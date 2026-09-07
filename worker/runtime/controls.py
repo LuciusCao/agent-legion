@@ -30,21 +30,18 @@ def load_config(path: Path) -> dict[str, Any]:
     return config
 
 
-def load_claim_controls(path: Path) -> tuple[int, bool]:
+def load_claim_controls(path: Path) -> tuple[int, bool, Any]:
+    """Hot-read (max_concurrency, claim_enabled, raw ramp_up #471 原块透传)。"""
     config = load_config(path)
     capacity = config.get("max_concurrency")
     enabled = config.get("claim_enabled", False)
     validate_claim_controls(capacity, enabled)
-    assert isinstance(capacity, int)
-    assert isinstance(enabled, bool)
-    return capacity, enabled
+    assert isinstance(capacity, int) and isinstance(enabled, bool)
+    return capacity, enabled, config.get("ramp_up")
 
 
 def load_code_concurrency(path: Path) -> int:
-    """code 执行池容量（批次 2 协议 v2）；0 = 仅领取 agent 任务。
-
-    与 Host 的 RegisterAgentWorkerRequest.max_code_concurrency 上限
-    （agent_workers_contracts.py，le=1024）对齐。"""
+    """code 执行池容量（0 = 仅 agent）；上限与 Host 注册契约 le=1024 对齐。"""
     value = load_config(path).get("max_code_concurrency", 0)
     if (
         isinstance(value, bool)

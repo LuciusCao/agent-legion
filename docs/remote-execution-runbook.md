@@ -167,15 +167,24 @@ essentials, for orientation:
   `/api/agent-executions/{id}/heartbeat` and `/api/agent-executions/{id}/result`.
   Registration carries `protocol_version` and `image_version`; the Host rejects
   workers below `agent_workers.min_protocol_version` (DB instance settings,
-  `/api/admin/instance-settings`). Current protocol is **v3**: v2 added
+  `/api/admin/instance-settings`). Current protocol is **v5**: v2 added
   `kind: "code"` claims and heartbeat cancellation bodies; v3 adds
   runtime-scoped model declarations plus a `host_protocol_version`
-  registration handshake. Compatibility matrix:
+  registration handshake; v4 adds gzip-compressed artifact objects (v4+
+  Workers receive `.gz`-suffixed upload specs and `content_encoding: gzip`
+  input refs; older Workers keep bare keys); v5 adds the per-Worker batch
+  heartbeat — `POST /api/agent-executions/heartbeats` renews every claimed
+  lease of the machine in one write transaction, so heartbeat write traffic
+  scales with machine count, not slot count. The single execution endpoint is
+  unchanged and serves mixed fleets; a v5 Worker that finds the batch route
+  missing (404/405) falls back to per-execution beats with a 5s per-beat
+  timeout. Compatibility matrix:
 
-  | Host \ Worker | v1 Worker | v2 Worker | v3 Worker |
+  | Host \ Worker | ≤ v3 Worker | v4 Worker | v5 Worker |
   | --- | --- | --- | --- |
-  | **pre-v3 Host** | agent-only (unchanged) | v2 behavior | rejected before claim — upgrade Host first |
-  | **v3 Host** | agent-only | agent + code; legacy model declarations expand to declared runtimes | full runtime-scoped Agent + code pools |
+  | **pre-v3 Host** | unchanged / v2 behavior | rejected before claim — upgrade Host first | rejected before claim — upgrade Host first |
+  | **v3 Host** | full runtime-scoped Agent + code pools | rejected before claim (gzip objects) | rejected before claim |
+  | **≥ v4 Host** | full runtime-scoped Agent + code pools | + gzip artifact objects | + batch heartbeat; single-beat fallback |
 
   The Host's `min_protocol_version` remains 1; raising it is an emergency
   escape hatch, not part of a normal upgrade.
@@ -185,7 +194,7 @@ essentials, for orientation:
   `max_code_concurrency` only (code requests do not consume workspace Agent
   capacity). The Host accounts and enforces the two pools separately, so long
   code tasks never starve Agent claims. Upgrade order is Host first, then
-  Workers. A v3 Worker treats a missing/older `host_protocol_version` as a
+  Workers. A v3+ Worker treats a missing/older `host_protocol_version` as a
   terminal registration error and exits 2, so it cannot let a pre-v3 Host
   erase model runtimes and misroute claims.
 
@@ -208,12 +217,12 @@ in:
   headroom and the workspace token scope — no capability declaration is
   needed (issue #284 retired capability matching). The field is hot (#123): `PUT /api/config` changes that touch
   only hot fields (`claim_enabled`, `max_concurrency`,
-  `max_code_concurrency`, `upload_max_concurrency`) do not restart the Worker
-  (`worker/service.py:34-39,133`). Hot-opening code capacity from 0 to >0
-  requires a resolvable `velites` binary: with velites missing, the in-loop
-  hot guard rejects the change and logs it, and the new capacity takes effect
-  on the next loop iteration once velites is installed
-  (`worker/runtime/controls.py:58-67`). Editing the state-copy YAML
+  `max_code_concurrency`, `upload_max_concurrency`, `ramp_up`) do not
+  restart the Worker (`worker/service.py`). Hot-opening code capacity from
+  0 to >0 requires a resolvable `velites` binary: with velites missing, the
+  in-loop hot guard rejects the change and logs it, and the new capacity
+  takes effect on the next loop iteration once velites is installed
+  (`worker/runtime/controls.py`). Editing the state-copy YAML
   `data/agent-worker-service/worker.yaml` directly works the same way — that
   is the bare-metal path; in container deployments the state copy lives in
   the control volume.
@@ -315,14 +324,58 @@ flipping the field:
 | Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | `max_code_concurrency > 0` without a resolvable `velites` binary (agent runtimes are auto-detected since issue #254 and can no longer fail preflight) | Install velites — either on PATH (`cargo build --release` in `velites/`) or as the bundled copy (`./scripts/ensure-velites.sh --dest data/bin`, per-platform) — or set `max_code_concurrency: 0`, then restart |
 | Registration returns 401 | A scoped token is unknown or deleted on the Host (the Host rejects the whole registration when any token fails — deletion is the only lifecycle action, there is no revoke) | Issue a new key in the admin UI (workspace 设置 → Agent 与 Worker), add it in the Worker console (配置 → Workspace 访问), and delete the stale key — deletion cascade-cuts every Worker still bound to it |
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
-| Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's detected/enabled runtimes (配置 → Agent 运行时) plus `labels` |
+| Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's detected/enabled runtimes (配置 → Agent 运行时) plus `labels`; the Host-side `claim.empty` vs `claim.rejected` events (§7.1) distinguish a drained queue from an admission mismatch (reason code names the gate) |
 | Heartbeat/result 409 (`execution is not owned by this Worker`) | Network partition or Host restart — the execution lease expired and was reassigned/failed | Terminal for that execution; rerun the job. Persistent storms mean the tailnet is unstable |
 | Result upload 413 | Archive exceeds `agent_workers.max_archive_bytes` (default 64 MiB) | Investigate why artifacts ballooned; raise the limit only if legitimate |
 | pi "model call failed" inside the worker container | Gateway unreachable or token rejected | Re-run the §3 container smoke test; confirm `LLM_GATEWAY_TOKEN` is set in `deploy/.env` and matches the gateway |
 | Gateway 502 | LLM provider unreachable from the laptop (VPN dropped, network change) | Restore the laptop's network path to the provider; workers' pi runs fail fast and surface as failed executions |
 | Gateway 401/403 | `LLM_GATEWAY_TOKEN` missing or mismatched | Gateway and every worker must share the same token (§4); never run a tailnet-bound gateway without it |
 | Batched agent failures with `unexpected EOF during chunk size line` while other apps on the same machine also lose connectivity | Worker egress silently routed through a local proxy process (Clash/mihomo) inherited from the launch shell; the proxy's config reload/subscription refresh cuts every in-flight stream at once (#444) | The service strips inherited proxy env at startup (a one-line INFO log marks it). Production workers must not run behind a local proxy process; if egress through a proxy is genuinely required, declare it explicitly in the worker config (`proxy:` field / console 高级参数 → 出网代理) so the choice is visible and owned |
+| Worker claims steadily but concurrency "breathes" below configured capacity during recovery | Success-path claim pacing (#472) is adaptive: the wait after a successful claim is the last single claim round-trip × 0.5, clamped to [10ms, 100ms] (the pre-0.7.0 fixed 0.2s wait is gone); an empty queue resets to the floor, error paths keep the #437 exponential backoff | Expected behavior — the floor is a deliberate guard for claim-transaction lock contention. If recovery throughput still matters, check `worker claim pacing <N>ms` log lines for the current band; a cold-start burst can additionally be shaped with `ramp_up` (deployment doc §5) |
 | Everything idle, nothing failing | Laptop asleep or offline | Workers recover on their own; enforce §2 item 5 |
+
+### 7.1 Structured event codes (#490)
+
+The Worker data plane emits single-line JSON lifecycle events on both sides
+(`event` / `ts` + per-event payload). Host-side events go to stderr on the
+`agent_legion.worker_events` logger (INFO for transitions, DEBUG for the
+normal rhythm — enable debug when hunting); Worker-side events ride the
+supervisor console stream. Align the two sides by `execution_id` /
+`worker_id`.
+
+| Event | Side | Meaning / key fields |
+| --- | --- | --- |
+| `worker.registered` | Host | Registration committed: runtime version matrix, concurrency declarations, resolved workspace scope |
+| `worker.register_rejected` | Host | Registration refused (400/401): `reason` (`protocol_version_too_old` + `min_protocol_version`, `register_key_deleted`, `invalid_registration`) |
+| `worker.offline` | Host | A previously-online worker crossed the `last_seen` threshold (30 s); `last_seen_at` (the DB-true last seen) + `threshold_seconds`; fires once per transition |
+| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`) |
+| `claim.empty` | Host | 204 — queue drained for this worker's pools; `reasons` when the queue head was skipped (paused workspace, lock races…) |
+| `claim.rejected` | Host | Stock present but this worker was not admitted — see the reason codes below; when every pool is at its cap the scan never runs and the live pool state is the evidence (`capacity_full`/`code_capacity_full` synthesized from it) |
+| `execution.started` | Host | Reserved name in the event namespace (the claim→run start is covered by `claim.granted` + Worker-side `execution.claimed`) |
+| `execution.finished` | Host | Terminal commit: `outcome` (`completed`/`failed`/… or `rejected` with `reason: not_owned`), `exit_code`, `wall_seconds` (claim → committed result; `null` when the post-commit read failed) — committed outcomes are DEBUG rhythm, `outcome=rejected` is INFO (the last Host-side clue of that execution) |
+| `execution.heartbeat_rejected` | Host | Heartbeat refused: `reason: not_owned` or `lease_not_active` — the worker must stop beating |
+| `execution.lease_expired` | Host | The sweeper deleted an expired lease: `attempt`, `requeue_limit` (will it rerun here?) |
+| `claim.attempt` | Worker | One claim poll's local budget snapshot (`agent_budget`/`code_budget`/`upload_backlog`/`claim_enabled`) |
+| `claim.backoff` | Worker | The #437 backoff sequence's position: `failures`, `wait_seconds`, `error` |
+| `execution.claimed` | Worker | A claim arrived — the Worker-side view of the Host's `claim.granted` |
+| `execution.completed` | Worker | Local process/code exit: `exit_code`, `wall_seconds`; Host acceptance is its `execution.finished` |
+| `execution.failed` | Worker | Local containment boundary fired (download/spawn/wait raised): `error` summary |
+| `http.error` | Worker | Upstream error response (`status_code` + `url` + bounded `body`) or transport failure (`url` + `error`) — the middle-502 blind spot, since the Host never sees the response |
+
+`claim.rejected` reason codes (claim-path decision-point naming):
+
+| Reason code | Meaning |
+| --- | --- |
+| `capacity_full` / `code_capacity_full` / `capacity_raced` | 并发池满 — the agent/code pool is at its declared cap (or lost the last-slot race) |
+| `runtime_mismatch` | The definition's runtime is not in this worker's declared runtimes |
+| `model_mismatch` | model 未声明 — the required provider/model is not in this worker's model declarations |
+| `workspace_not_allowed` | scope 拒绝 — the request's workspace is outside this worker's admission scope |
+
+Direct mappings for the common complaints: 「并发下来了」→ check the
+`claim.rejected` reason distribution; 「本机拿不到任务」→ `claim.empty`
+vs `claim.rejected` distinguishes drained queue from admission mismatch;
+「worker 静默」→ `worker.offline` names the moment; 「502 类中间层错误」→
+the Worker-side `http.error` carries the code and the target URL.
 
 ## 8. Security notes
 

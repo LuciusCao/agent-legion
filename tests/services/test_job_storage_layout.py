@@ -195,7 +195,7 @@ def test_create_jobs_bulk_creates_shard_dir_for_new_jobs(job_db, settings) -> No
     )
 
     job_id = "ws_wf_q-new"
-    assert [str(job["id"]) for job in jobs] == [job_id]
+    assert [str(job_id) for job_id in jobs] == [job_id]
     assert job_storage_dir(data_dir / "jobs", "ws", job_id).is_dir()
     with job_db._connect_read() as conn:
         row = conn.execute("select storage_dir from jobs where id = %s", (job_id,)).fetchone()
@@ -227,7 +227,7 @@ def test_create_jobs_bulk_resubmit_does_not_precreate_shard_dir(job_db, settings
         revision=_REVISION,
     )
 
-    assert [str(job["id"]) for job in jobs] == [job_id]
+    assert [str(job_id) for job_id in jobs] == [job_id]
     assert not job_storage_dir(data_dir / "jobs", "ws", job_id).exists()
     with job_db._connect_read() as conn:
         row = conn.execute("select storage_dir from jobs where id = %s", (job_id,)).fetchone()

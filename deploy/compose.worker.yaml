@@ -25,10 +25,12 @@ services:
       # *-aarch64-unknown-linux-gnu.tar.gz，解出的 velites chmod +x 后放这里；
       # 必须与 worker 镜像架构一致。
       #
-      # long syntax + create_host_path: false（review on #381）：短语法下源
-      # 路径不存在时 docker 会静默创建 root 属主的空**目录**，resolve_binary
-      # 的 is_file 检查 fail-closed 但报错迷惑；显式声明让 compose 在 up 时
-      # 即拒绝启动，把「忘了放二进制」提前到部署动作本身。
+      # long syntax（review on #381）：短语法下源路径不存在时 docker 会
+      # 静默创建 root 属主的空**目录**，resolve_binary 的 is_file 检查
+      # fail-closed 但报错迷惑。勘误（PR #474 实测）：long syntax 也不带
+      # create_host_path 键，daemon 对缺失源同样自动建目录、容器照常启动——
+      # 真正的 fail-fast 层是 AGENT_WORKER_EXPECT_RUNTIMES 守卫（空目录
+      # 探测不到二进制 → fail）。
       - type: bind
         source: ${VELITES_BIN:-../velites-bin/velites}
         target: /app/data/bin/velites

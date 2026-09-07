@@ -43,27 +43,24 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v78, claim_stage_profile, #448) must leave
-# behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v78 adds the six claim-stage gauge columns to
-# ops_runtime_profile_samples (the migration module carries the ALTERs; the
-# schema file stays at its ceiling): the undo drops the columns, nothing
-# else — no tables, indexes, or trigger shapes change at v78.
+# Effects the newest migration (v79, shard_identity_index, #401)
+# must leave behind so the undo step rewinds a current-shape database to
+# exactly SCHEMA_VERSION-1. v79 replaces the one-active-request index: the
+# undo drops the shard-aware expression index; the schema-file replay (which
+# the upgrade path runs first) then recreates it, so no old-shape DDL needs
+# restoring — the pre-v79 two-column index comes back via the same replay.
+# No tables, columns, or trigger shapes change at v79.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("ops_runtime_profile_samples", "claim_scan_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "claim_scan_seconds_max", "double precision"),
-    ("ops_runtime_profile_samples", "claim_evaluate_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "claim_evaluate_seconds_max", "double precision"),
-    ("ops_runtime_profile_samples", "claim_writes_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "claim_writes_seconds_max", "double precision"),
-)
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "claim_stage_profile"
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+# The expression index is a fresh object under the SAME name as the v59-era
+# two-column index; dropping it rewinds to "index absent", and the upgrade
+# replay must recreate the new shape from postgres_schema.sql.
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_agent_requests_one_active_node",)
+_NEWEST_MIGRATION_NAME = "shard_identity_index"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v77 (the v78 round adds columns only — no DDL to recreate).
+# faithful v78 (none: the schema file's drop+create carries both shapes).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

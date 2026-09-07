@@ -21,21 +21,44 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]  # worker/ 包根
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from worker import events
 from worker.claim_backoff import CLAIM_BACKOFF_CAP_SECONDS, ClaimBackoffSequence
+from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
-from worker.execution.run import agent_subprocess_env as agent_subprocess_env
+from worker.execution.heartbeat_batch import start_batch_heartbeat
 from worker.execution.run import run_execution
-from worker.fd_limits import raise_fd_limit
+from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import Client, WorkerAuthError
 from worker.host.status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
+from worker.ramp_up import (
+    apply_ramp_hot_reload,
+    load_ramp_up_controls,
+    ramp_pass,
+    slots_line,
+    validate_ramp_up,
+)
 from worker.registration.retry import register_from_config
 from worker.runtime import controls as runtime_controls
+from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.runtime.setup import prepare_runtime_models
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import claim_availability, load_transfer_controls
 from worker.upload.queue import UploadQueue
+
+# code 容量 0→>0 热开被拒（缺沙箱包装器）的一次性提示文案；守卫语义见
+# runtime/controls.hot_code_concurrency（EXEC-CODE-003 fail-closed）。
+CODE_HOT_REJECT_HINT = (
+    "max_code_concurrency 0→>0 需要可解析的沙箱包装器（velites-sandbox"
+    " 或 velites，启动预检项），热更拒绝生效；docker 形态该包装器内置"
+    "镜像（此错误通常意味着镜像损坏），裸机请安装后重启 worker"
+)
+
+
+def _print(message: str) -> None:
+    """stdout with flush=True —— worker 子进程日志的统一出口。"""
+    print(message, flush=True)
 
 
 def main() -> int:
@@ -44,13 +67,10 @@ def main() -> int:
         "--config", type=Path, default=Path("data/agent-worker-service/worker.yaml")
     )
     args = parser.parse_args()
-    try:
-        soft, hard = raise_fd_limit()
-        print(f"worker fd limit: soft={soft} hard={hard}", flush=True)
-    except (OSError, ValueError) as exc:
-        print(f"worker fd limit raise failed; continuing with defaults: {exc}", flush=True)
+    # fd 上限提升（含日志）在 fd_limits 内联；失败不致命（继续用默认值）。
+    raise_fd_limit_startup()
     config = runtime_controls.load_config(args.config)
-    max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
+    max_concurrency, claim_enabled, raw_ramp_up = runtime_controls.load_claim_controls(args.config)
     max_code_concurrency = runtime_controls.load_code_concurrency(args.config)
     if error := prepare_runtime_models(config, code_concurrency=max_code_concurrency):
         # 退出码 2（supervisor 不自动重启）：配置无法解析（disabled_runtimes 非法、
@@ -58,21 +78,27 @@ def main() -> int:
         # velites 沙箱二进制是部署缺口，重试无意义，必须人工修复后重启。
         print(error, flush=True)
         return 2
+    # #471 冷启动爬坡：启动预检 fail-fast——非法 ramp_up 块是配置错误，
+    # 重试无意义（退出码 2，supervisor 不自动重启，人工修配置后重启）；
+    # None（未配置）= 禁用，一次性全量——行为与现状完全一致。
+    try:
+        ramp_controls = validate_ramp_up(raw_ramp_up)
+    except ValueError as exc:
+        print(f"Agent Worker 启动预检失败：{exc}", flush=True)
+        return 2
     transfer = load_transfer_controls(args.config)
     client = Client(str(config["host_url"]), transfer_timeout=transfer.transfer_timeout_seconds)
     stop = threading.Event()
     status = ExecutionStatusReporter.from_env()
     metrics = WorkerMetricsCache.from_env()
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stop.set())  # noqa: B023
     poll_interval, registration = register_from_config(client, config, stop, args.config.parent)
     if registration is not True:
         return 2 if registration is False else 0
-    host_worker: dict[str, Any] | None = {
-        "worker_id": str(config["worker_id"]),
-        "name": str(config.get("name", config["worker_id"])),
-        "revoked": False,
-    }
+    worker_id = str(config["worker_id"])
+    # 首次同步前的兜底视图：get_self 失败时控制台仍有 worker_id 可显示。
+    host_worker: dict[str, Any] | None = {"worker_id": worker_id, "revoked": False}
     try:
         host_worker = sync_host_status(client, status, metrics, host_worker)
     except WorkerAuthError as exc:
@@ -89,24 +115,33 @@ def main() -> int:
         heartbeat_interval=interval,
         stop=stop,
     )
+    # #352：per-Worker 单心跳循环取代每执行一条心跳线程——本机全部在跑
+    # 执行（含排队上传）一次批量续期，写流量按机器数而非槽数；旧 Host
+    # （无批量端点）自动降级回逐执行心跳（heartbeat_batch.py）。
+    heartbeat_registry = start_batch_heartbeat(client, interval, stop)
+    uploads.set_heartbeat_registry(heartbeat_registry)
     # Restore unreported results BEFORE cleaning: their execution dirs carry
     # an upload_pending.json marker and are preserved by clean_work_root.
-    restored = uploads.restore(work_root)
-    if restored:
+    if restored := uploads.restore(work_root):
         print(f"restored {restored} pending result upload(s) from {work_root}", flush=True)
     clean_work_root(work_root)
     download_slots = threading.Semaphore(transfer.download_max_concurrency)
     active: set[Future[None]] = set()
-    # 双池跟踪（批次 2）：agent/code 各自计数，本地预算避免过度 claim；
-    # Host 侧在 claim 事务里再强制一次。
+    # 双池跟踪（批次 2）：agent/code 各自计数，本地预算防过度 claim（Host
+    # 在 claim 事务里再强制）。退避/pacing 的设计记录见各自模块 docstring。
     active_kinds: dict[Future[None], str] = {}
-    # #437: 退避序列改为「首次 1s 固定 → 指数翻倍 ±20% jitter → 上限 60s」。
-    # 旧版以 poll_interval 为基数且无 jitter：Host 一次抖动让整条领料线同步
-    # 退避对齐（锯齿并发）；首退避短固定让瞬时抖动不烧掉一个完整 poll 周期。
     backoff = ClaimBackoffSequence(cap_seconds=CLAIM_BACKOFF_CAP_SECONDS)
-    pool = ThreadPoolExecutor(
-        runtime_controls.MAX_DYNAMIC_CONCURRENCY, thread_name_prefix="agent-execution"
-    )
+    pacing = ClaimPacing(log=_print)
+    # #471：爬坡状态机只管「本 pass 最多领多少」（claim 预算的容量输入），
+    # 与 pacing（两次 claim 之间的等待）正交；未配置 ramp_up 块 = None，
+    # 预算直通目标——行为与现状完全一致（一次性全量）。
+    ramp = apply_ramp_hot_reload(None, ramp_controls, _print)
+    ramp_view, ramp_paused_since = None, None
+    pool = ThreadPoolExecutor(MAX_DYNAMIC_CONCURRENCY, thread_name_prefix="agent-execution")
+    # run_execution 的循环不变参数（client/claim 逐单在前，其余两组不变）；
+    # uploads/status 实例在本循环内从不重建，热更只调实例内部状态。
+    run_args = (work_root, environment, interval, stop, shutdown_grace)
+    run_tail = (status, uploads, download_slots)
     next_sweep = time.monotonic()
     next_host_status = time.monotonic() + interval
     control_error: str | None = None
@@ -121,10 +156,12 @@ def main() -> int:
                         f"Agent Worker rejected by server: {exc}; re-register required", flush=True
                     )
                     return 2
-                print(
-                    f"worker slots {len(active)}/{max_concurrency}+{max_code_concurrency},"
-                    f" upload queue depth {uploads.depth}",
-                    flush=True,
+                # #471：爬坡期 slots 行追加 "ramp-up e/t (+ns)"（判变在
+                # 状态机内）；无爬坡时行内容与现状逐字节一致。
+                _print(
+                    slots_line(
+                        len(active), max_concurrency, max_code_concurrency, uploads.depth, ramp_view
+                    )
                 )
                 next_host_status = time.monotonic() + interval
             if time.monotonic() >= next_sweep:
@@ -151,80 +188,82 @@ def main() -> int:
                 new_controls = runtime_controls.load_claim_controls(args.config)
                 new_code_concurrency = runtime_controls.load_code_concurrency(args.config)
                 new_transfer = load_transfer_controls(args.config)
+                new_ramp_controls = load_ramp_up_controls(args.config)
             except (OSError, ValueError, YAMLError) as exc:
-                message = str(exc)
-                if message != control_error:
-                    print(
-                        f"Agent dynamic control reload failed; keeping previous values: {message}",
-                        flush=True,
+                if (message := str(exc)) != control_error:
+                    _print(
+                        f"Agent dynamic control reload failed; keeping previous values: {message}"
                     )
                     control_error = message
             else:
                 # 全部加载成功才统一生效：半应用会让 "keeping previous values"
                 # 撒谎（claim 控制已覆盖、transfer 控制还是旧值）。
-                max_concurrency, claim_enabled = new_controls
+                max_concurrency, claim_enabled, _ = new_controls
                 max_code_concurrency, code_rejected = runtime_controls.hot_code_concurrency(
                     max_code_concurrency, new_code_concurrency
                 )
                 if code_rejected and not code_hot_reject_logged:
-                    print(
-                        "max_code_concurrency 0→>0 需要可解析的沙箱包装器（velites-sandbox"
-                        " 或 velites，启动预检项），热更拒绝生效；docker 形态该包装器内置"
-                        "镜像（此错误通常意味着镜像损坏），裸机请安装后重启 worker",
-                        flush=True,
-                    )
+                    print(CODE_HOT_REJECT_HINT, flush=True)
                 code_hot_reject_logged = code_rejected
                 transfer = new_transfer
                 uploads.set_max_concurrency(transfer.upload_max_concurrency)
                 control_error = None
-            agent_active = sum(1 for kind in active_kinds.values() if kind == "agent")
-            agent_base = max(0, max_concurrency - agent_active) if claim_enabled else 0
-            code_base = (
-                max(0, max_code_concurrency - (len(active) - agent_active)) if claim_enabled else 0
+                # #471 热更：开着的窗口只换参数不重置进度；置 null 立即关窗。
+                ramp = apply_ramp_hot_reload(ramp, new_ramp_controls, _print)
+            # #471：本 pass 生效容量（禁用/未开窗 = 目标直通；暂停期 deduct
+            # 折回、enabled 才推进虚拟时钟——策略收口在 ramp_pass）。
+            ramp_view, ramp_paused_since = ramp_pass(
+                ramp, ramp_paused_since, max_concurrency, time.monotonic(), claim_enabled
             )
-            # Backpressure: a deep upload backlog means the Host is not
-            # draining results; taper claiming linearly towards zero instead
-            # of an all-or-nothing gate, which hysteresis-oscillates.
+            effective = max_concurrency if ramp_view is None else ramp_view.effective
+            status.set_ramp_up(ramp_view, max_concurrency)
+            agent_active = sum(1 for kind in active_kinds.values() if kind == "agent")
+            agent_base = max(0, effective - agent_active) if claim_enabled else 0
+            code_active = len(active) - agent_active
+            code_base = max(0, max_code_concurrency - code_active) if claim_enabled else 0
+            # Backpressure（upload 积压线性衰减，见 claim_availability）；
+            # #471：worker_capacity 用生效容量（爬坡期=当前档），背压门随档位走。
+            backlog = transfer.upload_backlog_limit
             budget = {
-                "agent": claim_availability(
-                    agent_base, uploads.depth, max_concurrency, transfer.upload_backlog_limit
-                ),
+                "agent": claim_availability(agent_base, uploads.depth, effective, backlog),
                 "code": claim_availability(
-                    code_base,
-                    uploads.depth,
-                    max(max_code_concurrency, 1),
-                    transfer.upload_backlog_limit,
+                    code_base, uploads.depth, max(max_code_concurrency, 1), backlog
                 ),
             }
             claimed = False
+            claim_rtt = 0.0
             try:
                 while budget["agent"] + budget["code"] > 0:
                     if stop.is_set():
                         break
-                    claim = client.claim(
-                        str(config["worker_id"]), max_concurrency, max_code_concurrency
-                    )
+                    # #490 claim.attempt：本轮预算快照（结构化事件）先于
+                    # 发起；#472 的 RTT 打点紧贴 claim 调用。
+                    events.note_claim_attempt(worker_id, budget, uploads.depth, claim_enabled)
+                    claim_started = time.monotonic()
+                    # #501：声明的是**目标容量**而非爬坡档位——agent_workers
+                    # 行（UI/ops 容量面 + stock gate 的 fleet 池）不随档位抖；
+                    # 爬坡节流本来就由上方 budget（effective-活跃数）把门，
+                    # 生效档位只走 status 文件（set_ramp_up）。
+                    claim = client.claim(worker_id, max_concurrency, max_code_concurrency)
                     if claim is None:
                         break
+                    # #472 codex P2：pacing 输入是单次成功 claim 的往返
+                    # （非批次总墙钟），逐次重打点——设计记录见 claim_pacing。
+                    claim_rtt = time.monotonic() - claim_started
                     claimed = True
-                    kind = str(claim.get("kind") or "agent")
-                    if kind != "code":
-                        kind = "agent"
-                    # Host 在 claim 事务里已强制分池；本地预算只防过度
-                    # claim，竞态超发时照单收下（Host 已记账）。
+                    kind = "code" if str(claim.get("kind")) == "code" else "agent"
+                    events.note_claim_received(worker_id, claim)
+                    # Host 已在 claim 事务强制分池；竞态超发照单收下（Host 记账）。
                     budget[kind] -= 1
+                    # #352：heartbeat_registry 追加在 #471 的 run_args/run_tail
+                    # 拆组之后（registry 仍是 run_execution 的默认参数位）。
                     future = pool.submit(
                         run_execution,
                         client,
                         claim,
-                        work_root,
-                        environment,
-                        interval,
-                        stop,
-                        shutdown_grace,
-                        status,
-                        uploads,
-                        download_slots,
+                        *run_args,
+                        *run_tail,
+                        heartbeat_registry,
                     )
                     active.add(future)
                     active_kinds[future] = kind
@@ -242,11 +281,15 @@ def main() -> int:
                 # 时长。#437：等待时长经 ClaimBackoffSequence（首 1s 固定、
                 # 之后指数翻倍 ±20% jitter、上限 60s），fleet 不同步对齐。
                 wait = backoff.next_wait()
+                # #490 claim.backoff：#437 序列状态结构化落盘；HTTP 错误码/
+                # URL 已在 client.request 的 http.error 事件里。
+                events.note_claim_backoff(worker_id, exc, wait, backoff.failures)
                 print(f"Agent claim error: {exc}; retrying in {wait:.1f}s", flush=True)
                 stop.wait(wait)
                 continue
             backoff.reset()
-            stop.wait(0.2 if claimed else poll_interval)
+            # #472：成功=自适应短等待，空队列=poll_interval；错误路径走 backoff。
+            stop.wait(pacing.wait_after_pass(claimed, claim_rtt, poll_interval))
     finally:
         stop.set()
         # Bounded: run_execution watches `stop` and kills children within

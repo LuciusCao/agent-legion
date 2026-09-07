@@ -33,13 +33,15 @@ The host also injects a Content-Security-Policy into your document before it
 parses (the meta lands in the real `<head>`, positioned by the HTML parser —
 you cannot preempt or remove it): `default-src 'none'`, inline
 `script-src`/`style-src` plus the platform origin (scripts, styles, fonts,
-and `connect-src`), `img-src data: https:`, `form-action 'none'`. This
-tightens outbound network at the host, not by convention: `fetch()`,
-`sendBeacon()`, form submissions, and subresource loads to any external
-origin will not fire. Known residual: CSP does not govern iframe
-self-navigation, so `location.href = …`-style navigation with a query string
-remains technically possible — accepted as a documented limitation (it cannot
-carry response bodies, only what the script already knows).
+and `connect-src`), `img-src data:` plus the platform origin,
+`form-action 'none'`. This tightens outbound network at the host, not by
+convention: `fetch()`, `sendBeacon()`, form submissions, subresource loads
+(including images) to any external origin will not fire. Known residual: CSP
+does not govern iframe self-navigation, so `location.href = …`-style
+navigation with a query string remains technically possible — accepted as a
+documented limitation (it cannot carry response bodies, only what the script
+already knows); WebRTC and `dns-prefetch`/`preconnect` are likewise outside
+CSP's reach.
 
 Consequences for your markup:
 
@@ -50,9 +52,9 @@ Consequences for your markup:
 - Platform build assets the host explicitly offers (currently
   `assets.katexCssUrl` / `assets.katexJsUrl` for LaTeX) MAY be loaded; always
   degrade gracefully when absent.
-- Remote `https:` images render (the built-in question panel's sanitizer
-  allows them with `referrerpolicy="no-referrer"`); `http:` images and every
-  other subresource origin do not.
+- Images must be `data:` URIs inline in the HTML (or platform-origin assets);
+  remote `https:` images do NOT load — the built-in question panel's
+  sanitizer drops them rather than rendering remote sources.
 - Never `fetch()` the platform API directly: it fails (no credentials on an
   opaque origin, and `connect-src` only permits the platform origin) and is
   not the contract. Use the bridge.

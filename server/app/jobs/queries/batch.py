@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from typing import Any
 
@@ -9,6 +8,7 @@ from server.app.jobs.queries.batch_queue import (
     backfill_deprecated_workflow_key,
 )
 from server.app.jobs.queries.batch_queue_sql import RUN_UPSERT_CONFLICT
+from server.app.jobs.queries.run_healing import deterministic_run_id
 
 # Shared with the plan-shape pin test (tests/db/test_run_job_status_counts_migration.py):
 # a copy of the SQL there would silently drift if this one changes (#358 review).
@@ -38,9 +38,7 @@ class RunQueriesMixin(RunQueueQueriesMixin):
         with live jobs keeps the pins those jobs were created with.
         ``queue_payload`` is the async intake working state, empty for sync runs.
         """
-        payload_json = json.dumps(digest_payload, ensure_ascii=False, sort_keys=True)
-        payload_digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]
-        run_id = f"{workspace_id}_{workflow_key}_{source_kind}_{payload_digest}"
+        run_id = deterministic_run_id(workspace_id, workflow_key, source_kind, digest_payload)
         pins_json = json.dumps(frozen_pins or {}, ensure_ascii=False, sort_keys=True)
         queue_json = (
             json.dumps(queue_payload, ensure_ascii=False, sort_keys=True)

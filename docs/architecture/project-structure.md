@@ -70,10 +70,16 @@ agent-legion/
 │       ├── types/              # 类型声明
 │       ├── testing/            # 测试辅助
 │       └── styles.css          # 全局样式
-├── worker/                     # Agent Worker 协议 v2 实现
+├── worker/                     # Agent Worker 协议 v5 实现
 │   ├── service.py              # Worker Service 控制面入口
-│   ├── executor.py             # claim / 执行 / 心跳 / 结果上报主循环
-│   ├── execution/              # 单次执行：准备 / 运行 / 心跳 / 生命周期
+│   ├── executor.py             # claim / 执行 / 结果上报主循环（claim pacing
+│   │                             # #472 与 ramp-up 爬坡预算 #471 的接线点）
+│   ├── claim_pacing.py         # 成功路径自适应 pacing 状态机（#472）
+│   ├── ramp_up.py              # 冷启动容量爬坡状态机（#471）
+│   ├── events.py               # Worker 侧结构化事件日志（#490）
+│   ├── execution/              # 单次执行：准备 / 运行 / 生命周期 / 心跳
+│   │                             # （heartbeat.py 单条 + heartbeat_batch.py
+│   │                             #   per-Worker 批量续期 #352）
 │   ├── runtime/                # 声明解析与热更控制 / 模型发现 / 启动预检
 │   ├── upload/                 # 产物直传队列与 lane 调度
 │   ├── host/                   # Host 控制面 HTTP 客户端与状态同步

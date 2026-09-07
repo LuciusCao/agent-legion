@@ -24,6 +24,10 @@ repeatable, auditable production process.
   is tracked for you. Beyond single-file materials and external references,
   items can also be **bundles**: an entire folder submitted as one item
   (manifest-referenced).
+- **Human gates inside the DAG.** `type: approval` nodes put human decisions
+  into the flow: a node parks awaiting your approve / rework / reject call,
+  decisions are append-only audit records, and conditional edges can branch
+  on the verdict.
 - **A live operations console.** React SPA with a real-time DAG view, SSE
   dashboard events, WebSocket agent status, run logs, artifacts,
   token-usage statistics, and failure-category batch rerun.

@@ -8,6 +8,7 @@ from server.app.jobs.queries.groups import (
     WorkflowRevisionDomainQueriesMixin,
     WorkspaceDomainQueriesMixin,
 )
+from server.app.jobs.queries.run_healing import RunHealingQueriesMixin  # #501
 
 
 class JobQueries(
@@ -15,6 +16,7 @@ class JobQueries(
     StudioChatDomainQueriesMixin,
     WorkspaceDomainQueriesMixin,
     RunDomainQueriesMixin,
+    RunHealingQueriesMixin,
     WorkflowRevisionDomainQueriesMixin,
     JobQueriesBase,
 ):

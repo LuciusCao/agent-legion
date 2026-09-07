@@ -48,6 +48,10 @@ server/app/
 │                         # 注册/鉴权/liveness、register_tokens*.py scoped token
 │                         # 生命周期、completion.py 执行结果提交、
 │                         # declarations.py 声明归一化
+├── agent_broker/           # Agent 执行请求面：dispatch/enqueue/claim*.py claim 事务、
+│                         # heartbeat_single / heartbeat_batch（#352 协议 v5）、
+│                         # worker_events.py 结构化事件日志（#490）、
+│                         # sweepers.py 租约回收、code_dispatch/code_manifest 分片派发
 ├── agent_catalog/          # Agent 定义目录：definition.py AgentDefinition 模型、
 │                         # builtin.py demo workflow 内置模板
 ├── configuration/          # 配置加载与 owned-keys 校验；executor_runtime.py
@@ -109,6 +113,7 @@ server/app/
 | DELETE | `/agent-register-tokens/{token_id}` | `delete_register_token` | routes/agent_register_tokens.py |
 | POST | `/agent-executions/claim` | `claim` | routes/agent_worker_claims.py |
 | POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_heartbeat.py |
+| POST | `/agent-executions/heartbeats` | `heartbeat_batch` | routes/agent_worker_heartbeat_batch.py |
 | GET | `/agent-workers/self/metrics` | `get_worker_metrics` | routes/agent_worker_metrics.py |
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
 | GET | `/agent-workers/self` | `get_worker_self` | routes/agent_workers.py |
@@ -322,6 +327,9 @@ server/app/
 | AgentDetailResponse | BaseModel | agent_id: str, latest: AgentVersionResponse | None, published: AgentVersionRe... | app/routes/agent_definition_contracts.py |
 | AgentVersionsResponse | BaseModel | versions: list[AgentVersionSummary] | app/routes/agent_definition_contracts.py |
 | AgentArchiveResponse | BaseModel | archived: int | app/routes/agent_definition_contracts.py |
+| BatchHeartbeatItem | BaseModel | execution_id: str, lease_id: str | app/routes/agent_worker_heartbeat_batch.py |
+| BatchHeartbeatRequest | BaseModel | executions: list[BatchHeartbeatItem] | app/routes/agent_worker_heartbeat_batch.py |
+| BatchHeartbeatResponse | BaseModel | renewed: list[str], lost: list[str], cancelled_execution_ids: list[str] | app/routes/agent_worker_heartbeat_batch.py |
 | RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | AgentWorkerWorkspace | BaseModel | workspace_id: str, workspace_name: str, token_ids: list[str] | app/routes/agent_workers_contracts.py |
 | RegisterAgentWorkerResponse | BaseModel | worker_token: str, host_protocol_version: int, allowed_workspaces: list[str],... | app/routes/agent_workers_contracts.py |
@@ -468,7 +476,7 @@ server/app/
 | RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str | app/routes/run_contracts.py |
 | RunCreateRequest | BaseModel | workflow_key: str | None, items: list[RunItem] | app/routes/run_contracts.py |
 | RunRecord | BaseModel | id: str, workspace_id: str, workflow_key: str, source_kind: str, status: str,... | app/routes/run_contracts.py |
-| RunCreateResponse | BaseModel | run: RunRecord, created_count: int, jobs: list[dict[str, Any]] | app/routes/run_contracts.py |
+| RunCreateResponse | BaseModel | run: RunRecord, created_count: int | app/routes/run_contracts.py |
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
@@ -714,7 +722,7 @@ server/app/
   `owned_keys.py` 是「哪个文件拥有哪个顶层段」的权威。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - `workflows.enabled` 已退役（#385/#389）：调度线程总是启动（API 面无门禁）；部署形态由实例设置 `code_capacity` 表达——0 = 纯控制面模式（本进程不组装本地执行栈，code 节点 100% 依赖远程 code Worker，`/api/health` 报在线 code Worker 数）。
-  - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）优先派发远程 code Worker（在线且 payload 合格），否则回落本地 code 池（纯远程模式下无回落，任务挂起等待 Worker）；agent 节点（pi / velites runtime）经 broker 派发给 Worker；shard 节点的分片执行同样先远程后本地（#389）——分片身份随 kind='code' manifest 持久化，broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（受 `(job_id, node_key)` 单活跃请求索引约束，远程分片逐片串行），分片输出以 `shard_output-<index>.json` 常规 expected_output 随结果归档回传。
+  - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）优先派发远程 code Worker（在线且 payload 合格），否则回落本地 code 池（纯远程模式下无回落，任务挂起等待 Worker）；agent 节点（pi / velites runtime）经 broker 派发给 Worker；shard 节点的分片执行同样先远程后本地（#389）——分片身份随 kind='code' manifest 持久化，broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（单活跃请求索引自 schema v79 纳入分片身份（`coalesce(manifest_json->>'shard_index', -1)` 表达式索引，#401）——同一 shard 节点的多个分片可并发在飞，非 shard 节点的单活跃语义逐字保留；fan-out 受 `CodeStockGate.pass_budget`（`server/app/workflow_worker/code_stock.py`）单 pass 预算节流），分片输出以 `shard_output-<index>.json` 常规 expected_output 随结果归档回传（普通 `node.outputs` 不进 shard 的 expected_outputs，#401）。
 - 调度暂停是 **workspace 级**状态：每个 workspace 默认暂停，恢复经
   `POST /api/worker/resume?workspace_id=<id>`（或对应控制台开关）开始处理。
 - 后端每次启动会把全部 workspace 重置为暂停（刻意设计，防失控自跑）；恢复调度走
@@ -751,6 +759,9 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   - `materials` — 材料（单文件条目）元数据；`material_bundles` / `material_bundle_members` — bundle 文件夹条目的冻结引用式清单（schema v55）
   - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史
+  - `studio_publish_requests` — agent 发起的 workflow 发布握手（schema v76，#416：pending → superseded/confirmed/rejected/expired 状态机，agent 经 MCP 挂起、用户在 Studio 确认）
+  - `ops_runtime_profile_samples` — 运行画像 L1 指标（schema v72，#359：ops-metrics 采样循环每分钟一行六段管线指标 + 瓶颈分类，retention 共用 `monitoring.retention_days`）
+  - `run_job_status_counts` — run 级 job 状态计数快照（schema v73，#358：触发器维护，run 详情读取从 group-by 变 PK 点查）
   - `workspace_packages` — 已创建 package 路径
 - 初始化器在 PostgreSQL advisory lock 下按版本应用 schema。数据迁移经
   `server/app/db/migration_registry.py` 的 `MIGRATIONS` 注册表按版本有序应用

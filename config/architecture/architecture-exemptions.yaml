@@ -42,36 +42,71 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/agent_broker/claim.py
   reason: >-
-    Issue #448 phase 1 wires the claim-stage timer into the claim
-    transaction: the worker claim loop is single-threaded serial (claim
-    throughput = 1 / one claim round-trip), so the transaction now carries
-    a ClaimStageTimer whose worker_setup/scan/evaluate/writes closes ride
-    the existing statements, plus one _report_claim_stages helper shared by
-    all three return paths. The alternative — moving the orchestration out
-    to a new module — would split the claim transaction's single flow
-    across files for ~20 lines of instrumentation. Remove when #448's
-    phase-2 rework (transaction slimming or claim concurrency) restructures
-    the claim path and re-budgets the module.
+    The claim transaction module stays one file for two stacked
+    instrumentation generations: the #448 claim-stage timer (one
+    ClaimStageTimer whose worker_setup/scan/evaluate/writes closes ride the
+    existing statements, plus the _report_claim_stages helper shared by all
+    three return paths) and the #490 observation call (one
+    note_claim_outcome per exit, payloads assembled in worker_events.py).
+    The alternative — moving the orchestration out to a new module — would
+    split the claim transaction's single flow across files for ~20 lines of
+    instrumentation. The original anchor (#448) closed with phase 2
+    restructured elsewhere; re-anchored to #490 by the structured-events
+    PR that added the observation calls riding the same exits. #498 then
+    REMOVED the in-transaction observation calls (the verdict rides out as
+    one ClaimOutcome return; the broker emits only after the commit), so
+    the ceiling stays at its committed floor.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/498
   ceiling: 122
+- check: architecture.file_budget
+  path: server/app/agent_broker/worker_events.py
+  reason: >-
+    The #494 review round on the structured-events PR (#490) grows this
+    module past its first-registered ceiling with three never-raise /
+    classification fixes that belong next to the code they guard: the
+    claimed_at read inside note_execution_finished gets the try/except the
+    module's never-raise contract always demanded (a pool-exhausted read
+    must not turn a committed 204 into a 500), _event_level gains the
+    outcome=rejected INFO branch (the last Host-side clue of a refused
+    execution), and the pool-state synthesis in note_claim_outcome is
+    confined to the scan_skipped pass (agent full + drained code queue is
+    the idle rhythm, not a capacity_full rejection). Splitting the emitters
+    would fork the event-name/level/reason registries the module exists to
+    keep single-source. Remove when the events module gains its own
+    structural split (aggregation work) or the #490 family closes and the
+    module is re-budgeted. Ceiling re-dated 292 to 294 for the #497 codex
+    P2: the offline memo overwrites on every online bucket (setdefault
+    froze the first observation, aging worker.offline's last_seen_at by
+    hours) — one overwritten assignment plus its why-comment. #499 and PR
+    #497 review round #5125358408 then added the shared HEARTBEAT_*
+    reason literals, the saturation→DEBUG classification (P1-A) and the
+    isEnabledFor serialization guard, all paid for inside the SAME 294
+    ceiling by compacting the module docstring, the set literals and the
+    alias indirection — no re-date.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
+  ceiling: 294
 - check: architecture.file_budget
   path: server/app/agent_broker/claim_evaluate.py
   reason: >-
-    Issue #461 review on PR #461: the writes stage split (#448) moves into
+    The writes stage split (#448, reviewed on PR #461) moves into
     evaluate_candidate — the promote-write sequence (node flip, node_runs/
     executor_leases inserts, request claim, jobs promote) is the tail of
     the per-candidate evaluation that must close the "evaluate" stage where
     the writes begin, or the whole claim's write cost folds into evaluate
     and the "writes-dominant" branch of the stage data stays unreachable.
-    The alternative — closing the stage from claim_windows around the whole
-    call — cannot see the skip paths (a skipped candidate has no writes and
-    must not pollute the segment); splitting the promote sequence out to a
-    sibling module would fork the one lock-order invariant this module owns.
-    Remove when #448's phase-2 rework restructures the claim path and
-    re-budgets the module together with claim.py's entry.
+    #490 adds the skip-reason bookkeeping reads the structured claim events
+    fold (decision-point naming, zero judgment change). The alternative —
+    closing the stage from claim_windows around the whole call — cannot see
+    the skip paths (a skipped candidate has no writes and must not pollute
+    the segment); splitting the promote sequence out to a sibling module
+    would fork the one lock-order invariant this module owns. The original
+    anchor (#448) closed with phase 2 restructured elsewhere; re-anchored
+    to #490 by the structured-events PR. Remove when the claim path's next
+    rework re-budgets the module together with claim.py's entry.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
   ceiling: 217
 - check: architecture.file_budget
   path: server/app/agent_broker/claim_windows.py
@@ -108,9 +143,11 @@ exemptions:
     one more registry entry with its why-comment, same one-entry-per-version
     growth model the chain has followed since the first split. Splitting the
     chain would fork the version-sorted ordering invariant (the file's own
-    module docstring) for five lines of registry.
+    module docstring) for five lines of registry. The original anchor (#448)
+    closed with phase 2 restructured elsewhere; re-anchored to #490 by the
+    structured-events PR that found the entry (no code change of its own).
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
   ceiling: 111
 - check: architecture.file_budget
   path: server/app/db/migrations/job_status_counts_statement_triggers.py
@@ -370,14 +407,15 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 74
 - check: architecture.file_budget
-  path: server/app/services/job_intake.py
-  reason: 'Issue #358''s review round (P1 on #374) extends the per-run items cap to the intake path —
-    the same check-and-raise the /runs service carries, placed right after candidate resolution and before
-    the run/jobs writes. Duplicating the cap constant away from the resolve gate would invite the two
-    paths to drift; revisit when the creation paths converge on one service.'
+  path: server/app/services/run_partial_failure.py
+  reason: 'codex round-1 #2 on PR #479: the two-branch chunked-creation compensation (empty-run
+    removal vs partial-run failed-marking) moved into this module so the /runs items path and
+    the /job-batches intake share ONE implementation and cannot drift. The error type,
+    the operator message, and the compensation protocol are one concern; splitting them across
+    modules would separate the failure protocol from its error contract.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 178
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/467
+  ceiling: 90
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
   reason: 'The #358/#359 merge round registers two new migration functions (ops_runtime_profile_samples,
@@ -430,6 +468,16 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
   ceiling: 199
 - check: architecture.file_budget
+  path: frontend/src/features/previewPanel/CustomizePreviewDialog.tsx
+  reason: '#347 P1: draft execution became an explicit per-session action (preview-draft gating). The
+    dialog footer gained the "预览此草稿" button with its previewing state plus the previewDraft/onPreviewDraft
+    contract toward PreviewPanelSection; the gating state itself lives in the section (single source,
+    dialog stays the thin chat wrapper). The added lines are the honest cost of the explicit consent
+    UI; re-evaluate when the preview-panel governance UI is next restructured (#347 follow-up).'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
+  ceiling: 173
+- check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
   reason: The Codex P2 review on PR 345 added bundle content into the PreviewPanelHost remount key plus
     the hashBundle helper -- a cross-navigation bridge-request isolation fix that must stay at the composition
@@ -450,7 +498,9 @@ exemptions:
   path: server/app/routes/agent_workers.py
   reason: '#381 version handshake: the register endpoint logs the reported runtime_versions mapping (worker
     code x velites version matrix) at registration time. Drift diagnostics for externally-mounted runtimes;
-    informational only, no admission change.'
+    informational only, no admission change. #490 adds the structured register events at the same endpoint
+    (worker.registered after the transaction, worker.register_rejected at the 400/401 exits — one call each,
+    payloads built in worker_events.py); the ceiling covers both generations.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 236
@@ -472,13 +522,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 141
 - check: architecture.file_budget
-  path: worker/host/client.py
-  reason: '#381 version handshake: the registration payload gained one informational runtime_versions
-    mapping (effective runtimes'' --version outputs). Single line addition to an existing payload builder.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 164
-- check: architecture.file_budget
   path: worker/runtime/catalog.py
   reason: '#381 version handshake: probe_runtime_versions asks each effective runtime for its --version
     output so the registration payload carries the "worker code x velites version" compatibility matrix
@@ -488,15 +531,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 90
-- check: architecture.file_budget
-  path: worker/runtime/controls.py
-  reason: '#383 rewired hot_code_concurrency''s fail-closed guard from resolve_binary("velites") to the
-    shared sandbox resolver (velites-sandbox -> velites, bundled dir then PATH) so hot-opening the code
-    pool matches the startup preflight''s probe surface. One-line semantic change on an existing function;
-    no split warranted.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 51
 - check: architecture.file_budget
   path: worker/runtime/preflight.py
   reason: '#381 moved velites/pi out of the worker image (runtime executors are externally-mounted binaries
@@ -592,7 +626,8 @@ exemptions:
   reason: 'Issue #359 extends the sampling pass to persist the runtime-profile gauge row (one call plus
     the pool/pool-backlog gauge readers kept next to their only consumer). The sampler stays one cohesive
     write surface; the durable split is a sampling-dispatch module if more gauge families join, at which
-    point this exemption goes stale.'
+    point this exemption goes stale. #490 feeds the offline detector from the same last_seen read (one
+    call, threshold restored to match the online count — review P0 on #494).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 230
@@ -824,3 +859,259 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/431
   ceiling: 88
+- check: architecture.file_budget
+  path: velites/src/events.rs
+  reason: >-
+    Issue #469 adds ToolTiming to the event schema module: the phase
+    struct (spawnMs / firstByteMs / restMs / reapMs with per-phase wire
+    docs, including the firstByteMs observation semantics), the
+    tool_execution_end wiring, and the wire-shape tests sit next to every
+    other event type's definition and contract test — the module IS the
+    event schema. The growth is docstring + test lines over a ~50-line
+    struct; dropping the docs to fit would trade the phase semantics
+    (which phase covers what, when absent) for bookkeeping. Ceiling at
+    actual + 10 per the dated-exemption convention (#431 / #458
+    precedents). Remove when the timing fields move into a schema-driven
+    shape or the module gets a dedicated events-tools split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
+  ceiling: 525
+- check: architecture.file_budget
+  path: velites/src/tools/bash.rs
+  reason: >-
+    Issue #469 instruments the bash tool with the phase decomposition the
+    stall forensics asked for: spawn timing, first-output-byte reading
+    (read_with_first_byte replaces read_to_end with identical byte/error
+    semantics; the first byte is the earlier of the two streams), the
+    reap-phase branch, and the module docstring documenting the
+    observation axes and the harness-read-vs-child-write caveat. The tool
+    is one cohesive spawn/read/terminate flow; splitting instrumentation
+    out would fork the child lifecycle across modules. Ceiling at actual +
+    10 per the dated-exemption convention (#431 / #458 precedents) — the
+    module is in active observation tuning. Remove when #469's follow-up
+    (once the write() stall trigger is pinned) retires or reshapes the
+    instrumentation.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
+  ceiling: 267
+- check: architecture.file_budget
+  path: velites/src/tools/mod.rs
+  reason: >-
+    Issue #469 review fix makes the ToolKind::execute dispatch boundary
+    the single totalMs timing point (every tool kind gets it; the
+    in-process tools carry zero instrumentation of their own — the uuid
+    and validate exemptions retired when their timing code was deleted).
+    mod.rs is the tools facade every tool already imports. Ceiling at
+    actual + 10 per the dated-exemption convention (#431 / #458
+    precedents). Remove when the file shrinks back under its old ceiling.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
+  ceiling: 159
+- check: architecture.file_budget
+  path: server/app/config_schema.py
+  reason: >-
+    codex P1 on #432: a "secret: true" property declaring a plaintext
+    "default" is the fourth vault bypass — the schema-default merge
+    (config_schema_defaults) freezes the credential verbatim into every
+    intake snapshot even when no layer ever sets the field. Rejecting it
+    lives in _validate_property (2 code lines + comment), the single
+    chokepoint every declaration channel already calls: Agent definitions,
+    node config_schema blocks, executor contracts. Splitting the validator
+    to dodge 1 line of growth would fork the schema subset's one
+    well-formedness gate. Remove when the schema validator gets its own
+    structural split or #432's secret governance consolidates.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/432
+  ceiling: 161
+- check: architecture.file_budget
+  path: server/app/services/node_config_secret_guard.py
+  reason: >-
+    codex P1 on #432: the guard gains the secret+default gate —
+    reject_secret_schema_defaults re-raises the shared validator verdict
+    with the vault-channel guide (SECRET_DEFAULT_GUIDE) so resolve/publish
+    errors point at the fix, and secret_gate_errors calls it per executable
+    draft node so publish fails before a revision can strand intake. The
+    previous 71 ceiling left 10 effective lines of headroom; the gate plus
+    its channel-pointer comment needs 7 more. Remove when the #432 guard
+    family gets its structural split or the error-guide texts move to a
+    shared errors module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/432
+  ceiling: 88
+- check: architecture.file_budget
+  path: server/app/workflow_worker/code_stock.py
+  reason: >-
+    Issue #401 review P1-1 adds pass_budget to the code stock gate: the
+    v79 shard-aware index removed the accidental one-in-flight backpressure
+    on shard fan-outs, and within one poll pass the gate's queued count
+    cannot see the shards just submitted to the asynchronous enqueue pool
+    (it counts only committed rows). The shard fan-out loop now caps its
+    own submissions at the gate's remaining budget — same target, clamps
+    and TTL as allows(), extracted into a shared _ensure_fresh so the two
+    entry points cannot drift. ~5 effective lines; splitting the gate
+    module for one accessor would fork the single stockpile discipline.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/401
+  ceiling: 75
+- check: architecture.file_budget
+  path: shared/protocol.py
+  reason: >-
+    Issue #352 adds protocol v5 (per-Worker batch heartbeat) to the version
+    history: this module is the single source of truth both sides import (the
+    worker image ships shared/), and each version entry must state its
+    mixed-fleet contract for the next bump. Splitting the history out would
+    fork the one file both sides already share. Revisit when the version
+    history moves to generated docs.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 43
+- check: architecture.file_budget
+  path: worker/execution/heartbeat.py
+  reason: >-
+    Issue #352 turns the per-execution heartbeat thread starter into a
+    facade over the per-Worker batch registry: ExecutionHeartbeat keeps the
+    executor/upload call shape (adopt/shutdown/quiesce/resume/proc_ref) so
+    run.py and code_runner.py stay untouched by the threading change, while
+    each method forwards to the registry. The four one-line forwards plus
+    the degraded-mode contract docstring are the honest cost of that
+    compatibility seam. Remove when the no-registry single-beat mode retires
+    and only the batch registry path remains. Ceiling re-dated 75 to 79 for
+    the #497 codex P1: lease-scoped registry mutations (prune/quiesce/
+    resume/set_adopted) match on (execution_id, lease_id) so an old
+    attempt's late cleanup cannot drop or silence the entry of a re-claimed
+    new attempt — the facade threads its lease_id through the forwards.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 79
+- check: architecture.file_budget
+  path: worker/executor.py
+  reason: >-
+    Issue #352 starts the per-Worker batch heartbeat coordinator in main():
+    three lines (import, the coordinator start wiring the upload queue to
+    the same registry, the registry argument on the run_execution submit).
+    The executor main is the single place where the machine-wide stop event
+    and the UploadQueue live together; moving the wiring out would fork
+    lifecycle ownership. Revisit when executor main gets its next split.
+    Ceiling re-dated 226 to 224 after the rebase onto 0.7.0 (#481
+    ClaimPacing): #481's import cleanup (agent_subprocess_env re-export
+    retired, its test consumers import worker.execution.run directly) left
+    214 effective lines with this wiring on top, so the ceiling realigns to
+    actual + 10 per the dated-exemption convention (#431 / #458 precedents).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 224
+- check: architecture.file_budget
+  path: worker/upload/heartbeat.py
+  reason: >-
+    Issue #352 routes the upload-side lease heartbeat through the per-Worker
+    batch registry: start_upload_heartbeat takes the task (registry mode
+    registers the lease, no-registry mode keeps the single-beat thread for
+    unit tests), prune/quiesce forward to the registry. The dual-mode
+    docstrings are load-bearing: the single-beat path is the degraded
+    pre-v5-Host contract. Remove when the no-registry single-beat mode
+    retires and only the batch registry path remains. Ceiling re-dated 66
+    to 68 for the #497 codex P1: prune/quiesce pair-match on the task's own
+    (execution_id, lease_id) — a re-claimed execution's entry must survive
+    an old attempt's final stop.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 68
+- check: architecture.file_budget
+  path: worker/upload/queue.py
+  reason: >-
+    Issue #352 threads the batch heartbeat registry through the upload
+    queue: UploadTask carries heartbeat_registry (runtime only, not
+    persisted), the queue accepts/attaches it, and _deliver_bulk/_report
+    register restored and backoff-waiting leases with it. The alternative —
+    a wrapper queue subclass — would fork the two-lane scheduler wiring.
+    Revisit when the upload queue gets its next structural split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 326
+- check: architecture.file_budget
+  path: worker/execution/heartbeat_batch.py
+  reason: >-
+    Issue #352 review fixes grow the per-Worker batch heartbeat coordinator
+    past its first-check-in ceiling: lease sharding at MAX_BATCH_HEARTBEATS
+    (a chunk's transient error aborts the tick — never a degrade; only
+    404/405 flips the mode — and the next tick retries from the top,
+    per-item Host predicates being idempotent), the degraded single-beat
+    path carrying SINGLE_BEAT_TIMEOUT_SECONDS so one slow Host response
+    cannot serially starve every other lease, and the facade-shared
+    proc_ref wiring (zombie stop must read the same dict the executor
+    writes). All three are core loop semantics, not splittable helpers.
+    Revisit when the coordinator gains its own degraded-mode or sharding
+    module. Ceiling re-dated 238 to 274 for the #497 codex round: the two
+    P1s — lease-scoped registry mutations pair-matched on
+    (execution_id, lease_id) via the _matching_entry guard, and the
+    degraded single-beat path riding one short-lived daemon thread per
+    lease (the serial N × timeout sum could cross the lease TTL) — are
+    both core loop semantics living next to the loops they fix.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 274
+- check: architecture.file_budget
+  path: server/app/agent_broker/claim_scan.py
+  reason: >-
+    #498 (PR #497 review) adds the ClaimOutcome frozen dataclass here —
+    the post-transaction event payload the broker emits only after the
+    claim transaction commits. It lives beside AgentClaim/WorkerView/
+    ScanState because it is the same family of per-claim-pass value
+    objects (the scan modules already own the claim data model), and
+    giving it its own module would split the claim's data model across
+    files for ~26 lines. Remove when the claim path's next rework
+    re-budgets the family together with claim.py's entry.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/498
+  ceiling: 151
+- check: architecture.file_budget
+  path: server/app/agent_broker/heartbeat_single.py
+  reason: >-
+    #499 (PR #497 review) applies the #498 post-commit event discipline to
+    the single heartbeat: the refusal reason is decided inside the write
+    transaction (_renew_in_transaction, None = renewed) and the
+    execution.heartbeat_rejected event fires only after the commit
+    succeeds, sharing the HEARTBEAT_* reason literals with the batch
+    path. The split (transaction inner function + post-commit emit in the
+    public wrapper) is the minimal shape that keeps the verdict and its
+    emission in one readable flow; the alternative — emitting in place —
+    is exactly the ghost-event bug this fixes. Remove when the heartbeat
+    paths gain their own shared renewal module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
+  ceiling: 61
+- check: architecture.file_budget
+  path: server/app/agent_broker/heartbeat_batch.py
+  reason: >-
+    #499 (PR #497 review) makes the batch path emit one
+    execution.heartbeat_rejected per lost item — _renew_one returns the
+    refusal reason (shared HEARTBEAT_* literals) instead of a bare bool,
+    the lost loop collects reasons inside the transaction, and the
+    emissions run only after the batch transaction commits (the #498
+    discipline). All three additions are the v5 path's own event
+    contract; splitting them out would fork the single/batch pairing the
+    shared literals exist to keep aligned. Ceiling re-dated 91 to 98 for
+    PR #497 review round #5125358408 P1-B: the renewal loop takes its
+    per-item row locks in sorted execution_id order (two concurrent
+    batches sharing one worker registration can no longer interleave
+    A,B / B,A) and the lock-order note now documents the real three-table
+    lock surface (AER → executor_leases → agent_workers, same direction
+    as every other renewal path). PR base is develop, where this file
+    does not exist. Remove when the heartbeat paths gain their own
+    shared renewal module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
+  ceiling: 98
+- check: architecture.file_budget
+  path: worker/host/heartbeat_ops.py
+  reason: >-
+    PR #497 review round #5125358408 P2: the batch endpoint's 404/405
+    branch logs one INFO line carrying the lease count — degraded to
+    single beats, N leases × SINGLE_BEAT_TIMEOUT_SECONDS is the per-tick
+    wall-clock ceiling of the rolling-upgrade window, and the transition
+    was previously visible only as a count-free mode flip. One logging
+    call plus its module logger; remove together with the heartbeat_ops
+    split when the client gains a structured-events side.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
+  ceiling: 83

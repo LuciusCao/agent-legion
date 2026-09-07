@@ -175,7 +175,7 @@ make stack-logs STACK=worker
 - 注册令牌允许接入的 Workspace 范围；
 - 运行时、并发数、标签和最近日志。
 
-页面保存配置后会原子写入控制卷。身份、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和三个容量参数（`max_concurrency` / `max_code_concurrency` / `upload_max_concurrency`）都会热更新，无需重启。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
+页面保存配置后会原子写入控制卷。身份、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和四个热字段（`max_concurrency` / `max_code_concurrency` / `upload_max_concurrency` / `ramp_up`）都会热更新，无需重启。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
 
 Worker 不再需要声明 `capabilities`（issue #284 起该机制退役：claim 准入不再按
 capability 匹配；旧配置里的 `capabilities:` 键只是 deprecated no-op，存在时启动
@@ -188,6 +188,62 @@ warning，建议删除）。`models` 是可选的 runtime-scoped allowlist，不
 `velites models list --json`），最终注册集合 = 发现结果 ∩ allowlist；该 runtime 没有
 allowlist 条目时允许其全部发现结果。Agent 任务的准入条件：workspace token 授权、
 runtime 匹配、provider/model 命中 allowlist、labels 满足 `requires_labels`。
+
+### 拉取式部署（worker-v* 镜像发布）
+
+`make stack-worker-up` 默认在 Worker 机器现场构建镜像（`agent-legion-worker:local`）。
+多机部署可改用发布镜像：向仓库 push `worker-v*` tag（如 `worker-v0.6.0`；
+惯例跟随所基于的仓库发版 tag，同版重发加后缀如 `-r2`）触发
+[worker-image-release](../.github/workflows/worker-image-release.yml) workflow——
+原生 runner 构建 linux/amd64 与 linux/arm64（不使用 QEMU），按 digest 合成
+manifest list 后推送 GHCR `ghcr.io/luciuscao/agent-legion-worker`，打 `<版本>` /
+`sha-<短哈希>` / `latest` 三个 tag（`sha-` 指向 tag 背后的 commit，annotated
+tag 亦正确 dereference）。
+
+Worker 机器侧：复制 `deploy/compose.worker.pull.example.yaml` 为
+`deploy/compose.worker.local.yaml`（Makefile 的 stack-worker-* 目标自动并入），
+把 `image` 与 `AGENT_WORKER_IMAGE_VERSION` 改成固定版本 tag，之后
+`make stack-worker-up` 即拉取启动（override 用 `!reset` 清除 build 段）。
+**拉取镜像不改变任何前置**：velites 二进制外挂、期望 runtime 守卫与配置
+挂载同本地构建形态完全一致。GHCR 包默认 private——各 Worker 机器先
+`docker login ghcr.io`（具 read:packages 的 PAT），或在 GitHub package
+设置中改为 public。发布走 GitHub 托管 runner，只能推 GitHub 侧 registry；
+需要内网私有 registry 时须自建 runner，不在本管道覆盖范围内。
+
+与 PR 门的分工：quality-gate 的 docker-build job 只做构建验证（push:
+false、仅 amd64）；实际发布只由 `worker-v*` tag 触发。协议升级顺序
+（Host first, Worker second）对镜像形态同样适用——升级即 pull 新版本 tag
+并重启容器。
+
+### 一键安装（无仓库机器）
+
+没有仓库克隆的 Worker 机器（如个人 Mac、树莓派）用
+[install-worker.sh](../scripts/install-worker.sh) 一键组装独立部署：
+拉取 standalone compose（`deploy/compose.worker.standalone.yaml`，按
+`worker-v<version>` tag ref——镜像与编排文件版本耦合在同一发布 tag）、
+下载 sha256 校验的 velites 二进制（架构自动匹配）、生成引导 `worker.yaml`
+与 `models.json` 示例，最后 `docker compose up`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/develop/scripts/install-worker.sh \
+  | sh -s -- --host-url http://<部署机IP>:8000 --worker-id my-worker-1
+```
+
+幂等语义分层：脚本自有资产（compose 文件、velites 二进制、`.env` 的
+`AGENT_WORKER_IMAGE` 行）每次刷新到目标版本；**用户资产（`worker.yaml`、
+`models.json`、`.env` 其余内容）已存在即跳过、绝不覆盖**——`worker.yaml`
+首次启动导入控制卷后以控制台为准，覆盖只会制造 `mounted_config_diverged`。
+升级 = 重跑脚本带 `--version <新版本>`（须存在对应的 `worker-v*` 发布 tag）。
+细节约束（模型注册表就绪前不启动、`--models-json` 显式安装、
+`AGENT_WORKER_UI_BIND`/`AGENT_WORKER_UI_PORT` 端口插值、POSIX sh 管道模式）
+见脚本头部注释与 `--help`。
+
+与拉取式 override 的取舍：仓库克隆 + `compose.worker.local.yaml` 适合开发/
+调试机（能跑 `make stack-*`、随仓库升级）；一键安装适合纯执行节点（只有
+Docker、目录自包含）。两者最终形态等价（同一镜像 + 同一挂载面），但
+**共用 compose project name（`agent-legion-worker`），同一台机器上互斥**
+——一键安装的 up 会 recreate 仓库形态的容器并共享同名卷；要换形态先
+`down` 另一边。
 
 ### 出网代理（#444）
 
@@ -206,6 +262,15 @@ Worker 默认**直连出网**：service 入口会剥离启动 shell 继承的代
 是进程级配置，修改后随执行进程重启生效，不做热更新。
 
 
+### 冷启动容量爬坡（ramp-up，#471）
+
+冷启动窗口（发布重启、`claim_enabled` false→true、大批量 run 提交后恢复调度）会把积压的 queued 请求一次性释放——数百个 agent 同时发起首次大模型请求，瞬时压力打满 provider。`ramp_up` 配置块（控制台「配置 → 高级参数 → 容量爬坡」或 `PUT /api/config` 的 `ramp_up` 键，热更新免重启）把释放节奏改为阶梯放量：
+
+- **参数**：`initial` / `step` / `interval_seconds`（缺省 1 / 1 / 60s）——生效容量从 `initial` 起步、每 `interval_seconds` 放开 `step` 档，到 `max_concurrency` 目标后窗口永久关闭、回归正常容量语义。空对象 `{}` 是最保守爬坡；`null` 或缺块 = 禁用（一次性全量，即旧行为）。
+- **只升不降**：窗口内热更到更小的 `initial` 不回撤在途档位（避免与完成流耦合振荡）；`claim_enabled` 关闭期间爬坡虚拟时钟不前进——停领一小时的 Worker 恢复后不会直接跳到高档。
+- **生效范围仅冷启动窗口**：稳态的完成/补领槽位波动不经过状态机；爬坡只钳制新领取的预算，已在跑的执行不受影响。
+- 控制台容量卡在爬坡期显示「容量爬坡中 e/t」进度；未勾选提交 `null` 即时禁用。与 claim pacing（#472）正交：pacing 管两次 claim 之间的等待，爬坡管本 pass 最多领多少。
+
 ### code 节点执行池（协议 v2）
 
 自足的 workflow code 节点（静态 import 闭包 ⊆ `workspace_libs` + stdlib + `requests`；repo 内置的示例节点全部满足）可以被分派到 Worker：Host 把节点代码文本 + sha256 `code_hash` 与 `workspace_libs` 快照打进 bundle 下发，Worker 在 `velites sandbox wrap` OS 沙箱内执行（内置与自定义节点同一条沙箱路径）。接入方式：
@@ -221,13 +286,21 @@ Worker 默认**直连出网**：service 入口会剥离启动 shell 继承的代
 
 **secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程——secret 标记键在 Host 侧 `split_manifest_config` 就不进下发 manifest，Worker 侧没有任何 config 派生数据落盘，secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`）——白名单当前为空（`NODE_SETTINGS_CONFIG_SECTIONS = ()`，业务 section 已随业务节点迁出），vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
 
-**协议兼容**：当前协议版本为 v3（新增 runtime-scoped model triples）；v2 的 code claim
-和 heartbeat 取消 body 语义不变。Host 把旧 Worker 的二元 provider/model 声明解释成
-runtime wildcard；新 Worker 总是发送显式 runtime。注册时 code 容量仍只要求协议 >= v2。
-Host 的 `min_protocol_version` 仍为 1。升级必须遵循 **Host first, Worker second**：v3
-注册响应携带 `host_protocol_version`，新 Worker 若发现 Host 低于 v3（旧响应缺少该字段
-也视为旧 Host）会以退出码 2 fail-closed，不进入 claim，避免旧 Host 把 runtime-scoped
-模型降成二元 provider/model 后误投到另一个 runtime。确认 Host 健康后再逐台重启 Worker。
+**协议兼容**：当前协议版本为 v5：v3 新增 runtime-scoped model triples；v4 新增
+gzip 压缩产物对象（v4+ Worker 收 `.gz` 后缀的上传规格与 `content_encoding` 输入
+引用，旧 Worker 保持裸键）；v5 新增 per-Worker 批量心跳（`POST
+/api/agent-executions/heartbeats`，一次请求单写事务续期本机全部租约，心跳写流量
+按机器数而非槽数）。v2 的 code claim 和 heartbeat 取消 body 语义不变。Host 把旧
+Worker 的二元 provider/model 声明解释成 runtime wildcard；新 Worker 总是发送显式
+runtime。注册时 code 容量仍只要求协议 >= v2。Host 的 `min_protocol_version` 仍为
+1。心跳的混合舰队兼容：单条心跳端点保留且行为不变（旧 Worker 对升级后 Host 语义
+零变化）；v5 Worker 对批量路由缺席（404/405）的 Host 自动降级逐条心跳（逐条带 5s
+短超时；transient 错误不降级），zombie（进程死且未被上传收养）的租约停跳、交给
+Host 孤儿 sweeper 回收。升级必须遵循 **Host first, Worker second**：v3 起注册响应
+携带 `host_protocol_version`，新 Worker 若发现 Host 低于自身协议版本（旧响应缺少
+该字段也视为旧 Host）会以退出码 2 fail-closed，不进入 claim，避免旧 Host 把
+runtime-scoped 模型降成二元 provider/model 后误投到另一个 runtime。确认 Host 健康
+后再逐台重启 Worker。
 
 **workflow_key 兼容窗口期（issue #211，截止 2026-10-31）**：claim 响应中的
 `workflow_key` 字段已 deprecated（与 `workspace_id` 恒等，schema v62 绑定）。字段

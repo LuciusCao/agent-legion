@@ -9,7 +9,11 @@ use super::{resolve_in_cwd, ToolContext, ToolError, ToolOutput};
 pub async fn run(args: &Value, ctx: &ToolContext) -> ToolOutput {
     match run_inner(args, ctx) {
         Ok(output) => output,
-        Err(err) => ToolOutput::error(err.to_string()),
+        // Argument-shape failures (missing `path`/`content`) reject before
+        // any filesystem work and stay timing-free; resolution/write
+        // failures happen mid-measurement and keep their totalMs (#469).
+        Err(err @ ToolError::InvalidArgs(_)) => ToolOutput::error(err.to_string()),
+        Err(err) => ToolOutput::error(err.to_string()).measured(),
     }
 }
 
@@ -38,13 +42,15 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
     }
 
     // For write, the meaningful volume is the content written, not the
-    // confirmation text.
+    // confirmation text. totalMs is filled by the ToolKind::execute dispatch
+    // boundary (#469); in-process tools need no timing code of their own.
     Ok(ToolOutput {
         content: vec![crate::events::ContentBlock::Text {
             text: format!("wrote {} bytes to {path}", content.len()),
         }],
         is_error: false,
         output_bytes: content.len() as u64,
+        timing: None,
     })
 }
 
