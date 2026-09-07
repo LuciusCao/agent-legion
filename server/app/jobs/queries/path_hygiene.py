@@ -26,28 +26,39 @@ PATH_HYGIENE_COLUMNS: tuple[tuple[str, str, str], ...] = (
 
 class PathHygieneQueriesMixin(ConnectionQueriesMixin):
     def fetch_absolute_path_chunk(
-        self, table: str, column: str, key: str, limit: int
+        self, table: str, column: str, key: str, limit: int, *, after: str | None = None
     ) -> list[dict[str, Any]]:
-        """Read up to ``limit`` rows whose ``column`` still holds an absolute path.
+        """Read up to ``limit`` absolute-path rows with ``column`` values, in key order.
 
         The selection itself is the rewrite's idempotency guard: a clean
-        column returns no rows and the caller writes nothing.
+        column returns no rows and the caller writes nothing. ``after`` is
+        the key cursor — a full chunk of unmappable rows must still advance
+        the scan (codex review on #530), so the caller pages past scanned
+        keys instead of re-reading the same block forever.
         """
+        cursor_sql = f" and {key} > %s" if after is not None else ""
+        params: tuple[Any, ...] = ("/%", limit) if after is None else ("/%", after, limit)
         with self.read() as conn:
             rows = conn.execute(
                 f"select {key} as k, {column} as v from {table}"
-                f" where {column} like %s order by {key} limit %s",
-                ("/%", limit),
+                f" where {column} like %s{cursor_sql} order by {key} limit %s",
+                params,
             ).fetchall()
         return [{"key": str(row["k"]), "value": str(row["v"])} for row in rows]
 
     def rewrite_path_rows(
-        self, table: str, column: str, key: str, updates: list[tuple[str, str]]
+        self, table: str, column: str, key: str, updates: list[tuple[str, str, str]]
     ) -> None:
-        """Apply one chunk of (value, key) rewrites in a single transaction."""
+        """Apply (new_value, key, old_value) rewrites in one transaction.
+
+        The stored-value re-check (codex review on #530) makes each write
+        conditional on the row still holding the snapshotted value: a row
+        updated between read and write (lease finish canonicalizing it,
+        cleanup emptying it) is left alone, never overwritten back.
+        """
         with self.write() as conn:
-            for value, row_key in updates:
+            for value, row_key, old_value in updates:
                 conn.execute(
-                    f"update {table} set {column}=%s where {key}=%s",
-                    (value, row_key),
+                    f"update {table} set {column}=%s where {key}=%s and {column}=%s",
+                    (value, row_key, old_value),
                 )

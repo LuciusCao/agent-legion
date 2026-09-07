@@ -163,22 +163,36 @@ def migrate_absolute_db_paths(db: JobQueries, data_dir: Path) -> dict[str, int]:
 
     data_dir_name = data_dir.resolve(strict=True).name
     migrated: dict[str, int] = {}
-    for table, column, _key in PATH_HYGIENE_COLUMNS:
+    for table, column, key in PATH_HYGIENE_COLUMNS:
         done = 0
+        # Key cursor (codex review on #530): a full chunk with zero mappable
+        # rows must still ADVANCE, or the loop re-reads the same block
+        # forever (unmappable absolute rows never leave the selection and
+        # would spin the startup thread on repeated scans). Rows come back
+        # in key order, so the last key of each full chunk is the cursor;
+        # unmapped rows are simply left behind for the startup report.
+        cursor: str | None = None
         while True:
-            rows = db.fetch_absolute_path_chunk(table, column, _key, _MIGRATE_CHUNK_ROWS)
+            rows = db.fetch_absolute_path_chunk(
+                table, column, key, _MIGRATE_CHUNK_ROWS, after=cursor
+            )
             if not rows:
                 break
+            # (relative, key, old_value): the write re-checks the stored
+            # value (codex review on #530) so a row updated between the
+            # read and this transaction — a lease finish canonicalizing it,
+            # a cleanup thread emptying it — is never overwritten back.
             updates = []
             for row in rows:
                 relative = _rebase_legacy_absolute(row["value"], data_dir_name)
                 if relative is not None:
-                    updates.append((relative, row["key"]))
+                    updates.append((relative, row["key"], row["value"]))
             if updates:
-                db.rewrite_path_rows(table, column, _key, updates)
+                db.rewrite_path_rows(table, column, key, updates)
                 done += len(updates)
             if len(rows) < _MIGRATE_CHUNK_ROWS:
                 break
+            cursor = rows[-1]["key"]
         if done:
             migrated[f"{table}.{column}"] = done
     if migrated:

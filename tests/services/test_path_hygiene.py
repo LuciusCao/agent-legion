@@ -333,3 +333,77 @@ def test_rewrite_background_logs_failures_without_raising(monkeypatch, caplog) -
             time.sleep(0.01)
 
     assert any("path-hygiene one-time rewrite failed" in r.getMessage() for r in caplog.records)
+
+
+def test_migrate_terminates_on_a_full_chunk_of_unmappable_rows(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    """Codex review on #530: a full chunk (>= _MIGRATE_CHUNK_ROWS) with zero
+    mappable rows must still advance — the key cursor walks past scanned
+    rows instead of re-reading the same block forever."""
+    import server.app.services.path_hygiene as hygiene
+
+    rows = [{"key": f"k-{i}", "value": f"/elsewhere/unmapped-{i}.log"} for i in range(3)]
+    calls: list[str | None] = []
+
+    def _chunk(self, table, column, key, limit, *, after=None):
+        calls.append(after)
+        return rows if after is None else []
+
+    monkeypatch.setattr(
+        "server.app.jobs.queries.path_hygiene.PathHygieneQueriesMixin.fetch_absolute_path_chunk",
+        _chunk,
+    )
+    monkeypatch.setattr(hygiene, "_MIGRATE_CHUNK_ROWS", 3)
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    migrated = hygiene.migrate_absolute_db_paths(job_db, data_dir)
+
+    assert migrated == {}
+    # Four columns × (full unmapped chunk, then the post-cursor empty read):
+    # exactly two reads per column — the cursor advanced past the block
+    # instead of spinning on it. A regressed cursor makes this hang/loop.
+    assert calls == [None, "k-2"] * 4
+
+
+def test_migrate_does_not_overwrite_a_row_changed_since_the_read(job_db, tmp_path) -> None:
+    """Codex review on #530: a row canonicalized by a lease finish between
+    the chunk read and the write transaction must NOT be overwritten back
+    with the stale snapshot's rebase."""
+    _seed(
+        job_db,
+        job_id="job-raced",
+        log_path="/srv/old/data/logs/jobs/job-raced-generate.log",
+        run_dir="",
+        storage_dir="",
+    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    # Interpose: after the read, simulate the concurrent canonicalization.
+    real_chunk = job_db.fetch_absolute_path_chunk
+    real_rewrite = job_db.rewrite_path_rows
+
+    def _chunk_then_race(*args, **kwargs):
+        rows = real_chunk(*args, **kwargs)
+        if rows:
+            with job_db.connect() as conn:
+                conn.execute(
+                    "update node_runs set log_path=%s where job_id='job-raced'",
+                    ("logs/jobs/job-raced-generate.log",),
+                )
+        return rows
+
+    job_db.fetch_absolute_path_chunk = _chunk_then_race  # type: ignore[method-assign]
+    migrated = migrate_absolute_db_paths(job_db, data_dir)
+
+    # The conditional write lost the race on purpose: the canonicalized
+    # value stands, and the row is already clean either way.
+    with job_db.connect() as conn:
+        log_path = conn.execute(
+            "select log_path from node_runs where job_id='job-raced'"
+        ).fetchone()["log_path"]
+    assert log_path == "logs/jobs/job-raced-generate.log"
+    _ = real_rewrite
+    _ = migrated

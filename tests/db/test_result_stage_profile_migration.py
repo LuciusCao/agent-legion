@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import psycopg
+import pytest
 
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
@@ -89,10 +90,14 @@ def test_stage_columns_round_trip_through_the_sampler() -> None:
     assert row["result_events_seconds_total"] == 0.0
 
 
+@pytest.mark.fresh_schema
 def test_upgrade_from_v79_adds_the_columns() -> None:
     # A database recorded at v79 replays the schema file (CREATE TABLE IF NOT
     # EXISTS is a no-op) and runs the v80 migration: the guarded ALTERs are
-    # the only path that widens the existing table.
+    # the only path that widens the existing table. fresh_schema because the
+    # test drops the fourteen columns (DDL drift that plain TRUNCATE
+    # isolation must not leak into later tests on this worker — codex
+    # review on #530).
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version >= 80")
         for column in _STAGE_COLUMNS:
