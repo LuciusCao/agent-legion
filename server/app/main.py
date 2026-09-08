@@ -30,16 +30,12 @@ from server.app.routes.auth import create_auth_router
 from server.app.routes.quality_deps import build_quality_loop
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
-from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
-from server.app.services.execution_retention_sweeper import ExecutionRetentionThread
 from server.app.services.instance_settings import apply_instance_settings
-from server.app.services.job_artifact_maintenance import JobArtifactMaintenanceThread
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
-from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -55,9 +51,10 @@ from server.app.storage import build_s3_storage_checked
 from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
-from server.app.sweeper_owned_startup import start_sweeper_owned_threads
+from server.app.sweeper_owned_startup import SlowSweepThreads, start_sweeper_owned_threads
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
+from server.app.workflow_worker.campaign_feeder_wiring import build_campaign_feeder
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
@@ -124,17 +121,18 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     studio_chat_service.warm_availability_probe()
     executor_leases = agent_plane.executor_leases
     agent_worker_registry = agent_plane.worker_registry
-    workflow_worker_thread: WorkflowWorkerThread | None = None
-    sweeper_thread: SweeperThread | None = None
-    slow_sweeps: (
-        tuple[
-            ArtifactOrphanGcThread,
-            JobArtifactMaintenanceThread,
-            MaterialTtlSweeperThread,
-            ExecutionRetentionThread,
-        ]
-        | None
-    ) = None
+    # Campaign feeder (#532 PR-B, design §2.1/§3.1): its own service set
+    # (campaign_feeder_wiring), started only in the start_worker lifespan
+    # branch — an API-only replica never feeds (SingleReplicaProbe already
+    # guarantees one Host per database).
+    campaign_feeder = build_campaign_feeder(
+        job_db,
+        settings,
+        executor_leases,
+        job_event_manager,
+        job_event_buffer,
+        workspace_worker_control,
+    )
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
@@ -151,7 +149,14 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps
+        # Worker-plane threads live entirely inside the lifespan closure
+        # (assigned on start, stopped in the finally): routes reach them
+        # through app.state, never these locals, so no nonlocal plumbing.
+        workflow_worker_thread: WorkflowWorkerThread | None = None
+        sweeper_thread: SweeperThread | None = None
+        # The sweeper-owned quartet, or None when sweeper_enabled is off;
+        # start_sweeper_owned_threads' return type carries the tuple shape.
+        slow_sweeps: SlowSweepThreads | None = None
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         replica_probe.probe()
         if start_worker:
@@ -180,6 +185,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 slow_sweeps = start_sweeper_owned_threads(
                     artifact_store, job_artifact_objects, job_db, settings, object_storage
                 )
+            # Campaign feeder (#532 PR-B): daemon thread, never on the poll
+            # loop (a batch can take seconds; design §2.1). Started only on
+            # the Host replica — API-only copies leave campaigns pending.
+            campaign_feeder.start()
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
@@ -210,6 +219,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             ):
                 if thread is not None:
                     thread.stop()
+            campaign_feeder.stop()
             if workflow_worker_thread is not None:
                 unregister_wakeup(workflow_worker_thread.wake)
                 workflow_worker_thread.stop()
@@ -235,6 +245,12 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.materials_service = MaterialsService(job_db, object_storage)
     app.state.job_artifact_objects = job_artifact_objects
     app.state.workspace_event_aggregator = workspace_event_aggregator
+    # The resume endpoint's wake hook (design §2.4): resume flips the row and
+    # pokes the feeder so the next batch goes out immediately instead of
+    # after the tick cadence. Present even on API-only replicas, where the
+    # feeder thread is not started (wake is then a no-op set on an unstarted
+    # event — harmless).
+    app.state.campaign_feeder = campaign_feeder
     agent_catalog = AgentCatalogService(settings, job_db)
     workspace_execution_configuration = WorkspaceExecutionConfigurationService(job_db, settings)
     workspace_configuration = WorkspaceConfigurationService(job_db, settings)

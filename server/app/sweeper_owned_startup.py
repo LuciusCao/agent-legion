@@ -17,6 +17,15 @@ from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.settings import Settings
 from server.app.storage import ObjectStorage
 
+# The sweeper-owned quartet's shape (one entry per slow-cadence thread); the
+# composition root annotates its optional local with this alias.
+SlowSweepThreads = tuple[
+    ArtifactOrphanGcThread,
+    JobArtifactMaintenanceThread,
+    MaterialTtlSweeperThread,
+    ExecutionRetentionThread,
+]
+
 
 def start_sweeper_owned_threads(
     artifact_store: ArtifactStore,
@@ -24,12 +33,7 @@ def start_sweeper_owned_threads(
     job_db: JobQueries,
     settings: Settings,
     object_storage: ObjectStorage | None,
-) -> tuple[
-    ArtifactOrphanGcThread,
-    JobArtifactMaintenanceThread,
-    MaterialTtlSweeperThread,
-    ExecutionRetentionThread,
-]:
+) -> SlowSweepThreads:
     """Start the four slow-cadence sweep threads the sweeper replica owns.
 
     Orphan GC / artifact maintenance / materials TTL (design §10) /

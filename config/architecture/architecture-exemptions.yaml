@@ -1151,3 +1151,18 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
   ceiling: 76
+- check: architecture.file_budget
+  path: server/app/routes/campaigns.py
+  reason: >-
+    #532 PR-B: the resume endpoint's feeder-wake hookup (design §2.4) —
+    the resumed row left the active scan while paused, so without the
+    app.state poke it waits out the full tick cadence. Request injection
+    plus a 6-line guarded wake grew the route file past PR-A's registered
+    ceiling (219 → 225 effective); the alternative — moving the wake into
+    the service layer — would hand CampaignService an app.state contract
+    it has no business knowing. Anchored to #522 (budget-anchor tracker):
+    harvest when the campaign route set consolidates (the pause/cancel
+    handlers may fold into a shared status-transition helper).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 228

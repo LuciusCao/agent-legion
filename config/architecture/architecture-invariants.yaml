@@ -1301,6 +1301,9 @@ invariants:
       - kind: contract
         target: tests/routes/test_campaigns_api.py
         gate: quick
+      - kind: integration
+        target: tests/workers/test_campaign_feeder.py
+        gate: quick
 
   - id: EXEC-APPROVAL-001
     statement: "A ``type: approval`` node never dispatches to any executor or Agent: the workflow worker parks its job_node at awaiting_approval (no lease, no node_run), downstream nodes stay blocked until the node completes, and the only transition out is an approval-API decision from a human session — studio_agent scoped tokens are rejected on the decision route, and every decision is recorded as an insert-only approval_decisions row with the uniform user:{id} actor."

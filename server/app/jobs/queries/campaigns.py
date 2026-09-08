@@ -19,6 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from server.app.db.rowmap import iso_optional
+from server.app.jobs.queries.campaign_slice_queries import CampaignSliceQueriesMixin
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 # Terminal states: pause/resume refuse them (a finished campaign is not a
@@ -77,7 +78,7 @@ def _parse_object(value: Any) -> dict[str, Any]:
 # count+paused→running resume share one transaction under the lock).
 
 
-class CampaignQueriesMixin(ConnectionQueriesMixin):
+class CampaignQueriesMixin(CampaignSliceQueriesMixin, ConnectionQueriesMixin):
     def generate_campaign_id(self) -> str:
         """Allocate a campaign id before the row exists.
 
