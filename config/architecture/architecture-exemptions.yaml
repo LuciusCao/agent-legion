@@ -1,5 +1,22 @@
 exemptions:
 - check: architecture.file_budget
+  path: server/app/workflows/output_contract_engine.py
+  reason: >-
+    Issue #538 adds the in-process contract-block probe (_has_contract_block)
+    in front of the velites spawn: a skill that declares no contract block
+    would only buy the engine's existence-mode no-verdict, so the subprocess
+    is skipped and the validate stage returns to sub-second latency. The
+    probe mirrors velites's fence scan (exact trimmed "```yaml contract"
+    line, missing document degrades, everything fail-closed reports True) and
+    must stay beside the spawn it gates — splitting it out would fork the
+    degradation semantics from the engine seam that owns them. Ceiling at
+    actual + 10 per the dated-exemption convention (#431 / #458 precedents).
+    Remove when the velites engine itself grows an in-process Host library
+    form or the two-layer validation restructure re-budgets the module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/538
+  ceiling: 78
+- check: architecture.file_budget
   path: frontend/src/pages/globalSettings/instanceSettingsFields.ts
   reason: >-
     Issue #521 adds the result-commit gate knob to the Worker-limits field

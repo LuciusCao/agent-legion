@@ -11,13 +11,16 @@ still runs afterwards for business rules the engine does not express.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 import server.app.workflows.output_contract_engine as output_contract_engine
 from server.app.skills.errors import SkillRepoError
+from server.app.workflows.output_contract_engine import run_contract_engine
 from server.app.workflows.output_validation import run_output_validator
 from server.app.workflows.worker_output_validation import validate_worker_outputs
 
@@ -179,11 +182,17 @@ def test_manifest_without_skill_skips_validation(tmp_path: Path) -> None:
 
 # --- #443: contract engine layer (velites-sandbox validate) ---
 
+# A declaring document: prose around the machine-readable block, exactly the
+# shape velites's first-fence scan expects (#538 probe tests vary the doc).
+_CONTRACT_BLOCK_DOC = (
+    "# Output contract\n\n```yaml contract\nfiles:\n  - path: script.md\n    format: text\n```\n"
+)
 
-def _skill_dir(tmp_path: Path, legacy_body: str | None) -> Path:
+
+def _skill_dir(tmp_path: Path, legacy_body: str | None, doc: str = _CONTRACT_BLOCK_DOC) -> Path:
     skill_dir = tmp_path / "skill"
     (skill_dir / "references").mkdir(parents=True)
-    (skill_dir / "references" / "output-contract.md").write_text("contract\n")
+    (skill_dir / "references" / "output-contract.md").write_text(doc)
     if legacy_body is not None:
         (skill_dir / "scripts").mkdir()
         (skill_dir / "scripts" / "validate_output.py").write_text(legacy_body)
@@ -201,6 +210,18 @@ def _fake_engine(tmp_path: Path, *, stdout: str = "", stderr: str = "", rc: int 
 
 def _use_engine(monkeypatch: pytest.MonkeyPatch, binary: str | None) -> None:
     monkeypatch.setattr(output_contract_engine, "resolve_sandbox_binary", lambda: binary)
+
+
+def _record_engine_spawns(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Intercept the engine's subprocess.run; the legacy script stays real."""
+    calls: list[list[str]] = []
+
+    def _fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="mode=existence", stderr="")
+
+    monkeypatch.setattr(output_contract_engine, "subprocess", SimpleNamespace(run=_fake_run))
+    return calls
 
 
 def test_engine_violation_fails_fast_without_running_legacy(
@@ -332,3 +353,121 @@ def test_current_broken_engine_stays_fail_closed(
     assert error is not None
     assert error.startswith("Validator error:")
     assert "contract parse error" in error
+
+
+# --- #538: the contract-block probe gates the velites spawn ---
+
+
+def test_skill_without_contract_block_never_spawns_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The engine's only answer for a fence-less document is mode=existence
+    (a no-verdict) — spawning it is pure latency, so the probe skips it."""
+    skill_dir = _skill_dir(tmp_path, None, doc='# contract\n\n```json\n{"example": true}\n```\n')
+    _use_engine(monkeypatch, "/nonexistent/velites")
+    spawns = _record_engine_spawns(monkeypatch)
+
+    assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
+    assert spawns == []
+
+
+def test_missing_contract_document_never_spawns_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No references/output-contract.md at all — velites's degradation case."""
+    skill_dir = tmp_path / "skill"
+    (skill_dir / "scripts").mkdir(parents=True)
+    _use_engine(monkeypatch, "/nonexistent/velites")
+    spawns = _record_engine_spawns(monkeypatch)
+
+    assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
+    assert spawns == []
+
+
+def test_skill_without_contract_block_lets_the_legacy_script_decide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The skip must be verdict-neutral end to end: the legacy script keeps
+    the deciding vote exactly as when the engine answered existence mode."""
+    skill_dir = _skill_dir(
+        tmp_path,
+        "import sys; sys.stderr.write('legacy only\\n'); sys.exit(1)\n",
+        doc="prose only, no fences\n",
+    )
+    _use_engine(monkeypatch, "/nonexistent/velites")
+    spawns = _record_engine_spawns(monkeypatch)
+
+    error = run_output_validator(skill_dir, tmp_path / "job")
+
+    assert error is not None
+    assert "legacy only" in error
+    assert spawns == []
+
+
+def test_declared_contract_block_still_spawns_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A declared block keeps the engine authoritative — the pre-#538 spawn,
+    same argv shape."""
+    skill_dir = _skill_dir(tmp_path, None)
+    _use_engine(monkeypatch, "/nonexistent/velites")
+    spawns = _record_engine_spawns(monkeypatch)
+
+    assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
+    assert len(spawns) == 1
+    assert spawns[0][1] == "validate"
+    assert str(skill_dir) in spawns[0]
+
+
+def test_fence_variants_decide_the_spawn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the exact info string declares a block (velites matches the
+    trimmed line exactly): a plain ```yaml fence is prose, trailing text on
+    the info string is prose, surrounding whitespace is tolerated."""
+    cases = [
+        ("```yaml\nfiles: []\n```\n", False),
+        ("```YAML CONTRACT\n```\n", False),
+        ("```yaml contract extras\n```\n", False),
+        ("```yaml contract\nfiles:\n  - path: a.md\n    format: text\n```\n", True),
+        ("  ```yaml contract  \nfiles:\n  - path: a.md\n    format: text\n```\n", True),
+    ]
+    for index, (doc, declares) in enumerate(cases):
+        skill_dir = _skill_dir(tmp_path / f"case{index}", None, doc=doc)
+        _use_engine(monkeypatch, "/nonexistent/velites")
+        spawns = _record_engine_spawns(monkeypatch)
+
+        assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
+        assert bool(spawns) is declares, doc
+
+
+def test_unclosed_contract_fence_still_spawns_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An opening fence that is never closed is malformed, not absent — the
+    fail-closed verdict is velites's to deliver, so the probe keeps the
+    spawn."""
+    skill_dir = _skill_dir(
+        tmp_path, None, doc="```yaml contract\nfiles:\n  - path: a.md\n    format: text\n"
+    )
+    _use_engine(monkeypatch, "/nonexistent/velites")
+    spawns = _record_engine_spawns(monkeypatch)
+
+    assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
+    assert len(spawns) == 1
+
+
+def test_unreadable_contract_document_still_spawns_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read failure other than not-found is velites's fail-closed case —
+    the probe must not downgrade it to existence mode."""
+    skill_dir = _skill_dir(tmp_path, None)
+
+    def _deny(self: Path, **_kwargs: object) -> str:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "read_text", _deny)
+    _use_engine(monkeypatch, "/nonexistent/velites")
+    spawns = _record_engine_spawns(monkeypatch)
+
+    assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
+    assert len(spawns) == 1
