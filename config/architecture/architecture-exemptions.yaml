@@ -1421,15 +1421,3 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 80
-- check: architecture.file_budget
-  path: server/app/single_replica_probe.py
-  reason: >-
-    Issue #521 方案 B (role split): the probe takes a per-plane lock_name
-    (validated against a fixed tuple) and threads the built key through
-    probe/close/conflict-log — one lock slot per process ROLE so a
-    deliberate split deployment is not a #277 second-replica accident.
-    Two effective lines over the old ceiling. Shrinks back if the lock
-    naming centralizes with the role module.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
-  ceiling: 144
