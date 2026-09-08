@@ -78,7 +78,18 @@ stop_pids() {
     local name="$1" grace="$2" pidfile="$3"
     local pid
     pid="$(cat "$pidfile" 2>/dev/null || true)"
-    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    # PID 复用防护（与 native-prod-up.sh 的 scheduler_pid_alive 同一规则）：
+    # pidfile 残留 + PID 被无关进程复用时，只看 kill -0 会误杀别人。
+    # caffeinate 包裹下 pidfile 记的是 caffeinate 的 pid，校验其自身
+    # 命令行或子进程命中 scheduler_process 才认。
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        if ! ps -p "$pid" -o command= 2>/dev/null | grep -q "scheduler_process" \
+            && ! pgrep -P "$pid" -f "scheduler_process" >/dev/null 2>&1; then
+            echo "$name pidfile 指向无关进程（pid $pid，PID 复用），清理 pidfile 不发信号" >&2
+            rm -f "$pidfile"
+            return 0
+        fi
+    else
         echo "$name 未在运行，跳过"
         rm -f "$pidfile"
         return 0

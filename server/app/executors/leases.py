@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -56,6 +56,19 @@ class ExecutorLeaseRepository:
         self.job_event_manager = job_event_manager
         self.data_dir = data_dir
         self.job_event_buffer = job_event_buffer
+        # #521 方案 B: optional cross-plane event relay. In the split shape
+        # the scheduler process records job events into its own in-process
+        # buffer — which no SSE client ever drains — so every
+        # _broadcast_job_update additionally hands the (workspace, job) pair
+        # to this callback; the composition root wires it to the
+        # ``job_touched`` NOTIFY bridge so the http plane's buffer (the one
+        # its SSE clients DO drain) records the same touch. None in the
+        # combined role: the local buffer already serves the clients.
+        # #521 方案 B: cross-plane event relay, wired POST-construction by
+        # the composition root (bootstrap/agent_plane) in the split shape;
+        # the no-op default keeps call sites guard-free and the combined
+        # role free of bridge traffic.
+        self.cross_plane_event: Callable[[str], None] = lambda _job_id: None
         init_db(self.path)
 
     def _broadcast_job_update(self, job_id: str) -> None:
@@ -64,6 +77,7 @@ class ExecutorLeaseRepository:
                 return
             if self.job_event_buffer is not None:
                 record_job_update(self.job_db, self.job_event_buffer, job_id)
+                self.cross_plane_event(job_id)
                 return
             job = self.job_db.get_job(job_id)
             workspace_id = str(job.get("workspace_id", "")) if job else ""

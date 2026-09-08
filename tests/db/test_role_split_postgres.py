@@ -27,6 +27,8 @@ import pytest
 
 from server.app.scheduler_notify import SchedulerNotifyListener
 from server.app.scheduler_notify_emit import (
+    notify_job_touched_cross_process,
+    notify_restock_cross_process,
     notify_scan_reload_cross_process,
     notify_schedulable_work_cross_process,
 )
@@ -101,3 +103,68 @@ def test_probe_locks_are_disjoint_per_plane(monkeypatch: pytest.MonkeyPatch) -> 
         http_probe.close()
         scheduler_probe.close()
         http_probe_same_plane.close()
+
+
+def test_job_touched_bridge_round_trips() -> None:
+    """N1 on review: scheduler-plane job events must reach the http
+    plane's buffer — the relay folds the touched job into the receiving
+    plane's event flow so its SSE clients refresh."""
+    touched: list[str] = []
+    delivered = threading.Event()
+
+    def _on_job_touched(job_id: str) -> None:
+        touched.append(job_id)
+        delivered.set()
+
+    listener = SchedulerNotifyListener(TEST_DATABASE_URL, on_job_touched=_on_job_touched)
+    listener._POLL_INTERVAL_SECONDS = 1.0
+    listener.start()
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not touched:
+            notify_job_touched_cross_process(TEST_DATABASE_URL, "job-bridge-test")
+            delivered.wait(timeout=0.5)
+        assert touched == ["job-bridge-test"]
+    finally:
+        listener.stop()
+
+
+def test_job_touched_payload_escapes_quotes() -> None:
+    """A job id carrying a quote must not break the notify payload."""
+    from server.app import scheduler_notify_emit
+
+    emitted: list[str | None] = []
+
+    def _fake_emit(dsn, payload):
+        emitted.append(payload)
+
+    original = scheduler_notify_emit._emit_notify
+    scheduler_notify_emit._emit_notify = _fake_emit
+    try:
+        notify_job_touched_cross_process("pg-dsn", "job';--")
+    finally:
+        scheduler_notify_emit._emit_notify = original
+    assert emitted == ["job_touched:job;--"]
+
+
+def test_restock_payload_round_trips() -> None:
+    """N2 on review: the restock payload must survive the bridge and reach
+    the dedicated callback (force-refresh + wake on the scheduler side)."""
+    restocks: list[int] = []
+    delivered = threading.Event()
+
+    def _on_restock() -> None:
+        restocks.append(1)
+        delivered.set()
+
+    listener = SchedulerNotifyListener(TEST_DATABASE_URL, on_restock=_on_restock)
+    listener._POLL_INTERVAL_SECONDS = 1.0
+    listener.start()
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not restocks:
+            notify_restock_cross_process(TEST_DATABASE_URL)
+            delivered.wait(timeout=0.5)
+        assert restocks == [1]
+    finally:
+        listener.stop()

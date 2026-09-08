@@ -33,8 +33,9 @@ from __future__ import annotations
 import logging
 import signal
 import threading
+from functools import partial
 
-from server.app.bootstrap import build_agent_plane
+from server.app.bootstrap import build_agent_plane, plane_bridges
 from server.app.configuration.host_role import ROLE_SCHEDULER, host_role_from_env
 from server.app.db.connection import close_database_pools
 from server.app.events import JobEventManager
@@ -55,6 +56,7 @@ from server.app.storage import build_s3_storage_checked
 from server.app.sweeper_owned_startup import start_sweeper_owned_threads
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
+from server.app.workflow_worker.agent_gate import request_restock
 
 logger = logging.getLogger("agent_legion.scheduler")
 
@@ -91,10 +93,10 @@ def run_scheduler_process() -> int:
     job_event_manager = JobEventManager(event_bus)
     # The JobEventBuffer here is a construction dependency of the agent
     # plane (lease transitions record into it), but nothing drains it:
-    # the SSE delivery loop is an HTTP-plane facility, so events recorded
-    # by scheduler-side writes fill the bounded deque and are dropped
-    # (memory-safe by the buffer's max_events cap; the HTTP plane's own
-    # buffer carries everything its clients see).
+    # the SSE delivery loop is an HTTP-plane facility. Every recorded
+    # event is therefore ALSO relayed over the ``job_touched`` NOTIFY
+    # bridge (wired below via cross_plane_event) so the http plane's
+    # buffer — the one its SSE clients drain — records the same touch.
     job_event_buffer, _aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager.bus
     )
@@ -117,6 +119,10 @@ def run_scheduler_process() -> int:
         job_event_manager,
         job_event_buffer,
         object_store=job_artifact_objects,
+        # #521 方案 B: relay this process's recorded job events to the
+        # http plane over the NOTIFY bridge (its SSE clients never see
+        # this process's buffer). Best-effort by the emitter's contract.
+        cross_plane_event=plane_bridges.relay_job_event_emitter(job_db),
     )
 
     validate_settings(settings)
@@ -146,6 +152,14 @@ def run_scheduler_process() -> int:
         # booted otherwise never enter the scan snapshot (P1 on review).
         on_scan_reload=(
             workflow_worker_thread.reload_scan_entries
+            if workflow_worker_thread is not None
+            else None
+        ),
+        # restock payloads restore the combined role's request_restock
+        # semantics for the http plane's debounced empty-claim signal:
+        # expire the agent-stock snapshot, then wake (N2 on review).
+        on_restock=(
+            partial(request_restock, workflow_worker_thread)
             if workflow_worker_thread is not None
             else None
         ),

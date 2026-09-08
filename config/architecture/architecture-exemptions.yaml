@@ -1422,3 +1422,38 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 255
+- check: architecture.file_budget
+  path: server/app/scheduler_notify.py
+  reason: >-
+    #521 方案 B: the LISTEN listener carries the payload dispatch table
+    (job_touched / restock / scan_reload callbacks with per-callback
+    containment) plus the single-connection slice re-entry loop. Each
+    payload family grew out of review fixes (scheduler-originated SSE
+    events, request_restock parity, cross-plane scan reload); the
+    dispatch IS the bridge contract. Shrinks if the payload families
+    centralize into a table.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 148
+- check: architecture.file_budget
+  path: server/app/scheduler_notify_emit.py
+  reason: >-
+    #521 方案 B: the emitters grew one per bridge payload (plain wake,
+    scan_reload, restock, job_touched relay + the route-facing bridge
+    helper). Split from scheduler_notify.py for the same budget; each
+    emitter is the load-bearing pooled-connection commit round-trip.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 97
+- check: architecture.file_budget
+  path: server/app/scheduler_process.py
+  reason: >-
+    #521 方案 B: the scheduler-plane composition gained the review-fix
+    wiring — pause reset, job_touched cross_plane_event relay, restock
+    and scan_reload listener callbacks, sampling-thread join on
+    teardown. Each is one wiring line against the composition order it
+    guards. Shrinks if the plane assembly centralizes into a bootstrap
+    group module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 173

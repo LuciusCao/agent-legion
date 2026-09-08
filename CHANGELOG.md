@@ -69,11 +69,14 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   进程（`python -m server.app.scheduler_process`，跑 sweeper + workflow
   worker + 慢速清扫 + 指标采样），完成波的 GIL 绑定 result commit 不再
   与 claim/心跳循环共享 Python 进程。跨平面桥（`scheduler_notify.py`，
-  best-effort，丢通知由调度进程 3s poll 兜底）：可调度工作唤醒经
-  PostgreSQL `NOTIFY agent_legion_schedulable`（含 `scan_reload` payload
-  ——http 平面新建/重键/首发 workspace 时调度进程先重载 scan list 再
-  唤醒，否则新 workspace 要等调度进程重启才被扫到），空领补货信号同桥
-  （防抖留在 http 平面本地）；指标采样只在调度进程跑（分钟桶 upsert
+  best-effort，丢通知由调度进程 3s poll 兜底）四类 payload：可调度工作
+  唤醒（`schedulable`）、扫描列表变更（`scan_reload`——http 平面新建/
+  重键/首发 workspace 时调度进程先重载 scan list 再唤醒，否则新
+  workspace 要等调度进程重启才被扫到）、空领补货（`restock`——调度
+  进程过期 agent-stock 快照后唤醒，等价 combined 的 request_restock）、
+  调度面 job 事件回传（`job_touched:<job_id>`——调度进程记录的租约
+  claim/finish/过期事件折进 http 平面自己的事件 buffer，dashboard SSE
+  对调度驱动的生命周期变更持续刷新）；指标采样只在调度进程跑（分钟桶 upsert
   是每进程覆盖写，HTTP 平面停采，读路由不依赖采样循环——claim/result
   进程内计数器的取舍见 deployment.md）；`reset_all_to_paused` 只在
   combined/scheduler 角色执行（HTTP 平面重启不再抹掉运行中部署的恢复

@@ -1,9 +1,9 @@
 """Emission side of the scheduler NOTIFY bridge (#521 方案 B).
 
 Split from ``scheduler_notify.py`` for the file-size budget: the channel
-constants and the LISTEN loop stay there; this module owns the HTTP-plane
-emitters — payload construction, the pooled-connection round-trip, and
-the failure-escalation cadence. See the parent module's docstring for the
+constants and the LISTEN loop stay there; this module owns the emitters —
+payload construction, the pooled-connection round-trip, and the
+failure-escalation cadence. See the parent module's docstring for the
 bridge's semantics (payload-free safety, poll-backoff fallback).
 """
 
@@ -15,7 +15,12 @@ from typing import Any
 
 from server.app.db.connection import connect_database
 from server.app.db.dialect import ConnectSource, resolve_dsn
-from server.app.scheduler_notify import NOTIFY_CHANNEL, PAYLOAD_SCAN_RELOAD
+from server.app.scheduler_notify import (
+    NOTIFY_CHANNEL,
+    PAYLOAD_JOB_TOUCHED_PREFIX,
+    PAYLOAD_RESTOCK,
+    PAYLOAD_SCAN_RELOAD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,3 +104,35 @@ def bridge_scan_reload(request: Any) -> None:
     dsn = getattr(dsn, "job_db", None)
     if dsn is not None:
         notify_scan_reload_cross_process(dsn)
+
+
+def notify_job_touched_cross_process(dsn: ConnectSource, job_id: str) -> None:
+    """Best-effort "this job changed state" event relay (#521 方案 B).
+
+    Emitted by the scheduler plane for the job events it records (lease
+    claims, finishes, expiries): its in-process event buffer is never
+    drained by any SSE client there, so without this relay a job whose
+    lifecycle is entirely scheduler-driven finishes with the dashboard
+    not updating until page navigation. The http plane's listener folds
+    the relayed job into ITS buffer (the one its clients drain), reading
+    job facts from the DB — the payload only names the job.
+    """
+    # job_id is a server-generated UUID-ish identifier; the notify payload
+    # is a single-quoted literal, so guard the quote character (defense in
+    # depth — a hostile id can at worst mint a broken payload, which the
+    # listener drops on its own parse).
+    safe_id = job_id.replace("'", "")
+    _emit_notify(dsn, f"{PAYLOAD_JOB_TOUCHED_PREFIX}{safe_id}")
+
+
+def notify_restock_cross_process(dsn: ConnectSource) -> None:
+    """Best-effort "empty claim observed, restock now" notify (#521 N2).
+
+    The http plane's debounced empty-claim trigger fires this instead of a
+    plain wake: the scheduler plane expires its agent-stock snapshot
+    (force refresh) before waking, restoring the combined role's
+    request_restock semantics (force_refresh + wake). Without the payload
+    the snapshot stays frozen for up to agent_stock.refresh_seconds (30s
+    default), delaying burst recovery by that window.
+    """
+    _emit_notify(dsn, PAYLOAD_RESTOCK)

@@ -9,6 +9,7 @@ groups instead of 25 inline constructors.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
@@ -45,6 +46,7 @@ def build_agent_plane(
     job_event_manager: JobEventManager,
     job_event_buffer: JobEventBuffer,
     object_store: JobArtifactObjectStore | None = None,
+    cross_plane_event: Callable[[str], None] | None = None,
 ) -> AgentPlane:
     bundle_dir = settings.data_dir / "agent_bundles"
     broker = AgentExecutionBroker(
@@ -65,6 +67,11 @@ def build_agent_plane(
         job_event_manager=job_event_manager,
         job_event_buffer=job_event_buffer,
     )
+    # #521 方案 B: scheduler-plane wiring relays its recorded job events
+    # over the NOTIFY bridge (http-plane SSE clients never see the
+    # scheduler process's buffer). The attribute default is a no-op.
+    if cross_plane_event is not None:
+        executor_leases.cross_plane_event = cross_plane_event
     worker_registry = AgentWorkerRegistry(job_db)
     completion = AgentCompletionHandler(
         executor_leases,

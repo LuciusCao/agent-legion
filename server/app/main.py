@@ -3,23 +3,21 @@
 ``create_app`` wires settings → DB → seeds → services → routers → threads;
 ``create_prod_app`` is the uvicorn factory. Ordering invariants: backend.md.
 
-#521 方案 B (role split): ``role`` selects the plane this process runs —
-``combined`` (default, the pre-split single process), ``http`` (API plane
-only; wakeup notifies relay to the scheduler process via PostgreSQL
-NOTIFY), ``scheduler`` (rejected here — that role runs via
-``python -m server.app.scheduler_process``). See
-``server/app/configuration/host_role.py``.
+#521 方案 B (role split): ``role`` selects the plane — ``combined``
+(default, pre-split single process), ``http`` (API plane only), or
+``scheduler`` (rejected here; runs via ``python -m
+server.app.scheduler_process``). See configuration/host_role.py and
+bootstrap/plane_bridges.
 """
 
 import asyncio
 from contextlib import asynccontextmanager
-from functools import partial
 from pathlib import Path
 
 from fastapi import FastAPI
 
 from server.app.auth.service import build_auth_service
-from server.app.bootstrap import build_agent_plane
+from server.app.bootstrap import build_agent_plane, plane_bridges
 from server.app.configuration.host_role import ROLE_COMBINED, ROLE_HTTP, ROLE_SCHEDULER
 from server.app.db.connection import close_database_pools
 from server.app.events import JobEventManager
@@ -37,7 +35,6 @@ from server.app.mcp_server.http_app import (
 from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
 from server.app.routes.quality_deps import build_quality_loop
-from server.app.scheduler_notify_emit import notify_schedulable_work_cross_process
 from server.app.scheduler_wakeup import set_notify_backend, unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
@@ -181,22 +178,21 @@ def create_app(
     # message points at the respective plane's lock instead. Two
     # processes of the SAME plane remain the detected hazard.
     replica_probe = SingleReplicaProbe(job_db, lock_name="control-plane-http")
-    if role == ROLE_HTTP:
-        # The process-local wake registry cannot reach a scheduler in
-        # another process: relay this plane's wakeup notifies over
-        # PostgreSQL NOTIFY (best-effort; the scheduler's poll backoff is
-        # the fallback). The empty-claim restock signal rides the same
-        # bridge — its debounce stays local, the restock side lands on
-        # the scheduler plane.
-        relay = partial(notify_schedulable_work_cross_process, job_db)
-        set_notify_backend(relay)
-        agent_plane.broker.empty_claim.on_empty_queue = relay
+    scheduler_plane_probe = plane_bridges.combined_scheduler_plane_probe(role, start_worker, job_db)
+    # #521 方案 B bridges (wakeup relay / empty-claim restock /
+    # job-event listener) assemble in bootstrap/plane_bridges.
+    job_event_listener = (
+        plane_bridges.install_http_plane_bridges(job_db, agent_plane.broker, job_event_buffer)
+        if role == ROLE_HTTP
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         replica_probe.probe()
+        plane_bridges.start_role_split_runtime(scheduler_plane_probe, job_event_listener)
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
@@ -241,10 +237,11 @@ def create_app(
                 yield
         finally:
             await background_tasks.stop(app)
-            # Role split (#521 方案 B): stop relaying wakeup notifies before
-            # the pools close so a request racing shutdown cannot fire the
-            # backend into a closing pool.
+            # Role split (#521 方案 B): stop the wakeup relay and the
+            # job-event listener before the pools close (a request racing
+            # shutdown must not fire them into a closing pool).
             set_notify_backend(None)
+            plane_bridges.stop_role_split_runtime(scheduler_plane_probe, job_event_listener)
             # Release the replica-probe lock before the pools close so the
             # next starter (rolling restart) does not see a stale holder.
             replica_probe.close()

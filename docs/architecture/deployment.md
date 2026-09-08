@@ -155,9 +155,14 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
     唤醒调度进程的 poll 循环；payload 标记触发类型（`schedulable` 空排 /
     `scan_reload` 扫描列表变更——http 平面的 workspace 创建/首次发布经
     此让调度进程先重载 scan list 再唤醒，否则新 workspace 要等调度进程
-    重启才会被扫到）；best-effort，丢通知由 scheduler 3s 空转 poll 兜底
-    （桥只买延迟，不买正确性，`scan_reload` 除外——丢了要重启收敛）。
-    空领（empty claim）的补货信号同样走该桥（防抖留在 http 平面本地）。
+    重启才会被扫到 / `restock` 空领补货——调度进程过期 agent-stock 快照
+    后唤醒，等价 combined 的 request_restock）。best-effort，丢通知由
+    scheduler 3s 空转 poll 兜底（桥只买延迟，不买正确性，`scan_reload`
+    除外——丢了要重启收敛）。
+  - 调度面事件回传：调度进程记录的 job 事件（租约 claim/finish/过期）
+    经 `job_touched:<job_id>` payload 桥回 http 平面，http 平面的监听器
+    把 job 记进**自己的**事件 buffer——否则调度驱动的生命周期变更
+    （全部本地 code 节点的 workflow）完成后 dashboard 不刷新。
   - 指标采样：只在 scheduler 进程跑（`ops_metric_samples` /
     `ops_runtime_profile_samples` 的分钟桶 upsert 是每进程覆盖写，双写
     丢 (N-1)/N 数据）；HTTP 平面的 `/api/metrics/*` 读路由查表不采表。
@@ -173,10 +178,19 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
   - intake 异步消费：留在 HTTP 平面（BackgroundTasks 随 lifespan 无条件
     启动）；`claim_intake_run` 的 DB claim 语义本就多消费者安全，调度
     进程不重复消费即可。消费后经 NOTIFY 桥唤醒调度进程。
-  - 已知取舍：dashboard SSE 事件、Studio chat 会话、登录限速仍在 HTTP
-    平面进程内（#277 表格的 1/2/3 项语义不变）；调度进程的健康面是其
-    日志（`data/logs/prod-scheduler.log`，compose 侧 `restart:
-    unless-stopped` 托管存活）。
+  - 已知取舍：dashboard SSE 连接、Studio chat 会话、登录限速仍在 HTTP
+    平面进程内（#277 表格的 1/2/3 项语义不变；调度面事件经 `job_touched`
+    桥回传，见上）。其余拆分形态的已知差异：
+    - 调度进程的健康面是其日志（`data/logs/prod-scheduler.log`，compose
+      侧 `restart: unless-stopped` 托管存活）——`/api/health` 的
+      `workers` map 在 http 平面为 null（调度线程不在此进程），调度进程
+      挂掉时 API 仍健康，要看日志/compose 状态确认。
+    - Studio agent 启动自动探测（PATH 探测 + DB 合并）只在 combined 角色
+      跑（随 `start_worker` 门控）；拆分形态下用
+      `POST /api/admin/studio-agents/redetect` 手动刷新。
+    - combined + scheduler 两进程同库并存（迁移期误配）不会被探针检出
+      ——combined 持 http 锁槽、scheduler 持调度锁槽，两个调度面互不
+      相撞告警；部署拆分时确保 combined 实例先停。
 - 若未来确实需要多副本，正确路径不是简单横向扩缩容，而是把上表逐项外置
   （事件总线走 pub/sub、限速与暂停状态本就以 DB 为权威、Chat 会话需要粘性路由或
   会话外置），每项都是独立的设计工作，不在本节展开。

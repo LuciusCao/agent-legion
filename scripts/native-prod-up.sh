@@ -176,11 +176,22 @@ fi
 # 一致——SIGTERM 优雅停机由 native-prod-down.sh 发出。
 SCHEDULER_LOG="data/logs/prod-scheduler.log"
 SCHEDULER_PIDFILE="data/scheduler.pid"
+# PID 存活之外还校验命令行：pidfile 残留 + PID 被无关进程复用时，
+# 只看 kill -0 会把别人误认成调度进程（跳过启动→静默无调度 /
+# down 误杀）。caffeinate 包裹下 $! 是 caffeinate 的 pid，命令行
+# 同样不含 scheduler_process——因此校验它自身或其子进程任一命中
+# 即可（caffeinate 常驻转发，子进程才是真身；ps -o command= 列出
+# 本 pid 的命令行，pgrep -P 查子进程）。
+scheduler_pid_alive() {
+    local pid="$1"
+    [[ -n "$pid" ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    ps -p "$pid" -o command= 2>/dev/null | grep -q "scheduler_process" && return 0
+    pgrep -P "$pid" -f "scheduler_process" >/dev/null 2>&1
+}
 scheduler_running() {
     [[ -f "$SCHEDULER_PIDFILE" ]] || return 1
-    local pid
-    pid="$(cat "$SCHEDULER_PIDFILE" 2>/dev/null || true)"
-    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+    scheduler_pid_alive "$(cat "$SCHEDULER_PIDFILE" 2>/dev/null || true)"
 }
 if [[ "$BACKEND_ROLE" == "combined" ]]; then
     echo "AGENT_LEGION_HOST_ROLE=combined：调度平面并入后端单进程，跳过独立调度进程"
