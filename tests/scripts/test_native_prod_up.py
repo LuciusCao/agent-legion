@@ -380,7 +380,10 @@ class TestBackendRoleConsistencyGate:
     def test_script_gates_on_role_mismatch(self) -> None:
         """The mismatch branch must fail-fast with guidance, not skip."""
         assert '"$RUNNING_ROLE" != "$BACKEND_ROLE"' in NATIVE_PROD_UP
-        assert "双调度面" in NATIVE_PROD_UP
+        # The mismatch gate's code message names both hazard directions.
+        assert (
+            "双调度，或 http 平面占端口而新 combined 不再起独立调度器导致无调度" in NATIVE_PROD_UP
+        )
         assert NATIVE_PROD_UP.count("请先运行 ./scripts/native-prod-down.sh") >= 2
 
     def test_combined_target_refuses_running_scheduler(self) -> None:

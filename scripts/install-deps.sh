@@ -208,7 +208,7 @@ name: Local Dev Worker
 work_root: data/agent-worker
 YAML
     chmod 600 "$STATE_COPY"
-    echo "已生成 $STATE_COPY（最小 dev 配置；models/token 等走 worker 控制台配置）"
+    echo "已生成 ${STATE_COPY}（最小 dev 配置；models/token 等走 worker 控制台配置）"
 else
     echo "$STATE_COPY 已存在，跳过"
 fi
