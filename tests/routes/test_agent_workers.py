@@ -890,18 +890,32 @@ def test_code_result_with_expected_outputs_commits_completed(tmp_path: Path) -> 
     assert ref["hash"] == digest
 
 
-def test_result_commit_records_stage_timings_in_profile(tmp_path: Path) -> None:
+def test_result_commit_records_stage_timings_in_profile(tmp_path, monkeypatch) -> None:
     """#521 end-to-end: a real result commit folds per-stage timings into the
     runtime profile — the unpack/artifacts/lease_write/events/mark_done chain
     runs inside commit_agent_result, so a 204 report must leave non-zero
     stage totals behind (the route-level note_result counter doubles as the
-    control: it fires on the same request)."""
+    control: it fires on the same request).
+
+    The module-level profile singleton is shared across every app in this
+    process, and any live ops-metrics sampler thread (this app's, or one a
+    sibling test left behind on a shared xdist worker) drains it through
+    persist_profile_sample's snapshot_and_reset — the only drain site in
+    product code. Neutralize the persist during the test so the counters
+    accumulate undisturbed, read inside the TestClient context, and clear
+    the residue the earlier tests left."""
     from server.app.services.runtime_profile import profile
 
+    monkeypatch.setattr(
+        "server.app.services.runtime_profile.persist_profile_sample",
+        lambda *args, **kwargs: None,
+    )
     app = _make_app(tmp_path)
     _seed_code_request(app, expected_outputs=["out.json"])
 
     with TestClient(app) as client:
+        # Drop any residue earlier tests left in the shared singleton.
+        profile.counters.snapshot_and_reset()
         _authenticate_admin(client)
         token = _register_code_worker(client)
         claimed = _claim_code(client, token)
@@ -929,8 +943,8 @@ def test_result_commit_records_stage_timings_in_profile(tmp_path: Path) -> None:
             content=_archive_with_files({"out.json": "{}\n", "node.log": "done\n"}),
         )
         assert report.status_code == 204, report.text
+        deltas = profile.counters.snapshot_and_reset()
 
-    deltas = profile.counters.snapshot_and_reset()
     assert deltas["result_count"] >= 1
     assert deltas["result_seconds_total"] > 0.0
     # The stage chain: all seven markers fire unconditionally on this
