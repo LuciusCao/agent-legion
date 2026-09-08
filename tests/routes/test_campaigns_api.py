@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.routes.campaigns import _read_upload_size
+
 CSRF = {"x-agent-legion-request": "1"}
 
 _NODE_KEYS = [
@@ -251,6 +253,51 @@ def test_upload_rejects_non_submit_mode(client, job_db) -> None:
     assert response.status_code == 422
 
 
+def test_upload_over_limit_413_without_full_read(client, job_db, monkeypatch) -> None:
+    """审核 P1：multipart 上传限读——最多读 manifest_max_bytes+1 字节，超限 413，
+    不把整个超大请求体读进内存（`manifest.read(limit)` 的调用界就位）。"""
+    workspace_id = _create_workspace(client, job_db)
+    config = client.app.state.settings.executor_runtime.campaigns
+    limit = config.manifest_max_bytes
+    oversized = b"x" * (limit + 1)
+
+    reads: list[int | None] = []
+    original_read = _read_upload_size
+
+    def _sized_read(upload, size=None):
+        reads.append(size)
+        return original_read(upload, size)
+
+    monkeypatch.setattr("server.app.routes.campaigns._read_upload_size", _sized_read)
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/upload",
+        files={"manifest": ("big.jsonl", oversized, "application/x-ndjson")},
+        data={"mode": "submit"},
+    )
+    assert response.status_code == 413, response.text
+    # The single read is bounded by limit+1 — the whole 50MB+ body never
+    # enters memory (the service-level len check would see exactly limit+1
+    # and refuse anyway, but the route refuses without reading further).
+    assert reads == [limit + 1]
+
+
+def test_upload_at_exact_limit_reads_through(client, job_db, monkeypatch) -> None:
+    """恰好 limit 字节：limit+1 的读界拿到全文，不误 413（错误是无效清单而非超限）。"""
+    workspace_id = _create_workspace(client, job_db)
+    config = client.app.state.settings.executor_runtime.campaigns
+    payload = b"x" * config.manifest_max_bytes
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/upload",
+        files={"manifest": ("edge.jsonl", payload, "application/x-ndjson")},
+        data={"mode": "submit"},
+    )
+    # At the ceiling the bytes are accepted past the route bound; the
+    # content then fails manifest parsing (not 'x' lines) — a 400-range
+    # error, NOT 413.
+    assert response.status_code != 413
+    assert response.status_code == 400
+
+
 def test_unknown_campaign_404(client, job_db) -> None:
     workspace_id = _create_workspace(client, job_db)
     base = f"/api/workspaces/{workspace_id}/campaigns"
@@ -321,6 +368,151 @@ def test_preview_submit_counts(client, job_db) -> None:
     assert body["total_items"] == 2
     assert body["would_create"] == 0
     assert body["would_skip"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Wiring: the service must receive the ObjectStorage client, not the wrapper
+# ---------------------------------------------------------------------------
+
+
+def test_campaign_service_gets_object_storage_client(client, job_db) -> None:
+    """审核 P1：main.py 组装传入 deps.job_artifact_objects 是
+    JobArtifactObjectStore 包装器；service 需要底层 .storage（put_object 所在）。
+    组装后 service.object_storage 必须是同一 storage 本体（或 None——未配置
+    S3 的实例走 503 分支）。"""
+    from server.app.routes.campaign_wiring import build_campaign_service
+    from server.app.routes.deps import RouterDeps
+    from server.app.services.job_artifact_objects import JobArtifactObjectStore
+    from tests.fakes.storage import FakeObjectStorage
+
+    app = client.app
+    wired = app.state.job_artifact_objects
+    # The app's wrapper holds whatever build_s3_storage_checked produced.
+    assert isinstance(wired, JobArtifactObjectStore)
+    underlying = wired.storage
+    assert underlying is None or isinstance(underlying, FakeObjectStorage)
+
+    def _build(wrapper_storage):
+        deps = RouterDeps(
+            job_db=app.state.job_db,
+            settings=app.state.settings,
+            agent_manager=app.state.agent_manager,
+            agent_catalog=None,
+            workspace_execution_configuration=None,
+            workspace_configuration=None,
+            job_packages=None,
+            job_artifact_objects=JobArtifactObjectStore(job_db, wrapper_storage),
+        )
+        return build_campaign_service(deps)
+
+    # The exact seam the manifest spill path calls: put_object lives on the
+    # underlying ObjectStorage, never on the wrapper.
+    fake = FakeObjectStorage()
+    service = _build(fake)
+    assert service.object_storage is fake
+    assert hasattr(service.object_storage, "put_object")
+    # Unconfigured instance: None stays None (the 503 branch), never the
+    # truthy wrapper (which would AttributeError on put_object).
+    assert _build(None).object_storage is None
+
+
+def test_app_state_wiring_passes_wrapper_but_service_unwraps(client) -> None:
+    """main.py 的 RouterDeps 仍带包装器（agent worker 面也用它）；campaign
+    组装处的解包是唯一的修复面——service 拿到的绝不能是包装器。"""
+    from server.app.services.job_artifact_objects import JobArtifactObjectStore
+
+    app = client.app
+    wrapper = app.state.job_artifact_objects
+    assert isinstance(wrapper, JobArtifactObjectStore)
+    # The wrapper itself has no put_object — the bug shape the wiring must
+    # not pass through.
+    assert not hasattr(wrapper, "put_object")
+
+
+# ---------------------------------------------------------------------------
+# Preview: upgrade mode
+# ---------------------------------------------------------------------------
+
+
+def test_preview_upgrade_counts_eligible(client, job_db) -> None:
+    """审核 P2：upgrade preview 用升级写路径的资格判定（非 current 即可升级），
+    不再走 rerun preview 的 node_key 判定（那里对 upgrade 选集恒 0）。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 3)
+    # _seed_failed_jobs 建的 job 不带 revision 快照（stale）——全部 eligible。
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={"mode": "upgrade", "rerun": {"job_ids": ids}},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["result"]
+    assert body["mode"] == "upgrade"
+    assert body["total_count"] == 3
+    assert body["eligible_count"] == 3
+    assert body["eligible_count"] > 0  # the P2 regression pin
+    # preview writes nothing
+    assert client.get(f"/api/workspaces/{workspace_id}/campaigns").json()["campaigns"] == []
+
+
+def test_preview_upgrade_marks_current_jobs_ineligible(client, job_db) -> None:
+    """与 upgrade 写路径同判定：pin+snapshot 都等于 active revision 的 job 跳过。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 2)
+    active = job_db.get_active_workflow_revision(workspace_id, workspace_id)
+    assert active is not None
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set workflow_revision_id=%s, workflow_definition_snapshot_json=%s"
+            " where id=%s",
+            (str(active["id"]), str(active["definition_json"]), ids[0]),
+        )
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={"mode": "upgrade", "rerun": {"job_ids": ids}},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["result"]
+    assert body["total_count"] == 2
+    assert body["eligible_count"] == 1
+
+
+def test_preview_upgrade_matches_batch_upgrade_write_path(client, job_db) -> None:
+    """preview 与真实路径共享判定：upgrade campaign preview 的 eligible 数
+    与 batch-upgrade-workflow 端点实际升级的 succeeded+failed 数一致
+    （busy 类 skip 不影响本种子——无活跃 lease）。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 3)
+    preview = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={"mode": "upgrade", "rerun": {"job_ids": ids}},
+    )
+    assert preview.status_code == 200, preview.text
+    eligible = preview.json()["result"]["eligible_count"]
+
+    results = client.post(
+        f"/api/workspaces/{workspace_id}/jobs/batch-upgrade-workflow",
+        json={"job_ids": ids},
+    )
+    assert results.status_code == 200, results.text
+    statuses = [r["status"] for r in results.json()["results"]]
+    # The write path treats every eligible job as a real attempt (succeeded
+    # or failed), so attempts == preview's eligible_count.
+    assert len(statuses) == eligible
+    assert all(status in ("succeeded", "failed", "skipped") for status in statuses)
+
+
+def test_preview_upgrade_filter_form(client, job_db) -> None:
+    """filter 形态的 upgrade 选集同样走升级判定（不再恒 0）。"""
+    workspace_id = _create_workspace(client, job_db)
+    _seed_failed_jobs(client, job_db, workspace_id, 2)
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={"mode": "upgrade", "rerun": {"filter": {"status": "failed"}}},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["result"]
+    assert body["total_count"] == 2
+    assert body["eligible_count"] == 2
 
 
 # ---------------------------------------------------------------------------

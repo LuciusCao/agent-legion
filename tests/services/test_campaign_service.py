@@ -180,6 +180,86 @@ class TestCreateGuards:
             workspace_id, "rerun", job_ids=ids[:1], node_key="intake_knowledge_points"
         )
 
+    def test_concurrent_create_cannot_exceed_cap(self, campaign_service, job_db, settings):
+        """审核 P2：并发创建竞态。两个 create 同时发起（最后一席之争）：
+        guarded 事务在 workspace advisory lock 上串行——后进者在 count 处
+        重新数到先进者已提交的行并拒绝。旧实现（事务外 count → 各自 INSERT）
+        两个都读到 cap-1，双双落行击穿上限。"""
+        import threading
+
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-race-ws")
+        ids = _seed_failed_jobs(job_db, workspace_id, 1)
+        cap = settings.executor_runtime.campaigns.max_active_per_workspace
+        # cap-1 个先行占位，让并发窗口决定最后一个名额。
+        for _ in range(cap - 1):
+            campaign_service.create_campaign(
+                workspace_id, "rerun", job_ids=ids[:1], node_key="intake_knowledge_points"
+            )
+        assert job_db.count_active_campaigns(workspace_id) == cap - 1
+
+        start = threading.Barrier(2, timeout=10)
+        results: list = []
+        errors: list = []
+
+        def _run() -> None:
+            try:
+                start.wait(timeout=10)
+                results.append(
+                    campaign_service.create_campaign(
+                        workspace_id,
+                        "rerun",
+                        job_ids=ids[:1],
+                        node_key="intake_knowledge_points",
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - collected for the assertion below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_run) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+        assert not any(thread.is_alive() for thread in threads), "concurrent creates hung"
+        # 精确上限：两个并发 create 只落一个行，另一个拿到 409 形 ConflictError。
+        assert job_db.count_active_campaigns(workspace_id) == cap, (
+            "concurrent creates broke the cap:"
+            f" active={job_db.count_active_campaigns(workspace_id)}"
+            f" results={len(results)} errors={[str(e) for e in errors]}"
+        )
+        assert len(results) == 1
+        assert len(errors) == 1 and isinstance(errors[0], ConflictError)
+
+    def test_pause_refill_resume_blocked_at_cap(
+        self, campaign_service, job_db, settings, monkeypatch
+    ):
+        """审核 P2：pause 后名额被新 create 补满，resume 必须被拒——
+        paused 行不在 active 集里，resume 的 count 必须数到补满后的集合。"""
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-resume-cap-ws")
+        ids = _seed_failed_jobs(job_db, workspace_id, 2)
+        cap = settings.executor_runtime.campaigns.max_active_per_workspace
+        # 占满上限后暂停一个。
+        created = [
+            campaign_service.create_campaign(
+                workspace_id, "rerun", job_ids=ids[:1], node_key="intake_knowledge_points"
+            )
+            for _ in range(cap)
+        ]
+        paused = created[0]
+        assert campaign_service.pause_campaign(workspace_id, paused["id"])["status"] == "paused"
+        # 暂停腾出的名额被补满（创建恢复原上限数的 active 行）。
+        campaign_service.create_campaign(
+            workspace_id, "rerun", job_ids=ids[1:], node_key="intake_knowledge_points"
+        )
+        assert job_db.count_active_campaigns(workspace_id) == cap
+        # 补满后 resume：被拒（409 形 ConflictError）。
+        with pytest.raises(ConflictError, match="active campaigns"):
+            campaign_service.resume_campaign(workspace_id, paused["id"])
+        # 腾出名额后 resume 成功。
+        listed = campaign_service.list_campaigns(workspace_id)
+        campaign_service.cancel_campaign(workspace_id, listed[0]["id"])
+        assert campaign_service.resume_campaign(workspace_id, paused["id"])["status"] == "running"
+
 
 # ---------------------------------------------------------------------------
 # Create: rerun target
@@ -438,6 +518,69 @@ class TestPreview:
         assert via_campaign["mode"] == "rerun"
         assert via_campaign["total_count"] == direct["total_count"] == 7
         assert via_campaign["eligible_count"] == direct["eligible_count"]
+
+    def test_upgrade_preview_counts_stale_jobs(self, campaign_service, job_db):
+        """审核 P2：upgrade preview 走升级资格判定——不带快照的 stale job
+        全部 eligible（此前走 rerun preview 的 node_key 判定恒 0）。"""
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-upgrade-preview-ws")
+        ids = _seed_failed_jobs(job_db, workspace_id, 4)
+        result = campaign_service.preview_campaign(workspace_id, "upgrade", job_ids=ids)
+        assert result["mode"] == "upgrade"
+        assert result["total_count"] == 4
+        assert result["eligible_count"] == 4
+        assert result["eligible_count"] > 0  # the P2 regression pin
+
+    def test_upgrade_preview_current_jobs_ineligible(self, campaign_service, job_db):
+        """与 upgrade 写路径同判定：revision pin + definition snapshot 都等于
+        active revision 才算 current（只 pin 不算——stale snapshot 要 heal）。"""
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-upgrade-current-ws")
+        ids = _seed_failed_jobs(job_db, workspace_id, 3)
+        active = job_db.get_active_workflow_revision(workspace_id, workspace_id)
+        assert active is not None
+        # current: pin AND snapshot both match.
+        with job_db.connect() as conn:
+            conn.execute(
+                "update jobs set workflow_revision_id=%s, workflow_definition_snapshot_json=%s"
+                " where id=%s",
+                (str(active["id"]), str(active["definition_json"]), ids[0]),
+            )
+        # half-current: pin matches, snapshot stale — must stay eligible
+        # (the write path re-pins to heal instead of skipping forever).
+        with job_db.connect() as conn:
+            conn.execute(
+                "update jobs set workflow_revision_id=%s where id=%s",
+                (str(active["id"]), ids[1]),
+            )
+        result = campaign_service.preview_campaign(workspace_id, "upgrade", job_ids=ids)
+        assert result["total_count"] == 3
+        assert result["eligible_count"] == 2
+
+    def test_upgrade_preview_matches_upgrade_write_path(self, campaign_service, job_db):
+        """preview 与真实路径共享判定：eligible 数与 JobWorkflowUpgradeService
+        逐 job 实际尝试数一致（succeeded + failed；busy 是逐批次的 skip）。"""
+        from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
+
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-upgrade-parity-ws")
+        ids = _seed_failed_jobs(job_db, workspace_id, 5)
+        preview = campaign_service.preview_campaign(workspace_id, "upgrade", job_ids=ids)
+        upgrade_service = JobWorkflowUpgradeService(
+            job_db, campaign_service.rerun_service.lease_repo
+        )
+        results = [upgrade_service.upgrade(workspace_id, job_id) for job_id in ids]
+        attempted = [r for r in results if r["status"] in ("succeeded", "failed")]
+        assert len(attempted) == preview["eligible_count"] == 5
+
+    def test_upgrade_preview_no_active_revision(self, campaign_service, job_db):
+        """无 active revision 的 workspace：upgrade 会失败每个 job，故 eligible 0。"""
+        workspace = job_db.create_workspace(
+            "campaign-no-revision-ws", default_workflow_key="campaign-no-revision-ws"
+        )
+        workspace_id = str(workspace["id"])
+        _insert_job(job_db, workspace_id, "question", "Q-no-revision")
+        result = campaign_service.preview_campaign(workspace_id, "upgrade", job_ids=["j-1"])
+        assert result["mode"] == "upgrade"
+        assert result["total_count"] == 1
+        assert result["eligible_count"] == 0
 
     def test_rerun_preview_estimated_batches(self, campaign_service, job_db, settings):
         workspace_id = _seed_workspace_with_revision(job_db, "campaign-est-ws")

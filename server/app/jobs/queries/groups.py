@@ -14,7 +14,7 @@ from server.app.jobs.execution_control import JobExecutionControlMixin
 from server.app.jobs.queries.approval_decisions import ApprovalDecisionQueriesMixin
 from server.app.jobs.queries.auth import AuthQueriesMixin
 from server.app.jobs.queries.batch import RunQueriesMixin
-from server.app.jobs.queries.campaigns import CampaignQueriesMixin  # #532
+from server.app.jobs.queries.campaign_guards import CampaignGuardQueriesMixin  # #532
 from server.app.jobs.queries.execution_retention import ExecutionRetentionQueriesMixin
 from server.app.jobs.queries.external_connections import ExternalConnectionKeyQueriesMixin
 from server.app.jobs.queries.failed_node_runs import FailedNodeRunQueriesMixin
@@ -54,8 +54,7 @@ class IdentityQueriesMixin(
 class WorkspaceDomainQueriesMixin(
     WorkflowDraftQueriesMixin,
     WorkspacePackageQueriesMixin,
-    WorkspaceQueriesMixin,
-    # Subclasses ConnectionQueriesMixin, so it need not be listed separately.
+    WorkspaceQueriesMixin,  # subclasses ConnectionQueriesMixin itself
     ExternalConnectionKeyQueriesMixin,
 ):
     """Workspace lifecycle, packages, agent routes, drafts, and connections."""
@@ -77,11 +76,13 @@ class RunDomainQueriesMixin(
     ApprovalDecisionQueriesMixin,
     RuntimeProfileQueriesMixin,
     ExecutionRetentionQueriesMixin,
-    CampaignQueriesMixin,
+    # Campaign rows + the quota-guarded writes (PR #541 P2), one composed
+    # mixin (#532).
+    CampaignGuardQueriesMixin,
     AtomicJobMutationsMixin,
     JobExecutionControlMixin,
 ):
-    """Runs, jobs, nodes, scans, reruns, campaigns, quality replays, approvals, retention, and execution control."""
+    """Runs, jobs, nodes, scans, reruns, campaigns (rows + quota guards), replays, approvals, retention, control."""
 
 
 class StudioChatDomainQueriesMixin(StudioChatQueriesMixin, StudioPublishRequestQueriesMixin):

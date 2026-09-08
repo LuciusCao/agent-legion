@@ -38,6 +38,11 @@ from server.app.services.job_errors import JobServiceError
 _LIST_LIMIT_MAX = 200
 
 
+async def _read_upload_size(manifest: UploadFile, size: int) -> bytes:
+    """UploadFile.read seam — tests pin the size argument (the OOM bound)."""
+    return await manifest.read(size)
+
+
 def _raise_campaign_http_error(error: JobServiceError) -> Never:
     if isinstance(error, CampaignStorageUnavailableError):
         raise HTTPException(status_code=503, detail=str(error)) from error
@@ -109,9 +114,9 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
     ) -> CampaignCreateResponse:
         """Multipart variant: manifest file (.jsonl / .csv) + form knobs.
 
-        The submit-mode channel for manifests beyond the inline ceiling;
-        the file is read fully in-request (the 50MB ceiling bounds memory)
-        and normalized server-side before any row exists.
+        The submit channel beyond the inline ceiling; the read is bounded
+        by the 50MB cap (ceiling+1 bytes max, oversized → 413) and
+        normalized server-side before any row exists.
         """
         if mode != "submit":
             raise HTTPException(
@@ -123,7 +128,16 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
             raise HTTPException(
                 status_code=422, detail="A manifest file is required (field 'manifest')"
             )
-        data = await manifest.read()
+        # Bounded read (PR #541 P1): at most manifest_max_bytes+1 enter memory
+        # (+1 distinguishes "over the ceiling" from "exactly at it"); an
+        # oversized upload is refused 413 without reading the rest.
+        limit = service.manifest_max_bytes + 1
+        data = await _read_upload_size(manifest, limit)
+        if len(data) > service.manifest_max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Manifest exceeds the {service.manifest_max_bytes} byte limit",
+            )
         try:
             body = service.create_campaign(
                 workspace_id,

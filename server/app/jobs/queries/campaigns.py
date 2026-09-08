@@ -71,6 +71,12 @@ def _parse_object(value: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+# Advisory-lock key namespace for the quota's per-workspace critical
+# section lives with the guarded paths it serializes:
+# queries/campaign_guards.py (#532 PR-A, PR #541 P2 — count+insert and the
+# count+paused→running resume share one transaction under the lock).
+
+
 class CampaignQueriesMixin(ConnectionQueriesMixin):
     def generate_campaign_id(self) -> str:
         """Allocate a campaign id before the row exists.

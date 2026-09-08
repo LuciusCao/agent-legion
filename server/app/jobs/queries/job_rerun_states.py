@@ -21,7 +21,9 @@ class JobRerunStateQueriesMixin(ConnectionQueriesMixin):
         """Narrow job rows keyed by id for batch rerun eligibility checks.
 
         Only the columns the checks read (status/workspace_id/workflow_key
-        plus the definition snapshot); a full ``select *`` pays per-column row
+        plus the revision pin and definition snapshot — the upgrade
+        preview's already-current judgement reads both, mirroring the
+        upgrade write path); a full ``select *`` pays per-column row
         materialization for thousands of jobs. Deliberately NOT filtered by
         workspace: the batch write path must distinguish not-found from
         foreign-workspace ids, so the workspace check happens in Python.
@@ -31,7 +33,8 @@ class JobRerunStateQueriesMixin(ConnectionQueriesMixin):
         del workspace_id  # workspace scoping is the caller's semantic check
         params = [str(job_id) for job_id in job_ids]
         sql = (
-            "select id, workspace_id, status, workflow_definition_snapshot_json"
+            "select id, workspace_id, status, workflow_revision_id,"
+            " workflow_definition_snapshot_json"
             f" from jobs where id in ({','.join('%s' for _ in job_ids)})"
         )
         with self._connect_read() as conn:

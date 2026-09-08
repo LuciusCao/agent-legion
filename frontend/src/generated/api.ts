@@ -1702,9 +1702,9 @@ export interface paths {
      * Create Campaign From Manifest
      * @description Multipart variant: manifest file (.jsonl / .csv) + form knobs.
      *
-     *     The submit-mode channel for manifests beyond the inline ceiling;
-     *     the file is read fully in-request (the 50MB ceiling bounds memory)
-     *     and normalized server-side before any row exists.
+     *     The submit channel beyond the inline ceiling; the read is bounded
+     *     by the 50MB cap (ceiling+1 bytes max, oversized → 413) and
+     *     normalized server-side before any row exists.
      */
     post: operations['create_campaign_from_manifest_api_workspaces__workspace_id__campaigns_upload_post']
     delete?: never

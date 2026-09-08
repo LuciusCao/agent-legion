@@ -36,6 +36,7 @@ from server.app.services.job_errors import (
     NotFoundError,
 )
 from server.app.services.job_rerun.preview import batch_rerun_preview
+from server.app.services.job_rerun.upgrade_preview import batch_upgrade_preview
 from server.app.services.job_selection_resolver import EmptyJobSelectionError
 from server.app.services.run_item_resolution import resolve_run_items
 from server.app.settings import Settings
@@ -82,6 +83,11 @@ class CampaignService:
     def _campaigns_config(self) -> Any:
         return self.settings.executor_runtime.campaigns
 
+    @property
+    def manifest_max_bytes(self) -> int:
+        """Multipart upload ceiling; routes bound their reads by it (413)."""
+        return int(self._campaigns_config.manifest_max_bytes)
+
     # ------------------------------------------------------------------
     # Create
     # ------------------------------------------------------------------
@@ -107,10 +113,12 @@ class CampaignService:
     ) -> dict[str, Any]:
         """Normalize + validate + persist a pending campaign row.
 
-        Validation order (fail-fast before the first write): mode → target
-        shape → knobs → active-campaign cap → target resolution (rerun
-        resolves its selection; submit resolves items + dedup probe) →
-        storage decision (inline vs object store) → the row write itself.
+        Fail-fast order: mode → target shape → knobs → target resolution
+        (rerun resolves its selection; submit resolves items + dedup probe)
+        → storage decision (inline vs object store) → the quota-checked row
+        write (create_campaign_guarded: count + row write share one locked
+        transaction, so concurrent creates cannot each land a row below a
+        stale count — PR #541 P2).
         """
         if mode not in CAMPAIGN_MODES:
             raise InvalidOperationError(
@@ -136,11 +144,6 @@ class CampaignService:
             raise InvalidOperationError(
                 f"submit campaign batch_size {effective_batch_size} exceeds"
                 f" workflows.max_items_per_run={max_items_per_run} (#358 guard)"
-            )
-        if self.job_db.count_active_campaigns(workspace_id) >= config.max_active_per_workspace:
-            raise ConflictError(
-                f"Workspace already has {config.max_active_per_workspace} active"
-                " campaigns (pending/running); cancel or complete one first"
             )
 
         if mode == "submit":
@@ -168,7 +171,7 @@ class CampaignService:
             # keyset "created_at|id" cursor plus a processed count.
             progress = {"cursor": None, "processed": 0} if job_filter is not None else {"offset": 0}
 
-        return self.job_db.create_campaign(
+        return self.job_db.create_campaign_guarded(
             workspace_id,
             mode,
             target_spec,
@@ -177,6 +180,7 @@ class CampaignService:
             created_by=created_by,
             campaign_id=campaign_id,
             progress=progress,
+            max_active=config.max_active_per_workspace,
         )
 
     def _prepare_submit_target(
@@ -199,37 +203,9 @@ class CampaignService:
         carries manifest_storage_key + manifest_item_count only.
         """
         config = self._campaigns_config
-        if items is not None and manifest_bytes is not None:
-            raise InvalidOperationError("Provide either inline items or a manifest file, not both")
-        if items is not None:
-            if not items:
-                raise InvalidOperationError("At least one item is required")
-            normalized: list[dict[str, Any]] = []
-            for index, raw in enumerate(items, start=1):
-                try:
-                    normalized.append(
-                        # The API contract (RunItem) already enforces the
-                        # shape; normalize for storage canonicalization.
-                        _normalize_api_item(raw, source=f"items[{index}]")
-                    )
-                except ManifestError as exc:
-                    raise InvalidOperationError(str(exc)) from exc
-        elif manifest_bytes is not None:
-            if len(manifest_bytes) > config.manifest_max_bytes:
-                raise CampaignManifestTooLargeError(
-                    f"Manifest is {len(manifest_bytes)} bytes, exceeding the"
-                    f" {config.manifest_max_bytes} byte limit"
-                )
-            filename = manifest_filename or "manifest.jsonl"
-            try:
-                text = manifest_bytes.decode("utf-8-sig")
-                normalized = load_items_text(text, filename=filename)
-            except UnicodeDecodeError as exc:
-                raise InvalidOperationError(f"{filename}: manifest must be UTF-8 text") from exc
-            except ManifestError as exc:
-                raise InvalidOperationError(str(exc)) from exc
-        else:
-            raise InvalidOperationError("submit campaign requires items or a manifest file")
+        normalized = self._normalize_submit_items(
+            items, manifest_bytes, manifest_filename, context="campaign"
+        )
 
         # Fail-fast item validation against the workspace (same resolver the
         # write path uses); a campaign row never exists with unresolvable
@@ -271,6 +247,47 @@ class CampaignService:
             "manifest_item_count": len(normalized),
         }
 
+    def _normalize_submit_items(
+        self,
+        items: list[dict[str, Any]] | None,
+        manifest_bytes: bytes | None,
+        manifest_filename: str | None,
+        *,
+        context: str,
+    ) -> list[dict[str, Any]]:
+        """Item normalization shared by the persist and preview paths:
+        exactly one channel, size-ceilinged manifests, canonical shapes."""
+        config = self._campaigns_config
+        if items is not None and manifest_bytes is not None:
+            raise InvalidOperationError("Provide either inline items or a manifest file, not both")
+        if items is not None:
+            if not items:
+                raise InvalidOperationError("At least one item is required")
+            normalized: list[dict[str, Any]] = []
+            for index, raw in enumerate(items, start=1):
+                try:
+                    # The API contract (RunItem) already enforces the shape;
+                    # normalize for storage canonicalization.
+                    normalized.append(_normalize_api_item(raw, source=f"items[{index}]"))
+                except ManifestError as exc:
+                    raise InvalidOperationError(str(exc)) from exc
+            return normalized
+        if manifest_bytes is not None:
+            if len(manifest_bytes) > config.manifest_max_bytes:
+                raise CampaignManifestTooLargeError(
+                    f"Manifest is {len(manifest_bytes)} bytes, exceeding the"
+                    f" {config.manifest_max_bytes} byte limit"
+                )
+            filename = manifest_filename or "manifest.jsonl"
+            try:
+                text = manifest_bytes.decode("utf-8-sig")
+                return load_items_text(text, filename=filename)
+            except UnicodeDecodeError as exc:
+                raise InvalidOperationError(f"{filename}: manifest must be UTF-8 text") from exc
+            except ManifestError as exc:
+                raise InvalidOperationError(str(exc)) from exc
+        raise InvalidOperationError(f"submit {context} requires items or a manifest file")
+
     def _prepare_rerun_target(
         self,
         workspace_id: str,
@@ -285,10 +302,8 @@ class CampaignService:
 
         Mirrors JobBatchRerunRequest's validation (node_key and
         from_failed_node are mutually exclusive, exactly one required) and
-        JobSelectionMixin's (exactly one of job_ids or filter). The
-        selection is resolved through the same resolver the batch endpoints
-        use, so an empty/absent selection fails here instead of at the
-        feeder.
+        the batch endpoints' selection resolution, so an empty/absent
+        selection fails here instead of at the feeder.
         """
         if (job_ids is None) == (job_filter is None):
             raise InvalidOperationError("Provide exactly one of job_ids or filter")
@@ -346,12 +361,14 @@ class CampaignService:
     ) -> dict[str, Any]:
         """Dry-run the creation judgements; no row, no write.
 
-        rerun/upgrade: the SAME batch_rerun_preview the existing preview
-        endpoint runs (module docstring: "pure bulk-data equivalents of the
-        write path's checks") — same function, same numbers, zero drift by
-        construction. submit: resolve_run_items + the dedup probe over the
-        whole manifest, the same probes the feeder's create_run batch path
-        applies per batch.
+        rerun: the SAME batch_rerun_preview the existing preview endpoint
+        runs — same function, same numbers, zero drift by construction.
+        upgrade: batch_upgrade_preview, the bulk-data equivalent of the
+        upgrade write path's eligibility window (not-current against the
+        active revision — PR #541 P2: the node_key-shaped rerun preview
+        answers 0 for every job of an upgrade selection). submit:
+        resolve_run_items + the dedup probe over the whole manifest, the
+        same probes the feeder's create_run batch path applies per batch.
         """
         config = self._campaigns_config
         effective_batch_size = config.default_batch_size if batch_size is None else batch_size
@@ -378,14 +395,22 @@ class CampaignService:
             )
         if self.rerun_service is None:
             raise InvalidOperationError("Rerun service is not wired on this instance")
-        counts = batch_rerun_preview(
-            self.rerun_service,
-            workspace_id,
-            job_ids,
-            node_key,
-            from_failed_node=from_failed_node,
-            job_filter=job_filter,
-        )
+        if mode == "upgrade":
+            counts = batch_upgrade_preview(
+                self.rerun_service,
+                workspace_id,
+                job_ids,
+                job_filter=job_filter,
+            )
+        else:
+            counts = batch_rerun_preview(
+                self.rerun_service,
+                workspace_id,
+                job_ids,
+                node_key,
+                from_failed_node=from_failed_node,
+                job_filter=job_filter,
+            )
         return {
             "mode": mode,
             "total_count": counts["total_count"],
@@ -402,40 +427,13 @@ class CampaignService:
         manifest_filename: str | None,
         manifest_bytes: bytes | None,
     ) -> dict[str, int]:
-        if items is not None and manifest_bytes is not None:
-            raise InvalidOperationError("Provide either inline items or a manifest file, not both")
-        config = self._campaigns_config
-        if items is not None:
-            if not items:
-                raise InvalidOperationError("At least one item is required")
-            normalized = []
-            for index, raw in enumerate(items, start=1):
-                try:
-                    normalized.append(_normalize_api_item(raw, source=f"items[{index}]"))
-                except ManifestError as exc:
-                    raise InvalidOperationError(str(exc)) from exc
-        elif manifest_bytes is not None:
-            if len(manifest_bytes) > config.manifest_max_bytes:
-                raise CampaignManifestTooLargeError(
-                    f"Manifest is {len(manifest_bytes)} bytes, exceeding the"
-                    f" {config.manifest_max_bytes} byte limit"
-                )
-            try:
-                text = manifest_bytes.decode("utf-8-sig")
-                normalized = load_items_text(text, filename=manifest_filename or "manifest.jsonl")
-            except UnicodeDecodeError as exc:
-                raise InvalidOperationError("Manifest must be UTF-8 text") from exc
-            except ManifestError as exc:
-                raise InvalidOperationError(str(exc)) from exc
-        else:
-            raise InvalidOperationError("submit preview requires items or a manifest file")
+        normalized = self._normalize_submit_items(
+            items, manifest_bytes, manifest_filename, context="preview"
+        )
         candidates = resolve_run_items(self.job_db, workspace_id, normalized)
         existing = self.job_db.filter_existing_dedup_keys(
             workspace_id,
-            (
-                (str(candidate["entity_type"]), str(candidate["entity_id"]))
-                for candidate in candidates
-            ),
+            ((str(c["entity_type"]), str(c["entity_id"])) for c in candidates),
         )
         seen: set[tuple[str, str]] = set()
         would_create = 0
@@ -490,8 +488,20 @@ class CampaignService:
             )
         if row["status"] != "paused":
             raise ConflictError(f"Campaign is {row['status']}; resume applies to a paused campaign")
-        updated = self.job_db.transition_campaign_status(campaign_id, ("paused",), "running")
+        # Guarded resume (PR #541 P2): a paused row is outside the active
+        # count, so freed slots may have been refilled; the count check and
+        # the paused→running transition share one transaction under the
+        # same workspace lock create takes.
+        updated = self.job_db.resume_campaign_guarded(
+            workspace_id,
+            campaign_id,
+            max_active=self._campaigns_config.max_active_per_workspace,
+        )
         if updated is None:
+            raise NotFoundError("Campaign not found")
+        if updated["status"] != "running":
+            # The row moved between the read above and the guarded
+            # transition (a cancel raced us to a terminal status).
             raise ConflictError("Campaign state changed concurrently; retry")
         return updated
 
