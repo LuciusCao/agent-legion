@@ -341,3 +341,50 @@ def test_binds_specific_interface_behavior() -> None:
         "192.0.2.1 specific",
         "fe80::1 specific",
     ]
+
+
+def _extract_function(source: str, name: str) -> str:
+    """Extract one bash function body for direct execution (established
+    style: health_host tests above do the same)."""
+    match = re.search(rf"^(?:    )?{name}\(\) \{{.*?^\}}$", source, re.MULTILINE | re.DOTALL)
+    assert match is not None, f"function {name} not found"
+    return match.group(0)
+
+
+class TestBackendRoleConsistencyGate:
+    """codex P1 on #536: prod-up must refuse to layer a new deployment
+    shape on top of a running backend whose role disagrees — a stale
+    combined backend plus a fresh dedicated scheduler schedules twice."""
+
+    @staticmethod
+    def _role_sed_program() -> str:
+        match = re.search(r"backend_running_role\(\) \{(.*?)\n\}", NATIVE_PROD_UP, re.DOTALL)
+        assert match is not None, "backend_running_role not found in script"
+        return re.search(r"sed -n '([^']+)'", match.group(1)).group(1)
+
+    def test_running_role_extraction_parses_health_payload(self) -> None:
+        for body, expected in (
+            ('{"ok":true,"workers":null,"role":"combined","storage":null}', "combined"),
+            ('{"ok":true,"role":"http","storage":{"configured":false}}', "http"),
+            ('{"ok":true,"storage":null}', ""),
+        ):
+            extracted = subprocess.run(
+                ["sed", "-n", self._role_sed_program()],
+                input=body,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            assert extracted == expected
+
+    def test_script_gates_on_role_mismatch(self) -> None:
+        """The mismatch branch must fail-fast with guidance, not skip."""
+        assert '"$RUNNING_ROLE" != "$BACKEND_ROLE"' in NATIVE_PROD_UP
+        assert "双调度面" in NATIVE_PROD_UP
+        assert NATIVE_PROD_UP.count("请先运行 ./scripts/native-prod-down.sh") >= 2
+
+    def test_combined_target_refuses_running_scheduler(self) -> None:
+        """Switching back to combined must also refuse a still-running
+        dedicated scheduler (the reverse double-scheduling hazard)."""
+        gate = NATIVE_PROD_UP.split("反向切换同样 fail-fast")[1][:500]
+        assert "exit 1" in gate

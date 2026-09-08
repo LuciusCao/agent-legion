@@ -23,3 +23,14 @@ def test_health_reports_unconfigured_storage(anon_client, monkeypatch) -> None:
     response = anon_client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["storage"] == {"configured": False, "reachable": False}
+
+
+def test_health_reports_host_role(client) -> None:
+    """#521 方案 B: the process's host role is surfaced so the native
+    launcher can verify deployment-shape consistency before starting a
+    dedicated scheduler (stale combined backend + new scheduler would
+    double-schedule)."""
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    # The test client's app is built without a role → combined default.
+    assert response.json()["role"] == "combined"

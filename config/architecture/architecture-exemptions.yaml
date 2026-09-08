@@ -1451,9 +1451,19 @@ exemptions:
     #521 方案 B: the scheduler-plane composition gained the review-fix
     wiring — pause reset, job_touched cross_plane_event relay, restock
     and scan_reload listener callbacks, sampling-thread join on
-    teardown. Each is one wiring line against the composition order it
-    guards. Shrinks if the plane assembly centralizes into a bootstrap
-    group module.
+    teardown, and the codex-P1 fatal-startup gate (failed workflow
+    worker exits 3 so the supervisor retries). Each is one wiring line
+    against the composition order it guards. Shrinks if the plane
+    assembly centralizes into a bootstrap group module.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 173
+- check: architecture.file_budget
+  path: server/app/routes/common.py
+  reason: >-
+    #521 方案 B: /api/health gains the host-role field (+2 effective
+    lines) — the native launcher's deployment-shape consistency probe
+    reads it before starting a dedicated scheduler (codex P1 fix).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 24

@@ -181,6 +181,13 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
   - intake 异步消费：留在 HTTP 平面（BackgroundTasks 随 lifespan 无条件
     启动）；`claim_intake_run` 的 DB claim 语义本就多消费者安全，调度
     进程不重复消费即可。消费后经 NOTIFY 桥唤醒调度进程。
+  - 升级与失败语义：`/api/health` 暴露本进程 `role`；`native-prod-up.sh`
+    在已监听后端的角色与本次目标不一致（典型：升级时旧 combined 还在
+    跑而新默认 http）或目标 combined 而独立 scheduler 仍在时 **fail-fast
+    指引先 prod-down**——绝不静默叠出双调度面。调度进程的关键线程启动
+    失败（workflow worker）会**清理并退出非零**（compose restart 托管
+    重试、native 日志暴露），不再以「就绪但不调度」的状态常驻；sweeper
+    启动失败仅降级（租约清理回落 TTL 过期）。
   - 已知取舍：dashboard SSE 连接、Studio chat 会话、登录限速仍在 HTTP
     平面进程内（#277 表格的 1/2/3 项语义不变；调度面事件经 `job_touched`
     桥回传，见上）。其余拆分形态的已知差异：

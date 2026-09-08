@@ -262,6 +262,9 @@ def create_app(
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
     add_http_middleware(app, settings)
     app.state.settings = settings
+    # #521 方案 B: surfaced via /api/health for the launcher's
+    # deployment-shape consistency check.
+    app.state.host_role = role
     app.state.job_db = job_db
     app.state.auth_service = build_auth_service(job_db, settings.config)
     app.state.agent_broker = agent_plane.broker

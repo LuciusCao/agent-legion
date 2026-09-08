@@ -88,7 +88,11 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `deploy/compose.host.yaml` 拆 `host`（http）+ `scheduler`（显式
   `command: python -m server.app.scheduler_process`，不用镜像默认的
   uvicorn CMD）两服务。已知取舍（见 deployment.md）：dashboard SSE 事件
-  与 Studio chat 仍只在 HTTP 平面进程内（同 #277 语义）。
+  与 Studio chat 仍只在 HTTP 平面进程内（同 #277 语义）。升级与失败
+  语义：`/api/health` 暴露 `role`（generated types 同步），`native-prod-up.sh`
+  对已运行后端做角色一致性校验（不一致 fail-fast 指引先 prod-down，
+  不静默叠出双调度面）；调度进程 workflow worker 启动失败时清理并退出
+  非零（supervisor 重试），sweeper 失败仅降级（TTL 兜底）。
 
 ### Changed
 - 遗留绝对路径警告按存储路径去重（issue #521）：热路径（result

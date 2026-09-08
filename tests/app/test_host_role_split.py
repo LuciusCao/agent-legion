@@ -67,3 +67,24 @@ def test_probe_lock_keys_are_disjoint_per_plane() -> None:
     http_probe = SingleReplicaProbe("postgresql://127.0.0.1:5432/x", lock_name="control-plane-http")
     scheduler_probe = SingleReplicaProbe("postgresql://127.0.0.1:5432/x", lock_name="scheduler")
     assert http_probe._lock_key != scheduler_probe._lock_key
+
+
+class TestSchedulerStartFailureGate:
+    """codex P1 on #536: a failed workflow worker must exit the scheduler
+    process non-zero (supervisor retries) instead of a "ready" deployment
+    that schedules nothing; a failed sweeper only degrades."""
+
+    def test_fatal_path_exits_nonzero_with_teardown(self) -> None:
+        from pathlib import Path
+
+        source = Path("server/app/scheduler_process.py").read_text(encoding="utf-8")
+        # The fatal branch: workflow worker failed → teardown + return 3.
+        fatal_block = source.split('worker_status.get("workflow_worker") == "failed"')[1][:400]
+        assert "return 3" in fatal_block
+        assert "sweeper_thread.stop()" in fatal_block
+        assert "replica_probe.close()" in fatal_block
+        assert "close_database_pools()" in fatal_block
+        # The sweeper failure stays non-fatal (warning only, no return).
+        sweeper_block = source.split('worker_status.get("sweeper") == "failed"')[1][:250]
+        assert "return" not in sweeper_block
+        assert "logger.warning" in sweeper_block

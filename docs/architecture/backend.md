@@ -364,7 +364,7 @@ server/app/
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
 | StorageStatus | BaseModel | configured: bool, reachable: bool | app/routes/common.py |
-| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None | app/routes/common.py |
+| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, role: str | None, storage: StorageS... | app/routes/common.py |
 | ConnectionCreate | BaseModel | key: str, type: str, display_name: str, config: dict[str, Any] | app/routes/connections_contracts.py |
 | ConnectionUpdate | BaseModel | display_name: str | None, config: dict[str, Any] | None, enabled: bool | None | app/routes/connections_contracts.py |
 | ConnectionTokenStatus | BaseModel | expires_at: str | None, refreshed_at: str | None | app/routes/connections_contracts.py |

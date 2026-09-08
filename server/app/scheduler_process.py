@@ -8,24 +8,15 @@ claims, heartbeats, dashboard) in its own process, so a completion wave's
 GIL-bound commit work can no longer starve the claim/heartbeat loop —
 they no longer share a Python process.
 
-The plane composition deliberately reuses ``create_app``'s construction
-order (settings → hydrate → migrate demo seeds → agent plane → threads):
-app-construction side effects (schema bootstrap, instance-settings
-hydration, demo-node migration, skill-source retirement) are idempotent
-and advisory-locked, and they must run here too — the scheduler process
-may boot before any HTTP process (compose `depends_on` orders the
-reverse) and must be self-sufficient against the database.
-
-What does NOT come along (HTTP-plane facilities): the FastAPI app and
-routes, studio chat and its MCP app, the SPA, and the API-plane
-single-replica lock — this process takes the scheduler-plane lock slot
-instead (two schedulers against one database remain the detected
-hazard).
-
-Wakeup plumbing: the LISTEN bridge (``scheduler_notify``) turns
-PostgreSQL NOTIFY from the HTTP plane into local
-``notify_schedulable_work()`` calls; the scheduler's own write paths
-(the intake queue consumer) keep using the in-process registry directly.
+The plane composition reuses ``create_app``'s construction order
+(settings → hydrate → migrate → agent plane → threads): the
+app-construction side effects are idempotent and advisory-locked, and
+the scheduler may boot before any HTTP process (compose `depends_on`
+orders the reverse). HTTP-plane facilities (FastAPI app/routes, studio
+chat, SPA) stay behind; this process takes the scheduler-plane lock
+slot instead. The LISTEN bridge (``scheduler_notify``) turns NOTIFY
+from the HTTP plane into local wakeups; the scheduler's own write paths
+use the in-process registry directly.
 """
 
 from __future__ import annotations
@@ -68,13 +59,7 @@ def run_scheduler_process() -> int:
         logger.error("scheduler_process requires AGENT_LEGION_HOST_ROLE=scheduler (got %r)", role)
         return 2
 
-    # Same logging shape as the uvicorn processes (deploy/uvicorn-log-config
-    # configures the `agent_legion` logger for app code; this process runs
-    # outside uvicorn and sets it up itself).
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
-    logging.getLogger("agent_legion").addHandler(handler)
-    logging.getLogger("agent_legion").setLevel(logging.INFO)
+    plane_bridges.configure_scheduler_logging()
 
     settings = load_settings()
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
@@ -138,6 +123,25 @@ def run_scheduler_process() -> int:
     )
     for name, status in sorted(worker_status.items()):
         logger.info("scheduler plane: %s=%s", name, status)
+
+    # #521 方案 B (codex P1): a failed workflow worker is FATAL — this
+    # plane would read ready while scheduling nothing (compose restart
+    # only fires on exit; the launcher probes only HTTP/Worker). Exit
+    # non-zero so the supervisor retries. A failed sweeper only degrades
+    # (lease expiry falls back to TTL).
+    if worker_status.get("workflow_worker") == "failed":
+        logger.error(
+            "scheduler plane: workflow worker failed to start — exiting for supervisor retry"
+        )
+        if sweeper_thread is not None:
+            sweeper_thread.stop()
+        replica_probe.close()
+        close_database_pools()
+        return 3
+    if worker_status.get("sweeper") == "failed":
+        logger.warning(
+            "scheduler plane: sweeper failed to start — lease hygiene degrades to TTL expiry"
+        )
 
     slow_sweeps: tuple = ()
     if settings.executor_runtime.sweeper_enabled:

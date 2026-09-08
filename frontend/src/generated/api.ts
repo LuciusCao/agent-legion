@@ -3963,6 +3963,8 @@ export interface components {
     HealthResponse: {
       /** Ok */
       ok: boolean
+      /** Role */
+      role?: string | null
       storage?: components['schemas']['StorageStatus'] | null
       /** Workers */
       workers?: {

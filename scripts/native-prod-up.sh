@@ -150,8 +150,27 @@ fi
 # 2. 后端（#521 方案 B：默认 HTTP 平面；AGENT_LEGION_HOST_ROLE=combined
 # 可回退单进程形态——此时不再启动独立调度进程，见 2.5 节）。
 BACKEND_ROLE="${AGENT_LEGION_HOST_ROLE:-http}"
+# 已监听后端的角色（/api/health 的 role 字段，#521 方案 B 起暴露）。
+# 规定升级流程是 git pull → prod-up：旧后端常仍在监听，若它的角色与本
+# 次目标不一致（典型：combined 旧版 + 本次默认 http），静默跳过会把
+# 「旧后端内置调度器 + 新独立 scheduler」同时调度（双调度面），反向
+# 切回 combined 时独立 scheduler 也不会被停。不一致即 fail-fast，指引
+# 先停不匹配的进程，绝不带病继续（codex P1）。
+backend_running_role() {
+    curl -sS -m 2 --noproxy '*' "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" \
+        2>/dev/null | sed -n 's/.*"role"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p'
+}
+BACKEND_ALREADY_RUNNING=0
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
-    echo "后端已在 :$BACKEND_PORT 运行，跳过"
+    BACKEND_ALREADY_RUNNING=1
+    RUNNING_ROLE="$(backend_running_role)"
+    if [[ -n "$RUNNING_ROLE" && "$RUNNING_ROLE" != "$BACKEND_ROLE" ]]; then
+        echo "错误: 后端已在 :$BACKEND_PORT 以 ${RUNNING_ROLE} 角色运行，但本次目标是 ${BACKEND_ROLE}。" >&2
+        echo "      角色不一致时继续会产生双调度面（combined 内置调度器 + 独立 scheduler）。" >&2
+        echo "      请先运行 ./scripts/native-prod-down.sh 停止现有进程，再重新 prod-up。" >&2
+        exit 1
+    fi
+    echo "后端已在 :$BACKEND_PORT 运行（角色: ${RUNNING_ROLE:-未知}），跳过"
 else
     echo "启动后端（${BACKEND_ROLE} 平面）$BACKEND_BIND:$BACKEND_PORT …"
     ulimit -n 65535
@@ -193,9 +212,25 @@ scheduler_running() {
     scheduler_pid_alive "$(cat "$SCHEDULER_PIDFILE" 2>/dev/null || true)"
 }
 if [[ "$BACKEND_ROLE" == "combined" ]]; then
+    if scheduler_running; then
+        # 反向切换同样 fail-fast：combined 后端内含调度器，独立 scheduler
+        # 不停就是双调度面（探针会告警，但升级流程不该走到那一步）。
+        echo "错误: 目标角色 combined，但独立调度平面仍在运行。" >&2
+        echo "      请先运行 ./scripts/native-prod-down.sh 停止现有进程，再重新 prod-up。" >&2
+        exit 1
+    fi
     echo "AGENT_LEGION_HOST_ROLE=combined：调度平面并入后端单进程，跳过独立调度进程"
 elif scheduler_running; then
     echo "调度平面已在运行，跳过"
+elif [[ "$BACKEND_ALREADY_RUNNING" -eq 1 ]]; then
+    # 角色一致性已在上面临界校验（RUNNING_ROLE == BACKEND_ROLE == http）。
+    echo "调度平面未运行，启动（后端 http 平面已在位）…"
+    ulimit -n 65535
+    AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
+    AGENT_LEGION_HOST_ROLE=scheduler \
+    nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m server.app.scheduler_process \
+        >> "$SCHEDULER_LOG" 2>&1 &
+    echo $! > "$SCHEDULER_PIDFILE"
 else
     echo "启动调度平面（scheduler）…"
     ulimit -n 65535

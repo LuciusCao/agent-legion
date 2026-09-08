@@ -1,14 +1,14 @@
 """Role-split plane bridges for the composition root (#521 方案 B).
 
-Extracted from ``main.py`` (file-size budget): the http-plane wiring —
-the wakeup NOTIFY backend, the empty-claim restock relay, and the
-job-event listener that folds scheduler-plane ``job_touched`` events
-into the http plane's buffer — reads as one unit here instead of ten
-inline lines next to the probe setup.
+The http-plane wiring (wakeup NOTIFY backend, empty-claim restock relay,
+job-event listener), the combined-role second probe, and the scheduler
+fatal-startup gate — extracted so main.py / scheduler_process.py stay at
+their committed ceilings.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from functools import partial
 from typing import TYPE_CHECKING
@@ -22,6 +22,17 @@ from server.app.scheduler_notify_emit import (
 )
 from server.app.scheduler_wakeup import set_notify_backend
 from server.app.single_replica_probe import SingleReplicaProbe
+
+logger = logging.getLogger(__name__)
+
+
+def configure_scheduler_logging() -> None:
+    """Scheduler-plane logging (outside uvicorn, so the log-config json
+    never applies — mirror its INFO level)."""
+    _log = logging.getLogger("agent_legion")
+    _log.addHandler(logging.StreamHandler())
+    _log.setLevel(logging.INFO)
+
 
 if TYPE_CHECKING:
     from server.app.agent_broker import AgentExecutionBroker

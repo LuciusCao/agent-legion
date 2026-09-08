@@ -18,6 +18,17 @@ from server.app.agent_control.registry import AgentWorkerRegistry
 logger = logging.getLogger(__name__)
 
 
+def plane_role_status(app_state: Any) -> str | None:
+    """The process's host role (#521 方案 B), stamped by create_app.
+
+    ``combined`` / ``http`` / ``scheduler``; None for test/export app
+    shapes that never stamped it. The native prod launcher probes this
+    before starting a dedicated scheduler so an upgrade that flips the
+    deployment shape cannot silently double-schedule.
+    """
+    return getattr(app_state, "host_role", None)
+
+
 def pure_remote_workers_status(app_state: Any) -> dict[str, str] | None:
     """The ``workers`` health map, with a live online-Worker count appended
     in pure-remote mode; None when no worker threads ever started."""
