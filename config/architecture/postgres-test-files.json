@@ -3,6 +3,7 @@
   "files": [
     "tests/app/test_cors.py",
     "tests/app/test_export_openapi.py",
+    "tests/app/test_host_role_split.py",
     "tests/app/test_legacy_worker_disabled.py",
     "tests/app/test_main.py",
     "tests/app/test_relative_path_portability.py",

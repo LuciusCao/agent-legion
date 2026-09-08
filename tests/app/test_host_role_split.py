@@ -54,6 +54,43 @@ def test_create_app_rejects_scheduler_role() -> None:
         create_app(role=ROLE_SCHEDULER)
 
 
+def test_create_prod_app_dispatches_roles(tmp_path, monkeypatch):
+    """The uvicorn factory maps the env role onto the app composition:
+    http starts no worker threads, combined (default) does. A regression
+    flipping the ``start_worker`` boolean would otherwise pass the whole
+    suite (create_app(role=...) without start_worker is threadless for
+    every role)."""
+    from fastapi.testclient import TestClient
+
+    from server.app import main
+    from server.app.events.agents import AgentStatusManager
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
+
+    starts: list[str] = []
+    monkeypatch.setattr(WorkflowWorkerThread, "start", lambda self: starts.append("w"))
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+    real_load = main.load_settings
+
+    def _load(*args, **kwargs):
+        kwargs.setdefault("data_dir", tmp_path)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(main, "load_settings", _load)
+
+    monkeypatch.setenv(ROLE_ENV, ROLE_HTTP)
+    with TestClient(main.create_prod_app()) as _:
+        pass
+    assert starts == []
+
+    monkeypatch.setenv(ROLE_ENV, ROLE_COMBINED)
+    with TestClient(main.create_prod_app()) as _:
+        pass
+    assert starts == ["w"]
+
+
 def test_probe_rejects_unknown_lock_name() -> None:
     from server.app.single_replica_probe import SingleReplicaProbe
 

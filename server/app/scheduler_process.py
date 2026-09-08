@@ -89,10 +89,22 @@ def run_scheduler_process() -> int:
     event_bus = InProcessEventBus()
     agent_manager = AgentStatusManager(event_bus=event_bus)
     job_event_manager = JobEventManager(event_bus)
+    # The JobEventBuffer here is a construction dependency of the agent
+    # plane (lease transitions record into it), but nothing drains it:
+    # the SSE delivery loop is an HTTP-plane facility, so events recorded
+    # by scheduler-side writes fill the bounded deque and are dropped
+    # (memory-safe by the buffer's max_events cap; the HTTP plane's own
+    # buffer carries everything its clients see).
     job_event_buffer, _aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager.bus
     )
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db)
+    # Resume state must not survive a restart (same invariant as the
+    # combined-role app): dispatch stays off until an operator explicitly
+    # resumes it. The scheduler process owns this reset in the split
+    # shape — the http plane deliberately skips it so a rolling restart
+    # of the API does not wipe an operator's just-restored dispatch.
+    workspace_worker_control.reset_all_to_paused()
     artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db)
     object_storage = build_s3_storage_checked()
     job_artifact_objects = JobArtifactObjectStore(job_db, object_storage)
@@ -127,7 +139,17 @@ def run_scheduler_process() -> int:
             artifact_store, job_artifact_objects, job_db, settings, object_storage
         )
 
-    notify_listener = SchedulerNotifyListener(job_db)
+    notify_listener = SchedulerNotifyListener(
+        job_db,
+        # scan_reload payloads reload the worker's scan list before the
+        # wake: workspaces created on the http plane after this process
+        # booted otherwise never enter the scan snapshot (P1 on review).
+        on_scan_reload=(
+            workflow_worker_thread.reload_scan_entries
+            if workflow_worker_thread is not None
+            else None
+        ),
+    )
     notify_listener.start()
 
     # Ops-metrics sampling loop (#521 方案 B): the sampler lives HERE — the
@@ -154,6 +176,10 @@ def run_scheduler_process() -> int:
         pass
     finally:
         notify_listener.stop()
+        # Let an in-flight sampling write settle before the pools close
+        # (bounded, same discipline as the app's BackgroundTasks.stop);
+        # an unjoined daemon would hit a closing pool mid-transaction.
+        sampling_thread.join(timeout=5.0)
         for thread in (sweeper_thread, *(slow_sweeps or ())):
             if thread is not None:
                 thread.stop()

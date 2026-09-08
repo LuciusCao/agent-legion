@@ -10,19 +10,13 @@ affects the caller or the other callbacks.
 #521 方案 B (role split): in a split deployment the write paths run on the
 HTTP plane while the scheduler runs in the scheduler process, so a notify
 must ALSO cross the process boundary. The dispatch layer below fans each
-notify out to both transports:
-
-- the local registry (in-process callbacks — combined-role processes and
-  the scheduler process's own write paths, e.g. the intake queue
-  consumer);
-- an optional cross-process backend (PostgreSQL NOTIFY, see
-  ``scheduler_notify.py``) — installed on HTTP-plane processes by the
-  composition root; absent (None) in combined/scheduler-role processes,
-  where the local registry already reaches every consumer and a NOTIFY
-  would be a no-op round-trip.
-
-Backend failures are contained inside the backend (scheduler_notify logs
-and returns); the local registry's "never raises" contract is unchanged.
+notify out to both transports: the local registry (in-process callbacks)
+and an optional cross-process backend (PostgreSQL NOTIFY, see
+``scheduler_notify.py``) — installed on HTTP-plane processes by the
+composition root, absent (None) in combined/scheduler-role processes where
+the local registry already reaches every consumer. Backend failures are
+contained inside the backend; the local registry's "never raises" contract
+is unchanged.
 """
 
 from __future__ import annotations
@@ -57,12 +51,9 @@ def unregister_wakeup(callback: Callable[[], None]) -> None:
 
 
 def set_notify_backend(backend: Callable[[], None] | None) -> None:
-    """Install (or clear) the cross-process notify backend.
-
-    Called by the composition root on HTTP-plane processes; the backend
-    receives every notify alongside the local callbacks. Passing None
-    clears a previously installed backend (lifespan teardown).
-    """
+    """Install/clear the cross-process notify backend (composition root;
+    the backend receives every notify alongside the local callbacks —
+    None clears it, e.g. lifespan teardown)."""
     global _notify_backend
     with _lock:
         _notify_backend = backend
@@ -122,7 +113,14 @@ def reload_scan_entries_best_effort(worker: Any) -> None:
 
 
 def reload_worker_scan_entries(request: Any) -> None:
-    """Reload via the app-state workflow worker; no-op when none is running."""
+    """Reload via the app-state worker; on the http plane (#521 方案 B,
+    no worker threads) the reload crosses the NOTIFY bridge instead —
+    see ``scheduler_notify_emit.bridge_scan_reload`` for why that must
+    happen (new workspaces otherwise never get scanned)."""
     worker = getattr(request.app.state, "workflow_worker", None)
     if worker is not None:
         reload_scan_entries_best_effort(worker)
+    else:
+        from server.app.scheduler_notify_emit import bridge_scan_reload
+
+        bridge_scan_reload(request)

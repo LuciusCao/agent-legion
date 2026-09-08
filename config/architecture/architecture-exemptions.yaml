@@ -1394,30 +1394,31 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
   ceiling: 91
 - check: architecture.file_budget
+  path: server/app/scheduler_wakeup.py
+  reason: >-
+    Issue #521 方案 B (role split): the wakeup registry gains the
+    cross-process dispatch layer — set_notify_backend/clear plus the
+    backend fan-out inside notify_schedulable_work (best-effort, never
+    raises, same contract as the local callbacks), and the scan-list
+    reload helper bridges to the NOTIFY channel when no in-process
+    worker exists (http plane). The registry was single-plane before;
+    the dispatch IS the role split's wake semantics. Shrinks back if the
+    backend fan-out moves into scheduler_notify.py wholesale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 80
+- check: architecture.file_budget
   path: server/app/main.py
   reason: >-
     Issue #521 方案 B (role split): the composition root threads the role
     through its plane decisions — the scheduler-role rejection, the
     http-plane pause-reset gate, the per-plane ops-metrics ownership handoff
     (BackgroundTasks wiring), the NOTIFY backend install/clear bracketing
-    the lifespan, and the per-plane probe lock name. Each site is one
-    decision inline where the pre-split code made it unconditionally; a
-    further split would move the plane decisions away from the objects
-    they wire. Shrinks back if the role plumbing centralizes into a
-    bootstrap group module.
+    the lifespan, the empty-claim restock bridge, and the per-plane probe
+    lock name. Each site is one decision inline where the pre-split code
+    made it unconditionally; a further split would move the plane
+    decisions away from the objects they wire. Shrinks back if the role
+    plumbing centralizes into a bootstrap group module.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 255
-- check: architecture.file_budget
-  path: server/app/scheduler_wakeup.py
-  reason: >-
-    Issue #521 方案 B (role split): the wakeup registry gains the
-    cross-process dispatch layer — set_notify_backend/clear plus the
-    backend fan-out inside notify_schedulable_work (best-effort, never
-    raises, same contract as the local callbacks). The registry was
-    single-plane before; the dispatch IS the role split's wake semantics.
-    Shrinks back if the backend fan-out moves into scheduler_notify.py
-    wholesale.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
-  ceiling: 80

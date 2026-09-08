@@ -6,23 +6,35 @@ approval decisions, ...) run on the HTTP plane, so the process-local
 ``scheduler_wakeup.notify_schedulable_work`` registry alone can no longer
 reach the scheduler. This module is the bridge:
 
-- HTTP-plane processes emit ``NOTIFY agent_legion_schedulable`` on a
-  pooled autocommit connection (one round-trip, fire-and-forget — the
-  NOTIFY takes effect at commit, and autocommit commits immediately);
-- the scheduler process runs one LISTEN loop thread that turns each
-  notification into a local ``notify_schedulable_work()`` call, waking
-  the workflow worker's poll loop immediately instead of waiting out its
+- HTTP-plane processes emit ``NOTIFY agent_legion_schedulable`` (with an
+  optional payload, see below) — the emitters live in the sister module
+  ``scheduler_notify_emit.py``;
+- the scheduler process runs one LISTEN loop thread (below) that turns
+  each notification into local scheduler-plane actions, waking the
+  workflow worker's poll loop immediately instead of waiting out its
   idle backoff.
 
-Payload-free by design: notifications only mean "scan for schedulable
-work", never "execute this". Lost notifications are safe — the scheduler
-polls on a 3s idle backoff regardless; the bridge buys latency, not
-correctness. Duplicate notifications are likewise safe (a woken poll
-that finds no work simply backs off again).
+Payloads name the trigger kind; unknown payloads fall back to the plain
+wake (forward compatibility):
+
+- ``''`` / ``'schedulable'`` — "scan for schedulable work" (the default
+  wakeup notify);
+- ``'scan_reload'`` — "the workspace scan list changed" (workspace
+  created/re-keyed/first-published on the HTTP plane): the scheduler
+  plane reloads its scan entries before the wake, so a newly created
+  workspace is scheduled without a scheduler restart. This closes the
+  cross-plane gap the in-process ``reload_worker_scan_entries`` helper
+  cannot (it reads ``app.state.workflow_worker``, which only exists in
+  the process that started the worker threads).
+
+Notifications only ever mean "look at the database" — they never carry
+work items, so they are safe to lose (the scheduler polls on a 3s idle
+backoff regardless; the bridge buys latency, not correctness) and safe
+to duplicate (a woken poll that finds no work simply backs off again).
 
 Failure semantics mirror the in-process registry: emission is best-effort
-(a DB hiccup logs at debug and the write path continues — the poll
-backoff is the fallback latency).
+(a DB hiccup logs and the write path continues — the poll backoff is the
+fallback latency).
 """
 
 from __future__ import annotations
@@ -31,7 +43,6 @@ import logging
 import threading
 from typing import Any
 
-from server.app.db.connection import connect_database
 from server.app.db.dialect import ConnectSource, resolve_dsn
 from server.app.scheduler_wakeup import notify_schedulable_work
 
@@ -41,55 +52,37 @@ logger = logging.getLogger(__name__)
 # (single_replica_probe): a fixed, deployment-scoped literal.
 NOTIFY_CHANNEL = "agent_legion_schedulable"
 
+# Payload kinds (forward-compatible: unknown payloads fall back to wake).
+PAYLOAD_SCHEDULABLE = "schedulable"
+PAYLOAD_SCAN_RELOAD = "scan_reload"
+
 _LISTEN_SQL = f"listen {NOTIFY_CHANNEL}"
-_NOTIFY_SQL = f"notify {NOTIFY_CHANNEL}"
-
-
-def notify_schedulable_work_cross_process(dsn: ConnectSource) -> None:
-    """Best-effort cross-process wake: ``NOTIFY`` on a pooled connection.
-
-    Called by the HTTP plane's wakeup dispatch (scheduler_wakeup). The
-    connection is a checkout from the shared pool — NOT autocommit, and
-    a PostgreSQL NOTIFY only takes effect at its transaction's COMMIT:
-    the pool's reset hook rolls back INTRANS returns, so the commit here
-    is load-bearing (an uncommitted NOTIFY is silently dropped, not
-    deferred).
-    """
-    try:
-        conn = connect_database(resolve_dsn(dsn))
-        try:
-            conn.execute(_NOTIFY_SQL)
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception:
-        # #204 broad-except audit: fire-and-forget wake signal, never a
-        # dependency of the write path that produced schedulable work.
-        # The failure space is the psycopg/pool surface of one pooled
-        # checkout; the scheduler's 3s idle poll is the built-in fallback
-        # latency, so the correct response to any failure here is drop
-        # the wake, keep the write. Debug level: transient by nature, the
-        # poll loop self-heals within one backoff interval.
-        logger.debug("cross-process scheduler notify failed", exc_info=True)
 
 
 class SchedulerNotifyListener:
-    """Dedicated-connection LISTEN loop turning NOTIFY into local wakeups.
+    """Dedicated-connection LISTEN loop turning NOTIFY into scheduler actions.
 
     One instance per scheduler-plane process. The listener holds its own
     psycopg connection — NOT a pool checkout: the pool's idle recycling
     would reclaim the connection and silently drop the LISTEN
     registration, and the DB-API facade (DatabaseConnection) does not
     expose the notification generator. The connection is autocommit so
-    the LISTEN takes effect immediately; the thread blocks in the
-    ``notifies()`` generator and maps each delivered notification to one
-    local ``scheduler_wakeup.notify_schedulable_work()`` call.
+    the LISTEN takes effect immediately.
+
+    The loop re-enters the ``notifies()`` generator per timeout slice
+    instead of holding one long-lived generator: psycopg's generator
+    ENDS when the timeout expires, so the naive "for over one
+    generator" shape would close and reconnect every slice (~12
+    connections/minute on an idle deployment plus recurring miss
+    windows during each reconnect).
     """
 
     _POLL_INTERVAL_SECONDS = 5.0
+    _SLICE_SECONDS = 1.0
 
-    def __init__(self, dsn: ConnectSource) -> None:
+    def __init__(self, dsn: ConnectSource, on_scan_reload: Any | None = None) -> None:
         self._dsn = resolve_dsn(dsn)
+        self._on_scan_reload = on_scan_reload
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -116,14 +109,33 @@ class SchedulerNotifyListener:
         conn.execute("set timezone = 'UTC'")
         return conn
 
+    def _dispatch(self, payload: str) -> None:
+        if payload == PAYLOAD_SCAN_RELOAD and self._on_scan_reload is not None:
+            try:
+                self._on_scan_reload()
+            except Exception:
+                # #204 broad-except audit: the reload callback is the
+                # workflow worker's reload_scan_entries (DB read + swap);
+                # per-callback containment matches scheduler_wakeup's
+                # contract — a failing reload must not kill the listener
+                # thread (that would regress every later notification to
+                # the poll backoff). The worker keeps its previous scan
+                # snapshot; the next reload or restart converges.
+                logger.exception("scan-list reload callback failed")
+        notify_schedulable_work()
+
     def _loop(self) -> None:
         while not self._stop_event.is_set():
             try:
                 conn = self._connect()
                 try:
                     conn.execute(_LISTEN_SQL)
-                    for _notify in conn.notifies(timeout=self._POLL_INTERVAL_SECONDS):
-                        notify_schedulable_work()
+                    while not self._stop_event.is_set():
+                        # The generator ends when the slice times out;
+                        # re-entering it on the SAME connection keeps the
+                        # LISTEN registration alive without reconnects.
+                        for notification in conn.notifies(timeout=self._SLICE_SECONDS):
+                            self._dispatch(str(notification.payload))
                 finally:
                     conn.close()
             except Exception:
@@ -143,9 +155,9 @@ class SchedulerNotifyListener:
     def stop(self) -> None:
         """Signal the loop to stop; best-effort and idempotent.
 
-        The loop notices the stop event within one poll interval and
-        closes its own connection; ``join`` bounds the wait for callers
-        tearing the process down.
+        The loop notices the stop event within one slice and closes its
+        own connection; ``join`` bounds the wait for callers tearing the
+        process down.
         """
         self._stop_event.set()
         thread = self._thread

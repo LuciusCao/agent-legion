@@ -172,6 +172,9 @@ services:
       target: host
     image: agent-legion-host:local
     restart: unless-stopped
+    # 必须覆盖镜像默认 CMD（uvicorn create_prod_app）：scheduler 角色走
+    # 独立进程入口，app 工厂对该角色显式拒绝（否则 uvicorn 崩溃重启循环）。
+    command: ["python", "-m", "server.app.scheduler_process"]
     depends_on:
       postgres:
         condition: service_healthy

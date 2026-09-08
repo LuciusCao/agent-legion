@@ -20,11 +20,7 @@ from fastapi import FastAPI
 
 from server.app.auth.service import build_auth_service
 from server.app.bootstrap import build_agent_plane
-from server.app.configuration.host_role import (
-    ROLE_COMBINED,
-    ROLE_HTTP,
-    ROLE_SCHEDULER,
-)
+from server.app.configuration.host_role import ROLE_COMBINED, ROLE_HTTP, ROLE_SCHEDULER
 from server.app.db.connection import close_database_pools
 from server.app.events import JobEventManager
 from server.app.events.agents import AgentStatusManager
@@ -41,7 +37,7 @@ from server.app.mcp_server.http_app import (
 from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
 from server.app.routes.quality_deps import build_quality_loop
-from server.app.scheduler_notify import notify_schedulable_work_cross_process
+from server.app.scheduler_notify_emit import notify_schedulable_work_cross_process
 from server.app.scheduler_wakeup import set_notify_backend, unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
@@ -186,11 +182,15 @@ def create_app(
     # processes of the SAME plane remain the detected hazard.
     replica_probe = SingleReplicaProbe(job_db, lock_name="control-plane-http")
     if role == ROLE_HTTP:
-        # A process-local wake registry can never reach a scheduler in
-        # another process: relay this process's schedulable-work notifies
-        # to it over PostgreSQL NOTIFY (payload-free, best-effort — the
-        # scheduler's poll backoff is the fallback latency).
-        set_notify_backend(partial(notify_schedulable_work_cross_process, job_db))
+        # The process-local wake registry cannot reach a scheduler in
+        # another process: relay this plane's wakeup notifies over
+        # PostgreSQL NOTIFY (best-effort; the scheduler's poll backoff is
+        # the fallback). The empty-claim restock signal rides the same
+        # bridge — its debounce stays local, the restock side lands on
+        # the scheduler plane.
+        relay = partial(notify_schedulable_work_cross_process, job_db)
+        set_notify_backend(relay)
+        agent_plane.broker.empty_claim.on_empty_queue = relay
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -332,10 +332,9 @@ def create_prod_app() -> FastAPI:
 
     Role split (#521 方案 B): ``AGENT_LEGION_HOST_ROLE=http`` composes the
     API plane only (scheduler threads off, wakeup notifies relayed via
-    PostgreSQL NOTIFY); the default (and any other value) keeps the
-    combined single-process shape. ``scheduler`` never reaches here — the
-    factory rejects it and the scheduler plane runs via
-    ``python -m server.app.scheduler_process``.
+    PostgreSQL NOTIFY); the default keeps the combined single-process
+    shape. ``scheduler`` never reaches here — the factory rejects it and
+    the scheduler plane runs via ``python -m server.app.scheduler_process``.
     """
     from server.app.configuration.host_role import host_role_from_env
 

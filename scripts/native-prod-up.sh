@@ -147,17 +147,19 @@ elif [[ "$local_s3_rc" -ne 0 ]]; then
     echo "警告: 跳过本地 ${LOCAL_S3_SERVICE} 启动（原因见上方），材料相关功能将不可用" >&2
 fi
 
-# 2. 后端（HTTP 平面，#521 方案 B：AGENT_LEGION_HOST_ROLE=http）
+# 2. 后端（#521 方案 B：默认 HTTP 平面；AGENT_LEGION_HOST_ROLE=combined
+# 可回退单进程形态——此时不再启动独立调度进程，见 2.5 节）。
+BACKEND_ROLE="${AGENT_LEGION_HOST_ROLE:-http}"
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
 else
-    echo "启动后端（HTTP 平面）$BACKEND_BIND:$BACKEND_PORT …"
+    echo "启动后端（${BACKEND_ROLE} 平面）$BACKEND_BIND:$BACKEND_PORT …"
     ulimit -n 65535
     # 共享库 schema 门（server/app/db/schema.py）：prod 是有意迁移裸
     # agent_legion 库的操作者，显式授予 opt-in；误连该库的工具脚本
     # （缺 .env 的 worktree export_openapi 等）则被硬拦。
     AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
-    AGENT_LEGION_HOST_ROLE=http \
+    AGENT_LEGION_HOST_ROLE="$BACKEND_ROLE" \
     nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m uvicorn \
         server.app.main:create_prod_app --factory --host "$BACKEND_BIND" --port "$BACKEND_PORT" \
         --timeout-graceful-shutdown 3 \
@@ -167,16 +169,22 @@ fi
 
 # 2.5 调度平面（#521 方案 B）：专用进程跑 sweeper + workflow worker +
 # 慢速清扫 + 指标采样；HTTP 平面的可调度工作通知经 PostgreSQL
-# NOTIFY 桥接（scheduler_notify.py）。无 HTTP 端口，幂等判断按
-# 「上一次启动的进程仍在运行」：日志文件缺失即从未启动；存在则按
-# pgrep 匹配命令行（模块名足够特异）。重启语义与后端一致——SIGTERM
-# 优雅停机由 native-prod-down.sh 发出。
+# NOTIFY 桥接（scheduler_notify.py）。无 HTTP 端口，进程定位用 pidfile
+# （data/scheduler.pid）而非 pgrep——命令行跨 worktree 完全相同
+# （相对路径 .venv/bin/python），按名字匹配会误杀/误判其他 worktree
+# 的调度进程（与上面端口幂等判断防的是同一类错误）。重启语义与后端
+# 一致——SIGTERM 优雅停机由 native-prod-down.sh 发出。
 SCHEDULER_LOG="data/logs/prod-scheduler.log"
+SCHEDULER_PIDFILE="data/scheduler.pid"
 scheduler_running() {
-    [[ -f "$SCHEDULER_LOG" ]] || return 1
-    pgrep -f "python -m server.app.scheduler_process" >/dev/null 2>&1
+    [[ -f "$SCHEDULER_PIDFILE" ]] || return 1
+    local pid
+    pid="$(cat "$SCHEDULER_PIDFILE" 2>/dev/null || true)"
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
 }
-if scheduler_running; then
+if [[ "$BACKEND_ROLE" == "combined" ]]; then
+    echo "AGENT_LEGION_HOST_ROLE=combined：调度平面并入后端单进程，跳过独立调度进程"
+elif scheduler_running; then
     echo "调度平面已在运行，跳过"
 else
     echo "启动调度平面（scheduler）…"
@@ -184,7 +192,8 @@ else
     AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
     AGENT_LEGION_HOST_ROLE=scheduler \
     nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m server.app.scheduler_process \
-        > "$SCHEDULER_LOG" 2>&1 &
+        >> "$SCHEDULER_LOG" 2>&1 &
+    echo $! > "$SCHEDULER_PIDFILE"
 fi
 
 # 3. Worker

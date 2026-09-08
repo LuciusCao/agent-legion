@@ -75,31 +75,33 @@ stop_port() {
 }
 
 stop_pids() {
-    local name="$1" grace="$2" pattern="$3"
-    local pids
-    pids="$(pgrep -f "$pattern" 2>/dev/null || true)"
-    if [[ -z "$pids" ]]; then
+    local name="$1" grace="$2" pidfile="$3"
+    local pid
+    pid="$(cat "$pidfile" 2>/dev/null || true)"
+    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
         echo "$name 未在运行，跳过"
+        rm -f "$pidfile"
         return 0
     fi
-    echo "停止 $name (pid $pids) …"
-    for pid in $pids; do
-        kill "$pid" 2>/dev/null || true
-    done
+    echo "停止 $name (pid $pid) …"
+    kill "$pid" 2>/dev/null || true
     for i in $(seq 1 "$grace"); do
-        if ! pgrep -f "$pattern" >/dev/null 2>&1; then
+        if ! kill -0 "$pid" 2>/dev/null; then
             echo "$name 已停止"
+            rm -f "$pidfile"
             return 0
         fi
         sleep 1
     done
-    echo "警告：$name (pid $pids) ${grace}s 内未退出，请人工检查（日志 data/logs/prod-scheduler.log）" >&2
+    echo "警告：$name (pid $pid) ${grace}s 内未退出，请人工检查（日志 data/logs/prod-scheduler.log）" >&2
     return 1
 }
 
 rc=0
 # 先停 worker（停止领新任务并给它上报预算），再停调度平面与后端
 stop_port "$WORKER_BIND" "$WORKER_PORT" "Worker" 35 || rc=1
-stop_pids "调度平面" 15 "python -m server.app.scheduler_process" || rc=1
+# 调度平面按 pidfile（data/scheduler.pid，native-prod-up.sh 写入）定位：
+# 命令行跨 worktree 相同，pgrep 会误杀其他 worktree 的调度进程。
+stop_pids "调度平面" 15 "data/scheduler.pid" || rc=1
 stop_port "$BACKEND_BIND" "$BACKEND_PORT" "后端" 15 || rc=1
 exit "$rc"

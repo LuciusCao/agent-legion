@@ -1250,6 +1250,7 @@
     "server/app/routes/workspace_settings.py": 54,
     "server/app/routes/workspaces.py": 103,
     "server/app/scheduler_notify.py": 117,
+    "server/app/scheduler_notify_emit.py": 80,
     "server/app/scheduler_process.py": 163,
     "server/app/scheduler_wakeup.py": 60,
     "server/app/security.py": 20,

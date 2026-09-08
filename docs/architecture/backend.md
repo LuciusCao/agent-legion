@@ -689,7 +689,9 @@ server/app/
 - `server.app.main:create_app(data_dir, start_worker, role)` 是 FastAPI 应用工厂，也是
   Host 进程唯一的组装根（composition root）：settings → DB 门面 → 一次性
   migration/seed → services → routers → 线程组在此一次接线。内建的顺序不变式：
-  实例设置先于任何 service 读取从 DB hydrate；全部 workspace 启动即重置暂停；
+  实例设置先于任何 service 读取从 DB hydrate；全部 workspace 启动即重置暂停
+  （#521 方案 B 起 http 角色跳过——重置权归调度平面；
+  `server.app.scheduler_process` 同样执行该重置）；
   回收线程（sweeper / artifact GC / materials TTL）只在 `sweeper_enabled` 下启动、
   单副本持有（与 SingleReplicaProbe advisory lock 同规则，#277）；lifespan
   teardown 先释放 replica 锁、收割 studio chat 会话、停线程，最后才关 DB 连接池。

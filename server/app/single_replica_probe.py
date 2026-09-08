@@ -66,7 +66,10 @@ _SKIP_PROBE_ENV = "AGENT_LEGION_SKIP_SINGLE_REPLICA_PROBE"
 # Fixed lock key; combined with current_database() below so two Host
 # instances against two databases on one cluster do not fight over it
 # (same scoping precedent as db/schema.py's migration lock). The role
-# suffix (#521 方案 B) splits the key per process plane.
+# suffix (#521 方案 B) splits the key per process plane. Rolling-upgrade
+# note: during an upgrade an old (pre-split) process holds the unsuffixed
+# key while a new one holds a suffixed key, so neither sees the other —
+# the #277 warning is blind exactly for the upgrade window.
 _REPLICA_LOCK_KEY = "agent-legion-single-replica-probe"
 
 # One lock slot per process role (#521 方案 B): combined-role and http-plane

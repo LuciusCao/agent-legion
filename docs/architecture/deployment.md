@@ -128,9 +128,10 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 
 - **当前部署形态（单 uvicorn 进程 × 每数据库一个副本）全部正确**：开发机
   `make dev`、生产 `scripts/native-prod-up.sh` / `deploy/` compose 均如此
-  （prod 启动器自 #521 角色拆分起默认双平面，见下；`combined` 形态经
-  `AGENT_LEGION_HOST_ROLE` 回退）。多 worktree 开发也天然合规——
-  `scripts/init-worktree.sh` 给每个 worktree 派生专属数据库，
+  （prod 启动器自 #521 角色拆分起默认双平面，见下；导出
+  `AGENT_LEGION_HOST_ROLE=combined` 后重跑 `native-prod-up.sh` 回退单进程
+  形态，compose 侧则需自行裁剪 scheduler 服务）。多 worktree 开发也天然
+  合规——`scripts/init-worktree.sh` 给每个 worktree 派生专属数据库，
   「两个进程、两个库」不触发本节任何症状。
 - **第二副本探测（`server/app/single_replica_probe.py`）**：lifespan 启动时在一条
   专用池连接上取会话级 advisory lock（key 与 `current_database()` 一起哈希，跨库不
@@ -151,18 +152,27 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
   或两个 scheduler 进程都触发 #277 警告）。跨平面的归属划分：
   - 可调度工作唤醒：HTTP 平面的写路径（run 提交、发布、审批……）经
     PostgreSQL `NOTIFY agent_legion_schedulable` 桥（`scheduler_notify.py`）
-    唤醒调度进程的 poll 循环；payload-free、best-effort，丢通知由
-    scheduler 3s 空转 poll 兜底（桥只买延迟，不买正确性）。
+    唤醒调度进程的 poll 循环；payload 标记触发类型（`schedulable` 空排 /
+    `scan_reload` 扫描列表变更——http 平面的 workspace 创建/首次发布经
+    此让调度进程先重载 scan list 再唤醒，否则新 workspace 要等调度进程
+    重启才会被扫到）；best-effort，丢通知由 scheduler 3s 空转 poll 兜底
+    （桥只买延迟，不买正确性，`scan_reload` 除外——丢了要重启收敛）。
+    空领（empty claim）的补货信号同样走该桥（防抖留在 http 平面本地）。
   - 指标采样：只在 scheduler 进程跑（`ops_metric_samples` /
     `ops_runtime_profile_samples` 的分钟桶 upsert 是每进程覆盖写，双写
     丢 (N-1)/N 数据）；HTTP 平面的 `/api/metrics/*` 读路由查表不采表。
-    调度进程的 claim/result 进程内计数器因此只覆盖自身流量——HTTP
-    平面的 claim/result 延迟画像在拆分形态下改看 uvicorn 访问日志
-    （每请求行自带耗时），分阶段列反映调度进程本地的 commit/pass。
-  - `reset_all_to_paused`：只在 combined/scheduler 角色启动时执行；
+    已知观测取舍：claim/result 的**进程内计数器**落在各自进程——拆分
+    形态下运行画像表的 claim/result 及分段列只反映 scheduler 进程本地
+    流量，读作零不代表 http 平面无流量；#530 的 result 分段观测
+    （`result stages:` 日志行）仍在 http 平面进程日志里逐请求可见，
+    需要分钟级聚合画像时回 combined 形态。深度类指标（队列深度、
+    active、token 用量）与 pass 类指标来自 DB/调度进程，不受影响。
+  - `reset_all_to_paused`：只在 combined/scheduler 角色启动时执行
+    （scheduler 进程入口同样执行——拆分形态下两平面只有它做重置）；
     HTTP 平面滚动重启不再抹掉运行中部署的操作员恢复状态。
-  - intake 异步消费：调度进程独占（`claim_intake_run` 的 DB claim 语义
-    本就多消费者安全，单消费者是刻意的归属划分而非硬约束）。
+  - intake 异步消费：留在 HTTP 平面（BackgroundTasks 随 lifespan 无条件
+    启动）；`claim_intake_run` 的 DB claim 语义本就多消费者安全，调度
+    进程不重复消费即可。消费后经 NOTIFY 桥唤醒调度进程。
   - 已知取舍：dashboard SSE 事件、Studio chat 会话、登录限速仍在 HTTP
     平面进程内（#277 表格的 1/2/3 项语义不变）；调度进程的健康面是其
     日志（`data/logs/prod-scheduler.log`，compose 侧 `restart:

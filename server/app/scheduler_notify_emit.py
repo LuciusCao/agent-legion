@@ -1,0 +1,101 @@
+"""Emission side of the scheduler NOTIFY bridge (#521 方案 B).
+
+Split from ``scheduler_notify.py`` for the file-size budget: the channel
+constants and the LISTEN loop stay there; this module owns the HTTP-plane
+emitters — payload construction, the pooled-connection round-trip, and
+the failure-escalation cadence. See the parent module's docstring for the
+bridge's semantics (payload-free safety, poll-backoff fallback).
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any
+
+from server.app.db.connection import connect_database
+from server.app.db.dialect import ConnectSource, resolve_dsn
+from server.app.scheduler_notify import NOTIFY_CHANNEL, PAYLOAD_SCAN_RELOAD
+
+logger = logging.getLogger(__name__)
+
+_NOTIFY_SQL = f"notify {NOTIFY_CHANNEL}"
+
+# Escalation cadence for emission failures: one INFO line per minute at
+# most, DEBUG in between — a persistently degraded bridge (DB outage)
+# stays visible during incident triage without per-notify spam.
+_FAILURE_LOG_INTERVAL_SECONDS = 60.0
+_last_failure_log = 0.0
+
+
+def _emit_notify(dsn: ConnectSource, payload: str | None) -> None:
+    """Best-effort cross-process ``NOTIFY`` on a pooled connection.
+
+    The connection is a checkout from the shared pool — NOT autocommit,
+    and a PostgreSQL NOTIFY only takes effect at its transaction's COMMIT:
+    the pool's reset hook rolls back INTRANS returns, so the commit here
+    is load-bearing (an uncommitted NOTIFY is silently dropped, not
+    deferred).
+    """
+    global _last_failure_log
+    try:
+        sql = _NOTIFY_SQL if payload is None else f"notify {NOTIFY_CHANNEL}, '{payload}'"
+        conn = connect_database(resolve_dsn(dsn))
+        try:
+            conn.execute(sql)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        # #204 broad-except audit: fire-and-forget wake signal, never a
+        # dependency of the write path that produced the work. The
+        # failure space is the psycopg/pool surface of one pooled
+        # checkout; the scheduler's 3s idle poll is the built-in fallback
+        # latency, so the correct response to any failure here is drop
+        # the wake, keep the write. Logging: DEBUG per failure (the
+        # poll loop self-heals within one backoff interval), escalated
+        # to INFO once per minute so a persistently degraded bridge
+        # (DB outage) is visible during incident triage without
+        # per-notify spam.
+        now = time.monotonic()
+        if now - _last_failure_log >= _FAILURE_LOG_INTERVAL_SECONDS:
+            _last_failure_log = now
+            logger.info(
+                "cross-process scheduler notify has been failing "
+                "(bridge degraded; scheduler poll backoff covers wakeups)",
+                exc_info=True,
+            )
+        else:
+            logger.debug("cross-process scheduler notify failed", exc_info=True)
+
+
+def notify_schedulable_work_cross_process(dsn: ConnectSource) -> None:
+    """Best-effort cross-process wake (plain "scan for schedulable work")."""
+    _emit_notify(dsn, None)
+
+
+def notify_scan_reload_cross_process(dsn: ConnectSource) -> None:
+    """Best-effort "the scan list changed" notify (#521 方案 B).
+
+    Emitted by the HTTP plane where the in-process scan-list reload is a
+    no-op (no worker threads); the scheduler plane reloads its scan
+    entries on receipt. Best-effort like the plain wake — a lost reload
+    falls back to the scheduler restart (documented known limit).
+    """
+    _emit_notify(dsn, PAYLOAD_SCAN_RELOAD)
+
+
+def bridge_scan_reload(request: Any) -> None:
+    """Cross-plane scan-list reload for the http plane (#521 方案 B).
+
+    Called by ``scheduler_wakeup.reload_worker_scan_entries`` when the
+    app state has no workflow worker (http-plane process). Without this
+    bridge a workspace created after the scheduler booted is never
+    scanned — its jobs do not dispatch until a scheduler restart —
+    because the scheduler's scan snapshot is loaded once at start and
+    only the LISTEN listener reloads it afterwards.
+    """
+    dsn = getattr(getattr(request, "app", None), "state", None)
+    dsn = getattr(dsn, "job_db", None)
+    if dsn is not None:
+        notify_scan_reload_cross_process(dsn)
