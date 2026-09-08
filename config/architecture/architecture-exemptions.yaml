@@ -1,5 +1,22 @@
 exemptions:
 - check: architecture.file_budget
+  path: velites/src/provider/openai_compat/mod.rs
+  reason: >-
+    The #450 fix adds the is_error round-trip unit test next to the existing
+    openai_compat tests (Rust's inline #[cfg(test)] convention — the same
+    harness has no tests/ split for unit scope), pushing the file past its
+    first-registered ceiling. The regression coverage is load-bearing for
+    the fix itself and must live beside wire_message in aggregate.rs and
+    the provider tests in this file; splitting the test module off to a
+    sibling file was tried and rejected (it grows aggregate.rs past ITS
+    ceiling, a same-cost shuffle). Anchored to #522 (the long-lived
+    budget-anchor tracker): harvest when the provider module is
+    restructured (e.g. the request-builder split sketched in the module
+    docs), not when a single feature issue closes.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 500
+- check: architecture.file_budget
   path: worker/cli_args.py
   reason: >-
     The workerctl --proxy flag (#444 rework) gives headless workers (Docker
