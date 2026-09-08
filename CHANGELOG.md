@@ -17,6 +17,33 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   「竞态超发照单收下」语义一致）后终止本轮。回归测试：泄漏场景
   （旧代码复现 agent_budget -1/-2/… 负值序列）+ code 池对照组；纯
   code / 纯 agent 场景行为不变。
+- 越池 claim 的悬挂租约（#535 codex P1 复审，#534 修复的修复）：
+  守卫原本放在 `pool.submit` 之前——Host 已记 claimed 的越池执行不被
+  提交（不跑/不心跳/不报结果，只能等租约过期），爬坡期 Host 持续发
+  活会逐轮累积悬挂租约。「照单收下」的语义必须含提交执行：break 移
+  到 submit/active 记账之后。回归测试钉住「每个 claim 必被 submit」
+  （旧形态复现：1 submitted vs 102 claims）；claim-loop 回归用例拆到
+  姊妹文件 `test_agent_worker_claim_loop.py`（原文件 942 行，codex P2）。
+- 越池抑制需跨 pass 生效且必须压 claim 声明容量（PR #539 codex 复审
+  二轮 P1 + review P2-1）：仅 break 当前 pass 不够——Host 按「active
+  < 声明容量」分池发活（#501 声明的是目标容量，不随爬坡档位走），
+  本地预算只能 break 单个 pass，不压声明的话 Host 每个 pass 都会再发
+  一个越池的活，running 一路爬到声明容量，ramp-up/背压同样被绕过。
+  修复：**真越池**（预算已尽却领到该池的活，领取使预算转负）时把该
+  池记入 `pool_deferred`，抑制期间该池 claim 声明压到
+  `min(活跃数, 目标)`（Host 分池门即关闭）、预算视为 0；正常领满
+  （预算 1 → 领取 → 0）不是越池，不抑制、不终止 pass——否则 ramp
+  满档窗口声明容量会跌到档位值并随补位振荡，违反 #501「声明不随
+  档位抖」（触发面必须用 `< 0` 而非 `<= 0` 判定）。解除面 = 该池
+  「未被抑制时的预算」转正（avail > 0：执行完成/档位推进/背压消退
+  ——比 base > 0 更严，背压钳 0 时 base 仍可 > 0，此时解除会立刻再
+  越池），解除后声明回声目标容量。预算/声明推导收口到新模块
+  `worker/claim_budget.py`（文件预算治理；`pass_budget` 对
+  `pool_deferred` 的 discard 解除是显式 mutate 契约——executor 负责
+  add、解除面与预算数学同址）。回归测试用 Host 分池记账的保真 fake
+  （按声明容量发活、报果归还能名额）钉住：真越池抑制期间声明恒为
+  (活跃数, 目标) 且不再被授权、执行完成后恢复；正常领满双池满档
+  窗口声明恒为目标容量。
 
 ## [0.7.2] - 2026-09-08
 

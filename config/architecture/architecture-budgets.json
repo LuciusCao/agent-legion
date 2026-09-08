@@ -1627,6 +1627,7 @@
     "worker/bundle_fetch.py": 88,
     "worker/bundle_io.py": 40,
     "worker/claim_backoff.py": 66,
+    "worker/claim_budget.py": 53,
     "worker/claim_manifest.py": 21,
     "worker/claim_pacing.py": 116,
     "worker/cleanup.py": 28,

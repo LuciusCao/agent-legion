@@ -23,6 +23,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from worker import events
 from worker.claim_backoff import CLAIM_BACKOFF_CAP_SECONDS, ClaimBackoffSequence
+from worker.claim_budget import pass_budget
 from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
 from worker.execution.heartbeat_batch import start_batch_heartbeat
@@ -44,7 +45,7 @@ from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.runtime.setup import prepare_runtime_models
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
-from worker.transfer_controls import claim_availability, load_transfer_controls
+from worker.transfer_controls import load_transfer_controls
 from worker.upload.queue import UploadQueue
 
 # code 容量 0→>0 热开被拒（缺沙箱包装器）的一次性提示文案；守卫语义见
@@ -142,10 +143,15 @@ def main() -> int:
     # uploads/status 实例在本循环内从不重建，热更只调实例内部状态。
     run_args = (work_root, environment, interval, stop, shutdown_grace)
     run_tail = (status, uploads, download_slots)
-    next_sweep = time.monotonic()
-    next_host_status = time.monotonic() + interval
-    control_error: str | None = None
-    code_hot_reject_logged = False
+    next_sweep, next_host_status = time.monotonic(), time.monotonic() + interval
+    control_error, code_hot_reject_logged = None, False
+    # #534（codex P1 二轮）：越池抑制——领到「本地预算已尽的池」的活时
+    # 记下该池，抑制期间该池 claim 声明压到当前活跃数（Host 按「active
+    # < 声明容量」分池发活，这是唯一能止住逐 pass 再发的通道）、预算视
+    # 为 0；该池「未被抑制时的预算」转正（avail > 0：执行完成/档位推进/
+    # 背压消退）时解除。否则仅 break 当前 pass 的话，下个 pass 又领一个，
+    # running 一路爬到声明容量，绕过 ramp-up/背压。
+    pool_deferred: set[str] = set()
     try:
         while not stop.is_set():
             if time.monotonic() >= next_host_status:
@@ -171,6 +177,9 @@ def main() -> int:
             active -= completed
             for future in completed:
                 active_kinds.pop(future, None)
+                # #534（codex P1 二轮）：越池抑制的解除在预算面（pass_budget
+                # 内 avail > 0 的 discard）——执行完成或档位推进都会让预
+                # 算转正，此处无需按 kind 解除。
                 try:
                     future.result()
                 except Exception as exc:
@@ -217,19 +226,19 @@ def main() -> int:
             )
             effective = max_concurrency if ramp_view is None else ramp_view.effective
             status.set_ramp_up(ramp_view, max_concurrency)
-            agent_active = sum(1 for kind in active_kinds.values() if kind == "agent")
-            agent_base = max(0, effective - agent_active) if claim_enabled else 0
-            code_active = len(active) - agent_active
-            code_base = max(0, max_code_concurrency - code_active) if claim_enabled else 0
             # Backpressure（upload 积压线性衰减，见 claim_availability）；
             # #471：worker_capacity 用生效容量（爬坡期=当前档），背压门随档位走。
-            backlog = transfer.upload_backlog_limit
-            budget = {
-                "agent": claim_availability(agent_base, uploads.depth, effective, backlog),
-                "code": claim_availability(
-                    code_base, uploads.depth, max(max_code_concurrency, 1), backlog
-                ),
-            }
+            # 预算/越池抑制的计算与解除语义收口在 pass_budget（#534）。
+            budget, declared = pass_budget(
+                active,
+                active_kinds,
+                effective=effective,
+                targets=(max_concurrency, max_code_concurrency),
+                claim_enabled=claim_enabled,
+                pool_deferred=pool_deferred,
+                upload_depth=uploads.depth,
+                backlog=transfer.upload_backlog_limit,
+            )
             claimed, claim_rtt = False, 0.0
             try:
                 # #534：按池判定（or）——旧条件两池求和，agent 池被爬坡/
@@ -245,9 +254,14 @@ def main() -> int:
                     claim_started = time.monotonic()
                     # #501：声明的是**目标容量**而非爬坡档位——agent_workers
                     # 行（UI/ops 容量面 + stock gate 的 fleet 池）不随档位抖；
-                    # 爬坡节流本来就由上方 budget（effective-活跃数）把门，
-                    # 生效档位只走 status 文件（set_ramp_up）。
-                    claim = client.claim(worker_id, max_concurrency, max_code_concurrency)
+                    # 爬坡节流由上方 budget（effective-活跃数）把门，生效档位
+                    # 只走 status 文件（set_ramp_up）。#534（codex P1 二轮）
+                    # 唯一例外：越池抑制期间该池声明压到当前活跃数——Host
+                    # 按「active < 声明容量」分池发活，本地预算只能 break 单
+                    # 个 pass，不压声明的话 Host 每个 pass 再发一个，running
+                    # 一路爬到声明容量；预算面恢复（pass_budget 的 discard）
+                    # 后回声目标容量。
+                    claim = client.claim(worker_id, declared["agent"], declared["code"])
                     if claim is None:
                         break
                     # #472 codex P2：pacing 输入是单次成功 claim 的往返
@@ -255,10 +269,6 @@ def main() -> int:
                     claimed, claim_rtt = True, time.monotonic() - claim_started
                     kind = "code" if str(claim.get("kind")) == "code" else "agent"
                     events.note_claim_received(worker_id, claim)
-                    # #534：该池已尽却领到这种活——照单收下这一个（Host 已
-                    # 记账，与「竞态超发照单收下」一致）并终止本轮，不借池。
-                    if budget[kind] <= 0:
-                        break
                     # Host 已在 claim 事务强制分池；竞态超发照单收下（Host 记账）。
                     budget[kind] -= 1
                     # #352：heartbeat_registry 追加在 #471 的 run_args/run_tail
@@ -273,6 +283,17 @@ def main() -> int:
                     )
                     active.add(future)
                     active_kinds[future] = kind
+                    # #534（codex P1 复审 + 二轮）：真越池（预算已尽却领到
+                    # 这种活，领取使预算转负）——「照单收下」必须含提交执行
+                    # （break 在 submit 之后，否则 Host 已记 claimed 的执行
+                    # 悬挂到租约过期）；且记入 pool_deferred 抑制该池（预算
+                    # 0 + 声明压到活跃数，见 pass_budget/下方 claim 调用）。
+                    # < 0 而非 <= 0：正常领满（预算 1 → 领取 → 0）不是越池，
+                    # 不抑制、不 break——否则 ramp 满档窗口声明容量会跌到
+                    # 档位值并随补位振荡，违反 #501「声明不随档位抖」。
+                    if budget[kind] < 0:
+                        pool_deferred.add(kind)
+                        break
             except WorkerAuthError as exc:
                 print(f"Agent Worker rejected by server: {exc}; re-register required", flush=True)
                 return 2
