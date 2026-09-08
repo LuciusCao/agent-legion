@@ -331,6 +331,9 @@ server/app/
 | RuntimeToolEntry | BaseModel | name: str, tier: str, description: str, parameters: dict[str, Any], activatio... | app/routes/agent_runtimes_contracts.py |
 | RuntimeTools | BaseModel | tools: list[RuntimeToolEntry] | app/routes/agent_runtimes_contracts.py |
 | AgentRuntimesResponse | BaseModel | runtimes: dict[str, RuntimeTools] | app/routes/agent_runtimes_contracts.py |
+| ClaimAgentExecutionRequest | BaseModel | worker_id: str, max_concurrency: int | None, max_code_concurrency: int | None... | app/routes/agent_worker_claim_contracts.py |
+| AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_worker_claim_contracts.py |
+| BatchAgentClaimResponse | BaseModel | claims: list[AgentClaimResponse] | app/routes/agent_worker_claim_contracts.py |
 | BatchHeartbeatItem | BaseModel | execution_id: str, lease_id: str | app/routes/agent_worker_heartbeat_batch.py |
 | BatchHeartbeatRequest | BaseModel | executions: list[BatchHeartbeatItem] | app/routes/agent_worker_heartbeat_batch.py |
 | BatchHeartbeatResponse | BaseModel | renewed: list[str], lost: list[str], cancelled_execution_ids: list[str] | app/routes/agent_worker_heartbeat_batch.py |
@@ -342,11 +345,9 @@ server/app/
 | AgentRegisterTokenSummary | BaseModel | token_id: str, workspace_id: str | None, label: str, created_at: str, revoked... | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokenDeleteResponse | BaseModel | token_id: str, deleted: bool, cascaded_worker_ids: list[str] | app/routes/agent_workers_contracts.py |
-| ClaimAgentExecutionRequest | BaseModel | worker_id: str, max_concurrency: int | None, max_code_concurrency: int | None | app/routes/agent_workers_contracts.py |
 | AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary] | app/routes/agent_workers_contracts.py |
 | AgentWorkerDeleteResponse | BaseModel | worker_id: str, deleted: bool | app/routes/agent_workers_contracts.py |
-| AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_workers_contracts.py |
 | AgentHeartbeatResponse | BaseModel | cancelled_execution_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool | app/routes/agents.py |
 | AgentsResponse | BaseModel | agents: list[AgentStatusResponse] | app/routes/agents.py |

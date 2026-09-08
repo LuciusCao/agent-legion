@@ -3633,6 +3633,15 @@ export interface components {
       hash: string
     }
     /**
+     * BatchAgentClaimResponse
+     * @description Batch claim answer (#546): requested via
+     *     ``ClaimAgentExecutionRequest.limit`` > 1; an empty batch stays a 204.
+     */
+    BatchAgentClaimResponse: {
+      /** Claims */
+      claims: components['schemas']['AgentClaimResponse'][]
+    }
+    /**
      * BatchHeartbeatItem
      * @description One execution of a per-Worker batch heartbeat.
      */
@@ -3748,6 +3757,15 @@ export interface components {
     }
     /** ClaimAgentExecutionRequest */
     ClaimAgentExecutionRequest: {
+      /** Agent Limit */
+      agent_limit?: number | null
+      /** Code Limit */
+      code_limit?: number | null
+      /**
+       * Limit
+       * @default 1
+       */
+      limit: number
       /** Max Code Concurrency */
       max_code_concurrency?: number | null
       /** Max Concurrency */
@@ -8320,7 +8338,9 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['AgentClaimResponse']
+          'application/json':
+            | components['schemas']['AgentClaimResponse']
+            | components['schemas']['BatchAgentClaimResponse']
         }
       }
       /** @description Validation Error */

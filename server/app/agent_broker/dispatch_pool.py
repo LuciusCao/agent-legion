@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 class AgentEnqueuePool:
     """Fixed daemon workers draining enqueue closures; drops nothing silently."""
 
-    def __init__(self, workers: int = 16, max_pending: int = 1024) -> None:
+    # 默认值与 AgentEnqueueConfig.workers 同源（#546：16 → 48，备货池跟不上
+    # batch claim 抬升后的消费侧）。
+    def __init__(self, workers: int = 48, max_pending: int = 1024) -> None:
         self._queue: queue.Queue[Callable[[], None] | None] = queue.Queue(max_pending)
         self._threads = [
             threading.Thread(target=self._run, name=f"agent-enqueue-{index}", daemon=True)

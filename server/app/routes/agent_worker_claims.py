@@ -1,28 +1,33 @@
 """Claim routes for the Agent Worker data plane (split from
 ``agent_workers.py`` for the file budget; heartbeat lives in
 ``agent_worker_heartbeat``, mirrors ``agent_worker_metrics.py``).
+
+Response assembly (manifest injection + contract build) lives in
+``agent_worker_claim_response.py``; the batch claim transaction (#546) in
+``server/app/agent_broker/claim_batch.py``.
 """
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from server.app.agent_broker import AgentExecutionBroker
-from server.app.agent_broker.artifact_object_block import inject_artifact_object_block
-from server.app.agent_broker.code_manifest import resolve_code_runtime_context
-from server.app.agent_broker.code_manifest_config import resolve_code_manifest_config
-from server.app.routes.agent_worker_heartbeat import register_heartbeat_route
-from server.app.routes.agent_workers_contracts import (
+from server.app.agent_broker.claim_batch import claim_batch
+from server.app.routes.agent_worker_claim_contracts import (
     AgentClaimResponse,
+    BatchAgentClaimResponse,
     ClaimAgentExecutionRequest,
+    ClaimRouteResponse,
 )
+from server.app.routes.agent_worker_claim_response import (
+    build_batch_claim_response,
+    build_claim_response,
+)
+from server.app.routes.agent_worker_heartbeat import register_heartbeat_route
 from server.app.settings import Settings
-
-logger = logging.getLogger(__name__)
 
 
 def create_agent_worker_claim_router(
@@ -34,11 +39,35 @@ def create_agent_worker_claim_router(
 ) -> APIRouter:
     router = APIRouter(tags=["agent-workers"])
 
-    @router.post("/agent-executions/claim", response_model=AgentClaimResponse)
+    @router.post("/agent-executions/claim", response_model=ClaimRouteResponse)
     def claim(
         payload: ClaimAgentExecutionRequest, request: Request
-    ) -> Response | AgentClaimResponse:
+    ) -> Response | AgentClaimResponse | BatchAgentClaimResponse:
         worker = authorize_worker(request, payload.worker_id)
+        # #546 batch claim: limit > 1 promotes up to `limit` executions in one
+        # transaction and answers BatchAgentClaimResponse; the default (1, or a
+        # pre-#546 Worker that sends no limit) takes the legacy single-claim
+        # path with a byte-identical response. A request carrying per-pool
+        # limits IS a batch request even at limit=1 — otherwise the pool caps
+        # would silently fall off exactly in the steady-state top-up shape
+        # (budget sum 1), and a clamped pool (agent_limit=0) could still be
+        # served through the unpooled single path.
+        if payload.limit > 1 or payload.agent_limit is not None or payload.code_limit is not None:
+            try:
+                claims = claim_batch(
+                    broker,
+                    payload.worker_id,
+                    payload.max_concurrency,
+                    payload.max_code_concurrency,
+                    limit=payload.limit,
+                    agent_limit=payload.agent_limit,
+                    code_limit=payload.code_limit,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            return build_batch_claim_response(
+                broker, settings, job_artifact_objects, worker, claims
+            )
         # #338: the claiming Worker's protocol version selects the artifact
         # object form (v4+ gets .gz specs; older Workers stay raw dual-form).
         try:
@@ -49,72 +78,7 @@ def create_agent_worker_claim_router(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if claimed is None:
             return Response(status_code=204)
-        manifest = claimed.manifest
-        if claimed.kind == "code":
-            # Secret injection happens on the response path only: the queued
-            # manifest keeps vault references, the resolved plaintext crosses
-            # the HTTPS channel and is never persisted (VAULT-SECRET-001).
-            # Issue #142: the queued manifest persists only the lightweight
-            # runtime_context audit stub — rebuild the full DB-derived
-            # payloads here, in memory, never persisted.
-            try:
-                manifest = resolve_code_manifest_config(
-                    manifest, broker.database_dsn, settings.config
-                )
-                manifest = resolve_code_runtime_context(
-                    manifest,
-                    broker.database_dsn,
-                    settings.config,
-                    job_artifact_objects,
-                    worker_protocol_version=int(worker["protocol_version"]),
-                )
-            except Exception as exc:
-                # #204 broad-except audit: claim-time manifest resolution that
-                # CONVERTS to a retryable 500, never silently swallows. The
-                # outcome space is deliberately wide: secret resolution
-                # (VaultError families), connection-token injection, the DB
-                # re-fetches in resolve_code_runtime_context (its own
-                # documented strict reads), and material/bundle claim blocks —
-                # none is a business family the response layer could
-                # enumerate, and any of them means "this Worker cannot run
-                # this execution with a well-formed manifest". Raising 500
-                # after the committed claim is the pinned recovery loop: the
-                # Worker drops the attempt, the lease expires, the sweeper
-                # requeues. logger.exception keeps the traceback for the
-                # operator; HTTPException carries a non-leaking detail.
-                # The claim already committed; a 500 lets the Worker drop the
-                # attempt and the sweeper requeues after the lease expires.
-                logger.exception("code manifest resolution failed for %s", claimed.execution_id)
-                raise HTTPException(
-                    status_code=500, detail="code manifest resolution failed"
-                ) from exc
-        else:
-            # #160 D12: agent manifests persist only CAS refs (dispatch never
-            # embeds URLs); the object-storage artifact channel (presigned
-            # PUT for outputs, presigned GET for staged inputs) is injected
-            # here, on the per-claim freshly deserialized manifest — memory
-            # only, so URLs never persist and never expire in the queue. A
-            # storage error degrades to the legacy CAS channel inside the
-            # helper; the claim never fails over injection.
-            inject_artifact_object_block(
-                job_artifact_objects,
-                manifest,
-                worker_protocol_version=int(worker["protocol_version"]),
-            )
-        return AgentClaimResponse(
-            execution_id=claimed.execution_id,
-            lease_id=claimed.lease_id,
-            workspace_id=claimed.workspace_id,
-            job_id=claimed.job_id,
-            # #211 M2: the column is gone — the deprecated response field
-            # keeps returning the identity value until the M3 contract drop.
-            workflow_key=claimed.workspace_id,
-            node_key=claimed.node_key,
-            agent_id=claimed.agent_id,
-            kind=claimed.kind,
-            manifest=manifest,
-            bundle_url=f"/api/agent-executions/{claimed.execution_id}/bundle",
-        )
+        return build_claim_response(broker, settings, job_artifact_objects, worker, claimed)
 
     register_heartbeat_route(router, broker, authorize_worker, require_lease_id)
     return router

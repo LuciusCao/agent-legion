@@ -300,3 +300,57 @@ def test_client_heartbeat_batch_malformed_body_degrades_with_warning(
     captured = capsys.readouterr()
     assert "unparseable body" in captured.out
     assert "not json" in captured.out
+
+
+# --- #546: 批量 claim client 面 -------------------------------------------------
+
+
+def test_client_claim_batch_posts_split_pool_limits() -> None:
+    """#546：批申请携带分池上限与总上限（分池批申请是本 issue 的对症形态）。"""
+    client = agent_worker.Client("http://unused")
+    seen: list[dict] = []
+    client.request = lambda *a, **k: (  # type: ignore[method-assign]
+        seen.append(json.loads(k["data"])),
+        (200, b'{"claims": [{"execution_id": "e1"}, {"execution_id": "e2"}]}'),
+    )[1]
+
+    claims = client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3)
+
+    assert [claim["execution_id"] for claim in claims] == ["e1", "e2"]
+    assert seen == [
+        {
+            "worker_id": "w1",
+            "max_concurrency": 70,
+            "max_code_concurrency": 4,
+            "limit": 8,
+            "agent_limit": 5,
+            "code_limit": 3,
+        }
+    ]
+
+
+def test_client_claim_batch_empty_is_204() -> None:
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (204, b"")  # type: ignore[method-assign]
+    assert client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3) == []
+
+
+def test_client_claim_batch_wraps_single_claim_for_old_host() -> None:
+    """混合舰队回落：pre-#546 Host 忽略批字段、照常返回单条 claim 对象——
+    形状嗅探包成单元素列表，调用方退化为逐条领取。"""
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (200, b'{"execution_id": "e1", "kind": "agent"}')  # type: ignore[method-assign]
+
+    assert client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3) == [
+        {"execution_id": "e1", "kind": "agent"}
+    ]
+
+
+def test_client_claim_batch_error_family_matches_single_claim() -> None:
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (409, b"unknown or revoked Agent Worker")  # type: ignore[method-assign]
+    with pytest.raises(agent_worker.WorkerAuthError):
+        client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3)
+    client.request = lambda *a, **k: (500, b"boom")  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="Agent claim failed: HTTP 500"):
+        client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3)

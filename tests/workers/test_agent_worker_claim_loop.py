@@ -19,8 +19,9 @@ from pathlib import Path
 import pytest
 
 from tests.workers.helpers import FakeClient, _claim, _run_main
-from worker import events as agent_worker_events
+from worker import claim_batch as worker_claim_batch
 from worker import executor as agent_worker
+from worker.execution import run as execution_run
 
 
 def test_main_agent_pool_exhausted_does_not_borrow_code_budget(
@@ -73,23 +74,24 @@ def test_main_agent_pool_exhausted_does_not_borrow_code_budget(
 
     fake.claim = claim  # type: ignore[method-assign]
     # 拦截 claim.attempt 的预算快照（issue #534 验收面：agent_budget 不再
-    # 出现负值序列）——旧 bug 借 code 预算把 agent 预算扣到 -31。
+    # 出现负值序列）——旧 bug 借 code 预算把 agent 预算扣到 -31。#546 起
+    # 该事件由 worker.claim_batch（claim pass 的唯一调用点）发出。
     attempts: list[dict] = []
     monkeypatch.setattr(
-        agent_worker_events,
+        worker_claim_batch,
         "note_claim_attempt",
-        lambda worker_id, budget, depth, enabled: attempts.append(dict(budget)),
+        lambda worker_id, budget, depth, enabled, limit: attempts.append(dict(budget)),
     )
     # codex P1（#535 复审）：越池单必须被提交执行——run_execution 是
-    # pool.submit 的必经函数（executor 的 pool 是 main 局部变量包不到），
-    # counting wrapper 记录每次提交的 claim 载荷。
+    # pool.submit 的必经函数（#546 起由 claim_batch.make_claim_submitter
+    # 迟绑定导入，打桩目标是定义模块本身）。
     submitted: list[object] = []
 
     def counting_execution(*args, **kwargs):  # type: ignore[no-untyped-def]
         submitted.append(args[1] if len(args) > 1 else None)
         return block_execution(*args, **kwargs)
 
-    monkeypatch.setattr(agent_worker, "run_execution", counting_execution)
+    monkeypatch.setattr(execution_run, "run_execution", counting_execution)
 
     updates = {
         "claim_enabled": True,
@@ -168,7 +170,7 @@ def test_main_code_pool_claims_still_work_when_agent_pool_is_zero(
         release.wait(timeout=5)
 
     fake.claim = claim  # type: ignore[method-assign]
-    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    monkeypatch.setattr(execution_run, "run_execution", block_execution)
     updates = {
         "claim_enabled": True,
         "max_concurrency": 1,
@@ -285,14 +287,15 @@ def test_main_cross_pool_suppression_caps_declared_capacity(
         submitted.append(args[1] if len(args) > 1 else None)
         return block_execution(*args, **kwargs)
 
-    monkeypatch.setattr(agent_worker, "run_execution", counting_execution)
+    monkeypatch.setattr(execution_run, "run_execution", counting_execution)
     # 拦截 claim.attempt 的预算快照（#534 验收面：agent 预算不再出现负值
-    # 序列——原始 bug 借 code 预算把 agent 预算扣到 -31）。
+    # 序列——原始 bug 借 code 预算把 agent 预算扣到 -31）。#546 起该事件
+    # 由 worker.claim_batch 发出。
     attempts: list[dict] = []
     monkeypatch.setattr(
-        agent_worker_events,
+        worker_claim_batch,
         "note_claim_attempt",
-        lambda worker_id, budget, depth, enabled: attempts.append(dict(budget)),
+        lambda worker_id, budget, depth, enabled, limit: attempts.append(dict(budget)),
     )
 
     updates = {
@@ -391,7 +394,7 @@ def test_main_normal_fill_does_not_suppress_or_clip_declaration(
     ):
         release.wait(timeout=10)
 
-    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    monkeypatch.setattr(execution_run, "run_execution", block_execution)
     updates = {
         "claim_enabled": True,
         "max_concurrency": 8,

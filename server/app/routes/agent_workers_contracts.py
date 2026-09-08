@@ -88,17 +88,6 @@ class AgentRegisterTokenDeleteResponse(BaseModel):
     cascaded_worker_ids: list[str] = Field(default_factory=list)
 
 
-class ClaimAgentExecutionRequest(BaseModel):
-    worker_id: str = Field(min_length=1, max_length=64)
-    # Live re-declaration of the worker's machine-wide capacity: the Host
-    # records it as the enforced max_concurrency, so dynamic resizes on the
-    # worker take effect without re-registration.
-    max_concurrency: int | None = Field(default=None, gt=0, le=1024)
-    # Live re-declaration of the code-execution pool (batch 2); None leaves
-    # the recorded value untouched.
-    max_code_concurrency: int | None = Field(default=None, ge=0, le=1024)
-
-
 class AgentWorkerSummary(BaseModel):
     worker_id: str
     name: str
@@ -132,32 +121,6 @@ class AgentWorkersResponse(BaseModel):
 class AgentWorkerDeleteResponse(BaseModel):
     worker_id: str
     deleted: bool
-
-
-class AgentClaimResponse(BaseModel):
-    execution_id: str
-    lease_id: str
-    workspace_id: str
-    job_id: str
-    # #211 Phase 2: the claim's workflow_key equals workspace_id (schema v62
-    # binding); Workers read workspace_id. The field stays in the response
-    # until the Phase 3/4 removal window so already-shipped Worker images
-    # keep parsing the body.
-    workflow_key: str = Field(
-        description=(
-            "Deprecated: equals workspace_id (schema v62); read workspace_id instead. "
-            "Removal is tracked in #211 (deprecated field drops by 2026-10-31)."
-        ),
-        deprecated=True,
-    )
-    node_key: str
-    agent_id: str
-    # 'agent' (default) or 'code' (batch 2): code claims carry a
-    # self-contained code payload in the manifest and the Worker executes it
-    # through the velites sandbox instead of an Agent runtime.
-    kind: str = "agent"
-    manifest: dict[str, Any]
-    bundle_url: str
 
 
 class AgentHeartbeatResponse(BaseModel):

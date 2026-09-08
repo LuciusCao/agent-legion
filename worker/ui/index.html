@@ -159,6 +159,7 @@
                     <label>最大并发<input name="max_concurrency" type="number" min="1" max="1024" required /></label>
                     <label>代码并发 <span class="hint">code 节点沙箱执行，0 = 不领取；热更新免重启，0→&gt;0 需本机已装 velites</span><input name="max_code_concurrency" type="number" min="0" max="1024" required /></label>
                     <label>上传并发<input name="upload_max_concurrency" type="number" min="1" max="1024" required /></label>
+                    <label>批领取上限 <span class="hint">一次 claim 往返最多领取数（#546），1 = 逐条领取；热更新免重启</span><input name="claim_batch_limit" type="number" min="1" max="256" required /></label>
                   </div>
                 </div>
                 <!-- Agent 运行时（issue #254）：自动探测本机已安装 runtime 并默认全部启用，

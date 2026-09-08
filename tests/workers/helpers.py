@@ -50,6 +50,22 @@ class FakeClient:
         self.release_calls = 0
         self.uploads: dict[str, bytes] = {}
 
+    def claim_batch(
+        self,
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+        *,
+        limit: int,
+        agent_limit: int,
+        code_limit: int,
+    ) -> list[dict]:
+        """#546 适配器：只打桩了单条 ``claim()`` 的用例经此回落为逐条领取
+        （混合舰队形态）——存量用例的语义全部保留；真批量由各自用例直接
+        打桩本方法覆盖。"""
+        claim = self.claim(worker_id, max_concurrency, max_code_concurrency)  # type: ignore[attr-defined]
+        return [claim] if claim is not None else []
+
     def download(self, path: str, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(self._bundle.read_bytes())

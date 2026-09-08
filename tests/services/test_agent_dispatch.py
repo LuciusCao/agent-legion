@@ -133,8 +133,9 @@ def _enqueue(
 
 
 def test_enqueue_pool_sized_from_settings(harness: SimpleNamespace) -> None:
-    # Defaults come from executor_runtime.agent_enqueue (AgentEnqueueConfig).
-    assert harness.pool_kwargs == {"workers": 16, "max_pending": 1024}
+    # Defaults come from executor_runtime.agent_enqueue (AgentEnqueueConfig);
+    # workers 48 since #546 (the stock pool fell behind batch-claim demand).
+    assert harness.pool_kwargs == {"workers": 48, "max_pending": 1024}
     assert harness.service.enqueue_pool is harness.pool
 
 

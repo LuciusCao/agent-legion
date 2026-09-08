@@ -1,8 +1,10 @@
 """HTTP client for the local Worker Service CLI.
 
-Control calls (register/claim/metrics) live here; the heartbeat family is
-the ``HeartbeatOperations`` mixin (``worker.host.heartbeat_ops``), retried
-bulk transfers the ``TransferOperations`` mixin (``worker.host.transfer``).
+Control calls (register/metrics) live here; the claim family is the
+``ClaimOperations`` mixin (``worker.host.claim_ops``, #546), the heartbeat
+family is the ``HeartbeatOperations`` mixin (``worker.host.heartbeat_ops``),
+retried bulk transfers the ``TransferOperations`` mixin
+(``worker.host.transfer``).
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import requests
 
 from shared.protocol import PROTOCOL_VERSION
 from worker import events
+from worker.host.claim_ops import ClaimOperations
 from worker.host.errors import TransientHostError, WorkerAuthError
 from worker.host.heartbeat_ops import HeartbeatOperations
 from worker.host.transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
@@ -30,7 +33,7 @@ DEFAULT_TIMEOUT = 30
 __all__ = ["Client", "TransientHostError", "WorkerAuthError"]
 
 
-class Client(HeartbeatOperations, TransferOperations):
+class Client(ClaimOperations, HeartbeatOperations, TransferOperations):
     def __init__(
         self,
         host: str,
@@ -151,32 +154,6 @@ class Client(HeartbeatOperations, TransferOperations):
         if status != 200:
             raise RuntimeError(f"Agent Worker status failed: HTTP {status}: {body[:300]!r}")
         return dict(json.loads(body))
-
-    def claim(
-        self,
-        worker_id: str,
-        max_concurrency: int | None = None,
-        max_code_concurrency: int | None = None,
-    ) -> dict[str, Any] | None:
-        payload: dict[str, Any] = {"worker_id": worker_id}
-        if max_concurrency is not None:
-            payload["max_concurrency"] = max_concurrency
-        if max_code_concurrency is not None:
-            payload["max_code_concurrency"] = max_code_concurrency
-        status, body = self.request(
-            "POST",
-            "/api/agent-executions/claim",
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        if status == 204:
-            return None
-        if status in (401, 409):
-            raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
-        if status != 200:
-            raise RuntimeError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
-        claim: dict[str, Any] | None = json.loads(body)
-        return claim
 
     def get_ops_metrics(self, granularity: str) -> dict[str, Any]:
         """Fetch this Worker's metrics with its issued Worker token."""

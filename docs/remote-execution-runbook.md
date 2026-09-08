@@ -217,7 +217,8 @@ in:
   headroom and the workspace token scope — no capability declaration is
   needed (issue #284 retired capability matching). The field is hot (#123): `PUT /api/config` changes that touch
   only hot fields (`claim_enabled`, `max_concurrency`,
-  `max_code_concurrency`, `upload_max_concurrency`, `ramp_up`) do not
+  `max_code_concurrency`, `upload_max_concurrency`, `ramp_up`,
+  `claim_batch_limit`) do not
   restart the Worker (`worker/service.py`). Hot-opening code capacity from
   0 to >0 requires a resolvable `velites` binary: with velites missing, the
   in-loop hot guard rejects the change and logs it, and the new capacity
@@ -331,7 +332,7 @@ flipping the field:
 | Gateway 502 | LLM provider unreachable from the laptop (VPN dropped, network change) | Restore the laptop's network path to the provider; workers' pi runs fail fast and surface as failed executions |
 | Gateway 401/403 | `LLM_GATEWAY_TOKEN` missing or mismatched | Gateway and every worker must share the same token (§4); never run a tailnet-bound gateway without it |
 | Batched agent failures with `unexpected EOF during chunk size line` while other apps on the same machine also lose connectivity | Worker egress silently routed through a local proxy process (Clash/mihomo) inherited from the launch shell; the proxy's config reload/subscription refresh cuts every in-flight stream at once (#444) | The service strips inherited proxy env at startup (a one-line INFO log marks it). Production workers must not run behind a local proxy process; if egress through a proxy is genuinely required, declare it explicitly in the worker config (`proxy:` field / console 高级参数 → 出网代理) so the choice is visible and owned |
-| Worker claims steadily but concurrency "breathes" below configured capacity during recovery | Success-path claim pacing (#472) is adaptive: the wait after a successful claim is the last single claim round-trip × 0.5, clamped to [10ms, 100ms] (the pre-0.7.0 fixed 0.2s wait is gone); an empty queue resets to the floor, error paths keep the #437 exponential backoff | Expected behavior — the floor is a deliberate guard for claim-transaction lock contention. If recovery throughput still matters, check `worker claim pacing <N>ms` log lines for the current band; a cold-start burst can additionally be shaped with `ramp_up` (deployment doc §5) |
+| Worker claims steadily but concurrency "breathes" below configured capacity during recovery | Success-path claim pacing (#472) is adaptive: the wait after a successful claim is the last claim round-trip × 0.5, clamped to [10ms, 100ms] (the pre-0.7.0 fixed 0.2s wait is gone); since #546 one round-trip claims a batch (`claim_batch_limit`, default 32, hot) and pacing tracks the batch's equivalent per-claim RTT (batch RTT ÷ batch size); an empty queue resets to the floor, error paths keep the #437 exponential backoff | Expected behavior — the floor is a deliberate guard for claim-transaction lock contention. If recovery throughput still matters, check `worker claim pacing <N>ms` log lines for the current band; a cold-start burst can additionally be shaped with `ramp_up` (deployment doc §5) |
 | 高并发档位下运行容量规律性锯齿：贴满上限 → 数分钟一次掉 10%–20% 并一两分钟回满，worker 侧上传队列同时排队 | Host 单进程控制面在完成波下饱和（#521）：DAG 同相位节点成波报告，result commit 的 GIL 绑定工作（tar 解包、产物校验、写事务、events 后处理）打满单核，claim/心跳被饿死 | 运行画像（`/api/metrics/runtime-profile`）的 result 分段列（schema v80 起：`result_unpack / artifacts_verify / validate / artifacts_upload / lease_write / events / mark_done_seconds_total/max`）指认吃 CPU 的段；`result stages:` 日志行（超过 `AGENT_LEGION_SLOW_RESULT_MS`，默认 15s，升 WARNING）给单次分解。削峰 gate 默认已开（`agent_workers.max_concurrent_result_commits` = 16，instance settings 可调，0 = 关闭做 A/B）；gate 的排队等待是 result 总时长减去分段和的残差（spool 同在其中）——评估 gate 效果看这个数。调 gate 时注意连接池配比：events 段持读连接嵌套开写连接，gate 并发 × 2 逼近 `AGENT_LEGION_DB_POOL_MAX_SIZE`（默认 32）时 result 会在波峰 500（池超时），建议 gate ≤ pool/2；遗留绝对路径警告应已由一次性清理归零（启动报告 `report_absolute_db_paths` 全零），仍在刷说明有不可映射行留在库里 |
 | Everything idle, nothing failing | Laptop asleep or offline | Workers recover on their own; enforce §2 item 5 |
 
@@ -349,19 +350,21 @@ supervisor console stream. Align the two sides by `execution_id` /
 | `worker.registered` | Host | Registration committed: runtime version matrix, concurrency declarations, resolved workspace scope |
 | `worker.register_rejected` | Host | Registration refused (400/401): `reason` (`protocol_version_too_old` + `min_protocol_version`, `register_key_deleted`, `invalid_registration`) |
 | `worker.offline` | Host | A previously-online worker crossed the `last_seen` threshold (30 s); `last_seen_at` (the DB-true last seen) + `threshold_seconds`; fires once per transition |
-| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`) |
+| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`); batch claim (#546) emits one line per claimed execution and the occupancy counters read the batch's FINAL pool state (the single-claim path snapshots at its own promote) |
 | `claim.empty` | Host | 204 — queue drained for this worker's pools; `reasons` when the queue head was skipped (paused workspace, lock races…) |
 | `claim.rejected` | Host | Stock present but this worker was not admitted — see the reason codes below; when every pool is at its cap the scan never runs and the live pool state is the evidence (`capacity_full`/`code_capacity_full` synthesized from it) |
 | `execution.started` | Host | Reserved name in the event namespace (the claim→run start is covered by `claim.granted` + Worker-side `execution.claimed`) |
 | `execution.finished` | Host | Terminal commit: `outcome` (`completed`/`failed`/… or `rejected` with `reason: not_owned`), `exit_code`, `wall_seconds` (claim → committed result; `null` when the post-commit read failed) — committed outcomes are DEBUG rhythm, `outcome=rejected` is INFO (the last Host-side clue of that execution) |
 | `execution.heartbeat_rejected` | Host | Heartbeat refused: `reason: not_owned` or `lease_not_active` — the worker must stop beating |
 | `execution.lease_expired` | Host | The sweeper deleted an expired lease: `attempt`, `requeue_limit` (will it rerun here?) |
-| `claim.attempt` | Worker | One claim poll's local budget snapshot (`agent_budget`/`code_budget`/`upload_backlog`/`claim_enabled`) |
+| `claim.attempt` | Worker | One claim poll's local budget snapshot (`agent_budget`/`code_budget`/`upload_backlog`/`claim_enabled`); `limit` (#546) is the batch size this poll asks for |
 | `claim.backoff` | Worker | The #437 backoff sequence's position: `failures`, `wait_seconds`, `error` |
 | `execution.claimed` | Worker | A claim arrived — the Worker-side view of the Host's `claim.granted` |
 | `execution.completed` | Worker | Local process/code exit: `exit_code`, `wall_seconds`; Host acceptance is its `execution.finished` |
 | `execution.failed` | Worker | Local containment boundary fired (download/spawn/wait raised): `error` summary |
 | `http.error` | Worker | Upstream error response (`status_code` + `url` + bounded `body`) or transport failure (`url` + `error`) — the middle-502 blind spot, since the Host never sees the response |
+
+Batch claim (#546) note: a batch's skip reasons surface only on the zero-claim verdict (claim.empty above); a partially filled batch discards them (the claims themselves are the evidence). The batch-only skip `batch_lock_order` (candidates deferred to keep the batch transaction's workspace locks ascending) therefore never appears in an event — it is aggregated into the `skipped` count of the `claim stages:` log lines, and a batch that underfills against `limit` with a nonzero `skipped` is the signature.
 
 `claim.rejected` reason codes (claim-path decision-point naming):
 

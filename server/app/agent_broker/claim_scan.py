@@ -29,7 +29,7 @@ RUNNABLE_JOB_STATUSES = ("queued", "running", "awaiting_approval")
 
 
 class ClaimRacedError(Exception):
-    """The job left the runnable set mid-claim; roll the whole claim back."""
+    """Mid-claim job exit: rolls back the single claim; #546 batch contains it in a savepoint."""
 
 
 @dataclass(frozen=True)

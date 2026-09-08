@@ -162,7 +162,7 @@ exemptions:
     The claim transaction module stays one file for two stacked
     instrumentation generations: the #448 claim-stage timer (one
     ClaimStageTimer whose worker_setup/scan/evaluate/writes closes ride the
-    existing statements, plus the _report_claim_stages helper shared by all
+    existing statements, plus the report_claim_stages helper shared by all
     three return paths) and the #490 observation call (one
     note_claim_outcome per exit, payloads assembled in worker_events.py).
     The alternative — moving the orchestration out to a new module — would
@@ -172,10 +172,12 @@ exemptions:
     PR that added the observation calls riding the same exits. #498 then
     REMOVED the in-transaction observation calls (the verdict rides out as
     one ClaimOutcome return; the broker emits only after the commit), so
-    the ceiling stays at its committed floor.
+    the ceiling stays at its committed floor. #546 moved the Worker-level
+    setup out to claim_setup.py (shared with the batch claim) and the
+    exemption ceiling ratcheted down with the shrink.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/498
-  ceiling: 122
+  ceiling: 106
 - check: architecture.file_budget
   path: server/app/agent_broker/worker_events.py
   reason: >-
@@ -316,6 +318,17 @@ exemptions:
   reason: Agent Worker release-slot acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
   remove_when: docs/architecture/backend.md#agent-worker-protocol-responses
+- check: architecture.route_response_model
+  path: server/app/routes/agent_worker_claims.py:claim
+  reason: >-
+    #546 batch claim: one endpoint answers two protocol generations — the
+    single AgentClaimResponse (limit=1, byte-identical for pre-#546 Workers)
+    and the BatchAgentClaimResponse wrapper (limit>1). The named union
+    response_model serializes as anyOf, which the inline-schema gate rejects
+    by construction; both members are named contract models, so no untyped
+    payload crosses. Removed together with the single-claim path (#547).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/547
 - check: architecture.file_budget
   path: server/app/services/agent_service.py
   reason: Schema v27 made this service the only Agent catalog source of truth; the short-TTL published-definition
@@ -606,13 +619,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 236
-- check: architecture.file_budget
-  path: server/app/routes/agent_workers_contracts.py
-  reason: '#381 version handshake: RegisterAgentWorkerRequest gained the informational runtime_versions
-    mapping (default empty for older Workers). One field on the request contract.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 92
 - check: architecture.file_budget
   path: shared/code_sandbox.py
   reason: '#383 added the sandbox-binary resolution primitive here (candidates velites-sandbox -> velites;
@@ -1108,6 +1114,29 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/534
   ceiling: 67
+- check: architecture.file_budget
+  path: worker/service_models.py
+  reason: >-
+    #546 wires claim_batch_limit (the batch claim size knob) into the Worker
+    config API: one optional field on WorkerConfigPayload (+1 effective
+    line). The file is a flat payload-model list with nothing left to split;
+    the exemption closes when the payload models are next split by domain
+    (tracked by the remove_when issue).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/549
+  ceiling: 34
+- check: architecture.file_budget
+  path: worker/config_validation.py
+  reason: >-
+    #546 wires claim_batch_limit into the Worker config surface:
+    _EDITABLE_FIELDS + _DEFAULTS entries plus the value validation aligned
+    with max_code_concurrency's in-file check (+3 effective lines). Same
+    shape as the existing one-field precedents; the exemption closes when
+    per-field validation moves out to the field-owning modules (tracked by
+    the remove_when issue).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/549
+  ceiling: 148
 - check: architecture.file_budget
   path: worker/upload/heartbeat.py
   reason: >-
