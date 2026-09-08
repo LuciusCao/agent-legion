@@ -105,3 +105,18 @@ def test_invalid_workers_env_falls_back_with_warning(
         size = pool_module._pool_size()
     assert size == min(4, os.cpu_count() or 1)
     assert "AGENT_LEGION_RESULT_UNPACK_WORKERS" in caplog.text
+
+
+def test_reset_pool_only_kills_the_broken_instance() -> None:
+    """身份守卫（复审二轮 P2）：撞破旧池的线程只重置旧池——别人刚建好的
+    新池不受影响（完成波下并发撞池的重试 future 不被 cancel）。"""
+    from server.app.agent_broker import result_unpack_pool as pool_module
+
+    try:
+        pool_a = pool_module._pool()
+        pool_module.reset_pool(broken=object())  # 非当前池身份 → 不动
+        assert pool_module._pool() is pool_a
+        pool_module.reset_pool(broken=pool_a)  # 身份匹配 → 关停置 None
+        assert pool_module._POOL is None
+    finally:
+        pool_module.reset_pool()

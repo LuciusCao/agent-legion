@@ -70,12 +70,16 @@ def _pool() -> ProcessPoolExecutor:
         return _POOL
 
 
-def reset_pool() -> None:
-    """丢弃当前池（下次提交重建）。恢复入口：BrokenProcessPool 自愈与测试。"""
+def reset_pool(broken: ProcessPoolExecutor | None = None) -> None:
+    """丢弃当前池（下次提交重建）。``broken`` 身份守卫：只关停调用者实际
+    撞破的那个池——完成波下多条线程会同时撞 BrokenProcessPool（池内
+    worker 硬死时所有 pending future 同时失败），后来者的 reset 若落在别
+    人刚建好的新池上，会把人家的重试 future 一起 cancel 掉。"""
     global _POOL
     with _POOL_LOCK:
-        if _POOL is not None:
-            _POOL.shutdown(wait=False, cancel_futures=True)
+        if _POOL is None or (broken is not None and _POOL is not broken):
+            return
+        _POOL.shutdown(wait=False, cancel_futures=True)
         _POOL = None
 
 
@@ -89,8 +93,9 @@ def unpack_in_pool(call: Callable[..., Any], *args: Any) -> Any:
     once and the task retried; a deterministically crashing archive fails
     THIS result (the caller's containment converts it), not the pipeline.
     """
+    pool = _pool()
     try:
-        return _pool().submit(call, *args).result()
+        return pool.submit(call, *args).result()
     except BrokenProcessPool:
-        reset_pool()
+        reset_pool(broken=pool)
         return _pool().submit(call, *args).result()
