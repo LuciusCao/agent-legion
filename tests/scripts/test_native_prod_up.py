@@ -386,5 +386,35 @@ class TestBackendRoleConsistencyGate:
     def test_combined_target_refuses_running_scheduler(self) -> None:
         """Switching back to combined must also refuse a still-running
         dedicated scheduler (the reverse double-scheduling hazard)."""
-        gate = NATIVE_PROD_UP.split("反向切换同样 fail-fast")[1][:500]
-        assert "exit 1" in gate
+        branch = re.search(
+            r'if \[\[ "\$BACKEND_ROLE" == "combined" \]\]; then.*?fi',
+            NATIVE_PROD_UP,
+            re.DOTALL,
+        ).group(0)
+        assert branch.count("exit 1") == 1
+
+    def test_legacy_backend_without_role_is_rejected_on_http_target(self) -> None:
+        """R1 on the codex-fix review: a pre-#521 backend reports no role —
+        starting a dedicated scheduler next to its built-in one is the
+        exact double-scheduling upgrade hazard; the gate must fail-fast
+        with an opt-out escape hatch."""
+        legacy_block = re.search(
+            r'-z "\$RUNNING_ROLE" && "\$BACKEND_ROLE" == "http".*?fi',
+            NATIVE_PROD_UP,
+            re.DOTALL,
+        ).group(0)
+        assert "exit 1" in legacy_block
+        assert "AGENT_LEGION_ALLOW_LEGACY_BACKEND=1" in legacy_block
+
+    def test_probe_failure_falls_back_to_empty_role(self) -> None:
+        """R4: a curl failure between port check and probe must not abort
+        the whole script under set -e — it falls back to the empty-role
+        (unknown process) handling."""
+        assert 'RUNNING_ROLE="$(backend_running_role)" || RUNNING_ROLE=""' in NATIVE_PROD_UP
+
+    def test_readiness_loop_watches_scheduler_liveness(self) -> None:
+        """R2: the wait loop must fail when a scheduler started this run
+        dies during the window (exit-3), instead of printing ready."""
+        assert "SCHEDULER_STARTED_THIS_RUN=0" in NATIVE_PROD_UP
+        assert NATIVE_PROD_UP.count("SCHEDULER_STARTED_THIS_RUN=1") == 2
+        assert "scheduler_pid_alive" in NATIVE_PROD_UP.split("健康等待")[1]

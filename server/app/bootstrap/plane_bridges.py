@@ -28,9 +28,11 @@ logger = logging.getLogger(__name__)
 
 def configure_scheduler_logging() -> None:
     """Scheduler-plane logging (outside uvicorn, so the log-config json
-    never applies — mirror its INFO level)."""
+    never applies — mirror its INFO level and timestamped format)."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     _log = logging.getLogger("agent_legion")
-    _log.addHandler(logging.StreamHandler())
+    _log.addHandler(handler)
     _log.setLevel(logging.INFO)
 
 

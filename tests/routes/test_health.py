@@ -34,3 +34,29 @@ def test_health_reports_host_role(client) -> None:
     assert response.status_code == 200
     # The test client's app is built without a role → combined default.
     assert response.json()["role"] == "combined"
+
+
+def test_health_reports_http_role_for_http_plane(tmp_path, monkeypatch) -> None:
+    """#521 方案 B: the http plane stamps its role — the launcher's
+    deployment-shape probe depends on distinguishing http from combined."""
+    from fastapi.testclient import TestClient
+
+    from server.app import main
+    from server.app.events.agents import AgentStatusManager
+
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+    real_load = main.load_settings
+
+    def _load(*args, **kwargs):
+        kwargs.setdefault("data_dir", tmp_path)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(main, "load_settings", _load)
+    app = main.create_app(role="http")
+    with TestClient(app) as http_client:
+        response = http_client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["role"] == "http"

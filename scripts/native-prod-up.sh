@@ -163,11 +163,25 @@ backend_running_role() {
 BACKEND_ALREADY_RUNNING=0
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     BACKEND_ALREADY_RUNNING=1
-    RUNNING_ROLE="$(backend_running_role)"
+    # 探测失败（后端恰在此时退出/挂起）不得静默炸掉整个脚本（set -e），
+    # 回落到空角色按「未知进程」处理。
+    RUNNING_ROLE="$(backend_running_role)" || RUNNING_ROLE=""
     if [[ -n "$RUNNING_ROLE" && "$RUNNING_ROLE" != "$BACKEND_ROLE" ]]; then
         echo "错误: 后端已在 :$BACKEND_PORT 以 ${RUNNING_ROLE} 角色运行，但本次目标是 ${BACKEND_ROLE}。" >&2
         echo "      角色不一致时继续会产生双调度面（combined 内置调度器 + 独立 scheduler）。" >&2
         echo "      请先运行 ./scripts/native-prod-down.sh 停止现有进程，再重新 prod-up。" >&2
+        exit 1
+    fi
+    # 角色 #521 起必暴露：探测不到 role 的已监听后端要么是升级前的旧版
+    # （旧 combined 内置调度器——本次 http 目标下再起独立 scheduler 就是
+    # 双调度面，且旧探针锁键不同、无告警兜底），要么是端口上的未知进程。
+    # 两者都拒绝带病继续；确属预期的旧实例可用逃生门确认后继续。
+    if [[ -z "$RUNNING_ROLE" && "$BACKEND_ROLE" == "http" && "${AGENT_LEGION_ALLOW_LEGACY_BACKEND:-}" != "1" ]]; then
+        echo "错误: 后端已在 :$BACKEND_PORT 运行但 /api/health 未报告角色——" >&2
+        echo "      这是升级前的旧版后端（其内置调度器会与本次要启动的独立 scheduler 双调度）" >&2
+        echo "      或占用该端口的未知进程。" >&2
+        echo "      请先运行 ./scripts/native-prod-down.sh 停止现有进程，再重新 prod-up；" >&2
+        echo "      确认无碍确要继续时设 AGENT_LEGION_ALLOW_LEGACY_BACKEND=1。" >&2
         exit 1
     fi
     echo "后端已在 :$BACKEND_PORT 运行（角色: ${RUNNING_ROLE:-未知}），跳过"
@@ -195,6 +209,8 @@ fi
 # 一致——SIGTERM 优雅停机由 native-prod-down.sh 发出。
 SCHEDULER_LOG="data/logs/prod-scheduler.log"
 SCHEDULER_PIDFILE="data/scheduler.pid"
+# 就绪循环用：仅当调度平面是本脚本启动的，死 pidfile 才判失败（见第 4 节）。
+SCHEDULER_STARTED_THIS_RUN=0
 # PID 存活之外还校验命令行：pidfile 残留 + PID 被无关进程复用时，
 # 只看 kill -0 会把别人误认成调度进程（跳过启动→静默无调度 /
 # down 误杀）。macOS 上 caffeinate -is 直接 exec 子进程（$! 即真身，
@@ -223,8 +239,10 @@ if [[ "$BACKEND_ROLE" == "combined" ]]; then
 elif scheduler_running; then
     echo "调度平面已在运行，跳过"
 elif [[ "$BACKEND_ALREADY_RUNNING" -eq 1 ]]; then
-    # 角色一致性已在上面临界校验（RUNNING_ROLE == BACKEND_ROLE == http）。
+    # 角色一致性已在上面临界校验（RUNNING_ROLE == http；空角色在 http
+    # 目标下已被 legacy 门拦截）。
     echo "调度平面未运行，启动（后端 http 平面已在位）…"
+    SCHEDULER_STARTED_THIS_RUN=1
     ulimit -n 65535
     AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
     AGENT_LEGION_HOST_ROLE=scheduler \
@@ -233,6 +251,7 @@ elif [[ "$BACKEND_ALREADY_RUNNING" -eq 1 ]]; then
     echo $! > "$SCHEDULER_PIDFILE"
 else
     echo "启动调度平面（scheduler）…"
+    SCHEDULER_STARTED_THIS_RUN=1
     ulimit -n 65535
     AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
     AGENT_LEGION_HOST_ROLE=scheduler \
@@ -255,11 +274,25 @@ fi
 
 # 4. 健康等待：最多 5 分钟（#127——冷启动时 PG 冷缓存、schema 引导等
 # 仍可能超过 1 分钟；等待期间每 30s 输出一次进度，避免误报启动失败）。
+# 调度平面无 HTTP 端点，按 pidfile 存活判断：本次启动的 scheduler 若在
+# 等待期内退出（workflow worker 启动失败 → 退出码 3），就绪循环必须
+# 报错而非打印「已就绪」——否则部署显示就绪却无任何调度（codex P1-2
+# 的 native 侧收尾；compose 侧 restart: unless-stopped 已托管重启）。
 for i in $(seq 1 150); do
-    backend_ok=false; worker_ok=false
+    backend_ok=false; worker_ok=true; scheduler_ok=true
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
-    if $backend_ok && $worker_ok; then
+    if [[ -f "$SCHEDULER_PIDFILE" ]]; then
+        # 死 pidfile 只在「本脚本启动的 scheduler」上判失败：已存在/跳过
+        # 启动的场景无从区分刚死与从未启动，保持只做正向就绪检查。
+        if [[ "$SCHEDULER_STARTED_THIS_RUN" -eq 1 ]] \
+            && ! scheduler_pid_alive "$(cat "$SCHEDULER_PIDFILE" 2>/dev/null || true)"; then
+            echo "错误: 调度平面已退出（启动失败，日志见 $SCHEDULER_LOG）。" >&2
+            echo "      compose 形态会自动重启；原生形态请检查日志后重跑 prod-up。" >&2
+            exit 1
+        fi
+    fi
+    if $backend_ok && $worker_ok && $scheduler_ok; then
         echo "原生环境已就绪：后端 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT （含前端 SPA），Worker 控制台 http://$WORKER_HEALTH_HOST:$WORKER_PORT"
         exit 0
     fi
