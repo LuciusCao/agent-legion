@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.workers.test_agent_worker import FakeClient, _claim, _run_main
+from tests.workers.helpers import FakeClient, _claim, _run_main
 from worker import events as agent_worker_events
 from worker import executor as agent_worker
 

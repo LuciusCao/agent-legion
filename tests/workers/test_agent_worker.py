@@ -10,13 +10,10 @@ tests/workers/test_agent_worker_client_protocol.py（均为测试文件行数
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import shutil
 import stat
 import subprocess
-import sys
 import threading
 import time
 import urllib.error
@@ -24,71 +21,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.workers.helpers import FakeClient, _claim, _run_main, _write_main_config
 from worker import executor as agent_worker
 from worker.process_lifecycle import terminate
 from worker.status import ExecutionStatusReporter, read_runtime_status
-
-
-def _claim(execution_id: str = "exec-1") -> dict:
-    return {
-        "execution_id": execution_id,
-        "lease_id": "lease-1",
-        "node_key": "node_a",
-        "bundle_url": "/api/agent-executions/exec-1/bundle",
-    }
-
-
-class FakeClient:
-    """In-memory stand-in for agent_worker.Client.
-
-    构造参数仍是 bundle path（main() 系列传一个不存在的路径即可——它们
-    只打桩 claim/register/get_self，从不下载）。"""
-
-    def __init__(
-        self, bundle: Path, *, heartbeat_status: int = 204, release_status: int = 204
-    ) -> None:
-        self._bundle = bundle
-        self._heartbeat_status = heartbeat_status
-        self._release_status = release_status
-        self.heartbeats = 0
-        self.heartbeat_lease_ids: list[str] = []
-        self.reports: list[dict] = []
-        self.report_lease_ids: list[str] = []
-        self.release_calls = 0
-        self.uploads: dict[str, bytes] = {}
-
-    def download(self, path: str, destination: Path) -> None:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(self._bundle.read_bytes())
-
-    def upload_artifact(self, path: Path) -> str:
-        data = path.read_bytes()
-        self.uploads[hashlib.sha256(data).hexdigest()] = data
-        return f"sha256:{hashlib.sha256(data).hexdigest()}"
-
-    def get_self(self) -> dict:
-        return {
-            "worker_id": "w1",
-            "name": "Worker 1",
-            "revoked": False,
-            "online": True,
-        }
-
-    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
-        self.heartbeats += 1
-        self.heartbeat_lease_ids.append(lease_id)
-        return self._heartbeat_status, []
-
-    def release_slot(self, execution_id: str, lease_id: str) -> int:
-        self.release_calls += 1
-        return self._release_status
-
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
-        self.reports.append(metadata)
-        self.report_lease_ids.append(lease_id)
-        return 204, b""
 
 
 def _write_executable(path: Path, body: str) -> str:
@@ -185,24 +121,6 @@ def test_terminate_kills_sigterm_ignoring_process_group(tmp_path: Path) -> None:
     assert proc.poll() is not None
 
 
-def _write_main_config(tmp_path: Path) -> Path:
-    token_file = tmp_path / "register_token"
-    token_file.write_text("management-token", encoding="utf-8")
-    config = {
-        "host_url": "http://unused",
-        "worker_id": "w1",
-        "runtimes": ["pi"],
-        "max_concurrency": 1,
-        "register_token_file": str(token_file),
-        "work_root": str(tmp_path / "work"),
-        "poll_interval_seconds": 0.05,
-        "heartbeat_interval_seconds": 0.05,
-    }
-    config_path = tmp_path / "worker.yaml"
-    config_path.write_text(json.dumps(config), encoding="utf-8")
-    return config_path
-
-
 def test_load_claim_controls_reads_hot_fields_and_validates_types(tmp_path: Path) -> None:
     config_path = _write_main_config(tmp_path)
     config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -221,40 +139,6 @@ def test_load_claim_controls_defaults_to_disabled(tmp_path: Path) -> None:
     config_path = _write_main_config(tmp_path)
 
     assert agent_worker.runtime_controls.load_claim_controls(config_path) == (1, False, None)
-
-
-def _run_main(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    fake: FakeClient,
-    config_updates: dict | None = None,
-) -> tuple[threading.Thread, dict, list]:
-    """Run main() in a thread with a stubbed signal module and Client."""
-    handlers: dict = {}
-    monkeypatch.setattr(
-        agent_worker.signal,
-        "signal",
-        lambda sig, handler: handlers.setdefault(sig, handler),
-    )
-    monkeypatch.setattr(agent_worker, "Client", lambda host, **kwargs: fake)
-    fake.register = lambda config, token: {"worker_token": "worker-token", "workspaces": []}  # type: ignore[attr-defined]
-    # main() 的启动预检会探测 PATH 上的 runtime 二进制；测试与真实机器环境
-    # 无关，统一打桩为全部存在（预检自身的用例单独覆盖）。
-    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/bin/{binary}")
-    config_path = _write_main_config(tmp_path)
-    if config_updates:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        config.update(config_updates)
-        config_path.write_text(json.dumps(config), encoding="utf-8")
-    monkeypatch.setattr(sys, "argv", ["agent_worker.py", "--config", str(config_path)])
-    result: list[int] = []
-
-    def target() -> None:
-        result.append(agent_worker.main())
-
-    thread = threading.Thread(target=target, daemon=True)
-    thread.start()
-    return thread, handlers, result
 
 
 def test_main_survives_transient_claim_errors(
