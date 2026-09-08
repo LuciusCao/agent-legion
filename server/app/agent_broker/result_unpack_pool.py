@@ -74,12 +74,14 @@ def reset_pool(broken: ProcessPoolExecutor | None = None) -> None:
     """丢弃当前池（下次提交重建）。``broken`` 身份守卫：只关停调用者实际
     撞破的那个池——完成波下多条线程会同时撞 BrokenProcessPool（池内
     worker 硬死时所有 pending future 同时失败），后来者的 reset 若落在别
-    人刚建好的新池上，会把人家的重试 future 一起 cancel 掉。"""
+    人刚建好的新池上，会把人家的重试 future 一起 cancel 掉。
+    wait=True：worker 进程退出必须同步等完——测试断言
+    ``multiprocessing.active_children()`` 为空，异步关停会留竞态窗口。"""
     global _POOL
     with _POOL_LOCK:
         if _POOL is None or (broken is not None and _POOL is not broken):
             return
-        _POOL.shutdown(wait=False, cancel_futures=True)
+        _POOL.shutdown(wait=True, cancel_futures=True)
         _POOL = None
 
 
