@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# 一键停止原生（非 Docker）生产环境：后端 (8000) 与 worker (8787)。
-# SIGTERM 优雅停机（worker 有 shutdown_grace_seconds 预算用于上报在途结果），
+# 一键停止原生（非 Docker）生产环境：后端 (8000)、调度平面（scheduler）
+# 与 worker (8787)。SIGTERM 优雅停机（worker 有 shutdown_grace_seconds
+# 预算用于上报在途结果；scheduler 收 SIGTERM 停各调度线程后退出），
 # 超时未退出才警告提示人工处理。幂等：目标监听不存在则跳过。
 #
 # 进程按「绑定地址 + 端口」定位（NATIVE_BACKEND_BIND / NATIVE_WORKER_BIND，
 # 默认 127.0.0.1，与 native-prod-up.sh 同一组变量）：同端口不同地址可并存
 # 监听，按端口 head -1 会杀错进程；up 用什么 bind 起的，down 就用同一个
 # bind 停。同族通配监听（*:port / [::]:port）占满所属族，同样匹配。
+# 调度平面无端口，按命令行（python -m server.app.scheduler_process）定位。
 set -euo pipefail
 
 BACKEND_PORT="${NATIVE_BACKEND_PORT:-8000}"
@@ -72,8 +74,32 @@ stop_port() {
     return 1
 }
 
+stop_pids() {
+    local name="$1" grace="$2" pattern="$3"
+    local pids
+    pids="$(pgrep -f "$pattern" 2>/dev/null || true)"
+    if [[ -z "$pids" ]]; then
+        echo "$name 未在运行，跳过"
+        return 0
+    fi
+    echo "停止 $name (pid $pids) …"
+    for pid in $pids; do
+        kill "$pid" 2>/dev/null || true
+    done
+    for i in $(seq 1 "$grace"); do
+        if ! pgrep -f "$pattern" >/dev/null 2>&1; then
+            echo "$name 已停止"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "警告：$name (pid $pids) ${grace}s 内未退出，请人工检查（日志 data/logs/prod-scheduler.log）" >&2
+    return 1
+}
+
 rc=0
-# 先停 worker（停止领新任务并给它上报预算），再停后端
+# 先停 worker（停止领新任务并给它上报预算），再停调度平面与后端
 stop_port "$WORKER_BIND" "$WORKER_PORT" "Worker" 35 || rc=1
+stop_pids "调度平面" 15 "python -m server.app.scheduler_process" || rc=1
 stop_port "$BACKEND_BIND" "$BACKEND_PORT" "后端" 15 || rc=1
 exit "$rc"

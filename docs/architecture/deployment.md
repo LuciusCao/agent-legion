@@ -112,7 +112,8 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 > 刻意放在进程内，数据库只是部分状态的持久层。误把 uvicorn/compose 的水平扩缩容
 > 直觉搬过来（`--workers N`、多容器副本、K8s Deployment replicas>1），功能不会崩溃
 > 但会**静默退化**——每个症状都长得像另一个 bug。本节固化这份现状与症状形态，
-> 并说明已内置的第二副本探测护栏。
+> 并说明已内置的第二副本探测护栏。#521 方案 B 的角色拆分（见下）是**刻意双进程
+> 形态**：每个平面仍是单副本，只是把 API 面与调度面分进两个进程。
 
 ### 进程内的运行时状态
 
@@ -126,8 +127,10 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 ### 当前正确形态与护栏
 
 - **当前部署形态（单 uvicorn 进程 × 每数据库一个副本）全部正确**：开发机
-  `make dev`、生产 `scripts/native-prod-up.sh` / `deploy/` compose 均如此。多 worktree
-  开发也天然合规——`scripts/init-worktree.sh` 给每个 worktree 派生专属数据库，
+  `make dev`、生产 `scripts/native-prod-up.sh` / `deploy/` compose 均如此
+  （prod 启动器自 #521 角色拆分起默认双平面，见下；`combined` 形态经
+  `AGENT_LEGION_HOST_ROLE` 回退）。多 worktree 开发也天然合规——
+  `scripts/init-worktree.sh` 给每个 worktree 派生专属数据库，
   「两个进程、两个库」不触发本节任何症状。
 - **第二副本探测（`server/app/single_replica_probe.py`）**：lifespan 启动时在一条
   专用池连接上取会话级 advisory lock（key 与 `current_database()` 一起哈希，跨库不
@@ -138,6 +141,32 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 - 逃生门与开关：
   - `AGENT_LEGION_ALLOW_MULTI_REPLICA=1`：知情确认多副本，warning 降为 info；
   - `AGENT_LEGION_SKIP_SINGLE_REPLICA_PROBE=1`：完全跳过探测（测试/特殊场景）。
+- **角色拆分（#521 方案 B，刻意双进程形态）**：`AGENT_LEGION_HOST_ROLE`
+  把控制平面拆成两个单副本平面——`http`（uvicorn API 面：路由、result
+  commit、claim、心跳、dashboard SSE、Studio chat）与 `scheduler`
+  （`python -m server.app.scheduler_process`：sweeper、workflow worker、
+  慢速清扫、指标采样）。默认 `combined` 保持单进程形态不变。拆分形态
+  下两平面各持一把探针锁（`control-plane-http` / `scheduler`），互相
+  不误报；**同一平面的第二个进程仍会被检出**（两个 uvicorn http 平面
+  或两个 scheduler 进程都触发 #277 警告）。跨平面的归属划分：
+  - 可调度工作唤醒：HTTP 平面的写路径（run 提交、发布、审批……）经
+    PostgreSQL `NOTIFY agent_legion_schedulable` 桥（`scheduler_notify.py`）
+    唤醒调度进程的 poll 循环；payload-free、best-effort，丢通知由
+    scheduler 3s 空转 poll 兜底（桥只买延迟，不买正确性）。
+  - 指标采样：只在 scheduler 进程跑（`ops_metric_samples` /
+    `ops_runtime_profile_samples` 的分钟桶 upsert 是每进程覆盖写，双写
+    丢 (N-1)/N 数据）；HTTP 平面的 `/api/metrics/*` 读路由查表不采表。
+    调度进程的 claim/result 进程内计数器因此只覆盖自身流量——HTTP
+    平面的 claim/result 延迟画像在拆分形态下改看 uvicorn 访问日志
+    （每请求行自带耗时），分阶段列反映调度进程本地的 commit/pass。
+  - `reset_all_to_paused`：只在 combined/scheduler 角色启动时执行；
+    HTTP 平面滚动重启不再抹掉运行中部署的操作员恢复状态。
+  - intake 异步消费：调度进程独占（`claim_intake_run` 的 DB claim 语义
+    本就多消费者安全，单消费者是刻意的归属划分而非硬约束）。
+  - 已知取舍：dashboard SSE 事件、Studio chat 会话、登录限速仍在 HTTP
+    平面进程内（#277 表格的 1/2/3 项语义不变）；调度进程的健康面是其
+    日志（`data/logs/prod-scheduler.log`，compose 侧 `restart:
+    unless-stopped` 托管存活）。
 - 若未来确实需要多副本，正确路径不是简单横向扩缩容，而是把上表逐项外置
   （事件总线走 pub/sub、限速与暂停状态本就以 DB 为权威、Chat 会话需要粘性路由或
   会话外置），每项都是独立的设计工作，不在本节展开。

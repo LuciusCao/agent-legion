@@ -38,8 +38,13 @@ def test_probe_closes_transaction_and_keeps_session_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     unique_key = f"issue-433-regression-{os.getpid()}"
-    monkeypatch.setattr(single_replica_probe, "_REPLICA_LOCK_KEY", unique_key)
     probe = SingleReplicaProbe(TEST_DATABASE_URL)
+    # Per-test unique key: the stock key is shared with every TestClient
+    # lifespan in the postgres tier, and an xdist sibling running one of
+    # those concurrently would make acquisition non-deterministic. The
+    # key is instance state since the role split (#521 方案 B) added the
+    # per-plane suffix — patch the built key, not the module constant.
+    monkeypatch.setattr(probe, "_lock_key", unique_key)
 
     try:
         assert probe.probe() is True

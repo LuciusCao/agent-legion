@@ -146,6 +146,9 @@ services:
       # 的凭据齐备性由 scripts/local-s3-decide.sh 在 prod-up 入口 fail-fast。
       AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
       AGENT_LEGION_S3_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
+      # 角色分派（#521 方案 B）：本服务是 HTTP 平面，调度平面在同文件的
+      # scheduler 服务（AGENT_LEGION_HOST_ROLE: scheduler）。
+      AGENT_LEGION_HOST_ROLE: http
     secrets: [postgres_pgpass, vault_master_key]
     volumes:
       - host-data:/var/lib/agent-legion
@@ -158,6 +161,39 @@ services:
       interval: 10s
       timeout: 3s
       retries: 20
+
+  # 调度平面（#521 方案 B）：专用进程跑 sweeper + workflow worker + 慢速
+  # 清扫 + 指标采样，HTTP 平面（host 服务）专注 API/结果提交。两平面经
+  # PostgreSQL NOTIFY 桥接可调度工作通知（scheduler_notify.py）。无 HTTP
+  # 端口；健康语义即「进程存活」（restart: unless-stopped 托管重启）。
+  scheduler:
+    build:
+      context: ..
+      target: host
+    image: agent-legion-host:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AGENT_LEGION_DATABASE_URL: postgresql://agent_legion@postgres:5432/agent_legion
+      AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA: "1"
+      PGPASSFILE: /run/secrets/postgres_pgpass
+      AGENT_LEGION_VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
+      AGENT_LEGION_DATA_DIR: /var/lib/agent-legion
+      AGENT_LEGION_S3_ENDPOINT: ${AGENT_LEGION_S3_ENDPOINT-http://seaweedfs:8333}
+      AGENT_LEGION_S3_PUBLIC_ENDPOINT: ${AGENT_LEGION_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:8333}
+      AGENT_LEGION_S3_BUCKET: ${AGENT_LEGION_S3_BUCKET:-agent-legion}
+      AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
+      AGENT_LEGION_S3_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
+      # 角色分派（#521 方案 B）：scheduler 进程跑调度平面；上面的 host 服务
+      # 对应加 AGENT_LEGION_HOST_ROLE: http。
+      AGENT_LEGION_HOST_ROLE: scheduler
+    secrets: [postgres_pgpass, vault_master_key]
+    volumes:
+      - host-data:/var/lib/agent-legion
+      - ${AGENT_SKILLS_DIR:-../skills}:/root/.agents/skills:ro
+    stop_grace_period: 25s
 
   worker:
     build:

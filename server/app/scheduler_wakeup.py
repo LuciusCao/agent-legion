@@ -6,6 +6,23 @@ immediately instead of waiting out its idle backoff. The worker registers its
 ``wake`` callback from the application lifespan and unregisters on shutdown.
 Callbacks are invoked best-effort: a failing callback is logged and never
 affects the caller or the other callbacks.
+
+#521 方案 B (role split): in a split deployment the write paths run on the
+HTTP plane while the scheduler runs in the scheduler process, so a notify
+must ALSO cross the process boundary. The dispatch layer below fans each
+notify out to both transports:
+
+- the local registry (in-process callbacks — combined-role processes and
+  the scheduler process's own write paths, e.g. the intake queue
+  consumer);
+- an optional cross-process backend (PostgreSQL NOTIFY, see
+  ``scheduler_notify.py``) — installed on HTTP-plane processes by the
+  composition root; absent (None) in combined/scheduler-role processes,
+  where the local registry already reaches every consumer and a NOTIFY
+  would be a no-op round-trip.
+
+Backend failures are contained inside the backend (scheduler_notify logs
+and returns); the local registry's "never raises" contract is unchanged.
 """
 
 from __future__ import annotations
@@ -19,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _callbacks: list[Callable[[], None]] = []
+
+# Cross-process notify backend (see module docstring); installed once at
+# composition time via set_notify_backend, cleared via clear_notify_backend.
+_notify_backend: Callable[[], None] | None = None
 
 
 def register_wakeup(callback: Callable[[], None]) -> None:
@@ -35,10 +56,23 @@ def unregister_wakeup(callback: Callable[[], None]) -> None:
             _callbacks.remove(callback)
 
 
+def set_notify_backend(backend: Callable[[], None] | None) -> None:
+    """Install (or clear) the cross-process notify backend.
+
+    Called by the composition root on HTTP-plane processes; the backend
+    receives every notify alongside the local callbacks. Passing None
+    clears a previously installed backend (lifespan teardown).
+    """
+    global _notify_backend
+    with _lock:
+        _notify_backend = backend
+
+
 def notify_schedulable_work() -> None:
-    """Invoke all registered wakeup callbacks; never raises."""
+    """Invoke all registered wakeup callbacks and the notify backend; never raises."""
     with _lock:
         callbacks = list(_callbacks)
+        backend = _notify_backend
     for callback in callbacks:
         try:
             callback()
@@ -54,6 +88,17 @@ def notify_schedulable_work() -> None:
             # worst case the wake is lost and the next poll interval
             # rediscovers the work). logger.exception keeps the traceback.
             logger.exception("scheduler wakeup callback %r failed", callback)
+    if backend is not None:
+        try:
+            backend()
+        except Exception:
+            # #204 broad-except audit: the cross-process backend is
+            # scheduler_notify.notify_schedulable_work_cross_process,
+            # which already contains its own failure surface; this guard
+            # covers a replaced backend breaking its contract. Same
+            # rationale as the callback containment above: never raises,
+            # poll backoff is the fallback.
+            logger.exception("scheduler notify backend failed")
 
 
 def reload_scan_entries_best_effort(worker: Any) -> None:

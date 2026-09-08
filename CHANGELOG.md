@@ -63,6 +63,22 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   走 JobQueries 门面 `jobs/queries/path_hygiene.py`——BOUNDARY-DATA-001，
   分块小事务、失败下次启动续跑、幂等由选取条件自带）；不可映射行保留
   并继续由启动报告暴露。修数据而非反复警告。
+- Host 角色拆分（issue #521 方案 B，多进程根治）：`AGENT_LEGION_HOST_ROLE`
+  三态（env-only，默认 `combined` 保持单进程形态）——`http` 平面
+  （uvicorn 跑 API/result/claim/心跳，不启动调度线程）+ 专用 `scheduler`
+  进程（`python -m server.app.scheduler_process`，跑 sweeper + workflow
+  worker + 慢速清扫 + 指标采样），完成波的 GIL 绑定 result commit 不再
+  与 claim/心跳循环共享 Python 进程。跨平面可调度工作唤醒经 PostgreSQL
+  `NOTIFY agent_legion_schedulable` 桥（`scheduler_notify.py`，payload-free、
+  best-effort，丢通知由调度进程 3s poll 兜底，只买延迟不买正确性）；
+  指标采样只在调度进程跑（分钟桶 upsert 是每进程覆盖写，HTTP 平面停采，
+  读路由不依赖采样循环）；`reset_all_to_paused` 只在 combined/scheduler
+  角色执行（HTTP 平面重启不再抹掉运行中部署的恢复状态）；单副本探针
+  （#277）按平面分锁槽（`control-plane-http` / `scheduler`），拆分部署
+  不再误报，同平面双进程仍被检出。部署联动：`scripts/native-prod-up.sh`
+  起两平面（down 对应停）、`deploy/compose.host.yaml` 拆 `host`（http）
+  + `scheduler` 两服务。已知取舍（见 deployment.md）：dashboard SSE 事件
+  与 Studio chat 仍只在 HTTP 平面进程内（同 #277 语义）。
 
 ### Changed
 - 遗留绝对路径警告按存储路径去重（issue #521）：热路径（result

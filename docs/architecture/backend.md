@@ -686,7 +686,7 @@ server/app/
 
 ### 后端
 
-- `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂，也是
+- `server.app.main:create_app(data_dir, start_worker, role)` 是 FastAPI 应用工厂，也是
   Host 进程唯一的组装根（composition root）：settings → DB 门面 → 一次性
   migration/seed → services → routers → 线程组在此一次接线。内建的顺序不变式：
   实例设置先于任何 service 读取从 DB hydrate；全部 workspace 启动即重置暂停；
@@ -694,6 +694,14 @@ server/app/
   单副本持有（与 SingleReplicaProbe advisory lock 同规则，#277）；lifespan
   teardown 先释放 replica 锁、收割 studio chat 会话、停线程，最后才关 DB 连接池。
   `create_prod_app` 是 uvicorn 工厂，import 本模块保持无副作用。
+  #521 方案 B 角色拆分：`role` 参数（env `AGENT_LEGION_HOST_ROLE`，默认
+  `combined`）选平面——`http` 不启动调度线程组、不做启动暂停重置、停指标
+  采样循环（改由 scheduler 进程独占），可调度工作唤醒经
+  `scheduler_notify.py` 的 PostgreSQL NOTIFY 桥转发；
+  `scheduler` 角色不经 app 工厂，走 `server.app.scheduler_process`
+  独立进程入口（sweeper + workflow worker + 慢速清扫 + 指标采样，
+  持 `scheduler` 探针锁槽；`create_app(role="scheduler")` 显式拒绝）。
+  单进程形态的默认值与语义不变。
 - `server.app.executors.leases.ExecutorLeaseRepository` 是 AGENTS.md §6 点名的
   容量申请门面：service 一律经它 claim/finish/expire，不得直调
   `executors.code` / `.runtime` / `.contracts`。仓库是数据层毗邻组件（#187 设计

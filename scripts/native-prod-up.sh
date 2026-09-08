@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# 一键启动原生（非 Docker）生产环境：后端 (8000) + worker (8787)。
+# 一键启动原生（非 Docker）生产环境：后端 (8000) + scheduler + worker (8787)。
 # 前端无独立进程：后端直接服务 frontend/dist（本脚本会先构建）。
-# 幂等：端口已被监听时跳过对应进程的启动。进程经 nohup + caffeinate
-# 脱离终端并防睡眠，日志在 data/logs/prod-{backend,worker}.log。
+# 后端与 scheduler 是角色拆分的两平面（#521 方案 B）：HTTP 进程跑 API 面
+# （AGENT_LEGION_HOST_ROLE=http，result/claim/心跳），专用调度进程跑
+# sweeper + workflow worker + 指标采样（AGENT_LEGION_HOST_ROLE=scheduler）。
+# 幂等：端口已被监听时跳过对应进程的启动（scheduler 无端口，按日志文件
+# 存在 + 进程存活判断）。进程经 nohup + caffeinate 脱离终端并防睡眠，
+# 日志在 data/logs/prod-{backend,scheduler,worker}.log。
 # 端口与绑定地址可分别用 NATIVE_BACKEND_PORT / NATIVE_WORKER_PORT 与
 # NATIVE_BACKEND_BIND / NATIVE_WORKER_BIND 覆盖（默认 8000/8787 与 127.0.0.1；
 # 暴露给局域网/overlay 网络时把 bind 设为对应网卡地址，S3 联动配置见
@@ -143,21 +147,44 @@ elif [[ "$local_s3_rc" -ne 0 ]]; then
     echo "警告: 跳过本地 ${LOCAL_S3_SERVICE} 启动（原因见上方），材料相关功能将不可用" >&2
 fi
 
-# 2. 后端
+# 2. 后端（HTTP 平面，#521 方案 B：AGENT_LEGION_HOST_ROLE=http）
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
 else
-    echo "启动后端 $BACKEND_BIND:$BACKEND_PORT …"
+    echo "启动后端（HTTP 平面）$BACKEND_BIND:$BACKEND_PORT …"
     ulimit -n 65535
     # 共享库 schema 门（server/app/db/schema.py）：prod 是有意迁移裸
     # agent_legion 库的操作者，显式授予 opt-in；误连该库的工具脚本
     # （缺 .env 的 worktree export_openapi 等）则被硬拦。
     AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
+    AGENT_LEGION_HOST_ROLE=http \
     nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m uvicorn \
         server.app.main:create_prod_app --factory --host "$BACKEND_BIND" --port "$BACKEND_PORT" \
         --timeout-graceful-shutdown 3 \
         --log-config deploy/uvicorn-log-config.json \
         > data/logs/prod-backend.log 2>&1 &
+fi
+
+# 2.5 调度平面（#521 方案 B）：专用进程跑 sweeper + workflow worker +
+# 慢速清扫 + 指标采样；HTTP 平面的可调度工作通知经 PostgreSQL
+# NOTIFY 桥接（scheduler_notify.py）。无 HTTP 端口，幂等判断按
+# 「上一次启动的进程仍在运行」：日志文件缺失即从未启动；存在则按
+# pgrep 匹配命令行（模块名足够特异）。重启语义与后端一致——SIGTERM
+# 优雅停机由 native-prod-down.sh 发出。
+SCHEDULER_LOG="data/logs/prod-scheduler.log"
+scheduler_running() {
+    [[ -f "$SCHEDULER_LOG" ]] || return 1
+    pgrep -f "python -m server.app.scheduler_process" >/dev/null 2>&1
+}
+if scheduler_running; then
+    echo "调度平面已在运行，跳过"
+else
+    echo "启动调度平面（scheduler）…"
+    ulimit -n 65535
+    AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
+    AGENT_LEGION_HOST_ROLE=scheduler \
+    nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m server.app.scheduler_process \
+        > "$SCHEDULER_LOG" 2>&1 &
 fi
 
 # 3. Worker

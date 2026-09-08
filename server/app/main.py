@@ -2,16 +2,29 @@
 
 ``create_app`` wires settings → DB → seeds → services → routers → threads;
 ``create_prod_app`` is the uvicorn factory. Ordering invariants: backend.md.
+
+#521 方案 B (role split): ``role`` selects the plane this process runs —
+``combined`` (default, the pre-split single process), ``http`` (API plane
+only; wakeup notifies relay to the scheduler process via PostgreSQL
+NOTIFY), ``scheduler`` (rejected here — that role runs via
+``python -m server.app.scheduler_process``). See
+``server/app/configuration/host_role.py``.
 """
 
 import asyncio
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 
 from fastapi import FastAPI
 
 from server.app.auth.service import build_auth_service
 from server.app.bootstrap import build_agent_plane
+from server.app.configuration.host_role import (
+    ROLE_COMBINED,
+    ROLE_HTTP,
+    ROLE_SCHEDULER,
+)
 from server.app.db.connection import close_database_pools
 from server.app.events import JobEventManager
 from server.app.events.agents import AgentStatusManager
@@ -28,7 +41,8 @@ from server.app.mcp_server.http_app import (
 from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
 from server.app.routes.quality_deps import build_quality_loop
-from server.app.scheduler_wakeup import unregister_wakeup
+from server.app.scheduler_notify import notify_schedulable_work_cross_process
+from server.app.scheduler_wakeup import set_notify_backend, unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
@@ -61,7 +75,14 @@ from server.app.worker_startup import start_worker_threads
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
-def create_app(data_dir: Path | None = None, start_worker: bool = False) -> FastAPI:
+def create_app(
+    data_dir: Path | None = None, start_worker: bool = False, role: str = ROLE_COMBINED
+) -> FastAPI:
+    if role == ROLE_SCHEDULER:
+        raise RuntimeError(
+            "AGENT_LEGION_HOST_ROLE=scheduler is not an app-factory role: run the "
+            "scheduler plane via 'python -m server.app.scheduler_process'"
+        )
     settings = load_settings(data_dir=data_dir)
     event_bus = InProcessEventBus()
     agent_manager = AgentStatusManager(event_bus=event_bus)
@@ -88,7 +109,12 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db)
     # Resume state must not survive a restart: dispatch stays off until an
     # operator explicitly resumes it in this process lifetime.
-    workspace_worker_control.reset_all_to_paused()
+    # Role split (#521 方案 B): only the combined role performs the reset —
+    # an http-plane process resetting on every restart would wipe an
+    # operator's just-restored dispatch state in a running deployment
+    # (the scheduler process holds the resume state's authority instead).
+    if role != ROLE_HTTP:
+        workspace_worker_control.reset_all_to_paused()
     artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db)
     # Instance object storage is env-only infra config (AGENT_LEGION_S3_*):
     # unconfigured instances keep the API up — materials degrade to 503 and
@@ -139,7 +165,13 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
         job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
-        ops_metrics=ops_metrics,
+        # Role split (#521 方案 B): ops-metrics sampling runs ONLY in the
+        # process that owns the scheduler plane — a per-minute upsert row
+        # written from two processes overwrites (N-1)/N of the data.
+        # combined keeps the pre-split behavior; http defers the loop to
+        # the scheduler process (the service stays wired for the read
+        # routes, which never touch the sampling loop).
+        ops_metrics=ops_metrics if role != ROLE_HTTP else None,
     )
     # Single-replica guardrail (#277): the runtime state above (in-process
     # event bus, login rate limiter, studio chat sessions, pause reset) is
@@ -147,7 +179,18 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # silently. The probe holds one session advisory lock for the process
     # lifetime; a second starter finds it taken and logs a warning (env
     # escape hatches documented in single_replica_probe.py).
-    replica_probe = SingleReplicaProbe(job_db)
+    # Role split (#521 方案 B): each plane takes its own lock key, so a
+    # deliberate split deployment (http + scheduler against one database)
+    # is not a #277 second-replica accident — the per-plane conflict
+    # message points at the respective plane's lock instead. Two
+    # processes of the SAME plane remain the detected hazard.
+    replica_probe = SingleReplicaProbe(job_db, lock_name="control-plane-http")
+    if role == ROLE_HTTP:
+        # A process-local wake registry can never reach a scheduler in
+        # another process: relay this process's schedulable-work notifies
+        # to it over PostgreSQL NOTIFY (payload-free, best-effort — the
+        # scheduler's poll backoff is the fallback latency).
+        set_notify_backend(partial(notify_schedulable_work_cross_process, job_db))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -198,6 +241,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 yield
         finally:
             await background_tasks.stop(app)
+            # Role split (#521 方案 B): stop relaying wakeup notifies before
+            # the pools close so a request racing shutdown cannot fire the
+            # backend into a closing pool.
+            set_notify_backend(None)
             # Release the replica-probe lock before the pools close so the
             # next starter (rolling restart) does not see a stale holder.
             replica_probe.close()
@@ -282,5 +329,15 @@ def create_prod_app() -> FastAPI:
     Importing this module must stay side-effect free (no DB bootstrap, no
     seeding, no pause reset) — the former module-level ``app`` needed an env
     escape hatch; this replaces it.
+
+    Role split (#521 方案 B): ``AGENT_LEGION_HOST_ROLE=http`` composes the
+    API plane only (scheduler threads off, wakeup notifies relayed via
+    PostgreSQL NOTIFY); the default (and any other value) keeps the
+    combined single-process shape. ``scheduler`` never reaches here — the
+    factory rejects it and the scheduler plane runs via
+    ``python -m server.app.scheduler_process``.
     """
-    return create_app(start_worker=True)
+    from server.app.configuration.host_role import host_role_from_env
+
+    role = host_role_from_env()
+    return create_app(start_worker=role != ROLE_HTTP, role=role)

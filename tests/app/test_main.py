@@ -73,6 +73,92 @@ def test_lifespan_sweeper_disabled_by_settings(tmp_path, monkeypatch):
     assert "sweeper" not in calls
 
 
+def test_lifespan_http_role_skips_scheduler_threads(tmp_path, monkeypatch):
+    """#521 方案 B: the http plane composes the API without the scheduler
+    plane — no workflow worker/sweeper threads, no pause reset, no
+    ops-metrics sampling task (the scheduler process owns those)."""
+    from server.app import main
+
+    calls = []
+
+    def patched_workflow_start(self):
+        calls.append("workflow")
+
+    def patched_sweeper_start(self):
+        calls.append("sweeper")
+
+    monkeypatch.setattr(WorkflowWorkerThread, "start", patched_workflow_start)
+    monkeypatch.setattr(SweeperThread, "start", patched_sweeper_start)
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+
+    reset_calls: list[str] = []
+    monkeypatch.setattr(
+        main.WorkspaceWorkerControl,
+        "reset_all_to_paused",
+        lambda self: reset_calls.append("reset"),
+    )
+
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    app = main.create_app(data_dir=tmp_path, role="http")
+    with TestClient(app) as _:
+        pass  # lifespan startup runs here
+
+    # The scheduler plane stays in the scheduler process.
+    assert calls == []
+    # No pause reset from the http plane — a rolling restart must not
+    # wipe an operator's resumed dispatch state.
+    assert reset_calls == []
+    # No ops-metrics sampling task on the http plane.
+    assert getattr(app.state, "ops_metrics_task", None) is None
+
+
+def test_lifespan_combined_role_resets_pause_state(tmp_path, monkeypatch):
+    """The default combined role keeps the pre-split behavior: the startup
+    pause reset runs (dispatch stays off until an operator resumes it)."""
+    from server.app import main
+
+    monkeypatch.setattr(WorkflowWorkerThread, "start", lambda self: None)
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+
+    reset_calls: list[str] = []
+    monkeypatch.setattr(
+        main.WorkspaceWorkerControl,
+        "reset_all_to_paused",
+        lambda self: reset_calls.append("reset"),
+    )
+
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    app = main.create_app(data_dir=tmp_path, start_worker=True)
+    with TestClient(app) as _:
+        pass
+
+    assert reset_calls == ["reset"]
+
+
+def test_lifespan_http_role_installs_notify_backend(tmp_path, monkeypatch):
+    """The http plane relays wakeup notifies via the NOTIFY backend for its
+    whole lifespan and clears it on teardown."""
+    from server.app import main, scheduler_wakeup
+
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    app = main.create_app(data_dir=tmp_path, role="http")
+    assert scheduler_wakeup._notify_backend is not None
+    with TestClient(app) as _:
+        pass
+    assert scheduler_wakeup._notify_backend is None
+
+
 def test_spa_catch_all_serves_static_files_and_fallback(tmp_path, monkeypatch):
     from server.app import main
 

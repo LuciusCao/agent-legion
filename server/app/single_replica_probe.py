@@ -65,8 +65,14 @@ _SKIP_PROBE_ENV = "AGENT_LEGION_SKIP_SINGLE_REPLICA_PROBE"
 
 # Fixed lock key; combined with current_database() below so two Host
 # instances against two databases on one cluster do not fight over it
-# (same scoping precedent as db/schema.py's migration lock).
+# (same scoping precedent as db/schema.py's migration lock). The role
+# suffix (#521 方案 B) splits the key per process plane.
 _REPLICA_LOCK_KEY = "agent-legion-single-replica-probe"
+
+# One lock slot per process role (#521 方案 B): combined-role and http-plane
+# processes contend on the control-plane slot; the scheduler process takes
+# the scheduler slot. A name not in this set is a programming error.
+_VALID_LOCK_NAMES = ("control-plane-http", "scheduler")
 
 _TRY_LOCK_SQL = "select pg_try_advisory_lock(hashtext(%s || current_database())) as acquired"
 _UNLOCK_SQL = "select pg_advisory_unlock(hashtext(%s || current_database()))"
@@ -75,8 +81,18 @@ _UNLOCK_SQL = "select pg_advisory_unlock(hashtext(%s || current_database()))"
 class SingleReplicaProbe:
     """Owns the dedicated connection holding the replica-detection lock."""
 
-    def __init__(self, db_source: ConnectSource) -> None:
+    def __init__(self, db_source: ConnectSource, lock_name: str = "control-plane-http") -> None:
+        # lock_name (#521 方案 B role split): one slot per process ROLE, not
+        # per process — a deliberate split deployment (http + scheduler
+        # planes against one database) is not a #277 second-replica
+        # accident, so each plane holds its own key and two processes of
+        # the SAME plane remain the detected hazard. Keep the names
+        # short and stable: they are hashed with current_database() into
+        # the advisory-lock key space.
+        if lock_name not in _VALID_LOCK_NAMES:
+            raise ValueError(f"unknown single-replica probe lock name: {lock_name!r}")
         self._db_source = db_source
+        self._lock_key = f"{_REPLICA_LOCK_KEY}:{lock_name}"
         self._connection: DatabaseConnection | None = None
         self._lock_acquired: bool | None = None
 
@@ -99,7 +115,7 @@ class SingleReplicaProbe:
             return True
         conn = connect_database(self._db_source)
         try:
-            row = conn.execute(_TRY_LOCK_SQL, (_REPLICA_LOCK_KEY,)).fetchone()
+            row = conn.execute(_TRY_LOCK_SQL, (self._lock_key,)).fetchone()
             # The try-lock SELECT opened a transaction on this held-forever
             # connection, and the pooled connection is not autocommit (#433):
             # commit it or the connection sits in idle-in-transaction for the
@@ -147,11 +163,11 @@ class SingleReplicaProbe:
         logger.warning(
             "single-replica probe: another Host replica appears to be running "
             "against this database (advisory lock %s held elsewhere). The "
-            "control plane is single-replica: SSE events, login rate limiting, "
-            "Studio chat sessions, and pause state do not span replicas. Set "
-            "%s=1 to acknowledge this deployment, or run exactly one replica "
-            "per database.",
-            _REPLICA_LOCK_KEY,
+            "control plane is single-replica per plane: SSE events, login rate "
+            "limiting, Studio chat sessions, and pause state do not span "
+            "replicas. Set %s=1 to acknowledge this deployment, or run exactly "
+            "one replica of this plane per database.",
+            self._lock_key,
             _ALLOW_MULTI_REPLICA_ENV,
         )
 
@@ -171,7 +187,7 @@ class SingleReplicaProbe:
             return
         try:
             if self._lock_acquired:
-                conn.execute(_UNLOCK_SQL, (_REPLICA_LOCK_KEY,))
+                conn.execute(_UNLOCK_SQL, (self._lock_key,))
         except Exception:  # noqa: BLE001 - shutdown is best-effort
             # #204 broad-except audit: shutdown safety net during the lifespan
             # finally. A failed unlock (broken connection, pool already closed
