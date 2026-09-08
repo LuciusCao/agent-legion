@@ -178,10 +178,9 @@ SCHEDULER_LOG="data/logs/prod-scheduler.log"
 SCHEDULER_PIDFILE="data/scheduler.pid"
 # PID 存活之外还校验命令行：pidfile 残留 + PID 被无关进程复用时，
 # 只看 kill -0 会把别人误认成调度进程（跳过启动→静默无调度 /
-# down 误杀）。caffeinate 包裹下 $! 是 caffeinate 的 pid，命令行
-# 同样不含 scheduler_process——因此校验它自身或其子进程任一命中
-# 即可（caffeinate 常驻转发，子进程才是真身；ps -o command= 列出
-# 本 pid 的命令行，pgrep -P 查子进程）。
+# down 误杀）。macOS 上 caffeinate -is 直接 exec 子进程（$! 即真身，
+# ps -p 命中）；为兼容其他包装形态，校验自身或子进程任一命中即可
+# （ps -o command= 查本 pid，pgrep -P 查子进程）。
 scheduler_pid_alive() {
     local pid="$1"
     [[ -n "$pid" ]] || return 1

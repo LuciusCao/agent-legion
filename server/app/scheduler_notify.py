@@ -53,7 +53,7 @@ import threading
 from typing import Any
 
 from server.app.db.dialect import ConnectSource, resolve_dsn
-from server.app.scheduler_wakeup import notify_schedulable_work
+from server.app.scheduler_wakeup import notify_local_wakeups
 
 logger = logging.getLogger(__name__)
 
@@ -132,9 +132,14 @@ class SchedulerNotifyListener:
         return conn
 
     def _dispatch(self, payload: str) -> None:
-        if payload.startswith(PAYLOAD_JOB_TOUCHED_PREFIX) and self._on_job_touched:
+        if payload.startswith(PAYLOAD_JOB_TOUCHED_PREFIX):
+            # Consumed only by the plane that wired on_job_touched (the
+            # http plane): the scheduler process listens on the same
+            # channel it emits job_touched to, so without this early
+            # return every scheduler-side event would fall through to the
+            # plain wake below and add a spurious poll wakeup per event.
             job_id = payload[len(PAYLOAD_JOB_TOUCHED_PREFIX) :]
-            if job_id:
+            if job_id and self._on_job_touched is not None:
                 try:
                     self._on_job_touched(job_id)
                 except Exception:
@@ -143,7 +148,7 @@ class SchedulerNotifyListener:
                     # callback loop) — a failing receiver must not kill the
                     # listener thread; the next state change re-records.
                     logger.exception("job_touched relay callback failed")
-                return
+            return
         if payload == PAYLOAD_RESTOCK and self._on_restock is not None:
             try:
                 self._on_restock()
@@ -153,7 +158,7 @@ class SchedulerNotifyListener:
                 # TTL refresh is the fallback, a failed forced refresh must
                 # not kill the listener thread.
                 logger.exception("restock callback failed")
-            notify_schedulable_work()
+            notify_local_wakeups()
             return
         if payload == PAYLOAD_SCAN_RELOAD and self._on_scan_reload is not None:
             try:
@@ -167,7 +172,7 @@ class SchedulerNotifyListener:
                 # the poll backoff). The worker keeps its previous scan
                 # snapshot; the next reload or restart converges.
                 logger.exception("scan-list reload callback failed")
-        notify_schedulable_work()
+        notify_local_wakeups()
 
     def _loop(self) -> None:
         while not self._stop_event.is_set():

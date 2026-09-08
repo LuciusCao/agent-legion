@@ -272,3 +272,55 @@ def test_listener_survives_connection_failure(
         assert len(attempts) >= 3  # two failures + one successful connect
     finally:
         listener.stop()
+
+
+def test_listener_does_not_reenter_notify_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P0 regression (#521 third-round review): the http plane listens on
+    the very channel its own backend emits to. If the listener's dispatch
+    entered the full notify (backend included), every received
+    notification would re-emit — an unbounded NOTIFY storm (~10k/s
+    reproduced). The listener must wake ONLY the local callbacks."""
+    fake = FakeConnection()
+    notified = threading.Event()
+
+    class _FakeNotify:
+        payload = ""
+
+    def _notifies(timeout: float | None = None):
+        notified.wait(timeout=5)
+        notified.clear()
+        yield _FakeNotify()
+
+    emissions: list[str] = []
+
+    def _fake_backend() -> None:
+        emissions.append("backend")
+
+    monkeypatch.setattr(fake, "notifies", _notifies)
+    monkeypatch.setattr(SchedulerNotifyListener, "_connect", lambda self: fake)
+    local_wakes: list[int] = []
+
+    def _local_callback() -> None:
+        local_wakes.append(1)
+
+    monkeypatch.setattr(scheduler_wakeup, "_callbacks", [_local_callback])
+    monkeypatch.setattr(scheduler_wakeup, "_notify_backend", _fake_backend)
+
+    listener = SchedulerNotifyListener(_DSN)
+    listener._SLICE_SECONDS = 0.05
+    listener.start()
+    try:
+        notified.set()
+        for _ in range(100):
+            if len(local_wakes) >= 1:
+                break
+            listener._stop_event.wait(0.02)
+        # The local registry was woken...
+        assert local_wakes == [1]
+        # ...and the backend was NOT re-entered by the dispatch (the P0
+        # loop would have driven emissions unbounded here).
+        assert emissions == []
+    finally:
+        listener.stop()

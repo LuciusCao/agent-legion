@@ -162,7 +162,10 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
   - 调度面事件回传：调度进程记录的 job 事件（租约 claim/finish/过期）
     经 `job_touched:<job_id>` payload 桥回 http 平面，http 平面的监听器
     把 job 记进**自己的**事件 buffer——否则调度驱动的生命周期变更
-    （全部本地 code 节点的 workflow）完成后 dashboard 不刷新。
+    （全部本地 code 节点的 workflow）完成后 dashboard 不刷新。监听器
+    的唤醒走 `notify_local_wakeups`（只触发本地回调注册表，不回环进
+    NOTIFY 后端——http 平面监听的正是自己发射的 channel，全量分发
+    会形成 NOTIFY 风暴，回归测试钉住）。
   - 指标采样：只在 scheduler 进程跑（`ops_metric_samples` /
     `ops_runtime_profile_samples` 的分钟桶 upsert 是每进程覆盖写，双写
     丢 (N-1)/N 数据）；HTTP 平面的 `/api/metrics/*` 读路由查表不采表。
@@ -188,9 +191,9 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
     - Studio agent 启动自动探测（PATH 探测 + DB 合并）只在 combined 角色
       跑（随 `start_worker` 门控）；拆分形态下用
       `POST /api/admin/studio-agents/redetect` 手动刷新。
-    - combined + scheduler 两进程同库并存（迁移期误配）不会被探针检出
-      ——combined 持 http 锁槽、scheduler 持调度锁槽，两个调度面互不
-      相撞告警；部署拆分时确保 combined 实例先停。
+    - combined 进程同时持有 http 与调度两个锁槽——combined + scheduler
+      两进程同库并存（迁移期误配 = 双调度面）会被后启动者检出并告警
+      （#277 warning），但不会拒绝启动。
 - 若未来确实需要多副本，正确路径不是简单横向扩缩容，而是把上表逐项外置
   （事件总线走 pub/sub、限速与暂停状态本就以 DB 为权威、Chat 会话需要粘性路由或
   会话外置），每项都是独立的设计工作，不在本节展开。

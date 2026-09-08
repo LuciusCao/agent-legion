@@ -1,22 +1,12 @@
 """Process-local wakeup registry for the workflow scheduler.
 
-Any write path that may produce newly schedulable workflow nodes (job intake,
-rerun, ...) calls ``notify_schedulable_work`` so the worker's poll loop wakes
-immediately instead of waiting out its idle backoff. The worker registers its
-``wake`` callback from the application lifespan and unregisters on shutdown.
-Callbacks are invoked best-effort: a failing callback is logged and never
-affects the caller or the other callbacks.
-
-#521 方案 B (role split): in a split deployment the write paths run on the
-HTTP plane while the scheduler runs in the scheduler process, so a notify
-must ALSO cross the process boundary. The dispatch layer below fans each
-notify out to both transports: the local registry (in-process callbacks)
-and an optional cross-process backend (PostgreSQL NOTIFY, see
-``scheduler_notify.py``) — installed on HTTP-plane processes by the
-composition root, absent (None) in combined/scheduler-role processes where
-the local registry already reaches every consumer. Backend failures are
-contained inside the backend; the local registry's "never raises" contract
-is unchanged.
+Write paths that may produce schedulable work call
+``notify_schedulable_work`` so the worker's poll loop wakes instead of
+waiting out its idle backoff; the worker registers its ``wake`` callback
+from the lifespan. Callbacks are best-effort (logged, never raise).
+#521 方案 B: the optional cross-process backend (PostgreSQL NOTIFY) is
+installed on HTTP-plane processes only; ``notify_local_wakeups`` is the
+listener-side entry that skips it (loop guard).
 """
 
 from __future__ import annotations
@@ -51,19 +41,41 @@ def unregister_wakeup(callback: Callable[[], None]) -> None:
 
 
 def set_notify_backend(backend: Callable[[], None] | None) -> None:
-    """Install/clear the cross-process notify backend (composition root;
-    the backend receives every notify alongside the local callbacks —
-    None clears it, e.g. lifespan teardown)."""
+    """Install/clear the cross-process notify backend (None = clear)."""
     global _notify_backend
     with _lock:
         _notify_backend = backend
 
 
+def notify_local_wakeups() -> None:
+    """Invoke ONLY the local callbacks (never the backend).
+
+    Listener-side counterpart of ``notify_schedulable_work``: the http
+    plane listens on the very channel its backend emits to, so the full
+    dispatch here would loop into a NOTIFY storm (#521 review P0)."""
+    _invoke_callbacks()
+
+
 def notify_schedulable_work() -> None:
     """Invoke all registered wakeup callbacks and the notify backend; never raises."""
+    _invoke_callbacks()
+    with _lock:
+        backend = _notify_backend
+    if backend is not None:
+        try:
+            backend()
+        except Exception:
+            # #204 broad-except audit: the cross-process backend is
+            # scheduler_notify's emitter, which already contains its own
+            # failure surface; this guard covers a replaced backend
+            # breaking its contract. Same rationale as the callback
+            # containment: never raises, poll backoff is the fallback.
+            logger.exception("scheduler notify backend failed")
+
+
+def _invoke_callbacks() -> None:
     with _lock:
         callbacks = list(_callbacks)
-        backend = _notify_backend
     for callback in callbacks:
         try:
             callback()
@@ -79,17 +91,6 @@ def notify_schedulable_work() -> None:
             # worst case the wake is lost and the next poll interval
             # rediscovers the work). logger.exception keeps the traceback.
             logger.exception("scheduler wakeup callback %r failed", callback)
-    if backend is not None:
-        try:
-            backend()
-        except Exception:
-            # #204 broad-except audit: the cross-process backend is
-            # scheduler_notify.notify_schedulable_work_cross_process,
-            # which already contains its own failure surface; this guard
-            # covers a replaced backend breaking its contract. Same
-            # rationale as the callback containment above: never raises,
-            # poll backoff is the fallback.
-            logger.exception("scheduler notify backend failed")
 
 
 def reload_scan_entries_best_effort(worker: Any) -> None:
@@ -113,10 +114,9 @@ def reload_scan_entries_best_effort(worker: Any) -> None:
 
 
 def reload_worker_scan_entries(request: Any) -> None:
-    """Reload via the app-state worker; on the http plane (#521 方案 B,
-    no worker threads) the reload crosses the NOTIFY bridge instead —
-    see ``scheduler_notify_emit.bridge_scan_reload`` for why that must
-    happen (new workspaces otherwise never get scanned)."""
+    """Reload via the app-state worker; on the http plane (#521 方案 B)
+    the reload crosses the NOTIFY bridge instead — rationale in
+    ``scheduler_notify_emit.bridge_scan_reload``."""
     worker = getattr(request.app.state, "workflow_worker", None)
     if worker is not None:
         reload_scan_entries_best_effort(worker)

@@ -80,8 +80,8 @@ stop_pids() {
     pid="$(cat "$pidfile" 2>/dev/null || true)"
     # PID 复用防护（与 native-prod-up.sh 的 scheduler_pid_alive 同一规则）：
     # pidfile 残留 + PID 被无关进程复用时，只看 kill -0 会误杀别人。
-    # caffeinate 包裹下 pidfile 记的是 caffeinate 的 pid，校验其自身
-    # 命令行或子进程命中 scheduler_process 才认。
+    # 校验命令行（自身或 caffeinate 包装的子进程）命中 scheduler_process
+    # 才认（macOS caffeinate -is 直接 exec，$! 即真身）。
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
         if ! ps -p "$pid" -o command= 2>/dev/null | grep -q "scheduler_process" \
             && ! pgrep -P "$pid" -f "scheduler_process" >/dev/null 2>&1; then
