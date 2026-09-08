@@ -85,7 +85,7 @@ stop_pids() {
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
         if ! ps -p "$pid" -o command= 2>/dev/null | grep -q "scheduler_process" \
             && ! pgrep -P "$pid" -f "scheduler_process" >/dev/null 2>&1; then
-            echo "$name pidfile 指向无关进程（pid $pid，PID 复用），清理 pidfile 不发信号" >&2
+            echo "${name} pidfile 指向无关进程（pid ${pid}，PID 复用），清理 pidfile 不发信号" >&2
             rm -f "$pidfile"
             return 0
         fi

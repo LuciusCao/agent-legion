@@ -105,10 +105,10 @@ binds_specific_interface() {
 if binds_specific_interface "$BACKEND_BIND" \
     && [[ -f data/agent-worker-service/worker.yaml ]] \
     && grep -Eq 'host_url:[[:space:]]*https?://(127\.|localhost)' data/agent-worker-service/worker.yaml; then
-    echo "警告: 后端已绑定 $BACKEND_BIND，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT，否则本地 Worker 将无法注册（静默退避重试）" >&2
+    echo "警告: 后端已绑定 ${BACKEND_BIND}，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://${BACKEND_HEALTH_HOST}:${BACKEND_PORT}，否则本地 Worker 将无法注册（静默退避重试）" >&2
 fi
 if binds_specific_interface "$WORKER_BIND"; then
-    echo "提示: Worker 控制台已绑定 $WORKER_BIND，本机访问地址改为 http://$WORKER_HEALTH_HOST:$WORKER_PORT（127.0.0.1 不再监听）" >&2
+    echo "提示: Worker 控制台已绑定 ${WORKER_BIND}，本机访问地址改为 http://${WORKER_HEALTH_HOST}:${WORKER_PORT}（127.0.0.1 不再监听）" >&2
 fi
 
 # 1.5 材料对象存储：原生形态下后端/worker 是本机进程，对象存储仍由 docker
@@ -167,8 +167,8 @@ if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     # 回落到空角色按「未知进程」处理。
     RUNNING_ROLE="$(backend_running_role)" || RUNNING_ROLE=""
     if [[ -n "$RUNNING_ROLE" && "$RUNNING_ROLE" != "$BACKEND_ROLE" ]]; then
-        echo "错误: 后端已在 :$BACKEND_PORT 以 ${RUNNING_ROLE} 角色运行，但本次目标是 ${BACKEND_ROLE}。" >&2
-        echo "      角色不一致时继续会产生双调度面（combined 内置调度器 + 独立 scheduler）。" >&2
+        echo "错误: 后端已在 :${BACKEND_PORT} 以 ${RUNNING_ROLE} 角色运行，但本次目标是 ${BACKEND_ROLE}。" >&2
+        echo "      角色不一致时继续会错位：旧 combined + 新独立 scheduler 双调度，或 http 平面占端口而新 combined 不再起独立调度器导致无调度。" >&2
         echo "      请先运行 ./scripts/native-prod-down.sh 停止现有进程，再重新 prod-up。" >&2
         exit 1
     fi
@@ -279,7 +279,7 @@ fi
 # 报错而非打印「已就绪」——否则部署显示就绪却无任何调度（codex P1-2
 # 的 native 侧收尾；compose 侧 restart: unless-stopped 已托管重启）。
 for i in $(seq 1 150); do
-    backend_ok=false; worker_ok=true; scheduler_ok=true
+    backend_ok=false; worker_ok=false
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
     if [[ -f "$SCHEDULER_PIDFILE" ]]; then
@@ -287,12 +287,12 @@ for i in $(seq 1 150); do
         # 启动的场景无从区分刚死与从未启动，保持只做正向就绪检查。
         if [[ "$SCHEDULER_STARTED_THIS_RUN" -eq 1 ]] \
             && ! scheduler_pid_alive "$(cat "$SCHEDULER_PIDFILE" 2>/dev/null || true)"; then
-            echo "错误: 调度平面已退出（启动失败，日志见 $SCHEDULER_LOG）。" >&2
+            echo "错误: 调度平面已退出（启动失败，日志见 ${SCHEDULER_LOG}）。" >&2
             echo "      compose 形态会自动重启；原生形态请检查日志后重跑 prod-up。" >&2
             exit 1
         fi
     fi
-    if $backend_ok && $worker_ok && $scheduler_ok; then
+    if $backend_ok && $worker_ok; then
         echo "原生环境已就绪：后端 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT （含前端 SPA），Worker 控制台 http://$WORKER_HEALTH_HOST:$WORKER_PORT"
         exit 0
     fi

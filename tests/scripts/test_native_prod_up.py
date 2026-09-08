@@ -417,4 +417,30 @@ class TestBackendRoleConsistencyGate:
         dies during the window (exit-3), instead of printing ready."""
         assert "SCHEDULER_STARTED_THIS_RUN=0" in NATIVE_PROD_UP
         assert NATIVE_PROD_UP.count("SCHEDULER_STARTED_THIS_RUN=1") == 2
-        assert "scheduler_pid_alive" in NATIVE_PROD_UP.split("健康等待")[1]
+        readiness = re.search(
+            r"for i in \$\(seq 1 150\); do.*?^done", NATIVE_PROD_UP, re.DOTALL | re.MULTILINE
+        ).group(0)
+        assert "scheduler_pid_alive" in readiness
+        # F1 regression guard: worker readiness stays checked (the loop
+        # initializes worker_ok=false; scheduler liveness is enforced via
+        # exit, not via a third flag).
+        assert "worker_ok=false" in readiness
+        assert "scheduler_ok" not in readiness
+
+    def test_multibyte_after_variable_is_braced(self) -> None:
+        """F2-F4: macOS bash absorbs a multibyte char glued to an
+        unbraced $VAR into the variable name → unbound-variable abort
+        under set -u. Every executed $VAR followed by a non-ASCII char
+        must be braced."""
+        prod_down = (ROOT / "scripts" / "native-prod-down.sh").read_text(encoding="utf-8")
+        unbraced = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7f])")
+        for name, script in (
+            ("native-prod-up.sh", NATIVE_PROD_UP),
+            ("native-prod-down.sh", prod_down),
+        ):
+            for lineno, line in enumerate(script.splitlines(), start=1):
+                if line.strip().startswith("#"):
+                    continue
+                assert not unbraced.search(line), (
+                    f"{name}:{lineno} unbraced $VAR before multibyte: {line.strip()[:80]}"
+                )
