@@ -398,10 +398,33 @@ def test_execute_code_hash_mismatch_refuses_before_spawn(
         )
 
 
+def test_execute_code_prefers_path_velites_over_bundled_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#507：PATH 与 data/bin 并存时 PATH 胜出——ensure-velites.sh 维护的
+    机器级单副本不再被无人维护的存量 data/bin 旧副本遮蔽（data/bin 桩
+    exit 42，被选中即结果非 completed）。"""
+    bundled_dir = tmp_path / "data" / "bin"
+    bundled_dir.mkdir(parents=True)
+    bundled_stub = bundled_dir / "velites"
+    bundled_stub.write_text("#!/usr/bin/env bash\nexit 42\n", encoding="utf-8")
+    bundled_stub.chmod(bundled_stub.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    _fake_velites(tmp_path, monkeypatch)  # PATH 指向跳 wrap 直 exec 的真桩
+
+    client = FakeClient(_code_bundle(tmp_path))
+    task = _execute(tmp_path, monkeypatch, _code_claim(), client)
+
+    assert task is not None and task.code_result is not None
+    assert task.code_result["status"] == "completed"
+    assert task.command[0] == str(tmp_path / "velites")
+
+
 def test_execute_code_uses_bundled_velites_when_path_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """自带副本优先且不依赖 PATH：PATH 全空时执行走 data/bin 的 velites。"""
+    """PATH 全空时兜底走 data/bin 的 velites（Docker 外挂形态的解析面）。"""
     bundled_dir = tmp_path / "data" / "bin"
     bundled_dir.mkdir(parents=True)
     stub = bundled_dir / "velites"

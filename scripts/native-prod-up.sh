@@ -31,6 +31,16 @@ echo "同步 Python 依赖…"
 UV_CACHE_DIR=.uv-cache uv sync --frozen
 echo "检测 velites 二进制新鲜度…"
 ./scripts/ensure-velites.sh
+# 把 velites 实际安装目录前置到本进程 PATH（PR #519 codex P1）：调用方 shell
+# 的 PATH 可能不含 velites 安装目录（默认在用户 home 下），而本脚本改不了
+# 父 shell 环境；后端与 Worker 都按「PATH 优先、data/bin 兜底」解析 velites，
+# 兜底命中的是无人维护的存量旧副本（#507 修的静默漂移）。
+# 目录经 ensure-velites.sh --print-bin-dir 查询（单一事实源，含覆盖语义），
+# 本脚本不重写探测逻辑；下方 nohup 起的两个服务进程都继承该环境。查询先
+# 落独立赋值再 export——直接内插在 export 里时替换失败被 set -e 吞掉，
+# 会静默前置空 PATH 条目（PATH 的 CWD 注入）。
+VELITES_BIN_DIR="$(./scripts/ensure-velites.sh --print-bin-dir)"
+export PATH="$VELITES_BIN_DIR:$PATH"
 
 # 幂等判断按「绑定地址 + 端口」匹配已有监听：同端口不同地址是两个
 # 独立监听（127.0.0.1:8000 与 192.0.2.1:8000 可并存），只看端口会把

@@ -51,7 +51,7 @@ def sandboxed(monkeypatch: pytest.MonkeyPatch) -> None:
         pytest.skip("no OS sandbox backend (macOS sandbox-exec / Linux bwrap)")
     binary = velites_binary()
     # #383：host 侧沙箱解析走 shared.code_sandbox.resolve_sandbox_binary
-    # （候选 velites-sandbox → velites；自带 data/bin 目录 → PATH）。
+    # （候选 velites-sandbox → velites；#507 起 PATH 优先、自带 data/bin 兜底）。
     monkeypatch.setattr(
         "server.app.executors._code_sandbox.resolve_sandbox_binary",
         lambda: str(binary),

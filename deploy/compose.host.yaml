@@ -178,8 +178,9 @@ services:
     volumes:
       - ./worker.host.example.yaml:/etc/agent-legion/worker.yaml:ro
       # velites 二进制外挂（issue #381）：worker 镜像不含 agent runtime 执行器，
-      # 同 compose.worker.yaml 的挂载说明——自带副本目录优先于 PATH，架构须与
-      # 镜像一致，产物来自 velites-release workflow 的 GitHub Release。
+      # 同 compose.worker.yaml 的挂载说明——data/bin 是容器内唯一解析来源
+      # （PATH 优先、data/bin 兜底），架构须与镜像一致，产物来自
+      # velites-release workflow 的 GitHub Release。
       # long syntax + create_host_path: false：源缺失时 compose 启动即拒绝，
       # 不让 docker 静默建目录（详见 compose.worker.yaml 同段注释）。
       - type: bind

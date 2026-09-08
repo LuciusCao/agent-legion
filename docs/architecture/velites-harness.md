@@ -459,9 +459,10 @@ pi_config/pi_command_builder/pi_prompt 链）已整体删除（#108）。
   `runtime: velites` 落为 tracked 默认值。
 
 **worker bundle 与部署**：二进制不打进 bundle（bundle 只带 skill + prompt）。
-#254 起 runtime 声明 = 启动时自动探测（自带副本 `data/bin/` 优先、PATH
-兜底），探测到即启用、`disabled_runtimes` 反选停用；#381 起执行器不进
-worker 镜像——velites 经 compose 外挂（`AGENT_WORKER_EXPECT_RUNTIMES`
+#254 起 runtime 声明 = 启动时自动探测（PATH 优先、自带副本 `data/bin/` 兜底
+——#507 起原生形态收敛为 `~/.local/bin` 机器级单一副本，data/bin 兜底只
+服务 Docker 外挂形态），探测到即启用、`disabled_runtimes` 反选停用；#381
+起执行器不进 worker 镜像——velites 经 compose 外挂（`AGENT_WORKER_EXPECT_RUNTIMES`
 守卫防漏挂载），code 池沙箱则由镜像内置的 `velites-sandbox` 独立 bin 承担
 （#383，与 harness 分家）。容器部署前置：bwrap setuid 仍在镜像内；容器
 seccomp 需放行 `unshare`（见 §5 沙箱小节的运行时要求）。

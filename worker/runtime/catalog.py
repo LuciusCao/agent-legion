@@ -1,10 +1,10 @@
 """Worker agent runtime 目录与本机探测。
 
 支持全集 = 本 Worker 版本可承接的 agent runtime。声明语义（issue #254）：
-不再由用户手工勾选启用，而是每次读取配置时按二进制解析（自带副本
-``data/bin`` 优先、PATH 兜底，统一走 ``worker/binary_resolution.py``）
-探测本机已安装的 runtime，**默认全部启用**；``disabled_runtimes`` 反选
-停用（装了但刻意不接的场景）。生效声明 = 探测结果 − 停用集合。
+不再由用户手工勾选启用，而是每次读取配置时按二进制解析（PATH 优先、自带副本
+``data/bin`` 兜底——Docker 外挂注入点，#507 起原生形态只装 PATH——统一走
+``worker/binary_resolution.py``）探测本机已安装的 runtime，**默认全部启用**；
+``disabled_runtimes`` 反选停用（装了但刻意不接的场景）。生效声明 = 探测结果 − 停用集合。
 
 元数据集中在 RUNTIME_CATALOG：启动预检（worker/runtime/preflight.py 的
 code 守卫）、模型发现（worker/runtime/models.py 的 adapter 键）、配置
@@ -25,13 +25,13 @@ RUNTIME_CATALOG: dict[str, dict[str, Any]] = {
         "name": "Velites",
         "description": "内置 harness；code 节点的沙箱执行也依赖它。",
         "binaries": ("velites",),
-        "install_hint": "安装 velites（仓库内部署可执行 scripts/ensure-velites.sh --dest data/bin 构建自带副本，或放入 PATH）",
+        "install_hint": "安装 velites（可执行 scripts/ensure-velites.sh 装到 PATH，Docker 形态经 compose 挂载到 data/bin）",
     },
     "pi": {
         "name": "Pi",
         "description": "外部 Pi runtime；与 Velites 平级，按 Agent 定义选用。",
         "binaries": ("pi",),
-        "install_hint": "安装 pi 到 PATH（或 data/bin/）后重启 Worker",
+        "install_hint": "安装 pi 到 PATH 后重启 Worker",
     },
 }
 

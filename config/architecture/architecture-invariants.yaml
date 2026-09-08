@@ -453,7 +453,7 @@ invariants:
   # Rust-side wrap policy (seatbelt/bwrap argv) is covered by
   # velites/tests/sandbox_wrap.rs; registry targets allow only tests//scripts/.
   - id: EXEC-CODE-003
-    statement: "All (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend node code never runs unsandboxed. This holds on the Host (the bare multiprocessing child retired with the path mechanism in #96) and on a Worker alike (worker/code_runner.py): the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a resolvable velites binary (fail-closed). Worker-side binary resolution is shared between preflight, code_runner and execution_prepare (worker/binary_resolution.py resolve_binary): the bundled copy `data/bin/velites` (installed per-platform via `scripts/ensure-velites.sh --dest data/bin`) takes precedence over PATH, so a Worker machine needs no preinstalled velites."
+    statement: "All (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend node code never runs unsandboxed. This holds on the Host (the bare multiprocessing child retired with the path mechanism in #96) and on a Worker alike (worker/code_runner.py): the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a resolvable velites binary (fail-closed). Worker-side binary resolution is shared between preflight, code_runner and execution_prepare (worker/binary_resolution.py resolve_binary): PATH first (the copy maintained by `scripts/ensure-velites.sh`, issue #507: the machine-level shared `~/.local/bin` for dev worktrees, while a prod worktree — or `AGENT_LEGION_VELITES_ISOLATED=1` — installs into the worktree-isolated `${XDG_DATA_HOME:-~/.local/share}/agent-legion/<worktree>/bin` so a dev-side install can never rewrite the prod runtime copy, PR #519; service launchers prepend the resolved directory via `--print-bin-dir`, the single source of truth), then the bundled `data/bin/velites` as the Docker-only mount point fallback — so a bare-metal Worker machine resolves the maintained PATH copy while a container resolves the mounted one, and both fail closed when neither exists."
     owner: workspace-executor
     risk: high
     evidence:
@@ -473,7 +473,7 @@ invariants:
         target: tests/workers/test_runtime_preflight.py::test_preflight_code_capacity_requires_velites
         gate: quick
       - kind: integration
-        target: tests/workers/test_runtime_preflight.py::test_resolve_binary_prefers_bundled_over_path
+        target: tests/workers/test_runtime_preflight.py::test_resolve_binary_prefers_path_over_bundled
         gate: quick
       - kind: integration
         target: tests/workers/test_code_runner.py::test_execute_code_uses_bundled_velites_when_path_missing

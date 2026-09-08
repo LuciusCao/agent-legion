@@ -146,7 +146,9 @@ def test_macos_all_tools_present_initializes(tmp_path: Path) -> None:
     # 精确行匹配：子串 "createdb agent_legion" 对裸名共享库也会成立，钉不住
     # 派生名约定（裸名是 #227 要避开的共享/prod 库）。
     assert "createdb agent_legion_dev" in log.splitlines()
-    assert "ensure-velites --dest data/bin" in log
+    # #507：velites 装到 PATH（无参形态），data/bin 不再播种。
+    assert "ensure-velites" in log  # 桩记录 "ensure-velites $*"（无参 = 尾随空格）
+    assert "--dest" not in log
     env_text = (main / ".env").read_text()
     assert "AGENT_LEGION_S3_ACCESS_KEY=stub-access-key" in env_text
     assert "AGENT_LEGION_S3_SECRET_KEY=stub-secret-key" in env_text
@@ -250,3 +252,33 @@ def test_createdb_failure_surfaces_real_error_and_degrades(tmp_path: Path) -> No
     assert result.returncode == 0, result.stderr
     assert "createdb agent_legion_dev 未成功" in result.stdout
     assert "connection refused" in result.stdout
+
+
+def test_stale_databin_velites_copy_prompts_removal(tmp_path: Path) -> None:
+    """#507 迁移提示：存量 data/bin/velites 旧副本 → 打印删除指引，不代删。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "cargo", _EXIT_OK_STUB)
+    (main / "data" / "bin").mkdir(parents=True)
+    (main / "data" / "bin" / "velites").write_text("stale-binary\n")
+    (main / "data" / "bin" / "velites.src-stamp").write_text("old-hash\n")
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(main, bin_dir, stub_log)
+
+    assert result.returncode == 0, result.stderr
+    assert "data/bin/velites" in result.stderr
+    assert "rm -f data/bin/velites" in result.stderr
+    # 指引但不代删：旧副本原样保留（data/bin 可能有部署方手工安置的其他内容）。
+    assert (main / "data" / "bin" / "velites").read_text() == "stale-binary\n"
+
+
+def test_no_databin_velites_copy_no_migration_notice(tmp_path: Path) -> None:
+    """#507：无存量副本时静默（全新安装不输出迁移噪音）。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "cargo", _EXIT_OK_STUB)
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(main, bin_dir, stub_log)
+
+    assert result.returncode == 0, result.stderr
+    assert "data/bin/velites" not in result.stderr

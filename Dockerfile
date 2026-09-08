@@ -48,7 +48,8 @@ CMD ["uvicorn", "server.app.main:create_prod_app", "--factory", "--host", "0.0.0
 
 # Worker 镜像是纯执行服务（issue #381）：不含任何 agent runtime 执行器。
 # velites agent runtime 以平台匹配的二进制外挂提供（compose bind mount 挂到
-# /app/data/bin/velites，worker/binary_resolution.py 自带副本优先解析）。
+# /app/data/bin/velites；PATH 优先解析、data/bin 兜底命中——容器内 PATH 上
+# 没有 velites，挂载点即唯一来源，见 worker/binary_resolution.py）。
 # runtime 声明由启动时自动探测推导（issue #254），镜像内装什么 = 该
 # worker 能跑什么。注意 pi 不适用外挂形态：其入口是 npm 包脚本，依赖
 # node 运行时与包树（已随 #381 移出镜像）——pi 部署走裸机形态，docker
