@@ -17,6 +17,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   「竞态超发照单收下」语义一致）后终止本轮。回归测试：泄漏场景
   （旧代码复现 agent_budget -1/-2/… 负值序列）+ code 池对照组；纯
   code / 纯 agent 场景行为不变。
+- 越池 claim 的悬挂租约（#535 codex P1 复审，#534 修复的修复）：
+  守卫原本放在 `pool.submit` 之前——Host 已记 claimed 的越池执行不被
+  提交（不跑/不心跳/不报结果，只能等租约过期），爬坡期 Host 持续发
+  活会逐轮累积悬挂租约。「照单收下」的语义必须含提交执行：break 移
+  到 submit/active 记账之后。回归测试钉住「每个 claim 必被 submit」
+  （旧形态复现：1 submitted vs 102 claims）；claim-loop 回归用例拆到
+  姊妹文件 `test_agent_worker_claim_loop.py`（原文件 942 行，codex P2）。
 
 ## [0.7.2] - 2026-09-08
 

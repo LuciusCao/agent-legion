@@ -255,10 +255,6 @@ def main() -> int:
                     claimed, claim_rtt = True, time.monotonic() - claim_started
                     kind = "code" if str(claim.get("kind")) == "code" else "agent"
                     events.note_claim_received(worker_id, claim)
-                    # #534：该池已尽却领到这种活——照单收下这一个（Host 已
-                    # 记账，与「竞态超发照单收下」一致）并终止本轮，不借池。
-                    if budget[kind] <= 0:
-                        break
                     # Host 已在 claim 事务强制分池；竞态超发照单收下（Host 记账）。
                     budget[kind] -= 1
                     # #352：heartbeat_registry 追加在 #471 的 run_args/run_tail
@@ -273,6 +269,13 @@ def main() -> int:
                     )
                     active.add(future)
                     active_kinds[future] = kind
+                    # #534（codex P1 复审）：该池已尽却领到这种活——「照单
+                    # 收下」必须含提交执行：break 在 submit 之后，否则 Host
+                    # 已记 claimed 的执行不跑/不心跳/不报结果，悬挂到租约
+                    # 过期，爬坡期 Host 持续发活会逐轮累积。终止本轮在此
+                    # （不借另一池预算继续领），执行照常走。
+                    if budget[kind] <= 0:
+                        break
             except WorkerAuthError as exc:
                 print(f"Agent Worker rejected by server: {exc}; re-register required", flush=True)
                 return 2

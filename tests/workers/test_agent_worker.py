@@ -24,7 +24,6 @@ from pathlib import Path
 
 import pytest
 
-from worker import events as agent_worker_events
 from worker import executor as agent_worker
 from worker.process_lifecycle import terminate
 from worker.status import ExecutionStatusReporter, read_runtime_status
@@ -668,92 +667,6 @@ def test_main_ramp_up_disabled_claims_full_budget(
     # 无 ramp_up：claim 上报的容量恒为配置目标（3），首 pass 领满 3 单。
     assert claim_calls == 3
     assert seen_capacities == [3, 3, 3]
-
-
-def test_main_agent_pool_exhausted_does_not_borrow_code_budget(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """#534：agent 池被钳到 0 时不得借 code 池预算继续领 agent 执行。
-
-    场景：max_concurrency=1 + ramp_up initial=1（首单在跑后 agent 预算 0）、
-    max_code_concurrency=32（code 池满额），Host 持续只发 agent 活。旧循环
-    条件 ``budget[agent] + budget[code] > 0`` 借 code 预算放行，agent 预算
-    被扣到负值**同一 pass 内**连续领取（实测 -31，#471 爬坡门被完全绕过）。
-    修后：越池的那一单照单收下（Host 已记账）后 pass 终止——断言钳住后的
-    每个 pass 至多 1 单，而不是上不封顶的连发。"""
-    fake = FakeClient(tmp_path / "unused.tar.gz")
-    claim_calls = 0
-    first_claimed = threading.Event()
-    claim_lock = threading.Lock()
-
-    def claim(
-        worker_id: str,
-        max_concurrency: int | None = None,
-        max_code_concurrency: int | None = None,
-    ) -> dict | None:
-        nonlocal claim_calls
-        with claim_lock:
-            claim_calls += 1
-            if claim_calls == 1:
-                first_claimed.set()
-                # 首单占住执行（run_execution 阻塞在 release 上）。
-        # Host 按 #501 的目标容量记账，不替本地预算把门：钳住后仍发 agent 活。
-        return _claim(f"exec-{claim_calls}")
-
-    release = threading.Event()
-
-    def block_execution(  # type: ignore[no-untyped-def]
-        client,
-        claimed,
-        work_root,
-        environment,
-        interval,
-        stop,
-        grace,
-        status,
-        uploads,
-        slots,
-        heartbeat_registry=None,
-    ):
-        release.wait(timeout=10)
-
-    fake.claim = claim  # type: ignore[method-assign]
-    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
-    # 拦截 claim.attempt 的预算快照（issue #534 验收面：agent_budget 不再
-    # 出现负值序列）——旧 bug 借 code 预算把 agent 预算扣到 -31。
-    attempts: list[dict] = []
-    monkeypatch.setattr(
-        agent_worker_events,
-        "note_claim_attempt",
-        lambda worker_id, budget, depth, enabled: attempts.append(dict(budget)),
-    )
-    updates = {
-        "claim_enabled": True,
-        "max_concurrency": 1,
-        "max_code_concurrency": 32,
-        "ramp_up": {"initial": 1, "step": 1, "interval_seconds": 60},
-    }
-    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
-    assert first_claimed.wait(timeout=5), "first claim never happened"
-    # 观察足够多的 pass（interval=60s 档位不动，agent 池恒 0）。
-    deadline = time.monotonic() + 1.5
-    while time.monotonic() < deadline:
-        time.sleep(0.05)
-    handlers[agent_worker.signal.SIGTERM]()
-    release.set()
-    thread.join(timeout=10)
-    assert result == [0]
-    # 铁证一（#534 验收）：整个窗口内 agent 预算从未为负——旧代码在
-    # 钳住后的每个 pass 都把 agent 预算扣到 -1、-2…（借 code 预算续命）。
-    assert attempts, "claim.attempt events must have been emitted"
-    assert all(a["agent"] >= 0 for a in attempts), [a for a in attempts if a["agent"] < 0]
-    # 铁证二：越池单本身仍被照单收下（Host 已记账——总 claim 数 > 1），
-    # 但每个 pass 至多 1 单（attempts 次数 ≈ claim 次数，而非 32 连发）。
-    assert claim_calls >= 2, "the cross-pool claim itself must still be accepted"
-    assert claim_calls - 1 <= len(attempts), (
-        "each cross-pool claim must terminate its pass (one claim per attempt, "
-        f"got {claim_calls - 1} claims over {len(attempts)} attempts)"
-    )
 
 
 def test_main_code_pool_claims_still_work_when_agent_pool_is_zero(
