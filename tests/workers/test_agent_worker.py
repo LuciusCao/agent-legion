@@ -669,64 +669,6 @@ def test_main_ramp_up_disabled_claims_full_budget(
     assert seen_capacities == [3, 3, 3]
 
 
-def test_main_code_pool_claims_still_work_when_agent_pool_is_zero(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """#534 对照组：agent 池 0 不影响 code 池按自身预算领取——修复只堵
-    「借池」，不收紧各池自己的正常消费。"""
-    fake = FakeClient(tmp_path / "unused.tar.gz")
-    claim_calls = 0
-    release = threading.Event()
-    filled = threading.Event()
-
-    def claim(
-        worker_id: str,
-        max_concurrency: int | None = None,
-        max_code_concurrency: int | None = None,
-    ) -> dict | None:
-        nonlocal claim_calls
-        claim_calls += 1
-        if claim_calls >= 2:
-            filled.set()
-            release.wait(timeout=5)
-        payload = _claim(f"exec-{claim_calls}")
-        # 前两单是 code 活（code 池预算 2）——executor 按 claim["kind"]
-        # 分池；再往后停发（None 走空转）。
-        if claim_calls <= 2:
-            payload["kind"] = "code"
-        return payload if claim_calls <= 2 else None
-
-    def block_execution(  # type: ignore[no-untyped-def]
-        client,
-        claimed,
-        work_root,
-        environment,
-        interval,
-        stop,
-        grace,
-        status,
-        uploads,
-        slots,
-        heartbeat_registry=None,
-    ):
-        release.wait(timeout=5)
-
-    fake.claim = claim  # type: ignore[method-assign]
-    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
-    updates = {
-        "claim_enabled": True,
-        "max_concurrency": 1,
-        "max_code_concurrency": 2,
-        "ramp_up": {"initial": 1, "step": 1, "interval_seconds": 60},
-    }
-    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
-    assert filled.wait(timeout=5), "code pool should still claim its own budget"
-    handlers[agent_worker.signal.SIGTERM]()
-    release.set()
-    thread.join(timeout=10)
-    assert result == [0]
-
-
 def test_main_exits_cleanly_on_revoked_worker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

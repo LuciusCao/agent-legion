@@ -24,6 +24,20 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   到 submit/active 记账之后。回归测试钉住「每个 claim 必被 submit」
   （旧形态复现：1 submitted vs 102 claims）；claim-loop 回归用例拆到
   姊妹文件 `test_agent_worker_claim_loop.py`（原文件 942 行，codex P2）。
+- 越池抑制需跨 pass 生效且必须压 claim 声明容量（PR #539 codex 复审
+  二轮 P1）：仅 break 当前 pass 不够——Host 按「active < 声明容量」
+  分池发活（#501 声明的是目标容量，不随爬坡档位走），本地预算只能
+  break 单个 pass，不压声明的话 Host 每个 pass 都会再发一个越池的活，
+  running 一路爬到声明容量，ramp-up/背压同样被绕过。修复：越池时把
+  该池记入 `pool_deferred`，抑制期间该池 claim 声明压到
+  `min(活跃数, 目标)`（Host 分池门即关闭）、预算视为 0；解除面 = 该
+  池「未被抑制时的预算」转正（avail > 0：执行完成/档位推进/背压消退
+  ——比 base > 0 更严，背压钳 0 时 base 仍可 > 0，此时解除会立刻再
+  越池），解除后声明回声目标容量。预算/声明推导收口到新模块
+  `worker/claim_budget.py`（`pass_budget` 纯函数，文件预算治理）。
+  回归测试用 Host 分池记账的保真 fake（按声明容量发活、报果归还能
+  名额）钉住：抑制期间声明恒为 (活跃数, 目标) 且不再被授权、执行完
+  成后恢复。
 
 ## [0.7.2] - 2026-09-08
 
