@@ -25,7 +25,8 @@ from worker.runtime.controls import load_config
 
 # Defaults: 32 lifts the refill ceiling from ~350/min to thousands/min at a
 # ~100ms RTT while keeping one Host transaction in the tens of milliseconds;
-# 256 matches the Host-side hard cap (agent_broker.claim_batch.MAX_BATCH_CLAIMS).
+# 256 matches the Host-side hard cap
+# (agent_broker.claim_batch_tx.MAX_BATCH_CLAIMS).
 DEFAULT_CLAIM_BATCH_LIMIT = 32
 MAX_CLAIM_BATCH_LIMIT = 256
 
