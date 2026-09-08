@@ -328,24 +328,33 @@ def test_main_cross_pool_suppression_caps_declared_capacity(
         assert attempts, "claim.attempt events must have been emitted"
         assert all(a["agent"] >= 0 for a in attempts), [a for a in attempts if a["agent"] < 0]
         # 恢复面：执行完成后预算恢复（avail > 0 解除抑制），声明回声目标
-        # 容量，Host 恢复发活——抑制不能变成永久性楔死。
+        # 容量，Host 恢复发活——抑制不能变成永久性楔死。轮询等待而非在
+        # 第三个 grant 时立即断言：两个报果的 release_slot 与 claim pass
+        # 竞速——单核环境第一个 release_slot 后 pass 插入会看到
+        # agent_active=1（tier 已满，抑制维持正确），该 pass 声明仍
+        # (2,32) 且门 1<2 放行第三个 grant；两个报果都落账后下个 pass
+        # 才 discard → (8,32)。
         release.set()
         deadline = time.monotonic() + 5
-        while host.grants < 3 and time.monotonic() < deadline:
+        while (8, 32) not in host.declarations[2:] and time.monotonic() < deadline:
             time.sleep(0.01)
         assert host.grants >= 3, "suppression must lift once capacity frees up"
         assert (8, 32) in host.declarations[2:], (
             "declaration must return to target capacity after recovery"
-        )
-        assert len(submitted) == host.grants, (
-            f"every granted execution must be submitted: {len(submitted)} submitted "
-            f"vs {host.grants} grants"
         )
     finally:
         handlers[agent_worker.signal.SIGTERM]()
         release.set()
         thread.join(timeout=10)
     assert result == [0]
+    # 无悬挂租约（codex P1 验收）：每个 grant 必被 submit——在 join 之后
+    # 断言：claim 线程的 grants 计数与池线程 counting wrapper 的 submitted
+    # 计数跨线程，刚 grant 的执行可能还在 submit 队列里（wrapper 未跑），
+    # 主循环 join + 池收尾后必然追平。
+    assert len(submitted) == host.grants, (
+        f"every granted execution must be submitted: {len(submitted)} submitted "
+        f"vs {host.grants} grants"
+    )
 
 
 def test_main_normal_fill_does_not_suppress_or_clip_declaration(
