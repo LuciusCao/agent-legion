@@ -57,6 +57,7 @@ def test_default_document_matches_retired_yaml_values() -> None:
     assert document["agent_workers"] == {
         "max_archive_bytes": 64 * 1024 * 1024,
         "min_protocol_version": 1,
+        "max_concurrent_result_commits": 16,
     }
     # The retired openclaw block is stripped from stored documents (#75).
     assert "openclaw" not in document

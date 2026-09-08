@@ -6,6 +6,59 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-08
+
+### Added
+- Host 单进程 result 提交路径分段耗时观测（issue #521，复用 #448 claim
+  拆分模式）：`server/app/agent_broker/result_timing.py` 把一次 result
+  commit 切成 unpack（tar/gzip 解包）/ artifacts_verify（Worker 直传
+  产物 S3 校验/下载/晋升）/ validate（Host 侧输出校验）/
+  artifacts_upload（本地产物镜像）/ lease_write（lease 终态写事务）/
+  events（events.jsonl token 用量解析 + PI 压缩——两次全量扫描的现状
+  数据，0.7.3 单遍合并的立项依据）/ mark_done（请求终态写事务）七段，
+  每段一次 perf_counter + 一次 dict 写；每次 commit 输出一条阶段分解
+  日志（DEBUG 常态，超过 `AGENT_LEGION_SLOW_RESULT_MS`（默认 15s）升
+  WARNING）；分段折叠进 #359 运行画像（schema v80
+  `result_stage_profile`，`ops_runtime_profile_samples` 落 14 列
+  total+max，列只放迁移的 guarded ALTER 沿 v78 DDL 归属先例），采样/
+  查询/契约/generated types 全链路打通；profile 折叠经 lazy import +
+  best-effort 吞错，观测永不打断被观测的 commit。
+- 遗留绝对路径一次性清理（issue #521 / #37）：启动时后台线程把
+  `node_runs.log_path/run_dir/session_dir`、`jobs.storage_dir` 中
+  `<data-dir-name>/<managed-category>/` 后缀可映射的存量绝对路径行重写
+  为 data-dir 相对（复用 `resolve_data_path` 的后缀重定基规则，行访问
+  走 JobQueries 门面 `jobs/queries/path_hygiene.py`——BOUNDARY-DATA-001，
+  分块小事务、失败下次启动续跑、幂等由选取条件自带）；不可映射行保留
+  并继续由启动报告暴露。修数据而非反复警告。
+
+### Changed
+- 遗留绝对路径警告按存储路径去重（issue #521）：热路径（result
+  commit / claim / 仪表盘读）对同一存量遗留行每次读取都触发
+  `logger.warning` + `warnings.warn`——进程内 set 按存储路径去重后同
+  一路径每进程只警一次（`logger.warning` 的发射是真正的每次 CPU/IO
+  开销，Python 默认 warning filter 只去重 `warnings.warn` 的显示），
+  不同路径各自可见；测试的 per-tmp 路径语义不变。
+- result 提交削峰信号量（issue #521）：完成波（DAG 同相位节点成波报
+  告）下不受限的 GIL 绑定 commit 会打满单进程控制面饿死 claim/心跳，
+  `agent_workers.max_concurrent_result_commits`（默认 16，0 = 关闭的
+  kill-switch，instance settings 文档/契约/hydration 全链路支持、重
+  启生效）经 `server/app/agent_broker/result_gate.py` 以
+  `asyncio.Semaphore` 约束并发 commit 数；spool 不进门（慢速上传不占
+  gate 槽），排队者作为协程等待不占线程池令牌；排队期间 lease 过期走
+  既有 409 → sweeper 收尾语义。代价是波峰期 result 稍慢，换 claim/
+  心跳存活。**注意**：PUT /api/admin/instance-settings 契约新增必填
+  键（沿 max_items_per_run 的「PUT 去默认防静默重置」先例）——缓存的
+  旧设置文档直接 PUT 会 422，需先 GET 再回写；调低
+  AGENT_LEGION_DB_POOL_MAX_SIZE 时注意 gate 与连接池的配比（events
+  段持读连接嵌套开写连接，建议 gate ≤ pool/2）。
+- 运行画像内部拆分（issue #521 顺带，预算棘轮驱动）：stage 计量族
+  （#448 claim + #521 result 的元组与折叠）拆到
+  `runtime_profile/stage_gauges.py`、宽窗 rollup 拆到
+  `runtime_profile/rollup.py`——counters/sampling 回到基线内，#448/
+  #359 的两条 file_budget 豁免随之清账。
+
+## [0.7.1] - 2026-09-07
+
 ### Added
 - Agent 执行侧 JSON 字段级读写原语（issue #518）：velites 新增 opt-in 工具
   `json`——`op` 三态（`get` 按路径读字段、`set` 写任意 JSON 值、`delete` 删
@@ -786,7 +839,9 @@ Initial open-source release.
   runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/LuciusCao/agent-legion/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/LuciusCao/agent-legion/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/LuciusCao/agent-legion/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/LuciusCao/agent-legion/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/LuciusCao/agent-legion/compare/v0.4.0-alpha...v0.5.0

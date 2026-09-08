@@ -97,8 +97,16 @@ class ExecutorLeaseRepository:
             lambda: _lease_write_paths.heartbeat(self, lease_id, ttl_seconds)
         )
 
-    def finish(self, lease_id: str, result: ExecutionResult) -> bool:
-        return retry_on_database_conflict(lambda: _lease_write_paths.finish(self, lease_id, result))
+    def finish(
+        self,
+        lease_id: str,
+        result: ExecutionResult,
+        *,
+        stage_timer: Any | None = None,
+    ) -> bool:
+        return retry_on_database_conflict(
+            lambda: _lease_write_paths.finish(self, lease_id, result, stage_timer=stage_timer)
+        )
 
     def fail_without_lease(
         self, request: ConfigurationFailureRequest, error_message: str

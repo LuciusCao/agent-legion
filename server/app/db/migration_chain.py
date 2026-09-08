@@ -1,13 +1,11 @@
-"""Chronological registry of versioned schema migrations (the schema.py /
-migration_registry.py re-export splits are file-budget moves). DDL-only
-versions carry no Python function — DDL lives in ``postgres_schema.sql``
-(v76's table is the exception). migrate_runs (v53) must run after every
-migration that still reads job_batches; the sorted registry guarantees it.
-"""
+"""Chronological registry of versioned schema migrations (re-exported by
+schema.py / migration_registry.py, a file-budget split). DDL-only versions
+carry no Python function — DDL lives in ``postgres_schema.sql`` (v76's
+table is the exception). migrate_runs (v53) must run after every migration
+that still reads job_batches; the sorted registry guarantees it."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -50,6 +48,7 @@ from server.app.db.migrations.job_status_counts_statement_triggers import (
 )
 from server.app.db.migrations.jobs_workflow_key_alignment import migrate_jobs_workflow_key_alignment
 from server.app.db.migrations.preview_panels import migrate_preview_panels
+from server.app.db.migrations.result_stage_profile import migrate_result_stage_profile
 from server.app.db.migrations.retire_workflow_key_columns import migrate_retire_workflow_key_columns
 from server.app.db.migrations.shard_identity_index import migrate_shard_identity_index
 
@@ -60,7 +59,9 @@ class SchemaMigration:
 
     version: int
     name: str
-    apply: Callable[[Any], None] | None = None
+    # Callable[[conn], None] | None, typed as Any so the typing imports
+    # stay off the file's budget (every entry passes a plain function).
+    apply: Any = None
 
 
 MIGRATIONS: list[SchemaMigration] = [
@@ -201,7 +202,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # to -1 via COALESCE (old single-active semantics preserved). Apply fn
     # (drop + create): upgraded databases carry the two-column index.
     SchemaMigration(79, "shard_identity_index", migrate_shard_identity_index),
+    # v80 (#521): result-stage gauge columns on ops_runtime_profile_samples
+    # (seven stages, totals + maxes), the result-commit forensic split that
+    # orders the follow-up slimming. DDL-only, v78's guarded-ALTER home rule.
+    SchemaMigration(80, "result_stage_profile", migrate_result_stage_profile),
 ]
 
-_VERSIONS = [m.version for m in MIGRATIONS]
-assert sorted(_VERSIONS) == _VERSIONS, "MIGRATIONS must stay version-sorted"
+_versions = [m.version for m in MIGRATIONS]
+assert sorted(_versions) == _versions, "MIGRATIONS must stay version-sorted"

@@ -6,7 +6,11 @@ by the ops-metrics loop, plus DB-pool / advisory-lock cross-cutting waits.
 #448 phase 1 adds the claim-transaction stage split (scan / evaluate /
 writes totals + maxes, schema v78) — the worker claim loop is serial, so
 one claim's round-trip is the throughput ceiling and the split orders the
-follow-up work.
+follow-up work. #521 adds the result-commit stage split (unpack /
+artifacts_verify / validate / artifacts_upload / lease_write / events /
+mark_done totals + maxes, schema v80) — a completion wave's commits
+saturate the single Host process, and the split names the segment that
+owns the CPU.
 
 L2 — the bottleneck classifier (``classifier.py``) turns the latest gauges
 plus the existing queue-alert signal (blocked/stalled, passed in as context

@@ -43,6 +43,21 @@ class RuntimeProfileQueriesMixin(ConnectionQueriesMixin):
                 for stage in ("scan", "evaluate", "writes")
                 for kind in ("total", "max")
             ),
+            # Result-stage split (schema v80, #521): unpack/artifacts_verify/
+            # validate/artifacts_upload/lease_write/events/mark_done.
+            *(
+                f"result_{stage}_seconds_{kind}"
+                for stage in (
+                    "unpack",
+                    "artifacts_verify",
+                    "validate",
+                    "artifacts_upload",
+                    "lease_write",
+                    "events",
+                    "mark_done",
+                )
+                for kind in ("total", "max")
+            ),
             "execute_active",
             "execute_done",
             "execute_requeued",

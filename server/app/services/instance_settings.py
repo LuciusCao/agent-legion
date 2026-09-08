@@ -6,9 +6,9 @@ once at startup (``create_app``, right after ``JobQueries`` is constructed)
 and takes effect on restart; there is no runtime hot-reload:
 
 - executor runtime scalars plus ``workflows.max_items_per_run`` /
-  ``agent_workers.{max_archive_bytes,min_protocol_version}`` and
-  ``code_capacity`` are merged onto the loaded ``ExecutorRuntimeConfig`` and
-  re-validated;
+  ``agent_workers.{max_archive_bytes,min_protocol_version,
+  max_concurrent_result_commits}`` and ``code_capacity`` are merged onto the
+  loaded ``ExecutorRuntimeConfig`` and re-validated;
 - ``cleanup`` / ``monitoring`` values are written back into ``settings.config``
   for construction-time consumers (OpsMetricsService, CleanupConfig, WorkflowMaintenance).
 """
@@ -50,6 +50,9 @@ def default_instance_document() -> dict[str, Any]:
         "agent_workers": {
             "max_archive_bytes": runtime.agent_workers.max_archive_bytes,
             "min_protocol_version": runtime.agent_workers.min_protocol_version,
+            # #521 peak-shaving gate: instance-managed like its siblings,
+            # takes effect on restart (no hot reload).
+            "max_concurrent_result_commits": runtime.agent_workers.max_concurrent_result_commits,
         },
         # Materials TTL (design §10): 0 = disabled; read fresh from the DB at
         # material completion/sweep time, never hydrated into Settings.
@@ -104,6 +107,9 @@ def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> 
     base["agent_workers"]["max_archive_bytes"] = effective["agent_workers"]["max_archive_bytes"]
     base["agent_workers"]["min_protocol_version"] = effective["agent_workers"][
         "min_protocol_version"
+    ]
+    base["agent_workers"]["max_concurrent_result_commits"] = effective["agent_workers"][
+        "max_concurrent_result_commits"
     ]
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(base)
     settings.config["cleanup"] = effective["cleanup"]

@@ -1,11 +1,10 @@
 """Domain-grouped mixins composing the JobQueries facade (issue #195).
 
 JobQueries previously declared 18 flat mixins; this module groups them into
-five domain facades so the composition reads by domain. The linearization
-order is adjusted by the grouping, but method resolution is unaffected in
-practice: zero attribute-name collisions, no ``super()`` — every public
-method resolves to the same function object as before the regrouping.
-"""
+five domain facades so the composition reads by domain. Linearization order
+is adjusted by the grouping, but method resolution is unaffected: zero
+attribute-name collisions, no ``super()`` — every public method resolves to
+the same function object as before the regrouping."""
 
 from __future__ import annotations
 
@@ -25,18 +24,15 @@ from server.app.jobs.queries.job_nodes import JobNodeQueriesMixin
 from server.app.jobs.queries.job_rerun_states import JobRerunStateQueriesMixin
 from server.app.jobs.queries.job_scan_delta import JobScanDeltaMixin
 from server.app.jobs.queries.job_scan_marks import JobScanMarksMixin
+from server.app.jobs.queries.path_hygiene import PathHygieneQueriesMixin
 from server.app.jobs.queries.quality_replays import QualityReplayQueriesMixin
 from server.app.jobs.queries.run_item_probes import RunItemProbeQueriesMixin
 from server.app.jobs.queries.runtime_profile import RuntimeProfileQueriesMixin
-from server.app.jobs.queries.scoped_token_management import (
-    ScopedTokenManagementQueriesMixin,
-)
+from server.app.jobs.queries.scoped_token_management import ScopedTokenManagementQueriesMixin
 from server.app.jobs.queries.scoped_tokens import ScopedTokenQueriesMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
 from server.app.jobs.queries.studio_chat import StudioChatQueriesMixin
-from server.app.jobs.queries.studio_publish_requests import (  # #416
-    StudioPublishRequestQueriesMixin,
-)
+from server.app.jobs.queries.studio_publish_requests import StudioPublishRequestQueriesMixin  # #416
 from server.app.jobs.queries.workflow_drafts import WorkflowDraftQueriesMixin
 from server.app.jobs.queries.workflow_revisions import WorkflowRevisionQueriesMixin
 from server.app.jobs.queries.workspace import WorkspaceQueriesMixin
@@ -78,6 +74,7 @@ class RunDomainQueriesMixin(
     ApprovalDecisionQueriesMixin,
     RuntimeProfileQueriesMixin,
     ExecutionRetentionQueriesMixin,
+    PathHygieneQueriesMixin,
     AtomicJobMutationsMixin,
     JobExecutionControlMixin,
 ):

@@ -57,6 +57,25 @@ def test_counters_snapshot_resets_deltas() -> None:
     assert profile.counters.snapshot_and_reset()["claim_count"] == 0
 
 
+def test_result_stage_gauges_snapshot_and_reset() -> None:
+    # #521: the result-stage split rides the same single-source loops as
+    # the claim stages; unknown keys fold into nothing.
+    profile = RuntimeProfile()
+    profile.note_result_stages({"unpack": 0.1, "events": 1.5, "spool": 9.0})
+    profile.note_result_stages({"events": 0.5})
+
+    snapshot = profile.counters.snapshot_and_reset()
+
+    assert snapshot["result_unpack_seconds_total"] == 0.1
+    assert snapshot["result_unpack_seconds_max"] == 0.1
+    assert snapshot["result_events_seconds_total"] == 2.0
+    assert snapshot["result_events_seconds_max"] == 1.5
+    assert snapshot["result_mark_done_seconds_total"] == 0.0
+    # result-wide counters are note_result's exclusive property.
+    assert snapshot["result_count"] == 0
+    assert profile.counters.snapshot_and_reset()["result_events_seconds_total"] == 0.0
+
+
 def test_claim_timer_accumulates_exactly_once() -> None:
     """Codex P2 on #367: the timer must be pure — note_* owns accumulation.
 
@@ -272,3 +291,22 @@ def test_runtime_profile_route_serves_buckets_and_verdict(client: TestClient) ->
         "db_pool",
     }
     assert isinstance(verdict["evidence"], dict)
+
+
+def test_runtime_profile_route_carries_result_stage_fields(client: TestClient) -> None:
+    """#521: the result-stage split rides the bucket payload — the contract
+    model and the queries column list are the two places a new column can
+    silently drop (the sampler round-trip itself is pinned in
+    tests/db/test_result_stage_profile_migration.py)."""
+    from server.app.routes.runtime_profile_contracts import ProfileBucket
+
+    response = client.get("/api/metrics/runtime-profile?window=6h")
+    assert response.status_code == 200, response.text
+    buckets = response.json()["buckets"]
+    for bucket in buckets:
+        # Strict validation: every field must exist and be numeric.
+        ProfileBucket.model_validate(bucket)
+    for stage in ("unpack", "events", "mark_done"):
+        assert f"result_{stage}_seconds_total" in (
+            buckets[0] if buckets else ProfileBucket.model_fields
+        )

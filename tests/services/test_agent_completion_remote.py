@@ -52,7 +52,10 @@ class _StubLeases:
         self.data_dir = None
         self.results: list[Any] = []
 
-    def finish(self, lease_id: str, result: Any) -> bool:
+    def finish(self, lease_id: str, result: Any, *, stage_timer: Any = None) -> bool:
+        # stage_timer: the #521 result-stage split threads an optional timer
+        # through finish; the stub only records the result.
+        _ = stage_timer
         self.results.append(result)
         return True
 

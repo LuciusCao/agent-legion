@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker.remote_artifacts import apply_worker_artifact_refs
+from server.app.agent_broker.result_timing import mark as mark_result_stage
 from server.app.agent_broker.result_unpack import (
     code_result_log_target,
     safe_relative_dir,
@@ -22,6 +23,9 @@ from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.worker_output_validation import validate_worker_outputs
+
+if TYPE_CHECKING:
+    from server.app.agent_broker.result_timing import ResultStageTimer
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +101,7 @@ class AgentCompletionHandler:
         manifest: dict,
         outcome: AgentOutcome,
         archive_name: str,
+        stage_timer: ResultStageTimer | None = None,
     ) -> bool:
         job_db = self.leases.job_db
         job = job_db.get_job(job_id) if job_db is not None else None
@@ -104,7 +109,7 @@ class AgentCompletionHandler:
             result = ExecutionResult(
                 status="failed", exit_code=1, error_message=f"job {job_id!r} is missing"
             )
-            return self.leases.finish(lease_id, result)
+            return self.leases.finish(lease_id, result, stage_timer=stage_timer)
         job_dir = resolve_job_dir(job, self.jobs_dir)
         expected = tuple(str(name) for name in manifest.get("expected_outputs", ()))
         # Batch 2 (decision 10): a kind='code' archive's node.log member is
@@ -134,6 +139,7 @@ class AgentCompletionHandler:
                 # same poison archive). The converted message rides
                 # ExecutionResult.error_message; the Worker-side traceback
                 # stays in the Worker's own log.
+                mark_result_stage(stage_timer, "unpack")
                 return self.leases.finish(
                     lease_id,
                     ExecutionResult(
@@ -142,7 +148,9 @@ class AgentCompletionHandler:
                         error_message=f"failed to unpack Agent result: {exc}",
                         runner=worker_id,
                     ),
+                    stage_timer=stage_timer,
                 )
+        mark_result_stage(stage_timer, "unpack")
         # #160 D12: dict-form refs mean the Worker uploaded straight to S3
         # (per-execution staging keys); verify ALL refs, then promote +
         # download + register (no half-applied state). Any failure flips the
@@ -161,10 +169,12 @@ class AgentCompletionHandler:
             max_size_bytes=self.max_archive_bytes,
         )
         if remote_failure is not None:
-            return self.leases.finish(lease_id, remote_failure)
+            mark_result_stage(stage_timer, "artifacts_verify")
+            return self.leases.finish(lease_id, remote_failure, stage_timer=stage_timer)
         for name, ref in outcome.output_artifacts.items():
             if name not in remote_names:
                 self.artifact_store.add_ref(job_id, node_key, name, str(ref).split(":", 1)[-1])
+        mark_result_stage(stage_timer, "artifacts_verify")
         produced = tuple(name for name in expected if (job_dir / name).is_file())
         status = outcome.status
         exit_code = outcome.exit_code
@@ -179,6 +189,7 @@ class AgentCompletionHandler:
             validation_error = validate_worker_outputs(self.skill_manager, manifest, job_dir)
             if validation_error:
                 status, exit_code, error = "failed", 1, validation_error
+        mark_result_stage(stage_timer, "validate")
         # D12: mirror produced artifacts into object storage (best-effort —
         # a storage outage never flips the node; the reconciler retries).
         if status == "completed" and produced:
@@ -191,6 +202,7 @@ class AgentCompletionHandler:
                 produced=produced,
                 skip=remote_names,
             )
+        mark_result_stage(stage_timer, "artifacts_upload")
         return self.leases.finish(
             lease_id,
             ExecutionResult(
@@ -214,6 +226,7 @@ class AgentCompletionHandler:
                 # executor would have produced, no size-capped metadata hop.
                 output_json=read_shard_output(job_dir, manifest) if status == "completed" else "",
             ),
+            stage_timer=stage_timer,
         )
 
     def _stored_run_dir(self, job_dir: Path, run_dir: str) -> str:

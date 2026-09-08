@@ -1,10 +1,8 @@
 """Blocking commit path for the Agent Worker result endpoint.
 
-Split out of ``routes/agent_workers.py`` so the route handler can offload the
-DB/disk commit to the threadpool (at agent scale, multiple reports per second
-each committing ``finish()`` + ``mark_done()`` write transactions would hold
-the event loop and stall every heartbeat, claim, and dashboard stream).
-"""
+Split out of ``routes/agent_workers.py`` so the route can offload the
+commit to the threadpool (holding the loop would stall heartbeat, claim,
+and dashboard streams at agent scale)."""
 
 from __future__ import annotations
 
@@ -16,6 +14,7 @@ from fastapi import HTTPException
 
 from server.app.agent_broker import AgentExecutionBroker, worker_events
 from server.app.agent_broker.result_spool import publish_staged_result
+from server.app.agent_broker.result_timing import ResultStageTimer, report_result_stages
 from server.app.agent_control.completion import (
     AgentCompletionHandler,
     AgentOutcome,
@@ -35,9 +34,8 @@ def commit_agent_result(
 ) -> None:
     """Persist the archive and commit the terminal state; raises HTTPException.
 
-    ``staged_body`` is the staging file the route streamed the request body
-    into; it is atomically renamed into place here, and the route reclaims
-    it if this commit never renames it."""
+    ``staged_body`` is atomically renamed into place here; the route reclaims
+    it when the commit fails."""
     payload = broker.claimed_payload(execution_id, worker_id)
     if payload is None or str(payload["lease_id"]) != lease_id:
         worker_events.note_execution_finished_rejected(execution_id, worker_id)
@@ -45,15 +43,19 @@ def commit_agent_result(
     if broker.bundle_dir is None:
         raise HTTPException(status_code=500, detail="Agent bundle storage is unavailable")
     archive_name = f"{execution_id}.{uuid.uuid4().hex}.result.tar.gz"
-    archive_path = broker.bundle_dir / archive_name
     succeeded = False
+    # #521 result-stage split: one timer spans this commit's unpack → … →
+    # mark_done sequence; the route's result_timer (#359) keeps the
+    # spool-inclusive total. Attempt-level best-effort, reports on every
+    # exit path (409s included), mirroring the claim timer (#448).
+    stage_timer = ResultStageTimer()
     try:
-        publish_staged_result(staged_body, archive_path)
+        publish_staged_result(staged_body, broker.bundle_dir / archive_name)
         # finish() commits the lease/node terminal state first; mark_done()
         # then closes the request (bound to lease_id in SQL). A crash
         # between the two leaves a claimed request whose lease is no
         # longer active, which the sweeper closes instead of requeueing.
-        finished = completion.finish(
+        finished = completion.finish(  # fmt: skip
             lease_id=lease_id,
             worker_id=worker_id,
             job_id=str(payload["job_id"]),
@@ -61,12 +63,14 @@ def commit_agent_result(
             manifest=payload["manifest"],
             outcome=outcome,
             archive_name=archive_name,
+            stage_timer=stage_timer,
         )
         if not finished:
             raise HTTPException(status_code=409, detail="execution lease is no longer active")
         if broker.mark_done(execution_id, worker_id, lease_id, record) is None:
             worker_events.note_execution_finished_rejected(execution_id, worker_id, payload)
             raise HTTPException(status_code=409, detail="execution is no longer owned")
+        stage_timer.stage("mark_done")
         succeeded = True
         # #490 execution.finished: outcome + wall time (claim → committed
         # result spans download/run/upload); claimed_at is read post-done,
@@ -84,6 +88,9 @@ def commit_agent_result(
             # failure; the Host performs the privileged invalidation.
             report_auth_failure_safe(broker.database_dsn, outcome.auth_failure_connection)
     finally:
+        report_result_stages(
+            stage_timer, execution_id=execution_id, worker_id=worker_id, committed=succeeded
+        )
         # The archive name is unique to this attempt — always reclaim it.
         broker.discard_result_archive(archive_name)
         if succeeded:

@@ -17,6 +17,7 @@ from typing import Any
 from server.app.db.dialect import ConnectSource
 from server.app.jobs.queries.runtime_profile import runtime_profile_queries_from_dsn
 from server.app.services.runtime_profile.counters import RuntimeProfile
+from server.app.services.runtime_profile.rollup import rollup_rows as _rollup
 
 
 def persist_profile_sample(
@@ -60,6 +61,21 @@ def persist_profile_sample(
             for stage in ("scan", "evaluate", "writes")
             for kind in ("total", "max")
         },
+        # Result-stage split (schema v80, #521): unpack/artifacts_verify/
+        # validate/artifacts_upload/lease_write/events/mark_done.
+        **{
+            f"result_{stage}_seconds_{kind}": deltas[f"result_{stage}_seconds_{kind}"]
+            for stage in (
+                "unpack",
+                "artifacts_verify",
+                "validate",
+                "artifacts_upload",
+                "lease_write",
+                "events",
+                "mark_done",
+            )
+            for kind in ("total", "max")
+        },
         "execute_active": active_executions,
         "execute_done": deltas["execute_done"],
         "execute_requeued": deltas["execute_requeued"],
@@ -70,52 +86,6 @@ def persist_profile_sample(
         "db_pool_wait_seconds_total": db_pool_wait_seconds,
     }
     runtime_profile_queries_from_dsn(dsn).upsert_runtime_profile_sample(bucket_start, values)
-
-
-# Columns aggregated by max when rolling minute rows up into wider bins
-# (latencies and momentary depths); everything else sums. The claim-stage
-# maxes (#448) ride the same suffix rule as claim_seconds_max.
-_MAX_AGGREGATED_COLUMNS = frozenset(
-    {
-        "pass_scan_seconds_max",
-        "claim_seconds_max",
-        "result_seconds_max",
-        "execute_active",
-        "enqueue_pending",
-        "db_pool_waiting",
-    }
-)
-
-
-def _aggregates_by_max(column: str) -> bool:
-    # "_seconds_max" covers claim/result/pass latency peaks alike.
-    return column in _MAX_AGGREGATED_COLUMNS or column.endswith("_seconds_max")
-
-
-def _rollup(rows: list[dict[str, Any]], bin_seconds: int) -> list[dict[str, Any]]:
-    """Fold minute rows into fixed bins (epoch-floor, like ops series)."""
-    if bin_seconds <= 60:
-        return rows
-    bins: dict[int, dict[str, Any]] = {}
-    for row in rows:
-        start = row["bucket_start"]
-        # The row factory may render timestamptz as a string depending on
-        # the connection's session timezone; normalize before epoch-floor.
-        if isinstance(start, str):
-            start = datetime.fromisoformat(start)
-        key = int(start.timestamp()) // bin_seconds * bin_seconds
-        if key not in bins:
-            bins[key] = dict(row)
-            continue
-        acc = bins[key]
-        for column, value in row.items():
-            if column == "bucket_start" or value is None:
-                continue
-            if _aggregates_by_max(column):
-                acc[column] = max(acc[column] or 0, value)
-            else:
-                acc[column] = (acc[column] or 0) + value
-    return [bins[key] for key in sorted(bins)]
 
 
 def query_profile_series(
