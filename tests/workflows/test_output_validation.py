@@ -471,3 +471,21 @@ def test_unreadable_contract_document_still_spawns_the_engine(
 
     assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
     assert len(spawns) == 1
+
+
+def test_non_utf8_contract_document_still_spawns_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Non-UTF-8 content is the other undeterminable case (velites's
+    read_to_string fails → exit 2 fail-closed) — the probe must route it
+    to the engine, not silently degrade to existence mode."""
+    skill_dir = _skill_dir(tmp_path, None)
+    (skill_dir / "references" / "output-contract.md").write_bytes(
+        "```yaml contract\nfiles:\n  - path: a.md\n    format: text\n".encode("latin-1")
+        + b"\xff\xfe binary tail"
+    )
+    _use_engine(monkeypatch, "/nonexistent/velites")
+    spawns = _record_engine_spawns(monkeypatch)
+
+    assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
+    assert len(spawns) == 1

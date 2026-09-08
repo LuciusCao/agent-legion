@@ -9,10 +9,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ### Fixed
 - skill 无契约块时跳过 velites spawn（issue #538，hot-fix）：#521 落地的
   result 提交分段观测发现 validate 段秒级延迟的真因——契约引擎
-  （`velites-sandbox validate`）每次 result 都 spawn 一轮，而生产 skill
-  盘点（11/11）显示 `references/output-contract.md` 普遍只有 prose 与
-  `json` 示例围栏、0/11 携带 `yaml contract` 机器可读契约块，引擎空转
-  （mode=existence 无裁决）纯耗服务时间，波峰排队下 validate 段上秒。
+  （`velites-sandbox validate`）每次 result 都 spawn 一轮，而当前 skills
+  普遍不含 `yaml contract` 机器可读契约块（`references/output-contract.md`
+  里只有 prose 与示例围栏），引擎空转（mode=existence 无裁决）纯耗服务
+  时间，波峰排队下 validate 段上秒。
   修法：`server/app/workflows/output_contract_engine.py` 在 spawn 前进程
   内探测契约块（与 velites 同语义：strip 后恰为 ```yaml contract 的
   fence 行；无 `output-contract.md` → 无块），无块直接返回 None（None

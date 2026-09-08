@@ -30,6 +30,16 @@ def _has_contract_block(skill_dir: Path) -> bool:
     content, an opening fence that is never closed — reports True so the
     engine delivers the authoritative verdict. The fence marker is the one
     velites scans for: a line that strips to exactly "```yaml contract".
+
+    Cross-language drift guard: the fence semantics live in
+    ``velites/src/contract.rs`` ``extract_contract_block`` — if that scanner
+    ever changes its marker, this probe MUST follow (the fence-variant tests
+    here are the tripwire; drift in the missed-spawn direction would skip
+    the authoritative engine, the only correctness regression this probe
+    could cause). The line splitting is deliberately a superset of Rust's
+    ``lines()``: ``splitlines()`` also splits on \\r/\\v/\\f/U+2028 et al.,
+    so a fence line those separators hide from velites but not from us can
+    only produce an extra (harmless) spawn, never a missed one.
     """
     try:
         content = (skill_dir / _CONTRACT_DOC).read_text(encoding="utf-8")
