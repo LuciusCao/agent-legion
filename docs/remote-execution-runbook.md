@@ -353,8 +353,6 @@ supervisor console stream. Align the two sides by `execution_id` /
 | `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`); batch claim (#546) emits one line per claimed execution and the occupancy counters read the batch's FINAL pool state (the single-claim path snapshots at its own promote) |
 | `claim.empty` | Host | 204 — queue drained for this worker's pools; `reasons` when the queue head was skipped (paused workspace, lock races…) |
 | `claim.rejected` | Host | Stock present but this worker was not admitted — see the reason codes below; when every pool is at its cap the scan never runs and the live pool state is the evidence (`capacity_full`/`code_capacity_full` synthesized from it) |
-
-Batch claim (#546) note: a batch's skip reasons surface only on the zero-claim verdict (claim.empty above); a partially filled batch discards them (the claims themselves are the evidence). The batch-only skip `batch_lock_order` (candidates deferred to keep the batch transaction's workspace locks ascending) therefore never appears in an event — it is aggregated into the `skipped` count of the `claim stages:` log lines, and a batch that underfills against `limit` with a nonzero `skipped` is the signature.
 | `execution.started` | Host | Reserved name in the event namespace (the claim→run start is covered by `claim.granted` + Worker-side `execution.claimed`) |
 | `execution.finished` | Host | Terminal commit: `outcome` (`completed`/`failed`/… or `rejected` with `reason: not_owned`), `exit_code`, `wall_seconds` (claim → committed result; `null` when the post-commit read failed) — committed outcomes are DEBUG rhythm, `outcome=rejected` is INFO (the last Host-side clue of that execution) |
 | `execution.heartbeat_rejected` | Host | Heartbeat refused: `reason: not_owned` or `lease_not_active` — the worker must stop beating |
@@ -365,6 +363,8 @@ Batch claim (#546) note: a batch's skip reasons surface only on the zero-claim v
 | `execution.completed` | Worker | Local process/code exit: `exit_code`, `wall_seconds`; Host acceptance is its `execution.finished` |
 | `execution.failed` | Worker | Local containment boundary fired (download/spawn/wait raised): `error` summary |
 | `http.error` | Worker | Upstream error response (`status_code` + `url` + bounded `body`) or transport failure (`url` + `error`) — the middle-502 blind spot, since the Host never sees the response |
+
+Batch claim (#546) note: a batch's skip reasons surface only on the zero-claim verdict (claim.empty above); a partially filled batch discards them (the claims themselves are the evidence). The batch-only skip `batch_lock_order` (candidates deferred to keep the batch transaction's workspace locks ascending) therefore never appears in an event — it is aggregated into the `skipped` count of the `claim stages:` log lines, and a batch that underfills against `limit` with a nonzero `skipped` is the signature.
 
 `claim.rejected` reason codes (claim-path decision-point naming):
 
