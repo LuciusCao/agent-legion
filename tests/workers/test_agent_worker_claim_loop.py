@@ -95,7 +95,7 @@ def test_main_agent_pool_exhausted_does_not_borrow_code_budget(
         "claim_enabled": True,
         "max_concurrency": 1,
         "max_code_concurrency": 32,
-        "ramp_up": {"initial": 1, "step": 1, "interval_seconds": 60},
+        "ramp_up": {"initial": 1, "step": 1, "interval_seconds": 3600},
     }
     thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
     assert first_claimed.wait(timeout=5), "first claim never happened"
@@ -127,8 +127,9 @@ def test_main_agent_pool_exhausted_does_not_borrow_code_budget(
 def test_main_code_pool_claims_still_work_when_agent_pool_is_zero(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """#534 对照组：agent 池 0 不影响 code 池按自身预算领取——修复只堵
-    「借池」，不收紧各池自己的正常消费。"""
+    """#534 对照组：另一池按自身预算正常领取不受影响——修复只堵「越池
+    借预算」，不收紧各池自己的正常消费。场景里 agent 池在首单占住 tier
+    后本地预算 0，code 池（预算 2）在同一 pass 照常消费满。"""
     fake = FakeClient(tmp_path / "unused.tar.gz")
     claim_calls = 0
     release = threading.Event()
@@ -172,7 +173,7 @@ def test_main_code_pool_claims_still_work_when_agent_pool_is_zero(
         "claim_enabled": True,
         "max_concurrency": 1,
         "max_code_concurrency": 2,
-        "ramp_up": {"initial": 1, "step": 1, "interval_seconds": 60},
+        "ramp_up": {"initial": 1, "step": 1, "interval_seconds": 3600},
     }
     thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
     assert filled.wait(timeout=5), "code pool should still claim its own budget"
@@ -187,14 +188,18 @@ class _FaithfulHost:
 
     镜像 server/app/agent_broker/claim.py + agent_worker_capacity.py 的语义：
     每次 claim 按调用**声明的**容量记账，只发「active < 声明容量」的池的
-    活；release_slot 归还名额（执行报果后 Host 记账面回落）。队列无限
-    供给 agent 活、无 code 活——#534 的真实场景（Host 记账面与 Worker
-    本地爬坡预算脱钩）。
+    活；release_slot 归还名额（执行报果后 Host 记账面回落）。agent 供给
+    默认无限（#534 的真实场景：Host 记账面与 Worker 本地爬坡预算脱钩，
+    持续有余量就持续发）；``agent_supply`` 限量 / ``code_supply`` 供给
+    code 活（默认无）。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, agent_supply: int | None = None, code_supply: int = 0) -> None:
         self._lock = threading.Lock()
         self._agent_active = 0
+        self._agent_remaining = agent_supply
+        self._code_active = 0
+        self._code_remaining = code_supply
         self._serial = 0
         self.grants = 0
         self.declarations: list[tuple[int, int]] = []
@@ -207,11 +212,29 @@ class _FaithfulHost:
     ) -> dict | None:
         with self._lock:
             self.declarations.append((max_concurrency, max_code_concurrency))
-            if max_concurrency is not None and self._agent_active < max_concurrency:
+            payload = None
+            if (
+                max_concurrency is not None
+                and self._agent_active < max_concurrency
+                and (self._agent_remaining is None or self._agent_remaining > 0)
+            ):
                 self._agent_active += 1
-                self.grants += 1
+                if self._agent_remaining is not None:
+                    self._agent_remaining -= 1
+                payload = _claim(f"exec-{self._agent_active}")
+            elif (
+                self._code_remaining > 0
+                and max_code_concurrency is not None
+                and self._code_active < max_code_concurrency
+            ):
+                self._code_active += 1
+                self._code_remaining -= 1
+                payload = _claim(f"exec-code-{self._code_active}")
+                payload["kind"] = "code"
+            if payload is not None:
                 self._serial += 1
-                return _claim(f"exec-{self._serial}")
+                self.grants += 1
+                return payload
             return None
 
     def release_slot(self, execution_id: str, lease_id: str) -> int:
@@ -276,28 +299,31 @@ def test_main_cross_pool_suppression_caps_declared_capacity(
         "claim_enabled": True,
         "max_concurrency": 8,
         "max_code_concurrency": 32,
-        "ramp_up": {"initial": 1, "step": 1, "interval_seconds": 60},
+        "ramp_up": {"initial": 1, "step": 1, "interval_seconds": 3600},
     }
     thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
     try:
         deadline = time.monotonic() + 5
-        while host.grants < 1 and time.monotonic() < deadline:
+        while host.grants < 2 and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert host.grants >= 1, "first claim never granted"
-        # 抑制窗口：首单在跑（release 未放行）、档位 60s 不动，Host 记账
-        # 面持续有余量（1 < 8）——旧形态每个 pass 再领一个直到 8。
+        assert host.grants >= 2, "cross-pool claim never granted"
+        # 抑制窗口：首单在跑（release 未放行）、档位 3600s 不动。pass1
+        # 正常领满 tier（budget 1→0）后越池一单（0→-1，触发抑制），共 2
+        # grants；此后 Host 记账面持续有余量（2 < 8）——旧形态每个 pass
+        # 再领一个直到 8。修后抑制期间 running 钉死在 2。
         window_end = time.monotonic() + 2.0
         while time.monotonic() < window_end:
             time.sleep(0.05)
-        assert host.grants == 1, (
+        assert host.grants == 2, (
             f"suppressed pool must stop being granted (running climbed to "
             f"{host.grants} against ramp tier 1): declarations={host.declarations[:12]}"
         )
-        # 抑制期间的声明：首个声明是目标容量（抑制尚未发生），其后全部
-        # 压到 min(活跃数, 目标)=1——这是 Host 分池门唯一听的通道。
-        suppressed = host.declarations[1:]
+        # 抑制期间的声明：前两个是目标容量（正常领取 + 越池当单，抑制
+        # 尚未发生），其后全部压到 min(活跃数, 目标)=2——这是 Host 分池
+        # 门唯一听的通道。
+        suppressed = host.declarations[2:]
         assert suppressed, "suppressed passes must keep polling (claim calls)"
-        assert all(d == (1, 32) for d in suppressed), host.declarations[:20]
+        assert all(d == (2, 32) for d in suppressed), host.declarations[:20]
         # 预算验收面：整个窗口内 agent 预算从未为负。
         assert attempts, "claim.attempt events must have been emitted"
         assert all(a["agent"] >= 0 for a in attempts), [a for a in attempts if a["agent"] < 0]
@@ -305,16 +331,81 @@ def test_main_cross_pool_suppression_caps_declared_capacity(
         # 容量，Host 恢复发活——抑制不能变成永久性楔死。
         release.set()
         deadline = time.monotonic() + 5
-        while host.grants < 2 and time.monotonic() < deadline:
+        while host.grants < 3 and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert host.grants >= 2, "suppression must lift once capacity frees up"
-        assert (8, 32) in host.declarations[1:], (
+        assert host.grants >= 3, "suppression must lift once capacity frees up"
+        assert (8, 32) in host.declarations[2:], (
             "declaration must return to target capacity after recovery"
         )
         assert len(submitted) == host.grants, (
             f"every granted execution must be submitted: {len(submitted)} submitted "
             f"vs {host.grants} grants"
         )
+    finally:
+        handlers[agent_worker.signal.SIGTERM]()
+        release.set()
+        thread.join(timeout=10)
+    assert result == [0]
+
+
+def test_main_normal_fill_does_not_suppress_or_clip_declaration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#534（PR #539 review P2-1）：正常领满 ≠ 越池，不得进抑制。
+
+    守卫历史：1fbfe8a0 在 decrement 之前判（只拦真越池）；67e9e52a 移到
+    decrement 之后修复悬挂租约时触发面静默改宽到「<= 0」——预算 1 →
+    正常领取 → 0 也命中；ff5910f2 在其上挂了 pool_deferred，正常领满
+    也进抑制：ramp 满档窗口（tier=1、target=8，最常见状态）声明容量
+    跌到 min(活跃数, 目标)=档位值，且随补位在档位↔目标间振荡——违反
+    #501「声明不随档位抖」。修后（< 0 才是真越池）：满档窗口声明恒为
+    目标容量，双池 pass 语义也与 1fbfe8a0 对齐（领满不 break 整个
+    pass）。场景：tier=1 + agent 供给恰好 1 单（首单正常领满预算
+    1→0，供给同步耗尽——无越池面）+ code 池满额 2。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    host = _FaithfulHost(agent_supply=1, code_supply=2)
+    fake.claim = host.claim  # type: ignore[method-assign]
+    release = threading.Event()
+
+    def block_execution(  # type: ignore[no-untyped-def]
+        client,
+        claimed,
+        work_root,
+        environment,
+        interval,
+        stop,
+        grace,
+        status,
+        uploads,
+        slots,
+        heartbeat_registry=None,
+    ):
+        release.wait(timeout=10)
+
+    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    updates = {
+        "claim_enabled": True,
+        "max_concurrency": 8,
+        "max_code_concurrency": 2,
+        "ramp_up": {"initial": 1, "step": 1, "interval_seconds": 3600},
+    }
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
+    try:
+        deadline = time.monotonic() + 5
+        while host.grants < 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        # agent tier 1 正常领满（预算 1→0，供给同步耗尽，无越池）+
+        # code 池领满 2——全程不进抑制。
+        assert host.grants == 3, (
+            f"both pools should fill their budgets (1 agent + 2 code), got {host.grants}"
+        )
+        # 满档窗口观察：正常领满不得触发抑制——每个声明都是目标容量
+        # （8, 2），agent 行值不随档位抖（#501）。
+        window_end = time.monotonic() + 1.5
+        while time.monotonic() < window_end:
+            time.sleep(0.05)
+        assert all(d == (8, 2) for d in host.declarations), host.declarations[:20]
+        assert host.grants == 3, "normal fill must not keep claiming past its budgets"
     finally:
         handlers[agent_worker.signal.SIGTERM]()
         release.set()

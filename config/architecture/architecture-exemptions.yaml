@@ -1077,6 +1077,21 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
   ceiling: 224
 - check: architecture.file_budget
+  path: worker/claim_budget.py
+  reason: >-
+    Issue #534 splits the per-pool claim-pass budget out of executor.py
+    (its 224 ceiling): pass_budget owns how the two pools' budgets and
+    capacity declarations derive from effective capacity, active
+    executions, upload backpressure, and the #534 cross-pool deferral.
+    PR #539 review hardening (P2-2/P3: explicit mutate contract in the
+    module docstring, Future-typed parameters, the held⟺avail==0 note on
+    the budget expression) added 4 effective lines over the first
+    registration; ceiling = actual + 10 per the dated-exemption convention
+    (#431 / #458 precedents).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/534
+  ceiling: 67
+- check: architecture.file_budget
   path: worker/upload/heartbeat.py
   reason: >-
     Issue #352 routes the upload-side lease heartbeat through the per-Worker

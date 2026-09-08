@@ -283,14 +283,15 @@ def main() -> int:
                     )
                     active.add(future)
                     active_kinds[future] = kind
-                    # #534（codex P1 复审 + 二轮）：该池已尽却领到这种活——
-                    # 「照单收下」必须含提交执行（break 在 submit 之后，否则
-                    # Host 已记 claimed 的执行悬挂到租约过期）；且记入
-                    # pool_deferred 抑制该池（预算 0 + 声明压到活跃数，见
-                    # pass_budget/下方 claim 调用）——仅 break 当前 pass 的
-                    # 话，下个 pass 又会领一个，running 一路爬到声明容量，
-                    # 绕过 ramp-up/背压。
-                    if budget[kind] <= 0:
+                    # #534（codex P1 复审 + 二轮）：真越池（预算已尽却领到
+                    # 这种活，领取使预算转负）——「照单收下」必须含提交执行
+                    # （break 在 submit 之后，否则 Host 已记 claimed 的执行
+                    # 悬挂到租约过期）；且记入 pool_deferred 抑制该池（预算
+                    # 0 + 声明压到活跃数，见 pass_budget/下方 claim 调用）。
+                    # < 0 而非 <= 0：正常领满（预算 1 → 领取 → 0）不是越池，
+                    # 不抑制、不 break——否则 ramp 满档窗口声明容量会跌到
+                    # 档位值并随补位振荡，违反 #501「声明不随档位抖」。
+                    if budget[kind] < 0:
                         pool_deferred.add(kind)
                         break
             except WorkerAuthError as exc:

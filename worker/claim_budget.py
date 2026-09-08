@@ -1,19 +1,24 @@
 """Per-pool claim-pass budget (#471 ramp gate × #352 pools × #534 inhibition).
 
-Split out of ``worker/executor.py`` (file-budget ceiling): the computation is
-a pure function over the pass's inputs — executor keeps the claim loop, this
-module owns how the two pools' budgets derive from effective capacity,
-active executions, upload backpressure, and the #534 cross-pool deferral.
+Split out of ``worker/executor.py`` (file-budget ceiling): executor keeps the
+claim loop, this module owns how the two pools' budgets derive from effective
+capacity, active executions, upload backpressure, and the #534 cross-pool
+deferral. ``pass_budget`` mutates its ``pool_deferred`` argument (liftoff of
+a suppressed pool when its unsuppressed avail turns positive) — the executor
+passes the same set on every pass and is the only writer of ``add``; the
+release side lives here, next to the budget math that defines it.
 """
 
 from __future__ import annotations
+
+from concurrent.futures import Future
 
 from worker.transfer_controls import claim_availability
 
 
 def pass_budget(
-    active: set,
-    active_kinds: dict,
+    active: set[Future[None]],
+    active_kinds: dict[Future[None], str],
     *,
     effective: int,
     targets: tuple[int, int],
@@ -53,6 +58,9 @@ def pass_budget(
         pool_deferred.discard("code")
     agent_held = "agent" in pool_deferred
     code_held = "code" in pool_deferred
+    # held ⟺ avail == 0（held 只在 avail=0 时成立），预算表达式数值上恒
+    # 等于 avail——写 0 仅为语义显式化：抑制期间即使未来 avail 语义变化
+    # （如热更瞬间 base 恢复）也不放开该池的本地预算。
     budget = {"agent": 0 if agent_held else agent_avail, "code": 0 if code_held else code_avail}
     declared = {
         "agent": min(agent_active, agent_target) if agent_held else agent_target,
