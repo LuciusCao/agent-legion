@@ -221,6 +221,63 @@ def test_fail_without_lease_broadcasts_job_updated(manager, tmp_path):
     assert '"job_id": "j1"' in data
 
 
+def test_fail_shard_broadcasts_job_updated(manager, tmp_path):
+    """PR #520 review P2-2 回归锁：shard 级失败提交后必须广播 job 更新——
+    修复前 shard_failure 直接开事务提交，绕过 fail_without_lease 在 commit
+    后调用的 _broadcast_job_update，SSE 客户端会一直显示旧状态直到手动刷
+    新。写路径收进 ExecutorLeaseRepository.fail_shard 后与节点级失败同源；
+    身份校验失败（返回 False，无状态变更）不得广播。"""
+    lease_repo = ExecutorLeaseRepository(
+        FakeJobDB(),
+        job_event_manager=manager,
+        data_dir=tmp_path,
+    )
+    conn = connect_database(lease_repo.path)
+    try:
+        _insert_workspace_job(conn)
+        conn.execute(
+            "insert into job_nodes(job_id, node_key, status) values ('j1', 'n1', 'running')"
+        )
+        conn.execute(
+            "insert into node_shards(job_id, node_key, shard_index, status, input_json)"
+            " values ('j1', 'n1', 0, 'pending', '{}')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    queue = _ws1_queue(manager)
+    terminated = lease_repo.fail_shard("j1", "n1", 0, "dispatch resolve failed")
+    assert terminated is True
+    assert not queue.empty()
+    data = queue.get_nowait()
+    assert '"type": "job_updated"' in data
+    assert '"workspace_id": "ws1"' in data
+    assert '"job_id": "j1"' in data
+
+    # 对照（P1 的广播面）：身份校验失败（rerun 已重建、代次不匹配）时
+    # 无状态变更，也不得广播——False 的语义就是"什么都没发生"。
+    conn = connect_database(lease_repo.path)
+    try:
+        conn.execute(
+            "update job_nodes set created_at=current_timestamp, status='pending'"
+            " where job_id='j1' and node_key='n1'"
+        )
+        conn.execute("delete from node_shards where job_id='j1' and node_key='n1'")
+        conn.execute(
+            "insert into node_shards(job_id, node_key, shard_index, status, input_json)"
+            " values ('j1', 'n1', 0, 'pending', '{}')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    stale = lease_repo.fail_shard(
+        "j1", "n1", 0, "late failure", dispatch_generation="2000-01-01T00:00:00+00:00"
+    )
+    assert stale is False
+    assert queue.empty(), "a discarded stale-round failure must not broadcast"
+
+
 def test_expire_stale_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
         FakeJobDB(),

@@ -16,13 +16,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.db.transaction import write_transaction
-from server.app.executors._lease_shard_fail import fail_shard_without_lease
 from server.app.workflow_worker.agent_claim import fail_node_config
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
+
+# ``claim_shard_node`` 在 dispatch 时刻把节点代次（job_nodes.created_at）
+# 快照进 job dict 的这个键，两条 lane 的失败出口由此取回——key 只在本模
+# 块与 shards.py 之间流转，不进 broker manifest（runtime_context_stub 只
+# 白名单读取 job 的固定键），缺键（未来调用方未快照）回退为事务内现读，
+# 失败安全。#520 review P1。
+DISPATCH_GENERATION_JOB_KEY = "shard_dispatch_generation"
 
 
 def fail_claim_target_config(
@@ -41,10 +46,21 @@ def fail_claim_target_config(
     行失败同构）；非 terminal 聚合保持节点原状，由剩余 shard 的 finisher
     决定终态。两条 shard lane（本地 shard_dispatch、远程 code_claim）共用
     此分派；普通节点（shard_index None）路径完全不变。
+
+    PR #520 review P1/P2-2：dispatch 时刻的节点代次快照随 job dict 传入
+    （见 ``DISPATCH_GENERATION_JOB_KEY``）——写事务内 re-guard，迟到于
+    rerun 的旧轮失败被丢弃而不是污染新一轮的 pending shard；写路径走
+    ``ExecutorLeaseRepository.fail_shard``，commit 后的 job 广播与
+    ``fail_without_lease`` 同源。
     """
     if shard_index is None:
         # Ordinary node: the node IS the execution unit — fail it whole.
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, message)
-    with write_transaction(worker.leases.path) as conn:
-        fail_shard_without_lease(conn, str(job["id"]), node.key, shard_index, message)
-    return True
+    return worker.leases.fail_shard(
+        str(job["id"]),
+        node.key,
+        shard_index,
+        message,
+        dispatch_generation=str(job.get(DISPATCH_GENERATION_JOB_KEY, "")),
+        log_path=str(log_path),
+    )

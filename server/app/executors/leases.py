@@ -17,6 +17,7 @@ from server.app.executors import _lease_write_paths
 from server.app.executors._lease_approval import park_awaiting_approval_repo
 from server.app.executors._lease_config_failure import fail_without_lease
 from server.app.executors._lease_control import active_lease_counts
+from server.app.executors._lease_shard_fail import fail_shard_repo
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
@@ -109,6 +110,40 @@ class ExecutorLeaseRepository:
         # Broadcast only after the commit has succeeded, never inside the tx.
         self._broadcast_job_update(job_id)
         return run_id
+
+    def fail_shard(
+        self,
+        job_id: str,
+        node_key: str,
+        shard_index: int,
+        error_message: str,
+        *,
+        dispatch_generation: str = "",
+        log_path: str = "",
+    ) -> bool:
+        """Shard-granularity sibling of ``fail_without_lease`` (#520 review).
+
+        PR #520 review P2-2：shard 级失败此前由调用方直接开事务提交，绕过
+        了这里 commit 后的 ``_broadcast_job_update``——SSE 客户端会一直显
+        示旧状态直到手动刷新。写路径收进仓库方法后，广播/「提交成功后才
+        广播」的纪律与 ``fail_without_lease`` 完全同源（含冲突重试，事务
+        体在 ``_lease_shard_fail.fail_shard_repo``）。返回 False = 身份校验
+        失败（rerun 重建后的新轮 shard，迟到的旧轮失败被丢弃，见
+        ``_lease_shard_fail`` 的 P1 注释）。
+        """
+        terminated = fail_shard_repo(
+            self,
+            job_id,
+            node_key,
+            shard_index,
+            error_message,
+            dispatch_generation=dispatch_generation,
+            log_path=log_path,
+        )
+        if terminated:
+            # Broadcast only after the commit has succeeded, never inside the tx.
+            self._broadcast_job_update(job_id)
+        return terminated
 
     def park_awaiting_approval(self, job_id: str, node_key: str) -> bool:
         """Park a ready approval node (EXEC-APPROVAL-001); no lease, no node_run."""
