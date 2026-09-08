@@ -42,7 +42,7 @@ Key parameters:
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--items` | (required) | Manifest: `.jsonl` (one item per line, order preserved) or `.csv` (rows become items). Item contract is exactly `POST /runs`: `{"type": "material", "material_id": ...}`, `{"type": "bundle", "bundle_id": ...}`, `{"type": "ref", "connection_key": ..., "external_id": ..., "params": {...}}`. Note: CSV cells are plain strings — `params` (a JSON object) is only expressible in `.jsonl`; CSV manifests are limited to string-only fields. |
+| `--items` | (required) | Manifest: `.jsonl` (one item per line, order preserved) or `.csv` (rows become items). Item contract is exactly `POST /runs`: `{"type": "material", "material_id": ...}`, `{"type": "bundle", "bundle_id": ...}`, `{"type": "ref", "connection_key": ..., "external_id": ..., "params": {...}}`. Note: CSV cells are plain strings — `params` (a JSON object) is only expressible in `.jsonl`; CSV manifests are limited to string-only fields. A unified header may mix row types (material/bundle/ref sharing one header); empty cells mean "field absent" (the item contract has no meaningful empty string — the models are `extra="forbid"` and required fields are `min_length=1`), so a material row just leaves the bundle/ref columns empty. |
 | `--watermark` | `30000` | Water line: max non-terminal jobs in the workspace before the tool waits instead of submitting. |
 | `--batch-size` | `5000` | Items per POST. Must be ≤ `workflows.max_items_per_run` (default 2×10^4; the tool reads the live instance setting at startup and refuses a larger batch). |
 | `--poll-interval` | `10` | Seconds between water-level polls while the level is at/above the watermark. |
@@ -82,9 +82,13 @@ conservatively.
 scheduler pass sits around ~1s, leaving an order of magnitude of headroom to
 the 15s slow-pass warning (the pass-loop profiler flags any pass over 15s);
 it also stays under #349's 5×10^4 operational red line with buffer for
-provider slowdowns. Tune down when the fleet is slower than baseline; the
-guardrails refuse a watermark smaller than the batch size (the loop could
-never admit a batch).
+provider slowdowns. Tune down when the fleet is slower than baseline. The
+watermark is a replenishment *trigger threshold*, not a capacity commitment:
+a watermark smaller than the batch size is a legal (bursty) configuration —
+the first level check below the watermark admits a batch, after which the
+loop simply waits for the level to drain back below the low watermark between
+batches (codex #531 P2-1: `--watermark=100 --batch-size=5000` with a level of
+0 submits normally).
 
 **Batch size default 5k** matches the #467 chunked-submission baseline
 (5k items measured at 6.9s bounded return). Larger batches (up to 2×10^4)
@@ -153,8 +157,8 @@ Consequences worth knowing:
    admin-only instance-settings endpoint — non-admins exit 403 before the
    first batch).
 2. **Dry-run**: `--dry-run` prints batch boundaries and the batch count;
-   verifies the manifest parses and the guards pass (batch size vs
-   `max_items_per_run`, watermark vs batch size) without touching the server.
+   verifies the manifest parses and the batch-size guard passes (batch size
+   vs `max_items_per_run`) without touching the server.
 3. **Submit**: run without `--dry-run` in `tmux`/`nohup`. Monitor the log
    lines (`水位 N >= M, 等 ...s 再查` when waiting; per-batch `run <id> ...
    新建 job N` on success).

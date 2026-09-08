@@ -5,12 +5,15 @@
 用户手写的「读水位 → 分批 POST → 失败重试」循环：
 
 - items 清单文件（.jsonl 每行一个 item；.csv 逐行转 item——前者保序
-  保字节、后者给 spreadsheet 运营留的口子），item 契约与
+  保字节、后者给 spreadsheet 运营留的口子：统一表头可混排三型行，空
+  单元格按「字段缺省」处理、不进 item），item 契约与
   ``POST /workspaces/{id}/runs`` 完全一致（material/bundle/ref 三型）；
 - 循环：读 workspace 非终态 job 水位（GET /workspaces/{id}/stats 的
   job_stats，v36 计数表触发器维护，PK 点查成本），低于水位线就 POST
   下一批（批大小 ≤ workflows.max_items_per_run），否则 sleep 可配间隔
-  再查，直到清单投完；
+  再查，直到清单投完；水位线是补货触发阈值而非容量承诺——低于批大小
+  的低水位线 + 大批次是合法的突发节奏（投一批后水位涨过水位线，等回
+  落再补），启动期不做「至少容纳一批」的拒绝；
 - 认证：用户名/密码登录（session cookie + CSRF 头），与
   scripts/stress 的惯例一致，绝不硬编码凭据。
 
@@ -165,7 +168,15 @@ def load_items(path: Path) -> list[dict[str, Any]]:
             for row_number, row in enumerate(csv.DictReader(fh), start=2):
                 if all(value in (None, "") for value in row.values()):
                     continue
-                items.append(normalize_item(dict(row), source=f"{path.name}:{row_number}"))
+                # 混合表头（material/bundle/ref 共用一张表）时 DictReader 给
+                # 每行附带其他类型的空列（material 行带 bundle_id=""）。CSV
+                # 的空单元格只能表达「字段缺省」：POST /runs 契约（三个
+                # RunItem 均 extra="forbid"、必填字段 min_length=1）对缺省
+                # 字段走默认值（如 ref.params 补 {}），显式空串列必 422
+                # （codex #531 P2-2）——进 normalize 前丢弃空值列（含短缺
+                # 行尾列的 None）。
+                cleaned = {key: value for key, value in row.items() if value not in (None, "")}
+                items.append(normalize_item(cleaned, source=f"{path.name}:{row_number}"))
     else:
         with path.open(encoding="utf-8") as fh:
             for line_number, line in enumerate(fh, start=1):
@@ -203,19 +214,17 @@ def check_batch_size(batch_size: int, max_items_per_run: int) -> None:
         )
 
 
-def check_watermark(watermark: int, effective_batch_size: int) -> None:
-    """水位线合理性提示：水位线 < 批大小时永远补不进一批（配置错误）。
+def check_watermark(watermark: int) -> None:
+    """水位线护栏：只拦非正数（触发阈值没有 0/负值语义）。
 
-    用裁剪后的实际批大小（min(批大小, 清单长度)）判定；「水位线低于批
-    大小但水位常驻低位」的形态不拦——首查水位低于水位线就会投第一批。
+    水位线是「补货触发阈值」——水位低于它就投下一批——不是容量承诺
+    （issue #505 语义）：低水位线 + 大批次是合法的突发配置（codex #531
+    P2-1：--watermark=100 --batch-size=5000 且当前水位 0 时 0 < 100 照常
+    投第一批，「水位低于批大小就永远补不进一批」不成立），启动期不做
+    「至少容纳一批」的拒绝。
     """
     if watermark < 1:
         raise UsageError(f"--watermark 必须 >= 1，收到 {watermark}")
-    if watermark < effective_batch_size:
-        raise UsageError(
-            f"--watermark {watermark} 低于批大小 {effective_batch_size}"
-            "（水位永远补不进一批）；水位线至少要容得下一个批次"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -367,9 +376,7 @@ def run_campaign(
     """
     max_items_per_run = client.fetch_max_items_per_run()
     check_batch_size(batch_size, max_items_per_run)
-    if batch_size > len(items):
-        batch_size = len(items)
-    check_watermark(watermark, batch_size)
+    check_watermark(watermark)
 
     stats = {"submitted_runs": 0, "submitted_items": 0, "created_jobs": 0}
     cursor = 0
@@ -505,8 +512,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_WATERMARK,
         help=(
-            f"非终态 job 水位线（默认 {DEFAULT_WATERMARK}，issue #505 实测标定；"
-            "#349 红线 5×10^4 之内留 provider 降速缓冲）"
+            f"非终态 job 水位线——补货触发阈值，水位低于它就投下一批（默认 {DEFAULT_WATERMARK}，"
+            "issue #505 实测标定；#349 红线 5×10^4 之内留 provider 降速缓冲）；"
+            "不是容量承诺，低于批大小的低水位线 + 大批次同样是合法的突发配置"
         ),
     )
     parser.add_argument(
