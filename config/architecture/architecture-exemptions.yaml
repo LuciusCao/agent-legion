@@ -1189,3 +1189,23 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 123
+- check: architecture.file_budget
+  path: server/app/workflow_worker/code_claim.py
+  reason: >-
+    PR #520 review P2 (codex round on the #495 fix): the remote shard
+    lane's resolve/enqueue failures were node-level (fail_node_config),
+    but a shard node that an earlier fan-out round already flipped to
+    running is invisible to that write's pending/ready/stale status guard
+    — the failure recorded nothing anywhere and the shard stayed pending
+    forever. The four failure exits now report at claim-target
+    granularity through one shared ``_fail`` closure that routes shards
+    to the aggregate (shard_failure.fail_claim_target_config) and
+    ordinary nodes to the unchanged node-level write. The closure plus
+    its why-comment and the docstring note are ~6 effective lines; the
+    granularity decision belongs at each exit it guards, and hoisting it
+    further out would re-fork the node/shard failure semantics this fix
+    just unified. Remove when the shard claim paths consolidate their
+    failure reporting with their context assembly (#522 tracker).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 144

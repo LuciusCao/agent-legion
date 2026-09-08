@@ -168,6 +168,10 @@ def _local_worker(job_db, tmp_path: Path) -> MagicMock:
     worker.state.node_code_cache = {}
     worker.state.pass_claim_counts = {}
     worker.code_stock.pass_budget.return_value = None
+    # #520 P2: a shard's resolve failure now lands through the shard-granular
+    # write (fail_claim_target_config opens write_transaction(worker.leases.
+    # path)) — point it at the test database so the harness rows are real.
+    worker.leases.path = job_db.dsn_identity
     return worker
 
 
@@ -484,3 +488,181 @@ def test_claim_shard_locally_skips_resolution_without_capacity(job_db, tmp_path)
         )
 
     assert claimed is False
+
+
+def _shard_rows(job_db, job_id: str, node_key: str) -> dict[int, dict]:
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            "select shard_index, status, error_message from node_shards"
+            " where job_id=%s and node_key=%s order by shard_index",
+            (job_id, node_key),
+        ).fetchall()
+    return {int(row["shard_index"]): dict(row) for row in rows}
+
+
+def _job_status(job_db, job_id: str) -> str:
+    with job_db.connect() as conn:
+        row = conn.execute("select status from jobs where id=%s", (job_id,)).fetchone()
+    assert row is not None, "the harness must seed the job row"
+    return str(row["status"])
+
+
+def test_mid_fanout_resolve_failure_terminates_the_pending_shard_not_the_node(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    """#520 review P2 回归锁（本地 lane）：多轮 fan-out 中途归档代码——
+    节点已 running、一个 shard 已 running、剩余 shard 重新入队时 resolve
+    失败。修复前 fail_node_config 对 running 节点是 no-op：失败无处落地，
+    shard 永远 pending、job 永远 running。修复后：这个 shard 的行带真实
+    原因置 failed，any-failed 聚合把节点推进 failed，job 聚合 failed；
+    已 running 的兄弟 shard 行不被这个失败触碰（由其自身 finisher 收敛）。"""
+    ws_id = _unique_workspace()
+    job_id = _unique_job_id()
+    node = _shard_node()
+    _seed_workspace_and_job(job_db, ws_id, job_id, node, shard_count=3)
+    # 模拟第一轮 fan-out 的产物：节点 running + shard 0 已被 claim 置 running。
+    with job_db.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
+            (job_id, node.key),
+        )
+        conn.execute(
+            "update node_shards set status='running', execution_id='exec-first'"
+            " where job_id=%s and node_key=%s and shard_index=0",
+            (job_id, node.key),
+        )
+    # 代码从未发布（或两轮之间被归档）：下一个 shard 的 resolve 失败。
+    _no_remote_lane(monkeypatch)
+    worker = _local_worker(job_db, tmp_path)
+
+    claimed, contexts, _requests = _run_local_pass(
+        monkeypatch, job_db, worker, ws_id, job_id, node, tmp_path / job_id
+    )
+
+    assert claimed is True, "the shard-level failure still counts as pass work"
+    assert contexts == [], "no execution may be submitted without code"
+    rows = _shard_rows(job_db, job_id, node.key)
+    assert rows[0]["status"] == "running", "the in-flight sibling stays untouched"
+    for index in (1, 2):
+        assert rows[index]["status"] == "failed"
+        assert "no published node code" in str(rows[index]["error_message"])
+    status, error = _node_status(job_db, job_id, node.key)
+    assert status == "failed", "any-failed aggregate advances the node"
+    assert "no published node code" in error
+    assert _job_status(job_db, job_id) == "failed", "the job aggregate follows"
+
+
+def test_mid_fanout_failure_with_completed_siblings_keeps_node_running(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    """聚合语义另一半：失败的 shard 之外的兄弟全部 completed 时，any-failed
+    优先级仍然把节点置 failed（与 shard 执行失败的聚合完全同构——这里锁
+    的是 dispatch 失败与执行失败共享同一条聚合规则，不是新语义）。"""
+    ws_id = _unique_workspace()
+    job_id = _unique_job_id()
+    node = _shard_node()
+    _seed_workspace_and_job(job_db, ws_id, job_id, node, shard_count=2)
+    with job_db.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
+            (job_id, node.key),
+        )
+        conn.execute(
+            "update node_shards set status='completed', output_json='{}'"
+            " where job_id=%s and node_key=%s and shard_index=0",
+            (job_id, node.key),
+        )
+    _no_remote_lane(monkeypatch)
+    worker = _local_worker(job_db, tmp_path)
+
+    claimed, contexts, _requests = _run_local_pass(
+        monkeypatch, job_db, worker, ws_id, job_id, node, tmp_path / job_id
+    )
+
+    assert claimed is True and contexts == []
+    rows = _shard_rows(job_db, job_id, node.key)
+    assert rows[0]["status"] == "completed"
+    assert rows[1]["status"] == "failed"
+    status, _error = _node_status(job_db, job_id, node.key)
+    assert status == "failed", "any failed shard fails the node aggregate"
+
+
+def test_remote_lane_shard_resolve_failure_terminates_the_shard(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    """#520 review P2 回归锁（远程 lane）：shard 形状的远程 claim 遇到
+    resolve 失败（frozen pin 漂移）时终结该 shard 而非整个节点——修复前
+    远程 lane 与本地 lane 一样走节点级 fail_node_config，同样的 running
+    no-op wedge。普通（非分片）远程 claim 的失败路径保持节点级不变。"""
+    from server.app.services.node_codes import code_hash
+    from server.app.workflow_worker.code_claim import try_claim_code_worker_node
+
+    ws_id = _unique_workspace()
+    job_id = _unique_job_id()
+    node = _shard_node()
+    _seed_workspace_and_job(job_db, ws_id, job_id, node, shard_count=2)
+    _publish_code(job_db, ws_id, node.key, CUSTOM_V1)
+    # 节点 running + shard 0 已被远程 claim 置 running（claim_evaluate 的
+    # try_start_shard 产物）。
+    with job_db.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
+            (job_id, node.key),
+        )
+        conn.execute(
+            "update node_shards set status='running', execution_id='exec-remote-0'"
+            " where job_id=%s and node_key=%s and shard_index=0",
+            (job_id, node.key),
+        )
+    # 质量回放 pin 冻结 v1 却给出别的 hash：resolve fail closed（EXEC-CODE-003）。
+    bad_pin = {node.key: {"version": 1, "code_hash": code_hash(CUSTOM_V2)}}
+    _attach_replay_payload(
+        job_db,
+        ws_id,
+        job_id,
+        {"node_code_versions": bad_pin, "quality_replay": {"replay_id": "r1"}},
+    )
+    snapshot_pins = _attach_snapshot_pins(job_db, job_id, node, ws_id, bad_pin)
+    with job_db.read() as conn:
+        row = conn.execute(
+            "select id, workspace_id, run_id from jobs where id=%s", (job_id,)
+        ).fetchone()
+    lean_job = {
+        "id": row["id"],
+        "workspace_id": row["workspace_id"],
+        "run_id": row["run_id"],
+        "node_code_pins": snapshot_pins,
+    }
+
+    dispatch = MagicMock()
+    dispatch.is_in_flight.return_value = False
+    dispatch.broker.has_active_request.return_value = False
+    dispatch.online_code_worker_available.return_value = True
+    worker = _local_worker(job_db, tmp_path)
+    worker.code_dispatch = dispatch
+    worker.settings.root_dir = tmp_path
+    worker.settings.config = {}
+    worker.settings.executor_runtime.workflows.custom_nodes_enabled = True
+
+    handled = try_claim_code_worker_node(
+        worker,
+        {"id": ws_id},
+        lean_job,
+        node,
+        tmp_path / job_id,
+        tmp_path / "claim.log",
+        tuple(node.inputs),
+        ws_id,
+        shard_runtime={"shard_index": 1, "shard_input": {"q": 1}},
+    )
+
+    assert handled is True, "the shard-level failure counts as handled"
+    dispatch.enqueue.assert_not_called()
+    rows = _shard_rows(job_db, job_id, node.key)
+    assert rows[0]["status"] == "running", "the in-flight sibling stays untouched"
+    assert rows[1]["status"] == "failed"
+    assert "frozen node code hash mismatch" in str(rows[1]["error_message"])
+    status, error = _node_status(job_db, job_id, node.key)
+    assert status == "failed"
+    assert "frozen node code hash mismatch" in error
+    assert _job_status(job_db, job_id) == "failed"

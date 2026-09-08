@@ -31,7 +31,8 @@ from server.app.services.node_execution_config import (
     resolved_code_capability,
 )
 from server.app.services.vault import VaultError, VaultService
-from server.app.workflow_worker.agent_claim import cached_run_payload, fail_node_config
+from server.app.workflow_worker.agent_claim import cached_run_payload
+from server.app.workflow_worker.shard_failure import fail_claim_target_config
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
@@ -58,7 +59,9 @@ def try_claim_code_worker_node(
     configuration error); False = not Worker-routable right now, the caller
     falls back to local execution. ``shard_runtime`` (#389) carries a shard
     execution's ``shard_index`` / ``shard_input`` payload so shard rows ride
-    the same remote path; the runtime keys mirror the local executor's.
+    the same remote path; the runtime keys mirror the local executor's. A
+    resolve/enqueue failure at shard granularity terminates that shard
+    (#520 review P2) — an ordinary node keeps failing whole.
     """
     dispatch = worker.code_dispatch
     if dispatch is None:
@@ -70,6 +73,17 @@ def try_claim_code_worker_node(
     # shard_index), so multi-shard nodes keep many shards in flight.
     shard_index = int(shard_runtime["shard_index"]) if shard_runtime is not None else None
     in_flight_key = f"{node.key}#shard{shard_index}" if shard_index is not None else node.key
+
+    # Claim-target granularity (#520 review P2): every resolve/enqueue
+    # failure below reports through ``_fail`` — a shard terminates through
+    # the aggregate (the node-level write's status guard no-ops on a node
+    # that earlier shards already flipped to running); an ordinary node
+    # keeps failing whole.
+    def _fail(exc: Exception) -> bool:
+        return fail_claim_target_config(
+            worker, workspace_id, job, workflow_key, node, log_path, shard_index, str(exc)
+        )
+
     if dispatch.is_in_flight(job_id, in_flight_key) or dispatch.broker.has_active_request(
         job_id, node.key, shard_index=shard_index
     ):
@@ -104,7 +118,7 @@ def try_claim_code_worker_node(
             # the local executor reports the missing code (EXEC-CODE-002).
             return False
     except (ValueError, OSError) as exc:
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        return _fail(exc)
     if not is_worker_eligible(code_text, Path(worker.settings.root_dir)):
         return False
 
@@ -124,7 +138,7 @@ def try_claim_code_worker_node(
         return False
     except ValueError as exc:
         # Config drift must fail THIS node, not abort the whole poll pass.
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        return _fail(exc)
     try:
         # Validate the full secret-resolution chain now so a broken vault
         # reference or connection fails the node at dispatch, not mid-claim.
@@ -137,7 +151,7 @@ def try_claim_code_worker_node(
             resolved, schema, ConnectionTokenService(worker.job_db, worker.settings.config)
         )
     except (ValueError, VaultError, JobServiceError) as exc:
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        return _fail(exc)
 
     # The manifest carries the resolved schema/timeout/network (keys
     # unchanged): the Worker never consults an executor definition (P-0.5).
@@ -169,7 +183,7 @@ def try_claim_code_worker_node(
         except (ValueError, VaultError, JobServiceError) as exc:
             # Same trade-off as the agent enqueue pool: a configuration error
             # fails this node instead of poisoning every later poll pass.
-            fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+            _fail(exc)
         except Exception:
             # #204 broad-except audit: deliberate per-node containment.
             # Expected configuration failures (ValueError / VaultError /
