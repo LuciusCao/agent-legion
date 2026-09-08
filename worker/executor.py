@@ -230,10 +230,13 @@ def main() -> int:
                     code_base, uploads.depth, max(max_code_concurrency, 1), backlog
                 ),
             }
-            claimed = False
-            claim_rtt = 0.0
+            claimed, claim_rtt = False, 0.0
             try:
-                while budget["agent"] + budget["code"] > 0:
+                # #534：按池判定（or）——旧条件两池求和，agent 池被爬坡/
+                # 容量/背压钳到 0 时 agent 领取把 agent 预算扣成负值并借
+                # code 预算继续循环（实测 -31），#471 爬坡门被完全绕过。
+                # Host 按 #501 声明的目标容量记账不拦，本地预算是唯一的门。
+                while budget["agent"] > 0 or budget["code"] > 0:
                     if stop.is_set():
                         break
                     # #490 claim.attempt：本轮预算快照（结构化事件）先于
@@ -249,10 +252,13 @@ def main() -> int:
                         break
                     # #472 codex P2：pacing 输入是单次成功 claim 的往返
                     # （非批次总墙钟），逐次重打点——设计记录见 claim_pacing。
-                    claim_rtt = time.monotonic() - claim_started
-                    claimed = True
+                    claimed, claim_rtt = True, time.monotonic() - claim_started
                     kind = "code" if str(claim.get("kind")) == "code" else "agent"
                     events.note_claim_received(worker_id, claim)
+                    # #534：该池已尽却领到这种活——照单收下这一个（Host 已
+                    # 记账，与「竞态超发照单收下」一致）并终止本轮，不借池。
+                    if budget[kind] <= 0:
+                        break
                     # Host 已在 claim 事务强制分池；竞态超发照单收下（Host 记账）。
                     budget[kind] -= 1
                     # #352：heartbeat_registry 追加在 #471 的 run_args/run_tail
