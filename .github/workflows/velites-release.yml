@@ -125,19 +125,89 @@ jobs:
     # 白跑三个构建矩阵。
     if: github.repository == 'LuciusCao/agent-legion'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # subagent review P3：notes 逐 commit 调 API（实测 ~2-3s/commit，本仓库
+    # 历史最差区间 263 commits），串行估算 3-8 分钟；超时发生在三个 40 分钟
+    # 构建全部成功之后，代价极高，余量给足。
+    timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
+      # codex P1 on #533：下方 notes 生成要 git ls-remote origin 查上一个
+      # velites tag——GitHub-hosted runner 是全新环境，没有 checkout 就没有
+      # origin；depth 1 即可（只查 tag 引用，不看历史）。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
       - name: Consolidate checksums
-        run: cd dist && sha256sum *.tar.gz > sha256.txt
+        run: cd dist && sha256sum ./*.tar.gz > sha256.txt
+
+      # velites 版本线独立于仓库版本，两个 velites tag 之间整仓会合大量
+      # host/worker PR——GitHub 自动生成的 release notes 按整仓 compare
+      # 列 PR，与 velites 二进制无关的变更全混进来（v0.5.1 曾带 97 行）。
+      # 这里改为按 velites/ 子树过滤：compare 出的每个 commit 单查其变更
+      # 文件（compare 响应自带的 per-commit files 在 diff 大时会被截断，
+      # 逐 commit 的 commits/{sha} 接口才完整），含 velites/ 文件的进清单。
+      # merge commit 的 files 是合并结果全量——宽进（碰过即列）比漏报好，
+      # 语义上它也确实把这个 PR 的 velites 改动带进了本版本线。
+      - name: Generate velites-scoped release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # subagent review P3-8：注入面显式买断——validate job 已要求 tag ==
+          # velites-v + Cargo.toml version（semver 字符集），这里再钉一道，
+          # 防将来放宽 validate/needs 时 TAG 展开重开注入面。
+          [[ "${TAG}" =~ ^velites-v[0-9][0-9A-Za-z.+~-]*$ ]] || {
+            echo "unexpected tag name: ${TAG}" >&2; exit 1; }
+
+          # 上一个 velites-v* tag：版本降序候选里第一个「确为本 tag 祖先」
+          # 的（subagent review P2-2：回补旧线发版时版本最大的 tag 可能晚于
+          # 当前 tag——compare 反向区间 commits 为空，notes 会静默变空。按
+          # compare status==ahead 校验祖先关系，命中即定）。
+          PREV=""
+          for cand in $(git ls-remote --tags --refs --sort=-v:refname origin 'refs/tags/velites-v*' \
+            | awk -v cur="refs/tags/${TAG}" '$2 != cur {print $2}' | sed 's|refs/tags/||'); do
+            status="$(gh api "repos/${REPO}/compare/${cand}...${TAG}" --jq '.status')"
+            if [ "$status" = "ahead" ]; then PREV="$cand"; break; fi
+          done
+          RANGE="${PREV:+${PREV}...}${TAG}"
+          echo "compare range: ${RANGE:-${TAG}}"
+
+          commits="$(gh api "repos/${REPO}/compare/${RANGE:-${TAG}}" --paginate --jq '.commits[] | .sha')"
+          {
+            echo "## What's Changed (velites/ only)"
+            echo
+            for sha in $commits; do
+              # codex P2 + subagent review：commits/{sha} 的 files 每页 100 条，
+              # 大 merge commit（如 #503 有 182 个文件）必须聚合一页以上的
+              # 全量再判断——--paginate 时 jq 按页独立执行，先收集每页计数
+              # 再整体求和。awk 求和而非 bc：runner 镜像不预装 bc（macOS 本
+              # 地有，正是本地验证漏掉它的原因）。失败不吞（fail-loud）：
+              # notes 缺条目比发布失败更难察觉。
+              velites_hits="$(gh api "repos/${REPO}/commits/${sha}" --paginate \
+                --jq '[.files[].filename] | map(select(startswith("velites/"))) | length' \
+                | awk '{s+=$1} END {print s+0}')"
+              if [ "${velites_hits:-0}" -gt 0 ]; then
+                gh api "repos/${REPO}/commits/${sha}" \
+                  --jq '"* \(.commit.message | split("\n")[0]) — \(.html_url)"'
+              fi
+            done
+            echo
+            echo "**Full Changelog**: https://github.com/${REPO}/compare/${RANGE:-${TAG}}"
+          } > release-notes.md
+          cat release-notes.md
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/sha256.txt
-          generate_release_notes: true
+          body_path: release-notes.md
