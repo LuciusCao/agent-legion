@@ -1115,6 +1115,29 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/534
   ceiling: 67
 - check: architecture.file_budget
+  path: worker/service_models.py
+  reason: >-
+    #546 wires claim_batch_limit (the batch claim size knob) into the Worker
+    config API: one optional field on WorkerConfigPayload (+1 effective
+    line). The file is a flat payload-model list with nothing left to split;
+    the exemption closes when the payload models are next split by domain
+    (tracked by the remove_when issue).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/549
+  ceiling: 34
+- check: architecture.file_budget
+  path: worker/config_validation.py
+  reason: >-
+    #546 wires claim_batch_limit into the Worker config surface:
+    _EDITABLE_FIELDS + _DEFAULTS entries plus the value validation aligned
+    with max_code_concurrency's in-file check (+3 effective lines). Same
+    shape as the existing one-field precedents; the exemption closes when
+    per-field validation moves out to the field-owning modules (tracked by
+    the remove_when issue).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/549
+  ceiling: 148
+- check: architecture.file_budget
   path: worker/upload/heartbeat.py
   reason: >-
     Issue #352 routes the upload-side lease heartbeat through the per-Worker

@@ -15,6 +15,7 @@ import urllib.parse
 from typing import Any
 
 from worker import worker_declarations
+from worker.claim_batch import DEFAULT_CLAIM_BATCH_LIMIT, MAX_CLAIM_BATCH_LIMIT
 from worker.proxy_config import validate_proxy
 from worker.ramp_up import normalized_ramp_up_block, validate_ramp_up
 from worker.runtime.catalog import SUPPORTED_RUNTIMES, resolve_config_runtimes
@@ -38,6 +39,7 @@ _EDITABLE_FIELDS = {
     "shutdown_grace_seconds",
     "proxy",
     "ramp_up",
+    "claim_batch_limit",
 }
 _DEFAULTS: dict[str, Any] = {
     "claim_enabled": False,
@@ -64,6 +66,8 @@ _DEFAULTS: dict[str, Any] = {
     "proxy": "",
     # 冷启动容量爬坡（#471）：None = 禁用；块形状见 ramp_up.validate_ramp_up。
     "ramp_up": None,
+    # 批领取上限（#546）：与 claim_batch.DEFAULT_CLAIM_BATCH_LIMIT 同源。
+    "claim_batch_limit": DEFAULT_CLAIM_BATCH_LIMIT,
 }
 
 
@@ -136,6 +140,15 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     if not isinstance(environment, dict):
         raise ValueError("environment 必须是对象")
     proxy = validate_proxy(config.get("proxy", ""))
+    # 批领取上限（#546）：与 executor 热读（claim_batch.load_claim_batch_limit）
+    # 同域校验——非法值在配置入口 fail-fast，不留给执行进程启动预检。
+    batch_limit = config.get("claim_batch_limit", DEFAULT_CLAIM_BATCH_LIMIT)
+    if (
+        isinstance(batch_limit, bool)
+        or not isinstance(batch_limit, int)
+        or not 1 <= batch_limit <= MAX_CLAIM_BATCH_LIMIT
+    ):
+        raise ValueError(f"claim_batch_limit 必须是 1 到 {MAX_CLAIM_BATCH_LIMIT} 的整数")
     # 冷启动爬坡（#471）：None/False = 禁用（一次性全量，行为回到现状）；
     # 归一化出口（键补齐、int→float）在 ramp_up.normalized_ramp_up_block。
     ramp_up = normalized_ramp_up_block(validate_ramp_up(config.get("ramp_up")))

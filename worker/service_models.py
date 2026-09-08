@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorkerConfigPayload(BaseModel):
@@ -37,6 +37,9 @@ class WorkerConfigPayload(BaseModel):
     # 冷启动容量爬坡（#471）：null/缺省 = 禁用；对象形如
     # {"initial": 64, "step": 64, "interval_seconds": 120}，热更新生效。
     ramp_up: dict[str, Any] | None = None
+    # 批领取上限（#546）：一次 claim 往返最多领多少个执行（分池各不超过
+    # 该值）；1 = 逐条领取（0.7.3 行为）。热更新生效。
+    claim_batch_limit: int | None = Field(default=None, ge=1, le=256)
     # 兼容通道：等价于向 /api/register-tokens 添加一个 token（老客户端/脚本）。
     register_token: str | None = None
 

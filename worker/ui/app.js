@@ -22,7 +22,7 @@ if (!CONTROL_TOKEN && hasDom) {
 }
 const TOKEN_MISSING = !CONTROL_TOKEN;
 // 与 worker/config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
-export const NUMBER_DEFAULTS = { max_concurrency: 1, max_code_concurrency: 0, upload_max_concurrency: 4, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
+export const NUMBER_DEFAULTS = { max_concurrency: 1, max_code_concurrency: 0, upload_max_concurrency: 4, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25, claim_batch_limit: 32 };
 
 // Agent 运行时（issue #254）：最近一次 GET /api/config 的探测状态与停用集合。
 // 保存时保留「未安装但历史上被停用」的项，避免二进制重装后意外自动启用。
@@ -796,7 +796,7 @@ if (hasDom) {
       const data = new FormData(form);
       const payload = {
         host_url: data.get("host_url"), worker_id: data.get("worker_id"), name: data.get("name"),
-        max_concurrency: numberField(data, "max_concurrency"), max_code_concurrency: numberField(data, "max_code_concurrency"), upload_max_concurrency: numberField(data, "upload_max_concurrency"),
+        max_concurrency: numberField(data, "max_concurrency"), max_code_concurrency: numberField(data, "max_code_concurrency"), upload_max_concurrency: numberField(data, "upload_max_concurrency"), claim_batch_limit: numberField(data, "claim_batch_limit"),
         disabled_runtimes: collectDisabledRuntimes(),
         models: modelsFromText(data.get("models")), labels: labelsFromText(data.get("labels")),
         poll_interval_seconds: numberField(data, "poll_interval_seconds"),

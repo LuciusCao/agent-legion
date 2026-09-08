@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -199,3 +200,94 @@ class TestDrainBudget:
         assert claimed is False
         assert ctx.client.calls == []
         assert submitted == []
+
+    def test_batch_limit_one_degenerates_to_per_claim_requests(self) -> None:
+        """claim_batch_limit=1 = 事故降级旋钮（退回 0.7.3 的逐条领取形态）：
+        每个请求 limit/agent_limit/code_limit 都不超过 1，预算照常消费。"""
+        budget = {"agent": 3, "code": 0}
+        ctx, pool_deferred, submitted = _ctx(_FakeBatchClient([]))
+        ctx.client.script = [
+            [{"execution_id": "e1", "kind": "agent"}],
+            [{"execution_id": "e2", "kind": "agent"}],
+            [{"execution_id": "e3", "kind": "agent"}],
+        ]
+
+        claimed, _ = drain_budget(
+            ctx, budget, {"agent": 10, "code": 0}, 1, 0, True, _submitter(submitted, budget)
+        )
+
+        assert claimed is True
+        assert len(submitted) == 3
+        assert all(
+            call["limit"] == 1 and call["agent_limit"] == 1 and call["code_limit"] == 0
+            for call in ctx.client.calls
+        )
+        assert pool_deferred == set()
+
+
+class TestClaimBatchLimitConfigApi:
+    """#546 复审 P1：claim_batch_limit 必须走通控制台/PUT /api/config 的
+    热更通道——它是 batch claim 唯一的事故降级旋钮（调回 1 = 逐条领取）。"""
+
+    def _app(self, tmp_path: Path):  # type: ignore[no-untyped-def]
+        from fastapi.testclient import TestClient
+
+        from worker.service import create_app
+        from worker.supervisor import WorkerConfigStore, validate_config
+
+        store = WorkerConfigStore(tmp_path / "state")
+        store.write(
+            validate_config(
+                {
+                    "host_url": "http://host.test:8000/",
+                    "worker_id": "worker-1",
+                    "max_concurrency": 3,
+                    "register_token_file": "/run/secrets/register-token",
+                }
+            )
+        )
+
+        class FakeSupervisor:
+            """PUT /api/config 全链路需要的最小 supervisor 面（status 进响应）。"""
+
+            def __init__(self, store: WorkerConfigStore) -> None:
+                self.store = store
+                self.restarts = 0
+
+            def start(self) -> None:
+                pass
+
+            def stop(self) -> None:
+                pass
+
+            def restart(self) -> None:
+                self.restarts += 1
+
+            def status(self) -> dict[str, Any]:
+                return {"service": "running", "worker_running": True}
+
+        supervisor = FakeSupervisor(store)
+        app = create_app(supervisor, tmp_path)
+        headers = {"Authorization": f"Bearer {store.control_token()}"}
+        return store, supervisor, TestClient(app), headers
+
+    def test_hot_update_without_restart(self, tmp_path: Path) -> None:
+        store, supervisor, client, headers = self._app(tmp_path)
+        with client:
+            response = client.put("/api/config", json={"claim_batch_limit": 8}, headers=headers)
+            # 无关字段的保存不得丢该键（merge 语义，不是整体替换）。
+            other = client.put("/api/config", json={"max_concurrency": 5}, headers=headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["restarted"] is False, "claim_batch_limit 是热更字段"
+        assert response.json()["config"]["claim_batch_limit"] == 8
+        assert supervisor.restarts == 0
+        assert other.json()["config"]["claim_batch_limit"] == 8
+
+    def test_invalid_value_rejected_422(self, tmp_path: Path) -> None:
+        store, _, client, headers = self._app(tmp_path)
+        with client:
+            response = client.put("/api/config", json={"claim_batch_limit": 0}, headers=headers)
+
+        assert response.status_code == 422
+        assert store.read()["claim_batch_limit"] == 32, "校验失败不得半应用（保持默认值）"

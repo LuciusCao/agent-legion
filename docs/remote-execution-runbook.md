@@ -350,8 +350,8 @@ supervisor console stream. Align the two sides by `execution_id` /
 | `worker.registered` | Host | Registration committed: runtime version matrix, concurrency declarations, resolved workspace scope |
 | `worker.register_rejected` | Host | Registration refused (400/401): `reason` (`protocol_version_too_old` + `min_protocol_version`, `register_key_deleted`, `invalid_registration`) |
 | `worker.offline` | Host | A previously-online worker crossed the `last_seen` threshold (30 s); `last_seen_at` (the DB-true last seen) + `threshold_seconds`; fires once per transition |
-| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`) |
-| `claim.empty` | Host | 204 — queue drained for this worker's pools; `reasons` when the queue head was skipped (paused workspace, lock races…) |
+| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`); batch claim (#546) emits one line per claimed execution and the occupancy counters read the batch's FINAL pool state (the single-claim path snapshots at its own promote) |
+| `claim.empty` | Host | 204 — queue drained for this worker's pools; `reasons` when the queue head was skipped (paused workspace, lock races…); batch-only reason `batch_lock_order` (#546) = candidates deferred to the next batch to keep the batch transaction's workspace locks ascending |
 | `claim.rejected` | Host | Stock present but this worker was not admitted — see the reason codes below; when every pool is at its cap the scan never runs and the live pool state is the evidence (`capacity_full`/`code_capacity_full` synthesized from it) |
 | `execution.started` | Host | Reserved name in the event namespace (the claim→run start is covered by `claim.granted` + Worker-side `execution.claimed`) |
 | `execution.finished` | Host | Terminal commit: `outcome` (`completed`/`failed`/… or `rejected` with `reason: not_owned`), `exit_code`, `wall_seconds` (claim → committed result; `null` when the post-commit read failed) — committed outcomes are DEBUG rhythm, `outcome=rejected` is INFO (the last Host-side clue of that execution) |

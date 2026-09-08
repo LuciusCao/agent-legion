@@ -47,8 +47,12 @@ def create_agent_worker_claim_router(
         # #546 batch claim: limit > 1 promotes up to `limit` executions in one
         # transaction and answers BatchAgentClaimResponse; the default (1, or a
         # pre-#546 Worker that sends no limit) takes the legacy single-claim
-        # path with a byte-identical response.
-        if payload.limit > 1:
+        # path with a byte-identical response. A request carrying per-pool
+        # limits IS a batch request even at limit=1 — otherwise the pool caps
+        # would silently fall off exactly in the steady-state top-up shape
+        # (budget sum 1), and a clamped pool (agent_limit=0) could still be
+        # served through the unpooled single path.
+        if payload.limit > 1 or payload.agent_limit is not None or payload.code_limit is not None:
             try:
                 claims = claim_batch(
                     broker,

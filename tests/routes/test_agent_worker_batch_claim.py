@@ -131,3 +131,60 @@ def test_batch_claim_rejects_invalid_limit(tmp_path: Path) -> None:
         response = _batch_claim(client, token, {"limit": 0})
 
     assert response.status_code == 422
+
+
+def test_pool_limits_alone_route_to_batch_path(tmp_path: Path) -> None:
+    """携带分池上限即批请求（即使 limit=1）——稳态补位（预算和=1）是最常见
+    形态，若只按 limit>1 分流，agent_limit=0 的池在单条路径上完全不受钳制。"""
+    app = make_app(tmp_path)
+    seed_request(app.state.job_db, job_id="job-1", limit=10)
+
+    with TestClient(app) as client:
+        authenticate_admin(client)
+        token = register(client)["worker_token"]
+        response = _batch_claim(client, token, {"limit": 1, "agent_limit": 1, "code_limit": 0})
+
+    assert response.status_code == 200, response.text
+    assert set(response.json()) == {"claims"}
+    assert len(response.json()["claims"]) == 1
+
+
+def test_batch_response_drops_only_the_broken_item() -> None:
+    """批内单条注入失败（如 code manifest 解析异常）只剔该条——其余兄弟
+    照常交付；全丢才回落 204。纯单元：无需 app/DB。"""
+    from server.app.agent_broker.claim_scan import AgentClaim
+    from server.app.routes import agent_worker_claim_response as response_module
+
+    def _claim(execution_id: str) -> AgentClaim:
+        return AgentClaim(
+            execution_id=execution_id,
+            workspace_id="ws",
+            job_id=f"job-{execution_id}",
+            node_key="n",
+            agent_id="a",
+            lease_id=f"lease-{execution_id}",
+            node_run_id=1,
+            manifest={},
+        )
+
+    original = response_module.build_claim_response
+
+    def flaky(broker, settings, job_artifact_objects, worker, claimed):  # type: ignore[no-untyped-def]
+        if claimed.execution_id == "bad":
+            raise RuntimeError("manifest resolution exploded")
+        return original(broker, settings, job_artifact_objects, worker, claimed)
+
+    response_module.build_claim_response = flaky
+    try:
+        result = response_module.build_batch_claim_response(
+            None, None, None, {"protocol_version": 5}, [_claim("good"), _claim("bad")]
+        )
+        assert hasattr(result, "claims"), "partial batch must stay a 200 payload"
+        assert [item.execution_id for item in result.claims] == ["good"]
+
+        all_dropped = response_module.build_batch_claim_response(
+            None, None, None, {"protocol_version": 5}, [_claim("bad")]
+        )
+    finally:
+        response_module.build_claim_response = original
+    assert all_dropped.status_code == 204, "all items dropped = the empty-batch 204"

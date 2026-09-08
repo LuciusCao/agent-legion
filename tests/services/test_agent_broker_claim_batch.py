@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+
 from server.app.agent_broker.claim_batch import claim_batch
 from server.app.agent_control.registry import AgentWorkerRegistry
 from shared.protocol import PROTOCOL_VERSION
@@ -81,20 +83,18 @@ def test_batch_claim_promotes_up_to_limit_in_one_pass(job_db) -> None:
 
 def test_batch_claim_clamps_to_max_batch_claims(job_db) -> None:
     """Host 侧硬顶（MAX_BATCH_CLAIMS）：请求超过时按上限截断。"""
-    from server.app.agent_broker.claim_batch import MAX_BATCH_CLAIMS
+    # 不真造 257 个 job——直接把上限常量缩小验证 clamp 路径。
+    import server.app.agent_broker.claim_batch_tx as tx_module
 
     _register_worker()
-    # 不真造 257 个 job——直接把上限常量缩小验证 clamp 路径。
-    import server.app.agent_broker.claim_batch as claim_batch_module
-
-    original = claim_batch_module.MAX_BATCH_CLAIMS
-    claim_batch_module.MAX_BATCH_CLAIMS = 3
+    original = tx_module.MAX_BATCH_CLAIMS
+    tx_module.MAX_BATCH_CLAIMS = 3
     try:
         _seed_agent_jobs(job_db, 5)
         claims = claim_batch(broker(job_db.jobs_dir.parent), "worker-1", None, None, limit=1000)
     finally:
-        claim_batch_module.MAX_BATCH_CLAIMS = original
-    assert MAX_BATCH_CLAIMS > 3  # 防测试自身把常量改坏
+        tx_module.MAX_BATCH_CLAIMS = original
+    assert original > 3  # 防测试自身把常量改坏
     assert len(claims) == 3
     assert _queued_count(job_db) == 2
 
@@ -193,6 +193,74 @@ def test_batch_claim_empty_queue_returns_empty(job_db) -> None:
     _register_worker()
     claims = claim_batch(broker(job_db.jobs_dir.parent), "worker-1", None, None, limit=8)
     assert claims == []
+
+
+def test_batch_claim_defers_workspace_below_lock_floor(job_db) -> None:
+    """EXEC-CLAIM-LOCK-001 批形态（codex P1）：批事务按 workspace 升序累积
+    advisory 锁——队列序靠后的低序 workspace 候选让位到下一批（新事务、
+    floor 重置），两个并发批因此共享同一全局锁序，不可能 AB-BA。
+
+    场景：ws-b 的请求排在队首（先领，floor=ws-b），ws-a 的请求同批被
+    跳过（batch_lock_order），第二批（本用例的下一次调用）领到。"""
+    seed_request(job_db, job_id="job-b", workspace_id="ws-b")
+    seed_request(job_db, job_id="job-a", workspace_id="ws-a")
+    # 钉死队列序：ws-b 在前。
+    base = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set queued_at=%s where job_id='job-b'", (base,)
+        )
+        conn.execute(
+            "update agent_execution_requests set queued_at=%s where job_id='job-a'",
+            (base + timedelta(seconds=1),),
+        )
+    _register_worker()
+    pool = broker(job_db.jobs_dir.parent)
+
+    first = claim_batch(pool, "worker-1", None, None, limit=4)
+    second = claim_batch(pool, "worker-1", None, None, limit=4)
+
+    assert [claim.workspace_id for claim in first] == ["ws-b"]
+    assert [claim.workspace_id for claim in second] == ["ws-a"]
+
+
+def test_batch_claim_retries_once_on_deadlock(job_db, monkeypatch) -> None:
+    """40P01 策略与单条路径一致（claim_retry）：一次立即重试、整批在新连接
+    上重估；第二次 40P01 上抛（路由 500 / Worker 退避）。"""
+    import psycopg
+
+    import server.app.agent_broker.claim_batch as batch_module
+
+    class _Deadlock(psycopg.Error):
+        sqlstate = "40P01"
+
+    attempts = 0
+
+    def flaky(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _Deadlock("deadlock detected")
+        return batch_module.BatchClaimOutcome((), _view(), {})
+
+    monkeypatch.setattr(batch_module, "claim_batch_in_transaction", flaky)
+    pool = broker(job_db.jobs_dir.parent)
+
+    assert batch_module.claim_batch_with_retry(pool, "worker-1", None, None, limit=4).claims == ()
+    assert attempts == 2
+
+    def always_deadlock(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise _Deadlock("deadlock detected")
+
+    monkeypatch.setattr(batch_module, "claim_batch_in_transaction", always_deadlock)
+    with pytest.raises(_Deadlock):
+        batch_module.claim_batch_with_retry(pool, "worker-1", None, None, limit=4)
+
+
+def _view():  # type: ignore[no-untyped-def]
+    from server.app.agent_broker.claim_scan import WorkerView
+
+    return WorkerView(runtimes=set(), models=set(), labels={}, allowed_workspaces=set())
 
 
 def test_batch_claim_scan_skipped_when_pools_full(job_db) -> None:

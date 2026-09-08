@@ -313,7 +313,7 @@ invariants:
         gate: full
 
   - id: EXEC-CLAIM-LOCK-001
-    statement: "The agent-ws:<workspace> advisory lock guards the agent-only workspace capacity domain; an agent claim takes locks in fixed order ws then worker, a code claim (no workspace capacity domain) takes only the agent-worker lock — the lock graph stays a single directed edge, cycle-free, and code claims never queue behind concurrent agent claims (issue #351)."
+    statement: "The agent-ws:<workspace> advisory lock guards the agent-only workspace capacity domain; an agent claim takes locks in fixed order ws then worker, a code claim (no workspace capacity domain) takes only the agent-worker lock — the lock graph stays a single directed edge, cycle-free, and code claims never queue behind concurrent agent claims (issue #351). Batch claims (#546) hold one ws lock per claimed workspace within a single transaction and must therefore take them in ascending workspace order (ws_lock_floor in claim_batch_tx.py's _scan_kind_batch); candidates below the floor are deferred to the next batch, keeping the cross-transaction lock graph acyclic."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -325,6 +325,9 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/services/test_agent_broker_claim_locks.py::test_agent_claim_lock_order_is_ws_then_worker
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker_claim_batch.py::test_batch_claim_defers_workspace_below_lock_floor
         gate: quick
       - kind: integration
         target: tests/services/test_agent_broker_claim_locks.py::test_code_claim_completes_while_agent_ws_lock_held

@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 # claim 上报 Host，无需重新注册或重启。code 容量 0→>0 的 velites 守卫由
 # 循环内 hot_code_concurrency fail-closed 执行（缺失 velites 时拒绝热开
 # 并打日志），不依赖重启预检。ramp_up（#471 冷启动爬坡）同为热更：改参数
-# 调整下一次档位节奏、置 null 立即结束爬坡窗口。host_url / worker_id /
+# 调整下一次档位节奏、置 null 立即结束爬坡窗口。claim_batch_limit（#546
+# 批领取上限）同为热更：下一轮批申请即按新值折算。host_url / worker_id /
 # disabled_runtimes 等进程级配置仍走重启路径（生效 runtimes 随重启重新探测）。
 _HOT_CONFIG_FIELDS = {
     "claim_enabled",
@@ -39,6 +40,7 @@ _HOT_CONFIG_FIELDS = {
     "max_code_concurrency",
     "ramp_up",
     "upload_max_concurrency",
+    "claim_batch_limit",
 }
 
 
