@@ -14,6 +14,7 @@
     "tests/db/test_agent_workspace_scope_migration.py",
     "tests/db/test_auth_queries.py",
     "tests/db/test_auth_scoped_tokens_migration.py",
+    "tests/db/test_claim_queue_wait_profile_migration.py",
     "tests/db/test_claim_stage_profile_migration.py",
     "tests/db/test_connection_reset.py",
     "tests/db/test_custom_node_codes_migration.py",

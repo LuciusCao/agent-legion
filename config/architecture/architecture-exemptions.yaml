@@ -207,27 +207,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
   ceiling: 294
 - check: architecture.file_budget
-  path: server/app/agent_broker/claim_evaluate.py
-  reason: >-
-    The writes stage split (#448, reviewed on PR #461) moves into
-    evaluate_candidate — the promote-write sequence (node flip, node_runs/
-    executor_leases inserts, request claim, jobs promote) is the tail of
-    the per-candidate evaluation that must close the "evaluate" stage where
-    the writes begin, or the whole claim's write cost folds into evaluate
-    and the "writes-dominant" branch of the stage data stays unreachable.
-    #490 adds the skip-reason bookkeeping reads the structured claim events
-    fold (decision-point naming, zero judgment change). The alternative —
-    closing the stage from claim_windows around the whole call — cannot see
-    the skip paths (a skipped candidate has no writes and must not pollute
-    the segment); splitting the promote sequence out to a sibling module
-    would fork the one lock-order invariant this module owns. The original
-    anchor (#448) closed with phase 2 restructured elsewhere; re-anchored
-    to #490 by the structured-events PR. Remove when the claim path's next
-    rework re-budgets the module together with claim.py's entry.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
-  ceiling: 217
-- check: architecture.file_budget
   path: server/app/agent_broker/claim_windows.py
   reason: >-
     Issue #461 review on PR #461: scan_kind passes the #448 stage timer
@@ -240,19 +219,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
   ceiling: 77
-- check: architecture.file_budget
-  path: server/app/db/migration_chain.py
-  reason: >-
-    Issue #437 registers schema v77 (job_status_counts_statement_triggers):
-    one more registry entry with its why-comment, same one-entry-per-version
-    growth model the chain has followed since the first split. Splitting the
-    chain would fork the version-sorted ordering invariant (the file's own
-    module docstring) for five lines of registry. The original anchor (#448)
-    closed with phase 2 restructured elsewhere; re-anchored to #490 by the
-    structured-events PR that found the entry (no code change of its own).
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
-  ceiling: 111
 - check: architecture.file_budget
   path: server/app/db/migrations/job_status_counts_statement_triggers.py
   reason: >-
@@ -1153,18 +1119,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
   ceiling: 68
-- check: architecture.file_budget
-  path: worker/upload/queue.py
-  reason: >-
-    Issue #352 threads the batch heartbeat registry through the upload
-    queue: UploadTask carries heartbeat_registry (runtime only, not
-    persisted), the queue accepts/attaches it, and _deliver_bulk/_report
-    register restored and backoff-waiting leases with it. The alternative —
-    a wrapper queue subclass — would fork the two-lane scheduler wiring.
-    Revisit when the upload queue gets its next structural split.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
-  ceiling: 326
 - check: architecture.file_budget
   path: worker/execution/heartbeat_batch.py
   reason: >-

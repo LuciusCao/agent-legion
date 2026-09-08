@@ -219,7 +219,7 @@ def test_upgrade_path_applies_alignment(tmp_path: Path) -> None:
     assert str(row["name"]) == "jobs_workflow_key_alignment"
     assert tail is not None
     # The registry tail at the CURRENT schema version (v80, #521).
-    assert str(tail["name"]) == "result_stage_profile"
+    assert str(tail["name"]) == "claim_queue_wait_profile"
 
 
 def test_aligned_entity_history_is_preserved(fresh_db) -> None:

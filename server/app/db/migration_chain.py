@@ -6,9 +6,7 @@ that still reads job_batches; the sorted registry guarantees it."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
+from server.app.db.migration_entry import SchemaMigration
 from server.app.db.migrations import (
     migrate_agent_catalog_cutover,
     migrate_agent_request_kind_window,
@@ -41,6 +39,7 @@ from server.app.db.migrations import (
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
+from server.app.db.migrations.claim_queue_wait_profile import migrate_claim_queue_wait_profile
 from server.app.db.migrations.claim_stage_profile import migrate_claim_stage_profile
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
 from server.app.db.migrations.job_status_counts_statement_triggers import (
@@ -51,18 +50,6 @@ from server.app.db.migrations.preview_panels import migrate_preview_panels
 from server.app.db.migrations.result_stage_profile import migrate_result_stage_profile
 from server.app.db.migrations.retire_workflow_key_columns import migrate_retire_workflow_key_columns
 from server.app.db.migrations.shard_identity_index import migrate_shard_identity_index
-
-
-@dataclass(frozen=True)
-class SchemaMigration:
-    """One versioned entry (the newest migration introduced at this version)."""
-
-    version: int
-    name: str
-    # Callable[[conn], None] | None, typed as Any so the typing imports
-    # stay off the file's budget (every entry passes a plain function).
-    apply: Any = None
-
 
 MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(13, "auth_users_sessions_workspace_members"),
@@ -206,6 +193,9 @@ MIGRATIONS: list[SchemaMigration] = [
     # (seven stages, totals + maxes), the result-commit forensic split that
     # orders the follow-up slimming. DDL-only, v78's guarded-ALTER home rule.
     SchemaMigration(80, "result_stage_profile", migrate_result_stage_profile),
+    # v81 (#551): claim queue-wait gauge columns (total + max) — 供给延迟
+    # （queued_at→promote）进 claim 画像族。DDL-only, same guarded rule.
+    SchemaMigration(81, "claim_queue_wait_profile", migrate_claim_queue_wait_profile),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

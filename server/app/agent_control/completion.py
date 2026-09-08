@@ -12,6 +12,7 @@ from server.app.agent_broker.result_unpack import (
     safe_relative_dir,
     unpack_agent_result,
 )
+from server.app.agent_broker.result_unpack_pool import unpack_in_pool
 from server.app.db.dialect import ConnectSource
 from server.app.executors._shard_contract import read_shard_output
 from server.app.executors.artifact_mirror import upload_produced_artifacts
@@ -121,7 +122,11 @@ class AgentCompletionHandler:
         cancelled = outcome.status == "cancelled"
         if archive_name and (not cancelled or log_target is not None):
             try:
-                unpack_agent_result(
+                # #552：解包是纯 CPU 段（tar/gzip + member 校验），下沉进程池
+                # ——HTTP 平面线程只停在 future.result() 的 GIL 释放等待上，
+                # 完成波不再挤单核；坏包炸子进程不炸主进程。
+                unpack_in_pool(
+                    unpack_agent_result,
                     self.bundle_dir / archive_name,
                     job_dir,
                     () if cancelled else expected,

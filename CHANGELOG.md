@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-09-09
+
+### Performance
+- result 提交的解包 CPU 段下沉进程池（issue #552，#521 根治项）：0.7.4 的
+  batch claim 把执行面跑满后，完成波把 Host 单进程的 GIL 竞争推成新瓶颈
+  ——result commit 的 tar/gzip 解包 + member 校验（`unpack_agent_result`）
+  与 HTTP 面抢同一核，实测单核上限个位数 result/s、result POST 延迟恶化
+  一个数量级、worker 上传队列积压并触发 90s 租约重发。修法：
+  `unpack_agent_result` 是纯路径函数（无 DB 句柄/共享态），原样下沉
+  `ProcessPoolExecutor`（默认 min(4, 核数)，`AGENT_LEGION_RESULT_UNPACK_WORKERS`
+  可调）——调用线程停在 future.result() 的 GIL 释放等待上，N 核并行解包；
+  坏包炸子进程不炸 HTTP 主进程；`finish`/`mark_done` 的短 DB 事务留在主
+  进程。回归测试：池内真实解包 promote、坏包异常跨进程回传且池存活。
+
+### Added
+- 供给-消费全链路观测（issue #551）：
+  - Worker 新事件 `execution.reported`（每上传任务一条）：
+    queue_wait / prepare / transfer / report_wait / report 五段墙钟 +
+    outcome（delivered/rejected/aborted）+ archive_bytes——上传管线从
+    黑盒变成可分段定位；rejected（409）即租约重发的重复执行指纹。
+  - Host claim 画像族新增 `queue_wait` 段（queued_at→promote 的供给延迟，
+    per-promote 折叠，批内逐条计入；schema v81 落
+    `claim_queue_wait_seconds_total/max` 两列），与既有 claim 阶段拆分
+    （#448）、result 分段（#521）、enqueue 池深度（`enqueue_pending`）
+    合成完整链路画像。
+  - runbook §7 新增供给-消费链排障表（现象 → 指标列 → 判读）。
+
+### 结构性拆分（预算纪律，无行为变化）
+- `claim_evaluate.py` 的 promote 写入段 → `claim_promote.py`；
+  `worker/upload/queue.py` 的 UploadTask → `worker/upload/task.py`（import
+  路径不变，re-export）；`migration_chain.py` 的 SchemaMigration →
+  `migration_entry.py`。claim_evaluate / migration_chain /
+  worker/upload/queue 三个文件的 file_budget 豁免随拆分移除。
+
 ## [0.7.4] - 2026-09-08
 
 ### Performance
@@ -922,7 +956,8 @@ Initial open-source release.
   runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.5...HEAD
+[0.7.5]: https://github.com/LuciusCao/agent-legion/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/LuciusCao/agent-legion/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/LuciusCao/agent-legion/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/LuciusCao/agent-legion/compare/v0.7.1...v0.7.2

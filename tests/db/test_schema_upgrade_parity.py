@@ -43,7 +43,7 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v80, result_stage_profile, #521) must
+# Effects the newest migration (v81, claim_queue_wait_profile, #551) must
 # leave behind so the undo step rewinds a current-shape database to
 # exactly SCHEMA_VERSION-1. v80 adds the fourteen result-stage gauge
 # columns to ops_runtime_profile_samples (the migration module carries
@@ -52,24 +52,12 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 # indexes, or trigger shapes change at v80.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("ops_runtime_profile_samples", "result_unpack_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "result_unpack_seconds_max", "double precision"),
-    ("ops_runtime_profile_samples", "result_artifacts_verify_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "result_artifacts_verify_seconds_max", "double precision"),
-    ("ops_runtime_profile_samples", "result_validate_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "result_validate_seconds_max", "double precision"),
-    ("ops_runtime_profile_samples", "result_artifacts_upload_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "result_artifacts_upload_seconds_max", "double precision"),
-    ("ops_runtime_profile_samples", "result_lease_write_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "result_lease_write_seconds_max", "double precision"),
-    ("ops_runtime_profile_samples", "result_events_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "result_events_seconds_max", "double precision"),
-    ("ops_runtime_profile_samples", "result_mark_done_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "result_mark_done_seconds_max", "double precision"),
+    ("ops_runtime_profile_samples", "claim_queue_wait_seconds_total", "double precision"),
+    ("ops_runtime_profile_samples", "claim_queue_wait_seconds_max", "double precision"),
 )
-# The expression index shape is unchanged at v80 (v79's concern).
+# The expression index shape is unchanged at v81 (v79's concern).
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "result_stage_profile"
+_NEWEST_MIGRATION_NAME = "claim_queue_wait_profile"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a

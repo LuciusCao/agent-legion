@@ -2,24 +2,24 @@
 
 Split out of ``claim_scan.py`` for the file-size budget: given one candidate
 row (from the bounded window scan) and the Worker view, try to claim it —
-compatibility filters, row lock, job re-check, capacity enforcement, and the
-lease + run inserts. Must run inside the caller's transaction.
+compatibility filters, row lock, job re-check, capacity enforcement. The
+promote write sequence (run row / lease / request flip / jobs promote /
+queue-wait gauge) lives in ``claim_promote.py`` (#551). Must run inside the
+caller's transaction.
 """
 
 from __future__ import annotations
 
 import json
-import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import agent_claim_compatibility
-from server.app.agent_broker.claim_paths import claim_log_path
+from server.app.agent_broker.claim_promote import promote_claim
 from server.app.agent_broker.claim_scan import (
     RUNNABLE_JOB_STATUSES,
     AgentClaim,
-    ClaimRacedError,
     ScanState,
     WorkerView,
     labels_satisfy,
@@ -203,68 +203,9 @@ def evaluate_candidate(
             state.skip_reasons["node_not_pending"] += 1
             return None
 
-    log_path = claim_log_path(manifest, broker.data_dir)
-    # Dispatch-time config audit (CONFIG-RUNTIME-MUTABLE-001): the manifest
-    # config is the non-secret resolved config built at enqueue on the Host —
-    # frozen keys repeat the intake snapshot, runtime_mutable keys carry the
-    # enqueue-time re-resolution. Secret values never enter the manifest
-    # (CONFIG-MANIFEST-001), so this is safe to persist.
-    config_snapshot_json = json.dumps(manifest.get("config") or {}, sort_keys=True, default=str)
-    run = conn.execute(
-        """
-        insert into node_runs(
-          job_id, node_key, status, command_json, log_path, run_dir, session_dir,
-          started_at, config_snapshot_json
-        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp, %s)
-        returning id
-        """,
-        (selected["job_id"], selected["node_key"], log_path, config_snapshot_json),
-    ).fetchone()
-    if run is None:
-        raise RuntimeError("node run insert did not return an id")
-    lease_id = str(uuid.uuid4())
-    expires_at = datetime.now(UTC) + timedelta(seconds=broker.lease_ttl_seconds)
-    # Code leases share the 'agent:' prefix so the generic lease sweeper
-    # keeps leaving them to the Agent broker sweep (requeue semantics).
-    executor_id = (
-        f"agent:code:{selected['agent_id']}" if kind == "code" else f"agent:{selected['agent_id']}"
-    )
-    conn.execute(
-        """
-        insert into executor_leases(
-          id, execution_id, executor_id, workspace_id, job_id,
-          node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-        ) values (%s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s)
-        """,
-        (
-            lease_id,
-            selected["execution_id"],
-            executor_id,
-            selected["workspace_id"],
-            selected["job_id"],
-            selected["node_key"],
-            run["id"],
-            expires_at,
-        ),
-    )
-    conn.execute(
-        """
-        update agent_execution_requests set
-          state='claimed', worker_id=%s, lease_id=%s, node_run_id=%s,
-          attempt=attempt+1, claimed_at=current_timestamp, heartbeat_at=current_timestamp
-        where execution_id=%s and state='queued'
-        """,
-        (worker_id, lease_id, run["id"], selected["execution_id"]),
-    )
-    promoted = conn.execute(
-        "update jobs set status='running', updated_at=current_timestamp"
-        " where id=%s and status in ('queued', 'running') and execution_paused=0",
-        (selected["job_id"],),
-    )
-    if promoted.rowcount == 0:
-        # Pause/failure landed mid-claim; roll the whole claim back so the
-        # request stays queued instead of resurrecting the job.
-        raise ClaimRacedError()
+    # Promote 写入段（node_runs/lease/request/jobs + #551 queue_wait 折叠）
+    # 在 claim_promote.py——预算拆分，evaluate 只留准入与竞态语义。
+    lease_id, node_run_id = promote_claim(broker, conn, worker_id, selected, manifest, kind)
     return AgentClaim(
         execution_id=selected["execution_id"],
         workspace_id=selected["workspace_id"],
@@ -272,7 +213,7 @@ def evaluate_candidate(
         node_key=selected["node_key"],
         agent_id=selected["agent_id"],
         lease_id=lease_id,
-        node_run_id=int(run["id"]),
+        node_run_id=node_run_id,
         manifest=manifest,
         kind=kind,
         # #490: claim.granted reads the resolved runtime off the claim.

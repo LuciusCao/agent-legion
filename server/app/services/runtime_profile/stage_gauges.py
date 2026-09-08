@@ -24,8 +24,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from server.app.services.runtime_profile.counters import RuntimeProfileCounters
 
-# Claim-stage gauges (#448): set from ``claim_timing`` stage names.
-CLAIM_STAGES = ("scan", "evaluate", "writes")
+# Claim-stage gauges (#448): set from ``claim_timing`` stage names, plus
+# ``queue_wait`` (#551): queued_at→promote 的供给延迟，由 evaluate_candidate
+# 在 promote 成功时按候选直接 fold（不经 timer——它不属于事务内阶段）。
+CLAIM_STAGES = ("queue_wait", "scan", "evaluate", "writes")
 
 # Result-stage gauges (#521): set from ``result_timing`` stage names.
 RESULT_STAGES = (

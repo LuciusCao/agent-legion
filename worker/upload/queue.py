@@ -30,7 +30,6 @@ from __future__ import annotations
 import json
 import shutil
 import threading
-from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
@@ -40,6 +39,9 @@ from worker.artifact.upload import DirectUploadError, upload_artifact_direct
 from worker.host.transfer import HostRequestError
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.upload import heartbeat as upload_heartbeat
+from worker.upload import report_events
+from worker.upload.task import PendingUploadExists as PendingUploadExists
+from worker.upload.task import UploadTask
 
 if TYPE_CHECKING:
     from worker.execution.heartbeat_batch import BatchHeartbeatRegistry
@@ -58,101 +60,10 @@ from worker.upload.result_metadata import (
 from worker.upload.scheduler import LaneScheduler
 
 PENDING_FILENAME = "upload_pending.json"
-_PENDING_VERSION = 1
-
-
-class PendingUploadExists(RuntimeError):
-    """#203：execution dir 已带未投递 marker——该目录归 UploadQueue 所有。"""
-
 
 _RETRY_BASE_SECONDS = 2.0
 _RETRY_CAP_SECONDS = 60.0
 _HEARTBEAT_JOIN_SECONDS = 5.0
-
-
-@dataclass
-class UploadTask:
-    """Everything needed to deliver one execution's result to the Host."""
-
-    execution_id: str
-    lease_id: str
-    execution_dir: Path
-    node_key: str
-    status_fields: dict[str, str]
-    # "process": run post-processing (scan/compress/archive) then report.
-    # "prebuilt": metadata is final (pre-process failure / pre-start cancel).
-    kind: str
-    # "agent"（缺省）或 "code"（批次 2）：上面的 kind 已被
-    # "process"/"prebuilt" 占用，agent/code 维度用 exec_kind 表达（勿复用）。
-    exec_kind: str = "agent"
-    # code 执行的结果（status/error_message/auth_failure_connection），由
-    # code_runner 在进程退出后填入；随 pending marker 持久化供崩溃恢复。
-    code_result: dict[str, Any] | None = None
-    exit_code: int = 1
-    expected_outputs: tuple[str, ...] = ()
-    command: tuple[str, ...] = ()
-    prebuilt_metadata: dict[str, Any] | None = None
-    # #160 D12: claim manifest 的 artifact_uploads（name → {storage_key, url}
-    # presigned PUT）。非空时产物直传 S3、result.tar.gz 不再内嵌产物；
-    # 空 = 旧通道（CAS POST + tar 内嵌）。不持久化：presigned URL 会过期，
-    # 崩溃恢复的任务从 bulk 车道重进时走旧通道（Host 两种形态都收）。
-    artifact_uploads: dict[str, Any] = field(default_factory=dict)
-    heartbeat_stop: threading.Event = field(default_factory=threading.Event)
-    heartbeat_thread: threading.Thread | None = None
-    # #352: 本任务租约归属的批量心跳 registry（_deliver_bulk 接管/恢复时
-    # 设置）。None = 旧单条心跳模式（无 registry 的单测路径）。
-    heartbeat_registry: Any = None
-    # bulk 车道产物，交给 report 车道；运行时状态，不持久化——崩溃恢复的任务
-    # 一律从 bulk 车道重进，prepare 与 artifact 上传会原样重做。
-    prepared_metadata: dict[str, Any] | None = None
-    prepared_archive: Path | None = None
-
-    def is_direct_upload(self, outputs: list[str]) -> bool:
-        """#160 D12 直传判定（#201 单点收敛）：manifest 带 artifact_uploads 且
-        每个产出都有上传规格才走直传 S3 通道；否则整体回落旧通道（CAS POST +
-        tar 内嵌）。归档是否内嵌产物（upload_prepare / code_runner 的
-        prepare_result）与上传通道（_bulk_transfer）必须用同一判定，否则产物
-        既不在 tar 里也没直传。注意 DirectUploadError 的回落路径会把
-        artifact_uploads 清空再重取判定，本方法天然随之变 False。"""
-        return bool(self.artifact_uploads) and all(
-            name in self.artifact_uploads for name in outputs
-        )
-
-    def to_json(self) -> dict[str, Any]:
-        return {
-            "version": _PENDING_VERSION,
-            "execution_id": self.execution_id,
-            "lease_id": self.lease_id,
-            "node_key": self.node_key,
-            "status_fields": self.status_fields,
-            "kind": self.kind,
-            "exec_kind": self.exec_kind,
-            "code_result": self.code_result,
-            "exit_code": self.exit_code,
-            "expected_outputs": list(self.expected_outputs),
-            "command": list(self.command),
-            "prebuilt_metadata": self.prebuilt_metadata,
-        }
-
-    @classmethod
-    def from_json(cls, payload: dict[str, Any], work_root: Path) -> UploadTask:
-        if int(payload.get("version", 0)) != _PENDING_VERSION:
-            raise ValueError(f"unsupported upload marker version: {payload.get('version')!r}")
-        execution_id = str(payload["execution_id"])
-        return cls(
-            execution_id=execution_id,
-            lease_id=str(payload["lease_id"]),
-            execution_dir=work_root / execution_id,
-            node_key=str(payload["node_key"]),
-            status_fields={str(k): str(v) for k, v in dict(payload["status_fields"]).items()},
-            kind=str(payload["kind"]),
-            exec_kind=str(payload.get("exec_kind") or "agent"),
-            code_result=payload.get("code_result"),
-            exit_code=int(payload.get("exit_code", 1)),
-            expected_outputs=tuple(str(name) for name in payload.get("expected_outputs", [])),
-            command=tuple(str(part) for part in payload.get("command", [])),
-            prebuilt_metadata=payload.get("prebuilt_metadata"),
-        )
 
 
 class UploadQueue:
@@ -205,6 +116,7 @@ class UploadQueue:
         atomic_write(marker, json.dumps(task.to_json(), ensure_ascii=False))
         # upsert: 重启恢复的任务在 reporter 里尚无条目，积压期间也要以 queued_upload 可见。
         self._status.upsert_phase(task.execution_id, "queued_upload", **task.status_fields)
+        task.report_timer = report_events.UploadReportTimer()
         with self._lock:
             self._depth += 1
         self._scheduler.submit(lambda: self._deliver_bulk(task))
@@ -245,6 +157,7 @@ class UploadQueue:
 
     def _deliver_bulk(self, task: UploadTask) -> None:
         """bulk 车道入口：prepare + artifact 上传，完成后挂入 report 车道。"""
+        report_events.mark(task, "bulk_start")
         if task.heartbeat_thread is None:
             # Restored from disk: resume heartbeating so the lease survives.
             # The status entry already exists — submit() upserted it at restore.
@@ -275,12 +188,14 @@ class UploadQueue:
                 pass  # 调度器已关停；marker 留给下次启动恢复
             else:
                 return
-        self._finalize(task)
+        self._finalize(task, "aborted")
 
     def _deliver_report(self, task: UploadTask) -> None:
         """report 车道入口：quiesce 心跳 → report → 删 marker 清目录。"""
+        report_events.mark(task, "report_start")
+        outcome = "aborted"
         try:
-            self._report(task)
+            outcome = self._report(task)
         except Exception as exc:
             # #204 broad-except audit: report 车道任务的存活安全网（同
             # _deliver_bulk：逃逸异常会落进无人读取的 Future，这里是唯一
@@ -292,9 +207,9 @@ class UploadQueue:
             # print 记录 execution_id 与异常（仅消息、无堆栈）。
             print(f"upload report crashed for {task.execution_id}: {exc}", flush=True)
         finally:
-            self._finalize(task)
+            self._finalize(task, outcome)
 
-    def _finalize(self, task: UploadTask) -> None:
+    def _finalize(self, task: UploadTask, outcome: str) -> None:
         upload_heartbeat.prune_heartbeat(
             task.heartbeat_registry,
             task.heartbeat_stop,
@@ -305,6 +220,8 @@ class UploadQueue:
             task.heartbeat_thread.join(timeout=2)
             task.heartbeat_thread = None
         self._status.finish(task.execution_id)
+        # #551：每个上传任务一条 execution.reported（分段耗时 + 结局）。
+        report_events.note_execution_reported(task, outcome)
         with self._lock:
             self._depth -= 1
 
@@ -315,6 +232,7 @@ class UploadQueue:
         self._status.set_phase(task.execution_id, "uploading")
         job_dir = task.execution_dir / "job"
         metadata, archive, outputs = prepare_or_failed(task)
+        report_events.mark(task, "prepare_done")
         # #160 D12：直传判定经 UploadTask.is_direct_upload（#201 单点收敛）；
         # 直传走 presigned PUT，否则整体回落旧通道（CAS POST + tar 内嵌，tar
         # 已在 prepare_result 按同一方法决定是否内嵌）。
@@ -357,9 +275,10 @@ class UploadQueue:
         metadata["output_artifacts"] = uploaded
         task.prepared_metadata = metadata
         task.prepared_archive = archive
+        report_events.mark(task, "bulk_done")
         return True
 
-    def _report(self, task: UploadTask) -> None:
+    def _report(self, task: UploadTask) -> str:
         metadata = task.prepared_metadata or {}
         archive = task.prepared_archive or (task.execution_dir / "result.tar.gz")
         # Quiesce the heartbeat before the final report: a beat racing the
@@ -368,6 +287,10 @@ class UploadQueue:
         # Deliberately NOT run_with_retry: each backoff window must re-arm the
         # lease heartbeat, which the shared plain-sleep loop cannot express.
         upload_heartbeat.quiesce_task_heartbeat(task, _HEARTBEAT_JOIN_SECONDS)
+        # #551：归档随 report 成功后的目录清理删除——字节数先落进计时器
+        # （execution.reported 在 finalize 才发射）。
+        if task.report_timer is not None and archive.is_file():
+            task.report_timer.archive_bytes = archive.stat().st_size
         backoff = _RETRY_BASE_SECONDS
         while not self._stop.is_set():
             try:
@@ -400,10 +323,11 @@ class UploadQueue:
             )
             break
         else:
-            return  # stopped before the report resolved; marker stays
+            return "aborted"  # stopped before the report resolved; marker stays
         marker = task.execution_dir / PENDING_FILENAME
         marker.unlink(missing_ok=True)
         shutil.rmtree(task.execution_dir, ignore_errors=True)
+        return "delivered" if status_code == 204 else "rejected"
 
     def _upload_with_retry(self, path: Path) -> str | None:
         """Upload one artifact; None = stopped (retry next startup); 4xx propagates."""

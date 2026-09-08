@@ -270,7 +270,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         ).fetchone()
     assert migration is not None
     # The registry tail at the CURRENT schema version (v80, #521).
-    assert migration["name"] == "result_stage_profile"
+    assert migration["name"] == "claim_queue_wait_profile"
 
 
 @pytest.mark.fresh_schema
