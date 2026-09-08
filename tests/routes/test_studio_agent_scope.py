@@ -162,6 +162,14 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # Context push (Studio node selection): the agent reads it back via
     # get_studio_context, so a scoped token must not rewrite its own context.
     ("PUT", f"{_CHAT}/sessions/{{session_id}}/context", {"selected_node_key": "n"}),
+    # Campaigns (#532 PR-A): operator bulk actions, not agent tooling — the
+    # whole router mounts reject_studio_agent_scope (job_mutations precedent).
+    ("POST", "/api/workspaces/{workspace_id}/campaigns", None),
+    ("POST", "/api/workspaces/{workspace_id}/campaigns/upload", None),
+    ("POST", "/api/workspaces/{workspace_id}/campaigns/preview", None),
+    ("POST", "/api/workspaces/{workspace_id}/campaigns/{campaign_id}/pause", None),
+    ("POST", "/api/workspaces/{workspace_id}/campaigns/{campaign_id}/resume", None),
+    ("POST", "/api/workspaces/{workspace_id}/campaigns/{campaign_id}/cancel", None),
 ]
 
 # Unguarded non-GET routes, each with the reason a scoped token may reach it.
@@ -292,6 +300,7 @@ _PATH_PARAM_VALUES = {
     "request_id": "request-x",
     "material_id": "mat-x",
     "bundle_id": "bundle-x",
+    "campaign_id": "campaign-x",
 }
 
 

@@ -30,33 +30,45 @@ class WorkflowsRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # ``enabled`` retired (#385/#389): the gray-release switch drifted into a
-    # de-facto product master switch with no legitimate off state in
-    # single-node deployments. The deployment-shape responsibility now lives
-    # on ``executor_runtime.code_capacity`` (0 = pure-remote control plane)
-    # plus the sweeper escape hatch; stored DB documents carrying the key
-    # are stripped at read time (instance_settings).
-    # Feature gate for DB-backed custom workflow node codes (EXEC-CODE-002).
-    # Default on in this phase: self-hosted, workspace editors are all team
-    # members (design §7 trust assumption). Disable via
-    # AGENT_LEGION_CUSTOM_NODES_ENABLED=0.
+    # de-facto product master switch with no legitimate off state; the
+    # deployment-shape responsibility now lives on ``code_capacity``
+    # (0 = pure-remote control plane) plus the sweeper escape hatch; stored
+    # documents carrying the key are stripped at read time.
+    # Feature gate for DB-backed custom workflow node codes (EXEC-CODE-002):
+    # default on (self-hosted, workspace editors are team members, design
+    # §7); disable via AGENT_LEGION_CUSTOM_NODES_ENABLED=0.
     custom_nodes_enabled: bool = True
-    # Hard cap on one run's submitted items (#358 / #349 P0-1): a single
-    # POST /runs inserts every item in one transaction, so oversized runs
-    # blow memory and transaction length before the first job even executes.
-    # Default sits on the batched-submission baseline ceiling (2×10^4 items
-    # per run); 0 disables the cap (not recommended). Instance-settings
-    # managed, takes effect on restart.
+    # Hard cap on one run's submitted items (#358 / #349 P0-1); 0 disables
+    # the cap (not recommended). Instance-settings managed, restart-effective.
     max_items_per_run: int = Field(default=20_000, ge=0)
 
 
 class AgentWorkersRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # The global register token (register_token / register_token_file) was
-    # retired with issue #35: registration is scoped-token-only, so this
-    # section no longer carries any credential.
+    # Credentials retired with issue #35 (scoped-token-only registration).
     max_archive_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
     min_protocol_version: int = Field(default=1, ge=1)
+
+
+class CampaignsRuntimeConfig(BaseModel):
+    """Campaign feeder/manifest knobs (#532 / #505, design §2.5): the #505
+    CLI calibration as instance defaults; rows override watermark/batch_size.
+    The feeder loop lands in PR-B; PR-A ships the validating API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feed_interval_seconds: float = Field(default=10.0, gt=0)  # min gap between a campaign's batches
+    feeder_tick_seconds: float = Field(default=2.0, gt=0)  # active-scan tick cadence
+    # Replenishment trigger level, wide-set semantics (#349: total minus
+    # completed/failed; paused/awaiting count).
+    default_watermark: int = Field(default=30_000, ge=1)
+    default_batch_size: int = Field(default=5_000, ge=1)
+    # rerun/upgrade ceiling (5k slice ≈ 2.4s pass time vs 15s slow-pass).
+    rerun_max_batch_size: int = Field(default=5_000, ge=1)
+    max_active_per_workspace: int = Field(default=3, ge=1)  # pending+running campaigns
+    manifest_inline_max_bytes: int = Field(default=262_144, ge=1)  # 256KB ≈ 2–3k items
+    manifest_max_bytes: int = Field(default=52_428_800, ge=1)  # multipart upload ceiling
 
 
 class ExecutorRuntimeConfig(BaseModel):
@@ -67,27 +79,23 @@ class ExecutorRuntimeConfig(BaseModel):
     heartbeat_failure_threshold: int = Field(default=3, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
     # Local fallback execution capacity (#389): non-Agent-routed nodes run
-    # here only when no remote code Worker is available. Instance-settings
-    # managed; takes effect on restart (no hot reload). 0 = pure remote mode
-    # — the host executes no code nodes locally and the executor stack is
-    # not assembled at all (requires an online code-capable Worker to make
-    # progress).
+    # here only when no remote code Worker is available; instance-settings
+    # managed, restart-effective. 0 = pure remote mode (the host executes no
+    # code nodes locally; requires an online code-capable Worker).
     code_capacity: int = Field(default=16, ge=0)
     sweeper_enabled: bool = True
     sweeper_interval_seconds: float = Field(default=5.0, gt=0)
     workflows: WorkflowsRuntimeConfig = Field(default_factory=WorkflowsRuntimeConfig)
     agent_workers: AgentWorkersRuntimeConfig = Field(default_factory=AgentWorkersRuntimeConfig)
+    campaigns: CampaignsRuntimeConfig = Field(default_factory=CampaignsRuntimeConfig)
     agent_stock: AgentStockConfig = Field(default_factory=AgentStockConfig)
     code_stock: CodeStockConfig = Field(default_factory=CodeStockConfig)
     agent_enqueue: AgentEnqueueConfig = Field(default_factory=AgentEnqueueConfig)
 
 
 class StartupValidationError(Exception):
-    """Aggregated startup configuration errors.
-
-    Diagnostics list field paths and human-readable problems; secret values are
-    never included so messages can be logged safely.
-    """
+    """Aggregated startup configuration errors (field paths + human-readable
+    problems; secret values never included so messages log safely)."""
 
     def __init__(self, fields: list[tuple[str, str]]) -> None:
         self.fields = fields
@@ -110,17 +118,11 @@ def _resolve_executable(value: str) -> Path | None:
 
 
 def validate_runtime(runtime: ExecutorRuntimeConfig, config: dict[str, Any]) -> None:
-    """Validate enabled runtime dependencies at startup.
-
-    Business integrations (CMS credentials, ASR machine paths) retired with the
-    legacy business workflows: external service endpoints/credentials live on
-    instance-level connections and are injected into node config at dispatch
-    time, so startup has nothing to pre-check for them. The pi executor
-    precheck retired with the executor concept (P-0.5, schema v47): agent
-    runtimes are preflighted on the Agent Worker side. The ``openclaw`` block
-    retired with the openclaw runtime (#75). Kept as the startup-validation
-    seam for future checks.
-    """
+    """Validate enabled runtime dependencies at startup: business integrations
+    retired with the legacy workflows (external endpoints live on instance
+    connections, injected at dispatch), the pi precheck with the executor
+    concept (P-0.5, v47; agents preflight Worker-side), openclaw with #75 —
+    kept as the seam for future checks."""
     errors: list[tuple[str, str]] = []
     if errors:
         raise StartupValidationError(errors)

@@ -9,6 +9,7 @@ from server.app.db.migrations.agent_request_kind_window import (
 from server.app.db.migrations.agent_workspace_scope import (
     migrate_agent_workspace_scope,  # noqa: F401
 )
+from server.app.db.migrations.campaigns import migrate_campaigns  # noqa: F401
 from server.app.db.migrations.cms_config import migrate_workspace_cms_config  # noqa: F401
 from server.app.db.migrations.code_executor import migrate_code_executor_bindings  # noqa: F401
 from server.app.db.migrations.custom_node_codes import migrate_custom_node_codes  # noqa: F401
@@ -65,8 +66,4 @@ from server.app.db.migrations.workspace_secrets import migrate_workspace_secrets
 
 # The export list is derived from the imported migration functions themselves
 # (one export per module, no hand-maintained duplicate that grows per version).
-__all__ = [
-    name
-    for name, value in sorted(globals().items())
-    if name.startswith("migrate_") and callable(value)
-]
+__all__ = [n for n, v in sorted(globals().items()) if n.startswith("migrate_") and callable(v)]

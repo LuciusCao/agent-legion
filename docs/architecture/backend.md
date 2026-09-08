@@ -126,6 +126,14 @@ server/app/
 | WEBSOCKET | `/agents` | `agents_ws` | routes/agents.py |
 | POST | `/artifacts` | `upload_artifact` | routes/artifacts.py |
 | GET | `/artifacts/{hash}` | `download_artifact` | routes/artifacts.py |
+| POST | `/workspaces/{workspace_id}/campaigns` | `create_campaign` | routes/campaigns.py |
+| POST | `/workspaces/{workspace_id}/campaigns/upload` | `create_campaign_from_manifest` | routes/campaigns.py |
+| POST | `/workspaces/{workspace_id}/campaigns/preview` | `preview_campaign` | routes/campaigns.py |
+| GET | `/workspaces/{workspace_id}/campaigns` | `list_campaigns` | routes/campaigns.py |
+| GET | `/workspaces/{workspace_id}/campaigns/{campaign_id}` | `get_campaign` | routes/campaigns.py |
+| POST | `/workspaces/{workspace_id}/campaigns/{campaign_id}/pause` | `pause_campaign` | routes/campaigns.py |
+| POST | `/workspaces/{workspace_id}/campaigns/{campaign_id}/resume` | `resume_campaign` | routes/campaigns.py |
+| POST | `/workspaces/{workspace_id}/campaigns/{campaign_id}/cancel` | `cancel_campaign` | routes/campaigns.py |
 | GET | `/health` | `health` | routes/common.py |
 | GET | `/admin/connections` | `list_connections` | routes/connections.py |
 | GET | `/connections/keys` | `list_connection_keys` | routes/connections.py |
@@ -313,6 +321,7 @@ server/app/
 | CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/configuration/executor_knobs.py |
 | WorkflowsRuntimeConfig | BaseModel | custom_nodes_enabled: bool, max_items_per_run: int | app/configuration/executor_runtime.py |
 | AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/configuration/executor_runtime.py |
+| CampaignsRuntimeConfig | BaseModel | feed_interval_seconds: float, feeder_tick_seconds: float, default_watermark: ... | app/configuration/executor_runtime.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/configuration/executor_runtime.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
 | AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'velites'], capability: str, skill: str, tool... | app/routes/agent_catalog_contracts.py |
@@ -359,6 +368,16 @@ server/app/
 | MemberResponse | BaseModel | id: str, username: str, display_name: str, user_role: Literal['admin', 'membe... | app/routes/auth_contracts.py |
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
+| CampaignKnobsMixin | BaseModel | watermark: int | None, batch_size: int | None | app/routes/campaign_contracts.py |
+| CampaignCreateRequest | BaseModel | mode: CampaignMode, rerun: CampaignRerunTarget | None, submit: CampaignSubmit... | app/routes/campaign_contracts.py |
+| CampaignRecord | BaseModel | id: str, workspace_id: str, mode: CampaignMode, status: CampaignStatus, targe... | app/routes/campaign_contracts.py |
+| CampaignCreateResponse | BaseModel | campaign: CampaignRecord | app/routes/campaign_contracts.py |
+| CampaignListResponse | BaseModel | campaigns: list[CampaignRecord] | app/routes/campaign_contracts.py |
+| CampaignDetailResponse | BaseModel | campaign: CampaignRecord | app/routes/campaign_contracts.py |
+| CampaignRerunPreviewResult | BaseModel | mode: Literal['rerun', 'upgrade'], total_count: int, eligible_count: int, est... | app/routes/campaign_contracts.py |
+| CampaignSubmitPreviewResult | BaseModel | mode: Literal['submit'], total_items: int, would_create: int, would_skip: int... | app/routes/campaign_contracts.py |
+| CampaignPreviewResponse | BaseModel | result: Annotated[CampaignRerunPreviewResult | CampaignSubmitPreviewResult, F... | app/routes/campaign_contracts.py |
+| CampaignStatusChangeResponse | BaseModel | campaign: CampaignRecord | app/routes/campaign_contracts.py |
 | StorageStatus | BaseModel | configured: bool, reachable: bool | app/routes/common.py |
 | HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None | app/routes/common.py |
 | ConnectionCreate | BaseModel | key: str, type: str, display_name: str, config: dict[str, Any] | app/routes/connections_contracts.py |

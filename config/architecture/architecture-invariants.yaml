@@ -1287,6 +1287,21 @@ invariants:
         target: tests/db/test_db.py::test_database_initialization_records_postgres_schema
         gate: quick
 
+  - id: CAMPAIGN-STATE-001
+    statement: "A campaign row (schema v80, server/app/jobs/queries/campaigns.py) is the sole durable state of a watermark-gated bulk operation. State machine: pending (created, not yet picked up) → running (feeder's CAS pickup) ⇄ paused (operator intent — a paused WORKSPACE suspends feeding but never rewrites the campaign's own status) → failed (deterministic failures only) | completed | cancelled, with the status CHECK constraint as the enumeration boundary. The feeder advances its cursor and counters only through advance_campaign_progress, whose WHERE clause carries the OLD progress_json (compare-and-set): a pause/cancel landing between the feeder's read and write wins the race — already-submitted batch writes stay (job dedup and rerun eligibility make them idempotent), only the cursor freezes, and counters are absolute values so a lost race never double-counts. The watermark is the wide-set non-terminal level — total jobs minus completed minus failed (paused and awaiting_approval count, the #349 red line's set definition) — and is a replenishment trigger level, not a capacity promise: a watermark below the batch size is a legal burst configuration and the first batch is not refused."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/db/test_campaigns_schema.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_campaign_service.py
+        gate: quick
+      - kind: contract
+        target: tests/routes/test_campaigns_api.py
+        gate: quick
+
   - id: EXEC-APPROVAL-001
     statement: "A ``type: approval`` node never dispatches to any executor or Agent: the workflow worker parks its job_node at awaiting_approval (no lease, no node_run), downstream nodes stay blocked until the node completes, and the only transition out is an approval-API decision from a human session — studio_agent scoped tokens are rejected on the decision route, and every decision is recorded as an insert-only approval_decisions row with the uniform user:{id} actor."
     owner: workflow-worker

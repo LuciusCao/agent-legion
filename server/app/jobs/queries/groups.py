@@ -14,6 +14,7 @@ from server.app.jobs.execution_control import JobExecutionControlMixin
 from server.app.jobs.queries.approval_decisions import ApprovalDecisionQueriesMixin
 from server.app.jobs.queries.auth import AuthQueriesMixin
 from server.app.jobs.queries.batch import RunQueriesMixin
+from server.app.jobs.queries.campaigns import CampaignQueriesMixin  # #532
 from server.app.jobs.queries.execution_retention import ExecutionRetentionQueriesMixin
 from server.app.jobs.queries.external_connections import ExternalConnectionKeyQueriesMixin
 from server.app.jobs.queries.failed_node_runs import FailedNodeRunQueriesMixin
@@ -28,9 +29,7 @@ from server.app.jobs.queries.job_scan_marks import JobScanMarksMixin
 from server.app.jobs.queries.quality_replays import QualityReplayQueriesMixin
 from server.app.jobs.queries.run_item_probes import RunItemProbeQueriesMixin
 from server.app.jobs.queries.runtime_profile import RuntimeProfileQueriesMixin
-from server.app.jobs.queries.scoped_token_management import (
-    ScopedTokenManagementQueriesMixin,
-)
+from server.app.jobs.queries.scoped_token_management import ScopedTokenManagementQueriesMixin
 from server.app.jobs.queries.scoped_tokens import ScopedTokenQueriesMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
 from server.app.jobs.queries.studio_chat import StudioChatQueriesMixin
@@ -78,10 +77,11 @@ class RunDomainQueriesMixin(
     ApprovalDecisionQueriesMixin,
     RuntimeProfileQueriesMixin,
     ExecutionRetentionQueriesMixin,
+    CampaignQueriesMixin,
     AtomicJobMutationsMixin,
     JobExecutionControlMixin,
 ):
-    """Runs, jobs, nodes, scans, reruns, quality replays, approvals, retention, and execution control."""
+    """Runs, jobs, nodes, scans, reruns, campaigns, quality replays, approvals, retention, and execution control."""
 
 
 class StudioChatDomainQueriesMixin(StudioChatQueriesMixin, StudioPublishRequestQueriesMixin):

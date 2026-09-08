@@ -8,6 +8,8 @@ from .agent_definitions import create_agent_definitions_router
 from .agent_workers import create_agent_workers_router
 from .agents import create_agents_router
 from .artifacts import create_artifacts_router
+from .campaign_wiring import build_campaign_service
+from .campaigns import create_campaigns_router
 from .common import create_common_router
 from .connections import create_connections_router
 from .deps import RouterDeps
@@ -91,12 +93,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
         secured(create_metrics_router(deps.ops_metrics))
         secured(create_runtime_profile_router(deps.ops_metrics))
     quality_plane = _require_all_or_none(
-        (
-            deps.quality_sampling,
-            deps.quality_labels,
-            deps.quality_stats,
-            deps.quality_replays,
-        ),
+        (deps.quality_sampling, deps.quality_labels, deps.quality_stats, deps.quality_replays),
         ("quality_sampling", "quality_labels", "quality_stats", "quality_replays"),
     )
     if all(part is not None for part in quality_plane):
@@ -123,6 +120,9 @@ def create_router(deps: RouterDeps) -> APIRouter:
     )
     secured(agent_catalog_router)
     secured(create_workspace_agent_routes_router(deps.job_db))
+    # Campaigns (#532 PR-A): row lifecycle + API surface, no feeder yet —
+    # created campaigns stay pending until PR-B's feeder picks them up.
+    secured(create_campaigns_router(build_campaign_service(deps)))
     # Preview panels (#328): the published-bundle read is member-level (job
     # detail iframe host); state/publish/archive carry their own Studio
     # authoring + reject_studio_agent_scope guards inside the router.

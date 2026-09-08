@@ -1,9 +1,8 @@
 """Chronological registry of versioned schema migrations (the schema.py /
 migration_registry.py re-export splits are file-budget moves). DDL-only
 versions carry no Python function — DDL lives in ``postgres_schema.sql``
-(v76's table is the exception). migrate_runs (v53) must run after every
-migration that still reads job_batches; the sorted registry guarantees it.
-"""
+(v76's table is the exception). migrate_runs (v53) runs after every
+migration still reading job_batches; the sorted registry guarantees it."""
 
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ from server.app.db.migrations import (
     migrate_agent_catalog_cutover,
     migrate_agent_request_kind_window,
     migrate_agent_workspace_scope,
+    migrate_campaigns,
     migrate_code_executor_bindings,
     migrate_executor_asr_config_schema,
     migrate_executor_entity_type,
@@ -201,7 +201,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # to -1 via COALESCE (old single-active semantics preserved). Apply fn
     # (drop + create): upgraded databases carry the two-column index.
     SchemaMigration(79, "shard_identity_index", migrate_shard_identity_index),
+    # v80 (#532 / #505): campaigns — the watermark-gated bulk-operation
+    # product (table + runs.campaign_id + indexes, apply fn per the v76
+    # precedent: the schema file sits at its budget ceiling). PR-A ships the
+    # schema/queries/service/API; the feeder (PR-B) drives the state machine.
+    SchemaMigration(80, "campaigns", migrate_campaigns),
 ]
 
-_VERSIONS = [m.version for m in MIGRATIONS]
-assert sorted(_VERSIONS) == _VERSIONS, "MIGRATIONS must stay version-sorted"
+assert sorted(_VERSIONS := [m.version for m in MIGRATIONS]) == _VERSIONS, "sorted"

@@ -71,12 +71,12 @@ def test_migration_widens_legacy_check_and_is_idempotent() -> None:
 def test_upgrade_from_v70_applies_the_widening() -> None:
     # Upgrade path: a database recorded at v70 replays the schema file (a no-op
     # for the existing table) and runs the v71+ migrations. At SCHEMA_VERSION
-    # 79 the chain tail is shard_identity_index: init_db's
+    # 80 the chain tail is campaigns: init_db's
     # high-water skip means the test must drop v71 AND every later version
-    # (79 included) to force the replay; the extra migrations' applies are
+    # (80 included) to force the replay; the extra migrations' applies are
     # idempotent.
-    assert SCHEMA_VERSION == 79
-    assert MIGRATIONS[-1].name == "shard_identity_index"
+    assert SCHEMA_VERSION == 80
+    assert MIGRATIONS[-1].name == "campaigns"
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version >= 71")
         conn.execute(_LEGACY_CHECK_DDL)
