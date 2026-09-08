@@ -274,3 +274,20 @@ def test_batch_claim_scan_skipped_when_pools_full(job_db) -> None:
 
     assert claims == []
     assert _queued_count(job_db) == 1
+
+
+def test_promote_folds_queue_wait_into_claim_profile(job_db) -> None:
+    """#551：promote 成功时 queue_wait（queued_at→promote）折进 claim 画像族
+    ——单条与批（#546）共用 claim_promote.promote_claim，两路都计入。"""
+    from server.app.services.runtime_profile import profile
+
+    _seed_agent_jobs(job_db, 2)
+    _register_worker()
+    before = profile.counters.claim_queue_wait_seconds_total
+
+    claims = claim_batch(broker(job_db.jobs_dir.parent), "worker-1", None, None, limit=2)
+
+    assert len(claims) == 2
+    # 批内每个 promote 各折一条：total 增量 > 0 且 max >= 任一增量。
+    assert profile.counters.claim_queue_wait_seconds_total > before
+    assert profile.counters.claim_queue_wait_seconds_max > 0

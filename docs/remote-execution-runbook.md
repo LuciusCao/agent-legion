@@ -361,6 +361,7 @@ supervisor console stream. Align the two sides by `execution_id` /
 | `claim.backoff` | Worker | The #437 backoff sequence's position: `failures`, `wait_seconds`, `error` |
 | `execution.claimed` | Worker | A claim arrived — the Worker-side view of the Host's `claim.granted` |
 | `execution.completed` | Worker | Local process/code exit: `exit_code`, `wall_seconds`; Host acceptance is its `execution.finished` |
+| `execution.reported` | Worker | Upload pipeline delivery verdict (#551): per-stage wall times `queue_wait_seconds`（submit→lane）/ `prepare_seconds` / `transfer_seconds` / `report_wait_seconds`（report 车道排队）/ `report_seconds`（含重试退避）+ `outcome`（`delivered` / `rejected`（含租约 409——重复执行的指纹）/ `aborted`（关停或车道异常，marker 保留重投））+ `archive_bytes` |
 | `execution.failed` | Worker | Local containment boundary fired (download/spawn/wait raised): `error` summary |
 | `http.error` | Worker | Upstream error response (`status_code` + `url` + bounded `body`) or transport failure (`url` + `error`) — the middle-502 blind spot, since the Host never sees the response |
 
@@ -380,6 +381,16 @@ Direct mappings for the common complaints: 「并发下来了」→ check the
 vs `claim.rejected` distinguishes drained queue from admission mismatch;
 「worker 静默」→ `worker.offline` names the moment; 「502 类中间层错误」→
 the Worker-side `http.error` carries the code and the target URL.
+
+Supply→consume chain triage (#551/#552): one row per suspected stage, each
+with its direct evidence — no more inferring from marker files.
+
+| 现象 | 先看哪里 | 判读 |
+| --- | --- | --- |
+| 容量爬升慢 | Host `/api/metrics/runtime-profile` 的 `claim_queue_wait_seconds_*`（queued_at→promote）与 `enqueue_pending` / `enqueue_stock_gated` | queue_wait 高 + enqueue_pending 低 = 消费侧（worker 不足/爬坡钳制）；enqueue_pending 高 = 供给侧（备货池/备货门）；两者都低而并发低 = worker 容量或爬坡 |
+| 上传积压（worker 控制台 queued 涨） | worker 日志的 `execution.reported` 分段：`queue_wait`（排队）/ `prepare`（归档 CPU）/ `transfer`（传输）/ `report_wait`（report 车道排队）/ `report`（Host commit RTT，含退避） | `report_seconds` 大 = Host result commit 慢（0.7.5 起解包已下沉进程池，#552；仍慢则看 Host 的 result 分段列）；`queue_wait` 大 = 上传并发不足（`upload_max_concurrency`）；`transfer` 大 = 链路/S3 |
+| 结果延迟大、租约濒临 90s | `execution.reported` 的 `outcome=rejected`（409 = 租约已被重发，重复执行的指纹）+ Host `result_*` 分段列 | rejected 成片出现 = 上传链比租约 TTL 慢，先按上一行定位分段 |
+| Host 进程单核贴顶 | `result_unpack_seconds_*` 分段（#552 后只剩进程池排队墙钟）+ 机器级采样 | unpack 段墙钟高而 Host CPU 低 = 进程池排队（调 `AGENT_LEGION_RESULT_UNPACK_WORKERS`，默认 min(4, 核数)）；unpack 低而总时长高 = 查其余分段 |
 
 ## 8. Security notes
 

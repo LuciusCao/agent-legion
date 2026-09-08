@@ -59,7 +59,7 @@ def _bucket_row() -> dict:
 
 def test_fresh_schema_has_stage_columns() -> None:
     # The autouse fixture already ran init_db at SCHEMA_VERSION.
-    assert SCHEMA_VERSION == 80
+    assert SCHEMA_VERSION == 81
     with read_connection(TEST_DATABASE_URL) as conn:
         columns = _existing_columns(conn)
     for column in _STAGE_COLUMNS:

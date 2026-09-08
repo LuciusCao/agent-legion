@@ -4957,6 +4957,10 @@ export interface components {
       claim_evaluate_seconds_max: number
       /** Claim Evaluate Seconds Total */
       claim_evaluate_seconds_total: number
+      /** Claim Queue Wait Seconds Max */
+      claim_queue_wait_seconds_max: number
+      /** Claim Queue Wait Seconds Total */
+      claim_queue_wait_seconds_total: number
       /** Claim Scan Seconds Max */
       claim_scan_seconds_max: number
       /** Claim Scan Seconds Total */

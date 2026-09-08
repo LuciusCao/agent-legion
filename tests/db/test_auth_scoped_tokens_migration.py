@@ -78,7 +78,7 @@ def test_v41_database_upgrades_via_init_db() -> None:
     assert "idx_auth_scoped_tokens_id" in indexes
     assert migration is not None
     # The registry tail at the CURRENT schema version (v80, #521).
-    assert migration["name"] == "result_stage_profile"
+    assert migration["name"] == "claim_queue_wait_profile"
 
     # Idempotent on replay (init_db runs at every backend startup).
     init_db(TEST_DATABASE_URL)

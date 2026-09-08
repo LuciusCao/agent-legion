@@ -10,7 +10,8 @@ follow-up work. #521 adds the result-commit stage split (unpack /
 artifacts_verify / validate / artifacts_upload / lease_write / events /
 mark_done totals + maxes, schema v80) — a completion wave's commits
 saturate the single Host process, and the split names the segment that
-owns the CPU.
+owns the CPU. #551 adds ``queue_wait`` to the claim family (schema v81):
+queued_at→promote supply-side wait, separating "no stock" from "no taker".
 
 L2 — the bottleneck classifier (``classifier.py``) turns the latest gauges
 plus the existing queue-alert signal (blocked/stalled, passed in as context

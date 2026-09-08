@@ -13,7 +13,8 @@ console 流（executor 子进程 stdout → supervisor `_log` 面板 + 部署日
   未来路径把 token 类参数带进日志。
 - 级别纪律同 Host 侧：正常节奏事件（claim.attempt、execution.claimed）也
   全量输出——worker 子进程日志本来只进 supervisor 面板 deque（有界）与部署
-  日志，量级由事件本身稀疏性控制（每 claim 轮一次、每执行两次），无
+  日志，量级由事件本身稀疏性控制（每 claim 轮一次、每执行两次、
+  每上传任务一次——#551 的 execution.reported），无
   logging 级别面可调（print + flush=True 是 executor 的既有输出约定）。
 """
 
@@ -32,6 +33,7 @@ _KNOWN_EVENTS = frozenset(
         "execution.claimed",
         "execution.completed",
         "execution.failed",
+        "execution.reported",
     }
 )  # tests pin the full set; runbook §7 documents each name
 

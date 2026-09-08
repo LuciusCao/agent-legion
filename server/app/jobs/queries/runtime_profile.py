@@ -37,10 +37,11 @@ class RuntimeProfileQueriesMixin(ConnectionQueriesMixin):
             "claim_empty_count",
             "claim_seconds_total",
             "claim_seconds_max",
-            # Claim-stage split (schema v78, #448): scan/evaluate/writes.
+            # Claim-stage split (schema v78, #448): scan/evaluate/writes,
+            # plus queue_wait (#551, schema v81).
             *(
                 f"claim_{stage}_seconds_{kind}"
-                for stage in ("scan", "evaluate", "writes")
+                for stage in ("queue_wait", "scan", "evaluate", "writes")
                 for kind in ("total", "max")
             ),
             # Result-stage split (schema v80, #521): unpack/artifacts_verify/

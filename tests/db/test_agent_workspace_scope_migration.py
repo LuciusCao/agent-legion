@@ -245,4 +245,4 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         ).fetchone()
     assert migration is not None
     # The registry tail at the CURRENT schema version (v80, #521).
-    assert migration["name"] == "result_stage_profile"
+    assert migration["name"] == "claim_queue_wait_profile"

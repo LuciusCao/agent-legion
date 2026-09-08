@@ -29,6 +29,7 @@ def test_event_name_full_set_is_pinned() -> None:
         "execution.claimed",
         "execution.completed",
         "execution.failed",
+        "execution.reported",
     } == _KNOWN_EVENTS
 
 

@@ -366,6 +366,18 @@ def _session_test_schema():
 
 
 @pytest.fixture(autouse=True)
+def _reset_result_unpack_pool(_assert_shared_app_invariants):
+    """#552：result 解包进程池是模块级单例——用过它的测试收尾时必须回收，
+    否则泄漏的 SpawnProcess 会被「无残留子进程」类断言（如
+    tests/full/test_executor_cancellation_recovery.py）抓到。池未创建时
+    reset 是纯 no-op（无进程可杀），不产生每测试开销。"""
+    yield
+    from server.app.agent_broker import result_unpack_pool
+
+    result_unpack_pool.reset_pool()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_postgres_database(_assert_shared_app_invariants, request):
     if request.node.get_closest_marker("no_db") is not None:
         # Tests marked no_db never touch the database (pure static governance
