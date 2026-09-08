@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Fixed
+- Worker claim 循环的分池预算泄漏（issue #534，hot-fix）：循环条件
+  `budget["agent"] + budget["code"] > 0` 两池求和、扣减只扣实际领到的
+  池——agent 池被爬坡/容量打满/上传背压钳到 0 而 code 池有预算时，
+  agent 领取把 agent 预算扣成负值并借 code 预算继续循环（实测 -31），
+  #471 爬坡门被完全绕过（冷启动 running 远超档位、claim 不受限）；
+  Host 侧按 #501 声明的目标容量记账也不拦，本地预算是唯一的门。修
+  为按池判定（`or`）+ 领到已尽池的活照单收下一个（Host 已记账，与
+  「竞态超发照单收下」语义一致）后终止本轮。回归测试：泄漏场景
+  （旧代码复现 agent_budget -1/-2/… 负值序列）+ code 池对照组；纯
+  code / 纯 agent 场景行为不变。
+
 ## [0.7.2] - 2026-09-08
 
 ### Added
