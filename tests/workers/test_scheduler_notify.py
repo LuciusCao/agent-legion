@@ -132,6 +132,7 @@ def test_listener_maps_notifications_to_local_wakeups(
 
     listener = SchedulerNotifyListener(_DSN)
     listener._SLICE_SECONDS = 0.05
+    listener._POLL_INTERVAL_SECONDS = 0.5
     listener.start()
     try:
         for expected in (1, 2):
@@ -171,6 +172,7 @@ def test_listener_reloads_scan_list_on_scan_reload_payload(
 
     listener = SchedulerNotifyListener(_DSN, on_scan_reload=lambda: reloads.append(1))
     listener._SLICE_SECONDS = 0.05
+    listener._POLL_INTERVAL_SECONDS = 0.5
     listener.start()
     try:
         notified.set()
@@ -209,6 +211,7 @@ def test_listener_scan_reload_callback_failure_is_contained(
 
     listener = SchedulerNotifyListener(_DSN, on_scan_reload=_boom)
     listener._SLICE_SECONDS = 0.05
+    listener._POLL_INTERVAL_SECONDS = 0.5
     listener.start()
     try:
         notified.set()
@@ -310,6 +313,7 @@ def test_listener_does_not_reenter_notify_backend(
 
     listener = SchedulerNotifyListener(_DSN)
     listener._SLICE_SECONDS = 0.05
+    listener._POLL_INTERVAL_SECONDS = 0.5
     listener.start()
     try:
         notified.set()

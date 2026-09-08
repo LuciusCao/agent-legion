@@ -168,8 +168,9 @@ def run_scheduler_process() -> int:
 
     # Ops-metrics sampling loop (#521 方案 B): the sampler lives HERE — the
     # minute rows are per-process upserts, and the scheduler process is the
-    # single sampler of the deployment. Reuses the app's loop module so the
-    # catch-up/retention semantics stay single-sourced.
+    # single sampler of the deployment. The catch-up/retention semantics
+    # are shared via OpsMetricsService; the loop scaffolding below is a
+    # thread-shaped mirror of ops_metrics_background.run_ops_metrics_loop.
     stop_event = threading.Event()
     ops_metrics = OpsMetricsService(job_db, settings.config)
     sampling_thread = threading.Thread(
