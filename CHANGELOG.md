@@ -79,7 +79,11 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `asyncio.Semaphore` 约束并发 commit 数；spool 不进门（慢速上传不占
   gate 槽），排队者作为协程等待不占线程池令牌；排队期间 lease 过期走
   既有 409 → sweeper 收尾语义。代价是波峰期 result 稍慢，换 claim/
-  心跳存活。
+  心跳存活。**注意**：PUT /api/admin/instance-settings 契约新增必填
+  键（沿 max_items_per_run 的「PUT 去默认防静默重置」先例）——缓存的
+  旧设置文档直接 PUT 会 422，需先 GET 再回写；调低
+  AGENT_LEGION_DB_POOL_MAX_SIZE 时注意 gate 与连接池的配比（events
+  段持读连接嵌套开写连接，建议 gate ≤ pool/2）。
 - 运行画像内部拆分（issue #521 顺带，预算棘轮驱动）：stage 计量族
   （#448 claim + #521 result 的元组与折叠）拆到
   `runtime_profile/stage_gauges.py`、宽窗 rollup 拆到

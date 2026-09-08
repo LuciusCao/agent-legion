@@ -98,6 +98,23 @@ def _gated_app(tmp_path: Path, monkeypatch, gate: int):
     return _make_app(tmp_path)
 
 
+def _run_four_parallel_reports(app, client, token) -> list[dict]:
+    """Seed four jobs, claim four executions, report all four in parallel."""
+    for index in range(4):
+        _seed_request(app.state.job_db, job_id=f"gate-job-{index}", limit=20)
+    claims = [_claim(client, token) for _ in range(4)]
+    threads = []
+    for claimed in claims:
+        thread = threading.Thread(target=_report, args=(client, token, claimed))
+        threads.append(thread)
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not any(thread.is_alive() for thread in threads)
+    return claims
+
+
 def test_gate_bounds_peak_concurrent_commits(tmp_path: Path, monkeypatch) -> None:
     """Four simultaneous reports through a gate of 2 must never run more
     than 2 commits at once — the queued ones park as coroutines."""
@@ -110,40 +127,90 @@ def test_gate_bounds_peak_concurrent_commits(tmp_path: Path, monkeypatch) -> Non
         # One enqueued request per job (seed_request enqueues exactly one;
         # the one-active-request constraint dedups per job+node), so four
         # parallel reports need four jobs.
-        for index in range(4):
-            _seed_request(app.state.job_db, job_id=f"gate-job-{index}", limit=20)
-        claims = [_claim(client, token) for _ in range(4)]
-        threads = []
-        for claimed in claims:
-            thread = threading.Thread(target=_report, args=(client, token, claimed))
-            threads.append(thread)
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=30)
-        assert not any(thread.is_alive() for thread in threads)
+        _run_four_parallel_reports(app, client, token)
 
     assert tracker["peak"] <= 2, tracker
     assert tracker.get("peak", 0) >= 1
 
 
 def test_gate_disabled_runs_all_concurrently(tmp_path: Path, monkeypatch) -> None:
-    """max_concurrent_result_commits=0 is the kill-switch: no gate object,
-    the offload path is the un-gated original."""
+    """max_concurrent_result_commits=0 is the kill-switch: the un-gated
+    offload must let four parallel reports run concurrently (subagent review
+    on #530: a single-report peak==1 assert is vacuous — a regression
+    turning 0 into Semaphore(1) would still pass it)."""
     app = _gated_app(tmp_path, monkeypatch, gate=0)
     tracker: dict[str, int] = {}
     _instrument_commit(monkeypatch, tracker)
 
     with TestClient(app) as client:
         token = _register(client)["worker_token"]
-        _seed_request(app.state.job_db, job_id="job-0", limit=2)
-        claimed = _claim(client, token)
-        _report(client, token, claimed)
+        _run_four_parallel_reports(app, client, token)
 
-    assert tracker["peak"] == 1
+    # Un-gated: the four slow no-op commits overlap freely.
+    assert tracker["peak"] >= 2, tracker
 
     # The configuration contract: 0 is a valid value (the kill-switch).
     from server.app.configuration.executor_runtime import AgentWorkersRuntimeConfig
 
     config = AgentWorkersRuntimeConfig(max_concurrent_result_commits=0)
     assert config.max_concurrent_result_commits == 0
+
+
+def test_gate_slot_released_when_commit_raises(tmp_path: Path, monkeypatch) -> None:
+    """A commit exception must release the gate slot (subagent review on
+    #530): after a raising report, subsequent reports still commit through
+    the same gate instead of deadlocking on a leaked slot."""
+    from fastapi import HTTPException
+
+    app = _gated_app(tmp_path, monkeypatch, gate=1)
+    tracker: dict[str, int] = {}
+    _instrument_commit(monkeypatch, tracker)
+
+    from server.app.routes import agent_workers as route_module
+
+    def _raising_commit(*args, **kwargs) -> None:
+        tracker["raised"] = tracker.get("raised", 0) + 1
+        raise HTTPException(status_code=500, detail="commit exploded")
+
+    # First report: the commit raises inside the gate.
+    monkeypatch.setattr(route_module, "commit_agent_result", _raising_commit)
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        _seed_request(app.state.job_db, job_id="gate-job-fail", limit=20)
+        claimed = _claim(client, token)
+        failed = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/result",
+            headers={
+                "X-Agent-Worker-Token": token,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+                "X-Agent-Result": _HEADERS_META,
+            },
+            content=_empty_archive(),
+        )
+        assert failed.status_code == 500
+
+        # Restore the healthy commit and report the SAME (still-claimed)
+        # execution again through the same gate=1 — a leaked slot would
+        # hang this request until the client timeout.
+        monkeypatch.setattr(route_module, "commit_agent_result", _slow_commit_factory(tracker)[0])
+        _report(client, token, claimed)
+
+    assert tracker["raised"] == 1
+    assert tracker.get("peak", 0) >= 1
+
+
+def _slow_commit_factory(tracker: dict):
+    from server.app.routes import agent_workers as route_module
+
+    lock = threading.Lock()
+
+    def _slow_commit(*args, **kwargs) -> None:
+        with lock:
+            tracker["active"] = tracker.get("active", 0) + 1
+            tracker["peak"] = max(tracker.get("peak", 0), tracker["active"])
+        time.sleep(0.05)
+        with lock:
+            tracker["active"] -= 1
+
+    _ = route_module
+    return _slow_commit, lock

@@ -35,9 +35,11 @@ the same residual discipline as the claim timer):
   parse + persist, then PI compression (two full scans today);
 - mark_done: the agent_execution_requests terminal write.
 
-The route-level ``result_timer`` (#359) spans spool + commit, so spool
-wall time is the residual of ``result_seconds_total`` minus the stage
-sum; everything after ``mark_done`` (the finished-event emit, bundle
+The route-level ``result_timer`` (#359) spans spool + gate queue wait +
+commit, so both the spool wall time and the #521 gate's queue wait are
+the residual of ``result_seconds_total`` minus the stage sum (the queue
+wait is the number an operator wants when evaluating the gate);
+everything after ``mark_done`` (the finished-event emit, bundle
 retirement) is likewise covered by the result-wide total.
 
 Cost discipline mirrors ``claim_timing`` (this also runs per report at
@@ -121,7 +123,11 @@ def log_result_stages(
     if not stages:
         return
     total_ms = sum(stages.values()) * 1000.0
-    if total_ms <= _slow_result_threshold_ms() and not logger.isEnabledFor(logging.DEBUG):
+    # One threshold read (subagent review on #530): reading it twice can
+    # disagree between the guard and the level choice if the env changes
+    # in between.
+    threshold_ms = _slow_result_threshold_ms()
+    if total_ms <= threshold_ms and not logger.isEnabledFor(logging.DEBUG):
         return
     parts = " ".join(
         f"{name}={stages[name] * 1000.0:.1f}ms" for name in _STAGE_ORDER if name in stages
@@ -134,7 +140,7 @@ def log_result_stages(
         worker_id,
         committed,
     )
-    if total_ms > _slow_result_threshold_ms():
+    if total_ms > threshold_ms:
         logger.warning(*message)
     else:
         logger.debug(*message)

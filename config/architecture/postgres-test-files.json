@@ -113,7 +113,6 @@
     "tests/services/test_agent_broker_concurrency.py",
     "tests/services/test_agent_broker_empty.py",
     "tests/services/test_agent_broker_reaper.py",
-    "tests/services/test_agent_broker_result_timing.py",
     "tests/services/test_agent_bundle.py",
     "tests/services/test_agent_catalog.py",
     "tests/services/test_agent_completion_remote.py",

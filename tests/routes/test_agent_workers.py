@@ -933,8 +933,17 @@ def test_result_commit_records_stage_timings_in_profile(tmp_path: Path) -> None:
     deltas = profile.counters.snapshot_and_reset()
     assert deltas["result_count"] >= 1
     assert deltas["result_seconds_total"] > 0.0
-    # The stage chain: every stage marker the commit path closed shows up.
-    assert deltas["result_unpack_seconds_total"] > 0.0
-    assert deltas["result_artifacts_verify_seconds_total"] > 0.0
-    assert deltas["result_lease_write_seconds_total"] > 0.0
-    assert deltas["result_mark_done_seconds_total"] > 0.0
+    # The stage chain: all seven markers fire unconditionally on this
+    # completed path (subagent review on #530: pinning only four let a
+    # deleted marker's wall time silently fold into the next stage — a
+    # dropped validate/artifacts_upload/events marker passed every test).
+    for stage in (
+        "unpack",
+        "artifacts_verify",
+        "validate",
+        "artifacts_upload",
+        "lease_write",
+        "events",
+        "mark_done",
+    ):
+        assert deltas[f"result_{stage}_seconds_total"] > 0.0, stage

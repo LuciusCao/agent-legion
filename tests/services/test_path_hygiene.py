@@ -239,6 +239,25 @@ def test_resolve_data_path_dedupes_repeated_legacy_reads(tmp_path, caplog) -> No
     assert len(caplog.records) == 1, [r.getMessage() for r in caplog.records]
 
 
+def test_warn_dedupe_degrades_to_always_warning_past_the_cap(monkeypatch, caplog) -> None:
+    """Subagent review on #530: the dedupe set is capped — past the cap the
+    warn-every-time behavior returns (bounded memory on a huge legacy DB)
+    instead of holding one string per legacy row forever."""
+    import server.app.services.path_hygiene as hygiene
+
+    monkeypatch.setattr(hygiene, "_LEGACY_WARN_DEDUPE_CAP", 3)
+    reset_legacy_absolute_dedupe()
+    with caplog.at_level(logging.WARNING, logger="server.app.services.path_hygiene"):
+        for index in range(6):
+            warn_legacy_absolute(f"/old/data/logs/unique-{index}.log")
+        # Below the cap: the same path is deduped even while new ones warn.
+        warn_legacy_absolute("/old/data/logs/unique-0.log")
+    reset_legacy_absolute_dedupe()
+    # 6 unique paths: 3 deduped-in-set + 3 past-cap, plus the repeat of
+    # unique-0 which was IN the set and stayed deduped.
+    assert len(caplog.records) == 6, [r.getMessage() for r in caplog.records]
+
+
 # --- #521: one-time legacy-absolute rewrite ----------------------------------
 
 

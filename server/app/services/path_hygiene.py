@@ -38,7 +38,11 @@ _LEGACY_MESSAGE = "Legacy absolute path stored; resolving relative to data_dir i
 # Python's default warning filter only dedupes the warnings.warn DISPLAY;
 # the log emit fired every time. Keyed by the stored path string so tests
 # with per-test tmp paths keep firing (pytest.warns compatibility), and so
-# distinct legacy paths stay individually visible.
+# distinct legacy paths stay individually visible. CAPPED (subagent review
+# on #530): legacy log_path values are unique per row, so an unbounded set
+# would grow to the legacy row count; past the cap the dedupe degrades to
+# warn-every-time (the pre-#521 behavior) instead of holding memory.
+_LEGACY_WARN_DEDUPE_CAP = 10_000
 _legacy_absolute_seen: set[str] = set()
 _legacy_absolute_lock = threading.Lock()
 
@@ -47,14 +51,15 @@ def warn_legacy_absolute(stored_path: str = "") -> None:
     """A legacy absolute stored path was resolved: log plus deprecation warning.
 
     ``stored_path`` keys the process-wide dedupe — the same stored path
-    warns once per process, distinct paths each warn. The empty default
-    keeps direct/legacy callers warning (never deduped together), though
-    both ``storage_paths`` call sites pass the stored path.
+    warns once per process, distinct paths each warn; past the cap above
+    every call warns (the pre-#521 behavior). The empty default keeps
+    direct callers warning; both ``storage_paths`` sites pass the path.
     """
     with _legacy_absolute_lock:
         if stored_path and stored_path in _legacy_absolute_seen:
             return
-        if stored_path:
+        # Cap check on the ADD, not the dedupe: in-set paths stay deduped.
+        if stored_path and len(_legacy_absolute_seen) < _LEGACY_WARN_DEDUPE_CAP:
             _legacy_absolute_seen.add(stored_path)
     logger.warning(_LEGACY_MESSAGE)
     warnings.warn(_LEGACY_MESSAGE, DeprecationWarning, stacklevel=3)
