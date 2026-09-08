@@ -23,6 +23,7 @@ import pytest
 
 from tests.workers.helpers import FakeClient, _claim, _run_main, _write_main_config
 from worker import executor as agent_worker
+from worker.execution import run as execution_run
 from worker.process_lifecycle import terminate
 from worker.status import ExecutionStatusReporter, read_runtime_status
 
@@ -214,7 +215,7 @@ def test_main_error_pass_waits_via_backoff_not_pacing(
     fake.claim = claim_then_error  # type: ignore[attr-defined]
     # 执行生命周期不在本用例范围：no-op 掉 run_execution（FakeClient 的
     # bundle 路径不存在，真实 run_execution 会在 download 处炸掉）。
-    monkeypatch.setattr(agent_worker, "run_execution", lambda *a, **k: None)
+    monkeypatch.setattr(execution_run, "run_execution", lambda *a, **k: None)
     monkeypatch.setattr(agent_worker, "ClaimBackoffSequence", RecordingBackoff)
     monkeypatch.setattr(agent_worker, "ClaimPacing", RecordingPacing)
 
@@ -304,7 +305,7 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
             pass
 
     fake.claim = claim  # type: ignore[attr-defined]
-    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    monkeypatch.setattr(execution_run, "run_execution", block_execution)
     thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, {"claim_enabled": True})
     deadline = time.monotonic() + 2
     while claim_calls < 1 and time.monotonic() < deadline:
@@ -379,7 +380,7 @@ def test_main_ramp_up_limits_claim_budget_until_target(
         release.wait(timeout=5)
 
     fake.claim = claim  # type: ignore[attr-defined]
-    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    monkeypatch.setattr(execution_run, "run_execution", block_execution)
     updates = {
         "claim_enabled": True,
         "max_concurrency": 3,
@@ -452,7 +453,7 @@ def test_main_ramp_up_reaches_target_and_releases_budget(
         pass
 
     fake.claim = claim  # type: ignore[attr-defined]
-    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    monkeypatch.setattr(execution_run, "run_execution", block_execution)
     updates = {
         "claim_enabled": True,
         "max_concurrency": 3,
@@ -539,7 +540,7 @@ def test_main_ramp_up_disabled_claims_full_budget(
         pass
 
     fake.claim = claim  # type: ignore[attr-defined]
-    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    monkeypatch.setattr(execution_run, "run_execution", block_execution)
     thread, handlers, result = _run_main(
         monkeypatch, tmp_path, fake, {"claim_enabled": True, "max_concurrency": 3}
     )

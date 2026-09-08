@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-08
+
+### Performance
+- batch claim（issue #546，hot-fix）：`POST /api/agent-executions/claim` 支持
+  批领取——Worker 一次往返按分池申请（`agent_limit` / `code_limit` +
+  总上限 `limit`）领至多 N 个执行，Host 在**一个写事务**内 promote
+  （复用既有扫描阶梯、fairness 轮转、per-kind 尝试预算与跳过语义），
+  补充速率上限从 ~350/分钟抬到数千/分钟。0.7.3 后实测触发条件已命中：
+  瞬时 code 节点（0 秒执行）的自我吞噬循环把 claim 循环节拍吃掉一半
+  以上，agent 容量爬不上去（供给与欲望都在，卡的是循环带宽）；批领取
+  把节拍消耗从 N 次 RTT 降为 1 次。事务语义：`ClaimRacedError`（job
+  中途离场）在批内经 SAVEPOINT 只回滚当前候选、保留前 k 个并终止本
+  批，不再整事务回滚；其余候选级冲突（capacity_raced / shard 去重 /
+  lock_raced）沿用既有跳过语义。兼容：缺省 `limit=1` 走原单条路径、
+  响应逐字节不变；旧 Host 忽略批字段返回单条，新 Worker 形状嗅探自动
+  回落逐条领取（混合舰队无协议版本 bump）。Worker 侧批大小由
+  `claim_batch_limit`（默认 32，上限 256，热更）封顶，爬坡/背压/越池
+  抑制经预算天然作用于批大小；pacing 输入改为批 RTT ÷ 批大小的等效
+  单条 RTT（#472 自适应语义保留）。Host 侧硬顶 256/批
+  （`agent_broker.claim_batch.MAX_BATCH_CLAIMS`，与批量心跳同纪律）。
+  回归测试：limit=1 响应形状、批 promote/分池钳制/workspace 容量批内
+  记账/竞态保留前 k 个/空批 204/混合舰队回落。
+- enqueue 备货池默认并发 16 → 48（`executor_runtime.agent_enqueue.workers`）：
+  batch claim 把消费侧抬到数千/分钟后供给侧（~1s/单的 staging+bundling
+  闭包）成为瓶颈，实测备货池跟不上；每个闭包以 IO 为主，吞吐随 workers
+  线性扩。
+
 ## [0.7.3] - 2026-09-08
 
 ### Fixed
@@ -895,7 +922,8 @@ Initial open-source release.
   runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/LuciusCao/agent-legion/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/LuciusCao/agent-legion/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/LuciusCao/agent-legion/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/LuciusCao/agent-legion/compare/v0.7.0...v0.7.1

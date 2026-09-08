@@ -22,8 +22,8 @@ from typing import Any
 import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
-from worker import executor as agent_worker
 from worker.execution.heartbeat_batch import BatchHeartbeatRegistry, batch_heartbeat_loop
+from worker.execution.run import run_execution
 from worker.status import ExecutionStatusReporter
 from worker.upload.queue import PENDING_FILENAME, UploadQueue
 
@@ -148,7 +148,7 @@ def _run(
         stop=threading.Event(),
         heartbeat_registry=heartbeat_registry,
     )
-    agent_worker.run_execution(
+    run_execution(
         client,
         _claim(),
         work_root,
@@ -497,7 +497,7 @@ def test_run_execution_publishes_status_and_clears_it(
         heartbeat_interval=0.05,
         stop=threading.Event(),
     )
-    agent_worker.run_execution(
+    run_execution(
         client,
         _claim(),
         tmp_path / "work",
@@ -558,7 +558,7 @@ def test_claim_status_fields_key_on_workspace_id(tmp_path: Path) -> None:
         "agent_id": "agent-1",
         "bundle_url": "/api/agent-executions/exec-1/bundle",
     }
-    agent_worker.run_execution(
+    run_execution(
         client,
         claim,
         tmp_path / "work",

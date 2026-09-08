@@ -90,24 +90,6 @@ def execution_base(claim: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def note_claim_attempt(
-    worker_id: str, budget: dict[str, int], upload_backlog: int, claim_enabled: bool
-) -> None:
-    """claim.attempt: one claim poll's local budget snapshot (idle rhythm =
-    one per poll_interval; a single JSON line the Host-side
-    claim.granted/empty/rejected events align against by worker_id)."""
-    emit_event(
-        "claim.attempt",
-        {
-            "worker_id": worker_id,
-            "agent_budget": budget["agent"],
-            "code_budget": budget["code"],
-            "upload_backlog": upload_backlog,
-            "claim_enabled": claim_enabled,
-        },
-    )
-
-
 def note_claim_received(worker_id: str, claim: dict[str, Any]) -> None:
     """execution.claimed: a claim arrived (the Worker-side view of the
     Host's claim.granted — same execution, two timelines)."""
