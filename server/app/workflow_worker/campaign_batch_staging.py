@@ -9,6 +9,13 @@ job（它们退出了匹配集），processed/jobs 计数永久漏记。本模�
 目标」在投递前 CAS 进 progress_json.pending_batch（stage），重启时优
 先重放（replay），计数落账时摘除（pop）—— feeder 只保留编排，形状与
 切片纪律同居于此。
+
+PR #545 round-3 的两个后验边界：重放不是无条件入队——rerun 形态恢复路
+径先做 per-job eligibility 预检（复用 batch_rerun 内部同一判定），「已
+完成且无 lease/running」的 job 计 skipped 跳过、不再二次清理重置
+（P1-1）；末页耗尽用 progress 的 ``exhausted`` 标记与 ``cursor=None``
+同一 CAS 原子落库，区分「初始 None」与「耗尽 None」，completed 翻转的
+崩溃窗口不再回退成全量重扫（P1-2）。
 """
 
 from __future__ import annotations
@@ -46,17 +53,44 @@ def spec_filter(spec: dict[str, Any]) -> JobListFilter:
         raise InvalidOperationError(f"Campaign filter target is corrupt: {exc}") from exc
 
 
+def cursor_exhausted(progress: dict[str, Any]) -> bool:
+    """Distinguish the initial ``cursor=None`` from the consumed one (PR #545
+    round-3 P1-2).
+
+    A filter campaign's progress starts as ``{"cursor": None}`` and a
+    fully-drained keyset also parks ``None`` there — same value, opposite
+    meanings. The crash window between the final advance (cursor=None,
+    pending_batch popped) and the completed flip used to collapse them:
+    a restart resumed at the INITIAL cursor and re-fed the whole set. The
+    ``exhausted`` flag rides the same progress document the final CAS
+    commits, so the marker and the None-cursor land in ONE atomic write.
+    Only the filter form's marker matters; explicit-ids shares the flag for
+    a uniform document shape but never reads it (offset arithmetic carries
+    its own exhaustion).
+    """
+    return bool(progress.get("exhausted"))
+
+
 def next_slice(job_db: Any, campaign: dict[str, Any]) -> tuple[list[str], str | None, bool]:
     """Next id slice for a rerun/upgrade campaign (design §1.4).
 
     Filter form: one keyset page of the stored filter; a page that returns
     no cursor is the last page. A staged pending_batch replays first (PR
-    #545 P1). Explicit-ids form: the stored snapshot list at the offset.
+    #545 P1), and an exhausted marker outranks it (round-3 P1-2: the final
+    batch already landed its advance — the row is done, the marker is the
+    crash-window stand-in for the completed flip that never got to run).
+    Explicit-ids form: the stored snapshot list at the offset.
     """
     spec = target_spec(campaign)
     progress = copy_progress(campaign)
     batch_size = int(campaign["batch_size"])
     if "filter" in spec:
+        if cursor_exhausted(progress):
+            # The final page's advance committed (cursor=None + exhausted)
+            # and only the completed flip crashed; rescan from page one
+            # would re-feed every already-processed id for the search-like
+            # filters rerun never rewrites. Slice stays empty.
+            return [], None, True
         pending = progress.get("pending_batch")
         if isinstance(pending, dict) and pending.get("ids"):
             # PR #545 P1 恢复路径：优先消化上一进程 stage 的本批目标。
@@ -80,6 +114,12 @@ def next_slice(job_db: Any, campaign: dict[str, Any]) -> tuple[list[str], str | 
     offset = int(progress.get("offset") or 0)
     slice_ids = all_ids[offset : offset + batch_size]
     return slice_ids, None, offset + len(slice_ids) >= len(all_ids)
+
+
+def staged_pending_batch(campaign: dict[str, Any]) -> dict[str, Any] | None:
+    """The staged slice's document, or None when nothing is staged."""
+    pending = copy_progress(campaign).get("pending_batch")
+    return pending if isinstance(pending, dict) else None
 
 
 def stage_batch(
@@ -121,3 +161,19 @@ def stage_batch(
     # expected_progress 必须是含 pending_batch 的当前文档。
     campaign["progress"] = staged["progress"]
     return True
+
+
+def pop_pending_batch(progress: dict[str, Any], *, exhausted: bool) -> None:
+    """PR #545 P1：本批目标已消化（提交完成、计数即将落账），从文档
+    摘除 pending_batch——它是投递前的崩溃恢复锚点，正常推进路径不
+    留残迹；transient / 竞态路径不经过这里，锚点保留待重放。
+
+    Round-3 P1-2：末页的耗尽标记在同一份 progress 上落下——advance
+    的 CAS 一笔提交 cursor=None + exhausted + pop，与计数落账原子；
+    之后的 completed 翻转即使崩溃，恢复路径的 cursor_exhausted 也
+    直接短路（不重扫）。explicit-ids 形态的 offset 自带耗尽语义，
+    不写 progress 级标记。
+    """
+    progress.pop("pending_batch", None)
+    if "cursor" in progress and exhausted:
+        progress["exhausted"] = True

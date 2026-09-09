@@ -1183,3 +1183,31 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 233
+- check: architecture.file_budget
+  path: server/app/workflow_worker/campaign_batch_staging.py
+  reason: >-
+    #532 PR-B round-3 (PR #545 P1-2): the exhausted marker moved from
+    stage-time to account-time — cursor_exhausted distinguishes the
+    initial cursor=None from the drained one so the crash window between
+    the final advance and the completed flip no longer rescans page one
+    (the search-like filters rerun never rewrites would re-feed the
+    whole processed set). The marker bookkeeping lives beside the
+    stage/replay/pop trio it guards. Anchored to #522: harvest with the
+    out-of-process feeder migration (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 143
+- check: architecture.file_budget
+  path: server/app/workflow_worker/campaign_feeder.py
+  reason: >-
+    #532 PR-B round-3 (PR #545 P1-1): staged-batch replay gained
+    completed-artifact protection — a replayed pending_batch skips jobs
+    that completed between delivery and the crash (mark_nodes_for_rerun
+    eligibility passes completed+lease-less jobs under an explicit
+    node_key; an unconditional replay would wipe their artifacts and
+    rerun finished experiments). queued/failed still replay (the write
+    path is idempotent there). Anchored to #522: harvest with the
+    out-of-process feeder migration (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 363

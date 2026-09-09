@@ -309,3 +309,68 @@ def test_large_rerun_campaign_smoke(job_db, settings) -> None:
     assert row["jobs_skipped"] == 0
     assert row["progress"]["processed"] == _SMOKE_JOB_COUNT
     assert queued_count(job_db, ws) == _SMOKE_JOB_COUNT
+
+
+def test_replay_skips_completed_jobs_to_protect_artifacts(job_db, settings) -> None:
+    """Round-3 P1-1 回归锁：pause/resume 或崩溃后重放 staged 批时，批内
+    已 completed 的 job 不被再次投递——mark_nodes_for_rerun 的 eligibility
+    对显式 node_key 放行 completed 且无 lease 的 job，无条件重放会清掉产
+    物把已完成的实验再跑一遍。保护粒度只到 completed：queued（上次投递
+    已生效、幂等翻回）与 failed（上次没落上）照常重放。"""
+    ws = workspace(job_db, "feeder-replay-protect")
+    ids = seed_failed_jobs(job_db, ws, 3, "RP")
+    # 3 个 job 中 1 个在「崩溃窗口」期间被外部跑完了（completed）。
+    job_db.update_job_status(ids[0], "completed")
+
+    campaign = job_db.create_campaign(
+        ws,
+        "rerun",
+        {"filter": {"status": "failed"}, "node_key": NODE_KEYS[0]},
+        watermark=0,
+        batch_size=10,
+        progress={"cursor": None, "processed": 0},
+    )
+    campaign_id = campaign["id"]
+
+    # 手工落一个「已投递未落账」的 staged 批（模拟崩溃现场）。
+    staged_progress = dict(campaign["progress"])
+    staged_progress["pending_batch"] = {
+        "ids": list(ids),
+        "next_cursor": None,
+        "exhausted": True,
+    }
+    job_db.advance_campaign_progress(
+        campaign_id,
+        expected_progress=dict(campaign["progress"]),
+        progress=staged_progress,
+        batches_submitted=0,
+        jobs_succeeded=0,
+        jobs_skipped=0,
+        jobs_failed=0,
+    )
+
+    rerun_calls: list[str] = []
+    feeder = make_feeder(job_db, settings)
+
+    import server.app.workflow_worker.campaign_feeder as feeder_mod
+
+    original_batch_rerun = feeder_mod.batch_rerun
+
+    def _recording(service, workspace_id, **kwargs):
+        rerun_calls.extend(kwargs.get("job_ids") or [])
+        return original_batch_rerun(service, workspace_id, **kwargs)
+
+    feeder_mod.batch_rerun = _recording
+    try:
+        run_ticks(feeder, 2)
+    finally:
+        feeder_mod.batch_rerun = original_batch_rerun
+
+    row = job_db.get_campaign(campaign_id)
+    assert row["status"] == "completed"
+    # completed 的那个不进重放名单；其余 2 个（failed/queued）照常投递。
+    assert ids[0] not in rerun_calls
+    assert set(rerun_calls) == set(ids[1:])
+    # 计数：1 个保护性 skip + 2 个真实投递的落账。
+    assert row["jobs_succeeded"] + row["jobs_skipped"] == 3
+    assert row["progress"]["processed"] == 3

@@ -47,6 +47,7 @@ from server.app.workflow_worker.campaign_batch_staging import (
     copy_progress,
     next_slice,
     stage_batch,
+    staged_pending_batch,
     target_spec,
 )
 
@@ -342,6 +343,7 @@ class CampaignFeeder:
             jobs_skipped=int(campaign["jobs_skipped"]) + outcome.skipped,
             jobs_failed=int(campaign["jobs_failed"]) + outcome.failed,
         )
+
         if advanced is None:
             # Lost the CAS race against pause/cancel: the submitted batch
             # stays (dedup / rerun eligibility make it idempotent), the
@@ -368,6 +370,15 @@ class CampaignFeeder:
             # rerun/upgrade filter form: keyset cursor + processed count.
             progress["processed"] = int(progress.get("processed") or 0) + len(outcome.ids)
             progress["cursor"] = outcome.next_cursor
+            if outcome.exhausted:
+                # Round-3 P1-2：耗尽标记只在落账时写（与 pop pending_batch
+                # 同一份 progress、同一次 advance CAS 原子提交）——末页落
+                # 账后、completed 翻转前的崩溃窗口里，恢复路径凭它短路；
+                # stage 时不写：重放优先级必须高于 exhausted（否则末页
+                # 崩溃的 pending_batch 永远消化不掉、计数漏记）。
+                progress["exhausted"] = True
+            else:
+                progress.pop("exhausted", None)
         elif "offset" in progress:
             # rerun/upgrade explicit-ids form: the list offset.
             progress["offset"] = int(progress.get("offset") or 0) + len(outcome.ids)
@@ -397,6 +408,7 @@ class CampaignFeeder:
         raise InvalidOperationError(f"Unsupported campaign mode {mode!r}")
 
     def _submit_rerun(self, campaign: dict[str, Any]) -> BatchOutcome:
+        staged = staged_pending_batch(campaign)
         ids, next_cursor, exhausted = next_slice(self.job_db, campaign)
         if not ids:
             return BatchOutcome([], 0, 0, 0, True, None)
@@ -405,17 +417,42 @@ class CampaignFeeder:
             # 让 _feed_one 安静跳过（不投、不翻终态、不推进）。
             return BatchOutcome([], 0, 0, 0, False, None)
         spec = target_spec(campaign)
-        results = batch_rerun(
-            self.rerun_service,
-            str(campaign["workspace_id"]),
-            job_ids=list(ids),
-            node_key=spec.get("node_key"),
-            from_failed_node=bool(spec.get("from_failed_node")),
+        if staged is not None and list(staged.get("ids") or []) == list(ids):
+            # Round-3 P1-1 重放产物保护：这批 ids 来自 pending_batch（上一
+            # 进程已投递、计数落账前死亡）。mark_nodes_for_rerun 对
+            # queued/running 中的 job 重放是幂等置位（pending 重置、shard
+            # 清理、queued 请求被 cancel 防抢跑——写路径自身的守卫）；唯
+            # 一的破坏性窗口是 completed：eligibility 对显式 node_key 放行
+            # 已完成且无 lease 的 job，重放会清掉产物把已完成的实验再跑一
+            # 遍。因此重放只跳过 completed（计 skipped 保护产物），其余
+            # 全部照常投递——补投上次没落上的 failed、幂等吸收已翻回的
+            # queued，计数语义与首投一致。
+            completed = {
+                job_id
+                for job_id, row in self.job_db.list_job_rerun_states_for_jobs("", list(ids)).items()
+                if str(row["status"]) == "completed"
+            }
+            replay_ids = [i for i in ids if i not in completed]
+        else:
+            replay_ids = list(ids)
+        results = (
+            batch_rerun(
+                self.rerun_service,
+                str(campaign["workspace_id"]),
+                job_ids=replay_ids,
+                node_key=spec.get("node_key"),
+                from_failed_node=bool(spec.get("from_failed_node")),
+            )
+            if replay_ids
+            else []
         )
+
         return BatchOutcome(
             ids=list(ids),
             succeeded=sum(1 for r in results if r.get("status") == "succeeded"),
-            skipped=sum(1 for r in results if r.get("status") == "skipped"),
+            skipped=len(ids)
+            - len(replay_ids)
+            + sum(1 for r in results if r.get("status") == "skipped"),
             failed=sum(1 for r in results if r.get("status") == "failed"),
             exhausted=exhausted,
             next_cursor=next_cursor,
