@@ -13,16 +13,23 @@ from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 # Per-run job-count summary for the campaign detail view: rides the
 # trigger-maintained counter table (DB-RUN-JOB-STATUS-COUNTS-001) instead
-# of a group-by over each run's whole jobs slice.
+# of a group-by over each run's whole jobs slice. 先在子查询里截取最新
+# limit 条 run（外层 LIMIT 只做 top-N，不约束聚合前的扫描/连接范围——
+# PostgreSQL 仍会读完该 campaign 的全部历史 run 再逐条聚合），外层只对
+# 这 limit 条做计数表连接与求和，详情请求的成本不随历史批次数增长。
 _CAMPAIGN_RUN_OVERVIEW_SQL = """
 select r.id, r.status, r.created_count,
        coalesce(sum(c.cnt), 0) as job_count
-from runs r
+from (
+    select id, status, created_count, created_at
+    from runs
+    where campaign_id = %s
+    order by created_at desc, id desc
+    limit %s
+) r
 left join run_job_status_counts c on c.run_id = r.id and c.cnt <> 0
-where r.campaign_id = %s
-group by r.id, r.status, r.created_count
+group by r.id, r.status, r.created_count, r.created_at
 order by r.created_at desc, r.id desc
-limit %s
 """
 
 
@@ -33,11 +40,14 @@ class CampaignSliceQueriesMixin(ConnectionQueriesMixin):
         """Submit-mode run overview for the campaign detail endpoint (PR-C).
 
         Rides the idx_runs_campaign partial index (v80: campaign_id <> ''
-        rows only); the per-run job totals come from the counter table, so
-        the cost tracks the run count (bounded by batches_submitted), never
-        the campaign's job volume. Runs whose jobs were completed by a
-        manual submission still appear here — the deterministic run id made
-        the campaign's batch and that manual run the same row.
+        rows only); the latest-50 sub-select bounds the join+aggregate to
+        the page, so the cost never tracks the campaign's total historical
+        batches (PR #559 round 2: the outer LIMIT alone did not — Postgres
+        read and aggregated every run before the top-N). Per-run job totals
+        come from the counter table, never the campaign's job volume. Runs
+        whose jobs were completed by a manual submission still appear here
+        — the deterministic run id made the campaign's batch and that
+        manual run the same row.
         """
         with self._connect_read() as conn:
             rows = conn.execute(_CAMPAIGN_RUN_OVERVIEW_SQL, (campaign_id, limit)).fetchall()

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,40 @@ class FakeObjectStorage:
     def open_stream(self, storage_key: str):
         self.open_count += 1
         return io.BytesIO(self.objects[storage_key])
+
+
+class _TrackingStream(io.BytesIO):
+    """Records the read-size contract; exposes the position after each read.
+
+    有界读回归锁的探针：feeder 必须以 manifest_max_bytes+1 为上限调用
+    read(size)，且超限对象不允许被读完（position 停在上限处，缓冲区仍有
+    剩余）——无界 .read() 会先在这里现形（size 为 -1/None）。
+    """
+
+    def __init__(self, data: bytes) -> None:
+        super().__init__(data)
+        self.read_sizes: list[int] = []
+        self.position_after_read: int | None = None
+
+    def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        data = super().read(size)
+        self.position_after_read = self.tell()
+        return data
+
+
+class TrackingObjectStorage(FakeObjectStorage):
+    """open_stream replays through _TrackingStream so tests can pin the bound."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.streams: list[_TrackingStream] = []
+
+    def open_stream(self, storage_key: str) -> _TrackingStream:
+        self.open_count += 1
+        stream = _TrackingStream(self.objects[storage_key])
+        self.streams.append(stream)
+        return stream
 
 
 @pytest.fixture
@@ -557,6 +592,64 @@ def test_non_utf8_bucket_manifest_fails_deterministically(job_db, settings, stor
     assert campaign["id"] not in feeder._next_feed_at
 
 
+def test_replaced_oversized_manifest_object_fails_with_bounded_read(
+    job_db, settings, storage
+) -> None:
+    """PR #559 二轮回归锁：manifest 对象在 campaign 创建后被覆盖成超过
+    manifest_max_bytes 的内容时，读取必须有界（至多 manifest_max_bytes+1 字节
+    ——巨大对象不能在任何校验前把内存吃满），并按确定性损坏失败（failed +
+    样例错误），而不是无界读或瞬态退避。恰好等于上限的对象在 +1 的区分语义
+    下仍正常装载（limit+1 的读全量返回 limit 字节，不算超限）。"""
+    from server.app.services.campaign_manifest import serialize_manifest
+
+    tracking = TrackingObjectStorage()
+    ws = _workspace(job_db, "submit-replaced")
+    _insert_materials(job_db, ws, 2, "RP")
+    items = _material_items(2, "RP")
+    exact = serialize_manifest(items).encode("utf-8")
+    # 上限压到恰好等于该 manifest 的序列化字节数：边界两侧行为一目了然。
+    settings.executor_runtime.campaigns.manifest_max_bytes = len(exact)
+    service = _make_service(job_db, settings, tracking)
+    campaign = _create_submit_campaign(service, ws, items, batch_size=2, watermark=100)
+    campaign_id = campaign["id"]
+    key = campaign_manifest_key(ws, campaign_id)
+    # 手工改成桶通道形态（inline 上限未动；对象恰好等于上限）。
+    with job_db.connect() as conn:
+        conn.execute(
+            "update campaigns set target_spec_json=%s where id=%s",
+            (
+                '{"manifest_item_count": 2, "manifest_storage_key": "' + key + '"}',
+                campaign_id,
+            ),
+        )
+    tracking.objects[key] = exact
+
+    feeder = _make_feeder(job_db, settings, tracking)
+    # 恰好等于上限：limit+1 的有界读全量返回 limit 字节，解析照常。
+    assert feeder._load_manifest(dict(job_db.get_campaign(campaign_id))) == items
+    at_limit = tracking.streams[-1]
+    assert at_limit.read_sizes == [len(exact) + 1]
+    assert at_limit.position_after_read == len(exact)
+
+    # 对象被覆盖成超限内容：读取停在 limit+1 处（未读完），确定性 failed。
+    oversized = b"x" * (len(exact) + 10)
+    tracking.objects[key] = oversized
+    feeder._manifest_cache.clear()
+    feeder._manifest_cache_bytes.clear()
+    feeder._tick()
+    row = job_db.get_campaign(campaign_id)
+    assert row["status"] == "failed"
+    assert "corrupt" in row["error_message"]
+    assert "exceeds the" in row["error_message"]
+    assert str(len(exact)) in row["error_message"]
+    assert campaign_id not in feeder._attempts  # 确定性失败，不进退避
+    over = tracking.streams[-1]
+    assert over.read_sizes == [len(exact) + 1]  # 有界调用，而非无界 read()
+    assert over.position_after_read == len(exact) + 1  # 停在上限处
+    assert len(oversized) > len(exact) + 1  # 缓冲区仍有未读字节：没被读完
+    assert _campaign_job_count(job_db, campaign_id) == 0  # 什么都没建
+
+
 # ---------------------------------------------------------------------------
 # Detail aggregation
 # ---------------------------------------------------------------------------
@@ -597,6 +690,57 @@ def test_detail_run_overview_tracks_runs_and_counts(job_db, settings, storage) -
         ws, "rerun", job_ids=[str(failed_job["id"])], node_key=_NODE_KEYS[0], watermark=100
     )
     assert service.get_campaign(ws, rerun["id"])["runs"] == []
+
+
+def test_detail_run_overview_returns_latest_fifty_runs_only(job_db, settings, storage) -> None:
+    """PR #559 二轮回归锁：详情聚合先截取最新 50 条 run 再聚合——55 条历史
+    批次中恰好返回最新 50 条（最旧 5 条出局）、顺序 created_at desc、每条的
+    job_count 按行取自计数表（cnt<>0 过滤 + 无计数行的 coalesce 0）。种子走
+    直插 run 行：本测只钉查询分页/聚合的正确性，不重放整条 feeder 链。"""
+    ws = str(
+        job_db.create_workspace(
+            "submit-overview-cap", default_workflow_key="education_video_problems_generation"
+        )["id"]
+    )
+    campaign = job_db.create_campaign(
+        ws, "submit", {"items": []}, watermark=100, batch_size=10, progress={"item_offset": 0}
+    )
+    campaign_id = campaign["id"]
+    # 55 条 run，created_at 逐秒递增（时间戳互异，排序无并列歧义）。
+    base = datetime.now(UTC) - timedelta(seconds=60)
+    with job_db.connect() as conn:
+        for i in range(55):
+            conn.execute(
+                "insert into runs(id, workspace_id, status, created_count, campaign_id,"
+                " created_at) values (%s, %s, 'created', 2, %s, %s)",
+                (f"{campaign_id}-run-{i:02d}", ws, campaign_id, base + timedelta(seconds=i)),
+            )
+            if i == 7:
+                continue  # run-07 不播种计数行：left join + coalesce 的 0 路径
+            # 每行计数互异（证明按行聚合而非全局求和）；failed 的 0 计数行
+            # 必须被 cnt<>0 过滤掉。
+            conn.execute(
+                "insert into run_job_status_counts(run_id, status, cnt)"
+                " values (%s, 'completed', %s), (%s, 'pending', 2), (%s, 'failed', 0)",
+                (
+                    f"{campaign_id}-run-{i:02d}",
+                    i % 3,
+                    f"{campaign_id}-run-{i:02d}",
+                    f"{campaign_id}-run-{i:02d}",
+                ),
+            )
+    service = _make_service(job_db, settings, storage)
+    detail = service.get_campaign(ws, campaign_id)
+    # 恰好 50 条、最新在前、最旧 5 条（run-00..04）出局。
+    assert [run["id"] for run in detail["runs"]] == [
+        f"{campaign_id}-run-{i:02d}" for i in range(54, 4, -1)
+    ]
+    by_id = {run["id"]: run for run in detail["runs"]}
+    for i in range(54, 4, -1):
+        run = by_id[f"{campaign_id}-run-{i:02d}"]
+        assert run["job_count"] == (0 if i == 7 else (i % 3) + 2)
+        assert run["created_count"] == 2
+        assert run["status"] == "created"
 
 
 def test_rerun_mode_still_works_alongside_submit(job_db, settings, storage) -> None:

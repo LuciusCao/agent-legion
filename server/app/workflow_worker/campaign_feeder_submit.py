@@ -138,13 +138,21 @@ class CampaignSubmitMixin:
                     "Campaign target spec is corrupt (no inline items and no"
                     " readable manifest storage key)"
                 )
+            # 有界读（PR #559 二轮）：创建时虽过了 manifest_max_bytes 校验，但
+            # 对象可能在 campaign 创建后被覆盖成更大的内容——无界 .read() 会在
+            # 任何校验前把整个对象拉进内存（巨大对象无论后续合法与否都能先
+            # 耗尽 Host 内存）。最多读 manifest_max_bytes+1 字节（+1 区分「恰好
+            # 等于上限」与「超限」）；读毕即关流，存储层异常照旧原样上抛（瞬态
+            # 族，下个 tick 从头重试）。
+            limit = int(self.settings.executor_runtime.campaigns.manifest_max_bytes)
             try:
-                # A manifest is bounded at create time (manifest_max_bytes,
-                # currently 50MB — the multipart ceiling applies to the
-                # serialized form stored here), so reading the stream whole
-                # is bounded by construction, not an unbounded read.
-                text = self.object_storage.open_stream(storage_key).read().decode("utf-8")
-                items = parse_manifest_text(text)
+                with self.object_storage.open_stream(storage_key) as stream:
+                    data = stream.read(limit + 1)
+                if len(data) > limit:
+                    # 超限 = 对象已不是创建时那个有界对象（被覆盖/换内容），与
+                    # 损坏同类：重试无法修复，确定性 failed（修复 = 新建 campaign）。
+                    raise ManifestError(f"object exceeds the {limit} byte limit")
+                items = parse_manifest_text(data.decode("utf-8"))
             except (ManifestError, UnicodeDecodeError) as exc:
                 # Corrupt stored manifest — unparsable text AND non-UTF-8
                 # bytes (an overwritten/truncated object fails DECODE

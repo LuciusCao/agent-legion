@@ -1311,11 +1311,17 @@ exemptions:
     slice query because both are the campaign reads split out of
     queries/campaigns.py at ITS ceiling (the #209 sibling-module
     ratchet); moving it back would overflow the row-lifecycle module
-    instead. Anchored to #522; harvest when the campaign queries
-    consolidate into a package.
+    instead. Ceiling re-dated 77 to 84 for the #532 codex round 2
+    (PR #559): the aggregation's outer LIMIT did not bound the work
+    (Postgres read and aggregated every historical run before the
+    top-N), so the query now sub-selects the latest page first —
+    the derived table plus its sort column additions are the fix's
+    whole cost, and they belong inside the one SQL statement whose
+    shape they change. Anchored to #522; harvest when the campaign
+    queries consolidate into a package.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
-  ceiling: 77
+  ceiling: 84
 - check: architecture.file_budget
   path: server/app/routes/campaign_contracts.py
   reason: >-
@@ -1350,9 +1356,14 @@ exemptions:
     workspaces × watermark-blocked running campaigns cannot grow the
     heap without bound. The mechanics belong beside the cache they
     govern (the mixin owns _manifest_cache); splitting them out would
-    export private dict state to a helper module. Anchored to #522
-    (budget-anchor tracker): harvest when the submit mixin is reworked
-    for the out-of-process feeder migration (#562).
+    export private dict state to a helper module. Ceiling re-dated 183
+    to 184 for the #532 codex round 2 (PR #559): the manifest object
+    read is now bounded by manifest_max_bytes+1 (a replaced oversized
+    object must fail the campaign deterministically instead of being
+    loaded whole into memory) — the limit computation and its
+    in-place raise are three lines beside the read they bound.
+    Anchored to #522 (budget-anchor tracker): harvest when the submit
+    mixin is reworked for the out-of-process feeder migration (#562).
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
-  ceiling: 183
+  ceiling: 184
