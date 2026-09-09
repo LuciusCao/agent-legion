@@ -11,7 +11,7 @@ defers expiry and lets the next heartbeat renew the lease.
 
 The deferral is bounded: silence longer than ``TTL + grace`` (grace = TTL, so 2×TTL)
 expires as before — a truly dead attempt thread on a live Worker must not hang
-forever. The hard cutoff is a strict ``<``: a heartbeat exactly 2×TTL old expires.
+forever. Cutoff is strict ``<``: silence exactly 2×TTL old still defers.
 
 Known blind spot (phase 2): the claim loop talks to the Host only while
 its claim budget is positive (``drain_budget`` loops on ``budget > 0``).
