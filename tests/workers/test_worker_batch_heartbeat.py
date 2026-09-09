@@ -180,9 +180,9 @@ def test_degraded_single_beats_do_not_serialize_on_slow_host() -> None:
 
     client.heartbeat = slow_beat  # type: ignore[method-assign]
     started = time.monotonic()
-    from worker.execution.heartbeat_batch import _beat_single
+    from worker.execution.heartbeat_degraded import beat_single
 
-    _beat_single(client, registry.snapshot())
+    beat_single(client, registry.snapshot())
     # Both requests overlapped: serialized they would cost 0.6s+; concurrent
     # they cannot finish before the first (longest) 0.3s response does.
     assert time.monotonic() - started < 0.55, "degraded beats serialized on a slow Host"
@@ -517,3 +517,30 @@ def test_clamp_batch_interval_keeps_ttl_margin() -> None:
     # Above half the 90s lease TTL: clamped back to the #349 fleet baseline.
     assert clamp_batch_interval(60) == 30
     assert clamp_batch_interval(120) == 30
+
+
+def test_apply_beat_result_pair_matches_lost_and_dedups_cancelled() -> None:
+    """#566 phase 2: the relay write-back path applies lost verdicts
+    pair-matched (a re-claimed execution's NEW lease survives an old lease's
+    lost verdict) and fans cancelled out once per distinct callback."""
+    registry = BatchHeartbeatRegistry()
+    # exec-1 was re-claimed: the registry holds the NEW lease; the relay's
+    # lost verdict names the OLD lease.
+    new_lease_event = _register(registry, "exec-1", lease_id="lease-new")
+    gone_event = _register(registry, "exec-2", lease_id="lease-2")
+    cancelled_calls: list[list[str]] = []
+
+    def on_cancelled(execution_ids: list[str]) -> None:
+        cancelled_calls.append(list(execution_ids))
+
+    entry = registry.register("exec-3", "lease-3", threading.Event(), on_cancelled=on_cancelled)
+    assert entry is not None
+
+    registry.apply_beat_result(
+        lost=[("exec-1", "lease-old"), ("exec-2", "lease-2")],
+        cancelled=["exec-9"],
+    )
+
+    assert not new_lease_event.is_set(), "old lease's lost verdict must not touch the new attempt"
+    assert gone_event.is_set()
+    assert cancelled_calls == [["exec-9"]]

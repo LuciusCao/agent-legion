@@ -1128,9 +1128,13 @@ exemptions:
     degraded single-beat path riding one short-lived daemon thread per
     lease (the serial N × timeout sum could cross the lease TTL) — are
     both core loop semantics living next to the loops they fix.
+    Ceiling re-dated 274 to 271 for #566 phase 2: the degraded single-beat
+    path moved to heartbeat_degraded.py (the split this exemption's own
+    revisit note nominated), making room for the registry's
+    apply_beat_result (the supervisor relay's pair-matched write-back).
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
-  ceiling: 274
+  ceiling: 271
 - check: architecture.file_budget
   path: server/app/agent_broker/claim_scan.py
   reason: >-

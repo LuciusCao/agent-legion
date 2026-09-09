@@ -16,6 +16,9 @@ from typing import Any
 from yaml import YAMLError
 
 from worker.config_store import WorkerConfigStore, public_config, validate_config
+from worker.executor_log import ExecutorLogSink, executor_log_path
+from worker.heartbeat_relay import start_heartbeat_relay
+from worker.lease_snapshot import RESULT_FILENAME, SNAPSHOT_ENV_VAR, SNAPSHOT_FILENAME
 from worker.metrics_cache import METRICS_FILENAME
 from worker.orphan_reaper import reap_orphaned_agents
 from worker.registration.token import registration_tokens
@@ -65,10 +68,19 @@ class WorkerSupervisor:
         self._next_restart_delay: float | None = None
         self._failed_reason: str | None = None
         self._warned_divergence = False
+        # #566 三期：面板行（executor stdout + 生命周期）同步落滚动文件，
+        # 内存 500 行 deque 不再是唯一留存（排查事故时已被刷没过）。
+        self._sink = ExecutorLogSink(executor_log_path(store.state_dir))
+        # #566 二期：租约心跳 relay 常驻 supervisor 进程（executor 饱和时
+        # 进程内心跳线程抢不到 GIL）；无快照时每拍是 no-op。须在 _sink 之后
+        # 启动：relay 的日志走 _log。
+        self._heartbeat_relay_stop = start_heartbeat_relay(store, self._log)
 
     def _log(self, message: str) -> None:
-        """Append one panel log line with a local-time timestamp prefix."""
-        self._logs.append(f"[{time.strftime('%H:%M:%S')}] {message}")
+        """Append one panel log line (timestamped deque + rolling file)."""
+        line = f"[{time.strftime('%H:%M:%S')}] {message}"
+        self._logs.append(line)
+        self._sink.write(line, self._logs.append)
 
     def start(self) -> None:
         with self._op_lock:
@@ -112,6 +124,7 @@ class WorkerSupervisor:
                     **os.environ,
                     **proxy_env_overrides(config.get("proxy", "")),
                     ENV_VAR: str(status_file),
+                    SNAPSHOT_ENV_VAR: str(self.store.state_dir / SNAPSHOT_FILENAME),
                 },
                 text=True,
                 bufsize=1,
@@ -127,6 +140,7 @@ class WorkerSupervisor:
             self._shutdown = True
             self._restart_event.set()  # 唤醒退避等待中的 collector
             self._stop_locked()
+        self._sink.close()
 
     def _stop_locked(self) -> None:
         with self._lock:
@@ -151,7 +165,7 @@ class WorkerSupervisor:
             self._reap_orphans()  # 已出锁
 
     def _cleanup_runtime_files(self) -> None:
-        for filename in (STATUS_FILENAME, METRICS_FILENAME):
+        for filename in (STATUS_FILENAME, METRICS_FILENAME, SNAPSHOT_FILENAME, RESULT_FILENAME):
             (self.store.state_dir / filename).unlink(missing_ok=True)
 
     def _reap_orphans(self) -> None:

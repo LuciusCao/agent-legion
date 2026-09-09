@@ -49,6 +49,37 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   饿死」的纯饱和场景下控制面 30s 后照样 stale，延期分支不生效、回落
   旧行为（失败方向安全，不留僵尸容量）；二期方向是 worker 侧在预算
   为 0 时发轻量 keepalive。
+- Worker 心跳与执行负载解耦（issue #566 二期+三期）：
+  - **心跳 relay 挪到 supervisor 进程**：批量租约心跳不再跑在
+    executor 进程内的 daemon 线程（机器饱和时抢不到 GIL，一期 deferral
+    兜底的根因场景）。executor 按拍（2s 节流）把可续租约集合原子落盘
+    为 `lease_snapshot.json`（含 worker token，mode 600，与 register
+    token 同信任域）；supervisor 进程内的常驻 relay 线程
+    （`worker/heartbeat_relay.py`）按快照发批量心跳（含 404/405 降级
+    逐条、401 丢缓存 client 等 token 轮换），把 Host 的 lost/cancelled
+    裁定写回 `lease_beat_result.json`，executor 主循环按 seq 幂等应用
+    （lost 按 (execution_id, lease_id) 对匹配，重 claim 的新 attempt
+    不被旧裁定误伤）。安全栏：relay 只在快照 pid 存活且快照新鲜
+    （60s 停滞即停拍）时发拍——executor 脑死时租约按 Host TTL 正常
+    过期重排，不会被冻结快照永远续命。裸跑 executor（无快照 env）
+    保持原进程内心跳循环。
+  - **一期盲区闭合**：relay 的每拍心跳都经 Host 鉴权路径触活
+    `last_seen_at`，executor 整体饱和时控制面依然新鲜，一期 deferral
+    在纯饱和场景也能生效（实测复核：budget=0 时 executor 主循环的
+    状态同步 get_self 本就每拍触活，真正残留缺口只有 executor 进程
+    级饥饿，由 relay 覆盖）。
+  - **executor stdout 滚动持久化**：面板日志行（executor stdout +
+    supervisor 生命周期）从仅有 500 行内存 deque 变为同时写滚动文件
+    （10MB×5 轮转；state dir 在 `data/` 下时落 `data/logs/executor.log`，
+    否则 `<state_dir>/logs/`），写失败降级为仅内存并报一次错，不影响
+    采集线程。
+  - **claim 负载回压 + 容量告警**：claim 预算按 1 分钟 load average
+    衰减（≤核数不衰减，1×→3×核线性降至 0.25 下限——永不为零，共享/
+    高负载机器上补位减速不停摆；预算应用向上取整，正预算至少保 1 槽；
+    `os.getloadavg` 5s 缓存采样，不支持的平台直通不衰减），衰减/恢复
+    跨档各打一条日志；回压只作用本地预算、不动对 Host 的声明容量。
+    `max_concurrency` 超过 核数×4 时启动打 WARNING
+    （`worker/load_shedding.py`）。
 
 ## [0.7.6] - 2026-09-09
 
