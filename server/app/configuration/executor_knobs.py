@@ -23,7 +23,8 @@ class AgentEnqueueConfig(BaseModel):
 
     # #546 hotfix 同批：备货池实测跟不上（16 workers × ~1s/单 ≈ 960/分钟，
     # batch claim 把消费侧抬到数千/分钟后供给侧成为瓶颈），默认 48。
-    workers: int = Field(default=48, ge=1)
+    # le=256 与实例设置契约（#509）对齐，防误配打爆线程数。
+    workers: int = Field(default=48, ge=1, le=256)
     max_pending: int = Field(default=1024, ge=1)
 
 

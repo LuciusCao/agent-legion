@@ -223,6 +223,14 @@ def test_put_rejects_out_of_range_capacity_knobs(client) -> None:
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
 
 
+def test_put_accepts_capacity_knob_upper_bounds(client) -> None:
+    """边界接受侧：workers=256 与 result_unpack.workers=64 均为合法上限。"""
+    payload = _payload()
+    payload["agent_enqueue"]["workers"] = 256
+    payload["result_unpack"]["workers"] = 64
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+
+
 def test_put_rejects_retired_openclaw_block(client) -> None:
     """The openclaw block retired with the openclaw runtime (#75): writing it
     422s like any other unknown key (InstanceSettingsUpdate is extra=forbid)."""

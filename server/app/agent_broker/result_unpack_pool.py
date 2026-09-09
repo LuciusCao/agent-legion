@@ -60,7 +60,8 @@ def _pool_size() -> int:
             import logging
 
             logging.getLogger(__name__).warning(
-                "AGENT_LEGION_RESULT_UNPACK_WORKERS=%r 非法，回落默认池大小", override
+                "AGENT_LEGION_RESULT_UNPACK_WORKERS=%r 非法，回落实例设置/自动池大小",
+                override,
             )
     if _CONFIGURED_WORKERS > 0:
         return _CONFIGURED_WORKERS
