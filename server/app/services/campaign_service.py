@@ -47,10 +47,20 @@ from server.app.storage import ObjectStorage
 CAMPAIGN_MODES = ("rerun", "submit", "upgrade")
 
 
-# Object-store key convention (design §1.3): the materials bucket's
-# {workspace_id}/... prefix rule, one prefix per campaign.
+# Object-store key convention (design §1.3). The FIXED campaign prefix is
+# structural GC isolation (PR #541 round-3 P2): s3_jobs_gc scans ``jobs/`` and
+# ``jobs-staging/`` and its reference set is job_artifacts ∪ materials only —
+# a key under a bare {workspace_id}/ root would fall into that scan face
+# whenever the workspace id collides with "jobs"/"jobs-staging" and be deleted
+# as an orphan by --apply. The dedicated prefix keeps campaign manifests
+# outside both GC scan faces by construction (no GC reference-set change
+# needed); the {workspace}/... sub-path still rides the materials bucket's
+# per-workspace prefix rule. 0.8.0 unreleased — no legacy keys to migrate.
+CAMPAIGN_MANIFEST_KEY_PREFIX = "campaign-manifests"
+
+
 def campaign_manifest_key(workspace_id: str, campaign_id: str) -> str:
-    return f"{workspace_id}/campaigns/{campaign_id}/manifest.jsonl"
+    return f"{CAMPAIGN_MANIFEST_KEY_PREFIX}/{workspace_id}/campaigns/{campaign_id}/manifest.jsonl"
 
 
 class CampaignStorageUnavailableError(JobServiceError):
@@ -117,8 +127,10 @@ class CampaignService:
 
         Fail-fast order: mode → target shape → knobs → target resolution
         (rerun resolves its selection; submit resolves items + dedup probe)
-        → storage decision (inline vs object store) → the quota-checked row
-        write (create_campaign_guarded: count + row write share one locked
+        → storage decision (inline vs object store; the bucket branch runs
+        an advisory quota precheck AHEAD of the PUT so a full workspace
+        leaks no manifest object) → the quota-checked row write
+        (create_campaign_guarded: count + row write share one locked
         transaction, so concurrent creates cannot each land a row below a
         stale count — PR #541 P2).
         """
@@ -196,8 +208,8 @@ class CampaignService:
         spec lands in target_spec_json.items and needs no object store (the
         small-campaign path for instances without S3). Larger uploads are
         serialized to the object store under
-        {workspace_id}/campaigns/{campaign_id}/manifest.jsonl; the spec then
-        carries manifest_storage_key + manifest_item_count only.
+        campaign-manifests/{workspace_id}/campaigns/{campaign_id}/manifest.jsonl;
+        the spec then carries manifest_storage_key + manifest_item_count only.
         """
         config = self._campaigns_config
         normalized = self._normalize_submit_items(
@@ -220,11 +232,7 @@ class CampaignService:
         # checks the same limit before reading the body): a JSON body whose
         # serialized items exceed it must fail-fast rather than silently
         # bypass the declared product boundary into the bucket.
-        if len(payload.encode("utf-8")) > config.manifest_max_bytes:
-            raise CampaignManifestTooLargeError(
-                f"Campaign manifest is {len(payload.encode('utf-8'))} bytes;"
-                f" the limit is {config.manifest_max_bytes} bytes"
-            )
+        check_manifest_bytes(payload, config.manifest_max_bytes)
         if len(payload.encode("utf-8")) <= config.manifest_inline_max_bytes:
             return {"items": normalized}
         if self.object_storage is None:
@@ -234,11 +242,18 @@ class CampaignService:
                 " is not configured on this instance (AGENT_LEGION_S3_BUCKET is"
                 " unset)"
             )
-        # The storage key needs the campaign id, but the row does not exist
-        # yet — the caller pre-allocated the id (generate_campaign_id) so the
-        # manifest object, validation, and insert complete inside this one
-        # fail-fast request. On any later failure the object is an
-        # unreferenced orphan (no compensating delete: it would race retries).
+        # Quota BEFORE the PUT (round-3 P1): a full workspace used to leave
+        # an unreferenced 50 MB object per refused create (no campaign GC
+        # face reaps it — s3_jobs_gc only scans jobs/ + jobs-staging/ and
+        # knows nothing of campaign references). The check here is advisory:
+        # the authoritative count+insert stays in the one-transaction
+        # create_campaign_guarded; between this precheck and the guarded
+        # write another create may legitimately take the last slot, in which
+        # case the guarded 409 wins and the PUT'd object is the residual
+        # leak window — one bounded race, not one object per quota-refused
+        # request. The campaign id is pre-allocated so the manifest object,
+        # validation, and insert complete inside this one fail-fast request.
+        self._precheck_active_quota(workspace_id)
         storage_key = campaign_manifest_key(workspace_id, campaign_id)
         self.object_storage.put_object(
             storage_key, payload.encode("utf-8"), content_type="application/x-ndjson"
@@ -247,6 +262,23 @@ class CampaignService:
             "manifest_storage_key": storage_key,
             "manifest_item_count": len(normalized),
         }
+
+    def _precheck_active_quota(self, workspace_id: str) -> None:
+        """Advisory active-campaign cap check ahead of the bucket PUT.
+
+        The authoritative judgement is the guarded write's locked
+        count+row-write pair; this precheck only moves the common case
+        (workspace already at/above the cap) ahead of the object write so
+        repeated over-quota creates stop leaking manifest objects.
+        """
+        if self.job_db.count_active_campaigns(workspace_id) >= int(
+            self._campaigns_config.max_active_per_workspace
+        ):
+            raise ConflictError(
+                "Workspace already has"
+                f" {self._campaigns_config.max_active_per_workspace} active"
+                " campaigns (pending/running); cancel or complete one first"
+            )
 
     def _normalize_submit_items(
         self,
@@ -440,6 +472,13 @@ class CampaignService:
         # 不计 would_create，dry-run 直接报创建时的错误。
         preflight_submit_intake(self.job_db, self.settings, workspace_id, normalized)
         candidates = resolve_run_items(self.job_db, workspace_id, normalized)
+        # Serialized-bytes ceiling shared with the create path (round-3 P2):
+        # a preview that 200s a payload creation would 413 confirms a
+        # campaign that cannot exist — the same single-item-huge-params
+        # shape passes item-level contracts.
+        check_manifest_bytes(
+            serialize_manifest(normalized), self._campaigns_config.manifest_max_bytes
+        )
         existing = self.job_db.filter_existing_dedup_keys(
             workspace_id,
             ((str(c["entity_type"]), str(c["entity_id"])) for c in candidates),
@@ -530,6 +569,19 @@ def _ceil_div(total: int, batch: int) -> int:
     if batch < 1:
         return 0
     return (total + batch - 1) // batch
+
+
+def check_manifest_bytes(payload: str, manifest_max_bytes: int) -> None:
+    """The serialized-manifest byte ceiling, used by both the persist and
+    dry-run paths (PR #541 round-3 P2): the write path refuses oversized
+    payloads before the inline-vs-bucket decision, and the preview dry-run
+    reports the same error instead of confirming a campaign that cannot
+    exist."""
+    size = len(payload.encode("utf-8"))
+    if size > manifest_max_bytes:
+        raise CampaignManifestTooLargeError(
+            f"Campaign manifest is {size} bytes; the limit is {manifest_max_bytes} bytes"
+        )
 
 
 def _normalize_api_item(raw: dict[str, Any], *, source: str) -> dict[str, Any]:

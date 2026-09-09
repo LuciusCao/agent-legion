@@ -1115,3 +1115,39 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
   ceiling: 83
+- check: architecture.file_budget
+  path: server/app/services/campaign_service.py
+  reason: >-
+    PR #541 codex round 3 grows the campaign service past its
+    first-registered ceiling with three fixes that belong next to the
+    lifecycle they guard: the advisory quota precheck ahead of the
+    manifest bucket PUT (P1-3 — over-quota creates stop leaking 50 MB
+    unreferenced objects the jobs GC cannot see), the check_manifest_bytes
+    helper shared by create and preview (P2-2 — a dry-run must not confirm
+    a payload creation would 413), and the campaign-manifests/ fixed key
+    prefix that structurally exits the jobs/jobs-staging GC scan faces
+    (P2-1). Splitting them out would fork the single fail-fast creation
+    flow (normalize → preflight → resolve → size → quota → PUT → guarded
+    insert) this module exists to keep in one readable order. Remove when
+    the campaign family (#532) gains its PR-B feeder module and the
+    service is re-budgeted around the feeder split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
+  ceiling: 478
+- check: architecture.file_budget
+  path: server/app/routes/run_contracts.py
+  reason: >-
+    PR #541 codex round 3 P1-2 adds field-level length ceilings to the
+    RunItem union (material_id/connection_key/external_id/bundle_id
+    max_length=512, params serialized ≤ 64 KiB via one model_validator):
+    a single-item body carrying a megabyte "id" or params string passes
+    the item-count bound and reaches the service before any byte ceiling,
+    so the contract layer is where the bound must live. The three
+    discriminated variants are one union consumed by every
+    runs/campaign intake path; splitting the validator out would fork the
+    single contract the two channels share. Remove when the runs
+    contracts gain their own structural split or the #532 campaign
+    family closes and the contract file is re-budgeted.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
+  ceiling: 76

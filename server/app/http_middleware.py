@@ -9,6 +9,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from server.app.http_gzip import SelectiveGZipResponder
 from server.app.http_request_id import RequestIdMiddleware
+from server.app.routes.campaign_body_limit import CampaignBodyLimitMiddleware
 from server.app.settings import Settings
 
 
@@ -55,3 +56,9 @@ def add_http_middleware(app: FastAPI, settings: Settings) -> None:
     # and the slow-request timing covers the full app stack, not just the
     # router. See http_request_id.py for the pass-through/template tradeoffs.
     app.add_middleware(RequestIdMiddleware)
+    # Campaign JSON-body byte ceiling (PR #541 round-3 P1): path-scoped to
+    # /api/workspaces/{ws}/campaigns — see routes/campaign_body_limit.py.
+    # Added first, so it runs INNERMOST: the bound must sit as close to the
+    # route's body read as possible (gzip/CORS/request-id all sit outside it
+    # and never see the oversized body).
+    app.add_middleware(CampaignBodyLimitMiddleware, settings=settings)

@@ -58,7 +58,9 @@ def _raise_campaign_http_error(error: JobServiceError | ManifestError) -> Never:
 def create_campaigns_router(service: CampaignService) -> APIRouter:
     # The whole router is the mutation surface: reads (list/detail) share the
     # guard for uniformity — campaigns are operator tooling, not an agent
-    # tool face (STUDIO-AGENT-001).
+    # tool face (STUDIO-AGENT-001). The JSON-body byte ceiling rides the app
+    # -level CampaignBodyLimitMiddleware (routes/campaign_body_limit.py,
+    # mounted in main.py: APIRouter has no middleware surface of its own).
     router = APIRouter(dependencies=[Depends(reject_studio_agent_scope)])
 
     def _create_response(body: dict) -> CampaignCreateResponse:

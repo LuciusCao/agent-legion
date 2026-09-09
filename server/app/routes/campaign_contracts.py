@@ -6,7 +6,10 @@ job-list filters cannot drift; submit targets are the POST /runs RunItem
 union. Create accepts JSON (inline items) or multipart (manifest file) —
 FastAPI cannot express both on one path in a single model, so the multipart
 variant parses its fields by hand in the route (campaigns.py) and feeds the
-same service entry point.
+same service entry point. The JSON body's byte ceiling rides the campaign
+body-limit middleware mounted on the create/preview/upload routes (see
+campaign_body_limit.py); the contract layer additionally bounds every
+count-shaped hole (items, job_ids, per-item field lengths).
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from server.app.routes.job_batch_filter_contracts import JobFilterPayload
-from server.app.routes.run_contracts import RunItem
+from server.app.routes.run_contracts import MAX_ITEM_ID_LENGTH, RunItem
 
 CampaignMode = Literal["rerun", "submit", "upgrade"]
 CampaignStatus = Literal["pending", "running", "paused", "failed", "completed", "cancelled"]
@@ -31,6 +34,15 @@ CampaignStatus = Literal["pending", "running", "paused", "failed", "completed", 
 # multipart channel is already size-bounded at read time). Numbers are
 # matched, not derived: the two ceilings bound the same product boundary.
 MAX_MANIFEST_ITEMS = 500_000
+
+# Explicit job-id list ceiling (PR #541 round-3 P1): job_ids is the only
+# unbounded-length array left on the campaign face (each element is a
+# uuid-shaped string, but 10^6 of them is a 40 MB body the item-count and
+# byte checks never see — the ids are resolved, never serialized into a
+# manifest). 100_000 ids ≈ 4 MB of uuids bounds the list in the same spirit
+# as rerun_max_batch_size bounds the feeder's slice: a selection larger than
+# this belongs in the filter form (the keyset-cursor design, design §1.4).
+MAX_JOB_ID_SELECTION = 100_000
 
 
 class CampaignKnobsMixin(BaseModel):
@@ -51,7 +63,12 @@ class CampaignRerunTarget(CampaignKnobsMixin):
 
     node_key: str | None = None
     from_failed_node: bool = False
-    job_ids: list[str] | None = None
+    # round-3 P1: the id arrays are length-bounded at the contract layer
+    # (see MAX_JOB_ID_SELECTION) — an unbounded list is a body-size hole the
+    # manifest byte ceiling cannot see (ids resolve, never serialize).
+    job_ids: list[Annotated[str, Field(min_length=1, max_length=MAX_ITEM_ID_LENGTH)]] | None = (
+        Field(default=None, max_length=MAX_JOB_ID_SELECTION)
+    )
     filter: JobFilterPayload | None = None
 
     @model_validator(mode="after")
