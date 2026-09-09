@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
-## [0.7.7] - 未发布
+## [0.7.7] - 2026-09-10
 
 ### Performance
 - result commit 的 validate 段提速（issue #569）：完成波下每条 result
