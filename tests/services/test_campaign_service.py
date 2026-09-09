@@ -70,6 +70,22 @@ def _insert_material(job_db, workspace_id: str, material_id: str) -> None:
         )
 
 
+class _SpyReadConnection:
+    """记录 execute (sql, params) 的只读连接代理（F1 探测断言：filter 创建
+    对 jobs 表只允许一次有界存在性探测，不得出现 1001/页的全量物化取片）。"""
+
+    def __init__(self, conn, statements: list[tuple[str, tuple]]) -> None:
+        self._conn = conn
+        self._statements = statements
+
+    def execute(self, sql, params=()):  # noqa: ANN001 - psycopg 连接鸭子类型
+        self._statements.append((str(sql), tuple(params or ())))
+        return self._conn.execute(sql, params)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 @pytest.fixture
 def campaign_service(job_db, settings):
     from server.app.executors.leases import ExecutorLeaseRepository
@@ -287,6 +303,93 @@ class TestCreateRerunTarget:
                 job_filter=JobListFilter(status="failed"),
                 node_key="intake_knowledge_points",
             )
+
+    def test_filter_create_probes_existence_without_materializing_ids(
+        self, campaign_service, job_db, monkeypatch
+    ):
+        """四轮 P2（F1）：filter 形态创建只做有界存在性探测——
+        resolve_job_ids 的 O(N) keyset 全扫（10^5+ 选集的同步扫描与内存
+        物化）不得进入该路径；探测复用取片查询（同一 filter 谓词），
+        单页 limit=1（参数 2），而非 1001/页的物化取片。"""
+        import contextlib
+
+        from server.app.services import job_selection_resolver
+
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-probe-ws")
+        _seed_failed_jobs(job_db, workspace_id, 3)
+
+        # 全量物化器被调用即失败：创建只落 filter，不需要 id 列表。
+        def _no_materialize(*args, **kwargs):  # pragma: no cover - 断言绊线
+            raise AssertionError("filter create must not materialize the full id list")
+
+        monkeypatch.setattr(job_selection_resolver, "resolve_job_ids", _no_materialize)
+
+        statements: list[tuple[str, tuple]] = []
+        original_connect_read = job_db._connect_read
+
+        @contextlib.contextmanager
+        def _spying_connect_read():
+            with original_connect_read() as conn:
+                yield _SpyReadConnection(conn, statements)
+
+        monkeypatch.setattr(job_db, "_connect_read", _spying_connect_read)
+
+        row = campaign_service.create_campaign(
+            workspace_id,
+            "rerun",
+            job_filter=JobListFilter(status="failed"),
+            node_key="intake_knowledge_points",
+        )
+        assert row["target_spec"]["filter"]["status"] == "failed"
+        # filter 创建全程只有这一次 jobs 读——探测本身。
+        jobs_reads = [s for s in statements if " from jobs" in s[0]]
+        assert len(jobs_reads) == 1, statements
+        sql, params = jobs_reads[0]
+        # 与 feeder 取片同一查询形态、同一 filter 谓词（status = %s）。
+        assert "order by created_at desc, id desc" in sql
+        assert "status = %s" in sql
+        # 有界探测：limit 参数是 2（limit=1 的取片页 +1），不是物化页的
+        # _PAGE_SIZE+1=1001——一次读最多 2 行，不随选集大小增长。
+        assert params[-1] == 2, (sql, params)
+
+    def test_explicit_ids_normalized_before_persist(self, campaign_service, job_db):
+        """四轮 P2（F2）：显式 id 持久化前规范化（strip → 去空 → 去重，
+        与 batch rerun/upgrade 写路径同处理）——" id" 与 "id" 不再落成
+        两条快照（跨批次对同一 job 重复操作），空串不进 target_spec。"""
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-normalize-ws")
+        first, second = _seed_failed_jobs(job_db, workspace_id, 2)
+        row = campaign_service.create_campaign(
+            workspace_id,
+            "rerun",
+            job_ids=[f"  {first}  ", first, f" {second}", "", "   "],
+            node_key="intake_knowledge_points",
+        )
+        assert row["target_spec"]["job_ids"] == sorted({first, second})
+
+    def test_whitespace_only_ids_rejected_as_empty_selection(self, campaign_service, job_db):
+        """全空白 id 列表按空选集拒绝（与空 filter 同一错误语义），不再
+        建成 preview total_count=0 的无效 campaign。"""
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-blank-ids-ws")
+        with pytest.raises(InvalidOperationError, match="zero jobs"):
+            campaign_service.create_campaign(
+                workspace_id,
+                "rerun",
+                job_ids=["  ", ""],
+                node_key="intake_knowledge_points",
+            )
+
+    def test_preview_counts_follow_normalized_ids(self, campaign_service, job_db):
+        """preview 与创建共用规范化后的选集：脏 id（空白/重复）的 dry-run
+        total_count 等于去重后的集合——空格差异不会把同一 job 数两次。"""
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-preview-norm-ws")
+        first, second = _seed_failed_jobs(job_db, workspace_id, 2)
+        result = campaign_service.preview_campaign(
+            workspace_id,
+            "rerun",
+            job_ids=[f" {first}", first, second],
+            node_key="intake_knowledge_points",
+        )
+        assert result["total_count"] == 2
 
     def test_upgrade_mode_omits_rerun_knobs(self, campaign_service, job_db):
         """upgrade 与 rerun 同族取片，但不带 node_key/from_failed_node 语义。"""

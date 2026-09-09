@@ -111,10 +111,13 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
     async def create_campaign_from_manifest(
         workspace_id: str,
         user: Annotated[dict, Depends(require_workspace_access)],
+        # 四轮 P2（F3）：manifest 是合同必填项——由 FastAPI 的 File() 声明
+        # （缺失 422 由框架产生），OpenAPI/生成的 api.ts 不再把它标成
+        # optional；无默认值参数必须排在带默认值的表单字段之前。
+        manifest: Annotated[UploadFile, File()],
         mode: Annotated[str, Form()] = "submit",
         watermark: Annotated[int | None, Form()] = None,
         batch_size: Annotated[int | None, Form()] = None,
-        manifest: Annotated[UploadFile, File()] = None,  # type: ignore[assignment]
     ) -> CampaignCreateResponse:
         """Multipart variant: manifest file (.jsonl / .csv) + form knobs.
 
@@ -127,10 +130,6 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
                 status_code=422,
                 detail="The upload channel is submit-mode only; use the JSON body"
                 " for rerun/upgrade campaigns",
-            )
-        if manifest is None:
-            raise HTTPException(
-                status_code=422, detail="A manifest file is required (field 'manifest')"
             )
         # Bounded read (PR #541 P1): at most manifest_max_bytes+1 enter memory
         # (+1 distinguishes "over the ceiling" from "exactly at it"); an

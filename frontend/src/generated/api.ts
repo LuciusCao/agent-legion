@@ -3831,7 +3831,7 @@ export interface components {
       /** Batch Size */
       batch_size?: number | null
       /** Manifest */
-      manifest?: string
+      manifest: string
       /**
        * Mode
        * @default submit
@@ -11149,7 +11149,7 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: {
+    requestBody: {
       content: {
         'multipart/form-data': components['schemas']['Body_create_campaign_from_manifest_api_workspaces__workspace_id__campaigns_upload_post']
       }

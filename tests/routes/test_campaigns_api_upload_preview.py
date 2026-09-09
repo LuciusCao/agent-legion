@@ -142,6 +142,21 @@ def test_upload_rejects_non_submit_mode(client, job_db) -> None:
     assert response.status_code == 422
 
 
+def test_upload_missing_manifest_422_from_fastapi(client, job_db) -> None:
+    """四轮 P2（F3）：manifest 在 FastAPI 签名层必填——缺失 422 由框架
+    校验产生（载荷点名字段），OpenAPI/生成的 api.ts 不再把它标 optional
+    （类型安全客户端构造不出"合同合法却必失败"的请求）。"""
+    workspace_id = _create_workspace(client, job_db)
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/upload",
+        data={"mode": "submit"},
+    )
+    assert response.status_code == 422, response.text
+    assert any(error["loc"][-1] == "manifest" for error in response.json()["detail"]), response.text
+    # 缺 manifest 的请求不建任何行（路由体根本不执行）。
+    assert client.get(f"/api/workspaces/{workspace_id}/campaigns").json()["campaigns"] == []
+
+
 def test_upload_over_limit_413_without_full_read(client, job_db, monkeypatch) -> None:
     """审核 P1：multipart 上传限读——最多读 manifest_max_bytes+1 字节，超限 413，
     不把整个超大请求体读进内存（`manifest.read(limit)` 的调用界就位）。"""

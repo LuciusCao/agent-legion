@@ -47,6 +47,18 @@ def resolve_job_ids(
             return ids
 
 
+def selection_matches_any(
+    job_db: JobQueries,
+    workspace_id: str,
+    f: JobListFilter,
+) -> bool:
+    """Bounded existence probe (#532 PR-A round-4 P2): filter 形态的 campaign
+    创建只需判定选集非空——复用取片查询本身（同一谓词、索引短路），单页
+    LIMIT 1，不物化全量 id（10^5+ 选集的 O(N) 扫描不在创建路径）。"""
+    page, _cursor = _list_job_ids_page(job_db, workspace_id, f, 1, None)
+    return bool(page)
+
+
 def _list_job_ids_page(
     job_db: JobQueries,
     workspace_id: str,

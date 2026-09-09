@@ -39,7 +39,6 @@ from server.app.services.job_errors import (
 )
 from server.app.services.job_rerun.preview import batch_rerun_preview
 from server.app.services.job_rerun.upgrade_preview import batch_upgrade_preview
-from server.app.services.job_selection_resolver import EmptyJobSelectionError
 from server.app.services.run_item_resolution import resolve_run_items
 from server.app.settings import Settings
 from server.app.storage import ObjectStorage
@@ -332,12 +331,12 @@ class CampaignService:
         node_key: str | None,
         from_failed_node: bool,
     ) -> dict[str, Any]:
-        """Validate the rerun/upgrade target shape and resolve it once.
+        """Validate the rerun/upgrade target shape; empty selections fail here.
 
         Mirrors JobBatchRerunRequest's validation (node_key and
         from_failed_node are mutually exclusive, exactly one required) and
-        the batch endpoints' selection resolution, so an empty/absent
-        selection fails here instead of at the feeder.
+        the batch endpoints' empty-selection semantics; the filter form
+        only probes existence (round-4 P2) — the feeder re-resolves it.
         """
         if (job_ids is None) == (job_filter is None):
             raise InvalidOperationError("Provide exactly one of job_ids or filter")
@@ -349,24 +348,38 @@ class CampaignService:
                     )
             elif not node_key:
                 raise InvalidOperationError("node_key is required when from_failed_node is False")
-        from server.app.services.job_selection_resolver import resolve_batch_selection
+        from server.app.services.job_selection_resolver import selection_matches_any
 
-        try:
-            resolved = resolve_batch_selection(self.job_db, workspace_id, job_ids, job_filter)
-        except EmptyJobSelectionError as exc:
-            raise InvalidOperationError(f"Campaign selection is empty: {exc}") from exc
-        if not resolved:
-            raise InvalidOperationError("Campaign selection resolved to zero jobs")
-        # Target shape (design §1.3/§1.4): the filter form stores ONLY the
-        # filter — the feeder re-resolves it with a keyset cursor, and a
-        # materialized 10^5-id snapshot in the row would blow the row width
-        # (exactly what the keyset-cursor design avoids). Explicit ids are
-        # the snapshot form by definition (bounded by the request size).
-        spec: dict[str, Any] = (
-            {"filter": _filter_to_dict(job_filter)}
-            if job_filter is not None
-            else {"job_ids": sorted(set(resolved))}
-        )
+        # 四轮 P2（F2）：显式 id 先规范化再判定/持久化——与 batch rerun/
+        # upgrade 写路径同一 strip → 去空 → 去重处理，" id" 与 "id" 不再
+        # 落成两条、跨批次对同一 job 重复操作；全空白输入同样按空选集拒绝。
+        normalized_ids: list[str] | None = None
+        if job_ids is not None:
+            normalized_ids = list(
+                dict.fromkeys(value.strip() for value in job_ids if value.strip())
+            )
+            if not normalized_ids:
+                raise InvalidOperationError("Campaign selection resolved to zero jobs")
+
+        # 四轮 P2（F1）：filter 形态只需存在性判定——创建只落 filter 本身，
+        # 物化全部 id 的 O(N) 同步扫描（10^5+ 选集）违背流式取片设计；
+        # 探测与 feeder 取片共用 filter_clauses（selection_matches_any），
+        # 空选集语义不变（InvalidOperationError，路由映射同前）。显式 id
+        # 本就是快照形态，规范化后的非空列表即为选集，无需再查库。
+        if job_filter is not None:
+            if not selection_matches_any(self.job_db, workspace_id, job_filter):
+                raise InvalidOperationError("Campaign selection resolved to zero jobs")
+            # Target shape (design §1.3/§1.4): the filter form stores ONLY the
+            # filter — the feeder re-resolves it with a keyset cursor, and a
+            # materialized 10^5-id snapshot in the row would blow the row width
+            # (exactly what the keyset-cursor design avoids).
+            spec: dict[str, Any] = {"filter": _filter_to_dict(job_filter)}
+        else:
+            # Explicit ids are the snapshot form by definition (bounded by
+            # the request size); sorted() keeps the canonical persisted order
+            # (dedup already happened at normalization).
+            assert normalized_ids is not None  # exactly-one-of 守卫保证了非 None
+            spec = {"job_ids": sorted(normalized_ids)}
         if mode == "rerun":
             if from_failed_node:
                 spec["from_failed_node"] = True
