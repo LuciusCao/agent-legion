@@ -23,8 +23,12 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   - **per-execution 互斥锁**：`run_execution` 全程持有按 execution_id
     引用计数的进程内锁（`worker/execution/ownership.py`），同一
     execution_id 在本进程内任意时刻只有一个 attempt——旧 attempt 的
-    收尾与新 attempt 的 prepare 串行化，时序窗口整体消除；旧 attempt
-    下线只依赖自己的心跳 409，锁等待有界，无死锁。
+    收尾与新 attempt 的 prepare 串行化，时序窗口整体消除。等锁是有界
+    等待（`MUTEX_WAIT_BOUND_SECONDS` = 60s，按 90s 租约 TTL 基线留出
+    两个批量心跳拍，够旧 attempt 收到 409 并完成收尾）：超时说明心跳
+    面仍瘫痪、本 claim 的 lease 在 Host 侧已死或濒死，放弃本次 claim
+    （不 prepare、不上报、不启动心跳），租约过期后由 Host 在 worker
+    恢复健康时重排。
 
 ## [0.7.6] - 2026-09-09
 

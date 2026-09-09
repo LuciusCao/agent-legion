@@ -23,7 +23,7 @@ from worker._atomic import atomic_write
 from worker.code_runner import cancel_executions, execute_code
 from worker.event_filter import spawn_event_pump
 from worker.execution.heartbeat import ExecutionHeartbeat, start_lease_heartbeat
-from worker.execution.ownership import discard_owned_dir, execution_mutex
+from worker.execution.ownership import MUTEX_WAIT_BOUND_SECONDS, discard_owned_dir, execution_mutex
 from worker.execution.prepare import prepare_execution
 from worker.host.client import Client
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
@@ -141,10 +141,15 @@ def run_execution(
     # execution_id 而旧 attempt 线程仍存活。per-execution 互斥锁把旧
     # attempt 的丢弃收尾与新 attempt 的 prepare 串行化——锁内任意时刻本
     # 进程只有一个 attempt 碰这个目录；锁外的新 attempt 只是排队等锁，
-    # 旧 attempt 的下线只依赖自己的心跳 409（不依赖新 attempt），等待有界
-    # （心跳间隔 + 终止宽限），无死锁。归属标记（ownership.py）是锁之外
-    # 的正确性底线。
-    with execution_mutex(execution_id):
+    # 旧 attempt 的下线只依赖自己的心跳 409（不依赖新 attempt），无死锁。
+    # 等锁是有界等待（MUTEX_WAIT_BOUND_SECONDS 的依据见 ownership.py）：
+    # 超时说明心跳面仍瘫痪、本 claim 的 lease 在 Host 侧已死或濒死——放弃
+    # 本次 claim（不 prepare、不上报、不启动心跳），租约过期后由 Host 在
+    # worker 恢复健康时重排。归属标记（ownership.py）是锁之外的正确性底线。
+    with execution_mutex(execution_id, timeout=MUTEX_WAIT_BOUND_SECONDS) as acquired:
+        if not acquired:
+            print(f"abandoning claim of {execution_id}: attempt mutex busy", flush=True)
+            return
         node_key = str(claim["node_key"])
         started_monotonic = time.monotonic()  # #490 wall clock anchor
         # Batch 2: kind='code' claims run the node code sandboxed instead of an
@@ -206,13 +211,12 @@ def run_execution(
                 manifest = prepared.manifest
                 command = prepared.command
                 events_file = run_dir / "events.jsonl"
-                env = agent_subprocess_env(environment)
                 status.set_phase(execution_id, "running")
                 with events_file.open("wb") as output:
                     proc = subprocess.Popen(
                         command,
                         cwd=job_dir,
-                        env=env,
+                        env=agent_subprocess_env(environment),
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         start_new_session=True,

@@ -7,7 +7,9 @@ locally, and the same Worker immediately re-claims it:
 - ``execution_mutex`` is a per-execution_id in-process lock table;
   ``run_execution`` holds the lock for the whole attempt, so the old
   attempt's discard tail and the new attempt's prepare serialize instead of
-  interleaving (the race that deleted a live prompt.md).
+  interleaving (the race that deleted a live prompt.md). The wait is
+  bounded (``MUTEX_WAIT_BOUND_SECONDS``): a new attempt must not wait
+  longer than its own lease has left to live.
 - ``write_owner_marker`` tags the execution dir with the claiming lease at
   prepare time; the discard tail (``discard_owned_dir``) rmtree's only when
   the marker still names its own lease — the correctness floor for any path
@@ -35,11 +37,21 @@ from worker.upload.queue import PENDING_FILENAME
 # Sibling of upload_pending.json: which lease the execution dir belongs to.
 OWNER_FILENAME = "execution_owner.json"
 
+# Bound on waiting for a busy execution mutex (#564 P2). The Worker does not
+# know the Host's actual lease TTL (the 90s baseline is a Host-side #349
+# constant); 60s leaves two 30s batch-heartbeat beats inside that baseline —
+# enough for the old attempt to receive its 409 and finish its teardown. If
+# even that is not enough the heartbeat plane is still starved and this
+# claim's lease is already dead or dying Host-side, so the caller abandons
+# the claim (no prepare, no report, no heartbeat) and leaves the lease to
+# expire for a Host requeue once the Worker recovers.
+MUTEX_WAIT_BOUND_SECONDS = 60.0
+
 
 @dataclass
 class _MutexEntry:
     lock: threading.Lock
-    waiters: int
+    refs: int  # current holder + waiters
 
 
 _TABLE_GUARD = threading.Lock()
@@ -47,26 +59,34 @@ _MUTEX_TABLE: dict[str, _MutexEntry] = {}
 
 
 @contextmanager
-def execution_mutex(execution_id: str) -> Iterator[None]:
+def execution_mutex(execution_id: str, timeout: float | None = None) -> Iterator[bool]:
     """Serialize attempts for one execution_id within this process.
 
+    Yields True with the lock held; with ``timeout`` set, yields False when
+    it elapses while another attempt still holds the lock — the caller must
+    then abandon the claim untouched (no prepare, no report, no heartbeat).
     The table entry is dropped once the last holder/waiter leaves, so a
     long-lived Worker does not accumulate one lock per historical execution.
     """
     with _TABLE_GUARD:
         entry = _MUTEX_TABLE.get(execution_id)
         if entry is None:
-            entry = _MutexEntry(lock=threading.Lock(), waiters=0)
+            entry = _MutexEntry(lock=threading.Lock(), refs=0)
             _MUTEX_TABLE[execution_id] = entry
-        entry.waiters += 1
-    with entry.lock:
-        try:
-            yield
-        finally:
-            with _TABLE_GUARD:
-                entry.waiters -= 1
-                if entry.waiters == 0:
-                    _MUTEX_TABLE.pop(execution_id, None)
+        entry.refs += 1
+    # 自增之后的所有路径（acquire 超时/抛异常、holder 正常退出）统一走这个
+    # finally 回收计数与表项——任何中途异常都不得泄漏表项。
+    acquired = False
+    try:
+        acquired = entry.lock.acquire() if timeout is None else entry.lock.acquire(timeout=timeout)
+        yield acquired
+    finally:
+        if acquired:
+            entry.lock.release()
+        with _TABLE_GUARD:
+            entry.refs -= 1
+            if entry.refs == 0:
+                _MUTEX_TABLE.pop(execution_id, None)
 
 
 def write_owner_marker(execution_dir: Path, claim: dict[str, Any]) -> None:

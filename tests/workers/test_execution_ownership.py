@@ -189,3 +189,29 @@ def test_execution_mutex_table_entry_dropped_after_last_holder() -> None:
     with execution_mutex("exec-gc"):
         assert "exec-gc" in ownership._MUTEX_TABLE
     assert "exec-gc" not in ownership._MUTEX_TABLE
+
+
+def test_execution_mutex_wait_timeout_yields_false_and_recycles_entry() -> None:
+    """#564 P2：有界等锁——holder 不放锁时 contender 等满 timeout 拿到
+    False（不抛异常、快速返回），且 False 路径不误释放 holder 的锁；双方
+    退出后表项计数正确回收。"""
+    contender_result: list[bool] = []
+
+    def contender() -> None:
+        with execution_mutex("exec-busy", timeout=0.2) as acquired:
+            contender_result.append(acquired)
+
+    with execution_mutex("exec-busy") as first:
+        assert first
+        thread = threading.Thread(target=contender)
+        started = time.monotonic()
+        thread.start()
+        thread.join(timeout=10)
+        elapsed = time.monotonic() - started
+        assert not thread.is_alive()
+        # contender 放弃后 holder 仍持有锁：再探一次依旧拿不到。
+        with execution_mutex("exec-busy", timeout=0.05) as second:
+            assert not second
+    assert contender_result == [False]
+    assert 0.1 < elapsed < 10
+    assert "exec-busy" not in ownership._MUTEX_TABLE
