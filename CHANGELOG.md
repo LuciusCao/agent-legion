@@ -8,6 +8,29 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [0.7.7] - 未发布
 
+### Performance
+- result commit 的 validate 段提速（issue #569）：完成波下每条 result
+  都重新 `git archive` 物化 skill 树 + spawn velites 子进程，零复用
+  （单条最差实测 60.4s）。两步修法：
+  - **物化缓存**：按 `(skill_key, skill_commit)` 缓存物化目录到
+    `runs_dir/.shared/<workflow>--<capability>/<commit40>/`（commit 不可变，
+    内容恒定）；命中判定是纯路径探测（`.complete` 完整性标记在原子
+    rename 之后落盘，半截导出目录永不命中、下次物化时回收），命中零
+    git 调用；并发物化复用 per-repo FileLock 串行。缓存按 skill 有界
+    （每 skill 保留最近 4 个 commit，按 mtime LRU 淘汰），sweep 明确
+    豁免 `.shared` 子树；validate 路径不再创建 per-validation 执行目录，
+    `cleanup_execution` 退出该路径（共享缓存由 LRU 治理，不被误删）。
+  - **validate 下沉独立进程池**：`agent_broker/result_validate_pool.py`
+    复用 #552 unpack 池模式（spawn context、`reset_pool(broken=...)`
+    身份守卫、懒建池、BrokenProcessPool 单次重建重试），与 unpack 池
+    隔离（validate 含 30s timeout 的子进程等待，避免队头阻塞毫秒级
+    unpack）。拆分点：commit 解析（可能读写 DB skill lock 文档）留在
+    主进程，物化（走缓存）+ 两层校验器下沉池内。
+  - 池尺寸旋钮接入实例设置：`result_validate.workers`（0 = 自动
+    min(4, 核数)，上限 64，重启生效，admin UI「队列与解包容量」组），
+    env `AGENT_LEGION_RESULT_VALIDATE_WORKERS` 为覆盖通道（同 #554
+    链路）。
+
 ### Fixed
 - Worker 双 attempt 竞态修复（issue #564）：worker 过载时批量心跳被饿死，
   Host 误判租约过期重排队，同一 worker 立刻重新 claim 同一 execution_id

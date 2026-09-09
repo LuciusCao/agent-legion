@@ -60,6 +60,7 @@ def test_apply_overrides_executor_runtime_and_writes_back_config(settings, job_d
     assert runtime.agent_enqueue.workers == 48
     assert runtime.agent_enqueue.max_pending == 1024
     assert runtime.result_unpack.workers == 0
+    assert runtime.result_validate.workers == 0
     assert runtime.agent_claim.worker_touch_interval_seconds == 30
     # cleanup/monitoring are written back into the config dict, merged over
     # defaults (run_dir_retention_days was not in the stored document).
@@ -93,12 +94,14 @@ def test_apply_hydrates_result_commit_gate(settings, job_db, store) -> None:
 
 
 def test_apply_hydrates_capacity_knobs(settings, job_db, store) -> None:
-    """#509/#554/#561: agent_enqueue / result_unpack / agent_claim ride the
-    nested-block hydration like the workflows / agent_workers precedents."""
+    """#509/#554/#569/#561: agent_enqueue / result_unpack / result_validate /
+    agent_claim ride the nested-block hydration like the workflows /
+    agent_workers precedents."""
     store.put(
         {
             "agent_enqueue": {"workers": 64, "max_pending": 2048},
             "result_unpack": {"workers": 8},
+            "result_validate": {"workers": 6},
             "agent_claim": {"worker_touch_interval_seconds": 7.5},
         }
     )
@@ -108,6 +111,7 @@ def test_apply_hydrates_capacity_knobs(settings, job_db, store) -> None:
     assert settings.executor_runtime.agent_enqueue.workers == 64
     assert settings.executor_runtime.agent_enqueue.max_pending == 2048
     assert settings.executor_runtime.result_unpack.workers == 8
+    assert settings.executor_runtime.result_validate.workers == 6
     assert settings.executor_runtime.agent_claim.worker_touch_interval_seconds == 7.5
 
 

@@ -63,6 +63,14 @@ class InstanceResultUnpackSettings(BaseModel):
     workers: int = Field(ge=0, le=64)
 
 
+class InstanceResultValidateSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # #569: result-validate process pool size; same semantics as
+    # result_unpack (restart-effective, 0 = auto).
+    workers: int = Field(ge=0, le=64)
+
+
 class InstanceAgentClaimSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -105,6 +113,7 @@ class InstanceSettingsDocument(BaseModel):
     # restart-effective like the rest of the executor-runtime surface.
     agent_enqueue: InstanceAgentEnqueueSettings
     result_unpack: InstanceResultUnpackSettings
+    result_validate: InstanceResultValidateSettings
     agent_claim: InstanceAgentClaimSettings
 
 

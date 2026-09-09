@@ -17,6 +17,32 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/538
   ceiling: 78
 - check: architecture.file_budget
+  path: frontend/src/pages/globalSettings/instanceSettingsCapacityFields.ts
+  reason: >-
+    Issue #569 adds the result-validate pool knob beside its #554
+    result_unpack sibling: one field entry (path, label, integer, allowZero,
+    max) in the same table shape. The capacity-knob group IS the form
+    surface for the executor-runtime pool sizes; splitting a one-entry
+    overflow into a sister module would fork the group. Remove when the
+    instance-settings form gets its planned structural split or a knob
+    retirement frees headroom.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/569
+  ceiling: 47
+- check: architecture.file_budget
+  path: frontend/src/pages/globalSettings/instanceSettingsPayload.ts
+  reason: >-
+    Issue #569 adds the result-validate pool knob to the instance-settings
+    form: one toFormValues line plus one buildPayload block, the same shape
+    as its #554 result_unpack sibling (the prettier 80-column wrap forces
+    the block over three lines). The form value/payload mapping IS this
+    table; splitting two entries out would fork the mapping from the form
+    it serves. Remove when the instance-settings form gets its planned
+    structural split or a knob retirement frees headroom.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/569
+  ceiling: 132
+- check: architecture.file_budget
   path: frontend/src/pages/globalSettings/instanceSettingsFields.ts
   reason: >-
     Issue #521 adds the result-commit gate knob to the Worker-limits field
