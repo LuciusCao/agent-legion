@@ -6,10 +6,12 @@ scrolled the evidence away (the #566 investigation pain point). Every panel
 line is now ALSO appended to a size-rotated file — 10 MiB × 5 keeps weeks
 of normal operation and bounds the worst case at ~60 MiB.
 
-Path rule: the log sits next to the worker's data domain — ``data/logs/``
-when the state dir lives under a ``data/`` root (the default
-``data/agent-worker-service`` layout), else ``<state_dir>/logs/`` so a
-custom state dir never sprays logs into an unexpected parent.
+Path rule: the log sits next to the worker's data domain — ``data/logs/
+executor-<state dir 名>.log`` when the state dir lives under a ``data/``
+root (the default ``data/agent-worker-service`` layout; the name suffix
+keeps two co-located state dirs from sharing one file, PR #572), else
+``<state_dir>/logs/executor.log`` so a custom state dir never sprays logs
+into an unexpected parent.
 
 Rotation is hand-rolled (not RotatingFileHandler): logging's emit swallows
 write errors into handleError, which would break the report-once contract
@@ -27,14 +29,18 @@ from typing import Any
 
 MAX_BYTES = 10 * 1024 * 1024
 BACKUP_COUNT = 5
-LOG_FILENAME = "executor.log"
 
 
 def executor_log_path(state_dir: Path) -> Path:
-    """The rolling executor log's path for this worker's state dir."""
+    """The rolling executor log's path for this worker's state dir.
+
+    The filename carries the state dir name (PR #572 review): the two worker
+    state dirs (``data/agent-worker`` and ``data/agent-worker-service``)
+    share one ``data/logs/`` parent on a combined host, and two sinks on one
+    file would stomp each other's rotation."""
     if state_dir.parent.name == "data":
-        return state_dir.parent / "logs" / LOG_FILENAME
-    return state_dir / "logs" / LOG_FILENAME
+        return state_dir.parent / "logs" / f"executor-{state_dir.name}.log"
+    return state_dir / "logs" / "executor.log"
 
 
 class ExecutorLogSink:

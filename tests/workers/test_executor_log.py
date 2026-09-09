@@ -13,7 +13,10 @@ pytestmark = pytest.mark.no_db
 
 def test_log_path_anchors_to_worker_data_domain(tmp_path: Path) -> None:
     data_state = tmp_path / "data" / "agent-worker-service"
-    assert executor_log_path(data_state) == tmp_path / "data" / "logs" / "executor.log"
+    assert (
+        executor_log_path(data_state)
+        == tmp_path / "data" / "logs" / "executor-agent-worker-service.log"
+    )
     custom = tmp_path / "elsewhere" / "worker-state"
     assert executor_log_path(custom) == custom / "logs" / "executor.log"
 

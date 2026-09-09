@@ -20,9 +20,13 @@ Safety rails:
 - 401 (token rotated by a re-registration the snapshot predates) drops the
   cached client; the next fresh snapshot carries the new token.
 
-One relay thread serves the supervisor's whole lifetime: config is read
-per tick (``get_config``), so executor restarts and config reloads need no
-relay lifecycle management; with no live snapshot the tick is a no-op.
+Liveness (PR #572 review): the result file is rewritten EVERY tick that
+reaches the beat stage — even with empty verdicts or a transient beat
+failure — so the executor's watchdog (``relay_sync.py``) can tell
+"relay alive, nothing to report" from "relay dead / supervisor hung"
+(leases would otherwise silently expire and double-run). Degraded mode
+(pre-v5 Host) resets when the snapshot's pid changes: an executor restart
+re-probes the batch endpoint instead of pinning single beats forever.
 """
 
 from __future__ import annotations
@@ -51,6 +55,10 @@ def _pid_alive(pid: Any) -> bool:
     """Snapshot pids are self-reported; a dead executor must stop the beats."""
     try:
         os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but owned by someone else — still alive
     except (OSError, TypeError, ValueError):
         return False
     return True
@@ -80,6 +88,7 @@ class HeartbeatRelay:
         self._degraded = False
         self._stale_logged = False
         self._result_seq = 0
+        self._snapshot_pid: int | None = None
 
     def run(self) -> None:
         while not self._stop.wait(self._interval()):
@@ -116,6 +125,11 @@ class HeartbeatRelay:
         snapshot = read_snapshot(self._state_dir / SNAPSHOT_FILENAME)
         if snapshot is None or not _pid_alive(snapshot.get("pid")):
             return
+        # PR #572 P2-3: an executor restart (new pid) re-probes the batch
+        # endpoint — a Host upgrade must not wait out a supervisor restart.
+        pid = int(snapshot["pid"])
+        if pid != self._snapshot_pid:
+            self._snapshot_pid, self._degraded = pid, False
         if snapshot_stale(snapshot, now=self._clock(), stale_seconds=SNAPSHOT_STALE_SECONDS):
             if not self._stale_logged:
                 self._stale_logged = True
@@ -138,15 +152,18 @@ class HeartbeatRelay:
             self._client_key = (host_url, token)
         lost, cancelled = self._beat(leases)
         if lost is None:
-            return  # transient failure: next tick retries everything.
-        if lost or cancelled:
-            self._result_seq += 1
-            write_beat_result(
-                self._state_dir / RESULT_FILENAME,
-                seq=self._result_seq,
-                lost=lost,
-                cancelled=cancelled,
-            )
+            # Transient beat failure: the relay is still ALIVE — the liveness
+            # write below must still happen (the executor's watchdog keys on
+            # the advancing seq); the verdicts stay empty and the next tick
+            # retries everything.
+            lost, cancelled = [], []
+        self._result_seq += 1
+        write_beat_result(
+            self._state_dir / RESULT_FILENAME,
+            seq=self._result_seq,
+            lost=lost,
+            cancelled=cancelled,
+        )
 
     def _beat(self, leases: list[tuple[str, str]]) -> tuple[Any, Any]:
         """Beat the whole snapshot; (None, None) = transient, retry next tick."""
@@ -184,8 +201,7 @@ class HeartbeatRelay:
         return lost, cancelled
 
     def _beat_singles(self, leases: list[tuple[str, str]]) -> tuple[list, list]:
-        """Degraded mode: one short-lived thread per lease (the pre-v5 shape)
-        so one slow Host response parks only its own lease's beat."""
+        """Degraded mode: thread-per-lease beats (a slow Host parks only its own lease)."""
         lost: list[tuple[str, str]] = []
         cancelled: list[str] = []
         lock = threading.Lock()

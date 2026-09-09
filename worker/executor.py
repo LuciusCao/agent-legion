@@ -33,11 +33,7 @@ from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import Client, WorkerAuthError
 from worker.host.status_sync import sync_host_status
 from worker.hot_controls import DynamicControls, reload_controls
-from worker.lease_snapshot import (
-    EXECUTOR_RELAY_SYNC_SECONDS,
-    executor_relay_sync,
-    open_lease_channel,
-)
+from worker.lease_snapshot import open_lease_channel
 from worker.load_shedding import LoadShedder
 from worker.metrics_cache import WorkerMetricsCache
 from worker.ramp_up import (
@@ -47,6 +43,7 @@ from worker.ramp_up import (
     validate_ramp_up,
 )
 from worker.registration.retry import register_from_config
+from worker.relay_sync import RelaySyncState, executor_relay_sync
 from worker.runtime import controls as runtime_controls
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.runtime.setup import prepare_runtime_models
@@ -151,7 +148,9 @@ def main() -> int:
     run_args = (work_root, environment, interval, stop, shutdown_grace)
     run_tail = (status, uploads, download_slots)
     next_sweep, next_host_status = time.monotonic(), time.monotonic() + interval
-    next_lease_sync, last_beat_seq = time.monotonic(), -1
+    # PR #572 P2-1：relay 存活看门狗收在 RelaySyncState（seq 停跳超阈值
+    # 且持有租约即 WARNING）。
+    relay_state = RelaySyncState(interval)
     control_error = None
     controls = DynamicControls(
         max_concurrency, claim_enabled, max_code_concurrency, transfer, claim_batch_limit, ramp
@@ -198,14 +197,9 @@ def main() -> int:
             if time.monotonic() >= next_sweep:
                 sweep_stale_executions(work_root)
                 next_sweep = time.monotonic() + SWEEP_INTERVAL_SECONDS
-            if lease_snapshot_path is not None and time.monotonic() >= next_lease_sync:
-                next_lease_sync = time.monotonic() + EXECUTOR_RELAY_SYNC_SECONDS
-                last_beat_seq = executor_relay_sync(
-                    heartbeat_registry,
-                    lease_snapshot_path,
-                    worker_id=worker_id,
-                    token=client.token,
-                    last_result_seq=last_beat_seq,
+            if lease_snapshot_path is not None:
+                executor_relay_sync(
+                    heartbeat_registry, lease_snapshot_path, worker_id, client.token, relay_state
                 )
             completed = {future for future in active if future.done()}
             active -= completed
@@ -238,10 +232,11 @@ def main() -> int:
                 # 全部加载成功才统一生效（语义收口在 hot_controls）。
                 controls = reloaded
                 control_error = None
-            max_concurrency = controls.max_concurrency
-            claim_enabled = controls.claim_enabled
-            max_code_concurrency = controls.max_code_concurrency
-            claim_batch_limit = controls.claim_batch_limit
+            max_concurrency, claim_enabled = controls.max_concurrency, controls.claim_enabled
+            max_code_concurrency, claim_batch_limit = (
+                controls.max_code_concurrency,
+                controls.claim_batch_limit,
+            )
             ramp = controls.ramp
             # #471：本 pass 生效容量（禁用/未开窗 = 目标直通；暂停期 deduct
             # 折回、enabled 才推进虚拟时钟——策略收口在 ramp_pass）。

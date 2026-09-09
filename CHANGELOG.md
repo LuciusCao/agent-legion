@@ -61,8 +61,15 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
     （lost 按 (execution_id, lease_id) 对匹配，重 claim 的新 attempt
     不被旧裁定误伤）。安全栏：relay 只在快照 pid 存活且快照新鲜
     （60s 停滞即停拍）时发拍——executor 脑死时租约按 Host TTL 正常
-    过期重排，不会被冻结快照永远续命。裸跑 executor（无快照 env）
+    过期重排，不会被冻结快照永远续命；executor 换代（快照 pid 变化）
+    自动重探批量端点，降级不终身化。裸跑 executor（无快照 env）
     保持原进程内心跳循环。
+  - **relay 存活看门狗**（PR #572 复审）：relay 每拍（含空裁定与瞬时
+    失败）都重写结果文件并递增 seq 作为存活证明；executor 侧
+    `worker/relay_sync.py` 的看门狗在持有租约而 seq 停跳超阈值
+    （3×relay 拍间隔、下限 60s）时打一条 WARNING——区分「relay 活着
+    无裁定」与「relay 死亡/supervisor 挂起」（后者租约静默过期会双跑）。
+    纯观测信号，不改结果语义。
   - **一期盲区闭合**：relay 的每拍心跳都经 Host 鉴权路径触活
     `last_seen_at`，executor 整体饱和时控制面依然新鲜，一期 deferral
     在纯饱和场景也能生效（实测复核：budget=0 时 executor 主循环的
@@ -70,9 +77,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
     级饥饿，由 relay 覆盖）。
   - **executor stdout 滚动持久化**：面板日志行（executor stdout +
     supervisor 生命周期）从仅有 500 行内存 deque 变为同时写滚动文件
-    （10MB×5 轮转；state dir 在 `data/` 下时落 `data/logs/executor.log`，
-    否则 `<state_dir>/logs/`），写失败降级为仅内存并报一次错，不影响
-    采集线程。
+    （10MB×5 轮转；state dir 在 `data/` 下时落
+    `data/logs/executor-<state dir 名>.log`——文件名带 state dir 名，
+    两个 state dir 同机共存不互踩；否则 `<state_dir>/logs/`），写失败
+    降级为仅内存并报一次错，不影响采集线程。
   - **claim 负载回压 + 容量告警**：claim 预算按 1 分钟 load average
     衰减（≤核数不衰减，1×→3×核线性降至 0.25 下限——永不为零，共享/
     高负载机器上补位减速不停摆；预算应用向上取整，正预算至少保 1 槽；

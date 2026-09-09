@@ -86,8 +86,11 @@ def test_tick_beats_snapshot_leases(tmp_path: Path) -> None:
     relay.tick()
 
     assert client.batches == [[("exec-1", "lease-1"), ("exec-2", "lease-2")]]
-    # No lost/cancelled verdicts → no result file (nothing for the executor).
-    assert read_beat_result(tmp_path / RESULT_FILENAME) is None
+    # PR #572 P2-1: every beat-stage tick rewrites the result file (empty
+    # verdicts included) — the advancing seq is the relay's liveness proof.
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None and result["seq"] == 1
+    assert result["lost"] == [] and result["cancelled"] == []
     assert logs == []
 
 
@@ -156,7 +159,9 @@ def test_transient_batch_error_keeps_client_and_retries(tmp_path: Path) -> None:
     _write_snapshot(tmp_path)
 
     relay.tick()
-    assert read_beat_result(tmp_path / RESULT_FILENAME) is None
+    # Transient failure: the liveness write still lands (empty verdicts).
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None and result["seq"] == 1 and result["lost"] == []
     assert logs and "批量拍失败" in logs[0]
 
     client.batch_error = None
@@ -198,3 +203,87 @@ def test_404_degrades_to_single_beats(tmp_path: Path) -> None:
     result = read_beat_result(tmp_path / RESULT_FILENAME)
     assert result is not None
     assert result["lost"] == [["exec-1", "lease-1"], ["exec-2", "lease-2"]]
+
+
+def test_tick_shards_oversized_snapshot_and_merges_chunk_verdicts(tmp_path: Path) -> None:
+    """PR #572 P2-4: 257 leases shard into 256+1; a lost verdict from the
+    second chunk still lands in the merged result."""
+    from worker.execution.heartbeat_batch import MAX_BATCH_HEARTBEATS
+
+    client, logs = _FakeClient(), []
+    leases = [(f"exec-{i}", f"lease-{i}") for i in range(MAX_BATCH_HEARTBEATS + 1)]
+    client.lost = [f"exec-{MAX_BATCH_HEARTBEATS}"]  # the tail chunk's lease
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path, leases=leases)
+
+    relay.tick()
+
+    assert [len(chunk) for chunk in client.batches] == [MAX_BATCH_HEARTBEATS, 1]
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None
+    assert result["lost"] == [[f"exec-{MAX_BATCH_HEARTBEATS}", f"lease-{MAX_BATCH_HEARTBEATS}"]]
+
+
+def test_first_chunk_transient_aborts_tick_but_keeps_liveness(tmp_path: Path) -> None:
+    """A failing first chunk skips the tail chunk (next tick retries from the
+    top), and the liveness result write still lands (PR #572 P2-1)."""
+    from worker.execution.heartbeat_batch import MAX_BATCH_HEARTBEATS
+
+    client, logs = _FakeClient(), []
+    client.batch_error = ConnectionError("boom")
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(
+        tmp_path,
+        leases=[(f"exec-{i}", f"lease-{i}") for i in range(MAX_BATCH_HEARTBEATS + 1)],
+    )
+
+    relay.tick()
+
+    assert len(client.batches) == 1, "the tail chunk must not follow a failed first chunk"
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None and result["seq"] == 1 and result["lost"] == []
+
+
+def test_stale_recovery_rearms_the_stall_log(tmp_path: Path) -> None:
+    """PR #572 P2-4: the stall log fires once per episode — a recovered
+    executor that stalls AGAIN logs again."""
+    client, logs = _FakeClient(), []
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path)
+
+    import json
+
+    def backdate() -> None:
+        path = tmp_path / SNAPSHOT_FILENAME
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["updated_at"] = time.time() - 3600
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    backdate()
+    relay.tick()
+    _write_snapshot(tmp_path)  # executor recovers
+    relay.tick()
+    backdate()
+    relay.tick()  # stalls again
+
+    assert len([line for line in logs if "暂停心跳 relay" in line]) == 2
+
+
+def test_degraded_mode_resets_on_executor_generation_change(tmp_path: Path) -> None:
+    """PR #572 P2-3: a new executor pid re-probes the batch endpoint."""
+    client, logs = _FakeClient(), []
+    client.batch_status = 404
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path)
+    relay.tick()
+    assert relay._degraded is True
+    singles_before = len(client.singles)
+
+    # Executor restarted: same leases under a new pid; Host now has v5.
+    client.batch_status = 200
+    _write_snapshot(tmp_path, pid=1)  # pid 1 always exists
+    relay.tick()
+
+    assert relay._degraded is False
+    assert len(client.batches) == 2, "the new generation must re-probe the batch endpoint"
+    assert len(client.singles) == singles_before

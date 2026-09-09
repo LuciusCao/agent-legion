@@ -104,11 +104,6 @@ def read_beat_result(path: Path) -> dict[str, Any] | None:
     return payload
 
 
-# Executor-side relay sync cadence: the claim loop passes several times per
-# second; the snapshot write (one small atomic file) is throttled to this.
-EXECUTOR_RELAY_SYNC_SECONDS = 2.0
-
-
 def open_lease_channel(client: Any, interval: float, stop: Any) -> tuple[Any, Path | None]:
     """Registry + optional snapshot path for the executor's lease channel.
 
@@ -121,42 +116,3 @@ def open_lease_channel(client: Any, interval: float, stop: Any) -> tuple[Any, Pa
     if raw:
         return BatchHeartbeatRegistry(), Path(raw)
     return start_batch_heartbeat(client, interval, stop), None
-
-
-def executor_relay_sync(
-    registry: Any,
-    snapshot_path: Path,
-    *,
-    worker_id: str,
-    token: str,
-    last_result_seq: int,
-) -> int:
-    """One executor-side relay round (#566 phase 2): publish the beatable
-    lease snapshot, then apply any new beat result. Returns the applied
-    result seq (``last_result_seq`` when nothing new). Never raises into the
-    claim loop: a failed write/read costs one round, retried next pass —
-    the real deadline is the lease TTL."""
-    try:
-        write_snapshot(
-            snapshot_path,
-            worker_id=worker_id,
-            token=token,
-            pid=os.getpid(),
-            leases=[(entry.execution_id, entry.lease_id) for entry in registry.snapshot()],
-        )
-        result = read_beat_result(snapshot_path.parent / RESULT_FILENAME)
-        if result is None or result["seq"] == last_result_seq:
-            return last_result_seq
-        registry.apply_beat_result(
-            lost=[(str(pair[0]), str(pair[1])) for pair in result.get("lost", [])],
-            cancelled=[str(value) for value in result.get("cancelled", [])],
-        )
-        return int(result["seq"])
-    except Exception as exc:
-        # #204 broad-except audit: relay 同步是 claim 主循环的旁路 I/O——
-        # 磁盘错误/半写文件/畸形结果只丢这一轮，下一轮（2s 后）重试；让
-        # 它逃逸会杀死整个 claim 循环（worker 停摆），而容错面已就位：
-        # 快照停滞 60s 后 relay 停拍、租约按 TTL 过期重排。日志保全：
-        # print 逐次记录。
-        print(f"lease relay sync failed: {exc}", flush=True)
-        return last_result_seq

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
 import threading
 from pathlib import Path
@@ -16,7 +15,6 @@ from worker.lease_snapshot import (
     SNAPSHOT_ENV_VAR,
     SNAPSHOT_FILENAME,
     SNAPSHOT_STALE_SECONDS,
-    executor_relay_sync,
     open_lease_channel,
     read_beat_result,
     read_snapshot,
@@ -99,57 +97,3 @@ def test_open_lease_channel_switches_on_env(monkeypatch, tmp_path: Path) -> None
     assert path == tmp_path / SNAPSHOT_FILENAME
     # Snapshot mode starts no beat thread: nothing renews in-process.
     assert registry.degraded_to_single is False
-
-
-class _FakeEntry:
-    def __init__(self, execution_id: str, lease_id: str) -> None:
-        self.execution_id = execution_id
-        self.lease_id = lease_id
-
-
-class _FakeRegistry:
-    def __init__(self) -> None:
-        self.applied: list[tuple[list, list]] = []
-
-    def snapshot(self) -> list[_FakeEntry]:
-        return [_FakeEntry("exec-1", "lease-1")]
-
-    def apply_beat_result(self, lost: list, cancelled: list) -> None:
-        self.applied.append((lost, cancelled))
-
-
-def test_executor_relay_sync_writes_snapshot_and_applies_result_once(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / SNAPSHOT_FILENAME
-    write_beat_result(
-        tmp_path / RESULT_FILENAME, seq=7, lost=[("exec-1", "lease-1")], cancelled=["exec-9"]
-    )
-    registry = _FakeRegistry()
-
-    seq = executor_relay_sync(
-        registry, snapshot_path, worker_id="w1", token="t", last_result_seq=-1
-    )
-
-    assert seq == 7
-    assert registry.applied == [([("exec-1", "lease-1")], ["exec-9"])]
-    snapshot = read_snapshot(snapshot_path)
-    assert snapshot is not None and snapshot["pid"] == os.getpid()
-    assert snapshot["leases"] == [["exec-1", "lease-1"]]
-
-    # Same seq is not re-applied.
-    again = executor_relay_sync(
-        registry, snapshot_path, worker_id="w1", token="t", last_result_seq=seq
-    )
-    assert again == 7
-    assert len(registry.applied) == 1
-
-
-def test_executor_relay_sync_survives_garbage(tmp_path: Path) -> None:
-    registry = _FakeRegistry()
-    # Result file with no seq → treated as absent; sync still writes snapshot.
-    (tmp_path / RESULT_FILENAME).write_text("[]", encoding="utf-8")
-    seq = executor_relay_sync(
-        registry, tmp_path / SNAPSHOT_FILENAME, worker_id="w1", token="t", last_result_seq=-1
-    )
-    assert seq == -1
-    assert registry.applied == []
-    assert read_snapshot(tmp_path / SNAPSHOT_FILENAME) is not None
