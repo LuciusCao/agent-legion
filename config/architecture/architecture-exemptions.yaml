@@ -1401,9 +1401,10 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/routes/instance_settings_contracts.py
   reason: >-
-    Issue #509/#554 folds two capacity knob blocks (agent_enqueue,
-    result_unpack) into the instance settings document: two small nested
-    contract models plus two fields on InstanceSettingsDocument. The nested
+    Issue #509/#554/#561 folds three capacity knob blocks (agent_enqueue,
+    result_unpack, agent_claim) into the instance settings document: three
+    small nested contract models plus three fields on
+    InstanceSettingsDocument. The nested
     models must sit beside their siblings (InstanceWorkflowsSettings /
     InstanceAgentWorkersSettings) — the document IS the admin API surface;
     splitting two-field blocks into a sister module would fork the contract
