@@ -55,13 +55,13 @@ def test_schema_version_pin() -> None:
     # tests/db/test_agent_request_shard_index.py; v80 (campaigns, #532/#505)
     # owns tests/db/test_campaigns_schema.py — this copy stays as
     # a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 80
+    assert SCHEMA_VERSION == 81
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "campaigns"
+    assert row["name"] == "campaign_deliveries"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

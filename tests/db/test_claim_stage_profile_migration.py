@@ -49,7 +49,7 @@ def _bucket_row() -> dict:
 
 def test_fresh_schema_has_stage_columns() -> None:
     # The autouse fixture already ran init_db at SCHEMA_VERSION.
-    assert SCHEMA_VERSION == 80
+    assert SCHEMA_VERSION == 81
     with read_connection(TEST_DATABASE_URL) as conn:
         columns = _existing_columns(conn)
     for column in _STAGE_COLUMNS:
@@ -100,9 +100,9 @@ def test_upgrade_from_v77_adds_the_columns() -> None:
         assert column in columns, column
 
 
-def test_schema_version_pin_is_v80_tail() -> None:
+def test_schema_version_pin_is_v81_tail() -> None:
     # v80 (campaigns, #532/#505) is the chain tail now; this file's upgrade
     # test above pins its own v78 record separately.
     with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute("select name from schema_migrations where version=%s", (80,)).fetchone()
-    assert row is not None and row["name"] == "campaigns"
+        row = conn.execute("select name from schema_migrations where version=%s", (81,)).fetchone()
+    assert row is not None and row["name"] == "campaign_deliveries"

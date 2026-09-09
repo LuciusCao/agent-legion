@@ -75,8 +75,8 @@ def test_upgrade_from_v70_applies_the_widening() -> None:
     # high-water skip means the test must drop v71 AND every later version
     # (80 included) to force the replay; the extra migrations' applies are
     # idempotent.
-    assert SCHEMA_VERSION == 80
-    assert MIGRATIONS[-1].name == "campaigns"
+    assert SCHEMA_VERSION == 81
+    assert MIGRATIONS[-1].name == "campaign_deliveries"
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version >= 71")
         conn.execute(_LEGACY_CHECK_DDL)
