@@ -16,7 +16,9 @@ ported test files, tests/services/test_campaign_manifest_*.py):
   when the key is absent, codex #531 P2-2);
 - every item: string values stripped, unknown/missing types rejected, the
   per-type required fields checked, ref items get ``params`` defaulted to
-  ``{}``.
+  ``{}``, and the result is validated against the RunItem discriminated
+  contract (extra keys and wrong-typed fields rejected — the multipart
+  channel cannot bypass the inline channel's shapes, PR #541 round-2 P2).
 
 The service layer serializes the normalized list to canonical jsonl (one
 json.dumps per line) for storage (inline in the campaign row or the object
@@ -48,12 +50,11 @@ class ManifestError(ValueError):
 def normalize_item(raw: dict[str, Any], *, source: str) -> dict[str, Any]:
     """Normalize one manifest line into the POST /runs item contract.
 
-    ref's absent ``params`` defaults to ``{}`` (the RunItemRef contract
-    default); other fields pass through verbatim (RunCreateRequest is
-    extra="forbid", so the server's own 422 is the rejection authority —
-    duplicating field pruning here would drift). CSV sources additionally
-    str-ify (csv is untyped). Ported from scripts/submit_campaign.py
-    (issue #505) with UsageError renamed ManifestError.
+    ref's absent ``params`` defaults to ``{}``; string values stripped (CSV
+    sources are untyped). The result is then re-validated against the RunItem
+    discriminated contract (round-2 P2: the multipart channel cannot bypass
+    the inline channel's shapes). Ported from scripts/submit_campaign.py
+    (#505) with UsageError renamed ManifestError.
     """
     if not isinstance(raw, dict):
         raise ManifestError(f"{source}: item 必须是 JSON object，收到 {type(raw).__name__}")
@@ -72,7 +73,24 @@ def normalize_item(raw: dict[str, Any], *, source: str) -> dict[str, Any]:
         raise ManifestError(f"{source}: {item_type} item 缺少必填字段 {missing}")
     if item_type == "ref" and "params" not in item:
         item["params"] = {}
-    return item
+    # RunItem 合同复检（PR #541 二轮 P2）：multipart 通道不经过 JSON body
+    # 的 Pydantic 校验，缺了这一步任意键值都能留存（字符串 params、未知
+    # 字段……）并成为 job input。这里用与 inline 路径完全相同的
+    # discriminated RunItem 合同（extra="forbid"、逐字段类型）把关，两条
+    # 通道接受的 item 形状因此全等；返回 model_dump（合同化后的规范形）。
+    from pydantic import BaseModel, TypeAdapter, ValidationError
+
+    from server.app.routes.run_contracts import RunItem
+
+    try:
+        validated: BaseModel = TypeAdapter(RunItem).validate_python(item)
+    except ValidationError as exc:
+        # 报错定位到清单行；首个错误的 loc+msg 携带字段问题。
+        first = exc.errors()[0]
+        loc = ".".join(str(part) for part in first.get("loc", ()))
+        detail = f"{loc}: {first.get('msg')}" if loc else str(first.get("msg") or exc)
+        raise ManifestError(f"{source}: item 不符合 RunItem 合同（{detail}）") from exc
+    return dict(validated.model_dump(mode="json"))
 
 
 def load_items_text(text: str, *, filename: str) -> list[dict[str, Any]]:

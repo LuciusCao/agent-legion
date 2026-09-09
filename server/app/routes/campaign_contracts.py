@@ -21,6 +21,17 @@ from server.app.routes.run_contracts import RunItem
 CampaignMode = Literal["rerun", "submit", "upgrade"]
 CampaignStatus = Literal["pending", "running", "paused", "failed", "completed", "cancelled"]
 
+# Inline items count ceiling (PR #541 round-2 P1): FastAPI fully parses the
+# JSON body into RunItem models BEFORE any service check runs, so a
+# multi-copy-of-the-byte-limit body would balloon memory ahead of the
+# manifest_max_bytes 413. The count bound makes the inline channel bounded
+# at the contract layer instead — the model list construction is refused at
+# 5×10^5 items (~10^3 MB even at a minimal item, comfortably beyond the
+# 50 MB byte ceiling the service enforces on the serialized form; the
+# multipart channel is already size-bounded at read time). Numbers are
+# matched, not derived: the two ceilings bound the same product boundary.
+MAX_MANIFEST_ITEMS = 500_000
+
 
 class CampaignKnobsMixin(BaseModel):
     """Per-campaign overrides of the instance defaults (design §2.5)."""
@@ -65,7 +76,11 @@ class CampaignRerunTarget(CampaignKnobsMixin):
 class CampaignSubmitInlineTarget(CampaignKnobsMixin):
     """submit, inline channel: a bounded items array in the JSON body."""
 
-    items: list[RunItem] = Field(min_length=1)
+    # max_length bounds the body BEFORE Pydantic builds the model list (the
+    # round-2 P1 read-then-limit fix): an oversized array fails request
+    # validation with a plain 422 instead of deserializing half a million
+    # models first.
+    items: list[RunItem] = Field(min_length=1, max_length=MAX_MANIFEST_ITEMS)
 
 
 class CampaignCreateRequest(BaseModel):

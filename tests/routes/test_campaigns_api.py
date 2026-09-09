@@ -292,10 +292,44 @@ def test_upload_at_exact_limit_reads_through(client, job_db, monkeypatch) -> Non
         data={"mode": "submit"},
     )
     # At the ceiling the bytes are accepted past the route bound; the
-    # content then fails manifest parsing (not 'x' lines) — a 400-range
-    # error, NOT 413.
+    # content then fails manifest parsing (not 'x' lines) — a 422
+    # ManifestError (round-2 P2: file-manifest contract failures map 422),
+    # NOT 413.
     assert response.status_code != 413
-    assert response.status_code == 400
+    assert response.status_code == 422
+
+
+def test_create_json_items_count_ceiling(client, job_db, monkeypatch) -> None:
+    """审核二轮 P1：JSON body 先读后限——items 数量在 Pydantic 契约层封顶
+    （max_length），超限请求 422 于反序列化整个模型列表之前，而不是先构造
+    5×10^5+ 个 RunItem 再由 service 的字节上限兜底。"""
+    from pydantic import ValidationError
+
+    from server.app.routes.campaign_contracts import (
+        MAX_MANIFEST_ITEMS,
+        CampaignCreateRequest,
+    )
+
+    workspace_id = _create_workspace(client, job_db)
+    _insert_material(job_db, workspace_id, "mat-1")
+    # 不实际发 5×10^5 item 的 HTTP 请求体（测试进程自己就要吃这份内存）——
+    # FastAPI 对 payload 的处理就是这个契约校验本身，直接钉同一入口。
+    body = {
+        "mode": "submit",
+        "submit": {
+            "items": [{"type": "material", "material_id": "mat-1"}] * (MAX_MANIFEST_ITEMS + 1)
+        },
+    }
+    with pytest.raises(ValidationError, match="at most 500000 items"):
+        CampaignCreateRequest.model_validate(body)
+    # 合法数量不误拒（同形状、恰在上限内）。
+    ok = CampaignCreateRequest.model_validate(
+        {
+            "mode": "submit",
+            "submit": {"items": [{"type": "material", "material_id": "mat-1"}]},
+        }
+    )
+    assert ok.submit is not None and len(ok.submit.items) == 1
 
 
 def test_unknown_campaign_404(client, job_db) -> None:
@@ -368,6 +402,165 @@ def test_preview_submit_counts(client, job_db) -> None:
     assert body["total_items"] == 2
     assert body["would_create"] == 0
     assert body["would_skip"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Round-2 fixes: JSON channel count bound / start-node contract / RunItem
+# contract on the upload channel / preview batch_size guard
+# ---------------------------------------------------------------------------
+
+
+def _widen_start_item_types(job_db, workspace_id: str) -> None:
+    """把 active revision 换成接受 material+ref 的同 DAG 变体（runs API 测试
+    的 _accept_all_item_types 同一手法）。"""
+    import copy
+
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    raw = copy.deepcopy(DEMO_WORKFLOW_DEFINITION)
+    raw["nodes"]["_start"]["accepted_item_types"] = ["material", "ref"]
+    WorkflowRevisionService(job_db).publish_workspace_revision(
+        workspace_id, workflow_definition_from_dict(raw)
+    )
+
+
+def test_submit_ref_rejected_by_material_only_start_node(client, job_db) -> None:
+    """审核二轮 P1：demo 入口只收 material——ref manifest 创建即 400，
+    不建 pending campaign（同判定见 run_service.create_run 的
+    validate_run_item_types）。"""
+    workspace_id = _create_workspace(client, job_db)
+    base = f"/api/workspaces/{workspace_id}/campaigns"
+    body = {
+        "mode": "submit",
+        "submit": {"items": [{"type": "ref", "connection_key": "cms", "external_id": "Q-1"}]},
+    }
+    response = client.post(base, json=body)
+    assert response.status_code == 400, response.text
+    assert "not accepted" in response.json()["detail"]
+    assert client.get(base).json()["campaigns"] == []
+
+
+def test_submit_ref_accepted_by_widened_start_node(client, job_db) -> None:
+    """合法值不误拒：入口契约收 ref 的 workspace，ref 创建成功（200）。"""
+    workspace_id = _create_workspace(client, job_db)
+    _widen_start_item_types(job_db, workspace_id)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into external_connections(key, type, display_name, config_json, enabled)"
+            " values ('cms', 'hmac_token', 'cms', '{}', 1)"
+        )
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns",
+        json={
+            "mode": "submit",
+            "submit": {"items": [{"type": "ref", "connection_key": "cms", "external_id": "Q-1"}]},
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["campaign"]["mode"] == "submit"
+
+
+def test_upload_manifest_item_fails_runitem_contract(client, job_db) -> None:
+    """审核二轮 P2：multipart 通道不再绕过 RunItem 合同——字符串 params /
+    未知字段在 normalize 后被同一 discriminated 合同拒绝（422），不留存为
+    job input。"""
+    workspace_id = _create_workspace(client, job_db)
+    _insert_material(job_db, workspace_id, "mat-1")
+    base = f"/api/workspaces/{workspace_id}/campaigns"
+
+    bad_params = (
+        '{"type": "ref", "connection_key": "cms", "external_id": "Q-1", "params": "oops"}\n'
+    )
+    response = client.post(
+        f"{base}/upload",
+        files={"manifest": ("m.jsonl", bad_params.encode("utf-8"), "application/x-ndjson")},
+        data={"mode": "submit"},
+    )
+    assert response.status_code == 422, response.text
+    assert "RunItem" in response.json()["detail"]
+
+    bad_field = '{"type": "material", "material_id": "mat-1", "bogus": 1}\n'
+    response = client.post(
+        f"{base}/upload",
+        files={"manifest": ("m.jsonl", bad_field.encode("utf-8"), "application/x-ndjson")},
+        data={"mode": "submit"},
+    )
+    assert response.status_code == 422, response.text
+    assert client.get(base).json()["campaigns"] == []
+
+
+def test_upload_manifest_valid_items_not_overrejected(client, job_db) -> None:
+    """合法值不误拒：合同内形状（material 直传、ref 带 dict params）照常 200，
+    且落库的是合同化后的规范形（ref 补默认 params）。"""
+    workspace_id = _create_workspace(client, job_db)
+    _insert_material(job_db, workspace_id, "mat-1")
+    _widen_start_item_types(job_db, workspace_id)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into external_connections(key, type, display_name, config_json, enabled)"
+            " values ('cms', 'hmac_token', 'cms', '{}', 1)"
+        )
+    manifest = (
+        '{"type": "material", "material_id": "mat-1"}\n'
+        '{"type": "ref", "connection_key": "cms", "external_id": "Q-1", "params": {"k": "v"}}\n'
+    )
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/upload",
+        files={"manifest": ("m.jsonl", manifest.encode("utf-8"), "application/x-ndjson")},
+        data={"mode": "submit"},
+    )
+    assert response.status_code == 200, response.text
+    items = response.json()["campaign"]["target_spec"]["items"]
+    assert items[0] == {"type": "material", "material_id": "mat-1"}
+    assert items[1] == {
+        "type": "ref",
+        "connection_key": "cms",
+        "external_id": "Q-1",
+        "params": {"k": "v"},
+    }
+
+
+def test_preview_rejects_over_ceiling_batch_size(client, job_db) -> None:
+    """审核二轮 P2：preview 的 batch_size 护栏与创建一致——超
+    rerun_max_batch_size 的 dry-run 400，不再确认一个无法创建的 campaign。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 2)
+    config = client.app.state.settings.executor_runtime.campaigns
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={
+            "mode": "rerun",
+            "rerun": {
+                "job_ids": ids,
+                "node_key": _NODE_KEYS[0],
+                "batch_size": config.rerun_max_batch_size + 1,
+            },
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "rerun_max_batch_size" in response.json()["detail"]
+
+
+def test_preview_batch_size_at_ceiling_ok(client, job_db) -> None:
+    """合法值不误拒：恰在上限的 batch_size，preview 200。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 2)
+    config = client.app.state.settings.executor_runtime.campaigns
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={
+            "mode": "rerun",
+            "rerun": {
+                "job_ids": ids,
+                "node_key": _NODE_KEYS[0],
+                "batch_size": config.rerun_max_batch_size,
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"]["batch_size"] == config.rerun_max_batch_size
 
 
 # ---------------------------------------------------------------------------

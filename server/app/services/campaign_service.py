@@ -23,12 +23,14 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.campaigns import CAMPAIGN_TERMINAL_STATUSES
+from server.app.services.campaign_knobs import resolve_batch_size, resolve_watermark
 from server.app.services.campaign_manifest import (
     ManifestError,
     load_items_text,
     normalize_item,
     serialize_manifest,
 )
+from server.app.services.campaign_submit_preflight import preflight_submit_intake
 from server.app.services.job_errors import (
     ConflictError,
     InvalidOperationError,
@@ -124,27 +126,8 @@ class CampaignService:
             raise InvalidOperationError(
                 f"Unsupported campaign mode {mode!r} (supported: {CAMPAIGN_MODES})"
             )
-        config = self._campaigns_config
-        effective_watermark = config.default_watermark if watermark is None else watermark
-        if effective_watermark < 1:
-            raise InvalidOperationError(
-                f"watermark must be >= 1 (a replenishment trigger level), got {effective_watermark}"
-            )
-        effective_batch_size = config.default_batch_size if batch_size is None else batch_size
-        if effective_batch_size < 1:
-            raise InvalidOperationError(f"batch_size must be >= 1, got {effective_batch_size}")
-        if mode in ("rerun", "upgrade") and effective_batch_size > config.rerun_max_batch_size:
-            raise InvalidOperationError(
-                f"{mode} campaign batch_size {effective_batch_size} exceeds the"
-                f" rerun_max_batch_size ceiling {config.rerun_max_batch_size}"
-                " (each slice re-enters the scheduler's ready set)"
-            )
-        max_items_per_run = self.settings.executor_runtime.workflows.max_items_per_run
-        if mode == "submit" and max_items_per_run and effective_batch_size > max_items_per_run:
-            raise InvalidOperationError(
-                f"submit campaign batch_size {effective_batch_size} exceeds"
-                f" workflows.max_items_per_run={max_items_per_run} (#358 guard)"
-            )
+        effective_watermark = self._resolve_watermark(watermark)
+        effective_batch_size = self._resolve_batch_size(mode, batch_size)
 
         if mode == "submit":
             campaign_id = self.job_db.generate_campaign_id()
@@ -180,7 +163,21 @@ class CampaignService:
             created_by=created_by,
             campaign_id=campaign_id,
             progress=progress,
-            max_active=config.max_active_per_workspace,
+            max_active=self._campaigns_config.max_active_per_workspace,
+        )
+
+    def _resolve_watermark(self, watermark: int | None) -> int:
+        """Watermark with the default applied and the >= 1 guard."""
+        return resolve_watermark(self._campaigns_config, watermark)
+
+    def _resolve_batch_size(self, mode: str, batch_size: int | None) -> int:
+        """batch_size 护栏（PR #541 二轮 P2）：创建与 preview 共用同一判定。
+        rerun/upgrade ≤ rerun_max_batch_size；submit ≤ workflows.max_items_per_run。"""
+        return resolve_batch_size(
+            self._campaigns_config,
+            self.settings.executor_runtime.workflows,
+            mode,
+            batch_size,
         )
 
     def _prepare_submit_target(
@@ -206,6 +203,10 @@ class CampaignService:
         normalized = self._normalize_submit_items(
             items, manifest_bytes, manifest_filename, context="campaign"
         )
+
+        # 入口契约预检（二轮 P1）：与 feeder 的 create_run 同判定，建行前
+        # 拒绝已知不可投递的 manifest（见 campaign_submit_preflight）。
+        preflight_submit_intake(self.job_db, self.settings, workspace_id, normalized)
 
         # Fail-fast item validation against the workspace (same resolver the
         # write path uses); a campaign row never exists with unresolvable
@@ -270,6 +271,8 @@ class CampaignService:
                     # normalize for storage canonicalization.
                     normalized.append(_normalize_api_item(raw, source=f"items[{index}]"))
                 except ManifestError as exc:
+                    # 服务层输入（非文件清单）仍按 400 形 InvalidOperationError
+                    # （操作员可直接改 body）；与文件通道的 422 语义分开。
                     raise InvalidOperationError(str(exc)) from exc
             return normalized
         if manifest_bytes is not None:
@@ -281,11 +284,10 @@ class CampaignService:
             filename = manifest_filename or "manifest.jsonl"
             try:
                 text = manifest_bytes.decode("utf-8-sig")
+                # ManifestError 原样穿透（二轮 P2）：文件清单合同错按 422 映射。
                 return load_items_text(text, filename=filename)
             except UnicodeDecodeError as exc:
                 raise InvalidOperationError(f"{filename}: manifest must be UTF-8 text") from exc
-            except ManifestError as exc:
-                raise InvalidOperationError(str(exc)) from exc
         raise InvalidOperationError(f"submit {context} requires items or a manifest file")
 
     def _prepare_rerun_target(
@@ -369,9 +371,17 @@ class CampaignService:
         answers 0 for every job of an upgrade selection). submit:
         resolve_run_items + the dedup probe over the whole manifest, the
         same probes the feeder's create_run batch path applies per batch.
+        The knob guards (batch_size ceilings) are the creation path's own
+        resolvers — a dry-run cannot confirm what creation would refuse.
         """
-        config = self._campaigns_config
-        effective_batch_size = config.default_batch_size if batch_size is None else batch_size
+        if mode not in ("rerun", "upgrade", "submit"):
+            raise InvalidOperationError(
+                f"Unsupported campaign mode {mode!r} (supported: {CAMPAIGN_MODES})"
+            )
+        # Same batch_size guard as creation (round-2 P2): a dry-run that
+        # accepts a batch_size the create path would refuse confirms a
+        # campaign that cannot exist.
+        effective_batch_size = self._resolve_batch_size(mode, batch_size)
         if mode == "submit":
             counts = self._preview_submit(
                 workspace_id,
@@ -389,10 +399,6 @@ class CampaignService:
                 "estimated_batches": _ceil_div(total, effective_batch_size),
                 "batch_size": effective_batch_size,
             }
-        if mode not in ("rerun", "upgrade"):
-            raise InvalidOperationError(
-                f"Unsupported campaign mode {mode!r} (supported: {CAMPAIGN_MODES})"
-            )
         if self.rerun_service is None:
             raise InvalidOperationError("Rerun service is not wired on this instance")
         if mode == "upgrade":
@@ -430,6 +436,9 @@ class CampaignService:
         normalized = self._normalize_submit_items(
             items, manifest_bytes, manifest_filename, context="preview"
         )
+        # 入口契约与创建同判定（preview 与真实路径共享）：不可投递的 item
+        # 不计 would_create，dry-run 直接报创建时的错误。
+        preflight_submit_intake(self.job_db, self.settings, workspace_id, normalized)
         candidates = resolve_run_items(self.job_db, workspace_id, normalized)
         existing = self.job_db.filter_existing_dedup_keys(
             workspace_id,

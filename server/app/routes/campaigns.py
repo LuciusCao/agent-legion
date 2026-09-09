@@ -43,12 +43,14 @@ async def _read_upload_size(manifest: UploadFile, size: int) -> bytes:
     return await manifest.read(size)
 
 
-def _raise_campaign_http_error(error: JobServiceError) -> Never:
+def _raise_campaign_http_error(error: JobServiceError | ManifestError) -> Never:
     if isinstance(error, CampaignStorageUnavailableError):
         raise HTTPException(status_code=503, detail=str(error)) from error
     if isinstance(error, CampaignManifestTooLargeError):
         raise HTTPException(status_code=413, detail=str(error)) from error
     if isinstance(error, ManifestError):
+        # 文件清单的合同错（二轮 P2：service 原样穿透到此）——操作员可
+        # 修复，按 422 映射。
         raise HTTPException(status_code=422, detail=str(error)) from error
     raise_job_http_error(error)
 
@@ -96,7 +98,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
                 )
             else:  # pragma: no cover - the contract validator guarantees one
                 raise HTTPException(status_code=422, detail="missing target block")
-        except JobServiceError as exc:
+        except (JobServiceError, ManifestError) as exc:
             _raise_campaign_http_error(exc)
         return _create_response(body)
 
@@ -148,7 +150,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
                 watermark=watermark,
                 batch_size=batch_size,
             )
-        except JobServiceError as exc:
+        except (JobServiceError, ManifestError) as exc:
             _raise_campaign_http_error(exc)
         return _create_response(body)
 
@@ -181,7 +183,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
                 )
             else:  # pragma: no cover - the contract validator guarantees one
                 raise HTTPException(status_code=422, detail="missing target block")
-        except JobServiceError as exc:
+        except (JobServiceError, ManifestError) as exc:
             _raise_campaign_http_error(exc)
         return CampaignPreviewResponse.model_validate({"result": result})
 
@@ -206,7 +208,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
             return CampaignDetailResponse.model_validate(
                 {"campaign": service.get_campaign(workspace_id, campaign_id)}
             )
-        except JobServiceError as exc:
+        except (JobServiceError, ManifestError) as exc:
             _raise_campaign_http_error(exc)
 
     @router.post(
@@ -218,7 +220,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
             return CampaignStatusChangeResponse.model_validate(
                 {"campaign": service.pause_campaign(workspace_id, campaign_id)}
             )
-        except JobServiceError as exc:
+        except (JobServiceError, ManifestError) as exc:
             _raise_campaign_http_error(exc)
 
     @router.post(
@@ -230,7 +232,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
             return CampaignStatusChangeResponse.model_validate(
                 {"campaign": service.resume_campaign(workspace_id, campaign_id)}
             )
-        except JobServiceError as exc:
+        except (JobServiceError, ManifestError) as exc:
             _raise_campaign_http_error(exc)
 
     @router.post(
@@ -242,7 +244,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
             return CampaignStatusChangeResponse.model_validate(
                 {"campaign": service.cancel_campaign(workspace_id, campaign_id)}
             )
-        except JobServiceError as exc:
+        except (JobServiceError, ManifestError) as exc:
             _raise_campaign_http_error(exc)
 
     return router

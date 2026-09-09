@@ -14,6 +14,7 @@ import pytest
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs.queries.job_filtering import JobListFilter
+from server.app.services.campaign_manifest import ManifestError
 from server.app.services.campaign_service import (
     CampaignManifestTooLargeError,
     CampaignService,
@@ -111,6 +112,26 @@ def _insert_job(job_db, workspace_id: str, source_type: str, source_id: str) -> 
         workspace_id=workspace_id,
     )
     return str(job["id"])
+
+
+def _widen_start_item_types(job_db, workspace_id: str) -> None:
+    """把 workspace 的 active revision 换成接受 material+ref 的同 DAG 变体。
+
+    播种的 demo revision 只收 material（EXEC-WORKFLOW-START-001）；带 ref
+    item 的 submit 用例先发布该变体（与 tests/routes/test_runs_api.py 的
+    _accept_all_item_types 同一手法——发布侧改入口契约，不改判定链）。
+    """
+    import copy
+
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    raw = copy.deepcopy(DEMO_WORKFLOW_DEFINITION)
+    raw["nodes"]["_start"]["accepted_item_types"] = ["material", "ref"]
+    WorkflowRevisionService(job_db).publish_workspace_revision(
+        workspace_id, workflow_definition_from_dict(raw)
+    )
 
 
 @pytest.fixture
@@ -386,8 +407,12 @@ class TestCreateSubmitTarget:
         ]
 
     def test_manifest_csv_mixed_header(self, campaign_service, job_db):
-        """CSV 混合表头空列丢弃（#531 P2-2）的服务端创建路径。"""
+        """CSV 混合表头空列丢弃（#531 P2-2）的服务端创建路径。
+
+        入口契约收 material+ref（发布变体），ref 行才过创建时的
+        start-node preflight（二轮 P1）。"""
         workspace_id = _seed_workspace_with_revision(job_db, "campaign-csv-ws")
+        _widen_start_item_types(job_db, workspace_id)
         _insert_material(job_db, workspace_id, "m-1")
         _insert_connection(job_db, "cms-main")
         csv_bytes = (
@@ -405,7 +430,9 @@ class TestCreateSubmitTarget:
 
     def test_invalid_manifest_rejected_without_row(self, campaign_service, job_db):
         workspace_id = _seed_workspace_with_revision(job_db, "campaign-bad-manifest-ws")
-        with pytest.raises(InvalidOperationError, match="不支持的 item type"):
+        # 二轮 P2：文件清单的合同失败按 ManifestError（路由 422）穿透，
+        # 不再在 service 层降级为 400 形 InvalidOperationError。
+        with pytest.raises(ManifestError, match="不支持的 item type"):
             campaign_service.create_campaign(
                 workspace_id,
                 "submit",
@@ -492,6 +519,89 @@ class TestCreateSubmitTarget:
         workspace_id = _seed_workspace_with_revision(job_db, "campaign-none-ws")
         with pytest.raises(InvalidOperationError, match="items or a manifest"):
             campaign_service.create_campaign(workspace_id, "submit")
+
+    def test_submit_item_type_not_accepted_by_start_node(self, campaign_service, job_db):
+        """审核二轮 P1：start node 只收 material 时，ref manifest 在创建时
+        即被拒（同一判定 feeder 的 create_run 会用——validate_run_item_types），
+        不能先建 pending campaign、投放时才炸。"""
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-start-contract-ws")
+        _insert_connection(job_db, "cms-main")
+        # 播种的 demo revision：_start.accepted_item_types == ["material"]。
+        with pytest.raises(InvalidOperationError, match="not accepted by this workflow"):
+            campaign_service.create_campaign(
+                workspace_id,
+                "submit",
+                items=[{"type": "ref", "connection_key": "cms-main", "external_id": "Q-1"}],
+            )
+        # multipart 通道同判定（normalize 后同一 preflight）。
+        with pytest.raises(InvalidOperationError, match="not accepted by this workflow"):
+            campaign_service.create_campaign(
+                workspace_id,
+                "submit",
+                manifest_filename="m.jsonl",
+                manifest_bytes=b'{"type": "ref", "connection_key": "cms-main", "external_id": "Q-1"}\n',
+            )
+        # 全量判定在建行之前：零行、零桶写。
+        assert campaign_service.list_campaigns(workspace_id) == []
+
+    def test_submit_preview_rejects_item_type_not_accepted(self, campaign_service, job_db):
+        """preview 与创建共享判定：入口契约不收的 item 不计 would_create，
+        dry-run 直接报创建时的同一错误。"""
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-preview-contract-ws")
+        _insert_connection(job_db, "cms-main")
+        with pytest.raises(InvalidOperationError, match="not accepted by this workflow"):
+            campaign_service.preview_campaign(
+                workspace_id,
+                "submit",
+                items=[{"type": "ref", "connection_key": "cms-main", "external_id": "Q-1"}],
+            )
+
+    def test_submit_without_active_revision_rejected(self, campaign_service, job_db):
+        """审核二轮 P1：无 active revision 的 workspace，create_run 会拒每一个
+        item——submit campaign 创建时同样 fail-fast（不建 pending 行）。"""
+        workspace = job_db.create_workspace(
+            "campaign-no-active-revision-ws",
+            default_workflow_key="campaign-no-active-revision-ws",
+        )
+        workspace_id = str(workspace["id"])
+        with pytest.raises(InvalidOperationError, match="no active workflow revision"):
+            campaign_service.create_campaign(
+                workspace_id,
+                "submit",
+                items=[{"type": "material", "material_id": "mat-x"}],
+            )
+        assert campaign_service.list_campaigns(workspace_id) == []
+
+    def test_submit_manifest_over_per_run_limit_rejected(
+        self, campaign_service, job_db, settings, monkeypatch
+    ):
+        """审核二轮 P1：manifest 数量超 workflows.max_items_per_run 时创建即拒
+        （feeder 每批走 create_run 的 #358 上限——预检同判定）。"""
+        monkeypatch.setattr(settings.executor_runtime.workflows, "max_items_per_run", 2)
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-itemcap-ws")
+        _insert_material(job_db, workspace_id, "mat-1")
+        items = [{"type": "material", "material_id": "mat-1"}] * 3
+        with pytest.raises(InvalidOperationError, match="max_items_per_run"):
+            campaign_service.create_campaign(workspace_id, "submit", items=items)
+        assert campaign_service.list_campaigns(workspace_id) == []
+
+    def test_submit_within_per_run_limit_not_overrejected(
+        self, campaign_service, job_db, settings, monkeypatch
+    ):
+        """合法值不误拒：恰好等于 max_items_per_run 的 manifest 通过预检
+        （batch_size 同步给到上限内——submit 的默认批大小此时也会被上限
+        拦下，属创建护栏的正确口径）。"""
+        monkeypatch.setattr(settings.executor_runtime.workflows, "max_items_per_run", 2)
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-itemcap-ok-ws")
+        _insert_material(job_db, workspace_id, "mat-1")
+        row = campaign_service.create_campaign(
+            workspace_id,
+            "submit",
+            items=[{"type": "material", "material_id": "mat-1"}] * 2,
+            batch_size=2,
+        )
+        assert row["mode"] == "submit"
+        assert row["status"] == "pending"
 
 
 # ---------------------------------------------------------------------------
@@ -601,8 +711,12 @@ class TestPreview:
         assert small["estimated_batches"] == 3  # ceil(12/5)
 
     def test_submit_preview_dedup_probe(self, campaign_service, job_db):
-        """submit preview：resolve + dedup 探测 → would_create / would_skip。"""
+        """submit preview：resolve + dedup 探测 → would_create / would_skip。
+
+        入口契约收 material+ref（发布变体），ref item 才过 preview 的
+        intake preflight（二轮 P1：与创建同判定）。"""
         workspace_id = _seed_workspace_with_revision(job_db, "campaign-subpreview-ws")
+        _widen_start_item_types(job_db, workspace_id)
         _insert_material(job_db, workspace_id, "mat-1")
         _insert_connection(job_db, "cms-main")
         _insert_job(job_db, workspace_id, "material", "mat-1")
@@ -635,6 +749,74 @@ class TestPreview:
         workspace_id = _seed_workspace_with_revision(job_db, "campaign-bogus-ws")
         with pytest.raises(InvalidOperationError, match="Unsupported campaign mode"):
             campaign_service.preview_campaign(workspace_id, "bogus", job_ids=["j"])
+
+    def test_preview_rerun_batch_size_ceiling_shared_with_create(
+        self, campaign_service, job_db, settings
+    ):
+        """审核二轮 P2：rerun/upgrade preview 复用创建的 batch_size 护栏——
+        dry-run 不再确认一个随后无法创建的 batch_size。"""
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-pv-ceiling-ws")
+        ids = _seed_failed_jobs(job_db, workspace_id, 2)
+        ceiling = settings.executor_runtime.campaigns.rerun_max_batch_size
+        for mode in ("rerun", "upgrade"):
+            with pytest.raises(InvalidOperationError, match="rerun_max_batch_size"):
+                campaign_service.preview_campaign(
+                    workspace_id,
+                    mode,
+                    job_ids=ids,
+                    node_key="intake_knowledge_points" if mode == "rerun" else None,
+                    batch_size=ceiling + 1,
+                )
+
+    def test_preview_submit_batch_size_ceiling_shared_with_create(
+        self, campaign_service, job_db, settings, monkeypatch
+    ):
+        """审核二轮 P2：submit preview 的 batch_size 上限同创建
+        （workflows.max_items_per_run）。"""
+        monkeypatch.setattr(settings.executor_runtime.workflows, "max_items_per_run", 2)
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-pv-subcap-ws")
+        _insert_material(job_db, workspace_id, "mat-1")
+        with pytest.raises(InvalidOperationError, match="max_items_per_run"):
+            campaign_service.preview_campaign(
+                workspace_id,
+                "submit",
+                items=[{"type": "material", "material_id": "mat-1"}],
+                batch_size=3,
+            )
+
+    def test_preview_batch_size_at_ceilings_not_overrejected(
+        self, campaign_service, job_db, settings, monkeypatch
+    ):
+        """合法值不误拒：恰在上限的 batch_size，preview 与创建都放行。"""
+        monkeypatch.setattr(settings.executor_runtime.workflows, "max_items_per_run", 2)
+        workspace_id = _seed_workspace_with_revision(job_db, "campaign-pv-ok-ws")
+        ids = _seed_failed_jobs(job_db, workspace_id, 2)
+        _insert_material(job_db, workspace_id, "mat-1")
+        ceiling = settings.executor_runtime.campaigns.rerun_max_batch_size
+        rerun_preview = campaign_service.preview_campaign(
+            workspace_id,
+            "rerun",
+            job_ids=ids,
+            node_key="intake_knowledge_points",
+            batch_size=ceiling,
+        )
+        assert rerun_preview["batch_size"] == ceiling
+        submit_preview = campaign_service.preview_campaign(
+            workspace_id,
+            "submit",
+            items=[{"type": "material", "material_id": "mat-1"}],
+            batch_size=2,
+        )
+        assert submit_preview["batch_size"] == 2
+        # 同参数创建同样成功（护栏口径一致的反向钉）。
+        row = campaign_service.create_campaign(
+            workspace_id,
+            "rerun",
+            job_ids=ids,
+            node_key="intake_knowledge_points",
+            batch_size=ceiling,
+        )
+        assert row["batch_size"] == ceiling
 
 
 # ---------------------------------------------------------------------------

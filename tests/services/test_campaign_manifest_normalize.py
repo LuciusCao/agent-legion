@@ -87,3 +87,45 @@ class TestNormalizeItem:
     def test_manifest_error_is_value_error(self):
         """路由层按 422 映射的类型基座：ManifestError 是 ValueError 族。"""
         assert issubclass(ManifestError, ValueError)
+
+
+class TestRunItemContractRecheck:
+    """审核二轮 P2：multipart 通道不再绕过 RunItem 合同——normalize 后每个
+    item 过与 inline 路径相同的 discriminated 合同（extra=forbid、逐字段类型），
+    无效形状 422 fail-fast，不留存为 job input。"""
+
+    def test_ref_string_params_rejected(self):
+        with pytest.raises(ManifestError, match="RunItem 合同"):
+            normalize_item(
+                {"type": "ref", "connection_key": "cms", "external_id": "Q-1", "params": "oops"},
+                source="x",
+            )
+
+    def test_unknown_field_rejected(self):
+        with pytest.raises(ManifestError, match="RunItem 合同"):
+            normalize_item({"type": "material", "material_id": "m-1", "bogus": 1}, source="x")
+
+    def test_material_wrong_typed_field_rejected(self):
+        with pytest.raises(ManifestError, match="RunItem 合同"):
+            normalize_item({"type": "material", "material_id": 123}, source="x")
+
+    def test_valid_items_pass_through_contract(self):
+        """合法形状不误拒，且返回合同化后的规范形。"""
+        assert normalize_item({"type": "material", "material_id": "m-1"}, source="x") == {
+            "type": "material",
+            "material_id": "m-1",
+        }
+        assert normalize_item({"type": "bundle", "bundle_id": "b-1"}, source="x") == {
+            "type": "bundle",
+            "bundle_id": "b-1",
+        }
+        assert normalize_item(
+            {"type": "ref", "connection_key": "cms", "external_id": "Q-1"}, source="x"
+        ) == {"type": "ref", "connection_key": "cms", "external_id": "Q-1", "params": {}}
+
+    def test_contract_error_message_locates_source_line(self):
+        with pytest.raises(ManifestError, match="list.jsonl:7: item 不符合 RunItem 合同"):
+            normalize_item(
+                {"type": "ref", "connection_key": "cms", "external_id": "Q-1", "params": []},
+                source="list.jsonl:7",
+            )
