@@ -82,5 +82,7 @@ class AgentClaimConfig(BaseModel):
     # 实测 transactionid 排队）。活性由 heartbeat 通道与 authenticate 路径的
     # WorkerLiveness（#88，每 Worker 每 10s 一写）覆盖。0 = 每次写（0.7.5
     # 行为，A/B 止血位）。字面值镜像 worker_presence.DEFAULT_TOUCH_INTERVAL_SECONDS
-    # （configuration 不得 import runtime 包，#188）。
-    worker_touch_interval_seconds: float = Field(default=30.0, ge=0)
+    # （configuration 不得 import runtime 包，#188）。le=86400（1 天）：
+    # 业务上限远大于活性阈值（在线 30s / stock 120s），同时拦住会使
+    # PostgreSQL make_interval 溢出的超大值（#565 codex review）。
+    worker_touch_interval_seconds: float = Field(default=30.0, ge=0, le=86400)

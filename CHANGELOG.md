@@ -24,6 +24,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   - 存量文档缺键回退代码默认，无数据迁移；`InstanceSettingsDocument`
     新增 `agent_enqueue` / `result_unpack` 嵌套块，PUT 全文档校验
     （workers 上限分别 256 / 64）。
+- Worker 在线标记写入间隔收编进 admin 实例设置（issue #561，照
+  #509/#554 模子）：#555 引入的
+  `executor_runtime.agent_claim.worker_touch_interval_seconds`（默认
+  30s，0 = 恢复逐次写）新增 `agent_claim` 嵌套块进实例设置文档，
+  restart-effective（水合先于 broker 组装）；admin UI「队列与解包容量」
+  组以用户视角命名「Worker 在线标记写入间隔（秒）」，说明不出现
+  touch/last_seen_at 等实现术语。存量文档缺块回退默认 30s。
 
 ### Performance
 - claim 锁面修复（issue #555，#546 回归的根治项）——三处叠加修法：

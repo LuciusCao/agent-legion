@@ -94,6 +94,7 @@ def test_code_capacity_zero_is_accepted_by_both_contracts() -> None:
             },
             "agent_enqueue": {"workers": 48, "max_pending": 1024},
             "result_unpack": {"workers": 0},
+            "agent_claim": {"worker_touch_interval_seconds": 30},
         }
     )
     assert doc.code_capacity == 0

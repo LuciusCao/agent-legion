@@ -36,6 +36,7 @@ const settings: InstanceSettingsResponse = {
   },
   agent_enqueue: { workers: 48, max_pending: 1024 },
   result_unpack: { workers: 0 },
+  agent_claim: { worker_touch_interval_seconds: 30 },
   skills_root: '~/.agents/skills',
 }
 
@@ -122,6 +123,13 @@ describe('InstanceSettingsSection', () => {
     expect(
       screen.getByLabelText('result 解包进程数（0 = 自动）')
     ).toHaveAttribute('max', '64')
+    // #561：用户视角命名（无 touch / last_seen_at 实现术语）+ 说明文案。
+    expect(screen.getByLabelText('Worker 在线标记写入间隔（秒）')).toHaveValue(
+      30
+    )
+    expect(
+      screen.getByText(/心跳（每 10 秒）不受此限制，在线状态判定不受影响/)
+    ).toBeInTheDocument()
     expect(
       screen.getByText(/解包进程池承接完成波的 CPU 解包/)
     ).toBeInTheDocument()
@@ -162,6 +170,10 @@ describe('InstanceSettingsSection', () => {
     fireEvent.change(screen.getByLabelText('Agent 入队线程数'), {
       target: { value: '64' },
     })
+    // #561：在线标记写入间隔是小数字段（0.5 秒合法，不取整）。
+    fireEvent.change(screen.getByLabelText('Worker 在线标记写入间隔（秒）'), {
+      target: { value: '7.5' },
+    })
     fireEvent.click(screen.getByText('保存实例设置'))
 
     await waitFor(() => {
@@ -171,6 +183,7 @@ describe('InstanceSettingsSection', () => {
         heartbeat_interval_seconds: 12.5,
         workflows: { max_items_per_run: 20000 },
         agent_enqueue: { workers: 64, max_pending: 1024 },
+        agent_claim: { worker_touch_interval_seconds: 7.5 },
       })
     })
     // Baseline updated: the form is clean again after a successful save.
