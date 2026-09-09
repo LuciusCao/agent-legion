@@ -136,6 +136,45 @@ def test_lifespan_starts_campaign_feeder_when_probe_lock_held(tmp_path, monkeypa
     assert len(feeder_starts) == 1  # 独占副本（或探测跳过）照常启动 feeder
 
 
+def test_lifespan_stops_campaign_feeder_before_releasing_replica_lock(tmp_path, monkeypatch):
+    """PR #545 round-4 回归锁（关停锁序）：teardown 必须 feeder.stop() 先
+    于 replica_probe.close()——先放锁会开出「新 Host 拿锁启动 feeder、旧
+    feeder 线程还在跑耗时批次」的窗口（两副本并发重放同一 running
+    campaign）。事件序列钉住顺序：close 时 feeder 必须已停。"""
+    from unittest.mock import patch
+
+    from server.app import main
+    from server.app.single_replica_probe import SingleReplicaProbe
+
+    calls = []
+    monkeypatch.setattr(WorkflowWorkerThread, "start", lambda self: calls.append("workflow"))
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    events: list[str] = []
+    from server.app.workflow_worker.campaign_feeder import CampaignFeeder
+
+    def _fake_feeder_stop(self, timeout: float = 5) -> None:
+        events.append("feeder_stop")
+
+    def _fake_probe_close(self) -> None:
+        events.append("probe_close")
+
+    with (
+        patch.object(SingleReplicaProbe, "probe", return_value=True),
+        patch.object(CampaignFeeder, "start", lambda self: None),
+        patch.object(CampaignFeeder, "stop", _fake_feeder_stop),
+        patch.object(SingleReplicaProbe, "close", _fake_probe_close),
+    ):
+        app = main.create_app(data_dir=tmp_path, start_worker=True)
+        with TestClient(app) as _:
+            pass  # lifespan startup + shutdown run here
+
+    assert events == ["feeder_stop", "probe_close"]
+
+
 def test_spa_catch_all_serves_static_files_and_fallback(tmp_path, monkeypatch):
     from server.app import main
 

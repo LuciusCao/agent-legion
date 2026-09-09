@@ -221,6 +221,13 @@ class CampaignQueriesMixin(CampaignSliceQueriesMixin, ConnectionQueriesMixin):
                 f" returning {_CAMPAIGN_COLUMNS}",
                 params,
             ).fetchone()
+            if row is not None and finished:
+                # v81 (#545 round-4)：终态即结算——投递标记不再有重放要守，
+                # 与状态翻转同事务清理，任何终态路径都不遗留孤儿标记。
+                conn.execute(
+                    "delete from campaign_job_deliveries where campaign_id=%s",
+                    (campaign_id,),
+                )
         return campaign_record(dict(row)) if row else None
 
     def advance_campaign_progress(
@@ -269,4 +276,38 @@ class CampaignQueriesMixin(CampaignSliceQueriesMixin, ConnectionQueriesMixin):
             conn.execute(
                 "update campaigns set updated_at=%s where id=%s",
                 (datetime.now(UTC), campaign_id),
+            )
+
+    # ------------------------------------------------------------------
+    # Delivery markers (schema v81, #545 round-4)
+    # ------------------------------------------------------------------
+
+    def campaign_delivered_job_ids(self, campaign_id: str) -> set[str]:
+        """Jobs whose rerun/upgrade flip this campaign durably performed.
+
+        The feeder's replay guard: presence means the flip transaction
+        committed (the marker is written inside it), so a replayed batch
+        must not re-deliver these regardless of the jobs' CURRENT status —
+        a delivered job can legitimately be queued, or already run and
+        failed again, before the crashed process's replay pass.
+        """
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                "select job_id from campaign_job_deliveries where campaign_id=%s",
+                (campaign_id,),
+            ).fetchall()
+        return {str(row["job_id"]) for row in rows}
+
+    def clear_campaign_deliveries(self, campaign_id: str) -> None:
+        """Drop this campaign's markers once their batch is accounted.
+
+        The counting advance has landed (the CAS that pops pending_batch
+        and moves the cursor), so the markers' replay-guard duty is over —
+        a later campaign-level rerun/retry must deliver afresh. Idempotent;
+        also the terminal-transition sweep (no markers outlive their row).
+        """
+        with self.connect() as conn:
+            conn.execute(
+                "delete from campaign_job_deliveries where campaign_id=%s",
+                (campaign_id,),
             )

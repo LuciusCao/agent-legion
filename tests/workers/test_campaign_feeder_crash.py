@@ -9,7 +9,9 @@ upgrade 的 status/workflow_version），进程在 ``_submit_batch`` 已提交�
 已投递的 job（它们退出了匹配集），processed/jobs 计数永久漏记、甚至提前
 判耗尽。修复：切片选取后先把批内 ids + next_cursor CAS 进
 progress_json.pending_batch，投递完成、计数落账时摘除；重启时优先消化
-它（重放被 rerun/upgrade 写路径守卫幂等吸收），计数在重放 pass 落账。
+它，重放凭 v81 投递标记归属（标记在翻转事务内原子落库——round-4 起
+不再按 job 当前 status 猜测；completed 检查仅保留为无标记路径的产物保
+护），计数在重放 pass 落账。
 
 同步驱动约定与母文件一致：直接调 ``_tick()``，无 sleep 竞速。
 """
@@ -137,7 +139,10 @@ def test_filter_crash_before_advance_resume_endpoint_path(job_db, settings) -> N
 def test_filter_crash_before_advance_upgrade_mode(job_db, settings) -> None:
     """PR #545 P1 回归锁（upgrade filter 形态）：upgrade 的匹配字段同样
     被投递改写（status completed→queued、workflow_version 翻新）——同一
-    stage/重放/落账窗口必须成立，3 个 stale job 计数零漏。"""
+    stage/重放/落账窗口必须成立，3 个 stale job 计数零漏。Round-4 起
+    重放凭 v81 投递标记归属：崩溃 pass 已投递的 job 不再二次调用
+    upgrade（already_current 检查无法区分「崩溃 pass 已翻新」与「操作者
+    独立升级」，标记是唯一归属证据），计数按首投语义记 succeeded。"""
     from server.app.services.workflow_revisions import WorkflowRevisionService
     from server.app.workflows.builtin import load_builtin_workflow
 
@@ -176,9 +181,9 @@ def test_filter_crash_before_advance_upgrade_mode(job_db, settings) -> None:
     calls: list[str] = []
     real_upgrade = first.upgrade_service.upgrade
 
-    def _recording_upgrade(workspace_id, job_id):
+    def _recording_upgrade(workspace_id, job_id, **kwargs):
         calls.append(job_id)
-        return real_upgrade(workspace_id, job_id)
+        return real_upgrade(workspace_id, job_id, **kwargs)
 
     first.upgrade_service.upgrade = _recording_upgrade
     outcome = first._submit_batch(dict(campaign))  # 提交后、落账前「崩溃」
@@ -191,20 +196,16 @@ def test_filter_crash_before_advance_upgrade_mode(job_db, settings) -> None:
     run_ticks(second, 3)
     row = job_db.get_campaign(campaign_id)
     assert row["status"] == "completed"
-    # 计数语义与既有 explicit-ids rerun 崩溃先例一致（counters reflect
-    # one pass）：重放 pass 观察到 already_current（upgrade 的幂等检查在
-    # service 层，比对 revision id + 快照——崩溃 pass 已把它们翻新），落
-    # 账 skipped=3 / succeeded=0。零漏不变量是 processed=3（三个 job 都
-    # 被本 campaign 处理且只处理一批）+ 效果（全部 queued、pin 到新
-    # revision）+ 零副作用重复（重放只把 pin/节点写成同样的新值，
-    # len(calls)==2×3）。
-    assert row["jobs_succeeded"] == 0
-    assert row["jobs_skipped"] == 3
+    # Round-4（v81 标记）：重放零二次调用——3 个 job 的翻转事务已提交
+    # （标记为证），计数按首投语义记 succeeded；效果断言不变（全部
+    # queued、pin 到新 revision）。
+    assert len(calls) == 3
+    assert row["jobs_succeeded"] == 3
+    assert row["jobs_skipped"] == 0
     assert row["progress"]["processed"] == 3
     assert "pending_batch" not in row["progress"]
-    assert len(calls) == 6
     assert queued_count(job_db, ws) == 3
-    for job_id in calls[:3]:
+    for job_id in calls:
         upgraded = job_db.get_job(job_id)
         assert upgraded["status"] == "queued"
         assert upgraded["workflow_revision_id"] == current["id"]
@@ -312,11 +313,12 @@ def test_large_rerun_campaign_smoke(job_db, settings) -> None:
 
 
 def test_replay_skips_completed_jobs_to_protect_artifacts(job_db, settings) -> None:
-    """Round-3 P1-1 回归锁：pause/resume 或崩溃后重放 staged 批时，批内
-    已 completed 的 job 不被再次投递——mark_nodes_for_rerun 的 eligibility
-    对显式 node_key 放行 completed 且无 lease 的 job，无条件重放会清掉产
-    物把已完成的实验再跑一遍。保护粒度只到 completed：queued（上次投递
-    已生效、幂等翻回）与 failed（上次没落上）照常重放。"""
+    """Round-3 P1-1 / Round-4 产物保护回归锁：无投递标记的重放批（v81
+    升级时在途的旧 campaign 形状，或首投路径切片后外部完成）里已
+    completed 的 job 不被投递——mark_nodes_for_rerun 的 eligibility 对
+    显式 node_key 放行 completed 且无 lease 的 job，投递会清掉产物把已
+    完成的实验再跑一遍。标记（归属）与 completed 检查（产物保护）是两
+    条正交守卫：本测试只落 pending_batch 不落标记，专门钉后者。"""
     ws = workspace(job_db, "feeder-replay-protect")
     ids = seed_failed_jobs(job_db, ws, 3, "RP")
     # 3 个 job 中 1 个在「崩溃窗口」期间被外部跑完了（completed）。
@@ -368,9 +370,86 @@ def test_replay_skips_completed_jobs_to_protect_artifacts(job_db, settings) -> N
 
     row = job_db.get_campaign(campaign_id)
     assert row["status"] == "completed"
-    # completed 的那个不进重放名单；其余 2 个（failed/queued）照常投递。
+    # completed 的那个不进投递名单；其余 2 个（failed/queued）照常投递。
     assert ids[0] not in rerun_calls
     assert set(rerun_calls) == set(ids[1:])
     # 计数：1 个保护性 skip + 2 个真实投递的落账。
     assert row["jobs_succeeded"] + row["jobs_skipped"] == 3
     assert row["progress"]["processed"] == 3
+
+
+def test_replay_marker_outranks_failed_again_status(job_db, settings) -> None:
+    """Round-4 P1 回归锁（v81 投递标记）：staged 批重放时，「已投递且
+    崩溃窗口期间再次 failed」的 job 不被重投——按 job 当前 status 猜测
+    无法区分「上次没落上的 failed」与「投递后跑完又失败的 failed」，
+    重投会清掉第二次失败的产物重跑（from_failed_node 还会改选新失败
+    节点）。标记在翻转事务内原子落库：存在即本 campaign 的翻转已提交，
+    计 succeeded（首投语义），只有未标记的才真正投递。"""
+    from server.app.db.transaction import write_transaction
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    ws = workspace(job_db, "feeder-replay-marker")
+    ids = seed_failed_jobs(job_db, ws, 3, "RM")
+    campaign = job_db.create_campaign(
+        ws,
+        "rerun",
+        {"filter": {"status": "failed"}, "node_key": NODE_KEYS[0]},
+        watermark=0,
+        batch_size=10,
+        progress={"cursor": None, "processed": 0},
+    )
+    campaign_id = campaign["id"]
+
+    # 崩溃现场：批已部分投递（ids[0]/ids[1] 的翻转事务已提交——标记为
+    # 证；ids[2] 的没落上），pending_batch 已 stage、计数未落账。
+    # ids[1] 投递后跑完又失败（再次 failed）——status 猜测的两难现场。
+    staged_progress = dict(campaign["progress"])
+    staged_progress["pending_batch"] = {
+        "ids": list(ids),
+        "next_cursor": None,
+        "exhausted": True,
+    }
+    job_db.advance_campaign_progress(
+        campaign_id,
+        expected_progress=dict(campaign["progress"]),
+        progress=staged_progress,
+        batches_submitted=0,
+        jobs_succeeded=0,
+        jobs_skipped=0,
+        jobs_failed=0,
+    )
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        for job_id in (ids[0], ids[1]):
+            conn.execute(
+                "insert into campaign_job_deliveries(campaign_id, job_id) values (%s, %s)",
+                (campaign_id, job_id),
+            )
+    job_db.update_job_status(ids[1], "failed", "second_failure")
+
+    rerun_calls: list[str] = []
+    feeder = make_feeder(job_db, settings)
+
+    import server.app.workflow_worker.campaign_feeder as feeder_mod
+
+    original_batch_rerun = feeder_mod.batch_rerun
+
+    def _recording(service, workspace_id, **kwargs):
+        rerun_calls.extend(kwargs.get("job_ids") or [])
+        return original_batch_rerun(service, workspace_id, **kwargs)
+
+    feeder_mod.batch_rerun = _recording
+    try:
+        run_ticks(feeder, 2)
+    finally:
+        feeder_mod.batch_rerun = original_batch_rerun
+
+    row = job_db.get_campaign(campaign_id)
+    assert row["status"] == "completed"
+    # 只有未标记的 ids[2] 真正投递；再次 failed 的 ids[1] 靠标记豁免。
+    assert rerun_calls == [ids[2]]
+    # 计数按首投语义：2 个标记（含再次 failed 的）+ 1 个真实投递。
+    assert row["jobs_succeeded"] == 3
+    assert row["jobs_skipped"] == 0
+    assert row["progress"]["processed"] == 3
+    # 终态结算：completed 翻转同事务清掉全部标记，不留孤儿。
+    assert job_db.campaign_delivered_job_ids(campaign_id) == set()

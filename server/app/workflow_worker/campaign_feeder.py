@@ -46,8 +46,8 @@ from server.app.services.job_rerun.batch import batch_rerun
 from server.app.workflow_worker.campaign_batch_staging import (
     copy_progress,
     next_slice,
+    partition_replay,
     stage_batch,
-    staged_pending_batch,
     target_spec,
 )
 
@@ -205,17 +205,14 @@ class CampaignFeeder:
             picked = self._pick_campaign(workspace_id, group)
             if picked is None:
                 continue
-            if workspace_id not in paused:
-                paused[workspace_id] = self._is_paused(workspace_id)
-            if paused[workspace_id]:
+            if paused.setdefault(workspace_id, self._is_paused(workspace_id)):
                 # A paused workspace suspends feeding but never rewrites
                 # the campaign's own status (design §2.4): the row stays
                 # running, its counters stop moving.
                 continue
-            if workspace_id not in levels:
-                levels[workspace_id] = self._non_terminal_level(workspace_id)
+            level = levels.setdefault(workspace_id, self._non_terminal_level(workspace_id))
             try:
-                self._feed_one(picked, levels[workspace_id])
+                self._feed_one(picked, level)
             except JobServiceError as exc:
                 # Deterministic family: the campaign's target is broken
                 # (corrupt spec, vanished revision); retrying cannot change
@@ -320,11 +317,10 @@ class CampaignFeeder:
         if outcome is None:
             return  # submit mode: PR-C fills this branch in
         if not outcome.ids:
-            # An empty slice means the target is gone (post-creation
-            # deletions) or the completed flip lost the race to a crash —
-            # either way finish without counting a phantom batch. A lost
-            # stage race (PR #545 P1) returns exhausted=False and just
-            # skips; the row is already terminal.
+            # Empty slice: the target is gone (post-creation deletions) or
+            # the completed flip lost the race to a crash — finish without
+            # counting a phantom batch; a lost stage race (PR #545 P1)
+            # returns exhausted=False and just skips (the row is terminal).
             if outcome.exhausted:
                 self.job_db.transition_campaign_status(campaign_id, ("running",), "completed")
             return
@@ -353,6 +349,11 @@ class CampaignFeeder:
             return
         if outcome.exhausted:
             self.job_db.transition_campaign_status(campaign_id, ("running",), "completed")
+        else:
+            # Round-4 P1（v81）：本批计数已落账，投递标记的守护职责结束
+            # ——同一 campaign 的后续重试/新批次必须全新投递。exhausted
+            # 的终态翻转走上面的 transition，它在同一事务里兜底清标记。
+            self.job_db.clear_campaign_deliveries(campaign_id)
         self._attempts.pop(campaign_id, None)
         # A fed campaign waits out the feed interval before its next batch
         # (the single-campaign pacing rule; the picker enforces it).
@@ -408,7 +409,6 @@ class CampaignFeeder:
         raise InvalidOperationError(f"Unsupported campaign mode {mode!r}")
 
     def _submit_rerun(self, campaign: dict[str, Any]) -> BatchOutcome:
-        staged = staged_pending_batch(campaign)
         ids, next_cursor, exhausted = next_slice(self.job_db, campaign)
         if not ids:
             return BatchOutcome([], 0, 0, 0, True, None)
@@ -416,42 +416,28 @@ class CampaignFeeder:
             # PR #545 P1：stage 输给 pause/cancel——空 ids 且非 exhausted
             # 让 _feed_one 安静跳过（不投、不翻终态、不推进）。
             return BatchOutcome([], 0, 0, 0, False, None)
+        # Round-4 P1：重放分拣（标记归属 + completed 产物保护，语义见
+        # campaign_batch_staging.partition_replay）。
+        campaign_id = str(campaign["id"])
+        delivered, completed, to_deliver = partition_replay(self.job_db, campaign_id, ids)
         spec = target_spec(campaign)
-        if staged is not None and list(staged.get("ids") or []) == list(ids):
-            # Round-3 P1-1 重放产物保护：这批 ids 来自 pending_batch（上一
-            # 进程已投递、计数落账前死亡）。mark_nodes_for_rerun 对
-            # queued/running 中的 job 重放是幂等置位（pending 重置、shard
-            # 清理、queued 请求被 cancel 防抢跑——写路径自身的守卫）；唯
-            # 一的破坏性窗口是 completed：eligibility 对显式 node_key 放行
-            # 已完成且无 lease 的 job，重放会清掉产物把已完成的实验再跑一
-            # 遍。因此重放只跳过 completed（计 skipped 保护产物），其余
-            # 全部照常投递——补投上次没落上的 failed、幂等吸收已翻回的
-            # queued，计数语义与首投一致。
-            completed = {
-                job_id
-                for job_id, row in self.job_db.list_job_rerun_states_for_jobs("", list(ids)).items()
-                if str(row["status"]) == "completed"
-            }
-            replay_ids = [i for i in ids if i not in completed]
-        else:
-            replay_ids = list(ids)
         results = (
             batch_rerun(
                 self.rerun_service,
                 str(campaign["workspace_id"]),
-                job_ids=replay_ids,
+                job_ids=to_deliver,
                 node_key=spec.get("node_key"),
                 from_failed_node=bool(spec.get("from_failed_node")),
+                campaign_id=campaign_id,
             )
-            if replay_ids
+            if to_deliver
             else []
         )
-
         return BatchOutcome(
             ids=list(ids),
-            succeeded=sum(1 for r in results if r.get("status") == "succeeded"),
-            skipped=len(ids)
-            - len(replay_ids)
+            succeeded=len(delivered.intersection(ids))
+            + sum(1 for r in results if r.get("status") == "succeeded"),
+            skipped=len(completed - delivered)
             + sum(1 for r in results if r.get("status") == "skipped"),
             failed=sum(1 for r in results if r.get("status") == "failed"),
             exhausted=exhausted,
@@ -465,9 +451,18 @@ class CampaignFeeder:
         if not stage_batch(self.job_db, campaign, ids, next_cursor, exhausted):
             # PR #545 P1：同 _submit_rerun——stage 失败即放弃本批。
             return BatchOutcome([], 0, 0, 0, False, None)
-        succeeded = skipped = failed = 0
+        campaign_id = str(campaign["id"])
+        # Round-4 P1（v81）：标记归属，同 _submit_rerun——已投递计
+        # succeeded 不重投（already_current 无法归属崩溃 pass 的翻新）。
+        delivered = self.job_db.campaign_delivered_job_ids(campaign_id)
+        succeeded = len(delivered.intersection(ids))
+        skipped = failed = 0
         for job_id in ids:
-            result = self.upgrade_service.upgrade(str(campaign["workspace_id"]), job_id)
+            if job_id in delivered:
+                continue
+            result = self.upgrade_service.upgrade(
+                str(campaign["workspace_id"]), job_id, campaign_id=campaign_id
+            )
             status = str(result.get("status"))
             if status == "succeeded":
                 succeeded += 1

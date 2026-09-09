@@ -10,12 +10,12 @@ job（它们退出了匹配集），processed/jobs 计数永久漏记。本模�
 先重放（replay），计数落账时摘除（pop）—— feeder 只保留编排，形状与
 切片纪律同居于此。
 
-PR #545 round-3 的两个后验边界：重放不是无条件入队——rerun 形态恢复路
-径先做 per-job eligibility 预检（复用 batch_rerun 内部同一判定），「已
-完成且无 lease/running」的 job 计 skipped 跳过、不再二次清理重置
-（P1-1）；末页耗尽用 progress 的 ``exhausted`` 标记与 ``cursor=None``
-同一 CAS 原子落库，区分「初始 None」与「耗尽 None」，completed 翻转的
-崩溃窗口不再回退成全量重扫（P1-2）。
+PR #545 round-3/round-4 的崩溃边界收口：末页耗尽用 progress 的
+``exhausted`` 标记与 ``cursor=None`` 同一 CAS 原子落库，区分「初始
+None」与「耗尽 None」，completed 翻转的崩溃窗口不再回退成全量重扫
+（round-3 P1-2）；重放是否重投不再读 job 当前状态猜——v81 投递标记
+（campaign_job_deliveries，标记在翻转事务内原子落库）是归属权威，
+completed 检查只保留为产物保护（round-4 P1，语义见 campaign_feeder）。
 """
 
 from __future__ import annotations
@@ -24,6 +24,10 @@ from typing import Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
 from server.app.services.job_errors import InvalidOperationError
+
+# stage 的 CAS 不动计数（投递前的快照锚点）——四个计数列的键名与
+# advance_campaign_progress 的 kwargs 一一对应。
+_COUNTER_KEYS = ("batches_submitted", "jobs_succeeded", "jobs_skipped", "jobs_failed")
 
 
 def copy_progress(campaign: dict[str, Any]) -> dict[str, Any]:
@@ -116,10 +120,25 @@ def next_slice(job_db: Any, campaign: dict[str, Any]) -> tuple[list[str], str | 
     return slice_ids, None, offset + len(slice_ids) >= len(all_ids)
 
 
-def staged_pending_batch(campaign: dict[str, Any]) -> dict[str, Any] | None:
-    """The staged slice's document, or None when nothing is staged."""
-    pending = copy_progress(campaign).get("pending_batch")
-    return pending if isinstance(pending, dict) else None
+def partition_replay(
+    job_db: Any, campaign_id: str, ids: list[str]
+) -> tuple[set[str], set[str], list[str]]:
+    """Batch replay partition: (delivered, completed, to_deliver) (round-4 P1).
+
+    两条正交守卫的取数与分拣同居于此：
+    ① v81 投递标记（campaign_job_deliveries，标记在翻转事务内原子落库）
+    是归属权威——存在即「本 campaign 的翻转已提交」，重放计 succeeded
+    （首投语义，只差落账），不再重投；已再次 failed 的 job 与「上次没落
+    上的 failed」在 job 当前 status 上无法区分，标记是唯一可靠证据。
+    ② completed 检查是产物保护——eligibility 对显式 node_key 放行
+    completed 且无 lease 的 job，投递会清掉产物；作用于首投与无标记重放
+    （v81 升级时在途的旧 campaign）两路，计 skipped。
+    """
+    delivered = job_db.campaign_delivered_job_ids(campaign_id)
+    rows = job_db.list_job_rerun_states_for_jobs("", list(ids))
+    completed = {i for i in ids if str(rows.get(i, {}).get("status")) == "completed"}
+    to_deliver = [i for i in ids if i not in delivered and i not in completed]
+    return delivered, completed, to_deliver
 
 
 def stage_batch(
@@ -146,14 +165,12 @@ def stage_batch(
         "next_cursor": next_cursor,
         "exhausted": exhausted,
     }
+    counters = {k: int(campaign[k]) for k in _COUNTER_KEYS}
     staged = job_db.advance_campaign_progress(
         str(campaign["id"]),
         expected_progress=copy_progress(campaign),
         progress=progress,
-        batches_submitted=int(campaign["batches_submitted"]),
-        jobs_succeeded=int(campaign["jobs_succeeded"]),
-        jobs_skipped=int(campaign["jobs_skipped"]),
-        jobs_failed=int(campaign["jobs_failed"]),
+        **counters,
     )
     if staged is None:
         return False
@@ -161,19 +178,3 @@ def stage_batch(
     # expected_progress 必须是含 pending_batch 的当前文档。
     campaign["progress"] = staged["progress"]
     return True
-
-
-def pop_pending_batch(progress: dict[str, Any], *, exhausted: bool) -> None:
-    """PR #545 P1：本批目标已消化（提交完成、计数即将落账），从文档
-    摘除 pending_batch——它是投递前的崩溃恢复锚点，正常推进路径不
-    留残迹；transient / 竞态路径不经过这里，锚点保留待重放。
-
-    Round-3 P1-2：末页的耗尽标记在同一份 progress 上落下——advance
-    的 CAS 一笔提交 cursor=None + exhausted + pop，与计数落账原子；
-    之后的 completed 翻转即使崩溃，恢复路径的 cursor_exhausted 也
-    直接短路（不重扫）。explicit-ids 形态的 offset 自带耗尽语义，
-    不写 progress 级标记。
-    """
-    progress.pop("pending_batch", None)
-    if "cursor" in progress and exhausted:
-        progress["exhausted"] = True

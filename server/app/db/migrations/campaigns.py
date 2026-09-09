@@ -79,13 +79,28 @@ alter table runs add column if not exists campaign_id text not null default '';
 create index if not exists idx_runs_campaign on runs(campaign_id) where campaign_id <> '';
 """
 
+# v81 (#545 round-4)：campaign_job_deliveries——feeder 重放归属的投递
+# 标记表（标记在 rerun/upgrade 翻转事务内原子落库）。DDL 挂在 v80 的
+# apply fn 里（chain 以 DDL-only 条目登记，省去 import 行——该文件的
+# file_budget 棘轮已顶格）：幂等 create if not exists，fresh 与升级路径
+# 各执行一次；与 v80 同批意味着升级库在一次 replay 里同时补齐两形态。
+_DELIVERIES_DDL = """
+create table if not exists campaign_job_deliveries (
+  campaign_id text not null references campaigns(id) on delete cascade,
+  job_id text not null,
+  primary key (campaign_id, job_id)
+);
+"""
+
 
 def migrate_campaigns(conn: Any) -> None:
     """Create the campaigns table and the runs.campaign_id linkage (v80).
 
     Idempotent on replay: the schema-file replay never creates these objects
     (the file's line budget keeps campaigns out entirely), so both the fresh
-    path and the upgrade path run this fn exactly once per database.
+    path and the upgrade path run this fn exactly once per database. Also
+    carries the v81 delivery-marker DDL (see _DELIVERIES_DDL above).
     """
     conn.execute(_CAMPAIGNS_DDL)
     conn.execute(_RUNS_CAMPAIGN_DDL)
+    conn.execute(_DELIVERIES_DDL)

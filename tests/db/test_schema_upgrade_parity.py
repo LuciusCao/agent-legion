@@ -43,18 +43,17 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v80, campaigns, #532/#505) must leave behind
-# so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v80 creates the campaigns table (with its two indexes),
-# adds runs.campaign_id, and creates the partial idx_runs_campaign. The undo
-# drops the campaigns table (cascades its indexes), drops the runs column
-# (drops the dependent partial index), and deletes the v80 registry row; the
-# upgrade path under test then re-runs the schema replay + the v80 apply fn,
-# which must recreate byte-identical shapes.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("campaigns",)
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (("runs", "campaign_id", "text"),)
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_runs_campaign",)
-_NEWEST_MIGRATION_NAME = "campaigns"
+# Effects the newest migration (v81, campaign_deliveries, #545 round-4)
+# must leave behind so the undo step rewinds a current-shape database to
+# exactly SCHEMA_VERSION-1. v81 creates the campaign_job_deliveries table
+# (PK, no extra indexes — the PK lookup is the feeder's replay guard) and
+# nothing else; the undo drops the table (cascades the PK) and deletes the
+# v81 registry row; the upgrade path under test then re-runs the schema
+# replay + the v81 apply fn, which must recreate byte-identical shapes.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("campaign_job_deliveries",)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_NAME = "campaign_deliveries"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a

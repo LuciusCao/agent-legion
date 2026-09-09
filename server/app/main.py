@@ -192,6 +192,13 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 yield
         finally:
             await background_tasks.stop(app)
+            # PR #545 round-4：feeder 先于 replica 锁释放停转——先 close 会
+            # 开出「新 Host 拿锁启动 feeder、旧 feeder 线程还在跑耗时批次」
+            # 的窗口。stop() join 上限 5s，批次投递可更长（5k ≈ 7s）——
+            # 窗口内双 feeder 并发是安全的：pickup/advance 的 CAS、
+            # lease_guarded_mutation 串行化与 v81 标记共同兜底（同批至多
+            # 一方落账），泄漏的只是内存态而非正确性。
+            campaign_feeder.stop()
             # Release the replica-probe lock before the pools close so the
             # next starter (rolling restart) does not see a stale holder.
             replica_probe.close()
@@ -201,7 +208,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             for thread in (sweeper_thread, *(slow_sweeps or ())):
                 if thread is not None:
                     thread.stop()
-            campaign_feeder.stop()
             if workflow_worker_thread is not None:
                 unregister_wakeup(workflow_worker_thread.wake)
                 workflow_worker_thread.stop()

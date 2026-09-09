@@ -304,13 +304,11 @@ def test_kill_midway_restart_resumes_without_double_flips(job_db, settings) -> N
 
 def test_restart_refed_slice_absorbed_as_skips(job_db, settings) -> None:
     """The crash window between 'batch committed' and 'cursor advanced': the
-    restart re-feeds the same slice and the write-path re-guards absorb it
-    — a queued job with a pending (not failed/running) target node commits
-    AGAIN but lands in the same idempotent state (the node is already
-    pending, the job already queued), so the flip count stays exactly the
-    slice size and zero jobs double-queue. The counter split records the
-    first pass as succeeded and the replay as re-succeeded (the write
-    guard's contract: a re-mark of an already-pending node is not busy)."""
+    restart re-selects the same slice and the v81 delivery markers (written
+    inside each flip's transaction) tell the replay pass exactly which flips
+    already committed — marked jobs count as succeeded (first-pass semantics)
+    and are NOT re-delivered, unmarked ones deliver afresh. The flip count
+    stays exactly the slice size and zero jobs double-queue."""
     ws = workspace(job_db, "feeder-crash-window")
     ids = seed_failed_jobs(job_db, ws, 4, "CW")
     campaign = create_rerun_campaign(job_db, ws, job_ids=ids, watermark=100, batch_size=4)
