@@ -23,6 +23,12 @@ from server.app.services.runtime_profile import profile
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
 
+# rowcount=0 的重读（#555 review / codex P1）：FOR NO KEY UPDATE 与在飞的
+# 并发 pause（单行 UPDATE）串行化——pause 未提交则阻塞至其落地后读到最新
+# 值；重读到提交之间 pause 也进不来（行锁持有到 commit）。NO KEY 级足够：
+# 不重写元组、不 bump updated_at、不挡 FOR KEY SHARE。
+_JOBS_RECHECK_SQL = "select status, execution_paused from jobs where id=%s for no key update"
+
 
 def promote_claim(
     broker: AgentExecutionBroker,
@@ -104,11 +110,10 @@ def promote_claim(
         # rowcount 0 的两种语义必须区分：job 已被本 job 前序节点的 claim
         # promote 为 running（稳态放行，无写）vs job 在 claim 中途离开
         # runnable 集（raced——回滚整个 claim，请求保持 queued 而不是复活
-        # job）。重读判定；重读后再落 pause 的窗口与旧版条件 UPDATE 的相同
-        # （判读与 pause 从不原子），不放大结果空间。
-        job = conn.execute(
-            "select status, execution_paused from jobs where id=%s", (selected["job_id"],)
-        ).fetchone()
+        # job）。重读带 FOR NO KEY UPDATE 与 pause 串行化（锁理由见常量
+        # 注释）；锁只挂在本紧凑写事务内——两段式拆分后写事务不再跨扫描
+        # 持锁，热行持锁时间仍为毫秒级，不把 #555 消除的锁面带回来。
+        job = conn.execute(_JOBS_RECHECK_SQL, (selected["job_id"],)).fetchone()
         if job is None or job["status"] != "running" or job["execution_paused"]:
             raise ClaimRacedError()
     # #551：供给延迟观测——queued_at→promote 的 queue_wait 直接 fold 进 claim

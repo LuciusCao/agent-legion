@@ -82,9 +82,13 @@ def _promote_selected(
     """One savepoint-guarded promote attempt for a selected candidate.
 
     Returns ``(claim, raced)``; ``raced`` = a ClaimRacedError rolled the
-    attempt back to the savepoint and the batch must stop with what it has
-    (the job left the runnable set mid-claim — rescanning would just hit the
-    same raced row again, and the partial batch is already a good answer).
+    attempt back to the savepoint and the batch must stop with what it has.
+    The stop is not just "the partial batch is already a good answer":
+    ``pg_advisory_xact_lock`` is NOT released by ROLLBACK TO SAVEPOINT, so a
+    raced candidate's ws/worker advisory locks stay held to COMMIT —
+    continuing past a raced candidate would stretch the lock window this
+    two-phase split exists to shrink (and walk further down a queue whose
+    head just proved unstable). Do not turn the ``break`` into ``continue``.
     A None claim without ``raced`` is a stale candidate (lost the SKIP
     LOCKED probe, paused, capacity filled since selection): skip and let the
     loop take the next selected row.

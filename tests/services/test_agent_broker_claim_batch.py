@@ -308,13 +308,14 @@ def test_promote_folds_queue_wait_into_claim_profile(job_db) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_batch_write_phase_revalidates_stale_selection_and_never_scans(job_db) -> None:
+def test_batch_write_phase_revalidates_stale_selection_and_never_scans(job_db, monkeypatch) -> None:
     """#555 竞态窗口的重校验：只读选择段选出候选后、写入段开始前，候选被
     竞争者领走——写入段重跑 evaluate_candidate（SKIP LOCKED 探针 +
     条件 promote），判 lock_raced 跳过并继续后续候选，绝不半应用。
 
-    同钉结构性不变量：写入事务内不得出现扫描语句（eligible_workspaces
-    只属于选择段）——锁窗口 O(批×扫描) 的回归会直接亮红灯。"""
+    同钉结构性不变量：写入段不得调用任何扫描原语（fetch_candidates /
+    scan_kind / _select_kind_batch 直接炸）——钉调用行为而非 SQL 文本，
+    CTE 改名不再能让本钉静默失效。"""
     _seed_agent_jobs(job_db, 2)
     _register_worker()
     pool = broker(job_db.jobs_dir.parent)
@@ -326,23 +327,146 @@ def test_batch_write_phase_revalidates_stale_selection_and_never_scans(job_db) -
     raced = pool.claim("worker-1")
     assert raced is not None and raced.job_id == "job-0"
 
-    scan_statements: list[str] = []
+    scan_calls: list[str] = []
+
+    def _scan_bomb(name: str):  # type: ignore[no-untyped-def]
+        def _stub(*args: Any, **kwargs: Any) -> Any:
+            scan_calls.append(name)
+            raise AssertionError(f"write phase must not scan ({name})")
+
+        return _stub
+
+    monkeypatch.setattr(
+        "server.app.agent_broker.claim_scan.fetch_candidates", _scan_bomb("fetch_candidates")
+    )
+    monkeypatch.setattr("server.app.agent_broker.claim_windows.scan_kind", _scan_bomb("scan_kind"))
+    monkeypatch.setattr(
+        "server.app.agent_broker.claim_batch_select._select_kind_batch",
+        _scan_bomb("_select_kind_batch"),
+    )
+
     with write_transaction(TEST_DATABASE_URL) as conn:
-        real_execute = conn.execute
-
-        def spy(sql: Any, params: Any = None) -> Any:
-            if "eligible_workspaces" in str(sql):
-                scan_statements.append(str(sql))
-            return real_execute(sql, params)
-
-        conn.execute = spy  # type: ignore[method-assign]
         outcome = claim_batch_in_transaction(
             pool, conn, "worker-1", None, None, selection=selection
         )
 
-    assert scan_statements == []
+    assert scan_calls == []
     assert [claim.job_id for claim in outcome.claims] == ["job-1"]
     assert outcome.skip_reasons.get("lock_raced") == 1
+
+
+def test_batch_write_phase_skips_candidate_paused_after_selection(job_db) -> None:
+    """选择 → 写入之间落 job pause：写段重查 job 控制态，判 job_paused
+    跳过（请求保持 queued 等 resume），绝不把 paused job 的节点发出去。"""
+    _seed_agent_jobs(job_db, 1)
+    _register_worker()
+    pool = broker(job_db.jobs_dir.parent)
+    selection = select_batch_candidates(pool, "worker-1", None, None, limit=1)
+    assert len(selection.candidates) == 1
+
+    with job_db.connect() as conn:
+        conn.execute("update jobs set status='paused' where id='job-0'")
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        outcome = claim_batch_in_transaction(
+            pool, conn, "worker-1", None, None, selection=selection
+        )
+
+    assert outcome.claims == ()
+    assert outcome.skip_reasons.get("job_paused") == 1
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where job_id='job-0'"
+        ).fetchone()
+    assert row["state"] == "queued"
+
+
+def test_batch_promote_recheck_serializes_with_inflight_pause(job_db) -> None:
+    """codex P1（#555 review）：rowcount=0 的重读带 FOR NO KEY UPDATE——
+    已 running 的 job 上，pause 事务在飞（第二连接持未提交的 pause UPDATE）
+    时后继节点的 promote 阻塞在行锁上；pause 提交后重读读到最新值，判
+    raced 回滚 savepoint（请求保持 queued），「pause 返回成功但节点照常
+    下发」的窗口被关掉。
+
+    多连接并发写法跟随 test_agent_broker_claim_locks.py 的 holder-conn +
+    join-timeout 先例：join 超时把「回归导致的挂死」变成快速可诊断的失败。
+    """
+    import threading
+
+    import psycopg
+
+    _seed_two_node_job(job_db)
+    _register_worker()
+    pool = broker(job_db.jobs_dir.parent)
+    # 第一节点先正常领走：job 进入 running（重读路径的前置形态）。
+    first = claim_batch(pool, "worker-1", None, None, limit=1)
+    assert [claim.node_key for claim in first] == ["generate"]
+    selection = select_batch_candidates(pool, "worker-1", None, None, limit=1)
+    assert [str(row["node_key"]) for row in selection.candidates] == ["review"]
+
+    # pause 在飞：holder 连接持有未提交的 jobs 行 UPDATE。
+    holder = psycopg.connect(TEST_DATABASE_URL)
+    holder.execute("update jobs set status='paused' where id='job-multi'")
+    outcome_box: dict[str, Any] = {}
+
+    def run_write_phase() -> None:
+        with write_transaction(TEST_DATABASE_URL) as conn:
+            outcome_box["outcome"] = claim_batch_in_transaction(
+                pool, conn, "worker-1", None, None, selection=selection
+            )
+
+    try:
+        write_thread = threading.Thread(target=run_write_phase)
+        write_thread.start()
+        write_thread.join(timeout=5)
+        assert write_thread.is_alive(), (
+            "promote 未阻塞在在飞 pause 上——FOR NO KEY UPDATE 串行化退回了裸 SELECT"
+        )
+        holder.commit()
+        write_thread.join(timeout=30)
+        assert not write_thread.is_alive(), "pause 提交后写段未放行"
+    finally:
+        holder.close()
+
+    outcome = outcome_box["outcome"]
+    assert outcome.claims == ()
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where job_id='job-multi'"
+            " and node_key='review'"
+        ).fetchone()
+    # raced 回滚到 savepoint：请求保持 queued（未下发、未取消）。
+    assert row["state"] == "queued"
+
+
+def test_batch_write_phase_skips_when_capacity_tightened_after_selection(job_db) -> None:
+    """选择 → 写入之间容量收紧：写段 prepare_claim_view 的新快照才是权威
+    ——Worker 池只有 1 个坑，选择后该坑被同 Worker 的并发 claim 占掉；写段
+    视图重读后候选判 capacity_full 跳过（准入门在锁探针之前）。选择段的
+    乐观视图从不被信任。"""
+    _seed_agent_jobs(job_db, 2)
+    _register_worker(max_concurrency=1)
+    pool = broker(job_db.jobs_dir.parent)
+    selection = select_batch_candidates(pool, "worker-1", None, None, limit=1)
+    assert [str(row["job_id"]) for row in selection.candidates] == ["job-0"]
+
+    # 容量收紧（选择 → 写入之间）：唯一的坑被并发 claim 占掉（恰好也是
+    # job-0——capacity 门在 SKIP LOCKED 探针之前，判 capacity_full）。
+    assert pool.claim("worker-1") is not None
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        outcome = claim_batch_in_transaction(
+            pool, conn, "worker-1", None, None, selection=selection
+        )
+
+    assert outcome.claims == ()
+    assert outcome.skip_reasons.get("capacity_full") == 1
+    with job_db._connect_read() as conn:
+        request = conn.execute(
+            "select state from agent_execution_requests where job_id='job-1'"
+        ).fetchone()
+    # 未被任何一侧触碰的请求保持 queued。
+    assert request["state"] == "queued"
 
 
 def _seed_two_node_job(job_db) -> None:
