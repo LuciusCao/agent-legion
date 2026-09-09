@@ -689,7 +689,9 @@ def test_detail_run_overview_tracks_runs_and_counts(job_db, settings, storage) -
     rerun = service.create_campaign(
         ws, "rerun", job_ids=[str(failed_job["id"])], node_key=_NODE_KEYS[0], watermark=100
     )
-    assert service.get_campaign(ws, rerun["id"])["runs"] == []
+    # rerun 形态不带 runs 概览（拆分后条件装配）；路由层的
+    # CampaignDetailRecord 默认空列表兜底响应形状。
+    assert service.get_campaign(ws, rerun["id"]).get("runs", []) == []
 
 
 def test_detail_run_overview_returns_latest_fifty_runs_only(job_db, settings, storage) -> None:
