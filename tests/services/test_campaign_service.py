@@ -14,12 +14,13 @@ from __future__ import annotations
 import pytest
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services.campaign_manifest import (
+from server.app.services.campaign_manifest import ManifestError
+from server.app.services.campaign_service import (
     CampaignManifestTooLargeError,
+    CampaignService,
     CampaignStorageUnavailableError,
     campaign_manifest_key,
 )
-from server.app.services.campaign_service import CampaignService
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from tests.helpers import publish_builtin_revision
 
@@ -29,6 +30,22 @@ _NODE_KEYS = [
     "review_script",
     "publish_content",
 ]
+
+
+def _widen_start_item_types(job_db, workspace_id: str) -> None:
+    """把 active revision 换成接受 material+ref 的同 DAG 变体（runs API 测试
+    的 _accept_all_item_types 同一手法，upload_preview 姊妹文件同款）。"""
+    import copy
+
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    raw = copy.deepcopy(DEMO_WORKFLOW_DEFINITION)
+    raw["nodes"]["_start"]["accepted_item_types"] = ["material", "ref", "bundle"]
+    WorkflowRevisionService(job_db).publish_workspace_revision(
+        workspace_id, workflow_definition_from_dict(raw)
+    )
 
 
 def _seed_workspace_with_revision(job_db, workspace_id: str) -> str:
@@ -562,6 +579,7 @@ class TestCreateSubmitTarget:
     def test_manifest_csv_mixed_header(self, campaign_service, job_db):
         """CSV 混合表头空列丢弃（#531 P2-2）的服务端创建路径。"""
         workspace_id = _seed_workspace_with_revision(job_db, "campaign-csv-ws")
+        _widen_start_item_types(job_db, workspace_id)
         _insert_material(job_db, workspace_id, "m-1")
         _insert_connection(job_db, "cms-main")
         csv_bytes = (
@@ -579,7 +597,7 @@ class TestCreateSubmitTarget:
 
     def test_invalid_manifest_rejected_without_row(self, campaign_service, job_db):
         workspace_id = _seed_workspace_with_revision(job_db, "campaign-bad-manifest-ws")
-        with pytest.raises(InvalidOperationError, match="不支持的 item type"):
+        with pytest.raises(ManifestError, match="不支持的 item type"):
             campaign_service.create_campaign(
                 workspace_id,
                 "submit",
@@ -807,6 +825,7 @@ class TestPreview:
     def test_submit_preview_dedup_probe(self, campaign_service, job_db):
         """submit preview：resolve + dedup 探测 → would_create / would_skip。"""
         workspace_id = _seed_workspace_with_revision(job_db, "campaign-subpreview-ws")
+        _widen_start_item_types(job_db, workspace_id)
         _insert_material(job_db, workspace_id, "mat-1")
         _insert_connection(job_db, "cms-main")
         _insert_job(job_db, workspace_id, "material", "mat-1")

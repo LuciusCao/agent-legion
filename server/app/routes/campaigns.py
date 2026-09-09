@@ -83,6 +83,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
                     "submit",
                     items=[item.model_dump() for item in submit.items],
                     created_by=created_by,
+                    name=payload.name,
                     watermark=submit.watermark,
                     batch_size=submit.batch_size,
                 )
@@ -94,7 +95,9 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
                     job_filter=rerun.resolved_filter(),
                     node_key=rerun.node_key,
                     from_failed_node=rerun.from_failed_node,
+                    exclude_ids=rerun.exclude_ids,
                     created_by=created_by,
+                    name=payload.name,
                     watermark=rerun.watermark,
                     batch_size=rerun.batch_size,
                 )
@@ -116,6 +119,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
         # optional；无默认值参数必须排在带默认值的表单字段之前。
         manifest: Annotated[UploadFile, File()],
         mode: Annotated[str, Form()] = "submit",
+        name: Annotated[str, Form()] = "",
         watermark: Annotated[int | None, Form()] = None,
         batch_size: Annotated[int | None, Form()] = None,
     ) -> CampaignCreateResponse:
@@ -148,6 +152,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
                 manifest_filename=manifest.filename or "manifest.jsonl",
                 manifest_bytes=data,
                 created_by=str(user.get("id") or ""),
+                name=name,
                 watermark=watermark,
                 batch_size=batch_size,
             )
@@ -179,6 +184,7 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
                     job_filter=rerun.resolved_filter(),
                     node_key=rerun.node_key,
                     from_failed_node=rerun.from_failed_node,
+                    exclude_ids=rerun.exclude_ids,
                     watermark=rerun.watermark,
                     batch_size=rerun.batch_size,
                 )

@@ -110,6 +110,7 @@ class CampaignService:
         mode: str,
         *,
         created_by: str = "",
+        name: str = "",
         # rerun/upgrade target
         job_ids: list[str] | None = None,
         job_filter: Any | None = None,
@@ -126,14 +127,10 @@ class CampaignService:
     ) -> dict[str, Any]:
         """Normalize + validate + persist a pending campaign row.
 
-        Fail-fast order: mode → target shape → knobs → target resolution
-        (rerun resolves its selection; submit resolves items + dedup probe)
-        → storage decision (inline vs object store; the bucket branch runs
-        an advisory quota precheck AHEAD of the PUT so a full workspace
-        leaks no manifest object) → the quota-checked row write
-        (create_campaign_guarded: count + row write share one locked
-        transaction, so concurrent creates cannot each land a row below a
-        stale count — PR #541 P2).
+        Fail-fast 顺序：mode → target 形状 → knobs → target 解析 → 存储
+        决策（行内 vs 对象桶；桶分支的配额预检在 PUT 之前，满配额不漏
+        无主 manifest 对象）→ 配额护栏内的行写入（计数与落行同一
+        locked 事务，并发创建不会各自按 stale count 落行，PR #541 P2）。
         """
         if mode not in CAMPAIGN_MODES:
             raise InvalidOperationError(
@@ -167,6 +164,10 @@ class CampaignService:
             # Cursor form (design §1.4): explicit ids = list offset; filter =
             # keyset "created_at|id" cursor plus a processed count.
             progress = {"cursor": None, "processed": 0} if job_filter is not None else {"offset": 0}
+        # PR-D「任务名称」骑 spec 存储（不加列，见 v80 schema 注释）——
+        # 空串即未命名，UI 侧派生默认「类型 · MM-DD HH:mm」。
+        if name:
+            target_spec["name"] = name
 
         return self.job_db.create_campaign_guarded(
             workspace_id,
@@ -205,13 +206,11 @@ class CampaignService:
     ) -> dict[str, Any]:
         """Normalize the manifest, validate items, decide inline vs bucket.
 
-        Inline channel: items passed as a JSON array in the request body, or
-        an upload whose serialized form fits manifest_inline_max_bytes — the
-        spec lands in target_spec_json.items and needs no object store (the
-        small-campaign path for instances without S3). Larger uploads are
-        serialized to the object store under
-        campaign-manifests/{workspace_id}/campaigns/{campaign_id}/manifest.jsonl;
-        the spec then carries manifest_storage_key + manifest_item_count only.
+        行内通道：JSON items 或序列化后 ≤ manifest_inline_max_bytes 的上传
+        ——spec 落 target_spec_json.items，无需对象存储（无 S3 实例的小
+        campaign 路径）。更大的上传序列化进对象桶
+        campaign-manifests/{ws}/campaigns/{id}/manifest.jsonl，spec 只带
+        manifest_storage_key + manifest_item_count。
         """
         config = self._campaigns_config
         normalized = self._normalize_submit_items(
@@ -268,11 +267,8 @@ class CampaignService:
     def _precheck_active_quota(self, workspace_id: str) -> None:
         """Advisory active-campaign cap check ahead of the bucket PUT.
 
-        The authoritative judgement is the guarded write's locked
-        count+row-write pair; this precheck only moves the common case
-        (workspace already at/above the cap) ahead of the object write so
-        repeated over-quota creates stop leaking manifest objects.
-        """
+        权威判定是 guarded write 的加锁计数落行；本预检只是把
+        常见拒绝（配额已满）提前到对象写入之前，防漏无主对象。"""
         if self.job_db.count_active_campaigns(workspace_id) >= int(
             self._campaigns_config.max_active_per_workspace
         ):
@@ -337,13 +333,9 @@ class CampaignService:
     ) -> dict[str, Any]:
         """Validate the rerun/upgrade target shape; empty selections fail here.
 
-        Mirrors JobBatchRerunRequest's validation (node_key and
-        from_failed_node are mutually exclusive, exactly one required) and
-        the batch endpoints' empty-selection semantics; the filter form
-        only probes existence (round-4 P2) — the feeder re-resolves it.
-        exclude_ids 只随 filter 形态存储（allMatching 对话框的排除项——
-        契约层语义），feeder 的 keyset 取片在 SQL 内排除，页仍满尺寸。
-        """
+        校验同 JobBatchRerunRequest（node_key/from_failed_node 互斥恰一）；
+        filter 形态只做存在性探测（四轮 P2），feeder 重解析。
+        exclude_ids 只随 filter 存储，keyset 取片 SQL 内排除。"""
         if (job_ids is None) == (job_filter is None):
             raise InvalidOperationError("Provide exactly one of job_ids or filter")
         if mode == "rerun":
@@ -373,14 +365,22 @@ class CampaignService:
         # 空选集语义不变（InvalidOperationError，路由映射同前）。显式 id
         # 本就是快照形态，规范化后的非空列表即为选集，无需再查库。
         if job_filter is not None:
-            if not selection_matches_any(self.job_db, workspace_id, job_filter):
+            excluded = sorted({str(v).strip() for v in exclude_ids if str(v).strip()})
+            # 排除全部时创建即拒绝（fail-fast）：带 exclude 的 limit-1 探测
+            # ——裸探测只验「filter 有匹配」，排除后可能恰好清空选集。
+            if excluded:
+                page, _cursor = self.job_db.list_campaign_filter_job_ids_page(
+                    workspace_id, job_filter, 1, None, excluded
+                )
+                if not page:
+                    raise InvalidOperationError("Campaign selection resolved to zero jobs")
+            elif not selection_matches_any(self.job_db, workspace_id, job_filter):
                 raise InvalidOperationError("Campaign selection resolved to zero jobs")
             # Target shape (design §1.3/§1.4): the filter form stores ONLY the
             # filter — the feeder re-resolves it with a keyset cursor, and a
             # materialized 10^5-id snapshot in the row would blow the row width
             # (exactly what the keyset-cursor design avoids).
             spec: dict[str, Any] = {"filter": _filter_to_dict(job_filter)}
-            excluded = sorted({str(v).strip() for v in exclude_ids if str(v).strip()})
             if excluded:
                 spec["exclude_ids"] = excluded
         else:
@@ -418,16 +418,10 @@ class CampaignService:
     ) -> dict[str, Any]:
         """Dry-run the creation judgements; no row, no write.
 
-        rerun: the SAME batch_rerun_preview the existing preview endpoint
-        runs — same function, same numbers, zero drift by construction.
-        upgrade: batch_upgrade_preview, the bulk-data equivalent of the
-        upgrade write path's eligibility window (not-current against the
-        active revision — PR #541 P2: the node_key-shaped rerun preview
-        answers 0 for every job of an upgrade selection). submit:
-        resolve_run_items + the dedup probe over the whole manifest, the
-        same probes the feeder's create_run batch path applies per batch.
-        The knob guards (batch_size ceilings) are the creation path's own
-        resolvers — a dry-run cannot confirm what creation would refuse.
+        rerun 与既有 preview 端点同函数（零漂移）；upgrade 走
+        batch_upgrade_preview（非当前 revision 的资格窗，PR #541 P2）；
+        submit 全清单 resolve + dedup 探测。knob 护栏与创建路径共用
+        resolver——dry-run 不得确认创建会拒绝的东西。
         """
         if mode not in ("rerun", "upgrade", "submit"):
             raise InvalidOperationError(
@@ -602,11 +596,9 @@ def _ceil_div(total: int, batch: int) -> int:
 
 
 def check_manifest_bytes(payload: str, manifest_max_bytes: int) -> None:
-    """The serialized-manifest byte ceiling, used by both the persist and
-    dry-run paths (PR #541 round-3 P2): the write path refuses oversized
-    payloads before the inline-vs-bucket decision, and the preview dry-run
-    reports the same error instead of confirming a campaign that cannot
-    exist."""
+    """序列化清单的字节上限（落库与 dry-run 共用，PR #541 三轮 P2）：
+    写路径在行内/入桶决策前拒绝超限；preview 报同一错误而非确认一个
+    不可能存在的 campaign。"""
     size = len(payload.encode("utf-8"))
     if size > manifest_max_bytes:
         raise CampaignManifestTooLargeError(

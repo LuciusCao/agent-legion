@@ -40,16 +40,11 @@ class CampaignSliceQueriesMixin(ConnectionQueriesMixin):
     ) -> list[dict[str, Any]]:
         """Submit-mode run overview for the campaign detail endpoint (PR-C).
 
-        Rides the idx_runs_campaign partial index (v80: campaign_id <> ''
-        rows only); the latest-50 sub-select bounds the join+aggregate to
-        the page, so the cost never tracks the campaign's total historical
-        batches (PR #559 round 2: the outer LIMIT alone did not — Postgres
-        read and aggregated every run before the top-N). Per-run job totals
-        come from the counter table, never the campaign's job volume. Runs
-        whose jobs were completed by a manual submission still appear here
-        — the deterministic run id made the campaign's batch and that
-        manual run the same row.
-        """
+        骑 idx_runs_campaign 部分索引；最新 limit 条子查询约束连接+聚合
+        范围（PR #559 二轮：外层 LIMIT 只做 top-N 不约束扫描，Postgres
+        原本逐条聚合全部历史）。job 数取计数表，不随 campaign 体量增长。
+        手动提交完成的 run 仍在此出现——确定性 run id 使批次与手动运行
+        同行。"""
         with self._connect_read() as conn:
             rows = conn.execute(_CAMPAIGN_RUN_OVERVIEW_SQL, (campaign_id, limit)).fetchall()
         return [
@@ -72,18 +67,10 @@ class CampaignSliceQueriesMixin(ConnectionQueriesMixin):
     ) -> tuple[list[str], str | None]:
         """One keyset page of job ids matching ``job_filter``, newest first.
 
-        The feeder's rerun/upgrade filter-mode slicer (design §1.4): the SQL
-        shape is the resolver's ``_list_job_ids_page`` keyset semantics
-        (``order by created_at desc, id desc`` + the ``created_at|id``
-        composite cursor) expressed as a JobQueries method, so the campaign
-        worker never opens its own connection (BOUNDARY-DATA-001). The page
-        is exactly ``limit`` ids or fewer; the second element is the next
-        cursor, None at exhaustion.
-
-        exclude_ids (the stored target's user deselections — the old sync
-        path's filter + exclude_ids payload) is excluded in the SQL, not in
-        the feeder: the page stays full-sized and the cursor math
-        (limit + 1 lookahead) stays exact even when exclusions land mid-page.
+        feeder 的 filter 形态取片器（§1.4）：resolver 的 keyset 语义
+        （created_at|id 复合游标）以 JobQueries 方法表达（BOUNDARY-DATA-001，
+        campaign worker 不自开连接）。exclude_ids 在 SQL 内排除而非 feeder
+        侧过滤——页保持满尺寸、limit+1 前瞻的游标算术不受排除项影响。
         """
         from server.app.jobs.queries.job_filtering import filter_clauses
 

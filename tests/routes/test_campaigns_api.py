@@ -359,10 +359,10 @@ def test_upload_at_exact_limit_reads_through(client, job_db, monkeypatch) -> Non
         data={"mode": "submit"},
     )
     # At the ceiling the bytes are accepted past the route bound; the
-    # content then fails manifest parsing (not 'x' lines) — a 400-range
-    # error, NOT 413.
+    # content then fails manifest parsing (not 'x' lines) — the contract-
+    # violation family maps 422 (PR-A round-4 语义), never 413.
     assert response.status_code != 413
-    assert response.status_code == 400
+    assert response.status_code == 422, response.text
 
 
 def test_unknown_campaign_404(client, job_db) -> None:

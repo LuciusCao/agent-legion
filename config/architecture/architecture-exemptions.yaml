@@ -1416,3 +1416,53 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 569
+- check: architecture.file_budget
+  path: server/app/jobs/queries/batch.py
+  reason: >-
+    #532 PR-C (design §1.5): the run insert carries the v80 columns
+    campaign_id / created_by so the submit-mode linkage lands in the
+    same upsert statement (the RUN_UPSERT_CONFLICT clause stays
+    byte-identical — first writer owns the attribution). Two insert
+    columns, two params, two query-method kwargs, and the docstring
+    note; the alternative (a second campaign-specific insert statement
+    beside this one) would fork the deterministic-id upsert contract.
+    Anchored to #522; harvest when the runs insert consolidates with
+    the intake-carrier shapes (the queue_payload split is the natural
+    moment).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 95
+
+- check: architecture.file_budget
+  path: server/app/workflow_worker/campaign_feeder_submit.py
+  reason: >-
+    #532 PR-C review round (PR #559 P1): the manifest cache gained a
+    process-wide byte budget — LRU tracking (_cache_get/_cache_put with
+    move-to-back ordering plus serialized-bytes accounting) so many
+    workspaces × watermark-blocked running campaigns cannot grow the
+    heap without bound. The mechanics belong beside the cache they
+    govern (the mixin owns _manifest_cache); splitting them out would
+    export private dict state to a helper module. Ceiling re-dated 183
+    to 184 for the #532 codex round 2 (PR #559): the manifest object
+    read is now bounded by manifest_max_bytes+1 (a replaced oversized
+    object must fail the campaign deterministically instead of being
+    loaded whole into memory) — the limit computation and its
+    in-place raise are three lines beside the read they bound.
+    Anchored to #522 (budget-anchor tracker): harvest when the submit
+    mixin is reworked for the out-of-process feeder migration (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 184
+- check: architecture.file_budget
+  path: frontend/src/components/job/JobAllMatchingUpgradeDialog.tsx
+  reason: >-
+    #532 PR-D（定稿交互）：allMatching 全量升级从 per-job 循环改为创建
+    批量任务（upgrade campaign）——升级会翻回非终态从头重跑，全量形态
+    与批量重跑同样需要节奏闸控；反选（excludedIds）随创建参数传给
+    服务端切片排除。改造需引入 campaign 创建/查询失效/toast 三组接线，
+    组件落 91 行；再拆会把「提交 + 反选 + 失效」一体语义分到姊妹文件。
+    Anchored to #522: harvest when the allMatching dialogs consolidate
+    into a shared campaign-create wrapper.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 91
