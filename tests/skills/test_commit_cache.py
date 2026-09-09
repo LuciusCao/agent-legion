@@ -17,6 +17,7 @@ from server.app.skills.commit_cache import (
     COMPLETE_MARKER,
     KEPT_COMMITS_PER_SKILL,
     materialized_commit_dir,
+    materialized_private_copy,
     resolve_skill_commit,
     shared_cache_root,
 )
@@ -159,6 +160,43 @@ def test_tmp_export_leftover_is_reclaimed_on_next_materialization(tmp_path: Path
     materialized_commit_dir(manager, _KEY, _commit_skill_update(repo, "# v2\n"))
 
     assert not leftover.exists()
+
+
+def test_private_copy_is_independent_and_cleaned_up(tmp_path: Path) -> None:
+    """PR #571 codex P1-2: the validator runs on a per-validation private
+    copy — writes into it never reach the shared cache, and
+    cleanup_execution reclaims the copy."""
+    repo = _make_skill_repo(tmp_path / "skills", _KEY)
+    commit = _head_commit(repo)
+    manager = _make_manager(tmp_path)
+
+    run_dir = materialized_private_copy(manager, _KEY, commit, "validate-x")
+    assert run_dir == manager.runs_dir / "validate-x" / _KEY
+    (run_dir / "validator-was-here.txt").write_text("x\n")
+
+    cached = shared_cache_root(manager.runs_dir) / _KEY / commit / _KEY
+    assert not (cached / "validator-was-here.txt").exists()
+
+    manager.cleanup_execution("validate-x")
+    assert not run_dir.exists()
+    assert cached.is_dir()  # cleanup never reaches the shared cache
+
+
+def test_private_copy_survives_eviction_of_its_source(tmp_path: Path) -> None:
+    """PR #571 codex P1-1: evicting the source commit from the cache while a
+    validation is in flight cannot break it — the copy window and eviction
+    share the per-repo FileLock, and the validator reads only the copy."""
+    repo = _make_skill_repo(tmp_path / "skills", _KEY)
+    manager = _make_manager(tmp_path)
+    first = _head_commit(repo)
+    run_dir = materialized_private_copy(manager, _KEY, first, "validate-y")
+
+    for index in range(KEPT_COMMITS_PER_SKILL):
+        materialized_commit_dir(manager, _KEY, _commit_skill_update(repo, f"# v{index}\n"))
+
+    cache_bucket = shared_cache_root(manager.runs_dir) / _KEY
+    assert not (cache_bucket / first).exists(), "source commit must be evicted"
+    assert (run_dir / "SKILL.md").is_file(), "the in-flight copy is untouched"
 
 
 def test_cleanup_execution_cannot_reach_the_shared_cache(tmp_path: Path) -> None:

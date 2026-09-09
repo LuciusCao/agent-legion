@@ -5,9 +5,10 @@ result-validate process pool (#569; #443 split this out of
 
 Worker-reported success is untrusted: the Host revalidates server-side after
 unpacking the result archive, against the exact skill content the execution
-used (#330). Materialization is the shared (skill, commit) cache
-(``skills.commit_cache``), so per-validation execution dirs are gone and
-``cleanup_execution`` is no longer part of this path.
+used (#330). Materialization goes through the shared (skill, commit) cache
+(``skills.commit_cache``) plus a per-validation private copy (PR #571 codex
+P1s: the shared tree is read-only, validators write only into their copy),
+so ``cleanup_execution`` remains the per-validation cleanup of this path.
 """
 
 from __future__ import annotations

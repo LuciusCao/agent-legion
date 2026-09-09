@@ -10,14 +10,17 @@ still runs afterwards for business rules the engine does not express.
 
 Since #569 the wrapper resolves the manifest pin to a commit in-process and
 runs materialization + validation on the result-validate pool against the
-shared (skill, commit) materialization cache. These tests pin the wrapper's
-semantics with the pool inlined (the real pool hop is covered by
+shared (skill, commit) materialization cache plus a per-validation private
+copy (PR #571 codex P1s). These tests pin the wrapper's semantics with the
+pool inlined (the real pool hop is covered by
 tests/services/test_result_validate_pool.py).
 """
 
 from __future__ import annotations
 
 import subprocess
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,12 +28,17 @@ import pytest
 
 import server.app.workflows.output_contract_engine as output_contract_engine
 import server.app.workflows.worker_output_validation as worker_output_validation
-from server.app.skills.commit_cache import shared_cache_root
+from server.app.skills.commit_cache import (
+    KEPT_COMMITS_PER_SKILL,
+    materialized_commit_dir,
+    shared_cache_root,
+)
 from server.app.skills.manager import SkillManager
 from server.app.workflows.output_contract_engine import run_contract_engine
 from server.app.workflows.output_validation import run_output_validator
 from server.app.workflows.worker_output_validation import validate_worker_outputs
 from tests.helpers.skill_git import (
+    _commit_skill_update,
     _git,
     _head_commit,
     _make_skill_repo,
@@ -178,6 +186,77 @@ def test_manifest_without_skill_skips_validation(tmp_path: Path) -> None:
     assert validate_worker_outputs(manager, {}, tmp_path / "job") is None
 
     assert not (tmp_path / "runs").exists()
+
+
+def test_validator_writes_do_not_pollute_the_shared_cache(tmp_path: Path) -> None:
+    """PR #571 codex P1-2: a validator writing beside its own __file__ must
+    land in its private copy, never the shared cache tree — otherwise the
+    .complete marker would vouch for a polluted tree and every later
+    validation of that commit would run against it (the pre-#569 per-result
+    private copies had no such cross-result leak)."""
+    validator = (
+        "import pathlib, sys\n"
+        "pathlib.Path(__file__).with_name('validator-was-here.txt').write_text('x')\n"
+        "sys.exit(0)\n"
+    )
+    manager = _manager(tmp_path, validator)
+    commit = _head_commit(tmp_path / "skills" / _KEY)
+    manifest = {"skill": _KEY, "skill_commit": commit}
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+
+    assert validate_worker_outputs(manager, manifest, job_dir) is None
+    assert validate_worker_outputs(manager, manifest, job_dir) is None
+
+    cached_tree = shared_cache_root(manager.runs_dir) / "group" / "name" / commit / _KEY
+    assert not (cached_tree / "validator-was-here.txt").exists()
+    # Per-validation private copies are cleaned up after each validation.
+    leftovers = [e for e in manager.runs_dir.iterdir() if e.name.startswith("validate-")]
+    assert leftovers == []
+
+
+def test_eviction_during_validation_does_not_affect_the_result(tmp_path: Path) -> None:
+    """PR #571 codex P1-1: LRU eviction triggered by a newer commit while a
+    validation is still running must not break it — the validator reads its
+    private copy (the copy window and eviction share the per-repo lock)."""
+    gate = tmp_path / "validator-gate"
+    validator = (
+        "import pathlib, sys, time\n"
+        f"gate = pathlib.Path({str(gate)!r})\n"
+        "while not gate.exists():\n"
+        "    time.sleep(0.05)\n"
+        "sys.exit(0)\n"
+    )
+    manager = _manager(tmp_path, validator)
+    repo = tmp_path / "skills" / _KEY
+    commit = _head_commit(repo)
+    manifest = {"skill": _KEY, "skill_commit": commit}
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+
+    outcome: dict[str, str | None] = {}
+    thread = threading.Thread(
+        target=lambda: outcome.setdefault(
+            "verdict", validate_worker_outputs(manager, manifest, job_dir)
+        )
+    )
+    thread.start()
+    # Wait until the validation is parked inside the blocking validator.
+    deadline = time.monotonic() + 10
+    while not any(manager.runs_dir.glob("validate-*")) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert any(manager.runs_dir.glob("validate-*")), "validation never started"
+
+    # Push the skill past the eviction cap: the commit under validation is
+    # evicted from the shared cache mid-validation.
+    for index in range(KEPT_COMMITS_PER_SKILL):
+        materialized_commit_dir(manager, _KEY, _commit_skill_update(repo, f"# v{index}\n"))
+    assert not (shared_cache_root(manager.runs_dir) / "group" / "name" / commit).exists()
+
+    gate.write_text("go\n")
+    thread.join(timeout=30)
+    assert not thread.is_alive()
+    assert outcome["verdict"] is None
 
 
 # --- #443: contract engine layer (velites-sandbox validate) ---

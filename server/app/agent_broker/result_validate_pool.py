@@ -11,7 +11,8 @@ manifest's ``skill_ref`` is resolved to a commit there (it may read/write
 the skill lock document); the pool task (``validate_skill_commit_outputs``)
 is a pure path-in/string-out transform — materialize the (skill, commit)
 pair through the shared cache (``skills.commit_cache``, zero git calls on a
-hit), contract-check the tree, run the two-layer validator. The task must
+hit), copy out a per-validation private tree under the same FileLock,
+contract-check it, run the two-layer validator against it. The task must
 stay an importable module-level function with picklable args/return (the
 spawn-context constraint); exceptions cross the boundary pickled by
 reference, so ``SkillRepoError`` keeps its type for the caller's
@@ -125,19 +126,26 @@ def validate_skill_commit_outputs(
     commit: str,
     job_dir: str,
 ) -> str | None:
-    """Pool task: validate ``job_dir`` against the cached (skill, commit) tree.
+    """Pool task: validate ``job_dir`` against a private copy of (skill, commit).
 
     Runs in a pool worker: no DB handle, no shared process state — the
     manager is rebuilt from plain path/string args with a NullSkillStore
-    (the exact-commit path never touches the skill lock). Returns the
-    validator verdict (None = valid); raises cross the process boundary
-    (materialization/contract failures) for the caller to convert.
+    (the exact-commit path never touches the skill lock). The shared cache
+    tree is read-only; the validator runs against a per-validation private
+    copy (PR #571 codex P1s: a validator writing beside its own
+    ``__file__`` must not pollute the cache, and LRU eviction must never
+    rmtree a tree mid-validation — the copy window and eviction share the
+    per-repo FileLock, and the validator reads only the private copy).
+    Returns the validator verdict (None = valid); raises cross the process
+    boundary (materialization/contract failures) for the caller to convert.
     """
     # Local imports: keeps the spawn child's import graph minimal and lets
     # the pool module itself stay cheap to import in the main process.
+    import uuid
+
     from server.app.skills.commit_cache import (
         NullSkillStore,
-        materialized_commit_dir,
+        materialized_private_copy,
     )
     from server.app.skills.manager import SkillManager
     from server.app.workflows.output_validation import run_output_validator
@@ -149,11 +157,16 @@ def validate_skill_commit_outputs(
         runs_dir=Path(runs_dir),
         git_command=list(git_command),
     )
-    run_dir = materialized_commit_dir(manager, skill_key, commit)
-    # Contract-check the materialized copy (same bar as the dispatch path):
-    # <commit_dir>/<workflow>/<capability>, so parents[1] is the root the
-    # key joins under. No cleanup on failure — the tree is a shared cache
-    # entry, not a per-validation dir; a markerless/broken tree is reclaimed
-    # by the next materialization under the per-repo lock.
-    resolve_workflow_skill(run_dir.parents[1], skill_key)
-    return run_output_validator(run_dir, Path(job_dir))
+    validation_id = f"validate-{uuid.uuid4().hex}"
+    run_dir = materialized_private_copy(manager, skill_key, commit, validation_id)
+    try:
+        # Contract-check the private copy (same bar as the dispatch path):
+        # <runs_dir>/<validation_id>/<workflow>/<capability>, so parents[1]
+        # is the root the key joins under.
+        resolve_workflow_skill(run_dir.parents[1], skill_key)
+        return run_output_validator(run_dir, Path(job_dir))
+    finally:
+        # Per-validation cleanup is back (#569's original design removed it
+        # with the per-validation dir); a pool worker dying hard leaks the
+        # copy to the age-based sweeper instead.
+        manager.cleanup_execution(validation_id)
