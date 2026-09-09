@@ -116,7 +116,13 @@ class CampaignFeeder(CampaignSubmitMixin):
         self._next_feed_at: dict[str, float] = {}
         self._attempts: dict[str, int] = {}
         self._round_robin: dict[str, int] = {}
+        # campaign_id → loaded submit manifest, plus its byte accounting
+        # (the submit mixin's cache: LRU order by move-to-back, globally
+        # byte-budgeted via campaigns.manifest_cache_max_bytes — PR-C
+        # review P1; both dicts share the campaign_id key space and are
+        # pruned together below).
         self._manifest_cache: dict[str, Any] = {}
+        self._manifest_cache_bytes: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Thread plumbing
@@ -262,7 +268,12 @@ class CampaignFeeder(CampaignSubmitMixin):
     def _prune_memory(self, campaigns: Any) -> None:
         active = {str(campaign["id"]) for campaign in campaigns}
         workspaces = {str(campaign["workspace_id"]) for campaign in campaigns}
-        for registry in (self._next_feed_at, self._attempts, self._manifest_cache):
+        for registry in (
+            self._next_feed_at,
+            self._attempts,
+            self._manifest_cache,
+            self._manifest_cache_bytes,
+        ):
             for campaign_id in list(registry):
                 if campaign_id not in active:
                     del registry[campaign_id]
@@ -402,9 +413,10 @@ class CampaignFeeder(CampaignSubmitMixin):
         (byte-identical to the synchronous entry points): succeeded = flips
         that landed, skipped = ineligible/not-found/busy, failed = per-job
         failures. The submit path folds create_run's single verdict into the
-        same triple: created = succeeded, duplicate-absorbed = skipped, and
-        the absorbed-batch decode distinguishes heal (0 created, 0 skipped)
-        from a partial batch (created + skipped summing to the slice).
+        same triple: created = succeeded, the dedup-dropped remainder =
+        skipped (PR-C review P2-1: a mixed batch's counters sum to the
+        slice), and the all-duplicates absorb counts the whole slice as
+        skipped.
         """
         mode = str(campaign["mode"])
         if mode == "rerun":

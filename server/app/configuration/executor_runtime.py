@@ -69,6 +69,13 @@ class CampaignsRuntimeConfig(BaseModel):
     max_active_per_workspace: int = Field(default=3, ge=1)  # pending+running campaigns
     manifest_inline_max_bytes: int = Field(default=262_144, ge=1)  # 256KB ≈ 2–3k items
     manifest_max_bytes: int = Field(default=52_428_800, ge=1)  # multipart upload ceiling
+    # Process-wide ceiling on the feeder's cached submit manifests
+    # (campaign_feeder_submit's byte accounting; PR-C review P1): entries
+    # are LRU-evicted by their canonical serialized bytes, so many
+    # workspaces × watermark-blocked running campaigns cannot grow the
+    # heap without bound. 0 = unlimited (the max_items_per_run convention);
+    # a budget below one manifest's bytes degrades to cache-size-1.
+    manifest_cache_max_bytes: int = Field(default=268_435_456, ge=0)  # 256MB
 
 
 class ExecutorRuntimeConfig(BaseModel):

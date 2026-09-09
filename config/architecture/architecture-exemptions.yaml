@@ -1341,3 +1341,18 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 453
+- check: architecture.file_budget
+  path: server/app/workflow_worker/campaign_feeder_submit.py
+  reason: >-
+    #532 PR-C review round (PR #559 P1): the manifest cache gained a
+    process-wide byte budget — LRU tracking (_cache_get/_cache_put with
+    move-to-back ordering plus serialized-bytes accounting) so many
+    workspaces × watermark-blocked running campaigns cannot grow the
+    heap without bound. The mechanics belong beside the cache they
+    govern (the mixin owns _manifest_cache); splitting them out would
+    export private dict state to a helper module. Anchored to #522
+    (budget-anchor tracker): harvest when the submit mixin is reworked
+    for the out-of-process feeder migration (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 183

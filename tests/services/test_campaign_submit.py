@@ -336,9 +336,11 @@ def test_already_succeeded_batch_replay_absorbed_with_created_zero(
     job_db, settings, storage
 ) -> None:
     """The absorb pinned at the unit level: after a successful feed, calling
-    _submit_batch on the same un-advanced cursor again returns
-    created_count 0 semantics — succeeded 0, skipped slice size — without
-    touching any row (the pure in-process form of the crash replay)."""
+    _submit_batch on the same un-advanced cursor again returns created 0 —
+    succeeded 0 with the WHOLE slice counted as skipped (the P2-1 rule: a
+    created_count below the slice size is the dedup-dropped remainder, and
+    the #501 heal return folds into the same accounting) — without touching
+    any row (the pure in-process form of the crash replay)."""
     ws = _workspace(job_db, "submit-absorb")
     _insert_materials(job_db, ws, 3, "AB")
     service = _make_service(job_db, settings, storage)
@@ -351,11 +353,43 @@ def test_already_succeeded_batch_replay_absorbed_with_created_zero(
     assert (first.succeeded, first.skipped, first.failed) == (3, 0, 0)
     assert first.exhausted
 
-    # Same cursor, same slice: the re-feed is absorbed.
+    # Same cursor, same slice: the re-feed heals the run row (created 0) and
+    # the slice lands as skips.
     second = feeder._submit_batch(dict(campaign))
     assert (second.succeeded, second.skipped, second.failed) == (0, 3, 0)
     assert second.exhausted
     assert _campaign_job_count(job_db, campaign["id"]) == 3
+
+
+def test_partial_dedup_batch_counts_skipped(job_db, settings, storage) -> None:
+    """PR-C review P2-1 回归锁：slice 同时含新 item 与重复 item 时
+    （[new, dup, new]），create_run 过滤重复后返回较小的 created_count，
+    计数必须与之对齐——succeeded=2/skipped=1，item_offset 前进 3。
+    修复前成功路径固定 skipped=0：[A, A] 会显示 succeeded=1/skipped=0
+    而 offset 进 2，completed campaign 的计数与实际处理项数不符。"""
+    ws = _workspace(job_db, "submit-mixed-dedup")
+    _insert_materials(job_db, ws, 3, "MD")
+    service = _make_service(job_db, settings, storage)
+    campaign = _create_submit_campaign(
+        service, ws, _material_items(3, "MD"), batch_size=3, watermark=100
+    )
+    campaign_id = campaign["id"]
+
+    # One item of the batch already has a job (a manual run won the dedup
+    # key before the campaign's first feed).
+    manual = RunService(job_db, settings).create_run(
+        ws, workflow_key=ws, items=_material_items(1, "MD")
+    )
+    assert manual["created_count"] == 1
+
+    feeder = _make_feeder(job_db, settings, storage)
+    feeder._tick()
+    row = job_db.get_campaign(campaign_id)
+    assert row["status"] == "completed"
+    assert row["jobs_succeeded"] == 2  # the fresh items created
+    assert row["jobs_skipped"] == 1  # the duplicate dropped by dedup
+    assert row["progress"]["item_offset"] == 3  # the whole slice advanced
+    assert _campaign_job_count(job_db, campaign_id) == 2  # manual 1 + campaign 2
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +441,59 @@ def test_manifest_cache_evicted_on_terminal_and_pause(job_db, settings, storage)
     assert job_db.get_campaign(paused["id"])["jobs_succeeded"] == 6
 
 
+def test_manifest_cache_evicts_over_byte_budget_and_reloads(job_db, settings, storage) -> None:
+    """PR-C review P1 回归锁：manifest 缓存按「规范序列化字节数」全局记账，
+    超过 campaigns.manifest_cache_max_bytes 时逐出最久未用（多 workspace 并发
+    + 被水位阻塞的 running campaign 持续持有时，进程内存有全局上限）。逐出
+    不是终态：被逐出的 campaign 下次投放按 item_offset 重装载（一次对象存储
+    读），进度零丢失——与 pause→resume 的重装载路径同一条。"""
+    from server.app.services.campaign_manifest import serialize_manifest
+
+    ws_a = _workspace(job_db, "submit-cache-a")
+    ws_b = _workspace(job_db, "submit-cache-b")
+    _insert_materials(job_db, ws_a, 4, "MB-A")
+    _insert_materials(job_db, ws_b, 4, "MB-B")
+    settings.executor_runtime.campaigns.manifest_inline_max_bytes = 64  # bucket channel
+    service = _make_service(job_db, settings, storage)
+    a = _create_submit_campaign(
+        service, ws_a, _material_items(4, "MB-A"), batch_size=4, watermark=100
+    )
+    b = _create_submit_campaign(
+        service, ws_b, _material_items(4, "MB-B"), batch_size=4, watermark=100
+    )
+    bytes_a = len(serialize_manifest(_material_items(4, "MB-A")).encode("utf-8"))
+    bytes_b = len(serialize_manifest(_material_items(4, "MB-B")).encode("utf-8"))
+    assert bytes_a == bytes_b  # same shape, different dedup keys
+
+    feeder = _make_feeder(job_db, settings, storage)
+    # One byte below the two-manifest sum: loading the second must evict
+    # the first (LRU), even though both campaigns are still ACTIVE.
+    settings.executor_runtime.campaigns.manifest_cache_max_bytes = bytes_a + bytes_b - 1
+    a_row, b_row = job_db.get_campaign(a["id"]), job_db.get_campaign(b["id"])
+
+    assert feeder._load_manifest(dict(a_row)) == _material_items(4, "MB-A")
+    assert a["id"] in feeder._manifest_cache
+    assert feeder._manifest_cache_bytes[a["id"]] == bytes_a  # byte accounting
+    opens_after_first_loads = storage.open_count
+
+    assert feeder._load_manifest(dict(b_row)) == _material_items(4, "MB-B")
+    assert b["id"] in feeder._manifest_cache
+    assert a["id"] not in feeder._manifest_cache  # LRU-evicted over the budget
+    assert a["id"] not in feeder._manifest_cache_bytes  # accounting evicted too
+
+    # The evicted campaign is NOT terminal: the tick re-loads its manifest
+    # from the object store at the stored item_offset and completes it with
+    # zero progress lost (the same reload path as pause → resume).
+    _run_ticks(feeder, 2)
+    assert storage.open_count > opens_after_first_loads  # a real re-read
+    row = job_db.get_campaign(a["id"])
+    assert row["status"] == "completed"
+    assert row["jobs_succeeded"] == 4
+    assert row["progress"]["item_offset"] == 4
+    assert _campaign_job_count(job_db, a["id"]) == 4
+    assert job_db.get_campaign(b["id"])["status"] == "completed"
+
+
 def test_corrupt_bucket_manifest_fails_deterministically(job_db, settings, storage) -> None:
     """A manifest object that no longer round-trips (operator damage, bucket
     truncation) is deterministic: failed row with the sample error, no
@@ -436,6 +523,38 @@ def test_corrupt_bucket_manifest_fails_deterministically(job_db, settings, stora
     assert row["status"] == "failed"
     assert "corrupt" in row["error_message"]
     assert campaign["id"] not in feeder._attempts
+
+
+def test_non_utf8_bucket_manifest_fails_deterministically(job_db, settings, storage) -> None:
+    """PR-C review P2-2 回归锁：manifest 对象被覆盖/损坏为非 UTF-8 字节时，
+    decode("utf-8") 的 UnicodeDecodeError 必须与 ManifestError 同路——确定性
+    failed（对象损坏重试无法修复），而不是落进瞬态异常族无限退避、campaign
+    永远卡 running。修复前 except 只捕 ManifestError，decode 错误逃逸成
+    transient。"""
+    ws = _workspace(job_db, "submit-nonutf8")
+    _insert_materials(job_db, ws, 2, "N8")
+    service = _make_service(job_db, settings, storage)
+    campaign = _create_submit_campaign(
+        service, ws, _material_items(2, "N8"), batch_size=2, watermark=100
+    )
+    key = campaign_manifest_key(ws, campaign["id"])
+    with job_db.connect() as conn:
+        conn.execute(
+            "update campaigns set target_spec_json=%s where id=%s",
+            (
+                '{"manifest_item_count": 2, "manifest_storage_key": "' + key + '"}',
+                campaign["id"],
+            ),
+        )
+    storage.objects[key] = b"\xff\xfe\x00bad utf8\xff"
+
+    feeder = _make_feeder(job_db, settings, storage)
+    feeder._tick()
+    row = job_db.get_campaign(campaign["id"])
+    assert row["status"] == "failed"  # deterministic, NOT transient backoff
+    assert "corrupt" in row["error_message"]
+    assert campaign["id"] not in feeder._attempts  # no backoff was scheduled
+    assert campaign["id"] not in feeder._next_feed_at
 
 
 # ---------------------------------------------------------------------------

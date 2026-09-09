@@ -8,6 +8,17 @@ manifest object), item_offset slicing, the ``create_run(campaign_id=...)``
 call, and the all-duplicates absorb that lets a re-fed batch advance the
 cursor without creating anything.
 
+The cache is byte-budgeted process-wide (PR-C review P1): the sum of the
+cached manifests' serialized bytes stays under
+``campaigns.manifest_cache_max_bytes`` by evicting least-recently-used
+entries, so many workspaces × watermark-blocked running campaigns cannot
+grow the process heap without bound (``max_active_per_workspace`` bounds
+only one workspace's share, and a blocked running campaign keeps its
+cache). Eviction is cheap by construction: the campaign's next feed
+reloads its manifest (inline spec re-read or one object-store GET) from
+the row's stored item_offset — exactly the paused-and-resumed shape, so
+no progress is lost.
+
 The absorb contract (design §1.5, PR-C review P2): the ONLY exception the
 feeder absorbs is ``AllItemsAlreadyResolvedError`` — the dedicated subclass
 ``run_service`` raises when the dedup filter emptied an otherwise-valid
@@ -25,7 +36,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from server.app.services.campaign_manifest import ManifestError, parse_manifest_text
+from server.app.services.campaign_manifest import (
+    ManifestError,
+    parse_manifest_text,
+    serialize_manifest,
+)
 from server.app.services.job_errors import AllItemsAlreadyResolvedError, InvalidOperationError
 from server.app.workflow_worker.campaign_feeder_types import (
     BatchOutcome,
@@ -35,6 +50,7 @@ from server.app.workflow_worker.campaign_feeder_types import (
 
 if TYPE_CHECKING:
     from server.app.services.run_service import RunService
+    from server.app.settings import Settings
     from server.app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
@@ -45,24 +61,66 @@ class CampaignSubmitMixin:
 
     # Attribute contract with the composing CampaignFeeder (declared for the
     # type checker; the feeder owns the instances).
+    settings: Settings
     run_service: RunService | None
     object_storage: ObjectStorage | None
     _manifest_cache: dict[str, list[dict[str, Any]]]
+    _manifest_cache_bytes: dict[str, int]
+
+    # ------------------------------------------------------------------
+    # Byte-budgeted manifest cache (PR-C review P1)
+    # ------------------------------------------------------------------
+
+    def _cache_get(self, campaign_id: str) -> list[dict[str, Any]] | None:
+        """Cache lookup that marks the entry most recently used.
+
+        Move-to-back on a plain dict (pop + re-insert): the FIRST key is
+        then always the least-recently-used — the eviction victim.
+        """
+        cached = self._manifest_cache.pop(campaign_id, None)
+        if cached is None:
+            return None
+        self._manifest_cache[campaign_id] = cached
+        return cached
+
+    def _cache_put(self, campaign_id: str, items: list[dict[str, Any]]) -> None:
+        """Cache a loaded manifest and enforce the global byte budget.
+
+        The accounting unit is the canonical serialized form's bytes — the
+        exact size of the stored bucket object for the spill channel, and
+        the same bound for the inline channel (what it WOULD occupy), so
+        the budget measures one uniform thing regardless of channel.
+        """
+        self._manifest_cache[campaign_id] = items
+        self._manifest_cache_bytes[campaign_id] = len(serialize_manifest(items).encode("utf-8"))
+        budget = int(self.settings.executor_runtime.campaigns.manifest_cache_max_bytes)
+        if budget <= 0:
+            return  # 0 = unlimited (the max_items_per_run convention)
+        # Evict LRU-first until under budget; at least one entry always
+        # stays (len > 1), so a budget below a single manifest's bytes
+        # degrades to cache-size-1 (one reload per feed) instead of a
+        # load-evict thrash. Reload cost is bounded: one inline re-read or
+        # one object-store GET per evicted campaign per feed.
+        while len(self._manifest_cache) > 1 and sum(self._manifest_cache_bytes.values()) > budget:
+            evicted = next(iter(self._manifest_cache))
+            del self._manifest_cache[evicted]
+            del self._manifest_cache_bytes[evicted]
 
     def _load_manifest(self, campaign: dict[str, Any]) -> list[dict[str, Any]]:
-        """The campaign's full item list, cached per process (design §2.2).
+        """The campaign's full item list, cached per process under the
+        global byte budget (design §2.2; the budget mechanics above).
 
         Inline channel: the spec's ``items`` array (small campaigns; the
         service decided inline at create time). Bucket channel: the
-        normalized jsonl object read ONCE via open_stream and parsed with
-        the same ``parse_manifest_text`` that round-trips the service's
+        normalized jsonl object read via open_stream and parsed with the
+        same ``parse_manifest_text`` that round-trips the service's
         serialize_manifest — the stored object is always the canonical
         serialization, so this never sees CSV. Nothing is cached until the
         whole object parses: a transient read failure simply retries next
         tick from scratch.
         """
         campaign_id = str(campaign["id"])
-        cached = self._manifest_cache.get(campaign_id)
+        cached = self._cache_get(campaign_id)
         if cached is not None:
             return list(cached)
         spec = target_spec(campaign)
@@ -87,13 +145,18 @@ class CampaignSubmitMixin:
                 # is bounded by construction, not an unbounded read.
                 text = self.object_storage.open_stream(storage_key).read().decode("utf-8")
                 items = parse_manifest_text(text)
-            except ManifestError as exc:
-                # Corrupt stored manifest: deterministic — retrying cannot
-                # fix a broken object (repair = a fresh campaign, §2.3).
+            except (ManifestError, UnicodeDecodeError) as exc:
+                # Corrupt stored manifest — unparsable text AND non-UTF-8
+                # bytes (an overwritten/truncated object fails DECODE
+                # before parsing ever runs; PR-C review P2: without this
+                # catch the decode error escapes as the transient family
+                # and the campaign backs off forever instead of failing).
+                # Deterministic: retrying cannot fix a broken object
+                # (repair = a fresh campaign, §2.3).
                 raise InvalidOperationError(f"Campaign manifest is corrupt: {exc}") from exc
         if not items:
             raise InvalidOperationError("Campaign manifest is empty")
-        self._manifest_cache[campaign_id] = items
+        self._cache_put(campaign_id, items)
         return items
 
     def _submit_manifest_batch(self, campaign: dict[str, Any]) -> BatchOutcome:
@@ -103,7 +166,7 @@ class CampaignSubmitMixin:
         advancing:
         - no failed run under the deterministic id (the batch already
           succeeded, or a manual run completed the items): the raised
-          InvalidOperationError is caught here, created 0;
+          AllItemsAlreadyResolvedError is caught here, created 0;
         - #501 healing (the batch previously failed partway and its jobs
           were completed by a retry elsewhere): create_run itself returns
           created_count 0.
@@ -141,14 +204,17 @@ class CampaignSubmitMixin:
                 created_by=str(campaign.get("created_by") or ""),
             )
             created = int(result.get("created_count") or 0)
-            # The run created everything fresh (created == slice) or healed
-            # (created 0, healed run) — both mean the batch is done; the
-            # healed shape reports nothing as skipped (the jobs exist and
-            # belong to this run).
+            # A partial-dedup batch reports the dropped remainder as skipped
+            # (PR-C review P2-1): [A, A] → created 1, skipped 1 — the
+            # counters sum to the slice the offset advances, instead of the
+            # old succeeded=1/skipped=0 with offset +2. The #501 heal return
+            # (created_count 0) folds into the same rule: the whole slice
+            # counts as skipped — the jobs exist and belong to this run,
+            # nothing was created this pass.
             return BatchOutcome(
                 ids=[str(campaign["id"])],
                 succeeded=created,
-                skipped=0,
+                skipped=len(slice_items) - created,
                 failed=0,
                 exhausted=exhausted,
                 next_cursor=None,
