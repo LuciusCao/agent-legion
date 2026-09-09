@@ -7,7 +7,8 @@ and takes effect on restart; there is no runtime hot-reload:
 
 - executor runtime scalars plus the nested blocks in ``_NESTED_BLOCK_KEYS``
   (``workflows`` / ``agent_workers`` / ``agent_enqueue`` #509 /
-  ``result_unpack`` #554) and ``code_capacity`` are merged onto the
+  ``result_unpack`` #554 / ``agent_claim`` #561) and ``code_capacity`` are
+  merged onto the
   loaded ``ExecutorRuntimeConfig`` and re-validated;
 - ``cleanup`` / ``monitoring`` values are written back into ``settings.config``
   for construction-time consumers (OpsMetricsService, CleanupConfig, WorkflowMaintenance).
@@ -48,6 +49,7 @@ _NESTED_BLOCK_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("agent_enqueue", ("workers", "max_pending")),
     ("result_unpack", ("workers",)),
+    ("agent_claim", ("worker_touch_interval_seconds",)),
 )
 
 

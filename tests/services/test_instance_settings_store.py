@@ -59,9 +59,10 @@ def test_default_document_matches_retired_yaml_values() -> None:
         "min_protocol_version": 1,
         "max_concurrent_result_commits": 16,
     }
-    # #509/#554 capacity knobs: defaults ride the code config.
+    # #509/#554/#561 capacity knobs: defaults ride the code config.
     assert document["agent_enqueue"] == {"workers": 48, "max_pending": 1024}
     assert document["result_unpack"] == {"workers": 0}
+    assert document["agent_claim"] == {"worker_touch_interval_seconds": 30}
     # The retired openclaw block is stripped from stored documents (#75).
     assert "openclaw" not in document
 

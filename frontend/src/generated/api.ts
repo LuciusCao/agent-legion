@@ -4015,6 +4015,11 @@ export interface components {
       database: components['schemas']['DatabaseConnectionView']
       storage: components['schemas']['StorageConnectionView']
     }
+    /** InstanceAgentClaimSettings */
+    InstanceAgentClaimSettings: {
+      /** Worker Touch Interval Seconds */
+      worker_touch_interval_seconds: number
+    }
     /** InstanceAgentEnqueueSettings */
     InstanceAgentEnqueueSettings: {
       /** Max Pending */
@@ -4054,6 +4059,7 @@ export interface components {
     }
     /** InstanceSettingsResponse */
     InstanceSettingsResponse: {
+      agent_claim: components['schemas']['InstanceAgentClaimSettings']
       agent_enqueue: components['schemas']['InstanceAgentEnqueueSettings']
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
       cleanup: components['schemas']['InstanceCleanupSettings']
@@ -4084,6 +4090,7 @@ export interface components {
     }
     /** InstanceSettingsUpdate */
     InstanceSettingsUpdate: {
+      agent_claim: components['schemas']['InstanceAgentClaimSettings']
       agent_enqueue: components['schemas']['InstanceAgentEnqueueSettings']
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
       cleanup: components['schemas']['InstanceCleanupSettings']

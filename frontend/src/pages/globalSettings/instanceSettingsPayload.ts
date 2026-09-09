@@ -41,6 +41,9 @@ export function toFormValues(doc: InstanceSettingsResponse): FormValues {
     'agent_enqueue.workers': String(doc.agent_enqueue.workers),
     'agent_enqueue.max_pending': String(doc.agent_enqueue.max_pending),
     'result_unpack.workers': String(doc.result_unpack.workers),
+    'agent_claim.worker_touch_interval_seconds': String(
+      doc.agent_claim.worker_touch_interval_seconds
+    ),
   }
 }
 function parseNumber(values: FormValues, path: string): number {
@@ -117,6 +120,12 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
     },
     result_unpack: {
       workers: parseNumber(values, 'result_unpack.workers'),
+    },
+    agent_claim: {
+      worker_touch_interval_seconds: parseNumber(
+        values,
+        'agent_claim.worker_touch_interval_seconds'
+      ),
     },
   }
 }

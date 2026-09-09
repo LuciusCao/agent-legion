@@ -63,6 +63,14 @@ class InstanceResultUnpackSettings(BaseModel):
     workers: int = Field(ge=0, le=64)
 
 
+class InstanceAgentClaimSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # #561: Worker presence-write throttle (#555 knob); restart-effective.
+    # 0 = write on every claim/commit (restores the 0.7.5 behavior).
+    worker_touch_interval_seconds: float = Field(ge=0)
+
+
 class InstanceSettingsDocument(BaseModel):
     """Full instance settings document; constraints mirror ExecutorRuntimeConfig."""
 
@@ -95,6 +103,7 @@ class InstanceSettingsDocument(BaseModel):
     # restart-effective like the rest of the executor-runtime surface.
     agent_enqueue: InstanceAgentEnqueueSettings
     result_unpack: InstanceResultUnpackSettings
+    agent_claim: InstanceAgentClaimSettings
 
 
 class InstanceSettingsResponse(InstanceSettingsDocument):
