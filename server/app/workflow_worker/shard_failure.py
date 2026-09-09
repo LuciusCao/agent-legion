@@ -27,6 +27,10 @@ if TYPE_CHECKING:
 # 块与 shards.py 之间流转，不进 broker manifest（runtime_context_stub 只
 # 白名单读取 job 的固定键），缺键（未来调用方未快照）回退为事务内现读，
 # 失败安全。#520 review P1。
+# #520 四轮 P2：本地 lane 构造 ExecutionContext 前必须剥离该键（见
+# shard_dispatch.claim_shard_locally）——context.job 会被 build_runtime
+# 原样暴露给 node SDK 的 ctx.job，内部调度信号不得混入节点可见的 job
+# 载荷（远程 lane 天然不见此键，剥离后两条 lane 的 ctx.job 键集合对齐）。
 DISPATCH_GENERATION_JOB_KEY = "shard_dispatch_generation"
 
 

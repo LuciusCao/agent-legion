@@ -171,11 +171,14 @@ def fail_shard_without_lease(
     if aggregate == "failed":
         # 节点行同步归类（与节点级 fail_without_lease 一致）；shard 执行失败
         # 路径不设这两个字段，此处取更严的一侧——dispatch 失败的根因就是
-        # 分类规则的输入。
+        # 分类规则的输入。stale_reason 同步清空（四轮 P2）：上游 rerun 把
+        # 节点置 stale（stale_reason='upstream rerun'）后、本轮 dispatch 失败
+        # 把它翻成 failed 时，遗留的 stale_reason 与终态语义矛盾——与
+        # record_failed_node_without_execution 的写法对齐。
         conn.execute(
             """
             update job_nodes
-            set status='failed', error_message=%s, finished_at=%s,
+            set status='failed', stale_reason='', error_message=%s, finished_at=%s,
                 failure_category=%s, failure_detail=%s
             where job_id=%s and node_key=%s
                 and status in ('pending', 'ready', 'stale', 'running')

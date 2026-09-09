@@ -20,11 +20,11 @@ from server.app.executors.models import (
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.services.job_errors import JobServiceError
 from server.app.services.vault import VaultError
+from server.app.workflow_worker import shard_failure
 from server.app.workflow_worker.agent_claim import cached_run_payload
 from server.app.workflow_worker.code_dispatch import resolve_code_node_dispatch
 from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_config
 from server.app.workflow_worker.execution import submit_claim
-from server.app.workflow_worker.shard_failure import fail_claim_target_config
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
@@ -58,12 +58,11 @@ def claim_shard_locally(
     failure terminates THIS shard, not the node (#520 review P2): the
     node-level write's status guard no-ops on the ``running`` row.
 
-    PR #520 review P2: the same gap held for config — a shard node's
-    declared ``config_schema``/``config`` (secrets, connections,
-    ``timeout_seconds`` …) never resolved, so ``ExecutionContext.node_config``
-    stayed empty and ``config_snapshot_json`` blank while the remote lane
-    shipped the fully resolved config. Config now rides the same
-    ``resolve_dispatch_node_config`` chain as ``schedule``.
+    PR #520 review P2: the same gap held for config — a shard node's declared
+    ``config_schema``/``config`` (secrets, connections, ``timeout_seconds`` …)
+    never resolved, so ``ExecutionContext.node_config`` stayed empty and
+    ``config_snapshot_json`` blank while the remote lane shipped the fully
+    resolved config; it now rides the ``resolve_dispatch_node_config`` chain.
     """
     workspace_id = workspace["id"]
     # Schema v61: workspace id IS the workflow key — the same source the lease
@@ -101,7 +100,7 @@ def claim_shard_locally(
             worker, workspace_id, workflow_key, node, run_payload, job.get("node_code_pins")
         )
     except (ValueError, VaultError, JobServiceError) as exc:
-        return fail_claim_target_config(
+        return shard_failure.fail_claim_target_config(
             worker, workspace_id, job, workflow_key, node, log_path, shard_index, str(exc)
         )
     claim = worker.leases.try_claim(
@@ -128,6 +127,10 @@ def claim_shard_locally(
     if claim is None:
         return False  # capacity lost to a race; the next poll pass re-evaluates
     snapshot.record_claim(workspace_id, node.key)
+    # #520 四轮 P2：剥离失败通道的内部调度键——context.job 会被
+    # build_runtime 暴露给 node SDK 的 ctx.job（远程 lane 只含
+    # runtime_context_stub 的白名单键），不剥离即 lane 相关输入。
+    lane_job = {k: v for k, v in job.items() if k != shard_failure.DISPATCH_GENERATION_JOB_KEY}
     context = ExecutionContext(
         execution_id=claim.execution_id,
         lease_id=claim.lease_id,
@@ -139,7 +142,7 @@ def claim_shard_locally(
         node_key=claim.node_key,
         capability=claim.capability,
         workspace=dict(workspace),
-        job=dict(job),
+        job=dict(lane_job),
         job_dir=job_dir,
         log_path=log_path,
         inputs=tuple(node.inputs),
