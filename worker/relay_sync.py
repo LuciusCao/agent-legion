@@ -31,7 +31,12 @@ RELAY_SYNC_INTERVAL_SECONDS = 2.0
 
 
 def relay_watchdog_threshold(interval: float) -> float:
-    """The stall bound: three relay periods, with a floor covering slow ticks."""
+    """The stall bound: three relay periods, with a floor covering slow ticks.
+
+    The 60s floor must stay above the relay tick ceiling
+    (``clamp_batch_interval`` caps the batch period at 45s) — raising the
+    clamp past this floor would make the watchdog false-positive on slow
+    but healthy ticks."""
     return max(3.0 * interval, 60.0)
 
 

@@ -199,7 +199,12 @@ def main() -> int:
                 next_sweep = time.monotonic() + SWEEP_INTERVAL_SECONDS
             if lease_snapshot_path is not None:
                 executor_relay_sync(
-                    heartbeat_registry, lease_snapshot_path, worker_id, client.token, relay_state
+                    heartbeat_registry,
+                    lease_snapshot_path,
+                    worker_id,
+                    client.token,
+                    relay_state,
+                    log=_print,
                 )
             completed = {future for future in active if future.done()}
             active -= completed
