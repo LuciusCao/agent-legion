@@ -9,9 +9,20 @@ plane is fresh (the same online predicate as code_dispatch:
 ``last_seen_at`` younger than ``ONLINE_THRESHOLD_SECONDS``), the sweep
 defers expiry and lets the next heartbeat renew the lease.
 
-The deferral is bounded: silence longer than ``TTL + grace`` (grace = TTL,
-so 2×TTL) expires as before — a truly dead attempt thread on a live Worker
-must not hang forever.
+The deferral is bounded: silence longer than ``TTL + grace`` (grace = TTL, so 2×TTL)
+expires as before — a truly dead attempt thread on a live Worker must not hang
+forever. The hard cutoff is a strict ``<``: a heartbeat exactly 2×TTL old expires.
+
+Known blind spot (phase 2): the claim loop talks to the Host only while
+its claim budget is positive (``drain_budget`` loops on ``budget > 0``).
+A fully saturated Worker — every slot occupied, ``claim_enabled`` false,
+or upload back-pressure clamping the budget to zero — issues no claim
+traffic, so ``last_seen_at`` is then refreshed only by heartbeat touches
+and result commits; if the heartbeat threads are also starved, the control
+plane goes stale 30s later and this deferral never engages. The sweep then falls
+back to expire-and-requeue — a safe failure direction (no zombie capacity), but
+the pure-saturation spiral still needs a phase-2 Worker-side keepalive for the
+budget-zero state.
 """
 
 from __future__ import annotations

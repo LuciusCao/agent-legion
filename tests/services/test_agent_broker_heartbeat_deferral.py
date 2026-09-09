@@ -49,10 +49,10 @@ def _silence_heartbeat(job_db, execution_id: str, silence_seconds: float) -> Non
         )
 
 
-def _claim(job_db) -> tuple[AgentExecutionBroker, AgentClaim]:
-    _register_fresh_worker(job_db)
+def _claim(job_db, worker_id: str = "worker-1") -> tuple[AgentExecutionBroker, AgentClaim]:
+    _register_fresh_worker(job_db, worker_id)
     broker = _broker(job_db)
-    claimed = broker.claim("worker-1")
+    claimed = broker.claim(worker_id)
     assert claimed is not None
     return broker, claimed
 
@@ -147,3 +147,66 @@ def test_closed_lease_close_path_not_deferred(job_db) -> None:
             (claimed.execution_id,),
         ).fetchone()
     assert row["state"] == "done"
+
+
+def test_silence_exactly_at_hard_bound_expires(job_db) -> None:
+    """硬兜底是严格 <：心跳静默恰好 2×TTL 也算过期（不赦免）。"""
+    seed_request(job_db, job_id="job-1")
+    broker_instance, claimed = _claim(job_db)
+    _silence_heartbeat(job_db, claimed.execution_id, 2 * _TTL)
+
+    assert broker_instance.sweep_expired_claims() == [claimed.execution_id]
+
+
+def test_worker_turning_stale_within_grace_expires(job_db) -> None:
+    """grace 内 worker 由新鲜转离线：第一拍延期，第二拍照常过期重排。"""
+    seed_request(job_db, job_id="job-1")
+    broker_instance, claimed = _claim(job_db)
+    _silence_heartbeat(job_db, claimed.execution_id, _TTL + 10)
+    assert broker_instance.sweep_expired_claims() == []
+
+    _set_worker_last_seen(job_db, "worker-1", age_seconds=300)
+
+    assert broker_instance.sweep_expired_claims() == [claimed.execution_id]
+    assert job_db.get_job_node("job-1", "generate")["status"] == "pending"
+
+
+def test_mixed_sweep_counts_deferred_and_expired_separately(job_db, monkeypatch) -> None:
+    """同一 sweep 混合行：fresh worker 的延期、stale worker 的一个重排一个
+    终态——requeued 与 done 各计一次且数值正确（延期行两边都不计）。"""
+    for job_id in ("job-fresh", "job-requeue", "job-terminal"):
+        seed_request(job_db, job_id=job_id, limit=5)
+    broker_instance, fresh_claim = _claim(job_db, "worker-fresh")
+    _register_fresh_worker(job_db, "worker-stale")
+    requeue_claim = broker_instance.claim("worker-stale")
+    terminal_claim = broker_instance.claim("worker-stale")
+    assert requeue_claim is not None and terminal_claim is not None
+    for claimed in (fresh_claim, requeue_claim, terminal_claim):
+        _silence_heartbeat(job_db, claimed.execution_id, _TTL + 10)
+    _set_worker_last_seen(job_db, "worker-stale", age_seconds=300)
+    # Push the terminal row past the requeue limit so it force-closes as done.
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set attempt=%s where execution_id=%s",
+            (broker_instance.requeue_limit + 1, terminal_claim.execution_id),
+        )
+    requeued_calls: list[int] = []
+    done_calls: list[int] = []
+    monkeypatch.setattr(profile, "note_execution_requeued", lambda n: requeued_calls.append(n))
+    monkeypatch.setattr(profile, "note_execution_done", lambda n: done_calls.append(n))
+
+    swept = broker_instance.sweep_expired_claims()
+
+    assert swept == [requeue_claim.execution_id]
+    assert requeued_calls == [1]
+    assert done_calls == [1]
+    with job_db._connect_read() as conn:
+        rows = {
+            row["execution_id"]: row["state"]
+            for row in conn.execute(
+                "select execution_id, state from agent_execution_requests"
+            ).fetchall()
+        }
+    assert rows[fresh_claim.execution_id] == "claimed"
+    assert rows[requeue_claim.execution_id] == "queued"
+    assert rows[terminal_claim.execution_id] == "done"

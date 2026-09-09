@@ -39,9 +39,16 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `ONLINE_THRESHOLD_SECONDS` 口径，与 code_dispatch 一致），本次不删
   租约、不重排队，打一条按 TTL 分桶降采样的 WARNING 让 execution 续命，
   worker 心跳面恢复后下一拍心跳即续期自愈。延期有硬兜底：心跳静默超过
-  2×TTL（grace = TTL）照常过期——worker 活着但某 attempt 线程真死的
-  场景不会永远挂着；控制面不新鲜（worker 真离线）行为完全不变。延期
-  跳过的行既不计入 requeued 也不计入 done 的 runtime profile 口径。
+  2×TTL（grace = TTL，严格小于）照常过期——worker 活着但某 attempt
+  线程真死的场景不会永远挂着；控制面不新鲜（worker 真离线）行为完全
+  不变。延期跳过的行既不计入 requeued 也不计入 done 的 runtime
+  profile 口径。已知盲区（留二期）：worker 的 claim 循环只在领取预算
+  为正时发 HTTP（`drain_budget` 按 `budget > 0` 循环），槽位占满 /
+  `claim_enabled` 关闭 / 上传背压钳零时预算为 0、零控制面流量，
+  `last_seen_at` 只剩心跳触活与结果提交触活——「全部槽位占满 + 心跳
+  饿死」的纯饱和场景下控制面 30s 后照样 stale，延期分支不生效、回落
+  旧行为（失败方向安全，不留僵尸容量）；二期方向是 worker 侧在预算
+  为 0 时发轻量 keepalive。
 
 ## [0.7.6] - 2026-09-09
 
