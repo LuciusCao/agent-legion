@@ -518,16 +518,14 @@ class CampaignService:
         return self.job_db.list_campaigns(workspace_id, limit=limit)
 
     def get_campaign(self, workspace_id: str, campaign_id: str) -> dict[str, Any]:
-        """Campaign detail (design §3.2): the row plus, for submit mode, the
-        linked-run overview (run id / status / counts, newest first — the
-        idx_runs_campaign probe). Rerun/upgrade campaigns own no runs and
-        return an empty list (progress is the campaign's own counters)."""
+        """Campaign detail (§3.2)：submit 形态附带 linked-run 概览（最新在
+        前，idx_runs_campaign 探针）；rerun/upgrade 无 runs（进度即计数器）。"""
         row = self.job_db.get_campaign_in_workspace(workspace_id, campaign_id)
         if row is None:
             raise NotFoundError("Campaign not found")
-        row["runs"] = (
-            self.job_db.list_campaign_runs_overview(campaign_id) if row["mode"] == "submit" else []
-        )
+        # submit 形态带 linked-run 概览；rerun/upgrade 的进度即自身计数器。
+        if row["mode"] == "submit":
+            row["runs"] = self.job_db.list_campaign_runs_overview(campaign_id)
         return row
 
     # ------------------------------------------------------------------

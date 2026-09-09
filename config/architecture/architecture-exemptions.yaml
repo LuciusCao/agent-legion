@@ -1201,27 +1201,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 143
 - check: architecture.file_budget
-  path: server/app/workflow_worker/campaign_feeder.py
-  reason: >-
-    #532 PR-B round-3 (PR #545 P1-1): staged-batch replay gained
-    completed-artifact protection — a replayed pending_batch skips jobs
-    that completed between delivery and the crash (mark_nodes_for_rerun
-    eligibility passes completed+lease-less jobs under an explicit
-    node_key; an unconditional replay would wipe their artifacts and
-    rerun finished experiments). queued/failed still replay (the write
-    path is idempotent there). Round-4 (PR #545 P1): replay ownership is
-    now the v81 delivery markers — a delivered job that ran and failed
-    again before the crashed process's replay is no longer re-delivered
-    (status-based guessing cannot tell that failure from a never-landed
-    one); the feeder reads the markers and counts marked jobs as
-    succeeded while completed stays a product-protection skip. PR-C
-    stacks the submit mixin's dispatch onto the same class, which lands
-    the module at 378. Anchored to #522: harvest with the
-    out-of-process feeder migration (#562).
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
-  ceiling: 378
-- check: architecture.file_budget
   path: server/app/jobs/atomic_mutations.py
   reason: >-
     #545 round-4 (v81): record_campaign_delivery lands here because it
@@ -1346,12 +1325,12 @@ exemptions:
     conditional; the module sits 6 effective lines over PR-A's ceiling
     after PR-B's guarded-resume wording landed at the line budget's
     edge. PR-A round-4's bounded existence probe and id normalization
-    land the merged module at 480. Anchored to #522; harvest when the
-    campaign route set consolidates or the preview family moves to its
-    own module.
+    land the merged module at 477 (the detail runs-overview rides a
+    one-branch conditional). Anchored to #522; harvest when the campaign
+    route set consolidates or the preview family moves to its own module.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
-  ceiling: 480
+  ceiling: 477
 - check: architecture.file_budget
   path: server/app/workflow_worker/campaign_feeder_submit.py
   reason: >-
