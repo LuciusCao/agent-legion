@@ -119,7 +119,9 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
         # optional；无默认值参数必须排在带默认值的表单字段之前。
         manifest: Annotated[UploadFile, File()],
         mode: Annotated[str, Form()] = "submit",
-        name: Annotated[str, Form()] = "",
+        # 表单字段的长度界（审核 P3）：有界读只覆盖文件部分，name 会被
+        # python-multipart 全量缓冲后再校验——Form 侧限长封住这个缺口。
+        name: Annotated[str, Form(max_length=200)] = "",
         watermark: Annotated[int | None, Form()] = None,
         batch_size: Annotated[int | None, Form()] = None,
     ) -> CampaignCreateResponse:

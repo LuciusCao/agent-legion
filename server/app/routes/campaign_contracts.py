@@ -52,10 +52,9 @@ class CampaignKnobsMixin(BaseModel):
 class CampaignRerunTarget(CampaignKnobsMixin):
     """rerun/upgrade: exactly one of job_ids or filter, plus rerun knobs.
 
-    exclude_ids 仅随 filter 形态（allMatching 反选；keyset 取片在 SQL 内
-    排除）。显式 job_ids 是手写快照，语义上无排除项、忽略之。
-    node_key/from_failed_node 同 JobBatchRerunRequest 规则（仅 rerun；
-    upgrade 无节点选择，跨模式规则在 CampaignCreateRequest 判定）。
+    exclude_ids 仅随 filter 形态（allMatching 反选；取片 SQL 内排除）；
+    显式 job_ids 是手写快照，忽略之。node_key/from_failed_node 同
+    JobBatchRerunRequest 规则（仅 rerun；upgrade 无节点选择）。
     """
 
     node_key: str | None = None
@@ -66,7 +65,10 @@ class CampaignRerunTarget(CampaignKnobsMixin):
         Field(default=None, max_length=MAX_JOB_ID_SELECTION)
     )
     filter: JobFilterPayload | None = None
-    exclude_ids: list[str] = Field(default_factory=list)
+    # exclude_ids 序列化进 spec——与 job_ids 同限长防行宽回涨（审核 P3）。
+    exclude_ids: list[Annotated[str, Field(min_length=1, max_length=MAX_ITEM_ID_LENGTH)]] = Field(
+        default_factory=list, max_length=MAX_JOB_ID_SELECTION
+    )
 
     @model_validator(mode="after")
     def check_selection(self) -> Self:
