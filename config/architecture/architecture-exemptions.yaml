@@ -1166,3 +1166,20 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 228
+- check: architecture.file_budget
+  path: server/app/main.py
+  reason: >-
+    PR #545 P2: the campaign feeder's startup gate consumes the
+    SingleReplicaProbe verdict (previously fire-and-forget) so a second
+    Host replica against the same database no longer double-feeds running
+    campaigns — the feeder's pacing/fairness/backoff are process-memory
+    state with no durable mutual exclusion, so only the advisory-lock
+    holder may start it. Net +11 effective lines over PR-B's registered
+    ceiling (222 → 225 effective) after docstring trims; the honest
+    alternatives (folding the lifespan into a helper module) would split
+    startup ordering invariants that backend.md pins to this file.
+    Anchored to #522 (budget-anchor tracker): harvest when the lifespan
+    block gains its own module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 233

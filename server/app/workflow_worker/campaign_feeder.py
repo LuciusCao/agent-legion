@@ -14,6 +14,14 @@ cache — all of which are safe to lose on restart (the row re-initializes
 them; re-submitting a batch is idempotent through job dedup / rerun
 eligibility).
 
+Crash discipline for the filter form (PR #545 P1): a filter batch's
+matching fields are rewritten by its own submission, so a crash between
+the batch's commits and the CAS advance would make the fed jobs
+unfindable by the re-run filter — their counters lost forever. The
+stage/replay/pop mechanics live in campaign_batch_staging.py (split at
+the budget ceiling); explicit-ids and submit forms need no staging —
+their slice sources are stable across the crash.
+
 This slice (PR-B) implements the rerun and upgrade modes; submit dispatches
 through the same skeleton with a per-campaign manifest cache that PR-C
 fills in.
@@ -33,9 +41,14 @@ import time
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from server.app.jobs.queries.campaigns import CAMPAIGN_ACTIVE_STATUSES
-from server.app.jobs.queries.job_filtering import JobListFilter
 from server.app.services.job_errors import InvalidOperationError, JobServiceError
 from server.app.services.job_rerun.batch import batch_rerun
+from server.app.workflow_worker.campaign_batch_staging import (
+    copy_progress,
+    next_slice,
+    stage_batch,
+    target_spec,
+)
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -48,15 +61,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Wide-set non-terminal watermark (CAMPAIGN-STATE-001): total minus the
-# terminal statuses. count_jobs_by_status keys on the folded buckets
-# (queued → pending); paused / awaiting_approval deliberately count toward
+# terminal statuses. paused / awaiting_approval deliberately count toward
 # the level — the #349 red line's set definition, transplanted from the
 # issue-505 CLI's non_terminal_count.
 _TERMINAL_JOB_STATUSES = frozenset({"completed", "failed"})
 
 # Transient-error linear backoff (design §2.3, the CLI's MAX_RETRY_WAIT
 # server-side): min(5s × consecutive failures, 60s), held in memory. A
-# restart clears it, which is harmless — re-feeding a batch is idempotent.
+# restart clears it, which is harmless — re-feeding is idempotent.
 _BACKOFF_BASE_SECONDS = 5.0
 _BACKOFF_MAX_SECONDS = 60.0
 
@@ -98,17 +110,12 @@ class CampaignFeeder:
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
-        # In-memory scheduling state (lost on restart by design; see module
-        # docstring): campaign_id → monotonic deadline before which no feed
-        # is attempted (feed interval OR backoff), plus the consecutive-
-        # failure count feeding the linear backoff.
+        # In-memory scheduling state (lost on restart by design): the feed
+        # deadlines / backoff counters, the round-robin fairness pointers,
+        # and the submit-mode manifest cache (PR-C).
         self._next_feed_at: dict[str, float] = {}
         self._attempts: dict[str, int] = {}
-        # workspace_id → index into its stable-ordered active campaign list;
-        # the round-robin pointer fairness rule (design §2.3).
         self._round_robin: dict[str, int] = {}
-        # campaign_id → loaded submit manifest (PR-C fills the load/evict
-        # logic; the slot and its pruning are the skeleton this slice ships).
         self._manifest_cache: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
@@ -125,9 +132,8 @@ class CampaignFeeder:
 
     def start(self) -> None:
         # Idempotency guard (ArtifactOrphanGcThread.start precedent): a
-        # second start() — repeated lifespan entry under TestClient context
-        # usage or a future multi-lifespan host — must not resurrect the
-        # thread after stop().
+        # second start() — repeated lifespan entry or a future multi-
+        # lifespan host — must not resurrect the thread after stop().
         if self._thread is not None and self._thread.is_alive():
             return
         self._thread = threading.Thread(target=self._loop, name="campaign-feeder", daemon=True)
@@ -146,16 +152,13 @@ class CampaignFeeder:
             try:
                 self._tick()
             except Exception:
-                # #204 broad-except audit: deliberate feeder-loop safety net,
-                # the poll-loop discipline one layer over. Killing this
-                # thread would freeze every active campaign at its stored
-                # cursor until a Host restart; the next tick (2s later) is
-                # the built-in retry. The tick body already narrows
-                # per-campaign failures into backoff / failed-row flips, so
-                # anything landing here is a tick-level programming error or
-                # an infrastructure outage — visible in logs, never fatal,
-                # and never allowed to escape the thread (an unhandled
-                # exception would kill this daemon thread silently).
+                # #204 broad-except audit: deliberate feeder-loop safety
+                # net. Killing this thread would freeze every active
+                # campaign at its stored cursor until a Host restart; the
+                # next tick is the built-in retry, and the tick body
+                # already narrows per-campaign failures into backoff /
+                # failed-row flips — an escape here is a tick-level error,
+                # logged and never fatal to the thread.
                 logger.exception("campaign feeder tick failed")
             self._sleep(tick)
 
@@ -194,8 +197,7 @@ class CampaignFeeder:
         for campaign in campaigns:
             by_workspace.setdefault(str(campaign["workspace_id"]), []).append(campaign)
         # Per-tick per-workspace memoization of the pause check and the
-        # watermark level (the catalog_scan precedent: is_paused opens a
-        # connection per call, so memoize per round, not per campaign).
+        # watermark level (is_paused opens a connection per call).
         paused: dict[str, bool] = {}
         levels: dict[str, int] = {}
         for workspace_id, group in by_workspace.items():
@@ -205,10 +207,9 @@ class CampaignFeeder:
             if workspace_id not in paused:
                 paused[workspace_id] = self._is_paused(workspace_id)
             if paused[workspace_id]:
-                # A paused workspace suspends feeding but never rewrites the
-                # campaign's own status (design §2.4 / CAMPAIGN-STATE-001):
-                # the row stays running, its counters simply stop moving,
-                # and the operator's workspace resume restarts the feed.
+                # A paused workspace suspends feeding but never rewrites
+                # the campaign's own status (design §2.4): the row stays
+                # running, its counters stop moving.
                 continue
             if workspace_id not in levels:
                 levels[workspace_id] = self._non_terminal_level(workspace_id)
@@ -217,13 +218,12 @@ class CampaignFeeder:
             except JobServiceError as exc:
                 # Deterministic family: the campaign's target is broken
                 # (corrupt spec, vanished revision); retrying cannot change
-                # the outcome. Fail the row with the sample error and move
-                # on — repair path is a fresh campaign (design §2.3).
-                # PR-B review P1: attribute to `picked` (this tick's
-                # round-robin selection) — the grouping loop's `campaign`
-                # binding points at the last row of the group, so a feed
-                # failure would fail an unrelated, possibly healthy
-                # campaign while the broken one retries every tick.
+                # the outcome. Fail the row with the sample error — repair
+                # path is a fresh campaign (design §2.3). PR-B review P1:
+                # attribute to `picked` (this tick's round-robin selection)
+                # — the grouping loop's `campaign` binding points at the
+                # group's last row, so a feed failure would fail an
+                # unrelated, possibly healthy campaign.
                 logger.error(
                     "campaign feeder: campaign %s failed deterministically: %s",
                     picked["id"],
@@ -231,16 +231,13 @@ class CampaignFeeder:
                 )
                 self._fail_campaign(picked, str(exc))
             except Exception:
-                # #204 broad-except audit: per-campaign containment on the
-                # feeder loop. The feed body narrows the expected failures
-                # (JobServiceError above; per-job rerun/upgrade outcomes are
-                # result dicts, not exceptions), so an escape here is the
-                # transient infrastructure family (DB connection loss, OS
-                # errors). One campaign's outage must not stop the other
-                # workspaces' campaigns: log with traceback, back this
-                # campaign off linearly, keep ticking. Same P1 attribution:
-                # the backoff counters belong to `picked`, not the group's
-                # last row.
+                # #204 broad-except audit: per-campaign containment. The
+                # feed body narrows the expected failures (per-job
+                # rerun/upgrade outcomes are result dicts, not exceptions),
+                # so an escape here is the transient infrastructure family
+                # (DB connection loss, OS errors): log with traceback, back
+                # this campaign off linearly, keep ticking. Same P1
+                # attribution: the backoff counters belong to `picked`.
                 logger.exception("campaign feeder: feeding campaign %s failed", picked["id"])
                 self._note_transient_failure(picked)
 
@@ -249,10 +246,9 @@ class CampaignFeeder:
     ) -> dict[str, Any] | None:
         """Round-robin pick: one campaign per workspace per tick, feed-gated.
 
-        The scan order (workspace_id, id) is stable, so the memory pointer
-        walks the group fairly; campaigns still inside their feed-interval
-        window or backoff deadline are skipped. None when every campaign of
-        the workspace is gated this tick.
+        The scan order is stable, so the memory pointer walks the group
+        fairly; campaigns inside their feed-interval window or backoff
+        deadline are skipped. None when every campaign is gated.
         """
         now = time.monotonic()
         count = len(group)
@@ -288,8 +284,8 @@ class CampaignFeeder:
     def _non_terminal_level(self, workspace_id: str) -> int:
         """Wide-set non-terminal level: total − completed − failed.
 
-        The v36 trigger-maintained counter table is a PK-point-read whose
-        cost is independent of workspace size (DB-JOB-STATUS-COUNTS-001).
+        The trigger-maintained counter table is a PK-point-read whose cost
+        is independent of workspace size (DB-JOB-STATUS-COUNTS-001).
         """
         counts = self.job_db.count_jobs_by_status(workspace_id)
         return sum(n for status, n in counts.items() if status not in _TERMINAL_JOB_STATUSES)
@@ -304,16 +300,13 @@ class CampaignFeeder:
         The watermark is a replenishment trigger level, not a capacity
         promise: level >= watermark merely skips this round; a low watermark
         plus a large batch is a legal burst configuration and the batch is
-        NOT refused (the CLI check_watermark semantics, CAMPAIGN-STATE-001).
+        NOT refused (the CLI check_watermark semantics).
         """
         campaign_id = str(campaign["id"])
         if str(campaign["status"]) == "pending":
-            # CAS pickup: pending → running only if the row is still
-            # pending — two feeders racing (or a racing cancel) leave
-            # exactly one winner; the loser sees None and stops here. The
-            # pickup precedes the watermark gate so a gated campaign still
-            # shows as running ("being drained, waiting on the level")
-            # rather than lingering at pending.
+            # CAS pickup: pending → running, one winner among racing feeders
+            # or a racing cancel. Precedes the watermark gate so a gated
+            # campaign still shows running ("drained, waiting on the level").
             picked = self.job_db.transition_campaign_status(campaign_id, ("pending",), "running")
             if picked is None:
                 return
@@ -328,11 +321,13 @@ class CampaignFeeder:
         if not outcome.ids:
             # An empty slice means the target is gone (post-creation
             # deletions) or the completed flip lost the race to a crash —
-            # either way finish without counting a phantom batch.
+            # either way finish without counting a phantom batch. A lost
+            # stage race (PR #545 P1) returns exhausted=False and just
+            # skips; the row is already terminal.
             if outcome.exhausted:
                 self.job_db.transition_campaign_status(campaign_id, ("running",), "completed")
             return
-        progress = _copy_progress(campaign)
+        progress = copy_progress(campaign)
         self._advance_cursor(progress, campaign, outcome)
         samples = list(progress.get("watermark_samples") or [])
         samples.append({"level": level, "ts": time.time()})
@@ -340,7 +335,7 @@ class CampaignFeeder:
         progress.pop("consecutive_failures", None)
         advanced = self.job_db.advance_campaign_progress(
             campaign_id,
-            expected_progress=_copy_progress(campaign),
+            expected_progress=copy_progress(campaign),
             progress=progress,
             batches_submitted=int(campaign["batches_submitted"]) + 1,
             jobs_succeeded=int(campaign["jobs_succeeded"]) + outcome.succeeded,
@@ -351,7 +346,8 @@ class CampaignFeeder:
             # Lost the CAS race against pause/cancel: the submitted batch
             # stays (dedup / rerun eligibility make it idempotent), the
             # cursor stays frozen, and the next active scan will not match
-            # this row. Nothing left to do.
+            # this row. PR #545 P1：filter 形态下 stage 的 pending_batch
+            # 也留存——resume 后 next_slice 优先消化，计数不漏记。
             return
         if outcome.exhausted:
             self.job_db.transition_campaign_status(campaign_id, ("running",), "completed")
@@ -364,6 +360,10 @@ class CampaignFeeder:
         self, progress: dict[str, Any], campaign: dict[str, Any], outcome: BatchOutcome
     ) -> None:
         """Move the mode-specific cursor forward past the fed slice."""
+        # PR #545 P1：本批目标已消化（提交完成、计数即将落账），从文档
+        # 摘除 pending_batch——它是投递前的崩溃恢复锚点，正常推进路径
+        # 不留残迹；transient / 竞态路径不经过这里，锚点保留待重放。
+        progress.pop("pending_batch", None)
         if "cursor" in progress:
             # rerun/upgrade filter form: keyset cursor + processed count.
             progress["processed"] = int(progress.get("processed") or 0) + len(outcome.ids)
@@ -380,9 +380,9 @@ class CampaignFeeder:
     def _submit_batch(self, campaign: dict[str, Any]) -> BatchOutcome | None:
         """Feed one batch; None only for the PR-C submit stub.
 
-        Per-job outcomes are result dicts on both paths (byte-identical to
-        the synchronous entry points): succeeded = flips that landed,
-        skipped = ineligible/not-found/busy, failed = per-job failures.
+        Per-job outcomes are result dicts on both paths: succeeded = flips
+        that landed, skipped = ineligible/not-found/busy, failed = per-job
+        failures.
         """
         mode = str(campaign["mode"])
         if mode == "rerun":
@@ -390,44 +390,21 @@ class CampaignFeeder:
         if mode == "upgrade":
             return self._submit_upgrade(campaign)
         if mode == "submit":
-            # PR-C: load the manifest into _manifest_cache (inline spec or
-            # object store), slice at item_offset, call
-            # run_service.create_run(campaign_id=...), absorb the
-            # already-submitted batch, advance item_offset. The dispatch
-            # skeleton keeps the mode reachable so PR-C is a branch
+            # PR-C: load the manifest, slice at item_offset, absorb the
+            # already-submitted batch, advance item_offset — a branch
             # fill-in, not a rewire.
             return None
         raise InvalidOperationError(f"Unsupported campaign mode {mode!r}")
 
-    def _next_slice(self, campaign: dict[str, Any]) -> tuple[list[str], str | None, bool]:
-        """Next id slice for a rerun/upgrade campaign (design §1.4).
-
-        Filter form: one keyset page of the stored filter (the resolver's
-        ``_list_job_ids_page`` semantics through the JobQueries facade); a
-        page that returns no cursor is the last page. Explicit-ids form:
-        the stored snapshot list at the offset.
-        """
-        spec = _target_spec(campaign)
-        progress = _copy_progress(campaign)
-        batch_size = int(campaign["batch_size"])
-        if "filter" in spec:
-            ids, next_cursor = self.job_db.list_campaign_filter_job_ids_page(
-                str(campaign["workspace_id"]),
-                _spec_filter(spec),
-                batch_size,
-                progress.get("cursor") or None,
-            )
-            return ids, next_cursor, next_cursor is None
-        all_ids = [str(value) for value in (spec.get("job_ids") or [])]
-        offset = int(progress.get("offset") or 0)
-        slice_ids = all_ids[offset : offset + batch_size]
-        return slice_ids, None, offset + len(slice_ids) >= len(all_ids)
-
     def _submit_rerun(self, campaign: dict[str, Any]) -> BatchOutcome:
-        ids, next_cursor, exhausted = self._next_slice(campaign)
+        ids, next_cursor, exhausted = next_slice(self.job_db, campaign)
         if not ids:
             return BatchOutcome([], 0, 0, 0, True, None)
-        spec = _target_spec(campaign)
+        if not stage_batch(self.job_db, campaign, ids, next_cursor, exhausted):
+            # PR #545 P1：stage 输给 pause/cancel——空 ids 且非 exhausted
+            # 让 _feed_one 安静跳过（不投、不翻终态、不推进）。
+            return BatchOutcome([], 0, 0, 0, False, None)
+        spec = target_spec(campaign)
         results = batch_rerun(
             self.rerun_service,
             str(campaign["workspace_id"]),
@@ -445,9 +422,12 @@ class CampaignFeeder:
         )
 
     def _submit_upgrade(self, campaign: dict[str, Any]) -> BatchOutcome:
-        ids, next_cursor, exhausted = self._next_slice(campaign)
+        ids, next_cursor, exhausted = next_slice(self.job_db, campaign)
         if not ids:
             return BatchOutcome([], 0, 0, 0, True, None)
+        if not stage_batch(self.job_db, campaign, ids, next_cursor, exhausted):
+            # PR #545 P1：同 _submit_rerun——stage 失败即放弃本批。
+            return BatchOutcome([], 0, 0, 0, False, None)
         succeeded = skipped = failed = 0
         for job_id in ids:
             result = self.upgrade_service.upgrade(str(campaign["workspace_id"]), job_id)
@@ -476,9 +456,8 @@ class CampaignFeeder:
 
         No retry cap: the watermark loop always comes back around, and
         re-feeding is idempotent. The consecutive-failure count is surfaced
-        into progress_json for UI alerting (design §2.3) — best-effort, CAS
-        -guarded, so a racing pause/cancel simply wins and the count stays
-        in memory until the next failure.
+        into progress_json for UI alerting — best-effort, CAS-guarded, so
+        a racing pause/cancel simply wins.
         """
         campaign_id = str(campaign["id"])
         attempts = self._attempts.get(campaign_id, 0) + 1
@@ -486,11 +465,11 @@ class CampaignFeeder:
         self._next_feed_at[campaign_id] = time.monotonic() + min(
             _BACKOFF_BASE_SECONDS * attempts, _BACKOFF_MAX_SECONDS
         )
-        progress = _copy_progress(campaign)
+        progress = copy_progress(campaign)
         progress["consecutive_failures"] = attempts
         self.job_db.advance_campaign_progress(
             campaign_id,
-            expected_progress=_copy_progress(campaign),
+            expected_progress=copy_progress(campaign),
             progress=progress,
             batches_submitted=int(campaign["batches_submitted"]),
             jobs_succeeded=int(campaign["jobs_succeeded"]),
@@ -503,30 +482,3 @@ class CampaignFeeder:
         self.job_db.transition_campaign_status(
             str(campaign["id"]), CAMPAIGN_ACTIVE_STATUSES, "failed", error_message=message
         )
-
-
-def _copy_progress(campaign: dict[str, Any]) -> dict[str, Any]:
-    """Shallow copy of the campaign's stored progress document."""
-    progress = campaign.get("progress")
-    return dict(progress) if isinstance(progress, dict) else {}
-
-
-def _target_spec(campaign: dict[str, Any]) -> dict[str, Any]:
-    """The stored target spec; a non-dict shape is a deterministic failure."""
-    spec = campaign.get("target_spec")
-    if not isinstance(spec, dict):
-        raise InvalidOperationError(
-            f"Campaign target spec is corrupt (expected an object, got {type(spec).__name__})"
-        )
-    return spec
-
-
-def _spec_filter(spec: dict[str, Any]) -> JobListFilter:
-    """Rebuild the stored JobListFilter; unknown keys are a corrupt row."""
-    raw = spec.get("filter")
-    if not isinstance(raw, dict):
-        raise InvalidOperationError("Campaign filter target is corrupt (expected an object)")
-    try:
-        return JobListFilter(**raw)
-    except TypeError as exc:
-        raise InvalidOperationError(f"Campaign filter target is corrupt: {exc}") from exc
