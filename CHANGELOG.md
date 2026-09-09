@@ -29,6 +29,19 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
     面仍瘫痪、本 claim 的 lease 在 Host 侧已死或濒死，放弃本次 claim
     （不 prepare、不上报、不启动心跳），租约过期后由 Host 在 worker
     恢复健康时重排。
+- Host 侧心跳饿死止血（issue #566 一期）：worker 过载时进程内心跳
+  daemon 线程抢不到 GIL 被饿死，心跳静默超过租约 TTL，而控制面（claim
+  轮询）仍在正常触活 `agent_workers.last_seen_at`——旧 sweep 把「执行面
+  心跳饿死」误判为「worker 死亡」，同一 sweep 批量过期 → 重排队 → 立即
+  重 claim → 负载更高的死亡螺旋。`sweep_expired_claims` 的过期判定现在
+  参考 worker 控制面存活：对越过 TTL 的 claimed/reporting execution，
+  若其 worker 的 `last_seen_at` 仍在 online 窗口内（复用
+  `ONLINE_THRESHOLD_SECONDS` 口径，与 code_dispatch 一致），本次不删
+  租约、不重排队，打一条按 TTL 分桶降采样的 WARNING 让 execution 续命，
+  worker 心跳面恢复后下一拍心跳即续期自愈。延期有硬兜底：心跳静默超过
+  2×TTL（grace = TTL）照常过期——worker 活着但某 attempt 线程真死的
+  场景不会永远挂着；控制面不新鲜（worker 真离线）行为完全不变。延期
+  跳过的行既不计入 requeued 也不计入 done 的 runtime profile 口径。
 
 ## [0.7.6] - 2026-09-09
 

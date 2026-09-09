@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from server.app.agent_broker.claim import cancel_request
+from server.app.agent_broker.heartbeat_deferral import HeartbeatDeferral
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.worker_events import note_lease_expired
 from server.app.db.transaction import write_transaction
@@ -49,6 +50,11 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
             " for update skip locked",
             (cutoff,),
         ).fetchall()
+        # #566: expired claims on a Worker whose control plane is still
+        # fresh are deferred (bounded), not expired — heartbeat starvation
+        # is not Worker death.
+        deferral = HeartbeatDeferral(conn, broker.lease_ttl_seconds, rows)
+        deferred = 0
         for row in rows:
             lease_id = row["lease_id"]
             node_run_id = row["node_run_id"]
@@ -72,6 +78,9 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 released.append((str(row["worker_id"]), str(row["workspace_id"])))
                 continue
             if lease is None:
+                continue
+            if deferral.should_defer(row):
+                deferred += 1
                 continue
             # Sole lease-deletion path in the repo: audit the Worker-loss sweep.
             logger.warning(
@@ -134,6 +143,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                     " where id=%s",
                     (outcome["error_message"], row["job_id"]),
                 )
+        deferral.prune_log_buckets()
     for worker_id, workspace_id in released:
         broker._notify_worker_released(worker_id, workspace_id)
     if requeued:
@@ -144,9 +154,11 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         profile.note_execution_requeued(len(requeued))
     # Force-closed rows (requeue limit exceeded) are terminal executions too:
     # the done-rate gauge must not undercount exactly when workers are lost
-    # en masse (independent-review P2 on #367).
-    if len(requeued) < len(rows):
+    # en masse (independent-review P2 on #367). Deferred rows (#566) are
+    # neither requeued nor done — the execution still lives.
+    done = len(rows) - len(requeued) - deferred
+    if done > 0:
         from server.app.services.runtime_profile import profile
 
-        profile.note_execution_done(len(rows) - len(requeued))
+        profile.note_execution_done(done)
     return requeued
