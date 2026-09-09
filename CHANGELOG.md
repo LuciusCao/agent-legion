@@ -60,16 +60,23 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
     裁定写回 `lease_beat_result.json`，executor 主循环按 seq 幂等应用
     （lost 按 (execution_id, lease_id) 对匹配，重 claim 的新 attempt
     不被旧裁定误伤）。安全栏：relay 只在快照 pid 存活且快照新鲜
-    （60s 停滞即停拍）时发拍——executor 脑死时租约按 Host TTL 正常
-    过期重排，不会被冻结快照永远续命；executor 换代（快照 pid 变化）
-    自动重探批量端点，降级不终身化。裸跑 executor（无快照 env）
-    保持原进程内心跳循环。
+    （60s 停滞即停拍）时续租——executor 脑死时租约按 Host TTL 正常
+    过期重排，不会被冻结快照永远续命；但停拍 ≠ 失联：停滞期间 relay
+    继续用不续租的轻量已认证 ping（get_self → record_seen）维持控制
+    面新鲜（PR #572 codex P1——否则 last_seen_at 30s 后 stale，一期
+    deferral 无法区分执行面饥饿与 worker 真离线，故障只被延后约
+    60s），最终回收由 Host 侧 2×TTL 硬兜底负责。executor 换代（快照
+    pid 变化）自动重探批量端点，降级不终身化。裸跑 executor（无快照
+    env）保持原进程内心跳循环。
   - **relay 存活看门狗**（PR #572 复审）：relay 每拍（含空裁定与瞬时
     失败）都重写结果文件并递增 seq 作为存活证明；executor 侧
     `worker/relay_sync.py` 的看门狗在持有租约而 seq 停跳超阈值
     （3×relay 拍间隔、下限 60s）时打一条 WARNING——区分「relay 活着
     无裁定」与「relay 死亡/supervisor 挂起」（后者租约静默过期会双跑）。
-    纯观测信号，不改结果语义。
+    纯观测信号，不改结果语义。relay 线程生命周期锚在 service
+    lifespan（PR #572 P2：service 停时 set+join 终止 relay、重建于下次
+    启动——不再累积线程，停后 relay 也不会把已关闭的滚动日志惰性重开；
+    sink 因此获得 close/resume 语义）。
   - **一期盲区闭合**：relay 的每拍心跳都经 Host 鉴权路径触活
     `last_seen_at`，executor 整体饱和时控制面依然新鲜，一期 deferral
     在纯饱和场景也能生效（实测复核：budget=0 时 executor 主循环的

@@ -6,17 +6,19 @@ the beats starved while the machine still served work (phase 1's Host-side
 deferral covers the gap; this relay removes it). The relay runs in the
 supervisor process (idle by design): it reads the executor's lease
 snapshot (``lease_snapshot.py``), beats those leases with the snapshot's
-worker token, and writes the Host's verdicts (lost / cancelled) back to
-the beat-result file for the executor to apply.
+worker token (the beat transport lives in ``relay_beats.py``), and writes
+the Host's verdicts (lost / cancelled) back to the beat-result file for
+the executor to apply.
 
 Safety rails:
 - Only beats while the snapshot's pid is a live process AND the snapshot
   is fresh — a brain-dead executor's leases must expire on the normal Host
   TTL path, not be renewed forever from a frozen snapshot.
-- Every relayed beat authenticates the worker (the Host's authenticate
-  path refreshes ``last_seen_at``), so the control plane stays fresh even
-  when the executor's own claim/status loop is starved — this is what lets
-  the phase-1 deferral engage in the pure-saturation scenario.
+- 停拍 ≠ 失联（PR #572 codex P1）: a stale snapshot stops lease RENEWAL
+  but the relay keeps a lightweight authenticated ping
+  (``RelayBeater.control_plane_ping`` — no lease effect) so the Host's
+  phase-1 deferral can still tell a starved executor from a dead worker;
+  the 2×TTL hard bound owns the final reclaim.
 - 401 (token rotated by a re-registration the snapshot predates) drops the
   cached client; the next fresh snapshot carries the new token.
 
@@ -38,9 +40,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from worker.execution.heartbeat_batch import MAX_BATCH_HEARTBEATS, clamp_batch_interval
-from worker.host.client import Client
-from worker.host.heartbeat_ops import SINGLE_BEAT_TIMEOUT_SECONDS
+from worker.execution.heartbeat_batch import clamp_batch_interval
 from worker.lease_snapshot import (
     RESULT_FILENAME,
     SNAPSHOT_FILENAME,
@@ -49,6 +49,7 @@ from worker.lease_snapshot import (
     snapshot_stale,
     write_beat_result,
 )
+from worker.relay_beats import RelayBeater
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -81,11 +82,8 @@ class HeartbeatRelay:
         self._get_config = get_config
         self._stop = stop
         self._log = log
-        self._make_client = client_factory or (lambda host, token: Client(host, token=token))
+        self._beater = RelayBeater(log=log, client_factory=client_factory)
         self._clock = clock
-        self._client: Any = None
-        self._client_key: tuple[str, str] | None = None
-        self._degraded = False
         self._stale_logged = False
         self._result_seq = 0
         self._snapshot_pid: int | None = None
@@ -129,17 +127,25 @@ class HeartbeatRelay:
         # endpoint — a Host upgrade must not wait out a supervisor restart.
         pid = int(snapshot["pid"])
         if pid != self._snapshot_pid:
-            self._snapshot_pid, self._degraded = pid, False
+            self._snapshot_pid, self._beater.degraded = pid, False
+        token = str(snapshot.get("token") or "")
         if snapshot_stale(snapshot, now=self._clock(), stale_seconds=SNAPSHOT_STALE_SECONDS):
             if not self._stale_logged:
                 self._stale_logged = True
                 self._log(
                     f"executor 租约快照停滞（{SNAPSHOT_STALE_SECONDS:.0f}s 未刷新），"
-                    "暂停心跳 relay——租约将按 Host TTL 正常过期重排"
+                    "租约停拍（Host 硬兜底回收）；控制面 ping 继续"
                 )
+            if token:
+                self._beater.control_plane_ping(host_url, token)
+            # 有意停拍也是存活：seq 照 advance，executor 看门狗不误报——
+            # 「租约将过期」的信号面在上方停滞日志与 Host 侧 deferral。
+            self._result_seq += 1
+            write_beat_result(
+                self._state_dir / RESULT_FILENAME, seq=self._result_seq, lost=[], cancelled=[]
+            )
             return
         self._stale_logged = False
-        token = str(snapshot.get("token") or "")
         leases = [
             (str(pair[0]), str(pair[1]))
             for pair in snapshot["leases"]
@@ -147,10 +153,8 @@ class HeartbeatRelay:
         ]
         if not token or not leases:
             return
-        if self._client is None or self._client_key != (host_url, token):
-            self._client = self._make_client(host_url, token)
-            self._client_key = (host_url, token)
-        lost, cancelled = self._beat(leases)
+        self._beater.ensure_client(host_url, token)
+        lost, cancelled = self._beater.beat(leases)
         if lost is None:
             # Transient beat failure: the relay is still ALIVE — the liveness
             # write below must still happen (the executor's watchdog keys on
@@ -165,72 +169,12 @@ class HeartbeatRelay:
             cancelled=cancelled,
         )
 
-    def _beat(self, leases: list[tuple[str, str]]) -> tuple[Any, Any]:
-        """Beat the whole snapshot; (None, None) = transient, retry next tick."""
-        if self._degraded:
-            return self._beat_singles(leases)
-        outcome = self._beat_batch(leases)
-        return (None, None) if outcome is None else outcome
 
-    def _beat_batch(self, leases: list[tuple[str, str]]) -> tuple[list, list] | None:
-        lost: list[tuple[str, str]] = []
-        cancelled: list[str] = []
-        for start in range(0, len(leases), MAX_BATCH_HEARTBEATS):
-            chunk = leases[start : start + MAX_BATCH_HEARTBEATS]
-            try:
-                outcome = self._client.heartbeat_batch(chunk)
-            except Exception as exc:
-                # #204 broad-except audit: relay 的逐拍存活语义（与 executor
-                # 内 batch loop 同族）：传输错误/非 200 的 RuntimeError/畸形
-                # 应答都只丢这一拍，下一拍全量重来，Host 侧逐项谓词幂等；
-                # 真正的死线是租约 TTL 与快照停滞停拍。401（token 已被重新
-                # 注册轮换）额外丢弃缓存 client，下一份快照带新 token 重建。
-                # 日志保全：每次失败都 log。
-                self._log(f"心跳 relay 批量拍失败（{len(chunk)} 租约）：{exc}")
-                if "HTTP 401" in str(exc):
-                    self._client = None
-                return None
-            if outcome is None:
-                self._degraded = True
-                self._log("Host 无批量心跳端点，relay 降级为逐租约心跳")
-                return self._beat_singles(leases)
-            _status, body = outcome
-            lost_ids = set(body.get("lost", []))
-            lost.extend(pair for pair in chunk if pair[0] in lost_ids)
-            cancelled.extend(body.get("cancelled_execution_ids", []))
-        return lost, cancelled
-
-    def _beat_singles(self, leases: list[tuple[str, str]]) -> tuple[list, list]:
-        """Degraded mode: thread-per-lease beats (a slow Host parks only its own lease)."""
-        lost: list[tuple[str, str]] = []
-        cancelled: list[str] = []
-        lock = threading.Lock()
-
-        def beat_one(execution_id: str, lease_id: str) -> None:
-            try:
-                status, cancelled_ids = self._client.heartbeat(
-                    execution_id, lease_id, timeout=SINGLE_BEAT_TIMEOUT_SECONDS
-                )
-            except Exception as exc:
-                # #204 broad-except audit: 单租约丢拍语义——本线程只有这一次
-                # 调用，异常不逃逸成 daemon 线程 traceback；下一拍重试。
-                self._log(f"心跳 relay 单拍失败 {execution_id}：{exc}")
-                return
-            with lock:
-                if status in (401, 409):
-                    lost.append((execution_id, lease_id))
-                cancelled.extend(cancelled_ids)
-
-        threads = [threading.Thread(target=beat_one, args=pair, daemon=True) for pair in leases]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=SINGLE_BEAT_TIMEOUT_SECONDS + 1)
-        return lost, cancelled
-
-
-def start_heartbeat_relay(store: Any, log: Callable[[str], None]) -> threading.Event:
-    """Start the supervisor-lifetime relay thread; returns its stop event.
+def start_heartbeat_relay(
+    store: Any, log: Callable[[str], None]
+) -> tuple[threading.Event, threading.Thread]:
+    """Start one relay thread; returns (stop event, thread) so the supervisor
+    can terminate it on stop() and recreate it on the next start() (PR #572).
 
     ``store`` is the WorkerConfigStore (state dir + config reads); the relay
     no-ops until the executor publishes its first lease snapshot."""
@@ -241,5 +185,15 @@ def start_heartbeat_relay(store: Any, log: Callable[[str], None]) -> threading.E
         stop=stop,
         log=log,
     )
-    threading.Thread(target=relay.run, name="lease-heartbeat-relay", daemon=True).start()
-    return stop
+    thread = threading.Thread(target=relay.run, name="lease-heartbeat-relay", daemon=True)
+    thread.start()
+    return stop, thread
+
+
+def stop_heartbeat_relay(relay: tuple[threading.Event, threading.Thread] | None) -> None:
+    """Terminate the relay thread (bounded join): a tick mid-flight finishes
+    or the caller moves on — the thread is a daemon and exits at its next
+    wait() boundary either way."""
+    if relay is not None:
+        relay[0].set()
+        relay[1].join(timeout=5.0)

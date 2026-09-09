@@ -32,6 +32,14 @@ class _FakeClient:
         self.lost: list[str] = []
         self.cancelled: list[str] = []
         self.single_status = 204
+        self.pings = 0
+        self.ping_error: Exception | None = None
+
+    def get_self(self) -> dict:
+        self.pings += 1
+        if self.ping_error is not None:
+            raise self.ping_error
+        return {"worker_id": "w1"}
 
     def heartbeat_batch(self, executions: list[tuple[str, str]]) -> Any:
         self.batches.append(list(executions))
@@ -128,7 +136,7 @@ def test_tick_skips_stale_snapshot_and_logs_once(tmp_path: Path) -> None:
     relay.tick()
 
     assert client.batches == []
-    assert len([line for line in logs if "暂停心跳 relay" in line]) == 1
+    assert len([line for line in logs if "租约停拍" in line]) == 1
 
 
 def test_tick_skips_dead_executor_pid(tmp_path: Path) -> None:
@@ -176,13 +184,13 @@ def test_401_drops_cached_client_for_token_rotation(tmp_path: Path) -> None:
     _write_snapshot(tmp_path)
 
     relay.tick()
-    assert relay._client is None
+    assert relay._beater._client is None
 
     # A fresh snapshot carries the rotated token; the relay rebuilds.
     client.batch_error = None
     _write_snapshot(tmp_path, token="rotated-token")
     relay.tick()
-    assert relay._client is client
+    assert relay._beater._client is client
     assert client.batches
 
 
@@ -194,7 +202,7 @@ def test_404_degrades_to_single_beats(tmp_path: Path) -> None:
 
     relay.tick()
 
-    assert relay._degraded is True
+    assert relay._beater.degraded is True
     assert sorted(client.singles) == [("exec-1", "lease-1"), ("exec-2", "lease-2")]
     assert any("降级" in line for line in logs)
     # Degraded singles collect lost (401/409) into the result file.
@@ -266,7 +274,7 @@ def test_stale_recovery_rearms_the_stall_log(tmp_path: Path) -> None:
     backdate()
     relay.tick()  # stalls again
 
-    assert len([line for line in logs if "暂停心跳 relay" in line]) == 2
+    assert len([line for line in logs if "租约停拍" in line]) == 2
 
 
 def test_degraded_mode_resets_on_executor_generation_change(tmp_path: Path) -> None:
@@ -276,7 +284,7 @@ def test_degraded_mode_resets_on_executor_generation_change(tmp_path: Path) -> N
     relay = _relay(tmp_path, client, logs)
     _write_snapshot(tmp_path)
     relay.tick()
-    assert relay._degraded is True
+    assert relay._beater.degraded is True
     singles_before = len(client.singles)
 
     # Executor restarted: same leases under a new pid; Host now has v5.
@@ -284,6 +292,94 @@ def test_degraded_mode_resets_on_executor_generation_change(tmp_path: Path) -> N
     _write_snapshot(tmp_path, pid=1)  # pid 1 always exists
     relay.tick()
 
-    assert relay._degraded is False
+    assert relay._beater.degraded is False
     assert len(client.batches) == 2, "the new generation must re-probe the batch endpoint"
     assert len(client.singles) == singles_before
+
+
+def _backdate_snapshot(tmp_path: Path) -> None:
+    import json
+
+    path = tmp_path / SNAPSHOT_FILENAME
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["updated_at"] = time.time() - 3600
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_stale_snapshot_stops_renewal_but_pings_control_plane(tmp_path: Path) -> None:
+    """PR #572 codex P1: 停拍=放弃租约，ping=自证存活——快照过期后租约
+    不再续期（Host 2×TTL 硬兜底回收），但控制面 ping 每拍继续。"""
+    client, logs = _FakeClient(), []
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path)
+    _backdate_snapshot(tmp_path)
+
+    relay.tick()
+    relay.tick()
+
+    # No lease renewal of any kind (batch or single)…
+    assert client.batches == [] and client.singles == []
+    # …but the control plane stays warm: one ping per tick…
+    assert client.pings == 2
+    # …and the relay liveness seq still advances (the executor watchdog keys
+    # on it; an intentional stall must not trip it).
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None and result["seq"] == 2 and result["lost"] == []
+    assert any("控制面 ping 继续" in line for line in logs)
+
+
+def test_control_plane_ping_401_drops_cached_client(tmp_path: Path) -> None:
+    """Ping 的 401 语义与发拍路径一致：丢缓存 client，等快照带新 token。"""
+    client, logs = _FakeClient(), []
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path)
+    _backdate_snapshot(tmp_path)
+    client.ping_error = RuntimeError("HTTP 401: unauthorized")
+
+    relay.tick()
+
+    assert relay._beater._client is None
+    assert any("控制面 ping 失败" in line for line in logs)
+    # Recovery: next tick rebuilds and the error note re-arms silently.
+    client.ping_error = None
+    relay.tick()
+    assert relay._beater._client is client
+    assert client.pings == 2
+
+
+def _relay_threads() -> list[threading.Thread]:
+    return [
+        thread
+        for thread in threading.enumerate()
+        if thread.name == "lease-heartbeat-relay" and thread.is_alive()
+    ]
+
+
+def test_service_lifespan_owns_relay_thread_lifecycle(tmp_path: Path) -> None:
+    """PR #572 P2: the relay thread starts with the service lifespan, is
+    joined on shutdown (no accumulation, no post-close sink writes), and a
+    new lifespan builds a fresh thread."""
+    from fastapi.testclient import TestClient
+
+    from worker.config_store import WorkerConfigStore
+    from worker.service import create_app
+    from worker.supervisor import WorkerSupervisor
+
+    store = WorkerConfigStore(tmp_path / "state")
+    supervisor = WorkerSupervisor(store, tmp_path / "executor.py")
+    app = create_app(supervisor, tmp_path)
+
+    baseline = len(_relay_threads())
+    with TestClient(app):
+        assert len(_relay_threads()) == baseline + 1
+    deadline = time.monotonic() + 5
+    while len(_relay_threads()) > baseline and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(_relay_threads()) == baseline, "relay thread survived service shutdown"
+
+    with TestClient(app):  # a second lifecycle builds a fresh thread
+        assert len(_relay_threads()) == baseline + 1
+    deadline = time.monotonic() + 5
+    while len(_relay_threads()) > baseline and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(_relay_threads()) == baseline

@@ -15,8 +15,7 @@ into an unexpected parent.
 
 Rotation is hand-rolled (not RotatingFileHandler): logging's emit swallows
 write errors into handleError, which would break the report-once contract
-below. Writes never break the panel: the first OSError mutes the sink and
-surfaces one line into the in-memory deque instead.
+below. Writes never break the panel: the first OSError mutes the sink.
 """
 
 from __future__ import annotations
@@ -53,13 +52,17 @@ class ExecutorLogSink:
         self._handle: Any = None
         self._lock = threading.Lock()
         self._broken = False
+        self._closed = False
 
     def write(self, line: str, on_error: Callable[[str], None]) -> None:
         """Append one line; the first failure reports once via ``on_error``
-        and the sink mutes itself (degrades to the in-memory-only panel)."""
-        if self._broken:
-            return
+        and the sink mutes itself. After ``close()`` writes are dropped (a
+        relay thread outliving its join must not reopen the file, PR #572)."""
         with self._lock:
+            # 锁内检查：过检后阻塞在锁上的线程，在 close() 持锁置位后拿到锁，
+            # 不得走下面的懒开分支把文件重开（PR #572 评审）。
+            if self._broken or self._closed:
+                return
             try:
                 if self._handle is None:
                     self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +93,11 @@ class ExecutorLogSink:
 
     def close(self) -> None:
         with self._lock:
+            self._closed = True
             if self._handle is not None:
                 self._handle.close()
                 self._handle = None
+
+    def resume(self) -> None:
+        """Re-arm after close (supervisor start() following a stop())."""
+        self._closed = False

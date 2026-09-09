@@ -17,7 +17,6 @@ from yaml import YAMLError
 
 from worker.config_store import WorkerConfigStore, public_config, validate_config
 from worker.executor_log import ExecutorLogSink, executor_log_path
-from worker.heartbeat_relay import start_heartbeat_relay
 from worker.lease_snapshot import RESULT_FILENAME, SNAPSHOT_ENV_VAR, SNAPSHOT_FILENAME
 from worker.metrics_cache import METRICS_FILENAME
 from worker.orphan_reaper import reap_orphaned_agents
@@ -71,10 +70,6 @@ class WorkerSupervisor:
         # #566 三期：面板行（executor stdout + 生命周期）同步落滚动文件，
         # 内存 500 行 deque 不再是唯一留存（排查事故时已被刷没过）。
         self._sink = ExecutorLogSink(executor_log_path(store.state_dir))
-        # #566 二期：租约心跳 relay 常驻 supervisor 进程（executor 饱和时
-        # 进程内心跳线程抢不到 GIL）；无快照时每拍是 no-op。须在 _sink 之后
-        # 启动：relay 的日志走 _log。
-        self._heartbeat_relay_stop = start_heartbeat_relay(store, self._log)
 
     def _log(self, message: str) -> None:
         """Append one panel log line (timestamped deque + rolling file)."""
@@ -88,6 +83,7 @@ class WorkerSupervisor:
             self._failed_reason = None
             self._next_restart_delay = None
             self._restart_event.clear()
+            self._sink.resume()  # 与 stop() 的 sink.close() 配对（#572 P2）
             self._start()
 
     def _start(self) -> None:
