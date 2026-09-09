@@ -106,8 +106,10 @@ class CampaignCreateRequest(BaseModel):
 
     mode: CampaignMode
     # PR-D「任务名称」：骑 target_spec_json（非查询键，不加列——0.8.0 已
-    # 发 v80），空串 = UI 派生默认「类型 · 时间」。
-    name: str = ""
+    # 发 v80），空串 = UI 派生默认「类型 · 时间」。限长与 multipart 通道
+    # 的 Form(max_length=200) 一致（codex 二轮 P2：行内通道不得比文件
+    # 通道宽松——同一向导两模式切换会出现一边成功一边 422）。
+    name: str = Field(default="", max_length=200)
     rerun: CampaignRerunTarget | None = None
     submit: CampaignSubmitInlineTarget | None = None
 

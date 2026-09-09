@@ -119,20 +119,22 @@ export function BatchCreateWizard({
         usesSharedKey: false,
       }
     }
-    // 也支持整行 JSON（高级用法）：行是 { 开头时按对象解析。对象行自带
-    // 连接信息（豁免连接 Key）；纯 ID 行共享连接 Key（审核 P2：必填）。
-    if (lines.every((line) => line.startsWith('{'))) {
-      return { ...parseJsonlItems(itemsText), usesSharedKey: false }
-    }
-    return {
-      items: lines.map((externalId) => ({
+    // 整行 JSON 逐行分拣：对象行按 JSON 解析（自带连接，豁免 Key）；纯
+    // ID 行共享 Key（必填）。可混排，对象行不得降级成裸 ID（二轮 P2）。
+    const refItems = (ids: string[]) =>
+      ids.map((externalId) => ({
         type: 'ref' as const,
         connection_key: connectionKey.trim(),
         external_id: externalId,
-      })),
-      error: null,
-      usesSharedKey: true,
-    }
+      }))
+
+    const objLines = lines.filter((line) => line.startsWith('{'))
+    if (objLines.length === 0)
+      return { items: refItems(lines), error: null, usesSharedKey: true }
+    // 任一 ID 行存在即按共享 Key 必填（与纯 ID 模式同一门槛）。
+    const idItems = refItems(lines.filter((line) => !line.startsWith('{')))
+    const parsed = parseJsonlItems(objLines.join('\n'), idItems)
+    return { ...parsed, usesSharedKey: idItems.length > 0 }
   }, [submitChannel, itemsText, connectionKey])
   const inlineCount = parsedInline?.items.length ?? 0
 
@@ -582,21 +584,22 @@ function defaultName(mode: WizardMode): string {
 }
 
 /** 解析行内 jsonl 为 submit items（宽松 JSON Lines：逐行 parse）。 */
-function parseJsonlItems(text: string): {
+function parseJsonlItems(
+  text: string,
+  extraItems: CampaignSubmitInlineTarget['items'] = []
+): {
   items: CampaignSubmitInlineTarget['items']
   error: string | null
 } {
-  const items: CampaignSubmitInlineTarget['items'] = []
+  const items: CampaignSubmitInlineTarget['items'] = [...extraItems]
   for (const [index, line] of text.split('\n').entries()) {
     const trimmed = line.trim()
     if (!trimmed) continue
     try {
       const parsed = JSON.parse(trimmed)
-      if (
-        typeof parsed === 'object' &&
-        parsed !== null &&
-        !Array.isArray(parsed)
-      ) {
+      const isObj =
+        typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      if (isObj) {
         items.push(parsed as CampaignSubmitInlineTarget['items'][number])
       } else {
         return { items, error: `第 ${index + 1} 行不是 JSON 对象` }

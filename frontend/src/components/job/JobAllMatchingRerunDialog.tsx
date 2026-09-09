@@ -96,9 +96,15 @@ export function JobAllMatchingRerunDialog({
     : null
 
   const handleConfirm = async () => {
-    // 特定失败类别：原同步 rerun-by-failure 路径。
+    // 特定失败类别：原同步 rerun-by-failure 路径。store 已弹错误 toast，
+    // 这里再消费拒绝本身——footer 不 await 返回的 Promise，不 catch 会
+    // 变成未处理 rejection（codex 二轮 P2）；失败时对话框保持打开。
     if (selectedNodeKey == null && selection !== 'all') {
-      await onConfirmCategory?.(selection)
+      try {
+        await onConfirmCategory?.(selection)
+      } catch {
+        return
+      }
       onClose()
       return
     }
