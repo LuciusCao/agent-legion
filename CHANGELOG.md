@@ -25,6 +25,30 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
     新增 `agent_enqueue` / `result_unpack` 嵌套块，PUT 全文档校验
     （workers 上限分别 256 / 64）。
 
+### Performance
+- claim 锁面修复（issue #555，#546 回归的根治项）——三处叠加修法：
+  - **扫描移出锁窗口**：batch claim 拆成「只读选候选」
+    （`claim_batch_select.py`，read-only 连接、零锁）+「紧凑写入」
+    （`claim_batch_tx.py` 只跑重校验 + promote）两段——不再拿着
+    `agent-ws:*` / `agent-worker:*` advisory xact 锁与行锁跑
+    `fetch_candidates` 扫描，持锁窗口从 O(批×扫描) 收回 O(纯写入)。
+    选择段与写入段之间的竞态窗口由写入段逐候选重校验兜底
+    （SKIP LOCKED 行探针 / job 状态重查 / 容量门 / 条件 promote），
+    过期候选判 stale/raced 跳过，绝不半应用。锁前准入过滤单源化到
+    `claim_admission.py`（单条与批两路共用，消除双轨漂移）。
+  - **claim 不再重锁 running 的 jobs 行**：jobs promote 收窄为
+    `where status='queued'`；多节点 job 的后继节点 claim 不再对同一
+    热行做值不变的重写+重锁。rowcount=0 的两种语义（已 running
+    vs 竞态出局）经 `FOR NO KEY UPDATE` 重读区分——与在飞的并发
+    pause 串行化但不重写元组（review P1），后者仍判 ClaimRacedError
+    回滚。
+  - **touch_worker 节流**：claim promote 与 `mark_done` 的
+    `agent_workers.last_seen_at` 写入改为距上次落盘超过
+    `executor_runtime.agent_claim.worker_touch_interval_seconds`
+    （默认 30s，0 = 恢复每次写）才写，谓词在 UPDATE 里——命中节流的
+    touch 不匹配行、不取行锁；活性由 heartbeat 通道与 authenticate
+    路径的 WorkerLiveness（#88）覆盖。heartbeat 路径不节流。
+
 ## [0.7.5] - 2026-09-09
 
 ### Performance

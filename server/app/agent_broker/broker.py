@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import reaper, release, sweepers
-from server.app.agent_broker.agent_worker_capacity import touch_worker
 from server.app.agent_broker.claim import AgentClaim, ClaimRacedError
 from server.app.agent_broker.claim_retry import claim_with_retry
 from server.app.agent_broker.empty import EmptyClaimTrigger
@@ -26,6 +25,7 @@ from server.app.agent_broker.manifest_guard import SHARD_IDENTITY_SQL
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
 from server.app.agent_broker.worker_events import note_claim_outcome
+from server.app.agent_broker.worker_presence import DEFAULT_TOUCH_INTERVAL_SECONDS, touch_worker
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events.aggregator import record_job_update
@@ -70,6 +70,10 @@ class AgentExecutionBroker:
         is_workspace_paused: Callable[[str], bool] | None = None,
         job_db: JobQueries | None = None,
         job_event_buffer: Any | None = None,
+        # #555: claim promote / mark_done 的 last_seen_at 写入节流（秒）；
+        # 实例旋钮 executor_runtime.agent_claim.worker_touch_interval_seconds，
+        # 0 = 每次写（0.7.5 行为）。heartbeat 通道不节流。
+        touch_worker_interval_seconds: float = DEFAULT_TOUCH_INTERVAL_SECONDS,
     ) -> None:
         # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187);
         # submodules reach it through the public ``database_dsn`` attribute.
@@ -91,6 +95,7 @@ class AgentExecutionBroker:
         # otherwise filtered views only shrink, never grow.
         self.job_db = job_db
         self.job_event_buffer = job_event_buffer
+        self.touch_worker_interval_seconds = touch_worker_interval_seconds
         # Rotating cursor for bounded cross-workspace fairness (EXEC-FAIRNESS
         # style): each claim pass starts candidate evaluation at the next
         # workspace instead of always at the globally oldest request.
@@ -276,7 +281,7 @@ class AgentExecutionBroker:
                 + " where execution_id=%s",
                 (json.dumps(dict(outcome), ensure_ascii=False), execution_id),
             )
-            touch_worker(conn, worker_id)
+            touch_worker(conn, worker_id, min_interval_seconds=self.touch_worker_interval_seconds)
         self._notify_worker_released(worker_id, str(row["workspace_id"]))
         return str(row["lease_id"])
 

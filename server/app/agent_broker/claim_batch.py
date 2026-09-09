@@ -1,10 +1,12 @@
 """Batch claim orchestration (issue #546): transaction + retry + post-commit
 side effects.
 
-The in-transaction promote loop (scan ladder, savepoint containment,
-ascending-workspace lock floor) lives in ``claim_batch_tx.py``; this module
-owns the deadlock-retry policy and the committed-batch side effects,
-mirroring ``broker.claim``'s discipline one-for-one.
+Since #555 the batch is two-phase: the candidate scan ladder runs lock-free
+on a read-only connection (``claim_batch_select.py``), and only the compact
+revalidate-and-promote loop runs inside the write transaction
+(``claim_batch_tx.py``); this module owns the deadlock-retry policy and the
+committed-batch side effects, mirroring ``broker.claim``'s discipline
+one-for-one.
 
 Why batch at all: the serial claim loop's physical ceiling (~250-400
 claims/min: one HTTP RTT plus pacing per claim, #472) cannot refill the
@@ -21,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from psycopg import Error
 
+from server.app.agent_broker.claim_batch_select import select_batch_candidates
 from server.app.agent_broker.claim_batch_tx import (
     BatchClaimOutcome,
     claim_batch_in_transaction,
@@ -50,15 +53,24 @@ def claim_batch_with_retry(
     agent_limit: int | None = None,
     code_limit: int | None = None,
 ) -> BatchClaimOutcome:
-    """Run the batch claim transaction, retrying one SQLSTATE 40P01.
+    """Run one batch claim pass, retrying one SQLSTATE 40P01.
 
-    The retry re-enters on a clean connection with the whole batch
-    re-evaluated (write_transaction rolled the deadlocked one back), same as
-    the single claim's policy — a deadlock costs one batch, never a partial
-    one.
+    Each attempt re-runs BOTH phases on clean connections: the read-only
+    selection (it cannot deadlock, but its snapshot ages) and the write
+    transaction. A deadlock costs one batch, never a partial one —
+    ``write_transaction`` rolled the deadlocked one back.
     """
     for attempt in range(1 + _BATCH_DEADLOCK_RETRIES):
         try:
+            selection = select_batch_candidates(
+                broker,
+                worker_id,
+                declared_max_concurrency,
+                declared_max_code_concurrency,
+                limit=limit,
+                agent_limit=agent_limit,
+                code_limit=code_limit,
+            )
             with write_transaction(broker.database_dsn) as conn:
                 return claim_batch_in_transaction(
                     broker,
@@ -66,9 +78,7 @@ def claim_batch_with_retry(
                     worker_id,
                     declared_max_concurrency,
                     declared_max_code_concurrency,
-                    limit=limit,
-                    agent_limit=agent_limit,
-                    code_limit=code_limit,
+                    selection=selection,
                 )
         except Error as exc:
             if getattr(exc, "sqlstate", None) != "40P01" or attempt >= _BATCH_DEADLOCK_RETRIES:

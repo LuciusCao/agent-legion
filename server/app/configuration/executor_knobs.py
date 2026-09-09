@@ -70,3 +70,17 @@ class CodeStockConfig(BaseModel):
     min_stock: int = Field(default=8, ge=0)
     max_stock: int = Field(default=256, ge=1)
     refresh_seconds: float = Field(default=5.0, gt=0)
+
+
+class AgentClaimConfig(BaseModel):
+    """Claim-path tuning (``executor_runtime.agent_claim``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # #555: claim promote 与 mark_done 的 agent_workers.last_seen_at 写入节流
+    # ——未节流前两台 Worker 的全部 claim+commit 流量串在两行上（pg_stat_activity
+    # 实测 transactionid 排队）。活性由 heartbeat 通道与 authenticate 路径的
+    # WorkerLiveness（#88，每 Worker 每 10s 一写）覆盖。0 = 每次写（0.7.5
+    # 行为，A/B 止血位）。字面值镜像 worker_presence.DEFAULT_TOUCH_INTERVAL_SECONDS
+    # （configuration 不得 import runtime 包，#188）。
+    worker_touch_interval_seconds: float = Field(default=30.0, ge=0)
