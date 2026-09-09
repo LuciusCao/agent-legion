@@ -18,15 +18,19 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_AGE_SECONDS = 3600.0
 
 _LOCKS_DIR_NAME = ".locks"
+# #569: the shared (skill, commit) materialization cache lives in its own
+# subtree; entries are long-lived by design (LRU-bounded inside commit_cache)
+# and must never be swept as stale execution debris.
+SHARED_DIR_NAME = ".shared"
 
 
 def sweep_stale_execution_dirs(runs_dir: Path, *, max_age_seconds: float) -> int:
     """Remove execution dirs under ``runs_dir`` older than ``max_age_seconds``.
 
     Called periodically by the sweeper thread. Age is judged by the
-    execution dir's mtime; ``.locks`` and any non-directory entries (stray
-    files, symlinked execution dirs) are never touched — the same
-    escape-proofing ``SkillManager`` applies per execution id. Racy with a
+    execution dir's mtime; ``.locks``/``.shared`` and any non-directory
+    entries (stray files, symlinked execution dirs) are never touched — the
+    same escape-proofing ``SkillManager`` applies per execution id. Racy with a
     live dispatch only in the pathological case where a snapshot outlives
     the TTL it was supposed to finish within: ``get_skill_dir`` recreates
     the run dir, so a swept-but-in-use dir fails the copy loudly instead of
@@ -46,7 +50,11 @@ def sweep_stale_execution_dirs(runs_dir: Path, *, max_age_seconds: float) -> int
     cutoff = time.time() - max_age_seconds
     swept = 0
     for entry in root.iterdir():
-        if entry.name == _LOCKS_DIR_NAME or entry.is_symlink() or not entry.is_dir():
+        if (
+            entry.name in (_LOCKS_DIR_NAME, SHARED_DIR_NAME)
+            or entry.is_symlink()
+            or not entry.is_dir()
+        ):
             continue
         try:
             if entry.stat().st_mtime > cutoff:

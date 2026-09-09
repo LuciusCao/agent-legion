@@ -44,6 +44,7 @@ def _payload() -> dict:
         },
         "agent_enqueue": {"workers": 48, "max_pending": 1024},
         "result_unpack": {"workers": 0},
+        "result_validate": {"workers": 0},
         "agent_claim": {"worker_touch_interval_seconds": 30},
     }
 
@@ -190,21 +191,24 @@ def test_put_materials_ttl_roundtrip(client) -> None:
 
 
 def test_put_capacity_knobs_roundtrip(client) -> None:
-    """#509/#554/#561: agent_enqueue / result_unpack / agent_claim blocks ride
-    the full-document PUT and come back on GET."""
+    """#509/#554/#569/#561: agent_enqueue / result_unpack / result_validate /
+    agent_claim blocks ride the full-document PUT and come back on GET."""
     payload = _payload()
     payload["agent_enqueue"] = {"workers": 64, "max_pending": 2048}
     payload["result_unpack"] = {"workers": 8}
+    payload["result_validate"] = {"workers": 6}
     payload["agent_claim"] = {"worker_touch_interval_seconds": 7.5}
     response = client.put(INSTANCE_SETTINGS_URL, json=payload)
     assert response.status_code == 200, response.text
     assert response.json()["agent_enqueue"] == {"workers": 64, "max_pending": 2048}
     assert response.json()["result_unpack"] == {"workers": 8}
+    assert response.json()["result_validate"] == {"workers": 6}
     assert response.json()["agent_claim"] == {"worker_touch_interval_seconds": 7.5}
 
     response = client.get(INSTANCE_SETTINGS_URL)
     assert response.json()["agent_enqueue"] == {"workers": 64, "max_pending": 2048}
     assert response.json()["result_unpack"] == {"workers": 8}
+    assert response.json()["result_validate"] == {"workers": 6}
     assert response.json()["agent_claim"] == {"worker_touch_interval_seconds": 7.5}
 
 
@@ -221,6 +225,10 @@ def test_put_rejects_out_of_range_capacity_knobs(client) -> None:
     payload = _payload()
     payload["result_unpack"]["workers"] = 65
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    # #569：validate 池同上限。
+    payload = _payload()
+    payload["result_validate"]["workers"] = 65
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
     # #561：负的写入间隔不合法；0 = 每次都写（恢复 0.7.5 行为）合法。
     payload = _payload()
     payload["agent_claim"]["worker_touch_interval_seconds"] = -1
@@ -236,13 +244,17 @@ def test_put_rejects_out_of_range_capacity_knobs(client) -> None:
     payload = _payload()
     payload["result_unpack"]["workers"] = 0
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+    payload = _payload()
+    payload["result_validate"]["workers"] = 0
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
 
 
 def test_put_accepts_capacity_knob_upper_bounds(client) -> None:
-    """边界接受侧：workers=256 / result_unpack.workers=64 / 写入间隔 86400 均为合法上限。"""
+    """边界接受侧：workers=256 / 两个进程池 workers=64 / 写入间隔 86400 均为合法上限。"""
     payload = _payload()
     payload["agent_enqueue"]["workers"] = 256
     payload["result_unpack"]["workers"] = 64
+    payload["result_validate"]["workers"] = 64
     payload["agent_claim"]["worker_touch_interval_seconds"] = 86400
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
 
@@ -256,8 +268,9 @@ def test_put_rejects_retired_openclaw_block(client) -> None:
 
 
 def test_get_legacy_document_missing_capacity_blocks_falls_back(client) -> None:
-    """#509/#554/#561: a stored document written before the capacity knobs
-    existed carries no agent_enqueue / result_unpack / agent_claim blocks;
+    """#509/#554/#569/#561: a stored document written before the capacity knobs
+    existed carries no agent_enqueue / result_unpack / result_validate /
+    agent_claim blocks;
     GET must merge the code defaults (no migration) instead of failing
     response validation."""
     from server.app.services.instance_settings_store import InstanceSettingsStore
@@ -266,6 +279,7 @@ def test_get_legacy_document_missing_capacity_blocks_falls_back(client) -> None:
     document = _payload()
     del document["agent_enqueue"]
     del document["result_unpack"]
+    del document["result_validate"]
     del document["agent_claim"]
     store.put(document)
 
@@ -274,4 +288,5 @@ def test_get_legacy_document_missing_capacity_blocks_falls_back(client) -> None:
     assert response.status_code == 200, response.text
     assert response.json()["agent_enqueue"] == {"workers": 48, "max_pending": 1024}
     assert response.json()["result_unpack"] == {"workers": 0}
+    assert response.json()["result_validate"] == {"workers": 0}
     assert response.json()["agent_claim"] == {"worker_touch_interval_seconds": 30}

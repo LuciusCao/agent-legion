@@ -43,7 +43,8 @@ def validate_run_dir(manager: SkillManager, key: str, execution_id: str, run_dir
         # from the filesystem, or a programming error), or every retry leaks
         # one runs/<execution_id> copy (only the age-based sweeper would
         # reclaim it). The bare ``raise`` preserves the original type — the
-        # callers (output_validation, the dispatch path) classify it.
+        # caller (the dispatch path; the Worker-output validation path runs
+        # on the shared commit cache instead since #569) classifies it.
         manager.cleanup_execution(execution_id)
         raise
 

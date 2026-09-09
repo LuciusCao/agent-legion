@@ -41,6 +41,7 @@ export function toFormValues(doc: InstanceSettingsResponse): FormValues {
     'agent_enqueue.workers': String(doc.agent_enqueue.workers),
     'agent_enqueue.max_pending': String(doc.agent_enqueue.max_pending),
     'result_unpack.workers': String(doc.result_unpack.workers),
+    'result_validate.workers': String(doc.result_validate.workers),
     'agent_claim.worker_touch_interval_seconds': String(
       doc.agent_claim.worker_touch_interval_seconds
     ),
@@ -118,8 +119,9 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
       workers: parseNumber(values, 'agent_enqueue.workers'),
       max_pending: parseNumber(values, 'agent_enqueue.max_pending'),
     },
-    result_unpack: {
-      workers: parseNumber(values, 'result_unpack.workers'),
+    result_unpack: { workers: parseNumber(values, 'result_unpack.workers') },
+    result_validate: {
+      workers: parseNumber(values, 'result_validate.workers'),
     },
     agent_claim: {
       worker_touch_interval_seconds: parseNumber(

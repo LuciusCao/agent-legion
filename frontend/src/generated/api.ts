@@ -4057,6 +4057,11 @@ export interface components {
       /** Workers */
       workers: number
     }
+    /** InstanceResultValidateSettings */
+    InstanceResultValidateSettings: {
+      /** Workers */
+      workers: number
+    }
     /** InstanceSettingsResponse */
     InstanceSettingsResponse: {
       agent_claim: components['schemas']['InstanceAgentClaimSettings']
@@ -4077,6 +4082,7 @@ export interface components {
       materials_ttl_days: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
       result_unpack: components['schemas']['InstanceResultUnpackSettings']
+      result_validate: components['schemas']['InstanceResultValidateSettings']
       /**
        * Skills Root
        * @default ~/.agents/skills
@@ -4108,6 +4114,7 @@ export interface components {
       materials_ttl_days: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
       result_unpack: components['schemas']['InstanceResultUnpackSettings']
+      result_validate: components['schemas']['InstanceResultValidateSettings']
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */

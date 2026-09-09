@@ -24,6 +24,7 @@ from server.app.configuration.executor_knobs import (
     AgentStockConfig,
     CodeStockConfig,
     ResultUnpackConfig,
+    ResultValidateConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,9 @@ class ExecutorRuntimeConfig(BaseModel):
     # #554: result unpack process pool size; 0 = auto (min(4, cpu_count)).
     # Instance-settings managed, takes effect on restart.
     result_unpack: ResultUnpackConfig = Field(default_factory=ResultUnpackConfig)
+    # #569: result validate process pool size; same semantics as
+    # result_unpack (0 = auto, restart-effective).
+    result_validate: ResultValidateConfig = Field(default_factory=ResultValidateConfig)
     agent_claim: AgentClaimConfig = Field(default_factory=AgentClaimConfig)
 
 

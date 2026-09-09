@@ -1,5 +1,5 @@
 // 容量旋钮字段组（#509 agent_enqueue 入队池、#554 result 解包进程池、
-// #561 Worker 在线标记写入节流）。
+// #569 result 校验进程池、#561 Worker 在线标记写入节流）。
 // 从 instanceSettingsFields.ts 拆出以控制体积预算（主表有 #521 豁免
 // ceiling，不可再上抬）；三者都是实例级、重启生效的容量调参。
 
@@ -25,6 +25,14 @@ export const CAPACITY_FIELD_GROUPS: FieldGroup[] = [
       {
         path: 'result_unpack.workers',
         label: 'result 解包进程数（0 = 自动）',
+        integer: true,
+        allowZero: true,
+        max: 64,
+      },
+      // #569：result 校验进程池尺寸；0 = 自动（min(4, 核数)）。
+      {
+        path: 'result_validate.workers',
+        label: 'result 校验进程数（0 = 自动）',
         integer: true,
         allowZero: true,
         max: 64,

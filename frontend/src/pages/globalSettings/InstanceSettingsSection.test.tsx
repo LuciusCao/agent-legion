@@ -36,6 +36,7 @@ const settings: InstanceSettingsResponse = {
   },
   agent_enqueue: { workers: 48, max_pending: 1024 },
   result_unpack: { workers: 0 },
+  result_validate: { workers: 0 },
   agent_claim: { worker_touch_interval_seconds: 30 },
   skills_root: '~/.agents/skills',
 }

@@ -370,14 +370,17 @@ def _reset_result_unpack_pool(_assert_shared_app_invariants):
     """#552：result 解包进程池是模块级单例——用过它的测试收尾时必须回收，
     否则泄漏的 SpawnProcess 会被「无残留子进程」类断言（如
     tests/full/test_executor_cancellation_recovery.py）抓到。池未创建时
-    reset 是纯 no-op（无进程可杀），不产生每测试开销。"""
+    reset 是纯 no-op（无进程可杀），不产生每测试开销。#569 的
+    result_validate_pool 同款单例一并回收。"""
     yield
-    from server.app.agent_broker import result_unpack_pool
+    from server.app.agent_broker import result_unpack_pool, result_validate_pool
 
     result_unpack_pool.reset_pool()
     # #554：configure() 钉入的实例设置值同为模块级状态，一并复位，
     # 防测试间串味（monkeypatch 之外的直改场景）。
     result_unpack_pool.configure(0)
+    result_validate_pool.reset_pool()
+    result_validate_pool.configure(0)
 
 
 @pytest.fixture(autouse=True)

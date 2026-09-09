@@ -89,8 +89,10 @@ class SkillManager:
     def checkout_skill_commit(self, skill_key: str, execution_id: str, commit: str) -> Path:
         """Materialize an EXACT manifest-recorded commit (#330; lock untouched)."""
         # A commit id never drifts — immune to HEAD moves (latest) and to
-        # retagging (pinned refs) — so Host-side Worker-result validation
-        # re-materializes exactly the content the Worker executed.
+        # retagging (pinned refs). Host-side Worker-result validation goes
+        # through the shared (skill, commit) cache instead (#569,
+        # skills/commit_cache.py); this per-execution export remains for
+        # callers that need a private copy.
         if not _COMMIT_RE.fullmatch(commit):
             raise SkillRepoError(f"skill commit must be a 40-hex sha: {commit!r}")
         cache_dir, run_dir = self._resolve_paths(skill_key, execution_id)

@@ -39,6 +39,15 @@ class ResultUnpackConfig(BaseModel):
     workers: int = Field(default=0, ge=0, le=64)
 
 
+# #569: result-validate process pool (``executor_runtime.result_validate``)
+# — same semantics as ResultUnpackConfig above: 0 = auto, lazy pool,
+# restart-effective. Docstring-free to fit the module's budget exemption.
+class ResultValidateConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workers: int = Field(default=0, ge=0, le=64)
+
+
 class AgentStockConfig(BaseModel):
     """Tuning for the stockpile gate (``executor_runtime.agent_stock``)."""
 
