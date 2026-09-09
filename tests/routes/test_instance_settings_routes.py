@@ -228,6 +228,10 @@ def test_put_rejects_out_of_range_capacity_knobs(client) -> None:
     payload = _payload()
     payload["agent_claim"]["worker_touch_interval_seconds"] = 0
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+    # #565 codex：超上限会被 PostgreSQL make_interval 拒绝，契约层拦住。
+    payload = _payload()
+    payload["agent_claim"]["worker_touch_interval_seconds"] = 86401
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
     # 0 = 自动（min(4, 核数)）是合法值。
     payload = _payload()
     payload["result_unpack"]["workers"] = 0
@@ -235,10 +239,11 @@ def test_put_rejects_out_of_range_capacity_knobs(client) -> None:
 
 
 def test_put_accepts_capacity_knob_upper_bounds(client) -> None:
-    """边界接受侧：workers=256 与 result_unpack.workers=64 均为合法上限。"""
+    """边界接受侧：workers=256 / result_unpack.workers=64 / 写入间隔 86400 均为合法上限。"""
     payload = _payload()
     payload["agent_enqueue"]["workers"] = 256
     payload["result_unpack"]["workers"] = 64
+    payload["agent_claim"]["worker_touch_interval_seconds"] = 86400
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
 
 

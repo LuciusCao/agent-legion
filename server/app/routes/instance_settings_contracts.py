@@ -68,7 +68,9 @@ class InstanceAgentClaimSettings(BaseModel):
 
     # #561: Worker presence-write throttle (#555 knob); restart-effective.
     # 0 = write on every claim/commit (restores the 0.7.5 behavior).
-    worker_touch_interval_seconds: float = Field(ge=0)
+    # le=86400 mirrors AgentClaimConfig: keeps the value inside what
+    # PostgreSQL make_interval(secs => ...) accepts (#565 codex review).
+    worker_touch_interval_seconds: float = Field(ge=0, le=86400)
 
 
 class InstanceSettingsDocument(BaseModel):
