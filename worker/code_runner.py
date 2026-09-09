@@ -45,6 +45,7 @@ from shared.code_sandbox import (
 from shared.material_cache import MATERIALS_CACHE_DIRNAME
 from worker._atomic import atomic_write
 from worker.bundle_io import download_input_artifacts, safe_extract_tree
+from worker.execution.ownership import write_owner_marker
 from worker.execution.pending import refuse_if_pending_upload
 from worker.material_fetch import materialize_claim_material
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
@@ -128,6 +129,9 @@ def prepare_code_execution(
         print(f"removing stale execution dir for {execution_id}", flush=True)
         shutil.rmtree(execution_dir, ignore_errors=True)
     execution_dir.mkdir(parents=True)
+    # #564：重建后立刻落归属标记（同 agent 路径 prepare.py）——旧 attempt
+    # 的丢弃收尾按标记判定，不再误删新 attempt 正在使用的目录。
+    write_owner_marker(execution_dir, claim)
     job_dir.mkdir(parents=True)
     with download_slots:
         client.download(str(claim["bundle_url"]), bundle)

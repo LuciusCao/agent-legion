@@ -1659,6 +1659,7 @@
     "worker/execution/heartbeat.py": 56,
     "worker/execution/heartbeat_batch.py": 222,
     "worker/execution/lifecycle.py": 53,
+    "worker/execution/ownership.py": 91,
     "worker/execution/pending.py": 50,
     "worker/execution/prepare.py": 69,
     "worker/execution/run.py": 212,

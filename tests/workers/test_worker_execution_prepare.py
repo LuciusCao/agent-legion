@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import threading
 from pathlib import Path
 
 import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
+from worker.execution.ownership import OWNER_FILENAME
 from worker.execution.prepare import prepare_execution
 from worker.upload.queue import PENDING_FILENAME, PendingUploadExists
 
@@ -228,3 +230,45 @@ def test_prepare_replaces_stale_dir_without_marker(tmp_path: Path) -> None:
 
     assert not (stale / "junk").exists()
     assert (stale / "bundle.tar.gz").is_file()
+
+
+def test_prepare_writes_owner_marker_for_claim_lease(tmp_path: Path) -> None:
+    """#564：prepare 重建目录后立刻落归属标记——目录从这一刻起归本 claim
+    的 lease，旧 attempt 的丢弃收尾（deliver_result）据此判定不再误删。"""
+    execution_dir = tmp_path / "exec-1"
+
+    prepare_execution(
+        FakeClient(_make_bundle(tmp_path, _manifest({}))),
+        _claim(),
+        execution_dir,
+        threading.Semaphore(1),
+    )
+
+    marker = json.loads((execution_dir / OWNER_FILENAME).read_text(encoding="utf-8"))
+    assert marker["execution_id"] == "exec-1"
+    assert marker["lease_id"] == "lease-1"
+
+
+def test_prepare_retags_orphan_owner_marker_from_dead_lease(tmp_path: Path) -> None:
+    """#564 重启残留场景：目录带着已死 incarnation 的归属标记（lease-old，
+    无任何活 attempt 持有），且无 pending 上传 marker。prepare 照常整体清
+    理重建并把标记改写成本 claim 的 lease——孤儿标记不阻挡清理，其语义
+    只约束「仍在跑的旧 attempt 的丢弃收尾」。"""
+    execution_dir = tmp_path / "exec-1"
+    execution_dir.mkdir(parents=True)
+    (execution_dir / "junk").write_text("leftover", encoding="utf-8")
+    (execution_dir / OWNER_FILENAME).write_text(
+        '{"version": 1, "execution_id": "exec-1", "lease_id": "lease-old"}', encoding="utf-8"
+    )
+
+    prepare_execution(
+        FakeClient(_make_bundle(tmp_path, _manifest({}))),
+        _claim(),  # lease_id="lease-1" ≠ "lease-old"
+        execution_dir,
+        threading.Semaphore(1),
+    )
+
+    assert not (execution_dir / "junk").exists()
+    assert (execution_dir / "bundle.tar.gz").is_file()
+    marker = json.loads((execution_dir / OWNER_FILENAME).read_text(encoding="utf-8"))
+    assert marker["lease_id"] == "lease-1"

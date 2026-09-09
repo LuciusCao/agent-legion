@@ -17,6 +17,7 @@ from typing import Any
 from worker.binary_resolution import resolve_binary
 from worker.bundle_io import download_input_artifacts, safe_extract
 from worker.claim_manifest import apply_live_manifest
+from worker.execution.ownership import write_owner_marker
 from worker.execution.pending import refuse_if_pending_upload
 from worker.host.client import Client
 
@@ -55,6 +56,9 @@ def prepare_execution(
         print(f"removing stale execution dir for {execution_id}", flush=True)
         shutil.rmtree(execution_dir, ignore_errors=True)
     execution_dir.mkdir(parents=True)
+    # #564：重建后立刻落归属标记——从这一刻起目录归本 claim 的 lease，旧
+    # attempt 的丢弃收尾（run.py deliver_result）按标记判定，不再误删。
+    write_owner_marker(execution_dir, claim)
     job_dir.mkdir(parents=True)
     run_dir.mkdir(parents=True)
     session_dir.mkdir(parents=True)

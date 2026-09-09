@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.7.7] - 未发布
+
+### Fixed
+- Worker 双 attempt 竞态修复（issue #564）：worker 过载时批量心跳被饿死，
+  Host 误判租约过期重排队，同一 worker 立刻重新 claim 同一 execution_id
+  而旧 attempt 线程仍存活；旧 attempt 的丢弃收尾仅检查 pending-upload
+  marker 就 rmtree 整个 execution_dir，删掉新 attempt 刚重建、正在使用
+  的目录，新 attempt 写 prompt.md 时 FileNotFoundError。两层修法：
+  - **归属标记**：prepare 重建目录后立刻写入 `execution_owner.json`
+    （claim 的 lease_id，agent 与 code 两条路径同）；丢弃收尾只在标记
+    仍指向自己的 lease 时才 rmtree——标记易主（目录已被新 attempt 占
+    用）或缺失/损坏一律跳过删除，证明不了归属的孤儿目录归 startup
+    clean_work_root / stale sweeper 清理（与 #203 的 pending marker
+    先例同构）。
+  - **per-execution 互斥锁**：`run_execution` 全程持有按 execution_id
+    引用计数的进程内锁（`worker/execution/ownership.py`），同一
+    execution_id 在本进程内任意时刻只有一个 attempt——旧 attempt 的
+    收尾与新 attempt 的 prepare 串行化，时序窗口整体消除；旧 attempt
+    下线只依赖自己的心跳 409，锁等待有界，无死锁。
+
 ## [0.7.6] - 2026-09-09
 
 ### Added

@@ -536,6 +536,116 @@ class _StatusCapture:
         pass
 
 
+def test_reclaim_serializes_old_attempt_teardown_and_new_attempt(tmp_path: Path) -> None:
+    """#564 复现：Host 误判 lease-1 过期并重排队，同一 worker 立刻重新
+    claim 同一 execution_id（lease-2），旧 attempt 线程仍存活。修复前两
+    个 attempt 并发交错：旧 attempt 的丢弃收尾 rmtree 删掉新 attempt 刚
+    重建、正在使用的目录（prompt.md FileNotFoundError 的根源）。修复后
+    per-execution 互斥锁把「旧收尾」与「新 prepare」串行——新 attempt
+    的下载必须发生在旧 attempt 线程完全退出之后，且新 attempt 正常完成。
+    """
+    work_root = tmp_path / "work"
+    sleeper = _write_executable(
+        tmp_path / "sleeper", "#!/usr/bin/env python3\nimport time\ntime.sleep(60)\n"
+    )
+    finisher = _write_executable(
+        tmp_path / "finisher",
+        "#!/usr/bin/env python3\nimport time\nfrom pathlib import Path\n"
+        'time.sleep(0.2)\nPath("output.json").write_text("{}", encoding="utf-8")\n',
+    )
+    bundle_a = _make_bundle(tmp_path, _manifest([sleeper]))
+    bundle_b = _make_bundle(tmp_path, _manifest([finisher]))
+
+    class ReclaimClient(FakeClient):
+        """lease-1 的批量心跳一律判 lost（Host 已重排），lease-2 正常续期。"""
+
+        def __init__(self) -> None:
+            super().__init__(bundle_a)
+            self.a_done = threading.Event()
+            self.download_saw_a_done: list[bool] = []
+
+        def download(self, path: str, destination: Path) -> None:
+            self.download_saw_a_done.append(self.a_done.is_set())
+            bundle = bundle_a if len(self.download_saw_a_done) == 1 else bundle_b
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(bundle.read_bytes())
+
+        def heartbeat_batch(
+            self, executions: list[tuple[str, str]]
+        ) -> tuple[int, dict[str, list[str]]]:
+            lost = [eid for eid, lease in executions if lease == "lease-1"]
+            renewed = [eid for eid, _ in executions if eid not in lost]
+            return 200, {"renewed": renewed, "lost": lost, "cancelled_execution_ids": []}
+
+    client = ReclaimClient()
+    registry = BatchHeartbeatRegistry()
+    stop = threading.Event()
+    coordinator = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, stop, 0.05), daemon=True
+    )
+    coordinator.start()
+
+    def run_one(claim: dict) -> None:
+        uploads = UploadQueue(
+            client,
+            ExecutionStatusReporter(None),
+            max_concurrency=2,
+            heartbeat_interval=0.05,
+            stop=threading.Event(),
+            heartbeat_registry=registry,
+        )
+        try:
+            run_execution(
+                client,
+                claim,
+                work_root,
+                {},
+                0.05,
+                threading.Event(),
+                1,
+                ExecutionStatusReporter(None),
+                uploads,
+                threading.Semaphore(4),
+                registry,
+            )
+        finally:
+            uploads.shutdown()
+
+    claim_a = {**_claim(), "lease_id": "lease-1"}
+    claim_b = {**_claim(), "lease_id": "lease-2"}
+
+    def run_a() -> None:
+        try:
+            run_one(claim_a)
+        finally:
+            client.a_done.set()
+
+    thread_a = threading.Thread(target=run_a)
+    thread_a.start()
+    # 等 attempt A 完成 prepare 进入运行态（prompt.md 已写、agent 在跑），
+    # 再启动 attempt B——此时 A 正持有执行目录。
+    prompt = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker" / "prompt.md"
+    deadline = time.monotonic() + 10
+    while not prompt.is_file():
+        assert time.monotonic() < deadline, "attempt A never reached running phase"
+        time.sleep(0.01)
+    thread_b = threading.Thread(target=run_one, args=(claim_b,))
+    thread_b.start()
+    thread_a.join(timeout=30)
+    thread_b.join(timeout=30)
+    stop.set()
+    coordinator.join(timeout=2)
+    assert not thread_a.is_alive()
+    assert not thread_b.is_alive()
+
+    # 串行化钉：B 的下载（prepare 的第一步）必须发生在 A 的 run_execution
+    # 完全退出（含丢弃收尾）之后；修复前无锁，两次 attempt 的下载并发交错。
+    assert client.download_saw_a_done == [False, True]
+    # A 的 lease 已丢、不上报；B 正常跑完并投递 completed。
+    assert client.report_lease_ids == ["lease-2"]
+    assert client.reports[0]["status"] == "completed"
+
+
 def test_claim_status_fields_key_on_workspace_id(tmp_path: Path) -> None:
     """#211 Phase 2: the local status record keys on workspace_id — the
     claim's workflow_key is deprecated (equal since v62) and is no longer
