@@ -11,17 +11,39 @@ from __future__ import annotations
 
 import pathlib
 import sqlite3
+import subprocess
 
 import pytest
 
 from scripts.pytest_aff_selection import (
     build_index_from_coverage,
+    changed_source_files,
     select_affected_tests,
 )
 
 _REPO_ROOT = "/repo"
 
 pytestmark = pytest.mark.no_db
+
+
+def _git(repo: pathlib.Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _commit_all(repo: pathlib.Path, message: str) -> str:
+    """Initialize the repo on first use, stage everything, and commit;
+    returns the new HEAD sha."""
+    if not (repo / ".git").exists():
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD").strip()
 
 
 def _write_coverage_db(path, contexts: dict[str, list[str]]) -> None:
@@ -181,3 +203,76 @@ def test_select_affected_tests_sorted_and_deduplicated(tmp_path):
     )
 
     assert selected == ["tests/test_x.py::test_1", "tests/test_x.py::test_2"]
+
+
+def test_changed_source_files_includes_committed_changes_vs_base(tmp_path):
+    """Issue #502: `git diff --name-only <base>..HEAD` emits bare paths, but
+    the parser stripped the first 3 characters off every line as if it were
+    porcelain output — "server/app/settings.py" became "ver/app/settings.py",
+    matched no tracked prefix, and the committed-vs-base diff contributed
+    nothing to the selection."""
+    settings = tmp_path / "server" / "app" / "settings.py"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("A = 1\n", encoding="utf-8")
+    base = _commit_all(tmp_path, "base")
+    settings.write_text("A = 2\n", encoding="utf-8")
+    _commit_all(tmp_path, "change settings")
+
+    assert changed_source_files(base, repo_root=tmp_path) == ["server/app/settings.py"]
+
+
+def test_changed_source_files_includes_uncommitted_changes(tmp_path):
+    """The porcelain form keeps its 3-character "XY " strip: modified tracked
+    files (`` M path``) and untracked files (``?? path``) both surface with
+    their full repo-relative path."""
+    settings = tmp_path / "server" / "app" / "settings.py"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("A = 1\n", encoding="utf-8")
+    _commit_all(tmp_path, "base")
+    settings.write_text("A = 2\n", encoding="utf-8")
+    new_module = tmp_path / "worker" / "new_task.py"
+    new_module.parent.mkdir(parents=True)
+    new_module.write_text("B = 1\n", encoding="utf-8")
+
+    changed = changed_source_files(None, repo_root=tmp_path)
+
+    assert "server/app/settings.py" in changed
+    assert "worker/new_task.py" in changed
+
+
+def test_changed_source_files_unions_committed_and_uncommitted(tmp_path):
+    settings = tmp_path / "server" / "app" / "settings.py"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("A = 1\n", encoding="utf-8")
+    base = _commit_all(tmp_path, "base")
+    settings.write_text("A = 2\n", encoding="utf-8")
+    _commit_all(tmp_path, "change settings")
+    job = tmp_path / "server" / "app" / "jobs.py"
+    job.write_text("C = 1\n", encoding="utf-8")
+
+    changed = changed_source_files(base, repo_root=tmp_path)
+
+    assert changed == ["server/app/jobs.py", "server/app/settings.py"]
+
+
+def test_select_after_committed_change_is_nonempty(tmp_path):
+    """Issue #502 nail test: a change that is committed (not merely dirty in
+    the worktree) must still surface its covering tests. Before the fix the
+    committed-vs-base paths were all mangled, the selection was permanently
+    empty, and the aff tier fell back to the full unit tier on every run."""
+    settings = tmp_path / "server" / "app" / "settings.py"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("A = 1\n", encoding="utf-8")
+    test_file = tmp_path / "tests" / "test_settings.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_a():\n    pass\n", encoding="utf-8")
+    base = _commit_all(tmp_path, "base")
+    settings.write_text("A = 2\n", encoding="utf-8")
+    _commit_all(tmp_path, "change settings")
+
+    mapping = {"server/app/settings.py": ["tests/test_settings.py::test_a"]}
+    changed = changed_source_files(base, repo_root=tmp_path)
+    selected = select_affected_tests(changed, mapping, repo_root=tmp_path)
+
+    assert changed == ["server/app/settings.py"]
+    assert selected == ["tests/test_settings.py::test_a"]
