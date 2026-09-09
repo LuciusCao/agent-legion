@@ -23,4 +23,7 @@ export const queryKeys = {
     ['studio-chat-agents', workspaceId] as const,
   studioChatSessions: (workspaceId: string) =>
     ['studio-chat-sessions', workspaceId] as const,
+  campaigns: (workspaceId: string) => ['campaigns', workspaceId] as const,
+  campaign: (workspaceId: string, campaignId: string) =>
+    ['campaigns', workspaceId, campaignId] as const,
 }

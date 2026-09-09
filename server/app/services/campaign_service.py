@@ -19,6 +19,7 @@ workspace/revision reads.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 
 from server.app.jobs import JobQueries
@@ -114,6 +115,7 @@ class CampaignService:
         job_filter: Any | None = None,
         node_key: str | None = None,
         from_failed_node: bool = False,
+        exclude_ids: Collection[str] = (),
         # submit target
         items: list[dict[str, Any]] | None = None,
         manifest_filename: str | None = None,
@@ -160,6 +162,7 @@ class CampaignService:
                 job_filter=job_filter,
                 node_key=node_key,
                 from_failed_node=from_failed_node,
+                exclude_ids=exclude_ids,
             )
             # Cursor form (design §1.4): explicit ids = list offset; filter =
             # keyset "created_at|id" cursor plus a processed count.
@@ -330,6 +333,7 @@ class CampaignService:
         job_filter: Any,
         node_key: str | None,
         from_failed_node: bool,
+        exclude_ids: Collection[str] = (),
     ) -> dict[str, Any]:
         """Validate the rerun/upgrade target shape; empty selections fail here.
 
@@ -337,6 +341,8 @@ class CampaignService:
         from_failed_node are mutually exclusive, exactly one required) and
         the batch endpoints' empty-selection semantics; the filter form
         only probes existence (round-4 P2) — the feeder re-resolves it.
+        exclude_ids 只随 filter 形态存储（allMatching 对话框的排除项——
+        契约层语义），feeder 的 keyset 取片在 SQL 内排除，页仍满尺寸。
         """
         if (job_ids is None) == (job_filter is None):
             raise InvalidOperationError("Provide exactly one of job_ids or filter")
@@ -374,6 +380,9 @@ class CampaignService:
             # materialized 10^5-id snapshot in the row would blow the row width
             # (exactly what the keyset-cursor design avoids).
             spec: dict[str, Any] = {"filter": _filter_to_dict(job_filter)}
+            excluded = sorted({str(v).strip() for v in exclude_ids if str(v).strip()})
+            if excluded:
+                spec["exclude_ids"] = excluded
         else:
             # Explicit ids are the snapshot form by definition (bounded by
             # the request size); sorted() keeps the canonical persisted order
@@ -400,6 +409,7 @@ class CampaignService:
         job_filter: Any | None = None,
         node_key: str | None = None,
         from_failed_node: bool = False,
+        exclude_ids: Collection[str] = (),
         items: list[dict[str, Any]] | None = None,
         manifest_filename: str | None = None,
         manifest_bytes: bytes | None = None,
@@ -452,6 +462,7 @@ class CampaignService:
                 workspace_id,
                 job_ids,
                 job_filter=job_filter,
+                exclude_ids=exclude_ids,
             )
         else:
             counts = batch_rerun_preview(
@@ -461,6 +472,7 @@ class CampaignService:
                 node_key,
                 from_failed_node=from_failed_node,
                 job_filter=job_filter,
+                exclude_ids=exclude_ids,
             )
         return {
             "mode": mode,

@@ -42,13 +42,20 @@ _CAMPAIGN_COLUMNS = (
 
 
 def campaign_record(row: dict[str, Any]) -> dict[str, Any]:
-    """Public campaign record: JSON columns decoded, timestamps ISO-encoded."""
+    """Public campaign record: JSON columns decoded, timestamps ISO-encoded.
+
+    ``name`` (PR-D) is the operator-facing display name stored inside
+    target_spec_json — surfaced as a top-level field so the UI never pokes
+    the spec's shape; blank means "derive the default" client-side.
+    """
+    target_spec = _parse_object(row.get("target_spec_json"))
     return {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
         "mode": str(row["mode"]),
         "status": str(row["status"]),
-        "target_spec": _parse_object(row.get("target_spec_json")),
+        "name": str(target_spec.get("name") or ""),
+        "target_spec": target_spec,
         "progress": _parse_object(row.get("progress_json")),
         "watermark": int(row["watermark"]),
         "batch_size": int(row["batch_size"]),

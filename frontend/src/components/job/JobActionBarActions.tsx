@@ -14,7 +14,6 @@ import {
 import styles from './JobActionBar.module.css'
 
 const ALL_MATCHING_TOOLTIP = '全量选择模式下不可用'
-
 type JobActionBarActionsProps = JobActionBarProps & { isBatch: boolean }
 
 function allMatchingDisabled(
@@ -51,6 +50,7 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
     onPause,
     onResume,
     onUpgradeWorkflow,
+    onOpenCampaigns,
     onExitSelectMode,
     itemLabel = '任务',
   } = props
@@ -88,6 +88,7 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
             onUpgradeWorkflow={onUpgradeWorkflow}
             onPause={onPause}
             onResume={onResume}
+            onOpenCampaigns={onOpenCampaigns}
           />
         )}
         <Button
@@ -153,7 +154,9 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
           workflowDefinition={workflowDefinition}
           workflowNodesByKey={workflowNodesByKey}
           onClose={() => setRerunOpen(false)}
-          onConfirm={onRerun}
+          onConfirmCategory={(category) =>
+            onRerun(null, true, undefined, category)
+          }
         />
       ) : (
         <JobRerunDialog
@@ -181,8 +184,8 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
         <JobAllMatchingUpgradeDialog
           open={upgradeOpen}
           count={allMatchingCount ?? 0}
+          workspaceId={workspaceId}
           onClose={() => setUpgradeOpen(false)}
-          onConfirm={() => onUpgradeWorkflow?.()}
         />
       )}
     </>

@@ -16,6 +16,20 @@ export function parseRefIds(text: string): string[] {
   return ids
 }
 
+/**
+ * 读文件文本：File.text() 的 jsdom 兼容包装（jsdom 未实现 Blob.text，
+ * 回落 FileReader）。上层（清单规整）保持 async 语义不变。
+ */
+export function readFileText(file: File): Promise<string> {
+  if (typeof file.text === 'function') return file.text()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'))
+    reader.readAsText(file)
+  })
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
   const k = 1024

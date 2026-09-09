@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthGate } from './components/AuthGate'
 import AdminRoutes from './routes/AdminRoutes'
 import {
+  CampaignsPage,
   DashboardPage,
   GlobalOnboardingPage,
   JobDetailPage,
@@ -31,6 +32,7 @@ export default function AppRoutes() {
         <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
           <Route index element={<WorkspaceMainPage />} />
           <Route path="jobs/:jobId" element={<JobDetailPage />} />
+          <Route path="campaigns" element={<CampaignsPage />} />
         </Route>
         <Route path="/workspaces/:workspaceId">
           <Route path="settings" element={<SettingsPage />} />

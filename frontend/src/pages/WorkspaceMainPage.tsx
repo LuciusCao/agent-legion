@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   selectFilterCounts,
   selectFilteredJobIds,
@@ -29,6 +29,7 @@ import styles from './WorkspaceMainPage.module.css'
 
 export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
+  const navigate = useNavigate()
   const { data: workspaceStats } = useWorkspaceStats(workspaceId)
   const jobIds = useJobStore((state) => state.jobIds)
   const filterConfig = useJobStore((state) => state.filterConfig)
@@ -160,6 +161,11 @@ export default function WorkspaceMainPage() {
             onPause={pauseActions.handlePause}
             onResume={pauseActions.handleResume}
             onUpgradeWorkflow={handleUpgradeWorkflow}
+            onOpenCampaigns={
+              workspaceId
+                ? () => navigate(`/workspaces/${workspaceId}/campaigns`)
+                : undefined
+            }
           />
           <BatchDeleteDialog
             open={deleteDialogOpen}

@@ -3867,6 +3867,11 @@ export interface components {
        * @enum {string}
        */
       mode: 'rerun' | 'submit' | 'upgrade'
+      /**
+       * Name
+       * @default
+       */
+      name: string
       rerun?: components['schemas']['CampaignRerunTarget'] | null
       submit?: components['schemas']['CampaignSubmitInlineTarget'] | null
     }
@@ -3904,6 +3909,11 @@ export interface components {
        * @enum {string}
        */
       mode: 'rerun' | 'submit' | 'upgrade'
+      /**
+       * Name
+       * @default
+       */
+      name: string
       /** Progress */
       progress: {
         [key: string]: unknown
@@ -3951,6 +3961,11 @@ export interface components {
        * @enum {string}
        */
       mode: 'rerun' | 'submit' | 'upgrade'
+      /**
+       * Name
+       * @default
+       */
+      name: string
       rerun?: components['schemas']['CampaignRerunTarget'] | null
       submit?: components['schemas']['CampaignSubmitInlineTarget'] | null
     }
@@ -3992,6 +4007,11 @@ export interface components {
        * @enum {string}
        */
       mode: 'rerun' | 'submit' | 'upgrade'
+      /**
+       * Name
+       * @default
+       */
+      name: string
       /** Progress */
       progress: {
         [key: string]: unknown
@@ -4038,6 +4058,12 @@ export interface components {
      * CampaignRerunTarget
      * @description rerun/upgrade: exactly one of job_ids or filter, plus rerun knobs.
      *
+     *     exclude_ids applies to the filter form only (the allMatching dialog's
+     *     deselections — resolveBatchTarget's excludeIds shape): the feeder's
+     *     keyset slicer skips them server-side. It is meaningless next to an
+     *     explicit job_ids list (the user hand-wrote that snapshot), so the
+     *     contract ignores it there — the ids form stores exactly job_ids.
+     *
      *     The node_key/from_failed_node pair follows JobBatchRerunRequest's rule
      *     but only for rerun mode (upgrade re-pins the revision and reruns from
      *     the top — there is no node selection to make); the cross-mode rule is
@@ -4046,6 +4072,8 @@ export interface components {
     CampaignRerunTarget: {
       /** Batch Size */
       batch_size?: number | null
+      /** Exclude Ids */
+      exclude_ids?: string[]
       filter?: components['schemas']['JobFilterPayload'] | null
       /**
        * From Failed Node

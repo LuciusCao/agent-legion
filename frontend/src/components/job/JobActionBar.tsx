@@ -51,6 +51,8 @@ export type JobActionBarProps = {
   onPause?: () => void | Promise<void>
   onResume?: () => void | Promise<void>
   onUpgradeWorkflow?: (jobIds?: string[]) => void | Promise<void>
+  /** 跳转 workspace 的「批量任务」页（#532：批量执行的管理面入口）。 */
+  onOpenCampaigns?: () => void
   itemLabel?: string
 }
 

@@ -44,6 +44,7 @@ vi.mock('./routes/pages', () => {
     SettingsPage: stub('settings'),
     WorkflowStudioPage: stub('workflow-studio'),
     WorkspaceMainPage: stub('workspace-main'),
+    CampaignsPage: stub('campaigns'),
     TokenUsagePage: stub('token-usage'),
     MonitoringPage: stub('monitoring'),
     QualityPage: stub('quality'),

@@ -55,6 +55,12 @@ class CampaignKnobsMixin(BaseModel):
 class CampaignRerunTarget(CampaignKnobsMixin):
     """rerun/upgrade: exactly one of job_ids or filter, plus rerun knobs.
 
+    exclude_ids applies to the filter form only (the allMatching dialog's
+    deselections — resolveBatchTarget's excludeIds shape): the feeder's
+    keyset slicer skips them server-side. It is meaningless next to an
+    explicit job_ids list (the user hand-wrote that snapshot), so the
+    contract ignores it there — the ids form stores exactly job_ids.
+
     The node_key/from_failed_node pair follows JobBatchRerunRequest's rule
     but only for rerun mode (upgrade re-pins the revision and reruns from
     the top — there is no node selection to make); the cross-mode rule is
@@ -70,6 +76,7 @@ class CampaignRerunTarget(CampaignKnobsMixin):
         Field(default=None, max_length=MAX_JOB_ID_SELECTION)
     )
     filter: JobFilterPayload | None = None
+    exclude_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def check_selection(self) -> Self:
@@ -106,6 +113,12 @@ class CampaignCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: CampaignMode
+    # Operator-facing display name (PR-D「任务名称」). Not a query key: it
+    # rides target_spec_json (name -> target_spec["name"]) instead of a new
+    # column — 0.8.0 already shipped the v80 bump, and the name is only ever
+    # read back with the row, never filtered on. Empty string = derive the
+    # default (mode label + time) in the UI.
+    name: str = ""
     rerun: CampaignRerunTarget | None = None
     submit: CampaignSubmitInlineTarget | None = None
 
@@ -132,6 +145,9 @@ class CampaignRecord(BaseModel):
     workspace_id: str
     mode: CampaignMode
     status: CampaignStatus
+    # Display name carried inside target_spec_json (see CampaignCreateRequest);
+    # derived as mode label + time by the UI when the stored spec has none.
+    name: str = ""
     target_spec: dict[str, Any]
     progress: dict[str, Any]
     watermark: int

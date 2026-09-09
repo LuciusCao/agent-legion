@@ -7,6 +7,7 @@ submit-mode run-overview aggregation (PR-C).
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
@@ -67,6 +68,7 @@ class CampaignSliceQueriesMixin(ConnectionQueriesMixin):
         job_filter: Any,
         limit: int,
         cursor: str | None,
+        exclude_ids: Collection[str] = (),
     ) -> tuple[list[str], str | None]:
         """One keyset page of job ids matching ``job_filter``, newest first.
 
@@ -77,12 +79,21 @@ class CampaignSliceQueriesMixin(ConnectionQueriesMixin):
         worker never opens its own connection (BOUNDARY-DATA-001). The page
         is exactly ``limit`` ids or fewer; the second element is the next
         cursor, None at exhaustion.
+
+        exclude_ids (the stored target's user deselections — the old sync
+        path's filter + exclude_ids payload) is excluded in the SQL, not in
+        the feeder: the page stays full-sized and the cursor math
+        (limit + 1 lookahead) stays exact even when exclusions land mid-page.
         """
         from server.app.jobs.queries.job_filtering import filter_clauses
 
         clauses, filter_params = filter_clauses(job_filter)
         where = f" where workspace_id = %s{''.join(f' and {c}' for c in clauses)}"
         params: list[Any] = [workspace_id, *filter_params]
+        excluded = [value for value in dict.fromkeys(exclude_ids) if value]
+        if excluded:
+            where += " and id != all(%s)"
+            params.append(excluded)
         if cursor:
             created_at, job_id = cursor.split("|", 1)
             where += " and (created_at < %s or (created_at = %s and id < %s))"

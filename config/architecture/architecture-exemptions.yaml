@@ -1116,25 +1116,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
   ceiling: 83
 - check: architecture.file_budget
-  path: server/app/services/campaign_service.py
-  reason: >-
-    PR #541 codex round 3 grows the campaign service past its
-    first-registered ceiling with three fixes that belong next to the
-    lifecycle they guard: the advisory quota precheck ahead of the
-    manifest bucket PUT (P1-3 — over-quota creates stop leaking 50 MB
-    unreferenced objects the jobs GC cannot see), the check_manifest_bytes
-    helper shared by create and preview (P2-2 — a dry-run must not confirm
-    a payload creation would 413), and the campaign-manifests/ fixed key
-    prefix that structurally exits the jobs/jobs-staging GC scan faces
-    (P2-1). Splitting them out would fork the single fail-fast creation
-    flow (normalize → preflight → resolve → size → quota → PUT → guarded
-    insert) this module exists to keep in one readable order. Remove when
-    the campaign family (#532) gains its PR-B feeder module and the
-    service is re-budgeted around the feeder split.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
-  ceiling: 478
-- check: architecture.file_budget
   path: server/app/routes/run_contracts.py
   reason: >-
     PR #541 codex round 3 P1-2 adds field-level length ceilings to the
@@ -1279,10 +1260,49 @@ exemptions:
     Anchored to #522; harvest when the runs insert consolidates with
     the intake-carrier shapes (the queue_payload split is the natural
     moment).
+  path: frontend/src/components/AddItemsDialog.tsx
+  reason: >-
+    #532 PR-D 定稿: the paste-ID and manifest-file channels switched from
+    the direct createRun call to batch-task creation (submit mode) —
+    the manifest file picker + client-side normalization (bare-ID rows
+    become ref items with the shared connection key; JSON object lines
+    pass through), the any-row-count routing decision (usesCampaign), and
+    the merged-items payload, 274 → 372 effective. The upload/material
+    tabs keep their direct-run path, so the dialog now owns two submit
+    strategies plus four panels; the natural seam is extracting the
+    ref-tab campaign channel (picker + normalizer) into its own module.
+    Anchored to #522: harvest alongside the campaign component family's
+    next consolidation.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
-  ceiling: 95
+  ceiling: 383
 - check: architecture.file_budget
+  path: frontend/src/components/job/JobAllMatchingRerunDialog.tsx
+  reason: >-
+    #532 PR-D: the allMatching rerun dialog switched from the sync
+    batch-rerun call to campaign creation (preview + node/failure-category
+    rows + footer + the batch-task notice), 110 → 136 effective; P2-1
+    adds the excludedIds subscription and the exclude_ids create param
+    (the deselections must reach the batch task's target spec); PR-D 定稿
+    renames the user-facing copy (批量任务, no implementation terms) and
+    derives the automatic task name (类型 + 目标摘要). Splitting the
+    node/category selection rows out is the natural seam — anchored to
+    #522: harvest when the shared allMatching selection UI (this dialog
+    and the upgrade one) folds into one parameterized component.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 140
+- check: architecture.file_budget
+  path: frontend/src/components/job/JobAllMatchingUpgradeDialog.tsx
+  reason: >-
+    #532 PR-D: the allMatching upgrade dialog switched from the sync
+    batch-upgrade-workflow call to campaign creation (notice + confirm
+    flow + query invalidation), 65 → 91 effective; P2-1 adds the
+    excludedIds subscription and the exclude_ids create param; PR-D 定稿
+    renames the user-facing copy (批量任务) and derives the automatic task
+    name. The dialog is the upgrade twin of JobAllMatchingRerunDialog —
+    anchored to #522: harvest together with that sibling when the two
+    allMatching dialogs fold into one parameterized confirm component.
   path: server/app/jobs/queries/campaign_slice_queries.py
   reason: >-
     #532 PR-C (design §3.2): the campaign detail's run-overview
@@ -1351,3 +1371,29 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 184
+  path: frontend/src/components/job/JobActionBarActions.tsx
+  reason: >-
+    #532 PR-D: the campaign wiring — onOpenCampaigns threading (the
+    Campaigns page entry) and the onConfirmCategory handler for the
+    failure-category path that stays on the sync rerun-by-failure
+    endpoint (design §5.2), 185 → 187 effective. Two one-prop threads
+    with no extraction target; anchored to #522: harvest when the
+    action-bar prop surface consolidates (the batch buttons already split
+    once — the next seam folds the allMatching dialog wiring in).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 189
+- check: architecture.file_budget
+  path: frontend/src/pages/WorkspaceMainPage.tsx
+  reason: >-
+    #532 PR-D: the Campaigns-page navigation hook (useNavigate + the
+    guarded onOpenCampaigns callback the action bar consumes), 188 → 190
+    effective. Two lines of routing glue on the page that already owns
+    every action-bar handler; the alternative — a dedicated campaigns
+    entry elsewhere — is a page-level restructure this PR does not
+    justify. Anchored to #522: harvest when WorkspaceMainPage's action
+    wiring moves into its hook module (the file's standing split
+    candidate).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 192
