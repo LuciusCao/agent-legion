@@ -92,6 +92,8 @@ def test_code_capacity_zero_is_accepted_by_both_contracts() -> None:
                 "min_protocol_version": 1,
                 "max_concurrent_result_commits": 16,
             },
+            "agent_enqueue": {"workers": 48, "max_pending": 1024},
+            "result_unpack": {"workers": 0},
         }
     )
     assert doc.code_capacity == 0

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from server.app.agent_broker import result_unpack_pool
 from server.app.auth.service import build_auth_service
 from server.app.bootstrap import build_agent_plane
 from server.app.db.connection import close_database_pools
@@ -70,6 +71,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # Hydrate instance-level settings from the DB before any service reads
     # them (executor runtime, cleanup/monitoring config).
     apply_instance_settings(settings, job_db)
+    # #554: pin the result-unpack pool size from the hydrated settings.
+    # Restart-effective: hydration runs before any result can arrive, and the
+    # pool is created lazily on the first result, so it reads the configured
+    # value (env AGENT_LEGION_RESULT_UNPACK_WORKERS still overrides).
+    result_unpack_pool.configure(settings.executor_runtime.result_unpack.workers)
     # Executor definitions are retired (schema v47, P-0.5). Demo node code is
     # workspace-scoped; upgrade legacy global factory rows into every bound
     # demo workspace, then archive the global rows.

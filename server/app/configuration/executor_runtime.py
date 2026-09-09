@@ -2,9 +2,10 @@
 
 Lives in the neutral configuration package so the settings layer never
 imports the runtime packages (issue #188). The per-plane tuning knobs
-(``AgentEnqueueConfig`` / ``AgentStockConfig`` / ``CodeStockConfig``) live
-in ``executor_knobs``; this module aggregates them into the
-``ExecutorRuntimeConfig`` document that ``server/app/settings.py`` embeds.
+(``AgentEnqueueConfig`` / ``AgentStockConfig`` / ``CodeStockConfig`` /
+``ResultUnpackConfig``) live in ``executor_knobs``; this module aggregates
+them into the ``ExecutorRuntimeConfig`` document that
+``server/app/settings.py`` embeds.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from server.app.configuration.executor_knobs import (
     AgentEnqueueConfig,
     AgentStockConfig,
     CodeStockConfig,
+    ResultUnpackConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,9 @@ class ExecutorRuntimeConfig(BaseModel):
     agent_stock: AgentStockConfig = Field(default_factory=AgentStockConfig)
     code_stock: CodeStockConfig = Field(default_factory=CodeStockConfig)
     agent_enqueue: AgentEnqueueConfig = Field(default_factory=AgentEnqueueConfig)
+    # #554: result unpack process pool size; 0 = auto (min(4, cpu_count)).
+    # Instance-settings managed, takes effect on restart.
+    result_unpack: ResultUnpackConfig = Field(default_factory=ResultUnpackConfig)
 
 
 class StartupValidationError(Exception):

@@ -117,7 +117,7 @@ def classify_bottleneck(sample: dict[str, Any], **context: Any) -> dict[str, Any
         if pool_skipped > 0:
             return _verdict(
                 "enqueue",
-                "入队池饱和：max_pending 触顶产生跳过（P1-1：调大 agent_enqueue.workers）",
+                "入队池饱和：max_pending 触顶产生跳过（P1-1：admin 实例设置调大 agent_enqueue.workers，重启生效）",
                 evidence,
             )
         if stock_gated > 0 and stock_gated >= max(queued // 10, 1):

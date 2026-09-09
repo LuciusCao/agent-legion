@@ -26,16 +26,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 122
 - check: architecture.file_budget
-  path: frontend/src/pages/globalSettings/instanceSettingsForm.tsx
-  reason: >-
-    Issue #521 threads the gate knob through the form value mapping: one
-    entry in toFormValues, one in the document builder, both keyed by the
-    same path string the field table declares. The mapping IS the form
-    contract.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
-  ceiling: 160
-- check: architecture.file_budget
   path: server/app/agent_control/completion.py
   reason: >-
     Issue #521 adds the stage boundary marks (unpack/artifacts_verify/
@@ -1408,3 +1398,43 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
   ceiling: 91
+- check: architecture.file_budget
+  path: server/app/routes/instance_settings_contracts.py
+  reason: >-
+    Issue #509/#554 folds two capacity knob blocks (agent_enqueue,
+    result_unpack) into the instance settings document: two small nested
+    contract models plus two fields on InstanceSettingsDocument. The nested
+    models must sit beside their siblings (InstanceWorkflowsSettings /
+    InstanceAgentWorkersSettings) — the document IS the admin API surface;
+    splitting two-field blocks into a sister module would fork the contract
+    from the file that owns its shape. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when the document gets a structural
+    split (per-block modules) or the next retirement frees headroom.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/509
+  ceiling: 58
+- check: architecture.file_budget
+  path: server/app/agent_broker/result_unpack_pool.py
+  reason: >-
+    Issue #554 adds configure() (the instance-settings pin) and the
+    configured-value branch in _pool_size next to the env override it sits
+    behind — the size-resolution precedence (env > instance setting > auto)
+    must stay in one function to stay auditable; splitting two lines of
+    precedence out would fork the policy from the pool it sizes. Ceiling at
+    actual + 10 per the dated-exemption convention. Remove when the env
+    override channel retires (transitional per #554).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/554
+  ceiling: 100
+- check: architecture.file_budget
+  path: server/app/main.py
+  reason: >-
+    Issue #554: one import plus one result_unpack_pool.configure() call right
+    after apply_instance_settings — the composition root is where hydration
+    is sequenced before any result can arrive; moving the call elsewhere
+    would hide the ordering invariant. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when startup wiring gets its planned
+    restructure or the env-override retirement re-budgets the module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/554
+  ceiling: 235

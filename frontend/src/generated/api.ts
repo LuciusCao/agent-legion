@@ -4015,6 +4015,13 @@ export interface components {
       database: components['schemas']['DatabaseConnectionView']
       storage: components['schemas']['StorageConnectionView']
     }
+    /** InstanceAgentEnqueueSettings */
+    InstanceAgentEnqueueSettings: {
+      /** Max Pending */
+      max_pending: number
+      /** Workers */
+      workers: number
+    }
     /** InstanceAgentWorkersSettings */
     InstanceAgentWorkersSettings: {
       /** Max Archive Bytes */
@@ -4040,8 +4047,14 @@ export interface components {
       /** Sample Interval Seconds */
       sample_interval_seconds: number
     }
+    /** InstanceResultUnpackSettings */
+    InstanceResultUnpackSettings: {
+      /** Workers */
+      workers: number
+    }
     /** InstanceSettingsResponse */
     InstanceSettingsResponse: {
+      agent_enqueue: components['schemas']['InstanceAgentEnqueueSettings']
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
       cleanup: components['schemas']['InstanceCleanupSettings']
       /** Code Capacity */
@@ -4057,6 +4070,7 @@ export interface components {
       /** Materials Ttl Days */
       materials_ttl_days: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
+      result_unpack: components['schemas']['InstanceResultUnpackSettings']
       /**
        * Skills Root
        * @default ~/.agents/skills
@@ -4070,6 +4084,7 @@ export interface components {
     }
     /** InstanceSettingsUpdate */
     InstanceSettingsUpdate: {
+      agent_enqueue: components['schemas']['InstanceAgentEnqueueSettings']
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
       cleanup: components['schemas']['InstanceCleanupSettings']
       /** Code Capacity */
@@ -4085,6 +4100,7 @@ export interface components {
       /** Materials Ttl Days */
       materials_ttl_days: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
+      result_unpack: components['schemas']['InstanceResultUnpackSettings']
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */

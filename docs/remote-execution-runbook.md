@@ -390,7 +390,7 @@ with its direct evidence — no more inferring from marker files.
 | 容量爬升慢 | Host `/api/metrics/runtime-profile` 的 `claim_queue_wait_seconds_*`（queued_at→promote）与 `enqueue_pending` / `enqueue_stock_gated` | queue_wait 高 + enqueue_pending 低 = 消费侧（worker 不足/爬坡钳制）；enqueue_pending 高 = 供给侧（备货池/备货门）；两者都低而并发低 = worker 容量或爬坡 |
 | 上传积压（worker 控制台 queued 涨） | worker 日志的 `execution.reported` 分段：`queue_wait`（排队）/ `prepare`（归档 CPU）/ `transfer`（传输）/ `report_wait`（report 车道排队）/ `report`（Host commit RTT，含退避） | `report_seconds` 大 = Host result commit 慢（0.7.5 起解包已下沉进程池，#552；仍慢则看 Host 的 result 分段列）；`queue_wait` 大 = 上传并发不足（`upload_max_concurrency`）；`transfer` 大 = 链路/S3 |
 | 结果延迟大、租约濒临 90s | `execution.reported` 的 `outcome=rejected`（409 = 租约已被重发，重复执行的指纹）+ Host `result_*` 分段列 | rejected 成片出现 = 上传链比租约 TTL 慢，先按上一行定位分段 |
-| Host 进程单核贴顶 | `result_unpack_seconds_*` 分段（#552 后只剩进程池排队墙钟）+ 机器级采样 | unpack 段墙钟高而 Host CPU 低 = 进程池排队（调 `AGENT_LEGION_RESULT_UNPACK_WORKERS`，默认 min(4, 核数)）；unpack 低而总时长高 = 查其余分段 |
+| Host 进程单核贴顶 | `result_unpack_seconds_*` 分段（#552 后只剩进程池排队墙钟）+ 机器级采样 | unpack 段墙钟高而 Host CPU 低 = 进程池排队（admin 实例设置 `result_unpack.workers` 调大，重启生效；env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 为覆盖通道，默认 min(4, 核数)）；unpack 低而总时长高 = 查其余分段 |
 
 ## 8. Security notes
 

@@ -6,7 +6,8 @@ this neutral configuration module so the config layer never imports the
 runtime packages (issue #188: settings -> executors -> agent_broker /
 workflow_worker was an inverted dependency); the consumers
 (``agent_broker``, ``workflow_worker``, ``executors``) import from here
-instead.
+instead. ``ResultUnpackConfig`` (#552/#554) sizes the Host-side result
+unpack process pool.
 """
 
 from __future__ import annotations
@@ -24,6 +25,17 @@ class AgentEnqueueConfig(BaseModel):
     # batch claim 把消费侧抬到数千/分钟后供给侧成为瓶颈），默认 48。
     workers: int = Field(default=48, ge=1)
     max_pending: int = Field(default=1024, ge=1)
+
+
+class ResultUnpackConfig(BaseModel):
+    """Result-unpack process pool size (``executor_runtime.result_unpack``,
+    #552/#554). 0 = auto (min(4, cpu_count)); the pool is created lazily on
+    the first result commit, so startup hydration always lands before pool
+    creation (restart-effective)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workers: int = Field(default=0, ge=0, le=64)
 
 
 class AgentStockConfig(BaseModel):
