@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
@@ -78,10 +78,14 @@ export function BatchCreateWizard({
   const [itemsText, setItemsText] = useState('')
   const [connectionKey, setConnectionKey] = useState('')
   const [manifestFile, setManifestFile] = useState<File | null>(null)
-  const [previewResult, setPreviewResult] = useState<
-    CampaignPreviewResponse['result'] | null
-  >(null)
-  const [previewError, setPreviewError] = useState<string | null>(null)
+  // 试算结果绑定请求快照（审核 P2）：任一塑形输入变化后旧结果自然失效
+  // （快照失配即不展示），确认页不会残留按旧条件算出的数量；在途响应
+  // 由请求令牌丢弃，不许过期结果写入状态。
+  const [preview, setPreview] = useState<{
+    key: string
+    result: CampaignPreviewResponse['result'] | null
+    error: string | null
+  } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -109,11 +113,16 @@ export function BatchCreateWizard({
       .map((line) => line.trim())
       .filter(Boolean)
     if (lines.length === 0) {
-      return { items: [] as CampaignSubmitInlineTarget['items'], error: null }
+      return {
+        items: [] as CampaignSubmitInlineTarget['items'],
+        error: null,
+        usesSharedKey: false,
+      }
     }
-    // 也支持整行 JSON（高级用法）：行是 { 开头时按对象解析。
+    // 也支持整行 JSON（高级用法）：行是 { 开头时按对象解析。对象行自带
+    // 连接信息（豁免连接 Key）；纯 ID 行共享连接 Key（审核 P2：必填）。
     if (lines.every((line) => line.startsWith('{'))) {
-      return parseJsonlItems(itemsText)
+      return { ...parseJsonlItems(itemsText), usesSharedKey: false }
     }
     return {
       items: lines.map((externalId) => ({
@@ -122,9 +131,19 @@ export function BatchCreateWizard({
         external_id: externalId,
       })),
       error: null,
+      usesSharedKey: true,
     }
   }, [submitChannel, itemsText, connectionKey])
   const inlineCount = parsedInline?.items.length ?? 0
+
+  // 审核 P2：粘贴的纯 ID 行按连接 Key 关联外部数据源，Key 为空时后端
+  // 必拒（连接标识最短 1 字符）——必须卡在「下一步」之前并给出提示，
+  // 不能等提交才报错。对象行（自带连接信息）不适用。
+  const connectionKeyMissing =
+    mode === 'submit' &&
+    submitChannel === 'inline' &&
+    parsedInline?.usesSharedKey === true &&
+    connectionKey.trim() === ''
 
   const parsedJobIds = useMemo(
     () =>
@@ -163,10 +182,35 @@ export function BatchCreateWizard({
   const submitShapeValid =
     mode !== 'submit' ||
     (submitChannel === 'inline'
-      ? inlineCount > 0 && parsedInline?.error == null
+      ? inlineCount > 0 && parsedInline?.error == null && !connectionKeyMissing
       : manifestFile != null)
 
   const targetValid = knobsValid && rerunShapeValid && submitShapeValid
+
+  // 塑形输入的快照 key：模式 / 名称 / 清单来源与内容 / 连接 Key / 筛选 /
+  // 节点 / 批参数——任一字段变化都构成新请求，旧试算结果随之失效。
+  const previewKey = [
+    mode,
+    nameText.trim(),
+    submitChannel,
+    itemsText,
+    connectionKey.trim(),
+    manifestFile?.name ?? '',
+    useFilter,
+    filterText,
+    jobIdsText,
+    nodeKey.trim(),
+    fromFailedNode,
+    watermarkText,
+    batchSizeText,
+  ].join('\u0000')
+  const previewTokenRef = useRef(0)
+  // 展示层派生：只有「当前输入的试算结果」可见（loading 期间也不展示旧值）。
+  const previewVisible = previewLoading ? null : preview
+  const previewResult =
+    previewVisible?.key === previewKey ? previewVisible.result : null
+  const previewError =
+    previewVisible?.key === previewKey ? previewVisible.error : null
 
   const buildInlineSubmit = (): CampaignSubmitInlineTarget | null => {
     if (mode !== 'submit' || !parsedInline || parsedInline.items.length === 0) {
@@ -208,16 +252,24 @@ export function BatchCreateWizard({
   }
 
   const runPreview = async () => {
+    // 请求令牌 + 快照：响应回来时若已有更新的请求则丢弃；写入的结果
+    // 绑定发起时的快照，输入随后再变也会在展示层被过滤掉。
+    const token = ++previewTokenRef.current
+    const requestKey = previewKey
     setPreviewLoading(true)
-    setPreviewError(null)
-    setPreviewResult(null)
     try {
       const response = await previewCampaign(workspaceId, buildRequest())
-      setPreviewResult(response.result)
+      if (token !== previewTokenRef.current) return
+      setPreview({ key: requestKey, result: response.result, error: null })
     } catch (err) {
-      setPreviewError(err instanceof Error ? err.message : '试算失败')
+      if (token !== previewTokenRef.current) return
+      setPreview({
+        key: requestKey,
+        result: null,
+        error: err instanceof Error ? err.message : '试算失败',
+      })
     } finally {
-      setPreviewLoading(false)
+      if (token === previewTokenRef.current) setPreviewLoading(false)
     }
   }
 
@@ -325,7 +377,12 @@ export function BatchCreateWizard({
                       label="连接 Key（外部 ID 通道）"
                       value={connectionKey}
                       onChange={(event) => setConnectionKey(event.target.value)}
-                      helperText="外部平台条目的连接标识；JSON 行格式自带时不适用"
+                      error={connectionKeyMissing}
+                      helperText={
+                        connectionKeyMissing
+                          ? '粘贴的是纯 ID，需要先填写连接 Key 才能关联外部数据源'
+                          : '外部平台条目的连接标识；JSON 行格式自带时不适用'
+                      }
                       data-testid="batch-wizard-connection-key"
                     />
                     <TextField

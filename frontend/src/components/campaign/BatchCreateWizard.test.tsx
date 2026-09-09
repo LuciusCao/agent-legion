@@ -120,6 +120,11 @@ describe('BatchCreateWizard', () => {
     await expectActiveStep('做什么')
     await toTargetStep()
     await act(async () => {
+      fireEvent.change(field('batch-wizard-connection-key'), {
+        target: { value: 'cms' },
+      })
+    })
+    await act(async () => {
       fireEvent.change(field('batch-wizard-items-input'), {
         target: { value: 'Q-1001' },
       })
@@ -215,10 +220,170 @@ describe('BatchCreateWizard', () => {
     expect(screen.getByTestId('batch-wizard-next')).toBeDisabled()
   })
 
+  it('requires a connection key for pasted plain ids', async () => {
+    // 审核 P2 回归锁：纯 ID 行共享连接 Key，为空时后端必拒（连接标识
+    // 最短 1 字符）——必须卡住「下一步」并给出中文提示，不能等创建报错。
+    renderWizard()
+    await toTargetStep()
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-items-input'), {
+        target: { value: 'Q-1001' },
+      })
+    })
+    expect(
+      screen.getByText(/需要先填写连接 Key 才能关联外部数据源/)
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('batch-wizard-next')).toBeDisabled()
+
+    // 补上连接 Key 后即可推进。
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-connection-key'), {
+        target: { value: 'cms' },
+      })
+    })
+    expect(screen.getByTestId('batch-wizard-next')).toBeEnabled()
+    await toConfirmStep()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('batch-wizard-create'))
+    })
+    await waitFor(() => {
+      expect(mockCreateSubmitCampaign).toHaveBeenCalledWith(
+        'ws1',
+        {
+          items: [
+            { type: 'ref', connection_key: 'cms', external_id: 'Q-1001' },
+          ],
+        },
+        ''
+      )
+    })
+  })
+
+  it('exempts jsonl object lines from the connection key requirement', async () => {
+    // 对象行自带连接信息（审核 P2）：不填连接 Key 也能推进（创建路径的
+    // 载荷已在 jsonl 对象行用例覆盖，这里只锁「能推进」语义）。
+    renderWizard()
+    await toTargetStep()
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-items-input'), {
+        target: {
+          value:
+            '{"type": "ref", "connection_key": "cms", "external_id": "a1"}',
+        },
+      })
+    })
+    expect(screen.queryByText(/需要先填写连接 Key/)).not.toBeInTheDocument()
+    await toConfirmStep()
+  })
+
+  it('discards a stale preview after the inputs change', async () => {
+    // 审核 P2 回归锁：试算成功后回到第 2 步改条件（模式 / 筛选 / 批参数
+    // 都塑形请求），再进确认页不得展示按旧条件算出的数量。
+    renderWizard()
+    await selectField('batch-wizard-mode', '重跑任务')
+    await toTargetStep()
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-filter-input'), {
+        target: { value: '{"status": "failed"}' },
+      })
+    })
+    await toConfirmStep()
+    mockPreviewCampaign.mockResolvedValueOnce({
+      result: {
+        mode: 'rerun',
+        total_count: 100,
+        eligible_count: 40,
+        estimated_batches: 1,
+        batch_size: 5000,
+      },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('batch-wizard-preview-button'))
+    })
+    await waitFor(() => {
+      expect(screen.getByText(/试算结果：匹配 100 个任务/)).toBeInTheDocument()
+    })
+
+    // 回第 2 步改筛选（缩小范围），再进确认页：旧试算结果必须已失效。
+    await act(async () => {
+      fireEvent.click(screen.getByText('上一步'))
+    })
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-filter-input'), {
+        target: { value: '{"status": "failed", "workflow_version": 2}' },
+      })
+    })
+    await toConfirmStep()
+    expect(
+      screen.queryByText(/试算结果：匹配 100 个任务/)
+    ).not.toBeInTheDocument()
+    expect(screen.getByText(/可先试算确认数量，再创建/)).toBeInTheDocument()
+  })
+
+  it('ignores a preview response that arrives after the inputs changed', async () => {
+    // 在途旧响应（审核 P2）：试算发出后立刻改输入，慢回来的旧结果既不
+    // 展示为当前数量、也不会在「改回来」时复活。
+    renderWizard()
+    await toTargetStep()
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-connection-key'), {
+        target: { value: 'cms' },
+      })
+    })
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-items-input'), {
+        target: { value: 'Q-1001\nQ-1002' },
+      })
+    })
+    await toConfirmStep()
+    let resolvePreview!: (value: unknown) => void
+    mockPreviewCampaign.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePreview = resolve
+      }) as never
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('batch-wizard-preview-button'))
+    })
+
+    // 试算在途时回第 2 步追加 ID（请求已过期）。
+    await act(async () => {
+      fireEvent.click(screen.getByText('上一步'))
+    })
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-items-input'), {
+        target: { value: 'Q-1001\nQ-1002\nQ-1003' },
+      })
+    })
+    await toConfirmStep()
+    await act(async () => {
+      resolvePreview({
+        result: {
+          mode: 'submit',
+          total_items: 2,
+          would_create: 2,
+          would_skip: 0,
+          estimated_batches: 1,
+          batch_size: 5000,
+        },
+      })
+    })
+    // 过期响应被丢弃：确认页回到「可先试算」基线，而不是旧的两条结果。
+    await waitFor(() => {
+      expect(screen.getByText(/可先试算确认数量，再创建/)).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/试算结果：共 2 条/)).not.toBeInTheDocument()
+  })
+
   it('previews then creates; the upload channel disables the preview', async () => {
     renderWizard()
     await toTargetStep()
-    // 行内通道：试算可用。
+    // 行内通道：试算可用（纯 ID 行需要连接 Key）。
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-connection-key'), {
+        target: { value: 'cms' },
+      })
+    })
     await act(async () => {
       fireEvent.change(field('batch-wizard-items-input'), {
         target: { value: 'Q-1001' },
@@ -243,7 +408,9 @@ describe('BatchCreateWizard', () => {
         mode: 'submit',
         name: '',
         submit: {
-          items: [{ type: 'ref', connection_key: '', external_id: 'Q-1001' }],
+          items: [
+            { type: 'ref', connection_key: 'cms', external_id: 'Q-1001' },
+          ],
         },
       })
     })
@@ -377,6 +544,11 @@ describe('BatchCreateWizard', () => {
   it('passes knob overrides through to the create payload', async () => {
     renderWizard()
     await toTargetStep()
+    await act(async () => {
+      fireEvent.change(field('batch-wizard-connection-key'), {
+        target: { value: 'cms' },
+      })
+    })
     await act(async () => {
       fireEvent.change(field('batch-wizard-items-input'), {
         target: { value: 'Q-1001' },

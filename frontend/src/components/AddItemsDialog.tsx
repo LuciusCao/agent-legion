@@ -61,8 +61,6 @@ export function AddItemsDialog({
   const [connectionKey, setConnectionKey] = useState('')
   const [manifest, setManifest] = useState<{
     file: File
-    /** 规整后的 jsonl 清单（ref 条目补 connection_key；对象行透传）。 */
-    payload: File
     count: number
   } | null>(null)
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
@@ -154,9 +152,9 @@ export function AddItemsDialog({
     onClose()
   }, [resetState, onClose])
 
-  /** 文件清单 → 规整后的 jsonl（ref 条目补 connection_key；对象行透传）。 */
-  const normalizeManifest = useCallback(
-    async (file: File, key: string): Promise<File | null> => {
+  /** 文件清单 → 规整后的行（ref 条目补 connection_key；对象行透传）。 */
+  const normalizeManifestLines = useCallback(
+    async (file: File, key: string): Promise<string[] | null> => {
       const text = await readFileText(file)
       const lines: string[] = []
       for (const raw of text.split('\n')) {
@@ -177,10 +175,7 @@ export function AddItemsDialog({
           })
         )
       }
-      if (lines.length === 0) return null
-      return new File([lines.join('\n') + '\n'], 'manifest.jsonl', {
-        type: 'application/x-ndjson',
-      })
+      return lines.length > 0 ? lines : null
     },
     []
   )
@@ -191,18 +186,15 @@ export function AddItemsDialog({
         setManifest(null)
         return
       }
-      const payload = await normalizeManifest(file, connectionKey)
-      if (!payload) {
+      const lines = await normalizeManifestLines(file, connectionKey)
+      if (!lines) {
         showToast(`${file.name} 中没有可用条目`, 'error')
         setManifest(null)
         return
       }
-      const count = (await readFileText(payload))
-        .split('\n')
-        .filter((line) => line.trim() !== '').length
-      setManifest({ file, payload, count })
+      setManifest({ file, count: lines.length })
     },
-    [normalizeManifest, connectionKey, showToast]
+    [normalizeManifestLines, connectionKey, showToast]
   )
 
   const handleSubmit = useCallback(async () => {
@@ -235,10 +227,13 @@ export function AddItemsDialog({
         // multipart 清单（服务端 normalize_item 收 material/bundle/ref
         // 三型）——旧代码只上传文件 payload，同时存在的其他条目被静默
         // 丢弃而 toast 按合并口径报成功。
-        if (manifest && items.length > 0) {
-          const manifestLines = (await readFileText(manifest.payload))
-            .split('\n')
-            .filter((line) => line.trim() !== '')
+        // 审核 P1（连接 Key 重铸）：清单 payload 不再在选文件时缓存——
+        // 用户选完文件仍可改连接 Key，缓存的旧 key 会让裸 ID 静默绑到
+        // 旧连接的数据源；提交时始终用「原始文件 + 当前连接 Key」重跑
+        // 同一套规整管线，单一事实来源。
+        if (manifest) {
+          const manifestLines =
+            (await normalizeManifestLines(manifest.file, connectionKey)) ?? []
           const extraLines = items.map((item) => JSON.stringify(item))
           const merged = new File(
             [[...manifestLines, ...extraLines].join('\n') + '\n'],
@@ -246,8 +241,6 @@ export function AddItemsDialog({
             { type: 'application/x-ndjson' }
           )
           await createCampaignFromManifest(workspaceId, merged)
-        } else if (manifest) {
-          await createCampaignFromManifest(workspaceId, manifest.payload)
         } else {
           const submit: CampaignSubmitInlineTarget = { items }
           await createSubmitCampaign(workspaceId, submit)
@@ -290,6 +283,7 @@ export function AddItemsDialog({
     connectionKey,
     usesCampaign,
     manifest,
+    normalizeManifestLines,
     showToast,
     queryClient,
     resetState,

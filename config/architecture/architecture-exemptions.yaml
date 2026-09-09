@@ -1397,3 +1397,22 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 192
+- check: architecture.file_budget
+  path: frontend/src/components/campaign/BatchCreateWizard.tsx
+  reason: >-
+    #532 PR-D codex round 1 (two P2 review fixes): the paste-ID channel
+    gates on the connection key (usesSharedKey on the parsed-inline shape
+    + the missing-key hint/error state the confirm button consumes —
+    plain-ID rows bind to the shared key, object lines stay exempt) and
+    the preview result is keyed to a request snapshot (previewKey over
+    every request-shaping input + the request-token guard on the async
+    response) so stale dry-run counts can no longer ride an input change
+    back to the confirm page, 524 → 567 effective. Both guards live on
+    the shape/validation layer the wizard already owns; hoisting them
+    into a shared module would split the parse pipeline from the payload
+    it feeds. Anchored to #522: harvest together with the AddItemsDialog
+    exemption when the campaign component family consolidates its
+    channel/validation seams.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 569

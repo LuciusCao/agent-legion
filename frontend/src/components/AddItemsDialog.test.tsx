@@ -279,6 +279,52 @@ describe('AddItemsDialog', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
+  it('rebuilds the manifest with the current connection key at submit time', async () => {
+    // 审核 P1 回归锁：选完清单文件后改连接 Key，提交的清单必须按新 Key
+    // 重铸——旧实现缓存选文件时烘进去的 payload，裸 ID 会静默绑到旧连接
+    // 的数据源。
+    const onClose = vi.fn()
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+    )
+    fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'old-key' },
+    })
+    pickFiles('add-items-manifest-input', [
+      new File(['Q-1001\nQ-1002\n'], 'ids.csv', { type: 'text/csv' }),
+    ])
+    await waitFor(() =>
+      expect(screen.getByTestId('manifest-summary')).toHaveTextContent(
+        '解析 2 条'
+      )
+    )
+    // 选完文件后切换连接 Key——清单条目必须随之改绑。
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'new-key' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
+
+    await waitFor(() =>
+      expect(mockCreateCampaignFromManifest).toHaveBeenCalledOnce()
+    )
+    const [, payload] = mockCreateCampaignFromManifest.mock.calls[0]
+    const text = await readFileText(payload as File)
+    expect(text.split('\n').filter(Boolean)).toEqual([
+      JSON.stringify({
+        type: 'ref',
+        connection_key: 'new-key',
+        external_id: 'Q-1001',
+      }),
+      JSON.stringify({
+        type: 'ref',
+        connection_key: 'new-key',
+        external_id: 'Q-1002',
+      }),
+    ])
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
   it('merges a manifest file with pasted ids into one upload (no silent drop)', async () => {
     // 审核 P1 回归锁：清单文件与粘贴 ID 并存时，multipart payload 必须
     // 含两者——旧代码只上传文件 payload，粘贴的 ID 被静默丢弃而 toast
