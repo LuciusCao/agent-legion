@@ -336,6 +336,11 @@ def test_batch_write_phase_revalidates_stale_selection_and_never_scans(job_db, m
 
         return _stub
 
+    # 钉调用行为（monkeypatch 模块命名空间）而非 SQL 文本。已知盲区：
+    # 按命名空间替换只对「经模块属性调用」的回归敏感——若未来有人在
+    # claim_batch_tx 里 `from claim_windows import scan_kind` 做 by-value
+    # 绑定，会绕过本钉（仓库惯例即 from-import，见 claim.py）；届时需
+    # 同步 patch claim_batch_tx 命名空间。
     monkeypatch.setattr(
         "server.app.agent_broker.claim_scan.fetch_candidates", _scan_bomb("fetch_candidates")
     )
@@ -404,9 +409,12 @@ def test_batch_promote_recheck_serializes_with_inflight_pause(job_db) -> None:
     selection = select_batch_candidates(pool, "worker-1", None, None, limit=1)
     assert [str(row["node_key"]) for row in selection.candidates] == ["review"]
 
-    # pause 在飞：holder 连接持有未提交的 jobs 行 UPDATE。
+    # pause 在飞：holder 连接持有未提交的 jobs 行 UPDATE。用生产 pause 的
+    # 真实形态（execution_pause.py 单行 UPDATE 只写 execution_paused 等
+    # 非键列，status 保持 running）——行锁与列无关，两个分支（status /
+    # execution_paused）都被重读覆盖。
     holder = psycopg.connect(TEST_DATABASE_URL)
-    holder.execute("update jobs set status='paused' where id='job-multi'")
+    holder.execute("update jobs set execution_paused=1 where id='job-multi'")
     outcome_box: dict[str, Any] = {}
 
     def run_write_phase() -> None:

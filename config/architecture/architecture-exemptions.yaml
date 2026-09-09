@@ -1446,10 +1446,10 @@ exemptions:
     four effective lines over the 45 ceiling. The knob-block-per-plane form
     is the module's stated layout (#188 neutral layer), so splitting one
     block out for four lines would fork the single home of executor_runtime
-    knobs. Ceiling at actual + 3 per the dated-exemption convention. Remove
-    when the knob rides the instance-settings intake (#561) or the budget
-    re-balance pass re-budgets the module (tracked by the remove_when
-    issue).
+    knobs. Ceiling at actual + 3 (tighter than the +10 convention — the
+    module only takes whole knob blocks). Remove when the knob rides the
+    instance-settings intake (#561) or the budget re-balance pass re-budgets
+    the module (tracked by the remove_when issue).
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/549
   ceiling: 50
