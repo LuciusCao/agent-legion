@@ -13,16 +13,15 @@ The deferral is bounded: silence longer than ``TTL + grace`` (grace = TTL, so 2�
 expires as before — a truly dead attempt thread on a live Worker must not hang
 forever. Cutoff is strict ``<``: silence exactly 2×TTL old still defers.
 
-Known blind spot (phase 2): the claim loop talks to the Host only while
-its claim budget is positive (``drain_budget`` loops on ``budget > 0``).
-A fully saturated Worker — every slot occupied, ``claim_enabled`` false,
-or upload back-pressure clamping the budget to zero — issues no claim
-traffic, so ``last_seen_at`` is then refreshed only by heartbeat touches
-and result commits; if the heartbeat threads are also starved, the control
-plane goes stale 30s later and this deferral never engages. The sweep then falls
-back to expire-and-requeue — a safe failure direction (no zombie capacity), but
-the pure-saturation spiral still needs a phase-2 Worker-side keepalive for the
-budget-zero state.
+Blind-spot resolution (phase 2): the claim loop sends claim traffic only
+while its budget is positive, but the status sync in the same loop
+(``get_self`` every ``heartbeat_interval_seconds``) authenticates too and
+refreshes ``last_seen_at`` regardless of budget — a live main loop was
+never the gap. The real residual gap was executor-process-wide starvation
+(the whole loop stalled): closed by the supervisor-side heartbeat relay
+(``worker/heartbeat_relay.py``), whose beats authenticate the worker from
+the idle supervisor process and keep this deferral reachable even in the
+pure-saturation scenario.
 """
 
 from __future__ import annotations

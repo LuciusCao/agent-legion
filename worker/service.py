@@ -14,6 +14,7 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 from worker.config_response import public_config_response
+from worker.heartbeat_relay import start_heartbeat_relay, stop_heartbeat_relay
 from worker.metrics_proxy import create_metrics_proxy_router
 from worker.service_bind import embed_control_token
 from worker.service_env import strip_proxy_env
@@ -67,10 +68,16 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # #566 二期 relay 的生命周期锚在 service lifespan（PR #572 P2）：
+        # supervisor.stop() 只停 executor；relay 线程必须先停（join 有界），
+        # 否则 supervisor 生命周期反复会累积 relay 线程、且停后 relay 日志
+        # 会把已 close 的滚动 sink 惰性重开。
+        relay = start_heartbeat_relay(supervisor.store, getattr(supervisor, "_log", print))
         supervisor.start()
         try:
             yield
         finally:
+            stop_heartbeat_relay(relay)
             supervisor.stop()
 
     app = FastAPI(title="Agent Legion Worker Service", version="1.0", lifespan=lifespan)

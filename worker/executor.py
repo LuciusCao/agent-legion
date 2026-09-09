@@ -15,8 +15,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from yaml import YAMLError
-
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]  # worker/ 包根
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -31,19 +29,21 @@ from worker.claim_batch import (
 from worker.claim_budget import pass_budget
 from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
-from worker.execution.heartbeat_batch import start_batch_heartbeat
 from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import Client, WorkerAuthError
 from worker.host.status_sync import sync_host_status
+from worker.hot_controls import DynamicControls, reload_controls
+from worker.lease_snapshot import open_lease_channel
+from worker.load_shedding import LoadShedder
 from worker.metrics_cache import WorkerMetricsCache
 from worker.ramp_up import (
     apply_ramp_hot_reload,
-    load_ramp_up_controls,
     ramp_pass,
     slots_line,
     validate_ramp_up,
 )
 from worker.registration.retry import register_from_config
+from worker.relay_sync import RelaySyncState, executor_relay_sync
 from worker.runtime import controls as runtime_controls
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.runtime.setup import prepare_runtime_models
@@ -51,14 +51,6 @@ from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import load_transfer_controls
 from worker.upload.queue import UploadQueue
-
-# code 容量 0→>0 热开被拒（缺沙箱包装器）的一次性提示文案；守卫语义见
-# runtime/controls.hot_code_concurrency（EXEC-CODE-003 fail-closed）。
-CODE_HOT_REJECT_HINT = (
-    "max_code_concurrency 0→>0 需要可解析的沙箱包装器（velites-sandbox"
-    " 或 velites，启动预检项），热更拒绝生效；docker 形态该包装器内置"
-    "镜像（此错误通常意味着镜像损坏），裸机请安装后重启 worker"
-)
 
 
 def _print(message: str) -> None:
@@ -126,7 +118,10 @@ def main() -> int:
     # #352：per-Worker 单心跳循环取代每执行一条心跳线程——本机全部在跑
     # 执行（含排队上传）一次批量续期，写流量按机器数而非槽数；旧 Host
     # （无批量端点）自动降级回逐执行心跳（heartbeat_batch.py）。
-    heartbeat_registry = start_batch_heartbeat(client, interval, stop)
+    # #566 二期：supervisor 派生时设了快照 env 时心跳 relay 挪到 supervisor
+    # 进程（executor 饱和时进程内心跳线程抢不到 GIL），本进程只按拍发布
+    # 快照、回收 beat 结果；裸跑（无 env）保持进程内心跳循环。
+    heartbeat_registry, lease_snapshot_path = open_lease_channel(client, interval, stop)
     uploads.set_heartbeat_registry(heartbeat_registry)
     # Restore unreported results BEFORE cleaning: their execution dirs carry
     # an upload_pending.json marker and are preserved by clean_work_root.
@@ -144,6 +139,8 @@ def main() -> int:
     # 与 pacing（两次 claim 之间的等待）正交；未配置 ramp_up 块 = None，
     # 预算直通目标——行为与现状完全一致（一次性全量）。
     ramp = apply_ramp_hot_reload(None, ramp_controls, _print)
+    # #566 三期：load average 回压（构造即做容量合理性告警）。
+    shedder = LoadShedder(max_concurrency, log=_print)
     ramp_view, ramp_paused_since = None, None
     pool = ThreadPoolExecutor(MAX_DYNAMIC_CONCURRENCY, thread_name_prefix="agent-execution")
     # run_execution 的循环不变参数（client/claim 逐单在前，其余两组不变）；
@@ -151,7 +148,13 @@ def main() -> int:
     run_args = (work_root, environment, interval, stop, shutdown_grace)
     run_tail = (status, uploads, download_slots)
     next_sweep, next_host_status = time.monotonic(), time.monotonic() + interval
-    control_error, code_hot_reject_logged = None, False
+    # PR #572 P2-1：relay 存活看门狗收在 RelaySyncState（seq 停跳超阈值
+    # 且持有租约即 WARNING）。
+    relay_state = RelaySyncState(interval)
+    control_error = None
+    controls = DynamicControls(
+        max_concurrency, claim_enabled, max_code_concurrency, transfer, claim_batch_limit, ramp
+    )
     # #534（codex P1 二轮）：越池抑制——领到「本地预算已尽的池」的活时
     # 记下该池，抑制期间该池 claim 声明压到当前活跃数（Host 按「active
     # < 声明容量」分池发活，这是唯一能止住逐 pass 再发的通道）、预算视
@@ -194,6 +197,15 @@ def main() -> int:
             if time.monotonic() >= next_sweep:
                 sweep_stale_executions(work_root)
                 next_sweep = time.monotonic() + SWEEP_INTERVAL_SECONDS
+            if lease_snapshot_path is not None:
+                executor_relay_sync(
+                    heartbeat_registry,
+                    lease_snapshot_path,
+                    worker_id,
+                    client.token,
+                    relay_state,
+                    log=_print,
+                )
             completed = {future for future in active if future.done()}
             active -= completed
             for future in completed:
@@ -214,35 +226,23 @@ def main() -> int:
                     # traceback.print_exc() + print 摘要。
                     traceback.print_exc()
                     print(f"Agent execution failed: {exc}", flush=True)
-            try:
-                new_controls = runtime_controls.load_claim_controls(args.config)
-                new_code_concurrency = runtime_controls.load_code_concurrency(args.config)
-                new_transfer = load_transfer_controls(args.config)
-                new_ramp_controls = load_ramp_up_controls(args.config)
-                new_claim_batch_limit = load_claim_batch_limit(args.config)
-            except (OSError, ValueError, YAMLError) as exc:
-                if (message := str(exc)) != control_error:
+            reloaded, load_error = reload_controls(args.config, controls, uploads, _print)
+            if reloaded is None:
+                if load_error != control_error:
                     _print(
-                        f"Agent dynamic control reload failed; keeping previous values: {message}"
+                        f"Agent dynamic control reload failed; keeping previous values: {load_error}"
                     )
-                    control_error = message
+                    control_error = load_error
             else:
-                # 全部加载成功才统一生效：半应用会让 "keeping previous values"
-                # 撒谎（claim 控制已覆盖、transfer 控制还是旧值）。
-                max_concurrency, claim_enabled, _ = new_controls
-                max_code_concurrency, code_rejected = runtime_controls.hot_code_concurrency(
-                    max_code_concurrency, new_code_concurrency
-                )
-                if code_rejected and not code_hot_reject_logged:
-                    print(CODE_HOT_REJECT_HINT, flush=True)
-                code_hot_reject_logged = code_rejected
-                transfer = new_transfer
-                uploads.set_max_concurrency(transfer.upload_max_concurrency)
+                # 全部加载成功才统一生效（语义收口在 hot_controls）。
+                controls = reloaded
                 control_error = None
-                # #546：批上限即时生效（下一轮的 batch_request 即按新值折算）。
-                claim_batch_limit = new_claim_batch_limit
-                # #471 热更：开着的窗口只换参数不重置进度；置 null 立即关窗。
-                ramp = apply_ramp_hot_reload(ramp, new_ramp_controls, _print)
+            max_concurrency, claim_enabled = controls.max_concurrency, controls.claim_enabled
+            max_code_concurrency, claim_batch_limit = (
+                controls.max_code_concurrency,
+                controls.claim_batch_limit,
+            )
+            ramp = controls.ramp
             # #471：本 pass 生效容量（禁用/未开窗 = 目标直通；暂停期 deduct
             # 折回、enabled 才推进虚拟时钟——策略收口在 ramp_pass）。
             ramp_view, ramp_paused_since = ramp_pass(
@@ -261,12 +261,14 @@ def main() -> int:
                 claim_enabled=claim_enabled,
                 pool_deferred=pool_deferred,
                 upload_depth=uploads.depth,
-                backlog=transfer.upload_backlog_limit,
+                backlog=controls.transfer.upload_backlog_limit,
             )
             # #546 batch claim：分池批申请（agent_limit/code_limit）+ 总上
             # 限 limit，一次往返领一批——瞬时 code 洪峰不再逐个吃循环节拍；
             # 循环主体（批申请/提交/越池批后记账）在 claim_batch.drain_budget。
-            claimed, claim_rtt = False, 0.0
+            # shed()：load 回压只作用本地预算，声明容量不动（瞬态回压
+            # 抖进 Host 记账会放大振荡）。
+            claimed, claim_rtt, budget = False, 0.0, shedder.shed(budget)
             try:
                 claimed, claim_rtt = drain_budget(
                     claim_ctx, budget, declared, claim_batch_limit, uploads.depth, claim_enabled
