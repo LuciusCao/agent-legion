@@ -60,7 +60,8 @@ def _pool_size() -> int:
         try:
             return max(1, int(override))
         except ValueError:
-            # 配置错误不该把每条 result 都判 failed——warn 一次并回落默认。
+            # 配置错误不该把每条 result 都判 failed——warn（每次解析池尺寸
+            # 时各一次，即每次建池一次）并回落默认。
             import logging
 
             logging.getLogger(__name__).warning(

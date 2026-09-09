@@ -8,7 +8,14 @@ its exported tree is cacheable forever; this module materializes each
 (skill, commit) pair at most once per host into a shared subtree of the
 runs dir:
 
-    <runs_dir>/.shared/<workflow>--<capability>/<commit40>/<workflow>/<capability>/
+    <runs_dir>/.shared/<workflow>/<capability>/<commit40>/<workflow>/<capability>/
+
+The bucket is the two-component nested path, NOT a flattened
+``<workflow>--<capability>`` name: skill-key components may themselves
+contain ``--``, so flattening would collide distinct skills (``a--b/c`` vs
+``a/b--c``) into one bucket whose per-skill LRU eviction runs under the
+WRONG skill's FileLock and could rmtree a tree another skill's validator
+is reading (PR #571 review).
 
 A cache hit is a pure path probe: the ``.complete`` marker file inside the
 commit dir is written AFTER the atomic rename of a fully exported tree, so
@@ -101,7 +108,7 @@ def materialized_commit_dir(manager: SkillManager, skill_key: str, commit: str) 
         raise SkillRepoError(f"skill commit must be a 40-hex sha: {commit!r}")
     workflow, capability = manager._parse_skill_key(skill_key)
     cache_dir = manager._resolve_cache_dir(workflow, capability)
-    skill_root = shared_cache_root(manager.runs_dir) / f"{workflow}--{capability}"
+    skill_root = shared_cache_root(manager.runs_dir) / workflow / capability
     commit_dir = skill_root / commit
     marker = commit_dir / COMPLETE_MARKER
     run_dir = commit_dir / workflow / capability

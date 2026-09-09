@@ -80,7 +80,7 @@ def test_validates_against_the_manifests_frozen_ref(tmp_path: Path) -> None:
 
     # The validation ran against the shared cache materialization, not a
     # per-validation execution dir (#569).
-    cached = shared_cache_root(manager.runs_dir) / "group--name"
+    cached = shared_cache_root(manager.runs_dir) / "group" / "name"
     [commit_dir] = [entry for entry in cached.iterdir() if entry.is_dir()]
     assert (commit_dir / _KEY / "SKILL.md").is_file()
 
@@ -106,7 +106,7 @@ def test_manifest_with_skill_commit_materializes_the_exact_commit(tmp_path: Path
 
     assert validate_worker_outputs(manager, manifest, job_dir) is None
 
-    cached = shared_cache_root(manager.runs_dir) / "group--name" / commit
+    cached = shared_cache_root(manager.runs_dir) / "group" / "name" / commit
     assert (cached / _KEY / "SKILL.md").is_file()
 
 
@@ -169,7 +169,7 @@ def test_legacy_manifest_without_skill_ref_resolves_latest(tmp_path: Path) -> No
 
     # latest = the repo's live HEAD (#322), materialized into the shared cache.
     head = _head_commit(tmp_path / "skills" / _KEY)
-    assert (shared_cache_root(manager.runs_dir) / "group--name" / head).is_dir()
+    assert (shared_cache_root(manager.runs_dir) / "group" / "name" / head).is_dir()
 
 
 def test_manifest_without_skill_skips_validation(tmp_path: Path) -> None:

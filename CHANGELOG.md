@@ -13,7 +13,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   都重新 `git archive` 物化 skill 树 + spawn velites 子进程，零复用
   （单条最差实测 60.4s）。两步修法：
   - **物化缓存**：按 `(skill_key, skill_commit)` 缓存物化目录到
-    `runs_dir/.shared/<workflow>--<capability>/<commit40>/`（commit 不可变，
+    `runs_dir/.shared/<workflow>/<capability>/<commit40>/`（commit 不可变，
     内容恒定）；命中判定是纯路径探测（`.complete` 完整性标记在原子
     rename 之后落盘，半截导出目录永不命中、下次物化时回收），命中零
     git 调用；并发物化复用 per-repo FileLock 串行。缓存按 skill 有界
