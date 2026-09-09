@@ -1264,3 +1264,80 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 109
+- check: architecture.file_budget
+  path: server/app/services/run_service.py
+  reason: >-
+    #532 PR-C (design §1.5): create_run gains the campaign linkage
+    parameters campaign_id / created_by — the feeder's submit branch
+    stamps each batch's run with its campaign and forwards the
+    campaign's created_by (the column existed unfilled since PR-A).
+    Both are optional with empty-string pre-PR-C defaults (RunService is
+    a shared service; zero caller breakage), which is exactly one
+    signature line, two call-site lines, and a 6-line docstring on a
+    file whose 194 ceiling sat at its effective count. The PR-C review
+    P2 fix (AllItemsAlreadyResolvedError) adds a dedicated raise site
+    plus a 4-line parenthesized import — 200 effective lines. Nothing
+    to split — a params-object refactor would churn every caller for
+    no gain.
+    Anchored to #522 (budget-anchor tracker); harvest at the intake
+    retirement slice (the module's own TODO), when the old
+    JobIntakeService branch leaves.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 200
+- check: architecture.file_budget
+  path: server/app/jobs/queries/batch.py
+  reason: >-
+    #532 PR-C (design §1.5): the run insert carries the v80 columns
+    campaign_id / created_by so the submit-mode linkage lands in the
+    same upsert statement (the RUN_UPSERT_CONFLICT clause stays
+    byte-identical — first writer owns the attribution). Two insert
+    columns, two params, two query-method kwargs, and the docstring
+    note; the alternative (a second campaign-specific insert statement
+    beside this one) would fork the deterministic-id upsert contract.
+    Anchored to #522; harvest when the runs insert consolidates with
+    the intake-carrier shapes (the queue_payload split is the natural
+    moment).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 95
+- check: architecture.file_budget
+  path: server/app/jobs/queries/campaign_slice_queries.py
+  reason: >-
+    #532 PR-C (design §3.2): the campaign detail's run-overview
+    aggregation — one indexed read (idx_runs_campaign partial probe)
+    joining the v36 run counter table, so the cost tracks the run count
+    and never the campaign's job volume. Lives beside the feeder's
+    slice query because both are the campaign reads split out of
+    queries/campaigns.py at ITS ceiling (the #209 sibling-module
+    ratchet); moving it back would overflow the row-lifecycle module
+    instead. Anchored to #522; harvest when the campaign queries
+    consolidate into a package.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 77
+- check: architecture.file_budget
+  path: server/app/routes/campaign_contracts.py
+  reason: >-
+    #532 PR-C (design §3.2): CampaignRunOverview + CampaignDetailRecord —
+    the detail response's linked-run aggregate (run id / status /
+    created_count / job_count). Two models over four scalar fields each;
+    no validation logic to move anywhere. Anchored to #522 (budget-anchor
+    tracker); harvest when the campaign route set consolidates (same
+    window as the campaigns.py route exemption above).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 126
+- check: architecture.file_budget
+  path: server/app/services/campaign_service.py
+  reason: >-
+    #532 PR-C (design §3.2): get_campaign's detail aggregate — the
+    submit-mode branch appends the linked-run overview (one facade
+    call + the mode discriminator). The growth is a docstring plus the
+    conditional; the module sits 6 effective lines over PR-A's ceiling
+    after PR-B's guarded-resume wording landed at the line budget's
+    edge. Anchored to #522; harvest when the campaign route set
+    consolidates or the preview family moves to its own module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 453

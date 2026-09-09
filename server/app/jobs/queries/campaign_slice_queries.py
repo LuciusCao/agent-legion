@@ -1,9 +1,8 @@
-"""Campaign slice-page query (#532 PR-B): the feeder's keyset slicer.
-
-Split from queries/campaigns.py at its budget ceiling (#209 ratchet — the
-sibling-module precedent of studio_publish_requests): the campaign row
-lifecycle stays in campaigns.py; this mixin carries the one read the
-feeder's filter-form rerun/upgrade dispatch needs.
+"""Campaign queries split from queries/campaigns.py at its budget ceiling
+(#209 ratchet — the sibling-module precedent of studio_publish_requests):
+the campaign row lifecycle stays in campaigns.py; this mixin carries the
+reads beyond the row itself — the feeder's keyset slicer (PR-B) and the
+submit-mode run-overview aggregation (PR-C).
 """
 
 from __future__ import annotations
@@ -12,8 +11,46 @@ from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
+# Per-run job-count summary for the campaign detail view: rides the
+# trigger-maintained counter table (DB-RUN-JOB-STATUS-COUNTS-001) instead
+# of a group-by over each run's whole jobs slice.
+_CAMPAIGN_RUN_OVERVIEW_SQL = """
+select r.id, r.status, r.created_count,
+       coalesce(sum(c.cnt), 0) as job_count
+from runs r
+left join run_job_status_counts c on c.run_id = r.id and c.cnt <> 0
+where r.campaign_id = %s
+group by r.id, r.status, r.created_count
+order by r.created_at desc, r.id desc
+limit %s
+"""
+
 
 class CampaignSliceQueriesMixin(ConnectionQueriesMixin):
+    def list_campaign_runs_overview(
+        self, campaign_id: str, *, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Submit-mode run overview for the campaign detail endpoint (PR-C).
+
+        Rides the idx_runs_campaign partial index (v80: campaign_id <> ''
+        rows only); the per-run job totals come from the counter table, so
+        the cost tracks the run count (bounded by batches_submitted), never
+        the campaign's job volume. Runs whose jobs were completed by a
+        manual submission still appear here — the deterministic run id made
+        the campaign's batch and that manual run the same row.
+        """
+        with self._connect_read() as conn:
+            rows = conn.execute(_CAMPAIGN_RUN_OVERVIEW_SQL, (campaign_id, limit)).fetchall()
+        return [
+            {
+                "id": str(row["id"]),
+                "status": str(row["status"]),
+                "created_count": int(row["created_count"]),
+                "job_count": int(row["job_count"]),
+            }
+            for row in rows
+        ]
+
     def list_campaign_filter_job_ids_page(
         self,
         workspace_id: str,

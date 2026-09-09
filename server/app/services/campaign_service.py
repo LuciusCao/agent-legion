@@ -518,9 +518,16 @@ class CampaignService:
         return self.job_db.list_campaigns(workspace_id, limit=limit)
 
     def get_campaign(self, workspace_id: str, campaign_id: str) -> dict[str, Any]:
+        """Campaign detail (design §3.2): the row plus, for submit mode, the
+        linked-run overview (run id / status / counts, newest first — the
+        idx_runs_campaign probe). Rerun/upgrade campaigns own no runs and
+        return an empty list (progress is the campaign's own counters)."""
         row = self.job_db.get_campaign_in_workspace(workspace_id, campaign_id)
         if row is None:
             raise NotFoundError("Campaign not found")
+        row["runs"] = (
+            self.job_db.list_campaign_runs_overview(campaign_id) if row["mode"] == "submit" else []
+        )
         return row
 
     # ------------------------------------------------------------------

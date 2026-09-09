@@ -109,7 +109,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     executor_leases = agent_plane.executor_leases
     agent_worker_registry = agent_plane.worker_registry
     # Campaign feeder (#532 PR-B, design §2.1/§3.1): its own service set
-    # (campaign_feeder_wiring), gated per PR #545 P2 below.
+    # (campaign_feeder_wiring), gated per PR #545 P2 below. object_storage
+    # (PR-C) is the submit-mode manifest spill channel: the same client
+    # that wrote the manifest object at create time reads it back at feed
+    # time.
     campaign_feeder = build_campaign_feeder(
         job_db,
         settings,
@@ -117,6 +120,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         job_event_manager,
         job_event_buffer,
         workspace_worker_control,
+        object_storage,
     )
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,

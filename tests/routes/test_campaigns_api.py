@@ -46,6 +46,21 @@ def _reset_create_count():
     yield
 
 
+def _insert_material(job_db, workspace_id: str, material_id: str) -> None:
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename, content_type,"
+            " size_bytes, storage_key, status, created_by)"
+            " values (%s, %s, %s, 'doc.txt', 'text/plain', 10, %s, 'ready', 'tester')",
+            (
+                material_id,
+                workspace_id,
+                f"hash-{material_id}",
+                f"{workspace_id}/hash-{material_id}/doc.txt",
+            ),
+        )
+
+
 def _seed_failed_jobs(client, job_db, workspace_id: str, count: int) -> list[str]:
     batch = job_db.create_run(
         workspace_id,
@@ -208,6 +223,279 @@ def test_unknown_campaign_404(client, job_db) -> None:
     assert client.post(f"{base}/nope/pause").status_code == 404
     assert client.post(f"{base}/nope/resume").status_code == 404
     assert client.post(f"{base}/nope/cancel").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Preview
+# ---------------------------------------------------------------------------
+
+
+def test_preview_rerun_matches_legacy_preview_endpoint(client, job_db) -> None:
+    """同函数即同数：campaign preview 与既有 batch-rerun preview 端点一致。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 5)
+    legacy = client.post(
+        f"/api/workspaces/{workspace_id}/jobs/batch-rerun/preview",
+        json={"job_ids": ids, "node_key": _NODE_KEYS[0]},
+    )
+    assert legacy.status_code == 200, legacy.text
+    via_campaign = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={
+            "mode": "rerun",
+            "rerun": {"job_ids": ids, "node_key": _NODE_KEYS[0]},
+        },
+    )
+    assert via_campaign.status_code == 200, via_campaign.text
+    legacy_body = legacy.json()
+    campaign_body = via_campaign.json()["result"]
+    assert campaign_body["mode"] == "rerun"
+    assert campaign_body["total_count"] == legacy_body["total_count"] == 5
+    assert campaign_body["eligible_count"] == legacy_body["eligible_count"]
+    assert campaign_body["estimated_batches"] == 1
+    # preview writes nothing
+    assert client.get(f"/api/workspaces/{workspace_id}/campaigns").json()["campaigns"] == []
+
+
+def test_preview_submit_counts(client, job_db) -> None:
+    workspace_id = _create_workspace(client, job_db)
+    _insert_material(job_db, workspace_id, "mat-1")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, source_type, source_id, run_id, title,"
+            " status, storage_dir, stem, created_at, updated_at)"
+            " values ('job-existing', %s, 'material', 'mat-1', '', 'mat-1', 'completed',"
+            " '', '', current_timestamp, current_timestamp)",
+            (workspace_id,),
+        )
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={
+            "mode": "submit",
+            "submit": {
+                "items": [
+                    {"type": "material", "material_id": "mat-1"},
+                    {"type": "material", "material_id": "mat-1"},
+                ]
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["result"]
+    assert body["mode"] == "submit"
+    assert body["total_items"] == 2
+    assert body["would_create"] == 0
+    assert body["would_skip"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Wiring: the service must receive the ObjectStorage client, not the wrapper
+# ---------------------------------------------------------------------------
+
+
+def test_campaign_service_gets_object_storage_client(client, job_db) -> None:
+    """审核 P1：main.py 组装传入 deps.job_artifact_objects 是
+    JobArtifactObjectStore 包装器；service 需要底层 .storage（put_object 所在）。
+    组装后 service.object_storage 必须是同一 storage 本体（或 None——未配置
+    S3 的实例走 503 分支）。"""
+    from server.app.routes.campaign_wiring import build_campaign_service
+    from server.app.routes.deps import RouterDeps
+    from server.app.services.job_artifact_objects import JobArtifactObjectStore
+    from tests.fakes.storage import FakeObjectStorage
+
+    app = client.app
+    wired = app.state.job_artifact_objects
+    # The app's wrapper holds whatever build_s3_storage_checked produced.
+    assert isinstance(wired, JobArtifactObjectStore)
+    underlying = wired.storage
+    assert underlying is None or isinstance(underlying, FakeObjectStorage)
+
+    def _build(wrapper_storage):
+        deps = RouterDeps(
+            job_db=app.state.job_db,
+            settings=app.state.settings,
+            agent_manager=app.state.agent_manager,
+            agent_catalog=None,
+            workspace_execution_configuration=None,
+            workspace_configuration=None,
+            job_packages=None,
+            job_artifact_objects=JobArtifactObjectStore(job_db, wrapper_storage),
+        )
+        return build_campaign_service(deps)
+
+    # The exact seam the manifest spill path calls: put_object lives on the
+    # underlying ObjectStorage, never on the wrapper.
+    fake = FakeObjectStorage()
+    service = _build(fake)
+    assert service.object_storage is fake
+    assert hasattr(service.object_storage, "put_object")
+    # Unconfigured instance: None stays None (the 503 branch), never the
+    # truthy wrapper (which would AttributeError on put_object).
+    assert _build(None).object_storage is None
+
+
+def test_app_state_wiring_passes_wrapper_but_service_unwraps(client) -> None:
+    """main.py 的 RouterDeps 仍带包装器（agent worker 面也用它）；campaign
+    组装处的解包是唯一的修复面——service 拿到的绝不能是包装器。"""
+    from server.app.services.job_artifact_objects import JobArtifactObjectStore
+
+    app = client.app
+    wrapper = app.state.job_artifact_objects
+    assert isinstance(wrapper, JobArtifactObjectStore)
+    # The wrapper itself has no put_object — the bug shape the wiring must
+    # not pass through.
+    assert not hasattr(wrapper, "put_object")
+
+
+# ---------------------------------------------------------------------------
+# Preview: upgrade mode
+# ---------------------------------------------------------------------------
+
+
+def test_preview_upgrade_counts_eligible(client, job_db) -> None:
+    """审核 P2：upgrade preview 用升级写路径的资格判定（非 current 即可升级），
+    不再走 rerun preview 的 node_key 判定（那里对 upgrade 选集恒 0）。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 3)
+    # _seed_failed_jobs 建的 job 不带 revision 快照（stale）——全部 eligible。
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={"mode": "upgrade", "rerun": {"job_ids": ids}},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["result"]
+    assert body["mode"] == "upgrade"
+    assert body["total_count"] == 3
+    assert body["eligible_count"] == 3
+    assert body["eligible_count"] > 0  # the P2 regression pin
+    # preview writes nothing
+    assert client.get(f"/api/workspaces/{workspace_id}/campaigns").json()["campaigns"] == []
+
+
+def test_preview_upgrade_marks_current_jobs_ineligible(client, job_db) -> None:
+    """与 upgrade 写路径同判定：pin+snapshot 都等于 active revision 的 job 跳过。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 2)
+    active = job_db.get_active_workflow_revision(workspace_id, workspace_id)
+    assert active is not None
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set workflow_revision_id=%s, workflow_definition_snapshot_json=%s"
+            " where id=%s",
+            (str(active["id"]), str(active["definition_json"]), ids[0]),
+        )
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={"mode": "upgrade", "rerun": {"job_ids": ids}},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["result"]
+    assert body["total_count"] == 2
+    assert body["eligible_count"] == 1
+
+
+def test_preview_upgrade_matches_batch_upgrade_write_path(client, job_db) -> None:
+    """preview 与真实路径共享判定：upgrade campaign preview 的 eligible 数
+    与 batch-upgrade-workflow 端点实际升级的 succeeded+failed 数一致
+    （busy 类 skip 不影响本种子——无活跃 lease）。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 3)
+    preview = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={"mode": "upgrade", "rerun": {"job_ids": ids}},
+    )
+    assert preview.status_code == 200, preview.text
+    eligible = preview.json()["result"]["eligible_count"]
+
+    results = client.post(
+        f"/api/workspaces/{workspace_id}/jobs/batch-upgrade-workflow",
+        json={"job_ids": ids},
+    )
+    assert results.status_code == 200, results.text
+    statuses = [r["status"] for r in results.json()["results"]]
+    # The write path treats every eligible job as a real attempt (succeeded
+    # or failed), so attempts == preview's eligible_count.
+    assert len(statuses) == eligible
+    assert all(status in ("succeeded", "failed", "skipped") for status in statuses)
+
+
+def test_preview_upgrade_filter_form(client, job_db) -> None:
+    """filter 形态的 upgrade 选集同样走升级判定（不再恒 0）。"""
+    workspace_id = _create_workspace(client, job_db)
+    _seed_failed_jobs(client, job_db, workspace_id, 2)
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={"mode": "upgrade", "rerun": {"filter": {"status": "failed"}}},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["result"]
+    assert body["total_count"] == 2
+    assert body["eligible_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Submit mode end-to-end (PR-C): create → feeder → linked runs → detail
+# ---------------------------------------------------------------------------
+
+
+def test_submit_campaign_end_to_end_with_detail_runs(client, job_db) -> None:
+    """PR-C 全链路（API 面）：inline submit 创建 → app.state.campaign_feeder 的
+    tick 投放（start_worker=False 的测试 app 不启线程，tick 手动驱动）→
+    runs.campaign_id 落写 → 详情端点聚合 run 概览（CampaignDetailRecord.runs）。
+    rerun 模式的详情不带 runs 聚合（空列表）。"""
+    workspace_id = _create_workspace(client, job_db)
+    for i in range(4):
+        _insert_material(job_db, workspace_id, f"mat-e2e-{i}")
+    base = f"/api/workspaces/{workspace_id}/campaigns"
+
+    created = client.post(
+        base,
+        json={
+            "mode": "submit",
+            "submit": {
+                "items": [{"type": "material", "material_id": f"mat-e2e-{i}"} for i in range(4)],
+                "batch_size": 2,
+                "watermark": 100,
+            },
+        },
+    )
+    assert created.status_code == 200, created.text
+    campaign_id = created.json()["campaign"]["id"]
+    assert created.json()["campaign"]["progress"] == {"item_offset": 0}
+
+    feeder = client.app.state.campaign_feeder
+    assert feeder is not None  # built in create_app; only the thread is off
+    # The shared test app's workspaces start paused (the startup
+    # reset_all_to_paused discipline): the feeder correctly suspends a
+    # paused workspace (design §2.4), so resume it first — exactly what the
+    # operator's workspace-resume flow does for a stalled campaign.
+    feeder.workspace_worker_control.resume(workspace_id)
+    feeder._tick()
+    feeder._next_feed_at.clear()
+    feeder._tick()
+
+    detail = client.get(f"{base}/{campaign_id}")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()["campaign"]
+    assert body["status"] == "completed"
+    assert body["batches_submitted"] == 2
+    assert body["jobs_succeeded"] == 4
+    assert body["progress"]["item_offset"] == 4
+    runs = body["runs"]
+    assert len(runs) == 2
+    assert sorted(run["job_count"] for run in runs) == [2, 2]
+    with job_db.connect() as conn:
+        linked = conn.execute(
+            "select campaign_id from runs where campaign_id=%s", (campaign_id,)
+        ).fetchall()
+    assert len(linked) == 2
+
+    # Rerun-mode detail carries no runs aggregate.
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 1)
+    rerun_id = client.post(base, json=_rerun_body(ids)).json()["campaign"]["id"]
+    rerun_detail = client.get(f"{base}/{rerun_id}")
+    assert rerun_detail.status_code == 200
+    assert rerun_detail.json()["campaign"]["runs"] == []
 
 
 # ---------------------------------------------------------------------------

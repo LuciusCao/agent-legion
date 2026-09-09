@@ -25,6 +25,8 @@ class RunQueriesMixin(RunQueueQueriesMixin):
         status: str = "created",
         frozen_pins: dict[str, Any] | None = None,
         queue_payload: dict[str, Any] | None = None,
+        campaign_id: str = "",
+        created_by: str = "",
     ) -> dict[str, Any]:
         """Insert (or upsert) a run; ``digest_payload`` only derives the id.
 
@@ -37,6 +39,11 @@ class RunQueriesMixin(RunQueueQueriesMixin):
         republish, or the async intake carrier before its first chunk); a run
         with live jobs keeps the pins those jobs were created with.
         ``queue_payload`` is the async intake working state, empty for sync runs.
+        ``campaign_id`` / ``created_by`` are the PR-C submit-mode linkage: the
+        feeder stamps the campaign onto each run it creates (the empty-string
+        default keeps every legacy caller — intake, quality replay, the /runs
+        route — byte-identical; '' stays outside the idx_runs_campaign partial
+        index, so unattributed runs never touch it).
         """
         run_id = deterministic_run_id(workspace_id, workflow_key, source_kind, digest_payload)
         pins_json = json.dumps(frozen_pins or {}, ensure_ascii=False, sort_keys=True)
@@ -50,11 +57,20 @@ class RunQueriesMixin(RunQueueQueriesMixin):
                 f"""
                 insert into runs(
                   id, workspace_id, source_kind, status,
-                  frozen_pins_json, queue_payload_json
-                ) values (%s, %s, %s, %s, %s, %s)
+                  frozen_pins_json, queue_payload_json, campaign_id, created_by
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s)
                 {RUN_UPSERT_CONFLICT}
                 """,
-                (run_id, workspace_id, source_kind, status, pins_json, queue_json),
+                (
+                    run_id,
+                    workspace_id,
+                    source_kind,
+                    status,
+                    pins_json,
+                    queue_json,
+                    campaign_id,
+                    created_by,
+                ),
             )
             row = conn.execute("select * from runs where id=%s", (run_id,)).fetchone()
         if row is None:

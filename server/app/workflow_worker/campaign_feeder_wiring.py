@@ -28,9 +28,14 @@ def build_campaign_feeder(
     job_event_manager: Any,
     job_event_buffer: Any,
     workspace_worker_control: Any,
+    object_storage: Any = None,
 ) -> CampaignFeeder:
     """Positional on purpose: the composition-root call stays one screen line
-    pair (main.py sits at its budget ceiling)."""
+    pair (main.py sits at its budget ceiling). ``object_storage`` is the
+    manifest spill channel (PR-C): the same ObjectStorage client the campaign
+    service wrote the manifest object through, None on S3-less instances
+    (bucket manifests never existed there, so the loader only ever sees the
+    inline channel)."""
     return CampaignFeeder(
         job_db,
         settings,
@@ -54,4 +59,5 @@ def build_campaign_feeder(
             job_event_buffer=job_event_buffer,
         ),
         workspace_worker_control=workspace_worker_control,
+        object_storage=object_storage,
     )

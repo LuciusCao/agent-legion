@@ -147,6 +147,25 @@ class CampaignRecord(BaseModel):
     finished_at: str | None
 
 
+class CampaignRunOverview(BaseModel):
+    """One linked run of a submit campaign (the detail aggregate, PR-C).
+
+    created_count is the run row's counter; job_count the live per-run job
+    total from the status-counts table — they diverge exactly when a
+    partial failure left the run's count stale until healing."""
+
+    id: str
+    status: str
+    created_count: int
+    job_count: int
+
+
+class CampaignDetailRecord(CampaignRecord):
+    """Detail shape: the record plus the submit-mode run overview."""
+
+    runs: list[CampaignRunOverview] = Field(default_factory=list)
+
+
 class CampaignCreateResponse(BaseModel):
     campaign: CampaignRecord
 
@@ -156,7 +175,7 @@ class CampaignListResponse(BaseModel):
 
 
 class CampaignDetailResponse(BaseModel):
-    campaign: CampaignRecord
+    campaign: CampaignDetailRecord
 
 
 class CampaignRerunPreviewResult(BaseModel):

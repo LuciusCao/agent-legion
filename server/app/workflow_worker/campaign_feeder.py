@@ -22,9 +22,12 @@ stage/replay/pop mechanics live in campaign_batch_staging.py (split at
 the budget ceiling); explicit-ids and submit forms need no staging —
 their slice sources are stable across the crash.
 
-This slice (PR-B) implements the rerun and upgrade modes; submit dispatches
-through the same skeleton with a per-campaign manifest cache that PR-C
-fills in.
+The three mode dispatches: rerun/upgrade live here (PR-B); submit is the
+CampaignSubmitMixin (campaign_feeder_submit.py, PR-C) — the per-campaign
+manifest cache (inline spec or the object-store manifest object),
+item_offset slicing, ``run_service.create_run(campaign_id=...)``, and the
+all-duplicates InvalidOperationError absorb that keeps re-fed batches
+advancing the cursor without creating anything.
 
 Failure classification (design §2.3): ``JobServiceError`` families raised
 while feeding are deterministic (corrupt target spec, vanished revision)
@@ -38,16 +41,20 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.campaigns import CAMPAIGN_ACTIVE_STATUSES
 from server.app.services.job_errors import InvalidOperationError, JobServiceError
 from server.app.services.job_rerun.batch import batch_rerun
 from server.app.workflow_worker.campaign_batch_staging import (
-    copy_progress,
     next_slice,
     partition_replay,
     stage_batch,
+)
+from server.app.workflow_worker.campaign_feeder_submit import CampaignSubmitMixin
+from server.app.workflow_worker.campaign_feeder_types import (
+    BatchOutcome,
+    copy_progress,
     target_spec,
 )
 
@@ -57,6 +64,7 @@ if TYPE_CHECKING:
     from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
     from server.app.services.run_service import RunService
     from server.app.settings import Settings
+    from server.app.storage import ObjectStorage
     from server.app.worker_control import WorkspaceWorkerControl
 
 logger = logging.getLogger(__name__)
@@ -78,18 +86,7 @@ _BACKOFF_MAX_SECONDS = 60.0
 _WATERMARK_TRAIL_LENGTH = 50
 
 
-class BatchOutcome(NamedTuple):
-    """What one fed batch did (the CAS advance's input)."""
-
-    ids: list[str]
-    succeeded: int
-    skipped: int
-    failed: int
-    exhausted: bool  # this slice ended the campaign's target
-    next_cursor: str | None  # filter form: the keyset cursor after this page
-
-
-class CampaignFeeder:
+class CampaignFeeder(CampaignSubmitMixin):
     """Tick loop draining active campaign rows in watermark-gated batches."""
 
     def __init__(
@@ -101,6 +98,7 @@ class CampaignFeeder:
         upgrade_service: JobWorkflowUpgradeService,
         run_service: RunService | None = None,
         workspace_worker_control: WorkspaceWorkerControl | None = None,
+        object_storage: ObjectStorage | None = None,
     ) -> None:
         self.job_db = job_db
         self.settings = settings
@@ -108,6 +106,7 @@ class CampaignFeeder:
         self.upgrade_service = upgrade_service
         self.run_service = run_service
         self.workspace_worker_control = workspace_worker_control
+        self.object_storage = object_storage
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -383,18 +382,29 @@ class CampaignFeeder:
         elif "offset" in progress:
             # rerun/upgrade explicit-ids form: the list offset.
             progress["offset"] = int(progress.get("offset") or 0) + len(outcome.ids)
-        # submit mode's item_offset advance is PR-C's (design §1.4).
+        elif "item_offset" in progress:
+            # submit form: the manifest line offset. The batch outcome's
+            # ids field carries the campaign id marker (len 1), NOT the
+            # slice size — the slice length is batch_size-bounded and the
+            # created count is the dedup outcome, so recompute the advance
+            # from the stored offset + the row's batch_size (design §1.4).
+            batch_size = int(campaign["batch_size"])
+            progress["item_offset"] = int(progress.get("item_offset") or 0) + batch_size
 
     # ------------------------------------------------------------------
     # Mode dispatch (design §2.3)
     # ------------------------------------------------------------------
 
     def _submit_batch(self, campaign: dict[str, Any]) -> BatchOutcome | None:
-        """Feed one batch; None only for the PR-C submit stub.
+        """Feed one batch (rerun / upgrade / submit).
 
-        Per-job outcomes are result dicts on both paths: succeeded = flips
+        Per-job outcomes are result dicts on the rerun/upgrade paths
+        (byte-identical to the synchronous entry points): succeeded = flips
         that landed, skipped = ineligible/not-found/busy, failed = per-job
-        failures.
+        failures. The submit path folds create_run's single verdict into the
+        same triple: created = succeeded, duplicate-absorbed = skipped, and
+        the absorbed-batch decode distinguishes heal (0 created, 0 skipped)
+        from a partial batch (created + skipped summing to the slice).
         """
         mode = str(campaign["mode"])
         if mode == "rerun":
@@ -402,10 +412,7 @@ class CampaignFeeder:
         if mode == "upgrade":
             return self._submit_upgrade(campaign)
         if mode == "submit":
-            # PR-C: load the manifest, slice at item_offset, absorb the
-            # already-submitted batch, advance item_offset — a branch
-            # fill-in, not a rewire.
-            return None
+            return self._submit_manifest_batch(campaign)
         raise InvalidOperationError(f"Unsupported campaign mode {mode!r}")
 
     def _submit_rerun(self, campaign: dict[str, Any]) -> BatchOutcome:

@@ -127,6 +127,7 @@
     "tests/services/test_builtin_agent_seed.py",
     "tests/services/test_campaign_service.py",
     "tests/services/test_campaign_service_submit.py",
+    "tests/services/test_campaign_submit.py",
     "tests/services/test_cleanup_sweep_planner.py",
     "tests/services/test_code_claim.py",
     "tests/services/test_code_claim_sweeper.py",
