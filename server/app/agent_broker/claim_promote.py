@@ -2,8 +2,8 @@
 
 After a candidate passes admission and its job/node flips succeed, this
 module owns the rest of the write transaction: the node_runs insert, the
-executor lease, the request row's claimed flip, the jobs promote (whose
-rowcount=0 raises ClaimRacedError to roll the attempt back), and — since
+executor lease, the request row's claimed flip, the jobs promote (since
+#555 narrowed to the queued→running transition — see below), and — since
 #551 — the queue-wait gauge fold, which belongs exactly here because the
 scan row's ``queued_at`` is only visible on this path.
 """
@@ -92,15 +92,25 @@ def promote_claim(
         """,
         (worker_id, lease_id, run["id"], selected["execution_id"]),
     )
+    # #555: 收窄为 queued→running 的真实跃迁——多节点 job 的每个后继节点
+    # claim 都曾对同一 jobs 行做「值不变的重写+重锁」，与 result commit 侧
+    # 同批 job 的写正面相撞。已 running 的 job 无需再写。
     promoted = conn.execute(
         "update jobs set status='running', updated_at=current_timestamp"
-        " where id=%s and status in ('queued', 'running') and execution_paused=0",
+        " where id=%s and status='queued' and execution_paused=0",
         (selected["job_id"],),
     )
     if promoted.rowcount == 0:
-        # Pause/failure landed mid-claim; roll the whole claim back so the
-        # request stays queued instead of resurrecting the job.
-        raise ClaimRacedError()
+        # rowcount 0 的两种语义必须区分：job 已被本 job 前序节点的 claim
+        # promote 为 running（稳态放行，无写）vs job 在 claim 中途离开
+        # runnable 集（raced——回滚整个 claim，请求保持 queued 而不是复活
+        # job）。重读判定；重读后再落 pause 的窗口与旧版条件 UPDATE 的相同
+        # （判读与 pause 从不原子），不放大结果空间。
+        job = conn.execute(
+            "select status, execution_paused from jobs where id=%s", (selected["job_id"],)
+        ).fetchone()
+        if job is None or job["status"] != "running" or job["execution_paused"]:
+            raise ClaimRacedError()
     # #551：供给延迟观测——queued_at→promote 的 queue_wait 直接 fold 进 claim
     # 画像族（per-promote 一条，批内每个 promote 各自计入；与 #448 阶段计时
     # 同为事务内 best-effort gauge，不是事件，不适用 #498 post-commit 纪律）。

@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import claim_timing as _claim_timing
-from server.app.agent_broker.agent_worker_capacity import touch_worker
 from server.app.agent_broker.claim_scan import (
     AgentClaim,
     ClaimOutcome,
@@ -24,6 +23,7 @@ from server.app.agent_broker.claim_scan import (
 from server.app.agent_broker.claim_setup import prepare_claim_view
 from server.app.agent_broker.claim_windows import needed_claim_kinds, scan_kind
 from server.app.agent_broker.manifest_trim import cancel_request
+from server.app.agent_broker.worker_presence import touch_worker
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -71,7 +71,7 @@ def claim_in_transaction(
     # headroom on a pre-v2 Worker): skip the scan entirely.
     kinds = needed_claim_kinds(view)
     if not kinds:
-        touch_worker(conn, worker_id)
+        touch_worker(conn, worker_id, min_interval_seconds=broker.touch_worker_interval_seconds)
         timer.stage("writes")
         report_claim_stages(timer, worker_id, claimed=False, state=ScanState())
         return ClaimOutcome(None, view, {}, scan_skipped=True)
@@ -87,11 +87,11 @@ def claim_in_transaction(
         state.attempts = 0
         claimed = scan_kind(broker, conn, worker_id, view, state, kind, cursor, timer)
         if claimed is not None:
-            touch_worker(conn, worker_id)
+            touch_worker(conn, worker_id, min_interval_seconds=broker.touch_worker_interval_seconds)
             timer.stage("writes")
             report_claim_stages(timer, worker_id, claimed=True, state=state)
             return ClaimOutcome(claimed, view, dict(state.skip_reasons))
-    touch_worker(conn, worker_id)
+    touch_worker(conn, worker_id, min_interval_seconds=broker.touch_worker_interval_seconds)
     timer.stage("writes")
     report_claim_stages(timer, worker_id, claimed=False, state=state)
     return ClaimOutcome(None, view, dict(state.skip_reasons))

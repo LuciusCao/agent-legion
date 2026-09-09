@@ -56,6 +56,9 @@ def build_agent_plane(
         is_workspace_paused=workspace_worker_control.is_paused,
         job_db=job_db,
         job_event_buffer=job_event_buffer,
+        touch_worker_interval_seconds=(
+            settings.executor_runtime.agent_claim.worker_touch_interval_seconds
+        ),
     )
     dispatch = AgentDispatchService(settings, broker, artifact_store)
     skill_manager = build_skill_manager(job_db, settings.skills_runs_dir)

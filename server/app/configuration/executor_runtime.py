@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.configuration.executor_knobs import (
+    AgentClaimConfig,
     AgentEnqueueConfig,
     AgentStockConfig,
     CodeStockConfig,
@@ -93,6 +94,7 @@ class ExecutorRuntimeConfig(BaseModel):
     # #554: result unpack process pool size; 0 = auto (min(4, cpu_count)).
     # Instance-settings managed, takes effect on restart.
     result_unpack: ResultUnpackConfig = Field(default_factory=ResultUnpackConfig)
+    agent_claim: AgentClaimConfig = Field(default_factory=AgentClaimConfig)
 
 
 class StartupValidationError(Exception):

@@ -20,12 +20,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from server.app.agent_broker.agent_worker_capacity import touch_worker
 from server.app.agent_broker.worker_events import (
     HEARTBEAT_LEASE_NOT_ACTIVE,
     HEARTBEAT_NOT_OWNED,
     note_heartbeat_rejected,
 )
+from server.app.agent_broker.worker_presence import touch_worker
 from server.app.db.transaction import write_transaction
 
 if TYPE_CHECKING:

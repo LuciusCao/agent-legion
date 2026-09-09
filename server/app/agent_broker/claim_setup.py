@@ -23,6 +23,31 @@ ACTIVE_COUNT_SQL = (
 )
 
 
+def build_worker_view(
+    worker: Any,
+    agent_pool: int,
+    code_pool: int,
+    active_rows: Any,
+) -> WorkerView:
+    """Assemble the WorkerView from the worker row, enforced pools, counts.
+
+    Shared by ``prepare_claim_view`` (write phase, row locked) and the #555
+    batch read phase (``claim_batch_select``'s unlocked read) so both build
+    the identical view shape."""
+    active_by_kind = {str(row["kind"]): int(row["cnt"]) for row in active_rows}
+    return WorkerView(
+        runtimes=set(json.loads(worker["runtimes_json"])),
+        models=agent_claim_compatibility.worker_model_declarations(worker),
+        labels=json.loads(worker["labels_json"]),
+        allowed_workspaces=set(json.loads(worker["allowed_workspaces_json"] or "[]")),
+        agent_capacity=agent_pool,
+        agent_active=active_by_kind.get("agent", 0),
+        code_capacity=code_pool,
+        code_active=active_by_kind.get("code", 0),
+        protocol_version=int(worker["protocol_version"]),
+    )
+
+
 def prepare_claim_view(
     conn: Any,
     worker_id: str,
@@ -44,19 +69,7 @@ def prepare_claim_view(
     max_concurrency, max_code_concurrency = sync_declared_capacity(
         conn, worker, declared_max_concurrency, declared_max_code_concurrency
     )
-    models = agent_claim_compatibility.worker_model_declarations(worker)
     active_rows = conn.execute(ACTIVE_COUNT_SQL, (worker_id,)).fetchall()
     if timer is not None:
         timer.stage("worker_setup")
-    active_by_kind = {str(row["kind"]): int(row["cnt"]) for row in active_rows}
-    return WorkerView(
-        runtimes=set(json.loads(worker["runtimes_json"])),
-        models=models,
-        labels=json.loads(worker["labels_json"]),
-        allowed_workspaces=set(json.loads(worker["allowed_workspaces_json"] or "[]")),
-        agent_capacity=max_concurrency,
-        agent_active=active_by_kind.get("agent", 0),
-        code_capacity=max_code_concurrency,
-        code_active=active_by_kind.get("code", 0),
-        protocol_version=int(worker["protocol_version"]),
-    )
+    return build_worker_view(worker, max_concurrency, max_code_concurrency, active_rows)

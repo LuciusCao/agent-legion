@@ -1,15 +1,12 @@
-"""Host-side recording of a worker's live capacity declaration."""
+"""Host-side recording of a worker's live capacity declaration.
+
+The ``last_seen_at`` presence touch lives in ``worker_presence.py`` (#555 —
+throttled writes); this module keeps only the declared-capacity sync.
+"""
 
 from __future__ import annotations
 
 from typing import Any
-
-
-def touch_worker(conn: Any, worker_id: str) -> None:
-    conn.execute(
-        "update agent_workers set last_seen_at=current_timestamp where worker_id=%s",
-        (worker_id,),
-    )
 
 
 def sync_declared_capacity(
