@@ -46,6 +46,23 @@ class InstanceAgentWorkersSettings(BaseModel):
     max_concurrent_result_commits: int = Field(ge=0)
 
 
+class InstanceAgentEnqueueSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # #509: Host enqueue-pool knobs; restart-effective. workers upper bound
+    # 256 guards against a misconfiguration blowing up the thread count.
+    workers: int = Field(ge=1, le=256)
+    max_pending: int = Field(ge=1)
+
+
+class InstanceResultUnpackSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # #554: result-unpack process pool size; restart-effective. 0 = auto
+    # (min(4, cpu_count)), ge=0 mirrors ExecutorRuntimeConfig.
+    workers: int = Field(ge=0, le=64)
+
+
 class InstanceSettingsDocument(BaseModel):
     """Full instance settings document; constraints mirror ExecutorRuntimeConfig."""
 
@@ -74,6 +91,10 @@ class InstanceSettingsDocument(BaseModel):
     execution_retention_days: int = Field(ge=0, le=36500)
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
+    # #509/#554: capacity knobs folded into the instance document;
+    # restart-effective like the rest of the executor-runtime surface.
+    agent_enqueue: InstanceAgentEnqueueSettings
+    result_unpack: InstanceResultUnpackSettings
 
 
 class InstanceSettingsResponse(InstanceSettingsDocument):

@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-09-09
+
+### Added
+- 容量旋钮收编进 admin 实例设置（issue #509/#554）：两组 Host 侧容量调参
+  从「改 yaml/env + 重启」收编进 DB 实例设置文档（admin 全局设置 UI 可
+  编辑，重启生效，与 `code_capacity` / `workflows.max_items_per_run`
+  同形态）——
+  - `agent_enqueue.workers`（默认 48，上限 256 防误配）/
+    `max_pending`（默认 1024）：Host 入队线程池，#349 P1-1 承诺的
+    「DB 实例设置」处置路径自此真实存在；runtime-profile「入队池饱和」
+    分类指引同步指向 admin 实例设置。
+  - `result_unpack.workers`（0 = 自动 min(4, 核数)，上限 64）：
+    result 解包进程池尺寸（#552 下沉）；启动水合后 configure 惰性建池
+    自然读到配置值。env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 保留为
+    覆盖通道（过渡期）。
+  - 存量文档缺键回退代码默认，无数据迁移；`InstanceSettingsDocument`
+    新增 `agent_enqueue` / `result_unpack` 嵌套块，PUT 全文档校验
+    （workers 上限分别 256 / 64）。
+
 ## [0.7.5] - 2026-09-09
 
 ### Performance
@@ -956,7 +975,8 @@ Initial open-source release.
   runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/LuciusCao/agent-legion/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/LuciusCao/agent-legion/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/LuciusCao/agent-legion/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/LuciusCao/agent-legion/compare/v0.7.2...v0.7.3

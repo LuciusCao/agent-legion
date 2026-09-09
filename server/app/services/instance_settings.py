@@ -5,9 +5,9 @@ API) carries the instance-level tunables retired from yaml. Hydration runs
 once at startup (``create_app``, right after ``JobQueries`` is constructed)
 and takes effect on restart; there is no runtime hot-reload:
 
-- executor runtime scalars plus ``workflows.max_items_per_run`` /
-  ``agent_workers.{max_archive_bytes,min_protocol_version,
-  max_concurrent_result_commits}`` and ``code_capacity`` are merged onto the
+- executor runtime scalars plus the nested blocks in ``_NESTED_BLOCK_KEYS``
+  (``workflows`` / ``agent_workers`` / ``agent_enqueue`` #509 /
+  ``result_unpack`` #554) and ``code_capacity`` are merged onto the
   loaded ``ExecutorRuntimeConfig`` and re-validated;
 - ``cleanup`` / ``monitoring`` values are written back into ``settings.config``
   for construction-time consumers (OpsMetricsService, CleanupConfig, WorkflowMaintenance).
@@ -37,6 +37,19 @@ _EXECUTOR_SCALAR_KEYS = (
     "code_capacity",
 )
 
+# Nested ExecutorRuntimeConfig blocks managed by the instance document, with
+# their managed keys. Drives both the default document and the apply merge,
+# so a new knob block lands in both by extending this one table.
+_NESTED_BLOCK_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("workflows", ("max_items_per_run",)),
+    (
+        "agent_workers",
+        ("max_archive_bytes", "min_protocol_version", "max_concurrent_result_commits"),
+    ),
+    ("agent_enqueue", ("workers", "max_pending")),
+    ("result_unpack", ("workers",)),
+)
+
 
 def default_instance_document() -> dict[str, Any]:
     """Return the code-default instance settings document."""
@@ -44,16 +57,6 @@ def default_instance_document() -> dict[str, Any]:
     document: dict[str, Any] = {
         "cleanup": dict(DEFAULT_CLEANUP_CONFIG),
         "monitoring": dict(DEFAULT_MONITORING_CONFIG),
-        "workflows": {
-            "max_items_per_run": runtime.workflows.max_items_per_run,
-        },
-        "agent_workers": {
-            "max_archive_bytes": runtime.agent_workers.max_archive_bytes,
-            "min_protocol_version": runtime.agent_workers.min_protocol_version,
-            # #521 peak-shaving gate: instance-managed like its siblings,
-            # takes effect on restart (no hot reload).
-            "max_concurrent_result_commits": runtime.agent_workers.max_concurrent_result_commits,
-        },
         # Materials TTL (design §10): 0 = disabled; read fresh from the DB at
         # material completion/sweep time, never hydrated into Settings.
         "materials_ttl_days": 0,
@@ -61,6 +64,9 @@ def default_instance_document() -> dict[str, Any]:
         # read fresh from the DB at sweep time, never hydrated into Settings.
         "execution_retention_days": 0,
     }
+    for block, keys in _NESTED_BLOCK_KEYS:
+        block_model = getattr(runtime, block)
+        document[block] = {key: getattr(block_model, key) for key in keys}
     for key in _EXECUTOR_SCALAR_KEYS:
         document[key] = getattr(runtime, key)
     return document
@@ -103,14 +109,9 @@ def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> 
     base = settings.executor_runtime.model_dump()
     for key in _EXECUTOR_SCALAR_KEYS:
         base[key] = effective[key]
-    base["workflows"]["max_items_per_run"] = effective["workflows"]["max_items_per_run"]
-    base["agent_workers"]["max_archive_bytes"] = effective["agent_workers"]["max_archive_bytes"]
-    base["agent_workers"]["min_protocol_version"] = effective["agent_workers"][
-        "min_protocol_version"
-    ]
-    base["agent_workers"]["max_concurrent_result_commits"] = effective["agent_workers"][
-        "max_concurrent_result_commits"
-    ]
+    for block, keys in _NESTED_BLOCK_KEYS:
+        for key in keys:
+            base[block][key] = effective[block][key]
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(base)
     settings.config["cleanup"] = effective["cleanup"]
     settings.config["monitoring"] = effective["monitoring"]

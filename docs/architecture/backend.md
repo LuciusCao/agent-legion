@@ -310,6 +310,7 @@ server/app/
 |------|------|------|------|
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'velites'], skill: str, tools: tuple[... | app/agent_catalog/definition.py |
 | AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/configuration/executor_knobs.py |
+| ResultUnpackConfig | BaseModel | workers: int | app/configuration/executor_knobs.py |
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/configuration/executor_knobs.py |
 | CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/configuration/executor_knobs.py |
 | WorkflowsRuntimeConfig | BaseModel | custom_nodes_enabled: bool, max_items_per_run: int | app/configuration/executor_runtime.py |
@@ -386,6 +387,8 @@ server/app/
 | InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
 | InstanceWorkflowsSettings | BaseModel | max_items_per_run: int | app/routes/instance_settings_contracts.py |
 | InstanceAgentWorkersSettings | BaseModel | max_archive_bytes: int, min_protocol_version: int, max_concurrent_result_comm... | app/routes/instance_settings_contracts.py |
+| InstanceAgentEnqueueSettings | BaseModel | workers: int, max_pending: int | app/routes/instance_settings_contracts.py |
+| InstanceResultUnpackSettings | BaseModel | workers: int | app/routes/instance_settings_contracts.py |
 | InstanceSettingsDocument | BaseModel | cleanup: InstanceCleanupSettings, monitoring: InstanceMonitoringSettings, hea... | app/routes/instance_settings_contracts.py |
 | ApprovalDecisionCreateRequest | BaseModel | verdict: ApprovalVerdict, note: str, rework_target: str | app/routes/job_approval_contracts.py |
 | ApprovalDecisionResponse | BaseModel | id: str, job_id: str, node_key: str, verdict: ApprovalVerdict, note: str, rew... | app/routes/job_approval_contracts.py |
@@ -837,7 +840,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 `config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
 - env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers` 的全局 register token 已随 issue #35 退役（遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 或 yaml `register_token[_file]` 会让启动直接报错）。
-- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`code_capacity`（本地兜底执行并发上限，0 = 纯控制面模式，#389）、`workflows.max_items_per_run`、`agent_workers.max_archive_bytes` / `min_protocol_version` / `max_concurrent_result_commits`（result 提交削峰 gate，默认 16，0 = 关闭，#521）。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略；`workflows.enabled` 已随 #385/#389 退役：存量文档读取时键级剥离（`workflows` 块的 `max_items_per_run` 活跃保留）。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`code_capacity`（本地兜底执行并发上限，0 = 纯控制面模式，#389）、`workflows.max_items_per_run`、`agent_workers.max_archive_bytes` / `min_protocol_version` / `max_concurrent_result_commits`（result 提交削峰 gate，默认 16，0 = 关闭，#521）、`agent_enqueue.workers`（默认 48，上限 256）/ `max_pending`（默认 1024）（Host 入队线程池，#509）、`result_unpack.workers`（result 解包进程池尺寸，0 = 自动 min(4, 核数)，上限 64；env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 保留为覆盖通道，#554）。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略；`workflows.enabled` 已随 #385/#389 退役：存量文档读取时键级剥离（`workflows` 块的 `max_items_per_run` 活跃保留）。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
@@ -845,7 +848,7 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 
 `config/workflow.yaml` 的 `executors` 段已随 executor 概念整体退役（P-0.5，schema v47 drop 定义/allocation 两表，EXEC-CODE-POOL-001）：非 Agent 路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`（#389 改述：本地兜底执行并发上限——远程 code Worker 在线时任务优先远程执行，此值只约束宿主本地回落的并发；0 = 纯控制面模式，本地执行栈不组装），lease 行写常量 `'code'`；节点级并发经 `workspace_node_limits` 声明（远程 code claim 同样按节点计数）。code 节点的可调参数只剩一个声明层——节点 `config_schema:` 块（随 revision 快照版本化），平台保留执行键 `timeout_seconds` / `sandbox_network` 自动合并进每个 code 路由节点的有效 schema。
 
-实例级运行时设置（`agent_workers` 限额、`workflows.max_items_per_run`、lease/heartbeat/sweeper 时序、`code_capacity`）不再出现在 yaml，见上文「DB 实例设置」。
+实例级运行时设置（`agent_workers` 限额、`workflows.max_items_per_run`、lease/heartbeat/sweeper 时序、`code_capacity`、`agent_enqueue` 与 `result_unpack` 容量旋钮）不再出现在 yaml，见上文「DB 实例设置」。
 
 token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
 

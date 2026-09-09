@@ -10,12 +10,9 @@ import {
 import type { InstanceSettingsResponse } from '../../api/instanceSettings'
 import { FIELD_GROUPS, RETENTION_FIELD_GROUPS } from './instanceSettingsFields'
 import { GROUP_HINTS } from './instanceSettingsHints'
-import {
-  buildPayload,
-  FieldGroupFields,
-  toFormValues,
-} from './instanceSettingsForm'
-import type { FormValues } from './instanceSettingsForm'
+import { FieldGroupFields } from './instanceSettingsForm'
+import { buildPayload, toFormValues } from './instanceSettingsPayload'
+import type { FormValues } from './instanceSettingsPayload'
 import styles from '../GlobalSettingsPage.module.css'
 
 function errorMessage(error: unknown): string {

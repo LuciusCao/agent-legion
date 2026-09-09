@@ -42,6 +42,8 @@ def _payload() -> dict:
             "min_protocol_version": 1,
             "max_concurrent_result_commits": 16,
         },
+        "agent_enqueue": {"workers": 48, "max_pending": 1024},
+        "result_unpack": {"workers": 0},
     }
 
 
@@ -186,9 +188,71 @@ def test_put_materials_ttl_roundtrip(client) -> None:
     assert response.json()["materials_ttl_days"] == 30
 
 
+def test_put_capacity_knobs_roundtrip(client) -> None:
+    """#509/#554: agent_enqueue / result_unpack blocks ride the full-document
+    PUT and come back on GET."""
+    payload = _payload()
+    payload["agent_enqueue"] = {"workers": 64, "max_pending": 2048}
+    payload["result_unpack"] = {"workers": 8}
+    response = client.put(INSTANCE_SETTINGS_URL, json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["agent_enqueue"] == {"workers": 64, "max_pending": 2048}
+    assert response.json()["result_unpack"] == {"workers": 8}
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+    assert response.json()["agent_enqueue"] == {"workers": 64, "max_pending": 2048}
+    assert response.json()["result_unpack"] == {"workers": 8}
+
+
+def test_put_rejects_out_of_range_capacity_knobs(client) -> None:
+    payload = _payload()
+    payload["agent_enqueue"]["workers"] = 0
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["agent_enqueue"]["workers"] = 257  # #509 misconfiguration guard
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["agent_enqueue"]["max_pending"] = 0
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["result_unpack"]["workers"] = 65
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    # 0 = 自动（min(4, 核数)）是合法值。
+    payload = _payload()
+    payload["result_unpack"]["workers"] = 0
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+
+
+def test_put_accepts_capacity_knob_upper_bounds(client) -> None:
+    """边界接受侧：workers=256 与 result_unpack.workers=64 均为合法上限。"""
+    payload = _payload()
+    payload["agent_enqueue"]["workers"] = 256
+    payload["result_unpack"]["workers"] = 64
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+
+
 def test_put_rejects_retired_openclaw_block(client) -> None:
     """The openclaw block retired with the openclaw runtime (#75): writing it
     422s like any other unknown key (InstanceSettingsUpdate is extra=forbid)."""
     payload = _payload()
     payload["openclaw"] = {"cwd": "/tmp/openclaw"}
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+
+
+def test_get_legacy_document_missing_capacity_blocks_falls_back(client) -> None:
+    """#509/#554: a stored document written before the capacity knobs existed
+    carries no agent_enqueue / result_unpack blocks; GET must merge the code
+    defaults (no migration) instead of failing response validation."""
+    from server.app.services.instance_settings_store import InstanceSettingsStore
+
+    store = InstanceSettingsStore(client.app.state.job_db.dsn_identity)
+    document = _payload()
+    del document["agent_enqueue"]
+    del document["result_unpack"]
+    store.put(document)
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["agent_enqueue"] == {"workers": 48, "max_pending": 1024}
+    assert response.json()["result_unpack"] == {"workers": 0}

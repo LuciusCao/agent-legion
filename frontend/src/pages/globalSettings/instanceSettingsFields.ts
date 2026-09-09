@@ -6,9 +6,11 @@
 // instanceSettingsRetentionFields.ts。
 
 import type { FieldGroup, NumberFieldDef } from './instanceSettingsFieldTypes'
+import { CAPACITY_FIELD_GROUPS } from './instanceSettingsCapacityFields'
 import { RETENTION_FIELD_GROUPS } from './instanceSettingsRetentionFields'
 
 export type { FieldGroup, NumberFieldDef } from './instanceSettingsFieldTypes'
+export { CAPACITY_FIELD_GROUPS } from './instanceSettingsCapacityFields'
 export { RETENTION_FIELD_GROUPS } from './instanceSettingsRetentionFields'
 
 export const FIELD_GROUPS: FieldGroup[] = [
@@ -98,6 +100,7 @@ export const FIELD_GROUPS: FieldGroup[] = [
     toggles: [],
   },
   ...RETENTION_FIELD_GROUPS,
+  ...CAPACITY_FIELD_GROUPS,
   {
     title: 'Worker 限制',
     fields: [

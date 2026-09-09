@@ -34,6 +34,8 @@ const settings: InstanceSettingsResponse = {
     min_protocol_version: 2,
     max_concurrent_result_commits: 16,
   },
+  agent_enqueue: { workers: 48, max_pending: 1024 },
+  result_unpack: { workers: 0 },
   skills_root: '~/.agents/skills',
 }
 
@@ -107,6 +109,22 @@ describe('InstanceSettingsSection', () => {
     expect(screen.getByLabelText('单次 run 条目上限（0 不限制）')).toHaveValue(
       20000
     )
+    // #509/#554 容量旋钮组：值渲染 + 契约上界（max 属性）+ 组说明。
+    expect(screen.getByLabelText('Agent 入队线程数')).toHaveValue(48)
+    expect(screen.getByLabelText('Agent 入队线程数')).toHaveAttribute(
+      'max',
+      '256'
+    )
+    expect(screen.getByLabelText('Agent 入队排队上限')).toHaveValue(1024)
+    expect(screen.getByLabelText('result 解包进程数（0 = 自动）')).toHaveValue(
+      0
+    )
+    expect(
+      screen.getByLabelText('result 解包进程数（0 = 自动）')
+    ).toHaveAttribute('max', '64')
+    expect(
+      screen.getByText(/解包进程池承接完成波的 CPU 解包/)
+    ).toBeInTheDocument()
     expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()
     // 每组带一句面向用户的说明（抽查三组，含此前缺失的监控/本地执行组）。
     expect(
@@ -141,6 +159,9 @@ describe('InstanceSettingsSection', () => {
     fireEvent.change(screen.getByLabelText('心跳间隔（秒）'), {
       target: { value: '12.5' },
     })
+    fireEvent.change(screen.getByLabelText('Agent 入队线程数'), {
+      target: { value: '64' },
+    })
     fireEvent.click(screen.getByText('保存实例设置'))
 
     await waitFor(() => {
@@ -149,6 +170,7 @@ describe('InstanceSettingsSection', () => {
         cleanup: { ...settings.cleanup, log_retention_days: 46 },
         heartbeat_interval_seconds: 12.5,
         workflows: { max_items_per_run: 20000 },
+        agent_enqueue: { workers: 64, max_pending: 1024 },
       })
     })
     // Baseline updated: the form is clean again after a successful save.

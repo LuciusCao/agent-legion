@@ -11,7 +11,9 @@ into a ``ProcessPoolExecutor`` unchanged: the calling thread parks in
 parallel. Crash isolation is a bonus: a malformed archive kills a pool
 worker, never the HTTP plane.
 
-Pool size: ``AGENT_LEGION_RESULT_UNPACK_WORKERS`` overrides the default
+Pool size: ``AGENT_LEGION_RESULT_UNPACK_WORKERS`` overrides the instance
+setting ``result_unpack.workers`` (#554, admin UI, restart-effective via
+``configure`` at startup hydration; 0 = unset), which overrides the default
 min(4, cpu_count) — the issue's conservative starting point; the event loop
 keeps headroom and the DB side (finish/mark_done) stays in-process.
 
@@ -36,6 +38,16 @@ from typing import Any
 
 _POOL: ProcessPoolExecutor | None = None
 _POOL_LOCK = threading.Lock()
+# Instance-settings value (#554): set once by configure() at startup
+# hydration; 0 = unset. The pool is created lazily on the first result, so
+# startup configuration always lands before pool creation.
+_CONFIGURED_WORKERS = 0
+
+
+def configure(workers: int) -> None:
+    """Pin the pool size from the instance document (0 = back to auto/env)."""
+    global _CONFIGURED_WORKERS
+    _CONFIGURED_WORKERS = workers
 
 
 def _pool_size() -> int:
@@ -48,8 +60,11 @@ def _pool_size() -> int:
             import logging
 
             logging.getLogger(__name__).warning(
-                "AGENT_LEGION_RESULT_UNPACK_WORKERS=%r 非法，回落默认池大小", override
+                "AGENT_LEGION_RESULT_UNPACK_WORKERS=%r 非法，回落实例设置/自动池大小",
+                override,
             )
+    if _CONFIGURED_WORKERS > 0:
+        return _CONFIGURED_WORKERS
     return min(4, os.cpu_count() or 1)
 
 

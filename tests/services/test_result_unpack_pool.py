@@ -107,6 +107,30 @@ def test_invalid_workers_env_falls_back_with_warning(
     assert "AGENT_LEGION_RESULT_UNPACK_WORKERS" in caplog.text
 
 
+def test_configure_drives_pool_size_below_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#554 优先级：env 覆盖 > configure（实例设置）> 自动 min(4, 核数）。
+    纯尺寸解析，不建池（active_children 纪律：不留进程）。"""
+    from server.app.agent_broker import result_unpack_pool as pool_module
+
+    monkeypatch.delenv("AGENT_LEGION_RESULT_UNPACK_WORKERS", raising=False)
+    monkeypatch.setattr(pool_module, "_CONFIGURED_WORKERS", 0)
+    assert pool_module._pool_size() == min(4, os.cpu_count() or 1)
+
+    pool_module.configure(8)
+    assert pool_module._pool_size() == 8
+
+    # env 覆盖优先于实例设置（过渡期通道）。
+    monkeypatch.setenv("AGENT_LEGION_RESULT_UNPACK_WORKERS", "3")
+    assert pool_module._pool_size() == 3
+
+    # configure(0) = 未配置，回落自动档。
+    pool_module.configure(0)
+    monkeypatch.delenv("AGENT_LEGION_RESULT_UNPACK_WORKERS")
+    assert pool_module._pool_size() == min(4, os.cpu_count() or 1)
+
+
 def test_reset_pool_only_kills_the_broken_instance() -> None:
     """身份守卫（复审二轮 P2）：撞破旧池的线程只重置旧池——别人刚建好的
     新池不受影响（完成波下并发撞池的重试 future 不被 cancel）。"""
