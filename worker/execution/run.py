@@ -23,13 +23,13 @@ from worker._atomic import atomic_write
 from worker.code_runner import cancel_executions, execute_code
 from worker.event_filter import spawn_event_pump
 from worker.execution.heartbeat import ExecutionHeartbeat, start_lease_heartbeat
+from worker.execution.ownership import MUTEX_WAIT_BOUND_SECONDS, discard_owned_dir, execution_mutex
 from worker.execution.prepare import prepare_execution
 from worker.host.client import Client
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
 from worker.status import ExecutionStatusReporter
 from worker.upload.queue import (
     MAX_ERROR_MESSAGE_CHARS,
-    PENDING_FILENAME,
     PendingUploadExists,
     UploadQueue,
     UploadTask,
@@ -108,10 +108,12 @@ def deliver_result(
     # drop the execution dir; the Host requeues after the lease expires.
     # #203：带未投递 marker 的目录归 UploadQueue 所有，保留待其投递后自清
     # （skip 分支的 marker 必属当前 lease；孤儿 marker 在 prepare 已随 stale
-    # 目录清掉，走不到这里）。
+    # 目录清掉，走不到这里）。#564：归属标记不再指向本 lease（目录已被重新
+    # claim 的 attempt 重建占用）或标记缺失时不得 rmtree——丢弃收尾只删能
+    # 证明仍归自己的目录，证明不了的孤儿目录归 stale sweeper。
     heartbeat.shutdown()
     status.finish(execution_id)
-    if not (execution_dir / PENDING_FILENAME).is_file():
+    if discard_owned_dir(execution_dir, heartbeat.lease_id):
         shutil.rmtree(execution_dir, ignore_errors=True)
 
 
@@ -135,33 +137,144 @@ def run_execution(
     coordinator; None keeps the legacy inert facade (single-beat tests)."""
     execution_id = str(claim["execution_id"])
     lease_id = str(claim["lease_id"])
-    node_key = str(claim["node_key"])
-    started_monotonic = time.monotonic()  # #490 wall clock anchor
-    # Batch 2: kind='code' claims run the node code sandboxed instead of an
-    # Agent runtime; absent kind = agent (old Hosts never send it).
-    exec_kind = str(claim.get("kind") or "agent")
-    execution_dir = work_root / execution_id
-    job_dir = execution_dir / "job"
-    run_dir = job_dir / "runs" / node_key / "worker"
-    # agent 进程组记录：executor 被 SIGKILL 时 supervisor 按此 killpg 兜底。
-    pgid_record = execution_dir / AGENT_PGID_FILENAME
-    status_fields = events.status_fields(claim, run_dir, exec_kind)
-    status.start(execution_id, **status_fields)
-    ownership_lost = threading.Event()
-    heartbeat = start_lease_heartbeat(
-        client,
-        execution_id,
-        lease_id,
-        heartbeat_interval,
-        ownership_lost,
-        # 任一心跳拍都可能带回 Host 的 code 取消列表（协议 v2/v5 body）。
-        on_cancelled=cancel_executions,
-        registry=heartbeat_registry,
-    )
-    proc: subprocess.Popen[bytes] | None = None
-    task: UploadTask | None = None
-    try:
-        if shutdown.is_set():
+    # #564：Host 误判租约过期重排队后，本 Worker 可能立刻重新 claim 同一
+    # execution_id 而旧 attempt 线程仍存活。per-execution 互斥锁把旧
+    # attempt 的丢弃收尾与新 attempt 的 prepare 串行化——锁内任意时刻本
+    # 进程只有一个 attempt 碰这个目录；锁外的新 attempt 只是排队等锁，
+    # 旧 attempt 的下线只依赖自己的心跳 409（不依赖新 attempt），无死锁。
+    # 等锁是有界等待（MUTEX_WAIT_BOUND_SECONDS 的依据见 ownership.py）：
+    # 超时说明心跳面仍瘫痪、本 claim 的 lease 在 Host 侧已死或濒死——放弃
+    # 本次 claim（不 prepare、不上报、不启动心跳），租约过期后由 Host 在
+    # worker 恢复健康时重排。归属标记（ownership.py）是锁之外的正确性底线。
+    with execution_mutex(execution_id, timeout=MUTEX_WAIT_BOUND_SECONDS) as acquired:
+        if not acquired:
+            print(f"abandoning claim of {execution_id}: attempt mutex busy", flush=True)
+            return
+        node_key = str(claim["node_key"])
+        started_monotonic = time.monotonic()  # #490 wall clock anchor
+        # Batch 2: kind='code' claims run the node code sandboxed instead of an
+        # Agent runtime; absent kind = agent (old Hosts never send it).
+        exec_kind = str(claim.get("kind") or "agent")
+        execution_dir = work_root / execution_id
+        job_dir = execution_dir / "job"
+        run_dir = job_dir / "runs" / node_key / "worker"
+        # agent 进程组记录：executor 被 SIGKILL 时 supervisor 按此 killpg 兜底。
+        pgid_record = execution_dir / AGENT_PGID_FILENAME
+        status_fields = events.status_fields(claim, run_dir, exec_kind)
+        status.start(execution_id, **status_fields)
+        ownership_lost = threading.Event()
+        heartbeat = start_lease_heartbeat(
+            client,
+            execution_id,
+            lease_id,
+            heartbeat_interval,
+            ownership_lost,
+            # 任一心跳拍都可能带回 Host 的 code 取消列表（协议 v2/v5 body）。
+            on_cancelled=cancel_executions,
+            registry=heartbeat_registry,
+        )
+        proc: subprocess.Popen[bytes] | None = None
+        task: UploadTask | None = None
+        try:
+            if shutdown.is_set():
+                task = UploadTask(
+                    execution_id=execution_id,
+                    lease_id=lease_id,
+                    execution_dir=execution_dir,
+                    node_key=node_key,
+                    status_fields=status_fields,
+                    kind="prebuilt",
+                    prebuilt_metadata={
+                        "status": "cancelled",
+                        "exit_code": 130,
+                        "error_message": "Agent Worker is shutting down",
+                        "command": [],
+                    },
+                )
+            elif exec_kind == "code":
+                status.set_phase(execution_id, "downloading")
+                task = execute_code(
+                    client,
+                    claim,
+                    execution_dir,
+                    status_fields,
+                    download_slots,
+                    shutdown,
+                    shutdown_grace,
+                    ownership_lost,
+                    heartbeat,
+                    status,
+                )
+            else:
+                status.set_phase(execution_id, "downloading")
+                prepared = prepare_execution(client, claim, execution_dir, download_slots)
+                manifest = prepared.manifest
+                command = prepared.command
+                events_file = run_dir / "events.jsonl"
+                status.set_phase(execution_id, "running")
+                with events_file.open("wb") as output:
+                    proc = subprocess.Popen(
+                        command,
+                        cwd=job_dir,
+                        env=agent_subprocess_env(environment),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+                    atomic_write(pgid_record, str(proc.pid))
+                    heartbeat.proc_ref["proc"] = proc
+                    # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
+                    pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")
+                    # Fallback aligns with the Host product constant
+                    # (agent_runtime.execution.EXECUTION_TIMEOUT_SECONDS = 1800);
+                    # manifests always carry timeout_seconds, so this only covers
+                    # hand-built/legacy manifests.
+                    timeout = float(manifest.get("execution", {}).get("timeout_seconds", 1800))
+                    exit_code, report_result = wait_for_exit(
+                        proc, timeout, shutdown, shutdown_grace, ownership_lost
+                    )
+                    pump.join(timeout=10)
+                if report_result:
+                    task = UploadTask(
+                        execution_id=execution_id,
+                        lease_id=lease_id,
+                        execution_dir=execution_dir,
+                        node_key=node_key,
+                        status_fields=status_fields,
+                        kind="process",
+                        exit_code=exit_code,
+                        expected_outputs=tuple(
+                            str(name) for name in manifest.get("expected_outputs", [])
+                        ),
+                        command=tuple(command),
+                        # #160 D12：直传 S3 的上传规格（空 = 旧 CAS 通道）。
+                        artifact_uploads=dict(manifest.get("artifact_uploads") or {}),
+                    )
+                # else: lease lost mid-run — the Host owns the outcome; nothing
+                # to deliver, fall through to the local-discard path below.
+            # #490 execution.completed：exit_code 读 task（agent 分支的局部变量
+            # 在 code 分支未定义，读它会把每个 code claim 炸成 NameError）。
+            events.note_run_outcome(claim, task, started_monotonic)
+        except PendingUploadExists:
+            # #203：execution_dir 属于本 claim 租约的排队中 pending 上传。上报假
+            # failed 会经 submit() 覆盖 marker 丢掉旧结果，所以本次 claim 直接放
+            # 弃：task 保持 None 走本地丢弃分支（marker 目录被豁免），停心跳让租
+            # 约到期，由 Host 重新调度。孤儿 marker（旧 lease）在 prepare 已被清
+            # 掉，不会进这里——最后一次 attempt 不为过期结果殉葬（P1）。
+            print(f"skipping claim of {execution_id}: dir holds a pending upload", flush=True)
+        except Exception as exc:
+            # #204 broad-except audit: 单次执行的故意遏制边界（语义钉子：执行
+            # 失败要转化为一次 failed 结果上报，而非异常逃逸）。try 体横跨下载、
+            # spawn、等待与任务构造，逃逸族混族——传输错误、OSError、manifest
+            # 畸形的 ValueError 等；deliver_result 在 try 之外，逃逸即丢结果、
+            # 等租约过期后被 Host 重调度。吞是对的：降级产物是 prebuilt failed
+            # report，str(exc) 截断后随 error_message 上报。日志保全：
+            # traceback.print_exc() 先行输出完整堆栈。PendingUploadExists 已在
+            # 上臂按 #203 语义单独处理，不会落进这里。
+            traceback.print_exc()
+            # #490 execution.failed：下载/spawn/等待抛异常（遏制边界），错误
+            # 摘要随事件落盘。
+            events.note_execution_failed(claim, exc, started_monotonic)
             task = UploadTask(
                 execution_id=execution_id,
                 lease_id=lease_id,
@@ -170,112 +283,13 @@ def run_execution(
                 status_fields=status_fields,
                 kind="prebuilt",
                 prebuilt_metadata={
-                    "status": "cancelled",
-                    "exit_code": 130,
-                    "error_message": "Agent Worker is shutting down",
-                    "command": [],
+                    "status": "failed",
+                    "exit_code": 1,
+                    "error_message": str(exc)[:MAX_ERROR_MESSAGE_CHARS],
                 },
             )
-        elif exec_kind == "code":
-            status.set_phase(execution_id, "downloading")
-            task = execute_code(
-                client,
-                claim,
-                execution_dir,
-                status_fields,
-                download_slots,
-                shutdown,
-                shutdown_grace,
-                ownership_lost,
-                heartbeat,
-                status,
-            )
-        else:
-            status.set_phase(execution_id, "downloading")
-            prepared = prepare_execution(client, claim, execution_dir, download_slots)
-            manifest = prepared.manifest
-            command = prepared.command
-            events_file = run_dir / "events.jsonl"
-            env = agent_subprocess_env(environment)
-            status.set_phase(execution_id, "running")
-            with events_file.open("wb") as output:
-                proc = subprocess.Popen(
-                    command,
-                    cwd=job_dir,
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-                atomic_write(pgid_record, str(proc.pid))
-                heartbeat.proc_ref["proc"] = proc
-                # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
-                pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")
-                # Fallback aligns with the Host product constant
-                # (agent_runtime.execution.EXECUTION_TIMEOUT_SECONDS = 1800);
-                # manifests always carry timeout_seconds, so this only covers
-                # hand-built/legacy manifests.
-                timeout = float(manifest.get("execution", {}).get("timeout_seconds", 1800))
-                exit_code, report_result = wait_for_exit(
-                    proc, timeout, shutdown, shutdown_grace, ownership_lost
-                )
-                pump.join(timeout=10)
-            if report_result:
-                task = UploadTask(
-                    execution_id=execution_id,
-                    lease_id=lease_id,
-                    execution_dir=execution_dir,
-                    node_key=node_key,
-                    status_fields=status_fields,
-                    kind="process",
-                    exit_code=exit_code,
-                    expected_outputs=tuple(
-                        str(name) for name in manifest.get("expected_outputs", [])
-                    ),
-                    command=tuple(command),
-                    # #160 D12：直传 S3 的上传规格（空 = 旧 CAS 通道）。
-                    artifact_uploads=dict(manifest.get("artifact_uploads") or {}),
-                )
-            # else: lease lost mid-run — the Host owns the outcome; nothing
-            # to deliver, fall through to the local-discard path below.
-        # #490 execution.completed：exit_code 读 task（agent 分支的局部变量
-        # 在 code 分支未定义，读它会把每个 code claim 炸成 NameError）。
-        events.note_run_outcome(claim, task, started_monotonic)
-    except PendingUploadExists:
-        # #203：execution_dir 属于本 claim 租约的排队中 pending 上传。上报假
-        # failed 会经 submit() 覆盖 marker 丢掉旧结果，所以本次 claim 直接放
-        # 弃：task 保持 None 走本地丢弃分支（marker 目录被豁免），停心跳让租
-        # 约到期，由 Host 重新调度。孤儿 marker（旧 lease）在 prepare 已被清
-        # 掉，不会进这里——最后一次 attempt 不为过期结果殉葬（P1）。
-        print(f"skipping claim of {execution_id}: dir holds a pending upload", flush=True)
-    except Exception as exc:
-        # #204 broad-except audit: 单次执行的故意遏制边界（语义钉子：执行
-        # 失败要转化为一次 failed 结果上报，而非异常逃逸）。try 体横跨下载、
-        # spawn、等待与任务构造，逃逸族混族——传输错误、OSError、manifest
-        # 畸形的 ValueError 等；deliver_result 在 try 之外，逃逸即丢结果、
-        # 等租约过期后被 Host 重调度。吞是对的：降级产物是 prebuilt failed
-        # report，str(exc) 截断后随 error_message 上报。日志保全：
-        # traceback.print_exc() 先行输出完整堆栈。PendingUploadExists 已在
-        # 上臂按 #203 语义单独处理，不会落进这里。
-        traceback.print_exc()
-        # #490 execution.failed：下载/spawn/等待抛异常（遏制边界），错误
-        # 摘要随事件落盘。
-        events.note_execution_failed(claim, exc, started_monotonic)
-        task = UploadTask(
-            execution_id=execution_id,
-            lease_id=lease_id,
-            execution_dir=execution_dir,
-            node_key=node_key,
-            status_fields=status_fields,
-            kind="prebuilt",
-            prebuilt_metadata={
-                "status": "failed",
-                "exit_code": 1,
-                "error_message": str(exc)[:MAX_ERROR_MESSAGE_CHARS],
-            },
-        )
-    finally:
-        if proc is not None and proc.poll() is None:
-            terminate(proc, 5)
-        pgid_record.unlink(missing_ok=True)
-    deliver_result(client, uploads, status, task, heartbeat, execution_dir, execution_id)
+        finally:
+            if proc is not None and proc.poll() is None:
+                terminate(proc, 5)
+            pgid_record.unlink(missing_ok=True)
+        deliver_result(client, uploads, status, task, heartbeat, execution_dir, execution_id)
