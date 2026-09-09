@@ -197,9 +197,14 @@ def test_sweeper_requeue_resets_bound_shard_row(job_db, monkeypatch) -> None:
     bound = _shard_row(job_db)
     assert bound["status"] == "running" and str(bound["execution_id"]) == execution_id
 
-    import time
-
-    time.sleep(1.1)  # lease_ttl_seconds=1
+    # The lease expires without a heartbeat (explicitly past the 2×TTL
+    # deferral hard bound, #566 — a fresh worker's claim heartbeat would
+    # otherwise sit inside the grace window and defer instead of requeue).
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
+            (datetime.now(UTC) - timedelta(seconds=10), execution_id),
+        )
     assert broker.sweep_expired_claims() == [execution_id]
 
     # The requeue reset the shard row: pending again, unbound — a later
