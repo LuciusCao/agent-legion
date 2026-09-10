@@ -2,7 +2,9 @@ name: Quality Gate
 
 on:
   pull_request:
-    branches: [develop, main, master]
+    # release/* 是发版集成分支(issue PR 先入 release,封版时 release→main),
+    # 与 develop 同级对待——否则发版期内的 issue PR 完全没有 CI。
+    branches: [develop, main, master, "release/*"]
   push:
     # develop merges are already covered by the PR gate; keep push triggers
     # on the trunk branches only so a merge does not burn a second full gate.
