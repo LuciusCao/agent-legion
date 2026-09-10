@@ -53,6 +53,23 @@ describe('FormattedJsonBody lexing', () => {
     expect(host.querySelector('img')).toBeNull()
   })
 
+  it('indentJsonish indents truncated JSON by bracket depth (string-aware)', async () => {
+    // codex P2：解析失败/截断的 JSON 不再是超长单行——括号边界断行缩
+    // 进；字符串内的括号/逗号不参与（截断的未闭合字符串吞到文末）。
+    const { indentJsonish } = await import('./previewTextIndent')
+    const truncated = '{"a": [{"b": "x{y,z", "c": 1, "d": "unterminated'
+    const out = indentJsonish(truncated)
+    // 三个开括号 → 至少出现深度 0/1/2 三档缩进行。
+    expect(out).toMatch(/^\{\n {2}"a": \[\n {4}\{/m)
+    // 字符串内的 {y,z 原样保留（不被当结构括号）。
+    expect(out).toContain('"x{y,z"')
+    // 性能（与 lexer 同纪律）：64KB 高转义未闭合内容在 1s 内完成。
+    const dense = '"' + '\\"'.repeat(32_000)
+    const start = performance.now()
+    indentJsonish(`{"k": "${dense.slice(1)}`)
+    expect(performance.now() - start).toBeLessThan(1000)
+  })
+
   it('hyphens between letters stay un-colored (not-json)', () => {
     const html = renderMarkup('not-json{{')
     expect(html).not.toContain('span')

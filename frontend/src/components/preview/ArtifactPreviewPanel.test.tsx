@@ -223,7 +223,10 @@ describe('ArtifactPreviewPanel', () => {
     expandPanel()
     const pre = await waitFor(() => {
       const node = document.querySelector('pre')
-      expect(node?.textContent).toBe('not-json{{')
+      // codex P2：解析失败内容也做括号深度缩进——textContent 与原文
+      // 的 token 序列等价（仅空白布局变化），非 JSON 字符零着色。
+      expect(node?.textContent).toContain('not-json')
+      expect(node?.textContent).toContain('{')
       return node as HTMLElement
     })
     expect(pre.querySelectorAll('span').length).toBe(0)
