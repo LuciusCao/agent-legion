@@ -19,8 +19,9 @@ type Props = Pick<
 >
 
 // Agent 定义详情的查询 key 必须是 agentDefinitions 列表 key 的子级：内嵌
-// Agent 编辑器保存/发布/归档、聊天 turn_end、Agent 发布请求轮询的失效都
-// 按列表 key 前缀整体命中，生效 schema 随之刷新——不新增第二条失效路径。
+// Agent 编辑器保存/发布/归档、聊天 turn_end 的失效都按列表 key 前缀整体
+// 命中，生效 schema 随之刷新——不新增第二条失效路径（发布请求轮询失效
+// 的是 workflow 线且不改 Agent 定义，不在其中——审核 P3 修正）。
 const agentDefinitionDetailKey = (ws: string, agentId: string) =>
   [...extraQueryKeys.agentDefinitions(ws), agentId] as const
 

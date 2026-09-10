@@ -135,7 +135,9 @@ describe('WorkflowNodeAgentSchemaSection (#406 agent 生效 schema)', () => {
     expect(
       await screen.findByText('dry_run · boolean · 默认 false · 运行开关')
     ).toBeInTheDocument()
-    expect(screen.getByText('bank_version · string · 默认 v1')).toBeInTheDocument()
+    expect(
+      screen.getByText('bank_version · string · 默认 v1')
+    ).toBeInTheDocument()
     expect(screen.getByText('题库版本')).toBeInTheDocument()
     // 指向编辑入口：本区块只读，修改去「Agent 配置」。
     expect(
@@ -144,7 +146,9 @@ describe('WorkflowNodeAgentSchemaSection (#406 agent 生效 schema)', () => {
     // 只读：不出 code 节点 schema 编辑区的可编辑控件。
     expect(screen.queryByLabelText('属性名 dry_run')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('新增属性名')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新增' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '新增' })
+    ).not.toBeInTheDocument()
   })
 
   it('prefers the published version when a newer draft exists', async () => {
@@ -180,9 +184,7 @@ describe('WorkflowNodeAgentSchemaSection (#406 agent 生效 schema)', () => {
     expect(
       await screen.findByText('dry_run · boolean · 默认 false · 运行开关')
     ).toBeInTheDocument()
-    expect(
-      screen.queryByText(/draft_only_prop/)
-    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/draft_only_prop/)).not.toBeInTheDocument()
     // published 命中不是 draft 回落：无「草稿内容」提示。
     expect(screen.queryByText(/草稿内容/)).not.toBeInTheDocument()
   })
@@ -242,9 +244,7 @@ describe('WorkflowNodeAgentSchemaSection (#406 agent 生效 schema)', () => {
       await screen.findByText('dry_run · boolean · 默认 false · 运行开关')
     ).toBeInTheDocument()
     // 历史版本查看没有内嵌编辑器可跳：不给「上方编辑」指引。
-    expect(
-      screen.queryByText(/「Agent 配置」区块编辑/)
-    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/「Agent 配置」区块编辑/)).not.toBeInTheDocument()
   })
 
   it('shows the binding placeholder while the catalog is still settling', () => {

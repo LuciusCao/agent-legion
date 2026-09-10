@@ -581,6 +581,8 @@ nodes:
     expect(
       screen.queryByLabelText('配置 Schema generate')
     ).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('属性名 bank_version')).not.toBeInTheDocument()
+    expect(
+      screen.queryByLabelText('属性名 bank_version')
+    ).not.toBeInTheDocument()
   })
 })
