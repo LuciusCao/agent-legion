@@ -13,21 +13,30 @@ This module replaces N pump threads with:
    ``selectors`` — the kernel returns a batch of ready fds per wakeup, and
    the (blocking) ``select()`` call releases the GIL, so the reactor is not
    fighting the executor for it;
-2. **a small parse pool** (core-count-scale, not fleet-scale) doing the
-   per-line JSON parse + delta filtering (``worker.event_filter`` rules),
-   then the writes into each execution's events file.
+2. **a small parse pool** (core-count-scale, not fleet-scale) taking the
+   JSON parse + delta filtering + file writes off the reactor thread, so
+   reads and writes overlap across streams (the parse itself stays GIL-bound).
 
 The reactor only owns the byte→line→event segment: spawn, lease/heartbeat,
 timeout policing, and the #564 ownership semantics stay where they are
 (``worker.execution.run`` / ``process_lifecycle``). Per-stream ordering is
 preserved: each stream's lines are appended to its pending queue under the
-stream lock and written by pool tasks in queue order, so an execution's
-events.jsonl is byte-identical to the legacy pump.
+stream lock and written by pool tasks in queue order (line content is
+whitespace-normalized — filtered lines are written stripped with a single
+trailing ``\\n``; consumers parse per line, so this is semantically identical
+to the legacy pump's raw writes).
 
 Backpressure is explicit and by design: when an events file cannot keep up,
 the per-stream backlog bound pauses the fd and the child's 64KB pipe fills
 and blocks the *child* — the agent slows down instead of events being
 dropped. Do not "fix" that (#578 design point 3).
+
+Fail-closed scope: a reactor-internal error unregisters every stream and
+disables the reactor — *subsequent* spawns fall back to the legacy
+per-thread pump. Streams already registered at failure time lose their event
+pump: their children keep writing until the pipe fills and block there until
+the execution timeout/lease path reaps them (their in-memory events are
+unrecoverable; the timeline keeps whatever was already on disk).
 """
 
 from __future__ import annotations
@@ -47,9 +56,9 @@ from worker.event_filter import _DELTA_PREFIX, DROP_EVENT_TYPES, spawn_event_pum
 # (message_end with the full final message is the largest and stays well
 # under this in a single read; longer lines reassemble across reads).
 _READ_SIZE = 65536
-# A single unterminated line beyond this is unsalvageable noise; keep the
-# tail bounded instead of buffering forever (legacy readline had the same
-# practical failure mode via MemoryError).
+# A single unterminated line beyond this is unsalvageable noise; the head is
+# kept (the JSON "type" key lives there) and the tail discarded, bounding
+# memory instead of buffering forever.
 _MAX_LINE_BYTES = 64 * 1024 * 1024
 # Per-stream backlog of framed lines awaiting pool writes. Generous beyond
 # any legit per-turn burst; hitting it means the events file is wedged and
@@ -100,6 +109,7 @@ class _Stream:
         "done",
         "paused",
         "finishing",
+        "dropped",
         "inflight",
         "writer",
         "parse_error",
@@ -109,6 +119,11 @@ class _Stream:
         if proc.stdout is None:  # spawn contract: PIPE is always set here
             raise ReactorUnavailable("child has no stdout pipe")
         self.fd = proc.stdout.fileno()
+        # The drain loop reads until EAGAIN — the fd must be non-blocking or a
+        # full-pipe read followed by an empty pipe would park the whole
+        # reactor thread on the second os.read (review P0: pipe capacity
+        # equals _READ_SIZE on Linux, making that a certainty, not a tail).
+        os.set_blocking(self.fd, False)
         self.proc = proc
         self.buf = bytearray()
         self.path = path
@@ -117,6 +132,7 @@ class _Stream:
         self.done = threading.Event()
         self.paused = False
         self.finishing = False
+        self.dropped = False
         self.inflight = 0
         self.writer = False
         self.parse_error: BaseException | None = None
@@ -128,16 +144,24 @@ class _Stream:
             return batch
 
 
+def _stream_dropped(stream: _Stream) -> bool:
+    """Lock-guarded read of the drop fence (cross-thread mutation is the
+    point; a bare attribute read is fine for a bool but keeps mypy honest)."""
+    with stream.lock:
+        return stream.dropped
+
+
 class EventPumpReactor:
     """Process-wide singleton multiplexing agent stdout pipes (#578).
 
     ``get()`` lazily starts the reactor thread + parse pool; ``register``
     hooks one spawned child's stdout into it and returns a handle whose
     ``join()`` mirrors the legacy pump thread's semantics (waits for the
-    stream's buffered lines to be written out). Fail-closed: a reactor-
-    internal error unregisters every stream — each execution falls back to
-    the legacy per-thread pump — and disables the reactor for the process
-    lifetime.
+    stream's buffered lines to be written out). Fail-closed scope: a reactor-
+    internal error unregisters every stream and disables the reactor for the
+    process lifetime — later spawns fall back to the legacy per-thread pump;
+    streams registered at failure time lose the event pump (see module
+    docstring).
     """
 
     _singleton: EventPumpReactor | None = None
@@ -177,7 +201,17 @@ class EventPumpReactor:
             if self._failed:
                 raise ReactorUnavailable("reactor disabled after internal error")
             self._streams[stream.fd] = stream
-        self._selector.register(stream.fd, selectors.EVENT_READ, data=stream)
+        try:
+            self._selector.register(stream.fd, selectors.EVENT_READ, data=stream)
+        except Exception:
+            # #204 broad-except audit: register 失败（selector 内部 OSError）
+            # 时回滚 dict 条目防泄漏——流从未被监听，调用方经
+            # spawn_agent_pump 的宽捕获把该执行报 failed（等价于旧泵起不来
+            # 的结局）。吞是对的：让调用方拿到原始异常上下文前先恢复
+            # reactor 自身一致性。日志保全：异常向上传播。
+            with self._streams_lock:
+                self._streams.pop(stream.fd, None)
+            raise
         self._wake()
 
     def shutdown(self) -> None:
@@ -257,40 +291,49 @@ class EventPumpReactor:
                 self._selector.close()
 
     def _read_ready(self, stream: _Stream) -> None:
-        # Drain until EAGAIN/short read so one wakeup empties the child's
-        # writes; non-blocking fds make os.read raise instead of blocking.
+        # Drain until EAGAIN (the authoritative drained signal on a
+        # non-blocking fd) so one wakeup empties the child's writes without
+        # ever parking the reactor thread on an empty pipe.
         while not stream.paused:
-            chunk = os.read(stream.fd, _READ_SIZE)
+            try:
+                chunk = os.read(stream.fd, _READ_SIZE)
+            except BlockingIOError:
+                return  # EAGAIN: pipe drained for now
             if not chunk:
                 self.unregister(stream)  # EOF: child exited
                 return
             stream.buf += chunk
-            while True:
-                nl = stream.buf.find(b"\n")
-                if nl < 0:
-                    break
-                line, _, stream.buf = stream.buf.partition(b"\n")
-                stripped = bytes(line.strip())
-                if stripped:
-                    self._enqueue(stream, stripped)
-            if len(stream.buf) > _MAX_LINE_BYTES:
-                stream.buf = stream.buf[-_READ_SIZE:]
-            if len(chunk) < _READ_SIZE:
-                return  # short read ≈ pipe drained for now
+            self._frame_pending(stream, len(chunk))
 
-    def _enqueue(self, stream: _Stream, line: bytes) -> None:
-        with stream.lock:
-            stream.pending.append(line)
-            deep = len(stream.pending) >= _STREAM_BACKLOG
-            if deep and not stream.paused:
-                stream.paused = True
-        if deep:
+    def _frame_pending(self, stream: _Stream, last_read: int) -> None:
+        # Frame complete lines out of buf, then submit ONE pool task per
+        # read batch (review P1: per-line submits made every line after the
+        # first a no-op token dance — the pool queue churn the reactor was
+        # built to remove). The task loop drains whatever the queue holds.
+        while True:
+            nl = stream.buf.find(b"\n")
+            if nl < 0:
+                break
+            line, _, stream.buf = stream.buf.partition(b"\n")
+            stripped = bytes(line.strip())
+            if stripped:
+                with stream.lock:
+                    stream.pending.append(stripped)
+                    deep = len(stream.pending) >= _STREAM_BACKLOG
+                    if deep and not stream.paused:
+                        stream.paused = True
+        if len(stream.buf) > _MAX_LINE_BYTES:
+            # Keep the HEAD (the JSON "type" key lives there); the tail of an
+            # unsalvageable >64MB line is the least valuable part.
+            del stream.buf[:-_READ_SIZE]
+        if stream.paused:
             # Backpressure by design (#578 point 3): stop reading this fd;
             # the child's pipe fills and the child blocks — events slow down
             # instead of being dropped or buffered unbounded.
             with contextlib.suppress(KeyError, ValueError):
                 self._selector.unregister(stream.fd)
-        self._submit_parse(stream)
+        elif last_read:
+            self._submit_parse(stream)
 
     def _submit_parse(self, stream: _Stream) -> None:
         with stream.lock:
@@ -318,11 +361,16 @@ class EventPumpReactor:
         returns immediately and relies on the token holder to loop until the
         queue is empty (single-writer per stream ⇒ appends hit the file in
         queue order). The token is released in ``finally`` so a holder's
-        crash cannot wedge the stream forever."""
+        crash cannot wedge the stream forever. A ``dropped`` stream (join
+        timed out) is abandoned before the next open(): a late writer must
+        not append old-attempt lines into a path a re-claimed execution may
+        have already truncated (#564 adjacency)."""
         with stream.lock:
-            if stream.writer:
-                # Someone already owns the write token for this stream; that
-                # task will drain whatever we enqueued before returning.
+            if stream.dropped or stream.writer:
+                # Dropped: abandoned (join timed out / reactor failed) — a
+                # late writer must not append into a path a re-claimed
+                # execution may have already truncated. Writer token held:
+                # that task drains whatever we enqueued before returning.
                 stream.inflight -= 1
                 return
             stream.writer = True
@@ -330,6 +378,8 @@ class EventPumpReactor:
             while True:
                 batch = stream.take_pending()
                 if not batch:
+                    break
+                if _stream_dropped(stream):
                     break
                 kept = [line for line in batch if _filter_line(line)]
                 with open(stream.path, "ab") as output:
@@ -375,11 +425,17 @@ class EventPumpReactor:
 
     def _drop(self, stream: _Stream) -> None:
         """Force-drop a wedged stream (join timed out): no final drain — the
-        pool is the wedge point, queueing more work would only pile up."""
+        pool is the wedge point, queueing more work would only pile up.
+        ``dropped`` fences in-flight writers from appending into the path
+        after the caller has moved on (a re-claimed execution may have
+        truncated the file by then)."""
         with self._streams_lock:
             self._streams.pop(stream.fd, None)
         with contextlib.suppress(KeyError, ValueError):
             self._selector.unregister(stream.fd)
+        with stream.lock:
+            stream.dropped = True
+            stream.pending.clear()
         stream.done.set()
 
     def _fail_closed(self, exc: BaseException) -> None:
@@ -391,6 +447,13 @@ class EventPumpReactor:
             stream.parse_error = exc
             with contextlib.suppress(KeyError, ValueError):
                 self._selector.unregister(stream.fd)
+            # Fence in-flight writers (same as _drop): the reactor is dead,
+            # late pool tasks must not append into a path whose execution may
+            # have moved on. Buffered lines are abandoned — the failure mode
+            # is documented in the module docstring.
+            with stream.lock:
+                stream.dropped = True
+                stream.pending.clear()
             stream.done.set()  # unblock joiners; failure already printed
         self._pool.shutdown(wait=False)
 
@@ -425,12 +488,12 @@ def spawn_agent_pump(proc: subprocess.Popen[bytes], output: Any, execution_id: s
     Default: the process-wide reactor (one selector thread + a core-count
     parse pool replaces one pump thread per execution). Opt-out
     ``AGENT_WORKER_EVENT_PUMP=thread`` keeps the legacy per-execution thread;
-    any reactor-internal failure also falls back to it (fail-closed), so the
-    pump surface — ``join(timeout)`` — is identical either way."""
+    a reactor that is disabled (or fails at registration) also falls back to
+    it — the pump surface, ``join(timeout)``, is identical either way."""
     if os.environ.get("AGENT_WORKER_EVENT_PUMP", "reactor") == "reactor":
         try:
             return EventPumpReactor.get().register(proc, output.name)
-        except ReactorUnavailable:
+        except (ReactorUnavailable, OSError):
             print(
                 f"event-pump reactor unavailable for {execution_id}; using thread pump",
                 flush=True,
