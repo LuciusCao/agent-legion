@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-09-10
+
+### Performance
+- velites 事件落盘批量化（issue #577）：events 落盘从每行事件
+  `write_all` + `flush`（每事件至少 2 次 syscall）改为进程内 8 KiB
+  `BufWriter` 攒批——缓冲满或距上次落盘超过
+  `VELITES_EVENT_FLUSH_INTERVAL_MS`（默认 200ms，`0` 恢复逐行）才写
+  一次；首个事件无条件立即落盘（开场事件不滞留在缓冲里），容量触发
+  的 drain 同步 flush 时钟。正常完成 / SIGTERM 优雅取消 / 错误退出
+  在 sink Drop 时 flush 收尾、事件零丢失；SIGKILL 丢未满缓冲的尾部
+  一批（events.jsonl 是执行轨迹、归档有重试兜底，该窗口已声明可
+  接受）。进程内所有 sink 句柄共享同一缓冲，retry 路径的第二个句柄
+  不会造成 wire 顺序交错。高并发 agent 进程场景下显著降低
+  fseventsd 与管道读写两侧的 syscall 放大。
+
+### Added
+- host 镜像发布管线（issue #574）：push `v<数字>*` 发版 tag 触发
+  `host-image-release` workflow，原生 runner 构建 linux/amd64 与
+  linux/arm64（拒绝 QEMU）并推 GHCR
+  `ghcr.io/luciuscao/agent-legion-host`（版本 / `sha-<短哈希>` /
+  `latest` 三 tag；`latest` 仅当本次 tag 是远端最高版本时移动，
+  重推旧 tag 或并发乱序都不会回滚 latest）。触发器刻意收窄为
+  `v[0-9]*`（minimatch 下 `v*` 会误匹配 `velites-v*`）。部署侧新增
+  `deploy/compose.host.pull.example.yaml` 拉取式 override，文档见
+  docs/agent-worker-deployment.md §3。host 部署不再必须现场构建。
+
+### Changed
+- workflow studio agent 节点 tools 字段收敛（issue #575）：节点级
+  「工具声明」改为「Tools 覆盖（留空 = 跟随 Agent 默认）」主入口，
+  未声明时直接展示解析后的生效值与来源；Agent 摘要卡 Tools 行按
+  覆盖状态对称标注「（节点未覆盖，当前生效）/（节点已覆盖，以节点
+  为准）」；内嵌 AgentEditor 的 Tools 标注为「Agent 默认 / 兜底」，
+  对齐 #440 终局方向（定义层字段并入节点）。draft-only Agent 的
+  tools 未知态不再误显示为「（空）」。
+- CI：quality-gate 的 PR 触发范围补 `release/*`——发版集成分支上
+  的 issue PR 此前完全没有 CI 覆盖。
+
 ## [0.7.7] - 2026-09-10
 
 ### Performance
