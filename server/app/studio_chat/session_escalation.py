@@ -30,11 +30,13 @@ def escalate_dead_token_session(backend: ServiceBackend, session_id: str) -> Non
     not ours to stamp, and 'error' is already terminal for this purpose; the
     running turn's own turn_end (status_in running/awaiting_permission →
     idle) cannot resurrect an escalated row. ``awaiting_permission`` is
-    deliberately NOT excluded: the tool channel is dead, so the parked
-    permission is unanswerable either way — escalation trades its 120s
-    auto-deny wait for the immediately reachable resume entry. Runtime
-    teardown stays with resume/on_exit — the ACP process itself is healthy
-    and the current turn is allowed to finish."""
+    deliberately NOT excluded: the MCP tool channel is dead and parked
+    permissions are local-tool prompts — escalation trades at most a 120s
+    auto-deny for the immediately reachable resume entry. The healthy ACP
+    process is NOT torn down here: the caller (token_keepalive) follows this
+    with handle.request_stop(), which lets the running turn finish and
+    reuses the on_exit teardown — no wedged-turn kill, no self-join on the
+    ACP thread."""
     backend.db.update_studio_chat_session_if(
         session_id,
         status_not_in=("closed", "error", "starting"),
