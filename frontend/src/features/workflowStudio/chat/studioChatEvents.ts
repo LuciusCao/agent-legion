@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { invalidateStudioTurnEndQueries } from './studioChatInvalidation'
 import {
-  statusEvent,
+  isTerminalStatus,
   streamingTextId,
   upsertMessage,
   type ChatMessage,
@@ -29,8 +29,9 @@ type SseDeps = {
 }
 
 /** SSE message 事件的合入：流式残片 upsert（缺 seq 指向未知消息则增量补齐，
- * 补齐静默携带 turn_end 时与实时到达的同等触发全量回取——原地更新的流式
- * 行 seq 不变、after_seq 取不回，否则截断副本永久定格，#563）。 */
+ * 补齐静默携带 terminal 事件时与实时到达的同等触发全量回取与查询失效——
+ * 原地更新的流式行 seq 不变、after_seq 取不回，否则截断副本永久定格，
+ * #563）。 */
 export function handleSseMessageEvent(
   incoming: Partial<ChatMessage> & { id: string },
   deps: SseDeps
@@ -44,20 +45,23 @@ export function handleSseMessageEvent(
   if (missed) {
     void refillMessages()
       .then((hasTerminal) => {
-        if (hasTerminal) void refillMessages(0).catch(() => undefined)
+        if (hasTerminal) {
+          void refillMessages(0).catch(() => undefined)
+          invalidateStudioTurnEndQueries(queryClient, workspaceId)
+        }
       })
       .catch(() => undefined)
   }
-  if (statusEvent(incoming as ChatMessage).event === 'turn_end') {
+  if (isTerminalStatus(incoming as ChatMessage)) {
     void refillMessages(0).catch(() => undefined)
     invalidateStudioTurnEndQueries(queryClient, workspaceId)
   }
 }
 
 /** SSE 重连（status=open）的自愈：本地仍挂着未终结的流式 agent text 行
- * （turn 在断连期间结束、turn_end 只能经 after_seq 补齐静默合入）时直接
- * 全量回取一次校准；随后照常增量补齐 + 重拉会话快照（断连期间的状态
- * 翻转不补发 SSE，不重拉则本地 status 滞留 running）。 */
+ * （turn 在断连期间结束、terminal 事件只能经 after_seq 补齐静默合入）时
+ * 直接全量回取一次校准；随后照常增量补齐 + 重拉会话快照（断连期间的
+ * 状态翻转不补发 SSE，不重拉则本地 status 滞留 running）。 */
 export function handleSseReconnect(deps: SseDeps): void {
   const {
     messagesRef,
