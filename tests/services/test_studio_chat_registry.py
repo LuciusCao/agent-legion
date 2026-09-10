@@ -21,8 +21,10 @@ from server.app.studio_chat.agent_catalog import (
 )
 from server.app.studio_chat.registry import (
     GLOBAL_SETTINGS_KEY,
+    RegistryVersionMismatch,
     StudioAgentRegistryStore,
     default_registry_document,
+    registry_revision,
 )
 
 pytestmark = pytest.mark.no_db
@@ -128,3 +130,53 @@ def test_find_agent_covers_detected_entries() -> None:
     found = store.find_agent("kimi")
     assert found is not None and found["command"] == "kimi"
     assert store.find_agent("nope") is None
+
+
+def test_registry_revision_is_content_stable_and_probe_independent() -> None:
+    """#355：revision 仅由存储文档决定——同一文档稳定，agents/api_base 变化
+    才变化，响应端派生字段不参与。"""
+    document = {"api_base": "http://127.0.0.1:8000", "agents": []}
+    assert registry_revision(document) == registry_revision(dict(document))
+    assert registry_revision(document) != registry_revision(
+        dict(document, agents=[{"id": "kimi", "label": "K", "command": "kimi", "args": []}])
+    )
+    assert registry_revision(document) != registry_revision(
+        dict(document, api_base="http://127.0.0.1:9000")
+    )
+    # 键序不影响版本（canonical 序列化）。
+    agent = {"id": "kimi", "label": "K", "command": "kimi", "args": []}
+    assert registry_revision({"agents": [agent], "api_base": "b"}) == registry_revision(
+        {"api_base": "b", "agents": [dict(agent)]}
+    )
+
+
+def test_conditional_put_rejects_stale_revision_without_touching_storage() -> None:
+    """#355（方案 1）：行锁内版本不匹配 → 抛 RegistryVersionMismatch，
+    存储文档（含新 detected 行）原样保留。"""
+    store = _store({"api_base": "http://127.0.0.1:8000", "agents": []})
+    stale_revision = registry_revision(store.get())
+    # 快照后探测合并进新 detected 行：存储版本已前进。
+    store.update(lambda stored: merge_detected_into_document(stored, _statuses("kimi")))
+    stale_payload = {"api_base": "http://127.0.0.1:8000", "agents": []}
+    with pytest.raises(RegistryVersionMismatch):
+        store.conditional_put(stale_revision, merge_manual_edit, stale_payload)
+    # 陈旧快照没有覆盖掉 detected 行。
+    agents = store.get()["agents"]
+    assert [agent["id"] for agent in agents] == ["kimi"]
+    assert agents[0]["source"] == "detected"
+
+
+def test_conditional_put_accepts_current_revision_and_empty_revision() -> None:
+    """#355：当前版本匹配正常写入并返回合并基线；空版本跳过检查（legacy
+    客户端的整份替换语义不变）。"""
+    store = _store({"api_base": "http://127.0.0.1:8000", "agents": []})
+    current_revision = registry_revision(store.get())
+    payload = {"api_base": "http://127.0.0.1:9000", "agents": []}
+    stored = store.conditional_put(current_revision, merge_manual_edit, payload)
+    assert stored == {"api_base": "http://127.0.0.1:8000", "agents": []}
+    assert store.get()["api_base"] == "http://127.0.0.1:9000"
+    # 空 revision：不比对，直接写入。
+    store.conditional_put(
+        "", merge_manual_edit, {"api_base": "http://127.0.0.1:8000", "agents": []}
+    )
+    assert store.get()["api_base"] == "http://127.0.0.1:8000"
