@@ -114,7 +114,7 @@ curl http://192.0.2.1:8000/api/health
 
 ### 拉取式部署（v* 镜像发布，#574）
 
-`make stack-host-up` 默认在部署机现场构建镜像（`agent-legion-host:local`）。host 镜像跟随仓库 `v*` 发版 tag 走（与 worker 的独立 `worker-v*` 版本线不同：`v*` = 仓库 + host 一体发布，`worker-v*` = 可独立重发的执行端）：push `v*` tag（如 `v0.7.8`）触发 [host-image-release](../.github/workflows/host-image-release.yml) workflow——原生 runner 构建 linux/amd64 与 linux/arm64（不使用 QEMU），按 digest 合成 manifest list 后推送 GHCR `ghcr.io/luciuscao/agent-legion-host`，打 `<版本>` / `sha-<短哈希>` / `latest` 三个 tag（`sha-` 指向 tag 背后的 commit，annotated tag 亦正确 dereference）。
+`make stack-host-up` 默认在部署机现场构建镜像（`agent-legion-host:local`）。host 镜像跟随仓库 `v*` 发版 tag 走（与 worker 的独立 `worker-v*` 版本线不同：`v*` = 仓库 + host 一体发布，`worker-v*` = 可独立重发的执行端）：push `v<数字>*` tag（如 `v0.7.8`；触发器是 char class `v[0-9]*`，刻意排除 `velites-v*` 等同前缀家族）触发 [host-image-release](../.github/workflows/host-image-release.yml) workflow——原生 runner 构建 linux/amd64 与 linux/arm64（不使用 QEMU），按 digest 合成 manifest list 后推送 GHCR `ghcr.io/luciuscao/agent-legion-host`，打 `<版本>` / `sha-<短哈希>` / `latest` 三个 tag（`sha-` 指向 tag 背后的 commit，annotated tag 亦正确 dereference）。`latest` 只在本次 tag 是远端最高版本时移动：多 tag 并发构建乱序完成、或为修复重推旧 tag 重跑，都不会把 `latest` 指回旧 manifest（此时只打版本 tag 与 `sha-<短哈希>`）。
 
 部署机侧：复制 `deploy/compose.host.pull.example.yaml` 为 `deploy/compose.local.yaml`（Makefile 的 stack-host-* 目标自动并入），把 `image` 改成固定版本 tag，之后 `make stack-host-up` 即拉取启动（override 用 `!reset` 清除 build 段；只覆盖 host 服务，postgres / 对象存储 / worker 沿用基础文件）。GHCR 包默认 private——部署机先 `docker login ghcr.io`（具 read:packages 的 PAT），或在 GitHub package 设置中改为 public。发布走 GitHub 托管 runner，只能推 GitHub 侧 registry；需要内网私有 registry 时须自建 runner，不在本管道覆盖范围内。
 
