@@ -981,10 +981,12 @@ exemptions:
     (which phase covers what, when absent) for bookkeeping. Ceiling at
     actual + 10 per the dated-exemption convention (#431 / #458
     precedents). Remove when the timing fields move into a schema-driven
-    shape or the module gets a dedicated events-tools split.
+    shape or the module gets a dedicated events-tools split. #577 moved
+    StdoutJsonlSink out to velites/src/event_sink.rs; ceiling re-seated
+    at the post-move actual + 10.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
-  ceiling: 525
+  ceiling: 494
 - check: architecture.file_budget
   path: velites/src/tools/bash.rs
   reason: >-
