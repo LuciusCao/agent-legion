@@ -1667,6 +1667,8 @@
     "worker/execution/ownership.py": 91,
     "worker/execution/pending.py": 50,
     "worker/execution/prepare.py": 69,
+    "worker/execution/reactor.py": 323,
+    "worker/execution/reactor_stream.py": 91,
     "worker/execution/run.py": 212,
     "worker/executor.py": 212,
     "worker/executor_log.py": 84,
