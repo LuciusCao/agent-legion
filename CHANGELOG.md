@@ -20,6 +20,11 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   接受）。进程内所有 sink 句柄共享同一缓冲，retry 路径的第二个句柄
   不会造成 wire 顺序交错。高并发 agent 进程场景下显著降低
   fseventsd 与管道读写两侧的 syscall 放大。
+- velites 0.5.2 → 0.5.3 落版：本版的 BufWriter 攒批改动需要新二进制
+  才能到达 docker/裸机 worker（镜像与安装脚本外挂的 velites 来自
+  GitHub Release）。独立版本线随源码前进——三平台二进制经
+  velites-v0.5.3 tag 发布；scripts/install-worker.sh 默认版本同步
+  到 0.5.3。
 
 ### Added
 - host 镜像发布管线（issue #574）：push `v<数字>*` 发版 tag 触发
