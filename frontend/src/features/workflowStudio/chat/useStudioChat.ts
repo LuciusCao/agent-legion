@@ -22,6 +22,7 @@ import {
 } from './studioChatEvents'
 import {
   deriveChatViews,
+  isTerminalStatus,
   maxSeq,
   upsertMessage,
   type ChatMessage,
@@ -76,15 +77,18 @@ export function useStudioChat(workspaceId: string | undefined) {
         sessionId,
         after
       )
-      let hasTerminal = false
+      // #563：terminal 判定在 updater 外计算——updater 可能被 React 推迟到
+      // render 才执行（同 state 有排队更新时），在 updater 内赋值再返回会
+      // 拿到恒 false，REST 补齐的自愈被静默跳过；updater 必须是纯函数。
+      const hasTerminal =
+        activeSessionIdRef.current === sessionId &&
+        fetched.some(isTerminalStatus)
       setMessages((current) => {
         // 跨会话竞态：拉取在途时切换了会话，旧会话的消息不得合入新列表；
         // 函数式更新以 current 为基线——并发的 refill(0) 与增量补齐各自
         // 合入，后落者不再回写旧基线覆盖前者（#563）。
         if (activeSessionIdRef.current !== sessionId) return current
-        const merged = mergeMessages(current, fetched)
-        hasTerminal = merged.hasTerminal
-        return merged.messages
+        return mergeMessages(current, fetched)
       })
       return hasTerminal
     },

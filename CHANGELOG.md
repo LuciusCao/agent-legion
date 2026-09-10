@@ -12,17 +12,22 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   唯一自愈入口是"SSE 实时收到 turn_end → 全量回取"，但断连空窗恰好盖过
   turn 结尾时 turn_end 只能经 REST 补齐静默合入，自愈永不触发——截断文本
   被定妆成"已完成"消息。三层修法：
-  - **前端自愈推广**（useStudioChat/studioChatRefill）：mergeMessages 检测
-    terminal 状态行——REST 补齐静默携带的 turn_end 与 SSE 实时到达的
-    同等触发一次全量回取；SSE 重连时本地仍挂着未终结的流式 agent text
-    行即直接全量回取校准。refill 的 setMessages 改函数式更新（并发
-    refill 不再互相覆盖基线）。
+  - **前端自愈推广**（useStudioChat/studioChatEvents/studioChatMessages）：
+    terminal 状态行（turn_end/error/session_*）检测统一到 isTerminalStatus
+    ——REST 补齐静默携带的 terminal 事件与 SSE 实时到达的同等触发全量
+    回取 + 画布/Agent 目录查询失效；SSE 重连时本地仍挂着未终结的流式
+    agent text 行即直接全量回取校准。refill 的 terminal 判定在 updater
+    外计算（updater 可能被 React 推迟执行，内赋值会恒 false）、
+    setMessages 改函数式更新（并发 refill 不再互相覆盖基线）。
   - **EventBus 降触发**（server/app/events/bus.py）：QueueFull 从"立即
     驱逐订阅者"改为"丢最旧腾位投递最新"（流式帧是全量快照，丢中间帧
     无损），连续溢出 OVERFLOW_EVICT_THRESHOLD=64（真死连接）才驱逐——
-    驱逐引发的断流重连正是截断的主要触发形态。
+    驱逐引发的断流重连正是截断的主要触发形态。该行为变更对全部通道
+    生效：revision 水位线消费方（workspace job 补丁批次）在长时间
+    （约 64 帧 ≈ 32s）积压后可能静默滞后至下次事件/窗口聚焦，全量
+    快照消费方（dashboard、studio chat）无损。
   - **帧体积缩减**（studio_chat/store.py）：publish 的 json.dumps 补
-    `ensure_ascii=False`，CJK 文本不再 \uXXXX 膨胀 6 倍，显著放慢订阅
+    `ensure_ascii=False`，CJK 文本不再 \uXXXX 转义（帧体积减半），放慢订阅
     队列的积压速度。
 - Studio 会话闲置后 MCP 工具通道静默死亡（issue #558）：run token 固定
   2h TTL、续期由对话活动驱动，闲置过期后 agent 的 MCP headers 无法中途
