@@ -711,9 +711,11 @@ describe('JobDetailPage', () => {
     expect(iframe?.getAttribute('srcdoc')).toContain(
       'agent-legion-preview-panel'
     )
-    // issue #11：结构化面板在上，通用产物预览在下。
+    // issue #11：结构化面板在上，通用产物预览在下。#255：question 任务的
+    // questions.json 已被结构化面板消费，通用面板默认折叠 + 去重（原始
+    // 卡片不占屏）。
     expect(screen.getByTestId('artifact-preview-panel')).toBeInTheDocument()
-    expect(screen.getByText('question.json')).toBeInTheDocument()
+    expect(screen.queryByText('question.json')).not.toBeInTheDocument()
   })
 
   it('renders generic artifact preview for video jobs (issue #11)', async () => {
@@ -735,10 +737,14 @@ describe('JobDetailPage', () => {
 
     renderPage()
     // 未知 source_type 不再白屏：通用产物预览兜底（video 空态 stub 已删）。
+    // #255：非 question 实体无去重名单，产物默认可见但面板默认折叠——
+    // 摘要行可见、点开见卡片。
     await waitFor(() => {
       expect(screen.getByTestId('artifact-preview-panel')).toBeInTheDocument()
     })
-    expect(screen.getByText('question.json')).toBeInTheDocument()
+    expect(screen.getByText('1 个文件')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /产物预览/ }))
+    expect(await screen.findByText('question.json')).toBeInTheDocument()
   })
 
   it('renders job token usage dialog when open', async () => {
@@ -785,6 +791,8 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await screen.findByText('提取')
+    // #255：左栏通用预览默认折叠，先展开——卡片内容断言依赖其取数渲染。
+    fireEvent.click(screen.getByRole('button', { name: /产物预览/ }))
 
     // Open the artifact list, then close it without selecting.
     await act(async () => {
@@ -844,6 +852,8 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await screen.findByText('提取')
+    // #255：左栏通用预览默认折叠，先展开——错误占位断言依赖卡片取数渲染。
+    fireEvent.click(screen.getByRole('button', { name: /产物预览/ }))
     await act(async () => {
       screen.getByLabelText('产物文件').click()
     })
