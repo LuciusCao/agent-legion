@@ -39,7 +39,7 @@ describe('StatusLine', () => {
   it('falls back to a built-in text when the backend detail is empty', () => {
     render(<StatusLine message={statusMessage('run_token_invalidated')} />)
     expect(screen.getByRole('alert')).toHaveTextContent(
-      '工具通道已失效，关闭会话后点「继续对话」恢复'
+      '工具通道已失效，点「继续对话」重建即可恢复'
     )
   })
 

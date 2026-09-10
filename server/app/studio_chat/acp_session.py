@@ -222,6 +222,27 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             if thread.is_alive():
                 logger.warning("studio chat ACP session thread did not stop in time")
 
+    def request_stop(self) -> None:
+        """Ask the session to stop after the current turn; never blocks.
+
+        #558: the dead-token escalation wants the (healthy) ACP process gone
+        once the running turn finishes, without killing it mid-turn and
+        without deadlocking on the ACP thread — keepalive runs ON that
+        thread, so close()'s join() is a self-join. The prompt loop drains
+        the queue only between turns, so a _CLOSE enqueued now lands exactly
+        after the current turn: the loop returns, the async-with tears the
+        subprocess down gracefully, and the existing on_exit path finishes
+        the cleanup (registry pop, token revoke). Idempotent; a later
+        close() from resume's winner-side teardown still works (same
+        _closed gate) and returns fast because the thread is already gone.
+        A wedged turn bounds the wait at PROMPT_TIMEOUT_SECONDS via
+        on_turn_error; a parked permission at the 120s auto-deny."""
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._queue.put(_CLOSE)
+
     def _kill_process(self) -> None:
         with self._state_lock:
             process = self._process

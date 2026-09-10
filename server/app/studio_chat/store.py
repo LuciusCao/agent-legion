@@ -50,7 +50,13 @@ class StudioChatStore:
             return
         payload = {"session_id": session_id, **payload}
         try:
-            self._bus.publish(studio_chat_channel(session_id), json.dumps(payload, default=str))
+            # ensure_ascii=False：流式 text 帧携带全量累积文本，CJK 走 \uXXXX
+            # 转义会把每字符膨胀到 6 字节（UTF-8 直出 3 字节，2 倍帧体积）、
+            # 加速填满订阅者的有界队列（#563）。
+            self._bus.publish(
+                studio_chat_channel(session_id),
+                json.dumps(payload, default=str, ensure_ascii=False),
+            )
         except Exception:
             # #204 broad-except audit: deliberate fire-and-forget publish.
             # SSE delivery is lossy by design (a subscriber that reconnects
