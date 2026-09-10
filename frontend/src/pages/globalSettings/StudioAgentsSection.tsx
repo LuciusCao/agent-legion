@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { toErrorMessage } from '../../lib/queryError'
 import { useUiStore } from '../../stores/uiStore'
@@ -10,11 +10,13 @@ import type {
 } from '../../api/studioAgents'
 import {
   availabilityBadge,
+  ConflictRefreshDialog,
   DetectionCell,
   errorMessage,
   RedetectButton,
   serialize,
   toRows,
+  useApplyRegistryResult,
 } from './StudioAgentsSectionParts'
 import type { AgentRow } from './StudioAgentsSectionParts'
 import styles from '../GlobalSettingsPage.module.css'
@@ -24,7 +26,8 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
 
 function buildPayload(
   apiBase: string,
-  rows: AgentRow[]
+  rows: AgentRow[],
+  revision: string
 ): StudioAgentRegistryUpdate {
   if (!apiBase.trim()) {
     throw new Error('api_base 不能为空')
@@ -59,7 +62,7 @@ function buildPayload(
       source: row.source ?? 'manual',
     }
   })
-  return { api_base: apiBase.trim(), agents }
+  return { api_base: apiBase.trim(), agents, revision }
 }
 
 function StudioAgentsEditor({
@@ -67,7 +70,6 @@ function StudioAgentsEditor({
 }: {
   initial: StudioAgentRegistryResponse
 }) {
-  const queryClient = useQueryClient()
   const [apiBase, setApiBase] = useState(initial.api_base)
   const [rows, setRows] = useState<AgentRow[]>(() => toRows(initial))
   const [availability, setAvailability] = useState<Record<string, boolean>>(
@@ -79,6 +81,13 @@ function StudioAgentsEditor({
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // #355：快照版本随 GET 持有、随每次保存结果前进；409 冲突时由冲突响应刷新。
+  const [revision, setRevision] = useState(initial.revision ?? '')
+  // #355：409 冲突对话框打开态（不自动重试，由管理员选择刷新）。
+  const [conflictOpen, setConflictOpen] = useState(false)
+  // 409 响应携带的最新注册表（与存储同事务产出）——刷新动作的取数源。
+  const [conflictBody, setConflictBody] =
+    useState<StudioAgentRegistryResponse | null>(null)
 
   const isDirty = serialize(apiBase, rows) !== baseline
 
@@ -88,20 +97,23 @@ function StudioAgentsEditor({
     )
   }
 
-  function applyResult(result: StudioAgentRegistryResponse) {
-    queryClient.setQueryData(extraQueryKeys.studioAgents(), result)
-    const nextRows = toRows(result)
-    setRows(nextRows)
-    setBaseline(serialize(result.api_base, nextRows))
-    setAvailability(result.availability ?? {})
-    setDetection(result.detection ?? {})
-  }
+  // 审核 P1：保存/重检测/409 刷新三路共用的「编辑器前进」原语（实现
+  // 在 Parts——rows/baseline/availability/detection/revision 一次性
+  // 对齐服务端文档，任何持有旧 revision 的状态都不得存活）。
+  const applyResult = useApplyRegistryResult({
+    setApiBase,
+    setRows,
+    setBaseline,
+    setAvailability,
+    setDetection,
+    setRevision,
+  })
 
   async function handleSave() {
     setError('')
     let payload: StudioAgentRegistryUpdate
     try {
-      payload = buildPayload(apiBase, rows)
+      payload = buildPayload(apiBase, rows, revision)
     } catch (err) {
       setError(errorMessage(err))
       return
@@ -112,14 +124,48 @@ function StudioAgentsEditor({
       applyResult(result)
       useUiStore.getState().showToast('Studio Agent 注册表已保存', 'success')
     } catch (err) {
-      setError(errorMessage(err))
+      // #355：409 = 快照后有其他修改（典型为探测合并进新行）。静默覆盖会
+      // 删掉这些行，改为弹确认对话框提供刷新（丢弃本地编辑、采用 409 携
+      // 带的最新文档），不自动重试。
+      if (
+        err instanceof Error &&
+        (err as Error & { status?: number }).status === 409
+      ) {
+        const body = (err as Error & { body?: unknown }).body as
+          | StudioAgentRegistryResponse
+          | undefined
+        if (body && typeof body === 'object' && 'agents' in body) {
+          setConflictBody(body)
+          setConflictOpen(true)
+        } else {
+          setError(errorMessage(err))
+        }
+      } else {
+        setError(errorMessage(err))
+      }
     } finally {
       setSaving(false)
     }
   }
 
+  function handleConflictRefresh() {
+    // #355 审核 P1：编辑器状态只在挂载/保存/redetect 时前进——invalidate
+    // 重取的数据不会被 useState 编辑器消费（refs 仍是旧快照），刷新后
+    // 下一次保存必然再 409（死循环）。409 响应体就是服务端最新文档（与
+    // 存储同事务产出），直接 applyResult 一次性前进 rows/baseline/
+    // revision，本地未保存编辑被丢弃（对话框文案明示）。
+    if (conflictBody) applyResult(conflictBody)
+    setConflictBody(null)
+    setConflictOpen(false)
+  }
+
   return (
     <>
+      <ConflictRefreshDialog
+        open={conflictOpen}
+        onContinue={() => setConflictOpen(false)}
+        onRefresh={handleConflictRefresh}
+      />
       {error && (
         <p className={styles.error} role="alert">
           {error}

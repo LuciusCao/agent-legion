@@ -72,13 +72,22 @@ class StudioAgentRegistryResponse(StudioAgentRegistryDocument):
 
     ``availability`` and ``detection`` are response-only (admins see which
     entries can launch and which catalog agents this host has); both are
-    never persisted and never accepted on PUT, so they live here rather than
-    on the shared document model.
+    never persisted and never accepted on PUT, so they live here rather
+    than on the shared document model. ``revision`` is the stored content
+    version (#355): derived from the stored document alone (probe results
+    never change it), round-tripped by the editor and checked on PUT.
     """
 
+    revision: str = ""
     availability: dict[str, bool] = Field(default_factory=dict)
     detection: dict[str, StudioAgentDetection] = Field(default_factory=dict)
 
 
 class StudioAgentRegistryUpdate(StudioAgentRegistryDocument):
-    pass
+    """PUT 载荷：``revision`` 为客户端 GET 快照时的内容版本（#355）。
+
+    服务端在写入事务内比对该版本：不一致返回 409 并附当前注册表。缺省
+    为空——省略即跳过检查（legacy 客户端与 smoke 脚本的整份替换语义）。
+    """
+
+    revision: str = ""

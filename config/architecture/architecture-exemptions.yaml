@@ -1283,3 +1283,73 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
   ceiling: 76
+- check: architecture.file_budget
+  path: server/app/studio_chat/registry.py
+  reason: >-
+    #355 adds the registry content revision (canonical-JSON sha256),
+    RegistryVersionMismatch, and conditional_put — the version compare
+    runs inside the store's FOR UPDATE RMW and must be computed on the
+    same normalized view (_effective) GET serves, so GET and the compare
+    can never drift apart (a raw-vs-effective mismatch already bit the
+    fix once: a detection merge onto a fresh registry writes a bare
+    document without api_base, and the two views disagreed forever).
+    Version semantics ARE store semantics; splitting them to a sibling
+    module forks the single normalization the two sides must share.
+    Harvest when the store's version/CAS concern grows its own module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
+  ceiling: 132
+- check: architecture.file_budget
+  path: server/app/studio_chat/agent_catalog.py
+  reason: >-
+    #355 documents the stale-snapshot protection in the module docstring
+    (the PUT revision check and why merge_manual_edit alone cannot tell
+    "never saw the row" from "deleted it") — the merge semantics and the
+    conflict check are one story and live in one docstring; ~7 effective
+    lines of documentation with no code added.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
+  ceiling: 220
+- check: architecture.file_budget
+  path: server/app/routes/studio_agents_admin.py
+  reason: >-
+    #355 wires the revision into the PUT handler: the version-mismatch
+    branch returns 409 with the current registry so the frontend can
+    prompt a refresh. The conflict response rides the same _response
+    helper as every other handler in this 4-route file; splitting the
+    PUT out would leave the registry routes in two modules.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
+  ceiling: 68
+- check: architecture.file_budget
+  path: server/app/routes/studio_agents_admin_contracts.py
+  reason: >-
+    #355 adds the response/PUT revision field (snapshot version the
+    server compares inside the write transaction; an empty revision
+    skips the compare, keeping the smoke script's whole-document
+    replace semantics). The field belongs to the two contract models
+    the file already owns; the why-docstrings for both models grow by
+    a few effective lines.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
+  ceiling: 68
+- check: architecture.file_budget
+  path: frontend/src/pages/globalSettings/StudioAgentsSectionParts.tsx
+  reason: >-
+    #355 审核 P1/P2：编辑器「前进」原语 useApplyRegistryResult（保存/重
+    检测/409 刷新三路共用——invalidate 重取不被已挂载编辑器消费会死循
+    环）与 409 冲突确认对话框抽到本共享件；主文件回落 baseline 内。
+    Harvest when the globalSettings sections gain a shared dialog layer.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
+  ceiling: 156
+- check: architecture.file_budget
+  path: frontend/src/pages/globalSettings/StudioAgentsSection.tsx
+  reason: >-
+    #355：409 冲突确认流程（revision 状态、conflict body 持有、降级
+    alert）+ 审核 P1 的 body 守卫留在主文件；对话框与前进原语已在
+    Parts（见其豁免）。288 = 审核修复后的实际值（原 302 的豁免随
+    抽取收窄）。Harvest when the editor gets its next split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
+  ceiling: 288
