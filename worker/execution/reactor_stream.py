@@ -12,8 +12,9 @@ import contextlib
 import os
 import subprocess
 import threading
+from typing import BinaryIO, cast
 
-from worker.event_filter import spawn_event_pump
+from worker.event_filter import pump_filtered_events
 
 
 class ReactorUnavailable(RuntimeError):
@@ -81,21 +82,45 @@ def stream_dropped(stream: _Stream) -> bool:
         return stream.dropped
 
 
-def takeover_with_legacy_pump(stream: _Stream) -> None:
+def takeover_with_legacy_pump(stream: _Stream) -> bool:
     """Fail-closed takeover (codex review): hand the child's stdout to a
     legacy per-thread pump — these executions already hold a handle and never
     re-enter spawn_agent_pump, so without this their children wedge on a full
     pipe until the execution timeout. Restore blocking mode first (the legacy
     pump iterates blocking); append-mode re-open keeps continuity with what
-    the pool already wrote. The handle deliberately outlives this scope: the
-    pump thread owns it."""
+    the pool already wrote. The pump thread owns the file handle.
+
+    Returns True when the takeover started. ``stream.done`` is wired to the
+    pump thread's exit (not set here) so join() cannot race the fallback
+    drain — an immediate set would let the uploader read the file mid-flush
+    and ship a truncated events.jsonl (review P2). A dropped stream (concurrent
+    join-timeout) never gets a pump: writing into a path a re-claimed
+    execution may have truncated is the #564 hazard the fence exists for."""
+
+    def _pump_and_signal() -> None:
+        try:
+            src = stream.proc.stdout
+            if src is not None:  # guarded above; belt-and-braces for the thread
+                pump_filtered_events(cast(BinaryIO, src), _fallback_output)
+        finally:
+            stream.done.set()
+
+    with stream.lock:
+        if stream.dropped:
+            return False
+    if stream.proc.stdout is None:
+        return False
     with contextlib.suppress(OSError):
         os.set_blocking(stream.fd, True)
     try:
-        # The fallback pump thread owns this handle (not this scope).
-        fallback_output = open(stream.path, "ab")  # noqa: SIM115
+        # The pump thread owns this handle (not this scope).
+        _fallback_output = open(stream.path, "ab")  # noqa: SIM115
     except OSError as open_error:
         print(f"event-pump fallback open failed for {stream.path}: {open_error!r}", flush=True)
-        return
-    if stream.proc.stdout is not None:
-        spawn_event_pump(stream.proc, fallback_output, f"pi-events-fallback-{stream.fd}")
+        return False
+    threading.Thread(
+        target=_pump_and_signal,
+        name=f"pi-events-fallback-{stream.fd}",
+        daemon=True,
+    ).start()
+    return True

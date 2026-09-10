@@ -5,8 +5,8 @@ wakeups, GIL contention, context switches) taxes the executor more than the
 agents themselves (#578: 352% CPU supervising a fleet using 111%; #566's
 heartbeat starvation was a casualty). This module replaces N pump threads
 with one selector thread (batched ready-fds per wakeup; the blocking select
-releases the GIL) plus a core-count parse pool taking JSON parse + delta
-filter + file writes off the reactor thread.
+releases the GIL) plus a core-count parse pool overlapping file writes with
+reads across streams (json.loads itself stays GIL-bound).
 
 Scope: the reactor only owns the byte→line→event segment — spawn,
 lease/heartbeat, timeout policing, and the #564 ownership semantics stay in
@@ -59,7 +59,8 @@ _STREAM_BACKLOG = 2048
 
 
 # Pool size: core-count-scale (issue #578 "N = 核数级 8–16"), bounded for
-# the common machine shapes; json.loads releases the GIL well.
+# the common machine shapes; the pool overlaps file writes across streams
+# (json.loads itself stays GIL-bound — verified, it is NOT the parallel part).
 def _default_parse_workers() -> int:
     return max(2, min(16, os.cpu_count() or 4))
 
@@ -222,9 +223,9 @@ class EventPumpReactor:
                 self.unregister(stream)  # EOF: child exited
                 return
             stream.buf += chunk
-            self._frame_pending(stream, len(chunk))
+            self._frame_pending(stream)
 
-    def _frame_pending(self, stream: _Stream, last_read: int) -> None:
+    def _frame_pending(self, stream: _Stream) -> None:
         # Frame complete lines out of buf, then submit ONE pool task per
         # read batch (review P1: per-line submits made every line after the
         # first a no-op token dance — the pool queue churn the reactor was
@@ -244,13 +245,13 @@ class EventPumpReactor:
         if len(stream.buf) > _MAX_LINE_BYTES:
             # Keep the HEAD (the JSON "type" key lives there); the tail of an
             # unsalvageable >64MB line is the least valuable part.
-            del stream.buf[:-_READ_SIZE]
+            del stream.buf[_READ_SIZE:]
         # ALWAYS ensure a drain task exists when there is pending work: a
         # single read can burst past _STREAM_BACKLOG (paused flips on), and
         # skipping the submit would leave the queue full, inflight 0, and no
         # task to ever call _resume — the stream wedges until join times out
         # (codex review: 3000 one-byte lines in one write reproduces this).
-        if stream.pending or last_read:
+        if stream.pending:
             self._submit_parse(stream)
         if stream.paused:
             # Backpressure by design (#578 point 3): stop reading this fd;
@@ -296,6 +297,13 @@ class EventPumpReactor:
                 if stream_dropped(stream):
                     break
                 kept = [line for line in batch if _filter_line(line)]
+                # Fence check INSIDE the write transaction window too: the
+                # per-batch check above races a drop landing between it and
+                # this open (review P2 residual). TOCTOU cannot be fully
+                # closed without generation counters on the path — this
+                # narrows it to the open→write gap only.
+                if stream_dropped(stream):
+                    break
                 with open(stream.path, "ab") as output:
                     for line in kept:
                         output.write(line)
@@ -356,11 +364,14 @@ class EventPumpReactor:
                 self._selector.unregister(stream.fd)
             # Fence in-flight writers (same as _drop); buffered lines are
             # abandoned (module docstring), then a legacy pump takes the fd.
+            # ``done`` fires from the pump thread's exit so join() does not
+            # race the fallback drain (review P2: an immediate set let the
+            # uploader read the file mid-flush — truncated events.jsonl).
             with stream.lock:
                 stream.dropped = True
                 stream.pending.clear()
-            takeover_with_legacy_pump(stream)
-            stream.done.set()  # unblock joiners; failure already printed
+            if not takeover_with_legacy_pump(stream):
+                stream.done.set()  # no takeover: unblock joiners now
         self._pool.shutdown(wait=False)
 
 

@@ -266,8 +266,16 @@ def test_thread_pump_opt_out_still_works(tmp_path: Path) -> None:
 def test_reactor_survives_full_pipe_write_then_pause(tmp_path: Path) -> None:
     """P0 regression: a child that writes a full pipe (>= _READ_SIZE) without
     a newline and then pauses must not park the reactor on the second read.
-    A sibling stream must keep being served meanwhile (EAGAIN, not blocking),
-    and the burst stream flushes its framed lines once the child exits."""
+    A sibling stream must keep being served DURING the pause window (EAGAIN,
+    not blocking), and the burst stream flushes its framed lines once the
+    child exits.
+
+    The burst child sleeps 6s: with a blocking fd (the P0 condition) the
+    reactor parks on the second os.read until the child's exit — a 0.4s sleep
+    lets a parked reactor catch up after exit and the assertion loses its
+    bite on macOS (verified by review); 6s makes the mid-sleep check the
+    discriminator: a parked reactor cannot have served ANY sibling line while
+    the burst child sleeps."""
     burst = tmp_path / "burst.jsonl"
     sibling = tmp_path / "sibling.jsonl"
     burst.touch()
@@ -280,7 +288,7 @@ def test_reactor_survives_full_pipe_write_then_pause(tmp_path: Path) -> None:
             "import os, time\n"
             "os.write(1, b'x' * 70000)\n"
             'os.write(1, b\'{\\"type\\":\\"agent_end\\"}\\n\')\n'
-            "time.sleep(0.4)\n",
+            "time.sleep(6)\n",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -293,7 +301,8 @@ def test_reactor_survives_full_pipe_write_then_pause(tmp_path: Path) -> None:
             "import os, time\n"
             "for i in range(20):\n"
             '    os.write(1, (\'{\\"type\\":\\"tick\\",\\"n\\":%d}\\n\' % i).encode())\n'
-            "    time.sleep(0.02)\n",
+            "    time.sleep(0.02)\n"
+            "time.sleep(6)\n",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -302,18 +311,19 @@ def test_reactor_survives_full_pipe_write_then_pause(tmp_path: Path) -> None:
     try:
         burst_handle = reactor.register(burst_child, str(burst))
         sibling_handle = reactor.register(sibling_child, str(sibling))
-        # While the burst child sleeps mid-blob, the sibling must be drained
-        # live (a parked reactor would leave it at zero until the blob child
-        # writes again or exits).
-        deadline = time.monotonic() + 5
+        # Sibling finishes its 20 ticks (0.4s) well inside the burst child's
+        # 6s pause: a reactor parked on the burst fd serves zero of them
+        # until the park lifts — this is the mid-pause discriminator.
+        deadline = time.monotonic() + 4
         while time.monotonic() < deadline:
             if len(_read_events(sibling)) >= 20:
                 break
             time.sleep(0.05)
         assert len(_read_events(sibling)) == 20, "reactor parked on the full pipe"
-        burst_child.wait(timeout=10)
-        burst_handle.join(timeout=10)
-        sibling_handle.join(timeout=10)
+        assert burst_child.poll() is None, "burst child exited too early — timing invalid"
+        burst_child.wait(timeout=15)
+        burst_handle.join(timeout=15)
+        sibling_handle.join(timeout=15)
     finally:
         burst_child.kill()
         sibling_child.kill()
