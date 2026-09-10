@@ -1,5 +1,23 @@
 exemptions:
 - check: architecture.file_budget
+  path: frontend/src/components/preview/ArtifactPreviewPanel.tsx
+  reason: >-
+    The #255 readability fix adds the two presentation defaults the panel now
+    carries: collapse-by-default (the expand/collapse toggle, aria-expanded
+    header button and the dedup summary "另 N 个已在上方展示") and the
+    structuredHidden prop wiring toward the config menu. The visibility
+    derivation and session-scoped re-enable state were already split out to
+    hooks/useArtifactVisibility.ts (44 lines); what remains is the JSX the
+    header needs in one place — header, summary line, menu mount and the
+    collapsed card list. Splitting the header further would separate the
+    toggle from the count it summarizes (same-cost shuffle into a file that
+    would immediately carry its own header/JSX budget). Harvest when the
+    generic preview panel is restructured for the #328 renderer registry
+    (shape-sniffed renderers), which will replace this header wholesale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  ceiling: 69
+- check: architecture.file_budget
   path: velites/src/provider/openai_compat/mod.rs
   reason: >-
     The #450 fix adds the is_error round-trip unit test next to the existing
@@ -1283,3 +1301,14 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
   ceiling: 76
+- check: architecture.file_budget
+  path: frontend/src/components/preview/previewTextBodies.tsx
+  reason: >-
+    #255 审核 P1 修复：JSON 兜底着色从单条全局正则改为单趟手写
+    lexJsonish（未闭合字符串不再从每个引号位回溯，512KB 截断内容从
+    10-120s 主线程冻结降到毫秒级）。lexer 与其性能契约注释、转义次序
+    说明同居此文件；拆到姊妹文件会把「转义→着色→注入」三步管线分家。
+    Harvest when the preview renderers get a structural split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  ceiling: 98

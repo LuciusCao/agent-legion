@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Fixed
+- job detail 左栏可读性回归（issue #255，#248 后续）：结构化可视化恢复
+  主视图地位，原始文件降为次要/兜底视图——「产物预览（N 个文件）」通用
+  面板默认折叠为一行摘要（点击展开），非 question 实体的 job 不再被一整
+  屏原始 JSON 卡片取代（原 #248 前该类 job 左栏为空白）；question 任务的
+  questions.json / comprehension_info.json（含 reviewed→raw 回落链）与两份
+  评审报告已被结构化面板消费，同名原始卡片默认去重隐藏（摘要行提示
+  「另 N 个已在上方展示」，勾选菜单可会话内恢复，不写 workspace 配置）；
+  JSON 卡片兜底可读性（超限 / 解析失败的 .json 进不了树视图时改为缩进
+  排版 + 键名/字符串/数字着色，不再纯文本堆放）。
+
 ### Changed
 - 原生形态 velites 二进制收敛为 PATH 单一副本（issue #507）：解析顺序从
   「data/bin 自带副本优先、PATH 兜底」反转为「PATH 优先、data/bin 兜底」
