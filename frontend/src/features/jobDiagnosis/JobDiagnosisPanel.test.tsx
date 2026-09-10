@@ -251,9 +251,7 @@ describe('JobDiagnosisPanel', () => {
       expect(mockApi.createStudioChatSession).toHaveBeenCalled()
     )
     await screen.findByRole('button', { name: '继续对话' })
-    expect(
-      screen.getByText(/会话已中断，历史记录已保留/)
-    ).toBeInTheDocument()
+    expect(screen.getByText(/会话已中断，历史记录已保留/)).toBeInTheDocument()
   })
 
   it('does not render the resume bar while the session is live', async () => {
