@@ -129,6 +129,36 @@ def test_reactor_preserves_line_order_under_load(tmp_path: Path) -> None:
     assert seqs == list(range(total))
 
 
+def test_burst_past_backlog_still_schedules_drain(tmp_path: Path) -> None:
+    """codex review P1: a single read can burst past _STREAM_BACKLOG (paused
+    flips on mid-frame). The drain task MUST still be scheduled — skipping it
+    left the queue full, inflight 0, and no task to ever call _resume; the
+    stream wedged until join timed out and every event was dropped."""
+    total = 3000  # one write of one-byte lines > _STREAM_BACKLOG (2048)
+    out = tmp_path / "events.jsonl"
+    out.touch()
+    reactor = _fresh_reactor()
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import os\nos.write(1, b'x\\n' * 3000)\nimport time; time.sleep(0.05)\n",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        handle = reactor.register(proc, str(out))
+        proc.wait(timeout=10)
+        handle.join(timeout=10)
+    finally:
+        proc.kill()
+        reactor.shutdown()
+    lines = _read_events(out)
+    assert len(lines) == total  # nothing dropped despite the pause flipping on
+
+
 def test_reactor_join_timeout_returns_silently(tmp_path: Path) -> None:
     """A child that keeps its pipe open: join(timeout) returns, no raise."""
     proc = subprocess.Popen(
