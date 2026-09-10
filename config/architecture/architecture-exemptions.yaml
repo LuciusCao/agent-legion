@@ -1334,14 +1334,22 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
   ceiling: 68
 - check: architecture.file_budget
-  path: frontend/src/pages/globalSettings/StudioAgentsSection.tsx
+  path: frontend/src/pages/globalSettings/StudioAgentsSectionParts.tsx
   reason: >-
-    #355 adds the 409 conflict confirm dialog (refresh action, no
-    auto-retry) plus the revision state the editor round-trips on PUT.
-    The dialog is editor-local state next to handleSave's conflict
-    branch; moving it to StudioAgentsSectionParts would add a props
-    surface (open flag, both callbacks) across the module boundary for
-    one caller. Harvest when the editor gets its next split.
+    #355 审核 P1/P2：编辑器「前进」原语 useApplyRegistryResult（保存/重
+    检测/409 刷新三路共用——invalidate 重取不被已挂载编辑器消费会死循
+    环）与 409 冲突确认对话框抽到本共享件；主文件回落 baseline 内。
+    Harvest when the globalSettings sections gain a shared dialog layer.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
-  ceiling: 302
+  ceiling: 156
+- check: architecture.file_budget
+  path: frontend/src/pages/globalSettings/StudioAgentsSection.tsx
+  reason: >-
+    #355：409 冲突确认流程（revision 状态、conflict body 持有、降级
+    alert）+ 审核 P1 的 body 守卫留在主文件；对话框与前进原语已在
+    Parts（见其豁免）。288 = 审核修复后的实际值（原 302 的豁免随
+    抽取收窄）。Harvest when the editor gets its next split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
+  ceiling: 288

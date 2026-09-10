@@ -279,14 +279,33 @@ describe('StudioAgentsSection', () => {
     )
   })
 
-  it('shows a refresh confirmation dialog on 409 and does not auto-retry', async () => {
-    // #355：快照版本陈旧（保存间隙有探测合并等新写入）→ 后端 409。
-    // 前端弹确认对话框提示刷新，不自动重试、不静默覆盖。
-    vi.mocked(updateStudioAgents).mockRejectedValue(
-      Object.assign(new Error('HTTP 409: registry revision mismatch'), {
-        status: 409,
-      })
-    )
+  it('shows a refresh dialog on 409; refresh adopts the 409 body so the next save succeeds', async () => {
+    // #355 审核 P1：刷新必须真正前进编辑器（rows/baseline/revision），
+    // 否则旧实现 invalidate 重取的数据不被 useState 编辑器消费，下一
+    // 次保存仍持旧 revision——409 死循环。409 响应体携带服务端最新
+    // 文档（探测合并进了 codex 行、revision 前进到 rev-2）。
+    const concurrent: StudioAgentRegistryResponse = {
+      ...registry,
+      agents: [
+        ...(registry.agents ?? []),
+        {
+          id: 'codex',
+          label: 'Codex',
+          command: 'codex',
+          args: [],
+          source: 'detected',
+        },
+      ],
+      revision: 'rev-2',
+    }
+    vi.mocked(updateStudioAgents)
+      .mockRejectedValueOnce(
+        Object.assign(new Error('HTTP 409: registry revision mismatch'), {
+          status: 409,
+          body: concurrent,
+        })
+      )
+      .mockResolvedValueOnce(concurrent)
 
     renderSection()
     await screen.findByLabelText('agent-label-0')
@@ -298,25 +317,55 @@ describe('StudioAgentsSection', () => {
 
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('注册表已被其他修改更新')
-    expect(dialog).toHaveTextContent('请刷新后基于最新内容重试')
     // 不自动重试：确认对话框出现后 PUT 仍只调用过一次。
     expect(updateStudioAgents).toHaveBeenCalledTimes(1)
-    // 普通错误条不出现（409 走对话框而非 alert）。
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 
-    // 「刷新注册表」使缓存失效重取（由管理员主动选择刷新）。
+    // 「刷新注册表」直接采用 409 携带的最新文档——编辑器真正前进
+    //（并发文档多了一行 codex，第三行 label 即其名）。
     fireEvent.click(screen.getByRole('button', { name: '刷新注册表' }))
     await waitFor(() => {
-      expect(getStudioAgents).toHaveBeenCalledTimes(2)
+      expect(screen.getByLabelText('agent-label-2')).toHaveValue('Codex')
     })
-    // 「继续编辑」分支：再次 409 后关闭对话框，PUT 调用数不增加。
+    // 本地未保存的编辑被丢弃（对话框文案明示）。
+    expect(screen.getByLabelText('agent-label-0')).toHaveValue('Kimi Code')
+
+    // 关键断言（审核 P1 的回归钉）：再次保存携带刷新后的 rev-2，成功。
     fireEvent.change(screen.getByLabelText('agent-label-0'), {
-      target: { value: 'Kimi CLI 2' },
+      target: { value: 'Kimi CLI' },
     })
     fireEvent.click(screen.getByText('保存'))
-    await screen.findByRole('dialog')
-    fireEvent.click(screen.getByRole('button', { name: '继续编辑' }))
-    expect(updateStudioAgents).toHaveBeenCalledTimes(2)
+    await waitFor(() => {
+      expect(updateStudioAgents).toHaveBeenCalledTimes(2)
+    })
+    expect(updateStudioAgents).toHaveBeenLastCalledWith(
+      expect.objectContaining({ revision: 'rev-2' })
+    )
+    // 第二次保存成功：对话框不再出现（MUI 关闭有过渡，waitFor 收敛）。
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  })
+
+  it('degrades to the error alert when the 409 body is not a registry', async () => {
+    // 审核 P1 边界：异常路径（代理剥离响应体等）不能卡在无提示态。
+    vi.mocked(updateStudioAgents).mockRejectedValue(
+      Object.assign(new Error('HTTP 409: registry revision mismatch'), {
+        status: 409,
+        body: undefined,
+      })
+    )
+
+    renderSection()
+    await screen.findByLabelText('agent-label-0')
+
+    fireEvent.change(screen.getByLabelText('agent-label-0'), {
+      target: { value: 'Kimi CLI' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 409')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('shows the load error when GET fails', async () => {

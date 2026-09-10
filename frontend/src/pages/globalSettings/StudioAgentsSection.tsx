@@ -1,12 +1,5 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-} from '@mui/material'
+import { useQuery } from '@tanstack/react-query'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { toErrorMessage } from '../../lib/queryError'
 import { useUiStore } from '../../stores/uiStore'
@@ -17,11 +10,13 @@ import type {
 } from '../../api/studioAgents'
 import {
   availabilityBadge,
+  ConflictRefreshDialog,
   DetectionCell,
   errorMessage,
   RedetectButton,
   serialize,
   toRows,
+  useApplyRegistryResult,
 } from './StudioAgentsSectionParts'
 import type { AgentRow } from './StudioAgentsSectionParts'
 import styles from '../GlobalSettingsPage.module.css'
@@ -75,7 +70,6 @@ function StudioAgentsEditor({
 }: {
   initial: StudioAgentRegistryResponse
 }) {
-  const queryClient = useQueryClient()
   const [apiBase, setApiBase] = useState(initial.api_base)
   const [rows, setRows] = useState<AgentRow[]>(() => toRows(initial))
   const [availability, setAvailability] = useState<Record<string, boolean>>(
@@ -91,6 +85,9 @@ function StudioAgentsEditor({
   const [revision, setRevision] = useState(initial.revision ?? '')
   // #355：409 冲突对话框打开态（不自动重试，由管理员选择刷新）。
   const [conflictOpen, setConflictOpen] = useState(false)
+  // 409 响应携带的最新注册表（与存储同事务产出）——刷新动作的取数源。
+  const [conflictBody, setConflictBody] =
+    useState<StudioAgentRegistryResponse | null>(null)
 
   const isDirty = serialize(apiBase, rows) !== baseline
 
@@ -100,15 +97,16 @@ function StudioAgentsEditor({
     )
   }
 
-  function applyResult(result: StudioAgentRegistryResponse) {
-    queryClient.setQueryData(extraQueryKeys.studioAgents(), result)
-    const nextRows = toRows(result)
-    setRows(nextRows)
-    setBaseline(serialize(result.api_base, nextRows))
-    setAvailability(result.availability ?? {})
-    setDetection(result.detection ?? {})
-    setRevision(result.revision ?? '')
-  }
+  // 审核 P1：保存/重检测/409 刷新三路共用的「编辑器前进」原语（实现
+  // 在 Parts——rows/baseline/availability/detection/revision 一次性
+  // 对齐服务端文档，任何持有旧 revision 的状态都不得存活）。
+  const applyResult = useApplyRegistryResult({
+    setRows,
+    setBaseline,
+    setAvailability,
+    setDetection,
+    setRevision,
+  })
 
   async function handleSave() {
     setError('')
@@ -126,12 +124,21 @@ function StudioAgentsEditor({
       useUiStore.getState().showToast('Studio Agent 注册表已保存', 'success')
     } catch (err) {
       // #355：409 = 快照后有其他修改（典型为探测合并进新行）。静默覆盖会
-      // 删掉这些行，改为弹确认对话框提供刷新（丢弃本地编辑重取），不自动重试。
+      // 删掉这些行，改为弹确认对话框提供刷新（丢弃本地编辑、采用 409 携
+      // 带的最新文档），不自动重试。
       if (
         err instanceof Error &&
         (err as Error & { status?: number }).status === 409
       ) {
-        setConflictOpen(true)
+        const body = (err as Error & { body?: unknown }).body as
+          | StudioAgentRegistryResponse
+          | undefined
+        if (body && typeof body === 'object' && 'agents' in body) {
+          setConflictBody(body)
+          setConflictOpen(true)
+        } else {
+          setError(errorMessage(err))
+        }
       } else {
         setError(errorMessage(err))
       }
@@ -141,36 +148,23 @@ function StudioAgentsEditor({
   }
 
   function handleConflictRefresh() {
-    // #355：刷新走 query 失效重取（与初始 GET 同源），不直接采用 409
-    // 响应体——编辑器数据流保持单一路径；本地未保存编辑被丢弃。
+    // #355 审核 P1：编辑器状态只在挂载/保存/redetect 时前进——invalidate
+    // 重取的数据不会被 useState 编辑器消费（refs 仍是旧快照），刷新后
+    // 下一次保存必然再 409（死循环）。409 响应体就是服务端最新文档（与
+    // 存储同事务产出），直接 applyResult 一次性前进 rows/baseline/
+    // revision，本地未保存编辑被丢弃（对话框文案明示）。
+    if (conflictBody) applyResult(conflictBody)
+    setConflictBody(null)
     setConflictOpen(false)
-    queryClient.invalidateQueries({ queryKey: extraQueryKeys.studioAgents() })
   }
 
   return (
     <>
-      <Dialog
+      <ConflictRefreshDialog
         open={conflictOpen}
-        onClose={() => setConflictOpen(false)}
-        aria-labelledby="studio-agents-conflict-title"
-      >
-        <DialogTitle id="studio-agents-conflict-title">
-          注册表已被其他修改更新
-        </DialogTitle>
-        <DialogContent>
-          保存期间注册表被其他修改更新（例如自动探测合并了新 agent），
-          为避免覆盖丢失条目，请刷新后基于最新内容重试。刷新将丢弃当前
-          未保存的编辑。
-        </DialogContent>
-        <DialogActions>
-          <Button variant="text" onClick={() => setConflictOpen(false)}>
-            继续编辑
-          </Button>
-          <Button variant="contained" onClick={handleConflictRefresh}>
-            刷新注册表
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onContinue={() => setConflictOpen(false)}
+        onRefresh={handleConflictRefresh}
+      />
       {error && (
         <p className={styles.error} role="alert">
           {error}

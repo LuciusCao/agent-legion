@@ -14,8 +14,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `revision`（canonical JSON 的 sha256 前缀，探测/可用性结果不参与），
   PUT 载荷带上该版本后服务端在 `SELECT ... FOR UPDATE` 同一事务内比对
   ——不匹配返回 409 并附当前注册表，前端弹确认对话框「注册表已被其他
-  修改更新，请刷新后重试」提供刷新动作（不自动重试）；省略 `revision`
-  的 legacy 客户端（smoke 脚本等）保持原整份替换语义不变。
+  修改更新，请刷新后重试」；「刷新注册表」直接采用 409 携带的最新文档
+  前进编辑器（rows/baseline/revision 一次性更新——invalidate 重取的
+  数据不会被已挂载的编辑器消费，会陷入二次 409 死循环，审核 P1），
+  不自动重试；PUT 200 响应改用 RMW 事务内合并后的文档构建（revision
+  描述的正是刚提交的这次写入，事务外读取可能把并发写入者的结果冒充
+  本次保存返回，审核 P2）；smoke 脚本的 PUT 也携带 GET 到的 revision
+  （审核 P3），省略 `revision` 的调用保持原整份替换语义不变。
 
 ### Changed
 - 原生形态 velites 二进制收敛为 PATH 单一副本（issue #507）：解析顺序从

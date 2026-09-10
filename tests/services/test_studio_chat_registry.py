@@ -167,13 +167,14 @@ def test_conditional_put_rejects_stale_revision_without_touching_storage() -> No
 
 
 def test_conditional_put_accepts_current_revision_and_empty_revision() -> None:
-    """#355：当前版本匹配正常写入并返回合并基线；空版本跳过检查（legacy
-    客户端的整份替换语义不变）。"""
+    """#355：当前版本匹配正常写入并返回**合并后的最终文档**（审核 P2：
+    返回值即本次落库结果，调用方据此构建响应——revision 描述的就是刚
+    提交的这次写入）；空版本跳过检查（一次性客户端的整份替换语义不变）。"""
     store = _store({"api_base": "http://127.0.0.1:8000", "agents": []})
     current_revision = registry_revision(store.get())
     payload = {"api_base": "http://127.0.0.1:9000", "agents": []}
-    stored = store.conditional_put(current_revision, merge_manual_edit, payload)
-    assert stored == {"api_base": "http://127.0.0.1:8000", "agents": []}
+    merged = store.conditional_put(current_revision, merge_manual_edit, payload)
+    assert merged == {"api_base": "http://127.0.0.1:9000", "agents": []}
     assert store.get()["api_base"] == "http://127.0.0.1:9000"
     # 空 revision：不比对，直接写入。
     store.conditional_put(
