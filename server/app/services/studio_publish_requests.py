@@ -168,7 +168,9 @@ class StudioPublishRequestService:
             refuse_stale_draft_claim(self._job_db, workspace_id, request_id, draft_yaml)
             raise NotFoundError("Publish request not found or already resolved")
         # #464：执行期心跳续租（契约见 confirming_claim_heartbeat）——
-        # 包住门禁+探测+publish 全程，慢发布不被 300s 谓词误回收。
+        # 包住门禁+探测+publish+resolve 全程（codex P2：publish 返回后
+        # 的 active_after 探测与 resolve 同样吃 DB 锁/慢存储，窗口不续
+        # 到 resolve 会重现「发布成功但响应 expired」）。
         with confirming_claim_heartbeat(self._job_db, request_id):
             try:
                 # The key-match guard is a publish gate (422): replay it here so
@@ -207,34 +209,34 @@ class StudioPublishRequestService:
                         workspace_id,
                     )
                 raise
-        if not valid:
-            # Publish refused (draft drifted after the agent's request): the
-            # request returns to pending — the human can fix the draft and
-            # confirm again, or cancel. Never resolve on a failed publish.
-            self._job_db.resolve_publish_request(request_id, status="pending")
-            raise ConflictError("Publish validation failed: " + "; ".join(errors[:5]))
-        active_after = active_revision_id(self._job_db, workspace_id)
-        produced_revision = active_after is not None and active_after != active_before
-        # Known limitation (#429 二轮复审，不修，注释记录): the before/after
-        # double probe can misattribute a revision that a concurrent manual
-        # publish created between the two probes — this request would record
-        # that foreign revision as its own result_revision_id. The window is
-        # the publish call's duration and requires a concurrent human publish
-        # of the same workspace; the effect is a mislabeled receipt, not data
-        # corruption. Fixing it needs a publish call that returns the revision
-        # it created, which is the deferred follow-up.
-        resolved = self._job_db.resolve_publish_request(
-            request_id,
-            status="confirmed",
-            # result_revision_id is non-null only when the publish created a
-            # NEW revision; a runtime-only in-place save updates the existing
-            # revision's config without a new version (#429), and the field
-            # must say so instead of echoing the unchanged revision id.
-            result_revision_id=active_after if produced_revision else None,
-        )
-        if resolved is None:
-            resolved = self._resolve_lost_race(request_id)
-        return iso_payload(resolved)
+            if not valid:
+                # Publish refused (draft drifted after the agent's request): the
+                # request returns to pending — the human can fix the draft and
+                # confirm again, or cancel. Never resolve on a failed publish.
+                self._job_db.resolve_publish_request(request_id, status="pending")
+                raise ConflictError("Publish validation failed: " + "; ".join(errors[:5]))
+            active_after = active_revision_id(self._job_db, workspace_id)
+            produced_revision = active_after is not None and active_after != active_before
+            # Known limitation (#429 二轮复审，不修，注释记录): the before/after
+            # double probe can misattribute a revision that a concurrent manual
+            # publish created between the two probes — this request would record
+            # that foreign revision as its own result_revision_id. The window is
+            # the publish call's duration and requires a concurrent human publish
+            # of the same workspace; the effect is a mislabeled receipt, not data
+            # corruption. Fixing it needs a publish call that returns the revision
+            # it created, which is the deferred follow-up.
+            resolved = self._job_db.resolve_publish_request(
+                request_id,
+                status="confirmed",
+                # result_revision_id is non-null only when the publish created a
+                # NEW revision; a runtime-only in-place save updates the existing
+                # revision's config without a new version (#429), and the field
+                # must say so instead of echoing the unchanged revision id.
+                result_revision_id=active_after if produced_revision else None,
+            )
+            if resolved is None:
+                resolved = self._resolve_lost_race(request_id)
+            return iso_payload(resolved)
 
     def cancel(self, workspace_id: str, request_id: str) -> dict[str, Any]:
         """Human cancel: the request lands ``rejected``; the agent keeps its
