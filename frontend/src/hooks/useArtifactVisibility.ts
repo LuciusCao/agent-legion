@@ -24,7 +24,9 @@ export function useArtifactVisibility(
   workspaceId: string | undefined,
   structuredHidden: readonly string[]
 ): ArtifactVisibility {
-  /** 会话内手动恢复展示的消费产物（折叠状态重置时回归默认，不持久化）。 */
+  /** 手动恢复展示的消费产物（挂载内会话态：折叠/展开不重置、切换任务
+   * 经面板 key 重挂载即回归默认；不持久化——去重是展示层默认而非用户
+   * 偏好）。 */
   const [reenabled, setReenabled] = useState<ReadonlySet<string>>(
     () => new Set()
   )
@@ -36,7 +38,11 @@ export function useArtifactVisibility(
   for (const name of reenabled) dedupHidden.delete(name)
   const hiddenNames = new Set([...previewHidden, ...dedupHidden])
   const visible = artifacts.filter((name) => !hiddenNames.has(name))
-  const dedupedCount = artifacts.filter((name) => dedupHidden.has(name)).length
+  // 审核 P3：摘要计数只数「因去重而隐藏」的——同时被用户配置隐藏的不
+  // 算「已在上方展示」（那是用户自己的选择，不是结构化面板消费）。
+  const dedupedCount = artifacts.filter(
+    (name) => dedupHidden.has(name) && !previewHidden.includes(name)
+  ).length
 
   const toggleVisibility = useCallback(
     (name: string, nextVisible: boolean) => {
