@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import itertools
 import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from server.app.agent_broker import reaper, release, sweepers
+from server.app.agent_broker import mark_done_batch, reaper, release, sweepers
 from server.app.agent_broker.claim import AgentClaim, ClaimRacedError
 from server.app.agent_broker.claim_retry import claim_with_retry
 from server.app.agent_broker.empty import EmptyClaimTrigger
@@ -33,6 +34,8 @@ from server.app.events.aggregator import record_job_update
 if TYPE_CHECKING:
     from server.app.events.agents import AgentStatusManager
     from server.app.jobs import JobQueries
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,9 @@ class AgentExecutionBroker:
         # 实例旋钮 executor_runtime.agent_claim.worker_touch_interval_seconds，
         # 0 = 每次写（0.7.5 行为）。heartbeat 通道不节流。
         touch_worker_interval_seconds: float = DEFAULT_TOUCH_INTERVAL_SECONDS,
+        # #591 group-commit 队列（ResultCommitBatcher | None）：None = 直连
+        # 串行 mark_done（batching 关闭/测试/代码面调用者）。
+        result_batcher: Any | None = None,
     ) -> None:
         # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187);
         # submodules reach it through the public ``database_dsn`` attribute.
@@ -96,6 +102,7 @@ class AgentExecutionBroker:
         self.job_db = job_db
         self.job_event_buffer = job_event_buffer
         self.touch_worker_interval_seconds = touch_worker_interval_seconds
+        self.result_batcher = result_batcher
         # Rotating cursor for bounded cross-workspace fairness (EXEC-FAIRNESS
         # style): each claim pass starts candidate evaluation at the next
         # workspace instead of always at the globally oldest request.
@@ -264,6 +271,25 @@ class AgentExecutionBroker:
     ) -> str | None:
         """Close the request; bound to the current lease_id so a late result
         from a previous attempt is rejected after a requeue/re-claim."""
+        # #591 group-commit：batcher 在位时终态写停靠写线程队列、与完成波
+        # 其余成员合批；None（关闭/测试）保持直连路径。
+        if self.result_batcher is not None:
+            # direct = the post-stop fallback (#591 C6): a racing producer
+            # must not park on the drained queue.
+            direct = lambda: self._mark_done_direct(  # noqa: E731
+                execution_id, worker_id, lease_id, outcome
+            )
+            return cast(
+                "str | None",
+                self.result_batcher.submit(
+                    "mark_done", (execution_id, worker_id, lease_id, outcome), direct=direct
+                ),
+            )
+        return self._mark_done_direct(execution_id, worker_id, lease_id, outcome)
+
+    def _mark_done_direct(
+        self, execution_id: str, worker_id: str, lease_id: str, outcome: Mapping[str, Any]
+    ) -> str | None:
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
                 "select lease_id, agent_id, workspace_id from agent_execution_requests"
@@ -284,6 +310,13 @@ class AgentExecutionBroker:
             touch_worker(conn, worker_id, min_interval_seconds=self.touch_worker_interval_seconds)
         self._notify_worker_released(worker_id, str(row["workspace_id"]))
         return str(row["lease_id"])
+
+    def mark_done_many(
+        self, writes: list[tuple[str, str, str, Mapping[str, Any]]]
+    ) -> list[str | None]:
+        """#591 group-commit arm; the transaction body lives in
+        ``mark_done_batch`` (sister module, #401 ceiling discipline)."""
+        return mark_done_batch.mark_done_many(self, writes)
 
     def sweep_expired_claims(self) -> list[str]:
         """Requeue Worker-lost claims without leaving the workflow node running."""

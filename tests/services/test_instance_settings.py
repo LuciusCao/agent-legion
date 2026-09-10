@@ -62,6 +62,8 @@ def test_apply_overrides_executor_runtime_and_writes_back_config(settings, job_d
     assert runtime.result_unpack.workers == 0
     assert runtime.result_validate.workers == 0
     assert runtime.agent_claim.worker_touch_interval_seconds == 30
+    # #591 group-commit kill-switch: same legacy-document default.
+    assert runtime.agent_workers.result_commit_batching is True
     # cleanup/monitoring are written back into the config dict, merged over
     # defaults (run_dir_retention_days was not in the stored document).
     assert settings.config["cleanup"] == {
@@ -94,15 +96,16 @@ def test_apply_hydrates_result_commit_gate(settings, job_db, store) -> None:
 
 
 def test_apply_hydrates_capacity_knobs(settings, job_db, store) -> None:
-    """#509/#554/#569/#561: agent_enqueue / result_unpack / result_validate /
-    agent_claim ride the nested-block hydration like the workflows /
-    agent_workers precedents."""
+    """#509/#554/#569/#561/#591: agent_enqueue / result_unpack /
+    result_validate / agent_claim / agent_workers.result_commit_batching
+    ride the nested-block hydration like the workflows precedents."""
     store.put(
         {
             "agent_enqueue": {"workers": 64, "max_pending": 2048},
             "result_unpack": {"workers": 8},
             "result_validate": {"workers": 6},
             "agent_claim": {"worker_touch_interval_seconds": 7.5},
+            "agent_workers": {"result_commit_batching": False},
         }
     )
 
@@ -113,6 +116,7 @@ def test_apply_hydrates_capacity_knobs(settings, job_db, store) -> None:
     assert settings.executor_runtime.result_unpack.workers == 8
     assert settings.executor_runtime.result_validate.workers == 6
     assert settings.executor_runtime.agent_claim.worker_touch_interval_seconds == 7.5
+    assert settings.executor_runtime.agent_workers.result_commit_batching is False
 
 
 def test_apply_strips_retired_openclaw_block(settings, job_db, store) -> None:

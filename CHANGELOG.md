@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Performance
+- result 终态事务批量化（issue #591，#569 修复方向第三条的接续）：
+  #569 下沉 validate/unpack 段后，完成波慢 WARNING 的大头轮换为
+  lease_write（四表终态写事务）与 mark_done（单行 UPDATE）——两者都
+  是纯排队：同一波的 N 个事务抢同一个 jobs 行锁（sync_job_status）
+  且各付一次 commit fsync，而 PostgreSQL 本身空闲。落地 group-commit
+  队列
+  （`server/app/agent_broker/result_commit_batcher.py`）：一条 drain-only
+  写线程，完成波的终态写按类分批——finish 批在一个事务里跑 N 个
+  `finish_lease`（`server/app/executors/_lease_finish_batch.py`，jobs 行
+  锁与 fsync 每轮各一次），mark_done 批在一个事务里关 N 个请求
+  （`server/app/agent_broker/mark_done_batch.py`），per-item 判定经
+  future 原样回到各提交线程。空闲节奏首个 item 立即处理（仅一次队列
+  跳数，无延迟引入）；每轮批上限 64 项防病态事务。语义保持：两段
+  事务先 finish 后 mark_done 的顺序不变（崩溃窗口与 sweeper 兜底同
+  直连路径），per-item 409 判定不变（非 active lease / 已关请求返回
+  False/None 而非异常），events 后处理与 job 广播逐项独立容错、按
+  job 去重。批量事务意外失败时整片回滚后逐项单条重放（确定性失败
+  只击中自己的 item，邻居拿回真实判定）。实例旋钮
+  `executor_runtime.agent_workers.result_commit_batching`（默认开，重启生效，
+  管理面板可关；start_worker=False 的 app 不构造 batcher，始终直连）= kill-switch：关闭时 finish/mark_done 走 0.7.9 直连路径。
+  二轮评审修正：批量臂补齐直连路径的 completed/failed 门（cancelled
+  结果不再解析半截 events.jsonl / 落 token-usage 行 / 压缩留档文件）；
+  #521 的 lease_write/events 阶段计时在批量路径不再丢失（回调首句关
+  lease_write——诚实覆盖排队等待 + 共批，events 仅 completed/failed，
+  cancelled/409 不报 events 段）；批臂返回长度不齐时 fail-fast 落入
+  现有整片失败收容（strict zip），不再让尾部 future 悬挂。
+
 ## [0.7.8] - 2026-09-10
 
 ### Performance

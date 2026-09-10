@@ -41,6 +41,7 @@ def _payload() -> dict:
             "max_archive_bytes": 64 * 1024 * 1024,
             "min_protocol_version": 1,
             "max_concurrent_result_commits": 16,
+            "result_commit_batching": True,
         },
         "agent_enqueue": {"workers": 48, "max_pending": 1024},
         "result_unpack": {"workers": 0},

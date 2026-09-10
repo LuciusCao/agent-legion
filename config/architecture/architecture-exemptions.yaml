@@ -1,5 +1,79 @@
 exemptions:
 - check: architecture.file_budget
+  path: server/app/agent_broker/result_commit_batcher.py
+  reason: >-
+    Issue #591's group-commit queue: the codex review round added the
+    closed-gate direct fallback (C6 — a racing post-stop producer runs the
+    serial write instead of parking on the drained queue) and the
+    per-item post-commit callback plumbing (C5 — events file work returns
+    to the submitting thread), growing the module past its first-commit
+    baseline. The queue, the futures, and the fallbacks are one concurrency
+    narrative; splitting them across modules would fork the liveness
+    contract from the thread that enforces it. Ceiling at actual + 10 per
+    the dated-exemption convention. Remove when the group-commit queue
+    retires or the writer lifecycle gets its own module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
+  ceiling: 248
+- check: architecture.file_budget
+  path: server/app/executors/_lease_finish_batch.py
+  reason: >-
+    Issue #591's batched finish arm: the codex review round added the
+    deterministic job_id write ordering (C4 — the counter-lock sequence
+    shared with try_claim_many) and the post-commit callback assembly
+    (C5 — per-item events work returned to the submitting thread with
+    per-job broadcast dedup), growing the module past its first-commit
+    baseline. The sort discipline and the callback assembly must sit
+    beside the transaction they shape; the repo's finish() batched entry
+    (with its post-stop direct fallback) lives here too so the repository
+    stays at its frozen ceiling. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when the batched arm retires with
+    the group-commit queue.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
+  ceiling: 133
+- check: architecture.file_budget
+  path: server/app/services/instance_settings.py
+  reason: >-
+    Issue #591 adds the agent_workers.result_commit_batching key to the
+    nested-block table (one line inside the agent_workers tuple — the
+    multi-line wrapping the formatter forces costs the file its headroom).
+    The table IS the single source both the default document and the
+    apply merge iterate; splitting one block's keys out would fork it.
+    Ceiling at actual + 5 per the dated-exemption convention. Remove when
+    the instance-settings intake gets its planned restructure.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
+  ceiling: 100
+- check: architecture.file_budget
+  path: server/app/agent_broker/broker.py
+  reason: >-
+    Issue #591 threads the optional result_batcher seam through mark_done
+    (submit branch + the _mark_done_direct rename) plus the constructor
+    parameter — the batched arm itself lives in sister module
+    mark_done_batch.py, but the submit hop must sit on the method every
+    caller already reaches (the batcher and the direct path share one entry
+    point). Ceiling at actual + 10 per the dated-exemption convention
+    (#521 leases.py precedent). Remove when the broker gets its planned
+    structural split or the group-commit queue retires.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
+  ceiling: 268
+- check: architecture.file_budget
+  path: server/app/bootstrap/agent_plane.py
+  reason: >-
+    Issue #591 constructs the ResultCommitBatcher before the broker and the
+    lease repository (both receive it) and exposes it on the AgentPlane
+    dataclass for the lifespan start/stop — the plane is the composition
+    root the wiring must read at. The codex review round (C1) added the
+    result_batching gate parameter so a start_worker=False app builds no
+    batcher at all. Ceiling at actual + 5 per the dated-exemption
+    convention. Remove when the plane assembly gets its planned
+    restructure.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
+  ceiling: 101
+- check: architecture.file_budget
   path: server/app/skills/commit_cache.py
   reason: >-
     PR #571 codex P1s restored the per-validation private copy on top of the

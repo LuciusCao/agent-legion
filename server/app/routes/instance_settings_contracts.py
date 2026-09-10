@@ -44,6 +44,9 @@ class InstanceAgentWorkersSettings(BaseModel):
     # #521 peak-shaving gate on the result commit; restart-effective. 0 =
     # disabled (the kill-switch), ge=0 mirrors ExecutorRuntimeConfig.
     max_concurrent_result_commits: int = Field(ge=0)
+    # #591 group-commit batching kill-switch (False = direct serial path,
+    # 0.7.9 behavior); restart-effective.
+    result_commit_batching: bool
 
 
 class InstanceAgentEnqueueSettings(BaseModel):

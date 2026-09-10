@@ -47,6 +47,13 @@ export const CAPACITY_FIELD_GROUPS: FieldGroup[] = [
         hint: 'claim 领取与 result 提交时刷新 Worker『最近在线』时间的最小间隔；窗口内跳过写入，消除小集群下 worker 热行的锁竞争。心跳（每 10 秒）不受此限制，在线状态判定不受影响。0 = 每次都写（恢复 0.7.5 行为）。重启生效。',
       },
     ],
-    toggles: [],
+    // #591：result 终态事务批量化开关（kill-switch）。关闭后每个完成写
+    // 走直连串行路径（0.7.9 行为）。重启生效。
+    toggles: [
+      {
+        path: 'agent_workers.result_commit_batching',
+        label: 'result 终态事务批量化',
+      },
+    ],
   },
 ]

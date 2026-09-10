@@ -38,6 +38,8 @@ export function toFormValues(doc: InstanceSettingsResponse): FormValues {
     'agent_workers.max_concurrent_result_commits': String(
       doc.agent_workers.max_concurrent_result_commits
     ),
+    'agent_workers.result_commit_batching':
+      doc.agent_workers.result_commit_batching,
     'agent_enqueue.workers': String(doc.agent_enqueue.workers),
     'agent_enqueue.max_pending': String(doc.agent_enqueue.max_pending),
     'result_unpack.workers': String(doc.result_unpack.workers),
@@ -105,6 +107,9 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
       max_items_per_run: parseNumber(values, 'workflows.max_items_per_run'),
     },
     agent_workers: {
+      result_commit_batching: Boolean(
+        values['agent_workers.result_commit_batching']
+      ),
       max_archive_bytes: parseNumber(values, 'agent_workers.max_archive_bytes'),
       min_protocol_version: parseNumber(
         values,

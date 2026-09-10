@@ -13,7 +13,7 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
 from server.app.events.aggregator import record_job_update
-from server.app.executors import _lease_write_paths
+from server.app.executors import _lease_finish_batch, _lease_write_paths
 from server.app.executors._lease_approval import park_awaiting_approval_repo
 from server.app.executors._lease_config_failure import fail_without_lease
 from server.app.executors._lease_control import active_lease_counts
@@ -39,6 +39,7 @@ class ExecutorLeaseRepository:
         *,
         data_dir: Path,
         job_event_buffer: Any | None = None,
+        result_batcher: Any | None = None,
     ):
         # #187: the repository is constructed from the JobQueries facade (a
         # bare DSN string stays accepted so tests and the transition period
@@ -56,6 +57,9 @@ class ExecutorLeaseRepository:
         self.job_event_manager = job_event_manager
         self.data_dir = data_dir
         self.job_event_buffer = job_event_buffer
+        # #591 group-commit queue (ResultCommitBatcher | None): None keeps
+        # the direct serial path every pre-#591 caller and test relies on.
+        self.result_batcher = result_batcher
         init_db(self.path)
 
     def _broadcast_job_update(self, job_id: str) -> None:
@@ -98,15 +102,15 @@ class ExecutorLeaseRepository:
         )
 
     def finish(
-        self,
-        lease_id: str,
-        result: ExecutionResult,
-        *,
-        stage_timer: Any | None = None,
+        self, lease_id: str, result: ExecutionResult, *, stage_timer: Any | None = None
     ) -> bool:
-        return retry_on_database_conflict(
-            lambda: _lease_write_paths.finish(self, lease_id, result, stage_timer=stage_timer)
+        # #591: the batcher parks the write on the writer thread (None keeps
+        # the direct serial path); the batched entry + post-stop fallback
+        # live in _lease_finish_batch (file-budget split).
+        outcome: bool = _lease_finish_batch.finish_via_batcher(
+            self, self.result_batcher, lease_id, result, stage_timer
         )
+        return outcome
 
     def fail_without_lease(
         self, request: ConfigurationFailureRequest, error_message: str
