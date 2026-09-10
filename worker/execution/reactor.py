@@ -1,42 +1,27 @@
 """Reactor-based stdout pump for agent executions (#578 phase 1).
 
-The legacy model is thread-per-execution: every velites child owns one Python
-pump thread reading its stdout pipe (``worker.event_filter``). At fleet scale
-(hundreds of concurrent agents) the sheer thread count — kernel wakeups, GIL
-contention, context switches — taxes the executor far more than the agents
-themselves (issue #578: executor 352% CPU supervising a fleet using 111%);
-#566's heartbeat starvation was a direct casualty of that model.
+Legacy: thread-per-execution — at fleet scale the pump-thread count (kernel
+wakeups, GIL contention, context switches) taxes the executor more than the
+agents themselves (#578: 352% CPU supervising a fleet using 111%; #566's
+heartbeat starvation was a casualty). This module replaces N pump threads
+with one selector thread (batched ready-fds per wakeup; the blocking select
+releases the GIL) plus a core-count parse pool taking JSON parse + delta
+filter + file writes off the reactor thread.
 
-This module replaces N pump threads with:
+Scope: the reactor only owns the byte→line→event segment — spawn,
+lease/heartbeat, timeout policing, and the #564 ownership semantics stay in
+``run.py`` / ``process_lifecycle``. Per-stream ordering is preserved via the
+pending queue + single-writer token (lines are written whitespace-normalized
+with one trailing ``\\n`` — semantically identical to the legacy raw writes).
 
-1. **one reactor thread** multiplexing every registered pipe via
-   ``selectors`` — the kernel returns a batch of ready fds per wakeup, and
-   the (blocking) ``select()`` call releases the GIL, so the reactor is not
-   fighting the executor for it;
-2. **a small parse pool** (core-count-scale, not fleet-scale) taking the
-   JSON parse + delta filtering + file writes off the reactor thread, so
-   reads and writes overlap across streams (the parse itself stays GIL-bound).
-
-The reactor only owns the byte→line→event segment: spawn, lease/heartbeat,
-timeout policing, and the #564 ownership semantics stay where they are
-(``worker.execution.run`` / ``process_lifecycle``). Per-stream ordering is
-preserved: each stream's lines are appended to its pending queue under the
-stream lock and written by pool tasks in queue order (line content is
-whitespace-normalized — filtered lines are written stripped with a single
-trailing ``\\n``; consumers parse per line, so this is semantically identical
-to the legacy pump's raw writes).
-
-Backpressure is explicit and by design: when an events file cannot keep up,
-the per-stream backlog bound pauses the fd and the child's 64KB pipe fills
-and blocks the *child* — the agent slows down instead of events being
-dropped. Do not "fix" that (#578 design point 3).
+Backpressure is by design (#578 point 3): when an events file cannot keep
+up, the backlog bound pauses the fd, the child's 64KB pipe fills, and the
+*child* blocks — events slow down instead of being dropped. Do not "fix".
 
 Fail-closed scope: a reactor-internal error unregisters every stream and
-disables the reactor — *subsequent* spawns fall back to the legacy
-per-thread pump. Streams already registered at failure time lose their event
-pump: their children keep writing until the pipe fills and block there until
-the execution timeout/lease path reaps them (their in-memory events are
-unrecoverable; the timeline keeps whatever was already on disk).
+disables the reactor — subsequent spawns fall back to the legacy per-thread
+pump; streams registered at failure time lose the event pump (children block
+on the full pipe until the execution timeout path reaps them).
 """
 
 from __future__ import annotations
@@ -88,16 +73,13 @@ def _filter_line(raw: bytes) -> bool:
 
 
 class _Stream:
-    """One registered child stdout: fd bookkeeping, partial-line buffer,
-    and the bounded pending queue feeding the parse pool.
-
-    Pool protocol (all under ``lock``): ``inflight`` counts submitted pool
-    tasks, ``writer`` is the single-writer token (False→True flip claims it;
-    the holder drains the queue in a loop — per-stream line order is the
-    whole point), ``finishing`` marks the fd unregistered. ``done`` fires
-    exactly when finishing AND pending is empty AND inflight is 0 — the
-    leaving task checks that conjunction, which makes ``join`` race-free
-    against a task holding the last batch mid-write."""
+    """One registered child stdout: fd bookkeeping, partial-line buffer, the
+    bounded pending queue, and the pool protocol under ``lock`` — ``inflight``
+    counts submitted tasks, ``writer`` is the single-writer token (the holder
+    drains the queue in a loop: per-stream line order), ``finishing`` marks
+    the fd unregistered, ``dropped`` fences late writers. ``done`` fires when
+    finishing AND pending empty AND inflight 0 — checked by the leaving task,
+    making ``join`` race-free against a mid-write batch."""
 
     __slots__ = (
         "fd",
@@ -152,17 +134,9 @@ def _stream_dropped(stream: _Stream) -> bool:
 
 
 class EventPumpReactor:
-    """Process-wide singleton multiplexing agent stdout pipes (#578).
-
-    ``get()`` lazily starts the reactor thread + parse pool; ``register``
-    hooks one spawned child's stdout into it and returns a handle whose
-    ``join()`` mirrors the legacy pump thread's semantics (waits for the
-    stream's buffered lines to be written out). Fail-closed scope: a reactor-
-    internal error unregisters every stream and disables the reactor for the
-    process lifetime — later spawns fall back to the legacy per-thread pump;
-    streams registered at failure time lose the event pump (see module
-    docstring).
-    """
+    """Process-wide singleton: ``get()`` lazily starts the reactor thread +
+    parse pool; ``register`` returns a handle whose ``join()`` mirrors the
+    legacy pump thread's semantics. Fail-closed scope: see module docstring."""
 
     _singleton: EventPumpReactor | None = None
     _singleton_lock = threading.Lock()
@@ -276,11 +250,10 @@ class EventPumpReactor:
                         continue
                     self._read_ready(key.data)
         except Exception as exc:
-            # #204 broad-except audit: reactor 存活语义——这是监督模型的心脏，
-            # 任何逃逸（selector/os 的 OSError、编程错误）都不允许带崩
-            # executor 进程。吞是对的：fail-closed 降级——注销全部流（各执行
-            # 由调用方回落 legacy thread pump 跑完），_failed 让本进程后续
-            # spawn 不再走 reactor。日志保全：print 异常与降级后果。
+            # #204 broad-except audit: reactor 存活语义——任何逃逸都不允许
+            # 带崩 executor 进程。吞是对的：fail-closed 降级（注销全部流 +
+            # 后续 spawn 回落 legacy pump，在途流语义见模块 docstring）。
+            # 日志保全：print 异常与降级后果。
             print(
                 f"event-pump reactor failed, falling back to thread pumps: {exc!r}",
                 flush=True,
@@ -354,23 +327,13 @@ class EventPumpReactor:
         self._wake()
 
     def _parse_one(self, stream: _Stream) -> None:
-        """Pool task: drain the stream's pending queue, in order, exclusively.
-
-        Ordering contract: the ``writer`` flag is the per-stream write token —
-        only the task that flips it False→True writes; every other task
-        returns immediately and relies on the token holder to loop until the
-        queue is empty (single-writer per stream ⇒ appends hit the file in
-        queue order). The token is released in ``finally`` so a holder's
-        crash cannot wedge the stream forever. A ``dropped`` stream (join
-        timed out) is abandoned before the next open(): a late writer must
-        not append old-attempt lines into a path a re-claimed execution may
-        have already truncated (#564 adjacency)."""
+        """Pool task: drain the stream's pending queue, in order, exclusively
+        (the ``writer`` token's holder loops until empty — see _Stream). A
+        ``dropped`` stream is abandoned before the next open(): a late writer
+        must not append old-attempt lines into a path a re-claimed execution
+        may have truncated (#564 adjacency)."""
         with stream.lock:
             if stream.dropped or stream.writer:
-                # Dropped: abandoned (join timed out / reactor failed) — a
-                # late writer must not append into a path a re-claimed
-                # execution may have already truncated. Writer token held:
-                # that task drains whatever we enqueued before returning.
                 stream.inflight -= 1
                 return
             stream.writer = True
@@ -406,12 +369,9 @@ class EventPumpReactor:
             self._retire_if_idle(stream)
 
     def _retire_if_idle(self, stream: _Stream) -> None:
-        """Completion check from the leaving task: finishing + empty queue +
-        no other task in flight ⇒ every line is on disk, fire ``done``.
-
-        The writer-token holder re-checks the queue after releasing the
-        token: a task that skipped (token busy) may have enqueued the final
-        lines and returned, leaving the holder responsible for them."""
+        """Leaving-task completion check: finishing + empty queue + no task in
+        flight ⇒ fire ``done``; final lines enqueued after the last skip get
+        one more drain pass."""
         with stream.lock:
             stream.inflight -= 1
             finished = stream.finishing and not stream.pending and stream.inflight == 0
@@ -419,16 +379,12 @@ class EventPumpReactor:
         if finished:
             stream.done.set()
         elif requeued:
-            # Final lines arrived after the last task skipped; run one more
-            # drain pass for them.
             self._submit_parse(stream)
 
     def _drop(self, stream: _Stream) -> None:
         """Force-drop a wedged stream (join timed out): no final drain — the
-        pool is the wedge point, queueing more work would only pile up.
-        ``dropped`` fences in-flight writers from appending into the path
-        after the caller has moved on (a re-claimed execution may have
-        truncated the file by then)."""
+        pool is the wedge point. ``dropped`` fences late writers (a re-claimed
+        execution may have truncated the path by then)."""
         with self._streams_lock:
             self._streams.pop(stream.fd, None)
         with contextlib.suppress(KeyError, ValueError):
