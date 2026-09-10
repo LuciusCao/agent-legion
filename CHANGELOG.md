@@ -46,6 +46,20 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   描述的正是刚提交的这次写入，事务外读取可能把并发写入者的结果冒充
   本次保存返回，审核 P2）；smoke 脚本的 PUT 也携带 GET 到的 revision
   （审核 P3），省略 `revision` 的调用保持原整份替换语义不变。
+- Studio 节点类型切换前置校验两处缺陷（issue #405，codex on #403）：
+  其一，approval → code/agent 切换在结构化 UI 中是死路——`sanitizeNodeForType`
+  切入 approval 时剥除 `capability`、结构化编辑器对该类型又隐藏能力 Key
+  输入（loader 禁令），而 `validateNodeTypeSwitch` 切出时要求非空
+  capability，三方合力构成「必填项被隐藏」的死循环；现切换弹窗随本次
+  提交原子补齐 capability（`patchWorkflowNodeType` 新增 capability 通道
+  参数，type 与 capability 一次写入、取消即保持原类型，无中间非法态），
+  已有 capability 或空白串语义不变（后者仍被前置校验拦截）。其二，
+  →approval 的入边判定收集了全草稿的 `edge.to`（下游端）而非进入当前
+  节点的边——任何位置存在一条非 start 边即可通过，没有可执行入边的
+  节点也能切成 approval、发布时才被 `validate_approval_edges` 拒绝；现
+  判定修正为「节点 `after` ∪ `edge.to === 当前节点` 的边的 `edge.from`，
+  排除 start 上游」，与 loader 侧物化 edges 同构，非法状态在切换时即被
+  拦下。发布门禁纵深防御不变（后端仍兜底拒绝非法状态）。
 
 ### Changed
 - 检查器「配置 Schema」区块按节点类型分数据源（issue #406）：agent 节点
