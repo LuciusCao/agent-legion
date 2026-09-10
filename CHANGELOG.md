@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Changed
+- 检查器「配置 Schema」区块按节点类型分数据源（issue #406）：agent 节点
+  不再隐藏该区块，改为只读展示 Agent 定义里实际生效的 config_schema
+  （dispatch 只解析 published 版本，故详情取 published 优先、draft-only
+  Agent 回落 latest 草稿并提示「发布后生效」），并指引编辑入口在上方
+  「Agent 配置」的内嵌 Agent 编辑器；code 节点维持节点 YAML schema 的
+  可编辑区块不变。此前 agent 节点下挂着的是节点 YAML 里那份不生效的
+  schema（或整段缺失），误导真正要改配置的用户。区块经绑定门控
+  （useCapabilityAgent + bindingStatus）取数，绑定/详情加载失败时降级
+  为提示文案；查询 key 挂在 agentDefinitions 列表 key 之下，保存/发布/
+  归档与聊天 turn_end 的失效自动刷新生效 schema。
 - 原生形态 velites 二进制收敛为 PATH 单一副本（issue #507）：解析顺序从
   「data/bin 自带副本优先、PATH 兜底」反转为「PATH 优先、data/bin 兜底」
   （`shared/code_sandbox.py::resolve_sandbox_binary` 与

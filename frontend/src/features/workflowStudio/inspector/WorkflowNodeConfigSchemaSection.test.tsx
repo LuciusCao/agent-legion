@@ -573,11 +573,16 @@ nodes:
     expect(screen.queryByLabelText('属性名 dry_run')).not.toBeInTheDocument()
   })
 
-  it('does not render a node-owned schema section for agent nodes (#406)', () => {
+  it('does not render the node-owned schema editor for agent nodes (#406)', () => {
+    // agent 节点的生效 schema 归 Agent 定义：节点 YAML 的编辑区不渲染，
+    // 只读展示由 WorkflowNodeAgentSchemaSection 承载（单测在毗邻文件）。
     renderSection({ node: { ...node, node_type: 'agent' } })
 
     expect(
       screen.queryByLabelText('配置 Schema generate')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByLabelText('属性名 bank_version')
     ).not.toBeInTheDocument()
   })
 })

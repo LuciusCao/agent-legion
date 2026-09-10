@@ -19,8 +19,9 @@ type Props = {
 // 属性列表完整可编辑——新增、改名、改 type/description/default、删除、
 // runtime_mutable 开关，全部经 configSchema patch 写回草稿 YAML，随发布
 // 进版本。YAML 源码编辑器仍是兜底（enum/minimum/maximum/secret 等低频
-// 键只在源码层编辑）。Agent 节点的 schema 归 Agent Definition 管理，
-// 不属于本区块（#406）。列表编排/行编辑器/新增入口拆在毗邻组件守预算。
+// 键只在源码层编辑）。Agent 节点的生效 schema 归 Agent Definition 管理，
+// 只读展示拆在 WorkflowNodeAgentSchemaSection（#406）。列表编排/行编辑
+// 器/新增入口拆在毗邻组件守预算。
 export function WorkflowNodeConfigSchemaSection({
   node,
   definitionYaml,

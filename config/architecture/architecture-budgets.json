@@ -383,6 +383,7 @@
     "frontend/src/features/workflowStudio/inspector/WorkflowNodeAgentEditor.tsx": 44,
     "frontend/src/features/workflowStudio/inspector/WorkflowNodeAgentEditorPanel.tsx": 38,
     "frontend/src/features/workflowStudio/inspector/WorkflowNodeAgentGate.tsx": 51,
+    "frontend/src/features/workflowStudio/inspector/WorkflowNodeAgentSchemaSection.tsx": 129,
     "frontend/src/features/workflowStudio/inspector/WorkflowNodeApprovalConfigSection.tsx": 78,
     "frontend/src/features/workflowStudio/inspector/WorkflowNodeConfigSchemaList.tsx": 79,
     "frontend/src/features/workflowStudio/inspector/WorkflowNodeConfigSchemaProperties.tsx": 60,
