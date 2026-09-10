@@ -377,7 +377,11 @@ describe('useStudioChat', () => {
     })
 
     await waitFor(() =>
-      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith('ws1', 's1', 0)
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        0
+      )
     )
     await waitFor(() =>
       expect(result.current.messages[0]?.content.text).toBe('head + full tail')
@@ -399,7 +403,11 @@ describe('useStudioChat', () => {
     act(() => source.onopen?.())
 
     await waitFor(() =>
-      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith('ws1', 's1', 0)
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        0
+      )
     )
     await waitFor(() =>
       expect(result.current.messages[0]?.content.text).toBe(
