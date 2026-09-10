@@ -60,18 +60,13 @@ export function FormattedJsonBody({
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-    // 词法级着色（无上下文文法，覆盖三种 token 已够可读性）：
-    // "key" 后跟冒号 → 键名；其余 "..." → 字符串；裸数字 → 数字。
-    return escaped.replace(
-      /("(?:[^"\\]|\\.)*")(\s*:)?|\b(-?\d+(?:\.\d+)?)\b/g,
-      (_match, str: string, colon: string | undefined, num: string) => {
-        if (str !== undefined)
-          return colon !== undefined
-            ? `<span class="${styles.jsonKey}">${str}</span>${colon}`
-            : `<span class="${styles.jsonString}">${str}</span>`
-        return `<span class="${styles.jsonNumber}">${num}</span>`
-      }
-    )
+    // 词法级着色（无上下文文法，覆盖三种 token 已够可读性）。审核 P1：
+    // 不得用单条全局正则——未闭合字符串（截断 JSON 的常态）会让字符串
+    // 分支从每个引号位重试 O(K·L)（实测 512KB 截断内容 10-120s 主线程
+    // 冻结）。改为单趟手写扫描：光标只前进，遇 " 找配对引号（找不到则
+    // 原样吞到下一个引号，避免回溯），配对后看是否键名（后跟冒号）；
+    // 其余位置识别裸数字。
+    return lexJsonish(escaped)
   }, [content])
   return (
     <div>
@@ -83,4 +78,60 @@ export function FormattedJsonBody({
       />
     </div>
   )
+}
+
+/**
+ * 单趟 JSONish 词法着色（审核 P1 的修复体）：光标只前进、零回溯。
+ *
+ * 输入是已 HTML 转义的文本（&amp;/&lt;/&gt;），引号与反斜杠不受转义
+ * 影响。逐位置判定：
+ * - `"`：向后找配对引号（跳过 `\"`）——找到则按「后跟冒号=键名/否则
+ *   字符串」着色整段；找不到（截断）则整段按字符串着色到文末——不再
+ *   从中间每个引号位重试（这正是旧正则 O(K·L) 冻结的根因）。
+ * - 数字开头（- 或数字）：吞 [-0-9.eE+] 段着色为数字（`&` 已转义，
+ *   不会误吞实体）。
+ * - 其他：原样输出一个字符。
+ */
+function lexJsonish(escaped: string): string {
+  let out = ''
+  let i = 0
+  const n = escaped.length
+  while (i < n) {
+    const ch = escaped[i]
+    if (ch === '"') {
+      let j = i + 1
+      while (j < n) {
+        if (escaped[j] === '\\') j += 2
+        else if (escaped[j] === '"') break
+        else j += 1
+      }
+      const closed = j < n
+      const end = closed ? j + 1 : n
+      const body = escaped.slice(i, end)
+      const rest = escaped.slice(end)
+      const colonMatch = /^\s*:/.exec(rest)
+      const cls = colonMatch ? styles.jsonKey : styles.jsonString
+      const colon = colonMatch ? colonMatch[0] : ''
+      out += `<span class="${cls}">${body}</span>${colon}`
+      i = end + colon.length
+      continue
+    }
+    if (
+      ch === '-'
+        ? escaped[i + 1] >= '0' && escaped[i + 1] <= '9'
+        : ch >= '0' && ch <= '9'
+    ) {
+      // 负号必须后跟数字（否则是普通连字符，如 not-json）；数字段
+      // 只吞 [0-9.]——科学计数/符号留给词法边界外（着色是可读性
+      // 下限，不是解析器）。
+      let j = i + 1
+      while (j < n && /[0-9.]/.test(escaped[j]!)) j += 1
+      out += `<span class="${styles.jsonNumber}">${escaped.slice(i, j)}</span>`
+      i = j
+      continue
+    }
+    out += ch
+    i += 1
+  }
+  return out
 }

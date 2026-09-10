@@ -693,8 +693,13 @@ describe('JobDetailPage', () => {
           return Promise.resolve({
             ok: true,
             json: async () => ({
+              // 审核 P3 集成钉：fixture 用 questions.json（复数，真实
+              // 产物名）——它在 QUESTION_CONSUMED_ARTIFACTS 里，断言才
+              // 真正经过 EntityPanel 的去重接线（旧 fixture question.json
+              // 单数不在名单内，断言被折叠态平凡满足）。
               ...mockDetail,
               job: { ...mockDetail.job, source_type: 'question' },
+              artifacts: ['questions.json'],
             }),
           })
         }
@@ -715,7 +720,9 @@ describe('JobDetailPage', () => {
     // questions.json 已被结构化面板消费，通用面板默认折叠 + 去重（原始
     // 卡片不占屏）。
     expect(screen.getByTestId('artifact-preview-panel')).toBeInTheDocument()
-    expect(screen.queryByText('question.json')).not.toBeInTheDocument()
+    // 去重接线钉：questions.json 被结构化面板消费 → 摘要明示「已在上方
+    // 展示」（若 EntityPanel 的 structuredHidden 接线被删，此断言失败）。
+    expect(screen.getByText(/另 1 个已在上方展示/)).toBeInTheDocument()
   })
 
   it('renders generic artifact preview for video jobs (issue #11)', async () => {
