@@ -1,8 +1,9 @@
 /**
  * 文本类产物预览渲染器：每个 PreviewKind 一个组件，props 统一为
- * { jobId, name, version }。经 TanStack Query 取 artifact 文本
+ * { jobId, name, detail }。经 TanStack Query 取 artifact 文本
  * （版本失效机制沿用 producer-node 状态，Range 有界读取见
- * api/jobArtifactText）；媒体类渲染器在 ./previewMediaRenderers。
+ * api/jobArtifactText）；媒体类渲染器在 ./previewMediaRenderers，
+ * 截断 chip / 纯文本 / JSON 兜底正文在 ./previewTextBodies。
  *
  * 安全约定（与后端 raw 端点白名单对齐）：
  * - html 走 RichText 的 sanitizeHtml 白名单（http(s)-only src）；
@@ -11,7 +12,6 @@
  */
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Chip } from '@mui/material'
 import { RichText } from '../RichText'
 import { JsonTree } from '../JsonTree'
 import { fetchJobArtifactText } from '../../api/jobArtifactText'
@@ -20,6 +20,11 @@ import { artifactVersion } from '../../lib/jobArtifactVersions'
 import { renderMarkdownHtml } from '../../lib/markdownHtml'
 import { tryParseJson } from '../../lib/parsers'
 import { toErrorMessage } from '../../lib/queryError'
+import {
+  FormattedJsonBody,
+  TextBody,
+  TruncationChip,
+} from './previewTextBodies'
 import type { JobDetail } from '../../types/jobTypes'
 import styles from './previewRenderers.module.css'
 
@@ -63,34 +68,6 @@ function useArtifactText(
   }
 }
 
-function TruncationChip({ total }: { total: number }) {
-  return (
-    <Chip
-      label={`已截断（${total.toLocaleString()} 字符）`}
-      size="small"
-      variant="outlined"
-      sx={{ mb: 1 }}
-    />
-  )
-}
-
-function TextBody({
-  content,
-  truncated,
-  total,
-}: {
-  content: string
-  truncated: boolean
-  total: number
-}) {
-  return (
-    <div>
-      {truncated && <TruncationChip total={total} />}
-      <pre className={styles.pre}>{content}</pre>
-    </div>
-  )
-}
-
 export function JsonPreview({ jobId, name, detail }: PreviewRendererProps) {
   const { content, truncated, total, loading, error } = useArtifactText(
     jobId,
@@ -99,14 +76,27 @@ export function JsonPreview({ jobId, name, detail }: PreviewRendererProps) {
   )
   if (loading) return <p className={styles.loading}>加载中...</p>
   if (error) return <p className={styles.error}>{error}</p>
-  // 超限 JSON 不进 JsonTree：浅层大数组的展开 DOM 同样无界。
+  // 超限 JSON 不进 JsonTree：浅层大数组的展开 DOM 同样无界（#255 起
+  // 兜底视图为格式化着色，不再是纯文本）。
   if (truncated) {
-    return <TextBody content={content} truncated={truncated} total={total} />
+    return (
+      <FormattedJsonBody
+        content={content}
+        truncated={truncated}
+        total={total}
+      />
+    )
   }
   const parsed = tryParseJson(content)
   if (parsed === null) {
-    // .json 但解析失败：按原文展示而不是空白。
-    return <TextBody content={content} truncated={truncated} total={total} />
+    // .json 但解析失败：按格式化原文展示而不是空白。
+    return (
+      <FormattedJsonBody
+        content={content}
+        truncated={truncated}
+        total={total}
+      />
+    )
   }
   return <JsonTree data={parsed} />
 }
