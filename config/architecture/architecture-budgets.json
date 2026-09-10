@@ -337,6 +337,7 @@
     "frontend/src/features/workflowStudio/chat/agentConfigView.ts": 150,
     "frontend/src/features/workflowStudio/chat/studioChatApi.ts": 113,
     "frontend/src/features/workflowStudio/chat/studioChatConfigApi.ts": 41,
+    "frontend/src/features/workflowStudio/chat/studioChatEvents.ts": 75,
     "frontend/src/features/workflowStudio/chat/studioChatInvalidation.ts": 24,
     "frontend/src/features/workflowStudio/chat/studioChatMessages.ts": 320,
     "frontend/src/features/workflowStudio/chat/studioChatRefill.ts": 22,
