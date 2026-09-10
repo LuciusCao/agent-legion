@@ -24,9 +24,14 @@ export function inspectorNodeDetails(
   },
   selectedNodeKey: string | null
 ): SelectedWorkflowNodeDetails | null {
+  // #606 codex P2：草稿优先——已发布 workflow 的节点被切型后，header/
+  // sections 必须反映草稿类型，否则受控选择器停在旧类型、用户无法再
+  // 选它撤销切换。调用侧的 workflow 在草稿模式本就是 draftWorkflow（解
+  // 析失败才回落 published）；这里再加一层草稿兜底，覆盖 workflow 直接
+  // 来自基线（revision 只读视图之外的历史调用面）与解析成功前的窗口。
   return (
-    selectedNodeDetails(source.workflow, selectedNodeKey) ??
     ghostDraftNodeDetails(source.definitionYaml, selectedNodeKey) ??
+    selectedNodeDetails(source.workflow, selectedNodeKey) ??
     compareGhostNodeDetails(source.compareSummary ?? null, selectedNodeKey)
   )
 }
