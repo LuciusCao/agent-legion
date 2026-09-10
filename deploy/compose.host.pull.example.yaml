@@ -1,0 +1,19 @@
+# 拉取式部署 override（host-image-release workflow 发布 GHCR 镜像后使用）：
+# 复制为 deploy/compose.local.yaml（Makefile 的 stack-host-* 目标会自动并入
+# 该文件，见 Makefile 的 COMPOSE_HOST_FILES），并把 image 改成要固定的
+# 版本 tag。
+#
+# 镜像默认 private：内网机器先 docker login ghcr.io（read:packages 的 PAT），
+# 或在 GitHub package 设置里把包改为 public。
+#
+# 固定版本 tag 时 compose 默认 pull 策略（missing）即可；若固定 latest 追新，
+# 需另加 pull_policy: always，否则本机已有镜像不会更新。
+#
+# 注意只覆盖 host 服务：本文件不涉及 postgres / seaweedfs / rustfs / worker，
+# 它们沿用基础文件（worker 的拉取式 override 见 compose.worker.pull.example.yaml）。
+services:
+  host:
+    # !reset 清掉基础文件的 build 段（compose v2.24+ 语义）：up 一律使用
+    # registry 镜像，不再本地构建。
+    build: !reset null
+    image: ghcr.io/luciuscao/agent-legion-host:0.7.8
