@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Performance
+- executor 事件泵 reactor 化一期（issue #578）：agent 执行的 stdout 事件泵
+  从 thread-per-execution（每个 velites 子进程一根 Python 泵线程）改为
+  进程级单例 `worker/execution/reactor.py`——一根 selector 线程多路复用
+  全部在跑子进程的 stdout fd（阻塞 select 不持 GIL），就绪 fd 批量读取、
+  分帧后交核数级（2–16）解析线程池做 JSON 解析 + delta 过滤与落盘。
+  每流单写者令牌保证 events.jsonl 与旧泵逐字节同序（回归测试压 200 行
+  突发）。生命周期语义不动：租约/心跳（#352 批量面）、超时治理、#564
+  归属标记全部原样；背压显式化——事件文件写不动时暂停读 fd，子进程
+  管道写满自然减速（agent 减速而非丢事件，设计点 3）。回退开关
+  `AGENT_WORKER_EVENT_PUMP=thread` 恢复每执行一线程；reactor 内部错误
+  fail-closed（注销全部流 + 本进程后续 spawn 回落线程泵）。灰度：先只
+  接管 agent 节点路径（事件量最大面），code 节点 stdout 本就走文件
+  重定向不经泵。
+
 ## [0.7.8] - 2026-09-10
 
 ### Performance
