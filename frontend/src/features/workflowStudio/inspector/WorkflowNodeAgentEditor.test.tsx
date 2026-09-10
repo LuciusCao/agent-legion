@@ -104,7 +104,7 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith('ws1', 'agent-a')
     expect(await screen.findByDisplayValue('generate_key_info'))
     expect(screen.getByDisplayValue('agent-a')).toBeInTheDocument()
-    // #575：内嵌场景下 Tools 字段降级为「Agent 默认 / 兜底」入口，
+    // #575：Tools 字段的唯一形态是「Agent 默认 / 兜底」标注，
     // 主入口是节点级「Tools 覆盖」。
     expect(
       await screen.findByLabelText('Tools（Agent 默认 / 兜底）')

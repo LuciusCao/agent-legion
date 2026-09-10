@@ -23,9 +23,10 @@ const runtimes: AgentRuntime[] = ['velites', 'pi']
 const forcedTierHint =
   'harness 强制：节点声明 outputs 时经 --require-output 激活，退出契约门不可取消；工具开关仅控制模型 mid-run 自检'
 
-// #575：内嵌于节点详情时 Tools 字段降级呈现的提示——节点级「Tools 覆盖」
-// 是主入口，本字段只是 Agent 定义的兜底默认（#440 终局并入节点 YAML）。
-const embeddedToolsHint = '兜底默认——节点级「Tools 覆盖」优先，建议按节点覆盖'
+// #575：Tools 字段的兜底默认提示——本组件只内嵌于节点详情使用（唯一
+// 生产调用点是 WorkflowNodeAgentEditorPanel），节点级「Tools 覆盖」是
+// 主入口，本字段只是 Agent 定义的兜底默认（#440 终局并入节点 YAML）。
+const toolsFallbackHint = '兜底默认——节点级「Tools 覆盖」优先，建议按节点覆盖'
 
 type Props = {
   /** 当前 workspace（Agent 定义为 workspace 作用域，schema v46） */
@@ -34,8 +35,6 @@ type Props = {
   agentId: string | null
   /** 新建模式下预填的 capability（节点详情内嵌新建时传入） */
   initialCapability?: string
-  /** #575：内嵌于节点详情时为 true——Tools 字段标注为兜底默认。 */
-  embedded?: boolean
   onSaved: (agentId: string) => void
   onChanged: () => void
   onArchived: () => void
@@ -59,12 +58,15 @@ const isConflictError = (err: unknown) =>
  * （目录与 dispatch 校验同源）——default 预选中、opt-in 显式开启、
  * forced 渲染锁定行；runtime 切换后失效工具显式标记（uuid 在 pi 下
  * 不存在），把 dispatch fail-fast 前移到编辑体验。
+ *
+ * #575：Tools 字段只有一种形态——「Agent 默认 / 兜底」标注（本组件
+ * 唯一生产调用点是节点详情的内嵌面板，节点级「Tools 覆盖」是主入口；
+ * #440 终局定义层字段并入节点 YAML 时整体删除）。
  */
 export function AgentEditor({
   workspaceId,
   agentId,
   initialCapability,
-  embedded = false,
   onSaved,
   onChanged,
   onArchived,
@@ -306,7 +308,7 @@ export function AgentEditor({
       <div className={styles.field}>
         <TextField
           select
-          label={embedded ? 'Tools（Agent 默认 / 兜底）' : 'Tools'}
+          label="Tools（Agent 默认 / 兜底）"
           variant="outlined"
           value={tools}
           onChange={(e) => {
@@ -315,7 +317,7 @@ export function AgentEditor({
           }}
           fullWidth
           disabled={!toolEntries}
-          helperText={embedded ? embeddedToolsHint : undefined}
+          helperText={toolsFallbackHint}
           slotProps={{ select: { multiple: true } }}
         >
           {selectableEntries.map((entry) => (

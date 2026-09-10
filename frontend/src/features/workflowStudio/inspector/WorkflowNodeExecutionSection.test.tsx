@@ -506,6 +506,25 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()
   })
 
+  // #575：节点已声明 tools 覆盖时，卡片行标注「以节点为准」（定义值
+  // 不生效），节点级字段不再展示跟随 hint。
+  it('marks the card tools row as overridden when the node declares its own tools', () => {
+    const overriddenYaml = `execution:\n  provider: deepseek\n  model: your-model-b\n  thinking: low\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n    tools:\n      - read\n`
+    renderSection({
+      node,
+      ...editorProps,
+      definitionYaml: overriddenYaml,
+      readOnly: true,
+    })
+
+    expect(
+      screen.getByText('read, write, bash（节点已覆盖，以节点为准）')
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/当前生效（跟随 Agent 默认）/)
+    ).not.toBeInTheDocument()
+  })
+
   // —— #426 codex 终轮 P2：门控组合（capability 命中 × 两份查询 settle）——
 
   // 场景 1：catalog 空/未命中 + definitions 在途 → 占位——agentId=null 只是

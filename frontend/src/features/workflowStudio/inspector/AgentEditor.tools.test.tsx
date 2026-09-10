@@ -63,14 +63,13 @@ function catalogResponse() {
   }
 }
 
-function renderEditor(agentId: string | null = null, embedded = false) {
+function renderEditor(agentId: string | null = null) {
   return render(
     <TestQueryProvider>
       <AgentEditor
         workspaceId="ws1"
         agentId={agentId}
         initialCapability="gen"
-        embedded={embedded}
         onSaved={() => {}}
         onChanged={() => {}}
         onArchived={() => {}}
@@ -79,9 +78,13 @@ function renderEditor(agentId: string | null = null, embedded = false) {
   )
 }
 
+// #575：Tools 字段的唯一形态——「Agent 默认 / 兜底」标注（组件只内嵌
+// 于节点详情，节点级「Tools 覆盖」是主入口）。
+const toolsLabel = 'Tools（Agent 默认 / 兜底）'
+
 /** 打开 Tools 下拉并返回选项映射（name → { selected, disabled }）。 */
 async function openToolOptions() {
-  fireEvent.mouseDown(await screen.findByLabelText('Tools'))
+  fireEvent.mouseDown(await screen.findByLabelText(toolsLabel))
   const options = await screen.findAllByRole('option')
   const byName = new Map<string, { selected: boolean; disabled: boolean }>()
   for (const option of options) {
@@ -121,16 +124,13 @@ describe('AgentEditor tool catalog (#476)', () => {
     await closeDropdown()
   })
 
-  // #575：内嵌于节点详情时 Tools 不再是同级主入口——label 点明它是
-  // Agent 默认/兜底，并提示优先用节点级「Tools 覆盖」；独立面板不受影响。
-  it('downgrades the Tools field to a fallback-default entry in embedded mode (#575)', async () => {
-    renderEditor(null, true)
+  // #575：Tools 字段只有「Agent 默认 / 兜底」一种形态——label 点明层级，
+  // 并提示优先用节点级「Tools 覆盖」（组件唯一生产调用点是节点详情内嵌）。
+  it('labels the Tools field as the Agent-level fallback default (#575)', async () => {
+    renderEditor()
     await screen.findByText('创建草稿')
 
-    expect(
-      screen.getByLabelText('Tools（Agent 默认 / 兜底）')
-    ).toBeInTheDocument()
-    expect(screen.queryByLabelText('Tools')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(toolsLabel)).toBeInTheDocument()
     expect(
       screen.getByText('兜底默认——节点级「Tools 覆盖」优先，建议按节点覆盖')
     ).toBeInTheDocument()

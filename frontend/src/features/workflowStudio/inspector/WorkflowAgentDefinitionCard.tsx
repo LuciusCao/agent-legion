@@ -3,8 +3,9 @@ import styles from './WorkflowExecutorBindingList.module.css'
 
 /** 节点绑定 Agent 的只读摘要卡；编辑经节点详情的内嵌 AgentEditor。
  *  #575：Tools 行展示的是 Agent 定义的兜底值——节点未覆盖时标注
- * 「（节点未覆盖，当前生效）」，避免与节点级「Tools 覆盖」字段形成
- * 「两个字段」观感；节点已覆盖时保留原值（它是定义自身的值）。 */
+ * 「（节点未覆盖，当前生效）」，已覆盖时标注「（节点已覆盖，以节点为
+ * 准）」，两侧都点明层级，避免与节点级「Tools 覆盖」字段形成
+ * 「两个字段」观感。 */
 export function WorkflowAgentDefinitionCard(props: {
   definition: AgentDefinition
   /** #575：节点已声明 tools 覆盖时为 true。 */
@@ -13,7 +14,7 @@ export function WorkflowAgentDefinitionCard(props: {
   const { definition } = props
   const tools = definition.tools ?? []
   const toolsSuffix = props.nodeToolsOverridden
-    ? ''
+    ? '（节点已覆盖，以节点为准）'
     : '（节点未覆盖，当前生效）'
   return (
     <article className={styles.binding}>
