@@ -56,7 +56,8 @@ velites/                 # Cargo crate（本仓库根下新目录）
     lib.rs               # 库入口（供将来嵌入/契约测试复用）
     cli.rs               # 参数定义
     agent.rs             # agent loop
-    events.rs            # 事件 schema 定义（serde）+ emitter
+    events.rs            # 事件 schema 定义（serde）+ EventSink 契约/测试 sink
+    event_sink.rs        # stdout 事件落盘 sink（BufWriter 攒批，#577）
     models.rs            # ~/.velites/models.json provider/model registry
     config.rs            # 旧 gateway 凭据迁移桥
     session.rs           # session.jsonl 镜像落盘（--session-dir）
@@ -98,6 +99,14 @@ velites → velites argv；pi 不退役、长期保留，
 （`job_logs.py` 读 `events.jsonl` 渲染 agent 的思考 text/thinking 与工具调用过程）、
 token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲染的是语义边界事件
 （message/turn/tool 的起止），从不渲染 `message_update`。
+
+写盘节奏（#577，只改节奏不改内容）：事件行经 8 KiB `BufWriter` 攒批，缓冲满或距上次
+flush 超过 `VELITES_EVENT_FLUSH_INTERVAL_MS`（默认 200ms，`0` = 恢复逐行 flush）才真正
+写一次 stdout；时间维度是写路径上的惰性 elapsed 检查，无定时器线程。正常完成、SIGTERM
+优雅取消与 harness 错误退出都在 sink Drop 时 flush 收尾，事件零丢失；SIGKILL 会丢未满
+缓冲的尾部一批事件——events.jsonl 是执行轨迹（归档有重试/兜底语义），该窗口已声明
+可接受。进程内所有 sink 句柄共享同一缓冲（lib.rs 的 retry 回调建第二个句柄），保证
+wire 上事件顺序不被交错。
 
 ### 必发事件（与 Host 消费方一一对应）
 
