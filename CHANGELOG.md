@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Fixed
+- Studio Agent 注册表 PUT 陈旧快照冲突检查（issue #355，codex P2 on
+  #341）：管理员基于旧快照编辑期间若启动探测或「重新检测」先提交，
+  整份 PUT 会静默删除新探测到的 detected 行（直到下次探测才恢复）。
+  现在 `GET /api/admin/studio-agents` 响应携带注册表内容版本
+  `revision`（canonical JSON 的 sha256 前缀，探测/可用性结果不参与），
+  PUT 载荷带上该版本后服务端在 `SELECT ... FOR UPDATE` 同一事务内比对
+  ——不匹配返回 409 并附当前注册表，前端弹确认对话框「注册表已被其他
+  修改更新，请刷新后重试」提供刷新动作（不自动重试）；省略 `revision`
+  的 legacy 客户端（smoke 脚本等）保持原整份替换语义不变。
+
 ### Changed
 - 原生形态 velites 二进制收敛为 PATH 单一副本（issue #507）：解析顺序从
   「data/bin 自带副本优先、PATH 兜底」反转为「PATH 优先、data/bin 兜底」

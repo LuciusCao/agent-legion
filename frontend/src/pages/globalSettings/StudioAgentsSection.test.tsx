@@ -42,6 +42,8 @@ const registry: StudioAgentRegistryResponse = {
     },
     claude: { detected: false, path: null, version: null },
   },
+  // #355：GET/PUT 契约携带的内容版本（快照版本，随保存结果前进）。
+  revision: 'rev-1',
 }
 
 function renderSection() {
@@ -145,6 +147,8 @@ describe('StudioAgentsSection', () => {
             source: 'manual',
           },
         ],
+        // #355：PUT 携带快照版本，服务端在写入事务内比对。
+        revision: 'rev-1',
       })
     })
     // 保存成功后回到 clean 状态
@@ -263,7 +267,7 @@ describe('StudioAgentsSection', () => {
     )
 
     renderSection()
-    await screen.findByLabelText('agent-id-0')
+    await screen.findByLabelText('agent-label-0')
 
     fireEvent.change(screen.getByLabelText('agent-label-0'), {
       target: { value: 'Kimi CLI' },
@@ -273,6 +277,46 @@ describe('StudioAgentsSection', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'HTTP 422: duplicate agent id'
     )
+  })
+
+  it('shows a refresh confirmation dialog on 409 and does not auto-retry', async () => {
+    // #355：快照版本陈旧（保存间隙有探测合并等新写入）→ 后端 409。
+    // 前端弹确认对话框提示刷新，不自动重试、不静默覆盖。
+    vi.mocked(updateStudioAgents).mockRejectedValue(
+      Object.assign(new Error('HTTP 409: registry revision mismatch'), {
+        status: 409,
+      })
+    )
+
+    renderSection()
+    await screen.findByLabelText('agent-label-0')
+
+    fireEvent.change(screen.getByLabelText('agent-label-0'), {
+      target: { value: 'Kimi CLI' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('注册表已被其他修改更新')
+    expect(dialog).toHaveTextContent('请刷新后基于最新内容重试')
+    // 不自动重试：确认对话框出现后 PUT 仍只调用过一次。
+    expect(updateStudioAgents).toHaveBeenCalledTimes(1)
+    // 普通错误条不出现（409 走对话框而非 alert）。
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    // 「刷新注册表」使缓存失效重取（由管理员主动选择刷新）。
+    fireEvent.click(screen.getByRole('button', { name: '刷新注册表' }))
+    await waitFor(() => {
+      expect(getStudioAgents).toHaveBeenCalledTimes(2)
+    })
+    // 「继续编辑」分支：再次 409 后关闭对话框，PUT 调用数不增加。
+    fireEvent.change(screen.getByLabelText('agent-label-0'), {
+      target: { value: 'Kimi CLI 2' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+    await screen.findByRole('dialog')
+    fireEvent.click(screen.getByRole('button', { name: '继续编辑' }))
+    expect(updateStudioAgents).toHaveBeenCalledTimes(2)
   })
 
   it('shows the load error when GET fails', async () => {

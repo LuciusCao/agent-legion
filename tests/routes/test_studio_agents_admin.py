@@ -73,12 +73,9 @@ def _strip_probes(payload: dict) -> dict[str, bool]:
 def test_default_document_and_roundtrip(client) -> None:
     response = client.get(REGISTRY_URL)
     assert response.status_code == 200
-    assert response.json() == {
-        "api_base": "http://127.0.0.1:8000",
-        "agents": [],
-        "availability": {},
-        "detection": {},
-    }
+    payload = response.json()
+    empty_revision = _strip_probes_with_revision(payload)
+    assert payload == {"api_base": "http://127.0.0.1:8000", "agents": []}
 
     document = _document()
     response = client.put(REGISTRY_URL, json=document)
@@ -89,11 +86,17 @@ def test_default_document_and_roundtrip(client) -> None:
     payload = response.json()
     availability = _strip_probes(payload)
     assert set(availability) == {"kimi-acp"}
+    put_revision = payload.pop("revision")
     assert payload == expected
     payload = client.get(REGISTRY_URL).json()
     availability = _strip_probes(payload)
     assert set(availability) == {"kimi-acp"}
+    expected_revision = payload.pop("revision")
     assert payload == expected
+    # revision 是存储内容版本（#355）：空文档与写入后内容不同→版本不同；
+    # 同一内容 GET/PUT 响应一致且稳定，探测结果不参与计算。
+    assert expected_revision == put_revision != empty_revision
+    assert client.get(REGISTRY_URL).json()["revision"] == expected_revision
 
 
 def test_validation_rejects_bad_documents(client) -> None:
@@ -124,6 +127,80 @@ def test_validation_rejects_bad_documents(client) -> None:
     document = _document()
     document["api_base"] = ""
     assert client.put(REGISTRY_URL, json=document).status_code == 422
+
+
+def _strip_probes_with_revision(payload: dict) -> str:
+    """剥掉响应端派生字段，返回 revision（#355 测试助手）。"""
+    _strip_probes(payload)
+    revision = payload.pop("revision")
+    assert isinstance(revision, str) and revision
+    return revision
+
+
+def test_put_with_stale_revision_conflicts_and_keeps_detected_rows(client, monkeypatch) -> None:
+    """#355：快照后探测合并进新 detected 行 → 陈旧版本 PUT 得 409，
+    注册表原样保留（新 detected 行存活），且响应附当前文档与版本。"""
+    snapshot = client.get(REGISTRY_URL).json()
+    stale_revision = _strip_probes_with_revision(snapshot)
+    # 快照与 PUT 之间：探测合并进一个新 detected 行（模拟启动探测/redetect
+    # 先拿到行锁提交——正是 issue 中丢失更新的窗口）。
+    _stub_detection(
+        monkeypatch, {"kimi": CatalogDetection(True, "/usr/local/bin/kimi", "kimi 0.55.0")}
+    )
+    assert client.post(REDETECT_URL).status_code == 200
+
+    stale_payload = _document()  # 管理员仍基于旧快照编辑（不含 kimi 行）
+    stale_payload["revision"] = stale_revision
+    response = client.put(REGISTRY_URL, json=stale_payload)
+    assert response.status_code == 409, response.text
+    conflict = response.json()
+    current_revision = _strip_probes_with_revision(conflict)
+    assert [agent["id"] for agent in conflict["agents"]] == ["kimi"]
+    assert conflict["agents"][0]["source"] == "detected"
+    assert current_revision != stale_revision
+
+    # 存储未被陈旧快照覆盖：detected 行原样存活。
+    persisted = client.get(REGISTRY_URL).json()
+    assert _strip_probes_with_revision(persisted) == current_revision
+    assert [agent["id"] for agent in persisted["agents"]] == ["kimi"]
+    assert persisted["agents"][0]["source"] == "detected"
+
+    # 管理员刷新快照（带当前版本）重放同一编辑即可成功。
+    refreshed_payload = _document()
+    refreshed_payload["revision"] = current_revision
+    saved = client.put(REGISTRY_URL, json=refreshed_payload).json()
+    assert [agent["id"] for agent in saved["agents"]] == ["kimi-acp"]
+    assert saved["agents"][0]["source"] == "manual"
+
+
+def test_put_with_current_revision_merges_and_succeeds(client, monkeypatch) -> None:
+    """#355：携带当前版本的 PUT 正常合并保存（流程 b）。"""
+    _stub_detection(monkeypatch, {"kimi": CatalogDetection(True, "/usr/local/bin/kimi", None)})
+    current_revision = _strip_probes_with_revision(client.post(REDETECT_URL).json())
+
+    # 整份回放检测到的文档、只改 label：未改行保 source=detected（#332 合并）。
+    payload = client.get(REGISTRY_URL).json()
+    payload.pop("availability")
+    payload.pop("detection")
+    payload["agents"][0]["label"] = "Kimi Code (customized)"
+    payload["revision"] = current_revision
+    response = client.put(REGISTRY_URL, json=payload)
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert saved["agents"][0]["label"] == "Kimi Code (customized)"
+    assert saved["agents"][0]["source"] == "manual"  # 编辑即接管（#332）
+    assert _strip_probes_with_revision(saved) != current_revision  # 内容变了版本变
+
+
+def test_put_without_revision_bypasses_the_conflict_check(client, monkeypatch) -> None:
+    """#355：省略 revision 的 legacy 客户端保持旧的整份替换语义（不 409）。"""
+    _stub_detection(monkeypatch, {"kimi": CatalogDetection(True, "/usr/local/bin/kimi", None)})
+    assert client.post(REDETECT_URL).status_code == 200
+    # smoke 脚本式一次性写：不带 revision 直接整份替换。
+    document = _document()
+    response = client.put(REGISTRY_URL, json=document)
+    assert response.status_code == 200, response.text
+    assert [agent["id"] for agent in response.json()["agents"]] == ["kimi-acp"]
 
 
 def test_api_base_must_be_a_plain_http_url(client) -> None:
