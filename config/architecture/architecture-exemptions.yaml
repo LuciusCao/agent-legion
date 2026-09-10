@@ -1524,8 +1524,8 @@ exemptions:
     stream bookkeeping + takeover belong together (the fence is defined on
     the same lock the takeover must respect) — splitting them would fork the
     single concurrency domain. Ceiling at actual + 5 per the dated-exemption
-    convention. Remove when the #578 phase-3 cleanup re-budgets the pump
-    surface (legacy thread pump retirement folds takeover away).
+    convention. Remove when the #578 phase-3 cleanup retires the
+    per-execution thread pump and folds the takeover path away with it.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/578
   ceiling: 101
