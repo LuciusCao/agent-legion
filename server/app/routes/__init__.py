@@ -120,8 +120,8 @@ def create_router(deps: RouterDeps) -> APIRouter:
     )
     secured(agent_catalog_router)
     secured(create_workspace_agent_routes_router(deps.job_db))
-    # Campaigns (#532 PR-A): row lifecycle + API surface, no feeder yet —
-    # created campaigns stay pending until PR-B's feeder picks them up.
+    # Campaigns (#532): row lifecycle + API surface; the feeder (PR-B,
+    # workflow_worker/campaign_feeder.py) drains active rows in batches.
     secured(create_campaigns_router(build_campaign_service(deps)))
     # Preview panels (#328): the published-bundle read is member-level (job
     # detail iframe host); state/publish/archive carry their own Studio

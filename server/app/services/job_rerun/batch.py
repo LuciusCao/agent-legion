@@ -98,8 +98,14 @@ def commit_planned_reruns(
     pre: PrefetchedRerunState,
     workspace_id: str,
     plans: list[tuple[str, str]],
+    *,
+    campaign_id: str = "",
 ) -> dict[str, JobOperationResult]:
-    """Write phase: full rows for eligible jobs in one query, one commit each."""
+    """Write phase: full rows for eligible jobs in one query, one commit each.
+
+    ``campaign_id`` (feeder batches only) rides each commit's transaction
+    as the v81 delivery marker (#545 round-4) — atomic with the flip.
+    """
     full_jobs = {
         str(job["id"]): job
         for job in service.job_db.list_jobs_by_ids(workspace_id, [job_id for job_id, _ in plans])
@@ -112,6 +118,7 @@ def commit_planned_reruns(
             job_id,
             actual_node_key,
             definition=pre.definitions.for_job(pre.jobs[job_id]),
+            campaign_id=campaign_id,
         )
     return outcomes
 
@@ -125,6 +132,7 @@ def batch_rerun(
     from_failed_node: bool = False,
     job_filter: JobListFilter | None = None,
     exclude_ids: Collection[str] = (),
+    campaign_id: str = "",
 ) -> list[JobOperationResult]:
     ids = list(
         dict.fromkeys(
@@ -146,7 +154,9 @@ def batch_rerun(
             plans.append(outcome)
         else:
             results[job_id] = outcome.to_result()
-    results.update(commit_planned_reruns(service, pre, workspace_id, plans))
+    results.update(
+        commit_planned_reruns(service, pre, workspace_id, plans, campaign_id=campaign_id)
+    )
     return [results[job_id] for job_id in ids]
 
 

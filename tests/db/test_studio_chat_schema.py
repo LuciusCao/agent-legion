@@ -30,7 +30,7 @@ def test_schema_v57_recorded() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "campaigns"
+    assert row["name"] == "campaign_deliveries"
 
 
 def test_studio_chat_tables_exist() -> None:
@@ -79,7 +79,7 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "campaigns"
+        assert migration["name"] == "campaign_deliveries"
 
 
 @pytest.mark.fresh_schema
@@ -112,7 +112,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "campaigns"
+        assert migration["name"] == "campaign_deliveries"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

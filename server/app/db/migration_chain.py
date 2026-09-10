@@ -22,6 +22,7 @@ from server.app.db.migrations import (
     migrate_external_connections,
     migrate_hmac_connection_type,
     migrate_job_artifacts,
+    migrate_job_status_counts_statement_triggers,
     migrate_jobs_run_id_index,
     migrate_local_executor_removal,
     migrate_node_cms_config,
@@ -45,13 +46,13 @@ from server.app.db.migrations import (
 )
 from server.app.db.migrations.claim_stage_profile import migrate_claim_stage_profile
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
-from server.app.db.migrations.job_status_counts_statement_triggers import (
-    migrate_job_status_counts_statement_triggers as _migrate_v77_triggers,
-)
 from server.app.db.migrations.jobs_workflow_key_alignment import migrate_jobs_workflow_key_alignment
 from server.app.db.migrations.preview_panels import migrate_preview_panels
 from server.app.db.migrations.retire_workflow_key_columns import migrate_retire_workflow_key_columns
 from server.app.db.migrations.shard_identity_index import migrate_shard_identity_index
+
+# v77 的注册行在其全名形态下超 100 列（3 行）；短别名把这行压回 1 行。
+_m77 = migrate_job_status_counts_statement_triggers
 
 
 @dataclass(frozen=True)
@@ -191,7 +192,7 @@ MIGRATIONS: list[SchemaMigration] = [
     # consistent lock order per statement. Born as this branch's v76, bumped
     # to 77 when develop's #429 claimed v76 for studio_publish_requests (#434
     # collision protocol: the later merge renumbers).
-    SchemaMigration(77, "job_status_counts_statement_triggers", _migrate_v77_triggers),
+    SchemaMigration(77, "job_status_counts_statement_triggers", _m77),
     # v78 (#448 phase 1): claim-stage gauge columns on
     # ops_runtime_profile_samples (scan/evaluate/writes totals + maxes) —
     # the claim-path forensic instrumentation that orders phase 2. DDL-only.
@@ -206,6 +207,12 @@ MIGRATIONS: list[SchemaMigration] = [
     # precedent: the schema file sits at its budget ceiling). PR-A ships the
     # schema/queries/service/API; the feeder (PR-B) drives the state machine.
     SchemaMigration(80, "campaigns", migrate_campaigns),
+    # v81 (#545 round-4): campaign_job_deliveries — the feeder replay
+    # ownership marker table. Reuses the v80 apply fn (its _DELIVERIES_DDL
+    # is idempotent create-if-not-exists, so an upgraded v80 database that
+    # skipped the fn replays only the new table; a fresh one runs it twice,
+    # harmlessly).
+    SchemaMigration(81, "campaign_deliveries", migrate_campaigns),
 ]
 
 assert sorted(_VERSIONS := [m.version for m in MIGRATIONS]) == _VERSIONS, "sorted"

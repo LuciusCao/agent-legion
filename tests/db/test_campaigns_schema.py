@@ -53,6 +53,47 @@ def test_schema_v80_recorded() -> None:
     assert row["name"] == "campaigns"
 
 
+def test_schema_v81_recorded() -> None:
+    """v81（#545 round-4）：投递标记表——重放归属的持久权威。"""
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute("select name from schema_migrations where version=%s", (81,)).fetchone()
+    assert row is not None
+    assert row["name"] == "campaign_deliveries"
+
+
+def test_campaign_job_deliveries_shape() -> None:
+    """标记表只有 (campaign_id, job_id) 复合主键——纯归属标记，无结果列；
+    PK 即 feeder 重放守卫的点查（每 campaign 至多一个在途批，有界）。"""
+    with read_connection(TEST_DATABASE_URL) as conn:
+        columns = {
+            row["column_name"]
+            for row in conn.execute(
+                "select column_name from information_schema.columns"
+                " where table_schema=current_schema() and table_name='campaign_job_deliveries'"
+            ).fetchall()
+        }
+    assert columns == {"campaign_id", "job_id"}
+    # 复合主键真实生效：先种一行真 campaign（FK 可达），重复插入同一
+    # (campaign_id, job_id) 对被 PK 拒绝——审核 P3：空串 id 首插即撞 FK，
+    # 从未走到重复路径，断言是空洞的。
+    _insert_workspace("feeder-marker-pk-ws")
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into campaigns(id, workspace_id, mode)"
+            " values ('campaign-marker-pk', 'feeder-marker-pk-ws', 'rerun')"
+            " on conflict (id) do nothing"
+        )
+        conn.execute(
+            "insert into campaign_job_deliveries(campaign_id, job_id)"
+            " values ('campaign-marker-pk', 'job-dup')"
+        )
+    with pytest.raises(IntegrityError), write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into campaign_job_deliveries(campaign_id, job_id)"
+            " values ('campaign-marker-pk', 'job-dup')"
+        )
+
+
 def test_campaigns_columns() -> None:
     with read_connection(TEST_DATABASE_URL) as conn:
         columns = {

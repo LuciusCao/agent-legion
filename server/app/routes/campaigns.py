@@ -1,19 +1,19 @@
-"""Workspace campaigns API (#532 PR-A, design §3.2).
+"""Workspace campaigns API (#532, design §3.2).
 
 Endpoints: create (JSON inline / multipart manifest), preview (dry-run),
 list, detail, pause / resume / cancel. Every write route refuses
 studio-agent scoped tokens (STUDIO-AGENT-001, the job_mutations precedent:
 campaigns are operator bulk actions, not agent tools); reads ride the
 secured() group's require_workspace_access (viewer reads, editor writes).
-PR-A ships no feeder — created campaigns stay ``pending`` until PR-B's
-feeder picks them up; the API surface is the reviewable intermediate state.
+The PR-B feeder (workflow_worker/campaign_feeder.py) drains active rows;
+resume additionally pokes it via app.state so the next batch is immediate.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Never
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.auth.workspace_access import require_workspace_access
@@ -228,13 +228,24 @@ def create_campaigns_router(service: CampaignService) -> APIRouter:
         "/workspaces/{workspace_id}/campaigns/{campaign_id}/resume",
         response_model=CampaignStatusChangeResponse,
     )
-    def resume_campaign(workspace_id: str, campaign_id: str) -> CampaignStatusChangeResponse:
+    def resume_campaign(
+        workspace_id: str,
+        campaign_id: str,
+        request: Request,
+    ) -> CampaignStatusChangeResponse:
         try:
-            return CampaignStatusChangeResponse.model_validate(
-                {"campaign": service.resume_campaign(workspace_id, campaign_id)}
-            )
+            campaign = service.resume_campaign(workspace_id, campaign_id)
         except (JobServiceError, ManifestError) as exc:
             _raise_campaign_http_error(exc)
+        # Wake the feeder (design §2.4): the paused row left the active scan,
+        # so without the poke the resumed campaign waits out the tick cadence
+        # (worst case feeder_tick_seconds + the sleep phase). The feeder is
+        # process-local app.state — absent on non-Host process shapes by
+        # construction, and its wake never raises.
+        feeder = getattr(request.app.state, "campaign_feeder", None)
+        if feeder is not None:
+            feeder.wake()
+        return CampaignStatusChangeResponse.model_validate({"campaign": campaign})
 
     @router.post(
         "/workspaces/{workspace_id}/campaigns/{campaign_id}/cancel",

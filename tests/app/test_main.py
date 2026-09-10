@@ -73,6 +73,108 @@ def test_lifespan_sweeper_disabled_by_settings(tmp_path, monkeypatch):
     assert "sweeper" not in calls
 
 
+def test_lifespan_skips_campaign_feeder_when_probe_lock_not_held(tmp_path, monkeypatch):
+    """PR #545 P2 回归锁：start_worker=True 但 probe 返回 False（另一个
+    Host 副本持有单副本 advisory 锁）时，本副本不启动 campaign feeder——
+    feeder 的节流/公平/退避全是进程内存态且无持久互斥层，双副本同时 drain
+    同一 campaign 会重复投递并破坏 feed interval；worker 线程不受此门禁
+    （其执行安全由 DB 层 executor lease 跨进程互斥保证），照常启动。"""
+    from unittest.mock import patch
+
+    from server.app import main
+    from server.app.single_replica_probe import SingleReplicaProbe
+
+    calls = []
+    monkeypatch.setattr(WorkflowWorkerThread, "start", lambda self: calls.append("workflow"))
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    feeder_starts = []
+    from server.app.workflow_worker.campaign_feeder import CampaignFeeder
+
+    with (
+        patch.object(SingleReplicaProbe, "probe", return_value=False),
+        patch.object(CampaignFeeder, "start", lambda self: feeder_starts.append(self)),
+    ):
+        app = main.create_app(data_dir=tmp_path, start_worker=True)
+        with TestClient(app) as _:
+            pass  # lifespan startup runs here
+
+    assert "workflow" in calls  # worker 线程不受 probe 门禁
+    assert feeder_starts == []  # 锁冲突副本不启动 feeder
+
+
+def test_lifespan_starts_campaign_feeder_when_probe_lock_held(tmp_path, monkeypatch):
+    """对照：probe 正常返回 True（锁持有者/跳过/内部异常三态合一）时
+    feeder 照常启动——P2 门禁不能把单副本部署的 campaign 卡在 pending。"""
+    from unittest.mock import patch
+
+    from server.app import main
+    from server.app.single_replica_probe import SingleReplicaProbe
+
+    calls = []
+    monkeypatch.setattr(WorkflowWorkerThread, "start", lambda self: calls.append("workflow"))
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    feeder_starts = []
+    from server.app.workflow_worker.campaign_feeder import CampaignFeeder
+
+    with (
+        patch.object(SingleReplicaProbe, "probe", return_value=True),
+        patch.object(CampaignFeeder, "start", lambda self: feeder_starts.append(self)),
+    ):
+        app = main.create_app(data_dir=tmp_path, start_worker=True)
+        with TestClient(app) as _:
+            pass  # lifespan startup runs here
+
+    assert "workflow" in calls
+    assert len(feeder_starts) == 1  # 独占副本（或探测跳过）照常启动 feeder
+
+
+def test_lifespan_stops_campaign_feeder_before_releasing_replica_lock(tmp_path, monkeypatch):
+    """PR #545 round-4 回归锁（关停锁序）：teardown 必须 feeder.stop() 先
+    于 replica_probe.close()——先放锁会开出「新 Host 拿锁启动 feeder、旧
+    feeder 线程还在跑耗时批次」的窗口（两副本并发重放同一 running
+    campaign）。事件序列钉住顺序：close 时 feeder 必须已停。"""
+    from unittest.mock import patch
+
+    from server.app import main
+    from server.app.single_replica_probe import SingleReplicaProbe
+
+    calls = []
+    monkeypatch.setattr(WorkflowWorkerThread, "start", lambda self: calls.append("workflow"))
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    events: list[str] = []
+    from server.app.workflow_worker.campaign_feeder import CampaignFeeder
+
+    def _fake_feeder_stop(self, timeout: float = 5) -> None:
+        events.append("feeder_stop")
+
+    def _fake_probe_close(self) -> None:
+        events.append("probe_close")
+
+    with (
+        patch.object(SingleReplicaProbe, "probe", return_value=True),
+        patch.object(CampaignFeeder, "start", lambda self: None),
+        patch.object(CampaignFeeder, "stop", _fake_feeder_stop),
+        patch.object(SingleReplicaProbe, "close", _fake_probe_close),
+    ):
+        app = main.create_app(data_dir=tmp_path, start_worker=True)
+        with TestClient(app) as _:
+            pass  # lifespan startup + shutdown run here
+
+    assert events == ["feeder_stop", "probe_close"]
+
+
 def test_spa_catch_all_serves_static_files_and_fallback(tmp_path, monkeypatch):
     from server.app import main
 

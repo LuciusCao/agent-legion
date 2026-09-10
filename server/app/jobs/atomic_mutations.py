@@ -24,6 +24,26 @@ class _AtomicMutationQueries(Protocol):
     _path: str
 
 
+def record_campaign_delivery(conn: DatabaseConnection, campaign_id: str, job_id: str) -> None:
+    """Durably mark one job as flipped by this campaign (v81, #545 round-4).
+
+    MUST run inside the same ``lease_guarded_mutation`` transaction as the
+    rerun/upgrade flip: marker and flip commit atomically, so presence ⟺
+    the flip transaction committed. The feeder's replay pass checks the
+    marker instead of guessing from the job's current status — a delivered
+    job that ran and failed again before the crashed process's replay must
+    NOT be re-delivered (its second failure's artifacts would be wiped and
+    ``from_failed_node`` would retarget to the new failure's node).
+    ``on conflict do nothing``: replay of an already-marked flip is the
+    idempotent no-op the crash window demands.
+    """
+    conn.execute(
+        "insert into campaign_job_deliveries(campaign_id, job_id) values (%s, %s)"
+        " on conflict do nothing",
+        (campaign_id, job_id),
+    )
+
+
 def _cancel_queued_sql(placeholders: str) -> str:
     """Rerun-path cancel SQL; slims manifests in the same statement (#142/#354)."""
     return (

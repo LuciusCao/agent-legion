@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from server.app.events.aggregator import broadcast_job_update, record_job_update
-from server.app.jobs.atomic_mutations import JobMutationConflict
+from server.app.jobs.atomic_mutations import JobMutationConflict, record_campaign_delivery
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.eligibility import check_rerun_eligibility
@@ -65,6 +65,7 @@ def commit_rerun(
     actual_node_key: str,
     *,
     definition: Any | None = None,
+    campaign_id: str = "",
 ) -> JobOperationResult:
     """Write portion of ``execute_rerun``; the caller has validated eligibility.
 
@@ -72,6 +73,12 @@ def commit_rerun(
     still re-validates inside the write transaction, so a state change
     between a batch caller's prefetch and this write fails safely.
     ``definition`` lets batch callers pass their cached workflow definition.
+    ``campaign_id`` (feeder batches only) writes the v81 delivery marker
+    inside the SAME transaction as the flip — marker presence ⟺ flip
+    committed, so the crashed feeder's replay pass can skip already-
+    delivered jobs without guessing from their current status (#545
+    round-4: a delivered job that ran and failed again must not be
+    re-delivered).
     """
     if definition is None:
         definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
@@ -90,6 +97,8 @@ def commit_rerun(
             service.job_db.mark_nodes_for_rerun_in_transaction(
                 conn, job_id, [actual_node_key], {actual_node_key: stale_nodes}
             )
+            if campaign_id:
+                record_campaign_delivery(conn, campaign_id, job_id)
     except JobMutationConflict as exc:
         if staged is not None:
             staged.rollback()
@@ -153,10 +162,13 @@ def commit_rerun_result(
     actual_node_key: str,
     *,
     definition: Any | None = None,
+    campaign_id: str = "",
 ) -> JobOperationResult:
     """commit_rerun with the same error capture as ``execute_rerun_result``."""
     try:
-        return commit_rerun(service, job, job_id, actual_node_key, definition=definition)
+        return commit_rerun(
+            service, job, job_id, actual_node_key, definition=definition, campaign_id=campaign_id
+        )
     except JobOperationError as exc:
         return exc.to_result()
 

@@ -744,6 +744,26 @@ server/app/
   - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）优先派发远程 code Worker（在线且 payload 合格），否则回落本地 code 池（纯远程模式下无回落，任务挂起等待 Worker）；agent 节点（pi / velites runtime）经 broker 派发给 Worker；shard 节点的分片执行同样先远程后本地（#389）——分片身份随 kind='code' manifest 持久化，broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（单活跃请求索引自 schema v79 纳入分片身份（`coalesce(manifest_json->>'shard_index', -1)` 表达式索引，#401）——同一 shard 节点的多个分片可并发在飞，非 shard 节点的单活跃语义逐字保留；fan-out 受 `CodeStockGate.pass_budget`（`server/app/workflow_worker/code_stock.py`）单 pass 预算节流），分片输出以 `shard_output-<index>.json` 常规 expected_output 随结果归档回传（普通 `node.outputs` 不进 shard 的 expected_outputs，#401）。
 - 调度暂停是 **workspace 级**状态：每个 workspace 默认暂停，恢复经
   `POST /api/worker/resume?workspace_id=<id>`（或对应控制台开关）开始处理。
+- `CampaignFeeder`（`server/app/workflow_worker/campaign_feeder.py`，#532/#505）是
+  campaign 的投放循环：独立 daemon 线程 `campaign-feeder`（不内联 `_poll`——一批
+  投放可达秒级，0.2s 节奏的调度循环不能被它挡住），`create_app` 单独组装其依赖的
+  rerun/upgrade/run service 实例（共享 job_db/事件 buffer/lease 单例），仅
+  `start_worker=True` 的 Host 副本在 lifespan 启动、teardown 停止；API-only 副本不投
+  放（SingleReplicaProbe 保证单 Host）。每 tick（`campaigns.feeder_tick_seconds`，默认
+  2s）扫 pending/running campaign，按 workspace 分组后每 workspace 只选一个 campaign
+  投一批（campaign id 稳定序轮转指针，内存态），投放轮距 ≥
+  `campaigns.feed_interval_seconds`（默认 10s）；workspace 级检查（每 tick 每
+  workspace memoize 一次）：暂停 workspace 跳过（campaign 自身状态不改写——停滞而非
+  paused）、宽口径水位（`count_jobs_by_status` 的 total − completed − failed，v36
+  计数表点查）≥ watermark 跳过本轮。pending→running 走 CAS pickup（双 feeder 竞态
+  一个赢）；投一批后经 `advance_campaign_progress` 的 progress_json compare-and-set
+  推进游标与计数（pause/cancel 抢先则批次写入保留、游标冻结，CAMPAIGN-STATE-001）；
+  游标耗尽 → completed。rerun 模式经 keyset `created_at|id` 游标切片
+  （`list_campaign_filter_job_ids_page`）后整片调 `batch_rerun`（per-job 结果与同步
+  入口逐字节一致）；upgrade 模式同切片逐 job `JobWorkflowUpgradeService.upgrade`；
+  瞬态错误线性退避 min(5×attempt, 60s)（consecutive_failures 落 progress_json），
+  确定性失败（JobServiceError 族）→ failed + error_message 首个样例。resume 端点经
+  `app.state.campaign_feeder.wake()` 即时唤醒（自持事件，镜像 register_wakeup 模式）。
 - 后端每次启动会把全部 workspace 重置为暂停（刻意设计，防失控自跑）；恢复调度走
   `scripts/resume-workspaces.sh`（必须在后端首次启动建表之后执行才生效）或在控制台手动恢复。
 - 内置示例 workflow `education_video_problems_generation` 的节点序列

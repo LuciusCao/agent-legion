@@ -270,7 +270,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         ).fetchone()
     assert migration is not None
     # The registry tail at the CURRENT schema version (v80, #532/#505).
-    assert migration["name"] == "campaigns"
+    assert migration["name"] == "campaign_deliveries"
 
 
 @pytest.mark.fresh_schema

@@ -1151,3 +1151,116 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
   ceiling: 76
+- check: architecture.file_budget
+  path: server/app/routes/campaigns.py
+  reason: >-
+    #532 PR-B: the resume endpoint's feeder-wake hookup (design §2.4) —
+    the resumed row left the active scan while paused, so without the
+    app.state poke it waits out the full tick cadence. Request injection
+    plus a 6-line guarded wake grew the route file past PR-A's registered
+    ceiling (219 → 225 effective); the alternative — moving the wake into
+    the service layer — would hand CampaignService an app.state contract
+    it has no business knowing. Anchored to #522 (budget-anchor tracker):
+    harvest when the campaign route set consolidates (the pause/cancel
+    handlers may fold into a shared status-transition helper).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 228
+- check: architecture.file_budget
+  path: server/app/main.py
+  reason: >-
+    PR #545 P2: the campaign feeder's startup gate consumes the
+    SingleReplicaProbe verdict (previously fire-and-forget) so a second
+    Host replica against the same database no longer double-feeds running
+    campaigns — the feeder's pacing/fairness/backoff are process-memory
+    state with no durable mutual exclusion, so only the advisory-lock
+    holder may start it. Net +11 effective lines over PR-B's registered
+    ceiling (222 → 225 effective) after docstring trims; the honest
+    alternatives (folding the lifespan into a helper module) would split
+    startup ordering invariants that backend.md pins to this file.
+    Anchored to #522 (budget-anchor tracker): harvest when the lifespan
+    block gains its own module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 233
+- check: architecture.file_budget
+  path: server/app/workflow_worker/campaign_batch_staging.py
+  reason: >-
+    #532 PR-B round-3 (PR #545 P1-2): the exhausted marker moved from
+    stage-time to account-time — cursor_exhausted distinguishes the
+    initial cursor=None from the drained one so the crash window between
+    the final advance and the completed flip no longer rescans page one
+    (the search-like filters rerun never rewrites would re-feed the
+    whole processed set). The marker bookkeeping lives beside the
+    stage/replay/pop trio it guards. Round-4 removed the dead
+    staged_pending_batch / pop_pending_batch helpers and added
+    partition_replay (the v81 marker / completed product-protection
+    split the feeder's replay pass consumes). Anchored to #522: harvest
+    with the out-of-process feeder migration (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 143
+- check: architecture.file_budget
+  path: server/app/workflow_worker/campaign_feeder.py
+  reason: >-
+    #532 PR-B round-3 (PR #545 P1-1): staged-batch replay gained
+    completed-artifact protection — a replayed pending_batch skips jobs
+    that completed between delivery and the crash (mark_nodes_for_rerun
+    eligibility passes completed+lease-less jobs under an explicit
+    node_key; an unconditional replay would wipe their artifacts and
+    rerun finished experiments). queued/failed still replay (the write
+    path is idempotent there). Round-4 (PR #545 P1): replay ownership is
+    now the v81 delivery markers — a delivered job that ran and failed
+    again before the crashed process's replay is no longer re-delivered
+    (status-based guessing cannot tell that failure from a never-landed
+    one); the feeder reads the markers and counts marked jobs as
+    succeeded while completed stays a product-protection skip. Anchored
+    to #522: harvest with the out-of-process feeder migration (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 363
+- check: architecture.file_budget
+  path: server/app/jobs/atomic_mutations.py
+  reason: >-
+    #545 round-4 (v81): record_campaign_delivery lands here because it
+    must run inside the SAME lease_guarded_mutation transaction as the
+    rerun/upgrade flip (marker presence ⟺ flip committed) — moving it
+    out would break the atomicity the replay guard exists for. Anchored
+    to #522: harvest when campaign delivery accounting moves out of
+    process (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 302
+- check: architecture.file_budget
+  path: server/app/jobs/queries/campaigns.py
+  reason: >-
+    #545 round-4 (v81): campaign_delivered_job_ids / clear_campaign_
+    deliveries join the row lifecycle this mixin owns; the terminal
+    transition clears markers in its own transaction so no marker row
+    outlives its campaign. Anchored to #522: harvest with the
+    out-of-process feeder migration (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 260
+- check: architecture.file_budget
+  path: server/app/services/job_rerun/single.py
+  reason: >-
+    #545 round-4 (v81): commit_rerun gained the campaign_id passthrough
+    so the delivery marker is written inside the flip transaction —
+    the one place where marker and flip commit atomically. Anchored to
+    #522: harvest with the out-of-process feeder migration (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 156
+- check: architecture.file_budget
+  path: server/app/services/job_workflow_upgrade.py
+  reason: >-
+    #545 round-4 (v81): upgrade gained the campaign_id passthrough so
+    upgrade-mode campaign batches record their delivery markers inside
+    the pin-flip transaction — the already_current service check cannot
+    attribute a flip to the crashed campaign pass, the marker can.
+    Anchored to #522: harvest with the out-of-process feeder migration
+    (#562).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 109

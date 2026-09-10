@@ -1,10 +1,11 @@
 """FastAPI app factory — the composition root for the Host process.
 
 ``create_app`` wires settings → DB → seeds → services → routers → threads;
-``create_prod_app`` is the uvicorn factory. Ordering invariants: backend.md.
+``create_prod_app`` is the uvicorn factory (ordering: backend.md).
 """
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -30,16 +31,12 @@ from server.app.routes.auth import create_auth_router
 from server.app.routes.quality_deps import build_quality_loop
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
-from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
-from server.app.services.execution_retention_sweeper import ExecutionRetentionThread
 from server.app.services.instance_settings import apply_instance_settings
-from server.app.services.job_artifact_maintenance import JobArtifactMaintenanceThread
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
-from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -55,10 +52,13 @@ from server.app.storage import build_s3_storage_checked
 from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
-from server.app.sweeper_owned_startup import start_sweeper_owned_threads
+from server.app.sweeper_owned_startup import SlowSweepThreads, start_sweeper_owned_threads
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
+from server.app.workflow_worker.campaign_feeder_wiring import build_campaign_feeder
 from server.app.workflow_worker.thread import WorkflowWorkerThread
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(data_dir: Path | None = None, start_worker: bool = False) -> FastAPI:
@@ -67,23 +67,13 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     agent_manager = AgentStatusManager(event_bus=event_bus)
     job_event_manager = JobEventManager(event_bus)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
-    # Hydrate instance-level settings from the DB before any service reads
-    # them (executor runtime, cleanup/monitoring config).
+    # Hydrate instance-level settings from the DB before any service reads them.
     apply_instance_settings(settings, job_db)
-    # Executor definitions are retired (schema v47, P-0.5). Demo node code is
-    # workspace-scoped; upgrade legacy global factory rows into every bound
-    # demo workspace, then archive the global rows.
+    # Executor definitions are retired (schema v47, P-0.5); demo node code is
+    # workspace-scoped, legacy global factory rows are upgraded then archived.
     migrate_demo_node_codes_to_workspaces(settings, job_db)
-    # Agent definitions are workspace-scoped (schema v46): there is no global
-    # seed. Workspaces initialized from the sample template get the factory
-    # agent templates instantiated seed-if-absent at creation time
-    # (WorkflowRevisionService.ensure_active_revision). The workflow catalog
-    # is retired (schema v50, #112): a workflow is the DAG inside one
-    # workspace, keyed by workspaces.default_workflow_key as plain text.
-    # The global skill source registry is retired (#322): skill locations
-    # derive from the skills root + key, unpinned node refs follow the repo's
-    # live HEAD. Delete the persisted skill_sources document (idempotent
-    # no-op once migrated); the skill_lock document stays.
+    # Agent definitions are workspace-scoped (v46); the workflow catalog (v50)
+    # and skill source registry (#322) are retired.
     retire_skill_sources_document(job_db)
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db)
     # Resume state must not survive a restart: dispatch stays off until an
@@ -91,11 +81,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     workspace_worker_control.reset_all_to_paused()
     artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db)
     # Instance object storage is env-only infra config (AGENT_LEGION_S3_*):
-    # unconfigured instances keep the API up — materials degrade to 503 and
-    # job-artifact upload/read simply falls back to the local job_dir (D12).
-    # build_s3_storage_checked logs one startup self-check line (OK/DEGRADED/
-    # configured=false); a failed probe never blocks startup. One client is
-    # shared by the materials service and the job-artifact object store.
+    # unconfigured instances keep the API up (materials 503, local job_dir).
     object_storage = build_s3_storage_checked()
     job_artifact_objects = JobArtifactObjectStore(job_db, object_storage)
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
@@ -116,44 +102,43 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # subprocess per session; in-process only, reaped in the lifespan finally.
     studio_chat_service = StudioChatService(job_db, settings, job_event_manager.bus)
     # Studio chat injects the tool surface into ACP sessions by URL (kimi
-    # >= 0.38 dropped stdio MCP in session/new); served in-app. The MCP app
-    # itself is built per lifespan entry (single-use session manager).
+    # >= 0.38 dropped stdio MCP in session/new); the MCP app is per-lifespan.
     studio_mcp_relay = StudioMcpRelay()
-    # PATH-level availability of every registered chat agent: warms the probe
-    # cache and logs the entries the picker will hide on this host.
+    # PATH-level availability of every registered chat agent (probe warm).
     studio_chat_service.warm_availability_probe()
     executor_leases = agent_plane.executor_leases
     agent_worker_registry = agent_plane.worker_registry
-    workflow_worker_thread: WorkflowWorkerThread | None = None
-    sweeper_thread: SweeperThread | None = None
-    slow_sweeps: (
-        tuple[
-            ArtifactOrphanGcThread,
-            JobArtifactMaintenanceThread,
-            MaterialTtlSweeperThread,
-            ExecutionRetentionThread,
-        ]
-        | None
-    ) = None
+    # Campaign feeder (#532 PR-B, design §2.1/§3.1): its own service set
+    # (campaign_feeder_wiring), gated per PR #545 P2 below.
+    campaign_feeder = build_campaign_feeder(
+        job_db,
+        settings,
+        executor_leases,
+        job_event_manager,
+        job_event_buffer,
+        workspace_worker_control,
+    )
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
         job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
         ops_metrics=ops_metrics,
     )
-    # Single-replica guardrail (#277): the runtime state above (in-process
-    # event bus, login rate limiter, studio chat sessions, pause reset) is
-    # process-local, so a second replica against the same database degrades
-    # silently. The probe holds one session advisory lock for the process
-    # lifetime; a second starter finds it taken and logs a warning (env
-    # escape hatches documented in single_replica_probe.py).
+    # Single-replica guardrail (#277): the runtime state above is
+    # process-local; the probe holds one session advisory lock for life.
     replica_probe = SingleReplicaProbe(job_db)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps
+        # Worker-plane threads live in the lifespan closure; routes use
+        # app.state, never these locals.
+        workflow_worker_thread: WorkflowWorkerThread | None = None
+        sweeper_thread: SweeperThread | None = None
+        # The sweeper-owned quartet, or None when sweeper_enabled is off.
+        slow_sweeps: SlowSweepThreads | None = None
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
-        replica_probe.probe()
+        # PR #545 P2：接住 probe 独占判定（True 含 skipped/异常两态）。
+        replica_exclusive = replica_probe.probe()
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
@@ -174,17 +159,26 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 # None in pure-remote mode (#389): no local executor stack.
                 app.state.code_executor = workflow_worker_thread.local_executor()
             # Orphan GC / artifact maintenance / materials TTL / execution
-            # retention share the sweeper ownership rule: exactly one replica
-            # (sweeper_enabled) runs the slow sweeps, the rest stay idle.
+            # retention share the sweeper ownership rule (one replica).
             if settings.executor_runtime.sweeper_enabled:
                 slow_sweeps = start_sweeper_owned_threads(
                     artifact_store, job_artifact_objects, job_db, settings, object_storage
                 )
+            # Campaign feeder (#532 PR-B): daemon thread, never on the poll
+            # loop (design §2.1); PR #545 P2 下仅 probe 锁持有副本启动——
+            # worker 有 executor lease 兜底，feeder 的节流/退避全是内存态
+            # 且 CAS 只护首次 pickup，两副本会同投同一切片。
+            if replica_exclusive:
+                campaign_feeder.start()
+            else:
+                logger.warning(
+                    "campaign feeder not started: another replica holds the lock (#545 P2)"
+                )
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
-        # Startup auto-detection (#332): daemon thread, best-effort; gated on
-        # start_worker so test/export apps never spawn probe subprocesses.
+        # Startup auto-detection (#332): daemon thread, best-effort; gated
+        # on start_worker so test/export apps never spawn probe subprocesses.
         if start_worker:
             spawn_startup_detection(studio_registry)
         studio_mcp, studio_mcp_app = create_studio_mcp_http_app(
@@ -192,22 +186,26 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         )
         studio_mcp_relay.set(studio_mcp_app)
         try:
-            # Mounted sub-app lifespans do not propagate: run the MCP session
-            # manager inside the host lifespan (kimi holds long-lived streams).
+            # Mounted sub-app lifespans do not propagate: run the MCP
+            # session manager inside the host lifespan.
             async with studio_mcp.session_manager.run():
                 yield
         finally:
             await background_tasks.stop(app)
+            # PR #545 round-4：feeder 先于 replica 锁释放停转——先 close 会
+            # 开出「新 Host 拿锁启动 feeder、旧 feeder 线程还在跑耗时批次」
+            # 的窗口。stop() join 上限 5s，批次投递可更长（5k ≈ 7s）——
+            # 窗口内双 feeder 并发是安全的：pickup/advance 的 CAS、
+            # lease_guarded_mutation 串行化与 v81 标记共同兜底（同批至多
+            # 一方落账），泄漏的只是内存态而非正确性。
+            campaign_feeder.stop()
             # Release the replica-probe lock before the pools close so the
             # next starter (rolling restart) does not see a stale holder.
             replica_probe.close()
             # Reap chat sessions before closing DB pools: teardown revokes
             # scoped tokens and settles permission waiters via the DB.
             studio_chat_service.shutdown()
-            for thread in (
-                sweeper_thread,
-                *(slow_sweeps or ()),
-            ):
+            for thread in (sweeper_thread, *(slow_sweeps or ())):
                 if thread is not None:
                     thread.stop()
             if workflow_worker_thread is not None:
@@ -235,6 +233,8 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.materials_service = MaterialsService(job_db, object_storage)
     app.state.job_artifact_objects = job_artifact_objects
     app.state.workspace_event_aggregator = workspace_event_aggregator
+    # The resume endpoint's wake hook (design §2.4); no-op without the thread.
+    app.state.campaign_feeder = campaign_feeder
     agent_catalog = AgentCatalogService(settings, job_db)
     workspace_execution_configuration = WorkspaceExecutionConfigurationService(job_db, settings)
     workspace_configuration = WorkspaceConfigurationService(job_db, settings)
@@ -279,8 +279,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 def create_prod_app() -> FastAPI:
     """Uvicorn entry: ``server.app.main:create_prod_app --factory``.
 
-    Importing this module must stay side-effect free (no DB bootstrap, no
-    seeding, no pause reset) — the former module-level ``app`` needed an env
-    escape hatch; this replaces it.
+    Importing this module must stay side-effect free (no DB bootstrap,
+    no seeding, no pause reset).
     """
     return create_app(start_worker=True)

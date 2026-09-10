@@ -8,7 +8,10 @@ from server.app.events import JobEventManager
 from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
-from server.app.jobs.atomic_mutations import JobMutationConflict
+from server.app.jobs.atomic_mutations import (
+    JobMutationConflict,
+    record_campaign_delivery,
+)
 from server.app.jobs.workflow_upgrade_mutation import upgrade_job_workflow
 from server.app.services.job_workflow_upgrade_config import intake_frozen_config_json
 from server.app.workflows.definition import workflow_definition_from_dict
@@ -43,7 +46,15 @@ class JobWorkflowUpgradeService:
             "message": message,
         }
 
-    def upgrade(self, workspace_id: str, job_id: str) -> dict[str, Any]:
+    def upgrade(self, workspace_id: str, job_id: str, *, campaign_id: str = "") -> dict[str, Any]:
+        """Upgrade one job to the workspace's active revision.
+
+        ``campaign_id`` (feeder batches only) writes the v81 delivery marker
+        inside the upgrade transaction — atomic with the pin flip, so the
+        crashed feeder's replay pass can skip already-delivered jobs (#545
+        round-4; upgrade's ``already_current`` check alone cannot tell a
+        crashed pass's flip from an operator's fresh upgrade).
+        """
         job = self.job_db.get_job(job_id)
         if job is None:
             return self._result(job_id, "failed", "not_found", "Job not found")
@@ -109,6 +120,8 @@ class JobWorkflowUpgradeService:
                     node_keys=list(definition.executable_nodes),
                     frozen_config_json=frozen_config_json,
                 )
+                if campaign_id:
+                    record_campaign_delivery(conn, campaign_id, job_id)
         except JobMutationConflict as exc:
             return self._result(job_id, "skipped", exc.reason_code, str(exc))
 

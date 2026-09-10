@@ -245,4 +245,4 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         ).fetchone()
     assert migration is not None
     # The registry tail at the CURRENT schema version (v80, #532/#505).
-    assert migration["name"] == "campaigns"
+    assert migration["name"] == "campaign_deliveries"
