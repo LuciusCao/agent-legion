@@ -190,7 +190,10 @@ else
     "${GITHUB_RELEASE_BASE}/velites-v${VELITES_VERSION}/${VELITES_TARBALL}"
   curl -fsSL -o "$TMPDIR_/sha256.txt" \
     "${GITHUB_RELEASE_BASE}/velites-v${VELITES_VERSION}/sha256.txt"
-  expected="$(awk -v f="$VELITES_TARBALL" '$2 == f {print $1}' "$TMPDIR_/sha256.txt")"
+  # 发布端 sha256.txt 的文件名带 ./ 前缀（velites-release 用
+  # sha256sum ./*.tar.gz 生成，输出保留原始 FILE 名）——比较前先剥掉
+  # （codex P1 on #583：精确匹配曾恒为空导致安装中止）。
+  expected="$(awk -v f="$VELITES_TARBALL" '{sub(/^\.\//, "", $2)} $2 == f {print $1}' "$TMPDIR_/sha256.txt")"
   [ -n "$expected" ] || die "sha256.txt 中没有 ${VELITES_TARBALL} 的条目（版本与 Release 不匹配？）"
   # sha256sum（Linux）与 shasum -a 256（macOS）双兼容
   actual="$(sha256sum "$TMPDIR_/velites.tar.gz" 2>/dev/null || shasum -a 256 "$TMPDIR_/velites.tar.gz" | awk '{print $1}')"
