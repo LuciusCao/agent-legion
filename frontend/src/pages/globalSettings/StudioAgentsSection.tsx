@@ -101,6 +101,7 @@ function StudioAgentsEditor({
   // 在 Parts——rows/baseline/availability/detection/revision 一次性
   // 对齐服务端文档，任何持有旧 revision 的状态都不得存活）。
   const applyResult = useApplyRegistryResult({
+    setApiBase,
     setRows,
     setBaseline,
     setAvailability,

@@ -48,6 +48,7 @@ export function serialize(apiBase: string, rows: AgentRow[]): string {
 
 /** #355 审核 P1：编辑器「前进」原语（保存/重检测/409 刷新三路共用）。 */
 export function useApplyRegistryResult(setters: {
+  setApiBase: (v: string) => void
   setRows: (rows: AgentRow[]) => void
   setBaseline: (v: string) => void
   setAvailability: (v: Record<string, boolean>) => void
@@ -58,6 +59,10 @@ export function useApplyRegistryResult(setters: {
   return (result: StudioAgentRegistryResponse) => {
     queryClient.setQueryData(extraQueryKeys.studioAgents(), result)
     const nextRows = toRows(result)
+    // codex P2：api_base 必须随快照一并前进——它还是会话 token 的回调
+    // 目标；漏更会让刷新后立即 dirty，下次保存把旧地址写回、覆盖并发
+    // 修改。
+    setters.setApiBase(result.api_base)
     setters.setRows(nextRows)
     setters.setBaseline(serialize(result.api_base, nextRows))
     setters.setAvailability(result.availability ?? {})

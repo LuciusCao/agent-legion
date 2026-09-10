@@ -286,6 +286,9 @@ describe('StudioAgentsSection', () => {
     // 文档（探测合并进了 codex 行、revision 前进到 rev-2）。
     const concurrent: StudioAgentRegistryResponse = {
       ...registry,
+      // codex P2：并发修改同时改了 api_base——刷新必须一并前进（否则
+      // 立即 dirty、下次保存把旧地址写回覆盖并发修改）。
+      api_base: 'http://127.0.0.1:9000',
       agents: [
         ...(registry.agents ?? []),
         {
@@ -327,6 +330,10 @@ describe('StudioAgentsSection', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('agent-label-2')).toHaveValue('Codex')
     })
+    // api_base 同步前进（codex P2：不是只剩 rows 前进的半更新状态）。
+    expect(screen.getByLabelText('平台回调地址（api_base）')).toHaveValue(
+      'http://127.0.0.1:9000'
+    )
     // 本地未保存的编辑被丢弃（对话框文案明示）。
     expect(screen.getByLabelText('agent-label-0')).toHaveValue('Kimi Code')
 
