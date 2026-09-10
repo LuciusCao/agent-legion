@@ -58,22 +58,28 @@ export function sanitizeNodeForType(
 
 // 类型切换前置校验：目标类型必需的状态在写入前检查，不满足即抛错并
 // 保留原类型（草稿可自动保存，半应用态会被持久化）。loader 侧对应：
-// - code/agent 必须有非空 capability（loader.py 空 capability 拒绝；
-//   approval 节点按契约无 capability，approval→code/agent 必须先补）。
+// - code/agent 必须有非空 capability（loader.py 空 capability 拒绝）。
+//   approval 节点按契约无 capability，approval→code/agent 必须随切换
+//   原子补上（capabilityChannel；结构化 UI 对 approval 隐藏 capability
+//   输入框，「先补再切」在该形态下不可达，#405）。
 // - approval 必须有来自可执行节点的入边（approval_node.py
 //   validate_approval_edges；仅 start 驱动的根节点不满足，start 的合成
-//   边不算数）。判定源 = 节点 after ∪ 草稿 edges 的 to 侧（排除 from 为
-//   start 的边）——手写 v2 YAML 用 edges 声明依赖时 after 只是 echo 字段，
-//   单看 after 会误拦（与 validate_approval_edges 的物化 edges 同构）。
+//   边不算数）。判定源 = 节点 after ∪ 草稿 edges 中进入本节点的边的
+//   from 侧（排除 start 上游）——手写 v2 YAML 用 edges 声明依赖时 after
+//   只是 echo 字段，单看 after 会误拦；而草稿任意位置的边与本节点无关，
+//   收集全图 edge.to 会把「别处存在一条非 start 边」误判为入边（#405）。
 export function validateNodeTypeSwitch(
   draft: {
+    schema_version?: number
     nodes?: Record<string, WorkflowYamlNode>
     edges?: Array<{ from?: string; to?: string }>
   },
   node: WorkflowYamlNode,
-  targetType: 'code' | 'agent' | 'approval'
+  nodeKey: string,
+  targetType: 'code' | 'agent' | 'approval',
+  capabilityChannel?: string
 ): void {
-  if (targetType !== 'approval' && !node.capability) {
+  if (targetType !== 'approval' && !node.capability && !capabilityChannel) {
     throw new WorkflowNodeTypeSwitchError(
       `切换为 ${targetType} 需要先在「基本设置」填写 capability（当前节点没有）`
     )
@@ -84,14 +90,23 @@ export function validateNodeTypeSwitch(
         .filter(([, n]) => n.type === 'start')
         .map(([key]) => key)
     )
-    const upstream = new Set([
-      ...(node.after ?? []),
-      ...(draft.edges ?? [])
-        .filter((edge) => edge.to && !startKeys.has(edge.from ?? ''))
-        .map((edge) => edge.to as string),
-    ])
+    // 审核 P2 + codex P2：loader 只对 schema_version === 1 物化 after
+    // （loader._load_edges），v2+（含 3 及未来版本）完全以 edges 列表
+    // 为准。判定若对 v3+ 计入 after，「有 after 无入边」的草稿前端放
+    // 行、发布被 validate_approval_edges 拒——正是要消除的漂移；与
+    // loader 同构：仅缺省/1 计入。
+    const upstream = new Set(
+      draft.schema_version == null || draft.schema_version === 1
+        ? (node.after ?? [])
+        : []
+    )
+    for (const edge of draft.edges ?? []) {
+      if (edge.to === nodeKey) upstream.add(edge.from ?? '')
+    }
+    // 上游键必须真实存在于 nodes——loader 对未知来源单独拒绝
+    // （「Unknown edge source/dependency」），此处同构收口。
     const executableUpstream = [...upstream].filter(
-      (key) => !startKeys.has(key)
+      (key) => key && !startKeys.has(key) && (draft.nodes ?? {})[key] != null
     )
     if (executableUpstream.length === 0) {
       throw new WorkflowNodeTypeSwitchError(
