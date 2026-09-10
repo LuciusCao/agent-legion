@@ -27,20 +27,50 @@ def test_publish_isolated_by_channel():
     assert q2.empty()
 
 
-def test_bounded_queue_evicts_slow_subscriber_with_sentinel():
+def test_bounded_queue_drops_oldest_for_slow_subscriber():
+    """#563：瞬时慢消费不再驱逐——丢最旧腾位后投递最新事件，订阅保留。"""
     bus = InProcessEventBus()
     queue = bus.subscribe("dashboard")
     for _ in range(bus.QUEUE_MAXSIZE):
         bus.publish("dashboard", "x")
-    bus.publish("dashboard", "overflow")  # 队满 → 驱逐并投递哨兵
-    bus.publish("dashboard", "after-removal")
+    bus.publish("dashboard", "overflow")  # 队满 → 丢最旧、投递最新，不驱逐
     items = [queue.get_nowait() for _ in range(queue.qsize())]
-    # 最旧事件被丢弃以腾出位置，哨兵让流结束、客户端重连后 resync。
-    assert items[-1] is _EVICTED
+    # 最旧一条被丢弃腾位，最新事件在队尾，订阅者仍在册。
+    assert items[-1] == "overflow"
     assert len(items) == bus.QUEUE_MAXSIZE
+    assert queue in bus._subscribers.get("dashboard", {})
+
+
+def test_bounded_queue_evicts_subscriber_on_sustained_overflow():
+    """#563：连续溢出达到阈值（真死连接）才驱逐——哨兵结束流、订阅移除。"""
+    bus = InProcessEventBus()
+    queue = bus.subscribe("dashboard")
+    for _ in range(bus.QUEUE_MAXSIZE + 5):
+        bus.publish("dashboard", "x")
+    # 队已满且持续不消费：每次 publish 都是"丢最旧 + 投递最新 + 计数 +1"。
+    for index in range(bus.QUEUE_MAXSIZE + 10):
+        bus.publish("dashboard", f"burst-{index}")
+        if queue not in bus._subscribers.get("dashboard", {}):
+            break
+    items = [queue.get_nowait() for _ in range(queue.qsize())]
+    # 驱逐哨兵在队尾（腾位后投递），流结束、客户端重连后 resync。
+    assert items[-1] is _EVICTED
     assert "dashboard" not in bus._subscribers or queue not in bus._subscribers.get(
         "dashboard", set()
     )
+
+
+def test_overflow_counter_resets_on_successful_delivery():
+    """#563：一次成功投递清零连续溢出计数——间歇慢消费不累积到驱逐。"""
+    bus = InProcessEventBus()
+    queue = bus.subscribe("dashboard")
+    for _ in range(bus.QUEUE_MAXSIZE + 3):
+        bus.publish("dashboard", "x")
+    assert queue in bus._subscribers.get("dashboard", {})  # 未达阈值
+    queue.get_nowait()  # 腾出一个位置，下一次 publish 成功投递
+    bus.publish("dashboard", "fresh")  # 计数清零
+    assert bus._overflows[queue] == 0
+    assert queue in bus._subscribers.get("dashboard", {})
 
 
 def test_eviction_at_max_clients_sends_sentinel():

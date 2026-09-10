@@ -7,6 +7,13 @@ from typing import Protocol
 _EVICTED: object = object()
 """投递到被驱逐订阅者队列的哨兵；订阅方收到后应立即结束流。"""
 
+# #563：QueueFull 时先丢最旧腾位再投递，只有连续溢出达到该阈值才驱逐。
+# 流式事件（studio chat 的 text 快照帧）是全量语义——丢中间帧无损，最新
+# 帧到达即自愈；立刻驱逐会把短暂慢消费（前端合盖/后台节流）升级成断流
+# 重连，而重连空窗盖过 turn 结尾正是 #563 截断的触发形态。连续溢出说明
+# 消费端真的死了（驱逐防心跳僵尸连接的原语义保留）。
+OVERFLOW_EVICT_THRESHOLD = 64
+
 
 def workspace_channel(workspace_id: str) -> str:
     return f"workspace:{workspace_id}"
@@ -34,6 +41,8 @@ class InProcessEventBus:
         # dict 保持插入序，保证驱逐的是全局最旧订阅者。
         self._subscribers: dict[str, dict[asyncio.Queue, None]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
+        # #563：per-queue 连续溢出计数（成功投递清零）。
+        self._overflows: dict[asyncio.Queue, int] = {}
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
         self._loop = loop
@@ -51,6 +60,7 @@ class InProcessEventBus:
         if queues is None:
             return
         queues.pop(queue, None)
+        self._overflows.pop(queue, None)
         if not queues:
             self._subscribers.pop(channel, None)
 
@@ -79,20 +89,29 @@ class InProcessEventBus:
         for queue in list(queues):
             try:
                 queue.put_nowait(payload)
+                self._overflows[queue] = 0
             except asyncio.QueueFull:
-                # Slow subscriber falling QUEUE_MAXSIZE events behind: evict it
-                # with the sentinel (dropping the oldest queued item to make
-                # room) so its stream ends and the client reconnects/resyncs,
-                # instead of leaving it on a heartbeat-only zombie connection.
-                # #204 broad-except audit: the two suppressed calls below can only
+                # #563：慢消费先丢最旧腾位再投递一次（全量快照语义下丢中间
+                # 帧无损）；只有连续 OVERFLOW_EVICT_THRESHOLD 次腾位仍满才
+                # 驱逐（真死连接，心跳僵尸防护原语义保留）。
+                # #204 broad-except audit: the suppressed calls below can only
                 # fail in the QueueFull race (the queue filled between the
-                # except above and the room-making get_nowait) — the sentinel
-                # then never lands, but the eviction below still removes the
-                # subscriber, which is the whole point; the dropped payload is
-                # already lost by definition of the overflow. Nothing else is
-                # suppressible here (get/put on an unbounded asyncio.Queue
-                # have no other failure mode), so the suppression cannot eat a
-                # programming error from unrelated code.
+                # except above and the room-making get_nowait) — the retry put
+                # then simply drops this payload (already lost by definition of
+                # the overflow); nothing else is suppressible on an unbounded
+                # asyncio.Queue, so the suppression cannot eat a programming
+                # error from unrelated code.
+                overflows = self._overflows.get(queue, 0) + 1
+                self._overflows[queue] = overflows
+                with contextlib.suppress(Exception):
+                    queue.get_nowait()
+                    queue.put_nowait(payload)
+                if overflows < OVERFLOW_EVICT_THRESHOLD:
+                    continue
+                # Evict with the sentinel (dropping the oldest queued item to
+                # make room) so its stream ends and the client
+                # reconnects/resyncs, instead of leaving it on a
+                # heartbeat-only zombie connection.
                 with contextlib.suppress(Exception):
                     queue.get_nowait()
                     queue.put_nowait(_EVICTED)

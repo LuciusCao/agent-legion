@@ -345,6 +345,69 @@ describe('useStudioChat', () => {
     )
   })
 
+  it('heals a truncated stream when turn_end arrives via REST refill (#563)', async () => {
+    const { result } = await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    // 流式残片指向未知消息 → after_seq 增量补齐；补齐响应里带着 turn_end
+    // （断连空窗盖过 turn 结尾时的唯一到达路径），必须与 SSE 实时 turn_end
+    // 同等触发全量回取——否则截断的本地副本永久定格。
+    emit({ type: 'message', message: textMessage('m1', 1, 'head') })
+    mockApi.fetchStudioChatMessages
+      .mockResolvedValueOnce([
+        {
+          id: 'st1',
+          session_id: 's1',
+          kind: 'status',
+          role: 'system',
+          content: { event: 'turn_end', stop_reason: 'end_turn' },
+          seq: 2,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ])
+      .mockResolvedValueOnce([textMessage('m1', 1, 'head + full tail')])
+    emit({
+      type: 'message',
+      message: {
+        id: 'm2',
+        session_id: 's1',
+        kind: 'text',
+        role: 'agent',
+        content: { text: 'partial' },
+      },
+    })
+
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith('ws1', 's1', 0)
+    )
+    await waitFor(() =>
+      expect(result.current.messages[0]?.content.text).toBe('head + full tail')
+    )
+  })
+
+  it('heals an unterminated streaming row on SSE reconnect (#563)', async () => {
+    const { result } = await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    emit({ type: 'message', message: textMessage('m1', 1, 'truncated tail') })
+    expect(result.current.messages[0]?.content.text).toBe('truncated tail')
+
+    // turn 在断连期间结束：重连时本地仍挂着未终结的 agent text 行，
+    // 直接全量回取校准（after_seq 增量补齐取不回原地更新的行）。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      textMessage('m1', 1, 'complete text after reconnect'),
+    ])
+    const source = EventSourceMock.instances[0]
+    act(() => source.onopen?.())
+
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith('ws1', 's1', 0)
+    )
+    await waitFor(() =>
+      expect(result.current.messages[0]?.content.text).toBe(
+        'complete text after reconnect'
+      )
+    )
+  })
+
   it('invalidates studio canvas queries on turn_end so agent edits show up', async () => {
     await renderChat()
     await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))

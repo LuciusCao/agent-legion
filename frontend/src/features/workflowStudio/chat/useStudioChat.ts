@@ -20,6 +20,7 @@ import {
   deriveChatViews,
   maxSeq,
   statusEvent,
+  streamingTextId,
   upsertMessage,
   type ChatMessage,
 } from './studioChatMessages'
@@ -71,7 +72,7 @@ export function useStudioChat(workspaceId: string | undefined) {
 
   const refillMessages = useCallback(
     async (fromSeq?: number) => {
-      if (!workspaceId || !activeSessionId) return
+      if (!workspaceId || !activeSessionId) return false
       const sessionId = activeSessionId
       const after = fromSeq ?? maxSeq(messagesRef.current)
       const fetched = await fetchStudioChatMessages(
@@ -79,12 +80,17 @@ export function useStudioChat(workspaceId: string | undefined) {
         sessionId,
         after
       )
-      setMessages((current) =>
-        // 跨会话竞态：拉取在途时切换了会话，旧会话的消息不得合入新列表。
-        activeSessionIdRef.current === sessionId
-          ? mergeMessages(current, fetched)
-          : current
-      )
+      let hasTerminal = false
+      setMessages((current) => {
+        // 跨会话竞态：拉取在途时切换了会话，旧会话的消息不得合入新列表；
+        // 函数式更新以 current 为基线——并发的 refill(0) 与增量补齐各自
+        // 合入，后落者不再回写旧基线覆盖前者（#563）。
+        if (activeSessionIdRef.current !== sessionId) return current
+        const merged = mergeMessages(current, fetched)
+        hasTerminal = merged.hasTerminal
+        return merged.messages
+      })
+      return hasTerminal
     },
     [workspaceId, activeSessionId]
   )
@@ -148,7 +154,11 @@ export function useStudioChat(workspaceId: string | undefined) {
           const missed = upsertMessage(messagesRef.current, incoming) === null
           setMessages((current) => upsertMessage(current, incoming) ?? current)
           if (missed) {
-            void refillMessages().catch(() => undefined)
+            void refillMessages()
+              .then((hasTerminal) => {
+                if (hasTerminal) void refillMessages(0).catch(() => undefined)
+              })
+              .catch(() => undefined)
           }
           // 断连期间的流式 text 尾部会永久截断（原地更新 seq 不变，after_seq
           // 增量补齐拿不到）；turn 结束时全量回取一次自愈。
@@ -162,6 +172,13 @@ export function useStudioChat(workspaceId: string | undefined) {
       },
       onStatus: (status) => {
         if (status !== 'open') return
+        // #563 重连自愈：断连空窗盖过 turn 结尾时，turn_end 只能经下方
+        // after_seq 补齐静默合入（不触发上面的 refill(0) 分支），截断的
+        // 流式 text 副本会永久定格成"已完成"消息。本地还挂着未终结的
+        // agent text 行即处于该状态——直接全量回取一次校准。
+        if (streamingTextId(messagesRef.current) !== null) {
+          void refillMessages(0).catch(() => undefined)
+        }
         void refillMessages().catch(() => undefined)
         // 断连期间的会话状态翻转（如 agent 抛权限请求置
         // awaiting_permission）不补发 SSE；重连必须重拉会话快照，否则本地
