@@ -38,6 +38,29 @@ const draftYaml = [
   '',
 ].join('\n')
 
+// 中游审批门（#405）：sanitize 切入 approval 已剥 capability，结构化 UI
+// 对 approval 又隐藏能力 Key 输入——切回 code/agent 只能经弹窗补。
+const approvalGateYaml = [
+  'key: demo',
+  'nodes:',
+  '  _start:',
+  '    type: start',
+  '  draft_gen:',
+  '    type: code',
+  '    label: 起草',
+  '    capability: draft_gen',
+  '    after: [_start]',
+  '  gate:',
+  '    type: approval',
+  '    label: 审批',
+  '    config: {rework_target: draft_gen, feedback_artifact: review.json}',
+  '    after: [draft_gen]',
+  'edges:',
+  '  - from: _start',
+  '    to: draft_gen',
+  '',
+].join('\n')
+
 // #426 codex 终轮 P2：settle 信号基线（两份查询均 settle）——本套件聚焦
 // ghost 节点解析，门控组合逻辑由 agentBindingStatus.test.tsx 覆盖。
 const settledSettle = {
@@ -238,6 +261,101 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(
       screen.queryByRole('button', { name: '编辑 Agent' })
     ).not.toBeInTheDocument()
+  })
+
+  it('switches approval→code atomically via the capability prompt (#405)', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const promptSpy = vi
+      .spyOn(window, 'prompt')
+      .mockReturnValue('gate_cap' as unknown as string)
+    const setDefinitionYaml = vi.fn()
+    // 结构化 UI 对 approval 隐藏能力 Key 输入（loader 禁 capability）；
+    // 切回 code 必须经弹窗补 capability，一次提交原子落草稿。
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
+        selectedNodeKey="gate"
+        definitionYaml={approvalGateYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'code' },
+    })
+
+    expect(promptSpy).toHaveBeenCalledWith(expect.stringContaining('capability'))
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+    const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
+    const node = (
+      yaml.load(nextYaml) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.gate
+    // type 与 capability 同一次提交写入（无中间非法态）。
+    expect(node?.type).toBe('code')
+    expect(node?.capability).toBe('gate_cap')
+    // 审批专属 config 键随切换剥除。
+    expect(node).not.toHaveProperty('config')
+  })
+
+  it('keeps the draft untouched when the capability prompt is dismissed (#405)', async () => {
+    const promptSpy = vi
+      .spyOn(window, 'prompt')
+      .mockReturnValue(null as unknown as string)
+    const setDefinitionYaml = vi.fn()
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
+        selectedNodeKey="gate"
+        definitionYaml={approvalGateYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'code' },
+    })
+
+    // 取消（或留空）即放弃本次切换：草稿不动、不触发破坏性确认。
+    expect(promptSpy).toHaveBeenCalled()
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+    const confirmSpy = vi.spyOn(window, 'confirm')
+    expect(confirmSpy).not.toHaveBeenCalled()
+  })
+
+  it('skips the capability prompt when switching between executable types', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('x')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
+        selectedNodeKey="intake"
+        definitionYaml={draftYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    // code/agent 互切本就有 capability，弹窗不该出现（直通路径不变）。
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'agent' },
+    })
+
+    expect(promptSpy).not.toHaveBeenCalled()
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
   })
 
   it('keeps Agent schema ownership inside Agent config (#406)', async () => {

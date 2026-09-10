@@ -112,15 +112,15 @@ describe('patchWorkflowNodeType', () => {
     // approval 节点按契约无 capability；loader 对 code/agent 要求非空。
     // 前置校验必须拦下，否则草稿落入「type 已改、capability 缺失」的
     // 不可发布半应用态（AGENTS.md L88）。被拦截时草稿原样保留——审批
-    // config 键的剥除因此只发生在「先补 capability 再切」的路径上。
+    // config 键的剥除因此只发生在「补 capability 再切」的路径上。
     expect(() => patchWorkflowNodeType(midDagYaml, 'gate', 'code')).toThrow(
       WorkflowNodeTypeSwitchError
     )
     expect(() => patchWorkflowNodeType(midDagYaml, 'gate', 'agent')).toThrow(
       WorkflowNodeTypeSwitchError
     )
-    // 用户在「基本设置」补齐 capability 后切换成功，审批专属 config 键
-    // 随切换剥除（空 config 整体删除）。
+    // 手写「approval + capability」的中间态 YAML 仍是合法直通路径
+    // （已有 capability 优先于补能力通道）。
     const withCapability = midDagYaml.replace(
       '    type: approval',
       '    type: approval\n    capability: gate_cap'
@@ -132,6 +132,25 @@ describe('patchWorkflowNodeType', () => {
     expect(node).not.toHaveProperty('config')
   })
 
+  it('switches approval→code atomically via the capability channel (#405)', () => {
+    // 结构化 UI 对 approval 隐藏能力 Key 输入，「先在基本设置补再切」
+    // 不可达；切换弹窗收集的 capability 随本次 patch 原子写入——type
+    // 与 capability 一次提交，无中间非法态。
+    const out = patchWorkflowNodeType(midDagYaml, 'gate', 'code', 'gate_cap')
+    const node = parseNodes(out).nodes?.gate
+    expect(node?.type).toBe('code')
+    expect(node?.capability).toBe('gate_cap')
+    // 审批专属 config 键仍随切换剥除（空 config 整体删除）。
+    expect(node).not.toHaveProperty('config')
+    const toAgent = patchWorkflowNodeType(midDagYaml, 'gate', 'agent', 'gate_cap')
+    expect(parseNodes(toAgent).nodes?.gate?.type).toBe('agent')
+    expect(parseNodes(toAgent).nodes?.gate?.capability).toBe('gate_cap')
+    // 空白通道等同未提供（弹窗留空不应绕过前置校验）。
+    expect(() =>
+      patchWorkflowNodeType(midDagYaml, 'gate', 'code', '   ')
+    ).toThrow(WorkflowNodeTypeSwitchError)
+  })
+
   it('refuses →approval without an executable upstream (validate_approval_edges mirror)', () => {
     // 仅 start 驱动的根节点切 approval：start 的合成边不算可执行上游。
     expect(() => patchWorkflowNodeType(baseYaml, 'intake', 'approval')).toThrow(
@@ -141,7 +160,8 @@ describe('patchWorkflowNodeType', () => {
 
   it('accepts →approval when the upstream is declared via edges only (v2 yaml)', () => {
     // 手写 v2 YAML 用 edges 声明依赖、after 只是 echo（甚至缺省）——判定源
-    // 必须是 after ∪ edges，与 validate_approval_edges 的物化 edges 同构。
+    // 必须是 after ∪ 进入本节点的 edges（取 from 侧），与
+    // validate_approval_edges 的物化 edges 同构。
     const edgesOnlyYaml = [
       'key: demo',
       'schema_version: 2',
@@ -178,6 +198,45 @@ describe('patchWorkflowNodeType', () => {
     expect(() =>
       patchWorkflowNodeType(startOnlyEdgesYaml, 'gate', 'approval')
     ).toThrow(WorkflowNodeTypeSwitchError)
+  })
+
+  it('rejects →approval when the draft edge does not enter this node (#405)', () => {
+    // #405：收集全图 edge.to 会把「别处存在一条非 start 边」误判为入边
+    // （判定退化为任意非 start 边即可通过）。入边判定必须约束
+    // edge.to === 当前节点、收集 edge.from；本用例里唯一的非 start 边
+    // （draft_gen → intake）不进入 gate，gate 没有可执行入边仍拦截。
+    const unrelatedEdgeYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  draft_gen:',
+      '    type: code',
+      '    capability: draft_gen',
+      '    after: [_start]',
+      '  intake:',
+      '    type: code',
+      '    capability: intake',
+      '    after: [draft_gen]',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      '    after: [_start]',
+      'edges:',
+      '  - {from: _start, to: draft_gen}',
+      '  - {from: draft_gen, to: intake}',
+      '',
+    ].join('\n')
+    expect(() =>
+      patchWorkflowNodeType(unrelatedEdgeYaml, 'gate', 'approval')
+    ).toThrow(WorkflowNodeTypeSwitchError)
+    // 对照：进入本节点的非 start 边才放行。
+    const incomingEdgeYaml = unrelatedEdgeYaml.replace(
+      '  - {from: draft_gen, to: intake}',
+      '  - {from: draft_gen, to: intake}\n  - {from: intake, to: gate}'
+    )
+    const out = patchWorkflowNodeType(incomingEdgeYaml, 'gate', 'approval')
+    expect(parseNodes(out).nodes?.gate?.type).toBe('approval')
   })
 
   it('drops skill when switching agent→code (EXEC-SKILL-NODE-001)', () => {
