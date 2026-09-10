@@ -119,6 +119,112 @@ describe('WorkflowNodeAgentEditor', () => {
     })
   })
 
+  // #464：toolOptions 按 runtime 派生——velites 多出 uuid（#445 刻意不进
+  // velites 默认列表，此前正常 UI 无法声明它），pi 不含。防止回归成固定
+  // 三元组后 velites Agent 又只能绕过 UI 调 API。
+  it('offers uuid in the tools select for velites agents but not for pi (#464)', async () => {
+    // velites（默认 runtime）：下拉选项含 uuid 与基础三元组。
+    // （beforeEach 的 definition.runtime='pi'，这里改挂 velites Agent。）
+    mocks.fetchAgentDefinition.mockResolvedValue({
+      latest: null,
+      published: {
+        status: 'published',
+        definition: {
+          capability: 'generate_key_info',
+          runtime: 'velites',
+          skill: 'demo/skill',
+          tools: ['read'],
+        },
+      },
+    })
+    renderEditor({ agentId: 'agent-a', capability: 'generate_key_info' })
+    await screen.findByDisplayValue('agent-a')
+    // MUI 菜单开合是异步过渡：mouseDown 包 act，等 option 渲染出来。
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByLabelText('Tools'))
+    })
+    expect(screen.getByRole('option', { name: 'uuid' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'read' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'write' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'bash' })).toBeInTheDocument()
+  })
+
+  it('hides uuid from the tools select when the agent runs on pi (#464)', async () => {
+    // pi Agent（beforeEach 加载的 definition.runtime='pi'）：选项面退回
+    // 基础三元组。
+    renderEditor({ agentId: 'agent-a', capability: 'generate_key_info' })
+    await screen.findByDisplayValue('agent-a')
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByLabelText('Tools'))
+    })
+    expect(screen.getByRole('option', { name: 'read' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('option', { name: 'uuid' })
+    ).not.toBeInTheDocument()
+  })
+
+  // #464：velites→pi 切换时已选的 uuid 必须被过滤——pi 不认识该工具，
+  // payload 带上它会把无效工具名发给目标 runtime。
+  it('drops a selected uuid when the runtime switches from velites to pi (#464)', async () => {
+    mocks.fetchAgentDefinition.mockResolvedValue({
+      latest: null,
+      published: {
+        status: 'published',
+        definition: {
+          capability: 'generate_key_info',
+          runtime: 'velites',
+          skill: 'demo/skill',
+          tools: ['read'],
+        },
+      },
+    })
+    mocks.saveAgentDraft.mockResolvedValue({})
+    renderEditor({ agentId: 'agent-a', capability: 'generate_key_info' })
+    await screen.findByDisplayValue('agent-a')
+
+    // velites 下勾选 uuid。
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByLabelText('Tools'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('option', { name: 'uuid' }))
+    })
+
+    // 切到 pi：选项面不含 uuid，已选值里的 uuid 同步剔除。
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByLabelText('Runtime'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('option', { name: 'pi' }))
+    })
+    // 选 runtime 单选点击即关菜单；pi 下重开 Tools 下拉确认 uuid 已不在
+    // 选项面（多选菜单开着时「Tools」文本命中多个元素——label 的 for
+    // 指向 select 根 div，经它定位再 mouseDown）。
+    await act(async () => {
+      const toolsLabel = screen
+        .getAllByText('Tools')
+        .find((el) => el.tagName === 'LABEL') as HTMLLabelElement
+      fireEvent.mouseDown(
+        document.getElementById(toolsLabel.htmlFor) as HTMLElement
+      )
+    })
+    expect(
+      screen.queryByRole('option', { name: 'uuid' })
+    ).not.toBeInTheDocument()
+    // 关掉菜单再保存（多选下拉开着时保存按钮在传送门遮挡下不可达）。
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement as HTMLElement, {
+        key: 'Escape',
+      })
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    })
+    const saveCall = mocks.saveAgentDraft.mock.calls[0]
+    expect(saveCall?.[2]).toMatchObject({ runtime: 'pi' })
+    expect(saveCall?.[2].tools).not.toContain('uuid')
+  })
+
   it('surfaces the server conflict message when the capability is taken (#407)', async () => {
     // 同 capability 已有 Agent 时后端 409，detail 原文进错误框引导直接编辑。
     // #436 独立复审：另建变体的指引只面向 API/MCP（表单已无 agent_id 输入）。

@@ -683,7 +683,7 @@ exemptions:
   path: server/app/services/studio_publish_requests.py
   reason: 'The #429 review rounds harden the confirm path: resolve drops the expires_at predicate (a publish
     that outlives the remaining TTL must still record confirmed — TOCTOU), a losing resolve race reports
-    the row''s final state instead of 404, the claim does the TTL check and the observed-expiry sweep,
+    the row''s final state instead of 404, the claim does the TTL check and the observed-expiry sweep. #464 adds the confirm-phase heartbeat context (2 lines)
     and result_revision_id distinguishes a new revision from a runtime-only save via active-before/after
     probing. The #429 third round (codex P1s) adds the confirming claim state (the pre-publish atomic
     pending→confirming move that closes the cancel race and rolls back to pending on refused gates) and
@@ -1283,3 +1283,41 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
   ceiling: 76
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/inspector/AgentEditor.tsx
+  reason: '#464 makes the tools option list runtime-derived (velites adds uuid, pi keeps the
+    base triple) plus the runtime-switch filter that drops an out-of-list selected tool (a
+    velites-only uuid left selected after switching to pi would ship an invalid tool name to
+    the target runtime — velites rejects unknown --tools outright). The growth is the
+    toolOptionsFor helper, the setState-during-render adjustment block, and their contract
+    comments. This is the deliberate stopgap form: #476 owns the durable fix (velites tool
+    catalog self-description + Studio rendering from it), and #407/#440 will move tools to
+    nodes where the option surface migrates wholesale. Harvest when either lands.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 309
+- check: architecture.file_budget
+  path: server/app/jobs/queries/studio_publish_request_writes.py
+  reason: '#464 adds heartbeat_confirming_publish_request (the confirming claim''s lease
+    renewal — one parameterized UPDATE whose predicate re-checks status=''confirming'' so
+    a resolved/expired row reports rowcount=0 instead of pretending the renew landed). The
+    method mirrors executors/_lease_lifecycle.heartbeat_lease semantics and lives with the
+    stale-confirming sweep it keeps honest; splitting it out would separate the lease from
+    its expiry predicate. Harvest with the publish handshake''s next rework.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 102
+- check: architecture.file_budget
+  path: server/app/services/studio_publish_request_support.py
+  reason: '#464 moves the confirm-time heartbeat into the shared-helpers module (the
+    _confirming_claim_heartbeat context manager + _heartbeat_loop): while the publish
+    executes, a daemon thread renews claimed_at every CONFIRMING_STALE_SECONDS/5 so
+    the poll''s 300s stale predicate only fires for genuinely dead owners — a legitimately
+    slow publish no longer gets flipped to expired mid-flight (the issue #464 misrecycle).
+    The helpers could not stay in studio_publish_requests.py (its 199 exemption ceiling
+    only ratchets down) and mirror the executor lease heartbeat''s loop/stop discipline
+    (executors/runtime.py); they carry no state-machine semantics of their own, which is
+    this module''s charter. Harvest with the handshake''s next rework.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 144

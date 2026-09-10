@@ -15,7 +15,15 @@ import styles from './AgentsPanel.module.css'
 // #408：velites（自研 harness，流式事件 + token 计量）是默认且优先级
 // 更高的 runtime，排在选项首位；pi 是外部 runtime，仅作备选。
 const runtimes: AgentRuntime[] = ['velites', 'pi']
-const toolOptions = ['read', 'write', 'bash']
+// 基础工具三元组：两个 runtime 共有。#464：选项面按 runtime 派生——
+// uuid（#445）是 velites 专属工具（刻意不进 velites 默认列表，需显式
+// 声明），pi 没有该工具。#407/#440 里 tools 将并入节点，届时选项面随迁
+// （根治方案 #476：velites 工具目录自描述 + Studio 动态渲染）。
+const baseToolOptions = ['read', 'write', 'bash']
+
+function toolOptionsFor(runtime: AgentRuntime): string[] {
+  return runtime === 'velites' ? [...baseToolOptions, 'uuid'] : baseToolOptions
+}
 
 type Props = {
   /** 当前 workspace（Agent 定义为 workspace 作用域，schema v46） */
@@ -58,6 +66,16 @@ export function AgentEditor({
   // 保存草稿时原样保留（legacy 兜底），新建 Agent 才传空。
   const [skill, setSkill] = useState('')
   const [tools, setTools] = useState<string[]>(['read', 'write', 'bash'])
+  // #464：velites→pi 切换时已选的 uuid 对 pi 无效——剔除出界工具，避免
+  // payload 带上目标 runtime 不认识的工具（velites 对 --tools 里的未知
+  // 名字直接报错）；pi→velites 方向只是新增可选项，无需处理。用
+  // setState-during-render 维持（React 认可的「按派生状态调整」模式，
+  // WorkflowNodeAgentGate.everReady 同款）：翻转当帧就修正，不级联渲染。
+  const [prevRuntime, setPrevRuntime] = useState(runtime)
+  if (runtime !== prevRuntime) {
+    setPrevRuntime(runtime)
+    setTools((prev) => prev.filter((t) => toolOptionsFor(runtime).includes(t)))
+  }
   const [requiresLabels, setRequiresLabels] = useState<
     Record<string, string> | undefined
   >(undefined)
@@ -265,7 +283,9 @@ export function AgentEditor({
           fullWidth
           slotProps={{ select: { multiple: true } }}
         >
-          {toolOptions.map((tool) => (
+          {/* #464：选项面随 runtime 派生（velites 含 uuid，pi 不含）——
+              uuid 是 velites 专属工具，正常 UI 此前无法声明它。 */}
+          {toolOptionsFor(runtime).map((tool) => (
             <MenuItem key={tool} value={tool}>
               {tool}
             </MenuItem>

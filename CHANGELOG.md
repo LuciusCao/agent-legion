@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Fixed
+- 发布跟进（issue #464，PR #460 codex P2 两项）：confirming 状态 300s
+  超时误回收——claim 存活期内每 60s 续租 claimed_at（心跳窗口包住
+  confirm→publish→resolve 执行段，与 executor lease 的 interval<TTL/3
+  纪律同源），慢发布不再被轮询侧过期谓词误杀；Studio Agent 编辑器的
+  工具选项按 runtime 区分——velites 含 uuid（#445 引入、需显式声明），
+  pi 保持三元组，runtime 切换时已选的出界工具自动剔除。
+
 ### Changed
 - 原生形态 velites 二进制收敛为 PATH 单一副本（issue #507）：解析顺序从
   「data/bin 自带副本优先、PATH 兜底」反转为「PATH 优先、data/bin 兜底」

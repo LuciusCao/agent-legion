@@ -6,7 +6,9 @@ sweeps that are NOT the create/claim transitions — the pending row's lazy
 expiry (the poll's observed-expiry path) and the manual publish path's
 supersede. The stale-confirming sweep entry point also lives here (the
 create transaction runs its own in-line version under the lock; this one
-serves the poll read of a workspace whose agent is not re-requesting).
+serves the poll read of a workspace whose agent is not re-requesting),
+plus the confirming claim's heartbeat renew (#464) that keeps the sweep
+from expiring a publish that is legitimately still executing.
 """
 
 from __future__ import annotations
@@ -66,6 +68,28 @@ class StudioPublishRequestWriteQueriesMixin(ConnectionQueriesMixin):
                 (workspace_id,),
             ).fetchone()
         return dict(row) if row is not None else None
+
+    def heartbeat_confirming_publish_request(self, request_id: str) -> bool:
+        """#464：续租一个执行中的 ``confirming`` claim——把 claimed_at 推到
+        当前时刻，谓词（claimed_at < now - 300s）随之重置。
+
+        confirm 是跨进程的 claim（claim → publish → resolve 之间没有事务
+        包住整段执行）：慢存储/DB 锁下 publish 可能合法地超过 300 秒，若
+        执行期间无任何续租，轮询侧的过期谓词会把仍在执行的 confirming 行
+        误改成 expired——发布可能仍成功落 revision，但 resolve 已匹配不到
+        该行，响应与 agent 状态双双误报。本方法与 executor lease 的
+        heartbeat 同语义（executors/_lease_lifecycle.heartbeat_lease）：谓词
+        骑在 UPDATE 上（status='confirming'），行已被并发 resolve/过期时
+        rowcount=0，返回 False 而非谎报续租成功——调用方（服务层的心跳
+        循环）据此停跳即可，不需要撤销什么。
+        """
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "update studio_publish_requests set claimed_at=current_timestamp"
+                " where id=%s and status='confirming'",
+                (request_id,),
+            )
+            return cursor.rowcount > 0
 
     def supersede_pending_publish_requests(self, workspace_id: str) -> int:
         """Move the workspace's pending rows to ``superseded``; returns the

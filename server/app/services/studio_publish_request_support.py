@@ -3,12 +3,16 @@
 Split from services/studio_publish_requests.py (file budget): the wire-
 payload shaping, the lazy-expiry timestamp comparison, and the draft-version
 token are used by the service layer but carry no state-machine semantics of
-their own.
+their own. The confirm 执行期心跳（#464，续租 claimed_at 防误回收）also
+lives here（_confirming_claim_heartbeat）——纯执行期辅助，无自身状态机。
 """
 
 from __future__ import annotations
 
 import hashlib
+import logging
+import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -17,11 +21,63 @@ from server.app.services.job_errors import ConflictError
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
 
+logger = logging.getLogger(__name__)
+
 # #429 四轮 P1: how long a ``confirming`` row may sit before readers treat
 # it as a dead process's claim (the confirm died between claim and resolve).
 # A healthy publish completes in seconds; 5 minutes absorbs slow disk/
 # pagination without ever sweeping a live claim.
 CONFIRMING_STALE_SECONDS = 300
+
+# #464：claim 存活期内的心跳间隔。300s 过期阈值 ÷ 5 = 每 60s 续租一次，
+# 连续漏跳三拍以内都远够不到阈值（与 executor lease 的 interval<TTL/3
+# 纪律同源，见 executors/runtime.py 的 10s/90s 配比）。
+_CLAIM_HEARTBEAT_INTERVAL_SECONDS = CONFIRMING_STALE_SECONDS / 5
+
+
+@contextmanager
+def _confirming_claim_heartbeat(job_db: JobQueries, request_id: str):
+    """#464：confirm 执行期的 claimed_at 续租窗口。
+
+    claim → publish → resolve 之间没有事务包住整段执行（跨进程 claim）：
+    合法的慢发布（DB 锁/慢存储/大量校验）超过 CONFIRMING_STALE_SECONDS
+    时，轮询侧的过期谓词会把仍在执行的 confirming 行误改成 expired——
+    发布可能仍成功创建 revision，但 resolve 已匹配不到该行。本上下文
+    管理器在执行期间起一个守护线程周期性 bump claimed_at（executor
+    lease 心跳的同语义），谓词因此只对「claim 后无心跳」的死进程生效。
+
+    心跳失败不中断发布（与 lease 心跳的容错纪律一致）：单次续租写失败
+    （DB 抖动）只记日志——发布本身仍可能秒级完成并正常 resolve，心跳
+    只是延长存活窗口的辅助通道，把它做成失败点反而把罕见的 DB 抖动放大
+    成发布失败。行被并发 resolve/过期后心跳自然停跳（谓词在续租语句里
+    重查 status='confirming'，rowcount=0 即退出循环）。
+    """
+    stop = threading.Event()
+    thread = threading.Thread(
+        target=_heartbeat_loop,
+        args=(job_db, request_id, stop),
+        name=f"publish-request-heartbeat-{request_id}",
+        daemon=True,
+    )
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=_CLAIM_HEARTBEAT_INTERVAL_SECONDS + 5)
+
+
+def _heartbeat_loop(job_db: JobQueries, request_id: str, stop: threading.Event) -> None:
+    """续租循环：间隔一拍一跳，谓词失配（行已非 confirming）即退出。"""
+    while not stop.wait(_CLAIM_HEARTBEAT_INTERVAL_SECONDS):
+        try:
+            if not job_db.heartbeat_confirming_publish_request(request_id):
+                return
+        except Exception:
+            # #204 broad-except audit: 守护线程的生命支持（不吞错会死线程，
+            # 续租静默停止、慢发布重新暴露给误回收）。DB 层的异常面不可
+            # 枚举（连接抖动/锁超时/驱动 quirk），单跳失败只记日志继续。
+            logger.exception("publish-request heartbeat failed for %s (continuing)", request_id)
 
 
 def workspace_draft_yaml(job_db: JobQueries, workspace_id: str) -> str:
