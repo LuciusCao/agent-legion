@@ -358,6 +358,36 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
   })
 
+  it('skips the prompt for an approval node that already has capability (#405 审核 P3)', async () => {
+    // 手写 approval+capability 是合法瞬态（issue 明示）——切出必须维持
+    // 修复前的直通语义，不得被 prompt 拦下（cancel 会放弃合法切换）。
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('x')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
+        selectedNodeKey="gate"
+        definitionYaml={approvalGateYaml.replace(
+          '    config: {rework_target: draft_gen, feedback_artifact: review.json}',
+          '    config: {rework_target: draft_gen, feedback_artifact: review.json}\n    capability: gate_cap'
+        )}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'code' },
+    })
+
+    expect(promptSpy).not.toHaveBeenCalled()
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps Agent schema ownership inside Agent config (#406)', async () => {
     const agentYaml = [
       'key: demo',
