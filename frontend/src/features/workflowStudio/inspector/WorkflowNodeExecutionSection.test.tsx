@@ -495,7 +495,14 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
     expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
     expect(screen.getByText('pi')).toBeInTheDocument()
-    expect(screen.getByText('read, write, bash')).toBeInTheDocument()
+    // #575：节点未覆盖时卡片 Tools 行标注「（节点未覆盖，当前生效）」；
+    // 节点级字段的 helperText 同步展示解析后的生效值与来源。
+    expect(
+      screen.getByText('read, write, bash（节点未覆盖，当前生效）')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('当前生效（跟随 Agent 默认）：read, write, bash')
+    ).toBeInTheDocument()
     expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()
   })
 

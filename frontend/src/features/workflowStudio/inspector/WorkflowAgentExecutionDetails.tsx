@@ -14,6 +14,8 @@ import styles from './WorkflowAgentExecutionDetails.module.css'
 export function WorkflowAgentExecutionDetails(props: {
   node: WorkflowNodeRecord
   runtime: string
+  /** #575：Agent 定义层的兜底 tools，透传给节点级编辑器做生效值提示。 */
+  agentDefaultTools: string[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
@@ -59,6 +61,7 @@ export function WorkflowAgentExecutionDetails(props: {
       <WorkflowNodeToolsEditor
         node={props.node}
         runtime={props.runtime}
+        agentDefaultTools={props.agentDefaultTools}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}

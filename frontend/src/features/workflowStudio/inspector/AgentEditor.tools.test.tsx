@@ -63,13 +63,14 @@ function catalogResponse() {
   }
 }
 
-function renderEditor(agentId: string | null = null) {
+function renderEditor(agentId: string | null = null, embedded = false) {
   return render(
     <TestQueryProvider>
       <AgentEditor
         workspaceId="ws1"
         agentId={agentId}
         initialCapability="gen"
+        embedded={embedded}
         onSaved={() => {}}
         onChanged={() => {}}
         onArchived={() => {}}
@@ -118,6 +119,21 @@ describe('AgentEditor tool catalog (#476)', () => {
     expect(options.get('bash')?.selected).toBe(true)
     expect(options.get('uuid（可选开启）')?.selected).toBe(false)
     await closeDropdown()
+  })
+
+  // #575：内嵌于节点详情时 Tools 不再是同级主入口——label 点明它是
+  // Agent 默认/兜底，并提示优先用节点级「Tools 覆盖」；独立面板不受影响。
+  it('downgrades the Tools field to a fallback-default entry in embedded mode (#575)', async () => {
+    renderEditor(null, true)
+    await screen.findByText('创建草稿')
+
+    expect(
+      screen.getByLabelText('Tools（Agent 默认 / 兜底）')
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText('Tools')).not.toBeInTheDocument()
+    expect(
+      screen.getByText('兜底默认——节点级「Tools 覆盖」优先，建议按节点覆盖')
+    ).toBeInTheDocument()
   })
 
   it('renders the forced tier as a locked row, not a checkbox option', async () => {

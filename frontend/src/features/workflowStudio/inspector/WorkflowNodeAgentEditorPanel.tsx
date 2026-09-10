@@ -48,6 +48,7 @@ export function WorkflowNodeAgentEditorPanel(props: Props) {
       workspaceId={props.workspaceId}
       agentId={editingAgentId}
       initialCapability={editingAgentId ? undefined : props.capability}
+      embedded
       onSaved={handleSaved}
       onChanged={props.onRefresh}
       onArchived={handleArchived}

@@ -1,5 +1,6 @@
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { WorkflowNodeRecord } from '../../../types'
+import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft'
 import { WorkflowAgentDefinitionCard } from './WorkflowAgentDefinitionCard'
 import { WorkflowAgentExecutionDetails } from './WorkflowAgentExecutionDetails'
 import { WorkflowNodeSkillEditor } from './WorkflowNodeSkillEditor'
@@ -21,6 +22,8 @@ type Props = {
 // 完全缺失时给指引（发布门禁要求恰好一个 published Agent，会显式报错）。
 // #409：编辑态下方内联展开的 Agent 编辑面板已含完整定义信息，只读汇总卡
 // 只在 readOnly（历史版本查看，无编辑面板）下渲染，去掉重复的信息层。
+// #575：tools 的节点级声明（解析草稿 YAML）同时驱动只读卡的覆盖标注与
+// 节点级编辑器的生效值提示（Agent 定义为兜底来源）。
 export function WorkflowNodeAgentConfigBody(props: Props) {
   if (!props.agentDefinition)
     return (
@@ -28,6 +31,9 @@ export function WorkflowNodeAgentConfigBody(props: Props) {
         该 capability 暂无 published Agent；发布 workflow 前需新建并发布一个。
       </div>
     )
+  const draft =
+    parseWorkflowNode(props.definitionYaml, props.node.key) ?? props.node
+  const nodeTools = Array.isArray(draft.tools) ? draft.tools.map(String) : []
   return (
     <>
       {props.isDraft && (
@@ -36,7 +42,10 @@ export function WorkflowNodeAgentConfigBody(props: Props) {
         </div>
       )}
       {props.readOnly && (
-        <WorkflowAgentDefinitionCard definition={props.agentDefinition} />
+        <WorkflowAgentDefinitionCard
+          definition={props.agentDefinition}
+          nodeToolsOverridden={nodeTools.length > 0}
+        />
       )}
       <WorkflowNodeSkillEditor
         node={props.node}
@@ -47,6 +56,7 @@ export function WorkflowNodeAgentConfigBody(props: Props) {
       <WorkflowAgentExecutionDetails
         node={props.node}
         runtime={props.agentDefinition.runtime}
+        agentDefaultTools={props.agentDefinition.tools ?? []}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}

@@ -23,6 +23,10 @@ const runtimes: AgentRuntime[] = ['velites', 'pi']
 const forcedTierHint =
   'harness 强制：节点声明 outputs 时经 --require-output 激活，退出契约门不可取消；工具开关仅控制模型 mid-run 自检'
 
+// #575：内嵌于节点详情时 Tools 字段降级呈现的提示——节点级「Tools 覆盖」
+// 是主入口，本字段只是 Agent 定义的兜底默认（#440 终局并入节点 YAML）。
+const embeddedToolsHint = '兜底默认——节点级「Tools 覆盖」优先，建议按节点覆盖'
+
 type Props = {
   /** 当前 workspace（Agent 定义为 workspace 作用域，schema v46） */
   workspaceId: string
@@ -30,6 +34,8 @@ type Props = {
   agentId: string | null
   /** 新建模式下预填的 capability（节点详情内嵌新建时传入） */
   initialCapability?: string
+  /** #575：内嵌于节点详情时为 true——Tools 字段标注为兜底默认。 */
+  embedded?: boolean
   onSaved: (agentId: string) => void
   onChanged: () => void
   onArchived: () => void
@@ -58,6 +64,7 @@ export function AgentEditor({
   workspaceId,
   agentId,
   initialCapability,
+  embedded = false,
   onSaved,
   onChanged,
   onArchived,
@@ -116,9 +123,7 @@ export function AgentEditor({
             : ''
         )
       })
-      .catch((err) => {
-        setError(errorMessage(err))
-      })
+      .catch((err) => setError(errorMessage(err)))
   }, [workspaceId, agentId, creating])
 
   useEffect(() => {
@@ -301,7 +306,7 @@ export function AgentEditor({
       <div className={styles.field}>
         <TextField
           select
-          label="Tools"
+          label={embedded ? 'Tools（Agent 默认 / 兜底）' : 'Tools'}
           variant="outlined"
           value={tools}
           onChange={(e) => {
@@ -310,6 +315,7 @@ export function AgentEditor({
           }}
           fullWidth
           disabled={!toolEntries}
+          helperText={embedded ? embeddedToolsHint : undefined}
           slotProps={{ select: { multiple: true } }}
         >
           {selectableEntries.map((entry) => (
