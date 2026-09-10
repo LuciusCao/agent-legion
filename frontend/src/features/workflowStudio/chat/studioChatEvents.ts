@@ -1,12 +1,19 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { invalidateStudioTurnEndQueries } from './studioChatInvalidation'
 import {
-  isTerminalStatus,
+  statusEvent,
   streamingTextId,
+  TERMINAL,
   upsertMessage,
   type ChatMessage,
 } from './studioChatMessages'
 import type { StudioChatSessionRecord } from './studioChatApi'
+
+/** terminal 状态行检测（SSE/REST 双路径同源，#563）：任一到达即该 turn
+ * 已终结——turn_end/error/session_closed/session_resumed。 */
+export function isTerminalStatus(message: ChatMessage): boolean {
+  return message.kind === 'status' && TERMINAL.has(statusEvent(message).event)
+}
 
 export type SsePayload = {
   type?: string

@@ -332,12 +332,6 @@ export function textContent(message: ChatMessage): string {
 // prettier-ignore
 export const TERMINAL = new Set(['turn_end', 'error', 'session_closed', 'session_resumed'])
 
-/** terminal 状态行检测（SSE/REST 双路径同源，#563）：任一到达即该 turn
- * 已终结。 */
-export function isTerminalStatus(message: ChatMessage): boolean {
-  return message.kind === 'status' && TERMINAL.has(statusEvent(message).event)
-}
-
 /** 仍在流式聚合的 agent text 消息 id：从尾部扫描，先撞到 turn 终止事件
  * （turn_end/error/session_closed/session_resumed）则全部完成返回 null，先撞到 agent
  * text 则该条仍在流式。 */

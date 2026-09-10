@@ -18,11 +18,11 @@ import {
 import {
   handleSseMessageEvent,
   handleSseReconnect,
+  isTerminalStatus,
   type SsePayload,
 } from './studioChatEvents'
 import {
   deriveChatViews,
-  isTerminalStatus,
   maxSeq,
   upsertMessage,
   type ChatMessage,
