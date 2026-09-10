@@ -65,24 +65,15 @@ export function handleSseMessageEvent(
   }
 }
 
-/** SSE 重连（status=open）的自愈：本地仍挂着未终结的流式 agent text 行
- * （turn 在断连期间结束、terminal 事件只能经 after_seq 补齐静默合入）时
- * 直接全量回取一次校准；随后照常增量补齐 + 重拉会话快照（断连期间的
- * 状态翻转不补发 SSE，不重拉则本地 status 滞留 running）。补齐若携带
- * terminal 事件，与实时到达的同等触发查询失效（codex review P2——断连
- * 期间 agent 保存的草稿不失效则画布滞留旧数据直到手动刷新）。 */
+/** SSE 重连自愈（#563）：本地仍挂着未终结的流式 agent text 行时全量回取
+ * 校准，随后增量补齐 + 重拉会话快照；补齐携带 terminal 事件时与实时
+ * 到达的同等触发查询失效（codex P2——断连期间保存的草稿也要失效）。 */
 export function handleSseReconnect(deps: SseDeps): void {
-  const {
-    messagesRef,
-    refillMessages,
-    workspaceId,
-    activeSessionId,
-    setSession,
-    fetchSession,
-    queryClient,
-  } = deps
+  const { messagesRef, refillMessages, setSession, fetchSession } = deps
+  const invalidate = () =>
+    invalidateStudioTurnEndQueries(deps.queryClient, deps.workspaceId)
   const checkTerminal = (hasTerminal?: boolean | undefined) => {
-    if (hasTerminal) invalidateStudioTurnEndQueries(queryClient, workspaceId)
+    if (hasTerminal) invalidate()
   }
   if (streamingTextId(messagesRef.current) !== null) {
     void refillMessages(0)
@@ -92,7 +83,7 @@ export function handleSseReconnect(deps: SseDeps): void {
   void refillMessages()
     .then(checkTerminal)
     .catch(() => undefined)
-  void fetchSession(workspaceId, activeSessionId).then(
+  void fetchSession(deps.workspaceId, deps.activeSessionId).then(
     setSession,
     () => undefined
   )

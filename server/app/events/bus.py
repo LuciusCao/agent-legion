@@ -104,13 +104,10 @@ class InProcessEventBus:
             self.unsubscribe(channel, queue)
 
     def _overflow_send(self, queue: asyncio.Queue, payload: str, snapshot: bool) -> bool:
-        """#563 慢消费处理（返回是否驱逐）。
-
-        快照语义通道：丢最旧腾位投递最新（全量快照帧丢中间帧无损），连续
-        溢出达 OVERFLOW_EVICT_THRESHOLD（真死连接）才驱逐。增量语义通道
-        （snapshot=False，如 workspace job 补丁的 revision 水位消费）：立即
-        驱逐——SSE 断流重连 + loadSnapshot 是既有的无损自愈路径，静默丢帧
-        反而让客户端滞留旧 revision（codex review P2）。
+        """#563 慢消费处理（返回是否驱逐）。快照语义通道：丢最旧腾位投递
+        最新（丢中间帧无损），连续溢出达阈值（真死连接）才驱逐；增量语义
+        通道（revision 水位消费）：立即驱逐——断流重连 + loadSnapshot 是
+        既有的无损自愈，静默丢帧让客户端滞留旧 revision（codex P2）。
 
         #204 broad-except audit: the suppressed calls can only fail in the
         QueueFull race — the retry put then drops this payload (already
