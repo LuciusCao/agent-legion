@@ -1283,3 +1283,14 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
   ceiling: 76
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/inspector/useNodeTypeSwitch.ts
+  reason: >-
+    #405 审核 P3：切出弹窗只在 capability 缺失时触发——需要读草稿节点
+    的 capability（parseWorkflowNode）做判定，5 行净增（47→54）。
+    弹窗判定与切换执行必须在同一 useCallback（原子性：prompt 先于任何
+    突变），拆到姊妹文件会把「判定-弹窗-突变」一体流程分家。
+    Harvest when the type-switch flow gains a dialog component of its own.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 54
