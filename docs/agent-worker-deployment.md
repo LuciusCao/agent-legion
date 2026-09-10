@@ -112,6 +112,14 @@ curl http://192.0.2.1:8000/api/health
 
 **velites 二进制前置（#381）**：worker 镜像不含 agent runtime 执行器，启动 stack 前必须先把平台匹配的 velites 二进制放到 `VELITES_BIN`（默认 `../velites-bin/velites`，即仓库平级的 `velites-bin/`）——compose 用 long syntax bind mount，源文件缺失会**拒绝启动**（不会静默建目录）。产物获取与架构匹配见 §5「velites 二进制来源」的 Docker 小节。
 
+### 拉取式部署（v* 镜像发布，#574）
+
+`make stack-host-up` 默认在部署机现场构建镜像（`agent-legion-host:local`）。host 镜像跟随仓库 `v*` 发版 tag 走（与 worker 的独立 `worker-v*` 版本线不同：`v*` = 仓库 + host 一体发布，`worker-v*` = 可独立重发的执行端）：push `v*` tag（如 `v0.7.8`）触发 [host-image-release](../.github/workflows/host-image-release.yml) workflow——原生 runner 构建 linux/amd64 与 linux/arm64（不使用 QEMU），按 digest 合成 manifest list 后推送 GHCR `ghcr.io/luciuscao/agent-legion-host`，打 `<版本>` / `sha-<短哈希>` / `latest` 三个 tag（`sha-` 指向 tag 背后的 commit，annotated tag 亦正确 dereference）。
+
+部署机侧：复制 `deploy/compose.host.pull.example.yaml` 为 `deploy/compose.local.yaml`（Makefile 的 stack-host-* 目标自动并入），把 `image` 改成固定版本 tag，之后 `make stack-host-up` 即拉取启动（override 用 `!reset` 清除 build 段；只覆盖 host 服务，postgres / 对象存储 / worker 沿用基础文件）。GHCR 包默认 private——部署机先 `docker login ghcr.io`（具 read:packages 的 PAT），或在 GitHub package 设置中改为 public。发布走 GitHub 托管 runner，只能推 GitHub 侧 registry；需要内网私有 registry 时须自建 runner，不在本管道覆盖范围内。
+
+与 PR 门的分工：quality-gate 的 docker-build job 只做构建验证（push: false、仅 amd64）；实际发布只由 `v*` tag 触发。注意 `v*` tag 从此有重副作用（触发镜像构建）：若 tag 已打但构建失败，修复后重推同 tag 即可（cache-to 落在 tag ref 下，重跑可复用缓存）。
+
 ## 4. Worker 机器准备
 
 将同一版本的仓库放到 Worker 机器，并准备注册密钥目录：
