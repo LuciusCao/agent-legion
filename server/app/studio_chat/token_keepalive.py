@@ -106,3 +106,8 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
         return
     with runtime.lock:
         runtime.token_keepalive_done = True
+    # #558（review P1）：健康的 ACP 进程不能悬挂到 backend 重启——error 行
+    # 不占会话 cap、前端又无关闭入口，弃置的升级会话会无界累积子进程。
+    # request_stop 在当前 turn 结束后经既有 on_exit 路径自清理（不 join——
+    # keepalive 跑在 ACP 线程上，join 即自死锁）。
+    runtime.handle.request_stop()

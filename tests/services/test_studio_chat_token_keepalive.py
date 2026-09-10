@@ -49,6 +49,9 @@ class _StubHandle:
     """Minimal ACP handle stand-in: tests drive the service callbacks
     directly (no subprocess) to control interleaving precisely."""
 
+    def __init__(self) -> None:
+        self.request_stop_calls = 0
+
     def send_prompt(self, text: str) -> bool:
         del text
         return True
@@ -56,6 +59,9 @@ class _StubHandle:
     def cancel(self) -> None: ...
 
     def close(self) -> None: ...
+
+    def request_stop(self) -> None:
+        self.request_stop_calls += 1
 
 
 def _tool_call(update_id: str) -> dict:
@@ -313,10 +319,50 @@ def test_failed_escalation_retries_without_duplicate_notice(job_db, settings, mo
         service._on_update(session_id, _tool_call("tc-a"))
         assert not runtime.token_keepalive_done
         assert not _invalidation_messages(service, session_id)  # no duplicate on retry
+        # The ACP process stop is only requested once the whole path succeeds.
+        assert runtime.handle.request_stop_calls == 0
         monkeypatch.setattr(service.db, "update_studio_chat_session_if", real_escalate)
         service._on_update(session_id, _tool_call("tc-b"))
         assert runtime.token_keepalive_done
         assert len(_invalidation_messages(service, session_id)) == 1
+        assert job_db.get_studio_chat_session(session_id)["status"] == "error"
+        # Exactly one stop request for the dead session (dedup via the flag).
+        assert runtime.handle.request_stop_calls == 1
+        service._on_update(session_id, _tool_call("tc-c"))
+        assert runtime.handle.request_stop_calls == 1
+    finally:
+        service.shutdown()
+
+
+def test_live_token_session_is_not_stopped(job_db, settings) -> None:
+    """#558 review P1: a live token keeps the ACP process running — the stop
+    request rides ONLY the dead-token escalation path."""
+    user_id = str(job_db.create_user("nostop-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    service, _bus, session_id, runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        service._on_update(session_id, _tool_call("tc-live"))
+        assert runtime.handle.request_stop_calls == 0
+        assert not runtime.token_keepalive_done
+    finally:
+        service.shutdown()
+
+
+def test_on_error_fatal_does_not_stamp_resume_claim(job_db, settings) -> None:
+    """#558 review P2: a stale thread's fatal kill echo (resume's winner-side
+    teardown killing the OLD runtime while the new spawn is 'starting') must
+    not fail the resume's first hop — same final_statuses guard as on_exit."""
+    service, _bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, "x")
+    try:
+        job_db.update_studio_chat_session(session_id, status="starting")
+        service._on_error(session_id, "transport closed", fatal=True)
+        # The starting row belongs to the resume claim; the error detail is
+        # still on the timeline for diagnosability.
+        assert job_db.get_studio_chat_session(session_id)["status"] == "starting"
+        service._on_error(session_id, "agent died", fatal=True)
+        job_db.update_studio_chat_session(session_id, status="running")
+        service._on_error(session_id, "agent died", fatal=True)
+        # A live running row still takes the fatal error stamp.
         assert job_db.get_studio_chat_session(session_id)["status"] == "error"
     finally:
         service.shutdown()

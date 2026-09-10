@@ -97,7 +97,7 @@ export function JobDiagnosisPanel({ workspaceId, target }: Props) {
   const disabledReason = !chat.session
     ? '正在创建排查会话…'
     : chat.closed
-      ? '会话已关闭或中断，请重新打开排查面板'
+      ? '会话已关闭或出错，点「继续对话」恢复（上下文保留）'
       : null
 
   return (
