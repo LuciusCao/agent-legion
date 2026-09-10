@@ -13,6 +13,11 @@ vi.mock('../../../api', () => ({
   api: vi.fn(),
 }))
 
+// agent 节点的生效 schema 区块（#406）经 agent-definitions 列表/详情取数。
+vi.mock('../../../api/agentDefinitions', () => ({
+  fetchAgentDefinitions: vi.fn().mockResolvedValue({ agents: [] }),
+}))
+
 const mockApi = vi.mocked(api)
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -240,7 +245,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('keeps Agent schema ownership inside Agent config (#406)', async () => {
+  it('shows the agent definition schema read-only instead of the node YAML one (#406)', async () => {
     const agentYaml = [
       'key: demo',
       'nodes:',
@@ -263,9 +268,13 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(await screen.findByLabelText('节点执行能力')).toHaveTextContent(
       'Agent 配置'
     )
+    // 区块仍在（只读展示），但节点 YAML 里那份不生效的 schema 不出现。
+    expect(screen.getByLabelText('配置 Schema intake')).toBeInTheDocument()
     expect(
-      screen.queryByLabelText('配置 Schema intake')
-    ).not.toBeInTheDocument()
+      await screen.findByText('该 capability 尚无 Agent，暂无生效配置参数。')
+    ).toBeInTheDocument()
+    expect(screen.queryByText('ignored_node_schema')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('新增属性名')).not.toBeInTheDocument()
   })
 
   it('keeps the read-only entry contract for a ghost start node', () => {
