@@ -70,6 +70,7 @@ export function sanitizeNodeForType(
 //   收集全图 edge.to 会把「别处存在一条非 start 边」误判为入边（#405）。
 export function validateNodeTypeSwitch(
   draft: {
+    schema_version?: number
     nodes?: Record<string, WorkflowYamlNode>
     edges?: Array<{ from?: string; to?: string }>
   },
@@ -89,12 +90,20 @@ export function validateNodeTypeSwitch(
         .filter(([, n]) => n.type === 'start')
         .map(([key]) => key)
     )
-    const upstream = new Set(node.after ?? [])
+    // 审核 P2：v2 草稿的 after 只是 echo 字段——loader 只在 v1 把 after
+    // 物化进 edges（loader._load_edges），v2 完全以 edges 列表为准。
+    // 判定若无条件计入 after，v2 下「有 after 无入边」的草稿前端放行、
+    // 发布被 validate_approval_edges 拒——正是本 issue 要消除的漂移。
+    const upstream = new Set(
+      draft.schema_version === 2 ? [] : (node.after ?? [])
+    )
     for (const edge of draft.edges ?? []) {
       if (edge.to === nodeKey) upstream.add(edge.from ?? '')
     }
+    // 上游键必须真实存在于 nodes——loader 对未知来源单独拒绝
+    // （「Unknown edge source/dependency」），此处同构收口。
     const executableUpstream = [...upstream].filter(
-      (key) => key && !startKeys.has(key)
+      (key) => key && !startKeys.has(key) && (draft.nodes ?? {})[key] != null
     )
     if (executableUpstream.length === 0) {
       throw new WorkflowNodeTypeSwitchError(

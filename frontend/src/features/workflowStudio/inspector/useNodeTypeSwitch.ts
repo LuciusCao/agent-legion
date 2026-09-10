@@ -6,6 +6,7 @@ import {
   type SwitchableNodeType,
 } from '../shared/workflowStudioYamlDraft.nodeType'
 import { confirmDestructiveSwitch, promptForSwitchCapability } from './nodeTypeSelector'
+import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft.parse'
 
 // 头部类型选择器（#392）的写侧接线：先做目标类型前置校验
 // （capability/入边，校验都不过就不必问破坏性确认），确认通过后改写
@@ -25,10 +26,15 @@ export function useNodeTypeSwitch(
     (nodeTypeTarget: SwitchableNodeType) => {
       // approval 切出（无 capability）先弹补能力通道，取消/留空即放弃
       // 本次切换，草稿保持原类型；其余类型直通（prompt 非空才继续）。
-      const promptResult =
-        nodeTypeTarget !== 'approval' && nodeType === 'approval'
-          ? promptForSwitchCapability(nodeTypeTarget)
-          : undefined
+      // 审核 P3：手写 approval+capability 的节点已有直通语义——只有
+      // capability 缺失才弹窗（否则 cancel 会拦下此前合法的切换）。
+      const needsCapabilityChannel =
+        nodeTypeTarget !== 'approval' &&
+        nodeType === 'approval' &&
+        !parseWorkflowNode(definitionYaml, nodeKey)?.capability
+      const promptResult = needsCapabilityChannel
+        ? promptForSwitchCapability(nodeTypeTarget)
+        : undefined
       if (promptResult === null) return false
       try {
         const nextYaml = patchWorkflowNodeType(
