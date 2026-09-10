@@ -104,6 +104,12 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith('ws1', 'agent-a')
     expect(await screen.findByDisplayValue('generate_key_info'))
     expect(screen.getByDisplayValue('agent-a')).toBeInTheDocument()
+    // #575：Tools 字段的唯一形态是「Agent 默认 / 兜底」标注，
+    // 主入口是节点级「Tools 覆盖」。
+    expect(
+      await screen.findByLabelText('Tools（Agent 默认 / 兜底）')
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText('Tools')).not.toBeInTheDocument()
   })
 
   it('keeps the loaded skill when editing an existing agent (#76: legacy fallback)', async () => {

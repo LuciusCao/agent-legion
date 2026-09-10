@@ -78,9 +78,13 @@ function renderEditor(agentId: string | null = null) {
   )
 }
 
+// #575：Tools 字段的唯一形态——「Agent 默认 / 兜底」标注（组件只内嵌
+// 于节点详情，节点级「Tools 覆盖」是主入口）。
+const toolsLabel = 'Tools（Agent 默认 / 兜底）'
+
 /** 打开 Tools 下拉并返回选项映射（name → { selected, disabled }）。 */
 async function openToolOptions() {
-  fireEvent.mouseDown(await screen.findByLabelText('Tools'))
+  fireEvent.mouseDown(await screen.findByLabelText(toolsLabel))
   const options = await screen.findAllByRole('option')
   const byName = new Map<string, { selected: boolean; disabled: boolean }>()
   for (const option of options) {
@@ -118,6 +122,18 @@ describe('AgentEditor tool catalog (#476)', () => {
     expect(options.get('bash')?.selected).toBe(true)
     expect(options.get('uuid（可选开启）')?.selected).toBe(false)
     await closeDropdown()
+  })
+
+  // #575：Tools 字段只有「Agent 默认 / 兜底」一种形态——label 点明层级，
+  // 并提示优先用节点级「Tools 覆盖」（组件唯一生产调用点是节点详情内嵌）。
+  it('labels the Tools field as the Agent-level fallback default (#575)', async () => {
+    renderEditor()
+    await screen.findByText('创建草稿')
+
+    expect(screen.getByLabelText(toolsLabel)).toBeInTheDocument()
+    expect(
+      screen.getByText('兜底默认——节点级「Tools 覆盖」优先，建议按节点覆盖')
+    ).toBeInTheDocument()
   })
 
   it('renders the forced tier as a locked row, not a checkbox option', async () => {

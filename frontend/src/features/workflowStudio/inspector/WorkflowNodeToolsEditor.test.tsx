@@ -1,4 +1,6 @@
-/** #443/#476：agent 节点的节点级 tools 声明编辑入口（组件）。 */
+/** #443/#476：agent 节点的节点级 tools 声明编辑入口（组件）。
+ *  #575：主入口形态——label 点明覆盖层级，未声明时 helperText 展示
+ *  解析后的生效值（Agent 默认兜底）。 */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -44,7 +46,11 @@ function catalogResponse() {
   }
 }
 
-function renderEditor(definitionYaml: string, setDefinitionYaml = vi.fn()) {
+function renderEditor(
+  definitionYaml: string,
+  setDefinitionYaml = vi.fn(),
+  agentDefaultTools?: string[]
+) {
   return {
     setDefinitionYaml,
     ...render(
@@ -52,6 +58,7 @@ function renderEditor(definitionYaml: string, setDefinitionYaml = vi.fn()) {
         <WorkflowNodeToolsEditor
           node={node}
           runtime="velites"
+          agentDefaultTools={agentDefaultTools}
           definitionYaml={definitionYaml}
           setDefinitionYaml={setDefinitionYaml}
         />
@@ -60,26 +67,65 @@ function renderEditor(definitionYaml: string, setDefinitionYaml = vi.fn()) {
   }
 }
 
+const toolsLabel = 'Tools 覆盖（留空 = 跟随 Agent 默认）'
+
 /** 打开下拉前等目录加载（disabled 消失），再 mouseDown 打开。 */
 async function openToolsMenu() {
-  const label = '工具声明（空 = 跟随 Agent 定义）'
-  await screen.findByLabelText(label)
-  await waitFor(() => expect(screen.getByLabelText(label)).not.toBeDisabled())
-  fireEvent.mouseDown(screen.getByLabelText(label))
+  await screen.findByLabelText(toolsLabel)
+  await waitFor(() =>
+    expect(screen.getByLabelText(toolsLabel)).not.toBeDisabled()
+  )
+  fireEvent.mouseDown(screen.getByLabelText(toolsLabel))
 }
 
-describe('WorkflowNodeToolsEditor (#443/#476)', () => {
+describe('WorkflowNodeToolsEditor (#443/#476/#575)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.fetchAgentRuntimes.mockResolvedValue(catalogResponse())
   })
 
-  it('shows the undeclared state as empty (follows the Agent definition)', async () => {
-    renderEditor('nodes:\n  gen:\n    type: agent\n')
-    const field = await screen.findByLabelText(
-      '工具声明（空 = 跟随 Agent 定义）'
-    )
+  it('shows the undeclared state with the followed Agent defaults as the effective-value hint', async () => {
+    // #575：未声明不再是裸空态——helperText 展示解析后的生效值与来源。
+    renderEditor('nodes:\n  gen:\n    type: agent\n', vi.fn(), [
+      'read',
+      'write',
+      'bash',
+    ])
+    const field = await screen.findByLabelText(toolsLabel)
     expect(field).toBeInTheDocument()
+    expect(
+      screen.getByText('当前生效（跟随 Agent 默认）：read, write, bash')
+    ).toBeInTheDocument()
+  })
+
+  it('notes the empty effective value when the Agent definition declares no tools', async () => {
+    renderEditor('nodes:\n  gen:\n    type: agent\n', vi.fn(), [])
+    await screen.findByLabelText(toolsLabel)
+    expect(
+      screen.getByText('当前生效（跟随 Agent 默认）：（空）')
+    ).toBeInTheDocument()
+  })
+
+  // #580 codex P2：Agent tools 未知（draft-only Agent 的列表映射不含
+  // tools）时不出生效值 hint——未知 ≠ 空，不能声称「当前生效…（空）」。
+  it('shows no effective-value hint when the Agent tools are unknown', async () => {
+    renderEditor('nodes:\n  gen:\n    type: agent\n')
+    await screen.findByLabelText(toolsLabel)
+    expect(
+      screen.queryByText(/当前生效（跟随 Agent 默认）/)
+    ).not.toBeInTheDocument()
+  })
+
+  it('hides the fallback hint once the node declares its own tools', async () => {
+    renderEditor(
+      'nodes:\n  gen:\n    type: agent\n    tools:\n      - read\n',
+      vi.fn(),
+      ['read', 'write', 'bash']
+    )
+    await screen.findByLabelText(toolsLabel)
+    expect(
+      screen.queryByText(/当前生效（跟随 Agent 默认）/)
+    ).not.toBeInTheDocument()
   })
 
   it('patches the YAML declaration on selection', async () => {

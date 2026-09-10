@@ -309,6 +309,11 @@ describe('WorkflowNodeExecutionSection', () => {
     // （草稿经 react-query 异步解析，等待 resolve）。
     expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
     expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
+    // #580 codex P2：draft 列表映射不含 tools（未知 ≠ 空）——节点级
+    // 「Tools 覆盖」字段不得声称「当前生效（跟随 Agent 默认）：（空）」。
+    expect(
+      screen.queryByText(/当前生效（跟随 Agent 默认）/)
+    ).not.toBeInTheDocument()
   })
 
   it('prefers the published catalog agent over a same-capability draft', async () => {
@@ -495,8 +500,34 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
     expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
     expect(screen.getByText('pi')).toBeInTheDocument()
-    expect(screen.getByText('read, write, bash')).toBeInTheDocument()
+    // #575：节点未覆盖时卡片 Tools 行标注「（节点未覆盖，当前生效）」；
+    // 节点级字段的 helperText 同步展示解析后的生效值与来源。
+    expect(
+      screen.getByText('read, write, bash（节点未覆盖，当前生效）')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('当前生效（跟随 Agent 默认）：read, write, bash')
+    ).toBeInTheDocument()
     expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()
+  })
+
+  // #575：节点已声明 tools 覆盖时，卡片行标注「以节点为准」（定义值
+  // 不生效），节点级字段不再展示跟随 hint。
+  it('marks the card tools row as overridden when the node declares its own tools', () => {
+    const overriddenYaml = `execution:\n  provider: deepseek\n  model: your-model-b\n  thinking: low\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n    tools:\n      - read\n`
+    renderSection({
+      node,
+      ...editorProps,
+      definitionYaml: overriddenYaml,
+      readOnly: true,
+    })
+
+    expect(
+      screen.getByText('read, write, bash（节点已覆盖，以节点为准）')
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/当前生效（跟随 Agent 默认）/)
+    ).not.toBeInTheDocument()
   })
 
   // —— #426 codex 终轮 P2：门控组合（capability 命中 × 两份查询 settle）——
