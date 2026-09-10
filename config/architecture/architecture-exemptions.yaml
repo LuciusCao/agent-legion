@@ -1544,3 +1544,29 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/563
   ceiling: 96
+- check: architecture.file_budget
+  path: server/app/studio_chat/acp_session.py
+  reason: >-
+    #558 review rounds added request_stop() next to close(): the dead-token
+    escalation needs the turn-end stop semantics (queue a _CLOSE without
+    joining — keepalive runs ON the ACP thread, so close()'s join is a
+    self-deadlock), and it must live beside close()/the _closed gate it
+    shares. The correctness docstring (turn-end semantics, bounded waits,
+    resume-teardown interplay) is the review's deliverable, not padding.
+    Ceiling at actual + 5 per the dated-exemption convention. Remove when
+    the studio-chat lifecycle surface gets its planned consolidation.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/558
+  ceiling: 273
+- check: architecture.file_budget
+  path: server/app/studio_chat/events.py
+  reason: >-
+    #558 review P2: on_error's fatal arm gained the 'starting' exclusion
+    (stale kill echoes must not fail a resume claim's first hop — same
+    final_statuses semantics as on_exit). Three effective lines over the
+    first-registration ceiling; the guard and its comment are the whole
+    fix. Ceiling at actual + 5 per the dated-exemption convention. Remove
+    when the studio-chat lifecycle surface gets its planned consolidation.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/558
+  ceiling: 136
