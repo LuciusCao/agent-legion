@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -120,7 +121,7 @@ def test_missing_pin_is_fail_closed(tmp_path: Path) -> None:
     """钉点从文件里消失（形态被改）必须报错，不允许静默失明。"""
     _write_repo(tmp_path, installer='WORKER_VERSION="${AGENT_WORKER_VERSION:-latest}"\n')
     errors, _ = pin_errors(tmp_path)
-    assert any("找不到" in error and "check_release_pins.py" in error for error in errors)
+    assert any("钉点" in error and "check_release_pins.py" in error for error in errors)
 
 
 def test_missing_compose_file_is_fail_closed(tmp_path: Path) -> None:
@@ -135,3 +136,58 @@ def test_missing_manifest_reports_unresolvable(tmp_path: Path) -> None:
     (tmp_path / "velites/Cargo.toml").unlink()
     errors, _ = pin_errors(tmp_path)
     assert any("读取失败" in error for error in errors)
+
+
+def test_velites_pin_is_exact_not_normalized(tmp_path: Path) -> None:
+    """codex P2-1：velites 钉点逐字比较——0.8.0a0 钉成 0.8.0-alpha 不得
+    靠等价归一静默通过（发布 tag 只会是 Cargo 逐字形态）。"""
+    installer = INSTALLER.replace(
+        'VELITES_VERSION_DEFAULT="0.5.1"', 'VELITES_VERSION_DEFAULT="0.5.1-alpha"'
+    )
+    _write_repo(tmp_path, installer=installer)
+    errors, _ = pin_errors(tmp_path)
+    assert any("VELITES_VERSION" in e for e in errors)
+
+
+def test_worker_image_refix_suffix_is_accepted(tmp_path: Path) -> None:
+    """codex P2-2：-rN 重发后缀是受支持的镜像 tag——默认值指向修复镜像
+    （0.7.0-r2）不要求仓库版本同步改动。"""
+    refixed = STANDALONE.replace(
+        "agent-legion-worker:0.7.0}", "agent-legion-worker:0.7.0-r2}"
+    ).replace(
+        "AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.7.0-r2}",
+        "AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.7.0-r2}",
+    )
+    _write_repo(tmp_path, standalone=refixed)
+    errors, notes = pin_errors(tmp_path)
+    assert errors == []
+    assert any("standalone" in n and "0.7.0 ✓" in n for n in notes)
+
+
+def test_compose_both_pins_required(tmp_path: Path) -> None:
+    """codex P2-3：compose 的 image: 与 env 钉点缺一不可——删掉 env 一处
+    不得因「剩一个匹配」而静默通过。"""
+    missing_env = STANDALONE.replace(
+        "      AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.7.0}\n",
+        "",
+    )
+    _write_repo(tmp_path, standalone=missing_env)
+    errors, _ = pin_errors(tmp_path)
+    assert any("standalone" in e and "钉点" in e for e in errors)
+
+
+def test_main_parses_argv_when_none(tmp_path: Path) -> None:
+    """codex P2-4：`python -m` 调用走 argv=None——必须回落解析
+    sys.argv[1:]，--root 不得被静默忽略。"""
+    from scripts import check_release_pins
+
+    _write_repo(tmp_path)
+    stale = INSTALLER.replace('WORKER_VERSION_DEFAULT="0.7.0"', 'WORKER_VERSION_DEFAULT="0.6.0"')
+    (tmp_path / "scripts" / "install-worker.sh").write_text(stale, encoding="utf-8")
+    monkey_args = ["--root", str(tmp_path)]
+    original_argv = sys.argv
+    try:
+        sys.argv = ["check_release_pins", *monkey_args]
+        assert check_release_pins.main() != 0
+    finally:
+        sys.argv = original_argv
