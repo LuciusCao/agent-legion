@@ -1168,3 +1168,118 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
   ceiling: 76
+  path: server/app/workflow_worker/shard_dispatch.py
+  reason: >-
+    Issue #495: the shard local lane built its ExecutionContext without
+    node_code AND without resolved node_config, so every shard of a
+    pure-local deployment (code_capacity>0, no remote code Worker taking
+    the shard) died on the EXEC-CODE-002 backstop with a misleading
+    "no published node code" error while the remote lane resolved both
+    fine; config (defaults, workspace overrides, vault secrets,
+    connections) was silently dropped. The fix routes the lane through
+    the same resolve chains as the ordinary local path
+    (resolve_code_node_dispatch + resolve_dispatch_node_config +
+    fail_node_config with the true reason): two try/excepts with the
+    resolve calls (~23 effective lines) — the lane's claim/context
+    assembly already lives here and the resolves belong with them;
+    splitting them out would fork the resolve semantics the two local
+    paths must share. Anchored to #522 (the long-lived budget-anchor
+    tracker): harvest when the shard claim paths consolidate their
+    context assembly, not when a single fix issue closes.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 123
+- check: architecture.file_budget
+  path: server/app/workflow_worker/code_claim.py
+  reason: >-
+    PR #520 review P2 (codex round on the #495 fix): the remote shard
+    lane's resolve/enqueue failures were node-level (fail_node_config),
+    but a shard node that an earlier fan-out round already flipped to
+    running is invisible to that write's pending/ready/stale status guard
+    — the failure recorded nothing anywhere and the shard stayed pending
+    forever. The four failure exits now report at claim-target
+    granularity through one shared ``_fail`` closure that routes shards
+    to the aggregate (shard_failure.fail_claim_target_config) and
+    ordinary nodes to the unchanged node-level write. The closure plus
+    its why-comment and the docstring note are ~6 effective lines; the
+    granularity decision belongs at each exit it guards, and hoisting it
+    further out would re-fork the node/shard failure semantics this fix
+    just unified. Remove when the shard claim paths consolidate their
+    failure reporting with their context assembly (#522 tracker).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 144
+- check: architecture.file_budget
+  path: server/app/executors/_lease_shard_fail.py
+  reason: >-
+    PR #520 review round 2 (codex on 3d0f77d3): the shard-granularity
+    no-lease failure grows its three review fixes — P1 adds the
+    dispatch-identity re-guard (_shard_still_in_dispatch_round: shard-row
+    state + job_nodes.created_at generation check inside the write
+    transaction, mirroring lease_guarded_mutation's re-guard pattern, so
+    a rerun-rebuilt shard row is never failed by a stale round's late
+    _enqueue failure), P2-1 adds the synthetic failed node_run insert
+    (mirror of _failed_node_recording, failure_category/detail via
+    resolve_failure_fields, so list_failed_node_runs sees shard dispatch
+    failures), and P2-2 moves the connect-and-transact unit here
+    (fail_shard_repo with retry_on_database_conflict) behind the repo
+    method that broadcasts post-commit. The P1/P2-1 guards and the tx
+    wrapper belong with the failure write they guard — splitting them
+    out would fork the shard-failure semantics across files. Anchored to
+    #522: harvest when the shard claim paths consolidate their failure
+    reporting with their context assembly.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 210
+- check: architecture.file_budget
+  path: server/app/workflow_worker/shard_failure.py
+  reason: >-
+    PR #520 review round 2 (codex on 3d0f77d3): the claim-target failure
+    dispatcher gains the dispatch-generation carrier
+    (DISPATCH_GENERATION_JOB_KEY + its fail-safe contract comment): the
+    snapshot rides the job dict claim_shard_node already hands both lanes
+    (never the broker manifest — runtime_context_stub whitelist-reads
+    job keys), and a missing key degrades to a fresh in-tx read. The
+    module is the single dispatch point both shard lanes share; the
+    carrier definition belongs beside the dispatch it parameterizes.
+    Anchored to #522: harvest when the shard claim paths consolidate
+    their failure reporting with their context assembly.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 55
+- check: architecture.file_budget
+  path: server/app/executors/leases.py
+  reason: >-
+    PR #520 review P2-2 (codex on 3d0f77d3): the shard-granularity
+    failure write moves out of the worker lane (which opened its own
+    write_transaction, bypassing the repository's post-commit
+    _broadcast_job_update — SSE clients kept stale job state) into
+    ExecutorLeaseRepository.fail_shard, the same shape fail_without_lease
+    already uses: connect-and-transact unit delegated to
+    _lease_shard_fail.fail_shard_repo (conflict-retried), broadcast only
+    after the commit lands, only when the write terminated a shard. The
+    repo method (~20 effective lines with its why-docstring) must live
+    on the repository class the worker already holds; codex review
+    itself named this placement as the alternative to duplicating the
+    broadcast at the lane. Anchored to #522: harvest when the shard
+    failure write paths consolidate with fail_without_lease's shape.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 160
+- check: architecture.file_budget
+  path: server/app/routes/run_contracts.py
+  reason: >-
+    PR #541 codex round 3 P1-2 adds field-level length ceilings to the
+    RunItem union (material_id/connection_key/external_id/bundle_id
+    max_length=512, params serialized ≤ 64 KiB via one model_validator):
+    a single-item body carrying a megabyte "id" or params string passes
+    the item-count bound and reaches the service before any byte ceiling,
+    so the contract layer is where the bound must live. The three
+    discriminated variants are one union consumed by every
+    runs/campaign intake path; splitting the validator out would fork the
+    single contract the two channels share. Remove when the runs
+    contracts gain their own structural split or the #532 campaign
+    family closes and the contract file is re-budgeted.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
+  ceiling: 76

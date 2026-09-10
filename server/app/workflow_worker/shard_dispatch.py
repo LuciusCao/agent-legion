@@ -18,6 +18,12 @@ from server.app.executors.models import (
     LeaseClaimRequest,
 )
 from server.app.executors.scheduling.capacity import CapacitySnapshot
+from server.app.services.job_errors import JobServiceError
+from server.app.services.vault import VaultError
+from server.app.workflow_worker import shard_failure
+from server.app.workflow_worker.agent_claim import cached_run_payload
+from server.app.workflow_worker.code_dispatch import resolve_code_node_dispatch
+from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_config
 from server.app.workflow_worker.execution import submit_claim
 from server.app.workflows.definition import WorkflowNode
 
@@ -40,10 +46,63 @@ def claim_shard_locally(
     allowed_node_keys: frozenset[str] | None,
     snapshot: CapacitySnapshot,
 ) -> bool:
-    """Lease and submit one shard on the local code pool; False = no capacity."""
+    """Lease and submit one shard on the local code pool; False = no capacity.
+
+    #495: the local shard lane used to build its ExecutionContext without
+    ``node_code``, so every shard of a pure-local deployment died on the
+    EXEC-CODE-002 backstop with a misleading "no published node code" error
+    while the remote lane (``code_claim``) resolved the same code fine. The
+    resolution now mirrors the ordinary local path (``schedule`` →
+    ``code_dispatch``): resolve first and fail the shard with the true reason
+    when the code is unrunnable — the backstop stays a backstop. A resolve
+    failure terminates THIS shard, not the node (#520 review P2): the
+    node-level write's status guard no-ops on the ``running`` row.
+
+    PR #520 review P2: the same gap held for config — a shard node's declared
+    ``config_schema``/``config`` (secrets, connections, ``timeout_seconds`` …)
+    never resolved, so ``ExecutionContext.node_config`` stayed empty and
+    ``config_snapshot_json`` blank while the remote lane shipped the fully
+    resolved config; it now rides the ``resolve_dispatch_node_config`` chain.
+    """
     workspace_id = workspace["id"]
+    # Schema v61: workspace id IS the workflow key — the same source the lease
+    # request below and the shard remote lane (code_claim) use.
+    workflow_key = str(job["workspace_id"])
+    # The lease claim's execution-control snapshot fields; None snapshot →
+    # the defaults the claim guard accepts (mirror of the executor lane).
+    control = control_snapshot or {}
     if not snapshot.has_capacity(workspace_id, node.key):
         return False
+    run_payload = cached_run_payload(worker, job)
+    # Config first, then code — the order of the ordinary local path
+    # (schedule.py): both resolve before the lease, and an unresolvable
+    # value fails the shard with the true reason instead of surfacing as a
+    # mid-execution crash or a silently ignored config. #520 review P2: the
+    # failure terminates THIS shard through the aggregate
+    # (fail_claim_target_config) — the node-level write's status guard
+    # no-ops once an earlier fan-out round flipped the node to running,
+    # silently wedging the shard in pending forever.
+    try:
+        # Frozen snapshot (runtime-mutable keys re-resolved live) → vault
+        # secret_refs → connection config + token; in-memory only
+        # (VAULT-SECRET-001). The non-secret snapshot rides the lease as the
+        # dispatch-time audit (CONFIG-RUNTIME-MUTABLE-001).
+        node_config, config_snapshot_json = resolve_dispatch_node_config(
+            worker, node, workflow_key, workspace_id, workspace, run_payload
+        )
+        # #495: same resolve order as the ordinary local path (#115) and the
+        # shard remote lane — the currently published workspace code; frozen
+        # pins apply only to quality-replay batches (per-pass memo inside).
+        # resolve raises (ValueError) exactly when the node can never run; the
+        # message then names the real reason instead of the executor backstop's
+        # generic text.
+        node_code = resolve_code_node_dispatch(
+            worker, workspace_id, workflow_key, node, run_payload, job.get("node_code_pins")
+        )
+    except (ValueError, VaultError, JobServiceError) as exc:
+        return shard_failure.fail_claim_target_config(
+            worker, workspace_id, job, workflow_key, node, log_path, shard_index, str(exc)
+        )
     claim = worker.leases.try_claim(
         LeaseClaimRequest(
             executor_id=CODE_EXECUTOR_ID,
@@ -56,17 +115,22 @@ def claim_shard_locally(
             local_node_limit=local_node_limit,
             lease_ttl_seconds=worker.settings.executor_runtime.lease_ttl_seconds,
             log_path=str(log_path),
-            execution_mode=control_snapshot.get("execution_mode", "full")
-            if control_snapshot
-            else "full",
-            target_node_key=control_snapshot.get("target_node_key") if control_snapshot else None,
+            execution_mode=control.get("execution_mode", "full"),
+            target_node_key=control.get("target_node_key"),
             allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
             shard_index=shard_index,
+            # Non-secret resolved config audit, same channel as the ordinary
+            # local path (CONFIG-RUNTIME-MUTABLE-001).
+            config_snapshot_json=config_snapshot_json,
         )
     )
     if claim is None:
         return False  # capacity lost to a race; the next poll pass re-evaluates
     snapshot.record_claim(workspace_id, node.key)
+    # #520 四轮 P2：剥离失败通道的内部调度键——context.job 会被
+    # build_runtime 暴露给 node SDK 的 ctx.job（远程 lane 只含
+    # runtime_context_stub 的白名单键），不剥离即 lane 相关输入。
+    lane_job = {k: v for k, v in job.items() if k != shard_failure.DISPATCH_GENERATION_JOB_KEY}
     context = ExecutionContext(
         execution_id=claim.execution_id,
         lease_id=claim.lease_id,
@@ -78,7 +142,7 @@ def claim_shard_locally(
         node_key=claim.node_key,
         capability=claim.capability,
         workspace=dict(workspace),
-        job=dict(job),
+        job=dict(lane_job),
         job_dir=job_dir,
         log_path=log_path,
         inputs=tuple(node.inputs),
@@ -99,6 +163,8 @@ def claim_shard_locally(
             "shard_index": shard_index,
             "shard_input": shard_input,
         },
+        node_code=node_code,
+        node_config=node_config,
     )
     submit_claim(worker, CODE_EXECUTOR_ID, claim, context)
     return True

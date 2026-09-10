@@ -30,12 +30,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.transaction import write_transaction
+from server.app.executors._lease_shard_fail import read_shard_dispatch_generation
 from server.app.executors._lease_shards import complete_empty_shard_node
 from server.app.executors.models import ConfigurationFailureRequest
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.shard_dispatch import claim_shard_locally
+from server.app.workflow_worker.shard_failure import DISPATCH_GENERATION_JOB_KEY
 from server.app.workflows.definition import WorkflowNode
 from server.app.workflows.sharding import (
     ShardLimitExceeded,
@@ -71,6 +73,12 @@ def claim_shard_node(
     # (P-0.5): no binding/allocation lookup remains.
     with worker.job_db._connect_read() as conn:
         local_node_limit = get_local_node_limit(conn, workspace_id, workflow_key, node_key)
+        # #520 review P1：dispatch 时刻快照节点代次（rerun 重建 shard 行的同
+        # 一事务会刷新 created_at），随 job dict 流向两条 lane 的失败出口——
+        # 写事务内 re-guard 用它丢弃迟到于 rerun 的旧轮失败。缺省（节点行不
+        # 存在）为空串，fail_shard 对空串在事务内现读，语义一致。
+        dispatch_generation = read_shard_dispatch_generation(conn, str(job["id"]), node_key)
+    job = {**job, DISPATCH_GENERATION_JOB_KEY: dispatch_generation}
 
     rows = _read_shard_rows(worker, job["id"], node_key)
     if not rows:
