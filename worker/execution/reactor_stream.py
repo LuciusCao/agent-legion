@@ -83,19 +83,13 @@ def stream_dropped(stream: _Stream) -> bool:
 
 
 def takeover_with_legacy_pump(stream: _Stream) -> bool:
-    """Fail-closed takeover (codex review): hand the child's stdout to a
-    legacy per-thread pump — these executions already hold a handle and never
-    re-enter spawn_agent_pump, so without this their children wedge on a full
-    pipe until the execution timeout. Restore blocking mode first (the legacy
-    pump iterates blocking); append-mode re-open keeps continuity with what
-    the pool already wrote. The pump thread owns the file handle.
-
-    Returns True when the takeover started. ``stream.done`` is wired to the
-    pump thread's exit (not set here) so join() cannot race the fallback
-    drain — an immediate set would let the uploader read the file mid-flush
-    and ship a truncated events.jsonl (review P2). A dropped stream (concurrent
-    join-timeout) never gets a pump: writing into a path a re-claimed
-    execution may have truncated is the #564 hazard the fence exists for."""
+    """Fail-closed takeover (codex review): hand the child's stdout to a legacy
+    per-thread pump; ``done`` fires from the pump thread's exit (an immediate
+    set would let the uploader read the file mid-flush, review P2). Returns
+    False for dropped streams (re-claimed execution may have truncated the
+    path — the #564 hazard the fence exists for)."""
+    # Restore blocking mode first (the legacy pump iterates blocking);
+    # append-mode re-open keeps continuity with what the pool already wrote.
 
     def _pump_and_signal() -> None:
         try:
