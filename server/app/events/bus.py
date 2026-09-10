@@ -7,10 +7,14 @@ from typing import Protocol
 _EVICTED: object = object()
 """投递到被驱逐订阅者队列的哨兵；订阅方收到后应立即结束流。"""
 
-# #563：QueueFull 先丢最旧腾位再投递（流式帧是全量快照，丢中间帧无损），
-# 只有连续溢出达到该阈值（真死连接，防心跳僵尸原语义）才驱逐——立即驱逐
-# 引发的断流重连正是截断的触发形态。
+# #563：快照语义通道（studio-chat: 流式 text 帧是全量快照，丢中间帧无损）
+# 的 QueueFull 先丢最旧腾位再投递，只有连续溢出达到该阈值（真死连接，防
+# 心跳僵尸原语义）才驱逐——立即驱逐引发的断流重连正是 #563 截断的触发
+# 形态。增量语义通道（workspace job 补丁按 revision 水位消费）不做丢最旧：
+# 静默丢帧会让客户端滞留旧 revision，驱逐断流（SSE 重连 + loadSnapshot
+# 全量 resync）反而是既有的无损自愈路径（codex review P2）。
 OVERFLOW_EVICT_THRESHOLD = 64
+_SNAPSHOT_CHANNELS = ("studio-chat:",)
 
 
 def workspace_channel(workspace_id: str) -> str:
@@ -79,13 +83,14 @@ class InProcessEventBus:
         queues = self._subscribers.get(channel)
         if not queues:
             return
+        snapshot_semantics = channel.startswith(_SNAPSHOT_CHANNELS)
         dead: set[asyncio.Queue] = set()
         for queue in list(queues):
             try:
                 queue.put_nowait(payload)
                 self._overflows[queue] = 0
             except asyncio.QueueFull:
-                if self._overflow_send(queue, payload):
+                if self._overflow_send(queue, payload, snapshot_semantics):
                     dead.add(queue)
             except Exception:
                 # #204 broad-except audit (PR #251): a non-QueueFull failure on put marks
@@ -98,18 +103,21 @@ class InProcessEventBus:
         for queue in dead:
             self.unsubscribe(channel, queue)
 
-    def _overflow_send(self, queue: asyncio.Queue, payload: str) -> bool:
-        # #563 慢消费处理（返回是否驱逐）：丢最旧腾位投递最新（流式帧是
-        # 全量快照，丢中间帧无损）；连续溢出达 OVERFLOW_EVICT_THRESHOLD
-        # （真死连接，防心跳僵尸原语义）才投递哨兵——立即驱逐引发的断流
-        # 重连正是 #563 截断的触发形态。
-        #
-        # #204 broad-except audit: the suppressed calls can only fail in the
-        # QueueFull race — the retry put then drops this payload (already
-        # lost by definition of the overflow); nothing else is suppressible
-        # on an unbounded asyncio.Queue.
+    def _overflow_send(self, queue: asyncio.Queue, payload: str, snapshot: bool) -> bool:
+        """#563 慢消费处理（返回是否驱逐）。
+
+        快照语义通道：丢最旧腾位投递最新（全量快照帧丢中间帧无损），连续
+        溢出达 OVERFLOW_EVICT_THRESHOLD（真死连接）才驱逐。增量语义通道
+        （snapshot=False，如 workspace job 补丁的 revision 水位消费）：立即
+        驱逐——SSE 断流重连 + loadSnapshot 是既有的无损自愈路径，静默丢帧
+        反而让客户端滞留旧 revision（codex review P2）。
+
+        #204 broad-except audit: the suppressed calls can only fail in the
+        QueueFull race — the retry put then drops this payload (already
+        lost by definition of the overflow); nothing else is suppressible
+        on an unbounded asyncio.Queue."""
         overflows = self._overflows[queue] = self._overflows.get(queue, 0) + 1
-        evict = overflows >= OVERFLOW_EVICT_THRESHOLD
+        evict = not snapshot or overflows >= OVERFLOW_EVICT_THRESHOLD
         with contextlib.suppress(Exception):
             queue.get_nowait()
             queue.put_nowait(_EVICTED if evict else payload)

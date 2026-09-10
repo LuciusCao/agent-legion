@@ -19,13 +19,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
     agent text 行即直接全量回取校准。refill 的 terminal 判定在 updater
     外计算（updater 可能被 React 推迟执行，内赋值会恒 false）、
     setMessages 改函数式更新（并发 refill 不再互相覆盖基线）。
-  - **EventBus 降触发**（server/app/events/bus.py）：QueueFull 从"立即
-    驱逐订阅者"改为"丢最旧腾位投递最新"（流式帧是全量快照，丢中间帧
-    无损），连续溢出 OVERFLOW_EVICT_THRESHOLD=64（真死连接）才驱逐——
-    驱逐引发的断流重连正是截断的主要触发形态。该行为变更对全部通道
-    生效：revision 水位线消费方（workspace job 补丁批次）在长时间
-    （约 64 帧 ≈ 32s）积压后可能静默滞后至下次事件/窗口聚焦，全量
-    快照消费方（dashboard、studio chat）无损。
+  - **EventBus 降触发**（server/app/events/bus.py）：快照语义通道
+    （studio-chat:*）的 QueueFull 从"立即驱逐订阅者"改为"丢最旧腾位投递
+    最新"（流式帧是全量快照，丢中间帧无损），连续溢出
+    OVERFLOW_EVICT_THRESHOLD=64（真死连接）才驱逐——驱逐引发的断流重连
+    正是截断的主要触发形态。增量语义通道（workspace job 补丁等 revision
+    水位消费方）保持立即驱逐的旧行为：断流 → SSE 重连 + loadSnapshot 是
+    既有的无损自愈路径，静默丢帧反而让客户端滞留旧 revision。
   - **帧体积缩减**（studio_chat/store.py）：publish 的 json.dumps 补
     `ensure_ascii=False`，CJK 文本不再 \uXXXX 转义（帧体积减半），放慢订阅
     队列的积压速度。
