@@ -288,7 +288,9 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       target: { value: 'code' },
     })
 
-    expect(promptSpy).toHaveBeenCalledWith(expect.stringContaining('capability'))
+    expect(promptSpy).toHaveBeenCalledWith(
+      expect.stringContaining('capability')
+    )
     expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
     const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
     const node = (

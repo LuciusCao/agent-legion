@@ -142,7 +142,12 @@ describe('patchWorkflowNodeType', () => {
     expect(node?.capability).toBe('gate_cap')
     // 审批专属 config 键仍随切换剥除（空 config 整体删除）。
     expect(node).not.toHaveProperty('config')
-    const toAgent = patchWorkflowNodeType(midDagYaml, 'gate', 'agent', 'gate_cap')
+    const toAgent = patchWorkflowNodeType(
+      midDagYaml,
+      'gate',
+      'agent',
+      'gate_cap'
+    )
     expect(parseNodes(toAgent).nodes?.gate?.type).toBe('agent')
     expect(parseNodes(toAgent).nodes?.gate?.capability).toBe('gate_cap')
     // 空白通道等同未提供（弹窗留空不应绕过前置校验）。

@@ -5,7 +5,10 @@ import {
   WorkflowNodeTypeSwitchError,
   type SwitchableNodeType,
 } from '../shared/workflowStudioYamlDraft.nodeType'
-import { confirmDestructiveSwitch, promptForSwitchCapability } from './nodeTypeSelector'
+import {
+  confirmDestructiveSwitch,
+  promptForSwitchCapability,
+} from './nodeTypeSelector'
 import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft.parse'
 
 // 头部类型选择器（#392）的写侧接线：先做目标类型前置校验
