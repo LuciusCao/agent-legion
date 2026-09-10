@@ -140,6 +140,25 @@ describe('WorkspaceLayout', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/settings')
   })
 
+  it('renders the campaigns entry beside package and navigates on click', () => {
+    // #532 定稿修正：批量任务是 workspace 级管理入口（顶栏），不再藏在
+    // 多选工具栏里——未进多选模式也必须可达。
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    const batchEntry = screen.getByLabelText('批量任务')
+    expect(batchEntry).toBeInTheDocument()
+    fireEvent.click(batchEntry)
+    expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/campaigns')
+  })
+
   it('navigates to workflow studio when workflow studio button is clicked', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>

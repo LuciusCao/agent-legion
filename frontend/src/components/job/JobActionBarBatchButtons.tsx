@@ -12,8 +12,6 @@ export interface JobActionBarBatchButtonsProps {
   onUpgradeWorkflow?: (jobIds?: string[]) => void | Promise<void>
   onPause?: () => void | Promise<void>
   onResume?: () => void | Promise<void>
-  /** 跳转 workspace 的「批量任务」页（#532：批量执行的管理面入口）。 */
-  onOpenCampaigns?: () => void
 }
 
 /** Batch-mode leading actions: workflow upgrade plus execution pause/resume. */
@@ -27,7 +25,6 @@ export function JobActionBarBatchButtons({
   onUpgradeWorkflow,
   onPause,
   onResume,
-  onOpenCampaigns,
 }: JobActionBarBatchButtonsProps) {
   const pauseDisabled =
     loading || (allMatching ? allMatchingCount : jobs.length) === 0
@@ -48,11 +45,6 @@ export function JobActionBarBatchButtons({
           loading={loading}
           onUpgradeWorkflow={onUpgradeWorkflow}
         />
-      )}
-      {onOpenCampaigns && (
-        <Button variant="outlined" onClick={onOpenCampaigns}>
-          批量任务
-        </Button>
       )}
       {onPause && (
         <Button variant="outlined" onClick={onPause} disabled={pauseDisabled}>

@@ -50,7 +50,6 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
     onPause,
     onResume,
     onUpgradeWorkflow,
-    onOpenCampaigns,
     onExitSelectMode,
     itemLabel = '任务',
   } = props
@@ -88,7 +87,6 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
             onUpgradeWorkflow={onUpgradeWorkflow}
             onPause={onPause}
             onResume={onResume}
-            onOpenCampaigns={onOpenCampaigns}
           />
         )}
         <Button
