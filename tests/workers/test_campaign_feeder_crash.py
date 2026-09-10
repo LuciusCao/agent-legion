@@ -18,7 +18,6 @@ progress_json.pending_batch，投递完成、计数落账时摘除；重启时�
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -219,9 +218,11 @@ def test_filter_batch_stage_lost_to_cancel_skips_feed(job_db, feeder) -> None:
     campaign = create_filter_campaign(job_db, ws, batch_size=2)
     campaign_id = campaign["id"]
 
-    feeder_module = sys.modules[CampaignFeeder.__module__]
+    # PR-C 拆分后 batch_rerun/next_slice 都从 modes mixin 的命名空间引用。
+    import server.app.workflow_worker.campaign_feeder_modes as feeder_module
+
     real_batch_rerun = feeder_module.batch_rerun
-    real_next_slice = feeder_module.next_slice  # from-import 绑定在 feeder 命名空间
+    real_next_slice = feeder_module.next_slice  # from-import 绑定在 modes 命名空间
     submitted: list[list[str]] = []
 
     def _spying_rerun(service, workspace_id, **kwargs):
@@ -354,7 +355,7 @@ def test_replay_skips_completed_jobs_to_protect_artifacts(job_db, settings) -> N
     rerun_calls: list[str] = []
     feeder = make_feeder(job_db, settings)
 
-    import server.app.workflow_worker.campaign_feeder as feeder_mod
+    import server.app.workflow_worker.campaign_feeder_modes as feeder_mod
 
     original_batch_rerun = feeder_mod.batch_rerun
 
@@ -429,7 +430,7 @@ def test_replay_marker_outranks_failed_again_status(job_db, settings) -> None:
     rerun_calls: list[str] = []
     feeder = make_feeder(job_db, settings)
 
-    import server.app.workflow_worker.campaign_feeder as feeder_mod
+    import server.app.workflow_worker.campaign_feeder_modes as feeder_mod
 
     original_batch_rerun = feeder_mod.batch_rerun
 

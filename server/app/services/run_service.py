@@ -26,7 +26,11 @@ from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.agent_service import published_agent_definitions
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_errors import (
+    AllItemsAlreadyResolvedError,
+    InvalidOperationError,
+    NotFoundError,
+)
 from server.app.services.job_intake_workspace import get_workspace
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
@@ -82,7 +86,18 @@ class RunService:
         *,
         workflow_key: str,
         items: list[dict[str, Any]],
+        campaign_id: str = "",
+        created_by: str = "",
     ) -> dict[str, Any]:
+        """Create a run (one job per fresh item) from terminal-state items.
+
+        ``campaign_id`` / ``created_by`` are the campaign submit-mode linkage
+        (design §1.5, PR-C): the feeder stamps each batch's run with its
+        campaign and forwards the campaign's created_by. Both default to the
+        empty legacy value, so the /runs route and every other caller keep
+        their exact prior behavior (RunService is a shared service; optional
+        parameters only, never a breaking change).
+        """
         workspace = get_workspace(self.job_db, workspace_id)
         active_revision = self.job_db.get_active_workflow_revision(workspace_id, workflow_key)
         if active_revision is None:
@@ -166,7 +181,7 @@ class RunService:
             )
             if healed is not None:
                 return {"run": _run_record(healed), "created_count": 0, "job_ids": []}
-            raise InvalidOperationError("No tasks were resolved from input")
+            raise AllItemsAlreadyResolvedError("No tasks were resolved from input")
 
         run = self.job_db.create_run(
             workflow_key,
@@ -174,6 +189,8 @@ class RunService:
             digest_payload,
             workspace_id=workspace_id,
             frozen_pins={"node_code_versions": node_code_versions},
+            campaign_id=campaign_id,
+            created_by=created_by,
         )
         try:
             job_ids = self.job_db.create_jobs_bulk(

@@ -3874,9 +3874,67 @@ export interface components {
     CampaignCreateResponse: {
       campaign: components['schemas']['CampaignRecord']
     }
+    /**
+     * CampaignDetailRecord
+     * @description Detail shape: the record plus the submit-mode run overview.
+     */
+    CampaignDetailRecord: {
+      /** Batch Size */
+      batch_size: number
+      /** Batches Submitted */
+      batches_submitted: number
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** Error Message */
+      error_message: string
+      /** Finished At */
+      finished_at: string | null
+      /** Id */
+      id: string
+      /** Jobs Failed */
+      jobs_failed: number
+      /** Jobs Skipped */
+      jobs_skipped: number
+      /** Jobs Succeeded */
+      jobs_succeeded: number
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: 'rerun' | 'submit' | 'upgrade'
+      /** Progress */
+      progress: {
+        [key: string]: unknown
+      }
+      /** Runs */
+      runs?: components['schemas']['CampaignRunOverview'][]
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | 'pending'
+        | 'running'
+        | 'paused'
+        | 'failed'
+        | 'completed'
+        | 'cancelled'
+      /** Target Spec */
+      target_spec: {
+        [key: string]: unknown
+      }
+      /** Updated At */
+      updated_at: string | null
+      /** Watermark */
+      watermark: number
+      /** Workspace Id */
+      workspace_id: string
+    }
     /** CampaignDetailResponse */
     CampaignDetailResponse: {
-      campaign: components['schemas']['CampaignRecord']
+      campaign: components['schemas']['CampaignDetailRecord']
     }
     /** CampaignListResponse */
     CampaignListResponse: {
@@ -4000,6 +4058,24 @@ export interface components {
       node_key?: string | null
       /** Watermark */
       watermark?: number | null
+    }
+    /**
+     * CampaignRunOverview
+     * @description One linked run of a submit campaign (the detail aggregate, PR-C).
+     *
+     *     created_count is the run row's counter; job_count the live per-run job
+     *     total from the status-counts table — they diverge exactly when a
+     *     partial failure left the run's count stale until healing.
+     */
+    CampaignRunOverview: {
+      /** Created Count */
+      created_count: number
+      /** Id */
+      id: string
+      /** Job Count */
+      job_count: number
+      /** Status */
+      status: string
     }
     /** CampaignStatusChangeResponse */
     CampaignStatusChangeResponse: {

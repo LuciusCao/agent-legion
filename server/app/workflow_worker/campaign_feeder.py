@@ -22,9 +22,12 @@ stage/replay/pop mechanics live in campaign_batch_staging.py (split at
 the budget ceiling); explicit-ids and submit forms need no staging —
 their slice sources are stable across the crash.
 
-This slice (PR-B) implements the rerun and upgrade modes; submit dispatches
-through the same skeleton with a per-campaign manifest cache that PR-C
-fills in.
+The three mode dispatches: rerun/upgrade live here (PR-B); submit is the
+CampaignSubmitMixin (campaign_feeder_submit.py, PR-C) — the per-campaign
+manifest cache (inline spec or the object-store manifest object),
+item_offset slicing, ``run_service.create_run(campaign_id=...)``, and the
+all-duplicates InvalidOperationError absorb that keeps re-fed batches
+advancing the cursor without creating anything.
 
 Failure classification (design §2.3): ``JobServiceError`` families raised
 while feeding are deterministic (corrupt target spec, vanished revision)
@@ -38,17 +41,15 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.campaigns import CAMPAIGN_ACTIVE_STATUSES
 from server.app.services.job_errors import InvalidOperationError, JobServiceError
-from server.app.services.job_rerun.batch import batch_rerun
-from server.app.workflow_worker.campaign_batch_staging import (
+from server.app.workflow_worker.campaign_feeder_modes import CampaignRerunModesMixin
+from server.app.workflow_worker.campaign_feeder_submit import CampaignSubmitMixin
+from server.app.workflow_worker.campaign_feeder_types import (
+    BatchOutcome,
     copy_progress,
-    next_slice,
-    partition_replay,
-    stage_batch,
-    target_spec,
 )
 
 if TYPE_CHECKING:
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
     from server.app.services.run_service import RunService
     from server.app.settings import Settings
+    from server.app.storage import ObjectStorage
     from server.app.worker_control import WorkspaceWorkerControl
 
 logger = logging.getLogger(__name__)
@@ -78,18 +80,7 @@ _BACKOFF_MAX_SECONDS = 60.0
 _WATERMARK_TRAIL_LENGTH = 50
 
 
-class BatchOutcome(NamedTuple):
-    """What one fed batch did (the CAS advance's input)."""
-
-    ids: list[str]
-    succeeded: int
-    skipped: int
-    failed: int
-    exhausted: bool  # this slice ended the campaign's target
-    next_cursor: str | None  # filter form: the keyset cursor after this page
-
-
-class CampaignFeeder:
+class CampaignFeeder(CampaignRerunModesMixin, CampaignSubmitMixin):
     """Tick loop draining active campaign rows in watermark-gated batches."""
 
     def __init__(
@@ -101,6 +92,7 @@ class CampaignFeeder:
         upgrade_service: JobWorkflowUpgradeService,
         run_service: RunService | None = None,
         workspace_worker_control: WorkspaceWorkerControl | None = None,
+        object_storage: ObjectStorage | None = None,
     ) -> None:
         self.job_db = job_db
         self.settings = settings
@@ -108,6 +100,7 @@ class CampaignFeeder:
         self.upgrade_service = upgrade_service
         self.run_service = run_service
         self.workspace_worker_control = workspace_worker_control
+        self.object_storage = object_storage
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -117,7 +110,13 @@ class CampaignFeeder:
         self._next_feed_at: dict[str, float] = {}
         self._attempts: dict[str, int] = {}
         self._round_robin: dict[str, int] = {}
+        # campaign_id → loaded submit manifest, plus its byte accounting
+        # (the submit mixin's cache: LRU order by move-to-back, globally
+        # byte-budgeted via campaigns.manifest_cache_max_bytes — PR-C
+        # review P1; both dicts share the campaign_id key space and are
+        # pruned together below).
         self._manifest_cache: dict[str, Any] = {}
+        self._manifest_cache_bytes: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Thread plumbing
@@ -263,7 +262,12 @@ class CampaignFeeder:
     def _prune_memory(self, campaigns: Any) -> None:
         active = {str(campaign["id"]) for campaign in campaigns}
         workspaces = {str(campaign["workspace_id"]) for campaign in campaigns}
-        for registry in (self._next_feed_at, self._attempts, self._manifest_cache):
+        for registry in (
+            self._next_feed_at,
+            self._attempts,
+            self._manifest_cache,
+            self._manifest_cache_bytes,
+        ):
             for campaign_id in list(registry):
                 if campaign_id not in active:
                     del registry[campaign_id]
@@ -383,18 +387,32 @@ class CampaignFeeder:
         elif "offset" in progress:
             # rerun/upgrade explicit-ids form: the list offset.
             progress["offset"] = int(progress.get("offset") or 0) + len(outcome.ids)
-        # submit mode's item_offset advance is PR-C's (design §1.4).
+        elif "item_offset" in progress:
+            # submit form: the manifest line offset. The batch outcome's
+            # ids field carries the campaign id marker (len 1), NOT the
+            # slice size — the slice length is batch_size-bounded and the
+            # created count is the dedup outcome, so recompute the advance
+            # from the stored offset + the row's batch_size (design §1.4).
+            batch_size = int(campaign["batch_size"])
+            progress["item_offset"] = int(progress.get("item_offset") or 0) + batch_size
 
     # ------------------------------------------------------------------
     # Mode dispatch (design §2.3)
     # ------------------------------------------------------------------
 
     def _submit_batch(self, campaign: dict[str, Any]) -> BatchOutcome | None:
-        """Feed one batch; None only for the PR-C submit stub.
+        """Feed one batch (rerun / upgrade / submit).
 
-        Per-job outcomes are result dicts on both paths: succeeded = flips
+        Per-job outcomes are result dicts on the rerun/upgrade paths
+        (byte-identical to the synchronous entry points): succeeded = flips
         that landed, skipped = ineligible/not-found/busy, failed = per-job
-        failures.
+        failures. The submit path folds create_run's single verdict into the
+        same triple: created = succeeded, the dedup-dropped remainder =
+        skipped (PR-C review P2-1: a mixed batch's counters sum to the
+        slice), and the all-duplicates absorb counts the whole slice as
+        skipped. The rerun/upgrade bodies live in CampaignRerunModesMixin
+        (campaign_feeder_modes.py), submit in CampaignSubmitMixin — the
+        dispatch itself is the skeleton's one job here.
         """
         mode = str(campaign["mode"])
         if mode == "rerun":
@@ -402,82 +420,8 @@ class CampaignFeeder:
         if mode == "upgrade":
             return self._submit_upgrade(campaign)
         if mode == "submit":
-            # PR-C: load the manifest, slice at item_offset, absorb the
-            # already-submitted batch, advance item_offset — a branch
-            # fill-in, not a rewire.
-            return None
+            return self._submit_manifest_batch(campaign)
         raise InvalidOperationError(f"Unsupported campaign mode {mode!r}")
-
-    def _submit_rerun(self, campaign: dict[str, Any]) -> BatchOutcome:
-        ids, next_cursor, exhausted = next_slice(self.job_db, campaign)
-        if not ids:
-            return BatchOutcome([], 0, 0, 0, True, None)
-        if not stage_batch(self.job_db, campaign, ids, next_cursor, exhausted):
-            # PR #545 P1：stage 输给 pause/cancel——空 ids 且非 exhausted
-            # 让 _feed_one 安静跳过（不投、不翻终态、不推进）。
-            return BatchOutcome([], 0, 0, 0, False, None)
-        # Round-4 P1：重放分拣（标记归属 + completed 产物保护，语义见
-        # campaign_batch_staging.partition_replay）。
-        campaign_id = str(campaign["id"])
-        delivered, completed, to_deliver = partition_replay(self.job_db, campaign_id, ids)
-        spec = target_spec(campaign)
-        results = (
-            batch_rerun(
-                self.rerun_service,
-                str(campaign["workspace_id"]),
-                job_ids=to_deliver,
-                node_key=spec.get("node_key"),
-                from_failed_node=bool(spec.get("from_failed_node")),
-                campaign_id=campaign_id,
-            )
-            if to_deliver
-            else []
-        )
-        return BatchOutcome(
-            ids=list(ids),
-            succeeded=len(delivered.intersection(ids))
-            + sum(1 for r in results if r.get("status") == "succeeded"),
-            skipped=len(completed - delivered)
-            + sum(1 for r in results if r.get("status") == "skipped"),
-            failed=sum(1 for r in results if r.get("status") == "failed"),
-            exhausted=exhausted,
-            next_cursor=next_cursor,
-        )
-
-    def _submit_upgrade(self, campaign: dict[str, Any]) -> BatchOutcome:
-        ids, next_cursor, exhausted = next_slice(self.job_db, campaign)
-        if not ids:
-            return BatchOutcome([], 0, 0, 0, True, None)
-        if not stage_batch(self.job_db, campaign, ids, next_cursor, exhausted):
-            # PR #545 P1：同 _submit_rerun——stage 失败即放弃本批。
-            return BatchOutcome([], 0, 0, 0, False, None)
-        campaign_id = str(campaign["id"])
-        # Round-4 P1（v81）：标记归属，同 _submit_rerun——已投递计
-        # succeeded 不重投（already_current 无法归属崩溃 pass 的翻新）。
-        delivered = self.job_db.campaign_delivered_job_ids(campaign_id)
-        succeeded = len(delivered.intersection(ids))
-        skipped = failed = 0
-        for job_id in ids:
-            if job_id in delivered:
-                continue
-            result = self.upgrade_service.upgrade(
-                str(campaign["workspace_id"]), job_id, campaign_id=campaign_id
-            )
-            status = str(result.get("status"))
-            if status == "succeeded":
-                succeeded += 1
-            elif status == "skipped":
-                skipped += 1
-            else:
-                failed += 1
-        return BatchOutcome(
-            ids=list(ids),
-            succeeded=succeeded,
-            skipped=skipped,
-            failed=failed,
-            exhausted=exhausted,
-            next_cursor=next_cursor,
-        )
 
     # ------------------------------------------------------------------
     # Failure accounting (design §2.3)

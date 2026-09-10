@@ -371,9 +371,10 @@ server/app/
 | CampaignKnobsMixin | BaseModel | watermark: int | None, batch_size: int | None | app/routes/campaign_contracts.py |
 | CampaignCreateRequest | BaseModel | mode: CampaignMode, rerun: CampaignRerunTarget | None, submit: CampaignSubmit... | app/routes/campaign_contracts.py |
 | CampaignRecord | BaseModel | id: str, workspace_id: str, mode: CampaignMode, status: CampaignStatus, targe... | app/routes/campaign_contracts.py |
+| CampaignRunOverview | BaseModel | id: str, status: str, created_count: int, job_count: int | app/routes/campaign_contracts.py |
 | CampaignCreateResponse | BaseModel | campaign: CampaignRecord | app/routes/campaign_contracts.py |
 | CampaignListResponse | BaseModel | campaigns: list[CampaignRecord] | app/routes/campaign_contracts.py |
-| CampaignDetailResponse | BaseModel | campaign: CampaignRecord | app/routes/campaign_contracts.py |
+| CampaignDetailResponse | BaseModel | campaign: CampaignDetailRecord | app/routes/campaign_contracts.py |
 | CampaignRerunPreviewResult | BaseModel | mode: Literal['rerun', 'upgrade'], total_count: int, eligible_count: int, est... | app/routes/campaign_contracts.py |
 | CampaignSubmitPreviewResult | BaseModel | mode: Literal['submit'], total_items: int, would_create: int, would_skip: int... | app/routes/campaign_contracts.py |
 | CampaignPreviewResponse | BaseModel | result: Annotated[CampaignRerunPreviewResult | CampaignSubmitPreviewResult, F... | app/routes/campaign_contracts.py |

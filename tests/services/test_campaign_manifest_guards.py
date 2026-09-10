@@ -60,6 +60,7 @@ class TestCampaignsRuntimeConfig:
         assert config.max_active_per_workspace == 3
         assert config.manifest_inline_max_bytes == 262_144
         assert config.manifest_max_bytes == 52_428_800
+        assert config.manifest_cache_max_bytes == 268_435_456
 
     def test_watermark_low_with_large_batch_is_legal(self):
         """低水位线 + 大批次合法（codex #531 P2-1 的服务端化）：
@@ -74,6 +75,12 @@ class TestCampaignsRuntimeConfig:
     def test_non_positive_batch_size_rejected(self):
         with pytest.raises(ValueError):
             CampaignsRuntimeConfig(default_batch_size=0)
+
+    def test_negative_manifest_cache_budget_rejected(self):
+        """0 = 不限（与 max_items_per_run 同约定），负数不是合法预算。"""
+        CampaignsRuntimeConfig(manifest_cache_max_bytes=0)
+        with pytest.raises(ValueError):
+            CampaignsRuntimeConfig(manifest_cache_max_bytes=-1)
 
 
 class TestManifestErrorContract:
