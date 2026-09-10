@@ -11,6 +11,7 @@ pub mod cli;
 pub mod config;
 pub mod contract;
 pub mod contract_gate;
+pub mod event_sink;
 pub mod events;
 pub mod models;
 pub mod provider;
@@ -22,8 +23,8 @@ pub mod tools;
 use anyhow::{anyhow, Context};
 
 use crate::cli::Cli;
-use crate::events::{EventSink, StdoutJsonlSink};
 use crate::tools::ToolKind;
+use crate::{event_sink::StdoutJsonlSink, events::EventSink};
 
 /// Run one headless session from parsed CLI args. Returns the process exit
 /// code: 0 even for unrecovered model errors (Pi semantics) and for

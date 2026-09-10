@@ -1605,6 +1605,7 @@
     "velites/src/config.rs": 170,
     "velites/src/contract.rs": 513,
     "velites/src/contract_gate.rs": 89,
+    "velites/src/event_sink.rs": 307,
     "velites/src/events.rs": 463,
     "velites/src/lib.rs": 209,
     "velites/src/main.rs": 64,
