@@ -106,6 +106,16 @@ describe('WorkflowNodeToolsEditor (#443/#476/#575)', () => {
     ).toBeInTheDocument()
   })
 
+  // #580 codex P2：Agent tools 未知（draft-only Agent 的列表映射不含
+  // tools）时不出生效值 hint——未知 ≠ 空，不能声称「当前生效…（空）」。
+  it('shows no effective-value hint when the Agent tools are unknown', async () => {
+    renderEditor('nodes:\n  gen:\n    type: agent\n')
+    await screen.findByLabelText(toolsLabel)
+    expect(
+      screen.queryByText(/当前生效（跟随 Agent 默认）/)
+    ).not.toBeInTheDocument()
+  })
+
   it('hides the fallback hint once the node declares its own tools', async () => {
     renderEditor(
       'nodes:\n  gen:\n    type: agent\n    tools:\n      - read\n',

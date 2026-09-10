@@ -309,6 +309,11 @@ describe('WorkflowNodeExecutionSection', () => {
     // （草稿经 react-query 异步解析，等待 resolve）。
     expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
     expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
+    // #580 codex P2：draft 列表映射不含 tools（未知 ≠ 空）——节点级
+    // 「Tools 覆盖」字段不得声称「当前生效（跟随 Agent 默认）：（空）」。
+    expect(
+      screen.queryByText(/当前生效（跟随 Agent 默认）/)
+    ).not.toBeInTheDocument()
   })
 
   it('prefers the published catalog agent over a same-capability draft', async () => {

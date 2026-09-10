@@ -56,7 +56,10 @@ export function WorkflowNodeAgentConfigBody(props: Props) {
       <WorkflowAgentExecutionDetails
         node={props.node}
         runtime={props.agentDefinition.runtime}
-        agentDefaultTools={props.agentDefinition.tools ?? []}
+        // #580 codex P2：draft-only Agent 的列表映射（draftAgentFromListItem）
+        // 刻意不含 tools——undefined 是「未知」而非「空」，原样透传，节点级
+        // 编辑器对未知态不出生效值 hint。
+        agentDefaultTools={props.agentDefinition.tools}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}
