@@ -272,4 +272,39 @@ describe('WorkflowNodeAgentSchemaSection (#406 agent 生效 schema)', () => {
       await screen.findByText('Agent 定义加载失败，暂无法展示配置参数。')
     ).toBeInTheDocument()
   })
+
+  it('shows loading (not stale schema) while the detail refetches (#607 codex P2)', async () => {
+    // 发布/回滚/turn_end 失效后有缓存：isPending=false、isFetching=true——
+    // 旧 published 不得继续标「当前生效内容」。第二挂载（同 key 缓存
+    // + 新在途请求）期间应显示加载态。
+    mockDetail
+      .mockResolvedValueOnce({
+        agent_id: 'agent-generate',
+        published: version(
+          {
+            capability: 'generate_questions',
+            runtime: 'velites',
+            skill: 'demo/generate',
+            config_schema: agentSchema,
+          },
+          'published'
+        ),
+        latest: null,
+      } satisfies AgentDetailResponse)
+      .mockImplementationOnce(
+        () =>
+          new Promise(() => {
+            /* 永不 resolve：钉住 fetching 期间的加载态 */
+          })
+      )
+    const { unmount } = renderSection()
+    await screen.findByText('dry_run · boolean · 默认 false · 运行开关')
+
+    unmount()
+    renderSection()
+    expect(await screen.findByText('生效配置参数加载中...')).toBeInTheDocument()
+    expect(
+      screen.queryByText('dry_run · boolean · 默认 false · 运行开关')
+    ).not.toBeInTheDocument()
+  })
 })

@@ -104,7 +104,11 @@ export function WorkflowNodeAgentSchemaSection(props: Props) {
         <div className={inspectorStyles.empty}>
           该 capability 尚无 Agent，暂无生效配置参数。
         </div>
-      ) : detail.isPending ? (
+      ) : detail.isPending || detail.isFetching ? (
+        // codex P2：后台重取期间缓存数据仍是旧 schema——发布/回滚/turn_end
+        // 触发失效后 isPending 为 false 但 isFetching 为 true，旧 published
+        // 会被继续标成「当前生效内容」。fetching 期间维持加载态（与
+        // ExecutionSection 的冻结覆盖同纪律：宁可短暂加载，不闪旧数据）。
         <div className={inspectorStyles.empty} role="status">
           生效配置参数加载中...
         </div>
