@@ -1654,6 +1654,133 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/campaigns': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Campaigns */
+    get: operations['list_campaigns_api_workspaces__workspace_id__campaigns_get']
+    put?: never
+    /** Create Campaign */
+    post: operations['create_campaign_api_workspaces__workspace_id__campaigns_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/campaigns/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Preview Campaign */
+    post: operations['preview_campaign_api_workspaces__workspace_id__campaigns_preview_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/campaigns/upload': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Create Campaign From Manifest
+     * @description Multipart variant: manifest file (.jsonl / .csv) + form knobs.
+     *
+     *     The submit channel beyond the inline ceiling; the read is bounded
+     *     by the 50MB cap (ceiling+1 bytes max, oversized → 413) and
+     *     normalized server-side before any row exists.
+     */
+    post: operations['create_campaign_from_manifest_api_workspaces__workspace_id__campaigns_upload_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/campaigns/{campaign_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Campaign */
+    get: operations['get_campaign_api_workspaces__workspace_id__campaigns__campaign_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/campaigns/{campaign_id}/cancel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Campaign */
+    post: operations['cancel_campaign_api_workspaces__workspace_id__campaigns__campaign_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/campaigns/{campaign_id}/pause': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Pause Campaign */
+    post: operations['pause_campaign_api_workspaces__workspace_id__campaigns__campaign_id__pause_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/campaigns/{campaign_id}/resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resume Campaign */
+    post: operations['resume_campaign_api_workspaces__workspace_id__campaigns__campaign_id__resume_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/configuration': {
     parameters: {
       query?: never
@@ -3699,6 +3826,20 @@ export interface components {
       /** Job Ids */
       job_ids?: string[] | null
     }
+    /** Body_create_campaign_from_manifest_api_workspaces__workspace_id__campaigns_upload_post */
+    Body_create_campaign_from_manifest_api_workspaces__workspace_id__campaigns_upload_post: {
+      /** Batch Size */
+      batch_size?: number | null
+      /** Manifest */
+      manifest: string
+      /**
+       * Mode
+       * @default submit
+       */
+      mode: string
+      /** Watermark */
+      watermark?: number | null
+    }
     /** BootstrapRequest */
     BootstrapRequest: {
       /**
@@ -3715,6 +3856,188 @@ export interface components {
     BootstrapStatusResponse: {
       /** Available */
       available: boolean
+    }
+    /**
+     * CampaignCreateRequest
+     * @description JSON create body; the multipart variant lives in the route.
+     */
+    CampaignCreateRequest: {
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: 'rerun' | 'submit' | 'upgrade'
+      rerun?: components['schemas']['CampaignRerunTarget'] | null
+      submit?: components['schemas']['CampaignSubmitInlineTarget'] | null
+    }
+    /** CampaignCreateResponse */
+    CampaignCreateResponse: {
+      campaign: components['schemas']['CampaignRecord']
+    }
+    /** CampaignDetailResponse */
+    CampaignDetailResponse: {
+      campaign: components['schemas']['CampaignRecord']
+    }
+    /** CampaignListResponse */
+    CampaignListResponse: {
+      /** Campaigns */
+      campaigns: components['schemas']['CampaignRecord'][]
+    }
+    /**
+     * CampaignPreviewRequest
+     * @description Dry-run the creation judgements; same shape, no writes.
+     */
+    CampaignPreviewRequest: {
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: 'rerun' | 'submit' | 'upgrade'
+      rerun?: components['schemas']['CampaignRerunTarget'] | null
+      submit?: components['schemas']['CampaignSubmitInlineTarget'] | null
+    }
+    /**
+     * CampaignPreviewResponse
+     * @description Discriminated union of the per-mode preview results (named model so the
+     *     OpenAPI response schema is a $ref, not an inline blob).
+     */
+    CampaignPreviewResponse: {
+      /** Result */
+      result:
+        | components['schemas']['CampaignRerunPreviewResult']
+        | components['schemas']['CampaignSubmitPreviewResult']
+    }
+    /** CampaignRecord */
+    CampaignRecord: {
+      /** Batch Size */
+      batch_size: number
+      /** Batches Submitted */
+      batches_submitted: number
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** Error Message */
+      error_message: string
+      /** Finished At */
+      finished_at: string | null
+      /** Id */
+      id: string
+      /** Jobs Failed */
+      jobs_failed: number
+      /** Jobs Skipped */
+      jobs_skipped: number
+      /** Jobs Succeeded */
+      jobs_succeeded: number
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: 'rerun' | 'submit' | 'upgrade'
+      /** Progress */
+      progress: {
+        [key: string]: unknown
+      }
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | 'pending'
+        | 'running'
+        | 'paused'
+        | 'failed'
+        | 'completed'
+        | 'cancelled'
+      /** Target Spec */
+      target_spec: {
+        [key: string]: unknown
+      }
+      /** Updated At */
+      updated_at: string | null
+      /** Watermark */
+      watermark: number
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** CampaignRerunPreviewResult */
+    CampaignRerunPreviewResult: {
+      /** Batch Size */
+      batch_size: number
+      /** Eligible Count */
+      eligible_count: number
+      /** Estimated Batches */
+      estimated_batches: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'rerun' | 'upgrade'
+      /** Total Count */
+      total_count: number
+    }
+    /**
+     * CampaignRerunTarget
+     * @description rerun/upgrade: exactly one of job_ids or filter, plus rerun knobs.
+     *
+     *     The node_key/from_failed_node pair follows JobBatchRerunRequest's rule
+     *     but only for rerun mode (upgrade re-pins the revision and reruns from
+     *     the top — there is no node selection to make); the cross-mode rule is
+     *     checked in CampaignCreateRequest where the mode is known.
+     */
+    CampaignRerunTarget: {
+      /** Batch Size */
+      batch_size?: number | null
+      filter?: components['schemas']['JobFilterPayload'] | null
+      /**
+       * From Failed Node
+       * @default false
+       */
+      from_failed_node: boolean
+      /** Job Ids */
+      job_ids?: string[] | null
+      /** Node Key */
+      node_key?: string | null
+      /** Watermark */
+      watermark?: number | null
+    }
+    /** CampaignStatusChangeResponse */
+    CampaignStatusChangeResponse: {
+      campaign: components['schemas']['CampaignRecord']
+    }
+    /**
+     * CampaignSubmitInlineTarget
+     * @description submit, inline channel: a bounded items array in the JSON body.
+     */
+    CampaignSubmitInlineTarget: {
+      /** Batch Size */
+      batch_size?: number | null
+      /** Items */
+      items: (
+        | components['schemas']['RunItemMaterial']
+        | components['schemas']['RunItemRef']
+        | components['schemas']['RunItemBundle']
+      )[]
+      /** Watermark */
+      watermark?: number | null
+    }
+    /** CampaignSubmitPreviewResult */
+    CampaignSubmitPreviewResult: {
+      /** Batch Size */
+      batch_size: number
+      /** Estimated Batches */
+      estimated_batches: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'submit'
+      /** Total Items */
+      total_items: number
+      /** Would Create */
+      would_create: number
+      /** Would Skip */
+      would_skip: number
     }
     /** ClaimAgentExecutionRequest */
     ClaimAgentExecutionRequest: {
@@ -10701,6 +11024,272 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceAgentRoutesResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_campaigns_api_workspaces__workspace_id__campaigns_get: {
+    parameters: {
+      query?: {
+        limit?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CampaignListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_campaign_api_workspaces__workspace_id__campaigns_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CampaignCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CampaignCreateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_campaign_api_workspaces__workspace_id__campaigns_preview_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CampaignPreviewRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CampaignPreviewResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_campaign_from_manifest_api_workspaces__workspace_id__campaigns_upload_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['Body_create_campaign_from_manifest_api_workspaces__workspace_id__campaigns_upload_post']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CampaignCreateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_campaign_api_workspaces__workspace_id__campaigns__campaign_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        campaign_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CampaignDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cancel_campaign_api_workspaces__workspace_id__campaigns__campaign_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        campaign_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CampaignStatusChangeResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  pause_campaign_api_workspaces__workspace_id__campaigns__campaign_id__pause_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        campaign_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CampaignStatusChangeResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  resume_campaign_api_workspaces__workspace_id__campaigns__campaign_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        campaign_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CampaignStatusChangeResponse']
         }
       }
       /** @description Validation Error */

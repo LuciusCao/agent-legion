@@ -24,13 +24,13 @@ def test_schema_v57_recorded() -> None:
     """Latest-migration record pin (moved from
     tests/db/test_job_node_status_counts_migration.py, v56)."""
     # The pin narrative now lives in tests/db/test_workspace_id_key_binding.py;
-    # v79 (shard_identity_index, #401) is the current chain tail.
+    # v80 (campaigns, #532/#505) is the current chain tail.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "shard_identity_index"
+    assert row["name"] == "campaigns"
 
 
 def test_studio_chat_tables_exist() -> None:
@@ -79,7 +79,7 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "shard_identity_index"
+        assert migration["name"] == "campaigns"
 
 
 @pytest.mark.fresh_schema
@@ -112,7 +112,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "shard_identity_index"
+        assert migration["name"] == "campaigns"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).
