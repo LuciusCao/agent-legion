@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Fixed
+- Studio 会话闲置后 MCP 工具通道静默死亡（issue #558）：run token 固定
+  2h TTL、续期由对话活动驱动，闲置过期后 agent 的 MCP headers 无法中途
+  重指（协议限制），工具调用全 401 → client "Not connected"；而聊天主链路
+  （ACP 进程）毫发无伤，会话停在 idle——界面上一个"看起来活着"但工具
+  全废的会话，且 resume 只接受 closed/error，恢复入口不可达。修法：
+  #411 keepalive 的 dead 分支（首个 tool_call 检出 token 死亡）在追加
+  `run_token_invalidated` 通知的同时把会话升级为 status=error
+  （`server/app/studio_chat/session_escalation.py`，守卫同 on_error 致命
+  臂：closed/starting 不越权盖章，SSE session 快照同步发布），既有的
+  ResumeBar /「继续对话」恢复链（新 token + 上下文保留）直接生效；
+  jobDiagnosis 排查面板补挂 ResumeBar（此前 error 会话只有禁用文案，
+  只能废弃）；通知文案改为指向「继续对话」。
+
 ### Performance
 - executor 事件泵 reactor 化一期（issue #578）：agent 执行的 stdout 事件泵
   从 thread-per-execution（每个 velites 子进程一根 Python 泵线程）改为
