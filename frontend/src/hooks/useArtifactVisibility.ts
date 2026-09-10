@@ -50,19 +50,19 @@ export function useArtifactVisibility(
         void toggleArtifact(name, nextVisible)
         return
       }
+      // codex P2：消费产物的会话态恢复不得触碰 workspace 配置——用户
+      // 在设置页/旧版菜单写入的 previewHidden 是跨任务/跨用户的持久偏
+      // 好，会话级「临时看一眼」就把它永久删掉与「恢复仅为会话态」的
+      // 契约相反。两层隐藏在会话内叠加即可（dedupHidden 与 previewHidden
+      // 的并集天然实现），刷新/切换任务后回归持久偏好。
       setReenabled((prev) => {
         const next = new Set(prev)
         if (nextVisible) next.add(name)
         else next.delete(name)
         return next
       })
-      // 历史上被手动隐藏过的消费产物：恢复展示时同步清掉，避免两层
-      // 隐藏叠加（面板隐藏 + 配置隐藏）。
-      if (nextVisible && previewHidden.includes(name)) {
-        void toggleArtifact(name, true)
-      }
     },
-    [consumed, previewHidden, toggleArtifact]
+    [consumed]
   )
 
   return { hiddenNames, visible, dedupedCount, toggleVisibility }

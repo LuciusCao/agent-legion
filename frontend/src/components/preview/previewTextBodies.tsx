@@ -3,14 +3,15 @@
  * 预算）：截断提示 chip、纯文本 <pre>、JSON 兜底格式化视图。
  *
  * FormattedJsonBody（#255 方案 C）：超限或解析失败的 .json 进不了
- * JsonTree，但仍是结构化数据——至少缩进 2 空格排版后着色键名/字符串/
- * 数字，等宽展示。内容先经 HTML 转义再注入 span 标记（React 文本子节点
- * 的等价手动路径），用户数据不可能构成标签。
+ * JsonTree——缩进排版（可解析走 stringify；失败走 indentJsonish 的
+ * 括号深度缩进）后着色键名/字符串/数字。内容先经 HTML 转义再注入
+ * span 标记，用户数据不可能构成标签。
  */
 import { useMemo } from 'react'
 import { Chip } from '@mui/material'
 import { tryParseJson } from '../../lib/parsers'
 import styles from './previewRenderers.module.css'
+import { indentJsonish } from './previewTextIndent'
 
 export function TruncationChip({ total }: { total: number }) {
   return (
@@ -55,17 +56,16 @@ export function FormattedJsonBody({
 }) {
   const formatted = useMemo(() => {
     const parsed = tryParseJson(content)
-    const text = parsed === null ? content : JSON.stringify(parsed, null, 2)
+    // codex P2：解析失败的 JSON 也做括号深度缩进（indentJsonish，姊妹
+    // 件）——不再只是着色的超长单行。
+    const text =
+      parsed === null ? indentJsonish(content) : JSON.stringify(parsed, null, 2)
     const escaped = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-    // 词法级着色（无上下文文法，覆盖三种 token 已够可读性）。审核 P1：
-    // 不得用单条全局正则——未闭合字符串（截断 JSON 的常态）会让字符串
-    // 分支从每个引号位重试 O(K·L)（实测 512KB 截断内容 10-120s 主线程
-    // 冻结）。改为单趟手写扫描：光标只前进，遇 " 找配对引号（找不到则
-    // 原样吞到下一个引号，避免回溯），配对后看是否键名（后跟冒号）；
-    // 其余位置识别裸数字。
+      .replace(/>/g, '&gt;') // 转义先于 span 注入
+    // 着色契约见 lexJsonish（单趟手写扫描；不得用单条全局正则——
+    // 未闭合字符串会 O(K·L) 回溯，实测 512KB 截断内容 10-120s 冻结）。
     return lexJsonish(escaped)
   }, [content])
   return (
@@ -116,14 +116,10 @@ function lexJsonish(escaped: string): string {
       i = end + colon.length
       continue
     }
-    if (
-      ch === '-'
-        ? escaped[i + 1] >= '0' && escaped[i + 1] <= '9'
-        : ch >= '0' && ch <= '9'
-    ) {
-      // 负号必须后跟数字（否则是普通连字符，如 not-json）；数字段
-      // 只吞 [0-9.]——科学计数/符号留给词法边界外（着色是可读性
-      // 下限，不是解析器）。
+    // 负号必须后跟数字（否则是普通连字符，如 not-json）；数字段只吞
+    // [0-9.]——科学计数/符号留给词法边界外（着色是可读性下限）。
+    const isDigit = (c: string) => c >= '0' && c <= '9'
+    if (isDigit(ch) || (ch === '-' && isDigit(escaped[i + 1] ?? ''))) {
       let j = i + 1
       while (j < n && /[0-9.]/.test(escaped[j]!)) j += 1
       out += `<span class="${styles.jsonNumber}">${escaped.slice(i, j)}</span>`
