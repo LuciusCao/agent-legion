@@ -1524,8 +1524,23 @@ exemptions:
     stream bookkeeping + takeover belong together (the fence is defined on
     the same lock the takeover must respect) — splitting them would fork the
     single concurrency domain. Ceiling at actual + 5 per the dated-exemption
-    convention. Remove when the #578 phase-3 cleanup retires the per-execution
-    thread pump and folds the takeover path away with it.
+    convention. Remove when the #578 phase-3 cleanup re-budgets the pump
+    surface (legacy thread pump retirement folds takeover away).
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/578
   ceiling: 101
+- check: architecture.file_budget
+  path: server/app/events/bus.py
+  reason: >-
+    #563 + codex review: the overflow policy gained per-channel semantics
+    (snapshot channels drop-oldest with an evict threshold, incremental
+    channels keep the immediate evict) — the counter dict, the policy
+    parameter, and the semantics docstring are the whole feature. The bus
+    is a single concurrency surface shared by every channel kind; moving
+    one policy arm out would split the overflow handling across files.
+    Ceiling at actual + 5 per the dated-exemption convention. Remove when
+    the resync-signal follow-up (overflow -> typed signal instead of evict)
+    re-budgets the overflow path.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/563
+  ceiling: 96
