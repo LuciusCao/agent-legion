@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRealtimeChannel } from '../../../lib/realtime'
 import { queryKeys } from '../../../lib/queryKeys'
-import { invalidateStudioTurnEndQueries } from './studioChatInvalidation'
 import {
   answerStudioChatPermission,
   cancelStudioChatTurn,
@@ -17,10 +16,13 @@ import {
   type StudioChatSessionRecord,
 } from './studioChatApi'
 import {
+  handleSseMessageEvent,
+  handleSseReconnect,
+  type SsePayload,
+} from './studioChatEvents'
+import {
   deriveChatViews,
   maxSeq,
-  statusEvent,
-  streamingTextId,
   upsertMessage,
   type ChatMessage,
 } from './studioChatMessages'
@@ -31,12 +33,6 @@ import {
   useStudioChatRunTiming,
 } from './useStudioChatRunTiming'
 import { useStudioChatSessionMemory } from './useStudioChatSessionMemory'
-
-type SsePayload = {
-  type?: string
-  message?: Partial<ChatMessage> & { id: string }
-  session?: StudioChatSessionRecord
-}
 
 /** Studio「Agent 助手」对话面板的状态与动作：会话/消息经 REST 拉取，
  * 实时更新走 SSE（message 按 id upsert，session 为状态快照）；SSE
@@ -136,6 +132,19 @@ export function useStudioChat(workspaceId: string | undefined) {
   useEffect(() => {
     if (!workspaceId || !activeSessionId || typeof EventSource === 'undefined')
       return
+    // SSE 事件的合入与重连自愈逻辑在 studioChatEvents（#563 拆出，保体积
+    // 预算）：message 事件 upsert + terminal 触发全量回取；重连时未终结
+    // 流式行直接校准。
+    const sseDeps = {
+      workspaceId,
+      messagesRef,
+      queryClient,
+      setMessages,
+      setSession,
+      refillMessages,
+      fetchSession: fetchStudioChatSession,
+      activeSessionId,
+    }
     const channel = createRealtimeChannel({
       url: `/api/workspaces/${encodeURIComponent(workspaceId)}/studio-chat/sessions/${encodeURIComponent(activeSessionId)}/events`,
       protocol: 'sse',
@@ -147,51 +156,17 @@ export function useStudioChat(workspaceId: string | undefined) {
           return
         }
         if (payload.type === 'message' && payload.message) {
-          const incoming = payload.message
-          // 缺 seq 的流式残片指向未知消息：在 updater 外判定（updater 在
-          // StrictMode 下会被双调用，副作用放里面会重复 fetch），增量补齐
-          // 而不是丢弃；补齐失败留待下次事件再试，不产生 unhandled rejection。
-          const missed = upsertMessage(messagesRef.current, incoming) === null
-          setMessages((current) => upsertMessage(current, incoming) ?? current)
-          if (missed) {
-            void refillMessages()
-              .then((hasTerminal) => {
-                if (hasTerminal) void refillMessages(0).catch(() => undefined)
-              })
-              .catch(() => undefined)
-          }
-          // 断连期间的流式 text 尾部会永久截断（原地更新 seq 不变，after_seq
-          // 增量补齐拿不到）；turn 结束时全量回取一次自愈。
-          if (statusEvent(incoming as ChatMessage).event === 'turn_end') {
-            void refillMessages(0).catch(() => undefined)
-            invalidateStudioTurnEndQueries(queryClient, workspaceId)
-          }
+          handleSseMessageEvent(payload.message, sseDeps)
         } else if (payload.type === 'session' && payload.session) {
           setSession(payload.session)
         }
       },
       onStatus: (status) => {
-        if (status !== 'open') return
-        // #563 重连自愈：断连空窗盖过 turn 结尾时，turn_end 只能经下方
-        // after_seq 补齐静默合入（不触发上面的 refill(0) 分支），截断的
-        // 流式 text 副本会永久定格成"已完成"消息。本地还挂着未终结的
-        // agent text 行即处于该状态——直接全量回取一次校准。
-        if (streamingTextId(messagesRef.current) !== null) {
-          void refillMessages(0).catch(() => undefined)
-        }
-        void refillMessages().catch(() => undefined)
-        // 断连期间的会话状态翻转（如 agent 抛权限请求置
-        // awaiting_permission）不补发 SSE；重连必须重拉会话快照，否则本地
-        // status 滞留 running，approve/deny 永远 disabled。刷新失败不阻断
-        // 消息补齐：sessions 列表兜底与后续 SSE 会再校准。
-        void fetchStudioChatSession(workspaceId, activeSessionId).then(
-          setSession,
-          () => undefined
-        )
+        if (status === 'open') handleSseReconnect(sseDeps)
       },
     })
     return () => channel.close()
-  }, [workspaceId, activeSessionId, refillMessages, queryClient])
+  }, [workspaceId, activeSessionId, refillMessages, queryClient, setSession])
 
   async function runAction(action: () => Promise<void>) {
     setActionError(null)
