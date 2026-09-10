@@ -360,6 +360,84 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
   })
 
+  it('inspector shows the DRAFT type after approval→code switch (#606 codex P2)', async () => {
+    // codex 场景的组件级形态：details 链的 workflow 输入在草稿模式下是
+    // draftWorkflow（草稿优先）——本测试以 ghost 链（workflow=null）钉
+    // 「切型后 selector/sections 反映草稿类型」；完整 published 回退路
+    // 径由 useWorkflowStudioDraft 的 draftWorkflow ?? activeWorkflow 顺序
+    // 保证（见其测试）。
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    const draftSwitched = approvalGateYaml.replace(
+      '    type: approval',
+      '    type: code\n    capability: gate_cap'
+    )
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
+        selectedNodeKey="gate"
+        definitionYaml={draftSwitched}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    const selector = await screen.findByLabelText('节点类型')
+    expect(selector).toHaveValue('code')
+  })
+
+  it('inspector shows the DRAFT type after a switch on a published workflow (#606 codex P2)', async () => {
+    // codex 场景的直击形态：已发布 workflow 的 approval 节点，草稿里
+    // 已切成 code——header/选择器必须显示 code（草稿优先），否则受控
+    // 选择器停在 approval、用户无法再选择 approval 来撤销切换。
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    const draftSwitched = approvalGateYaml.replace(
+      '    type: approval',
+      '    type: code\n    capability: gate_cap'
+    )
+    render(
+      <WorkflowNodeInspector
+        workflow={
+          {
+            key: 'demo',
+            label: 'Demo',
+            nodes: [
+              {
+                key: '_start',
+                node_type: 'start',
+                label: 'Start',
+                inputs: [],
+                outputs: [],
+              },
+              {
+                key: 'gate',
+                node_type: 'approval',
+                label: '审批',
+                inputs: [],
+                outputs: [],
+              },
+            ],
+            edges: [],
+          } as never
+        }
+        agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
+        selectedNodeKey="gate"
+        definitionYaml={draftSwitched}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    const selector = await screen.findByLabelText('节点类型')
+    expect(selector).toHaveValue('code')
+  })
+
   it('skips the prompt for an approval node that already has capability (#405 审核 P3)', async () => {
     // 手写 approval+capability 是合法瞬态（issue 明示）——切出必须维持
     // 修复前的直通语义，不得被 prompt 拦下（cancel 会放弃合法切换）。

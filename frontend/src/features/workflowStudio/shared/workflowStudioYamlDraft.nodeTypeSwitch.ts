@@ -90,12 +90,15 @@ export function validateNodeTypeSwitch(
         .filter(([, n]) => n.type === 'start')
         .map(([key]) => key)
     )
-    // 审核 P2：v2 草稿的 after 只是 echo 字段——loader 只在 v1 把 after
-    // 物化进 edges（loader._load_edges），v2 完全以 edges 列表为准。
-    // 判定若无条件计入 after，v2 下「有 after 无入边」的草稿前端放行、
-    // 发布被 validate_approval_edges 拒——正是本 issue 要消除的漂移。
+    // 审核 P2 + codex P2：loader 只对 schema_version === 1 物化 after
+    // （loader._load_edges），v2+（含 3 及未来版本）完全以 edges 列表
+    // 为准。判定若对 v3+ 计入 after，「有 after 无入边」的草稿前端放
+    // 行、发布被 validate_approval_edges 拒——正是要消除的漂移；与
+    // loader 同构：仅缺省/1 计入。
     const upstream = new Set(
-      draft.schema_version === 2 ? [] : (node.after ?? [])
+      draft.schema_version == null || draft.schema_version === 1
+        ? (node.after ?? [])
+        : []
     )
     for (const edge of draft.edges ?? []) {
       if (edge.to === nodeKey) upstream.add(edge.from ?? '')

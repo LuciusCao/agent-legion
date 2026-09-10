@@ -244,6 +244,31 @@ describe('patchWorkflowNodeType', () => {
     expect(parseNodes(out).nodes?.gate?.type).toBe('approval')
   })
 
+  it('v3+ counts only entering edges like v2 (#606 codex P2)', () => {
+    // loader 对 v2+ 一律 edges-only（物化只在 v1）；仓库 compare 测试
+    // 明确接受版本 3——判定不得把 v3 的 after 当入边。
+    const v3Yaml = [
+      'key: demo',
+      'schema_version: 3',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  draft_gen:',
+      '    type: code',
+      '    capability: draft_gen',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      '    after: [draft_gen]',
+      'edges:',
+      '  - {from: _start, to: draft_gen}',
+      '',
+    ].join('\n')
+    expect(() => patchWorkflowNodeType(v3Yaml, 'gate', 'approval')).toThrow(
+      WorkflowNodeTypeSwitchError
+    )
+  })
+
   it('v2 counts only entering edges — after is an echo field (#405 审核 P2)', () => {
     // v2 草稿 loader 只以 edges 列表为准（_load_edges 不物化 after）；
     // gate 有 after: [draft_gen] 但无入边——无条件计入 after 会让前端
