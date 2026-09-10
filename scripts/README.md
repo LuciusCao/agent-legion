@@ -7,6 +7,7 @@
 | 脚本 | 用途 |
 |------|------|
 | `check-quick.sh` | 日常快速质量门：静态轮并行 backend/frontend/rust，测试轮错峰——backend 先单独跑完，frontend/rust 随后并行（三条测试 lane 同时起会从 gate 内部超订机器；静态轮很轻保持全并行）。`GATE_TIER=aff` 是 agent 内环组合档（backend 受影响测试 + 前端 `vitest related`，非 gate 凭证）。 |
+| `check_release_pins.py` | 发布钉点门禁（backend 静态轮）：消费者侧默认版本必须钉在当前发布线——`install-worker.sh` 的 `WORKER_VERSION_DEFAULT` / `VELITES_VERSION_DEFAULT` 对齐 pyproject / velites 版本，独立部署 compose 的 GHCR 镜像默认 tag 对齐 pyproject 版本；钉点缺失或形态被改按 fail-closed 报错（issue #504）。 |
 | `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all`。测试档位 `GATE_TIER=smoke\|unit\|postgres\|full`：`full`（默认）与 `unit` 同选 PostgreSQL 离线 unit 层——postgres 集成层交给 CI，碰 db 改动交接前显式跑 `postgres` 档；pytest 统一 `-n <workers> --dist worksteal`（空闲 worker 窃取待跑测试，消掉单个慢测试拖尾整批的尾部延迟）；`aff` 按 `.pytest-aff-index.json` 选择受影响测试（无索引回落 unit），`aff-index` 一次性重建索引（带 `--cov-context=test` 的 unit 全量跑）。 |
 | `check-quick-frontend.sh` | quick gate 前端 lane；支持 `FRONTEND_GATE_PHASE=static\|test\|all`，并通过 `FRONTEND_TEST_MODE=test\|coverage\|related` 选择 Vitest 模式（`related` = 只跑导入改动源文件的测试，`vitest related`）。 |
 | `gate-jobs.sh` | 各 lane 默认并行度策略：机器预算按并发 gate 数均分（`(cores-2)/N` 夹在 2..8，N 为机器级 slot 数）；队列不可见时回落兄弟 worktree 探测（`min(4, cores)` / `cores-2`）。 |

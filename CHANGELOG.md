@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Fixed
+- 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
+  `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
+  部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5
+  批量心跳与最新 velites 打点。钉点补齐到 0.7.0 / 0.5.1；安装器默认
+  值收敛为 `*_DEFAULT` 变量单点定义（usage 文案同源打印，消灭文件内
+  重复）。
+
+### Added
+- 发布钉点门禁 `scripts/check_release_pins.py`（backend 静态轮，紧邻
+  check_versions）：`install-worker.sh` 的 `WORKER_VERSION_DEFAULT` /
+  `VELITES_VERSION_DEFAULT` 对齐 pyproject / velites 版本，
+  `deploy/compose.worker.standalone.yaml` 与
+  `compose.worker.pull.example.yaml` 的 GHCR 镜像默认 tag（各两处）对齐
+  pyproject 版本；比较复用 check_versions 的 normalize（PEP 440 预发布
+  与 tag 形归一等价），钉点缺失或形态被改按 fail-closed 报错。契约
+  测试 `tests/scripts/test_check_release_pins.py`（8 例）。
+
 ### Changed
 - 原生形态 velites 二进制收敛为 PATH 单一副本（issue #507）：解析顺序从
   「data/bin 自带副本优先、PATH 兜底」反转为「PATH 优先、data/bin 兜底」
