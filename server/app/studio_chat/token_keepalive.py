@@ -1,17 +1,14 @@
 """Mid-turn run-token keepalive + invalidation notice for studio chat (#411/#558).
 
 The agent's MCP headers cannot be re-pointed mid-session, so a token that
-dies (mid-turn expiry, idle-expiry before a later turn, admin revoke) kills
-the tool channel while the chat main path stays healthy. This module keeps
-a live token alive across long turns (renew on each `tool_call` sessionUpdate
-— status-only `tool_call_update` excluded; threshold wide enough that a
-checked-live token always outlives the current turn) and, once dead, notices
-it (one timeline message) and escalates the session to status=error — the
-resume-reachable state, so ResumeBar / 「继续对话」 rebuilds the channel with
-a fresh token and preserved context instead of a live-looking dead session
-(#558; escalation semantics in session_escalation.py). Cost per tool_call:
-one liveness SELECT, one conditional UPDATE, plus a re-check SELECT only in
-the no-row case. ACP notification path, never raises.
+dies (mid-turn expiry, idle-expiry, admin revoke) kills the tool channel
+while the chat main path stays healthy. This module keeps a live token alive
+across long turns (renew on each `tool_call` sessionUpdate; threshold wide
+enough that a checked-live token always outlives the turn) and, once dead,
+escalates the session to error (resume-reachable — ResumeBar /「继续对话」
+rebuilds the channel with a fresh token; #558, semantics in
+session_escalation.py) then notices it on the timeline. ACP notification
+path, never raises.
 """
 
 from __future__ import annotations
@@ -59,12 +56,10 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
     """Renew the session's run token on a `tool_call` update; notice once dead.
 
     Runs on EVERY tool_call — token death is only ever detected after it
-    happens, so the check must keep firing while the agent keeps calling
-    tools. The done-flag deduplicates only the DEAD notice (a resume mints
-    a fresh runtime, token, and flag). Check and notice append are guarded —
-    a transient DB failure leaves the flag unset so the next tool_call
-    retries. Callers run this AFTER the tool_call row append.
-    """
+    happens. The done-flag deduplicates the DEAD path (a resume mints a fresh
+    runtime, token, and flag); every step is guarded so a transient DB
+    failure retries on the next tool_call. Callers run this AFTER the
+    tool_call row append."""
     runtime: SessionRuntime | None = backend.runtime(session_id)
     if runtime is None:
         return
@@ -82,6 +77,18 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
         return
     if alive:
         return
+    # #558：先升级后通知——escalate 抛异常（DB 故障）时 flag 未置、直接
+    # 重试且不产生重复通知；escalate 成功后 append 失败时状态已是 error
+    # （escalate 的守卫对 error 幂等），重试只补通知。两步都在各自的
+    # 吞异常边界内，模块的 never-raises 不变量保持成立。
+    try:
+        escalate_dead_token_session(backend, session_id)
+    except Exception:
+        # #204 broad-except audit: best-effort escalation on the notification
+        # path — a transient DB failure must not propagate into it; the next
+        # tool_call retries (flag stays unset, no notice appended yet).
+        logger.warning("studio chat session escalation failed for %s", session_id, exc_info=True)
+        return
     try:
         backend.store.append_message(
             session_id,
@@ -90,16 +97,12 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
             {"event": "run_token_invalidated", "detail": TOKEN_INVALIDATED_DETAIL},
         )
     except Exception:
-        # #204 broad-except audit: same swallow semantics as the check above
-        # — a failed append must retry on the next tool_call (flag set only
-        # on success below) rather than be permanently lost, and must never
-        # break the notification path around it.
+        # #204 broad-except audit: same swallow semantics as the escalation
+        # above — a failed append must retry on the next tool_call (flag set
+        # only on success below) rather than be permanently lost.
         logger.warning(
             "studio chat run_token_invalidated notice failed for %s", session_id, exc_info=True
         )
         return
-    # #558: escalate the dead-tool-channel session to error (resume-
-    # reachable) — semantics and guards live in session_escalation.py.
-    escalate_dead_token_session(backend, session_id)
     with runtime.lock:
         runtime.token_keepalive_done = True

@@ -17,20 +17,24 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
 
-# Bounded like on_error's 500-char error_detail ceiling.
+# Short by construction (61 chars); error_detail's 500-char ceiling applies
+# to caller-supplied details, not this fixed literal.
 _TOKEN_DEAD_ERROR_DETAIL = "run token invalidated: tool channel unrecoverable (#558)"
 
 
 def escalate_dead_token_session(backend: ServiceBackend, session_id: str) -> None:
     """Move a dead-tool-channel session to error (the resume-reachable state).
 
-    Guarded like on_error's fatal arm: a concurrent close owns the final
-    'closed' state, and a mid-flight resume claim's 'starting' row is not
-    ours to stamp; 'error' is already terminal for this purpose. The running
-    turn's own turn_end (status_in running/awaiting_permission → idle)
-    cannot resurrect an escalated row. Runtime teardown deliberately stays
-    with resume/on_exit — the ACP process itself is healthy and the current
-    turn is allowed to finish."""
+    Guarded with on_exit's final_statuses semantics: a concurrent close owns
+    the final 'closed' state, a mid-flight resume claim's 'starting' row is
+    not ours to stamp, and 'error' is already terminal for this purpose; the
+    running turn's own turn_end (status_in running/awaiting_permission →
+    idle) cannot resurrect an escalated row. ``awaiting_permission`` is
+    deliberately NOT excluded: the tool channel is dead, so the parked
+    permission is unanswerable either way — escalation trades its 120s
+    auto-deny wait for the immediately reachable resume entry. Runtime
+    teardown stays with resume/on_exit — the ACP process itself is healthy
+    and the current turn is allowed to finish."""
     backend.db.update_studio_chat_session_if(
         session_id,
         status_not_in=("closed", "error", "starting"),

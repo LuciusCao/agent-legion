@@ -290,6 +290,38 @@ def test_dead_token_appends_single_invalidation_notice(job_db, settings) -> None
         service.shutdown()
 
 
+def test_failed_escalation_retries_without_duplicate_notice(job_db, settings, monkeypatch) -> None:
+    """#558 review P1: the escalation runs BEFORE the notice append. A
+    transient escalation failure must (a) not raise into on_update, (b) leave
+    no notice behind (no duplicates on retry), and (c) retry the whole path
+    on the next tool_call — then append exactly once."""
+    user_id = str(job_db.create_user("escal-fail-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    scoped_tokens.revoke_scoped_token(job_db, token)
+    service, _bus, session_id, runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        real_escalate = service.db.update_studio_chat_session_if
+        calls = {"n": 0}
+
+        def flaky_escalate(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("transient db failure")
+            return real_escalate(*args, **kwargs)
+
+        monkeypatch.setattr(service.db, "update_studio_chat_session_if", flaky_escalate)
+        service._on_update(session_id, _tool_call("tc-a"))
+        assert not runtime.token_keepalive_done
+        assert not _invalidation_messages(service, session_id)  # no duplicate on retry
+        monkeypatch.setattr(service.db, "update_studio_chat_session_if", real_escalate)
+        service._on_update(session_id, _tool_call("tc-b"))
+        assert runtime.token_keepalive_done
+        assert len(_invalidation_messages(service, session_id)) == 1
+        assert job_db.get_studio_chat_session(session_id)["status"] == "error"
+    finally:
+        service.shutdown()
+
+
 def test_expired_token_is_not_revived_by_keepalive(job_db, settings) -> None:
     """Leaked-token guarantee preserved: an already-expired token reports
     dead (notice appended) and its expiry row is untouched — no revival."""
