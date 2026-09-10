@@ -8,14 +8,20 @@ import {
   Tab,
   Tabs,
 } from '@mui/material'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, createRun } from '../api'
 import { useUiStore } from '../stores/uiStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
+import { queryKeys } from '../lib/queryKeys'
 import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { acceptedItemTypes, itemTypeLabel } from '../lib/acceptedItemTypes'
-import { parseRefIds } from '../lib/addItems'
+import { parseRefIds, readFileText } from '../lib/addItems'
+import {
+  createCampaignFromManifest,
+  createSubmitCampaign,
+} from '../api/campaignApi'
 import type { RunItem, WorkspaceResponse } from '../types'
+import type { CampaignSubmitInlineTarget } from '../types/campaignTypes'
 import { AddItemsBundlePanel } from './AddItemsBundlePanel'
 import { AddItemsExistingMaterials } from './AddItemsExistingMaterials'
 import { AddItemsRefPanel } from './AddItemsRefPanel'
@@ -33,9 +39,15 @@ type AddItemsDialogProps = {
 type TabKey = 'upload' | 'ref' | 'existing' | 'bundle'
 
 /**
- * 添加条目对话框：按条目类型各一个面板组件（上传材料 / 粘贴 ID /
- * 已有材料），可用的类型由 workflow start 节点的入口契约决定
+ * 「添加条目」对话框：按条目类型各一个面板组件（上传材料 / 粘贴 ID /
+ * 已有材料 / 文件夹打包），可用的类型由 workflow start 节点的入口契约决定
  * （EXEC-WORKFLOW-START-001）。
+ *
+ * 批量任务化（#532 PR-D 定稿）：「粘贴 ID」与文件清单通道不论多少条都
+ * 创建批量任务（submit 模式）——用户对分批无感，任务按执行节奏自动分批
+ * 创建，进度在「批量任务」页可见（旧版 2,000 条分界取消）。材料上传 /
+ * 已有材料 / 文件夹打包保持原「直接创建运行」路径（各自的多文件流程
+ * 不变）；两类条目混填时统一走批量任务（清单含全部条目，去重语义相同）。
  */
 export function AddItemsDialog({
   open,
@@ -43,9 +55,14 @@ export function AddItemsDialog({
   workspaceId,
 }: AddItemsDialogProps) {
   const { showToast } = useUiStore()
+  const queryClient = useQueryClient()
   const [tab, setTab] = useState<TabKey>('upload')
   const [refText, setRefText] = useState('')
   const [connectionKey, setConnectionKey] = useState('')
+  const [manifest, setManifest] = useState<{
+    file: File
+    count: number
+  } | null>(null)
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -114,6 +131,7 @@ export function AddItemsDialog({
     resetBundles()
     setRefText('')
     setConnectionKey('')
+    setManifest(null)
     setSelectedMaterialIds([])
     setTab('upload')
   }, [resetUploads, resetBundles])
@@ -123,12 +141,61 @@ export function AddItemsDialog({
   const totalItems =
     (materialAccepted ? doneEntries.length + selectedMaterialIds.length : 0) +
     (bundleAccepted ? readyBundles.length : 0) +
-    (refAccepted ? refIds.length : 0)
+    (refAccepted ? refIds.length + (manifest?.count ?? 0) : 0)
+
+  // 走批量任务的判定：粘贴 ID 或清单文件有条目（ref 通道）——材料类条目
+  // 与之混填时一并进清单；纯材料提交维持直接创建运行。
+  const usesCampaign = refAccepted && (refIds.length > 0 || manifest != null)
 
   const handleClose = useCallback(() => {
     resetState()
     onClose()
   }, [resetState, onClose])
+
+  /** 文件清单 → 规整后的行（ref 条目补 connection_key；对象行透传）。 */
+  const normalizeManifestLines = useCallback(
+    async (file: File, key: string): Promise<string[] | null> => {
+      const text = await readFileText(file)
+      const lines: string[] = []
+      for (const raw of text.split('\n')) {
+        const line = raw.trim()
+        if (!line || line.startsWith('#')) continue
+        if (line.startsWith('{')) {
+          lines.push(line)
+          continue
+        }
+        // 裸 ID 行：csv 多列时取首列。
+        const externalId = line.split(',')[0]?.trim() ?? ''
+        if (!externalId) continue
+        lines.push(
+          JSON.stringify({
+            type: 'ref',
+            connection_key: key.trim(),
+            external_id: externalId,
+          })
+        )
+      }
+      return lines.length > 0 ? lines : null
+    },
+    []
+  )
+
+  const handleManifestPicked = useCallback(
+    async (file: File | null) => {
+      if (!file) {
+        setManifest(null)
+        return
+      }
+      const lines = await normalizeManifestLines(file, connectionKey)
+      if (!lines) {
+        showToast(`${file.name} 中没有可用条目`, 'error')
+        setManifest(null)
+        return
+      }
+      setManifest({ file, count: lines.length })
+    },
+    [normalizeManifestLines, connectionKey, showToast]
+  )
 
   const handleSubmit = useCallback(async () => {
     if (!workspaceId || !workflowKey || totalItems === 0) return
@@ -153,6 +220,42 @@ export function AddItemsDialog({
     ]
     setIsSubmitting(true)
     try {
+      if (usesCampaign) {
+        // 批量任务通道（#532 定稿）：清单文件走 multipart（服务端规整），
+        // 粘贴走行内清单——两者对用户都是「添加后自动分批创建」。
+        // 审核 P1：清单文件与粘贴 ID / 材料条目并存时必须合并进同一
+        // multipart 清单（服务端 normalize_item 收 material/bundle/ref
+        // 三型）——旧代码只上传文件 payload，同时存在的其他条目被静默
+        // 丢弃而 toast 按合并口径报成功。
+        // 审核 P1（连接 Key 重铸）：清单 payload 不再在选文件时缓存——
+        // 用户选完文件仍可改连接 Key，缓存的旧 key 会让裸 ID 静默绑到
+        // 旧连接的数据源；提交时始终用「原始文件 + 当前连接 Key」重跑
+        // 同一套规整管线，单一事实来源。
+        if (manifest) {
+          const manifestLines =
+            (await normalizeManifestLines(manifest.file, connectionKey)) ?? []
+          const extraLines = items.map((item) => JSON.stringify(item))
+          const merged = new File(
+            [[...manifestLines, ...extraLines].join('\n') + '\n'],
+            'manifest.jsonl',
+            { type: 'application/x-ndjson' }
+          )
+          await createCampaignFromManifest(workspaceId, merged)
+        } else {
+          const submit: CampaignSubmitInlineTarget = { items }
+          await createSubmitCampaign(workspaceId, submit)
+        }
+        showToast(
+          `批量任务已创建，共 ${totalItems} 个条目将按执行节奏自动创建任务，进度可在「批量任务」页查看`,
+          'success'
+        )
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.campaigns(workspaceId),
+        })
+        resetState()
+        onClose()
+        return
+      }
       const response = await createRun(workspaceId, {
         workflow_key: workflowKey,
         items,
@@ -178,7 +281,11 @@ export function AddItemsDialog({
     readyBundles,
     refIds,
     connectionKey,
+    usesCampaign,
+    manifest,
+    normalizeManifestLines,
     showToast,
+    queryClient,
     resetState,
     onClose,
   ])
@@ -242,12 +349,36 @@ export function AddItemsDialog({
             />
           )}
           {activeTab === 'ref' && (
-            <AddItemsRefPanel
-              connectionKey={connectionKey}
-              refText={refText}
-              onConnectionKeyChange={setConnectionKey}
-              onRefTextChange={setRefText}
-            />
+            <>
+              <AddItemsRefPanel
+                connectionKey={connectionKey}
+                refText={refText}
+                onConnectionKeyChange={setConnectionKey}
+                onRefTextChange={setRefText}
+              />
+              <Button variant="outlined" component="label" size="small">
+                或上传清单文件（.csv / .jsonl / .txt，一行一个 ID）
+                <input
+                  type="file"
+                  hidden
+                  accept=".csv,.jsonl,.txt"
+                  data-testid="add-items-manifest-input"
+                  onChange={(event) => {
+                    void handleManifestPicked(event.target.files?.[0] ?? null)
+                    event.target.value = ''
+                  }}
+                />
+              </Button>
+              {manifest && (
+                <div className={styles.summary} data-testid="manifest-summary">
+                  已选择 {manifest.file.name}（解析 {manifest.count} 条，与
+                  粘贴的 ID 一并提交）
+                </div>
+              )}
+              <div className={styles.summary}>
+                任务会按执行节奏自动分批创建，进度在「批量任务」页可见
+              </div>
+            </>
           )}
           {activeTab === 'existing' && (
             <AddItemsExistingMaterials
@@ -284,7 +415,7 @@ export function AddItemsDialog({
           onClick={handleSubmit}
           disabled={submitDisabled}
         >
-          {isSubmitting ? '处理中...' : '创建运行'}
+          {isSubmitting ? '处理中...' : usesCampaign ? '添加' : '创建运行'}
         </Button>
       </DialogActions>
     </Dialog>

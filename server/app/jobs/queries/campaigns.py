@@ -42,13 +42,18 @@ _CAMPAIGN_COLUMNS = (
 
 
 def campaign_record(row: dict[str, Any]) -> dict[str, Any]:
-    """Public campaign record: JSON columns decoded, timestamps ISO-encoded."""
+    """Public campaign record: JSON columns decoded, timestamps ISO-encoded.
+
+    ``name``（PR-D）骑 target_spec_json 存储，表层字段化——UI 不感知
+    spec 形状；空串即客户端派生默认。"""
+    target_spec = _parse_object(row.get("target_spec_json"))
     return {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
         "mode": str(row["mode"]),
         "status": str(row["status"]),
-        "target_spec": _parse_object(row.get("target_spec_json")),
+        "name": str(target_spec.get("name") or ""),
+        "target_spec": target_spec,
         "progress": _parse_object(row.get("progress_json")),
         "watermark": int(row["watermark"]),
         "batch_size": int(row["batch_size"]),
@@ -82,11 +87,9 @@ class CampaignQueriesMixin(CampaignSliceQueriesMixin, ConnectionQueriesMixin):
     def generate_campaign_id(self) -> str:
         """Allocate a campaign id before the row exists.
 
-        The submit path needs the id to build the object-store manifest key
-        BEFORE the insert (upload → validate → insert in one fail-fast
-        request; a two-phase row would add a pending-upload state this slice
-        deliberately avoids). ``create_campaign`` accepts the pre-allocated
-        id via ``campaign_id=``.
+        submit 路径要在 insert 前用 id 组 manifest key（一次 fail-fast
+        请求内 upload→validate→insert；两段式行会引入本片刻意避免的
+        pending-upload 态）。``create_campaign`` 经 ``campaign_id=`` 收。
         """
         return uuid4().hex
 
@@ -285,12 +288,8 @@ class CampaignQueriesMixin(CampaignSliceQueriesMixin, ConnectionQueriesMixin):
     def campaign_delivered_job_ids(self, campaign_id: str) -> set[str]:
         """Jobs whose rerun/upgrade flip this campaign durably performed.
 
-        The feeder's replay guard: presence means the flip transaction
-        committed (the marker is written inside it), so a replayed batch
-        must not re-deliver these regardless of the jobs' CURRENT status —
-        a delivered job can legitimately be queued, or already run and
-        failed again, before the crashed process's replay pass.
-        """
+        重放守卫（v81）：标记在翻转事务内落库，存在即已提交——与 job
+        当前 status 无关（可能是 queued、也可能已再次 failed）。"""
         with self._connect_read() as conn:
             rows = conn.execute(
                 "select job_id from campaign_job_deliveries where campaign_id=%s",
@@ -301,11 +300,8 @@ class CampaignQueriesMixin(CampaignSliceQueriesMixin, ConnectionQueriesMixin):
     def clear_campaign_deliveries(self, campaign_id: str) -> None:
         """Drop this campaign's markers once their batch is accounted.
 
-        The counting advance has landed (the CAS that pops pending_batch
-        and moves the cursor), so the markers' replay-guard duty is over —
-        a later campaign-level rerun/retry must deliver afresh. Idempotent;
-        also the terminal-transition sweep (no markers outlive their row).
-        """
+        计数落账后守卫职责结束（幂等）；终态翻转亦经此清扫——标记不
+        比行活得更久。"""
         with self.connect() as conn:
             conn.execute(
                 "delete from campaign_job_deliveries where campaign_id=%s",

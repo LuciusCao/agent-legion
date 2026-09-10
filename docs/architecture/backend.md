@@ -369,8 +369,8 @@ server/app/
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
 | CampaignKnobsMixin | BaseModel | watermark: int | None, batch_size: int | None | app/routes/campaign_contracts.py |
-| CampaignCreateRequest | BaseModel | mode: CampaignMode, rerun: CampaignRerunTarget | None, submit: CampaignSubmit... | app/routes/campaign_contracts.py |
-| CampaignRecord | BaseModel | id: str, workspace_id: str, mode: CampaignMode, status: CampaignStatus, targe... | app/routes/campaign_contracts.py |
+| CampaignCreateRequest | BaseModel | mode: CampaignMode, name: str, rerun: CampaignRerunTarget | None, submit: Cam... | app/routes/campaign_contracts.py |
+| CampaignRecord | BaseModel | id: str, workspace_id: str, mode: CampaignMode, status: CampaignStatus, name:... | app/routes/campaign_contracts.py |
 | CampaignRunOverview | BaseModel | id: str, status: str, created_count: int, job_count: int | app/routes/campaign_contracts.py |
 | CampaignCreateResponse | BaseModel | campaign: CampaignRecord | app/routes/campaign_contracts.py |
 | CampaignListResponse | BaseModel | campaigns: list[CampaignRecord] | app/routes/campaign_contracts.py |

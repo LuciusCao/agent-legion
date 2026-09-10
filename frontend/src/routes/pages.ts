@@ -19,6 +19,7 @@ export const WorkflowStudioPage = lazy(() =>
 export const WorkspaceMainPage = lazy(
   () => import('../pages/WorkspaceMainPage')
 )
+export const CampaignsPage = lazy(() => import('../pages/CampaignsPage'))
 export const TokenUsagePage = lazy(() =>
   import('../pages/TokenUsagePage').then((m) => ({ default: m.TokenUsagePage }))
 )

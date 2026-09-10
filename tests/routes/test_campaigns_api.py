@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.routes.campaigns import _read_upload_size
+
 CSRF = {"x-agent-legion-request": "1"}
 
 _NODE_KEYS = [
@@ -169,6 +171,29 @@ def test_create_from_filter_form(client, job_db) -> None:
     assert "job_ids" not in campaign["target_spec"]
 
 
+def test_create_with_name_roundtrip(client, job_db) -> None:
+    """PR-D「任务名称」：create 请求的 name 进 target_spec 并以顶层字段
+    回读（列表显示用）；缺省时 name 为空串（前端派生默认名）。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 1)
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns",
+        json={**_rerun_body(ids), "name": "重跑 · 全部失败任务"},
+    )
+    assert response.status_code == 200, response.text
+    campaign = response.json()["campaign"]
+    assert campaign["name"] == "重跑 · 全部失败任务"
+    assert campaign["target_spec"]["name"] == "重跑 · 全部失败任务"
+
+    # 缺省 name：campaign_record 的顶层 name 为空串（默认名是 UI 派生）。
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns",
+        json=_rerun_body(ids),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["campaign"]["name"] == ""
+
+
 def test_create_upgrade_mode(client, job_db) -> None:
     workspace_id = _create_workspace(client, job_db)
     ids = _seed_failed_jobs(client, job_db, workspace_id, 2)
@@ -178,6 +203,46 @@ def test_create_upgrade_mode(client, job_db) -> None:
     )
     assert response.status_code == 200, response.text
     assert response.json()["campaign"]["mode"] == "upgrade"
+
+
+def test_create_from_filter_form_with_exclude_ids(client, job_db) -> None:
+    """P2-1：filter + exclude_ids（allMatching 反选）进 target_spec；显式
+    ids 形态忽略 exclude_ids（不落键）。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 3)
+    base = f"/api/workspaces/{workspace_id}/campaigns"
+    response = client.post(
+        base,
+        json={
+            "mode": "rerun",
+            "rerun": {
+                "filter": {"status": "failed"},
+                "exclude_ids": [ids[0]],
+                "node_key": _NODE_KEYS[0],
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    campaign = response.json()["campaign"]
+    assert campaign["target_spec"]["exclude_ids"] == [ids[0]]
+    assert campaign["target_spec"]["filter"]["status"] == "failed"
+
+    # 显式 ids 形态：exclude_ids 不生效也不进 spec。
+    response = client.post(
+        base,
+        json={
+            "mode": "rerun",
+            "rerun": {
+                "job_ids": ids,
+                "exclude_ids": [ids[0]],
+                "node_key": _NODE_KEYS[0],
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    campaign = response.json()["campaign"]
+    assert campaign["target_spec"]["job_ids"] == sorted(ids)
+    assert "exclude_ids" not in campaign["target_spec"]
 
 
 def test_create_validation_4xx(client, job_db) -> None:
@@ -214,6 +279,90 @@ def test_create_validation_4xx(client, job_db) -> None:
         ).status_code
         == 400
     )
+
+
+def test_create_submit_inline_and_upload(client, job_db) -> None:
+    workspace_id = _create_workspace(client, job_db)
+    _insert_material(job_db, workspace_id, "mat-1")
+    base = f"/api/workspaces/{workspace_id}/campaigns"
+    inline = client.post(
+        base,
+        json={
+            "mode": "submit",
+            "submit": {"items": [{"type": "material", "material_id": "mat-1"}]},
+        },
+    )
+    assert inline.status_code == 200, inline.text
+    assert inline.json()["campaign"]["target_spec"]["items"] == [
+        {"type": "material", "material_id": "mat-1"}
+    ]
+
+    manifest = '{"type": "material", "material_id": "mat-1"}\n'
+    upload = client.post(
+        f"{base}/upload",
+        files={"manifest": ("campaign.jsonl", manifest.encode("utf-8"), "application/x-ndjson")},
+        data={"mode": "submit", "name": "添加 · 开学季补录"},
+    )
+    assert upload.status_code == 200, upload.text
+    assert upload.json()["campaign"]["mode"] == "submit"
+    assert upload.json()["campaign"]["status"] == "pending"
+    assert upload.json()["campaign"]["name"] == "添加 · 开学季补录"
+
+
+def test_upload_rejects_non_submit_mode(client, job_db) -> None:
+    workspace_id = _create_workspace(client, job_db)
+    manifest = '{"type": "material", "material_id": "m"}\n'
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/upload",
+        files={"manifest": ("campaign.jsonl", manifest.encode("utf-8"), "text/plain")},
+        data={"mode": "rerun"},
+    )
+    assert response.status_code == 422
+
+
+def test_upload_over_limit_413_without_full_read(client, job_db, monkeypatch) -> None:
+    """审核 P1：multipart 上传限读——最多读 manifest_max_bytes+1 字节，超限 413，
+    不把整个超大请求体读进内存（`manifest.read(limit)` 的调用界就位）。"""
+    workspace_id = _create_workspace(client, job_db)
+    config = client.app.state.settings.executor_runtime.campaigns
+    limit = config.manifest_max_bytes
+    oversized = b"x" * (limit + 1)
+
+    reads: list[int | None] = []
+    original_read = _read_upload_size
+
+    def _sized_read(upload, size=None):
+        reads.append(size)
+        return original_read(upload, size)
+
+    monkeypatch.setattr("server.app.routes.campaigns._read_upload_size", _sized_read)
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/upload",
+        files={"manifest": ("big.jsonl", oversized, "application/x-ndjson")},
+        data={"mode": "submit"},
+    )
+    assert response.status_code == 413, response.text
+    # The single read is bounded by limit+1 — the whole 50MB+ body never
+    # enters memory (the service-level len check would see exactly limit+1
+    # and refuse anyway, but the route refuses without reading further).
+    assert reads == [limit + 1]
+
+
+def test_upload_at_exact_limit_reads_through(client, job_db, monkeypatch) -> None:
+    """恰好 limit 字节：limit+1 的读界拿到全文，不误 413（错误是无效清单而非超限）。"""
+    workspace_id = _create_workspace(client, job_db)
+    config = client.app.state.settings.executor_runtime.campaigns
+    payload = b"x" * config.manifest_max_bytes
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/upload",
+        files={"manifest": ("edge.jsonl", payload, "application/x-ndjson")},
+        data={"mode": "submit"},
+    )
+    # At the ceiling the bytes are accepted past the route bound; the
+    # content then fails manifest parsing (not 'x' lines) — the contract-
+    # violation family maps 422 (PR-A round-4 语义), never 413.
+    assert response.status_code != 413
+    assert response.status_code == 422, response.text
 
 
 def test_unknown_campaign_404(client, job_db) -> None:
@@ -255,6 +404,38 @@ def test_preview_rerun_matches_legacy_preview_endpoint(client, job_db) -> None:
     assert campaign_body["estimated_batches"] == 1
     # preview writes nothing
     assert client.get(f"/api/workspaces/{workspace_id}/campaigns").json()["campaigns"] == []
+
+
+def test_preview_rerun_filter_form_honors_exclude_ids(client, job_db) -> None:
+    """P2-1 preview 口径：campaign preview 透传 exclude_ids，计数与旧同步
+    路径（filter + exclude_ids 载荷）一致——对话框试算数不漂移。"""
+    workspace_id = _create_workspace(client, job_db)
+    ids = _seed_failed_jobs(client, job_db, workspace_id, 5)
+    legacy = client.post(
+        f"/api/workspaces/{workspace_id}/jobs/batch-rerun/preview",
+        json={
+            "filter": {"status": "failed"},
+            "exclude_ids": ids[4:],
+            "node_key": _NODE_KEYS[0],
+        },
+    )
+    assert legacy.status_code == 200, legacy.text
+    via_campaign = client.post(
+        f"/api/workspaces/{workspace_id}/campaigns/preview",
+        json={
+            "mode": "rerun",
+            "rerun": {
+                "filter": {"status": "failed"},
+                "exclude_ids": ids[4:],
+                "node_key": _NODE_KEYS[0],
+            },
+        },
+    )
+    assert via_campaign.status_code == 200, via_campaign.text
+    campaign_body = via_campaign.json()["result"]
+    legacy_body = legacy.json()
+    assert campaign_body["total_count"] == legacy_body["total_count"] == 4
+    assert campaign_body["eligible_count"] == legacy_body["eligible_count"]
 
 
 def test_preview_submit_counts(client, job_db) -> None:

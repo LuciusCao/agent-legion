@@ -5,7 +5,11 @@ import type { ReactElement } from 'react'
 import { AddItemsDialog } from './AddItemsDialog'
 import { api, createRun, fetchActiveWorkflowRevision } from '../api'
 import { createMaterialBundle } from '../api/materialsApi'
-import { uploadMaterialFile } from '../lib/addItems'
+import {
+  createCampaignFromManifest,
+  createSubmitCampaign,
+} from '../api/campaignApi'
+import { readFileText, uploadMaterialFile } from '../lib/addItems'
 import { useUiStore } from '../stores/uiStore'
 import { TestQueryProvider } from '../testing/testQueryClient'
 import type { MaterialListResponse } from '../types'
@@ -21,6 +25,16 @@ vi.mock('../api/materialsApi', async (importOriginal) => {
   return { ...actual, createMaterialBundle: vi.fn() }
 })
 
+// #532 PR-D：粘贴 ID / 清单文件通道创建批量任务（submit campaign）。
+vi.mock('../api/campaignApi', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/campaignApi')>()
+  return {
+    ...actual,
+    createSubmitCampaign: vi.fn(),
+    createCampaignFromManifest: vi.fn(),
+  }
+})
+
 vi.mock('../lib/addItems', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/addItems')>()
   return { ...actual, uploadMaterialFile: vi.fn() }
@@ -29,6 +43,8 @@ vi.mock('../lib/addItems', async (importOriginal) => {
 const mockApi = vi.mocked(api)
 const mockCreateRun = vi.mocked(createRun)
 const mockCreateBundle = vi.mocked(createMaterialBundle)
+const mockCreateSubmitCampaign = vi.mocked(createSubmitCampaign)
+const mockCreateCampaignFromManifest = vi.mocked(createCampaignFromManifest)
 const mockUpload = vi.mocked(uploadMaterialFile)
 const mockFetchRevision = vi.mocked(fetchActiveWorkflowRevision)
 
@@ -79,17 +95,48 @@ function folderFile(relativePath: string, content: string) {
   return file
 }
 
+function campaignResponse() {
+  return {
+    campaign: {
+      id: 'camp1',
+      workspace_id: 'ws1',
+      mode: 'submit',
+      status: 'pending',
+      name: '',
+      target_spec: {},
+      progress: {},
+      watermark: 30000,
+      batch_size: 5000,
+      batches_submitted: 0,
+      jobs_succeeded: 0,
+      jobs_skipped: 0,
+      jobs_failed: 0,
+      error_message: '',
+      created_by: '',
+      created_at: '2026-09-09T00:00:00Z',
+      updated_at: '2026-09-09T00:00:00Z',
+      finished_at: null,
+    },
+  }
+}
+
 describe('AddItemsDialog', () => {
   beforeEach(() => {
     mockApi.mockReset()
     mockCreateRun.mockReset()
     mockCreateBundle.mockReset()
+    mockCreateSubmitCampaign.mockReset()
+    mockCreateCampaignFromManifest.mockReset()
     mockUpload.mockReset()
     mockFetchRevision.mockReset()
     // 默认：workspace 未发布 revision（404）→ 入口契约按 DEFAULT
     // ['material','ref'] 处理（刻意不含 bundle，存量 fail-closed）。
     mockFetchRevision.mockRejectedValue(
       Object.assign(new Error('No active workflow revision'), { status: 404 })
+    )
+    mockCreateSubmitCampaign.mockResolvedValue(campaignResponse() as never)
+    mockCreateCampaignFromManifest.mockResolvedValue(
+      campaignResponse() as never
     )
     useUiStore.setState({ toast: null })
     mockMaterials([])
@@ -154,17 +201,205 @@ describe('AddItemsDialog', () => {
     expect(screen.getByTestId('total-count')).toHaveTextContent('共 2 个条目')
   })
 
-  it('submits merged material and ref items to the runs API', async () => {
+  it('creates a submit campaign for pasted ids of any row count', async () => {
+    // #532 PR-D 定稿：粘贴 ID 任意行数都创建批量任务（无大小分界，
+    // 用户对分批无感）；不再是 createRun。
+    const onClose = vi.fn()
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+    )
+    fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'cms' },
+    })
+    fireEvent.change(screen.getByLabelText('外部 ID'), {
+      target: { value: 'q1\nq2\nq3' },
+    })
+    const submitButton = screen.getByRole('button', { name: '添加' })
+    await waitFor(() => expect(submitButton).not.toBeDisabled())
+    fireEvent.click(submitButton)
+
+    await waitFor(() => expect(mockCreateSubmitCampaign).toHaveBeenCalledOnce())
+    expect(mockCreateSubmitCampaign).toHaveBeenCalledWith('ws1', {
+      items: [
+        { type: 'ref', connection_key: 'cms', external_id: 'q1' },
+        { type: 'ref', connection_key: 'cms', external_id: 'q2' },
+        { type: 'ref', connection_key: 'cms', external_id: 'q3' },
+      ],
+    })
+    expect(mockCreateRun).not.toHaveBeenCalled()
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(useUiStore.getState().toast).toEqual({
+      message:
+        '批量任务已创建，共 3 个条目将按执行节奏自动创建任务，进度可在「批量任务」页查看',
+      type: 'success',
+    })
+  })
+
+  it('uploads a manifest file through the campaign upload channel', async () => {
+    // 文件清单通道：裸 ID 行（csv 取首列）规整为 ref 条目，multipart 上传。
+    const onClose = vi.fn()
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+    )
+    fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'cms' },
+    })
+    pickFiles('add-items-manifest-input', [
+      new File(['Q-1001\nQ-1002\n'], 'ids.csv', { type: 'text/csv' }),
+    ])
+    await waitFor(() =>
+      expect(screen.getByTestId('manifest-summary')).toHaveTextContent(
+        '解析 2 条'
+      )
+    )
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 2 个条目')
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
+
+    await waitFor(() =>
+      expect(mockCreateCampaignFromManifest).toHaveBeenCalledOnce()
+    )
+    const [workspaceId, payload] = mockCreateCampaignFromManifest.mock.calls[0]
+    expect(workspaceId).toBe('ws1')
+    const text = await readFileText(payload as File)
+    expect(text.split('\n').filter(Boolean)).toEqual([
+      JSON.stringify({
+        type: 'ref',
+        connection_key: 'cms',
+        external_id: 'Q-1001',
+      }),
+      JSON.stringify({
+        type: 'ref',
+        connection_key: 'cms',
+        external_id: 'Q-1002',
+      }),
+    ])
+    expect(mockCreateSubmitCampaign).not.toHaveBeenCalled()
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('rebuilds the manifest with the current connection key at submit time', async () => {
+    // 审核 P1 回归锁：选完清单文件后改连接 Key，提交的清单必须按新 Key
+    // 重铸——旧实现缓存选文件时烘进去的 payload，裸 ID 会静默绑到旧连接
+    // 的数据源。
+    const onClose = vi.fn()
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+    )
+    fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'old-key' },
+    })
+    pickFiles('add-items-manifest-input', [
+      new File(['Q-1001\nQ-1002\n'], 'ids.csv', { type: 'text/csv' }),
+    ])
+    await waitFor(() =>
+      expect(screen.getByTestId('manifest-summary')).toHaveTextContent(
+        '解析 2 条'
+      )
+    )
+    // 选完文件后切换连接 Key——清单条目必须随之改绑。
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'new-key' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
+
+    await waitFor(() =>
+      expect(mockCreateCampaignFromManifest).toHaveBeenCalledOnce()
+    )
+    const [, payload] = mockCreateCampaignFromManifest.mock.calls[0]
+    const text = await readFileText(payload as File)
+    expect(text.split('\n').filter(Boolean)).toEqual([
+      JSON.stringify({
+        type: 'ref',
+        connection_key: 'new-key',
+        external_id: 'Q-1001',
+      }),
+      JSON.stringify({
+        type: 'ref',
+        connection_key: 'new-key',
+        external_id: 'Q-1002',
+      }),
+    ])
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('merges a manifest file with pasted ids into one upload (no silent drop)', async () => {
+    // 审核 P1 回归锁：清单文件与粘贴 ID 并存时，multipart payload 必须
+    // 含两者——旧代码只上传文件 payload，粘贴的 ID 被静默丢弃而 toast
+    // 按合并口径报成功。
+    const onClose = vi.fn()
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+    )
+    fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'cms' },
+    })
+    // 粘贴 1 个 ID + 上传 2 行清单文件
+    fireEvent.change(screen.getByLabelText('外部 ID'), {
+      target: { value: 'q-extra' },
+    })
+    pickFiles('add-items-manifest-input', [
+      new File(['Q-1001\nQ-1002\n'], 'ids.csv', { type: 'text/csv' }),
+    ])
+    await waitFor(() =>
+      expect(screen.getByTestId('manifest-summary')).toHaveTextContent(
+        '解析 2 条'
+      )
+    )
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 3 个条目')
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
+
+    await waitFor(() =>
+      expect(mockCreateCampaignFromManifest).toHaveBeenCalledOnce()
+    )
+    const [, payload] = mockCreateCampaignFromManifest.mock.calls[0]
+    const lines = (await readFileText(payload as File))
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { external_id?: string })
+    expect(lines.map((l) => l.external_id)).toEqual([
+      'Q-1001',
+      'Q-1002',
+      'q-extra',
+    ])
+    expect(mockCreateSubmitCampaign).not.toHaveBeenCalled()
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('submits materials-only through the direct run path', async () => {
+    // 材料上传 tab 保持现状：无粘贴 ID / 清单时直接创建运行。
     const onClose = vi.fn()
     mockUpload.mockResolvedValue({ materialId: 'm1', deduplicated: false })
     mockCreateRun.mockResolvedValue({
       run: { id: 'r1' },
-      created_count: 2,
+      created_count: 1,
     } as never)
     renderWithClient(
       <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
     )
+    pickFiles('add-items-file-input', [new File(['a'], 'a.txt')])
+    await waitFor(() => expect(screen.getByText('完成')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
 
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [{ type: 'material', material_id: 'm1' }],
+    })
+    expect(mockCreateSubmitCampaign).not.toHaveBeenCalled()
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('merges uploaded materials with pasted ids into the campaign list', async () => {
+    // 混填（材料 + 粘贴 ID）：整单进批量任务（清单含全部条目）。
+    const onClose = vi.fn()
+    mockUpload.mockResolvedValue({ materialId: 'm1', deduplicated: false })
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+    )
     pickFiles('add-items-file-input', [new File(['a'], 'a.txt')])
     await waitFor(() => expect(screen.getByText('完成')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
@@ -174,25 +409,23 @@ describe('AddItemsDialog', () => {
     fireEvent.change(screen.getByLabelText('外部 ID'), {
       target: { value: 'q1' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
 
-    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
-    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
-      workflow_key: 'demo_workflow',
+    await waitFor(() => expect(mockCreateSubmitCampaign).toHaveBeenCalledOnce())
+    expect(mockCreateSubmitCampaign).toHaveBeenCalledWith('ws1', {
       items: [
         { type: 'material', material_id: 'm1' },
         { type: 'ref', connection_key: 'cms', external_id: 'q1' },
       ],
     })
+    expect(mockCreateRun).not.toHaveBeenCalled()
     await waitFor(() => expect(onClose).toHaveBeenCalled())
-    expect(useUiStore.getState().toast).toEqual({
-      message: '运行已创建，共 2 个任务',
-      type: 'success',
-    })
   })
 
-  it('shows the backend error when run creation fails', async () => {
-    mockCreateRun.mockRejectedValue(new Error('全部条目被 dedup 过滤'))
+  it('shows the backend error when campaign creation fails', async () => {
+    mockCreateSubmitCampaign.mockRejectedValue(
+      new Error('全部条目被 dedup 过滤')
+    )
     renderWithClient(
       <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
     )
@@ -203,7 +436,7 @@ describe('AddItemsDialog', () => {
     fireEvent.change(screen.getByLabelText('外部 ID'), {
       target: { value: 'q1' },
     })
-    const submitButton = screen.getByRole('button', { name: '创建运行' })
+    const submitButton = screen.getByRole('button', { name: '添加' })
     await waitFor(() => expect(submitButton).not.toBeDisabled())
     fireEvent.click(submitButton)
 
@@ -268,48 +501,31 @@ describe('AddItemsDialog', () => {
     expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
   })
 
-  it('merges uploaded, existing and ref items in the submit payload', async () => {
-    const onClose = vi.fn()
-    mockUpload.mockResolvedValue({ materialId: 'm-up', deduplicated: false })
+  it('keeps existing-materials selection on the direct run path', async () => {
+    // 已有材料（无粘贴 ID）：维持直接创建运行。
     mockMaterials([
       { id: 'm-old', filename: 'old.md', size_bytes: 10, status: 'ready' },
     ])
     mockCreateRun.mockResolvedValue({
       run: { id: 'r1' },
-      created_count: 3,
+      created_count: 1,
     } as never)
     renderWithClient(
-      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
     )
-
-    pickFiles('add-items-file-input', [new File(['a'], 'a.txt')])
-    await waitFor(() => expect(screen.getByText('完成')).toBeInTheDocument())
-
     fireEvent.click(screen.getByRole('tab', { name: '已有材料' }))
     await waitFor(() =>
       expect(screen.getByTestId('existing-materials-list')).toBeInTheDocument()
     )
     fireEvent.click(screen.getByRole('checkbox', { name: 'old.md' }))
-
-    fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
-    fireEvent.change(screen.getByLabelText('连接 Key'), {
-      target: { value: 'cms' },
-    })
-    fireEvent.change(screen.getByLabelText('外部 ID'), {
-      target: { value: 'q1' },
-    })
     fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
 
     await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
     expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
       workflow_key: 'demo_workflow',
-      items: [
-        { type: 'material', material_id: 'm-up' },
-        { type: 'material', material_id: 'm-old' },
-        { type: 'ref', connection_key: 'cms', external_id: 'q1' },
-      ],
+      items: [{ type: 'material', material_id: 'm-old' }],
     })
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(mockCreateSubmitCampaign).not.toHaveBeenCalled()
   })
 
   function mockRevisionWithAcceptedTypes(accepted: string[]) {
@@ -375,7 +591,7 @@ describe('AddItemsDialog', () => {
   it('drops hidden-panel items when the resolved contract narrows', async () => {
     // 竞态：契约查询未 resolve 时缺省全接受，用户已粘贴 ref id 并完成
     // 上传；契约随后 resolve 为仅 material——隐藏面板残留的 ref 条目
-    // 不计数、不提交。
+    // 不计数、不提交（此时退回直接创建运行）。
     let resolveRevision!: (value: unknown) => void
     mockFetchRevision.mockReturnValue(
       new Promise((resolve) => {
@@ -430,7 +646,7 @@ describe('AddItemsDialog', () => {
     await waitFor(() =>
       expect(screen.getByRole('tab', { name: '粘贴 ID' })).toBeDisabled()
     )
-    // 残留的 ref 条目不再计数，剩下的上传条目仍可提交。
+    // 残留的 ref 条目不再计数，剩下的上传条目仍可提交（直接创建运行）。
     expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
     fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
 

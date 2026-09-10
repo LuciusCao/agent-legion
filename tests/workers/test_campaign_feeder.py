@@ -593,6 +593,36 @@ def test_filter_form_keyset_slicing_multi_batch(job_db, feeder) -> None:
     assert queued_count(job_db, ws) == 7
 
 
+def test_filter_form_excludes_deselected_ids(job_db, feeder) -> None:
+    """P2-1：filter + exclude_ids（allMatching 反选）——被排除的 job 永不出现在
+    任何切片里（创建后翻完成也不行），drain 只投剩余的。"""
+    ws = workspace(job_db, "feeder-filter-excl")
+    ids = seed_failed_jobs(job_db, ws, 6, "FX")
+    excluded = sorted(ids)[2:4]  # 排除中间两个（切片分页边界无关性）
+    campaign = job_db.create_campaign(
+        ws,
+        "rerun",
+        {
+            "filter": {"status": "failed"},
+            "exclude_ids": excluded,
+            "node_key": NODE_KEYS[0],
+        },
+        watermark=100,
+        batch_size=2,  # 多切片 + 排除项跨页分布
+        progress={"cursor": None, "processed": 0},
+    )
+    campaign_id = campaign["id"]
+
+    run_ticks(feeder, 5)
+    row = job_db.get_campaign(campaign_id)
+    assert row["status"] == "completed"
+    assert row["jobs_succeeded"] == 4
+    assert row["progress"]["processed"] == 4
+    for job_id in excluded:
+        assert job_db.get_job(job_id)["status"] == "failed"  # 从未被翻回
+    assert queued_count(job_db, ws) == 4
+
+
 def test_upgrade_mode_drains_with_upgrade_service(job_db, feeder) -> None:
     """Upgrade-mode campaigns drain through JobWorkflowUpgradeService.upgrade:
     each stale job is re-pinned and flipped to queued, already-current ones

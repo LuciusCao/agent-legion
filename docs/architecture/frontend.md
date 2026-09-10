@@ -120,6 +120,7 @@ frontend/src/
 | `/workspaces/:workspaceId` | WorkspaceLayout |
 | `/workspaces/:workspaceId` | WorkspaceMainPage |
 | `/workspaces/:workspaceId/jobs/:jobId` | JobDetailPage |
+| `/workspaces/:workspaceId/campaigns` | CampaignsPage |
 | `/workspaces/:workspaceId` | SettingsPage |
 | `/workspaces/:workspaceId/token-usage` | TokenUsagePage |
 | `/workspaces/:workspaceId/monitoring` | MonitoringPage |

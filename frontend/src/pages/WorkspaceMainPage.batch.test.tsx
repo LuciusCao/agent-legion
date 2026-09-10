@@ -21,6 +21,8 @@ import {
 } from '../api/jobApi'
 import { upgradeJobWorkflow } from '../api/jobWorkflowUpgradeApi'
 import { batchUpgradeJobsWorkflow } from '../api/jobBatchUpgradeWorkflowApi'
+import { createCampaign } from '../api/campaignApi'
+import { previewBatchRerunJobs } from '../api/jobRerunPreviewApi'
 import { EventSourceMock } from '../testing/eventSourceMock'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 import { makeJob } from '../testing/fixtures'
@@ -38,6 +40,8 @@ const mockFetchJobFacets = vi.fn()
 const mockFetchWorkspaceStats = vi.fn()
 const mockFetchWorkspacePackages = vi.fn()
 const mockFetchWorkflowDefinition = vi.fn()
+const mockCreateCampaign = vi.fn()
+const mockPreviewBatchRerunJobs = vi.fn()
 const mockBatchRerunJobs = vi.fn()
 const mockBatchDeleteJobs = vi.fn()
 const mockPackageJobs = vi.fn()
@@ -83,6 +87,18 @@ vi.mock('../api/jobBatchUpgradeWorkflowApi', () => ({
   batchUpgradeJobsWorkflow: (
     ...args: Parameters<typeof batchUpgradeJobsWorkflow>
   ) => mockBatchUpgradeJobsWorkflow(...args),
+}))
+
+vi.mock('../api/campaignApi', () => ({
+  // allMatching 重跑/升级改造后只走 createCampaign；其余端点由
+  // campaign 组件测试覆盖，这里给 no-op 默认避免误触。
+  createCampaign: (...args: Parameters<typeof createCampaign>) =>
+    mockCreateCampaign(...args),
+}))
+
+vi.mock('../api/jobRerunPreviewApi', () => ({
+  previewBatchRerunJobs: (...args: Parameters<typeof previewBatchRerunJobs>) =>
+    mockPreviewBatchRerunJobs(...args),
 }))
 
 const mockGetWorkspaceExecutionConfiguration = vi.fn()
@@ -185,6 +201,8 @@ describe('WorkspaceMainPage batch operations', () => {
     mockBatchRunToJobs.mockReset()
     mockUpgradeJobWorkflow.mockReset()
     mockBatchUpgradeJobsWorkflow.mockReset()
+    mockCreateCampaign.mockReset()
+    mockPreviewBatchRerunJobs.mockReset()
     mockGetWorkspaceExecutionConfiguration.mockReset()
     mockGetWorkspaceExecutionConfiguration.mockResolvedValue({
       node_limits: [],
@@ -683,11 +701,30 @@ describe('WorkspaceMainPage batch operations', () => {
     })
   })
 
-  it('upgrades all matching jobs via the batch endpoint after confirmation', async () => {
-    mockBatchUpgradeJobsWorkflow.mockResolvedValueOnce({
-      results: [
-        { job_id: 'j1', operation: 'upgrade_workflow', status: 'succeeded' },
-      ],
+  it('creates an upgrade batch task for all matching jobs after confirmation', async () => {
+    // #532 PR-D 定稿：allMatching 的 filter 全量升级从同步
+    // batch-upgrade-workflow 切到批量任务创建（同步端点保留给显式 ids
+    // 小批量）。
+    mockCreateCampaign.mockResolvedValueOnce({
+      campaign: {
+        id: 'camp1',
+        workspace_id: 'ws1',
+        mode: 'upgrade',
+        status: 'pending',
+        target_spec: {},
+        progress: {},
+        watermark: 30000,
+        batch_size: 5000,
+        batches_submitted: 0,
+        jobs_succeeded: 0,
+        jobs_skipped: 0,
+        jobs_failed: 0,
+        error_message: '',
+        created_by: '',
+        created_at: '2026-09-09T00:00:00Z',
+        updated_at: '2026-09-09T00:00:00Z',
+        finished_at: null,
+      },
     })
     const seed = [
       makeJob({ id: 'j1', status: 'failed' }),
@@ -719,26 +756,119 @@ describe('WorkspaceMainPage batch operations', () => {
       screen.getByText('升级 workflow').click()
     })
     expect(
-      screen.getByText(/将对符合筛选条件的 25 个 job 执行 workflow/)
+      screen.getByText(/将对符合筛选条件的 25 个任务执行 workflow/)
     ).toBeInTheDocument()
 
     await act(async () => {
-      screen.getByText('确认升级').click()
+      screen.getByText('创建批量任务').click()
     })
 
-    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith('ws1', {
-      filter: {
-        status: null,
-        search: null,
-        workflow_version: null,
-        workflow_version_none: false,
-        active_node_key: null,
-        paused: null,
+    // 同一 selection filter 进批量任务 target_spec；同步端点不再被调用；
+    // 自动命名「升级 · 目标摘要」（定稿 §4）。
+    expect(mockCreateCampaign).toHaveBeenCalledWith(
+      'ws1',
+      'upgrade',
+      {
+        from_failed_node: false,
+        node_key: null,
+        filter: {
+          status: null,
+          search: null,
+          workflow_version: null,
+          workflow_version_none: false,
+          active_node_key: null,
+          paused: null,
+        },
+        job_ids: null,
+        exclude_ids: [],
       },
-      excludeIds: [],
+      '升级 · 旧版本存量任务'
+    )
+    expect(mockBatchUpgradeJobsWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('passes deselected ids through to the created campaign (P2-1)', async () => {
+    // allMatching 反选不能丢：旧同步路径 resolveBatchTarget 传
+    // filter + excludeIds，campaign 创建带上同一份 exclude_ids。
+    mockCreateCampaign.mockResolvedValueOnce({
+      campaign: {
+        id: 'camp2',
+        workspace_id: 'ws1',
+        mode: 'upgrade',
+        status: 'pending',
+        target_spec: {},
+        progress: {},
+        watermark: 30000,
+        batch_size: 5000,
+        batches_submitted: 0,
+        jobs_succeeded: 0,
+        jobs_skipped: 0,
+        jobs_failed: 0,
+        error_message: '',
+        created_by: '',
+        created_at: '2026-09-09T00:00:00Z',
+        updated_at: '2026-09-09T00:00:00Z',
+        finished_at: null,
+      },
     })
-    await waitFor(() => {
-      expect(useJobStore.getState().selectionMode).toBe('explicit')
+    const seed = [
+      makeJob({ id: 'j1', status: 'failed' }),
+      makeJob({ id: 'j2', status: 'failed', source_id: 'Q2' }),
+      makeJob({ id: 'j3', status: 'failed', source_id: 'Q3' }),
+    ]
+    useJobStore.setState({
+      jobs: seed,
+      selectMode: true,
     })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    seedJobs(seed)
+    await loadJobsViaSSE()
+    act(() => {
+      useJobStore.setState({ totalJobs: 25 })
+    })
+
+    await act(async () => {
+      screen.getByText('全选').click()
+    })
+    expect(useJobStore.getState().selectionMode).toBe('allMatching')
+    // 反选一行（allMatching 的 toggleSelect 语义：进 excludedIds）。
+    await act(async () => {
+      const rowCheckbox = screen.getByRole('checkbox', {
+        name: '选择任务 Q1',
+      })
+      fireEvent.click(rowCheckbox)
+    })
+    expect(useJobStore.getState().excludedIds).toEqual(new Set(['j1']))
+
+    await act(async () => {
+      screen.getByText('升级 workflow').click()
+    })
+    await act(async () => {
+      screen.getByText('创建批量任务').click()
+    })
+
+    expect(mockCreateCampaign).toHaveBeenCalledWith(
+      'ws1',
+      'upgrade',
+      {
+        from_failed_node: false,
+        node_key: null,
+        filter: {
+          status: null,
+          search: null,
+          workflow_version: null,
+          workflow_version_none: false,
+          active_node_key: null,
+          paused: null,
+        },
+        job_ids: null,
+        exclude_ids: ['j1'],
+      },
+      '升级 · 旧版本存量任务'
+    )
   })
 })

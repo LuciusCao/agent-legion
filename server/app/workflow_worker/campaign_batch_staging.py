@@ -1,21 +1,13 @@
 """Filter 批次的崩溃恢复 staging（#532 PR-B / PR #545 P1）。
 
-从 campaign_feeder.py 拆出（#209 预算棘轮，campaign_slice_queries 的
-sibling 先例）：feeder 的 filter 形态有一条 explicit-ids 形态没有的
-崩溃窗口——filter 的匹配字段会被投递自身改写（rerun 的
-status="failed"、upgrade 的 status/workflow_version），进程在「批次已
-提交」与「CAS 计数落账」之间死亡时，重启后重查 filter 选不出已投递的
-job（它们退出了匹配集），processed/jobs 计数永久漏记。本模块把「本批
-目标」在投递前 CAS 进 progress_json.pending_batch（stage），重启时优
-先重放（replay），计数落账时摘除（pop）—— feeder 只保留编排，形状与
-切片纪律同居于此。
+feeder 的 filter 形态：匹配字段被投递自身改写，进程在「批次已提交」
+与「CAS 计数落账」之间死亡时，重启后重查 filter 选不出已投递的 job
+——本模块把「本批目标」在投递前 CAS 进 progress_json.pending_batch
+（stage），重启时优先重放（replay），计数落账时摘除（pop）。
 
-PR #545 round-3/round-4 的崩溃边界收口：末页耗尽用 progress 的
-``exhausted`` 标记与 ``cursor=None`` 同一 CAS 原子落库，区分「初始
-None」与「耗尽 None」，completed 翻转的崩溃窗口不再回退成全量重扫
-（round-3 P1-2）；重放是否重投不再读 job 当前状态猜——v81 投递标记
-（campaign_job_deliveries，标记在翻转事务内原子落库）是归属权威，
-completed 检查只保留为产物保护（round-4 P1，语义见 campaign_feeder）。
+崩溃边界收口（round-3/4）：末页耗尽标记与 ``cursor=None`` 同一 CAS
+原子落库；重放是否重投由 v81 投递标记归属，completed 检查只保留为产
+物保护（语义见 campaign_feeder / modes）。
 """
 
 from __future__ import annotations
@@ -55,6 +47,15 @@ def spec_filter(spec: dict[str, Any]) -> JobListFilter:
         return JobListFilter(**raw)
     except TypeError as exc:
         raise InvalidOperationError(f"Campaign filter target is corrupt: {exc}") from exc
+
+
+def spec_exclude_ids(spec: dict[str, Any]) -> tuple[str, ...]:
+    """Filter 形态的用户排除项（allMatching 反选）；显式 ids 形态不存储。
+    异常形状按空处理——行损坏由 spec_filter 显式报错，此处不重复设卡。"""
+    raw = spec.get("exclude_ids")
+    if not isinstance(raw, list):
+        return ()
+    return tuple(str(v) for v in raw if str(v).strip())
 
 
 def cursor_exhausted(progress: dict[str, Any]) -> bool:
@@ -112,6 +113,7 @@ def next_slice(job_db: Any, campaign: dict[str, Any]) -> tuple[list[str], str | 
             spec_filter(spec),
             batch_size,
             progress.get("cursor") or None,
+            spec_exclude_ids(spec),
         )
         return ids, next_cursor, next_cursor is None
     all_ids = [str(value) for value in (spec.get("job_ids") or [])]

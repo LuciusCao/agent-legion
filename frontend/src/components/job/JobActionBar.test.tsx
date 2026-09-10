@@ -17,6 +17,12 @@ vi.mock('./useBatchRerunPreview', () => ({
   useBatchRerunPreview: () => ({ data: previewStub.data }),
 }))
 
+// #532 PR-D：allMatching 确认动作改为创建 campaign，走 campaignApi。
+const mockCreateCampaign = vi.hoisted(() => vi.fn())
+vi.mock('../../api/campaignApi', () => ({
+  createCampaign: (...args: unknown[]) => mockCreateCampaign(...args),
+}))
+
 const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
@@ -512,6 +518,28 @@ describe('JobActionBar', () => {
 describe('JobActionBar in allMatching selection mode', () => {
   beforeEach(() => {
     previewStub.data = undefined
+    mockCreateCampaign.mockReset()
+    mockCreateCampaign.mockResolvedValue({
+      campaign: {
+        id: 'camp1',
+        workspace_id: 'ws1',
+        mode: 'rerun',
+        status: 'pending',
+        target_spec: {},
+        progress: {},
+        watermark: 30000,
+        batch_size: 5000,
+        batches_submitted: 0,
+        jobs_succeeded: 0,
+        jobs_skipped: 0,
+        jobs_failed: 0,
+        error_message: '',
+        created_by: '',
+        created_at: '2026-09-09T00:00:00Z',
+        updated_at: '2026-09-09T00:00:00Z',
+        finished_at: null,
+      },
+    })
   })
 
   function renderAllMatching(onRerun = vi.fn(), onUpgradeWorkflow = vi.fn()) {
@@ -524,6 +552,7 @@ describe('JobActionBar in allMatching selection mode', () => {
             workspace_id: 'question_content',
           }),
         ]}
+        workspaceId="ws1"
         workflowDefinition={workflow}
         mode="batch"
         selectedCount={10}
@@ -553,40 +582,64 @@ describe('JobActionBar in allMatching selection mode', () => {
     expect(screen.getByText('运行到')).toHaveAttribute('disabled')
   })
 
-  it('opens the all-matching upgrade dialog and confirms without job ids', async () => {
-    const { onUpgradeWorkflow } = renderAllMatching()
+  it('opens the all-matching upgrade dialog and creates an upgrade campaign', async () => {
+    renderAllMatching()
 
     await act(async () => {
       screen.getByText('升级 workflow').click()
     })
     expect(
-      screen.getByText(/将对符合筛选条件的 10 个 job 执行 workflow/)
+      screen.getByText(/将对符合筛选条件的 10 个任务执行 workflow/)
     ).toBeInTheDocument()
 
     await act(async () => {
-      screen.getByText('确认升级').click()
+      screen.getByText('创建批量任务').click()
     })
-    // 不带 jobIds：store 在 allMatching 模式下经 selection filter 服务端解析。
-    expect(onUpgradeWorkflow).toHaveBeenCalledWith()
+    // #532 定稿：allMatching 升级改创建批量任务（同步端点留给显式 ids）；
+    // P2-1：反选透传 exclude_ids（此处无反选为空数组）；
+    // 自动命名「升级 · 目标摘要」。
+    expect(mockCreateCampaign).toHaveBeenCalledWith(
+      'ws1',
+      'upgrade',
+      {
+        from_failed_node: false,
+        node_key: null,
+        filter: expect.anything(),
+        job_ids: null,
+        exclude_ids: [],
+      },
+      '升级 · 旧版本存量任务'
+    )
   })
 
-  it('opens the all-matching rerun dialog and confirms full scope', async () => {
-    const { onRerun } = renderAllMatching()
+  it('opens the all-matching rerun dialog and confirms full scope via campaign', async () => {
+    renderAllMatching()
 
     await act(async () => {
       screen.getByText('重跑').click()
     })
     expect(
-      screen.getByText(/将对符合筛选条件的 10 个 job 执行/)
+      screen.getByText(/将对符合筛选条件的 10 个任务执行/)
     ).toBeInTheDocument()
 
     await act(async () => {
       screen.getByText('确认重跑').click()
     })
-    expect(onRerun).toHaveBeenCalledWith(null, true, undefined, undefined)
+    expect(mockCreateCampaign).toHaveBeenCalledWith(
+      'ws1',
+      'rerun',
+      {
+        from_failed_node: true,
+        node_key: null,
+        filter: expect.anything(),
+        job_ids: null,
+        exclude_ids: [],
+      },
+      '重跑 · 全部失败任务'
+    )
   })
 
-  it('confirms a specific failure category in allMatching mode', async () => {
+  it('confirms a specific failure category via the sync rerun-by-failure path', async () => {
     const { onRerun } = renderAllMatching()
 
     await act(async () => {
@@ -598,11 +651,14 @@ describe('JobActionBar in allMatching selection mode', () => {
     await act(async () => {
       screen.getByText('确认重跑').click()
     })
+    // 特定失败类别不在 #532 的无护栏端点清单（设计 §5.2），保留原同步
+    // rerun-by-failure；只有节点/全部失败形态创建批量任务。
+    expect(mockCreateCampaign).not.toHaveBeenCalled()
     expect(onRerun).toHaveBeenCalledWith(null, true, undefined, 'technical')
   })
 
   it('offers node chips and confirms a node rerun without jobIds', async () => {
-    const { onRerun } = renderAllMatching()
+    renderAllMatching()
 
     await act(async () => {
       screen.getByText('重跑').click()
@@ -623,12 +679,23 @@ describe('JobActionBar in allMatching selection mode', () => {
     await act(async () => {
       screen.getByText('确认重跑').click()
     })
-    // 不带 jobIds：store 在 allMatching 模式下经 selection filter 服务端解析。
-    expect(onRerun).toHaveBeenCalledWith('generate', false)
+    expect(mockCreateCampaign).toHaveBeenCalledWith(
+      'ws1',
+      'rerun',
+      {
+        from_failed_node: false,
+        node_key: 'generate',
+        filter: expect.anything(),
+        job_ids: null,
+        exclude_ids: [],
+      },
+      // 自动命名用节点人话 label（orderedNodes 的 label 优先于 key）。
+      '重跑 · 从「生成」节点'
+    )
   })
 
   it('switching back to a failure category clears the node selection', async () => {
-    const { onRerun } = renderAllMatching()
+    renderAllMatching()
 
     await act(async () => {
       screen.getByText('重跑').click()
@@ -642,12 +709,23 @@ describe('JobActionBar in allMatching selection mode', () => {
     await act(async () => {
       screen.getByText('确认重跑').click()
     })
-    expect(onRerun).toHaveBeenCalledWith(null, true, undefined, undefined)
+    expect(mockCreateCampaign).toHaveBeenCalledWith(
+      'ws1',
+      'rerun',
+      {
+        from_failed_node: true,
+        node_key: null,
+        filter: expect.anything(),
+        job_ids: null,
+        exclude_ids: [],
+      },
+      '重跑 · 全部失败任务'
+    )
   })
 
   it('shows the server-side eligible count in summary and confirm label', async () => {
     previewStub.data = { total_count: 10, eligible_count: 4 }
-    const { onRerun } = renderAllMatching()
+    renderAllMatching()
 
     await act(async () => {
       screen.getByText('重跑').click()
@@ -664,7 +742,19 @@ describe('JobActionBar in allMatching selection mode', () => {
     await act(async () => {
       screen.getByText('确认重跑（4）').click()
     })
-    expect(onRerun).toHaveBeenCalledWith('generate', false)
+    expect(mockCreateCampaign).toHaveBeenCalledWith(
+      'ws1',
+      'rerun',
+      {
+        from_failed_node: false,
+        node_key: 'generate',
+        filter: expect.anything(),
+        job_ids: null,
+        exclude_ids: [],
+      },
+      // 自动命名用节点人话 label（orderedNodes 的 label 优先于 key）。
+      '重跑 · 从「生成」节点'
+    )
   })
 
   it('disables confirm when the preview reports zero eligible jobs', async () => {

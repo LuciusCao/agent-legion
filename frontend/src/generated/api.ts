@@ -3837,6 +3837,11 @@ export interface components {
        * @default submit
        */
       mode: string
+      /**
+       * Name
+       * @default
+       */
+      name: string
       /** Watermark */
       watermark?: number | null
     }
@@ -3867,6 +3872,11 @@ export interface components {
        * @enum {string}
        */
       mode: 'rerun' | 'submit' | 'upgrade'
+      /**
+       * Name
+       * @default
+       */
+      name: string
       rerun?: components['schemas']['CampaignRerunTarget'] | null
       submit?: components['schemas']['CampaignSubmitInlineTarget'] | null
     }
@@ -3904,6 +3914,11 @@ export interface components {
        * @enum {string}
        */
       mode: 'rerun' | 'submit' | 'upgrade'
+      /**
+       * Name
+       * @default
+       */
+      name: string
       /** Progress */
       progress: {
         [key: string]: unknown
@@ -3951,6 +3966,11 @@ export interface components {
        * @enum {string}
        */
       mode: 'rerun' | 'submit' | 'upgrade'
+      /**
+       * Name
+       * @default
+       */
+      name: string
       rerun?: components['schemas']['CampaignRerunTarget'] | null
       submit?: components['schemas']['CampaignSubmitInlineTarget'] | null
     }
@@ -3992,6 +4012,11 @@ export interface components {
        * @enum {string}
        */
       mode: 'rerun' | 'submit' | 'upgrade'
+      /**
+       * Name
+       * @default
+       */
+      name: string
       /** Progress */
       progress: {
         [key: string]: unknown
@@ -4038,14 +4063,15 @@ export interface components {
      * CampaignRerunTarget
      * @description rerun/upgrade: exactly one of job_ids or filter, plus rerun knobs.
      *
-     *     The node_key/from_failed_node pair follows JobBatchRerunRequest's rule
-     *     but only for rerun mode (upgrade re-pins the revision and reruns from
-     *     the top — there is no node selection to make); the cross-mode rule is
-     *     checked in CampaignCreateRequest where the mode is known.
+     *     exclude_ids 仅随 filter 形态（allMatching 反选；取片 SQL 内排除）；
+     *     显式 job_ids 是手写快照，忽略之。node_key/from_failed_node 同
+     *     JobBatchRerunRequest 规则（仅 rerun；upgrade 无节点选择）。
      */
     CampaignRerunTarget: {
       /** Batch Size */
       batch_size?: number | null
+      /** Exclude Ids */
+      exclude_ids?: string[]
       filter?: components['schemas']['JobFilterPayload'] | null
       /**
        * From Failed Node
@@ -4063,9 +4089,8 @@ export interface components {
      * CampaignRunOverview
      * @description One linked run of a submit campaign (the detail aggregate, PR-C).
      *
-     *     created_count is the run row's counter; job_count the live per-run job
-     *     total from the status-counts table — they diverge exactly when a
-     *     partial failure left the run's count stale until healing.
+     *     created_count 是 run 行计数；job_count 是状态计数表的活跃值——部分
+     *     失败后、heal 前二者短暂分歧。
      */
     CampaignRunOverview: {
       /** Created Count */

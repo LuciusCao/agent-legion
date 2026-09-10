@@ -94,6 +94,15 @@ export default function WorkspaceLayout() {
                     }
                   }}
                 />
+                <LabeledIconButton
+                  icon="stream"
+                  label="批量任务"
+                  ariaLabel="批量任务"
+                  onClick={() =>
+                    workspaceId &&
+                    navigate(`/workspaces/${workspaceId}/campaigns`)
+                  }
+                />
                 {tokenAnalysisButton}
                 <LabeledIconButton
                   icon="add_task"
