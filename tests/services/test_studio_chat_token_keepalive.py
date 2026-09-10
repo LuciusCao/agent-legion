@@ -361,6 +361,66 @@ def test_keepalive_skipped_without_runtime(job_db, settings) -> None:
         service.shutdown()
 
 
+def test_dead_token_moves_session_to_error_for_resume(job_db, settings) -> None:
+    """#558: a dead tool channel must make the session resume-reachable —
+    the notice alone left the row at 'running'/'idle', so the UI kept a
+    live-looking session whose tool calls all fail with no recovery entry.
+    Escalation is guarded: closed/error/starting rows keep their state (a
+    concurrent close or resume claim owns the final status)."""
+    user_id = str(job_db.create_user("escalate-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    scoped_tokens.revoke_scoped_token(job_db, token)
+    service, bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        service._on_update(session_id, _tool_call("tc-esc"))
+        session = job_db.get_studio_chat_session(session_id)
+        assert session["status"] == "error"
+        assert "#558" in str(session["error_detail"])
+        # The status transition also rides the SSE session snapshot so the
+        # UI flips to the resume-reachable state without a manual refresh.
+        assert any(
+            payload.get("type") == "session" and payload["session"].get("status") == "error"
+            for _channel, payload in bus.events
+        )
+    finally:
+        service.shutdown()
+
+
+def test_escalation_respects_final_status_guards(job_db, settings) -> None:
+    """#558: closed / already-error / starting (a resume claim in flight)
+    rows are not stamped — same ownership rules as on_error's fatal arm."""
+    user_id = str(job_db.create_user("guard-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    scoped_tokens.revoke_scoped_token(job_db, token)
+    service, _bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        for status, expected in (
+            ("closed", "closed"),
+            ("error", "error"),
+            ("starting", "starting"),
+        ):
+            job_db.update_studio_chat_session(session_id, status=status)
+            service._on_update(session_id, _tool_call(f"tc-{status}"))
+            assert job_db.get_studio_chat_session(session_id)["status"] == expected
+    finally:
+        service.shutdown()
+
+
+def test_live_token_escalation_is_not_triggered(job_db, settings) -> None:
+    """#558 sanity: a live token keeps the session untouched — escalation
+    only ever rides the dead-token notice path."""
+    user_id = str(job_db.create_user("stays-idle-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    service, _bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        service._on_update(session_id, _tool_call("tc-live"))
+        session = job_db.get_studio_chat_session(session_id)
+        assert session["status"] == "running"  # untouched by the keepalive
+        assert not _invalidation_messages(service, session_id)
+    finally:
+        service.shutdown()
+
+
 def test_list_messages_cap_keeps_newest_rows(job_db, settings) -> None:
     """#411 companion: the 500-row cap must window on the NEWEST messages —
     a long session re-entered from the UI shows its latest turn, not the

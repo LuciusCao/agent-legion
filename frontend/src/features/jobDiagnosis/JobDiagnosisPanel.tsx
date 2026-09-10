@@ -6,6 +6,7 @@ import { StudioChatMessageList } from '../workflowStudio/chat/StudioChatMessageL
 import { StudioChatRunBar } from '../workflowStudio/chat/StudioChatRunBar'
 import { StudioChatQueueBar } from '../workflowStudio/chat/StudioChatQueueBar'
 import { StudioChatInput } from '../workflowStudio/chat/StudioChatInput'
+import { StudioChatResumeBar } from '../workflowStudio/chat/StudioChatResumeBar'
 import { useStudioChatQueue } from '../workflowStudio/chat/useStudioChatQueue'
 import {
   latestJobActionSuggestions,
@@ -146,6 +147,9 @@ export function JobDiagnosisPanel({ workspaceId, target }: Props) {
         lastRunMs={chat.lastRunMs}
         onCancel={() => void chat.cancel()}
       />
+      {/* #558：会话 error/closed 时给恢复入口（此前只有禁用文案，闲置后
+       * 工具通道死亡的诊断会话只能废弃）。 */}
+      {chat.closed && chat.session && <StudioChatResumeBar chat={chat} />}
       <StudioChatQueueBar queue={queue} />
       <StudioChatInput
         busy={chat.busy}
