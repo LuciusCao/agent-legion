@@ -24,12 +24,48 @@ def test_python_excludes_comment_only_and_blank_lines(tmp_path: Path) -> None:
     assert count_effective_lines(path) == 2
 
 
-def test_python_docstring_counts_as_code(tmp_path: Path) -> None:
+def test_python_docstring_rows_are_free(tmp_path: Path) -> None:
+    # #610: docstrings are documentation, not code — the same courtesy the
+    # C-like scanner already extends to JSDoc/Rust doc comments. Fitting a
+    # budget must not reward deleting them.
     path = _write(
         tmp_path / "example.py",
         '"""Module docstring.\n\nMore detail.\n"""\nx = 1\n',
     )
-    # Blank lines are excluded even inside a docstring; the rest count as code.
+    assert count_effective_lines(path) == 1
+
+
+def test_python_function_and_class_docstrings_free_mixed_rows_count(
+    tmp_path: Path,
+) -> None:
+    path = _write(
+        tmp_path / "example.py",
+        "def f():\n"
+        '    """Doc.\n'
+        "    Continued.\n"
+        '    """  # trailing comment on the closing row stays free\n'
+        "    return 1\n"
+        "class C:\n"
+        '    """Class doc."""\n'
+        "    x = 1\n"
+        # A one-line def whose body is the docstring: the row carries the
+        # def, so it counts (the trailing-comment discipline).
+        'def g(): """doc"""\n'
+        "return 2\n",
+    )
+    # counted: def f, return 1, class C, x = 1, def g (docstring on its row),
+    # return 2 = 6
+    assert count_effective_lines(path) == 6
+
+
+def test_python_orphan_strings_and_fstrings_are_code(tmp_path: Path) -> None:
+    # Later orphan string expressions are values, not documentation; an
+    # f-string first statement is not a docstring (ast.get_docstring skips
+    # it) — both stay counted.
+    path = _write(
+        tmp_path / "example.py",
+        'def f():\n    f"""not a docstring {1}"""\n    "orphan string"\n    return 1\n',
+    )
     assert count_effective_lines(path) == 4
 
 
