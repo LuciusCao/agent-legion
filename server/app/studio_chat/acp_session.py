@@ -157,6 +157,11 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         self._queue: queue.Queue[Any] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._closed = False
+        # request_stop() only asks for a graceful post-turn exit; unlike
+        # close() it must NOT flip _closed, or a later close() (resume's
+        # winner-side teardown) would return at its idempotence gate without
+        # joining or killing a turn that is still running (codex P1).
+        self._stop_requested = False
         self._state_lock = threading.Lock()
         # Loop-owned handles, captured under _state_lock for cross-thread
         # cancel/kill; None until the connection is up.
@@ -232,15 +237,18 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         the queue only between turns, so a _CLOSE enqueued now lands exactly
         after the current turn: the loop returns, the async-with tears the
         subprocess down gracefully, and the existing on_exit path finishes
-        the cleanup (registry pop, token revoke). Idempotent; a later
-        close() from resume's winner-side teardown still works (same
-        _closed gate) and returns fast because the thread is already gone.
-        A wedged turn bounds the wait at PROMPT_TIMEOUT_SECONDS via
-        on_turn_error; a parked permission at the 120s auto-deny."""
+        the cleanup (registry pop, token revoke).
+
+        Deliberately does NOT set ``_closed`` (codex P1): a resume racing in
+        mid-turn still needs close()'s full join→kill teardown of THIS
+        runtime before the new one spawns. The extra _CLOSE it queues is
+        harmless — the loop is already exiting. A wedged turn bounds the
+        graceful wait at PROMPT_TIMEOUT_SECONDS via on_turn_error; a parked
+        permission at the 120s auto-deny."""
         with self._state_lock:
-            if self._closed:
+            if self._closed or self._stop_requested:
                 return
-            self._closed = True
+            self._stop_requested = True
             self._queue.put(_CLOSE)
 
     def _kill_process(self) -> None:

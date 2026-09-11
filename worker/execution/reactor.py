@@ -1,12 +1,13 @@
 """Reactor-based stdout pump for agent executions (#578 phase 1).
 
 Legacy: thread-per-execution — at fleet scale the pump-thread count (kernel
-wakeups, GIL contention, context switches) taxes the executor more than the
-agents themselves (#578: 352% CPU supervising a fleet using 111%; #566's
-heartbeat starvation was a casualty). This module replaces N pump threads
-with one selector thread (batched ready-fds per wakeup; the blocking select
-releases the GIL) plus a core-count parse pool overlapping file writes with
-reads across streams (json.loads itself stays GIL-bound).
+wakeups, GIL contention, context switches) taxes the executor far more than
+the agents themselves (#578: measured supervision cost several times the
+fleet's own CPU; #566's heartbeat starvation was a casualty). This module
+replaces N pump threads with one selector thread (batched ready-fds per
+wakeup; the blocking select releases the GIL) plus a core-count parse pool
+overlapping file writes with reads across streams (json.loads itself stays
+GIL-bound).
 
 Scope: the reactor only owns the byte→line→event segment — spawn,
 lease/heartbeat, timeout policing, and the #564 ownership semantics stay in

@@ -7,14 +7,15 @@ from typing import Protocol
 _EVICTED: object = object()
 """投递到被驱逐订阅者队列的哨兵；订阅方收到后应立即结束流。"""
 
-# #563：快照语义通道（studio-chat: 流式 text 帧是全量快照，丢中间帧无损）
-# 的 QueueFull 先丢最旧腾位再投递，只有连续溢出达到该阈值（真死连接，防
+# #563：可丢帧（流式 text 快照——后续帧是全量累积，丢中间帧无损）的
+# QueueFull 先丢最旧腾位再投递，只有连续溢出达到该阈值（真死连接，防
 # 心跳僵尸原语义）才驱逐——立即驱逐引发的断流重连正是 #563 截断的触发
-# 形态。增量语义通道（workspace job 补丁按 revision 水位消费）不做丢最旧：
-# 静默丢帧会让客户端滞留旧 revision，驱逐断流（SSE 重连 + loadSnapshot
-# 全量 resync）反而是既有的无损自愈路径（codex review P2）。
+# 形态。不可丢事件（workspace job 补丁的 revision 水位、studio-chat 的
+# tool_call/permission/status 持久消息）不做丢最旧：驱逐断流（SSE 重连
+# + 全量 resync）是既有的无损自愈路径，静默丢帧让消费方缺消息且无
+# 重连触发（codex 611 review P2）。可丢与否由发布方声明（publish 的
+# replaceable 参数），bus 不解析 payload。
 OVERFLOW_EVICT_THRESHOLD = 64
-_SNAPSHOT_CHANNELS = ("studio-chat:",)
 
 
 def workspace_channel(workspace_id: str) -> str:
@@ -26,7 +27,7 @@ class EventBus(Protocol):
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop | None) -> None: ...
 
-    def publish(self, channel: str, payload: str) -> None: ...
+    def publish(self, channel: str, payload: str, *, replaceable: bool = False) -> None: ...
 
     def subscribe(self, channel: str) -> asyncio.Queue: ...
 
@@ -65,7 +66,7 @@ class InProcessEventBus:
         if not queues:
             self._subscribers.pop(channel, None)
 
-    def publish(self, channel: str, payload: str) -> None:
+    def publish(self, channel: str, payload: str, *, replaceable: bool = False) -> None:
         # Race window: the loop can stop between the is_running check and
         # call_soon_threadsafe (the latter then raises RuntimeError). A
         # publish racing shutdown must degrade to a direct send (same as
@@ -73,24 +74,23 @@ class InProcessEventBus:
         loop = self._loop
         try:
             if loop is not None and loop.is_running():
-                loop.call_soon_threadsafe(self._send, channel, payload)
+                loop.call_soon_threadsafe(self._send, channel, payload, replaceable)
                 return
         except RuntimeError:
             pass
-        self._send(channel, payload)
+        self._send(channel, payload, replaceable)
 
-    def _send(self, channel: str, payload: str) -> None:
+    def _send(self, channel: str, payload: str, replaceable: bool = False) -> None:
         queues = self._subscribers.get(channel)
         if not queues:
             return
-        snapshot_semantics = channel.startswith(_SNAPSHOT_CHANNELS)
         dead: set[asyncio.Queue] = set()
         for queue in list(queues):
             try:
                 queue.put_nowait(payload)
                 self._overflows[queue] = 0
             except asyncio.QueueFull:
-                if self._overflow_send(queue, payload, snapshot_semantics):
+                if self._overflow_send(queue, payload, replaceable):
                     dead.add(queue)
             except Exception:
                 # #204 broad-except audit (PR #251): a non-QueueFull failure on put marks
@@ -103,18 +103,18 @@ class InProcessEventBus:
         for queue in dead:
             self.unsubscribe(channel, queue)
 
-    def _overflow_send(self, queue: asyncio.Queue, payload: str, snapshot: bool) -> bool:
-        """#563 慢消费处理（返回是否驱逐）。快照语义通道：丢最旧腾位投递
-        最新（丢中间帧无损），连续溢出达阈值（真死连接）才驱逐；增量语义
-        通道（revision 水位消费）：立即驱逐——断流重连 + loadSnapshot 是
-        既有的无损自愈，静默丢帧让客户端滞留旧 revision（codex P2）。
+    def _overflow_send(self, queue: asyncio.Queue, payload: str, replaceable: bool) -> bool:
+        """#563 慢消费处理（返回是否驱逐）。replaceable（可丢帧：流式 text
+        快照）：丢最旧腾位投递最新（丢中间帧无损），连续溢出达阈值（真死
+        连接）才驱逐；不可丢事件：立即驱逐——断流重连 + 全量 resync 是
+        既有的无损自愈，静默丢帧让消费方缺消息且无重连触发（codex P2）。
 
         #204 broad-except audit: the suppressed calls can only fail in the
         QueueFull race — the retry put then drops this payload (already
         lost by definition of the overflow); nothing else is suppressible
         on an unbounded asyncio.Queue."""
         overflows = self._overflows[queue] = self._overflows.get(queue, 0) + 1
-        evict = not snapshot or overflows >= OVERFLOW_EVICT_THRESHOLD
+        evict = not replaceable or overflows >= OVERFLOW_EVICT_THRESHOLD
         with contextlib.suppress(Exception):
             queue.get_nowait()
             queue.put_nowait(_EVICTED if evict else payload)
