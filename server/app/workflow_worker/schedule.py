@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.services.job_errors import JobServiceError
 from server.app.services.vault import VaultError
+from server.app.storage_paths import job_log_dir
 from server.app.workflow_worker.agent_claim import (
     cached_run_payload,
     claim_agent_node,
@@ -119,8 +120,9 @@ def try_claim_and_submit(
     if node.reduce is not None:
         assemble_reduce_inputs(worker, job["id"], node, job_dir)
         inputs = (*inputs, f"{node.key}.shards.json")
-    log_path = worker.settings.logs_dir.resolve() / "jobs" / f"{job['id']}-{node_key}.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    # #618: the jobs log dir is resolved+ensured once per process; the old
+    # per-attempt resolve + mkdir pair was the top write-type fsevent item.
+    log_path = job_log_dir(worker.settings.logs_dir) / f"{job['id']}-{node_key}.log"
 
     resolved = resolve_node_route(worker, workspace_id, workflow_key, node_key, node.capability)
     if resolved.kind == "error":
