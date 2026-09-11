@@ -9,13 +9,27 @@ for a non-active row — a 409 is data, not an error).
 
 Two disciplines the codex review on #609 added:
 
-- **Deterministic counter-lock order** (#591 C4): ``sync_job_status``'s
-  triggers take per-job counter rows, and a multi-job batch writing in
-  queue order can interleave with ``try_claim_many``'s multi-job claim
-  transaction as A→B vs B→A (SQLSTATE 40P01). The batch therefore resolves
-  every lease's job FIRST, sorts the writes by job_id, and only then
-  writes, removing the batch-vs-batch direction — cross-path safety
-  (claims/sweeps lock in arrival order) rests on the 40P01 retry + fallback.
+- **Deterministic counter-lock order** (#591 C4, full key per #609 P1-2):
+  ``sync_job_status``'s statement triggers take (run_id, status) and
+  (workspace_id, status) counter rows per jobs UPDATE, and a multi-job
+  batch writing in queue order can interleave with ``try_claim_many``'s
+  multi-job claim transaction as A→B vs B→A (SQLSTATE 40P01) — a job_id
+  sort alone does NOT pin that order, because two jobs sorted X→Y by
+  job_id can live in workspaces ordered Y→X. Both batches therefore
+  resolve every item's (workspace_id, run_id, job_id) up front (the jobs
+  row is the key the triggers read) and write in that shared order.
+  Residual windows, documented rather than expanded (P2): the per-item
+  statement still takes its run-counter rows before its workspace-counter
+  row (trigger firing order is alphabetical), so the workspace row's
+  position sits after each batch's OWN first item in that workspace — two
+  multi-item batches whose first items in one SHARED workspace differ can
+  still close a ring on (workspace row, run row); the sweep/expire paths
+  (``expire_stale_leases`` and friends) also touch counters in arrival
+  order. Both are far narrower than the cross-workspace opposite-order
+  class this removes and stay covered by the 40P01 retry; the airtight
+  shapes (workspace-trigger-first firing order, or one multi-row jobs
+  UPDATE aggregating the whole batch through the statement trigger) are
+  schema-level changes out of scope here.
 - **The writer thread owns only the shared transaction** (#591 C5): events
   post-processing (token capture + PI compression, two full-file scans per
   item) is returned to the SUBMITTING commit thread as per-item closures —
@@ -32,7 +46,10 @@ from typing import TYPE_CHECKING, Any, cast
 from server.app.db.retry import retry_on_database_conflict
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_lifecycle import finish_lease
-from server.app.executors._lease_write_paths import _mark_result_stage
+from server.app.executors._lease_write_paths import (
+    _mark_result_stage,
+    finish_events_post_processing,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -57,21 +74,32 @@ def finish_many(
     (record_job_update reads current stats, so N broadcasts are noise).
     """
     with write_transaction(repo.path) as conn:
-        resolved: list[tuple[str, str, int, ExecutionResult, Any]] = []
+        # (workspace_id, run_id, job_id, queue_index, lease_id, result, timer):
+        # the first three are the counter keys the status triggers read —
+        # the full sort key #609 P1-2 pins (see the module docstring), with
+        # queue position for stability. Verdicts are re-assembled in QUEUE
+        # order below so each submitting thread gets its own item's answer.
+        resolved: list[tuple[str, str, str, int, str, ExecutionResult, Any]] = []
         for index, (lease_id, result, stage_timer) in enumerate(writes):
             lease = conn.execute(
-                "select job_id from executor_leases where id=%s", (lease_id,)
+                "select l.job_id, j.workspace_id, j.run_id from executor_leases l"
+                " left join jobs j on j.id = l.job_id where l.id = %s",
+                (lease_id,),
             ).fetchone()
             resolved.append(
-                (str(lease["job_id"]) if lease else "", lease_id, index, result, stage_timer)
+                (
+                    str(lease.get("workspace_id") or "") if lease else "",
+                    str(lease.get("run_id") or "") if lease else "",
+                    str(lease.get("job_id")) if lease else "",
+                    index,
+                    lease_id,
+                    result,
+                    stage_timer,
+                )
             )
-        # Counter-lock order (#591 C4): job_id asc, then queue position for
-        # stability inside a job — the write order the status triggers see.
-        # Verdicts are re-assembled in QUEUE order below so each submitting
-        # thread gets its own item's answer.
-        resolved.sort(key=lambda entry: (entry[0], entry[2]))
+        resolved.sort(key=lambda entry: entry[:4])
         by_index: dict[int, bool] = {}
-        for _job_id, lease_id, index, result, _stage_timer in resolved:
+        for _ws, _run, _job_id, index, lease_id, result, _timer in resolved:
             by_index[index] = finish_lease(conn, lease_id, result, repo.data_dir)
     outcomes = [by_index.get(index, False) for index in range(len(writes))]
 
@@ -110,7 +138,9 @@ def finish_many(
 
         return run
 
-    for job_id, lease_id, index, result, stage_timer in sorted(resolved, key=lambda i: i[2]):
+    for _ws, _run, job_id, index, lease_id, result, stage_timer in sorted(
+        resolved, key=lambda i: i[3]
+    ):
         result_flag = by_index[index]
         events_ran = result_flag and result.status in ("completed", "failed")
         with_broadcast = result_flag and job_id not in claimed_jobs
@@ -125,22 +155,11 @@ def finish_many(
 def _finish_post_processing(
     repo: ExecutorLeaseRepository, lease_id: str, result: ExecutionResult
 ) -> None:
-    """Events.jsonl token capture + PI compression for one finished lease.
-
-    Completed/failed only (the callback assembly's family gate); the
-    data_dir guard keeps the direct path's exact defensive shape.
-    """
-    if repo.data_dir is not None:
-        from server.app.db.transaction import read_connection
-        from server.app.services.token_usage_lease import capture_token_usage_after_lease_finish
-        from server.app.storage_paths import resolve_data_path
-        from shared.pi_events import compress_pi_events
-
-        with read_connection(repo.path) as read_conn:
-            capture_token_usage_after_lease_finish(read_conn, lease_id, repo.data_dir)
-        if result.run_dir:
-            run_dir = resolve_data_path(result.run_dir, repo.data_dir, allow_missing=True)
-            compress_pi_events(run_dir / "events.jsonl")
+    """Events post-processing for the post-commit callbacks: the shared
+    token-capture + PI-compression shape lives with the direct path
+    (``finish_events_post_processing`` in _lease_write_paths) — one owner
+    for both finish paths (#591 C5)."""
+    finish_events_post_processing(repo, lease_id, result)
 
 
 def finish_many_with_retry(
@@ -160,24 +179,21 @@ def finish_via_batcher(
 ) -> bool:  # typed: returns the batcher verdict or the serial write's
     """The repo's finish() batched entry: park on the queue, with the
     serial write as the post-stop fallback (#591 C6)."""
-    direct = lambda: retry_on_database_conflict(  # noqa: E731
-        lambda: _finish_direct(repo, lease_id, result, stage_timer)
-    )
+    from server.app.executors import _lease_write_paths
+
+    def direct() -> bool:
+        return cast(
+            bool, _lease_write_paths.finish(repo, lease_id, result, stage_timer=stage_timer)
+        )
+
+    direct_with_retry = lambda: retry_on_database_conflict(direct)  # noqa: E731
     if batcher is None:
-        return direct()
+        return direct_with_retry()
     # #521 stage marks: submit() runs the item's post-commit callback on
     # THIS thread before returning — _post_for closes lease_write (queue
     # wait + batch, the honest batching measurement) and events there. A
     # mark placed after submit() returns would be wrong twice over: the
     # events work has already run (submit runs the callbacks), so its time
     # would fold into lease_write and the two segments would swap order.
-    outcome: bool = batcher.submit("finish", (lease_id, result, stage_timer), direct=direct)
-    return outcome
-
-
-def _finish_direct(
-    repo: ExecutorLeaseRepository, lease_id: str, result: ExecutionResult, stage_timer: Any
-) -> bool:
-    from server.app.executors import _lease_write_paths
-
-    return cast(bool, _lease_write_paths.finish(repo, lease_id, result, stage_timer=stage_timer))
+    verdict = batcher.submit("finish", (lease_id, result, stage_timer), direct=direct_with_retry)
+    return cast(bool, verdict)

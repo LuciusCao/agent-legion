@@ -119,8 +119,11 @@ class ResultCommitBatcher:
         self._queue: queue.SimpleQueue[_BatchItem | None] = queue.SimpleQueue()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
-        # C6: set BEFORE the sentinel is enqueued — submit() checks it and
-        # takes the direct path, so nothing can park on the dying writer.
+        # C6/#609 P1-1: the close gate — stop()'s {set + sentinel put} and
+        # submit()'s {check + enqueue} pairs both run under _lock, so a
+        # submitter either lands ahead of the sentinel or takes the direct
+        # path; nothing can enqueue onto a dead writer. The writer's queue
+        # consumption stays lock-free.
         self._closed = threading.Event()
         self._lock = threading.Lock()
 
@@ -128,6 +131,16 @@ class ResultCommitBatcher:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return
+            if self._closed.is_set():
+                # Restart after stop(): reopen the gate (a stopped batcher
+                # otherwise stays in bypass mode forever) and drop any
+                # sentinel a stop() without a live writer left behind — it
+                # would kill the fresh writer on its first get(). Real
+                # items cannot be parked behind the gate: post-close
+                # submits never enqueue. A first start keeps the queue, so
+                # submits that raced ahead of start() still drain.
+                self._closed.clear()
+                self._queue = queue.SimpleQueue()
             self._stop.clear()
             self._thread = threading.Thread(
                 target=self._writer_loop, name="result-commit-batcher", daemon=True
@@ -137,13 +150,17 @@ class ResultCommitBatcher:
     def stop(self, timeout_seconds: float = 10.0) -> None:
         """Stop the writer after draining; in-flight items complete first.
 
-        Call only after request traffic has quiesced (app shutdown): a
-        submit racing past the sentinel would block on a future nobody
-        resolves — the same liveness ordering the DB pool close relies on.
+        The close decision and the sentinel enqueue run under the batcher
+        lock, atomic against submit()'s check+enqueue pair (#609 P1-1): a
+        submitter either lands its item ahead of the sentinel (the writer's
+        exit drain resolves it) or observes the closed gate and takes the
+        direct path — the interleaving where it enqueues behind a dead
+        writer and parks on a future nobody resolves cannot occur.
         """
-        self._closed.set()
-        self._stop.set()
-        self._queue.put(None)
+        with self._lock:
+            self._closed.set()
+            self._stop.set()
+            self._queue.put(None)
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=timeout_seconds)
@@ -158,18 +175,24 @@ class ResultCommitBatcher:
         #591 C5), the SUBMITTING thread runs them here, off the single
         writer — the direct path's parallel shape.
 
-        After ``stop()`` the queue is closed (#591 C6): a racing producer
-        (an executor thread outliving its bounded shutdown wait) would
-        otherwise park forever on a future nobody drains. It runs the
-        caller-provided ``direct`` serial path instead — the same writes,
-        just unbatched.
+        After ``stop()`` the queue is closed (#591 C6): the closed-check
+        and the enqueue run under the batcher lock, atomic against stop()'s
+        close+sentinel pair (#609 P1-1) — a racing producer (an executor
+        thread outliving its bounded shutdown wait) can never enqueue onto
+        a drained queue and park forever. It runs the caller-provided
+        ``direct`` serial path instead — the same writes, just unbatched.
+        The writer never takes the lock (its queue consumption is
+        lock-free), so submitters cannot stall a drain round.
         """
-        if self._closed.is_set():
+        item = _BatchItem(kind=kind, args=args)
+        with self._lock:
+            closed = self._closed.is_set()
+            if not closed:
+                self._queue.put(item)
+        if closed:
             if direct is None:
                 raise RuntimeError("result commit batcher is stopped")
             return direct()
-        item = _BatchItem(kind=kind, args=args)
-        self._queue.put(item)
         item.future.done.wait()
         if item.future.error is not None:
             raise item.future.error

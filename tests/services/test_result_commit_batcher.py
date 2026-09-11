@@ -330,25 +330,42 @@ def test_kill_switch_none_batcher_takes_direct_path(job_db) -> None:
 
 
 def test_finish_many_sorts_writes_by_job_for_counter_lock_order(job_db) -> None:
-    """C4: the batch writes in job_id order regardless of queue order —
-    the deterministic counter-lock sequence claim/finish batches share."""
-    for index in range(4):
-        seed_request(job_db, job_id=f"job-{index:02d}", limit=10)
+    """C4/#609 P1-2: the batch writes in (workspace_id, run_id, job_id)
+    order regardless of queue order — the full counter-key sequence the
+    status triggers read and try_claim_many shares. job_id alone does not
+    pin it: two jobs sorted X→Y by job_id can live in workspaces ordered
+    Y→X, reopening the cross-batch 40P01 ring."""
+    # Two workspaces with INVERTED id vs job_id order: ws-a's job sorts
+    # after ws-b's by job_id but before it by workspace_id.
+    seed_request(job_db, job_id="job-01", limit=10, workspace_id="ws-a")
+    seed_request(job_db, job_id="job-02", limit=10, workspace_id="ws-a")
+    seed_request(job_db, job_id="job-03", limit=10, workspace_id="ws-b")
+    seed_request(job_db, job_id="job-04", limit=10, workspace_id="ws-b")
+    # Distinct run_ids with their own inversion inside ws-a: job-01's run
+    # sorts after job-02's.
+    with job_db.connect() as conn:
+        conn.execute("update jobs set run_id='run-B' where id='job-01'")
+        conn.execute("update jobs set run_id='run-A' where id='job-02'")
+        conn.execute("update jobs set run_id='run-A' where id='job-03'")
+        conn.execute("update jobs set run_id='run-B' where id='job-04'")
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     claimed = [broker.claim("worker-1") for _ in range(4)]
     assert all(c is not None for c in claimed)
-    # Reverse queue order (job-03..job-00); the batch must still write
-    # job-00 first.
-    order: list[str] = []
+    # Reverse queue order; the batch must still write the (ws, run, job)
+    # order: (ws-a, run-A, job-02), (ws-a, run-B, job-01),
+    # (ws-b, run-A, job-03), (ws-b, run-B, job-04).
+    order: list[tuple[str, str, str]] = []
     real_finish_lease = _lease_finish_batch.finish_lease
 
     def _recording_finish_lease(conn, lease_id, result, data_dir=None):  # noqa: ANN001
         lease = conn.execute(
-            "select job_id from executor_leases where id=%s", (lease_id,)
+            "select j.workspace_id, j.run_id, l.job_id from executor_leases l"
+            " left join jobs j on j.id = l.job_id where l.id = %s",
+            (lease_id,),
         ).fetchone()
-        order.append(str(lease["job_id"]))
+        order.append((str(lease["workspace_id"]), str(lease["run_id"]), str(lease["job_id"])))
         return real_finish_lease(conn, lease_id, result, data_dir)
 
     import server.app.executors._lease_finish_batch as batch_module
@@ -363,7 +380,13 @@ def test_finish_many_sorts_writes_by_job_for_counter_lock_order(job_db) -> None:
     finally:
         batch_module.finish_lease = real_finish_lease
     assert verdicts == [True] * 4
-    assert order == sorted(order), "writes must run in job_id order"
+    assert order == sorted(order), "writes must run in (workspace, run, job) order"
+    assert order == [
+        ("ws-a", "run-A", "job-02"),
+        ("ws-a", "run-B", "job-01"),
+        ("ws-b", "run-A", "job-03"),
+        ("ws-b", "run-B", "job-04"),
+    ]
 
 
 def test_post_stop_submit_takes_direct_path(job_db) -> None:
@@ -420,6 +443,88 @@ def test_writer_offloads_post_commit_to_submitter(job_db) -> None:
 
 
 # ------------------------------------------- #609 review round (P1-1 / P1-2)
+
+
+def test_submit_racing_stop_never_enqueues_onto_dead_writer(job_db) -> None:
+    """P1-1: the closed-check and the enqueue are one atomic pair against
+    stop()'s close+sentinel. Orchestrated at the exact old race window: a
+    submitter parks between its check and its enqueue (a parking _BatchItem
+    constructor), stop() runs to completion (writer joined and gone), then
+    the submitter is released — it must take the direct path, never enqueue
+    onto the dead writer and park on a future nobody resolves."""
+    seed_request(job_db, job_id="job-1", limit=10)
+    _setup_worker(job_db)
+    leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+    batcher = ResultCommitBatcher(partial(finish_many_with_retry, leases), broker.mark_done_many)
+    broker.result_batcher = batcher
+    leases.result_batcher = batcher
+    claim = broker.claim("worker-1")
+    batcher.start()
+
+    entered_ctor = threading.Event()
+    release_ctor = threading.Event()
+    real_item_cls = _batcher_module._BatchItem
+
+    class _ParkingItem(real_item_cls):
+        def __init__(self, kind, args):  # noqa: ANN001
+            # Fires between submit()'s closed-check and its enqueue (the
+            # old race window; the new code has not taken the lock yet).
+            entered_ctor.set()
+            release_ctor.wait(timeout=5)
+            super().__init__(kind=kind, args=args)
+
+    _batcher_module._BatchItem = _ParkingItem
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            verdict = pool.submit(
+                leases.finish,
+                claim.lease_id,
+                ExecutionResult(status="completed", exit_code=0),
+            )
+            assert entered_ctor.wait(timeout=5), "submitter never reached the race window"
+            # The submitter is parked past its closed-check: stop() closes
+            # the gate, feeds the sentinel, and joins the (now dead) writer.
+            batcher.stop()
+            release_ctor.set()
+            # Bounded wait: the unfixed race parks this forever — fail fast
+            # instead of hanging the suite.
+            assert verdict.result(timeout=5) is True
+    finally:
+        _batcher_module._BatchItem = real_item_cls
+    assert job_db.get_job_node("job-1", "generate")["status"] == "completed"
+
+
+def test_restart_reopens_the_queue_after_stop() -> None:
+    """P1-1 companion nit: start() after stop() reopens the closed gate —
+    a restarted batcher serves the queue again instead of staying in
+    bypass mode, and a sentinel left by a stop() without a live writer
+    cannot kill the fresh writer on its first get()."""
+    arm = _CountingArm()
+    batcher = ResultCommitBatcher(arm, arm)
+    # stop() before any start(): no writer drains the sentinel — start()
+    # must drop it with the stale gate, or the fresh writer exits instantly
+    # and every submit parks forever.
+    batcher.stop()
+    batcher.start()
+    try:
+        assert batcher.submit("finish", ("lease-1",)) is True
+    finally:
+        batcher.stop()
+    assert arm.calls == [[("lease-1",)]]
+
+    # Same after a live start/stop cycle: the restart reopens the gate.
+    arm2 = _CountingArm()
+    batcher.finish_many = arm2
+    batcher.mark_done_many = arm2
+    batcher.start()
+    batcher.stop()
+    batcher.start()
+    try:
+        assert batcher.submit("mark_done", ("exec-1",)) is True
+    finally:
+        batcher.stop()
+    assert arm2.calls == [[("exec-1",)]]
 
 
 def test_batched_cancelled_finish_skips_events_post_processing(job_db) -> None:
