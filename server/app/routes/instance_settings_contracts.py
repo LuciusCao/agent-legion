@@ -127,5 +127,4 @@ class InstanceSettingsResponse(InstanceSettingsDocument):
     skills_root: str = SKILLS_ROOT_DISPLAY
 
 
-class InstanceSettingsUpdate(InstanceSettingsDocument):
-    pass
+class InstanceSettingsUpdate(InstanceSettingsDocument): ...
