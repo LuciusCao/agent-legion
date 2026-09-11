@@ -22,6 +22,20 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   一次 mkdir）同样接入 `ensure_dir_once`。稳态下该写类文件事件
   最大单项预期清零，fseventsd 与 sys time 相应回落。
 
+>>>>>>> origin/release/0.7.10
+
+### Fixed
+- 心跳 relay 批量拍的停摆放大面（issue #591，0.7.10 短期止血）：完成波
+  尖峰下 Host HTTP 面可长时间无响应，批量心跳拍按机器在飞量整拍发出，
+  一次停摆即整拍超时丢失，级联成批量租约过期与重跑（0.7.9 上线日实测
+  复现，形态与 #566 死亡螺旋同族）。收尾调参 + 分片语义重做：relay 批量
+  拍按 `RELAY_BEAT_SHARD=64` 分片并**并行发出**（独立常量，不动机器
+  executor 侧的 256）——失败分片只丢本片的拍、不沉没后续分片（无队头
+  饿死），失败片的租约按未知处理（非丢失），下一拍全量重试；并行分片
+  下串行累加导致的整轮超租约 TTL 不再可能。批量拍显式 10s 超时
+  （`BATCH_BEAT_TIMEOUT_SECONDS`，`heartbeat_batch` 增加 timeout 透传）
+  ——30s 客户端默认太贴 90s 租约 TTL，两拍全长等待即耗尽续租预算，
+  10s 让失败早暴露、早重试。executor 侧分片与全局限时器不变。
 ## [0.7.8] - 2026-09-10
 
 ### Performance
