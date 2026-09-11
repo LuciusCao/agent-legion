@@ -17,6 +17,8 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 from starlette import concurrency
 
+from server.app.storage_paths import ensure_dir_once
+
 
 async def spool_result_body(request: Request, bundle_dir: Path, max_bytes: int) -> Path:
     """Stream the request body to a staging file in ``bundle_dir``.
@@ -25,7 +27,7 @@ async def spool_result_body(request: Request, bundle_dir: Path, max_bytes: int) 
     any failure, and the caller publishes it via ``publish_staged_result``.
     Crash-orphaned staging files are reaped by the broker's bundle-dir GC
     (``reaper.reap_terminal_bundles``, age-gated)."""
-    await concurrency.run_in_threadpool(bundle_dir.mkdir, parents=True, exist_ok=True)
+    await concurrency.run_in_threadpool(ensure_dir_once, bundle_dir)
     descriptor, staging = await concurrency.run_in_threadpool(
         tempfile.mkstemp, dir=bundle_dir, prefix=".result-", suffix=".tmp"
     )
@@ -60,7 +62,7 @@ async def spool_result_body(request: Request, bundle_dir: Path, max_bytes: int) 
 
 def publish_staged_result(staged: Path, archive_path: Path) -> None:
     """Atomically rename the staging file into place (same filesystem)."""
-    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir_once(archive_path.parent)
     os.replace(staged, archive_path)
 
 

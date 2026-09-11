@@ -23,6 +23,7 @@ from server.app.agent_broker.agent_bundle import (
     extract_agent_result,
 )
 from server.app.agent_broker.claim_paths import claim_log_path
+from server.app.storage_paths import ensure_dir_once
 
 
 def safe_relative_dir(value: str) -> PurePosixPath | None:
@@ -86,5 +87,7 @@ def unpack_agent_result(
         if log_target is not None:
             log_source = staging_dir / CODE_RESULT_LOG_MEMBER
             if log_source.is_file():
-                log_target.parent.mkdir(parents=True, exist_ok=True)
+                # #618: code results land node.log in the shared logs/jobs
+                # dir (the claim insert already points node_runs there).
+                ensure_dir_once(log_target.parent)
                 shutil.move(str(log_source), str(log_target))
