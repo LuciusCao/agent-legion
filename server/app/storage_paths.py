@@ -13,6 +13,28 @@ def _resolved_dir(path: Path) -> Path:
     return path.resolve(strict=True)
 
 
+# #618: mkdir-once memoization for directories whose lifetime spans the
+# process (logs/jobs, the broker bundle dir). Hot paths (per candidate pop /
+# dispatch / result) used to re-assert them with
+# mkdir(parents=True, exist_ok=True) — a real syscall plus an FSEvents
+# dispatch every call (the single largest write-event item in issue #618's
+# fseventsd attribution). NOT for paths a runtime flow may
+# remove (job-dir trees, trash staging, per-result temp dirs): a memoized
+# path would skip its recreation mkdir.
+@lru_cache(maxsize=4096)
+def ensure_dir_once(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# Resolved-and-ensured <logs_dir>/jobs, computed once per process (#618):
+# the scheduler used to resolve logs_dir (a filesystem probe) and mkdir the
+# same long-lived dir on every node-claim attempt.
+@lru_cache(maxsize=16)
+def job_log_dir(logs_dir: Path) -> Path:
+    return ensure_dir_once(logs_dir.resolve() / "jobs")
+
+
 class ManagedPathError(ValueError):
     """Raised when a stored path escapes its managed root."""
 

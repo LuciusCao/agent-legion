@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Performance
+- 调度器每 claim 重复 mkdir 消除（issue #618）：`data/logs/jobs`
+  从服务启动起就存在，但 `workflow_worker/schedule.py` 每次节点
+  claim 准备都执行 `logs_dir.resolve()`（文件系统探测）+
+  `mkdir(parents=True, exist_ok=True)`（真实 syscall + FSEvents
+  事件分发）——issue #618 的 fseventsd 写类事件分账实测中，该
+  重复 mkdir 是量级最大的单项（高频 claim 路径上的纯重复动作）。
+  新增 `storage_paths.ensure_dir_once`（进程级 lru_cache 备忘录：
+  目录首次创建后跳过后续 mkdir）与 `job_log_dir`（`<logs_dir>/jobs`
+  的 resolve+ensure 进程级一次计算），调度主路径、shard claim、
+  本地沙箱执行、code 结果 `node.log` 落盘四处统一接入。同模式
+  全仓清扫：Agent bundle 与 code bundle 打包路径、Worker 结果回传
+  的 spool/publish 路径（共享 bundle 目录、每次 dispatch/每份结果
+  一次 mkdir）同样接入 `ensure_dir_once`。稳态下该写类文件事件
+  最大单项预期清零，fseventsd 与 sys time 相应回落。
+
+>>>>>>> origin/release/0.7.10
+
 ### Fixed
 - 心跳 relay 批量拍的停摆放大面（issue #591，0.7.10 短期止血）：完成波
   尖峰下 Host HTTP 面可长时间无响应，批量心跳拍按机器在飞量整拍发出，
