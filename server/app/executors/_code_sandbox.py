@@ -32,6 +32,7 @@ from server.app.executors._code_runtime import (
 )
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.models import ExecutionContext, ExecutionResult
+from server.app.storage_paths import ensure_dir_once
 from shared.code_sandbox import (
     build_sandbox_argv,
     child_env,
@@ -114,10 +115,7 @@ def _read_result(result_path: Path, log_path: Path) -> ExecutionResult | None:
     if error is None:
         return None
     return ExecutionResult(
-        status="failed",
-        exit_code=1,
-        error_message=error,
-        log_path=str(log_path),
+        status="failed", exit_code=1, error_message=error, log_path=str(log_path)
     )
 
 
@@ -143,7 +141,8 @@ def execute_custom_sandboxed(
         )
 
     context.job_dir.mkdir(parents=True, exist_ok=True)
-    context.log_path.parent.mkdir(parents=True, exist_ok=True)
+    # #618: log_path.parent is the shared logs/jobs dir; mkdir once.
+    ensure_dir_once(context.log_path.parent)
     result_path = context.job_dir / _RESULT_BASENAME
     # A leftover result from a previous attempt must never fake a success.
     result_path.unlink(missing_ok=True)

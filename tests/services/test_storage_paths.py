@@ -1,9 +1,15 @@
+import contextlib
+import os
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pytest
 
 from server.app.storage_paths import (
     ManagedPathError,
+    ensure_dir_once,
+    job_log_dir,
     make_data_relative,
     resolve_data_path,
     resolve_job_dir,
@@ -346,3 +352,127 @@ class TestResolveJobDir:
             resolve_job_dir(job, managed_root)
 
         assert "job" in str(exc_info.value)
+
+
+class TestEnsureDirOnce:
+    # #618: mkdir-once memoization, asserted at the os.mkdir syscall level
+    # (the thing fseventsd actually sees). The lru_cache is process-global,
+    # so every test clears it first.
+
+    def test_creates_once_and_skips_subsequent_calls(self, tmp_path: Path) -> None:
+        target = tmp_path / "logs" / "jobs"
+        ensure_dir_once.cache_clear()
+        try:
+            with probe_os_mkdir() as syscalls:
+                for _ in range(10):
+                    ensure_dir_once(target)
+        finally:
+            ensure_dir_once.cache_clear()
+
+        assert target.is_dir()
+        assert syscalls == sorted((str(tmp_path / "logs"), str(target)))
+
+    def test_distinct_paths_are_created_independently(self, tmp_path: Path) -> None:
+        first = tmp_path / "a" / "shared"
+        second = tmp_path / "b" / "shared"
+        ensure_dir_once.cache_clear()
+        try:
+            with probe_os_mkdir() as syscalls:
+                ensure_dir_once(first)
+                ensure_dir_once(second)
+                ensure_dir_once(first)
+                ensure_dir_once(second)
+        finally:
+            ensure_dir_once.cache_clear()
+
+        assert first.is_dir() and second.is_dir()
+        expected = sorted(str(p) for p in (first, first.parent, second, second.parent))
+        assert syscalls == expected
+
+    def test_returns_the_path(self, tmp_path: Path) -> None:
+        target = tmp_path / "logs" / "jobs"
+        ensure_dir_once.cache_clear()
+        try:
+            assert ensure_dir_once(target) is target
+        finally:
+            ensure_dir_once.cache_clear()
+
+    def test_concurrent_cold_cache_creates_the_dir(self, tmp_path: Path) -> None:
+        # lru_cache is not atomic across threads: a cold cache hit by many
+        # threads at once runs mkdir(parents=True, exist_ok=True) more than
+        # once. The contract is only that this is harmless — every caller
+        # must see a usable directory.
+        target = tmp_path / "logs" / "jobs"
+        errors: list[BaseException] = []
+
+        def hit() -> None:
+            try:
+                ensure_dir_once(target)
+            except BaseException as exc:  # noqa: BLE001 - recorded, not masked
+                errors.append(exc)
+
+        ensure_dir_once.cache_clear()
+        try:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                for future in as_completed([pool.submit(hit) for _ in range(32)]):
+                    future.result()
+        finally:
+            ensure_dir_once.cache_clear()
+
+        assert errors == []
+        assert target.is_dir()
+
+
+class TestJobLogDir:
+    # #618: <logs_dir>/jobs resolved AND ensured once per process — the
+    # scheduler's per-claim resolve + mkdir pair was the top write-type
+    # fsevent item in issue #618's attribution.
+
+    def test_resolves_and_creates_the_jobs_log_dir(self, tmp_path: Path) -> None:
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir()
+
+        job_log_dir.cache_clear()
+        try:
+            result = job_log_dir(logs_dir)
+            again = job_log_dir(logs_dir)
+        finally:
+            job_log_dir.cache_clear()
+
+        assert result == (logs_dir / "jobs").resolve()
+        assert result.is_dir()
+        assert again is result  # the lru_cache returns the same object
+
+    def test_repeated_calls_issue_no_mkdir_syscalls(self, tmp_path: Path) -> None:
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir()
+        job_log_dir.cache_clear()
+        try:
+            first = job_log_dir(logs_dir)
+            with probe_os_mkdir() as syscalls:
+                for _ in range(25):
+                    assert job_log_dir(logs_dir) is first
+        finally:
+            job_log_dir.cache_clear()
+        assert syscalls == []
+
+
+@contextlib.contextmanager
+def probe_os_mkdir() -> Iterator[list[str]]:
+    """Record every *successful* os.mkdir syscall issued inside the block.
+
+    Only successes count: pathlib's parents=True recursion probes with a
+    failing first attempt, and a failed attempt is not a filesystem write.
+    """
+    created: list[str] = []
+    original = os.mkdir
+
+    def counting_mkdir(path: object, *args: object, **kwargs: object) -> None:
+        original(path, *args, **kwargs)  # type: ignore[arg-type,call-arg]
+        created.append(str(path))
+
+    os.mkdir = counting_mkdir  # type: ignore[assignment]
+    try:
+        yield created
+    finally:
+        os.mkdir = original  # type: ignore[assignment]
