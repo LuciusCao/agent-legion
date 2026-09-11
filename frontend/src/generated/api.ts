@@ -4035,6 +4035,8 @@ export interface components {
       max_concurrent_result_commits: number
       /** Min Protocol Version */
       min_protocol_version: number
+      /** Result Commit Batching */
+      result_commit_batching: boolean
     }
     /** InstanceCleanupSettings */
     InstanceCleanupSettings: {

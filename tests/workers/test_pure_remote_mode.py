@@ -91,6 +91,7 @@ def test_code_capacity_zero_is_accepted_by_both_contracts() -> None:
                 "max_archive_bytes": 1024,
                 "min_protocol_version": 1,
                 "max_concurrent_result_commits": 16,
+                "result_commit_batching": True,
             },
             "agent_enqueue": {"workers": 48, "max_pending": 1024},
             "result_unpack": {"workers": 0},

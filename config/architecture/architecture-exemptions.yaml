@@ -19,36 +19,56 @@ exemptions:
   reason: >-
     Issue #569 adds the result-validate pool knob beside its #554
     result_unpack sibling: one field entry (path, label, integer, allowZero,
-    max) in the same table shape. The capacity-knob group IS the form
-    surface for the executor-runtime pool sizes; splitting a one-entry
-    overflow into a sister module would fork the group. Remove when the
-    instance-settings form gets its planned structural split or a knob
-    retirement frees headroom.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/569
-  ceiling: 42
-- check: architecture.file_budget
-  path: frontend/src/pages/globalSettings/instanceSettingsPayload.ts
-  reason: >-
-    Issue #569 adds the result-validate pool knob to the instance-settings
-    form: one toFormValues line plus one buildPayload block, the same shape
-    as its #554 result_unpack sibling (the prettier 80-column wrap forces
-    the block over three lines). The form value/payload mapping IS this
-    table; splitting two entries out would fork the mapping from the form
-    it serves. Remove when the instance-settings form gets its planned
+    max) in the same table shape. Issue #591 adds the result-commit batching
+    kill-switch toggle to the same capacity group (the toggle entry body
+    lives in instanceSettingsFieldTypes.ts since #612's re-baseline left
+    every group table at its wall — only the reference registers here). The
+    capacity-knob group IS the form surface for the executor-runtime pool
+    sizes; splitting a one-entry overflow into a sister module would fork
+    the group. Remove when the instance-settings form gets its planned
     structural split or a knob retirement frees headroom.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/569
-  ceiling: 127
+  ceiling: 42
 - check: architecture.file_budget
   path: frontend/src/pages/globalSettings/instanceSettingsFields.ts
   reason: >-
     Issue #521 adds the result-commit gate knob to the Worker-limits field
     group: one field entry (path, label, integer, allowZero) in the same
-    table shape as its agent_workers siblings. The list IS the form surface.
+    table shape. The list IS the form surface.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 122
+- check: architecture.file_budget
+  path: server/app/agent_broker/broker.py
+  reason: >-
+    Issue #591 threads the optional result_batcher seam through mark_done
+    (submit branch + the _mark_done_direct rename) plus the constructor
+    parameter — the batched arm itself lives in sister module
+    mark_done_batch.py, but the submit hop must sit on the method every
+    caller already reaches (the batcher and the direct path share one entry
+    point). Re-sized down from 268 under #612's docstring-free metric
+    (docstring rows no longer count). Ceiling at actual + 10 per the
+    dated-exemption convention (#521 leases.py precedent). Remove when the
+    broker gets its planned structural split or the group-commit queue
+    retires.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
+  ceiling: 234
+- check: architecture.file_budget
+  path: server/app/bootstrap/agent_plane.py
+  reason: >-
+    Issue #591 constructs the ResultCommitBatcher before the broker and the
+    lease repository (both receive it) and exposes it on the AgentPlane
+    dataclass for the lifespan start/stop — the plane is the composition
+    root the wiring must read at. The codex review round (C1) added the
+    result_batching gate parameter so a start_worker=False app builds no
+    batcher at all. Re-sized down from 101 under #612's docstring-free
+    metric. Ceiling at actual + 5 per the dated-exemption convention.
+    Remove when the plane assembly gets its planned restructure.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
+  ceiling: 93
 - check: architecture.file_budget
   path: server/app/agent_control/completion.py
   reason: >-
@@ -767,7 +787,9 @@ exemptions:
     Issue #509/#554/#561 folds three capacity knob blocks (agent_enqueue,
     result_unpack, agent_claim) into the instance settings document: three
     small nested contract models plus three fields on
-    InstanceSettingsDocument. The nested
+    InstanceSettingsDocument; issue #591 adds the result_commit_batching
+    kill-switch bool to the agent_workers block (one line, the same
+    nested-block shape). The nested
     models must sit beside their siblings (InstanceWorkflowsSettings /
     InstanceAgentWorkersSettings) — the document IS the admin API surface;
     splitting two-field blocks into a sister module would fork the contract

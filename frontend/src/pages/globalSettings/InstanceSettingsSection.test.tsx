@@ -33,6 +33,7 @@ const settings: InstanceSettingsResponse = {
     max_archive_bytes: 104857600,
     min_protocol_version: 2,
     max_concurrent_result_commits: 16,
+    result_commit_batching: true,
   },
   agent_enqueue: { workers: 48, max_pending: 1024 },
   result_unpack: { workers: 0 },

@@ -403,3 +403,64 @@ def test_active_counts_reflects_released_leases(
     # Workspaces without active leases simply do not appear (P-0.5: the
     # allocation table that used to pre-seed zero rows is gone).
     assert counts_after.get(workspace_id, 0) == 0
+
+
+def test_try_claim_many_sorts_writes_by_counter_key(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    """#609 P1-2: try_claim_many runs its claims in (workspace_id, run_id,
+    job_id) order — the shared counter-lock sequence #591's finish batch
+    writes in. job_id alone does not pin it: two jobs sorted X→Y by job_id
+    can live in workspaces ordered Y→X, and two multi-item transactions
+    visiting shared counter rows in opposite orders close a 40P01 ring the
+    retry budget cannot always absorb. Verdicts stay positional in caller
+    order."""
+    import server.app.executors._lease_write_paths as _write_paths
+
+    # Two workspaces with explicit ids (ws-a < ws-b), two jobs in ws-a with
+    # inverted run_id vs arrival order, one in ws-b. Caller order:
+    # [ws-a/run-b, ws-b, ws-a/run-a]; write order must be
+    # [ws-a/run-a, ws-a/run-b, ws-b] — both inversions (workspace and run)
+    # visible in one batch.
+    ws_a = str(
+        queries.create_workspace(
+            name="claim-ws-a", default_workflow_key="a-ws", workspace_id="a-ws"
+        )["id"]
+    )
+    ws_b = str(
+        queries.create_workspace(
+            name="claim-ws-b", default_workflow_key="b-ws", workspace_id="b-ws"
+        )["id"]
+    )
+    job_a1 = _create_job_in_workspace(queries, ws_a)
+    job_a2 = _create_job_in_workspace(queries, ws_a)
+    job_b1 = _create_job_in_workspace(queries, ws_b)
+    with queries.connect() as conn:
+        conn.execute("update jobs set run_id='run-b' where id=%s", (job_a1,))
+        conn.execute("update jobs set run_id='run-a' where id=%s", (job_a2,))
+        conn.execute("update jobs set run_id='run-a' where id=%s", (job_b1,))
+
+    requests = [
+        _claim_request(ws_a, job_a1, global_capacity=99, local_node_limit=None),
+        _claim_request(ws_b, job_b1, global_capacity=99, local_node_limit=None),
+        _claim_request(ws_a, job_a2, global_capacity=99, local_node_limit=None),
+    ]
+    order: list[str] = []
+    real_claim_lease = _write_paths.claim_lease
+
+    def _recording_claim_lease(conn, request, data_dir=None):  # noqa: ANN001
+        order.append(request.job_id)
+        return real_claim_lease(conn, request, data_dir)
+
+    _write_paths.claim_lease = _recording_claim_lease
+    try:
+        results = repo_a.try_claim_many(requests)
+    finally:
+        _write_paths.claim_lease = real_claim_lease
+
+    assert all(r is not None for r in results), "capacity 99 must admit all three"
+    # Verdicts are positional: caller order preserved regardless of write order.
+    assert [r.job_id for r in results if r is not None] == [job_a1, job_b1, job_a2]
+    # Both inversions corrected: run-a before run-b inside ws-a, and all of
+    # ws-a's claims before ws-b's despite ws-b arriving in the middle.
+    assert order == [job_a2, job_a1, job_b1], "claims must run in (ws, run, job) order"

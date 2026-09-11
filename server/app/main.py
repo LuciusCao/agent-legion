@@ -118,6 +118,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         job_event_manager,
         job_event_buffer,
         object_store=job_artifact_objects,
+        # #591 codex C1: batch only when the lifespan will actually start
+        # the writer (start_worker); a start_worker=False app would park
+        # every submit on an undrained future.
+        result_batching=start_worker,
     )
     ops_metrics = OpsMetricsService(job_db, settings.config)
     # Studio chat (phase 3 chunk 4): ACP conversation sessions, one agent
@@ -188,6 +192,12 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 slow_sweeps = start_sweeper_owned_threads(
                     artifact_store, job_artifact_objects, job_db, settings, object_storage
                 )
+            # #591: start the result-commit group-commit writer. Gated on
+            # start_worker (test/export apps take the direct serial paths —
+            # the batcher object itself is inert until started); the plane
+            # leaves it un-constructed entirely when the knob disables it.
+            if agent_plane.result_commit_batcher is not None:
+                agent_plane.result_commit_batcher.start()
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
@@ -221,6 +231,12 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             if workflow_worker_thread is not None:
                 unregister_wakeup(workflow_worker_thread.wake)
                 workflow_worker_thread.stop()
+            # #591: stop the group-commit writer BEFORE the pools close —
+            # stop() drains parked writes to completion, and those writes
+            # need a live pool (the same ordering discipline the studio
+            # chat teardown two blocks up keeps).
+            if agent_plane.result_commit_batcher is not None:
+                agent_plane.result_commit_batcher.stop()
             close_database_pools()
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)

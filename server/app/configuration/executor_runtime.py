@@ -69,6 +69,11 @@ class AgentWorkersRuntimeConfig(BaseModel):
     # threadpool tokens). 0 disables the gate (kill-switch for A/B).
     # Instance-settings managed, takes effect on restart.
     max_concurrent_result_commits: int = Field(default=16, ge=0)
+    # #591 group-commit batching for the terminal writes (lease finish +
+    # mark_done): a drain-only writer thread batches the completion wave's
+    # transactions. False = kill-switch (direct serial path, 0.7.9
+    # behavior); restart-effective, instance-settings managed.
+    result_commit_batching: bool = Field(default=True)
 
 
 class ExecutorRuntimeConfig(BaseModel):
