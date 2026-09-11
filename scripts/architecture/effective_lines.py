@@ -8,7 +8,8 @@ budget must not reward deleting it (the #293 rationale, closed to its
 logical end; every other governed language already counts its doc
 comments free). Lines that mix docstring with code still count, the same
 discipline as trailing comments. Absolute size limits (production/test
-max_lines) keep using raw line counts.
+max_lines) keep using raw line counts. A file that fails either parser
+(tokenize or ast) falls back to raw counting — the stricter metric.
 """
 
 from __future__ import annotations
@@ -55,14 +56,18 @@ def _python_effective_lines(text: str) -> int:
             row, col = tok.start
             if row - 1 < len(lines) and not lines[row - 1][:col].strip():
                 free_rows.add(row)
-        free_rows |= _python_docstring_rows(text, lines)
+        free_rows |= _python_docstring_rows(ast.parse(text), lines)
     except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
         # Unparseable file: fall back to raw counting (the stricter metric).
+        # Both parsers run inside this try: a file that tokenizes yet fails
+        # ast.parse (a plain grammar violation like ``None = 1``) must hit
+        # the raw fallback too — counting it comment-free would undercut
+        # the very "stricter metric" the fallback promises.
         return len(lines)
     return sum(bool(line.strip()) and row not in free_rows for row, line in enumerate(lines, 1))
 
 
-def _python_docstring_rows(text: str, lines: list[str]) -> set[int]:
+def _python_docstring_rows(tree: ast.Module, lines: list[str]) -> set[int]:
     """Rows entirely occupied by a docstring (free per #610).
 
     A docstring is the first statement of a module/class/function and must
@@ -71,13 +76,10 @@ def _python_docstring_rows(text: str, lines: list[str]) -> set[int]:
     (values, not documentation) and stay counted. Only rows the docstring
     occupies alone are freed; a row that also carries code (a one-line
     ``def`` whose body is the docstring) keeps counting, mirroring the
-    trailing-comment rule.
+    trailing-comment rule. The tree comes pre-parsed from
+    ``_python_effective_lines``: an ast failure there triggers the raw
+    fallback, so a parse error can never reach this function.
     """
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
-        # The caller's tokenize pass already fell back to raw counting.
-        return set()
     rows: set[int] = set()
     for node in ast.walk(tree):
         if not (isinstance(node, _DOCSTRING_OWNERS) and node.body):
@@ -91,12 +93,16 @@ def _python_docstring_rows(text: str, lines: list[str]) -> set[int]:
         for row in range(start, min(end, len(lines)) + 1):
             # A row keeps counting when code shares it with the docstring:
             # code before the opening quotes (first row) or after the
-            # closing quotes (last row, a trailing comment excepted).
-            if row == start and lines[row - 1][: first.col_offset].strip():
+            # closing quotes (last row, a trailing comment excepted). ast
+            # col offsets are UTF-8 BYTE offsets into the source, so the
+            # boundary checks slice the line's bytes, never the str (a
+            # non-ASCII docstring would otherwise shift every cut and let
+            # a code-carrying row pass as free — codex review on #612).
+            if row == start and lines[row - 1].encode()[: first.col_offset].strip():
                 continue
             if row == end:
-                suffix = lines[row - 1][first.end_col_offset :]
-                if suffix.strip() and not suffix.lstrip().startswith("#"):
+                suffix = lines[row - 1].encode()[first.end_col_offset :]
+                if suffix.strip() and not suffix.lstrip().startswith(b"#"):
                     continue
             rows.add(row)
     return rows

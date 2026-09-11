@@ -35,6 +35,26 @@ def test_python_docstring_rows_are_free(tmp_path: Path) -> None:
     assert count_effective_lines(path) == 1
 
 
+def test_python_nonascii_docstring_boundary_is_byte_offset_safe(tmp_path: Path) -> None:
+    # codex review on #612: ast col offsets are UTF-8 byte offsets — slicing
+    # the line str with them would shift every boundary on a non-ASCII
+    # docstring and let a code-carrying row pass as free.
+    path = _write(
+        tmp_path / "example.py",
+        "def f():\n"
+        '    """中文文档，占三列字节。\n'
+        "    继续说明。\n"
+        '    """; x = 1\n'
+        "    return 2\n"
+        "def g():\n"
+        '    """文档"""\n'
+        "    y = 3\n",
+    )
+    # counted: def f, the docstring-closing row (code follows on it),
+    # return 2, def g, y = 3 = 5; both docstrings' own rows stay free.
+    assert count_effective_lines(path) == 5
+
+
 def test_python_function_and_class_docstrings_free_mixed_rows_count(
     tmp_path: Path,
 ) -> None:
@@ -80,6 +100,24 @@ def test_python_hash_inside_string_is_not_a_comment(tmp_path: Path) -> None:
 def test_python_unparseable_falls_back_to_raw_count(tmp_path: Path) -> None:
     path = _write(tmp_path / "broken.py", "def broken(:\n# comment\n\n")
     assert count_effective_lines(path) == 3
+
+
+def test_python_tokenizable_but_not_ast_parseable_falls_back_to_raw_count(
+    tmp_path: Path,
+) -> None:
+    # #612 review: a file can tokenize cleanly yet fail ast.parse — the raw
+    # fallback must fire on EITHER parser failing, or this file would count
+    # comment-free (below raw) and undercut the "stricter metric" the
+    # fallback promises. ``None = 1`` is the version-robust trigger (a plain
+    # grammar violation: every token is valid, the module is not). Note a
+    # module-level ``return`` does NOT trigger it on 3.13+: "return outside
+    # function" is a symtable-pass error and ast.parse (PyCF_ONLY_AST)
+    # skips that pass.
+    path = _write(
+        tmp_path / "none_assign.py",
+        '"""Module docstring."""\n# comment-only row\nNone = 1\n\n',
+    )
+    assert count_effective_lines(path) == 4
 
 
 def test_ts_excludes_line_and_block_comments(tmp_path: Path) -> None:

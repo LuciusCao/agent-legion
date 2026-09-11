@@ -4,7 +4,7 @@ exemptions:
   reason: >-
     Issue #610 adds the docstring-row detection to the Python effective-line
     metric (ast walk over module/class/function first statements plus the
-    own-row boundary check against code sharing the row) — ~8 effective
+    own-row boundary check against code sharing the row) — ~4 effective
     lines past the 88 baseline. The metric module IS the single counting
     authority every budget decision reads; splitting the docstring scanner
     into a sister module would fork the metric from the file that gates it.
