@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from server.app.storage_paths import ensure_dir_once
+
 # Re-exported for the Host-side code bundle packer/consumers; the single
 # copy lives in shared/code_sandbox.py (shared with the Worker runner).
 from shared.code_sandbox import CODE_BUNDLE_LIBS_DIR as CODE_BUNDLE_LIBS_DIR
@@ -52,7 +54,8 @@ def cleanup_bundle_on_error(bundle_path: Path) -> Iterator[None]:
 def build_agent_bundle(
     bundle_path: Path, *, skill_dir: Path | None, manifest: dict[str, Any]
 ) -> None:
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    # #618: the shared bundle dir outlives every dispatch; mkdir once.
+    ensure_dir_once(bundle_path.parent)
     with tarfile.open(bundle_path, "w:gz") as tar:
         if skill_dir is not None:
             tar.add(skill_dir, arcname="skill")

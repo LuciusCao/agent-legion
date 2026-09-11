@@ -34,6 +34,7 @@ from server.app.executors._lease_shards import complete_empty_shard_node
 from server.app.executors.models import ConfigurationFailureRequest
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
+from server.app.storage_paths import job_log_dir
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.shard_dispatch import claim_shard_locally
 from server.app.workflows.definition import WorkflowNode
@@ -64,8 +65,8 @@ def claim_shard_node(
     workspace_id = workspace["id"]
     workflow_key = str(job["workspace_id"])
     node_key = node.key
-    log_path = worker.settings.logs_dir.resolve() / "jobs" / f"{job['id']}-{node_key}.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    # #618: resolved+ensured once per process (schedule.py sibling comment).
+    log_path = job_log_dir(worker.settings.logs_dir) / f"{job['id']}-{node_key}.log"
 
     # Shard nodes join the implicit code pool like any other code node
     # (P-0.5): no binding/allocation lookup remains.

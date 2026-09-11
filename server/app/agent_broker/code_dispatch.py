@@ -44,6 +44,7 @@ from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.run_payload import sdk_batch_row
 from server.app.settings import Settings
+from server.app.storage_paths import ensure_dir_once
 from server.app.workflows.definition import WorkflowNode
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,8 @@ def build_code_bundle(bundle_path: Path, *, code_text: str, workspace_libs_dir: 
     copy in the bundle would create a second, secret-free-but-stale source of
     truth (VAULT-SECRET-001).
     """
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    # #618: the shared bundle dir outlives every dispatch; mkdir once.
+    ensure_dir_once(bundle_path.parent)
     with tarfile.open(bundle_path, "w:gz") as tar:
         tar.add(
             workspace_libs_dir,

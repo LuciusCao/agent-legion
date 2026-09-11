@@ -26,6 +26,12 @@ class _FakeClient:
 
     def __init__(self) -> None:
         self.batches: list[list[tuple[str, str]]] = []
+        self.batch_timeouts: list[float | None] = []
+        # Failure injection keyed on chunk CONTENT (first execution_id), not
+        # on append order — shards fly in parallel threads, so len(batches)-1
+        # is scheduling order and a loaded CI runner could mis-target the
+        # scripted failure (PR #617 review: test determinism).
+        self.failing_shards: set[str] = set()
         self.singles: list[tuple[str, str]] = []
         self.batch_error: Exception | None = None
         self.batch_status: int = 200
@@ -41,9 +47,13 @@ class _FakeClient:
             raise self.ping_error
         return {"worker_id": "w1"}
 
-    def heartbeat_batch(self, executions: list[tuple[str, str]]) -> Any:
+    def heartbeat_batch(
+        self, executions: list[tuple[str, str]], timeout: float | None = None
+    ) -> Any:
         self.batches.append(list(executions))
-        if self.batch_error is not None:
+        self.batch_timeouts.append(timeout)
+        key = executions[0][0] if executions else ""
+        if self.batch_error is not None and (not self.failing_shards or key in self.failing_shards):
             raise self.batch_error
         if self.batch_status in (404, 405):
             return None
@@ -214,42 +224,174 @@ def test_404_degrades_to_single_beats(tmp_path: Path) -> None:
 
 
 def test_tick_shards_oversized_snapshot_and_merges_chunk_verdicts(tmp_path: Path) -> None:
-    """PR #572 P2-4: 257 leases shard into 256+1; a lost verdict from the
-    second chunk still lands in the merged result."""
-    from worker.execution.heartbeat_batch import MAX_BATCH_HEARTBEATS
+    """PR #572 P2-4 + #591 止血：relay 按 RELAY_BEAT_SHARD（64，比 executor 侧
+    256 更紧）并行分片——一次 Host HTTP 停摆只丢一个分片的拍；跨分片 lost
+    判定仍合并进结果。"""
+    from worker.relay_beats import RELAY_BEAT_SHARD
 
     client, logs = _FakeClient(), []
-    leases = [(f"exec-{i}", f"lease-{i}") for i in range(MAX_BATCH_HEARTBEATS + 1)]
-    client.lost = [f"exec-{MAX_BATCH_HEARTBEATS}"]  # the tail chunk's lease
+    leases = [(f"exec-{i}", f"lease-{i}") for i in range(RELAY_BEAT_SHARD + 1)]
+    client.lost = [f"exec-{RELAY_BEAT_SHARD}"]  # the tail chunk's lease
     relay = _relay(tmp_path, client, logs)
     _write_snapshot(tmp_path, leases=leases)
 
     relay.tick()
 
-    assert [len(chunk) for chunk in client.batches] == [MAX_BATCH_HEARTBEATS, 1]
+    assert [len(chunk) for chunk in client.batches] == [RELAY_BEAT_SHARD, 1]
     result = read_beat_result(tmp_path / RESULT_FILENAME)
     assert result is not None
-    assert result["lost"] == [[f"exec-{MAX_BATCH_HEARTBEATS}", f"lease-{MAX_BATCH_HEARTBEATS}"]]
+    assert result["lost"] == [[f"exec-{RELAY_BEAT_SHARD}", f"lease-{RELAY_BEAT_SHARD}"]]
+    # #591: every batch beat rides the tightened 10s deadline, not the 30s
+    # client default — a stalled Host fails fast into the next tick.
+    assert client.batch_timeouts == [10.0, 10.0]
 
 
-def test_first_chunk_transient_aborts_tick_but_keeps_liveness(tmp_path: Path) -> None:
-    """A failing first chunk skips the tail chunk (next tick retries from the
-    top), and the liveness result write still lands (PR #572 P2-1)."""
-    from worker.execution.heartbeat_batch import MAX_BATCH_HEARTBEATS
+def test_failing_shard_does_not_sink_later_shards(tmp_path: Path) -> None:
+    """#591 codex: a failed shard loses only its own leases' tick — later
+    shards still fly (no head-of-line starvation), the failed shard's leases
+    are unknown-not-lost, and the round still reports what survived."""
+    from worker.relay_beats import RELAY_BEAT_SHARD
 
     client, logs = _FakeClient(), []
     client.batch_error = ConnectionError("boom")
+    client.failing_shards = {"exec-0"}  # the FIRST shard (content-keyed)
+    client.lost = [f"exec-{RELAY_BEAT_SHARD}"]  # the SECOND shard's lease
     relay = _relay(tmp_path, client, logs)
     _write_snapshot(
         tmp_path,
-        leases=[(f"exec-{i}", f"lease-{i}") for i in range(MAX_BATCH_HEARTBEATS + 1)],
+        leases=[(f"exec-{i}", f"lease-{i}") for i in range(2 * RELAY_BEAT_SHARD)],
     )
 
     relay.tick()
 
-    assert len(client.batches) == 1, "the tail chunk must not follow a failed first chunk"
+    # Both shards flew despite the first one failing.
+    assert [len(chunk) for chunk in client.batches] == [RELAY_BEAT_SHARD, RELAY_BEAT_SHARD]
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None
+    # The failed shard's leases (exec-0..63) are unknown, NOT lost; the
+    # surviving shard's lost verdict landed.
+    assert result["lost"] == [[f"exec-{RELAY_BEAT_SHARD}", f"lease-{RELAY_BEAT_SHARD}"]]
+
+
+def test_all_shards_failing_is_transient(tmp_path: Path) -> None:
+    """Every shard failing reports (None, None) — the transient signal: the
+    liveness result write still lands, verdicts stay empty, next tick
+    retries everything (PR #572 P2-1 semantics under sharding)."""
+    from worker.relay_beats import RELAY_BEAT_SHARD
+
+    client, logs = _FakeClient(), []
+    client.batch_error = ConnectionError("boom")
+    # Content-keyed failure for every shard's first lease (exec-0 and
+    # exec-64 head the two chunks of RELAY_BEAT_SHARD + 1 leases).
+    client.failing_shards = {"exec-0", f"exec-{RELAY_BEAT_SHARD}"}
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(
+        tmp_path,
+        leases=[(f"exec-{i}", f"lease-{i}") for i in range(RELAY_BEAT_SHARD + 1)],
+    )
+
+    relay.tick()
+
+    assert len(client.batches) == 2, "every shard must still have flown"
     result = read_beat_result(tmp_path / RESULT_FILENAME)
     assert result is not None and result["seq"] == 1 and result["lost"] == []
+
+
+def test_overstayed_shard_cannot_mutate_returned_verdicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PR #617 review P1-1: a shard daemon that overstays its join can
+    still append to the merge lists — beat_sharded must return copies, so
+    the late append never reaches the lists the caller already holds
+    (write_beat_result iterates them; a racing append raised "list changed
+    size during iteration" and stalled the seq advance)."""
+    from worker import relay_shards
+
+    # One lease per shard (the "slow" lease must head its OWN chunk to park
+    # its own thread) and a join budget of milliseconds so the straggler
+    # measurably overstays it.
+    monkeypatch.setattr(relay_shards, "RELAY_BEAT_SHARD", 1)
+    monkeypatch.setattr(relay_shards, "BATCH_BEAT_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(relay_shards, "_JOIN_MARGIN_SECONDS", 0.1)
+
+    release = threading.Event()
+
+    class _OverstayingClient:
+        """Fast shard answers at once; the slow shard parks until released,
+        landing its verdict append only after beat_sharded has returned."""
+
+        def heartbeat_batch(
+            self, executions: list[tuple[str, str]], timeout: float | None = None
+        ) -> tuple[int, dict[str, list[str]]]:
+            if executions[0][0] == "exec-slow":
+                release.wait(timeout=5)
+                return 200, {"lost": ["exec-slow"], "cancelled_execution_ids": ["exec-x"]}
+            return 200, {"lost": ["exec-fast"], "cancelled_execution_ids": ["exec-fast-c"]}
+
+    client = _OverstayingClient()
+    baseline = set(threading.enumerate())
+    outcome = relay_shards.beat_sharded(
+        client, [("exec-fast", "lease-fast"), ("exec-slow", "lease-slow")], lambda message: None
+    )
+
+    assert outcome.verdicts is not None
+    lost, cancelled = outcome.verdicts
+    assert lost == [("exec-fast", "lease-fast")]
+    assert cancelled == ["exec-fast-c"]
+
+    # Let the overstayed shard land its append AFTER beat_sharded returned;
+    # joining the straggler means its append has fully executed by the time
+    # the assertions below run — no sleep-based hope.
+    release.set()
+    stragglers = [thread for thread in threading.enumerate() if thread not in baseline]
+    for thread in stragglers:
+        thread.join(timeout=5)
+    assert lost == [("exec-fast", "lease-fast")], "late shard append leaked into returned verdicts"
+    assert cancelled == ["exec-fast-c"], "late shard append leaked into returned verdicts"
+
+
+def test_join_deadline_is_shared_across_shards(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR #617 review P1-2: the fan-out join spends ONE beat-timeout budget
+    in total, not one per shard — a slow-drip Host that keeps every shard
+    request alive past its own join must not serialise N × (timeout +
+    margin) of tick wall time (the smaller twin of the #591 expiry stall)."""
+    from worker import relay_shards
+
+    monkeypatch.setattr(relay_shards, "RELAY_BEAT_SHARD", 1)  # every lease = its own shard
+    monkeypatch.setattr(relay_shards, "BATCH_BEAT_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(relay_shards, "_JOIN_MARGIN_SECONDS", 0.1)
+
+    release = threading.Event()
+
+    class _SlowDripClient:
+        """Every shard parks past its own join budget — a slow-drip Host
+        does exactly this (requests' timeout is per socket-read-op, so the
+        wire never goes quiet long enough to trip it)."""
+
+        def heartbeat_batch(
+            self, executions: list[tuple[str, str]], timeout: float | None = None
+        ) -> tuple[int, dict[str, list[str]]]:
+            release.wait(timeout=5)
+            return 200, {"lost": [], "cancelled_execution_ids": []}
+
+    budget = 0.2 + 0.1  # BATCH_BEAT_TIMEOUT_SECONDS + _JOIN_MARGIN_SECONDS
+    shards = 4  # a per-thread join would serialise 4 × budget = 1.2s
+    client = _SlowDripClient()
+
+    started = time.monotonic()
+    outcome = relay_shards.beat_sharded(
+        client, [(f"exec-{i}", f"lease-{i}") for i in range(shards)], lambda message: None
+    )
+    elapsed = time.monotonic() - started
+    release.set()  # let the abandoned daemon shards drain
+
+    # 2× slack: a shared deadline lands at ~budget, per-thread stacking at
+    # shards × budget — the bound sits squarely between the two regimes.
+    assert elapsed < 2 * budget, (
+        f"fan-out join spent {elapsed:.2f}s — per-thread budget stacking is back"
+    )
+    # The round still completed: nothing learned, verdicts intact.
+    assert outcome.verdicts is not None and outcome.verdicts == ([], [])
 
 
 def test_stale_recovery_rearms_the_stall_log(tmp_path: Path) -> None:
