@@ -49,6 +49,24 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   cancelled/409 不报 events 段）；批臂返回长度不齐时 fail-fast 落入
   现有整片失败收容（strict zip），不再让尾部 future 悬挂。
 
+### Changed
+- 预算计量的 docstring 口径（issue #610，#209 棘轮的计量层治理）：
+  Python 有效行计数（`scripts/architecture/effective_lines.py`）此前只
+  排除 `#` 注释与空行，docstring 作为字符串字面量逐行计费——全仓唯一
+  要为预算付费的文档形态（TS/Rust/CSS 的文档注释在 C-like 计量里全部
+  免费），预算压力因此系统性落在 docstring 高尔夫上（942 个 Python/JS/
+  SQL 治理文件中 273 个余量 ≤3 行时，agent 的理性最优解是削文档而非削
+  复杂度）。现在模块/类/函数首语句的字符串常量（与 `ast.get_docstring`
+  同一群体；f-string、孤儿字符串表达式、字符串赋值照常计费）按文档免
+  费——整行被 docstring 独占才免费，与代码混行照常计费（同尾注释纪
+  律）；tokenize 或 ast 任一解析失败的文件回落 raw 口径（更严纪律）。
+  配套一次性 re-baseline：`architecture-budgets.json` 682 个条目 ceiling
+  收紧（合计 -8,901 行，docstring 退出分母）；豁免清淤：`file_budget`
+  豁免 124 → 67 条（58 条删除、56 条 ceiling 收紧、新增 1 条——
+  `effective_lines.py` 自身，ceiling 96；`route_response_model` 豁免
+  4 → 4 条不变）。治理后贴墙文件（余量 = max(baseline, 豁免 ceiling) −
+  实际有效行，≤3 行）在同口径 942 文件群体上 29.0% → 7.6%（273 → 72）。
+  #209 的单调语义、绝对上限（raw 口径）、test 限制均不变。
 
 ### Fixed
 - 心跳 relay 批量拍的停摆放大面（issue #591，0.7.10 短期止血）：完成波

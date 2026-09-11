@@ -41,8 +41,11 @@ def _write_source_files(root: Path, files_dict: dict[str, int]) -> None:
     for rel_path, line_count in files_dict.items():
         file_path = root / rel_path
         file_path.parent.mkdir(parents=True, exist_ok=True)
+        # Valid Python (an expression statement like ``line 0`` fails
+        # ast.parse, and the metric's either-parser raw fallback would
+        # count comment rows — the #610 metric needs parseable fixtures).
         file_path.write_text(
-            "\n".join(f"line {idx}" for idx in range(line_count)),
+            "\n".join(f"x_{idx} = {idx}" for idx in range(line_count)),
             encoding="utf-8",
         )
 
