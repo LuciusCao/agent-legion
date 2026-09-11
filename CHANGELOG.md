@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-09-11
+
 ### Fixed
 - Studio 会话长回复尾部静默截断（issue #563）：流式 text 帧是原地全量
   快照（seq 不变），断连/被驱逐丢帧后 after_seq 增量补齐永远取不回该行；
