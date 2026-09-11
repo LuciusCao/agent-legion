@@ -56,25 +56,27 @@ class HeartbeatOperations:
         return status, cancelled
 
     def heartbeat_batch(
-        self, executions: list[tuple[str, str]]
+        self,
+        executions: list[tuple[str, str]],
+        timeout: float | None = None,
     ) -> tuple[int, dict[str, list[str]]] | None:
         """One batch beat for every live lease (protocol v5, #352).
 
         Returns (200, body) on success, ``None`` when the Host predates the
         batch endpoint (404/405) — the caller falls back to per-execution
         beats. Any other status raises (transport errors already raise inside
-        ``request``), matching the single-beat error family."""
-        payload = {
-            "executions": [
-                {"execution_id": execution_id, "lease_id": lease_id}
-                for execution_id, lease_id in executions
-            ]
-        }
+        ``request``), matching the single-beat error family. ``timeout``
+        overrides the client default for callers that beat against the lease
+        TTL deadline (the relay passes a tightened 10s so a stalled Host
+        fails the beat fast into the next tick instead of eating the renewal
+        budget, issue #591)."""
+        payload = {"executions": [{"execution_id": e, "lease_id": m} for e, m in executions]}
         status, body = self.request(  # type: ignore[attr-defined]
             "POST",
             _BULK_PATH,
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
+            timeout=timeout,
         )
         if status in (404, 405):
             # PR #497 review：降级转场打一条 INFO——滚动升级窗口的每拍上限
@@ -82,11 +84,9 @@ class HeartbeatOperations:
             # f-string 内插而非 %s 参数表：ruff format 的 magic-trailing-comma
             # 会把多参数调用 explode 成每参数一行，预算装不下（exemption 83）。
             n = len(executions)
-            logger.info(
-                f"batch heartbeat endpoint unavailable (HTTP {status}); degraded to"
-                f" single beats for {n} leases"
-                f" (per-tick ceiling {n} × {SINGLE_BEAT_TIMEOUT_SECONDS:.0f}s)"
-            )
+            logger.info(  # fmt: off
+                f"batch heartbeat endpoint unavailable (HTTP {status}); degraded to single beats for {n} leases (per-tick ceiling {n} × {SINGLE_BEAT_TIMEOUT_SECONDS:.0f}s)"
+            )  # fmt: on
             return None
         if status != 200:
             raise RuntimeError(f"batch heartbeat failed: HTTP {status}: {body[:300]!r}")

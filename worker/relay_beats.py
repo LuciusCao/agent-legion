@@ -18,9 +18,15 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from worker.execution.heartbeat_batch import MAX_BATCH_HEARTBEATS
 from worker.host.client import Client
 from worker.host.heartbeat_ops import SINGLE_BEAT_TIMEOUT_SECONDS
+from worker.relay_shards import BATCH_BEAT_TIMEOUT_SECONDS, RELAY_BEAT_SHARD, beat_sharded
+
+__all__ = [
+    "BATCH_BEAT_TIMEOUT_SECONDS",
+    "RELAY_BEAT_SHARD",
+    "RelayBeater",
+]
 
 
 class RelayBeater:
@@ -74,32 +80,20 @@ class RelayBeater:
         return (None, None) if outcome is None else outcome
 
     def _beat_batch(self, leases: list[tuple[str, str]]) -> tuple[list, list] | None:
-        lost: list[tuple[str, str]] = []
-        cancelled: list[str] = []
-        for start in range(0, len(leases), MAX_BATCH_HEARTBEATS):
-            chunk = leases[start : start + MAX_BATCH_HEARTBEATS]
-            try:
-                outcome = self._client.heartbeat_batch(chunk)
-            except Exception as exc:
-                # #204 broad-except audit: relay 的逐拍存活语义（与 executor
-                # 内 batch loop 同族）：传输错误/非 200 的 RuntimeError/畸形
-                # 应答都只丢这一拍，下一拍全量重来，Host 侧逐项谓词幂等；
-                # 真正的死线是租约 TTL 与快照停滞停拍。401（token 已被重新
-                # 注册轮换）额外丢弃缓存 client，下一份快照带新 token 重建。
-                # 日志保全：每次失败都 log。
-                self._log(f"心跳 relay 批量拍失败（{len(chunk)} 租约）：{exc}")
-                if "HTTP 401" in str(exc):
-                    self._client = None
-                return None
-            if outcome is None:
-                self.degraded = True
-                self._log("Host 无批量心跳端点，relay 降级为逐租约心跳")
-                return self._beat_singles(leases)
-            _status, body = outcome
-            lost_ids = set(body.get("lost", []))
-            lost.extend(pair for pair in chunk if pair[0] in lost_ids)
-            cancelled.extend(body.get("cancelled_execution_ids", []))
-        return lost, cancelled
+        """Sharded parallel batch beat; the concurrency body lives in
+        ``relay_shards`` (file-budget split, same seam as the #566 relay
+        modules). ``(None, None)`` at the ``beat`` layer = transient."""
+        outcome = beat_sharded(self._client, leases, self._log)
+        if outcome.degraded:
+            self.degraded = True
+            self._log("Host 无批量心跳端点，relay 降级为逐租约心跳")
+            return self._beat_singles(leases)
+        if outcome.unauthorized:
+            # 401 (token rotated under a re-register): drop the cached client,
+            # the next snapshot rebuilds with the fresh token.
+            self._client = None
+            return None
+        return outcome.verdicts
 
     def _beat_singles(self, leases: list[tuple[str, str]]) -> tuple[list, list]:
         """Degraded mode: thread-per-lease beats (a slow Host parks only its own lease)."""
