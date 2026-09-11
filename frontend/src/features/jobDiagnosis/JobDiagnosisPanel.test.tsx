@@ -230,4 +230,34 @@ describe('JobDiagnosisPanel', () => {
     })
     expect(screen.queryByRole('group', { name: /建议动作/ })).toBeNull()
   })
+
+  it('renders the resume bar when the session lands in error (#558)', async () => {
+    // #558：闲置后工具通道死亡的会话升级为 error——排查面板必须给
+    // 「继续对话」入口（此前只有禁用文案，会话只能废弃）。
+    mockApi.createStudioChatSession.mockResolvedValue(
+      sessionRecord({ status: 'error' })
+    )
+    mockApi.sendStudioChatMessage.mockResolvedValue({
+      id: 'u1',
+      session_id: 's9',
+      kind: 'text',
+      role: 'user',
+      content: { text: 'hi' },
+      seq: 1,
+      created_at: '2026-01-01T00:00:00Z',
+    })
+    renderPanel()
+    await waitFor(() =>
+      expect(mockApi.createStudioChatSession).toHaveBeenCalled()
+    )
+    await screen.findByRole('button', { name: '继续对话' })
+    expect(screen.getByText(/会话已中断，历史记录已保留/)).toBeInTheDocument()
+  })
+
+  it('does not render the resume bar while the session is live', async () => {
+    await renderReadyPanel()
+    expect(
+      screen.queryByRole('button', { name: '继续对话' })
+    ).not.toBeInTheDocument()
+  })
 })

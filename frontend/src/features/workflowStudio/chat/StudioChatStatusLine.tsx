@@ -13,12 +13,11 @@ export function StatusLine({ message }: { message: ChatMessage }) {
     )
   }
   if (event === 'run_token_invalidated') {
-    // run token 过期/吊销：工具通道死亡但聊天主链路仍活着（#411），必须
-    // 显式警示而不是静默失败；文案以后端 detail 为唯一来源（「继续对话」
-    // 按钮仅在会话关闭后出现，故恢复指引包含先关闭）。
+    // run token 过期/吊销：工具通道死亡但聊天主链路仍活着（#411/#558——
+    // 会话已被升级为 error，ResumeBar 的「继续对话」直接可达）。
     return (
       <div className={styles.statusWarning} role="alert">
-        ⚠ {detail || '工具通道已失效，关闭会话后点「继续对话」恢复'}
+        ⚠ {detail || '工具通道已失效，点「继续对话」重建即可恢复'}
       </div>
     )
   }

@@ -158,7 +158,7 @@ class FakeEventBus:
         self.resyncs = []
         self.dashboard_stats = []
 
-    def publish(self, channel: str, payload: str) -> None:
+    def publish(self, channel: str, payload: str, *, replaceable: bool = False) -> None:
         data = json.loads(payload)
         if data["type"] == "job_patch_batch":
             self.patch_batches.append(

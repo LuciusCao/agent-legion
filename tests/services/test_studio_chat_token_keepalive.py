@@ -35,7 +35,7 @@ class RecordingBus:
     def attach_loop(self, loop) -> None:
         del loop
 
-    def publish(self, channel: str, payload: str) -> None:
+    def publish(self, channel: str, payload: str, *, replaceable: bool = False) -> None:
         self.events.append((channel, json.loads(payload)))
 
     def subscribe(self, channel: str):
@@ -49,6 +49,9 @@ class _StubHandle:
     """Minimal ACP handle stand-in: tests drive the service callbacks
     directly (no subprocess) to control interleaving precisely."""
 
+    def __init__(self) -> None:
+        self.request_stop_calls = 0
+
     def send_prompt(self, text: str) -> bool:
         del text
         return True
@@ -56,6 +59,9 @@ class _StubHandle:
     def cancel(self) -> None: ...
 
     def close(self) -> None: ...
+
+    def request_stop(self) -> None:
+        self.request_stop_calls += 1
 
 
 def _tool_call(update_id: str) -> dict:
@@ -290,6 +296,78 @@ def test_dead_token_appends_single_invalidation_notice(job_db, settings) -> None
         service.shutdown()
 
 
+def test_failed_escalation_retries_without_duplicate_notice(job_db, settings, monkeypatch) -> None:
+    """#558 review P1: the escalation runs BEFORE the notice append. A
+    transient escalation failure must (a) not raise into on_update, (b) leave
+    no notice behind (no duplicates on retry), and (c) retry the whole path
+    on the next tool_call — then append exactly once."""
+    user_id = str(job_db.create_user("escal-fail-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    scoped_tokens.revoke_scoped_token(job_db, token)
+    service, _bus, session_id, runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        real_escalate = service.db.update_studio_chat_session_if
+        calls = {"n": 0}
+
+        def flaky_escalate(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("transient db failure")
+            return real_escalate(*args, **kwargs)
+
+        monkeypatch.setattr(service.db, "update_studio_chat_session_if", flaky_escalate)
+        service._on_update(session_id, _tool_call("tc-a"))
+        assert not runtime.token_keepalive_done
+        assert not _invalidation_messages(service, session_id)  # no duplicate on retry
+        # The ACP process stop is only requested once the whole path succeeds.
+        assert runtime.handle.request_stop_calls == 0
+        monkeypatch.setattr(service.db, "update_studio_chat_session_if", real_escalate)
+        service._on_update(session_id, _tool_call("tc-b"))
+        assert runtime.token_keepalive_done
+        assert len(_invalidation_messages(service, session_id)) == 1
+        assert job_db.get_studio_chat_session(session_id)["status"] == "error"
+        # Exactly one stop request for the dead session (dedup via the flag).
+        assert runtime.handle.request_stop_calls == 1
+        service._on_update(session_id, _tool_call("tc-c"))
+        assert runtime.handle.request_stop_calls == 1
+    finally:
+        service.shutdown()
+
+
+def test_live_token_session_is_not_stopped(job_db, settings) -> None:
+    """#558 review P1: a live token keeps the ACP process running — the stop
+    request rides ONLY the dead-token escalation path."""
+    user_id = str(job_db.create_user("nostop-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    service, _bus, session_id, runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        service._on_update(session_id, _tool_call("tc-live"))
+        assert runtime.handle.request_stop_calls == 0
+        assert not runtime.token_keepalive_done
+    finally:
+        service.shutdown()
+
+
+def test_on_error_fatal_does_not_stamp_resume_claim(job_db, settings) -> None:
+    """#558 review P2: a stale thread's fatal kill echo (resume's winner-side
+    teardown killing the OLD runtime while the new spawn is 'starting') must
+    not fail the resume's first hop — same final_statuses guard as on_exit."""
+    service, _bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, "x")
+    try:
+        job_db.update_studio_chat_session(session_id, status="starting")
+        service._on_error(session_id, "transport closed", fatal=True)
+        # The starting row belongs to the resume claim; the error detail is
+        # still on the timeline for diagnosability.
+        assert job_db.get_studio_chat_session(session_id)["status"] == "starting"
+        service._on_error(session_id, "agent died", fatal=True)
+        job_db.update_studio_chat_session(session_id, status="running")
+        service._on_error(session_id, "agent died", fatal=True)
+        # A live running row still takes the fatal error stamp.
+        assert job_db.get_studio_chat_session(session_id)["status"] == "error"
+    finally:
+        service.shutdown()
+
+
 def test_expired_token_is_not_revived_by_keepalive(job_db, settings) -> None:
     """Leaked-token guarantee preserved: an already-expired token reports
     dead (notice appended) and its expiry row is untouched — no revival."""
@@ -357,6 +435,66 @@ def test_keepalive_skipped_without_runtime(job_db, settings) -> None:
         service._on_update(session_id, _tool_call("tc-gone"))
         assert not _invalidation_messages(service, session_id)
         del workspace_id
+    finally:
+        service.shutdown()
+
+
+def test_dead_token_moves_session_to_error_for_resume(job_db, settings) -> None:
+    """#558: a dead tool channel must make the session resume-reachable —
+    the notice alone left the row at 'running'/'idle', so the UI kept a
+    live-looking session whose tool calls all fail with no recovery entry.
+    Escalation is guarded: closed/error/starting rows keep their state (a
+    concurrent close or resume claim owns the final status)."""
+    user_id = str(job_db.create_user("escalate-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    scoped_tokens.revoke_scoped_token(job_db, token)
+    service, bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        service._on_update(session_id, _tool_call("tc-esc"))
+        session = job_db.get_studio_chat_session(session_id)
+        assert session["status"] == "error"
+        assert "#558" in str(session["error_detail"])
+        # The status transition also rides the SSE session snapshot so the
+        # UI flips to the resume-reachable state without a manual refresh.
+        assert any(
+            payload.get("type") == "session" and payload["session"].get("status") == "error"
+            for _channel, payload in bus.events
+        )
+    finally:
+        service.shutdown()
+
+
+def test_escalation_respects_final_status_guards(job_db, settings) -> None:
+    """#558: closed / already-error / starting (a resume claim in flight)
+    rows are not stamped — same ownership rules as on_error's fatal arm."""
+    user_id = str(job_db.create_user("guard-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    scoped_tokens.revoke_scoped_token(job_db, token)
+    service, _bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        for status, expected in (
+            ("closed", "closed"),
+            ("error", "error"),
+            ("starting", "starting"),
+        ):
+            job_db.update_studio_chat_session(session_id, status=status)
+            service._on_update(session_id, _tool_call(f"tc-{status}"))
+            assert job_db.get_studio_chat_session(session_id)["status"] == expected
+    finally:
+        service.shutdown()
+
+
+def test_live_token_escalation_is_not_triggered(job_db, settings) -> None:
+    """#558 sanity: a live token keeps the session untouched — escalation
+    only ever rides the dead-token notice path."""
+    user_id = str(job_db.create_user("stays-idle-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    service, _bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        service._on_update(session_id, _tool_call("tc-live"))
+        session = job_db.get_studio_chat_session(session_id)
+        assert session["status"] == "running"  # untouched by the keepalive
+        assert not _invalidation_messages(service, session_id)
     finally:
         service.shutdown()
 

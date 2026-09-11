@@ -27,20 +27,66 @@ def test_publish_isolated_by_channel():
     assert q2.empty()
 
 
-def test_bounded_queue_evicts_slow_subscriber_with_sentinel():
+def test_bounded_queue_drops_oldest_for_replaceable_payload():
+    """#563：可丢帧（流式 text 快照，publish 声明 replaceable=True）的瞬时
+    慢消费不再驱逐——丢最旧腾位后投递最新事件，订阅保留。"""
     bus = InProcessEventBus()
-    queue = bus.subscribe("dashboard")
+    queue = bus.subscribe("studio-chat:s1")
     for _ in range(bus.QUEUE_MAXSIZE):
-        bus.publish("dashboard", "x")
-    bus.publish("dashboard", "overflow")  # 队满 → 驱逐并投递哨兵
-    bus.publish("dashboard", "after-removal")
+        bus.publish("studio-chat:s1", "x", replaceable=True)
+    bus.publish("studio-chat:s1", "overflow", replaceable=True)  # 队满 → 丢最旧、投递最新，不驱逐
     items = [queue.get_nowait() for _ in range(queue.qsize())]
-    # 最旧事件被丢弃以腾出位置，哨兵让流结束、客户端重连后 resync。
-    assert items[-1] is _EVICTED
+    # 最旧一条被丢弃腾位，最新事件在队尾，订阅者仍在册。
+    assert items[-1] == "overflow"
     assert len(items) == bus.QUEUE_MAXSIZE
-    assert "dashboard" not in bus._subscribers or queue not in bus._subscribers.get(
-        "dashboard", set()
+    assert queue in bus._subscribers.get("studio-chat:s1", {})
+
+
+def test_bounded_queue_evicts_on_sustained_replaceable_overflow():
+    """#563：可丢帧连续溢出达到阈值（真死连接）才驱逐——哨兵结束流。"""
+    bus = InProcessEventBus()
+    queue = bus.subscribe("studio-chat:s1")
+    for _ in range(bus.QUEUE_MAXSIZE + 5):
+        bus.publish("studio-chat:s1", "x", replaceable=True)
+    # 队已满且持续不消费：每次 publish 都是"丢最旧 + 投递最新 + 计数 +1"。
+    for index in range(bus.QUEUE_MAXSIZE + 10):
+        bus.publish("studio-chat:s1", f"burst-{index}", replaceable=True)
+        if queue not in bus._subscribers.get("studio-chat:s1", {}):
+            break
+    items = [queue.get_nowait() for _ in range(queue.qsize())]
+    # 驱逐哨兵在队尾（腾位后投递），流结束、客户端重连后 resync。
+    assert items[-1] is _EVICTED
+    assert "studio-chat:s1" not in bus._subscribers or queue not in bus._subscribers.get(
+        "studio-chat:s1", set()
     )
+
+
+def test_non_replaceable_payload_evicts_immediately_on_overflow():
+    """#611 codex P2：不可丢事件（tool_call/permission/status 持久消息、
+    workspace job 补丁的 revision 水位消费）不做丢最旧——静默丢帧让消费方
+    缺消息且无重连触发；立即驱逐断流 → SSE 重连 + 全量回取是既有的无损
+    自愈路径。同一 channel 上只有 replaceable=True 的 publish 走丢旧。"""
+    bus = InProcessEventBus()
+    queue = bus.subscribe("studio-chat:s1")
+    for _ in range(bus.QUEUE_MAXSIZE):
+        bus.publish("studio-chat:s1", "x")  # 未声明 replaceable
+    bus.publish("studio-chat:s1", "overflow")  # 队满 → 立即驱逐 + 哨兵
+    items = [queue.get_nowait() for _ in range(queue.qsize())]
+    assert items[-1] is _EVICTED
+    assert "studio-chat:s1" not in bus._subscribers
+
+
+def test_overflow_counter_resets_on_successful_delivery():
+    """#563：一次成功投递清零连续溢出计数——间歇慢消费不累积到驱逐。"""
+    bus = InProcessEventBus()
+    queue = bus.subscribe("studio-chat:s1")
+    for _ in range(bus.QUEUE_MAXSIZE + 3):
+        bus.publish("studio-chat:s1", "x", replaceable=True)
+    assert queue in bus._subscribers.get("studio-chat:s1", {})  # 未达阈值
+    queue.get_nowait()  # 腾出一个位置，下一次 publish 成功投递
+    bus.publish("studio-chat:s1", "fresh", replaceable=True)  # 计数清零
+    assert bus._overflows[queue] == 0
+    assert queue in bus._subscribers.get("studio-chat:s1", {})
 
 
 def test_eviction_at_max_clients_sends_sentinel():
