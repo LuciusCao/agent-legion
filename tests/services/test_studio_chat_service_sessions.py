@@ -115,7 +115,7 @@ class RecordingBus:
     def attach_loop(self, loop) -> None:
         del loop
 
-    def publish(self, channel: str, payload: str) -> None:
+    def publish(self, channel: str, payload: str, *, replaceable: bool = False) -> None:
         self.events.append((channel, json.loads(payload)))
 
     def subscribe(self, channel: str):
