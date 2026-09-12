@@ -200,6 +200,29 @@ def test_stop_drains_parked_items() -> None:
         batcher.stop()
 
 
+def test_stop_timeout_is_explicit_while_writer_is_still_draining() -> None:
+    """PR #621 Codex P1: a bounded shutdown may report timeout, but it must
+    never return success while an in-flight DB arm can still use the pool."""
+    entered = threading.Event()
+    release = threading.Event()
+
+    def _blocked_arm(args):  # noqa: ANN001
+        entered.set()
+        release.wait(timeout=5)
+        return [True] * len(args)
+
+    batcher = ResultCommitBatcher(_blocked_arm, _blocked_arm)
+    batcher.start()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(batcher.submit, "finish", ("lease-1",))
+        assert entered.wait(timeout=5)
+        with pytest.raises(TimeoutError, match="still draining"):
+            batcher.stop(timeout_seconds=0.01)
+        release.set()
+        assert future.result(timeout=5) is True
+    batcher.stop(timeout_seconds=1)
+
+
 def test_max_items_bound_splits_rounds() -> None:
     arm = _CountingArm()
     batcher = ResultCommitBatcher(arm, arm)

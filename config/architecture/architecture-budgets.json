@@ -1703,6 +1703,7 @@
     "worker/relay_beats.py": 88,
     "worker/relay_shards.py": 75,
     "worker/relay_sync.py": 92,
+    "worker/relay_thread_limiter.py": 33,
     "worker/restart_policy.py": 20,
     "worker/result_archive.py": 48,
     "worker/runtime/__init__.py": 10,

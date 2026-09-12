@@ -62,6 +62,15 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [0.7.10] - 2026-09-11
 
+### Fixed
+- heartbeat relay 的并行分片线程改为跨 tick 共享固定容量：一次请求超过
+  join deadline 后会持续占用槽位直到 socket 调用真正返回，后续 tick
+  对满额分片按本拍未知处理，不再在 Host 持续慢响应时无限累积 daemon
+  线程与连接。
+- result commit batcher 关闭时默认等待 writer 完整排空后才允许数据库池
+  关闭；显式有限超时不再静默成功，而是抛出错误并阻断后续池关闭，避免
+  终态事务在 teardown 中途失去连接。
+
 ### Performance
 - 调度器每 claim 重复 mkdir 消除（issue #618）：`data/logs/jobs`
   从服务启动起就存在，但 `workflow_worker/schedule.py` 每次节点

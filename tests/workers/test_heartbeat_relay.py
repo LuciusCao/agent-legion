@@ -306,6 +306,7 @@ def test_overstayed_shard_cannot_mutate_returned_verdicts(
     (write_beat_result iterates them; a racing append raised "list changed
     size during iteration" and stalled the seq advance)."""
     from worker import relay_shards
+    from worker.relay_thread_limiter import ShardThreadLimiter
 
     # One lease per shard (the "slow" lease must head its OWN chunk to park
     # its own thread) and a join budget of milliseconds so the straggler
@@ -331,7 +332,10 @@ def test_overstayed_shard_cannot_mutate_returned_verdicts(
     client = _OverstayingClient()
     baseline = set(threading.enumerate())
     outcome = relay_shards.beat_sharded(
-        client, [("exec-fast", "lease-fast"), ("exec-slow", "lease-slow")], lambda message: None
+        client,
+        [("exec-fast", "lease-fast"), ("exec-slow", "lease-slow")],
+        lambda message: None,
+        ShardThreadLimiter(),
     )
 
     assert outcome.verdicts is not None
@@ -356,6 +360,7 @@ def test_join_deadline_is_shared_across_shards(monkeypatch: pytest.MonkeyPatch) 
     request alive past its own join must not serialise N × (timeout +
     margin) of tick wall time (the smaller twin of the #591 expiry stall)."""
     from worker import relay_shards
+    from worker.relay_thread_limiter import ShardThreadLimiter
 
     monkeypatch.setattr(relay_shards, "RELAY_BEAT_SHARD", 1)  # every lease = its own shard
     monkeypatch.setattr(relay_shards, "BATCH_BEAT_TIMEOUT_SECONDS", 0.2)
@@ -380,7 +385,10 @@ def test_join_deadline_is_shared_across_shards(monkeypatch: pytest.MonkeyPatch) 
 
     started = time.monotonic()
     outcome = relay_shards.beat_sharded(
-        client, [(f"exec-{i}", f"lease-{i}") for i in range(shards)], lambda message: None
+        client,
+        [(f"exec-{i}", f"lease-{i}") for i in range(shards)],
+        lambda message: None,
+        ShardThreadLimiter(),
     )
     elapsed = time.monotonic() - started
     release.set()  # let the abandoned daemon shards drain
@@ -392,6 +400,49 @@ def test_join_deadline_is_shared_across_shards(monkeypatch: pytest.MonkeyPatch) 
     )
     # The round still completed: nothing learned, verdicts intact.
     assert outcome.verdicts is not None and outcome.verdicts == ([], [])
+
+
+def test_overstayed_shards_are_bounded_across_ticks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR #621 Codex P1: slow-drip requests that outlive the join budget
+    keep their slots, so later ticks cannot accumulate another thread wave."""
+    from worker import relay_shards
+    from worker.relay_thread_limiter import ShardThreadLimiter
+
+    monkeypatch.setattr(relay_shards, "RELAY_BEAT_SHARD", 1)
+    monkeypatch.setattr(relay_shards, "BATCH_BEAT_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(relay_shards, "_JOIN_MARGIN_SECONDS", 0.01)
+
+    release = threading.Event()
+    calls: list[str] = []
+    calls_lock = threading.Lock()
+
+    class _BlockedClient:
+        def heartbeat_batch(
+            self, executions: list[tuple[str, str]], timeout: float | None = None
+        ) -> tuple[int, dict[str, list[str]]]:
+            with calls_lock:
+                calls.append(executions[0][0])
+            release.wait(timeout=5)
+            return 200, {"lost": [], "cancelled_execution_ids": []}
+
+    limiter = ShardThreadLimiter(max_inflight=2)
+    leases = [("exec-1", "lease-1"), ("exec-2", "lease-2")]
+    baseline = set(threading.enumerate())
+    try:
+        first = relay_shards.beat_sharded(_BlockedClient(), leases, lambda message: None, limiter)
+        second = relay_shards.beat_sharded(_BlockedClient(), leases, lambda message: None, limiter)
+        assert first.verdicts == ([], [])
+        assert second.verdicts is None
+        assert calls == ["exec-1", "exec-2"], "a later tick spawned duplicate shard threads"
+    finally:
+        release.set()
+        for thread in threading.enumerate():
+            if thread not in baseline:
+                thread.join(timeout=5)
+
+    recovered = relay_shards.beat_sharded(_BlockedClient(), leases, lambda message: None, limiter)
+    assert recovered.verdicts == ([], [])
+    assert calls == ["exec-1", "exec-2", "exec-1", "exec-2"]
 
 
 def test_stale_recovery_rearms_the_stall_log(tmp_path: Path) -> None:
