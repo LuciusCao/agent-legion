@@ -5,6 +5,11 @@ on:
     # release/* 是发版集成分支(issue PR 先入 release,封版时 release→main),
     # 与 develop 同级对待——否则发版期内的 issue PR 完全没有 CI。
     branches: [develop, main, master, "release/*"]
+  # Merge Queue validates the synthetic merge-group commit, not the stale PR
+  # head. This event must exist before main enables the queue, otherwise the
+  # required quality-gate context is never reported for queued entries.
+  merge_group:
+    types: [checks_requested]
   push:
     # develop merges are already covered by the PR gate; keep push triggers
     # on the trunk branches only so a merge does not burn a second full gate.
@@ -70,12 +75,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PUSH_BEFORE: ${{ github.event.before }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
           backend=true; frontend=true; rust=true; docker=true
           base=""
           if [ "$EVENT_NAME" = "pull_request" ]; then
             base="$PR_BASE"
+          elif [ "$EVENT_NAME" = "merge_group" ]; then
+            base="$MERGE_GROUP_BASE"
           elif [ "$EVENT_NAME" = "push" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
             base="$PUSH_BEFORE"
           fi
@@ -85,6 +93,9 @@ jobs:
             while IFS= read -r f; do
               case "$f" in
                 docs/*|*.md|LICENSE) ;;
+                # A workflow/composite-action edit can change any lane. Test
+                # every lane rather than letting the edited lane skip itself.
+                .github/workflows/*|.github/actions/*) backend=true; frontend=true; rust=true; docker=true ;;
                 frontend/*) frontend=true ;;
                 velites/*) rust=true ;;
                 # 镜像内容/打包相关：Dockerfile 年久失修只有真构建才能发现
@@ -133,18 +144,19 @@ jobs:
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
         env:
-          # Release train（同仓 develop/release/* → main）与 main 合并后
-          # push 重跑：main 的预算 floor 落后发布分支整整一个发布周期，
+          # Release train（同仓 develop/release/* → main）、merge queue 的
+          # 合成提交与 main 合并后 push 重跑：main 的预算 floor 落后发布分支整整一个发布周期，
           # HEAD^ 锚点会把刚合入
           # 的、已经过门禁的历史再拒一遍（0.4.0 的 PR #249 与其 main push
           # run 各撞一次）。进入 main 的合并都已被对应 PR 门覆盖
-          # （release train 走本 env，hotfix PR 走严格锚点），push 重跑
-          # 锚点只看 HEAD。feature→develop PR 保持 HEAD^ 完整严格性。
+          # （release train 走本 env，hotfix PR 走严格锚点）；PR 自身已严格
+          # 验过的 merge group 及 push 重跑只看 HEAD。feature→develop PR
+          # 保持 HEAD^ 完整严格性。
           # 条件组必须整体括号闭合：GHA 的 && 优先级高于 ||，裸写
           # `A || B && '1' || '0'` 会让 release-train PR 一臂短路返回
           # 布尔 true 而非 '1'，opt-out 静默失效（#460 首撞，守卫按
           # == "1" 判定）。
-          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ ((github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository && (github.head_ref == 'develop' || startsWith(github.head_ref, 'release/'))) || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) && '1' || '0' }}
+          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ ((github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository && (github.head_ref == 'develop' || startsWith(github.head_ref, 'release/'))) || (github.event_name == 'merge_group' && (github.event.merge_group.base_ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/master')) || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) && '1' || '0' }}
 
       - name: Backend unit tests (PostgreSQL offline)
         run: |
@@ -262,16 +274,14 @@ jobs:
   # artifact polling. fail-fast stays off so a failing shard does not
   # cancel its peers' evidence.
   #
-  # The lane condition lives on the STEPS, not the job: a matrix job skipped
-  # at job level reports a single check with the literal name
-  # "backend-postgres-${{ matrix.shard }}", so the required per-shard
-  # contexts (backend-postgres-a/b/c) never appear and docs-only PRs stay
-  # blocked (first hit on #319). With the condition on steps, a docs-only
-  # run boots each shard as a seconds-long no-op and every shard reports
-  # success, satisfying branch protection.
+  # Branch protection now requires only the stable quality-gate aggregate.
+  # The old per-step condition existed solely to manufacture three successful
+  # contexts for docs-only PRs; job-level skipping avoids booting three idle
+  # Postgres service containers while the aggregate still receives a result.
   backend-postgres:
     name: backend-postgres-${{ matrix.shard }}
     needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -300,16 +310,13 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
-        if: needs.changes.outputs.backend == 'true'
 
       - uses: astral-sh/setup-uv@v5
-        if: needs.changes.outputs.backend == 'true'
         with:
           enable-cache: true
           python-version: "3.13"
 
       - run: uv sync
-        if: needs.changes.outputs.backend == 'true'
 
       # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
       # fail-closed: the postgres tier's velites sandbox tests need a real
@@ -317,7 +324,6 @@ jobs:
       # userns via AppArmor; current bubblewrap no longer supports the legacy
       # setuid mode, so the disposable CI VM must explicitly enable userns.
       - name: Install bubblewrap (velites sandbox backend)
-        if: needs.changes.outputs.backend == 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -327,7 +333,7 @@ jobs:
       # self-skips so it is not repeated after hundreds of
       # coverage-instrumented tests.
       - name: Velites sandbox integration
-        if: needs.changes.outputs.backend == 'true' && matrix.shard == 'b'
+        if: matrix.shard == 'b'
         run: >-
           uv run pytest -q
           tests/workers/test_workflow_worker_thread_local.py::test_make_workflow_worker_runs_demo_intake_local_node
@@ -335,7 +341,6 @@ jobs:
           TMPDIR: /var/tmp
 
       - name: Backend PostgreSQL tests (shard ${{ matrix.gate_shard }})
-        if: needs.changes.outputs.backend == 'true'
         run: |
           mkdir -p coverage-data
           BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
@@ -352,7 +357,7 @@ jobs:
       # (--cov-fail-under=0); the combined report in backend-coverage
       # enforces it once.
       - name: Full gate evidence (tests/full)
-        if: needs.changes.outputs.backend == 'true' && matrix.shard == 'b'
+        if: matrix.shard == 'b'
         run: |
           mkdir -p coverage-data test-results
           uv run pytest -q tests/full -m full_gate \
@@ -371,7 +376,7 @@ jobs:
       # coverage floor and the aggregate summary; a missing upload fails the
       # corresponding download step there, keeping the gate red.
       - name: Upload shard coverage data
-        if: always() && needs.changes.outputs.backend == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-postgres-${{ matrix.shard }}-coverage
@@ -379,7 +384,7 @@ jobs:
           retention-days: 1
 
       - name: Upload full-gate coverage data
-        if: always() && needs.changes.outputs.backend == 'true' && matrix.shard == 'b'
+        if: always() && matrix.shard == 'b'
         uses: actions/upload-artifact@v4
         with:
           name: backend-full-coverage
@@ -387,7 +392,7 @@ jobs:
           retention-days: 1
 
       - name: Upload shard test telemetry
-        if: always() && needs.changes.outputs.backend == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-postgres-${{ matrix.shard }}-telemetry
@@ -397,7 +402,7 @@ jobs:
           retention-days: 1
 
       - name: Upload full-gate test telemetry
-        if: always() && needs.changes.outputs.backend == 'true' && matrix.shard == 'b'
+        if: always() && matrix.shard == 'b'
         uses: actions/upload-artifact@v4
         with:
           name: backend-full-telemetry
@@ -410,26 +415,23 @@ jobs:
   # changes filter maps docs/*|*.md|LICENSE to backend=false, so backend-unit
   # (which runs the static round including check_architecture) is skipped
   # exactly when a docs-only PR is most likely to reintroduce retired
-  # terminology. This job always runs: with backend=true every step is gated
-  # off and it reports success in seconds (the postgres no-op pattern), with
-  # backend=false it executes the standalone module entry in a --no-project
-  # env — only pyyaml, no uv sync.
+  # terminology. With only the aggregate context required, backend changes
+  # can skip this job entirely; backend=false executes the standalone module
+  # entry in a --no-project env — only pyyaml, no uv sync.
   docs-terms:
     name: docs-terms
     needs: changes
+    if: needs.changes.outputs.backend == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-        if: needs.changes.outputs.backend == 'false'
 
       - uses: astral-sh/setup-uv@v5
-        if: needs.changes.outputs.backend == 'false'
         with:
           python-version: "3.13"
 
       - name: Docs retired-terms guard
-        if: needs.changes.outputs.backend == 'false'
         run: uv run --no-project --with pyyaml python -m scripts.architecture.docs_retired_terms
         env:
           PYTHONPATH: .
@@ -655,11 +657,19 @@ jobs:
           cat test-results/frontend-logic-summary.md >> "$GITHUB_STEP_SUMMARY"
 
   frontend-component:
-    name: frontend-component
+    name: frontend-component-${{ matrix.shard }}
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: a
+            gate_shard: 1/2
+          - shard: b
+            gate_shard: 2/2
     steps:
       - uses: actions/checkout@v4
 
@@ -676,17 +686,18 @@ jobs:
         run: >-
           FRONTEND_GATE_PHASE=test FRONTEND_TEST_MODE=coverage
           FRONTEND_TEST_PROJECT=component
-          FRONTEND_COVERAGE_BLOB_DIR="${{ github.workspace }}/coverage-blobs/component"
+          FRONTEND_TEST_SHARD=${{ matrix.gate_shard }}
+          FRONTEND_COVERAGE_BLOB_DIR="${{ github.workspace }}/coverage-blobs/component-${{ matrix.shard }}"
           ./scripts/check-quick-frontend.sh
         env:
-          AGENT_LEGION_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results/frontend-component
+          AGENT_LEGION_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results/frontend-component-${{ matrix.shard }}
 
       - name: Upload component coverage blob
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-coverage-blob-component
-          path: coverage-blobs/component/
+          name: frontend-coverage-blob-component-${{ matrix.shard }}
+          path: coverage-blobs/component-${{ matrix.shard }}/
           retention-days: 1
 
       - name: Frontend component test summary
@@ -695,10 +706,10 @@ jobs:
           AGENT_LEGION_COV: frontend-v8-blob
         run: |
           python3 scripts/summarize_test_results.py \
-            --title "Frontend component test evidence" \
-            --junit test-results/frontend-component/vitest-junit.xml \
-            --output test-results/frontend-component-summary.md
-          cat test-results/frontend-component-summary.md >> "$GITHUB_STEP_SUMMARY"
+            --title "Frontend component ${{ matrix.shard }} test evidence" \
+            --junit test-results/frontend-component-${{ matrix.shard }}/vitest-junit.xml \
+            --output test-results/frontend-component-${{ matrix.shard }}-summary.md
+          cat test-results/frontend-component-${{ matrix.shard }}-summary.md >> "$GITHUB_STEP_SUMMARY"
 
   frontend-coverage:
     name: frontend-coverage
@@ -966,6 +977,8 @@ jobs:
   # names and shard counts can then evolve without leaving docs-only PRs
   # waiting for a skipped required check. Every applicable lane is included
   # in `needs`; `always()` guarantees a final verdict after failures/cancels.
+  # A selected lane must succeed: accepting every skipped job would let a
+  # broken `if:` silently bypass the work that changes selected.
   quality-gate:
     name: quality-gate
     if: always()
@@ -988,7 +1001,39 @@ jobs:
       NEEDS_CONTEXT: ${{ toJSON(needs) }}
     steps:
       - name: Require every selected lane to pass
-        run: >-
-          jq -e
-          'all(.[]; .result == "success" or .result == "skipped")'
-          <<< "$NEEDS_CONTEXT"
+        run: |
+          jq -e '
+            def require_selected($selected; $lanes):
+              . as $context |
+              all($lanes[];
+                . as $lane |
+                if $selected then $context[$lane].result == "success"
+                else ($context[$lane].result == "success" or $context[$lane].result == "skipped")
+                end);
+
+            (.changes.result == "success") and
+            require_selected(
+              .changes.outputs.backend != "true";
+              ["docs-terms"]
+            ) and
+            require_selected(
+              .changes.outputs.backend == "true";
+              ["backend-unit", "backend-postgres", "backend-coverage"]
+            ) and
+            require_selected(
+              (.changes.outputs.backend == "true" or .changes.outputs.frontend == "true");
+              ["api-check"]
+            ) and
+            require_selected(
+              .changes.outputs.frontend == "true";
+              ["frontend-logic", "frontend-component", "frontend-coverage"]
+            ) and
+            require_selected(
+              (.changes.outputs.backend == "true" or
+               .changes.outputs.frontend == "true" or
+               .changes.outputs.rust == "true");
+              ["e2e-smoke"]
+            ) and
+            require_selected(.changes.outputs.rust == "true"; ["rust"]) and
+            require_selected(.changes.outputs.docker == "true"; ["docker-build"])
+          ' <<< "$NEEDS_CONTEXT"

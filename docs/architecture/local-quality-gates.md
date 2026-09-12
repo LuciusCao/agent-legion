@@ -157,17 +157,13 @@ unaffected. Passing evidence is shared through the same Git common directory.
 ## CI Workflow
 
 `.github/workflows/quality-gate.yml` runs on pull requests to
-`develop` / `main` / `master` / `release/*`, pushes to `main` / `master` (a `develop`
-merge is already covered by its PR gate, so push runs there were dropped to
-save Actions minutes), plus manual dispatch. Docs-only changes (`docs/**`,
+`develop` / `main` / `master` / `release/*`, merge-queue synthetic commits,
+pushes to `main` / `master` (a `develop` merge is already covered by its PR
+gate, so push runs there were dropped to save Actions minutes), plus manual dispatch. Docs-only changes (`docs/**`,
 `**/*.md`, `LICENSE`) still trigger the workflow but every backend/frontend
-lane evaluates to false in the `changes` job: single jobs skip outright (a
-skipped required check satisfies branch protection), while the
-`backend-postgres` matrix carries its lane condition on the steps instead of
-the job — a job-level skip would report one check with the literal name
-`backend-postgres-${{ matrix.shard }}` and the required per-shard contexts
-would never appear — so each shard boots as a seconds-long no-op and
-reports success. The `docs-terms` guard is the one check that still runs on
+lane evaluates to false in the `changes` job and skips without acquiring a
+runner, including the complete `backend-postgres` matrix. The `docs-terms`
+guard is the one check that still runs on
 that path (codex review on #375/#377): docs-only PRs are exactly the ones
 that can reintroduce retired terminology into current-state docs, so the
 retired-terms check gets its own lightweight job that executes whenever the
@@ -176,13 +172,15 @@ whenever the backend lane is on — the two entries are exact complements).
 A `paths-ignore` trigger would keep the workflow from
 starting at all and leave required checks pending forever — the docs-only
 PR deadlock first hit on #316 (single jobs) and #319 (matrix shards).
-The weekly schedule lives in `.github/workflows/nightly-gate.yml` (issue
+Workflow and composite-action changes force all four path flags on, so an
+edited Rust or Docker lane cannot skip its own validation. The weekly schedule lives in `.github/workflows/nightly-gate.yml` (issue
 #193), which runs only `ci-extended` and `nightly-e2e` — the stress jobs
 never run on PR/push, and a scheduled trunk run in the quality-gate file
 shared its concurrency group, so it could cancel an in-flight push gate for
 the same ref. Branch protection requires only the final `quality-gate` job.
-It runs with `always()`, reads every lane result through `needs`, accepts
-intentional path skips, and rejects failures or cancellations. Internal job
+It runs with `always()`, reads every lane result and the path-selection flags
+through `needs`, requires every selected lane to succeed, accepts skips only
+for unselected lanes, and rejects failures or cancellations. Internal job
 names and shard counts can therefore change without rewriting protected-branch
 contexts:
 
@@ -215,8 +213,10 @@ contexts:
   partial tier, and floors on partial data produce false reds. It also runs
   `check_reruns.py` against every shard report: a retry-pass is merge-blocking
   unless its exact nodeid has a live registry entry.
-- **frontend-logic / frontend-component / frontend-coverage** — frontend
+- **frontend-logic / frontend-component-a/b / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
+  the slower component project is split again with Vitest's deterministic
+  native `--shard=1/2` partition;
   the coverage job merges the shard blob reports and enforces the frontend
   coverage thresholds plus the production bundle (`npm run build:bundle`),
   and enforces the frontend coverage partitions (auth/bootstrap / api
@@ -227,9 +227,8 @@ contexts:
   and `cargo test` in `velites/`.
 - **e2e-smoke** — the deterministic browser smoke suite.
 - **docs-terms** — the retired-terms docs guard as a standalone lightweight
-  job (`uv run --no-project --with pyyaml`, no uv sync). Always reports a
-  check (no lane skip): a no-op success while the backend lane is on, the
-  real module entry while it is off — the exact complement of the
+  job (`uv run --no-project --with pyyaml`, no uv sync). It runs when the
+  backend lane is off and skips otherwise — the exact complement of the
   `check_architecture` static round inside `backend-unit`.
 - **docker-build** — CI-only image build lane (host + worker targets). It runs
   only when the `changes` job detects image-relevant path changes
@@ -319,17 +318,14 @@ verification comes from the CI workflow, not from these files.
 Configure the repository on GitHub as follows:
 
 1. Protect `develop` and any release branches (Settings → Branches, or Rules → Rulesets).
-2. Require the `backend-unit`, `api-check`, `backend-postgres-a`,
-   `backend-postgres-b`, `backend-postgres-c`, `backend-coverage`,
-   `frontend-logic`, `frontend-component`,
-   `frontend-coverage`, `rust`, `e2e-smoke`, `docker-build`, and `docs-terms`
-   status checks to pass before
-   merging; require branches to be up to date. `docs-terms` is the docs-only
-   PR lane for the retired-terms guard (codex review on #375/#377): without
-   it in the required set, a docs-only PR can merge with the guard red
-   because every other required context is skipped-or-green on that path.
-3. Disable force-push and branch deletion for protected branches.
-4. Merge changes through a pull request; do not edit protected branches in the web UI.
+2. Require only the stable `quality-gate` status check before merging. It
+   validates selected internal lanes, including `docs-terms` for docs-only
+   changes; do not require volatile shard names individually.
+3. On `main`, enable Merge Queue after the workflow contains the
+   `merge_group: checks_requested` trigger. The queue validates the synthetic
+   combined commit rather than relying on independently green, stale PR heads.
+4. Disable force-push and branch deletion for protected branches.
+5. Merge changes through a pull request; do not edit protected branches in the web UI.
 
 Until required status checks are configured, nothing server-side blocks a red
 merge — the protection is only as strong as this one-time setup.

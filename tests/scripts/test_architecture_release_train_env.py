@@ -67,6 +67,27 @@ _CONTEXTS: dict[str, tuple[dict[str, Any], str]] = {
         {"event_name": "push", "base_ref": "", "head_ref": "", "ref": "refs/heads/main"},
         "1",
     ),
+    "main_merge_group": (
+        {
+            "event_name": "merge_group",
+            "event_merge_group_base_ref": "refs/heads/main",
+        },
+        "1",
+    ),
+    "master_merge_group": (
+        {
+            "event_name": "merge_group",
+            "event_merge_group_base_ref": "refs/heads/master",
+        },
+        "1",
+    ),
+    "develop_merge_group_is_strict": (
+        {
+            "event_name": "merge_group",
+            "event_merge_group_base_ref": "refs/heads/develop",
+        },
+        "0",
+    ),
     "master_push_rerun": (
         {"event_name": "push", "base_ref": "", "head_ref": "", "ref": "refs/heads/master"},
         "1",

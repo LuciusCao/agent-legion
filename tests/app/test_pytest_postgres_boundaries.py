@@ -283,10 +283,8 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     assert "GATE_TIER: unit" in workflow
     assert "backend-unit-junit.xml" in workflow
     # Phase 5C-2/5C-3 (issue #193 topology): the postgres tier is hash-sharded
-    # into three matrix legs of one backend-postgres job — the templated name
-    # keeps the legacy backend-postgres-a/b/c check names, so branch
-    # protection and docs references stay valid — each on its own COVERAGE_FILE
-    # and result name. Shard b also runs the tests/full gate; api:check lives
+    # into three matrix legs of one backend-postgres job — each on its own
+    # COVERAGE_FILE and result name. Shard b also runs the tests/full gate; api:check lives
     # in its own api-check job so frontend-only PRs skip the test shards.
     assert "name: backend-postgres-${{ matrix.shard }}" in workflow
     assert "- shard: a" in workflow
@@ -299,6 +297,9 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     assert "GATE_SHARD: ${{ matrix.gate_shard }}" in workflow
     assert "AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-${{ matrix.shard }}" in workflow
     assert "backend-postgres-${{ matrix.shard }}-junit.xml" in workflow
+    postgres_job = workflow.split("\n  backend-postgres:\n", 1)[1]
+    postgres_job = postgres_job.split("\n  docs-terms:\n", 1)[0]
+    assert "if: needs.changes.outputs.backend == 'true'" in postgres_job
     assert "api-check:" in workflow
     assert "FRONTEND_GATE_PHASE=api-contract" in workflow
     assert "Worker UI tests" in workflow
@@ -356,7 +357,38 @@ def test_quality_gate_has_one_stable_aggregate_context() -> None:
     ):
         assert f"- {lane}" in aggregate
     assert "toJSON(needs)" in aggregate
-    assert '.result == "success" or .result == "skipped"' in aggregate
+    assert "def require_selected($selected; $lanes):" in aggregate
+    assert 'if $selected then $context[$lane].result == "success"' in aggregate
+    assert '.changes.outputs.backend == "true"' in aggregate
+    assert '.changes.outputs.frontend == "true"' in aggregate
+    assert '.changes.outputs.rust == "true"' in aggregate
+    assert '.changes.outputs.docker == "true"' in aggregate
+
+
+def test_quality_gate_supports_merge_queue_and_full_workflow_self_validation() -> None:
+    workflow = (ROOT / ".github/workflows/quality-gate.yml").read_text(encoding="utf-8")
+
+    assert "merge_group:\n    types: [checks_requested]" in workflow
+    assert "MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}" in workflow
+    assert 'elif [ "$EVENT_NAME" = "merge_group" ]; then' in workflow
+    assert (
+        ".github/workflows/*|.github/actions/*) backend=true; frontend=true; rust=true; docker=true ;;"
+        in workflow
+    )
+
+
+def test_frontend_component_lane_uses_two_native_vitest_shards() -> None:
+    workflow = (ROOT / ".github/workflows/quality-gate.yml").read_text(encoding="utf-8")
+    frontend_gate = (ROOT / "scripts/check-quick-frontend.sh").read_text(encoding="utf-8")
+
+    component = workflow.split("\n  frontend-component:\n", 1)[1]
+    component = component.split("\n  frontend-coverage:\n", 1)[0]
+    assert "name: frontend-component-${{ matrix.shard }}" in component
+    assert "gate_shard: 1/2" in component
+    assert "gate_shard: 2/2" in component
+    assert "FRONTEND_TEST_SHARD=${{ matrix.gate_shard }}" in component
+    assert "frontend-coverage-blob-component-${{ matrix.shard }}" in component
+    assert 'vitest_args+=(--shard "$FRONTEND_TEST_SHARD")' in frontend_gate
 
 
 def test_weekly_stress_lane_lives_in_nightly_gate() -> None:
