@@ -117,6 +117,7 @@ def test_loopback_tools_are_async() -> None:
         "get_skill",
         "validate_skill",
         "save_skill_version",
+        "create_skill",
         "get_preview_context",
         "get_preview_panel",
         "save_preview_panel_draft",
@@ -363,6 +364,36 @@ def test_save_skill_version_posts_body(recorded) -> None:
     assert calls[0]["method"] == "POST"
     assert calls[0]["url"].endswith("/skills/wf/review/versions")
     assert calls[0]["json"] == {"files": files, "new_tag": "v2.0.0", "message": "revise"}
+
+
+def test_create_skill_posts_workspace_scoped_body(recorded) -> None:
+    # #633: create_skill is workspace-scoped (the repo lands under the
+    # calling workspace's skill dir), so the tool path carries workspace_id.
+    server, calls = recorded
+    files = [
+        {"path": "SKILL.md", "content": "# New\n"},
+        {"path": "references/output-contract.md", "content": "# contract\n"},
+        {"path": "scripts/validate_output.py", "content": "raise SystemExit(0)\n"},
+    ]
+    _run_tool(
+        server,
+        "create_skill",
+        {
+            "workspace_id": "ws-1",
+            "skill_name": "review",
+            "files": files,
+            "new_tag": "v1.0.0",
+            "message": "initial skill",
+        },
+    )
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/skills")
+    assert calls[0]["json"] == {
+        "skill_name": "review",
+        "files": files,
+        "new_tag": "v1.0.0",
+        "message": "initial skill",
+    }
 
 
 def test_get_preview_guide_is_served_locally(recorded) -> None:

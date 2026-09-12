@@ -1399,6 +1399,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Create Skill */
+    post: operations['create_skill_api_studio_agent_tools_workspaces__workspace_id__skills_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active': {
     parameters: {
       query?: never
@@ -5730,6 +5747,29 @@ export interface components {
     RuntimeTools: {
       /** Tools */
       tools?: components['schemas']['RuntimeToolEntry'][]
+    }
+    /**
+     * SkillCreateRequest
+     * @description create_skill payload (#633): same bounds as SkillSaveVersionRequest.
+     */
+    SkillCreateRequest: {
+      /** Files */
+      files: components['schemas']['SkillVersionFileWrite'][]
+      /** Message */
+      message: string
+      /** New Tag */
+      new_tag: string
+      /** Skill Name */
+      skill_name: string
+    }
+    /** SkillCreateResponse */
+    SkillCreateResponse: {
+      /** Commit */
+      commit: string
+      /** Key */
+      key: string
+      /** Tag */
+      tag: string
     }
     /**
      * SkillDetailResponse
@@ -10345,6 +10385,41 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['PreviewPanelVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_skill_api_studio_agent_tools_workspaces__workspace_id__skills_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillCreateResponse']
         }
       }
       /** @description Validation Error */

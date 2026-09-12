@@ -22,6 +22,15 @@ SKILLS_ROOT_DISPLAY = "~/.agents/skills"
 # empty, absolute, separator-bearing and ``..`` ids by construction.
 _WORKSPACE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
+# One-segment skill directory names under a workspace's skill dir (the full
+# skill key is <workspace_id>/<skill_name>, #633 create_skill).
+_SKILL_DIR_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def is_valid_skill_dir_name(name: str) -> bool:
+    """Whether a one-segment skill directory name is well-formed (#633)."""
+    return _SKILL_DIR_NAME_RE.fullmatch(name) is not None
+
 
 def skills_root() -> Path:
     """The on-disk skills root: base for the skill cache and workspace skills."""

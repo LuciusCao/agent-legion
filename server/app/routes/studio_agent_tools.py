@@ -27,14 +27,15 @@ from server.app.routes.studio_agent_prompt_tools import create_studio_agent_prom
 from server.app.routes.studio_agent_publish_tools import (
     create_studio_agent_publish_tools_router,
 )
+from server.app.routes.studio_agent_skill_creation_tools import (
+    create_studio_agent_skill_creation_tools_router,
+)
 from server.app.routes.studio_agent_skill_tools import create_studio_agent_skill_tools_router
 from server.app.routes.studio_agent_tool_contracts import (
     StudioAgentActiveWorkflowResponse,
     StudioAgentNodeCodeDraftRequest,
-)
-from server.app.routes.studio_agent_tool_helpers import (
-    _agent_version_response,
-    _parse_agent_definition,
+    agent_version_response,
+    parse_agent_definition_payload,
 )
 from server.app.routes.workflow_draft_compare_contracts import WorkflowDraftCompareResponse
 from server.app.routes.workflow_node_code_contracts import (
@@ -145,14 +146,14 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         payload: AgentDefinitionPayload,
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
     ) -> AgentVersionResponse:
-        definition = _parse_agent_definition(payload)
+        definition = parse_agent_definition_payload(payload)
         try:
             entity = _service().save_agent_definition_draft(
                 workspace_id, agent_id, definition, str(user["id"])
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)
-        return _agent_version_response(entity)
+        return agent_version_response(entity)
 
     @workspace_scoped.get(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/active",
@@ -189,8 +190,12 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
     router.include_router(create_studio_agent_skill_tools_router(job_db, settings))
     workspace_scoped.include_router(create_studio_agent_prompt_tools_router(job_db))
     workspace_scoped.include_router(create_studio_agent_draft_tools_router(job_db))
-    # Preview panel tools (issue #328): context/panel reads + draft write —
-    # workspace-bound like the prompt tools (scoped token + workspace binding).
+    # Skill creation tool (#633), workspace-scoped (the created repo lives
+    # under the calling workspace's skill dir); preview panel tools (#328),
+    # workspace-bound draft reads/write.
+    workspace_scoped.include_router(
+        create_studio_agent_skill_creation_tools_router(job_db, settings)
+    )
     workspace_scoped.include_router(create_studio_agent_preview_tools_router(job_db, settings))
     # Publish-request tools (issue #416): request parks a pending publish (a
     # scoped-only write — the human confirm/cancel endpoints live on the

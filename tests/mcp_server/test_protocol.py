@@ -96,6 +96,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
             assert names == [
                 "compare_jobs",
                 "compare_workflow",
+                "create_skill",
                 "get_active_workflow",
                 "get_authoring_guide",
                 "get_job_context",
