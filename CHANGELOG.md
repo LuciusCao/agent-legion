@@ -106,6 +106,12 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   现有整片失败收容（strict zip），不再让尾部 future 悬挂。
 
 ### Changed
+- 质量门云端收口：多 worktree 本地内环改为 affected tests，push 保留按
+  路径裁剪的 smoke，完整 unit/PostgreSQL/coverage/E2E 以 PR CI 为合并
+  凭证；workflow 新增稳定 `quality-gate` 聚合 check，分支保护不再绑定
+  内部 shard 名称。pytest 的 retry-pass 改为 PR 当场校验 flaky registry，
+  未登记或超期条目直接阻止合并；公开仓库测试 workflow 的
+  `GITHUB_TOKEN` 显式收紧为 `contents: read`。
 - 预算计量的 docstring 口径（issue #610，#209 棘轮的计量层治理）：
   Python 有效行计数（`scripts/architecture/effective_lines.py`）此前只
   排除 `#` 注释与空行，docstring 作为字符串字面量逐行计费——全仓唯一

@@ -20,6 +20,12 @@ concurrency:
   group: quality-gate-${{ github.ref }}
   cancel-in-progress: true
 
+# PR code, build scripts, and dependencies are untrusted input now that the
+# repository is public. Test jobs only need to read the checkout; deployment
+# and release workflows grant their own narrower write permissions.
+permissions:
+  contents: read
+
 env:
   # Gate scripts default UV_CACHE_DIR to the in-project .uv-cache; point it back
   # at the default location so astral-sh/setup-uv caching covers it.
@@ -570,6 +576,20 @@ jobs:
             --output test-results/backend-summary.md
           cat test-results/backend-summary.md >> "$GITHUB_STEP_SUMMARY"
 
+      # A retry-pass is still a loss of test determinism. Known nodeids may
+      # carry a short-lived registry entry, but a new rerun or an expired
+      # exemption turns the PR red immediately instead of waiting for the
+      # weekly governance job.
+      - name: Enforce flaky rerun registry
+        if: always()
+        run: >-
+          uv run python scripts/check_reruns.py
+          --rerun-report test-results/backend-unit-reruns.json
+          --rerun-report test-results/backend-postgres-a-reruns.json
+          --rerun-report test-results/backend-postgres-b-reruns.json
+          --rerun-report test-results/backend-postgres-c-reruns.json
+          --rerun-report test-results/backend-full-reruns.json
+
   # Frontend is sharded into the two Vitest projects (test architecture plan,
   # Phase 5B): pure logic tests (node) and component tests (jsdom) run as
   # parallel jobs, each emitting a blob report that embeds raw V8 coverage.
@@ -940,3 +960,34 @@ jobs:
           push: false
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
+
+  # Branch protection should require this one stable context. Internal lane
+  # names and shard counts can then evolve without leaving docs-only PRs
+  # waiting for a skipped required check. Every applicable lane is included
+  # in `needs`; `always()` guarantees a final verdict after failures/cancels.
+  quality-gate:
+    name: quality-gate
+    if: always()
+    needs:
+      - changes
+      - backend-unit
+      - api-check
+      - backend-postgres
+      - docs-terms
+      - backend-coverage
+      - frontend-logic
+      - frontend-component
+      - frontend-coverage
+      - e2e-smoke
+      - rust
+      - docker-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NEEDS_CONTEXT: ${{ toJSON(needs) }}
+    steps:
+      - name: Require every selected lane to pass
+        run: >-
+          jq -e
+          'all(.[]; .result == "success" or .result == "skipped")'
+          <<< "$NEEDS_CONTEXT"
