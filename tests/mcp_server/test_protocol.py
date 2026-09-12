@@ -109,6 +109,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
                 "get_publish_request_status",
                 "get_skill",
                 "get_studio_context",
+                "get_workflow_draft",
                 "list_jobs",
                 "read_artifact",
                 "request_workflow_publish",
@@ -117,6 +118,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
                 "save_node_prompt",
                 "save_preview_panel_draft",
                 "save_skill_version",
+                "save_workflow_draft",
                 "validate_skill",
                 "validate_workflow",
             ]

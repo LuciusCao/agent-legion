@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  DRAFT_NEVER_SAVED,
+  WorkflowDraftConflictError,
+} from '../../../api/workflowDraft'
+import {
   draftSaveText,
   useWorkflowDraftPersistence,
 } from './useWorkflowDraftPersistence'
@@ -14,6 +18,30 @@ vi.mock('../../../api', () => ({
   fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
   fetchWorkflowDraft: (...args: unknown[]) => mocks.fetchWorkflowDraft(...args),
   putWorkflowDraft: (...args: unknown[]) => mocks.putWorkflowDraft(...args),
+}))
+vi.mock('../../../api/workflowDraft', () => ({
+  DRAFT_NEVER_SAVED: 'never-saved',
+  WorkflowDraftConflictError: class extends Error {
+    readonly currentDraft: {
+      definition_yaml: string | null
+      updated_at: string | null
+    }
+    constructor(detail: unknown) {
+      super('workflow draft conflict')
+      const payload =
+        typeof detail === 'object' && detail !== null
+          ? (detail as { current_draft?: unknown })
+          : {}
+      const current = (payload.current_draft ?? {}) as {
+        definition_yaml?: string | null
+        updated_at?: string | null
+      }
+      this.currentDraft = {
+        definition_yaml: current.definition_yaml ?? null,
+        updated_at: current.updated_at ?? null,
+      }
+    }
+  },
 }))
 
 const SERVER_DRAFT = {
@@ -135,7 +163,8 @@ describe('useWorkflowDraftPersistence', () => {
 
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
-      'key: demo\nlabel: Edited\n'
+      'key: demo\nlabel: Edited\n',
+      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
     )
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
     expect(result.current.state.savedAt).toBe(SERVER_DRAFT.updated_at)
@@ -179,7 +208,8 @@ describe('useWorkflowDraftPersistence', () => {
 
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
-      'key: demo\nlabel: Y\n'
+      'key: demo\nlabel: Y\n',
+      { expectedUpdatedAt: '2026-08-27T00:00:00+00:00' }
     )
   })
 
@@ -231,7 +261,8 @@ describe('useWorkflowDraftPersistence', () => {
 
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
-      'key: demo\nlabel: Edited\n'
+      'key: demo\nlabel: Edited\n',
+      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
     )
   })
 
@@ -284,7 +315,8 @@ describe('useWorkflowDraftPersistence', () => {
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
-      'key: demo\nlabel: B\n'
+      'key: demo\nlabel: B\n',
+      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
     )
 
     // PUT(B) 响应前回退到 A。
@@ -307,7 +339,8 @@ describe('useWorkflowDraftPersistence', () => {
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
-      'key: demo\nlabel: A\n'
+      'key: demo\nlabel: A\n',
+      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
     )
 
     // lastPersisted 未被 B 污染：再编辑为 C 照常保存。
@@ -323,7 +356,8 @@ describe('useWorkflowDraftPersistence', () => {
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
-      'key: demo\nlabel: C\n'
+      'key: demo\nlabel: C\n',
+      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
     )
   })
 
@@ -357,7 +391,8 @@ describe('useWorkflowDraftPersistence', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
-      'key: demo\nlabel: Two\n'
+      'key: demo\nlabel: Two\n',
+      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
     )
   })
 })
@@ -422,7 +457,9 @@ describe('useWorkflowDraftPersistence flushNow', () => {
       flushed = await result.current.flushNow()
     })
 
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED)
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+    })
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
     // #429 收尾 P2-1：resolve 值携带本次落盘的终态（成功 → ok=true）。
     expect(flushed?.ok).toBe(true)
@@ -511,8 +548,189 @@ describe('useWorkflowDraftPersistence flushNow', () => {
     })
 
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(4)
-    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', EDITED)
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+    })
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
+  })
+})
+
+describe('useWorkflowDraftPersistence CAS (#633)', () => {
+  const BASE = 'key: demo\nlabel: Base\n'
+  const EDITED = 'key: demo\nlabel: Edited\n'
+  const SERVER_AT = '2026-08-27T01:02:03+00:00'
+
+  function conflictError() {
+    return new WorkflowDraftConflictError({
+      message: 'Workflow draft conflict',
+      current_draft: {
+        definition_yaml: 'key: demo\nlabel: Agent v2\n',
+        updated_at: '2026-09-12T10:00:00+00:00',
+      },
+    })
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.clearAllMocks()
+    mocks.putWorkflowDraft.mockResolvedValue(SERVER_DRAFT)
+  })
+
+  it('PUTs with the hydrated updated_at as the CAS base', async () => {
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: SERVER_AT,
+    })
+  })
+
+  it('PUTs with never-saved before any baseline exists', async () => {
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: NO_DRAFT,
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: NO_DRAFT,
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+    })
+  })
+
+  it('a 409 conflict lands in the conflict state without retrying', async () => {
+    mocks.putWorkflowDraft.mockRejectedValue(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+    expect(result.current.state.conflictDraftYaml).toBe(
+      'key: demo\nlabel: Agent v2\n'
+    )
+    // 冲突不自动重试：同一过期时间戳重试只会再 409。
+    await act(async () => {
+      vi.advanceTimersByTime(10000)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+    expect(draftSaveText(result.current.state)).toBe(
+      '草稿已被其它会话（Agent/其它标签页）更新，本页编辑未保存'
+    )
+  })
+
+  it('a successful save after a conflict updates the CAS base and clears the flag on the next edit', async () => {
+    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // 用户在冲突后继续编辑：conflict 标记被新调度清除，保存以服务端
+    // 冲突响应（或新一轮 GET）推进后的基线重新竞争。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: EDITED,
+      updated_at: '2026-09-12T11:00:00+00:00',
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Third\n',
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    expect(result.current.state.conflict).toBeUndefined()
+
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Fourth\n',
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
+      'ws1',
+      'key: demo\nlabel: Fourth\n',
+      { expectedUpdatedAt: '2026-09-12T11:00:00+00:00' }
+    )
+  })
+
+  it('flushNow resolves {ok: false} on a conflict (publish guard must abort)', async () => {
+    mocks.putWorkflowDraft.mockRejectedValue(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+
+    let flushed: { ok: boolean; state: { conflict?: boolean } } | undefined
+    await act(async () => {
+      flushed = await result.current.flushNow()
+    })
+
+    expect(flushed?.ok).toBe(false)
+    expect(flushed?.state.conflict).toBe(true)
   })
 })
 
@@ -594,7 +812,9 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
     await act(async () => {
       vi.advanceTimersByTime(850)
     })
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED)
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+    })
 
     // 重试计时器等待中来了新编辑：旧重试必须作废，只保存最新值。
     rerender({
@@ -613,7 +833,8 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(2)
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
-      'key: demo\nlabel: Two\n'
+      'key: demo\nlabel: Two\n',
+      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
     )
   })
 })
@@ -662,7 +883,9 @@ describe('useWorkflowDraftPersistence unload guard', () => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
 
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED)
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+    })
     visibility.mockRestore()
   })
 
@@ -675,6 +898,7 @@ describe('useWorkflowDraftPersistence unload guard', () => {
 
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
       keepalive: true,
+      expectedUpdatedAt: DRAFT_NEVER_SAVED,
     })
   })
 
@@ -714,7 +938,9 @@ describe('useWorkflowDraftPersistence unload guard', () => {
       window.dispatchEvent(new Event('pagehide'))
     })
 
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', hugeDraft)
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', hugeDraft, {
+      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+    })
   })
 
   it('blocks page unload while edits are unsaved and stays quiet once saved', async () => {

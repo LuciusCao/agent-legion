@@ -378,9 +378,11 @@ describe('useWorkflowStudio draft & revision', () => {
       vi.advanceTimersByTime(850)
     })
 
+    // 无服务端草稿时首次保存的 CAS 基线是 never-saved（#633）。
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
-      'key: demo\nlabel: Autosaved\n'
+      'key: demo\nlabel: Autosaved\n',
+      { expectedUpdatedAt: 'never-saved' }
     )
     await waitFor(() => expect(result.current.draftSave.status).toBe('saved'))
   })

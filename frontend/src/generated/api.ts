@@ -1433,6 +1433,24 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workflow Draft Route */
+    get: operations['get_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_get']
+    /** Save Workflow Draft Route */
+    put: operations['save_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/publish-request': {
     parameters: {
       query?: never
@@ -6232,6 +6250,23 @@ export interface components {
       tokens: components['schemas']['StudioAgentTokenEntry'][]
     }
     /**
+     * StudioAgentWorkflowDraftResponse
+     * @description Human draft-store mirror; both null when no draft (structured empty).
+     */
+    StudioAgentWorkflowDraftResponse: {
+      /** Definition Yaml */
+      definition_yaml?: string | null
+      /** Updated At */
+      updated_at?: string | null
+    }
+    /** StudioAgentWorkflowDraftSaveRequest */
+    StudioAgentWorkflowDraftSaveRequest: {
+      /** Definition Yaml */
+      definition_yaml: string
+      /** Expected Updated At */
+      expected_updated_at: string
+    }
+    /**
      * StudioChatAgentOption
      * @description Picker view of a registry agent: never exposes command/args.
      */
@@ -10376,6 +10411,72 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowDraftCompareResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentWorkflowDraftResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioAgentWorkflowDraftSaveRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentWorkflowDraftResponse']
         }
       }
       /** @description Validation Error */

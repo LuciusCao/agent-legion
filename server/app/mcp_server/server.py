@@ -31,6 +31,7 @@ from mcp.server.fastmcp import FastMCP
 # preview/job tools in their sibling modules (file-size budget).
 from server.app.agent_catalog.definition import DEFAULT_TOOLS
 from server.app.mcp_server import (
+    draft_tools,
     job_tools,
     preview_tools,
     prompt_tools,
@@ -150,8 +151,10 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
     prompt_tools.register_prompt_tools(mcp, _client)
     # Workflow tools (active read / validate / compare / publish-request,
     # issue #416): the publish request parks a pending publish for the human
-    # to confirm in Studio — never publishes directly.
+    # to confirm in Studio — never publishes directly. Draft read/write pair
+    # (issue #633): canvas-draft CAS editing, same draft-only boundary.
     workflow_tools.register_workflow_tools(mcp, _client)
+    draft_tools.register_draft_tools(mcp, _client)
     # Preview panel tools (issue #328): context/panel reads + draft save,
     # draft-only like the rest of the surface.
     preview_tools.register_preview_tools(mcp, _client)

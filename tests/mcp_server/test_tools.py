@@ -103,8 +103,10 @@ def test_loopback_tools_are_async() -> None:
     for name in (
         "get_studio_context",
         "get_active_workflow",
+        "get_workflow_draft",
         "validate_workflow",
         "compare_workflow",
+        "save_workflow_draft",
         "request_workflow_publish",
         "get_publish_request_status",
         "save_node_code_draft",
@@ -152,6 +154,34 @@ def test_get_active_workflow(recorded) -> None:
     _run_tool(server, "get_active_workflow", {"workspace_id": "ws-1"})
     assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/active")
     assert calls[0]["method"] == "GET"
+
+
+def test_get_workflow_draft_gets_canvas_draft(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_workflow_draft", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/draft")
+
+
+def test_save_workflow_draft_puts_with_cas_token(recorded) -> None:
+    # #633: the write carries the CAS base (expected_updated_at) — a stale
+    # token comes back as HTTP 409 text carrying the current draft.
+    server, calls = recorded
+    _run_tool(
+        server,
+        "save_workflow_draft",
+        {
+            "workspace_id": "ws-1",
+            "definition_yaml": "key: wf\n",
+            "expected_updated_at": "2026-09-12 00:00:00+00",
+        },
+    )
+    assert calls[0]["method"] == "PUT"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/draft")
+    assert calls[0]["json"] == {
+        "definition_yaml": "key: wf\n",
+        "expected_updated_at": "2026-09-12 00:00:00+00",
+    }
 
 
 def test_validate_workflow_posts_definition(recorded) -> None:

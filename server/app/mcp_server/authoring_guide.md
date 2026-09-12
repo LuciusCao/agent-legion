@@ -14,6 +14,18 @@ Studio. Nothing you do takes effect in production by itself.
   YAML. Answers `{"state": "empty", ...}` (HTTP 200) when the workspace has no
   published workflow yet: that is your signal to author from scratch, not an
   error.
+- `get_workflow_draft(workspace_id)` — the workspace's unpublished Studio
+  draft (the SAME draft the canvas autosaves; NOT the active revision).
+  `{"definition_yaml": ..., "updated_at": ...}`; both null when no draft was
+  ever saved. The `updated_at` is your CAS token for `save_workflow_draft`.
+- `save_workflow_draft(workspace_id, definition_yaml, expected_updated_at)` —
+  write the full definition YAML into the Studio draft; the human's canvas and
+  YAML editor pick it up. CAS: `expected_updated_at` must be the `updated_at`
+  from your last read (or the literal `never-saved` when none existed). A
+  stale token returns HTTP 409 with the current draft embedded
+  (`current_draft.definition_yaml` / `current_draft.updated_at`) — rebase your
+  changes onto that draft and retry with its timestamp; never retry the old
+  one. Draft only: publishing stays with `request_workflow_publish`.
 - `validate_workflow(workspace_id, definition_yaml)` — the full publish
   validation set (structure + bindings). Persists nothing.
 - `compare_workflow(workspace_id, definition_yaml)` — diff vs the active
@@ -86,10 +98,14 @@ publish, agent definition publish, and skill release actions stay human-only).
 3. Draft the definition YAML (section 3).
 4. `validate_workflow` → fix every reported error. Then `compare_workflow`
    → preview the full shape. Repeat until clean.
-5. For each code node, `save_node_code_draft` with `expected_capability` set
+5. `save_workflow_draft` → persist the validated YAML as the Studio draft
+   (`expected_updated_at` from your `get_workflow_draft`/`get_studio_context`
+   read, or `never-saved`). On a 409 conflict, rebase onto the returned
+   `current_draft` and retry — the human may have edited concurrently.
+6. For each code node, `save_node_code_draft` with `expected_capability` set
    (section 4). For each agent-backed capability without a published Agent,
    `save_agent_definition_draft` (section 5).
-6. Present the change summary to the human, then call
+7. Present the change summary to the human, then call
    `request_workflow_publish` — the publish review dialog pops in Studio with
    the same compare data. Poll `get_publish_request_status`: confirmed means
    live, rejected/expired means revise the draft and re-request, superseded
@@ -258,6 +274,11 @@ reports — a malformed block fails validation just like a missing file.
 
 - `Draft workflow key '...' does not match workspace default workflow key
   '...'` — the workspace already has a key; re-emit the YAML with that key.
+- HTTP 409 `Workflow draft conflict` from `save_workflow_draft` — the human
+  (or another session) saved a newer draft after your read. Rebase your
+  changes onto `current_draft.definition_yaml` from the error and retry with
+  `current_draft.updated_at` as the new `expected_updated_at`; never retry
+  the stale timestamp.
 - `no published node code for ...` — publish the node code first
   (`save_node_code_draft` with `expected_capability`, then publish).
 - `Agent capability X must resolve to exactly one published Agent` — draft
