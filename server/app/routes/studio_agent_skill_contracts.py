@@ -37,3 +37,6 @@ class SkillSaveVersionResponse(BaseModel):
     tag: str
     commit: str
     files: list[str] = Field(default_factory=list)
+    # Shared materials the save synced into the commit (#633); empty list
+    # when the workspace has no _shared mapping for this skill.
+    synced_files: list[str] = Field(default_factory=list)

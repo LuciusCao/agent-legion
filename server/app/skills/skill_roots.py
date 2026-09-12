@@ -39,10 +39,15 @@ def _validate_workspace_id(workspace_id: str) -> None:
         raise ValueError(msg)
 
 
-def workspace_skill_dir(workspace_id: str) -> Path:
-    """A workspace's agent skill directory under the skills root."""
+def workspace_skill_dir(workspace_id: str, *, base_dir: Path | None = None) -> Path:
+    """A workspace's agent skill directory under the skills root.
+
+    ``base_dir`` (optional, #633) lets the shared-materials services derive
+    the workspace dir from the same base the skill catalog/editing services
+    were constructed with instead of re-reading HOME.
+    """
     _validate_workspace_id(workspace_id)
-    return skills_root() / workspace_id
+    return (base_dir or skills_root()) / workspace_id
 
 
 def workspace_skill_prefix_display(workspace_id: str) -> str:

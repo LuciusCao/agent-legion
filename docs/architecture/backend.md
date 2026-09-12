@@ -217,6 +217,8 @@ server/app/
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/node-prompt` | `save_node_prompt_route` | routes/studio_agent_prompt_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/publish-request` | `request_workflow_publish` | routes/studio_agent_publish_tools.py |
 | GET | `/studio-agent/tools/publish-requests/{request_id}` | `get_publish_request_status` | routes/studio_agent_publish_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared` | `get_shared_materials` | routes/studio_agent_shared_tools.py |
+| PUT | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared` | `save_shared_materials` | routes/studio_agent_shared_tools.py |
 | GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/versions` | `save_skill_version` | routes/studio_agent_skill_tools.py |
@@ -525,11 +527,15 @@ server/app/
 | PreviewPanelDraftRequest | BaseModel | html: str, change_note: str | None | app/routes/studio_agent_preview_contracts.py |
 | PreviewContextJobSummary | BaseModel | id: str, status: str | None, source_type: str | None, source_id: str | None, ... | app/routes/studio_agent_preview_contracts.py |
 | PreviewContextResponse | BaseModel | workspace_id: str, recent_jobs: list[PreviewContextJobSummary], selected_job:... | app/routes/studio_agent_preview_contracts.py |
+| SharedMaterialFileWrite | BaseModel | path: str, content: str | app/routes/studio_agent_shared_contracts.py |
+| SharedMaterialsSaveRequest | BaseModel | files: list[SharedMaterialFileWrite] | app/routes/studio_agent_shared_contracts.py |
+| SharedMaterialFile | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/studio_agent_shared_contracts.py |
+| SharedMaterialsResponse | BaseModel | workspace_id: str, map: dict[str, Any] | None, files: list[SharedMaterialFile] | app/routes/studio_agent_shared_contracts.py |
 | SkillValidationIssue | BaseModel | path: str, error: str | app/routes/studio_agent_skill_contracts.py |
 | SkillValidateToolResponse | BaseModel | key: str, valid: bool, errors: list[SkillValidationIssue] | app/routes/studio_agent_skill_contracts.py |
 | SkillVersionFileWrite | BaseModel | path: str, content: str | app/routes/studio_agent_skill_contracts.py |
 | SkillSaveVersionRequest | BaseModel | files: list[SkillVersionFileWrite], new_tag: str, message: str | app/routes/studio_agent_skill_contracts.py |
-| SkillSaveVersionResponse | BaseModel | key: str, tag: str, commit: str, files: list[str] | app/routes/studio_agent_skill_contracts.py |
+| SkillSaveVersionResponse | BaseModel | key: str, tag: str, commit: str, files: list[str], synced_files: list[str] | app/routes/studio_agent_skill_contracts.py |
 | StudioAgentTokenMintRequest | BaseModel | ttl_hours: int | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenMintResponse | BaseModel | id: str, token: str, expires_at: str | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenEntry | BaseModel | id: str, created_at: str, expires_at: str, revoked_at: str | None | app/routes/studio_agent_token_contracts.py |

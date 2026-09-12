@@ -115,6 +115,8 @@ def test_loopback_tools_are_async() -> None:
         "get_skill",
         "validate_skill",
         "save_skill_version",
+        "get_shared_materials",
+        "save_shared_materials",
         "get_preview_context",
         "get_preview_panel",
         "save_preview_panel_draft",
@@ -333,6 +335,25 @@ def test_save_skill_version_posts_body(recorded) -> None:
     assert calls[0]["method"] == "POST"
     assert calls[0]["url"].endswith("/skills/wf/review/versions")
     assert calls[0]["json"] == {"files": files, "new_tag": "v2.0.0", "message": "revise"}
+
+
+def test_get_shared_materials_gets_workspace_materials(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_shared_materials", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/skills-shared")
+
+
+def test_save_shared_materials_puts_files(recorded) -> None:
+    server, calls = recorded
+    files = [
+        {"path": "map.json", "content": '{"version": 1, "materials": []}'},
+        {"path": "references/style.md", "content": "# style\n"},
+    ]
+    _run_tool(server, "save_shared_materials", {"workspace_id": "ws-1", "files": files})
+    assert calls[0]["method"] == "PUT"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/skills-shared")
+    assert calls[0]["json"] == {"files": files}
 
 
 def test_get_preview_guide_is_served_locally(recorded) -> None:

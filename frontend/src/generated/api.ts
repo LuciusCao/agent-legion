@@ -1399,6 +1399,24 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills-shared': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Shared Materials */
+    get: operations['get_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_get']
+    /** Save Shared Materials */
+    put: operations['save_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active': {
     parameters: {
       query?: never
@@ -5714,6 +5732,50 @@ export interface components {
       tools?: components['schemas']['RuntimeToolEntry'][]
     }
     /**
+     * SharedMaterialFile
+     * @description One readable shared file — same shape as the skill detail read.
+     */
+    SharedMaterialFile: {
+      /** Content */
+      content: string
+      /** Path */
+      path: string
+      /** Size */
+      size: number
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated: boolean
+    }
+    /** SharedMaterialFileWrite */
+    SharedMaterialFileWrite: {
+      /** Content */
+      content: string
+      /** Path */
+      path: string
+    }
+    /**
+     * SharedMaterialsResponse
+     * @description Workspace shared materials; ``map: null`` + empty ``files`` is the
+     *     structured empty state for a workspace that never opted into ``_shared``.
+     */
+    SharedMaterialsResponse: {
+      /** Files */
+      files?: components['schemas']['SharedMaterialFile'][]
+      /** Map */
+      map?: {
+        [key: string]: unknown
+      } | null
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** SharedMaterialsSaveRequest */
+    SharedMaterialsSaveRequest: {
+      /** Files */
+      files: components['schemas']['SharedMaterialFileWrite'][]
+    }
+    /**
      * SkillDetailResponse
      * @description Skill detail; with the ``ref`` query param the content comes from that
      *     git tag instead of the working tree (lock and checkout untouched). An
@@ -5780,6 +5842,8 @@ export interface components {
       files?: string[]
       /** Key */
       key: string
+      /** Synced Files */
+      synced_files?: string[]
       /** Tag */
       tag: string
     }
@@ -10310,6 +10374,72 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['PreviewPanelVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedMaterialsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SharedMaterialsSaveRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedMaterialsResponse']
         }
       }
       /** @description Validation Error */
