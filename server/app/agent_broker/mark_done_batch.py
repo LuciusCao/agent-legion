@@ -7,7 +7,9 @@ arm the batcher's writer thread runs — N guarded request closes inside ONE
 mirror post-commit. Per-item semantics match ``mark_done`` exactly (the
 guarded SELECT ... FOR UPDATE re-runs per entry inside the shared
 transaction; a None verdict is data); the win is one commit fsync and one
-connection checkout for the whole wave slice.
+connection checkout for the whole wave slice. The batcher binds the
+retry-wrapped entry (``mark_done_many_with_retry``, #609 P2-A — symmetric
+with the finish arm's wrapper).
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.worker_presence import touch_worker
+from server.app.db.retry import retry_on_database_conflict
 from server.app.db.transaction import write_transaction
 
 if TYPE_CHECKING:
@@ -65,3 +68,15 @@ def mark_done_many(
             # a bus failure must not fail the batch's verdicts.
             logger.exception("worker-released notify failed for %s", worker_id)
     return results
+
+
+def mark_done_many_with_retry(
+    broker: AgentExecutionBroker,
+    writes: list[tuple[str, str, str, Mapping[str, Any]]],
+) -> list[str | None]:
+    """#609 P2-A: the retry wrapper the batcher binds — symmetric with
+    ``finish_many_with_retry``. Cross-replica deployments (the
+    single-replica probe is warning-only) can 40P01 the shared mark_done
+    transaction; without this wrapper the writer's whole round and every
+    isolation-fallback single-item replay would run un-wrapped."""
+    return retry_on_database_conflict(lambda: mark_done_many(broker, writes))

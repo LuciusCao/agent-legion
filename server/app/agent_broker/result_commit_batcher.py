@@ -206,10 +206,6 @@ class ResultCommitBatcher:
             _run_post_commit(callback)
         return item.future.result
 
-    def pending_depth(self) -> int:
-        """Queue depth (observability only; the sampler may read it)."""
-        return self._queue.qsize()
-
     def _writer_loop(self) -> None:
         while not self._stop.is_set():
             item = self._queue.get()

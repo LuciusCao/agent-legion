@@ -1,10 +1,11 @@
 """#591 agent-plane batcher wiring tests (no app, no threads started).
 
 The plane-level contract only: the knob decides whether the batcher is
-constructed, both repositories share the ONE instance, and the arms point
-at the repository methods (the thread lifecycle is the app lifespan's job
-— tests never start it here). The ``job_db`` fixture rides the postgres
-tier (the repository constructor runs init_db).
+constructed, both repositories share the ONE instance, and the arms are
+the retry-wrapped batch modules bound to their owners (#609 P2-A; the
+thread lifecycle is the app lifespan's job — tests never start it here).
+The ``job_db`` fixture rides the postgres tier (the repository constructor
+runs init_db).
 """
 
 from __future__ import annotations
@@ -57,7 +58,13 @@ def test_knob_on_shares_one_batcher(job_db, settings) -> None:
     assert batcher is not None
     assert plane.executor_leases.result_batcher is batcher
     assert plane.broker.result_batcher is batcher
-    assert batcher.mark_done_many == plane.broker.mark_done_many
+    # #609 P2-A: BOTH arms are retry-wrapped (partials over the module
+    # functions) — a bare broker.mark_done_many binding regresses the
+    # mark_done arm to un-wrapped retries under cross-replica 40P01.
+    from server.app.agent_broker.mark_done_batch import mark_done_many_with_retry
+
+    assert batcher.mark_done_many.args == (plane.broker,)
+    assert batcher.mark_done_many.func is mark_done_many_with_retry
     # The finish arm is the retry-wrapped batch module bound to the repo
     # (partial — repo-method identity does not hold by design).
     assert callable(batcher.finish_many)

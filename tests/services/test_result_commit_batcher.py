@@ -2,9 +2,8 @@
 
 Three layers:
 
-- unit layer (no DB): the batcher's queue semantics — verdict plumbing,
-  two-phase ordering, drain-only collection, isolation fallback, and the
-  stop-drain;
+- queue unit tests live in the sister ``test_result_commit_batcher_queue.py``;
+  this file owns repository and wired integration behavior;
 - repository layer (real PostgreSQL): ``finish_many`` / ``mark_done_many``
   per-item semantics against seeded leases/requests — the 409 verdicts are
   data, not errors, and one item's rejection must not fail its neighbours;
@@ -16,7 +15,14 @@ Three layers:
   completed/failed gate on events post-processing (a cancelled result
   parses no partial events.jsonl) and its #521 lease_write/events stage
   marks on the submitting thread (#530: cancelled/409 never report an
-  events segment).
+  events segment);
+- #609 round 3 (P2): the mark_done arm binds the retry wrapper
+  (cross-replica symmetry with the finish arm); the max-items split and
+  the stop exit-drain are pinned for real (direct queue fill / writer
+  parked inside an arm); the wired path runs the PRODUCTION order
+  (finish → mark_done per request); a mixed-409 mark_done batch and a
+  mixed-kind round (the finish transaction commits before the mark_done
+  one) are covered.
 """
 
 from __future__ import annotations
@@ -27,14 +33,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
-import pytest
-
 import server.app.agent_broker.result_commit_batcher as _batcher_module
 from server.app.agent_broker import AgentExecutionBroker
-from server.app.agent_broker.result_commit_batcher import (
-    MAX_ITEMS_PER_TRANSACTION,
-    ResultCommitBatcher,
-)
+from server.app.agent_broker.mark_done_batch import mark_done_many_with_retry
+from server.app.agent_broker.result_commit_batcher import ResultCommitBatcher
 from server.app.agent_broker.result_timing import ResultStageTimer
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.executors import _lease_finish_batch
@@ -89,154 +91,6 @@ def _usage_node_run_ids(job_db) -> set[int]:
     return {int(row["node_run_id"]) for row in rows}
 
 
-# ---------------------------------------------------------------- unit layer
-
-
-class _CountingArm:
-    """Batched-arm double: counts calls, returns per-item verdicts."""
-
-    def __init__(self, verdicts: list | None = None, fail_on: set[int] | None = None) -> None:
-        self.calls: list[list[tuple]] = []
-        self.verdicts = verdicts
-        self.fail_on = fail_on or set()
-
-    def __call__(self, args: list[tuple]):
-        self.calls.append(list(args))
-        if self.fail_on and len(self.calls) - 1 in self.fail_on:
-            raise RuntimeError("boom")
-        if self.verdicts is not None:
-            return list(self.verdicts)
-        return [True] * len(args)
-
-
-def test_submit_returns_verdict_through_queue() -> None:
-    arm = _CountingArm()
-    batcher = ResultCommitBatcher(arm, arm)
-    batcher.start()
-    try:
-        assert batcher.submit("finish", ("lease-1",)) is True
-        assert batcher.submit("mark_done", ("exec-1",)) is True
-    finally:
-        batcher.stop()
-    # Idle rhythm: each submit is drained alone (drain-only, no linger).
-    assert [c for c in arm.calls if c] == [[("lease-1",)], [("exec-1",)]]
-
-
-def test_wave_batches_into_one_transaction_per_kind() -> None:
-    calls: list[list[tuple]] = []
-    released = threading.Event()
-
-    def _recording_arm(args: list[tuple]):
-        # Hold the FIRST round open so the wave's remaining items pile up
-        # on the queue and join the SAME round; later rounds run through.
-        calls.append(list(args))
-        if len(calls) == 1:
-            released.wait(timeout=5)
-        return [True] * len(args)
-
-    batcher = ResultCommitBatcher(_recording_arm, _recording_arm)
-    batcher.start()
-    try:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            first = pool.submit(batcher.submit, "finish", ("lease-1",))
-            time.sleep(0.05)  # let the writer pick lease-1 up and park
-            rest = [pool.submit(batcher.submit, "finish", (f"lease-{i}",)) for i in range(2, 6)]
-            released.set()
-            assert first.result(timeout=5) is True
-            assert all(f.result(timeout=5) is True for f in rest)
-    finally:
-        batcher.stop()
-    # The first round carried lease-1 (alone or with whatever arrived
-    # before the writer got there); the wave's later finishes joined a
-    # multi-item round — the queue is FIFO and drain-only, so items that
-    # arrived while round one was parked cannot run alone.
-    flat = [a for call in calls for a in call]
-    assert ("lease-1",) in calls[0]
-    assert any(len(call) > 1 for call in calls)
-    assert sorted(flat) == sorted((f"lease-{i}",) for i in range(1, 6))
-
-
-def test_isolation_fallback_reruns_items_individually() -> None:
-    # Batch arm raises for the whole slice; every item must still get its
-    # OWN verdict via the single-item re-run: the good items resolve True,
-    # the deterministic failure crosses back as its exception (the same
-    # raise the direct path gives).
-    def _flaky(args: list[tuple]):
-        if len(args) > 1:
-            raise RuntimeError("slice aborted")
-        if args[0][0] == "lease-bad":
-            raise RuntimeError("deterministic failure")
-        return [True]
-
-    batcher = ResultCommitBatcher(_flaky, _flaky)
-    batcher.start()
-    try:
-        assert batcher.submit("finish", ("lease-1",)) is True
-        with pytest.raises(RuntimeError, match="deterministic failure"):
-            batcher.submit("finish", ("lease-bad",))
-    finally:
-        batcher.stop()
-
-
-def test_stop_drains_parked_items() -> None:
-    arm = _CountingArm()
-    batcher = ResultCommitBatcher(arm, arm)
-    batcher.start()
-    # Park an item on the queue without a consumer racing: stop() must
-    # drain it (the future resolves) — the shutdown contract.
-    item_future_gate = threading.Event()
-
-    def _gated(args):  # noqa: ANN001
-        item_future_gate.set()
-        return [True] * len(args)
-
-    batcher.finish_many = _gated
-    try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(batcher.submit, "finish", ("lease-1",))
-            assert future.result(timeout=5) is True
-        assert item_future_gate.is_set()
-    finally:
-        batcher.stop()
-
-
-def test_stop_timeout_is_explicit_while_writer_is_still_draining() -> None:
-    """PR #621 Codex P1: a bounded shutdown may report timeout, but it must
-    never return success while an in-flight DB arm can still use the pool."""
-    entered = threading.Event()
-    release = threading.Event()
-
-    def _blocked_arm(args):  # noqa: ANN001
-        entered.set()
-        release.wait(timeout=5)
-        return [True] * len(args)
-
-    batcher = ResultCommitBatcher(_blocked_arm, _blocked_arm)
-    batcher.start()
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(batcher.submit, "finish", ("lease-1",))
-        assert entered.wait(timeout=5)
-        with pytest.raises(TimeoutError, match="still draining"):
-            batcher.stop(timeout_seconds=0.01)
-        release.set()
-        assert future.result(timeout=5) is True
-    batcher.stop(timeout_seconds=1)
-
-
-def test_max_items_bound_splits_rounds() -> None:
-    arm = _CountingArm()
-    batcher = ResultCommitBatcher(arm, arm)
-    # Block the writer from starting: fill the queue directly, then run one
-    # _run_batch by hand to observe the bound without racing the thread.
-    items = 2 * MAX_ITEMS_PER_TRANSACTION
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        futures = [pool.submit(batcher.submit, "finish", (f"lease-{i}",)) for i in range(items)]
-        # Not started yet: nothing drains; start now and let it run.
-        batcher.start()
-        assert all(f.result(timeout=10) is True for f in futures)
-    batcher.stop()
-
-
 # -------------------------------------------------------- repository layer
 
 
@@ -285,18 +139,58 @@ def test_mark_done_many_matches_direct_semantics(job_db) -> None:
     ]
 
 
+def test_mark_done_many_mixed_409_in_batch_is_data(job_db) -> None:
+    """#609 P2-B: [success, None, success] in ONE shared transaction — a
+    mismatched guard (wrong lease/worker/already-done) is per-item data
+    that must neither fail the neighbours nor abort the transaction."""
+    for index in range(3):
+        seed_request(job_db, job_id=f"job-{index}", limit=10)
+    _setup_worker(job_db)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+    claims = [broker.claim("worker-1") for _ in range(3)]
+    assert all(c is not None for c in claims)
+    outcome = {"status": "completed"}
+
+    verdicts = broker.mark_done_many(
+        [
+            (claims[0].execution_id, "worker-1", claims[0].lease_id, outcome),
+            # Guard miss: a stale lease_id from a previous attempt shape —
+            # the row exists but the triple does not match, so the guarded
+            # SELECT ... FOR UPDATE returns no row for exactly this entry.
+            (claims[1].execution_id, "worker-1", "lease-not-the-bound-one", outcome),
+            (claims[2].execution_id, "worker-1", claims[2].lease_id, outcome),
+        ]
+    )
+    assert verdicts == [claims[0].lease_id, None, claims[2].lease_id]
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            "select execution_id, state from agent_execution_requests order by execution_id"
+        ).fetchall()
+    states = {str(row["execution_id"]): str(row["state"]) for row in rows}
+    assert states[claims[0].execution_id] == "done"
+    assert states[claims[1].execution_id] == "claimed"
+    assert states[claims[2].execution_id] == "done"
+
+
 # -------------------------------------------------------- integration layer
 
 
 def test_wired_batcher_commits_wave_end_to_end(job_db) -> None:
-    """The full #591 path: broker+leases share one batcher; a wave of
-    mark_done verdicts rides the writer thread and commits correctly."""
+    """The full #591 path in PRODUCTION order (#609 P2-B): per request the
+    commit path runs finish → mark_done (``commit_agent_result``'s shape),
+    never the reverse. A wave of four rides the writer thread as one
+    finish round + one mark_done round and lands committed terminal state;
+    the request closes stay bound to their leases (a mark_done that ran
+    first would strand the leases the finishes need)."""
     for index in range(4):
         seed_request(job_db, job_id=f"job-{index}", limit=10)
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
-    batcher = ResultCommitBatcher(partial(finish_many_with_retry, leases), broker.mark_done_many)
+    batcher = ResultCommitBatcher(
+        partial(finish_many_with_retry, leases),
+        partial(mark_done_many_with_retry, broker),
+    )
     broker.result_batcher = batcher
     leases.result_batcher = batcher
     batcher.start()
@@ -304,37 +198,121 @@ def test_wired_batcher_commits_wave_end_to_end(job_db) -> None:
         claims = [broker.claim("worker-1") for _ in range(4)]
         assert all(c is not None for c in claims)
         with ThreadPoolExecutor(max_workers=4) as pool:
-            verdicts = [
+            rounds = [
                 f.result(timeout=10)
                 for f in [
+                    # finish FIRST, then the callback-shaped mark_done —
+                    # the two-phase contract the sweeper's crash window
+                    # relies on.
                     pool.submit(
-                        broker.mark_done,
-                        claim.execution_id,
-                        "worker-1",
-                        claim.lease_id,
-                        {"status": "completed"},
-                    )
-                    for claim in claims
-                ]
-            ]
-        assert verdicts == [c.lease_id for c in claims]
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            with_leases = [
-                f.result(timeout=10)
-                for f in [
-                    pool.submit(
-                        leases.finish,
-                        claim.lease_id,
+                        _finish_then_mark_done,
+                        leases,
+                        broker,
+                        claim,
                         ExecutionResult(status="completed", exit_code=0),
                     )
                     for claim in claims
                 ]
             ]
-        assert with_leases == [True] * 4
+        assert rounds == [(True, True)] * 4
     finally:
         batcher.stop()
     for index in range(4):
         assert job_db.get_job_node(f"job-{index}", "generate")["status"] == "completed"
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            "select state, lease_id from agent_execution_requests"
+            " where job_id in ('job-0', 'job-1', 'job-2', 'job-3')"
+        ).fetchall()
+    assert rows and all(str(row["state"]) == "done" and row["lease_id"] is not None for row in rows)
+
+
+def _finish_then_mark_done(leases, broker, claim, result) -> tuple[bool, bool]:
+    """One commit thread's production sequence: finish() → mark_done()."""
+    finished = leases.finish(claim.lease_id, result)
+    done = (
+        broker.mark_done(claim.execution_id, "worker-1", claim.lease_id, {"status": "completed"})
+        is not None
+    )
+    return finished, done
+
+
+def test_mixed_kind_round_commits_finish_before_mark_done(job_db, monkeypatch) -> None:
+    """#609 P2-B: a mixed round (finish + mark_done drained together) runs
+    the finish arm's transaction to completion BEFORE the mark_done arm's —
+    the ordering contract that keeps every interleaving of one request's
+    pair on the right side of the sweeper's crash window. Pinned by
+    recording arm invocations on the shared writer thread."""
+    seed_request(job_db, job_id="job-1", limit=10)
+    seed_request(job_db, job_id="job-2", limit=10)
+    _setup_worker(job_db)
+    leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+    arm_order: list[tuple[str, int]] = []
+    first_finish_entered = threading.Event()
+    release_first_finish = threading.Event()
+    finish_calls = 0
+
+    def _finish_arm(writes):  # noqa: ANN001
+        nonlocal finish_calls
+        finish_calls += 1
+        arm_order.append(("finish", len(writes)))
+        if finish_calls == 1:
+            first_finish_entered.set()
+            release_first_finish.wait(timeout=5)
+        return finish_many_with_retry(leases, writes)
+
+    def _mark_done_arm(writes):  # noqa: ANN001
+        arm_order.append(("mark_done", len(writes)))
+        return mark_done_many_with_retry(broker, writes)
+
+    batcher = ResultCommitBatcher(_finish_arm, _mark_done_arm)
+    round_kinds: list[list[str]] = []
+    real_run_batch = batcher._run_batch
+
+    def _recording_run_batch(batch):  # noqa: ANN001
+        round_kinds.append([item.kind for item in batch])
+        return real_run_batch(batch)
+
+    monkeypatch.setattr(batcher, "_run_batch", _recording_run_batch)
+    broker.result_batcher = batcher
+    leases.result_batcher = batcher
+    batcher.start()
+    try:
+        claims = [broker.claim("worker-1") for _ in range(2)]
+        assert all(c is not None for c in claims)
+        result = ExecutionResult(status="completed", exit_code=0)
+        # Hold the first round inside its finish arm. Both kinds then queue
+        # behind it before release, forcing the next drain to be a mixed
+        # round rather than relying on scheduler timing.
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            first_finish = pool.submit(leases.finish, claims[0].lease_id, result)
+            assert first_finish_entered.wait(timeout=5)
+            rest = [
+                pool.submit(leases.finish, claims[1].lease_id, result),
+                pool.submit(
+                    broker.mark_done,
+                    claims[0].execution_id,
+                    "worker-1",
+                    claims[0].lease_id,
+                    {"status": "completed"},
+                ),
+            ]
+            deadline = time.monotonic() + 5
+            while batcher._queue.qsize() < 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert batcher._queue.qsize() >= 2, "mixed items never reached the queue"
+            release_first_finish.set()
+            assert first_finish.result(timeout=10) is True
+            assert all(f.result(timeout=10) for f in rest)
+    finally:
+        release_first_finish.set()
+        batcher.stop()
+    assert round_kinds[0] == ["finish"]
+    assert len(round_kinds) == 2 and sorted(round_kinds[1]) == ["finish", "mark_done"]
+    assert [kind for kind, _ in arm_order] == ["finish", "finish", "mark_done"]
+    for index in range(len(claims)):
+        assert job_db.get_job_node(f"job-{index + 1}", "generate")["status"] == "completed"
 
 
 def test_kill_switch_none_batcher_takes_direct_path(job_db) -> None:
@@ -419,7 +397,9 @@ def test_post_stop_submit_takes_direct_path(job_db) -> None:
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
-    batcher = ResultCommitBatcher(partial(finish_many_with_retry, leases), broker.mark_done_many)
+    batcher = ResultCommitBatcher(
+        partial(finish_many_with_retry, leases), partial(mark_done_many_with_retry, broker)
+    )
     broker.result_batcher = batcher
     leases.result_batcher = batcher
     claim = broker.claim("worker-1")
@@ -440,7 +420,9 @@ def test_writer_offloads_post_commit_to_submitter(job_db) -> None:
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
-    batcher = ResultCommitBatcher(partial(finish_many_with_retry, leases), broker.mark_done_many)
+    batcher = ResultCommitBatcher(
+        partial(finish_many_with_retry, leases), partial(mark_done_many_with_retry, broker)
+    )
     broker.result_batcher = batcher
     leases.result_batcher = batcher
     claim = broker.claim("worker-1")
@@ -479,7 +461,9 @@ def test_submit_racing_stop_never_enqueues_onto_dead_writer(job_db) -> None:
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
-    batcher = ResultCommitBatcher(partial(finish_many_with_retry, leases), broker.mark_done_many)
+    batcher = ResultCommitBatcher(
+        partial(finish_many_with_retry, leases), partial(mark_done_many_with_retry, broker)
+    )
     broker.result_batcher = batcher
     leases.result_batcher = batcher
     claim = broker.claim("worker-1")
@@ -516,38 +500,6 @@ def test_submit_racing_stop_never_enqueues_onto_dead_writer(job_db) -> None:
     finally:
         _batcher_module._BatchItem = real_item_cls
     assert job_db.get_job_node("job-1", "generate")["status"] == "completed"
-
-
-def test_restart_reopens_the_queue_after_stop() -> None:
-    """P1-1 companion nit: start() after stop() reopens the closed gate —
-    a restarted batcher serves the queue again instead of staying in
-    bypass mode, and a sentinel left by a stop() without a live writer
-    cannot kill the fresh writer on its first get()."""
-    arm = _CountingArm()
-    batcher = ResultCommitBatcher(arm, arm)
-    # stop() before any start(): no writer drains the sentinel — start()
-    # must drop it with the stale gate, or the fresh writer exits instantly
-    # and every submit parks forever.
-    batcher.stop()
-    batcher.start()
-    try:
-        assert batcher.submit("finish", ("lease-1",)) is True
-    finally:
-        batcher.stop()
-    assert arm.calls == [[("lease-1",)]]
-
-    # Same after a live start/stop cycle: the restart reopens the gate.
-    arm2 = _CountingArm()
-    batcher.finish_many = arm2
-    batcher.mark_done_many = arm2
-    batcher.start()
-    batcher.stop()
-    batcher.start()
-    try:
-        assert batcher.submit("mark_done", ("exec-1",)) is True
-    finally:
-        batcher.stop()
-    assert arm2.calls == [[("exec-1",)]]
 
 
 def test_batched_cancelled_finish_skips_events_post_processing(job_db) -> None:
@@ -609,7 +561,9 @@ def test_batched_finish_marks_result_stages_on_submitting_thread(job_db) -> None
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
-    batcher = ResultCommitBatcher(partial(finish_many_with_retry, leases), broker.mark_done_many)
+    batcher = ResultCommitBatcher(
+        partial(finish_many_with_retry, leases), partial(mark_done_many_with_retry, broker)
+    )
     broker.result_batcher = batcher
     leases.result_batcher = batcher
     claims = [broker.claim("worker-1") for _ in range(2)]
@@ -664,3 +618,31 @@ def test_batched_finish_marks_result_stages_on_submitting_thread(job_db) -> None
     assert set(inactive_timer.stages) == {"lease_write"}
     # Every mark closed on the submitting thread, never the single writer.
     assert marks and all(name != "result-commit-batcher" for _, name in marks)
+
+
+# --------------------------------------------- #609 round-3 P2 (P2-A wiring)
+
+
+def test_mark_done_arm_retries_deadlock(job_db, monkeypatch) -> None:
+    """P2-A: the retry wrapper the plane binds — a retryable 40P01 from the
+    shared mark_done transaction is retried (symmetric with
+    ``finish_many_with_retry``), so the writer's whole round AND the
+    isolation fallback's single-item replays (they ride the same bound
+    arm) are covered under cross-replica contention."""
+    import psycopg
+
+    import server.app.agent_broker.mark_done_batch as mark_done_batch_module
+
+    attempts = 0
+
+    def _flaky(broker, writes):  # noqa: ANN001
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise psycopg.errors.DeadlockDetected("deadlock detected")
+        return [None] * len(writes)
+
+    monkeypatch.setattr(mark_done_batch_module, "mark_done_many", _flaky)
+    verdicts = mark_done_many_with_retry(object(), [("e", "w", "l", {})])
+    assert verdicts == [None]
+    assert attempts == 2
