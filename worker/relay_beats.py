@@ -21,6 +21,7 @@ from typing import Any
 from worker.host.client import Client
 from worker.host.heartbeat_ops import SINGLE_BEAT_TIMEOUT_SECONDS
 from worker.relay_shards import BATCH_BEAT_TIMEOUT_SECONDS, RELAY_BEAT_SHARD, beat_sharded
+from worker.relay_thread_limiter import ShardThreadLimiter
 
 __all__ = [
     "BATCH_BEAT_TIMEOUT_SECONDS",
@@ -42,6 +43,10 @@ class RelayBeater:
         self._make_client = client_factory or (lambda host, token: Client(host, token=token))
         self._client: Any = None
         self._client_key: tuple[str, str] | None = None
+        # Shared across ticks: a timed-out request keeps its slot until its
+        # socket call really exits, so a slow Host cannot grow daemon threads
+        # without bound on every relay interval.
+        self._shard_threads = ShardThreadLimiter()
         self.degraded = False
         self._ping_error_logged = False
 
@@ -83,7 +88,7 @@ class RelayBeater:
         """Sharded parallel batch beat; the concurrency body lives in
         ``relay_shards`` (file-budget split, same seam as the #566 relay
         modules). ``(None, None)`` at the ``beat`` layer = transient."""
-        outcome = beat_sharded(self._client, leases, self._log)
+        outcome = beat_sharded(self._client, leases, self._log, self._shard_threads)
         if outcome.degraded:
             self.degraded = True
             self._log("Host 无批量心跳端点，relay 降级为逐租约心跳")

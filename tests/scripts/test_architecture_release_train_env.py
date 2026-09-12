@@ -26,13 +26,42 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "quality-gate.yml"
 ENV_NAME = "AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN"
 
-# (event, base_ref, head_ref, ref) → expected env value. The four gates
-# the expression encodes: release-train PR, main/master push rerun,
-# feature→develop PR, and anything else.
+# GitHub context → expected env value. The expression encodes internal
+# develop/release trains, main/master push reruns, and strict handling for
+# feature or fork PRs.
 _CONTEXTS: dict[str, tuple[dict[str, Any], str]] = {
     "release_train_pr": (
-        {"event_name": "pull_request", "base_ref": "main", "head_ref": "develop", "ref": ""},
+        {
+            "event_name": "pull_request",
+            "base_ref": "main",
+            "head_ref": "develop",
+            "ref": "",
+            "event_pull_request_head_repo_full_name": "owner/repo",
+            "repository": "owner/repo",
+        },
         "1",
+    ),
+    "versioned_release_train_pr": (
+        {
+            "event_name": "pull_request",
+            "base_ref": "main",
+            "head_ref": "release/0.7.10",
+            "ref": "",
+            "event_pull_request_head_repo_full_name": "owner/repo",
+            "repository": "owner/repo",
+        },
+        "1",
+    ),
+    "fork_cannot_impersonate_release_train": (
+        {
+            "event_name": "pull_request",
+            "base_ref": "main",
+            "head_ref": "release/0.7.10",
+            "ref": "",
+            "event_pull_request_head_repo_full_name": "fork/repo",
+            "repository": "owner/repo",
+        },
+        "0",
     ),
     "main_push_rerun": (
         {"event_name": "push", "base_ref": "", "head_ref": "", "ref": "refs/heads/main"},
@@ -160,13 +189,17 @@ class _GhaExpr:
             return self.evaluate(text[1:-1])
         if text[0] in "'\"":
             return text[1:-1]
+        function = re.fullmatch(r"startsWith\(([^,]+),\s*([^\)]+)\)", text)
+        if function:
+            value, prefix = (self._atom(argument) for argument in function.groups())
+            return str(value).startswith(str(prefix))
         for op in ("==", "!="):
             if op in text:
                 left, right = (side.strip() for side in text.split(op, 1))
                 lhs, rhs = self._atom(left), self._atom(right)
                 return lhs == rhs if op == "==" else lhs != rhs
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", text):
-            return self._context.get(text.split(".", 1)[1], None)
+        if re.fullmatch(r"github(?:\.[A-Za-z_][A-Za-z0-9_]*)+", text):
+            return self._context.get(text.removeprefix("github.").replace(".", "_"), None)
         if text == "true":
             return True
         if text == "false":

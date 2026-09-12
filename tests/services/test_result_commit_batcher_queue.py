@@ -138,6 +138,28 @@ def test_stop_drains_parked_items() -> None:
     assert sorted(flat) == sorted((f"lease-{i}",) for i in range(1, 4))
 
 
+def test_stop_timeout_is_explicit_while_writer_is_still_draining() -> None:
+    """A finite stop timeout must not report success before the arm exits."""
+    entered = threading.Event()
+    release = threading.Event()
+
+    def _blocked_arm(args):  # noqa: ANN001
+        entered.set()
+        release.wait(timeout=5)
+        return [True] * len(args)
+
+    batcher = ResultCommitBatcher(_blocked_arm, _blocked_arm)
+    batcher.start()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(batcher.submit, "finish", ("lease-1",))
+        assert entered.wait(timeout=5)
+        with pytest.raises(TimeoutError, match="still draining"):
+            batcher.stop(timeout_seconds=0.01)
+        release.set()
+        assert future.result(timeout=5) is True
+    batcher.stop(timeout_seconds=1)
+
+
 def test_max_items_bound_splits_rounds() -> None:
     """Pre-fill 2× the cap so the writer must drain exactly two rounds."""
     arm = _CountingArm()

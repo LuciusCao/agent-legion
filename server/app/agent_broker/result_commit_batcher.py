@@ -1,13 +1,11 @@
 """Group-commit batching for the result commit terminal writes (issue #591).
 
 #569 retired the validate/unpack CPU segments (process pools) and left the
-completion wave's remaining hotspot in the two DB-serializing segments the
-issue's stage data names: ``lease_write`` (the four-table terminal
-transaction, 59% of the slow-warning budget) and ``mark_done`` (the single-
-row request UPDATE, 17%). Both are pure queueing: the same wave's
-transactions fight for the same jobs-row lock (``sync_job_status``) and pay
-one commit fsync each — the DB itself is idle (21% CPU, 45 idle
-connections).
+completion wave's remaining hotspot in two DB-serializing segments:
+``lease_write`` (the four-table terminal transaction) and ``mark_done``
+(the single-row request UPDATE). Both are queueing-heavy under a completion
+wave: transactions fight for the same jobs-row lock (``sync_job_status``)
+and pay one commit fsync each.
 
 This module owns the write-side fix: one drain-only writer thread with a
 group-commit queue. A commit thread parks its terminal write on the queue
@@ -147,7 +145,7 @@ class ResultCommitBatcher:
             )
             self._thread.start()
 
-    def stop(self, timeout_seconds: float = 10.0) -> None:
+    def stop(self, timeout_seconds: float | None = None) -> None:
         """Stop the writer after draining; in-flight items complete first.
 
         The close decision and the sentinel enqueue run under the batcher
@@ -156,6 +154,12 @@ class ResultCommitBatcher:
         exit drain resolves it) or observes the closed gate and takes the
         direct path — the interleaving where it enqueues behind a dead
         writer and parks on a future nobody resolves cannot occur.
+
+        The default wait is unbounded because the app closes its database
+        pools immediately after this method returns. Callers that provide a
+        finite timeout get an explicit ``TimeoutError`` while the writer is
+        still alive, preventing teardown from silently closing those pools
+        underneath an in-flight terminal transaction.
         """
         with self._lock:
             self._closed.set()
@@ -164,6 +168,8 @@ class ResultCommitBatcher:
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=timeout_seconds)
+            if thread.is_alive():
+                raise TimeoutError("result commit batcher is still draining")
 
     def submit(self, kind: str, args: tuple, *, direct: Callable[[], Any] | None = None) -> Any:
         """Queue one terminal write and block for its verdict.

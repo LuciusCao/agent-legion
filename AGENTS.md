@@ -41,16 +41,16 @@
 
 ## 4. Quality Gates（必须执行）
 
-- 修改-验证内环用 `GATE_TIER=aff ./scripts/check-quick.sh`：backend 按覆盖逆索引只跑受影响测试、前端 `vitest related`。aff 档不是 gate 凭证（`run-local-gate.sh` 拒绝该档）——无索引、索引盲区或选择面太宽时自动回落 unit 全量，回落只会更慢、不会漏跑。任何代码修改后至少跑一次完整 `./scripts/check-quick.sh`（aff 通过不能替代）。
-- **quick gate 的完整档默认只跑 unit 层**（PostgreSQL 离线，`-m "not postgres and not repository_gate"`），postgres 集成层交给 CI（每个 PR 的 backend-postgres-a/b/c 必跑）。**碰数据库的改动（schema、migration、queries、routes 的 DB 行为）交接前必须显式跑 `GATE_TIER=postgres ./scripts/check-quick-backend.sh`**；本地全量替代品 `./scripts/check.sh` 含两层（unit 段 + postgres 追加段）。
+- 修改-验证内环用 `GATE_TIER=aff ./scripts/check-quick.sh`：backend 按覆盖逆索引只跑受影响测试、前端 `vitest related`。aff 档不是合并凭证；无索引、索引盲区或选择面太宽时自动回落 unit 全量。本地提交由 fast hook、推送由按路径裁剪的 smoke hook 兜底，完整门禁以 PR CI 为准，不再要求每条并行开发线重复跑本地完整 quick gate。
+- **quick gate 的完整档默认只跑 unit 层**（PostgreSQL 离线，`-m "not postgres and not repository_gate"`），postgres 集成层交给 CI（每个 PR 的 backend-postgres-a/b/c 必跑）。碰数据库的改动内环先跑直接相关的 postgres 测试；CI 不可用或需要离线发布凭证时，才跑 `GATE_TIER=postgres ./scripts/check-quick-backend.sh` 或含 unit + postgres 两层的 `./scripts/check.sh`。
 - gate 内部 test 轮错峰：backend lane 先单独跑完，frontend/rust 随后并行；静态轮全并行。
 - **机器级 gate 排队**：quick gate 经 git common dir 的 slot 排队（`scripts/gate-queue.sh`），默认 `AGENT_LEGION_MAX_PARALLEL_GATES=1`——同机串行、一次一个 gate 独占整机预算（大机器可显式设 2），后来者打印持有者并等待；每 lane worker 数按并发 gate 数均分，backend pytest 统一 `--dist worksteal`。排队本身就是正确行为，等待期做读代码/写代码等不占 CPU 的事。机制与实测依据见 [docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md)。
 - **aff 索引纪律**：`.pytest-aff-index.json` 是 gitignore 的本地工件，每个 worktree 首次用 aff 前必须先跑 `GATE_TIER=aff-index ./scripts/check-quick-backend.sh` 建索引（约 2.5 分钟）；依赖或 `tests/conftest.py` 变更后重建。aff 输出含「aff fallback」时先建索引再继续内环。
 - quick gate 的 backend lane 同时跑 `worker/ui/app.test.mjs`（node:test，无 node 时跳过并提示）；CI 侧在 api-check job 执行同一入口。
-- 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml` 的 backend-unit、api-check、backend-postgres-a/b/c、backend-coverage、frontend-logic、frontend-component、frontend-coverage、e2e-smoke、rust、docker-build 等 job）；CI 不可用时本地跑 `./scripts/check.sh` 代替。
+- 合并或发布前确认 GitHub Actions 的稳定聚合 check `quality-gate` 通过；它汇总 `.github/workflows/quality-gate.yml` 的全部适用 lane，未登记 rerun 也会在 PR 当场失败。CI 不可用时本地跑 `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push 默认跑 smoke 级（成员见 `tests/conftest.py`）并按推送路径裁剪 lane（纯前端跳过 backend pytest、纯 `velites/` 只跑 rust、docs 只跑静态、共享文件/新分支全量）。用 `AGENT_LEGION_GATE_LEVEL=quick` / `full` 升级单次推送。CI full gate 按同样的路径规则裁剪 lane（检测逻辑见 workflow 的 `changes` job；docs-only 变更仅 changes 与 docs-terms（退役术语门禁的轻量入口）运行 + postgres shard 秒级空跑、其余 lane 跳过，跳过/空跑的 required check 在分支保护里算通过）；ci-extended 与 nightly-e2e 在 `.github/workflows/nightly-gate.yml` 独立执行。
 - 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
-- 禁止在质量门未通过时声明完成。
+- 禁止在适用的本地反馈检查失败时交接，或在 PR `quality-gate` 未通过时声明可合并/可发布。
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema` 走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由 CI 与 `./scripts/check.sh` 强制）。pytest worker 数默认 worktree 感知（`scripts/gate-jobs.sh`），用 `AGENT_LEGION_TEST_WORKERS` 覆盖。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增 `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线 `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加 `@pytest.mark.no_db` 跳过 TRUNCATE 隔离。
 - 测试文件超过 800 行就应主动按被测主题拆分（同目录姊妹文件、用例零改动迁移）；gate 的 1000 行上限是硬底线。存量超 800 行的文件随下次触碰时顺手拆。
@@ -64,7 +64,7 @@
 - 概念退役 PR 必须同步在 `config/architecture/docs-retired-terms.yaml` 追加 pattern 条目，并清零现行文档命中（退役表述上下文豁免，语义见 `scripts/architecture/docs_retired_terms.py`）；现行文档白名单须与 `docs/architecture/README.md` 现行文档索引表同步。
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
 - 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计（排除注释行、空行与 docstring 行——#610 起 Python docstring 按文档免费，与 TS/Rust 的文档注释同权；与代码混行的 docstring 尾行仍计费，同尾注释纪律），不要为凑预算压缩注释或 docstring；`max_lines` 绝对上限按原始行数计（#293 起声明式产物 root 可覆盖：`server/app/db` 的 `.sql` 与 `worker/ui` 的 `.js/.css` 各有 root 级 `max_lines`）。
-- ceiling 单调只降不升（#209）：`check_architecture` 按 git 锚点拒绝**已跟踪条目**的任何上抬；唯一合法上抬通道是带 `remove_when` 的 `architecture.file_budget` 豁免。改名不重置 ceiling（git rename 检测沿用旧路径地板，#236）；真正的全新文件首次登记（actual + buffer）不受约束。release train（develop→main）例外：CI 在 `base=main && head=develop` 的 PR 与 main/master 合并后 push 重跑时设 `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD（#249）；feature→develop 的 PR 与本地门禁保持 HEAD^ 基线锚点严格性。本地模拟 CI 的 PR 锚点判定：设 `AGENT_LEGION_BUDGET_BASE=origin/develop` 后锚点变为 HEAD + 该 base ref（release-train opt-out 优先；base ref 无法解析硬失败，按指引 fetch；边界基线守卫共用该覆盖）。
+- ceiling 单调只降不升（#209）：`check_architecture` 按 git 锚点拒绝**已跟踪条目**的任何上抬；唯一合法上抬通道是带 `remove_when` 的 `architecture.file_budget` 豁免。改名不重置 ceiling（git rename 检测沿用旧路径地板，#236）；真正的全新文件首次登记（actual + buffer）不受约束。release train（同仓库 develop 或 release/* → main）例外：CI 在对应 PR 与 main/master 合并后 push 重跑时设 `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD（#249）；外部 fork 与其他 PR、本地门禁保持基线锚点严格性。本地模拟 CI 的 PR 锚点判定：设 `AGENT_LEGION_BUDGET_BASE=origin/develop` 后锚点变为 HEAD + 该 base ref（release-train opt-out 优先；base ref 无法解析硬失败，按指引 fetch；边界基线守卫共用该覆盖）。
 
 ## 6. Boundary Rules（禁止模式摘要）
 

@@ -22,7 +22,10 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
+
+from worker.relay_thread_limiter import ShardThreadLimiter
 
 # Relay beat sharding, deliberately tighter than the executor-side
 # MAX_BATCH_HEARTBEATS (256): one beat HTTP request that the Host cannot
@@ -71,6 +74,7 @@ def beat_sharded(
     client: Any,
     leases: list[tuple[str, str]],
     log: Callable[[str], None],
+    limiter: ShardThreadLimiter,
 ) -> ShardedBeat:
     """Beat every shard in parallel; verdicts merge, failures never sink
     neighbours (see ShardedBeat for the outcome shape)."""
@@ -113,11 +117,19 @@ def beat_sharded(
             lost.extend(pair for pair in chunk if pair[0] in lost_ids)
             cancelled.extend(body.get("cancelled_execution_ids", []))
 
-    threads = [
-        threading.Thread(target=beat_one_shard, args=(shard,), daemon=True) for shard in shards
-    ]
-    for thread in threads:
-        thread.start()
+    threads: list[threading.Thread] = []
+    for shard in shards:
+        thread = limiter.start(partial(beat_one_shard, shard))
+        if thread is None:
+            # Every occupied slot belongs to an earlier request that has not
+            # really returned. This shard is unknown for this tick, exactly
+            # like a transport failure; retrying by spawning another socket
+            # would recreate the resource leak this limiter prevents.
+            with lock:
+                failures += 1
+            log(f"心跳 relay 批量拍跳过（{len(shard)} 租约）：未完成分片已达上限")
+            continue
+        threads.append(thread)
     # One SHARED deadline for the whole fan-out join (PR #617 review P1-2):
     # a per-thread timeout would let wedged shards stack — N shards × (beat
     # timeout + margin) ≈ 240s at the 1024-lease cap — because `requests`'

@@ -144,8 +144,10 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # 文件名不带 ./ 前缀（裸 glob）：安装端 sha256 校验按文件名精确匹配
+      # （install-worker.sh 兼容剥前缀，但发布侧保持干净格式）。
       - name: Consolidate checksums
-        run: cd dist && sha256sum ./*.tar.gz > sha256.txt
+        run: cd dist && sha256sum *.tar.gz > sha256.txt
 
       # velites 版本线独立于仓库版本，两个 velites tag 之间整仓会合大量
       # host/worker PR——GitHub 自动生成的 release notes 按整仓 compare

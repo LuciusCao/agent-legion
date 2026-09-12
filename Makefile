@@ -156,7 +156,7 @@ check-quick: ## 运行快速质量门
 	./scripts/check-quick.sh
 
 .PHONY: check
-check: ## 运行完整质量门 (提交前使用)
+check: ## 运行完整质量门 (CI 不可用或离线发布时使用)
 	./scripts/check.sh
 
 .PHONY: check-ci

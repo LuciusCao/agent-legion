@@ -157,6 +157,11 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         self._queue: queue.Queue[Any] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._closed = False
+        # request_stop() only asks for a graceful post-turn exit; unlike
+        # close() it must NOT flip _closed, or a later close() (resume's
+        # winner-side teardown) would return at its idempotence gate without
+        # joining or killing a turn that is still running (codex P1).
+        self._stop_requested = False
         self._state_lock = threading.Lock()
         # Loop-owned handles, captured under _state_lock for cross-thread
         # cancel/kill; None until the connection is up.
@@ -221,6 +226,30 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             thread.join(timeout=CLOSE_GRACE_SECONDS * 2)
             if thread.is_alive():
                 logger.warning("studio chat ACP session thread did not stop in time")
+
+    def request_stop(self) -> None:
+        """Ask the session to stop after the current turn; never blocks.
+
+        #558: the dead-token escalation wants the (healthy) ACP process gone
+        once the running turn finishes, without killing it mid-turn and
+        without deadlocking on the ACP thread — keepalive runs ON that
+        thread, so close()'s join() is a self-join. The prompt loop drains
+        the queue only between turns, so a _CLOSE enqueued now lands exactly
+        after the current turn: the loop returns, the async-with tears the
+        subprocess down gracefully, and the existing on_exit path finishes
+        the cleanup (registry pop, token revoke).
+
+        Deliberately does NOT set ``_closed`` (codex P1): a resume racing in
+        mid-turn still needs close()'s full join→kill teardown of THIS
+        runtime before the new one spawns. The extra _CLOSE it queues is
+        harmless — the loop is already exiting. A wedged turn bounds the
+        graceful wait at PROMPT_TIMEOUT_SECONDS via on_turn_error; a parked
+        permission at the 120s auto-deny."""
+        with self._state_lock:
+            if self._closed or self._stop_requested:
+                return
+            self._stop_requested = True
+            self._queue.put(_CLOSE)
 
     def _kill_process(self) -> None:
         with self._state_lock:

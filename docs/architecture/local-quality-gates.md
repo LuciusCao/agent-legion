@@ -17,7 +17,7 @@ provide.
 | Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `scripts/check-quick.sh` with `GATE_TIER=smoke` |
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: unit-tier quick suite, lanes trimmed | `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
-| PR to `develop`/`main`/`master`, push to `main`/`master` | Full | CI jobs `backend-unit` + `api-check` + `backend-postgres-a/b/c` + `backend-coverage` + `frontend-*` + `rust` + `e2e-smoke` |
+| PR to `develop`/`main`/`master`/`release/*`, push to `main`/`master` | Full | CI lanes run in parallel; stable aggregate check `quality-gate` is the merge boundary |
 | Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` (`nightly-gate.yml`) |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
@@ -29,6 +29,9 @@ diffs, and any diff failure fall back to all lanes. CI always runs every lane
 of the full quick suite, so trimming never weakens the server-side boundary.
 The lane set and the test tier are part of the local evidence fingerprint, so
 evidence from a trimmed run is never reused for a different lane set or tier.
+Local checks are feedback rather than the trust boundary: parallel worktrees
+use the affected tier while editing and the path-trimmed smoke hook on push;
+they do not each repeat the complete unit or PostgreSQL suite before CI.
 
 Per-lane parallelism defaults are worktree-aware
 (`detect_gate_default_jobs_worktree_aware` in `scripts/gate-jobs.sh`): the
@@ -109,9 +112,9 @@ The full tier (`GATE_TIER=full`, the default for `check-quick.sh` without a
 tier override) selects the same unit layer as `GATE_TIER=unit`: the
 PostgreSQL integration layer (~47% of the quick suite's tests and ~2.5x the
 unit tier's wall time) moved out of the local default because CI re-runs all
-of it on every PR — paying it on every local gate bought little. Before
-handing off database-touching work, run `GATE_TIER=postgres
-./scripts/check-quick-backend.sh` explicitly (or rely on CI).
+of it on every PR — paying it on every local gate bought little. Database
+development runs directly related postgres tests in the inner loop and relies
+on the PR shards for the complete tier.
 `scripts/check.sh` — the local full-gate substitute — still pins both tiers
 itself (unit segment, then postgres appended onto the same coverage file),
 so its combined coverage report keeps seeing the whole suite. The postgres
@@ -120,7 +123,8 @@ segment re-enters the quick gate for its test round only
 `BACKEND_SKIP_WORKER_UI_TESTS=1` skips the tier-independent worker UI
 tests): the unit segment already ran those, so every check still runs
 exactly once per full gate, and the worktree lock, machine slot, and
-coverage append semantics are unchanged.
+coverage append semantics are unchanged. Use this local full substitute only
+when CI is unavailable or an offline release credential is required.
 
 The affected tier (`GATE_TIER=aff`) is the edit-test iteration loop for
 agents and humans alike: the backend lane selects tests whose recorded
@@ -153,7 +157,7 @@ unaffected. Passing evidence is shared through the same Git common directory.
 ## CI Workflow
 
 `.github/workflows/quality-gate.yml` runs on pull requests to
-`develop` / `main` / `master`, pushes to `main` / `master` (a `develop`
+`develop` / `main` / `master` / `release/*`, pushes to `main` / `master` (a `develop`
 merge is already covered by its PR gate, so push runs there were dropped to
 save Actions minutes), plus manual dispatch. Docs-only changes (`docs/**`,
 `**/*.md`, `LICENSE`) still trigger the workflow but every backend/frontend
@@ -176,7 +180,11 @@ The weekly schedule lives in `.github/workflows/nightly-gate.yml` (issue
 #193), which runs only `ci-extended` and `nightly-e2e` — the stress jobs
 never run on PR/push, and a scheduled trunk run in the quality-gate file
 shared its concurrency group, so it could cancel an in-flight push gate for
-the same ref:
+the same ref. Branch protection requires only the final `quality-gate` job.
+It runs with `always()`, reads every lane result through `needs`, accepts
+intentional path skips, and rejects failures or cancellations. Internal job
+names and shard counts can therefore change without rewriting protected-branch
+contexts:
 
 - **backend-unit** — static checks (ruff, format, mypy, architecture contracts,
   invariant registry, spec health, version-manifest consistency via
@@ -204,7 +212,9 @@ the same ref:
   for the backend partitions (agent dispatch / workflow upgrade / agent
   artifacts / worker execution plane / job log raw, #275+#295). Local
   `check.sh` keeps partitions report-only — its coverage file may hold a
-  partial tier, and floors on partial data produce false reds.
+  partial tier, and floors on partial data produce false reds. It also runs
+  `check_reruns.py` against every shard report: a retry-pass is merge-blocking
+  unless its exact nodeid has a live registry entry.
 - **frontend-logic / frontend-component / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
   the coverage job merges the shard blob reports and enforces the frontend
@@ -225,6 +235,9 @@ the same ref:
   only when the `changes` job detects image-relevant path changes
   (`Dockerfile`, `.dockerignore`, dependency locks, `worker/`, `shared/`,
   `deploy/`); no other job exercises the Dockerfile.
+- **quality-gate** — stable final context required by branch protection;
+  succeeds only when every selected lane succeeded (intentional path skips are
+  neutral).
 
 In `nightly-gate.yml`:
 
@@ -234,13 +247,9 @@ In `nightly-gate.yml`:
 - **exemption-expiry** — refreshes the issue-state manifest and detects
   expired architecture exemptions; since #295 it also detects expired
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
-  evidence without needing the extended rerun report — the PR gate's
-  `--reruns 1` makes reruns invisible there, so deadline drift now surfaces
-  at the same weekly cadence as exemption expiry). The PR-side visibility
-  half of #295: backend-coverage renders the rerun nodeids it has evidence
-  for in the job summary (the backend-full shard emits the rerun report;
-  unit/postgres shards do not), so a PR rerun can be checked against the
-  registry by eye.
+  evidence without needing the extended rerun report). PR backend-coverage
+  already enforces observed reruns and deadlines synchronously; this weekly
+  lane catches deadline drift even during a quiet week with no backend PR.
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
   re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
   PR/push stays Chromium-only) plus a workspace stress run
@@ -255,6 +264,9 @@ combined report in backend-coverage enforces the 85% floor.
 
 CI environment notes:
 
+- The workflow declares `permissions: contents: read`; PR test code and build
+  scripts receive no write token, and release workflows grant their own
+  permissions separately.
 - Each job gets a fresh `postgres:17` service container; `AGENT_LEGION_DATABASE_URL`
   and `AGENT_LEGION_TEST_DATABASE_URL` point at it. The test database and worker
   schemas are created lazily when the PostgreSQL layer starts; importing the
