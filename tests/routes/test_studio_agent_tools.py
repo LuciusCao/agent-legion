@@ -109,6 +109,15 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
                 "message": "m",
             },
         ),
+        # Shared skill material tools (#633): a workspace without _shared
+        # returns the structured empty state, which proves both the scope
+        # guard and the workspace binding let the token through.
+        ("GET", f"{base}/skills-shared", None),
+        (
+            "PUT",
+            f"{base}/skills-shared",
+            {"files": [{"path": "map.json", "content": '{"version": 1, "materials": []}'}]},
+        ),
         # Preview panel tools (issue #328): context/panel reads + draft write.
         ("GET", f"{base}/preview/context", None),
         ("GET", f"{base}/preview/panel", None),

@@ -35,6 +35,7 @@ from server.app.mcp_server import (
     job_tools,
     preview_tools,
     prompt_tools,
+    shared_tools,
     skill_tools,
     workflow_tools,
 )
@@ -146,8 +147,10 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         )
 
     # Skill read/validate/save-version tools (issue #217) and node prompt
-    # preview/save tools, both split into sibling modules for the budget.
+    # preview/save tools, both split into sibling modules for the budget;
+    # shared-material tools (#633) sit in their own sibling module too.
     skill_tools.register_skill_tools(mcp, _client)
+    shared_tools.register_shared_tools(mcp, _client)
     prompt_tools.register_prompt_tools(mcp, _client)
     # Workflow tools (active read / validate / compare / publish-request,
     # issue #416): the publish request parks a pending publish for the human

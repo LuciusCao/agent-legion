@@ -285,6 +285,13 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
         "POST",
         "/api/studio-agent/tools/workspaces/{workspace_id}/skills",
     ): "scoped-only tool surface",
+    # Shared skill material tools (#633): workspace-scoped authoring of the
+    # _shared dir synced into skills at save_skill_version time — the
+    # write only touches the shared materials, never a skill lock.
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/skills-shared",
+    ): "scoped-only tool surface",
     # SPA mount's API 404 catch-all (server/app/spa.py).
     ("POST", "/api/{path:path}"): "API 404 catch-all",
     ("PUT", "/api/{path:path}"): "API 404 catch-all",

@@ -80,6 +80,13 @@ Studio. Nothing you do takes effect in production by itself.
   success the initial commit is tagged `new_tag`. Existing dir → 409. After
   the create, iterate with `validate_skill` / `save_skill_version`. Lock
   untouched.
+- `get_shared_materials(workspace_id)` — the workspace's shared skill
+  materials (`_shared/map.json` + `references/` + `scripts/`); a workspace
+  without `_shared` returns the structured empty state `{"map": null,
+  "files": []}` — that is your signal to author them (section 6.1).
+- `save_shared_materials(workspace_id, files)` — author those shared
+  materials (section 6.1). Draft-only: `_shared` is not a git repo; the
+  audit trail is the commits the sync lands in each mapped skill.
 
 There is NO tool to create workspaces, and no workflow registry anymore
 (schema v50): a workflow is simply the DAG inside one workspace. The human
@@ -285,9 +292,46 @@ files:
 ```
 
 Engine v1 expresses exactly these four check classes: existence, text length
-(`min_chars`), required headings, and JSON Schema. Before asking the human to
-release a tag, call `validate_skill` and fix every contract-block error it
+(`min_chars`), required headings, and JSON Schema. Before asking the human
+to release a tag, call `validate_skill` and fix every contract-block error it
 reports — a malformed block fails validation just like a missing file.
+
+### 6.1 Shared materials across a workspace's skills (#633)
+
+When several skills of one workspace need the SAME reference or script
+(a house style guide, a normalization helper), author it ONCE under the
+workspace's shared materials instead of copying it into every skill:
+
+```json
+// map.json — {"version": 1, "materials": [{"source": "<path>", "skills": [<skill names>]}]}
+{
+  "version": 1,
+  "materials": [
+    {"source": "references/prompt-style.md", "skills": ["video-analysis", "video-summary"]},
+    {"source": "scripts/normalize.py", "skills": ["video-analysis"]}
+  ]
+}
+```
+
+- `source` is relative to `_shared/` and must stay under `references/` or
+  `scripts/`; `skills` lists skill names (the second key segment of
+  `<workspace_id>/<skill_name>`).
+- Read with `get_shared_materials(workspace_id)`; write the FULL state with
+  `save_shared_materials(workspace_id, files)` — `map.json` is just one of
+  the files, you author its JSON. Everything is validated before anything
+  is written (bad map or paths → 422 listing the problems).
+- Sync is AUTOMATIC: every `save_skill_version` of a mapped skill copies
+  `_shared/<source>` into that skill's repo at the SAME relative path and
+  includes it in the commit (the save response lists them in `synced_files`).
+  A synced file that breaks the skill's contract rolls the whole save back,
+  like any other file.
+- NEVER hand-supply a mapped path in the `save_skill_version` payload —
+  the shared copy is authoritative for mapped paths, so the save rejects
+  the payload with an error listing the conflicting paths; drop them and
+  re-save.
+- Relock/publish stays human-only as everywhere else: the sync only lands
+  in the LOCAL skill commits, never in the DB skill lock. `_shared` itself
+  is not a git repo — the mapped skills' synced commits are the audit trail.
 
 ## 7. Common errors and what to do
 
