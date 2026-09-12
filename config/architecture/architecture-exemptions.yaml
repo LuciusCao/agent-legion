@@ -804,18 +804,28 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
   ceiling: 58
 - check: architecture.file_budget
-  path: server/app/routes/studio_agent_tool_contracts.py
+  path: server/app/mcp_server/server.py
   reason: >-
-    Issue #633 moves the agent-definition parse/response helpers
-    (parse_agent_definition_payload / agent_version_response, 15 effective
-    lines) here from studio_agent_tools.py: the tool-surface composition root
-    hit its frozen #211 exemption ceiling (178, only ratchets down) when the
-    workspace-scoped skill-creation sub-router mounted there, and the helpers
-    are contract adapters, not route wiring — they belong beside the
-    AgentDefinitionPayload/AgentVersionResponse shapes they translate. Remove
-    when the tool-surface composition root gets its planned registry-driven
-    split (the helpers can follow the agent-definition routes) or a
-    retirement frees headroom in either file.
+    Issue #633 merges three tool groups into the registration sequence
+    (draft CAS pair, shared-material pair, agent-definition read trio) and
+    the inline save_agent_definition_draft gains the requires_labels/
+    config_schema parameters. Each group's register_* call plus its guard
+    comment is one effective line over the frozen 103 baseline; the module
+    is the single composition root and every tool group that CAN live in a
+    sibling module already does. Remove when the last inline tools
+    (get_authoring_guide / get_studio_context / save_node_code_draft /
+    save_agent_definition_draft) move to sibling modules.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 48
+  ceiling: 104
+- check: architecture.file_budget
+  path: server/app/services/skill_editing.py
+  reason: >-
+    Issue #633 adds the save-time shared-material sync hook to _save_version
+    (plan_shared_sync call plus the synced_files response wiring). One
+    effective line over the frozen 170 baseline; the sync logic itself lives
+    in skill_shared_sync.py and only the in-lock hook call grew this module.
+    Remove when the save flow gets its planned orchestration split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 171
