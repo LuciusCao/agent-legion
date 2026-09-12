@@ -61,6 +61,13 @@ Studio. Nothing you do takes effect in production by itself.
   error list. Persists nothing.
 - `save_skill_version(skill_key, files, new_tag, message)` — commit + tag a
   new version in the skill's LOCAL source repo (section 6). Lock untouched.
+- `create_skill(workspace_id, skill_name, files, new_tag, message)` — create
+  a BRAND-NEW skill repo at `<skills root>/<workspace_id>/<skill_name>`
+  (#633, workspace-scoped): the files must carry the full contract trio
+  (section 6) and everything is validated before anything is written; on
+  success the initial commit is tagged `new_tag`. Existing dir → 409. After
+  the create, iterate with `validate_skill` / `save_skill_version`. Lock
+  untouched.
 
 There is NO tool to create workspaces, and no workflow registry anymore
 (schema v50): a workflow is simply the DAG inside one workspace. The human
@@ -198,22 +205,33 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
   wholesale — it is not appended. Preview with `get_node_prompt`, edit the
   draft with `save_node_prompt` (empty string clears back to the default).
 
-## 6. Skill editing (read → edit → validate → tag)
+## 6. Skill editing (create → read → edit → validate → tag)
 
 Skills live in git repos under the skills root (`<skills root>/<group>/<name>`,
 in-place is the only mode). A node either follows the repo's live HEAD
-(`latest`) or pins a tag frozen in the skill lock. You may read any tag,
-validate the working tree, and save a new version — you may NEVER relock or
-publish: a human reviews the git diff and re-pins.
+(`latest`) or pins a tag frozen in the skill lock. You may create a new skill
+under the bound workspace's directory, read any tag, validate the working
+tree, and save a new version — you may NEVER relock or publish: a human
+reviews the git diff and re-pins.
 
-1. `get_skill(skill_key)` — the working tree at HEAD (`latest`), or
+1. Creating a brand-new skill starts with `create_skill(workspace_id,
+   skill_name, files, new_tag, message)` (#633): `skill_name` is one segment
+   (`^[a-z0-9][a-z0-9_-]{0,63}$`) and `files` must carry the full contract
+   trio from the start — non-empty `SKILL.md` +
+   `references/output-contract.md` + `scripts/validate_output.py` (use the
+   machine-readable contract block below where it fits). The repo is created
+   at `<skills root>/<workspace_id>/<skill_name>` with the initial commit
+   (author agent-legion-studio) tagged `new_tag` (e.g. `v0.1.0`). Everything
+   is validated first; a name that already exists is a 409, and a failed
+   create leaves no directory behind, so you can retry safely.
+2. `get_skill(skill_key)` — the working tree at HEAD (`latest`), or
    `ref=<tag>` to preview one tag, e.g. one another agent just created; an
    unknown tag is a structured 404 and changes
    nothing.
-2. Edit the file contents in your draft, then `validate_skill(skill_key)` —
+3. Edit the file contents in your draft, then `validate_skill(skill_key)` —
    the runtime contract: non-empty SKILL.md + references/output-contract.md +
    scripts/validate_output.py. Fix every reported error.
-3. `save_skill_version(skill_key, files, new_tag, message)` — writes into the
+4. `save_skill_version(skill_key, files, new_tag, message)` — writes into the
    skill's in-place repo. Every path is validated before any
    write (inside the skill dir, no `..`/absolute paths, no `.git`, no
    overwriting untracked files); after writing, the contract check re-runs
@@ -221,10 +239,11 @@ publish: a human reviews the git diff and re-pins.
    commits (author agent-legion-studio) and tags `new_tag` (an existing tag
    is a conflict). The skill lock is untouched: tag-pinned nodes keep the
    locked commit, `latest` nodes pick the new HEAD up on their next dispatch.
-4. Show the human the git diff of the new tag and ask them to release it:
+5. Show the human the git diff of the new tag and ask them to release it:
    re-pin the node's skill ref to the new tag in Studio and relock
    (`make skills-lock`, or let the first dispatch auto-lock). NEVER ask for
-   a relock before the human has seen the diff.
+   a relock before the human has seen the diff. Publishing/relocking stays
+   human-only — you can never do it with these tools.
 
 ### Machine-readable output contract block
 
@@ -268,6 +287,10 @@ reports — a malformed block fails validation just like a missing file.
   save_node_code_draft — you forgot `expected_capability` for a new node.
 - save_skill_version: 409 `already has tag` — pick a fresh tag; 422 with an
   `errors` list — fix the reported paths or missing contract files.
+- create_skill: 409 `already exists` — the skill name is taken under this
+  workspace; pick another name. 422 with an `errors` list — fix the skill
+  name (one lowercase segment), the reported file paths, or the missing
+  contract trio. 404 — the workspace does not exist.
 - `HTTP 401` — token expired/revoked; ask the human to mint a new one.
 
 Golden rule: validate first, compare second, present third — then request

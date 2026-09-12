@@ -94,6 +94,18 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
             "/api/studio-agent/tools/skills/wf/review/versions",
             {"files": [{"path": "SKILL.md", "content": "x"}], "new_tag": "v2", "message": "m"},
         ),
+        # Skill creation tool (#633, workspace-scoped): invalid skill name is
+        # a 422 business rejection — the scope guard let the token through.
+        (
+            "POST",
+            f"{base}/skills",
+            {
+                "skill_name": "Bad Name",
+                "files": [{"path": "SKILL.md", "content": "x"}],
+                "new_tag": "v1",
+                "message": "m",
+            },
+        ),
         # Preview panel tools (issue #328): context/panel reads + draft write.
         ("GET", f"{base}/preview/context", None),
         ("GET", f"{base}/preview/panel", None),

@@ -221,16 +221,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 240
 - check: architecture.file_budget
-  path: server/app/routes/studio_agent_tools.py
-  reason: Same issue-211 Phase 2 dual-path deprecation as workflow_node_codes.py — the studio-agent node-code
-    tool routes keep their historical workflow-key alias registered as deprecated alongside the segment-free
-    path. Removing the aliases with the Phase 3/4 URL cleanup in issue 211 retires this exemption. The
-    Codex P2 fix on PR 299 adds _resolve_key (query-bound alias must equal the workspace id), which is
-    part of the same deprecation-window cost.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 178
-- check: architecture.file_budget
   path: server/app/routes/job_http.py
   reason: The issue-211 Phase 3 read-binding guard (reject_mismatched_workflow_key, shared by five explicit-key
     entry points per the Codex P1 on PR 307) lives here with the other route-layer HTTP helpers. The overage
@@ -799,3 +789,33 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/509
   ceiling: 55
+- check: architecture.file_budget
+  path: server/app/mcp_server/skill_tools.py
+  reason: >-
+    Issue #633 adds the create_skill tool to the skill tool group: one more
+    tool function (docstring is the budget-heavy part — every tool's
+    contract text lives in its docstring) beside get/validate/save_version.
+    The module IS the single skill-tool registration surface; splitting one
+    tool into a sister module would fork the group's shared client_factory
+    wiring and the URL-encoding helper. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when the skill tool group gets a
+    registration split per tool or a budget re-balance frees headroom.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 58
+- check: architecture.file_budget
+  path: server/app/routes/studio_agent_tool_contracts.py
+  reason: >-
+    Issue #633 moves the agent-definition parse/response helpers
+    (parse_agent_definition_payload / agent_version_response, 15 effective
+    lines) here from studio_agent_tools.py: the tool-surface composition root
+    hit its frozen #211 exemption ceiling (178, only ratchets down) when the
+    workspace-scoped skill-creation sub-router mounted there, and the helpers
+    are contract adapters, not route wiring — they belong beside the
+    AgentDefinitionPayload/AgentVersionResponse shapes they translate. Remove
+    when the tool-surface composition root gets its planned registry-driven
+    split (the helpers can follow the agent-definition routes) or a
+    retirement frees headroom in either file.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 48

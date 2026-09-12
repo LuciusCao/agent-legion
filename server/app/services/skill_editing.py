@@ -26,7 +26,7 @@ workspace members).
 from __future__ import annotations
 
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, NamedTuple
 
 from server.app.services import skill_repo
@@ -36,6 +36,7 @@ from server.app.services.job_errors import (
     JobServiceError,
     NotFoundError,
 )
+from server.app.services.skill_edit_checks import contract_errors, resolve_targets_checked
 from server.app.services.skill_repo import SkillGitError
 from server.app.services.skill_repo_edit import (
     edit_lock_for,
@@ -177,18 +178,8 @@ class SkillEditingService:
 
     @staticmethod
     def _contract_errors(content_dir: Path) -> list[dict[str, str]]:
-        if not content_dir.is_dir():
-            return [{"path": ".", "error": "skill directory does not exist"}]
-        errors: list[dict[str, str]] = []
-        skill_md = content_dir / "SKILL.md"
-        if not skill_md.is_file():
-            errors.append({"path": "SKILL.md", "error": "missing SKILL.md"})
-        elif not skill_md.read_text(encoding="utf-8", errors="replace").strip():
-            errors.append({"path": "SKILL.md", "error": "SKILL.md is empty"})
-        for required in ("references/output-contract.md", "scripts/validate_output.py"):
-            if not (content_dir / required).is_file():
-                errors.append({"path": required, "error": f"missing {required}"})
-        return errors
+        # Shared with SkillCreationService (services/skill_edit_checks.py).
+        return contract_errors(content_dir)
 
     def _check_tag(self, skill_key: str, repo_dir: Path, new_tag: str) -> None:
         # `git check-ref-format refs/tags/-l` passes (the dash rule covers the
@@ -218,34 +209,12 @@ class SkillEditingService:
     def _resolve_targets(
         self, repo_dir: Path, files: list[SkillFileWrite]
     ) -> list[tuple[Path, str]]:
-        errors: list[dict[str, str]] = []
-        targets: list[tuple[Path, str]] = []
-        root = repo_dir.resolve()
-        for raw, content in files:
-            parts = PurePosixPath(raw).parts
-            if (
-                not raw
-                or PurePosixPath(raw).is_absolute()
-                or ".." in parts
-                # Any level, any case: on case-insensitive filesystems
-                # `.GIT/hooks/` still lands inside the git metadata dir.
-                or any(part.lower() == ".git" for part in parts)
-            ):
-                errors.append(
-                    {
-                        "path": raw or ".",
-                        "error": "path must be relative, stay inside the skill directory, "
-                        "and not touch .git",
-                    }
-                )
-                continue
-            resolved = (root / raw).resolve()
-            try:
-                resolved.relative_to(root)
-            except ValueError:
-                errors.append({"path": raw, "error": "path escapes the skill directory"})
-                continue
-            targets.append((resolved, content))
+        # Shared path-safety rules with SkillCreationService (#633). The
+        # tuple unpacking (vs item.path) keeps this module free of `.path`
+        # attribute reads the BOUNDARY-DATA-001 scanner counts.
+        targets, errors = resolve_targets_checked(
+            repo_dir, [(raw, content) for raw, content in files]
+        )
         if errors:
             raise SkillEditValidationError("Invalid skill file paths", errors)
         return targets

@@ -217,6 +217,7 @@ server/app/
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/node-prompt` | `save_node_prompt_route` | routes/studio_agent_prompt_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/publish-request` | `request_workflow_publish` | routes/studio_agent_publish_tools.py |
 | GET | `/studio-agent/tools/publish-requests/{request_id}` | `get_publish_request_status` | routes/studio_agent_publish_tools.py |
+| POST | `/studio-agent/tools/workspaces/{workspace_id}/skills` | `create_skill` | routes/studio_agent_skill_creation_tools.py |
 | GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/versions` | `save_skill_version` | routes/studio_agent_skill_tools.py |
@@ -530,6 +531,8 @@ server/app/
 | SkillVersionFileWrite | BaseModel | path: str, content: str | app/routes/studio_agent_skill_contracts.py |
 | SkillSaveVersionRequest | BaseModel | files: list[SkillVersionFileWrite], new_tag: str, message: str | app/routes/studio_agent_skill_contracts.py |
 | SkillSaveVersionResponse | BaseModel | key: str, tag: str, commit: str, files: list[str] | app/routes/studio_agent_skill_contracts.py |
+| SkillCreateRequest | BaseModel | skill_name: str, files: list[SkillVersionFileWrite], new_tag: str, message: str | app/routes/studio_agent_skill_contracts.py |
+| SkillCreateResponse | BaseModel | key: str, tag: str, commit: str | app/routes/studio_agent_skill_contracts.py |
 | StudioAgentTokenMintRequest | BaseModel | ttl_hours: int | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenMintResponse | BaseModel | id: str, token: str, expires_at: str | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenEntry | BaseModel | id: str, created_at: str, expires_at: str, revoked_at: str | None | app/routes/studio_agent_token_contracts.py |
