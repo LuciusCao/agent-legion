@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 import server.app.routes.workflow_contracts as workflow_contracts
+from server.app.routes.agent_definition_contracts import AgentVersionResponse
 from server.app.routes.workflow_node_code_contracts import WorkflowNodeCodeDraftRequest
 from server.app.routes.workflow_revisions_contracts import WorkflowRevisionSummary
 
@@ -28,3 +29,12 @@ class StudioAgentNodeCodeDraftRequest(WorkflowNodeCodeDraftRequest):
     ``min_length=1``: an empty string must not bypass the presence gate."""
 
     expected_capability: str | None = Field(default=None, min_length=1)
+
+
+class StudioAgentAgentVersionsResponse(BaseModel):
+    """Latest version per Agent with the FULL definition payload (#633) —
+    the human list route carries only a summary, but the authoring agent's
+    read loop needs every field (capability, runtime, skill, tools,
+    requires_labels, config_schema) plus version metadata."""
+
+    versions: list[AgentVersionResponse]

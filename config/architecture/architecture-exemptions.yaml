@@ -221,16 +221,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 240
 - check: architecture.file_budget
-  path: server/app/routes/studio_agent_tools.py
-  reason: Same issue-211 Phase 2 dual-path deprecation as workflow_node_codes.py — the studio-agent node-code
-    tool routes keep their historical workflow-key alias registered as deprecated alongside the segment-free
-    path. Removing the aliases with the Phase 3/4 URL cleanup in issue 211 retires this exemption. The
-    Codex P2 fix on PR 299 adds _resolve_key (query-bound alias must equal the workspace id), which is
-    part of the same deprecation-window cost.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 178
-- check: architecture.file_budget
   path: server/app/routes/job_http.py
   reason: The issue-211 Phase 3 read-binding guard (reject_mismatched_workflow_key, shared by five explicit-key
     entry points per the Codex P1 on PR 307) lives here with the other route-layer HTTP helpers. The overage
