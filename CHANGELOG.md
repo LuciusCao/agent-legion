@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-09-11
+
 ### Performance
 - 调度器每 claim 重复 mkdir 消除（issue #618）：`data/logs/jobs`
   从服务启动起就存在，但 `workflow_worker/schedule.py` 每次节点
