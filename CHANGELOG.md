@@ -48,6 +48,17 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   lease_write——诚实覆盖排队等待 + 共批，events 仅 completed/failed，
   cancelled/409 不报 events 段）；批臂返回长度不齐时 fail-fast 落入
   现有整片失败收容（strict zip），不再让尾部 future 悬挂。
+  三轮评审（#609 P2 跟进）：mark_done 批量臂同样绑定 40P01 重试包装
+  （`mark_done_many_with_retry`，与 finish 臂对称——跨副本部署下隔离
+  回退的单条重放也经同一绑定臂获得重试）；写线程在 lifespan 中先于
+  其生产者启动（`start_worker_threads` 之前，关闭「code-plane finish
+  停靠在未启动 writer 上」的微秒级窗口）；薄弱测试补强（max-items
+  分裂断言、stop 退出排空真实路径、集成测试改为生产序 finish→
+  mark_done、混批 409 数据判定与混合轮臂序钉子）；sweeper requeue-limit
+  臂与本批的已知锁环经核实不因 (workspace, run, job) 排序变化而变宽
+  （排序只重排 item，不重排 finish_lease 内语句），维持 40P01 双侧吸收
+  并文档化；`pending_depth()` 观测位按评审结论移除（采样器接线需要
+  尚不存在的依赖形状/持久列/契约字段，不投机扩面）。
 
 ### Changed
 - 预算计量的 docstring 口径（issue #610，#209 棘轮的计量层治理）：

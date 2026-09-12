@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from functools import partial
 
 from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
+from server.app.agent_broker.mark_done_batch import (
+    mark_done_many_with_retry as _mark_done_many_with_retry,
+)
 from server.app.agent_broker.result_commit_batcher import ResultCommitBatcher
 from server.app.agent_control import AgentCompletionHandler, AgentWorkerRegistry
 from server.app.events import JobEventManager
@@ -60,8 +63,8 @@ def build_agent_plane(
 ) -> AgentPlane:
     bundle_dir = settings.data_dir / "agent_bundles"
     # #591: the batcher precedes its two owners (both receive it); the
-    # late-bound arms are the retry-wrapped batch module and the broker's
-    # mark_done_many. The writer starts only in the app lifespan.
+    # late-bound arms are the two retry-wrapped batch modules. The writer
+    # starts only in the app lifespan.
     batcher = (
         ResultCommitBatcher(None, None)
         if result_batching and settings.executor_runtime.agent_workers.result_commit_batching
@@ -90,7 +93,11 @@ def build_agent_plane(
     )
     if batcher is not None:
         batcher.finish_many = partial(_finish_many_with_retry, executor_leases)
-        batcher.mark_done_many = broker.mark_done_many
+        # #609 P2-A: BOTH arms retry-wrapped (symmetry) — cross-replica
+        # deployments (the single-replica probe is warning-only) can 40P01
+        # either shared transaction; the isolation fallback's single-item
+        # replays ride the same bound arm, so they retry too.
+        batcher.mark_done_many = partial(_mark_done_many_with_retry, broker)
     dispatch = AgentDispatchService(settings, broker, artifact_store)
     skill_manager = build_skill_manager(job_db, settings.skills_runs_dir)
     completion = AgentCompletionHandler(

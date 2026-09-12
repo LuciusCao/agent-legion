@@ -29,7 +29,17 @@ Two disciplines the codex review on #609 added:
   class this removes and stay covered by the 40P01 retry; the airtight
   shapes (workspace-trigger-first firing order, or one multi-row jobs
   UPDATE aggregating the whole batch through the statement trigger) are
-  schema-level changes out of scope here.
+  schema-level changes out of scope here. Known counterparty of the same
+  absorbed class (#609 round-3 P2-E): the sweep requeue-limit arm
+  (``sweepers.py``) deletes a lease row then takes that job's jobs row,
+  while a LATER item of the SAME job in this batch blocks on that lease
+  row after an earlier item already took the jobs row (sync_job_status).
+  The sort only reorders ITEMS — the statements inside ``finish_lease``
+  (and same-job items' queue-relative order, pinned by the index
+  tiebreak) are untouched, so this cycle is exactly as wide pre- and
+  post-sort; both sides absorb it (the arm's retry wrapper re-runs
+  cleanly on a fresh connection; the sweep pass is broad-except + the
+  next tick).
 - **The writer thread owns only the shared transaction** (#591 C5): events
   post-processing (token capture + PI compression, two full-file scans per
   item) is returned to the SUBMITTING commit thread as per-item closures —

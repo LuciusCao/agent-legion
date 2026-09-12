@@ -169,6 +169,18 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
+            # #591 (#609 P2-D): start the result-commit group-commit writer
+            # BEFORE its producers — start_worker_threads below can
+            # synchronously drive a code-plane finish (the sweeper's first
+            # sweep, a local execution), and a terminal write parking on an
+            # unstarted writer would block on a future nobody drains. Gated
+            # on start_worker (test/export apps take the direct serial paths
+            # — the batcher object itself is inert until started); the plane
+            # leaves it un-constructed entirely when the knob disables it.
+            # No dependency runs the other way: both arms are bound at plane
+            # construction, before the lifespan even entered.
+            if agent_plane.result_commit_batcher is not None:
+                agent_plane.result_commit_batcher.start()
             sweeper_thread, workflow_worker_thread, worker_status = start_worker_threads(
                 settings,
                 job_db=job_db,
@@ -192,12 +204,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 slow_sweeps = start_sweeper_owned_threads(
                     artifact_store, job_artifact_objects, job_db, settings, object_storage
                 )
-            # #591: start the result-commit group-commit writer. Gated on
-            # start_worker (test/export apps take the direct serial paths —
-            # the batcher object itself is inert until started); the plane
-            # leaves it un-constructed entirely when the knob disables it.
-            if agent_plane.result_commit_batcher is not None:
-                agent_plane.result_commit_batcher.start()
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
