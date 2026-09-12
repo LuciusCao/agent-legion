@@ -75,6 +75,12 @@ run_related_tests() {
   if [[ -n "${FRONTEND_TEST_PROJECT:-}" ]]; then
     vitest_args+=(--project "$FRONTEND_TEST_PROJECT")
   fi
+  # CI may split a Vitest project with its native deterministic shard
+  # partition. Local gates leave this unset and continue to run the project
+  # as one suite.
+  if [[ -n "${FRONTEND_TEST_SHARD:-}" ]]; then
+    vitest_args+=(--shard "$FRONTEND_TEST_SHARD")
+  fi
   npx vitest "${vitest_args[@]}"
 }
 
@@ -85,6 +91,7 @@ run_tests() {
   fi
   echo "=== Frontend Tests (${test_command}) ==="
   vitest_args=()
+  coverage_blob_key="${FRONTEND_TEST_PROJECT:-all}"
   # Vitest defaults to one worker thread per core, which oversubscribes
   # machines running multiple worktrees (node at 500%+ CPU). Cap the default;
   # CI runners (4 vCPU) are unaffected. AGENT_LEGION_FRONTEND_TEST_WORKERS
@@ -95,6 +102,13 @@ run_tests() {
   if [[ -n "${FRONTEND_TEST_PROJECT:-}" ]]; then
     vitest_args+=(--project "$FRONTEND_TEST_PROJECT")
   fi
+  # CI may split a Vitest project with its native deterministic shard
+  # partition. Local gates leave this unset and continue to run the project
+  # as one suite.
+  if [[ -n "${FRONTEND_TEST_SHARD:-}" ]]; then
+    vitest_args+=(--shard "$FRONTEND_TEST_SHARD")
+    coverage_blob_key+="-${FRONTEND_TEST_SHARD//\//-}"
+  fi
   # FRONTEND_COVERAGE_BLOB_DIR marks a coverage shard: emit a blob report
   # (which embeds the raw V8 coverage) for a downstream merge job, keep the
   # local coverage report cheap (text only), and defer threshold + inventory
@@ -104,7 +118,7 @@ run_tests() {
     mkdir -p "$FRONTEND_COVERAGE_BLOB_DIR"
     vitest_args+=(
       --reporter=blob
-      --outputFile.blob="$FRONTEND_COVERAGE_BLOB_DIR/vitest-blob-${FRONTEND_TEST_PROJECT:-all}.json"
+      --outputFile.blob="$FRONTEND_COVERAGE_BLOB_DIR/vitest-blob-${coverage_blob_key}.json"
       --coverage.reporter=text
       --coverage.thresholds.lines=0
       --coverage.thresholds.functions=0
