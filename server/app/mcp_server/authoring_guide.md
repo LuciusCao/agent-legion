@@ -56,8 +56,27 @@ Studio. Nothing you do takes effect in production by itself.
   any pending draft (origin: builtin | custom | none). Nodes that only exist
   in your not-yet-published draft are readable too (a skeleton draft you saved
   reads back; otherwise origin `none`); only start nodes 404.
-- `save_agent_definition_draft(agent_id, capability, runtime, skill, tools)` —
-  draft Agent definition for an agent-backed capability.
+- `get_agent_definitions(workspace_id)` — the workspace's Agent definitions:
+  the latest version per agent (a pending draft beats the published row) with
+  ALL fields — capability, runtime, skill, tools, requires_labels,
+  config_schema — plus version metadata (version, status, definition_hash,
+  created_by, created_at, published_at). Read this BEFORE drafting agent or
+  workflow changes so capability bindings build on what exists.
+- `get_runtime_models(workspace_id)` — the workspace's available
+  `{runtime: {provider: [models]}}` view aggregated from its ONLINE workers'
+  declarations. Discovery only: provider/model declarations are worker-owned
+  and can never be edited through these tools; use the view to pick sensible
+  node `execution.*` values (a typed value corresponds to a worker that can
+  actually claim the execution).
+- `get_agent_runtimes(workspace_id)` — the runtime catalog: each runtime
+  (pi, velites) and its agent tool catalog — tool names, tiers (`default`
+  preselected / `opt-in` explicit / `forced` harness-enforced with an
+  activation condition) and parameters. The catalog is code-defined and
+  static; the only editable tool surface is the `tools` selection inside an
+  Agent definition draft.
+- `save_agent_definition_draft(workspace_id, agent_id, capability, runtime,
+  skill, tools?, requires_labels?, config_schema?)` —
+  draft Agent definition for an agent-backed capability (section 5).
 - `get_node_prompt(workspace_id, node_key, definition_yaml?)` — the effective
   run prompt of an agent node: fixed platform envelope + node instructions
   (auto-assembled default, or the custom `execution.prompt` when set). Read
@@ -200,11 +219,28 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
 
 ## 5. Agent definitions and tunables
 
+Agent-definition authoring loop (read → discover → draft):
+1. `get_agent_definitions(workspace_id)` — what already exists: latest
+   version per agent with every field. A pending draft beats the published
+   row, so the list shows exactly what the next publish would ship.
+2. Discover the surroundings you canNOT edit:
+   - `get_agent_runtimes(workspace_id)` — the per-runtime tool catalog
+     (code-defined, static): which tools exist for pi/velites, their tiers
+     and activation conditions. Pick `tools` values from THIS catalog.
+   - `get_runtime_models(workspace_id)` — the worker-declared
+     runtime → provider → models view, so node `execution.model` values you
+     draft correspond to models an online worker can actually claim.
+3. `save_agent_definition_draft(...)` — draft the change. A human publishes
+   it in Studio; publishing/archiving is never yours.
+
 `save_agent_definition_draft` binds a capability to an implementation:
 - `runtime`: one of `pi`, `velites` (anything else is rejected).
 - `skill`: relative skill path (`group/skill-name`); absolute paths and `..`
   are rejected.
 - `tools`: allowlist, default `["read", "write", "bash"]`.
+- `requires_labels`: worker labels the agent requires
+  (e.g. `{"gpu": "a100"}`) — only workers carrying every label can claim it.
+- `config_schema`: tunables as a JSON-Schema subset (below).
 - Tunables: the Agent definition (or the workflow node's `config_schema:`
   block) declares a JSON-Schema subset: top-level `type: "object"` with
   `properties`/`required`; property types `string|integer|number|boolean`
@@ -220,6 +256,9 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
   (CONFIG-RUNTIME-MUTABLE-001).
 - Agent execution (`provider`/`model`/`thinking`) resolves node
   `execution.*` overrides → workspace defaults → validation error if unset.
+  Provider/model declarations themselves are worker-owned
+  (EXEC-RUNTIME-MODELS-001): no tool edits them — `get_runtime_models` is
+  the read-only view.
 - Node prompt (`execution.prompt`): the run prompt is a fixed platform
   envelope (job/skill paths, declared inputs/outputs, output discipline)
   plus one node-instructions section. Empty `execution.prompt` means the

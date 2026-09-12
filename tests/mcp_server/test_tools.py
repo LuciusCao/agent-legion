@@ -112,6 +112,9 @@ def test_loopback_tools_are_async() -> None:
         "save_node_code_draft",
         "get_node_code",
         "save_agent_definition_draft",
+        "get_agent_definitions",
+        "get_runtime_models",
+        "get_agent_runtimes",
         "get_node_prompt",
         "save_node_prompt",
         "get_skill",
@@ -282,7 +285,59 @@ def test_save_agent_definition_draft_default_tools(recorded) -> None:
         "runtime": "pi",
         "skill": "s/k",
         "tools": ["read", "write", "bash"],
+        "requires_labels": {},
+        "config_schema": {},
     }
+
+
+def test_save_agent_definition_draft_forwards_labels_and_config_schema(recorded) -> None:
+    # #633：requires_labels / config_schema 是 HTTP 契约的一部分（草稿保存
+    # 已支持），MCP 包装此前丢字段——现在原样透传。
+    server, calls = recorded
+    _run_tool(
+        server,
+        "save_agent_definition_draft",
+        {
+            "workspace_id": "ws-1",
+            "agent_id": "a-1",
+            "capability": "cap",
+            "runtime": "velites",
+            "skill": "s/k",
+            "tools": ["read"],
+            "requires_labels": {"gpu": "a100"},
+            "config_schema": {
+                "type": "object",
+                "properties": {"dry_run": {"type": "boolean"}},
+            },
+        },
+    )
+    assert calls[0]["json"]["requires_labels"] == {"gpu": "a100"}
+    assert calls[0]["json"]["config_schema"] == {
+        "type": "object",
+        "properties": {"dry_run": {"type": "boolean"}},
+    }
+    assert calls[0]["json"]["tools"] == ["read"]
+
+
+def test_get_agent_definitions(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_agent_definitions", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/agent-definitions")
+
+
+def test_get_runtime_models(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_runtime_models", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/runtime-models")
+
+
+def test_get_agent_runtimes(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_agent_runtimes", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/agent-runtimes")
 
 
 def test_get_skill_without_ref(recorded) -> None:

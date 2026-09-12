@@ -86,6 +86,11 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
         ("POST", f"{base}/node-prompt", {"node_key": "node"}),
         ("PUT", f"{base}/node-prompt", {"node_key": "node", "prompt": "x"}),
         ("GET", f"{base}/workflow/active", None),
+        # Catalog read tools (issue #633): agent definitions / runtime
+        # models / runtime tool catalog — all read-only visibility.
+        ("GET", f"{base}/agent-definitions", None),
+        ("GET", f"{base}/runtime-models", None),
+        ("GET", f"{base}/agent-runtimes", None),
         ("GET", f"{base}/workflows/wf/nodes/node/code", None),
         ("GET", "/api/studio-agent/tools/chat-sessions/session-x/context", None),
         # Skill tools (issue #217): unknown skill keys 404, which still proves

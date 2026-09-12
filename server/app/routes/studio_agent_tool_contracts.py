@@ -8,18 +8,12 @@ tool surface's adapter between the Studio payload and AgentDefinition.
 
 from typing import Literal
 
-from fastapi import HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 import server.app.routes.workflow_contracts as workflow_contracts
-from server.app.agent_catalog import AgentDefinition
-from server.app.routes.agent_definition_contracts import (
-    AgentDefinitionPayload,
-    AgentVersionResponse,
-)
+from server.app.routes.agent_definition_contracts import AgentVersionResponse
 from server.app.routes.workflow_node_code_contracts import WorkflowNodeCodeDraftRequest
 from server.app.routes.workflow_revisions_contracts import WorkflowRevisionSummary
-from server.app.services.versioned_entities import VersionedEntity
 
 
 class StudioAgentActiveWorkflowResponse(BaseModel):
@@ -40,24 +34,10 @@ class StudioAgentNodeCodeDraftRequest(WorkflowNodeCodeDraftRequest):
     expected_capability: str | None = Field(default=None, min_length=1)
 
 
-def parse_agent_definition_payload(payload: AgentDefinitionPayload) -> AgentDefinition:
-    try:
-        return AgentDefinition.model_validate(payload.model_dump())
-    except ValidationError as exc:
-        # ctx carries the raw exception objects — not JSON serializable.
-        detail = [{k: v for k, v in error.items() if k != "ctx"} for error in exc.errors()]
-        raise HTTPException(status_code=422, detail=detail) from exc
+class StudioAgentAgentVersionsResponse(BaseModel):
+    """Latest version per Agent with the FULL definition payload (#633) —
+    the human list route carries only a summary, but the authoring agent's
+    read loop needs every field (capability, runtime, skill, tools,
+    requires_labels, config_schema) plus version metadata."""
 
-
-def agent_version_response(entity: VersionedEntity) -> AgentVersionResponse:
-    return AgentVersionResponse(
-        id=entity.id,
-        agent_id=entity.entity_key,
-        version=entity.version,
-        status=entity.status,
-        definition=entity.definition,
-        definition_hash=entity.definition_hash,
-        created_by=entity.created_by,
-        created_at=entity.created_at,
-        published_at=entity.published_at,
-    )
+    versions: list[AgentVersionResponse]

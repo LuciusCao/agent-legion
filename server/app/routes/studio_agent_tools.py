@@ -16,11 +16,10 @@ from server.app.auth.dependencies import (
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
-from server.app.routes.agent_definition_contracts import (
-    AgentDefinitionPayload,
-    AgentVersionResponse,
-)
 from server.app.routes.job_http import raise_job_http_error
+from server.app.routes.studio_agent_catalog_read_tools import (
+    create_studio_agent_catalog_read_tools_router,
+)
 from server.app.routes.studio_agent_draft_tools import create_studio_agent_draft_tools_router
 from server.app.routes.studio_agent_preview_tools import create_studio_agent_preview_tools_router
 from server.app.routes.studio_agent_prompt_tools import create_studio_agent_prompt_tools_router
@@ -34,8 +33,6 @@ from server.app.routes.studio_agent_skill_tools import create_studio_agent_skill
 from server.app.routes.studio_agent_tool_contracts import (
     StudioAgentActiveWorkflowResponse,
     StudioAgentNodeCodeDraftRequest,
-    agent_version_response,
-    parse_agent_definition_payload,
 )
 from server.app.routes.workflow_draft_compare_contracts import WorkflowDraftCompareResponse
 from server.app.routes.workflow_node_code_contracts import (
@@ -136,25 +133,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
             raise_job_http_error(exc)
         return WorkflowNodeCodeVersionResponse(**row)
 
-    @workspace_scoped.put(
-        "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
-        response_model=AgentVersionResponse,
-    )
-    def save_agent_definition_draft(
-        workspace_id: str,
-        agent_id: str,
-        payload: AgentDefinitionPayload,
-        user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
-    ) -> AgentVersionResponse:
-        definition = parse_agent_definition_payload(payload)
-        try:
-            entity = _service().save_agent_definition_draft(
-                workspace_id, agent_id, definition, str(user["id"])
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
-        return agent_version_response(entity)
-
     @workspace_scoped.get(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/active",
         response_model=StudioAgentActiveWorkflowResponse,
@@ -197,6 +175,9 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         create_studio_agent_skill_creation_tools_router(job_db, settings)
     )
     workspace_scoped.include_router(create_studio_agent_preview_tools_router(job_db, settings))
+    # Catalog read tools (issue #633): agent definitions / runtime models /
+    # runtime tool catalog — read-only visibility for the authoring agent.
+    workspace_scoped.include_router(create_studio_agent_catalog_read_tools_router(job_db, settings))
     # Publish-request tools (issue #416): request parks a pending publish (a
     # scoped-only write — the human confirm/cancel endpoints live on the
     # guarded Studio surface), status is a plain scoped read.

@@ -203,6 +203,10 @@ server/app/
 | GET | `/skills/directories` | `list_skill_directories` | routes/skill_directories.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions` | `list_agent_definitions` | routes/studio_agent_catalog_read_tools.py |
+| PUT | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/studio_agent_catalog_read_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/runtime-models` | `get_runtime_models` | routes/studio_agent_catalog_read_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/agent-runtimes` | `get_agent_runtimes` | routes/studio_agent_catalog_read_tools.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/context` | `get_chat_session_context` | routes/studio_agent_context.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflow/draft` | `get_workflow_draft_route` | routes/studio_agent_draft_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/workflow/draft` | `save_workflow_draft_route` | routes/studio_agent_draft_tools.py |
@@ -230,7 +234,6 @@ server/app/
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/compare` | `compare_workflow` | routes/studio_agent_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code/draft` | `save_node_code_draft` | routes/studio_agent_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft` | `save_node_code_draft` | routes/studio_agent_tools.py |
-| PUT | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflow/active` | `get_active_revision` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
@@ -543,6 +546,7 @@ server/app/
 | StudioAgentTokensResponse | BaseModel | tokens: list[StudioAgentTokenEntry] | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenRevokeResponse | BaseModel | id: str, revoked: bool | app/routes/studio_agent_token_contracts.py |
 | StudioAgentActiveWorkflowResponse | BaseModel | state: Literal['active', 'empty'], workflow_key: str | None, revision: Workfl... | app/routes/studio_agent_tool_contracts.py |
+| StudioAgentAgentVersionsResponse | BaseModel | versions: list[AgentVersionResponse] | app/routes/studio_agent_tool_contracts.py |
 | StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str], source: Literal['manual',... | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentRegistryDocument | BaseModel | api_base: str, agents: list[StudioAgentRegistryEntry] | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentDetection | BaseModel | detected: bool, path: str | None, version: str | None | app/routes/studio_agents_admin_contracts.py |

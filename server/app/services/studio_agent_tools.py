@@ -6,7 +6,8 @@ other effecting actions (STUDIO-AGENT-001). This module composes the existing
 services behind that surface and stamps every draft it writes with
 ``created_by=f"studio-agent:{user_id}"`` so agent-authored drafts stay
 attributable to the run's initiating user. Node-code reads/drafts live in
-``studio_agent_node_codes`` (split for budget).
+``studio_agent_node_codes`` and the agent-definition/runtime/model reads in
+``studio_agent_catalog_reads`` (both split for budget).
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.agent_catalog import AgentDefinition
 from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import NotFoundError
+from server.app.services.studio_agent_catalog_reads import StudioAgentCatalogReads
 from server.app.services.studio_agent_node_codes import StudioAgentNodeCodeTools
 from server.app.services.versioned_entities import VersionedEntity
 from server.app.services.workflow_draft_compare import compare_workflow_draft
@@ -46,6 +48,7 @@ class StudioAgentToolsService:
         self._job_db = job_db
         self._settings = settings
         self.node_codes = StudioAgentNodeCodeTools(job_db, settings)
+        self.reads = StudioAgentCatalogReads(job_db)
 
     # Write tools (draft/register only — no effecting operations).
 
