@@ -2,9 +2,8 @@
 
 Three layers:
 
-- unit layer (no DB): the batcher's queue semantics — verdict plumbing,
-  two-phase ordering, drain-only collection, isolation fallback, and the
-  stop-drain;
+- queue unit tests live in the sister ``test_result_commit_batcher_queue.py``;
+  this file owns repository and wired integration behavior;
 - repository layer (real PostgreSQL): ``finish_many`` / ``mark_done_many``
   per-item semantics against seeded leases/requests — the 409 verdicts are
   data, not errors, and one item's rejection must not fail its neighbours;
@@ -34,15 +33,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
-import pytest
-
 import server.app.agent_broker.result_commit_batcher as _batcher_module
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.mark_done_batch import mark_done_many_with_retry
-from server.app.agent_broker.result_commit_batcher import (
-    MAX_ITEMS_PER_TRANSACTION,
-    ResultCommitBatcher,
-)
+from server.app.agent_broker.result_commit_batcher import ResultCommitBatcher
 from server.app.agent_broker.result_timing import ResultStageTimer
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.executors import _lease_finish_batch
@@ -95,158 +89,6 @@ def _usage_node_run_ids(job_db) -> set[int]:
     with job_db.connect() as conn:
         rows = conn.execute("select node_run_id from node_run_token_usage").fetchall()
     return {int(row["node_run_id"]) for row in rows}
-
-
-# ---------------------------------------------------------------- unit layer
-
-
-class _CountingArm:
-    """Batched-arm double: counts calls, returns per-item verdicts."""
-
-    def __init__(self, verdicts: list | None = None, fail_on: set[int] | None = None) -> None:
-        self.calls: list[list[tuple]] = []
-        self.verdicts = verdicts
-        self.fail_on = fail_on or set()
-
-    def __call__(self, args: list[tuple]):
-        self.calls.append(list(args))
-        if self.fail_on and len(self.calls) - 1 in self.fail_on:
-            raise RuntimeError("boom")
-        if self.verdicts is not None:
-            return list(self.verdicts)
-        return [True] * len(args)
-
-
-def test_submit_returns_verdict_through_queue() -> None:
-    arm = _CountingArm()
-    batcher = ResultCommitBatcher(arm, arm)
-    batcher.start()
-    try:
-        assert batcher.submit("finish", ("lease-1",)) is True
-        assert batcher.submit("mark_done", ("exec-1",)) is True
-    finally:
-        batcher.stop()
-    # Idle rhythm: each submit is drained alone (drain-only, no linger).
-    assert [c for c in arm.calls if c] == [[("lease-1",)], [("exec-1",)]]
-
-
-def test_wave_batches_into_one_transaction_per_kind() -> None:
-    calls: list[list[tuple]] = []
-    released = threading.Event()
-
-    def _recording_arm(args: list[tuple]):
-        # Hold the FIRST round open so the wave's remaining items pile up
-        # on the queue and join the SAME round; later rounds run through.
-        calls.append(list(args))
-        if len(calls) == 1:
-            released.wait(timeout=5)
-        return [True] * len(args)
-
-    batcher = ResultCommitBatcher(_recording_arm, _recording_arm)
-    batcher.start()
-    try:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            first = pool.submit(batcher.submit, "finish", ("lease-1",))
-            time.sleep(0.05)  # let the writer pick lease-1 up and park
-            rest = [pool.submit(batcher.submit, "finish", (f"lease-{i}",)) for i in range(2, 6)]
-            released.set()
-            assert first.result(timeout=5) is True
-            assert all(f.result(timeout=5) is True for f in rest)
-    finally:
-        batcher.stop()
-    # The first round carried lease-1 (alone or with whatever arrived
-    # before the writer got there); the wave's later finishes joined a
-    # multi-item round — the queue is FIFO and drain-only, so items that
-    # arrived while round one was parked cannot run alone.
-    flat = [a for call in calls for a in call]
-    assert ("lease-1",) in calls[0]
-    assert any(len(call) > 1 for call in calls)
-    assert sorted(flat) == sorted((f"lease-{i}",) for i in range(1, 6))
-
-
-def test_isolation_fallback_reruns_items_individually() -> None:
-    # Batch arm raises for the whole slice; every item must still get its
-    # OWN verdict via the single-item re-run: the good items resolve True,
-    # the deterministic failure crosses back as its exception (the same
-    # raise the direct path gives).
-    def _flaky(args: list[tuple]):
-        if len(args) > 1:
-            raise RuntimeError("slice aborted")
-        if args[0][0] == "lease-bad":
-            raise RuntimeError("deterministic failure")
-        return [True]
-
-    batcher = ResultCommitBatcher(_flaky, _flaky)
-    batcher.start()
-    try:
-        assert batcher.submit("finish", ("lease-1",)) is True
-        with pytest.raises(RuntimeError, match="deterministic failure"):
-            batcher.submit("finish", ("lease-bad",))
-    finally:
-        batcher.stop()
-
-
-def test_stop_drains_parked_items() -> None:
-    """The shutdown contract's real path: the writer parks INSIDE an arm
-    (the Event-gate pattern the wave test uses), items queue up behind the
-    round, and stop()'s sentinel+exit-drain must still resolve every parked
-    future — the submitters blocked on futures nobody else would ever set.
-    """
-    arm_entered = threading.Event()
-    release_arm = threading.Event()
-    arm_calls: list[list[tuple]] = []
-
-    def _gated_arm(args: list[tuple]):
-        arm_calls.append(list(args))
-        if len(arm_calls) == 1:
-            arm_entered.set()
-            release_arm.wait(timeout=5)  # park the writer mid-round
-        return [True] * len(args)
-
-    batcher = ResultCommitBatcher(_gated_arm, _gated_arm)
-    batcher.start()
-    try:
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            first = pool.submit(batcher.submit, "finish", ("lease-1",))
-            assert arm_entered.wait(timeout=5), "writer never entered the first round"
-            # Items queued while the writer is parked inside its arm — they
-            # sit behind the round and can only be resolved by the exit
-            # drain (the sentinel ends the loop before a second round).
-            parked = [pool.submit(batcher.submit, "finish", (f"lease-{i}",)) for i in range(2, 4)]
-            # They must be ENQUEUED before stop() closes the gate, or the
-            # closed-check races them onto the direct path instead.
-            deadline = time.monotonic() + 5
-            while batcher._queue.qsize() < 2 and time.monotonic() < deadline:
-                time.sleep(0.01)
-            assert batcher._queue.qsize() >= 2, "parked items never reached the queue"
-            assert not first.done(), "the gated round must still be open"
-            batcher.stop()  # sentinel lands while the writer is parked
-            release_arm.set()  # let the round finish; exit drain runs next
-            assert first.result(timeout=5) is True
-            assert all(f.result(timeout=5) is True for f in parked), (
-                "stop() must drain items parked behind the sentinel-in-flight round"
-            )
-    finally:
-        release_arm.set()
-        batcher.stop()
-    flat = [a for call in arm_calls for a in call]
-    assert sorted(flat) == sorted((f"lease-{i}",) for i in range(1, 4))
-
-
-def test_max_items_bound_splits_rounds() -> None:
-    """2× the cap must split into ≥2 rounds, each ≤ the cap (#609 P2-B:
-    without the bound the single round would still pass every verdict —
-    the split itself is the pinned behavior)."""
-    arm = _CountingArm()
-    batcher = ResultCommitBatcher(arm, arm)
-    items = 2 * MAX_ITEMS_PER_TRANSACTION
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        futures = [pool.submit(batcher.submit, "finish", (f"lease-{i}",)) for i in range(items)]
-        # Not started yet: nothing drains; start now and let it run.
-        batcher.start()
-        assert all(f.result(timeout=10) is True for f in futures)
-    batcher.stop()
-    assert len(arm.calls) >= 2 and all(len(c) <= MAX_ITEMS_PER_TRANSACTION for c in arm.calls)
 
 
 # -------------------------------------------------------- repository layer
@@ -395,7 +237,7 @@ def _finish_then_mark_done(leases, broker, claim, result) -> tuple[bool, bool]:
     return finished, done
 
 
-def test_mixed_kind_round_commits_finish_before_mark_done(job_db) -> None:
+def test_mixed_kind_round_commits_finish_before_mark_done(job_db, monkeypatch) -> None:
     """#609 P2-B: a mixed round (finish + mark_done drained together) runs
     the finish arm's transaction to completion BEFORE the mark_done arm's —
     the ordering contract that keeps every interleaving of one request's
@@ -407,18 +249,32 @@ def test_mixed_kind_round_commits_finish_before_mark_done(job_db) -> None:
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     arm_order: list[tuple[str, int]] = []
+    first_finish_entered = threading.Event()
+    release_first_finish = threading.Event()
+    finish_calls = 0
 
-    def _recording(kind: str, real):
-        def _arm(writes):
-            arm_order.append((kind, len(writes)))
-            return real(writes)
+    def _finish_arm(writes):  # noqa: ANN001
+        nonlocal finish_calls
+        finish_calls += 1
+        arm_order.append(("finish", len(writes)))
+        if finish_calls == 1:
+            first_finish_entered.set()
+            release_first_finish.wait(timeout=5)
+        return finish_many_with_retry(leases, writes)
 
-        return _arm
+    def _mark_done_arm(writes):  # noqa: ANN001
+        arm_order.append(("mark_done", len(writes)))
+        return mark_done_many_with_retry(broker, writes)
 
-    batcher = ResultCommitBatcher(
-        _recording("finish", partial(finish_many_with_retry, leases)),
-        _recording("mark_done", partial(mark_done_many_with_retry, broker)),
-    )
+    batcher = ResultCommitBatcher(_finish_arm, _mark_done_arm)
+    round_kinds: list[list[str]] = []
+    real_run_batch = batcher._run_batch
+
+    def _recording_run_batch(batch):  # noqa: ANN001
+        round_kinds.append([item.kind for item in batch])
+        return real_run_batch(batch)
+
+    monkeypatch.setattr(batcher, "_run_batch", _recording_run_batch)
     broker.result_batcher = batcher
     leases.result_batcher = batcher
     batcher.start()
@@ -426,13 +282,12 @@ def test_mixed_kind_round_commits_finish_before_mark_done(job_db) -> None:
         claims = [broker.claim("worker-1") for _ in range(2)]
         assert all(c is not None for c in claims)
         result = ExecutionResult(status="completed", exit_code=0)
-        # One submitter's pair drains in ONE round when the writer parks:
-        # gate the finish arm so both items queue behind it.
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        # Hold the first round inside its finish arm. Both kinds then queue
+        # behind it before release, forcing the next drain to be a mixed
+        # round rather than relying on scheduler timing.
+        with ThreadPoolExecutor(max_workers=3) as pool:
             first_finish = pool.submit(leases.finish, claims[0].lease_id, result)
-            # Give the writer a beat to pick the first finish up, then park
-            # the second pair's items behind the open round.
-            time.sleep(0.05)
+            assert first_finish_entered.wait(timeout=5)
             rest = [
                 pool.submit(leases.finish, claims[1].lease_id, result),
                 pool.submit(
@@ -443,18 +298,19 @@ def test_mixed_kind_round_commits_finish_before_mark_done(job_db) -> None:
                     {"status": "completed"},
                 ),
             ]
+            deadline = time.monotonic() + 5
+            while batcher._queue.qsize() < 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert batcher._queue.qsize() >= 2, "mixed items never reached the queue"
+            release_first_finish.set()
             assert first_finish.result(timeout=10) is True
             assert all(f.result(timeout=10) for f in rest)
     finally:
+        release_first_finish.set()
         batcher.stop()
-    # The writer ran both arms; every finish invocation precedes every
-    # mark_done invocation (a round runs finishes first, and rounds are
-    # serialized on the single writer thread).
-    kinds = [kind for kind, _ in arm_order]
-    assert "finish" in kinds and "mark_done" in kinds
-    assert kinds == sorted(kinds, key=lambda kind: 0 if kind == "finish" else 1), (
-        f"finish arm must commit before the mark_done arm in every round: {arm_order}"
-    )
+    assert round_kinds[0] == ["finish"]
+    assert len(round_kinds) == 2 and sorted(round_kinds[1]) == ["finish", "mark_done"]
+    assert [kind for kind, _ in arm_order] == ["finish", "finish", "mark_done"]
     for index in range(len(claims)):
         assert job_db.get_job_node(f"job-{index + 1}", "generate")["status"] == "completed"
 
@@ -644,38 +500,6 @@ def test_submit_racing_stop_never_enqueues_onto_dead_writer(job_db) -> None:
     finally:
         _batcher_module._BatchItem = real_item_cls
     assert job_db.get_job_node("job-1", "generate")["status"] == "completed"
-
-
-def test_restart_reopens_the_queue_after_stop() -> None:
-    """P1-1 companion nit: start() after stop() reopens the closed gate —
-    a restarted batcher serves the queue again instead of staying in
-    bypass mode, and a sentinel left by a stop() without a live writer
-    cannot kill the fresh writer on its first get()."""
-    arm = _CountingArm()
-    batcher = ResultCommitBatcher(arm, arm)
-    # stop() before any start(): no writer drains the sentinel — start()
-    # must drop it with the stale gate, or the fresh writer exits instantly
-    # and every submit parks forever.
-    batcher.stop()
-    batcher.start()
-    try:
-        assert batcher.submit("finish", ("lease-1",)) is True
-    finally:
-        batcher.stop()
-    assert arm.calls == [[("lease-1",)]]
-
-    # Same after a live start/stop cycle: the restart reopens the gate.
-    arm2 = _CountingArm()
-    batcher.finish_many = arm2
-    batcher.mark_done_many = arm2
-    batcher.start()
-    batcher.stop()
-    batcher.start()
-    try:
-        assert batcher.submit("mark_done", ("exec-1",)) is True
-    finally:
-        batcher.stop()
-    assert arm2.calls == [[("exec-1",)]]
 
 
 def test_batched_cancelled_finish_skips_events_post_processing(job_db) -> None:
