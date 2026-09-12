@@ -22,6 +22,15 @@ SKILLS_ROOT_DISPLAY = "~/.agents/skills"
 # empty, absolute, separator-bearing and ``..`` ids by construction.
 _WORKSPACE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
+# One-segment skill directory names under a workspace's skill dir (the full
+# skill key is <workspace_id>/<skill_name>, #633 create_skill).
+_SKILL_DIR_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def is_valid_skill_dir_name(name: str) -> bool:
+    """Whether a one-segment skill directory name is well-formed (#633)."""
+    return _SKILL_DIR_NAME_RE.fullmatch(name) is not None
+
 
 def skills_root() -> Path:
     """The on-disk skills root: base for the skill cache and workspace skills."""
@@ -39,10 +48,15 @@ def _validate_workspace_id(workspace_id: str) -> None:
         raise ValueError(msg)
 
 
-def workspace_skill_dir(workspace_id: str) -> Path:
-    """A workspace's agent skill directory under the skills root."""
+def workspace_skill_dir(workspace_id: str, *, base_dir: Path | None = None) -> Path:
+    """A workspace's agent skill directory under the skills root.
+
+    ``base_dir`` (optional, #633) lets the shared-materials services derive
+    the workspace dir from the same base the skill catalog/editing services
+    were constructed with instead of re-reading HOME.
+    """
     _validate_workspace_id(workspace_id)
-    return skills_root() / workspace_id
+    return (base_dir or skills_root()) / workspace_id
 
 
 def workspace_skill_prefix_display(workspace_id: str) -> str:

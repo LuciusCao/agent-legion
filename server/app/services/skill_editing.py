@@ -21,27 +21,35 @@ their next dispatch.
 Client error messages name the skill key only; host absolute paths go
 to the server log (they would otherwise leak to scoped tokens and
 workspace members).
+
+#633: when the skill's workspace carries a ``_shared/map.json`` mapping
+materials to this skill, ``save_version`` injects those materials into
+the write set before any file is written (planning in
+``services/skill_shared_sync``) — the synced copies land in the commit,
+and the save response reports them as ``synced_files``.
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, NamedTuple
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import (
     ConflictError,
     InvalidOperationError,
-    JobServiceError,
     NotFoundError,
 )
+from server.app.services.skill_edit_checks import contract_errors, resolve_targets_checked
 from server.app.services.skill_repo import SkillGitError
 from server.app.services.skill_repo_edit import (
+    SkillEditValidationError,
     edit_lock_for,
     rollback_checked,
     run_edit_git,
 )
+from server.app.services.skill_shared_sync import plan_shared_sync
 from server.app.skills.skill_roots import default_skill_base_dir
 
 logger = logging.getLogger(__name__)
@@ -49,13 +57,9 @@ logger = logging.getLogger(__name__)
 STUDIO_GIT_AUTHOR_NAME = "agent-legion-studio"
 STUDIO_GIT_AUTHOR_EMAIL = "studio@local"
 
-
-class SkillEditValidationError(JobServiceError):
-    """422-mapping edit rejection carrying a structured error list."""
-
-    def __init__(self, message: str, errors: list[dict[str, str]]) -> None:
-        super().__init__(message)
-        self.errors = errors
+# Moved to skill_repo_edit (#633: the shared-materials planner raises it);
+# re-exported so historical importers (job_http, tests) keep resolving.
+__all__ = ["SkillEditingService", "SkillEditValidationError", "SkillFileWrite"]
 
 
 class SkillFileWrite(NamedTuple):
@@ -109,6 +113,17 @@ class SkillEditingService:
         self._check_tag(skill_key, repo_dir, new_tag)
         self._check_clean(skill_key, repo_dir)
         targets = self._resolve_targets(repo_dir, files)
+        # Shared-material sync (#633): mapped materials are injected into the
+        # write set (shared copy authoritative) and flow through the same
+        # path-safety/overwrite/contract/commit/tag steps; malformed map,
+        # missing source or colliding hand-supplied path = pre-write 422.
+        # No _shared dir = no-op. SkillFileWrite IS a tuple[str, str] (a
+        # NamedTuple), so it passes plan_shared_sync's Sequence directly.
+        sync_plan = plan_shared_sync(self.base_dir, skill_key, files)
+        for source, shared_content in sync_plan.files:
+            targets.extend(
+                self._resolve_targets(repo_dir, [SkillFileWrite(source, shared_content)])
+            )
         self._check_overwrites(repo_dir, targets)
 
         written_paths = [path for path, _ in targets]
@@ -159,7 +174,15 @@ class SkillEditingService:
         commit = skill_repo.head_commit(repo_dir)
         if commit is None:
             raise SkillGitError(f"Skill {skill_key!r} repo has no HEAD after commit")
-        return {"key": skill_key, "tag": new_tag, "commit": commit, "files": written}
+        return {
+            "key": skill_key,
+            "tag": new_tag,
+            "commit": commit,
+            "files": written,
+            # Shared materials synced into this commit (#633), sorted, []
+            # when the workspace has no _shared mapping for the skill.
+            "synced_files": sorted(source for source, _ in sync_plan.files),
+        }
 
     # Validation helpers.
 
@@ -177,18 +200,8 @@ class SkillEditingService:
 
     @staticmethod
     def _contract_errors(content_dir: Path) -> list[dict[str, str]]:
-        if not content_dir.is_dir():
-            return [{"path": ".", "error": "skill directory does not exist"}]
-        errors: list[dict[str, str]] = []
-        skill_md = content_dir / "SKILL.md"
-        if not skill_md.is_file():
-            errors.append({"path": "SKILL.md", "error": "missing SKILL.md"})
-        elif not skill_md.read_text(encoding="utf-8", errors="replace").strip():
-            errors.append({"path": "SKILL.md", "error": "SKILL.md is empty"})
-        for required in ("references/output-contract.md", "scripts/validate_output.py"):
-            if not (content_dir / required).is_file():
-                errors.append({"path": required, "error": f"missing {required}"})
-        return errors
+        # Shared with SkillCreationService (services/skill_edit_checks.py).
+        return contract_errors(content_dir)
 
     def _check_tag(self, skill_key: str, repo_dir: Path, new_tag: str) -> None:
         # `git check-ref-format refs/tags/-l` passes (the dash rule covers the
@@ -218,34 +231,12 @@ class SkillEditingService:
     def _resolve_targets(
         self, repo_dir: Path, files: list[SkillFileWrite]
     ) -> list[tuple[Path, str]]:
-        errors: list[dict[str, str]] = []
-        targets: list[tuple[Path, str]] = []
-        root = repo_dir.resolve()
-        for raw, content in files:
-            parts = PurePosixPath(raw).parts
-            if (
-                not raw
-                or PurePosixPath(raw).is_absolute()
-                or ".." in parts
-                # Any level, any case: on case-insensitive filesystems
-                # `.GIT/hooks/` still lands inside the git metadata dir.
-                or any(part.lower() == ".git" for part in parts)
-            ):
-                errors.append(
-                    {
-                        "path": raw or ".",
-                        "error": "path must be relative, stay inside the skill directory, "
-                        "and not touch .git",
-                    }
-                )
-                continue
-            resolved = (root / raw).resolve()
-            try:
-                resolved.relative_to(root)
-            except ValueError:
-                errors.append({"path": raw, "error": "path escapes the skill directory"})
-                continue
-            targets.append((resolved, content))
+        # Shared path-safety rules with SkillCreationService (#633). The
+        # tuple unpacking (vs item.path) keeps this module free of `.path`
+        # attribute reads the BOUNDARY-DATA-001 scanner counts.
+        targets, errors = resolve_targets_checked(
+            repo_dir, [(raw, content) for raw, content in files]
+        )
         if errors:
             raise SkillEditValidationError("Invalid skill file paths", errors)
         return targets

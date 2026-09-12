@@ -1,10 +1,12 @@
 """Skill tools for the studio-agent MCP server (issue #217).
 
 Registered onto the shared FastMCP instance from ``server.create_mcp_server``
-(split out for the file-size budget). All three are loopback tools and stay
+(split out for the file-size budget). All four are loopback tools and stay
 ``async def`` for the same single-event-loop reason documented in
-``server.py``; all are draft-only: reads (``get_skill``, ``validate_skill``)
-plus a local-repo commit+tag that never touches the DB skill lock.
+``server.py``; all are draft-only: reads (``get_skill``, ``validate_skill``),
+a local-repo commit+tag that never touches the DB skill lock
+(``save_skill_version``), and repo creation under the workspace's skill dir
+that equally never touches the lock (``create_skill``, #633).
 """
 
 from __future__ import annotations
@@ -71,3 +73,33 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         _, client = await client_factory()
         body: dict[str, Any] = {"files": files, "new_tag": new_tag, "message": message}
         return await client.call("POST", f"/skills/{_skill_path(skill_key)}/versions", body)
+
+    @mcp.tool()
+    async def create_skill(
+        workspace_id: str,
+        skill_name: str,
+        files: list[dict[str, str]],
+        new_tag: str,
+        message: str,
+    ) -> str:
+        """Create a BRAND-NEW skill under the workspace's skill directory
+        (~/.agents/skills/<workspace_id>/<skill_name>) as a fresh local git
+        repo. skill_name is one segment (^[a-z0-9][a-z0-9_-]{0,63}$); the
+        files MUST already contain the full contract trio — non-empty
+        SKILL.md + references/output-contract.md + scripts/validate_output.py
+        — or the create is rejected. Everything is validated before anything
+        is written (path safety: no '..', absolute paths, or .git; tag must
+        be a valid git ref name); on any failure after the directory was
+        created the partial directory is removed, so a retry is never wedged.
+        On success the initial commit (author agent-legion-studio) is tagged
+        new_tag. Draft-only: nothing is published and the skill lock is
+        untouched — a human still reviews, re-pins, and relocks. Afterwards
+        iterate with validate_skill / save_skill_version."""
+        _, client = await client_factory()
+        body: dict[str, Any] = {
+            "skill_name": skill_name,
+            "files": files,
+            "new_tag": new_tag,
+            "message": message,
+        }
+        return await client.call("POST", f"/workspaces/{workspace_id}/skills", body)

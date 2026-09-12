@@ -31,9 +31,12 @@ from mcp.server.fastmcp import FastMCP
 # preview/job tools in their sibling modules (file-size budget).
 from server.app.agent_catalog.definition import DEFAULT_TOOLS
 from server.app.mcp_server import (
+    agent_tools,
+    draft_tools,
     job_tools,
     preview_tools,
     prompt_tools,
+    shared_tools,
     skill_tools,
     workflow_tools,
 )
@@ -127,34 +130,50 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         runtime: str,
         skill: str,
         tools: list[str] | None = None,
+        requires_labels: dict[str, str] | None = None,
+        config_schema: dict | None = None,
     ) -> str:
         """Save a draft Agent definition (workspace-scoped) binding a capability
-        to a runtime and skill. runtime is one of: pi, velites.
+        to a runtime and skill. runtime is one of: pi, velites. requires_labels
+        declares worker labels the agent requires ({"label": "value"}); config_schema
+        declares tunables as a JSON-Schema subset (see get_authoring_guide §5).
         Draft only — a human publishes it in Studio before any job can use it."""
+        body: dict[str, Any] = {
+            "capability": capability,
+            "runtime": runtime,
+            "skill": skill,
+            # #476：默认三件套与 AgentDefinition 同源（catalog default 档）。
+            "tools": tools or list(DEFAULT_TOOLS),
+            "requires_labels": requires_labels or {},
+            "config_schema": config_schema or {},
+        }
         _, client = await _client()
         return await client.call(
             "PUT",
             f"/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
-            {
-                "capability": capability,
-                "runtime": runtime,
-                "skill": skill,
-                # #476：默认三件套与 AgentDefinition 同源（catalog default 档）。
-                "tools": tools or list(DEFAULT_TOOLS),
-            },
+            body,
         )
 
     # Skill read/validate/save-version tools (issue #217) and node prompt
-    # preview/save tools, both split into sibling modules for the budget.
+    # preview/save tools, both split into sibling modules for the budget;
+    # shared-material tools (#633) sit in their own sibling module too.
     skill_tools.register_skill_tools(mcp, _client)
+    shared_tools.register_shared_tools(mcp, _client)
     prompt_tools.register_prompt_tools(mcp, _client)
     # Workflow tools (active read / validate / compare / publish-request,
     # issue #416): the publish request parks a pending publish for the human
-    # to confirm in Studio — never publishes directly.
+    # to confirm in Studio — never publishes directly. Draft read/write pair
+    # (issue #633): canvas-draft CAS editing, same draft-only boundary.
     workflow_tools.register_workflow_tools(mcp, _client)
+    draft_tools.register_draft_tools(mcp, _client)
     # Preview panel tools (issue #328): context/panel reads + draft save,
     # draft-only like the rest of the surface.
     preview_tools.register_preview_tools(mcp, _client)
+    # Agent-definition/catalog tools (issue #633): read the workspace's agent
+    # definitions and discover runtimes/tools and provider/models — all
+    # read-only visibility (worker-owned models and the static tool catalog
+    # are never editable from the tool surface).
+    agent_tools.register_agent_tools(mcp, _client)
     # Job observation tools (issue #329): read-only diagnosis surface —
     # context/detail/logs/artifacts/list/compare; no effecting operations.
     job_tools.register_job_tools(mcp, _client)

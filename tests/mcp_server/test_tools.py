@@ -103,18 +103,26 @@ def test_loopback_tools_are_async() -> None:
     for name in (
         "get_studio_context",
         "get_active_workflow",
+        "get_workflow_draft",
         "validate_workflow",
         "compare_workflow",
+        "save_workflow_draft",
         "request_workflow_publish",
         "get_publish_request_status",
         "save_node_code_draft",
         "get_node_code",
         "save_agent_definition_draft",
+        "get_agent_definitions",
+        "get_runtime_models",
+        "get_agent_runtimes",
         "get_node_prompt",
         "save_node_prompt",
         "get_skill",
         "validate_skill",
         "save_skill_version",
+        "create_skill",
+        "get_shared_materials",
+        "save_shared_materials",
         "get_preview_context",
         "get_preview_panel",
         "save_preview_panel_draft",
@@ -152,6 +160,34 @@ def test_get_active_workflow(recorded) -> None:
     _run_tool(server, "get_active_workflow", {"workspace_id": "ws-1"})
     assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/active")
     assert calls[0]["method"] == "GET"
+
+
+def test_get_workflow_draft_gets_canvas_draft(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_workflow_draft", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/draft")
+
+
+def test_save_workflow_draft_puts_with_cas_token(recorded) -> None:
+    # #633: the write carries the CAS base (expected_updated_at) — a stale
+    # token comes back as HTTP 409 text carrying the current draft.
+    server, calls = recorded
+    _run_tool(
+        server,
+        "save_workflow_draft",
+        {
+            "workspace_id": "ws-1",
+            "definition_yaml": "key: wf\n",
+            "expected_updated_at": "2026-09-12 00:00:00+00",
+        },
+    )
+    assert calls[0]["method"] == "PUT"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/draft")
+    assert calls[0]["json"] == {
+        "definition_yaml": "key: wf\n",
+        "expected_updated_at": "2026-09-12 00:00:00+00",
+    }
 
 
 def test_validate_workflow_posts_definition(recorded) -> None:
@@ -249,7 +285,59 @@ def test_save_agent_definition_draft_default_tools(recorded) -> None:
         "runtime": "pi",
         "skill": "s/k",
         "tools": ["read", "write", "bash"],
+        "requires_labels": {},
+        "config_schema": {},
     }
+
+
+def test_save_agent_definition_draft_forwards_labels_and_config_schema(recorded) -> None:
+    # #633：requires_labels / config_schema 是 HTTP 契约的一部分（草稿保存
+    # 已支持），MCP 包装此前丢字段——现在原样透传。
+    server, calls = recorded
+    _run_tool(
+        server,
+        "save_agent_definition_draft",
+        {
+            "workspace_id": "ws-1",
+            "agent_id": "a-1",
+            "capability": "cap",
+            "runtime": "velites",
+            "skill": "s/k",
+            "tools": ["read"],
+            "requires_labels": {"gpu": "a100"},
+            "config_schema": {
+                "type": "object",
+                "properties": {"dry_run": {"type": "boolean"}},
+            },
+        },
+    )
+    assert calls[0]["json"]["requires_labels"] == {"gpu": "a100"}
+    assert calls[0]["json"]["config_schema"] == {
+        "type": "object",
+        "properties": {"dry_run": {"type": "boolean"}},
+    }
+    assert calls[0]["json"]["tools"] == ["read"]
+
+
+def test_get_agent_definitions(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_agent_definitions", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/agent-definitions")
+
+
+def test_get_runtime_models(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_runtime_models", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/runtime-models")
+
+
+def test_get_agent_runtimes(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_agent_runtimes", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/agent-runtimes")
 
 
 def test_get_skill_without_ref(recorded) -> None:
@@ -333,6 +421,55 @@ def test_save_skill_version_posts_body(recorded) -> None:
     assert calls[0]["method"] == "POST"
     assert calls[0]["url"].endswith("/skills/wf/review/versions")
     assert calls[0]["json"] == {"files": files, "new_tag": "v2.0.0", "message": "revise"}
+
+
+def test_create_skill_posts_workspace_scoped_body(recorded) -> None:
+    # #633: create_skill is workspace-scoped (the repo lands under the
+    # calling workspace's skill dir), so the tool path carries workspace_id.
+    server, calls = recorded
+    files = [
+        {"path": "SKILL.md", "content": "# New\n"},
+        {"path": "references/output-contract.md", "content": "# contract\n"},
+        {"path": "scripts/validate_output.py", "content": "raise SystemExit(0)\n"},
+    ]
+    _run_tool(
+        server,
+        "create_skill",
+        {
+            "workspace_id": "ws-1",
+            "skill_name": "review",
+            "files": files,
+            "new_tag": "v1.0.0",
+            "message": "initial skill",
+        },
+    )
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/skills")
+    assert calls[0]["json"] == {
+        "skill_name": "review",
+        "files": files,
+        "new_tag": "v1.0.0",
+        "message": "initial skill",
+    }
+
+
+def test_get_shared_materials_gets_workspace_materials(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_shared_materials", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/skills-shared")
+
+
+def test_save_shared_materials_puts_files(recorded) -> None:
+    server, calls = recorded
+    files = [
+        {"path": "map.json", "content": '{"version": 1, "materials": []}'},
+        {"path": "references/style.md", "content": "# style\n"},
+    ]
+    _run_tool(server, "save_shared_materials", {"workspace_id": "ws-1", "files": files})
+    assert calls[0]["method"] == "PUT"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/skills-shared")
+    assert calls[0]["json"] == {"files": files}
 
 
 def test_get_preview_guide_is_served_locally(recorded) -> None:

@@ -37,3 +37,21 @@ class SkillSaveVersionResponse(BaseModel):
     tag: str
     commit: str
     files: list[str] = Field(default_factory=list)
+    # Shared materials the save synced into the commit (#633); empty list
+    # when the workspace has no _shared mapping for this skill.
+    synced_files: list[str] = Field(default_factory=list)
+
+
+class SkillCreateRequest(BaseModel):
+    """create_skill payload (#633): same bounds as SkillSaveVersionRequest."""
+
+    skill_name: str = Field(min_length=1, max_length=64)
+    files: list[SkillVersionFileWrite] = Field(min_length=1, max_length=100)
+    new_tag: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=4096)
+
+
+class SkillCreateResponse(BaseModel):
+    key: str
+    tag: str
+    commit: str

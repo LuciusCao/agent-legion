@@ -203,7 +203,13 @@ server/app/
 | GET | `/skills/directories` | `list_skill_directories` | routes/skill_directories.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions` | `list_agent_definitions` | routes/studio_agent_catalog_read_tools.py |
+| PUT | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/studio_agent_catalog_read_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/runtime-models` | `get_runtime_models` | routes/studio_agent_catalog_read_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/agent-runtimes` | `get_agent_runtimes` | routes/studio_agent_catalog_read_tools.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/context` | `get_chat_session_context` | routes/studio_agent_context.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/workflow/draft` | `get_workflow_draft_route` | routes/studio_agent_draft_tools.py |
+| PUT | `/studio-agent/tools/workspaces/{workspace_id}/workflow/draft` | `save_workflow_draft_route` | routes/studio_agent_draft_tools.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/job-context` | `get_job_context` | routes/studio_agent_job_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs` | `list_jobs` | routes/studio_agent_job_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs/compare` | `compare_jobs` | routes/studio_agent_job_tools.py |
@@ -217,6 +223,9 @@ server/app/
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/node-prompt` | `save_node_prompt_route` | routes/studio_agent_prompt_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/publish-request` | `request_workflow_publish` | routes/studio_agent_publish_tools.py |
 | GET | `/studio-agent/tools/publish-requests/{request_id}` | `get_publish_request_status` | routes/studio_agent_publish_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared` | `get_shared_materials` | routes/studio_agent_shared_tools.py |
+| PUT | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared` | `save_shared_materials` | routes/studio_agent_shared_tools.py |
+| POST | `/studio-agent/tools/workspaces/{workspace_id}/skills` | `create_skill` | routes/studio_agent_skill_creation_tools.py |
 | GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/versions` | `save_skill_version` | routes/studio_agent_skill_tools.py |
@@ -227,7 +236,6 @@ server/app/
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/compare` | `compare_workflow` | routes/studio_agent_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code/draft` | `save_node_code_draft` | routes/studio_agent_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft` | `save_node_code_draft` | routes/studio_agent_tools.py |
-| PUT | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflow/active` | `get_active_revision` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
@@ -505,6 +513,8 @@ server/app/
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
 | StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, wor... | app/routes/studio_agent_context_contracts.py |
+| StudioAgentWorkflowDraftSaveRequest | BaseModel | definition_yaml: str, expected_updated_at: str | app/routes/studio_agent_draft_tools.py |
+| StudioAgentWorkflowDraftResponse | BaseModel | definition_yaml: str | None, updated_at: str | None | app/routes/studio_agent_draft_tools.py |
 | StudioAgentJobSummaryNode | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/studio_agent_job_tool_contracts.py |
 | StudioAgentJobView | BaseModel | id: str, title: str, status: str, outcome: str, created_at: datetime | None, ... | app/routes/studio_agent_job_tool_contracts.py |
 | StudioAgentJobListResponse | BaseModel | jobs: list[StudioAgentJobView], returned: int, limit: int | app/routes/studio_agent_job_tool_contracts.py |
@@ -525,17 +535,24 @@ server/app/
 | PreviewPanelDraftRequest | BaseModel | html: str, change_note: str | None | app/routes/studio_agent_preview_contracts.py |
 | PreviewContextJobSummary | BaseModel | id: str, status: str | None, source_type: str | None, source_id: str | None, ... | app/routes/studio_agent_preview_contracts.py |
 | PreviewContextResponse | BaseModel | workspace_id: str, recent_jobs: list[PreviewContextJobSummary], selected_job:... | app/routes/studio_agent_preview_contracts.py |
+| SharedMaterialFileWrite | BaseModel | path: str, content: str | app/routes/studio_agent_shared_contracts.py |
+| SharedMaterialsSaveRequest | BaseModel | files: list[SharedMaterialFileWrite] | app/routes/studio_agent_shared_contracts.py |
+| SharedMaterialFile | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/studio_agent_shared_contracts.py |
+| SharedMaterialsResponse | BaseModel | workspace_id: str, map: dict[str, Any] | None, files: list[SharedMaterialFile] | app/routes/studio_agent_shared_contracts.py |
 | SkillValidationIssue | BaseModel | path: str, error: str | app/routes/studio_agent_skill_contracts.py |
 | SkillValidateToolResponse | BaseModel | key: str, valid: bool, errors: list[SkillValidationIssue] | app/routes/studio_agent_skill_contracts.py |
 | SkillVersionFileWrite | BaseModel | path: str, content: str | app/routes/studio_agent_skill_contracts.py |
 | SkillSaveVersionRequest | BaseModel | files: list[SkillVersionFileWrite], new_tag: str, message: str | app/routes/studio_agent_skill_contracts.py |
-| SkillSaveVersionResponse | BaseModel | key: str, tag: str, commit: str, files: list[str] | app/routes/studio_agent_skill_contracts.py |
+| SkillSaveVersionResponse | BaseModel | key: str, tag: str, commit: str, files: list[str], synced_files: list[str] | app/routes/studio_agent_skill_contracts.py |
+| SkillCreateRequest | BaseModel | skill_name: str, files: list[SkillVersionFileWrite], new_tag: str, message: str | app/routes/studio_agent_skill_contracts.py |
+| SkillCreateResponse | BaseModel | key: str, tag: str, commit: str | app/routes/studio_agent_skill_contracts.py |
 | StudioAgentTokenMintRequest | BaseModel | ttl_hours: int | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenMintResponse | BaseModel | id: str, token: str, expires_at: str | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenEntry | BaseModel | id: str, created_at: str, expires_at: str, revoked_at: str | None | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokensResponse | BaseModel | tokens: list[StudioAgentTokenEntry] | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenRevokeResponse | BaseModel | id: str, revoked: bool | app/routes/studio_agent_token_contracts.py |
 | StudioAgentActiveWorkflowResponse | BaseModel | state: Literal['active', 'empty'], workflow_key: str | None, revision: Workfl... | app/routes/studio_agent_tool_contracts.py |
+| StudioAgentAgentVersionsResponse | BaseModel | versions: list[AgentVersionResponse] | app/routes/studio_agent_tool_contracts.py |
 | StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str], source: Literal['manual',... | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentRegistryDocument | BaseModel | api_base: str, agents: list[StudioAgentRegistryEntry] | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentDetection | BaseModel | detected: bool, path: str | None, version: str | None | app/routes/studio_agents_admin_contracts.py |

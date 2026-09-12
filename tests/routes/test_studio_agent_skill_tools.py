@@ -8,6 +8,7 @@ commits + tags the in-place repo but never touches the DB skill lock.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -131,6 +132,7 @@ def test_save_skill_version_commits_tags_and_keeps_lock(client_factory, job_db, 
         assert payload["tag"] == "v1.1.0"
         assert payload["commit"] == _git(skill_home, "rev-parse", "HEAD")
         assert payload["commit"] != before
+        assert payload["synced_files"] == []  # no _shared dir: nothing synced
         assert _git(skill_home, "log", "-1", "--format=%an <%ae>") == (
             "agent-legion-studio <studio@local>"
         )
@@ -143,6 +145,54 @@ def test_save_skill_version_commits_tags_and_keeps_lock(client_factory, job_db, 
         preview = scoped.get(f"{_TOOLS}/{_KEY}", params={"ref": "v1.1.0"})
         skill_md = next(f for f in preview.json()["files"] if f["path"] == "SKILL.md")
         assert skill_md["content"] == "# Write Script v2\n"
+
+
+def test_save_skill_version_syncs_shared_materials(client_factory, job_db, skill_home) -> None:
+    """#633 end-to-end: a mapped _shared material lands in the skill repo's
+    new commit and is reported in synced_files; a hand-supplied copy of the
+    mapped path is rejected with 422 naming it."""
+    shared = skill_home.parent / "_shared"
+    (shared / "references").mkdir(parents=True)
+    (shared / "map.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "materials": [{"source": "references/prompt-style.md", "skills": ["write-script"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (shared / "references" / "prompt-style.md").write_text("# house style\n", encoding="utf-8")
+
+    with client_factory(fresh=True) as client:
+        scoped = _scoped(client, job_db)
+        saved = scoped.post(
+            f"{_TOOLS}/{_KEY}/versions",
+            json={
+                "files": [{"path": "SKILL.md", "content": "# Write Script v2\n"}],
+                "new_tag": "v1.1.0",
+                "message": "revise",
+            },
+        )
+        assert saved.status_code == 201, saved.text
+        assert saved.json()["synced_files"] == ["references/prompt-style.md"]
+        # The synced copy is inside the tagged commit (git show strips the
+        # trailing newline; content equality is what matters).
+        assert _git(skill_home, "show", "v1.1.0:references/prompt-style.md") == "# house style"
+
+        conflict = scoped.post(
+            f"{_TOOLS}/{_KEY}/versions",
+            json={
+                "files": [
+                    {"path": "SKILL.md", "content": "# v3\n"},
+                    {"path": "references/prompt-style.md", "content": "# stale\n"},
+                ],
+                "new_tag": "v1.2.0",
+                "message": "m",
+            },
+        )
+        assert conflict.status_code == 422
+        assert conflict.json()["detail"]["errors"][0]["path"] == "references/prompt-style.md"
 
 
 def test_save_skill_version_path_escape_is_422(client_factory, job_db, skill_home) -> None:

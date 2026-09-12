@@ -8,7 +8,8 @@ reason documented in ``server.py``.
 Safety invariant (#416, STUDIO-AGENT-001): ``request_workflow_publish``
 NEVER publishes — it parks a pending request the human confirms in Studio's
 publish review dialog; the confirm endpoint replays the manual publish gates.
-The other three are reads / validation-only and persist nothing.
+The other tools are reads / validation-only and persist nothing. The #633
+draft read/write pair lives in ``draft_tools`` (split for the budget).
 """
 
 from __future__ import annotations

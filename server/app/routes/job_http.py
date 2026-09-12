@@ -42,7 +42,8 @@ def raise_job_http_error(error: JobServiceError) -> Never:
     if isinstance(error, CustomNodesDisabledError):
         raise HTTPException(status_code=403, detail=str(error)) from error
     if isinstance(error, ConflictError):
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        # #633：DraftConflictError 子类的 409 携带结构化 payload。
+        raise HTTPException(409, getattr(error, "payload", str(error))) from error
     if isinstance(error, UnsupportedOperationError):
         raise HTTPException(status_code=501, detail=str(error)) from error
     if isinstance(error, PayloadTooLargeError):

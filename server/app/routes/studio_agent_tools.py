@@ -10,23 +10,24 @@ human-facing routers behind ``reject_studio_agent_scope`` (STUDIO-AGENT-001).
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import ValidationError
 
-from server.app.agent_catalog import AgentDefinition
 from server.app.auth.dependencies import (
     require_studio_agent_scope,
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
-from server.app.routes.agent_definition_contracts import (
-    AgentDefinitionPayload,
-    AgentVersionResponse,
-)
 from server.app.routes.job_http import raise_job_http_error
+from server.app.routes.studio_agent_catalog_read_tools import (
+    create_studio_agent_catalog_read_tools_router,
+)
+from server.app.routes.studio_agent_draft_tools import create_studio_agent_draft_tools_router
 from server.app.routes.studio_agent_preview_tools import create_studio_agent_preview_tools_router
 from server.app.routes.studio_agent_prompt_tools import create_studio_agent_prompt_tools_router
 from server.app.routes.studio_agent_publish_tools import (
     create_studio_agent_publish_tools_router,
+)
+from server.app.routes.studio_agent_skill_creation_tools import (
+    create_studio_agent_skill_creation_tools_router,
 )
 from server.app.routes.studio_agent_skill_tools import create_studio_agent_skill_tools_router
 from server.app.routes.studio_agent_tool_contracts import (
@@ -44,31 +45,7 @@ from server.app.routes.workflow_revisions_contracts import (
 )
 from server.app.services.job_errors import JobServiceError
 from server.app.services.studio_agent_tools import StudioAgentToolsService
-from server.app.services.versioned_entities import VersionedEntity
 from server.app.settings import Settings
-
-
-def _parse_agent_definition(payload: AgentDefinitionPayload) -> AgentDefinition:
-    try:
-        return AgentDefinition.model_validate(payload.model_dump())
-    except ValidationError as exc:
-        # ctx carries the raw exception objects — not JSON serializable.
-        detail = [{k: v for k, v in error.items() if k != "ctx"} for error in exc.errors()]
-        raise HTTPException(status_code=422, detail=detail) from exc
-
-
-def _agent_version_response(entity: VersionedEntity) -> AgentVersionResponse:
-    return AgentVersionResponse(
-        id=entity.id,
-        agent_id=entity.entity_key,
-        version=entity.version,
-        status=entity.status,
-        definition=entity.definition,
-        definition_hash=entity.definition_hash,
-        created_by=entity.created_by,
-        created_at=entity.created_at,
-        published_at=entity.published_at,
-    )
 
 
 def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
@@ -156,25 +133,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
             raise_job_http_error(exc)
         return WorkflowNodeCodeVersionResponse(**row)
 
-    @workspace_scoped.put(
-        "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
-        response_model=AgentVersionResponse,
-    )
-    def save_agent_definition_draft(
-        workspace_id: str,
-        agent_id: str,
-        payload: AgentDefinitionPayload,
-        user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
-    ) -> AgentVersionResponse:
-        definition = _parse_agent_definition(payload)
-        try:
-            entity = _service().save_agent_definition_draft(
-                workspace_id, agent_id, definition, str(user["id"])
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
-        return _agent_version_response(entity)
-
     @workspace_scoped.get(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/active",
         response_model=StudioAgentActiveWorkflowResponse,
@@ -209,9 +167,17 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
 
     router.include_router(create_studio_agent_skill_tools_router(job_db, settings))
     workspace_scoped.include_router(create_studio_agent_prompt_tools_router(job_db))
-    # Preview panel tools (issue #328): context/panel reads + draft write —
-    # workspace-bound like the prompt tools (scoped token + workspace binding).
+    workspace_scoped.include_router(create_studio_agent_draft_tools_router(job_db))
+    # Skill creation tool (#633), workspace-scoped (the created repo lives
+    # under the calling workspace's skill dir); preview panel tools (#328),
+    # workspace-bound draft reads/write.
+    workspace_scoped.include_router(
+        create_studio_agent_skill_creation_tools_router(job_db, settings)
+    )
     workspace_scoped.include_router(create_studio_agent_preview_tools_router(job_db, settings))
+    # Catalog read tools (issue #633): agent definitions / runtime models /
+    # runtime tool catalog — read-only visibility for the authoring agent.
+    workspace_scoped.include_router(create_studio_agent_catalog_read_tools_router(job_db, settings))
     # Publish-request tools (issue #416): request parks a pending publish (a
     # scoped-only write — the human confirm/cancel endpoints live on the
     # guarded Studio surface), status is a plain scoped read.

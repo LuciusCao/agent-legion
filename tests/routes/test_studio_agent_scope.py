@@ -246,6 +246,15 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt",
     ): "scoped-only tool surface",
+    # Workflow draft-store tools (#633): read + CAS write of the SAME canvas
+    # draft the human editor autosaves to; a stale updated_at is a 409, and
+    # publishing stays on the human-only confirm endpoints above. The read is
+    # a GET — outside this manifest's non-GET scope, pinned instead by the
+    # behavioral inventory in tests/routes/test_studio_agent_tools.py.
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft",
+    ): "scoped-only tool surface",
     # Preview panel draft tool (issue #328): draft-only write.
     (
         "PUT",
@@ -268,6 +277,20 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     (
         "POST",
         "/api/studio-agent/tools/skills/{skill_key:path}/versions",
+    ): "scoped-only tool surface",
+    # Skill creation tool (#633, workspace-scoped): draft-only like the save
+    # — creates a fresh local skill repo under the workspace's skill dir and
+    # never touches the skill lock (publish/relock stays human-only).
+    (
+        "POST",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/skills",
+    ): "scoped-only tool surface",
+    # Shared skill material tools (#633): workspace-scoped authoring of the
+    # _shared dir synced into skills at save_skill_version time — the
+    # write only touches the shared materials, never a skill lock.
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/skills-shared",
     ): "scoped-only tool surface",
     # SPA mount's API 404 catch-all (server/app/spa.py).
     ("POST", "/api/{path:path}"): "API 404 catch-all",

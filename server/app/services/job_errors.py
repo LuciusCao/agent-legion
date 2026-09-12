@@ -14,6 +14,16 @@ class ConflictError(JobServiceError):
     pass
 
 
+class DraftConflictError(ConflictError):
+    """CAS draft save lost the race (#633); routes map to a 409 whose detail
+    carries the conflict payload (message + expected/current updated_at +
+    the current draft) so the agent can rebase without a second read."""
+
+    def __init__(self, payload: dict):
+        self.payload = payload
+        super().__init__(str(payload["message"]))
+
+
 class UnsupportedOperationError(JobServiceError):
     pass
 
