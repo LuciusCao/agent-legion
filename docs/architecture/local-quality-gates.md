@@ -184,6 +184,13 @@ for unselected lanes, and rejects failures or cancellations. Internal job
 names and shard counts can therefore change without rewriting protected-branch
 contexts:
 
+Merge-group static checks retain the normal `HEAD` / `HEAD^` monotonicity
+anchors. The queue rebuilds synthetic commits against the latest base and any
+preceding queued PRs, so an individual PR's earlier green result cannot opt the
+combined commit out of the newer budget and data-boundary floors. Only an
+explicit same-repository release-train PR and the post-merge trunk push use the
+release-train `HEAD`-only exception.
+
 - **backend-unit** — static checks (ruff, format, mypy, architecture contracts,
   invariant registry, spec health, version-manifest consistency via
   `scripts/check_versions.py` — the decoupled versioning discipline for

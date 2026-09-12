@@ -27,8 +27,9 @@ WORKFLOW = ROOT / ".github" / "workflows" / "quality-gate.yml"
 ENV_NAME = "AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN"
 
 # GitHub context → expected env value. The expression encodes internal
-# develop/release trains, main/master push reruns, and strict handling for
-# feature or fork PRs.
+# develop/release trains and main/master push reruns. Feature/fork PRs and
+# every merge group stay strict because a queue rebuild can introduce a newer
+# baseline after the individual PR was checked.
 _CONTEXTS: dict[str, tuple[dict[str, Any], str]] = {
     "release_train_pr": (
         {
@@ -72,14 +73,14 @@ _CONTEXTS: dict[str, tuple[dict[str, Any], str]] = {
             "event_name": "merge_group",
             "event_merge_group_base_ref": "refs/heads/main",
         },
-        "1",
+        "0",
     ),
     "master_merge_group": (
         {
             "event_name": "merge_group",
             "event_merge_group_base_ref": "refs/heads/master",
         },
-        "1",
+        "0",
     ),
     "develop_merge_group_is_strict": (
         {
