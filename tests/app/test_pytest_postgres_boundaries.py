@@ -305,12 +305,13 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     # Issue #193: the merge is event-driven. backend-coverage sits behind the
     # needs-DAG (backend-unit + backend-postgres), so it starts only after
     # every shard finished — the old 40x15s artifact poll (and its
-    # actions: read permission) is gone.
+    # actions: read permission) is gone. The public-repository workflow keeps
+    # only the checkout permission at top level.
     assert "backend-coverage:" in workflow
     assert "needs: [changes, backend-unit, backend-postgres]" in workflow
     assert "Wait for peer shard coverage artifacts" not in workflow
     assert "seq 1 40" not in workflow
-    assert "permissions:" not in workflow
+    assert "permissions:\n  contents: read" in workflow
     # Phase 5C: the tiers run as parallel jobs, each writing an independent
     # coverage data file (no cross-tier AGENT_LEGION_COV_APPEND). The
     # backend-coverage job downloads every shard's artifact and merges all
@@ -329,6 +330,33 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     full_gate_step = workflow.split("Full gate evidence (tests/full)", 1)[1]
     full_gate_step = full_gate_step.split("- name:", 1)[0]
     assert "--cov-fail-under=0" in full_gate_step
+    assert "Enforce flaky rerun registry" in workflow
+    assert "scripts/check_reruns.py" in workflow
+
+
+def test_quality_gate_has_one_stable_aggregate_context() -> None:
+    workflow = (ROOT / ".github/workflows/quality-gate.yml").read_text(encoding="utf-8")
+
+    aggregate = workflow.split("\n  quality-gate:\n", 1)[1]
+    assert "name: quality-gate" in aggregate
+    assert "if: always()" in aggregate
+    for lane in (
+        "changes",
+        "backend-unit",
+        "api-check",
+        "backend-postgres",
+        "docs-terms",
+        "backend-coverage",
+        "frontend-logic",
+        "frontend-component",
+        "frontend-coverage",
+        "e2e-smoke",
+        "rust",
+        "docker-build",
+    ):
+        assert f"- {lane}" in aggregate
+    assert "toJSON(needs)" in aggregate
+    assert '.result == "success" or .result == "skipped"' in aggregate
 
 
 def test_weekly_stress_lane_lives_in_nightly_gate() -> None:
