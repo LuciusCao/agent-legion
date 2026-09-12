@@ -20,6 +20,12 @@ concurrency:
   group: quality-gate-${{ github.ref }}
   cancel-in-progress: true
 
+# PR code, build scripts, and dependencies are untrusted input now that the
+# repository is public. Test jobs only need to read the checkout; deployment
+# and release workflows grant their own narrower write permissions.
+permissions:
+  contents: read
+
 env:
   # Gate scripts default UV_CACHE_DIR to the in-project .uv-cache; point it back
   # at the default location so astral-sh/setup-uv caching covers it.
@@ -127,17 +133,18 @@ jobs:
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
         env:
-          # Release train (develop→main)与 main 合并后 push 重跑：main 的
-          # 预算 floor 落后 develop 整整一个发布周期，HEAD^ 锚点会把刚合入
+          # Release train（同仓 develop/release/* → main）与 main 合并后
+          # push 重跑：main 的预算 floor 落后发布分支整整一个发布周期，
+          # HEAD^ 锚点会把刚合入
           # 的、已经过门禁的历史再拒一遍（0.4.0 的 PR #249 与其 main push
           # run 各撞一次）。进入 main 的合并都已被对应 PR 门覆盖
           # （release train 走本 env，hotfix PR 走严格锚点），push 重跑
           # 锚点只看 HEAD。feature→develop PR 保持 HEAD^ 完整严格性。
           # 条件组必须整体括号闭合：GHA 的 && 优先级高于 ||，裸写
-          # `A || B && '1' || '0'` 会让 develop→main PR 一臂短路返回
+          # `A || B && '1' || '0'` 会让 release-train PR 一臂短路返回
           # 布尔 true 而非 '1'，opt-out 静默失效（#460 首撞，守卫按
           # == "1" 判定）。
-          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ ((github.base_ref == 'main' && github.head_ref == 'develop') || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) && '1' || '0' }}
+          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ ((github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository && (github.head_ref == 'develop' || startsWith(github.head_ref, 'release/'))) || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) && '1' || '0' }}
 
       - name: Backend unit tests (PostgreSQL offline)
         run: |
@@ -570,6 +577,20 @@ jobs:
             --output test-results/backend-summary.md
           cat test-results/backend-summary.md >> "$GITHUB_STEP_SUMMARY"
 
+      # A retry-pass is still a loss of test determinism. Known nodeids may
+      # carry a short-lived registry entry, but a new rerun or an expired
+      # exemption turns the PR red immediately instead of waiting for the
+      # weekly governance job.
+      - name: Enforce flaky rerun registry
+        if: always()
+        run: >-
+          uv run python scripts/check_reruns.py
+          --rerun-report test-results/backend-unit-reruns.json
+          --rerun-report test-results/backend-postgres-a-reruns.json
+          --rerun-report test-results/backend-postgres-b-reruns.json
+          --rerun-report test-results/backend-postgres-c-reruns.json
+          --rerun-report test-results/backend-full-reruns.json
+
   # Frontend is sharded into the two Vitest projects (test architecture plan,
   # Phase 5B): pure logic tests (node) and component tests (jsdom) run as
   # parallel jobs, each emitting a blob report that embeds raw V8 coverage.
@@ -940,3 +961,34 @@ jobs:
           push: false
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
+
+  # Branch protection should require this one stable context. Internal lane
+  # names and shard counts can then evolve without leaving docs-only PRs
+  # waiting for a skipped required check. Every applicable lane is included
+  # in `needs`; `always()` guarantees a final verdict after failures/cancels.
+  quality-gate:
+    name: quality-gate
+    if: always()
+    needs:
+      - changes
+      - backend-unit
+      - api-check
+      - backend-postgres
+      - docs-terms
+      - backend-coverage
+      - frontend-logic
+      - frontend-component
+      - frontend-coverage
+      - e2e-smoke
+      - rust
+      - docker-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NEEDS_CONTEXT: ${{ toJSON(needs) }}
+    steps:
+      - name: Require every selected lane to pass
+        run: >-
+          jq -e
+          'all(.[]; .result == "success" or .result == "skipped")'
+          <<< "$NEEDS_CONTEXT"

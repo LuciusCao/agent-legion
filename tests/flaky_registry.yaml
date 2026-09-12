@@ -3,8 +3,9 @@
 # Every known flaky test or flake scope gets an owner, a reason, and either a
 # fix deadline or `recurring: true` for irreducible infrastructure noise.
 # Global `--reruns 1` stays, but reruns are no longer silently absorbed:
-# scripts/check_reruns.py fails nightly CI when a rerun hits a nodeid outside
-# this registry or when a non-recurring entry outlives its deadline.
+# scripts/check_reruns.py fails PR CI when a rerun hits a nodeid outside this
+# registry or when a non-recurring entry outlives its deadline; nightly also
+# checks deadlines without requiring a rerun report.
 # Field style follows config/architecture/architecture-exemptions.yaml.
 entries:
 - id: FLAKY-002
@@ -23,7 +24,7 @@ entries:
   observed: https://github.com/LuciusCao/agent-legion/actions/runs/30814709192
   deadline: 2026-09-15
 - id: FLAKY-007
-  scope: backend:studio-chat-turn-tool-call-timing
+  nodeid: tests/services/test_studio_chat_service_sessions.py::test_session_lifecycle_turn_and_token_revocation
   owner: test-infra
   reason: >-
     tests/services/test_studio_chat_service_sessions.py::test_session_lifecycle_turn_and_token_revocation
@@ -37,16 +38,7 @@ entries:
     event instead of relying on immediate visibility.
   observed: Local quick gate on review/architecture (c8913a71 + audit fixes),
     2026-08-27; isolated rerun passed.
-  recurring: true
-- id: FLAKY-003
-  scope: backend:xdist-coverage-combine
-  owner: test-infra
-  reason: xdist coverage combine dropped one postgres worker's data under high
-    load once (first 5B gate round reported 59% lines; rerun recovered to
-    93.5%). The 59% in CI run 30805689114 was a separate orchestration bug
-    (already fixed) and is NOT this entry.
-  observed: Local 5B gate run, 2026-08 (Phase 5B acceptance evidence).
-  deadline: 2026-09-01
+  deadline: 2026-09-30
 - id: FLAKY-004
   scope: ci-infra:docker-hub
   owner: test-infra
@@ -69,7 +61,7 @@ entries:
   observed: First nightly-e2e stress run after Phase 4C, 2026-08.
   recurring: true
 - id: FLAKY-006
-  scope: backend:sharding-lease-poll-timing
+  nodeid: tests/workflows/test_sharding.py::test_every_shard_claim_goes_through_leases
   owner: test-infra
   reason: tests/workflows/test_sharding.py::test_every_shard_claim_goes_through_leases
     failed once in a local pre-push quick gate run (pull request 175,
@@ -82,7 +74,7 @@ entries:
     considering a deeper fix.
   observed: Local pre-push quick gate for 9f479768 (pull request 175),
     2026-08-26; retry run passed in 47s.
-  recurring: true
+  deadline: 2026-09-30
 - id: FLAKY-008
   scope: backend:shard-finish-aggregate-race
   owner: workflow-runtime

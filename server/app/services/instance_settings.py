@@ -6,9 +6,9 @@ once at startup (``create_app``, right after ``JobQueries`` is constructed)
 and takes effect on restart; there is no runtime hot-reload:
 
 - executor runtime scalars plus the nested blocks in ``_NESTED_BLOCK_KEYS``
-  (``workflows`` / ``agent_workers`` / ``agent_enqueue`` #509 /
-  ``result_unpack`` #554 / ``result_validate`` #569 / ``agent_claim`` #561)
-  and ``code_capacity`` are merged onto the
+  (``workflows`` / ``agent_workers`` incl. #591 result_commit_batching /
+  ``agent_enqueue`` #509 / ``result_unpack`` #554 / ``result_validate``
+  #569 / ``agent_claim`` #561) and ``code_capacity`` are merged onto the
   loaded ``ExecutorRuntimeConfig`` and re-validated;
 - ``cleanup`` / ``monitoring`` values are written back into ``settings.config``
   for construction-time consumers (OpsMetricsService, CleanupConfig, WorkflowMaintenance).
@@ -45,7 +45,12 @@ _NESTED_BLOCK_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("workflows", ("max_items_per_run",)),
     (
         "agent_workers",
-        ("max_archive_bytes", "min_protocol_version", "max_concurrent_result_commits"),
+        (
+            "max_archive_bytes",
+            "min_protocol_version",
+            "max_concurrent_result_commits",
+            "result_commit_batching",
+        ),
     ),
     ("agent_enqueue", ("workers", "max_pending")),
     ("result_unpack", ("workers",)),

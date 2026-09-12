@@ -26,21 +26,25 @@ See [README.md](README.md) for the full quick start and the demo workflow.
 
 ## Before you open a PR
 
-1. Run the quick quality gate and keep it green:
+1. Run the affected-test feedback loop while editing:
 
    ```bash
-   ./scripts/check-quick.sh
+   GATE_TIER=aff ./scripts/check-quick.sh
    ```
 
-   It covers Ruff, mypy, pytest, architecture invariant/contract checks,
-   ESLint/Prettier/typecheck/Vitest, and cargo fmt/clippy/test.
+   It selects backend tests from the local coverage index and uses
+   `vitest related` for frontend changes. Missing or stale selection evidence
+   falls back to the complete unit tier. The server-side PR gate remains the
+   merge credential.
 
 2. Optionally install the versioned local hooks (`make install-hooks`):
    pre-commit runs fast checks, pre-push runs a smoke tier trimmed by the
    pushed paths. Never bypass them with `--no-verify`.
 
 3. The full gate runs on GitHub Actions for every PR
-   (`.github/workflows/quality-gate.yml`); a red CI blocks merge.
+   (`.github/workflows/quality-gate.yml`). The stable `quality-gate` aggregate
+   check is the required merge boundary; run `./scripts/check.sh` locally only
+   when CI is unavailable or an offline release credential is required.
 
 ## House rules
 

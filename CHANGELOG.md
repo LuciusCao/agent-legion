@@ -60,6 +60,109 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   接管 agent 节点路径（事件量最大面），code 节点 stdout 本就走文件
   重定向不经泵。
 
+## [0.7.10] - 2026-09-11
+
+### Fixed
+- heartbeat relay 的并行分片线程改为跨 tick 共享固定容量：一次请求超过
+  join deadline 后会持续占用槽位直到 socket 调用真正返回，后续 tick
+  对满额分片按本拍未知处理，不再在 Host 持续慢响应时无限累积 daemon
+  线程与连接。
+- result commit batcher 关闭时默认等待 writer 完整排空后才允许数据库池
+  关闭；显式有限超时不再静默成功，而是抛出错误并阻断后续池关闭，避免
+  终态事务在 teardown 中途失去连接。
+
+### Performance
+- 调度器每 claim 重复 mkdir 消除（issue #618）：`data/logs/jobs`
+  从服务启动起就存在，但 `workflow_worker/schedule.py` 每次节点
+  claim 准备都执行 `logs_dir.resolve()`（文件系统探测）+
+  `mkdir(parents=True, exist_ok=True)`（真实 syscall + FSEvents
+  事件分发）——issue #618 的 fseventsd 写类事件分账实测中，该
+  重复 mkdir 是量级最大的单项（高频 claim 路径上的纯重复动作）。
+  新增 `storage_paths.ensure_dir_once`（进程级 lru_cache 备忘录：
+  目录首次创建后跳过后续 mkdir）与 `job_log_dir`（`<logs_dir>/jobs`
+  的 resolve+ensure 进程级一次计算），调度主路径、shard claim、
+  本地沙箱执行、code 结果 `node.log` 落盘四处统一接入。同模式
+  全仓清扫：Agent bundle 与 code bundle 打包路径、Worker 结果回传
+  的 spool/publish 路径（共享 bundle 目录、每次 dispatch/每份结果
+  一次 mkdir）同样接入 `ensure_dir_once`。稳态下该写类文件事件
+  最大单项预期清零，fseventsd 与 sys time 相应回落。
+
+- result 终态事务批量化（issue #591，#569 修复方向第三条的接续）：
+  #569 下沉 validate/unpack 段后，完成波慢 WARNING 的大头轮换为
+  lease_write（四表终态写事务）与 mark_done（单行 UPDATE）——两者都
+  是纯排队：同一波的 N 个事务抢同一个 jobs 行锁（sync_job_status）
+  且各付一次 commit fsync，而 PostgreSQL 本身空闲。落地 group-commit
+  队列
+  （`server/app/agent_broker/result_commit_batcher.py`）：一条 drain-only
+  写线程，完成波的终态写按类分批——finish 批在一个事务里跑 N 个
+  `finish_lease`（`server/app/executors/_lease_finish_batch.py`，jobs 行
+  锁与 fsync 每轮各一次），mark_done 批在一个事务里关 N 个请求
+  （`server/app/agent_broker/mark_done_batch.py`），per-item 判定经
+  future 原样回到各提交线程。空闲节奏首个 item 立即处理（仅一次队列
+  跳数，无延迟引入）；每轮批上限 64 项防病态事务。语义保持：两段
+  事务先 finish 后 mark_done 的顺序不变（崩溃窗口与 sweeper 兜底同
+  直连路径），per-item 409 判定不变（非 active lease / 已关请求返回
+  False/None 而非异常），events 后处理与 job 广播逐项独立容错、按
+  job 去重。批量事务意外失败时整片回滚后逐项单条重放（确定性失败
+  只击中自己的 item，邻居拿回真实判定）。实例旋钮
+  `executor_runtime.agent_workers.result_commit_batching`（默认开，重启生效，
+  管理面板可关；start_worker=False 的 app 不构造 batcher，始终直连）= kill-switch：关闭时 finish/mark_done 走 0.7.9 直连路径。
+  二轮评审修正：批量臂补齐直连路径的 completed/failed 门（cancelled
+  结果不再解析半截 events.jsonl / 落 token-usage 行 / 压缩留档文件）；
+  #521 的 lease_write/events 阶段计时在批量路径不再丢失（回调首句关
+  lease_write——诚实覆盖排队等待 + 共批，events 仅 completed/failed，
+  cancelled/409 不报 events 段）；批臂返回长度不齐时 fail-fast 落入
+  现有整片失败收容（strict zip），不再让尾部 future 悬挂。
+  三轮评审（#609 P2 跟进）：mark_done 批量臂同样绑定 40P01 重试包装
+  （`mark_done_many_with_retry`，与 finish 臂对称——跨副本部署下隔离
+  回退的单条重放也经同一绑定臂获得重试）；写线程在 lifespan 中先于
+  其生产者启动（`start_worker_threads` 之前，关闭「code-plane finish
+  停靠在未启动 writer 上」的微秒级窗口）；薄弱测试补强（max-items
+  分裂断言、stop 退出排空真实路径、集成测试改为生产序 finish→
+  mark_done、混批 409 数据判定与混合轮臂序钉子）；sweeper requeue-limit
+  臂与本批的已知锁环经核实不因 (workspace, run, job) 排序变化而变宽
+  （排序只重排 item，不重排 finish_lease 内语句），维持 40P01 双侧吸收
+  并文档化；`pending_depth()` 观测位按评审结论移除（采样器接线需要
+  尚不存在的依赖形状/持久列/契约字段，不投机扩面）。
+
+### Changed
+- 质量门云端收口：多 worktree 本地内环改为 affected tests，push 保留按
+  路径裁剪的 smoke，完整 unit/PostgreSQL/coverage/E2E 以 PR CI 为合并
+  凭证；workflow 新增稳定 `quality-gate` 聚合 check，分支保护不再绑定
+  内部 shard 名称。pytest 的 retry-pass 改为 PR 当场校验 flaky registry，
+  未登记或超期条目直接阻止合并；公开仓库测试 workflow 的
+  `GITHUB_TOKEN` 显式收紧为 `contents: read`。
+- 预算计量的 docstring 口径（issue #610，#209 棘轮的计量层治理）：
+  Python 有效行计数（`scripts/architecture/effective_lines.py`）此前只
+  排除 `#` 注释与空行，docstring 作为字符串字面量逐行计费——全仓唯一
+  要为预算付费的文档形态（TS/Rust/CSS 的文档注释在 C-like 计量里全部
+  免费），预算压力因此系统性落在 docstring 高尔夫上（942 个 Python/JS/
+  SQL 治理文件中 273 个余量 ≤3 行时，agent 的理性最优解是削文档而非削
+  复杂度）。现在模块/类/函数首语句的字符串常量（与 `ast.get_docstring`
+  同一群体；f-string、孤儿字符串表达式、字符串赋值照常计费）按文档免
+  费——整行被 docstring 独占才免费，与代码混行照常计费（同尾注释纪
+  律）；tokenize 或 ast 任一解析失败的文件回落 raw 口径（更严纪律）。
+  配套一次性 re-baseline：`architecture-budgets.json` 682 个条目 ceiling
+  收紧（合计 -8,901 行，docstring 退出分母）；豁免清淤：`file_budget`
+  豁免 124 → 67 条（58 条删除、56 条 ceiling 收紧、新增 1 条——
+  `effective_lines.py` 自身，ceiling 96；`route_response_model` 豁免
+  4 → 4 条不变）。治理后贴墙文件（余量 = max(baseline, 豁免 ceiling) −
+  实际有效行，≤3 行）在同口径 942 文件群体上 29.0% → 7.6%（273 → 72）。
+  #209 的单调语义、绝对上限（raw 口径）、test 限制均不变。
+
+### Fixed
+- 心跳 relay 批量拍的停摆放大面（issue #591，0.7.10 短期止血）：完成波
+  尖峰下 Host HTTP 面可长时间无响应，批量心跳拍按机器在飞量整拍发出，
+  一次停摆即整拍超时丢失，级联成批量租约过期与重跑（0.7.9 上线日实测
+  复现，形态与 #566 死亡螺旋同族）。收尾调参 + 分片语义重做：relay 批量
+  拍按 `RELAY_BEAT_SHARD=64` 分片并**并行发出**（独立常量，不动机器
+  executor 侧的 256）——失败分片只丢本片的拍、不沉没后续分片（无队头
+  饿死），失败片的租约按未知处理（非丢失），下一拍全量重试；并行分片
+  下串行累加导致的整轮超租约 TTL 不再可能。批量拍显式 10s 超时
+  （`BATCH_BEAT_TIMEOUT_SECONDS`，`heartbeat_batch` 增加 timeout 透传）
+  ——30s 客户端默认太贴 90s 租约 TTL，两拍全长等待即耗尽续租预算，
+  10s 让失败早暴露、早重试。executor 侧分片与全局限时器不变。
+
 ## [0.7.8] - 2026-09-10
 
 ### Performance

@@ -1,10 +1,11 @@
 """Fail when pytest reruns hit tests outside the flaky registry.
 
-Nightly-only governance (test architecture plan, Phase 5D): the global
-``--reruns 1`` absorbs flakes silently on PR lanes. This script turns rerun
-evidence (``scripts/pytest_telemetry.py`` JSON reports) into a failure when a
-rerun lands on a nodeid that has no registry entry, or when a non-recurring
-registry entry outlives its deadline. Registry: ``tests/flaky_registry.yaml``.
+The global ``--reruns 1`` gives a timing-sensitive test one diagnostic retry,
+but a retry-pass must not become invisible. PR backend-coverage feeds every
+``scripts/pytest_telemetry.py`` JSON report to this script and fails when a
+rerun lands on a nodeid without a live registry entry. Nightly also invokes
+the deadline-only mode so stale entries fail even during a quiet week.
+Registry: ``tests/flaky_registry.yaml``.
 """
 
 from __future__ import annotations

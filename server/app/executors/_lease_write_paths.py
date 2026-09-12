@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.connection import DatabaseConnection
-from server.app.db.transaction import read_connection, write_transaction
+from server.app.db.transaction import write_transaction
 from server.app.executors._lease_claims import claim_lease
 from server.app.executors._lease_control import sync_job_status
 from server.app.executors._lease_lifecycle import (
@@ -25,10 +25,7 @@ from server.app.executors.models import (
     ExecutionResult,
     LeaseClaimRequest,
 )
-from server.app.services.token_usage_lease import capture_token_usage_after_lease_finish
-from server.app.storage_paths import resolve_data_path
 from server.app.workflows.sharding import delete_shards
-from shared.pi_events import compress_pi_events
 
 if TYPE_CHECKING:
     from server.app.executors.leases import ExecutorLeaseRepository
@@ -40,19 +37,55 @@ def try_claim(repo: ExecutorLeaseRepository, request: LeaseClaimRequest) -> Clai
     # claim_lease returns None without modifying any rows; committing the empty
     # transaction is equivalent to the old rollback. Broadcast only post-commit.
     if result is not None:
-        repo._broadcast_job_update(str(result.job_id))
+        _broadcast_committed(repo, [str(result.job_id)])
     return result
 
 
 def try_claim_many(
     repo: ExecutorLeaseRepository, requests: list[LeaseClaimRequest]
 ) -> list[ClaimedExecution | None]:
-    """Claim a batch of nodes in one transaction; None entries on capacity loss."""
+    """Claim a batch of nodes in one transaction; None entries on capacity loss.
+
+    The claims run in (workspace_id, run_id, job_id) order — the shared
+    counter-lock sequence #591's finish batch writes in (#609 P1-2): the
+    claim's jobs promote and the finish's jobs flip take the same
+    (run_id, status)/(workspace_id, status) counter rows via the status
+    triggers, and two multi-item transactions visiting shared rows in
+    opposite orders close a 40P01 ring that repeated contention can
+    exhaust the retries on. The key comes from each request's jobs row
+    (resolved in-batch, same as the finish arm); queue position breaks
+    ties, verdicts are re-assembled in CALLER order so the flush zip and
+    per-request verdicts stay positional. Capacity semantics are order-
+    insensitive: every claim's capacity re-check reads the transaction's
+    own prior writes (a claim cannot see committed state mid-batch), so
+    which claim loses on a shared limit differs at most by the same
+    per-request tie-break the round-robin arrival order already produces.
+    """
     with write_transaction(repo.path) as conn:
-        results = [claim_lease(conn, request, repo.data_dir) for request in requests]
-    for job_id in {str(result.job_id) for result in results if result is not None}:
-        repo._broadcast_job_update(job_id)
+        # (workspace_id, run_id, job_id, index, request): the first three
+        # are the counter keys the status triggers read — the full sort key
+        # #609 P1-2 pins, matching finish_many's write order.
+        keyed: list[tuple[str, str, str, int, LeaseClaimRequest]] = []
+        for index, request in enumerate(requests):
+            job = conn.execute(
+                "select workspace_id, run_id from jobs where id = %s", (request.job_id,)
+            ).fetchone()
+            ws = str(job["workspace_id"]) if job else request.workspace_id
+            run = str(job["run_id"] or "") if job else ""
+            keyed.append((ws, run, request.job_id, index, request))
+        keyed.sort(key=lambda entry: entry[:4])
+        by_index: dict[int, ClaimedExecution | None] = {}
+        for _ws, _run, _job_id, index, request in keyed:
+            by_index[index] = claim_lease(conn, request, repo.data_dir)
+        results = [by_index.get(index) for index in range(len(requests))]
+    _broadcast_committed(repo, [str(r.job_id) for r in results if r is not None])
     return results
+
+
+def _broadcast_committed(repo: ExecutorLeaseRepository, job_ids: list[str]) -> None:
+    """Broadcast job updates only after the commit landed (deduped)."""
+    for job_id in set(job_ids):
+        repo._broadcast_job_update(job_id)
 
 
 def heartbeat(repo: ExecutorLeaseRepository, lease_id: str, ttl_seconds: int) -> bool:
@@ -88,19 +121,37 @@ def finish(
     # migration is Task 3), so hand it a fresh one now that the commit
     # has landed.
     events_ran = result_flag and result.status in ("completed", "failed")
-    if events_ran and repo.data_dir is not None:
+    if events_ran:
+        finish_events_post_processing(repo, lease_id, result)
+        _mark_result_stage(stage_timer, "events")
+
+    # Broadcast only after the commit has succeeded, never inside the tx.
+    if job_id is not None and result_flag:
+        _broadcast_committed(repo, [job_id])
+    return result_flag
+
+
+def finish_events_post_processing(
+    repo: ExecutorLeaseRepository, lease_id: str, result: ExecutionResult
+) -> None:
+    """Events.jsonl token capture + PI compression for one finished lease.
+
+    Completed/failed only (both finish paths' family gate — the direct
+    path and the batched arm's post-commit callback); the data_dir guard
+    keeps the exact defensive shape. Parse events outside the main write
+    transaction; the capture helper opens its own short tx for the persist.
+    """
+    from server.app.db.transaction import read_connection
+    from server.app.services.token_usage_lease import capture_token_usage_after_lease_finish
+    from server.app.storage_paths import resolve_data_path
+    from shared.pi_events import compress_pi_events
+
+    if repo.data_dir is not None:
         with read_connection(repo.path) as read_conn:
             capture_token_usage_after_lease_finish(read_conn, lease_id, repo.data_dir)
         if result.run_dir:
             run_dir = resolve_data_path(result.run_dir, repo.data_dir, allow_missing=True)
             compress_pi_events(run_dir / "events.jsonl")
-    if events_ran:
-        _mark_result_stage(stage_timer, "events")
-
-    # Broadcast only after the commit has succeeded, never inside the tx.
-    if job_id is not None and result_flag:
-        repo._broadcast_job_update(job_id)
-    return result_flag
 
 
 def _mark_result_stage(stage_timer: Any | None, name: str) -> None:
@@ -115,11 +166,9 @@ def expire_stale(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
             "select job_id from executor_leases where status='active' and expires_at<=%s",
             (database_timestamp(now),),
         ).fetchall()
-        affected_job_ids = list({str(row["job_id"]) for row in rows})
+        affected_job_ids = [str(row["job_id"]) for row in rows]
         expired = expire_stale_leases(conn, now)
-    # Broadcast only after the commit has succeeded, never inside the tx.
-    for job_id in affected_job_ids:
-        repo._broadcast_job_update(job_id)
+    _broadcast_committed(repo, affected_job_ids)
     return expired
 
 
@@ -128,24 +177,15 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
     now_str = database_timestamp(now)
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
-            """
-            select j.id
-            from jobs j
-            where j.status='running'
-              and not exists (
-                  select 1 from executor_leases l
-                  where l.job_id = j.id and l.status='active'
-              )
-            """
+            "select j.id from jobs j where j.status='running' and not exists"
+            " (select 1 from executor_leases l where l.job_id=j.id and l.status='active')"
         ).fetchall()
-        recovered: list[str] = []
-        for row in rows:
-            job_id = str(row["id"])
-            if _recover_orphaned_job(conn, job_id, now_str):
-                recovered.append(job_id)
-    # Broadcast only after the commit has succeeded, never inside the tx.
-    for job_id in recovered:
-        repo._broadcast_job_update(job_id)
+        recovered = [
+            job_id
+            for job_id in (str(row["id"]) for row in rows)
+            if _recover_orphaned_job(conn, job_id, now_str)
+        ]
+    _broadcast_committed(repo, recovered)
     return recovered
 
 
