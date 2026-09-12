@@ -40,7 +40,7 @@ export function StudioChatRunBar(props: Props) {
     return (
       <div className={styles.runBar} aria-label="运行状态">
         <span className={`${styles.runDot} ${styles.runDotError}`} />
-        <span>会话出错，请新建对话</span>
+        <span>会话出错，可点「继续对话」恢复</span>
       </div>
     )
   }

@@ -45,12 +45,24 @@ class StudioChatStore:
         if session is not None:
             self.publish(session_id, {"type": "session", "session": serialize_session(session)})
 
-    def publish(self, session_id: str, payload: dict[str, Any]) -> None:
+    def publish(
+        self, session_id: str, payload: dict[str, Any], *, replaceable: bool = False
+    ) -> None:
         if self._bus is None:
             return
         payload = {"session_id": session_id, **payload}
         try:
-            self._bus.publish(studio_chat_channel(session_id), json.dumps(payload, default=str))
+            # ensure_ascii=False：流式 text 帧携带全量累积文本，CJK 走 \uXXXX
+            # 转义会把每字符膨胀到 6 字节（UTF-8 直出 3 字节，2 倍帧体积）、
+            # 加速填满订阅者的有界队列（#563）。
+            # replaceable：仅流式 text 快照帧声明（后续帧是全量累积，bus 溢出
+            # 时丢旧无损）；持久事件（tool_call/permission/status/session）不
+            # 声明——bus 对它们立即驱逐断流，SSE 重连 + REST 全量回取自愈。
+            self._bus.publish(
+                studio_chat_channel(session_id),
+                json.dumps(payload, default=str, ensure_ascii=False),
+                replaceable=replaceable,
+            )
         except Exception:
             # #204 broad-except audit: deliberate fire-and-forget publish.
             # SSE delivery is lossy by design (a subscriber that reconnects
@@ -96,4 +108,5 @@ class StudioChatStore:
                 "type": "message",
                 "message": stream_message_payload(session_id, open_id, kind, full_text),
             },
+            replaceable=True,
         )

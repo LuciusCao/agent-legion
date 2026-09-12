@@ -100,6 +100,60 @@ def test_cancel_without_connection_is_a_silent_noop() -> None:
     handle.cancel()  # no loop/conn yet: nothing to hand off, no error
 
 
+# -- request_stop(): graceful post-turn exit vs close()'s full teardown -----
+
+
+def test_request_stop_does_not_gate_a_later_close() -> None:
+    """#611 codex P1: request_stop() must NOT flip _closed — a resume racing
+    in mid-turn still needs close()'s full join→kill teardown of this runtime
+    before the new one spawns. request_stop only enqueues _CLOSE + remembers
+    it asked; close() afterwards still enqueues its own _CLOSE and runs the
+    join path (no early return at the idempotence gate)."""
+    handle = _handle()
+    handle.request_stop()
+    assert handle._closed is False  # the whole point: not gated
+
+    closed_seen: list[bool] = []
+    original_put = handle._queue.put
+
+    def _recording_put(item: object) -> None:
+        closed_seen.append(handle._closed)
+        original_put(item)
+
+    handle._queue.put = _recording_put  # type: ignore[method-assign]
+    # Simulate the resume teardown path: no thread ever started, but close()
+    # must still pass its gate and enqueue (the no-thread early return comes
+    # AFTER the gate + put, so the gate behavior is what we assert on).
+    handle.close()
+    assert closed_seen == [True]  # close() ran its own gate + enqueue
+    assert handle._closed is True
+
+
+def test_request_stop_is_idempotent() -> None:
+    """Repeat request_stop calls enqueue exactly one _CLOSE (the second call
+    sees _stop_requested and returns early)."""
+    from server.app.studio_chat.acp_session import _CLOSE
+
+    handle = _handle()
+    handle.request_stop()
+    handle.request_stop()
+    assert handle._queue.qsize() == 1
+    assert handle._queue.get_nowait() is _CLOSE
+    assert handle._closed is False
+
+
+def test_request_stop_after_close_is_a_noop() -> None:
+    """A close()d handle ignores request_stop: the runtime is already being
+    torn down; a second _CLOSE would be harmless but noisy."""
+    from server.app.studio_chat.acp_session import _CLOSE
+
+    handle = _handle()
+    handle.close()
+    handle.request_stop()
+    assert handle._queue.qsize() == 1
+    assert handle._queue.get_nowait() is _CLOSE
+
+
 # -- _kill_process(): the already-dead-child race ---------------------------
 
 

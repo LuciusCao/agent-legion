@@ -136,11 +136,16 @@ class AcpEventHandlers:
             session_id, "status", "system", {"event": "error", "detail": detail}
         )
         if fatal:
-            # Guarded (#158): a close owns the final 'closed' state. Runtime
-            # teardown happens in on_exit, which the ACP thread always runs
-            # after this callback.
+            # Guarded (#158): a close owns the final 'closed' state, and a
+            # resume claim's 'starting' row is not ours to stamp — a stale
+            # thread's kill echo (teardown of the OLD runtime racing the new
+            # spawn) must not fail the resume's first hop (#558 review P2,
+            # same final_statuses semantics as on_exit).
             self._backend.db.update_studio_chat_session_if(
-                session_id, status_not_in=("closed",), status="error", error_detail=detail[:500]
+                session_id,
+                status_not_in=("closed", "starting"),
+                status="error",
+                error_detail=detail[:500],
             )
         else:
             self._backend.db.update_studio_chat_session_if(

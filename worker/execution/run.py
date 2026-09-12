@@ -21,10 +21,10 @@ from typing import Any
 from worker import events
 from worker._atomic import atomic_write
 from worker.code_runner import cancel_executions, execute_code
-from worker.event_filter import spawn_event_pump
 from worker.execution.heartbeat import ExecutionHeartbeat, start_lease_heartbeat
 from worker.execution.ownership import MUTEX_WAIT_BOUND_SECONDS, discard_owned_dir, execution_mutex
 from worker.execution.prepare import prepare_execution
+from worker.execution.reactor import spawn_agent_pump
 from worker.host.client import Client
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
 from worker.status import ExecutionStatusReporter
@@ -224,7 +224,7 @@ def run_execution(
                     atomic_write(pgid_record, str(proc.pid))
                     heartbeat.proc_ref["proc"] = proc
                     # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
-                    pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")
+                    pump = spawn_agent_pump(proc, output, execution_id)
                     # Fallback aligns with the Host product constant
                     # (agent_runtime.execution.EXECUTION_TIMEOUT_SECONDS = 1800);
                     # manifests always carry timeout_seconds, so this only covers
