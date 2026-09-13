@@ -36,7 +36,18 @@ class ArchitectureExemption:
 
 
 def _parse_exemption(raw: dict[str, Any]) -> ArchitectureExemption:
-    """Parse a single exemption entry from the registry YAML."""
+    """Parse a single exemption entry from the registry YAML.
+
+    An unquoted ``expires: 2026-12-31`` is resolved by PyYAML's timestamp
+    resolver to a ``datetime.date`` — the documented plain form must keep
+    working, so it is normalized to its ISO string here (codex P1 on #642:
+    the validator's ``.strip()`` must never see a raw date object). Any
+    other non-string type falls through untouched for the validator to
+    reject with a proper error instead of a traceback.
+    """
+    expires: Any = raw.get("expires")
+    if isinstance(expires, date):
+        expires = expires.isoformat()
     return ArchitectureExemption(
         check=raw.get("check", ""),
         path=raw.get("path", ""),
@@ -44,7 +55,7 @@ def _parse_exemption(raw: dict[str, Any]) -> ArchitectureExemption:
         owner=raw.get("owner", ""),
         remove_when=raw.get("remove_when", ""),
         ceiling=raw.get("ceiling"),
-        expires=raw.get("expires"),
+        expires=expires,
     )
 
 
@@ -101,19 +112,27 @@ def _validate_remove_when(remove_when: str, base_path: Path) -> str | None:
     return None
 
 
-def _validate_expires(ex: ArchitectureExemption, prefix: str, today: date) -> str | None:
+def _validate_expires(ex: ArchitectureExemption, today: date) -> str | None:
     """Validate the optional #641 expires deadline for an exemption."""
     if ex.expires is None:
         return None
 
-    expires = ex.expires.strip()
+    # Guard: entries built without the loader (tests, hand-constructed) or
+    # carrying an unexpected YAML type must fail validation, not traceback.
+    # The Any widen keeps mypy from marking the branch unreachable under
+    # the declared ``str | None`` while runtime YAML types can differ.
+    expires_value: Any = ex.expires
+    if not isinstance(expires_value, str):
+        return f"expires {ex.expires!r} must be an ISO date string (YYYY-MM-DD)"
+
+    expires = expires_value.strip()
     if not _ISO_DATE.match(expires):
         return f"expires '{ex.expires}' must be an ISO date (YYYY-MM-DD)"
 
     deadline = date.fromisoformat(expires)
     if today > deadline:
         return (
-            f"{prefix}: exemption expired on {expires} — renew it with a fresh "
+            f"exemption expired on {expires} — renew it with a fresh "
             "justification and a later expires date, or shrink the file back "
             "under its ceiling"
         )
@@ -197,7 +216,7 @@ def validate_exemptions(
         if ceiling_error:
             errors.append(f"{prefix}: {ceiling_error}")
 
-        expires_error = _validate_expires(ex, prefix, today or date.today())
+        expires_error = _validate_expires(ex, today or date.today())
         if expires_error:
             errors.append(f"{prefix}: {expires_error}")
 

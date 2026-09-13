@@ -26,7 +26,13 @@ from scripts.architecture.budget_policy import (
 )
 from scripts.architecture.exemptions import load_exemptions
 from scripts.architecture.file_budgets import check_file_budgets
-from scripts.quality.exemptions import ArchitectureExemption, validate_exemptions
+from scripts.quality.exemptions import (
+    ArchitectureExemption,
+    validate_exemptions,
+)
+from scripts.quality.exemptions import (
+    load_exemptions as load_registry_exemptions,
+)
 from scripts.ratchet_architecture_budgets import ratchet_budgets
 from tests.architecture_budget_helpers import (
     governed_repo,
@@ -216,6 +222,38 @@ class TestExemptionExpires:
         exemption = _exemption(ceiling=100)
 
         assert validate_exemptions((exemption,), tmp_path, today=date(2026, 9, 13)) == []
+
+    def test_unquoted_yaml_date_normalized_by_loader(self, tmp_path: Path) -> None:
+        # codex P1 on #642: the documented plain form `expires: 2026-12-31`
+        # is resolved by PyYAML to a datetime.date; the loader must normalize
+        # it to its ISO string so the validator (and any consumer reading
+        # exemption.expires) never sees a raw date object.
+        registry = tmp_path / "architecture-exemptions.yaml"
+        registry.write_text(
+            "exemptions:\n"
+            "- check: architecture.file_budget\n"
+            "  path: server/app/example.py\n"
+            "  reason: Oversized module needs staged split.\n"
+            "  owner: agent-legion\n"
+            "  remove_when: issues/open/001.md\n"
+            "  ceiling: 200\n"
+            "  expires: 2026-12-31\n",
+            encoding="utf-8",
+        )
+
+        exemptions = load_registry_exemptions(registry)
+
+        assert exemptions[0].expires == "2026-12-31"
+        assert validate_exemptions(exemptions, tmp_path, today=date(2026, 9, 13)) == []
+
+    def test_non_string_expires_rejected_not_traceback(self, tmp_path: Path) -> None:
+        # Hand-constructed or malformed entries carrying a non-string
+        # expires must fail validation with an error, never an AttributeError.
+        exemption = _exemption(ceiling=100, expires=12345)
+
+        errors = validate_exemptions((exemption,), tmp_path, today=date(2026, 9, 13))
+
+        assert any("must be an ISO date string (YYYY-MM-DD)" in e for e in errors)
 
 
 class TestExemptionCeilingAllowanceAlignment:
