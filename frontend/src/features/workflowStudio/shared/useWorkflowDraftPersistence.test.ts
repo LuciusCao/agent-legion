@@ -347,7 +347,18 @@ describe('useWorkflowDraftPersistence', () => {
       }
     )
 
-    // lastPersisted 内容未被 B 污染；再编辑为 C 以 B 的时间戳竞争。
+    // lastPersisted 内容未被 B 污染；再编辑为 C 以新基线竞争。codex R3 P1
+    // 串行化后：A 的补存 PUT 仍在途（手动 mock），C 排队等 A 落盘。先
+    // resolve A（resolvePut 已被 A 的调用重绑），再切自动 resolve 的
+    // mock 让 drain 补发的 C 走 SERVER_DRAFT；async advance 把 A 的
+    // then 链（基线推进 → drain → C 补发）完整 flush。
+    await act(async () => {
+      resolvePut({
+        definition_yaml: 'key: demo\nlabel: A\n',
+        updated_at: '2026-08-27T01:02:03+00:00',
+      })
+      await vi.advanceTimersByTimeAsync(0)
+    })
     mocks.putWorkflowDraft.mockResolvedValue(SERVER_DRAFT)
     rerender({
       workspaceId: 'ws1',
@@ -356,14 +367,69 @@ describe('useWorkflowDraftPersistence', () => {
       serverDraft: NO_DRAFT,
     })
     await act(async () => {
-      vi.advanceTimersByTime(850)
+      // async advance：C 的 armTimer 到期发起 save（此时 A 已落盘、无在
+      // 途），直接以 A 推进的新基线 PUT。
+      await vi.advanceTimersByTimeAsync(850)
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: C\n',
       {
-        expectedUpdatedAt: '2026-08-27T02:00:00+00:00',
+        expectedUpdatedAt: '2026-08-27T01:02:03+00:00',
       }
+    )
+  })
+
+  it('queues a save behind an in-flight PUT and re-issues it with the advanced baseline', async () => {
+    // codex R3 P1：A 的 PUT 延迟超过 debounce 窗口时，B 不得并发用同一
+    // 旧基线竞争（A 先落盘则 B 必然被自己的 A 409，连续编辑被误报为
+    // 外部冲突）。B 排队，A 成功推进基线后 B 以新基线补发。
+    let resolveA!: (value: typeof SERVER_DRAFT) => void
+    const calls: Array<string | undefined> = []
+    mocks.putWorkflowDraft.mockImplementation(
+      (_ws: string, yaml: string) =>
+        new Promise<typeof SERVER_DRAFT>((resolve) => {
+          calls.push(yaml)
+          if (calls.length === 1) resolveA = resolve
+          else resolve(SERVER_DRAFT)
+        })
+    )
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: A\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+
+    // A 仍在途时编辑 B：debounce 到期，save(B) 排队（不发并发 PUT）。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: B\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1) // B 尚未发出
+
+    // A 落盘（updated_at=02:00）→ drain 以新基线补发 B。
+    resolveA({
+      definition_yaml: 'key: demo\nlabel: A\n',
+      updated_at: '2026-08-27T02:00:00+00:00',
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(2)
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
+      'ws1',
+      'key: demo\nlabel: B\n',
+      { expectedUpdatedAt: '2026-08-27T02:00:00+00:00' }
     )
   })
 

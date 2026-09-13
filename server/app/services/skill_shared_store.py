@@ -57,16 +57,31 @@ def shared_edit_lock(shared_dir: Path, base_dir: Path):
     return edit_lock_for(shared_dir, base_dir, None)
 
 
-def read_shared_text(path: Path) -> str:
+def read_shared_text(path: Path, *, strict: bool = False) -> str:
     """Read one shared file under the skill-file read rules (text
     extensions only, no symlinks, 128 KB cap, UTF-8 with replacement) —
     the same contract as the catalog read, so ``_shared`` files and skill
-    repo files cannot drift apart in what the surface accepts."""
+    repo files cannot drift apart in what the surface accepts.
+
+    ``strict=True`` (the sync path, codex R3 P1): a file whose raw size
+    exceeds the cap RAISES instead of returning truncated text — the sync
+    copies the shared file authoritatively into every mapped skill, so a
+    display-style truncation (possibly mid UTF-8 sequence, rendered as
+    replacement characters) must never ride a save_skill_version commit
+    while still reporting success. The PUT boundary already rejects
+    oversized payloads; this guards files that arrived through another
+    path."""
     if path.suffix.lower() not in TEXT_EXTENSIONS:
         raise OSError(f"unsupported file extension: {path.name!r}")
     if path.is_symlink() or not path.is_file():
         raise OSError(f"not a regular file: {path.name!r}")
-    return path.read_bytes()[:MAX_FILE_BYTES].decode("utf-8", errors="replace")
+    raw = path.read_bytes()
+    if strict and len(raw) > MAX_FILE_BYTES:
+        raise OSError(
+            f"shared material exceeds the {MAX_FILE_BYTES}-byte cap "
+            f"({len(raw)} bytes); refusing to sync a truncated copy"
+        )
+    return raw[:MAX_FILE_BYTES].decode("utf-8", errors="replace")
 
 
 def read_shared_files(shared_dir: Path, material_dirs: tuple[str, ...]) -> list[dict]:

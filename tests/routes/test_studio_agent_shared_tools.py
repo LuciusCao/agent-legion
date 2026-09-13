@@ -333,3 +333,58 @@ def test_put_staging_failure_leaves_previous_state_intact(
         # The live dir is untouched: old content, no staging leftovers.
         assert (shared / "references" / "prompt-style.md").read_text(encoding="utf-8") == "v1"
         assert sorted(p.name for p in shared_home.iterdir()) == ["_shared"]
+
+
+def test_put_rejects_content_over_the_utf8_byte_cap(client_factory, job_db, shared_home) -> None:
+    """codex R3 P1: the wire cap counts CHARACTERS (max_length) but the
+    disk/read cap counts BYTES — CJK content can pass the contract and
+    still exceed 128 KiB, which the sync would silently truncate into
+    every mapped skill. The PUT must reject it as 422."""
+    with client_factory(fresh=True) as client:
+        _create_workspace(client)
+        scoped = _scoped(client, job_db)
+        # 7 万个汉字 ≈ 21 万 UTF-8 字节 > 128 KiB，但字符数在 128K 上限内。
+        big = "汉" * 70_000
+        response = scoped.put(
+            f"{_TOOLS}/workspaces/{_WS}/skills-shared",
+            json={
+                "files": [
+                    {"path": "map.json", "content": json.dumps(_MAP)},
+                    {"path": "references/prompt-style.md", "content": big},
+                ]
+            },
+        )
+        assert response.status_code == 422, response.text
+        body = response.json()
+        errors = body["detail"]["errors"]
+        assert any("UTF-8 bytes" in e["error"] for e in errors)
+        assert not (shared_home / "_shared").exists()
+
+
+def test_put_rejects_map_sources_missing_from_the_full_state_payload(
+    client_factory, job_db, shared_home
+) -> None:
+    """codex R3 P2: the PUT replaces the whole _shared directory — a map
+    entry whose source file is not in the same payload would strand every
+    mapped save_skill_version on "shared source unreadable" until the
+    shared state is fixed. Reject with 422 naming the missing source."""
+    with client_factory(fresh=True) as client:
+        _create_workspace(client)
+        scoped = _scoped(client, job_db)
+        response = scoped.put(
+            f"{_TOOLS}/workspaces/{_WS}/skills-shared",
+            json={
+                "files": [
+                    {"path": "map.json", "content": json.dumps(_MAP)},
+                    # references/prompt-style.md is mapped but absent.
+                    {"path": "references/other.md", "content": "present"},
+                ]
+            },
+        )
+        assert response.status_code == 422, response.text
+        body = response.json()
+        errors = body["detail"]["errors"]
+        assert any(
+            "references/prompt-style.md" in e["error"] and "missing" in e["error"] for e in errors
+        )
+        assert not (shared_home / "_shared").exists()

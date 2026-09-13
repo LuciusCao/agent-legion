@@ -201,7 +201,10 @@ def plan_shared_sync(
         injected: list[tuple[str, str]] = []
         for material in mapped:
             try:
-                content = read_shared_text(shared_map.shared_dir / material.source)
+                # strict (codex R3 P1): an oversized shared file fails the
+                # save as an unreadable source instead of committing a
+                # silently truncated copy into the skill repo.
+                content = read_shared_text(shared_map.shared_dir / material.source, strict=True)
             except (OSError, UnicodeDecodeError) as exc:
                 errors.append(
                     {"path": material.source, "error": f"shared source unreadable: {exc}"}

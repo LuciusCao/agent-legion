@@ -149,6 +149,10 @@ def test_validate_reports_clean_when_root_contract_yaml_present(
         "files:\n  - path: a.md\n    format: text\n    schema: {type: object}\n",  # text + schema
         "files:\n  - path: a.json\n    format: json\n    min_chars: 5\n    schema: {type: object}\n",
         "files:\n  - path: a.json\n    format: json\n    schema: {type: nope}\n",  # uncompilable
+        # codex R3 P2: YAML `true` parses to a Python bool, and bool is an
+        # int subclass — it must still be rejected (velites cannot
+        # deserialize a boolean into Option<usize>).
+        "files:\n  - path: a.md\n    format: text\n    min_chars: true\n",
     ],
 )
 def test_validate_reports_malformed_contract_yaml_as_error(

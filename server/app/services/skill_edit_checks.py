@@ -152,7 +152,11 @@ def _file_entry_errors(entry: object, index: int) -> list[dict[str, str]]:
     elif entry.get("schema") is not None:
         errors.append({"path": where, "error": "`schema` only applies to `format: json`"})
     min_chars = entry.get("min_chars")
-    if min_chars is not None and (not isinstance(min_chars, int) or min_chars < 0):
+    if min_chars is not None and (
+        isinstance(min_chars, bool)  # bool is an int subclass; YAML `true` must not pass
+        or not isinstance(min_chars, int)
+        or min_chars < 0
+    ):
         errors.append({"path": where, "error": "`min_chars` must be a non-negative int"})
     headings = entry.get("required_headings")
     if headings is not None and (

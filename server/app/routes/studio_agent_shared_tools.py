@@ -27,7 +27,7 @@ snapshot.
 from __future__ import annotations
 
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from fastapi import APIRouter, Depends
 
@@ -44,6 +44,7 @@ from server.app.routes.studio_agent_shared_contracts import (
 )
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_repo_edit import SkillEditValidationError
+from server.app.services.skill_shared_put import validate_shared_put_payload
 from server.app.services.skill_shared_store import (
     MAP_PATH,
     SHARED_DIR_NAME,
@@ -51,7 +52,7 @@ from server.app.services.skill_shared_store import (
     shared_edit_lock,
     write_shared_materials,
 )
-from server.app.services.skill_shared_sync import load_shared_map, validate_materials
+from server.app.services.skill_shared_sync import load_shared_map
 from server.app.settings import Settings
 from server.app.skills.skill_roots import workspace_skill_dir
 
@@ -129,78 +130,15 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
         workspace_id: str, payload: SharedMaterialsSaveRequest
     ) -> SharedMaterialsResponse:
         shared_dir = _shared_dir(job_db, workspace_id)
-        root = shared_dir.resolve()
-        errors: list[dict[str, str]] = []
-        # Validated relative paths → content; duplicates are rejected, not
-        # last-wins (codex review R2 P1: two map.json entries meant only the
-        # first was validated while the write loop applied both).
-        targets: dict[str, str] = {}
-        for item in payload.files:
-            parts = PurePosixPath(item.path).parts
-            # Only map.json sits at the root; everything else must live
-            # under the two material dirs (the sync only copies those).
-            if (
-                not item.path
-                or PurePosixPath(item.path).is_absolute()
-                or ".." in parts
-                or any(part.lower() == ".git" for part in parts)
-                or (item.path != MAP_PATH and (len(parts) < 2 or parts[0] not in _MATERIAL_DIRS))
-            ):
-                errors.append(
-                    {
-                        "path": item.path or ".",
-                        "error": "path must be map.json at the root or stay under "
-                        "references/ or scripts/, with no '..'/absolute/.git components",
-                    }
-                )
-                continue
-            resolved = (root / item.path).resolve()
-            try:
-                resolved.relative_to(root)
-            except ValueError:
-                errors.append({"path": item.path, "error": "path escapes the _shared directory"})
-                continue
-            relative = resolved.relative_to(root).as_posix()
-            if relative in targets:
-                errors.append(
-                    {"path": relative, "error": "duplicate path in payload (map to ONE file)"}
-                )
-                continue
-            targets[relative] = item.content
-        if errors:
-            raise_job_http_error(SkillEditValidationError("Invalid shared material paths", errors))
-        # map.json presence + schema: everything validated before any write.
-        map_content = targets.get(MAP_PATH)
-        if map_content is None:
-            raise_job_http_error(
-                SkillEditValidationError(
-                    "Invalid shared materials map",
-                    [{"path": MAP_PATH, "error": "map.json is required in the payload"}],
-                )
-            )
+        # Full-state PUT: every rule (paths, UTF-8 byte caps, map shape,
+        # mapped-source completeness — codex R2/R3) runs before the staged
+        # swap touches disk; a validation failure leaves the live dir alone.
         try:
-            parsed = json.loads(map_content)
-        except json.JSONDecodeError as exc:
-            raise_job_http_error(
-                SkillEditValidationError(
-                    "Invalid shared materials map",
-                    [{"path": MAP_PATH, "error": f"malformed JSON: {exc}"}],
-                )
+            targets = validate_shared_put_payload(
+                shared_dir, [(item.path, item.content) for item in payload.files]
             )
-        if not isinstance(parsed, dict) or parsed.get("version") != 1:
-            raise_job_http_error(
-                SkillEditValidationError(
-                    "Invalid shared materials map",
-                    [{"path": MAP_PATH, "error": "version must be 1"}],
-                )
-            )
-        try:
-            validate_materials(parsed.get("materials"))
         except SkillEditValidationError as exc:
             raise_job_http_error(exc)
-        # Full-state staged swap: validation-failure paths above never
-        # touched disk; a staging failure leaves the live dir untouched,
-        # and the swap deletes whatever the payload omitted.
         write_shared_materials(shared_dir, list(targets.items()), shared_dir.parent.parent)
         return get_shared_materials(workspace_id)
 

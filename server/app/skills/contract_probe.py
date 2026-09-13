@@ -35,7 +35,11 @@ from typing import Literal
 # Location constants shared with velites/src/contract.rs (#542).
 CONTRACT_YAML = "contract.yaml"
 CONTRACT_DOC = "references/output-contract.md"
-_CONTRACT_FENCE = "```yaml contract"
+# The fence marker the Rust scanner matches (a line that strips to exactly
+# this). Public: the pinned-ref publish advisory (workflows/skill_repo_gate)
+# re-implements the tier-2 presence scan against a git tag's tree.
+CONTRACT_FENCE = "```yaml contract"
+_CONTRACT_FENCE = CONTRACT_FENCE  # historical private alias
 
 ContractProbe = Literal[
     "root_yaml",  # tier 1: skill-root contract.yaml present (normative)
@@ -54,7 +58,12 @@ def probe_contract(skill_dir: Path) -> ContractProbe:
     """
     root = skill_dir / CONTRACT_YAML
     try:
-        if root.is_file():
+        # Existence (not is_file): a directory / symlink-to-directory at the
+        # root-contract path is still a DECLARED contract — velites's
+        # read_to_string fails closed there (EISDIR etc.), and only NotFound
+        # falls through to tier 2. is_file() would wrongly report "none" and
+        # skip the engine, bypassing the fail-closed verdict (codex review).
+        if root.exists():
             return "root_yaml"
     except OSError:
         # Undeterminable: assume a contract and let velites fail closed.
