@@ -55,3 +55,23 @@ def test_no_example_keeps_the_deprecated_embedded_block() -> None:
         assert "```yaml contract" not in content, skill.name
         # The prose points readers at the machine contract's new home.
         assert "contract.yaml" in content, skill.name
+
+
+def test_probe_treats_a_contract_yaml_directory_as_declared(tmp_path: Path) -> None:
+    """codex R3 P2: presence, not regular-file-ness, decides tier 1 — a
+    directory named contract.yaml makes velites fail closed (EISDIR), so
+    the probe must never report ``none`` and skip the engine for it."""
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    (skill / "contract.yaml").mkdir()
+
+    assert probe_contract(skill) == "root_yaml"
+
+
+def test_probe_reports_none_only_for_a_genuinely_contractless_dir(tmp_path: Path) -> None:
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    (skill / "references").mkdir()
+    (skill / "references" / "output-contract.md").write_text("# prose only\n", encoding="utf-8")
+
+    assert probe_contract(skill) == "none"

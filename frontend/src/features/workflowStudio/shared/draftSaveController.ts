@@ -1,25 +1,21 @@
 import {
-  DRAFT_NEVER_SAVED,
-  WorkflowDraftConflictError,
-} from '../../../api/workflowDraft'
-import {
-  DEBOUNCE_MS,
   MAX_PUT_RETRIES,
-  RETRY_BASE_MS,
+  DEBOUNCE_MS,
   IDLE_DRAFT_SAVE,
   withinKeepaliveLimit,
   type DraftSaveFlushResult,
   type DraftSaveState,
   type PutWorkflowDraftFn,
 } from './draftSaveTypes'
+import { drainQueue, DraftSaveQueue, runTrackedSave } from './draftSaveQueue'
 import {
   conflictClearedState,
   conflictEnteredState,
   conflictResolvedState,
   decideSchedule,
+  hasPendingWork,
   pendingAfterResolve,
   revertedState,
-  runSave,
   stopTimer,
 } from './draftSaveConflict'
 
@@ -47,6 +43,8 @@ export class DraftSaveController {
   private timer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private pendingSave: { yaml: string; requestId: number } | null = null
+  // codex R3 P1：在途 PUT 期间的下一次保存排队（见 draftSaveQueue.ts）。
+  private readonly queue = new DraftSaveQueue()
 
   constructor(private readonly put: PutWorkflowDraftFn) {}
 
@@ -60,7 +58,10 @@ export class DraftSaveController {
      updated_at 作为后续 PUT 的 CAS 基线——冲突恢复采用服务端草稿与首次
      hydrate 走同一入口。kimi review P1-2：hydrate 即冲突的解除路径之一
      （采用服务端版本），conflict 字段一并清零。 */
-  hydrate(persistedYaml: string, updatedAt: string | null | undefined) {
+  hydrate = (
+    persistedYaml: string,
+    updatedAt: string | null | undefined
+  ): void => {
     this.lastPersisted = persistedYaml
     this.lastPersistedAt = updatedAt ?? null
     this.setState(conflictResolvedState(this.state, updatedAt))
@@ -72,7 +73,10 @@ export class DraftSaveController {
      到服务端 updated_at（下一次保存以新基线竞争，否则同一过期时间戳永远
      409）；用户未落盘的编辑保留在画布（conflictDraftYaml 供 UI 提供采用
      服务端草稿的入口），不自动重试。 */
-  enterConflict(serverYaml: string | null, serverAt: string | null) {
+  enterConflict = (
+    serverYaml: string | null,
+    serverAt: string | null
+  ): void => {
     if (serverAt) this.lastPersistedAt = serverAt
     this.setState(conflictEnteredState(this.state, serverYaml, serverAt))
   }
@@ -129,7 +133,7 @@ export class DraftSaveController {
      requestId 护栏，这里显式清理），并把可见状态从 pending/error 收回。
      kimi review P2-3：画布回到已持久化内容即冲突已消解（本页与服务端
      一致），conflict 标记一并清除，避免红字常驻 + 保存按钮卡死。 */
-  private revertToPersisted() {
+  private revertToPersisted = (): void => {
     this.abortPending()
     this.setState(revertedState(this.state))
   }
@@ -162,19 +166,17 @@ export class DraftSaveController {
   /* beforeunload 护栏读法：pending（未落盘）/在途写入/失败未恢复/冲突挂起
      （本页编辑未保存且自动 flush 已停）都算未保存——离开前提示用户。 */
   hasUnsaved(): boolean {
-    return (
-      this.pendingSave !== null ||
-      this.inFlight !== 0 ||
-      this.state.status === 'error' ||
+    return hasPendingWork(
+      this.pendingSave !== null,
+      this.inFlight !== 0,
+      this.state.status === 'error',
       this.state.conflict === true
     )
   }
 
   /* 卸载/workspace 切换：清理计时器（pending 的尾部编辑随 debounce 窗口
      丢弃，与旧行为一致；页面级离开由 useDraftUnloadGuard 的 flush 覆盖）。 */
-  dispose() {
-    this.abortPending()
-  }
+  dispose = (): void => this.abortPending()
 
   /* 发起一次 PUT 并跟踪其终态。#429：返回 promise 供 flushNow 的调用方
      await——失败同样 resolve，迟到的响应/重试发现 requestId 过期时 resolve
@@ -190,45 +192,57 @@ export class DraftSaveController {
     retriesLeft: number,
     keepalive: boolean
   ): Promise<DraftSaveFlushResult> {
+    // codex R3 P1：串行化 PUT——在途写入未结束时本次保存排队（A 完成后
+    // 以 A 推进的新基线补发），而不是用同一旧基线并发竞争。flushNow 的
+    // 调用方等待的是整条链的终态：排队请求 resolve 随补发 PUT 的结果。
+    if (this.inFlight !== 0 && this.inFlight !== requestId) {
+      return new Promise<DraftSaveFlushResult>((resolve) =>
+        this.queue.enqueue({ yaml, requestId }, resolve)
+      )
+    }
     this.inFlight = requestId
-    this.setState({ ...this.state, status: 'saving' })
-    const expectedAt = this.lastPersistedAt ?? DRAFT_NEVER_SAVED
-    return new Promise<DraftSaveFlushResult>((resolve) =>
-      runSave({
-        put: this.put,
-        yaml,
-        keepalive,
-        expectedAt,
-        requestId,
-        isCurrentRequest: (id) => this.requestCounter === id,
-        clearInFlight: (id) => {
-          if (this.inFlight === id) this.inFlight = 0
-        },
-        onSuccess: (saved, updatedAt, current) => {
-          this.lastPersisted = saved
-          this.lastPersistedAt = updatedAt
-          if (current) this.setState({ status: 'saved', savedAt: updatedAt })
-        },
-        onFailure: (error, resolveRetry) => {
-          if (error instanceof WorkflowDraftConflictError) {
-            const current = error.currentDraft
-            this.enterConflict(current.definition_yaml, current.updated_at)
-            return resolveRetry(false)
-          }
-          this.setState({ ...this.state, status: 'error' })
-          if (retriesLeft === 0) return resolveRetry(false)
-          const attempt = MAX_PUT_RETRIES - retriesLeft + 1
-          this.retryTimer = setTimeout(() => {
-            this.retryTimer = null
-            if (this.requestCounter !== requestId) return resolveRetry(true)
-            this.save(yaml, requestId, retriesLeft - 1, false).then((r) =>
-              resolveRetry(r.ok)
-            )
-          }, RETRY_BASE_MS * attempt)
-        },
-        resolve: (ok) => resolve(this.result(ok)),
-      })
-    )
+    return runTrackedSave({
+      put: this.put,
+      yaml,
+      requestId,
+      retriesLeft,
+      keepalive,
+      currentRequest: this.isCurrent,
+      onCleared: (id) => {
+        if (this.inFlight === id) this.inFlight = 0
+        this.drainQueued()
+      },
+      baseline: () => this.lastPersistedAt,
+      onBaseline: (saved, updatedAt, current) => {
+        this.lastPersisted = saved
+        this.lastPersistedAt = updatedAt
+        if (current) this.setState({ status: 'saved', savedAt: updatedAt })
+      },
+      onSaving: () => this.setState({ ...this.state, status: 'saving' }),
+      onConflict: this.enterConflict.bind(this),
+      onTransientError: () => this.setState({ ...this.state, status: 'error' }),
+      armRetry: (timer) => {
+        this.retryTimer = timer
+      },
+      save: this.save.bind(this),
+      finish: (ok: boolean) => this.result(ok),
+    })
+  }
+
+  /* 在途 PUT 终态后的排队补发（决策逻辑在 DraftSaveQueue.decide）：
+     补发以发起时刻的基线竞争（save 内现取）。 */
+  private drainQueued(): void {
+    drainQueue(this.queue, {
+      inFlight: this.inFlight,
+      currentRequest: this.isCurrent,
+      inConflict: this.state.conflict === true,
+      staleResult: this.result.bind(this),
+      onConflictHold: (queued) => {
+        this.pendingSave = queued
+      },
+      reissue: (queued) =>
+        this.save(queued.yaml, queued.requestId, MAX_PUT_RETRIES, false),
+    })
   }
 
   /* flush 终态工厂：ok=false 让发布确认中止（不发布未落盘的旧草稿）。 */
@@ -241,12 +255,16 @@ export class DraftSaveController {
     this.listeners.forEach((listener) => listener(next))
   }
 
-  /* 作废 pending 保存：双清计时器 + 递增 requestId（在途响应作废）。 */
+  /* 作废 pending 保存：双清计时器 + 递增 requestId（在途响应作废）；排队
+     保存一并作废（drainQueued 会按 requestId 过期丢弃）。 */
   private abortPending() {
     this.clearTimers()
     this.requestCounter += 1
     this.pendingSave = null
+    this.queue.discard().forEach((resolve) => resolve(this.result(true)))
   }
+
+  private isCurrent = (id: number): boolean => this.requestCounter === id
 
   private clearTimers() {
     this.timer = stopTimer(this.timer)

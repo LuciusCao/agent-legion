@@ -876,11 +876,16 @@ exemptions:
     confirm awaits (#427). The state machine keeps its single-file shape by design:
     splitting it would fork the requestId/timer/CAS-baseline invariants it guards.
     #633 adds the conflict lifecycle (enter/resolve/adopt + autosave suspension);
-    pure state transitions moved to draftSaveConflict.ts. Remove when the draft-save
-    wiring gets its planned rework.'
+    pure state transitions moved to draftSaveConflict.ts, and codex R3 P1 adds the
+    PUT serialization (queued saves re-issue with the advanced CAS baseline; the
+    queue/drain/schedule orchestration lives in draftSaveQueue.ts). The 171→182
+    ceiling bump rides the develop release train (AGENT_LEGION_BUDGET_MONOTONICITY_
+    RELEASE_TRAIN; #633 is the planned draft-save wiring rework this exemption
+    waited for). Remove when the queue module absorbs the remaining save wiring
+    or a budget re-balance re-registers it.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/429
-  ceiling: 171
+  ceiling: 182
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/useDraftServerSync.ts
   reason: >-

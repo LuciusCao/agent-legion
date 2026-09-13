@@ -122,12 +122,16 @@ export function runSave(options: {
   const { put, yaml, keepalive, expectedAt, requestId } = options
   put(yaml, keepalive, expectedAt)
     .then((response) => {
-      options.clearInFlight(requestId)
+      // onSuccess BEFORE clearInFlight: the success handler advances the
+      // persisted baseline (lastPersistedAt), and a queued save drains on
+      // clearInFlight — the drain must re-read the ADVANCED baseline, not
+      // the pre-A snapshot (codex R3 P1 serialization).
       options.onSuccess(
         yaml,
         response.updated_at ?? null,
         options.isCurrentRequest(requestId)
       )
+      options.clearInFlight(requestId)
       options.resolve(true)
     })
     .catch((error: unknown) => {
