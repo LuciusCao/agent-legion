@@ -1,0 +1,9 @@
+/* #593：实例没有任何外部服务连接时，字段下方的空态指路（灰色小字 +
+   管理员入口链接），与 AddItemsDialog 的 .summary 同风格。 */
+.emptyHint {
+  color: #4b5563;
+  font-size: 13px;
+}
+.emptyHint a {
+  color: #2563eb;
+}

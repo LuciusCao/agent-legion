@@ -166,9 +166,15 @@ pub struct SandboxWrapCli {
 
 /// `velites validate` / `velites-sandbox validate` (issue #443): run the
 /// output-contract engine standalone. Exit 0 prints `mode=contract` (all
-/// rules hold) or `mode=existence` (no contract block declared — the Host
-/// falls back to its legacy check); exit 1 lists violations on stderr;
-/// exit 2 is a parse/argument/I/O error. Kept separate from [`Cli`] like
+/// rules hold) or `mode=existence` (no contract declared — the Host falls
+/// back to its legacy check); exit 1 lists violations on stderr; exit 2 is a
+/// parse/argument/I/O error. Since #542 the contract is read three-tier:
+/// the skill-root `contract.yaml` first (present-but-malformed fails
+/// closed, an embedded block is never consulted), then the deprecated
+/// ```yaml contract block in `references/output-contract.md`, else nothing
+/// declared. An embedded-block hit adds the stdout line
+/// `source=embedded-block (deprecated; migrate to contract.yaml)` after the
+/// mode line (stdout is diagnostic only). Kept separate from [`Cli`] like
 /// [`SandboxWrapCli`]; both binaries dispatch on the leading `validate`
 /// token before clap sees the agent-run CLI.
 #[derive(Debug, Parser)]
@@ -177,8 +183,10 @@ pub struct ValidateCli {
     /// Job directory to check (contract paths resolve relative to it).
     #[arg(long)]
     pub job_dir: PathBuf,
-    /// Skill directory to read references/output-contract.md from;
-    /// repeatable, the first directory declaring a contract block wins.
+    /// Skill directory to read the contract from (root `contract.yaml`
+    /// first, then the deprecated embedded block in
+    /// references/output-contract.md); repeatable, the first directory
+    /// declaring a contract wins.
     #[arg(long = "skill")]
     pub skill: Vec<PathBuf>,
 }

@@ -33,6 +33,7 @@ from server.app.jobs.queries.scoped_tokens import ScopedTokenQueriesMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
 from server.app.jobs.queries.studio_chat import StudioChatQueriesMixin
 from server.app.jobs.queries.studio_publish_requests import StudioPublishRequestQueriesMixin  # #416
+from server.app.jobs.queries.workflow_draft_cas import WorkflowDraftCasQueriesMixin
 from server.app.jobs.queries.workflow_drafts import WorkflowDraftQueriesMixin
 from server.app.jobs.queries.workflow_revisions import WorkflowRevisionQueriesMixin
 from server.app.jobs.queries.workspace import WorkspaceQueriesMixin
@@ -50,6 +51,7 @@ class IdentityQueriesMixin(
 
 class WorkspaceDomainQueriesMixin(
     WorkflowDraftQueriesMixin,
+    WorkflowDraftCasQueriesMixin,
     WorkspacePackageQueriesMixin,
     WorkspaceQueriesMixin,
     # Subclasses ConnectionQueriesMixin, so it need not be listed separately.

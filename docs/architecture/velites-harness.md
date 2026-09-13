@@ -180,7 +180,7 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 |---|---|---|
 | 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline（复用 `--timeout-seconds`，M3 起该 flag 界定整个 run 的墙钟上限；**不再**兼任单次 provider HTTP 总超时——总超时会掐断长生成流，HTTP 层改为 connect 超时 + chunk 间 idle 超时，见 §7）；每次模型调用**前**检查，耗尽时注入一条收尾消息给模型**一个**收尾轮写出已声明产物，然后结束，`agent_end{reason: "budget_exceeded"}`（M3 实现为可选 `reason` 字段，取 `budget_exceeded` / `cancelled` 两值，替代布尔 flag 方案）；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 | 现在只有外层 wall-clock 强杀 |
 | 优雅取消 | SIGTERM 被 loop 捕获：检查点在 turn 边界与每次工具执行完成后（模型调用也可被中断）；bash 工具正在跑时走既有 TERM→grace→KILL 进程组清理；收尾发出 `agent_end{reason:"cancelled"}` 再退出，**exit 0**（取消是 Host 主动行为，非 harness 故障；M3 已决）；SIGKILL 兜底语义不变 | 现在 cancel = 进程组强杀，无事件收尾 |
-| 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定）；补救后仍缺失的非取消运行 **exit 1**（EXEC-HARNESS-OUTPUTS-001）。#443 起升级为**契约模式**：任一 `--skill` 目录的 `references/output-contract.md` 声明了机器可读契约段（见 §8）时，引擎同时校验文件**内容**（text 长度/必备标题、JSON Schema draft 2020-12），违约与缺失一样触发补救轮与 exit 1，事件带 `mode: contract` + `violations`；契约段解析失败按一条违约处理（fail-closed，不静默降级；未闭合 fence 同此），且因契约段位于只读 skill 目录、模型无法修复而**跳过补救轮直接失败**（不烧徒劳的 token）；无可解析契约段时保持 legacy 存在性语义，事件带 `mode: existence`（给 skill 作者补契约的信号） | 现在 Host 事后扫 job_dir 才发现缺失 |
+| 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定）；补救后仍缺失的非取消运行 **exit 1**（EXEC-HARNESS-OUTPUTS-001）。#443 起升级为**契约模式**：任一 `--skill` 目录声明了机器可读契约（#542 起根目录 `contract.yaml` 为权威位置，legacy 嵌入块继续生效，见 §8）时，引擎同时校验文件**内容**（text 长度/必备标题、JSON Schema draft 2020-12），违约与缺失一样触发补救轮与 exit 1，事件带 `mode: contract` + `violations`；契约解析失败按一条违约处理（fail-closed，不静默降级；未闭合 fence 同此），且因契约位于只读 skill 目录、模型无法修复而**跳过补救轮直接失败**（不烧徒劳的 token）；无可解析契约时保持 legacy 存在性语义，事件带 `mode: existence`（给 skill 作者补契约的信号） | 现在 Host 事后扫 job_dir 才发现缺失 |
 | 零自动发现 | 不读 AGENTS.md/CLAUDE.md、不扫描 skill/扩展/模板目录、不读用户级配置；上下文 = `--system-prompt` + `--skill` + `@prompt.md`，无第三个来源（代码层不存在发现逻辑，而非"有逻辑加开关"） | Pi 靠 4 个 `--no-*` flag 维持；pi_agent_rust 无开关（PoC 的 P0 阻断项） |
 | 无 delta | 见 §4 | 现在 99% 的 stdout 体积是被丢弃的 delta |
 
@@ -380,8 +380,17 @@ fail-closed 报错，内置节点不受影响。
   编号违约清单（`is_error`，文案面向模型可行动）；skill 目录都没有可解析契约段时返回
   信息性错误（"nothing to validate against"），不静默成功。引擎与关卡、Host 复核共用
   `src/contract.rs` 一份实现；
-- **输出契约段（受控接口，权威定义）**：skill 仓库的 `references/output-contract.md`
-  中嵌入一个 fenced block（**第一个** ```` ```yaml contract ```` 块生效，其余视为 prose）：
+- **输出契约段（受控接口，权威定义；#542 起位置迁移到根目录）**：机器可读契约的
+  权威位置是 skill 根目录的 `contract.yaml`（独立 YAML 文件，顶层 `files:` 列表，
+  结构与下方示例一致）。legacy 位置——`references/output-contract.md` 中嵌入的
+  fenced block（**第一个** ```` ```yaml contract ```` 块生效，其余视为 prose）——已废弃
+  但继续生效（存量迁移期承诺）。三档读取语义（`Contract::parse`）：
+
+  1. 根目录 `contract.yaml` 存在 → 唯一权威：畸形（坏 YAML/非法结构/不可读）→
+     显式错误 fail-closed，**即使同时存在合法的嵌入块也不回落**（root 完全胜出，
+     嵌入块不解析、不报错）；
+  2. 无 `contract.yaml`，但有嵌入块 → 按嵌入块解析（废弃路径，语义不变）；
+  3. 两者皆无 → `Ok(None)`（关卡回落 existence 模式）。
 
   ```yaml contract
   files:
@@ -396,18 +405,26 @@ fail-closed 报错，内置节点不受影响。
         required: [exercises]
   ```
 
-  规则与降级语义：无 `output-contract.md` 或无契约段 → 降级信号（`Ok(None)`，关卡回落
-  existence 模式）；段存在但 YAML/结构非法（json 缺 schema、format 取值非法、path 为空、
+  （`contract.yaml` 的文件内容即上面 fence 内的 YAML 本体。）
+
+  规则与降级语义：无 `contract.yaml` 且无契约段 → 降级信号（`Ok(None)`，关卡回落
+  existence 模式）；契约存在但 YAML/结构非法（json 缺 schema、format 取值非法、path 为空、
   text 文件配 schema 等）→ 显式错误，关卡上按违约处理（fail-closed）。逐文件检查：文件
   缺失/为空/非 UTF-8 各一条违约；text 按 `min_chars`、`required_headings` 逐项；json 解析
   失败一条违约，schema 每个错误一条（带 JSON path）。
-  两条边界规则：**跨文件一致性与业务规则不在契约段表达**，留在同文件的 prose 里供模型阅读
-  （引擎只做单文件结构校验）；**契约段格式向后兼容**——只允许新增可选键，变更必填键或语义
-  必须显式升版本（格式本身是受控接口）。
+  两条边界规则：**跨文件一致性与业务规则不在契约表达**，留在 `references/output-contract.md`
+  的 prose 里供模型阅读（引擎只做单文件结构校验）；**契约格式向后兼容**——只允许新增可选键，
+  变更必填键或语义必须显式升版本（格式本身是受控接口）。#542 的是**接口位置变更**而非
+  格式变更：`files:` 列表的键与语义原样保留，按本节自身的受控接口规则记录为一次位置
+  迁移（根目录 `contract.yaml` 成为 normative 位置，嵌入块进入废弃期、语义冻结）。
+  废弃信号：validate 子命令命中嵌入块时在 stdout 追加一行
+  `source=embedded-block (deprecated; migrate to contract.yaml)`；validate 工具的成功消息
+  附迁移提示。stdout 是诊断通道——Host 侧复核只读 exit code 与 stderr，信号不改变任何
+  消费方语义。
   Host 侧复核与离线检查走同形子命令：`velites validate --job-dir <dir> [--skill <dir>]...`
-  （`velites-sandbox validate` 相同入口）——全过打 `mode=contract` exit 0；无契约段打
-  `mode=existence` exit 0（Host 据此回落 legacy 校验）；违约逐行 stderr + exit 1；契约段
-  解析错误/参数错误/IO 错误 stderr + exit 2。多个 `--skill` 时取第一个含契约段的；
+  （`velites-sandbox validate` 相同入口）——全过打 `mode=contract` exit 0；无契约打
+  `mode=existence` exit 0（Host 据此回落 legacy 校验）；违约逐行 stderr + exit 1；契约
+  解析错误/参数错误/IO 错误 stderr + exit 2。多个 `--skill` 时取第一个含契约的；
 - **输出截断（pi 对齐）**：工具输出按双阈值截断——2000 行 或 50KB
   （50×1024 字节），任一先到即截，语义与 pi `truncate.js` 完全一致
   （实现集中在 `velites/src/tools/truncate.rs`）：

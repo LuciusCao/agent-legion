@@ -99,6 +99,7 @@
     "tests/routes/test_misc.py",
     "tests/routes/test_quality.py",
     "tests/routes/test_quality_replay_routes.py",
+    "tests/routes/test_studio_agent_catalog_read_tools.py",
     "tests/routes/test_workflow_draft_publish_routes.py",
     "tests/routes/test_workflow_draft_validate.py",
     "tests/routes/test_workspace_agent_routes.py",

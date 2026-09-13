@@ -26,6 +26,12 @@ class StudioPublishRequestRecord(BaseModel):
 
     ``claimed_at``: stamped when the row moved to ``confirming``; null on
     every other state (#429 四轮 P1 — the stale-claim sweep's clock).
+
+    ``warnings`` (#542): read-side advisory computed at request/status/poll
+    time — one entry per agent node whose effective skill declares no
+    machine-readable contract (no root ``contract.yaml``). Never persisted
+    (no schema change), never blocks the confirm; the human review dialog
+    surfaces it. Absent on resolved rows without a draft.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -41,6 +47,7 @@ class StudioPublishRequestRecord(BaseModel):
     expires_at: str
     resolved_at: str | None = None
     claimed_at: str | None = None
+    warnings: list[str] | None = None
 
 
 class StudioAgentPublishRequestResponse(BaseModel):

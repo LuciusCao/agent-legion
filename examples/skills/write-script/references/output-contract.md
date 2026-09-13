@@ -26,20 +26,12 @@
 
 ## 校验
 
-运行时优先按下面的机器可读契约段经 harness 内置引擎校验（存在性、文本
-长度、必备标题）：
-
-```yaml contract
-files:
-  - path: script.md
-    format: text
-    min_chars: 200
-    required_headings: ["## 开场导入", "## 概念讲解", "## 例题演示", "## 易错点提醒", "## 小结"]
-```
+运行时优先按机器可读契约（本 skill 根目录的 `contract.yaml`）经
+harness 内置引擎校验（存在性、文本长度、必备标题）。
 
 `scripts/validate_output.py` 为 legacy 回落通道
 （`python validate_output.py <job_dir>`，退出码 0 为通过），检查项与
-契约段一致：
+契约一致：
 
 - `script.md` 存在且为合法 UTF-8 文本；
 - 五个必备小节标题全部出现；

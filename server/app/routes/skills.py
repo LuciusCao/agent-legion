@@ -30,6 +30,7 @@ def create_skills_router(job_db: JobQueries, settings: Settings) -> APIRouter:
             tags=list(result.tags),
             latest_tag=result.latest_tag,
             locked_ref=result.locked_ref,
+            warnings=list(result.warnings),
         )
 
     @router.get("/skills/tags", response_model=SkillTagsResponse)

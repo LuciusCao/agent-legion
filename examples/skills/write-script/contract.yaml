@@ -1,0 +1,5 @@
+files:
+  - path: script.md
+    format: text
+    min_chars: 200
+    required_headings: ["## 开场导入", "## 概念讲解", "## 例题演示", "## 易错点提醒", "## 小结"]

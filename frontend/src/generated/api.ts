@@ -1194,6 +1194,36 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * List Agent Definitions
+     * @description Latest version per Agent of the workspace (a pending draft beats
+     *     the published row), with the full definition payload — the read side
+     *     of the agent-authoring loop.
+     */
+    get: operations['list_agent_definitions_api_studio_agent_tools_workspaces__workspace_id__agent_definitions_get']
+    put?: never
+    /**
+     * Create Agent Definition
+     * @description Start a NEW Agent definition draft: the agent_id derives from the
+     *     capability (no explicit id on this surface — a colliding capability
+     *     gets a 409 pointing at the existing Agent), the draft stamps
+     *     ``studio-agent:{user_id}``. Draft-only like the save: a human
+     *     publishes it in Studio (STUDIO-AGENT-001).
+     */
+    post: operations['create_agent_definition_api_studio_agent_tools_workspaces__workspace_id__agent_definitions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft': {
     parameters: {
       query?: never
@@ -1202,8 +1232,34 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** Save Agent Definition Draft */
+    /**
+     * Save Agent Definition Draft
+     * @description Draft-only write: a human publishes it in Studio (STUDIO-AGENT-001).
+     */
     put: operations['save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/agent-runtimes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Agent Runtimes
+     * @description Per-runtime agent tool catalog (tool names, tiers, activation).
+     *     Static code-defined projection (EXEC-RUNTIME-CATALOG-001): agent
+     *     "tools" are not runtime-editable — the editable surface is the
+     *     ``tools`` selection inside Agent definition drafts.
+     */
+    get: operations['get_agent_runtimes_api_studio_agent_tools_workspaces__workspace_id__agent_runtimes_get']
+    put?: never
     post?: never
     delete?: never
     options?: never
@@ -1399,6 +1455,63 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/runtime-models': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Runtime Models
+     * @description ``{runtime: {provider: [models]}}`` across the workspace's online
+     *     Workers — read-only visibility (EXEC-RUNTIME-MODELS-001): workers own
+     *     provider/model declarations; there is no tool to edit them.
+     */
+    get: operations['get_runtime_models_api_studio_agent_tools_workspaces__workspace_id__runtime_models_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Create Skill */
+    post: operations['create_skill_api_studio_agent_tools_workspaces__workspace_id__skills_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills-shared': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Shared Materials */
+    get: operations['get_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_get']
+    /** Save Shared Materials */
+    put: operations['save_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active': {
     parameters: {
       query?: never
@@ -1427,6 +1540,24 @@ export interface paths {
     put?: never
     /** Compare Workflow */
     post: operations['compare_workflow_api_studio_agent_tools_workspaces__workspace_id__workflow_compare_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workflow Draft Route */
+    get: operations['get_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_get']
+    /** Save Workflow Draft Route */
+    put: operations['save_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_put']
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -5714,6 +5845,73 @@ export interface components {
       tools?: components['schemas']['RuntimeToolEntry'][]
     }
     /**
+     * SharedMaterialFile
+     * @description One readable shared file — same shape as the skill detail read.
+     */
+    SharedMaterialFile: {
+      /** Content */
+      content: string
+      /** Path */
+      path: string
+      /** Size */
+      size: number
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated: boolean
+    }
+    /** SharedMaterialFileWrite */
+    SharedMaterialFileWrite: {
+      /** Content */
+      content: string
+      /** Path */
+      path: string
+    }
+    /**
+     * SharedMaterialsResponse
+     * @description Workspace shared materials; ``map: null`` + empty ``files`` is the
+     *     structured empty state for a workspace that never opted into ``_shared``.
+     */
+    SharedMaterialsResponse: {
+      /** Files */
+      files?: components['schemas']['SharedMaterialFile'][]
+      /** Map */
+      map?: {
+        [key: string]: unknown
+      } | null
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** SharedMaterialsSaveRequest */
+    SharedMaterialsSaveRequest: {
+      /** Files */
+      files: components['schemas']['SharedMaterialFileWrite'][]
+    }
+    /**
+     * SkillCreateRequest
+     * @description create_skill payload (#633): same bounds as SkillSaveVersionRequest.
+     */
+    SkillCreateRequest: {
+      /** Files */
+      files: components['schemas']['SkillVersionFileWrite'][]
+      /** Message */
+      message: string
+      /** New Tag */
+      new_tag: string
+      /** Skill Name */
+      skill_name: string
+    }
+    /** SkillCreateResponse */
+    SkillCreateResponse: {
+      /** Commit */
+      commit: string
+      /** Key */
+      key: string
+      /** Tag */
+      tag: string
+    }
+    /**
      * SkillDetailResponse
      * @description Skill detail; with the ``ref`` query param the content comes from that
      *     git tag instead of the working tree (lock and checkout untouched). An
@@ -5780,8 +5978,12 @@ export interface components {
       files?: string[]
       /** Key */
       key: string
+      /** Synced Files */
+      synced_files?: string[]
       /** Tag */
       tag: string
+      /** Warnings */
+      warnings?: components['schemas']['SkillValidationWarning'][]
     }
     /** SkillTagsResponse */
     SkillTagsResponse: {
@@ -5813,6 +6015,8 @@ export interface components {
       tags?: string[]
       /** Valid */
       valid: boolean
+      /** Warnings */
+      warnings?: string[]
     }
     /** SkillValidateToolResponse */
     SkillValidateToolResponse: {
@@ -5822,9 +6026,18 @@ export interface components {
       key: string
       /** Valid */
       valid: boolean
+      /** Warnings */
+      warnings?: components['schemas']['SkillValidationWarning'][]
     }
     /** SkillValidationIssue */
     SkillValidationIssue: {
+      /** Error */
+      error: string
+      /** Path */
+      path: string
+    }
+    /** SkillValidationWarning */
+    SkillValidationWarning: {
       /** Error */
       error: string
       /** Path */
@@ -5890,6 +6103,48 @@ export interface components {
       workflow?: components['schemas']['WorkflowDefinitionResponse'] | null
       /** Workflow Key */
       workflow_key?: string | null
+    }
+    /**
+     * StudioAgentAgentCreateRequest
+     * @description Tool-surface create payload: same editable fields as the save, minus
+     *     an explicit agent_id (#635) — the capability derives it, so the tool
+     *     never spawns a second entity for an occupied capability (409 instead).
+     *     The human route keeps its optional agent_id for legacy clients.
+     */
+    StudioAgentAgentCreateRequest: {
+      /** Capability */
+      capability: string
+      /** Config Schema */
+      config_schema?: {
+        [key: string]: unknown
+      }
+      /** Requires Labels */
+      requires_labels?: {
+        [key: string]: string
+      }
+      /**
+       * Runtime
+       * @enum {string}
+       */
+      runtime: 'pi' | 'velites'
+      /**
+       * Skill
+       * @default
+       */
+      skill: string
+      /** Tools */
+      tools?: string[]
+    }
+    /**
+     * StudioAgentAgentVersionsResponse
+     * @description Latest version per Agent with the FULL definition payload (#633) —
+     *     the human list route carries only a summary, but the authoring agent's
+     *     read loop needs every field (capability, runtime, skill, tools,
+     *     requires_labels, config_schema) plus version metadata.
+     */
+    StudioAgentAgentVersionsResponse: {
+      /** Versions */
+      versions: components['schemas']['AgentVersionResponse'][]
     }
     /** StudioAgentArtifactResponse */
     StudioAgentArtifactResponse: {
@@ -6232,6 +6487,23 @@ export interface components {
       tokens: components['schemas']['StudioAgentTokenEntry'][]
     }
     /**
+     * StudioAgentWorkflowDraftResponse
+     * @description Human draft-store mirror; both null when no draft (structured empty).
+     */
+    StudioAgentWorkflowDraftResponse: {
+      /** Definition Yaml */
+      definition_yaml?: string | null
+      /** Updated At */
+      updated_at?: string | null
+    }
+    /** StudioAgentWorkflowDraftSaveRequest */
+    StudioAgentWorkflowDraftSaveRequest: {
+      /** Definition Yaml */
+      definition_yaml: string
+      /** Expected Updated At */
+      expected_updated_at: string
+    }
+    /**
      * StudioChatAgentOption
      * @description Picker view of a registry agent: never exposes command/args.
      */
@@ -6255,10 +6527,15 @@ export interface components {
      * StudioChatContextResponse
      * @description What the get_studio_context MCP tool returns: the session's bound
      *     workspace, the human's live Studio node selection, the canvas' unpublished
-     *     workflow draft (None until the frontend pushes it), and the active
-     *     workflow's structure. ``workflow`` is None when nothing is published yet.
+     *     workflow draft (None until the frontend pushes it), the draft row's
+     *     ``updated_at`` (kimi review P2-5: the CAS token for a subsequent
+     *     ``save_workflow_draft`` — the session-pushed draft_yaml alone carries
+     *     no baseline; None = never-saved), and the active workflow's structure.
+     *     ``workflow`` is None when nothing is published yet.
      */
     StudioChatContextResponse: {
+      /** Draft Updated At */
+      draft_updated_at: string | null
       /** Draft Yaml */
       draft_yaml: string | null
       /** Selected Node Key */
@@ -6497,6 +6774,12 @@ export interface components {
      *
      *     ``claimed_at``: stamped when the row moved to ``confirming``; null on
      *     every other state (#429 四轮 P1 — the stale-claim sweep's clock).
+     *
+     *     ``warnings`` (#542): read-side advisory computed at request/status/poll
+     *     time — one entry per agent node whose effective skill declares no
+     *     machine-readable contract (no root ``contract.yaml``). Never persisted
+     *     (no schema change), never blocks the confirm; the human review dialog
+     *     surfaces it. Absent on resolved rows without a draft.
      */
     StudioPublishRequestRecord: {
       /** Chat Session Id */
@@ -6519,6 +6802,8 @@ export interface components {
       result_revision_id?: string | null
       /** Status */
       status: string
+      /** Warnings */
+      warnings?: string[] | null
       /** Workspace Id */
       workspace_id: string
     }
@@ -6876,6 +7161,8 @@ export interface components {
     WorkflowDraftStoreRequest: {
       /** Definition Yaml */
       definition_yaml: string
+      /** Expected Updated At */
+      expected_updated_at?: string | null
     }
     /** WorkflowDraftStoreResponse */
     WorkflowDraftStoreResponse: {
@@ -9878,6 +10165,72 @@ export interface operations {
       }
     }
   }
+  list_agent_definitions_api_studio_agent_tools_workspaces__workspace_id__agent_definitions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentAgentVersionsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_agent_definition_api_studio_agent_tools_workspaces__workspace_id__agent_definitions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioAgentAgentCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put: {
     parameters: {
       query?: never
@@ -9901,6 +10254,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_agent_runtimes_api_studio_agent_tools_workspaces__workspace_id__agent_runtimes_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentRuntimesResponse']
         }
       }
       /** @description Validation Error */
@@ -10323,6 +10707,138 @@ export interface operations {
       }
     }
   }
+  get_runtime_models_api_studio_agent_tools_workspaces__workspace_id__runtime_models_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceRuntimeModelsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_skill_api_studio_agent_tools_workspaces__workspace_id__skills_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillCreateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedMaterialsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SharedMaterialsSaveRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedMaterialsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_active_revision_api_studio_agent_tools_workspaces__workspace_id__workflow_active_get: {
     parameters: {
       query?: never
@@ -10376,6 +10892,72 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowDraftCompareResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentWorkflowDraftResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioAgentWorkflowDraftSaveRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentWorkflowDraftResponse']
         }
       }
       /** @description Validation Error */

@@ -8,8 +8,10 @@ restores a repo to a recorded HEAD after a failed save and turns a
 rollback failure into an explicit ``SkillRollbackError`` instead of
 silently continuing in a partially applied state. ``run_edit_git`` is
 the mutation-side git runner (operational failures raise
-``SkillGitError``; host paths stay in the server log). Split from
-``services/skill_editing.py`` for the file budget.
+``SkillGitError``; host paths stay in the server log).
+``SkillEditValidationError`` (422-mapping, structured error list) is
+defined here for cycle-free sharing with the shared-materials module
+(#633). Split from ``services/skill_editing.py`` for the file budget.
 """
 
 from __future__ import annotations
@@ -32,6 +34,19 @@ from server.app.skills.paths import default_skills_runs_dir, ensure_secure_runs_
 logger = logging.getLogger(__name__)
 
 GIT_EDIT_TIMEOUT_SECONDS = 30
+
+
+class SkillEditValidationError(JobServiceError):
+    """422-mapping edit rejection carrying a structured error list.
+
+    Lives here (mutation-side plumbing) rather than ``skill_editing`` so
+    the shared-materials module can raise it without an import cycle;
+    ``skill_editing`` re-exports it for its historical importers.
+    """
+
+    def __init__(self, message: str, errors: list[dict[str, str]]) -> None:
+        super().__init__(message)
+        self.errors = errors
 
 
 class SkillRollbackError(JobServiceError):

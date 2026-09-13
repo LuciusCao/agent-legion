@@ -46,6 +46,16 @@ def string_dict_row(cursor: Any):
 
 
 def configure_connection(conn: Connection[dict[str, Any]]) -> None:
-    """Make naive legacy timestamp strings deterministic across host timezones."""
+    """Make naive legacy timestamp strings deterministic across host timezones.
+
+    Also bounds lock waits session-wide: a leaked open transaction holding
+    row/table locks would otherwise hang every later statement on that
+    table forever (observed in the postgres test tier as an idle-in-
+    transaction `update agent_workers` blocking the next test's isolation
+    TRUNCATE with no timeout). 30s turns such a hang into an attributable
+    LockNotAvailable error instead; normal lock contention (short
+    transactions) is unaffected.
+    """
     conn.execute("set timezone = 'UTC'")
+    conn.execute("set lock_timeout = '30s'")
     conn.commit()

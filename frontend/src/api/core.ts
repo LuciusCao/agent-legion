@@ -15,9 +15,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const text = await response.text()
     let message: string
+    let detail: unknown
     const prefix = `HTTP ${response.status}`
     try {
       const json = JSON.parse(text)
+      detail = json.detail
       const d = json.detail as string | { message?: string } | undefined
       // #467：结构化 detail（部分创建失败）取 message；字符串直传。
       const inline = typeof d === 'string' ? d : d?.message
@@ -25,7 +27,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       message = `${prefix}: ${text.slice(0, 200)}`
     }
-    throw Object.assign(new Error(message), { status: response.status })
+    throw Object.assign(new Error(message), { status: response.status, detail })
   }
   return (await response.json()) as T
 }

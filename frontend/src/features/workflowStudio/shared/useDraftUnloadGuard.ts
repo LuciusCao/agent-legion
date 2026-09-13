@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import type { DraftSaveFlushResult } from './draftSaveController'
+import type { DraftSaveFlushResult } from './draftSaveTypes'
 
 type DraftUnloadGuardOptions = {
   /** 尽力把未落盘编辑立即 PUT；keepalive=true 用于 pagehide（请求可存活于

@@ -10,7 +10,11 @@
   跳过并记 warning，可后续手动上传），intake 节点从 job 的材料输入
   （`ctx.material`）读取 markdown——每个材料一个 job。
 - `skills/`：4 个示例 agent skill（`write-script` / `review-script` /
-  `generate-questions` / `review-questions`），随仓库版本化。运行
+  `generate-questions` / `review-questions`），随仓库版本化。每个 skill
+  自带分层契约四件套：`SKILL.md`（任务指令）、根目录 `contract.yaml`
+  （机器契约，#542 起 normative 位置）、`references/output-contract.md`
+  （语义散文与示例）、`scripts/validate_output.py`（跨文件/业务规则
+  兜底）。运行
   `make import-demo` 把它们导入本机 skill root 下的
   `~/.agents/skills/education-video-problems-generation/`
   并逐个 `git init` + 打 tag `v1.0.0`，随后把该 tag 解析的 commit

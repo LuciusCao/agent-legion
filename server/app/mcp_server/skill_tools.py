@@ -1,10 +1,12 @@
 """Skill tools for the studio-agent MCP server (issue #217).
 
 Registered onto the shared FastMCP instance from ``server.create_mcp_server``
-(split out for the file-size budget). All three are loopback tools and stay
+(split out for the file-size budget). All four are loopback tools and stay
 ``async def`` for the same single-event-loop reason documented in
-``server.py``; all are draft-only: reads (``get_skill``, ``validate_skill``)
-plus a local-repo commit+tag that never touches the DB skill lock.
+``server.py``; all are draft-only: reads (``get_skill``, ``validate_skill``),
+a local-repo commit+tag that never touches the DB skill lock
+(``save_skill_version``), and repo creation under the workspace's skill dir
+that equally never touches the lock (``create_skill``, #633).
 """
 
 from __future__ import annotations
@@ -46,9 +48,13 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     async def validate_skill(skill_key: str) -> str:
         """Check a skill against the runtime contract the platform enforces at
         dispatch: SKILL.md (non-empty) + references/output-contract.md +
-        scripts/validate_output.py. Returns a structured error list
-        ({"valid": bool, "errors": [{"path", "error"}]}). Persists nothing —
-        always run this before save_skill_version."""
+        scripts/validate_output.py, plus a strict parse of the root
+        contract.yaml when present (malformed = error). Returns
+        {"valid": bool, "errors": [{"path", "error"}], "warnings":
+        [{"path", "error"}]} — warnings cover a MISSING root contract.yaml
+        (embedded-block fallback: deprecated; nothing: runtime validation
+        degrades to existence-only) without failing the verdict.
+        Persists nothing — always run this before save_skill_version."""
         _, client = await client_factory()
         return await client.call("POST", f"/skills/{_skill_path(skill_key)}/validate")
 
@@ -62,12 +68,49 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         """Write a new version of a skill into its LOCAL in-place repo
         (<skills root>/<key>): validate every path (inside the skill dir, no
         '..' or absolute paths), write the files, re-run the contract check
-        (failure rolls the repo back to its original commit), then git commit
-        (author agent-legion-studio) and git tag new_tag. An existing tag is
-        a conflict. The skill lock is never touched: nodes pinned to a tag
+        (a malformed root contract.yaml fails like any contract error and
+        rolls the repo back to its original commit; a MISSING one only
+        warns), then git commit (author agent-legion-studio) and git tag
+        new_tag. An existing tag is a conflict. The response carries
+        "warnings" (e.g. contract.yaml missing — migrate the embedded block
+        or add one). The skill lock is never touched: nodes pinned to a tag
         keep the locked commit until a human reviews the diff, re-pins the
         node, and relocks; ``latest`` nodes pick the new HEAD up on their
         next dispatch."""
         _, client = await client_factory()
         body: dict[str, Any] = {"files": files, "new_tag": new_tag, "message": message}
         return await client.call("POST", f"/skills/{_skill_path(skill_key)}/versions", body)
+
+    @mcp.tool()
+    async def create_skill(
+        workspace_id: str,
+        skill_name: str,
+        files: list[dict[str, str]],
+        new_tag: str,
+        message: str,
+    ) -> str:
+        """Create a BRAND-NEW skill under the workspace's skill directory
+        (~/.agents/skills/<workspace_id>/<skill_name>) as a fresh local git
+        repo. skill_name is one segment (^[a-z0-9][a-z0-9_-]{0,63}$); the
+        files MUST already contain the full contract set of FOUR files —
+        non-empty SKILL.md + references/output-contract.md +
+        scripts/validate_output.py + a root contract.yaml (the
+        machine-readable contract; malformed YAML/structure is rejected
+        like a missing file) — or the create is rejected (422). Everything
+        is validated before anything is written (path safety: no '..',
+        absolute paths, or .git; tag must be a valid git ref name); on any
+        failure after the directory was created the partial directory is
+        removed, so a retry is never wedged. On success the initial commit
+        (author agent-legion-studio) is tagged new_tag. Draft-only: nothing
+        is published and the skill lock is untouched — a human still
+        reviews, re-pins, and relocks. Afterwards iterate with
+        validate_skill / save_skill_version (which only WARN on a missing
+        contract.yaml for existing skills)."""
+        _, client = await client_factory()
+        body: dict[str, Any] = {
+            "skill_name": skill_name,
+            "files": files,
+            "new_tag": new_tag,
+            "message": message,
+        }
+        return await client.call("POST", f"/workspaces/{workspace_id}/skills", body)

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchWorkflowDraft, putWorkflowDraft } from './workflowDraft'
+import {
+  DRAFT_NEVER_SAVED,
+  WorkflowDraftConflictError,
+  fetchWorkflowDraft,
+  putWorkflowDraft,
+} from './workflowDraft'
 
 const originalFetch = global.fetch
 
@@ -54,5 +59,58 @@ describe('workflowDraft api', () => {
         body: JSON.stringify({ definition_yaml: 'key: wf' }),
       })
     )
+  })
+
+  it('carries the CAS base in the body when expectedUpdatedAt is set (#633)', async () => {
+    const fetchMock = mockFetchJson({
+      definition_yaml: 'key: wf',
+      updated_at: '2026-09-12T00:00:00+00:00',
+    })
+    global.fetch = fetchMock
+
+    await putWorkflowDraft('ws1', 'key: wf', {
+      expectedUpdatedAt: '2026-09-11T00:00:00+00:00',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/ws1/workflow-draft',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          definition_yaml: 'key: wf',
+          expected_updated_at: '2026-09-11T00:00:00+00:00',
+        }),
+      })
+    )
+  })
+
+  it('translates a 409 into WorkflowDraftConflictError with the current draft (#633)', async () => {
+    const detail = {
+      message: 'Workflow draft conflict: another session saved a newer draft.',
+      expected_updated_at: '2026-09-11T00:00:00+00:00',
+      current_draft: {
+        definition_yaml: 'key: wf\nlabel: agent\n',
+        updated_at: '2026-09-12T00:00:00+00:00',
+      },
+    }
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: () => Promise.resolve({ detail }),
+      text: () => Promise.resolve(JSON.stringify({ detail })),
+    } as unknown as Response)
+
+    const error = await putWorkflowDraft('ws1', 'key: wf', {
+      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+    }).then(
+      () => null,
+      (e: unknown) => e
+    )
+
+    expect(error).toBeInstanceOf(WorkflowDraftConflictError)
+    expect((error as WorkflowDraftConflictError).currentDraft).toEqual({
+      definition_yaml: 'key: wf\nlabel: agent\n',
+      updated_at: '2026-09-12T00:00:00+00:00',
+    })
   })
 })
