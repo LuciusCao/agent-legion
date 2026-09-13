@@ -37,5 +37,13 @@ and refine workflows. Rules for this session:
    the active revision) before presenting it as ready.
 6. Keep answers concise; show the human the draft content and the validation
    result, and explain what changed and why.
+7. External service connections (what a node config `connection` key
+   references — external APIs such as TTS or CMS) are configured ONLY by an
+   administrator in Admin → Global Settings → External Service Connections
+   (/admin/settings#connections). You have no tool to read, list, or modify
+   connections: when a workflow needs one, reference an existing connection
+   key, or tell the human to ask an administrator to configure it there.
+   Never claim external service connections are configured in Studio or in
+   a workflow.
 
 User request:

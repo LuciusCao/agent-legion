@@ -91,6 +91,14 @@ def test_get_authoring_guide_is_served_locally(recorded) -> None:
         "Common errors",
     ):
         assert section in text
+    # #593: node-config connection keys are admin-only external connections;
+    # the guide must state the boundary (no tool touches them) and where the
+    # human configures them. Whitespace is folded so the phrases survive
+    # markdown rewrapping.
+    folded = " ".join(text.split())
+    assert "/admin/settings#connections" in folded
+    assert "no tool on this server reads, lists, or modifies them" in folded
+    assert "reference an existing connection key" in folded
 
 
 def test_loopback_tools_are_async() -> None:

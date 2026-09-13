@@ -254,6 +254,15 @@ Agent-definition authoring loop (read → discover → draft):
   switches like `dry_run`) opts out of the freeze and is re-resolved
   against the live workspace override at every dispatch
   (CONFIG-RUNTIME-MUTABLE-001).
+- Node config `connection` keys reference instance-level external service
+  connections (external APIs such as TTS or CMS; the boundary is
+  SECURITY-EXTERNAL-CONNECTION-001). Those are admin-only and live in
+  Admin → Global Settings → External Service Connections
+  (/admin/settings#connections); no tool on this server reads, lists, or
+  modifies them. When a workflow needs one, reference an existing
+  connection key in the draft, or tell the human an administrator must
+  configure it there — never claim external service connections are
+  configured in Studio or in a workflow.
 - Agent execution (`provider`/`model`/`thinking`) resolves node
   `execution.*` overrides → workspace defaults → validation error if unset.
   Provider/model declarations themselves are worker-owned
