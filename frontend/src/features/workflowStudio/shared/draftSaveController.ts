@@ -18,9 +18,11 @@ import {
  * 并发规则：每次调度递增 requestId，迟到的响应/重试发现 requestId 过期即
  * 作废（last-write-wins）；回退到已持久化值且仍有在途写入时照常补存。
  * #633：PUT 携带 CAS 基线，409 冲突进入专属 conflict 态（不自动重试
- * ——同一过期时间戳重试只会再 409），用户采用服务端草稿（hydrate）或
- * 继续编辑（新调度）后解除。状态/常量在 draftSaveTypes.ts，提示文本在
- * draftSaveText.ts（#633 拆出）。 */
+ * ——同一过期时间戳重试只会再 409），同时把 CAS 基线推进到冲突响应的
+ * current_draft.updated_at（服务端真值），用户继续编辑后的下一次保存以新
+ * 基线竞争；conflict 在用户采用服务端草稿（hydrate）或继续编辑（新调度）
+ * 后解除。状态/常量在 draftSaveTypes.ts，提示文本在 draftSaveText.ts
+ * （#633 拆出）。 */
 export class DraftSaveController {
   private state: DraftSaveState = IDLE_DRAFT_SAVE
   private readonly listeners = new Set<(state: DraftSaveState) => void>()
@@ -43,15 +45,30 @@ export class DraftSaveController {
     }
   }
 
-  /** 记录服务端已持久化基线（GET 草稿到达时调用一次）。#633：同时记下
+  /** 记录服务端已持久化基线（GET 草稿到达时调用一次；#633 codex review
+   * P1-2：服务端草稿前进且画布采用了它时再次调用）。#633：同时记下
    * updated_at 作为后续 PUT 的 CAS 基线——冲突恢复采用服务端草稿与首次
    * hydrate 走同一入口。 */
   hydrate(persistedYaml: string, updatedAt: string | null | undefined) {
     this.lastPersisted = persistedYaml
     this.lastPersistedAt = updatedAt ?? null
-    if (updatedAt) {
-      this.setState({ status: 'idle', savedAt: updatedAt })
-    }
+    if (updatedAt) this.setState({ status: 'idle', savedAt: updatedAt })
+  }
+
+  /** #633 codex review P1-2/P2-1：进入 conflict 态的统一入口——409 冲突
+   * 响应（current_draft）与 turn-end 失效后服务端草稿前进（useDraftServerSync
+   * 在用户有本地编辑时调用）共用。冲突双方携带服务端真值：把 CAS 基线推进
+   * 到服务端 updated_at（下一次保存以新基线竞争，否则同一过期时间戳永远
+   * 409）；用户未落盘的编辑保留在画布（conflictDraftYaml 供 UI 提供采用
+   * 服务端草稿的入口），不自动重试。 */
+  enterConflict(serverYaml: string | null, serverAt: string | null) {
+    if (serverAt) this.lastPersistedAt = serverAt
+    this.setState({
+      status: 'error',
+      savedAt: serverAt ?? this.state.savedAt,
+      conflict: true,
+      conflictDraftYaml: serverYaml,
+    })
   }
 
   /** draftYaml 变化时调度一次 debounce 保存；空内容与「回退到已持久化值且
@@ -139,7 +156,9 @@ export class DraftSaveController {
    * （不构成失败信号）。
    * #633：PUT 携带发起时刻的 CAS 基线（同一 requestId 的重试链固定用首次
    * 快照）；409 冲突直接进 conflict 态且不重试，flush 终态 ok=false（等待方
-   * 如发布确认必须中止——本页草稿并未落盘）。 */
+   * 如发布确认必须中止——本页草稿并未落盘）。冲突响应同时把基线推进到
+   * current_draft.updated_at（服务端真值）：用户的编辑保留在画布，下一次
+   * 保存以新基线重新竞争而不是永远 409。 */
   private save(
     yaml: string,
     requestId: number,
@@ -157,10 +176,8 @@ export class DraftSaveController {
             return resolve(this.successResult())
           this.lastPersisted = yaml
           this.lastPersistedAt = response.updated_at ?? null
-          this.setState({
-            status: 'saved',
-            savedAt: response.updated_at ?? null,
-          })
+          const savedAt = response.updated_at ?? null
+          this.setState({ status: 'saved', savedAt })
           resolve(this.successResult())
         })
         .catch((error) => {
@@ -168,12 +185,9 @@ export class DraftSaveController {
           if (this.requestCounter !== requestId)
             return resolve(this.successResult())
           if (error instanceof WorkflowDraftConflictError) {
-            this.setState({
-              status: 'error',
-              savedAt: this.state.savedAt,
-              conflict: true,
-              conflictDraftYaml: error.currentDraft.definition_yaml,
-            })
+            // #633 codex review P2-1：冲突响应携带服务端真值（见 enterConflict）。
+            const current = error.currentDraft
+            this.enterConflict(current.definition_yaml, current.updated_at)
             return resolve(this.failureResult())
           }
           this.setState({ ...this.state, status: 'error' })

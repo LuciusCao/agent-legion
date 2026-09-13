@@ -1,9 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  DRAFT_NEVER_SAVED,
-  WorkflowDraftConflictError,
-} from '../../../api/workflowDraft'
+import { DRAFT_NEVER_SAVED } from '../../../api/workflowDraft'
 import {
   draftSaveText,
   useWorkflowDraftPersistence,
@@ -72,6 +69,8 @@ function renderPersistence(initial: HookProps) {
   )
 }
 
+/* #633 codex review P1-2：带重应用冲突消费口的渲染（模拟
+   useServerDraftApply 的 consumeConflict 接线）。 */
 describe('useWorkflowDraftPersistence', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -552,185 +551,6 @@ describe('useWorkflowDraftPersistence flushNow', () => {
       expectedUpdatedAt: DRAFT_NEVER_SAVED,
     })
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
-  })
-})
-
-describe('useWorkflowDraftPersistence CAS (#633)', () => {
-  const BASE = 'key: demo\nlabel: Base\n'
-  const EDITED = 'key: demo\nlabel: Edited\n'
-  const SERVER_AT = '2026-08-27T01:02:03+00:00'
-
-  function conflictError() {
-    return new WorkflowDraftConflictError({
-      message: 'Workflow draft conflict',
-      current_draft: {
-        definition_yaml: 'key: demo\nlabel: Agent v2\n',
-        updated_at: '2026-09-12T10:00:00+00:00',
-      },
-    })
-  }
-
-  beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-    vi.clearAllMocks()
-    mocks.putWorkflowDraft.mockResolvedValue(SERVER_DRAFT)
-  })
-
-  it('PUTs with the hydrated updated_at as the CAS base', async () => {
-    const { rerender } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-
-    await act(async () => {
-      vi.advanceTimersByTime(850)
-    })
-
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: SERVER_AT,
-    })
-  })
-
-  it('PUTs with never-saved before any baseline exists', async () => {
-    const { rerender } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-
-    await act(async () => {
-      vi.advanceTimersByTime(850)
-    })
-
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: DRAFT_NEVER_SAVED,
-    })
-  })
-
-  it('a 409 conflict lands in the conflict state without retrying', async () => {
-    mocks.putWorkflowDraft.mockRejectedValue(conflictError())
-    const { result, rerender } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-
-    await act(async () => {
-      vi.advanceTimersByTime(850)
-    })
-
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(result.current.state.conflict).toBe(true))
-    expect(result.current.state.conflictDraftYaml).toBe(
-      'key: demo\nlabel: Agent v2\n'
-    )
-    // 冲突不自动重试：同一过期时间戳重试只会再 409。
-    await act(async () => {
-      vi.advanceTimersByTime(10000)
-    })
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
-    expect(draftSaveText(result.current.state)).toBe(
-      '草稿已被其它会话（Agent/其它标签页）更新，本页编辑未保存'
-    )
-  })
-
-  it('a successful save after a conflict updates the CAS base and clears the flag on the next edit', async () => {
-    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
-    const { result, rerender } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(850)
-    })
-    await waitFor(() => expect(result.current.state.conflict).toBe(true))
-
-    // 用户在冲突后继续编辑：conflict 标记被新调度清除，保存以服务端
-    // 冲突响应（或新一轮 GET）推进后的基线重新竞争。
-    mocks.putWorkflowDraft.mockResolvedValue({
-      definition_yaml: EDITED,
-      updated_at: '2026-09-12T11:00:00+00:00',
-    })
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: 'key: demo\nlabel: Third\n',
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(850)
-    })
-    await waitFor(() => expect(result.current.state.status).toBe('saved'))
-    expect(result.current.state.conflict).toBeUndefined()
-
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: 'key: demo\nlabel: Fourth\n',
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(850)
-    })
-    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
-      'ws1',
-      'key: demo\nlabel: Fourth\n',
-      { expectedUpdatedAt: '2026-09-12T11:00:00+00:00' }
-    )
-  })
-
-  it('flushNow resolves {ok: false} on a conflict (publish guard must abort)', async () => {
-    mocks.putWorkflowDraft.mockRejectedValue(conflictError())
-    const { result, rerender } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
-    })
-
-    let flushed: { ok: boolean; state: { conflict?: boolean } } | undefined
-    await act(async () => {
-      flushed = await result.current.flushNow()
-    })
-
-    expect(flushed?.ok).toBe(false)
-    expect(flushed?.state.conflict).toBe(true)
   })
 })
 

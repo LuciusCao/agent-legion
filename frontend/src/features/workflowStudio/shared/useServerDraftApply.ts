@@ -1,39 +1,58 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ServerDraftApplyTracker } from './serverDraftReapply'
 
-/** 服务端草稿的一次性应用 + 用户编辑追踪。返回包装后的 setDraftYaml：
- * 只有经它（用户编辑/聊天应用/重置/采用历史版本）的写入才算「用户碰过」；
- * useDraftBaselineSync 的内部 reset 不算。应用规则（与
- * useWorkflowDraftPersistence 的 hydrated 规则配套）：草稿查询到达（非
- * undefined）且基线已知后，草稿未被碰过就用服务端草稿替换基线（服务端
- * 草稿 ≠ 基线即 dirty）。本 effect 在 useWorkflowStudioDraft 的基线同步
- * 之后注册，同一 commit 内基线首次 reset 先跑、本 effect 后跑，无论两个
- * 查询谁先返回，最终都是服务端草稿胜出。 */
+export type ServerDraftConflict = { yaml: string; updatedAt: string }
+
+export type ServerDraftApplyControls = {
+  /** touched-aware setter：经它（用户编辑/聊天应用/重置/采用历史版本）的
+   * 写入才算「用户碰过」；useDraftBaselineSync 的内部 reset 不算。 */
+  setDraftYaml: (value: string) => void
+  /** #633 codex review P1-2：服务端草稿前进但用户有本地编辑时挂起的冲突
+   * 通知（yaml = 服务端草稿，updatedAt = 其 updated_at）；由保存层消费成
+   * conflict 态。读取即消费（再次调用返回 null）。 */
+  consumeConflict: () => ServerDraftConflict | null
+}
+
+/** 服务端草稿的应用 + 用户编辑追踪（跟踪器在 serverDraftReapply.ts）。
+ * 应用规则：草稿查询到达（非 undefined）且基线已知后，草稿未被碰过就用
+ * 服务端草稿替换基线（服务端草稿 ≠ 基线即 dirty）。本 effect 在
+ * useWorkflowStudioDraft 的基线同步之后注册，同一 commit 内基线首次
+ * reset 先跑、本 effect 后跑，无论两个查询谁先返回，最终都是服务端草稿
+ * 胜出。#633 codex review P1-2：应用以 updated_at 为准（非一次性布尔）
+ * ——turn-end 失效重取到更新的草稿时，用户无本地编辑则重应用到画布，
+ * 有编辑则挂起冲突通知（绝不覆盖）。 */
 export function useServerDraftApply(
   workspaceId: string | undefined,
   originalYaml: string,
   serverDraftYaml: string | null | undefined,
+  serverDraftUpdatedAt: string | null | undefined,
   setDraftYamlState: (value: string) => void
-): (value: string) => void {
-  const userTouchedRef = useRef(false)
-  const appliedRef = useRef(false)
+): ServerDraftApplyControls {
+  // workspace 切换重建跟踪器（清空 appliedAt/touched/冲突挂起）；两个 effect
+  // 的注册顺序保证 reset 先于 evaluate 跑。
+  const trackerRef = useRef(new ServerDraftApplyTracker())
+  const [, forceRender] = useState(0)
   useEffect(() => {
-    appliedRef.current = false
-    userTouchedRef.current = false
+    trackerRef.current = new ServerDraftApplyTracker()
   }, [workspaceId])
   useEffect(() => {
-    if (appliedRef.current || serverDraftYaml === undefined || !originalYaml) {
-      return
-    }
-    appliedRef.current = true
-    if (serverDraftYaml !== null && !userTouchedRef.current) {
-      setDraftYamlState(serverDraftYaml)
-    }
-  }, [serverDraftYaml, originalYaml, setDraftYamlState])
-  return useCallback(
-    (value: string) => {
-      userTouchedRef.current = true
-      setDraftYamlState(value)
-    },
+    if (serverDraftYaml === undefined || !originalYaml) return
+    const outcome = trackerRef.current.evaluate(
+      serverDraftYaml,
+      serverDraftUpdatedAt,
+      setDraftYamlState
+    )
+    // 冲突挂起需要一次重渲染让保存层 effect 跑起来；apply/no-op 不需要。
+    if (outcome === 'conflict') forceRender((count) => count + 1)
+  }, [serverDraftYaml, serverDraftUpdatedAt, originalYaml, setDraftYamlState])
+  return useMemo(
+    () => ({
+      setDraftYaml: (value: string) => {
+        trackerRef.current.markTouched()
+        setDraftYamlState(value)
+      },
+      consumeConflict: () => trackerRef.current.consumeConflict(),
+    }),
     [setDraftYamlState]
   )
 }
