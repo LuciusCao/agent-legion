@@ -483,6 +483,43 @@ def test_skill_without_contract_block_lets_the_legacy_script_decide(
     assert spawns == []
 
 
+# --- #542: the probe covers the root contract.yaml tier ---
+
+
+def test_root_contract_yaml_alone_still_spawns_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A root contract.yaml with NO embedded block must keep the engine
+    authoritative — the #538-era probe (embedded block only) would have
+    skipped the spawn and silently degraded the skill to existence mode."""
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "contract.yaml").write_text(
+        "files:\n  - path: out.md\n    format: text\n", encoding="utf-8"
+    )
+    _use_engine(monkeypatch, "/nonexistent/velites")
+    spawns = _record_engine_spawns(monkeypatch)
+
+    assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
+    assert len(spawns) == 1
+
+
+def test_root_contract_yaml_wins_over_the_embedded_block_in_the_spawn_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both sources present: one spawn, the engine (not the probe) decides
+    which contract wins — the probe only answers yes/no."""
+    skill_dir = _skill_dir(tmp_path, None)
+    (skill_dir / "contract.yaml").write_text(
+        "files:\n  - path: root.md\n    format: text\n", encoding="utf-8"
+    )
+    _use_engine(monkeypatch, "/nonexistent/velites")
+    spawns = _record_engine_spawns(monkeypatch)
+
+    assert run_contract_engine(skill_dir, tmp_path / "job", timeout_seconds=5) is None
+    assert len(spawns) == 1
+
+
 def test_declared_contract_block_still_spawns_the_engine(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

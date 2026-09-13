@@ -5982,6 +5982,8 @@ export interface components {
       synced_files?: string[]
       /** Tag */
       tag: string
+      /** Warnings */
+      warnings?: components['schemas']['SkillValidationWarning'][]
     }
     /** SkillTagsResponse */
     SkillTagsResponse: {
@@ -6013,6 +6015,8 @@ export interface components {
       tags?: string[]
       /** Valid */
       valid: boolean
+      /** Warnings */
+      warnings?: string[]
     }
     /** SkillValidateToolResponse */
     SkillValidateToolResponse: {
@@ -6022,9 +6026,18 @@ export interface components {
       key: string
       /** Valid */
       valid: boolean
+      /** Warnings */
+      warnings?: components['schemas']['SkillValidationWarning'][]
     }
     /** SkillValidationIssue */
     SkillValidationIssue: {
+      /** Error */
+      error: string
+      /** Path */
+      path: string
+    }
+    /** SkillValidationWarning */
+    SkillValidationWarning: {
       /** Error */
       error: string
       /** Path */
@@ -6756,6 +6769,12 @@ export interface components {
      *
      *     ``claimed_at``: stamped when the row moved to ``confirming``; null on
      *     every other state (#429 四轮 P1 — the stale-claim sweep's clock).
+     *
+     *     ``warnings`` (#542): read-side advisory computed at request/status/poll
+     *     time — one entry per agent node whose effective skill declares no
+     *     machine-readable contract (no root ``contract.yaml``). Never persisted
+     *     (no schema change), never blocks the confirm; the human review dialog
+     *     surfaces it. Absent on resolved rows without a draft.
      */
     StudioPublishRequestRecord: {
       /** Chat Session Id */
@@ -6778,6 +6797,8 @@ export interface components {
       result_revision_id?: string | null
       /** Status */
       status: string
+      /** Warnings */
+      warnings?: string[] | null
       /** Workspace Id */
       workspace_id: string
     }

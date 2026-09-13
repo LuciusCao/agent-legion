@@ -4,6 +4,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Typography,
 } from '@mui/material'
 import type { WorkflowRevisionSummary } from '../../../types'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
@@ -29,6 +30,10 @@ type Props = {
    * ESC 会二次调 cancel → 404 → 红色假失败 toast。与 confirming 同款
    * 守卫，见 requestClose。手动发布对话框不传，行为不变。 */
   canceling?: boolean
+  /** #542 发布面 advisory：agent 节点绑定的 skill 无机器契约（无
+   * contract.yaml 且无嵌入块）时后端在读取侧现算的提示列表。仅呈现，
+   * 不阻断发布；手动发布对话框不传，行为不变。 */
+  advisories?: string[]
 }
 
 export function WorkflowPublishReviewDialog({
@@ -43,6 +48,7 @@ export function WorkflowPublishReviewDialog({
   onCancel,
   confirming = false,
   canceling = false,
+  advisories = [],
 }: Props) {
   const hasChanges = hasCompareSummaryChanges(summary)
   // 任一操作在途即禁止二次触发关闭与确认（#429 四轮 codex P2：cancel 在途
@@ -71,6 +77,16 @@ export function WorkflowPublishReviewDialog({
           definitionHash={definitionHash}
         />
         <WorkflowPublishReviewDialogChanges summary={summary} />
+        {advisories.length > 0 && (
+          <Typography
+            variant="body2"
+            color="warning.main"
+            sx={{ mt: 2, whiteSpace: 'pre-line' }}
+            data-testid="publish-advisories"
+          >
+            {advisories.join('\n')}
+          </Typography>
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={requestClose} variant="outlined" disabled={resolving}>

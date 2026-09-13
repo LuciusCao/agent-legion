@@ -44,6 +44,10 @@ def _make_skill_repo(repo: Path, tag: str = "v1.0.0") -> None:
     (repo / "references" / "output-contract.md").write_text("# contract\n", encoding="utf-8")
     (repo / "scripts").mkdir()
     (repo / "scripts" / "validate_output.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
+    # #542: the machine contract lives in the skill root.
+    (repo / "contract.yaml").write_text(
+        "files:\n  - path: script.md\n    format: text\n", encoding="utf-8"
+    )
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init", "--no-gpg-sign")
     _git(repo, "tag", tag)
@@ -104,7 +108,7 @@ def test_validate_skill(client_factory, job_db, skill_home) -> None:
         scoped = _scoped(client, job_db)
         ok = scoped.post(f"{_TOOLS}/{_KEY}/validate")
         assert ok.status_code == 200, ok.text
-        assert ok.json() == {"key": _KEY, "valid": True, "errors": []}
+        assert ok.json() == {"key": _KEY, "valid": True, "errors": [], "warnings": []}
 
         (skill_home / "scripts" / "validate_output.py").unlink()
         broken = scoped.post(f"{_TOOLS}/{_KEY}/validate")

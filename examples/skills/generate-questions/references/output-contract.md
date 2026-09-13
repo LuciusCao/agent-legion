@@ -31,53 +31,8 @@
 
 ## 校验
 
-运行时优先按下面的机器可读契约段经 harness 内置引擎校验（存在性、
-JSON Schema）：
-
-```yaml contract
-files:
-  - path: exercises.json
-    format: json
-    schema:
-      type: object
-      required: [exercises]
-      properties:
-        knowledge_point_id:
-          type: string
-        exercises:
-          type: array
-          minItems: 5
-          maxItems: 5
-          allOf:
-            # 位置约束（prefixItems 所在分支不能再带 items，否则 items 只约束
-            # 第 6 个起的元素）：id 依次为 q1..q5。
-            - prefixItems:
-                - properties: {id: {enum: ["q1"]}}
-                - properties: {id: {enum: ["q2"]}}
-                - properties: {id: {enum: ["q3"]}}
-                - properties: {id: {enum: ["q4"]}}
-                - properties: {id: {enum: ["q5"]}}
-            # 通用元素约束：作用于全部元素。
-            - items:
-                type: object
-                required: [id, difficulty, stem, answer, analysis]
-                properties:
-                  id: {type: string, minLength: 1}
-                  difficulty: {enum: [easy, medium, hard]}
-                  stem: {type: string, minLength: 1}
-                  answer: {type: string, minLength: 1}
-                  analysis: {type: string, minLength: 1}
-            # 难度分布：easy ×2、medium ×2、hard ×1。
-            - contains: {properties: {difficulty: {enum: [easy]}}}
-              minContains: 2
-              maxContains: 2
-            - contains: {properties: {difficulty: {enum: [medium]}}}
-              minContains: 2
-              maxContains: 2
-            - contains: {properties: {difficulty: {enum: [hard]}}}
-              minContains: 1
-              maxContains: 1
-```
+运行时优先按机器可读契约（本 skill 根目录的 `contract.yaml`）经
+harness 内置引擎校验（存在性、JSON Schema）。
 
 引擎不表达的部分由 `scripts/validate_output.py` legacy 脚本兜底
 （`python validate_output.py <job_dir>`，退出码 0 为通过）：

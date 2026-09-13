@@ -39,6 +39,7 @@ from server.app.services.studio_publish_request_support import (
     iso_payload,
     may_read_request,
     refuse_stale_draft_claim,
+    with_draft_warnings,
     workspace_draft_yaml,
 )
 from server.app.services.workflow_draft_key import require_draft_workflow_key_match
@@ -46,6 +47,8 @@ from server.app.services.workflow_draft_publish import (
     publish_workflow_draft,
     validate_workflow_draft_for_publish,
 )
+from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
+from server.app.workflows.skill_repo_gate import skill_repo_publish_warnings
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -104,7 +107,12 @@ class StudioPublishRequestService:
             chat_session_id,
             draft_hash=draft_yaml_hash(draft_yaml),
         )
-        return iso_payload(request)
+        # #542: the advisory skill-contract warnings ride the response —
+        # computed read-side (never persisted), same list the human review
+        # poll computes for the same draft.
+        return with_draft_warnings(
+            iso_payload(request), self._draft_warnings(workspace_id, draft_yaml)
+        )
 
     def get_request_status(self, request_id: str, user: dict[str, Any]) -> dict[str, Any]:
         """One request by id for the agent; authorization mirrors
@@ -113,7 +121,28 @@ class StudioPublishRequestService:
         request = self._job_db.get_publish_request(request_id)
         if request is None or not may_read_request(self._job_db, request, user):
             raise NotFoundError("Publish request not found")
-        return iso_payload(request)
+        draft = self._job_db.get_workspace_workflow_draft(request["workspace_id"])
+        warnings: list[str] = []
+        if draft is not None:
+            warnings = self._draft_warnings(request["workspace_id"], str(draft["definition_yaml"]))
+        return with_draft_warnings(iso_payload(request), warnings)
+
+    def _draft_warnings(self, workspace_id: str, draft_yaml: str) -> list[str]:
+        """#542 read-side advisory: agent-node skills without a machine
+        contract. Never blocks anything — a draft that fails to parse here
+        has no agent nodes to warn about (and could not have been requested
+        in the first place)."""
+        try:
+            definition = workflow_definition_from_yaml_string(draft_yaml)
+        except Exception:
+            # #204 broad-except audit: display-only advisory enrichment on
+            # a best-effort basis — a draft this malformed would have been
+            # rejected by request_publish's full validation, so the only
+            # way here is a concurrent edit racing the read. No warnings
+            # (an empty list) is the honest degradation; the error channel
+            # stays with the publish validation itself.
+            return []
+        return skill_repo_publish_warnings(definition, workspace_id, self._job_db)
 
     # -- human side (Studio endpoints) ------------------------------------
 
@@ -122,8 +151,21 @@ class StudioPublishRequestService:
         none): the pending row, or the ``confirming`` row while its publish
         is in flight. The orchestration (live-confirming surfacing, the
         stale-claim sweep, the healthy-poll zero-write discipline) lives in
-        studio_publish_request_poll.py — see poll_pending_request."""
-        return poll_pending_request(self._job_db, workspace_id)
+        studio_publish_request_poll.py — see poll_pending_request.
+
+        #542: the pending/confirming payload carries the read-side advisory
+        ``warnings`` (agent-node skills without a machine contract) so the
+        human review dialog can surface them."""
+        request = poll_pending_request(self._job_db, workspace_id)
+        if request is None:
+            return None
+        draft = self._job_db.get_workspace_workflow_draft(workspace_id)
+        warnings = (
+            self._draft_warnings(workspace_id, str(draft["definition_yaml"]))
+            if draft is not None
+            else []
+        )
+        return with_draft_warnings(request, warnings)
 
     def confirm(self, workspace_id: str, request_id: str) -> dict[str, Any]:
         """Human confirm: publish the draft through the manual-publish gates.

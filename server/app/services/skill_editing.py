@@ -8,6 +8,12 @@ content directory, and ``save_version`` writes a new skill version into
 the skill's in-place repository at ``<skills root>/<key>`` (#322:
 in-place is the only mode, there is no remote source to refuse).
 
+#542 grading: a present-but-malformed root ``contract.yaml`` is an ERROR
+(the save rolls back like any contract failure), while a MISSING one is a
+WARNING only (``validate`` reports it, ``save_version`` succeeds and
+carries the warnings in its response) — the migration window keeps legacy
+embedded-block and contract-less skills saveable.
+
 Save is all-or-nothing and serialized (lock + checked rollback live in
 ``services/skill_repo_edit``); every input (paths, tag, repo state) is
 validated before any file is written. The commit carries the platform
@@ -41,7 +47,10 @@ from server.app.services.job_errors import (
     InvalidOperationError,
     NotFoundError,
 )
-from server.app.services.skill_edit_checks import contract_errors, resolve_targets_checked
+from server.app.services.skill_edit_checks import (
+    graded_contract_check,
+    resolve_targets_checked,
+)
 from server.app.services.skill_repo import SkillGitError
 from server.app.services.skill_repo_edit import (
     SkillEditValidationError,
@@ -79,16 +88,17 @@ class SkillEditingService:
         self._runs_dir = runs_dir
 
     def validate(self, skill_key: str) -> dict[str, Any]:
-        """Runtime contract check against the skill's content directory."""
-        errors = self._contract_errors(self._skill_dir(skill_key))
-        return {"key": skill_key, "valid": not errors, "errors": errors}
+        """Runtime contract check against the skill's content directory.
+
+        #542: errors keep failing the trio/format layer (a malformed root
+        ``contract.yaml`` included); a missing root ``contract.yaml`` only
+        warns (the response stays ``valid``).
+        """
+        errors, warnings = graded_contract_check(self._skill_dir(skill_key))
+        return {"key": skill_key, "valid": not errors, "errors": errors, "warnings": warnings}
 
     def save_version(
-        self,
-        skill_key: str,
-        files: list[SkillFileWrite],
-        new_tag: str,
-        message: str,
+        self, skill_key: str, files: list[SkillFileWrite], new_tag: str, message: str
     ) -> dict[str, Any]:
         repo_dir = self._skill_dir(skill_key)
         with edit_lock_for(repo_dir, self.base_dir, self._runs_dir):
@@ -131,12 +141,15 @@ class SkillEditingService:
             for path, content in targets:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content, encoding="utf-8")
-            contract_errors = self._contract_errors(repo_dir)
-            if contract_errors:
+            # #542 graded post-write check: trio errors plus a malformed
+            # root contract.yaml are errors (rollback); a missing one is a
+            # warning carried on the success response.
+            validation_errors, warnings = graded_contract_check(repo_dir)
+            if validation_errors:
                 raise SkillEditValidationError(
-                    "Skill contract validation failed after writing; the repo was rolled "
-                    "back to its original commit",
-                    contract_errors,
+                    "Skill contract validation failed after writing;"
+                    " the repo was rolled back to its original commit",
+                    validation_errors,
                 )
             written = [path.relative_to(repo_dir).as_posix() for path in written_paths]
             self._git(repo_dir, ["add", "--", *written])
@@ -174,14 +187,16 @@ class SkillEditingService:
         commit = skill_repo.head_commit(repo_dir)
         if commit is None:
             raise SkillGitError(f"Skill {skill_key!r} repo has no HEAD after commit")
+        # synced_files: shared materials synced into this commit (#633); warnings:
+        # #542 — the save SUCCEEDED despite them (a missing root contract.yaml
+        # is a warning, not an error — migration window).
         return {
             "key": skill_key,
             "tag": new_tag,
             "commit": commit,
             "files": written,
-            # Shared materials synced into this commit (#633), sorted, []
-            # when the workspace has no _shared mapping for the skill.
             "synced_files": sorted(source for source, _ in sync_plan.files),
+            "warnings": warnings,
         }
 
     # Validation helpers.
@@ -198,25 +213,20 @@ class SkillEditingService:
             raise NotFoundError("Invalid skill path") from exc
         return candidate
 
-    @staticmethod
-    def _contract_errors(content_dir: Path) -> list[dict[str, str]]:
-        # Shared with SkillCreationService (services/skill_edit_checks.py).
-        return contract_errors(content_dir)
-
     def _check_tag(self, skill_key: str, repo_dir: Path, new_tag: str) -> None:
         # `git check-ref-format refs/tags/-l` passes (the dash rule covers the
         # refname, not path components) while `git tag -l` would silently list
         # instead of creating — refuse dash-leading tags outright.
+        error = None
         if new_tag.startswith("-"):
+            error = "tag names must not start with '-'"
+        elif self._git(
+            repo_dir, ["check-ref-format", f"refs/tags/{new_tag}"], check=False
+        ).returncode:
+            error = f"tag {new_tag!r} is not a valid git ref name"
+        if error:
             raise SkillEditValidationError(
-                f"Invalid tag name: {new_tag!r}",
-                [{"path": ".", "error": "tag names must not start with '-'"}],
-            )
-        fmt = self._git(repo_dir, ["check-ref-format", f"refs/tags/{new_tag}"], check=False)
-        if fmt.returncode != 0:
-            raise SkillEditValidationError(
-                f"Invalid tag name: {new_tag!r}",
-                [{"path": ".", "error": f"tag {new_tag!r} is not a valid git ref name"}],
+                f"Invalid tag name: {new_tag!r}", [{"path": ".", "error": error}]
             )
         if new_tag in skill_repo.list_tags(repo_dir):
             raise ConflictError(f"Skill {skill_key!r} repo already has tag {new_tag!r}")

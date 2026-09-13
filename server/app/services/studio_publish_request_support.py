@@ -76,6 +76,20 @@ def iso_payload(request: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def with_draft_warnings(
+    payload: dict[str, Any],
+    warnings: list[str],
+) -> dict[str, Any]:
+    """Attach the read-side publish warnings to a request payload (#542).
+
+    The warnings are computed at read time (never persisted — no schema
+    change), so every consumer of the same draft sees the same advisory
+    list: the agent's request/status tools and the human review poll."""
+    payload = dict(payload)
+    payload["warnings"] = list(warnings)
+    return payload
+
+
 def is_past_expiry(request: dict[str, Any]) -> bool:
     """Whether a pending row is past its ``expires_at``. The driver hands
     timestamptz back as an ISO string in this deployment, so parse (always

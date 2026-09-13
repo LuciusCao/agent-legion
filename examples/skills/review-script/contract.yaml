@@ -1,0 +1,41 @@
+files:
+  - path: script_review.json
+    format: json
+    schema:
+      type: object
+      required: [verdict, dimensions, issues, summary]
+      properties:
+        verdict: {enum: [pass, revise]}
+        dimensions:
+          type: object
+          required: [teaching_goal, accuracy, pacing]
+          additionalProperties: false
+          properties:
+            teaching_goal:
+              type: object
+              required: [score, comment]
+              properties:
+                score: {type: integer, minimum: 1, maximum: 10}
+                comment: {type: string, minLength: 1}
+            accuracy:
+              type: object
+              required: [score, comment]
+              properties:
+                score: {type: integer, minimum: 1, maximum: 10}
+                comment: {type: string, minLength: 1}
+            pacing:
+              type: object
+              required: [score, comment]
+              properties:
+                score: {type: integer, minimum: 1, maximum: 10}
+                comment: {type: string, minLength: 1}
+        issues:
+          type: array
+          items:
+            type: object
+            required: [section, problem, suggestion]
+            properties:
+              section: {type: string, minLength: 1}
+              problem: {type: string, minLength: 1}
+              suggestion: {type: string, minLength: 1}
+        summary: {type: string, minLength: 1}

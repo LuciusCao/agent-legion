@@ -51,6 +51,8 @@ def test_first_run_imports_all_skills_with_git_and_tag(tmp_path: Path) -> None:
         assert (skill_dir / "SKILL.md").is_file(), name
         assert (skill_dir / "references" / "output-contract.md").is_file(), name
         assert (skill_dir / "scripts" / "validate_output.py").is_file(), name
+        # #542: the machine contract rides the import (root contract.yaml).
+        assert (skill_dir / "contract.yaml").is_file(), name
         _tag_commit(skill_dir)  # raises when the tag is missing
         # Source tree content is copied verbatim.
         source = (REPO_ROOT / "examples" / "skills" / name / "SKILL.md").read_text("utf-8")

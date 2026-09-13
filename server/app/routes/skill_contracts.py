@@ -36,6 +36,10 @@ class SkillValidateResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     latest_tag: str | None = None
     locked_ref: str | None = None
+    # #542: machine-contract tier notices (deprecated embedded block /
+    # existence-only degradation). Display-only; never flips ``valid`` —
+    # externally imported skills stay valid without a root contract.yaml.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SkillTagsResponse(BaseModel):

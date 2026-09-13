@@ -1,8 +1,10 @@
 //! `validate` tool: mid-run self-check of the working-directory outputs
-//! against the skill's output contract (issue #443, design §8). No
-//! arguments; the engine lives in `crate::contract`. The tool fails
-//! informatively when no skill directory declares a contract block —
-//! silently succeeding would tell the model a lie.
+//! against the skill's output contract (issue #443, design §8; contract
+//! location migrated to the skill-root `contract.yaml` in #542, embedded
+//! block still honored as the deprecated fallback). No arguments; the
+//! engine lives in `crate::contract`. The tool fails informatively when no
+//! skill directory declares a contract — silently succeeding would tell
+//! the model a lie.
 
 use serde_json::Value;
 
@@ -11,7 +13,8 @@ use super::{ToolContext, ToolOutput};
 pub async fn run(_args: &Value, ctx: &ToolContext) -> ToolOutput {
     match crate::contract::first_contract(&ctx.skill_dirs) {
         None => ToolOutput::error(
-            "no output-contract.md contract block found in the skill directories; \
+            "no output contract found in the skill directories \
+             (no contract.yaml and no embedded contract block); \
              nothing to validate against"
                 .into(),
         ),
@@ -19,11 +22,14 @@ pub async fn run(_args: &Value, ctx: &ToolContext) -> ToolOutput {
         Some(Ok(contract)) => {
             let violations = contract.check(&ctx.cwd);
             if violations.is_empty() {
-                ToolOutput::text(
-                    format!("contract ok ({} files checked)", contract.file_count()),
-                    false,
-                )
-                .measured()
+                let mut message = format!("contract ok ({} files checked)", contract.file_count());
+                if contract.source() == crate::contract::ContractSource::EmbeddedBlock {
+                    message.push_str(
+                        "\nnote: contract read from the deprecated embedded block; \
+                         migrate to the skill-root contract.yaml",
+                    );
+                }
+                ToolOutput::text(message, false).measured()
             } else {
                 let list = violations
                     .iter()

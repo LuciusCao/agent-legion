@@ -2,10 +2,11 @@
 
 POST /api/studio-agent/tools/workspaces/{id}/skills materializes a fresh
 git skill repo under the workspace's skill dir (~/.agents/skills/<id>/):
-the contract trio must ride the request, the create is draft-only (never
-touches the DB skill lock, never publishes), and a failed create leaves no
-half-initialized repo behind. Scope behavior (401/403 inventory, workspace
-binding) is covered by test_studio_agent_tools.py / test_studio_agent_scope.py.
+the four-file contract set must ride the request (the trio plus a root
+contract.yaml, #542), the create is draft-only (never touches the DB skill
+lock, never publishes), and a failed create leaves no half-initialized
+repo behind. Scope behavior (401/403 inventory, workspace binding) is
+covered by test_studio_agent_tools.py / test_studio_agent_scope.py.
 """
 
 from __future__ import annotations
@@ -26,6 +27,11 @@ _TRIO = [
     {"path": "SKILL.md", "content": "# New Skill\n\nDoes a thing.\n"},
     {"path": "references/output-contract.md", "content": "# contract\n"},
     {"path": "scripts/validate_output.py", "content": "raise SystemExit(0)\n"},
+]
+# #542: create_skill is the strict birth gate — the four-file set.
+_QUARTET = [
+    *_TRIO,
+    {"path": "contract.yaml", "content": "files:\n  - path: out.md\n    format: text\n"},
 ]
 
 
@@ -70,7 +76,7 @@ def test_create_skill_materializes_repo_with_trio_commit_and_tag(
             _CREATE_URL,
             json={
                 "skill_name": "generate-quiz",
-                "files": _TRIO,
+                "files": _QUARTET,
                 "new_tag": "v0.1.0",
                 "message": "initial skill",
             },
@@ -89,7 +95,12 @@ def test_create_skill_materializes_repo_with_trio_commit_and_tag(
             "agent-legion-studio <studio@local>"
         )
         assert _git(repo, "status", "--porcelain") == ""
-        for path in ("SKILL.md", "references/output-contract.md", "scripts/validate_output.py"):
+        for path in (
+            "SKILL.md",
+            "references/output-contract.md",
+            "scripts/validate_output.py",
+            "contract.yaml",
+        ):
             assert (repo / path).is_file()
 
         # The created skill immediately reads through the existing tools.
@@ -105,7 +116,7 @@ def test_create_skill_conflict_when_directory_exists(client_factory, job_db, ski
             _CREATE_URL,
             json={
                 "skill_name": "taken",
-                "files": _TRIO,
+                "files": _QUARTET,
                 "new_tag": "v0.1.0",
                 "message": "m",
             },
@@ -115,7 +126,7 @@ def test_create_skill_conflict_when_directory_exists(client_factory, job_db, ski
             _CREATE_URL,
             json={
                 "skill_name": "taken",
-                "files": _TRIO,
+                "files": _QUARTET,
                 "new_tag": "v0.2.0",
                 "message": "m",
             },
@@ -126,7 +137,7 @@ def test_create_skill_conflict_when_directory_exists(client_factory, job_db, ski
         (skill_home / _WS / "blocker").write_text("not a dir", encoding="utf-8")
         blocked = scoped.post(
             _CREATE_URL,
-            json={"skill_name": "blocker", "files": _TRIO, "new_tag": "v1", "message": "m"},
+            json={"skill_name": "blocker", "files": _QUARTET, "new_tag": "v1", "message": "m"},
         )
         assert blocked.status_code == 409
         assert (skill_home / _WS / "blocker").read_text(encoding="utf-8") == "not a dir"
@@ -139,7 +150,7 @@ def test_create_skill_404_for_unknown_workspace(client_factory, job_db, skill_ho
             f"{_TOOLS}/ws-missing/skills",
             json={
                 "skill_name": "orphan",
-                "files": _TRIO,
+                "files": _QUARTET,
                 "new_tag": "v0.1.0",
                 "message": "m",
             },
@@ -156,7 +167,7 @@ def test_create_skill_rejections_are_422(client_factory, job_db, skill_home) -> 
         def post(**overrides):
             payload = {
                 "skill_name": "new-skill",
-                "files": _TRIO,
+                "files": _QUARTET,
                 "new_tag": "v0.1.0",
                 "message": "m",
             }
@@ -167,8 +178,21 @@ def test_create_skill_rejections_are_422(client_factory, job_db, skill_home) -> 
         assert post(skill_name="Bad Name").status_code == 422
         assert post(skill_name="a/b").status_code == 422
         assert post(skill_name="x" * 65).status_code == 422
-        # Missing contract trio member.
-        assert post(files=_TRIO[:2]).status_code == 422
+        # Missing contract file (trio member or the root contract.yaml).
+        assert post(files=_QUARTET[:2]).status_code == 422
+        # #542: the trio alone is no longer enough — the birth gate requires
+        # the root contract.yaml as well.
+        assert post(files=_TRIO).status_code == 422
+        # A malformed contract.yaml is the same 422.
+        assert (
+            post(
+                files=[
+                    *_TRIO,
+                    {"path": "contract.yaml", "content": "files: [\n"},
+                ]
+            ).status_code
+            == 422
+        )
         # Empty SKILL.md fails the contract too.
         assert (
             post(
@@ -181,9 +205,9 @@ def test_create_skill_rejections_are_422(client_factory, job_db, skill_home) -> 
             == 422
         )
         # Path escape and git metadata paths.
-        assert post(files=_TRIO + [{"path": "../evil.md", "content": "x"}]).status_code == 422
+        assert post(files=_QUARTET + [{"path": "../evil.md", "content": "x"}]).status_code == 422
         assert (
-            post(files=_TRIO + [{"path": ".GIT/hooks/pre-commit", "content": "x"}]).status_code
+            post(files=_QUARTET + [{"path": ".GIT/hooks/pre-commit", "content": "x"}]).status_code
             == 422
         )
         # Invalid tag names.
@@ -226,5 +250,9 @@ def test_create_skill_missing_trio_reports_structured_errors(
         assert {
             "path": "scripts/validate_output.py",
             "error": ("missing scripts/validate_output.py"),
+        } in detail["errors"]
+        assert {
+            "path": "contract.yaml",
+            "error": "missing contract.yaml",
         } in detail["errors"]
         assert not (skill_home / _WS / "incomplete").exists()

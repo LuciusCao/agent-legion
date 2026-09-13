@@ -71,7 +71,20 @@ def service(repo: Path, tmp_path: Path) -> SkillEditingService:
 
 def test_validate_happy_path(service: SkillEditingService) -> None:
     result = service.validate(_KEY)
-    assert result == {"key": _KEY, "valid": True, "errors": []}
+    assert result == {
+        "key": _KEY,
+        "valid": True,
+        "errors": [],
+        "warnings": [
+            {
+                "path": "contract.yaml",
+                "error": (
+                    "contract.yaml is missing; runtime output validation degrades to "
+                    "existence-only mode (add a root contract.yaml)"
+                ),
+            }
+        ],
+    }
 
 
 def test_validate_reports_every_missing_contract_file(
@@ -93,6 +106,112 @@ def test_validate_unknown_skill_reports_missing_directory(service: SkillEditingS
     result = service.validate("wf/missing")
     assert result["valid"] is False
     assert result["errors"] == [{"path": ".", "error": "skill directory does not exist"}]
+
+
+# --- #542: graded contract.yaml validation (error vs warning) ---
+
+
+def test_validate_reports_embedded_block_deprecation_warning(
+    service: SkillEditingService, repo: Path
+) -> None:
+    (repo / "references" / "output-contract.md").write_text(
+        "```yaml contract\nfiles:\n  - path: a.md\n    format: text\n```\n",
+        encoding="utf-8",
+    )
+    result = service.validate(_KEY)
+    assert result["valid"] is True
+    assert result["errors"] == []
+    assert len(result["warnings"]) == 1
+    assert "deprecated" in result["warnings"][0]["error"]
+    assert "contract.yaml" in result["warnings"][0]["error"]
+
+
+def test_validate_reports_clean_when_root_contract_yaml_present(
+    service: SkillEditingService, repo: Path
+) -> None:
+    (repo / "contract.yaml").write_text(
+        "files:\n  - path: a.md\n    format: text\n", encoding="utf-8"
+    )
+    result = service.validate(_KEY)
+    assert result == {"key": _KEY, "valid": True, "errors": [], "warnings": []}
+
+
+@pytest.mark.parametrize(
+    "bad_yaml",
+    [
+        "files: [",  # broken YAML
+        "files: []",  # empty files list
+        "extra_key: 1\nfiles:\n  - path: a.md\n    format: text\n",  # unknown top key
+        "files:\n  - path: /abs.md\n    format: text\n",  # absolute path
+        "files:\n  - path: ../escape.md\n    format: text\n",  # escaping path
+        "files:\n  - path: a.md\n    format: yaml\n",  # illegal format
+        "files:\n  - path: a.json\n    format: json\n",  # json without schema
+        "files:\n  - path: a.md\n    format: text\n    schema: {type: object}\n",  # text + schema
+        "files:\n  - path: a.json\n    format: json\n    min_chars: 5\n    schema: {type: object}\n",
+        "files:\n  - path: a.json\n    format: json\n    schema: {type: nope}\n",  # uncompilable
+    ],
+)
+def test_validate_reports_malformed_contract_yaml_as_error(
+    service: SkillEditingService, repo: Path, bad_yaml: str
+) -> None:
+    (repo / "contract.yaml").write_text(bad_yaml, encoding="utf-8")
+    result = service.validate(_KEY)
+    assert result["valid"] is False
+    assert result["errors"], bad_yaml
+    assert all(e["path"].startswith("contract.yaml") for e in result["errors"])
+
+
+def test_save_version_succeeds_with_missing_contract_warning(
+    service: SkillEditingService, repo: Path
+) -> None:
+    """Migration leniency: no contract.yaml → the save still lands, with the
+    warning carried on the response."""
+    result = service.save_version(
+        _KEY, [SkillFileWrite(path="SKILL.md", content="# Review v2\n")], "v1.1.0", "m"
+    )
+    assert result["tag"] == "v1.1.0"
+    assert result["warnings"], "missing contract must warn on the save response"
+    assert "contract.yaml" in result["warnings"][0]["error"]
+
+
+def test_save_version_rolls_back_on_malformed_contract_yaml(
+    service: SkillEditingService, repo: Path
+) -> None:
+    """Format layer: a broken root contract.yaml is an error like any
+    contract failure — all-or-nothing rollback applies."""
+    before = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(SkillEditValidationError) as excinfo:
+        service.save_version(
+            _KEY,
+            [
+                SkillFileWrite(path="SKILL.md", content="# v2\n"),
+                SkillFileWrite(path="contract.yaml", content="files: [\n"),
+            ],
+            "v2.0.0",
+            "m",
+        )
+    assert any(e["path"] == "contract.yaml" for e in excinfo.value.errors)
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert (repo / "SKILL.md").read_text(encoding="utf-8") == "# Review\n"
+    assert not (repo / "contract.yaml").exists()
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_save_version_with_valid_contract_yaml_has_no_warnings(
+    service: SkillEditingService, repo: Path
+) -> None:
+    result = service.save_version(
+        _KEY,
+        [
+            SkillFileWrite(
+                path="contract.yaml", content="files:\n  - path: a.md\n    format: text\n"
+            )
+        ],
+        "v1.1.0",
+        "m",
+    )
+    assert result["tag"] == "v1.1.0"
+    assert result["warnings"] == []
 
 
 def test_save_version_commits_and_tags(service: SkillEditingService, repo: Path) -> None:

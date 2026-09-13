@@ -101,8 +101,9 @@ Studio. Nothing you do takes effect in production by itself.
   new version in the skill's LOCAL source repo (section 6). Lock untouched.
 - `create_skill(workspace_id, skill_name, files, new_tag, message)` — create
   a BRAND-NEW skill repo at `<skills root>/<workspace_id>/<skill_name>`
-  (#633, workspace-scoped): the files must carry the full contract trio
-  (section 6) and everything is validated before anything is written; on
+  (#633, workspace-scoped): the files must carry the full contract set of
+  four files (section 6) and everything is validated before anything is
+  written; on
   success the initial commit is tagged `new_tag`. Existing dir → 409. After
   the create, iterate with `validate_skill` / `save_skill_version`. Lock
   untouched.
@@ -374,9 +375,10 @@ reviews the git diff and re-pins.
 1. Creating a brand-new skill starts with `create_skill(workspace_id,
    skill_name, files, new_tag, message)` (#633): `skill_name` is one segment
    (`^[a-z0-9][a-z0-9_-]{0,63}$`) and `files` must carry the full contract
-   trio from the start — non-empty `SKILL.md` +
-   `references/output-contract.md` + `scripts/validate_output.py` (use the
-   machine-readable contract block below where it fits). The repo is created
+   set of FOUR files from the start — non-empty `SKILL.md` +
+   `references/output-contract.md` + `scripts/validate_output.py` + a root
+   `contract.yaml` (the machine-readable contract, see below; a malformed
+   one is rejected like a missing file). The repo is created
    at `<skills root>/<workspace_id>/<skill_name>` with the initial commit
    (author agent-legion-studio) tagged `new_tag` (e.g. `v0.1.0`). Everything
    is validated first; a name that already exists is a 409, and a failed
@@ -387,14 +389,21 @@ reviews the git diff and re-pins.
    nothing.
 3. Edit the file contents in your draft, then `validate_skill(skill_key)` —
    the runtime contract: non-empty SKILL.md + references/output-contract.md +
-   scripts/validate_output.py. Fix every reported error.
+   scripts/validate_output.py, plus a strict parse of the root
+   `contract.yaml` when present. Fix every reported error; reported
+   `warnings` (a missing root contract.yaml) do not fail the verdict but
+   tell you the machine contract is either on the deprecated embedded
+   block or missing entirely.
 4. `save_skill_version(skill_key, files, new_tag, message)` — writes into the
    skill's in-place repo. Every path is validated before any
    write (inside the skill dir, no `..`/absolute paths, no `.git`, no
    overwriting untracked files); after writing, the contract check re-runs
-   and a failure rolls the repo back to its original commit. On success it
-   commits (author agent-legion-studio) and tags `new_tag` (an existing tag
-   is a conflict). The skill lock is untouched: tag-pinned nodes keep the
+   and a failure (including a malformed root `contract.yaml`) rolls the
+   repo back to its original commit — but a MISSING root `contract.yaml`
+   only warns, so existing skills keep saving during the migration window.
+   On success it commits (author agent-legion-studio) and tags `new_tag`
+   (an existing tag is a conflict); the response carries the `warnings`.
+   The skill lock is untouched: tag-pinned nodes keep the
    locked commit, `latest` nodes pick the new HEAD up on their next dispatch.
 5. Show the human the git diff of the new tag and ask them to release it:
    re-pin the node's skill ref to the new tag in Studio and relock
@@ -402,17 +411,24 @@ reviews the git diff and re-pins.
    a relock before the human has seen the diff. Publishing/relocking stays
    human-only — you can never do it with these tools.
 
-### Machine-readable output contract block
+### Machine-readable output contract (`contract.yaml`)
 
-Beyond the prose contract, `references/output-contract.md` may embed ONE
-machine-readable contract block — a fenced code block whose info string is
-`yaml contract`. At run time the harness's built-in contract engine checks it
-first (existence, then the checks below); cross-file rules and business
-semantics stay in prose — the engine does not express them — and
-`scripts/validate_output.py` remains the legacy fallback channel for
-everything the engine cannot say:
+The machine-readable contract is a standalone root file: `contract.yaml`
+in the skill root. Skills created through `create_skill` MUST carry it
+from the first commit. Semantics are graded:
 
-```yaml contract
+- malformed `contract.yaml` (bad YAML, unknown fields, empty `files`,
+  absolute/escaping `path`, illegal `format`, `json` without a compilable
+  `schema`, `text` with `schema`/`min_chars` misuse) = **error** —
+  `validate_skill` reports it and `save_skill_version`/`create_skill`
+  reject the save;
+- missing `contract.yaml` = **warning** only (the save succeeds and
+  reports it): with the contract still on the deprecated embedded block
+  you are urged to migrate; with no contract at all the runtime output
+  validation degrades to existence-only checks.
+
+```yaml
+# contract.yaml — the skill-root machine contract
 files:
   - path: script.md              # relative to the job dir, required
     format: text                 # text | json, required
@@ -425,10 +441,21 @@ files:
       required: [exercises]
 ```
 
-Engine v1 expresses exactly these four check classes: existence, text length
-(`min_chars`), required headings, and JSON Schema. Before asking the human
-to release a tag, call `validate_skill` and fix every contract-block error it
-reports — a malformed block fails validation just like a missing file.
+At run time the harness's built-in contract engine checks it first
+(existence, then the per-format checks); cross-file rules and business
+semantics stay in prose in `references/output-contract.md` — the engine
+does not express them — and `scripts/validate_output.py` remains the
+legacy fallback channel for everything the engine cannot say.
+
+Migration promise: the pre-#542 location — a fenced ```yaml contract
+block embedded in `references/output-contract.md` — still works but is
+DEPRECATED; when a skill has both, the root `contract.yaml` wins
+completely. Migrate by moving the block's YAML body into the root file
+and keeping the prose. Engine v1 expresses exactly these four check
+classes: existence, text length (`min_chars`), required headings, and
+JSON Schema. Before asking the human to release a tag, call
+`validate_skill` and fix every contract error it reports — a malformed
+contract fails validation just like a missing file.
 
 ### 6.1 Shared materials across a workspace's skills (#633)
 
@@ -497,11 +524,14 @@ workspace's shared materials instead of copying it into every skill:
 - 404 `Unknown workflow node` / `No active workflow revision` on
   save_node_code_draft — you forgot `expected_capability` for a new node.
 - save_skill_version: 409 `already has tag` — pick a fresh tag; 422 with an
-  `errors` list — fix the reported paths or missing contract files.
+  `errors` list — fix the reported paths, missing contract files, or the
+  malformed `contract.yaml`.
 - create_skill: 409 `already exists` — the skill name is taken under this
   workspace; pick another name. 422 with an `errors` list — fix the skill
-  name (one lowercase segment), the reported file paths, or the missing
-  contract trio. 404 — the workspace does not exist.
+  name (one lowercase segment), the reported file paths, the missing
+  contract set (SKILL.md + references/output-contract.md +
+  scripts/validate_output.py + contract.yaml), or the malformed
+  `contract.yaml`. 404 — the workspace does not exist.
 - `HTTP 401` — token expired/revoked; ask the human to mint a new one.
 
 Golden rule: validate first, compare second, present third — then request
