@@ -28,8 +28,8 @@
 | 脚本 | 用途 |
 |------|------|
 | `check_architecture.py` | 检查模块边界、路由响应模型、源文件体积预算。 |
-| `check_invariants.py` | 校验 `config/architecture/architecture-invariants.yaml` 与 `architecture-exemptions.yaml`。 |
-| `ratchet_architecture_budgets.py` | 更新 `config/architecture/architecture-budgets.json` 基线；拒绝抬高 ceiling。 |
+| `check_invariants.py` | 校验 `config/architecture/architecture-invariants.yaml` 与 `architecture-exemptions.yaml`（含 #641 `expires` 到期硬失败与容忍带对齐）。 |
+| `ratchet_architecture_budgets.py` | 更新 `config/architecture/architecture-budgets.json` 基线；拒绝抬高 ceiling（#641 容忍带内的超出不吸收、不报错）。 |
 | `generate_architecture.py` | 从代码 AST 自动生成 `docs/architecture/backend.md`、`frontend.md`、`deployment.md` 的表格章节。 |
 | `generate_architecture_frontend.py` | `generate_architecture.py` 的前端路由提取 helper。 |
 | `check_exemption_age.py` | 提醒移除条件已过期的架构豁免（非阻塞；check.sh / CI 调用）。 |
