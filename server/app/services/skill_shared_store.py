@@ -20,10 +20,6 @@ payload disappear with the replaced dir (full-state semantics).
 
 from __future__ import annotations
 
-import os
-import shutil
-import uuid
-from collections.abc import Sequence
 from pathlib import Path
 
 from server.app.services.job_errors import JobServiceError
@@ -109,35 +105,3 @@ def read_shared_files(shared_dir: Path, material_dirs: tuple[str, ...]) -> list[
                 }
             )
     return files
-
-
-def write_shared_materials(
-    shared_dir: Path, files: Sequence[tuple[str, str]], base_dir: Path
-) -> None:
-    """Apply the full-state write atomically: stage every file (relative
-    posix path + content) in a sibling temp dir — any failure there
-    leaves the live dir untouched — then swap under the shared lock with
-    two same-filesystem renames; the replaced dir's retirement is the
-    removal pass for dropped files."""
-    staging = shared_dir.parent / f"{SHARED_DIR_NAME}.tmp-{uuid.uuid4().hex[:12]}"
-    retired = shared_dir.parent / f"{SHARED_DIR_NAME}.old-{uuid.uuid4().hex[:12]}"
-    try:
-        for relative, content in files:
-            path = staging / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-        with shared_edit_lock(shared_dir, base_dir):
-            had_previous = shared_dir.is_dir()
-            if had_previous:
-                os.rename(shared_dir, retired)
-            try:
-                os.rename(staging, shared_dir)
-            except OSError:
-                if had_previous:
-                    os.rename(retired, shared_dir)  # restore, staging stays garbage
-                raise
-    except OSError as exc:
-        raise SharedMaterialWriteError(f"shared materials write failed: {exc}") from exc
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
-        shutil.rmtree(retired, ignore_errors=True)

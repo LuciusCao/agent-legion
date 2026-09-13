@@ -121,6 +121,12 @@ export class ServerDraftApplyTracker {
     if (decision.action === 'apply') {
       this.appliedAt = decision.updatedAt
       this.conflict = null
+      // codex R4 P2: an apply IS the server acknowledging a baseline the
+      // canvas now matches (own-save echo, or an explicit adopt). The local
+      // edit that set `touched` is confirmed on the server — keeping the
+      // flag would misclassify the NEXT different agent update as "local
+      // unsaved edits" and raise a phantom conflict.
+      this.touched = false
       applyToCanvas(decision.yaml)
       return 'apply'
     }

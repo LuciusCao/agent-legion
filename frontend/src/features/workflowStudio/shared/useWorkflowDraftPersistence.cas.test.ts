@@ -609,4 +609,41 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     const calls = mocks.putWorkflowDraft.mock.calls.length
     expect(calls).toBe(1) // 仅第一次保存；adopt 未触发回写
   })
+
+  it('entering the conflict state cancels the pending debounce timer (codex R4 P1)', async () => {
+    // 用户编辑已 arm 的 debounce 计时器若在 enterConflict 后存活，到期 save()
+    // 会用刚推进的服务端时间戳成功覆盖 Agent 版本——绕过显式二选一。
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    // 一次失败的保存先进入 conflict 态。
+    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+    // conflict 态下再编辑（挂起 pendingSave，不 arm 计时器——kimi P1-2）；
+    // 即使计时器意外存活，conflict 置位后 flushNow 也不发 PUT；推进大量
+    // 假时钟证明没有任何计时器在途。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: More\n',
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1) // 无覆盖性 PUT
+  })
 })
