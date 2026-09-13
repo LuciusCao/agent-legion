@@ -18,6 +18,7 @@ parsing and the rename-floor carry live in ``budget_registry_history``.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NamedTuple
 
 from .budget_anchors import (
     anchor_budget_floors,
@@ -32,6 +33,21 @@ from .budget_anchors import (
 from .budget_floor_errors import baseline_raise_error, exemption_raise_error
 from .budget_git import BudgetGitUnavailable, GitHelper
 from .budget_registry_history import effective_floor
+
+__test__ = False
+
+
+class FrozenCeiling(NamedTuple):
+    """Exemption-registered ceiling plus its optional #641 expiry.
+
+    Lives here (not in ``file_budgets``, which builds it) so the guard
+    that consumes it does not import its producer — ``file_budgets``
+    already imports this module for ``ceiling_regression_errors``.
+    """
+
+    ceiling: int
+    expires: str | None = None
+
 
 __test__ = False
 
@@ -80,7 +96,9 @@ def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:
 def ceiling_regression_errors(
     root: Path,
     baseline_files: dict[str, int],
-    frozen_ceilings: dict[str, int],
+    frozen_ceilings: dict[str, FrozenCeiling],
+    *,
+    growth_allowance: int = 0,
 ) -> list[str]:
     """Reject ceiling increases against the committed monotonic floor.
 
@@ -89,6 +107,12 @@ def ceiling_regression_errors(
     carrying the old path's floor onto the new path (#236) — a rename is
     not a ceiling reset. New entries stay unrestricted unless a detected
     rename supplies their floor.
+
+    Baseline entries stay strictly only-down (#209). The exemption layer
+    additionally opens the #641 re-file channel: a re-filed ceiling within
+    ``growth_allowance`` of the floor passes without ceremony, and one
+    beyond the band passes when it carries a future ``expires`` deadline
+    (validated and hard-failed at expiry by ``check_invariants``).
     """
     git = GitHelper(root)
     try:
@@ -115,16 +139,23 @@ def ceiling_regression_errors(
                     )
                 )
 
-        for path, ceiling in frozen_ceilings.items():
+        for path, entry in frozen_ceilings.items():
             floor, _origin = effective_floor(
                 git, path, exemption_floors, budget_floors, exemption_floors, anchors
             )
-            if floor is not None and ceiling > floor:
-                errors.append(
-                    exemption_raise_error(
-                        path, ceiling, floor, base_floor_anchor(exemption_sources.get(path))
-                    )
+            if floor is None or entry.ceiling <= floor + growth_allowance:
+                continue
+            if entry.expires is not None:
+                continue
+            errors.append(
+                exemption_raise_error(
+                    path,
+                    entry.ceiling,
+                    floor,
+                    base_floor_anchor(exemption_sources.get(path)),
+                    growth_allowance=growth_allowance,
                 )
+            )
         return errors
     except BudgetGitUnavailable as exc:
         # Fail closed: the snapshot path is the only way to see untracked

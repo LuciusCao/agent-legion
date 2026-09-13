@@ -1,5 +1,28 @@
 exemptions:
 - check: architecture.file_budget
+  path: scripts/architecture/budget_monotonicity.py
+  reason: 'Issue #641 opens the exemption re-file channel: the exemption layer of
+    ceiling_regression_errors now admits a re-file within growth_allowance of the floor
+    and an arbitrarily high one carrying a future expires date (FrozenCeiling NamedTuple
+    plus the banded judgment) — 4 effective lines past the 81 baseline. The NamedTuple
+    lives here rather than file_budgets to keep the guard importing its producer only
+    one way. Remove when the re-file judgment folds into budget_floor_errors or a
+    budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 95
+- check: architecture.file_budget
+  path: scripts/architecture/file_budgets.py
+  reason: 'Issue #641 threads the growth_allowance band and the FrozenCeiling expiry through
+    the budget evaluator: _build_frozen_ceilings returns ceiling+expires pairs and
+    check_file_budgets passes the policy band into the monotonicity guard — 3 effective
+    lines past the 168 baseline. The evaluator is the single place ceilings, exemptions
+    and the band intersect. Remove when the frozen-ceiling plumbing moves into
+    budget_monotonicity wholesale or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 181
+- check: architecture.file_budget
   path: scripts/check_invariants.py
   reason: 'Issue #641 wires the budget policy growth_allowance into validate_exemptions so
     the exemption ceiling check shares the same band as the file-budget gate, and the

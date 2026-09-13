@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -20,6 +21,7 @@ import yaml
 
 from scripts.architecture.budget_policy import (
     BudgetConfigurationError,
+    BudgetPolicy,
     load_budget_policy,
 )
 from scripts.architecture.exemptions import load_exemptions
@@ -240,3 +242,86 @@ class TestExemptionCeilingAllowanceAlignment:
         errors = validate_exemptions((exemption,), root, growth_allowance=15)
 
         assert any("even with the growth allowance (15 lines)" in e for e in errors)
+
+
+def _refile_repo(tmp_path: Path, committed_ceiling: int, lines: int) -> tuple[Path, BudgetPolicy]:
+    """Governed git repo whose HEAD^ carries a committed exemption floor.
+
+    The draftSaveController 171→182 incident (#610): a file with a committed
+    exemption that needed a higher ceiling had no legal path short of the
+    release train. The exemption at ``committed_ceiling`` is committed into
+    HEAD^; the caller then rewrites the registry in the working tree to play
+    the re-file attempt. ``lines`` sizes the file so the refiled ceiling
+    stays within the staleness band (ceiling ≤ actual + buffer).
+    """
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=lines)
+    write_baseline(root, {"server/app/example.py": 110})
+    rewrite_exemption_ceiling(root, ceiling=committed_ceiling)
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "init"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    return root, replace(policy, growth_allowance=15)
+
+
+def _check_with_refile(
+    root: Path, policy: BudgetPolicy, ceiling: int, expires: str = ""
+) -> list[str]:
+    registry = root / "config/architecture/architecture-exemptions.yaml"
+    entry = yaml.safe_load(registry.read_text())["exemptions"][0]
+    entry["ceiling"] = ceiling
+    if expires:
+        entry["expires"] = expires
+    registry.write_text(yaml.safe_dump({"exemptions": [entry]}), encoding="utf-8")
+    return check_file_budgets(root, policy, load_exemptions(root))
+
+
+class TestExemptionRefiling:
+    """#641 re-file channel: within-band re-files pass, beyond-band need expires."""
+
+    def test_within_band_refile_passes_without_expires(self, tmp_path: Path) -> None:
+        root, policy = _refile_repo(tmp_path, committed_ceiling=171, lines=176)
+
+        # The draftSaveController 171→182 raise: within floor + 15, no
+        # ceremony needed — the release-train detour is gone.
+        assert _check_with_refile(root, policy, 182) == []
+
+    def test_beyond_band_refile_without_expires_errors(self, tmp_path: Path) -> None:
+        root, policy = _refile_repo(tmp_path, committed_ceiling=171, lines=177)
+
+        errors = _check_with_refile(root, policy, 187)
+
+        assert errors == [
+            "server/app/example.py: exemption ceiling 187 rose above committed "
+            "ceiling 171 + growth allowance 15; beyond the allowance band a "
+            "re-file must carry a future expires date (#641 time-boxed raise) "
+            "or split the file"
+        ]
+
+    def test_beyond_band_refile_with_expires_passes(self, tmp_path: Path) -> None:
+        root, policy = _refile_repo(tmp_path, committed_ceiling=171, lines=195)
+
+        assert _check_with_refile(root, policy, 200, expires="2026-12-31") == []
+
+    def test_zero_allowance_keeps_legacy_raise_rejected(self, tmp_path: Path) -> None:
+        root, policy = _refile_repo(tmp_path, committed_ceiling=171, lines=166)
+        strict = replace(policy, growth_allowance=0)
+
+        errors = _check_with_refile(root, strict, 172)
+
+        assert errors == [
+            "server/app/example.py: exemption ceiling 172 rose above committed "
+            "ceiling 171 + growth allowance 0; beyond the allowance band a "
+            "re-file must carry a future expires date (#641 time-boxed raise) "
+            "or split the file"
+        ]
+
+    def test_lowering_refile_still_passes(self, tmp_path: Path) -> None:
+        root, policy = _refile_repo(tmp_path, committed_ceiling=171, lines=145)
+
+        assert _check_with_refile(root, policy, 150) == []

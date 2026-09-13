@@ -69,15 +69,13 @@ def ratchet_budgets(root: Path) -> RatchetResult:
         # Exempt files answer to their frozen exemption ceiling instead of the
         # baseline entry, which stays untouched for when the exemption is
         # removed.
-        effective_ceiling = frozen if frozen is not None else existing
+        effective_ceiling = frozen.ceiling if frozen is not None else existing
 
         # #641 growth allowance: within-band overshoot is not an error and
         # never absorbs into the registry; beyond-band growth still errors.
         if effective_ceiling is not None and actual > effective_ceiling + policy.growth_allowance:
             band = (
-                f" + growth allowance {policy.growth_allowance}"
-                if policy.growth_allowance
-                else ""
+                f" + growth allowance {policy.growth_allowance}" if policy.growth_allowance else ""
             )
             errors.append(
                 f"{path}: {actual} effective lines exceeds ceiling {effective_ceiling}"  # fmt: skip

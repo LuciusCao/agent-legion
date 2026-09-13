@@ -10,7 +10,7 @@ from typing import Any
 from scripts.quality.exemptions import ArchitectureExemption
 
 from .budget_inventory import absolute_limit_map, build_budget_inventory
-from .budget_monotonicity import ceiling_regression_errors
+from .budget_monotonicity import FrozenCeiling, ceiling_regression_errors
 from .budget_policy import BudgetPolicy
 from .effective_lines import count_effective_lines
 
@@ -93,9 +93,9 @@ def _positive_int(value: Any) -> int:
 def _build_frozen_ceilings(
     production: tuple[str, ...],
     exemptions: tuple[ArchitectureExemption, ...],
-) -> dict[str, int]:
+) -> dict[str, FrozenCeiling]:
     """Build frozen ceiling map from file-budget exemptions."""
-    frozen: dict[str, int] = {}
+    frozen: dict[str, FrozenCeiling] = {}
     production_set = set(production)
     for ex in exemptions:
         if ex.check != "architecture.file_budget":
@@ -104,7 +104,7 @@ def _build_frozen_ceilings(
             continue
         if ex.ceiling is None:
             continue
-        frozen[ex.path] = _positive_int(ex.ceiling)
+        frozen[ex.path] = FrozenCeiling(_positive_int(ex.ceiling), ex.expires)
     return frozen
 
 
@@ -129,9 +129,13 @@ def check_file_budgets(
     errors: list[str] = []
 
     frozen_ceilings = _build_frozen_ceilings(inventory.production, exemptions)
-    errors.extend(ceiling_regression_errors(root, baseline_files, frozen_ceilings))
+    errors.extend(
+        ceiling_regression_errors(
+            root, baseline_files, frozen_ceilings, growth_allowance=policy.growth_allowance
+        )
+    )
 
-    for path, ceiling in frozen_ceilings.items():
+    for path, entry in frozen_ceilings.items():
         file_path = root / path
         actual = count_effective_lines(file_path)
 
@@ -140,7 +144,7 @@ def check_file_budgets(
             normal_ceiling = _positive_int(normal_ceiling)
             if actual <= normal_ceiling and normal_ceiling <= actual + policy.buffer_lines:
                 errors.append(
-                    f"{path}: exemption ceiling {ceiling} is stale; "
+                    f"{path}: exemption ceiling {entry.ceiling} is stale; "
                     f"file fits within normal ceiling {normal_ceiling}; "
                     "remove the architecture.file_budget exemption"
                 )
@@ -174,7 +178,8 @@ def check_file_budgets(
             )
 
     for path in inventory.production:
-        effective_ceiling = frozen_ceilings.get(path, baseline_files.get(path))
+        frozen = frozen_ceilings.get(path)
+        effective_ceiling = frozen.ceiling if frozen is not None else baseline_files.get(path)
         if effective_ceiling is None:
             continue
         effective_ceiling = _positive_int(effective_ceiling)
