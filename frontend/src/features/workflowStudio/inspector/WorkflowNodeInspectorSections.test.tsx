@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
+import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { WorkflowNodeInspectorSections } from './WorkflowNodeInspectorSections'
 import { api } from '../../../api'
 import { useSettingStore } from '../../../stores/settingStore'
@@ -50,14 +51,16 @@ function renderSections(
   }
 ) {
   return render(
-    <WorkflowNodeInspectorSections
-      details={{ node, incoming: [], outgoing: [] }}
-      agentCatalog={[]}
-      agentCatalogSettle={settledSettle}
-      definitionYaml={options?.definitionYaml ?? startYaml}
-      setDefinitionYaml={options?.setDefinitionYaml ?? (() => {})}
-      readOnly={options?.readOnly}
-    />
+    <MemoryRouter>
+      <WorkflowNodeInspectorSections
+        details={{ node, incoming: [], outgoing: [] }}
+        agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
+        definitionYaml={options?.definitionYaml ?? startYaml}
+        setDefinitionYaml={options?.setDefinitionYaml ?? (() => {})}
+        readOnly={options?.readOnly}
+      />
+    </MemoryRouter>
   )
 }
 

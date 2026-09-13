@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
+import { useLocation } from 'react-router-dom'
 
 import { AddItemsRefPanel } from './AddItemsRefPanel'
 import { getConnectionKeys } from '../api/connections'
-import { TestQueryProvider } from '../testing/testQueryClient'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 
 vi.mock('../api/connections', () => ({
   getConnectionKeys: vi.fn(),
@@ -11,18 +12,29 @@ vi.mock('../api/connections', () => ({
 
 const mockGetConnectionKeys = vi.mocked(getConnectionKeys)
 
+function LocationProbe() {
+  const { pathname, hash } = useLocation()
+  return (
+    <span data-testid="location-path">
+      {pathname}
+      {hash}
+    </span>
+  )
+}
+
 function renderPanel(onConnectionKeyChange = vi.fn()) {
   return {
     onConnectionKeyChange,
     ...render(
-      <TestQueryProvider>
+      <MemoryRouter>
         <AddItemsRefPanel
           connectionKey=""
           refText=""
           onConnectionKeyChange={onConnectionKeyChange}
           onRefTextChange={vi.fn()}
         />
-      </TestQueryProvider>
+        <LocationProbe />
+      </MemoryRouter>
     ),
   }
 }
@@ -107,5 +119,43 @@ describe('AddItemsRefPanel', () => {
     await screen.findByRole('combobox')
     await openMenu()
     expect(menuOptions()).toEqual(['（实例还没有外部服务连接）'])
+  })
+
+  it('renders an admin-settings link when the instance has zero keys', async () => {
+    // #593：空态不留死胡同——下拉占位之外，字段下方出现指向
+    // /admin/settings#connections 的跳转链接，点击可导航。
+    // 注意 loading 态的 datalist 文本框隐式 role 也是 combobox，等待链接
+    // 出现才是「空列表已就绪」的信号。
+    mockGetConnectionKeys.mockResolvedValue({ keys: [] } as never)
+    renderPanel()
+
+    const link = await screen.findByRole('link', {
+      name: '全局设置 · 外部服务连接',
+    })
+    expect(link).toHaveAttribute('href', '/admin/settings#connections')
+    expect(screen.getByText(/需要管理员先到/)).toBeInTheDocument()
+    expect(screen.getByText(/配置。/)).toBeInTheDocument()
+
+    fireEvent.click(link)
+    expect(screen.getByTestId('location-path')).toHaveTextContent(
+      '/admin/settings#connections'
+    )
+  })
+
+  it('does not render the empty-state link when keys exist', async () => {
+    mockGetConnectionKeys.mockResolvedValue({ keys: ['cms-a'] } as never)
+    renderPanel()
+    // MUI select 的 combobox 带 aria-haspopup，与 loading 态的 datalist
+    // 文本框区分开；等到 select 形态再断言链接不存在。
+    await waitFor(() =>
+      expect(screen.getByRole('combobox')).toHaveAttribute(
+        'aria-haspopup',
+        'listbox'
+      )
+    )
+
+    expect(
+      screen.queryByRole('link', { name: '全局设置 · 外部服务连接' })
+    ).not.toBeInTheDocument()
   })
 })
