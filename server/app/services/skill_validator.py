@@ -5,6 +5,11 @@ A skill is a directory under the managed skills base dir
 directory is its own git repository whose tags are the selectable refs
 (the DB ``skill_lock`` document stays the authority on which ref is pinned —
 the validator only reports what exists, it never mutates the lock).
+
+#542: the validation also reports the machine-contract tier as warnings —
+a skill without a root ``contract.yaml`` is still VALID (external imports
+must keep running), but the editor surfaces the deprecation/migration
+nudge from the shared probe.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from server.app.skills.config import SkillsLock
+from server.app.skills.contract_probe import probe_contract
 
 _GIT_TAG_TIMEOUT_SECONDS = 5
 
@@ -28,6 +34,9 @@ class SkillValidation:
     tags: tuple[str, ...] = ()
     latest_tag: str | None = None
     locked_ref: str | None = None
+    # #542: machine-contract tier warnings (empty when the skill carries a
+    # root contract.yaml). Never affects ``valid``.
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -70,6 +79,7 @@ class SkillValidator:
             tags=tags,
             latest_tag=tags[0] if tags else None,
             locked_ref=self._locked_ref(skill_key),
+            warnings=_contract_tier_warnings(path),
         )
 
     def list_tags(self, raw_path: str) -> SkillTags:
@@ -130,3 +140,22 @@ class SkillValidator:
         # Without the retired source registry there is no declared default
         # ref: only a sole pin is an unambiguous "locked ref" display answer.
         return next(iter(entry.refs)) if len(entry.refs) == 1 else None
+
+
+def _contract_tier_warnings(path: Path) -> tuple[str, ...]:
+    """#542: display-only machine-contract nudges for the editor.
+
+    Mirrors the authoring-side phrasing (services/skill_edit_checks.
+    contract_warnings) but stays display-only — this validator is also the
+    entry gate for externally imported skills, which stay valid without a
+    root contract.yaml by design.
+    """
+    tier = probe_contract(path)
+    if tier == "embedded_block":
+        return (
+            "machine contract lives in the deprecated embedded block; "
+            "migrate to a root contract.yaml",
+        )
+    if tier in ("none", "undetermined"):
+        return ("no machine contract; runtime output validation is existence-only",)
+    return ()

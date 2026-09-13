@@ -25,6 +25,7 @@ import logging
 import os
 import shutil
 import stat
+import tempfile
 from os.path import lexists as _lexists
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,7 @@ from server.app.services import skill_repo
 from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.services.skill_edit_checks import (
     contract_errors,
+    contract_yaml_errors,
     resolve_targets_checked,
 )
 from server.app.services.skill_editing import (
@@ -62,6 +64,11 @@ MAX_TAG_LENGTH = 128
 MAX_MESSAGE_LENGTH = 4096
 
 _CONTRACT_TRIO = ("SKILL.md", "references/output-contract.md", "scripts/validate_output.py")
+# #542: new skills are born with the full four-file set — the machine
+# contract must live in a root contract.yaml from the first commit (the
+# embedded-block location is deprecated and never an acceptable birth
+# form; migration leniency applies only to save_version/validate).
+_CONTRACT_REQUIRED = _CONTRACT_TRIO + ("contract.yaml",)
 
 
 class SkillCreationService:
@@ -82,7 +89,11 @@ class SkillCreationService:
         new_tag: str,
         message: str,
     ) -> dict[str, Any]:
-        """Materialize ``<workspace_id>/<skill_name>`` as a fresh in-place repo."""
+        """Materialize ``<workspace_id>/<skill_name>`` as a fresh in-place repo.
+
+        #542: new skills are born with the full four-file contract — the
+        runtime trio plus a root ``contract.yaml`` (also strictly parsed);
+        a payload missing it or carrying a malformed one is a 422."""
         if self._job_db.get_workspace(workspace_id) is None:
             raise NotFoundError(f"Unknown workspace {workspace_id!r}")
         self._check_skill_name(skill_name)
@@ -105,7 +116,6 @@ class SkillCreationService:
         errors = path_errors + contract
         if errors:
             raise SkillEditValidationError("Invalid skill creation payload", errors)
-
         with edit_lock_for(repo_dir, skills_root(), self._runs_dir):
             if _lexists(repo_dir):
                 raise ConflictError(
@@ -120,9 +130,17 @@ class SkillCreationService:
                 for path, content in targets:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(content, encoding="utf-8")
-                # Defense in depth: the trio was checked on the proposed
-                # file set; re-check what actually landed on disk.
+                # Defense in depth: the four-file set was checked on the
+                # proposed payload; re-check what actually landed on disk
+                # (trio + root contract.yaml, same graded rules — a
+                # malformed contract.yaml is an error, and a new skill must
+                # be born with one at all).
                 written_errors = contract_errors(repo_dir)
+                written_errors.extend(contract_yaml_errors(repo_dir))
+                if not (repo_dir / "contract.yaml").is_file():
+                    written_errors.append(
+                        {"path": "contract.yaml", "error": "missing contract.yaml"}
+                    )
                 if written_errors:
                     raise SkillEditValidationError(
                         "Skill contract validation failed for the created skill",
@@ -219,8 +237,12 @@ class SkillCreationService:
     def _proposed_contract_errors(
         targets: list[tuple[Path, str]], repo_dir: Path
     ) -> list[dict[str, str]]:
-        """The contract trio checked against the PROPOSED file set, before
-        anything is written (same error shape as the on-disk check)."""
+        """The four-file contract checked against the PROPOSED file set,
+        before anything is written (same error shape as the on-disk check).
+
+        #542: create_skill is the strict birth gate — a root ``contract.yaml``
+        must be present in the payload AND parse clean (a malformed one is
+        the same 422 as a missing trio file)."""
         proposed = {
             path.relative_to(repo_dir.resolve()).as_posix(): content for path, content in targets
         }
@@ -230,9 +252,17 @@ class SkillCreationService:
             errors.append({"path": "SKILL.md", "error": "missing SKILL.md"})
         elif not skill_md.strip():
             errors.append({"path": "SKILL.md", "error": "SKILL.md is empty"})
-        for required in _CONTRACT_TRIO[1:]:
+        for required in _CONTRACT_REQUIRED[1:]:
             if required not in proposed:
                 errors.append({"path": required, "error": f"missing {required}"})
+        contract_yaml = proposed.get("contract.yaml")
+        if contract_yaml is not None:
+            # The proposed TEXT is authoritative, not any on-disk state:
+            # validate it through the same strict parser via a scratch dir.
+            with tempfile.TemporaryDirectory() as scratch:
+                staged = Path(scratch)
+                (staged / "contract.yaml").write_text(contract_yaml, encoding="utf-8")
+                errors.extend(contract_yaml_errors(staged))
         return errors
 
     # Class attribute (not an import alias at module scope) so tests can

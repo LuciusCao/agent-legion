@@ -1,13 +1,20 @@
-"""Host-side adapter for the harness contract engine (#443).
+"""Host-side adapter for the harness contract engine (#443, #542).
 
 The engine lives in the velites binaries (``velites-sandbox validate`` /
-``velites validate``) and reads the skill's machine-readable contract block;
-this module is the subprocess seam so ``output_validation`` stays under its
-file-size budget. See that module for the two-layer validation contract.
+``velites validate``) and reads the skill's machine-readable contract —
+the skill-root ``contract.yaml`` since #542, falling back to the deprecated
+embedded block in ``references/output-contract.md``; this module is the
+subprocess seam so ``output_validation`` stays under its file-size budget.
+See that module for the two-layer validation contract.
 
-Since #538 the spawn is gated by an in-process probe of the skill's contract
-document: a skill that declares no contract block would only buy the engine's
-``mode=existence`` no-verdict, so the subprocess is skipped outright.
+Since #538 the spawn is gated by an in-process probe of the skill's
+contract presence: a skill that declares no contract (neither root file
+nor embedded block) would only buy the engine's ``mode=existence``
+no-verdict, so the subprocess is skipped outright. Since #542 the probe
+is the shared three-tier decision function in
+``skills/contract_probe.py`` (also consumed by the authoring-side
+validation), so the spawn gate cannot drift from what the editor warns
+about.
 """
 
 from __future__ import annotations
@@ -15,40 +22,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from server.app.skills.contract_probe import has_machine_contract
 from shared.code_sandbox import resolve_sandbox_binary
-
-_CONTRACT_DOC = "references/output-contract.md"
-_CONTRACT_FENCE = "```yaml contract"
-
-
-def _has_contract_block(skill_dir: Path) -> bool:
-    """Probe whether the engine would find a contract block here (#538).
-
-    Mirrors the velites ``Contract::parse`` decision function, not its
-    parsing: a missing document degrades (no block, the spawn is skippable)
-    while every shape that fails closed there — unreadable file, non-UTF-8
-    content, an opening fence that is never closed — reports True so the
-    engine delivers the authoritative verdict. The fence marker is the one
-    velites scans for: a line that strips to exactly "```yaml contract".
-
-    Cross-language drift guard: the fence semantics live in
-    ``velites/src/contract.rs`` ``extract_contract_block`` — if that scanner
-    ever changes its marker, this probe MUST follow (the fence-variant tests
-    here are the tripwire; drift in the missed-spawn direction would skip
-    the authoritative engine, the only correctness regression this probe
-    could cause). The line splitting is deliberately a superset of Rust's
-    ``lines()``: ``splitlines()`` also splits on \\r/\\v/\\f/U+2028 et al.,
-    so a fence line those separators hide from velites but not from us can
-    only produce an extra (harmless) spawn, never a missed one.
-    """
-    try:
-        content = (skill_dir / _CONTRACT_DOC).read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return False
-    except (OSError, UnicodeDecodeError):
-        # Undeterminable: assume a block and let velites fail closed.
-        return True
-    return any(line.strip() == _CONTRACT_FENCE for line in content.splitlines())
 
 
 def run_contract_engine(
@@ -61,16 +36,16 @@ def run_contract_engine(
 
     The engine is authoritative only when it reports contract violations
     (exit 1) or is itself broken (exit 2); exit 0 means either the contract
-    block passed (``mode=contract``) or the skill has no machine-readable
-    contract block (``mode=existence``) — either way the legacy script in
+    passed (``mode=contract``) or the skill has no machine-readable
+    contract (``mode=existence``) — either way the legacy script in
     ``output_validation`` still runs. Hosts without a velites binary keep
-    the legacy-only behavior. A skill that declares no contract block never
-    spawns the engine at all (#538): its answer is the existence-mode
+    the legacy-only behavior. A skill that declares no contract at all
+    never spawns the engine (#538): its answer is the existence-mode
     no-verdict this function returns anyway.
     """
-    # #538: no declared block — the spawn would only produce the existence
-    # no-verdict; skip it and let the legacy script decide alone.
-    if not _has_contract_block(skill_dir):
+    # #538/#542: no declared contract — the spawn would only produce the
+    # existence no-verdict; skip it and let the legacy script decide alone.
+    if not has_machine_contract(skill_dir):
         return None
     binary = resolve_sandbox_binary()
     if binary is None:

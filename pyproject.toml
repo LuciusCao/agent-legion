@@ -17,6 +17,7 @@ dependencies = [
   # Pinned below 2.0: mcp 2.0 removed mcp.server.fastmcp (breaking change) and
   # the standalone fastmcp 3.x package is incompatible with mcp 2.x; the MCP
   # server (server/app/mcp_server) uses FastMCP from mcp.server.fastmcp.
+  "jsonschema>=4.26.0",
   "mcp>=1.12,<2",
   "psycopg[binary,pool]>=3.2",
   "pydantic",
