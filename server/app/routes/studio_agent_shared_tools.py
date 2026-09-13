@@ -50,8 +50,8 @@ from server.app.services.skill_shared_store import (
     SHARED_DIR_NAME,
     read_shared_files,
     shared_edit_lock,
-    write_shared_materials,
 )
+from server.app.services.skill_shared_swap import write_shared_materials
 from server.app.services.skill_shared_sync import load_shared_map
 from server.app.settings import Settings
 from server.app.skills.skill_roots import workspace_skill_dir

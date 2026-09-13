@@ -96,3 +96,19 @@ entries:
     local repro ~1-in-8 isolated runs before the fix, 55+ consecutive passes
     after.
   deadline: 2026-09-15
+- id: FLAKY-009
+  nodeid: tests/routes/test_studio_publish_request_races.py::test_concurrent_creates_leave_exactly_one_pending
+  owner: test-infra
+  reason: >-
+    The #429 three-round P1 regression pin: two concurrent request_publish
+    calls race on the partial unique index (one pending row per workspace).
+    The flake observed in the release-train PR #636 CI (backend-coverage
+    lane, run 34762377305, 2026-09-13) was a retry-rerun, not a failure —
+    the second attempt passed and the final count was green; the rerun
+    governance step failed only because the nodeid was not yet registered.
+    Timing family: the two threads' INSERT/supersede interleaving under
+    READ COMMITTED can transiently exceed the default poll/lock window on
+    a loaded runner. Registered for rerun absorption; the assertion itself
+    (exactly one pending row) is the invariant under test and stays.
+  observed: PR #636 backend-coverage lane (run 34762377305), 2026-09-13, rerun passed and the lane was green.
+  deadline: 2026-10-13
