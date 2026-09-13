@@ -71,8 +71,18 @@ def ratchet_budgets(root: Path) -> RatchetResult:
         # removed.
         effective_ceiling = frozen if frozen is not None else existing
 
-        if effective_ceiling is not None and actual > effective_ceiling:
-            errors.append(f"{path}: {actual} effective lines exceeds ceiling {effective_ceiling}; split the file or revert growth")  # fmt: skip
+        # #641 growth allowance: within-band overshoot is not an error and
+        # never absorbs into the registry; beyond-band growth still errors.
+        if effective_ceiling is not None and actual > effective_ceiling + policy.growth_allowance:
+            band = (
+                f" + growth allowance {policy.growth_allowance}"
+                if policy.growth_allowance
+                else ""
+            )
+            errors.append(
+                f"{path}: {actual} effective lines exceeds ceiling {effective_ceiling}"  # fmt: skip
+                f"{band}; split the file or revert growth"
+            )
             if existing is not None:
                 new_map[path] = existing
             continue
@@ -80,6 +90,9 @@ def ratchet_budgets(root: Path) -> RatchetResult:
         if existing is None:
             new_map[path] = desired
         else:
+            # Within the growth allowance (#641) the file may exceed the
+            # ceiling without error; min() keeps the registry entry frozen
+            # at its old value so the band is never absorbed here.
             new_map[path] = min(existing, desired)
 
     if errors:

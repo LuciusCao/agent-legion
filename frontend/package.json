@@ -63,5 +63,10 @@
     "react18-json-view": "^0.2.10",
     "uplot": "^1.6.32",
     "zustand": "^4.5.7"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "fsevents@2.3.3": true,
+    "fsevents@2.3.2": true
   }
 }

@@ -1,5 +1,17 @@
 exemptions:
 - check: architecture.file_budget
+  path: scripts/architecture/budget_policy.py
+  reason: 'Issue #641 adds the growth_allowance policy knob: one dataclass field, the
+    _parse_growth_allowance loader (optional, non-negative, default 0 keeps the strict
+    pre-#641 line) and its _check_keys whitelist entry — 9 effective lines past the 153
+    baseline. The guard files are budgeted by their own gate; the alternative (parking
+    the parser in a sibling module) would split the typed policy loader in two for a
+    nine-line feature. Remove when the allowance parser folds into a shared optional-int
+    helper or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 172
+- check: architecture.file_budget
   path: velites/src/contract.rs
   reason: 'Issue #542 migrates the machine-readable contract location to the skill-root contract.yaml:
     the parse tiering (root wins completely and fails closed on a malformed file, embedded-block fallback

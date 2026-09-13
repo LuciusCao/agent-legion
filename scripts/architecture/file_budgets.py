@@ -180,11 +180,21 @@ def check_file_budgets(
         effective_ceiling = _positive_int(effective_ceiling)
         file_path = root / path
         actual = count_effective_lines(file_path)
-        if actual > effective_ceiling:
-            errors.append(
-                f"{path}: {actual} effective lines exceeds ceiling {effective_ceiling}; "
-                "split the file or revert growth"
-            )
+        # #641 growth allowance: within-band overshoot passes and is never
+        # absorbed into the registry — only beyond-band growth errors.
+        allowance = policy.growth_allowance
+        if actual > effective_ceiling + allowance:
+            if allowance:
+                errors.append(
+                    f"{path}: {actual} effective lines exceeds ceiling {effective_ceiling} "
+                    f"+ growth allowance {allowance}; split the file, re-file the "
+                    "exemption, or revert growth"
+                )
+            else:
+                errors.append(
+                    f"{path}: {actual} effective lines exceeds ceiling {effective_ceiling}; "
+                    "split the file or revert growth"
+                )
         elif effective_ceiling > actual + policy.buffer_lines:
             errors.append(
                 f"{path}: ceiling {effective_ceiling} is stale for {actual} effective lines; "
