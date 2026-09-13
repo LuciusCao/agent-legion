@@ -140,7 +140,6 @@ describe('decideServerDraftReapply', () => {
   })
 })
 
-
 describe('ServerDraftApplyTracker (codex R4 P2: apply clears touched)', () => {
   it('an applied own-save echo resets touched — the next different agent update is not a phantom conflict', () => {
     const tracker = new ServerDraftApplyTracker()
