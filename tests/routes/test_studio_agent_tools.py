@@ -619,6 +619,47 @@ def test_save_workflow_draft_rejects_blank_and_missing_cas_token(client, job_db)
     assert scoped.get(_draft_url(workspace_id)).json()["definition_yaml"] is None
 
 
+def test_save_workflow_draft_rejects_unparseable_cas_token_with_422(client, job_db) -> None:
+    """#633 codex review P2-2：非法 CAS 时间戳（既非 never-saved 也非 ISO）是
+    契约层 422——否则 timestamptz cast 会以 500 DB 错误暴露，而不是清晰的
+    "no match → conflict"。"""
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+
+    for bad in ("garbage", "2026-13-45T99:99:99+00:00", "yesterday"):
+        response = scoped.put(
+            _draft_url(workspace_id),
+            json={"definition_yaml": "key: x\n", "expected_updated_at": bad},
+        )
+        assert response.status_code == 422, bad
+        assert "expected_updated_at must be an ISO timestamp" in response.text
+
+    assert scoped.get(_draft_url(workspace_id)).json()["definition_yaml"] is None
+
+
+def test_save_workflow_draft_valid_but_stale_timestamp_gets_409_not_422(client, job_db) -> None:
+    """合法 ISO 但已过期的基线走正常 CAS 冲突（409 + current_draft），
+    never-saved 在草稿确实不存在时成功——422 只拦「非法格式」。"""
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+
+    ok = scoped.put(
+        _draft_url(workspace_id),
+        json={"definition_yaml": "key: first\n", "expected_updated_at": "never-saved"},
+    )
+    assert ok.status_code == 200, ok.text
+
+    stale = scoped.put(
+        _draft_url(workspace_id),
+        json={
+            "definition_yaml": "key: second\n",
+            "expected_updated_at": "2020-01-01T00:00:00+00:00",
+        },
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["current_draft"]["definition_yaml"] == "key: first\n"
+
+
 def test_compare_workflow_without_baseline_returns_full_draft_preview(client, job_db) -> None:
     """Tool-surface compare on a never-published workflow (workspace key set,
     no revision): instead of a revision error the draft is diffed against an

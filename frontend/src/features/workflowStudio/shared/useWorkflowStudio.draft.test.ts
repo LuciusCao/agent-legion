@@ -10,6 +10,13 @@ function queryClientWrapper({ children }: { children: ReactNode }) {
     children
   )
 }
+
+/* #633 codex review P1-2 的用例需要触发 turn-end 失效（查询重取），
+   wrapper 持有测试创建的 QueryClient 供 invalidateQueries 使用。 */
+function wrapperWithClient(client: ReturnType<typeof createTestQueryClient>) {
+  return ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children)
+}
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudio } from './useWorkflowStudio'
 import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
@@ -358,6 +365,135 @@ describe('useWorkflowStudio draft & revision', () => {
       vi.advanceTimersByTime(2000)
     })
     expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
+  })
+
+  // --- #633 codex review P1-2：turn-end 失效重取后的画布重应用。 ---
+
+  it('applies the agent-saved draft when the user has no local edits', async () => {
+    // 首次装载：无草稿（双 null）；画布跟随基线。
+    const client = createTestQueryClient()
+    let resolveDraftQuery: (value: {
+      definition_yaml: string | null
+      updated_at: string | null
+    }) => void = () => {}
+    mocks.fetchWorkflowDraft.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDraftQuery = resolve
+        })
+    )
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: wrapperWithClient(client),
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+    await act(async () => {
+      resolveDraftQuery({ definition_yaml: null, updated_at: null })
+    })
+    await waitFor(() =>
+      expect(result.current.definitionYaml).toBe(
+        activeRevisionPayload.definition_yaml
+      )
+    )
+
+    // agent 保存草稿：turn-end 失效（studioChatInvalidation 同款 key）触发
+    // 查询重取，服务端草稿前进。
+    let resolveRefetch: (value: {
+      definition_yaml: string | null
+      updated_at: string | null
+    }) => void = () => {}
+    mocks.fetchWorkflowDraft.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRefetch = resolve
+        })
+    )
+    // invalidateQueries 对 active 查询会等待重取完成——不能 await 它（重取
+    // 的 resolver 还没被调用会死锁）：先触发失效，让重取发起后再 resolve。
+    act(() => {
+      void client.invalidateQueries({
+        queryKey: ['workflowStudioDraft', 'ws1'],
+      })
+    })
+    await act(async () => {
+      resolveRefetch({
+        definition_yaml: 'key: demo\nlabel: Agent v2\n',
+        updated_at: '2026-08-27T02:00:00+00:00',
+      })
+    })
+
+    // 用户无本地编辑：画布直接采用 agent 草稿（无需整页刷新）。
+    await waitFor(() =>
+      expect(result.current.definitionYaml).toBe('key: demo\nlabel: Agent v2\n')
+    )
+    // CAS 基线同步推进到服务端真值：后续 PUT 用新 updated_at。
+    expect(result.current.draftSave.savedAt).toBe('2026-08-27T02:00:00+00:00')
+    // 采用本身不触发回写 PUT。
+    await act(async () => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
+  })
+
+  it('preserves user edits and surfaces conflict when the server draft advanced', async () => {
+    // 首次装载：无草稿；用户随后编辑（未保存——debounce 内先拦截）。
+    const client = createTestQueryClient()
+    let resolveDraftQuery: (value: {
+      definition_yaml: string | null
+      updated_at: string | null
+    }) => void = () => {}
+    mocks.fetchWorkflowDraft.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDraftQuery = resolve
+        })
+    )
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: wrapperWithClient(client),
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+    await act(async () => {
+      resolveDraftQuery({ definition_yaml: null, updated_at: null })
+    })
+    await waitFor(() =>
+      expect(result.current.definitionYaml).toBe(
+        activeRevisionPayload.definition_yaml
+      )
+    )
+    act(() => {
+      result.current.setDefinitionYaml('key: demo\nlabel: My edit\n')
+    })
+
+    // agent 保存草稿：turn-end 失效触发重取，服务端草稿前进。
+    let resolveRefetch: (value: {
+      definition_yaml: string | null
+      updated_at: string | null
+    }) => void = () => {}
+    mocks.fetchWorkflowDraft.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRefetch = resolve
+        })
+    )
+    // invalidateQueries 对 active 查询会等待重取完成——不能 await 它（重取
+    // 的 resolver 还没被调用会死锁）：先触发失效，让重取发起后再 resolve。
+    act(() => {
+      void client.invalidateQueries({
+        queryKey: ['workflowStudioDraft', 'ws1'],
+      })
+    })
+    await act(async () => {
+      resolveRefetch({
+        definition_yaml: 'key: demo\nlabel: Agent v2\n',
+        updated_at: '2026-08-27T02:00:00+00:00',
+      })
+    })
+
+    // 用户编辑保留（不被 agent 草稿覆盖），保存层进入 conflict 态。
+    expect(result.current.definitionYaml).toBe('key: demo\nlabel: My edit\n')
+    await waitFor(() => expect(result.current.draftSave.conflict).toBe(true))
+    expect(result.current.draftSave.conflictDraftYaml).toBe(
+      'key: demo\nlabel: Agent v2\n'
+    )
   })
 
   it('autosaves draft edits to the server after the debounce', async () => {

@@ -34,3 +34,9 @@ class CustomNodesDisabledError(JobServiceError):
 
 class DraftWorkflowKeyMismatchError(InvalidOperationError):
     """Draft workflow key does not match the workspace default key (routes map to 422)."""
+
+
+class InvalidDraftCasTokenError(InvalidOperationError):
+    """#633 codex review P2-2: expected_updated_at is neither the literal
+    'never-saved' nor a parseable ISO timestamp (routes map to 422) — the
+    timestamptz cast must never see it as a DB error (500)."""

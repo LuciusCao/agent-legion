@@ -18,6 +18,10 @@ from server.app.jobs import JobQueries
 from server.app.routes.job_http import raise_job_http_error
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
+from server.app.services.workflow_draft_cas_token import (
+    CAS_TIMESTAMP_HINT,
+    parse_cas_timestamp,
+)
 from server.app.services.workflow_draft_store import get_workflow_draft
 
 
@@ -25,6 +29,8 @@ from server.app.services.workflow_draft_store import get_workflow_draft
 # returned (or the literal "never-saved"); a stale value is a 409 carrying the
 # current draft, never a silent overwrite. A blank draft is refused like the
 # human editor's store (a whitespace-only draft would resurrect broken).
+# #633 codex review P2-2: a token that is neither the marker nor a parseable
+# ISO timestamp is a 422 (never reaches the timestamptz cast as a 500).
 class StudioAgentWorkflowDraftSaveRequest(BaseModel):
     definition_yaml: str
     expected_updated_at: str = Field(min_length=1)
@@ -35,6 +41,13 @@ class StudioAgentWorkflowDraftSaveRequest(BaseModel):
         if not value.strip():
             raise ValueError("definition_yaml must not be blank")
         return value
+
+    @field_validator("expected_updated_at")
+    @classmethod
+    def _cas_timestamp_or_never_saved(cls, value: str) -> str:
+        if parse_cas_timestamp(value):
+            return value
+        raise ValueError(CAS_TIMESTAMP_HINT)
 
 
 class StudioAgentWorkflowDraftResponse(BaseModel):
