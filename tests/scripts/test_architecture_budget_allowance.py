@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from scripts.architecture.budget_policy import (
 )
 from scripts.architecture.exemptions import load_exemptions
 from scripts.architecture.file_budgets import check_file_budgets
+from scripts.quality.exemptions import ArchitectureExemption, validate_exemptions
 from scripts.ratchet_architecture_budgets import ratchet_budgets
 from tests.architecture_budget_helpers import (
     governed_repo,
@@ -164,3 +166,77 @@ class TestGrowthAllowanceRatchet:
         assert len(result.errors) == 1
         assert "exceeds ceiling 25 + growth allowance 15" in result.errors[0]
         assert result.changed is False
+
+
+_EXEMPTION_KWARGS = {
+    "check": "architecture.file_budget",
+    "path": "server/app/example.py",
+    "reason": "Oversized module needs staged split.",
+    "owner": "agent-legion",
+    "remove_when": "issues/open/001.md",
+}
+
+
+def _exemption(**overrides: object) -> ArchitectureExemption:
+    return ArchitectureExemption(**{**_EXEMPTION_KWARGS, **overrides})  # type: ignore[arg-type]
+
+
+class TestExemptionExpires:
+    def test_future_expires_passes(self, tmp_path: Path) -> None:
+        exemption = _exemption(ceiling=100, expires="2027-01-01")
+
+        assert validate_exemptions((exemption,), tmp_path, today=date(2026, 9, 13)) == []
+
+    @pytest.mark.parametrize("bad", ["2026-9-13", "01-01-2027", "not-a-date", ""])
+    def test_malformed_expires_rejected(self, tmp_path: Path, bad: str) -> None:
+        exemption = _exemption(ceiling=100, expires=bad)
+
+        errors = validate_exemptions((exemption,), tmp_path, today=date(2026, 9, 13))
+
+        assert any("must be an ISO date (YYYY-MM-DD)" in e for e in errors)
+
+    def test_past_expires_hard_fails_with_renewal_guidance(self, tmp_path: Path) -> None:
+        exemption = _exemption(ceiling=100, expires="2026-09-01")
+
+        errors = validate_exemptions((exemption,), tmp_path, today=date(2026, 9, 13))
+
+        assert any(
+            "exemption expired on 2026-09-01 — renew it with a fresh justification" in e
+            for e in errors
+        )
+
+    def test_today_is_still_valid(self, tmp_path: Path) -> None:
+        exemption = _exemption(ceiling=100, expires="2026-09-13")
+
+        assert validate_exemptions((exemption,), tmp_path, today=date(2026, 9, 13)) == []
+
+    def test_expires_optional(self, tmp_path: Path) -> None:
+        exemption = _exemption(ceiling=100)
+
+        assert validate_exemptions((exemption,), tmp_path, today=date(2026, 9, 13)) == []
+
+
+class TestExemptionCeilingAllowanceAlignment:
+    def test_ceiling_below_band_lets_overshoot_pass_validation(self, tmp_path: Path) -> None:
+        root = tmp_path / "project"
+        (root / "server/app").mkdir(parents=True)
+        (root / "server/app/example.py").write_text(
+            "\n".join(f"x_{idx} = {idx}" for idx in range(60)), encoding="utf-8"
+        )
+        exemption = _exemption(ceiling=50)
+
+        errors = validate_exemptions((exemption,), root, growth_allowance=15)
+
+        assert not any("below actual" in e for e in errors)
+
+    def test_ceiling_below_band_minus_one_still_rejected(self, tmp_path: Path) -> None:
+        root = tmp_path / "project"
+        (root / "server/app").mkdir(parents=True)
+        (root / "server/app/example.py").write_text(
+            "\n".join(f"x_{idx} = {idx}" for idx in range(66)), encoding="utf-8"
+        )
+        exemption = _exemption(ceiling=50)
+
+        errors = validate_exemptions((exemption,), root, growth_allowance=15)
+
+        assert any("even with the growth allowance (15 lines)" in e for e in errors)

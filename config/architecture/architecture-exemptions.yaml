@@ -1,5 +1,27 @@
 exemptions:
 - check: architecture.file_budget
+  path: scripts/check_invariants.py
+  reason: 'Issue #641 wires the budget policy growth_allowance into validate_exemptions so
+    the exemption ceiling check shares the same band as the file-budget gate, and the
+    load failure surfaces as an explicit error — 3 effective lines past the 69 baseline.
+    The alternative is exempting ceiling drift between the two gates (a misregistered
+    exemption would only fail one of them). Remove when the two registry validators merge
+    into a single entry point or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 82
+- check: architecture.file_budget
+  path: scripts/quality/exemptions.py
+  reason: 'Issue #641 adds the optional expires deadline to the exemption schema: the field,
+    the strict-ISO-date validator with the today-parameterized hard failure on expiry, and
+    the growth_allowance parameter that keeps the ceiling-vs-actual check consistent with
+    the file-budget gate — 21 effective lines past the 113 baseline. The expiry wording is
+    the gate copy developers see, so it lives with the validator. Remove when expiry checks
+    move into issue_state expiry governance or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 144
+- check: architecture.file_budget
   path: scripts/architecture/budget_policy.py
   reason: 'Issue #641 adds the growth_allowance policy knob: one dataclass field, the
     _parse_growth_allowance loader (optional, non-negative, default 0 keeps the strict
