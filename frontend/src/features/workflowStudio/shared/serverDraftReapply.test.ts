@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   decideServerDraftReapply,
   isServerDraftNewer,
+  ServerDraftApplyTracker,
 } from './serverDraftReapply'
 
 /** #633 codex review P1-2：重应用决策的纯函数用例。 */
@@ -136,5 +137,29 @@ describe('decideServerDraftReapply', () => {
       yaml: 'key: demo\nlabel: Agent v2\n',
       updatedAt: '2026-08-27T02:00:00+00:00',
     })
+  })
+})
+
+
+describe('ServerDraftApplyTracker (codex R4 P2: apply clears touched)', () => {
+  it('an applied own-save echo resets touched — the next different agent update is not a phantom conflict', () => {
+    const tracker = new ServerDraftApplyTracker()
+    tracker.markTouched()
+    // own-save 回显：服务端草稿 = 画布内容 → apply（确认基线），touched 清零。
+    const applied = tracker.evaluate(
+      'key: demo\nlabel: Mine\n',
+      '2026-08-27T02:00:00+00:00',
+      () => {},
+      'key: demo\nlabel: Mine\n'
+    )
+    expect(applied).toBe('apply')
+    // touched 已清：内容不同的下一个 agent 更新走 apply，不再幻影冲突。
+    const next = tracker.evaluate(
+      'key: demo\nlabel: Agent v2\n',
+      '2026-08-27T03:00:00+00:00',
+      () => {},
+      'key: demo\nlabel: Mine\n'
+    )
+    expect(next).toBe('apply')
   })
 })

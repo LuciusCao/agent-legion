@@ -72,11 +72,15 @@ export class DraftSaveController {
      在用户有本地编辑时调用）共用。冲突双方携带服务端真值：把 CAS 基线推进
      到服务端 updated_at（下一次保存以新基线竞争，否则同一过期时间戳永远
      409）；用户未落盘的编辑保留在画布（conflictDraftYaml 供 UI 提供采用
-     服务端草稿的入口），不自动重试。 */
+     服务端草稿的入口），不自动重试。R4 P1：同时取消挂起的 debounce/retry
+     计时器——计时器若存活，到期 save() 会以刚推进的基线成功覆盖 Agent
+     版本，绕过「用户显式二选一」的保护。 */
   enterConflict = (
     serverYaml: string | null,
     serverAt: string | null
   ): void => {
+    this.clearTimers()
+    this.pendingSave = null
     if (serverAt) this.lastPersistedAt = serverAt
     this.setState(conflictEnteredState(this.state, serverYaml, serverAt))
   }

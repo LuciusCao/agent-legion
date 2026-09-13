@@ -18,7 +18,7 @@ import pytest
 from server.app.services import skill_creation
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_creation import SkillCreationService
-from server.app.services.skill_editing import SkillFileWrite
+from server.app.services.skill_editing import SkillEditValidationError, SkillFileWrite
 from server.app.services.skill_repo import SkillGitError
 
 _TRIO = [
@@ -165,3 +165,49 @@ def test_create_skill_with_malformed_contract_yaml_is_rejected(
         _service(tmp_path / "runs").create_skill("ws-1", "broken-contract", files, "v1", "m")
     assert any("contract.yaml" in e["path"] for e in excinfo.value.errors)
     assert not (home / "ws-1" / "broken-contract").exists()
+
+
+def test_create_skill_rejects_content_over_the_utf8_byte_cap(home, tmp_path) -> None:
+    """codex R4 P2: the cap is BYTES (what the read paths enforce) — 7 万
+    汉字 passes a character count under 128 KiB but is ~3× over in UTF-8
+    bytes; writing it would produce files get_skill truncates (or corrupts
+    a multi-byte sequence). The create must 422."""
+    with pytest.raises(SkillEditValidationError) as excinfo:
+        _service(tmp_path / "runs").create_skill(
+            "ws-1",
+            "cjk-payload",
+            [
+                *_TRIO,
+                SkillFileWrite(
+                    path="contract.yaml",
+                    content=_CONTRACT_YAML,
+                ),
+                SkillFileWrite(path="references/big.md", content="汉" * 70_000),
+            ],
+            "v1",
+            "m",
+        )
+    assert any("128 KB" in e["error"] for e in excinfo.value.errors)
+    assert not (home / "ws-1" / "cjk-payload").exists()
+
+
+def test_created_skill_reads_back_with_root_contract_yaml(home, tmp_path) -> None:
+    """codex R4 P2: get_skill must return the normative root contract.yaml
+    (both the working-tree read and the pinned-tag read) — the agent needs
+    it back to check or incrementally edit the contract it was forced to
+    create."""
+    service = _service(tmp_path / "runs")
+    service.create_skill("ws-1", "with-contract", list(_QUARTET), "v1", "m")
+
+    from server.app.services.skill_catalog import SkillCatalogService
+    from server.app.services.skill_detail import detail_at_ref
+
+    repo = home / "ws-1" / "with-contract"
+    catalog = SkillCatalogService.__new__(SkillCatalogService)
+    live = catalog._files(repo)  # noqa: SLF001 - the working-tree reader
+    paths = {f["path"]: f["content"] for f in live}
+    assert paths["contract.yaml"] == _CONTRACT_YAML
+
+    pinned = detail_at_ref("ws-1/with-contract", "v1", repo)
+    pinned_paths = {f["path"]: f["content"] for f in pinned["files"]}
+    assert pinned_paths["contract.yaml"] == _CONTRACT_YAML

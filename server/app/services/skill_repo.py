@@ -92,7 +92,11 @@ def contract_declared_at_ref(repo_dir: Path, ref: str) -> bool:
         result = run_git(repo_dir, ["show", f"{ref}:{member}"], check=False)
         if result.returncode != 0:
             continue
-        if member == CONTRACT_YAML or CONTRACT_FENCE in result.stdout.decode(errors="replace"):
+        # codex R4 P2: the exact scanner semantics — a LINE whose stripped
+        # form equals the fence marker (substring matches would count prose
+        # that merely mentions the marker as a declared contract).
+        content = result.stdout.decode(errors="replace").splitlines()
+        if member == CONTRACT_YAML or CONTRACT_FENCE in {ln.strip() for ln in content}:
             return True
     return False
 

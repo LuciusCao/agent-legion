@@ -208,7 +208,10 @@ class SkillCreationService:
         for raw, content in files:  # tuple unpacking: no .path attribute reads
             if not 1 <= len(raw) <= MAX_PATH_LENGTH:
                 errors.append({"path": raw or ".", "error": "path length out of bounds"})
-            if len(content) > MAX_FILE_BYTES:
+            # codex R4 P2: byte semantics (MAX_FILE_BYTES is what the read
+            # paths cap) — len(content) counts CHARACTERS, so CJK/emoji
+            # payloads could write multi-MB files the reads then truncate.
+            if len(content.encode("utf-8")) > MAX_FILE_BYTES:
                 errors.append({"path": raw or ".", "error": "content exceeds 128 KB"})
         if not 1 <= len(new_tag) <= MAX_TAG_LENGTH:
             errors.append({"path": ".", "error": "new_tag length out of bounds"})

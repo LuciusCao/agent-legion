@@ -294,10 +294,8 @@ def test_put_staging_failure_leaves_previous_state_intact(
     write leaves the live dir exactly as it was. The operational IO error
     surfaces as SharedMaterialWriteError (unmapped JobServiceError → 500,
     the SkillGitError convention)."""
-    from server.app.services.skill_shared_store import (
-        SharedMaterialWriteError,
-        write_shared_materials,
-    )
+    from server.app.services.skill_shared_store import SharedMaterialWriteError
+    from server.app.services.skill_shared_swap import write_shared_materials
 
     with client_factory(fresh=True) as client:
         _create_workspace(client)
