@@ -1,6 +1,8 @@
-//! Validate tool tests (#443): the three tool states (contract ok /
-//! violations / no contract block) and the agent-loop "not enabled" path
-//! when `validate` is absent from `--tools`.
+//! Validate tool tests (#443, contract location migrated in #542): the tool
+//! states (contract ok / violations / no contract / parse error) for both
+//! the normative root `contract.yaml` and the deprecated embedded block,
+//! and the agent-loop "not enabled" path when `validate` is absent from
+//! `--tools`.
 
 use std::path::{Path, PathBuf};
 
@@ -25,13 +27,26 @@ fn result_text(output: &velites::tools::ToolOutput) -> String {
     }
 }
 
-/// Skill dir with a one-file text contract (min_chars 10, heading `## 目标`).
+const _CONTRACT_BODY: &str =
+    "files:\n  - path: script.md\n    format: text\n    min_chars: 10\n    required_headings: [\"## 目标\"]\n";
+
+/// Skill dir with a one-file text contract in the normative root location
+/// (min_chars 10, heading `## 目标`).
 fn contract_skill(dir: &Path) -> PathBuf {
     let skill = dir.join("skill");
+    std::fs::create_dir(&skill).unwrap();
+    std::fs::write(skill.join("contract.yaml"), _CONTRACT_BODY).unwrap();
+    skill
+}
+
+/// Same contract, but embedded in the deprecated references/output-contract.md.
+fn embedded_contract_skill(dir: &Path) -> PathBuf {
+    let skill = dir.join("skill");
+    std::fs::create_dir(&skill).unwrap();
     std::fs::create_dir_all(skill.join("references")).unwrap();
     std::fs::write(
         skill.join("references/output-contract.md"),
-        "# Contract\n\n```yaml contract\nfiles:\n  - path: script.md\n    format: text\n    min_chars: 10\n    required_headings: [\"## 目标\"]\n```\n",
+        format!("# Contract\n\n```yaml contract\n{_CONTRACT_BODY}```\n"),
     )
     .unwrap();
     skill
@@ -69,15 +84,15 @@ async fn validate_lists_violations_as_an_error() {
 }
 
 #[tokio::test]
-async fn validate_without_contract_block_is_an_informational_error() {
+async fn validate_without_contract_is_an_informational_error() {
     let dir = tempfile::tempdir().unwrap();
     let skill = dir.path().join("skill");
     std::fs::create_dir(&skill).unwrap();
     let job = dir.path().join("job");
     std::fs::create_dir(&job).unwrap();
 
-    // No --skill dirs at all, and a skill dir without a contract block both
-    // land on the same "nothing to validate against" error.
+    // No --skill dirs at all, and a skill dir without a contract (root or
+    // embedded) both land on the same "nothing to validate against" error.
     for dirs in [Vec::new(), vec![skill]] {
         let output = ToolKind::Validate
             .execute(&serde_json::json!({}), &ctx(&job, &dirs))
@@ -85,7 +100,8 @@ async fn validate_without_contract_block_is_an_informational_error() {
         assert!(output.is_error);
         assert_eq!(
             result_text(&output),
-            "no output-contract.md contract block found in the skill directories; \
+            "no output contract found in the skill directories \
+             (no contract.yaml and no embedded contract block); \
              nothing to validate against"
         );
     }
@@ -109,6 +125,61 @@ async fn validate_surfaces_contract_parse_errors() {
         .await;
     assert!(output.is_error);
     assert!(result_text(&output).starts_with("contract parse error:"));
+}
+
+// --- #542: root contract.yaml three-tier resolution ---
+
+#[tokio::test]
+async fn validate_reports_the_deprecated_embedded_block_on_success() {
+    // The embedded block still works, and the success message carries the
+    // migration note (the agent can act on it, unlike the subcommand's
+    // stdout-only signal).
+    let dir = tempfile::tempdir().unwrap();
+    let skill = embedded_contract_skill(dir.path());
+    let job = dir.path().join("job");
+    std::fs::create_dir(&job).unwrap();
+    std::fs::write(job.join("script.md"), "## 目标\nlong enough content").unwrap();
+
+    let output = ToolKind::Validate
+        .execute(&serde_json::json!({}), &ctx(&job, &[skill]))
+        .await;
+    assert!(!output.is_error);
+    let text = result_text(&output);
+    assert!(text.contains("contract ok (1 files checked)"), "{text}");
+    assert!(text.contains("deprecated embedded block"), "{text}");
+    assert!(text.contains("contract.yaml"), "{text}");
+}
+
+#[tokio::test]
+async fn validate_root_contract_wins_over_the_embedded_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let skill = dir.path().join("skill");
+    std::fs::create_dir(&skill).unwrap();
+    std::fs::write(
+        skill.join("contract.yaml"),
+        "files:\n  - path: root.md\n    format: text\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(skill.join("references")).unwrap();
+    std::fs::write(
+        skill.join("references/output-contract.md"),
+        "```yaml contract\nfiles:\n  - path: embedded.md\n    format: text\n```\n",
+    )
+    .unwrap();
+    let job = dir.path().join("job");
+    std::fs::create_dir(&job).unwrap();
+    std::fs::write(job.join("embedded.md"), "content").unwrap();
+
+    let output = ToolKind::Validate
+        .execute(&serde_json::json!({}), &ctx(&job, &[skill]))
+        .await;
+    // The root's file is the one missing: the embedded contract did not run
+    // (its artifact exists; the violation names root.md only).
+    assert!(output.is_error);
+    let text = result_text(&output);
+    assert!(text.contains("root.md: missing required file"), "{text}");
+    assert!(!text.contains("embedded.md:"), "{text}");
+    assert!(!text.contains("deprecated"), "{text}");
 }
 
 #[test]
