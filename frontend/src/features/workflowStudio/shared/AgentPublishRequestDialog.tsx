@@ -75,10 +75,10 @@ export function AgentPublishRequestDialog() {
       {...reviewDialogProps(studio)}
       confirming={polledConfirming || agentRequest.publishInFlight}
       canceling={agentRequest.canceling}
+      // #542：发布面 advisory（skill 无机器契约）——poll 读取侧现算透传。
+      advisories={agentRequest.pendingRequest.warnings ?? []}
       onConfirm={confirmAgentRequest}
-      onCancel={() => {
-        void agentRequest.cancel()
-      }}
+      onCancel={() => void agentRequest.cancel()}
     />
   )
 }
