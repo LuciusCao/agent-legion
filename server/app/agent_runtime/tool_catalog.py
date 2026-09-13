@@ -195,9 +195,9 @@ VELITES_TOOL_CATALOG: tuple[ToolCatalogEntry, ...] = (
         activation="--require-output",
         description=(
             "Check working-directory outputs against the skill's output contract "
-            "(the ```yaml contract block in its references/output-contract.md). "
-            "No arguments. On failure returns a numbered violation list to fix; "
-            "when no skill declares a contract block, returns an informational "
+            "(root contract.yaml; the deprecated ```yaml contract block still "
+            "counts). No arguments. On failure returns a numbered violation list "
+            "to fix; when no skill declares a contract, returns an informational "
             "error. Use it to self-check outputs mid-run before stopping."
         ),
         parameters={"type": "object", "properties": {}},

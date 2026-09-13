@@ -136,3 +136,43 @@ def test_list_tags(base_dir) -> None:
     empty = validator.list_tags(str(base_dir / "wf" / "missing"))
     assert empty.tags == ()
     assert empty.latest_tag is None
+
+
+# --- #542: machine-contract tier warnings (display-only, never validity) ---
+
+
+def test_validate_warns_when_no_machine_contract(base_dir) -> None:
+    skill_dir = _make_skill(base_dir, "wf/plain")
+
+    result = SkillValidator(base_dir).validate(str(skill_dir))
+
+    assert result.valid is True
+    assert result.warnings == ("no machine contract; runtime output validation is existence-only",)
+
+
+def test_validate_warns_on_the_deprecated_embedded_block(base_dir) -> None:
+    skill_dir = _make_skill(base_dir, "wf/legacy")
+    (skill_dir / "references").mkdir()
+    (skill_dir / "references" / "output-contract.md").write_text(
+        "```yaml contract\nfiles:\n  - path: a.md\n    format: text\n```\n",
+        encoding="utf-8",
+    )
+
+    result = SkillValidator(base_dir).validate(str(skill_dir))
+
+    assert result.valid is True
+    assert len(result.warnings) == 1
+    assert "deprecated" in result.warnings[0]
+    assert "contract.yaml" in result.warnings[0]
+
+
+def test_validate_is_clean_with_a_root_contract_yaml(base_dir) -> None:
+    skill_dir = _make_skill(base_dir, "wf/modern")
+    (skill_dir / "contract.yaml").write_text(
+        "files:\n  - path: a.md\n    format: text\n", encoding="utf-8"
+    )
+
+    result = SkillValidator(base_dir).validate(str(skill_dir))
+
+    assert result.valid is True
+    assert result.warnings == ()

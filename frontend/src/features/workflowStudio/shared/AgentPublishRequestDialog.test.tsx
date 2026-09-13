@@ -155,6 +155,38 @@ describe('AgentPublishRequestDialog', () => {
     )
   })
 
+  it('surfaces the read-side skill-contract advisories without blocking', async () => {
+    // #542：agent 节点绑定的 skill 无机器契约时，后端在 poll 读取侧现算
+    // warnings 并透传——对话框以 advisory 文案呈现，确认按钮仍然可点。
+    mocks.fetchPendingPublishRequest.mockResolvedValue(
+      pendingRecord({
+        warnings: [
+          "Node do_thing binds skill 'group/legacy' which declares no machine-readable contract (no contract.yaml); its runtime output validation degrades to existence-only",
+        ],
+      })
+    )
+    renderDialog()
+
+    const advisories = await screen.findByTestId('publish-advisories')
+    expect(advisories).toHaveTextContent('group/legacy')
+    expect(advisories).toHaveTextContent('existence-only')
+    expect(
+      await screen.findByRole('button', { name: '确认发布' })
+    ).toBeEnabled()
+  })
+
+  it('renders no advisories block when the payload carries none', async () => {
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog()
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('dialog', { name: '发布 workflow revision' })
+      ).toBeInTheDocument()
+    )
+    expect(screen.queryByTestId('publish-advisories')).toBeNull()
+  })
+
   it('stays closed while the manual review dialog is open', async () => {
     mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
     renderDialog({ reviewDialogOpen: true })

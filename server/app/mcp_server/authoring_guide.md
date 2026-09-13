@@ -14,6 +14,18 @@ Studio. Nothing you do takes effect in production by itself.
   YAML. Answers `{"state": "empty", ...}` (HTTP 200) when the workspace has no
   published workflow yet: that is your signal to author from scratch, not an
   error.
+- `get_workflow_draft(workspace_id)` — the workspace's unpublished Studio
+  draft (the SAME draft the canvas autosaves; NOT the active revision).
+  `{"definition_yaml": ..., "updated_at": ...}`; both null when no draft was
+  ever saved. The `updated_at` is your CAS token for `save_workflow_draft`.
+- `save_workflow_draft(workspace_id, definition_yaml, expected_updated_at)` —
+  write the full definition YAML into the Studio draft; the human's canvas and
+  YAML editor pick it up. CAS: `expected_updated_at` must be the `updated_at`
+  from your last read (or the literal `never-saved` when none existed). A
+  stale token returns HTTP 409 with the current draft embedded
+  (`current_draft.definition_yaml` / `current_draft.updated_at`) — rebase your
+  changes onto that draft and retry with its timestamp; never retry the old
+  one. Draft only: publishing stays with `request_workflow_publish`.
 - `validate_workflow(workspace_id, definition_yaml)` — the full publish
   validation set (structure + bindings). Persists nothing.
 - `compare_workflow(workspace_id, definition_yaml)` — diff vs the active
@@ -44,8 +56,37 @@ Studio. Nothing you do takes effect in production by itself.
   any pending draft (origin: builtin | custom | none). Nodes that only exist
   in your not-yet-published draft are readable too (a skeleton draft you saved
   reads back; otherwise origin `none`); only start nodes 404.
-- `save_agent_definition_draft(agent_id, capability, runtime, skill, tools)` —
-  draft Agent definition for an agent-backed capability.
+- `get_agent_definitions(workspace_id)` — the workspace's Agent definitions:
+  the latest version per agent (a pending draft beats the published row) with
+  ALL fields — capability, runtime, skill, tools, requires_labels,
+  config_schema — plus version metadata (version, status, definition_hash,
+  created_by, created_at, published_at). Read this BEFORE drafting agent or
+  workflow changes so capability bindings build on what exists.
+- `create_agent_definition(workspace_id, capability, runtime, skill,
+  tools?, requires_labels?, config_schema?)` — start a NEW Agent definition
+  draft for a capability that has no Agent yet (any status): the agent_id
+  derives from the capability, and a colliding capability returns HTTP 409
+  naming the existing Agent — edit that one with
+  `save_agent_definition_draft` instead. Same payload fields as the save
+  (section 5). Draft only; a human publishes it in Studio.
+- `get_runtime_models(workspace_id)` — the workspace's available
+  `{runtime: {provider: [models]}}` view aggregated from its ONLINE workers'
+  declarations. Discovery only: provider/model declarations are worker-owned
+  and can never be edited through these tools; use the view to pick sensible
+  node `execution.*` values (a typed value corresponds to a worker that can
+  actually claim the execution).
+- `get_agent_runtimes(workspace_id)` — the runtime catalog: each runtime
+  (pi, velites) and its agent tool catalog — tool names, tiers (`default`
+  preselected / `opt-in` explicit / `forced` harness-enforced with an
+  activation condition) and parameters. The catalog is code-defined and
+  static; the only editable tool surface is the `tools` selection inside an
+  Agent definition draft.
+- `save_agent_definition_draft(workspace_id, agent_id, capability, runtime,
+  skill, tools?, requires_labels?, config_schema?)` — draft an EXISTING
+  Agent definition for an agent-backed capability (section 5). FULL-PAYLOAD
+  semantics: an omitted optional field RESETS to its default (tools →
+  catalog default tier, requires_labels/config_schema → {}) — call
+  `get_agent_definitions` first and echo back every value you want kept.
 - `get_node_prompt(workspace_id, node_key, definition_yaml?)` — the effective
   run prompt of an agent node: fixed platform envelope + node instructions
   (auto-assembled default, or the custom `execution.prompt` when set). Read
@@ -61,6 +102,21 @@ Studio. Nothing you do takes effect in production by itself.
   error list. Persists nothing.
 - `save_skill_version(skill_key, files, new_tag, message)` — commit + tag a
   new version in the skill's LOCAL source repo (section 6). Lock untouched.
+- `create_skill(workspace_id, skill_name, files, new_tag, message)` — create
+  a BRAND-NEW skill repo at `<skills root>/<workspace_id>/<skill_name>`
+  (#633, workspace-scoped): the files must carry the full contract set of
+  four files (section 6) and everything is validated before anything is
+  written; on
+  success the initial commit is tagged `new_tag`. Existing dir → 409. After
+  the create, iterate with `validate_skill` / `save_skill_version`. Lock
+  untouched.
+- `get_shared_materials(workspace_id)` — the workspace's shared skill
+  materials (`_shared/map.json` + `references/` + `scripts/`); a workspace
+  without `_shared` returns the structured empty state `{"map": null,
+  "files": []}` — that is your signal to author them (section 6.1).
+- `save_shared_materials(workspace_id, files)` — author those shared
+  materials (section 6.1). Draft-only: `_shared` is not a git repo; the
+  audit trail is the commits the sync lands in each mapped skill.
 
 There is NO tool to create workspaces, and no workflow registry anymore
 (schema v50): a workflow is simply the DAG inside one workspace. The human
@@ -86,10 +142,17 @@ publish, agent definition publish, and skill release actions stay human-only).
 3. Draft the definition YAML (section 3).
 4. `validate_workflow` → fix every reported error. Then `compare_workflow`
    → preview the full shape. Repeat until clean.
-5. For each code node, `save_node_code_draft` with `expected_capability` set
+5. `save_workflow_draft` → persist the validated YAML as the Studio draft.
+   The CAS token (`expected_updated_at`) comes from `get_workflow_draft`'s
+   `updated_at`, from `get_studio_context`'s `draft_updated_at` (same value —
+   the draft row's updated_at), or the literal `never-saved`. Never invent a
+   timestamp. On a 409, rebase onto the response's `current_draft` and retry
+   with its `updated_at` — the human may have edited concurrently.
+6. For each code node, `save_node_code_draft` with `expected_capability` set
    (section 4). For each agent-backed capability without a published Agent,
-   `save_agent_definition_draft` (section 5).
-6. Present the change summary to the human, then call
+   `create_agent_definition` (new capability) or `save_agent_definition_draft`
+   (edit an existing Agent) (section 5).
+7. Present the change summary to the human, then call
    `request_workflow_publish` — the publish review dialog pops in Studio with
    the same compare data. Poll `get_publish_request_status`: confirmed means
    live, rejected/expired means revise the draft and re-request, superseded
@@ -170,11 +233,32 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
 
 ## 5. Agent definitions and tunables
 
-`save_agent_definition_draft` binds a capability to an implementation:
+Agent-definition authoring loop (read → discover → draft):
+1. `get_agent_definitions(workspace_id)` — what already exists: latest
+   version per agent with every field. A pending draft beats the published
+   row, so the list shows exactly what the next publish would ship.
+2. Discover the surroundings you canNOT edit:
+   - `get_agent_runtimes(workspace_id)` — the per-runtime tool catalog
+     (code-defined, static): which tools exist for pi/velites, their tiers
+     and activation conditions. Pick `tools` values from THIS catalog.
+   - `get_runtime_models(workspace_id)` — the worker-declared
+     runtime → provider → models view, so node `execution.model` values you
+     draft correspond to models an online worker can actually claim.
+3. Start a new Agent with `create_agent_definition(...)` when the capability
+   has no Agent yet (409 = the capability is taken — edit that Agent
+   instead), or edit an existing one with `save_agent_definition_draft(...)`.
+   Either way a human publishes it in Studio; publishing/archiving is never
+   yours.
+
+`create_agent_definition` / `save_agent_definition_draft` bind a capability
+to an implementation:
 - `runtime`: one of `pi`, `velites` (anything else is rejected).
 - `skill`: relative skill path (`group/skill-name`); absolute paths and `..`
   are rejected.
 - `tools`: allowlist, default `["read", "write", "bash"]`.
+- `requires_labels`: worker labels the agent requires
+  (e.g. `{"gpu": "a100"}`) — only workers carrying every label can claim it.
+- `config_schema`: tunables as a JSON-Schema subset (below).
 - Tunables: the Agent definition (or the workflow node's `config_schema:`
   block) declares a JSON-Schema subset: top-level `type: "object"` with
   `properties`/`required`; property types `string|integer|number|boolean`
@@ -188,8 +272,18 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
   switches like `dry_run`) opts out of the freeze and is re-resolved
   against the live workspace override at every dispatch
   (CONFIG-RUNTIME-MUTABLE-001).
+- Node config `connection` keys reference instance-level external service
+  connections (external APIs such as TTS or CMS; the boundary is
+  SECURITY-EXTERNAL-CONNECTION-001). Those are admin-only and live in
+  Admin → Global Settings → External Service Connections
+  (/admin/settings#connections); no tool on this server reads, lists, or
+  modifies them. When a workflow needs one, reference an existing
+  connection key in the draft, or tell the human an administrator must
+  configure it there — never claim external service connections are
+  configured in Studio or in a workflow.
 - Agent execution (`provider`/`model`/`thinking`) resolves node
-  `execution.*` overrides → workspace defaults → validation error if unset.
+  `execution.*` overrides → workflow top-level `execution:` defaults →
+  validation error if unset.
 - Node prompt (`execution.prompt`): the run prompt is a fixed platform
   envelope (job/skill paths, declared inputs/outputs, output discipline)
   plus one node-instructions section. Empty `execution.prompt` means the
@@ -198,45 +292,157 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
   wholesale — it is not appended. Preview with `get_node_prompt`, edit the
   draft with `save_node_prompt` (empty string clears back to the default).
 
-## 6. Skill editing (read → edit → validate → tag)
+### 5.1 Configuring execution (provider/model/thinking)
+
+An agent node's `execution:` block carries `provider`, `model`, `thinking`
+(the only keys; `prompt`/`prompt_mode` are node-level extras — see §5). The
+effective value resolves at definition-load time:
+
+- node `execution:` override first; empty keys fall through to
+- the workflow's top-level `execution:` default block, which the loader
+  merges into every non-start node (workspace-level defaults retired at
+  schema v64 — the top-level block is the only fallback).
+
+A REQUIRED key still empty after the merge fails fast at dispatch
+(EXEC-RUNTIME-DISPATCH-001): both runtimes require `provider` and `model`
+(`thinking` is optional — empty means the runtime decides). Pick values
+from `get_runtime_models(workspace_id)`: the view aggregates the ONLINE
+workers' declarations, so a typed value corresponds to a worker that can
+actually claim the execution. `*` wildcards may appear in the list — a
+worker declared `*` accepts whatever the node types.
+
+Edit execution blocks through the workflow draft round-trip:
+`get_workflow_draft` / `get_active_workflow` → edit the YAML (top-level
+`execution:` and/or per-node overrides) → `validate_workflow` →
+`save_workflow_draft` with the CAS flow (`expected_updated_at` from your
+last read; a 409 carries `current_draft` for rebasing) →
+`compare_workflow` to preview.
+
+### 5.2 Configuring tools (per node and per definition)
+
+`tools` is an allowlist of catalog tool names, resolved per agent node at
+dispatch:
+
+- a node-level `tools:` list (agent nodes ONLY — the loader rejects `tools`
+  on any non-agent node) overrides the Agent definition's `tools` default
+  for that node;
+- a node without `tools:` falls back to the definition-level `tools` (the
+  `create_agent_definition`/`save_agent_definition_draft` argument).
+
+Unknown tool names fail validation at dispatch. Discover what exists per
+runtime with `get_agent_runtimes(workspace_id)`: e.g. for velites, `read`/
+`write`/`bash` are `default` tier (preselected), `uuid`/`json` are `opt-in`
+(explicitly enabled — add them to `tools` when the node needs them), and
+`validate` is `forced` (harness-enforced via `--require-output`; never
+select it yourself — listing it is a silent no-op). pi offers the
+`read`/`write`/`bash` trio only.
+
+Concrete example — one workflow with a top-level execution default, an agent
+node overriding it, a per-node tools selection, and the matching
+agent-definition `tools` default:
+
+```yaml
+key: education_video_problems_generation
+schema_version: 2
+execution:                  # workflow-level default for every agent node
+  provider: deepseek
+  model: v4-flash
+nodes:
+  intake:
+    label: 拉取数据
+    capability: fetch_data          # code node: execution/tools ignored
+    outputs: [data.json]
+  review:
+    label: 审核知识点
+    capability: review_keywords     # agent node (published Agent exists)
+    inputs: [data.json]
+    outputs: [review.json]
+    execution:              # node override beats the top-level default
+      model: v4-pro         # provider still falls through to deepseek
+    tools: [read, write, json]      # node tools override the definition's
+  report:
+    label: 汇总
+    capability: report
+    inputs: [review.json]
+    outputs: [report.md]
+edges:
+  - {from: intake, to: review}
+  - {from: review, to: report}
+```
+
+with the Agent definition for `review_keywords` drafted as e.g.
+`create_agent_definition(workspace_id, capability="review_keywords",
+runtime="velites", skill="keywords/review", tools=["read", "write"])` —
+the `review` node's `tools:` list of three tools wins over the
+definition's two; an agent node without `tools:` (say `report`, if it is
+agent-routed too) uses ITS Agent definition's default.
+
+## 6. Skill editing (create → read → edit → validate → tag)
 
 Skills live in git repos under the skills root (`<skills root>/<group>/<name>`,
 in-place is the only mode). A node either follows the repo's live HEAD
-(`latest`) or pins a tag frozen in the skill lock. You may read any tag,
-validate the working tree, and save a new version — you may NEVER relock or
-publish: a human reviews the git diff and re-pins.
+(`latest`) or pins a tag frozen in the skill lock. You may create a new skill
+under the bound workspace's directory, read any tag, validate the working
+tree, and save a new version — you may NEVER relock or publish: a human
+reviews the git diff and re-pins.
 
-1. `get_skill(skill_key)` — the working tree at HEAD (`latest`), or
+1. Creating a brand-new skill starts with `create_skill(workspace_id,
+   skill_name, files, new_tag, message)` (#633): `skill_name` is one segment
+   (`^[a-z0-9][a-z0-9_-]{0,63}$`) and `files` must carry the full contract
+   set of FOUR files from the start — non-empty `SKILL.md` +
+   `references/output-contract.md` + `scripts/validate_output.py` + a root
+   `contract.yaml` (the machine-readable contract, see below; a malformed
+   one is rejected like a missing file). The repo is created
+   at `<skills root>/<workspace_id>/<skill_name>` with the initial commit
+   (author agent-legion-studio) tagged `new_tag` (e.g. `v0.1.0`). Everything
+   is validated first; a name that already exists is a 409, and a failed
+   create leaves no directory behind, so you can retry safely.
+2. `get_skill(skill_key)` — the working tree at HEAD (`latest`), or
    `ref=<tag>` to preview one tag, e.g. one another agent just created; an
    unknown tag is a structured 404 and changes
    nothing.
-2. Edit the file contents in your draft, then `validate_skill(skill_key)` —
+3. Edit the file contents in your draft, then `validate_skill(skill_key)` —
    the runtime contract: non-empty SKILL.md + references/output-contract.md +
-   scripts/validate_output.py. Fix every reported error.
-3. `save_skill_version(skill_key, files, new_tag, message)` — writes into the
+   scripts/validate_output.py, plus a strict parse of the root
+   `contract.yaml` when present. Fix every reported error; reported
+   `warnings` (a missing root contract.yaml) do not fail the verdict but
+   tell you the machine contract is either on the deprecated embedded
+   block or missing entirely.
+4. `save_skill_version(skill_key, files, new_tag, message)` — writes into the
    skill's in-place repo. Every path is validated before any
    write (inside the skill dir, no `..`/absolute paths, no `.git`, no
    overwriting untracked files); after writing, the contract check re-runs
-   and a failure rolls the repo back to its original commit. On success it
-   commits (author agent-legion-studio) and tags `new_tag` (an existing tag
-   is a conflict). The skill lock is untouched: tag-pinned nodes keep the
+   and a failure (including a malformed root `contract.yaml`) rolls the
+   repo back to its original commit — but a MISSING root `contract.yaml`
+   only warns, so existing skills keep saving during the migration window.
+   On success it commits (author agent-legion-studio) and tags `new_tag`
+   (an existing tag is a conflict); the response carries the `warnings`.
+   The skill lock is untouched: tag-pinned nodes keep the
    locked commit, `latest` nodes pick the new HEAD up on their next dispatch.
-4. Show the human the git diff of the new tag and ask them to release it:
+5. Show the human the git diff of the new tag and ask them to release it:
    re-pin the node's skill ref to the new tag in Studio and relock
    (`make skills-lock`, or let the first dispatch auto-lock). NEVER ask for
-   a relock before the human has seen the diff.
+   a relock before the human has seen the diff. Publishing/relocking stays
+   human-only — you can never do it with these tools.
 
-### Machine-readable output contract block
+### Machine-readable output contract (`contract.yaml`)
 
-Beyond the prose contract, `references/output-contract.md` may embed ONE
-machine-readable contract block — a fenced code block whose info string is
-`yaml contract`. At run time the harness's built-in contract engine checks it
-first (existence, then the checks below); cross-file rules and business
-semantics stay in prose — the engine does not express them — and
-`scripts/validate_output.py` remains the legacy fallback channel for
-everything the engine cannot say:
+The machine-readable contract is a standalone root file: `contract.yaml`
+in the skill root. Skills created through `create_skill` MUST carry it
+from the first commit. Semantics are graded:
 
-```yaml contract
+- malformed `contract.yaml` (bad YAML, unknown fields, empty `files`,
+  absolute/escaping `path`, illegal `format`, `json` without a compilable
+  `schema`, `text` with `schema`/`min_chars` misuse) = **error** —
+  `validate_skill` reports it and `save_skill_version`/`create_skill`
+  reject the save;
+- missing `contract.yaml` = **warning** only (the save succeeds and
+  reports it): with the contract still on the deprecated embedded block
+  you are urged to migrate; with no contract at all the runtime output
+  validation degrades to existence-only checks.
+
+```yaml
+# contract.yaml — the skill-root machine contract
 files:
   - path: script.md              # relative to the job dir, required
     format: text                 # text | json, required
@@ -249,25 +455,97 @@ files:
       required: [exercises]
 ```
 
-Engine v1 expresses exactly these four check classes: existence, text length
-(`min_chars`), required headings, and JSON Schema. Before asking the human to
-release a tag, call `validate_skill` and fix every contract-block error it
-reports — a malformed block fails validation just like a missing file.
+At run time the harness's built-in contract engine checks it first
+(existence, then the per-format checks); cross-file rules and business
+semantics stay in prose in `references/output-contract.md` — the engine
+does not express them — and `scripts/validate_output.py` remains the
+legacy fallback channel for everything the engine cannot say.
+
+Migration promise: the pre-#542 location — a fenced ```yaml contract
+block embedded in `references/output-contract.md` — still works but is
+DEPRECATED; when a skill has both, the root `contract.yaml` wins
+completely. Migrate by moving the block's YAML body into the root file
+and keeping the prose. Engine v1 expresses exactly these four check
+classes: existence, text length (`min_chars`), required headings, and
+JSON Schema. Before asking the human to release a tag, call
+`validate_skill` and fix every contract error it reports — a malformed
+contract fails validation just like a missing file.
+
+### 6.1 Shared materials across a workspace's skills (#633)
+
+When several skills of one workspace need the SAME reference or script
+(a house style guide, a normalization helper), author it ONCE under the
+workspace's shared materials instead of copying it into every skill:
+
+```json
+// map.json — {"version": 1, "materials": [{"source": "<path>", "skills": [<skill names>]}]}
+{
+  "version": 1,
+  "materials": [
+    {"source": "references/prompt-style.md", "skills": ["video-analysis", "video-summary"]},
+    {"source": "scripts/normalize.py", "skills": ["video-analysis"]}
+  ]
+}
+```
+
+- `source` is relative to `_shared/` and must stay under `references/` or
+  `scripts/`; `skills` lists skill names (the second key segment of
+  `<workspace_id>/<skill_name>`).
+- Read with `get_shared_materials(workspace_id)`; write the FULL state with
+  `save_shared_materials(workspace_id, files)` — `map.json` is just one of
+  the files, you author its JSON. Everything is validated before anything
+  is written (bad map or paths → 422 listing the problems).
+- Sync is AUTOMATIC: every `save_skill_version` of a mapped skill copies
+  `_shared/<source>` into that skill's repo at the SAME relative path and
+  includes it in the commit (the save response lists them in `synced_files`).
+  A synced file that breaks the skill's contract rolls the whole save back,
+  like any other file.
+- NEVER hand-supply a mapped path in the `save_skill_version` payload —
+  the shared copy is authoritative for mapped paths, so the save rejects
+  the payload with an error listing the conflicting paths; drop them and
+  re-save.
+- Relock/publish stays human-only as everywhere else: the sync only lands
+  in the LOCAL skill commits, never in the DB skill lock. `_shared` itself
+  is not a git repo — the mapped skills' synced commits are the audit trail.
 
 ## 7. Common errors and what to do
 
 - `Draft workflow key '...' does not match workspace default workflow key
   '...'` — the workspace already has a key; re-emit the YAML with that key.
+- HTTP 409 `Workflow draft conflict` from `save_workflow_draft` — the human
+  (or another session) saved a newer draft after your read. Rebase your
+  changes onto `current_draft.definition_yaml` from the error and retry with
+  `current_draft.updated_at` as the new `expected_updated_at`; never retry
+  the stale timestamp.
 - `no published node code for ...` — publish the node code first
   (`save_node_code_draft` with `expected_capability`, then publish).
 - `Agent capability X must resolve to exactly one published Agent` — draft
   (or ask the human to publish/archive) an Agent definition for X.
+- create_agent_definition: 409 — the capability already has an Agent in
+  this workspace (the error names it and its status); switch to
+  `save_agent_definition_draft` on that Agent. 422 — invalid runtime or
+  malformed config_schema/requires_labels. 404 — unknown workspace.
+- `node X requires a provider/model ...` at dispatch — a required
+  `execution` key resolved empty: set it on the node's `execution:` block
+  or the workflow's top-level `execution:` default (EXEC-RUNTIME-DISPATCH-001).
+- `node X selects tools not offered by agent runtime ...` — the node (or
+  the Agent definition) lists a tool the runtime's catalog does not offer;
+  pick names from `get_agent_runtimes` (§5.2).
+- `Node X.tools is only valid on an agent node` — move the `tools:` list to
+  an agent-routed node; code nodes cannot select tools.
 - `node code must define a module-level 'run' function` / `not valid Python`
   — fix the code before re-saving.
 - 404 `Unknown workflow node` / `No active workflow revision` on
   save_node_code_draft — you forgot `expected_capability` for a new node.
 - save_skill_version: 409 `already has tag` — pick a fresh tag; 422 with an
-  `errors` list — fix the reported paths or missing contract files.
+  `errors` list — fix the reported paths, missing contract files, or the
+  malformed `contract.yaml`.
+- create_skill: 409 `already exists` — the skill name is taken under this
+  workspace; pick another name. 422 with an `errors` list — fix the skill
+  name (one lowercase segment), the reported file paths, the missing
+  contract set (SKILL.md + references/output-contract.md +
+  scripts/validate_output.py + contract.yaml), or the malformed
+  `contract.yaml`. 404 — the workspace does not exist.
 - `HTTP 401` — token expired/revoked; ask the human to mint a new one.
 
 Golden rule: validate first, compare second, present third — then request

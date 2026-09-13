@@ -19,7 +19,8 @@ from server.app.services.job_errors import NotFoundError
 
 
 def read_files_at_commit(repo_dir: Path, commit: str) -> list[dict[str, Any]]:
-    """Skill text files (SKILL.md + references/ + scripts/) at ``commit``.
+    """Skill text files (SKILL.md + root contract.yaml + references/ +
+    scripts/) at ``commit``.
 
     Same selection and shaping as the working-tree catalog read: text
     extensions only, symlinks skipped, content capped at MAX_FILE_BYTES.
@@ -34,7 +35,9 @@ def read_files_at_commit(repo_dir: Path, commit: str) -> list[dict[str, Any]]:
         meta_parts = meta.split(" ")
         if len(meta_parts) < 2 or meta_parts[1] != "blob" or meta_parts[0] == "120000":
             continue
-        if path != "SKILL.md" and not path.startswith(("references/", "scripts/")):
+        if path not in ("SKILL.md", "contract.yaml") and not path.startswith(
+            ("references/", "scripts/")
+        ):
             continue
         if Path(path).suffix.lower() not in skill_repo.TEXT_EXTENSIONS:
             continue
@@ -47,7 +50,7 @@ def read_files_at_commit(repo_dir: Path, commit: str) -> list[dict[str, Any]]:
                 "truncated": len(raw) > skill_repo.MAX_FILE_BYTES,
             }
         )
-    files.sort(key=lambda item: (item["path"] != "SKILL.md", item["path"]))
+    files.sort(key=lambda item: (item["path"] not in ("SKILL.md", "contract.yaml"), item["path"]))
     return files
 
 

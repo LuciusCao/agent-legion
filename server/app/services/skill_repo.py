@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 from server.app.services.job_errors import JobServiceError
+from server.app.skills.contract_probe import CONTRACT_DOC, CONTRACT_FENCE, CONTRACT_YAML
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,25 @@ def resolve_tag(repo_dir: Path, tag: str) -> str | None:
     if result.returncode != 0:
         return None
     return result.stdout.decode("utf-8", errors="replace").strip()
+
+
+def contract_declared_at_ref(repo_dir: Path, ref: str) -> bool:
+    """#542/codex R3: does the pinned ref's TREE declare a machine
+    contract (root contract.yaml, or the deprecated fenced block inside
+    references/output-contract.md)? Object-database read via ``git show``
+    — no checkout; a missing path (non-zero) is "not declared at this
+    ref", not an error."""
+    for member in (CONTRACT_YAML, CONTRACT_DOC):
+        result = run_git(repo_dir, ["show", f"{ref}:{member}"], check=False)
+        if result.returncode != 0:
+            continue
+        # codex R4 P2: the exact scanner semantics — a LINE whose stripped
+        # form equals the fence marker (substring matches would count prose
+        # that merely mentions the marker as a declared contract).
+        content = result.stdout.decode(errors="replace").splitlines()
+        if member == CONTRACT_YAML or CONTRACT_FENCE in {ln.strip() for ln in content}:
+            return True
+    return False
 
 
 def has_commit(repo_dir: Path, commit: str) -> bool:

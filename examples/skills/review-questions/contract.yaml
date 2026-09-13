@@ -1,0 +1,20 @@
+files:
+  - path: exercises_review.json
+    format: json
+    schema:
+      type: object
+      required: [verdict, exercise_reviews, summary]
+      properties:
+        verdict: {enum: [pass, revise]}
+        summary: {type: string, minLength: 1}
+        exercise_reviews:
+          type: array
+          items:
+            type: object
+            required: [id, verdict, issues]
+            properties:
+              id: {type: string, minLength: 1}
+              verdict: {enum: [pass, fail]}
+              issues:
+                type: array
+                items: {type: string}

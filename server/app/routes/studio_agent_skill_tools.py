@@ -5,7 +5,9 @@ Skills are instance-level, so these endpoints sit on the global tool
 router (no workspace binding) while still requiring a studio-agent
 scoped token. ``save_skill_version`` is draft-only by design: it commits
 and tags the skill's LOCAL in-place repo but never touches the DB skill
-lock — publishing (re-pin + relock) stays a human admin action.
+lock — publishing (re-pin + relock) stays a human admin action. The
+module also mounts the workspace-scoped shared-material tool router
+(#633), whose endpoints are workspace-bound by their own guards.
 """
 
 from fastapi import APIRouter
@@ -25,6 +27,10 @@ from server.app.settings import Settings
 
 
 def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
+    from server.app.routes.studio_agent_shared_tools import (
+        create_studio_agent_shared_tools_router,
+    )
+
     router = APIRouter()
     catalog = SkillCatalogService(job_db)
     editing = SkillEditingService(runs_dir=settings.skills_runs_dir)
@@ -61,4 +67,9 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
             raise_job_http_error(exc)
         return SkillSaveVersionResponse(**result)
 
+    # Workspace-scoped shared-material tools (#633): workspace-bound (the
+    # router carries its own scope/binding guards), mounted here — the
+    # skill-authoring tool surface's natural home — because the assembly
+    # modules sit at frozen budget ceilings.
+    router.include_router(create_studio_agent_shared_tools_router(job_db, settings))
     return router

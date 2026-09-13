@@ -72,6 +72,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     canSubmit: draft.canSubmit,
     draftSave: draft.draftSave,
     flushDraftSave: draft.flushDraftSave,
+    adoptServerDraft: draft.adoptServerDraft, // kimi review P1-2：冲突出口
+    resolveConflict: draft.resolveConflict,
     canPublish: actions.canPublish,
     createsRevision: compare.compareSummary?.createsRevision ?? true,
     validateDraft: actions.validateDraft,

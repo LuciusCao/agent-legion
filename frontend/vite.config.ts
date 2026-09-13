@@ -29,6 +29,7 @@ const browserTestFiles = [
   'src/features/workflowStudio/shared/useWorkflowStudio.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.draft.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioActions.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioMobilePanel.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioPageView.test.ts',

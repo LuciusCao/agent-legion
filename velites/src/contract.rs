@@ -1,15 +1,26 @@
-//! The generic output-contract engine (issue #443, design §8 契约段).
+//! The generic output-contract engine (issue #443, design §8 契约段;
+//! #542 contract location migration).
 //!
-//! Business validation rules stay declarative in the skill repository: a
-//! skill's `references/output-contract.md` embeds ONE machine-readable
-//! contract block — the first fenced block whose info string is exactly
-//! `yaml contract` (the prose around it stays for humans and the model).
-//! The harness ships only this engine; the skill owns the rules.
+//! Business validation rules stay declarative in the skill repository; the
+//! harness ships only this engine; the skill owns the rules. Since #542 the
+//! machine-readable contract is a standalone root file — `contract.yaml` —
+//! and the legacy location (a fenced block with info string exactly
+//! `yaml contract` inside `references/output-contract.md`, the first such
+//! block winning) is deprecated but still honored.
 //!
-//! Degradation contract: no `output-contract.md` or no contract block in it
-//! is `Ok(None)` (the caller falls back to existence checks); a block that
-//! exists but is malformed (bad YAML, illegal structure, uncompilable
-//! schema) is an explicit `Err` — never a silent downgrade.
+//! Three-tier resolution (#542), in priority order:
+//!
+//! 1. `contract.yaml` in the skill root EXISTS → it is the sole authority.
+//!    A malformed file (bad YAML, illegal structure, uncompilable schema,
+//!    unreadable/non-UTF-8) is an explicit `Err` — fail-closed, never a
+//!    silent downgrade, and the embedded block is NOT consulted even when
+//!    present (root wins completely: no parsing, no error).
+//! 2. No `contract.yaml`, but `references/output-contract.md` embeds a
+//!    contract block → the block is parsed as before (deprecated source).
+//! 3. Neither → `Ok(None)` (the caller falls back to existence checks).
+//!
+//! Degradation contract unchanged: "nothing declared here" is `Ok(None)`
+//! while "present but malformed" is always `Err` — never a silent downgrade.
 //!
 //! Three consumers share this one implementation: the `validate` tool
 //! (agent self-check), the `--require-output` end-of-run gate, and the
@@ -21,13 +32,31 @@ use serde::Deserialize;
 
 use crate::tools::resolve_in_cwd;
 
-/// Location of the contract document inside a skill directory.
-pub const CONTRACT_FILE: &str = "references/output-contract.md";
+/// Location of the machine-readable contract (normative since #542): a
+/// standalone YAML file in the skill root.
+pub const CONTRACT_FILE: &str = "contract.yaml";
+/// Location of the deprecated legacy contract document (pre-#542): the
+/// embedded ```yaml contract block inside this markdown file still wins
+/// when no root `contract.yaml` exists.
+pub const CONTRACT_DOC: &str = "references/output-contract.md";
+
+/// Where a parsed contract came from (#542): the validate subcommand prints
+/// a deprecation signal for the embedded-block source (stdout only; the
+/// Host reads exit code + stderr, so the extra line is inert there).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContractSource {
+    /// The skill-root `contract.yaml` (normative location).
+    RootYaml,
+    /// A ```yaml contract block embedded in `references/output-contract.md`
+    /// (deprecated; migration signal is emitted, semantics unchanged).
+    EmbeddedBlock,
+}
 
 /// A parsed contract: the file rules declared by the skill.
 #[derive(Debug)]
 pub struct Contract {
     files: Vec<FileContract>,
+    source: ContractSource,
 }
 
 #[derive(Debug)]
@@ -95,35 +124,37 @@ struct FileYaml {
 }
 
 impl Contract {
-    /// Parse the contract block of one skill directory. `Ok(None)` signals
-    /// "nothing declared here" (missing document or no block); `Err` means a
-    /// block exists but is malformed.
+    /// Parse the contract of one skill directory, three-tier fallback (#542).
+    /// `Ok(None)` signals "nothing declared here" (no root `contract.yaml`
+    /// and no embedded block); `Err` means a contract exists but is
+    /// malformed — the root file being present but unreadable, non-UTF-8,
+    /// or structurally illegal is fail-closed regardless of any embedded
+    /// block (root wins completely when present).
     pub fn parse(skill_dir: &Path) -> Result<Option<Contract>, ContractError> {
-        let doc_path = skill_dir.join(CONTRACT_FILE);
-        let content = match std::fs::read_to_string(&doc_path) {
-            Ok(content) => content,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        // Tier 1: the skill-root contract.yaml. Existence (not mere
+        // readability) decides the tier: a present-but-broken root file is
+        // an error even when a valid embedded block exists — root wins.
+        let root_path = skill_dir.join(CONTRACT_FILE);
+        let root_content = match read_root_contract(&root_path) {
+            Ok(Some(content)) => content,
+            Ok(None) => {
+                // Tier 2: fall back to the embedded block.
+                return parse_embedded_block(skill_dir);
+            }
             Err(source) => {
                 return Err(ContractError::Io {
-                    path: doc_path,
+                    path: root_path,
                     source,
                 })
             }
         };
-        let Some(block) = extract_contract_block(&content)? else {
-            return Ok(None);
-        };
-        let raw: ContractYaml = serde_yaml::from_str(&block)?;
-        let mut files = Vec::with_capacity(raw.files.len());
-        for file in raw.files {
-            files.push(FileContract::parse(file)?);
-        }
-        if files.is_empty() {
-            return Err(ContractError::Structure(
-                "`files` must be a non-empty list".into(),
-            ));
-        }
-        Ok(Some(Contract { files }))
+        let raw: ContractYaml = serde_yaml::from_str(&root_content)?;
+        Ok(Some(Self::from_raw(raw, ContractSource::RootYaml)?))
+    }
+
+    /// Where this contract was read from (#542 migration signal surface).
+    pub fn source(&self) -> ContractSource {
+        self.source
     }
 
     /// Number of declared files (for the "N files checked" success line).
@@ -140,6 +171,54 @@ impl Contract {
         }
         violations
     }
+
+    fn from_raw(raw: ContractYaml, source: ContractSource) -> Result<Contract, ContractError> {
+        let mut files = Vec::with_capacity(raw.files.len());
+        for file in raw.files {
+            files.push(FileContract::parse(file)?);
+        }
+        if files.is_empty() {
+            return Err(ContractError::Structure(
+                "`files` must be a non-empty list".into(),
+            ));
+        }
+        Ok(Contract { files, source })
+    }
+}
+
+/// Tier-1 file read: `Ok(None)` = no root contract.yaml (tier 2 applies);
+/// any other I/O failure is the caller's `Err` (fail-closed).
+fn read_root_contract(path: &Path) -> Result<Option<String>, std::io::Error> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// Tier 2 (deprecated since #542): the embedded ```yaml contract block in
+/// `references/output-contract.md`. No document or no block → `Ok(None)`;
+/// an unclosed opening fence is "present but malformed" (fail-closed).
+fn parse_embedded_block(skill_dir: &Path) -> Result<Option<Contract>, ContractError> {
+    let doc_path = skill_dir.join(CONTRACT_DOC);
+    let content = match std::fs::read_to_string(&doc_path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(ContractError::Io {
+                path: doc_path,
+                source,
+            })
+        }
+    };
+    let Some(block) = extract_contract_block(&content)? else {
+        return Ok(None);
+    };
+    let raw: ContractYaml = serde_yaml::from_str(&block)?;
+    Ok(Some(Contract::from_raw(
+        raw,
+        ContractSource::EmbeddedBlock,
+    )?))
 }
 
 impl FileContract {
@@ -348,7 +427,13 @@ mod tests {
     fn skill_with_doc(doc: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("references")).unwrap();
-        std::fs::write(dir.path().join(CONTRACT_FILE), doc).unwrap();
+        std::fs::write(dir.path().join(CONTRACT_DOC), doc).unwrap();
+        dir
+    }
+
+    fn skill_with_root_contract(body: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(CONTRACT_FILE), body).unwrap();
         dir
     }
 
@@ -364,6 +449,98 @@ mod tests {
         assert!(Contract::parse(dir.path()).unwrap().is_none());
         let dir = skill_with_doc("# Just prose\n\n```yaml\nfiles: []\n```\n");
         assert!(Contract::parse(dir.path()).unwrap().is_none());
+    }
+
+    // --- #542: three-tier resolution (root contract.yaml first) ---
+
+    #[test]
+    fn parse_prefers_the_root_contract_yaml() {
+        let dir = skill_with_root_contract("files:\n  - path: root.md\n    format: text\n");
+        // A VALID embedded block must not win — root wins completely.
+        let dir = {
+            std::fs::create_dir_all(dir.path().join("references")).unwrap();
+            std::fs::write(
+                dir.path().join(CONTRACT_DOC),
+                contract_doc("files:\n  - path: embedded.md\n    format: text\n"),
+            )
+            .unwrap();
+            dir
+        };
+        let contract = Contract::parse(dir.path()).unwrap().unwrap();
+        assert_eq!(contract.source(), ContractSource::RootYaml);
+        assert_eq!(contract.files.len(), 1);
+        assert_eq!(contract.files[0].path, "root.md");
+
+        // And it is actually enforced against a job dir.
+        let job = tempfile::tempdir().unwrap();
+        let job = job.path().canonicalize().unwrap();
+        assert_eq!(contract.check(&job)[0].message, "missing required file");
+        std::fs::write(job.join("root.md"), "content").unwrap();
+        std::fs::write(job.join("embedded.md"), "content").unwrap();
+        assert!(contract.check(&job).is_empty());
+    }
+
+    #[test]
+    fn parse_root_contract_wins_even_when_malformed() {
+        // Root is present but broken: fail-closed on the ROOT file — the
+        // embedded block is never consulted, never rescues, never errors.
+        let dir = skill_with_root_contract("files: [");
+        std::fs::create_dir_all(dir.path().join("references")).unwrap();
+        std::fs::write(
+            dir.path().join(CONTRACT_DOC),
+            contract_doc("files:\n  - path: embedded.md\n    format: text\n"),
+        )
+        .unwrap();
+        let err = Contract::parse(dir.path()).unwrap_err();
+        assert!(
+            matches!(err, ContractError::Yaml(_)),
+            "malformed root must surface its own YAML error, got {err}"
+        );
+    }
+
+    #[test]
+    fn parse_root_contract_runs_the_same_structure_rules() {
+        // The root file gets the identical strict structure checks the
+        // embedded block always had (unknown fields, format rules, escapes).
+        for (body, needle) in [
+            ("files: []", "non-empty list"),
+            (
+                "files:\n  - path: ''\n    format: text",
+                "`path` must be non-empty",
+            ),
+            (
+                "files:\n  - path: a.md\n    format: yaml",
+                "`format` must be `text` or `json`",
+            ),
+            (
+                "files:\n  - path: a.json\n    format: json",
+                "requires a `schema`",
+            ),
+            (
+                "files:\n  - path: a.md\n    format: text\n    bogus: 1",
+                "unknown field",
+            ),
+            (
+                "files:\n  - path: ../escape.md\n    format: text\n",
+                "must not contain `..`",
+            ),
+        ] {
+            let dir = skill_with_root_contract(body);
+            let err =
+                Contract::parse(dir.path()).expect_err(&format!("root contract must fail: {body}"));
+            assert!(
+                err.to_string().contains(needle),
+                "error `{err}` must mention `{needle}`"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_falls_back_to_the_deprecated_embedded_block() {
+        let dir = skill_with_doc(&contract_doc("files:\n  - path: a.md\n    format: text\n"));
+        let contract = Contract::parse(dir.path()).unwrap().unwrap();
+        assert_eq!(contract.source(), ContractSource::EmbeddedBlock);
+        assert_eq!(contract.files[0].path, "a.md");
     }
 
     #[test]

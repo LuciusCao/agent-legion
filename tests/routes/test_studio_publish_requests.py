@@ -14,6 +14,7 @@ the manual Studio button, or cancels. Security matrix front and center:
 
 from __future__ import annotations
 
+from server.app.agent_catalog import AgentDefinition
 from tests.routes.studio_publish_request_testlib import (
     DRAFT_YAML as _DRAFT_YAML,
 )
@@ -481,6 +482,66 @@ def test_pending_poll_is_read_only_until_a_row_actually_expires(
     assert write_calls == ["expire"]  # observed expiry → exactly one write
     status = scoped.get(f"/api/studio-agent/tools/publish-requests/{request['id']}")
     assert status.json()["request"]["status"] == "expired"
+
+
+def test_request_and_poll_carry_skill_contract_warnings(client, job_db, monkeypatch) -> None:
+    """#542: an agent node bound to a contract-less skill surfaces a read-side
+    advisory on the agent's request response, the status tool, AND the human
+    pending poll (the review dialog's data source) — computed fresh each
+    read, never persisted."""
+    from tests.helpers import replace_agent_catalog
+
+    workspace_id = _seed_workspace(client, job_db)
+    # Route the node through a published Agent so the draft validates, and
+    # bind the skill on the node (#76 semantics).
+    replace_agent_catalog(
+        workspace_id, {"do-thing-v1": AgentDefinition(capability="do_thing", runtime="velites")}
+    )
+    _put_draft(
+        client,
+        workspace_id,
+        """
+key: publish_flow_ws
+label: Publish Flow
+nodes:
+  do_thing:
+    type: agent
+    capability: do_thing
+    skill: {key: group/contract-less, ref: latest}
+""",
+    )
+    seen_workspaces: list[str] = []
+
+    def _fake_warnings(definition, workspace_id, job_db, skill_base_dir=None):
+        seen_workspaces.append(workspace_id)
+        return [
+            "Node do_thing binds skill 'group/contract-less' which declares no machine-readable contract (no contract.yaml); its runtime output validation degrades to existence-only"
+        ]
+
+    monkeypatch.setattr(
+        "server.app.services.studio_publish_requests.skill_repo_publish_warnings",
+        _fake_warnings,
+    )
+    # The errors pass keeps running against the (absent) repo; stub it empty
+    # so the request parks instead of 409-ing.
+    monkeypatch.setattr(
+        "server.app.services.workflow_draft_publish.skill_repo_publish_errors",
+        lambda *a, **k: [],
+    )
+    scoped = _scoped_client(client, job_db, workspace_id)
+
+    response = _request_publish(scoped, workspace_id)
+
+    assert response.status_code == 200, response.text
+    request = response.json()["request"]
+    assert request["warnings"] and "contract-less" in request["warnings"][0]
+    # Status tool: same advisory for the agent.
+    status = scoped.get(f"/api/studio-agent/tools/publish-requests/{request['id']}")
+    assert status.json()["request"]["warnings"] == request["warnings"]
+    # Human poll: same advisory on the review dialog's data source.
+    poll = _pending(client, workspace_id).json()["request"]
+    assert poll["warnings"] == request["warnings"]
+    assert workspace_id in seen_workspaces
 
 
 # -- security matrix ------------------------------------------------------

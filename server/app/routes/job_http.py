@@ -6,6 +6,7 @@ from server.app.services.job_errors import (
     ConflictError,
     CustomNodesDisabledError,
     DraftWorkflowKeyMismatchError,
+    InvalidDraftCasTokenError,
     InvalidOperationError,
     JobServiceError,
     NotFoundError,
@@ -42,17 +43,20 @@ def raise_job_http_error(error: JobServiceError) -> Never:
     if isinstance(error, CustomNodesDisabledError):
         raise HTTPException(status_code=403, detail=str(error)) from error
     if isinstance(error, ConflictError):
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        # #633：DraftConflictError 子类的 409 携带结构化 payload。
+        raise HTTPException(409, getattr(error, "payload", str(error))) from error
     if isinstance(error, UnsupportedOperationError):
         raise HTTPException(status_code=501, detail=str(error)) from error
     if isinstance(error, PayloadTooLargeError):
         raise HTTPException(status_code=413, detail=str(error)) from error
-    if isinstance(error, DraftWorkflowKeyMismatchError):
+    # InvalidDraftCasTokenError（#633 P2-2，非法 CAS 时间戳是输入错误）与
+    # key-mismatch 同为 422，都先于 InvalidOperationError 的 400。
+    if isinstance(error, (DraftWorkflowKeyMismatchError, InvalidDraftCasTokenError)):
         raise HTTPException(status_code=422, detail=str(error)) from error
     if isinstance(error, PartialRunCreationError):
         # #467 A3：分块提交下失败可能已创建部分 job——进度必须可见。
-        detail = error.partial_detail()  # {message, run_id, created_so_far}
-        raise HTTPException(status_code=400, detail=detail) from error
+        # detail = {message, run_id, created_so_far}
+        raise HTTPException(status_code=400, detail=error.partial_detail()) from error
     if isinstance(error, SkillEditValidationError):
         raise HTTPException(
             status_code=422, detail={"message": str(error), "errors": error.errors}

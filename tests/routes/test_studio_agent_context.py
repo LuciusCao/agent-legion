@@ -134,7 +134,10 @@ def test_bound_token_reads_own_session_context(client, job_db, tmp_path) -> None
 
 def test_context_carries_canvas_draft_mirror(client, job_db, tmp_path) -> None:
     """The payload's draft_yaml is null until the human's Studio pushes the
-    canvas' unpublished draft through the PUT context route."""
+    canvas' unpublished draft through the PUT context route. kimi review
+    P2-5: draft_updated_at mirrors the draft ROW's updated_at (the CAS token
+    for a subsequent save_workflow_draft) — null while never-saved, then the
+    store row's timestamp once the canvas draft is saved."""
     script_path = _register_fake_agent(client, tmp_path)
     workspace_id = _create_workspace(client)
     session_id = _create_session(client, workspace_id)
@@ -145,17 +148,27 @@ def test_context_carries_canvas_draft_mirror(client, job_db, tmp_path) -> None:
         )
         assert response.status_code == 200, response.text
         assert response.json()["draft_yaml"] is None
+        assert response.json()["draft_updated_at"] is None
 
         pushed = client.put(
             f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context",
             json={"draft_yaml": "key: wf\nnodes: {}\n"},
         )
         assert pushed.status_code == 200, pushed.text
+        # The canvas draft store row advances the CAS token (session-row
+        # draft_yaml alone carries no baseline).
+        saved = client.put(
+            f"/api/workspaces/{workspace_id}/workflow-draft",
+            json={"definition_yaml": "key: wf\nschema_version: 2\nnodes: {}\nedges: []\n"},
+        )
+        assert saved.status_code == 200, saved.text
+        saved_at = saved.json()["updated_at"]
         response = client.get(
             _context_url(session_id), headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == 200, response.text
         assert response.json()["draft_yaml"] == "key: wf\nnodes: {}\n"
+        assert response.json()["draft_updated_at"] == saved_at
     finally:
         client.delete(f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}")
 

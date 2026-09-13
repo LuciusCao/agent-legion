@@ -6,7 +6,8 @@ other effecting actions (STUDIO-AGENT-001). This module composes the existing
 services behind that surface and stamps every draft it writes with
 ``created_by=f"studio-agent:{user_id}"`` so agent-authored drafts stay
 attributable to the run's initiating user. Node-code reads/drafts live in
-``studio_agent_node_codes`` (split for budget).
+``studio_agent_node_codes`` and the agent-definition/runtime/model reads in
+``studio_agent_catalog_reads`` (both split for budget).
 """
 
 from __future__ import annotations
@@ -15,8 +16,10 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
+from server.app.services.agent_definition_create import create_agent_draft
 from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import NotFoundError
+from server.app.services.studio_agent_catalog_reads import StudioAgentCatalogReads
 from server.app.services.studio_agent_node_codes import StudioAgentNodeCodeTools
 from server.app.services.versioned_entities import VersionedEntity
 from server.app.services.workflow_draft_compare import compare_workflow_draft
@@ -46,6 +49,7 @@ class StudioAgentToolsService:
         self._job_db = job_db
         self._settings = settings
         self.node_codes = StudioAgentNodeCodeTools(job_db, settings)
+        self.reads = StudioAgentCatalogReads(job_db)
 
     # Write tools (draft/register only — no effecting operations).
 
@@ -88,11 +92,18 @@ class StudioAgentToolsService:
         )
 
     def save_agent_definition_draft(
-        self, workspace_id: str, agent_id: str, definition: AgentDefinition, user_id: str
+        self,
+        workspace_id: str,
+        agent_id: str | None,
+        definition: AgentDefinition,
+        user_id: str,
     ) -> VersionedEntity:
-        return AgentService(self._job_db, workspace_id).save_draft(
-            agent_id, definition, studio_agent_created_by(user_id)
-        )
+        """Save a draft; ``agent_id=None`` starts a NEW Agent (id derived
+        from the capability; occupied capability 409s, #407)."""
+        if self._job_db.get_workspace(workspace_id) is None:
+            raise NotFoundError("Workspace not found")
+        service = AgentService(self._job_db, workspace_id)
+        return create_agent_draft(service, agent_id, definition, studio_agent_created_by(user_id))
 
     # Read tools.
 

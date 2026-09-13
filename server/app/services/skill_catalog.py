@@ -52,7 +52,10 @@ class SkillCatalogService:
         return candidate
 
     def _files(self, skill_dir: Path) -> list[dict[str, Any]]:
-        candidates = [skill_dir / "SKILL.md"]
+        # Root contract.yaml rides along (codex R4 P2): it is the normative
+        # machine contract — the agent must be able to read it back to check
+        # or incrementally edit it, exactly like the trio.
+        candidates = [skill_dir / "SKILL.md", skill_dir / "contract.yaml"]
         for folder in (skill_dir / "references", skill_dir / "scripts"):
             if folder.is_dir():
                 candidates.extend(sorted(folder.rglob("*")))

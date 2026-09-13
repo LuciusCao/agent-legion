@@ -1,0 +1,213 @@
+"""Unit tests for SkillCreationService (#633).
+
+The route-level behavior lives in
+tests/routes/test_studio_agent_skill_creation_tools.py; here the focus is
+the all-or-nothing guarantee that no half-initialized repo survives a failed
+create, plus the cleanup identity re-verification.
+"""
+
+from __future__ import annotations
+
+import os
+import stat
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from server.app.services import skill_creation
+from server.app.services.job_errors import NotFoundError
+from server.app.services.skill_creation import SkillCreationService
+from server.app.services.skill_editing import SkillEditValidationError, SkillFileWrite
+from server.app.services.skill_repo import SkillGitError
+
+_TRIO = [
+    SkillFileWrite(path="SKILL.md", content="# Skill\n"),
+    SkillFileWrite(path="references/output-contract.md", content="# contract\n"),
+    SkillFileWrite(path="scripts/validate_output.py", content="raise SystemExit(0)\n"),
+]
+_CONTRACT_YAML = "files:\n  - path: out.md\n    format: text\n"
+_QUARTET = [
+    *_TRIO,
+    SkillFileWrite(path="contract.yaml", content=_CONTRACT_YAML),
+]
+
+
+class _FakeJobDB:
+    """Only get_workspace is needed for the create flow."""
+
+    def get_workspace(self, workspace_id: str):
+        return {"id": workspace_id} if workspace_id == "ws-1" else None
+
+
+def _service(runs_dir: Path) -> SkillCreationService:
+    return SkillCreationService(_FakeJobDB(), runs_dir=runs_dir)
+
+
+def _git_subcommand(args: list[str]) -> str:
+    """First token that is neither a flag nor a -c flag's value."""
+    skip_value = False
+    for token in args:
+        if skip_value:
+            skip_value = False
+            continue
+        if token in ("-c", "-C", "-m", "--git-dir", "--work-tree"):
+            skip_value = True
+            continue
+        if token.startswith("-"):
+            continue
+        return token
+    return args[0]
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    base = tmp_path / "home" / ".agents" / "skills"
+    base.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    return base
+
+
+def test_failed_git_step_removes_partial_repo(home, tmp_path) -> None:
+    service = _service(tmp_path / "runs")
+    calls: list[str] = []
+
+    real_git = SkillCreationService.__dict__["_git"].__func__
+    monkey = pytest.MonkeyPatch()
+
+    def failing_git(repo_dir: Path, args: list[str], *, check: bool = True):
+        # The commit call leads with -c identity flags; the first non-flag,
+        # non-flag-value token is the subcommand ("commit" here — the -c
+        # values contain '=' or match git config keys).
+        subcommand = _git_subcommand(args)
+        calls.append(subcommand)
+        if subcommand == "commit":
+            # Simulate a commit failure after files were written.
+            return subprocess.CompletedProcess(args, returncode=1, stdout="", stderr="boom")
+        return real_git(repo_dir, args, check=check)
+
+    monkey.setattr(SkillCreationService, "_git", staticmethod(failing_git))
+    try:
+        with pytest.raises(SkillGitError):
+            service.create_skill("ws-1", "broken", list(_QUARTET), "v0.1.0", "m")
+    finally:
+        monkey.undo()
+
+    # init ran, then the commit failed — and the partial dir is gone.
+    assert "init" in calls and "commit" in calls
+    repo = home / "ws-1" / "broken"
+    assert not repo.exists()
+
+    # A retry (with git healthy again) succeeds — no wedged state.
+    result = service.create_skill("ws-1", "broken", list(_QUARTET), "v0.1.0", "m")
+    assert result["key"] == "ws-1/broken"
+    assert repo.is_dir()
+
+
+def test_cleanup_refuses_to_delete_a_swapped_directory(home, tmp_path) -> None:
+    # The identity check: a directory replaced between mkdir and cleanup must
+    # survive (never rm something we did not just create).
+    repo = home / "ws-1" / "swapped"
+    repo.mkdir(parents=True)
+    (repo / "precious.txt").write_text("do not delete", encoding="utf-8")
+    identity = (0, 0)  # an identity that will never match
+    skill_creation._remove_created_repo(repo, identity)
+    assert (repo / "precious.txt").read_text(encoding="utf-8") == "do not delete"
+
+    # The true identity DOES remove the freshly created directory.
+    st = os.lstat(repo)
+    assert stat.S_ISDIR(st.st_mode)
+    skill_creation._remove_created_repo(repo, (st.st_dev, st.st_ino))
+    assert not repo.exists()
+
+
+def test_create_skill_unknown_workspace_is_404(home, tmp_path) -> None:
+    with pytest.raises(NotFoundError):
+        _service(tmp_path / "runs").create_skill("ws-x", "a", list(_QUARTET), "v1", "m")
+
+
+# --- #542: the birth gate requires the four-file contract set ---
+
+
+def test_create_skill_without_contract_yaml_is_rejected(home, tmp_path) -> None:
+    """New skills are born with the full set: a trio-only payload (the
+    pre-#542 shape) is a 422 naming the missing contract.yaml."""
+    from server.app.services.skill_editing import SkillEditValidationError
+
+    with pytest.raises(SkillEditValidationError) as excinfo:
+        _service(tmp_path / "runs").create_skill("ws-1", "trio-only", list(_TRIO), "v1", "m")
+    assert any(e["path"] == "contract.yaml" for e in excinfo.value.errors)
+    assert not (home / "ws-1" / "trio-only").exists()
+
+
+@pytest.mark.parametrize(
+    "bad_yaml",
+    [
+        "files: [",
+        "files: []",
+        "files:\n  - path: /abs.md\n    format: text\n",
+        "files:\n  - path: a.json\n    format: json\n",
+        "files:\n  - path: a.json\n    format: json\n    schema: {type: nope}\n",
+    ],
+)
+def test_create_skill_with_malformed_contract_yaml_is_rejected(
+    home, tmp_path, bad_yaml: str
+) -> None:
+    """A malformed contract.yaml is the same 422 as a missing file — the
+    payload is validated before anything touches the disk."""
+    from server.app.services.skill_editing import SkillEditValidationError
+
+    files = [
+        *_TRIO,
+        SkillFileWrite(path="contract.yaml", content=bad_yaml),
+    ]
+    with pytest.raises(SkillEditValidationError) as excinfo:
+        _service(tmp_path / "runs").create_skill("ws-1", "broken-contract", files, "v1", "m")
+    assert any("contract.yaml" in e["path"] for e in excinfo.value.errors)
+    assert not (home / "ws-1" / "broken-contract").exists()
+
+
+def test_create_skill_rejects_content_over_the_utf8_byte_cap(home, tmp_path) -> None:
+    """codex R4 P2: the cap is BYTES (what the read paths enforce) — 7 万
+    汉字 passes a character count under 128 KiB but is ~3× over in UTF-8
+    bytes; writing it would produce files get_skill truncates (or corrupts
+    a multi-byte sequence). The create must 422."""
+    with pytest.raises(SkillEditValidationError) as excinfo:
+        _service(tmp_path / "runs").create_skill(
+            "ws-1",
+            "cjk-payload",
+            [
+                *_TRIO,
+                SkillFileWrite(
+                    path="contract.yaml",
+                    content=_CONTRACT_YAML,
+                ),
+                SkillFileWrite(path="references/big.md", content="汉" * 70_000),
+            ],
+            "v1",
+            "m",
+        )
+    assert any("128 KB" in e["error"] for e in excinfo.value.errors)
+    assert not (home / "ws-1" / "cjk-payload").exists()
+
+
+def test_created_skill_reads_back_with_root_contract_yaml(home, tmp_path) -> None:
+    """codex R4 P2: get_skill must return the normative root contract.yaml
+    (both the working-tree read and the pinned-tag read) — the agent needs
+    it back to check or incrementally edit the contract it was forced to
+    create."""
+    service = _service(tmp_path / "runs")
+    service.create_skill("ws-1", "with-contract", list(_QUARTET), "v1", "m")
+
+    from server.app.services.skill_catalog import SkillCatalogService
+    from server.app.services.skill_detail import detail_at_ref
+
+    repo = home / "ws-1" / "with-contract"
+    catalog = SkillCatalogService.__new__(SkillCatalogService)
+    live = catalog._files(repo)  # noqa: SLF001 - the working-tree reader
+    paths = {f["path"]: f["content"] for f in live}
+    assert paths["contract.yaml"] == _CONTRACT_YAML
+
+    pinned = detail_at_ref("ws-1/with-contract", "v1", repo)
+    pinned_paths = {f["path"]: f["content"] for f in pinned["files"]}
+    assert pinned_paths["contract.yaml"] == _CONTRACT_YAML

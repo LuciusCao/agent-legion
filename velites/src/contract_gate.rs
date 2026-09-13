@@ -5,7 +5,7 @@
 //! itself (parse + check) lives there.
 
 use crate::cli::ValidateCli;
-use crate::contract::{first_contract, Contract, ContractError};
+use crate::contract::{first_contract, Contract, ContractError, ContractSource};
 
 /// Gate outcome for the `--require-output` upgrade: `("existence", [])`
 /// without a contract, `("contract", violations)` with one — including the
@@ -58,6 +58,12 @@ pub fn remediation_message(missing: &[String], violations: &[String]) -> String 
 /// (`mode=existence`, the Host falls back to its legacy check); 1 = contract
 /// violations (one per stderr line); 2 = contract parse error or I/O failure
 /// (the latter propagates as `Err` for the caller to report).
+///
+/// #542 deprecation signal: when the contract was read from the deprecated
+/// embedded block (not the skill-root `contract.yaml`), an extra stdout line
+/// `source=embedded-block (deprecated; migrate to contract.yaml)` follows the
+/// mode line. Stdout is diagnostic only — the Host-side adapter reads exit
+/// code and stderr, so the extra line changes no consumer semantics.
 pub fn run_validate(cli: ValidateCli) -> anyhow::Result<u8> {
     use anyhow::Context;
     let job_dir = cli
@@ -74,6 +80,9 @@ pub fn run_validate(cli: ValidateCli) -> anyhow::Result<u8> {
             Ok(2)
         }
         Some(Ok(contract)) => {
+            if contract.source() == ContractSource::EmbeddedBlock {
+                println!("source=embedded-block (deprecated; migrate to contract.yaml)");
+            }
             let violations = contract.check(&job_dir);
             if violations.is_empty() {
                 println!("mode=contract");

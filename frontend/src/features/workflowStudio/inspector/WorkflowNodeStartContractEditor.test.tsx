@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
+import { useLocation } from 'react-router-dom'
+import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { WorkflowNodeStartContractEditor } from './WorkflowNodeStartContractEditor'
 import type { WorkflowNodeRecord } from '../../../types'
 
@@ -12,6 +14,16 @@ const draftYaml = [
   '',
 ].join('\n')
 
+function LocationProbe() {
+  const { pathname, hash } = useLocation()
+  return (
+    <span data-testid="location-path">
+      {pathname}
+      {hash}
+    </span>
+  )
+}
+
 function renderEditor(types: string[]) {
   const setDefinitionYaml = vi.fn()
   const node = {
@@ -20,11 +32,14 @@ function renderEditor(types: string[]) {
     accepted_item_types: types,
   } as unknown as WorkflowNodeRecord
   render(
-    <WorkflowNodeStartContractEditor
-      node={node}
-      definitionYaml={draftYaml}
-      setDefinitionYaml={setDefinitionYaml}
-    />
+    <MemoryRouter>
+      <WorkflowNodeStartContractEditor
+        node={node}
+        definitionYaml={draftYaml}
+        setDefinitionYaml={setDefinitionYaml}
+      />
+      <LocationProbe />
+    </MemoryRouter>
   )
   return setDefinitionYaml
 }
@@ -39,7 +54,7 @@ describe('WorkflowNodeStartContractEditor', () => {
     expect(
       screen.getByText(/决定「添加条目」对话框里提供哪些提交方式/)
     ).toBeInTheDocument()
-    expect(screen.getByText(/需要管理员先配置外部服务连接/)).toBeInTheDocument()
+    expect(screen.getByText(/需要管理员先在/)).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: /上传文件/ })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: /外部平台内容/ })).toBeChecked()
     expect(
@@ -50,6 +65,18 @@ describe('WorkflowNodeStartContractEditor', () => {
       screen.getByText(/粘贴 ID 或链接引用外部平台内容/)
     ).toBeInTheDocument()
     expect(screen.getByText('保持目录结构，整体算一个条目')).toBeInTheDocument()
+  })
+
+  it('links the external-connection hint to the admin settings anchor', () => {
+    renderEditor(['material', 'ref'])
+
+    const link = screen.getByRole('link', { name: '全局设置 · 外部服务连接' })
+    expect(link).toHaveAttribute('href', '/admin/settings#connections')
+
+    fireEvent.click(link)
+    expect(screen.getByTestId('location-path')).toHaveTextContent(
+      '/admin/settings#connections'
+    )
   })
 
   it('patches the draft YAML when an option is unchecked', () => {
