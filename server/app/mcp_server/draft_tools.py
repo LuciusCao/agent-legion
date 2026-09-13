@@ -40,12 +40,13 @@ def register_draft_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         """Save the full workflow definition YAML as the workspace's Studio
         draft — the canvas and YAML editor pick it up live. CAS semantics:
         expected_updated_at must be the updated_at your last get_workflow_draft
-        (or get_studio_context draft read) returned, or "never-saved" when no
-        draft existed. A value that is neither an ISO timestamp nor the literal
-        "never-saved" is an HTTP 422. A stale value is an HTTP 409 carrying the
-        current draft (current_draft.definition_yaml + current_draft.updated_at)
-        — re-read, rebase your changes onto it and retry; never retry with the
-        old timestamp. Draft only: validate, compare, then
+        returned, the draft_updated_at from get_studio_context, or "never-saved"
+        when no draft existed. Do NOT guess or invent a timestamp — a wrong
+        value is a 409 (or a 422 when not an ISO timestamp at all). A stale
+        value is an HTTP 409 carrying the current draft
+        (current_draft.definition_yaml + current_draft.updated_at) — use that
+        response directly (no need to re-read), rebase your changes onto it
+        and retry with its updated_at. Draft only: validate, compare, then
         request_workflow_publish — the human still confirms every publish."""
         _, client = await client_factory()
         body: dict[str, Any] = {

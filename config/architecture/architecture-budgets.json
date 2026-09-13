@@ -481,6 +481,7 @@
     "frontend/src/features/workflowStudio/shared/WorkflowStudioYamlEditorDialog.module.css": 26,
     "frontend/src/features/workflowStudio/shared/WorkflowStudioYamlEditorDialog.tsx": 55,
     "frontend/src/features/workflowStudio/shared/agentPublishNoticeStore.ts": 45,
+    "frontend/src/features/workflowStudio/shared/draftSaveConflict.ts": 119,
     "frontend/src/features/workflowStudio/shared/draftSaveController.ts": 159,
     "frontend/src/features/workflowStudio/shared/draftSaveText.ts": 25,
     "frontend/src/features/workflowStudio/shared/draftSaveTypes.ts": 37,

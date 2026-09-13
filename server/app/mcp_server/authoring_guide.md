@@ -83,7 +83,10 @@ Studio. Nothing you do takes effect in production by itself.
   Agent definition draft.
 - `save_agent_definition_draft(workspace_id, agent_id, capability, runtime,
   skill, tools?, requires_labels?, config_schema?)` — draft an EXISTING
-  Agent definition for an agent-backed capability (section 5).
+  Agent definition for an agent-backed capability (section 5). FULL-PAYLOAD
+  semantics: an omitted optional field RESETS to its default (tools →
+  catalog default tier, requires_labels/config_schema → {}) — call
+  `get_agent_definitions` first and echo back every value you want kept.
 - `get_node_prompt(workspace_id, node_key, definition_yaml?)` — the effective
   run prompt of an agent node: fixed platform envelope + node instructions
   (auto-assembled default, or the custom `execution.prompt` when set). Read
@@ -139,10 +142,12 @@ publish, agent definition publish, and skill release actions stay human-only).
 3. Draft the definition YAML (section 3).
 4. `validate_workflow` → fix every reported error. Then `compare_workflow`
    → preview the full shape. Repeat until clean.
-5. `save_workflow_draft` → persist the validated YAML as the Studio draft
-   (`expected_updated_at` from your `get_workflow_draft`/`get_studio_context`
-   read, or `never-saved`). On a 409 conflict, rebase onto the returned
-   `current_draft` and retry — the human may have edited concurrently.
+5. `save_workflow_draft` → persist the validated YAML as the Studio draft.
+   The CAS token (`expected_updated_at`) comes from `get_workflow_draft`'s
+   `updated_at`, from `get_studio_context`'s `draft_updated_at` (same value —
+   the draft row's updated_at), or the literal `never-saved`. Never invent a
+   timestamp. On a 409, rebase onto the response's `current_draft` and retry
+   with its `updated_at` — the human may have edited concurrently.
 6. For each code node, `save_node_code_draft` with `expected_capability` set
    (section 4). For each agent-backed capability without a published Agent,
    `create_agent_definition` (new capability) or `save_agent_definition_draft`

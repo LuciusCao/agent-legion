@@ -78,6 +78,20 @@ def test_get_empty_state_and_populated(client_factory, job_db, shared_home) -> N
         assert payload["files"][0]["truncated"] is False
 
 
+def test_get_with_corrupted_map_is_structured_422(client_factory, job_db, shared_home) -> None:
+    """kimi review P2-6：损坏的 map.json 在 GET 侧也是结构化 422（agent 拿到
+    可理解的错误定位坏文件），不是零信息 500。"""
+    with client_factory(fresh=True) as client:
+        _create_workspace(client)
+        scoped = _scoped(client, job_db)
+        shared = shared_home / "_shared"
+        (shared / "references").mkdir(parents=True)
+        (shared / "map.json").write_text("{ not json", encoding="utf-8")
+        response = scoped.get(f"{_TOOLS}/workspaces/{_WS}/skills-shared")
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["errors"][0]["path"] == "map.json"
+
+
 def test_put_writes_and_round_trips(client_factory, job_db, shared_home) -> None:
     with client_factory(fresh=True) as client:
         _create_workspace(client)

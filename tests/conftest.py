@@ -278,6 +278,31 @@ def _dirty_tables(conn, tables: list[str]) -> set[str]:
         return set(tables)
 
 
+def _fail_on_leaked_locks(conn, phase: str) -> None:
+    """Fail with attribution when the isolation pass hits the lock timeout.
+
+    The blocker query must not itself inherit the lock_timeout wait: it
+    reads only pg_stat_activity (catalog), so it returns immediately.
+    """
+    blockers = conn.execute(
+        """
+        select pid, state, left(query, 90) as query
+        from pg_stat_activity
+        where datname = current_database()
+          and pid = any(
+            select unnest(pg_blocking_pids(pid)) from pg_stat_activity
+          )
+        """
+    ).fetchall()
+    held = "\n".join(f"  pid {row[0]} ({row[1]}): {row[2]}" for row in blockers)
+    pytest.fail(
+        f"Test-schema isolation {phase} timed out on a lock wait after 30s — another "
+        "session holds locks on this schema (a leaked open transaction, e.g. a "
+        "request thread that never committed). Blocking sessions:\n"
+        f"{held or '  (none visible)'}"
+    )
+
+
 def _reset_schema_data() -> bool:
     """Empty dirty tables without touching DDL, then restore seeded rows.
 
@@ -295,6 +320,16 @@ def _reset_schema_data() -> bool:
     """
     try:
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
+            # Session-level lock wait bound for the whole isolation pass:
+            # the TRUNCATE below needs ACCESS EXCLUSIVE on every dirty
+            # table, and the dirty-probe EXISTS reads wait behind row
+            # locks — a leaked open transaction (observed shape: a
+            # TestClient anyio-threadpool request leaves `update
+            # agent_workers` open on a pooled connection) would otherwise
+            # hang BOTH statements forever. The timeout turns that hang
+            # into a failure that names the blocking session, so the leak
+            # is attributable instead of silent.
+            conn.execute("set lock_timeout = '30s'")
             tables = [
                 row[0]
                 for row in conn.execute(
@@ -305,17 +340,23 @@ def _reset_schema_data() -> bool:
             if _SEED_SNAPSHOT is None:
                 dirty = set(tables)
             else:
-                dirty = _dirty_tables(conn, tables)
+                try:
+                    dirty = _dirty_tables(conn, tables)
+                except psycopg.errors.LockNotAvailable:
+                    _fail_on_leaked_locks(conn, "dirty-table probe")
                 # Seeded tables are always re-truncated and replayed: a test
                 # that deleted seed rows without adding new ones would
                 # otherwise look "clean" to the row probe and lose its seeds.
                 dirty.update(t for t in _SEEDED_TABLES if t in tables)
             if dirty:
-                conn.execute(
-                    sql.SQL("truncate {} restart identity cascade").format(
-                        sql.SQL(", ").join(sql.Identifier(TEST_SCHEMA, t) for t in dirty)
+                try:
+                    conn.execute(
+                        sql.SQL("truncate {} restart identity cascade").format(
+                            sql.SQL(", ").join(sql.Identifier(TEST_SCHEMA, t) for t in dirty)
+                        )
                     )
-                )
+                except psycopg.errors.LockNotAvailable:
+                    _fail_on_leaked_locks(conn, "TRUNCATE")
             if _SEED_SNAPSHOT is not None:
                 _restore_seed_rows(conn, [t for t in _SEEDED_TABLES if t in dirty])
                 return True

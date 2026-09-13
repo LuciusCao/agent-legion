@@ -190,8 +190,9 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
       vi.advanceTimersByTime(10000)
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+    // kimi review P2-8：冲突文案带行动指引（挂起自动保存 + 二选一）。
     expect(draftSaveText(result.current.state)).toBe(
-      '草稿已被其它会话（Agent/其它标签页）更新，本页编辑未保存'
+      'Agent 已保存新的草稿版本；本页编辑未落盘，自动保存已暂停——请选择采用 Agent 版本或保留本页编辑'
     )
   })
 
@@ -264,18 +265,27 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     })
     await waitFor(() => expect(result.current.state.conflict).toBe(true))
 
-    // 用户在冲突后继续编辑：conflict 标记被新调度清除，保存以服务端
-    // 冲突响应（或新一轮 GET）推进后的基线重新竞争。
-    mocks.putWorkflowDraft.mockResolvedValue({
-      definition_yaml: EDITED,
-      updated_at: '2026-09-12T11:00:00+00:00',
-    })
+    // kimi review P1-2/P2-4：冲突后继续编辑不再自动保存（挂起 autosave，
+    // 防止对 Agent 改动零知情下不可逆覆盖）；编辑进 pendingSave 待显式解除。
+    const callsBefore = mocks.putWorkflowDraft.mock.calls.length
     rerender({
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: Third\n',
       originalYaml: BASE,
       serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
     })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft.mock.calls.length).toBe(callsBefore)
+    expect(result.current.state.conflict).toBe(true)
+
+    // 用户显式选择保留本页编辑：以冲突响应推进后的基线重新竞争。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: 'key: demo\nlabel: Third\n',
+      updated_at: '2026-09-12T11:00:00+00:00',
+    })
+    act(() => result.current.resolveConflict(true))
     await act(async () => {
       vi.advanceTimersByTime(850)
     })
@@ -326,8 +336,8 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
 
   it('a conflict advances lastPersistedAt so the next save competes on the fresh base', async () => {
     // 冲突响应的 current_draft.updated_at 是服务端真值：进入 conflict 态的
-    // 同时把基线推进到它——用户继续编辑（不改内容重存同值）后的下一次保存
-    // 以新基线发起，而不是永远用过期时间戳 409。
+    // 同时把基线推进到它——用户显式保留本页（resolveConflict）后的下一次
+    // 保存以新基线发起，而不是永远用过期时间戳 409。
     mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
     const { result, rerender } = renderPersistence({
       workspaceId: 'ws1',
@@ -348,7 +358,7 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     // conflict 态的 savedAt 已是冲突响应携带的服务端时间戳。
     expect(result.current.state.savedAt).toBe('2026-09-12T10:00:00+00:00')
 
-    // 用户继续编辑（新的 yaml → 新调度）：保存以冲突响应推进后的基线发起。
+    // 用户继续编辑后显式保留本页：保存以冲突响应推进后的基线发起。
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: EDITED,
       updated_at: '2026-09-12T11:30:00+00:00',
@@ -359,6 +369,11 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
       originalYaml: BASE,
       serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
     })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(result.current.state.conflict).toBe(true) // 挂起中，未发 PUT
+    act(() => result.current.resolveConflict(true))
     await act(async () => {
       vi.advanceTimersByTime(850)
     })
@@ -483,7 +498,8 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     await waitFor(() => expect(result.current.state.conflict).toBe(true))
     expect(result.current.state.conflictDraftYaml).toBe(conflict.yaml)
 
-    // 基线已推进到服务端真值：用户继续编辑后的保存不再用过期时间戳。
+    // 基线已推进到服务端真值。kimi review P2-4：冲突态挂起自动保存——
+    // 继续编辑不自动 PUT；显式 resolveConflict(true) 后以推进的基线竞争。
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: EDITED,
       updated_at: '2026-08-27T04:00:00+00:00',
@@ -500,11 +516,97 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     await act(async () => {
       vi.advanceTimersByTime(850)
     })
+    expect(result.current.state.conflict).toBe(true) // 挂起：未自动 PUT
+    act(() => result.current.resolveConflict(true))
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
       'key: demo\nlabel: After conflict\n',
       { expectedUpdatedAt: conflict.updatedAt }
     )
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
+  })
+
+  // --- kimi review P1-1：own-save 回显不误报幻影冲突。 ---
+
+  it("does not raise a phantom conflict when the refetched draft is the user's own save", async () => {
+    // 用户编辑 → 保存成功 → turn-end 失效重取回自己的草稿：服务端 yaml
+    // 与画布一致，即使 touched=true 也只推进基线（hydrate），不进冲突态。
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    // turn-end 重取：updated_at 推进到本页保存的时间戳，内容 === 画布。
+    const OWN_AT = '2026-08-27T05:00:00+00:00'
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: EDITED, updated_at: OWN_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(result.current.state.conflict).toBeFalsy()
+    expect(result.current.state.status).not.toBe('error')
+  })
+
+  // --- kimi review P1-2：adoptServerDraft 出口。 ---
+
+  it('adoptServerDraft takes the agent version, advances the base, and clears the conflict', async () => {
+    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    const adopted: string[] = []
+    act(() =>
+      result.current.adoptServerDraft(
+        'key: demo\nlabel: Agent v2\n',
+        '2026-09-12T10:00:00+00:00',
+        (yaml) => adopted.push(yaml)
+      )
+    )
+    expect(result.current.state.conflict).toBeFalsy()
+    expect(adopted).toEqual(['key: demo\nlabel: Agent v2\n'])
+    // 采用后画布（调用方写入）= 服务端内容：后续调度不发起覆盖性 PUT。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Agent v2\n',
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    const calls = mocks.putWorkflowDraft.mock.calls.length
+    expect(calls).toBe(1) // 仅第一次保存；adopt 未触发回写
   })
 })

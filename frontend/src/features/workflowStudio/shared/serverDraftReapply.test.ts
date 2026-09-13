@@ -105,4 +105,36 @@ describe('decideServerDraftReapply', () => {
       updatedAt: '2026-08-27T02:00:00+00:00',
     })
   })
+
+  it('treats an own-save echo as an apply, not a phantom conflict (kimi review P1-1)', () => {
+    // 用户自己保存成功后 turn-end 重取：服务端草稿 === 画布当前内容——
+    // 即使 touched=true 也不得误报「其它会话更新」；静默推进基线。
+    expect(
+      decideServerDraftReapply({
+        serverDraftYaml: 'key: demo\nlabel: Mine\n',
+        serverDraftUpdatedAt: '2026-08-27T02:00:00+00:00',
+        appliedUpdatedAt: '2026-08-27T01:02:03+00:00',
+        userTouched: true,
+        canvasYaml: 'key: demo\nlabel: Mine\n',
+      })
+    ).toEqual({
+      action: 'apply',
+      yaml: 'key: demo\nlabel: Mine\n',
+      updatedAt: '2026-08-27T02:00:00+00:00',
+    })
+    // 内容不同（真正的外部变更）仍走 conflict。
+    expect(
+      decideServerDraftReapply({
+        serverDraftYaml: 'key: demo\nlabel: Agent v2\n',
+        serverDraftUpdatedAt: '2026-08-27T02:00:00+00:00',
+        appliedUpdatedAt: '2026-08-27T01:02:03+00:00',
+        userTouched: true,
+        canvasYaml: 'key: demo\nlabel: Mine\n',
+      })
+    ).toEqual({
+      action: 'conflict',
+      yaml: 'key: demo\nlabel: Agent v2\n',
+      updatedAt: '2026-08-27T02:00:00+00:00',
+    })
+  })
 })

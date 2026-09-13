@@ -28,7 +28,16 @@ export function useDraftServerSync(
   originalYaml: string,
   controllerRef: RefObject<DraftSaveController | null>,
   consumeConflict: () => ServerDraftConflict | null
-): { hydrated: boolean; isHydrated: () => boolean } {
+): {
+  hydrated: boolean
+  isHydrated: () => boolean
+  adoptServerDraft: (
+    serverYaml: string,
+    serverAt: string | null,
+    onAdopt?: (serverYaml: string) => void
+  ) => void
+  resolveConflict: (keepMine: boolean) => void
+} {
   const [hydrated, setHydrated] = useState(false)
   const hydratedRef = useRef(false)
   const hydratedAtRef = useRef<string | null>(null)
@@ -61,5 +70,22 @@ export function useDraftServerSync(
     hydratedAtRef.current = serverDraft.updated_at ?? null
     hydratedRef.current = true
   }, [hydrated, serverDraft, originalYaml, controllerRef, consumeConflict])
-  return { hydrated, isHydrated }
+  /* kimi review P1-2：冲突出口——采用服务端（Agent）版本（hydrate 推进
+     基线、清除冲突；onAdopt 写画布）或显式 keep-mine 继续保存。 */
+  const adoptServerDraft = useCallback(
+    (
+      serverYaml: string,
+      serverAt: string | null,
+      onAdopt?: (yaml: string) => void
+    ) => {
+      controllerRef.current?.adoptServerDraft(serverYaml, serverAt)
+      onAdopt?.(serverYaml)
+    },
+    [controllerRef]
+  )
+  const resolveConflict = useCallback(
+    (keepMine: boolean) => controllerRef.current?.resolveConflict(keepMine),
+    [controllerRef]
+  )
+  return { hydrated, isHydrated, adoptServerDraft, resolveConflict }
 }

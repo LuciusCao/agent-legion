@@ -131,9 +131,10 @@ describe('useWorkflowDraftPersistence', () => {
       serverDraft: SERVER_DRAFT,
     })
 
-    expect(result.current.state).toEqual({
+    expect(result.current.state).toMatchObject({
       status: 'idle',
       savedAt: '2026-08-27T01:02:03+00:00',
+      conflict: false,
     })
   })
 

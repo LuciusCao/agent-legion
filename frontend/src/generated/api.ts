@@ -6527,10 +6527,15 @@ export interface components {
      * StudioChatContextResponse
      * @description What the get_studio_context MCP tool returns: the session's bound
      *     workspace, the human's live Studio node selection, the canvas' unpublished
-     *     workflow draft (None until the frontend pushes it), and the active
-     *     workflow's structure. ``workflow`` is None when nothing is published yet.
+     *     workflow draft (None until the frontend pushes it), the draft row's
+     *     ``updated_at`` (kimi review P2-5: the CAS token for a subsequent
+     *     ``save_workflow_draft`` — the session-pushed draft_yaml alone carries
+     *     no baseline; None = never-saved), and the active workflow's structure.
+     *     ``workflow`` is None when nothing is published yet.
      */
     StudioChatContextResponse: {
+      /** Draft Updated At */
+      draft_updated_at: string | null
       /** Draft Yaml */
       draft_yaml: string | null
       /** Selected Node Key */

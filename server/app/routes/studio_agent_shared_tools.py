@@ -65,8 +65,17 @@ def _shared_dir(job_db: JobQueries, workspace_id: str) -> Path:
 
 
 def _load_map_json(shared_dir: Path) -> dict:
+    # kimi review P2-6：损坏的 map.json 在读侧也是结构化 422（同类失败路径
+    # 的一致契约），agent 拿到可理解的错误而不是零信息 500。
     try:
         raw = json.loads((shared_dir / MAP_PATH).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise_job_http_error(
+            SkillEditValidationError(
+                "Invalid shared materials map",
+                [{"path": MAP_PATH, "error": f"malformed JSON: {exc}"}],
+            )
+        )
     except (OSError, UnicodeDecodeError) as exc:
         raise_job_http_error(
             SkillEditValidationError(
@@ -95,17 +104,22 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
         shared_dir = _shared_dir(job_db, workspace_id)
         # Lock-consistent snapshot (codex review R2 P1): the map and the
         # files must come from the same generation, never a swap in between.
-        with shared_edit_lock(shared_dir, shared_dir.parent.parent):
-            if load_shared_map(shared_dir) is None:
-                return SharedMaterialsResponse(workspace_id=workspace_id, map=None, files=[])
-            return SharedMaterialsResponse(
-                workspace_id=workspace_id,
-                map=_load_map_json(shared_dir),
-                files=[
-                    SharedMaterialFile(**item)
-                    for item in read_shared_files(shared_dir, _MATERIAL_DIRS)
-                ],
-            )
+        # kimi review P2-6：损坏的 map.json（load_shared_map 校验失败）与
+        # 读取失败都是结构化 422，不冒泡成零信息 500。
+        try:
+            with shared_edit_lock(shared_dir, shared_dir.parent.parent):
+                if load_shared_map(shared_dir) is None:
+                    return SharedMaterialsResponse(workspace_id=workspace_id, map=None, files=[])
+                return SharedMaterialsResponse(
+                    workspace_id=workspace_id,
+                    map=_load_map_json(shared_dir),
+                    files=[
+                        SharedMaterialFile(**item)
+                        for item in read_shared_files(shared_dir, _MATERIAL_DIRS)
+                    ],
+                )
+        except SkillEditValidationError as exc:
+            raise_job_http_error(exc)
 
     @router.put(
         "/studio-agent/tools/workspaces/{workspace_id}/skills-shared",

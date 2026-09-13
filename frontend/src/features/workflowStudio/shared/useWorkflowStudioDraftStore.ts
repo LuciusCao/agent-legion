@@ -41,7 +41,9 @@ export function useWorkflowStudioDraftStore(
     originalYaml,
     serverDraft === undefined ? undefined : serverDraft.definition_yaml,
     serverDraft === undefined ? undefined : serverDraft.updated_at,
-    draft.setDraftYaml
+    draft.setDraftYaml,
+    /* kimi review P1-1：own-save 回显判定需要当前画布内容。 */
+    draft.draftYaml
   )
   // #633 codex review P1-2：服务端草稿前进且画布采用了它（用户无本地
   // 编辑）时，保存层同步 hydrate——lastPersistedAt 推进到服务端真值，
@@ -70,5 +72,10 @@ export function useWorkflowStudioDraftStore(
     useViewedRevisionAsDraft,
     draftSave: draftSave.state,
     flushDraftSave: draftSave.flushNow,
+    /* kimi review P1-2：冲突出口——采用服务端版本经 touched-aware setter
+       写画布；keep-mine 继续保存。 */
+    adoptServerDraft: (yaml: string, at: string | null) =>
+      draftSave.adoptServerDraft(yaml, at, setDraftYaml),
+    resolveConflict: draftSave.resolveConflict,
   }
 }

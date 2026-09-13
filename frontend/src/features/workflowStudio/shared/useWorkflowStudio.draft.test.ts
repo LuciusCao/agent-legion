@@ -356,9 +356,10 @@ describe('useWorkflowStudio draft & revision', () => {
 
     // 服务端草稿 ≠ 基线即 dirty；且装载本身不触发任何 PUT。
     expect(result.current.dirty).toBe(true)
-    expect(result.current.draftSave).toEqual({
+    expect(result.current.draftSave).toMatchObject({
       status: 'idle',
       savedAt: '2026-08-27T01:02:03+00:00',
+      conflict: false,
     })
     // async act 冲刷 react-query 的异步通知，避免 act 外交互告警。
     await act(async () => {

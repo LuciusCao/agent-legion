@@ -137,7 +137,12 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         to a runtime and skill. runtime is one of: pi, velites. requires_labels
         declares worker labels the agent requires ({"label": "value"}); config_schema
         declares tunables as a JSON-Schema subset (see get_authoring_guide §5).
-        Draft only — a human publishes it in Studio before any job can use it."""
+        WARNING (full-payload semantics): omitted optional fields RESET to
+        their defaults (tools → catalog default tier, requires_labels → {},
+        config_schema → {}). To change just one field on an existing Agent,
+        first call get_agent_definitions and echo back every current value you
+        want kept. Draft only — a human publishes it in Studio before any job
+        can use it."""
         body: dict[str, Any] = {
             "capability": capability,
             "runtime": runtime,

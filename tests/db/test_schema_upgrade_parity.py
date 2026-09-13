@@ -132,7 +132,9 @@ def _catalog_constraints(schema_name: str) -> _CatalogConstraints:
                 """
                 select tc.table_name, tc.constraint_name, pg_get_constraintdef(c.oid) as constraintdef
                 from information_schema.table_constraints tc
-                join pg_constraint c on c.conname = tc.constraint_name
+                join pg_constraint c
+                  on c.conname = tc.constraint_name
+                 and c.conrelid = (tc.table_schema || '.' || tc.table_name)::regclass
                 where tc.table_schema=%s and tc.constraint_type in ('UNIQUE', 'PRIMARY KEY')
                 """,
                 (schema_name,),

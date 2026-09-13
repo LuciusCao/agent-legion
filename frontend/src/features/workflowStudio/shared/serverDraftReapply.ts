@@ -36,24 +36,37 @@ function normalizeOffset(value: string): string {
 /** 重应用决策：not-ready（查询未到达/基线未知）与 same-or-older（同一
  * updated_at 或乱序迟到）都是 no-op；agent 草稿前进且用户未碰本地草稿
  * → apply（画布直接采用服务端真值）；用户有本地编辑 → conflict（保留
- * 编辑，由保存层以 conflict 态向用户呈现，见 useWorkflowDraftPersistence）。 */
+ * 编辑，由保存层以 conflict 态向用户呈现，见 useWorkflowDraftPersistence）。
+ * kimi review P1-1（幻影冲突）：用户自己的保存成功后，turn-end 重取回的
+ * 正是本页刚存的草稿——内容与画布一致即 own-save 回显，静默推进基线
+ * （apply 到相同内容 + 清 touched），不升起冲突警示。 */
 export function decideServerDraftReapply(input: {
   serverDraftYaml: string | null | undefined
   serverDraftUpdatedAt: string | null | undefined
   appliedUpdatedAt: string | null | undefined
   userTouched: boolean
+  canvasYaml?: string
 }): ServerDraftReapplyDecision {
   const {
     serverDraftYaml,
     serverDraftUpdatedAt,
     appliedUpdatedAt,
     userTouched,
+    canvasYaml,
   } = input
   if (serverDraftYaml === undefined || serverDraftYaml === null) {
     return { action: 'noop', reason: 'not-ready' }
   }
   if (!isServerDraftNewer(serverDraftUpdatedAt, appliedUpdatedAt)) {
     return { action: 'noop', reason: 'same-or-older' }
+  }
+  // own-save 回显：服务端草稿即画布当前内容——不是外部变更，推进基线。
+  if (canvasYaml !== undefined && serverDraftYaml === canvasYaml) {
+    return {
+      action: 'apply',
+      yaml: serverDraftYaml,
+      updatedAt: serverDraftUpdatedAt ?? '',
+    }
   }
   if (userTouched) {
     return {
@@ -89,17 +102,21 @@ export class ServerDraftApplyTracker {
   }
 
   /** 评估一次服务端草稿：apply 时写画布并推进 appliedAt；conflict 时挂起
-   * 冲突通知（由 consumeConflict 消费）。返回是否有冲突挂起（供重渲染）。 */
+   * 冲突通知（由 consumeConflict 消费）。canvasYaml 参与 own-save 回显
+   * 判定（kimi review P1-1）：服务端草稿与画布一致时走 apply（内容相同，
+   * 实际只是推进基线），不误报冲突。 */
   evaluate(
     serverDraftYaml: string | null | undefined,
     serverDraftUpdatedAt: string | null | undefined,
-    applyToCanvas: (yaml: string) => void
+    applyToCanvas: (yaml: string) => void,
+    canvasYaml?: string
   ): 'apply' | 'conflict' | 'noop' {
     const decision = decideServerDraftReapply({
       serverDraftYaml,
       serverDraftUpdatedAt,
       appliedUpdatedAt: this.appliedAt,
       userTouched: this.touched,
+      canvasYaml,
     })
     if (decision.action === 'apply') {
       this.appliedAt = decision.updatedAt

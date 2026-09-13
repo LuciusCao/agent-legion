@@ -6,7 +6,9 @@ import type { DraftSaveState } from './draftSaveTypes'
 export function draftSaveText(save: DraftSaveState | undefined): string | null {
   if (!save) return null
   if (save.conflict)
-    return '草稿已被其它会话（Agent/其它标签页）更新，本页编辑未保存'
+    // kimi review P2-8：冲突文案带行动指引——服务端（Agent）保存了新草稿，
+    // 本页未保存的编辑保留在画布，自动保存已挂起，需在两版之间做选择。
+    return 'Agent 已保存新的草稿版本；本页编辑未落盘，自动保存已暂停——请选择采用 Agent 版本或保留本页编辑'
   if (save.loadError) return '草稿服务不可用，编辑仅保留在本页内存'
   if (save.status === 'saving') return '草稿保存中…'
   if (save.status === 'error') return '草稿保存失败，将自动重试'

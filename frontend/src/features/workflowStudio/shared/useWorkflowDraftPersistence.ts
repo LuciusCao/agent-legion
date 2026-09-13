@@ -7,6 +7,7 @@ import {
   type DraftSaveFlushResult,
   type DraftSaveState,
 } from './draftSaveTypes'
+import type { AdoptServerDraft, ResolveConflict } from './draftSaveConflict'
 import { useDraftServerSync } from './useDraftServerSync'
 import { useDraftUnloadGuard } from './useDraftUnloadGuard'
 import type { ServerDraftConflict } from './useServerDraftApply'
@@ -23,6 +24,13 @@ export type DraftSaveControls = {
      守卫）。 */
   flushNow: (keepalive?: boolean) => Promise<DraftSaveFlushResult>
   hasUnsavedChanges: () => boolean
+  /* kimi review P1-2：冲突态的显式出口（实现与冲突接线同在
+     useDraftServerSync）。adoptServerDraft(serverYaml, serverAt, onAdopt) =
+     采用服务端（Agent）版本——controller 经 hydrate 推进基线清除冲突，
+     onAdopt 写画布；resolveConflict(true) = 看过警示后保留本页编辑并继续
+     保存（以已推进基线竞争）；resolveConflict(false) = 仅解除警示。 */
+  adoptServerDraft: AdoptServerDraft
+  resolveConflict: ResolveConflict
 }
 
 /* 草稿自动持久化：draftYaml 变化由 DraftSaveController debounce 后 PUT
@@ -77,13 +85,14 @@ export function useWorkflowDraftPersistence(
     }
   }, [workspaceId])
 
-  const { hydrated, isHydrated } = useDraftServerSync(
-    workspaceId,
-    serverDraft,
-    originalYaml,
-    controllerRef,
-    consumeReapplyConflict
-  )
+  const { hydrated, isHydrated, adoptServerDraft, resolveConflict } =
+    useDraftServerSync(
+      workspaceId,
+      serverDraft,
+      originalYaml,
+      controllerRef,
+      consumeReapplyConflict
+    )
 
   useEffect(() => {
     if (!workspaceId || !hydrated) return
@@ -122,5 +131,7 @@ export function useWorkflowDraftPersistence(
     state: serverDraftLoadError ? { ...state, loadError: true } : state,
     flushNow,
     hasUnsavedChanges,
+    adoptServerDraft,
+    resolveConflict,
   }
 }

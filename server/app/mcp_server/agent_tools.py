@@ -52,12 +52,14 @@ def register_agent_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         derives from the capability (one capability, one main draft per
         workspace), so a capability that already has an Agent — any status —
         returns HTTP 409 naming it; edit that Agent with
-        save_agent_definition_draft instead. Same payload as the save:
-        runtime is one of pi, velites; tools defaults to the catalog default
-        tier; requires_labels declares worker labels ({"label": "value"});
-        config_schema declares tunables as a JSON-Schema subset (see
-        get_authoring_guide §5). Draft only — a human publishes it in Studio
-        before any job can use it."""
+        save_agent_definition_draft instead. Same payload semantics as the
+        save: runtime is one of pi, velites; tools defaults to the catalog
+        default tier; requires_labels declares worker labels
+        ({"label": "value"}); config_schema declares tunables as a JSON-Schema
+        subset (see get_authoring_guide §5). Note both tools are FULL-PAYLOAD:
+        for save_agent_definition_draft an omitted field resets to its default
+        (get_agent_definitions first and echo the values you want kept).
+        Draft only — a human publishes it in Studio before any job can use it."""
         body: dict[str, Any] = {
             "capability": capability,
             "runtime": runtime,

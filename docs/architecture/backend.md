@@ -513,7 +513,7 @@ server/app/
 | StudioContextNode | BaseModel | key: str, capability: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
-| StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, wor... | app/routes/studio_agent_context_contracts.py |
+| StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, dra... | app/routes/studio_agent_context_contracts.py |
 | StudioAgentWorkflowDraftSaveRequest | BaseModel | definition_yaml: str, expected_updated_at: str | app/routes/studio_agent_draft_tools.py |
 | StudioAgentWorkflowDraftResponse | BaseModel | definition_yaml: str | None, updated_at: str | None | app/routes/studio_agent_draft_tools.py |
 | StudioAgentJobSummaryNode | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/studio_agent_job_tool_contracts.py |

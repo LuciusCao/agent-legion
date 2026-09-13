@@ -509,28 +509,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 356
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/shared/draftSaveController.ts
-  reason: '#429 rounds four and closing: flushNow/save return the PUT promise the agent-publish confirm
-    awaits (completion order — the re-read and the confirm endpoint fire only after the draft lands),
-    and the closing round makes the resolved value carry the flush''s terminal result ({ok, state} — the
-    controller resolves on every path and failure lives only in state, so a React-snapshot guard would
-    miss a PUT that fails during the await). The result type plus its contract docstrings are the load-bearing
-    concurrency narrative; splitting them from the state machine would separate the completion-order rules
-    from the code they govern.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 171
-- check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/shared/useWorkflowDraftPersistence.ts
-  reason: '#429 closing P2-1: flushNow now returns the DraftSaveFlushResult (the live terminal state,
-    not the React useState snapshot the dialog''s closure captured at click time — the snapshot guard
-    missed a PUT failing during the await and would publish the stale draft). The unhydrated no-op branch
-    resolves {ok: true, IDLE} so awaiting callers treat it as no-content-no-failure. The typing/return-shape
-    growth rides the same review round; revisit when the draft-save wiring is next reworked.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 95
-- check: architecture.file_budget
   path: frontend/src/lib/queryKeysExtra.ts
   reason: 'Merge-growth class (PR 317 precedent): develop''s #419 connectionKeys and #427 nodeRuns entries
     plus this branch''s studioPublishRequest key (the agent publish request poll, #416) union to one effective
@@ -827,3 +805,101 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
   ceiling: 48
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/WorkflowStudioDraftSaveControl.tsx
+  reason: >-
+    Issue #633 kimi review adds the conflict exit UI (adopt/keep-mine action buttons) to the draft-save
+    conflict loop. The growth is the conflict-UX feature itself (the P1
+    findings demanded explicit exits instead of a one-key silent override);
+    splitting the conflict lifecycle out of the save controller would fork
+    the CAS base bookkeeping it guards. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when the draft-save wiring gets its
+    planned rework or a budget re-balance pass re-registers it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 93
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/serverDraftReapply.ts
+  reason: >-
+    Issue #633 kimi review adds the own-save echo detection (canvasYaml content compare) to the draft-save
+    conflict loop. The growth is the conflict-UX feature itself (the P1
+    findings demanded explicit exits instead of a one-key silent override);
+    splitting the conflict lifecycle out of the save controller would fork
+    the CAS base bookkeeping it guards. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when the draft-save wiring gets its
+    planned rework or a budget re-balance pass re-registers it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 107
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/useServerDraftApply.ts
+  reason: >-
+    Issue #633 kimi review adds the canvasYaml wiring for the echo detection to the draft-save
+    conflict loop. The growth is the conflict-UX feature itself (the P1
+    findings demanded explicit exits instead of a one-key silent override);
+    splitting the conflict lifecycle out of the save controller would fork
+    the CAS base bookkeeping it guards. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when the draft-save wiring gets its
+    planned rework or a budget re-balance pass re-registers it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 57
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/useWorkflowStudio.ts
+  reason: >-
+    Issue #633 kimi review adds the conflict exit fields on the studio API to the draft-save
+    conflict loop. The growth is the conflict-UX feature itself (the P1
+    findings demanded explicit exits instead of a one-key silent override);
+    splitting the conflict lifecycle out of the save controller would fork
+    the CAS base bookkeeping it guards. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when the draft-save wiring gets its
+    planned rework or a budget re-balance pass re-registers it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 101
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/useWorkflowStudioDraftStore.ts
+  reason: >-
+    Issue #633 kimi review adds the conflict exit wiring + canvasYaml feed to the draft-save
+    conflict loop. The growth is the conflict-UX feature itself (the P1
+    findings demanded explicit exits instead of a one-key silent override);
+    splitting the conflict lifecycle out of the save controller would fork
+    the CAS base bookkeeping it guards. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when the draft-save wiring gets its
+    planned rework or a budget re-balance pass re-registers it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 75
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/draftSaveController.ts
+  reason: '#429 rounds four and closing: flushNow/save return the PUT promise the agent-publish
+    confirm awaits (#427). The state machine keeps its single-file shape by design:
+    splitting it would fork the requestId/timer/CAS-baseline invariants it guards.
+    #633 adds the conflict lifecycle (enter/resolve/adopt + autosave suspension);
+    pure state transitions moved to draftSaveConflict.ts. Remove when the draft-save
+    wiring gets its planned rework.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/429
+  ceiling: 171
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/useDraftServerSync.ts
+  reason: >-
+    Issue #633 kimi review P1-2 adds the conflict exits (adoptServerDraft /
+    resolveConflict) to the server-draft wiring hook — they belong beside the
+    conflict surfacing they complete (the same hook drives enterConflict on
+    the server advance). The file was created earlier in this same PR (#633
+    codex review P1-2 reapply wiring) and the initial ratchet landed mid-PR
+    at a smaller shape. Ceiling at actual + 10.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 79
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/useWorkflowDraftPersistence.ts
+  reason: '#429 closing P2-1: flushNow now returns the DraftSaveFlushResult (the live terminal state,
+    not the React useState snapshot the dialog''s closure captured at click time). #633 adds the
+    conflict-exit passthrough (adoptServerDraft/resolveConflict — kimi review P1-2; the exits live
+    in useDraftServerSync and flow through here) and the reapply wiring consumes the same hook.
+    Revisit when the draft-save wiring gets its planned rework.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/429
+  ceiling: 95
