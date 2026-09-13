@@ -195,6 +195,56 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     )
   })
 
+  it('a superseded success still advances the CAS base for the follow-up save', async () => {
+    /* codex review R2 P1：保存 A 在途时用户继续编辑调度 B——A 的成功
+       响应虽被作废（不落 savedAt/不发通知），但它是服务端真值，基线必须
+       前进；否则 B 携带 A 之前的旧基线必然 409，连续编辑被误报成
+       「其它会话更新」并停止自动保存。 */
+    const A_AT = '2026-09-12T11:00:00+00:00'
+    let resolveA: (value: typeof SERVER_DRAFT) => void = () => {}
+    mocks.putWorkflowDraft.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveA = resolve))
+    )
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    // A：edited 草稿的保存（PUT 挂起在途）。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+
+    // A 在途时用户继续编辑 → B 的 debounce 调度作废 A 的 UI 结果。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Third\n',
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    // A 成功返回（被 B 的调度作废）。
+    await act(async () => {
+      resolveA({ definition_yaml: EDITED, updated_at: A_AT })
+    })
+    // B 的 debounce 到期发起 PUT——基线必须是 A 落盘的时间戳。
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
+      'ws1',
+      'key: demo\nlabel: Third\n',
+      { expectedUpdatedAt: A_AT }
+    )
+  })
+
   it('a successful save after a conflict updates the CAS base and clears the flag on the next edit', async () => {
     mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
     const { result, rerender } = renderPersistence({

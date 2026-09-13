@@ -12,6 +12,7 @@ workspace skill DIR, since `_shared` is not a git repo.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -198,3 +199,123 @@ def test_workspace_bound_token_cannot_write_other_workspace(
             ).status_code
             == 403
         )
+
+
+def test_put_rejects_duplicate_paths(client_factory, job_db, shared_home) -> None:
+    """codex review R2 P1: two map.json entries must be a 422 BEFORE any
+    write — the old loop validated only the first match while the write
+    pass applied both, letting a malformed second copy through."""
+    with client_factory(fresh=True) as client:
+        _create_workspace(client)
+        scoped = _scoped(client, job_db)
+        response = scoped.put(
+            f"{_TOOLS}/workspaces/{_WS}/skills-shared",
+            json={
+                "files": [
+                    {"path": "map.json", "content": json.dumps(_MAP)},
+                    {"path": "map.json", "content": "{ not json"},
+                    {"path": "references/a.md", "content": "a"},
+                    {"path": "references/a.md", "content": "b"},
+                ]
+            },
+        )
+        assert response.status_code == 422, response.text
+        body = response.json()
+        paths = {e["path"] for e in body["detail"]["errors"]}
+        assert "map.json" in paths and "references/a.md" in paths
+        # Nothing was written: the live dir stays absent.
+        assert not (shared_home / "_shared").exists()
+
+
+def test_put_full_state_replaces_and_removes_dropped_files(
+    client_factory, job_db, shared_home
+) -> None:
+    """codex review R2 P2: the PUT is a FULL-STATE save — files omitted
+    from the payload disappear (rename/retire of a material is otherwise
+    impossible: the old loop only ever overwrote targets)."""
+    with client_factory(fresh=True) as client:
+        _create_workspace(client)
+        scoped = _scoped(client, job_db)
+        first = scoped.put(
+            f"{_TOOLS}/workspaces/{_WS}/skills-shared",
+            json={
+                "files": [
+                    {"path": "map.json", "content": json.dumps(_MAP)},
+                    {"path": "references/prompt-style.md", "content": "v1"},
+                    {"path": "references/old.md", "content": "obsolete"},
+                ]
+            },
+        )
+        assert first.status_code == 200, first.text
+        # Second PUT drops references/old.md and renames the mapping.
+        new_map = {
+            "version": 1,
+            "materials": [{"source": "references/style-v2.md", "skills": ["write-script"]}],
+        }
+        second = scoped.put(
+            f"{_TOOLS}/workspaces/{_WS}/skills-shared",
+            json={
+                "files": [
+                    {"path": "map.json", "content": json.dumps(new_map)},
+                    {"path": "references/style-v2.md", "content": "v2"},
+                ]
+            },
+        )
+        assert second.status_code == 200, second.text
+        payload = second.json()
+        assert [f["path"] for f in payload["files"]] == ["references/style-v2.md"]
+        # The dropped material is gone from disk too, and no staging/retire
+        # leftovers sit beside the live dir.
+        shared = shared_home / "_shared"
+        assert not (shared / "references" / "old.md").exists()
+        assert not (shared / "references" / "prompt-style.md").exists()
+        assert sorted(p.name for p in shared_home.iterdir()) == ["_shared"]
+
+
+def test_put_staging_failure_leaves_previous_state_intact(
+    client_factory, job_db, shared_home, monkeypatch
+) -> None:
+    """codex review R2 P1: a mid-write failure must not half-apply — the
+    staged-swap writes everything into a temp dir first, so a failing
+    write leaves the live dir exactly as it was. The operational IO error
+    surfaces as SharedMaterialWriteError (unmapped JobServiceError → 500,
+    the SkillGitError convention)."""
+    from server.app.services.skill_shared_store import (
+        SharedMaterialWriteError,
+        write_shared_materials,
+    )
+
+    with client_factory(fresh=True) as client:
+        _create_workspace(client)
+        scoped = _scoped(client, job_db)
+        first = scoped.put(
+            f"{_TOOLS}/workspaces/{_WS}/skills-shared",
+            json={
+                "files": [
+                    {"path": "map.json", "content": json.dumps(_MAP)},
+                    {"path": "references/prompt-style.md", "content": "v1"},
+                ]
+            },
+        )
+        assert first.status_code == 200, first.text
+
+        shared = shared_home / "_shared"
+        real_write = Path.write_text
+
+        def failing_write(self, data, encoding=None, errors=None):
+            # Fail only inside the staging dir (live-dir reads still work).
+            if ".tmp-" in str(self):
+                raise OSError("disk full")
+            return real_write(self, data, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "write_text", failing_write)
+        with pytest.raises(SharedMaterialWriteError):
+            write_shared_materials(
+                shared,
+                [("map.json", json.dumps(_MAP)), ("references/prompt-style.md", "v2-never")],
+                shared_home,
+            )
+        monkeypatch.setattr(Path, "write_text", real_write)
+        # The live dir is untouched: old content, no staging leftovers.
+        assert (shared / "references" / "prompt-style.md").read_text(encoding="utf-8") == "v1"
+        assert sorted(p.name for p in shared_home.iterdir()) == ["_shared"]

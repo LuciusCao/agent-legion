@@ -17,6 +17,8 @@ import {
  * PUT 失败指数退避重试（≤2 次，仍败保持 error，后续编辑会重新调度）。
  * 并发规则：每次调度递增 requestId，迟到的响应/重试发现 requestId 过期即
  * 作废（last-write-wins）；回退到已持久化值且仍有在途写入时照常补存。
+ * 作废的成功响应仍推进 CAS 基线（#633 codex review R2 P1）——它是服务端
+ * 真值，后续请求必须以它竞争，否则连续编辑会被误报成会话冲突。
  * #633：PUT 携带 CAS 基线，409 冲突进入专属 conflict 态（不自动重试
  * ——同一过期时间戳重试只会再 409），同时把 CAS 基线推进到冲突响应的
  * current_draft.updated_at（服务端真值），用户继续编辑后的下一次保存以新
@@ -172,10 +174,14 @@ export class DraftSaveController {
       this.put(yaml, keepalive, expectedAt)
         .then((response) => {
           if (this.inFlight === requestId) this.inFlight = 0
-          if (this.requestCounter !== requestId)
-            return resolve(this.successResult())
+          // #633 codex review R2 P1：被后续编辑作废的成功响应仍是服务端
+          // 真值——A 落盘后 B 若仍携带 A 之前的基线必然 409（连续编辑被
+          // 误报成「其它会话更新」）。作废分支只作废 UI 状态（不改
+          // savedAt/不发通知），基线照常推进，让 B 的 PUT 以新基线竞争。
           this.lastPersisted = yaml
           this.lastPersistedAt = response.updated_at ?? null
+          if (this.requestCounter !== requestId)
+            return resolve(this.successResult())
           const savedAt = response.updated_at ?? null
           this.setState({ status: 'saved', savedAt })
           resolve(this.successResult())
@@ -204,7 +210,6 @@ export class DraftSaveController {
     })
   }
 
-  /** no-op / 过期作废：等待方继续自己的重读校准（不构成失败信号）。 */
   private successResult(): DraftSaveFlushResult {
     return { ok: true, state: this.state }
   }

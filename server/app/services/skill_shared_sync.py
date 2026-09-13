@@ -22,6 +22,9 @@ source, conflicting hand-supplied path) is a pre-write 422
 existing path-safety, untracked-overwrite refusal, contract re-check,
 commit and tag then see the injected files like agent-authored ones.
 Workspaces without ``_shared`` get a no-op plan (zero behavior change).
+The map+material read runs under the ``_shared`` edit lock (codex review
+R2 P1: a concurrent full-state PUT must not let a save commit a mix of
+the old and new material generations).
 """
 
 from __future__ import annotations
@@ -32,12 +35,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from server.app.services.skill_repo import MAX_FILE_BYTES, TEXT_EXTENSIONS
 from server.app.services.skill_repo_edit import SkillEditValidationError
-from server.app.skills.skill_roots import workspace_skill_dir
+from server.app.services.skill_shared_store import (
+    MAP_PATH,
+    read_shared_text,
+    shared_dir_for,
+    shared_edit_lock,
+)
 
-SHARED_DIR_NAME = "_shared"
-MAP_PATH = "map.json"
 # Skill names are the second key segment — same dir-name shape the skills
 # root enforces for workspace ids (skill_roots._WORKSPACE_ID_RE).
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -65,26 +70,6 @@ class SharedSyncPlan:
     """Pre-write sync plan for one ``save_version`` call."""
 
     files: tuple[tuple[str, str], ...] = ()  # (relative path, content) to inject
-
-
-def shared_dir_for(base_dir: Path, skill_key: str) -> Path:
-    """The workspace ``_shared`` dir behind a skill key (first segment =
-    workspace id by skills-root convention); the key shape itself is
-    validated by the caller's own ``_skill_dir`` guard."""
-    workspace_id = skill_key.split("/", 1)[0]
-    return workspace_skill_dir(workspace_id, base_dir=base_dir) / SHARED_DIR_NAME
-
-
-def _read_shared_text(path: Path) -> str:
-    """Read one shared file under the skill-file read rules (text
-    extensions only, no symlinks, 128 KB cap, UTF-8 with replacement) —
-    the same contract as the catalog read, so ``_shared`` files and skill
-    repo files cannot drift apart in what the surface accepts."""
-    if path.suffix.lower() not in TEXT_EXTENSIONS:
-        raise OSError(f"unsupported file extension: {path.name!r}")
-    if path.is_symlink() or not path.is_file():
-        raise OSError(f"not a regular file: {path.name!r}")
-    return path.read_bytes()[:MAX_FILE_BYTES].decode("utf-8", errors="replace")
 
 
 def _invalid(errors: list[dict[str, str]]) -> SkillEditValidationError:
@@ -165,7 +150,7 @@ def load_shared_map(shared_dir: Path) -> SharedMap | None:
     if not map_path.is_file():
         raise _invalid([{"path": MAP_PATH, "error": f"{MAP_PATH} is missing"}])
     try:
-        raw = json.loads(_read_shared_text(map_path))
+        raw = json.loads(read_shared_text(map_path))
     except (OSError, UnicodeDecodeError) as exc:
         raise _invalid([{"path": MAP_PATH, "error": f"unreadable: {exc}"}]) from exc
     except json.JSONDecodeError as exc:
@@ -185,37 +170,44 @@ def plan_shared_sync(
     mapped source, or a caller-supplied file colliding with a mapped
     shared path — the shared copy is authoritative for mapped paths, so a
     hand-supplied stale copy must not silently shadow a newer shared
-    revision (the agent removes those paths and re-saves).
+    revision (the agent removes those paths and re-saves). The map and
+    material reads run under the ``_shared`` edit lock so a concurrent
+    full-state PUT can never be observed half-applied (codex review R2
+    P1: the map generation and the material contents must match).
     """
-    shared_map = load_shared_map(shared_dir_for(base_dir, skill_key))
-    if shared_map is None:
-        return SharedSyncPlan()
-    skill_name = skill_key.split("/", 1)[1]
-    mapped = [m for m in shared_map.materials if skill_name in m.skills]
-    if not mapped:
-        return SharedSyncPlan()
-    supplied = {path for path, _ in files}
-    conflicts = sorted(supplied & {m.source for m in mapped})
-    if conflicts:
-        raise _invalid(
-            [
-                {
-                    "path": path,
-                    "error": "path is a mapped shared material (the shared copy wins); "
-                    "remove it from the save payload",
-                }
-                for path in conflicts
-            ]
-        )
-    errors: list[dict[str, str]] = []
-    injected: list[tuple[str, str]] = []
-    for material in mapped:
-        try:
-            content = _read_shared_text(shared_map.shared_dir / material.source)
-        except (OSError, UnicodeDecodeError) as exc:
-            errors.append({"path": material.source, "error": f"shared source unreadable: {exc}"})
-            continue
-        injected.append((material.source, content))
-    if errors:
-        raise _invalid(errors)
-    return SharedSyncPlan(files=tuple(injected))
+    shared_dir = shared_dir_for(base_dir, skill_key)
+    with shared_edit_lock(shared_dir, base_dir):
+        shared_map = load_shared_map(shared_dir)
+        if shared_map is None:
+            return SharedSyncPlan()
+        skill_name = skill_key.split("/", 1)[1]
+        mapped = [m for m in shared_map.materials if skill_name in m.skills]
+        if not mapped:
+            return SharedSyncPlan()
+        supplied = {path for path, _ in files}
+        conflicts = sorted(supplied & {m.source for m in mapped})
+        if conflicts:
+            raise _invalid(
+                [
+                    {
+                        "path": path,
+                        "error": "path is a mapped shared material (the shared copy wins); "
+                        "remove it from the save payload",
+                    }
+                    for path in conflicts
+                ]
+            )
+        errors: list[dict[str, str]] = []
+        injected: list[tuple[str, str]] = []
+        for material in mapped:
+            try:
+                content = read_shared_text(shared_map.shared_dir / material.source)
+            except (OSError, UnicodeDecodeError) as exc:
+                errors.append(
+                    {"path": material.source, "error": f"shared source unreadable: {exc}"}
+                )
+                continue
+            injected.append((material.source, content))
+        if errors:
+            raise _invalid(errors)
+        return SharedSyncPlan(files=tuple(injected))

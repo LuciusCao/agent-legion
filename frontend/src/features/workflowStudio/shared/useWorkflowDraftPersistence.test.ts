@@ -332,17 +332,21 @@ describe('useWorkflowDraftPersistence', () => {
         updated_at: '2026-08-27T02:00:00+00:00',
       })
     })
-    // 回退后补存 A（last-write-wins 把服务端的 B 改回来）。
+    // 回退后补存 A（last-write-wins 把服务端的 B 改回来）。#633 codex
+    // review R2 P1：补存 A 的 CAS 基线是 B 落盘的时间戳（B 的迟到成功
+    // 响应仍是服务端真值——基线已推进；带 never-saved 会 409）。
     await act(async () => {
       vi.advanceTimersByTime(850)
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: A\n',
-      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
+      {
+        expectedUpdatedAt: '2026-08-27T02:00:00+00:00',
+      }
     )
 
-    // lastPersisted 未被 B 污染：再编辑为 C 照常保存。
+    // lastPersisted 内容未被 B 污染；再编辑为 C 以 B 的时间戳竞争。
     mocks.putWorkflowDraft.mockResolvedValue(SERVER_DRAFT)
     rerender({
       workspaceId: 'ws1',
@@ -356,7 +360,9 @@ describe('useWorkflowDraftPersistence', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: C\n',
-      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
+      {
+        expectedUpdatedAt: '2026-08-27T02:00:00+00:00',
+      }
     )
   })
 

@@ -1,7 +1,7 @@
 """Studio-agent shared skill material tool endpoints (issue #633).
 
 Read (``GET .../skills-shared``) and author (``PUT .../skills-shared``)
-for a workspace's ``_shared`` materials — the shared references/scripts
+a workspace's ``_shared`` materials — the shared references/scripts
 a workspace's skills consume via ``_shared/map.json``, synced into each
 mapped skill's repo at ``save_skill_version`` time (STUDIO-AGENT-001:
 draft-only; the sync lands in the LOCAL skill commits, never in the DB
@@ -14,11 +14,14 @@ materials are skill-authoring infrastructure; ``studio_agent_tools.py``
 and ``routes/__init__.py`` are at frozen budget ceilings).
 
 ``_shared`` is NOT a git repo in v1 — the mapped skills' commits record
-the synced copies, which IS the audit trail. Writes validate EVERYTHING
-first (path safety, map.json schema, per-file bounds), then write all
-files; a crash mid-write can leave a partially updated ``_shared``
-(acceptable v1: the next PUT is full-state, and a broken map fails the
-next save loudly with 422 rather than silently skipping).
+the synced copies, which IS the audit trail. The PUT validates
+EVERYTHING first (path safety, duplicate resolved paths, map.json
+schema, per-file bounds), then applies the full state through the
+staged-swap in ``skill_shared_store.write_shared_materials``: readers
+see old-or-new (never mixed), a mid-write failure leaves the previous
+state in place, and files omitted from the payload disappear (the
+replaced directory is the delete pass). GET reads a lock-consistent
+snapshot.
 """
 
 from __future__ import annotations
@@ -40,14 +43,15 @@ from server.app.routes.studio_agent_shared_contracts import (
     SharedMaterialsSaveRequest,
 )
 from server.app.services.job_errors import NotFoundError
-from server.app.services.skill_repo import MAX_FILE_BYTES, TEXT_EXTENSIONS
 from server.app.services.skill_repo_edit import SkillEditValidationError
-from server.app.services.skill_shared_sync import (
+from server.app.services.skill_shared_store import (
     MAP_PATH,
     SHARED_DIR_NAME,
-    load_shared_map,
-    validate_materials,
+    read_shared_files,
+    shared_edit_lock,
+    write_shared_materials,
 )
+from server.app.services.skill_shared_sync import load_shared_map, validate_materials
 from server.app.settings import Settings
 from server.app.skills.skill_roots import workspace_skill_dir
 
@@ -58,34 +62,6 @@ def _shared_dir(job_db: JobQueries, workspace_id: str) -> Path:
     if job_db.get_workspace(workspace_id) is None:
         raise_job_http_error(NotFoundError("Workspace not found"))
     return workspace_skill_dir(workspace_id) / SHARED_DIR_NAME
-
-
-def _read_files(shared_dir: Path) -> list[SharedMaterialFile]:
-    """Readable shared files — same shape and rules as the skill detail
-    read (text extensions only, symlinks skipped, 128 KB cap)."""
-    files: list[SharedMaterialFile] = []
-    for folder_name in _MATERIAL_DIRS:
-        folder = shared_dir / folder_name
-        if not folder.is_dir():
-            continue
-        for path in sorted(folder.rglob("*")):
-            if (
-                not path.is_file()
-                or path.is_symlink()
-                or path.suffix.lower() not in TEXT_EXTENSIONS
-            ):
-                continue
-            size = path.stat().st_size
-            raw = path.read_bytes()[:MAX_FILE_BYTES]
-            files.append(
-                SharedMaterialFile(
-                    path=path.relative_to(shared_dir).as_posix(),
-                    size=size,
-                    content=raw.decode("utf-8", errors="replace"),
-                    truncated=size > MAX_FILE_BYTES,
-                )
-            )
-    return files
 
 
 def _load_map_json(shared_dir: Path) -> dict:
@@ -117,13 +93,19 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
     )
     def get_shared_materials(workspace_id: str) -> SharedMaterialsResponse:
         shared_dir = _shared_dir(job_db, workspace_id)
-        if load_shared_map(shared_dir) is None:
-            return SharedMaterialsResponse(workspace_id=workspace_id, map=None, files=[])
-        return SharedMaterialsResponse(
-            workspace_id=workspace_id,
-            map=_load_map_json(shared_dir),
-            files=_read_files(shared_dir),
-        )
+        # Lock-consistent snapshot (codex review R2 P1): the map and the
+        # files must come from the same generation, never a swap in between.
+        with shared_edit_lock(shared_dir, shared_dir.parent.parent):
+            if load_shared_map(shared_dir) is None:
+                return SharedMaterialsResponse(workspace_id=workspace_id, map=None, files=[])
+            return SharedMaterialsResponse(
+                workspace_id=workspace_id,
+                map=_load_map_json(shared_dir),
+                files=[
+                    SharedMaterialFile(**item)
+                    for item in read_shared_files(shared_dir, _MATERIAL_DIRS)
+                ],
+            )
 
     @router.put(
         "/studio-agent/tools/workspaces/{workspace_id}/skills-shared",
@@ -135,7 +117,10 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
         shared_dir = _shared_dir(job_db, workspace_id)
         root = shared_dir.resolve()
         errors: list[dict[str, str]] = []
-        targets: list[tuple[Path, str]] = []
+        # Validated relative paths → content; duplicates are rejected, not
+        # last-wins (codex review R2 P1: two map.json entries meant only the
+        # first was validated while the write loop applied both).
+        targets: dict[str, str] = {}
         for item in payload.files:
             parts = PurePosixPath(item.path).parts
             # Only map.json sits at the root; everything else must live
@@ -161,15 +146,18 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
             except ValueError:
                 errors.append({"path": item.path, "error": "path escapes the _shared directory"})
                 continue
-            targets.append((resolved, item.content))
+            relative = resolved.relative_to(root).as_posix()
+            if relative in targets:
+                errors.append(
+                    {"path": relative, "error": "duplicate path in payload (map to ONE file)"}
+                )
+                continue
+            targets[relative] = item.content
         if errors:
             raise_job_http_error(SkillEditValidationError("Invalid shared material paths", errors))
         # map.json presence + schema: everything validated before any write.
-        map_target = next(
-            (t for t in targets if t[0] == root / MAP_PATH),
-            None,
-        )
-        if map_target is None:
+        map_content = targets.get(MAP_PATH)
+        if map_content is None:
             raise_job_http_error(
                 SkillEditValidationError(
                     "Invalid shared materials map",
@@ -177,7 +165,7 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
                 )
             )
         try:
-            parsed = json.loads(map_target[1])
+            parsed = json.loads(map_content)
         except json.JSONDecodeError as exc:
             raise_job_http_error(
                 SkillEditValidationError(
@@ -196,9 +184,10 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
             validate_materials(parsed.get("materials"))
         except SkillEditValidationError as exc:
             raise_job_http_error(exc)
-        for path, content in targets:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+        # Full-state staged swap: validation-failure paths above never
+        # touched disk; a staging failure leaves the live dir untouched,
+        # and the swap deletes whatever the payload omitted.
+        write_shared_materials(shared_dir, list(targets.items()), shared_dir.parent.parent)
         return get_shared_materials(workspace_id)
 
     return router
