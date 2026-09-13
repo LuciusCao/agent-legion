@@ -26,6 +26,11 @@ _TRIO = [
     SkillFileWrite(path="references/output-contract.md", content="# contract\n"),
     SkillFileWrite(path="scripts/validate_output.py", content="raise SystemExit(0)\n"),
 ]
+_CONTRACT_YAML = "files:\n  - path: out.md\n    format: text\n"
+_QUARTET = [
+    *_TRIO,
+    SkillFileWrite(path="contract.yaml", content=_CONTRACT_YAML),
+]
 
 
 class _FakeJobDB:
@@ -84,7 +89,7 @@ def test_failed_git_step_removes_partial_repo(home, tmp_path) -> None:
     monkey.setattr(SkillCreationService, "_git", staticmethod(failing_git))
     try:
         with pytest.raises(SkillGitError):
-            service.create_skill("ws-1", "broken", list(_TRIO), "v0.1.0", "m")
+            service.create_skill("ws-1", "broken", list(_QUARTET), "v0.1.0", "m")
     finally:
         monkey.undo()
 
@@ -94,7 +99,7 @@ def test_failed_git_step_removes_partial_repo(home, tmp_path) -> None:
     assert not repo.exists()
 
     # A retry (with git healthy again) succeeds — no wedged state.
-    result = service.create_skill("ws-1", "broken", list(_TRIO), "v0.1.0", "m")
+    result = service.create_skill("ws-1", "broken", list(_QUARTET), "v0.1.0", "m")
     assert result["key"] == "ws-1/broken"
     assert repo.is_dir()
 
@@ -118,4 +123,45 @@ def test_cleanup_refuses_to_delete_a_swapped_directory(home, tmp_path) -> None:
 
 def test_create_skill_unknown_workspace_is_404(home, tmp_path) -> None:
     with pytest.raises(NotFoundError):
-        _service(tmp_path / "runs").create_skill("ws-x", "a", list(_TRIO), "v1", "m")
+        _service(tmp_path / "runs").create_skill("ws-x", "a", list(_QUARTET), "v1", "m")
+
+
+# --- #542: the birth gate requires the four-file contract set ---
+
+
+def test_create_skill_without_contract_yaml_is_rejected(home, tmp_path) -> None:
+    """New skills are born with the full set: a trio-only payload (the
+    pre-#542 shape) is a 422 naming the missing contract.yaml."""
+    from server.app.services.skill_editing import SkillEditValidationError
+
+    with pytest.raises(SkillEditValidationError) as excinfo:
+        _service(tmp_path / "runs").create_skill("ws-1", "trio-only", list(_TRIO), "v1", "m")
+    assert any(e["path"] == "contract.yaml" for e in excinfo.value.errors)
+    assert not (home / "ws-1" / "trio-only").exists()
+
+
+@pytest.mark.parametrize(
+    "bad_yaml",
+    [
+        "files: [",
+        "files: []",
+        "files:\n  - path: /abs.md\n    format: text\n",
+        "files:\n  - path: a.json\n    format: json\n",
+        "files:\n  - path: a.json\n    format: json\n    schema: {type: nope}\n",
+    ],
+)
+def test_create_skill_with_malformed_contract_yaml_is_rejected(
+    home, tmp_path, bad_yaml: str
+) -> None:
+    """A malformed contract.yaml is the same 422 as a missing file — the
+    payload is validated before anything touches the disk."""
+    from server.app.services.skill_editing import SkillEditValidationError
+
+    files = [
+        *_TRIO,
+        SkillFileWrite(path="contract.yaml", content=bad_yaml),
+    ]
+    with pytest.raises(SkillEditValidationError) as excinfo:
+        _service(tmp_path / "runs").create_skill("ws-1", "broken-contract", files, "v1", "m")
+    assert any("contract.yaml" in e["path"] for e in excinfo.value.errors)
+    assert not (home / "ws-1" / "broken-contract").exists()

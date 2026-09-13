@@ -426,11 +426,13 @@ def test_save_skill_version_posts_body(recorded) -> None:
 def test_create_skill_posts_workspace_scoped_body(recorded) -> None:
     # #633: create_skill is workspace-scoped (the repo lands under the
     # calling workspace's skill dir), so the tool path carries workspace_id.
+    # #542: the payload must carry the four-file contract set.
     server, calls = recorded
     files = [
         {"path": "SKILL.md", "content": "# New\n"},
         {"path": "references/output-contract.md", "content": "# contract\n"},
         {"path": "scripts/validate_output.py", "content": "raise SystemExit(0)\n"},
+        {"path": "contract.yaml", "content": "files:\n  - path: out.md\n    format: text\n"},
     ]
     _run_tool(
         server,

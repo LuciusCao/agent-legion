@@ -1,152 +1,200 @@
 exemptions:
 - check: architecture.file_budget
+  path: velites/src/contract.rs
+  reason: 'Issue #542 migrates the machine-readable contract location to the skill-root contract.yaml:
+    the parse tiering (root wins completely and fails closed on a malformed file, embedded-block fallback
+    stays for the deprecation window) lands in Contract::parse plus three new-tier unit tests — ~116 effective
+    lines past the 513 baseline, still under the 800 soft budget. The engine is the single shared implementation
+    for the validate tool, the --require-output gate and the validate subcommand (three consumers, one
+    module); the fallback tier and the tier tests are inseparable from the parse they pin. Remove when
+    the deprecated embedded-block tier retires (planned follow-up once example/instance skills are migrated)
+    or the unit tests move to a sister integration module under velites/tests/.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
+  ceiling: 637
+- check: architecture.file_budget
+  path: server/app/services/skill_edit_checks.py
+  reason: 'Issue #542 adds the strict root contract.yaml validation (PyYAML parse + structure + jsonschema
+    compile check) and the missing-contract warning channel to the shared skill-edit checks module — the
+    graded format layer (error vs warning) that save_version/create_skill and the validate tool all consume.
+    ~123 effective lines past the 61 baseline. The parser is the parity anchor for the velites Contract::parse
+    semantics; splitting it out would fork the graded rules from the path-safety helpers the two creation/edit
+    flows already share here. Remove when the contract.yaml parser moves into its own module (e.g. a skills/contract_probe
+    sibling) or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
+  ceiling: 194
+- check: architecture.file_budget
+  path: server/app/workflows/skill_repo_gate.py
+  reason: 'Issue #542 adds the advisory publish pass (skill_repo_publish_warnings) beside the error pass;
+    the node-to-skill resolution walk was extracted into the shared _agent_node_skills helper so the two
+    lists cannot drift — 70 effective lines vs the 50 baseline. The gate is the single publish-time seam
+    for skill presence; splitting the warning pass into a sibling module would fork the resolution loop
+    it must share. Remove when the publish validation gains a structured multi-pass framework or a budget
+    re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
+  ceiling: 80
+- check: architecture.file_budget
+  path: server/app/services/skill_creation.py
+  reason: 'Issue #542 makes create_skill the strict birth gate: the four-file set check plus the proposed-payload
+    contract.yaml strict parse (scratch-dir staging of the proposed text) — 205 vs the 199 baseline. The
+    birth gate belongs with the create flow it guards. Remove when a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
+  ceiling: 215
+- check: architecture.file_budget
+  path: server/app/services/skill_validator.py
+  reason: 'Issue #542 adds the display-only machine-contract tier warnings to the human-side validator
+    (embedded-block deprecation nudge / existence-only notice) — 110 vs the 105 baseline. The tier probe
+    is one call plus phrasing; the validator stays the single editor-side read model. Remove when a budget
+    re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
+  ceiling: 120
+- check: architecture.file_budget
+  path: server/app/services/studio_publish_requests.py
+  reason: 'Issue #542 computes the read-side publish advisories (skill-contract warnings) at request/status/poll
+    time via _draft_warnings and attaches them with with_draft_warnings — 153 vs the 139 baseline. The
+    advisory enrichment must sit on the same service methods the routes already call; persisting instead
+    would need the schema change #542 explicitly avoids. Remove when the publish-request read model gets
+    its planned split or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
+  ceiling: 163
+- check: architecture.file_budget
+  path: server/app/routes/studio_agent_skill_contracts.py
+  reason: 'Issue #542 adds the warnings channel to the validate/save-version tool responses (SkillValidationWarning
+    model + the two response fields) — 35 vs the 30 baseline. The contracts file is the single wire-shape
+    anchor for the studio-agent skill tools. Remove when a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
+  ceiling: 45
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/validation/WorkflowPublishReviewDialog.tsx
+  reason: 'Issue #542 adds the optional advisories block (warning-colored list, data-testid publish-advisories)
+    to the shared publish review dialog — 87 vs the 74 baseline. The dialog is shared by the manual and
+    agent publish flows; the advisory presentation is one guarded block. Remove when a budget re-balance
+    re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
+  ceiling: 97
+- check: architecture.file_budget
   path: scripts/architecture/effective_lines.py
-  reason: >-
-    Issue #610 adds the docstring-row detection to the Python effective-line
-    metric (ast walk over module/class/function first statements plus the
-    own-row boundary check against code sharing the row) — ~4 effective
-    lines past the 88 baseline. The metric module IS the single counting
-    authority every budget decision reads; splitting the docstring scanner
-    into a sister module would fork the metric from the file that gates it.
-    Ceiling at actual + 10 per the dated-exemption convention. Remove when
-    the metric module gets its planned split (scanner vs counting) or a
-    budget re-balance pass re-registers it.
+  reason: 'Issue #610 adds the docstring-row detection to the Python effective-line metric (ast walk over
+    module/class/function first statements plus the own-row boundary check against code sharing the row)
+    — ~4 effective lines past the 88 baseline. The metric module IS the single counting authority every
+    budget decision reads; splitting the docstring scanner into a sister module would fork the metric
+    from the file that gates it. Ceiling at actual + 10 per the dated-exemption convention. Remove when
+    the metric module gets its planned split (scanner vs counting) or a budget re-balance pass re-registers
+    it.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/610
   ceiling: 96
 - check: architecture.file_budget
   path: frontend/src/pages/globalSettings/instanceSettingsCapacityFields.ts
-  reason: >-
-    Issue #569 adds the result-validate pool knob beside its #554
-    result_unpack sibling: one field entry (path, label, integer, allowZero,
-    max) in the same table shape. Issue #591 adds the result-commit batching
-    kill-switch toggle to the same capacity group (the toggle entry body
-    lives in instanceSettingsFieldTypes.ts since #612's re-baseline left
-    every group table at its wall — only the reference registers here). The
-    capacity-knob group IS the form surface for the executor-runtime pool
-    sizes; splitting a one-entry overflow into a sister module would fork
-    the group. Remove when the instance-settings form gets its planned
-    structural split or a knob retirement frees headroom.
+  reason: 'Issue #569 adds the result-validate pool knob beside its #554 result_unpack sibling: one field
+    entry (path, label, integer, allowZero, max) in the same table shape. Issue #591 adds the result-commit
+    batching kill-switch toggle to the same capacity group (the toggle entry body lives in instanceSettingsFieldTypes.ts
+    since #612''s re-baseline left every group table at its wall — only the reference registers here).
+    The capacity-knob group IS the form surface for the executor-runtime pool sizes; splitting a one-entry
+    overflow into a sister module would fork the group. Remove when the instance-settings form gets its
+    planned structural split or a knob retirement frees headroom.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/569
   ceiling: 42
 - check: architecture.file_budget
   path: frontend/src/pages/globalSettings/instanceSettingsFields.ts
-  reason: >-
-    Issue #521 adds the result-commit gate knob to the Worker-limits field
-    group: one field entry (path, label, integer, allowZero) in the same
-    table shape. The list IS the form surface.
+  reason: 'Issue #521 adds the result-commit gate knob to the Worker-limits field group: one field entry
+    (path, label, integer, allowZero) in the same table shape. The list IS the form surface.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 122
 - check: architecture.file_budget
   path: server/app/agent_broker/broker.py
-  reason: >-
-    Issue #591 threads the optional result_batcher seam through mark_done
-    (submit branch + the _mark_done_direct rename) plus the constructor
-    parameter — the batched arm itself lives in sister module
-    mark_done_batch.py, but the submit hop must sit on the method every
-    caller already reaches (the batcher and the direct path share one entry
-    point). Re-sized down from 268 under #612's docstring-free metric
-    (docstring rows no longer count). Ceiling at actual + 10 per the
-    dated-exemption convention (#521 leases.py precedent). Remove when the
-    broker gets its planned structural split or the group-commit queue
-    retires.
+  reason: 'Issue #591 threads the optional result_batcher seam through mark_done (submit branch + the
+    _mark_done_direct rename) plus the constructor parameter — the batched arm itself lives in sister
+    module mark_done_batch.py, but the submit hop must sit on the method every caller already reaches
+    (the batcher and the direct path share one entry point). Re-sized down from 268 under #612''s docstring-free
+    metric (docstring rows no longer count). Ceiling at actual + 10 per the dated-exemption convention
+    (#521 leases.py precedent). Remove when the broker gets its planned structural split or the group-commit
+    queue retires.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
   ceiling: 234
 - check: architecture.file_budget
   path: server/app/bootstrap/agent_plane.py
-  reason: >-
-    Issue #591 constructs the ResultCommitBatcher before the broker and the
-    lease repository (both receive it) and exposes it on the AgentPlane
-    dataclass for the lifespan start/stop — the plane is the composition
-    root the wiring must read at. The codex review round (C1) added the
-    result_batching gate parameter so a start_worker=False app builds no
-    batcher at all. Re-sized down from 101 under #612's docstring-free
-    metric. Ceiling at actual + 5 per the dated-exemption convention.
-    Remove when the plane assembly gets its planned restructure.
+  reason: 'Issue #591 constructs the ResultCommitBatcher before the broker and the lease repository (both
+    receive it) and exposes it on the AgentPlane dataclass for the lifespan start/stop — the plane is
+    the composition root the wiring must read at. The codex review round (C1) added the result_batching
+    gate parameter so a start_worker=False app builds no batcher at all. Re-sized down from 101 under
+    #612''s docstring-free metric. Ceiling at actual + 5 per the dated-exemption convention. Remove when
+    the plane assembly gets its planned restructure.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
   ceiling: 93
 - check: architecture.file_budget
   path: server/app/agent_control/completion.py
-  reason: >-
-    Issue #521 adds the stage boundary marks (unpack/artifacts_verify/
-    validate/artifacts_upload) inline between the physical steps they
-    separate; each mark is one line at the exact boundary it names. The
-    marks retire with the stage split's phase 2 rework (per-stage slimming
-    restructures finish() and re-budgets the module).
+  reason: 'Issue #521 adds the stage boundary marks (unpack/artifacts_verify/ validate/artifacts_upload)
+    inline between the physical steps they separate; each mark is one line at the exact boundary it names.
+    The marks retire with the stage split''s phase 2 rework (per-stage slimming restructures finish()
+    and re-budgets the module).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 176
 - check: architecture.file_budget
   path: server/app/executors/leases.py
-  reason: >-
-    Issue #521 threads the optional stage_timer keyword through finish()
-    into _lease_write_paths; the parameter must ride the same retry wrapper
-    as the result it instruments (a retry re-runs the stages it re-measures).
+  reason: 'Issue #521 threads the optional stage_timer keyword through finish() into _lease_write_paths;
+    the parameter must ride the same retry wrapper as the result it instruments (a retry re-runs the stages
+    it re-measures).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 127
 - check: architecture.file_budget
   path: server/app/services/path_hygiene.py
-  reason: >-
-    Issue #521 adds the per-path warn dedupe (set + lock + keyed signature)
-    and the one-time rewrite orchestration (rebase rule, chunk loop, two
-    daemon-thread kickers). The rewrite rides the facade queries added in
-    jobs/queries/path_hygiene; the service keeps the warnings/report/rewrite
-    story in one module. Shrinks back once every deployment's stored
-    absolute-path rows have been rewritten and the rewrite pass can drop.
+  reason: 'Issue #521 adds the per-path warn dedupe (set + lock + keyed signature) and the one-time rewrite
+    orchestration (rebase rule, chunk loop, two daemon-thread kickers). The rewrite rides the facade queries
+    added in jobs/queries/path_hygiene; the service keeps the warnings/report/rewrite story in one module.
+    Shrinks back once every deployment''s stored absolute-path rows have been rewritten and the rewrite
+    pass can drop.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 104
 - check: architecture.file_budget
   path: server/app/routes/runtime_profile_contracts.py
-  reason: >-
-    Issue #521 mirrors the fourteen result-stage gauge columns into
-    ProfileBucket, the same field-list growth the v78 claim-stage split
-    made. The model IS the response contract.
+  reason: 'Issue #521 mirrors the fourteen result-stage gauge columns into ProfileBucket, the same field-list
+    growth the v78 claim-stage split made. The model IS the response contract.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
   ceiling: 55
 - check: architecture.file_budget
   path: worker/cli_args.py
-  reason: >-
-    The workerctl --proxy flag (#444 rework) gives headless workers (Docker
-    form, console behind an ssh tunnel) the same config surface the UI
-    already has: the console path needs a tunnel and hand-editing the
-    mounted yaml triggers the supervisor divergence warning without taking
-    effect. Five lines of honest cost (one argparse declaration with its
-    help text, one payload mapping entry); the file is a flat argv table
-    where each line IS a flag — nothing to split without forking the
-    parser. Remove together with the supervisor spawn split (#451).
+  reason: 'The workerctl --proxy flag (#444 rework) gives headless workers (Docker form, console behind
+    an ssh tunnel) the same config surface the UI already has: the console path needs a tunnel and hand-editing
+    the mounted yaml triggers the supervisor divergence warning without taking effect. Five lines of honest
+    cost (one argparse declaration with its help text, one payload mapping entry); the file is a flat
+    argv table where each line IS a flag — nothing to split without forking the parser. Remove together
+    with the supervisor spawn split (#451).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/451
   ceiling: 94
 - check: architecture.file_budget
   path: worker/supervisor.py
-  reason: >-
-    The proxy config injection (#444) adds the env override dict at the
-    single executor spawn site — the one place where os.environ is
-    snapshotted into the child — so proxy semantics (configured proxy vs
-    stripped default) apply to the executor and all agent subprocesses in
-    one hop. Moving the Popen call out just to dodge 2 lines would split
-    supervision state (_process/_generation) across modules; revisit when
-    supervisor grows its next feature, not for this.
+  reason: The proxy config injection (#444) adds the env override dict at the single executor spawn site
+    — the one place where os.environ is snapshotted into the child — so proxy semantics (configured proxy
+    vs stripped default) apply to the executor and all agent subprocesses in one hop. Moving the Popen
+    call out just to dodge 2 lines would split supervision state (_process/_generation) across modules;
+    revisit when supervisor grows its next feature, not for this.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/451
   ceiling: 231
 - check: architecture.file_budget
   path: worker/worker_declarations.py
-  reason: >-
-    The deprecated-capabilities normalization moved here from
-    config_validation (#444 rework) to free that file's zero headroom for
-    the proxy field; labels/models/capabilities are one family of
-    scheduling declarations and share this validation module. The move is
-    net-zero for the package; remove this exemption together with the
-    capabilities compat key itself (tracked separately from the #284
-    mechanism retirement) instead of re-splitting.
+  reason: 'The deprecated-capabilities normalization moved here from config_validation (#444 rework) to
+    free that file''s zero headroom for the proxy field; labels/models/capabilities are one family of
+    scheduling declarations and share this validation module. The move is net-zero for the package; remove
+    this exemption together with the capabilities compat key itself (tracked separately from the #284
+    mechanism retirement) instead of re-splitting.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/452
   ceiling: 54
@@ -182,13 +230,11 @@ exemptions:
   remove_when: docs/architecture/backend.md#agent-worker-protocol-responses
 - check: architecture.route_response_model
   path: server/app/routes/agent_worker_claims.py:claim
-  reason: >-
-    #546 batch claim: one endpoint answers two protocol generations — the
-    single AgentClaimResponse (limit=1, byte-identical for pre-#546 Workers)
-    and the BatchAgentClaimResponse wrapper (limit>1). The named union
-    response_model serializes as anyOf, which the inline-schema gate rejects
-    by construction; both members are named contract models, so no untyped
-    payload crosses. Removed together with the single-claim path (#547).
+  reason: '#546 batch claim: one endpoint answers two protocol generations — the single AgentClaimResponse
+    (limit=1, byte-identical for pre-#546 Workers) and the BatchAgentClaimResponse wrapper (limit>1).
+    The named union response_model serializes as anyOf, which the inline-schema gate rejects by construction;
+    both members are named contract models, so no untyped payload crosses. Removed together with the single-claim
+    path (#547).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/547
 - check: architecture.file_budget
@@ -296,11 +342,11 @@ exemptions:
   ceiling: 71
 - check: architecture.file_budget
   path: server/app/services/run_partial_failure.py
-  reason: 'codex round-1 #2 on PR #479: the two-branch chunked-creation compensation (empty-run
-    removal vs partial-run failed-marking) moved into this module so the /runs items path and
-    the /job-batches intake share ONE implementation and cannot drift. The error type,
-    the operator message, and the compensation protocol are one concern; splitting them across
-    modules would separate the failure protocol from its error contract.'
+  reason: 'codex round-1 #2 on PR #479: the two-branch chunked-creation compensation (empty-run removal
+    vs partial-run failed-marking) moved into this module so the /runs items path and the /job-batches
+    intake share ONE implementation and cannot drift. The error type, the operator message, and the compensation
+    protocol are one concern; splitting them across modules would separate the failure protocol from its
+    error contract.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/467
   ceiling: 57
@@ -343,8 +389,8 @@ exemptions:
   reason: '#347 P1: draft execution became an explicit per-session action (preview-draft gating). The
     dialog footer gained the "预览此草稿" button with its previewing state plus the previewDraft/onPreviewDraft
     contract toward PreviewPanelSection; the gating state itself lives in the section (single source,
-    dialog stays the thin chat wrapper). The added lines are the honest cost of the explicit consent
-    UI; re-evaluate when the preview-panel governance UI is next restructured (#347 follow-up).'
+    dialog stays the thin chat wrapper). The added lines are the honest cost of the explicit consent UI;
+    re-evaluate when the preview-panel governance UI is next restructured (#347 follow-up).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
   ceiling: 163
@@ -446,18 +492,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 137
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/shared/AgentPublishRequestDialog.tsx
-  reason: 'The #429 fourth round (#429 四轮 P2-1/P3-2) makes the confirm''s draft flush a completion-order
-    await (flushDraftSave returns the PUT promise; the server-draft re-read and the confirm endpoint fire
-    only after it resolves — the old fire-and-forget could publish a stale draft whose hash happened to
-    match) and teaches the dialog to hold itself open on polled confirming rows (publishInFlight keeps
-    the buttons disabled mid-publish instead of the dialog vanishing). The growth is the try/catch around
-    the flush/read-draft chain plus the error toast the review asked for. Revisit when the deferred follow-ups
-    (a shared useConfirmPublish hook) rework the dialog''s action wiring.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 58
-- check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/StudioChatAside.tsx
   reason: 'The #429 fix makes the resolved notice real: it renders from the shared store and is dismissable
     (a close button next to the message). The growth is the dismissable-notice markup; the aside stays
@@ -507,325 +541,259 @@ exemptions:
   ceiling: 66
 - check: architecture.file_budget
   path: server/app/db/connection.py
-  reason: '#438 makes __exit__ leak-proof (close in finally so a failed commit/rollback cannot strand the
-    checkout) and stamps the checkout origin for the pool return-path telemetry. The 8 effective lines are
-    the two documented guards; the attribution logic itself lives in pool_reset.py. Stays until the
+  reason: '#438 makes __exit__ leak-proof (close in finally so a failed commit/rollback cannot strand
+    the checkout) and stamps the checkout origin for the pool return-path telemetry. The 8 effective lines
+    are the two documented guards; the attribution logic itself lives in pool_reset.py. Stays until the
     transaction helpers retire this facade.'
   owner: database
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 75
 - check: architecture.file_budget
   path: server/app/db/pools.py
-  reason: '#438 installs the pool reset callback (reset=reset_connection) so every returned connection is
-    verified IDLE and dirty returns are attributed — one effective line plus wiring comment.'
+  reason: '#438 installs the pool reset callback (reset=reset_connection) so every returned connection
+    is verified IDLE and dirty returns are attributed — one effective line plus wiring comment.'
   owner: database
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 50
 - check: architecture.file_budget
   path: server/app/workflows/loader.py
-  reason: >-
-    Issue #458 round-trip fix: the asdict snapshot reloader must translate
-    the serialized reduce.from_node spelling back to the yaml from the
-    loader reads (mirroring the existing node_type translation), else every
-    sharded/reduce revision snapshot fails reparse with "reduce.from is
-    required". A ten-line guarded translation at the one dict->definition
-    boundary; moving it out would fork the snapshot normalization the
-    loader already owns. Revisit when snapshot loading gains its own module.
+  reason: 'Issue #458 round-trip fix: the asdict snapshot reloader must translate the serialized reduce.from_node
+    spelling back to the yaml from the loader reads (mirroring the existing node_type translation), else
+    every sharded/reduce revision snapshot fails reparse with "reduce.from is required". A ten-line guarded
+    translation at the one dict->definition boundary; moving it out would fork the snapshot normalization
+    the loader already owns. Revisit when snapshot loading gains its own module.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/458
   ceiling: 299
 - check: architecture.file_budget
   path: server/app/workflows/revision_format.py
-  reason: '#458 grows definition_to_yaml past its 131 ceiling: the echo must carry the shard/reduce
-    declarations (previously dropped — the studio''s initial draft YAML showed a ghost change against
-    its own baseline and publishing it silently stripped fan-out) plus the apply_shard_echo helper
-    extracted to keep the non-default-keys spelling next to its loader counterpart. The alternative,
-    splitting the echo out of the revision format module, would fork the one serializer every
-    revision/job-snapshot path shares. Remove when the revision echo moves to a schema-driven
-    serializer or the file gets a structural split of its own.'
+  reason: '#458 grows definition_to_yaml past its 131 ceiling: the echo must carry the shard/reduce declarations
+    (previously dropped — the studio''s initial draft YAML showed a ghost change against its own baseline
+    and publishing it silently stripped fan-out) plus the apply_shard_echo helper extracted to keep the
+    non-default-keys spelling next to its loader counterpart. The alternative, splitting the echo out
+    of the revision format module, would fork the one serializer every revision/job-snapshot path shares.
+    Remove when the revision echo moves to a schema-driven serializer or the file gets a structural split
+    of its own.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/458
   ceiling: 138
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/validation/workflowStudioChangeFormatters.ts
-  reason: >-
-    Issue #431 adds the remaining compare-field labels (node_type, after,
-    shard, reduce) so the changes drawer never shows raw field names for
-    the fields compare now diffs; the file is a flat label table where
-    every line is a translation. Revisit when the label table moves to the
-    generated change-contract types or gets i18n tooling.
+  reason: 'Issue #431 adds the remaining compare-field labels (node_type, after, shard, reduce) so the
+    changes drawer never shows raw field names for the fields compare now diffs; the file is a flat label
+    table where every line is a translation. Revisit when the label table moves to the generated change-contract
+    types or gets i18n tooling.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/431
   ceiling: 78
 - check: architecture.file_budget
   path: velites/src/events.rs
-  reason: >-
-    Issue #469 adds ToolTiming to the event schema module: the phase
-    struct (spawnMs / firstByteMs / restMs / reapMs with per-phase wire
-    docs, including the firstByteMs observation semantics), the
-    tool_execution_end wiring, and the wire-shape tests sit next to every
-    other event type's definition and contract test — the module IS the
-    event schema. The growth is docstring + test lines over a ~50-line
-    struct; dropping the docs to fit would trade the phase semantics
-    (which phase covers what, when absent) for bookkeeping. Ceiling at
-    actual + 10 per the dated-exemption convention (#431 / #458
-    precedents). Remove when the timing fields move into a schema-driven
-    shape or the module gets a dedicated events-tools split. #577 moved
-    StdoutJsonlSink out to velites/src/event_sink.rs; ceiling re-seated
-    at the post-move actual + 10.
+  reason: 'Issue #469 adds ToolTiming to the event schema module: the phase struct (spawnMs / firstByteMs
+    / restMs / reapMs with per-phase wire docs, including the firstByteMs observation semantics), the
+    tool_execution_end wiring, and the wire-shape tests sit next to every other event type''s definition
+    and contract test — the module IS the event schema. The growth is docstring + test lines over a ~50-line
+    struct; dropping the docs to fit would trade the phase semantics (which phase covers what, when absent)
+    for bookkeeping. Ceiling at actual + 10 per the dated-exemption convention (#431 / #458 precedents).
+    Remove when the timing fields move into a schema-driven shape or the module gets a dedicated events-tools
+    split. #577 moved StdoutJsonlSink out to velites/src/event_sink.rs; ceiling re-seated at the post-move
+    actual + 10.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
   ceiling: 484
 - check: architecture.file_budget
   path: velites/src/tools/bash.rs
-  reason: >-
-    Issue #469 instruments the bash tool with the phase decomposition the
-    stall forensics asked for: spawn timing, first-output-byte reading
-    (read_with_first_byte replaces read_to_end with identical byte/error
-    semantics; the first byte is the earlier of the two streams), the
-    reap-phase branch, and the module docstring documenting the
-    observation axes and the harness-read-vs-child-write caveat. The tool
-    is one cohesive spawn/read/terminate flow; splitting instrumentation
-    out would fork the child lifecycle across modules. Ceiling at actual +
-    10 per the dated-exemption convention (#431 / #458 precedents) — the
-    module is in active observation tuning. Remove when #469's follow-up
-    (once the write() stall trigger is pinned) retires or reshapes the
-    instrumentation.
+  reason: 'Issue #469 instruments the bash tool with the phase decomposition the stall forensics asked
+    for: spawn timing, first-output-byte reading (read_with_first_byte replaces read_to_end with identical
+    byte/error semantics; the first byte is the earlier of the two streams), the reap-phase branch, and
+    the module docstring documenting the observation axes and the harness-read-vs-child-write caveat.
+    The tool is one cohesive spawn/read/terminate flow; splitting instrumentation out would fork the child
+    lifecycle across modules. Ceiling at actual + 10 per the dated-exemption convention (#431 / #458 precedents)
+    — the module is in active observation tuning. Remove when #469''s follow-up (once the write() stall
+    trigger is pinned) retires or reshapes the instrumentation.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
   ceiling: 264
 - check: architecture.file_budget
   path: velites/src/tools/mod.rs
-  reason: >-
-    Issue #469 review fix makes the ToolKind::execute dispatch boundary
-    the single totalMs timing point (every tool kind gets it; the
-    in-process tools carry zero instrumentation of their own — the uuid
-    and validate exemptions retired when their timing code was deleted).
-    mod.rs is the tools facade every tool already imports. Ceiling at
-    actual + 10 per the dated-exemption convention (#431 / #458
-    precedents). Remove when the file shrinks back under its old ceiling.
+  reason: 'Issue #469 review fix makes the ToolKind::execute dispatch boundary the single totalMs timing
+    point (every tool kind gets it; the in-process tools carry zero instrumentation of their own — the
+    uuid and validate exemptions retired when their timing code was deleted). mod.rs is the tools facade
+    every tool already imports. Ceiling at actual + 10 per the dated-exemption convention (#431 / #458
+    precedents). Remove when the file shrinks back under its old ceiling.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
   ceiling: 155
 - check: architecture.file_budget
   path: worker/executor.py
-  reason: >-
-    Issue #352 starts the per-Worker batch heartbeat coordinator in main():
-    three lines (import, the coordinator start wiring the upload queue to
-    the same registry, the registry argument on the run_execution submit).
-    The executor main is the single place where the machine-wide stop event
-    and the UploadQueue live together; moving the wiring out would fork
-    lifecycle ownership. Revisit when executor main gets its next split.
-    Ceiling re-dated 226 to 224 after the rebase onto 0.7.0 (#481
-    ClaimPacing): #481's import cleanup (agent_subprocess_env re-export
-    retired, its test consumers import worker.execution.run directly) left
-    214 effective lines with this wiring on top, so the ceiling realigns to
-    actual + 10 per the dated-exemption convention (#431 / #458 precedents).
+  reason: 'Issue #352 starts the per-Worker batch heartbeat coordinator in main(): three lines (import,
+    the coordinator start wiring the upload queue to the same registry, the registry argument on the run_execution
+    submit). The executor main is the single place where the machine-wide stop event and the UploadQueue
+    live together; moving the wiring out would fork lifecycle ownership. Revisit when executor main gets
+    its next split. Ceiling re-dated 226 to 224 after the rebase onto 0.7.0 (#481 ClaimPacing): #481''s
+    import cleanup (agent_subprocess_env re-export retired, its test consumers import worker.execution.run
+    directly) left 214 effective lines with this wiring on top, so the ceiling realigns to actual + 10
+    per the dated-exemption convention (#431 / #458 precedents).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
   ceiling: 220
 - check: architecture.file_budget
   path: server/app/agent_runtime/velites.py
-  reason: >-
-    #476 wires the velites static tool-catalog mirror (the
-    `velites tools list --json` reflection pinned by the cross-binary
-    contract test) into the adapter declaration — one dataclass field.
-    The mirror itself lives in tool_catalog.py; this file only carries
-    the reference. Remove together with the mirror if velites ever
-    self-describes over the wire instead of via static declaration.
+  reason: '#476 wires the velites static tool-catalog mirror (the `velites tools list --json` reflection
+    pinned by the cross-binary contract test) into the adapter declaration — one dataclass field. The
+    mirror itself lives in tool_catalog.py; this file only carries the reference. Remove together with
+    the mirror if velites ever self-describes over the wire instead of via static declaration.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
   ceiling: 16
 - check: architecture.file_budget
   path: velites/src/main.rs
-  reason: >-
-    #476 dispatches the `tools list` token before the agent-run CLI
-    parse — the same pre-parse dispatch block as `models list` /
-    `sandbox wrap` / `validate` (that CLI requires a positional, so
-    subcommands must be peeled off first). The handler itself is one
-    catalog call in tools/catalog.rs. Remove if the pre-parse dispatch
-    moves into a shared argv router.
+  reason: '#476 dispatches the `tools list` token before the agent-run CLI parse — the same pre-parse
+    dispatch block as `models list` / `sandbox wrap` / `validate` (that CLI requires a positional, so
+    subcommands must be peeled off first). The handler itself is one catalog call in tools/catalog.rs.
+    Remove if the pre-parse dispatch moves into a shared argv router.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
   ceiling: 81
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/AgentEditor.tsx
-  reason: >-
-    #476 makes the tool picker catalog-driven: option-surface derivation
-    (selectable/forced/invalid sets as memoized maps), the forced-tier
-    locked-row hint, and the runtime-switch invalid-tool banner join the
-    existing form lifecycle. The catalog plumbing is already split out
-    (useAgentRuntimes hook); what stays here is the interaction itself —
-    splitting render from state would separate the two halves of every
-    conditional being tested. Remove when the editor gains a shared
-    tool-picker component with WorkflowNodeToolsEditor.
+  reason: '#476 makes the tool picker catalog-driven: option-surface derivation (selectable/forced/invalid
+    sets as memoized maps), the forced-tier locked-row hint, and the runtime-switch invalid-tool banner
+    join the existing form lifecycle. The catalog plumbing is already split out (useAgentRuntimes hook);
+    what stays here is the interaction itself — splitting render from state would separate the two halves
+    of every conditional being tested. Remove when the editor gains a shared tool-picker component with
+    WorkflowNodeToolsEditor.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
   ceiling: 357
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.ts
-  reason: >-
-    #443/#476 add patchWorkflowNodeTools — one patchNode call site with the
-    empty-means-undeclared delete-key semantics, same shape as the sibling
-    patch functions in this table. Remove together with the node-level
-    tools declaration if it ever retires.
+  reason: '#443/#476 add patchWorkflowNodeTools — one patchNode call site with the empty-means-undeclared
+    delete-key semantics, same shape as the sibling patch functions in this table. Remove together with
+    the node-level tools declaration if it ever retires.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
   ceiling: 121
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.parse.ts
-  reason: >-
-    #443: WorkflowYamlNode gains the optional tools field (one line plus
-    its contract comment). The node shape lives in one type by design.
-    Remove with the field itself.
+  reason: '#443: WorkflowYamlNode gains the optional tools field (one line plus its contract comment).
+    The node shape lives in one type by design. Remove with the field itself.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
   ceiling: 83
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowAgentExecutionDetails.tsx
-  reason: >-
-    #443/#476 mount WorkflowNodeToolsEditor below the runtime settings —
-    one import plus one JSX block (9 lines) in the agent execution body.
-    The editor itself is a sibling component; this file is only the
-    composition point. Remove if the composition is restructured.
+  reason: '#443/#476 mount WorkflowNodeToolsEditor below the runtime settings — one import plus one JSX
+    block (9 lines) in the agent execution body. The editor itself is a sibling component; this file is
+    only the composition point. Remove if the composition is restructured.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
   ceiling: 65
 - check: architecture.file_budget
   path: velites/src/tools/specs.rs
-  reason: >-
-    #518 adds the json tool's provider spec (description + JSON Schema
-    parameters) — the file is the per-tool spec table by design, one arm
-    per ToolKind; the spec IS the content, there is nothing to split
-    without separating a tool's spec from its siblings' in a way no
-    consumer wants. Remove only with the json tool itself.
+  reason: '#518 adds the json tool''s provider spec (description + JSON Schema parameters) — the file
+    is the per-tool spec table by design, one arm per ToolKind; the spec IS the content, there is nothing
+    to split without separating a tool''s spec from its siblings'' in a way no consumer wants. Remove
+    only with the json tool itself.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
   ceiling: 112
 - check: architecture.file_budget
-  path: server/app/agent_runtime/tool_catalog.py
-  reason: >-
-    #518 adds the json tool's entry to the velites static mirror — the
-    file is the declared mirror of `velites tools list --json`, pinned
-    equal by the cross-binary contract test; its size is the catalog's
-    size plus the pi triple. The entry must live here in full
-    (description/parameters verbatim) or the parity test fails by
-    design. Remove if the mirror is replaced by runtime probing.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
-  ceiling: 192
-- check: architecture.file_budget
   path: velites/src/lib.rs
-  reason: >-
-    #476/#518: lib.rs carries the forced-tool activation at the one point
-    where all three inputs exist (parsed --tools, canonicalized skill
-    dirs, --require-output) and the tools-listing error message that
-    must name the full tool set. The activation is a harness
-    run-assembly concern, not a tool-module one. Remove if the run
-    assembler is extracted from the provider wiring.
+  reason: '#476/#518: lib.rs carries the forced-tool activation at the one point where all three inputs
+    exist (parsed --tools, canonicalized skill dirs, --require-output) and the tools-listing error message
+    that must name the full tool set. The activation is a harness run-assembly concern, not a tool-module
+    one. Remove if the run assembler is extracted from the provider wiring.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
   ceiling: 211
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowNodePromptEditor.tsx
-  reason: >-
-    #513 adds the prompt-mode selector (append/overwrite) to the custom
-    prompt editor: one TextField select with two labeled options plus the
-    state-switching hint line — the interaction the whole feature is about.
-    The data layer lives in useNodePromptPreview; splitting the selector
-    out would separate the mode from the textarea it governs. Remove if
-    the prompt panel is restructured.
+  reason: '#513 adds the prompt-mode selector (append/overwrite) to the custom prompt editor: one TextField
+    select with two labeled options plus the state-switching hint line — the interaction the whole feature
+    is about. The data layer lives in useNodePromptPreview; splitting the selector out would separate
+    the mode from the textarea it governs. Remove if the prompt panel is restructured.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
   ceiling: 82
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/useNodePromptPreview.ts
-  reason: >-
-    #513: the hook derives the prompt mode from the draft YAML (junk-tolerant
-    normalization mirroring the prompt field) and exposes onPatchMode —
-    data-layer counterparts of the editor's mode selector. Same P1
-    normalization family as customPrompt above it. Remove with the mode
-    selector.
+  reason: '#513: the hook derives the prompt mode from the draft YAML (junk-tolerant normalization mirroring
+    the prompt field) and exposes onPatchMode — data-layer counterparts of the editor''s mode selector.
+    Same P1 normalization family as customPrompt above it. Remove with the mode selector.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
   ceiling: 98
 - check: architecture.file_budget
   path: server/app/services/node_prompt_preview.py
-  reason: >-
-    #513: the preview payload gains prompt_mode (normalized to append) and
-    save_node_prompt accepts it — the API surface of the mode feature. The
-    service is the single preview/save implementation shared by the Studio
-    route and the MCP tools; the growth is the feature, not drift. Remove
-    if prompt previewing is extracted from the draft-editing service.
+  reason: '#513: the preview payload gains prompt_mode (normalized to append) and save_node_prompt accepts
+    it — the API surface of the mode feature. The service is the single preview/save implementation shared
+    by the Studio route and the MCP tools; the growth is the feature, not drift. Remove if prompt previewing
+    is extracted from the draft-editing service.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
   ceiling: 161
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowNodeToolsEditor.tsx
-  reason: >-
-    codex P2 on #527: invalid declared tools render as removable chips
-    (MUI multi-select cannot deselect a disabled option, so the removal
-    needs its own surface) — one Chip row inside the existing alert.
-    The editor is already the node-level counterpart of AgentEditor's
-    picker. Remove together with the AgentEditor tool-picker exemption.
+  reason: 'codex P2 on #527: invalid declared tools render as removable chips (MUI multi-select cannot
+    deselect a disabled option, so the removal needs its own surface) — one Chip row inside the existing
+    alert. The editor is already the node-level counterpart of AgentEditor''s picker. Remove together
+    with the AgentEditor tool-picker exemption.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
   ceiling: 90
 - check: architecture.file_budget
   path: server/app/routes/instance_settings_contracts.py
-  reason: >-
-    Issue #509/#554/#561 folds three capacity knob blocks (agent_enqueue,
-    result_unpack, agent_claim) into the instance settings document: three
-    small nested contract models plus three fields on
-    InstanceSettingsDocument; issue #591 adds the result_commit_batching
-    kill-switch bool to the agent_workers block (one line, the same
-    nested-block shape). The nested
-    models must sit beside their siblings (InstanceWorkflowsSettings /
-    InstanceAgentWorkersSettings) — the document IS the admin API surface;
-    splitting two-field blocks into a sister module would fork the contract
-    from the file that owns its shape. Ceiling at actual + 10 per the
-    dated-exemption convention. Remove when the document gets a structural
-    split (per-block modules) or the next retirement frees headroom.
+  reason: 'Issue #509/#554/#561 folds three capacity knob blocks (agent_enqueue, result_unpack, agent_claim)
+    into the instance settings document: three small nested contract models plus three fields on InstanceSettingsDocument;
+    issue #591 adds the result_commit_batching kill-switch bool to the agent_workers block (one line,
+    the same nested-block shape). The nested models must sit beside their siblings (InstanceWorkflowsSettings
+    / InstanceAgentWorkersSettings) — the document IS the admin API surface; splitting two-field blocks
+    into a sister module would fork the contract from the file that owns its shape. Ceiling at actual
+    + 10 per the dated-exemption convention. Remove when the document gets a structural split (per-block
+    modules) or the next retirement frees headroom.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/509
   ceiling: 55
 - check: architecture.file_budget
   path: server/app/mcp_server/skill_tools.py
-  reason: >-
-    Issue #633 adds the create_skill tool to the skill tool group: one more
-    tool function (docstring is the budget-heavy part — every tool's
-    contract text lives in its docstring) beside get/validate/save_version.
-    The module IS the single skill-tool registration surface; splitting one
-    tool into a sister module would fork the group's shared client_factory
-    wiring and the URL-encoding helper. Ceiling at actual + 10 per the
-    dated-exemption convention. Remove when the skill tool group gets a
-    registration split per tool or a budget re-balance frees headroom.
+  reason: 'Issue #633 adds the create_skill tool to the skill tool group: one more tool function (docstring
+    is the budget-heavy part — every tool''s contract text lives in its docstring) beside get/validate/save_version.
+    The module IS the single skill-tool registration surface; splitting one tool into a sister module
+    would fork the group''s shared client_factory wiring and the URL-encoding helper. Ceiling at actual
+    + 10 per the dated-exemption convention. Remove when the skill tool group gets a registration split
+    per tool or a budget re-balance frees headroom.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
   ceiling: 58
 - check: architecture.file_budget
   path: server/app/mcp_server/server.py
-  reason: >-
-    Issue #633 merges three tool groups into the registration sequence
-    (draft CAS pair, shared-material pair, agent-definition read trio) and
-    the inline save_agent_definition_draft gains the requires_labels/
-    config_schema parameters. Each group's register_* call plus its guard
-    comment is one effective line over the frozen 103 baseline; the module
-    is the single composition root and every tool group that CAN live in a
-    sibling module already does. Remove when the last inline tools
-    (get_authoring_guide / get_studio_context / save_node_code_draft /
-    save_agent_definition_draft) move to sibling modules.
+  reason: 'Issue #633 merges three tool groups into the registration sequence (draft CAS pair, shared-material
+    pair, agent-definition read trio) and the inline save_agent_definition_draft gains the requires_labels/
+    config_schema parameters. Each group''s register_* call plus its guard comment is one effective line
+    over the frozen 103 baseline; the module is the single composition root and every tool group that
+    CAN live in a sibling module already does. Remove when the last inline tools (get_authoring_guide
+    / get_studio_context / save_node_code_draft / save_agent_definition_draft) move to sibling modules.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
   ceiling: 104
 - check: architecture.file_budget
-  path: server/app/services/skill_editing.py
-  reason: >-
-    Issue #633 adds the save-time shared-material sync hook to _save_version
-    (plan_shared_sync call plus the synced_files response wiring). One
-    effective line over the frozen 170 baseline; the sync logic itself lives
-    in skill_shared_sync.py and only the in-lock hook call grew this module.
-    Remove when the save flow gets its planned orchestration split.
+  path: frontend/src/features/workflowStudio/shared/AgentPublishRequestDialog.tsx
+  reason: 'The #429 fourth round (#429 四轮 P2-1/P3-2) makes the confirm''s draft flush a completion-order
+    await (flushDraftSave returns the PUT promise; the server-draft re-read and the confirm endpoint fire
+    only after it resolves — the old fire-and-forget could publish a stale draft whose hash happened to
+    match) and teaches the dialog to hold itself open on polled confirming rows (publishInFlight keeps
+    the buttons disabled mid-publish instead of the dialog vanishing). The growth is the try/catch around
+    the flush/read-draft chain plus the error toast the review asked for. Revisit when the deferred follow-ups
+    (a shared useConfirmPublish hook) rework the dialog''s action wiring.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 171
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 58
+- check: architecture.file_budget
+  path: server/app/agent_runtime/tool_catalog.py
+  reason: '#518 adds the json tool''s entry to the velites static mirror — the file is the declared mirror
+    of `velites tools list --json`, pinned equal by the cross-binary contract test; its size is the catalog''s
+    size plus the pi triple. The entry must live here in full (description/parameters verbatim) or the
+    parity test fails by design. Remove if the mirror is replaced by runtime probing.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
+  ceiling: 192

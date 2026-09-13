@@ -540,10 +540,11 @@ server/app/
 | SharedMaterialFile | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/studio_agent_shared_contracts.py |
 | SharedMaterialsResponse | BaseModel | workspace_id: str, map: dict[str, Any] | None, files: list[SharedMaterialFile] | app/routes/studio_agent_shared_contracts.py |
 | SkillValidationIssue | BaseModel | path: str, error: str | app/routes/studio_agent_skill_contracts.py |
-| SkillValidateToolResponse | BaseModel | key: str, valid: bool, errors: list[SkillValidationIssue] | app/routes/studio_agent_skill_contracts.py |
+| SkillValidationWarning | BaseModel | path: str, error: str | app/routes/studio_agent_skill_contracts.py |
+| SkillValidateToolResponse | BaseModel | key: str, valid: bool, errors: list[SkillValidationIssue], warnings: list[Ski... | app/routes/studio_agent_skill_contracts.py |
 | SkillVersionFileWrite | BaseModel | path: str, content: str | app/routes/studio_agent_skill_contracts.py |
 | SkillSaveVersionRequest | BaseModel | files: list[SkillVersionFileWrite], new_tag: str, message: str | app/routes/studio_agent_skill_contracts.py |
-| SkillSaveVersionResponse | BaseModel | key: str, tag: str, commit: str, files: list[str], synced_files: list[str] | app/routes/studio_agent_skill_contracts.py |
+| SkillSaveVersionResponse | BaseModel | key: str, tag: str, commit: str, files: list[str], synced_files: list[str], w... | app/routes/studio_agent_skill_contracts.py |
 | SkillCreateRequest | BaseModel | skill_name: str, files: list[SkillVersionFileWrite], new_tag: str, message: str | app/routes/studio_agent_skill_contracts.py |
 | SkillCreateResponse | BaseModel | key: str, tag: str, commit: str | app/routes/studio_agent_skill_contracts.py |
 | StudioAgentTokenMintRequest | BaseModel | ttl_hours: int | app/routes/studio_agent_token_contracts.py |
