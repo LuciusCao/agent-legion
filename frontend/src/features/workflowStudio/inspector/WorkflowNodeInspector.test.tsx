@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createElement, type ReactNode } from 'react'
+import { MemoryRouter as ReactRouterMemoryRouter } from 'react-router-dom'
 import yaml from 'js-yaml'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
@@ -20,7 +21,12 @@ function wrapper({ children }: { children: ReactNode }) {
   return createElement(
     QueryClientProvider,
     { client: createTestQueryClient() },
-    children
+    createElement(
+      ReactRouterMemoryRouter,
+      // #593：start 契约编辑器渲染外部服务连接的管理员入口 Link。
+      { future: { v7_startTransition: true, v7_relativeSplatPath: true } },
+      children
+    )
   )
 }
 

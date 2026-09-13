@@ -239,6 +239,7 @@
     "frontend/src/components/settings/AgentWorkerList.tsx": 129,
     "frontend/src/components/settings/BasicInfoFields.tsx": 46,
     "frontend/src/components/settings/BasicInfoSection.tsx": 51,
+    "frontend/src/components/settings/ConnectionKeyField.module.css": 17,
     "frontend/src/components/settings/ConnectionKeyField.tsx": 61,
     "frontend/src/components/settings/DangerZone.module.css": 26,
     "frontend/src/components/settings/DangerZone.tsx": 59,
