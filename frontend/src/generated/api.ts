@@ -7135,6 +7135,8 @@ export interface components {
     WorkflowDraftStoreRequest: {
       /** Definition Yaml */
       definition_yaml: string
+      /** Expected Updated At */
+      expected_updated_at?: string | null
     }
     /** WorkflowDraftStoreResponse */
     WorkflowDraftStoreResponse: {
