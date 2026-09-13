@@ -27,31 +27,8 @@
 
 ## 校验
 
-运行时优先按下面的机器可读契约段经 harness 内置引擎校验（存在性、
-JSON Schema）：
-
-```yaml contract
-files:
-  - path: exercises_review.json
-    format: json
-    schema:
-      type: object
-      required: [verdict, exercise_reviews, summary]
-      properties:
-        verdict: {enum: [pass, revise]}
-        summary: {type: string, minLength: 1}
-        exercise_reviews:
-          type: array
-          items:
-            type: object
-            required: [id, verdict, issues]
-            properties:
-              id: {type: string, minLength: 1}
-              verdict: {enum: [pass, fail]}
-              issues:
-                type: array
-                items: {type: string}
-```
+运行时优先按机器可读契约（本 skill 根目录的 `contract.yaml`）经
+harness 内置引擎校验（存在性、JSON Schema）。
 
 引擎不表达的部分由 `scripts/validate_output.py` legacy 脚本兜底
 （`python validate_output.py <job_dir>`，退出码 0 为通过）：
