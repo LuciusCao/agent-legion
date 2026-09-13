@@ -105,6 +105,7 @@ def test_initialize_and_tool_listing(client, job_db) -> None:
     assert names == [
         "compare_jobs",
         "compare_workflow",
+        "create_agent_definition",
         "create_skill",
         "get_active_workflow",
         "get_agent_definitions",

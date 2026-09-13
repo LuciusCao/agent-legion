@@ -11,7 +11,10 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 import server.app.routes.workflow_contracts as workflow_contracts
-from server.app.routes.agent_definition_contracts import AgentVersionResponse
+from server.app.routes.agent_definition_contracts import (
+    AgentDefinitionPayload,
+    AgentVersionResponse,
+)
 from server.app.routes.workflow_node_code_contracts import WorkflowNodeCodeDraftRequest
 from server.app.routes.workflow_revisions_contracts import WorkflowRevisionSummary
 
@@ -41,3 +44,12 @@ class StudioAgentAgentVersionsResponse(BaseModel):
     requires_labels, config_schema) plus version metadata."""
 
     versions: list[AgentVersionResponse]
+
+
+class StudioAgentAgentCreateRequest(AgentDefinitionPayload):
+    """Tool-surface create payload: same editable fields as the save, minus
+    an explicit agent_id (#635) — the capability derives it, so the tool
+    never spawns a second entity for an occupied capability (409 instead).
+    The human route keeps its optional agent_id for legacy clients."""
+
+    capability: str = Field(min_length=1)

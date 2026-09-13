@@ -829,3 +829,33 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
   ceiling: 171
+- check: architecture.file_budget
+  path: server/app/routes/studio_agent_catalog_read_tools.py
+  reason: >-
+    Issue #633 adds the workspace-scoped agent-definition create entry to
+    the agent-definition tool group: one POST handler (capability-derived
+    agent_id, studio-agent attribution) beside the read trio and the save
+    draft. The module IS the single agent-definition tool endpoint surface;
+    splitting one endpoint into a sister module would fork the group's
+    shared router guards and the version-response helper. Ceiling at
+    actual + 10 per the dated-exemption convention. Remove when the
+    agent-definition tool endpoints get a route split per verb or a budget
+    re-balance frees headroom.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 126
+- check: architecture.file_budget
+  path: server/app/mcp_server/agent_tools.py
+  reason: >-
+    Issue #633 adds the create_agent_definition tool to the agent tool
+    group: one more tool function (docstring is the budget-heavy part —
+    every tool's contract text lives in its docstring, and the create spells
+    out the capability-derivation + 409 semantics) beside the read trio.
+    The module IS the single agent-tool registration surface; splitting one
+    tool into a sister module would fork the group's shared client_factory
+    wiring. Ceiling at actual + 10 per the dated-exemption convention.
+    Remove when the agent tool group gets a registration split per tool or
+    a budget re-balance frees headroom.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  ceiling: 48

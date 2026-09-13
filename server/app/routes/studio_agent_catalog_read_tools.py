@@ -1,10 +1,11 @@
 """Studio-agent agent-definition tool endpoints (issue #633).
 
 The workspace-scoped Agent surface for the authoring agent: read the
-workspace's Agent definitions (latest versions, all fields), draft an Agent
-definition, read the workspace's runtime → provider → models view aggregated
-from online Workers, and read the per-runtime tool catalog. Read-only or
-draft-only by design:
+workspace's Agent definitions (latest versions, all fields), start a NEW
+Agent definition draft, draft an EXISTING Agent definition, read the
+workspace's runtime → provider → models view aggregated from online
+Workers, and read the per-runtime tool catalog. Read-only or draft-only by
+design:
 
 - Provider/model declarations are worker-owned (EXEC-RUNTIME-MODELS-001);
   this surface only reads the aggregation — there is no edit tool.
@@ -32,7 +33,10 @@ from server.app.routes.agent_definition_contracts import (
 )
 from server.app.routes.agent_runtimes_contracts import AgentRuntimesResponse
 from server.app.routes.job_http import raise_job_http_error
-from server.app.routes.studio_agent_tool_contracts import StudioAgentAgentVersionsResponse
+from server.app.routes.studio_agent_tool_contracts import (
+    StudioAgentAgentCreateRequest,
+    StudioAgentAgentVersionsResponse,
+)
 from server.app.routes.workspace_runtime_models import WorkspaceRuntimeModelsResponse
 from server.app.services.job_errors import JobServiceError
 from server.app.services.studio_agent_catalog_reads import StudioAgentCatalogReads
@@ -108,6 +112,31 @@ def create_studio_agent_catalog_read_tools_router(
         try:
             entity = StudioAgentToolsService(job_db, settings).save_agent_definition_draft(
                 workspace_id, agent_id, definition, str(user["id"])
+            )
+        except JobServiceError as exc:
+            raise_job_http_error(exc)
+        return _version_response(entity)
+
+    @router.post(
+        "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions",
+        response_model=AgentVersionResponse,
+        status_code=201,
+    )
+    def create_agent_definition(
+        workspace_id: str,
+        payload: StudioAgentAgentCreateRequest,
+        user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
+    ) -> AgentVersionResponse:
+        """Start a NEW Agent definition draft: the agent_id derives from the
+        capability (no explicit id on this surface — a colliding capability
+        gets a 409 pointing at the existing Agent), the draft stamps
+        ``studio-agent:{user_id}``. Draft-only like the save: a human
+        publishes it in Studio (STUDIO-AGENT-001)."""
+        definition = _parse_agent_definition(payload)
+        try:
+            service = StudioAgentToolsService(job_db, settings)
+            entity = service.save_agent_definition_draft(
+                workspace_id, None, definition, str(user["id"])
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)

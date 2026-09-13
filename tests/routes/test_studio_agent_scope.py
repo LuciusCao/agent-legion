@@ -236,6 +236,12 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
     ): "scoped-only tool surface",
+    # Agent-definition creation tool (#635): starts a capability-keyed draft
+    # (409 on an occupied capability) — draft-level like the save above.
+    (
+        "POST",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions",
+    ): "scoped-only tool surface",
     # Node prompt read/save tools: preview persists nothing; the save edits
     # only the workspace's unpublished draft YAML (draft-only by design).
     (

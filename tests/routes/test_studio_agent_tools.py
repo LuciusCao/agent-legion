@@ -83,6 +83,9 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
             {"code": "not python"},
         ),
         ("PUT", f"{base}/agent-definitions/agent-x/draft", {}),
+        # Agent-definition creation tool (#635): an invalid definition is a
+        # 422 business rejection — the scope guard let the token through.
+        ("POST", f"{base}/agent-definitions", {"runtime": "bogus"}),
         ("POST", f"{base}/node-prompt", {"node_key": "node"}),
         ("PUT", f"{base}/node-prompt", {"node_key": "node", "prompt": "x"}),
         ("GET", f"{base}/workflow/active", None),

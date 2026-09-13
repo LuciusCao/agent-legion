@@ -205,6 +205,7 @@ server/app/
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions` | `list_agent_definitions` | routes/studio_agent_catalog_read_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/studio_agent_catalog_read_tools.py |
+| POST | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions` | `create_agent_definition` | routes/studio_agent_catalog_read_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/runtime-models` | `get_runtime_models` | routes/studio_agent_catalog_read_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/agent-runtimes` | `get_agent_runtimes` | routes/studio_agent_catalog_read_tools.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/context` | `get_chat_session_context` | routes/studio_agent_context.py |

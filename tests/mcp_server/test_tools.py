@@ -112,6 +112,7 @@ def test_loopback_tools_are_async() -> None:
         "save_node_code_draft",
         "get_node_code",
         "save_agent_definition_draft",
+        "create_agent_definition",
         "get_agent_definitions",
         "get_runtime_models",
         "get_agent_runtimes",
@@ -324,6 +325,58 @@ def test_get_agent_definitions(recorded) -> None:
     _run_tool(server, "get_agent_definitions", {"workspace_id": "ws-1"})
     assert calls[0]["method"] == "GET"
     assert calls[0]["url"].endswith("/workspaces/ws-1/agent-definitions")
+
+
+def test_create_agent_definition_posts_workspace_scoped_body(recorded) -> None:
+    # #635: the create derives agent_id from the capability — the path keys
+    # on the workspace alone, and the body mirrors the save tool's defaults.
+    server, calls = recorded
+    _run_tool(
+        server,
+        "create_agent_definition",
+        {
+            "workspace_id": "ws-1",
+            "capability": "review_keywords",
+            "runtime": "velites",
+            "skill": "g/s",
+        },
+    )
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/agent-definitions")
+    assert calls[0]["json"] == {
+        "capability": "review_keywords",
+        "runtime": "velites",
+        "skill": "g/s",
+        "tools": ["read", "write", "bash"],
+        "requires_labels": {},
+        "config_schema": {},
+    }
+
+
+def test_create_agent_definition_forwards_optional_fields(recorded) -> None:
+    server, calls = recorded
+    _run_tool(
+        server,
+        "create_agent_definition",
+        {
+            "workspace_id": "ws-1",
+            "capability": "generate_questions",
+            "runtime": "pi",
+            "skill": "g/q",
+            "tools": ["read", "json"],
+            "requires_labels": {"gpu": "a100"},
+            "config_schema": {
+                "type": "object",
+                "properties": {"dry_run": {"type": "boolean"}},
+            },
+        },
+    )
+    assert calls[0]["json"]["tools"] == ["read", "json"]
+    assert calls[0]["json"]["requires_labels"] == {"gpu": "a100"}
+    assert calls[0]["json"]["config_schema"] == {
+        "type": "object",
+        "properties": {"dry_run": {"type": "boolean"}},
+    }
 
 
 def test_get_runtime_models(recorded) -> None:

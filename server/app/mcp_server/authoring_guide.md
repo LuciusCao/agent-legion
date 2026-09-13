@@ -62,6 +62,13 @@ Studio. Nothing you do takes effect in production by itself.
   config_schema — plus version metadata (version, status, definition_hash,
   created_by, created_at, published_at). Read this BEFORE drafting agent or
   workflow changes so capability bindings build on what exists.
+- `create_agent_definition(workspace_id, capability, runtime, skill,
+  tools?, requires_labels?, config_schema?)` — start a NEW Agent definition
+  draft for a capability that has no Agent yet (any status): the agent_id
+  derives from the capability, and a colliding capability returns HTTP 409
+  naming the existing Agent — edit that one with
+  `save_agent_definition_draft` instead. Same payload fields as the save
+  (section 5). Draft only; a human publishes it in Studio.
 - `get_runtime_models(workspace_id)` — the workspace's available
   `{runtime: {provider: [models]}}` view aggregated from its ONLINE workers'
   declarations. Discovery only: provider/model declarations are worker-owned
@@ -75,8 +82,8 @@ Studio. Nothing you do takes effect in production by itself.
   static; the only editable tool surface is the `tools` selection inside an
   Agent definition draft.
 - `save_agent_definition_draft(workspace_id, agent_id, capability, runtime,
-  skill, tools?, requires_labels?, config_schema?)` —
-  draft Agent definition for an agent-backed capability (section 5).
+  skill, tools?, requires_labels?, config_schema?)` — draft an EXISTING
+  Agent definition for an agent-backed capability (section 5).
 - `get_node_prompt(workspace_id, node_key, definition_yaml?)` — the effective
   run prompt of an agent node: fixed platform envelope + node instructions
   (auto-assembled default, or the custom `execution.prompt` when set). Read
@@ -137,7 +144,8 @@ publish, agent definition publish, and skill release actions stay human-only).
    `current_draft` and retry — the human may have edited concurrently.
 6. For each code node, `save_node_code_draft` with `expected_capability` set
    (section 4). For each agent-backed capability without a published Agent,
-   `save_agent_definition_draft` (section 5).
+   `create_agent_definition` (new capability) or `save_agent_definition_draft`
+   (edit an existing Agent) (section 5).
 7. Present the change summary to the human, then call
    `request_workflow_publish` — the publish review dialog pops in Studio with
    the same compare data. Poll `get_publish_request_status`: confirmed means
@@ -230,10 +238,14 @@ Agent-definition authoring loop (read → discover → draft):
    - `get_runtime_models(workspace_id)` — the worker-declared
      runtime → provider → models view, so node `execution.model` values you
      draft correspond to models an online worker can actually claim.
-3. `save_agent_definition_draft(...)` — draft the change. A human publishes
-   it in Studio; publishing/archiving is never yours.
+3. Start a new Agent with `create_agent_definition(...)` when the capability
+   has no Agent yet (409 = the capability is taken — edit that Agent
+   instead), or edit an existing one with `save_agent_definition_draft(...)`.
+   Either way a human publishes it in Studio; publishing/archiving is never
+   yours.
 
-`save_agent_definition_draft` binds a capability to an implementation:
+`create_agent_definition` / `save_agent_definition_draft` bind a capability
+to an implementation:
 - `runtime`: one of `pi`, `velites` (anything else is rejected).
 - `skill`: relative skill path (`group/skill-name`); absolute paths and `..`
   are rejected.
@@ -255,10 +267,8 @@ Agent-definition authoring loop (read → discover → draft):
   against the live workspace override at every dispatch
   (CONFIG-RUNTIME-MUTABLE-001).
 - Agent execution (`provider`/`model`/`thinking`) resolves node
-  `execution.*` overrides → workspace defaults → validation error if unset.
-  Provider/model declarations themselves are worker-owned
-  (EXEC-RUNTIME-MODELS-001): no tool edits them — `get_runtime_models` is
-  the read-only view.
+  `execution.*` overrides → workflow top-level `execution:` defaults →
+  validation error if unset.
 - Node prompt (`execution.prompt`): the run prompt is a fixed platform
   envelope (job/skill paths, declared inputs/outputs, output discipline)
   plus one node-instructions section. Empty `execution.prompt` means the
@@ -266,6 +276,91 @@ Agent-definition authoring loop (read → discover → draft):
   bound skill, and declared IO; a non-empty value REPLACES the default
   wholesale — it is not appended. Preview with `get_node_prompt`, edit the
   draft with `save_node_prompt` (empty string clears back to the default).
+
+### 5.1 Configuring execution (provider/model/thinking)
+
+An agent node's `execution:` block carries `provider`, `model`, `thinking`
+(the only keys; `prompt`/`prompt_mode` are node-level extras — see §5). The
+effective value resolves at definition-load time:
+
+- node `execution:` override first; empty keys fall through to
+- the workflow's top-level `execution:` default block, which the loader
+  merges into every non-start node (workspace-level defaults retired at
+  schema v64 — the top-level block is the only fallback).
+
+A REQUIRED key still empty after the merge fails fast at dispatch
+(EXEC-RUNTIME-DISPATCH-001): both runtimes require `provider` and `model`
+(`thinking` is optional — empty means the runtime decides). Pick values
+from `get_runtime_models(workspace_id)`: the view aggregates the ONLINE
+workers' declarations, so a typed value corresponds to a worker that can
+actually claim the execution. `*` wildcards may appear in the list — a
+worker declared `*` accepts whatever the node types.
+
+Edit execution blocks through the workflow draft round-trip:
+`get_workflow_draft` / `get_active_workflow` → edit the YAML (top-level
+`execution:` and/or per-node overrides) → `validate_workflow` →
+`save_workflow_draft` with the CAS flow (`expected_updated_at` from your
+last read; a 409 carries `current_draft` for rebasing) →
+`compare_workflow` to preview.
+
+### 5.2 Configuring tools (per node and per definition)
+
+`tools` is an allowlist of catalog tool names, resolved per agent node at
+dispatch:
+
+- a node-level `tools:` list (agent nodes ONLY — the loader rejects `tools`
+  on any non-agent node) overrides the Agent definition's `tools` default
+  for that node;
+- a node without `tools:` falls back to the definition-level `tools` (the
+  `create_agent_definition`/`save_agent_definition_draft` argument).
+
+Unknown tool names fail validation at dispatch. Discover what exists per
+runtime with `get_agent_runtimes(workspace_id)`: e.g. for velites, `read`/
+`write`/`bash` are `default` tier (preselected), `uuid`/`json` are `opt-in`
+(explicitly enabled — add them to `tools` when the node needs them), and
+`validate` is `forced` (harness-enforced via `--require-output`; never
+select it yourself — listing it is a silent no-op). pi offers the
+`read`/`write`/`bash` trio only.
+
+Concrete example — one workflow with a top-level execution default, an agent
+node overriding it, a per-node tools selection, and the matching
+agent-definition `tools` default:
+
+```yaml
+key: education_video_problems_generation
+schema_version: 2
+execution:                  # workflow-level default for every agent node
+  provider: deepseek
+  model: v4-flash
+nodes:
+  intake:
+    label: 拉取数据
+    capability: fetch_data          # code node: execution/tools ignored
+    outputs: [data.json]
+  review:
+    label: 审核知识点
+    capability: review_keywords     # agent node (published Agent exists)
+    inputs: [data.json]
+    outputs: [review.json]
+    execution:              # node override beats the top-level default
+      model: v4-pro         # provider still falls through to deepseek
+    tools: [read, write, json]      # node tools override the definition's
+  report:
+    label: 汇总
+    capability: report
+    inputs: [review.json]
+    outputs: [report.md]
+edges:
+  - {from: intake, to: review}
+  - {from: review, to: report}
+```
+
+with the Agent definition for `review_keywords` drafted as e.g.
+`create_agent_definition(workspace_id, capability="review_keywords",
+runtime="velites", skill="keywords/review", tools=["read", "write"])` —
+the `review` node's `tools:` list of three tools wins over the
+definition's two; an agent node without `tools:` (say `report`, if it is
+agent-routed too) uses ITS Agent definition's default.
 
 ## 6. Skill editing (create → read → edit → validate → tag)
 
@@ -385,6 +480,18 @@ workspace's shared materials instead of copying it into every skill:
   (`save_node_code_draft` with `expected_capability`, then publish).
 - `Agent capability X must resolve to exactly one published Agent` — draft
   (or ask the human to publish/archive) an Agent definition for X.
+- create_agent_definition: 409 — the capability already has an Agent in
+  this workspace (the error names it and its status); switch to
+  `save_agent_definition_draft` on that Agent. 422 — invalid runtime or
+  malformed config_schema/requires_labels. 404 — unknown workspace.
+- `node X requires a provider/model ...` at dispatch — a required
+  `execution` key resolved empty: set it on the node's `execution:` block
+  or the workflow's top-level `execution:` default (EXEC-RUNTIME-DISPATCH-001).
+- `node X selects tools not offered by agent runtime ...` — the node (or
+  the Agent definition) lists a tool the runtime's catalog does not offer;
+  pick names from `get_agent_runtimes` (§5.2).
+- `Node X.tools is only valid on an agent node` — move the `tools:` list to
+  an agent-routed node; code nodes cannot select tools.
 - `node code must define a module-level 'run' function` / `not valid Python`
   — fix the code before re-saving.
 - 404 `Unknown workflow node` / `No active workflow revision` on
