@@ -149,15 +149,18 @@ warn_if_unresolvable() {
         # 可能不同），也可能什么都解析不到——两种情况服务链都不受影响
         # （native-prod-up.sh 经 --print-bin-dir 前置隔离目录），但提示措辞
         # 必须区分：前者是版本来源问题，后者才谈得上「解析不到」。
-        echo "警告: 本 worktree 的 velites 隔离副本在 $VELITES_BIN，当前 shell 未优先解析它" >&2
-        [[ -z "$resolved" ]] || echo "  （当前解析到 $resolved——非本 worktree 的隔离副本，" >&2
+        # 变量一律花括号：裸 $VAR 紧跟多字节标点（，与——等）会被 bash 把
+        # 标点首字节误并入变量名（set -u 下 unbound variable 假报错，
+        # #484 整体桩测试在 bash 3.2 下抓到的真实断裂）。
+        echo "警告: 本 worktree 的 velites 隔离副本在 ${VELITES_BIN}，当前 shell 未优先解析它" >&2
+        [[ -z "$resolved" ]] || echo "  （当前解析到 ${resolved}——非本 worktree 的隔离副本，" >&2
         [[ -z "$resolved" ]] || echo "    版本可能来自开发侧构建，与本 worktree 不一致）" >&2
         echo "  服务链不受影响：native-prod-up.sh 启动服务前已前置隔离目录。" >&2
         echo "  交互使用可临时 export PATH=\"$(dirname "$VELITES_BIN"):\$PATH\"（不建议写入 profile——" >&2
         echo "  会让开发 shell 也解析到生产副本）。" >&2
         return 0
     fi
-    echo "警告: velites 已安装到 $VELITES_BIN，但该目录不在当前 PATH 上——本 shell" >&2
+    echo "警告: velites 已安装到 ${VELITES_BIN}，但该目录不在当前 PATH 上——本 shell" >&2
     echo "  及其启动的进程解析不到它（Worker/Host 会 fail-closed 或回落 data/bin" >&2
     echo "  存量旧副本）。请把目录加入 PATH（建议写入 shell profile）:" >&2
     echo "    export PATH=\"$(dirname "$VELITES_BIN"):\$PATH\"" >&2

@@ -10,7 +10,7 @@ lsof/npm/uv/docker/curl/caffeinate/ensure-velites 全走 PATH 桩
 退出的交互、幂等/健康检查/警告块/通配兜底的组合行为都在真实脚本级执行
 下覆盖。手法与 test_install_deps.py / test_dev_stack_local_s3.py 同源。
 
-桩矩阵核心是 lsof 桩（port_listening / port_has_any_listener /
+桩矩阵核心是 lsof 桩（port_listening / port_first_listener_display /
 listener_pids 的共同底座）：STUB_LISTENERS 形如 "127.0.0.1:8000,*:8787"
 （lsof -F n 的 display:port 全集，逗号分隔；-F pn 时每行配 STUB_PID），
 按 -iTCP:port 参数过滤——「port_listening 判否但同端口仍有任意地址监听」
@@ -352,7 +352,8 @@ def test_wildcard_bind_skips_over_specific_listener(tmp_path: Path) -> None:
     """通配 bind 幂等兜底（#486/#482 follow-up，行为级）：请求 0.0.0.0 而
     lsof 只报具体地址 127.0.0.1:8000（port_listening 判否——通配归一为 *
     后不匹配具体地址行），同端口同族仍有任意监听 → 跳过启动并打醒目提示
-    （不并行起第二个实例连同一库）。Worker 无监听照常启动（对照）。"""
+    （不并行起第二个实例连同一库）。跳过后健康探测改按观测地址
+    （127.0.0.1）而非请求 bind 派生地址；Worker 无监听照常启动（对照）。"""
     main, bin_dir = _setup(tmp_path)
     stub_log = tmp_path / "stub.log"
 
@@ -370,12 +371,53 @@ def test_wildcard_bind_skips_over_specific_listener(tmp_path: Path) -> None:
     assert "不并行启动第二个实例" in result.stderr
     assert "单副本退化" in result.stderr
     assert "./scripts/native-prod-down.sh" in result.stderr
-    assert "后端视为已在 :8000 运行，跳过" in result.stdout
+    # 终态文案区分跳过（含观测地址）与正常就绪。
+    assert "后端视为已在 127.0.0.1:8000 运行，跳过（健康探测按该地址）" in result.stdout
+    assert "原生环境已就绪" in result.stdout
+    # 就绪文案的后端地址是观测地址（127.0.0.1），不是请求 bind 派生的地址。
+    assert "后端 http://127.0.0.1:8000" in result.stdout
+
+
+def test_wildcard_skip_probes_observed_non_loopback_listener(tmp_path: Path) -> None:
+    """通配跳过后按观测地址健康探测（#486 收尾 P2，实测复现的断裂）：
+    残留实例绑非 loopback 具体地址（STUB_LISTENERS=192.0.2.1:8000）+ 请求
+    0.0.0.0 → wildcard_bind_skip 拦截启动；健康探测必须指向观测地址
+    192.0.2.1（curl 桩记录在案），不得按请求 bind 派生 127.0.0.1 空转
+    150 次后误报「服务未在预期时间内就绪」退出 1。curl 桩恒绿（yes）下
+    观测地址探测成功即视为就绪，脚本快速 exit 0。"""
+    main, bin_dir = _setup(tmp_path)
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(
+        main,
+        bin_dir,
+        stub_log,
+        {
+            "STUB_LISTENERS": "192.0.2.1:8000",
+            "NATIVE_BACKEND_BIND": "0.0.0.0",
+            "STUB_CURL_LOG": "yes",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = _log_lines(stub_log)
+    # 后端被通配兜底拦截（残留实例），Worker 照常启动。
+    assert not any("uvicorn" in line for line in lines), "通配兜底未拦截后端启动"
+    assert any("worker.service" in line for line in lines)
+    # 健康探测确实打到了观测地址（非 loopback 残留实例的地址）。
+    curls = [line for line in lines if line.startswith("curl ")]
+    assert any("http://192.0.2.1:8000/api/health" in line for line in curls), curls
+    # 不得再按请求 bind 派生的 loopback 地址空转探测后端。
+    assert not any("http://127.0.0.1:8000/api/health" in line for line in curls), curls
+    # 终态：区分「跳过（已在 <观测地址> 运行）」与正常就绪，exit 0。
+    assert "后端视为已在 192.0.2.1:8000 运行，跳过（健康探测按该地址）" in result.stdout
+    assert "原生环境已就绪" in result.stdout
+    assert "服务未在预期时间内就绪" not in result.stderr
 
 
 def test_wildcard_bind_starts_when_port_really_free(tmp_path: Path) -> None:
     """通配 bind + 端口确实空闲：兜底不误伤（STUB_LISTENERS 空 →
-    port_has_any_listener 也判否）→ 照常启动。"""
+    port_first_listener_display 也观测为空）→ 照常启动。"""
     main, bin_dir = _setup(tmp_path)
     stub_log = tmp_path / "stub.log"
 
@@ -513,24 +555,40 @@ def test_loopback_bind_no_warnings(tmp_path: Path) -> None:
 # 整体执行本身即防护：脚本内任何被调用的函数缺失定义时 bash 直接报
 # 「command not found」，set -e 下立即非零退出——上面所有用例的
 # returncode 断言同时钉住「无悬空引用」（#480/#482 期间 listener_display
-# 被误删那类断裂会让全部用例集体翻红，而不是靠人工 grep 撞见）。本节
-# 的多字节标点用例是首跑抓到的真实断裂（见模块 docstring）：裸 $VAR
+# 被误删那类断裂会让全部用例集体翻红，而不是靠人工 grep 撞见）。本节的
+# 多字节标点用例是首跑抓到的真实断裂（见模块 docstring）：裸 $VAR
 # 紧跟 U+FF0C/U+FF08 时 bash 把标点首字节误并入变量名，set -u 下对已
 # 赋值变量报 unbound variable、启动路径退出 1——test_specific_bind_
 # with_loopback_host_url_warns 的 returncode 断言整体执行覆盖它，此处
-# 再以形态断言钉死「提示文案变量必须花括号」，防退回裸形态。
+# 再以形态断言钉死，防退回裸形态。
+#
+# #484 审查收口把守卫从「native-prod-up.sh 的提示文案」扩到全仓
+# scripts 树：同型残留真实存在（ensure-velites.sh 三处——它是
+# native-prod-up.sh 的直接 callee；install-deps.sh 全新安装主路径的
+# 「已生成」提示；clean-worktree.sh 的 S3 清理降级提示）。执行级覆盖对
+# 它们不可靠：多数桩测试跑在无 locale 的子进程环境里（bash 按 C 字节流
+# 处理，误并入变量名的断裂不触发），静态形态守卫才是兜底。
 
 
-def test_prompt_text_uses_braced_variables_before_multibyte_punctuation() -> None:
-    """提示/警告文案里的变量一律 ${VAR}：裸 $VAR 紧跟多字节标点（，与
-    （）会被 bash 把标点首字节误并入变量名——set -u 下报 unbound
-    variable、启动路径整体断裂（#484 首跑抓到的真实 bug）。"""
-    up = UP_SCRIPT.read_text(encoding="utf-8")
-    for line in up.splitlines():
-        if line.lstrip().startswith(('echo "警告', 'echo "提示')):
-            bare = re.search(r"\$[A-Za-z_][A-Za-z0-9_]*", line)
-            if bare:
-                pytest.fail(f"提示文案存在裸 $VAR（应使用花括号）: {line.strip()}")
+def test_shell_scripts_use_braced_variables_before_multibyte_punctuation() -> None:
+    """scripts 树全部 .sh 对「裸 $VAR 紧跟非 ASCII 字符」零容忍：bash 对
+    「裸 $VAR 紧跟多字节标点（，、（）——等）」会把标点首字节误并入
+    变量名——set -u 下对已赋值变量报「unbound variable」并退出 1
+    （#484 首跑抓到的真实 bug，审查收口时又在三个脚本撞见同型残留）。
+    形态修复一律花括号化 ${VAR}；匹配任意非 ASCII 直接相邻（不限标点），
+    注释行同样命中——该形态在任何上下文都不该再出现。"""
+    pattern = re.compile(r"(?<!\\)\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]")
+    hits: list[str] = []
+    scripts_dir = ROOT / "scripts"
+    for script in sorted(scripts_dir.rglob("*.sh")):
+        for lineno, line in enumerate(script.read_text(encoding="utf-8").splitlines(), start=1):
+            match = pattern.search(line)
+            if match:
+                hits.append(
+                    f"{script.relative_to(ROOT)}:{lineno}: {match.group(0)!r} "
+                    f"in {line.strip()[:80]}"
+                )
+    assert not hits, "存在裸 $VAR 紧跟非 ASCII 字符（应花括号化）:\n" + "\n".join(hits)
 
 
 def test_down_uses_dotenv_two_level_source(tmp_path: Path) -> None:
