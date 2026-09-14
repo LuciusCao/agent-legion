@@ -169,7 +169,7 @@ def test_batch_heartbeat_accepts_empty_batch(tmp_path: Path) -> None:
         token = register(client)["worker_token"]
         outcome = _heartbeat_ok(client, token, [])
 
-    assert outcome == {"renewed": [], "lost": [], "cancelled_execution_ids": []}
+    assert outcome == {"renewed": [], "lost": [], "settled": [], "cancelled_execution_ids": []}
 
 
 def test_batch_heartbeat_requires_worker_token(tmp_path: Path) -> None:
@@ -529,3 +529,57 @@ def test_batch_heartbeat_takes_row_locks_in_sorted_order(monkeypatch: pytest.Mon
     assert visited == ["exec-a", "exec-b", "exec-c"], "row locks must be taken in PK order"
     assert outcome["renewed"] == ["exec-a", "exec-b", "exec-c"]
     assert outcome["lost"] == []
+
+
+def test_batch_heartbeat_settled_items_emit_no_rejected_events(tmp_path, events) -> None:
+    """#590 review 重设计：完成态分类在 beat 事务内完成——行已 done 的
+    not_owned 拒绝进 ``settled``（不进 ``lost``、不发
+    execution.heartbeat_rejected 事件）；重排队（queued）仍是 lost 照发
+    事件。分类零额外 RTT（无探测端点）。"""
+    app = make_app(tmp_path)
+    seed_request(app.state.job_db, job_id="job-1", limit=10)
+    seed_request(app.state.job_db, job_id="job-2", limit=10)
+
+    with TestClient(app) as client:
+        authenticate_admin(client)
+        token = register(client)["worker_token"]
+        finished = claim(client, token)
+        swept = claim(client, token)
+        # finished: 提交结果 → 状态 done（完成态收尾的 Host 侧形态）。
+        report = client.post(
+            f"/api/agent-executions/{finished['execution_id']}/result",
+            headers={
+                "X-Agent-Worker-Token": token,
+                "X-Agent-Lease-Id": finished["lease_id"],
+                "X-Agent-Result": json.dumps({"status": "completed", "exit_code": 0}),
+            },
+            content=b"",
+        )
+        assert report.status_code == 204, report.text
+        # swept: Host 重排队 → 状态 queued（真丢失所有权的形态）。
+        from server.app.db.transaction import write_transaction
+
+        with write_transaction(app.state.job_db.dsn_identity) as conn:
+            conn.execute(
+                "update agent_execution_requests set state='queued', lease_id='gone'"
+                " where execution_id=%s",
+                (swept["execution_id"],),
+            )
+
+        outcome = _heartbeat_ok(
+            client,
+            token,
+            [
+                {"execution_id": finished["execution_id"], "lease_id": finished["lease_id"]},
+                {"execution_id": swept["execution_id"], "lease_id": swept["lease_id"]},
+            ],
+        )
+
+    assert outcome["renewed"] == []
+    assert outcome["settled"] == [finished["execution_id"]]
+    assert outcome["lost"] == [swept["execution_id"]]
+    rejected = _heartbeat_events(events)
+    # Only the swept execution fires an event — the settled completion
+    # followup is silent (the stream keeps meaning "investigate").
+    assert [event["execution_id"] for event in rejected] == [swept["execution_id"]]
+    assert rejected[0]["reason"] == "not_owned"

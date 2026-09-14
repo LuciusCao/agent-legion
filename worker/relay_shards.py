@@ -65,7 +65,7 @@ class ShardedBeat:
     the caller drops its cached client so the next snapshot rebuilds).
     """
 
-    verdicts: tuple[list, list] | None = None
+    verdicts: tuple[list, list, list] | None = None
     degraded: bool = False
     unauthorized: bool = False
 
@@ -83,6 +83,7 @@ def beat_sharded(
         for start in range(0, len(leases), RELAY_BEAT_SHARD)
     ]
     lost: list[tuple[str, str]] = []
+    settled: list[str] = []
     cancelled: list[str] = []
     lock = threading.Lock()
     failures = 0
@@ -113,8 +114,10 @@ def beat_sharded(
             return
         _status, body = outcome
         lost_ids = set(body.get("lost", []))
+        settled_ids = set(body.get("settled", []))
         with lock:
             lost.extend(pair for pair in chunk if pair[0] in lost_ids)
+            settled.extend(pair[0] for pair in chunk if pair[0] in settled_ids)
             cancelled.extend(body.get("cancelled_execution_ids", []))
 
     threads: list[threading.Thread] = []
@@ -159,4 +162,4 @@ def beat_sharded(
     # the caller snapshots so a straggler's late append cannot mutate the
     # lists it is already iterating (the relay's write_beat_result raced
     # exactly that: "list changed size during iteration").
-    return ShardedBeat(verdicts=(list(lost), list(cancelled)))
+    return ShardedBeat(verdicts=(list(lost), list(settled), list(cancelled)))

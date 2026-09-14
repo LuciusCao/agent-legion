@@ -171,13 +171,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - supervisor 心跳 relay 的迟到心跳噪音（issue #590）：执行完成提交后、
   executor 把租约从快照摘除前的 2s 节流窗口内，relay 仍按旧快照给已
   终结租约发心跳，Host 正确拒绝（not_owned）——0.7.7 后实测放大到
-  3.3k/小时，稀释租约丢失排查的第一信号。修法：relay 对每个 not_owned
-  verdict 探测一次 Host 侧执行状态（新增 worker-token 鉴权的
-  `GET /api/agent-executions/{id}/state`），`done`/`cancelled`/无行 =
-  完成态收尾——beat-result 新增 `settled` 通道，executor 静默摘除该
-  租约（不设 ownership_lost、不触发 cancel）；`queued`/`claimed`/
-  `reporting` 或探测失败保持原有 lost 通道（真丢租约信号不变）。探测
-  是例外路径上的单主键 select，健康心跳零额外流量。
+  3.3k/小时，稀释租约丢失排查的第一信号。修法（分类在 Host 侧 beat
+  事务内完成，零额外 RTT）：批量心跳的行缺失分支加一次同事务主键
+  读——行已 `done`/`cancelled` 即完成态收尾，随响应的 `settled` 列表
+  返回（不发 execution.heartbeat_rejected 事件）；`queued`（重排队）/
+  未知 id / 他人 execution 仍是 lost 照发事件。executor 侧
+  apply_beat_result 把 settled 静默摘除（不设 ownership_lost、不触发
+  cancel），下一拍快照不再携带死租约。
 - rerun 不清对象存储清单导致旧 run 产物残留（issue #508）：rerun 的
   产物清理只作用于本地 job_dir，`job_artifacts` 清单行无任何删除路径
   ——重跑中断/再次失败时，job 详情继续展示旧 run 产物（本地 ∪ 清单），

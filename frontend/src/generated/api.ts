@@ -444,33 +444,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/agent-executions/{execution_id}/state': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * Execution State
-     * @description One execution's state, for this Worker's heartbeat relay (#590).
-     *
-     *     A not_owned verdict on a batch beat is ambiguous between "lease
-     *     swept/requeued" (the Worker must react) and "execution finished, the
-     *     snapshot entry is simply stale" (benign completion followup). The
-     *     relay probes here per not_owned verdict — cheap, rare (only the
-     *     exception path), and it is what lets the Host-side
-     *     execution.heartbeat_rejected stream keep meaning "investigate".
-     */
-    get: operations['execution_state_api_agent_executions__execution_id__state_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/agent-register-tokens': {
     parameters: {
       query?: never
@@ -3509,15 +3482,6 @@ export interface components {
       published?: components['schemas']['AgentVersionResponse'] | null
     }
     /**
-     * AgentExecutionStateResponse
-     * @description #590 not_owned-verdict probe body: one execution's Host-side state
-     *     (the relay's completion-followup split).
-     */
-    AgentExecutionStateResponse: {
-      /** State */
-      state: string
-    }
-    /**
      * AgentHeartbeatResponse
      * @description Protocol v2 heartbeat body: explicit cancellations for this Worker.
      *
@@ -3835,10 +3799,14 @@ export interface components {
      *
      *     ``renewed``/``lost`` partition the request items; ``lost`` carries the
      *     409 family (unknown id, swept lease, foreign worker) so the Worker can
-     *     prune those leases locally instead of retrying them forever. The cancel
-     *     body mirrors the single heartbeat's protocol-v2 shape: batch beats carry
-     *     the same explicit cancellation list for this Worker's claimed code
-     *     executions.
+     *     prune those leases locally instead of retrying them forever.
+     *     ``settled`` (#590) carries the completion followup — the execution is in
+     *     a terminal state on the Host and the Worker's snapshot entry is merely
+     *     stale; the Worker prunes it quietly (no ownership_lost, no event: the
+     *     Host emits ``execution.heartbeat_rejected`` only for the ``lost``
+     *     family). The cancel body mirrors the single heartbeat's protocol-v2
+     *     shape: batch beats carry the same explicit cancellation list for this
+     *     Worker's claimed code executions.
      */
     BatchHeartbeatResponse: {
       /** Cancelled Execution Ids */
@@ -3847,6 +3815,8 @@ export interface components {
       lost: string[]
       /** Renewed */
       renewed: string[]
+      /** Settled */
+      settled?: string[]
     }
     /** BatchJobIdsRequest */
     BatchJobIdsRequest: {
@@ -8855,37 +8825,6 @@ export interface operations {
           [name: string]: unknown
         }
         content?: never
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  execution_state_api_agent_executions__execution_id__state_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        execution_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentExecutionStateResponse']
-        }
       }
       /** @description Validation Error */
       422: {

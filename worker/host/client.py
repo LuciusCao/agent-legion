@@ -165,19 +165,3 @@ class Client(ClaimOperations, HeartbeatOperations, TransferOperations):
             raise RuntimeError(f"ops metrics failed: HTTP {status}: {body[:300]!r}")
         metrics: dict[str, Any] = json.loads(body)
         return metrics
-
-    def execution_state(self, execution_id: str) -> str | None:
-        """One execution's state on the Host (#590 not_owned verdict probe).
-
-        Returns the state string, or None for an unknown execution — both
-        read as "settled" to the caller (nothing left to renew). Raises on
-        transport/HTTP failure so the caller can fall back to the loud
-        lost-ownership path instead of pruning on a failed probe."""
-        status, body = self.request("GET", f"/api/agent-executions/{execution_id}/state")
-        if status in (401, 409):
-            raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
-        if status == 404:
-            return None
-        if status != 200:
-            raise RuntimeError(f"execution state failed: HTTP {status}: {body[:300]!r}")
-        return str(json.loads(body).get("state", "")) or None

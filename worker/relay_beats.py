@@ -57,35 +57,6 @@ class RelayBeater:
             self._client_key = (host_url, token)
         return self._client
 
-    def execution_settled(self, execution_id: str) -> bool:
-        """Is this execution past the beatable states on the Host? (#590)
-
-        One GET per not_owned verdict (the rare exception path, not the
-        rhythm). True = the completion followup: the result was accepted and
-        this Worker's snapshot simply still carries the dead lease — the
-        caller routes the verdict to ``settled`` so the executor prunes it
-        quietly. False = still beatable ('claimed'/'reporting', or a probe
-        failure): a real lost-ownership verdict. Any transport/parse failure
-        reads as False — the verdict keeps the old (loud) lost path and the
-        next tick retries, never a silent prune based on a failed probe."""
-        try:
-            state = self._client.execution_state(execution_id)
-        except Exception as exc:
-            # #204 broad-except audit: 状态探测是 not_owned 裁决的旁路读——
-            # 失败只影响本条裁决走哪条通道（保守回落 lost 通道，executor
-            # 照旧收到 ownership_lost 信号），下一拍重试；让异常逃逸会杀死
-            # relay 线程（本机全部租约停拍）。结果空间是「本次噪音未消除」，
-            # 不是错误行为。日志保全：print 逐次记录。
-            print(f"execution state probe failed for {execution_id}: {exc}", flush=True)
-            return False
-        # Terminal-and-accounted states only. None (no row — the execution
-        # was deleted with its job) is terminal too. 'queued' after a
-        # sweep/requeue means the lease is genuinely lost (someone will
-        # re-claim it) — the loud path; 'claimed'/'reporting' under a
-        # different lease is the re-claimed case, also the loud path (the
-        # pair-matched apply already protects the new attempt).
-        return state in ("done", "cancelled") or state is None
-
     def control_plane_ping(self, host_url: str, token: str) -> None:
         """One authenticated read with no lease effect (stale-stall liveness).
 
@@ -106,14 +77,17 @@ class RelayBeater:
         else:
             self._ping_error_logged = False
 
-    def beat(self, leases: list[tuple[str, str]]) -> tuple[Any, Any]:
-        """Beat the whole snapshot; (None, None) = transient, retry next tick."""
+    def beat(self, leases: list[tuple[str, str]]) -> tuple[Any, Any, Any]:
+        """Beat the whole snapshot; (None, None, None) = transient, retry next
+        tick. #590: the second slot carries the Host-classified settled list
+        (completion followups — the classification rides the beat response,
+        no probe call)."""
         if self.degraded:
             return self._beat_singles(leases)
         outcome = self._beat_batch(leases)
-        return (None, None) if outcome is None else outcome
+        return (None, None, None) if outcome is None else outcome
 
-    def _beat_batch(self, leases: list[tuple[str, str]]) -> tuple[list, list] | None:
+    def _beat_batch(self, leases: list[tuple[str, str]]) -> tuple[list, list, list] | None:
         """Sharded parallel batch beat; the concurrency body lives in
         ``relay_shards`` (file-budget split, same seam as the #566 relay
         modules). ``(None, None)`` at the ``beat`` layer = transient."""
@@ -129,9 +103,15 @@ class RelayBeater:
             return None
         return outcome.verdicts
 
-    def _beat_singles(self, leases: list[tuple[str, str]]) -> tuple[list, list]:
-        """Degraded mode: thread-per-lease beats (a slow Host parks only its own lease)."""
+    def _beat_singles(self, leases: list[tuple[str, str]]) -> tuple[list, list, list]:
+        """Degraded mode: thread-per-lease beats (a slow Host parks only its
+        own lease). The single-beat protocol has no settled channel — a
+        terminal execution answers 409 and takes the loud lost path (the
+        executor-side ownership_lost is idempotent; the pre-#590 noise
+        return is acceptable in degraded mode, which exits on the first
+        Host answer with the batch endpoint)."""
         lost: list[tuple[str, str]] = []
+        settled: list[str] = []
         cancelled: list[str] = []
         lock = threading.Lock()
 
@@ -155,4 +135,4 @@ class RelayBeater:
             thread.start()
         for thread in threads:
             thread.join(timeout=SINGLE_BEAT_TIMEOUT_SECONDS + 1)
-        return lost, cancelled
+        return lost, settled, cancelled

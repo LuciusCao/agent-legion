@@ -311,3 +311,61 @@ def test_approval_rework_deletes_target_closure_manifest_rows(job_db, settings):
     assert store.names_for_job(job["id"]) == {"review_feedback.json"}
     deleted_names = {key.rsplit("/", 1)[-1] for key in storage.deleted}
     assert deleted_names == {"script.md"}
+
+
+def test_rerun_object_cleanup_spares_re_registered_authority_keys(
+    job_db, settings, chain_definition
+):
+    """#508 review P1：事务提交与对象清理之间，job 已可再次调度——若新
+    attempt 已完成并登记同一稳定权威键（jobs/{ws}/{job}/{name}），按旧
+    快照删该键会让新清单行指向不存在的对象。清理前按当前清单重验：
+    同键复现 = 新 attempt 的权威副本，跳过删除。"""
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    service = _make_rerun_service(job_db, settings, storage)
+
+    result = service.rerun(workspace["id"], job["id"], "up")
+
+    assert result["status"] == "succeeded"
+    store = JobArtifactObjectStore(job_db, storage)
+    assert store.names_for_job(job["id"]) == set()  # 旧 run 行已删
+
+    # 新 attempt 在清理运行前完成：重新登记同名产物的权威键（模拟
+    # promote_all 的 server-side copy + record_remote_many 已提交）。
+    up_key = f"jobs/{workspace['id']}/{job['id']}/up.json"
+    down_key = f"jobs/{workspace['id']}/{job['id']}/down.json"
+    storage.objects[up_key] = b"new run bytes"
+    store.record_remote(
+        workspace_id=str(workspace["id"]),
+        job_id=job["id"],
+        node_key="up",
+        name="up.json",
+        storage_key=up_key,
+        size_bytes=13,
+        content_hash="hash-new",
+    )
+
+    # 迟到的清理（拿的是事务时的旧行快照）：按当前清单重验后跳过
+    # 已复现的键——新 attempt 的对象与清单行都完好。
+    from server.app.services.job_staged_cleanup import delete_rerun_artifact_objects
+
+    stale_rows = [
+        {"node_key": "up", "name": "up.json", "storage_key": up_key},
+        # 另一个未复现的键：照删（真孤儿，bucket lifecycle 的等价物）。
+        {"node_key": "down", "name": "down.json", "storage_key": down_key},
+    ]
+    stale_call_baseline = len(storage.deleted)
+    delete_rerun_artifact_objects(store, stale_rows, job["id"], "rerun")
+
+    # The stale cleanup call itself must spare the re-registered key: count
+    # its deletions via the isolated call (the earlier entries in
+    # storage.deleted are service.rerun's own legitimate cleanup of the OLD
+    # run's bytes). The object and its fresh manifest row both survive.
+    deleted_by_stale_call = storage.deleted[stale_call_baseline:]
+    assert up_key not in deleted_by_stale_call, "stale snapshot must not delete the fresh key"
+    assert down_key in deleted_by_stale_call, "unre-registered orphan keys still delete"
+    assert up_key in storage.objects
+    assert store.lookup(job["id"], "up.json") is not None

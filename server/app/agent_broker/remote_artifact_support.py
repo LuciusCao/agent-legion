@@ -208,9 +208,18 @@ def verify_remote_digest(
     hash — the HEAD size check in phase 1 already bounded the object. An
     EMPTY reported hash still streams unconditionally: there is nothing to
     trust, the manifest row needs a Host-computed digest. Sampling off (0)
-    = the pre-#356 always-verify; 100 = always (the kill-switch inverse)."""
+    = the pre-#356 always-verify; 100 = always (the kill-switch inverse).
+
+    #356 review P1: a ``.gz`` ref NEVER takes the trust shortcut — its HEAD
+    size check bounds the COMPRESSED bytes only, so an unsampled gzip bomb
+    would register (and later read back) unbounded decompressed content.
+    The ``read_bounded`` decompression cap is a security property of the
+    stream itself, not part of the hash comparison; the spot check may skip
+    the digest match, never the cap. Bare keys keep the shortcut: for raw
+    objects the HEAD size IS the byte bound."""
     declared = str(ref.get("content_hash") or "")
-    if declared and not spot_check_selected(name, ref, spot_check_percent):
+    gzip_ref = is_gzip_key(str(ref["storage_key"]))
+    if declared and not gzip_ref and not spot_check_selected(name, ref, spot_check_percent):
         return declared
     digest = hashlib.sha256()
     with store.open_stream({"storage_key": str(ref["storage_key"])}) as stream:

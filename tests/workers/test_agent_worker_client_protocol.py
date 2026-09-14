@@ -250,7 +250,12 @@ def test_client_heartbeat_batch_posts_executions_and_parses_body() -> None:
 
     assert outcome == (
         200,
-        {"renewed": ["exec-1"], "lost": ["exec-2"], "cancelled_execution_ids": ["exec-3"]},
+        {
+            "renewed": ["exec-1"],
+            "lost": ["exec-2"],
+            "settled": [],  # #590: 完成态分类随 batch 响应返回
+            "cancelled_execution_ids": ["exec-3"],
+        },
     )
     assert seen == [
         {

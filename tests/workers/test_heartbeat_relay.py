@@ -40,18 +40,11 @@ class _FakeClient:
         self.single_status = 204
         self.pings = 0
         self.ping_error: Exception | None = None
-        # #590: state probe results keyed by execution_id; default "claimed"
-        # (still beatable — a not_owned verdict then keeps the loud lost
-        # path, the pre-#590 behavior every legacy test scripts).
-        self.states: dict[str, str | None] = {}
-        self.state_error: Exception | None = None
-        self.state_probes: list[str] = []
-
-    def execution_state(self, execution_id: str) -> str | None:
-        self.state_probes.append(execution_id)
-        if self.state_error is not None:
-            raise self.state_error
-        return self.states.get(execution_id, "claimed")
+        # #590: the Host classifies the completion followups inside the beat
+        # transaction; the response carries a settled list (default empty =
+        # every lost verdict is the loud family, the pre-#590 behavior every
+        # legacy test scripts).
+        self.settled: list[str] = []
 
     def get_self(self) -> dict:
         self.pings += 1
@@ -69,7 +62,11 @@ class _FakeClient:
             raise self.batch_error
         if self.batch_status in (404, 405):
             return None
-        return 200, {"lost": self.lost, "cancelled_execution_ids": self.cancelled}
+        return 200, {
+            "lost": self.lost,
+            "settled": self.settled,
+            "cancelled_execution_ids": self.cancelled,
+        }
 
     def heartbeat(self, execution_id: str, lease_id: str, timeout: float | None = None) -> Any:
         self.singles.append((execution_id, lease_id))
@@ -144,14 +141,15 @@ def test_tick_writes_beat_result_with_lost_pairs_and_cancelled(tmp_path: Path) -
     assert result["cancelled"] == ["exec-9"]
 
 
-def test_tick_splits_not_owned_verdicts_into_settled_and_lost(tmp_path: Path) -> None:
-    """#590: a not_owned verdict for an execution the Host already finished
-    (default probe state "done") routes to ``settled`` — pruned quietly, no
-    ownership_lost; a still-beatable row ("queued" after a requeue sweep)
-    keeps the loud lost path."""
+def test_tick_routes_response_settled_and_lost_verdicts(tmp_path: Path) -> None:
+    """#590: the Host classifies inside the beat transaction — the response's
+    ``settled`` list (terminal executions whose snapshot entry is stale)
+    rides through to the beat-result file unchanged; ``lost`` keeps the
+    (execution_id, lease_id) pairs for the pair-matched apply. No probe
+    round-trip exists at all."""
     client, logs = _FakeClient(), []
-    client.lost = ["exec-1", "exec-2"]
-    client.states = {"exec-1": "done", "exec-2": "queued"}
+    client.lost = ["exec-2"]
+    client.settled = ["exec-1"]
     relay = _relay(tmp_path, client, logs)
     _write_snapshot(tmp_path)
 
@@ -161,15 +159,14 @@ def test_tick_splits_not_owned_verdicts_into_settled_and_lost(tmp_path: Path) ->
     assert result is not None
     assert result["settled"] == ["exec-1"]
     assert result["lost"] == [["exec-2", "lease-2"]]
-    assert client.state_probes == ["exec-1", "exec-2"], "one probe per not_owned verdict"
 
 
-def test_tick_state_probe_failure_falls_back_to_lost(tmp_path: Path) -> None:
-    """Probe failure must never prune on a failed check: the verdict keeps
-    the (loud) lost path and the next tick retries."""
+def test_tick_transient_beat_failure_reports_no_settled(tmp_path: Path) -> None:
+    """A transient beat failure loses the whole verdict set (retry next
+    tick) — settled arrives only with a real answer, never guessed."""
     client, logs = _FakeClient(), []
-    client.lost = ["exec-1"]
-    client.state_error = ConnectionError("host unreachable")
+    client.batch_error = ConnectionError("host unreachable")
+    client.settled = ["exec-1"]
     relay = _relay(tmp_path, client, logs)
     _write_snapshot(tmp_path)
 
@@ -177,24 +174,7 @@ def test_tick_state_probe_failure_falls_back_to_lost(tmp_path: Path) -> None:
 
     result = read_beat_result(tmp_path / RESULT_FILENAME)
     assert result is not None
-    assert result["settled"] == []
-    assert result["lost"] == [["exec-1", "lease-1"]]
-
-
-def test_tick_unknown_execution_reads_as_settled(tmp_path: Path) -> None:
-    """A 404 (no row) is terminal like any finished state: settled."""
-    client, logs = _FakeClient(), []
-    client.lost = ["exec-1"]
-    client.states = {"exec-1": None}
-    relay = _relay(tmp_path, client, logs)
-    _write_snapshot(tmp_path)
-
-    relay.tick()
-
-    result = read_beat_result(tmp_path / RESULT_FILENAME)
-    assert result is not None
-    assert result["settled"] == ["exec-1"]
-    assert result["lost"] == []
+    assert result["settled"] == [] and result["lost"] == []
 
 
 def test_tick_skips_stale_snapshot_and_logs_once(tmp_path: Path) -> None:
@@ -406,7 +386,7 @@ def test_overstayed_shard_cannot_mutate_returned_verdicts(
     )
 
     assert outcome.verdicts is not None
-    lost, cancelled = outcome.verdicts
+    lost, settled, cancelled = outcome.verdicts
     assert lost == [("exec-fast", "lease-fast")]
     assert cancelled == ["exec-fast-c"]
 
@@ -466,7 +446,7 @@ def test_join_deadline_is_shared_across_shards(monkeypatch: pytest.MonkeyPatch) 
         f"fan-out join spent {elapsed:.2f}s — per-thread budget stacking is back"
     )
     # The round still completed: nothing learned, verdicts intact.
-    assert outcome.verdicts is not None and outcome.verdicts == ([], [])
+    assert outcome.verdicts is not None and outcome.verdicts == ([], [], [])
 
 
 def test_overstayed_shards_are_bounded_across_ticks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -498,7 +478,7 @@ def test_overstayed_shards_are_bounded_across_ticks(monkeypatch: pytest.MonkeyPa
     try:
         first = relay_shards.beat_sharded(_BlockedClient(), leases, lambda message: None, limiter)
         second = relay_shards.beat_sharded(_BlockedClient(), leases, lambda message: None, limiter)
-        assert first.verdicts == ([], [])
+        assert first.verdicts == ([], [], [])
         assert second.verdicts is None
         assert calls == ["exec-1", "exec-2"], "a later tick spawned duplicate shard threads"
     finally:
@@ -508,7 +488,7 @@ def test_overstayed_shards_are_bounded_across_ticks(monkeypatch: pytest.MonkeyPa
                 thread.join(timeout=5)
 
     recovered = relay_shards.beat_sharded(_BlockedClient(), leases, lambda message: None, limiter)
-    assert recovered.verdicts == ([], [])
+    assert recovered.verdicts == ([], [], [])
     assert calls == ["exec-1", "exec-2", "exec-1", "exec-2"]
 
 

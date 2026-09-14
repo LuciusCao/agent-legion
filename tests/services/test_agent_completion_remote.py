@@ -750,3 +750,50 @@ def test_finish_cancelled_sampled_mismatch_still_fails(tmp_path: Path) -> None:
 
     assert leases.results[0].status == "failed"
     assert "hash mismatch" in leases.results[0].error_message
+
+
+def test_finish_cancelled_unsampled_gzip_still_streams_for_the_cap(tmp_path: Path) -> None:
+    """#356 review P1：未抽样的 .gz 引用不得走信任捷径——HEAD 只约束压缩
+    字节，read_bounded 的解压上限是流本身的安全属性。percent=0（全信任）
+    也必须对 gzip 流式核验，防未抽样的解压炸弹被登记。"""
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, spot_check_percent=0
+    )
+
+    _finish(handler, {"out.json": _gz_ref()}, status="cancelled")
+
+    # 未抽样也打开了对象流（解压上限生效），登记自报 hash。
+    assert storage.opened == 1
+    assert leases.results[0].status == "cancelled"
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH
+
+
+def test_finish_cancelled_unsampled_gzip_bomb_fails(tmp_path: Path) -> None:
+    """解压后超限（max_archive_bytes 远小于解压结果）：即使未抽样、自报
+    hash 匹配，read_bounded 也拒绝——信任捷径不得绕过炸弹防护。"""
+    decompressed = b"x" * (4 * 1024 * 1024)
+    big = gzip.compress(decompressed)  # 压缩后很小
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = big
+    # 自报 hash（未压缩哈希）与 size（压缩后字节数）都如实——HEAD 两项
+    # 核验全过，唯一防线是 read_bounded 的解压上限。
+    import hashlib as _hashlib
+
+    honest = _hashlib.sha256(decompressed).hexdigest()
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, max_archive_bytes=1024, spot_check_percent=0
+    )
+    ref = _gz_ref(content_hash=honest)
+    ref["size_bytes"] = len(big)
+
+    _finish(handler, {"out.json": ref}, status="cancelled")
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "exceeds" in result.error_message
+    assert object_store.lookup("job-1", "out.json") is None
+    assert GZ_AUTHORITY_KEY not in storage.objects

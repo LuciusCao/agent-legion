@@ -265,47 +265,6 @@ def test_heartbeat_requires_and_validates_lease_id(tmp_path: Path) -> None:
         assert ok.status_code == 204
 
 
-def test_execution_state_reports_beatable_and_terminal(tmp_path: Path) -> None:
-    """#590: the relay's not_owned-probe endpoint. A claimed execution
-    answers its state; a finished one answers 'done' (the completion
-    followup the relay routes to ``settled``); an unknown id is 404 (also
-    terminal to the caller); and the endpoint is worker-token gated."""
-    app = _make_app(tmp_path)
-    _seed_request(app.state.job_db, job_id="job-1", limit=2)
-
-    with TestClient(app) as client:
-        _authenticate_admin(client)
-        token = _register(client)["worker_token"]
-        claimed = _claim(client, token)
-        execution_id = claimed["execution_id"]
-        auth = {"X-Agent-Worker-Token": token}
-
-        anon = client.get(f"/api/agent-executions/{execution_id}/state")
-        assert anon.status_code in (401, 403)
-
-        beatable = client.get(f"/api/agent-executions/{execution_id}/state", headers=auth)
-        assert beatable.status_code == 200
-        assert json.loads(beatable.content)["state"] == "claimed"
-
-        # Finish it (the result commit is the Host-side terminal transition).
-        report = client.post(
-            f"/api/agent-executions/{execution_id}/result",
-            headers={
-                **auth,
-                "X-Agent-Lease-Id": claimed["lease_id"],
-                "X-Agent-Result": json.dumps({"status": "completed", "exit_code": 0}),
-            },
-            content=_empty_archive(),
-        )
-        assert report.status_code == 204
-        done = client.get(f"/api/agent-executions/{execution_id}/state", headers=auth)
-        assert done.status_code == 200
-        assert json.loads(done.content)["state"] == "done"
-
-        missing = client.get("/api/agent-executions/exec-unknown/state", headers=auth)
-        assert missing.status_code == 404
-
-
 def test_release_slot_requires_and_validates_lease_id(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
