@@ -28,9 +28,13 @@ GITHUB_RELEASE_BASE="https://github.com/LuciusCao/agent-legion/releases/download
 IMAGE_REPO="ghcr.io/luciuscao/agent-legion-worker"
 # 默认钉在已发布版本；--version / --velites-version 或同名环境变量覆盖。
 # 注意 compose 文件按 worker-v<version> tag ref 拉取：自定义版本必须存在
-# 对应 tag（即经过 worker-image-release workflow 发布过）。
-WORKER_VERSION="${AGENT_WORKER_VERSION:-0.6.1}"
-VELITES_VERSION="${VELITES_VERSION:-0.5.0}"
+# 对应 tag（即经过 worker-image-release workflow 发布过）。默认值由
+# scripts/check_release_pins.py 门禁对齐发布线（issue #504）——bump
+# pyproject / velites 版本时不同步改这里会被静态轮拒绝。
+WORKER_VERSION_DEFAULT="0.7.0"
+VELITES_VERSION_DEFAULT="0.5.1"
+WORKER_VERSION="${AGENT_WORKER_VERSION:-$WORKER_VERSION_DEFAULT}"
+VELITES_VERSION="${VELITES_VERSION:-$VELITES_VERSION_DEFAULT}"
 TARGET="${AGENT_WORKER_INSTALL_DIR:-$HOME/agent-legion-worker}"
 HOST_URL=""
 WORKER_ID=""
@@ -52,9 +56,10 @@ usage() {
   --name NAME           显示名（默认 "Worker on <hostname>"）
   --models-json FILE    安装该文件为 velites-config/models.json（已存在则
                         覆盖——显式传入即声明为本次的期望内容）
-  --version TAG         worker 镜像 tag（默认 0.6.1；须存在 worker-v<TAG>
-                        发布 tag）
-  --velites-version VER velites 二进制版本（默认 0.5.0）
+EOF
+  printf '  --version TAG         worker 镜像 tag（默认 %s；须存在 worker-v<TAG> 发布 tag）\n' "$WORKER_VERSION_DEFAULT"
+  printf '  --velites-version VER velites 二进制版本（默认 %s）\n' "$VELITES_VERSION_DEFAULT"
+  cat <<'EOF'
   --no-up               只组装文件，不执行 docker compose up
 
 示例（无仓库的远程机器）:

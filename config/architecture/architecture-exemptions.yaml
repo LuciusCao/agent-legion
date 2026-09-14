@@ -1283,3 +1283,14 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
   ceiling: 76
+- check: architecture.file_budget
+  path: scripts/check_release_pins.py
+  reason: >-
+    #506 codex 四项修复的防御逻辑：velites 逐字比较（发布 tag 逐字相等
+    契约）、镜像 -rN 重发后缀接受、compose 双钉点 count 校验、argv
+    回落解析。每个比较模式都有独立注释与回归钉；拆分会把四种比较语义
+    分散到姊妹文件而失去单一契约视图。Harvest when the release-pins
+    gate gains a structural split of its own.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 167
