@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Fixed
+- 原生形态提示文案的 bash 变量陷阱（issue #484）：`native-prod-up.sh` /
+  `native-prod-down.sh` 的警告/提示文案里「裸 `$VAR` 紧跟多字节标点
+  （`，` `（`）」会把标点首字节误并入变量名——`set -u` 下对已赋值变量报
+  「unbound variable」并退出 1，bind 非 loopback 的启动路径整体不可用
+  （bash 3.2 与 5 皆然）。#484 新增的整体执行桩测试首跑即抓到；四处
+  提示文案变量统一花括号化，并以形态断言钉死。
 - 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
   `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
   部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5
@@ -15,6 +21,28 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   重复）。
 
 ### Added
+- 原生形态 NATIVE_* 端口/绑定地址的 `.env` 持久化载体（issue #486）：
+  `NATIVE_BACKEND_PORT` / `NATIVE_WORKER_PORT` / `NATIVE_BACKEND_BIND` /
+  `NATIVE_WORKER_BIND` 四变量改为「进程环境 > 根 `.env`」两级来源
+  （`native-prod-up.sh` 与 `native-prod-down.sh` 同步），换 shell 会话、
+  重启或 launchd/cron 非 shell 调起时不再静默退回 loopback；进程环境
+  已导出时优先（临时覆盖逃生门保留，与 dotenv override=False 一致）。
+  dotenv 解析先收敛为公共原语 `scripts/lib/dotenv.sh`（`dotenv_value` /
+  `dotenv_value_first`，语义对齐原 local-s3-decide.sh 的
+  lookup/lookup_first），`local-s3-decide.sh`（stdout 协议与退出码不变）
+  与 `dev_stack.sh`（read_env_value 退役）同步收敛。同 PR 处理 #482
+  follow-up 的通配 bind 幂等边界：请求 `0.0.0.0`/`::` 而同端口同族已有
+  具体地址监听时（原幂等判定拦不住），视为已在运行并跳过启动、打醒目
+  提示——双实例连同一库会造成单副本退化（SSE 分裂/限速稀释/暂停互踩）；
+  `native-prod-down.sh` 对应的通配 bind 残留态（旧实例绑具体地址、
+  listener_pids 未命中）改判未完全停止（rc 1）并指引，不再伪装成功。
+- `native-prod-up.sh` 整体执行的行为级桩测试
+  `tests/scripts/test_native_prod_up_exec.py`（issue #484）：合成仓库
+  布局 + PATH 桩（lsof/npm/uv/docker/curl/caffeinate/ensure-velites，
+  STUB_* env 驱动）真跑整个脚本，覆盖正常启动参数组装、幂等分支两条
+  路、健康检查循环（curl 桩控成败 + sleep 桩 no-op，失败路径断言超时
+  退出码与 `--noproxy/--fail/-m` 参数）、警告块触发、函数悬空引用防护
+  （整体执行天然覆盖）；首跑即抓到上方提示文案的真断裂。
 - 发布钉点门禁 `scripts/check_release_pins.py`（backend 静态轮，紧邻
   check_versions）：`install-worker.sh` 的 `WORKER_VERSION_DEFAULT` /
   `VELITES_VERSION_DEFAULT` 对齐 pyproject / velites 版本，
