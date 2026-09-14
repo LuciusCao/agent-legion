@@ -59,6 +59,12 @@ services:
       # 无冒号的 ${VAR-默认值} 形式：deploy/.env 显式写空值时生效为「禁用
       # 守卫」（零 runtime 注册合法，如纯 code 池形态），不会被默认值盖掉。
       AGENT_WORKER_EXPECT_RUNTIMES: ${AGENT_WORKER_EXPECT_RUNTIMES-velites}
+      # 宿主侧实际发布地址（issue #489）：容器内进程必绑 0.0.0.0（端口映射
+      # 前提），但控制面 token 是否内嵌页面取决于宿主侧发布面——与上方
+      # ports 行同一 ${AGENT_WORKER_UI_BIND} 插值（.env 一处改、两处同步），
+      # service 据此判定：发布回环 → token 内嵌；发布非回环 → 不内嵌 +
+      # warning（见 docs/agent-worker-deployment.md §控制面鉴权）。
+      AGENT_WORKER_UI_EFFECTIVE_BIND: ${AGENT_WORKER_UI_BIND:-127.0.0.1}
     stop_grace_period: 30s
     healthcheck:
       # Healthy = 服务可达，且控制面未进入 failed，且（Worker 进程在跑或尚未配置）。

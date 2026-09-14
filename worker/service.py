@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -151,7 +152,16 @@ def main() -> int:
         args.state_dir.resolve(), args.config.resolve() if args.config is not None else None
     )
     supervisor = WorkerSupervisor(store, worker_dir / "executor.py")
-    app = create_app(supervisor, worker_dir / "ui", embed_token=embed_control_token(args.host))
+    # #489：Docker 形态容器内必绑 0.0.0.0（端口映射前提），但真实暴露面由
+    # compose 的宿主侧发布地址决定——AGENT_WORKER_UI_EFFECTIVE_BIND 经环境
+    # 变量传入（与发布行同源插值）。未设置时（裸机/dev 形态）按进程 bind
+    # 判定，行为与本改动前完全一致。
+    effective_host = os.environ.get("AGENT_WORKER_UI_EFFECTIVE_BIND")
+    app = create_app(
+        supervisor,
+        worker_dir / "ui",
+        embed_token=embed_control_token(args.host, effective_host),
+    )
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
