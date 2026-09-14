@@ -281,13 +281,10 @@ class ExitWatchReactor:
                 return waiter
             displaced = self._waiters.get(proc.pid)
             if displaced is not None and displaced is not waiter:
-                # Same-pid double-register would orphan the first waiter
-                # (dict overwrite: no wake source could reach it — kernel
-                # events, tick, and deadline all key off the registry).
-                # Unreachable via today's single-waiter-per-child call
-                # graph, but nothing enforces that invariant; resolve the
-                # displaced waiter instead of parking it forever
-                # (subagent review P1-latent).
+                # Same-pid double-register would orphan the displaced
+                # waiter (dict overwrite: no wake source reaches it —
+                # kernel events, tick, deadline all key off the registry;
+                # subagent review P1-latent). Resolve it instead.
                 displaced.watcher_dead = True
                 displaced.done.set()
             self._waiters[proc.pid] = waiter
@@ -510,6 +507,25 @@ class ExitWatchReactor:
         for waiter in waiters:
             waiter.watcher_dead = True
             waiter.done.set()
+        # Reactor-owned resources too (codex P2 round 2): each death spawns
+        # a fresh singleton, so persistently failing backends would leak the
+        # kernel fd + wakeup pipe (2 fds) per rebuild until fd exhaustion.
+        # Handles are nulled after closing — a later shutdown() must not
+        # double-close an fd the OS may have reused.
+        if self._kqueue is not None:
+            with contextlib.suppress(OSError):
+                self._kqueue.close()
+            self._kqueue = None
+        if self._selector is not None:
+            with contextlib.suppress(Exception):
+                self._selector.close()
+            self._selector = None
+        for attr in ("_wakeup_r", "_wakeup_w"):
+            fd = getattr(self, attr)
+            if fd >= 0:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+                setattr(self, attr, -1)
 
 
 def wait_for_exit(

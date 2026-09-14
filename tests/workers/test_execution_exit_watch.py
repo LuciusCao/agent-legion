@@ -375,3 +375,37 @@ def test_orderly_shutdown_resolves_parked_waiters() -> None:
     assert waiter.watcher_dead
     proc.kill()
     proc.wait()
+
+
+def test_fail_dead_closes_reactor_owned_fds() -> None:
+    """codex P2 round 2：_fail_dead 也要关 reactor 自身资源（kqueue/selector
+    + wakeup pipe）——持续故障下每次重建泄漏至少 2 个 fd，直到耗尽 Worker
+    的 fd 上限使监督初始化失败。修后：死亡路径句柄关闭并置空（防二次
+    close 复用 fd）。"""
+    import os
+
+    # kqueue/pidfd 模式才持有 wakeup pipe；scan 无内核 fd，用本机可用模式。
+    mode = "kqueue" if exit_watch._kqueue_available() else "pidfd"
+    if not (exit_watch._kqueue_available() or exit_watch._pidfd_available()):
+        pytest.skip("no kernel backend on this platform")
+    instance = ExitWatchReactor(mode)
+    try:
+        r_before, w_before = instance._wakeup_r, instance._wakeup_w
+        assert r_before >= 0 and w_before >= 0
+        open_before = os.listdir("/dev/fd") if Path("/dev/fd").is_dir() else None
+        instance._fail_dead()
+        assert instance._wakeup_r == -1 and instance._wakeup_w == -1
+        # fd 确已关闭：对旧 fd 的写应 EBADF（被复用的极小概率不在此断言内）。
+        import errno
+
+        try:
+            os.write(w_before, b"x")
+            raised = False
+        except OSError as exc:
+            raised = exc.errno == errno.EBADF
+        assert raised, "wakeup pipe fd must be closed after _fail_dead"
+        if open_before is not None:
+            open_after = os.listdir("/dev/fd")
+            assert len(open_after) <= len(open_before) + 1
+    finally:
+        instance.shutdown()

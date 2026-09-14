@@ -304,3 +304,82 @@ def test_shutdown_does_not_strand_late_submitted_task() -> None:
     # 无滞留任务：哨兵之外的队列项必为空。
     assert pool._queue.qsize() == 0
     assert future.result(timeout=1) is None or future.done()
+
+
+def test_idle_retire_handoff_does_not_strand_late_task() -> None:
+    """codex P1 round 2：idle 超时醒来→拿锁退休的窗口里，submit 已把任务
+    入队并计入本线程（live=1 不 spawn）——退休后任务永久无人消费（
+    max_workers=1 时 Worker 停止 claim）。修后：退休临界区内 re-check 队列，
+    非空即取消退休回去消费。钉法：短 idle + 在超时沿附近持续提交，所有
+    future 必须完成（修复前该窗口会挂到 join 超时）。"""
+    pool = ExecutionLanePool(1, idle_timeout=0.15)
+    try:
+        results: list[str] = []
+        # 前置：起一根线程并让它进入 idle 计时。
+        assert pool.submit(lambda: "warmup").result(timeout=5) == "warmup"
+        # 在 idle 到期沿附近高频提交，制造 get 超时与提交的交错窗口。
+        for i in range(12):
+            time.sleep(0.14)  # 紧贴 idle_timeout，让部分提交落在竞态窗内
+            results.append(pool.submit(lambda i=i: f"done-{i}").result(timeout=10))
+        assert results == [f"done-{i}" for i in range(12)]
+        assert pool.live_threads() <= 1
+    finally:
+        pool.shutdown(wait=True)
+
+
+def test_spawn_never_exceeds_max_workers_under_burst() -> None:
+    """codex P2 round 2：spawn 判定（锁内快照）与插入（原锁外）可并发
+    突破 max_workers。修后插入临界区是上限的原子裁决者——突发并发提交
+    下 live 恒 ≤ max_workers。"""
+    pool = ExecutionLanePool(4, idle_timeout=30)
+    try:
+        release = threading.Event()
+
+        def blocker() -> None:
+            release.wait(15)
+
+        barrier = threading.Barrier(8)
+
+        def burst() -> None:
+            barrier.wait(10)
+            pool.submit(blocker)
+
+        threads = [threading.Thread(target=burst) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        # 观察窗口：让所有 spawn 决策落地。
+        deadline = time.monotonic() + 3
+        peak = 0
+        while time.monotonic() < deadline:
+            peak = max(peak, pool.live_threads())
+            time.sleep(0.01)
+        assert peak <= 4, f"pool exceeded max_workers: peak={peak}"
+        release.set()
+    finally:
+        pool.shutdown(wait=True)
+
+
+def test_spawn_start_failure_rolls_back_live_entry(monkeypatch) -> None:
+    """自审 round 3：_spawn_locked 的 start() 失败（线程预算耗尽的
+    RuntimeError）必须回滚 _live 条目——未启动的线程没有任何人会 join，
+    ghost 会永久虚高 live_threads() 并侵占 max_workers 名额。"""
+    from worker.execution import execution_lane
+
+    pool = execution_lane.ExecutionLanePool(4, idle_timeout=30)
+    try:
+        started: list[object] = []
+
+        def fake_start(self):  # noqa: ANN001
+            started.append(self)
+            raise RuntimeError("can't start new thread")
+
+        monkeypatch.setattr(execution_lane._LaneWorker, "start", fake_start)
+        with pytest.raises(RuntimeError, match="can't start new thread"):
+            pool.submit(lambda: "never-runs")
+        # ghost 回滚：live 归零、无人 join 的条目不存在。
+        assert pool.live_threads() == 0
+        assert len(started) == 1
+    finally:
+        pool.shutdown(wait=True)

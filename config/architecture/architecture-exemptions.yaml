@@ -965,3 +965,28 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/429
   ceiling: 95
+- check: architecture.file_budget
+  path: worker/execution/execution_lane.py
+  reason: '#647 PR #648 复审加固（codex round 2 + subagent 双审）：退休交接
+    re-check（_retire_if_idle，防 idle 超时窗口提交的任务永久滞留）、spawn
+    判定与插入合并为临界区原子裁决（_spawn/_spawn_locked，防并发突破
+    max_workers）、take→finish 全区 try/finally + future claim。防御性正确性
+    代码使有效行 106→127（超 growth_allowance 带）。时间盒：phase-3
+    remainder（run_execution 队列驱动 continuation 重写，见 exit_watch.py
+    docstring）落地时 lane 结构重排并重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/647
+  ceiling: 127
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: worker/execution/exit_watch.py
+  reason: '#647 PR #648 复审加固：watcher 忙旋修复（_tick_timeout/_tick 排除
+    done-set waiter）、同 pid 双注册唤醒被顶 waiter、reactor 两条死亡路径的
+    pidfd 排水 + 自身资源关闭（kqueue/selector/wakeup pipe，防持续故障下
+    fd 泄漏）。pidfd 管线已拆 exit_watch_pidfd.py，剩余防御性正确性代码使
+    有效行 328→353（超 growth_allowance 带）。时间盒：同 execution_lane.py
+    ——phase-3 continuation 重写时重排。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/647
+  ceiling: 353
+  expires: 2026-12-31

@@ -61,35 +61,42 @@ def _lane_idle_timeout() -> float:
 
 class _LaneWorker(threading.Thread):
     """One pool thread: loop taking (future, fn, args) triples off the shared
-    queue; exit after one idle-timeout round.
-
-    Spawn policy ledger: ``_busy`` counts taken-but-unfinished tasks. A
-    spawn is warranted exactly when demand (busy + queued + this submit)
-    exceeds the live threads — parked threads absorb work, busy threads
-    will pick from the queue on completion, and only genuine excess demand
-    grows the pool (codex P2, PR #648: submit must not grow the pool past
-    live executions — sequential submit/wait/submit must reuse threads)."""
+    queue; exit after one idle-timeout round. Spawn policy ledger (codex P2,
+    PR #648): ``_busy`` counts taken-but-unfinished tasks; spawn only when
+    demand (busy + queued + submit) exceeds live — sequential submit/wait
+    must reuse threads, not climb to max_workers."""
 
     def __init__(self, pool: ExecutionLanePool, serial: int) -> None:
         super().__init__(daemon=True, name=f"agent-execution-{serial:d}")
         self._pool = pool
 
     def _retire(self) -> None:
+        """Unconditional retirement (the shutdown-sentinel exit)."""
         with self._pool._guard:
             self._pool._live.discard(self)
 
+    def _retire_if_idle(self) -> bool:
+        """Idle-death retirement with the handoff re-check (codex P1 round
+        2): a submit may queue a task in the get→lock window while this
+        thread still counts as live — retiring anyway strands that task
+        with no consumer (max_workers=1: the Worker stops claiming forever).
+        Queue non-empty inside the retirement critical section → abort
+        retirement (False; the next get() returns immediately); else retire."""
+        with self._pool._guard:
+            if self._pool._queue.qsize() > 0:
+                return False
+            self._pool._live.discard(self)
+            return True
+
     def _rebalance_after_take(self) -> None:
         """Mark busy, then the consumer-side spawn belt: a racing submit's
-        demand check can miss a needed spawn in the get()→here window (this
-        thread's take is not yet in ``_busy``), so the next take re-checks
-        with the fresh ledger. The stall ceiling of a miss is one
-        park-to-take handoff (microseconds), not an execution's runtime."""
+        demand check can miss a needed spawn in the get()→here window (the
+        take is not yet in ``_busy``), so the next take re-checks with the
+        fresh ledger — a miss stalls one park-to-take handoff, not an
+        execution's runtime. Post-shutdown spawn is forbidden (no sentinel
+        would ever reach it)."""
         with self._pool._guard:
             self._pool._busy += 1
-            # Post-shutdown spawn is forbidden: shutdown already queued its
-            # sentinels per the then-live count, and a fresh thread would
-            # park on the queue with NO sentinel to consume — shutdown's
-            # join then waits out the full idle timeout for it.
             undersupplied = (
                 not self._pool._shutdown
                 and self._pool._busy + self._pool._queue.qsize() > len(self._pool._live)
@@ -103,9 +110,10 @@ class _LaneWorker(threading.Thread):
             try:
                 item = self._pool._queue.get(timeout=self._pool._idle_timeout)
             except queue.Empty:
-                # Idle death: deregister first so shutdown's join-set can
-                # never contain a dead thread, then exit.
-                self._retire()
+                # Idle death — but only after the handoff re-check: a task
+                # queued during the get→lock window must not be stranded.
+                if not self._retire_if_idle():
+                    continue
                 return
             if item is None:
                 # Shutdown sentinel: wake immediately instead of idling out
@@ -181,15 +189,45 @@ class ExecutionLanePool:
             return len(self._live)
 
     def _spawn(self) -> None:
-        # Serial/name assignment and the live-set insert share one critical
-        # section; worker.start() stays OUTSIDE the lock (the new thread's
-        # first idle-death deregister must not wait on our guard — and the
-        # constructor must never take the same non-reentrant lock we hold).
+        """Spawn entry for callers NOT holding ``_guard`` (the rebalance
+        belt). Callers holding the guard use ``_spawn_locked`` directly."""
         with self._guard:
-            self._serial += 1
-            worker = _LaneWorker(self, self._serial)
-            self._live.add(worker)
-        worker.start()
+            self._spawn_locked()
+
+    def _spawn_locked(self) -> None:
+        """Guard-held spawn — the ATOMIC ARBITER of both the shutdown flag
+        and the max_workers cap: spawn decisions are made from lock-side
+        snapshots (submit under the lock, the rebalance belt from a
+        snapshot it releases before calling), and concurrent deciders at
+        live == max-1 would each insert a thread past the cap without this
+        re-check (codex P2 round 2; the shutdown re-check likewise closes
+        the decision→insertion gap — subagent review P2).
+
+        ``worker.start()`` runs under the guard by design: start() itself
+        never blocks on it, and the new thread's first guard acquisition
+        (a task take, or its first idle retirement ≥ idle_timeout away)
+        only ever waits out microseconds of the caller's remainder — no
+        deadlock, unlike the constructor path. A start() failure (thread
+        budget exhausted) rolls the live-set entry back: a never-started
+        thread would ghost in ``_live`` forever (nothing joins it),
+        permanently inflating live_threads() and squatting a max_workers
+        slot (self-review round 3)."""
+        if self._shutdown or len(self._live) >= self._max_workers:
+            return
+        self._serial += 1
+        worker = _LaneWorker(self, self._serial)
+        self._live.add(worker)
+        try:
+            worker.start()
+        except BaseException:
+            # #204 broad-except audit: spawn 回滚臂（自审 round 3）。逃逸族
+            # 是 Thread.start 的资源类 RuntimeError/线程系统异常；吞不是
+            # 目的——先回滚 _live 条目再原样 re-raise（submit 的调用方拿
+            # 原始异常，任务 future 尚未入队因此无人悬挂）。不回滚则
+            # 未启动的 ghost 线程永久虚高 live 计数。日志保全：异常向上
+            # 传播，不在此处打印。
+            self._live.discard(worker)
+            raise
 
     def submit(self, fn, *args):  # type: ignore[no-untyped-def]
         """Queue one task; spawn a thread only when no idle thread can take
@@ -207,15 +245,19 @@ class ExecutionLanePool:
         slot-return sees idle=0 and spawns a thread that then parks for the
         full idle timeout — steady sequential traffic kept spawning strays
         (codex P2 round 2)."""
+        future: Future = Future()
         with self._guard:
             if self._shutdown:
                 raise RuntimeError("cannot submit to a shutdown ExecutionLanePool")
             demand = self._busy + self._queue.qsize() + 1
-            spawn = demand > len(self._live) and len(self._live) < self._max_workers
-        if spawn:
-            self._spawn()
-        future: Future = Future()
-        self._queue.put((future, fn, args))
+            # The put stays INSIDE the critical section: releasing between
+            # the flag check and the put lets shutdown's sentinels queue
+            # first, stranding this task in a dead queue while shutdown
+            # (wait=True) has already returned (subagent review P1;
+            # ThreadPoolExecutor holds _shutdown_lock across both).
+            self._queue.put((future, fn, args))
+            if demand > len(self._live) and len(self._live) < self._max_workers:
+                self._spawn_locked()
         return future
 
     def shutdown(self, wait: bool = True) -> None:
@@ -227,16 +269,17 @@ class ExecutionLanePool:
         with self._guard:
             first = not self._shutdown
             self._shutdown = True
+            # Sentinels queue inside the SAME critical section that set the
+            # flag (subagent review P1): submit's put is also inside its
+            # section, so a task and the sentinels cannot interleave
+            # (task-after-sentinel would strand it; sentinel-before-spawn
+            # is prevented by _spawn's flag re-check).
             live = len(self._live)
+            if first:
+                for _ in range(live):
+                    self._queue.put(None)
         if not wait:
             return
-        if first:
-            for _ in range(live):
-                self._queue.put(None)
-            # Threads spawned between the flag and now (raced submits fail
-            # the flag check, so this cannot happen — but a sentinel count
-            # below live would park shutdown; loop the join with the idle
-            # ceiling regardless, as the belt).
         while True:
             with self._guard:
                 workers = list(self._live)
