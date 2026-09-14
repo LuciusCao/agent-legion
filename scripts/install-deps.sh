@@ -80,7 +80,11 @@ else
         exit 1
     fi
     have uv || brew_install "uv" "uv"
-    python_ok || brew_install "Python 3.11+" "python@3.12"
+    # 兜底对齐 .python-version 钉点（3.13，#483）：python_ok 仍按
+    # requires-python 下界 3.11+ 探测（已有 3.11/3.12 的机器不重复装）；
+    # 实际 venv 由 uv 按 .python-version 自管，这行只服务缺 python3 的
+    # macOS 全新机器。
+    python_ok || brew_install "Python 3.13" "python@3.13"
     node_ok || brew_install "Node 18+" "node"
     if ! { have psql && have createdb; }; then
         brew_install "PostgreSQL 17" "postgresql@17"
