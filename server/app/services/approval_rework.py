@@ -18,7 +18,10 @@ from server.app.jobs.queries.approval_decisions import ApprovalGateConflict
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.services.job_rerun.eligibility import check_rerun_eligibility
-from server.app.services.job_staged_cleanup import commit_staged_outputs
+from server.app.services.job_staged_cleanup import (
+    commit_staged_outputs,
+    delete_rerun_artifact_objects,
+)
 from server.app.workflows.approval_node import (
     AWAITING_APPROVAL_STATUS,
     approval_feedback_artifact,
@@ -93,14 +96,19 @@ def execute_rework(
     # together: staged output cleanup rolls back with the transaction.
     stale_nodes = downstream_nodes(definition, target)
     staged = None
+    deleted_rows: list[dict[str, Any]] = []
     try:
         with service.job_db.lease_guarded_mutation(
             job_id, datetime.now(UTC), reject_running_nodes=True
         ) as conn:
             staged = service.rerun.artifact_service.stage_outputs(job, [target], definition)
             service.job_db.record_rework_decision_in_transaction(conn, decision)
-            service.job_db.mark_nodes_for_rerun_in_transaction(
-                conn, job_id, [target], {target: stale_nodes}
+            deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(
+                conn,
+                job_id,
+                [target],
+                {target: stale_nodes},
+                staged_artifact_names=staged.artifact_names,
             )
     except (ApprovalGateConflict, JobMutationConflict) as exc:
         if staged is not None:
@@ -111,6 +119,7 @@ def execute_rework(
             staged.rollback()
         raise InvalidOperationError(str(exc)) from exc
     commit_staged_outputs(staged, job_id, "rework")
+    delete_rerun_artifact_objects(service.object_store, deleted_rows, job_id, "rework")
     service._upload_artifact(job, node_key, feedback_name)
     notify_schedulable_work()
     service._broadcast(job_id)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Protocol
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -33,3 +33,19 @@ def commit_staged_outputs(
             operation,
             job_id,
         )
+
+
+def delete_rerun_artifact_objects(
+    object_store: Any,
+    deleted_rows: list[dict[str, Any]],
+    job_id: str,
+    operation: str,
+) -> None:
+    """Best-effort object removal for manifest rows a rerun just dropped
+    (#508). Mirrors job_deletion's post-commit ordering: the rows are gone
+    from ``job_artifacts`` inside the committed transaction, so a failed
+    removal only leaves an orphan the bucket lifecycle rule reaps — never a
+    listed-but-stale artifact. No object store (None / disabled) = no-op."""
+    if object_store is None or not getattr(object_store, "enabled", False) or not deleted_rows:
+        return
+    object_store.delete_objects(deleted_rows)
