@@ -179,7 +179,10 @@ fi
 # 5. deploy/secrets/vault_master_key（env-only 配置，缺失时 vault 写入会抛错）
 mkdir -p deploy/secrets
 if [[ ! -s deploy/secrets/vault_master_key ]]; then
-    UV_CACHE_DIR=.uv-cache uv run python -c \
+    # --frozen（issue #526）：上方 uv sync 刚按 pyproject 建好环境/lock
+    # （bootstrap 路径，保持非 frozen），此处的 run 依赖已就位，frozen 调用
+    # 从不写 lock——镜像 index 环境下不再有 re-lock 污染窗口。
+    UV_CACHE_DIR=.uv-cache uv run --frozen python -c \
         "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
         > deploy/secrets/vault_master_key
     echo "已生成 deploy/secrets/vault_master_key"

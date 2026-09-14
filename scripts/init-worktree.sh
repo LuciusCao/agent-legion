@@ -126,7 +126,10 @@ echo "AGENT_LEGION_S3_BUCKET -> ${BUCKET}"
 # 复用 server/app/storage 的 env 加载（.env 经 load_dotenv 生效，
 # override=False——调用 shell 已导出的同名变量优先）。任何失败（endpoint
 # 不可达、boto3 缺失、凭据错误）都降级为提示，不阻断初始化。
-if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python scripts/ensure-s3-bucket.py .env; then
+# --frozen：依赖从冻结 lock 解析安装（fresh worktree 无 .venv 时也按 lock
+# 建环境），绝不写 lock——否则开发者 shell 会话带 UV_DEFAULT_INDEX/UV_INDEX_URL
+# 镜像变量时会触发 re-lock 把镜像 URL 写进 uv.lock（issue #526）。
+if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run --frozen python scripts/ensure-s3-bucket.py .env; then
     :
 else
     echo "提示: S3 endpoint 不可达或未配置，跳过建 bucket（材料 API 将降级为 503；" >&2
@@ -136,7 +139,8 @@ fi
 # 3. deploy/secrets
 mkdir -p deploy/secrets
 if [[ ! -s deploy/secrets/vault_master_key ]]; then
-    UV_CACHE_DIR=.uv-cache uv run python -c \
+    # --frozen 同上（issue #526）：frozen 调用从不写 lock。
+    UV_CACHE_DIR=.uv-cache uv run --frozen python -c \
         "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
         > deploy/secrets/vault_master_key
     echo "已生成 deploy/secrets/vault_master_key"
