@@ -239,6 +239,11 @@ curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/develop/scri
 `AGENT_WORKER_UI_BIND`/`AGENT_WORKER_UI_PORT` 端口插值、POSIX sh 管道模式）
 见脚本头部注释与 `--help`。
 
+控制台 token 体验（issue #489）：默认 loopback 发布下 token 已自动内嵌页面，
+打开控制台即用；仅当把 `AGENT_WORKER_UI_BIND` 改为非回环地址（页面不再内嵌）
+时才需手动取一次 token（安装脚本的成功提示与 §「控制面鉴权」的判定矩阵
+均含该命令）。
+
 与拉取式 override 的取舍：仓库克隆 + `compose.worker.local.yaml` 适合开发/
 调试机（能跑 `make stack-*`、随仓库升级）；一键安装适合纯执行节点（只有
 Docker、目录自包含）。两者最终形态等价（同一镜像 + 同一挂载面），但
@@ -316,6 +321,23 @@ v68 及以上的 Host 仍下发 `workflow_key`（兼容窗口内），Worker 可
 
 Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > 状态目录下的 `control_token` 文件（容器内执行时自动命中）。
 
+**页面内嵌判定（issue #489）**：控制台页面是否自动内嵌 token，由**实际暴露面**而非进程 bind 决定。Docker 形态下容器内进程必绑 `0.0.0.0`（端口映射前提），但页面真正从哪个地址被访问由 compose 的宿主侧发布地址（`AGENT_WORKER_UI_BIND`）决定——compose 把该值经 `AGENT_WORKER_UI_EFFECTIVE_BIND` 环境变量告知 service（与发布行同一插值源，`.env` 一处改、两处同步）。判定矩阵（进程 bind × 宿主侧发布地址 × token 内嵌结果）：
+
+| 进程 bind（`--host`） | 宿主侧发布（`AGENT_WORKER_UI_BIND`） | token 内嵌 | 说明 |
+| --- | --- | --- | --- |
+| `127.0.0.1` 等回环 | （无发布层，裸机/dev 形态） | 是 | 历史行为：`AGENT_WORKER_UI_EFFECTIVE_BIND` 未设置，按进程 bind 判定 |
+| `0.0.0.0`（容器内） | `127.0.0.1`（默认） | 是 | 容器内 bind 仅为端口映射前提；宿主发布回环 = 页面仅本机可达，内嵌不扩大风险面，日志打 info 说明判定链 |
+| `0.0.0.0`（容器内） | `0.0.0.0` / `192.0.2.1` 等非回环 | 否 | 同网段浏览器都能打开页面，不内嵌 + warning，需手动输入 token（见下方取 token 命令） |
+| 回环 | 非回环 | 否 | 复合形态兜底：设置了 `AGENT_WORKER_UI_EFFECTIVE_BIND` 时判定只看发布面（发布非回环即不内嵌，覆盖发布层与进程 bind 不一致的场景） |
+
+发布非回环时（后两行），从容器内手动取一次 token，页面会把它存进 localStorage，日常无需重复：
+
+```bash
+docker compose exec worker cat /var/lib/agent-legion-worker-control/control_token
+```
+
+裸机/dev 形态不设 `AGENT_WORKER_UI_EFFECTIVE_BIND` 时行为与历史版本完全一致（按进程 bind 判定）。issue #489 讨论中的另两个方向——把控制面降级为 loopback-only + 经 ssh/socat 转发访问（消灭网络暴露面，代价是远程管理变麻烦）、以及重新审视 control token 本身换更强的本机身份绑定（如 Unix socket / 进程属主校验）——暂缓（deferred），不在当前实现范围内；需要时回到该 issue 继续讨论。
+
 如果需要从终端查询或自动化，可使用容器内 CLI：
 
 ```bash
@@ -371,7 +393,7 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 - 用 `workerctl configure`（或控制台）把新值写入状态副本并重启执行进程；
 - 或删除状态卷中的 `worker.yaml` 后重启容器，重新导入挂载配置。
 
-默认端口只绑定宿主机 loopback；compose 网络内其它容器可达 `http://worker:8787`，但所有端点（除 `/api/health`）都要求 control token。需要从 Tailnet 上的另一台管理机访问时，显式设置 `AGENT_WORKER_UI_BIND`，并先在主机防火墙或 Tailnet ACL 中限制来源；不要把控制面暴露到公网。
+默认端口只绑定宿主机 loopback；compose 网络内其它容器可达 `http://worker:8787`，但所有端点（除 `/api/health`）都要求 control token。需要从 Tailnet 上的另一台管理机访问时，显式设置 `AGENT_WORKER_UI_BIND`，并先在主机防火墙或 Tailnet ACL 中限制来源；不要把控制面暴露到公网。非回环发布下控制台不再内嵌 token（判定矩阵见 §「控制面鉴权」），改用 `docker compose exec worker cat /var/lib/agent-legion-worker-control/control_token` 手动取。
 
 ### 全新克隆的本地 Worker（无 init-worktree.sh）
 

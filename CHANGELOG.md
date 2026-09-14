@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Fixed
+- Docker 形态 Worker 控制台 token 内嵌误判（issue #489）：容器内进程必绑
+  `0.0.0.0`（端口映射前提）导致 `embed_control_token` 恒判非回环、token
+  永不内嵌——但宿主侧 compose 发布默认是 `127.0.0.1`，页面实际仅本机
+  可达，安全上是 false positive、体验上每次都要手动
+  `docker compose exec ... cat control_token`。现在 compose 经
+  `AGENT_WORKER_UI_EFFECTIVE_BIND` 把宿主侧实际发布地址传入容器（与
+  ports 发布行同一 `${AGENT_WORKER_UI_BIND}` 插值源，`.env` 一处改两处
+  生效，三个 compose 文件全部覆盖），service 按真实暴露面判定：发布
+  回环 → token 内嵌（进程绑 0.0.0.0 打 info 说明判定链）；发布非回环 →
+  维持不内嵌 + warning（消息带「进程绑定 × 发布地址」两个地址）。环境
+  变量未设置时（裸机/dev 形态）按进程 bind 判定，行为与历史版本完全
+  一致。install-worker.sh 成功提示与部署文档补齐 Docker 形态手动取
+  token 的命令与判定矩阵；issue 讨论中的 loopback-only 转发与替换
+  token 本身两个方向记为 deferred。
 - 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
   `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
   部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5

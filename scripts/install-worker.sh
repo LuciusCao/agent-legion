@@ -395,6 +395,11 @@ cat <<EOF
 
 安装完成。后续步骤：
   1. 打开 Worker 控制台 http://${ui_host_final}:${ui_port_final}（本机浏览器）；
+     默认 loopback 发布（${ui_host_final}）下控制 token 已内嵌页面，无需
+     手动输入；若 .env 把 AGENT_WORKER_UI_BIND 改为非回环地址（页面不再
+     内嵌 token），手动取一次：
+       docker compose exec worker cat /var/lib/agent-legion-worker-control/control_token
+     （在 ${TARGET} 执行；页面会把它存进 localStorage，日常无需重复）
   2. 在「Workspace 访问」粘贴 Host 签发的 scoped token（Host Web UI 的
      workspace 设置 → Agent 与 Worker）；
   3. 点「开始领取」（claim_enabled 每次进程启动都重置为关闭，刻意设计）；
