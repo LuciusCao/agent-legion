@@ -9,8 +9,8 @@ exemptions:
     one way. Remove when the re-file judgment folds into budget_floor_errors or a
     budget re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
-  ceiling: 95
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 85
 - check: architecture.file_budget
   path: scripts/architecture/file_budgets.py
   reason: 'Issue #641 threads the growth_allowance band and the FrozenCeiling expiry through
@@ -20,8 +20,8 @@ exemptions:
     and the band intersect. Remove when the frozen-ceiling plumbing moves into
     budget_monotonicity wholesale or a budget re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
-  ceiling: 181
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 171
 - check: architecture.file_budget
   path: scripts/check_invariants.py
   reason: 'Issue #641 wires the budget policy growth_allowance into validate_exemptions so
@@ -31,8 +31,8 @@ exemptions:
     exemption would only fail one of them). Remove when the two registry validators merge
     into a single entry point or a budget re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
-  ceiling: 82
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 72
 - check: architecture.file_budget
   path: scripts/quality/exemptions.py
   reason: 'Issue #641 adds the optional expires deadline to the exemption schema: the field,
@@ -42,8 +42,8 @@ exemptions:
     the gate copy developers see, so it lives with the validator. Remove when expiry checks
     move into issue_state expiry governance or a budget re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
-  ceiling: 144
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 140
 - check: architecture.file_budget
   path: scripts/architecture/budget_policy.py
   reason: 'Issue #641 adds the growth_allowance policy knob: one dataclass field, the
@@ -54,8 +54,8 @@ exemptions:
     nine-line feature. Remove when the allowance parser folds into a shared optional-int
     helper or a budget re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
-  ceiling: 172
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 162
 - check: architecture.file_budget
   path: velites/src/contract.rs
   reason: 'Issue #542 migrates the machine-readable contract location to the skill-root contract.yaml:
@@ -67,8 +67,8 @@ exemptions:
     the deprecated embedded-block tier retires (planned follow-up once example/instance skills are migrated)
     or the unit tests move to a sister integration module under velites/tests/.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
-  ceiling: 637
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 627
 - check: architecture.file_budget
   path: server/app/services/skill_edit_checks.py
   reason: 'Issue #542 adds the strict root contract.yaml validation (PyYAML parse + structure + jsonschema
@@ -79,8 +79,8 @@ exemptions:
     flows already share here. Remove when the contract.yaml parser moves into its own module (e.g. a skills/contract_probe
     sibling) or a budget re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
-  ceiling: 194
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 192
 - check: architecture.file_budget
   path: server/app/workflows/skill_repo_gate.py
   reason: 'Issue #542 adds the advisory publish pass (skill_repo_publish_warnings) beside the error pass;
@@ -90,16 +90,16 @@ exemptions:
     it must share. Remove when the publish validation gains a structured multi-pass framework or a budget
     re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
-  ceiling: 80
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 79
 - check: architecture.file_budget
   path: server/app/services/skill_creation.py
   reason: 'Issue #542 makes create_skill the strict birth gate: the four-file set check plus the proposed-payload
     contract.yaml strict parse (scratch-dir staging of the proposed text) — 205 vs the 199 baseline. The
     birth gate belongs with the create flow it guards. Remove when a budget re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
-  ceiling: 215
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 205
 - check: architecture.file_budget
   path: server/app/services/skill_validator.py
   reason: 'Issue #542 adds the display-only machine-contract tier warnings to the human-side validator
@@ -107,8 +107,8 @@ exemptions:
     is one call plus phrasing; the validator stays the single editor-side read model. Remove when a budget
     re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
-  ceiling: 120
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 110
 - check: architecture.file_budget
   path: server/app/services/studio_publish_requests.py
   reason: 'Issue #542 computes the read-side publish advisories (skill-contract warnings) at request/status/poll
@@ -117,16 +117,16 @@ exemptions:
     would need the schema change #542 explicitly avoids. Remove when the publish-request read model gets
     its planned split or a budget re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
-  ceiling: 163
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 153
 - check: architecture.file_budget
   path: server/app/routes/studio_agent_skill_contracts.py
   reason: 'Issue #542 adds the warnings channel to the validate/save-version tool responses (SkillValidationWarning
     model + the two response fields) — 35 vs the 30 baseline. The contracts file is the single wire-shape
     anchor for the studio-agent skill tools. Remove when a budget re-balance re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
-  ceiling: 45
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 35
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/validation/WorkflowPublishReviewDialog.tsx
   reason: 'Issue #542 adds the optional advisories block (warning-colored list, data-testid publish-advisories)
@@ -134,8 +134,8 @@ exemptions:
     agent publish flows; the advisory presentation is one guarded block. Remove when a budget re-balance
     re-registers it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/542
-  ceiling: 97
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 87
 - check: architecture.file_budget
   path: scripts/architecture/effective_lines.py
   reason: 'Issue #610 adds the docstring-row detection to the Python effective-line metric (ast walk over
@@ -146,8 +146,8 @@ exemptions:
     the metric module gets its planned split (scanner vs counting) or a budget re-balance pass re-registers
     it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/610
-  ceiling: 96
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 92
 - check: architecture.file_budget
   path: frontend/src/pages/globalSettings/instanceSettingsCapacityFields.ts
   reason: 'Issue #569 adds the result-validate pool knob beside its #554 result_unpack sibling: one field
@@ -158,14 +158,14 @@ exemptions:
     overflow into a sister module would fork the group. Remove when the instance-settings form gets its
     planned structural split or a knob retirement frees headroom.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/569
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 42
 - check: architecture.file_budget
   path: frontend/src/pages/globalSettings/instanceSettingsFields.ts
   reason: 'Issue #521 adds the result-commit gate knob to the Worker-limits field group: one field entry
     (path, label, integer, allowZero) in the same table shape. The list IS the form surface.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 122
 - check: architecture.file_budget
   path: server/app/agent_broker/broker.py
@@ -177,8 +177,8 @@ exemptions:
     (#521 leases.py precedent). Remove when the broker gets its planned structural split or the group-commit
     queue retires.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
-  ceiling: 234
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 227
 - check: architecture.file_budget
   path: server/app/bootstrap/agent_plane.py
   reason: 'Issue #591 constructs the ResultCommitBatcher before the broker and the lease repository (both
@@ -188,8 +188,8 @@ exemptions:
     #612''s docstring-free metric. Ceiling at actual + 5 per the dated-exemption convention. Remove when
     the plane assembly gets its planned restructure.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/591
-  ceiling: 93
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 92
 - check: architecture.file_budget
   path: server/app/agent_control/completion.py
   reason: 'Issue #521 adds the stage boundary marks (unpack/artifacts_verify/ validate/artifacts_upload)
@@ -197,7 +197,7 @@ exemptions:
     The marks retire with the stage split''s phase 2 rework (per-stage slimming restructures finish()
     and re-budgets the module).'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 176
 - check: architecture.file_budget
   path: server/app/executors/leases.py
@@ -205,8 +205,8 @@ exemptions:
     the parameter must ride the same retry wrapper as the result it instruments (a retry re-runs the stages
     it re-measures).'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
-  ceiling: 127
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 126
 - check: architecture.file_budget
   path: server/app/services/path_hygiene.py
   reason: 'Issue #521 adds the per-path warn dedupe (set + lock + keyed signature) and the one-time rewrite
@@ -215,14 +215,14 @@ exemptions:
     Shrinks back once every deployment''s stored absolute-path rows have been rewritten and the rewrite
     pass can drop.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 104
 - check: architecture.file_budget
   path: server/app/routes/runtime_profile_contracts.py
   reason: 'Issue #521 mirrors the fourteen result-stage gauge columns into ProfileBucket, the same field-list
     growth the v78 claim-stage split made. The model IS the response contract.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 55
 - check: architecture.file_budget
   path: worker/cli_args.py
@@ -396,7 +396,7 @@ exemptions:
     protocol are one concern; splitting them across modules would separate the failure protocol from its
     error contract.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/467
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 57
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
@@ -430,7 +430,7 @@ exemptions:
     srcDoc head-injection helper and its documentation grow the security surface in place -- splitting
     them out would separate the CSP from the iframe that enforces it.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 189
 - check: architecture.file_budget
   path: frontend/src/features/previewPanel/CustomizePreviewDialog.tsx
@@ -440,7 +440,7 @@ exemptions:
     dialog stays the thin chat wrapper). The added lines are the honest cost of the explicit consent UI;
     re-evaluate when the preview-panel governance UI is next restructured (#347 follow-up).'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 163
 - check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
@@ -589,7 +589,7 @@ exemptions:
     translation at the one dict->definition boundary; moving it out would fork the snapshot normalization
     the loader already owns. Revisit when snapshot loading gains its own module.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/458
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 299
 - check: architecture.file_budget
   path: server/app/workflows/revision_format.py
@@ -601,7 +601,7 @@ exemptions:
     Remove when the revision echo moves to a schema-driven serializer or the file gets a structural split
     of its own.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/458
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 138
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/validation/workflowStudioChangeFormatters.ts
@@ -610,7 +610,7 @@ exemptions:
     table where every line is a translation. Revisit when the label table moves to the generated change-contract
     types or gets i18n tooling.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/431
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 78
 - check: architecture.file_budget
   path: velites/src/events.rs
@@ -660,7 +660,7 @@ exemptions:
     directly) left 214 effective lines with this wiring on top, so the ceiling realigns to actual + 10
     per the dated-exemption convention (#431 / #458 precedents).'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 220
 - check: architecture.file_budget
   path: server/app/agent_runtime/velites.py
@@ -669,7 +669,7 @@ exemptions:
     mirror itself lives in tool_catalog.py; this file only carries the reference. Remove together with
     the mirror if velites ever self-describes over the wire instead of via static declaration.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 16
 - check: architecture.file_budget
   path: velites/src/main.rs
@@ -678,7 +678,7 @@ exemptions:
     subcommands must be peeled off first). The handler itself is one catalog call in tools/catalog.rs.
     Remove if the pre-parse dispatch moves into a shared argv router.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 81
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/AgentEditor.tsx
@@ -689,7 +689,7 @@ exemptions:
     of every conditional being tested. Remove when the editor gains a shared tool-picker component with
     WorkflowNodeToolsEditor.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 357
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.ts
@@ -697,14 +697,14 @@ exemptions:
     delete-key semantics, same shape as the sibling patch functions in this table. Remove together with
     the node-level tools declaration if it ever retires.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 121
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.parse.ts
   reason: '#443: WorkflowYamlNode gains the optional tools field (one line plus its contract comment).
     The node shape lives in one type by design. Remove with the field itself.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 83
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowAgentExecutionDetails.tsx
@@ -712,7 +712,7 @@ exemptions:
     block (9 lines) in the agent execution body. The editor itself is a sibling component; this file is
     only the composition point. Remove if the composition is restructured.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 65
 - check: architecture.file_budget
   path: velites/src/tools/specs.rs
@@ -721,8 +721,18 @@ exemptions:
     to split without separating a tool''s spec from its siblings'' in a way no consumer wants. Remove
     only with the json tool itself.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 112
+- check: architecture.file_budget
+  path: velites/src/config.rs
+  reason: '#602 adds the deprecation notice pair (file-present + env-override arms, ~20 effective lines:
+    the migration-target message, the models.json pointer, and the removal-window statement) to a file
+    that is scheduled for wholesale deletion in the next release cycle — the issue''s removal phase drops
+    config.rs and the lib.rs gateway fallback branch together. Ceiling at actual + 10 per the dated-exemption
+    convention; harvest together with the deletion.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/602
+  ceiling: 200
 - check: architecture.file_budget
   path: velites/src/lib.rs
   reason: '#476/#518: lib.rs carries the forced-tool activation at the one point where all three inputs
@@ -730,7 +740,7 @@ exemptions:
     that must name the full tool set. The activation is a harness run-assembly concern, not a tool-module
     one. Remove if the run assembler is extracted from the provider wiring.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 211
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowNodePromptEditor.tsx
@@ -739,7 +749,7 @@ exemptions:
     is about. The data layer lives in useNodePromptPreview; splitting the selector out would separate
     the mode from the textarea it governs. Remove if the prompt panel is restructured.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 82
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/useNodePromptPreview.ts
@@ -747,7 +757,7 @@ exemptions:
     the prompt field) and exposes onPatchMode — data-layer counterparts of the editor''s mode selector.
     Same P1 normalization family as customPrompt above it. Remove with the mode selector.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 98
 - check: architecture.file_budget
   path: server/app/services/node_prompt_preview.py
@@ -756,7 +766,7 @@ exemptions:
     by the Studio route and the MCP tools; the growth is the feature, not drift. Remove if prompt previewing
     is extracted from the draft-editing service.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 161
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowNodeToolsEditor.tsx
@@ -765,7 +775,7 @@ exemptions:
     alert. The editor is already the node-level counterpart of AgentEditor''s picker. Remove together
     with the AgentEditor tool-picker exemption.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 90
 - check: architecture.file_budget
   path: server/app/routes/instance_settings_contracts.py
@@ -778,7 +788,7 @@ exemptions:
     + 10 per the dated-exemption convention. Remove when the document gets a structural split (per-block
     modules) or the next retirement frees headroom.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/509
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 55
 - check: architecture.file_budget
   path: server/app/mcp_server/skill_tools.py
@@ -789,8 +799,8 @@ exemptions:
     + 10 per the dated-exemption convention. Remove when the skill tool group gets a registration split
     per tool or a budget re-balance frees headroom.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 58
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 48
 - check: architecture.file_budget
   path: server/app/mcp_server/server.py
   reason: 'Issue #633 merges three tool groups into the registration sequence (draft CAS pair, shared-material
@@ -800,7 +810,7 @@ exemptions:
     CAN live in a sibling module already does. Remove when the last inline tools (get_authoring_guide
     / get_studio_context / save_node_code_draft / save_agent_definition_draft) move to sibling modules.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 104
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/AgentPublishRequestDialog.tsx
@@ -821,7 +831,7 @@ exemptions:
     size plus the pi triple. The entry must live here in full (description/parameters verbatim) or the
     parity test fails by design. Remove if the mirror is replaced by runtime probing.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 192
 - check: architecture.file_budget
   path: server/app/routes/studio_agent_catalog_read_tools.py
@@ -836,8 +846,8 @@ exemptions:
     agent-definition tool endpoints get a route split per verb or a budget
     re-balance frees headroom.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 126
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 116
 - check: architecture.file_budget
   path: server/app/mcp_server/agent_tools.py
   reason: >-
@@ -851,8 +861,8 @@ exemptions:
     Remove when the agent tool group gets a registration split per tool or
     a budget re-balance frees headroom.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 48
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 38
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/WorkflowStudioDraftSaveControl.tsx
   reason: >-
@@ -864,8 +874,8 @@ exemptions:
     dated-exemption convention. Remove when the draft-save wiring gets its
     planned rework or a budget re-balance pass re-registers it.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 93
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 83
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/serverDraftReapply.ts
   reason: >-
@@ -877,8 +887,8 @@ exemptions:
     dated-exemption convention. Remove when the draft-save wiring gets its
     planned rework or a budget re-balance pass re-registers it.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 107
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 98
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/useServerDraftApply.ts
   reason: >-
@@ -890,8 +900,8 @@ exemptions:
     dated-exemption convention. Remove when the draft-save wiring gets its
     planned rework or a budget re-balance pass re-registers it.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 57
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 47
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/useWorkflowStudio.ts
   reason: >-
@@ -903,8 +913,8 @@ exemptions:
     dated-exemption convention. Remove when the draft-save wiring gets its
     planned rework or a budget re-balance pass re-registers it.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 101
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 91
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/useWorkflowStudioDraftStore.ts
   reason: >-
@@ -916,8 +926,8 @@ exemptions:
     dated-exemption convention. Remove when the draft-save wiring gets its
     planned rework or a budget re-balance pass re-registers it.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 75
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 65
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/draftSaveController.ts
   reason: '#429 rounds four and closing: flushNow/save return the PUT promise the agent-publish
@@ -944,8 +954,8 @@ exemptions:
     codex review P1-2 reapply wiring) and the initial ratchet landed mid-PR
     at a smaller shape. Ceiling at actual + 10.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/633
-  ceiling: 79
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 69
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/useWorkflowDraftPersistence.ts
   reason: '#429 closing P2-1: flushNow now returns the DraftSaveFlushResult (the live terminal state,

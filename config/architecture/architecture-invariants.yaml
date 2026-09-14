@@ -515,7 +515,7 @@ invariants:
         target: tests/services/test_code_manifest_trim.py
         gate: quick
       - kind: integration
-        target: tests/routes/test_agent_workers.py::test_code_claim_injects_secrets_into_response_manifest
+        target: tests/routes/test_agent_worker_code_executions.py::test_code_claim_injects_secrets_into_response_manifest
         gate: quick
 
   - id: EXEC-CODE-WORKER-001
