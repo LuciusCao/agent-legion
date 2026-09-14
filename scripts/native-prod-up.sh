@@ -153,10 +153,13 @@ binds_specific_interface() {
 if binds_specific_interface "$BACKEND_BIND" \
     && [[ -f data/agent-worker-service/worker.yaml ]] \
     && grep -Eq 'host_url:[[:space:]]*https?://(127\.|localhost)' data/agent-worker-service/worker.yaml; then
-    echo "警告: 后端已绑定 $BACKEND_BIND，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT，否则本地 Worker 将无法注册（静默退避重试）" >&2
+    # $VAR 一律花括号：bash 对「裸 $VAR 紧跟多字节标点（如 U+FF0C）」会把
+    # 标点首字节误并入变量名（set -u 下直接 unbound variable 假报错），
+    # #484 整体桩测试在 bash 3.2（macOS /bin/bash）下抓到的真实断裂。
+    echo "警告: 后端已绑定 ${BACKEND_BIND}，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://${BACKEND_HEALTH_HOST}:${BACKEND_PORT}，否则本地 Worker 将无法注册（静默退避重试）" >&2
 fi
 if binds_specific_interface "$WORKER_BIND"; then
-    echo "提示: Worker 控制台已绑定 $WORKER_BIND，本机访问地址改为 http://$WORKER_HEALTH_HOST:$WORKER_PORT（127.0.0.1 不再监听）" >&2
+    echo "提示: Worker 控制台已绑定 ${WORKER_BIND}，本机访问地址改为 http://${WORKER_HEALTH_HOST}:${WORKER_PORT}（127.0.0.1 不再监听）" >&2
 fi
 
 # 1.5 材料对象存储：原生形态下后端/worker 是本机进程，对象存储仍由 docker
@@ -199,7 +202,7 @@ fi
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
 elif wildcard_bind_skip "$BACKEND_BIND" "$BACKEND_PORT" "后端"; then
-    echo "提示: 检测到 :$BACKEND_PORT 已有 $BACKEND_BIND 可覆盖的监听；通配 bind 不并行启动第二个实例（双实例连同一库会造成单副本退化：SSE 分裂/限速稀释/暂停互踩）。如需以 $BACKEND_BIND 重启请先 ./scripts/native-prod-down.sh" >&2
+    echo "提示: 检测到 :${BACKEND_PORT} 已有 ${BACKEND_BIND} 可覆盖的监听；通配 bind 不并行启动第二个实例（双实例连同一库会造成单副本退化：SSE 分裂/限速稀释/暂停互踩）。如需以 ${BACKEND_BIND} 重启请先 ./scripts/native-prod-down.sh" >&2
     echo "后端视为已在 :$BACKEND_PORT 运行，跳过"
 else
     echo "启动后端 $BACKEND_BIND:$BACKEND_PORT …"
@@ -219,7 +222,7 @@ fi
 if port_listening "$WORKER_BIND" "$WORKER_PORT"; then
     echo "Worker 已在 :$WORKER_PORT 运行，跳过"
 elif wildcard_bind_skip "$WORKER_BIND" "$WORKER_PORT" "Worker"; then
-    echo "提示: 检测到 :$WORKER_PORT 已有 $WORKER_BIND 可覆盖的监听；通配 bind 不并行启动第二个实例（双 Worker 分摊领任务会造成互相稀释）。如需以 $WORKER_BIND 重启请先 ./scripts/native-prod-down.sh" >&2
+    echo "提示: 检测到 :${WORKER_PORT} 已有 ${WORKER_BIND} 可覆盖的监听；通配 bind 不并行启动第二个实例（双 Worker 分摊领任务会造成互相稀释）。如需以 ${WORKER_BIND} 重启请先 ./scripts/native-prod-down.sh" >&2
     echo "Worker 视为已在 :$WORKER_PORT 运行，跳过"
 else
     echo "启动 Worker $WORKER_BIND:$WORKER_PORT …"

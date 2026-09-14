@@ -96,7 +96,9 @@ stop_port() {
     if [[ -z "$pid" ]]; then
         if is_wildcard_bind "$bind" \
             && port_has_any_listener "$port" "$(listener_family "$bind")"; then
-            echo "警告: $name 端口 :$port 仍有监听但绑定形态与 $bind 不同（可能是旧实例绑的具体地址）；未停止，请用具体 bind 重跑或按日志 data/logs/prod-*.log 定位进程" >&2
+            # 变量一律花括号（多字节标点紧跟裸 $VAR 的 bash 陷阱，见
+            # native-prod-up.sh 同款注释）。
+            echo "警告: ${name} 端口 :${port} 仍有监听但绑定形态与 ${bind} 不同（可能是旧实例绑的具体地址）；未停止，请用具体 bind 重跑或按日志 data/logs/prod-*.log 定位进程" >&2
             return 1
         fi
         echo "$name $bind:$port 未在运行，跳过"
@@ -111,7 +113,7 @@ stop_port() {
         fi
         sleep 1
     done
-    echo "警告：$name (pid $pid) ${grace}s 内未退出，请人工检查（日志 data/logs/prod-*.log）" >&2
+    echo "警告：${name} (pid ${pid}) ${grace}s 内未退出，请人工检查（日志 data/logs/prod-*.log）" >&2
     return 1
 }
 

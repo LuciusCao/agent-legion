@@ -656,8 +656,9 @@ def test_wildcard_down_reports_residual_listener_instead_of_silent_success() -> 
     停不掉）。接线断言。"""
     assert "port_has_any_listener" in NATIVE_PROD_DOWN
     assert "is_wildcard_bind" in NATIVE_PROD_DOWN
-    assert "绑定形态与 $bind 不同" in NATIVE_PROD_DOWN
+    # 提示文案变量花括号化（裸 $VAR 紧跟多字节标点的 bash 陷阱，#484）。
+    assert "绑定形态与 ${bind} 不同" in NATIVE_PROD_DOWN
     # 警告分支必须在「未命中 pid」的判定内、先于「未在运行，跳过」返回。
-    warn_at = NATIVE_PROD_DOWN.index("绑定形态与 $bind 不同")
+    warn_at = NATIVE_PROD_DOWN.index("绑定形态与 ${bind} 不同")
     skip_at = NATIVE_PROD_DOWN.index("未在运行，跳过")
     assert warn_at < skip_at
