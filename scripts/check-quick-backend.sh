@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# 所有 uv run 一律 --frozen（issue #526）：依赖从冻结 lock 解析安装，绝不
-# 写 lock——开发者 shell 会话带 UV_DEFAULT_INDEX/UV_INDEX_URL 镜像变量时，
-# 不带 --frozen 的 uv run 会触发 re-lock 把镜像 URL 写进 uv.lock；pyproject/
-# lock 漂移时则 fail-fast，而不是静默按旧 lock 跑门禁。
+# 所有 uv run 一律 --frozen（issue #526）：依赖从冻结 lock 解析安装，保证
+# 绝不写 lock——开发者 shell 会话带 UV_DEFAULT_INDEX/UV_INDEX_URL 镜像变量
+# 时，不带 --frozen 的 uv run 会触发 re-lock 把镜像 URL 写进 uv.lock（镜像
+# index 环境不再污染）。注意 --frozen 不校验 pyproject/lock 漂移（断言 lock
+# 不变是 --locked 的语义）：漂移场景静默按旧 lock 跑门禁，而非 fail-fast。
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

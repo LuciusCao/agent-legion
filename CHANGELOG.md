@@ -16,21 +16,28 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   （init-worktree、check-quick-backend、check、check-fast、check-ci、
   clean-worktree、dev_stack、generate-api-types、install-deps keygen、
   resume-workspaces）统一 `--frozen`：依赖从冻结 lock 解析安装（fresh
-  worktree 无 .venv 时也按 lock 建环境），frozen 调用绝不写 lock；
-  门禁脚本 pyproject/lock 漂移时 fail-fast。`install-deps.sh` 的
-  `uv sync` bootstrap（按 pyproject 建环境/更新 lock）保持不动。契约
-  测试 `tests/scripts/test_uv_frozen_scripts.py` 钉住 scripts/ 下不再
-  出现非 frozen 的 `uv run`/`uv sync`。
+  worktree 无 .venv 时也按 lock 建环境），保证绝不写 lock——镜像 index
+  环境不再有污染窗口。注意 `--frozen` 不校验 pyproject/lock 漂移（断言
+  lock 不变是 `--locked` 的语义）：漂移场景静默按旧 lock 跑，并非
+  fail-fast。`install-deps.sh` 的 `uv sync` bootstrap（按 pyproject 建
+  环境/更新 lock）保持不动。契约测试 `tests/scripts/test_uv_frozen_scripts.py`
+  钉住 scripts/ 下不再出现非 frozen 的 `uv run`/`uv sync`（行级整词正则，
+  `$UV run`/`uv "run"` 等变体同样在捕获范围）。
 - 本地 venv Python 版本与 CI 漂移（issue #483，发现于 #480）：仓库
   requires-python >= 3.11 且无 `.python-version`，本地 worktree venv 落到
   3.12 而 CI 各 job 用 3.13——3.12 上 `test_code_child` 的 sigterm 用例
   非确定性失败（`_communicate` 对已关 stdin flush 抛 ValueError；绕过后
-  signal handler 打断子进程 stdout 管道写时偶发永久阻塞），CI 3.13 一直
-  绿所以长期无人发现。仓库根新增 `.python-version` 钉 `3.13`（uv 自动
-  读取，新 worktree/CI 对齐；requires-python 保持 `>=3.11` 不动，收紧
-  另行讨论）。契约测试 `tests/scripts/test_python_version_pin.py` 断言
-  钉点内容并解析 quality-gate/nightly-gate 的 `python-version:` 全部
-  钉点与之对齐——防 CI 与本地再漂移。
+  signal handler 打断子进程 stdout 管道写时偶发永久阻塞）。仓库根新增
+  `.python-version` 钉 `3.13`（uv 自动读取，新 worktree/CI 对齐；版本
+  对齐消除上述 3.12 特有崩溃形态，但并非该用例 flaky 的全部根因——
+  sigterm 用例另有的 started 标记竞态与 Python 版本无关：父进程在标记
+  文件 open() 后、payload `try:` 前发 SIGTERM 时绕过 token-cancelled
+  标记写入，已随本 PR 一并修复——标记写入移入 `try:` 块，handler 在
+  try 内任何位置触发都走 except 分支写标记。requires-python 保持
+  `>=3.11` 不动，收紧另行讨论）。契约测试
+  `tests/scripts/test_python_version_pin.py` 断言钉点内容并解析
+  quality-gate/nightly-gate 的 `python-version:` 全部钉点与之对齐——防
+  CI 与本地再漂移。
 - 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
   `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
   部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5
