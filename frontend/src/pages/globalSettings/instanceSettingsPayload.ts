@@ -70,6 +70,10 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
       result_commit_batching: Boolean(
         values['agent_workers.result_commit_batching']
       ),
+      artifact_spot_check_percent: parseNumber(
+        values,
+        'agent_workers.artifact_spot_check_percent'
+      ),
       max_archive_bytes: parseNumber(values, 'agent_workers.max_archive_bytes'),
       min_protocol_version: parseNumber(
         values,

@@ -343,6 +343,15 @@ def test_thought_chunks_persist_as_coalesced_thought_message(chat) -> None:
     session = service.create_session(workspace_id, user_id, "fake-agent")
     service.send_message(session["id"], workspace_id, "think it through")
 
+    # #326（与 #525 同族）：「session 翻回 idle」与「最终 text 消息落库」
+    # 之间存在竞态窗口（CI 慢机放大）——先等正文 text 消息出现再等状态，
+    # 而非只等 session 状态后就裸读；thought 已聚合是伴随断言。
+    _wait_for(
+        lambda: any(
+            m["kind"] == "text" and m["role"] == "agent"
+            for m in service.list_messages(session["id"], workspace_id)
+        )
+    )
     _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
     messages = service.list_messages(session["id"], workspace_id)
     thoughts = [m for m in messages if m["kind"] == "thought"]
