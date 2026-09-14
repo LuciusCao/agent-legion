@@ -743,6 +743,35 @@ def test_embed_control_token_loopback_process_non_loopback_publish(
     )
 
 
+def test_embed_control_token_bracketed_ipv6_loopback_publish(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """方括号 IPv6 回环发布（Docker ports 语法形态）→ 回环，内嵌。
+
+    IPv6 发布必须写 AGENT_WORKER_UI_BIND=[::1]（ports 方括号语法），该值
+    与 EFFECTIVE_BIND 同源传入；不剥方括号时 ip_address("[::1]") 抛
+    ValueError 被判非回环——fail-closed 安全，但丢了「回环发布即内嵌」
+    的判定（进程 bind 侧的方括号形态一并钉住）。
+    """
+    with caplog.at_level(logging.WARNING):
+        assert embed_control_token("0.0.0.0", "[::1]") is True
+        assert embed_control_token("[::1]") is True
+
+    assert not any(record.levelname == logging.WARNING for record in caplog.records)
+
+
+def test_embed_control_token_bracketed_ipv6_non_loopback_publish(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """方括号 IPv6 非回环（[::] 通配 / 全局地址）→ 不内嵌 + warning。"""
+    with caplog.at_level(logging.WARNING):
+        assert embed_control_token("0.0.0.0", "[::]") is False
+        assert embed_control_token("0.0.0.0", "[2001:db8::1]") is False
+
+    assert any("发布地址 [::]" in record.message for record in caplog.records)
+    assert any("发布地址 [2001:db8::1]" in record.message for record in caplog.records)
+
+
 def test_main_reads_effective_bind_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """service.main 的接线契约：effective bind 来自 AGENT_WORKER_UI_EFFECTIVE_BIND。"""
     captured: dict[str, object] = {}
@@ -961,6 +990,41 @@ def test_compose_files_publish_effective_bind_to_worker_service() -> None:
             f"{name} 缺宿主侧发布地址注入或插值与 ports 行不同源"
         )
         assert "${AGENT_WORKER_UI_BIND:-127.0.0.1}" in compose, f"{name} 缺 UI bind 发布插值行"
+
+
+def test_compose_host_worker_network_isolated_from_peer_services() -> None:
+    """#489 P1 网络契约：host compose 的 worker 不得与 postgres/seaweedfs/rustfs 共网。
+
+    worker 控制台 GET / 无鉴权（token 内嵌页面的设计前提），同网 peer 容器
+    即可 curl http://worker:8787/ 提取 control token 接管控制面——默认回环
+    发布下 service 会内嵌 token（判定只看宿主侧发布面），挡不住 compose
+    内网。断言以解析 YAML 求网络集合交集的方式钉住（字符串包含式断言钉不
+    住「共享隐式 default」的缺省形态——不写 networks 键时五个服务在文本上
+    完全一致）。
+    """
+    doc = yaml.safe_load((ROOT / "deploy/compose.host.yaml").read_text(encoding="utf-8"))
+    services = doc["services"]
+
+    def service_networks(name: str) -> set[str]:
+        # compose 语义：服务未声明 networks 键时挂隐式 default 网络
+        raw = services[name].get("networks") or ["default"]
+        return set(raw) if isinstance(raw, list) else set(raw)
+
+    worker_networks = service_networks("worker")
+    assert worker_networks, "worker 未声明 networks：隐式 default 会让它与全部 peer 共网"
+    for peer in ("postgres", "seaweedfs", "rustfs"):
+        shared = worker_networks & service_networks(peer)
+        assert not shared, (
+            f"compose.host.yaml 的 worker 与 {peer} 共享网络 {sorted(shared)}：peer 容器"
+            "可达无鉴权的 worker 控制台，默认回环发布下的 token 内嵌即向同网段"
+            "泄漏 control token（issue #489 安全不变量）"
+        )
+    # worker 出站依赖的唯一 peer 是 host：隔离不得切断 host_url 通道
+    assert worker_networks & service_networks("host"), (
+        "worker 与 host 无共享网络：register/claim/heartbeat/result 将全部失联"
+    )
+    # host 双挂 default：postgres / 对象存储的既有依赖不受隔离影响
+    assert "default" in service_networks("host")
 
 
 def test_supervisor_injects_status_file_and_cleans_it_on_exit(
