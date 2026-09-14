@@ -1152,7 +1152,7 @@
     "server/app/routes/agent_runtimes_contracts.py": 22,
     "server/app/routes/agent_worker_claim_contracts.py": 38,
     "server/app/routes/agent_worker_claim_response.py": 80,
-    "server/app/routes/agent_worker_claims.py": 53,
+    "server/app/routes/agent_worker_claims.py": 51,
     "server/app/routes/agent_worker_heartbeat.py": 38,
     "server/app/routes/agent_worker_heartbeat_batch.py": 49,
     "server/app/routes/agent_worker_metrics.py": 43,

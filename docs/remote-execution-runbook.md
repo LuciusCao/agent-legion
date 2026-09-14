@@ -342,8 +342,11 @@ The Worker data plane emits single-line JSON lifecycle events on both sides
 (`event` / `ts` + per-event payload). Host-side events go to stderr on the
 `agent_legion.worker_events` logger (INFO for transitions, DEBUG for the
 normal rhythm — enable debug when hunting); Worker-side events ride the
-supervisor console stream. Align the two sides by `execution_id` /
-`worker_id`.
+supervisor console stream AND persist to the structured-events sink
+`data/logs/events-<state dir 名>.jsonl` (#510; 5MB×3 rotation — the 500-line
+panel deque scrolls in 1–2 minutes under full load, the file keeps the
+low-frequency exception events reachable for a whole busy episode). Align
+the two sides by `execution_id` / `worker_id`.
 
 | Event | Side | Meaning / key fields |
 | --- | --- | --- |
