@@ -24,7 +24,7 @@ def test_client_claim_raises_auth_error_on_409() -> None:
     client = agent_worker.Client("http://unused")
     client.request = lambda *a, **k: (409, b"unknown or revoked Agent Worker")  # type: ignore[method-assign]
     with pytest.raises(agent_worker.WorkerAuthError):
-        client.claim("w1")
+        client.claim_batch("w1", limit=1, agent_limit=1, code_limit=1)
 
 
 def test_client_heartbeat_returns_status() -> None:
@@ -50,9 +50,17 @@ def test_client_claim_declares_live_capacity() -> None:
     seen: list[dict] = []
     client.request = lambda *a, **k: (seen.append(json.loads(k["data"])), (204, b""))[1]  # type: ignore[method-assign]
 
-    assert client.claim("w1", 70) is None
+    assert client.claim_batch("w1", 70, limit=1, agent_limit=1, code_limit=1) == []
 
-    assert seen == [{"worker_id": "w1", "max_concurrency": 70}]
+    assert seen == [
+        {
+            "worker_id": "w1",
+            "limit": 1,
+            "agent_limit": 1,
+            "code_limit": 1,
+            "max_concurrency": 70,
+        }
+    ]
 
 
 def test_client_claim_declares_code_capacity() -> None:
@@ -61,9 +69,18 @@ def test_client_claim_declares_code_capacity() -> None:
     seen: list[dict] = []
     client.request = lambda *a, **k: (seen.append(json.loads(k["data"])), (204, b""))[1]  # type: ignore[method-assign]
 
-    assert client.claim("w1", 70, 4) is None
+    assert client.claim_batch("w1", 70, 4, limit=1, agent_limit=1, code_limit=1) == []
 
-    assert seen == [{"worker_id": "w1", "max_concurrency": 70, "max_code_concurrency": 4}]
+    assert seen == [
+        {
+            "worker_id": "w1",
+            "limit": 1,
+            "agent_limit": 1,
+            "code_limit": 1,
+            "max_concurrency": 70,
+            "max_code_concurrency": 4,
+        }
+    ]
 
 
 def test_client_registration_declares_latest_protocol_and_code_capacity() -> None:

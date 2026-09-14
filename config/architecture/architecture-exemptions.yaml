@@ -285,15 +285,6 @@ exemptions:
   reason: Agent Worker release-slot acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
   remove_when: docs/architecture/backend.md#agent-worker-protocol-responses
-- check: architecture.route_response_model
-  path: server/app/routes/agent_worker_claims.py:claim
-  reason: '#546 batch claim: one endpoint answers two protocol generations — the single AgentClaimResponse
-    (limit=1, byte-identical for pre-#546 Workers) and the BatchAgentClaimResponse wrapper (limit>1).
-    The named union response_model serializes as anyOf, which the inline-schema gate rejects by construction;
-    both members are named contract models, so no untyped payload crosses. Removed together with the single-claim
-    path (#547).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/547
 - check: architecture.file_budget
   path: frontend/src/components/dag/dagNodeTypes.ts
   reason: The hover-highlight rework (#276) adds the two data-level boolean fields (active/dimmed) that

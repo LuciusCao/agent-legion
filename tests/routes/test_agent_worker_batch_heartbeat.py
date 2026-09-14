@@ -275,7 +275,7 @@ def test_batch_heartbeat_returns_cancel_body_for_code_executions(tmp_path: Path)
             json={"worker_id": "code-worker", "max_code_concurrency": 2},
         )
         assert claimed.status_code == 200, claimed.text
-        lease_id = claimed.json()["lease_id"]
+        lease_id = claimed.json()["claims"][0]["lease_id"]  # #547 batch wrapper
 
         idle = _heartbeat_ok(client, token, [])
         assert idle["cancelled_execution_ids"] == []

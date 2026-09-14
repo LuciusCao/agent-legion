@@ -132,7 +132,9 @@ def _claim_code(client: TestClient, token: str) -> dict:
         json={"worker_id": "code-worker", "max_code_concurrency": 2},
     )
     assert response.status_code == 200, response.text
-    return dict(response.json())
+    claims = response.json()["claims"]  # #547 batch wrapper
+    assert len(claims) == 1
+    return dict(claims[0])
 
 
 def test_register_roundtrips_code_capacity(tmp_path: Path) -> None:

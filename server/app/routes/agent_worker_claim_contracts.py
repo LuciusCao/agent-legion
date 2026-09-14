@@ -19,10 +19,10 @@ class ClaimAgentExecutionRequest(BaseModel):
     # Live re-declaration of the code-execution pool (batch 2); None leaves
     # the recorded value untouched.
     max_code_concurrency: int | None = Field(default=None, ge=0, le=1024)
-    # Batch claim (issue #546): 1 (default) = the legacy single-claim path
-    # with a byte-identical response; >1 promotes up to `limit` executions in
-    # ONE transaction and answers BatchAgentClaimResponse (empty batch = the
-    # same 204). Pre-#546 Hosts ignore the field and answer a single claim.
+    # Batch claim (issue #546; single path retired by #547): promotes up to
+    # `limit` executions in ONE transaction and answers
+    # BatchAgentClaimResponse (empty batch = the same 204). The default 1
+    # answers a one-element claims list.
     limit: int = Field(default=1, ge=1, le=1024)
     # Per-pool batch caps (the #546 flood shape: an instantaneous-code storm
     # must fill the code pool without spending agent slots); None = the Host
@@ -58,13 +58,8 @@ class AgentClaimResponse(BaseModel):
 
 
 class BatchAgentClaimResponse(BaseModel):
-    """Batch claim answer (#546): requested via
-    ``ClaimAgentExecutionRequest.limit`` > 1; an empty batch stays a 204."""
+    """Batch claim answer (#546; the route's only shape since #547 retired
+    the single-object path): ``claims`` holds 0..limit items, an empty batch
+    stays a 204. The default ``limit=1`` answers a one-element list."""
 
     claims: list[AgentClaimResponse]
-
-
-# The claim route answers a single claim on the legacy path and a batch on
-# the #546 path; the named union keeps the route's response_model a Name
-# (the architecture gate's route-contract rule) while OpenAPI gets anyOf.
-ClaimRouteResponse = AgentClaimResponse | BatchAgentClaimResponse
