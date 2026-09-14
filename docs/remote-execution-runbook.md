@@ -353,7 +353,7 @@ the two sides by `execution_id` / `worker_id`.
 | `worker.registered` | Host | Registration committed: runtime version matrix, concurrency declarations, resolved workspace scope |
 | `worker.register_rejected` | Host | Registration refused (400/401): `reason` (`protocol_version_too_old` + `min_protocol_version`, `register_key_deleted`, `invalid_registration`) |
 | `worker.offline` | Host | A previously-online worker crossed the `last_seen` threshold (30 s); `last_seen_at` (the DB-true last seen) + `threshold_seconds`; fires once per transition |
-| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`); batch claim (#546) emits one line per claimed execution and the occupancy counters read the batch's FINAL pool state (the single-claim path snapshots at its own promote) |
+| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`); every claim is a batch claim since #547 retired the single path — one line per claimed execution, and the occupancy counters read the batch's FINAL pool state |
 | `claim.empty` | Host | 204 — queue drained for this worker's pools; `reasons` when the queue head was skipped (paused workspace, lock races…) |
 | `claim.rejected` | Host | Stock present but this worker was not admitted — see the reason codes below; when every pool is at its cap the scan never runs and the live pool state is the evidence (`capacity_full`/`code_capacity_full` synthesized from it) |
 | `execution.started` | Host | Reserved name in the event namespace (the claim→run start is covered by `claim.granted` + Worker-side `execution.claimed`) |

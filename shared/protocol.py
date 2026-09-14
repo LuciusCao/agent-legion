@@ -28,6 +28,15 @@ Field-level deprecations ride without a version bump while the wire shape is
 unchanged: the claim body's workflow_key is deprecated (#211 Phase 2 — equals
 workspace_id since schema v62); its removal is gated on the Phase 3/4 window
 and will carry a version bump.
+
+Response-shape retirement without a bump (#547): the claim endpoint answers
+``BatchAgentClaimResponse`` (``{"claims": [...]}``, one element at the
+default limit=1) for EVERY request — the pre-#546 single-object body is gone.
+No version bump because the only affected fleet is pre-0.7.4 Workers (they
+never send ``limit``); that window is closed. A v5 Worker's
+``claim_batch`` shape-sniff still wraps a single object from an older Host
+during a Host downgrade, so the mixed-fleet direction that matters (new
+Worker, old Host) keeps working.
 """
 
 CODE_PROTOCOL_VERSION = 2
