@@ -341,3 +341,67 @@ def test_binds_specific_interface_behavior() -> None:
         "192.0.2.1 specific",
         "fe80::1 specific",
     ]
+
+
+def _extract_function(name: str) -> str:
+    match = re.search(rf"^{name}\(\) \{{.*?^\}}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
+    assert match, f"{name} 函数定义缺失"
+    return match.group(0)
+
+
+def test_s3_credential_export_bridges_root_env_to_compose(tmp_path: Path) -> None:
+    """#624：决策为 start 时 export_s3_credentials 把根 .env 的凭据 export
+    给 compose（进程环境优先于 deploy/.env 插值）——deploy/.env 缺凭据时
+    插值成空串、seaweedfs 以空凭据生成 s3.config，后端鉴权失败静默
+    reachable=false。提取函数定义后真实执行。"""
+    (tmp_path / ".env").write_text(
+        "# local s3\n"
+        'AGENT_LEGION_S3_ACCESS_KEY="hexaccess"\n'
+        "AGENT_LEGION_S3_SECRET_KEY=hexsecret\n"
+        "OTHER_KEY=irrelevant\n",
+        encoding="utf-8",
+    )
+    code = (
+        "set -euo pipefail\n"
+        "cd "
+        + str(tmp_path)
+        + "\n"
+        + _extract_function("export_s3_credentials")
+        + "\nexport_s3_credentials\n"
+        'echo "AK=$AGENT_LEGION_S3_ACCESS_KEY SK=$AGENT_LEGION_S3_SECRET_KEY"\n'
+    )
+    result = subprocess.run(["bash", "-c", code], capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == "AK=hexaccess SK=hexsecret"
+
+
+def test_s3_credential_export_prefers_existing_env_and_skips_empty(tmp_path: Path) -> None:
+    """#624：已有进程环境值优先（不覆盖）；.env 中空值/缺失键不 export。"""
+    (tmp_path / ".env").write_text(
+        "AGENT_LEGION_S3_ACCESS_KEY=\n"
+        "AGENT_LEGION_S3_SECRET_KEY=fromfile\n"
+        "AGENT_LEGION_S3_BUCKET=some-bucket\n",
+        encoding="utf-8",
+    )
+    code = (
+        "set -euo pipefail\n"
+        "cd " + str(tmp_path) + "\n"
+        "export AGENT_LEGION_S3_ACCESS_KEY=fromenv\n"
+        + _extract_function("export_s3_credentials")
+        + "\nexport_s3_credentials\n"
+        'echo "AK=$AGENT_LEGION_S3_ACCESS_KEY SK=${AGENT_LEGION_S3_SECRET_KEY:-<unset>}"\n'
+    )
+    result = subprocess.run(["bash", "-c", code], capture_output=True, text=True, check=True)
+    # 环境值 fromenv 胜出；.env 里的空 ACCESS_KEY 不覆盖；SECRET 正常取文件值。
+    assert result.stdout.strip() == "AK=fromenv SK=fromfile"
+
+
+def test_s3_credential_export_wired_into_start_branch() -> None:
+    """#624 接线钉：export_s3_credentials 必须在 compose up 之前、且只在
+    LOCAL_S3_DECISION=start 分支内被调用（skip/never 形态不需要凭据）。"""
+    assert 'if [[ "$LOCAL_S3_DECISION" == "start" ]]; then' in NATIVE_PROD_UP
+    branch = NATIVE_PROD_UP.split('if [[ "$LOCAL_S3_DECISION" == "start" ]]; then', 1)[1]
+    branch = branch.split("elif", 1)[0]
+    assert "export_s3_credentials" in branch
+    call_pos = branch.index("export_s3_credentials\n") + len("export_s3_credentials\n")
+    up_pos = branch.index("docker compose")
+    assert call_pos < up_pos, "export must run before compose up (env precedence)"

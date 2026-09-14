@@ -125,7 +125,27 @@ fi
 # 后端分派的服务名（seaweedfs/rustfs）由 decide 脚本统一解析，避免这里
 # 再写一份 dotenv 解析。
 LOCAL_S3_SERVICE="$(scripts/local-s3-decide.sh --service-name .env deploy/.env)"
+# #624 凭据链路对齐：compose 插值只读 deploy/.env（project 目录按第一个
+# -f 文件取 deploy/），而本地后端读根 .env——decide 脚本两者都传，决策与
+# 后端一致，但 up 时 deploy/.env 缺凭据会被插值成空串、容器以空凭据生成
+# s3.config，后端用真实凭据连接即鉴权失败，健康端点静默 reachable=false。
+# 修复：决策为 start 时把根 .env 的凭据 export 给 compose（进程环境优先
+# 于 .env 插值），消除两个 env 文件的双写要求；两边都缺时 decide 已按
+# rc=3 告警跳过，这里不再重复。
+export_s3_credentials() {
+    local key line value
+    for key in AGENT_LEGION_S3_ACCESS_KEY AGENT_LEGION_S3_SECRET_KEY; do
+        [[ -n "${!key:-}" ]] && continue  # 已有进程环境值，优先
+        line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" .env 2>/dev/null | head -n 1 || true)"
+        [[ -n "$line" ]] || continue
+        value="${line#*=}"
+        value="${value#\"}" ; value="${value%\"}"
+        value="${value#\'}" ; value="${value%\'}"
+        [[ -n "$value" ]] && export "$key=$value"
+    done
+}
 if [[ "$LOCAL_S3_DECISION" == "start" ]]; then
+    export_s3_credentials
     if command -v docker >/dev/null 2>&1; then
         COMPOSE_FILES=(-f deploy/compose.host.yaml)
         [[ -f deploy/compose.local.yaml ]] && COMPOSE_FILES+=(-f deploy/compose.local.yaml)

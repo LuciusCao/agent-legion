@@ -145,20 +145,31 @@ chmod 600 deploy/secrets/vault_master_key
 
 # 4. worker 状态副本 data/agent-worker-service/worker.yaml：worker 唯一生效
 #    配置（issue #323，dev 侧不再有 config/agent-worker.yaml 种子）。缺失时
-#    从基准 worktree 的状态副本复制并改写本实例字段（host_url 指向开发后端、
-#    worker_id 按 worktree 派生）；后续修改走 worker 控制台或 PUT /api/config。
+#    从基准 worktree 的状态副本复制并改写本实例字段（host_url 按 worktree
+#    角色分流端口：prod worktree 的后端在 NATIVE_BACKEND_PORT（默认 8000，
+#    make prod-up），其余指向开发后端 DEV_BACKEND_PORT（默认 8001）——无
+#    条件种子 dev 端口会让 prod worktree 的 worker 静默连错端口、退避重试
+#    不易察觉（#625）；worker_id 按 worktree 派生）。后续修改走 worker
+#    控制台或 PUT /api/config。
 STATE_COPY=data/agent-worker-service/worker.yaml
 if [[ ! -f "$STATE_COPY" ]]; then
     if [[ -n "$BASE" && -f "$BASE/$STATE_COPY" ]]; then
+        # 与 native-prod-up.sh 的端口约定一致（NATIVE_BACKEND_PORT 默认 8000）；
+        # 目录名按 basename 精确匹配 prod（AGENTS.md §1 的生产 worktree 惯例）。
+        if [[ "$(basename "$ROOT")" == "prod" ]]; then
+            SEEDED_HOST_URL="http://127.0.0.1:${NATIVE_BACKEND_PORT:-8000}"
+        else
+            SEEDED_HOST_URL="http://127.0.0.1:${DEV_BACKEND_PORT:-8001}"
+        fi
         mkdir -p data/agent-worker-service
         # register_token_file 是指向基准 worktree 绝对路径的实例私有字段，
         # 不能复制；scoped token 经 worker 控制台添加（issue #35）。
         grep -v '^register_token_file:' "$BASE/$STATE_COPY" > "$STATE_COPY"
         chmod 600 "$STATE_COPY"
-        replace_in_place "s|^host_url:.*|host_url: http://127.0.0.1:${DEV_BACKEND_PORT:-8001}|" "$STATE_COPY"
+        replace_in_place "s|^host_url:.*|host_url: ${SEEDED_HOST_URL}|" "$STATE_COPY"
         replace_in_place "s|^worker_id:.*|worker_id: ${NAME}|" "$STATE_COPY"
         replace_in_place "s|^name:.*|name: ${NAME} (worktree)|" "$STATE_COPY"
-        echo "已生成 $STATE_COPY <- ${BASE}（host_url/worker_id/name 已改写）"
+        echo "已生成 $STATE_COPY <- ${BASE}（host_url=${SEEDED_HOST_URL}、worker_id/name 已改写）"
     else
         echo "提示: 基准 worktree 无 worker 状态副本，跳过 worker 配置种子（首启后经 worker 控制台配置）" >&2
     fi

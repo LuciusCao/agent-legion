@@ -6,6 +6,54 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Performance
+- executor 生命周期监督事件化（issue #647，#578 二三期）：每个执行一根
+  线程的 `wait_for_exit` 0.5s 轮询循环（#647 实测 800 档 = 793 根轮询线
+  程、每秒 1600 次无效唤醒，单机容量顶到 ~800 的主因之一）改为进程级
+  单例 `worker/execution/exit_watch.py`——一根 watcher 线程经内核事件
+  （macOS kqueue `EVFILT_PROC`+`NOTE_EXIT` / Linux pidfd+selector；均不可
+  用时回落共享 0.5s tick 的单线程扫描，`AGENT_WORKER_EXIT_WATCH` 显式
+  选模式）监听全部在飞子进程退出，等待方 park 在自己的
+  `threading.Event` 上零唤醒；超时/ownership/cancel/shutdown 检查合并进
+  watcher 的共享 tick（一根线程一次检查替代 N 根线程各自轮询）。唤醒即
+  定谳：所有触发源单调（控制事件 set-once、exit/timeout sticky），被唤
+  醒方按旧优先级序重 derive 判定，无 lost-wakeup；心跳线程先行
+  poll/reap 子进程（zombie-stop）的交错由事件 sticky 性容纳。fail-closed：
+  watcher 死亡立即唤醒全部等待者并退回 `process_lifecycle.poll_wait_locally`
+  （原轮询循环唯一保留副本，仅作降级路径），后续等待落到新单例。判定
+  契约（exit code / 124 超时 / 130 取消 / 1+不上报的租约丢失）与旧版逐
+  分支等价，`run.py` / `code_runner.py` 调用面零改动换接；#564
+  per-execution 互斥锁在事件模型下的等价性有专项测试钉住。
+- executor 执行车道 idle 回收（issue #647 三期）：`ThreadPoolExecutor`
+  线程永不收缩（实测 800 档稳态残留 1177 根永不收缩的 idle worker），
+  换为 `worker/execution/execution_lane.py`——按需起线程（上限仍为声明
+  容量：执行等待期仍持线程 park，池小于容量会钳本地并发）、空闲
+  `AGENT_WORKER_LANE_IDLE_TIMEOUT`（默认 30s，env 可调）后自动退出，线程
+  数跟随在飞执行而非历史峰值；submit/shutdown/Future 契约与
+  ThreadPoolExecutor 对齐（哨兵唤醒的快速 shutdown、任务异常不杀 lane
+  线程）。slots 心跳行追加 `lane <n>`（存活线程）与 `exit <mode>`
+  （watcher 内核模式）观测面。
+
+### Fixed
+- 原生形态 `make prod-up` 拉起 seaweedfs 时凭据与后端 `.env` 脱节（issue
+  #624）：决策脚本读根 `.env`（凭据齐备 → start），但 compose 插值只读
+  `deploy/.env`——后者缺失时凭据插值为空串，seaweedfs 以空凭据生成
+  s3.config，后端用真实凭据连接即鉴权失败，`/api/health` 静默
+  `storage.reachable=false`、prod-up 退出码 0。修复：决策为 start 时
+  `native-prod-up.sh` 把根 `.env` 的 `AGENT_LEGION_S3_*` 凭据 export 给
+  compose（进程环境优先于 .env 插值），消除两个 env 文件的双写要求。
+- `init-worktree.sh` 种子 worker 状态副本的 host_url 无条件写 dev 端口
+  （issue #625）：prod worktree 的后端在 8000（`NATIVE_BACKEND_PORT`），
+  worker 对着没人监听的 8001 静默退避重试。修复：按 worktree 名分流——
+  `prod` worktree 种子 `NATIVE_BACKEND_PORT`（默认 8000），其余保持
+  `DEV_BACKEND_PORT`（默认 8001）。
+- 三个脚本在 git 索引中丢失执行位（issue #623）：`install-deps.sh` /
+  `gate-jobs.sh` / `gate-queue.sh` 为 100644，`make install` 全新 clone
+  必现 Permission denied（core.fileMode=true 的 macOS/Linux；本地 chmod 过
+  的老 checkout 无感）。修复：补执行位（mode 100755），并新增静态门禁
+  检查 `scripts/architecture/script_permissions.py`——所有 tracked `.sh`
+  必须带执行位，防回归。
+
 ## [0.7.9] - 2026-09-11
 
 ### Fixed

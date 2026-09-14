@@ -196,6 +196,54 @@ def test_worker_config_host_url_uses_dev_backend_port(tmp_path: Path) -> None:
     assert "host_url: http://127.0.0.1:8010" in config
 
 
+def test_worker_config_prod_worktree_seeds_native_backend_port(tmp_path: Path) -> None:
+    """#625：名为 prod 的 worktree 种子 host_url 指向原生生产后端
+    （NATIVE_BACKEND_PORT，默认 8000）——无条件种子 dev 端口 8001 会让
+    prod worktree 的 worker 静默连错端口、退避重试不易察觉。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/prod/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    base_state = develop / "data/agent-worker-service"
+    base_state.mkdir(parents=True)
+    (base_state / "worker.yaml").write_text(
+        "host_url: http://127.0.0.1:8001\n",
+        encoding="utf-8",
+    )
+
+    result = _run(main / ".worktrees/prod/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    config = (main / ".worktrees/prod/data/agent-worker-service/worker.yaml").read_text()
+    assert "host_url: http://127.0.0.1:8000" in config
+    assert "8001" not in config
+
+
+def test_worker_config_prod_worktree_respects_native_port_override(tmp_path: Path) -> None:
+    """#625：prod worktree 的种子端口跟随 NATIVE_BACKEND_PORT 覆盖
+    （与 native-prod-up.sh 同一变量，避免两处漂移）。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/prod/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    base_state = develop / "data/agent-worker-service"
+    base_state.mkdir(parents=True)
+    (base_state / "worker.yaml").write_text(
+        "host_url: http://127.0.0.1:8001\n",
+        encoding="utf-8",
+    )
+
+    result = _run(
+        main / ".worktrees/prod/scripts/init-worktree.sh",
+        bin_dir,
+        extra_env={"NATIVE_BACKEND_PORT": "9000"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    config = (main / ".worktrees/prod/data/agent-worker-service/worker.yaml").read_text()
+    assert "host_url: http://127.0.0.1:9000" in config
+
+
 def test_nonbare_main_repo_is_skipped_as_base(tmp_path: Path) -> None:
     """主仓库根非 bare（普通 checkout、无 .env）时不得作为 .env 复制基准。
 
