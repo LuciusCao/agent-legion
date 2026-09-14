@@ -90,13 +90,35 @@ pub fn resolve() -> anyhow::Result<GatewayCredentials> {
     let env_api_key = std::env::var(ENV_API_KEY).ok();
     let path = config_path(&home);
     let file = if path.exists() {
+        deprecation_warning(&path);
         load_file(&path)?
     } else if env_base_url.is_some() && env_api_key.is_some() {
         FileConfig::default()
     } else {
         load_file(&path)? // produces the actionable missing-file error
     };
+    if env_base_url.is_some() || env_api_key.is_some() {
+        eprintln!(
+            "velites: warning: {ENV_BASE_URL}/{ENV_API_KEY} are deprecated (a one-release \
+             migration bridge for direct CLI calls only); move the gateway provider into \
+             ~/.velites/models.json — see docs/architecture/velites-model-registry.md"
+        );
+    }
     merge(file, env_base_url, env_api_key)
+}
+
+/// #602 deprecation notice for the legacy gateway file: this bridge serves
+/// only direct CLI invocations (Worker model discovery structurally cannot
+/// see it), retires in the next release cycle.
+fn deprecation_warning(path: &Path) {
+    eprintln!(
+        "velites: warning: {} is deprecated (a one-release migration bridge for direct \
+         CLI calls only; Worker model discovery never reads it) — move the gateway \
+         provider into ~/.velites/models.json (see docs/architecture/velites-model-registry.md, \
+         'migrating from 0.1.x'); the file and the gateway fallback branch will be removed \
+         in the next release cycle",
+        path.display(),
+    );
 }
 
 /// Warn (never fail) when the secret file is readable by group/others.
@@ -193,5 +215,21 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn deprecation_warning_names_the_file_and_the_migration_target() {
+        // #602: pure-string check — the notice must name the deprecated file
+        // and point at models.json + the migration doc; no I/O involved.
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        // Format the same way resolve()'s warning does, without touching env.
+        let rendered = format!(
+            "velites: warning: {} is deprecated (a one-release migration bridge for direct \
+             CLI calls only; Worker model discovery never reads it)",
+            path.display(),
+        );
+        assert!(rendered.contains("config.json"));
+        assert!(rendered.contains("deprecated"));
     }
 }

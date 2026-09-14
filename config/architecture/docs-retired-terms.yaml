@@ -47,5 +47,10 @@ terms:
     retired_in: '#385/#389'
     note: 灰度开关退役；部署形态由 code_capacity 表达（0 = 纯控制面），
       存量 DB 文档读时键级剥离
+  - pattern: '\.velites/config\.json 作为配置入口'
+    retired_in: '#602（deprecation 阶段，下一版本周期移除）'
+    note: config.json 是仅供直调 CLI 的迁移桥，结构上进不了 Worker 模型
+      发现；配置入口是 ~/.velites/models.json。迁移历史上下文（velites-
+      model-registry.md 的 0.1.x 迁移节与 deprecation 公告）豁免
 
 exemptions: []
