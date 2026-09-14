@@ -49,8 +49,9 @@ SANDBOX_BINARY_CANDIDATES: tuple[str, ...] = ("velites-sandbox", "velites")
 #: `VELITES_BIN` bind mount 到镜像内 /app/data/bin/velites——容器内 PATH 上
 #: 只有镜像内置的沙箱包装器，data/bin 是 runtime 二进制的唯一落点）。
 #: 原生/裸机形态 velites 收敛为 PATH 单一副本（#507：~/.local/bin，
-#: ensure-velites.sh 维护），data/bin 不再播种、仅作兜底。沙箱解析与
-#: worker/binary_resolution.py 共用（单一事实源，mock 任一侧同一目录）。
+#: ensure-velites.sh 维护），data/bin 不再播种、仅作兜底。本常量是事实源；
+#: worker/binary_resolution.py 经 PEP 562 __getattr__ 动态代理读取（#496），
+#: 测试隔离必须 patch 本模块属性——对 re-export 位赋值只会遮蔽代理。
 BUNDLED_SANDBOX_DIR = Path(__file__).resolve().parents[1] / "data" / "bin"
 
 
