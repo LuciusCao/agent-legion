@@ -1,14 +1,20 @@
-"""Shared (skill, commit) materialization cache (issue #569).
+"""Shared (skill, commit) materialization cache (issues #569, #638, #639).
 
-Pins the cache contract: a hit is a pure path probe (zero git calls), a
-markerless half-exported directory is never a hit, the per-skill cache is
-LRU-bounded at KEPT_COMMITS_PER_SKILL, and neither per-validation cleanup
-nor the stale-execution sweeper touches the shared subtree.
+Pins the cache contract: a healthy hit is a path + contract probe (zero git
+calls), a markerless half-exported directory is never a hit, an externally
+emptied tree whose marker survived an mtime-based cleaner self-heals on the
+next probe (#638), an exported tree is touched to the current mtime so
+content and marker age together, a relative runs_dir materializes from any
+cwd (#639), the per-skill cache is LRU-bounded at KEPT_COMMITS_PER_SKILL,
+and neither per-validation cleanup nor the stale-execution sweeper touches
+the shared subtree.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -22,6 +28,7 @@ from server.app.skills.commit_cache import (
     shared_cache_root,
 )
 from server.app.skills.errors import SkillRepoError
+from server.app.skills.manager import SkillManager
 from server.app.skills.runs_gc import SHARED_DIR_NAME, sweep_stale_execution_dirs
 from tests.helpers.skill_git import (
     _KEY,
@@ -31,6 +38,7 @@ from tests.helpers.skill_git import (
     _make_skill_repo,
     _tag,
 )
+from tests.helpers.skill_store import memory_skill_store
 
 pytestmark = pytest.mark.no_db
 
@@ -80,6 +88,129 @@ def test_markerless_half_exported_dir_is_never_a_hit(tmp_path: Path) -> None:
     assert rerun == run_dir
     assert (rerun / "SKILL.md").read_text() == "# skill\n"
     assert (commit_dir / COMPLETE_MARKER).is_file()
+
+
+def test_externally_emptied_tree_with_surviving_marker_self_heals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#638: an mtime-based cleaner (macOS dirhelper purges $TMPDIR entries
+    older than 3 days) empties the tree but keeps the younger .complete
+    marker — the empty tree must be treated as a miss and re-exported, not
+    returned as a poisoned hit that fails every validation with
+    "skill missing SKILL.md"."""
+    repo = _make_skill_repo(tmp_path / "skills", _KEY)
+    commit = _head_commit(repo)
+    manager = _make_manager(tmp_path)
+
+    run_dir = materialized_commit_dir(manager, _KEY, commit)
+    commit_dir = run_dir.parents[1]
+    # Simulate the cleaner: tree contents gone, marker alive.
+    shutil.rmtree(run_dir)
+    run_dir.mkdir()  # dirhelper leaves the emptied dir in place
+    assert (commit_dir / COMPLETE_MARKER).is_file()
+
+    rerun = materialized_commit_dir(manager, _KEY, commit)
+
+    assert rerun == run_dir
+    assert (rerun / "SKILL.md").read_text() == "# skill\n"
+    assert (rerun / "references" / "output-contract.md").is_file()
+    assert (rerun / "scripts" / "validate_output.py").is_file()
+    assert (commit_dir / COMPLETE_MARKER).is_file()
+
+
+def test_half_emptied_tree_with_surviving_marker_self_heals(tmp_path: Path) -> None:
+    """The hit hardening checks the full contract trio, not just SKILL.md:
+    a cleaner that only removed the references/ subtree (or a partially
+    surviving purge) must still miss, or the validator would blow up later
+    on references/output-contract.md instead of the cache self-healing."""
+    repo = _make_skill_repo(tmp_path / "skills", _KEY)
+    commit = _head_commit(repo)
+    manager = _make_manager(tmp_path)
+
+    run_dir = materialized_commit_dir(manager, _KEY, commit)
+    shutil.rmtree(run_dir / "references")
+
+    rerun = materialized_commit_dir(manager, _KEY, commit)
+
+    assert rerun == run_dir
+    assert (rerun / "references" / "output-contract.md").is_file()
+    assert (rerun / "scripts" / "validate_output.py").is_file()
+
+
+def test_exported_tree_is_touched_to_now_so_content_ages_with_the_marker(
+    tmp_path: Path,
+) -> None:
+    """#638 recurrence cycle: git archive stamps each file with the commit's
+    committer date, so an un-updated skill's cached tree would out-age the
+    marker written at materialization time. After the fix every entry is as
+    young as the marker — an mtime cleaner takes both together, leaving the
+    markerless leftover the existing miss path already reclaims."""
+    long_ago = int(time.time()) - 5 * 86400
+    # git archive derives file mtimes from the commit date, not extraction
+    # time; both dates must be old (tests.helpers.skill_git copies os.environ).
+    old_env = {
+        "GIT_AUTHOR_DATE": os.environ.get("GIT_AUTHOR_DATE"),
+        "GIT_COMMITTER_DATE": os.environ.get("GIT_COMMITTER_DATE"),
+    }
+    try:
+        os.environ["GIT_AUTHOR_DATE"] = f"{long_ago} +0000"
+        os.environ["GIT_COMMITTER_DATE"] = f"{long_ago} +0000"
+        repo = _make_skill_repo(tmp_path / "skills", _KEY)
+    finally:
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    commit = _head_commit(repo)
+    manager = _make_manager(tmp_path)
+
+    run_dir = materialized_commit_dir(manager, _KEY, commit)
+    marker = run_dir.parents[1] / COMPLETE_MARKER
+
+    fresh = time.time() - 60  # generous window for a slow CI touch
+    assert (run_dir / "SKILL.md").stat().st_mtime >= fresh, "tree content must be young"
+    assert (run_dir / "scripts").stat().st_mtime >= fresh, "directories age too"
+    assert marker.stat().st_mtime >= fresh
+    # And the aging is uniform: no entry is dramatically older than the
+    # marker (the #638 poisoning wedge was exactly this gap).
+    marker_age_gap = abs(marker.stat().st_mtime - (run_dir / "SKILL.md").stat().st_mtime)
+    assert marker_age_gap < 60
+
+
+def test_relative_runs_dir_materializes_from_any_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#639: a pinned relative AGENT_LEGION_SKILLS_RUNS_DIR used to fail
+    shared-cache materialization outright — git resolves a relative
+    ``archive -o`` against its ``-C`` dir (the skill repo), not the process
+    cwd, so mkdir created the dir in one place and git wrote to another.
+    The manager now anchors the pin to the cwd once, in __init__."""
+    repo = _make_skill_repo(tmp_path / "skills", _KEY)
+    commit = _head_commit(repo)
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    # Anchor: __init__ resolves the relative pin against ITS cwd.
+    monkeypatch.chdir(workdir)
+    manager = SkillManager(
+        store=memory_skill_store(),
+        base_dir=tmp_path / "skills",
+        runs_dir=Path("relative-runs"),
+    )
+    assert manager.runs_dir.is_absolute()
+    assert manager.runs_dir == workdir / "relative-runs"
+
+    # Materialize from a DIFFERENT cwd than the anchor: the git -o path
+    # must not silently re-anchor to the repo dir (#639's failure shape).
+    monkeypatch.chdir(tmp_path)
+    run_dir = materialized_commit_dir(manager, _KEY, commit)
+    assert (run_dir / "SKILL.md").is_file()
+    assert not (repo / "relative-runs").exists(), "git -o must not resolve into the repo"
+
+    # A hit from yet another cwd resolves the same absolute tree.
+    monkeypatch.chdir(tmp_path / "skills")
+    again = materialized_commit_dir(manager, _KEY, commit)
+    assert again == run_dir
 
 
 def test_cache_is_lru_bounded_per_skill(tmp_path: Path) -> None:

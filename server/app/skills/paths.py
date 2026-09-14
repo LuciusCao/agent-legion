@@ -39,6 +39,14 @@ def default_skills_runs_dir() -> Path:
     there. Deployments where the temp dir is not stable across processes
     (e.g. systemd ``PrivateTmp``) must pin ``AGENT_LEGION_SKILLS_RUNS_DIR``
     to a shared path.
+
+    The temp default is still an OS-managed cleaning domain: macOS
+    ``com.apple.bsd.dirhelper`` deletes ``$TMPDIR`` entries older than 3
+    days nightly (~03:35). Since #638 the shared commit cache self-heals
+    from such sweeps (hit hardening re-exports an emptied tree), but a
+    pinned stable path outside any cleaner's reach remains the recommended
+    production setting — an absolute path; a relative one is anchored to
+    the process cwd (#639).
     """
     suffix = f"-{os.getuid()}" if hasattr(os, "getuid") else ""
     return Path(tempfile.gettempdir()) / f"{RUNS_DIR_PREFIX}{suffix}"

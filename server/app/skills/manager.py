@@ -47,7 +47,18 @@ class SkillManager:
     ) -> None:
         self._store = store
         self.base_dir = Path(base_dir)
-        self.runs_dir = Path(runs_dir) if runs_dir else default_skills_runs_dir()
+        # abspath, deliberately NOT resolve(): a pinned runs_dir must be
+        # anchored to the cwd so every consumer (mkdir, FileLock domain,
+        # ``git -C ... archive -o`` — git resolves a relative -o against the
+        # -C dir, not the cwd, #639) sees the same absolute path, but a
+        # symlink AT the root must stay a symlink for
+        # ensure_secure_runs_dir to refuse it. The default branch is kept
+        # verbatim: its string form is already cross-process stable, and
+        # re-anchoring it would split the FileLock domain across an upgrade.
+        if runs_dir is None:
+            self.runs_dir = default_skills_runs_dir()
+        else:
+            self.runs_dir = Path(os.path.abspath(runs_dir))
         self.git_command = git_command or ["git"]
         self._cache_locks: dict[str, FileLock] = {}
         # Serializes the read-modify-write of the DB lock document within this

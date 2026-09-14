@@ -17,11 +17,25 @@ contain ``--``, so flattening would collide distinct skills (``a--b/c`` vs
 WRONG skill's FileLock and could rmtree a tree another skill's validator
 is reading (PR #571 review).
 
-A cache hit is a pure path probe: the ``.complete`` marker file inside the
-commit dir is written AFTER the atomic rename of a fully exported tree, so
-its presence certifies integrity — a crashed export leaves a markerless
-directory that is never treated as a hit (and is reclaimed on the next
-materialization under the same lock). No git subprocess runs on a hit.
+A cache hit is a path probe plus a contract probe: the ``.complete`` marker
+file inside the commit dir is written AFTER the atomic rename of a fully
+exported tree, so its presence certifies integrity — a crashed export leaves
+a markerless directory that is never treated as a hit (and is reclaimed on
+the next materialization under the same lock). The marker alone is not
+trusted, though: an external cleaner that purges old-mtime files (macOS
+dirhelper wipes $TMPDIR entries older than 3 days, #638) empties the tree
+but keeps the younger marker, so a hit additionally stats the dispatch
+contract trio (REQUIRED_CONTRACT_FILES) and treats any missing file as a
+miss — rmtree + re-export, an immediate self-heal instead of a poisoned
+cache. No git subprocess runs on a healthy hit.
+
+The same external-cleaner failure mode is closed at the source: git archive
+restores each file's mtime from the commit date, so an un-updated skill's
+cached tree would age past the cleaner's threshold while its marker stayed
+young. After the rename, every tree entry is therefore touched to the
+current moment — content and marker age together, so the cleaner removes
+both and the markerless-leftover reclaim path takes over (re-export). The
+poisoned-marker cycle (empty tree + live marker ≈ 72h) cannot recur.
 
 The layout keeps the ``run_dir.parents[1]`` contract of
 ``workflows.skills.resolve_workflow_skill`` (the materialized skill dir is
@@ -61,6 +75,7 @@ from server.app.skills.errors import SkillRepoError
 from server.app.skills.manager import _COMMIT_RE, SkillManager
 from server.app.skills.materialize import export_commit
 from server.app.skills.runs_gc import SHARED_DIR_NAME
+from server.app.workflows.skills import REQUIRED_CONTRACT_FILES
 
 KEPT_COMMITS_PER_SKILL = 4
 COMPLETE_MARKER = ".complete"
@@ -149,10 +164,10 @@ def _cached_commit_tree(
 ) -> Path:
     """The lock-held guts of the cache: probe, materialize on miss, evict.
 
-    Caller must hold ``manager._cache_lock_for(cache_dir)``. Hit (marker
-    file present): pure path probe, zero git calls. Miss: export the
-    commit's tree to a temp sibling, atomically rename into place, then
-    drop the integrity marker.
+    Caller must hold ``manager._cache_lock_for(cache_dir)``. Hit (marker file
+    present AND the contract trio intact): path + contract stats, zero git
+    calls. Miss: export the commit's tree to a temp sibling, atomically
+    rename into place, then drop the integrity marker.
     """
     if not _COMMIT_RE.fullmatch(commit):
         raise SkillRepoError(f"skill commit must be a 40-hex sha: {commit!r}")
@@ -160,12 +175,14 @@ def _cached_commit_tree(
     commit_dir = skill_root / commit
     marker = commit_dir / COMPLETE_MARKER
     run_dir = commit_dir / workflow / capability
-    if marker.is_file() and run_dir.is_dir():
+    if marker.is_file() and run_dir.is_dir() and _contract_intact(run_dir):
         # LRU touch: eviction ranks by commit-dir mtime.
         os.utime(commit_dir)
         return run_dir
     if commit_dir.exists():
-        # Markerless leftover from a crashed export — never a hit.
+        # Markerless leftover from a crashed export — never a hit. Also the
+        # reclaim path for an externally emptied tree whose marker survived
+        # (dirhelper-style mtime sweeps, #638).
         shutil.rmtree(commit_dir)
     manager._require_cache_dir(skill_key, cache_dir)
     if not manager._has_commit(cache_dir, commit):
@@ -175,10 +192,27 @@ def _cached_commit_tree(
         manager._run_git, manager.runs_dir, cache_dir, commit, tmp_dir / workflow / capability
     )
     os.rename(tmp_dir, commit_dir)
+    # git archive restores commit-date mtimes; age the tree to NOW so the
+    # marker is never the sole young survivor of an mtime-based cleaner
+    # (#638) — content and marker die together, and the markerless leftover
+    # above rebuilds the tree.
+    _touch_tree(run_dir)
     # Marker AFTER the atomic rename: presence == complete tree.
     marker.write_text("ok\n")
     _evict_old_commits(skill_root)
     return run_dir
+
+
+def _contract_intact(run_dir: Path) -> bool:
+    """The dispatch contract trio is present (#638 hit hardening)."""
+    return all((run_dir / rel).is_file() for rel in REQUIRED_CONTRACT_FILES)
+
+
+def _touch_tree(run_dir: Path) -> None:
+    """Set every tree entry's mtime to now (files and directories)."""
+    for entry in run_dir.rglob("*"):
+        os.utime(entry)
+    os.utime(run_dir)
 
 
 def _evict_old_commits(skill_root: Path) -> None:
