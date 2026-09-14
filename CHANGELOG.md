@@ -45,6 +45,11 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
     文案宣称的「已内嵌」与产物行为相反）；低版本与非数字 tag 保守走
     「手动取一次」指引。版本门槛测试
     `tests/scripts/test_install_worker_version_gates.py`（8 例）。
+  - worker/service_bind.py 判定矩阵 51 行（原 27）登记 file_budget 豁免
+    （收割跟踪 issue #650：#489 方向二/三落地或文档去重时收缩）；
+    token/embed 判定测试拆至
+    `tests/workers/test_worker_control_token_embed.py`（原聚合文件回到
+    1000 行测试上限内）。
 - 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
   `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
   部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5

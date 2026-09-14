@@ -1401,3 +1401,16 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 167
+- check: architecture.file_budget
+  path: worker/service_bind.py
+  reason: '#489 control-token embedding decided by the host-side publish face: the check grew
+    from a single loopback test (27 lines) to a two-input matrix (process bind × effective
+    publish, three logging branches incl. the bare-metal no-effective warning kept byte-identical
+    to the pre-#489 message, bracketed IPv6 stripping). The growth is the feature itself; the
+    matrix narrative also lives in docs/agent-worker-deployment.md §控制面鉴权. The harvest
+    tracking issue lists concrete shrink conditions: #489 deferred direction 2 (loopback-only +
+    forwarding) or 3 (Unix-socket identity) landing and collapsing the matrix, or deduplicating
+    the docstring chain narration against the deployment doc.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/650
+  ceiling: 51
