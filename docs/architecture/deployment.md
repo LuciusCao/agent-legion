@@ -135,6 +135,11 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
   各自退化的提示 + 逃生门指引），不拒绝启动——自托管单机下「两个 worktree 实例连
   不同库」是合法形态，fail-fast 会误伤；同库多副本才是危险形态，而探测的 key 恰好
   以库为粒度。连到 shutdown 才释放，连接归池不泄漏。
+- **启动器幂等兜底（`scripts/native-prod-up.sh`）**：通配 bind
+  （`NATIVE_BACKEND_BIND=0.0.0.0`/`::`）请求且同端口已有具体地址监听时视为
+  已在运行并跳过启动、打醒目提示（#486）——此前该形态不会被幂等判定拦住，
+  `127.0.0.1:8000` 旧实例在监听时以 `0.0.0.0` 跑 `prod-up` 会起出双实例连
+  同一个库，正是上表的退化形态组合。
 - 逃生门与开关：
   - `AGENT_LEGION_ALLOW_MULTI_REPLICA=1`：知情确认多副本，warning 降为 info；
   - `AGENT_LEGION_SKIP_SINGLE_REPLICA_PROBE=1`：完全跳过探测（测试/特殊场景）。

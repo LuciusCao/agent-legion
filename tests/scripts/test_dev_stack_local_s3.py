@@ -6,8 +6,9 @@ cmd_up 的功能路径（起 docker、建 bucket）由 tests/scripts/test_local_
 悄悄断开（与 test_local_s3_decide.py 的 prod 入口接线检查同一风格）。
 
 下半部分是 ensure_local_object_store 的行为级桩测试：与 test_install_deps.py 同一
-手法——把 dev_stack.sh 复制进合成仓库布局，scripts/local-s3-decide.sh 与
-docker/uv/lsof/curl 全部走 PATH 桩，用 STUB_* env 驱动行为并记录调用。
+手法——把 dev_stack.sh（连同其 source 的 scripts/lib/dotenv.sh，#486 收敛）复制
+进合成仓库布局，scripts/local-s3-decide.sh 与 docker/uv/lsof/curl 全部走 PATH 桩，
+用 STUB_* env 驱动行为并记录调用。
 """
 
 from __future__ import annotations
@@ -48,8 +49,11 @@ def test_dev_stack_dispatches_backend_service_and_port() -> None:
     assert "http_ok 8333 /healthz" in DEV_STACK
     assert "http_ok 9000 /minio/health/live" in DEV_STACK
     assert "deploy/compose.host.yaml" in DEV_STACK
-    assert "read_env_value AGENT_LEGION_S3_ACCESS_KEY" in DEV_STACK
-    assert "read_env_value AGENT_LEGION_S3_SECRET_KEY" in DEV_STACK
+    # dotenv 解析原语收敛在 scripts/lib/dotenv.sh（#486），dev 形态只读根 .env。
+    assert 'source "$ROOT/scripts/lib/dotenv.sh"' in DEV_STACK
+    assert "dotenv_value AGENT_LEGION_S3_ACCESS_KEY .env" in DEV_STACK
+    assert "dotenv_value AGENT_LEGION_S3_SECRET_KEY .env" in DEV_STACK
+    assert "read_env_value" not in DEV_STACK  # 旧局部实现不得残留
 
 
 def test_dev_stack_ensures_bucket_after_start() -> None:
@@ -151,10 +155,12 @@ def _write_stub(path: Path, content: str) -> None:
 def _setup(tmp_path: Path, *, with_docker: bool = True) -> tuple[Path, Path]:
     """合成仓库布局：真实 dev_stack.sh + 桩决策脚本 + PATH 桩。"""
     main = tmp_path / "main"
-    (main / "scripts").mkdir(parents=True)
+    (main / "scripts" / "lib").mkdir(parents=True)
     (main / "deploy").mkdir()
     (main / "frontend" / "node_modules").mkdir(parents=True)
     shutil.copy(DEV_STACK_SCRIPT, main / "scripts" / DEV_STACK_SCRIPT.name)
+    # dotenv 原语库（#486 收敛）：dev_stack.sh 的真实依赖，随脚本一起进合成布局。
+    shutil.copy(ROOT / "scripts" / "lib" / "dotenv.sh", main / "scripts" / "lib" / "dotenv.sh")
     _write_stub(main / "scripts" / "local-s3-decide.sh", _DECIDE_STUB)
     _write_stub(main / "scripts" / "ensure-velites.sh", _ENSURE_VELITES_STUB)
     (main / "deploy" / "compose.host.yaml").write_text("name: agent-legion\n")

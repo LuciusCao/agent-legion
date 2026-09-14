@@ -6,16 +6,26 @@
 # 端口与绑定地址可分别用 NATIVE_BACKEND_PORT / NATIVE_WORKER_PORT 与
 # NATIVE_BACKEND_BIND / NATIVE_WORKER_BIND 覆盖（默认 8000/8787 与 127.0.0.1；
 # 暴露给局域网/overlay 网络时把 bind 设为对应网卡地址，S3 联动配置见
-# docs/agent-worker-deployment.md）。
+# docs/agent-worker-deployment.md）。四个变量读「进程环境 > 根 .env」两级
+# 来源（.env 是持久化载体——换 shell 会话/重启/launchd cron 调起时不再
+# 静默退回 loopback；进程环境已导出时优先，与 dotenv override=False 一致，
+# 临时覆盖逃生门保留）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BACKEND_PORT="${NATIVE_BACKEND_PORT:-8000}"
-WORKER_PORT="${NATIVE_WORKER_PORT:-8787}"
-BACKEND_BIND="${NATIVE_BACKEND_BIND:-127.0.0.1}"
-WORKER_BIND="${NATIVE_WORKER_BIND:-127.0.0.1}"
+# dotenv 解析原语统一在 scripts/lib/dotenv.sh（#486 收敛，见该文件头注释）。
+source "$ROOT/scripts/lib/dotenv.sh"
+
+BACKEND_PORT="$(dotenv_value NATIVE_BACKEND_PORT .env)"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+WORKER_PORT="$(dotenv_value NATIVE_WORKER_PORT .env)"
+WORKER_PORT="${WORKER_PORT:-8787}"
+BACKEND_BIND="$(dotenv_value NATIVE_BACKEND_BIND .env)"
+BACKEND_BIND="${BACKEND_BIND:-127.0.0.1}"
+WORKER_BIND="$(dotenv_value NATIVE_WORKER_BIND .env)"
+WORKER_BIND="${WORKER_BIND:-127.0.0.1}"
 CAFFEINATE="$(command -v caffeinate || true)"
 
 mkdir -p data/logs
@@ -74,6 +84,38 @@ port_listening() {
     family="$(listener_family "$1")"
     lsof -nP -a -iTCP:"$port" -i"$family" -sTCP:LISTEN -F n 2>/dev/null \
         | sed -n 's/^n//p' | grep -Fxq -e "${display}:${port}" -e "*:${port}" -e "[::]:${port}"
+}
+
+# 同端口同族是否「任意地址」有监听（不限 bind 形态；-F n 输出全部监听
+# 行，非精确匹配）。仅供通配 bind 的幂等兜底（见下）。
+port_has_any_listener() {
+    local port family
+    port="$1"
+    family="$2"
+    lsof -nP -a -iTCP:"$port" -i"$family" -sTCP:LISTEN -F n 2>/dev/null | grep -q '^n'
+}
+
+is_wildcard_bind() {
+    case "$1" in
+        0.0.0.0 | ::) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 通配 bind 的幂等兜底（#482 follow-up，生产实际踩到的形态）：port_listening
+# 把 0.0.0.0/:: 归一为 *，只在「同族通配监听」时命中——同端口已有具体地址
+# （如 127.0.0.1:8000）监听时判否，随后照常起进程会连出双实例：两个后端
+# 连同一个库，单副本约束（docs/architecture/deployment.md）被静默破坏——
+# SSE fan-out 分裂、限速稀释、workspace 暂停状态互踩。因此通配 bind 请求
+# 且同端口同族已有任意地址监听时视为已在运行、跳过启动并打醒目提示。
+# 权衡：跳过的最坏情况是「用户以为换了 bind 其实没换」（提示文案已点名，
+# 可被立即发现）；并存的最坏情况是静默的数据面退化（不可见）。取轻。
+# 反向（请求具体 bind、已有通配监听）无需此兜底——port_listening 的
+# "*:${port}" 模式已覆盖该场景为已运行。
+wildcard_bind_skip() {
+    local bind="$1" port="$2" name="$3"
+    is_wildcard_bind "$bind" || return 1
+    port_has_any_listener "$port" "$(listener_family "$bind")"
 }
 
 # 健康检查与就绪提示用的探测地址：0.0.0.0 是 IPv4 全接口监听，必然含
@@ -156,6 +198,9 @@ fi
 # 2. 后端
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
+elif wildcard_bind_skip "$BACKEND_BIND" "$BACKEND_PORT" "后端"; then
+    echo "提示: 检测到 :$BACKEND_PORT 已有 $BACKEND_BIND 可覆盖的监听；通配 bind 不并行启动第二个实例（双实例连同一库会造成单副本退化：SSE 分裂/限速稀释/暂停互踩）。如需以 $BACKEND_BIND 重启请先 ./scripts/native-prod-down.sh" >&2
+    echo "后端视为已在 :$BACKEND_PORT 运行，跳过"
 else
     echo "启动后端 $BACKEND_BIND:$BACKEND_PORT …"
     ulimit -n 65535
@@ -173,6 +218,9 @@ fi
 # 3. Worker
 if port_listening "$WORKER_BIND" "$WORKER_PORT"; then
     echo "Worker 已在 :$WORKER_PORT 运行，跳过"
+elif wildcard_bind_skip "$WORKER_BIND" "$WORKER_PORT" "Worker"; then
+    echo "提示: 检测到 :$WORKER_PORT 已有 $WORKER_BIND 可覆盖的监听；通配 bind 不并行启动第二个实例（双 Worker 分摊领任务会造成互相稀释）。如需以 $WORKER_BIND 重启请先 ./scripts/native-prod-down.sh" >&2
+    echo "Worker 视为已在 :$WORKER_PORT 运行，跳过"
 else
     echo "启动 Worker $WORKER_BIND:$WORKER_PORT …"
     ulimit -n 65535

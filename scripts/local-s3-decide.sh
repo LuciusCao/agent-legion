@@ -42,6 +42,10 @@
 #   不做启停决策——供 native-prod-up 等入口直接 up -d <服务名>。
 set -euo pipefail
 
+# dotenv 解析原语统一在 scripts/lib/dotenv.sh（#486 收敛，见该文件头注释）。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/dotenv.sh"
+
 PROFILE_RUSTFS="materials-local-rustfs"
 PROFILE_SEAWEEDFS="materials-local"
 DEFAULT_ENDPOINT=""
@@ -76,59 +80,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 取值优先级：进程环境 > 先出现的 env 文件；空值按未配置处理。
+# 取值优先级：进程环境 > 先出现的 env 文件；空值按未配置处理。解析实现
+# 是 lib/dotenv.sh 的 dotenv_value（语义见其头注释），这里只绑定 ENV_FILES。
 lookup() {
-    local key="$1" value file line
-    value="$(printenv "$key" 2>/dev/null || true)"
-    if [[ -n "$value" ]]; then
-        printf '%s' "$value"
-        return 0
-    fi
-    for file in ${ENV_FILES[@]+"${ENV_FILES[@]}"}; do
-        [[ -f "$file" ]] || continue
-        line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -n 1 || true)"
-        [[ -n "$line" ]] || continue
-        value="$(_dotenv_value "$line")"
-        if [[ -n "$value" ]]; then
-            printf '%s' "$value"
-            return 0
-        fi
-    done
-    return 0
-}
-
-# 解析 env 行的值部分：去 = 前缀、首尾空白与一层配对的引号（与 dotenv 对齐）。
-# 注意：这是仓库里第二份 shell dotenv 解析（另一份是 scripts/dev_stack.sh 的
-# read_env_value，语义更窄、仅够读扁平 KEY=VALUE 凭据）。需要扩展语义时不要
-# 各自漂移，应合并为一份实现。
-_dotenv_value() {
-    local value="${1#*=}"
-    value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-    if [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
-        value="${value:1:${#value}-2}"
-    elif [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
-        value="${value:1:${#value}-2}"
-    fi
-    printf '%s' "$value"
+    dotenv_value "$1" ${ENV_FILES[@]+"${ENV_FILES[@]}"}
 }
 
 # endpoint 专用，严格 dotenv 语义：按优先级（进程环境 > 文件按传入顺序）
 # 找第一个出现该键的来源并用它的值（哪怕为空）——空值也是值，不回退更低
 # 优先级来源；完全未出现返回 1。bucket/凭据/开关保持空=未配置，仍走 lookup。
 lookup_first() {
-    local key="$1" file line
-    if printenv "$key" >/dev/null 2>&1; then
-        printenv "$key"
-        return 0
-    fi
-    for file in ${ENV_FILES[@]+"${ENV_FILES[@]}"}; do
-        [[ -f "$file" ]] || continue
-        line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -n 1 || true)"
-        [[ -n "$line" ]] || continue
-        _dotenv_value "$line"
-        return 0
-    done
-    return 1
+    dotenv_value_first "$1" ${ENV_FILES[@]+"${ENV_FILES[@]}"}
 }
 
 endpoint_is_local() {
