@@ -156,14 +156,14 @@ class BatchHeartbeatRegistry:
     def prune_settled(self, settled: list[str]) -> None:
         """Quietly drop settled executions from the registry (#590).
 
-        The relay confirmed these not_owned verdicts were the completion
-        followup (Host already finished them); unlike ``apply_beat_result``'s
-        lost arm there is no ownership_lost to set and no signal to the
-        executor — the entry simply stops being beaten. NOT pair-matched by
-        design: the probe answered for the execution, and the next snapshot
-        must not carry the dead lease whatever its lease_id was. A new
-        attempt (re-claim after requeue) re-registers its own entry, which
-        happens-before the next beat round."""
+        The Host classified these refusals inside the beat transaction as
+        the completion followup (the execution row is in a TERMINAL state);
+        unlike ``apply_beat_result``'s lost arm there is no ownership_lost
+        to set and no signal to the executor — the entry simply stops being
+        beaten. NOT pair-matched by design: terminal is absorbing (no path
+        requeues a done/cancelled row), so no live new-attempt entry can
+        exist under that execution_id and the next snapshot must not carry
+        the dead lease whatever its lease_id was."""
         if not settled:
             return
         with self._lock:

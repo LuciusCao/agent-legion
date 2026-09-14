@@ -90,7 +90,7 @@ class RelayBeater:
     def _beat_batch(self, leases: list[tuple[str, str]]) -> tuple[list, list, list] | None:
         """Sharded parallel batch beat; the concurrency body lives in
         ``relay_shards`` (file-budget split, same seam as the #566 relay
-        modules). ``(None, None)`` at the ``beat`` layer = transient."""
+        modules). ``(None, None, None)`` at the ``beat`` layer = transient."""
         outcome = beat_sharded(self._client, leases, self._log, self._shard_threads)
         if outcome.degraded:
             self.degraded = True

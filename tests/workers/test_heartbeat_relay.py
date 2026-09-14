@@ -266,6 +266,10 @@ def test_404_degrades_to_single_beats(tmp_path: Path) -> None:
     result = read_beat_result(tmp_path / RESULT_FILENAME)
     assert result is not None
     assert result["lost"] == [["exec-1", "lease-1"], ["exec-2", "lease-2"]]
+    # The single-beat protocol has NO settled channel: terminal executions
+    # answer 409 and take the loud lost path (pre-#590 noise, documented as
+    # acceptable — degraded mode exits on the first batch-capable answer).
+    assert result["settled"] == []
 
 
 def test_tick_shards_oversized_snapshot_and_merges_chunk_verdicts(tmp_path: Path) -> None:

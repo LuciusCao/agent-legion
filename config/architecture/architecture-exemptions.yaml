@@ -236,6 +236,16 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/451
   ceiling: 94
 - check: architecture.file_budget
+  path: worker/executor_log.py
+  reason: '#510 grew this module by the events split: events_log_path anchoring, the
+    is_structured_event sniff (containment-shaped after review R1 — a prefix check
+    dropped the forensic events), and PanelLogSinks bundling the two sinks'' lifecycle
+    so supervisor._log stays one delegation. Actual 83 vs the 67 floor. Harvest when
+    the sink family next restructures (e.g. a third channel or a sink-config module).'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 83
+- check: architecture.file_budget
   path: worker/supervisor.py
   reason: The proxy config injection (#444) adds the env override dict at the single executor spawn site
     — the one place where os.environ is snapshotted into the child — so proxy semantics (configured proxy

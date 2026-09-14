@@ -1419,6 +1419,7 @@
     "server/app/services/quality_sampling.py": 173,
     "server/app/services/quality_stats.py": 99,
     "server/app/services/reap_watermark_store.py": 48,
+    "server/app/services/rerun_artifact_cleanup.py": 48,
     "server/app/services/run_bundle_candidate.py": 44,
     "server/app/services/run_dir_cleanup.py": 60,
     "server/app/services/run_item_resolution.py": 105,

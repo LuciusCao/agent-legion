@@ -102,16 +102,18 @@ class ExecutorLogSink:
                 on_error(f"executor 滚动日志写入失败（{self._path}）：{exc}；后续仅保留内存日志")
 
     def _rotate(self) -> None:
-        """caller holds the lock: shift .1→.2…, current→.1, reopen fresh."""
+        """caller holds the lock: shift .1→.2…, current→.1, reopen fresh.
+
+        The loop bounds keep ``index + 1 <= backups`` by construction
+        (range stops at 1, and backups >= 1), so every existing older file
+        shifts up by one and the highest (.backups) is overwritten by the
+        shift — "current + N backups" with no unreachable arm."""
         self._handle.close()
         for index in range(self._backups - 1, 0, -1):
             older = self._path.with_name(f"{self._path.name}.{index}")
             newer = self._path.with_name(f"{self._path.name}.{index + 1}")
             if older.exists():
-                if index + 1 > self._backups:
-                    older.unlink()
-                else:
-                    os.replace(older, newer)
+                os.replace(older, newer)
         if self._path.exists():
             os.replace(self._path, self._path.with_name(f"{self._path.name}.1"))
         self._handle = self._path.open("a", encoding="utf-8")
@@ -131,13 +133,19 @@ class ExecutorLogSink:
 def is_structured_event(message: str) -> bool:
     """#510: does this executor stdout line carry a #490 structured event?
 
-    The events module emits ``{"event": ..., "ts": ...}`` as single-line JSON
-    (sorted keys — ``event`` leads). The sniff is deliberately cheap and
-    conservative: a false negative strands one line in the panel file (the
-    pre-#510 behavior), a false positive puts one text line in events.jsonl;
-    neither changes any runtime behavior. A full json.loads would buy exact
-    classification at a per-line cost the panel loop does not need."""
-    return message.startswith('{"event":') and message.endswith("}")
+    ``sort_keys=True`` means ``"event"`` leads only when no payload key
+    sorts before it — ``http.error`` (``body`` first) and friends do NOT,
+    and a prefix check drops exactly the forensic events this sink exists
+    for (review R1 P1). Containment-shaped instead: brace-wrapped JSON
+    carrying both marker keys. Misclassification only moves one line between
+    files, zero runtime effect; json.loads would cost more than the panel
+    loop needs."""
+    return (
+        message.startswith("{")
+        and message.endswith("}")
+        and '"event":' in message
+        and '"ts":' in message
+    )
 
 
 class PanelLogSinks:

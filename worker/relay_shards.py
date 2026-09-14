@@ -56,8 +56,9 @@ class ShardedBeat:
     """One sharded round's outcome; exactly one field set.
 
     ``verdicts``: whatever the surviving shards learned, snapshotted at
-    return (copies — a shard daemon that overstays its join can still land
-    appends in the merge lists, never in what the caller holds). ``None``
+    return (copies of all three lists — lost pairs, settled ids, cancelled
+    ids — a shard daemon that overstays its join can still land appends in
+    the merge lists, never in what the caller holds). ``None``
     verdicts with no signal = the transient round (nothing learned).
     ``degraded`` = any shard saw the 404/405 pre-v5 answer (a protocol
     property one shard settles for the round — the caller flips to single

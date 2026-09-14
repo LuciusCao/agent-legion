@@ -7,8 +7,8 @@ deferral covers the gap; this relay removes it). The relay runs in the
 supervisor process (idle by design): it reads the executor's lease
 snapshot (``lease_snapshot.py``), beats those leases with the snapshot's
 worker token (the beat transport lives in ``relay_beats.py``), and writes
-the Host's verdicts (lost / cancelled) back to the beat-result file for
-the executor to apply.
+the Host's verdicts (lost / settled / cancelled) back to the beat-result
+file for the executor to apply.
 
 Safety rails:
 - Only beats while the snapshot's pid is a live process AND the snapshot
