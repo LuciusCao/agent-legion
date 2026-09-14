@@ -21,6 +21,7 @@ from server.app.routes.agent_worker_claims import create_agent_worker_claim_rout
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_results import parse_result_metadata
 from server.app.routes.agent_workers_contracts import (
+    AgentExecutionStateResponse,
     AgentWorkerDeleteResponse,
     AgentWorkersResponse,
     AgentWorkerSummary,
@@ -209,6 +210,24 @@ def create_agent_workers_router(
         responsible for passing the current workspace, and the admin settings
         page intentionally keeps the unfiltered view."""
         return AgentWorkersResponse.model_validate({"workers": registry.list_workers(workspace_id)})
+
+    @router.get(
+        "/agent-executions/{execution_id}/state", response_model=AgentExecutionStateResponse
+    )
+    def execution_state(execution_id: str, request: Request) -> AgentExecutionStateResponse:
+        """One execution's state, for this Worker's heartbeat relay (#590).
+
+        A not_owned verdict on a batch beat is ambiguous between "lease
+        swept/requeued" (the Worker must react) and "execution finished, the
+        snapshot entry is simply stale" (benign completion followup). The
+        relay probes here per not_owned verdict — cheap, rare (only the
+        exception path), and it is what lets the Host-side
+        execution.heartbeat_rejected stream keep meaning "investigate"."""
+        authorize_worker(request)
+        state = broker.execution_state(execution_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="execution not found")
+        return AgentExecutionStateResponse(state=state)
 
     @router.get("/agent-executions/{execution_id}/bundle")
     def bundle(execution_id: str, request: Request) -> FileResponse:

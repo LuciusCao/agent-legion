@@ -57,6 +57,35 @@ class RelayBeater:
             self._client_key = (host_url, token)
         return self._client
 
+    def execution_settled(self, execution_id: str) -> bool:
+        """Is this execution past the beatable states on the Host? (#590)
+
+        One GET per not_owned verdict (the rare exception path, not the
+        rhythm). True = the completion followup: the result was accepted and
+        this Worker's snapshot simply still carries the dead lease — the
+        caller routes the verdict to ``settled`` so the executor prunes it
+        quietly. False = still beatable ('claimed'/'reporting', or a probe
+        failure): a real lost-ownership verdict. Any transport/parse failure
+        reads as False — the verdict keeps the old (loud) lost path and the
+        next tick retries, never a silent prune based on a failed probe."""
+        try:
+            state = self._client.execution_state(execution_id)
+        except Exception as exc:
+            # #204 broad-except audit: 状态探测是 not_owned 裁决的旁路读——
+            # 失败只影响本条裁决走哪条通道（保守回落 lost 通道，executor
+            # 照旧收到 ownership_lost 信号），下一拍重试；让异常逃逸会杀死
+            # relay 线程（本机全部租约停拍）。结果空间是「本次噪音未消除」，
+            # 不是错误行为。日志保全：print 逐次记录。
+            print(f"execution state probe failed for {execution_id}: {exc}", flush=True)
+            return False
+        # Terminal-and-accounted states only. None (no row — the execution
+        # was deleted with its job) is terminal too. 'queued' after a
+        # sweep/requeue means the lease is genuinely lost (someone will
+        # re-claim it) — the loud path; 'claimed'/'reporting' under a
+        # different lease is the re-claimed case, also the loud path (the
+        # pair-matched apply already protects the new attempt).
+        return state in ("done", "cancelled") or state is None
+
     def control_plane_ping(self, host_url: str, token: str) -> None:
         """One authenticated read with no lease effect (stale-stall liveness).
 

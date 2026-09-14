@@ -153,7 +153,26 @@ class BatchHeartbeatRegistry:
             if entry is not None:
                 entry.adopted.set()
 
-    def apply_beat_result(self, lost: list[tuple[str, str]], cancelled: list[str]) -> None:
+    def prune_settled(self, settled: list[str]) -> None:
+        """Quietly drop settled executions from the registry (#590).
+
+        The relay confirmed these not_owned verdicts were the completion
+        followup (Host already finished them); unlike ``apply_beat_result``'s
+        lost arm there is no ownership_lost to set and no signal to the
+        executor — the entry simply stops being beaten. NOT pair-matched by
+        design: the probe answered for the execution, and the next snapshot
+        must not carry the dead lease whatever its lease_id was. A new
+        attempt (re-claim after requeue) re-registers its own entry, which
+        happens-before the next beat round."""
+        if not settled:
+            return
+        with self._lock:
+            for execution_id in settled:
+                self._entries.pop(execution_id, None)
+
+    def apply_beat_result(
+        self, lost: list[tuple[str, str]], cancelled: list[str], settled: list[str] | None = None
+    ) -> None:
         """Apply the supervisor relay's beat verdicts (#566 phase 2).
 
         Pair-matched like every other mutation: a lost verdict for a lease
@@ -161,6 +180,7 @@ class BatchHeartbeatRegistry:
         lease_id, so the new attempt's entry matches nothing and stays
         untouched. Cancelled fan-out dedups by callback identity (every
         entry's callback is or wraps the same cancel_executions)."""
+        self.prune_settled(settled or [])
         with self._lock:
             entries = list(self._entries.values())
             for execution_id, lease_id in lost:

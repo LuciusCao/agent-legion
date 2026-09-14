@@ -40,6 +40,18 @@ class _FakeClient:
         self.single_status = 204
         self.pings = 0
         self.ping_error: Exception | None = None
+        # #590: state probe results keyed by execution_id; default "claimed"
+        # (still beatable — a not_owned verdict then keeps the loud lost
+        # path, the pre-#590 behavior every legacy test scripts).
+        self.states: dict[str, str | None] = {}
+        self.state_error: Exception | None = None
+        self.state_probes: list[str] = []
+
+    def execution_state(self, execution_id: str) -> str | None:
+        self.state_probes.append(execution_id)
+        if self.state_error is not None:
+            raise self.state_error
+        return self.states.get(execution_id, "claimed")
 
     def get_self(self) -> dict:
         self.pings += 1
@@ -115,6 +127,8 @@ def test_tick_beats_snapshot_leases(tmp_path: Path) -> None:
 def test_tick_writes_beat_result_with_lost_pairs_and_cancelled(tmp_path: Path) -> None:
     client, logs = _FakeClient(), []
     client.lost = ["exec-2"]
+    # Still beatable (swept/requeued): keeps the loud lost path.
+    client.states = {"exec-2": "queued"}
     client.cancelled = ["exec-9"]
     relay = _relay(tmp_path, client, logs)
     _write_snapshot(tmp_path)
@@ -128,6 +142,59 @@ def test_tick_writes_beat_result_with_lost_pairs_and_cancelled(tmp_path: Path) -
     # pair-matched apply cannot hit a re-claimed execution's new lease.
     assert result["lost"] == [["exec-2", "lease-2"]]
     assert result["cancelled"] == ["exec-9"]
+
+
+def test_tick_splits_not_owned_verdicts_into_settled_and_lost(tmp_path: Path) -> None:
+    """#590: a not_owned verdict for an execution the Host already finished
+    (default probe state "done") routes to ``settled`` — pruned quietly, no
+    ownership_lost; a still-beatable row ("queued" after a requeue sweep)
+    keeps the loud lost path."""
+    client, logs = _FakeClient(), []
+    client.lost = ["exec-1", "exec-2"]
+    client.states = {"exec-1": "done", "exec-2": "queued"}
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path)
+
+    relay.tick()
+
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None
+    assert result["settled"] == ["exec-1"]
+    assert result["lost"] == [["exec-2", "lease-2"]]
+    assert client.state_probes == ["exec-1", "exec-2"], "one probe per not_owned verdict"
+
+
+def test_tick_state_probe_failure_falls_back_to_lost(tmp_path: Path) -> None:
+    """Probe failure must never prune on a failed check: the verdict keeps
+    the (loud) lost path and the next tick retries."""
+    client, logs = _FakeClient(), []
+    client.lost = ["exec-1"]
+    client.state_error = ConnectionError("host unreachable")
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path)
+
+    relay.tick()
+
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None
+    assert result["settled"] == []
+    assert result["lost"] == [["exec-1", "lease-1"]]
+
+
+def test_tick_unknown_execution_reads_as_settled(tmp_path: Path) -> None:
+    """A 404 (no row) is terminal like any finished state: settled."""
+    client, logs = _FakeClient(), []
+    client.lost = ["exec-1"]
+    client.states = {"exec-1": None}
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path)
+
+    relay.tick()
+
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None
+    assert result["settled"] == ["exec-1"]
+    assert result["lost"] == []
 
 
 def test_tick_skips_stale_snapshot_and_logs_once(tmp_path: Path) -> None:

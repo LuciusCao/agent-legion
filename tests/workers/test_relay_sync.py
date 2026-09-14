@@ -71,18 +71,26 @@ class _FakeEntry:
 class _FakeRegistry:
     def __init__(self) -> None:
         self.applied: list[tuple[list, list]] = []
+        self.settled: list[list[str]] = []
 
     def snapshot(self) -> list[_FakeEntry]:
         return [_FakeEntry("exec-1", "lease-1")]
 
-    def apply_beat_result(self, lost: list, cancelled: list) -> None:
+    def apply_beat_result(
+        self, lost: list, cancelled: list, settled: list[str] | None = None
+    ) -> None:
         self.applied.append((lost, cancelled))
+        self.settled.append(list(settled or []))
 
 
 def test_relay_sync_writes_snapshot_and_applies_result_once(tmp_path: Path) -> None:
     snapshot_path = tmp_path / SNAPSHOT_FILENAME
     write_beat_result(
-        tmp_path / RESULT_FILENAME, seq=7, lost=[("exec-1", "lease-1")], cancelled=["exec-9"]
+        tmp_path / RESULT_FILENAME,
+        seq=7,
+        lost=[("exec-1", "lease-1")],
+        cancelled=["exec-9"],
+        settled=["exec-3"],
     )
     registry = _FakeRegistry()
     state = RelaySyncState(15.0)
@@ -91,6 +99,7 @@ def test_relay_sync_writes_snapshot_and_applies_result_once(tmp_path: Path) -> N
 
     assert state.last_seq == 7
     assert registry.applied == [([("exec-1", "lease-1")], ["exec-9"])]
+    assert registry.settled == [["exec-3"]]
     snapshot = read_snapshot(snapshot_path)
     assert snapshot is not None and snapshot["pid"] == os.getpid()
     assert snapshot["leases"] == [["exec-1", "lease-1"]]

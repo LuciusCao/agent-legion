@@ -14,6 +14,11 @@ Safety rails:
 - Only beats while the snapshot's pid is a live process AND the snapshot
   is fresh — a brain-dead executor's leases must expire on the normal Host
   TTL path, not be renewed forever from a frozen snapshot.
+- #590 noise split: a not_owned verdict for an execution the Host already
+  finished (result accepted, snapshot entry not yet pruned) is routed to
+  ``settled`` — the executor prunes the lease quietly instead of firing
+  ownership_lost, and the Host stops seeing the completion followup beats
+  on the next tick.
 - 停拍 ≠ 失联（PR #572 codex P1）: a stale snapshot stops lease RENEWAL
   but the relay keeps a lightweight authenticated ping
   (``RelayBeater.control_plane_ping`` — no lease effect) so the Host's
@@ -161,12 +166,27 @@ class HeartbeatRelay:
             # the advancing seq); the verdicts stay empty and the next tick
             # retries everything.
             lost, cancelled = [], []
+        # #590: split the not_owned verdicts. A verdict for a lease the Host
+        # already moved out of the beatable states is the completion
+        # followup (finished on the Host, snapshot not yet pruned) — pushing
+        # it through ``lost`` would set ownership_lost on the executor for an
+        # execution whose result was accepted, which is exactly the noise
+        # this split removes. A verdict for a still-beatable row is the real
+        # lost-ownership signal (swept/requeued lease) and keeps the old
+        # path.
+        settled = [
+            execution_id
+            for (execution_id, _lease_id) in lost
+            if self._beater.execution_settled(execution_id)
+        ]
+        lost = [pair for pair in lost if pair[0] not in set(settled)]
         self._result_seq += 1
         write_beat_result(
             self._state_dir / RESULT_FILENAME,
             seq=self._result_seq,
             lost=lost,
             cancelled=cancelled,
+            settled=settled,
         )
 
 

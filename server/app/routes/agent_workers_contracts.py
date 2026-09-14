@@ -123,6 +123,13 @@ class AgentWorkerDeleteResponse(BaseModel):
     deleted: bool
 
 
+class AgentExecutionStateResponse(BaseModel):
+    """#590 not_owned-verdict probe body: one execution's Host-side state
+    (the relay's completion-followup split)."""
+
+    state: str
+
+
 class AgentHeartbeatResponse(BaseModel):
     """Protocol v2 heartbeat body: explicit cancellations for this Worker.
 

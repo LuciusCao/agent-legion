@@ -21,6 +21,7 @@ from server.app.agent_broker.claim import AgentClaim, ClaimRacedError
 from server.app.agent_broker.claim_retry import claim_with_retry
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
+from server.app.agent_broker.execution_state import execution_state
 from server.app.agent_broker.heartbeat_single import single_heartbeat
 from server.app.agent_broker.manifest_guard import SHARD_IDENTITY_SQL
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
@@ -222,6 +223,10 @@ class AgentExecutionBroker:
     def release_slot(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
         """Flip claimed -> reporting, freeing execution capacity (lease stays owned)."""
         return release.release_slot(self, execution_id, worker_id, lease_id)
+
+    def execution_state(self, execution_id: str) -> str | None:
+        """One execution's state; None = unknown (#590 relay not_owned probe)."""
+        return execution_state(self, execution_id)
 
     def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
         """Renew the lease, bound to the current lease_id so zombie attempts
