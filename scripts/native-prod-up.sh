@@ -6,16 +6,26 @@
 # 端口与绑定地址可分别用 NATIVE_BACKEND_PORT / NATIVE_WORKER_PORT 与
 # NATIVE_BACKEND_BIND / NATIVE_WORKER_BIND 覆盖（默认 8000/8787 与 127.0.0.1；
 # 暴露给局域网/overlay 网络时把 bind 设为对应网卡地址，S3 联动配置见
-# docs/agent-worker-deployment.md）。
+# docs/agent-worker-deployment.md）。四个变量读「进程环境 > 根 .env」两级
+# 来源（.env 是持久化载体——换 shell 会话/重启/launchd cron 调起时不再
+# 静默退回 loopback；进程环境已导出时优先，与 dotenv override=False 一致，
+# 临时覆盖逃生门保留）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BACKEND_PORT="${NATIVE_BACKEND_PORT:-8000}"
-WORKER_PORT="${NATIVE_WORKER_PORT:-8787}"
-BACKEND_BIND="${NATIVE_BACKEND_BIND:-127.0.0.1}"
-WORKER_BIND="${NATIVE_WORKER_BIND:-127.0.0.1}"
+# dotenv 解析原语统一在 scripts/lib/dotenv.sh（#486 收敛，见该文件头注释）。
+source "$ROOT/scripts/lib/dotenv.sh"
+
+BACKEND_PORT="$(dotenv_value NATIVE_BACKEND_PORT .env)"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+WORKER_PORT="$(dotenv_value NATIVE_WORKER_PORT .env)"
+WORKER_PORT="${WORKER_PORT:-8787}"
+BACKEND_BIND="$(dotenv_value NATIVE_BACKEND_BIND .env)"
+BACKEND_BIND="${BACKEND_BIND:-127.0.0.1}"
+WORKER_BIND="$(dotenv_value NATIVE_WORKER_BIND .env)"
+WORKER_BIND="${WORKER_BIND:-127.0.0.1}"
 CAFFEINATE="$(command -v caffeinate || true)"
 
 mkdir -p data/logs
@@ -76,6 +86,45 @@ port_listening() {
         | sed -n 's/^n//p' | grep -Fxq -e "${display}:${port}" -e "*:${port}" -e "[::]:${port}"
 }
 
+# 同端口同族观测到的第一个监听的 display 地址（display:port 形态，无监听
+# 返回空）。up 的通配 bind 幂等兜底拿它做两件事：判定「任意地址已有监听」
+# 并取观测地址用于健康探测（跳过启动的组件按观测地址探测——实例绑的
+# 可能是非 loopback 具体地址，按 bind 派生地址探 loopback 必然无人应答）。
+# -F n 输出全部监听行非精确匹配。
+port_first_listener_display() {
+    lsof -nP -a -iTCP:"$1" -i"$2" -sTCP:LISTEN -F n 2>/dev/null \
+        | sed -n 's/^n//p' | head -1 || true
+}
+
+is_wildcard_bind() {
+    case "$1" in
+        0.0.0.0 | ::) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 通配 bind 的幂等兜底（#482 follow-up，生产实际踩到的形态）：port_listening
+# 把 0.0.0.0/:: 归一为 *，只在「同族通配监听」时命中——同端口已有具体地址
+# （如 127.0.0.1:8000）监听时判否，随后照常起进程会连出双实例：两个后端
+# 连同一个库，单副本约束（docs/architecture/deployment.md）被静默破坏——
+# SSE fan-out 分裂、限速稀释、workspace 暂停状态互踩。因此通配 bind 请求
+# 且同端口同族已有任意地址监听时视为已在运行、跳过启动并打醒目提示。
+# 跳过时把观测到的监听地址写入全局 WILDCARD_SKIP_ADDR（display 形态，
+# 可能为 *:port / [::]:port）：健康等待用它派生观测侧探测地址（#486 收尾
+# 修复——跳过的组件按请求 bind 派生地址探测会空转 5 分钟后误报失败）。
+# 权衡：跳过的最坏情况是「用户以为换了 bind 其实没换」（提示文案已点名，
+# 可被立即发现）；并存的最坏情况是静默的数据面退化（不可见）。取轻。
+# 反向（请求具体 bind、已有通配监听）无需此兜底——port_listening 的
+# "*:${port}" 模式已覆盖该场景为已运行。
+WILDCARD_SKIP_ADDR=""
+wildcard_bind_skip() {
+    local bind="$1" port="$2"
+    WILDCARD_SKIP_ADDR=""
+    is_wildcard_bind "$bind" || return 1
+    WILDCARD_SKIP_ADDR="$(port_first_listener_display "$port" "$(listener_family "$bind")")"
+    [[ -n "$WILDCARD_SKIP_ADDR" ]]
+}
+
 # 健康检查与就绪提示用的探测地址：0.0.0.0 是 IPv4 全接口监听，必然含
 # IPv4 loopback，归一为 127.0.0.1；:: 是 IPv6 全接口（bindv6only=1 的
 # Linux 上不含 IPv4），必然含 ::1，归一为 [::1]——注意两个通配各自只
@@ -95,6 +144,34 @@ health_host() {
 BACKEND_HEALTH_HOST="$(health_host "$BACKEND_BIND")"
 WORKER_HEALTH_HOST="$(health_host "$WORKER_BIND")"
 
+# 通配跳过后按「观测地址」派生的探测地址（#486 收尾修复）：被跳过的
+# 实例绑的可能是非 loopback 具体地址（如 192.0.2.1），按请求 bind 派生
+# （0.0.0.0→127.0.0.1）探测 loopback 必然无人应答、空转 5 分钟后误报
+# 失败。观测地址取 lsof display 形态剥掉「:端口」精确后缀后的 host 部分
+# （裸 IPv6 字面量无端口后缀、不受剥离影响），经 health_host 归一为探测
+# URL 可用的 host。不可解析形态（空 / lsof 的通配显示 *:port、[::]:port
+# ——不含具体地址、族别未知）回落按请求 bind 派生的 fallback 并打提示，
+# 理论不应出现在跳过分支：通配显示会被 port_listening 的通配模式先行
+# 命中、空值被 wildcard_bind_skip 判否。
+wildcard_observation_resolvable() {
+    case "$1" in
+        "" | \** | \[::\]:*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+observed_health_host() {
+    local display="$1" port="$2" fallback="$3" observed
+    if ! wildcard_observation_resolvable "$display"; then
+        if [[ -n "$display" ]]; then
+            echo "提示: 通配跳过的组件监听显示为 ${display}，无法派生观测探测地址，按请求 bind 探测" >&2
+        fi
+        echo "$fallback"
+        return
+    fi
+    observed="${display%:"$port"}"
+    health_host "$observed"
+}
+
 # 绑定具体网卡地址时的本地接入提醒：非 loopback 绑定后，指向 127.0.0.1 的
 # 既有接入不再可达——本地 Worker 状态副本的 host_url 会让它静默退避重试注册
 # （不崩溃、不易察觉），本机浏览器访问 127.0.0.1:8787 控制台同理。配置一律
@@ -111,10 +188,13 @@ binds_specific_interface() {
 if binds_specific_interface "$BACKEND_BIND" \
     && [[ -f data/agent-worker-service/worker.yaml ]] \
     && grep -Eq 'host_url:[[:space:]]*https?://(127\.|localhost)' data/agent-worker-service/worker.yaml; then
-    echo "警告: 后端已绑定 $BACKEND_BIND，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT，否则本地 Worker 将无法注册（静默退避重试）" >&2
+    # $VAR 一律花括号：bash 对「裸 $VAR 紧跟多字节标点（如 U+FF0C）」会把
+    # 标点首字节误并入变量名（set -u 下直接 unbound variable 假报错），
+    # #484 整体桩测试在 bash 3.2（macOS /bin/bash）下抓到的真实断裂。
+    echo "警告: 后端已绑定 ${BACKEND_BIND}，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://${BACKEND_HEALTH_HOST}:${BACKEND_PORT}，否则本地 Worker 将无法注册（静默退避重试）" >&2
 fi
 if binds_specific_interface "$WORKER_BIND"; then
-    echo "提示: Worker 控制台已绑定 $WORKER_BIND，本机访问地址改为 http://$WORKER_HEALTH_HOST:$WORKER_PORT（127.0.0.1 不再监听）" >&2
+    echo "提示: Worker 控制台已绑定 ${WORKER_BIND}，本机访问地址改为 http://${WORKER_HEALTH_HOST}:${WORKER_PORT}（127.0.0.1 不再监听）" >&2
 fi
 
 # 1.5 材料对象存储：原生形态下后端/worker 是本机进程，对象存储仍由 docker
@@ -156,6 +236,16 @@ fi
 # 2. 后端
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
+elif wildcard_bind_skip "$BACKEND_BIND" "$BACKEND_PORT"; then
+    echo "提示: 检测到 :${BACKEND_PORT} 已有 ${BACKEND_BIND} 可覆盖的监听；通配 bind 不并行启动第二个实例（双实例连同一库会造成单副本退化：SSE 分裂/限速稀释/暂停互踩）。如需以 ${BACKEND_BIND} 重启请先 ./scripts/native-prod-down.sh" >&2
+    # 健康探测地址换为观测地址（终端文案区分「跳过（已在 <观测地址>
+    # 运行）」与正常就绪；通配显示不可解析时回落按 bind 并提示）。
+    if wildcard_observation_resolvable "$WILDCARD_SKIP_ADDR"; then
+        echo "后端视为已在 ${WILDCARD_SKIP_ADDR} 运行，跳过（健康探测按该地址）"
+    else
+        echo "后端视为已在 :${BACKEND_PORT} 运行，跳过"
+    fi
+    BACKEND_HEALTH_HOST="$(observed_health_host "$WILDCARD_SKIP_ADDR" "$BACKEND_PORT" "$BACKEND_HEALTH_HOST")"
 else
     echo "启动后端 $BACKEND_BIND:$BACKEND_PORT …"
     ulimit -n 65535
@@ -173,6 +263,15 @@ fi
 # 3. Worker
 if port_listening "$WORKER_BIND" "$WORKER_PORT"; then
     echo "Worker 已在 :$WORKER_PORT 运行，跳过"
+elif wildcard_bind_skip "$WORKER_BIND" "$WORKER_PORT"; then
+    echo "提示: 检测到 :${WORKER_PORT} 已有 ${WORKER_BIND} 可覆盖的监听；通配 bind 不并行启动第二个实例（双 Worker 分摊领任务会造成互相稀释）。如需以 ${WORKER_BIND} 重启请先 ./scripts/native-prod-down.sh" >&2
+    # 同后端：健康探测地址换为观测地址。
+    if wildcard_observation_resolvable "$WILDCARD_SKIP_ADDR"; then
+        echo "Worker 视为已在 ${WILDCARD_SKIP_ADDR} 运行，跳过（健康探测按该地址）"
+    else
+        echo "Worker 视为已在 :${WORKER_PORT} 运行，跳过"
+    fi
+    WORKER_HEALTH_HOST="$(observed_health_host "$WILDCARD_SKIP_ADDR" "$WORKER_PORT" "$WORKER_HEALTH_HOST")"
 else
     echo "启动 Worker $WORKER_BIND:$WORKER_PORT …"
     ulimit -n 65535
@@ -184,6 +283,9 @@ fi
 
 # 4. 健康等待：最多 5 分钟（#127——冷启动时 PG 冷缓存、schema 引导等
 # 仍可能超过 1 分钟；等待期间每 30s 输出一次进度，避免误报启动失败）。
+# 通配跳过的组件按观测地址探测（上方已把 *_HEALTH_HOST 换成观测地址；
+# 观测地址不可解析时保持按 bind 派生——理论不应发生，见
+# observed_health_host）。
 for i in $(seq 1 150); do
     backend_ok=false; worker_ok=false
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true

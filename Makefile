@@ -89,9 +89,10 @@ stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Wor
 
 # 生产环境启停（仅 prod worktree 使用）：默认本机原生形态（后端 8000 含 SPA +
 # worker 8787，绑定地址默认 127.0.0.1，经 NATIVE_BACKEND_BIND /
-# NATIVE_WORKER_BIND 暴露给局域网/overlay 网络）；Docker stack 形态收编为参数
-# `make prod-up docker` / `make prod-down docker`（PostgreSQL + Host + Worker，
-# secrets 预检 + 健康等待）。
+# NATIVE_WORKER_BIND 暴露给局域网/overlay 网络；这组变量与 NATIVE_*_PORT 读
+# 「进程环境 > 根 .env」两级来源——持久配置写 .env，临时覆盖导出环境变量）；
+# Docker stack 形态收编为参数 `make prod-up docker` / `make prod-down docker`
+# （PostgreSQL + Host + Worker，secrets 预检 + 健康等待）。
 .PHONY: docker
 docker:
 	@:
