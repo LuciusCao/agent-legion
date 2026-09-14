@@ -255,10 +255,19 @@ def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
 
     service.send_message(session["id"], workspace_id, "list my workflows")
     _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    # #525：tool_call 与 text 的落库没有顺序保证——ACP SDK 对每个
+    # session/update 通知各起一个独立 task，负载下 tool_call 的 INSERT 可
+    # 晚于 text 提交；等 text 后裸读 tool_calls 会间歇红。等 tool_call 落库
+    # 信号本身再断言（与 #453 同思路：不依赖两个落库时点的先后）。
     _wait_for(
-        lambda: any(
-            m["kind"] == "text" and m["role"] == "agent"
-            for m in service.list_messages(session["id"], workspace_id)
+        lambda: (
+            any(
+                m["kind"] == "text" and m["role"] == "agent"
+                for m in service.list_messages(session["id"], workspace_id)
+            )
+            and any(
+                m["kind"] == "tool_call" for m in service.list_messages(session["id"], workspace_id)
+            )
         )
     )
 
@@ -336,6 +345,17 @@ def test_thought_chunks_persist_as_coalesced_thought_message(chat) -> None:
     service.send_message(session["id"], workspace_id, "think it through")
 
     _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    # #525 同款缺口：thought 与 text 消息的落库无先后保证（每个
+    # session/update 通知独立 task），等齐两种消息再断言，不裸读。
+    _wait_for(
+        lambda: (
+            any(m["kind"] == "thought" for m in service.list_messages(session["id"], workspace_id))
+            and any(
+                m["kind"] == "text" and m["role"] == "agent"
+                for m in service.list_messages(session["id"], workspace_id)
+            )
+        )
+    )
     messages = service.list_messages(session["id"], workspace_id)
     thoughts = [m for m in messages if m["kind"] == "thought"]
     assert len(thoughts) == 1

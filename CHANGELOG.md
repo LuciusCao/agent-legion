@@ -7,6 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Fixed
+- 测试健壮性两项（issue #496 / #525，0.7.0 验收与 #453 审核发现的
+  CI/开发机间歇红）：
+  - #496 二进制目录 patch 位失配——`worker/binary_resolution.py` 顶部
+    `from shared.code_sandbox import BUNDLED_SANDBOX_DIR as BUNDLED_BINARY_DIR`
+    是值拷贝 re-export，monkeypatch re-export 侧打不到
+    `resolve_sandbox_binary`/`resolve_binary` 的真实读取点，开发机
+    「先 ensure-velites 再跑单测」（data/bin 有 velites）时两个 fail-closed
+    测试静默变红（干净 CI 从未暴露）。修复：re-export 改为 PEP 562 模块级
+    `__getattr__` 动态代理（读值永远反映事实源当前值，注释同步改写准确
+    表述），6 个 worker 测试文件的目录隔离位统一改为 patch 事实源
+    `code_sandbox.BUNDLED_SANDBOX_DIR`；AGENTS.md 补「ensure-velites 后
+    跑单测」的坑位说明。三态验证：data/bin 放假 velites 复现 2 failed →
+    修复后同环境 72 passed → 删除假 velites 后 72 passed（全 workers 套件
+    566 passed）。
+  - #525 studio chat 会话测试等待缺口——
+    `test_session_lifecycle_turn_and_token_revocation` 用 `_wait_for` 等到
+    agent text 落库后无等待直接断言 tool_calls；ACP SDK 对每个
+    session/update 通知各起独立 task，xdist 负载下 tool_call 的落库可晚于
+    text，即间歇红。修复（与 #453 同思路）：把等待条件改为「text 与
+    tool_call 都已落库」再断言，同文件 thought 测试的同类裸读一并补齐；
+    修前 3 轮负载未复现（时序依赖的间歇），修后 3 轮负载（1749 / 2506 /
+    811 项）全绿。
 - 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
   `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
   部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5
