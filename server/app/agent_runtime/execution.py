@@ -51,21 +51,33 @@ def validate_execution_contract(
     return resolved
 
 
-def resolve_execution(node: WorkflowNode, runtime: str) -> dict[str, Any]:
+def resolve_execution(
+    node: WorkflowNode, runtime: str, *, timeout_seconds: int | None = None
+) -> dict[str, Any]:
     """Resolve the manifest ``execution`` block (strict node-only source, contract-checked).
 
     The node execution seen here already carries the loader-merged workflow
     top-level defaults (workspace-level defaults retired at schema v64).
-    """
+    ``timeout_seconds`` (#550) is the dispatch-resolved reserved-key value
+    (agent nodes now merge it into their effective schema, so it travels the
+    regular config chain); None or an invalid value falls back to the
+    product constant — hand-built manifests keep their pre-#550 shape."""
     adapter = get_adapter(runtime)
     resolved = validate_execution_contract(
         node_key=node.key, runtime=runtime, values=asdict(node.execution)
+    )
+    timeout = (
+        timeout_seconds
+        if isinstance(timeout_seconds, int)
+        and not isinstance(timeout_seconds, bool)
+        and timeout_seconds >= 1
+        else None
     )
     return {
         "binary": adapter.binary,
         "provider": resolved["provider"],
         "model": resolved["model"],
         "thinking": resolved["thinking"],
-        "timeout_seconds": EXECUTION_TIMEOUT_SECONDS,
+        "timeout_seconds": timeout or EXECUTION_TIMEOUT_SECONDS,
         "no_sandbox": False,
     }

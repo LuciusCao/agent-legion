@@ -122,16 +122,39 @@ def test_resolve_workflow_node_configs_merges_all_layers() -> None:
     resolved = resolve_workflow_node_configs(
         definition, {"a": _agent("generate", SCHEMA)}, workspace
     )
-    assert resolved == {"generate": {"page_size": 5, "subject_id": "physics"}}
+    # #550: agent nodes merge the reserved execution keys under the Agent
+    # schema; the timeout default keeps the agent product constant (1800).
+    assert resolved == {
+        "generate": {
+            "page_size": 5,
+            "subject_id": "physics",
+            "timeout_seconds": 1800,
+            "sandbox_network": False,
+        }
+    }
 
 
-def test_resolve_workflow_node_configs_skips_plain_nodes() -> None:
-    assert resolve_workflow_node_configs(_definition(), {"a": _agent("generate")}, None) == {}
+def test_resolve_workflow_node_configs_plain_agent_carries_reserved_defaults() -> None:
+    """#550: an Agent-schema-less agent node used to skip config resolution
+    entirely; the reserved-key merge gives it exactly the platform defaults
+    (agent timeout constant), so its timeout is configurable from zero."""
+    assert resolve_workflow_node_configs(_definition(), {"a": _agent("generate")}, None) == {
+        "generate": {"timeout_seconds": 1800, "sandbox_network": False}
+    }
 
 
 def test_workflow_node_config_schemas_maps_nodes() -> None:
     schemas = workflow_node_config_schemas(_definition(), {"a": _agent("generate", SCHEMA)})
-    assert schemas == {"generate": SCHEMA}
+    assert schemas == {
+        "generate": {
+            "type": "object",
+            "properties": {
+                "timeout_seconds": {"type": "integer", "default": 1800, "minimum": 1},
+                "sandbox_network": {"type": "boolean", "default": False},
+                **SCHEMA["properties"],
+            },
+        }
+    }
 
 
 def test_frozen_node_config_reads_batch_payload() -> None:
@@ -296,10 +319,14 @@ def test_workflow_node_config_schemas_node_declared_schema() -> None:
     assert properties["sandbox_network"]["default"] is False
 
 
-def test_resolve_workflow_node_configs_agent_nodes_skip_reserved_keys() -> None:
-    # Agent-routed nodes keep their Agent Definition schema untouched.
+def test_resolve_workflow_node_configs_agent_nodes_merge_reserved_keys() -> None:
+    """#550 renamed: agent-routed nodes MERGE the reserved execution keys
+    under their Agent Definition schema (timeout configurable; agent default
+    1800, not the code-node 600)."""
     resolved = resolve_workflow_node_configs(_definition(), {"a": _agent("generate", SCHEMA)}, None)
-    assert resolved == {"generate": {"page_size": 50}}
+    assert resolved == {
+        "generate": {"page_size": 50, "timeout_seconds": 1800, "sandbox_network": False}
+    }
 
 
 def test_code_node_ignores_agent_schema_with_matching_capability() -> None:

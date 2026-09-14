@@ -132,6 +132,26 @@ def _enqueue(
     )
 
 
+def test_enqueue_manifest_timeout_follows_node_config(harness: SimpleNamespace) -> None:
+    """#550: a timeout_seconds resolved into the dispatch config (the agent
+    node's reserved-key chain) overrides the 1800 product constant in the
+    manifest execution block — the worker-side wait_for_exit follows it."""
+    harness.service.enqueue(
+        agent_id="generator-v1",
+        definition=_definition(),
+        workspace={"id": "workspace-1", "name": "Workspace"},
+        job={"id": "job-1", "title": "Question"},
+        workflow_key="questions",
+        node=_node(),
+        job_dir=harness.tmp_path / "jobs" / "job-1",
+        log_path=harness.tmp_path / "logs" / "job-1.log",
+        inputs=("question.json",),
+        node_config={"page_size": 25, "timeout_seconds": 7200},
+    )
+    request = harness.broker.enqueue.call_args.args[0]
+    assert request.manifest["execution"]["timeout_seconds"] == 7200
+
+
 def test_enqueue_pool_sized_from_settings(harness: SimpleNamespace) -> None:
     # Defaults come from executor_runtime.agent_enqueue (AgentEnqueueConfig);
     # workers 48 since #546 (the stock pool fell behind batch-claim demand).
