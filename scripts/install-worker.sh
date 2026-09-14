@@ -391,15 +391,48 @@ ui_host_final="${ui_host_final:-127.0.0.1}"
 ui_port_final="$(sed -n 's/^AGENT_WORKER_UI_PORT=//p' ./.env 2>/dev/null | tail -1)"
 ui_port_final="${ui_port_final:-8787}"
 
+# 控制台 token 体验按实际安装的版本分支（发布窗口：默认钉住的 0.7.0
+# 镜像/compose 还没有内嵌判定，文案必须与产物行为一致）：worker 0.8.0
+# 起默认 loopback 发布下控制 token 自动内嵌页面；旧版本页面恒要求手动
+# 输入。EFFECTIVE_BIND 判定是 compose 与镜像两侧的组合能力，两边同一
+# worker-v<version> tag 发布，比镜像版本即可。-rN 重发后缀（0.8.0-r1）
+# 被正则的 `.*` 吸收、基础版本比较不受影响；完全不匹配 major.minor
+# 形态的 tag（如 latest）保守按旧版处理（手动取 token 的文案永不错）。
+worker_version_cmp="$(printf '%s\n' "$WORKER_VERSION" | sed -n 's/^\([0-9]*\)\.\([0-9]*\).*/\1 \2/p')"
+token_embedded=no
+if [ -n "$worker_version_cmp" ]; then
+  wmaj="${worker_version_cmp%% *}"
+  wmin="${worker_version_cmp##* }"
+  if [ "$wmaj" -gt 0 ] || [ "$wmin" -ge 8 ]; then
+    token_embedded=yes
+  fi
+fi
+
+print_token_help() {
+  # $1 = embedded|manual：token 获取指引的两种文案（命令相同，说明随版本）
+  if [ "$1" = "embedded" ]; then
+    echo "     默认 loopback 发布（${ui_host_final}）下控制 token 已内嵌页面（worker 0.8.0 起），"
+    echo "     打开即用，无需手动输入；若 .env 把 AGENT_WORKER_UI_BIND 改为非回环"
+    echo "     地址（页面不再内嵌 token），手动取一次："
+  else
+    echo "     worker 0.8.0 起默认 loopback 发布会自动内嵌控制 token；当前安装的"
+    echo "     ${WORKER_VERSION} 页面仍需手动输入 token，取一次："
+  fi
+  echo "       docker compose exec worker cat /var/lib/agent-legion-worker-control/control_token"
+  echo "     （在 ${TARGET} 执行；页面会把它存进 localStorage，日常无需重复）"
+}
+
+if [ "$token_embedded" = "yes" ]; then
+  token_mode="embedded"
+else
+  token_mode="manual"
+fi
+
 cat <<EOF
 
 安装完成。后续步骤：
-  1. 打开 Worker 控制台 http://${ui_host_final}:${ui_port_final}（本机浏览器）；
-     默认 loopback 发布（${ui_host_final}）下控制 token 已内嵌页面，无需
-     手动输入；若 .env 把 AGENT_WORKER_UI_BIND 改为非回环地址（页面不再
-     内嵌 token），手动取一次：
-       docker compose exec worker cat /var/lib/agent-legion-worker-control/control_token
-     （在 ${TARGET} 执行；页面会把它存进 localStorage，日常无需重复）
+  1. 打开 Worker 控制台 http://${ui_host_final}:${ui_port_final}（本机浏览器）
+$(print_token_help "$token_mode")
   2. 在「Workspace 访问」粘贴 Host 签发的 scoped token（Host Web UI 的
      workspace 设置 → Agent 与 Worker）；
   3. 点「开始领取」（claim_enabled 每次进程启动都重置为关闭，刻意设计）；

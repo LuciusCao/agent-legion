@@ -108,7 +108,7 @@ make stack-host-up
 curl http://192.0.2.1:8000/api/health
 ```
 
-该命令启动 PostgreSQL、Host 和部署机本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。本地 RustFS（材料对象存储）是否随 stack 启动由 `AGENT_LEGION_LOCAL_S3`（默认 `auto`）经 `scripts/local-s3-decide.sh` 决策：配置外部 S3 后自动跳过，详见 [materials-storage-deployment.md](materials-storage-deployment.md)。
+该命令启动 PostgreSQL、Host 和部署机本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排：Worker 被隔离在专用 `worker-ctrl` 网络（host 双挂两个网络，postgres / 对象存储只在默认网络）——worker 控制台 `GET /` 无鉴权，网络隔离保证同 stack 的其它容器不能从 compose 内网提取其控制 token，安全模型不依赖宿主侧端口发布（完整拓扑与出站依赖说明见 §5「控制面鉴权」）。本地 RustFS（材料对象存储）是否随 stack 启动由 `AGENT_LEGION_LOCAL_S3`（默认 `auto`）经 `scripts/local-s3-decide.sh` 决策：配置外部 S3 后自动跳过，详见 [materials-storage-deployment.md](materials-storage-deployment.md)。
 
 **velites 二进制前置（#381）**：worker 镜像不含 agent runtime 执行器，启动 stack 前必须先把平台匹配的 velites 二进制放到 `VELITES_BIN`（默认 `../velites-bin/velites`，即仓库平级的 `velites-bin/`）——compose 用 long syntax bind mount，源文件缺失会**拒绝启动**（不会静默建目录）。产物获取与架构匹配见 §5「velites 二进制来源」的 Docker 小节。
 
@@ -242,7 +242,8 @@ curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/develop/scri
 控制台 token 体验（issue #489）：默认 loopback 发布下 token 已自动内嵌页面，
 打开控制台即用；仅当把 `AGENT_WORKER_UI_BIND` 改为非回环地址（页面不再内嵌）
 时才需手动取一次 token（安装脚本的成功提示与 §「控制面鉴权」的判定矩阵
-均含该命令）。
+均含该命令）。该内嵌判定随 **worker 0.8.0** 发布——安装脚本钉住的 0.7.0
+仍要求手动输入一次（脚本按实际 `--version` 区分提示）。
 
 与拉取式 override 的取舍：仓库克隆 + `compose.worker.local.yaml` 适合开发/
 调试机（能跑 `make stack-*`、随仓库升级）；一键安装适合纯执行节点（只有
@@ -321,14 +322,19 @@ v68 及以上的 Host 仍下发 `workflow_key`（兼容窗口内），Worker 可
 
 Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > 状态目录下的 `control_token` 文件（容器内执行时自动命中）。
 
-**页面内嵌判定（issue #489）**：控制台页面是否自动内嵌 token，由**实际暴露面**而非进程 bind 决定。Docker 形态下容器内进程必绑 `0.0.0.0`（端口映射前提），但页面真正从哪个地址被访问由 compose 的宿主侧发布地址（`AGENT_WORKER_UI_BIND`）决定——compose 把该值经 `AGENT_WORKER_UI_EFFECTIVE_BIND` 环境变量告知 service（与发布行同一插值源，`.env` 一处改、两处同步）。判定矩阵（进程 bind × 宿主侧发布地址 × token 内嵌结果）：
+**页面内嵌判定（issue #489）**：控制台页面是否自动内嵌 token，由**实际暴露面**而非进程 bind 决定。Docker 形态下容器内进程必绑 `0.0.0.0`（端口映射前提），但页面真正从哪个地址被访问由 compose 的宿主侧发布地址（`AGENT_WORKER_UI_BIND`）决定——compose 把该值经 `AGENT_WORKER_UI_EFFECTIVE_BIND` 环境变量告知 service（与发布行同一插值源，`.env` 一处改、两处同步）。该机制随 **worker 0.8.0** 发布：一键安装（`install-worker.sh`）在更低版本上安装时页面仍要求手动输入 token（脚本的成功提示会按实际版本区分）。判定矩阵（进程 bind × 宿主侧发布地址 × token 内嵌结果）：
 
 | 进程 bind（`--host`） | 宿主侧发布（`AGENT_WORKER_UI_BIND`） | token 内嵌 | 说明 |
 | --- | --- | --- | --- |
 | `127.0.0.1` 等回环 | （无发布层，裸机/dev 形态） | 是 | 历史行为：`AGENT_WORKER_UI_EFFECTIVE_BIND` 未设置，按进程 bind 判定 |
-| `0.0.0.0`（容器内） | `127.0.0.1`（默认） | 是 | 容器内 bind 仅为端口映射前提；宿主发布回环 = 页面仅本机可达，内嵌不扩大风险面，日志打 info 说明判定链 |
+| `0.0.0.0`（容器内） | `127.0.0.1`（默认） / `[::1]` | 是 | 容器内 bind 仅为端口映射前提；宿主发布回环 = 页面仅本机可达，内嵌不扩大风险面，日志打 info 说明判定链。compose.host.yaml 形态另需网络隔离成立（见下方网络拓扑） |
 | `0.0.0.0`（容器内） | `0.0.0.0` / `192.0.2.1` 等非回环 | 否 | 同网段浏览器都能打开页面，不内嵌 + warning，需手动输入 token（见下方取 token 命令） |
 | 回环 | 非回环 | 否 | 复合形态兜底：设置了 `AGENT_WORKER_UI_EFFECTIVE_BIND` 时判定只看发布面（发布非回环即不内嵌，覆盖发布层与进程 bind 不一致的场景） |
+
+两个运维注意：
+
+- **compose override 改发布地址时必须同步设置 `AGENT_WORKER_UI_BIND`**：compose 合并 override 时 `ports` 列表整体替换、`environment` 按 key 合并——只在 override 里改 `ports` 发布地址（或加新条目）而不同步 `.env` 的 `AGENT_WORKER_UI_BIND`，两个插值源就会漂移，service 会按旧的 EFFECTIVE_BIND 判定内嵌（页面实际已发布到非回环地址 = 泄漏）或反向多要一次手动 token。仓库内两个 worker compose 的 `ports` 行与 `EFFECTIVE_BIND` 同用 `${AGENT_WORKER_UI_BIND}` 插值，`.env` 一处改两处同步就是为此。
+- **网络拓扑差异（`compose.host.yaml` 形态）**：部署机 stack 里 postgres / seaweedfs / rustfs / host / worker 原本同挂一个默认 compose 网络——而 worker 控制台 `GET /` 无鉴权，同网 peer 容器 `curl http://worker:8787/` 即可提取内嵌的 control token（issue #489 讨论里担心的「token 泄给同网段」在 docker 内网上被重新引入）。该 compose 现已把 worker 隔离到专用 `worker-ctrl` 网络：host 双挂默认网络与 `worker-ctrl`（仍是 worker 唯一需要直连的 peer——register/claim/heartbeat/result 与旧 CAS 产物通道都走它），worker 只挂 `worker-ctrl`，postgres/seaweedfs/rustfs 不可达无鉴权的控制台。worker 的材料下载与产物直传本就走 Host 按 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`（宿主发布地址，非 compose 服务名）签发的 presigned URL 且 worker 不持对象存储凭据，网络隔离不改变该通道；但把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 覆盖为 compose 服务名（如 `http://seaweedfs:8333`）在这种形态下会不可达——产物直传自动回落经 host 的 CAS 通道，材料任务会失败，覆盖值必须用宿主侧发布地址。无 peer 的 `compose.worker.yaml` / standalone 形态不需要（也从未需要）该隔离。
 
 发布非回环时（后两行），从容器内手动取一次 token，页面会把它存进 localStorage，日常无需重复：
 
@@ -393,7 +399,7 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 - 用 `workerctl configure`（或控制台）把新值写入状态副本并重启执行进程；
 - 或删除状态卷中的 `worker.yaml` 后重启容器，重新导入挂载配置。
 
-默认端口只绑定宿主机 loopback；compose 网络内其它容器可达 `http://worker:8787`，但所有端点（除 `/api/health`）都要求 control token。需要从 Tailnet 上的另一台管理机访问时，显式设置 `AGENT_WORKER_UI_BIND`，并先在主机防火墙或 Tailnet ACL 中限制来源；不要把控制面暴露到公网。非回环发布下控制台不再内嵌 token（判定矩阵见 §「控制面鉴权」），改用 `docker compose exec worker cat /var/lib/agent-legion-worker-control/control_token` 手动取。
+默认端口只绑定宿主机 loopback；compose 网络内其它容器可达 `http://worker:8787`，但所有端点（除 `/api/health`）都要求 control token；`compose.host.yaml` 形态下同 stack 的其它服务更被网络隔离挡在控制台之外（见 §「控制面鉴权」的网络拓扑说明），只有 host 容器可达。需要从 Tailnet 上的另一台管理机访问时，显式设置 `AGENT_WORKER_UI_BIND`，并先在主机防火墙或 Tailnet ACL 中限制来源；不要把控制面暴露到公网。非回环发布下控制台不再内嵌 token（判定矩阵见 §「控制面鉴权」），改用 `docker compose exec worker cat /var/lib/agent-legion-worker-control/control_token` 手动取。
 
 ### 全新克隆的本地 Worker（无 init-worktree.sh）
 

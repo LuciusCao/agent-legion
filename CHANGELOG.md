@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Fixed
+- compose.host.yaml 网络内泄露 Worker control token（issue #489 审查 P1）：
+  部署机 stack 五个服务共享默认 compose 网络，而 Worker 控制台 `GET /`
+  无鉴权——发布回环即内嵌 token 的新判定让任何 peer 容器
+  `curl http://worker:8787/` 就能提取 control token 接管控制面，「token
+  泄给同网段」在 docker 内网上被重新引入。worker 的出站依赖只有 host
+  一个 peer（材料/产物直传走 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 签发的
+  presigned URL、worker 不持对象存储凭据），现已把它隔离到专用
+  `worker-ctrl` 网络：host 双挂两网、worker 只挂 `worker-ctrl`，
+  postgres/seaweedfs/rustfs 不可达无鉴权的控制台；契约测试
+  `test_compose_host_worker_network_isolated_from_peer_services` 以解析
+  YAML 求网络集合交集的方式钉住该拓扑（含 host↔worker 通道不中断）。
+  部署文档补网络拓扑差异说明与 override 改 `ports` 时须同步
+  `AGENT_WORKER_UI_BIND` 的漂移警示（ports 整体替换而 environment 按
+  key 合并）。
 - Docker 形态 Worker 控制台 token 内嵌误判（issue #489）：容器内进程必绑
   `0.0.0.0`（端口映射前提）导致 `embed_control_token` 恒判非回环、token
   永不内嵌——但宿主侧 compose 发布默认是 `127.0.0.1`，页面实际仅本机
@@ -21,6 +35,16 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   一致。install-worker.sh 成功提示与部署文档补齐 Docker 形态手动取
   token 的命令与判定矩阵；issue 讨论中的 loopback-only 转发与替换
   token 本身两个方向记为 deferred。
+  - IPv6 回环发布的方括号形态（Docker ports 语法须写
+    `AGENT_WORKER_UI_BIND=[::1]`，与 EFFECTIVE_BIND 同源传入）此前
+    `ip_address("[::1]")` 抛 ValueError 被判非回环——fail-closed 但丢失
+    「回环发布即内嵌」的判定；现剥方括号后判定（`[::1]` → 回环，
+    `[::]` / `[2001:db8::1]` → 非回环）。
+  - install-worker.sh 成功提示按实际 `--version` 区分：worker 0.8.0 起
+    默认 loopback 发布自动内嵌 token（此前钉住 0.7.0 的发布窗口里，
+    文案宣称的「已内嵌」与产物行为相反）；低版本与非数字 tag 保守走
+    「手动取一次」指引。版本门槛测试
+    `tests/scripts/test_install_worker_version_gates.py`（8 例）。
 - 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
   `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
   部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5
