@@ -64,7 +64,14 @@ def main() -> int:
     )
     put = client.put(
         f"{args.base}/api/admin/studio-agents",
-        json={"api_base": args.api_base, "agents": agents},
+        json={
+            "api_base": args.api_base,
+            "agents": agents,
+            # #355 审核 P3：GET 拿到的 revision 一并带上——不携带则走空
+            # 版本旁路（整份替换语义），GET 与 PUT 之间探测合并进的新
+            # detected 行会被静默删掉。
+            "revision": registry.get("revision", ""),
+        },
         timeout=30,
     )
     if put.status_code != 200:

@@ -127,26 +127,26 @@ class StudioAgentRegistryStore:
         变存储版本、使陈旧 PUT 以 RegistryVersionMismatch 拒绝，而非被
         整份覆盖静默删除。比对基于与 GET 相同的归一化视图（_effective）。
         匹配则执行 updater(incoming=document, stored)（source 重导等合并）
-        写入并返回合并前的存储文档；不匹配抛出，存储不动。
-        expected_revision 为空表示不做检查（smoke 脚本等一次性客户端）。
+        写入并返回**合并后的最终文档**（审核 P2：调用方据此构建响应，
+        revision 即刚落库的这次写入；事务外再 get 会把并发写入者的文档
+        冒充本次结果）。不匹配抛出；空 revision 跳过检查（一次性客户端）。
         """
-        current: dict[str, Any] | None = None
+        merged: dict[str, Any] | None = None
 
         def _rmw(stored: dict[str, Any]) -> dict[str, Any]:
-            nonlocal current
-            if not expected_revision:
-                return updater(document, stored)
-            current = stored
-            effective = self._effective(stored)
-            if registry_revision(effective) != expected_revision:
-                raise RegistryVersionMismatch(
-                    f"registry revision is now {registry_revision(effective)}, "
-                    f"not {expected_revision}"
-                )
-            return updater(document, stored)
+            nonlocal merged
+            if expected_revision:
+                effective = self._effective(stored)
+                if registry_revision(effective) != expected_revision:
+                    raise RegistryVersionMismatch(
+                        f"registry revision is now {registry_revision(effective)}, "
+                        f"not {expected_revision}"
+                    )
+            merged = updater(document, stored)
+            return merged
 
         self.update(_rmw)
-        return current if current is not None else document
+        return merged if merged is not None else document
 
     def find_agent(self, agent_id: str) -> dict[str, Any] | None:
         for agent in self.get()["agents"]:
