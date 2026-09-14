@@ -21,9 +21,10 @@ from typing import Any
 
 import pytest
 
+from shared import code_sandbox
 from shared.code_sandbox import build_sandbox_argv
 from shared.material_cache import MATERIALS_CACHE_DIRNAME, MaterializeError
-from worker import binary_resolution, material_fetch
+from worker import material_fetch
 from worker.cleanup import clean_work_root
 from worker.code_runner import execute_code
 from worker.material_fetch import materialize_claim_material
@@ -215,7 +216,8 @@ def test_execute_code_materializes_and_exposes_local_path(
         encoding="utf-8",
     )
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
+    # #496：隔离位 patch 目录事实源（沙箱解析的真实读取点）。
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled-bin")
     monkeypatch.setattr(
         shutil, "which", lambda binary: str(script) if binary == "velites" else None
     )

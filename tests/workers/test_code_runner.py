@@ -24,7 +24,6 @@ import pytest
 
 from shared import code_sandbox
 from shared.code_sandbox import build_sandbox_argv
-from worker import binary_resolution
 from worker.code_runner import (
     cancel_executions,
     execute_code,
@@ -293,7 +292,10 @@ def _fake_velites(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     # 自带目录指向不存在的位置：测试不依赖开发机 data/bin 的真实状态。
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
+    # #496：必须 patch 事实源 code_sandbox.BUNDLED_SANDBOX_DIR（沙箱解析的
+    # 真实读取点）；binary_resolution 侧的 re-export patch 只遮蔽其自身
+    # 属性读，改不了解析函数看到的目录。
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled-bin")
     monkeypatch.setattr(
         shutil, "which", lambda binary: str(script) if binary == "velites" else None
     )
@@ -409,7 +411,7 @@ def test_execute_code_prefers_path_velites_over_bundled_copy(
     bundled_stub = bundled_dir / "velites"
     bundled_stub.write_text("#!/usr/bin/env bash\nexit 42\n", encoding="utf-8")
     bundled_stub.chmod(bundled_stub.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    # #496：两侧目录位都指向桩目录（runtime 解析与沙箱解析共用）。
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     _fake_velites(tmp_path, monkeypatch)  # PATH 指向跳 wrap 直 exec 的真桩
 
@@ -433,7 +435,8 @@ def test_execute_code_uses_bundled_velites_when_path_missing(
         encoding="utf-8",
     )
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    # #496：事实源一侧的 patch 即同时覆盖 runtime 解析（resolve_binary）与
+    # 沙箱解析（resolve_sandbox_binary）。
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
 
@@ -459,8 +462,11 @@ def test_execute_code_uses_bundled_velites_when_path_missing(
 def test_execute_code_fails_closed_without_any_velites(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """自带副本与 PATH 都找不到 velites → 拒绝执行（EXEC-CODE-003 fail-closed）。"""
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
+    """自带副本与 PATH 都找不到 velites → 拒绝执行（EXEC-CODE-003 fail-closed）。
+    #496：隔离位 patch 事实源 code_sandbox.BUNDLED_SANDBOX_DIR（沙箱解析的
+    真实读取点）——旧代码 patch binary_resolution 的值拷贝 re-export 打不到
+    读取点，开发机 data/bin 有 velites 时该测试静默变红。"""
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled-bin")
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
     client = FakeClient(_code_bundle(tmp_path))
     with pytest.raises(RuntimeError, match="refusing to run unsandboxed"):

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
-from worker import binary_resolution
+from shared import code_sandbox
 from worker.execution.prepare import prepare_execution
 
 pytestmark = pytest.mark.no_db
@@ -74,7 +74,9 @@ def test_argv0_prefers_path_over_bundled_copy(
     单一副本（~/.local/bin）不再被无人维护的存量 data/bin 旧副本遮蔽。"""
     bundled = tmp_path / "data" / "bin" / "velites"
     _write_executable(bundled)
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled.parent)
+    # #496：目录事实源在 code_sandbox.BUNDLED_SANDBOX_DIR（resolve_binary
+    # 的真实读取点）；re-export 侧的 patch 打不到解析函数。
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled.parent)
     monkeypatch.setattr(shutil, "which", lambda _binary: "/usr/local/bin/velites")
 
     command = _prepare(tmp_path, ["velites", "run", "--x"])
@@ -89,7 +91,7 @@ def test_argv0_falls_back_to_bundled_copy_when_path_missing(
     """PATH 全空、仅自带副本存在（Docker 外挂形态）：解析落到 data/bin。"""
     bundled = tmp_path / "data" / "bin" / "velites"
     _write_executable(bundled)
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled.parent)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled.parent)
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
 
     command = _prepare(tmp_path, ["velites", "run", "--x"])
@@ -103,7 +105,7 @@ def test_argv0_left_untouched_when_unresolvable(
 ) -> None:
     # 无法解析时保持原名（spawn 会报 FileNotFoundError 并作为失败执行上报）；
     # 绝对路径 argv[0] 不参与解析。
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled-bin")
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
 
     assert _prepare(tmp_path, ["velites"])[0] == "velites"

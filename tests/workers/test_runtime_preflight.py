@@ -32,10 +32,10 @@ ROOT = Path(__file__).resolve().parents[2]
 def _isolated_bundled_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """把自带二进制目录指向不存在的位置，避免开发机 data/bin 污染测试。
 
-    目录常量定义在 shared/code_sandbox.py（BUNDLED_SANDBOX_DIR），
-    worker/binary_resolution.py re-export 为 BUNDLED_BINARY_DIR——模块属性
-    各自独立，两侧都要 patch，runtime 解析与沙箱解析（#383）才同时隔离。"""
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bin")
+    目录常量与解析读取点都在 shared/code_sandbox.py（BUNDLED_SANDBOX_DIR，
+    #496 起 worker/binary_resolution.py 的 re-export 经模块级 __getattr__
+    动态代理到它）——patch 事实源一侧即同时隔离 runtime 解析与沙箱解析
+    （#383）；对 re-export 位的赋值只遮蔽其自身属性读，不影响解析函数。"""
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bin")
 
 
@@ -134,7 +134,7 @@ def test_resolve_binary_prefers_path_over_bundled(
     无人维护的存量 data/bin 旧副本遮蔽。"""
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
 
     assert resolve_binary("velites") == "/usr/local/bin/velites"
@@ -147,7 +147,7 @@ def test_resolve_binary_falls_back_to_bundled_copy(
     # PATH 全空、仅自带副本存在（Docker 外挂形态）：解析落到 data/bin。
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", _all_missing)
 
     assert resolve_binary("velites") == str(bundled_dir / "velites")
@@ -161,7 +161,7 @@ def test_resolve_binary_skips_non_executable_bundled_copy(
     bundled_dir = tmp_path / "bundle"
     bundled_dir.mkdir()
     (bundled_dir / "velites").write_text("#!/bin/sh\n", encoding="utf-8")  # 无 +x
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
 
     assert resolve_binary("velites") == "/usr/local/bin/velites"
@@ -178,10 +178,9 @@ def test_preflight_code_capacity_passes_with_bundled_velites_only(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # PATH 全空，仅自带副本存在（Docker 外挂形态的裸解析面）：code 容量
-    # 预检必须放行（沙箱解析与 runtime 解析共用该目录，两侧常量都指向它）。
+    # 预检必须放行（沙箱解析与 runtime 解析共用该目录，事实源 patch 即两侧生效）。
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", _all_missing)
 
@@ -256,7 +255,7 @@ def test_preflight_expect_runtimes_satisfied_passes(
     # 自带副本目录（docker 挂载路径）解析到 velites 即满足，无需 PATH。
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", _all_missing)
     assert preflight_error(expect_runtimes=["velites"]) is None
 

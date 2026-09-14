@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from worker import binary_resolution
+from shared import code_sandbox
 from worker.runtime import controls as runtime_controls
 
 pytestmark = pytest.mark.no_db
@@ -20,8 +20,14 @@ pytestmark = pytest.mark.no_db
 
 @pytest.fixture(autouse=True)
 def _isolated_bundled_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """把自带二进制目录指向不存在的位置，避免开发机 data/bin 污染测试。"""
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bin")
+    """把自带二进制目录指向不存在的位置，避免开发机 data/bin 污染测试。
+
+    #496：必须 patch 事实源 code_sandbox.BUNDLED_SANDBOX_DIR——
+    hot_code_concurrency 走 resolve_sandbox_binary（读该模块属性）；旧代码
+    patch binary_resolution 的值拷贝 re-export 打不到读取点，开发机
+    「先 ensure-velites 再跑单测」（data/bin 有 velites）时该文件的
+    fail-closed 测试静默变红。"""
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bin")
 
 
 def test_hot_open_code_capacity_rejected_without_velites(

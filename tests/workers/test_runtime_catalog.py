@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from shared import code_sandbox
-from worker import binary_resolution, config_store
+from worker import config_store
 from worker.config_store import validate_config
 from worker.runtime import catalog
 from worker.runtime.catalog import (
@@ -29,11 +29,10 @@ from worker.runtime.status import runtime_status
 def _isolated_bundled_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """把自带二进制目录指向不存在的位置，避免开发机 data/bin 污染测试。
 
-    目录常量定义在 shared/code_sandbox.py（BUNDLED_SANDBOX_DIR）、
-    worker/binary_resolution.py re-export（BUNDLED_BINARY_DIR）——模块属性
-    各自独立，两侧都 patch，与 test_runtime_preflight.py 的隔离约定对齐
-    （subagent 二轮评审 P2-4）。"""
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bin")
+    目录常量与解析读取点都在 shared/code_sandbox.py（BUNDLED_SANDBOX_DIR，
+    #496 起 worker/binary_resolution.py 的 re-export 经模块级 __getattr__
+    动态代理到它）——patch 事实源一侧即同时隔离两侧解析，与
+    test_runtime_preflight.py 的隔离约定对齐（subagent 二轮评审 P2-4）。"""
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bin")
 
 
