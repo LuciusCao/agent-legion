@@ -269,6 +269,37 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
   })
 
   it('shows the agent definition schema read-only instead of the node YAML one (#406)', async () => {
+    const agentYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake:',
+      '    type: agent',
+      '    label: 读取知识点',
+      '    capability: intake',
+      '    after: [_start]',
+      '    config_schema:',
+      '      properties:',
+      '        ignored_node_schema:',
+      '          type: boolean',
+      '',
+    ].join('\n')
+
+    renderInspector('intake', { definitionYaml: agentYaml })
+
+    expect(await screen.findByLabelText('节点执行能力')).toHaveTextContent(
+      'Agent 配置'
+    )
+    // 区块仍在（只读展示），但节点 YAML 里那份不生效的 schema 不出现。
+    expect(screen.getByLabelText('配置 Schema intake')).toBeInTheDocument()
+    expect(
+      await screen.findByText('该 capability 尚无 Agent，暂无生效配置参数。')
+    ).toBeInTheDocument()
+    expect(screen.queryByText('ignored_node_schema')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('新增属性名')).not.toBeInTheDocument()
+  })
+
   it('switches approval→code atomically via the capability prompt (#405)', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const promptSpy = vi

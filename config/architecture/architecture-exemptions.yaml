@@ -1330,13 +1330,13 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/592
   ceiling: 288
 - check: architecture.file_budget
-  path: frontend/src/components/preview/previewTextBodies.tsx
-  reason: '#255 审核 P1 修复：JSON 兜底着色从单条全局正则改为单趟手写 lexJsonish（未闭合字符串不再从每个引号位回溯，512KB
-    截断内容从 10-120s 主线程冻结降到毫秒级）。lexer 与其性能契约注释、转义次序 说明同居此文件；拆到姊妹文件会把「转义→着色→注入」三步管线分家。
-    Harvest when the preview renderers get a structural split.'
+  path: frontend/src/features/workflowStudio/inspector/useNodeTypeSwitch.ts
+  reason: '#405 审核 P3：切出弹窗只在 capability 缺失时触发——需要读草稿节点 的 capability（parseWorkflowNode）做判定，5
+    行净增（47→54）。 弹窗判定与切换执行必须在同一 useCallback（原子性：prompt 先于任何 突变），拆到姊妹文件会把「判定-弹窗-突变」一体流程分家。
+    Harvest when the type-switch flow gains a dialog component of its own.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
-  ceiling: 98
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 54
 - check: architecture.file_budget
   path: scripts/check_release_pins.py
   reason: '#506 codex 四项修复的防御逻辑：velites 逐字比较（发布 tag 逐字相等契约）、镜像 -rN 重发后缀接受、compose
@@ -1345,13 +1345,3 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
   ceiling: 167
-  path: frontend/src/features/workflowStudio/inspector/useNodeTypeSwitch.ts
-  reason: >-
-    #405 审核 P3：切出弹窗只在 capability 缺失时触发——需要读草稿节点
-    的 capability（parseWorkflowNode）做判定，5 行净增（47→54）。
-    弹窗判定与切换执行必须在同一 useCallback（原子性：prompt 先于任何
-    突变），拆到姊妹文件会把「判定-弹窗-突变」一体流程分家。
-    Harvest when the type-switch flow gains a dialog component of its own.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
-  ceiling: 54
