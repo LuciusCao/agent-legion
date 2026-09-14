@@ -14,7 +14,7 @@ export function LabeledIconButton({
 }: {
   icon: string
   label: string
-  onClick?: () => void
+  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void
   active?: boolean
   ariaLabel?: string
 }) {

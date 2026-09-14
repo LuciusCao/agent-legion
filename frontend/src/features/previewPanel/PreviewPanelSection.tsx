@@ -10,7 +10,7 @@
  *   新草稿/新上下文不继承旧授权（避免一次点击永久放行）。授权的快照与
  *   render 期派生比对抽在 useDraftAuthorization（#500 P1-3/P1-5）；发布
  *   永远是人工动作。
- * 定制入口 admin-only（与 WorkflowStudioButton 同一惯例，P4/STUDIO-AGENT-001：
+ * 定制入口 admin-only（与 WorkspaceMoreMenu 的 Studio 项同一惯例，P4/STUDIO-AGENT-001：
  * 治理面端点本身 admin/scoped-only，非 admin 点开只会收获一串 403）。
  */
 import { useState, type ReactNode } from 'react'
