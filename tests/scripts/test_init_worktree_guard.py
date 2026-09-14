@@ -276,11 +276,11 @@ def test_missing_env_fails_fast_without_side_effects(tmp_path: Path) -> None:
     assert not (worktree / "deploy").exists()
 
 
-# S3 建桶块的桩：uv stub 把 `uv run python scripts/ensure-s3-bucket.py` 转给
-# 真实 python3 执行抽出的脚本，PYTHONPATH 前置探针模块——dotenv 桩对无参
+# S3 建桶块的桩：uv stub 把 `uv run --frozen python scripts/ensure-s3-bucket.py`
+# 转给真实 python3 执行抽出的脚本，PYTHONPATH 前置探针模块——dotenv 桩对无参
 # load_dotenv() 抛 AssertionError（复现 find_dotenv 在 stdin heredoc 下的
 # 崩溃），boto3 桩把 head_bucket 记进 STUB_LOG 作为「越过 load_dotenv」的
-# 证据。
+# 证据。--frozen（issue #526）：frozen 调用绝不写 lock。
 _DOTENV_PROBE = """
 def load_dotenv(dotenv_path=None, override=False):
     if dotenv_path is None:
@@ -331,8 +331,8 @@ def load_s3_settings():
 """
 
 _UV_STUB_REAL_SCRIPT = """#!/usr/bin/env bash
-if [[ "$1" == "run" && "$2" == "python" && "$3" == *ensure-s3-bucket.py ]]; then
-  PYTHONPATH="{pystub}:${{PYTHONPATH:-}}" exec python3 "$3" "$4"
+if [[ "$3" == "python" && "$4" == *ensure-s3-bucket.py ]]; then
+  PYTHONPATH="{pystub}:${{PYTHONPATH:-}}" exec python3 "$4" "$5"
 fi
 echo "stub-vault-master-key"
 """

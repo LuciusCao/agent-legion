@@ -81,7 +81,11 @@ else
         exit 1
     fi
     have uv || brew_install "uv" "uv"
-    python_ok || brew_install "Python 3.11+" "python@3.12"
+    # 兜底对齐 .python-version 钉点（3.13，#483）：python_ok 仍按
+    # requires-python 下界 3.11+ 探测（已有 3.11/3.12 的机器不重复装）；
+    # 实际 venv 由 uv 按 .python-version 自管，这行只服务缺 python3 的
+    # macOS 全新机器。
+    python_ok || brew_install "Python 3.13" "python@3.13"
     node_ok || brew_install "Node 18+" "node"
     if ! { have psql && have createdb; }; then
         brew_install "PostgreSQL 17" "postgresql@17"
@@ -179,7 +183,10 @@ fi
 # 5. deploy/secrets/vault_master_key（env-only 配置，缺失时 vault 写入会抛错）
 mkdir -p deploy/secrets
 if [[ ! -s deploy/secrets/vault_master_key ]]; then
-    UV_CACHE_DIR=.uv-cache uv run python -c \
+    # --frozen（issue #526）：上方 uv sync 刚按 pyproject 建好环境/lock
+    # （bootstrap 路径，保持非 frozen），此处的 run 依赖已就位，frozen 调用
+    # 从不写 lock——镜像 index 环境下不再有 re-lock 污染窗口。
+    UV_CACHE_DIR=.uv-cache uv run --frozen python -c \
         "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
         > deploy/secrets/vault_master_key
     echo "已生成 deploy/secrets/vault_master_key"
