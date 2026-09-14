@@ -81,7 +81,10 @@ def _remote_ref(key: str = STAGING_KEY, size: int | None = None, content_hash: s
 
 
 def _make_handler(
-    tmp_path: Path, storage: FakeStorage | None, max_archive_bytes: int | None = None
+    tmp_path: Path,
+    storage: FakeStorage | None,
+    max_archive_bytes: int | None = None,
+    spot_check_percent: int | None = None,
 ) -> tuple[AgentCompletionHandler, _StubLeases, _StubArtifactStore, JobArtifactObjectStore, Path]:
     init_db(TEST_DATABASE_URL)
     with write_transaction(TEST_DATABASE_URL) as conn:
@@ -108,6 +111,7 @@ def _make_handler(
         skill_manager=None,
         object_store=object_store,
         max_archive_bytes=max_archive_bytes,
+        spot_check_percent=spot_check_percent,
     )
     return handler, leases, artifact_store, object_store, job_dir
 
@@ -329,10 +333,13 @@ def test_finish_remote_ref_size_over_limit_fails(tmp_path: Path) -> None:
 
 
 def test_finish_cancelled_hash_mismatch_fails(tmp_path: Path) -> None:
-    """cancelled 路径同样 digest 核验 staging 字节：自报 hash 不符整批失败。"""
+    """cancelled 路径被抽中时同样 digest 核验 staging 字节：自报 hash 不符
+    整批失败（percent=100 钉住「必抽中」分支；未抽中分支见下方专项测试）。"""
     storage = FakeStorage()
     storage.objects[STAGING_KEY] = PAYLOAD
-    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, spot_check_percent=100
+    )
 
     _finish(handler, {"out.json": _remote_ref(content_hash="0" * 64)}, status="cancelled")
 
@@ -693,3 +700,53 @@ def test_finish_gzip_cancelled_bomb_fails_on_digest_path(tmp_path: Path) -> None
     assert "decompresses beyond the size limit" in result.error_message
     assert not (job_dir / "out.json").exists()
     assert object_store.lookup("job-1", "out.json") is None
+
+
+def test_finish_cancelled_unsampled_trusts_reported_hash(tmp_path: Path) -> None:
+    """#356 plan B：cancelled 路径、自报 hash 且未入抽检样本 → 不下载字节，
+    登记自报值（kill-switch 0 = 全信任）。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, spot_check_percent=0
+    )
+
+    _finish(handler, {"out.json": _remote_ref()}, status="cancelled")
+
+    assert leases.results[0].status == "cancelled"
+    assert not (job_dir / "out.json").exists()
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH  # 自报值被登记
+    assert storage.opened == 0  # 未打开对象流——第二跳流量消除
+
+
+def test_finish_cancelled_empty_hash_always_streams(tmp_path: Path) -> None:
+    """#356：自报 hash 为空时无条件流式计算（无可信任值，manifest 行需要
+    Host 计算 digest）——即便 percent=0。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, spot_check_percent=0
+    )
+
+    _finish(handler, {"out.json": _remote_ref(content_hash="")}, status="cancelled")
+
+    assert leases.results[0].status == "cancelled"
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH  # Host 计算值
+    assert storage.opened == 1
+
+
+def test_finish_cancelled_sampled_mismatch_still_fails(tmp_path: Path) -> None:
+    """#356：抽中的样本照旧全量核验（percent=100 与专项 mismatch 测试互为
+    补充：本测试确认样本臂的失败语义未被信任路径吞掉）。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, _ = _make_handler(tmp_path, storage, spot_check_percent=100)
+
+    _finish(handler, {"out.json": _remote_ref(content_hash="0" * 64)}, status="cancelled")
+
+    assert leases.results[0].status == "failed"
+    assert "hash mismatch" in leases.results[0].error_message
