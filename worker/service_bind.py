@@ -9,6 +9,12 @@ logger = logging.getLogger(__name__)
 
 
 def _is_loopback(host: str) -> bool:
+    # 方括号形态（IPv6 发布的 Docker ports 语法，如 [::1]）：AGENT_
+    # WORKER_UI_BIND=[::1] 会随 EFFECTIVE_BIND 同源传入，剥掉再判——否则
+    # ip_address("[::1]") 抛 ValueError 被判非回环（fail-closed 但丢失
+    # 「回环发布即内嵌」的判定）。
+    if len(host) >= 2 and host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
     try:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
