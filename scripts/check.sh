@@ -112,7 +112,7 @@ extensions_started_at=$SECONDS
 
 (
   cd "$ROOT_DIR"
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q tests/full \
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q tests/full \
     -m full_gate --reruns 1 --reruns-delay 2 \
     --cov=server --cov=worker --cov-report= --cov-append
 ) >"$full_log" 2>&1 &
@@ -150,7 +150,7 @@ cd "$ROOT_DIR"
 # silently discarded by the cleanup trap.
 coverage_report_log="$log_dir/coverage-report.log"
 coverage_status=0
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run coverage report >"$coverage_report_log" 2>&1 || coverage_status=$?
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen coverage report >"$coverage_report_log" 2>&1 || coverage_status=$?
 print_lane_output "Combined Coverage" "$coverage_report_log"
 if [[ "$coverage_status" -ne 0 ]]; then
   keep_log_dir="$log_dir"
@@ -165,14 +165,14 @@ echo "=== Coverage Partition Report ==="
 # violations into a failure — CI's backend-coverage job runs the worker
 # execution-plane floor (issue #275) in enforce mode, where the merged
 # shard data is complete.
-if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_coverage_partitions.py \
+if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python scripts/check_coverage_partitions.py \
   --backend "$COVERAGE_FILE" \
   --frontend "$ROOT_DIR/frontend/coverage/coverage-final.json"; then
   echo "WARNING: coverage partition check reported violations (non-blocking)." >&2
 fi
 
 echo "=== Exemption Age Check (non-blocking) ==="
-if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_exemption_age; then
+if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_exemption_age; then
   echo "WARNING: exemption age check reported overdue exemptions (non-blocking)." >&2
 fi
 
