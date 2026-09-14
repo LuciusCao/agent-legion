@@ -7,6 +7,30 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Fixed
+- `scripts/` 的 `uv run` 全量补 `--frozen`（issue #526，#453 审核取证的
+  根因修复）：0.8.0 开发期间多个 worktree 的 `uv.lock` 被同样的 1040 行
+  镜像 URL 重写污染（pypi.org → 镜像源，hash 全不变，#502/#505/#453/#495
+  系列四次），根因是 `init-worktree.sh` 建桶/Fernet keygen 两处 `uv run`
+  不带 `--frozen`——开发者 shell 会话带 `UV_DEFAULT_INDEX`/`UV_INDEX_URL`
+  镜像变量时触发 re-lock 把镜像 URL 写进 lock。全部 `uv run` 调用点
+  （init-worktree、check-quick-backend、check、check-fast、check-ci、
+  clean-worktree、dev_stack、generate-api-types、install-deps keygen、
+  resume-workspaces）统一 `--frozen`：依赖从冻结 lock 解析安装（fresh
+  worktree 无 .venv 时也按 lock 建环境），frozen 调用绝不写 lock；
+  门禁脚本 pyproject/lock 漂移时 fail-fast。`install-deps.sh` 的
+  `uv sync` bootstrap（按 pyproject 建环境/更新 lock）保持不动。契约
+  测试 `tests/scripts/test_uv_frozen_scripts.py` 钉住 scripts/ 下不再
+  出现非 frozen 的 `uv run`/`uv sync`。
+- 本地 venv Python 版本与 CI 漂移（issue #483，发现于 #480）：仓库
+  requires-python >= 3.11 且无 `.python-version`，本地 worktree venv 落到
+  3.12 而 CI 各 job 用 3.13——3.12 上 `test_code_child` 的 sigterm 用例
+  非确定性失败（`_communicate` 对已关 stdin flush 抛 ValueError；绕过后
+  signal handler 打断子进程 stdout 管道写时偶发永久阻塞），CI 3.13 一直
+  绿所以长期无人发现。仓库根新增 `.python-version` 钉 `3.13`（uv 自动
+  读取，新 worktree/CI 对齐；requires-python 保持 `>=3.11` 不动，收紧
+  另行讨论）。契约测试 `tests/scripts/test_python_version_pin.py` 断言
+  钉点内容并解析 quality-gate/nightly-gate 的 `python-version:` 全部
+  钉点与之对齐——防 CI 与本地再漂移。
 - 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
   `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
   部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5
