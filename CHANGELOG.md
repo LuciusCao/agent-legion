@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [0.7.11] - 2026-09-14
 
+### Changed
+- 版本线对齐（issue #497 同族收尾）：`pyproject.toml` / `uv.lock` 的
+  agent-legion 包版本 0.7.0 → 0.7.11——0.7.1 起版本号只由 git tag 承载、
+  包清单漂移了十个版次，本版随封板对齐，此后每个 0.7.x 同步落版。
+
 ### Added
 - 架构预算增长容忍带与豁免限时重签（issue #641）：文件预算检查线放宽为
   注册表 ceiling + `growth_allowance: 15`——带内超出检查通过、不注册新
