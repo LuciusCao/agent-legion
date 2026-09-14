@@ -261,6 +261,14 @@ def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
             for m in service.list_messages(session["id"], workspace_id)
         )
     )
+    # #525: the tool_call row can persist AFTER the coalesced text under
+    # xdist load — wait for it instead of reading between the two persist
+    # points (same bounded-wait shape as the text wait above).
+    _wait_for(
+        lambda: any(
+            m["kind"] == "tool_call" for m in service.list_messages(session["id"], workspace_id)
+        )
+    )
 
     messages = service.list_messages(session["id"], workspace_id)
     agent_texts = [m for m in messages if m["kind"] == "text" and m["role"] == "agent"]
