@@ -24,8 +24,8 @@ issue #254 起，agent runtime 的注册声明不再是手工勾选，而是读�
 
 from __future__ import annotations
 
+from shared import code_sandbox
 from shared.code_sandbox import resolve_sandbox_binary
-from worker import binary_resolution
 from worker.runtime.catalog import (
     RUNTIME_CATALOG,
     SUPPORTED_RUNTIMES,
@@ -70,7 +70,7 @@ def preflight_error(
         installed = detect_installed_runtimes()
         missing = [runtime for runtime in expect_runtimes if runtime not in installed]
         if missing:
-            bundled_dir = binary_resolution.BUNDLED_BINARY_DIR
+            bundled_dir = code_sandbox.BUNDLED_SANDBOX_DIR
             hints = "；".join(
                 f"{runtime!r} 需要可执行文件 {'/'.join(RUNTIME_CATALOG[runtime]['binaries'])}"
                 for runtime in missing

@@ -14,10 +14,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
     是值拷贝 re-export，monkeypatch re-export 侧打不到
     `resolve_sandbox_binary`/`resolve_binary` 的真实读取点，开发机
     「先 ensure-velites 再跑单测」（data/bin 有 velites）时两个 fail-closed
-    测试静默变红（干净 CI 从未暴露）。修复：re-export 改为 PEP 562 模块级
-    `__getattr__` 动态代理（读值永远反映事实源当前值，注释同步改写准确
-    表述），6 个 worker 测试文件的目录隔离位统一改为 patch 事实源
-    `code_sandbox.BUNDLED_SANDBOX_DIR`；AGENTS.md 补「ensure-velites 后
+    测试静默变红（干净 CI 从未暴露）。修复：彻底移除 re-export（原本仅剩
+    preflight 错误文案一处读者，改为直读事实源属性），两个解析函数与全部
+    读者统一读 `code_sandbox.BUNDLED_SANDBOX_DIR`；6 个 worker 测试文件的
+    目录隔离位统一 patch 事实源；AGENTS.md 补「ensure-velites 后
     跑单测」的坑位说明。三态验证：data/bin 放假 velites 复现 2 failed →
     修复后同环境 72 passed → 删除假 velites 后 72 passed（全 workers 套件
     566 passed）。

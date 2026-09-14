@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from shared import code_sandbox
-from worker import binary_resolution
 from worker import executor as agent_worker
 from worker.binary_resolution import resolve_binary
 from worker.runtime import setup as runtime_setup
@@ -32,10 +31,10 @@ ROOT = Path(__file__).resolve().parents[2]
 def _isolated_bundled_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """把自带二进制目录指向不存在的位置，避免开发机 data/bin 污染测试。
 
-    目录常量与解析读取点都在 shared/code_sandbox.py（BUNDLED_SANDBOX_DIR，
-    #496 起 worker/binary_resolution.py 的 re-export 经模块级 __getattr__
-    动态代理到它）——patch 事实源一侧即同时隔离 runtime 解析与沙箱解析
-    （#383）；对 re-export 位的赋值只遮蔽其自身属性读，不影响解析函数。"""
+    目录常量与全部解析读取点都在 shared/code_sandbox.py
+    （BUNDLED_SANDBOX_DIR，#496 起 worker/binary_resolution.py 不再
+    re-export）——patch 事实源一侧即同时隔离 runtime 解析与沙箱解析
+    （#383）。"""
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bin")
 
 
@@ -230,7 +229,7 @@ def test_preflight_expect_runtimes_missing_fails(monkeypatch: pytest.MonkeyPatch
     assert error is not None
     assert "AGENT_WORKER_EXPECT_RUNTIMES" in error
     assert "'velites'" in error
-    assert str(binary_resolution.BUNDLED_BINARY_DIR) in error
+    assert str(code_sandbox.BUNDLED_SANDBOX_DIR) in error
     assert "架构" in error  # 挂载了错误架构的二进制同样探测不到
 
 

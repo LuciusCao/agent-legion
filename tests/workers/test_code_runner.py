@@ -293,8 +293,8 @@ def _fake_velites(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     # 自带目录指向不存在的位置：测试不依赖开发机 data/bin 的真实状态。
     # #496：必须 patch 事实源 code_sandbox.BUNDLED_SANDBOX_DIR（沙箱解析的
-    # 真实读取点）；binary_resolution 侧的 re-export patch 只遮蔽其自身
-    # 属性读，改不了解析函数看到的目录。
+    # 真实读取点）；binary_resolution.py 已不再 re-export 该常量，历史值拷贝
+    # 形态的 patch 打不到任何读取点（#496 根因）。
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled-bin")
     monkeypatch.setattr(
         shutil, "which", lambda binary: str(script) if binary == "velites" else None
