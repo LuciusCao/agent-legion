@@ -129,27 +129,43 @@ LOCAL_S3_SERVICE="$(scripts/local-s3-decide.sh --service-name .env deploy/.env)"
 # -f 文件取 deploy/），而本地后端读根 .env——decide 脚本两者都传，决策与
 # 后端一致，但 up 时 deploy/.env 缺凭据会被插值成空串、容器以空凭据生成
 # s3.config，后端用真实凭据连接即鉴权失败，健康端点静默 reachable=false。
-# 修复：决策为 start 时把根 .env 的凭据 export 给 compose（进程环境优先
-# 于 .env 插值），消除两个 env 文件的双写要求；两边都缺时 decide 已按
-# rc=3 告警跳过，这里不再重复。
-export_s3_credentials() {
+# 修复：决策为 start 时把根 .env 的凭据经 `env` 前缀注入 compose 调用
+# （子进程环境优先于 .env 插值），消除两个 env 文件的双写要求；两边都缺
+# 时 decide 已按 rc=3 告警跳过，这里不再重复。
+# codex P1（PR #648）：凭据只随 compose 子进程走，绝不能 export 进本脚本
+# 环境——下方启动的 Worker 会复制全部 os.environ 给每个 Agent 子进程
+# （worker/supervisor.py），S3 管理凭据不得流入 Agent 面。
+# 值解析与 scripts/local-s3-decide.sh 的 _dotenv_value 同语义（去 = 前缀、
+# 首尾空白、一层配对引号）——padded/带引号的 .env 值若在这里解析漂移，
+# compose 与后端会拿到不同凭据，正是 #624 要消灭的静默 reachable=false。
+collect_s3_credentials() {
     local key line value
+    COMPOSE_S3_ENV=()
     for key in AGENT_LEGION_S3_ACCESS_KEY AGENT_LEGION_S3_SECRET_KEY; do
-        [[ -n "${!key:-}" ]] && continue  # 已有进程环境值，优先
+        if [[ -n "${!key:-}" ]]; then
+            COMPOSE_S3_ENV+=("$key=${!key}")  # 已有进程环境值，原样透传
+            continue
+        fi
         line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" .env 2>/dev/null | head -n 1 || true)"
         [[ -n "$line" ]] || continue
         value="${line#*=}"
-        value="${value#\"}" ; value="${value%\"}"
-        value="${value#\'}" ; value="${value%\'}"
-        [[ -n "$value" ]] && export "$key=$value"
+        value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+        if [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+            value="${value:1:${#value}-2}"
+        elif [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+        [[ -n "$value" ]] && COMPOSE_S3_ENV+=("$key=$value")
     done
 }
 if [[ "$LOCAL_S3_DECISION" == "start" ]]; then
-    export_s3_credentials
+    collect_s3_credentials
     if command -v docker >/dev/null 2>&1; then
         COMPOSE_FILES=(-f deploy/compose.host.yaml)
         [[ -f deploy/compose.local.yaml ]] && COMPOSE_FILES+=(-f deploy/compose.local.yaml)
-        if docker compose "${COMPOSE_FILES[@]}" up -d "$LOCAL_S3_SERVICE" >/dev/null 2>&1; then
+        # ${arr[@]+...} 守卫兼容 macOS bash 3.2 的 set -u 空数组展开。
+        if env ${COMPOSE_S3_ENV[@]+"${COMPOSE_S3_ENV[@]}"} \
+            docker compose "${COMPOSE_FILES[@]}" up -d "$LOCAL_S3_SERVICE" >/dev/null 2>&1; then
             echo "${LOCAL_S3_SERVICE}（材料对象存储）已就绪"
         else
             echo "警告: ${LOCAL_S3_SERVICE} 启动失败，材料相关功能将不可用（详见 deploy 文档）" >&2

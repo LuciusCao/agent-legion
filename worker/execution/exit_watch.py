@@ -80,11 +80,20 @@ def _kqueue_available() -> bool:
     return _KQUEUE is not None and _KEVENT is not None and _KQ_FILTER_PROC is not None
 
 
+def _pidfd_available() -> bool:
+    return hasattr(os, "pidfd_open")
+
+
 def _resolve_mode(requested: str) -> str:
-    """Map the configured mode to a usable one; unavailable kernels (and
-    unknown env values) degrade with a printed reason — an execution must
-    not fail over a supervision-mode typo (same leniency as
-    AGENT_WORKER_EVENT_PUMP)."""
+    """Map the configured mode to a usable one.
+
+    Only ``auto`` picks the first available kernel backend; an explicit
+    request is honored as-is when available and otherwise degrades to scan
+    with a printed reason (codex P2, PR #648: explicit modes are the
+    canary/rollback channel — silently substituting another backend breaks
+    both the log line and the operator's intent). Unknown env values fall
+    back to auto with a printed reason — an execution must not fail over a
+    supervision-mode typo (same leniency as AGENT_WORKER_EVENT_PUMP)."""
     if requested not in _VALID_MODES:
         print(
             f"exit-watch: {_MODE_ENV}={requested} 非法（合法值 "
@@ -94,14 +103,19 @@ def _resolve_mode(requested: str) -> str:
         requested = "auto"
     if requested == "scan":
         return "scan"
-    if _kqueue_available():
-        return "kqueue"
-    if requested == "kqueue":
-        print("exit-watch: kqueue requested but unavailable; using scan mode", flush=True)
-    if hasattr(os, "pidfd_open"):
-        return "pidfd"
-    if requested == "pidfd":
-        print("exit-watch: pidfd requested but unavailable; using scan mode", flush=True)
+    if requested == "auto":
+        if _kqueue_available():
+            return "kqueue"
+        if _pidfd_available():
+            return "pidfd"
+        return "scan"
+    available = _kqueue_available() if requested == "kqueue" else _pidfd_available()
+    if available:
+        return requested
+    print(
+        f"exit-watch: {requested} requested but unavailable on this platform; using scan mode",
+        flush=True,
+    )
     return "scan"
 
 
@@ -210,13 +224,29 @@ class ExitWatchReactor:
     def shutdown(self) -> None:
         """Stop the watcher (tests). Production never calls this: the thread
         is a daemon and the executor's shutdown Event reaches children
-        through the tick like any other control event."""
+        through the tick like any other control event.
+
+        Parked waiters are resolved as watcher-dead first (they degrade to
+        local polling) — a stop path that leaves waiters parked forever
+        would bypass the fail-closed invariant (subagent review P2)."""
         with ExitWatchReactor._singleton_lock:
             if ExitWatchReactor._singleton is self:
                 ExitWatchReactor._singleton = None
         self._stop.set()
         self._wake()
         self._thread.join(timeout=5)
+        # Drain pidfd state on the (now joined) watcher thread's behalf:
+        # pending registrations and applied fds would otherwise leak.
+        with self._lock:
+            waiters = list(self._waiters.values())
+            pending, self._pending = self._pending, []
+        if self._mode == "pidfd":
+            from worker.execution.exit_watch_pidfd import drain_pidfds
+
+            drain_pidfds(waiters, pending, self._selector)
+        for waiter in waiters:
+            waiter.watcher_dead = True
+            waiter.done.set()
         if self._kqueue is not None:
             self._kqueue.close()
         if self._selector is not None:
@@ -243,15 +273,29 @@ class ExitWatchReactor:
     ) -> _Waiter:
         waiter = _Waiter(proc, timeout, shutdown, ownership_lost, cancelled)
         with self._lock:
-            if self._failed:
+            if self._failed or self._stop.is_set():
+                # Stopped watcher (tests) or dead one: degrade immediately —
+                # the caller falls back to local polling either way.
                 waiter.watcher_dead = True
                 waiter.done.set()
                 return waiter
+            displaced = self._waiters.get(proc.pid)
+            if displaced is not None and displaced is not waiter:
+                # Same-pid double-register would orphan the first waiter
+                # (dict overwrite: no wake source could reach it — kernel
+                # events, tick, and deadline all key off the registry).
+                # Unreachable via today's single-waiter-per-child call
+                # graph, but nothing enforces that invariant; resolve the
+                # displaced waiter instead of parking it forever
+                # (subagent review P1-latent).
+                displaced.watcher_dead = True
+                displaced.done.set()
             self._waiters[proc.pid] = waiter
-            if self._mode == "kqueue":
-                # Cross-thread kqueue changelists are kernel-serialized; the
-                # kqueue fd itself is never closed while the watcher lives.
-                try:
+            try:
+                if self._mode == "kqueue":
+                    # Cross-thread kqueue changelists are kernel-serialized;
+                    # the kqueue fd itself is never closed while the watcher
+                    # lives. OSError → the shared tick polls this child.
                     assert self._kqueue is not None and _KEVENT is not None
                     assert _KQ_EV_ADD is not None and _KQ_EV_ONESHOT is not None
                     self._kqueue.control(
@@ -266,12 +310,21 @@ class ExitWatchReactor:
                         0,
                         0,
                     )
-                except OSError:
+                elif self._mode == "pidfd":
+                    self._pending.append(("register", waiter))
+                else:  # scan: no kernel watch — the shared tick polls it
                     waiter.scan_only = True
-            elif self._mode == "pidfd":
-                self._pending.append(("register", waiter))
-            else:  # scan: no kernel watch — the shared tick polls it
+            except OSError:
                 waiter.scan_only = True
+            except BaseException:
+                # #204 broad-except audit: 注册回滚臂（subagent review P2）。
+                # 逃逸族是 OSError 之外的资源类异常（MemoryError 等）；吞不
+                # 是目的——先回滚字典条目再原样 re-raise，调用方拿原始异常
+                # 上抛（run_execution 的遏制边界转 prebuilt failed）。
+                # 不回滚则已注册 waiter 的过去时 deadline 会留在表里空转
+                # watcher。日志保全：异常向上传播，不在此处打印。
+                self._waiters.pop(proc.pid, None)
+                raise
         if self._mode == "pidfd":
             self._wake()
         return waiter
@@ -355,46 +408,34 @@ class ExitWatchReactor:
             self._fail_dead()
 
     def _apply_pending(self) -> None:
-        """Watcher-thread-only selector mutations (pidfd mode)."""
+        """Watcher-thread-only selector mutations (pidfd mode); the plumbing
+        lives in exit_watch_pidfd (split for the file-size budget)."""
         if self._mode != "pidfd":
             return
         with self._lock:
             pending, self._pending = self._pending, []
-        for op, waiter in pending:
-            if self._waiters.get(waiter.proc.pid) is not waiter and op == "register":
-                continue  # unregistered while queued — nothing to arm
-            if op == "register":
-                try:
-                    fd = os.pidfd_open(waiter.proc.pid)  # type: ignore[attr-defined]
-                except OSError:
-                    # Raced a reaped child (heartbeat poll) or unsupported —
-                    # resolved now if it already exited, else tick-polled.
-                    with self._lock:
-                        if waiter.proc.poll() is not None:
-                            waiter.exit_observed = True
-                            waiter.done.set()
-                        else:
-                            waiter.scan_only = True
-                    continue
-                assert self._selector is not None
-                waiter.pidfd = fd
-                self._selector.register(fd, selectors.EVENT_READ, data=waiter)
-            else:  # unregister
-                fd = waiter.pidfd
-                waiter.pidfd = -1
-                if fd >= 0 and self._selector is not None:
-                    with contextlib.suppress(KeyError, ValueError):
-                        self._selector.unregister(fd)
-                    with contextlib.suppress(OSError):
-                        os.close(fd)
+        assert self._selector is not None
+        from worker.execution.exit_watch_pidfd import apply_pending
+
+        apply_pending(pending, self._waiters, self._lock, self._selector)
 
     def _tick_timeout(self) -> float:
         """select/kevent timeout: the shared tick, tightened to the nearest
         deadline so timeouts keep sub-tick precision (the legacy loop's
-        ``min(0.5, remaining)`` equivalent)."""
+        ``min(0.5, remaining)`` equivalent).
+
+        Resolved-but-unregistered waiters (the caller is inside its
+        terminate() grace window — unregister happens in wait_for_exit's
+        finally) are EXCLUDED: their past deadline would clamp the timeout
+        to 0 and busy-spin the watcher at a full core for the entire grace
+        window of every timed-out execution (subagent review P1, measured
+        586k iterations/sec — reintroducing exactly the supervision tax
+        this module exists to remove)."""
         now = time.monotonic()
         with self._lock:
-            deadlines = [waiter.deadline for waiter in self._waiters.values()]
+            deadlines = [
+                waiter.deadline for waiter in self._waiters.values() if not waiter.done.is_set()
+            ]
         if not deadlines:
             return _TICK_SECONDS
         return max(0.0, min(min(deadlines) - now, _TICK_SECONDS))
@@ -432,10 +473,15 @@ class ExitWatchReactor:
     def _tick(self) -> None:
         """The one shared 0.5s pass: control events, deadlines, scan-mode
         exits. Control wakes carry no flag — the caller re-derives them from
-        the (monotonic) Events themselves."""
+        the (monotonic) Events themselves. Resolved-but-unregistered waiters
+        (caller inside its terminate() window) are skipped: their flags are
+        monotonic so re-setting is harmless, but their scan poll would burn
+        a syscall per tick for the whole grace window."""
         now = time.monotonic()
         with self._lock:
             for waiter in self._waiters.values():
+                if waiter.done.is_set():
+                    continue
                 if (
                     waiter.ownership_lost.is_set()
                     or (waiter.cancelled is not None and waiter.cancelled.is_set())
@@ -453,6 +499,14 @@ class ExitWatchReactor:
         with self._lock:
             self._failed = True
             waiters = list(self._waiters.values())
+            pending, self._pending = self._pending, []
+        # The watcher thread is dead (that's why we're here): the
+        # close-on-watcher-thread hazard no longer applies, so drain pidfd
+        # state here instead of leaking one fd per in-flight execution.
+        if self._mode == "pidfd":
+            from worker.execution.exit_watch_pidfd import drain_pidfds
+
+            drain_pidfds(waiters, pending, self._selector)
         for waiter in waiters:
             waiter.watcher_dead = True
             waiter.done.set()

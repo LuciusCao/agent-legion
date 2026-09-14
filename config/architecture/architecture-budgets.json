@@ -1696,6 +1696,7 @@
     "worker/execution/__init__.py": 10,
     "worker/execution/execution_lane.py": 106,
     "worker/execution/exit_watch.py": 328,
+    "worker/execution/exit_watch_pidfd.py": 59,
     "worker/execution/heartbeat.py": 56,
     "worker/execution/heartbeat_batch.py": 183,
     "worker/execution/heartbeat_degraded.py": 35,

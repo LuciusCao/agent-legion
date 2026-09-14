@@ -40,8 +40,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `deploy/.env`——后者缺失时凭据插值为空串，seaweedfs 以空凭据生成
   s3.config，后端用真实凭据连接即鉴权失败，`/api/health` 静默
   `storage.reachable=false`、prod-up 退出码 0。修复：决策为 start 时
-  `native-prod-up.sh` 把根 `.env` 的 `AGENT_LEGION_S3_*` 凭据 export 给
-  compose（进程环境优先于 .env 插值），消除两个 env 文件的双写要求。
+  `native-prod-up.sh` 把根 `.env` 的 `AGENT_LEGION_S3_*` 凭据经 `env` 前缀
+  注入 compose 子进程（不 export 进脚本环境——Worker 会把 `os.environ`
+  复制给每个 Agent 子进程，S3 管理凭据不得流入 Agent 面），消除两个 env
+  文件的双写要求。
 - `init-worktree.sh` 种子 worker 状态副本的 host_url 无条件写 dev 端口
   （issue #625）：prod worktree 的后端在 8000（`NATIVE_BACKEND_PORT`），
   worker 对着没人监听的 8001 静默退避重试。修复：按 worktree 名分流——

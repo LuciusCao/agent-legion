@@ -275,3 +275,103 @@ def test_module_facade_matches_legacy_signature() -> None:
     modern = inspect.signature(wait_for_exit)
     assert list(legacy.parameters) == list(modern.parameters)
     assert legacy.return_annotation == modern.return_annotation
+
+
+def test_resolve_mode_auto_prefers_first_available_kernel() -> None:
+    """auto：首个可用内核后端（本机 macOS = kqueue；无内核平台 = scan）。
+    codex P2（PR #648）：只有 auto 才做可用性挑选。"""
+    mode = exit_watch._resolve_mode("auto")
+    if exit_watch._kqueue_available():
+        assert mode == "kqueue"
+    elif exit_watch._pidfd_available():
+        assert mode == "pidfd"
+    else:
+        assert mode == "scan"
+
+
+def test_resolve_mode_explicit_request_is_honored_or_scan() -> None:
+    """codex P2（PR #648）：显式请求是灰度/回退通道——可用即遵守，不可用
+    回落 scan 并打印原因；不得静默替换成另一个后端（旧 bug：Linux 显式
+    kqueue 打印 scan 却返回 pidfd；macOS 显式 pidfd 被强转 kqueue）。"""
+    if exit_watch._kqueue_available():
+        assert exit_watch._resolve_mode("kqueue") == "kqueue"
+        # macOS 有 kqueue 无 pidfd：显式 pidfd 必须回落 scan，不是 kqueue。
+        if not exit_watch._pidfd_available():
+            assert exit_watch._resolve_mode("pidfd") == "scan"
+    if exit_watch._pidfd_available():
+        assert exit_watch._resolve_mode("pidfd") == "pidfd"
+        # Linux 有 pidfd 无 kqueue：显式 kqueue 必须回落 scan，不是 pidfd。
+        if not exit_watch._kqueue_available():
+            assert exit_watch._resolve_mode("kqueue") == "scan"
+    assert exit_watch._resolve_mode("scan") == "scan"
+
+
+def test_resolve_mode_unknown_value_falls_back_to_auto() -> None:
+    """非法 env 值按 auto 处理（宽容：监督模式 typo 不该炸执行）。"""
+    mode = exit_watch._resolve_mode("bogus")
+    assert mode in ("kqueue", "pidfd", "scan")
+
+
+def test_watcher_does_not_busy_spin_during_terminate_window(reactor: ExitWatchReactor) -> None:
+    """subagent review P1：超时判定后、调用方还在 terminate() 宽限窗内时，
+    waiter 仍在注册表且 deadline 已过——_tick_timeout 不得被它钳到 0
+    （实测 58.6 万次/秒空转，重新引入本 PR 要消灭的监督税）。"""
+    reactor2 = ExitWatchReactor("scan")
+    try:
+        # 模拟超时判定后的状态：waiter 已定谳（done 已置）但调用方仍在
+        # terminate() 里等 SIGKILL 宽限——它留在注册表、deadline 在过去。
+        proc = _spawn_sleep(60)
+        waiter = reactor2.register(proc, 0.1, threading.Event(), threading.Event(), None)
+        waiter.timed_out = True
+        waiter.done.set()
+        time.sleep(1.2)  # 跨过 deadline，确认它确在"过去"
+        # 修复前：min(过去时 deadline - now, 0.5) → 0 → watcher 空转。
+        # 修复后：done-set waiter 被排除，无其他 waiter 时返回整 tick。
+        timeout = reactor2._tick_timeout()
+        assert timeout > 0.1, f"watcher would busy-spin: tick timeout {timeout}"
+        proc.kill()
+        proc.wait()
+    finally:
+        reactor2.shutdown()
+
+
+def test_double_register_resolves_displaced_waiter(reactor: ExitWatchReactor) -> None:
+    """subagent review P1-latent：同 pid 二次注册不得让首个 waiter 永久
+    悬挂（字典覆盖后没有任何唤醒源能到达它）——被顶掉的 waiter 应立即以
+    watcher_dead 定谳（调用方退回本地轮询）。"""
+    proc = _spawn_sleep(30)
+    first = reactor.register(proc, 30, threading.Event(), threading.Event(), None)
+    second = reactor.register(proc, 30, threading.Event(), threading.Event(), None)
+    assert first.done.is_set()
+    assert first.watcher_dead
+    assert not second.done.is_set()
+    proc.kill()
+    proc.wait()
+
+
+def test_degradation_path_returns_real_verdict() -> None:
+    """subagent review P2：fail-closed 降级分支的端到端钉——watcher 死亡
+    后 wait_for_exit 走 poll_wait_locally 必须返回真实判定（不是只验证
+    标志位）。子进程已退出 + watcher 已死 → 本地轮询立即定谳 exit code。"""
+    instance = ExitWatchReactor("scan")
+    try:
+        instance._fail_dead()
+        proc = subprocess.Popen(["true"], start_new_session=True)
+        code, report = _wait(instance, proc, 5)
+        assert (code, report) == (0, True)
+    finally:
+        instance.shutdown()
+
+
+def test_orderly_shutdown_resolves_parked_waiters() -> None:
+    """subagent review P2：reactor 的 shutdown() 必须先唤醒全部 parked
+    waiter（以 watcher_dead 定谳），不得让它们悬挂——fail-closed 不变量
+    不应被唯一的停止路径绕过。"""
+    instance = ExitWatchReactor("scan")
+    proc = _spawn_sleep(30)
+    waiter = instance.register(proc, 30, threading.Event(), threading.Event(), None)
+    instance.shutdown()
+    assert waiter.done.is_set()
+    assert waiter.watcher_dead
+    proc.kill()
+    proc.wait()

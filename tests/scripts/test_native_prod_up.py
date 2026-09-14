@@ -349,10 +349,10 @@ def _extract_function(name: str) -> str:
     return match.group(0)
 
 
-def test_s3_credential_export_bridges_root_env_to_compose(tmp_path: Path) -> None:
-    """#624：决策为 start 时 export_s3_credentials 把根 .env 的凭据 export
-    给 compose（进程环境优先于 deploy/.env 插值）——deploy/.env 缺凭据时
-    插值成空串、seaweedfs 以空凭据生成 s3.config，后端鉴权失败静默
+def test_s3_credentials_bridge_root_env_to_compose(tmp_path: Path) -> None:
+    """#624：决策为 start 时 collect_s3_credentials 把根 .env 的凭据收进
+    COMPOSE_S3_ENV（进程环境优先于 deploy/.env 插值）——deploy/.env 缺凭据
+    时插值成空串、seaweedfs 以空凭据生成 s3.config，后端鉴权失败静默
     reachable=false。提取函数定义后真实执行。"""
     (tmp_path / ".env").write_text(
         "# local s3\n"
@@ -366,16 +366,41 @@ def test_s3_credential_export_bridges_root_env_to_compose(tmp_path: Path) -> Non
         "cd "
         + str(tmp_path)
         + "\n"
-        + _extract_function("export_s3_credentials")
-        + "\nexport_s3_credentials\n"
-        'echo "AK=$AGENT_LEGION_S3_ACCESS_KEY SK=$AGENT_LEGION_S3_SECRET_KEY"\n'
+        + _extract_function("collect_s3_credentials")
+        + "\ncollect_s3_credentials\n"
+        "printf '%s\\n' \"${COMPOSE_S3_ENV[@]}\"\n"
     )
     result = subprocess.run(["bash", "-c", code], capture_output=True, text=True, check=True)
-    assert result.stdout.strip() == "AK=hexaccess SK=hexsecret"
+    assert result.stdout.splitlines() == [
+        "AGENT_LEGION_S3_ACCESS_KEY=hexaccess",
+        "AGENT_LEGION_S3_SECRET_KEY=hexsecret",
+    ]
 
 
-def test_s3_credential_export_prefers_existing_env_and_skips_empty(tmp_path: Path) -> None:
-    """#624：已有进程环境值优先（不覆盖）；.env 中空值/缺失键不 export。"""
+def test_s3_credentials_scoped_to_compose_invocation(tmp_path: Path) -> None:
+    """codex P1（PR #648）：凭据只随 env 前缀的 compose 调用走，不得 export
+    进脚本环境——下方启动的 Worker 复制全部 os.environ 给每个 Agent 子进
+    程，S3 管理凭据流入 Agent 面是越权。collect 后脚本自身环境必须仍无凭据。"""
+    (tmp_path / ".env").write_text(
+        "AGENT_LEGION_S3_ACCESS_KEY=hexaccess\nAGENT_LEGION_S3_SECRET_KEY=hexsecret\n",
+        encoding="utf-8",
+    )
+    code = (
+        "set -euo pipefail\n"
+        "cd "
+        + str(tmp_path)
+        + "\n"
+        + _extract_function("collect_s3_credentials")
+        + "\ncollect_s3_credentials\n"
+        'echo "leaked=${AGENT_LEGION_S3_ACCESS_KEY:-none},"\n'
+        'env "${COMPOSE_S3_ENV[@]}" sh -c \'echo "injected=$AGENT_LEGION_S3_ACCESS_KEY"\'\n'
+    )
+    result = subprocess.run(["bash", "-c", code], capture_output=True, text=True, check=True)
+    assert result.stdout.splitlines() == ["leaked=none,", "injected=hexaccess"]
+
+
+def test_s3_credentials_prefers_existing_env_and_skips_empty(tmp_path: Path) -> None:
+    """#624：已有进程环境值优先（不覆盖）；.env 中空值/缺失键不收集。"""
     (tmp_path / ".env").write_text(
         "AGENT_LEGION_S3_ACCESS_KEY=\n"
         "AGENT_LEGION_S3_SECRET_KEY=fromfile\n"
@@ -386,22 +411,59 @@ def test_s3_credential_export_prefers_existing_env_and_skips_empty(tmp_path: Pat
         "set -euo pipefail\n"
         "cd " + str(tmp_path) + "\n"
         "export AGENT_LEGION_S3_ACCESS_KEY=fromenv\n"
-        + _extract_function("export_s3_credentials")
-        + "\nexport_s3_credentials\n"
-        'echo "AK=$AGENT_LEGION_S3_ACCESS_KEY SK=${AGENT_LEGION_S3_SECRET_KEY:-<unset>}"\n'
+        + _extract_function("collect_s3_credentials")
+        + "\ncollect_s3_credentials\n"
+        "printf '%s\\n' \"${COMPOSE_S3_ENV[@]}\"\n"
     )
     result = subprocess.run(["bash", "-c", code], capture_output=True, text=True, check=True)
     # 环境值 fromenv 胜出；.env 里的空 ACCESS_KEY 不覆盖；SECRET 正常取文件值。
-    assert result.stdout.strip() == "AK=fromenv SK=fromfile"
+    assert result.stdout.splitlines() == [
+        "AGENT_LEGION_S3_ACCESS_KEY=fromenv",
+        "AGENT_LEGION_S3_SECRET_KEY=fromfile",
+    ]
 
 
-def test_s3_credential_export_wired_into_start_branch() -> None:
-    """#624 接线钉：export_s3_credentials 必须在 compose up 之前、且只在
-    LOCAL_S3_DECISION=start 分支内被调用（skip/never 形态不需要凭据）。"""
+def test_s3_credentials_wired_into_start_branch() -> None:
+    """#624 接线钉：collect_s3_credentials 只在 LOCAL_S3_DECISION=start 分支
+    内被调用（skip/never 形态不需要凭据），且 compose up 经 env 前缀消费
+    COMPOSE_S3_ENV——脚本任何位置不得出现对 S3 凭据的 export。"""
     assert 'if [[ "$LOCAL_S3_DECISION" == "start" ]]; then' in NATIVE_PROD_UP
     branch = NATIVE_PROD_UP.split('if [[ "$LOCAL_S3_DECISION" == "start" ]]; then', 1)[1]
     branch = branch.split("elif", 1)[0]
-    assert "export_s3_credentials" in branch
-    call_pos = branch.index("export_s3_credentials\n") + len("export_s3_credentials\n")
+    assert "collect_s3_credentials" in branch
+    call_pos = branch.index("collect_s3_credentials\n") + len("collect_s3_credentials\n")
     up_pos = branch.index("docker compose")
-    assert call_pos < up_pos, "export must run before compose up (env precedence)"
+    assert call_pos < up_pos, "credential collection must run before compose up"
+    assert 'env ${COMPOSE_S3_ENV[@]+"${COMPOSE_S3_ENV[@]}"}' in branch, (
+        "compose up must consume credentials via the env prefix (no export)"
+    )
+    # P1 反向钉：全脚本不得再 export S3 凭据（泄漏进 Worker/Agent 环境）。
+    assert 'export "$key=$value"' not in NATIVE_PROD_UP
+    assert "export AGENT_LEGION_S3" not in NATIVE_PROD_UP
+
+
+def test_s3_credentials_dotenv_parity_for_padded_and_quoted_values(tmp_path: Path) -> None:
+    """subagent review P2：collect_s3_credentials 的值解析须与
+    local-s3-decide.sh 的 _dotenv_value 同语义（去首尾空白 + 一层配对
+    引号）——padded 值解析漂移会让 compose 与后端拿到不同凭据，正是
+    #624 要消灭的静默 reachable=false。"""
+    (tmp_path / ".env").write_text(
+        'AGENT_LEGION_S3_ACCESS_KEY=  "padded key"  \n'
+        "AGENT_LEGION_S3_SECRET_KEY='single-quoted'\n"
+        "AGENT_LEGION_S3_BUCKET=irrelevant\n",
+        encoding="utf-8",
+    )
+    code = (
+        "set -euo pipefail\n"
+        "cd "
+        + str(tmp_path)
+        + "\n"
+        + _extract_function("collect_s3_credentials")
+        + "\ncollect_s3_credentials\n"
+        "printf '%s\\n' \"${COMPOSE_S3_ENV[@]}\"\n"
+    )
+    result = subprocess.run(["bash", "-c", code], capture_output=True, text=True, check=True)
+    assert result.stdout.splitlines() == [
+        "AGENT_LEGION_S3_ACCESS_KEY=padded key",
+        "AGENT_LEGION_S3_SECRET_KEY=single-quoted",
+    ]

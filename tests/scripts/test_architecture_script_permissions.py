@@ -58,3 +58,18 @@ def test_repo_current_index_is_all_exec() -> None:
 def test_check_skips_gracefully_without_git(tmp_path: Path) -> None:
     """无 git 元数据（合成布局/导出目录）时静默跳过，不误报。"""
     assert check_script_permissions(tmp_path) == []
+
+
+def test_symlink_and_submodule_modes_exempt() -> None:
+    """subagent review P2：symlink（120000）与 submodule（160000）条目
+    不携带可 chmod 的 mode——标记它们是不可处置的误报，豁免。"""
+    errors = check_script_exec_bits(
+        {
+            "scripts/real.sh": "100644",
+            "scripts/link.sh": "120000",
+            "vendor/sub.sh": "160000",
+            "scripts/fine.sh": "100755",
+        }
+    )
+    assert len(errors) == 1
+    assert errors[0].startswith("scripts/real.sh")

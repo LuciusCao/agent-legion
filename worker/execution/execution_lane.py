@@ -28,11 +28,12 @@ takes them, never dropped.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import queue
 import threading
 from collections.abc import Callable
-from concurrent.futures import Future
+from concurrent.futures import Future, InvalidStateError
 from typing import Any, cast
 
 # Idle threads exit after this long without work (seconds). Generous: the
@@ -60,11 +61,42 @@ def _lane_idle_timeout() -> float:
 
 class _LaneWorker(threading.Thread):
     """One pool thread: loop taking (future, fn, args) triples off the shared
-    queue; exit after one idle-timeout round."""
+    queue; exit after one idle-timeout round.
+
+    Spawn policy ledger: ``_busy`` counts taken-but-unfinished tasks. A
+    spawn is warranted exactly when demand (busy + queued + this submit)
+    exceeds the live threads — parked threads absorb work, busy threads
+    will pick from the queue on completion, and only genuine excess demand
+    grows the pool (codex P2, PR #648: submit must not grow the pool past
+    live executions — sequential submit/wait/submit must reuse threads)."""
 
     def __init__(self, pool: ExecutionLanePool, serial: int) -> None:
         super().__init__(daemon=True, name=f"agent-execution-{serial:d}")
         self._pool = pool
+
+    def _retire(self) -> None:
+        with self._pool._guard:
+            self._pool._live.discard(self)
+
+    def _rebalance_after_take(self) -> None:
+        """Mark busy, then the consumer-side spawn belt: a racing submit's
+        demand check can miss a needed spawn in the get()→here window (this
+        thread's take is not yet in ``_busy``), so the next take re-checks
+        with the fresh ledger. The stall ceiling of a miss is one
+        park-to-take handoff (microseconds), not an execution's runtime."""
+        with self._pool._guard:
+            self._pool._busy += 1
+            # Post-shutdown spawn is forbidden: shutdown already queued its
+            # sentinels per the then-live count, and a fresh thread would
+            # park on the queue with NO sentinel to consume — shutdown's
+            # join then waits out the full idle timeout for it.
+            undersupplied = (
+                not self._pool._shutdown
+                and self._pool._busy + self._pool._queue.qsize() > len(self._pool._live)
+                and len(self._pool._live) < self._pool._max_workers
+            )
+        if undersupplied:
+            self._pool._spawn()
 
     def run(self) -> None:
         while True:
@@ -73,17 +105,28 @@ class _LaneWorker(threading.Thread):
             except queue.Empty:
                 # Idle death: deregister first so shutdown's join-set can
                 # never contain a dead thread, then exit.
-                with self._pool._guard:
-                    self._pool._live.discard(self)
+                self._retire()
                 return
             if item is None:
                 # Shutdown sentinel: wake immediately instead of idling out
                 # (executor teardown must not wait out the idle timeout).
-                with self._pool._guard:
-                    self._pool._live.discard(self)
+                self._retire()
                 return
             future, fn, args = item
+            # Claim the future before running (ThreadPoolExecutor semantics):
+            # without set_running_or_notify_cancel, Future.cancel() succeeds
+            # mid-run and the set_result/set_exception below raises
+            # InvalidStateError OUTSIDE the task containment — killing this
+            # lane thread, leaking _busy, and ghosting _live (subagent review
+            # P1). False = already cancelled: nothing to report, skip the
+            # task. The whole take→finish region sits in one try/finally so
+            # ANY escape (a BaseException from the claim, thread kill) still
+            # releases the busy slot and retires the ghost thread instead of
+            # hanging shutdown(wait=True) in a join spin.
+            if not future.set_running_or_notify_cancel():
+                continue
             try:
+                self._rebalance_after_take()
                 result = cast("Callable[..., Any]", fn)(*args)
             except BaseException as exc:
                 # #204 broad-except audit: lane 线程的存活语义——同
@@ -97,9 +140,19 @@ class _LaneWorker(threading.Thread):
                 # The executor's reap treats a failed future exactly like a
                 # ThreadPoolExecutor one (traceback + Host requeue on lease
                 # expiry); the lane thread itself stays alive.
-                future.set_exception(exc)
+                # Cancel raced the finish: InvalidStateError would escape the
+                # task containment and kill this thread (subagent review P1).
+                with contextlib.suppress(InvalidStateError):
+                    future.set_exception(exc)
             else:
-                future.set_result(result)
+                with contextlib.suppress(InvalidStateError):
+                    future.set_result(result)
+            finally:
+                # Task done (or the containment itself failed): the busy
+                # slot releases on every path out of the region, so no
+                # escape can leak the ledger and starve later spawns.
+                with self._pool._guard:
+                    self._pool._busy = max(0, self._pool._busy - 1)
 
 
 class ExecutionLanePool:
@@ -114,6 +167,9 @@ class ExecutionLanePool:
         self._queue: queue.Queue[tuple[Future, Any, tuple] | None] = queue.Queue()
         self._guard = threading.Lock()
         self._live: set[_LaneWorker] = set()
+        # Tasks taken off the queue but not finished (see _LaneWorker's
+        # ledger note). Invariant: _busy <= len(_live).
+        self._busy = 0
         self._serial = 0
         self._shutdown = False
 
@@ -124,7 +180,7 @@ class ExecutionLanePool:
         with self._guard:
             return len(self._live)
 
-    def _spawn(self) -> _LaneWorker:
+    def _spawn(self) -> None:
         # Serial/name assignment and the live-set insert share one critical
         # section; worker.start() stays OUTSIDE the lock (the new thread's
         # first idle-death deregister must not wait on our guard — and the
@@ -134,18 +190,29 @@ class ExecutionLanePool:
             worker = _LaneWorker(self, self._serial)
             self._live.add(worker)
         worker.start()
-        return worker
 
     def submit(self, fn, *args):  # type: ignore[no-untyped-def]
-        """Queue one task; spawn a thread when the pool is below max_workers
-        (see the undersubscription note in the module docstring). Mirrors
+        """Queue one task; spawn a thread only when no idle thread can take
+        it and the pool is below max_workers (codex P2, PR #648). Mirrors
         ThreadPoolExecutor.submit's Future contract, including the
-        pre-shutdown RuntimeError."""
+        pre-shutdown RuntimeError.
+
+        The demand check is ``busy + queued + this submit > live threads``:
+        every live thread either is running a task (and takes the next
+        queued one on completion) or is parked on the queue — either way it
+        will serve the demand, so the pool only grows when demand exceeds
+        ALL live threads, capped at max_workers (beyond which the task
+        queues — the ThreadPoolExecutor semantics). Checking idle slots
+        instead has a churn flaw: a submit racing the previous task's
+        slot-return sees idle=0 and spawns a thread that then parks for the
+        full idle timeout — steady sequential traffic kept spawning strays
+        (codex P2 round 2)."""
         with self._guard:
             if self._shutdown:
                 raise RuntimeError("cannot submit to a shutdown ExecutionLanePool")
-            undersubscribed = len(self._live) < self._max_workers
-        if undersubscribed:
+            demand = self._busy + self._queue.qsize() + 1
+            spawn = demand > len(self._live) and len(self._live) < self._max_workers
+        if spawn:
             self._spawn()
         future: Future = Future()
         self._queue.put((future, fn, args))

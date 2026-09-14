@@ -34,13 +34,17 @@ def parse_index_modes(lines: Iterable[str]) -> dict[str, str]:
 
 
 def check_script_exec_bits(index_modes: dict[str, str]) -> list[str]:
-    """Every tracked ``*.sh`` must be mode 100755."""
+    """Every tracked regular-file ``*.sh`` must be mode 100755.
+
+    Symlinks (120000) and submodule entries (160000) are exempt: neither
+    carries a chmod-able mode, so flagging them is an unactionable false
+    positive (subagent review P2)."""
     return [
         f"{path}: tracked shell script is {mode}, must be 100755 "
         "(chmod +x and commit the mode change; direct `./scripts/...` "
         "invocations fail on fresh clones otherwise, #623)"
         for path, mode in sorted(index_modes.items())
-        if path.endswith(".sh") and mode != "100755"
+        if path.endswith(".sh") and mode.startswith("100") and mode != "100755"
     ]
 
 
