@@ -17,13 +17,26 @@
   background: #ffffff;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 480px;
   overflow: auto;
+}
+
+/* JSON 兜底着色（#255）：键名/字符串/数字三色近似 JsonTree 的 vscode 主题。 */
+.jsonKey {
+  color: #0451a5;
+}
+
+.jsonString {
+  color: #a31515;
+}
+
+.jsonNumber {
+  color: #098658;
 }
 
 .markdownBody {

@@ -693,8 +693,13 @@ describe('JobDetailPage', () => {
           return Promise.resolve({
             ok: true,
             json: async () => ({
+              // 审核 P3 集成钉：fixture 用 questions.json（复数，真实
+              // 产物名）——它在 QUESTION_CONSUMED_ARTIFACTS 里，断言才
+              // 真正经过 EntityPanel 的去重接线（旧 fixture question.json
+              // 单数不在名单内，断言被折叠态平凡满足）。
               ...mockDetail,
               job: { ...mockDetail.job, source_type: 'question' },
+              artifacts: ['questions.json'],
             }),
           })
         }
@@ -711,9 +716,13 @@ describe('JobDetailPage', () => {
     expect(iframe?.getAttribute('srcdoc')).toContain(
       'agent-legion-preview-panel'
     )
-    // issue #11：结构化面板在上，通用产物预览在下。
+    // issue #11：结构化面板在上，通用产物预览在下。#255：question 任务的
+    // questions.json 已被结构化面板消费，通用面板默认折叠 + 去重（原始
+    // 卡片不占屏）。
     expect(screen.getByTestId('artifact-preview-panel')).toBeInTheDocument()
-    expect(screen.getByText('question.json')).toBeInTheDocument()
+    // 去重接线钉：questions.json 被结构化面板消费 → 摘要明示「已在上方
+    // 展示」（若 EntityPanel 的 structuredHidden 接线被删，此断言失败）。
+    expect(screen.getByText(/另 1 个已在上方展示/)).toBeInTheDocument()
   })
 
   it('renders generic artifact preview for video jobs (issue #11)', async () => {
@@ -735,10 +744,14 @@ describe('JobDetailPage', () => {
 
     renderPage()
     // 未知 source_type 不再白屏：通用产物预览兜底（video 空态 stub 已删）。
+    // #255：非 question 实体无去重名单，产物默认可见但面板默认折叠——
+    // 摘要行可见、点开见卡片。
     await waitFor(() => {
       expect(screen.getByTestId('artifact-preview-panel')).toBeInTheDocument()
     })
-    expect(screen.getByText('question.json')).toBeInTheDocument()
+    expect(screen.getByText('1 个文件')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /产物预览/ }))
+    expect(await screen.findByText('question.json')).toBeInTheDocument()
   })
 
   it('renders job token usage dialog when open', async () => {
@@ -785,6 +798,8 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await screen.findByText('提取')
+    // #255：左栏通用预览默认折叠，先展开——卡片内容断言依赖其取数渲染。
+    fireEvent.click(screen.getByRole('button', { name: /产物预览/ }))
 
     // Open the artifact list, then close it without selecting.
     await act(async () => {
@@ -844,6 +859,8 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await screen.findByText('提取')
+    // #255：左栏通用预览默认折叠，先展开——错误占位断言依赖卡片取数渲染。
+    fireEvent.click(screen.getByRole('button', { name: /产物预览/ }))
     await act(async () => {
       screen.getByLabelText('产物文件').click()
     })

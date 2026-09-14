@@ -7,6 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Fixed
+<<<<<<< HEAD
 - 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
   `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
   部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5
@@ -23,6 +24,17 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   pyproject 版本；比较复用 check_versions 的 normalize（PEP 440 预发布
   与 tag 形归一等价），钉点缺失或形态被改按 fail-closed 报错。契约
   测试 `tests/scripts/test_check_release_pins.py`（8 例）。
+=======
+- job detail 左栏可读性回归（issue #255，#248 后续）：结构化可视化恢复
+  主视图地位，原始文件降为次要/兜底视图——「产物预览（N 个文件）」通用
+  面板默认折叠为一行摘要（点击展开），非 question 实体的 job 不再被一整
+  屏原始 JSON 卡片取代（原 #248 前该类 job 左栏为空白）；question 任务的
+  questions.json / comprehension_info.json（含 reviewed→raw 回落链）与两份
+  评审报告已被结构化面板消费，同名原始卡片默认去重隐藏（摘要行提示
+  「另 N 个已在上方展示」，勾选菜单可会话内恢复，不写 workspace 配置）；
+  JSON 卡片兜底可读性（超限 / 解析失败的 .json 进不了树视图时改为缩进
+  排版 + 键名/字符串/数字着色，不再纯文本堆放）。
+>>>>>>> e5dd2b67b (fix(ui)：#255 job detail 左栏可读性——结构化面板消费的产物默认去重/通用预览默认折叠)
 
 ### Changed
 - 原生形态 velites 二进制收敛为 PATH 单一副本（issue #507）：解析顺序从

@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   evaluateQuestionGates,
   evaluateReviewAttempted,
+  QUESTION_CONSUMED_ARTIFACTS,
   QUESTION_PREVIEW_SECTIONS,
 } from './questionPreviewManifest'
 import type { JobDetail } from '../../types/jobTypes'
@@ -121,5 +124,34 @@ describe('questionPreviewManifest', () => {
     expect(gates.possibleErrors).toBe(false)
     expect(evaluateReviewAttempted(null, 'keyInfo')).toBe(false)
     expect(evaluateReviewAttempted(null, 'possibleErrors')).toBe(false)
+  })
+})
+
+describe('QUESTION_CONSUMED_ARTIFACTS（结构化面板消费产物，#255）', () => {
+  // 名单从 questionPanel.html 的取数代码静态提取（readArtifact 调用点 +
+  // 回落链数组），与 QUESTION_CONSUMED_ARTIFACTS 全等——bundle 改数据源
+  // 而名单没跟上时，通用面板会漏去重（原始 JSON 重复占屏）。
+  const bundleSource = readFileSync(
+    join(
+      import.meta.dirname,
+      '../../features/previewPanel/builtin/questionPanel.html'
+    ),
+    'utf8'
+  )
+  const bundleArtifactNames = new Set<string>()
+  for (const m of bundleSource.matchAll(
+    /readJsonArtifactOrNull\('([^']+)'\)/g
+  )) {
+    bundleArtifactNames.add(m[1])
+  }
+  // 回落链数组（firstNonNull(['reviewed.json', 'raw.json'])）。
+  for (const m of bundleSource.matchAll(/firstNonNull\(\[([^\]]+)\]/g)) {
+    for (const name of m[1].matchAll(/'([^']+)'/g))
+      bundleArtifactNames.add(name[1])
+  }
+
+  it('与内置 bundle 实际读取的产物名集合全等（防漂移）', () => {
+    const declared = new Set(QUESTION_CONSUMED_ARTIFACTS)
+    expect([...declared].sort()).toEqual([...bundleArtifactNames].sort())
   })
 })

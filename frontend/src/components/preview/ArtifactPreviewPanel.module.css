@@ -10,6 +10,18 @@
   gap: 8px;
 }
 
+/* 折叠开关：整行摘要可点，视觉上仍是面板标题而非独立按钮。 */
+.toggleButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
+
 .title {
   font-size: 16px;
   font-weight: 600;
