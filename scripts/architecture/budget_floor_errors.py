@@ -32,10 +32,23 @@ def baseline_raise_error(
     )
 
 
-def exemption_raise_error(path: str, ceiling: int, floor: int, anchor: str | None) -> str:
-    """Exemption ceiling rose above the committed floor."""
+def exemption_raise_error(
+    path: str,
+    ceiling: int,
+    floor: int,
+    anchor: str | None,
+    *,
+    growth_allowance: int = 0,
+) -> str:
+    """Exemption ceiling rose above the committed floor plus the allowance band.
+
+    #641 re-file channel: a re-file within the growth allowance needs no
+    ceremony; beyond it the exemption must carry a future ``expires`` date
+    (time-boxed raise, hard-failed at expiry by ``check_invariants``).
+    """
     return (
         f"{path}: exemption ceiling {ceiling} rose above committed "
-        f"ceiling {floor}{_anchor_suffix(anchor)}; exemption ceilings only ratchet "
-        "down — re-file the exemption or split the file"
+        f"ceiling {floor} + growth allowance {growth_allowance}{_anchor_suffix(anchor)}; "
+        "beyond the allowance band a re-file must carry a future expires date "
+        "(#641 time-boxed raise) or split the file"
     )

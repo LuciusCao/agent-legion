@@ -676,9 +676,18 @@ server/app/
   ratchet 脚本不会提高 ceiling（`--rebase` / `--bump` 上抬通道已随 #209 移除）；
   `scripts/architecture/budget_monotonicity.py` 在 `check_architecture` 中按 git 锚点
   （HEAD / HEAD^）对照近期提交的基线与豁免冻结值，拒绝**已跟踪条目**的任何
-  ceiling 上抬——手工改 `architecture-budgets.json` 抬高数值、或抬高豁免 ceiling
-  同样会被拒绝。ceiling 上抬的唯一合法通道是带 `remove_when` 的
-  `architecture.file_budget` 豁免。改名绕过已随 #236 加固：检测交给 git 自身的
+  baseline ceiling 上抬——手工改 `architecture-budgets.json` 抬高数值同样会被拒绝。
+  baseline 上抬的唯一合法通道是带 `remove_when` 的
+  `architecture.file_budget` 豁免。#641 增长容忍带（`production.growth_allowance`，
+  当前 15）：有效行可超过注册表 ceiling 15 行而不报错，用于吸收 prettier 80 列
+  重排（实测 +5）与小型功能增长；带内超出不注册新条目、永不被 ratchet 吸收——
+  与 buffer 的本质区别：buffer 是每次 ratchet 以 actual + buffer 重新灌满的可再生
+  余量，allowance 是相对冻结天花板的一次性额度，文件收缩后由 staleness 检查
+  自动回收。已有豁免的重签（#641）：重签 ceiling 在 floor + growth_allowance
+  带内直接合法；超出带必须带 `expires: YYYY-MM-DD`（时间盒上抬），
+  `scripts/check_invariants.py` 到期硬失败（续期须重新论证，否则收缩文件），
+  `scripts/quality/exemptions.py` 同时校验日期格式与 ceiling 与实际行数的带内
+  一致性。改名绕过已随 #236 加固：检测交给 git 自身的
   rename 相似度引擎（`git diff --find-renames`，含未提交改动），命中的新路径沿用
   旧路径地板——改名不再重置 ceiling，真正的全新文件首次登记
   （actual + buffer）不受约束（删旧建新的正常重构不会误判，因为只有 git 判定

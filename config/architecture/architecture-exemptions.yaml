@@ -1,5 +1,62 @@
 exemptions:
 - check: architecture.file_budget
+  path: scripts/architecture/budget_monotonicity.py
+  reason: 'Issue #641 opens the exemption re-file channel: the exemption layer of
+    ceiling_regression_errors now admits a re-file within growth_allowance of the floor
+    and an arbitrarily high one carrying a future expires date (FrozenCeiling NamedTuple
+    plus the banded judgment) — 4 effective lines past the 81 baseline. The NamedTuple
+    lives here rather than file_budgets to keep the guard importing its producer only
+    one way. Remove when the re-file judgment folds into budget_floor_errors or a
+    budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 95
+- check: architecture.file_budget
+  path: scripts/architecture/file_budgets.py
+  reason: 'Issue #641 threads the growth_allowance band and the FrozenCeiling expiry through
+    the budget evaluator: _build_frozen_ceilings returns ceiling+expires pairs and
+    check_file_budgets passes the policy band into the monotonicity guard — 3 effective
+    lines past the 168 baseline. The evaluator is the single place ceilings, exemptions
+    and the band intersect. Remove when the frozen-ceiling plumbing moves into
+    budget_monotonicity wholesale or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 181
+- check: architecture.file_budget
+  path: scripts/check_invariants.py
+  reason: 'Issue #641 wires the budget policy growth_allowance into validate_exemptions so
+    the exemption ceiling check shares the same band as the file-budget gate, and the
+    load failure surfaces as an explicit error — 3 effective lines past the 69 baseline.
+    The alternative is exempting ceiling drift between the two gates (a misregistered
+    exemption would only fail one of them). Remove when the two registry validators merge
+    into a single entry point or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 82
+- check: architecture.file_budget
+  path: scripts/quality/exemptions.py
+  reason: 'Issue #641 adds the optional expires deadline to the exemption schema: the field,
+    the strict-ISO-date validator with the today-parameterized hard failure on expiry, and
+    the growth_allowance parameter that keeps the ceiling-vs-actual check consistent with
+    the file-budget gate — 21 effective lines past the 113 baseline. The expiry wording is
+    the gate copy developers see, so it lives with the validator. Remove when expiry checks
+    move into issue_state expiry governance or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 144
+- check: architecture.file_budget
+  path: scripts/architecture/budget_policy.py
+  reason: 'Issue #641 adds the growth_allowance policy knob: one dataclass field, the
+    _parse_growth_allowance loader (optional, non-negative, default 0 keeps the strict
+    pre-#641 line) and its _check_keys whitelist entry — 9 effective lines past the 153
+    baseline. The guard files are budgeted by their own gate; the alternative (parking
+    the parser in a sibling module) would split the typed policy loader in two for a
+    nine-line feature. Remove when the allowance parser folds into a shared optional-int
+    helper or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/641
+  ceiling: 172
+- check: architecture.file_budget
   path: velites/src/contract.rs
   reason: 'Issue #542 migrates the machine-readable contract location to the skill-root contract.yaml:
     the parse tiering (root wins completely and fails closed on a malformed file, embedded-block fallback
