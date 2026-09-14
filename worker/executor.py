@@ -152,7 +152,7 @@ def main() -> int:
     # #647 三期：idle-dying 执行车道取代 ThreadPoolExecutor——上限仍是
     # MAX_DYNAMIC_CONCURRENCY（执行等待期仍持线程 park，池小于声明容量会钳
     # 本地并发），但空闲线程超时退出，线程数跟随在飞执行而非历史峰值
-    # （实测残留 1177 根永不收缩的 idle worker 的归宿）。
+    # （高并发回落后按历史峰值驻留的 idle worker 的归宿）。
     pool = ExecutionLanePool(MAX_DYNAMIC_CONCURRENCY)
     # run_execution 的循环不变参数（client/claim 逐单在前，其余两组不变）；
     # uploads/status 实例在本循环内从不重建，热更只调实例内部状态。

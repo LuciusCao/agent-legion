@@ -1,8 +1,9 @@
 """Idle-dying execution lane pool (#647 phase 3 — the pool-semantics half).
 
 Why not ``ThreadPoolExecutor``: its threads NEVER shrink — a fleet that once
-peaked at 1600 submissions keeps ~1024 idle workers forever (#647 measured
-1177 never-shrinking idle workers on top of the 793 wait loops). Phase 2
+peaked at high submission counts keeps its peak-sized idle workforce forever
+(#647 measured the residue: never-shrinking idle workers on top of the wait
+loops). Phase 2
 (``exit_watch.py``) removed the per-execution wakeup tax; this module removes
 the residency tax: threads spawn on demand up to ``max_workers`` and die
 after ``idle_timeout`` without work, so the pool tracks live executions

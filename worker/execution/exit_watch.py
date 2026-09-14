@@ -462,7 +462,19 @@ class ExitWatchReactor:
                     with contextlib.suppress(OSError, BlockingIOError):
                         os.read(self._wakeup_r, 65536)
                     continue
-                exited.append(key.data)
+                waiter = key.data
+                # Unregister the ready fd IMMEDIATELY (codex P2 round 3):
+                # pidfd readability is sticky after exit, so leaving it
+                # armed makes every subsequent select() return instantly
+                # until the woken execution thread reaches its finally
+                # unregister — a full-core spin window that batch exits and
+                # scheduler congestion widen. The fd itself stays open
+                # (close stays with the normal unregister/drain paths);
+                # only the selector stops watching it.
+                from worker.execution.exit_watch_pidfd import release_pidfd_selector_only
+
+                release_pidfd_selector_only(waiter, self._selector)
+                exited.append(waiter)
             return exited
         time.sleep(timeout)
         return []

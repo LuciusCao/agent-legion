@@ -61,6 +61,21 @@ def release_pidfd(waiter: _Waiter, selector: selectors.BaseSelector | None) -> N
             os.close(fd)
 
 
+def release_pidfd_selector_only(waiter: _Waiter, selector: selectors.BaseSelector) -> None:
+    """Unregister the fd WITHOUT closing it (codex P2 round 3): pidfd
+    readability is sticky after exit, so a ready-but-still-armed fd makes
+    every select() return instantly until the woken execution thread
+    reaches its finally unregister — the watcher would spin a core for the
+    whole handoff window. The fd stays open; the normal unregister/drain
+    paths keep ownership of the close (unregister on a not-currently-
+    registered fd is the racy no-op the suppress covers — e.g. the waiter
+    was already unregistered by the death paths)."""
+    fd = waiter.pidfd
+    if fd >= 0:
+        with contextlib.suppress(KeyError, ValueError):
+            selector.unregister(fd)
+
+
 def drain_pidfds(
     waiters: list[_Waiter],
     pending: list[tuple[str, _Waiter]],

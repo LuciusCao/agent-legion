@@ -8,8 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ### Performance
 - executor 生命周期监督事件化（issue #647，#578 二三期）：每个执行一根
-  线程的 `wait_for_exit` 0.5s 轮询循环（#647 实测 800 档 = 793 根轮询线
-  程、每秒 1600 次无效唤醒，单机容量顶到 ~800 的主因之一）改为进程级
+  线程的 `wait_for_exit` 0.5s 轮询循环（高并发档位下轮询线程数与在飞执行
+  数同阶、每执行每秒两次无效唤醒，是单机容量的主要监督税之一）改为进程级
   单例 `worker/execution/exit_watch.py`——一根 watcher 线程经内核事件
   （macOS kqueue `EVFILT_PROC`+`NOTE_EXIT` / Linux pidfd+selector；均不可
   用时回落共享 0.5s tick 的单线程扫描，`AGENT_WORKER_EXIT_WATCH` 显式
@@ -25,8 +25,8 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   分支等价，`run.py` / `code_runner.py` 调用面零改动换接；#564
   per-execution 互斥锁在事件模型下的等价性有专项测试钉住。
 - executor 执行车道 idle 回收（issue #647 三期）：`ThreadPoolExecutor`
-  线程永不收缩（实测 800 档稳态残留 1177 根永不收缩的 idle worker），
-  换为 `worker/execution/execution_lane.py`——按需起线程（上限仍为声明
+  线程永不收缩（高并发回落后仍按历史峰值驻留大批 idle worker），换为
+  `worker/execution/execution_lane.py`——按需起线程（上限仍为声明
   容量：执行等待期仍持线程 park，池小于容量会钳本地并发）、空闲
   `AGENT_WORKER_LANE_IDLE_TIMEOUT`（默认 30s，env 可调）后自动退出，线程
   数跟随在飞执行而非历史峰值；submit/shutdown/Future 契约与
