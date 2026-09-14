@@ -33,7 +33,10 @@ WORKER_BIND="${WORKER_BIND:-127.0.0.1}"
 # 启动的（双实例防线），down 同 bind 跑一遍却「停不掉它」，用户只能
 # kill。因此通配 bind 未命中任何 pid 且同端口同族仍有任意监听时改判
 # 未完全停止（rc=1）并指引：这是用户按 up 的提示来重启、却停在「具体
-# bind 旧实例仍在」的半途态，静默 0 会伪装成成功。
+# bind 旧实例仍在」的半途态，静默 0 会伪装成成功。恢复操作序列（.env
+# 已持久携带新 bind 时）：NATIVE_BACKEND_BIND=<旧地址> make prod-down 用
+# 旧地址定位停掉残留实例，再按新 bind 起（见
+# docs/agent-worker-deployment.md 原生形态段）。
 
 listener_display() {
     local host="$1"
@@ -72,9 +75,11 @@ listener_pids() {
         }' | sort -u
 }
 
-# 同端口同族是否「任意地址」有监听（不限 bind 形态，与 up 的同名 helper
-# 同语义；up 在通配 bind 幂等兜底用它，down 在通配 bind 未命中 pid 时
-# 用它识别「仍在监听但 bind 形态不同」的残留实例）。
+# 同端口同族是否「任意地址」有监听（不限 bind 形态）：up 的通配 bind
+# 幂等兜底为取观测地址升级成了 port_first_listener_display（#486 收尾），
+# 本脚本只需要布尔判定，保留同款 lsof 查询的布尔形态；up 在通配 bind
+# 幂等兜底用它识别残留实例，down 在通配 bind 未命中 pid 时用它识别
+# 「仍在监听但 bind 形态不同」的残留实例。
 port_has_any_listener() {
     local port family
     port="$1"

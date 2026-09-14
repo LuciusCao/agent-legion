@@ -12,7 +12,25 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   （`，` `（`）」会把标点首字节误并入变量名——`set -u` 下对已赋值变量报
   「unbound variable」并退出 1，bind 非 loopback 的启动路径整体不可用
   （bash 3.2 与 5 皆然）。#484 新增的整体执行桩测试首跑即抓到；四处
-  提示文案变量统一花括号化，并以形态断言钉死。
+  提示文案变量统一花括号化，并以形态断言钉死。#484 审查收口发现同型
+  残留散布在其他脚本（`ensure-velites.sh` 三处——它是
+  `native-prod-up.sh` 的直接 callee；`install-deps.sh` 全新安装主路径
+  的「已生成」提示；`clean-worktree.sh` 的 S3 清理降级提示），一并
+  花括号化，形态守卫从「native-prod-up.sh 的提示文案」扩围到全仓
+  `scripts/**/*.sh` 对「裸 `$VAR` 紧跟非 ASCII 字符」零命中——执行级
+  覆盖对此不可靠：多数桩测试跑在无 locale 的子进程（bash 按 C 字节流
+  处理，该断裂不触发）。
+- 通配 bind 跳过启动后的健康探测空转（issue #486 审查收口）：残留实例
+  绑非 loopback 具体地址（如 192.0.2.1:8000）而请求 `0.0.0.0` 时，
+  `wildcard_bind_skip` 正确拦截启动，但健康循环仍按请求 bind 派生地址
+  （0.0.0.0→127.0.0.1）探测 loopback——必然无人监听，150 次空转 5 分钟
+  后 exit 1，错误信息指向根本没启动的进程。修复：跳过的组件改按
+  lsof 实际观测到的监听地址探测（`port_has_any_listener` 升级为
+  `port_first_listener_display`，返回首个命中监听的 display 地址；IPv6
+  地址经 `observed_health_host` 补 URL 方括号），观测地址不可解析（lsof
+  通配显示形态，理论不应发生）时回落按 bind 探测并打提示；终态文案区分
+  「跳过（已在 <观测地址> 运行）」与正常就绪，并新增非 loopback 残留
+  （STUB_LISTENERS=192.0.2.1:8000）的整体执行桩测试钉死。
 - 发布钉点漂移（issue #504，PR #503 codex P2）：0.7.0 发布时
   `install-worker.sh` 默认版本停在 worker 0.6.1 / velites 0.5.0、独立
   部署 compose 的 GHCR 镜像默认 tag 停在 0.6.0，一键安装拿不到协议 v5
@@ -30,12 +48,17 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   dotenv 解析先收敛为公共原语 `scripts/lib/dotenv.sh`（`dotenv_value` /
   `dotenv_value_first`，语义对齐原 local-s3-decide.sh 的
   lookup/lookup_first），`local-s3-decide.sh`（stdout 协议与退出码不变）
-  与 `dev_stack.sh`（read_env_value 退役）同步收敛。同 PR 处理 #482
+  与 `dev_stack.sh`（read_env_value 退役）同步收敛。四变量同步收录进
+  `.env.example`（注释形态，注明默认值、「进程环境 > .env」优先级与
+  bind 的安全语义）。同 PR 处理 #482
   follow-up 的通配 bind 幂等边界：请求 `0.0.0.0`/`::` 而同端口同族已有
   具体地址监听时（原幂等判定拦不住），视为已在运行并跳过启动、打醒目
-  提示——双实例连同一库会造成单副本退化（SSE 分裂/限速稀释/暂停互踩）；
+  提示——双实例连同一库会造成单副本退化（SSE 分裂/限速稀释/暂停互踩），
+  跳过后健康探测按实际观测到的监听地址进行（见 Fixed 的对应条目）；
   `native-prod-down.sh` 对应的通配 bind 残留态（旧实例绑具体地址、
-  listener_pids 未命中）改判未完全停止（rc 1）并指引，不再伪装成功。
+  listener_pids 未命中）改判未完全停止（rc 1）并指引，不再伪装成功
+  （`.env` 持久携带新 bind 时按旧地址环境覆盖恢复的操作序列写入
+  `docs/agent-worker-deployment.md` 原生形态段）。
 - `native-prod-up.sh` 整体执行的行为级桩测试
   `tests/scripts/test_native_prod_up_exec.py`（issue #484）：合成仓库
   布局 + PATH 桩（lsof/npm/uv/docker/curl/caffeinate/ensure-velites，

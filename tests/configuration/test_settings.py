@@ -437,3 +437,18 @@ def test_env_example_documents_skills_runs_dir():
     example_path = Path(__file__).resolve().parents[2] / ".env.example"
     example = example_path.read_text(encoding="utf-8")
     assert "AGENT_LEGION_SKILLS_RUNS_DIR=" in example
+
+
+def test_env_example_documents_native_prod_vars():
+    """原生生产形态的 NATIVE_* 四变量收录在 .env.example（#486）：脚本侧
+    已改为「进程环境 > 根 .env」两级来源，模板必须同步收录（注释形态，
+    默认值见文案）——否则用户无从发现该持久化载体。"""
+    example_path = Path(__file__).resolve().parents[2] / ".env.example"
+    example = example_path.read_text(encoding="utf-8")
+    for key in (
+        "NATIVE_BACKEND_PORT",
+        "NATIVE_WORKER_PORT",
+        "NATIVE_BACKEND_BIND",
+        "NATIVE_WORKER_BIND",
+    ):
+        assert f"# {key}=" in example, f"{key} is missing from .env.example"

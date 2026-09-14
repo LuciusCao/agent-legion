@@ -384,7 +384,7 @@ def test_binds_specific_interface_behavior() -> None:
     ]
 
 
-# --- #486：NATIVE_* 四变量的 .env 支持（进程环境 > 根 .env > 默认） --—
+# --- #486：NATIVE_* 四变量的 .env 支持（进程环境 > 根 .env > 默认） ---
 
 NATIVE_PROD_DOWN = (ROOT / "scripts" / "native-prod-down.sh").read_text(encoding="utf-8")
 DOTENV_LIB = (ROOT / "scripts" / "lib" / "dotenv.sh").read_text(encoding="utf-8")
@@ -542,27 +542,37 @@ def test_wildcard_bind_does_not_start_second_instance_over_existing_listener() -
     """通配 bind（0.0.0.0/::）+ 同端口同族已有具体地址监听：port_listening
     判否（通配归一为 *，只匹配同族通配监听），但不得照常起进程——那会
     造出双实例连同一库（单副本退化：SSE 分裂/限速稀释/暂停互踩）。必须
-    经 port_has_any_listener 兜底视为已运行、跳过启动并打醒目提示（含
-    native-prod-down.sh 指引）。接线断言（行为级覆盖见整体桩测试）。"""
-    assert "port_has_any_listener" in NATIVE_PROD_UP
+    经 wildcard_bind_skip 兜底视为已运行、跳过启动并打醒目提示（含
+    native-prod-down.sh 指引）。接线断言（行为级覆盖见整体桩测试）；
+    #486 收尾 P2：兜底同时经 observed_health_host 把健康探测地址换成
+    观测到的监听地址（跳过的实例可能绑非 loopback 地址，按请求 bind 派生
+    探测会空转 5 分钟误报失败）。"""
+    assert "port_first_listener_display" in NATIVE_PROD_UP
     assert "wildcard_bind_skip" in NATIVE_PROD_UP
-    # 兜底分支在两个组件的启动判定里都被消费（elif，port_listening 之后）。
-    assert 'elif wildcard_bind_skip "$BACKEND_BIND" "$BACKEND_PORT" "后端"; then' in NATIVE_PROD_UP
-    assert 'elif wildcard_bind_skip "$WORKER_BIND" "$WORKER_PORT" "Worker"; then' in NATIVE_PROD_UP
+    # 兜底分支在两个组件的启动判定里都被消费（elif，port_listening 之后；
+    # 组件名不进参数——文案在调用点就地展开，函数只做判定与观测地址）。
+    assert 'elif wildcard_bind_skip "$BACKEND_BIND" "$BACKEND_PORT"; then' in NATIVE_PROD_UP
+    assert 'elif wildcard_bind_skip "$WORKER_BIND" "$WORKER_PORT"; then' in NATIVE_PROD_UP
     # 提示文案点名风险与处置路径（用户以为换了 bind 其实没换——可由提示发现）。
     assert "不并行启动第二个实例" in NATIVE_PROD_UP
     assert "双实例连同一库会造成单副本退化" in NATIVE_PROD_UP
     assert "./scripts/native-prod-down.sh" in NATIVE_PROD_UP
+    # 跳过后健康探测改用观测地址：两个组件的探测地址都经 observed_health_host
+    # 重写，终态文案区分「跳过（已在 <观测地址> 运行）」与正常就绪。
+    assert "observed_health_host" in NATIVE_PROD_UP
+    assert 'BACKEND_HEALTH_HOST="$(observed_health_host' in NATIVE_PROD_UP
+    assert 'WORKER_HEALTH_HOST="$(observed_health_host' in NATIVE_PROD_UP
+    assert "视为已在 ${WILDCARD_SKIP_ADDR} 运行，跳过" in NATIVE_PROD_UP
 
 
 def test_wildcard_bind_helpers_behavior() -> None:
-    """is_wildcard_bind / port_has_any_listener 行为：通配形态识别两值；
-    port_has_any_listener 对真实监听判真、无监听判假（提取函数后真实执行，
-    lsof 不经桩——真实进程表）。"""
+    """is_wildcard_bind / port_first_listener_display 行为：通配形态识别
+    两值；观测函数对真实监听返回其 display 地址、无监听返回空（提取函数
+    后真实执行，lsof 不经桩——真实进程表）。"""
     sources = []
     for name in (
         "listener_family",
-        "port_has_any_listener",
+        "port_first_listener_display",
         "is_wildcard_bind",
     ):
         match = re.search(rf"^{name}\(\) \{{.*?^\}}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
@@ -595,20 +605,76 @@ def test_wildcard_bind_helpers_behavior() -> None:
     sock.bind(("127.0.0.1", port))
     sock.listen(1)
     try:
-        for family, expected in (("4", "yes"), ("6", "no")):
+        for family, expected in (("4", f"127.0.0.1:{port}"), ("6", "")):
             r3 = subprocess.run(
                 [
                     "bash",
                     "-c",
-                    funcs + f'\nport_has_any_listener "{port}" "{family}" && echo yes || echo no\n',
+                    funcs
+                    + '\nobs="$(port_first_listener_display "$1" "$2")"\nprintf "[%s]\\n" "$obs"\n',
+                    "observe",
+                    str(port),
+                    family,
                 ],
                 capture_output=True,
                 text=True,
                 check=True,
             )
-            assert r3.stdout.strip() == expected, f"family={family}: {r3.stdout.strip()!r}"
+            assert r3.stdout.strip() == f"[{expected}]", f"family={family}: {r3.stdout.strip()!r}"
     finally:
         sock.close()
+
+
+def test_observed_health_host_behavior() -> None:
+    """observed_health_host 归一语义（#486 收尾 P2，提取函数后真实执行）：
+    入参是 lsof 的 display:port 观测值，剥掉「:端口」精确后缀后取 host——
+    IPv4 具体地址原样、括号化 IPv6 幂等（裸 IPv6 字面量无端口后缀，不受
+    剥离影响）；不可解析形态（空 / *:port / [::]:port 通配显示，具体地址
+    无从探测）回落按请求 bind 派生的 fallback，通配显示额外向 stderr 打
+    提示。"""
+    sources = []
+    for name in ("health_host", "wildcard_observation_resolvable", "observed_health_host"):
+        match = re.search(rf"^{name}\(\) \{{.*?^\}}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
+        assert match, f"{name} 函数定义缺失"
+        sources.append(match.group(0))
+    funcs = "\n".join(sources)
+    cases = [
+        # (display 观测值, port, fallback, 期望探测 host)
+        ("192.0.2.1:8000", "8000", "127.0.0.1", "192.0.2.1"),
+        ("127.0.0.1:8000", "8000", "127.0.0.1", "127.0.0.1"),
+        ("[fe80::1]:8787", "8787", "127.0.0.1", "[fe80::1]"),
+        # 裸 IPv6 字面量（无端口后缀）不受精确后缀剥离影响。
+        ("fe80::1", "8787", "127.0.0.1", "[fe80::1]"),
+    ]
+    for display, port, fallback, expected in cases:
+        r = subprocess.run(
+            [
+                "bash",
+                "-c",
+                funcs + f'\nobserved_health_host "{display}" "{port}" "{fallback}"\n',
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert r.stdout.strip() == expected, f"{display}: {r.stdout.strip()!r}"
+        assert r.stderr == ""
+    for display in ("", "*:8000", "[::]:8787"):
+        r = subprocess.run(
+            [
+                "bash",
+                "-c",
+                funcs + f'\nobserved_health_host "{display}" "8000" "127.0.0.1"\n',
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert r.stdout.strip() == "127.0.0.1", f"{display}: {r.stdout.strip()!r}"
+        if display:
+            assert "无法派生观测探测地址" in r.stderr
+        else:
+            assert r.stderr == ""
 
 
 def test_specific_bind_over_wildcard_listener_is_covered_by_port_listening() -> None:
