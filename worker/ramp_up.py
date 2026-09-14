@@ -265,10 +265,22 @@ def slots_line_suffix(view: RampUpSnapshot | None) -> str:
 
 
 def slots_line(
-    active: int, target: int, code_target: int, depth: int, view: RampUpSnapshot | None
+    active: int,
+    target: int,
+    code_target: int,
+    depth: int,
+    view: RampUpSnapshot | None,
+    lane_threads: int | None = None,
+    exit_watch_mode: str | None = None,
 ) -> str:
-    """The executor's whole ``worker slots`` heartbeat line（含 #471 爬坡后缀）。"""
-    return (
-        f"worker slots {active}/{target}+{code_target},"
-        f" upload queue depth {depth}{slots_line_suffix(view)}"
-    )
+    """The executor's whole ``worker slots`` heartbeat line（含 #471 爬坡后缀）。
+
+    #647 观测面：``lane`` 是执行车道的存活线程数（idle-dying 池，跟随在飞
+    执行而非历史峰值）；``exit`` 是退出 watcher 的内核模式（kqueue/pidfd/
+    scan）。两者缺省（旧调用方/测试）时后缀为空，日志行与此前逐字节一致。"""
+    suffix = slots_line_suffix(view)
+    if lane_threads is not None:
+        suffix += f", lane {lane_threads}"
+    if exit_watch_mode is not None:
+        suffix += f", exit {exit_watch_mode}"
+    return f"worker slots {active}/{target}+{code_target}, upload queue depth {depth}{suffix}"

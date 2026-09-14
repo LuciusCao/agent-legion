@@ -45,10 +45,11 @@ from shared.code_sandbox import (
 from shared.material_cache import MATERIALS_CACHE_DIRNAME
 from worker._atomic import atomic_write
 from worker.bundle_io import download_input_artifacts, safe_extract_tree
+from worker.execution.exit_watch import wait_for_exit
 from worker.execution.ownership import write_owner_marker
 from worker.execution.pending import refuse_if_pending_upload
 from worker.material_fetch import materialize_claim_material
-from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
+from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate
 from worker.upload.queue import UploadTask
 
 if TYPE_CHECKING:
