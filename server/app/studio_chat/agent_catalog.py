@@ -15,6 +15,14 @@ never touched by detection) or ``detected`` (refreshed from the catalog on
 every detect pass). Manual always wins on id collision: a detected template
 is only added when no manual entry already owns that id, and any admin edit
 of a detected entry flips it to manual so later detections leave it alone.
+
+PUT stale-snapshot protection (#355): the row-locked RMW can only serialize
+writers, not tell "client never saw the row" from "admin deleted it" — a
+PUT from a snapshot older than a concurrent detection pass used to return
+``incoming`` wholesale and silently drop the freshly detected rows. The PUT
+now carries the snapshot's content revision (registry.revision) and the
+store rejects a mismatch inside the FOR UPDATE transaction (409), so the
+merge only ever runs on a current snapshot.
 """
 
 from __future__ import annotations
