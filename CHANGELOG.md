@@ -60,6 +60,12 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   判定修正为「节点 `after` ∪ `edge.to === 当前节点` 的边的 `edge.from`，
   排除 start 上游」，与 loader 侧物化 edges 同构，非法状态在切换时即被
   拦下。发布门禁纵深防御不变（后端仍兜底拒绝非法状态）。
+- 发布跟进（issue #464，PR #460 codex P2 两项）：confirming 状态 300s
+  超时误回收——claim 存活期内每 60s 续租 claimed_at（心跳窗口包住
+  confirm→publish→resolve 执行段，与 executor lease 的 interval<TTL/3
+  纪律同源），慢发布不再被轮询侧过期谓词误杀；Studio Agent 编辑器的
+  工具选项按 runtime 区分——velites 含 uuid（#445 引入、需显式声明），
+  pi 保持三元组，runtime 切换时已选的出界工具自动剔除。
 
 ### Changed
 - 检查器「配置 Schema」区块按节点类型分数据源（issue #406）：agent 节点

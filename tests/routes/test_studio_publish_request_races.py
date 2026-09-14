@@ -543,3 +543,135 @@ def test_pending_poll_surfaces_the_confirming_row_while_publish_is_in_flight(
     assert confirmed.status_code == 200, confirmed.text
     # Once resolved, the poll is empty again.
     assert _pending(client, workspace_id).json()["request"] is None
+
+
+# -- #464: the confirm-time heartbeat keeps a slow publish alive -------------
+
+
+def test_heartbeated_confirming_row_survives_past_stale_threshold(
+    client, job_db, monkeypatch
+) -> None:
+    """#464 回归 (a): an executing publish whose claim is being renewed must
+    NOT be swept even when the publish outruns CONFIRMING_STALE_SECONDS. The
+    heartbeat loop bumps claimed_at every interval, so the poll's stale
+    predicate (claimed_at < now - 300s) never matches a live claim — the row
+    resolves confirmed and the receipt is honest."""
+    from server.app.services import studio_publish_request_support as support
+
+    # Shrink the heartbeat interval so the renewal actually fires inside a
+    # test: the interval constant is the loop's only clock; the production
+    # value (60s) is derivation-anchored in the module (TTL/5) and untouched.
+    monkeypatch.setattr(support, "_CLAIM_HEARTBEAT_INTERVAL_SECONDS", 0.05)
+
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+    request_id = request["id"]
+
+    from server.app.services import studio_publish_requests as service_module
+
+    real_publish = service_module.publish_workflow_draft
+    service_job_db = client.app.state.job_db
+
+    def slow_publish_then_age_past_threshold(job_db_, workspace_id_, yaml, enabled):
+        # 1) Let the heartbeat fire at least once (claimed_at moves to now).
+        import time
+
+        time.sleep(0.2)
+        with service_job_db.connect() as conn:
+            row = conn.execute(
+                "select claimed_at from studio_publish_requests where id=%s",
+                (request_id,),
+            ).fetchone()
+        assert row["claimed_at"] is not None
+        # 2) The publish is still executing while the claim sits "past" the
+        #    threshold it would have crossed without the renewal: simulate the
+        #    aging, then let the publish finish — the sweep must NOT have a
+        #    window because the renewal reset the clock well after the claim.
+        with service_job_db.connect() as conn:
+            conn.execute(
+                "update studio_publish_requests set claimed_at=current_timestamp"
+                " - interval '400 seconds' where id=%s",
+                (request_id,),
+            )
+        # 3) One more heartbeat beat lands on the aged row: the loop's renew
+        #    resets claimed_at to now, so a subsequent poll sweep cannot match
+        #    the stale predicate even though the row was aged mid-publish.
+        time.sleep(0.2)
+        with service_job_db.connect() as conn:
+            row = conn.execute(
+                "select claimed_at from studio_publish_requests where id=%s",
+                (request_id,),
+            ).fetchone()
+        assert row["claimed_at"] is not None
+        polled = _pending(client, workspace_id_).json()["request"]
+        assert polled is not None, "renewed claim must survive the poll sweep"
+        assert polled["status"] == "confirming"
+        return real_publish(job_db_, workspace_id_, yaml, enabled)
+
+    monkeypatch.setattr(
+        service_module, "publish_workflow_draft", slow_publish_then_age_past_threshold
+    )
+    confirmed = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm"
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["request"]["status"] == "confirmed"
+
+
+def test_stale_confirming_row_without_heartbeat_is_still_swept(client, job_db, monkeypatch) -> None:
+    """#464 回归 (b): the heartbeat only protects LIVE owners. A claim whose
+    process died between claim and resolve (no heartbeats can land anymore)
+    must still be swept by the poll once past the threshold — the renewal is
+    an owner-liveness signal, not an exemption from the predicate."""
+    from server.app.services import studio_publish_request_support as support
+
+    # Same interval shrink, but the "owner" dies before any renewal lands.
+    monkeypatch.setattr(support, "_CLAIM_HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    from server.app.services.studio_publish_request_support import (
+        CONFIRMING_STALE_SECONDS,
+    )
+
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+    request_id = request["id"]
+    service_job_db = client.app.state.job_db
+
+    from server.app.services import studio_publish_requests as service_module
+
+    def die_between_claim_and_resolve(job_db_, workspace_id_, yaml, enabled):
+        # The process dies mid-publish (this is the last statement it runs):
+        # age the claim past the threshold, then "crash". The confirm's
+        # broad-except rollback would normally move the row back to pending,
+        # so the death is completed by also swallowing the rollback (the
+        # resolve never runs — same shape as the #429 sweep test above).
+        with service_job_db.connect() as conn:
+            conn.execute(
+                "update studio_publish_requests set claimed_at=current_timestamp"
+                f" - interval '{int(CONFIRMING_STALE_SECONDS) + 60} seconds'"
+                " where id=%s",
+                (request_id,),
+            )
+        raise RuntimeError("simulated process death between claim and resolve")
+
+    def resolve_never_runs(*args, **kwargs):
+        # The dead process's rollback/resolve: no-op (None = lost race).
+        return None
+
+    monkeypatch.setattr(service_module, "publish_workflow_draft", die_between_claim_and_resolve)
+    monkeypatch.setattr(service_job_db, "resolve_publish_request", resolve_never_runs)
+    with pytest.raises(RuntimeError, match="simulated process death"):
+        client.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm"
+        )
+    monkeypatch.undo()
+
+    # No rollback ran (the crash ate it) and no heartbeat can ever land for
+    # the dead owner: the row sits confirming past the threshold, and the
+    # poll's sweep must flip it to expired.
+    assert _pending(client, workspace_id).json()["request"] is None
+    status = scoped.get(f"/api/studio-agent/tools/publish-requests/{request_id}")
+    assert status.json()["request"]["status"] == "expired"
