@@ -78,6 +78,9 @@ describe('nodeTypeSections registry (#392 Phase 2)', () => {
   it('composes agent sections without the code-pool section', () => {
     const names = NODE_TYPE_SECTIONS.agent.sections.map((s) => s.name)
     expect(names).toContain('ExecutionSection')
+    // #406：agent 节点挂的是 Agent 定义生效 schema 的只读区块，不是
+    // code 节点的节点 YAML schema 编辑区。
+    expect(names).toContain('WorkflowNodeAgentSchemaSection')
     expect(names).not.toContain('CodeSection')
     expect(names).not.toContain('ConfigSchemaSection')
     expect(names).not.toContain('ApprovalConfigSection')

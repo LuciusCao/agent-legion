@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import type { SwitchableNodeType } from '../shared/workflowStudioYamlDraft.nodeType'
 import { WorkflowNodeCodeSection } from '../code-editor/WorkflowNodeCodeSection'
+import { WorkflowNodeAgentSchemaSection } from './WorkflowNodeAgentSchemaSection'
 import { WorkflowNodeConfigSchemaSection } from './WorkflowNodeConfigSchemaSection'
 import { WorkflowNodeConfigSection } from './WorkflowNodeConfigSection'
 import { WorkflowNodeDataContractSection } from './WorkflowNodeDataContractSection'
@@ -35,13 +36,14 @@ export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
     ],
   },
   // agent：基本设置 → 执行能力（Agent 配置 + 内联编辑面板，#409）→
-  // 节点配置（仅运行时覆盖通道——schema 归 Agent Definition）→
-  // 数据契约 → 依赖。Agent 的有效 config_schema 归 Agent
-  // Definition 管理，不渲染节点 YAML 的 schema 编辑区（#406）。
+  // 配置 Schema（只读展示 Agent 定义的生效 schema，#406）→ 节点配置
+  // （仅运行时覆盖通道——schema 归 Agent Definition）→ 数据契约 → 依赖。
+  // WorkflowNodeAgentSchemaSection 直接收窄 props 切片（Pick），无需适配层。
   agent: {
     sections: [
       EditorSection,
       ExecutionSection,
+      WorkflowNodeAgentSchemaSection,
       NodeConfigSection,
       DataContractSection,
       DependencySection,
