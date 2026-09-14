@@ -1,0 +1,46 @@
+.root {
+  position: relative;
+}
+
+/* 透明桥接区：指针从按钮滑向面板时不脱开 hover。 */
+.popover {
+  position: absolute;
+  z-index: 100;
+  top: 100%;
+  right: 0;
+  display: none;
+  padding-top: 4px;
+}
+
+.panel {
+  min-width: 160px;
+  padding: 6px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.root:focus-within .popover,
+.root:hover .popover {
+  display: block;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: #1a1c1e;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.item:hover,
+.item:focus-visible {
+  background: rgba(0, 0, 0, 0.06);
+}

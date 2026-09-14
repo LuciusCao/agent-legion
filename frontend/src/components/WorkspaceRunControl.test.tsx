@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
-import { AgentStatusIndicator } from './AgentStatusIndicator'
+import { WorkspaceRunControl } from './WorkspaceRunControl'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { useConnectionStatusStore } from '../stores/connectionStatusStore'
 import type { AgentWorkerSummary as WorkerSummary } from '../api/agentWorkers'
@@ -9,10 +9,10 @@ import { createMockAgentsState, createMockUiState } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
 import type { AgentStatus } from '../types'
 
-function renderIndicator() {
+function renderControl() {
   return render(
     <MemoryRouter>
-      <AgentStatusIndicator workspaceId="ws1" />
+      <WorkspaceRunControl workspaceId="ws1" />
     </MemoryRouter>
   )
 }
@@ -83,7 +83,7 @@ vi.mock('../stores/uiStore', () => ({
   },
 }))
 
-describe('AgentStatusIndicator', () => {
+describe('WorkspaceRunControl', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockWorkerPausedByWorkspace = {}
@@ -101,55 +101,56 @@ describe('AgentStatusIndicator', () => {
     setWorkerPausedMock.mockResolvedValue(undefined)
   })
 
-  it('renders agent status button', () => {
-    renderIndicator()
-    expect(screen.getByLabelText('Agent 状态')).toBeInTheDocument()
+  it('renders run state button', () => {
+    renderControl()
+    expect(screen.getByLabelText('恢复运行')).toBeInTheDocument()
   })
 
-  it('links to the monitoring page from the popover', () => {
-    renderIndicator()
-    expect(screen.getByRole('link', { name: '查看监控' })).toHaveAttribute(
-      'href',
-      '/workspaces/ws1/monitoring'
-    )
+  it('shows 已暂停 when the workspace is paused', () => {
+    mockWorkerPausedByWorkspace = { ws1: true }
+    renderControl()
+    expect(screen.getByText('已暂停')).toBeInTheDocument()
+  })
+
+  it('shows 运行中 when the workspace is running', () => {
+    mockWorkerPausedByWorkspace = { ws1: false }
+    renderControl()
+    expect(screen.getByText('运行中')).toBeInTheDocument()
   })
 
   it('fetches worker status for the given workspace on mount', () => {
-    renderIndicator()
+    renderControl()
     expect(fetchWorkerStatusMock).toHaveBeenCalledWith('ws1')
   })
 
-  it('shows auto-scheduling switch in the popover', () => {
-    renderIndicator()
-    expect(screen.getByText('自动调度')).toBeInTheDocument()
+  it('popover is display-only: no switch, only the worker list', () => {
+    renderControl()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.getByText('已注册 Worker')).toBeInTheDocument()
   })
 
-  it('resumes scheduling when switch is toggled on', async () => {
+  it('resumes running when the button is clicked while paused', async () => {
     mockWorkerPausedByWorkspace = { ws1: true }
-    renderIndicator()
-    const switchEl = screen.getByRole('checkbox')
-    expect(switchEl).toBeInTheDocument()
+    renderControl()
 
     await act(async () => {
-      fireEvent.click(switchEl)
+      fireEvent.click(screen.getByLabelText('恢复运行'))
     })
 
     expect(setWorkerPausedMock).toHaveBeenCalledWith(false, 'ws1')
-    expect(showToastMock).toHaveBeenCalledWith('已恢复自动调度', 'success')
+    expect(showToastMock).toHaveBeenCalledWith('已恢复运行', 'success')
   })
 
-  it('pauses scheduling when switch is toggled off', async () => {
+  it('pauses running when the button is clicked while running', async () => {
     mockWorkerPausedByWorkspace = { ws1: false }
-    renderIndicator()
-    const switchEl = screen.getByRole('checkbox')
-    expect(switchEl).toBeInTheDocument()
+    renderControl()
 
     await act(async () => {
-      fireEvent.click(switchEl)
+      fireEvent.click(screen.getByLabelText('暂停运行'))
     })
 
     expect(setWorkerPausedMock).toHaveBeenCalledWith(true, 'ws1')
-    expect(showToastMock).toHaveBeenCalledWith('已暂停自动调度', 'success')
+    expect(showToastMock).toHaveBeenCalledWith('已暂停运行', 'success')
   })
 
   it('shows workspace-specific agents', () => {
@@ -167,7 +168,7 @@ describe('AgentStatusIndicator', () => {
         max_tasks: 2,
       }),
     ]
-    renderIndicator()
+    renderControl()
     expect(screen.getByText('Main')).toBeInTheDocument()
     expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
   })
@@ -183,14 +184,14 @@ describe('AgentStatusIndicator', () => {
         max_tasks: 16,
       }),
     ]
-    renderIndicator()
+    renderControl()
     expect(screen.getByText('MacMini')).toBeInTheDocument()
     expect(screen.getByText('忙碌 3/16')).toBeInTheDocument()
   })
 
   it('shows empty state when no worker is available', () => {
     mockAgents = []
-    renderIndicator()
+    renderControl()
     expect(screen.getByText('暂无可用 Worker')).toBeInTheDocument()
   })
 
@@ -198,7 +199,7 @@ describe('AgentStatusIndicator', () => {
     useConnectionStatusStore.setState({
       connectionStatus: { agents: 'closed' },
     })
-    renderIndicator()
+    renderControl()
     const dot = screen.getByTestId('agents-connection-status')
     expect(dot).toBeInTheDocument()
     expect(dot).toHaveAttribute('title', 'Agent 连接已断开')
@@ -208,7 +209,7 @@ describe('AgentStatusIndicator', () => {
     useConnectionStatusStore.setState({
       connectionStatus: { agents: 'connecting' },
     })
-    renderIndicator()
+    renderControl()
     const dot = screen.getByTestId('agents-connection-status')
     expect(dot).toBeInTheDocument()
     expect(dot).toHaveAttribute('title', 'Agent 连接中')
@@ -216,14 +217,14 @@ describe('AgentStatusIndicator', () => {
 
   it('hides the status dot when the agents channel is open', () => {
     useConnectionStatusStore.setState({ connectionStatus: { agents: 'open' } })
-    renderIndicator()
+    renderControl()
     expect(
       screen.queryByTestId('agents-connection-status')
     ).not.toBeInTheDocument()
   })
 
   it('fetches registered workers on mount', async () => {
-    renderIndicator()
+    renderControl()
     await waitFor(() => expect(listAgentWorkersMock).toHaveBeenCalled())
   })
 
@@ -237,7 +238,7 @@ describe('AgentStatusIndicator', () => {
         last_seen_at: '2026-07-22 01:00:00',
       }),
     ])
-    renderIndicator()
+    renderControl()
     expect(screen.getByText('已注册 Worker')).toBeInTheDocument()
     await screen.findByText('Online Mac')
     expect(screen.getByText('Offline Mac')).toBeInTheDocument()
@@ -263,7 +264,7 @@ describe('AgentStatusIndicator', () => {
         allowed_workspaces: ['ws2'],
       }),
     ])
-    renderIndicator()
+    renderControl()
     await screen.findByText('Global Mac')
     expect(screen.getByText('Scoped Mac')).toBeInTheDocument()
     expect(screen.queryByText('Other Mac')).not.toBeInTheDocument()
@@ -277,7 +278,7 @@ describe('AgentStatusIndicator', () => {
         revoked: true,
       }),
     ])
-    renderIndicator()
+    renderControl()
     // 等 workers 查询 resolve 后再断言缺失，避免抢在数据到达之前。
     await act(async () => {})
     expect(screen.queryByText('Revoked Mac')).not.toBeInTheDocument()
@@ -304,7 +305,7 @@ describe('AgentStatusIndicator', () => {
         max_tasks: 30,
       }),
     ]
-    renderIndicator()
+    renderControl()
     await screen.findByText('在线')
     expect(screen.getAllByText('MacbookAir')).toHaveLength(1)
     expect(screen.getByText('忙碌 3/30')).toBeInTheDocument()
@@ -320,7 +321,7 @@ describe('AgentStatusIndicator', () => {
       }),
     ])
     mockAgents = []
-    renderIndicator()
+    renderControl()
     await screen.findByText('Idle Mac')
     expect(screen.getByText('空闲 0/10')).toBeInTheDocument()
   })
