@@ -7,9 +7,9 @@ import { useUiStore } from '../stores/uiStore'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
 import { AddItemsDialog } from '../components/AddItemsDialog'
-import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
+import { WorkspaceRunControl } from '../components/WorkspaceRunControl'
 import { LabeledIconButton } from '../components/LabeledIconButton'
-import { WorkflowStudioButton } from '../components/WorkflowStudioButton'
+import { WorkspaceMoreMenu } from '../components/WorkspaceMoreMenu'
 import { WorkspacePageOutlet } from './WorkspacePageOutlet'
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
@@ -21,9 +21,6 @@ export default function WorkspaceLayout() {
   // page skeleton + <Outlet/> subtree on every unrelated store write (agent
   // heartbeats, toast flags).
   const fetchWorkerStatus = useAgentsStore((s) => s.fetchWorkerStatus)
-  const setWorkspacePackageDialogOpen = useUiStore(
-    (s) => s.setWorkspacePackageDialogOpen
-  )
   const setTokenUsageDialogOpen = useUiStore((s) => s.setTokenUsageDialogOpen)
   const addItemsDialogOpen = useUiStore((s) => s.addItemsDialogOpen)
   const setAddItemsDialogOpen = useUiStore((s) => s.setAddItemsDialogOpen)
@@ -41,19 +38,6 @@ export default function WorkspaceLayout() {
     }
   }, [fetchWorkerStatus, workspaceId])
   const title = pageTitle || currentWorkspace?.name || workspaceId || ''
-  const tokenAnalysisButton = (
-    <LabeledIconButton
-      icon="analytics"
-      label="用量"
-      ariaLabel="Token 使用分析"
-      onClick={() =>
-        workspaceId &&
-        (isDetailPage
-          ? setTokenUsageDialogOpen(true)
-          : navigate(`/workspaces/${workspaceId}/token-usage`))
-      }
-    />
-  )
   return (
     <AppShell
       appBar={({ scrolled }) => (
@@ -67,14 +51,8 @@ export default function WorkspaceLayout() {
             !isDetailPage ? (
               <>
                 {workspaceId && (
-                  <AgentStatusIndicator workspaceId={workspaceId} />
+                  <WorkspaceRunControl workspaceId={workspaceId} />
                 )}
-                <LabeledIconButton
-                  icon={selectMode ? 'close' : 'checklist'}
-                  label={selectMode ? '完成' : '多选'}
-                  active={selectMode}
-                  onClick={toggleSelectMode}
-                />
                 <LabeledIconButton
                   icon="add"
                   label="添加"
@@ -85,37 +63,30 @@ export default function WorkspaceLayout() {
                   }}
                 />
                 <LabeledIconButton
-                  icon="inventory_2"
-                  label="打包"
-                  ariaLabel="包历史"
-                  onClick={() => {
-                    if (workspaceId) {
-                      setWorkspacePackageDialogOpen(true)
-                    }
-                  }}
+                  icon={selectMode ? 'close' : 'checklist'}
+                  label={selectMode ? '完成' : '多选'}
+                  active={selectMode}
+                  onClick={toggleSelectMode}
                 />
-                {tokenAnalysisButton}
                 <LabeledIconButton
-                  icon="add_task"
-                  label="质量"
-                  ariaLabel="质量闭环"
+                  icon="query_stats"
+                  label="监控"
+                  ariaLabel="运维监控"
                   onClick={() =>
                     workspaceId &&
-                    navigate(`/workspaces/${workspaceId}/quality`)
+                    navigate(`/workspaces/${workspaceId}/monitoring`)
                   }
                 />
-                <WorkflowStudioButton />
-                <LabeledIconButton
-                  icon="settings"
-                  label="设置"
-                  onClick={() =>
-                    navigate(`/workspaces/${workspaceId}/settings`)
-                  }
-                />
+                <WorkspaceMoreMenu />
               </>
             ) : (
               <>
-                {tokenAnalysisButton}
+                <LabeledIconButton
+                  icon="analytics"
+                  label="用量"
+                  ariaLabel="Token 使用分析"
+                  onClick={() => setTokenUsageDialogOpen(true)}
+                />
                 {detailPageActions}
               </>
             )

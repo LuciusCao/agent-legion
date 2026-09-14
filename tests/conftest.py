@@ -101,12 +101,25 @@ _CMS_ENV_KEYS = (
     "AGENT_LEGION_REMOTE_WORKER_TOKEN",
 )
 
+# #641: the budget-monotonicity anchor env vars reshape the architecture
+# guards globally when they leak from a developer shell (e.g. exporting the
+# release-train flag to simulate a train merge, then running pytest — the
+# HEAD^-dependent monotonicity self-tests silently lose their second anchor).
+# Tests that need them set their own via monkeypatch; the session starts clean.
+_BUDGET_ANCHOR_ENV_KEYS = (
+    "AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN",
+    "AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW",
+    "AGENT_LEGION_BUDGET_BASE",
+)
+
 
 def pytest_configure() -> None:
     if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") != "1":
         os.environ.setdefault("AGENT_LEGION_SKIP_DOTENV", "1")
         for key in _CMS_ENV_KEYS:
             os.environ[key] = ""
+    for key in _BUDGET_ANCHOR_ENV_KEYS:
+        os.environ.pop(key, None)
 
 
 # Smoke tier (GATE_TIER=smoke, used by pre-push): a small set of fast,

@@ -129,6 +129,10 @@ def test_child_sigterm_cancels_token_and_reports(tmp_path: Path) -> None:
     )
     proc = _spawn_child(result_path, payload)
     try:
+        # 写完必须 close（子进程 stdin 读等 EOF 才开始跑节点）；但已 close
+        # 的 stdin 不能再交给 communicate——3.11 的 _communicate 会对其
+        # flush 抛 "flush of closed file"（develop 上既有写法缺陷，本机
+        # Python patchlevel 下稳定复现）。改读 stdout + wait 等收尾。
         proc.stdin.write(pickle.dumps(payload))
         proc.stdin.close()
         deadline = time.monotonic() + 10
@@ -137,7 +141,8 @@ def test_child_sigterm_cancels_token_and_reports(tmp_path: Path) -> None:
             assert proc.poll() is None, f"child exited early: {proc.stdout.read()!r}"
             time.sleep(0.02)
         proc.send_signal(signal.SIGTERM)
-        _, _ = proc.communicate(timeout=30)
+        proc.stdout.read()  # SIGTERM → 子进程 SystemExit(130) 退出，read 到 EOF
+        proc.wait(timeout=30)
     finally:
         if proc.poll() is None:
             proc.kill()

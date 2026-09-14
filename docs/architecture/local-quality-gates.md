@@ -337,6 +337,20 @@ Configure the repository on GitHub as follows:
 Until required status checks are configured, nothing server-side blocks a red
 merge — the protection is only as strong as this one-time setup.
 
+Drift incident (2026-09-13, PR #642): `develop` was in fact configured with a
+per-job context list (pre-sharding habit) while `main` follows rule 2 above
+(`quality-gate` only). The 0.7.11 CI hardening (8ab318c10) split
+`frontend-component` into the `frontend-component-a/b` matrix shards, and the
+renamed context stopped being reported — the stale `frontend-component` entry
+became a ghost check that no run could ever satisfy, leaving every
+develop-based PR stuck in "Expected / Waiting for status". Fixed by replacing
+the ghost entry with the two shard contexts. Two lessons: (a) renaming or
+sharding a job requires updating branch protection in the same change —
+the settings live outside the repo and no CI test can catch the drift;
+(b) prefer the stable `quality-gate` aggregate per rule 2, which is immune
+to job-name churn by construction; the per-job list is acceptable only if
+maintained in lockstep with workflow renames.
+
 ## Extended Gate Policy
 
 The `ci-extended` CI job covers the areas that previously required a manual

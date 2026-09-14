@@ -4,61 +4,86 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
-## [Unreleased]
+## [0.7.11] - 2026-09-14
 
-## [0.7.9] - 2026-09-11
+### Changed
+- 版本线对齐（issue #497 同族收尾）：`pyproject.toml` / `uv.lock` 的
+  agent-legion 包版本 0.7.0 → 0.7.11——0.7.1 起版本号只由 git tag 承载、
+  包清单漂移了十个版次，本版随封板对齐，此后每个 0.7.x 同步落版。
 
-### Fixed
-- Studio 会话长回复尾部静默截断（issue #563）：流式 text 帧是原地全量
-  快照（seq 不变），断连/被驱逐丢帧后 after_seq 增量补齐永远取不回该行；
-  唯一自愈入口是"SSE 实时收到 turn_end → 全量回取"，但断连空窗恰好盖过
-  turn 结尾时 turn_end 只能经 REST 补齐静默合入，自愈永不触发——截断文本
-  被定妆成"已完成"消息。三层修法：
-  - **前端自愈推广**（useStudioChat/studioChatEvents/studioChatMessages）：
-    terminal 状态行（turn_end/error/session_*）检测统一到 isTerminalStatus
-    ——REST 补齐静默携带的 terminal 事件与 SSE 实时到达的同等触发全量
-    回取 + 画布/Agent 目录查询失效；SSE 重连时本地仍挂着未终结的流式
-    agent text 行即直接全量回取校准。refill 的 terminal 判定在 updater
-    外计算（updater 可能被 React 推迟执行，内赋值会恒 false）、
-    setMessages 改函数式更新（并发 refill 不再互相覆盖基线）。
-  - **EventBus 降触发**（server/app/events/bus.py）：快照语义通道
-    （studio-chat:*）的 QueueFull 从"立即驱逐订阅者"改为"丢最旧腾位投递
-    最新"（流式帧是全量快照，丢中间帧无损），连续溢出
-    OVERFLOW_EVICT_THRESHOLD=64（真死连接）才驱逐——驱逐引发的断流重连
-    正是截断的主要触发形态。增量语义通道（workspace job 补丁等 revision
-    水位消费方）保持立即驱逐的旧行为：断流 → SSE 重连 + loadSnapshot 是
-    既有的无损自愈路径，静默丢帧反而让客户端滞留旧 revision。
-  - **帧体积缩减**（studio_chat/store.py）：publish 的 json.dumps 补
-    `ensure_ascii=False`，CJK 文本不再 \uXXXX 转义（帧体积减半），放慢订阅
-    队列的积压速度。
-- Studio 会话闲置后 MCP 工具通道静默死亡（issue #558）：run token 固定
-  2h TTL、续期由对话活动驱动，闲置过期后 agent 的 MCP headers 无法中途
-  重指（协议限制），工具调用全 401 → client "Not connected"；而聊天主链路
-  （ACP 进程）毫发无伤，会话停在 idle——界面上一个"看起来活着"但工具
-  全废的会话，且 resume 只接受 closed/error，恢复入口不可达。修法：
-  #411 keepalive 的 dead 分支（首个 tool_call 检出 token 死亡）把会话升级
-  为 status=error 后追加 `run_token_invalidated` 通知
-  （`server/app/studio_chat/session_escalation.py`，守卫同 on_exit 的
-  final_statuses：closed/error/starting 不越权盖章，SSE session 快照同步
-  发布；升级先于通知且吞异常——DB 故障时干净重试、不产生重复通知），
-  既有的 ResumeBar /「继续对话」恢复链（新 token + 上下文保留）直接
-  生效；jobDiagnosis 排查面板补挂 ResumeBar（此前 error 会话只有禁用
-  文案，只能废弃）；通知与前端兜底文案改为指向「继续对话」。
+### Added
+- 架构预算增长容忍带与豁免限时重签（issue #641）：文件预算检查线放宽为
+  注册表 ceiling + `growth_allowance: 15`——带内超出检查通过、不注册新
+  条目、永不被棘轮吸收（文件收缩后由 staleness 检查自动回收），吸收
+  prettier 80 列重排与小型功能增长；豁免重签在 floor + allowance 带内
+  免仪式直接合法，超出带必须带 `expires: YYYY-MM-DD` 时间盒上抬，到期
+  `check_invariants` 硬失败，续期须重新论证。
+- Workspace 主页顶栏交互收敛（issue #649）：八个平铺入口收敛为
+  运行/暂停 · 添加 · 多选 · 监控 · 更多——运行控件一键切换运行/暂停
+  （状态化显示，Worker 状态列表移入 hover popover）、监控提为一级入口、
+  低频操作（打包/用量/质量/Studio/设置）收入更多菜单的纯 CSS hover 面板。
 
 ### Performance
-- executor 事件泵 reactor 化一期（issue #578）：agent 执行的 stdout 事件泵
-  从 thread-per-execution（每个 velites 子进程一根 Python 泵线程）改为
-  进程级单例 `worker/execution/reactor.py`——一根 selector 线程多路复用
-  全部在跑子进程的 stdout fd（阻塞 select 不持 GIL），就绪 fd 批量读取、
-  分帧后交核数级（2–16）解析线程池做 JSON 解析 + delta 过滤与落盘。
-  每流单写者令牌保证 events.jsonl 与旧泵逐字节同序（回归测试压 200 行
-  突发）。生命周期语义不动：租约/心跳（#352 批量面）、超时治理、#564
-  归属标记全部原样；背压显式化——事件文件写不动时暂停读 fd，子进程
-  管道写满自然减速（agent 减速而非丢事件，设计点 3）。回退开关
-  `AGENT_WORKER_EVENT_PUMP=thread` 恢复每执行一线程；reactor 内部错误
-  fail-closed（注销全部流 + 本进程后续 spawn 回落线程泵）。灰度：先只
-  接管 agent 节点路径（事件量最大面），code 节点 stdout 本就走文件
-  重定向不经泵。
+- executor 生命周期监督事件化（issue #647，#578 二三期）：每个执行一根
+  线程的 `wait_for_exit` 0.5s 轮询循环（高并发档位下轮询线程数与在飞执行
+  数同阶、每执行每秒两次无效唤醒，是单机容量的主要监督税之一）改为进程级
+  单例 `worker/execution/exit_watch.py`——一根 watcher 线程经内核事件
+  （macOS kqueue `EVFILT_PROC`+`NOTE_EXIT` / Linux pidfd+selector；均不可
+  用时回落共享 0.5s tick 的单线程扫描，`AGENT_WORKER_EXIT_WATCH` 显式
+  选模式）监听全部在飞子进程退出，等待方 park 在自己的
+  `threading.Event` 上零唤醒；超时/ownership/cancel/shutdown 检查合并进
+  watcher 的共享 tick（一根线程一次检查替代 N 根线程各自轮询）。唤醒即
+  定谳：所有触发源单调（控制事件 set-once、exit/timeout sticky），被唤
+  醒方按旧优先级序重 derive 判定，无 lost-wakeup；心跳线程先行
+  poll/reap 子进程（zombie-stop）的交错由事件 sticky 性容纳。fail-closed：
+  watcher 死亡立即唤醒全部等待者并退回 `process_lifecycle.poll_wait_locally`
+  （原轮询循环唯一保留副本，仅作降级路径），后续等待落到新单例。判定
+  契约（exit code / 124 超时 / 130 取消 / 1+不上报的租约丢失）与旧版逐
+  分支等价，`run.py` / `code_runner.py` 调用面零改动换接；#564
+  per-execution 互斥锁在事件模型下的等价性有专项测试钉住。
+- executor 执行车道 idle 回收（issue #647 三期）：`ThreadPoolExecutor`
+  线程永不收缩（高并发回落后仍按历史峰值驻留大批 idle worker），换为
+  `worker/execution/execution_lane.py`——按需起线程（上限仍为声明
+  容量：执行等待期仍持线程 park，池小于容量会钳本地并发）、空闲
+  `AGENT_WORKER_LANE_IDLE_TIMEOUT`（默认 30s，env 可调）后自动退出，线程
+  数跟随在飞执行而非历史峰值；submit/shutdown/Future 契约与
+  ThreadPoolExecutor 对齐（哨兵唤醒的快速 shutdown、任务异常不杀 lane
+  线程）。slots 心跳行追加 `lane <n>`（存活线程）与 `exit <mode>`
+  （watcher 内核模式）观测面。
+- **运维提示（监督事件化灰度/回退）**：生产 Worker 升级后观察 slots 心跳
+  行的 `exit <mode>`（kqueue/pidfd/scan）与 `lane <n>` 是否符合预期；
+  异常时 `AGENT_WORKER_EXIT_WATCH=scan` / `AGENT_WORKER_LANE_IDLE_TIMEOUT`
+  为运行时回退开关（详见 docs/agent-worker-deployment.md）。
+
+### Fixed
+- skills 共享 commit 缓存被外部清理后的中毒自愈（issue #638/#639）：
+  `$TMPDIR` 下物化树的 mtime 是 commit 日期，macOS dirhelper 夜间清掉
+  「过期」内容后 `.complete` 标记存活，命中判定把空树当有效缓存返回，
+  验证批量失败且对老 commit 周期性复发。修复：命中追加契约文件三件套
+  校验（缺失按 miss 处理并重建），物化改为 touch 当前时刻（树不再携带
+  旧 commit 日期）、runs_dir 统一绝对路径（跨 cwd 物化不再把缓存写进
+  仓库目录）——默认 `$TMPDIR` 部署从「中毒数天」变为「每晚一次透明
+  重建」。
+- 原生形态 `make prod-up` 拉起 seaweedfs 时凭据与后端 `.env` 脱节（issue
+  #624）：决策脚本读根 `.env`（凭据齐备 → start），但 compose 插值只读
+  `deploy/.env`——后者缺失时凭据插值为空串，seaweedfs 以空凭据生成
+  s3.config，后端用真实凭据连接即鉴权失败，`/api/health` 静默
+  `storage.reachable=false`、prod-up 退出码 0。修复：决策为 start 时
+  `native-prod-up.sh` 把根 `.env` 的 `AGENT_LEGION_S3_*` 凭据经 `env` 前缀
+  注入 compose 子进程（不 export 进脚本环境——Worker 会把 `os.environ`
+  复制给每个 Agent 子进程，S3 管理凭据不得流入 Agent 面），消除两个 env
+  文件的双写要求。
+- `init-worktree.sh` 种子 worker 状态副本的 host_url 无条件写 dev 端口
+  （issue #625）：prod worktree 的后端在 8000（`NATIVE_BACKEND_PORT`），
+  worker 对着没人监听的 8001 静默退避重试。修复：按 worktree 名分流——
+  `prod` worktree 种子 `NATIVE_BACKEND_PORT`（默认 8000），其余保持
+  `DEV_BACKEND_PORT`（默认 8001）。
+- 三个脚本在 git 索引中丢失执行位（issue #623）：`install-deps.sh` /
+  `gate-jobs.sh` / `gate-queue.sh` 为 100644，`make install` 全新 clone
+  必现 Permission denied（core.fileMode=true 的 macOS/Linux；本地 chmod 过
+  的老 checkout 无感）。修复：补执行位（mode 100755），并新增静态门禁
+  检查 `scripts/architecture/script_permissions.py`——所有 tracked `.sh`
+  必须带执行位，防回归。
 
 ## [0.7.10] - 2026-09-11
 
@@ -162,6 +187,60 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   （`BATCH_BEAT_TIMEOUT_SECONDS`，`heartbeat_batch` 增加 timeout 透传）
   ——30s 客户端默认太贴 90s 租约 TTL，两拍全长等待即耗尽续租预算，
   10s 让失败早暴露、早重试。executor 侧分片与全局限时器不变。
+
+## [0.7.9] - 2026-09-11
+
+### Fixed
+- Studio 会话长回复尾部静默截断（issue #563）：流式 text 帧是原地全量
+  快照（seq 不变），断连/被驱逐丢帧后 after_seq 增量补齐永远取不回该行；
+  唯一自愈入口是"SSE 实时收到 turn_end → 全量回取"，但断连空窗恰好盖过
+  turn 结尾时 turn_end 只能经 REST 补齐静默合入，自愈永不触发——截断文本
+  被定妆成"已完成"消息。三层修法：
+  - **前端自愈推广**（useStudioChat/studioChatEvents/studioChatMessages）：
+    terminal 状态行（turn_end/error/session_*）检测统一到 isTerminalStatus
+    ——REST 补齐静默携带的 terminal 事件与 SSE 实时到达的同等触发全量
+    回取 + 画布/Agent 目录查询失效；SSE 重连时本地仍挂着未终结的流式
+    agent text 行即直接全量回取校准。refill 的 terminal 判定在 updater
+    外计算（updater 可能被 React 推迟执行，内赋值会恒 false）、
+    setMessages 改函数式更新（并发 refill 不再互相覆盖基线）。
+  - **EventBus 降触发**（server/app/events/bus.py）：快照语义通道
+    （studio-chat:*）的 QueueFull 从"立即驱逐订阅者"改为"丢最旧腾位投递
+    最新"（流式帧是全量快照，丢中间帧无损），连续溢出
+    OVERFLOW_EVICT_THRESHOLD=64（真死连接）才驱逐——驱逐引发的断流重连
+    正是截断的主要触发形态。增量语义通道（workspace job 补丁等 revision
+    水位消费方）保持立即驱逐的旧行为：断流 → SSE 重连 + loadSnapshot 是
+    既有的无损自愈路径，静默丢帧反而让客户端滞留旧 revision。
+  - **帧体积缩减**（studio_chat/store.py）：publish 的 json.dumps 补
+    `ensure_ascii=False`，CJK 文本不再 \uXXXX 转义（帧体积减半），放慢订阅
+    队列的积压速度。
+- Studio 会话闲置后 MCP 工具通道静默死亡（issue #558）：run token 固定
+  2h TTL、续期由对话活动驱动，闲置过期后 agent 的 MCP headers 无法中途
+  重指（协议限制），工具调用全 401 → client "Not connected"；而聊天主链路
+  （ACP 进程）毫发无伤，会话停在 idle——界面上一个"看起来活着"但工具
+  全废的会话，且 resume 只接受 closed/error，恢复入口不可达。修法：
+  #411 keepalive 的 dead 分支（首个 tool_call 检出 token 死亡）把会话升级
+  为 status=error 后追加 `run_token_invalidated` 通知
+  （`server/app/studio_chat/session_escalation.py`，守卫同 on_exit 的
+  final_statuses：closed/error/starting 不越权盖章，SSE session 快照同步
+  发布；升级先于通知且吞异常——DB 故障时干净重试、不产生重复通知），
+  既有的 ResumeBar /「继续对话」恢复链（新 token + 上下文保留）直接
+  生效；jobDiagnosis 排查面板补挂 ResumeBar（此前 error 会话只有禁用
+  文案，只能废弃）；通知与前端兜底文案改为指向「继续对话」。
+
+### Performance
+- executor 事件泵 reactor 化一期（issue #578）：agent 执行的 stdout 事件泵
+  从 thread-per-execution（每个 velites 子进程一根 Python 泵线程）改为
+  进程级单例 `worker/execution/reactor.py`——一根 selector 线程多路复用
+  全部在跑子进程的 stdout fd（阻塞 select 不持 GIL），就绪 fd 批量读取、
+  分帧后交核数级（2–16）解析线程池做 JSON 解析 + delta 过滤与落盘。
+  每流单写者令牌保证 events.jsonl 与旧泵逐字节同序（回归测试压 200 行
+  突发）。生命周期语义不动：租约/心跳（#352 批量面）、超时治理、#564
+  归属标记全部原样；背压显式化——事件文件写不动时暂停读 fd，子进程
+  管道写满自然减速（agent 减速而非丢事件，设计点 3）。回退开关
+  `AGENT_WORKER_EVENT_PUMP=thread` 恢复每执行一线程；reactor 内部错误
+  fail-closed（注销全部流 + 本进程后续 spawn 回落线程泵）。灰度：先只
+  接管 agent 节点路径（事件量最大面），code 节点 stdout 本就走文件
+  重定向不经泵。
 
 ## [0.7.8] - 2026-09-10
 

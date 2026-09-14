@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 import traceback
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,8 @@ from worker.claim_batch import (
 from worker.claim_budget import pass_budget
 from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
+from worker.execution.execution_lane import ExecutionLanePool
+from worker.execution.exit_watch import ExitWatchReactor
 from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import Client, WorkerAuthError
 from worker.host.status_sync import sync_host_status
@@ -142,7 +144,16 @@ def main() -> int:
     # #566 三期：load average 回压（构造即做容量合理性告警）。
     shedder = LoadShedder(max_concurrency, log=_print)
     ramp_view, ramp_paused_since = None, None
-    pool = ThreadPoolExecutor(MAX_DYNAMIC_CONCURRENCY, thread_name_prefix="agent-execution")
+    # #647：executor 事件面预热——exit watcher（退出等待事件化，#578 二期）
+    # 在首个执行前起好（模式经 AGENT_WORKER_EXIT_WATCH=kqueue|pidfd|scan|auto，
+    # 启动即打印所选模式与降级原因，fail-closed 语义见 exit_watch.py）。
+    exit_watch = ExitWatchReactor.get()
+    exit_watch_mode = exit_watch.mode()
+    # #647 三期：idle-dying 执行车道取代 ThreadPoolExecutor——上限仍是
+    # MAX_DYNAMIC_CONCURRENCY（执行等待期仍持线程 park，池小于声明容量会钳
+    # 本地并发），但空闲线程超时退出，线程数跟随在飞执行而非历史峰值
+    # （高并发回落后按历史峰值驻留的 idle worker 的归宿）。
+    pool = ExecutionLanePool(MAX_DYNAMIC_CONCURRENCY)
     # run_execution 的循环不变参数（client/claim 逐单在前，其余两组不变）；
     # uploads/status 实例在本循环内从不重建，热更只调实例内部状态。
     run_args = (work_root, environment, interval, stop, shutdown_grace)
@@ -187,10 +198,17 @@ def main() -> int:
                     )
                     return 2
                 # #471：爬坡期 slots 行追加 "ramp-up e/t (+ns)"（判变在
-                # 状态机内）；无爬坡时行内容与现状逐字节一致。
+                # 状态机内）；无爬坡时行内容与现状逐字节一致。#647：追加
+                # lane（存活线程）与 exit（watcher 模式）观测面。
                 _print(
                     slots_line(
-                        len(active), max_concurrency, max_code_concurrency, uploads.depth, ramp_view
+                        len(active),
+                        max_concurrency,
+                        max_code_concurrency,
+                        uploads.depth,
+                        ramp_view,
+                        lane_threads=pool.live_threads(),
+                        exit_watch_mode=exit_watch_mode,
                     )
                 )
                 next_host_status = time.monotonic() + interval

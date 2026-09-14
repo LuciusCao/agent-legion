@@ -1,5 +1,15 @@
 from pathlib import Path
 
+# The dispatch/validation contract trio every materialized skill tree must
+# carry. Single source of truth: resolve_workflow_skill rejects a tree
+# missing any of these, and the shared commit cache probe
+# (skills/commit_cache.py) treats their absence as a corrupted hit (#638).
+REQUIRED_CONTRACT_FILES: tuple[str, ...] = (
+    "SKILL.md",
+    "references/output-contract.md",
+    "scripts/validate_output.py",
+)
+
 
 def resolve_workflow_skill(root: Path, relative_name: str) -> Path:
     """Resolve a workflow skill directory under root, validating it remains below root.
@@ -18,11 +28,8 @@ def resolve_workflow_skill(root: Path, relative_name: str) -> Path:
     except ValueError as exc:
         raise ValueError(f"skill path must remain below root: {relative_name!r}") from exc
 
-    if not (skill_dir / "SKILL.md").is_file():
-        raise ValueError(f"skill missing SKILL.md: {relative_name!r}")
-    if not (skill_dir / "references" / "output-contract.md").is_file():
-        raise ValueError(f"skill missing references/output-contract.md: {relative_name!r}")
-    if not (skill_dir / "scripts" / "validate_output.py").is_file():
-        raise ValueError(f"skill missing scripts/validate_output.py: {relative_name!r}")
+    for contract_file in REQUIRED_CONTRACT_FILES:
+        if not (skill_dir / contract_file).is_file():
+            raise ValueError(f"skill missing {contract_file}: {relative_name!r}")
 
     return skill_dir

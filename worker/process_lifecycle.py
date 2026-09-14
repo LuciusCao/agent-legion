@@ -1,4 +1,11 @@
-"""Agent-process lifecycle helpers: graceful termination and exit waiting."""
+"""Agent-process lifecycle helpers: graceful termination and exit waiting.
+
+``wait_for_exit`` moved to the event-driven watcher
+(``worker/execution/exit_watch.py``, #647 — #578 phases 2/3: one kernel-event
+watcher thread replaces the per-execution 0.5s poll loop). This module keeps
+``terminate`` and the pgid record; the poll loop below survives ONLY as the
+watcher's fail-closed degradation path.
+"""
 
 from __future__ import annotations
 
@@ -27,7 +34,7 @@ def terminate(proc: subprocess.Popen[bytes], grace_seconds: float) -> None:
     print(f"Agent process {proc.pid} did not exit after SIGKILL", flush=True)
 
 
-def wait_for_exit(
+def poll_wait_locally(
     proc: subprocess.Popen[bytes],
     timeout: float,
     shutdown: threading.Event,
@@ -35,8 +42,11 @@ def wait_for_exit(
     ownership_lost: threading.Event,
     cancelled: threading.Event | None = None,
 ) -> tuple[int, bool]:
-    """Poll the child, reacting to shutdown/ownership loss/Host cancel.
+    """Legacy per-execution poll loop (pre-#647 semantics) — the ONLY caller
+    is the exit watcher's fail-closed degradation path (watcher thread died).
+    Production waits go through ``worker.execution.exit_wait.wait_for_exit``.
 
+    Poll the child, reacting to shutdown/ownership loss/Host cancel.
     Returns (exit_code, report). ``cancelled`` is the batch-2 code path's
     Host-driven cancel (heartbeat body): SIGTERM the process group like a
     shutdown, but report the run as cancelled instead of discarding it."""

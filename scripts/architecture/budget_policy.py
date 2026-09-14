@@ -39,6 +39,11 @@ class BudgetPolicy:
     production_max_lines: int
     test_roots: tuple[TestRoot, ...]
     test_max_lines: int
+    # Growth allowance (#641): effective lines may exceed a registry
+    # ceiling by this band without error, and the band is never absorbed
+    # into the registry (the ratchet still only lowers) — unlike
+    # buffer_lines, which the ratchet refills at actual + buffer.
+    growth_allowance: int = 0
 
 
 def load_budget_policy(path: Path) -> BudgetPolicy:
@@ -62,7 +67,11 @@ def load_budget_policy(path: Path) -> BudgetPolicy:
 
     production = _require_mapping(raw, "production")
     tests = _require_mapping(raw, "tests")
-    _check_keys(production, {"roots", "exclude", "buffer_lines", "max_lines"}, "production")
+    _check_keys(
+        production,
+        {"roots", "exclude", "buffer_lines", "max_lines", "growth_allowance"},
+        "production",
+    )
     _check_keys(tests, {"roots", "max_lines"}, "tests")
 
     return BudgetPolicy(
@@ -72,7 +81,20 @@ def load_budget_policy(path: Path) -> BudgetPolicy:
         production_max_lines=_parse_positive_int(production, "max_lines"),
         test_roots=_parse_test_roots(tests),
         test_max_lines=_parse_positive_int(tests, "max_lines"),
+        growth_allowance=_parse_growth_allowance(production),
     )
+
+
+def _parse_growth_allowance(production: dict[str, Any]) -> int:
+    """Optional non-negative band; absent (or 0) keeps the strict legacy line."""
+    if "growth_allowance" not in production:
+        return 0
+    value = production["growth_allowance"]
+    if type(value) is not int:
+        raise BudgetConfigurationError("growth_allowance must be an integer")
+    if value < 0:
+        raise BudgetConfigurationError("growth_allowance must not be negative")
+    return value
 
 
 def _check_keys(mapping: Any, allowed: set[str], context: str) -> None:

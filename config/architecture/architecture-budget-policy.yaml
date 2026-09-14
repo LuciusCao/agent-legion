@@ -34,6 +34,13 @@ production:
     - frontend/src/generated/**
     - worker/ui/vendor/**
   buffer_lines: 10
+  # #641 增长容忍带：有效行可超过注册表 ceiling 15 行而不报错，超出部分
+  # 永不被 ratchet 吸收（与 buffer 的本质区别：buffer 是每次 ratchet 以
+  # actual+buffer 重新灌满的可再生余量；allowance 是相对冻结天花板的一次
+  # 性额度，文件收缩后由 staleness 检查自动回收）。#209 baseline 只降不升
+  # 不变；prettier 80 列重排（实测 +5）与小型功能增长（#633 那次 +11）预期
+  # 落在带内。豁免重签超过 floor+15 须带 expires（到期硬失败）。
+  growth_allowance: 15
   max_lines: 800
 tests:
   roots:

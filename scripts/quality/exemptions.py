@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,9 @@ _VAGUE_REASONS: tuple[str, ...] = ("legacy", "temporary", "follow up")
 _PLAN_PREFIXES: tuple[str, ...] = ("docs/superpowers/plans/", "docs/architecture/")
 _ISSUE_PREFIXES: tuple[str, ...] = ("issues/open/", "issues/closed/")
 
+# #641: strict ISO calendar date — fromisoformat alone also accepts compact forms.
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 
 @dataclass(frozen=True)
 class ArchitectureExemption:
@@ -24,10 +29,25 @@ class ArchitectureExemption:
     owner: str
     remove_when: str
     ceiling: int | None = None
+    # #641 time-boxed re-file channel: an exemption raised past its monotonic
+    # floor + growth allowance must carry a deadline, and the gate hard-fails
+    # once the date passes (renew with fresh justification or shrink the file).
+    expires: str | None = None
 
 
 def _parse_exemption(raw: dict[str, Any]) -> ArchitectureExemption:
-    """Parse a single exemption entry from the registry YAML."""
+    """Parse a single exemption entry from the registry YAML.
+
+    An unquoted ``expires: 2026-12-31`` is resolved by PyYAML's timestamp
+    resolver to a ``datetime.date`` — the documented plain form must keep
+    working, so it is normalized to its ISO string here (codex P1 on #642:
+    the validator's ``.strip()`` must never see a raw date object). Any
+    other non-string type falls through untouched for the validator to
+    reject with a proper error instead of a traceback.
+    """
+    expires: Any = raw.get("expires")
+    if isinstance(expires, date):
+        expires = expires.isoformat()
     return ArchitectureExemption(
         check=raw.get("check", ""),
         path=raw.get("path", ""),
@@ -35,6 +55,7 @@ def _parse_exemption(raw: dict[str, Any]) -> ArchitectureExemption:
         owner=raw.get("owner", ""),
         remove_when=raw.get("remove_when", ""),
         ceiling=raw.get("ceiling"),
+        expires=expires,
     )
 
 
@@ -91,7 +112,36 @@ def _validate_remove_when(remove_when: str, base_path: Path) -> str | None:
     return None
 
 
-def _validate_ceiling(ex: ArchitectureExemption, root: Path, prefix: str) -> str | None:
+def _validate_expires(ex: ArchitectureExemption, today: date) -> str | None:
+    """Validate the optional #641 expires deadline for an exemption."""
+    if ex.expires is None:
+        return None
+
+    # Guard: entries built without the loader (tests, hand-constructed) or
+    # carrying an unexpected YAML type must fail validation, not traceback.
+    # The Any widen keeps mypy from marking the branch unreachable under
+    # the declared ``str | None`` while runtime YAML types can differ.
+    expires_value: Any = ex.expires
+    if not isinstance(expires_value, str):
+        return f"expires {ex.expires!r} must be an ISO date string (YYYY-MM-DD)"
+
+    expires = expires_value.strip()
+    if not _ISO_DATE.match(expires):
+        return f"expires '{ex.expires}' must be an ISO date (YYYY-MM-DD)"
+
+    deadline = date.fromisoformat(expires)
+    if today > deadline:
+        return (
+            f"exemption expired on {expires} — renew it with a fresh "
+            "justification and a later expires date, or shrink the file back "
+            "under its ceiling"
+        )
+    return None
+
+
+def _validate_ceiling(
+    ex: ArchitectureExemption, root: Path, prefix: str, growth_allowance: int
+) -> str | None:
     """Validate the optional ceiling field for an exemption."""
     if ex.ceiling is None:
         if ex.check == "architecture.file_budget":
@@ -113,8 +163,15 @@ def _validate_ceiling(ex: ArchitectureExemption, root: Path, prefix: str) -> str
             from scripts.architecture.effective_lines import count_effective_lines
 
             actual = count_effective_lines(file_path)
-            if ex.ceiling < actual:
-                return f"ceiling {ex.ceiling} is below actual effective line count ({actual} lines)"
+            # #641: the growth allowance band may legally separate the file's
+            # actual size from its registered ceiling, so only a ceiling below
+            # actual minus the band is a misregistered exemption.
+            if ex.ceiling + growth_allowance < actual:
+                return (
+                    f"ceiling {ex.ceiling} is below actual effective line count "
+                    f"({actual} lines) even with the growth allowance "
+                    f"({growth_allowance} lines)"
+                )
 
     return None
 
@@ -122,6 +179,9 @@ def _validate_ceiling(ex: ArchitectureExemption, root: Path, prefix: str) -> str
 def validate_exemptions(
     exemptions: tuple[ArchitectureExemption, ...],
     base_path: str | Path | None = None,
+    *,
+    today: date | None = None,
+    growth_allowance: int = 0,
 ) -> list[str]:
     """Validate a loaded exemption registry and return a list of concise violations."""
     root = Path(base_path) if base_path else Path.cwd()
@@ -152,8 +212,12 @@ def validate_exemptions(
         if remove_when_error:
             errors.append(f"{prefix}: {remove_when_error}")
 
-        ceiling_error = _validate_ceiling(ex, root, prefix)
+        ceiling_error = _validate_ceiling(ex, root, prefix, growth_allowance)
         if ceiling_error:
             errors.append(f"{prefix}: {ceiling_error}")
+
+        expires_error = _validate_expires(ex, today or date.today())
+        if expires_error:
+            errors.append(f"{prefix}: {expires_error}")
 
     return errors
