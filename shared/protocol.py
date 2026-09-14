@@ -37,6 +37,12 @@ never send ``limit``); that window is closed. A v5 Worker's
 ``claim_batch`` shape-sniff still wraps a single object from an older Host
 during a Host downgrade, so the mixed-fleet direction that matters (new
 Worker, old Host) keeps working.
+
+Additive field without a bump (#590): the batch heartbeat response carries a
+``settled`` list (completion followups the Host classified inside the beat
+transaction). Old Workers ignore the unknown key; new Workers parse a
+settled-less body from an older Host as an empty list — both directions ride
+v5 safely.
 """
 
 CODE_PROTOCOL_VERSION = 2

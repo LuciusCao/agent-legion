@@ -98,27 +98,38 @@ pub fn resolve() -> anyhow::Result<GatewayCredentials> {
         load_file(&path)? // produces the actionable missing-file error
     };
     if env_base_url.is_some() || env_api_key.is_some() {
-        eprintln!(
-            "velites: warning: {ENV_BASE_URL}/{ENV_API_KEY} are deprecated (a one-release \
-             migration bridge for direct CLI calls only); move the gateway provider into \
-             ~/.velites/models.json — see docs/architecture/velites-model-registry.md"
-        );
+        eprintln!("{}", env_deprecation_warning_text());
     }
     merge(file, env_base_url, env_api_key)
 }
 
 /// #602 deprecation notice for the legacy gateway file: this bridge serves
 /// only direct CLI invocations (Worker model discovery structurally cannot
-/// see it), retires in the next release cycle.
-fn deprecation_warning(path: &Path) {
-    eprintln!(
+/// see it), retires in the next release cycle. Pure string builder — the
+/// test pins the migration guidance itself (delete/mangle the text and it
+/// goes red).
+fn deprecation_warning_text(path: &Path) -> String {
+    format!(
         "velites: warning: {} is deprecated (a one-release migration bridge for direct \
          CLI calls only; Worker model discovery never reads it) — move the gateway \
          provider into ~/.velites/models.json (see docs/architecture/velites-model-registry.md, \
          'migrating from 0.1.x'); the file and the gateway fallback branch will be removed \
          in the next release cycle",
         path.display(),
-    );
+    )
+}
+
+/// #602: the env-override arm of the same bridge (either variable set).
+fn env_deprecation_warning_text() -> String {
+    format!(
+        "velites: warning: {ENV_BASE_URL}/{ENV_API_KEY} are deprecated (a one-release \
+         migration bridge for direct CLI calls only); move the gateway provider into \
+         ~/.velites/models.json — see docs/architecture/velites-model-registry.md"
+    )
+}
+
+fn deprecation_warning(path: &Path) {
+    eprintln!("{}", deprecation_warning_text(path));
 }
 
 /// Warn (never fail) when the secret file is readable by group/others.
@@ -218,18 +229,28 @@ mod tests {
     }
 
     #[test]
-    fn deprecation_warning_names_the_file_and_the_migration_target() {
-        // #602: pure-string check — the notice must name the deprecated file
-        // and point at models.json + the migration doc; no I/O involved.
+    fn file_deprecation_warning_pins_the_migration_guidance() {
+        // #602: the notice is the deprecation's only enforcement — it must
+        // name the deprecated file, the migration target, the doc section,
+        // and the removal window. Asserting the builder's return value (not
+        // a re-formatted copy) so text drift fails here.
         let dir = tempfile::tempdir().unwrap();
         let path = config_path(dir.path());
-        // Format the same way resolve()'s warning does, without touching env.
-        let rendered = format!(
-            "velites: warning: {} is deprecated (a one-release migration bridge for direct \
-             CLI calls only; Worker model discovery never reads it)",
-            path.display(),
-        );
+        let rendered = deprecation_warning_text(&path);
         assert!(rendered.contains("config.json"));
+        assert!(rendered.contains("deprecated"));
+        assert!(rendered.contains("models.json"));
+        assert!(rendered.contains("velites-model-registry.md"));
+        assert!(rendered.contains("next release cycle"));
+    }
+
+    #[test]
+    fn env_deprecation_warning_names_both_variables_and_the_target() {
+        // #602 env arm: either variable set fires this text at resolve().
+        let rendered = env_deprecation_warning_text();
+        assert!(rendered.contains(ENV_BASE_URL));
+        assert!(rendered.contains(ENV_API_KEY));
+        assert!(rendered.contains("models.json"));
         assert!(rendered.contains("deprecated"));
     }
 }

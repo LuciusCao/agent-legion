@@ -309,6 +309,11 @@ def _beat_batch_chunk(
         if entry.execution_id in lost:
             print(f"heartbeat lost ownership for {entry.execution_id}: batch 409", flush=True)
             entry.ownership_lost.set()
+    # #590: the legacy in-process loop honors the settled channel too — the
+    # Host classified it inside the beat transaction; pruning here stops the
+    # dead entry from riding every future batch (the relay path does the
+    # same via apply_beat_result).
+    registry.prune_settled([str(value) for value in body.get("settled", [])])
     cancelled = [str(value) for value in body.get("cancelled_execution_ids", [])]
     if cancelled:
         # Every entry's callback is (or wraps) cancel_executions, which

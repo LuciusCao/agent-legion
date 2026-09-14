@@ -797,3 +797,18 @@ def test_finish_cancelled_unsampled_gzip_bomb_fails(tmp_path: Path) -> None:
     assert "exceeds" in result.error_message
     assert object_store.lookup("job-1", "out.json") is None
     assert GZ_AUTHORITY_KEY not in storage.objects
+
+
+def test_finish_cancelled_unsampled_gzip_lying_hash_fails(tmp_path: Path) -> None:
+    """#356 review：percent=0（全信任）下撒谎的 gzip 自报 hash 仍必失败
+    ——区分「gzip 永远全量核验」与「裸键信任捷径」：同场景的裸键会
+    静默通过，gzip 不许。"""
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    handler, leases, _, _, _ = _make_handler(tmp_path, storage, spot_check_percent=0)
+
+    _finish(handler, {"out.json": _gz_ref(content_hash="0" * 64)}, status="cancelled")
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "hash mismatch" in result.error_message

@@ -124,8 +124,6 @@ def test_tick_beats_snapshot_leases(tmp_path: Path) -> None:
 def test_tick_writes_beat_result_with_lost_pairs_and_cancelled(tmp_path: Path) -> None:
     client, logs = _FakeClient(), []
     client.lost = ["exec-2"]
-    # Still beatable (swept/requeued): keeps the loud lost path.
-    client.states = {"exec-2": "queued"}
     client.cancelled = ["exec-9"]
     relay = _relay(tmp_path, client, logs)
     _write_snapshot(tmp_path)

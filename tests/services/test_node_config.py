@@ -539,3 +539,54 @@ def test_resolve_node_config_accepts_non_secret_defaults_and_clean_secrets() -> 
         "kept": "ok",
         "api_key": marker,
     }
+
+
+def test_agent_claim_frozen_seed_pads_agent_timeout_not_code_default() -> None:
+    """#550 review P2：agent 路径的 dispatch 垫底种子（agent_claim.py 构造
+    fallback_defaults 的方式）必须给 pre-#550 冻结配置垫 1800（agent 产品
+    常量），绝不能落回 code 节点的 600——升级静默砍掉在飞 agent 任务
+    三分之二超时预算的回归防线。种子带节点自声明值时以其为准。"""
+    from server.app.services.node_execution_config import (
+        AGENT_DEFAULT_TIMEOUT_SECONDS,
+        merge_reserved_execution_schema,
+        node_config_reserved_defaults,
+    )
+
+    node = _definition().nodes["generate"]  # type=agent 节点
+    frozen = {"node_config": {"generate": {"page_size": 7}}}  # pre-#550 冻结形态
+
+    # 与 agent_claim.py 完全同形的构造（schema 合并 + 垫底种子）。
+    def _agent_fallback(node_config: dict) -> dict:
+        reserved = node_config_reserved_defaults(node_config)
+        return {
+            **reserved,
+            "timeout_seconds": reserved["timeout_seconds"]
+            if "timeout_seconds" in node_config
+            else AGENT_DEFAULT_TIMEOUT_SECONDS,
+        }
+
+    effective = dispatch_effective_config(
+        merge_reserved_execution_schema(SCHEMA, {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS}),
+        node,
+        "wf",
+        None,
+        frozen,
+        fallback_defaults=_agent_fallback(node.config),
+    )
+    assert effective["page_size"] == 7  # 冻结值胜出
+    assert effective["timeout_seconds"] == 1800, (
+        "pre-#550 冻结配置必须垫 agent 常量，不是 code 的 600"
+    )
+    assert effective["sandbox_network"] is False
+
+    # 节点自声明 timeout（v47 harvest 形态）时以其为准垫底。
+    declared = _definition({"timeout_seconds": 30}).nodes["generate"]
+    effective_declared = dispatch_effective_config(
+        merge_reserved_execution_schema(SCHEMA, {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS}),
+        declared,
+        "wf",
+        None,
+        frozen,
+        fallback_defaults=_agent_fallback(declared.config),
+    )
+    assert effective_declared["timeout_seconds"] == 30

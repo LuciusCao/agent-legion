@@ -185,8 +185,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `mark_nodes_for_rerun` 在同一事务内删除受影响闭包的清单行（staged
   输出名集合由 `stage_outputs` 提供，RMW 产物天然排除），三入口（单
   节点 rerun / run-to / 审批 rework）全部接线；对象本体在提交后
-  best-effort 删除（bucket lifecycle 兜底，与 job_deletion 的顺序纪律
-  一致）。
+  best-effort 删除——删前按当前 `job_artifacts` 清单重验：同
+  `storage_key` 已被新 attempt 复现的权威键跳过删除（清理窗口内快速
+  重跑完成的竞态防护），未复现的孤儿键照删，bucket lifecycle 兜底，
+  与 job_deletion 的顺序纪律一致。
 - 三例 CI 负载敏感 flake（issue #453/#496/#525）：#453 publish race
   的 created_at 次序断言改顺序无关（race 的真实不变量是「谁赢了」）；
   #496 `binary_resolution` 的值导入 re-export 使 monkeypatch 打不到
@@ -228,7 +230,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   稳定哈希分桶，默认 3%）的信任自报值（HEAD size 核验仍全量）；自报
   为空或入样本的照旧流式核验。覆盖面仅信任上报通道（未声明产物 +
   cancelled 路径），声明产物始终全量核验（字节本就要落 job_dir）。
-  旋钮 `agent_workers.artifact_spot_check_percent`（0 = 全信任
+  **`.gz` 引用永不参与信任捷径**：HEAD 只约束压缩字节，解压上限是
+  流本身的安全属性——gzip 引用永远全量流式核验（解压上限 + hash
+  比对），与抽检比例无关。旋钮
+  `agent_workers.artifact_spot_check_percent`（0 = 裸键全信任
   kill-switch，100 = #356 前行为），instance settings 管理。
 
 ### Observability

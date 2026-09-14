@@ -578,8 +578,25 @@ def test_batch_heartbeat_settled_items_emit_no_rejected_events(tmp_path, events)
     assert outcome["renewed"] == []
     assert outcome["settled"] == [finished["execution_id"]]
     assert outcome["lost"] == [swept["execution_id"]]
+
+    # cancelled 终态同样走 settled（manifest_trim 的形态——result commit
+    # 对一切 outcome 写 done，故直接 SQL 置位）：同一执行从 queued 改为
+    # cancelled 后，下一拍从 lost 转入 settled、不再发事件。
+    with write_transaction(app.state.job_db.dsn_identity) as conn:
+        conn.execute(
+            "update agent_execution_requests set state='cancelled' where execution_id=%s",
+            (swept["execution_id"],),
+        )
+    outcome2 = _heartbeat_ok(
+        client,
+        token,
+        [{"execution_id": swept["execution_id"], "lease_id": swept["lease_id"]}],
+    )
+    assert outcome2["settled"] == [swept["execution_id"]]
+    assert outcome2["lost"] == []
+
     rejected = _heartbeat_events(events)
-    # Only the swept execution fires an event — the settled completion
-    # followup is silent (the stream keeps meaning "investigate").
+    # Only the queued sweep fired an event — the settled completion
+    # followups (done AND cancelled) are silent.
     assert [event["execution_id"] for event in rejected] == [swept["execution_id"]]
     assert rejected[0]["reason"] == "not_owned"
