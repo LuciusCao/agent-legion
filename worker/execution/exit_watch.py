@@ -53,6 +53,7 @@ import selectors
 import subprocess
 import threading
 import time
+from typing import Any
 
 from worker.process_lifecycle import poll_wait_locally, terminate
 
@@ -62,6 +63,21 @@ from worker.process_lifecycle import poll_wait_locally, terminate
 _TICK_SECONDS = 0.5
 _MODE_ENV = "AGENT_WORKER_EXIT_WATCH"
 _VALID_MODES = ("auto", "kqueue", "pidfd", "scan")
+
+# kqueue platform surface (macOS/BSD). Pulled through getattr so the module
+# imports — and type-checks — on Linux, where the select module has none of
+# these attributes; ``_KQUEUE`` is None there and kqueue mode is never armed.
+_KQUEUE = getattr(select, "kqueue", None)
+_KEVENT = getattr(select, "kevent", None)
+_KQ_FILTER_READ = getattr(select, "KQ_FILTER_READ", None)
+_KQ_FILTER_PROC = getattr(select, "KQ_FILTER_PROC", None)
+_KQ_EV_ADD = getattr(select, "KQ_EV_ADD", None)
+_KQ_EV_ONESHOT = getattr(select, "KQ_EV_ONESHOT", None)
+_KQ_NOTE_EXIT = getattr(select, "KQ_NOTE_EXIT", None)
+
+
+def _kqueue_available() -> bool:
+    return _KQUEUE is not None and _KEVENT is not None and _KQ_FILTER_PROC is not None
 
 
 def _resolve_mode(requested: str) -> str:
@@ -78,7 +94,7 @@ def _resolve_mode(requested: str) -> str:
         requested = "auto"
     if requested == "scan":
         return "scan"
-    if hasattr(select, "kqueue"):
+    if _kqueue_available():
         return "kqueue"
     if requested == "kqueue":
         print("exit-watch: kqueue requested but unavailable; using scan mode", flush=True)
@@ -150,15 +166,18 @@ class ExitWatchReactor:
         # thread is selecting on is the hazard; the wakeup pipe forces the
         # watcher back around to the queue promptly).
         self._pending: list[tuple[str, _Waiter]] = []
-        self._kqueue: select.kqueue | None = None
+        self._kqueue: Any | None = None
         self._selector: selectors.BaseSelector | None = None
         self._wakeup_r = self._wakeup_w = -1
         if self._mode == "kqueue":
-            self._kqueue = select.kqueue()
+            # Guarded by _kqueue_available() in _resolve_mode; the getattr
+            # dance keeps Linux typecheckers honest about the platform gap.
+            assert _KQUEUE is not None and _KEVENT is not None
+            self._kqueue = _KQUEUE()
             self._wakeup_r, self._wakeup_w = os.pipe()
             os.set_blocking(self._wakeup_r, False)
             self._kqueue.control(
-                [select.kevent(self._wakeup_r, select.KQ_FILTER_READ, select.KQ_EV_ADD)],
+                [_KEVENT(self._wakeup_r, _KQ_FILTER_READ, _KQ_EV_ADD)],
                 0,
                 0,
             )
@@ -233,14 +252,15 @@ class ExitWatchReactor:
                 # Cross-thread kqueue changelists are kernel-serialized; the
                 # kqueue fd itself is never closed while the watcher lives.
                 try:
-                    assert self._kqueue is not None
+                    assert self._kqueue is not None and _KEVENT is not None
+                    assert _KQ_EV_ADD is not None and _KQ_EV_ONESHOT is not None
                     self._kqueue.control(
                         [
-                            select.kevent(
+                            _KEVENT(
                                 proc.pid,
-                                select.KQ_FILTER_PROC,
-                                select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
-                                select.KQ_NOTE_EXIT,
+                                _KQ_FILTER_PROC,
+                                _KQ_EV_ADD | _KQ_EV_ONESHOT,
+                                _KQ_NOTE_EXIT,
                             )
                         ],
                         0,
@@ -386,11 +406,11 @@ class ExitWatchReactor:
             assert self._kqueue is not None
             exited: list[_Waiter] = []
             for event in self._kqueue.control(None, 256, timeout):
-                if event.filter == select.KQ_FILTER_READ and event.ident == self._wakeup_r:
+                if event.filter == _KQ_FILTER_READ and event.ident == self._wakeup_r:
                     with contextlib.suppress(OSError, BlockingIOError):
                         os.read(self._wakeup_r, 65536)
                     continue
-                if event.filter == select.KQ_FILTER_PROC:
+                if event.filter == _KQ_FILTER_PROC:
                     with self._lock:
                         waiter = self._waiters.get(event.ident)
                     if waiter is not None:
