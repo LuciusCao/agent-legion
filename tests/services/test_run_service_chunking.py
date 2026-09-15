@@ -474,19 +474,22 @@ def test_concurrent_runs_share_material_set_without_row_duplication(
     assert int(distinct["n"]) == 120
 
 
-def test_per_row_updates_in_opposite_order_serialise_not_deadlock(job_db, settings) -> None:
-    """排他锁事实面——#659 后的形态：两个事务以相反顺序 UPDATE 同一对
-    job 行。v82 之前 barrier 钉住的交错**必然死锁**（50/50 检出受害者）；
-    v82 的状态计数触发器入口按 key 取 pg_advisory_xact_lock 后，同一
-    workspace 的 jobs 写事务在计数行上**串行化**：后到者的第一条语句
-    在触发器入口等待先到者提交——它根本到不了「持锁交叉」的汇合点
-    （barrier 形态因此失效：后到者卡在 stmt1，barrier 必超时）。
+def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings) -> None:
+    """排他锁事实面（codex R3 复核钉住）：两个事务以相反顺序 UPDATE 同
+    一 workspace 的一对 job 行——AFTER 触发器里的 ws advisory 锁在
+    **jobs 行锁之后**取得，B 的 stmt1 持 job-b 行锁、在触发器里等 A 的
+    ws 锁；A 的 stmt2 要 job-b 行锁——(行锁 × advisory 锁) 环。v77 的
+    同形环经计数行（行锁 × 计数行锁），v82 改变了等待位置、环结构不
+    变——这不是回归，是本 PR 文档记载的接受残留类。
 
-    本测试钉住串行化的结果契约，改用无汇合点的直接交错：先后启动
-    两个反序事务，后到者在先到者的 advisory lock 上排队；先到者提交
-    后后到者完成。契约：双方全部提交、零 40P01、每行恰一次最终写入
-    （后提交者的 title 胜出）。#659 的修复目标即此（claim/心跳/rerun
-    500 波与 result 409 波的共同根因消除）。
+    本测试用 pg_locks 轮询**强制**该交错（Event 同步不保证 B 先阻塞，
+    A 抢跑提交则环不闭合——此前版本的「串行化」断言正是这样假通过
+    的），钉住结果契约：恰一个 40P01 受害者、其事务干净回滚（触发器
+    侧写随事务回滚，计数与 group-by 全等）、幸存者两行 UPDATE 落库、
+    无重复无丢行。生产面的多语句 jobs 写者全部升序遍历（五路 sweep
+    + finish batch + claim 的 (workspace, run, job) 序），同 workspace
+    反序交错不出现在生产代码——本形态是 40P01 重试基建（claim_retry、
+    db/retry）吸收的并发事实。
     """
     _workspace(job_db, settings)
     _insert_materials(job_db, 2)
@@ -505,7 +508,12 @@ def test_per_row_updates_in_opposite_order_serialise_not_deadlock(job_db, settin
     job_a, job_b = str(rows[0]["id"]), str(rows[1]["id"])
 
     results: dict[str, BaseException | None] = {}
-    started = threading.Event()
+    # 强制交错的两个闸门：w1 在 stmt1 后暂停（持 job_a 行锁 + ws advisory
+    # 锁），主线程轮询 pg_locks 直到 w2 真正阻塞在未授予的 advisory 锁上
+    # （此时 w2 持 job_b 行锁），再放 w1 跑 stmt2——两把行锁互为等待边，
+    # 环确定性闭合。无闸门的形态下 w1 会在 w2 启动前跑完提交，交错不发生。
+    w1_gate = threading.Event()
+    w2_blocked = threading.Event()
 
     def _rebind(tag: str, ids: list[str]) -> None:
         writer = connect_database(job_db.dsn_identity)
@@ -516,7 +524,11 @@ def test_per_row_updates_in_opposite_order_serialise_not_deadlock(job_db, settin
                     (f"rebound-by-{tag}", ids[0]),
                 )
                 if tag == "w1":
-                    started.set()  # w1 持有 advisory lock 后放行 w2
+                    w1_gate.wait(timeout=15)
+                else:
+                    # w2 走到这里说明 stmt1 已返回（或将来返回）；阻塞在
+                    # advisory 锁上时本行尚未执行——主线程靠 pg_locks 观测。
+                    pass
                 writer.execute(
                     "update jobs set title=%s, updated_at=current_timestamp where id=%s",
                     (f"rebound-by-{tag}", ids[1]),
@@ -530,18 +542,32 @@ def test_per_row_updates_in_opposite_order_serialise_not_deadlock(job_db, settin
     t1 = threading.Thread(target=_rebind, args=("w1", [job_a, job_b]))
     t2 = threading.Thread(target=_rebind, args=("w2", [job_b, job_a]))
     t1.start()
-    started.wait(timeout=10)  # w1 的 stmt1（含触发器）已落地
-    t2.start()  # w2 反序：其 stmt1 在触发器的 advisory lock 上排队
+    time.sleep(0.3)  # w1 的 stmt1（含触发器）已落地并停在闸门
+    t2.start()
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        with job_db.connect() as poll:
+            n = poll.execute(
+                "select count(*) from pg_locks"
+                " where locktype='advisory' and classid=82 and not granted"
+            ).fetchone()[0]
+        if n:
+            w2_blocked.set()
+            break
+        time.sleep(0.05)
+    assert w2_blocked.is_set(), "w2 never reached the advisory-lock wait — interleave not forced"
+    w1_gate.set()  # 放行 w1 的 stmt2——闭合环
     t1.join(timeout=60)
     t2.join(timeout=60)
     assert not t1.is_alive() and not t2.is_alive()
 
     outcomes = list(results.values())
     deadlocked = [exc for exc in outcomes if isinstance(exc, psycopg.errors.DeadlockDetected)]
-    # #659 契约：串行化而非死锁——双方全部提交，零 40P01 受害者。
-    assert deadlocked == [], outcomes
-    assert outcomes == [None, None], outcomes
-    # 每行恰一次最终写入（后提交者胜出），无丢行。
+    # 结果契约：环被检测、恰一个受害者整事务回滚、幸存者提交。
+    assert len(deadlocked) == 1, outcomes
+    survivor = [tag for tag, exc in results.items() if exc is None]
+    assert len(survivor) == 1, results
+    # 幸存者的两行 UPDATE 都在；受害者写入零残留（行 title 与计数均回滚）。
     with job_db.connect() as conn:
         titles = {
             str(row["id"]): str(row["title"])
@@ -551,7 +577,26 @@ def test_per_row_updates_in_opposite_order_serialise_not_deadlock(job_db, settin
         }
     assert len(titles) == 2
     for job_id in (job_a, job_b):
-        assert titles[job_id].startswith("rebound-by-"), titles
+        assert titles[job_id] == f"rebound-by-{survivor[0]}", titles
+    from server.app.db.rows import string_dict_row  # noqa: F401  (parity read below)
+
+    with job_db.connect() as conn:
+        group_by = {
+            str(row["status"]): int(row["cnt"])
+            for row in conn.execute(
+                "select status, count(*) as cnt from jobs where workspace_id=%s group by status",
+                (WORKSPACE_ID,),
+            ).fetchall()
+        }
+        counters = {
+            str(row["status"]): int(row["cnt"])
+            for row in conn.execute(
+                "select status, cnt from workspace_job_status_counts"
+                " where workspace_id=%s and cnt<>0",
+                (WORKSPACE_ID,),
+            ).fetchall()
+        }
+    assert counters == group_by, (counters, group_by)
 
 
 def test_material_delete_holding_for_update_blocks_chunk_probe(service, job_db) -> None:

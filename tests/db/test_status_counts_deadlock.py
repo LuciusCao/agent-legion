@@ -35,11 +35,16 @@ on the v77 shape — verified while writing this file):
 
 The v82 fix (two-level advisory hierarchy at trigger entry: class-82
 pg_advisory_xact_lock on every distinct ws:<workspace> FIRST, then the
-dimension keys, both sorted) serialises all counter writers per
-workspace: B's stmt1 blocks on A's ws-gate advisory lock BEFORE touching
-any counter row or dimension lock; when A commits, B proceeds and both
-transactions complete — no ring can close because no two transactions
-ever hold the same workspace's counter rows concurrently.
+dimension keys, both sorted) serialises COUNTER-ROW access per workspace:
+in these tests' shapes B's stmt1 blocks on A's ws-gate advisory lock
+before touching any counter row or dimension lock; when A commits, B
+proceeds and both transactions complete. The gate cannot serialise the
+statement's own jobs ROW locks (AFTER triggers take the advisory after
+the row locks) — an opposite-order pair of same-workspace multi-row
+writers can still ring through the (row lock × advisory) edge; that
+residual shape is pinned by tests/services/test_run_service_chunking.py
+'s forced-interleave deadlock-recovery test, and production writers are
+ordered so the pair does not occur on live paths.
 The test drives exactly that ordering: B blocks on the advisory lock while
 A's later statements run; A commits (releasing the lock); B finishes and
 commits. ``lock_timeout`` bounds every wait so a regression in the fix

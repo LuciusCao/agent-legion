@@ -48,17 +48,27 @@ Properties relied upon:
   (inherited from the enclosing transaction) — safe here: the counter
   writes before the savepoint roll back with the savepoint, and the
   lock's only job is ordering between transactions.
-- Residual window (known, accepted): the hierarchy orders locks WITHIN
-  one statement. A transaction whose successive statements touch
-  DIFFERENT workspaces in different orders (e.g. a sweeper processing
-  scanned rows unordered across workspaces vs. a claim batch walking
-  EXEC-CLAIM-LOCK-001's ascending order) can still ring cross-workspace.
-  #659's production shapes are same-workspace; the detector plus the
-  claim/heartbeat retry liveness absorb the residual. Cross-workspace
-  multi-statement jobs DML follows the ascending-workspace discipline:
-  all five sweep paths (broker claim sweep, stale-definition sweep,
-  unclaimable-model sweep, lease expiry, orphaned-job recovery) sort
-  their rows by workspace_id.
+- Residual windows (known, accepted — v77 had the same shapes):
+  (a) cross-workspace: a transaction whose successive statements touch
+  different workspaces in different orders can ring against another such
+  transaction; production's multi-statement jobs DML walks workspaces
+  ascending (all five sweep paths — broker claim sweep, stale-definition
+  sweep, unclaimable-model sweep, lease expiry, orphaned-job recovery —
+  plus finish batches and claim batches under their own ordering
+  disciplines), so the writer pair this needs does not exist in
+  production code.
+  (b) row-lock × advisory edge: these are AFTER triggers, so the ws
+  advisory lock is taken AFTER the statement's jobs row locks — a
+  transaction B that updated job-b (holding its row lock) and waits on
+  the ws lock, while transaction A (holding the ws lock) next wants
+  job-b's row lock, closes a ring. Same-workspace opposite-order
+  multi-row writers are the shape; production writers are either
+  single-row-per-statement or ordered, so the pair needs opposite-order
+  updates of the same rows — not present in production paths. Both
+  windows are absorbed by PG's deadlock detector plus the 40P01 retry
+  liveness (claim_retry, db/retry); the airtight fix (BEFORE-trigger
+  locking or statement-level aggregation through one jobs UPDATE) is a
+  schema-level change out of scope here.
 - All three arms' delta loops keep v77's ``order by`` unchanged
   (v77 already sorted every arm's group-by select); the new lock loops
   follow the same fixed-order discipline.
