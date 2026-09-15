@@ -56,6 +56,7 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
         rows = conn.execute(
             """
             select r.execution_id, r.job_id, r.node_key, r.manifest_json,
+                   r.workspace_id,
                    d.definition_json::jsonb->>'runtime' as runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
@@ -76,7 +77,12 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             """,
             (_SWEEP_LIMIT,),
         ).fetchall()
-        for row in rows:
+        # #659 v82 discipline: the per-row failed-node writes below fire
+        # the counter triggers per statement — walk workspaces ASCENDING
+        # (the scan's queued_at order is workload-ordered, not workspace
+        # ordered) so this sweeper cannot ring against claim batches on
+        # the cross-workspace multi-statement window.
+        for row in sorted(rows, key=lambda r: str(r.get("workspace_id") or "")):
             try:
                 manifest = agent_claim_compatibility.live_claim_manifest(row)
             except ValueError as exc:

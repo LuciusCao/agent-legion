@@ -144,7 +144,6 @@ def _deadlock_or_timeout(exc: psycopg.Error) -> str:
 
 
 def _race(
-    workspace_id: str,
     a_statements: tuple[tuple[str, tuple[str, ...]], ...],
     b_statements: tuple[tuple[str, tuple[str, ...]], ...],
 ) -> tuple[list[str], list[str]]:
@@ -198,6 +197,9 @@ def _race(
     finally:
         conn_a.close()
     thread_b.join(timeout=30)
+    # B hanging past the join bound must fail loudly (its failures list
+    # would read as empty otherwise — a false pass).
+    assert not thread_b.is_alive(), "B-side transaction never resolved"
     return failures["a"], failures["b"]
 
 
@@ -222,7 +224,6 @@ def test_workspace_counter_ring_is_serialised_by_advisory_lock() -> None:
         )
 
     a_failures, b_failures = _race(
-        workspace,
         a_statements=(
             ("update jobs set status='running' where id=%s", ("sc82-ws-1",)),
             ("update jobs set status='completed' where id=%s", ("sc82-ws-3",)),
@@ -266,7 +267,6 @@ def test_run_counter_ring_is_serialised_by_advisory_lock() -> None:
         )
 
     a_failures, b_failures = _race(
-        workspace,
         a_statements=(
             ("update jobs set status='running' where id=%s", ("sc82-run-1",)),
             ("update jobs set status='completed' where id=%s", ("sc82-run-3",)),
@@ -308,11 +308,22 @@ def test_trigger_function_carries_the_advisory_lock() -> None:
     ):
         src = by_name[fn]
         assert "pg_advisory_xact_lock" in src, f"{fn} lost the advisory lock"
+        # Two-int class form: the dedicated lock class 82 structurally
+        # separates this keyspace from every single-bigint advisory user.
+        assert "pg_advisory_xact_lock(82," in src, f"{fn} lost its lock class id"
         assert f"hashtext('{prefix}'" in src, f"{fn} lost its '{prefix}' keyspace prefix"
         # The prologue precedes every branch: the lock loop sits before the
         # first counter write.
         assert src.index("pg_advisory_xact_lock") < src.index("insert into"), fn
         assert src.index("pg_advisory_xact_lock") < src.index("update ", src.index("declare")), fn
+        # TWO-LEVEL hierarchy: the ws: prologue precedes the dimension loop
+        # for the run twin (swapping the levels would reopen the codex
+        # cross-family ring; the ws twin's dimension loop is the same ws:
+        # keyspace so the order check is trivially satisfied there).
+        if prefix == "run:":
+            assert src.index("hashtext('ws:'") < src.index("hashtext('run:'"), (
+                f"{fn}: dimension lock taken before the ws prologue"
+            )
 
 
 @pytest.mark.postgres

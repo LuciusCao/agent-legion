@@ -55,7 +55,12 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         # is not Worker death.
         deferral = HeartbeatDeferral(conn, broker.lease_ttl_seconds, rows)
         deferred = 0
-        for row in rows:
+        # #659 v82 discipline: the per-row DML below fires the counter
+        # triggers per statement — walking workspaces in ASCENDING order
+        # extends EXEC-CLAIM-LOCK-001's ordering to the sweeper, closing
+        # the cross-workspace multi-statement ring window against claim
+        # batches (which walk the same ascending order).
+        for row in sorted(rows, key=lambda r: str(r["workspace_id"])):
             lease_id = row["lease_id"]
             node_run_id = row["node_run_id"]
             lease = conn.execute(

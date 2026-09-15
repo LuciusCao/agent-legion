@@ -201,10 +201,12 @@ MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(81, "claim_queue_wait_profile", migrate_claim_queue_wait_profile),
     # v82 (#659): the v77 statement triggers' per-statement sorted lock order
     # cannot stop rings that span MULTIPLE statements in one transaction (a
-    # claim batch's per-execution promotes each fire the trigger) — the
-    # rebuilt functions take pg_advisory_xact_lock(hashtext('<family>:<key>'))
-    # per distinct key in sorted order at trigger entry, serialising all
-    # counter writers per key. Also adds the DELETE arm's missing order by.
+    # claim batch's per-execution promotes each fire the trigger) or across
+    # trigger families (name-ordered firing) — the rebuilt functions take a
+    # TWO-LEVEL advisory hierarchy at entry: pg_advisory_xact_lock(82,
+    # hashtext('ws:<workspace>')) for every distinct workspace FIRST, then
+    # class-82 dimension locks per key, both sorted. Same-workspace writers
+    # serialise at the ws gate before any counter row.
     SchemaMigration(82, "job_status_counts_advisory_locks", _migrate_v82_locks),
 ]
 
