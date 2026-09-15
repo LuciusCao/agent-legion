@@ -23,6 +23,12 @@ export function useStudioState(): StudioState {
   return studio
 }
 
+// 聊天草稿卡这类「测试会脱离 Provider 直渲染深层组件」的消费方用 optional
+// 版：无 Provider 时返回 null，由消费方降级（隐藏发布动作/不接线选择）。
+export function useStudioStateOptional(): StudioState | null {
+  return useContext(StudioStateContext)
+}
+
 export function useStudioView(): StudioView {
   const view = useContext(StudioViewContext)
   if (view === null) {

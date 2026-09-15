@@ -42,10 +42,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     catalog.agents,
     draft.viewMode === 'draft' ? compare.compareSummary : null
   )
-  const { selectedNodeKey, setSelectedNodeKey } = useStudioNodeSelection(
-    workspaceId,
-    nodes
-  )
+  const { selectedNodeKey, setSelectedNodeKey, focusNonce, requestNodeFocus } =
+    useStudioNodeSelection(workspaceId, nodes)
   return {
     loadState,
     actionState: actions.actionState,
@@ -66,6 +64,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     setDefinitionYaml: draft.setDraftYaml,
     selectedNodeKey,
     setSelectedNodeKey,
+    focusNonce,
+    requestNodeFocus,
     validationErrors: actions.validationErrors,
     validationMessage: actions.validationMessage,
     dirty: draft.dirty,

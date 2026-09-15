@@ -13,7 +13,8 @@ export function WorkflowStudioWorkspace() {
   const studio = useStudioState()
   const view = useStudioView()
   const { mobilePanel, setMobilePanel } = useWorkflowStudioMobilePanel(
-    studio.selectedNodeKey
+    studio.selectedNodeKey,
+    studio.focusNonce
   )
 
   return (
