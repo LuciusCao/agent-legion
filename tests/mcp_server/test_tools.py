@@ -56,7 +56,8 @@ def _patch_http_client(monkeypatch, handler) -> None:
 
 
 def _run_tool(server, name: str, args: dict) -> str:
-    blocks, _result = asyncio.run(server.call_tool(name, args))
+    # structured_output=False (#660): call_tool returns bare content blocks.
+    blocks = asyncio.run(server.call_tool(name, args))
     return "".join(block.text for block in blocks if block.type == "text")
 
 
@@ -101,12 +102,36 @@ def test_get_authoring_guide_is_served_locally(recorded) -> None:
     assert "reference an existing connection key" in folded
 
 
+def test_get_authoring_guide_returns_one_section(recorded) -> None:
+    # #660 phase B: section pulls a single ## chapter instead of the full text.
+    server, calls = recorded
+    text = _run_tool(server, "get_authoring_guide", {"section": "yaml"})
+    assert calls == []
+    assert text.startswith("## Workflow definition YAML")
+    assert "From-scratch flow" not in text
+    # Chapters keep their ### subsections (5.1/5.2 belong to agents).
+    agents = _run_tool(server, "get_authoring_guide", {"section": "agents"})
+    assert agents.startswith("## Agent definitions and tunables")
+    assert "Configuring tools" in agents
+
+
+def test_get_authoring_guide_unknown_section_lists_valid_keys(recorded) -> None:
+    server, _calls = recorded
+    text = _run_tool(server, "get_authoring_guide", {"section": "bogus"})
+    assert "Unknown guide section" in text
+    for key in ("tool-map", "flow", "yaml", "capabilities", "agents", "skills", "errors"):
+        assert key in text
+
+
 def test_loopback_tools_are_async() -> None:
     # The in-app HTTP transport executes tools inline on the uvicorn event
     # loop (FastMCP runs sync tools without to_thread), so a sync loopback
     # tool deadlocks the single-worker backend against its own request —
     # the prod symptom was every tool call hanging to the 30s read timeout.
-    server = create_mcp_server(_CONFIG)
+    # Session-bound config: the two session tools only register then (#660).
+    server = create_mcp_server(
+        McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
+    )
     tools = server._tool_manager._tools  # pinned mcp==1.29 internals
     for name in (
         "get_studio_context",
@@ -603,11 +628,37 @@ def test_get_studio_context_uses_the_bound_session(monkeypatch) -> None:
     ]
 
 
-def test_get_studio_context_without_session_binding() -> None:
-    # Self-service (external agent) setups carry no chat session binding.
+def test_static_config_without_session_skips_session_tools() -> None:
+    # #660 phase C: a static external config without a chat session never
+    # registers the two session-bound tools (they could only answer
+    # "unavailable"); the callable-resolver HTTP transport keeps them.
     server = create_mcp_server(_CONFIG)
-    text = _run_tool(server, "get_studio_context", {})
-    assert "no chat session bound" in text
+    tools = server._tool_manager._tools  # pinned mcp==1.29 internals
+    assert len(tools) == 32
+    assert "get_studio_context" not in tools
+    assert "get_job_context" not in tools
+
+    bound = create_mcp_server(
+        McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
+    )
+    bound_tools = bound._tool_manager._tools
+    assert len(bound_tools) == 34
+
+
+def test_listing_has_no_output_schema_and_slim_input_schema() -> None:
+    # #660 phase A2: structured_output=False drops every outputSchema, and
+    # the listing inputSchema carries no per-parameter titles or null
+    # defaults — while tools/call argument validation (fn_metadata) still
+    # applies, so the text content of a call is unchanged.
+    server = create_mcp_server(
+        McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
+    )
+    for tool in asyncio.run(server.list_tools()):
+        assert tool.outputSchema is None, tool.name
+        assert "title" not in json.dumps(tool.inputSchema), tool.name
+        assert '"default": null' not in json.dumps(tool.inputSchema), tool.name
+    text = _run_tool(server, "get_authoring_guide", {"section": "errors"})
+    assert text.startswith("## Common errors")
 
 
 def test_non_2xx_returns_http_text(monkeypatch) -> None:

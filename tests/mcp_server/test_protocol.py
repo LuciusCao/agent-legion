@@ -2,9 +2,10 @@
 
 Spawns ``python -m server.app.mcp_server`` over stdio like a real MCP host
 would, pointed at a local stub HTTP backend (no platform database involved):
-handshake, tools/list discovers the 33 tools, and a tools/call round-trip
+handshake, tools/list discovers the 34 tools, and a tools/call round-trip
 proves the scoped token reaches the backend and the response comes back as
-text.
+text. A second spawn without a session binding lists 32 tools (#660: the two
+session-bound tools only register when a chat session is bound).
 """
 
 from __future__ import annotations
@@ -158,5 +159,32 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
             # sees a request for it.
             guide = await call_text("get_authoring_guide", {})
             assert guide.startswith("# Agent Legion Workflow Authoring Guide")
+
+    asyncio.run(asyncio.wait_for(run(), timeout=60))
+
+
+def test_mcp_stdio_without_session_lists_32_tools(stub_backend: str) -> None:
+    # #660 phase C: a static config without AGENT_LEGION_MCP_SESSION_ID never
+    # registers the two session-bound tools (external self-service setups).
+    async def run() -> None:
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "server.app.mcp_server"],
+            env={
+                "AGENT_LEGION_MCP_API_BASE": stub_backend,
+                "AGENT_LEGION_STUDIO_AGENT_TOKEN": _TOKEN,
+            },
+            cwd=REPO_ROOT,
+        )
+        async with (
+            stdio_client(params) as (read, write),
+            ClientSession(read, write) as session,
+        ):
+            await session.initialize()
+            tools = await session.list_tools()
+            names = {tool.name for tool in tools.tools}
+            assert len(names) == 32
+            assert "get_studio_context" not in names
+            assert "get_job_context" not in names
 
     asyncio.run(asyncio.wait_for(run(), timeout=60))
