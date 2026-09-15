@@ -205,7 +205,8 @@ MIGRATIONS: list[SchemaMigration] = [
     # trigger families (name-ordered firing) — the rebuilt functions take a
     # TWO-LEVEL advisory hierarchy at entry: pg_advisory_xact_lock(82,
     # hashtext('ws:<workspace>')) for every distinct workspace FIRST, then
-    # class-82 dimension locks per key, both sorted. Same-workspace writers'
+    # class-83 dimension locks per key for the run twin (the ws twin's
+    # dimension loop re-enters class 82 by design), both sorted. Same-workspace writers'
     # COUNTER-ROW access serialises at the ws gate (jobs row locks precede
     # the AFTER-trigger gate — residual ring window, see the v82 module).
     SchemaMigration(82, "job_status_counts_advisory_locks", _migrate_v82_locks),

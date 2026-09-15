@@ -12,16 +12,18 @@ from collections.abc import Callable
 # it keeps beating until the result report commits; the claim backpressure
 # gate allows the upload backlog to reach ~2× the pool capacity). The
 # worst-case snapshot is therefore ~(2 + 2) × MAX_DYNAMIC_CONCURRENCY
-# leases = 8192 = 128 shards at RELAY_BEAT_SHARD leases each. This assumes
-# the DEFAULT backpressure (upload_backlog_limit unset → hard gate 2×
-# pool): an operator-configured backlog above that raises the true worst
-# case past 8192 — the failure mode stays bounded (un-slotted shards read
-# as an unknown round and retry next tick), so the overshoot degrades to
-# tail retries rather than lease loss. Undersizing starves the snapshot
-# TAIL every tick. Oversizing costs idle daemon threads in the
-# by-design-idle supervisor process. Importing relay_shards here would be
-# circular (it imports this limiter), so the contract test re-derives the
-# bound.
+# leases = 8192 = 128 shards at RELAY_BEAT_SHARD leases each. The upload
+# plane's 4096 share is ENFORCED, not assumed: load_transfer_controls caps
+# upload_backlog_limit at 2×MAX_DYNAMIC_CONCURRENCY (raising the cap, the
+# ceiling, or this constant requires all three plus the ceiling contract
+# test to move together — each side names the others). Before that cap the
+# overshoot failure mode was persistent tail starvation to lease expiry
+# (registry insertion order is stable across ticks, so skipped tail shards
+# are the SAME tail every tick — NOT a next-tick retry), the codex #662
+# review P1. Undersizing starves the snapshot TAIL every tick. Oversizing
+# costs idle daemon threads in the by-design-idle supervisor process.
+# Importing relay_shards here would be circular (it imports this limiter),
+# so the contract test re-derives the bound.
 MAX_INFLIGHT_SHARDS = 128
 
 

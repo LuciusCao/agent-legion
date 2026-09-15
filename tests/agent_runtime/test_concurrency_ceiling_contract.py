@@ -93,10 +93,11 @@ def test_relay_shard_admission_covers_the_ceiling() -> None:
     from worker.relay_thread_limiter import MAX_INFLIGHT_SHARDS
 
     # Every live capacity plane rides the registry: agent + code executing
-    # pools (each ≤ ceiling) plus the upload lane's adopted leases (backed
-    # by the claim backpressure gate at ~2× pool capacity) — worst case
-    # ~4 × 2048 leases (review round 2). The limiter must cover that whole
-    # tail so no shard reads as an unknown round on a saturated snapshot.
+    # pools (each ≤ ceiling) plus the upload lane's adopted leases — the
+    # upload share is capped at 2×ceiling by load_transfer_controls
+    # (upload_backlog_limit), so worst case ~4 × ceiling leases is
+    # ENFORCED. The limiter must cover that whole tail so no shard reads
+    # as an unknown round on a saturated snapshot.
     worst_case_shards = -(-4 * MAX_DYNAMIC_CONCURRENCY // RELAY_BEAT_SHARD)
     assert MAX_INFLIGHT_SHARDS == worst_case_shards == 128
 

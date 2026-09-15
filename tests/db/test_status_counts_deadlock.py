@@ -327,6 +327,13 @@ def test_trigger_function_carries_the_advisory_lock() -> None:
             assert "pg_advisory_xact_lock(83, hashtext('run:'" in src, (
                 f"{fn} lost the dimension lock class id 83"
             )
+        else:
+            # The ws twin is single-level BY DESIGN: its dimension loop
+            # re-enters the prologue's class-82 ws: locks — class 83 must
+            # never appear (a split here would be a copy-paste slip).
+            assert "pg_advisory_xact_lock(83," not in src, (
+                f"{fn} unexpectedly carries a run-class dimension lock"
+            )
         assert f"hashtext('{prefix}'" in src, f"{fn} lost its '{prefix}' keyspace prefix"
         # The prologue precedes every branch: the lock loop sits before the
         # first counter write.
