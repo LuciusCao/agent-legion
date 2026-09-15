@@ -474,21 +474,19 @@ def test_concurrent_runs_share_material_set_without_row_duplication(
     assert int(distinct["n"]) == 120
 
 
-def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings) -> None:
-    """P2-3 的排他锁事实面（barrier 钉住，确定性）：两个事务以相反
-    顺序先后 UPDATE 同一对 job 行，交错持锁 → **必然死锁**（Postgres
-    检测并回滚一个受害者，50/50 脚本实测），幸存者提交、受害者整事务
-    回滚零残留——这正是仓库里 40P01 单次重试基建（agent_broker
-    claim_retry、db/retry）所吸收的并发事实，不是 jobs 写入路径需要
-    规避的新死锁面：真实提交路径一次触达一行（分块 INSERT + ON
-    CONFLICT 的 resubmit 臂同语句锁同一行集），不存在事务间反序。
+def test_per_row_updates_in_opposite_order_serialise_not_deadlock(job_db, settings) -> None:
+    """排他锁事实面——#659 后的形态：两个事务以相反顺序 UPDATE 同一对
+    job 行。v82 之前 barrier 钉住的交错**必然死锁**（50/50 检出受害者）；
+    v82 的状态计数触发器入口按 key 取 pg_advisory_xact_lock 后，同一
+    workspace 的 jobs 写事务在计数行上**串行化**：后到者的第一条语句
+    在触发器入口等待先到者提交——它根本到不了「持锁交叉」的汇合点
+    （barrier 形态因此失效：后到者卡在 stmt1，barrier 必超时）。
 
-    两个「反序并发必然死锁」的形态（复审轮先后实测，均 50/50）：
-    (a) 一条多行 ON CONFLICT 语句——投机插入全部候选后逐个冲突仲裁，
-    两事务各持一行锁再互相等待；(b) 逐行 UPDATE ×2——第二行等第一行
-    的行锁。因此「相反顺序无死锁」不是 jobs 写入路径的可断言性质；
-    本测试钉住的是死锁的**结果**契约（受害者回滚、幸存者落库、无
-    重复无丢行），并以 barrier 把 (b) 的窗口从偶发变成确定性。
+    本测试钉住串行化的结果契约，改用无汇合点的直接交错：先后启动
+    两个反序事务，后到者在先到者的 advisory lock 上排队；先到者提交
+    后后到者完成。契约：双方全部提交、零 40P01、每行恰一次最终写入
+    （后提交者的 title 胜出）。#659 的修复目标即此（claim/心跳/rerun
+    500 波与 result 409 波的共同根因消除）。
     """
     _workspace(job_db, settings)
     _insert_materials(job_db, 2)
@@ -506,9 +504,8 @@ def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings
         ).fetchall()
     job_a, job_b = str(rows[0]["id"]), str(rows[1]["id"])
 
-    # barrier 精确交错：两线程各锁住自己「第一行」后再去要对方的行。
-    barrier = threading.Barrier(2, timeout=15)
     results: dict[str, BaseException | None] = {}
+    started = threading.Event()
 
     def _rebind(tag: str, ids: list[str]) -> None:
         writer = connect_database(job_db.dsn_identity)
@@ -518,7 +515,8 @@ def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings
                     "update jobs set title=%s, updated_at=current_timestamp where id=%s",
                     (f"rebound-by-{tag}", ids[0]),
                 )
-                barrier.wait()  # 双方都持住第一行的锁，再交叉请求
+                if tag == "w1":
+                    started.set()  # w1 持有 advisory lock 后放行 w2
                 writer.execute(
                     "update jobs set title=%s, updated_at=current_timestamp where id=%s",
                     (f"rebound-by-{tag}", ids[1]),
@@ -532,28 +530,28 @@ def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings
     t1 = threading.Thread(target=_rebind, args=("w1", [job_a, job_b]))
     t2 = threading.Thread(target=_rebind, args=("w2", [job_b, job_a]))
     t1.start()
-    t2.start()
+    started.wait(timeout=10)  # w1 的 stmt1（含触发器）已落地
+    t2.start()  # w2 反序：其 stmt1 在触发器的 advisory lock 上排队
     t1.join(timeout=60)
     t2.join(timeout=60)
     assert not t1.is_alive() and not t2.is_alive()
 
     outcomes = list(results.values())
     deadlocked = [exc for exc in outcomes if isinstance(exc, psycopg.errors.DeadlockDetected)]
-    # 死锁受害者恰一个；幸存者的两行 UPDATE 都在（其事务提交）。
-    assert len(deadlocked) == 1, outcomes
-    survivor = [tag for tag, exc in results.items() if exc is None]
-    assert len(survivor) == 1, results
+    # #659 契约：串行化而非死锁——双方全部提交，零 40P01 受害者。
+    assert deadlocked == [], outcomes
+    assert outcomes == [None, None], outcomes
+    # 每行恰一次最终写入（后提交者胜出），无丢行。
     with job_db.connect() as conn:
-        final = conn.execute(
-            "select count(*) as n, count(distinct id) as d from jobs where workspace_id=%s",
-            (WORKSPACE_ID,),
-        ).fetchone()
-        titles = conn.execute(
-            "select distinct title from jobs where workspace_id=%s", (WORKSPACE_ID,)
-        ).fetchall()
-    # 无重复、无丢行；幸存者的 title 覆盖两行（受害者的写入整事务回滚）。
-    assert int(final["n"]) == int(final["d"]) == 2
-    assert {str(row["title"]) for row in titles} == {f"rebound-by-{survivor[0]}"}
+        titles = {
+            str(row["id"]): str(row["title"])
+            for row in conn.execute(
+                "select id, title from jobs where workspace_id=%s", (WORKSPACE_ID,)
+            ).fetchall()
+        }
+    assert len(titles) == 2
+    for job_id in (job_a, job_b):
+        assert titles[job_id].startswith("rebound-by-"), titles
 
 
 def test_material_delete_holding_for_update_blocks_chunk_probe(service, job_db) -> None:
