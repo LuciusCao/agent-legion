@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from acp.schema import TextContentBlock
@@ -50,20 +51,36 @@ def _orphan(task: asyncio.Task[Any]) -> None:
     task.add_done_callback(_log_orphan_result)
 
 
-async def run_prompt_turn(conn: Any, acp_session_id: str, text: str) -> Any:
-    """One prompt turn: prompt → on timeout session/cancel → grace → wedged.
+async def run_prompt_turn(
+    conn: Any, acp_session_id: str, text: str, *, on_timeout: Callable[[], None]
+) -> Any:
+    """One prompt turn: prompt → on timeout settle+cancel → grace → wedged.
 
     The prompt runs as a task and asyncio.wait never cancels it on timeout,
     so the timeout path can still deliver the cancel and harvest a late
-    response. Raises PromptWedgedError when the cancel cannot be sent or the
-    grace expires; any task exception (agent refusal etc.) propagates as-is
-    for the caller's per-turn containment.
+    response. ``on_timeout`` fires before the cancel is sent — the service
+    uses it to settle parked permissions as denied, because an agent parked
+    on session/request_permission can only end its prompt after the reply
+    arrives; skipping it would misread a healthy session as wedged once the
+    grace expires (#664 review). Raises PromptWedgedError when the cancel
+    cannot be sent or the grace expires; any task exception (agent refusal
+    etc.) propagates as-is for the caller's per-turn containment.
     """
     prompt_task = asyncio.create_task(
         conn.prompt(acp_session_id, [TextContentBlock(type="text", text=text)])
     )
     done, _pending = await asyncio.wait({prompt_task}, timeout=PROMPT_TIMEOUT_SECONDS)
     if not done:
+        try:
+            on_timeout()
+        except Exception:
+            # #204 broad-except audit: the settle hook is best-effort
+            # preparation for the cancel — its failure must never skip the
+            # session/cancel below, because a skipped cancel is exactly the
+            # zombie-session failure this ladder exists to fix (#664). The
+            # hook failure is logged with its traceback; the cancel still
+            # goes out and the grace verdict decides the outcome.
+            logger.warning("studio chat turn-timeout hook failed", exc_info=True)
         # Loop-local cancel path — unlike the cross-thread handle.cancel(),
         # conn is directly usable here.
         try:

@@ -91,6 +91,11 @@ class AcpSessionCallbacks(Protocol):
 
     def on_turn_end(self, stop_reason: str) -> None: ...
 
+    def on_turn_timeout(self) -> None:
+        """The turn hit the prompt timeout; the ladder auto-cancels next.
+        Settle parked permissions as denied so an agent parked on a
+        permission response can still end the turn (#664 review)."""
+
     def on_turn_error(self, detail: str) -> None:
         """A single prompt turn failed; the session loop keeps running."""
 
@@ -363,7 +368,13 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             if item is _CLOSE:
                 return
             try:
-                response = await run_prompt_turn(conn, acp_session_id, str(item))
+                response = await run_prompt_turn(
+                    conn,
+                    acp_session_id,
+                    str(item),
+                    on_timeout=self.callbacks.on_turn_timeout,
+                )
+                self.callbacks.on_turn_end(str(response.stop_reason))
             except PromptWedgedError:
                 # Fatal, not per-turn containment (#664): a turn that ignores
                 # session/cancel past the grace is wedged at the transport
@@ -379,12 +390,12 @@ class AcpSessionHandle(SessionConfigHandleMixin):
                 # turn must not kill the loop and the session with it; the
                 # service records the turn error and the user can send the
                 # next prompt, and the traceback is logged for the agent-side
-                # failures that dominate here. The fatal wedged turn is
-                # filtered out above by type.
+                # failures that dominate here. Only the wedged signal crosses
+                # the turn boundary (filtered above by type): on_turn_end
+                # callback failures (transient store/DB errors inside the
+                # hook) stay contained per-turn exactly as before #664.
                 self.callbacks.on_turn_error(f"{type(exc).__name__}: {exc}")
                 logger.warning("studio chat prompt turn failed: %s", exc, exc_info=True)
-            else:
-                self.callbacks.on_turn_end(str(response.stop_reason))
 
     def _drain_stderr(self, process: Any) -> None:
         """Discard agent stderr on a reader task so a chatty agent never

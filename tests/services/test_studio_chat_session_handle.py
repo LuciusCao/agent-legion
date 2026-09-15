@@ -36,6 +36,7 @@ class _Callbacks(SimpleNamespace):
             on_update=lambda *a: None,
             on_permission_request=lambda *a: {},
             on_turn_end=lambda *a: None,
+            on_turn_timeout=lambda *a: None,
             on_turn_error=lambda *a: None,
             on_error=lambda *a: None,
             on_exit=lambda *a: None,
@@ -356,6 +357,33 @@ class _RefusingConn:
         self.cancel_calls += 1
 
 
+class _QuickConn:
+    """Fake ACP conn answering immediately (no ladder involvement)."""
+
+    async def prompt(self, session_id, blocks):  # noqa: ANN001, ANN202
+        return SimpleNamespace(stop_reason="end_turn")
+
+    async def cancel(self, session_id):  # noqa: ANN001, ANN202
+        raise AssertionError("no cancel for an in-time turn")
+
+
+class _PermissionParkedConn:
+    """Fake conn parked until BOTH the settle hook and the cancel arrive —
+    mirrors an agent that can only end its prompt after the permission
+    reply (session/request_permission) it is waiting on."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    async def prompt(self, session_id, blocks):  # noqa: ANN001, ANN202
+        while "cancel" not in self.events:
+            await asyncio.sleep(0.005)
+        return SimpleNamespace(stop_reason="cancelled")
+
+    async def cancel(self, session_id):  # noqa: ANN001, ANN202
+        self.events.append("cancel")
+
+
 @pytest.fixture
 def short_turn_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
     """Inject near-zero ladder timeouts so the wedged paths never really wait."""
@@ -478,3 +506,48 @@ def test_prompt_turn_failure_stays_per_turn_containment() -> None:
     assert "another turn is already in progress" in calls["turn_error"][0]
     assert calls["turn_end"] == [] and calls["error"] == []
     assert conn.cancel_calls == 0  # in-time failure never triggers the ladder
+
+
+@pytest.mark.usefixtures("short_turn_timeouts")
+def test_on_turn_end_callback_failure_stays_per_turn() -> None:
+    """#664 review: on_turn_end is back inside the per-turn containment — a
+    transient callback failure (store/DB inside the hook) goes to
+    on_turn_error and the loop keeps serving, exactly as before #664; only
+    PromptWedgedError crosses the turn boundary."""
+    from server.app.studio_chat.acp_session import _CLOSE
+
+    handle = _handle()
+    calls = _record_callbacks(handle)
+
+    def _failing_turn_end(stop_reason: str) -> None:
+        raise RuntimeError("store down")
+
+    handle.callbacks.on_turn_end = _failing_turn_end
+    handle._queue.put("one")
+    handle._queue.put(_CLOSE)
+
+    asyncio.run(handle._prompt_loop(_QuickConn(), "s-1"))  # drains _CLOSE
+
+    assert calls["turn_error"] == ["RuntimeError: store down"]
+    assert calls["error"] == []  # never escalated to the fatal path
+
+
+@pytest.mark.usefixtures("short_turn_timeouts")
+def test_prompt_timeout_settles_permissions_before_cancel() -> None:
+    """#664 review: the auto-cancel path fires the on_turn_timeout hook
+    (service settles parked permissions as denied) strictly BEFORE
+    session/cancel — an agent parked on a permission reply can then end its
+    turn, so the healthy session is not misread as wedged."""
+    from server.app.studio_chat.acp_session import _CLOSE
+
+    handle = _handle()
+    calls = _record_callbacks(handle)
+    conn = _PermissionParkedConn()
+    handle.callbacks.on_turn_timeout = lambda: conn.events.append("settle")
+    handle._queue.put("parked")
+    handle._queue.put(_CLOSE)
+
+    asyncio.run(handle._prompt_loop(conn, "s-1"))
+
+    assert conn.events == ["settle", "cancel"]  # hook strictly before cancel
+    assert calls == {"turn_end": ["cancelled"], "turn_error": [], "error": []}
