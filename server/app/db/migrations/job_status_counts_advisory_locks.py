@@ -51,6 +51,14 @@ Properties relied upon:
   (inherited from the enclosing transaction) — safe here: the counter
   writes before the savepoint roll back with the savepoint, and the
   lock's only job is ordering between transactions.
+- Same-layer ordering is by the ACTUAL advisory key (hashtext of the
+  prefixed text), sorted and deduped — a 32-bit collision between two
+  workspace texts collapses to ONE lock taken at one position for every
+  writer (codex review round), instead of two text-adjacent keys whose
+  acquisition order could invert across transactions. The delta loops
+  below keep the (key, status) text order for the counter writes: those
+  rows are guarded by the already-held advisory locks, so their order is
+  about lock-footprint discipline, not ring formation.
 - Residual windows (known, accepted — v77 had the same shapes):
   (a) cross-workspace: a transaction whose successive statements touch
   different workspaces in different orders can ring against another such
@@ -125,7 +133,7 @@ declare
   k text;
   st text;
   delta bigint;
-  lk text;
+  lk int;
 begin
   -- Lock hierarchy (review P1): workspace-level advisory locks FIRST, then
   -- the counter-dimension keys — in BOTH trigger families. PostgreSQL fires
@@ -138,11 +146,13 @@ begin
   -- acquisition order globally consistent: workspace level, then dimension
   -- level, both sorted.
   if TG_OP = 'INSERT' then
-    for lk in select distinct workspace_id from new_table order by 1 loop
-      perform pg_advisory_xact_lock(82, hashtext('ws:' || lk));
+    for lk in select distinct hashtext('ws:' || workspace_id)::int as lock_key
+      from new_table order by 1 loop
+      perform pg_advisory_xact_lock(82, lk);
     end loop;
-    for lk in select distinct {key} from new_table where {key} <> '' order by 1 loop
-      perform pg_advisory_xact_lock({lock_class}, hashtext('{key_prefix}' || lk));
+    for lk in select distinct hashtext('{key_prefix}' || {key})::int as lock_key
+      from new_table where {key} <> '' order by 1 loop
+      perform pg_advisory_xact_lock({lock_class}, lk);
     end loop;
     for k, st, delta in
       select {key}, status, count(*) from new_table where {key} <> ''
@@ -154,11 +164,13 @@ begin
       do update set cnt = {table}.cnt + excluded.cnt;
     end loop;
   elsif TG_OP = 'DELETE' then
-    for lk in select distinct workspace_id from old_table order by 1 loop
-      perform pg_advisory_xact_lock(82, hashtext('ws:' || lk));
+    for lk in select distinct hashtext('ws:' || workspace_id)::int as lock_key
+      from old_table order by 1 loop
+      perform pg_advisory_xact_lock(82, lk);
     end loop;
-    for lk in select distinct {key} from old_table where {key} <> '' order by 1 loop
-      perform pg_advisory_xact_lock({lock_class}, hashtext('{key_prefix}' || lk));
+    for lk in select distinct hashtext('{key_prefix}' || {key})::int as lock_key
+      from old_table where {key} <> '' order by 1 loop
+      perform pg_advisory_xact_lock({lock_class}, lk);
     end loop;
     for k, st, delta in
       select {key}, status, -count(*)::bigint from old_table where {key} <> ''
@@ -168,22 +180,22 @@ begin
     end loop;
   else
     for lk in
-      select distinct workspace_id from (
+      select distinct hashtext('ws:' || workspace_id)::int as lock_key from (
         select workspace_id from old_table
         union
         select workspace_id from new_table
       ) ws_keys order by 1
     loop
-      perform pg_advisory_xact_lock(82, hashtext('ws:' || lk));
+      perform pg_advisory_xact_lock(82, lk);
     end loop;
     for lk in
-      select distinct key from (
+      select distinct hashtext('{key_prefix}' || key)::int as lock_key from (
         select {key} as key from old_table where {key} <> ''
         union
         select {key} from new_table where {key} <> ''
       ) lk_keys order by 1
     loop
-      perform pg_advisory_xact_lock({lock_class}, hashtext('{key_prefix}' || lk));
+      perform pg_advisory_xact_lock({lock_class}, lk);
     end loop;
     for k, st, delta in
       select key, status, sum(cnt) from (

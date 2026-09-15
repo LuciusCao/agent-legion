@@ -321,12 +321,17 @@ def test_trigger_function_carries_the_advisory_lock() -> None:
         # separate this keyspace from every single-bigint advisory user,
         # and the ws (82) / run (83) levels from EACH OTHER — a shared
         # class id would let a 32-bit hashtext collision collapse the
-        # hierarchy onto one lock (codex review round).
+        # hierarchy onto one lock (codex review round). The loops lock by
+        # the PRECOMPUTED key (hashtext in the select, cast int) so the
+        # acquisition order is the actual advisory-key order (same-layer
+        # collision safety, codex round 6).
         assert "pg_advisory_xact_lock(82," in src, f"{fn} lost the ws lock class id"
+        assert "hashtext('ws:'" in src, f"{fn} lost the ws keyspace prefix"
         if prefix == "run:":
-            assert "pg_advisory_xact_lock(83, hashtext('run:'" in src, (
+            assert f"pg_advisory_xact_lock({83}, lk)" in src, (
                 f"{fn} lost the dimension lock class id 83"
             )
+            assert "hashtext('run:'" in src, f"{fn} lost the run keyspace prefix"
         else:
             # The ws twin is single-level BY DESIGN: its dimension loop
             # re-enters the prologue's class-82 ws: locks — class 83 must
