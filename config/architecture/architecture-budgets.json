@@ -1543,6 +1543,7 @@
     "server/app/studio_chat/payloads.py": 25,
     "server/app/studio_chat/permissions.py": 121,
     "server/app/studio_chat/prompts.py": 41,
+    "server/app/studio_chat/prompt_turn.py": 46,
     "server/app/studio_chat/registry.py": 59,
     "server/app/studio_chat/resume.py": 69,
     "server/app/studio_chat/resume_context.py": 66,

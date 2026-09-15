@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from server.app.studio_chat import permissions as permissions_module
+from server.app.studio_chat import prompt_turn
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
 from tests.helpers import wait_for_predicate
@@ -324,3 +325,26 @@ def test_unanswered_permission_auto_denies_after_timeout(chat, monkeypatch) -> N
         e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
     ]
     assert outcomes == [{"outcome": "cancelled"}]
+
+
+def test_turn_timeout_settles_parked_permission_and_session_survives(chat, monkeypatch) -> None:
+    """#664 review: the prompt timeout landing while the agent is parked on
+    a human permission settles the request as denied BEFORE session/cancel,
+    so the agent can end the turn and the healthy session is NOT misread as
+    wedged (escalated to error after the grace)."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(HUMAN_PERMISSION_SCRIPT)
+    monkeypatch.setattr(prompt_turn, "PROMPT_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(prompt_turn, "CANCEL_GRACE_SECONDS", 5)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run ls")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
+    # No human answer: the ladder times out, settles the request as denied,
+    # then cancels — the agent honours both and the session returns to idle.
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "cancelled"}]
+    assert service.get_session(session["id"])["status"] == "idle"

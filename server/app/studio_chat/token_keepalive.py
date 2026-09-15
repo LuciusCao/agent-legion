@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.auth.sessions import hash_token
-from server.app.studio_chat.acp_session import PROMPT_TIMEOUT_SECONDS
+from server.app.studio_chat.prompt_turn import PROMPT_TIMEOUT_SECONDS
 from server.app.studio_chat.session_escalation import escalate_dead_token_session
 
 if TYPE_CHECKING:
