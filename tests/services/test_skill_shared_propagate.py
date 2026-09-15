@@ -389,3 +389,71 @@ def test_planning_rejects_intermediate_symlink_escape(ws_dir, tmp_path) -> None:
     assert entry.status == "failed"
     assert "unreadable" in (entry.detail or "")
     assert _git(repo, "show", "HEAD:references/style.md") == "# v1"
+
+
+def test_shared_lock_held_through_skip_judgment_and_write(ws_dir, monkeypatch) -> None:
+    """codex P1（#674 三轮）：shared 代次锁保持到 skip 判定与文件应用
+    完成——写阶段内另一线程拿不到 shared 锁（并发 PUT 被阻塞到本
+    skill 提交之后，窗口不复存在）。"""
+    import threading
+
+    from server.app.services import skill_editing as editing_module
+    from server.app.services.skill_shared_store import shared_edit_lock
+
+    _seed_shared(
+        ws_dir,
+        [{"source": "references/style.md", "skills": ["skill-a"]}],
+        {"references/style.md": "# v2\n"},
+    )
+    _make_skill_repo(ws_dir / _WS / "skill-a", {"references/style.md": "# v1\n"})
+
+    real_check = editing_module.graded_contract_check
+    shared_dir = ws_dir / _WS / "_shared"
+    probe: dict[str, bool] = {}
+
+    def probe_check(repo_dir):
+        # 写阶段（_save_version_locked 的契约复检）内探测锁占用。
+        def try_acquire() -> None:
+            lock = shared_edit_lock(shared_dir, ws_dir)
+            try:
+                lock.acquire(timeout=0.2)
+            except Exception:
+                probe["acquired_during_write"] = False
+            else:
+                probe["acquired_during_write"] = True
+                lock.release()
+
+        thread = threading.Thread(target=try_acquire)
+        thread.start()
+        thread.join()
+        return real_check(repo_dir)
+
+    monkeypatch.setattr(editing_module, "graded_contract_check", probe_check)
+    (entry,) = propagate_shared_materials(_WS).results
+    assert entry.status == "synced"
+    assert probe == {"acquired_during_write": False}
+
+
+def test_propagate_rejects_shared_dir_symlink(ws_dir, tmp_path) -> None:
+    """codex P1（#674 三轮）：`_shared` 自身是外部 symlink 时传播拒绝
+    （map 加载即按无共享材料处理 → NotFoundError/404），外部目录不会
+    成为可信 containment 根。"""
+    outside = tmp_path / "private"
+    (outside / "references").mkdir(parents=True)
+    (outside / "map.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "materials": [{"source": "references/style.md", "skills": ["skill-a"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (outside / "references" / "style.md").write_text("smuggled\n", encoding="utf-8")
+    (ws_dir / _WS / "_shared").symlink_to(outside)
+    _make_skill_repo(ws_dir / _WS / "skill-a", {"references/style.md": "# v1\n"})
+
+    with pytest.raises(NotFoundError):
+        propagate_shared_materials(_WS)
+    repo = ws_dir / _WS / "skill-a"
+    assert _git(repo, "show", "HEAD:references/style.md") == "# v1"

@@ -56,7 +56,11 @@ def read_shared_source_bytes(shared_dir: Path, source: str) -> bytes:
     """Plan-time source read WITH containment (codex P1, same rule as the
     viewer): resolve and require the target to stay inside the resolved
     ``_shared`` — an intermediate symlink must not smuggle host files into
-    skill repos. Raises OSError for unreadable OR escaping sources."""
+    skill repos. Raises OSError for unreadable OR escaping sources. A
+    symlinked ``_shared`` itself is rejected too (codex P1 on #674: the
+    external target would otherwise become the trusted root)."""
+    if shared_dir.is_symlink():
+        raise OSError("_shared must be a real directory, not a symlink")
     root = shared_dir.resolve()
     target = (root / source).resolve()
     try:

@@ -44,7 +44,6 @@ from typing import Any, NamedTuple
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import (
-    ConflictError,
     InvalidOperationError,
     NotFoundError,
 )
@@ -59,6 +58,12 @@ from server.app.services.skill_repo_edit import (
     rollback_checked,
     run_edit_git,
 )
+from server.app.services.skill_save_guards import (
+    check_clean,
+    check_overwrites,
+    check_tag,
+)
+from server.app.services.skill_shared_store import shared_dir_for, shared_edit_lock
 from server.app.services.skill_shared_sync import SharedSyncPlan, plan_shared_sync
 from server.app.skills.skill_roots import default_skill_base_dir
 
@@ -109,19 +114,25 @@ class SkillEditingService:
     ) -> dict[str, Any] | None:
         repo_dir = self._skill_dir(skill_key)
         with edit_lock_for(repo_dir, self.base_dir, self._runs_dir):
-            # #673 (codex P2): callers racing on the same repo (concurrent
-            # propagation) re-judge the skip and resolve the tag INSIDE the
-            # lock, so the waiter decides against the state the winner just
-            # committed instead of failing on a stale tag conflict. The
-            # result is None exactly when prepare returned None (callers
-            # passing no prepare always get the save dict).
-            sync_plan = prepare(repo_dir) if prepare is not None else None
-            if prepare is not None and sync_plan is None:
-                return None
-            tag = new_tag(repo_dir) if callable(new_tag) else new_tag
-            return self._save_version_locked(
-                skill_key, repo_dir, files, tag, message, sync_plan=sync_plan
-            )
+            if prepare is None:
+                tag = new_tag(repo_dir) if callable(new_tag) else new_tag
+                return self._save_version_locked(skill_key, repo_dir, files, tag, message)
+            # Propagation path (codex P1 on #674): the shared generation
+            # lock is held from the recheck/plan through the skip judgment
+            # AND the file application — a concurrent full-state PUT needs
+            # this lock and therefore cannot swap the generation anywhere
+            # in the per-skill critical section. Lock order stays
+            # skill → shared; prepare must NOT acquire the shared lock
+            # itself. The result is None exactly when prepare skips.
+            shared_dir = shared_dir_for(self.base_dir, skill_key)
+            with shared_edit_lock(shared_dir, self.base_dir):
+                sync_plan = prepare(repo_dir)
+                if sync_plan is None:
+                    return None
+                tag = new_tag(repo_dir) if callable(new_tag) else new_tag
+                return self._save_version_locked(
+                    skill_key, repo_dir, files, tag, message, sync_plan=sync_plan
+                )
 
     def _save_version_locked(
         self,
@@ -141,8 +152,8 @@ class SkillEditingService:
             raise InvalidOperationError(f"Skill {skill_key!r} repo has no commits yet")
 
         # Everything below validates BEFORE any write (all-or-nothing).
-        self._check_tag(skill_key, repo_dir, new_tag)
-        self._check_clean(skill_key, repo_dir)
+        check_tag(self._git, skill_key, repo_dir, new_tag)
+        check_clean(self._git, skill_key, repo_dir)
         targets = self._resolve_targets(repo_dir, files)
         # Shared-material sync (#633): mapped materials are injected into the
         # write set (shared copy authoritative) and flow through the same
@@ -159,7 +170,7 @@ class SkillEditingService:
             targets.extend(
                 self._resolve_targets(repo_dir, [SkillFileWrite(source, shared_content)])
             )
-        self._check_overwrites(repo_dir, targets)
+        check_overwrites(self._git, skill_key, repo_dir, targets)
 
         written_paths = [path for path, _ in targets]
         try:
@@ -238,31 +249,6 @@ class SkillEditingService:
             raise NotFoundError("Invalid skill path") from exc
         return candidate
 
-    def _check_tag(self, skill_key: str, repo_dir: Path, new_tag: str) -> None:
-        # `git check-ref-format refs/tags/-l` passes (the dash rule covers the
-        # refname, not path components) while `git tag -l` would silently list
-        # instead of creating — refuse dash-leading tags outright.
-        error = None
-        if new_tag.startswith("-"):
-            error = "tag names must not start with '-'"
-        elif self._git(
-            repo_dir, ["check-ref-format", f"refs/tags/{new_tag}"], check=False
-        ).returncode:
-            error = f"tag {new_tag!r} is not a valid git ref name"
-        if error:
-            raise SkillEditValidationError(
-                f"Invalid tag name: {new_tag!r}", [{"path": ".", "error": error}]
-            )
-        if new_tag in skill_repo.list_tags(repo_dir):
-            raise ConflictError(f"Skill {skill_key!r} repo already has tag {new_tag!r}")
-
-    def _check_clean(self, skill_key: str, repo_dir: Path) -> None:
-        status = self._git(repo_dir, ["status", "--porcelain"], check=False)
-        if status.returncode != 0 or status.stdout.strip():
-            raise ConflictError(
-                f"Skill {skill_key!r} repo has uncommitted changes; commit or revert them first"
-            )
-
     def _resolve_targets(
         self, repo_dir: Path, files: list[SkillFileWrite]
     ) -> list[tuple[Path, str]]:
@@ -275,22 +261,6 @@ class SkillEditingService:
         if errors:
             raise SkillEditValidationError("Invalid skill file paths", errors)
         return targets
-
-    def _check_overwrites(self, repo_dir: Path, targets: list[tuple[Path, str]]) -> None:
-        """Refuse to overwrite a pre-existing UNTRACKED file: rolling back a
-        write to such a file could not restore its original content."""
-        errors: list[dict[str, str]] = []
-        for path, _ in targets:
-            relative = path.relative_to(repo_dir.resolve()).as_posix()
-            tracked = self._git(
-                repo_dir, ["ls-files", "--error-unmatch", "--", relative], check=False
-            )
-            if tracked.returncode != 0 and path.exists():
-                errors.append(
-                    {"path": relative, "error": "refusing to overwrite an untracked file"}
-                )
-        if errors:
-            raise SkillEditValidationError("Unsafe skill file overwrite", errors)
 
     # Class attribute (not an import alias at module scope) so tests can
     # monkeypatch the git runner per service class.

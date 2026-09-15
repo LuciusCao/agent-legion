@@ -1460,6 +1460,7 @@
     "server/app/services/skill_lock_store.py": 37,
     "server/app/services/skill_repo.py": 67,
     "server/app/services/skill_repo_edit.py": 84,
+    "server/app/services/skill_save_guards.py": 47,
     "server/app/services/skill_shared_propagate.py": 84,
     "server/app/services/skill_shared_propagate_apply.py": 82,
     "server/app/services/skill_shared_propagate_plan.py": 77,

@@ -328,3 +328,26 @@ def test_scoped_token_rejected_on_user_facing_gets(client, job_db, shared_home) 
         )
     # 全量会话不受影响。
     assert client.get(_BASE).status_code == 200
+
+
+def test_shared_dir_symlink_is_not_a_trusted_root(client, shared_home, tmp_path) -> None:
+    """codex P1（#674 三轮）：`_shared -> 外部目录` 时 resolve 会把外部
+    目录设为可信根、containment 必然通过——必须整体拒绝：GET 按无共享
+    材料返回空态，/file 404，宿主文件不可读。"""
+    _create_workspace(client)
+    outside = tmp_path / "private"
+    (outside / "references").mkdir(parents=True)
+    (outside / "map.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "materials": [{"source": "references/secret.md", "skills": ["s"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (outside / "references" / "secret.md").write_text("top secret\n", encoding="utf-8")
+    (shared_home / "_shared").symlink_to(outside)
+
+    assert client.get(_BASE).json() == {"workspace_id": _WS, "map": None, "files": []}
+    assert client.get(f"{_BASE}/file", params={"path": "references/secret.md"}).status_code == 404

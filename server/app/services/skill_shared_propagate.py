@@ -26,15 +26,17 @@ selected INSIDE the skill repo lock (codex P2): two propagations racing
 the same skill no longer compute the same patch tag outside the lock —
 the waiter re-reads the tags the winner left behind.
 
-Concurrency (codex P1): the plan is taken under the ``_shared`` edit
-lock (map + per-source content digests + source bytes), then RELEASED —
-``save_version`` acquires skill lock → shared lock in that order, so the
-shared lock must not be held across the batch. Before each skill's save,
-INSIDE the skill repo lock, the planned generation is re-verified (the
-shared lock nests inside, preserving the order): a concurrent full-state
-PUT that swapped the generation aborts the batch with a retryable
-``ConflictError`` (409) instead of applying a stale plan to a new
-generation (missed new targets / removed targets / replaced sources).
+Concurrency (codex P1): the batch plan is taken under the ``_shared``
+edit lock (map + per-source content digests + source bytes), then
+RELEASED — the shared lock must not be held across the batch. Each
+skill's save then re-acquires it INSIDE the skill repo lock (order
+skill → shared) and HOLDS it for the whole per-skill critical section:
+generation recheck, sync-plan pinning, skip judgment and the file
+application all complete before it is released. A concurrent full-state
+PUT therefore either lands first (the recheck aborts the batch with a
+retryable ``ConflictError``, 409) or after the skill's commit — never in
+between, so a stale plan is never applied to a new generation (missed
+new targets / removed targets / replaced sources).
 
 Per-skill isolation: one skill's failure (dirty tree, unreadable shared
 source, contract regression, git error) never aborts the batch — every
