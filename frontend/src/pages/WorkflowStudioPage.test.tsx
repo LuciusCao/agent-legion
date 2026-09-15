@@ -245,7 +245,10 @@ describe('WorkflowStudioPage', () => {
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    await screen.findByText(/未发布变更/)
+    // chip 查询限定命令栏：画布角标（#666 起与顶栏同源）也带「未发布变更」
+    // 文案，整屏 findByText 会多匹配。
+    const commandBar = screen.getByLabelText('Workflow command bar')
+    await within(commandBar).findByText(/未发布变更/)
     // 校验完成打开右侧变更面板（Drawer），不再切换画布模式。
     await user.click(screen.getByRole('button', { name: '校验' }))
     expect(await screen.findByText('变更与校验')).toBeInTheDocument()
@@ -264,8 +267,10 @@ describe('WorkflowStudioPage', () => {
 
     // 等 compare 落定、chip 稳定为计数形态再点击：编辑后 chip 先显示瞬态的
     // 「有未发布变更」，compare debounce 一到就被「计算中…」替换——点在被
-    // 替换下来的旧节点上点击会静默丢失（慢机器/CI 上必现的竞态）。
-    await user.click(await screen.findByText(/未发布变更 \d+/))
+    // 替换下来的旧节点上点击会静默丢失（慢机器/CI 上必现的竞态）。查询限定
+    // 命令栏（画布角标也带「未发布变更」文案，整屏匹配会命中两个）。
+    const commandBar = screen.getByLabelText('Workflow command bar')
+    await user.click(await within(commandBar).findByText(/未发布变更 \d+/))
 
     expect(await screen.findByText('变更与校验')).toBeInTheDocument()
     expect(screen.getByText('变更摘要')).toBeInTheDocument()
@@ -304,7 +309,9 @@ describe('WorkflowStudioPage', () => {
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    await screen.findByText(/未发布变更/)
+    await within(screen.getByLabelText('Workflow command bar')).findByText(
+      /未发布变更/
+    )
     const publishButton = screen.getByRole('button', { name: '发布新版本' })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)
@@ -325,7 +332,9 @@ describe('WorkflowStudioPage', () => {
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    await screen.findByText(/未发布变更/)
+    await within(screen.getByLabelText('Workflow command bar')).findByText(
+      /未发布变更/
+    )
     const publishButton = screen.getByRole('button', { name: '发布新版本' })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)
