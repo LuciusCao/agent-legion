@@ -28,6 +28,7 @@ const browserTestFiles = [
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.draft.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowStudio.draftBaselineSync.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioActions.test.ts',
