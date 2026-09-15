@@ -301,3 +301,42 @@ def test_tag_selected_inside_repo_lock_uses_latest_tags(ws_dir, monkeypatch) -> 
     # 锁内读取的 tag 列表就是计算依据（v1.0.0 → v1.0.1）。
     assert seen_tags == [("v1.0.0",)]
     assert entry.tag == "v1.0.1"
+
+
+def test_tag_conflict_gets_friendly_detail(ws_dir, monkeypatch) -> None:
+    """评审顺手项：竞争产生的 tag 冲突改写为用户友好文案（语义不变）。"""
+    _seed_shared(
+        ws_dir,
+        [{"source": "references/style.md", "skills": ["skill-a"]}],
+        {"references/style.md": "# v2\n"},
+    )
+    repo = ws_dir / _WS / "skill-a"
+    _make_skill_repo(repo, {"references/style.md": "# v1\n"}, tags=("v1.0.0",))
+
+    from server.app.services import skill_shared_propagate_plan as plan_module
+
+    # 模拟竞争：锁内选出的 tag 已被并发方占用。
+    monkeypatch.setattr(plan_module, "next_version_tag", lambda tags: "v1.0.0")
+    (entry,) = propagate_shared_materials(_WS).results
+    assert entry.status == "failed"
+    assert entry.detail == "版本已被并发更新，请刷新后重试（数据未受影响）"
+    # 仓库未被半应用：HEAD 仍是 v1。
+    assert _git(repo, "show", "HEAD:references/style.md") == "# v1"
+
+
+def test_nothing_to_commit_gets_friendly_detail(ws_dir, monkeypatch) -> None:
+    """评审顺手项：竞争者已先行同步导致的 nothing-to-commit 同样改写。"""
+    _seed_shared(
+        ws_dir,
+        [{"source": "references/style.md", "skills": ["skill-a"]}],
+        {"references/style.md": "# same\n"},
+    )
+    _make_skill_repo(ws_dir / _WS / "skill-a", {"references/style.md": "# same\n"})
+
+    from server.app.services import skill_shared_propagate_apply as apply_module
+
+    # 强制 skip 误判为「待同步」，走到 commit 才发现内容一致。
+    monkeypatch.setattr(apply_module, "_head_matches", lambda repo, source, data: False)
+    (entry,) = propagate_shared_materials(_WS).results
+    assert entry.status == "failed"
+    assert entry.detail == "版本已被并发更新，请刷新后重试（数据未受影响）"

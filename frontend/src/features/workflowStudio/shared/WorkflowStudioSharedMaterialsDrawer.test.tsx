@@ -307,10 +307,13 @@ describe('WorkflowStudioSharedMaterialsDrawer', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: '同步 references/style.md' })
     )
-    // 轻确认：说明会 commit + 打新 tag。
+    // 轻确认：说明会 commit + 打新 tag（两种起始情形都准确的表述）。
     const dialog = await screen.findByRole('dialog')
     expect(dialog.textContent).toContain('commit')
     expect(dialog.textContent).toContain('references/style.md')
+    expect(dialog.textContent).toContain(
+      '最高版本 +0.0.1；无版本 tag 的仓库从 v0.1.0 起'
+    )
     fireEvent.click(screen.getByRole('button', { name: '同步并打 tag' }))
 
     await waitFor(() =>

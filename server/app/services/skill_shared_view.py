@@ -217,8 +217,12 @@ def read_shared_file_content(
     except ValueError as exc:
         raise NotFoundError("Shared material not found") from exc
     try:
+        # stat BEFORE the read: size and content then describe the same
+        # state in practice (a full-state PUT swaps the dir atomically via
+        # two renames, so the worst case is a transient 404 mid-swap, never
+        # a half-written file — taking the shared lock here stays off).
+        size = target.stat().st_size
         content = read_shared_text(target)
     except (OSError, UnicodeDecodeError) as exc:
         raise NotFoundError("Shared material not found") from exc
-    size = target.stat().st_size
     return content, size, size > MAX_FILE_BYTES

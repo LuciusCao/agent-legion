@@ -40,6 +40,28 @@ def _head_matches(repo_dir: Path, source: str, shared_bytes: bytes) -> bool:
     return result.returncode == 0 and result.stdout == shared_bytes
 
 
+_CONCURRENCY_DETAIL = "版本已被并发更新，请刷新后重试（数据未受影响）"
+
+# save_version 的 commit 调用以 "-c" 身份配置开头，SkillGitError 按
+# args[0] 命名为 "git -c failed ..."；tag 步骤则是 "git tag failed ..."
+# —— 这两类与 "already has tag" 都是并发竞争（edit-lock 域外的并发写）
+# 的典型失败，改写为可操作的友好文案。
+_CONCURRENCY_GIT_FAILURES = (
+    "git -c failed for the skill repository",
+    "git tag failed for the skill repository",
+)
+
+
+def _friendly_detail(exc: JobServiceError) -> str:
+    """Rewrite concurrency-typical save failures (tag conflict /
+    nothing-to-commit from a racing save) into an actionable message; the
+    underlying semantics (per-skill failed, no data loss) are unchanged."""
+    text = str(exc)
+    if "already has tag" in text or text in _CONCURRENCY_GIT_FAILURES:
+        return _CONCURRENCY_DETAIL
+    return text
+
+
 def propagate_one(
     workspace_id: str,
     skill: str,
@@ -89,7 +111,10 @@ def propagate_one(
     except JobServiceError as exc:
         # Mapped save failures (dirty tree 409, contract regression 422,
         # tag conflict, git operational error) — isolated to this skill.
-        return PropagateSkillResult(skill=skill, status="failed", detail=str(exc))
+        # Concurrency-typical ones (tag conflict / nothing-to-commit from a
+        # racing save OUTSIDE the edit-lock domain) get a user-friendly
+        # detail: the data is intact, a refresh-and-retry is the fix.
+        return PropagateSkillResult(skill=skill, status="failed", detail=_friendly_detail(exc))
     except Exception as exc:
         # #204 broad-except audit: per-skill isolation must hold for ANY
         # save failure mode, including ones outside the JobServiceError

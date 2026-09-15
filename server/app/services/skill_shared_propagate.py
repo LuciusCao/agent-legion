@@ -110,13 +110,13 @@ def propagate_shared_materials(
     # The sources filter selects WHICH skills run (mapped to at least one
     # requested source); the skip check and commit message see the skill's
     # WHOLE mapped set, because save_version syncs all of it.
-    selected: dict[str, list[str]] = {}
+    selected: set[str] = set()
     all_mapped: dict[str, list[str]] = {}
     for material in shared_map.materials:
         for skill in material.skills:
             all_mapped.setdefault(skill, []).append(material.source)
             if requested is None or material.source in requested:
-                selected.setdefault(skill, [])
+                selected.add(skill)
     editing = SkillEditingService(base_dir=base, runs_dir=runs_dir)
     return PropagateResult(
         results=tuple(
