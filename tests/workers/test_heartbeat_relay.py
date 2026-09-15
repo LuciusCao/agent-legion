@@ -40,6 +40,11 @@ class _FakeClient:
         self.single_status = 204
         self.pings = 0
         self.ping_error: Exception | None = None
+        # #590: the Host classifies the completion followups inside the beat
+        # transaction; the response carries a settled list (default empty =
+        # every lost verdict is the loud family, the pre-#590 behavior every
+        # legacy test scripts).
+        self.settled: list[str] = []
 
     def get_self(self) -> dict:
         self.pings += 1
@@ -57,7 +62,11 @@ class _FakeClient:
             raise self.batch_error
         if self.batch_status in (404, 405):
             return None
-        return 200, {"lost": self.lost, "cancelled_execution_ids": self.cancelled}
+        return 200, {
+            "lost": self.lost,
+            "settled": self.settled,
+            "cancelled_execution_ids": self.cancelled,
+        }
 
     def heartbeat(self, execution_id: str, lease_id: str, timeout: float | None = None) -> Any:
         self.singles.append((execution_id, lease_id))
@@ -128,6 +137,42 @@ def test_tick_writes_beat_result_with_lost_pairs_and_cancelled(tmp_path: Path) -
     # pair-matched apply cannot hit a re-claimed execution's new lease.
     assert result["lost"] == [["exec-2", "lease-2"]]
     assert result["cancelled"] == ["exec-9"]
+
+
+def test_tick_routes_response_settled_and_lost_verdicts(tmp_path: Path) -> None:
+    """#590: the Host classifies inside the beat transaction — the response's
+    ``settled`` list (terminal executions whose snapshot entry is stale)
+    rides through to the beat-result file unchanged; ``lost`` keeps the
+    (execution_id, lease_id) pairs for the pair-matched apply. No probe
+    round-trip exists at all."""
+    client, logs = _FakeClient(), []
+    client.lost = ["exec-2"]
+    client.settled = ["exec-1"]
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path)
+
+    relay.tick()
+
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None
+    assert result["settled"] == ["exec-1"]
+    assert result["lost"] == [["exec-2", "lease-2"]]
+
+
+def test_tick_transient_beat_failure_reports_no_settled(tmp_path: Path) -> None:
+    """A transient beat failure loses the whole verdict set (retry next
+    tick) — settled arrives only with a real answer, never guessed."""
+    client, logs = _FakeClient(), []
+    client.batch_error = ConnectionError("host unreachable")
+    client.settled = ["exec-1"]
+    relay = _relay(tmp_path, client, logs)
+    _write_snapshot(tmp_path)
+
+    relay.tick()
+
+    result = read_beat_result(tmp_path / RESULT_FILENAME)
+    assert result is not None
+    assert result["settled"] == [] and result["lost"] == []
 
 
 def test_tick_skips_stale_snapshot_and_logs_once(tmp_path: Path) -> None:
@@ -221,6 +266,10 @@ def test_404_degrades_to_single_beats(tmp_path: Path) -> None:
     result = read_beat_result(tmp_path / RESULT_FILENAME)
     assert result is not None
     assert result["lost"] == [["exec-1", "lease-1"], ["exec-2", "lease-2"]]
+    # The single-beat protocol has NO settled channel: terminal executions
+    # answer 409 and take the loud lost path (pre-#590 noise, documented as
+    # acceptable — degraded mode exits on the first batch-capable answer).
+    assert result["settled"] == []
 
 
 def test_tick_shards_oversized_snapshot_and_merges_chunk_verdicts(tmp_path: Path) -> None:
@@ -339,7 +388,7 @@ def test_overstayed_shard_cannot_mutate_returned_verdicts(
     )
 
     assert outcome.verdicts is not None
-    lost, cancelled = outcome.verdicts
+    lost, settled, cancelled = outcome.verdicts
     assert lost == [("exec-fast", "lease-fast")]
     assert cancelled == ["exec-fast-c"]
 
@@ -399,7 +448,7 @@ def test_join_deadline_is_shared_across_shards(monkeypatch: pytest.MonkeyPatch) 
         f"fan-out join spent {elapsed:.2f}s — per-thread budget stacking is back"
     )
     # The round still completed: nothing learned, verdicts intact.
-    assert outcome.verdicts is not None and outcome.verdicts == ([], [])
+    assert outcome.verdicts is not None and outcome.verdicts == ([], [], [])
 
 
 def test_overstayed_shards_are_bounded_across_ticks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -431,7 +480,7 @@ def test_overstayed_shards_are_bounded_across_ticks(monkeypatch: pytest.MonkeyPa
     try:
         first = relay_shards.beat_sharded(_BlockedClient(), leases, lambda message: None, limiter)
         second = relay_shards.beat_sharded(_BlockedClient(), leases, lambda message: None, limiter)
-        assert first.verdicts == ([], [])
+        assert first.verdicts == ([], [], [])
         assert second.verdicts is None
         assert calls == ["exec-1", "exec-2"], "a later tick spawned duplicate shard threads"
     finally:
@@ -441,7 +490,7 @@ def test_overstayed_shards_are_bounded_across_ticks(monkeypatch: pytest.MonkeyPa
                 thread.join(timeout=5)
 
     recovered = relay_shards.beat_sharded(_BlockedClient(), leases, lambda message: None, limiter)
-    assert recovered.verdicts == ([], [])
+    assert recovered.verdicts == ([], [], [])
     assert calls == ["exec-1", "exec-2", "exec-1", "exec-2"]
 
 

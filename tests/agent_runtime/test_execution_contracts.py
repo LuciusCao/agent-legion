@@ -114,3 +114,16 @@ def test_unsupported_key_empty_passes(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_unknown_runtime_fails_fast_listing_catalog() -> None:
     with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'.*pi, velites"):
         validate_execution_contract(node_key="gen", runtime="rust", values={})
+
+
+def test_resolve_execution_timeout_from_dispatch_config() -> None:
+    """#550: the dispatch-resolved reserved-key timeout overrides the product
+    constant in the manifest execution block; missing/invalid values fall
+    back to it (hand-built manifests keep the pre-#550 shape)."""
+    node = _node(provider="p", model="m")
+    assert resolve_execution(node, "velites", timeout_seconds=7200)["timeout_seconds"] == 7200
+    assert resolve_execution(node, "velites")["timeout_seconds"] == 1800
+    assert resolve_execution(node, "velites", timeout_seconds=None)["timeout_seconds"] == 1800
+    assert resolve_execution(node, "velites", timeout_seconds=0)["timeout_seconds"] == 1800
+    assert resolve_execution(node, "velites", timeout_seconds=-5)["timeout_seconds"] == 1800
+    assert resolve_execution(node, "velites", timeout_seconds=True)["timeout_seconds"] == 1800

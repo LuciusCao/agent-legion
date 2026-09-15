@@ -44,7 +44,7 @@ from worker.execution.heartbeat_degraded import beat_single
 # long-transaction problem this split exists to solve; 256 renewals of
 # fixed-size primary-key statements stay in the tens-of-milliseconds range.
 # A Worker may legally hold more leases than this (the registration caps
-# max_concurrency and max_code_concurrency at 1024 each), so an oversized
+# max_concurrency and max_code_concurrency at MAX_DYNAMIC_CONCURRENCY each), so an oversized
 # snapshot is SHARDED into sequential per-chunk requests — never truncated
 # (a silently renewed prefix would let the tail's leases expire), never
 # refused (that would reclaim every lease of a healthy high-slot Worker).
@@ -153,7 +153,26 @@ class BatchHeartbeatRegistry:
             if entry is not None:
                 entry.adopted.set()
 
-    def apply_beat_result(self, lost: list[tuple[str, str]], cancelled: list[str]) -> None:
+    def prune_settled(self, settled: list[str]) -> None:
+        """Quietly drop settled executions from the registry (#590).
+
+        The Host classified these refusals inside the beat transaction as
+        the completion followup (the execution row is in a TERMINAL state);
+        unlike ``apply_beat_result``'s lost arm there is no ownership_lost
+        to set and no signal to the executor — the entry simply stops being
+        beaten. NOT pair-matched by design: terminal is absorbing (no path
+        requeues a done/cancelled row), so no live new-attempt entry can
+        exist under that execution_id and the next snapshot must not carry
+        the dead lease whatever its lease_id was."""
+        if not settled:
+            return
+        with self._lock:
+            for execution_id in settled:
+                self._entries.pop(execution_id, None)
+
+    def apply_beat_result(
+        self, lost: list[tuple[str, str]], cancelled: list[str], settled: list[str] | None = None
+    ) -> None:
         """Apply the supervisor relay's beat verdicts (#566 phase 2).
 
         Pair-matched like every other mutation: a lost verdict for a lease
@@ -161,6 +180,7 @@ class BatchHeartbeatRegistry:
         lease_id, so the new attempt's entry matches nothing and stays
         untouched. Cancelled fan-out dedups by callback identity (every
         entry's callback is or wraps the same cancel_executions)."""
+        self.prune_settled(settled or [])
         with self._lock:
             entries = list(self._entries.values())
             for execution_id, lease_id in lost:
@@ -289,6 +309,11 @@ def _beat_batch_chunk(
         if entry.execution_id in lost:
             print(f"heartbeat lost ownership for {entry.execution_id}: batch 409", flush=True)
             entry.ownership_lost.set()
+    # #590: the legacy in-process loop honors the settled channel too — the
+    # Host classified it inside the beat transaction; pruning here stops the
+    # dead entry from riding every future batch (the relay path does the
+    # same via apply_beat_result).
+    registry.prune_settled([str(value) for value in body.get("settled", [])])
     cancelled = [str(value) for value in body.get("cancelled_execution_ids", [])]
     if cancelled:
         # Every entry's callback is (or wraps) cancel_executions, which

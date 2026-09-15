@@ -4,6 +4,109 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [0.7.12] - 2026-09-14
+
+执行平面收尾与系统性还债版本（纯后端线，不涉及用户交互）。
+
+### Fixed
+- supervisor 心跳 relay 的迟到心跳噪音（issue #590）：执行完成提交后、
+  executor 把租约从快照摘除前的 2s 节流窗口内，relay 仍按旧快照给已
+  终结租约发心跳，Host 正确拒绝（not_owned）——0.7.7 后实测放大到
+  3.3k/小时，稀释租约丢失排查的第一信号。修法（分类在 Host 侧 beat
+  事务内完成，零额外 RTT）：批量心跳的行缺失分支加一次同事务主键
+  读——行已 `done`/`cancelled` 即完成态收尾，随响应的 `settled` 列表
+  返回（不发 execution.heartbeat_rejected 事件）；`queued`（重排队）/
+  未知 id / 他人 execution 仍是 lost 照发事件。executor 侧
+  apply_beat_result 把 settled 静默摘除（不设 ownership_lost、不触发
+  cancel），下一拍快照不再携带死租约。
+- rerun 不清对象存储清单导致旧 run 产物残留（issue #508）：rerun 的
+  产物清理只作用于本地 job_dir，`job_artifacts` 清单行无任何删除路径
+  ——重跑中断/再次失败时，job 详情继续展示旧 run 产物（本地 ∪ 清单），
+  单产物读取本地 miss 后落 S3 旧对象，内容也是旧的。修法：
+  `mark_nodes_for_rerun` 在同一事务内删除受影响闭包的清单行（staged
+  输出名集合由 `stage_outputs` 提供，RMW 产物天然排除），三入口（单
+  节点 rerun / run-to / 审批 rework）全部接线；对象本体在提交后
+  best-effort 删除——删前按当前 `job_artifacts` 清单重验：同
+  `storage_key` 已被新 attempt 复现的权威键跳过删除（清理窗口内快速
+  重跑完成的竞态防护），未复现的孤儿键照删，bucket lifecycle 兜底，
+  与 job_deletion 的顺序纪律一致。
+- 三例 CI 负载敏感 flake（issue #453/#496/#525）：#453 publish race
+  的 created_at 次序断言改顺序无关（race 的真实不变量是「谁赢了」）；
+  #496 `binary_resolution` 的值导入 re-export 使 monkeypatch 打不到
+  `code_sandbox` 侧读取点——开发机 data/bin 有 velites 时 fail-closed
+  测试静默失真，改经模块属性访问同源生效；#525 session lifecycle 在
+  text 与 tool_call 两个落库时点之间裸读，补 tool_call 可见性的
+  bounded wait。
+
+### Changed
+- 单条 claim 响应路径退役（issue #547）：batch claim（#546）随 0.7.4
+  发布，pre-#546 Worker 镜像已退出支持窗口。claim 端点固定
+  `BatchAgentClaimResponse`（缺省 limit=1 应答单元素 claims 列表），
+  `ClaimRouteResponse` union 与 route_response_model 豁免随之收割；
+  worker 侧 `ClaimOperations.claim()` 单条方法删除（生产零调用者），
+  `claim_batch` 的混合舰队 shape-sniff 保留。行为收口：单条路径的
+  「提交后 500」容错形态消失——批路径逐条丢弃语义接管（全丢 = 空批
+  204），恢复路径不变（租约到期 sweeper 重排）。
+- velites `~/.velites/config.json` 迁移桥进入 deprecation（issue
+  #602，deprecation 阶段）：直调使用旧文件或 `VELITES_BASE_URL`/
+  `VELITES_API_KEY` env 时 stderr 打迁移指引（指向 models.json 与
+  迁移文档），下一版本周期移除（config.rs + lib.rs gateway 兜底分支）。
+  该文件仅供直调 CLI 兜底、结构上进不了 Worker 模型发现——新用户照旧
+  教程配置后 Worker 完全看不见，表现为「任务无人认领」类困惑。
+
+### Added
+- agent 节点执行超时开放配置（issue #550）：保留执行键
+  `timeout_seconds` 合并进 agent 节点的有效 schema（Agent Definition
+  schema 之下，重声明禁令不变），值走常规解析链（defaults → 节点
+  config → workspace 覆盖 → intake 冻结）；dispatch 以解析后的冻结值
+  写入 manifest `execution.timeout_seconds`，缺省保持产品常量 1800s
+  （合并默认同样取 1800 而非 code 节点的 600——升级不得静默砍掉存量
+  agent 运行的超时预算）。撰写/审核类 agent 跑不完 30 分钟时，运维可
+  经 workspace 覆盖调整；Studio 检查器卡片留待前端跟进。
+
+### Performance
+- artifact 校验回读的信任上报抽检（issue #356 方案 B）：Worker 直传
+  S3 产物的 result 提交路径，第二跳流量（Host 下载重算 sha256）改为
+  确定性抽检——自报 hash 非空且未入样本（按 name/storage_key/size
+  稳定哈希分桶，默认 3%）的信任自报值（HEAD size 核验仍全量）；自报
+  为空或入样本的照旧流式核验。覆盖面仅信任上报通道（未声明产物 +
+  cancelled 路径），声明产物始终全量核验（字节本就要落 job_dir）。
+  **`.gz` 引用永不参与信任捷径**：HEAD 只约束压缩字节，解压上限是
+  流本身的安全属性——gzip 引用永远全量流式核验（解压上限 + hash
+  比对），与抽检比例无关。旋钮
+  `agent_workers.artifact_spot_check_percent`（0 = 裸键全信任
+  kill-switch，100 = #356 前行为），instance settings 管理。
+
+### Observability
+- Worker 侧结构化事件分流落盘（issue #510）：#490 的单行 JSON 事件
+  （claim.attempt / execution.* / http.error）单独落
+  `data/logs/events-<state dir 名>.jsonl`（5MB×3 轮转）——此前只进
+  supervisor 的 500 行内存 deque，满载 1-2 分钟整体滚过一遍，低频异常
+  事件（http.error、claim.backoff）事后完全不可得。面板滚动日志与
+  deque 行为不变；jq/时间线工具可直接消费纯 JSON。
+
+### Maintenance
+- 架构豁免治理收口（issue #456/#522）：刷新 issue-states 后 53 条
+  file_budget 豁免过期（锚定 issue 已关闭但代码未回落——#641/#633/
+  #542/#521 等），逐条核验均为「预算未回落」型，按 #522 纪律统一重锚
+  #456 长期锚点；26 条过松 ceiling 收紧到当前实际行数。
+  `EXEC-CODE-MANIFEST-001` 的 evidence 目标随 #547 测试拆分修正。
+- Worker 并发上限放宽至 2048，双侧收敛为单一常量（issue #657）：
+  1024 档实测健康（RSS ~14.2GB/1024 进程、零重排），护栏挡住了机器
+  吃得下的档位。新 `shared/concurrency_limits.MAX_DYNAMIC_CONCURRENCY`
+  为唯一权威——worker 本地校验（controls/config_validation/hot_reload）
+  与 Host 注册/claim 契约（五处 le= 散落字面量）全部改为引用；契约
+  测试钉住全等（worker 本地 == 每个 Host 契约字段），防单边漂移（单边
+  放宽会让 worker 撞 422）。隐性假设复核：relay 分片准入上限按
+  ceiling/分片大小重估（16→32，2048 档满载心跳分片不再饿死）；
+  load_shedding 与档位无耦合（测试钉住）。DB 层无上限不变；
+  min_protocol_version 不动（值域放宽非语义变化）。2048 是契约值域
+  而非单机目标（外推 ~28GB RSS 超 32GB 物理内存）。
+- `worker/service_bind.py` 豁免收割确认（issue #650）：判定矩阵已随
+  后续重构回落到 15 行有效行（≤30 收割线），file_budget 豁免已不在
+  册——收割条件 1/2（#489 方向二/三）未做、条件 3（docstring 瘦身）
+  被顺带完成，issue 关闭收账。
+
 ## [0.7.11] - 2026-09-14
 
 ### Changed

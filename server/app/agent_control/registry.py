@@ -19,6 +19,7 @@ from server.app.agent_control.register_tokens import AgentRegisterTokenStore
 from server.app.agent_runtime.catalog import AGENT_RUNTIMES
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
+from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
 from shared.protocol import CODE_PROTOCOL_VERSION, MODEL_RUNTIME_PROTOCOL_VERSION
 
 # Worker-supplied registration fields are scheduling inputs from a
@@ -28,7 +29,12 @@ from shared.protocol import CODE_PROTOCOL_VERSION, MODEL_RUNTIME_PROTOCOL_VERSIO
 # "<worker_id>.<secret>", so '.' must stay excluded.
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _MAX_NAME_LENGTH = 128
-_MAX_CONCURRENCY = 1024
+# Per-Worker concurrency ceiling: single source shared with the route
+# contracts and the Worker's own config validation (#657 — a local literal
+# here defeated the shared bump once; the contract test walks the registry
+# layer too).
+_MAX_CONCURRENCY = MAX_DYNAMIC_CONCURRENCY
+
 # A Worker is "online" while its last authenticated call (claim poll every few
 # seconds, or an execution heartbeat) is fresher than this threshold.
 ONLINE_THRESHOLD_SECONDS = 30

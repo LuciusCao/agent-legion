@@ -7,13 +7,19 @@ deferral covers the gap; this relay removes it). The relay runs in the
 supervisor process (idle by design): it reads the executor's lease
 snapshot (``lease_snapshot.py``), beats those leases with the snapshot's
 worker token (the beat transport lives in ``relay_beats.py``), and writes
-the Host's verdicts (lost / cancelled) back to the beat-result file for
-the executor to apply.
+the Host's verdicts (lost / settled / cancelled) back to the beat-result
+file for the executor to apply.
 
 Safety rails:
 - Only beats while the snapshot's pid is a live process AND the snapshot
   is fresh — a brain-dead executor's leases must expire on the normal Host
   TTL path, not be renewed forever from a frozen snapshot.
+- #590 noise split: the Host classifies each refused beat INSIDE the batch
+  transaction — a refusal for an execution already in a terminal state is
+  the completion followup (result accepted, snapshot entry not yet pruned)
+  and rides the response's ``settled`` list; the executor prunes those
+  leases quietly, the Host emits no heartbeat_rejected for them, and the
+  next snapshot stops carrying them. No probe endpoint, no extra RTT.
 - 停拍 ≠ 失联（PR #572 codex P1）: a stale snapshot stops lease RENEWAL
   but the relay keeps a lightweight authenticated ping
   (``RelayBeater.control_plane_ping`` — no lease effect) so the Host's
@@ -154,19 +160,25 @@ class HeartbeatRelay:
         if not token or not leases:
             return
         self._beater.ensure_client(host_url, token)
-        lost, cancelled = self._beater.beat(leases)
+        lost, settled, cancelled = self._beater.beat(leases)
         if lost is None:
             # Transient beat failure: the relay is still ALIVE — the liveness
             # write below must still happen (the executor's watchdog keys on
             # the advancing seq); the verdicts stay empty and the next tick
             # retries everything.
-            lost, cancelled = [], []
+            lost, settled, cancelled = [], [], []
+        # #590: ``settled`` arrives classified by the Host INSIDE the beat
+        # transaction (terminal state + stale snapshot entry = the completion
+        # followup) — no probe round-trip, no serial per-item timeouts, and
+        # the Host already suppressed the heartbeat_rejected events for
+        # these. ``lost`` keeps the loud family (swept/requeued/foreign).
         self._result_seq += 1
         write_beat_result(
             self._state_dir / RESULT_FILENAME,
             seq=self._result_seq,
             lost=lost,
             cancelled=cancelled,
+            settled=settled,
         )
 
 

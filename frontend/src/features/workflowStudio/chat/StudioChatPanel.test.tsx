@@ -118,6 +118,30 @@ describe('StudioChatPanel', () => {
     await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
   })
 
+  it('places the agent config between the message list and the input (#658)', async () => {
+    // 广告配置面的会话：配置区作为对话上下文呈现。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({
+        capability_snapshot: { sessionModes: true },
+        session_modes: {
+          currentModeId: 'default',
+          availableModes: [{ id: 'default', name: 'Default' }],
+        },
+      }),
+    ])
+    renderPanel()
+
+    const configBar = await screen.findByRole('group', { name: 'Agent 配置' })
+    const following = Node.DOCUMENT_POSITION_FOLLOWING
+    // 会话管理（顶部）在配置区之前，配置区紧贴输入框之上。
+    const sessionPicker = screen.getByLabelText('选择会话')
+    expect(
+      sessionPicker.compareDocumentPosition(configBar) & following
+    ).toBeTruthy()
+    const input = screen.getByLabelText('消息输入')
+    expect(configBar.compareDocumentPosition(input) & following).toBeTruthy()
+  })
+
   it('renders every message kind', async () => {
     mockApi.fetchStudioChatMessages.mockResolvedValue([
       chatMessage('m1', 1, 'text', 'user', { text: '帮我加个难度评估节点' }),

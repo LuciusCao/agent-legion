@@ -1,4 +1,4 @@
-"""Persistent rolling log for the worker panel lines (#566 phase 3).
+"""Persistent rolling logs for the worker panel lines and structured events.
 
 The supervisor's panel log (executor stdout + supervisor lifecycle lines)
 used to live only in a 500-line in-memory deque: a crash or a busy episode
@@ -6,12 +6,21 @@ scrolled the evidence away (the #566 investigation pain point). Every panel
 line is now ALSO appended to a size-rotated file — 10 MiB × 5 keeps weeks
 of normal operation and bounds the worst case at ~60 MiB.
 
-Path rule: the log sits next to the worker's data domain — ``data/logs/
-executor-<state dir 名>.log`` when the state dir lives under a ``data/``
-root (the default ``data/agent-worker-service`` layout; the name suffix
-keeps two co-located state dirs from sharing one file, PR #572), else
-``<state_dir>/logs/executor.log`` so a custom state dir never sprays logs
-into an unexpected parent.
+#510 splits the structured events out: ``emit_event``'s single-line JSON
+objects (claim.attempt / execution.* / http.error) go to their own
+``events.jsonl`` sink beside the panel log, so jq-style timeline tooling
+consumes pure JSON without filtering the panel's rhythm text (slots lines,
+restart notices). The split happens in the supervisor's ``_log`` shim — the
+executor itself keeps one stdout channel (#204 discipline: the observer
+never breaks the observed loop).
+
+Path rule: the logs sit next to the worker's data domain — ``data/logs/
+executor-<state dir 名>.log`` (and ``events-<state dir 名>.jsonl``) when the
+state dir lives under a ``data/`` root (the default
+``data/agent-worker-service`` layout; the name suffix keeps two co-located
+state dirs from sharing one file, PR #572), else ``<state_dir>/logs/
+executor.log`` so a custom state dir never sprays logs into an unexpected
+parent.
 
 Rotation is hand-rolled (not RotatingFileHandler): logging's emit swallows
 write errors into handleError, which would break the report-once contract
@@ -29,6 +38,14 @@ from typing import Any
 MAX_BYTES = 10 * 1024 * 1024
 BACKUP_COUNT = 5
 
+# One structured event line per claim round / execution / upload task — a
+# far slower rhythm than the panel text, so the events file gets a tighter
+# cap: 5 MiB × 3 bounds the worst case at ~20 MiB while keeping the
+# low-frequency exception events (http.error, claim.backoff) reachable for
+# a full busy episode (#510's acceptance: 30 minutes of full load).
+EVENTS_MAX_BYTES = 5 * 1024 * 1024
+EVENTS_BACKUP_COUNT = 3
+
 
 def executor_log_path(state_dir: Path) -> Path:
     """The rolling executor log's path for this worker's state dir.
@@ -40,6 +57,14 @@ def executor_log_path(state_dir: Path) -> Path:
     if state_dir.parent.name == "data":
         return state_dir.parent / "logs" / f"executor-{state_dir.name}.log"
     return state_dir / "logs" / "executor.log"
+
+
+def events_log_path(state_dir: Path) -> Path:
+    """The structured-events sink's path (#510): same anchoring rule as the
+    panel log, ``.jsonl`` extension, ``events-`` prefix."""
+    if state_dir.parent.name == "data":
+        return state_dir.parent / "logs" / f"events-{state_dir.name}.jsonl"
+    return state_dir / "logs" / "events.jsonl"
 
 
 class ExecutorLogSink:
@@ -77,16 +102,18 @@ class ExecutorLogSink:
                 on_error(f"executor 滚动日志写入失败（{self._path}）：{exc}；后续仅保留内存日志")
 
     def _rotate(self) -> None:
-        """caller holds the lock: shift .1→.2…, current→.1, reopen fresh."""
+        """caller holds the lock: shift .1→.2…, current→.1, reopen fresh.
+
+        The loop bounds keep ``index + 1 <= backups`` by construction
+        (range stops at 1, and backups >= 1), so every existing older file
+        shifts up by one and the highest (.backups) is overwritten by the
+        shift — "current + N backups" with no unreachable arm."""
         self._handle.close()
         for index in range(self._backups - 1, 0, -1):
             older = self._path.with_name(f"{self._path.name}.{index}")
             newer = self._path.with_name(f"{self._path.name}.{index + 1}")
             if older.exists():
-                if index + 1 > self._backups:
-                    older.unlink()
-                else:
-                    os.replace(older, newer)
+                os.replace(older, newer)
         if self._path.exists():
             os.replace(self._path, self._path.with_name(f"{self._path.name}.1"))
         self._handle = self._path.open("a", encoding="utf-8")
@@ -101,3 +128,53 @@ class ExecutorLogSink:
     def resume(self) -> None:
         """Re-arm after close (supervisor start() following a stop())."""
         self._closed = False
+
+
+def is_structured_event(message: str) -> bool:
+    """#510: does this executor stdout line carry a #490 structured event?
+
+    ``sort_keys=True`` means ``"event"`` leads only when no payload key
+    sorts before it — ``http.error`` (``body`` first) and friends do NOT,
+    and a prefix check drops exactly the forensic events this sink exists
+    for (review R1 P1). Containment-shaped instead: brace-wrapped JSON
+    carrying both marker keys. Misclassification only moves one line between
+    files, zero runtime effect; json.loads would cost more than the panel
+    loop needs."""
+    return (
+        message.startswith("{")
+        and message.endswith("}")
+        and '"event":' in message
+        and '"ts":' in message
+    )
+
+
+class PanelLogSinks:
+    """The supervisor's two rolling sinks: the panel log (every line,
+    timestamped by the caller) and the structured-events file (#510).
+
+    Bundled so the supervisor's ``_log`` stays one delegation: panel lines
+    always hit the panel sink; a recognized event line ALSO lands untimestamped
+    in events.jsonl (the JSON body carries its own ``ts``). Both sinks share
+    ExecutorLogSink's failure semantics — the first OSError mutes that sink,
+    never the panel loop. Lifecycle (resume/close) pairs with the
+    supervisor's start()/stop()."""
+
+    def __init__(self, state_dir: Path) -> None:
+        self.panel = ExecutorLogSink(executor_log_path(state_dir))
+        self.events = ExecutorLogSink(
+            events_log_path(state_dir), max_bytes=EVENTS_MAX_BYTES, backups=EVENTS_BACKUP_COUNT
+        )
+
+    def write(self, message: str, line: str, on_error: Callable[[str], None]) -> None:
+        """``line`` is the timestamped panel form of ``message``."""
+        self.panel.write(line, on_error)
+        if is_structured_event(message):
+            self.events.write(message, on_error)
+
+    def resume(self) -> None:
+        self.panel.resume()
+        self.events.resume()
+
+    def close(self) -> None:
+        self.panel.close()
+        self.events.close()

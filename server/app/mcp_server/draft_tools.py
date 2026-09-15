@@ -20,34 +20,29 @@ from server.app.mcp_server.skill_tools import ClientFactory
 
 
 def register_draft_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_workflow_draft(workspace_id: str) -> str:
-        """Get the workspace's unpublished workflow draft — the SAME canvas
-        draft the human editor autosaves (not the active revision). Returns
-        {"definition_yaml": ..., "updated_at": ...}; both null when no draft
-        was ever saved (author against the active revision or from scratch).
-        Pass the returned updated_at to save_workflow_draft as
-        expected_updated_at; null updated_at means "never-saved"."""
+        """The workspace's unpublished workflow draft — the SAME canvas draft
+        the human editor autosaves: {"definition_yaml", "updated_at"}, both
+        null when never saved. Pass updated_at to save_workflow_draft as
+        expected_updated_at; null means "never-saved"."""
         _, client = await client_factory()
         return await client.call("GET", f"/workspaces/{workspace_id}/workflow/draft")
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def save_workflow_draft(
         workspace_id: str,
         definition_yaml: str,
         expected_updated_at: str,
     ) -> str:
         """Save the full workflow definition YAML as the workspace's Studio
-        draft — the canvas and YAML editor pick it up live. CAS semantics:
-        expected_updated_at must be the updated_at your last get_workflow_draft
-        returned, the draft_updated_at from get_studio_context, or "never-saved"
-        when no draft existed. Do NOT guess or invent a timestamp — a wrong
-        value is a 409 (or a 422 when not an ISO timestamp at all). A stale
-        value is an HTTP 409 carrying the current draft
-        (current_draft.definition_yaml + current_draft.updated_at) — use that
-        response directly (no need to re-read), rebase your changes onto it
-        and retry with its updated_at. Draft only: validate, compare, then
-        request_workflow_publish — the human still confirms every publish."""
+        draft (canvas picks it up live). CAS: expected_updated_at must be the
+        updated_at from your last get_workflow_draft, get_studio_context's
+        draft_updated_at, or the literal "never-saved" — never invent a
+        timestamp (wrong → 409, malformed → 422). A stale value → 409
+        carrying the current draft (current_draft.definition_yaml +
+        current_draft.updated_at): rebase onto it and retry with its
+        updated_at. Draft only — the human confirms every publish."""
         _, client = await client_factory()
         body: dict[str, Any] = {
             "definition_yaml": definition_yaml,

@@ -80,17 +80,21 @@ export function nodeExecutionWarning(
  * 整体提示判定：workflow 有 agent 节点且顶层 execution 默认缺失
  * （provider/model 皆空，即没有可回落的默认层）。节点级缺口由节点徽标
  * 承载，这里只标顶层默认的缺席；纯 code workflow 不提示。
+ * #666 豁免：顶层默认缺失但每个 agent 节点经 mergeNodeExecution 后的有效
+ * provider/model 都配齐时不是缺口，不误报；只要有一个节点缺配仍提示。
+ * 输入的节点记录须为有效值（草稿经 mergeNodeExecution、published 快照经
+ * 后端 loader 合并），与 nodeExecutionWarning 的输入约定一致。
  */
 export function topLevelExecutionMissing(
   workflow: WorkflowDefinitionRecord | null,
   defaults: WorkflowYamlExecutionDefaults
 ): boolean {
-  const hasAgentNode = (workflow?.nodes ?? []).some(
+  const agentNodes = (workflow?.nodes ?? []).filter(
     (node) => node.node_type === 'agent'
   )
-  return (
-    hasAgentNode &&
+  const defaultsMissing =
     !asConfigValue(defaults.provider).trim() &&
     !asConfigValue(defaults.model).trim()
-  )
+  if (agentNodes.length === 0 || !defaultsMissing) return false
+  return agentNodes.some((node) => nodeExecutionWarning(node) !== undefined)
 }

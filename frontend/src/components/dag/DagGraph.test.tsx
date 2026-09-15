@@ -244,10 +244,11 @@ describe('DagGraph', () => {
 
   it('renders edge highlight styles from custom dagEdge component', async () => {
     const view = await renderDagGraphWithEdges({ nodes, edges })
-    // 常态：默认灰描边、宽 2、透明度 0.4（与重构前内联 style 逐字段一致）。
+    // 常态（#668）：buildRfEdges 原始 style 透传——加深灰描边、宽 2.5、
+    // 全亮（不置灰）。置灰态只在高亮模式内出现。
     expect(edgeInlineStyles(view.container)).toEqual([
-      { stroke: '#d1d5db', strokeWidth: '2', opacity: '0.4' },
-      { stroke: '#d1d5db', strokeWidth: '2', opacity: '0.4' },
+      { stroke: '#6b7280', strokeWidth: '2.5', opacity: '' },
+      { stroke: '#6b7280', strokeWidth: '2.5', opacity: '' },
     ])
 
     // hover 节点 b：邻接边（a→b、b→c）变蓝加粗全亮。
@@ -257,11 +258,32 @@ describe('DagGraph', () => {
       { stroke: '#1d4ed8', strokeWidth: '3', opacity: '1' },
     ])
 
-    // 移出：恢复常态。
+    // 移出：恢复常态（加深描边全亮，不残留置灰视觉）。
     fireEvent.mouseLeave(view.container.querySelector('[data-id="b"]')!)
     expect(edgeInlineStyles(view.container)).toEqual([
+      { stroke: '#6b7280', strokeWidth: '2.5', opacity: '' },
+      { stroke: '#6b7280', strokeWidth: '2.5', opacity: '' },
+    ])
+
+    // hover 节点 a：链路边 a→b 变蓝，非链路边 b→c 置灰（#668：置灰明显
+    // 浅于常态——#d1d5db / 宽 2 / 0.4），不再是常态的默认视觉。
+    fireEvent.mouseEnter(view.container.querySelector('[data-id="a"]')!)
+    expect(edgeInlineStyles(view.container)).toEqual([
+      { stroke: '#1d4ed8', strokeWidth: '3', opacity: '1' },
       { stroke: '#d1d5db', strokeWidth: '2', opacity: '0.4' },
-      { stroke: '#d1d5db', strokeWidth: '2', opacity: '0.4' },
+    ])
+
+    // 链路间移动 hover（a→b）：b→c 从置灰翻回高亮，a→b 保持高亮。
+    fireEvent.mouseEnter(view.container.querySelector('[data-id="b"]')!)
+    expect(edgeInlineStyles(view.container)).toEqual([
+      { stroke: '#1d4ed8', strokeWidth: '3', opacity: '1' },
+      { stroke: '#1d4ed8', strokeWidth: '3', opacity: '1' },
+    ])
+
+    fireEvent.mouseLeave(view.container.querySelector('[data-id="b"]')!)
+    expect(edgeInlineStyles(view.container)).toEqual([
+      { stroke: '#6b7280', strokeWidth: '2.5', opacity: '' },
+      { stroke: '#6b7280', strokeWidth: '2.5', opacity: '' },
     ])
   })
 

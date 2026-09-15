@@ -74,6 +74,14 @@ class AgentWorkersRuntimeConfig(BaseModel):
     # transactions. False = kill-switch (direct serial path, 0.7.9
     # behavior); restart-effective, instance-settings managed.
     result_commit_batching: bool = Field(default=True)
+    # #356 plan B: the percent of trust-reported (non-download-verified)
+    # artifacts that still get a Host-side digest stream on the result-commit
+    # path — undeclared outputs and every cancelled-run artifact. Declared
+    # outputs always verify (their bytes land in the job dir anyway). The
+    # pick is deterministic per (name, key, size). 0 = trust everything
+    # (kill-switch), 100 = always verify (pre-#356 behavior). Restart-
+    # effective, instance-settings managed.
+    artifact_spot_check_percent: int = Field(default=3, ge=0, le=100)
 
 
 class ExecutorRuntimeConfig(BaseModel):

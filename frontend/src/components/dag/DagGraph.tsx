@@ -3,6 +3,7 @@ import React, {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
 } from 'react'
 import {
@@ -19,6 +20,7 @@ import { buildRfEdges, DagEdgeLabels } from './DagEdgeLabels'
 import { computeLayout } from './dagLayout'
 import { DagEdge as DagEdgeComponent } from './DagEdge'
 import { DagNode as DagNodeComponent } from './DagNode'
+import { DagSelectionViewport } from './DagSelectionViewport'
 import type { DagNodeData } from './DagNode'
 import type { DagNodeChangeType } from './dagNodeTypes'
 import type { DagNodeStatus } from '../dagNodeStatus'
@@ -81,6 +83,9 @@ interface DagGraphProps {
   onViewLogs?: (nodeKey: string) => void
   selectedNode?: string | null
   onSelectedNodeChange?: (nodeKey: string | null) => void
+  /** Studio 选择链路的定位请求信号（#667）：key 不变而 nonce 变化时同样
+   * 触发镜头定位；不传（job 详情等共享场景）则只按 key 变化定位。 */
+  selectionNonce?: number
   hideNodeDetails?: boolean
 }
 
@@ -111,6 +116,7 @@ export function DagGraph({
   runs = [],
   onViewLogs = () => {},
   selectedNode: controlledSelectedNode,
+  selectionNonce,
   onSelectedNodeChange,
   hideNodeDetails = false,
 }: DagGraphProps) {
@@ -148,6 +154,8 @@ export function DagGraph({
     },
     [isControlled, onSelectedNodeChange]
   )
+  // #667：记录「选中来自画布点击」的来源标记（DagSelectionViewport 消费）。
+  const clickOriginRef = useRef<string | null>(null)
 
   useEffect(() => {
     setRfNodes(initialNodes)
@@ -156,6 +164,9 @@ export function DagGraph({
 
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node<DagNodeData>) => {
+      // #667：画布内点击的选中不触发镜头定位（节点本来就在光标下），
+      // 标记来源供 DagSelectionViewport 跳过。
+      clickOriginRef.current = node.id
       setSelectedNode(node.id)
     },
     [setSelectedNode]
@@ -267,6 +278,12 @@ export function DagGraph({
         >
           <Background gap={16} />
           <Controls />
+          <DagSelectionViewport
+            selectedNode={selectedNode}
+            selectionNonce={selectionNonce}
+            nodesVersion={rfNodes}
+            clickOriginRef={clickOriginRef}
+          />
           <MiniMap
             nodeStrokeWidth={3}
             zoomable

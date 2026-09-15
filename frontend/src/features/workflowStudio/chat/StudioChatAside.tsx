@@ -55,7 +55,7 @@ export function StudioChatAside({
           studio.backToDraft()
           studio.setDefinitionYaml(yaml)
         }}
-        onSelectNode={studio.setSelectedNodeKey}
+        onSelectNode={studio.requestNodeFocus}
       />
     </aside>
   )

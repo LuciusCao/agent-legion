@@ -50,6 +50,7 @@ _NESTED_BLOCK_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "min_protocol_version",
             "max_concurrent_result_commits",
             "result_commit_batching",
+            "artifact_spot_check_percent",
         ),
     ),
     ("agent_enqueue", ("workers", "max_pending")),
