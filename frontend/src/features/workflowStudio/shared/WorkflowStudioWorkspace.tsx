@@ -12,7 +12,8 @@ import { useStudioState } from './studioStateContext'
 export function WorkflowStudioWorkspace() {
   const studio = useStudioState()
   const { mobilePanel, setMobilePanel } = useWorkflowStudioMobilePanel(
-    studio.selectedNodeKey
+    studio.selectedNodeKey,
+    studio.focusNonce
   )
   const [agentOpen, setAgentOpen] = useState(true)
 

@@ -98,7 +98,10 @@ export function WorkflowDraftCard(props: WorkflowProps) {
                   studio
                     ? (nodeKey) => {
                         if (!canvasNodeKeys.has(nodeKey)) return
-                        studio.setSelectedNodeKey(nodeKey)
+                        // requestNodeFocus = bump 定位 nonce + 选中：目标已
+                        // 是 selectedNodeKey 时（移动端在 Agent 面板点同一
+                        // 节点）也能触发面板切换与镜头定位。
+                        studio.requestNodeFocus(nodeKey)
                         setDiffOpen(false)
                       }
                     : undefined

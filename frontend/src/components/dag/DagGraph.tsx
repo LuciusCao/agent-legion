@@ -83,6 +83,9 @@ interface DagGraphProps {
   onViewLogs?: (nodeKey: string) => void
   selectedNode?: string | null
   onSelectedNodeChange?: (nodeKey: string | null) => void
+  /** Studio 选择链路的定位请求信号（#667）：key 不变而 nonce 变化时同样
+   * 触发镜头定位；不传（job 详情等共享场景）则只按 key 变化定位。 */
+  selectionNonce?: number
   hideNodeDetails?: boolean
 }
 
@@ -113,6 +116,7 @@ export function DagGraph({
   runs = [],
   onViewLogs = () => {},
   selectedNode: controlledSelectedNode,
+  selectionNonce,
   onSelectedNodeChange,
   hideNodeDetails = false,
 }: DagGraphProps) {
@@ -276,6 +280,7 @@ export function DagGraph({
           <Controls />
           <DagSelectionViewport
             selectedNode={selectedNode}
+            selectionNonce={selectionNonce}
             nodesVersion={rfNodes}
             clickOriginRef={clickOriginRef}
           />

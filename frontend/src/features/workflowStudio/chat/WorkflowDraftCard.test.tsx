@@ -28,6 +28,8 @@ function makeStudio(overrides: Record<string, unknown> = {}) {
     compareSummary: null,
     definitionYaml: draft.yaml,
     nodes: [{ key: 'n_extract' }],
+    focusNonce: 0,
+    requestNodeFocus: vi.fn(),
     requestPublish: vi.fn(),
     setSelectedNodeKey: vi.fn(),
     ...overrides,
@@ -167,7 +169,7 @@ describe('WorkflowDraftCard diff 变更节点定位（#667 B2）', () => {
     const nodeItem = await screen.findByText('提取: 节点配置值')
     fireEvent.click(nodeItem)
 
-    expect(studio.setSelectedNodeKey).toHaveBeenCalledWith('n_extract')
+    expect(studio.requestNodeFocus).toHaveBeenCalledWith('n_extract')
     await waitFor(() =>
       expect(
         screen.queryByText('草稿与 active revision 的差异')
@@ -189,7 +191,7 @@ describe('WorkflowDraftCard diff 变更节点定位（#667 B2）', () => {
     const nodeItem = await screen.findByText('提取: 节点配置值')
     fireEvent.click(nodeItem)
 
-    expect(studio.setSelectedNodeKey).not.toHaveBeenCalled()
+    expect(studio.requestNodeFocus).not.toHaveBeenCalled()
     expect(
       screen.getByText('草稿与 active revision 的差异')
     ).toBeInTheDocument()

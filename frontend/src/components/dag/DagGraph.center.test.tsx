@@ -247,4 +247,43 @@ describe('DagGraph 选中节点镜头定位（#667 B2）', () => {
     )
     expect(mocks.setCenter).toHaveBeenCalledTimes(2)
   })
+
+  it('selectionNonce 变化（key 不变）时重新定位——已选中节点被再次请求定位', () => {
+    // 移动端在 Agent 面板点草稿 diff 里已选中的同一节点：setter 写相同值
+    // 不触发选中更新，只有 nonce 变化能驱动镜头再次定位。
+    const { rerender } = render(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="a"
+        selectionNonce={0}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="a"
+        selectionNonce={1}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(2)
+    expect(mocks.setCenter).toHaveBeenLastCalledWith(240, 90, {
+      zoom: 1,
+      duration: 350,
+    })
+
+    // nonce 也不变时不重复飞行。
+    rerender(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="a"
+        selectionNonce={1}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(2)
+  })
 })
