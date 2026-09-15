@@ -1,0 +1,36 @@
+.hint {
+  font-size: 12px;
+  color: #74777f;
+  margin: 0;
+}
+
+.error {
+  font-size: 13px;
+  color: #c62828;
+  margin: 0;
+}
+
+.empty {
+  font-size: 13px;
+  color: #74777f;
+  margin: 0;
+}
+
+.dialogPath {
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.fileContent {
+  margin: 0;
+  padding: 12px;
+  background: #f6f7f9;
+  border-radius: 8px;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60vh;
+  overflow: auto;
+}

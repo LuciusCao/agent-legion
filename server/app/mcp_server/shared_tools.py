@@ -1,11 +1,11 @@
 """Shared skill material tools for the studio-agent MCP server (#633).
 
 Split from ``skill_tools`` for the file-size budget, same registration
-contract (``register_*`` onto the shared FastMCP instance). Both tools are
+contract (``register_*`` onto the shared FastMCP instance). The tools are
 workspace-scoped loopback tools and stay ``async def`` for the
 single-event-loop reason documented in ``server.py``: they author the
-workspace ``_shared`` materials that ``save_skill_version`` syncs into
-each mapped skill's repo.
+workspace ``_shared`` materials and propagate them into each mapped
+skill's repo (#673).
 """
 
 from __future__ import annotations
@@ -16,7 +16,10 @@ from urllib.parse import quote
 from mcp.server.fastmcp import FastMCP
 
 from server.app.mcp_server.config import McpServerConfig
-from server.app.mcp_server.tool_client import ToolClient
+from server.app.mcp_server.tool_client import (
+    SYNC_PROPAGATE_TIMEOUT_SECONDS,
+    ToolClient,
+)
 
 ClientFactory = Callable[[], Awaitable[tuple[McpServerConfig, ToolClient]]]
 
@@ -42,4 +45,20 @@ def register_shared_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         body = {"files": files}
         return await client.call(
             "PUT", f"/workspaces/{quote(workspace_id, safe='')}/skills-shared", body
+        )
+
+    @mcp.tool(structured_output=False)
+    async def sync_shared_materials(workspace_id: str, sources: list[str] | None = None) -> str:
+        """Propagate _shared materials into each mapped skill repo: copy
+        the shared sources in, commit and tag a new patch version per
+        skill (omit sources for every mapped entry). Per-skill results
+        (synced/skipped/failed + new tag); one failure never aborts the
+        batch. Touches only local skill repos — the DB skill lock and
+        node pins stay put."""
+        _, client = await client_factory()
+        return await client.call(
+            "POST",
+            f"/workspaces/{quote(workspace_id, safe='')}/skills-shared/propagate",
+            {"sources": sources},
+            timeout=SYNC_PROPAGATE_TIMEOUT_SECONDS,
         )

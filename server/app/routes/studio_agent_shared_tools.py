@@ -42,8 +42,14 @@ from server.app.routes.studio_agent_shared_contracts import (
     SharedMaterialsResponse,
     SharedMaterialsSaveRequest,
 )
-from server.app.services.job_errors import NotFoundError
+from server.app.routes.workspace_shared_materials_propagate_contracts import (
+    SharedMaterialPropagateSkillResult,
+    SharedMaterialsPropagateRequest,
+    SharedMaterialsPropagateResponse,
+)
+from server.app.services.job_errors import JobServiceError, NotFoundError
 from server.app.services.skill_repo_edit import SkillEditValidationError
+from server.app.services.skill_shared_propagate import propagate_shared_materials
 from server.app.services.skill_shared_put import validate_shared_put_payload
 from server.app.services.skill_shared_store import (
     MAP_PATH,
@@ -88,8 +94,6 @@ def _load_map_json(shared_dir: Path) -> dict:
 
 
 def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
-    del settings  # the shared dir resolves from the skills root (HOME)
-
     router = APIRouter(
         dependencies=[
             Depends(require_studio_agent_scope),
@@ -141,5 +145,27 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
             raise_job_http_error(exc)
         write_shared_materials(shared_dir, list(targets.items()), shared_dir.parent.parent)
         return get_shared_materials(workspace_id)
+
+    @router.post(
+        "/studio-agent/tools/workspaces/{workspace_id}/skills-shared/propagate",
+        response_model=SharedMaterialsPropagateResponse,
+    )
+    def propagate_shared_materials_endpoint(
+        workspace_id: str, payload: SharedMaterialsPropagateRequest
+    ) -> SharedMaterialsPropagateResponse:
+        # #673：MCP sync_shared_materials 工具的服务端——逐 skill 隔离
+        # （一个 skill 的失败不中断批次），提交 + 打新 tag 复用
+        # save_version 写路径，DB skill lock 不动。
+        _shared_dir(job_db, workspace_id)
+        try:
+            result = propagate_shared_materials(
+                workspace_id, payload.sources, runs_dir=settings.skills_runs_dir
+            )
+        except JobServiceError as exc:
+            raise_job_http_error(exc)
+        return SharedMaterialsPropagateResponse(
+            workspace_id=workspace_id,
+            results=[SharedMaterialPropagateSkillResult(**vars(r)) for r in result.results],
+        )
 
     return router

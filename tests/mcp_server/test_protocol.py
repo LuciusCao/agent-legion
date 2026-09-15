@@ -2,7 +2,7 @@
 
 Spawns ``python -m server.app.mcp_server`` over stdio like a real MCP host
 would, pointed at a local stub HTTP backend (no platform database involved):
-handshake, tools/list discovers the 34 tools, and a tools/call round-trip
+handshake, tools/list discovers the 35 tools, and a tools/call round-trip
 proves the scoped token reaches the backend and the response comes back as
 text. A second spawn without a session binding lists 32 tools (#660: the two
 session-bound tools only register when a chat session is bound).
@@ -127,6 +127,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
                 "save_shared_materials",
                 "save_skill_version",
                 "save_workflow_draft",
+                "sync_shared_materials",
                 "validate_skill",
                 "validate_workflow",
             ]
@@ -163,7 +164,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
     asyncio.run(asyncio.wait_for(run(), timeout=60))
 
 
-def test_mcp_stdio_without_session_lists_32_tools(stub_backend: str) -> None:
+def test_mcp_stdio_without_session_lists_33_tools(stub_backend: str) -> None:
     # #660 phase C: a static config without AGENT_LEGION_MCP_SESSION_ID never
     # registers the two session-bound tools (external self-service setups).
     async def run() -> None:
@@ -183,7 +184,7 @@ def test_mcp_stdio_without_session_lists_32_tools(stub_backend: str) -> None:
             await session.initialize()
             tools = await session.list_tools()
             names = {tool.name for tool in tools.tools}
-            assert len(names) == 32
+            assert len(names) == 33
             assert "get_studio_context" not in names
             assert "get_job_context" not in names
 

@@ -49,3 +49,7 @@ export { deleteAgentWorker, listAgentWorkers } from './agentWorkers'
 export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary } from './workerTokens'
 // prettier-ignore
 export type { AgentWorkerSummary } from './agentWorkers'
+// prettier-ignore
+export { getWorkspaceSharedMaterials, getWorkspaceSharedMaterialFile, propagateWorkspaceSharedMaterials } from './workspaceSharedMaterials'
+// prettier-ignore
+export type { SharedMaterialDriftStatus, SharedMaterialFileContent, SharedMaterialFileEntry, SharedMaterialMapping, SharedMaterialPropagateSkillResult, SharedMaterialPropagateStatus, SharedMaterialsPropagateResponse, SharedMaterialSkillDrift, WorkspaceSharedMaterialsResponse } from './workspaceSharedMaterials'

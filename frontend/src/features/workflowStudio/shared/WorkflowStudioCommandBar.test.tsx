@@ -97,4 +97,13 @@ describe('WorkflowStudioCommandBar', () => {
       '收起 Agent 面板'
     )
   })
+
+  it('renders the shared-materials entry button in the actions area', () => {
+    // #643：入口在 actions 区；未点击时抽屉不挂载、不触发查询。
+    renderCommandBar()
+
+    expect(
+      screen.getByRole('button', { name: 'Skill 共享材料' })
+    ).toBeInTheDocument()
+  })
 })
