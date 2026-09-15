@@ -18,8 +18,6 @@ type Props = {
   readOnly: boolean
   detailLeft: boolean
   mobileActive: boolean
-  agentOpen: boolean
-  onToggleAgent: () => void
   onBack: () => void
 }
 
@@ -50,8 +48,6 @@ export function WorkflowStudioDetailSection(props: Props) {
         setDefinitionYaml={props.setDefinitionYaml}
         compareSummary={props.compareSummary}
         readOnly={props.readOnly}
-        agentOpen={props.agentOpen}
-        onToggleAgent={props.onToggleAgent}
         onBack={props.onBack}
       />
     </section>

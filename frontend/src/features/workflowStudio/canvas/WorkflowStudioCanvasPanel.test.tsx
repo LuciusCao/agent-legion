@@ -29,12 +29,7 @@ function renderPanel(view: ReturnType<typeof makeStudioView>) {
     withStudioProviders(
       baseStudio,
       view,
-      <WorkflowStudioCanvasPanel
-        agentOpen
-        onToggleAgent={() => {}}
-        mobileActive
-        replacedByDetail={false}
-      />
+      <WorkflowStudioCanvasPanel mobileActive replacedByDetail={false} />
     )
   )
 }
@@ -51,6 +46,11 @@ describe('WorkflowStudioCanvasPanel', () => {
     expect(
       screen.getByRole('button', { name: 'open fullscreen DAG' })
     ).toBeInTheDocument()
+    // #668：Agent 面板开关收敛到 appbar（CommandBar）唯一入口，
+    // 画布工具条不再渲染。
+    expect(
+      screen.queryByRole('button', { name: 'toggle agent panel' })
+    ).not.toBeInTheDocument()
   })
 
   it('opens the YAML editor dialog from the toolbar button', () => {
@@ -67,12 +67,7 @@ describe('WorkflowStudioCanvasPanel', () => {
       withStudioProviders(
         { ...baseStudio, workflow: null },
         makeStudioView(),
-        <WorkflowStudioCanvasPanel
-          agentOpen
-          onToggleAgent={() => {}}
-          mobileActive
-          replacedByDetail={false}
-        />
+        <WorkflowStudioCanvasPanel mobileActive replacedByDetail={false} />
       )
     )
 

@@ -1,3 +1,4 @@
+import { StudioAgentPanelToggle } from '../inspector/StudioAgentPanelToggle'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
 import type { WorkflowStudioCommandBarProps as Props } from './WorkflowStudioCommandBar.types'
@@ -63,6 +64,7 @@ export function WorkflowStudioCommandBar({
         onSelectRevision={onSelectRevision}
       />
       <div className={styles.actions}>
+        <StudioAgentPanelToggle />
         <WorkflowStudioCommandBarActions
           readOnly={readOnly}
           dirty={dirty}
