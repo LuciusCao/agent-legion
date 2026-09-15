@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioCommandBar } from './WorkflowStudioCommandBar'
+import { makeStudioView, withStudioProviders } from './testStudioProviders'
 
 // 草稿保存状态/按钮已迁到 WorkflowStudioDraftSaveControl（自带测试），这里
 // 打桩掉它的 context 接线，保持 CommandBar 纯 props 渲染。
@@ -33,9 +34,28 @@ const baseProps = {
   useViewedRevisionAsDraft: vi.fn(),
 }
 
+// #668：CommandBar 内嵌的 Agent 面板开关读 StudioViewContext，
+// 渲染需挂 providers（studio 状态本套件不消费，给空壳）。
+function renderCommandBar(
+  props: Record<string, unknown> = {},
+  viewOverrides: Record<string, unknown> = {}
+) {
+  const view = makeStudioView(viewOverrides)
+  return {
+    view,
+    ...render(
+      withStudioProviders(
+        {},
+        view,
+        <WorkflowStudioCommandBar {...baseProps} {...props} />
+      )
+    ),
+  }
+}
+
 describe('WorkflowStudioCommandBar', () => {
   it('renders exactly one status chip and keeps the mode text', () => {
-    const { container } = render(<WorkflowStudioCommandBar {...baseProps} />)
+    const { container } = renderCommandBar()
 
     expect(screen.getByText('基于 v- 的草稿')).toBeInTheDocument()
     expect(container.querySelectorAll('.MuiChip-root')).toHaveLength(1)
@@ -48,12 +68,33 @@ describe('WorkflowStudioCommandBar', () => {
 
   it('delegates the status chip click to onShowChanges', () => {
     const onShowChanges = vi.fn()
-    render(
-      <WorkflowStudioCommandBar {...baseProps} onShowChanges={onShowChanges} />
-    )
+    renderCommandBar({ onShowChanges })
 
     fireEvent.click(screen.getByText('有未发布变更'))
 
     expect(onShowChanges).toHaveBeenCalledTimes(1)
+  })
+
+  // #668：Agent 面板开关的唯一入口在 appbar（CommandBar actions 区），
+  // 开合状态走 StudioViewContext。
+  it('renders the agent panel toggle and delegates to view.toggleAgent', () => {
+    const { view } = renderCommandBar()
+
+    const toggle = screen.getByRole('button', { name: 'toggle agent panel' })
+    expect(toggle).toBeInTheDocument()
+    fireEvent.click(toggle)
+
+    expect(view.toggleAgent).toHaveBeenCalledTimes(1)
+  })
+
+  it('reflects the agent panel open state in the toggle tooltip', async () => {
+    renderCommandBar()
+
+    fireEvent.mouseOver(
+      screen.getByRole('button', { name: 'toggle agent panel' })
+    )
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      '收起 Agent 面板'
+    )
   })
 })

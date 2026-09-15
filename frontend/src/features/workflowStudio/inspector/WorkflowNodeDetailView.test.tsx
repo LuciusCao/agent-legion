@@ -141,8 +141,6 @@ function renderView(
         definitionYaml={definitionYaml}
         setDefinitionYaml={() => {}}
         readOnly={false}
-        agentOpen={false}
-        onToggleAgent={() => {}}
         onBack={onBack}
       />
     </TestQueryProvider>
@@ -166,8 +164,6 @@ function viewFor(
         definitionYaml={definitionYaml}
         setDefinitionYaml={() => {}}
         readOnly={false}
-        agentOpen={false}
-        onToggleAgent={() => {}}
         onBack={() => {}}
       />
     </TestQueryProvider>
@@ -197,6 +193,10 @@ describe('WorkflowNodeDetailView', () => {
     renderView(onBack)
 
     expect(screen.getByText('Demo DAG / 生成关键信息')).toBeInTheDocument()
+    // #668：Agent 面板开关收敛到 appbar，面包屑不再渲染开关。
+    expect(
+      screen.queryByRole('button', { name: 'toggle agent panel' })
+    ).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '返回 DAG' }))
     expect(onBack).toHaveBeenCalledTimes(1)
   })
@@ -271,8 +271,6 @@ describe('WorkflowNodeDetailView', () => {
           definitionYaml={definitionYaml}
           setDefinitionYaml={() => {}}
           readOnly={false}
-          agentOpen={false}
-          onToggleAgent={() => {}}
           onBack={() => {}}
         />
       </TestQueryProvider>
@@ -367,8 +365,6 @@ describe('WorkflowNodeDetailView', () => {
           definitionYaml={definitionYaml}
           setDefinitionYaml={() => {}}
           readOnly={false}
-          agentOpen={false}
-          onToggleAgent={() => {}}
           onBack={() => {}}
         />
       </TestQueryProvider>
@@ -393,8 +389,6 @@ describe('WorkflowNodeDetailView', () => {
           definitionYaml={definitionYaml}
           setDefinitionYaml={() => {}}
           readOnly={false}
-          agentOpen={false}
-          onToggleAgent={() => {}}
           onBack={() => {}}
         />
       </TestQueryProvider>

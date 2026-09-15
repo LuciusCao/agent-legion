@@ -43,16 +43,19 @@ export function applyHighlight(
   )
 
   if (!activeNode) {
-    // 全图常态：只有 data.active/dimmed/highlighted 从 true 翻回 false 的
-    // 条目需要换新对象（边同时还原默认 marker 颜色）。对照 prev 判断翻转
-    // 而非基线——从「hover 中」到「移出」也只重建高亮过的条目。
+    // 全图常态：凡 data.highlighted 已定义（处于/曾处于高亮模式）的边都
+    // 归位为 undefined（从未进入高亮模式）并还原默认 marker 颜色，DagEdge
+    // 据此透传 buildRfEdges 的原始 style（#668：常态是加深的全亮描边，
+    // 不是置灰态；只归位 true 会把 hover 时置灰的 false 边永远留在置灰
+    // 视觉）。对照 prev 判断翻转而非基线——从「hover 中」到「移出」也只
+    // 重建高亮过的条目。
     return {
       highlightedEdges: rfEdges.map((edge) =>
-        prevEdgeData.get(edge.id)?.highlighted === true
+        prevEdgeData.get(edge.id)?.highlighted !== undefined
           ? {
               ...edge,
-              data: { ...edge.data, highlighted: false },
-              markerEnd: { type: MarkerType.ArrowClosed, color: '#9ca3af' },
+              data: { ...edge.data, highlighted: undefined },
+              markerEnd: { type: MarkerType.ArrowClosed, color: '#6b7280' },
             }
           : edge
       ),
@@ -83,17 +86,30 @@ export function applyHighlight(
     ...descendants,
   ])
 
-  // 三元判定避免 boolean 与 undefined 混用：data 字段只以 true/false 参与
-  // 比较（undefined 视作 false），保证「首次 hover」不会因 undefined→false
-  // 的归一化而产生无谓的新对象——引用复用判断对未翻转条目保持穷尽。
+  // 三态视觉判定（#668）：data.highlighted 的 undefined=常态（透传
+  // buildRfEdges 原始 style：加深加粗的全亮描边）、false=置灰、
+  // true=高亮。常态 ≠ 置灰后「视觉态未翻转」的边不能一律回退基线对象
+  // （基线是常态视觉）——保持置灰/高亮的边必须复用 prev 已重建的对象，
+  // 否则 hover 移动时非链路边会闪回常态。
+  const prevEdgeById = new Map(
+    (prev?.highlightedEdges ?? []).map((edge) => [edge.id, edge])
+  )
   const highlightedEdges = rfEdges.map((edge) => {
     const isHighlighted =
       edge.source === activeNode ||
       edge.target === activeNode ||
       (ancestors.has(edge.source) && edge.target === activeNode) ||
       (edge.source === activeNode && descendants.has(edge.target))
-    if ((prevEdgeData.get(edge.id)?.highlighted === true) === isHighlighted) {
-      return edge
+    const prevHighlighted = prevEdgeData.get(edge.id)?.highlighted
+    const prevVisual =
+      prevHighlighted === true
+        ? 'highlighted'
+        : prevHighlighted === false
+          ? 'dimmed'
+          : 'normal'
+    const desiredVisual = isHighlighted ? 'highlighted' : 'dimmed'
+    if (prevVisual === desiredVisual) {
+      return prevEdgeById.get(edge.id) ?? edge
     }
     // markerEnd 颜色与描边同步翻转（视觉行为与重构前逐字段一致）；只在
     // 翻转时随 edge 一起新建，未翻转的边连 markerEnd 引用都不变。
