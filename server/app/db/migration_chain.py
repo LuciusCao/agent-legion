@@ -42,6 +42,9 @@ from server.app.db.migrations import (
 from server.app.db.migrations.claim_queue_wait_profile import migrate_claim_queue_wait_profile
 from server.app.db.migrations.claim_stage_profile import migrate_claim_stage_profile
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
+from server.app.db.migrations.job_status_counts_advisory_locks import (
+    migrate_job_status_counts_advisory_locks as _migrate_v82_locks,
+)
 from server.app.db.migrations.job_status_counts_statement_triggers import (
     migrate_job_status_counts_statement_triggers as _migrate_v77_triggers,
 )
@@ -196,6 +199,13 @@ MIGRATIONS: list[SchemaMigration] = [
     # v81 (#551): claim queue-wait gauge columns (total + max) — 供给延迟
     # （queued_at→promote）进 claim 画像族。DDL-only, same guarded rule.
     SchemaMigration(81, "claim_queue_wait_profile", migrate_claim_queue_wait_profile),
+    # v82 (#659): the v77 statement triggers' per-statement sorted lock order
+    # cannot stop rings that span MULTIPLE statements in one transaction (a
+    # claim batch's per-execution promotes each fire the trigger) — the
+    # rebuilt functions take pg_advisory_xact_lock(hashtext('<family>:<key>'))
+    # per distinct key in sorted order at trigger entry, serialising all
+    # counter writers per key. Also adds the DELETE arm's missing order by.
+    SchemaMigration(82, "job_status_counts_advisory_locks", _migrate_v82_locks),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

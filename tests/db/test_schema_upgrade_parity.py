@@ -43,25 +43,22 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v81, claim_queue_wait_profile, #551) must
-# leave behind so the undo step rewinds a current-shape database to
-# exactly SCHEMA_VERSION-1. v80 adds the fourteen result-stage gauge
-# columns to ops_runtime_profile_samples (the migration module carries
-# the ALTERs; the schema file stays at its ceiling, same DDL-home rule
-# as v78): the undo drops the columns, nothing else — no tables,
-# indexes, or trigger shapes change at v80.
+# Effects the newest migration (v82, job_status_counts_advisory_locks,
+# #659) must leave behind so the undo step rewinds a current-shape database
+# to exactly SCHEMA_VERSION-1. v82 re-creates the two counter trigger
+# FUNCTIONS with the per-key advisory-lock prologue (no tables, columns, or
+# indexes change) — the undo rewinds the function bodies to the v77 shape
+# by replaying the v77 module's DDL, which is what an upgraded-from-v77
+# database would carry before its v82 migration runs.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("ops_runtime_profile_samples", "claim_queue_wait_seconds_total", "double precision"),
-    ("ops_runtime_profile_samples", "claim_queue_wait_seconds_max", "double precision"),
-)
-# The expression index shape is unchanged at v81 (v79's concern).
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "claim_queue_wait_profile"
+_NEWEST_MIGRATION_NAME = "job_status_counts_advisory_locks"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v79 (none: the schema file's drop+create carries both shapes).
+# faithful v77: the v77 trigger functions (no advisory lock), rebuilt from
+# the v77 migration module's own DDL so the rewind is shape-exact.
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
@@ -74,6 +71,13 @@ _CatalogConstraints = set[tuple[str, str, str]]
 
 def _undo_newest_migration(database_dsn: str) -> None:
     """Rewind a current-shape database to SCHEMA_VERSION - 1."""
+    from server.app.db.migrations.job_status_counts_statement_triggers import (
+        _RUN_DDL as _V77_RUN_DDL,
+    )
+    from server.app.db.migrations.job_status_counts_statement_triggers import (
+        _WORKSPACE_DDL as _V77_WORKSPACE_DDL,
+    )
+
     with write_transaction(database_dsn) as conn:
         for table in _NEWEST_MIGRATION_TABLES:
             conn.execute(f"drop table if exists {table}")
@@ -85,6 +89,10 @@ def _undo_newest_migration(database_dsn: str) -> None:
             conn.execute(f"alter table {table} add column if not exists {column_ddl}")
         for statement in _NEWEST_MIGRATION_UNDO_DDL:
             conn.execute(statement)
+        # v82's only footprint is the two trigger function bodies: replay the
+        # v77 module's create-or-replace DDL to restore the pre-v82 shape.
+        conn.execute(_V77_RUN_DDL)
+        conn.execute(_V77_WORKSPACE_DDL)
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
 
 

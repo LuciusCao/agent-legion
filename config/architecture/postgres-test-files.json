@@ -47,6 +47,7 @@
     "tests/db/test_schema_upgrade_parity.py",
     "tests/db/test_schema_version_registry.py",
     "tests/db/test_single_replica_probe_postgres.py",
+    "tests/db/test_status_counts_deadlock.py",
     "tests/db/test_studio_chat_schema.py",
     "tests/db/test_studio_publish_requests_schema.py",
     "tests/db/test_versioned_entities_migration.py",
