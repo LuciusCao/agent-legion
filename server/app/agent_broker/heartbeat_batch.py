@@ -36,8 +36,9 @@ if TYPE_CHECKING:
 # long-transaction problem this split exists to solve. One renewal is a fixed
 # handful of cheap primary-key statements, and a Worker's live claims are
 # bounded by max_concurrency + max_code_concurrency (registration caps both at
-# 1024), so 256 items per transaction keeps the worst case in the tens-of-
-# milliseconds range while covering every realistic slot count in one round.
+# MAX_DYNAMIC_CONCURRENCY, #657), so 256 items per transaction keeps the worst
+# case in the tens-of-milliseconds range; oversized snapshots shard
+# sequentially — never truncated, never refused.
 MAX_BATCH_HEARTBEATS = 256
 
 

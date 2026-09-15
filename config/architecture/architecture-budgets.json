@@ -985,6 +985,7 @@
     "server/app/db/migrations/job_artifacts.py": 26,
     "server/app/db/migrations/job_node_status_counts.py": 24,
     "server/app/db/migrations/job_status_counts.py": 19,
+    "server/app/db/migrations/job_status_counts_advisory_locks.py": 110,
     "server/app/db/migrations/job_status_counts_statement_triggers.py": 103,
     "server/app/db/migrations/jobs_run_id_index.py": 14,
     "server/app/db/migrations/jobs_workflow_key_alignment.py": 42,

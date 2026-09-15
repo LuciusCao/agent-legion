@@ -294,3 +294,34 @@ def test_legacy_worker_without_recorded_binding_is_always_deletable(
     )
     assert registry.delete_worker("legacy-worker") == "deleted"
     assert registry.delete_worker("legacy-worker") == "not_found"
+
+
+def test_registration_round_trip_at_the_concurrency_ceiling(client) -> None:
+    """#657 review R2 P1 的回归钉子：2048 注册必须走通**路由 + registry 两层**——
+    pydantic 契约放行而 registry 层独立上界拒绝的「藏在深一层的单边放宽」
+    曾真实发生（本地 _MAX_CONCURRENCY=1024 漏改）。越界 2049 在契约层即被
+    拒绝（422），registry 层的上界与契约全等由 ceiling contract test 钉住。"""
+    from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
+    from tests.helpers.agent_worker_api import register
+
+    result = register(client, worker_id="ceiling-worker", max_concurrency=MAX_DYNAMIC_CONCURRENCY)
+    assert result["worker_token"]
+
+    response = client.get("/api/agent-workers")
+    entry = next(w for w in response.json()["workers"] if w["worker_id"] == "ceiling-worker")
+    assert entry["max_concurrency"] == MAX_DYNAMIC_CONCURRENCY
+
+    rejected = client.post(
+        "/api/agent-workers/register",
+        headers={
+            "X-Agent-Worker-Register-Token": _issue_scoped_token(client),
+        },
+        json={
+            "worker_id": "over-ceiling",
+            "name": "Over",
+            "runtimes": ["pi"],
+            "max_concurrency": MAX_DYNAMIC_CONCURRENCY + 1,
+            "protocol_version": 1,
+        },
+    )
+    assert rejected.status_code == 422

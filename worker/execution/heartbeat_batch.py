@@ -44,7 +44,7 @@ from worker.execution.heartbeat_degraded import beat_single
 # long-transaction problem this split exists to solve; 256 renewals of
 # fixed-size primary-key statements stay in the tens-of-milliseconds range.
 # A Worker may legally hold more leases than this (the registration caps
-# max_concurrency and max_code_concurrency at 1024 each), so an oversized
+# max_concurrency and max_code_concurrency at MAX_DYNAMIC_CONCURRENCY each), so an oversized
 # snapshot is SHARDED into sequential per-chunk requests — never truncated
 # (a silently renewed prefix would let the tail's leases expire), never
 # refused (that would reclaim every lease of a healthy high-slot Worker).

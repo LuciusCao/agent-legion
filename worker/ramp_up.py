@@ -87,7 +87,7 @@ def validate_ramp_up(block: Any) -> RampUpControls:
     """Validate one raw ``ramp_up`` config block into RampUpControls.
 
     ``None``/``False`` = 禁用（回到一次性全量）。mapping 需整数
-    ``initial``/``step`` ∈ [1,1024]、``interval_seconds`` ∈ [0.2,3600]
+    ``initial``/``step`` ∈ [1, MAX_DYNAMIC_CONCURRENCY]、``interval_seconds`` ∈ [0.2,3600]
     （键缺省 1/1/60），否则 ``ValueError`` 点名键。``initial`` ≥ 目标时
     首 observe 即到顶、不报错（大档位配置不 brick 调小的 worker）。"""
     if block is None or block is False:

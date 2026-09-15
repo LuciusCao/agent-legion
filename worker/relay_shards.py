@@ -136,7 +136,8 @@ def beat_sharded(
         threads.append(thread)
     # One SHARED deadline for the whole fan-out join (PR #617 review P1-2):
     # a per-thread timeout would let wedged shards stack — N shards × (beat
-    # timeout + margin) ≈ 240s at the 1024-lease cap — because `requests`'
+    # timeout + margin) ≈ 240s at the 1024-lease cap of the era (2048 now doubles
+    # it — the shared-deadline fix below is what actually bounds the wall time) — because `requests`'
     # timeout is per socket-read-op, so a slow-drip Host keeps every shard
     # "alive" past its own join. That serialises the tick into exactly the
     # expiry stall this hotfix exists to prevent. With the budget spent
