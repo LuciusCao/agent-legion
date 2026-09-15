@@ -42,7 +42,11 @@ Per-skill isolation: one skill's failure (dirty tree, unreadable shared
 source, contract regression, git error) never aborts the batch — every
 skill reports ``synced`` (new tag) / ``skipped`` (already in sync, or no
 git repo) / ``failed`` (reason). The generation conflict above is the one
-deliberate exception: continuing would apply a stale plan.
+deliberate exception: continuing would apply a stale plan. The abort
+still cannot blind the caller to what already landed — each completed
+skill's commit is atomic and valid, so the 409 payload carries those
+per-skill results in the normal response shape
+(``SharedGenerationConflictError``).
 """
 
 from __future__ import annotations
@@ -50,13 +54,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from server.app.services.job_errors import NotFoundError
+from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.services.skill_editing import SkillEditingService
 from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_propagate_apply import propagate_one
 from server.app.services.skill_shared_propagate_plan import (
     PropagateResult,
     PropagateSkillResult,
+    SharedGenerationConflictError,
 )
 from server.app.services.skill_shared_propagate_plan import (
     read_generation as _read_generation,
@@ -120,17 +125,24 @@ def propagate_shared_materials(
             if requested is None or material.source in requested:
                 selected.add(skill)
     editing = SkillEditingService(base_dir=base, runs_dir=runs_dir)
-    return PropagateResult(
-        results=tuple(
-            propagate_one(
-                workspace_id,
-                skill,
-                tuple(all_mapped[skill]),
-                shared_dir,
-                generation,
-                shared_bytes,
-                editing,
+    completed: list[PropagateSkillResult] = []
+    try:
+        for skill in sorted(selected):
+            completed.append(
+                propagate_one(
+                    workspace_id,
+                    skill,
+                    tuple(all_mapped[skill]),
+                    shared_dir,
+                    generation,
+                    shared_bytes,
+                    editing,
+                )
             )
-            for skill in sorted(selected)
-        )
-    )
+    except ConflictError as exc:
+        # A mid-batch generation swap aborts the batch — but the skills
+        # completed so far committed atomically and stay valid, so the 409
+        # must not leave the caller blind to them (codex on #674): the
+        # payload carries their per-skill results in the normal shape.
+        raise SharedGenerationConflictError(str(exc), tuple(completed)) from exc
+    return PropagateResult(results=tuple(completed))

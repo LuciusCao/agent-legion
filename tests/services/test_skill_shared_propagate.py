@@ -484,3 +484,55 @@ def test_non_utf8_source_fails_with_explicit_reason(ws_dir) -> None:
     # 不打空气 tag：仓库保持原样。
     assert _git(repo, "show", "HEAD:references/raw.md") == "# v1"
     assert _git(repo, "tag", "--list") == "v1.0.0"
+
+
+def test_mid_batch_conflict_409_carries_completed_results(ws_dir, monkeypatch) -> None:
+    """codex（#674）：两 skill 批次中第二个复核换代 → 409 的 payload
+    携带第一个 skill 的 synced 结果（tag 在内），重试者知情；已完成
+    提交各自原子合法，重试收敛（重试额外 bump 一次 tag 是 patch 递增
+    的固有行为，无害）。"""
+    _seed_shared(
+        ws_dir,
+        [{"source": "references/style.md", "skills": ["skill-a", "skill-b"]}],
+        {"references/style.md": "# v2\n"},
+    )
+    repo_a = ws_dir / _WS / "skill-a"
+    _make_skill_repo(repo_a, {"references/style.md": "# v1\n"}, tags=("v1.0.0",))
+    repo_b = ws_dir / _WS / "skill-b"
+    _make_skill_repo(repo_b, {"references/style.md": "# v1\n"})
+
+    from server.app.services import skill_shared_propagate_apply as apply_module
+
+    real_recheck = apply_module._generation_matches
+    calls = {"n": 0}
+
+    def swap_on_second(shared_dir, generation):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            # 第一个 skill 完成后换代。
+            (ws_dir / _WS / "_shared" / "references" / "style.md").write_text(
+                "# v3-concurrent\n", encoding="utf-8"
+            )
+        return real_recheck(shared_dir, generation)
+
+    monkeypatch.setattr(apply_module, "_generation_matches", swap_on_second)
+    from server.app.services.skill_shared_propagate_plan import (
+        SharedGenerationConflictError,
+    )
+
+    with pytest.raises(SharedGenerationConflictError) as exc_info:
+        propagate_shared_materials(_WS)
+    payload = exc_info.value.payload
+    assert "retry" in payload["message"]
+    (completed,) = payload["results"]
+    assert completed["skill"] == "skill-a"
+    assert completed["status"] == "synced"
+    assert completed["tag"] == "v1.0.1"
+    assert completed["synced_files"] == ["references/style.md"]
+    # 第一个 skill 的提交已真实落盘；第二个未被打扰。
+    assert _git(repo_a, "show", "HEAD:references/style.md") == "# v2"
+    assert _git(repo_b, "show", "HEAD:references/style.md") == "# v1"
+    # 重试收敛：再次传播把 skill-b 同步到新代次（skill-a 已一致跳过）。
+    (retry,) = [r for r in propagate_shared_materials(_WS).results if r.skill == "skill-b"]
+    assert retry.status == "synced"
+    assert _git(repo_b, "show", "HEAD:references/style.md") == "# v3-concurrent"

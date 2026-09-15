@@ -351,3 +351,25 @@ def test_shared_dir_symlink_is_not_a_trusted_root(client, shared_home, tmp_path)
 
     assert client.get(_BASE).json() == {"workspace_id": _WS, "map": None, "files": []}
     assert client.get(f"{_BASE}/file", params={"path": "references/secret.md"}).status_code == 404
+
+
+def test_file_endpoint_reads_size_and_content_from_one_open(
+    client, shared_home, monkeypatch
+) -> None:
+    """codex P2（#674）：/file 在同一文件描述符上 fstat + read——目标
+    文件只被 open 一次，size/truncated 与 content 不可能跨代。"""
+    _create_workspace(client)
+    _seed_shared(shared_home)
+    real_open = Path.open
+    opens: list[str] = []
+
+    def counting_open(self, *args, **kwargs):
+        if self.name == "style.md":
+            opens.append(str(self))
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counting_open)
+    response = client.get(f"{_BASE}/file", params={"path": "references/style.md"})
+    assert response.status_code == 200, response.text
+    assert response.json()["size"] == len(b"# house style v2\n")
+    assert len(opens) == 1

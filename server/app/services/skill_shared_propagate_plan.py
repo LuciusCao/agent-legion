@@ -11,11 +11,12 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
 from server.app.services import skill_repo
+from server.app.services.job_errors import ConflictError
 from server.app.services.skill_shared_store import MAP_PATH
 
 _VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
@@ -32,6 +33,24 @@ class PropagateSkillResult:
     tag: str | None = None
     detail: str | None = None
     synced_files: tuple[str, ...] = ()
+
+
+class SharedGenerationConflictError(ConflictError):
+    """Mid-batch generation swap (409). Each completed skill's commit is
+    atomic and valid on its own and the retry converges, but the caller
+    must not be blind to what already landed: the 409 payload carries the
+    per-skill results completed BEFORE the swap, in the same shape as the
+    normal response's ``results`` (codex on #674)."""
+
+    def __init__(self, message: str, completed: Sequence[PropagateSkillResult]) -> None:
+        super().__init__(message)
+        self.payload = {
+            "message": message,
+            "results": [
+                {**asdict(result), "synced_files": list(result.synced_files)}
+                for result in completed
+            ],
+        }
 
 
 @dataclass(frozen=True)

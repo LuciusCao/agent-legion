@@ -31,6 +31,7 @@ listing and the compared source bytes).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -47,7 +48,6 @@ from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_store import (
     MAP_PATH,
     SHARED_DIR_NAME,
-    read_shared_text,
     shared_edit_lock,
 )
 from server.app.services.skill_shared_sync import SharedMap, load_shared_map
@@ -199,8 +199,8 @@ def read_shared_file_content(
     advertises. The target is then RESOLVED and required to stay inside
     the resolved ``_shared`` dir: a symlinked intermediate directory
     (``_shared/docs -> /srv/private``) passes the lexical check and
-    ``read_shared_text`` only inspects the FINAL path, so without the
-    containment check such a link would read supported-extension files
+    final-path symlink checks only inspect the LAST component, so without
+    the containment check such a link would read supported-extension files
     anywhere on the host (codex review P1).
     """
     if not is_shared_file_path(path) or PurePosixPath(path).suffix.lower() not in TEXT_EXTENSIONS:
@@ -220,13 +220,18 @@ def read_shared_file_content(
         target.relative_to(shared_root)
     except ValueError as exc:
         raise NotFoundError("Shared material not found") from exc
+    if target.is_symlink() or not target.is_file():
+        raise NotFoundError("Shared material not found")
     try:
-        # stat BEFORE the read: size and content then describe the same
-        # state in practice (a full-state PUT swaps the dir atomically via
-        # two renames, so the worst case is a transient 404 mid-swap, never
-        # a half-written file — taking the shared lock here stays off).
-        size = target.stat().st_size
-        content = read_shared_text(target)
-    except (OSError, UnicodeDecodeError) as exc:
+        # One open, fstat + read on the SAME descriptor (codex P2 on
+        # #674): size/truncated and content always describe one generation
+        # — even when a full-state PUT swaps the directory between the two
+        # (taking the shared lock here stays off; the swap is atomic, so
+        # the worst case is a transient 404 mid-swap).
+        with target.open("rb") as handle:
+            size = os.fstat(handle.fileno()).st_size
+            raw = handle.read()
+    except OSError as exc:
         raise NotFoundError("Shared material not found") from exc
+    content = raw[:MAX_FILE_BYTES].decode("utf-8", errors="replace")
     return content, size, size > MAX_FILE_BYTES
