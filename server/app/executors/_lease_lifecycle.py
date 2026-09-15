@@ -137,14 +137,19 @@ def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
     # failed with a permanently queued request.
     rows = conn.execute(
         """
-        select id, job_id, node_key, node_run_id, execution_id
-        from executor_leases
-        where status='active' and expires_at<=%s and not starts_with(executor_id, 'agent:')
+        select l.id, l.job_id, l.node_key, l.node_run_id, l.execution_id,
+               j.workspace_id
+        from executor_leases l
+        join jobs j on j.id = l.job_id
+        where l.status='active' and l.expires_at<=%s
+          and not starts_with(l.executor_id, 'agent:')
         """,
         (now_str,),
     ).fetchall()
     expired: list[str] = []
-    for row in rows:
+    # #659 v82 discipline: per-lease jobs DML walks workspaces ascending —
+    # same cross-workspace ring discipline as the broker sweepers.
+    for row in sorted(rows, key=lambda r: str(r["workspace_id"])):
         if _expire_lease_row(conn, row, now_str):
             expired.append(row["id"])
     return expired

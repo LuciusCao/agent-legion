@@ -38,7 +38,8 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
     with write_transaction(broker.database_dsn) as conn:
         rows = conn.execute(
             """
-            select r.execution_id, r.job_id, r.node_key, r.agent_id
+            select r.execution_id, r.job_id, r.node_key, r.agent_id,
+                   r.workspace_id
             from agent_execution_requests r
             where r.state='queued'
               -- kind='code' payloads are self-contained: no versioned Agent
@@ -58,7 +59,10 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
             for update of r skip locked
             """
         ).fetchall()
-        for row in rows:
+        # #659 v82 discipline: per-row jobs DML walks workspaces ascending
+        # (same as the sibling sweepers) — closes the cross-workspace
+        # multi-statement ring window against claim batches.
+        for row in sorted(rows, key=lambda r: str(r["workspace_id"])):
             error = (
                 f"Agent definition {row['agent_id']!r} was disabled or changed"
                 " while the request was queued"

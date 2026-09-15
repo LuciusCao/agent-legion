@@ -33,9 +33,11 @@ family firing order — takes the ws: level before any dimension key of that
 workspace, a "holds run:r while waiting on ws:x" state is unreachable
 (anyone holding run:r passed ws:x first), and same-workspace writers
 serialise at the ws: gate before any counter row or dimension lock. The
-two-int lock class id 82 dedicates the keyspace to this migration: other
-pg_advisory_xact_lock users hash single bigint keys, so cross-user
-collisions are structurally impossible rather than merely unlikely.
+two-int lock class id 82 dedicates the keyspace to this migration: the
+only other two-int advisory user in the codebase (the studio
+publish-request handshake) uses class id 416429, so class 82 is exclusive
+to the counter triggers — a future two-int user must pick a different id
+(pinned by the shape test).
 
 Properties relied upon:
 
@@ -53,12 +55,13 @@ Properties relied upon:
   EXEC-CLAIM-LOCK-001's ascending order) can still ring cross-workspace.
   #659's production shapes are same-workspace; the detector plus the
   claim/heartbeat retry liveness absorb the residual. Cross-workspace
-  multi-statement jobs DML should follow the same ascending-workspace
-  discipline (sweepers sort their rows by workspace_id).
-- Also tightened: the DELETE arm's group-by select gains the
-  ``order by 1, 2`` the INSERT/UPDATE arms already had — with the
-  advisory gate this is belt-and-braces, but the every-loop-walks-a-
-  fixed-order discipline stays uniform across the three arms.
+  multi-statement jobs DML follows the ascending-workspace discipline:
+  all five sweep paths (broker claim sweep, stale-definition sweep,
+  unclaimable-model sweep, lease expiry, orphaned-job recovery) sort
+  their rows by workspace_id.
+- All three arms' delta loops keep v77's ``order by`` unchanged
+  (v77 already sorted every arm's group-by select); the new lock loops
+  follow the same fixed-order discipline.
 
 Delta semantics are byte-identical to v77 (sign-split apply, zero-net
 filter, ``<> ''`` guard on the run twin) — the module splices the same

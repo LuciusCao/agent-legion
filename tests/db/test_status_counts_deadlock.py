@@ -33,11 +33,13 @@ on the v77 shape — verified while writing this file):
   workspace twin's shared (workspace, status) rows and the run twin's own
   rows in the same interleave — the rerun-vs-result shape of #659.
 
-The v82 fix (pg_advisory_xact_lock per distinct key, sorted, at trigger
-entry) serialises all counter writers per key: B's stmt1 blocks on A's
-advisory lock BEFORE touching any counter row; when A commits, B proceeds
-and both transactions complete — no ring can close because no two
-transactions ever hold counter-row locks for the same key concurrently.
+The v82 fix (two-level advisory hierarchy at trigger entry: class-82
+pg_advisory_xact_lock on every distinct ws:<workspace> FIRST, then the
+dimension keys, both sorted) serialises all counter writers per
+workspace: B's stmt1 blocks on A's ws-gate advisory lock BEFORE touching
+any counter row or dimension lock; when A commits, B proceeds and both
+transactions complete — no ring can close because no two transactions
+ever hold the same workspace's counter rows concurrently.
 The test drives exactly that ordering: B blocks on the advisory lock while
 A's later statements run; A commits (releasing the lock); B finishes and
 commits. ``lock_timeout`` bounds every wait so a regression in the fix
@@ -394,6 +396,7 @@ def test_cross_family_ring_is_broken_by_the_lock_hierarchy() -> None:
     finally:
         conn_a.close()
         thread_b.join(timeout=30)
+        assert not thread_b.is_alive(), "B-side transaction never resolved"
 
     outcomes = list(results.values())
     deadlocked = [e for e in outcomes if isinstance(e, psycopg.errors.DeadlockDetected)]
