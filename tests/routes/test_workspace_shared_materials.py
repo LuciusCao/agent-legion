@@ -188,6 +188,23 @@ def test_listing_covers_whole_shared_dir_except_map(client, shared_home) -> None
     assert guide.status_code == 200, guide.text
 
 
+def test_file_endpoint_refuses_intermediate_symlink_escape(client, shared_home, tmp_path) -> None:
+    """codex P1：`_shared/docs -> 外部目录` 这类中间 symlink 能过词法
+    校验，读取前必须 resolve 并验证仍在 _shared 内，否则可读到 skill
+    root 外任意受支持扩展名文件。"""
+    _create_workspace(client)
+    _seed_shared(shared_home)
+    outside = tmp_path / "private"
+    outside.mkdir()
+    (outside / "secret.md").write_text("top secret\n", encoding="utf-8")
+    (shared_home / "_shared" / "docs").symlink_to(outside)
+
+    response = client.get(f"{_BASE}/file", params={"path": "docs/secret.md"})
+    assert response.status_code == 404, response.text
+    # 词法上的越界依然是 422（两类拒绝分工不变）。
+    assert client.get(f"{_BASE}/file", params={"path": "../x.md"}).status_code == 422
+
+
 def test_file_endpoint_missing_file_is_404(client, shared_home) -> None:
     _create_workspace(client)
     _seed_shared(shared_home)

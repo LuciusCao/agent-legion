@@ -21,125 +21,56 @@ reports what actually landed.
 
 Tag rule: the highest ``vMAJOR.MINOR.PATCH`` tag gets patch +1
 (``v1.2.3`` → ``v1.2.4``); a repo without any version tag starts at
-``v0.1.0``. Non-semver tags are ignored for the computation; a collision
-is rejected by ``save_version``'s own tag check and surfaces as that
-skill's failure.
+``v0.1.0``. Non-semver tags are ignored for the computation. The tag is
+selected INSIDE the skill repo lock (codex P2): two propagations racing
+the same skill no longer compute the same patch tag outside the lock —
+the waiter re-reads the tags the winner left behind.
+
+Concurrency (codex P1): the plan is taken under the ``_shared`` edit
+lock (map + per-source content digests + source bytes), then RELEASED —
+``save_version`` acquires skill lock → shared lock in that order, so the
+shared lock must not be held across the batch. Before each skill's save,
+INSIDE the skill repo lock, the planned generation is re-verified (the
+shared lock nests inside, preserving the order): a concurrent full-state
+PUT that swapped the generation aborts the batch with a retryable
+``ConflictError`` (409) instead of applying a stale plan to a new
+generation (missed new targets / removed targets / replaced sources).
 
 Per-skill isolation: one skill's failure (dirty tree, unreadable shared
 source, contract regression, git error) never aborts the batch — every
 skill reports ``synced`` (new tag) / ``skipped`` (already in sync, or no
-git repo) / ``failed`` (reason). The shared map is read once under the
-``_shared`` edit lock and RELEASED before any save: ``save_version``
-acquires skill lock → shared lock in that order, so holding the shared
-lock across the batch would invert the lock order.
+git repo) / ``failed`` (reason). The generation conflict above is the one
+deliberate exception: continuing would apply a stale plan.
 """
 
 from __future__ import annotations
 
-import logging
-import re
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
-from server.app.services import skill_repo
-from server.app.services.job_errors import JobServiceError, NotFoundError
+from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_editing import SkillEditingService
 from server.app.services.skill_repo_edit import SkillEditValidationError
+from server.app.services.skill_shared_propagate_apply import propagate_one
+from server.app.services.skill_shared_propagate_plan import (
+    PropagateResult,
+    PropagateSkillResult,
+)
+from server.app.services.skill_shared_propagate_plan import (
+    read_generation as _read_generation,
+)
+from server.app.services.skill_shared_propagate_plan import (
+    read_source_bytes as _read_source_bytes,
+)
 from server.app.services.skill_shared_store import SHARED_DIR_NAME, shared_edit_lock
 from server.app.services.skill_shared_sync import load_shared_map
 from server.app.skills.skill_roots import skills_root, workspace_skill_dir
 
-logger = logging.getLogger(__name__)
-
-_VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
-INITIAL_VERSION_TAG = "v0.1.0"
-
-PropagateStatus = Literal["synced", "skipped", "failed"]
-
-
-@dataclass(frozen=True)
-class PropagateSkillResult:
-    skill: str
-    status: PropagateStatus
-    tag: str | None = None
-    detail: str | None = None
-    synced_files: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class PropagateResult:
-    results: tuple[PropagateSkillResult, ...]
-
-
-def next_version_tag(tags: Sequence[str]) -> str:
-    """Highest ``vX.Y.Z`` tag with patch +1; ``v0.1.0`` when none parse."""
-    best: tuple[int, int, int] | None = None
-    for tag in tags:
-        match = _VERSION_TAG_RE.fullmatch(tag)
-        if match is None:
-            continue
-        version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-        if best is None or version > best:
-            best = version
-    if best is None:
-        return INITIAL_VERSION_TAG
-    return f"v{best[0]}.{best[1]}.{best[2] + 1}"
-
-
-def _head_matches(repo_dir: Path, source: str, shared_bytes: bytes) -> bool:
-    result = skill_repo.run_git(repo_dir, ["show", f"HEAD:{source}"], check=False)
-    return result.returncode == 0 and result.stdout == shared_bytes
-
-
-def _propagate_one(
-    workspace_id: str,
-    skill: str,
-    mapped_sources: tuple[str, ...],
-    shared_dir: Path,
-    editing: SkillEditingService,
-) -> PropagateSkillResult:
-    skill_key = f"{workspace_id}/{skill}"
-    repo_dir = workspace_skill_dir(workspace_id, base_dir=editing.base_dir) / skill
-    if not skill_repo.is_git_repo(repo_dir):
-        return PropagateSkillResult(skill=skill, status="skipped", detail="skill repo not found")
-    shared_bytes: dict[str, bytes] = {}
-    for source in mapped_sources:
-        try:
-            shared_bytes[source] = (shared_dir / source).read_bytes()
-        except OSError:
-            return PropagateSkillResult(
-                skill=skill, status="failed", detail=f"shared source unreadable: {source}"
-            )
-    if all(_head_matches(repo_dir, source, data) for source, data in shared_bytes.items()):
-        return PropagateSkillResult(skill=skill, status="skipped", detail="already in sync")
-    tag = next_version_tag(skill_repo.list_tags(repo_dir))
-    message = f"Sync shared materials: {', '.join(mapped_sources)}"
-    try:
-        outcome = editing.save_version(skill_key, [], tag, message)
-    except JobServiceError as exc:
-        # Mapped save failures (dirty tree 409, contract regression 422,
-        # tag conflict, git operational error) — isolated to this skill.
-        return PropagateSkillResult(skill=skill, status="failed", detail=str(exc))
-    except Exception as exc:
-        # #204 broad-except audit: per-skill isolation must hold for ANY
-        # save failure mode, including ones outside the JobServiceError
-        # taxonomy (e.g. SkillRollbackError after a failed rollback or a
-        # programming error). Swallowing into a per-skill `failed` result
-        # is the batch contract — one repo's problem must not strand the
-        # others; the full traceback goes to the server log, the client
-        # gets the exception type only (messages may carry host paths).
-        logger.exception("shared-material propagate failed for skill %s", skill_key)
-        return PropagateSkillResult(
-            skill=skill, status="failed", detail=f"unexpected error ({type(exc).__name__})"
-        )
-    return PropagateSkillResult(
-        skill=skill,
-        status="synced",
-        tag=str(outcome["tag"]),
-        synced_files=tuple(outcome["synced_files"]),
-    )
+__all__ = [
+    "PropagateResult",
+    "PropagateSkillResult",
+    "propagate_shared_materials",
+]
 
 
 def propagate_shared_materials(
@@ -158,8 +89,13 @@ def propagate_shared_materials(
     shared_dir = workspace_skill_dir(workspace_id, base_dir=base) / SHARED_DIR_NAME
     with shared_edit_lock(shared_dir, base):
         shared_map = load_shared_map(shared_dir)
-    if shared_map is None:
-        raise NotFoundError("Workspace has no shared materials (_shared)")
+        if shared_map is None:
+            raise NotFoundError("Workspace has no shared materials (_shared)")
+        all_sources = [m.source for m in shared_map.materials]
+        generation = _read_generation(shared_dir, all_sources)
+        # Source bytes pinned to the planned generation; the per-skill
+        # recheck guarantees they are still current when the save applies.
+        shared_bytes = _read_source_bytes(shared_dir, all_sources)
     requested = None if sources is None else set(sources)
     if requested is not None:
         unknown = sorted(requested - {m.source for m in shared_map.materials})
@@ -184,7 +120,15 @@ def propagate_shared_materials(
     editing = SkillEditingService(base_dir=base, runs_dir=runs_dir)
     return PropagateResult(
         results=tuple(
-            _propagate_one(workspace_id, skill, tuple(all_mapped[skill]), shared_dir, editing)
+            propagate_one(
+                workspace_id,
+                skill,
+                tuple(all_mapped[skill]),
+                shared_dir,
+                generation,
+                shared_bytes,
+                editing,
+            )
             for skill in sorted(selected)
         )
     )

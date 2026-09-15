@@ -38,6 +38,7 @@ and the save response reports them as ``synced_files``.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -98,11 +99,26 @@ class SkillEditingService:
         return {"key": skill_key, "valid": not errors, "errors": errors, "warnings": warnings}
 
     def save_version(
-        self, skill_key: str, files: list[SkillFileWrite], new_tag: str, message: str
-    ) -> dict[str, Any]:
+        self,
+        skill_key: str,
+        files: list[SkillFileWrite],
+        new_tag: str | Callable[[Path], str],
+        message: str,
+        *,
+        skip_if: Callable[[Path], bool] | None = None,
+    ) -> dict[str, Any] | None:
         repo_dir = self._skill_dir(skill_key)
         with edit_lock_for(repo_dir, self.base_dir, self._runs_dir):
-            return self._save_version_locked(skill_key, repo_dir, files, new_tag, message)
+            # #673 (codex P2): callers racing on the same repo (concurrent
+            # propagation) re-judge the skip and resolve the tag INSIDE the
+            # lock, so the waiter decides against the state the winner just
+            # committed instead of failing on a stale tag conflict. The
+            # result is None exactly when skip_if fired (callers passing no
+            # skip_if always get the save dict).
+            if skip_if is not None and skip_if(repo_dir):
+                return None
+            tag = new_tag(repo_dir) if callable(new_tag) else new_tag
+            return self._save_version_locked(skill_key, repo_dir, files, tag, message)
 
     def _save_version_locked(
         self,

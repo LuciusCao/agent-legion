@@ -11,8 +11,9 @@ lock is never touched).
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workspace_shared_materials_propagate_contracts import (
@@ -33,6 +34,10 @@ def create_workspace_shared_materials_propagate_router(
     @router.post(
         "/workspaces/{workspace_id}/skills-shared/propagate",
         response_model=SharedMaterialsPropagateResponse,
+        # Effecting write (commits + tags local skill repos): scoped tokens
+        # get 403 and use their own scoped tool endpoint instead
+        # (STUDIO-AGENT-001; the UI calls this with full sessions).
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def propagate_shared(
         workspace_id: str, payload: SharedMaterialsPropagateRequest

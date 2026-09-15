@@ -196,7 +196,12 @@ def read_shared_file_content(
     Path shape is validated against the shared-file rule first (422 for
     escapes/``.git`` components); a missing, non-text or symlinked target
     is a 404 — it is not part of the readable surface the listing
-    advertises.
+    advertises. The target is then RESOLVED and required to stay inside
+    the resolved ``_shared`` dir: a symlinked intermediate directory
+    (``_shared/docs -> /srv/private``) passes the lexical check and
+    ``read_shared_text`` only inspects the FINAL path, so without the
+    containment check such a link would read supported-extension files
+    anywhere on the host (codex review P1).
     """
     if not is_shared_file_path(path) or PurePosixPath(path).suffix.lower() not in TEXT_EXTENSIONS:
         raise SkillEditValidationError(
@@ -205,7 +210,12 @@ def read_shared_file_content(
         )
     base = base_dir or skills_root()
     shared_dir = workspace_skill_dir(workspace_id, base_dir=base) / SHARED_DIR_NAME
-    target = shared_dir / path
+    shared_root = shared_dir.resolve()
+    target = (shared_root / path).resolve()
+    try:
+        target.relative_to(shared_root)
+    except ValueError as exc:
+        raise NotFoundError("Shared material not found") from exc
     try:
         content = read_shared_text(target)
     except (OSError, UnicodeDecodeError) as exc:

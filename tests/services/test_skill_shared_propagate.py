@@ -19,10 +19,8 @@ import pytest
 
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_repo_edit import SkillEditValidationError
-from server.app.services.skill_shared_propagate import (
-    next_version_tag,
-    propagate_shared_materials,
-)
+from server.app.services.skill_shared_propagate import propagate_shared_materials
+from server.app.services.skill_shared_propagate_plan import next_version_tag
 
 _WS = "propagate-ws"
 
@@ -239,3 +237,67 @@ def test_propagate_unknown_source_is_422_and_writes_nothing(ws_dir) -> None:
 def test_propagate_without_shared_dir_is_404(ws_dir) -> None:
     with pytest.raises(NotFoundError):
         propagate_shared_materials(_WS)
+
+
+def test_generation_swap_mid_batch_is_retryable_conflict(ws_dir, monkeypatch) -> None:
+    """codex P1：计划（map + 源指纹）在锁释放后被全量 PUT 换代时，
+    批次以 ConflictError（路由 409，可重试）中止，而不是把旧计划应用
+    到新一代上。用计划后立刻改写共享源文件模拟换代。"""
+    _seed_shared(
+        ws_dir,
+        [{"source": "references/style.md", "skills": ["skill-a"]}],
+        {"references/style.md": "# v2\n"},
+    )
+    _make_skill_repo(ws_dir / _WS / "skill-a", {"references/style.md": "# v1\n"})
+
+    from server.app.services import skill_shared_propagate_apply as apply_module
+
+    real_recheck = apply_module._generation_matches
+    swapped = {"done": False}
+
+    def swap_then_check(shared_dir, generation):
+        if not swapped["done"]:
+            swapped["done"] = True
+            # 模拟并发全量 PUT：同一 map，源文件内容换代。
+            (ws_dir / _WS / "_shared" / "references" / "style.md").write_text(
+                "# v3-concurrent\n", encoding="utf-8"
+            )
+        return real_recheck(shared_dir, generation)
+
+    monkeypatch.setattr(apply_module, "_generation_matches", swap_then_check)
+    from server.app.services.job_errors import ConflictError
+
+    with pytest.raises(ConflictError, match="retry"):
+        propagate_shared_materials(_WS)
+    # 批次中止：skill 仓库保持原样（HEAD 仍是 v1，无新 tag）。
+    repo = ws_dir / _WS / "skill-a"
+    assert _git(repo, "show", "HEAD:references/style.md") == "# v1"
+    assert _git(repo, "tag", "--list") == ""
+
+
+def test_tag_selected_inside_repo_lock_uses_latest_tags(ws_dir, monkeypatch) -> None:
+    """codex P2：tag 选择在 repo lock 临界区内执行——等待方读到胜者刚
+    打上的 tag 再递增，而不是锁外算好后撞 tag conflict。"""
+    _seed_shared(
+        ws_dir,
+        [{"source": "references/style.md", "skills": ["skill-a"]}],
+        {"references/style.md": "# v2\n"},
+    )
+    repo = ws_dir / _WS / "skill-a"
+    _make_skill_repo(repo, {"references/style.md": "# v1\n"}, tags=("v1.0.0",))
+
+    from server.app.services import skill_shared_propagate_plan as plan_module
+
+    real_next = plan_module.next_version_tag
+    seen_tags: list[tuple[str, ...]] = []
+
+    def spy_next(tags):
+        seen_tags.append(tuple(tags))
+        return real_next(tags)
+
+    monkeypatch.setattr(plan_module, "next_version_tag", spy_next)
+    (entry,) = propagate_shared_materials(_WS).results
+    assert entry.status == "synced"
+    # 锁内读取的 tag 列表就是计算依据（v1.0.0 → v1.0.1）。
+    assert seen_tags == [("v1.0.0",)]
+    assert entry.tag == "v1.0.1"
