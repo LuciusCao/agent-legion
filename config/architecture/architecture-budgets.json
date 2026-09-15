@@ -879,7 +879,7 @@
     "server/app/agent_broker/claim.py": 81,
     "server/app/agent_broker/claim_admission.py": 68,
     "server/app/agent_broker/claim_batch.py": 108,
-    "server/app/agent_broker/claim_batch_select.py": 154,
+    "server/app/agent_broker/claim_batch_select.py": 150,
     "server/app/agent_broker/claim_batch_tx.py": 91,
     "server/app/agent_broker/claim_evaluate.py": 121,
     "server/app/agent_broker/claim_paths.py": 24,

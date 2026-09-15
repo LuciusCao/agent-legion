@@ -177,12 +177,16 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
     now_str = database_timestamp(now)
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
-            "select j.id from jobs j where j.status='running' and not exists"
+            "select j.id, j.workspace_id from jobs j where j.status='running' and not exists"
             " (select 1 from executor_leases l where l.job_id=j.id and l.status='active')"
         ).fetchall()
+        # #659 v82 discipline: per-job DML walks workspaces ascending —
+        # same cross-workspace ring discipline as the broker sweepers.
         recovered = [
             job_id
-            for job_id in (str(row["id"]) for row in rows)
+            for job_id in (
+                str(row["id"]) for row in sorted(rows, key=lambda r: str(r["workspace_id"]))
+            )
             if _recover_orphaned_job(conn, job_id, now_str)
         ]
     _broadcast_committed(repo, recovered)

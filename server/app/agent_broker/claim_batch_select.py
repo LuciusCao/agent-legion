@@ -114,7 +114,7 @@ def _select_kind_batch(
     kind: str,
     cursor: int,
     timer: _claim_timing.ClaimStageTimer,
-    ws_lock_floor: str | None,
+    ws_lock_floor: int | None,
     chosen_ids: set[str],
 ) -> Mapping[str, Any] | None:
     """``claim_windows.scan_kind`` 的批选择形态：同一 SCAN_ROUNDS 阶梯、fair
@@ -134,14 +134,16 @@ def _select_kind_batch(
         for row in fair_candidate_order(candidates, cursor):
             if str(row["execution_id"]) in chosen_ids:
                 continue
-            if (
-                ws_lock_floor is not None
-                and kind != "code"
-                and str(row["workspace_id"]) < ws_lock_floor
-            ):
+            row_key = int(row["ws_lock_key"])
+            if ws_lock_floor is not None and row_key < ws_lock_floor:
                 # 批内 ws 锁升序（EXEC-CLAIM-LOCK-001）：低序候选让位下一批
                 # （floor 重置），本批绝不下探。选择段的顺序即写入段的加锁
-                # 顺序，floor 纪律由这里守住。
+                # 顺序，floor 纪律由这里守住。#662 review：code 候选同样
+                # 受限——v82 起每个 promote 的 UPDATE jobs 都经触发器取
+                # class-82 ws 锁（「code claims take no ws lock」是 v77
+                # 时代的旧事实），轮转的 code 顺序不升序会跨 worker 成环；
+                # floor 比较的是实际 advisory key（hashtext 后的 int），
+                # 文本序在 32 位碰撞时会与触发器内的实际锁序脱节。
                 state.skip_reasons["batch_lock_order"] += 1
                 continue
             if admit_candidate(broker, row, view, state) is not None:
@@ -189,10 +191,11 @@ def select_batch_candidates(
         # the write phase accumulates one ``agent-ws:*`` advisory lock per
         # claimed workspace; without an ascending constraint two batches
         # walking the same workspaces in different queue orders could AB-BA
-        # deadlock. Agent candidates below the floor are deferred (skip +
-        # next batch = fresh floor); code claims take no ws lock and stay
-        # unconstrained.
-        ws_lock_floor: str | None = None
+        # deadlock. Candidates below the floor are deferred (skip + next
+        # batch = fresh floor); since #659 v82 every promote (agent AND
+        # code) takes the class-82 ws lock via the jobs UPDATE trigger, so
+        # BOTH kinds are constrained.
+        ws_lock_floor: int | None = None
         while len(selected) < budget:
             open_kinds = []
             for kind in needed_claim_kinds(view):
@@ -219,9 +222,13 @@ def select_batch_candidates(
             selected.append(row)
             chosen_ids.add(str(row["execution_id"]))
             row_kind = str(row["kind"])
-            row_workspace = str(row["workspace_id"])
-            if row_kind == "agent" and (ws_lock_floor is None or row_workspace > ws_lock_floor):
-                ws_lock_floor = row_workspace
+            row_key = int(row["ws_lock_key"])
+            # #662 review：两类候选都推进 floor（code 的 UPDATE jobs 同样
+            # 取 ws 锁——floor 只跟 agent 走会让 code 批的后续行下探），
+            # 且按实际 class-82 锁键（hashtext int）推进——与触发器内
+            # 的获取序同域。
+            if ws_lock_floor is None or row_key > ws_lock_floor:
+                ws_lock_floor = row_key
             pool_left = pool_remaining[row_kind]
             if pool_left is not None:
                 pool_remaining[row_kind] = pool_left - 1

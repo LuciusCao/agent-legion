@@ -137,7 +137,11 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
                        and active.kind='agent'
                     ) < coalesce(w.max_concurrency, 2147483647))
         )
-        select r.*, wr.definition_json as revision_definition_json
+        select r.*, wr.definition_json as revision_definition_json,
+               -- #662 v82：候选携带实际 class-82 锁键——批内 floor 与排序
+               -- 按触发器真正获取的 advisory key 比较，文本序在 hashtext
+               -- 碰撞时会与实际锁序脱节（codex review）。
+               hashtext('ws:' || r.workspace_id)::int as ws_lock_key
         from eligible_workspaces ws
         cross join lateral (
           select r2.*,

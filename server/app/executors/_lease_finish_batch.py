@@ -24,9 +24,10 @@ Two disciplines the codex review on #609 added:
   position sits after each batch's OWN first item in that workspace — two
   multi-item batches whose first items in one SHARED workspace differ can
   still close a ring on (workspace row, run row); the sweep/expire paths
-  (``expire_stale_leases`` and friends) also touch counters in arrival
-  order. Both are far narrower than the cross-workspace opposite-order
-  class this removes and stay covered by the 40P01 retry; the airtight
+  (``expire_stale_leases`` and friends) walk workspaces ascending since
+  the #659 v82 discipline, so they are counterparty-safe here. Both are
+  far narrower than the cross-workspace opposite-order class this
+  removes and stay covered by the 40P01 retry; the airtight
   shapes (workspace-trigger-first firing order, or one multi-row jobs
   UPDATE aggregating the whole batch through the statement trigger) are
   schema-level changes out of scope here. Known counterparty of the same
