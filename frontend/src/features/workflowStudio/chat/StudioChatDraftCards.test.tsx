@@ -22,6 +22,7 @@ function makeStudio(overrides: Record<string, unknown> = {}) {
   return {
     canPublish: true,
     createsRevision: true,
+    actionState: 'idle',
     compareState: 'ready',
     compareErrors: null,
     compareSummary: null,
@@ -118,6 +119,21 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
       'title',
       '正在与 active revision 对比，请稍候'
     )
+  })
+
+  it('canPublish 为真但 actionState 非 idle（publish POST 在途）时禁用', () => {
+    // canPublish 不含 actionState：确认框关闭后首个 POST 在途，按钮必须
+    // 保持禁用，防止再开确认框发起第二个 POST（命令条同口径）。
+    const studio = makeStudio({ actionState: 'publishing' })
+    renderCard(studio)
+    const publish = screen.getByRole('button', { name: '发布新版本' })
+    expect(publish).toBeDisabled()
+    expect(publish.parentElement).toHaveAttribute(
+      'title',
+      '校验或保存进行中，请稍候'
+    )
+    fireEvent.click(publish)
+    expect(studio.requestPublish).not.toHaveBeenCalled()
   })
 
   it('草稿与编辑器内容不一致时提示发布以编辑器 YAML 为准', () => {

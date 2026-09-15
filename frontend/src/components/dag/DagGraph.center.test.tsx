@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /* #667 B2：DagSelectionViewport 的镜头定位用 mock 的 useReactFlow 验证
  * （xyflow 真实实例的 setCenter 走 d3 transition，jsdom 里无法观测）。
@@ -54,19 +54,48 @@ const nodes: DagGraphNode[] = [
 ]
 const edges: DagGraphEdge[] = [{ from: 'a', to: 'b' }]
 
+/* 容器尺寸可变 stub：DagSelectionViewport 跳过零尺寸容器（jsdom
+ * clientWidth 恒为 0），默认给非零尺寸让定位走到 mocked setCenter；
+ * 尺寸恢复重试用例把它调成 0 再调回。 */
+const containerSize = { width: 800, height: 600 }
+
+class ResizeObserverMock {
+  static instances: ResizeObserverMock[] = []
+  private callback: ResizeObserverCallback
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback
+    ResizeObserverMock.instances.push(this)
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  trigger() {
+    this.callback([], this as unknown as ResizeObserver)
+  }
+}
+
+const originalResizeObserver = globalThis.ResizeObserver
+
 describe('DagGraph 选中节点镜头定位（#667 B2）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // DagSelectionViewport 跳过零尺寸容器（jsdom clientWidth 恒为 0）；stub
-    // 出非零尺寸让定位逻辑在测试里走到 mocked setCenter。
+    containerSize.width = 800
+    containerSize.height = 600
+    ResizeObserverMock.instances = []
+    globalThis.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
       configurable: true,
-      get: () => 800,
+      get: () => containerSize.width,
     })
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
       configurable: true,
-      get: () => 600,
+      get: () => containerSize.height,
     })
+  })
+
+  afterEach(() => {
+    globalThis.ResizeObserver = originalResizeObserver
   })
 
   it('画布外选中（受控 selectedNode 到达/变化）时镜头平滑移到节点中心', () => {
@@ -110,5 +139,73 @@ describe('DagGraph 选中节点镜头定位（#667 B2）', () => {
     render(<DagGraph nodes={nodes} edges={edges} selectedNode="ghost" />)
     expect(mocks.getInternalNode).toHaveBeenCalledWith('ghost')
     expect(mocks.setCenter).not.toHaveBeenCalled()
+  })
+
+  it('容器从零尺寸恢复后重试未完成的定位（display:none 面板切回）', () => {
+    // 移动端 DAG 面板被 CSS display:none 隐藏时尺寸为零：定位被跳过，且
+    // 切回面板只改 class，selectedNode/nodesVersion 不变——必须靠容器尺寸
+    // 监听重试。
+    containerSize.width = 0
+    containerSize.height = 0
+    render(<DagGraph nodes={nodes} edges={edges} selectedNode="a" />)
+    expect(mocks.setCenter).not.toHaveBeenCalled()
+
+    act(() => {
+      containerSize.width = 800
+      containerSize.height = 600
+      ResizeObserverMock.instances.forEach((instance) => instance.trigger())
+    })
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+    expect(mocks.setCenter).toHaveBeenLastCalledWith(240, 90, {
+      zoom: 1,
+      duration: 350,
+    })
+
+    // 已完成定位后，后续尺寸变化不重复飞行。
+    act(() => {
+      ResizeObserverMock.instances.forEach((instance) => instance.trigger())
+    })
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+  })
+
+  it('外部选中后点击同节点再取消，重新外部选中同节点仍定位', () => {
+    // 回归：外部选中并定位后，画布点击同一节点写入 clickOriginRef 但不被
+    // 消费（focusedRef 去重提前返回）；取消选中时必须一并清掉，否则下次
+    // 同节点的外部选择被误判为画布点击而跳过定位。
+    const onSelectedNodeChange = vi.fn()
+    const { rerender } = render(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="a"
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+
+    // 受控选中下详情面板也渲染同名标题，直接点节点容器。
+    fireEvent.click(
+      screen.getByTestId('dag-flow-wrapper').querySelector('[data-id="a"]')!
+    )
+    expect(onSelectedNodeChange).toHaveBeenCalledWith('a')
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode={null}
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    rerender(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="a"
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(2)
   })
 })

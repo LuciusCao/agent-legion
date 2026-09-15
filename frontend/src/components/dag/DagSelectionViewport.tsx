@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useReducer, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import { useReactFlow, useStoreApi } from '@xyflow/react'
 
@@ -27,9 +27,25 @@ export function DagSelectionViewport({
   const { setCenter, getZoom, getInternalNode } = useReactFlow()
   const storeApi = useStoreApi()
   const focusedRef = useRef<string | null>(null)
+  /* 容器尺寸信号：移动端 DAG 面板被 CSS display:none 隐藏时尺寸为零，定位
+     被跳过且 selectedNode/nodesVersion 不再变化；切回图面板只改 class。监听
+     容器尺寸，恢复非零后让未完成的定位重试（已完成定位由 focusedRef 去重，
+     不会重复飞行）。 */
+  const [sizeTick, bumpSizeTick] = useReducer((count: number) => count + 1, 0)
+  useEffect(() => {
+    const domNode = storeApi.getState().domNode
+    if (!domNode || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => bumpSizeTick())
+    observer.observe(domNode)
+    return () => observer.disconnect()
+  }, [storeApi])
   useEffect(() => {
     if (!selectedNode) {
       focusedRef.current = null
+      // 清除可能遗留的画布点击来源：外部选中并定位后用户再点同一节点会
+      // 写入 clickOriginRef，但 focusedRef 去重会让 effect 提前返回不消费
+      // 它；不在这里清掉，下次同节点的外部选择会被误判为画布点击而跳过。
+      clickOriginRef.current = null
       return
     }
     if (focusedRef.current === selectedNode) return
@@ -61,6 +77,7 @@ export function DagSelectionViewport({
   }, [
     selectedNode,
     nodesVersion,
+    sizeTick,
     clickOriginRef,
     setCenter,
     getZoom,
