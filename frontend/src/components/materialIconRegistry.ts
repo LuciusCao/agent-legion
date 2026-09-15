@@ -33,9 +33,12 @@ import Inventory2Icon from '@mui/icons-material/Inventory2'
 import ListIcon from '@mui/icons-material/List'
 import LockIcon from '@mui/icons-material/Lock'
 import LockOpenIcon from '@mui/icons-material/LockOpen'
+import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
+import PauseIcon from '@mui/icons-material/Pause'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import PlayCircleIcon from '@mui/icons-material/PlayCircle'
+import QueryStatsIcon from '@mui/icons-material/QueryStats'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
@@ -89,9 +92,12 @@ export type MaterialIconName =
   | 'list'
   | 'lock'
   | 'lock_open'
+  | 'more_horiz'
   | 'more_vert'
+  | 'pause'
   | 'play_arrow'
   | 'play_circle'
+  | 'query_stats'
   | 'radio_button_unchecked'
   | 'restart_alt'
   | 'rocket_launch'
@@ -145,9 +151,12 @@ export const ICON_MAP = {
   list: ListIcon,
   lock: LockIcon,
   lock_open: LockOpenIcon,
+  more_horiz: MoreHorizIcon,
   more_vert: MoreVertIcon,
+  pause: PauseIcon,
   play_arrow: PlayArrowIcon,
   play_circle: PlayCircleIcon,
+  query_stats: QueryStatsIcon,
   radio_button_unchecked: RadioButtonUncheckedIcon,
   restart_alt: RestartAltIcon,
   rocket_launch: RocketLaunchIcon,

@@ -287,7 +287,8 @@ describe('WorkspaceLayout 页面级隔离', () => {
 
     // 崩溃页面被局部边界捕获，渲染错误 UI。
     expect(screen.getByRole('alert')).toHaveTextContent('页面出错了')
-    // shell 仍在：AppBar 的设置按钮可点（不崩溃、可导航离开当前页）。
+    // shell 仍在：AppBar 的更多菜单可开、设置项可点（不崩溃、可导航离开当前页）。
+    fireEvent.click(screen.getByLabelText('更多操作'))
     const settingsButton = screen.getByLabelText('设置')
     expect(settingsButton).toBeInTheDocument()
     fireEvent.click(settingsButton)

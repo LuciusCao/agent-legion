@@ -26,8 +26,8 @@ vi.mock('../views/WorkspaceJobDetail', () => ({
   default: () => <div data-testid="job-detail">JobDetail</div>,
 }))
 
-vi.mock('../components/AgentStatusIndicator', () => ({
-  AgentStatusIndicator: () => <div data-testid="agent-status">Agent</div>,
+vi.mock('../components/WorkspaceRunControl', () => ({
+  WorkspaceRunControl: () => <div data-testid="run-control">运行</div>,
 }))
 
 describe('WorkspaceLayout token usage navigation', () => {
@@ -58,6 +58,7 @@ describe('WorkspaceLayout token usage navigation', () => {
       </MemoryRouter>
     )
 
+    fireEvent.click(screen.getByLabelText('更多操作'))
     fireEvent.click(screen.getByLabelText('Token 使用分析'))
 
     expect(screen.getByTestId('token-usage-page')).toBeInTheDocument()

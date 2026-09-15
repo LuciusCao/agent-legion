@@ -4,61 +4,189 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
-## [Unreleased]
+## [0.7.12] - 2026-09-14
 
-## [0.7.9] - 2026-09-11
+执行平面收尾与系统性还债版本（纯后端线，不涉及用户交互）。
 
 ### Fixed
-- Studio 会话长回复尾部静默截断（issue #563）：流式 text 帧是原地全量
-  快照（seq 不变），断连/被驱逐丢帧后 after_seq 增量补齐永远取不回该行；
-  唯一自愈入口是"SSE 实时收到 turn_end → 全量回取"，但断连空窗恰好盖过
-  turn 结尾时 turn_end 只能经 REST 补齐静默合入，自愈永不触发——截断文本
-  被定妆成"已完成"消息。三层修法：
-  - **前端自愈推广**（useStudioChat/studioChatEvents/studioChatMessages）：
-    terminal 状态行（turn_end/error/session_*）检测统一到 isTerminalStatus
-    ——REST 补齐静默携带的 terminal 事件与 SSE 实时到达的同等触发全量
-    回取 + 画布/Agent 目录查询失效；SSE 重连时本地仍挂着未终结的流式
-    agent text 行即直接全量回取校准。refill 的 terminal 判定在 updater
-    外计算（updater 可能被 React 推迟执行，内赋值会恒 false）、
-    setMessages 改函数式更新（并发 refill 不再互相覆盖基线）。
-  - **EventBus 降触发**（server/app/events/bus.py）：快照语义通道
-    （studio-chat:*）的 QueueFull 从"立即驱逐订阅者"改为"丢最旧腾位投递
-    最新"（流式帧是全量快照，丢中间帧无损），连续溢出
-    OVERFLOW_EVICT_THRESHOLD=64（真死连接）才驱逐——驱逐引发的断流重连
-    正是截断的主要触发形态。增量语义通道（workspace job 补丁等 revision
-    水位消费方）保持立即驱逐的旧行为：断流 → SSE 重连 + loadSnapshot 是
-    既有的无损自愈路径，静默丢帧反而让客户端滞留旧 revision。
-  - **帧体积缩减**（studio_chat/store.py）：publish 的 json.dumps 补
-    `ensure_ascii=False`，CJK 文本不再 \uXXXX 转义（帧体积减半），放慢订阅
-    队列的积压速度。
-- Studio 会话闲置后 MCP 工具通道静默死亡（issue #558）：run token 固定
-  2h TTL、续期由对话活动驱动，闲置过期后 agent 的 MCP headers 无法中途
-  重指（协议限制），工具调用全 401 → client "Not connected"；而聊天主链路
-  （ACP 进程）毫发无伤，会话停在 idle——界面上一个"看起来活着"但工具
-  全废的会话，且 resume 只接受 closed/error，恢复入口不可达。修法：
-  #411 keepalive 的 dead 分支（首个 tool_call 检出 token 死亡）把会话升级
-  为 status=error 后追加 `run_token_invalidated` 通知
-  （`server/app/studio_chat/session_escalation.py`，守卫同 on_exit 的
-  final_statuses：closed/error/starting 不越权盖章，SSE session 快照同步
-  发布；升级先于通知且吞异常——DB 故障时干净重试、不产生重复通知），
-  既有的 ResumeBar /「继续对话」恢复链（新 token + 上下文保留）直接
-  生效；jobDiagnosis 排查面板补挂 ResumeBar（此前 error 会话只有禁用
-  文案，只能废弃）；通知与前端兜底文案改为指向「继续对话」。
+- supervisor 心跳 relay 的迟到心跳噪音（issue #590）：执行完成提交后、
+  executor 把租约从快照摘除前的 2s 节流窗口内，relay 仍按旧快照给已
+  终结租约发心跳，Host 正确拒绝（not_owned）——0.7.7 后实测放大到
+  3.3k/小时，稀释租约丢失排查的第一信号。修法（分类在 Host 侧 beat
+  事务内完成，零额外 RTT）：批量心跳的行缺失分支加一次同事务主键
+  读——行已 `done`/`cancelled` 即完成态收尾，随响应的 `settled` 列表
+  返回（不发 execution.heartbeat_rejected 事件）；`queued`（重排队）/
+  未知 id / 他人 execution 仍是 lost 照发事件。executor 侧
+  apply_beat_result 把 settled 静默摘除（不设 ownership_lost、不触发
+  cancel），下一拍快照不再携带死租约。
+- rerun 不清对象存储清单导致旧 run 产物残留（issue #508）：rerun 的
+  产物清理只作用于本地 job_dir，`job_artifacts` 清单行无任何删除路径
+  ——重跑中断/再次失败时，job 详情继续展示旧 run 产物（本地 ∪ 清单），
+  单产物读取本地 miss 后落 S3 旧对象，内容也是旧的。修法：
+  `mark_nodes_for_rerun` 在同一事务内删除受影响闭包的清单行（staged
+  输出名集合由 `stage_outputs` 提供，RMW 产物天然排除），三入口（单
+  节点 rerun / run-to / 审批 rework）全部接线；对象本体在提交后
+  best-effort 删除——删前按当前 `job_artifacts` 清单重验：同
+  `storage_key` 已被新 attempt 复现的权威键跳过删除（清理窗口内快速
+  重跑完成的竞态防护），未复现的孤儿键照删，bucket lifecycle 兜底，
+  与 job_deletion 的顺序纪律一致。
+- 三例 CI 负载敏感 flake（issue #453/#496/#525）：#453 publish race
+  的 created_at 次序断言改顺序无关（race 的真实不变量是「谁赢了」）；
+  #496 `binary_resolution` 的值导入 re-export 使 monkeypatch 打不到
+  `code_sandbox` 侧读取点——开发机 data/bin 有 velites 时 fail-closed
+  测试静默失真，改经模块属性访问同源生效；#525 session lifecycle 在
+  text 与 tool_call 两个落库时点之间裸读，补 tool_call 可见性的
+  bounded wait。
+
+### Changed
+- 单条 claim 响应路径退役（issue #547）：batch claim（#546）随 0.7.4
+  发布，pre-#546 Worker 镜像已退出支持窗口。claim 端点固定
+  `BatchAgentClaimResponse`（缺省 limit=1 应答单元素 claims 列表），
+  `ClaimRouteResponse` union 与 route_response_model 豁免随之收割；
+  worker 侧 `ClaimOperations.claim()` 单条方法删除（生产零调用者），
+  `claim_batch` 的混合舰队 shape-sniff 保留。行为收口：单条路径的
+  「提交后 500」容错形态消失——批路径逐条丢弃语义接管（全丢 = 空批
+  204），恢复路径不变（租约到期 sweeper 重排）。
+- velites `~/.velites/config.json` 迁移桥进入 deprecation（issue
+  #602，deprecation 阶段）：直调使用旧文件或 `VELITES_BASE_URL`/
+  `VELITES_API_KEY` env 时 stderr 打迁移指引（指向 models.json 与
+  迁移文档），下一版本周期移除（config.rs + lib.rs gateway 兜底分支）。
+  该文件仅供直调 CLI 兜底、结构上进不了 Worker 模型发现——新用户照旧
+  教程配置后 Worker 完全看不见，表现为「任务无人认领」类困惑。
+
+### Added
+- agent 节点执行超时开放配置（issue #550）：保留执行键
+  `timeout_seconds` 合并进 agent 节点的有效 schema（Agent Definition
+  schema 之下，重声明禁令不变），值走常规解析链（defaults → 节点
+  config → workspace 覆盖 → intake 冻结）；dispatch 以解析后的冻结值
+  写入 manifest `execution.timeout_seconds`，缺省保持产品常量 1800s
+  （合并默认同样取 1800 而非 code 节点的 600——升级不得静默砍掉存量
+  agent 运行的超时预算）。撰写/审核类 agent 跑不完 30 分钟时，运维可
+  经 workspace 覆盖调整；Studio 检查器卡片留待前端跟进。
 
 ### Performance
-- executor 事件泵 reactor 化一期（issue #578）：agent 执行的 stdout 事件泵
-  从 thread-per-execution（每个 velites 子进程一根 Python 泵线程）改为
-  进程级单例 `worker/execution/reactor.py`——一根 selector 线程多路复用
-  全部在跑子进程的 stdout fd（阻塞 select 不持 GIL），就绪 fd 批量读取、
-  分帧后交核数级（2–16）解析线程池做 JSON 解析 + delta 过滤与落盘。
-  每流单写者令牌保证 events.jsonl 与旧泵逐字节同序（回归测试压 200 行
-  突发）。生命周期语义不动：租约/心跳（#352 批量面）、超时治理、#564
-  归属标记全部原样；背压显式化——事件文件写不动时暂停读 fd，子进程
-  管道写满自然减速（agent 减速而非丢事件，设计点 3）。回退开关
-  `AGENT_WORKER_EVENT_PUMP=thread` 恢复每执行一线程；reactor 内部错误
-  fail-closed（注销全部流 + 本进程后续 spawn 回落线程泵）。灰度：先只
-  接管 agent 节点路径（事件量最大面），code 节点 stdout 本就走文件
-  重定向不经泵。
+- artifact 校验回读的信任上报抽检（issue #356 方案 B）：Worker 直传
+  S3 产物的 result 提交路径，第二跳流量（Host 下载重算 sha256）改为
+  确定性抽检——自报 hash 非空且未入样本（按 name/storage_key/size
+  稳定哈希分桶，默认 3%）的信任自报值（HEAD size 核验仍全量）；自报
+  为空或入样本的照旧流式核验。覆盖面仅信任上报通道（未声明产物 +
+  cancelled 路径），声明产物始终全量核验（字节本就要落 job_dir）。
+  **`.gz` 引用永不参与信任捷径**：HEAD 只约束压缩字节，解压上限是
+  流本身的安全属性——gzip 引用永远全量流式核验（解压上限 + hash
+  比对），与抽检比例无关。旋钮
+  `agent_workers.artifact_spot_check_percent`（0 = 裸键全信任
+  kill-switch，100 = #356 前行为），instance settings 管理。
+
+### Observability
+- Worker 侧结构化事件分流落盘（issue #510）：#490 的单行 JSON 事件
+  （claim.attempt / execution.* / http.error）单独落
+  `data/logs/events-<state dir 名>.jsonl`（5MB×3 轮转）——此前只进
+  supervisor 的 500 行内存 deque，满载 1-2 分钟整体滚过一遍，低频异常
+  事件（http.error、claim.backoff）事后完全不可得。面板滚动日志与
+  deque 行为不变；jq/时间线工具可直接消费纯 JSON。
+
+### Maintenance
+- 架构豁免治理收口（issue #456/#522）：刷新 issue-states 后 53 条
+  file_budget 豁免过期（锚定 issue 已关闭但代码未回落——#641/#633/
+  #542/#521 等），逐条核验均为「预算未回落」型，按 #522 纪律统一重锚
+  #456 长期锚点；26 条过松 ceiling 收紧到当前实际行数。
+  `EXEC-CODE-MANIFEST-001` 的 evidence 目标随 #547 测试拆分修正。
+- Worker 并发上限放宽至 2048，双侧收敛为单一常量（issue #657）：
+  1024 档实测健康（RSS ~14.2GB/1024 进程、零重排），护栏挡住了机器
+  吃得下的档位。新 `shared/concurrency_limits.MAX_DYNAMIC_CONCURRENCY`
+  为唯一权威——worker 本地校验（controls/config_validation/hot_reload）
+  与 Host 注册/claim 契约（五处 le= 散落字面量）全部改为引用；契约
+  测试钉住全等（worker 本地 == 每个 Host 契约字段），防单边漂移（单边
+  放宽会让 worker 撞 422）。隐性假设复核：relay 分片准入上限按
+  ceiling/分片大小重估（16→32，2048 档满载心跳分片不再饿死）；
+  load_shedding 与档位无耦合（测试钉住）。DB 层无上限不变；
+  min_protocol_version 不动（值域放宽非语义变化）。2048 是契约值域
+  而非单机目标（外推 ~28GB RSS 超 32GB 物理内存）。
+- `worker/service_bind.py` 豁免收割确认（issue #650）：判定矩阵已随
+  后续重构回落到 15 行有效行（≤30 收割线），file_budget 豁免已不在
+  册——收割条件 1/2（#489 方向二/三）未做、条件 3（docstring 瘦身）
+  被顺带完成，issue 关闭收账。
+
+## [0.7.11] - 2026-09-14
+
+### Changed
+- 版本线对齐（issue #497 同族收尾）：`pyproject.toml` / `uv.lock` 的
+  agent-legion 包版本 0.7.0 → 0.7.11——0.7.1 起版本号只由 git tag 承载、
+  包清单漂移了十个版次，本版随封板对齐，此后每个 0.7.x 同步落版。
+
+### Added
+- 架构预算增长容忍带与豁免限时重签（issue #641）：文件预算检查线放宽为
+  注册表 ceiling + `growth_allowance: 15`——带内超出检查通过、不注册新
+  条目、永不被棘轮吸收（文件收缩后由 staleness 检查自动回收），吸收
+  prettier 80 列重排与小型功能增长；豁免重签在 floor + allowance 带内
+  免仪式直接合法，超出带必须带 `expires: YYYY-MM-DD` 时间盒上抬，到期
+  `check_invariants` 硬失败，续期须重新论证。
+- Workspace 主页顶栏交互收敛（issue #649）：八个平铺入口收敛为
+  运行/暂停 · 添加 · 多选 · 监控 · 更多——运行控件一键切换运行/暂停
+  （状态化显示，Worker 状态列表移入 hover popover）、监控提为一级入口、
+  低频操作（打包/用量/质量/Studio/设置）收入更多菜单的纯 CSS hover 面板。
+
+### Performance
+- executor 生命周期监督事件化（issue #647，#578 二三期）：每个执行一根
+  线程的 `wait_for_exit` 0.5s 轮询循环（高并发档位下轮询线程数与在飞执行
+  数同阶、每执行每秒两次无效唤醒，是单机容量的主要监督税之一）改为进程级
+  单例 `worker/execution/exit_watch.py`——一根 watcher 线程经内核事件
+  （macOS kqueue `EVFILT_PROC`+`NOTE_EXIT` / Linux pidfd+selector；均不可
+  用时回落共享 0.5s tick 的单线程扫描，`AGENT_WORKER_EXIT_WATCH` 显式
+  选模式）监听全部在飞子进程退出，等待方 park 在自己的
+  `threading.Event` 上零唤醒；超时/ownership/cancel/shutdown 检查合并进
+  watcher 的共享 tick（一根线程一次检查替代 N 根线程各自轮询）。唤醒即
+  定谳：所有触发源单调（控制事件 set-once、exit/timeout sticky），被唤
+  醒方按旧优先级序重 derive 判定，无 lost-wakeup；心跳线程先行
+  poll/reap 子进程（zombie-stop）的交错由事件 sticky 性容纳。fail-closed：
+  watcher 死亡立即唤醒全部等待者并退回 `process_lifecycle.poll_wait_locally`
+  （原轮询循环唯一保留副本，仅作降级路径），后续等待落到新单例。判定
+  契约（exit code / 124 超时 / 130 取消 / 1+不上报的租约丢失）与旧版逐
+  分支等价，`run.py` / `code_runner.py` 调用面零改动换接；#564
+  per-execution 互斥锁在事件模型下的等价性有专项测试钉住。
+- executor 执行车道 idle 回收（issue #647 三期）：`ThreadPoolExecutor`
+  线程永不收缩（高并发回落后仍按历史峰值驻留大批 idle worker），换为
+  `worker/execution/execution_lane.py`——按需起线程（上限仍为声明
+  容量：执行等待期仍持线程 park，池小于容量会钳本地并发）、空闲
+  `AGENT_WORKER_LANE_IDLE_TIMEOUT`（默认 30s，env 可调）后自动退出，线程
+  数跟随在飞执行而非历史峰值；submit/shutdown/Future 契约与
+  ThreadPoolExecutor 对齐（哨兵唤醒的快速 shutdown、任务异常不杀 lane
+  线程）。slots 心跳行追加 `lane <n>`（存活线程）与 `exit <mode>`
+  （watcher 内核模式）观测面。
+- **运维提示（监督事件化灰度/回退）**：生产 Worker 升级后观察 slots 心跳
+  行的 `exit <mode>`（kqueue/pidfd/scan）与 `lane <n>` 是否符合预期；
+  异常时 `AGENT_WORKER_EXIT_WATCH=scan` / `AGENT_WORKER_LANE_IDLE_TIMEOUT`
+  为运行时回退开关（详见 docs/agent-worker-deployment.md）。
+
+### Fixed
+- skills 共享 commit 缓存被外部清理后的中毒自愈（issue #638/#639）：
+  `$TMPDIR` 下物化树的 mtime 是 commit 日期，macOS dirhelper 夜间清掉
+  「过期」内容后 `.complete` 标记存活，命中判定把空树当有效缓存返回，
+  验证批量失败且对老 commit 周期性复发。修复：命中追加契约文件三件套
+  校验（缺失按 miss 处理并重建），物化改为 touch 当前时刻（树不再携带
+  旧 commit 日期）、runs_dir 统一绝对路径（跨 cwd 物化不再把缓存写进
+  仓库目录）——默认 `$TMPDIR` 部署从「中毒数天」变为「每晚一次透明
+  重建」。
+- 原生形态 `make prod-up` 拉起 seaweedfs 时凭据与后端 `.env` 脱节（issue
+  #624）：决策脚本读根 `.env`（凭据齐备 → start），但 compose 插值只读
+  `deploy/.env`——后者缺失时凭据插值为空串，seaweedfs 以空凭据生成
+  s3.config，后端用真实凭据连接即鉴权失败，`/api/health` 静默
+  `storage.reachable=false`、prod-up 退出码 0。修复：决策为 start 时
+  `native-prod-up.sh` 把根 `.env` 的 `AGENT_LEGION_S3_*` 凭据经 `env` 前缀
+  注入 compose 子进程（不 export 进脚本环境——Worker 会把 `os.environ`
+  复制给每个 Agent 子进程，S3 管理凭据不得流入 Agent 面），消除两个 env
+  文件的双写要求。
+- `init-worktree.sh` 种子 worker 状态副本的 host_url 无条件写 dev 端口
+  （issue #625）：prod worktree 的后端在 8000（`NATIVE_BACKEND_PORT`），
+  worker 对着没人监听的 8001 静默退避重试。修复：按 worktree 名分流——
+  `prod` worktree 种子 `NATIVE_BACKEND_PORT`（默认 8000），其余保持
+  `DEV_BACKEND_PORT`（默认 8001）。
+- 三个脚本在 git 索引中丢失执行位（issue #623）：`install-deps.sh` /
+  `gate-jobs.sh` / `gate-queue.sh` 为 100644，`make install` 全新 clone
+  必现 Permission denied（core.fileMode=true 的 macOS/Linux；本地 chmod 过
+  的老 checkout 无感）。修复：补执行位（mode 100755），并新增静态门禁
+  检查 `scripts/architecture/script_permissions.py`——所有 tracked `.sh`
+  必须带执行位，防回归。
 
 ## [0.7.10] - 2026-09-11
 
@@ -163,108 +291,59 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   ——30s 客户端默认太贴 90s 租约 TTL，两拍全长等待即耗尽续租预算，
   10s 让失败早暴露、早重试。executor 侧分片与全局限时器不变。
 
-## [0.7.12] - 2026-09-14
-
-执行平面收尾与系统性还债版本（纯后端线，不涉及用户交互）。
+## [0.7.9] - 2026-09-11
 
 ### Fixed
-- supervisor 心跳 relay 的迟到心跳噪音（issue #590）：执行完成提交后、
-  executor 把租约从快照摘除前的 2s 节流窗口内，relay 仍按旧快照给已
-  终结租约发心跳，Host 正确拒绝（not_owned）——0.7.7 后实测放大到
-  3.3k/小时，稀释租约丢失排查的第一信号。修法（分类在 Host 侧 beat
-  事务内完成，零额外 RTT）：批量心跳的行缺失分支加一次同事务主键
-  读——行已 `done`/`cancelled` 即完成态收尾，随响应的 `settled` 列表
-  返回（不发 execution.heartbeat_rejected 事件）；`queued`（重排队）/
-  未知 id / 他人 execution 仍是 lost 照发事件。executor 侧
-  apply_beat_result 把 settled 静默摘除（不设 ownership_lost、不触发
-  cancel），下一拍快照不再携带死租约。
-- rerun 不清对象存储清单导致旧 run 产物残留（issue #508）：rerun 的
-  产物清理只作用于本地 job_dir，`job_artifacts` 清单行无任何删除路径
-  ——重跑中断/再次失败时，job 详情继续展示旧 run 产物（本地 ∪ 清单），
-  单产物读取本地 miss 后落 S3 旧对象，内容也是旧的。修法：
-  `mark_nodes_for_rerun` 在同一事务内删除受影响闭包的清单行（staged
-  输出名集合由 `stage_outputs` 提供，RMW 产物天然排除），三入口（单
-  节点 rerun / run-to / 审批 rework）全部接线；对象本体在提交后
-  best-effort 删除——删前按当前 `job_artifacts` 清单重验：同
-  `storage_key` 已被新 attempt 复现的权威键跳过删除（清理窗口内快速
-  重跑完成的竞态防护），未复现的孤儿键照删，bucket lifecycle 兜底，
-  与 job_deletion 的顺序纪律一致。
-- 三例 CI 负载敏感 flake（issue #453/#496/#525）：#453 publish race
-  的 created_at 次序断言改顺序无关（race 的真实不变量是「谁赢了」）；
-  #496 `binary_resolution` 的值导入 re-export 使 monkeypatch 打不到
-  `code_sandbox` 侧读取点——开发机 data/bin 有 velites 时 fail-closed
-  测试静默失真，改经模块属性访问同源生效；#525 session lifecycle 在
-  text 与 tool_call 两个落库时点之间裸读，补 tool_call 可见性的
-  bounded wait。
-
-### Changed
-- 单条 claim 响应路径退役（issue #547）：batch claim（#546）随 0.7.4
-  发布，pre-#546 Worker 镜像已退出支持窗口。claim 端点固定
-  `BatchAgentClaimResponse`（缺省 limit=1 应答单元素 claims 列表），
-  `ClaimRouteResponse` union 与 route_response_model 豁免随之收割；
-  worker 侧 `ClaimOperations.claim()` 单条方法删除（生产零调用者），
-  `claim_batch` 的混合舰队 shape-sniff 保留。行为收口：单条路径的
-  「提交后 500」容错形态消失——批路径逐条丢弃语义接管（全丢 = 空批
-  204），恢复路径不变（租约到期 sweeper 重排）。
-- velites `~/.velites/config.json` 迁移桥进入 deprecation（issue
-  #602，deprecation 阶段）：直调使用旧文件或 `VELITES_BASE_URL`/
-  `VELITES_API_KEY` env 时 stderr 打迁移指引（指向 models.json 与
-  迁移文档），下一版本周期移除（config.rs + lib.rs gateway 兜底分支）。
-  该文件仅供直调 CLI 兜底、结构上进不了 Worker 模型发现——新用户照旧
-  教程配置后 Worker 完全看不见，表现为「任务无人认领」类困惑。
-
-### Added
-- agent 节点执行超时开放配置（issue #550）：保留执行键
-  `timeout_seconds` 合并进 agent 节点的有效 schema（Agent Definition
-  schema 之下，重声明禁令不变），值走常规解析链（defaults → 节点
-  config → workspace 覆盖 → intake 冻结）；dispatch 以解析后的冻结值
-  写入 manifest `execution.timeout_seconds`，缺省保持产品常量 1800s
-  （合并默认同样取 1800 而非 code 节点的 600——升级不得静默砍掉存量
-  agent 运行的超时预算）。撰写/审核类 agent 跑不完 30 分钟时，运维可
-  经 workspace 覆盖调整；Studio 检查器卡片留待前端跟进。
+- Studio 会话长回复尾部静默截断（issue #563）：流式 text 帧是原地全量
+  快照（seq 不变），断连/被驱逐丢帧后 after_seq 增量补齐永远取不回该行；
+  唯一自愈入口是"SSE 实时收到 turn_end → 全量回取"，但断连空窗恰好盖过
+  turn 结尾时 turn_end 只能经 REST 补齐静默合入，自愈永不触发——截断文本
+  被定妆成"已完成"消息。三层修法：
+  - **前端自愈推广**（useStudioChat/studioChatEvents/studioChatMessages）：
+    terminal 状态行（turn_end/error/session_*）检测统一到 isTerminalStatus
+    ——REST 补齐静默携带的 terminal 事件与 SSE 实时到达的同等触发全量
+    回取 + 画布/Agent 目录查询失效；SSE 重连时本地仍挂着未终结的流式
+    agent text 行即直接全量回取校准。refill 的 terminal 判定在 updater
+    外计算（updater 可能被 React 推迟执行，内赋值会恒 false）、
+    setMessages 改函数式更新（并发 refill 不再互相覆盖基线）。
+  - **EventBus 降触发**（server/app/events/bus.py）：快照语义通道
+    （studio-chat:*）的 QueueFull 从"立即驱逐订阅者"改为"丢最旧腾位投递
+    最新"（流式帧是全量快照，丢中间帧无损），连续溢出
+    OVERFLOW_EVICT_THRESHOLD=64（真死连接）才驱逐——驱逐引发的断流重连
+    正是截断的主要触发形态。增量语义通道（workspace job 补丁等 revision
+    水位消费方）保持立即驱逐的旧行为：断流 → SSE 重连 + loadSnapshot 是
+    既有的无损自愈路径，静默丢帧反而让客户端滞留旧 revision。
+  - **帧体积缩减**（studio_chat/store.py）：publish 的 json.dumps 补
+    `ensure_ascii=False`，CJK 文本不再 \uXXXX 转义（帧体积减半），放慢订阅
+    队列的积压速度。
+- Studio 会话闲置后 MCP 工具通道静默死亡（issue #558）：run token 固定
+  2h TTL、续期由对话活动驱动，闲置过期后 agent 的 MCP headers 无法中途
+  重指（协议限制），工具调用全 401 → client "Not connected"；而聊天主链路
+  （ACP 进程）毫发无伤，会话停在 idle——界面上一个"看起来活着"但工具
+  全废的会话，且 resume 只接受 closed/error，恢复入口不可达。修法：
+  #411 keepalive 的 dead 分支（首个 tool_call 检出 token 死亡）把会话升级
+  为 status=error 后追加 `run_token_invalidated` 通知
+  （`server/app/studio_chat/session_escalation.py`，守卫同 on_exit 的
+  final_statuses：closed/error/starting 不越权盖章，SSE session 快照同步
+  发布；升级先于通知且吞异常——DB 故障时干净重试、不产生重复通知），
+  既有的 ResumeBar /「继续对话」恢复链（新 token + 上下文保留）直接
+  生效；jobDiagnosis 排查面板补挂 ResumeBar（此前 error 会话只有禁用
+  文案，只能废弃）；通知与前端兜底文案改为指向「继续对话」。
 
 ### Performance
-- artifact 校验回读的信任上报抽检（issue #356 方案 B）：Worker 直传
-  S3 产物的 result 提交路径，第二跳流量（Host 下载重算 sha256）改为
-  确定性抽检——自报 hash 非空且未入样本（按 name/storage_key/size
-  稳定哈希分桶，默认 3%）的信任自报值（HEAD size 核验仍全量）；自报
-  为空或入样本的照旧流式核验。覆盖面仅信任上报通道（未声明产物 +
-  cancelled 路径），声明产物始终全量核验（字节本就要落 job_dir）。
-  **`.gz` 引用永不参与信任捷径**：HEAD 只约束压缩字节，解压上限是
-  流本身的安全属性——gzip 引用永远全量流式核验（解压上限 + hash
-  比对），与抽检比例无关。旋钮
-  `agent_workers.artifact_spot_check_percent`（0 = 裸键全信任
-  kill-switch，100 = #356 前行为），instance settings 管理。
-
-### Observability
-- Worker 侧结构化事件分流落盘（issue #510）：#490 的单行 JSON 事件
-  （claim.attempt / execution.* / http.error）单独落
-  `data/logs/events-<state dir 名>.jsonl`（5MB×3 轮转）——此前只进
-  supervisor 的 500 行内存 deque，满载 1-2 分钟整体滚过一遍，低频异常
-  事件（http.error、claim.backoff）事后完全不可得。面板滚动日志与
-  deque 行为不变；jq/时间线工具可直接消费纯 JSON。
-
-### Maintenance
-- 架构豁免治理收口（issue #456/#522）：刷新 issue-states 后 53 条
-  file_budget 豁免过期（锚定 issue 已关闭但代码未回落——#641/#633/
-  #542/#521 等），逐条核验均为「预算未回落」型，按 #522 纪律统一重锚
-  #456 长期锚点；26 条过松 ceiling 收紧到当前实际行数。
-  `EXEC-CODE-MANIFEST-001` 的 evidence 目标随 #547 测试拆分修正。
-- Worker 并发上限放宽至 2048，双侧收敛为单一常量（issue #657）：
-  1024 档实测健康（RSS ~14.2GB/1024 进程、零重排），护栏挡住了机器
-  吃得下的档位。新 `shared/concurrency_limits.MAX_DYNAMIC_CONCURRENCY`
-  为唯一权威——worker 本地校验（controls/config_validation/hot_reload）
-  与 Host 注册/claim 契约（五处 le= 散落字面量）全部改为引用；契约
-  测试钉住全等（worker 本地 == 每个 Host 契约字段），防单边漂移（单边
-  放宽会让 worker 撞 422）。隐性假设复核：relay 分片准入上限按
-  ceiling/分片大小重估（16→32，2048 档满载心跳分片不再饿死）；
-  load_shedding 与档位无耦合（测试钉住）。DB 层无上限不变；
-  min_protocol_version 不动（值域放宽非语义变化）。2048 是契约值域
-  而非单机目标（外推 ~28GB RSS 超 32GB 物理内存）。
-- `worker/service_bind.py` 豁免收割确认（issue #650）：判定矩阵已随
-  后续重构回落到 15 行有效行（≤30 收割线），file_budget 豁免已不在
-  册——收割条件 1/2（#489 方向二/三）未做、条件 3（docstring 瘦身）
-  被顺带完成，issue 关闭收账。
+- executor 事件泵 reactor 化一期（issue #578）：agent 执行的 stdout 事件泵
+  从 thread-per-execution（每个 velites 子进程一根 Python 泵线程）改为
+  进程级单例 `worker/execution/reactor.py`——一根 selector 线程多路复用
+  全部在跑子进程的 stdout fd（阻塞 select 不持 GIL），就绪 fd 批量读取、
+  分帧后交核数级（2–16）解析线程池做 JSON 解析 + delta 过滤与落盘。
+  每流单写者令牌保证 events.jsonl 与旧泵逐字节同序（回归测试压 200 行
+  突发）。生命周期语义不动：租约/心跳（#352 批量面）、超时治理、#564
+  归属标记全部原样；背压显式化——事件文件写不动时暂停读 fd，子进程
+  管道写满自然减速（agent 减速而非丢事件，设计点 3）。回退开关
+  `AGENT_WORKER_EVENT_PUMP=thread` 恢复每执行一线程；reactor 内部错误
+  fail-closed（注销全部流 + 本进程后续 spawn 回落线程泵）。灰度：先只
+  接管 agent 节点路径（事件量最大面），code 节点 stdout 本就走文件
+  重定向不经泵。
 
 ## [0.7.8] - 2026-09-10
 

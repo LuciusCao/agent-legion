@@ -1,0 +1,27 @@
+.root {
+  position: relative;
+}
+
+/* 连接异常点挂在图标自身的角上。 */
+.iconWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.popover {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 4px);
+  right: 0;
+  display: none;
+  min-width: 320px;
+  padding: 12px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.root:focus-within .popover,
+.root:hover .popover {
+  display: block;
+}
