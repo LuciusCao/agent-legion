@@ -63,7 +63,8 @@ def _build_server(monkeypatch, calls: list[dict], config: McpServerConfig = _CON
 
 
 def _run_tool(server: FastMCP, name: str, args: dict) -> str:
-    blocks, _result = asyncio.run(server.call_tool(name, args))
+    # structured_output=False (#660): call_tool returns bare content blocks.
+    blocks = asyncio.run(server.call_tool(name, args))
     return "".join(block.text for block in blocks if block.type == "text")
 
 

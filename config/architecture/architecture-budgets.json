@@ -1137,6 +1137,7 @@
     "server/app/mcp_server/job_tools.py": 63,
     "server/app/mcp_server/preview_tools.py": 37,
     "server/app/mcp_server/prompt_tools.py": 32,
+    "server/app/mcp_server/schema_slim.py": 27,
     "server/app/mcp_server/server.py": 103,
     "server/app/mcp_server/shared_tools.py": 29,
     "server/app/mcp_server/skill_tools.py": 42,

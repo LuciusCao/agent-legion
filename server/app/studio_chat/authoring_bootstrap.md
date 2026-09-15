@@ -19,7 +19,9 @@ and refine workflows. Rules for this session:
 2. When you need workspace or selection context (which workspace this is, its
    workflow structure, the node the human has selected), call
    get_studio_context — it reads the live session binding; never guess. For
-   from-scratch workflow authoring, read get_authoring_guide first.
+   from-scratch workflow authoring, read get_authoring_guide first (it
+   defaults to the full text; pass a section key — tool-map, flow, yaml,
+   capabilities, agents, skills, errors — to re-read one chapter later).
 3. Produce drafts only: workflow YAML drafts, node code drafts, agent
    definition drafts, skill version tags (the skill lock never moves), and
    preview panel drafts (publishing a panel is always the human's click).

@@ -22,30 +22,22 @@ ClientFactory = Callable[[], Awaitable[tuple[McpServerConfig, ToolClient]]]
 
 
 def register_shared_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_shared_materials(workspace_id: str) -> str:
-        """Read a workspace's shared skill materials: the parsed
-        _shared/map.json (materials -> skills mapping) plus the readable
-        text files under _shared/references and _shared/scripts. A
-        workspace without _shared returns the structured empty state
-        {"map": null, "files": []} — that is the signal to author them
-        with save_shared_materials, not an error."""
+        """Read the workspace's shared skill materials (_shared/map.json +
+        references/ + scripts/ texts). No _shared → {"map": null, "files":
+        []} — the signal to author them, not an error."""
         _, client = await client_factory()
         return await client.call("GET", f"/workspaces/{quote(workspace_id, safe='')}/skills-shared")
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def save_shared_materials(workspace_id: str, files: list[dict[str, str]]) -> str:
-        """Author a workspace's shared skill materials under _shared/
-        (map.json + references/ + scripts/). map.json is just one of the
-        files — you author its JSON: {"version": 1, "materials":
-        [{"source": "references/style.md", "skills": ["skill-a"]}]}.
-        Sources must stay under references/ or scripts/; each entry maps a
-        source to the skills (second key segment) that receive it. Every
-        save_skill_version of a mapped skill then copies the shared
-        sources into that skill's repo at the SAME relative path and
-        includes them in the commit — never hand-supply a mapped path in
-        the save payload (the shared copy wins; the save rejects with an
-        error listing the conflicting paths)."""
+        """Author the workspace's shared materials under _shared/ (map.json +
+        references/ + scripts/); map.json is just one of the files — you
+        author its JSON. save_skill_version of a mapped skill syncs the
+        shared sources into that skill's repo — never hand-supply a mapped
+        path in the save payload (the shared copy wins; the save rejects
+        it)."""
         _, client = await client_factory()
         body = {"files": files}
         return await client.call(
