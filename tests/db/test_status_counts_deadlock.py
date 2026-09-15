@@ -40,11 +40,13 @@ in these tests' shapes B's stmt1 blocks on A's ws-gate advisory lock
 before touching any counter row or dimension lock; when A commits, B
 proceeds and both transactions complete. The gate cannot serialise the
 statement's own jobs ROW locks (AFTER triggers take the advisory after
-the row locks) — an opposite-order pair of same-workspace multi-row
-writers can still ring through the (row lock × advisory) edge; that
-residual shape is pinned by tests/services/test_run_service_chunking.py
-'s forced-interleave deadlock-recovery test, and production writers are
-ordered so the pair does not occur on live paths.
+the row locks) — any same-workspace writer that takes the gate with one
+jobs statement and executes a second jobs DML can ring against a
+single-row counterparty holding the needed row lock (writer order is
+irrelevant; the residual is LIVE in production shapes, bounded by
+inter-statement milliseconds); that residual shape is pinned by
+tests/services/test_run_service_chunking.py's forced-interleave
+deadlock-recovery test.
 The test drives exactly that ordering: B blocks on the advisory lock while
 A's later statements run; A commits (releasing the lock); B finishes and
 commits. ``lock_timeout`` bounds every wait so a regression in the fix

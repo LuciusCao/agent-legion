@@ -484,12 +484,16 @@ def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings
 
     本测试用 pg_locks 轮询**强制**该交错（Event 同步不保证 B 先阻塞，
     A 抢跑提交则环不闭合——此前版本的「串行化」断言正是这样假通过
-    的），钉住结果契约：恰一个 40P01 受害者、其事务干净回滚（触发器
-    侧写随事务回滚，计数与 group-by 全等）、幸存者两行 UPDATE 落库、
-    无重复无丢行。生产面的多语句 jobs 写者全部升序遍历（五路 sweep
-    + finish batch + claim 的 (workspace, run, job) 序），同 workspace
-    反序交错不出现在生产代码——本形态是 40P01 重试基建（claim_retry、
-    db/retry）吸收的并发事实。
+    的），钉住结果契约：恰一个 40P01 受害者、其事务干净回滚（受害者
+    的 title 写入随事务回滚，两行最终均为幸存者所写）、幸存者两行
+    UPDATE 落库、无重复无丢行。注意本形状的语句只改 title（状态不
+    变），触发器净 delta 全为零——文末的计数全等断言在此形状下不构
+    成回滚证据（留作回归哨兵），回滚证据是 title 断言；真正的计数
+    侧回滚钉子在 tests/db/test_status_counts_deadlock.py（状态迁移
+    形状）。残留环的对手方只需单行写者、与顺序无关（见 v82 模块
+    docstring 残留 (b)），生产两类形状并存、窗口为批内语句间毫秒
+    级——本形态是 40P01 重试基建（claim_retry、db/retry）吸收的
+    并发事实。
     """
     _workspace(job_db, settings)
     _insert_materials(job_db, 2)
@@ -547,9 +551,16 @@ def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings
     deadline = time.time() + 10
     while time.time() < deadline:
         with job_db.connect() as poll:
+            # Scoped to THIS workspace's gate key: pg_locks is a
+            # database-level view, and an xdist sibling test blocking on a
+            # different workspace's class-82 gate would otherwise satisfy
+            # the predicate and release w1's gate before w2 is actually
+            # blocked (a cross-test flake vector).
             n = poll.execute(
                 "select count(*) from pg_locks"
                 " where locktype='advisory' and classid=82 and not granted"
+                " and objid = hashtext('ws:' || %s)",
+                (WORKSPACE_ID,),
             ).fetchone()[0]
         if n:
             w2_blocked.set()

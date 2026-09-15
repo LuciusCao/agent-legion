@@ -31,8 +31,9 @@ in a TWO-LEVEL hierarchy —
 Because every writer — whatever its statement mix, business order, or
 family firing order — takes the ws: level before any dimension key of that
 workspace, a "holds run:r while waiting on ws:x" state is unreachable
-(anyone holding run:r passed ws:x first), and same-workspace writers
-serialise at the ws: gate before any counter row or dimension lock. The
+(anyone holding run:r passed ws:x first), and same-workspace writers'
+COUNTER-ROW access serialises at the ws: gate (the gate cannot order the
+statements' own jobs row locks — see residual (b)). The
 two-int lock class id 82 dedicates the keyspace to this migration: the
 only other two-int advisory user in the codebase (the studio
 publish-request handshake) uses class id 416429, so class 82 is exclusive
@@ -58,15 +59,28 @@ Properties relied upon:
   disciplines), so the writer pair this needs does not exist in
   production code.
   (b) row-lock × advisory edge: these are AFTER triggers, so the ws
-  advisory lock is taken AFTER the statement's jobs row locks — a
-  transaction B that updated job-b (holding its row lock) and waits on
-  the ws lock, while transaction A (holding the ws lock) next wants
-  job-b's row lock, closes a ring. Same-workspace opposite-order
-  multi-row writers are the shape; production writers are either
-  single-row-per-statement or ordered, so the pair needs opposite-order
-  updates of the same rows — not present in production paths. Both
-  windows are absorbed by PG's deadlock detector plus the 40P01 retry
-  liveness (claim_retry, db/retry); the airtight fix (BEFORE-trigger
+  advisory lock is taken AFTER the statement's jobs row locks. The ring
+  closes whenever one transaction, having taken the ws gate with its
+  first jobs statement, executes a SECOND jobs DML on a row whose lock
+  is held by a concurrent transaction currently waiting on that same
+  gate — the counterparty can be a single-statement single-row writer;
+  writer ORDER on either side is irrelevant to closure (verified
+  experimentally: an ascending multi-statement writer vs. one
+  single-row update rings). Production has both shapes (finish
+  batches / sweeps / claim batches are the multi-statement side; every
+  single-row jobs update — one claim promote, one mark_done, one rerun
+  reset — is a potential counterparty), so this window is LIVE, not
+  theoretical: it is bounded by the milliseconds between the
+  multi-statement writer's statements and absorbed by PG's deadlock
+  detector plus the 40P01 retry liveness (claim_retry, db/retry, the
+  sweepers' next-tick requeue).
+  Versus v77, precisely: v77's counter-row locks are per (key, status),
+  so it rang only when the two writers' STATUS sets overlapped; the ws
+  gate is per workspace regardless of status, so v82 serialises MORE
+  writers (the same-workspace same-status rings that motivated #659)
+  but also blocks — and can ring — on status-DISJOINT pairs that v77
+  let through concurrently (verified: disjoint-status pair commits
+  clean on v77, rings on v82). The airtight fix (BEFORE-trigger
   locking or statement-level aggregation through one jobs UPDATE) is a
   schema-level change out of scope here.
 - All three arms' delta loops keep v77's ``order by`` unchanged
