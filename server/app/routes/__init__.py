@@ -37,6 +37,10 @@ from .workspace_agent_catalog import create_workspace_agent_catalog_router
 from .workspace_agent_routes import create_workspace_agent_routes_router
 from .workspace_configuration import create_workspace_configuration_router
 from .workspace_settings import create_workspace_settings_router
+from .workspace_shared_materials import create_workspace_shared_materials_router
+from .workspace_shared_materials_propagate import (
+    create_workspace_shared_materials_propagate_router,
+)
 from .workspaces import create_workspaces_router
 
 
@@ -123,6 +127,8 @@ def create_router(deps: RouterDeps) -> APIRouter:
     )
     secured(agent_catalog_router)
     secured(create_workspace_agent_routes_router(deps.job_db))
+    secured(create_workspace_shared_materials_router(deps.job_db, deps.settings))
+    secured(create_workspace_shared_materials_propagate_router(deps.job_db, deps.settings))
     # Preview panels (#328): the published-bundle read is member-level (job
     # detail iframe host); state/publish/archive carry their own Studio
     # authoring + reject_studio_agent_scope guards inside the router.

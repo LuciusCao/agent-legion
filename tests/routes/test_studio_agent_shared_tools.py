@@ -386,3 +386,58 @@ def test_put_rejects_map_sources_missing_from_the_full_state_payload(
             "references/prompt-style.md" in e["error"] and "missing" in e["error"] for e in errors
         )
         assert not (shared_home / "_shared").exists()
+
+
+def test_propagate_via_scoped_token(client_factory, job_db, shared_home, tmp_path) -> None:
+    """#673: the MCP sync_shared_materials tool's endpoint — same guards as
+    the rest of the surface, per-skill results, DB skill lock untouched."""
+    import os
+    import subprocess
+
+    def git(repo: Path, *args: str) -> None:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(
+            GIT_AUTHOR_NAME="t",
+            GIT_AUTHOR_EMAIL="t@t",
+            GIT_COMMITTER_NAME="t",
+            GIT_COMMITTER_EMAIL="t@t",
+        )
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=env)
+
+    with client_factory(fresh=True) as client:
+        _create_workspace(client)
+        scoped = _scoped(client, job_db)
+        repo = shared_home / "write-script"
+        repo.mkdir(parents=True)
+        git(repo, "init", "-q")
+        (repo / "references").mkdir()
+        (repo / "scripts").mkdir()
+        (repo / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+        (repo / "references" / "output-contract.md").write_text("# c\n", encoding="utf-8")
+        (repo / "references" / "prompt-style.md").write_text("# old\n", encoding="utf-8")
+        (repo / "scripts" / "validate_output.py").write_text(
+            "raise SystemExit(0)\n", encoding="utf-8"
+        )
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "init", "--no-gpg-sign")
+        git(repo, "tag", "v1.0.0")
+
+        shared = shared_home / "_shared"
+        (shared / "references").mkdir(parents=True)
+        (shared / "map.json").write_text(json.dumps(_MAP), encoding="utf-8")
+        (shared / "references" / "prompt-style.md").write_text("# new\n", encoding="utf-8")
+
+        response = scoped.post(f"{_TOOLS}/workspaces/{_WS}/skills-shared/propagate", json={})
+        assert response.status_code == 200, response.text
+        (entry,) = response.json()["results"]
+        assert entry["skill"] == "write-script"
+        assert entry["status"] == "synced"
+        assert entry["tag"] == "v1.0.1"
+
+        # Unknown workspace 404; a token bound elsewhere 403.
+        assert (
+            scoped.post(
+                f"{_TOOLS}/workspaces/ws-missing/skills-shared/propagate", json={}
+            ).status_code
+            == 404
+        )

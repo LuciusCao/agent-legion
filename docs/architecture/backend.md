@@ -226,6 +226,7 @@ server/app/
 | GET | `/studio-agent/tools/publish-requests/{request_id}` | `get_publish_request_status` | routes/studio_agent_publish_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared` | `get_shared_materials` | routes/studio_agent_shared_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared` | `save_shared_materials` | routes/studio_agent_shared_tools.py |
+| POST | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared/propagate` | `propagate_shared_materials_endpoint` | routes/studio_agent_shared_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/skills` | `create_skill` | routes/studio_agent_skill_creation_tools.py |
 | GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
@@ -305,6 +306,9 @@ server/app/
 | DELETE | `/workspaces/{workspace_id}/secrets/{name}` | `delete_workspace_secret` | routes/workspace_secrets.py |
 | GET | `/workspaces/{workspace_id}/settings` | `get_workspace_settings` | routes/workspace_settings.py |
 | PATCH | `/workspaces/{workspace_id}/settings/{section}` | `update_workspace_settings_section` | routes/workspace_settings.py |
+| GET | `/workspaces/{workspace_id}/skills-shared` | `get_shared_materials` | routes/workspace_shared_materials.py |
+| GET | `/workspaces/{workspace_id}/skills-shared/file` | `get_shared_material_file` | routes/workspace_shared_materials.py |
+| POST | `/workspaces/{workspace_id}/skills-shared/propagate` | `propagate_shared` | routes/workspace_shared_materials_propagate.py |
 | GET | `/workspaces` | `list_workspaces` | routes/workspaces.py |
 | POST | `/workspaces` | `create_workspace` | routes/workspaces.py |
 | GET | `/workspaces/{workspace_id}` | `get_workspace` | routes/workspaces.py |
@@ -648,6 +652,15 @@ server/app/
 | WorkspaceSecretsResponse | BaseModel | secrets: list[WorkspaceSecretMetadata] | app/routes/workspace_secrets.py |
 | WorkspaceSecretResponse | BaseModel | secret: WorkspaceSecretMetadata | app/routes/workspace_secrets.py |
 | WorkspaceSecretDeleteResponse | BaseModel | deleted: str | app/routes/workspace_secrets.py |
+| SharedMaterialSkillDrift | BaseModel | skill: str, status: DriftStatus | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialMapping | BaseModel | source: str, skills: list[SharedMaterialSkillDrift] | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialsMapView | BaseModel | version: int, materials: list[SharedMaterialMapping] | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialFileEntry | BaseModel | path: str, size: int, modified_at: str | app/routes/workspace_shared_materials_contracts.py |
+| WorkspaceSharedMaterialsResponse | BaseModel | workspace_id: str, map: SharedMaterialsMapView | None, files: list[SharedMate... | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialFileContent | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialsPropagateRequest | BaseModel | sources: list[str] | None | app/routes/workspace_shared_materials_propagate_contracts.py |
+| SharedMaterialPropagateSkillResult | BaseModel | skill: str, status: PropagateStatus, tag: str | None, detail: str | None, syn... | app/routes/workspace_shared_materials_propagate_contracts.py |
+| SharedMaterialsPropagateResponse | BaseModel | workspace_id: str, results: list[SharedMaterialPropagateSkillResult] | app/routes/workspace_shared_materials_propagate_contracts.py |
 | JobDeleteResult | TypedDict | job_id: str, operation: str, status: str, reason_code: str | None, message: s... | app/services/job_deletion.py |
 | LogEntry | TypedDict | type: str, title: str, detail: str, truncated: bool | app/services/job_log_renderer.py |
 | JobOperationResult | TypedDict | job_id: str, operation: str, status: str, node_key: str | None, reason_code: ... | app/services/job_operation_error.py |

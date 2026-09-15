@@ -634,7 +634,7 @@ def test_static_config_without_session_skips_session_tools() -> None:
     # "unavailable"); the callable-resolver HTTP transport keeps them.
     server = create_mcp_server(_CONFIG)
     tools = server._tool_manager._tools  # pinned mcp==1.29 internals
-    assert len(tools) == 32
+    assert len(tools) == 33
     assert "get_studio_context" not in tools
     assert "get_job_context" not in tools
 
@@ -642,7 +642,7 @@ def test_static_config_without_session_skips_session_tools() -> None:
         McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
     )
     bound_tools = bound._tool_manager._tools
-    assert len(bound_tools) == 34
+    assert len(bound_tools) == 35
 
 
 def test_listing_has_no_output_schema_and_slim_input_schema() -> None:

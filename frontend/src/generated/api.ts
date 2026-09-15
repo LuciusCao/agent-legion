@@ -1512,6 +1512,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills-shared/propagate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Propagate Shared Materials Endpoint */
+    post: operations['propagate_shared_materials_endpoint_api_studio_agent_tools_workspaces__workspace_id__skills_shared_propagate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active': {
     parameters: {
       query?: never
@@ -2778,6 +2795,57 @@ export interface paths {
     head?: never
     /** Update Workspace Settings Section */
     patch: operations['update_workspace_settings_section_api_workspaces__workspace_id__settings__section__patch']
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/skills-shared': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Shared Materials */
+    get: operations['get_shared_materials_api_workspaces__workspace_id__skills_shared_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/skills-shared/file': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Shared Material File */
+    get: operations['get_shared_material_file_api_workspaces__workspace_id__skills_shared_file_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/skills-shared/propagate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Propagate Shared */
+    post: operations['propagate_shared_api_workspaces__workspace_id__skills_shared_propagate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
     trace?: never
   }
   '/api/workspaces/{workspace_id}/stats': {
@@ -5870,12 +5938,93 @@ export interface components {
        */
       truncated: boolean
     }
+    /** SharedMaterialFileContent */
+    SharedMaterialFileContent: {
+      /** Content */
+      content: string
+      /** Path */
+      path: string
+      /** Size */
+      size: number
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated: boolean
+    }
+    /**
+     * SharedMaterialFileEntry
+     * @description Listing form — no content; the UI fetches single files on demand.
+     */
+    SharedMaterialFileEntry: {
+      /** Modified At */
+      modified_at: string
+      /** Path */
+      path: string
+      /** Size */
+      size: number
+    }
     /** SharedMaterialFileWrite */
     SharedMaterialFileWrite: {
       /** Content */
       content: string
       /** Path */
       path: string
+    }
+    /** SharedMaterialMapping */
+    SharedMaterialMapping: {
+      /** Skills */
+      skills: components['schemas']['SharedMaterialSkillDrift'][]
+      /** Source */
+      source: string
+    }
+    /** SharedMaterialPropagateSkillResult */
+    SharedMaterialPropagateSkillResult: {
+      /** Detail */
+      detail?: string | null
+      /** Skill */
+      skill: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'synced' | 'skipped' | 'failed'
+      /** Synced Files */
+      synced_files?: string[]
+      /** Tag */
+      tag?: string | null
+    }
+    /** SharedMaterialSkillDrift */
+    SharedMaterialSkillDrift: {
+      /** Skill */
+      skill: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'synced' | 'pending_sync' | 'missing_in_skill' | 'skill_not_found'
+    }
+    /** SharedMaterialsMapView */
+    SharedMaterialsMapView: {
+      /** Materials */
+      materials?: components['schemas']['SharedMaterialMapping'][]
+      /** Version */
+      version: number
+    }
+    /**
+     * SharedMaterialsPropagateRequest
+     * @description ``sources: null`` (or omitted) propagates every mapped entry.
+     */
+    SharedMaterialsPropagateRequest: {
+      /** Sources */
+      sources?: string[] | null
+    }
+    /** SharedMaterialsPropagateResponse */
+    SharedMaterialsPropagateResponse: {
+      /** Results */
+      results?: components['schemas']['SharedMaterialPropagateSkillResult'][]
+      /** Workspace Id */
+      workspace_id: string
     }
     /**
      * SharedMaterialsResponse
@@ -7824,6 +7973,19 @@ export interface components {
       previewHidden?: string[] | null
       /** Workflowkey */
       workflowKey?: string | null
+    }
+    /**
+     * WorkspaceSharedMaterialsResponse
+     * @description ``map: null`` + empty ``files`` is the structured empty state for a
+     *     workspace that never opted into ``_shared`` (same semantics as the
+     *     studio-agent surface).
+     */
+    WorkspaceSharedMaterialsResponse: {
+      /** Files */
+      files?: components['schemas']['SharedMaterialFileEntry'][]
+      map?: components['schemas']['SharedMaterialsMapView'] | null
+      /** Workspace Id */
+      workspace_id: string
     }
     /** WorkspaceStatsResponse */
     WorkspaceStatsResponse: {
@@ -10846,6 +11008,41 @@ export interface operations {
       }
     }
   }
+  propagate_shared_materials_endpoint_api_studio_agent_tools_workspaces__workspace_id__skills_shared_propagate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SharedMaterialsPropagateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedMaterialsPropagateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_active_revision_api_studio_agent_tools_workspaces__workspace_id__workflow_active_get: {
     parameters: {
       query?: never
@@ -13756,6 +13953,105 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceSettingsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_shared_materials_api_workspaces__workspace_id__skills_shared_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceSharedMaterialsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_shared_material_file_api_workspaces__workspace_id__skills_shared_file_get: {
+    parameters: {
+      query: {
+        path: string
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedMaterialFileContent']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  propagate_shared_api_workspaces__workspace_id__skills_shared_propagate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SharedMaterialsPropagateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedMaterialsPropagateResponse']
         }
       }
       /** @description Validation Error */
