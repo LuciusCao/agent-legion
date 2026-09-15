@@ -163,3 +163,40 @@ def test_top_level_edit_after_echo_round_trip_takes_effect() -> None:
     # 节点真实覆盖（provider）不受顶层改动影响；其继承来的 model 跟随顶层。
     assert reloaded.nodes["agent_node"].execution.provider == "node-provider"
     assert reloaded.nodes["agent_node"].execution.model == "new-model"
+
+
+def test_top_level_execution_does_not_bake_into_approval_node() -> None:
+    """回归（本地发布版实测踩坑）：顶层默认烘焙进 approval 节点后，
+    asdict 快照带上非空 execution，下次 from_dict 加载被
+    must-not-declare-execution 规则拒绝——发布成功、读取 500。"""
+    raw = {
+        "key": "wf",
+        "label": "WF",
+        "schema_version": 2,
+        "execution": {"provider": "top-provider", "model": "top-model"},
+        "nodes": {
+            "entry": {"type": "start", "label": "入口"},
+            "write": {"label": "写稿", "capability": "write_script", "outputs": ["script.md"]},
+            "gate": {"type": "approval", "label": "审批", "inputs": ["script.md"]},
+        },
+        "edges": [
+            {"from": "entry", "to": "write"},
+            {"from": "write", "to": "gate"},
+        ],
+    }
+    definition = workflow_definition_from_mapping(raw)
+
+    gate = definition.nodes["gate"]
+    assert gate.execution.provider == ""
+    assert gate.execution.model == ""
+    # 非 approval 节点照常吃默认。
+    assert definition.nodes["write"].execution.provider == "top-provider"
+
+    # 快照必须能原样重载——正是踩坑的读路径（发布存库 → active 读取）。
+    # 走与存库一致的序列化链路（asdict + JSON），而非裸 asdict（tuple 形态）。
+    import json
+
+    from server.app.workflows.revision_format import serialize_definition
+
+    reloaded = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
+    assert reloaded.nodes["gate"].execution.provider == ""
