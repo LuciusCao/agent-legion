@@ -317,9 +317,16 @@ def test_trigger_function_carries_the_advisory_lock() -> None:
     ):
         src = by_name[fn]
         assert "pg_advisory_xact_lock" in src, f"{fn} lost the advisory lock"
-        # Two-int class form: the dedicated lock class 82 structurally
-        # separates this keyspace from every single-bigint advisory user.
-        assert "pg_advisory_xact_lock(82," in src, f"{fn} lost its lock class id"
+        # Two-int class form: the dedicated lock classes structurally
+        # separate this keyspace from every single-bigint advisory user,
+        # and the ws (82) / run (83) levels from EACH OTHER — a shared
+        # class id would let a 32-bit hashtext collision collapse the
+        # hierarchy onto one lock (codex review round).
+        assert "pg_advisory_xact_lock(82," in src, f"{fn} lost the ws lock class id"
+        if prefix == "run:":
+            assert "pg_advisory_xact_lock(83, hashtext('run:'" in src, (
+                f"{fn} lost the dimension lock class id 83"
+            )
         assert f"hashtext('{prefix}'" in src, f"{fn} lost its '{prefix}' keyspace prefix"
         # The prologue precedes every branch: the lock loop sits before the
         # first counter write.

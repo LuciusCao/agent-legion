@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY, load_config
+from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
+from worker.runtime.controls import load_config
 
 
 @dataclass(frozen=True)
@@ -41,10 +42,19 @@ def claim_availability(
 def load_transfer_controls(path: Path) -> TransferControls:
     config = load_config(path)
     backlog = config.get("upload_backlog_limit")
+    # #662 review：上限 = 默认背压门的 2×池容量。registry 的插入序跨拍
+    # 稳定，relay 分片准入（relay_thread_limiter）只覆盖默认面（执行双
+    # 池 + 上传 2×池）——超上限的积压会让尾部分片每拍被同一前缀挤掉、
+    # 持续丢拍到租约过期，而非注释曾称的「下一拍重试」。收紧可自由；
+    # 抬高须连同 MAX_INFLIGHT_SHARDS 与其契约测试同改。
+    backlog_cap = 2 * MAX_DYNAMIC_CONCURRENCY
     if backlog is not None and (
-        isinstance(backlog, bool) or not isinstance(backlog, int) or backlog < 1
+        isinstance(backlog, bool) or not isinstance(backlog, int) or not 1 <= backlog <= backlog_cap
     ):
-        raise ValueError("upload_backlog_limit 必须是正整数")
+        raise ValueError(
+            f"upload_backlog_limit 必须是 1 到 {backlog_cap} 的整数"
+            "（relay 分片准入覆盖面：2×并发上限；抬高须同步扩 relay_thread_limiter）"
+        )
     timeout = float(config.get("transfer_timeout_seconds", 120))
     if timeout <= 0:
         raise ValueError("transfer_timeout_seconds 必须是正数")

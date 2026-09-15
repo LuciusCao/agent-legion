@@ -23,10 +23,10 @@ in a TWO-LEVEL hierarchy —
 1. workspace level: ``pg_advisory_xact_lock(82, hashtext('ws:' ||
    <workspace_id>))`` for every distinct workspace in the statement's
    transition tables, sorted;
-2. dimension level: ``pg_advisory_xact_lock(82, hashtext('<family>:'
+2. dimension level: ``pg_advisory_xact_lock(83, hashtext('<family>:'
    || <key>))`` for every distinct counter key, sorted (``run:`` for the
-   run twin; the workspace twin's dimension key IS the ws: keyspace —
-   re-entrant, free).
+   run twin; the workspace twin's dimension key IS the ws: keyspace at
+   class 82 — re-entrant, free).
 
 Because every writer — whatever its statement mix, business order, or
 family firing order — takes the ws: level before any dimension key of that
@@ -34,11 +34,13 @@ workspace, a "holds run:r while waiting on ws:x" state is unreachable
 (anyone holding run:r passed ws:x first), and same-workspace writers'
 COUNTER-ROW access serialises at the ws: gate (the gate cannot order the
 statements' own jobs row locks — see residual (b)). The
-two-int lock class id 82 dedicates the keyspace to this migration: the
-only other two-int advisory user in the codebase (the studio
-publish-request handshake) uses class id 416429, so class 82 is exclusive
-to the counter triggers — a future two-int user must pick a different id
-(pinned by the shape test).
+two lock levels use DEDICATED two-int class ids — 82 for the ws level,
+83 for the run dimension (codex review: a single class id let a
+hashtext('ws:x') × hashtext('run:y') 32-bit collision collapse the two
+levels onto one lock, re-opening a ring through the supposed hierarchy).
+The only other two-int advisory user in the codebase (the studio
+publish-request handshake) uses class id 416429; a future two-int user
+must pick a different id (pinned by the shape test).
 
 Properties relied upon:
 
@@ -140,7 +142,7 @@ begin
       perform pg_advisory_xact_lock(82, hashtext('ws:' || lk));
     end loop;
     for lk in select distinct {key} from new_table where {key} <> '' order by 1 loop
-      perform pg_advisory_xact_lock(82, hashtext('{key_prefix}' || lk));
+      perform pg_advisory_xact_lock({lock_class}, hashtext('{key_prefix}' || lk));
     end loop;
     for k, st, delta in
       select {key}, status, count(*) from new_table where {key} <> ''
@@ -156,7 +158,7 @@ begin
       perform pg_advisory_xact_lock(82, hashtext('ws:' || lk));
     end loop;
     for lk in select distinct {key} from old_table where {key} <> '' order by 1 loop
-      perform pg_advisory_xact_lock(82, hashtext('{key_prefix}' || lk));
+      perform pg_advisory_xact_lock({lock_class}, hashtext('{key_prefix}' || lk));
     end loop;
     for k, st, delta in
       select {key}, status, -count(*)::bigint from old_table where {key} <> ''
@@ -181,7 +183,7 @@ begin
         select {key} from new_table where {key} <> ''
       ) lk_keys order by 1
     loop
-      perform pg_advisory_xact_lock(82, hashtext('{key_prefix}' || lk));
+      perform pg_advisory_xact_lock({lock_class}, hashtext('{key_prefix}' || lk));
     end loop;
     for k, st, delta in
       select key, status, sum(cnt) from (
@@ -215,9 +217,18 @@ $$ language plpgsql;
 
 
 def _advisory_trigger_ddl(
-    *, fn: str, table: str, key: str, key_prefix: str, prefix: str, legacy_name: str
+    *,
+    fn: str,
+    table: str,
+    key: str,
+    key_prefix: str,
+    lock_class: int,
+    prefix: str,
+    legacy_name: str,
 ) -> str:
-    return _BODY_TEMPLATE.format(fn=fn, table=table, key=key, key_prefix=key_prefix) + (
+    return _BODY_TEMPLATE.format(
+        fn=fn, table=table, key=key, key_prefix=key_prefix, lock_class=lock_class
+    ) + (
         _TRIGGER_TEMPLATE.format(
             fn=fn,
             legacy_name=legacy_name,
@@ -234,6 +245,7 @@ _RUN_DDL = _advisory_trigger_ddl(
     table="run_job_status_counts",
     key="run_id",
     key_prefix="run:",
+    lock_class=83,
     prefix="jobs_run_status_counts_sync",
     legacy_name="jobs_run_status_counts_sync",
 )
@@ -241,11 +253,15 @@ _RUN_DDL = _advisory_trigger_ddl(
 # Workspace-level twin: v77's ``.replace(" where workspace_id <> ''", "")``
 # drops the empty-key guard (workspace_id is never '') — same splice here,
 # and the guard-free SELECT DISTINCT collapses to a plain scan.
+# The workspace twin's dimension key IS the ws: keyspace: class 82, the
+# same lock as the prologue — re-entrant, free (the hierarchy collapses to
+# one level for this family, which is the design).
 _WORKSPACE_DDL = _advisory_trigger_ddl(
     fn="sync_workspace_job_status_counts",
     table="workspace_job_status_counts",
     key="workspace_id",
     key_prefix="ws:",
+    lock_class=82,
     prefix="jobs_status_counts_sync",
     legacy_name="jobs_status_counts_sync",
 ).replace(" where workspace_id <> ''", "")

@@ -61,3 +61,26 @@ def test_zero_base_stays_zero() -> None:
 def test_availability_monotonic_non_increasing_in_depth() -> None:
     values = [claim_availability(8, depth, 8, None) for depth in range(20)]
     assert all(first >= second for first, second in zip(values, values[1:], strict=False))
+
+
+def test_backlog_limit_rejects_above_the_relay_covered_bound(tmp_path) -> None:
+    """#662 review P1：upload_backlog_limit 的上界 = 2×并发上限（relay 分片
+    准入覆盖面）。registry 插入序跨拍稳定，超覆盖面的积压会让尾部分片
+    每拍被同一前缀挤掉——持续丢拍到租约过期，不是「下一拍重试」。抬高
+    上界须连同 MAX_INFLIGHT_SHARDS 与其契约测试同改（注释已声明耦合）。"""
+    from worker.transfer_controls import load_transfer_controls
+
+    # 合法区间：1 到 2×ceiling（含）。
+    low = tmp_path / "low.yaml"
+    low.write_text("upload_max_concurrency: 4\nupload_backlog_limit: 1\n")
+    controls = load_transfer_controls(low)
+    assert controls.upload_backlog_limit == 1
+
+    at_cap = tmp_path / "cap.yaml"
+    at_cap.write_text("upload_max_concurrency: 4\nupload_backlog_limit: 4096\n")
+    assert load_transfer_controls(at_cap).upload_backlog_limit == 4096
+
+    over = tmp_path / "over.yaml"
+    over.write_text("upload_max_concurrency: 4\nupload_backlog_limit: 4097\n")
+    with pytest.raises(ValueError, match="relay 分片准入覆盖面"):
+        load_transfer_controls(over)
