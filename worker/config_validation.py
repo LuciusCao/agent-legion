@@ -104,7 +104,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     concurrency = config.get("max_concurrency")
     claim_enabled = config.get("claim_enabled")
     validate_claim_controls(concurrency, claim_enabled)
-    # 批次 2 code 执行池；0 = 仅 agent。上限与 Host 注册契约（le=1024）一致。
+    # 批次 2 code 执行池；0 = 仅 agent。上限与 Host 注册契约引用同一常量。
     code_concurrency = config.get("max_code_concurrency", 0)
     if (
         isinstance(code_concurrency, bool)

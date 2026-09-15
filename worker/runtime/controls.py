@@ -8,8 +8,7 @@ from typing import Any
 import yaml
 
 from shared.code_sandbox import resolve_sandbox_binary
-
-MAX_DYNAMIC_CONCURRENCY = 1024
+from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
 
 
 def validate_claim_controls(capacity: Any, enabled: Any) -> None:
@@ -18,7 +17,7 @@ def validate_claim_controls(capacity: Any, enabled: Any) -> None:
         or not isinstance(capacity, int)
         or not 1 <= capacity <= MAX_DYNAMIC_CONCURRENCY
     ):
-        raise ValueError("最大并发数必须是 1 到 1024 的整数")
+        raise ValueError(f"最大并发数必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     if not isinstance(enabled, bool):
         raise ValueError("领取任务开关必须是布尔值")
 
@@ -41,7 +40,7 @@ def load_claim_controls(path: Path) -> tuple[int, bool, Any]:
 
 
 def load_code_concurrency(path: Path) -> int:
-    """code 执行池容量（0 = 仅 agent）；上限与 Host 注册契约 le=1024 对齐。"""
+    """code 执行池容量（0 = 仅 agent）；上限与 Host 注册契约引用同一常量。"""
     value = load_config(path).get("max_code_concurrency", 0)
     if (
         isinstance(value, bool)

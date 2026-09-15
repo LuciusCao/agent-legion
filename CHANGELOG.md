@@ -250,6 +250,21 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   #542/#521 等），逐条核验均为「预算未回落」型，按 #522 纪律统一重锚
   #456 长期锚点；26 条过松 ceiling 收紧到当前实际行数。
   `EXEC-CODE-MANIFEST-001` 的 evidence 目标随 #547 测试拆分修正。
+- Worker 并发上限放宽至 2048，双侧收敛为单一常量（issue #657）：
+  1024 档实测健康（RSS ~14.2GB/1024 进程、零重排），护栏挡住了机器
+  吃得下的档位。新 `shared/concurrency_limits.MAX_DYNAMIC_CONCURRENCY`
+  为唯一权威——worker 本地校验（controls/config_validation/hot_reload）
+  与 Host 注册/claim 契约（五处 le= 散落字面量）全部改为引用；契约
+  测试钉住全等（worker 本地 == 每个 Host 契约字段），防单边漂移（单边
+  放宽会让 worker 撞 422）。隐性假设复核：relay 分片准入上限按
+  ceiling/分片大小重估（16→32，2048 档满载心跳分片不再饿死）；
+  load_shedding 与档位无耦合（测试钉住）。DB 层无上限不变；
+  min_protocol_version 不动（值域放宽非语义变化）。2048 是契约值域
+  而非单机目标（外推 ~28GB RSS 超 32GB 物理内存）。
+- `worker/service_bind.py` 豁免收割确认（issue #650）：判定矩阵已随
+  后续重构回落到 15 行有效行（≤30 收割线），file_budget 豁免已不在
+  册——收割条件 1/2（#489 方向二/三）未做、条件 3（docstring 瘦身）
+  被顺带完成，issue 关闭收账。
 
 ## [0.7.8] - 2026-09-10
 

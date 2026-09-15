@@ -9,26 +9,28 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
+
 
 class ClaimAgentExecutionRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=64)
     # Live re-declaration of the worker's machine-wide capacity: the Host
     # records it as the enforced max_concurrency, so dynamic resizes on the
     # worker take effect without re-registration.
-    max_concurrency: int | None = Field(default=None, gt=0, le=1024)
+    max_concurrency: int | None = Field(default=None, gt=0, le=MAX_DYNAMIC_CONCURRENCY)
     # Live re-declaration of the code-execution pool (batch 2); None leaves
     # the recorded value untouched.
-    max_code_concurrency: int | None = Field(default=None, ge=0, le=1024)
+    max_code_concurrency: int | None = Field(default=None, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
     # Batch claim (issue #546; single path retired by #547): promotes up to
     # `limit` executions in ONE transaction and answers
     # BatchAgentClaimResponse (empty batch = the same 204). The default 1
     # answers a one-element claims list.
-    limit: int = Field(default=1, ge=1, le=1024)
+    limit: int = Field(default=1, ge=1, le=MAX_DYNAMIC_CONCURRENCY)
     # Per-pool batch caps (the #546 flood shape: an instantaneous-code storm
     # must fill the code pool without spending agent slots); None = the Host
     # capacity view decides per kind.
-    agent_limit: int | None = Field(default=None, ge=0, le=1024)
-    code_limit: int | None = Field(default=None, ge=0, le=1024)
+    agent_limit: int | None = Field(default=None, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
+    code_limit: int | None = Field(default=None, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
 
 
 class AgentClaimResponse(BaseModel):

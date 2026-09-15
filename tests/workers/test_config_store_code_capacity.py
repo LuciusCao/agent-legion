@@ -33,7 +33,7 @@ def test_max_code_concurrency_accepts_pool_size() -> None:
     assert validate_config(_config(max_code_concurrency=4))["max_code_concurrency"] == 4
 
 
-@pytest.mark.parametrize("bad", [-1, 1025, True, 1.5, "4"])
+@pytest.mark.parametrize("bad", [-1, 2049, True, 1.5, "4"])  # #657：越界=ceiling+1
 def test_max_code_concurrency_rejects_invalid_values(bad: Any) -> None:
     with pytest.raises(ValueError, match="code 并发数"):
         validate_config(_config(max_code_concurrency=bad))
