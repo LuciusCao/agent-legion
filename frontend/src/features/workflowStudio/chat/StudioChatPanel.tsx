@@ -71,7 +71,6 @@ export function StudioChatPanel(props: Props) {
         }
         newChatDisabled={!selectedAgentId || chat.starting}
       />
-      <StudioChatAgentConfig workspaceId={workspaceId} session={chat.session} />
       <div className={styles.scopeNote}>
         Agent 来自管理员配置并按本机安装过滤；agent 只能产出草稿与校验，
         <b>发布永远由你确认</b>。
@@ -99,6 +98,8 @@ export function StudioChatPanel(props: Props) {
       />
       <StudioChatQueueBar queue={queue} />
       {chat.closed && chat.session && <StudioChatResumeBar chat={chat} />}
+      {/* #658：执行配置归属对话区域——贴着输入框呈现，与会话管理（顶部）分区。 */}
+      <StudioChatAgentConfig workspaceId={workspaceId} session={chat.session} />
       <StudioChatInput
         busy={chat.busy}
         disabled={inputDisabled}
