@@ -5,16 +5,18 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
-# Ceiling-scaled shard admission (#657): a healthy relay snapshot needs at
-# most ceil(MAX_DYNAMIC_CONCURRENCY / RELAY_BEAT_SHARD) in-flight shard
-# requests — 2048 slots / 64 per shard = 32 (importing relay_shards here
-# would be circular: it imports this limiter, so the two contract tests
-# re-derive and pin the arithmetic instead). An overstaying socket keeps
-# its slot until the request really returns, preventing a slow Host from
-# creating an unbounded new wave of threads and sockets every relay
-# interval — so the bound must cover the DECLARED ceiling, not today's
-# typical load.
-MAX_INFLIGHT_SHARDS = 32
+# Ceiling-scaled shard admission (#657 + codex review): the registry carries
+# BOTH capacity planes — executing leases AND upload-queue-adopted leases
+# (release_slot hands the lease to the upload lane, which keeps it beating
+# until the result report commits). Each plane is independently bounded by
+# MAX_DYNAMIC_CONCURRENCY, so a fully saturated snapshot reaches ~2 × 2048
+# leases = 4096, i.e. ceil(2 × MAX_DYNAMIC_CONCURRENCY / RELAY_BEAT_SHARD)
+# = 64 concurrent shards. Undersizing here starves the snapshot TAIL every
+# tick (the limiter skips un-slotted shards as unknown-round) — the tail
+# leases then miss beats until they expire. Importing relay_shards here
+# would be circular (it imports this limiter), so the contract test
+# re-derives and pins the arithmetic instead.
+MAX_INFLIGHT_SHARDS = 64
 
 
 class ShardThreadLimiter:

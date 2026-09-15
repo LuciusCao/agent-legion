@@ -313,3 +313,83 @@ def test_trigger_function_carries_the_advisory_lock() -> None:
         # first counter write.
         assert src.index("pg_advisory_xact_lock") < src.index("insert into"), fn
         assert src.index("pg_advisory_xact_lock") < src.index("update ", src.index("declare")), fn
+
+
+@pytest.mark.postgres
+def test_cross_family_ring_is_broken_by_the_lock_hierarchy() -> None:
+    """codex review P1 的回归钉子：跨触发器家族的 AB-BA 环。PG 按名序
+    触发（jobs_run_* 先于 jobs_status_*），单层锁序（每家族只锁自己的
+    维度键）挡不住这个形态——A 的 stmt1 持 run:a + ws:x；B 的 stmt1
+    （run-b 行）先锁 run:b、再在 ws 触发器等 ws:x；A 的 stmt2 摸 run-b
+    的行，其 run 触发器等 run:b——环（单层形态实测 A 侧 40P01）。
+    双层锁序（两家族都先锁全部 ws: 再锁维度键）让 B 在 ws: 入口排队，
+    A 提交后 B 完成：零 40P01、双方落库、计数与 group-by 全等。
+
+    A 的 stmt2 必须摸 run-b 的行——这是环的闭合边（此前版本摸 run-a
+    自身键，re-entrant 不构成等待，环不闭合，revert-check 不红）。
+    """
+    workspace = "sc82-xfam"
+    with psycopg.connect(TEST_DATABASE_URL, autocommit=True, row_factory=string_dict_row) as seed:
+        seed.execute("delete from jobs where id like 'sc82-xf-%'")
+        seed.execute("delete from run_job_status_counts where run_id like 'sc82-xf-%'")
+        seed.execute("delete from workspace_job_status_counts where workspace_id=%s", (workspace,))
+        seed.execute("delete from runs where id like 'sc82-xf-%'")
+        seed.execute("delete from workspaces where id=%s", (workspace,))
+        _seed(
+            seed,
+            workspace,
+            {
+                "sc82-xf-a": ("sc82-xf-1", "sc82-xf-3"),
+                "sc82-xf-b": ("sc82-xf-2", "sc82-xf-4"),
+            },
+        )
+
+    results: dict[str, BaseException | None] = {}
+
+    def _b() -> None:
+        conn = psycopg.connect(TEST_DATABASE_URL, autocommit=False)
+        try:
+            for timeout in _TIMEOUTS:
+                conn.execute(timeout)
+            # stmt1（run-b 行）：run 触发器锁 run:b，ws 触发器等 A 的 ws:x。
+            conn.execute("update jobs set status='completed' where id=%s", ("sc82-xf-2",))
+            conn.execute("update jobs set status='running' where id=%s", ("sc82-xf-4",))
+            conn.commit()
+            results["b"] = None
+        except psycopg.Error as exc:
+            results["b"] = exc
+            with contextlib.suppress(psycopg.Error):
+                conn.rollback()
+        finally:
+            conn.close()
+
+    conn_a = psycopg.connect(TEST_DATABASE_URL, autocommit=False)
+    try:
+        for timeout in _TIMEOUTS:
+            conn_a.execute(timeout)
+        # stmt1（run-a 行）：A 持 run:a + ws:x 直到事务结束。
+        conn_a.execute("update jobs set status='running' where id=%s", ("sc82-xf-1",))
+        thread_b = threading.Thread(target=_b)
+        thread_b.start()
+        time.sleep(_B_BLOCK_WINDOW)  # B 已锁 run:b、阻塞在 ws:x
+        # stmt2（run-b 行）：run 触发器等 run:b——单层形态在此闭合环。
+        conn_a.execute("update jobs set status='completed' where id=%s", ("sc82-xf-4",))
+        conn_a.commit()
+        results["a"] = None
+    except psycopg.Error as exc:
+        results["a"] = exc
+        with contextlib.suppress(psycopg.Error):
+            conn_a.rollback()
+    finally:
+        conn_a.close()
+        thread_b.join(timeout=30)
+
+    outcomes = list(results.values())
+    deadlocked = [e for e in outcomes if isinstance(e, psycopg.errors.DeadlockDetected)]
+    assert deadlocked == [], [getattr(e, "sqlstate", e) for e in outcomes]
+    assert outcomes == [None, None], outcomes
+
+    with psycopg.connect(TEST_DATABASE_URL, autocommit=True, row_factory=string_dict_row) as check:
+        assert _workspace_counts(check, workspace) == _group_by(check, workspace)
+        for run_id in ("sc82-xf-a", "sc82-xf-b"):
+            assert _run_counts(check, run_id) == _run_group_by(check, run_id)

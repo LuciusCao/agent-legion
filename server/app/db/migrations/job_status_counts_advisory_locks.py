@@ -18,6 +18,38 @@ hits the terminal state — the 409 is a downstream symptom of this lock
 contention, not an independent bug).
 
 The fix is issue #659's direction 1, minimal and structural: the trigger
+takes transaction-scoped advisory locks BEFORE touching any counter row,
+in a TWO-LEVEL hierarchy (codex review round): every trigger of BOTH
+families locks the workspace-level key (``ws:<workspace_id>``) for every
+distinct workspace in its transition tables FIRST, then its own dimension
+keys (``run:<run_id>`` for the run twin; the workspace twin's dimension
+lock is the same ws: keyspace — re-entrant, free). PostgreSQL fires
+same-table triggers in name order — ``jobs_run_*`` before ``jobs_status_*``
+— so a per-family-only lock order left a cross-family ring: transaction A
+(run trigger fires first) could hold run:a + ws:x while B held run:b
+waiting on ws:x, and A's NEXT statement's run trigger would wait on run:b.
+The global hierarchy (ws: before run:, both sorted) makes every writer's
+acquisition sequence consistent regardless of statement mix or family
+order. Properties relied upon: advisory locks for the job status count triggers (#659).
+
+The v77 statement-level rebuild (#437) fixed the ring WITHIN one statement:
+every firing applies its net deltas in a fixed (key, status) sorted order.
+What it could not fix is the ring ACROSS statements inside ONE transaction —
+the production shape of #659: a claim batch promotes several executions in
+one transaction, and psycopg executemany issues each promote as its own
+UPDATE statement, so the transaction fires the counter trigger several
+times, each firing taking its (key, status) row locks in sorted order but
+the SEQUENCE of row-lock sets varying with the business order of the
+promotes. Two such multi-statement transactions interleaving (claim batch
+vs. rerun's mark_nodes_for_rerun, both touching one workspace's hot counter
+rows) close an AB-BA ring on the counter rows: PG's deadlock detector
+breaks it after 1s, the client retries, and the visible symptoms are the
+claim/heartbeat/rerun 500 waves plus the result-commit 409 waves (the first
+POST commits but its response is lost in the lock queue; the retried POST
+hits the terminal state — the 409 is a downstream symptom of this lock
+contention, not an independent bug).
+
+The fix is issue #659's direction 1, minimal and structural: the trigger
 takes a per-key transaction-scoped advisory lock BEFORE touching any
 counter row. ``pg_advisory_xact_lock`` on the distinct keys of the
 statement, taken in sorted key order at function entry, serialises ALL
@@ -90,7 +122,20 @@ declare
   delta bigint;
   lk text;
 begin
+  -- Lock hierarchy (review P1): workspace-level advisory locks FIRST, then
+  -- the counter-dimension keys — in BOTH trigger families. PostgreSQL fires
+  -- same-table triggers in name order (jobs_run_* before jobs_status_*), so
+  -- without this hierarchy a multi-statement transaction could hold run:a +
+  -- ws:x while another holds run:b and waits on ws:x, and the first's next
+  -- statement waits on run:b — a cross-family AB-BA ring that no per-family
+  -- sorted order can break. Every trigger taking ws:<workspace> before any
+  -- run:<run> key (and the workspace twin taking only ws: keys) makes the
+  -- acquisition order globally consistent: workspace level, then dimension
+  -- level, both sorted.
   if TG_OP = 'INSERT' then
+    for lk in select distinct workspace_id from new_table order by 1 loop
+      perform pg_advisory_xact_lock(hashtext('ws:' || lk));
+    end loop;
     for lk in select distinct {key} from new_table where {key} <> '' order by 1 loop
       perform pg_advisory_xact_lock(hashtext('{key_prefix}' || lk));
     end loop;
@@ -104,6 +149,9 @@ begin
       do update set cnt = {table}.cnt + excluded.cnt;
     end loop;
   elsif TG_OP = 'DELETE' then
+    for lk in select distinct workspace_id from old_table order by 1 loop
+      perform pg_advisory_xact_lock(hashtext('ws:' || lk));
+    end loop;
     for lk in select distinct {key} from old_table where {key} <> '' order by 1 loop
       perform pg_advisory_xact_lock(hashtext('{key_prefix}' || lk));
     end loop;
@@ -114,6 +162,15 @@ begin
       update {table} set cnt = cnt + delta where {key} = k and status = st;
     end loop;
   else
+    for lk in
+      select distinct workspace_id from (
+        select workspace_id from old_table
+        union
+        select workspace_id from new_table
+      ) ws_keys order by 1
+    loop
+      perform pg_advisory_xact_lock(hashtext('ws:' || lk));
+    end loop;
     for lk in
       select distinct key from (
         select {key} as key from old_table where {key} <> ''
