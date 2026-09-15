@@ -11,6 +11,11 @@ import { buildChangeSummary } from '../validation/workflowStudioChanges'
 import type { CompareResponse } from '../shared/useWorkflowDraftCompare.types'
 import { WorkflowChangeSummaryPanel } from '../validation/WorkflowChangeSummaryPanel'
 import { useStudioNav } from '../shared/useStudioNavState'
+import { useStudioStateOptional } from '../shared/studioStateContext'
+import {
+  WorkflowDraftPublishButton,
+  WorkflowDraftStaleHint,
+} from './WorkflowDraftPublishAction'
 import type {
   AgentDefinitionDraftView,
   NodeCodeDraftView,
@@ -28,6 +33,7 @@ export function WorkflowDraftCard(props: WorkflowProps) {
   const [diffOpen, setDiffOpen] = useState(false)
   const [compare, setCompare] = useState<CompareResponse | null>(null)
   const [compareError, setCompareError] = useState<string | null>(null)
+  const studio = useStudioStateOptional()
 
   async function openDiff() {
     setDiffOpen(true)
@@ -64,7 +70,9 @@ export function WorkflowDraftCard(props: WorkflowProps) {
         >
           应用到编辑器
         </button>
+        <WorkflowDraftPublishButton />
       </div>
+      <WorkflowDraftStaleHint draftYaml={props.draft.yaml} />
       <Dialog
         open={diffOpen}
         onClose={() => setDiffOpen(false)}
@@ -79,6 +87,14 @@ export function WorkflowDraftCard(props: WorkflowProps) {
               summary={compare ? buildChangeSummary(compare) : null}
               loading={compare === null}
               errors={compare?.errors ?? null}
+              onSelectNode={
+                studio
+                  ? (nodeKey) => {
+                      studio.setSelectedNodeKey(nodeKey)
+                      setDiffOpen(false)
+                    }
+                  : undefined
+              }
             />
           )}
         </DialogContent>
