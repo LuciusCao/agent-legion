@@ -38,7 +38,6 @@ from acp.schema import (
     HttpMcpServer,
     Implementation,
     RequestPermissionResponse,
-    TextContentBlock,
 )
 
 from server.app.studio_chat.acp_session_config import (
@@ -46,6 +45,7 @@ from server.app.studio_chat.acp_session_config import (
     studio_client_capabilities,
 )
 from server.app.studio_chat.capabilities import capability_snapshot
+from server.app.studio_chat.prompt_turn import PromptWedgedError, run_prompt_turn
 from server.app.studio_chat.session_load import open_acp_session
 from server.app.studio_chat.terminals import AcpTerminalStore, TerminalClientMixin
 
@@ -67,8 +67,6 @@ def _log_cancel_result(task: asyncio.Task[Any]) -> None:
         logger.warning("studio chat ACP cancel failed: %s", exc)
 
 
-# Safety net for a wedged agent turn; cancel() is the intended control path.
-PROMPT_TIMEOUT_SECONDS = 3600
 # Grace for the loop to drain _CLOSE and let the SDK transport shut the child
 # down (stdin EOF -> terminate) before close() escalates to kill.
 CLOSE_GRACE_SECONDS = 5
@@ -243,8 +241,11 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         mid-turn still needs close()'s full join→kill teardown of THIS
         runtime before the new one spawns. The extra _CLOSE it queues is
         harmless — the loop is already exiting. A wedged turn bounds the
-        graceful wait at PROMPT_TIMEOUT_SECONDS via on_turn_error; a parked
-        permission at the 120s auto-deny."""
+        graceful wait at PROMPT_TIMEOUT_SECONDS + CANCEL_GRACE_SECONDS: the
+        #664 timeout ladder (prompt_turn.py) sends session/cancel and, when
+        the agent never acknowledges it, escalates to the fatal path, which
+        fails the session and tears the subprocess down without draining the
+        queued _CLOSE; a parked permission at the 120s auto-deny."""
         with self._state_lock:
             if self._closed or self._stop_requested:
                 return
@@ -336,8 +337,10 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             # #204 broad-except audit: the catch stays broad because the
             # outcome space is genuinely mixed — expected agent-side
             # refusals (RequestError from initialize / session open),
-            # transport deaths (ConnectionError / OSError) and programming
-            # errors all funnel into the SAME designed semantics here: the
+            # transport deaths (ConnectionError / OSError), the #664
+            # wedged-turn escalation (PromptWedgedError from the prompt
+            # loop) and programming errors all funnel into the SAME
+            # designed semantics here: the
             # session is marked error and the user sees a dead session
             # instead of a hung one. Nothing is masked (the traceback is
             # logged) and no exception type is converted on the way out.
@@ -360,20 +363,28 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             if item is _CLOSE:
                 return
             try:
-                response = await asyncio.wait_for(
-                    conn.prompt(acp_session_id, [TextContentBlock(type="text", text=str(item))]),
-                    timeout=PROMPT_TIMEOUT_SECONDS,
-                )
-                self.callbacks.on_turn_end(str(response.stop_reason))
+                response = await run_prompt_turn(conn, acp_session_id, str(item))
+            except PromptWedgedError:
+                # Fatal, not per-turn containment (#664): a turn that ignores
+                # session/cancel past the grace is wedged at the transport
+                # level — every later prompt would be rejected ("another turn
+                # is already in progress"), so keeping the loop alive only
+                # preserves a zombie session. _run's error path marks the
+                # session error (the resume-reachable state) and the
+                # async-with tears the subprocess down.
+                raise
             except Exception as exc:
                 # #204 broad-except audit: deliberate per-turn containment —
                 # the prompt loop is the session's life support, so one failed
                 # turn must not kill the loop and the session with it; the
                 # service records the turn error and the user can send the
                 # next prompt, and the traceback is logged for the agent-side
-                # failures that dominate here.
+                # failures that dominate here. The fatal wedged turn is
+                # filtered out above by type.
                 self.callbacks.on_turn_error(f"{type(exc).__name__}: {exc}")
                 logger.warning("studio chat prompt turn failed: %s", exc, exc_info=True)
+            else:
+                self.callbacks.on_turn_end(str(response.stop_reason))
 
     def _drain_stderr(self, process: Any) -> None:
         """Discard agent stderr on a reader task so a chatty agent never
