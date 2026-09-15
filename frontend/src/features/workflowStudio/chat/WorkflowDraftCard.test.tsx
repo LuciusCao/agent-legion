@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { WorkflowDraftCard } from './StudioChatDraftCards'
+import { WorkflowDraftCard } from './WorkflowDraftCard'
 import { compareWorkflowDraft } from '../../../api/workflowDraftCompare'
 import {
   makeStudioView,
@@ -27,6 +27,7 @@ function makeStudio(overrides: Record<string, unknown> = {}) {
     compareErrors: null,
     compareSummary: null,
     definitionYaml: draft.yaml,
+    nodes: [{ key: 'n_extract' }],
     requestPublish: vi.fn(),
     setSelectedNodeKey: vi.fn(),
     ...overrides,
@@ -172,6 +173,29 @@ describe('WorkflowDraftCard diff 变更节点定位（#667 B2）', () => {
         screen.queryByText('草稿与 active revision 的差异')
       ).not.toBeInTheDocument()
     )
+    // 节点在画布上：无「应用草稿后可定位」提示。
+    expect(screen.queryByText(/应用草稿后可定位/)).not.toBeInTheDocument()
+  })
+
+  it('变更节点不在当前画布时不可定位：不选中、不关闭 dialog 并提示', async () => {
+    // 草稿未「应用到编辑器」（或新增节点）时节点不在 studio.nodes 中：
+    // 选中会被 useStudioNodeSelection 立即清掉，必须提前拦住并说明。
+    const studio = makeStudio({ nodes: [] })
+    renderCard(studio)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '查看 diff' }))
+    })
+    const nodeItem = await screen.findByText('提取: 节点配置值')
+    fireEvent.click(nodeItem)
+
+    expect(studio.setSelectedNodeKey).not.toHaveBeenCalled()
+    expect(
+      screen.getByText('草稿与 active revision 的差异')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('部分变更节点不在当前编辑器画布中，应用草稿后可定位')
+    ).toBeInTheDocument()
   })
 
   it('无 Studio Provider 时变更节点不可点击（不抛错、不回退既有展示）', async () => {

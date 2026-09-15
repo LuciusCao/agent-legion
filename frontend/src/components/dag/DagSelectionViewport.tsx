@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef } from 'react'
 import type { MutableRefObject } from 'react'
-import { useReactFlow, useStoreApi } from '@xyflow/react'
+import { useReactFlow, useStore, useStoreApi } from '@xyflow/react'
 
 /* 镜头平滑移动的时长：够感知「飞过去」又不拖沓。 */
 const CENTER_DURATION_MS = 350
@@ -39,6 +39,14 @@ export function DagSelectionViewport({
     observer.observe(domNode)
     return () => observer.disconnect()
   }, [storeApi])
+  /* 选中节点的测量就绪信号：新 ReactFlow 实例以已有 selectedNode 挂载时
+     （如选中后打开全屏 DAG），getInternalNode 在 DOM 测量完成前返回、
+     measured 为空。订阅 store，测量就绪翻转后重试定位。 */
+  const measuredReady = useStore((state) => {
+    if (!selectedNode) return false
+    const measured = state.nodeLookup.get(selectedNode)?.measured
+    return measured?.width != null && measured?.height != null
+  })
   useEffect(() => {
     if (!selectedNode) {
       focusedRef.current = null
@@ -58,6 +66,11 @@ export function DagSelectionViewport({
     const internal = getInternalNode(selectedNode)
     // 节点未入 store（布局同步前）：保留未定位态，nodesVersion 变化时重试。
     if (!internal) return
+    // measured 未完成（新实例挂载、DOM 测量前）时宽高会降为 0，镜头定到
+    // 节点左上角且标完成后无法校正——保留未定位态，measuredReady 翻转后重试。
+    const width = internal.measured?.width
+    const height = internal.measured?.height
+    if (width == null || height == null) return
     // 零尺寸容器（jsdom、隐藏挂载）里镜头不可见，且 d3-zoom 过渡插值以容器
     // 尺寸为分母会产出 NaN 视口，直接跳过——保持未定位态，容器有尺寸后
     // 随节点/选中变化重试。
@@ -68,8 +81,6 @@ export function DagSelectionViewport({
     clickOriginRef.current = null
     focusedRef.current = selectedNode
     const { x, y } = internal.internals.positionAbsolute
-    const width = internal.measured?.width ?? 0
-    const height = internal.measured?.height ?? 0
     void setCenter(x + width / 2, y + height / 2, {
       zoom: getZoom(),
       duration: CENTER_DURATION_MS,
@@ -78,6 +89,7 @@ export function DagSelectionViewport({
     selectedNode,
     nodesVersion,
     sizeTick,
+    measuredReady,
     clickOriginRef,
     setCenter,
     getZoom,
