@@ -536,3 +536,28 @@ def test_mid_batch_conflict_409_carries_completed_results(ws_dir, monkeypatch) -
     (retry,) = [r for r in propagate_shared_materials(_WS).results if r.skill == "skill-b"]
     assert retry.status == "synced"
     assert _git(repo_b, "show", "HEAD:references/style.md") == "# v3-concurrent"
+
+
+def test_propagate_rejects_workspace_dir_symlink(ws_dir, tmp_path) -> None:
+    """codex P1（#674 收尾）：workspace 目录自身为 symlink 时传播拒绝
+    （map 加载按无共享材料处理 → NotFoundError）。"""
+    outside = tmp_path / "other-place"
+    (outside / "_shared" / "references").mkdir(parents=True)
+    (outside / "_shared" / "map.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "materials": [{"source": "references/style.md", "skills": ["skill-a"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (outside / "_shared" / "references" / "style.md").write_text("smuggled\n", encoding="utf-8")
+    (ws_dir / _WS).rmdir()
+    (ws_dir / _WS).symlink_to(outside)
+    repo = ws_dir / _WS / "skill-a"
+    _make_skill_repo(repo, {"references/style.md": "# v1\n"})
+
+    with pytest.raises(NotFoundError):
+        propagate_shared_materials(_WS)
+    assert _git(repo, "show", "HEAD:references/style.md") == "# v1"

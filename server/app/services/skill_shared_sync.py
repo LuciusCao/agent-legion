@@ -144,12 +144,13 @@ def load_shared_map(shared_dir: Path) -> SharedMap | None:
     workspace opted into sharing, so a malformed map must fail the save
     loudly instead of half-syncing.
     """
-    if not shared_dir.is_dir() or shared_dir.is_symlink():
-        # codex P1 (#674): a symlinked _shared would resolve to an EXTERNAL
-        # directory that then becomes the trusted containment root — every
-        # check passes and host files leak into reads and skill commits.
-        # A symlinked _shared is never a legitimate layout; treat it as
-        # absent (no shared materials).
+    if not shared_dir.is_dir() or shared_dir.is_symlink() or shared_dir.parent.is_symlink():
+        # codex P1 (#674): a symlinked _shared — or a symlinked WORKSPACE
+        # dir (shared_dir.parent, e.g. <skills_root>/<ws> -> another
+        # workspace or an external dir) — resolves to a directory that
+        # then becomes the trusted containment root: every check passes
+        # and foreign files leak into reads and skill commits. Neither is
+        # a legitimate layout; treat both as absent (no shared materials).
         return None
     map_path = shared_dir / MAP_PATH
     if not map_path.is_file():

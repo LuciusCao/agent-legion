@@ -373,3 +373,27 @@ def test_file_endpoint_reads_size_and_content_from_one_open(
     assert response.status_code == 200, response.text
     assert response.json()["size"] == len(b"# house style v2\n")
     assert len(opens) == 1
+
+
+def test_workspace_dir_symlink_is_not_a_trusted_root(client, shared_home, tmp_path) -> None:
+    """codex P1（#674 收尾）：`<skills_root>/<workspace_id>` 自身是
+    symlink（指向其它 workspace/外部目录）时，resolve 后的 _shared 根
+    会被信任、containment 必过——必须整体拒绝：GET 空态、/file 404。"""
+    _create_workspace(client)
+    outside = tmp_path / "other-place"
+    (outside / "_shared" / "references").mkdir(parents=True)
+    (outside / "_shared" / "map.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "materials": [{"source": "references/secret.md", "skills": ["s"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (outside / "_shared" / "references" / "secret.md").write_text("top secret\n", encoding="utf-8")
+    shared_home.rmdir()
+    shared_home.symlink_to(outside)
+
+    assert client.get(_BASE).json() == {"workspace_id": _WS, "map": None, "files": []}
+    assert client.get(f"{_BASE}/file", params={"path": "references/secret.md"}).status_code == 404

@@ -31,10 +31,11 @@ class _FakeResponse:
         self.text = json.dumps(payload if payload is not None else {"ok": True})
 
 
-def _build_server(monkeypatch, calls: list[dict]) -> FastMCP:
+def _build_server(monkeypatch, calls: list[dict], inits: list[dict] | None = None) -> FastMCP:
     class FakeAsyncClient:
         def __init__(self, **kwargs):
-            pass
+            if inits is not None:
+                inits.append(kwargs)
 
         async def __aenter__(self):
             return self
@@ -130,3 +131,22 @@ def test_sync_shared_materials_omitted_sources_forwards_null(monkeypatch) -> Non
     server = _build_server(monkeypatch, calls)
     _run(server, "sync_shared_materials", {"workspace_id": "ws-1"})
     assert calls[0]["json"] == {"sources": None}
+
+
+def test_sync_shared_materials_uses_extended_timeout(monkeypatch) -> None:
+    """codex P1（#674 收尾）：传播批次是逐 skill git 保存 + 锁等待，
+    固定 30s 会让 MCP 端报 request failed 而后端继续写——传播调用用
+    专用 300s 覆盖（依据注释在 tool_client.SYNC_PROPAGATE_TIMEOUT_SECONDS）。"""
+    calls: list[dict] = []
+    inits: list[dict] = []
+    server = _build_server(monkeypatch, calls, inits)
+    _run(server, "sync_shared_materials", {"workspace_id": "ws-1"})
+    assert inits[0]["timeout"] == 300
+
+
+def test_default_timeout_stays_30s_for_other_tools(monkeypatch) -> None:
+    calls: list[dict] = []
+    inits: list[dict] = []
+    server = _build_server(monkeypatch, calls, inits)
+    _run(server, "get_shared_materials", {"workspace_id": "ws-1"})
+    assert inits[0]["timeout"] == 30

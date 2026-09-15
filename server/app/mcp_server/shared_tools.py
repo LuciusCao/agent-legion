@@ -16,7 +16,10 @@ from urllib.parse import quote
 from mcp.server.fastmcp import FastMCP
 
 from server.app.mcp_server.config import McpServerConfig
-from server.app.mcp_server.tool_client import ToolClient
+from server.app.mcp_server.tool_client import (
+    SYNC_PROPAGATE_TIMEOUT_SECONDS,
+    ToolClient,
+)
 
 ClientFactory = Callable[[], Awaitable[tuple[McpServerConfig, ToolClient]]]
 
@@ -57,4 +60,5 @@ def register_shared_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
             "POST",
             f"/workspaces/{quote(workspace_id, safe='')}/skills-shared/propagate",
             {"sources": sources},
+            timeout=SYNC_PROPAGATE_TIMEOUT_SECONDS,
         )

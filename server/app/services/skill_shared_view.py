@@ -210,9 +210,11 @@ def read_shared_file_content(
         )
     base = base_dir or skills_root()
     shared_dir = workspace_skill_dir(workspace_id, base_dir=base) / SHARED_DIR_NAME
-    if shared_dir.is_symlink():
-        # codex P1 (#674): _shared itself as a symlink would make the
-        # external target the trusted containment root — refuse outright.
+    if shared_dir.is_symlink() or shared_dir.parent.is_symlink():
+        # codex P1 (#674): _shared itself — or the WORKSPACE dir above it
+        # — as a symlink would make the link target the trusted
+        # containment root (another workspace's or a host directory) —
+        # refuse outright.
         raise NotFoundError("Shared material not found")
     shared_root = shared_dir.resolve()
     target = (shared_root / path).resolve()
