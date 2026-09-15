@@ -60,10 +60,13 @@ _WORKER_READ_SQL = "select * from agent_workers where worker_id=%s"
 class BatchClaimSelection:
     """Read-phase output carried into the write phase.
 
-    ``candidates`` are scan rows in promote order (ws-ascending for agent
-    kinds, fairness-rotated across workspaces); ``timer`` carries the scan/
-    evaluate stage timings so the write phase reports one coherent claim
-    profile (#448) across both phases.
+    ``candidates`` are scan rows in promote order — ascending by the
+    ACTUAL class-82 ws lock key (the hashtext int the v82 counter
+    triggers take), fairness-rotated across workspaces within that
+    constraint — so the write phase's lock acquisitions are monotone by
+    construction; ``timer`` carries the scan/evaluate stage timings so
+    the write phase reports one coherent claim profile (#448) across
+    both phases.
     """
 
     candidates: tuple[Mapping[str, Any], ...]
@@ -142,8 +145,9 @@ def _select_kind_batch(
                 # 受限——v82 起每个 promote 的 UPDATE jobs 都经触发器取
                 # class-82 ws 锁（「code claims take no ws lock」是 v77
                 # 时代的旧事实），轮转的 code 顺序不升序会跨 worker 成环；
-                # floor 比较的是实际 advisory key（hashtext 后的 int），
-                # 文本序在 32 位碰撞时会与触发器内的实际锁序脱节。
+                # floor 比较的是实际 advisory key（hashtext 后的 int）——
+                # hashtext 的 signed-int 序与文本序无关，约一半 id 对无需
+                # 碰撞即反序（真碰撞坍缩为同一把锁，次序无关）。
                 state.skip_reasons["batch_lock_order"] += 1
                 continue
             if admit_candidate(broker, row, view, state) is not None:

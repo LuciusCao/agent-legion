@@ -139,8 +139,9 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
         )
         select r.*, wr.definition_json as revision_definition_json,
                -- #662 v82：候选携带实际 class-82 锁键——批内 floor 与排序
-               -- 按触发器真正获取的 advisory key 比较，文本序在 hashtext
-               -- 碰撞时会与实际锁序脱节（codex review）。
+               -- 按触发器真正获取的 advisory key 比较。hashtext 的
+               -- signed-int 序与文本序无关：约一半 id 对无需碰撞即反序
+               -- （真碰撞则坍缩为同一把锁，次序无关，codex review）。
                hashtext('ws:' || r.workspace_id)::int as ws_lock_key
         from eligible_workspaces ws
         cross join lateral (

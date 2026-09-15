@@ -39,7 +39,8 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
         rows = conn.execute(
             """
             select r.execution_id, r.job_id, r.node_key, r.agent_id,
-                   r.workspace_id
+                   r.workspace_id,
+                   hashtext('ws:' || r.workspace_id)::int as ws_lock_key
             from agent_execution_requests r
             where r.state='queued'
               -- kind='code' payloads are self-contained: no versioned Agent
@@ -60,9 +61,16 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
             """
         ).fetchall()
         # #659 v82 discipline: per-row jobs DML walks workspaces ascending
-        # (same as the sibling sweepers) — closes the cross-workspace
-        # multi-statement ring window against claim batches.
-        for row in sorted(rows, key=lambda r: str(r["workspace_id"])):
+        # by the ACTUAL class-82 lock key (hashtext int — same as the
+        # sibling sweepers and the claim batch's ws_lock_floor). NOT
+        # workspace TEXT: hashtext's signed-int order is unrelated to
+        # text order, so roughly half of all id pairs invert with no
+        # collision involved (a true collision instead collapses two ids
+        # onto ONE lock, where order is moot) — a text-sorted sweep
+        # diverges from the trigger's lock order routinely, reopening
+        # the cross-workspace ring window against claim batches (codex
+        # round on #662).
+        for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
             error = (
                 f"Agent definition {row['agent_id']!r} was disabled or changed"
                 " while the request was queued"

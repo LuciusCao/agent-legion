@@ -138,7 +138,8 @@ def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
     rows = conn.execute(
         """
         select l.id, l.job_id, l.node_key, l.node_run_id, l.execution_id,
-               j.workspace_id
+               j.workspace_id,
+               hashtext('ws:' || j.workspace_id)::int as ws_lock_key
         from executor_leases l
         join jobs j on j.id = l.job_id
         where l.status='active' and l.expires_at<=%s
@@ -147,9 +148,14 @@ def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
         (now_str,),
     ).fetchall()
     expired: list[str] = []
-    # #659 v82 discipline: per-lease jobs DML walks workspaces ascending —
-    # same cross-workspace ring discipline as the broker sweepers.
-    for row in sorted(rows, key=lambda r: str(r["workspace_id"])):
+    # #659 v82 discipline: per-lease jobs DML walks workspaces ascending by
+    # the ACTUAL class-82 lock key (hashtext int — same cross-workspace ring
+    # discipline as the broker sweepers and the claim batch's ws_lock_floor).
+    # NOT workspace text: hashtext's signed-int order is unrelated to text
+    # order, so roughly half of all id pairs invert with no collision
+    # involved (a true collision instead collapses two ids onto ONE lock,
+    # where order is moot) — codex round on #662.
+    for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
         if _expire_lease_row(conn, row, now_str):
             expired.append(row["id"])
     return expired

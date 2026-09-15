@@ -16,16 +16,23 @@ Two disciplines the codex review on #609 added:
   multi-job claim transaction as A→B vs B→A (SQLSTATE 40P01) — a job_id
   sort alone does NOT pin that order, because two jobs sorted X→Y by
   job_id can live in workspaces ordered Y→X. Both batches therefore
-  resolve every item's (workspace_id, run_id, job_id) up front (the jobs
-  row is the key the triggers read) and write in that shared order.
+  resolve every item's (class-82 ws lock key, run_id, job_id) up front
+  (the jobs row is the key the triggers read; the leading component is
+  hashtext('ws:' || workspace_id)::int — the ACTUAL advisory key, because
+  hashtext's signed-int order is unrelated to text order: roughly half of
+  all id pairs invert with no collision involved, and a true collision
+  collapses two ids onto ONE lock, where order is moot — codex round on
+  #662) and write in that shared order.
   Residual windows, documented rather than expanded (P2): the per-item
   statement still takes its run-counter rows before its workspace-counter
   row (trigger firing order is alphabetical), so the workspace row's
   position sits after each batch's OWN first item in that workspace — two
   multi-item batches whose first items in one SHARED workspace differ can
   still close a ring on (workspace row, run row); the sweep/expire paths
-  (``expire_stale_leases`` and friends) walk workspaces ascending since
-  the #659 v82 discipline, so they are counterparty-safe here. Both are
+  (``expire_stale_leases`` and friends) walk workspaces ascending by the
+  same class-82 lock key (text order through the #659 v82 discipline,
+  the actual hashtext int key since #662 R6), so they are
+  counterparty-safe here. Both are
   far narrower than the cross-workspace opposite-order class this
   removes and stay covered by the 40P01 retry; the airtight
   shapes (workspace-trigger-first firing order, or one multi-row jobs
@@ -58,6 +65,7 @@ from server.app.db.retry import retry_on_database_conflict
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_lifecycle import finish_lease
 from server.app.executors._lease_write_paths import (
+    _ORPHAN_WS_LOCK_KEY,
     _mark_result_stage,
     finish_events_post_processing,
 )
@@ -85,21 +93,32 @@ def finish_many(
     (record_job_update reads current stats, so N broadcasts are noise).
     """
     with write_transaction(repo.path) as conn:
-        # (workspace_id, run_id, job_id, queue_index, lease_id, result, timer):
-        # the first three are the counter keys the status triggers read —
-        # the full sort key #609 P1-2 pins (see the module docstring), with
-        # queue position for stability. Verdicts are re-assembled in QUEUE
-        # order below so each submitting thread gets its own item's answer.
-        resolved: list[tuple[str, str, str, int, str, ExecutionResult, Any]] = []
+        # (ws_lock_key, run_id, job_id, queue_index, lease_id, result, timer):
+        # the leading component is the ACTUAL class-82 lock key
+        # (hashtext('ws:' || workspace_id)::int, resolved in-batch from the
+        # lease's jobs row) — the same int the status trigger takes and the
+        # claim arms sort/advance by. NOT workspace TEXT: hashtext's
+        # signed-int order is unrelated to text order, so roughly half of
+        # all id pairs invert with no collision involved (a true collision
+        # instead collapses two ids onto ONE lock, where order is moot —
+        # codex round on #662) — text order would invert the acquisition
+        # order vs the claim side and re-open the ring. run_id/job_id
+        # keep the #609
+        # P1-2 tie-break; queue position for stability. Verdicts are
+        # re-assembled in QUEUE order below so each submitting thread gets
+        # its own item's answer.
+        resolved: list[tuple[int, str, str, int, str, ExecutionResult, Any]] = []
         for index, (lease_id, result, stage_timer) in enumerate(writes):
             lease = conn.execute(
-                "select l.job_id, j.workspace_id, j.run_id from executor_leases l"
+                "select l.job_id, j.workspace_id, j.run_id,"
+                " hashtext('ws:' || j.workspace_id)::int as ws_lock_key"
+                " from executor_leases l"
                 " left join jobs j on j.id = l.job_id where l.id = %s",
                 (lease_id,),
             ).fetchone()
             resolved.append(
                 (
-                    str(lease.get("workspace_id") or "") if lease else "",
+                    int(lease["ws_lock_key"]) if lease is not None else _ORPHAN_WS_LOCK_KEY,
                     str(lease.get("run_id") or "") if lease else "",
                     str(lease.get("job_id")) if lease else "",
                     index,
@@ -110,7 +129,7 @@ def finish_many(
             )
         resolved.sort(key=lambda entry: entry[:4])
         by_index: dict[int, bool] = {}
-        for _ws, _run, _job_id, index, lease_id, result, _timer in resolved:
+        for _ws_key, _run, _job_id, index, lease_id, result, _timer in resolved:
             by_index[index] = finish_lease(conn, lease_id, result, repo.data_dir)
     outcomes = [by_index.get(index, False) for index in range(len(writes))]
 

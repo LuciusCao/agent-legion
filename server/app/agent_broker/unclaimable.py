@@ -57,6 +57,7 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             """
             select r.execution_id, r.job_id, r.node_key, r.manifest_json,
                    r.workspace_id,
+                   hashtext('ws:' || r.workspace_id)::int as ws_lock_key,
                    d.definition_json::jsonb->>'runtime' as runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
@@ -79,10 +80,15 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
         ).fetchall()
         # #659 v82 discipline: the per-row failed-node writes below fire
         # the counter triggers per statement — walk workspaces ASCENDING
-        # (the scan's queued_at order is workload-ordered, not workspace
-        # ordered) so this sweeper cannot ring against claim batches on
-        # the cross-workspace multi-statement window.
-        for row in sorted(rows, key=lambda r: str(r.get("workspace_id") or "")):
+        # by the ACTUAL class-82 lock key (hashtext int — the scan's
+        # queued_at order is workload-ordered, not workspace ordered,
+        # and hashtext's signed-int order is unrelated to text order:
+        # roughly half of all id pairs invert with no collision involved
+        # — a true collision instead collapses two ids onto ONE lock,
+        # where order is moot), so this sweeper cannot ring against
+        # claim batches on the cross-workspace multi-statement window
+        # (codex round on #662).
+        for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
             try:
                 manifest = agent_claim_compatibility.live_claim_manifest(row)
             except ValueError as exc:

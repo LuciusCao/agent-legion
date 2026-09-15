@@ -63,11 +63,12 @@ Properties relied upon:
   (a) cross-workspace: a transaction whose successive statements touch
   different workspaces in different orders can ring against another such
   transaction; production's multi-statement jobs DML walks workspaces
-  ascending (all five sweep paths — broker claim sweep, stale-definition
-  sweep, unclaimable-model sweep, lease expiry, orphaned-job recovery —
-  plus finish batches and claim batches under their own ordering
-  disciplines), so the writer pair this needs does not exist in
-  production code.
+  ascending by the ACTUAL class-82 lock key — the hashtext int, not
+  workspace text (all five sweep paths — broker claim sweep,
+  stale-definition sweep, unclaimable-model sweep, lease expiry,
+  orphaned-job recovery — plus finish batches and claim batches under
+  their own ordering disciplines), so the writer pair this needs does
+  not exist in production code.
   (b) row-lock × advisory edge: these are AFTER triggers, so the ws
   advisory lock is taken AFTER the statement's jobs row locks. The ring
   closes whenever one transaction, having taken the ws gate with its

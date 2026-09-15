@@ -45,7 +45,8 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
     released: list[tuple[str, str]] = []
     with write_transaction(broker.database_dsn) as conn:
         rows = conn.execute(
-            "select * from agent_execution_requests"
+            "select *, hashtext('ws:' || workspace_id)::int as ws_lock_key"
+            " from agent_execution_requests"
             " where state in ('claimed', 'reporting') and heartbeat_at<%s"
             " for update skip locked",
             (cutoff,),
@@ -59,8 +60,15 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         # triggers per statement — walking workspaces in ASCENDING order
         # extends EXEC-CLAIM-LOCK-001's ordering to the sweeper, closing
         # the cross-workspace multi-statement ring window against claim
-        # batches (which walk the same ascending order).
-        for row in sorted(rows, key=lambda r: str(r["workspace_id"])):
+        # batches. The order is the ACTUAL class-82 lock key
+        # (hashtext('ws:' || id)::int, the same int the trigger takes and
+        # the claim batch's ws_lock_floor advances by) — NOT workspace
+        # text: hashtext's signed-int order is unrelated to text order,
+        # so roughly half of all id pairs invert with no collision
+        # involved (a true collision instead collapses two ids onto ONE
+        # lock, where order is moot) — a text-sorted sweep vs an
+        # int-sorted claim batch reopens the ring (codex round on #662).
+        for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
             lease_id = row["lease_id"]
             node_run_id = row["node_run_id"]
             lease = conn.execute(

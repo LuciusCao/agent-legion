@@ -202,12 +202,14 @@ def test_batch_claim_empty_queue_returns_empty(job_db) -> None:
 
 
 def test_batch_claim_defers_workspace_below_lock_floor(job_db) -> None:
-    """EXEC-CLAIM-LOCK-001 批形态（codex P1）：批事务按 workspace 升序累积
+    """EXEC-CLAIM-LOCK-001 批形态（codex P1）：批事务按锁键升序累积
     advisory 锁——队列序靠后的低序 workspace 候选让位到下一批（新事务、
     floor 重置），两个并发批因此共享同一全局锁序，不可能 AB-BA。
 
     场景：ws-b 的请求排在队首（先领，floor=ws-b），ws-a 的请求同批被
-    跳过（batch_lock_order），第二批（本用例的下一次调用）领到。"""
+    跳过（batch_lock_order），第二批（本用例的下一次调用）领到。ws-a/
+    ws-b 的文本序与 int 锁键序恰好一致（测试内断言钉住对齐——反序对
+    形态在 test_batch_claim_floor_follows_actual_lock_key 里）。"""
     seed_request(job_db, job_id="job-b", workspace_id="ws-b")
     seed_request(job_db, job_id="job-a", workspace_id="ws-a")
     # 钉死队列序：ws-b 在前。
@@ -220,6 +222,14 @@ def test_batch_claim_defers_workspace_below_lock_floor(job_db) -> None:
             "update agent_execution_requests set queued_at=%s where job_id='job-a'",
             (base + timedelta(seconds=1),),
         )
+        keys = {
+            str(row["workspace_id"]): int(row["k"])
+            for row in conn.execute(
+                "select workspace_id, hashtext('ws:' || workspace_id)::int as k"
+                " from jobs where id in ('job-a', 'job-b')"
+            ).fetchall()
+        }
+    assert keys["ws-a"] < keys["ws-b"], "fixture ids must keep text and lock-key order aligned"
     _register_worker()
     pool = broker(job_db.jobs_dir.parent)
 
@@ -228,6 +238,63 @@ def test_batch_claim_defers_workspace_below_lock_floor(job_db) -> None:
 
     assert [claim.workspace_id for claim in first] == ["ws-b"]
     assert [claim.workspace_id for claim in second] == ["ws-a"]
+
+
+def test_batch_claim_floor_follows_actual_lock_key(job_db) -> None:
+    """#662 自审 P3-4：ws_lock_floor 比较的是实际 class-82 锁键
+    （hashtext('ws:' || workspace_id)::int），不是 workspace 文本——
+    文本序与 int 锁键序相反的 ws 对（约一半 id 对如此，无需碰撞）上，
+    文本域的 floor 会让「文本较小、锁键较大」之后的候选下探，破坏批内
+    升序纪律。钉子：播种一对反序 id，队首（文本较小、锁键较大）先领后，
+    文本较大但锁键更小的候选必须被让位到下一批——同
+    test_try_claim_many_orders_by_actual_ws_lock_key 的 agent 批形态。"""
+    # 播种一对「文本序与 hashtext int 序相反」的 workspace id。
+    pool_ids: list[tuple[str, int]] = []
+    with job_db.connect() as conn:
+        for i in range(200):
+            wid = f"ws-f{i:03d}"
+            row = conn.execute("select hashtext('ws:' || %s)::int as k", (wid,)).fetchone()
+            assert row is not None
+            pool_ids.append((wid, int(row["k"])))
+    ws_low, ws_high = "", ""
+    for wid, key in sorted(pool_ids, key=lambda p: p[0]):
+        smaller = [w for w, other_key in pool_ids if w > wid and other_key < key]
+        if smaller:
+            ws_low = wid
+            ws_high = min(smaller)
+            break
+    assert ws_low and ws_high, "expected an inverted (text, lock-key) pair among 200 candidates"
+
+    seed_request(job_db, job_id="job-lo", workspace_id=ws_low)
+    seed_request(job_db, job_id="job-hi", workspace_id=ws_high)
+    # 钉死队列序：文本较小（job-lo）在前；并断言反序对成立（其锁键更大）。
+    base = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set queued_at=%s where job_id='job-lo'", (base,)
+        )
+        conn.execute(
+            "update agent_execution_requests set queued_at=%s where job_id='job-hi'",
+            (base + timedelta(seconds=1),),
+        )
+        keys = {
+            str(row["workspace_id"]): int(row["k"])
+            for row in conn.execute(
+                "select workspace_id, hashtext('ws:' || workspace_id)::int as k"
+                " from jobs where id in ('job-lo', 'job-hi')"
+            ).fetchall()
+        }
+    assert keys[ws_low] > keys[ws_high], "fixture must invert text vs lock-key order"
+    _register_worker()
+    pool = broker(job_db.jobs_dir.parent)
+
+    first = claim_batch(pool, "worker-1", None, None, limit=4)
+    second = claim_batch(pool, "worker-1", None, None, limit=4)
+
+    # 第一批：job-lo 领走；job-hi 的锁键更小（文本域会判「升序可领」），
+    # 必须按 int 域 floor 让位到第二批。
+    assert [claim.workspace_id for claim in first] == [ws_low]
+    assert [claim.workspace_id for claim in second] == [ws_high]
 
 
 def test_batch_claim_retries_once_on_deadlock(job_db, monkeypatch) -> None:
