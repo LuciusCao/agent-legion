@@ -304,3 +304,27 @@ def test_propagate_unknown_workspace_and_no_shared_are_404(client, shared_home) 
     )
     # Workspace exists but never opted into _shared.
     assert client.post(f"{_BASE}/propagate", json={}).status_code == 404
+
+
+def test_scoped_token_rejected_on_user_facing_gets(client, job_db, shared_home) -> None:
+    """codex P1（#674）：继承 admin 身份的 scoped token 对用户态 GET 也
+    必须 403（require_workspace_access 对 admin 直接放行、不看
+    scoped_workspace_id）——scoped identity 走它自己的 studio-agent
+    工具端点。绑定其它 workspace 的 run token 同理。"""
+    from server.app.auth import scoped_tokens
+
+    _create_workspace(client)
+    _seed_shared(shared_home)
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    for token in (
+        scoped_tokens.mint_scoped_token(job_db, admin_id),
+        scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id="other-ws"),
+    ):
+        scoped = client.__class__(client.app)
+        scoped.headers["authorization"] = f"Bearer {token}"
+        assert scoped.get(_BASE).status_code == 403
+        assert (
+            scoped.get(f"{_BASE}/file", params={"path": "references/style.md"}).status_code == 403
+        )
+    # 全量会话不受影响。
+    assert client.get(_BASE).status_code == 200

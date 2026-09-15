@@ -23,6 +23,7 @@ from server.app.services.skill_shared_propagate_plan import (
     generation_matches as _generation_matches,
 )
 from server.app.services.skill_shared_store import shared_edit_lock
+from server.app.services.skill_shared_sync import SharedSyncPlan, plan_shared_sync_locked
 from server.app.skills.skill_roots import workspace_skill_dir
 
 logger = logging.getLogger(__name__)
@@ -81,15 +82,21 @@ def propagate_one(
             skill=skill, status="failed", detail=f"shared source unreadable: {missing}"
         )
 
-    def _recheck_and_skip(repo: Path) -> bool:
-        # Runs INSIDE the skill repo lock (codex P2's critical section);
-        # the shared lock nests within it, preserving the skill → shared
-        # lock order. Generation first (codex P1): a mid-batch PUT swap is
-        # a retryable conflict for the whole batch, not a per-skill skip.
+    def _prepare(repo: Path) -> SharedSyncPlan | None:
+        # Runs INSIDE the skill repo lock; the shared lock nests within it
+        # (skill → shared order preserved). Generation recheck and the
+        # skill's sync plan are pinned in ONE shared-lock critical section
+        # (codex P1 on #674): a concurrent PUT needs the shared lock and
+        # therefore cannot swap the generation between the two, and the
+        # save below applies THIS plan instead of re-reading under a fresh
+        # lock. Returns None when the skill is already in sync (skip).
         with shared_edit_lock(shared_dir, editing.base_dir):
             if not _generation_matches(shared_dir, generation):
                 raise GenerationConflictError
-        return all(_head_matches(repo, source, shared_bytes[source]) for source in mapped_sources)
+            plan = plan_shared_sync_locked(shared_dir, skill_key, [])
+        if all(_head_matches(repo, source, shared_bytes[source]) for source in mapped_sources):
+            return None
+        return plan
 
     message = f"Sync shared materials: {', '.join(mapped_sources)}"
     try:
@@ -100,7 +107,7 @@ def propagate_one(
             # a race re-reads the winner's tags instead of colliding.
             next_repo_tag,
             message,
-            skip_if=_recheck_and_skip,
+            prepare=_prepare,
         )
     except GenerationConflictError as exc:
         # Generation changed mid-batch — abort with a retryable 409 for the

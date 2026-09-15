@@ -10,8 +10,9 @@ repo's HEAD copy still matches the shared source.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workspace_shared_materials_contracts import (
@@ -34,7 +35,14 @@ from server.app.settings import Settings
 def create_workspace_shared_materials_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     del settings  # the shared dir resolves from the skills root (HOME)
 
-    router = APIRouter()
+    router = APIRouter(
+        # Scoped identities (workspace-bound run tokens inherit the
+        # initiator's role — admin passes require_workspace_access on ANY
+        # workspace) must use their own studio-agent tool endpoints, never
+        # this user-session surface (codex P1 on #674; same guard class as
+        # the user-facing POST propagate).
+        dependencies=[Depends(reject_studio_agent_scope)]
+    )
 
     def _require_workspace(workspace_id: str) -> None:
         if job_db.get_workspace(workspace_id) is None:

@@ -52,9 +52,23 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def read_shared_source_bytes(shared_dir: Path, source: str) -> bytes:
+    """Plan-time source read WITH containment (codex P1, same rule as the
+    viewer): resolve and require the target to stay inside the resolved
+    ``_shared`` — an intermediate symlink must not smuggle host files into
+    skill repos. Raises OSError for unreadable OR escaping sources."""
+    root = shared_dir.resolve()
+    target = (root / source).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise OSError(f"source {source!r} escapes _shared via a symlink") from exc
+    return target.read_bytes()
+
+
 def source_digest(shared_dir: Path, source: str) -> str:
     try:
-        return _digest((shared_dir / source).read_bytes())
+        return _digest(read_shared_source_bytes(shared_dir, source))
     except OSError:
         return UNREADABLE
 
@@ -72,7 +86,7 @@ def read_source_bytes(shared_dir: Path, sources: Sequence[str]) -> dict[str, byt
     out: dict[str, bytes] = {}
     for source in sources:
         try:
-            out[source] = (shared_dir / source).read_bytes()
+            out[source] = read_shared_source_bytes(shared_dir, source)
         except OSError:
             continue
     return out

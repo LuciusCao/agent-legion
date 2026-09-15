@@ -59,7 +59,7 @@ from server.app.services.skill_repo_edit import (
     rollback_checked,
     run_edit_git,
 )
-from server.app.services.skill_shared_sync import plan_shared_sync
+from server.app.services.skill_shared_sync import SharedSyncPlan, plan_shared_sync
 from server.app.skills.skill_roots import default_skill_base_dir
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ class SkillEditingService:
         new_tag: str | Callable[[Path], str],
         message: str,
         *,
-        skip_if: Callable[[Path], bool] | None = None,
+        prepare: Callable[[Path], SharedSyncPlan | None] | None = None,
     ) -> dict[str, Any] | None:
         repo_dir = self._skill_dir(skill_key)
         with edit_lock_for(repo_dir, self.base_dir, self._runs_dir):
@@ -113,12 +113,15 @@ class SkillEditingService:
             # propagation) re-judge the skip and resolve the tag INSIDE the
             # lock, so the waiter decides against the state the winner just
             # committed instead of failing on a stale tag conflict. The
-            # result is None exactly when skip_if fired (callers passing no
-            # skip_if always get the save dict).
-            if skip_if is not None and skip_if(repo_dir):
+            # result is None exactly when prepare returned None (callers
+            # passing no prepare always get the save dict).
+            sync_plan = prepare(repo_dir) if prepare is not None else None
+            if prepare is not None and sync_plan is None:
                 return None
             tag = new_tag(repo_dir) if callable(new_tag) else new_tag
-            return self._save_version_locked(skill_key, repo_dir, files, tag, message)
+            return self._save_version_locked(
+                skill_key, repo_dir, files, tag, message, sync_plan=sync_plan
+            )
 
     def _save_version_locked(
         self,
@@ -127,6 +130,8 @@ class SkillEditingService:
         files: list[SkillFileWrite],
         new_tag: str,
         message: str,
+        *,
+        sync_plan: SharedSyncPlan | None = None,
     ) -> dict[str, Any]:
         if not skill_repo.is_git_repo(repo_dir):
             logger.error("skill %s has no in-place git repo: %s", skill_key, repo_dir)
@@ -145,7 +150,11 @@ class SkillEditingService:
         # missing source or colliding hand-supplied path = pre-write 422.
         # No _shared dir = no-op. SkillFileWrite IS a tuple[str, str] (a
         # NamedTuple), so it passes plan_shared_sync's Sequence directly.
-        sync_plan = plan_shared_sync(self.base_dir, skill_key, files)
+        # A caller-pinned plan (propagation, codex P1 on #674: recheck and
+        # plan fixed in one shared-lock critical section) is used as-is
+        # instead of re-reading the shared state under a fresh lock.
+        if sync_plan is None:
+            sync_plan = plan_shared_sync(self.base_dir, skill_key, files)
         for source, shared_content in sync_plan.files:
             targets.extend(
                 self._resolve_targets(repo_dir, [SkillFileWrite(source, shared_content)])

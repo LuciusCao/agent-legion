@@ -340,3 +340,52 @@ def test_nothing_to_commit_gets_friendly_detail(ws_dir, monkeypatch) -> None:
     (entry,) = propagate_shared_materials(_WS).results
     assert entry.status == "failed"
     assert entry.detail == "版本已被并发更新，请刷新后重试（数据未受影响）"
+
+
+def test_save_uses_the_pinned_plan_and_never_rereads_shared(ws_dir, monkeypatch) -> None:
+    """codex P1（#674）：代次复核与保存所用同步计划固定在同一临界步骤
+    ——save 不得再在独立的锁里重读共享状态（外层的 plan_shared_sync 在
+    传播期间被调用即失败）。"""
+    _seed_shared(
+        ws_dir,
+        [{"source": "references/style.md", "skills": ["skill-a"]}],
+        {"references/style.md": "# v2\n"},
+    )
+    repo = ws_dir / _WS / "skill-a"
+    _make_skill_repo(repo, {"references/style.md": "# v1\n"})
+
+    def forbidden_reread(*args, **kwargs):
+        raise AssertionError("save re-read the shared state instead of the pinned plan")
+
+    monkeypatch.setattr("server.app.services.skill_editing.plan_shared_sync", forbidden_reread)
+    (entry,) = propagate_shared_materials(_WS).results
+    assert entry.status == "synced"
+    assert _git(repo, "show", "HEAD:references/style.md") == "# v2"
+
+
+def test_planning_rejects_intermediate_symlink_escape(ws_dir, tmp_path) -> None:
+    """codex P1（#674）：传播计划期的源读取同样做 containment——
+    `_shared/references -> 外部` 的 source 计为不可读（failed），外部
+    文件不会进 skill 仓库。"""
+    shared = ws_dir / _WS / "_shared"
+    shared.mkdir(parents=True)
+    (shared / "map.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "materials": [{"source": "references/style.md", "skills": ["skill-a"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    outside = tmp_path / "private"
+    outside.mkdir()
+    (outside / "style.md").write_text("smuggled\n", encoding="utf-8")
+    (shared / "references").symlink_to(outside)
+    repo = ws_dir / _WS / "skill-a"
+    _make_skill_repo(repo, {"references/style.md": "# v1\n"})
+
+    (entry,) = propagate_shared_materials(_WS).results
+    assert entry.status == "failed"
+    assert "unreadable" in (entry.detail or "")
+    assert _git(repo, "show", "HEAD:references/style.md") == "# v1"

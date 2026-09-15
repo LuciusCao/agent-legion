@@ -65,7 +65,7 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
             result = editing.save_version(skill_key, files, payload.new_tag, payload.message)
         except JobServiceError as exc:
             raise_job_http_error(exc)
-        assert result is not None  # None only when skip_if fires (not used here)
+        assert result is not None  # None only when prepare skips (not used here)
         return SkillSaveVersionResponse(**result)
 
     # Workspace-scoped shared-material tools (#633): workspace-bound (the

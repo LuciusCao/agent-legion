@@ -177,40 +177,62 @@ def plan_shared_sync(
     """
     shared_dir = shared_dir_for(base_dir, skill_key)
     with shared_edit_lock(shared_dir, base_dir):
-        shared_map = load_shared_map(shared_dir)
-        if shared_map is None:
-            return SharedSyncPlan()
-        skill_name = skill_key.split("/", 1)[1]
-        mapped = [m for m in shared_map.materials if skill_name in m.skills]
-        if not mapped:
-            return SharedSyncPlan()
-        supplied = {path for path, _ in files}
-        conflicts = sorted(supplied & {m.source for m in mapped})
-        if conflicts:
-            raise _invalid(
-                [
-                    {
-                        "path": path,
-                        "error": "path is a mapped shared material (the shared copy wins); "
-                        "remove it from the save payload",
-                    }
-                    for path in conflicts
-                ]
-            )
-        errors: list[dict[str, str]] = []
-        injected: list[tuple[str, str]] = []
-        for material in mapped:
-            try:
-                # strict (codex R3 P1): an oversized shared file fails the
-                # save as an unreadable source instead of committing a
-                # silently truncated copy into the skill repo.
-                content = read_shared_text(shared_map.shared_dir / material.source, strict=True)
-            except (OSError, UnicodeDecodeError) as exc:
-                errors.append(
-                    {"path": material.source, "error": f"shared source unreadable: {exc}"}
-                )
-                continue
-            injected.append((material.source, content))
-        if errors:
-            raise _invalid(errors)
-        return SharedSyncPlan(files=tuple(injected))
+        return plan_shared_sync_locked(shared_dir, skill_key, files)
+
+
+def _contained_source(shared_dir: Path, source: str) -> Path:
+    """Resolve a mapped source and require it to stay inside the resolved
+    ``_shared`` dir (codex P1, same containment as the viewer): an
+    intermediate symlink (``_shared/references -> /srv/private``) passes
+    every lexical check, and without this the sync would commit host files
+    into skill repos."""
+    root = shared_dir.resolve()
+    target = (root / source).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise OSError(f"source {source!r} escapes _shared via a symlink") from exc
+    return target
+
+
+def plan_shared_sync_locked(
+    shared_dir: Path, skill_key: str, files: Sequence[tuple[str, str]]
+) -> SharedSyncPlan:
+    """Lock-free inner of ``plan_shared_sync``: the caller already holds
+    the ``_shared`` edit lock (propagation pins its generation recheck and
+    this plan into ONE critical section, codex P1 on #674)."""
+    shared_map = load_shared_map(shared_dir)
+    if shared_map is None:
+        return SharedSyncPlan()
+    skill_name = skill_key.split("/", 1)[1]
+    mapped = [m for m in shared_map.materials if skill_name in m.skills]
+    if not mapped:
+        return SharedSyncPlan()
+    supplied = {path for path, _ in files}
+    conflicts = sorted(supplied & {m.source for m in mapped})
+    if conflicts:
+        raise _invalid(
+            [
+                {
+                    "path": path,
+                    "error": "path is a mapped shared material (the shared copy wins); "
+                    "remove it from the save payload",
+                }
+                for path in conflicts
+            ]
+        )
+    errors: list[dict[str, str]] = []
+    injected: list[tuple[str, str]] = []
+    for material in mapped:
+        try:
+            # strict (codex R3 P1): an oversized shared file fails the
+            # save as an unreadable source instead of committing a
+            # silently truncated copy into the skill repo.
+            content = read_shared_text(_contained_source(shared_dir, material.source), strict=True)
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append({"path": material.source, "error": f"shared source unreadable: {exc}"})
+            continue
+        injected.append((material.source, content))
+    if errors:
+        raise _invalid(errors)
+    return SharedSyncPlan(files=tuple(injected))
