@@ -441,3 +441,23 @@ def test_propagate_via_scoped_token(client_factory, job_db, shared_home, tmp_pat
             ).status_code
             == 404
         )
+
+
+def test_get_skips_symlinked_material_root(client_factory, job_db, shared_home, tmp_path) -> None:
+    """主 agent P1（#633 存量）：`_shared/references -> 外部目录` 时
+    folder.is_dir() 跟随 symlink 且 rglob 会遍历根 symlink——scoped GET
+    是唯一内联返回内容的读面，外部文件必须不可见（map 仍正常返回）。"""
+    with client_factory(fresh=True) as client:
+        _create_workspace(client)
+        scoped = _scoped(client, job_db)
+        shared = shared_home / "_shared"
+        shared.mkdir(parents=True)
+        (shared / "map.json").write_text(json.dumps(_MAP), encoding="utf-8")
+        outside = tmp_path / "private"
+        outside.mkdir()
+        (outside / "prompt-style.md").write_text("smuggled\n", encoding="utf-8")
+        (shared / "references").symlink_to(outside)
+
+        payload = scoped.get(f"{_TOOLS}/workspaces/{_WS}/skills-shared").json()
+        assert payload["map"] == _MAP
+        assert payload["files"] == []

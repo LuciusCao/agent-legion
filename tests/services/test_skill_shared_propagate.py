@@ -457,3 +457,30 @@ def test_propagate_rejects_shared_dir_symlink(ws_dir, tmp_path) -> None:
         propagate_shared_materials(_WS)
     repo = ws_dir / _WS / "skill-a"
     assert _git(repo, "show", "HEAD:references/style.md") == "# v1"
+
+
+def test_non_utf8_source_fails_with_explicit_reason(ws_dir) -> None:
+    """主 agent P3：非 UTF-8 映射源（只能本地 FS 放入）永远无法与同步
+    副本字节一致——前置拒绝并给出「非 UTF-8 无法同步」的明确 detail，
+    而不是 commit 无变化失败后被误改为「并发更新请重试」。"""
+    shared = ws_dir / _WS / "_shared"
+    (shared / "references").mkdir(parents=True)
+    (shared / "map.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "materials": [{"source": "references/raw.md", "skills": ["skill-a"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (shared / "references" / "raw.md").write_bytes(b"\xff\xfe invalid utf8\n")
+    repo = ws_dir / _WS / "skill-a"
+    _make_skill_repo(repo, {"references/raw.md": "# v1\n"}, tags=("v1.0.0",))
+
+    (entry,) = propagate_shared_materials(_WS).results
+    assert entry.status == "failed"
+    assert entry.detail == "源文件非 UTF-8，无法同步：references/raw.md"
+    # 不打空气 tag：仓库保持原样。
+    assert _git(repo, "show", "HEAD:references/raw.md") == "# v1"
+    assert _git(repo, "tag", "--list") == "v1.0.0"

@@ -40,6 +40,14 @@ def _head_matches(repo_dir: Path, source: str, shared_bytes: bytes) -> bool:
     return result.returncode == 0 and result.stdout == shared_bytes
 
 
+def _is_valid_utf8(data: bytes) -> bool:
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 _CONCURRENCY_DETAIL = "版本已被并发更新，请刷新后重试（数据未受影响）"
 
 # save_version 的 commit 调用以 "-c" 身份配置开头，SkillGitError 按
@@ -79,6 +87,19 @@ def propagate_one(
     if missing is not None:
         return PropagateSkillResult(
             skill=skill, status="failed", detail=f"shared source unreadable: {missing}"
+        )
+    # A non-UTF-8 mapped source (only placeable via the local FS — the PUT
+    # boundary takes text) can NEVER byte-match its synced copy: the sync
+    # commits the decode-with-replacement text, so drift stays pending
+    # forever and the save fails on nothing-to-commit — which the friendly
+    # detail would mislabel as a concurrency conflict (retry never helps).
+    # Refuse it up front with the real reason.
+    non_utf8 = next((s for s in mapped_sources if not _is_valid_utf8(shared_bytes[s])), None)
+    if non_utf8 is not None:
+        return PropagateSkillResult(
+            skill=skill,
+            status="failed",
+            detail=f"源文件非 UTF-8，无法同步：{non_utf8}",
         )
 
     def _prepare(repo: Path) -> SharedSyncPlan | None:
