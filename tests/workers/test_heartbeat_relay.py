@@ -625,3 +625,55 @@ def test_service_lifespan_owns_relay_thread_lifecycle(tmp_path: Path) -> None:
     while len(_relay_threads()) > baseline and time.monotonic() < deadline:
         time.sleep(0.05)
     assert len(_relay_threads()) == baseline
+
+
+def test_skipped_shards_rotate_to_the_head_next_tick() -> None:
+    """codex #662 review P1：槽位被上一拍的慢请求跨拍占用时，固定从快照
+    首部准入会让同一尾部每拍被跳过（registry 插入序稳定）——饿死到租约
+    过期。轮转游标把本拍第一个被跳过的分片变成下一拍的准入头：持续
+    缺槽时尾部延迟变为轮转而非饥饿。"""
+    from worker.relay_thread_limiter import ShardThreadLimiter
+
+    limiter = ShardThreadLimiter(max_inflight=1)
+    # 模拟上一拍遗留的一个占用槽：占住唯一槽位。
+    assert limiter.start(lambda: None) is not None
+
+    # 本拍有 3 个分片：index 0 占到唯一槽位（上一拍的遗留），1/2 被跳过。
+    limiter.note_skip(1)
+    limiter.note_skip(2)
+    # take_rotation 消费游标：下一拍从第一个被跳过的分片（1）开始。
+    assert limiter.take_rotation(3) == 1
+    # 游标一次性消费：干净拍重置回头部。
+    assert limiter.take_rotation(3) == 0
+
+    # 无跳过时恒为 0；分片数 < 2 时轮转无意义。
+    limiter.note_skip(5)
+    assert limiter.take_rotation(1) == 0
+    assert limiter.take_rotation(0) == 0
+    # 越界索引取模收敛。
+    limiter.note_skip(4)
+    assert limiter.take_rotation(3) == 1
+
+
+def test_beat_sharded_rotation_feeds_limiter_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """端到端：快照超过可用槽位时，被跳过分片的位置进入游标；下一拍
+    的准入顺序从那里开始（分片内容随之轮转）。"""
+    from worker import relay_shards
+    from worker.relay_thread_limiter import ShardThreadLimiter
+
+    monkeypatch.setattr(relay_shards, "RELAY_BEAT_SHARD", 2)
+    monkeypatch.setattr(relay_shards, "BATCH_BEAT_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(relay_shards, "_JOIN_MARGIN_SECONDS", 0.1)
+
+    # 6 个租约 = 3 个分片；限制器只有 1 个槽且先被占用。
+    limiter = ShardThreadLimiter(max_inflight=1)
+    assert limiter.start(lambda: None) is not None
+
+    leases = [(f"exec-{i}", f"lease-{i}") for i in range(6)]
+    outcome = relay_shards.beat_sharded(_FakeClient(), leases, lambda _m: None, limiter)
+    # 全部分片被跳过（槽位被遗留占用）：verdicts 为空但非 None（跳过计
+    # 为 failures 而非 404 降级），游标记录第一个跳过位。
+    assert outcome.verdicts == ([], [], [])
+    assert outcome.degraded is False
+    # 首个跳过位（轮转后 index 0）成为下一拍的准入头。
+    assert limiter.take_rotation(3) == 0

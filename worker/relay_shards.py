@@ -78,11 +78,23 @@ def beat_sharded(
     limiter: ShardThreadLimiter,
 ) -> ShardedBeat:
     """Beat every shard in parallel; verdicts merge, failures never sink
-    neighbours (see ShardedBeat for the outcome shape)."""
+    neighbours (see ShardedBeat for the outcome shape).
+
+    Admission rotates (codex #662 review): an overstaying socket from the
+    previous tick keeps its slot, so a saturated snapshot can have fewer
+    than MAX_INFLIGHT_SHARDS available — admitting always from shard 0
+    would starve the SAME tail every tick (stable insertion order) until
+    its leases expire. The limiter's fairness cursor rotates the admission
+    start to the first shard skipped last tick, so starvation becomes
+    round-robin delay instead. Skipped shards still read as unknown-round
+    (retry semantics unchanged)."""
     shards = [
         leases[start : start + RELAY_BEAT_SHARD]
         for start in range(0, len(leases), RELAY_BEAT_SHARD)
     ]
+    if len(shards) > 1:
+        rotation = limiter.take_rotation(len(shards))
+        shards = shards[rotation:] + shards[:rotation]
     lost: list[tuple[str, str]] = []
     settled: list[str] = []
     cancelled: list[str] = []
@@ -122,7 +134,7 @@ def beat_sharded(
             cancelled.extend(body.get("cancelled_execution_ids", []))
 
     threads: list[threading.Thread] = []
-    for shard in shards:
+    for index, shard in enumerate(shards):
         thread = limiter.start(partial(beat_one_shard, shard))
         if thread is None:
             # Every occupied slot belongs to an earlier request that has not
@@ -131,6 +143,7 @@ def beat_sharded(
             # would recreate the resource leak this limiter prevents.
             with lock:
                 failures += 1
+                limiter.note_skip(index)
             log(f"心跳 relay 批量拍跳过（{len(shard)} 租约）：未完成分片已达上限")
             continue
         threads.append(thread)

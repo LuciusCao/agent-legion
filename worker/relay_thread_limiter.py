@@ -28,10 +28,39 @@ MAX_INFLIGHT_SHARDS = 128
 
 
 class ShardThreadLimiter:
-    """Bound request threads across relay ticks, not just within one beat."""
+    """Bound request threads across relay ticks, not just within one beat.
+
+    Fairness cursor (codex #662 review): overstaying sockets keep their
+    slots across ticks, so a saturated snapshot may admit fewer shards
+    than MAX_INFLIGHT_SHARDS. ``note_skip`` records the admission index
+    of each shard the tick could NOT start; ``take_rotation`` returns
+    where the next tick's admission should begin — the first skipped
+    shard becomes the head, so a persistent slot deficit delays shards
+    round-robin instead of starving the same tail to lease expiry.
+    """
 
     def __init__(self, max_inflight: int = MAX_INFLIGHT_SHARDS) -> None:
         self._slots = threading.BoundedSemaphore(max_inflight)
+        self._lock = threading.Lock()
+        self._first_skip: int | None = None
+
+    def note_skip(self, admission_index: int) -> None:
+        """Record one shard the tick could not admit (caller holds the
+        round's result lock; this only needs its own cursor lock for the
+        cross-tick read in take_rotation)."""
+        with self._lock:
+            if self._first_skip is None or admission_index < self._first_skip:
+                self._first_skip = admission_index
+
+    def take_rotation(self, shard_count: int) -> int:
+        """The next tick's admission start: the first skipped shard's index,
+        consumed once (a clean tick with no skips resets to the head)."""
+        with self._lock:
+            skip = self._first_skip
+            self._first_skip = None
+        if skip is None or shard_count < 2:
+            return 0
+        return skip % shard_count
 
     def start(self, target: Callable[[], None]) -> threading.Thread | None:
         """Start ``target`` when a slot is free; release only on real exit."""
