@@ -131,3 +131,45 @@ fn json_tool_not_enabled_reports_not_enabled() {
             .unwrap();
     assert_eq!(spec["entries"][0]["content"], "needs fixing");
 }
+
+#[test]
+fn json_tool_oversized_file_is_rejected_before_loading() {
+    // #637: load_json's whole-file read_to_string is size-bounded — an
+    // over-cap JSON file (5 MiB against the 4 MiB limit) fails fast at the
+    // metadata check with a bash-extraction hint, before any byte is read
+    // into memory or parsed.
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    let mut content = vec![b'x'; 5 * 1024 * 1024];
+    content.push(b'\n');
+    std::fs::write(cwd.join("big.json"), &content).expect("failed to write test file");
+    write(&cwd.join("prompt.md"), "Query the spec.");
+    write(
+        &cwd.join("fixture.json"),
+        r#"{
+  "responses": [
+    {"content": [{"type": "toolCall", "name": "json", "arguments": {"op": "get", "path": "big.json", "query": "a"}}]},
+    {"content": [{"type": "text", "text": "done"}], "stopReason": "stop"}
+  ]
+}"#,
+    );
+
+    let output = run_velites(cwd, "read,write,bash,json");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let events = tool_events(&output.stdout);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["isError"], true);
+    let text = events[0]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("too large"),
+        "missing size-limit error: {text}"
+    );
+    assert!(
+        text.contains("Extract the needed fields via bash"),
+        "missing extraction hint: {text}"
+    );
+}

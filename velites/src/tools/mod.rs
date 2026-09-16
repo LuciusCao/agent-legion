@@ -113,6 +113,10 @@ pub enum ToolError {
     InvalidArgs(String),
     #[error("command blocked by velites guard: {0}")]
     CommandBlocked(String),
+    /// 读入内容超过内存上限（#637）——文件大小 / 捕获量在读前检查，
+    /// 超限报错并提示分段读取的替代路径，而不是把内容堆进内存。
+    #[error("content too large for in-memory processing: {0}")]
+    TooLarge(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

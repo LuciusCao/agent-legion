@@ -38,6 +38,18 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         .map(|n| n as usize);
 
     let resolved = resolve_readable(&ctx.cwd, &ctx.read_roots, path)?;
+    // #637 内存防线：read_to_string 会把整个文件读进内存——行级
+    // offset/limit 只是选取，挡不住读入本身（50KB 展示截断发生在读取
+    // 之后）。读前按 metadata 检查大小，超限直接报错并提示用 bash
+    // 分段读取。
+    let size = std::fs::metadata(&resolved)?.len();
+    if size > truncate::MAX_CAPTURE_BYTES {
+        return Err(ToolError::TooLarge(format!(
+            "{path} is {}, over the {} whole-file limit of the read tool. Read it in chunks via bash, e.g. `sed -n '1,2000p' {path}`",
+            truncate::format_size(usize::try_from(size).unwrap_or(usize::MAX)),
+            truncate::MAX_CAPTURE_BYTES_DISPLAY,
+        )));
+    }
     let text = std::fs::read_to_string(&resolved)?;
     // Same counting as truncate::split_lines: a trailing newline does not
     // add an empty line.

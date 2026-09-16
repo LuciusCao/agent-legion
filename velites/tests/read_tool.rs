@@ -159,3 +159,39 @@ async fn read_offset_past_eof_with_huge_limit_selects_nothing() {
     assert!(!output.is_error);
     assert_eq!(result_text(&output), "");
 }
+
+#[tokio::test]
+async fn read_oversized_file_is_rejected_before_loading() {
+    // #637: the whole-file read_to_string is bounded — an over-cap file
+    // fails fast at the metadata check (a 5 MiB file against the 4 MiB
+    // limit), before any byte is read into memory, and the error tells the
+    // model to switch to chunked bash reads. A file just under the cap
+    // still loads normally (the limit is inclusive of exactly 4 MiB).
+    let dir = tempfile::tempdir().unwrap();
+    let mut content = vec![b'x'; 5 * 1024 * 1024];
+    content.push(b'\n');
+    std::fs::write(dir.path().join("huge.txt"), &content).unwrap();
+
+    let output = ToolKind::Read
+        .execute(&serde_json::json!({"path": "huge.txt"}), &ctx(dir.path()))
+        .await;
+    assert!(output.is_error, "over-cap file must be rejected");
+    let text = result_text(&output);
+    assert!(
+        text.contains("too large"),
+        "missing size-limit error: {text}"
+    );
+    assert!(
+        text.contains("sed -n '1,2000p' huge.txt"),
+        "missing chunked-read hint: {text}"
+    );
+
+    // Exactly at the cap: allowed (the error is strictly greater-than).
+    let dir = tempfile::tempdir().unwrap();
+    let at_cap = vec![b'y'; 4 * 1024 * 1024];
+    std::fs::write(dir.path().join("cap.txt"), &at_cap).unwrap();
+    let output = ToolKind::Read
+        .execute(&serde_json::json!({"path": "cap.txt"}), &ctx(dir.path()))
+        .await;
+    assert!(!output.is_error, "exactly-at-cap file must load");
+}

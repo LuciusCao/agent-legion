@@ -8,11 +8,28 @@
 //! the end (bash output, where errors and final results live). Neither
 //! splits a line, except the tail edge case where the single last line
 //! alone exceeds the byte limit: then the tail of that line is kept.
+//!
+//! [`MAX_CAPTURE_BYTES`] is a different kind of limit — not display
+//! truncation but the read-side in-memory cap shared by the bash output
+//! capture and the `read`/`json` whole-file loads (see its doc).
 
 pub const DEFAULT_MAX_LINES: usize = 2000;
 pub const DEFAULT_MAX_BYTES: usize = 50 * 1024;
 /// Human-readable form of [`DEFAULT_MAX_BYTES`] used in notices.
 pub const MAX_BYTES_DISPLAY: &str = "50KB";
+
+/// 读入内存的字节上限：bash 输出捕获（每条 pipe）与 `read`/`json` 整文件
+/// 读入共用。
+///
+/// 背景（#637）：曾发生单个 velites 进程在数秒内无界分配出远超物理内存
+/// 的堆、导致机器被系统内存清场（jetsam/OOM）的事故——根因是无界读取
+/// （bash 子进程输出全量累积进内存），展示层的 50KB 截断发生在读取
+/// 之后，挡不住读取本身。4 MiB 远大于展示上限，且与 ACP terminal 侧的
+/// 输出字节上限（`DEFAULT_OUTPUT_BYTE_LIMIT`，4 MiB）同值。bash 侧触顶
+/// 后保留头部、其余字节只计数不保留；文件侧超限在读前直接报错。
+pub const MAX_CAPTURE_BYTES: u64 = 4 * 1024 * 1024;
+/// Human-readable form of [`MAX_CAPTURE_BYTES`] used in notices.
+pub const MAX_CAPTURE_BYTES_DISPLAY: &str = "4MB";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TruncatedBy {

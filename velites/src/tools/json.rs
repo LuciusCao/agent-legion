@@ -68,6 +68,16 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
 /// Resolve one file against the sandbox and parse it as JSON.
 fn load_json(ctx: &ToolContext, path: &str) -> Result<(PathBuf, Value), ToolError> {
     let resolved = resolve_in_cwd(&ctx.cwd, path)?;
+    // #637 内存防线：与 read 工具同一大小上限（read_to_string 整文件
+    // 读入）；超限直接报错，提示改走 bash 提取字段。
+    let size = std::fs::metadata(&resolved)?.len();
+    if size > truncate::MAX_CAPTURE_BYTES {
+        return Err(ToolError::TooLarge(format!(
+            "{path} is {}, over the {} whole-file limit of the json tool. Extract the needed fields via bash (e.g. jq/python) instead",
+            truncate::format_size(usize::try_from(size).unwrap_or(usize::MAX)),
+            truncate::MAX_CAPTURE_BYTES_DISPLAY,
+        )));
+    }
     let raw = std::fs::read_to_string(&resolved)?;
     let value: Value = serde_json::from_str(&raw)
         .map_err(|err| ToolError::InvalidArgs(format!("{path} is not valid JSON: {err}")))?;
