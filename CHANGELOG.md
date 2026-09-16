@@ -4,11 +4,45 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
-## [0.7.12] - 2026-09-14
+## [0.7.12] - 2026-09-16
 
-执行平面收尾与系统性还债版本（纯后端线，不涉及用户交互）。
+执行平面收尾与系统性还债版本；发布窗口内合入 #659 状态计数死锁
+修复与 Studio 交互线（#658/#660/#664/#666/#667/#668/#643+#673）。
 
 ### Fixed
+- 状态计数触发器的跨语句死锁环（issue #659，v82 迁移）：v77（#437）
+  只修了单条语句内的锁序——claim 批量在一个事务内逐条 promote
+  （psycopg executemany），事务多次触发计数触发器，每次各自按
+  (key, status) 排序取计数行锁，跨事务的锁集合序列随业务序变化，
+  claim 与 rerun 在同一 workspace 的热点计数行上闭合 AB-BA 环。
+  生产表象：claim/心跳/rerun 每夜数百次 500（PG 死锁检测 + 客户端
+  重试自愈的稳定性债务）；result 409 波是下游症状（首次 POST 已
+  提交但响应丢失在锁队列，重试撞终态，无工作丢失）。修复：两族
+  触发器入口先取逐 key 事务级 advisory lock——双层层级（ws 级
+  class 82 先于维度级 class 83，类号拆分防 hashtext 碰撞坍缩层级），
+  按实际锁键序（hashtext int，非文本序）排序；五路 sweep 与
+  claim/finish 批统一按实际 class-82 锁键升序行走；relay 分片准入
+  跨拍公平轮转（持续缺槽下 round-robin 而非饿死同一尾部到租约
+  过期）。残留窗口（跨 workspace 语句序列环、AFTER 触发器行锁×
+  advisory 边）如实记录，毫秒级 + 40P01 重试吸收。
+- Studio 会话 prompt 超时僵尸化（issue #664）：`_prompt_loop` 的
+  `wait_for` 超时只取消客户端本地协程、不向 agent 送
+  `session/cancel`——旧轮仍在跑，后续每条消息被 another-turn 拒绝，
+  会话停在 idle 令 ResumeBar（只接受 closed/error）不可达，无自救
+  通道。修复（`prompt_turn.py` 三级阶梯）：超时即送 session/cancel
+  并等待 30s 宽限——守约结束正常收尾，宽限耗尽强制置 error 会话、
+  恢复链可达；on_turn_end 回归单轮容错、自动 cancel 前先结清挂起
+  审批（#665 评审轮）。
+- Studio 发布状态显示失真三连（issue #666）：发布存库的 revision
+  YAML 是 canonical 重建（丢注释、重排 key、补 loader 默认值），
+  前端 dirty 纯文本对比 → 发布后基线 ≠ 草稿原文 → dirty 永真且刷新
+  甩不掉——发布原文 flag 覆盖根因（成功后跳过 preserve、强制 reset
+  到新基线，两道防陈旧护栏）；画布角标与顶栏「未发布」标识统一改吃
+  compare 计数（无变更不渲染）；顶层 execution 误报加豁免（节点
+  自配齐的合法场景不再提示）。
+- `test_thought_chunks_persist_as_coalesced_thought_message` 的
+  CI postgres 分片间歇失败（issue #326）：thought chunks 落库的
+  等待窗口改为 bounded wait，与 #525 同族的裸读竞态修法。
 - supervisor 心跳 relay 的迟到心跳噪音（issue #590）：执行完成提交后、
   executor 把租约从快照摘除前的 2s 节流窗口内，relay 仍按旧快照给已
   终结租约发心跳，Host 正确拒绝（not_owned）——0.7.7 后实测放大到
@@ -53,6 +87,18 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   迁移文档），下一版本周期移除（config.rs + lib.rs gateway 兜底分支）。
   该文件仅供直调 CLI 兜底、结构上进不了 Worker 模型发现——新用户照旧
   教程配置后 Worker 完全看不见，表现为「任务无人认领」类困惑。
+- Studio 对话配置区归位（issue #658）：权限模式/模型/思考档位配置条
+  从 SessionBar 正下方移至状态栏与输入框之间（顶部 1px 分隔线 +
+  浅灰底，读作输入区上方的低权重 footer 带，与输入框同视觉组）；
+  kimi agent 经 `session_modes` 与 `category: 'mode'` config option
+  双通道重复广告权限模式、后者掉进「高级设置」兜底折叠——modes 通道
+  存在时去重该条目。
+- Studio DAG 连线三态语义改实（issue #668）：常态边的真实渲染是
+  `DagEdge` 对 `highlighted: false` 一律置灰覆盖（#d1d5db/2px/
+  opacity 0.4），`buildRfEdges` 写的常量从未生效——缺省（undefined）
+  改为常态透传原始 style，`false` 仅表示高亮模式内置灰；常态边
+  #6b7280/2.5px/全亮，ghost 边 0.5 透明度真正生效；agent 面板开关
+  从 Workspace 局部 state 提升到顶栏（跨视图保持）。
 
 ### Added
 - agent 节点执行超时开放配置（issue #550）：保留执行键
@@ -63,6 +109,19 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   （合并默认同样取 1800 而非 code 节点的 600——升级不得静默砍掉存量
   agent 运行的超时预算）。撰写/审核类 agent 跑不完 30 分钟时，运维可
   经 workspace 覆盖调整；Studio 检查器卡片留待前端跟进。
+- Studio agent 编辑动作闭环（issue #667）：聊天区 workflow 草稿卡
+  直接「发布新版本 / 保存运行配置」（与顶栏同一 canPublish 门控、
+  同一发布评审对话框；卡片草稿 ≠ 编辑器 YAML 时提示以编辑器为准）；
+  agent 改动节点可定位——画布选中即视口居中（`DagSelectionViewport`），
+  聊天区改动行点击经定位 nonce 定位到对应节点（同节点重复请求也能
+  切换）。
+- 共享材料 Studio 可视化与一键传播（issue #643/#673）：用户态只读
+  视图（锁一致快照 + 单文件读取；drift 四态徽标——一致/待同步/
+  仓库缺失/Skill 缺失，`git show HEAD` 裸字节比对零工作树写；viewer
+  可读、非成员 404）经顶栏 Drawer 呈现（参考材料/脚本/其他分组，
+  行内嵌映射 skill 的 drift 徽标）；一键传播把共享材料变更推回映射
+  skill（传播代次复核与锁内打 tag、workspace 目录与 symlink 逃逸
+  多重封堵、传播 MCP 调用专用超时——codex 多轮评审修复）。
 
 ### Performance
 - artifact 校验回读的信任上报抽检（issue #356 方案 B）：Worker 直传
@@ -76,6 +135,12 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   比对），与抽检比例无关。旋钮
   `agent_workers.artifact_spot_check_percent`（0 = 裸键全信任
   kill-switch，100 = #356 前行为），instance settings 管理。
+- studio-agent MCP 常驻上下文瘦身（issue #660）：34 个工具的
+  description/schema 精简 + outputSchema 消除——chat 会话的 tools
+  常驻部分 31,978 → 16,967 字符（−47%，~10k → ~5k tokens，随会话
+  轮次放大）；authoring guide 分节，`get_authoring_guide` 从零创作
+  场景单次调用 −80%。五条 load-bearing 红线全保留（full-payload
+  RESET 警告、CAS 三要素、永不自行发布、capability 门控、调用顺序）。
 
 ### Observability
 - Worker 侧结构化事件分流落盘（issue #510）：#490 的单行 JSON 事件
@@ -106,6 +171,8 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   后续重构回落到 15 行有效行（≤30 收割线），file_budget 豁免已不在
   册——收割条件 1/2（#489 方向二/三）未做、条件 3（docstring 瘦身）
   被顺带完成，issue 关闭收账。
+- npm 依赖漏洞修复（#547 收尾顺带）：frontend 依赖审计 3 → 2
+  （high 清零）；draft 测试文件随 #670 拆分超 800 行的单文件。
 
 ## [0.7.11] - 2026-09-14
 
