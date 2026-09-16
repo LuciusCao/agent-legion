@@ -1,10 +1,12 @@
 /**
- * PreviewPanelSection 回落路径与草稿显式预览的组件测试（issue #328 / #347 P1）：
+ * PreviewPanelSection 回落路径与草稿显式预览的组件测试（issue #328 / #347 P1 / #615）：
  * - 未定制 workspace（published=null）→ 渲染 fallback（现有通用预览）；
  * - 已发布 bundle → bundle host 接管，fallback 不再渲染；
  * - 「定制预览」对话期间草稿**不自动执行**（#347 P1）：左栏继续渲染已发布
  *   版本；显式点「预览此草稿」后才切换到草稿；关闭对话回到已发布版本，
  *   重开对话框回到默认态（不记忆执行态）。
+ * - #615 wiring：对话框拿到的 previewDraft/jobId 与左栏草稿渲染吃同一
+ *   授权判定（对话框内嵌预览的渲染细节在 CustomizePreviewDialog 测试）。
  *
  * srcdoc 断言一律用「包含」：宿主会在 bundle 头部注入 CSP meta
  * （PreviewPanelHost 的出站网络红线），完整字符串不再等于 bundle 原文。
@@ -30,20 +32,28 @@ vi.mock('./previewPanelApi', () => ({
 // 对话框本体（Studio chat 封装）在 CustomizePreviewDialog 自己的测试覆盖；
 // 这里钉住的是 section 的组装与回落语义。mock 透传显式预览动作（#347 P1）
 // 与治理面 state（data-hasdraft 暴露草稿是否已送达——真实按钮
-// disabled={!draft}，mock 无门控，用例需显式等草稿落定再点击）。
+// disabled={!draft}，mock 无门控，用例需显式等草稿落定再点击）；
+// data-previewdraft 暴露 section 下发的授权判定（#615：内嵌预览吃同一
+// 判定，mock 不重复实现 iframe——对话框内渲染细节在 dialog 测试覆盖）。
 vi.mock('./CustomizePreviewDialog', () => ({
   CustomizePreviewDialog: ({
     onPreviewDraft,
     onClose,
     state,
+    previewDraft,
+    jobId,
   }: {
     onPreviewDraft: () => void
     onClose: () => void
     state: { draft?: unknown } | null
+    previewDraft: boolean
+    jobId: string
   }) => (
     <div
       data-testid="customize-dialog"
       data-hasdraft={String(Boolean(state?.draft))}
+      data-previewdraft={String(previewDraft)}
+      data-jobid={jobId}
     >
       <button onClick={onPreviewDraft}>预览此草稿</button>
       <button onClick={onClose}>关闭</button>
@@ -509,6 +519,44 @@ describe('PreviewPanelSection', () => {
     )
     expect(screen.queryByRole('button', { name: '定制预览' })).toBeNull()
     expect(mockFetchState).not.toHaveBeenCalled()
+  })
+
+  it('#615 wiring：对话框拿到 jobId 与同一授权判定，左栏草稿渲染与授权同步存续', async () => {
+    // bundle 切换使 host 重挂，jsdom 的 load 事件让宿主 setLoading 脱离
+    // act（known noise，同上各 fake-timer 用例的声明方式）。
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    mockFetchPublished.mockResolvedValue(
+      makeVersion(PUBLISHED_HTML, 'published')
+    )
+    mockFetchState.mockResolvedValue({
+      published: makeVersion(PUBLISHED_HTML, 'published'),
+      draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
+    } satisfies PreviewPanelState)
+    renderSection()
+
+    // 打开对话框：无授权 → previewDraft=false（对话框内嵌预览此时只是
+    // 占位，不重复挂草稿 iframe 的门控在 dialog 测试覆盖）。
+    fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+    await waitForDraftInDialog()
+    const dialog = screen.getByTestId('customize-dialog')
+    expect(dialog).toHaveAttribute('data-previewdraft', 'false')
+    // 桥上下文身份透传（内嵌预览与左栏渲染同源）。
+    expect(dialog).toHaveAttribute('data-jobid', 'job-1')
+
+    // 显式授权 → previewDraft=true，左栏同步渲染草稿（双通道同判定）。
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('customize-dialog')).toHaveAttribute(
+        'data-previewdraft',
+        'true'
+      )
+      const iframe = screen
+        .getByTestId('preview-panel-host')
+        .querySelector('iframe')
+      expect(iframe?.getAttribute('srcdoc')).toContain('draft panel')
+    })
+    expect(screen.getByText('草稿预览中')).toBeInTheDocument()
   })
 
   it('预览中草稿内容变化（save_draft 覆盖，html_hash 变）回退未授权：新内容需重新显式预览（#500 P1-5）', async () => {

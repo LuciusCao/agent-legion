@@ -443,6 +443,21 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 189
 - check: architecture.file_budget
+  path: frontend/src/features/previewPanel/CustomizePreviewDialog.tsx
+  reason: '#347 P1 + #615: draft execution is an explicit per-session action (preview-draft gating), and
+    #615 embeds the draft preview inside the dialog (chat and preview share one screen; the modal dialog
+    scroll-locks and covers the left column, so an out-of-dialog-only preview target made manual verification
+    effectively impossible). The footer keeps the "预览此草稿" consent button plus the previewDraft/onPreviewDraft
+    contract toward PreviewPanelSection, and the two-column dialog grid (chat | embedded CustomizePreviewPane)
+    lives in CustomizePreviewDialog.module.css; the gating state itself stays in the section (single source,
+    the embedded pane is a pure display of the shared verdict). The added lines are the honest cost of the
+    consent UI plus the same-screen preview layout; re-evaluate when the preview-panel governance UI is next
+    restructured (#347 follow-up).'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 183
+  expires: 2026-12-31
+- check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
   reason: The Codex P2 review on PR 345 added bundle content into the PreviewPanelHost remount key plus
     the hashBundle helper -- a cross-navigation bridge-request isolation fix that must stay at the composition

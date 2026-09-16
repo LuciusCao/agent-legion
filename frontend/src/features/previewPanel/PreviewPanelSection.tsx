@@ -10,12 +10,16 @@
  *   新草稿/新上下文不继承旧授权（避免一次点击永久放行）。授权的快照与
  *   render 期派生比对抽在 useDraftAuthorization（#500 P1-3/P1-5）；发布
  *   永远是人工动作。
+ * - #615：授权后草稿双通道渲染——左栏（全宽）与对话框内嵌预览区
+ *   （CustomizePreviewPane，对话与预览同屏）共用同一 draftPreview 判定；
+ *   左栏保留，对话框不再是「关掉才能看预览」的单向门。
  * 定制入口 admin-only（与 WorkspaceMoreMenu 的 Studio 项同一惯例，P4/STUDIO-AGENT-001：
  * 治理面端点本身 admin/scoped-only，非 admin 点开只会收获一串 403）。
  */
 import { useState, type ReactNode } from 'react'
 import { useAuthStore } from '../../stores/authStore'
 import { PreviewPanelHost } from './PreviewPanelHost'
+import { previewHostKey } from './bundleKey'
 import { CustomizePreviewDialog } from './CustomizePreviewDialog'
 import {
   usePreviewPanelState,
@@ -23,15 +27,6 @@ import {
 } from './usePreviewPanel'
 import { useDraftAuthorization } from './useDraftAuthorization'
 import styles from './PreviewPanelSection.module.css'
-
-/** key 用的 bundle 稳定指纹（草稿轮询比较内容而非引用，避免无谓重挂）。授权判定不用它——比对服务端 html_hash（sha256），避免两套指纹漂移。 */
-function hashBundle(html: string): string {
-  let hash = 0
-  for (let i = 0; i < html.length; i++) {
-    hash = (Math.imul(hash, 31) + html.charCodeAt(i)) | 0
-  }
-  return (hash >>> 0).toString(36)
-}
 
 export interface PreviewPanelSectionProps {
   jobId: string
@@ -80,13 +75,14 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
         </header>
       )}
       {bundle ? (
-        // key 含 bundle 内容（codex P2）：草稿轮询更新 bundle 时若沿用旧
-        // iframe，React 在同一 contentWindow 上做 srcDoc 导航——旧文档仍在
-        // 途的桥请求会由宿主把响应投递给同一个 WindowProxy，而新文档的
-        // 请求编号又从 1 重新计数，旧响应可能错误地应答新文档的同编号
-        // 请求。bundle 变化即整树重挂：旧窗口销毁，在途响应无处可投。
+        // key 含 bundle 内容（codex P2，指纹抽在 bundleKey）：草稿轮询更新
+        // bundle 时若沿用旧 iframe，React 在同一 contentWindow 上做 srcDoc
+        // 导航——旧文档仍在途的桥请求会由宿主把响应投递给同一个
+        // WindowProxy，而新文档的请求编号又从 1 重新计数，旧响应可能错误地
+        // 应答新文档的同编号请求。bundle 变化即整树重挂：旧窗口销毁，在途
+        // 响应无处可投。
         <PreviewPanelHost
-          key={`${jobId}:${hashBundle(bundle)}`}
+          key={previewHostKey(jobId, bundle)}
           jobId={jobId}
           html={bundle}
         />
@@ -96,6 +92,7 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
       {customizing && isAdmin && workspaceId && (
         <CustomizePreviewDialog
           workspaceId={workspaceId}
+          jobId={jobId}
           state={stateQuery.data ?? null}
           previewDraft={auth.isAuthorized && draft !== null}
           onPreviewDraft={() => {
