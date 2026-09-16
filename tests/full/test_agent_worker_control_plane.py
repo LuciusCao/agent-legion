@@ -206,7 +206,7 @@ def test_http_claim_cycle_releases_capacity_and_updates_panel(tmp_path: Path) ->
             "/api/agent-executions/claim", headers=auth, json={"worker_id": "e2e-worker"}
         )
         assert claimed_response.status_code == 200, claimed_response.text
-        claimed = claimed_response.json()
+        claimed = claimed_response.json()["claims"][0]  # #547 批包装
         lease_auth = {**auth, "X-Agent-Lease-Id": claimed["lease_id"]}
 
         heartbeat = client.post(

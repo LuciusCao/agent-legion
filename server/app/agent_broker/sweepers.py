@@ -45,7 +45,8 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
     released: list[tuple[str, str]] = []
     with write_transaction(broker.database_dsn) as conn:
         rows = conn.execute(
-            "select * from agent_execution_requests"
+            "select *, hashtext('ws:' || workspace_id)::int as ws_lock_key"
+            " from agent_execution_requests"
             " where state in ('claimed', 'reporting') and heartbeat_at<%s"
             " for update skip locked",
             (cutoff,),
@@ -55,7 +56,8 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         # is not Worker death.
         deferral = HeartbeatDeferral(conn, broker.lease_ttl_seconds, rows)
         deferred = 0
-        for row in rows:
+        # Stable workspace-hash order; v82 counter folders never wait.
+        for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
             lease_id = row["lease_id"]
             node_run_id = row["node_run_id"]
             lease = conn.execute(

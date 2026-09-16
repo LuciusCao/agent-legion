@@ -9,7 +9,8 @@ Studio. Nothing you do takes effect in production by itself.
 - `get_studio_context()` — which workspace this session is bound to, which
   node the human has selected, and the canvas' current unpublished workflow
   draft YAML (null until the human's Studio pushes it). Call first; takes no
-  workspace_id.
+  workspace_id. Registered only when a chat session is bound (Studio chat;
+  external self-service setups do not have this tool).
 - `get_active_workflow(workspace_id)` — the live revision + full definition
   YAML. Answers `{"state": "empty", ...}` (HTTP 200) when the workspace has no
   published workflow yet: that is your signal to author from scratch, not an

@@ -85,7 +85,11 @@ def read_shared_files(shared_dir: Path, material_dirs: tuple[str, ...]) -> list[
     files: list[dict] = []
     for folder_name in material_dirs:
         folder = shared_dir / folder_name
-        if not folder.is_dir():
+        # codex/main-agent P1 (#674): folder.is_dir() follows symlinks and
+        # rglob descends into a symlinked material root, leaking host files
+        # through the only content-inlining read surface — skip symlinked
+        # roots outright (same refusal class as _contained_source).
+        if not folder.is_dir() or folder.is_symlink():
             continue
         for path in sorted(folder.rglob("*")):
             if (

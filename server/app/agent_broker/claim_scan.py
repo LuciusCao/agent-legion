@@ -137,7 +137,11 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
                        and active.kind='agent'
                     ) < coalesce(w.max_concurrency, 2147483647))
         )
-        select r.*, wr.definition_json as revision_definition_json
+        select r.*, wr.definition_json as revision_definition_json,
+               -- Batch agent claims retain several agent-ws capacity locks
+               -- in one transaction. Carry the ACTUAL lock key so the write
+               -- phase never substitutes unrelated workspace-text order.
+               hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key
         from eligible_workspaces ws
         cross join lateral (
           select r2.*,

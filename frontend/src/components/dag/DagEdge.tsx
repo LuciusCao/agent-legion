@@ -21,8 +21,9 @@ export interface DagEdgeData extends Record<string, unknown> {
 
 export type DagEdgeType = Edge<DagEdgeData, 'dagEdge'>
 
-// 与重构前 DagGraph 内联高亮的视觉常量完全一致（详见 dagHighlight.ts 的
-// #276 注释）；markerEnd 颜色由 dagHighlight 随 highlighted 翻转一并重建，
+// 高亮/置灰视觉常量（常态描边色值在 buildRfEdges，#668 起为 #6b7280 /
+// 2.5 全亮；undefined highlighted 时本组件原样透传该 style，不进这里）。
+// markerEnd 颜色由 dagHighlight 随 highlighted 翻转一并重建，
 // 本组件只负责透传 marker（含终点箭头——markerStart/End 都传给 BaseEdge，
 // marker 缺失会让方向指示丢失）。
 const STROKE_HIGHLIGHTED = '#1d4ed8'

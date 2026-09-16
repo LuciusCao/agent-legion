@@ -12,7 +12,13 @@ from server.app.jobs.queries.run_healing import deterministic_run_id
 
 # Shared with the plan-shape pin test (tests/db/test_run_job_status_counts_migration.py):
 # a copy of the SQL there would silently drift if this one changes (#358 review).
-RUN_STATUS_COUNTS_SQL = "select status, cnt from run_job_status_counts where run_id=%s and cnt<>0"
+RUN_STATUS_COUNTS_SQL = (
+    "select status, sum(cnt) as cnt from ("
+    " select status, cnt from run_job_status_counts where run_id=%s"
+    " union all"
+    " select status, delta as cnt from run_job_status_count_deltas where run_id=%s"
+    ") counts group by status having sum(cnt)<>0"
+)
 
 
 class RunQueriesMixin(RunQueueQueriesMixin):
@@ -89,10 +95,9 @@ class RunQueriesMixin(RunQueueQueriesMixin):
         return [dict(row) for row in rows]
 
     def count_jobs_by_status_in_run(self, run_id: str) -> dict[str, int]:
-        # Reads the trigger-maintained counter table
-        # (DB-RUN-JOB-STATUS-COUNTS-001) instead of a group-by over the
-        # run's whole jobs slice — the run detail endpoint polls this per
-        # refresh, which scanned every job of 10^6-item runs (#358).
+        # Read the indexed base plus its normally tiny pending delta tail,
+        # never the run's whole jobs slice. The run detail endpoint polls
+        # this per refresh (up to 10^6 jobs per run).
         with self._connect_read() as conn:
-            rows = conn.execute(RUN_STATUS_COUNTS_SQL, (run_id,)).fetchall()
+            rows = conn.execute(RUN_STATUS_COUNTS_SQL, (run_id, run_id)).fetchall()
         return {str(row["status"]): int(row["cnt"]) for row in rows}

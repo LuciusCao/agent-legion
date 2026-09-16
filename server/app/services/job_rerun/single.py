@@ -8,7 +8,10 @@ from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.eligibility import check_rerun_eligibility
-from server.app.services.job_staged_cleanup import commit_staged_outputs
+from server.app.services.job_staged_cleanup import (
+    commit_staged_outputs,
+    delete_rerun_artifact_objects,
+)
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.workflow_branching import downstream_nodes
@@ -80,6 +83,7 @@ def commit_rerun(
 
     stale_nodes = downstream_nodes(definition, actual_node_key)
     staged = None
+    deleted_rows: list[dict[str, Any]] = []
     try:
         with service.job_db.lease_guarded_mutation(
             job_id,
@@ -87,8 +91,12 @@ def commit_rerun(
             reject_running_nodes=True,
         ) as conn:
             staged = service.artifact_service.stage_outputs(job, [actual_node_key], definition)
-            service.job_db.mark_nodes_for_rerun_in_transaction(
-                conn, job_id, [actual_node_key], {actual_node_key: stale_nodes}
+            deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(
+                conn,
+                job_id,
+                [actual_node_key],
+                {actual_node_key: stale_nodes},
+                staged_artifact_names=staged.artifact_names,
             )
     except JobMutationConflict as exc:
         if staged is not None:
@@ -125,6 +133,7 @@ def commit_rerun(
         ) from exc
 
     commit_staged_outputs(staged, job_id, "rerun")
+    delete_rerun_artifact_objects(service.object_store, deleted_rows, job_id, "rerun")
     notify_schedulable_work()
     if service.job_event_buffer is not None:
         record_job_update(service.job_db, service.job_event_buffer, job_id)

@@ -19,6 +19,12 @@ from server.app.workflows.node_config_schema import RESERVED_EXECUTION_KEYS
 
 DEFAULT_TIMEOUT_SECONDS = 600
 
+# #550: agent nodes joining the reserved-key chain keep their product
+# default (1800s, the pre-#550 constant) instead of the code-node 600 —
+# merging with the code default would silently cut existing agent runs'
+# timeout budget by two thirds on upgrade.
+AGENT_DEFAULT_TIMEOUT_SECONDS = 1800
+
 
 def reserved_execution_defaults(seed: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Reserved-key defaults; missing/invalid seeds get the platform defaults."""

@@ -24,7 +24,6 @@ import pytest
 
 from shared import code_sandbox
 from shared.code_sandbox import build_sandbox_argv
-from worker import binary_resolution
 from worker.code_runner import (
     cancel_executions,
     execute_code,
@@ -293,7 +292,9 @@ def _fake_velites(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     # 自带目录指向不存在的位置：测试不依赖开发机 data/bin 的真实状态。
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
+    monkeypatch.setattr(
+        code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled-bin"
+    )  # #496 真实读取点
     monkeypatch.setattr(
         shutil, "which", lambda binary: str(script) if binary == "velites" else None
     )
@@ -410,7 +411,7 @@ def test_execute_code_uses_bundled_velites_when_path_missing(
         encoding="utf-8",
     )
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)  # #496 真实读取点
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
 
@@ -437,7 +438,9 @@ def test_execute_code_fails_closed_without_any_velites(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """自带副本与 PATH 都找不到 velites → 拒绝执行（EXEC-CODE-003 fail-closed）。"""
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
+    monkeypatch.setattr(
+        code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled-bin"
+    )  # #496 真实读取点
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
     client = FakeClient(_code_bundle(tmp_path))
     with pytest.raises(RuntimeError, match="refusing to run unsandboxed"):

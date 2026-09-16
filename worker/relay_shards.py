@@ -56,8 +56,9 @@ class ShardedBeat:
     """One sharded round's outcome; exactly one field set.
 
     ``verdicts``: whatever the surviving shards learned, snapshotted at
-    return (copies — a shard daemon that overstays its join can still land
-    appends in the merge lists, never in what the caller holds). ``None``
+    return (copies of all three lists — lost pairs, settled ids, cancelled
+    ids — a shard daemon that overstays its join can still land appends in
+    the merge lists, never in what the caller holds). ``None``
     verdicts with no signal = the transient round (nothing learned).
     ``degraded`` = any shard saw the 404/405 pre-v5 answer (a protocol
     property one shard settles for the round — the caller flips to single
@@ -65,7 +66,7 @@ class ShardedBeat:
     the caller drops its cached client so the next snapshot rebuilds).
     """
 
-    verdicts: tuple[list, list] | None = None
+    verdicts: tuple[list, list, list] | None = None
     degraded: bool = False
     unauthorized: bool = False
 
@@ -77,12 +78,29 @@ def beat_sharded(
     limiter: ShardThreadLimiter,
 ) -> ShardedBeat:
     """Beat every shard in parallel; verdicts merge, failures never sink
-    neighbours (see ShardedBeat for the outcome shape)."""
+    neighbours (see ShardedBeat for the outcome shape).
+
+    Admission rotates (codex #662 review): an overstaying socket from the
+    previous tick keeps its slot, so a saturated snapshot can have fewer
+    than MAX_INFLIGHT_SHARDS available — admitting always from shard 0
+    would starve the SAME tail every tick (stable insertion order) until
+    its leases expire. The limiter's fairness cursor rotates the admission
+    start to the first shard skipped last tick, so starvation becomes
+    round-robin delay instead. The cursor is keyed by stable lease identity,
+    not a shard array index: the next snapshot may prune completed leases
+    or append new ones, changing every later numeric position. Skipped
+    shards still read as unknown-round (retry semantics unchanged)."""
     shards = [
         leases[start : start + RELAY_BEAT_SHARD]
         for start in range(0, len(leases), RELAY_BEAT_SHARD)
     ]
+    if len(shards) > 1:
+        rotation = limiter.take_rotation(shards)
+        shards = shards[rotation:] + shards[:rotation]
+    else:
+        rotation = 0
     lost: list[tuple[str, str]] = []
+    settled: list[str] = []
     cancelled: list[str] = []
     lock = threading.Lock()
     failures = 0
@@ -113,8 +131,10 @@ def beat_sharded(
             return
         _status, body = outcome
         lost_ids = set(body.get("lost", []))
+        settled_ids = set(body.get("settled", []))
         with lock:
             lost.extend(pair for pair in chunk if pair[0] in lost_ids)
+            settled.extend(pair[0] for pair in chunk if pair[0] in settled_ids)
             cancelled.extend(body.get("cancelled_execution_ids", []))
 
     threads: list[threading.Thread] = []
@@ -124,15 +144,19 @@ def beat_sharded(
             # Every occupied slot belongs to an earlier request that has not
             # really returned. This shard is unknown for this tick, exactly
             # like a transport failure; retrying by spawning another socket
-            # would recreate the resource leak this limiter prevents.
+            # would recreate the resource leak this limiter prevents. The
+            # Record stable lease identities, not this rotated list's index:
+            # the next fresh snapshot may have pruned or appended leases.
             with lock:
                 failures += 1
+                limiter.note_skip(shard)
             log(f"心跳 relay 批量拍跳过（{len(shard)} 租约）：未完成分片已达上限")
             continue
         threads.append(thread)
     # One SHARED deadline for the whole fan-out join (PR #617 review P1-2):
     # a per-thread timeout would let wedged shards stack — N shards × (beat
-    # timeout + margin) ≈ 240s at the 1024-lease cap — because `requests`'
+    # timeout + margin) ≈ 240s at the 1024-lease cap of the era (2048 now doubles
+    # it — the shared-deadline fix below is what actually bounds the wall time) — because `requests`'
     # timeout is per socket-read-op, so a slow-drip Host keeps every shard
     # "alive" past its own join. That serialises the tick into exactly the
     # expiry stall this hotfix exists to prevent. With the budget spent
@@ -159,4 +183,4 @@ def beat_sharded(
     # the caller snapshots so a straggler's late append cannot mutate the
     # lists it is already iterating (the relay's write_beat_result raced
     # exactly that: "list changed size during iteration").
-    return ShardedBeat(verdicts=(list(lost), list(cancelled)))
+    return ShardedBeat(verdicts=(list(lost), list(settled), list(cancelled)))

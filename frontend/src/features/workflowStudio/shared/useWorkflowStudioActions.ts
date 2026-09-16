@@ -71,6 +71,9 @@ export function useWorkflowStudioActions(
         draft.definitionYaml
       )
       if (result.valid) {
+        // #666：先登记发布的草稿原文再 reload——baseline sync 见到紧随的
+        // canonical 基线变化时据此强制 reset，不误判为外部变更保留旧草稿。
+        draft.markDraftPublished(draft.definitionYaml)
         await reload()
         report(result.errors, '保存成功', 'success')
       } else {

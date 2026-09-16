@@ -38,7 +38,9 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
     with write_transaction(broker.database_dsn) as conn:
         rows = conn.execute(
             """
-            select r.execution_id, r.job_id, r.node_key, r.agent_id
+            select r.execution_id, r.job_id, r.node_key, r.agent_id,
+                   r.workspace_id,
+                   hashtext('ws:' || r.workspace_id)::int as ws_lock_key
             from agent_execution_requests r
             where r.state='queued'
               -- kind='code' payloads are self-contained: no versioned Agent
@@ -58,7 +60,9 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
             for update of r skip locked
             """
         ).fetchall()
-        for row in rows:
+        # Stable workspace-hash order; counter correctness no longer relies
+        # on it because v82 folders never wait.
+        for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
             error = (
                 f"Agent definition {row['agent_id']!r} was disabled or changed"
                 " while the request was queued"

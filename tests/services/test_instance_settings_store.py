@@ -59,6 +59,7 @@ def test_default_document_matches_retired_yaml_values() -> None:
         "min_protocol_version": 1,
         "max_concurrent_result_commits": 16,
         "result_commit_batching": True,
+        "artifact_spot_check_percent": 3,
     }
     # #509/#554/#569/#561 capacity knobs: defaults ride the code config.
     assert document["agent_enqueue"] == {"workers": 48, "max_pending": 1024}

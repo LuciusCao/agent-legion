@@ -84,6 +84,30 @@ describe('WorkflowStudioExecutionHint', () => {
     expect(screen.queryByText(HINT)).not.toBeInTheDocument()
   })
 
+  it('stays silent when every agent node carries its own provider/model (#666)', () => {
+    // 顶层默认缺席但节点各自配齐：不是真实缺口，整体提示不误报。
+    const workflow = makeWorkflow(['agent'])
+    workflow.nodes[0] = {
+      ...workflow.nodes[0],
+      execution: {
+        provider: 'openai',
+        model: 'gpt-5',
+        thinking: '',
+        prompt: '',
+        prompt_mode: '',
+      },
+    }
+    mockStudio(
+      'draft',
+      'key: wf\nnodes:\n  n0:\n    type: agent\n    execution:\n      provider: openai\n      model: gpt-5\n',
+      workflow
+    )
+
+    render(<WorkflowStudioExecutionHint />)
+
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument()
+  })
+
   it('also shows the hint when viewing a revision without top-level defaults', () => {
     mockStudio(
       'revision',

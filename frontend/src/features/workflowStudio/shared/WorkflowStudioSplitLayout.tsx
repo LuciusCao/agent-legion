@@ -11,16 +11,12 @@ import splitStyles from './WorkflowStudioSplitLayout.module.css'
 type Props = {
   mobilePanel: StudioMobilePanel
   agentOpen: boolean
-  onToggleAgent: () => void
 }
 
 /** 左右分栏 grid：左半画布（或节点详情），右半 Agent 对话（或详情）。
- * chat 收起后保持挂载（chatCollapsed hidden），会话与滚动状态不丢。 */
-export function WorkflowStudioSplitLayout({
-  mobilePanel,
-  agentOpen,
-  onToggleAgent,
-}: Props) {
+ * chat 收起后保持挂载（chatCollapsed hidden），会话与滚动状态不丢。
+ * agentOpen 来自 StudioViewContext（appbar 开关的唯一状态源，#668）。 */
+export function WorkflowStudioSplitLayout({ mobilePanel, agentOpen }: Props) {
   const studio = useStudioState()
   const nodeSelected = studio.selectedNodeKey !== null
   const detailLeft = nodeSelected && agentOpen
@@ -41,8 +37,6 @@ export function WorkflowStudioSplitLayout({
       className={`${pageStyles.layout}${split ? ` ${pageStyles.withInspector}` : ''}`}
     >
       <WorkflowStudioCanvasPanel
-        agentOpen={agentOpen}
-        onToggleAgent={onToggleAgent}
         mobileActive={mobilePanel === 'graph'}
         replacedByDetail={detailLeft}
       />
@@ -59,8 +53,6 @@ export function WorkflowStudioSplitLayout({
           readOnly={studio.readOnly}
           detailLeft={detailLeft}
           mobileActive={mobilePanel === 'editor'}
-          agentOpen={agentOpen}
-          onToggleAgent={onToggleAgent}
           onBack={() => studio.setSelectedNodeKey(null)}
         />
       )}

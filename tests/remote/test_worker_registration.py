@@ -174,7 +174,7 @@ def test_delete_only_key_cascades_worker_record_and_cuts_token(admin_client) -> 
     with pytest.raises(WorkerAuthError):
         client.get_self()
     with pytest.raises(WorkerAuthError):
-        client.claim(_WORKER_CONFIG["worker_id"])
+        client.claim_batch(_WORKER_CONFIG["worker_id"], limit=1, agent_limit=1, code_limit=1)
 
     workers = admin_client.get("/api/agent-workers").json()["workers"]
     assert all(w["worker_id"] != _WORKER_CONFIG["worker_id"] for w in workers)
@@ -255,4 +255,7 @@ def test_claim_after_registration_returns_204_when_queue_empty(admin_client) -> 
     client = Client(f"http://{_BRIDGE_HOST}")
     client.register(dict(_WORKER_CONFIG), [credential])
 
-    assert client.claim(_WORKER_CONFIG["worker_id"], max_concurrency=4) is None
+    assert (
+        client.claim_batch(_WORKER_CONFIG["worker_id"], 4, limit=1, agent_limit=1, code_limit=1)
+        == []
+    )

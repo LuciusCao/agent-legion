@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type {
   WorkflowDefinitionRecord,
   WorkflowRevisionDetailResponse,
@@ -28,6 +28,9 @@ export type UseWorkflowStudioDraftResult = {
   hasPreservedDraft: boolean
   isLoadingRevision: boolean
   revisionLoadError: string | null
+  /** #666：发布成功后登记发布的草稿原文，baseline sync 见到紧随的基线
+   * 变化时强制 reset（canonical 基线与草稿原文纯文本不等，不能走 preserve）。 */
+  markDraftPublished: (publishedYaml: string) => void
   selectRevision: (revisionId: string) => Promise<void>
   backToDraft: () => void
   useViewedRevisionAsDraft: () => void
@@ -59,6 +62,7 @@ export function useWorkflowStudioDraft(
     fetchRevisionDetail
   )
 
+  const justPublishedRef = useRef<string | null>(null)
   useDraftBaselineSync(
     originalYaml,
     activeRevision?.id,
@@ -66,7 +70,8 @@ export function useWorkflowStudioDraft(
     setDraftYaml,
     setViewState,
     clearRevisionLoadError,
-    viewState.hasPreservedDraft
+    viewState.hasPreservedDraft,
+    justPublishedRef
   )
 
   const readOnly = isRevisionReadOnly(viewState)
@@ -121,6 +126,9 @@ export function useWorkflowStudioDraft(
     hasPreservedDraft: viewState.hasPreservedDraft,
     isLoadingRevision,
     revisionLoadError,
+    markDraftPublished: (publishedYaml: string) => {
+      justPublishedRef.current = publishedYaml
+    },
     selectRevision,
     backToDraft,
     useViewedRevisionAsDraft,

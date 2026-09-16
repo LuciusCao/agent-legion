@@ -25,6 +25,9 @@ type Props = {
   loading: boolean
   errors: CompareError[] | null
   onSelectNode?: (nodeKey: string) => void
+  /* 变更节点是否可点击定位（如聊天草稿 diff 里尚未应用进画布的节点不可
+     定位）；缺省视为全部可定位，保持既有调用方行为。 */
+  isNodeSelectable?: (nodeKey: string) => boolean
 }
 
 function classForSeverity(severity: ChangeSeverity): string {
@@ -49,16 +52,20 @@ function ChangeBadge({ severity }: { severity: ChangeSeverity }) {
 function NodeItem({
   change,
   onSelectNode,
+  isNodeSelectable,
 }: {
   change: NodeChangeGroup
   onSelectNode?: (nodeKey: string) => void
+  isNodeSelectable?: (nodeKey: string) => boolean
 }) {
   const text = formatNodeChange(change)
+  const selectable =
+    Boolean(onSelectNode) && (isNodeSelectable?.(change.nodeKey) ?? true)
   return (
     <li className={styles.item}>
       <span
-        className={`${styles.itemText} ${onSelectNode ? styles.clickableNode : ''}`}
-        onClick={() => onSelectNode?.(change.nodeKey)}
+        className={`${styles.itemText} ${selectable ? styles.clickableNode : ''}`}
+        onClick={selectable ? () => onSelectNode?.(change.nodeKey) : undefined}
         title={text}
       >
         {text}
@@ -120,6 +127,7 @@ export function WorkflowChangeSummaryPanel({
   loading,
   errors,
   onSelectNode,
+  isNodeSelectable,
 }: Props) {
   const viewModel = summary ?? buildChangeSummary(null)
   const hasErrors = errors && errors.length > 0
@@ -182,6 +190,7 @@ export function WorkflowChangeSummaryPanel({
                     key={`node-${change.type}-${change.nodeKey}`}
                     change={change}
                     onSelectNode={onSelectNode}
+                    isNodeSelectable={isNodeSelectable}
                   />
                 ))}
               </ul>

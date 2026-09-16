@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from worker import binary_resolution
+from shared import code_sandbox
 from worker.runtime import controls as runtime_controls
 
 pytestmark = pytest.mark.no_db
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.no_db
 @pytest.fixture(autouse=True)
 def _isolated_bundled_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """把自带二进制目录指向不存在的位置，避免开发机 data/bin 污染测试。"""
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bin")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bin")  # #496 真实读取点
 
 
 def test_hot_open_code_capacity_rejected_without_velites(

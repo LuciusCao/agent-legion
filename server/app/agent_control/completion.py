@@ -80,6 +80,7 @@ class AgentCompletionHandler:
         skill_manager: SkillManager | None = None,
         object_store: JobArtifactObjectStore | None = None,
         max_archive_bytes: int | None = None,
+        spot_check_percent: int | None = None,
     ) -> None:
         self.leases = leases
         self.artifact_store = artifact_store
@@ -91,6 +92,9 @@ class AgentCompletionHandler:
         # Worker-direct S3 uploads the same way the legacy archive channel
         # enforces it; None = no ceiling.
         self.max_archive_bytes = max_archive_bytes
+        # #356 plan B: the trust-reported artifacts' spot-check percent
+        # (agent_workers.artifact_spot_check_percent); None = module default.
+        self.spot_check_percent = spot_check_percent
 
     def finish(
         self,
@@ -172,6 +176,7 @@ class AgentCompletionHandler:
             download=not cancelled,
             execution_id=str(manifest.get("execution_id") or ""),
             max_size_bytes=self.max_archive_bytes,
+            spot_check_percent=self.spot_check_percent,
         )
         if remote_failure is not None:
             mark_result_stage(stage_timer, "artifacts_verify")

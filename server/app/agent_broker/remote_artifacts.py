@@ -30,6 +30,7 @@ from typing import Any
 
 from server.app.agent_broker.remote_artifact_promote import promote_all
 from server.app.agent_broker.remote_artifact_support import (
+    DEFAULT_SPOT_CHECK_PERCENT,
     download_remote_artifact,
     verify_remote_digest,
 )
@@ -68,6 +69,7 @@ def apply_remote_artifact_refs(
     download: bool,
     execution_id: str,
     max_size_bytes: int | None = None,
+    spot_check_percent: int | None = None,
 ) -> tuple[set[str], str | None]:
     """Verify + apply the dict-form (staging-key) refs in output_artifacts.
 
@@ -118,10 +120,20 @@ def apply_remote_artifact_refs(
                             object_store, Path(stage), name, ref, max_size_bytes
                         )
                     else:
-                        # Undeclared names never land in the job dir but are
-                        # still digest-verified Host-side for the manifest row.
+                        # Undeclared names never land in the job dir; a
+                        # Worker-reported hash is trusted outside the #356
+                        # spot-check sample, an empty one still streams (the
+                        # manifest row needs a Host-computed digest).
                         content_hashes[name] = verify_remote_digest(
-                            object_store, name, ref, max_size_bytes
+                            object_store,
+                            name,
+                            ref,
+                            max_size_bytes,
+                            spot_check_percent=(
+                                DEFAULT_SPOT_CHECK_PERCENT
+                                if spot_check_percent is None
+                                else spot_check_percent
+                            ),
                         )
                 # Phase 3: all verified — promote copies, files, and rows.
                 promote_all(
@@ -136,11 +148,19 @@ def apply_remote_artifact_refs(
                     execution_id,
                 )
                 return set(remote), None
-        # Cancelled path: no download, but the staging bytes are still
-        # digest-verified Host-side (stream, never persisted) — a reported
-        # hash must match and an empty one registers the computed value.
+        # Cancelled path: no download; a reported hash is trusted outside
+        # the #356 spot-check sample, an empty one still streams to compute
+        # the digest (stream, never persisted).
         for name, ref in remote.items():
-            content_hashes[name] = verify_remote_digest(object_store, name, ref, max_size_bytes)
+            content_hashes[name] = verify_remote_digest(
+                object_store,
+                name,
+                ref,
+                max_size_bytes,
+                spot_check_percent=(
+                    DEFAULT_SPOT_CHECK_PERCENT if spot_check_percent is None else spot_check_percent
+                ),
+            )
         promote_all(
             object_store,
             workspace_id,

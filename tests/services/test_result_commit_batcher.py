@@ -331,13 +331,14 @@ def test_kill_switch_none_batcher_takes_direct_path(job_db) -> None:
 
 
 def test_finish_many_sorts_writes_by_job_for_counter_lock_order(job_db) -> None:
-    """C4/#609 P1-2: the batch writes in (workspace_id, run_id, job_id)
-    order regardless of queue order — the full counter-key sequence the
-    status triggers read and try_claim_many shares. job_id alone does not
-    pin it: two jobs sorted X→Y by job_id can live in workspaces ordered
-    Y→X, reopening the cross-batch 40P01 ring."""
+    """The batch shares try_claim_many's stable workspace-hash/run/job order
+    and restores verdicts to queue order. v82 no longer needs this for
+    counter safety, but the deterministic contract remains useful."""
     # Two workspaces with INVERTED id vs job_id order: ws-a's job sorts
-    # after ws-b's by job_id but before it by workspace_id.
+    # after ws-b's by job_id but before it by workspace_id. The ids are
+    # chosen so TEXT and workspace-hash order agree (verified in-test
+    # below) — the text-vs-int distinction is pinned by
+    # test_finish_many_orders_by_actual_ws_lock_key.
     seed_request(job_db, job_id="job-01", limit=10, workspace_id="ws-a")
     seed_request(job_db, job_id="job-02", limit=10, workspace_id="ws-a")
     seed_request(job_db, job_id="job-03", limit=10, workspace_id="ws-b")
@@ -349,13 +350,20 @@ def test_finish_many_sorts_writes_by_job_for_counter_lock_order(job_db) -> None:
         conn.execute("update jobs set run_id='run-A' where id='job-02'")
         conn.execute("update jobs set run_id='run-A' where id='job-03'")
         conn.execute("update jobs set run_id='run-B' where id='job-04'")
+        keys = conn.execute(
+            "select workspace_id, hashtext('ws:' || workspace_id)::int as ws_lock_key"
+            " from jobs where id in ('job-01', 'job-03') order by ws_lock_key"
+        ).fetchall()
+        assert [str(k["workspace_id"]) for k in keys] == ["ws-a", "ws-b"], (
+            "fixture ids must keep text and lock-key order aligned here"
+        )
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     claimed = [broker.claim("worker-1") for _ in range(4)]
     assert all(c is not None for c in claimed)
-    # Reverse queue order; the batch must still write the (ws, run, job)
-    # order: (ws-a, run-A, job-02), (ws-a, run-B, job-01),
+    # Reverse queue order; the batch must still write the (ws lock key,
+    # run, job) order: (ws-a, run-A, job-02), (ws-a, run-B, job-01),
     # (ws-b, run-A, job-03), (ws-b, run-B, job-04).
     order: list[tuple[str, str, str]] = []
     real_finish_lease = _lease_finish_batch.finish_lease
@@ -381,13 +389,80 @@ def test_finish_many_sorts_writes_by_job_for_counter_lock_order(job_db) -> None:
     finally:
         batch_module.finish_lease = real_finish_lease
     assert verdicts == [True] * 4
-    assert order == sorted(order), "writes must run in (workspace, run, job) order"
+    assert order == sorted(order), "writes must run in (ws lock key, run, job) order"
     assert order == [
         ("ws-a", "run-A", "job-02"),
         ("ws-a", "run-B", "job-01"),
         ("ws-b", "run-A", "job-03"),
         ("ws-b", "run-B", "job-04"),
     ]
+
+
+def test_finish_many_orders_by_actual_ws_lock_key(job_db) -> None:
+    """The deterministic leading key is the workspace hash, not text."""
+    # 找一对 hashtext int 序与文本序相反的 workspace id：候选池里文本较小
+    # 的 id 锁键更大、文本较大的 id 锁键更小（500 个候选必命中）。
+    candidates: list[tuple[str, int]] = []
+    with job_db.connect() as conn:
+        for i in range(500):
+            row = conn.execute(
+                "select hashtext('ws:' || %s)::int as k", (f"ws-c{i:03d}",)
+            ).fetchone()
+            assert row is not None
+            candidates.append((f"ws-c{i:03d}", int(row["k"])))
+    keys_by_ws = dict(candidates)
+    ws_low, ws_high = "", ""
+    for wid, key in sorted(candidates, key=lambda p: p[0]):
+        smaller = [w for w, other_key in candidates if w > wid and other_key < key]
+        if smaller:
+            ws_low = wid
+            ws_high = min(smaller)
+            break
+    assert ws_low and ws_high, "expected an inverted (text, lock-key) pair among 500 candidates"
+    assert keys_by_ws[ws_low] > keys_by_ws[ws_high]
+
+    seed_request(job_db, job_id="job-lo", limit=10, workspace_id=ws_low)
+    seed_request(job_db, job_id="job-hi", limit=10, workspace_id=ws_high)
+    _setup_worker(job_db)
+    leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+    claimed = [broker.claim("worker-1") for _ in range(2)]
+    assert all(c is not None for c in claimed)
+    by_job = {str(c.job_id): c.lease_id for c in claimed if c is not None}
+    with job_db.connect() as conn:
+        keys = {
+            str(row["workspace_id"]): int(row["k"])
+            for row in conn.execute(
+                "select workspace_id, hashtext('ws:' || workspace_id)::int as k"
+                " from jobs where id in ('job-lo', 'job-hi')"
+            ).fetchall()
+        }
+    assert keys[ws_low] > keys[ws_high], "fixture must invert text vs lock-key order"
+
+    order: list[str] = []
+    real_finish_lease = _lease_finish_batch.finish_lease
+
+    def _recording_finish_lease(conn, lease_id, result, data_dir=None):  # noqa: ANN001
+        lease = conn.execute(
+            "select l.job_id from executor_leases l where l.id = %s", (lease_id,)
+        ).fetchone()
+        order.append(str(lease["job_id"]))
+        return real_finish_lease(conn, lease_id, result, data_dir)
+
+    import server.app.executors._lease_finish_batch as batch_module
+
+    batch_module.finish_lease = _recording_finish_lease
+    try:
+        # 队列序：文本序在前（job-lo 先）——int 序必须把它排到后面。
+        writes = [
+            (by_job["job-lo"], ExecutionResult(status="completed", exit_code=0), None),
+            (by_job["job-hi"], ExecutionResult(status="completed", exit_code=0), None),
+        ]
+        verdicts, _callbacks = _lease_finish_batch.finish_many_with_retry(leases, writes)
+    finally:
+        batch_module.finish_lease = real_finish_lease
+    assert verdicts == [True, True]
+    assert order == ["job-hi", "job-lo"], "write order must follow the workspace hash"
 
 
 def test_post_stop_submit_takes_direct_path(job_db) -> None:
