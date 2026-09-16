@@ -89,7 +89,7 @@ class AcpSessionCallbacks(Protocol):
     ) -> dict[str, Any]:
         """Block until a decision: {"option_id": ...} or {"deny": True}."""
 
-    def on_turn_end(self, stop_reason: str) -> None: ...
+    def on_turn_end(self, stop_reason: str, *, timed_out: bool = False) -> None: ...
 
     def on_turn_timeout(self) -> None:
         """The turn hit the prompt timeout; the ladder auto-cancels next.
@@ -368,13 +368,15 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             if item is _CLOSE:
                 return
             try:
-                response = await run_prompt_turn(
+                result = await run_prompt_turn(
                     conn,
                     acp_session_id,
                     str(item),
                     on_timeout=self.callbacks.on_turn_timeout,
                 )
-                self.callbacks.on_turn_end(str(response.stop_reason))
+                self.callbacks.on_turn_end(
+                    str(result.response.stop_reason), timed_out=result.timed_out
+                )
             except PromptWedgedError:
                 # Fatal, not per-turn containment (#664): a turn that ignores
                 # session/cancel past the grace is wedged at the transport

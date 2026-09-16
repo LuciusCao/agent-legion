@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,7 @@ from server.app.events.bus import EventBus
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.settings import Settings
+from server.app.studio_chat import compaction
 from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.registry import StudioAgentRegistryStore
@@ -204,6 +206,11 @@ class StudioChatService:
         runtime = self.runtime(session_id)
         if runtime is None:
             raise ConflictError("Chat session is not running on this server")
+        # #694: inside kimi's background-compaction window a prompt is
+        # silently queued and settled as a fake instant end_turn — refuse
+        # the send instead (/compact itself is never blocked).
+        if compaction.send_blocked(self._db, session_id, runtime, text):
+            raise ConflictError(compaction.SEND_BLOCKED_DETAIL)
         first_prompt = self._db.count_studio_chat_user_messages(session_id) == 0
         # Atomic idle -> running claim: two concurrent senders (double click,
         # two clients) cannot both observe idle and start duplicate turns.
@@ -220,9 +227,13 @@ class StudioChatService:
         # New turn, new stream rows: reset the coalescing slots at turn START
         # (not at turn end) so trailing chunks of the finished turn — the ACP
         # SDK can deliver them after turn_end — keep folding into that turn's
-        # rows instead of starting tail-only orphan rows (#98).
+        # rows instead of starting tail-only orphan rows (#98). The #694
+        # degenerate-turn bookkeeping rides the same critical section.
         with runtime.lock:
             runtime.stream.reset()
+            runtime.turn_started_at = time.monotonic()
+            runtime.turn_update_count = 0
+            runtime.turn_slash_command = text.lstrip().startswith("/")
         message = self.store.append_message(session_id, "text", "user", {"text": text})
         self.store.publish_session(session_id)
         from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
@@ -349,8 +360,8 @@ class StudioChatService:
     ) -> dict[str, Any]:
         return self._events().on_permission_request(session_id, tool_call, options)
 
-    def _on_turn_end(self, session_id: str, stop_reason: str) -> None:
-        self._events().on_turn_end(session_id, stop_reason)
+    def _on_turn_end(self, session_id: str, stop_reason: str, *, timed_out: bool = False) -> None:
+        self._events().on_turn_end(session_id, stop_reason, timed_out=timed_out)
 
     def _on_turn_timeout(self, session_id: str) -> None:
         """#664: the prompt-turn ladder is about to auto-cancel a timed-out

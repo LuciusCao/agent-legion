@@ -23,6 +23,7 @@ import {
 } from './studioChatEvents'
 import {
   deriveChatViews,
+  lastTerminalEvent,
   maxSeq,
   upsertMessage,
   type ChatMessage,
@@ -249,6 +250,9 @@ export function useStudioChat(workspaceId: string | undefined) {
   const { toolCalls, workflowDraft, agentDrafts, nodeDrafts, permissions } =
     useMemo(() => deriveChatViews(messages), [messages])
 
+  // #693：最近一轮的终结类型——RunBar 据此区分「已完成」与「已超时终止」。
+  const terminalEvent = useMemo(() => lastTerminalEvent(messages), [messages])
+
   // 「继续对话」：closed/error 会话重建 runtime（转录/session load 由后端决定）。
   // 响应归属守卫（refillMessages 的 activeSessionIdRef 同款模式）：resume 在途
   // 时切换了会话，旧会话的响应不得覆盖当前选中会话的快照；成功后失效 sessions
@@ -302,6 +306,7 @@ export function useStudioChat(workspaceId: string | undefined) {
     starting,
     actionError,
     lastRunMs: runTiming.lastMs,
+    lastTerminalEvent: terminalEvent,
     resume,
     resuming,
     selectSession: setActiveSessionId,

@@ -5,19 +5,46 @@
  * PreviewPanelSection.test.tsx）；agent 列表缺失时给出提示；chat 本体由
  * workflowStudio/chat 自己的测试覆盖，这里 mock 其 API 层。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { CustomizePreviewDialog } from './CustomizePreviewDialog'
 import * as previewPanelApi from './previewPanelApi'
 import * as chatApi from '../workflowStudio/chat/studioChatApi'
+import type { StudioChatSessionRecord } from '../workflowStudio/chat/studioChatApi'
+import { EventSourceMock } from '../../testing/eventSourceMock'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 
 vi.mock('./previewPanelApi')
 vi.mock('../workflowStudio/chat/studioChatApi')
+vi.mock('../workflowStudio/chat/studioChatResumeApi')
 
 const mockPanelApi = vi.mocked(previewPanelApi)
 const mockChatApi = vi.mocked(chatApi)
+
+function sessionRecord(
+  overrides?: Partial<StudioChatSessionRecord>
+): StudioChatSessionRecord {
+  return {
+    id: 's1',
+    workspace_id: 'ws1',
+    user_id: 'u1',
+    agent_id: 'kimi',
+    title: '',
+    status: 'idle',
+    acp_session_id: null,
+    capability_snapshot: {},
+    allow_all_permissions: false,
+    compacting: false,
+    mcp_status: 'unknown',
+    selected_node_key: null,
+    error_detail: '',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    closed_at: null,
+    ...overrides,
+  }
+}
 
 function makeVersion(
   status: 'draft' | 'published'
@@ -61,13 +88,21 @@ function renderDialog(
 
 beforeEach(() => {
   vi.clearAllMocks()
+  EventSourceMock.reset()
+  globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
   mockChatApi.fetchStudioChatAgents.mockResolvedValue([])
   mockChatApi.fetchStudioChatSessions.mockResolvedValue([])
+  mockChatApi.fetchStudioChatMessages.mockResolvedValue([])
   mockPanelApi.publishPreviewPanel.mockResolvedValue(makeVersion('published'))
   mockPanelApi.archivePreviewPanel.mockResolvedValue({
     published: null,
     draft: null,
   })
+})
+
+const originalEventSource = globalThis.EventSource
+afterEach(() => {
+  globalThis.EventSource = originalEventSource
 })
 
 describe('CustomizePreviewDialog', () => {
@@ -164,5 +199,43 @@ describe('CustomizePreviewDialog', () => {
       await screen.findByText(/草稿 v1（studio-agent:u1）/)
     ).toBeInTheDocument()
     expect(screen.getByText(/已发布 v1/)).toBeInTheDocument()
+  })
+
+  it('#695：busy 时发送进入队列而不是直发撞 409', async () => {
+    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi' },
+    ] as never)
+    mockChatApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'running' }),
+    ])
+    mockChatApi.sendStudioChatMessage.mockResolvedValue({} as never)
+    renderDialog(null)
+
+    const input = await screen.findByLabelText('消息输入')
+    await waitFor(() => expect(input).toBeEnabled())
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    fireEvent.change(input, { target: { value: '排队消息' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+    // busy：不直接发送（直发会被后端单 turn 原子认领 409 拒绝），进入队列。
+    expect(mockChatApi.sendStudioChatMessage).not.toHaveBeenCalled()
+    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getByText('排队消息')).toBeInTheDocument()
+  })
+
+  it('#695：closed 会话显示恢复条', async () => {
+    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi' },
+    ] as never)
+    mockChatApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'closed', closed_at: '2026-09-01T01:00:00Z' }),
+    ])
+    renderDialog(null)
+
+    expect(
+      await screen.findByRole('button', { name: '继续对话' })
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('消息输入')).toBeDisabled()
   })
 })

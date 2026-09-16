@@ -6798,6 +6798,11 @@ export interface components {
       }
       /** Closed At */
       closed_at: string | null
+      /**
+       * Compacting
+       * @default false
+       */
+      compacting: boolean
       /** Config Options */
       config_options?:
         | {
@@ -6844,6 +6849,10 @@ export interface components {
        * Format: date-time
        */
       updated_at: string
+      /** Usage */
+      usage?: {
+        [key: string]: unknown
+      } | null
       /** User Id */
       user_id: string
       /** Workspace Id */
