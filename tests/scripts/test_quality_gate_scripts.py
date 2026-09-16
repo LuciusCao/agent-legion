@@ -250,9 +250,12 @@ def test_quick_gate_backend_test_failure_still_runs_frontend_round(tmp_path: Pat
     # after the backend test failure instead of being skipped (the api-contract
     # integration step between the rounds is frontend:api-contract).
     phases = phase_log.read_text(encoding="utf-8").splitlines()
-    assert phases == [
-        "backend:static",
-        "frontend:static",
+    # The static round runs both lanes in parallel, so their two lines arrive
+    # in either order; the api-contract step and the staggered test round
+    # (backend before frontend) are strictly ordered.
+    assert len(phases) == 5
+    assert sorted(phases[:2]) == ["backend:static", "frontend:static"]
+    assert phases[2:] == [
         "frontend:api-contract",
         "backend:test",
         "frontend:test",
