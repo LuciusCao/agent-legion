@@ -120,6 +120,12 @@ export const FIELD_GROUPS: FieldGroup[] = [
         integer: true,
         allowZero: true,
       },
+      {
+        path: 'agent_workers.artifact_spot_check_percent',
+        label: '产物校验抽检比例 %（0 全信任，100 全核验）',
+        integer: true,
+        allowZero: true,
+      },
     ],
     toggles: [],
   },

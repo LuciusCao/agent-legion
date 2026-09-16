@@ -103,9 +103,12 @@ def test_code_claim_secret_failure_500_then_sweeper_requeue_retries(
             client, capabilities=["package"], max_code_concurrency=1, protocol_version=2
         )["worker_token"]
 
+        # #547: the single path's post-commit 500 is gone — the batch
+        # response drops the broken item and answers the empty-batch 204.
+        # Recovery is unchanged: the claim already committed, the lease
+        # expiry sweeper requeues it for the retry below.
         failed = _claim(client, token)
-        assert failed.status_code == 500
-        assert failed.json()["detail"] == "code manifest resolution failed"
+        assert failed.status_code == 204
 
         # The claim committed before injection failed: the request is not
         # lost, it sits claimed behind the expired-soon lease.
@@ -127,7 +130,7 @@ def test_code_claim_secret_failure_500_then_sweeper_requeue_retries(
         claimed = _claim(client, token)
 
     assert claimed.status_code == 200, claimed.text
-    body = claimed.json()
+    body = claimed.json()["claims"][0]  # #547 batch wrapper
     assert body["execution_id"] == execution_id
     assert body["kind"] == "code"
     assert body["manifest"]["config"] == {"mode": "fast", "token": "restored-secret"}
@@ -196,7 +199,7 @@ def test_code_claim_binds_shard_row_and_ships_payload(tmp_path: Path, job_db) ->
         claimed = _claim(client, token)
 
     assert claimed.status_code == 200, claimed.text
-    body = claimed.json()
+    body = claimed.json()["claims"][0]  # #547 batch wrapper
     assert body["kind"] == "code"
     # The manifest rebuild (claim response) keeps the shard identity.
     assert body["manifest"]["shard_index"] == 2

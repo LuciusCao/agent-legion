@@ -41,13 +41,18 @@ class BatchHeartbeatResponse(BaseModel):
 
     ``renewed``/``lost`` partition the request items; ``lost`` carries the
     409 family (unknown id, swept lease, foreign worker) so the Worker can
-    prune those leases locally instead of retrying them forever. The cancel
-    body mirrors the single heartbeat's protocol-v2 shape: batch beats carry
-    the same explicit cancellation list for this Worker's claimed code
-    executions."""
+    prune those leases locally instead of retrying them forever.
+    ``settled`` (#590) carries the completion followup — the execution is in
+    a terminal state on the Host and the Worker's snapshot entry is merely
+    stale; the Worker prunes it quietly (no ownership_lost, no event: the
+    Host emits ``execution.heartbeat_rejected`` only for the ``lost``
+    family). The cancel body mirrors the single heartbeat's protocol-v2
+    shape: batch beats carry the same explicit cancellation list for this
+    Worker's claimed code executions."""
 
     renewed: list[str]
     lost: list[str]
+    settled: list[str] = Field(default_factory=list)
     cancelled_execution_ids: list[str]
 
 
@@ -80,5 +85,6 @@ def register_batch_heartbeat_route(
         return BatchHeartbeatResponse(
             renewed=outcome["renewed"],
             lost=outcome["lost"],
+            settled=outcome.get("settled", []),
             cancelled_execution_ids=cancelled,
         )

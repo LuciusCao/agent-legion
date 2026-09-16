@@ -134,6 +134,11 @@ def note_skip_reasons(
 # renewal paths cannot drift (runbook §7 names them).
 HEARTBEAT_NOT_OWNED = "not_owned"
 HEARTBEAT_LEASE_NOT_ACTIVE = "lease_not_active"
+# #590: the completion followup — the execution reached a terminal state on
+# the Host and the Worker's lease snapshot entry is merely stale. Internal
+# verdict only (never an event reason): settled items carry no
+# ``execution.heartbeat_rejected`` — that stream keeps meaning "investigate".
+HEARTBEAT_SETTLED = "settled"
 
 
 def note_claim_outcome(

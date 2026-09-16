@@ -83,13 +83,22 @@ def write_beat_result(
     seq: int,
     lost: list[tuple[str, str]],
     cancelled: list[str],
+    settled: list[str] | None = None,
 ) -> None:
     """Publish one beat round's verdicts; ``seq`` lets the executor apply
-    each result exactly once."""
+    each result exactly once.
+
+    ``settled`` (#590): execution ids the Host answered ``not_owned`` for
+    AFTER the execution reached a terminal state on the Host side — the
+    completion-followup beat, not a lost-ownership verdict. The executor
+    prunes them from the registry so the next snapshot stops carrying the
+    dead lease (the noise source); no ``ownership_lost`` is set, no cancel
+    fires, and the local discard path keeps its own pruning."""
     payload = {
         "seq": seq,
         "lost": [[execution_id, lease_id] for execution_id, lease_id in lost],
         "cancelled": list(cancelled),
+        "settled": list(settled or []),
     }
     atomic_write(path, json.dumps(payload), mode=0o600)
 

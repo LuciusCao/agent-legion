@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.agent_broker.worker_events import (
     HEARTBEAT_LEASE_NOT_ACTIVE,
     HEARTBEAT_NOT_OWNED,
+    HEARTBEAT_SETTLED,
     note_heartbeat_rejected,
 )
 from server.app.agent_broker.worker_presence import touch_worker
@@ -35,8 +36,9 @@ if TYPE_CHECKING:
 # long-transaction problem this split exists to solve. One renewal is a fixed
 # handful of cheap primary-key statements, and a Worker's live claims are
 # bounded by max_concurrency + max_code_concurrency (registration caps both at
-# 1024), so 256 items per transaction keeps the worst case in the tens-of-
-# milliseconds range while covering every realistic slot count in one round.
+# MAX_DYNAMIC_CONCURRENCY, #657), so 256 items per transaction keeps the worst
+# case in the tens-of-milliseconds range; oversized snapshots shard
+# sequentially — never truncated, never refused.
 MAX_BATCH_HEARTBEATS = 256
 
 
@@ -44,13 +46,22 @@ def _renew_one(
     conn: Any, broker: AgentExecutionBroker, worker_id: str, execution_id: str, lease_id: str
 ) -> str | None:
     """Renew one lease inside the batch transaction; None = renewed, else the
-    refusal reason (HEARTBEAT_NOT_OWNED / HEARTBEAT_LEASE_NOT_ACTIVE).
+    refusal reason (HEARTBEAT_NOT_OWNED / HEARTBEAT_LEASE_NOT_ACTIVE /
+    HEARTBEAT_SETTLED).
 
     The single heartbeat's exact predicate — the row must be this Worker's,
     under this exact lease_id, still claimable — so zombie attempts from a
     requeued execution cannot keep a re-claimed lease alive, and one Worker
     can never renew another's execution. The reason literals are shared with
-    the single path (#499): both failure points must classify identically."""
+    the single path (#499): both failure points must classify identically.
+
+    #590 review: a row miss is ambiguous between "lease swept/requeued" (the
+    Worker must react) and "execution finished — the relay's snapshot entry
+    is merely stale" (the benign completion followup). One extra primary-key
+    read inside the SAME transaction settles it: a row in a terminal state
+    (done/cancelled) is the followup and reports HEARTBEAT_SETTLED — the
+    Worker prunes the lease quietly; anything else (queued after a sweep,
+    unknown id, foreign worker) is the loud HEARTBEAT_NOT_OWNED."""
     row = conn.execute(
         "select lease_id from agent_execution_requests"
         " where execution_id=%s and worker_id=%s and lease_id=%s"
@@ -59,6 +70,12 @@ def _renew_one(
         (execution_id, worker_id, lease_id),
     ).fetchone()
     if row is None:
+        state_row = conn.execute(
+            "select state from agent_execution_requests where execution_id=%s",
+            (execution_id,),
+        ).fetchone()
+        if state_row is not None and str(state_row["state"]) in ("done", "cancelled"):
+            return HEARTBEAT_SETTLED
         return HEARTBEAT_NOT_OWNED
     conn.execute(
         "update agent_execution_requests set heartbeat_at=current_timestamp where execution_id=%s",
@@ -79,11 +96,16 @@ def batch_heartbeat(
 ) -> dict[str, Any]:
     """Renew a batch of ``[{'execution_id', 'lease_id'}, ...]`` for one Worker.
 
-    Returns ``{'renewed': [...], 'lost': [...]}`` (execution ids). An item is
-    lost when this Worker no longer owns the execution under that exact lease
-    (unknown id, swept/requeued lease, wrong worker) — the same 409 family the
-    single heartbeat reports, surfaced per item so the rest of the batch still
-    renews. Duplicated execution ids are collapsed to the last lease_id.
+    Returns ``{'renewed': [...], 'lost': [...], 'settled': [...]}`` (execution
+    ids). An item is lost when this Worker no longer owns the execution under
+    that exact lease AND it is not in a terminal state (unknown id, swept/
+    requeued lease, wrong worker) — the same 409 family the single heartbeat
+    reports, surfaced per item so the rest of the batch still renews.
+    ``settled`` (#590) carries the completion followup: the execution reached
+    a terminal state on the Host and the Worker's snapshot entry is merely
+    stale — the Worker prunes it quietly, and NO ``heartbeat_rejected`` event
+    fires (the event stream keeps meaning "investigate"). Duplicated
+    execution ids are collapsed to the last lease_id.
 
     Lock-order note (#5125358408 P1-B): this transaction locks THREE tables,
     always in this order — agent_execution_requests (``for update`` per batch
@@ -106,6 +128,7 @@ def batch_heartbeat(
         by_execution[str(item["execution_id"])] = str(item["lease_id"])
     renewed: list[str] = []
     lost: list[str] = []
+    settled: list[str] = []
     # Refusal reasons per lost item, emitted only after the commit (#498
     # discipline shared with the claim path): a transaction that rolls back
     # never happened, so its verdicts must not reach the event stream.
@@ -115,6 +138,8 @@ def batch_heartbeat(
             reason = _renew_one(conn, broker, worker_id, execution_id, lease_id)
             if reason is None:
                 renewed.append(execution_id)
+            elif reason == HEARTBEAT_SETTLED:
+                settled.append(execution_id)
             else:
                 lost.append(execution_id)
                 lost_reasons[execution_id] = reason
@@ -124,4 +149,4 @@ def batch_heartbeat(
             touch_worker(conn, worker_id)
     for execution_id in lost:
         note_heartbeat_rejected(execution_id, worker_id, lost_reasons[execution_id])
-    return {"renewed": renewed, "lost": lost}
+    return {"renewed": renewed, "lost": lost, "settled": settled}

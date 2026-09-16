@@ -16,7 +16,7 @@ from typing import Any
 from yaml import YAMLError
 
 from worker.config_store import WorkerConfigStore, public_config, validate_config
-from worker.executor_log import ExecutorLogSink, executor_log_path
+from worker.executor_log import PanelLogSinks
 from worker.lease_snapshot import RESULT_FILENAME, SNAPSHOT_ENV_VAR, SNAPSHOT_FILENAME
 from worker.metrics_cache import METRICS_FILENAME
 from worker.orphan_reaper import reap_orphaned_agents
@@ -67,15 +67,15 @@ class WorkerSupervisor:
         self._next_restart_delay: float | None = None
         self._failed_reason: str | None = None
         self._warned_divergence = False
-        # #566 三期：面板行（executor stdout + 生命周期）同步落滚动文件，
-        # 内存 500 行 deque 不再是唯一留存（排查事故时已被刷没过）。
-        self._sink = ExecutorLogSink(executor_log_path(store.state_dir))
+        # #566 三期 + #510：面板行与结构化事件分别落滚动文件（PanelLogSinks
+        # 收口两个 sink 的分流与生命周期），内存 500 行 deque 不再是唯一留存。
+        self._sinks = PanelLogSinks(store.state_dir)
 
     def _log(self, message: str) -> None:
         """Append one panel log line (timestamped deque + rolling file)."""
         line = f"[{time.strftime('%H:%M:%S')}] {message}"
         self._logs.append(line)
-        self._sink.write(line, self._logs.append)
+        self._sinks.write(message, line, self._logs.append)
 
     def start(self) -> None:
         with self._op_lock:
@@ -83,7 +83,7 @@ class WorkerSupervisor:
             self._failed_reason = None
             self._next_restart_delay = None
             self._restart_event.clear()
-            self._sink.resume()  # 与 stop() 的 sink.close() 配对（#572 P2）
+            self._sinks.resume()  # 与 stop() 的 sinks.close() 配对（#572 P2）
             self._start()
 
     def _start(self) -> None:
@@ -136,7 +136,7 @@ class WorkerSupervisor:
             self._shutdown = True
             self._restart_event.set()  # 唤醒退避等待中的 collector
             self._stop_locked()
-        self._sink.close()
+        self._sinks.close()
 
     def _stop_locked(self) -> None:
         with self._lock:

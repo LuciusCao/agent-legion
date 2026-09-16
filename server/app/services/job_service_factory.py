@@ -73,6 +73,7 @@ class JobServices:
             settings,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
+            object_store=object_store,
         )
         self.approvals = ApprovalDecisionService(
             job_db, settings, self.rerun, object_store=object_store
@@ -89,6 +90,7 @@ class JobServices:
             self.executor_leases,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
+            object_store=object_store,
         )
         self.deletion = JobDeletionService(
             job_db,

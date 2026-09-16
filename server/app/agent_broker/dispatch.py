@@ -72,7 +72,12 @@ class AgentDispatchService:
     ) -> bool:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
-        execution = resolve_execution_block(node, definition.runtime)
+        # #550：超时从 dispatch 解析后的节点 config 取（agent 节点的有效
+        # schema 已合并保留键，值走 defaults → 节点 config → workspace 覆盖
+        # → intake 冻结的常规链）；缺省/畸形回落产品常量。
+        timeout_raw = (node_config or {}).get("timeout_seconds")
+        timeout = timeout_raw if isinstance(timeout_raw, int) and timeout_raw >= 1 else None
+        execution = resolve_execution_block(node, definition.runtime, timeout_seconds=timeout)
         execution_id = str(uuid.uuid4())
         skill = checkout_node_skill(self.skill_manager, node, definition.skill, execution_id)
         try:

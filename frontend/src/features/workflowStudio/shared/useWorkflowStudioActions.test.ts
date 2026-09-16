@@ -33,6 +33,7 @@ const draft: UseWorkflowStudioDraftResult = {
   hasPreservedDraft: false,
   isLoadingRevision: false,
   revisionLoadError: null,
+  markDraftPublished: vi.fn(),
   selectRevision: vi.fn(),
   backToDraft: vi.fn(),
   useViewedRevisionAsDraft: vi.fn(),
@@ -144,5 +145,60 @@ describe('useWorkflowStudioActions', () => {
 
     expect(result.current.validationMessage).toBe('')
     expect(result.current.validationErrors).toEqual([])
+  })
+
+  it('marks the published draft before reload so baseline sync force-resets (#666)', async () => {
+    const markDraftPublished = vi.fn()
+    const reloadCalls: string[] = []
+    const trackingReload = vi.fn(async () => {
+      // 登记必须先于 reload：baseline sync 在 reload 拉回的基线变化里消费标记。
+      reloadCalls.push(
+        markDraftPublished.mock.calls.length
+          ? 'marked-before-reload'
+          : 'not-marked'
+      )
+    })
+    const { result } = renderHook(() =>
+      useWorkflowStudioActions(
+        'ws1',
+        { ...draft, markDraftPublished },
+        trackingReload,
+        compare
+      )
+    )
+
+    await act(async () => {
+      await result.current.publishDraft()
+    })
+
+    expect(markDraftPublished).toHaveBeenCalledWith('key: demo\n')
+    expect(reloadCalls).toEqual(['marked-before-reload'])
+  })
+
+  it('does not mark the draft when publish fails validation or rejects', async () => {
+    const markDraftPublished = vi.fn()
+    mocks.publishWorkflowDraft.mockResolvedValueOnce({
+      valid: false,
+      errors: ['missing key'],
+    })
+    const { result } = renderHook(() =>
+      useWorkflowStudioActions(
+        'ws1',
+        { ...draft, markDraftPublished },
+        reload,
+        compare
+      )
+    )
+
+    await act(async () => {
+      await result.current.publishDraft()
+    })
+    expect(markDraftPublished).not.toHaveBeenCalled()
+
+    mocks.publishWorkflowDraft.mockRejectedValueOnce(new Error('network error'))
+    await act(async () => {
+      await result.current.publishDraft()
+    })
+    expect(markDraftPublished).not.toHaveBeenCalled()
   })
 })

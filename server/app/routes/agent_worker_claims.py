@@ -17,15 +17,10 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.claim_batch import claim_batch
 from server.app.routes.agent_worker_claim_contracts import (
-    AgentClaimResponse,
     BatchAgentClaimResponse,
     ClaimAgentExecutionRequest,
-    ClaimRouteResponse,
 )
-from server.app.routes.agent_worker_claim_response import (
-    build_batch_claim_response,
-    build_claim_response,
-)
+from server.app.routes.agent_worker_claim_response import build_batch_claim_response
 from server.app.routes.agent_worker_heartbeat import register_heartbeat_route
 from server.app.settings import Settings
 
@@ -39,46 +34,30 @@ def create_agent_worker_claim_router(
 ) -> APIRouter:
     router = APIRouter(tags=["agent-workers"])
 
-    @router.post("/agent-executions/claim", response_model=ClaimRouteResponse)
+    @router.post("/agent-executions/claim", response_model=BatchAgentClaimResponse)
     def claim(
         payload: ClaimAgentExecutionRequest, request: Request
-    ) -> Response | AgentClaimResponse | BatchAgentClaimResponse:
+    ) -> Response | BatchAgentClaimResponse:
         worker = authorize_worker(request, payload.worker_id)
-        # #546 batch claim: limit > 1 promotes up to `limit` executions in one
-        # transaction and answers BatchAgentClaimResponse; the default (1, or a
-        # pre-#546 Worker that sends no limit) takes the legacy single-claim
-        # path with a byte-identical response. A request carrying per-pool
-        # limits IS a batch request even at limit=1 — otherwise the pool caps
-        # would silently fall off exactly in the steady-state top-up shape
-        # (budget sum 1), and a clamped pool (agent_limit=0) could still be
-        # served through the unpooled single path.
-        if payload.limit > 1 or payload.agent_limit is not None or payload.code_limit is not None:
-            try:
-                claims = claim_batch(
-                    broker,
-                    payload.worker_id,
-                    payload.max_concurrency,
-                    payload.max_code_concurrency,
-                    limit=payload.limit,
-                    agent_limit=payload.agent_limit,
-                    code_limit=payload.code_limit,
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
-            return build_batch_claim_response(
-                broker, settings, job_artifact_objects, worker, claims
-            )
-        # #338: the claiming Worker's protocol version selects the artifact
-        # object form (v4+ gets .gz specs; older Workers stay raw dual-form).
+        # #546 batch claim, #547 single-path retirement: every request is a
+        # batch request now (the default limit=1 answers a one-element
+        # ``claims`` list; the pre-#546 byte-identical single-object body is
+        # gone — batch claim shipped in 0.7.4 and the mixed-fleet window has
+        # closed). Per-pool limits keep their meaning; a request carrying
+        # them is capped per pool exactly as before.
         try:
-            claimed = broker.claim(
-                payload.worker_id, payload.max_concurrency, payload.max_code_concurrency
+            claims = claim_batch(
+                broker,
+                payload.worker_id,
+                payload.max_concurrency,
+                payload.max_code_concurrency,
+                limit=payload.limit,
+                agent_limit=payload.agent_limit,
+                code_limit=payload.code_limit,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        if claimed is None:
-            return Response(status_code=204)
-        return build_claim_response(broker, settings, job_artifact_objects, worker, claimed)
+        return build_batch_claim_response(broker, settings, job_artifact_objects, worker, claims)
 
     register_heartbeat_route(router, broker, authorize_worker, require_lease_id)
     return router

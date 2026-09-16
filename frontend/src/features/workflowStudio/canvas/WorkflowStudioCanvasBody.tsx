@@ -15,6 +15,7 @@ export function WorkflowStudioCanvasBody() {
       nodes={studio.nodes}
       edges={studio.edges}
       selectedNode={studio.selectedNodeKey}
+      selectionNonce={studio.focusNonce}
       onSelectedNodeChange={studio.setSelectedNodeKey}
       hideNodeDetails
     />

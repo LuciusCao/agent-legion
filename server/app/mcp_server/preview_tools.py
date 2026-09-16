@@ -24,45 +24,39 @@ PREVIEW_GUIDE = Path(__file__).with_name("preview_guide.md").read_text(encoding=
 
 
 def register_preview_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     def get_preview_guide() -> str:
-        """The built-in preview panel playbook: the sandboxed iframe runtime
-        (allow-scripts, never allow-same-origin), the read-only postMessage
-        bridge contract (listArtifacts/readArtifact/getJobDetail + theme
-        variables), the panel HTML skeleton, and the draft → human-publish
-        flow. Read this BEFORE authoring a preview panel. Served locally —
-        no backend call, always available."""
+        """The built-in preview panel playbook: sandboxed iframe runtime,
+        read-only postMessage bridge contract, panel HTML skeleton, draft →
+        human-publish flow. Read BEFORE authoring a panel. Served locally —
+        no backend call."""
         return PREVIEW_GUIDE
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_preview_context(workspace_id: str, job_id: str | None = None) -> str:
-        """Real data shapes for authoring a preview panel: the workspace's
-        recent jobs with their artifact inventories, plus bounded content
-        samples (2k chars each, up to 5 artifacts) of one job — the given
-        job_id, or the most recent job when omitted. Call this BEFORE writing
-        a panel so the markup matches what jobs actually produce."""
+        """Real data shapes for authoring a preview panel: recent jobs with
+        artifact inventories + bounded content samples of one job (given
+        job_id or the most recent). Call BEFORE writing a panel."""
         _, client = await client_factory()
         path = f"/workspaces/{workspace_id}/preview/context"
         if job_id is not None:
             path += f"?job_id={quote(job_id, safe='')}"
         return await client.call("GET", path)
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_preview_panel(workspace_id: str) -> str:
-        """Read the workspace's preview panel state: the published bundle
-        (what job detail pages render) and any pending draft. Both null means
-        the workspace falls back to the built-in generic preview."""
+        """The workspace's preview panel state: published bundle (what job
+        detail pages render) + any pending draft; both null → built-in
+        generic preview."""
         _, client = await client_factory()
         return await client.call("GET", f"/workspaces/{workspace_id}/preview/panel")
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def save_preview_panel_draft(workspace_id: str, html: str, change_note: str = "") -> str:
         """Save a preview panel draft: one self-contained HTML document
-        (inline <style>/<script>, no external origins) that renders the job
-        detail left column through the read-only bridge (see
-        get_preview_guide). Validated for size and document shape. Draft
-        only — a human reviews the live draft preview in the job detail page
-        and publishes it there; the tool surface can never publish."""
+        (inline <style>/<script>, no external origins) rendering the job
+        detail left column via the read-only bridge (get_preview_guide).
+        Draft only — a human publishes from the job detail page."""
         _, client = await client_factory()
         body: dict[str, Any] = {"html": html, "change_note": change_note or None}
         return await client.call("PUT", f"/workspaces/{workspace_id}/preview/panel/draft", body)

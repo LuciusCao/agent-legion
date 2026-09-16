@@ -180,8 +180,15 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
         # executor definitions (D15). publish_content declares no parameters,
         # but as a code-routed node it still carries the platform-reserved
         # execution keys (timeout_seconds/sandbox_network, P-0.5 step 1).
+        # #550: agent-routed nodes merge the same reserved keys under their
+        # Agent schema — including schema-less demo agents (review_script /
+        # review_questions / generate_questions), whose timeouts are now
+        # configurable through the regular node-config chain.
         assert set(settings["nodeConfigSchemas"]) == {
             "write_script",
+            "review_script",
+            "review_questions",
+            "generate_questions",
             "intake_knowledge_points",
             "publish_content",
         }

@@ -262,7 +262,7 @@ def test_validate_ramp_up_defaults_and_none_disable() -> None:
     ("block", "match"),
     [
         ({"initial": 0}, "ramp_up.initial"),
-        ({"initial": 1025}, "ramp_up.initial"),
+        ({"initial": 2049}, "ramp_up.initial"),  # #657：越界=ceiling+1
         ({"initial": True}, "ramp_up.initial"),
         ({"initial": 1.5}, "ramp_up.initial"),
         ({"step": 0}, "ramp_up.step"),

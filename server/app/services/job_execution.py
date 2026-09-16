@@ -14,7 +14,10 @@ from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.batch_ops import batch_run_to as _batch_run_to
 from server.app.services.job_rerun.upstream_guard import raise_if_failed_upstream
-from server.app.services.job_staged_cleanup import commit_staged_outputs
+from server.app.services.job_staged_cleanup import (
+    commit_staged_outputs,
+    delete_rerun_artifact_objects,
+)
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
@@ -36,6 +39,7 @@ class JobExecutionService:
         clock: Callable[[], float] | None = None,
         job_event_manager: JobEventManager | None = None,
         job_event_buffer: Any | None = None,
+        object_store: Any = None,
     ) -> None:
         self.job_db = job_db
         self.artifact_mutation = artifact_mutation
@@ -43,6 +47,8 @@ class JobExecutionService:
         self.clock = clock
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
+        # #508: manifest-row GC needs the post-commit object deletion.
+        self.object_store = object_store
 
     def _now(self) -> datetime:
         if self.clock is not None:
@@ -238,6 +244,7 @@ class JobExecutionService:
         )
 
         staged = None
+        deleted_rows: list[dict[str, Any]] = []
         try:
             descendants = downstream_nodes(definition, start_node_key)
             with self.job_db.lease_guarded_mutation(
@@ -248,8 +255,12 @@ class JobExecutionService:
                 staged = self.artifact_mutation.stage_outputs(
                     job, [start_node_key], definition, closure=closure
                 )
-                self.job_db.mark_nodes_for_rerun_in_transaction(
-                    conn, job_id, [start_node_key], {start_node_key: descendants}
+                deleted_rows = self.job_db.mark_nodes_for_rerun_in_transaction(
+                    conn,
+                    job_id,
+                    [start_node_key],
+                    {start_node_key: descendants},
+                    staged_artifact_names=staged.artifact_names,
                 )
                 self.job_db.set_run_to_control_in_transaction(conn, job_id, target_node_key)
         except JobMutationConflict as exc:
@@ -288,6 +299,7 @@ class JobExecutionService:
             ) from exc
 
         commit_staged_outputs(staged, job_id, "run-to")
+        delete_rerun_artifact_objects(self.object_store, deleted_rows, job_id, "run-to")
         if self.job_event_buffer is not None:
             record_job_update(self.job_db, self.job_event_buffer, job_id, str(job["workspace_id"]))
         elif self.job_event_manager is not None:

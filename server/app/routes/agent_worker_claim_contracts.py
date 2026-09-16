@@ -9,26 +9,28 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
+
 
 class ClaimAgentExecutionRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=64)
     # Live re-declaration of the worker's machine-wide capacity: the Host
     # records it as the enforced max_concurrency, so dynamic resizes on the
     # worker take effect without re-registration.
-    max_concurrency: int | None = Field(default=None, gt=0, le=1024)
+    max_concurrency: int | None = Field(default=None, gt=0, le=MAX_DYNAMIC_CONCURRENCY)
     # Live re-declaration of the code-execution pool (batch 2); None leaves
     # the recorded value untouched.
-    max_code_concurrency: int | None = Field(default=None, ge=0, le=1024)
-    # Batch claim (issue #546): 1 (default) = the legacy single-claim path
-    # with a byte-identical response; >1 promotes up to `limit` executions in
-    # ONE transaction and answers BatchAgentClaimResponse (empty batch = the
-    # same 204). Pre-#546 Hosts ignore the field and answer a single claim.
-    limit: int = Field(default=1, ge=1, le=1024)
+    max_code_concurrency: int | None = Field(default=None, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
+    # Batch claim (issue #546; single path retired by #547): promotes up to
+    # `limit` executions in ONE transaction and answers
+    # BatchAgentClaimResponse (empty batch = the same 204). The default 1
+    # answers a one-element claims list.
+    limit: int = Field(default=1, ge=1, le=MAX_DYNAMIC_CONCURRENCY)
     # Per-pool batch caps (the #546 flood shape: an instantaneous-code storm
     # must fill the code pool without spending agent slots); None = the Host
     # capacity view decides per kind.
-    agent_limit: int | None = Field(default=None, ge=0, le=1024)
-    code_limit: int | None = Field(default=None, ge=0, le=1024)
+    agent_limit: int | None = Field(default=None, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
+    code_limit: int | None = Field(default=None, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
 
 
 class AgentClaimResponse(BaseModel):
@@ -58,13 +60,8 @@ class AgentClaimResponse(BaseModel):
 
 
 class BatchAgentClaimResponse(BaseModel):
-    """Batch claim answer (#546): requested via
-    ``ClaimAgentExecutionRequest.limit`` > 1; an empty batch stays a 204."""
+    """Batch claim answer (#546; the route's only shape since #547 retired
+    the single-object path): ``claims`` holds 0..limit items, an empty batch
+    stays a 204. The default ``limit=1`` answers a one-element list."""
 
     claims: list[AgentClaimResponse]
-
-
-# The claim route answers a single claim on the legacy path and a batch on
-# the #546 path; the named union keeps the route's response_model a Name
-# (the architecture gate's route-contract rule) while OpenAPI gets anyOf.
-ClaimRouteResponse = AgentClaimResponse | BatchAgentClaimResponse

@@ -67,7 +67,10 @@ const baseSettings: WorkspaceSettings = {
   workflowKey: '',
 }
 
-function renderWorkspace(overrides?: Record<string, unknown>) {
+function renderWorkspace(
+  overrides?: Record<string, unknown>,
+  viewOverrides?: Record<string, unknown>
+) {
   const props = {
     workflow,
     executorCatalog,
@@ -89,7 +92,7 @@ function renderWorkspace(overrides?: Record<string, unknown>) {
     setDagFullscreenOpen: vi.fn(),
     ...overrides,
   } as unknown as Record<string, unknown>
-  const view = makeStudioView()
+  const view = makeStudioView(viewOverrides)
   return {
     setSelectedNodeKey: props.setSelectedNodeKey,
     ...render(
@@ -123,14 +126,17 @@ describe('WorkflowStudioWorkspace', () => {
     expect(agentPanel).not.toHaveAttribute('data-collapsed')
     expect(screen.getByText('chat panel stub')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '节点详情' })).toBeNull()
+    // #668：面板开关收敛到 appbar（CommandBar），画布工具条不再有开关。
+    expect(
+      screen.queryByRole('button', { name: 'toggle agent panel' })
+    ).not.toBeInTheDocument()
   })
 
+  // #668：agentOpen 提升到 StudioViewContext（appbar 开关写、布局读）；
+  // 收起态布局直接以 view.agentOpen=false 注入。
   it('collapses the agent panel so the DAG takes the full width', () => {
-    renderWorkspace()
+    renderWorkspace({}, { agentOpen: false })
 
-    fireEvent.click(
-      screen.getAllByRole('button', { name: 'toggle agent panel' })[0]
-    )
     expect(
       screen.getByRole('complementary', { name: 'Agent 对话面板' })
     ).toHaveAttribute('data-collapsed', 'true')
@@ -149,11 +155,8 @@ describe('WorkflowStudioWorkspace', () => {
   })
 
   it('puts node detail on the right half next to the DAG when the agent panel is collapsed', async () => {
-    renderWorkspace({ selectedNodeKey: 'fetch_items' })
+    renderWorkspace({ selectedNodeKey: 'fetch_items' }, { agentOpen: false })
 
-    fireEvent.click(
-      screen.getAllByRole('button', { name: 'toggle agent panel' })[0]
-    )
     const detail = screen.getByRole('region', { name: '节点详情' })
     expect(detail).toHaveAttribute('data-placement', 'right')
     expect(
