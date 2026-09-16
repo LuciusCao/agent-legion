@@ -11,9 +11,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Header
 from fastapi.responses import FileResponse, StreamingResponse
 
-from server.app.routes.job_artifact_media import raw_media_type
 from server.app.routes.job_artifact_raw_response import raw_response
 from server.app.routes.job_http import raise_job_http_error
+from server.app.services.job_artifact_media import raw_media_type
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_errors import JobServiceError
 from server.app.settings import Settings

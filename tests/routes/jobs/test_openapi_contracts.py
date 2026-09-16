@@ -49,3 +49,37 @@ def test_job_routes_are_available_without_former_gate(tmp_path):
     # "Workflows are disabled" is gone).
     assert response.status_code != 404 or "disabled" not in response.json().get("detail", "")
     assert workspaces.status_code != 404 or "disabled" not in workspaces.json().get("detail", "")
+
+
+def test_external_artifact_routes_contract(tmp_path):
+    """#631: the three workspace-prefixed read endpoints are exposed with
+    their response models (the raw download stays application/octet-stream,
+    no JSON schema)."""
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    schema = app.openapi()
+
+    status_path = schema["paths"]["/api/workspaces/{workspace_id}/jobs/{job_id}"]
+    assert (
+        status_path["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+        == "#/components/schemas/ExternalJobStatusResponse"
+    )
+    list_path = schema["paths"]["/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts"]
+    assert (
+        list_path["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+        == "#/components/schemas/ExternalArtifactListResponse"
+    )
+    raw_path = schema["paths"][
+        "/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw"
+    ]
+    assert "application/octet-stream" in raw_path["get"]["responses"]["200"]["content"]
+
+    schemas = schema["components"]["schemas"]
+    entry = schemas["ExternalArtifactEntry"]
+    # required: the identity fields; metadata fields default (local rows carry
+    # no content_hash/uploaded_at).
+    assert set(entry["required"]) == {"name", "storage"}
+    assert {"content_hash", "uploaded_at", "size_bytes", "node_key", "media_type"} <= set(
+        entry["properties"]
+    )

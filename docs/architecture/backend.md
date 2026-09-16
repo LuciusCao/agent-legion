@@ -136,6 +136,9 @@ server/app/
 | DELETE | `/admin/connections/{key}` | `delete_connection` | routes/connections.py |
 | POST | `/admin/connections/{key}/test` | `test_connection` | routes/connections.py |
 | GET | `/dashboard/events` | `dashboard_events` | routes/dashboard_events.py |
+| GET | `/workspaces/{workspace_id}/jobs/{job_id}` | `get_external_job_status` | routes/external_artifacts.py |
+| GET | `/workspaces/{workspace_id}/jobs/{job_id}/artifacts` | `list_external_artifacts` | routes/external_artifacts.py |
+| GET | `/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw` | `get_external_artifact_raw` | routes/external_artifacts.py |
 | GET | `/workspaces/{workspace_id}/failed-node-runs` | `list_failed_node_runs` | routes/failed_node_runs.py |
 | POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
 | GET | `/admin/infra-connections` | `get_infra_connections` | routes/infra_connections.py |
@@ -395,6 +398,9 @@ server/app/
 | ConnectionTypeView | BaseModel | type: str, description: str, required_config_keys: list[str], secret_keys: li... | app/routes/connections_contracts.py |
 | ConnectionTypesResponse | BaseModel | types: list[ConnectionTypeView] | app/routes/connections_contracts.py |
 | ConnectionTestResponse | BaseModel | ok: bool, message: str | app/routes/connections_contracts.py |
+| ExternalJobStatusResponse | BaseModel | job_id: str, workspace_id: str, status: str, outcome: str, created_at: dateti... | app/routes/external_artifact_contracts.py |
+| ExternalArtifactEntry | BaseModel | name: str, storage: str, node_key: str, size_bytes: int | None, content_hash:... | app/routes/external_artifact_contracts.py |
+| ExternalArtifactListResponse | BaseModel | job_id: str, workspace_id: str, status: str, artifacts: list[ExternalArtifact... | app/routes/external_artifact_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
 | DatabaseConnectionView | BaseModel | engine: str, host: str, port: int | None, name: str, user: str, password_set:... | app/routes/infra_connections_contracts.py |
