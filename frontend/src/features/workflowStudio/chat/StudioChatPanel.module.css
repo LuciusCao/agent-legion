@@ -237,9 +237,36 @@
   padding: 10px 12px;
 }
 .draftTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   font-weight: 600;
   color: #0d47a1;
+}
+/* #692：类型色——图标着色 + 标题随类型，卡片底色保持统一的蓝底家族
+ * （同一 agent 会话产出的草稿在视觉上仍是一组）。 */
+.draftTitle_workflow {
+  color: #0d47a1;
+}
+.draftTitle_agent {
+  color: #6a1b9a;
+}
+.draftTitle_code {
+  color: #2e7d32;
+}
+.draftTitle svg {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.draftIcon_workflow {
+  color: #1976d2;
+}
+.draftIcon_agent {
+  color: #8e24aa;
+}
+.draftIcon_code {
+  color: #388e3c;
 }
 .draftMeta {
   font-size: 12px;
