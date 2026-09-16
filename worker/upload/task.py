@@ -52,6 +52,13 @@ class UploadTask:
     # #352: 本任务租约归属的批量心跳 registry（_deliver_bulk 接管/恢复时
     # 设置）。None = 旧单条心跳模式（无 registry 的单测路径）。
     heartbeat_registry: Any = None
+    # #644：租约判死共享事件。批量 registry 的 entry（start_upload_heartbeat
+    # 注册）与 legacy 单拍线程（HeartbeatConfig）都指向同一个对象——beat 面
+    # 的 409/lost verdict（batch lost 列表、单拍 401/409）一经触发，_report
+    # 的重试循环下一轮即终态放弃：执行已不归本 worker，结果是 moot 的。
+    # 运行态不持久化：重启恢复的任务从「未判死」起步，由恢复后的首拍或首次
+    # report 重新判定（409 report 本身仍是终态出口）。
+    ownership_lost: threading.Event = field(default_factory=threading.Event)
     # bulk 车道产物，交给 report 车道；运行时状态，不持久化——崩溃恢复的任务
     # 一律从 bulk 车道重进，prepare 与 artifact 上传会原样重做。
     prepared_metadata: dict[str, Any] | None = None

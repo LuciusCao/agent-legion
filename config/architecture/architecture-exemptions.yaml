@@ -1134,4 +1134,20 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
   ceiling: 679
+
+- check: architecture.file_budget
+  path: worker/execution/heartbeat_batch.py
+  reason: 'Issue #644 closes the result-report 409 storm: register_upload is the
+    non-clobbering registration path for the upload-side lease heartbeat (a
+    mismatched (execution_id, lease_id) pair returns the existing entry instead
+    of overwriting a re-claimed attempt''s entry), and the executor-to-upload
+    handover rebinds the shared ownership_lost event in place. The three
+    lookup arms plus the pair-matching comments are one registry surface;
+    splitting them would fork the heartbeat entry lifecycle across modules.
+    Ceiling re-seated at actual + 10 per the dated-exemption convention
+    (#431/#458 precedents). Remove when the registry moves to its own module
+    or the file shrinks below the old floor.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/644
+  ceiling: 210
   expires: 2027-03-31

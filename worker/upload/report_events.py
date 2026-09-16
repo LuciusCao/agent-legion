@@ -57,6 +57,7 @@ def note_execution_reported(task: Any, outcome: str) -> None:
     """Emit execution.reported: per-stage spans + outcome + size.
 
     ``outcome``: delivered（204）/ rejected（Host 拒收，含租约 409）/
+    lost（#644：退避中心跳面判死——beat 409/lost verdict——终态放弃）/
     aborted（关停或车道异常——marker 保留，下次启动重投）。
     report_seconds 是 report 车道的墙钟（含瞬时失败的重试退避——它直接
     决定租约 90s TTL 的生存压力）。

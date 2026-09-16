@@ -124,6 +124,36 @@ class BatchHeartbeatRegistry:
             self._entries[execution_id] = entry
         return entry
 
+    def register_upload(
+        self,
+        execution_id: str,
+        lease_id: str,
+        ownership_lost: threading.Event,
+    ) -> _LeaseEntry:
+        """#644: the upload arm's register — NEVER displaces a re-claimed
+        attempt's entry.
+
+        The executor arm's ``register`` must overwrite a requeued execution's
+        OLD entry with the new lease (claim time owns the slot). This arm arms
+        a queued upload task, which may be the OLD attempt's task racing the
+        re-claim: its displacing register deleted the new attempt's entry and
+        the old attempt's pair-matched prune then removed its own — the
+        execution ended up with NO entry, its new lease silently expired
+        unrenewed (result loss + requeue spiral). Same-lease replacement (the
+        executor→upload handover) stays: it rebinds the entry to the task's
+        shared ownership_lost event (#644)."""
+        entry = _LeaseEntry(
+            execution_id=execution_id,
+            lease_id=lease_id,
+            ownership_lost=ownership_lost,
+        )
+        with self._lock:
+            current = self._entries.get(execution_id)
+            if current is not None and current.lease_id != lease_id:
+                return current  # a re-claimed attempt owns the slot; touch nothing
+            self._entries[execution_id] = entry
+            return entry
+
     def prune(self, execution_id: str, lease_id: str) -> None:
         """Stop beating one lease (result delivered, ownership lost, discard).
 

@@ -22,7 +22,12 @@ re-upload is harmless).
 Lease ownership: the lease heartbeat keeps beating through the upload
 (per-execution threads before #352; the per-Worker batch registry after). It
 is quiesced for the final report and resumed only while a transient report
-failure backs off (worker/upload/heartbeat.py).
+failure backs off (worker/upload/heartbeat.py). #644: a beat-plane lost
+verdict (409 family) or a 409 report answer is TERMINAL for the delivery —
+the task's shared ``ownership_lost`` event stops the retry loop, the marker
+is dropped and the execution dir is discarded via the #564 ownership check,
+so a dead lease can neither spin unbounded report retries nor hammer the
+Host with re-registered beats.
 """
 
 from __future__ import annotations
@@ -292,7 +297,20 @@ class UploadQueue:
         if task.report_timer is not None and archive.is_file():
             task.report_timer.archive_bytes = archive.stat().st_size
         backoff = _RETRY_BASE_SECONDS
+        status_code = 0
+        lost = False
         while not self._stop.is_set():
+            # #644：心跳面已判死（beat 409/lost verdict）——租约不归本
+            # worker，结果 moot：终态放弃，不再发 report、不再续拍。退避
+            # 等待期恰是 verdict 落地的窗口，检查必须每轮重做。
+            if task.ownership_lost.is_set():
+                lost = True
+                print(
+                    f"result report abandoned for {task.execution_id}:"
+                    " lease lost (heartbeat 409 family); discarding result",
+                    flush=True,
+                )
+                break
             try:
                 status_code, body = self._client.report(
                     task.execution_id, task.lease_id, metadata, archive
@@ -303,8 +321,11 @@ class UploadQueue:
                     flush=True,
                 )
                 # An unbounded backoff chain can outlive the lease TTL.
-                task.heartbeat_stop = threading.Event()
-                task.heartbeat_thread = upload_heartbeat.start_upload_heartbeat(
+                # #644：resume（pair-matched）而非重新 register——register
+                # 按 execution_id 单键覆盖，会以全新 entry 抹掉已触发的
+                # lost verdict（死租约被无限重新续拍 = 同 execution 的 409
+                # 风暴），也会践踏重 claim 后新 attempt 的 entry。
+                task.heartbeat_thread = upload_heartbeat.resume_upload_heartbeat(
                     self._client, task, self._heartbeat_interval
                 )
                 self._stop.wait(backoff)
@@ -326,8 +347,24 @@ class UploadQueue:
             return "aborted"  # stopped before the report resolved; marker stays
         marker = task.execution_dir / PENDING_FILENAME
         marker.unlink(missing_ok=True)
-        shutil.rmtree(task.execution_dir, ignore_errors=True)
-        return "delivered" if status_code == 204 else "rejected"
+        if status_code == 204:
+            # 204 已把请求行置为 done（终态，该请求不可能再被重排/重 claim
+            # 占用本目录），无归属竞态，整删。
+            shutil.rmtree(task.execution_dir, ignore_errors=True)
+            return "delivered"
+        # 409（rejected）或心跳判死（lost）：结果 moot。#564：目录可能已被
+        # 重排后的新 attempt 以新 lease 重建占用，只删仍能证明归自己的
+        # （owner 标记匹配本 lease）；判不了归属的留给 stale sweeper。
+        # marker 已删——重启 restore 不会重投这条已 moot 的结果。
+        # 函数内延迟导入：worker.execution.ownership 反向 import 本模块的
+        # PENDING_FILENAME（#564），模块级互相 import 会成环（先 import 哪边
+        # 都会在对方半初始化时取不到名字）；同族先例见 upload/heartbeat.py
+        # 的 legacy 分支。
+        from worker.execution.ownership import discard_owned_dir
+
+        if discard_owned_dir(task.execution_dir, task.lease_id):
+            shutil.rmtree(task.execution_dir, ignore_errors=True)
+        return "lost" if lost else "rejected"
 
     def _upload_with_retry(self, path: Path) -> str | None:
         """Upload one artifact; None = stopped (retry next startup); 4xx propagates."""

@@ -9,6 +9,12 @@ Since #352 the per-execution heartbeat threads are gone: leases live in the
 per-Worker batch registry and these helpers forward quiesce/prune to it.
 Legacy mode (no registry, e.g. unit tests driving the single-beat loop)
 keeps the old thread stop/join semantics.
+
+#644: every arm (initial register, backoff resume, legacy thread) shares the
+task's ``ownership_lost`` event, so a beat-plane lost verdict (batch 409
+family) reaches ``_report`` regardless of which arm is currently beating —
+and a resume can never resurrect an already-condemned lease or erase its
+verdict.
 """
 
 from __future__ import annotations
@@ -21,13 +27,21 @@ if TYPE_CHECKING:
 
 
 def start_upload_heartbeat(client: Any, task: Any, interval: float) -> threading.Thread | None:
-    """Keep one upload task's lease alive (registry mode, #352): register the
+    """Keep one upload task's lease alive (registry mode, #352): arm the
     lease with the per-Worker batch coordinator (``thread`` is None — the
-    coordinator owns the beats); re-registration on report backoff doubles as
-    the resume path. Legacy mode (no registry, e.g. unit tests driving the
-    single-beat loop): start a daemon single-beat thread."""
+    coordinator owns the beats), wiring the registry entry to the task's
+    SHARED ownership_lost event (#644) so a lost verdict is visible to
+    ``_report`` and survives later re-arms. #644: the arm is
+    NON-DISPLACING (``register_upload``) — this task may be an old
+    attempt's queued/restored task racing a re-claim, and a displacing
+    register here deleted the re-claimed attempt's entry (its new lease
+    then expired unrenewed). Legacy mode (no registry, e.g. unit tests
+    driving the single-beat loop): start a daemon single-beat thread on
+    the same shared event."""
     if task.heartbeat_registry is not None:
-        task.heartbeat_registry.register(task.execution_id, task.lease_id, threading.Event())
+        task.heartbeat_registry.register_upload(
+            task.execution_id, task.lease_id, task.ownership_lost
+        )
         return None
     from worker.execution.lifecycle import HeartbeatConfig, heartbeat_loop
 
@@ -37,10 +51,31 @@ def start_upload_heartbeat(client: Any, task: Any, interval: float) -> threading
         lease_id=task.lease_id,
         stop=task.heartbeat_stop,
         interval=interval,
+        ownership_lost=task.ownership_lost,
     )
     thread = threading.Thread(target=heartbeat_loop, args=(config,), daemon=True)
     thread.start()
     return thread
+
+
+def resume_upload_heartbeat(client: Any, task: Any, interval: float) -> threading.Thread | None:
+    """Re-arm one task's lease heartbeat for a report-backoff window (#644).
+
+    Registry mode RESUMES the existing entry — pair-matched on
+    (execution_id, lease_id) — instead of re-registering: ``register`` keys
+    on execution_id alone, so the old re-arm path installed a brand-new
+    entry that (a) erased an already-fired lost verdict with a fresh event
+    and re-admitted the dead lease to every batch beat (the sustained
+    same-execution 409 storm of #644), and (b) stomped a re-claimed
+    attempt's NEW lease entry, silently stopping its beats. A lost entry
+    stays excluded from the snapshot even after resume — resume only clears
+    the quiesce flag. Legacy mode restarts the single-beat thread (quiesce
+    stopped and joined it) on the shared ownership_lost event."""
+    if task.heartbeat_registry is not None:
+        task.heartbeat_registry.resume(task.execution_id, task.lease_id)
+        return None
+    task.heartbeat_stop = threading.Event()
+    return start_upload_heartbeat(client, task, interval)
 
 
 def prune_heartbeat(
