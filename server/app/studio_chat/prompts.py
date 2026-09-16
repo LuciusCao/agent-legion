@@ -14,41 +14,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from server.app.mcp_server.tool_names import AGENT_LEGION_MCP_TOOL_NAMES
+
 STUDIO_AUTHORING_BOOTSTRAP = (
     Path(__file__).with_name("authoring_bootstrap.md").read_text(encoding="utf-8")
 )
 
 # Tool names exposed by server.app.mcp_server — used both to recognize
 # agent-legion MCP tool calls in session/update traffic (permission
-# auto-approve + the mcp_status smoke signal) and nowhere else; keep in sync
-# with create_mcp_server.
-AGENT_LEGION_MCP_TOOL_NAMES = frozenset(
-    {
-        "get_authoring_guide",
-        "get_studio_context",
-        "get_active_workflow",
-        "get_workflow_draft",
-        "validate_workflow",
-        "compare_workflow",
-        "save_workflow_draft",
-        "save_node_code_draft",
-        "get_node_code",
-        "save_agent_definition_draft",
-        "create_agent_definition",
-        "get_agent_definitions",
-        "get_runtime_models",
-        "get_agent_runtimes",
-        "get_node_prompt",
-        "save_node_prompt",
-        "get_skill",
-        "validate_skill",
-        "save_skill_version",
-        "create_skill",
-        "get_shared_materials",
-        "save_shared_materials",
-        "sync_shared_materials",
-    }
-)
+# auto-approve + the mcp_status smoke signal). #678: a hand-copied list
+# here drifted 12 tools behind create_mcp_server's registrations; the
+# manifest now lives on the MCP-server side (tool_names.py) and is
+# imported — three-way equality (registered == manifest == this
+# reference) is pinned by tests/mcp_server/test_tool_names.py.
 
 # The MCP server name passed in session/new; agents typically prefix tool
 # calls with it (e.g. "agent-legion-studio__list_workflows").
