@@ -51,6 +51,15 @@ class WorkflowsRuntimeConfig(BaseModel):
     # per run); 0 disables the cap (not recommended). Instance-settings
     # managed, takes effect on restart.
     max_items_per_run: int = Field(default=20_000, ge=0)
+    # Byte budget for one custom node code version (#628): the historical
+    # 64KB hardcode rejects legitimate "heavy" nodes (self-contained report
+    # renderers), so the ceiling opens up as an instance-level knob. Default
+    # unchanged (64KB); values below 1KB are rejected — the SDK import plus
+    # a real ``run`` body no longer fits meaningfully. Env-configurable via
+    # AGENT_LEGION_NODE_CODE_MAX_BYTES (env-only; NOT instance-settings
+    # managed — raising it is a deliberate operator decision, not a
+    # runtime-tuning surface). Takes effect on restart.
+    node_code_max_bytes: int = Field(default=64 * 1024, ge=1024)
 
 
 class AgentWorkersRuntimeConfig(BaseModel):

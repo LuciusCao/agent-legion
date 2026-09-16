@@ -33,7 +33,11 @@ from server.app.services.versioned_entities import EntityType, VersionedEntity, 
 logger = logging.getLogger(__name__)
 
 # Custom nodes stay single-file and cohesive; oversized code is rejected.
-MAX_CODE_BYTES = 64 * 1024
+# The byte ceiling is instance-configurable (#628: heavy self-contained
+# nodes outgrew the hardcode) — DEFAULT_MAX_CODE_BYTES mirrors the
+# ``executor_runtime.workflows.node_code_max_bytes`` default
+# (AGENT_LEGION_NODE_CODE_MAX_BYTES); both must stay in sync.
+DEFAULT_MAX_CODE_BYTES = 64 * 1024
 
 _ENTITY_TYPE: EntityType = "node_code"
 _ENTITY_KEY_SEPARATOR = ":"
@@ -90,10 +94,20 @@ def _to_row(entity: VersionedEntity) -> dict[str, Any]:
     }
 
 
-def validate_node_code(code: str) -> None:
-    """Syntax + module-level ``run`` + size contract for custom node code."""
-    if len(code.encode("utf-8")) > MAX_CODE_BYTES:
-        raise InvalidOperationError(f"node code exceeds the {MAX_CODE_BYTES}-byte size limit")
+def validate_node_code(code: str, max_code_bytes: int = DEFAULT_MAX_CODE_BYTES) -> None:
+    """Syntax + module-level ``run`` + size contract for custom node code.
+
+    ``max_code_bytes`` (#628): the instance-level byte budget, injected by
+    callers that hold Settings (route layer passes
+    ``settings.executor_runtime.workflows.node_code_max_bytes``); the module
+    default is the unchanged 64KB, which keeps the historical behavior for
+    non-DI constructions (workers/tests/seed paths).
+    """
+    if len(code.encode("utf-8")) > max_code_bytes:
+        raise InvalidOperationError(
+            f"node code exceeds the {max_code_bytes}-byte size limit"
+            f" (node_code_max_bytes, default {DEFAULT_MAX_CODE_BYTES})"
+        )
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
@@ -115,9 +129,15 @@ class NodeCodeService:
     (BOUNDARY-DATA-001, #187); production wiring passes the facade.
     """
 
-    def __init__(self, database_dsn: ConnectSource, custom_nodes_enabled: bool = True) -> None:
+    def __init__(
+        self,
+        database_dsn: ConnectSource,
+        custom_nodes_enabled: bool = True,
+        max_code_bytes: int = DEFAULT_MAX_CODE_BYTES,
+    ) -> None:
         self._store = VersionedEntityStore(database_dsn, _ENTITY_TYPE)
         self._enabled = custom_nodes_enabled
+        self._max_code_bytes = max_code_bytes
 
     def _require_enabled(self) -> None:
         if not self._enabled:
@@ -173,7 +193,7 @@ class NodeCodeService:
     ) -> dict[str, Any]:
         """Create a draft version, overwriting the existing draft when present."""
         self._require_enabled()
-        validate_node_code(code)
+        validate_node_code(code, self._max_code_bytes)
         entity = self._store.save_draft(
             _entity_key(workflow_key, node_key),
             {"code": code, "change_note": change_note},
@@ -232,7 +252,7 @@ class NodeCodeService:
         entity_key = _entity_key(workflow_key, node_key)
         if self._store.list_versions(entity_key, None):
             return False
-        validate_node_code(code)
+        validate_node_code(code, self._max_code_bytes)
         try:
             self._store.save_draft(
                 entity_key,

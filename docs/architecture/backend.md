@@ -328,7 +328,7 @@ server/app/
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/configuration/executor_knobs.py |
 | CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/configuration/executor_knobs.py |
 | AgentClaimConfig | BaseModel | worker_touch_interval_seconds: float | app/configuration/executor_knobs.py |
-| WorkflowsRuntimeConfig | BaseModel | custom_nodes_enabled: bool, max_items_per_run: int | app/configuration/executor_runtime.py |
+| WorkflowsRuntimeConfig | BaseModel | custom_nodes_enabled: bool, max_items_per_run: int, node_code_max_bytes: int | app/configuration/executor_runtime.py |
 | AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int, max_concurrent_result_comm... | app/configuration/executor_runtime.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/configuration/executor_runtime.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
