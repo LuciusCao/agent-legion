@@ -21,6 +21,13 @@ import httpx
 from server.app.mcp_server.config import McpServerConfig
 
 REQUEST_TIMEOUT_SECONDS = 30
+# sync_shared_materials (#673, codex P1 on #674): a propagation batch is
+# per-skill git saves (each up to GIT_TIMEOUT/GIT_EDIT_TIMEOUT) PLUS repo
+# lock waits — the flat 30s would report "request failed" while the
+# backend thread keeps writing. 300s covers multi-skill batches with
+# lock contention; making it a resumable async task is a bigger design,
+# deferred until long batches actually show up.
+SYNC_PROPAGATE_TIMEOUT_SECONDS = 300
 _TOOLS_PATH = "/api/studio-agent/tools"
 
 
@@ -34,12 +41,21 @@ class ToolClient:
             "Content-Type": "application/json",
         }
 
-    async def call(self, method: str, path: str, body: dict[str, Any] | None = None) -> str:
+    async def call(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> str:
         try:
             # trust_env=False: the loopback target is this backend itself, so
             # HTTP(S)_PROXY/ALL_PROXY must never apply — a socks ALL_PROXY
             # without socksio installed otherwise breaks every tool call.
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as http:
+            async with httpx.AsyncClient(
+                timeout=timeout or REQUEST_TIMEOUT_SECONDS, trust_env=False
+            ) as http:
                 response = await http.request(
                     method,
                     f"{self._api_base}{_TOOLS_PATH}{path}",

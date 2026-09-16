@@ -88,6 +88,33 @@ describe('agentConfigView', () => {
     expect(view.advanced[0].currentValue).toBe('false')
   })
 
+  it('dedupes category-mode config options against session_modes (kimi double-advertises)', () => {
+    const modeOption = {
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      type: 'select',
+      currentValue: 'default',
+      options: [{ value: 'default' }, { value: 'plan' }],
+    }
+    const withModes = agentConfigView(
+      session({
+        session_modes: {
+          currentModeId: 'default',
+          availableModes: [{ id: 'default' }, { id: 'plan' }],
+        },
+        config_options: [MODEL, modeOption],
+      })
+    )
+    expect(withModes.modes).not.toBeNull()
+    expect(withModes.advanced.map((e) => e.id)).toEqual([])
+
+    const withoutModes = agentConfigView(
+      session({ session_modes: null, config_options: [modeOption] })
+    )
+    expect(withoutModes.advanced.map((e) => e.id)).toEqual(['mode'])
+  })
+
   it('flattens grouped options for mapping while keeping groups for rendering', () => {
     const view = agentConfigView(session({ config_options: [MODEL] }))
     expect(view.model?.options).toHaveLength(1)

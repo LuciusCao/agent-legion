@@ -51,6 +51,7 @@ const studioState = {
   backToDraft: vi.fn(),
   setDefinitionYaml: vi.fn(),
   setSelectedNodeKey: vi.fn(),
+  requestNodeFocus: vi.fn(),
 }
 
 function renderAside() {

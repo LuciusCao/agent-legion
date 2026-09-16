@@ -122,16 +122,39 @@ def test_resolve_workflow_node_configs_merges_all_layers() -> None:
     resolved = resolve_workflow_node_configs(
         definition, {"a": _agent("generate", SCHEMA)}, workspace
     )
-    assert resolved == {"generate": {"page_size": 5, "subject_id": "physics"}}
+    # #550: agent nodes merge the reserved execution keys under the Agent
+    # schema; the timeout default keeps the agent product constant (1800).
+    assert resolved == {
+        "generate": {
+            "page_size": 5,
+            "subject_id": "physics",
+            "timeout_seconds": 1800,
+            "sandbox_network": False,
+        }
+    }
 
 
-def test_resolve_workflow_node_configs_skips_plain_nodes() -> None:
-    assert resolve_workflow_node_configs(_definition(), {"a": _agent("generate")}, None) == {}
+def test_resolve_workflow_node_configs_plain_agent_carries_reserved_defaults() -> None:
+    """#550: an Agent-schema-less agent node used to skip config resolution
+    entirely; the reserved-key merge gives it exactly the platform defaults
+    (agent timeout constant), so its timeout is configurable from zero."""
+    assert resolve_workflow_node_configs(_definition(), {"a": _agent("generate")}, None) == {
+        "generate": {"timeout_seconds": 1800, "sandbox_network": False}
+    }
 
 
 def test_workflow_node_config_schemas_maps_nodes() -> None:
     schemas = workflow_node_config_schemas(_definition(), {"a": _agent("generate", SCHEMA)})
-    assert schemas == {"generate": SCHEMA}
+    assert schemas == {
+        "generate": {
+            "type": "object",
+            "properties": {
+                "timeout_seconds": {"type": "integer", "default": 1800, "minimum": 1},
+                "sandbox_network": {"type": "boolean", "default": False},
+                **SCHEMA["properties"],
+            },
+        }
+    }
 
 
 def test_frozen_node_config_reads_batch_payload() -> None:
@@ -296,10 +319,14 @@ def test_workflow_node_config_schemas_node_declared_schema() -> None:
     assert properties["sandbox_network"]["default"] is False
 
 
-def test_resolve_workflow_node_configs_agent_nodes_skip_reserved_keys() -> None:
-    # Agent-routed nodes keep their Agent Definition schema untouched.
+def test_resolve_workflow_node_configs_agent_nodes_merge_reserved_keys() -> None:
+    """#550 renamed: agent-routed nodes MERGE the reserved execution keys
+    under their Agent Definition schema (timeout configurable; agent default
+    1800, not the code-node 600)."""
     resolved = resolve_workflow_node_configs(_definition(), {"a": _agent("generate", SCHEMA)}, None)
-    assert resolved == {"generate": {"page_size": 50}}
+    assert resolved == {
+        "generate": {"page_size": 50, "timeout_seconds": 1800, "sandbox_network": False}
+    }
 
 
 def test_code_node_ignores_agent_schema_with_matching_capability() -> None:
@@ -512,3 +539,54 @@ def test_resolve_node_config_accepts_non_secret_defaults_and_clean_secrets() -> 
         "kept": "ok",
         "api_key": marker,
     }
+
+
+def test_agent_claim_frozen_seed_pads_agent_timeout_not_code_default() -> None:
+    """#550 review P2：agent 路径的 dispatch 垫底种子（agent_claim.py 构造
+    fallback_defaults 的方式）必须给 pre-#550 冻结配置垫 1800（agent 产品
+    常量），绝不能落回 code 节点的 600——升级静默砍掉在飞 agent 任务
+    三分之二超时预算的回归防线。种子带节点自声明值时以其为准。"""
+    from server.app.services.node_execution_config import (
+        AGENT_DEFAULT_TIMEOUT_SECONDS,
+        merge_reserved_execution_schema,
+        node_config_reserved_defaults,
+    )
+
+    node = _definition().nodes["generate"]  # type=agent 节点
+    frozen = {"node_config": {"generate": {"page_size": 7}}}  # pre-#550 冻结形态
+
+    # 与 agent_claim.py 完全同形的构造（schema 合并 + 垫底种子）。
+    def _agent_fallback(node_config: dict) -> dict:
+        reserved = node_config_reserved_defaults(node_config)
+        return {
+            **reserved,
+            "timeout_seconds": reserved["timeout_seconds"]
+            if "timeout_seconds" in node_config
+            else AGENT_DEFAULT_TIMEOUT_SECONDS,
+        }
+
+    effective = dispatch_effective_config(
+        merge_reserved_execution_schema(SCHEMA, {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS}),
+        node,
+        "wf",
+        None,
+        frozen,
+        fallback_defaults=_agent_fallback(node.config),
+    )
+    assert effective["page_size"] == 7  # 冻结值胜出
+    assert effective["timeout_seconds"] == 1800, (
+        "pre-#550 冻结配置必须垫 agent 常量，不是 code 的 600"
+    )
+    assert effective["sandbox_network"] is False
+
+    # 节点自声明 timeout（v47 harvest 形态）时以其为准垫底。
+    declared = _definition({"timeout_seconds": 30}).nodes["generate"]
+    effective_declared = dispatch_effective_config(
+        merge_reserved_execution_schema(SCHEMA, {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS}),
+        declared,
+        "wf",
+        None,
+        frozen,
+        fallback_defaults=_agent_fallback(declared.config),
+    )
+    assert effective_declared["timeout_seconds"] == 30

@@ -108,6 +108,7 @@ def build_agent_plane(
         skill_manager=skill_manager,
         object_store=object_store,
         max_archive_bytes=settings.executor_runtime.agent_workers.max_archive_bytes,
+        spot_check_percent=settings.executor_runtime.agent_workers.artifact_spot_check_percent,
     )
     return AgentPlane(
         broker=broker,

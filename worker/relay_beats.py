@@ -77,17 +77,20 @@ class RelayBeater:
         else:
             self._ping_error_logged = False
 
-    def beat(self, leases: list[tuple[str, str]]) -> tuple[Any, Any]:
-        """Beat the whole snapshot; (None, None) = transient, retry next tick."""
+    def beat(self, leases: list[tuple[str, str]]) -> tuple[Any, Any, Any]:
+        """Beat the whole snapshot; (None, None, None) = transient, retry next
+        tick. #590: the second slot carries the Host-classified settled list
+        (completion followups — the classification rides the beat response,
+        no probe call)."""
         if self.degraded:
             return self._beat_singles(leases)
         outcome = self._beat_batch(leases)
-        return (None, None) if outcome is None else outcome
+        return (None, None, None) if outcome is None else outcome
 
-    def _beat_batch(self, leases: list[tuple[str, str]]) -> tuple[list, list] | None:
+    def _beat_batch(self, leases: list[tuple[str, str]]) -> tuple[list, list, list] | None:
         """Sharded parallel batch beat; the concurrency body lives in
         ``relay_shards`` (file-budget split, same seam as the #566 relay
-        modules). ``(None, None)`` at the ``beat`` layer = transient."""
+        modules). ``(None, None, None)`` at the ``beat`` layer = transient."""
         outcome = beat_sharded(self._client, leases, self._log, self._shard_threads)
         if outcome.degraded:
             self.degraded = True
@@ -100,9 +103,15 @@ class RelayBeater:
             return None
         return outcome.verdicts
 
-    def _beat_singles(self, leases: list[tuple[str, str]]) -> tuple[list, list]:
-        """Degraded mode: thread-per-lease beats (a slow Host parks only its own lease)."""
+    def _beat_singles(self, leases: list[tuple[str, str]]) -> tuple[list, list, list]:
+        """Degraded mode: thread-per-lease beats (a slow Host parks only its
+        own lease). The single-beat protocol has no settled channel — a
+        terminal execution answers 409 and takes the loud lost path (the
+        executor-side ownership_lost is idempotent; the pre-#590 noise
+        return is acceptable in degraded mode, which exits on the first
+        Host answer with the batch endpoint)."""
         lost: list[tuple[str, str]] = []
+        settled: list[str] = []
         cancelled: list[str] = []
         lock = threading.Lock()
 
@@ -126,4 +135,4 @@ class RelayBeater:
             thread.start()
         for thread in threads:
             thread.join(timeout=SINGLE_BEAT_TIMEOUT_SECONDS + 1)
-        return lost, cancelled
+        return lost, settled, cancelled

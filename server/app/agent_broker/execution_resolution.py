@@ -20,6 +20,9 @@ from server.app.workflows.schema import WorkflowNode
 __all__ = ["resolve_execution_block"]
 
 
-def resolve_execution_block(node: WorkflowNode, runtime: str) -> dict[str, Any]:
-    """Resolve the manifest ``execution`` block (strict, node-only source)."""
-    return resolve_execution(node, runtime)
+def resolve_execution_block(
+    node: WorkflowNode, runtime: str, *, timeout_seconds: int | None = None
+) -> dict[str, Any]:
+    """Resolve the manifest ``execution`` block (strict, node-only source;
+    ``timeout_seconds`` is the #550 dispatch-resolved reserved-key value)."""
+    return resolve_execution(node, runtime, timeout_seconds=timeout_seconds)

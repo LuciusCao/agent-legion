@@ -2,6 +2,44 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [0.7.12] - 2026-09-16
+
+执行平面收尾与系统性还债版本；发布窗口内合入 #659 状态计数死锁修复与 Studio 交互线（#658/#660/#664/#666/#667/#668/#643+#673）。
+
+### Fixed
+- 状态计数触发器的跨语句死锁环（issue #659，v82 迁移）：v77（#437）只修了单条语句内的锁序——claim 批量在一个事务内逐条 promote（psycopg executemany），事务多次触发计数触发器，每次各自按 (key, status) 排序取计数行锁，跨事务的锁集合序列随业务序变化，claim 与 rerun 在同一 workspace 的热点计数行上闭合 AB-BA 环。生产表象：claim/心跳/rerun 每夜数百次 500（PG 死锁检测 + 客户端重试自愈的稳定性债务）；result 409 波是下游症状（首次 POST 已提交但响应丢失在锁队列，重试撞终态，无工作丢失）。修复：两族触发器入口先取逐 key 事务级 advisory lock——双层层级（ws 级 class 82 先于维度级 class 83，类号拆分防 hashtext 碰撞坍缩层级），按实际锁键序（hashtext int，非文本序）排序；五路 sweep 与 claim/finish 批统一按实际 class-82 锁键升序行走；relay 分片准入跨拍公平轮转（持续缺槽下 round-robin 而非饿死同一尾部到租约过期）。残留窗口（跨 workspace 语句序列环、AFTER 触发器行锁× advisory 边）如实记录，毫秒级 + 40P01 重试吸收。
+- Studio 会话 prompt 超时僵尸化（issue #664）：`_prompt_loop` 的 `wait_for` 超时只取消客户端本地协程、不向 agent 送 `session/cancel`——旧轮仍在跑，后续每条消息被 another-turn 拒绝，会话停在 idle 令 ResumeBar（只接受 closed/error）不可达，无自救通道。修复（`prompt_turn.py` 三级阶梯）：超时即送 session/cancel 并等待 30s 宽限——守约结束正常收尾，宽限耗尽强制置 error 会话、恢复链可达；on_turn_end 回归单轮容错、自动 cancel 前先结清挂起审批（#665 评审轮）。
+- Studio 发布状态显示失真三连（issue #666）：发布存库的 revision YAML 是 canonical 重建（丢注释、重排 key、补 loader 默认值），前端 dirty 纯文本对比 → 发布后基线 ≠ 草稿原文 → dirty 永真且刷新甩不掉——发布原文 flag 覆盖根因（成功后跳过 preserve、强制 reset 到新基线，两道防陈旧护栏）；画布角标与顶栏「未发布」标识统一改吃 compare 计数（无变更不渲染）；顶层 execution 误报加豁免（节点自配齐的合法场景不再提示）。
+- `test_thought_chunks_persist_as_coalesced_thought_message` 的 CI postgres 分片间歇失败（issue #326）：thought chunks 落库的等待窗口改为 bounded wait，与 #525 同族的裸读竞态修法。
+- supervisor 心跳 relay 的迟到心跳噪音（issue #590）：执行完成提交后、executor 把租约从快照摘除前的 2s 节流窗口内，relay 仍按旧快照给已终结租约发心跳，Host 正确拒绝（not_owned）——0.7.7 后实测放大到 3.3k/小时，稀释租约丢失排查的第一信号。修法（分类在 Host 侧 beat 事务内完成，零额外 RTT）：批量心跳的行缺失分支加一次同事务主键读——行已 `done`/`cancelled` 即完成态收尾，随响应的 `settled` 列表返回（不发 execution.heartbeat_rejected 事件）；`queued`（重排队）/ 未知 id / 他人 execution 仍是 lost 照发事件。executor 侧 apply_beat_result 把 settled 静默摘除（不设 ownership_lost、不触发 cancel），下一拍快照不再携带死租约。
+- rerun 不清对象存储清单导致旧 run 产物残留（issue #508）：rerun 的产物清理只作用于本地 job_dir，`job_artifacts` 清单行无任何删除路径——重跑中断/再次失败时，job 详情继续展示旧 run 产物（本地 ∪ 清单），单产物读取本地 miss 后落 S3 旧对象，内容也是旧的。修法：`mark_nodes_for_rerun` 在同一事务内删除受影响闭包的清单行（staged 输出名集合由 `stage_outputs` 提供，RMW 产物天然排除），三入口（单节点 rerun / run-to / 审批 rework）全部接线；对象本体在提交后 best-effort 删除——删前按当前 `job_artifacts` 清单重验：同 `storage_key` 已被新 attempt 复现的权威键跳过删除（清理窗口内快速重跑完成的竞态防护），未复现的孤儿键照删，bucket lifecycle 兜底，与 job_deletion 的顺序纪律一致。
+- 三例 CI 负载敏感 flake（issue #453/#496/#525）：#453 publish race 的 created_at 次序断言改顺序无关（race 的真实不变量是「谁赢了」）；#496 `binary_resolution` 的值导入 re-export 使 monkeypatch 打不到 `code_sandbox` 侧读取点——开发机 data/bin 有 velites 时 fail-closed 测试静默失真，改经模块属性访问同源生效；#525 session lifecycle 在 text 与 tool_call 两个落库时点之间裸读，补 tool_call 可见性的 bounded wait。
+
+### Changed
+- 单条 claim 响应路径退役（issue #547）：batch claim（#546）随 0.7.4 发布，pre-#546 Worker 镜像已退出支持窗口。claim 端点固定 `BatchAgentClaimResponse`（缺省 limit=1 应答单元素 claims 列表），`ClaimRouteResponse` union 与 route_response_model 豁免随之收割；worker 侧 `ClaimOperations.claim()` 单条方法删除（生产零调用者），`claim_batch` 的混合舰队 shape-sniff 保留。行为收口：单条路径的「提交后 500」容错形态消失——批路径逐条丢弃语义接管（全丢 = 空批 204），恢复路径不变（租约到期 sweeper 重排）。
+- velites `~/.velites/config.json` 迁移桥进入 deprecation（issue #602，deprecation 阶段）：直调使用旧文件或 `VELITES_BASE_URL`/ `VELITES_API_KEY` env 时 stderr 打迁移指引（指向 models.json 与迁移文档），下一版本周期移除（config.rs + lib.rs gateway 兜底分支）。该文件仅供直调 CLI 兜底、结构上进不了 Worker 模型发现——新用户照旧教程配置后 Worker 完全看不见，表现为「任务无人认领」类困惑。
+- velites 0.5.3 → 0.5.4 落版：0.5.3 tag 后 velites 子树积了三个未随任何 velites 版本线发布的改动——#542 契约读取三档回落（根目录 contract.yaml 为权威位置，畸形 fail-closed，嵌入块废弃信号）、#602 迁移桥 deprecation 警告（上条）、其 R1 review 修正。独立版本线随源码前进——三平台二进制经 velites-v0.5.4 tag 发布；scripts/install-worker.sh 默认版本同步到 0.5.4。
+- Studio 对话配置区归位（issue #658）：权限模式/模型/思考档位配置条从 SessionBar 正下方移至状态栏与输入框之间（顶部 1px 分隔线 + 浅灰底，读作输入区上方的低权重 footer 带，与输入框同视觉组）；kimi agent 经 `session_modes` 与 `category: 'mode'` config option 双通道重复广告权限模式、后者掉进「高级设置」兜底折叠——modes 通道存在时去重该条目。
+- Studio DAG 连线三态语义改实（issue #668）：常态边的真实渲染是 `DagEdge` 对 `highlighted: false` 一律置灰覆盖（#d1d5db/2px/ opacity 0.4），`buildRfEdges` 写的常量从未生效——缺省（undefined）改为常态透传原始 style，`false` 仅表示高亮模式内置灰；常态边 #6b7280/2.5px/全亮，ghost 边 0.5 透明度真正生效；agent 面板开关从 Workspace 局部 state 提升到顶栏（跨视图保持）。
+
+### Added
+- agent 节点执行超时开放配置（issue #550）：保留执行键 `timeout_seconds` 合并进 agent 节点的有效 schema（Agent Definition schema 之下，重声明禁令不变），值走常规解析链（defaults → 节点 config → workspace 覆盖 → intake 冻结）；dispatch 以解析后的冻结值写入 manifest `execution.timeout_seconds`，缺省保持产品常量 1800s（合并默认同样取 1800 而非 code 节点的 600——升级不得静默砍掉存量 agent 运行的超时预算）。撰写/审核类 agent 跑不完 30 分钟时，运维可经 workspace 覆盖调整；Studio 检查器卡片留待前端跟进。
+- Studio agent 编辑动作闭环（issue #667）：聊天区 workflow 草稿卡直接「发布新版本 / 保存运行配置」（与顶栏同一 canPublish 门控、同一发布评审对话框；卡片草稿 ≠ 编辑器 YAML 时提示以编辑器为准）；agent 改动节点可定位——画布选中即视口居中（`DagSelectionViewport`），聊天区改动行点击经定位 nonce 定位到对应节点（同节点重复请求也能切换）。
+- 共享材料 Studio 可视化与一键传播（issue #643/#673）：用户态只读视图（锁一致快照 + 单文件读取；drift 四态徽标——一致/待同步/ 仓库缺失/Skill 缺失，`git show HEAD` 裸字节比对零工作树写；viewer 可读、非成员 404）经顶栏 Drawer 呈现（参考材料/脚本/其他分组，行内嵌映射 skill 的 drift 徽标）；一键传播把共享材料变更推回映射 skill（传播代次复核与锁内打 tag、workspace 目录与 symlink 逃逸多重封堵、传播 MCP 调用专用超时——codex 多轮评审修复）。
+
+### Performance
+- artifact 校验回读的信任上报抽检（issue #356 方案 B）：Worker 直传 S3 产物的 result 提交路径，第二跳流量（Host 下载重算 sha256）改为确定性抽检——自报 hash 非空且未入样本（按 name/storage_key/size 稳定哈希分桶，默认 3%）的信任自报值（HEAD size 核验仍全量）；自报为空或入样本的照旧流式核验。覆盖面仅信任上报通道（未声明产物 + cancelled 路径），声明产物始终全量核验（字节本就要落 job_dir）。**`.gz` 引用永不参与信任捷径**：HEAD 只约束压缩字节，解压上限是流本身的安全属性——gzip 引用永远全量流式核验（解压上限 + hash 比对），与抽检比例无关。旋钮 `agent_workers.artifact_spot_check_percent`（0 = 裸键全信任 kill-switch，100 = #356 前行为），instance settings 管理。
+- studio-agent MCP 常驻上下文瘦身（issue #660）：34 个工具的 description/schema 精简 + outputSchema 消除——chat 会话的 tools 常驻部分 31,978 → 16,967 字符（−47%，~10k → ~5k tokens，随会话轮次放大）；authoring guide 分节，`get_authoring_guide` 从零创作场景单次调用 −80%。五条 load-bearing 红线全保留（full-payload RESET 警告、CAS 三要素、永不自行发布、capability 门控、调用顺序）。
+
+### Observability
+- Worker 侧结构化事件分流落盘（issue #510）：#490 的单行 JSON 事件（claim.attempt / execution.* / http.error）单独落 `data/logs/events-<state dir 名>.jsonl`（5MB×3 轮转）——此前只进 supervisor 的 500 行内存 deque，满载 1-2 分钟整体滚过一遍，低频异常事件（http.error、claim.backoff）事后完全不可得。面板滚动日志与 deque 行为不变；jq/时间线工具可直接消费纯 JSON。
+
+### Maintenance
+- 架构豁免治理收口（issue #456/#522）：刷新 issue-states 后 53 条 file_budget 豁免过期（锚定 issue 已关闭但代码未回落——#641/#633/ #542/#521 等），逐条核验均为「预算未回落」型，按 #522 纪律统一重锚 #456 长期锚点；26 条过松 ceiling 收紧到当前实际行数。`EXEC-CODE-MANIFEST-001` 的 evidence 目标随 #547 测试拆分修正。
+- Worker 并发上限放宽至 2048，双侧收敛为单一常量（issue #657）：1024 档实测健康（RSS ~14.2GB/1024 进程、零重排），护栏挡住了机器吃得下的档位。新 `shared/concurrency_limits.MAX_DYNAMIC_CONCURRENCY` 为唯一权威——worker 本地校验（controls/config_validation/hot_reload）与 Host 注册/claim 契约（五处 le= 散落字面量）全部改为引用；契约测试钉住全等（worker 本地 == 每个 Host 契约字段），防单边漂移（单边放宽会让 worker 撞 422）。隐性假设复核：relay 分片准入上限按 ceiling/分片大小重估（16→32，2048 档满载心跳分片不再饿死）；load_shedding 与档位无耦合（测试钉住）。DB 层无上限不变；min_protocol_version 不动（值域放宽非语义变化）。2048 是契约值域而非单机目标（外推 ~28GB RSS 超 32GB 物理内存）。
+- `worker/service_bind.py` 豁免收割确认（issue #650）：判定矩阵已随后续重构回落到 15 行有效行（≤30 收割线），file_budget 豁免已不在册——收割条件 1/2（#489 方向二/三）未做、条件 3（docstring 瘦身）被顺带完成，issue 关闭收账。
+- npm 依赖漏洞修复（#547 收尾顺带）：frontend 依赖审计 3 → 2（high 清零）；draft 测试文件随 #670 拆分超 800 行的单文件。
+
 ## [0.7.11] - 2026-09-14
 
 ### Changed
@@ -363,4 +401,5 @@ Initial open-source release.
 [0.3.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.2.0...v0.3.0-alpha
 [0.2.0]: https://github.com/LuciusCao/agent-legion/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LuciusCao/agent-legion/releases/tag/v0.1.0
+
 

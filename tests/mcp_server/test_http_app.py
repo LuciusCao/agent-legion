@@ -135,6 +135,7 @@ def test_initialize_and_tool_listing(client, job_db) -> None:
         "save_shared_materials",
         "save_skill_version",
         "save_workflow_draft",
+        "sync_shared_materials",
         "validate_skill",
         "validate_workflow",
     ]

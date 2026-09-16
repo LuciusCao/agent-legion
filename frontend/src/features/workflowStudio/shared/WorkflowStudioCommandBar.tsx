@@ -1,5 +1,7 @@
+import { StudioAgentPanelToggle } from '../inspector/StudioAgentPanelToggle'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
+import { WorkflowStudioSharedMaterialsButton } from './WorkflowStudioSharedMaterialsDrawer'
 import type { WorkflowStudioCommandBarProps as Props } from './WorkflowStudioCommandBar.types'
 import { WorkflowStudioDraftSaveControlContainer } from './WorkflowStudioDraftSaveControl'
 import { WorkflowStudioStatusChip } from './WorkflowStudioStatusChip'
@@ -63,6 +65,7 @@ export function WorkflowStudioCommandBar({
         onSelectRevision={onSelectRevision}
       />
       <div className={styles.actions}>
+        <StudioAgentPanelToggle />
         <WorkflowStudioCommandBarActions
           readOnly={readOnly}
           dirty={dirty}
@@ -76,6 +79,7 @@ export function WorkflowStudioCommandBar({
           backToDraft={backToDraft}
           useViewedRevisionAsDraft={useViewedRevisionAsDraft}
         />
+        <WorkflowStudioSharedMaterialsButton />
       </div>
     </div>
   )

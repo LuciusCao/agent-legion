@@ -37,6 +37,9 @@ export function toFormValues(doc: InstanceSettingsResponse): FormValues {
     ),
     'agent_workers.result_commit_batching':
       doc.agent_workers.result_commit_batching,
+    'agent_workers.artifact_spot_check_percent': String(
+      doc.agent_workers.artifact_spot_check_percent
+    ),
     'agent_enqueue.workers': String(doc.agent_enqueue.workers),
     'agent_enqueue.max_pending': String(doc.agent_enqueue.max_pending),
     'result_unpack.workers': String(doc.result_unpack.workers),

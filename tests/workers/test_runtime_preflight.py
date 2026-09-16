@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from shared import code_sandbox
-from worker import binary_resolution
 from worker import executor as agent_worker
 from worker.binary_resolution import resolve_binary
 from worker.runtime import setup as runtime_setup
@@ -35,7 +34,7 @@ def _isolated_bundled_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     目录常量定义在 shared/code_sandbox.py（BUNDLED_SANDBOX_DIR），
     worker/binary_resolution.py re-export 为 BUNDLED_BINARY_DIR——模块属性
     各自独立，两侧都要 patch，runtime 解析与沙箱解析（#383）才同时隔离。"""
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bin")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bin")  # #496 真实读取点
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bin")
 
 
@@ -132,7 +131,7 @@ def test_resolve_binary_prefers_bundled_over_path(
 ) -> None:
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)  # #496 真实读取点
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
 
     assert resolve_binary("velites") == str(bundled_dir / "velites")
@@ -152,7 +151,7 @@ def test_resolve_binary_skips_non_executable_bundled_copy(
     bundled_dir = tmp_path / "bundle"
     bundled_dir.mkdir()
     (bundled_dir / "velites").write_text("#!/bin/sh\n", encoding="utf-8")  # 无 +x
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)  # #496 真实读取点
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
 
     assert resolve_binary("velites") == "/usr/local/bin/velites"
@@ -172,7 +171,7 @@ def test_preflight_code_capacity_passes_with_bundled_velites_only(
     # 路径——沙箱解析与 runtime 解析共用 data/bin，两侧常量都指向它）。
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)  # #496 真实读取点
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", _all_missing)
 
@@ -222,7 +221,7 @@ def test_preflight_expect_runtimes_missing_fails(monkeypatch: pytest.MonkeyPatch
     assert error is not None
     assert "AGENT_WORKER_EXPECT_RUNTIMES" in error
     assert "'velites'" in error
-    assert str(binary_resolution.BUNDLED_BINARY_DIR) in error
+    assert str(code_sandbox.BUNDLED_SANDBOX_DIR) in error  # #496 与解析同源
     assert "架构" in error  # 挂载了错误架构的二进制同样探测不到
 
 
@@ -247,7 +246,7 @@ def test_preflight_expect_runtimes_satisfied_passes(
     # 自带副本目录（docker 挂载路径）解析到 velites 即满足，无需 PATH。
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)  # #496 真实读取点
     monkeypatch.setattr(shutil, "which", _all_missing)
     assert preflight_error(expect_runtimes=["velites"]) is None
 

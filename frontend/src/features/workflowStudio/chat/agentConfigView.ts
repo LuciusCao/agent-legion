@@ -7,7 +7,9 @@ import {
 
 /** 会话行里 agent 广告的配置面 → 面板视图模型（#368）。通用选择器挂在
  * category（model / thought_level）上而不是 configId 上——同一语义三家三个
- * id；未知 category（含 `_` 前缀自定义）与 boolean 型折叠进高级设置。 */
+ * id；未知 category（含 `_` 前缀自定义）与 boolean 型折叠进高级设置；
+ * category 'mode' 与 session_modes 重复（kimi 双通道广告），mode 通道
+ * 存在时去重。 */
 
 export type ModeOption = { id: string; name: string; description?: string }
 export type ModeView = { currentModeId: string; available: ModeOption[] }
@@ -132,6 +134,10 @@ export function agentConfigView(
   let thought: ThoughtView | null = null
   const advanced: ConfigEntry[] = []
   for (const entry of entries) {
+    // kimi 等 agent 把权限模式同时经 session_modes 与 category 'mode' 的
+    // config option 广告两遍；mode 通道已有一等选择器时去重，避免「高级
+    // 设置」里出现重复的权限选项。modes 缺失时保留兜底可见。
+    if (entry.category === 'mode' && modes) continue
     if (entry.type === 'select' && entry.category === 'model' && !model)
       model = entry
     else if (

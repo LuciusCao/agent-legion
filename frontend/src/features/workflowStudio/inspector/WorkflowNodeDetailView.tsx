@@ -4,7 +4,6 @@ import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges
 import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
 import { useNodeDetailPreview } from './useNodeDetailPreview'
 import { selectedNodeDetails } from '../shared/workflowStudioModel'
-import { StudioAgentPanelToggle } from './StudioAgentPanelToggle'
 import type { AgentCatalogSettle } from './agentBindingStatus'
 import styles from './WorkflowNodeDetailView.module.css'
 
@@ -17,15 +16,14 @@ type Props = {
   setDefinitionYaml: (value: string) => void
   compareSummary?: ChangeSummaryViewModel | null
   readOnly: boolean
-  agentOpen: boolean
-  onToggleAgent: () => void
   onBack: () => void
 }
 
 /** 节点详情视图：面包屑（工作流 / 节点 [/ 预览]）+ 分级返回 + inspector 内容
  * 平铺。预览状态（useNodeDetailPreview，nodeKey 变化即清除）使面包屑随预览态
  * 加深、返回按钮分级（预览中→回节点详情，否则→回 DAG），预览面板自身不再有
- * 第二层导航。Agent 面板展开时占左半（替换 DAG），收起时占右半。 */
+ * 第二层导航。Agent 面板展开时占左半（替换 DAG），收起时占右半；面板开关
+ * 在 appbar（#668），面包屑不再放开关。 */
 export function WorkflowNodeDetailView(props: Props) {
   const preview = useNodeDetailPreview(props.nodeKey)
   const node = selectedNodeDetails(props.workflow, props.nodeKey)?.node
@@ -44,10 +42,6 @@ export function WorkflowNodeDetailView(props: Props) {
         <span className={styles.breadcrumb}>
           {`${workflowLabel} / ${node?.label ?? props.nodeKey}${preview.crumbs}`}
         </span>
-        <StudioAgentPanelToggle
-          open={props.agentOpen}
-          onToggle={props.onToggleAgent}
-        />
       </div>
       <div className={styles.body}>
         <WorkflowNodeDetailBody

@@ -60,10 +60,10 @@ _WORKER_READ_SQL = "select * from agent_workers where worker_id=%s"
 class BatchClaimSelection:
     """Read-phase output carried into the write phase.
 
-    ``candidates`` are scan rows in promote order (ws-ascending for agent
-    kinds, fairness-rotated across workspaces); ``timer`` carries the scan/
-    evaluate stage timings so the write phase reports one coherent claim
-    profile (#448) across both phases.
+    Agent ``candidates`` are monotone by the actual ``agent-ws:`` capacity
+    lock key, fairness-rotated within that constraint. Code candidates do
+    not enter that lock domain and remain unconstrained. ``timer`` carries
+    the scan/evaluate timings across both phases (#448).
     """
 
     candidates: tuple[Mapping[str, Any], ...]
@@ -114,7 +114,7 @@ def _select_kind_batch(
     kind: str,
     cursor: int,
     timer: _claim_timing.ClaimStageTimer,
-    ws_lock_floor: str | None,
+    ws_lock_floor: int | None,
     chosen_ids: set[str],
 ) -> Mapping[str, Any] | None:
     """``claim_windows.scan_kind`` 的批选择形态：同一 SCAN_ROUNDS 阶梯、fair
@@ -134,14 +134,12 @@ def _select_kind_batch(
         for row in fair_candidate_order(candidates, cursor):
             if str(row["execution_id"]) in chosen_ids:
                 continue
-            if (
-                ws_lock_floor is not None
-                and kind != "code"
-                and str(row["workspace_id"]) < ws_lock_floor
-            ):
+            row_key = int(row["ws_lock_key"])
+            if kind != "code" and ws_lock_floor is not None and row_key < ws_lock_floor:
                 # 批内 ws 锁升序（EXEC-CLAIM-LOCK-001）：低序候选让位下一批
                 # （floor 重置），本批绝不下探。选择段的顺序即写入段的加锁
-                # 顺序，floor 纪律由这里守住。
+                # 顺序，floor 纪律由这里守住。Code 候选不取 agent-ws
+                # capacity 锁，因此不应被这个 floor 过滤。
                 state.skip_reasons["batch_lock_order"] += 1
                 continue
             if admit_candidate(broker, row, view, state) is not None:
@@ -190,9 +188,9 @@ def select_batch_candidates(
         # claimed workspace; without an ascending constraint two batches
         # walking the same workspaces in different queue orders could AB-BA
         # deadlock. Agent candidates below the floor are deferred (skip +
-        # next batch = fresh floor); code claims take no ws lock and stay
-        # unconstrained.
-        ws_lock_floor: str | None = None
+        # next batch = fresh floor). Code claims take no agent-ws lock and
+        # must not lose throughput to an unrelated ordering domain.
+        ws_lock_floor: int | None = None
         while len(selected) < budget:
             open_kinds = []
             for kind in needed_claim_kinds(view):
@@ -219,9 +217,9 @@ def select_batch_candidates(
             selected.append(row)
             chosen_ids.add(str(row["execution_id"]))
             row_kind = str(row["kind"])
-            row_workspace = str(row["workspace_id"])
-            if row_kind == "agent" and (ws_lock_floor is None or row_workspace > ws_lock_floor):
-                ws_lock_floor = row_workspace
+            row_key = int(row["ws_lock_key"])
+            if row_kind != "code" and (ws_lock_floor is None or row_key > ws_lock_floor):
+                ws_lock_floor = row_key
             pool_left = pool_remaining[row_kind]
             if pool_left is not None:
                 pool_remaining[row_kind] = pool_left - 1

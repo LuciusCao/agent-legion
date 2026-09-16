@@ -150,16 +150,21 @@ def test_client_request_emits_on_transport_error_then_reraises(
 def test_client_claim_flow_still_maps_status_codes(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Behavior pin: claim()'s 204→None / 401→WorkerAuthError / other→RuntimeError
-    mapping is untouched by the instrumentation (only one extra event line)."""
+    """Behavior pin: claim_batch()'s 204→[] / 401→WorkerAuthError /
+    other→RuntimeError mapping is untouched by the instrumentation (only one
+    extra event line)."""
+
+    def _batch(host_client: Client) -> list[dict]:
+        return host_client.claim_batch("w1", limit=1, agent_limit=1, code_limit=1)
+
     _patch_session(monkeypatch, [_FakeResponse(204, b"")])
-    assert Client("http://h").claim("w1") is None
+    assert _batch(Client("http://h")) == []
     _patch_session(monkeypatch, [_FakeResponse(401, b"nope")])
     with pytest.raises(WorkerAuthError):
-        Client("http://h").claim("w1")
+        _batch(Client("http://h"))
     _patch_session(monkeypatch, [_FakeResponse(500, b"boom")])
     with pytest.raises(RuntimeError):
-        Client("http://h").claim("w1")
+        _batch(Client("http://h"))
     out = capsys.readouterr().out
     events = [json.loads(line) for line in out.splitlines() if line.strip()]
     # 204 emits nothing; the two failures emit http.error events.

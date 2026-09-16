@@ -264,6 +264,16 @@
   border-color: #1976d2;
   color: #fff;
 }
+/* #667 B1：草稿与编辑器内容不一致时，发布口径（编辑器 YAML 为准）的提示。 */
+.draftHint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b26a00;
+}
+.draftButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .statusWarning {
   margin: 0 12px;
   padding: 8px 10px;

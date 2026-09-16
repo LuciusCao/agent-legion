@@ -27,18 +27,16 @@ from server.app.mcp_server.skill_tools import ClientFactory
 
 
 def register_agent_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_agent_definitions(workspace_id: str) -> str:
-        """List the workspace's Agent definitions — the latest version per
-        agent (a pending draft beats the published row) with ALL fields:
-        capability, runtime, skill, tools, requires_labels, config_schema,
-        plus version metadata (version, status, definition_hash, created_by,
-        created_at, published_at). Read this before drafting agent or
-        workflow changes so capability bindings build on what exists."""
+        """The workspace's Agent definitions: latest version per agent
+        (pending draft beats published), ALL fields (capability, runtime,
+        skill, tools, requires_labels, config_schema) + version metadata.
+        Read before drafting agent or workflow changes."""
         _, client = await client_factory()
         return await client.call("GET", f"/workspaces/{workspace_id}/agent-definitions")
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def create_agent_definition(
         workspace_id: str,
         capability: str,
@@ -48,18 +46,12 @@ def register_agent_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         requires_labels: dict[str, str] | None = None,
         config_schema: dict | None = None,
     ) -> str:
-        """Start a NEW Agent definition draft (workspace-scoped): the agent_id
-        derives from the capability (one capability, one main draft per
-        workspace), so a capability that already has an Agent — any status —
-        returns HTTP 409 naming it; edit that Agent with
-        save_agent_definition_draft instead. Same payload semantics as the
-        save: runtime is one of pi, velites; tools defaults to the catalog
-        default tier; requires_labels declares worker labels
-        ({"label": "value"}); config_schema declares tunables as a JSON-Schema
-        subset (see get_authoring_guide §5). Note both tools are FULL-PAYLOAD:
-        for save_agent_definition_draft an omitted field resets to its default
-        (get_agent_definitions first and echo the values you want kept).
-        Draft only — a human publishes it in Studio before any job can use it."""
+        """Start a NEW Agent definition draft: the agent_id derives from the
+        capability, so a capability that already has an Agent (any status)
+        returns HTTP 409 naming it — edit it with save_agent_definition_draft
+        instead. Same FULL-PAYLOAD semantics as the save (get_agent_definitions
+        first, echo the values you want kept). Draft only — a human publishes
+        it in Studio."""
         body: dict[str, Any] = {
             "capability": capability,
             "runtime": runtime,
@@ -72,25 +64,19 @@ def register_agent_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         _, client = await client_factory()
         return await client.call("POST", f"/workspaces/{workspace_id}/agent-definitions", body)
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_runtime_models(workspace_id: str) -> str:
-        """The workspace's available {runtime: {provider: [models]}} view,
-        aggregated from the workspace's ONLINE workers' declarations. This is
-        discovery-only: provider/model declarations are worker-owned and are
-        NEVER editable through these tools (EXEC-RUNTIME-MODELS-001). Use the
-        view to pick sensible node `execution.*` values (a typed value
-        corresponds to a worker that can actually claim the execution)."""
+        """Available {runtime: {provider: [models]}} view from the workspace's
+        ONLINE workers' declarations (discovery-only, never editable here).
+        Pick node execution.* values a worker can actually claim."""
         _, client = await client_factory()
         return await client.call("GET", f"/workspaces/{workspace_id}/runtime-models")
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_agent_runtimes(workspace_id: str) -> str:
-        """The runtime catalog: each runtime (pi, velites) and its agent tool
-        catalog — every tool's name, tier (default = preselected, opt-in =
-        explicitly enabled, forced = harness-enforced with an activation
-        condition) and parameters. The catalog is a code-defined static
-        projection (EXEC-RUNTIME-CATALOG-001): agent "tools" are not
-        runtime-editable; the editable surface is the `tools` selection
-        inside an Agent definition draft."""
+        """Runtime catalog: each runtime (pi, velites) with its agent tool
+        catalog — names, tiers (default preselected / opt-in explicit /
+        forced harness-enforced), parameters. Static — the editable surface
+        is the tools selection in an Agent definition draft."""
         _, client = await client_factory()
         return await client.call("GET", f"/workspaces/{workspace_id}/agent-runtimes")

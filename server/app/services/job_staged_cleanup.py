@@ -3,7 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Protocol
 
+from server.app.services.rerun_artifact_cleanup import delete_rerun_artifact_objects
+
 logger = logging.getLogger(__name__)
+
+__all__ = ["commit_staged_outputs", "delete_rerun_artifact_objects"]
 
 
 class _StagedOutputs(Protocol):

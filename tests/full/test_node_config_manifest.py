@@ -60,7 +60,16 @@ def test_intake_freeze_and_manifest_whitelist(job_db) -> None:
 
     resolved = resolve_workflow_node_configs(_definition(), agents, workspace)
     # defaults → node config → workspace override
-    assert resolved == {"generate": {"page_size": 5, "subject_id": "math", "api_key": "sekret"}}
+    # #550: agent 节点合并保留执行键（agent 默认 1800，非 code 的 600）。
+    assert resolved == {
+        "generate": {
+            "page_size": 5,
+            "subject_id": "math",
+            "api_key": "sekret",
+            "timeout_seconds": 1800,
+            "sandbox_network": False,
+        }
+    }
 
     mode = SimpleNamespace(key="batch_by_ids", label="IDs", input_field="question_ids", resource="")
     result = enqueue_intake_batch(
@@ -78,7 +87,14 @@ def test_intake_freeze_and_manifest_whitelist(job_db) -> None:
     # consumer freezes onto each job) in queue_payload_json.
     payload = json.loads(str(batch["queue_payload_json"]))
     frozen = payload["node_config"]["generate"]
-    assert frozen == {"page_size": 5, "subject_id": "math", "api_key": "sekret"}
+    # #550：冻结配置携带保留执行键（agent 默认 1800）。
+    assert frozen == {
+        "page_size": 5,
+        "subject_id": "math",
+        "api_key": "sekret",
+        "timeout_seconds": 1800,
+        "sandbox_network": False,
+    }
 
     manifest_config = manifest_safe_config(SCHEMA, frozen)
     assert "api_key" not in manifest_config

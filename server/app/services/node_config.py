@@ -26,7 +26,10 @@ from server.app.config_schema import (
 from server.app.services.node_config_batch import frozen_node_config
 from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.services.node_config_secret_guard import reject_secret_violations
-from server.app.services.node_execution_config import merge_reserved_execution_schema
+from server.app.services.node_execution_config import (
+    AGENT_DEFAULT_TIMEOUT_SECONDS,
+    merge_reserved_execution_schema,
+)
 from server.app.services.node_secrets import strip_secret_fields
 from server.app.workflows.schema import WorkflowDefinition, WorkflowNode
 
@@ -60,14 +63,21 @@ def _node_config_schema(
 ) -> dict[str, Any]:
     """One node's effective schema: Agent Definition → node-declared.
 
-    ``type: agent`` nodes keep their Agent Definition schema untouched.
-    Every other node is code-routed and gets the platform-reserved
-    execution keys merged into its declared schema. The explicit node type
-    decides (#284): a code node may share its capability with a published
-    Agent without inheriting the Agent's schema.
+    ``type: agent`` nodes keep their Agent Definition schema — with the
+    platform-reserved execution keys merged UNDER it since #550 (an agent
+    node's timeout is configurable like a code node's; ``sandbox_network``
+    rides along inertly — the agent runtime ignores it). The merged default
+    keeps the agent product constant (1800s), NOT the code-node 600 — the
+    upgrade must not silently cut existing agent runs' budget. Every other
+    node is code-routed and gets the same merge into its declared schema.
+    The explicit node type decides (#284): a code node may share its
+    capability with a published Agent without inheriting the Agent's schema.
     """
     if node.node_type == "agent":
-        return agent_schemas.get(node.capability, {})
+        return merge_reserved_execution_schema(
+            agent_schemas.get(node.capability, {}),
+            {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS},
+        )
     return merge_reserved_execution_schema(node.config_schema)
 
 

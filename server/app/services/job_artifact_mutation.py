@@ -17,12 +17,17 @@ class StagedOutputs:
     """Reversible artifact staging for job rerun operations.
 
     `commit()` permanently removes staged files; `rollback()` restores them to
-    their original locations.
+    their original locations. ``artifact_names`` are the output names staged
+    for the affected closure (#508: the same set whose ``job_artifacts``
+    manifest rows the rerun transaction deletes).
     """
 
-    def __init__(self, staged_dir: Path, moves: list[tuple[Path, Path]]) -> None:
+    def __init__(
+        self, staged_dir: Path, moves: list[tuple[Path, Path]], artifact_names: set[str]
+    ) -> None:
         self._staged_dir = staged_dir
         self._moves = list(moves)
+        self.artifact_names = frozenset(artifact_names)
         self._committed = False
         self._rolled_back = False
 
@@ -146,7 +151,7 @@ class JobArtifactMutationService:
             # here). Either way the half-staged moves must roll back and the
             # original type propagates to the caller's conflict/failed
             # classification (job_execution, job_rerun).
-            StagedOutputs(staged_dir, moves).rollback()
+            StagedOutputs(staged_dir, moves, outputs).rollback()
             raise
 
-        return StagedOutputs(staged_dir, moves)
+        return StagedOutputs(staged_dir, moves, outputs)

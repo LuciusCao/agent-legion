@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -74,9 +75,24 @@ def _claimed(manifest: dict[str, Any]) -> SimpleNamespace:
     )
 
 
-def _client(object_store: JobArtifactObjectStore | None) -> tuple[TestClient, MagicMock]:
+def _client(
+    object_store: JobArtifactObjectStore | None,
+    monkeypatch: pytest.MonkeyPatch | None = None,
+) -> tuple[TestClient, MagicMock]:
     broker = MagicMock()
-    broker.claim.return_value = _claimed(_manifest())
+    # #547: the route always calls the module-level claim_batch now; stub it
+    # at the route module seam (a MagicMock broker cannot serve the real
+    # transaction path's database_dsn reads). monkeypatch auto-restores; the
+    # None fallback keeps inline callers working with a manual restore.
+    from server.app.routes import agent_worker_claims as claims_module
+
+    def _stub(*_args: object, **_kwargs: object) -> list[dict[str, Any]]:
+        return [_claimed(_manifest())]
+
+    if monkeypatch is not None:
+        monkeypatch.setattr(claims_module, "claim_batch", _stub)
+    else:
+        claims_module.claim_batch = _stub  # type: ignore[assignment]
     app = FastAPI()
     app.include_router(
         create_agent_worker_claim_router(
@@ -93,10 +109,11 @@ def _client(object_store: JobArtifactObjectStore | None) -> tuple[TestClient, Ma
 def _claim(client: TestClient) -> dict[str, Any]:
     response = client.post("/agent-executions/claim", json={"worker_id": "w1"})
     assert response.status_code == 200, response.text
-    return response.json()["manifest"]
+    # #547: the route answers the batch wrapper (one-element claims list).
+    return response.json()["claims"][0]["manifest"]
 
 
-def test_agent_claim_injects_object_channel() -> None:
+def test_agent_claim_injects_object_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed()
     storage = FakeStorage()
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
@@ -111,7 +128,7 @@ def test_agent_claim_injects_object_channel() -> None:
         size_bytes=len(PAYLOAD),
         content_hash=hashlib.sha256(PAYLOAD).hexdigest(),
     )
-    client, _ = _client(store)
+    client, _ = _client(store, monkeypatch)
 
     manifest = _claim(client)
 
@@ -126,10 +143,10 @@ def test_agent_claim_injects_object_channel() -> None:
     assert "storage_key" not in ref
 
 
-def test_agent_claim_degrades_on_storage_error() -> None:
+def test_agent_claim_degrades_on_storage_error(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed()
     store = JobArtifactObjectStore(TEST_DATABASE_URL, RaisingStorage())
-    client, _ = _client(store)
+    client, _ = _client(store, monkeypatch)
 
     manifest = _claim(client)  # claim 不挂，正常 200
 
@@ -137,9 +154,9 @@ def test_agent_claim_degrades_on_storage_error() -> None:
     assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
 
 
-def test_agent_claim_without_object_storage_unchanged() -> None:
+def test_agent_claim_without_object_storage_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed()
-    client, _ = _client(None)
+    client, _ = _client(None, monkeypatch)
 
     manifest = _claim(client)
 
@@ -147,7 +164,7 @@ def test_agent_claim_without_object_storage_unchanged() -> None:
     assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
 
 
-def test_agent_claim_v4_worker_gets_gzip_specs() -> None:
+def test_agent_claim_v4_worker_gets_gzip_specs(monkeypatch: pytest.MonkeyPatch) -> None:
     """#338：v4 worker（authorize 报 protocol_version=4）拿 .gz 上传 spec，
     .gz 输入行升级为 presigned GET + content_encoding 标记。"""
     import gzip as gzip_mod
@@ -167,7 +184,9 @@ def test_agent_claim_v4_worker_gets_gzip_specs() -> None:
         content_hash=HASH,
     )
     broker = MagicMock()
-    broker.claim.return_value = _claimed(_manifest())
+    from server.app.routes import agent_worker_claims as claims_module
+
+    monkeypatch.setattr(claims_module, "claim_batch", lambda *a, **k: [_claimed(_manifest())])
     app = FastAPI()
     app.include_router(
         create_agent_worker_claim_router(
@@ -191,7 +210,7 @@ def test_agent_claim_v4_worker_gets_gzip_specs() -> None:
     assert ref["content_encoding"] == "gzip"
 
 
-def test_agent_claim_mixed_fleet_v3_worker_keeps_raw_specs() -> None:
+def test_agent_claim_mixed_fleet_v3_worker_keeps_raw_specs(monkeypatch: pytest.MonkeyPatch) -> None:
     """#338 混合舰队：v3 worker 对同一批 .gz 数据拿裸上传 spec，.gz 输入行
     不升级（保留 CAS 形态）——不因输入/上传形态 mismatch 失败。"""
     import gzip as gzip_mod
@@ -210,7 +229,7 @@ def test_agent_claim_mixed_fleet_v3_worker_keeps_raw_specs() -> None:
         size_bytes=len(compressed),
         content_hash=HASH,
     )
-    client, _ = _client(store)  # _client 的 authorize stub 报 protocol_version=3
+    client, _ = _client(store, monkeypatch)  # _client 的 authorize stub 报 protocol_version=3
 
     manifest = _claim(client)
 
@@ -221,7 +240,9 @@ def test_agent_claim_mixed_fleet_v3_worker_keeps_raw_specs() -> None:
     assert storage.presigned_gets == []  # 未为旧 worker 签发 .gz GET
 
 
-def test_agent_claim_presign_expiry_follows_execution_timeout() -> None:
+def test_agent_claim_presign_expiry_follows_execution_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """presign TTL 从 execution.timeout_seconds 派生：max(3600, t + 900)。"""
     _seed()
     storage = FakeStorage()
@@ -236,17 +257,21 @@ def test_agent_claim_presign_expiry_follows_execution_timeout() -> None:
         size_bytes=len(PAYLOAD),
         content_hash=hashlib.sha256(PAYLOAD).hexdigest(),
     )
-    broker = MagicMock()
     long_timeout = _manifest()
     long_timeout["execution"]["timeout_seconds"] = 7200
-    broker.claim.side_effect = [
-        _claimed(long_timeout),  # 长 timeout → TTL 拉长
-        _claimed(_manifest()),  # 无 timeout → 3600 下限
-    ]
+    from server.app.routes import agent_worker_claims as claims_module
+
+    batches = iter(
+        [
+            [_claimed(long_timeout)],  # 长 timeout → TTL 拉长
+            [_claimed(_manifest())],  # 无 timeout → 3600 下限
+        ]
+    )
+    monkeypatch.setattr(claims_module, "claim_batch", lambda *a, **k: next(batches))
     app = FastAPI()
     app.include_router(
         create_agent_worker_claim_router(
-            broker,
+            MagicMock(),
             MagicMock(),
             lambda request, worker_id=None: {"worker_id": "w1", "protocol_version": 3},
             lambda request: "lease-1",

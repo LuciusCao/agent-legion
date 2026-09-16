@@ -17,10 +17,10 @@ execute against write-time state. A candidate that left the runnable set
 since selection skips (stale) or, when the exit lands mid-promote, rolls
 its own savepoint back (``ClaimRacedError``); nothing is half-applied.
 
-Lock order (EXEC-CLAIM-LOCK-001): the selection's ascending-workspace floor
-(``claim_batch_select``) fixes the promote order, so this loop takes the
-batch's ws locks in ascending workspace order without re-checking — two
-concurrent batches share one global lock order and cannot AB-BA.
+Lock order (EXEC-CLAIM-LOCK-001): the selection's ascending ``agent-ws:``
+capacity-lock floor fixes agent promote order, so this loop accumulates its
+workspace locks in one global order. Code candidates take no workspace
+capacity lock and are deliberately outside that floor.
 
 Partial-failure semantics (mirroring the #352 batch-heartbeat pattern): each
 promote attempt rides a SAVEPOINT, so a mid-batch ``ClaimRacedError`` rolls

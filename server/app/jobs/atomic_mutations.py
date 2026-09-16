@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.db.connection import DatabaseConnection
@@ -120,7 +120,20 @@ def mark_nodes_for_rerun(
     job_id: str,
     node_keys: Sequence[str],
     downstream_map: dict[str, list[str]],
-) -> None:
+    *,
+    staged_artifact_names: frozenset[str] | set[str] = frozenset(),
+) -> list[dict[str, Any]]:
+    """Reset rerun targets to pending (descendants to stale) and delete the
+    affected nodes' object-storage manifest rows (#508).
+
+    ``staged_artifact_names`` is the set ``stage_outputs`` staged for the same
+    closure (outputs minus RMW): exactly the artifacts whose local files the
+    rerun removed, so their ``job_artifacts`` rows must go in the SAME
+    transaction — otherwise a rerun that never completes leaves the job
+    listing (and serving) the previous run's artifacts from object storage.
+    Returns the deleted manifest rows (with ``storage_key``) for the caller's
+    post-commit best-effort object deletion.
+    """
     descendants = {
         descendant
         for node_key in node_keys
@@ -129,6 +142,20 @@ def mark_nodes_for_rerun(
     }
     affected_nodes = set(node_keys) | descendants
     placeholders = ",".join("%s" for _ in affected_nodes)
+    deleted_rows: list[dict[str, Any]] = []
+    if staged_artifact_names:
+        name_marks = ",".join("%s" for _ in staged_artifact_names)
+        deleted_rows = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                delete from job_artifacts
+                where job_id=%s and node_key in ({placeholders}) and name in ({name_marks})
+                returning node_key, name, storage_key
+                """,
+                (job_id, *sorted(affected_nodes), *sorted(staged_artifact_names)),
+            ).fetchall()
+        ]
     conn.execute(
         f"""
         update node_runs
@@ -175,6 +202,7 @@ def mark_nodes_for_rerun(
         """,
         (job_id,),
     )
+    return deleted_rows
 
 
 def prepare_replay_copy(
@@ -309,8 +337,12 @@ class AtomicJobMutationsMixin:
         job_id: str,
         node_keys: Sequence[str],
         downstream_map: dict[str, list[str]],
-    ) -> None:
-        mark_nodes_for_rerun(conn, job_id, node_keys, downstream_map)
+        *,
+        staged_artifact_names: frozenset[str] | set[str] = frozenset(),
+    ) -> list[dict[str, Any]]:
+        return mark_nodes_for_rerun(
+            conn, job_id, node_keys, downstream_map, staged_artifact_names=staged_artifact_names
+        )
 
     @staticmethod
     def set_run_to_control_in_transaction(

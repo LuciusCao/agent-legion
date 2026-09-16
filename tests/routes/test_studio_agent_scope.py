@@ -162,6 +162,10 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # Context push (Studio node selection): the agent reads it back via
     # get_studio_context, so a scoped token must not rewrite its own context.
     ("PUT", f"{_CHAT}/sessions/{{session_id}}/context", {"selected_node_key": "n"}),
+    # Shared-material propagation (#673): commits + tags local skill repos —
+    # an effecting write for full sessions (the UI); scoped tokens use their
+    # own scoped tool endpoint (exempt below), never this one.
+    ("POST", "/api/workspaces/{workspace_id}/skills-shared/propagate", None),
 ]
 
 # Unguarded non-GET routes, each with the reason a scoped token may reach it.
@@ -297,6 +301,13 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     (
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/skills-shared",
+    ): "scoped-only tool surface",
+    # Shared material propagation tool (#673): commits + tags the local
+    # skill repos via the save_version write path — draft-only like the
+    # save endpoint above (skill lock and node pins never move).
+    (
+        "POST",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/skills-shared/propagate",
     ): "scoped-only tool surface",
     # SPA mount's API 404 catch-all (server/app/spa.py).
     ("POST", "/api/{path:path}"): "API 404 catch-all",

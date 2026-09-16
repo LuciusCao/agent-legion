@@ -29,59 +29,46 @@ def _skill_path(skill_key: str) -> str:
 
 
 def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_skill(skill_key: str, ref: str | None = None) -> str:
-        """Read a skill: key, the repo's git tags (latest version first),
-        and text files (SKILL.md + references/ + scripts/). Without ref the
-        content is the working tree at HEAD — the ``latest`` semantics an
-        unpinned node ref dispatches against. Pass ref (a git tag of the
-        skill repo) to preview that tag's content — e.g. a tag another
-        agent just created — without changing the lock; an unknown tag
-        comes back as a structured HTTP 404 error, nothing changes."""
+        """Read a skill: key, git tags (latest first), text files (SKILL.md +
+        references/ + scripts/). No ref → working tree at HEAD (the latest
+        semantics); ref previews one tag without moving the lock (unknown tag
+        → 404)."""
         _, client = await client_factory()
         path = f"/skills/{_skill_path(skill_key)}"
         if ref is not None:
             path += f"?ref={quote(ref, safe='')}"
         return await client.call("GET", path)
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def validate_skill(skill_key: str) -> str:
-        """Check a skill against the runtime contract the platform enforces at
-        dispatch: SKILL.md (non-empty) + references/output-contract.md +
-        scripts/validate_output.py, plus a strict parse of the root
-        contract.yaml when present (malformed = error). Returns
-        {"valid": bool, "errors": [{"path", "error"}], "warnings":
-        [{"path", "error"}]} — warnings cover a MISSING root contract.yaml
-        (embedded-block fallback: deprecated; nothing: runtime validation
-        degrades to existence-only) without failing the verdict.
-        Persists nothing — always run this before save_skill_version."""
+        """Check a skill against the dispatch-time runtime contract (SKILL.md
+        + references/output-contract.md + scripts/validate_output.py + root
+        contract.yaml parse). Returns {valid, errors, warnings} — a MISSING
+        contract.yaml only warns. Persists nothing; run before
+        save_skill_version."""
         _, client = await client_factory()
         return await client.call("POST", f"/skills/{_skill_path(skill_key)}/validate")
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def save_skill_version(
         skill_key: str,
         files: list[dict[str, str]],
         new_tag: str,
         message: str,
     ) -> str:
-        """Write a new version of a skill into its LOCAL in-place repo
-        (<skills root>/<key>): validate every path (inside the skill dir, no
-        '..' or absolute paths), write the files, re-run the contract check
-        (a malformed root contract.yaml fails like any contract error and
-        rolls the repo back to its original commit; a MISSING one only
-        warns), then git commit (author agent-legion-studio) and git tag
-        new_tag. An existing tag is a conflict. The response carries
-        "warnings" (e.g. contract.yaml missing — migrate the embedded block
-        or add one). The skill lock is never touched: nodes pinned to a tag
-        keep the locked commit until a human reviews the diff, re-pins the
-        node, and relocks; ``latest`` nodes pick the new HEAD up on their
-        next dispatch."""
+        """Write a new skill version into its LOCAL in-place repo: paths
+        validated (inside the skill dir, no '..'/absolute), contract
+        re-checked (malformed root contract.yaml rolls the repo back; missing
+        only warns), then commit + tag new_tag (existing tag = conflict).
+        Skill lock untouched — pinned nodes keep the locked commit, latest
+        nodes follow the new HEAD; a human reviews, re-pins, relocks."""
         _, client = await client_factory()
         body: dict[str, Any] = {"files": files, "new_tag": new_tag, "message": message}
         return await client.call("POST", f"/skills/{_skill_path(skill_key)}/versions", body)
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def create_skill(
         workspace_id: str,
         skill_name: str,
@@ -89,23 +76,12 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         new_tag: str,
         message: str,
     ) -> str:
-        """Create a BRAND-NEW skill under the workspace's skill directory
-        (~/.agents/skills/<workspace_id>/<skill_name>) as a fresh local git
-        repo. skill_name is one segment (^[a-z0-9][a-z0-9_-]{0,63}$); the
-        files MUST already contain the full contract set of FOUR files —
-        non-empty SKILL.md + references/output-contract.md +
-        scripts/validate_output.py + a root contract.yaml (the
-        machine-readable contract; malformed YAML/structure is rejected
-        like a missing file) — or the create is rejected (422). Everything
-        is validated before anything is written (path safety: no '..',
-        absolute paths, or .git; tag must be a valid git ref name); on any
-        failure after the directory was created the partial directory is
-        removed, so a retry is never wedged. On success the initial commit
-        (author agent-legion-studio) is tagged new_tag. Draft-only: nothing
-        is published and the skill lock is untouched — a human still
-        reviews, re-pins, and relocks. Afterwards iterate with
-        validate_skill / save_skill_version (which only WARN on a missing
-        contract.yaml for existing skills)."""
+        """Create a BRAND-NEW skill repo under the workspace's skill
+        directory. skill_name: one segment (^[a-z0-9][a-z0-9_-]{0,63}$);
+        files MUST carry the four-file contract set (SKILL.md +
+        references/output-contract.md + scripts/validate_output.py + root
+        contract.yaml) or 422. All-or-nothing; initial commit tagged new_tag;
+        lock untouched. Iterate with validate_skill / save_skill_version."""
         _, client = await client_factory()
         body: dict[str, Any] = {
             "skill_name": skill_name,

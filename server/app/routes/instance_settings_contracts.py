@@ -47,6 +47,10 @@ class InstanceAgentWorkersSettings(BaseModel):
     # #591 group-commit batching kill-switch (False = direct serial path,
     # 0.7.9 behavior); restart-effective.
     result_commit_batching: bool
+    # #356 plan B: trust-reported artifacts' spot-check percent (0 = trust
+    # everything, 100 = always verify — the pre-#356 behavior);
+    # restart-effective.
+    artifact_spot_check_percent: int = Field(ge=0, le=100)
 
 
 class InstanceAgentEnqueueSettings(BaseModel):

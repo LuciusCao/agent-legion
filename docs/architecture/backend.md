@@ -226,6 +226,7 @@ server/app/
 | GET | `/studio-agent/tools/publish-requests/{request_id}` | `get_publish_request_status` | routes/studio_agent_publish_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared` | `get_shared_materials` | routes/studio_agent_shared_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared` | `save_shared_materials` | routes/studio_agent_shared_tools.py |
+| POST | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared/propagate` | `propagate_shared_materials_endpoint` | routes/studio_agent_shared_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/skills` | `create_skill` | routes/studio_agent_skill_creation_tools.py |
 | GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
@@ -305,6 +306,9 @@ server/app/
 | DELETE | `/workspaces/{workspace_id}/secrets/{name}` | `delete_workspace_secret` | routes/workspace_secrets.py |
 | GET | `/workspaces/{workspace_id}/settings` | `get_workspace_settings` | routes/workspace_settings.py |
 | PATCH | `/workspaces/{workspace_id}/settings/{section}` | `update_workspace_settings_section` | routes/workspace_settings.py |
+| GET | `/workspaces/{workspace_id}/skills-shared` | `get_shared_materials` | routes/workspace_shared_materials.py |
+| GET | `/workspaces/{workspace_id}/skills-shared/file` | `get_shared_material_file` | routes/workspace_shared_materials.py |
+| POST | `/workspaces/{workspace_id}/skills-shared/propagate` | `propagate_shared` | routes/workspace_shared_materials_propagate.py |
 | GET | `/workspaces` | `list_workspaces` | routes/workspaces.py |
 | POST | `/workspaces` | `create_workspace` | routes/workspaces.py |
 | GET | `/workspaces/{workspace_id}` | `get_workspace` | routes/workspaces.py |
@@ -348,7 +352,7 @@ server/app/
 | BatchAgentClaimResponse | BaseModel | claims: list[AgentClaimResponse] | app/routes/agent_worker_claim_contracts.py |
 | BatchHeartbeatItem | BaseModel | execution_id: str, lease_id: str | app/routes/agent_worker_heartbeat_batch.py |
 | BatchHeartbeatRequest | BaseModel | executions: list[BatchHeartbeatItem] | app/routes/agent_worker_heartbeat_batch.py |
-| BatchHeartbeatResponse | BaseModel | renewed: list[str], lost: list[str], cancelled_execution_ids: list[str] | app/routes/agent_worker_heartbeat_batch.py |
+| BatchHeartbeatResponse | BaseModel | renewed: list[str], lost: list[str], settled: list[str], cancelled_execution_... | app/routes/agent_worker_heartbeat_batch.py |
 | RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | AgentWorkerWorkspace | BaseModel | workspace_id: str, workspace_name: str, token_ids: list[str] | app/routes/agent_workers_contracts.py |
 | RegisterAgentWorkerResponse | BaseModel | worker_token: str, host_protocol_version: int, allowed_workspaces: list[str],... | app/routes/agent_workers_contracts.py |
@@ -648,6 +652,15 @@ server/app/
 | WorkspaceSecretsResponse | BaseModel | secrets: list[WorkspaceSecretMetadata] | app/routes/workspace_secrets.py |
 | WorkspaceSecretResponse | BaseModel | secret: WorkspaceSecretMetadata | app/routes/workspace_secrets.py |
 | WorkspaceSecretDeleteResponse | BaseModel | deleted: str | app/routes/workspace_secrets.py |
+| SharedMaterialSkillDrift | BaseModel | skill: str, status: DriftStatus | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialMapping | BaseModel | source: str, skills: list[SharedMaterialSkillDrift] | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialsMapView | BaseModel | version: int, materials: list[SharedMaterialMapping] | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialFileEntry | BaseModel | path: str, size: int, modified_at: str | app/routes/workspace_shared_materials_contracts.py |
+| WorkspaceSharedMaterialsResponse | BaseModel | workspace_id: str, map: SharedMaterialsMapView | None, files: list[SharedMate... | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialFileContent | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/workspace_shared_materials_contracts.py |
+| SharedMaterialsPropagateRequest | BaseModel | sources: list[str] | None | app/routes/workspace_shared_materials_propagate_contracts.py |
+| SharedMaterialPropagateSkillResult | BaseModel | skill: str, status: PropagateStatus, tag: str | None, detail: str | None, syn... | app/routes/workspace_shared_materials_propagate_contracts.py |
+| SharedMaterialsPropagateResponse | BaseModel | workspace_id: str, results: list[SharedMaterialPropagateSkillResult] | app/routes/workspace_shared_materials_propagate_contracts.py |
 | JobDeleteResult | TypedDict | job_id: str, operation: str, status: str, reason_code: str | None, message: s... | app/services/job_deletion.py |
 | LogEntry | TypedDict | type: str, title: str, detail: str, truncated: bool | app/services/job_log_renderer.py |
 | JobOperationResult | TypedDict | job_id: str, operation: str, status: str, node_key: str | None, reason_code: ... | app/services/job_operation_error.py |
@@ -872,7 +885,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 `config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
 - env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers` 的全局 register token 已随 issue #35 退役（遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 或 yaml `register_token[_file]` 会让启动直接报错）。
-- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`code_capacity`（本地兜底执行并发上限，0 = 纯控制面模式，#389）、`workflows.max_items_per_run`、`agent_workers.max_archive_bytes` / `min_protocol_version` / `max_concurrent_result_commits`（result 提交削峰 gate，默认 16，0 = 关闭，#521）、`agent_enqueue.workers`（默认 48，上限 256）/ `max_pending`（默认 1024）（Host 入队线程池，#509）、`result_unpack.workers`（result 解包进程池尺寸，0 = 自动 min(4, 核数)，上限 64；env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 保留为覆盖通道，#554）、`result_validate.workers`（result 校验进程池尺寸，同 result_unpack 语义；env `AGENT_LEGION_RESULT_VALIDATE_WORKERS`，#569）、`agent_claim.worker_touch_interval_seconds`（claim/result 路径刷新 Worker 在线标记的节流间隔，默认 30s，0 = 逐次写恢复 0.7.5 行为，#561）。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略；`workflows.enabled` 已随 #385/#389 退役：存量文档读取时键级剥离（`workflows` 块的 `max_items_per_run` 活跃保留）。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`code_capacity`（本地兜底执行并发上限，0 = 纯控制面模式，#389）、`workflows.max_items_per_run`、`agent_workers.max_archive_bytes` / `min_protocol_version` / `max_concurrent_result_commits`（result 提交削峰 gate，默认 16，0 = 关闭，#521）/ `result_commit_batching`（终态写组提交，默认开，False = 直连串行路径，#591）/ `artifact_spot_check_percent`（信任上报产物的抽检比例，默认 3，0 = 裸键全信任，100 = 全核验；`.gz` 引用永远全量核验不参与抽检，#356）、`agent_enqueue.workers`（默认 48，上限 256）/ `max_pending`（默认 1024）（Host 入队线程池，#509）、`result_unpack.workers`（result 解包进程池尺寸，0 = 自动 min(4, 核数)，上限 64；env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 保留为覆盖通道，#554）、`result_validate.workers`（result 校验进程池尺寸，同 result_unpack 语义；env `AGENT_LEGION_RESULT_VALIDATE_WORKERS`，#569）、`agent_claim.worker_touch_interval_seconds`（claim/result 路径刷新 Worker 在线标记的节流间隔，默认 30s，0 = 逐次写恢复 0.7.5 行为，#561）。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略；`workflows.enabled` 已随 #385/#389 退役：存量文档读取时键级剥离（`workflows` 块的 `max_items_per_run` 活跃保留）。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 

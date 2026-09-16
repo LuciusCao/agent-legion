@@ -5,8 +5,12 @@ import type { DagEdgeData } from './DagEdge'
 export type RfDagEdge = Edge<DagEdgeData>
 
 // #276：边走自定义 dagEdge 类型（渲染逻辑见 DagEdge.tsx），高亮态放
-// data.highlighted；这里的 data 是常态初始值，DagGraph 的高亮 useMemo 只在
+// data.highlighted；这里的 data 是常态初始值（highlighted 缺省 = 从未进入
+// 高亮模式，DagEdge 原样透传本 style），DagGraph 的高亮 useMemo 只在
 // highlighted 翻转时新建 data 对象，其余边引用稳定。
+// #668：常态描边加深加粗（#6b7280 / 2.5），与 dagHighlight 退出高亮时
+// 还原的 marker 颜色保持一致；置灰态（DagEdge 的 STROKE_DEFAULT +
+// 0.4 透明度）维持明显浅于常态。
 export function buildRfEdges(edges: DagGraphEdge[]): RfDagEdge[] {
   return edges.map((edge, idx) => ({
     id: `e-${edge.from}-${edge.to}-${idx}`,
@@ -14,11 +18,11 @@ export function buildRfEdges(edges: DagGraphEdge[]): RfDagEdge[] {
     target: edge.to,
     type: 'dagEdge',
     label: edge.label || undefined,
-    data: { highlighted: false },
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#9ca3af' },
+    data: {},
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#6b7280' },
     style: {
-      stroke: '#9ca3af',
-      strokeWidth: 2,
+      stroke: '#6b7280',
+      strokeWidth: 2.5,
       strokeDasharray: edge.conditional
         ? '6 4'
         : edge.ghost

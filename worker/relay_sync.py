@@ -122,6 +122,7 @@ def executor_relay_sync(
         registry.apply_beat_result(
             lost=[(str(pair[0]), str(pair[1])) for pair in result.get("lost", [])],
             cancelled=[str(value) for value in result.get("cancelled", [])],
+            settled=[str(value) for value in result.get("settled", [])],
         )
         state.last_seq = int(result["seq"])
     except Exception as exc:

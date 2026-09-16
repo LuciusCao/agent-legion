@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
 from shared.protocol import PROTOCOL_VERSION
 
 
@@ -18,9 +19,9 @@ class RegisterAgentWorkerRequest(BaseModel):
     # verbatim on the registration row; no migration of existing values.
     capabilities: list[str] = Field(default_factory=list)
     models: list[dict[str, str]] = Field(default_factory=list)
-    max_concurrency: int = Field(gt=0, le=1024)
+    max_concurrency: int = Field(gt=0, le=MAX_DYNAMIC_CONCURRENCY)
     # Code-execution capacity pool (batch 2); 0/absent = agent-only Worker.
-    max_code_concurrency: int = Field(default=0, ge=0, le=1024)
+    max_code_concurrency: int = Field(default=0, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
     labels: dict[str, Any] = Field(default_factory=dict)
     protocol_version: int = Field(default=1, ge=1)
     # Informational only: no agent_workers column stores it yet.

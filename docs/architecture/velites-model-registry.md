@@ -71,6 +71,13 @@ velites models list --json
 为准。如果 `apiKey` 改用 `$ENV` 引用，原生 Worker 需在启动环境中提供该
 变量；Docker Worker 按上文使用 `VELITES_PROVIDER_ENV_FILE`。
 
+**Deprecation 状态（#602）**：`config.json`（连同 `VELITES_BASE_URL` /
+`VELITES_API_KEY` env 覆盖）是仅供直调 CLI 的迁移桥——结构上进不了 Worker
+模型发现。自本版本起，直调使用该文件或 env 时 stderr 会打 deprecation
+警告（指回本节迁移方法）；**下一个版本周期移除**（删除 `config.rs` 与
+lib.rs 的 gateway 兜底分支，gateway/openai_compat 直调报错直接指向
+models.json）。
+
 ## Runtime adapters
 
 - velites：`velites models list --json`；

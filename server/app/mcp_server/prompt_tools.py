@@ -18,33 +18,26 @@ from server.app.mcp_server.skill_tools import ClientFactory
 
 
 def register_prompt_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_node_prompt(
         workspace_id: str, node_key: str, definition_yaml: str | None = None
     ) -> str:
-        """Preview the effective run prompt of an agent node: the fixed
-        platform envelope plus the node instructions. execution.prompt empty
-        means the platform auto-assembles default instructions from the
-        node's label/capability/skill and declared inputs/outputs (is_default
-        true, default_instructions shows the text); a non-empty
-        execution.prompt REPLACES the default wholesale (custom_instructions
-        echoes it). Pass definition_yaml to preview against a draft instead
-        of the workspace's active revision. Read this BEFORE writing a custom
-        prompt so the override builds on the real default."""
+        """Preview an agent node's effective run prompt: platform envelope +
+        node instructions (auto-assembled default, or a custom
+        execution.prompt REPLACING it wholesale). Pass definition_yaml to
+        preview against a draft. Read BEFORE writing a custom prompt."""
         _, client = await client_factory()
         body: dict[str, Any] = {"node_key": node_key}
         if definition_yaml is not None:
             body["definition_yaml"] = definition_yaml
         return await client.call("POST", f"/workspaces/{workspace_id}/node-prompt", body)
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def save_node_prompt(workspace_id: str, node_key: str, prompt: str) -> str:
-        """Write a custom prompt for one agent node into the workspace's
-        unpublished workflow draft YAML (nodes.<key>.execution.prompt). The
-        custom text replaces the auto-assembled default instructions
-        wholesale — the platform envelope always stays. An empty string
-        clears the custom prompt back to the auto default. Draft only — a
-        human reviews and publishes the workflow in Studio."""
+        """Write a custom prompt for one agent node into the unpublished
+        workflow draft YAML (nodes.<key>.execution.prompt); replaces the auto
+        default wholesale, empty string clears back to default. Draft only —
+        a human publishes the workflow."""
         _, client = await client_factory()
         return await client.call(
             "PUT",

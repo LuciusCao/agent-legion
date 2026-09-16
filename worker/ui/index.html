@@ -156,9 +156,9 @@
                     <label class="wide">Host 地址<input name="host_url" type="url" placeholder="http://100.64.0.10:8000" required /></label>
                     <label>Worker ID<input name="worker_id" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" title="以字母或数字开头，只能包含字母、数字、_、-，最长 64 字符" required /></label>
                     <label>显示名称<input name="name" /></label>
-                    <label>最大并发<input name="max_concurrency" type="number" min="1" max="1024" required /></label>
-                    <label>代码并发 <span class="hint">code 节点沙箱执行，0 = 不领取；热更新免重启，0→&gt;0 需本机已装 velites</span><input name="max_code_concurrency" type="number" min="0" max="1024" required /></label>
-                    <label>上传并发<input name="upload_max_concurrency" type="number" min="1" max="1024" required /></label>
+                    <label>最大并发<input name="max_concurrency" type="number" min="1" max="2048" required /></label>
+                    <label>代码并发 <span class="hint">code 节点沙箱执行，0 = 不领取；热更新免重启，0→&gt;0 需本机已装 velites</span><input name="max_code_concurrency" type="number" min="0" max="2048" required /></label>
+                    <label>上传并发<input name="upload_max_concurrency" type="number" min="1" max="2048" required /></label>
                     <label>批领取上限 <span class="hint">一次 claim 往返最多领取数（#546），1 = 逐条领取；热更新免重启</span><input name="claim_batch_limit" type="number" min="1" max="256" required /></label>
                   </div>
                 </div>
@@ -213,8 +213,8 @@
                   <p class="hint">开启后，Worker 启动 / 重新开始领取时生效容量从初始档起步、按步进和间隔逐档放量到最大并发，避免一次性全量并发打满 provider；三项任一留空或勾选禁用即回到一次性全量。热更新生效。</p>
                   <div class="advanced-grid">
                     <label class="ramp-toggle"><input type="checkbox" name="ramp_up_enabled" /> 启用爬坡</label>
-                    <label>初始档位 <span class="hint">起步并发</span><input name="ramp_up_initial" type="number" min="1" max="1024" /></label>
-                    <label>步进 <span class="hint">每档增加</span><input name="ramp_up_step" type="number" min="1" max="1024" /></label>
+                    <label>初始档位 <span class="hint">起步并发</span><input name="ramp_up_initial" type="number" min="1" max="2048" /></label>
+                    <label>步进 <span class="hint">每档增加</span><input name="ramp_up_step" type="number" min="1" max="2048" /></label>
                     <label>间隔（秒）<span class="hint">每档保持时长</span><input name="ramp_up_interval_seconds" type="number" min="0.2" step="0.1" /></label>
                   </div>
                 </details>
