@@ -106,3 +106,67 @@ entries:
     passes, no poll loop of its own (single worker._poll() call).
   observed: PR #684 backend-coverage lane (run 35056532267), 2026-09-16, rerun passed and the lane count was green.
   deadline: 2026-10-16
+
+- id: FLAKY-012
+  nodeid: tests/scripts/test_quality_gate_scripts.py::test_quick_gate_backend_test_failure_still_runs_frontend_round
+  owner: test-infra
+  reason: >-
+    Loaded-runner timing flake, observed on 0.7.13 development PRs (#701/#704
+    backend-coverage rerun governance; also hit once during local #628 review
+    under a full-suite batch run). The test drives the REAL check-quick.sh
+    inside a fixture repo and asserts the stub lanes' start/end ordering via
+    marker files; under heavy parallel runner load the poll loop's
+    marker-file visibility window can race the stub's own writing, so the
+    first attempt fails and the --reruns 1 retry passes in isolation. Fix
+    direction (deadline item): make the stub lanes fsync their markers or
+    add a bounded wait on the marker file instead of relying on immediate
+    visibility.
+  observed: >-
+    PR #701 and #704 backend-coverage lanes, 2026-09-16 (rerun absorbed);
+    single-attempt local reproduction under batch load only.
+  deadline: 2026-12-31
+- id: FLAKY-013
+  nodeid: tests/services/test_studio_chat_service_permissions.py::test_turn_timeout_settles_parked_permission_and_session_survives
+  owner: test-infra
+  reason: >-
+    Same async-persistence timing family as FLAKY-007 (the #664 timeout
+    ladder's settle test): under loaded CI runners the parked-permission
+    settle assertion can read session state in the window before the
+    timeout ladder's final status write lands; the --reruns 1 retry passes.
+    Observed once on the 0.7.13 #708 backend-coverage lane (2026-09-16),
+    also hit during local #675 review under a full-suite batch run where
+    the clean-tree baseline reproduced it once. Fix direction: bound the
+    wait on the terminal session status like #525 did for FLAKY-007.
+  observed: >-
+    PR #708 backend-coverage lane rerun governance, 2026-09-16; local batch
+    load reproduction once, isolated rerun green.
+  deadline: 2026-12-31
+- id: FLAKY-014
+  nodeid: tests/workflows/test_workflow_worker_concurrency.py::test_target_completion_pauses_job_and_stops_further_claims
+  owner: test-infra
+  reason: >-
+    Loaded-runner rerun absorbed on 0.7.13 PRs #704/#708 backend-coverage
+    lanes (runs 35126791591/35126795788, 2026-09-16): first attempt failed,
+    retry green, lane counts green — only rerun governance tripped. Same
+    loaded-runner timing family as FLAKY-009/010/011 (worker-concurrency
+    poll timing under 2-core shard runners); the 0.7.13 diffs (#626 auth,
+    #679 gate scripts) have no interaction surface with the Python worker
+    concurrency plane. Registered for rerun absorption; fix direction is
+    the shared family item (bounded wait on the terminal job status).
+  observed: >-
+    PR #704 and #708 backend-coverage lanes, 2026-09-16 (rerun absorbed).
+  deadline: 2026-12-31
+- id: FLAKY-015
+  nodeid: tests/workflows/test_workflow_execution_control.py::test_worker_runs_only_target_closure_in_until_node_mode
+  owner: test-infra
+  reason: >-
+    Same nodeid as FLAKY-011 (registered on the velites-0.5.4 release line,
+    not yet on develop when the 0.7.13 wave branched): loaded-runner rerun
+    absorbed again on 0.7.13 PR #701 backend-coverage lane (run 35126787623,
+    2026-09-16). The 0.7.13 diff (#615, frontend-only) cannot interact with
+    the Python target-closure plane. Entry mirrors FLAKY-011 until the
+    release line merges and the dedupe lands on develop.
+  observed: >-
+    PR #701 backend-coverage lane, 2026-09-16 (rerun absorbed); first
+    observed on PR #684 (FLAKY-011).
+  deadline: 2026-12-31
