@@ -339,6 +339,7 @@
     "frontend/src/features/workflowStudio/chat/StudioChatThought.module.css": 25,
     "frontend/src/features/workflowStudio/chat/StudioChatThought.tsx": 20,
     "frontend/src/features/workflowStudio/chat/StudioChatToolCallCard.tsx": 56,
+    "frontend/src/features/workflowStudio/chat/StudioDraftCardHeader.tsx": 29,
     "frontend/src/features/workflowStudio/chat/WorkflowDraftCard.tsx": 122,
     "frontend/src/features/workflowStudio/chat/WorkflowDraftPublishAction.tsx": 62,
     "frontend/src/features/workflowStudio/chat/agentConfigView.ts": 150,
