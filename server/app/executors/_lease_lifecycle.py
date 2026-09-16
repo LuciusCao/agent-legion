@@ -148,13 +148,7 @@ def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
         (now_str,),
     ).fetchall()
     expired: list[str] = []
-    # #659 v82 discipline: per-lease jobs DML walks workspaces ascending by
-    # the ACTUAL class-82 lock key (hashtext int — same cross-workspace ring
-    # discipline as the broker sweepers and the claim batch's ws_lock_floor).
-    # NOT workspace text: hashtext's signed-int order is unrelated to text
-    # order, so roughly half of all id pairs invert with no collision
-    # involved (a true collision instead collapses two ids onto ONE lock,
-    # where order is moot) — codex round on #662.
+    # Stable sweep order; v82's non-blocking folds do not depend on it.
     for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
         if _expire_lease_row(conn, row, now_str):
             expired.append(row["id"])

@@ -86,23 +86,16 @@ def beat_sharded(
     would starve the SAME tail every tick (stable insertion order) until
     its leases expire. The limiter's fairness cursor rotates the admission
     start to the first shard skipped last tick, so starvation becomes
-    round-robin delay instead. Skipped shards still read as unknown-round
-    (retry semantics unchanged).
-
-    Skip indices are recorded in ORIGINAL-snapshot coordinates (codex
-    #662 follow-up round): ``note_skip`` receives (rotation + rotated
-    index) % shard_count, because the limiter's cursor is consumed next
-    tick as an offset into the FRESH unrotated list — recording the
-    rotated-list position instead would pin the rotation to the wrong
-    shard whenever a previous tick's rotation shifted the list (tick 1
-    skips original 126 but stores 127; tick 2 rotates by 127 and may keep
-    skipping original 126 forever)."""
+    round-robin delay instead. The cursor is keyed by stable lease identity,
+    not a shard array index: the next snapshot may prune completed leases
+    or append new ones, changing every later numeric position. Skipped
+    shards still read as unknown-round (retry semantics unchanged)."""
     shards = [
         leases[start : start + RELAY_BEAT_SHARD]
         for start in range(0, len(leases), RELAY_BEAT_SHARD)
     ]
     if len(shards) > 1:
-        rotation = limiter.take_rotation(len(shards))
+        rotation = limiter.take_rotation(shards)
         shards = shards[rotation:] + shards[:rotation]
     else:
         rotation = 0
@@ -145,19 +138,18 @@ def beat_sharded(
             cancelled.extend(body.get("cancelled_execution_ids", []))
 
     threads: list[threading.Thread] = []
-    for index, shard in enumerate(shards):
+    for shard in shards:
         thread = limiter.start(partial(beat_one_shard, shard))
         if thread is None:
             # Every occupied slot belongs to an earlier request that has not
             # really returned. This shard is unknown for this tick, exactly
             # like a transport failure; retrying by spawning another socket
             # would recreate the resource leak this limiter prevents. The
-            # skip is recorded in ORIGINAL-snapshot coordinates — the
-            # limiter's cursor is consumed next tick as an offset into the
-            # fresh unrotated list (see beat_sharded's docstring).
+            # Record stable lease identities, not this rotated list's index:
+            # the next fresh snapshot may have pruned or appended leases.
             with lock:
                 failures += 1
-                limiter.note_skip((rotation + index) % len(shards))
+                limiter.note_skip(shard)
             log(f"心跳 relay 批量拍跳过（{len(shard)} 租约）：未完成分片已达上限")
             continue
         threads.append(thread)

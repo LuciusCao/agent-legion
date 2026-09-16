@@ -23,11 +23,9 @@ shape used to give for free:
   FOR KEY SHARE locks are mutually compatible, so the lock phase itself has
   no cross-run deadlock surface (review P2-3 — this is not an exclusive-lock
   ordering test);
-- opposite-order exclusive writers: two transactions touching the same job
-  rows in opposite orders deadlock by necessity (Postgres breaks it, one
-  victim rolls back whole-transaction) — the outcome contract is pinned
-  deterministically with a barrier; the real submit path never orders
-  multi-row writes across transactions (one chunk statement = one row set).
+- row-lock/advisory overlap: a multi-statement writer can continue after a
+  concurrent single-row writer commits; counter folding never adds a waiting
+  edge after the jobs-row lock has already been taken.
 """
 
 from __future__ import annotations
@@ -474,26 +472,14 @@ def test_concurrent_runs_share_material_set_without_row_duplication(
     assert int(distinct["n"]) == 120
 
 
-def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings) -> None:
-    """排他锁事实面（codex R3 复核钉住）：两个事务以相反顺序 UPDATE 同
-    一 workspace 的一对 job 行——AFTER 触发器里的 ws advisory 锁在
-    **jobs 行锁之后**取得，B 的 stmt1 持 job-b 行锁、在触发器里等 A 的
-    ws 锁；A 的 stmt2 要 job-b 行锁——(行锁 × advisory 锁) 环。v77 的
-    同形环经计数行（行锁 × 计数行锁），v82 改变了等待位置、环结构不
-    变——这不是回归，是本 PR 文档记载的接受残留类。
+def test_counter_fold_does_not_close_row_lock_cycle(job_db, settings) -> None:
+    """A single-row writer must not wait behind an AFTER-trigger gate.
 
-    本测试用 pg_locks 轮询**强制**该交错（Event 同步不保证 B 先阻塞，
-    A 抢跑提交则环不闭合——此前版本的「串行化」断言正是这样假通过
-    的），钉住结果契约：恰一个 40P01 受害者、其事务干净回滚（受害者
-    的 title 写入随事务回滚，两行最终均为幸存者所写）、幸存者两行
-    UPDATE 落库、无重复无丢行。注意本形状的语句只改 title（状态不
-    变），触发器净 delta 全为零——文末的计数全等断言在此形状下不构
-    成回滚证据（留作回归哨兵），回滚证据是 title 断言；真正的计数
-    侧回滚钉子在 tests/db/test_status_counts_deadlock.py（状态迁移
-    形状）。残留环的对手方只需单行写者、与顺序无关（见 v82 模块
-    docstring 残留 (b)），生产两类形状并存、窗口为批内语句间毫秒
-    级——本形态是 40P01 重试基建（claim_retry、db/retry）吸收的
-    并发事实。
+    A updates job-a and keeps the transaction open. B then takes job-b's row
+    lock and commits while A still owns the workspace folder try-lock. Only
+    after B has committed does A update job-b. A blocking advisory gate would
+    leave B waiting after taking job-b, so A's second statement would close
+    the production row-lock × advisory-lock cycle.
     """
     _workspace(job_db, settings)
     _insert_materials(job_db, 2)
@@ -512,73 +498,63 @@ def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings
     job_a, job_b = str(rows[0]["id"]), str(rows[1]["id"])
 
     results: dict[str, BaseException | None] = {}
-    # 强制交错的两个闸门：w1 在 stmt1 后暂停（持 job_a 行锁 + ws advisory
-    # 锁），主线程轮询 pg_locks 直到 w2 真正阻塞在未授予的 advisory 锁上
-    # （此时 w2 持 job_b 行锁），再放 w1 跑 stmt2——两把行锁互为等待边，
-    # 环确定性闭合。无闸门的形态下 w1 会在 w2 启动前跑完提交，交错不发生。
-    w1_gate = threading.Event()
-    w2_blocked = threading.Event()
+    a_holds_gate = threading.Event()
+    release_a = threading.Event()
+    b_committed = threading.Event()
 
-    def _rebind(tag: str, ids: list[str]) -> None:
+    def _writer_a() -> None:
         writer = connect_database(job_db.dsn_identity)
         try:
             with writer:
                 writer.execute(
                     "update jobs set title=%s, updated_at=current_timestamp where id=%s",
-                    (f"rebound-by-{tag}", ids[0]),
+                    ("rebound-by-a", job_a),
                 )
-                if tag == "w1":
-                    w1_gate.wait(timeout=15)
-                else:
-                    # w2 走到这里说明 stmt1 已返回（或将来返回）；阻塞在
-                    # advisory 锁上时本行尚未执行——主线程靠 pg_locks 观测。
-                    pass
+                a_holds_gate.set()
+                assert release_a.wait(timeout=15)
                 writer.execute(
                     "update jobs set title=%s, updated_at=current_timestamp where id=%s",
-                    (f"rebound-by-{tag}", ids[1]),
+                    ("rebound-by-a", job_b),
                 )
-            results[tag] = None
+            results["a"] = None
         except BaseException as exc:  # 线程内失败带回主线程
-            results[tag] = exc
+            results["a"] = exc
         finally:
             writer.close()
 
-    t1 = threading.Thread(target=_rebind, args=("w1", [job_a, job_b]))
-    t2 = threading.Thread(target=_rebind, args=("w2", [job_b, job_a]))
-    t1.start()
-    time.sleep(0.3)  # w1 的 stmt1（含触发器）已落地并停在闸门
-    t2.start()
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        with job_db.connect() as poll:
-            # Scoped to THIS workspace's gate key: pg_locks is a
-            # database-level view, and an xdist sibling test blocking on a
-            # different workspace's class-82 gate would otherwise satisfy
-            # the predicate and release w1's gate before w2 is actually
-            # blocked (a cross-test flake vector).
-            n = poll.execute(
-                "select count(*) from pg_locks"
-                " where locktype='advisory' and classid=82 and not granted"
-                " and objid = hashtext('ws:' || %s)",
-                (WORKSPACE_ID,),
-            ).fetchone()[0]
-        if n:
-            w2_blocked.set()
-            break
-        time.sleep(0.05)
-    assert w2_blocked.is_set(), "w2 never reached the advisory-lock wait — interleave not forced"
-    w1_gate.set()  # 放行 w1 的 stmt2——闭合环
-    t1.join(timeout=60)
-    t2.join(timeout=60)
-    assert not t1.is_alive() and not t2.is_alive()
+    def _writer_b() -> None:
+        writer = connect_database(job_db.dsn_identity)
+        try:
+            assert a_holds_gate.wait(timeout=15)
+            with writer:
+                writer.execute(
+                    "update jobs set title=%s, updated_at=current_timestamp where id=%s",
+                    ("rebound-by-b", job_b),
+                )
+            results["b"] = None
+        except BaseException as exc:  # 线程内失败带回主线程
+            results["b"] = exc
+        finally:
+            writer.close()
+            b_committed.set()
 
-    outcomes = list(results.values())
-    deadlocked = [exc for exc in outcomes if isinstance(exc, psycopg.errors.DeadlockDetected)]
-    # 结果契约：环被检测、恰一个受害者整事务回滚、幸存者提交。
-    assert len(deadlocked) == 1, outcomes
-    survivor = [tag for tag, exc in results.items() if exc is None]
-    assert len(survivor) == 1, results
-    # 幸存者的两行 UPDATE 都在；受害者写入零残留（行 title 与计数均回滚）。
+    thread_a = threading.Thread(target=_writer_a)
+    thread_b = threading.Thread(target=_writer_b)
+    thread_a.start()
+    assert a_holds_gate.wait(timeout=10)
+    thread_b.start()
+    try:
+        assert b_committed.wait(timeout=5), (
+            "single-row writer waited behind the AFTER-trigger folder gate"
+        )
+        assert results.get("b") is None, results
+    finally:
+        release_a.set()
+    thread_a.join(timeout=30)
+    thread_b.join(timeout=30)
+    assert not thread_a.is_alive() and not thread_b.is_alive()
+    assert results == {"b": None, "a": None}, results
+
     with job_db.connect() as conn:
         titles = {
             str(row["id"]): str(row["title"])
@@ -588,8 +564,7 @@ def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings
         }
     assert len(titles) == 2
     for job_id in (job_a, job_b):
-        assert titles[job_id] == f"rebound-by-{survivor[0]}", titles
-    from server.app.db.rows import string_dict_row  # noqa: F401  (parity read below)
+        assert titles[job_id] == "rebound-by-a", titles
 
     with job_db.connect() as conn:
         group_by = {
@@ -602,9 +577,12 @@ def test_per_row_updates_in_opposite_order_deadlock_and_recover(job_db, settings
         counters = {
             str(row["status"]): int(row["cnt"])
             for row in conn.execute(
-                "select status, cnt from workspace_job_status_counts"
-                " where workspace_id=%s and cnt<>0",
-                (WORKSPACE_ID,),
+                "select status, sum(cnt) as cnt from ("
+                " select status, cnt from workspace_job_status_counts where workspace_id=%s"
+                " union all select status, delta as cnt"
+                " from workspace_job_status_count_deltas where workspace_id=%s"
+                ") counts group by status having sum(cnt)<>0",
+                (WORKSPACE_ID, WORKSPACE_ID),
             ).fetchall()
         }
     assert counters == group_by, (counters, group_by)

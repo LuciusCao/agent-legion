@@ -55,33 +55,13 @@ def try_claim_many(
 ) -> list[ClaimedExecution | None]:
     """Claim a batch of nodes in one transaction; None entries on capacity loss.
 
-    The claims run in (class-82 ws lock key, run_id, job_id) order — the
-    shared counter-lock sequence #591's finish batch writes in (#609 P1-2):
-    the claim's jobs promote and the finish's jobs flip take the same
-    (run_id, status)/(workspace_id, status) counter rows via the status
-    triggers, and two multi-item transactions visiting shared rows in
-    opposite orders close a 40P01 ring that repeated contention can
-    exhaust the retries on. The LEADING component is the ACTUAL class-82
-    lock key (hashtext('ws:' || workspace_id)::int, resolved in-batch from
-    each request's jobs row) — the same int the trigger takes and the
-    agent claim batch's ws_lock_floor advances by; sorting by workspace
-    TEXT instead inverts the acquisition order vs the trigger's
-    signed-int lock order for roughly half of all id pairs (hashtext's
-    signed-int order is unrelated to text order; a true collision
-    instead collapses two ids onto ONE lock, where order is moot —
-    codex round on #662), re-opening the ring between the code and
-    agent claim families. Queue position breaks ties,
-    verdicts are re-assembled in CALLER order so the flush zip and
-    per-request verdicts stay positional. Capacity semantics are order-
-    insensitive: every claim's capacity re-check reads the transaction's
-    own prior writes (a claim cannot see committed state mid-batch), so
-    which claim loses on a shared limit differs at most by the same
-    per-request tie-break the round-robin arrival order already produces.
+    Claims keep a stable (workspace hash, run_id, job_id) order shared with
+    ``finish_many``. v82 no longer relies on this order for counter safety —
+    trigger losers never wait — but retaining it keeps batch behavior
+    deterministic. Verdicts are reassembled in caller order.
     """
     with write_transaction(repo.path) as conn:
-        # (ws_lock_key, run_id, job_id, index, request): the first is the
-        # actual class-82 counter lock key the status trigger takes; the
-        # full sort key #609 P1-2 pins, matching finish_many's write order.
+        # Stable cross-batch order; not a counter-lock correctness boundary.
         keyed: list[tuple[int, str, str, int, LeaseClaimRequest]] = []
         for index, request in enumerate(requests):
             job = conn.execute(
@@ -200,13 +180,8 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
             " from jobs j where j.status='running' and not exists"
             " (select 1 from executor_leases l where l.job_id=j.id and l.status='active')"
         ).fetchall()
-        # #659 v82 discipline: per-job DML walks workspaces ascending by the
-        # ACTUAL class-82 lock key (hashtext int — same cross-workspace ring
-        # discipline as the broker sweepers and the claim batch's
-        # ws_lock_floor). NOT workspace text: hashtext's signed-int order is
-        # unrelated to text order, so roughly half of all id pairs invert
-        # with no collision involved (a true collision instead collapses
-        # two ids onto ONE lock, where order is moot) — codex round on #662.
+        # Preserve deterministic recovery order; v82's try-fold triggers do
+        # not depend on this sort for deadlock safety.
         recovered = [
             job_id
             for job_id in (

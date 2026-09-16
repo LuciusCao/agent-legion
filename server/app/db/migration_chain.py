@@ -199,16 +199,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # v81 (#551): claim queue-wait gauge columns (total + max) — 供给延迟
     # （queued_at→promote）进 claim 画像族。DDL-only, same guarded rule.
     SchemaMigration(81, "claim_queue_wait_profile", migrate_claim_queue_wait_profile),
-    # v82 (#659): the v77 statement triggers' per-statement sorted lock order
-    # cannot stop rings that span MULTIPLE statements in one transaction (a
-    # claim batch's per-execution promotes each fire the trigger) or across
-    # trigger families (name-ordered firing) — the rebuilt functions take a
-    # TWO-LEVEL advisory hierarchy at entry: pg_advisory_xact_lock(82,
-    # hashtext('ws:<workspace>')) for every distinct workspace FIRST, then
-    # class-83 dimension locks per key for the run twin (the ws twin's
-    # dimension loop re-enters class 82 by design), both sorted. Same-workspace writers'
-    # COUNTER-ROW access serialises at the ws gate (jobs row locks precede
-    # the AFTER-trigger gate — residual ring window, see the v82 module).
+    # v82 (#659): v77's per-statement order cannot stop rings spanning several
+    # statements or both trigger families. Each firing now appends net deltas;
+    # non-blocking try-lock winners fold committed deltas into the base tables,
+    # and reads sum base + pending. Losing writers never wait after acquiring
+    # jobs-row locks, removing both counter-row and row/advisory cycles.
     SchemaMigration(82, "job_status_counts_advisory_locks", _migrate_v82_locks),
 ]
 

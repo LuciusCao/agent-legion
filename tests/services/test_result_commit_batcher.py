@@ -331,16 +331,12 @@ def test_kill_switch_none_batcher_takes_direct_path(job_db) -> None:
 
 
 def test_finish_many_sorts_writes_by_job_for_counter_lock_order(job_db) -> None:
-    """C4/#609 P1-2: the batch writes in (class-82 ws lock key, run_id,
-    job_id) order regardless of queue order — the full counter-key sequence
-    the status triggers read and try_claim_many shares. job_id alone does
-    not pin it: two jobs sorted X→Y by job_id can live in workspaces
-    ordered Y→X, reopening the cross-batch 40P01 ring. The LEADING key is
-    the actual advisory lock int (hashtext), not workspace text — pinned
-    by the ws-int inversion in the seeded ids (see the order snapshot)."""
+    """The batch shares try_claim_many's stable workspace-hash/run/job order
+    and restores verdicts to queue order. v82 no longer needs this for
+    counter safety, but the deterministic contract remains useful."""
     # Two workspaces with INVERTED id vs job_id order: ws-a's job sorts
     # after ws-b's by job_id but before it by workspace_id. The ids are
-    # chosen so TEXT and class-82 lock-key order agree (verified in-test
+    # chosen so TEXT and workspace-hash order agree (verified in-test
     # below) — the text-vs-int distinction is pinned by
     # test_finish_many_orders_by_actual_ws_lock_key.
     seed_request(job_db, job_id="job-01", limit=10, workspace_id="ws-a")
@@ -403,14 +399,7 @@ def test_finish_many_sorts_writes_by_job_for_counter_lock_order(job_db) -> None:
 
 
 def test_finish_many_orders_by_actual_ws_lock_key(job_db) -> None:
-    """#662 codex 后续轮 P1-A：finish_many 的排序首键是实际 class-82
-    锁键（hashtext('ws:' || workspace_id)::int），不是 workspace 文本——
-    两个 id 的 hashtext int 序与文本序相反时（32 位碰撞之外也常见，
-    signed int 任意序），文本序会把锁获取序排反，与 claim 侧
-    （claim_batch_select 的 ws_lock_floor，同 int 域）对撞成 40P01 环。
-    钉子：文本序与 int 序相反的 ws 对 + 独立 run，队列乱序进批，
-    实际写序必须按 int 键排（两 ws 各自的 run/job 次级序顺带钉住）。
-    """
+    """The deterministic leading key is the workspace hash, not text."""
     # 找一对 hashtext int 序与文本序相反的 workspace id：候选池里文本较小
     # 的 id 锁键更大、文本较大的 id 锁键更小（500 个候选必命中）。
     candidates: list[tuple[str, int]] = []
@@ -473,7 +462,7 @@ def test_finish_many_orders_by_actual_ws_lock_key(job_db) -> None:
     finally:
         batch_module.finish_lease = real_finish_lease
     assert verdicts == [True, True]
-    assert order == ["job-hi", "job-lo"], "write order must follow the ACTUAL class-82 lock key"
+    assert order == ["job-hi", "job-lo"], "write order must follow the workspace hash"
 
 
 def test_post_stop_submit_takes_direct_path(job_db) -> None:

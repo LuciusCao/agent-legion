@@ -88,10 +88,8 @@ def evaluate_candidate(
     # Agent domain first, then the Worker machine domain. A code claim skips
     # the agent-ws CAPACITY lock entirely — that domain is agent-only, so
     # taking it for code would be pure queueing overhead. The order stays
-    # acyclic: agent takes ws→worker, code takes only worker. (Distinct
-    # from the v82/#659 class-82 counter lock, which EVERY claim takes via
-    # its jobs UPDATE trigger regardless of kind — a different keyspace,
-    # ordered by the caller's sort/floor discipline, not here.)
+    # acyclic: agent takes ws→worker, code takes only worker. The v82
+    # counter folder uses non-blocking try-locks and adds no ordering edge.
     if kind != "code":
         ws_domain = f"agent-ws:{selected['workspace_id']}"
         conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domain,))

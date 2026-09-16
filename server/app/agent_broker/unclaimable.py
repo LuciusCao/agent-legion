@@ -78,16 +78,7 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             """,
             (_SWEEP_LIMIT,),
         ).fetchall()
-        # #659 v82 discipline: the per-row failed-node writes below fire
-        # the counter triggers per statement — walk workspaces ASCENDING
-        # by the ACTUAL class-82 lock key (hashtext int — the scan's
-        # queued_at order is workload-ordered, not workspace ordered,
-        # and hashtext's signed-int order is unrelated to text order:
-        # roughly half of all id pairs invert with no collision involved
-        # — a true collision instead collapses two ids onto ONE lock,
-        # where order is moot), so this sweeper cannot ring against
-        # claim batches on the cross-workspace multi-statement window
-        # (codex round on #662).
+        # Stable workspace-hash order; v82 counter folders never wait.
         for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
             try:
                 manifest = agent_claim_compatibility.live_claim_manifest(row)

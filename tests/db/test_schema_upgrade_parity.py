@@ -46,11 +46,12 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 # Effects the newest migration (v82, job_status_counts_advisory_locks,
 # #659) must leave behind so the undo step rewinds a current-shape database
 # to exactly SCHEMA_VERSION-1. v82 re-creates the two counter trigger
-# FUNCTIONS with the per-key advisory-lock prologue (no tables, columns, or
-# indexes change) — the undo rewinds the function bodies to the v77 shape
-# by replaying the v77 module's DDL, which is what an upgraded-from-v77
-# database would carry before its v82 migration runs.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
+# FUNCTIONS plus the two pending-delta tables. The undo drops the tables and
+# helper functions, then rewinds the trigger bodies/purge function to v77/v73.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = (
+    "workspace_job_status_count_deltas",
+    "run_job_status_count_deltas",
+)
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_NAME = "job_status_counts_advisory_locks"
@@ -77,8 +78,11 @@ def _undo_newest_migration(database_dsn: str) -> None:
     from server.app.db.migrations.job_status_counts_statement_triggers import (
         _WORKSPACE_DDL as _V77_WORKSPACE_DDL,
     )
+    from server.app.db.migrations.run_job_status_counts import _TRIGGER_DDL as _V73_RUN_DDL
 
     with write_transaction(database_dsn) as conn:
+        conn.execute("drop function if exists try_fold_workspace_job_status_counts(text, int)")
+        conn.execute("drop function if exists try_fold_run_job_status_counts(text, int, int)")
         for table in _NEWEST_MIGRATION_TABLES:
             conn.execute(f"drop table if exists {table}")
         for table, column, _data_type in _NEWEST_MIGRATION_COLUMNS:
@@ -89,8 +93,8 @@ def _undo_newest_migration(database_dsn: str) -> None:
             conn.execute(f"alter table {table} add column if not exists {column_ddl}")
         for statement in _NEWEST_MIGRATION_UNDO_DDL:
             conn.execute(statement)
-        # v82's only footprint is the two trigger function bodies: replay the
-        # v77 module's create-or-replace DDL to restore the pre-v82 shape.
+        # Restore the v73 purge function, then the v77 statement triggers.
+        conn.execute(_V73_RUN_DDL)
         conn.execute(_V77_RUN_DDL)
         conn.execute(_V77_WORKSPACE_DDL)
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))

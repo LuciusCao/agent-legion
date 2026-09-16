@@ -33,26 +33,13 @@ on the v77 shape — verified while writing this file):
   workspace twin's shared (workspace, status) rows and the run twin's own
   rows in the same interleave — the rerun-vs-result shape of #659.
 
-The v82 fix (two-level advisory hierarchy at trigger entry: class-82
-pg_advisory_xact_lock on every distinct ws:<workspace> FIRST, then the
-dimension keys, both sorted) serialises COUNTER-ROW access per workspace:
-in these tests' shapes B's stmt1 blocks on A's ws-gate advisory lock
-before touching any counter row or dimension lock; when A commits, B
-proceeds and both transactions complete. The gate cannot serialise the
-statement's own jobs ROW locks (AFTER triggers take the advisory after
-the row locks) — any same-workspace writer that takes the gate with one
-jobs statement and executes a second jobs DML can ring against a
-single-row counterparty holding the needed row lock (writer order is
-irrelevant; the residual is LIVE in production shapes, bounded by
-inter-statement milliseconds); that residual shape is pinned by
-tests/services/test_run_service_chunking.py's forced-interleave
-deadlock-recovery test.
-The test drives exactly that ordering: B blocks on the advisory lock while
-A's later statements run; A commits (releasing the lock); B finishes and
-commits. ``lock_timeout`` bounds every wait so a regression in the fix
-fails fast instead of hanging the suite, and ``deadlock_timeout`` is set
-LOW so a reintroduced ring is detected in milliseconds, not the 1s
-production default.
+The v82 fix appends each statement's net changes to delta tables and uses
+``pg_try_advisory_xact_lock`` only to elect an opportunistic folder. A loser
+never waits and never touches the shared base counter rows; reads sum base +
+pending deltas in one snapshot. This removes both the original cross-statement
+counter-row ring and the row-lock × blocking-advisory ring an AFTER-trigger
+gate would introduce. ``lock_timeout`` bounds any unexpected wait and
+``deadlock_timeout`` makes a reintroduced ring fail in milliseconds.
 
 The trigger shape under test is whatever init_db deployed (the autouse
 postgres fixture builds the schema at SCHEMA_VERSION): the assertions are
@@ -76,14 +63,11 @@ from server.app.db.rows import string_dict_row
 from tests.postgres_support import TEST_DATABASE_URL
 
 # Low deadlock_timeout: a reintroduced ring must be DETECTED fast (ms), not
-# after the 1s production default. lock_timeout bounds every wait: B waiting
-# on A's advisory lock is the FIX working (A commits within the window), but
-# a broken fix (B waiting forever) must fail the test, not hang the suite.
+# after the 1s production default. lock_timeout bounds every unexpected wait.
 _TIMEOUTS = ("set deadlock_timeout='50ms'", "set lock_timeout='5s'")
 
-# Handshake window: B's stmt1 must be blocked on A's counter-row/advisory
-# lock before A's stmt2 fires. The blocking is server-side after ~1ms; the
-# window only needs to cover thread scheduling jitter.
+# Handshake window: keep A's transaction open long enough for B to exercise
+# the same overlap that used to block on A's counter-row/advisory lock.
 _B_BLOCK_WINDOW = 0.3
 
 
@@ -118,16 +102,25 @@ def _group_by(conn, workspace_id: str) -> dict[str, int]:
 
 def _workspace_counts(conn, workspace_id: str) -> dict[str, int]:
     rows = conn.execute(
-        "select status, cnt from workspace_job_status_counts where workspace_id=%s and cnt<>0",
-        (workspace_id,),
+        "select status, sum(cnt) as cnt from ("
+        " select status, cnt from workspace_job_status_counts where workspace_id=%s"
+        " union all"
+        " select status, delta as cnt from workspace_job_status_count_deltas"
+        " where workspace_id=%s"
+        ") counts group by status having sum(cnt)<>0",
+        (workspace_id, workspace_id),
     ).fetchall()
     return {str(row["status"]): int(row["cnt"]) for row in rows}
 
 
 def _run_counts(conn, run_id: str) -> dict[str, int]:
     rows = conn.execute(
-        "select status, cnt from run_job_status_counts where run_id=%s and cnt<>0",
-        (run_id,),
+        "select status, sum(cnt) as cnt from ("
+        " select status, cnt from run_job_status_counts where run_id=%s"
+        " union all"
+        " select status, delta as cnt from run_job_status_count_deltas where run_id=%s"
+        ") counts group by status having sum(cnt)<>0",
+        (run_id, run_id),
     ).fetchall()
     return {str(row["status"]): int(row["cnt"]) for row in rows}
 
@@ -159,13 +152,11 @@ def _race(
     """Run two interleaved multi-statement transactions and return their
     failure classifications ([] == committed clean).
 
-    A runs its statements in order, pauses after the first so B's first
-    statement is blocked server-side, then runs its remaining statements
-    and COMMITS (releasing whatever B waits on — the advisory lock under
-    the fix, the counter-row locks under v77). B then runs its remaining
-    statements and commits. The interleaving is the #659 production shape:
-    both transactions hold counter-row locks for one key while wanting each
-    other's.
+    A runs its statements in order and pauses after the first while B runs.
+    On v77 this interleave closes the #659 counter-row ring; on the rejected
+    blocking-gate v82 shape B waits on A's advisory lock and can close a
+    jobs-row/gate ring. The non-blocking delta shape lets B proceed without
+    touching A's base-counter locks.
     """
     failures: dict[str, list[str]] = {"a": [], "b": []}
 
@@ -213,14 +204,14 @@ def _race(
 
 
 @pytest.mark.postgres
-def test_workspace_counter_ring_is_serialised_by_advisory_lock() -> None:
+def test_workspace_counter_ring_has_no_waiting_edge() -> None:
     # The claim-batch shape: one workspace, one run, four queued jobs. A
     # (claim) promotes j1 then flips j3 to completed; B (rerun-shaped) flips
     # j2 to completed then promotes j4. A's stmt1 holds (ws,queued) +
     # (ws,running); B's stmt1 takes (ws,completed) and blocks on (ws,queued);
     # A's stmt2 wants (ws,completed) — the AB-BA ring on the workspace
-    # counter rows. Under v82, B blocks on A's advisory lock instead (before
-    # ANY counter row), A commits, B proceeds: both commit, no 40P01.
+    # counter rows. Under v82, B appends deltas and skips folding while A owns
+    # the try-lock: both commit without a waiting edge or 40P01.
     workspace = "sc82-ws-ring"
     with psycopg.connect(TEST_DATABASE_URL, autocommit=True, row_factory=string_dict_row) as seed:
         seed.execute("delete from jobs where id like 'sc82-ws-%'")
@@ -251,7 +242,7 @@ def test_workspace_counter_ring_is_serialised_by_advisory_lock() -> None:
 
 
 @pytest.mark.postgres
-def test_run_counter_ring_is_serialised_by_advisory_lock() -> None:
+def test_run_counter_ring_has_no_waiting_edge() -> None:
     # The run-twin's own ring: two runs in one workspace. A's statements
     # touch run-a (promote j1, then flip j3 to completed); B's touch run-b
     # (flip j2 to completed, then promote j4). The run counter rows are
@@ -295,81 +286,45 @@ def test_run_counter_ring_is_serialised_by_advisory_lock() -> None:
 
 
 @pytest.mark.postgres
-def test_trigger_function_carries_the_advisory_lock() -> None:
-    # Shape pin: the deployed counter trigger functions must take the
-    # per-key advisory lock BEFORE any branch (the fix's entry prologue),
-    # with family-distinct key prefixes so the run and workspace twins never
-    # cross-lock. Guards a silent regression to the v77 body (e.g. a future
-    # edit of the v77 module that v82 reuses slipping through unreviewed).
+def test_trigger_function_uses_non_blocking_delta_folds() -> None:
+    """Shape pin: losers append exact deltas and never wait on a gate."""
     with psycopg.connect(TEST_DATABASE_URL, autocommit=True, row_factory=string_dict_row) as conn:
         rows = conn.execute(
             """
             select proname, prosrc
             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
             where n.nspname = current_schema()
-              and proname in ('sync_run_job_status_counts', 'sync_workspace_job_status_counts')
+              and proname in (
+                'sync_run_job_status_counts', 'sync_workspace_job_status_counts',
+                'try_fold_run_job_status_counts', 'try_fold_workspace_job_status_counts'
+              )
             """
         ).fetchall()
     by_name = {str(row["proname"]): str(row["prosrc"]) for row in rows}
-    for fn, prefix in (
-        ("sync_run_job_status_counts", "run:"),
-        ("sync_workspace_job_status_counts", "ws:"),
-    ):
-        src = by_name[fn]
-        assert "pg_advisory_xact_lock" in src, f"{fn} lost the advisory lock"
-        # Two-int class form: the dedicated lock classes structurally
-        # separate this keyspace from every single-bigint advisory user,
-        # and the ws (82) / run (83) levels from EACH OTHER — a shared
-        # class id would let a 32-bit hashtext collision collapse the
-        # hierarchy onto one lock (codex review round). Both loops lock
-        # by the PRECOMPUTED key (hashtext in the select, cast int, fed
-        # to the two-int form as the `lk` variable) so the acquisition
-        # order is the actual advisory-key order — the same-layer
-        # collision-collapse concern does not arise (equal keys = one
-        # re-entrant lock), but a regression to hashtext-in-the-call or
-        # a (class, text) form would divorce the loops' order from the
-        # key domain every caller now shares (codex rounds 5-6).
-        assert "pg_advisory_xact_lock(82, lk)" in src, f"{fn} lost the precomputed-key ws lock form"
-        assert "hashtext('ws:'" in src, f"{fn} lost the ws keyspace prefix"
-        if prefix == "run:":
-            assert f"pg_advisory_xact_lock({83}, lk)" in src, (
-                f"{fn} lost the dimension lock class id 83"
-            )
-            assert "hashtext('run:'" in src, f"{fn} lost the run keyspace prefix"
-        else:
-            # The ws twin is single-level BY DESIGN: its dimension loop
-            # re-enters the prologue's class-82 ws: locks — class 83 must
-            # never appear (a split here would be a copy-paste slip).
-            assert "pg_advisory_xact_lock(83," not in src, (
-                f"{fn} unexpectedly carries a run-class dimension lock"
-            )
-        assert f"hashtext('{prefix}'" in src, f"{fn} lost its '{prefix}' keyspace prefix"
-        # The prologue precedes every branch: the lock loop sits before the
-        # first counter write.
-        assert src.index("pg_advisory_xact_lock") < src.index("insert into"), fn
-        assert src.index("pg_advisory_xact_lock") < src.index("update ", src.index("declare")), fn
-        # TWO-LEVEL hierarchy: the ws: prologue precedes the dimension loop
-        # for the run twin (swapping the levels would reopen the codex
-        # cross-family ring; the ws twin's dimension loop is the same ws:
-        # keyspace so the order check is trivially satisfied there).
-        if prefix == "run:":
-            assert src.index("hashtext('ws:'") < src.index("hashtext('run:'"), (
-                f"{fn}: dimension lock taken before the ws prologue"
-            )
+    run_sync = by_name["sync_run_job_status_counts"]
+    ws_sync = by_name["sync_workspace_job_status_counts"]
+    run_fold = by_name["try_fold_run_job_status_counts"]
+    ws_fold = by_name["try_fold_workspace_job_status_counts"]
+    assert "insert into run_job_status_count_deltas" in run_sync
+    assert "insert into workspace_job_status_count_deltas" in ws_sync
+    assert "pg_try_advisory_xact_lock(82" in run_fold
+    assert "pg_try_advisory_xact_lock(83" in run_fold
+    assert "pg_try_advisory_xact_lock(82" in ws_fold
+    assert "delete from run_job_status_count_deltas" in run_fold
+    assert "delete from workspace_job_status_count_deltas" in ws_fold
+    assert "returning status, delta" in run_fold
+    assert "returning status, delta" in ws_fold
+    assert "pg_advisory_xact_lock" not in "".join(by_name.values())
 
 
 @pytest.mark.postgres
-def test_cross_family_ring_is_broken_by_the_lock_hierarchy() -> None:
-    """codex review P1 的回归钉子：跨触发器家族的 AB-BA 环。PG 按名序
-    触发（jobs_run_* 先于 jobs_status_*），单层锁序（每家族只锁自己的
-    维度键）挡不住这个形态——A 的 stmt1 持 run:a + ws:x；B 的 stmt1
-    （run-b 行）先锁 run:b、再在 ws 触发器等 ws:x；A 的 stmt2 摸 run-b
-    的行，其 run 触发器等 run:b——环（单层形态实测 A 侧 40P01）。
-    双层锁序（两家族都先锁全部 ws: 再锁维度键）让 B 在 ws: 入口排队，
-    A 提交后 B 完成：零 40P01、双方落库、计数与 group-by 全等。
+def test_cross_family_ring_has_no_waiting_edge() -> None:
+    """Run/workspace trigger overlap must never wait on another folder.
 
-    A 的 stmt2 必须摸 run-b 的行——这是环的闭合边（此前版本摸 run-a
-    自身键，re-entrant 不构成等待，环不闭合，revert-check 不红）。
+    The old per-family lock design let A hold run:a + ws:x while B held
+    run:b and waited for ws:x; A's next run-b statement closed the ring.
+    Try-lock losers now leave their deltas pending, so B never owns one side
+    of a cross-family wait cycle.
     """
     workspace = "sc82-xfam"
     with psycopg.connect(TEST_DATABASE_URL, autocommit=True, row_factory=string_dict_row) as seed:
@@ -394,7 +349,7 @@ def test_cross_family_ring_is_broken_by_the_lock_hierarchy() -> None:
         try:
             for timeout in _TIMEOUTS:
                 conn.execute(timeout)
-            # stmt1（run-b 行）：run 触发器锁 run:b，ws 触发器等 A 的 ws:x。
+            # The run-b statements overlap A's open run-a transaction.
             conn.execute("update jobs set status='completed' where id=%s", ("sc82-xf-2",))
             conn.execute("update jobs set status='running' where id=%s", ("sc82-xf-4",))
             conn.commit()
@@ -410,12 +365,12 @@ def test_cross_family_ring_is_broken_by_the_lock_hierarchy() -> None:
     try:
         for timeout in _TIMEOUTS:
             conn_a.execute(timeout)
-        # stmt1（run-a 行）：A 持 run:a + ws:x 直到事务结束。
+        # A keeps both folder gates until its transaction ends.
         conn_a.execute("update jobs set status='running' where id=%s", ("sc82-xf-1",))
         thread_b = threading.Thread(target=_b)
         thread_b.start()
-        time.sleep(_B_BLOCK_WINDOW)  # B 已锁 run:b、阻塞在 ws:x
-        # stmt2（run-b 行）：run 触发器等 run:b——单层形态在此闭合环。
+        time.sleep(_B_BLOCK_WINDOW)
+        # Touch run-b while B is active: this used to close the family ring.
         conn_a.execute("update jobs set status='completed' where id=%s", ("sc82-xf-4",))
         conn_a.commit()
         results["a"] = None
@@ -437,3 +392,70 @@ def test_cross_family_ring_is_broken_by_the_lock_hierarchy() -> None:
         assert _workspace_counts(check, workspace) == _group_by(check, workspace)
         for run_id in ("sc82-xf-a", "sc82-xf-b"):
             assert _run_counts(check, run_id) == _run_group_by(check, run_id)
+
+
+@pytest.mark.postgres
+def test_try_lock_loser_commits_exact_pending_deltas() -> None:
+    """A try-lock loser commits promptly and remains visible to readers."""
+    workspace = "sc82-pending"
+    run_id = "sc82-pending-run"
+    with psycopg.connect(TEST_DATABASE_URL, autocommit=True, row_factory=string_dict_row) as seed:
+        _seed(seed, workspace, {run_id: ("sc82-pending-a", "sc82-pending-b")})
+
+    b_done = threading.Event()
+    b_failures: list[str] = []
+
+    def _b() -> None:
+        conn = psycopg.connect(TEST_DATABASE_URL, autocommit=False)
+        try:
+            for timeout in _TIMEOUTS:
+                conn.execute(timeout)
+            conn.execute("update jobs set status='completed' where id='sc82-pending-b'")
+            conn.commit()
+        except psycopg.Error as exc:  # pragma: no cover - failure detail
+            b_failures.append(_deadlock_or_timeout(exc))
+            with contextlib.suppress(psycopg.Error):
+                conn.rollback()
+        finally:
+            conn.close()
+            b_done.set()
+
+    conn_a = psycopg.connect(TEST_DATABASE_URL, autocommit=False)
+    try:
+        for timeout in _TIMEOUTS:
+            conn_a.execute(timeout)
+        conn_a.execute("update jobs set status='running' where id='sc82-pending-a'")
+        thread_b = threading.Thread(target=_b)
+        thread_b.start()
+        assert b_done.wait(timeout=5), "try-lock loser waited instead of committing its delta"
+        assert b_failures == []
+
+        # A is still uncommitted. One snapshot must see B's committed jobs row
+        # and matching pending delta, but none of A's private changes.
+        with psycopg.connect(
+            TEST_DATABASE_URL, autocommit=True, row_factory=string_dict_row
+        ) as check:
+            assert _workspace_counts(check, workspace) == _group_by(check, workspace)
+            assert _run_counts(check, run_id) == _run_group_by(check, run_id)
+
+        conn_a.commit()
+        thread_b.join(timeout=5)
+    finally:
+        conn_a.close()
+
+    with psycopg.connect(TEST_DATABASE_URL, autocommit=True, row_factory=string_dict_row) as check:
+        assert _workspace_counts(check, workspace) == _group_by(check, workspace)
+        assert _run_counts(check, run_id) == _run_group_by(check, run_id)
+        # A no-op status transition still invokes the statement triggers and
+        # lets the next winner fold the committed tail left by B.
+        check.execute("update jobs set title='fold-tail' where id='sc82-pending-a'")
+        ws_pending = check.execute(
+            "select count(*) as n from workspace_job_status_count_deltas where workspace_id=%s",
+            (workspace,),
+        ).fetchone()
+        run_pending = check.execute(
+            "select count(*) as n from run_job_status_count_deltas where run_id=%s",
+            (run_id,),
+        ).fetchone()
+        assert int(ws_pending["n"]) == 0
+        assert int(run_pending["n"]) == 0

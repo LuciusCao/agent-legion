@@ -56,18 +56,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         # is not Worker death.
         deferral = HeartbeatDeferral(conn, broker.lease_ttl_seconds, rows)
         deferred = 0
-        # #659 v82 discipline: the per-row DML below fires the counter
-        # triggers per statement — walking workspaces in ASCENDING order
-        # extends EXEC-CLAIM-LOCK-001's ordering to the sweeper, closing
-        # the cross-workspace multi-statement ring window against claim
-        # batches. The order is the ACTUAL class-82 lock key
-        # (hashtext('ws:' || id)::int, the same int the trigger takes and
-        # the claim batch's ws_lock_floor advances by) — NOT workspace
-        # text: hashtext's signed-int order is unrelated to text order,
-        # so roughly half of all id pairs invert with no collision
-        # involved (a true collision instead collapses two ids onto ONE
-        # lock, where order is moot) — a text-sorted sweep vs an
-        # int-sorted claim batch reopens the ring (codex round on #662).
+        # Stable workspace-hash order; v82 counter folders never wait.
         for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
             lease_id = row["lease_id"]
             node_run_id = row["node_run_id"]

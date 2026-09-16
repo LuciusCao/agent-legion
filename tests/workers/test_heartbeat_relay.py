@@ -627,7 +627,7 @@ def test_service_lifespan_owns_relay_thread_lifecycle(tmp_path: Path) -> None:
     assert len(_relay_threads()) == baseline
 
 
-def test_skipped_shards_rotate_to_the_head_next_tick() -> None:
+def test_skipped_shards_rotate_to_the_head_next_tick_by_identity() -> None:
     """codex #662 review P1：槽位被上一拍的慢请求跨拍占用时，固定从快照
     首部准入会让同一尾部每拍被跳过（registry 插入序稳定）——饿死到租约
     过期。轮转游标把本拍第一个被跳过的分片变成下一拍的准入头：持续
@@ -638,28 +638,29 @@ def test_skipped_shards_rotate_to_the_head_next_tick() -> None:
     # 模拟上一拍遗留的一个占用槽：占住唯一槽位。
     assert limiter.start(lambda: None) is not None
 
+    shards = [[(f"exec-{i}", f"lease-{i}")] for i in range(3)]
     # 本拍有 3 个分片：index 0 占到唯一槽位（上一拍的遗留），1/2 被跳过。
-    limiter.note_skip(1)
-    limiter.note_skip(2)
-    # take_rotation 消费游标：下一拍从第一个被跳过的分片（1）开始。
-    assert limiter.take_rotation(3) == 1
+    limiter.note_skip(shards[1])
+    limiter.note_skip(shards[2])
+    # take_rotation 消费锚点：下一拍从第一个仍存活的被跳分片开始。
+    assert limiter.take_rotation(shards) == 1
     # 游标一次性消费：干净拍重置回头部。
-    assert limiter.take_rotation(3) == 0
+    assert limiter.take_rotation(shards) == 0
 
-    # FIRST-wins 语义（#662 自审 P2-2）：记录序即准入序，后记录的更大
-    # 索引不得移动游标——min() 形态下这里会返回 1，wrap 时游标 2-cycle、
-    # 中段分片持续饿死（见 wrap-tick 端到端测试）。
-    limiter.note_skip(2)
-    limiter.note_skip(1)
-    assert limiter.take_rotation(3) == 2
+    # 记录序即准入序，后记录的更小下标不得移动游标。
+    limiter.note_skip(shards[2])
+    limiter.note_skip(shards[1])
+    assert limiter.take_rotation(shards) == 2
 
-    # 无跳过时恒为 0；分片数 < 2 时轮转无意义。
-    limiter.note_skip(5)
-    assert limiter.take_rotation(1) == 0
-    assert limiter.take_rotation(0) == 0
-    # 越界索引取模收敛。
-    limiter.note_skip(4)
-    assert limiter.take_rotation(3) == 1
+    # 首个被跳分片已全部完成时，顺延到下一个仍存在的锚点。
+    limiter.note_skip(shards[1])
+    limiter.note_skip(shards[2])
+    assert limiter.take_rotation([shards[0], shards[2]]) == 1
+
+    # 无跳过时恒为 0；分片数 < 2 时轮转无意义且会消费旧锚点。
+    limiter.note_skip(shards[2])
+    assert limiter.take_rotation([shards[2]]) == 0
+    assert limiter.take_rotation([]) == 0
 
 
 def test_beat_sharded_rotation_feeds_limiter_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -724,21 +725,22 @@ def test_beat_sharded_rotation_feeds_limiter_cursor(monkeypatch: pytest.MonkeyPa
     # shard 1 先飞（准入顺序钉住轮转真的发生），shard 0 让位 → 游标 0。
     _tick(limiter, leases)
     assert beats == ["exec-0", "exec-2"], "the skipped shard must fly first"
-    assert limiter.take_rotation(2) == 0
+    current_shards = [leases[:2], leases[2:]]
+    assert limiter.take_rotation(current_shards) == 0
 
     # 收尾：放掉跨拍预占的槽位线程。
     hold.set()
     held.join(timeout=5)
 
 
-def test_skipped_shard_rotation_composes_to_absolute_index(monkeypatch: pytest.MonkeyPatch) -> None:
-    """#662 codex 后续轮 P1：note_skip 的坐标系必须是「原始快照索引」。
-    beat_sharded 先按 take_rotation 轮转分片列表，跳过发生在轮转后的
-    相对位上；而下一拍的游标按未旋转新列表的偏移解读。记相对位时：
-    tick 1 跳过末位分片记 N-1；tick 2 转 N-1 后又在相对 N-1（=原位
-    N-2）上失败却再记 N-1——原位 N-2 被永久钉在尾部（饿死到租约过期）。
-    端到端钉住组合语义（codex 失败步走的 3/4 准入、尾部 1 跳过形态）：
-    跨三拍驱动 beat_sharded，被跳过的 ORIGINAL 分片下一拍第一个被准入。"""
+def test_skipped_shard_identity_survives_rotated_admission_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """跨三拍钉住 identity cursor 与轮转准入的组合语义。
+
+    每拍只准入 3/4 分片；无论当前列表已如何轮转，下一拍都必须从上一拍
+    首个被跳分片的稳定租约身份重新定位，而不是记录轮转后的相对下标。
+    """
 
     from worker import relay_shards
     from worker.relay_thread_limiter import ShardThreadLimiter
@@ -792,12 +794,10 @@ def test_skipped_shard_rotation_composes_to_absolute_index(monkeypatch: pytest.M
     # （轮转尾）跳过 → 游标 3。
     assert sorted(_round_beats(leases)) == ["exec-0", "exec-1", "exec-2"]
 
-    # tick 2（rotation=3）：轮转序 [3,0,1,2]，前 3 准入（原位 3/0/1），
-    # 轮转尾（原位 2）跳过。绝对记录 → 游标 2；相对记录（bug）→ 3，
-    # 且 tick 3 仍从 3 起转、原位 2 继续垫底——codex 失败步。
+    # tick 2：从 exec-3 的身份重定位并轮转为 [3,0,1,2]；原位 2 被跳过。
     assert sorted(_round_beats(leases)) == ["exec-0", "exec-1", "exec-3"]
 
-    # tick 3（rotation=2，正确游标）：轮转头 = 原位 2 的分片。先占掉 2
+    # tick 3：exec-2 的身份在新一拍仍解析为轮转头。先占掉 2
     # 个槽，让本拍只能准入轮转头——上一拍被跳过的原位 2 必须第一个
     # （且是本拍唯一）被准入。
     def _park() -> None:
@@ -818,12 +818,12 @@ def test_skipped_shard_rotation_composes_to_absolute_index(monkeypatch: pytest.M
 def test_persistent_majority_deficit_rotates_every_shard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#662 自审 P2-2 的 wrap-tick 钉子：持续缺槽 d > N/2（跳过集绕过
-    索引 0 回卷）时，轮转游标仍必须 round-robin 全部分片——first-wins
-    游标下每拍准入的正是上一拍第一个被跳过的分片，N 拍内全部飞过；
-    min() 游标在回卷后钉在 0 上 2-cycle（准入序 0,1,0,1…），中段分片
-    （原位 2/3）饿死到租约过期——本测试正是那个形态的判别器。
-    生产可达：#617 的慢滴 Host 实测 4/4 分片全部跨拍滞留。"""
+    """持续缺槽 d > N/2 时，稳定身份游标仍须轮转到每个分片。
+
+    每拍只有一个空槽，下一拍必须从上一拍首个被跳过的存活身份开始；
+    N 拍内全部分片各飞一次，不能退化为固定前缀。生产可达：#617 的
+    慢滴 Host 实测 4/4 分片全部跨拍滞留。
+    """
 
     from worker import relay_shards
     from worker.relay_thread_limiter import ShardThreadLimiter
@@ -878,9 +878,7 @@ def test_persistent_majority_deficit_rotates_every_shard(
             if thread is not None:
                 thread.join(timeout=5)
 
-    # first-wins：准入序 [0,1,2,3]（每拍头部 = 上一拍第一个跳过位）。
-    # min()：tick 2 的跳过集 {2,3,0} 回卷取 0，准入序退化为 [0,1,0,1]，
-    # 2/3 永不出现——断言排序比较对两种形态都是判别器。
+    # 准入序 [0,1,2,3]：每拍头部 = 上一拍第一个仍存活的被跳身份。
     assert admitted == ["exec-0", "exec-1", "exec-2", "exec-3"], (
         "a persistent majority deficit must rotate through EVERY shard, "
         f"admission history: {admitted}"

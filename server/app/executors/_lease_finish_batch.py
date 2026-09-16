@@ -9,45 +9,10 @@ for a non-active row — a 409 is data, not an error).
 
 Two disciplines the codex review on #609 added:
 
-- **Deterministic counter-lock order** (#591 C4, full key per #609 P1-2):
-  ``sync_job_status``'s statement triggers take (run_id, status) and
-  (workspace_id, status) counter rows per jobs UPDATE, and a multi-job
-  batch writing in queue order can interleave with ``try_claim_many``'s
-  multi-job claim transaction as A→B vs B→A (SQLSTATE 40P01) — a job_id
-  sort alone does NOT pin that order, because two jobs sorted X→Y by
-  job_id can live in workspaces ordered Y→X. Both batches therefore
-  resolve every item's (class-82 ws lock key, run_id, job_id) up front
-  (the jobs row is the key the triggers read; the leading component is
-  hashtext('ws:' || workspace_id)::int — the ACTUAL advisory key, because
-  hashtext's signed-int order is unrelated to text order: roughly half of
-  all id pairs invert with no collision involved, and a true collision
-  collapses two ids onto ONE lock, where order is moot — codex round on
-  #662) and write in that shared order.
-  Residual windows, documented rather than expanded (P2): the per-item
-  statement still takes its run-counter rows before its workspace-counter
-  row (trigger firing order is alphabetical), so the workspace row's
-  position sits after each batch's OWN first item in that workspace — two
-  multi-item batches whose first items in one SHARED workspace differ can
-  still close a ring on (workspace row, run row); the sweep/expire paths
-  (``expire_stale_leases`` and friends) walk workspaces ascending by the
-  same class-82 lock key (text order through the #659 v82 discipline,
-  the actual hashtext int key since #662 R6), so they are
-  counterparty-safe here. Both are
-  far narrower than the cross-workspace opposite-order class this
-  removes and stay covered by the 40P01 retry; the airtight
-  shapes (workspace-trigger-first firing order, or one multi-row jobs
-  UPDATE aggregating the whole batch through the statement trigger) are
-  schema-level changes out of scope here. Known counterparty of the same
-  absorbed class (#609 round-3 P2-E): the sweep requeue-limit arm
-  (``sweepers.py``) deletes a lease row then takes that job's jobs row,
-  while a LATER item of the SAME job in this batch blocks on that lease
-  row after an earlier item already took the jobs row (sync_job_status).
-  The sort only reorders ITEMS — the statements inside ``finish_lease``
-  (and same-job items' queue-relative order, pinned by the index
-  tiebreak) are untouched, so this cycle is exactly as wide pre- and
-  post-sort; both sides absorb it (the arm's retry wrapper re-runs
-  cleanly on a fresh connection; the sweep pass is broad-except + the
-  next tick).
+- **Deterministic item order**: finish and claim batches share a stable
+  (workspace hash, run_id, job_id) order and restore queue-order verdicts.
+  v82's append-and-try-fold counters no longer require this ordering for
+  deadlock safety, but preserving it avoids unnecessary scheduling churn.
 - **The writer thread owns only the shared transaction** (#591 C5): events
   post-processing (token capture + PI compression, two full-file scans per
   item) is returned to the SUBMITTING commit thread as per-item closures —
@@ -93,20 +58,8 @@ def finish_many(
     (record_job_update reads current stats, so N broadcasts are noise).
     """
     with write_transaction(repo.path) as conn:
-        # (ws_lock_key, run_id, job_id, queue_index, lease_id, result, timer):
-        # the leading component is the ACTUAL class-82 lock key
-        # (hashtext('ws:' || workspace_id)::int, resolved in-batch from the
-        # lease's jobs row) — the same int the status trigger takes and the
-        # claim arms sort/advance by. NOT workspace TEXT: hashtext's
-        # signed-int order is unrelated to text order, so roughly half of
-        # all id pairs invert with no collision involved (a true collision
-        # instead collapses two ids onto ONE lock, where order is moot —
-        # codex round on #662) — text order would invert the acquisition
-        # order vs the claim side and re-open the ring. run_id/job_id
-        # keep the #609
-        # P1-2 tie-break; queue position for stability. Verdicts are
-        # re-assembled in QUEUE order below so each submitting thread gets
-        # its own item's answer.
+        # Stable item order shared with try_claim_many; queue position keeps
+        # same-key ordering and verdicts are restored to queue order below.
         resolved: list[tuple[int, str, str, int, str, ExecutionResult, Any]] = []
         for index, (lease_id, result, stage_timer) in enumerate(writes):
             lease = conn.execute(

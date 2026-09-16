@@ -374,18 +374,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 55
 - check: architecture.file_budget
-  path: server/app/db/migrations/job_status_counts_advisory_locks.py
-  reason: '#659 v82 grew through six codex/subagent review rounds: the two-level advisory
-    lock body (ws prologue + dimension loop per arm, three arms), the class-id split
-    (ws=82 / run=83 — a shared class let a hashtext collision collapse the hierarchy),
-    and the honest residual-window documentation the rounds demanded. The template is
-    spliced per family like v77; the size is the price of provable-identical twins plus
-    the audit trail. Harvest when the trigger design next restructures (e.g. the
-    BEFORE-trigger or statement-aggregation airtight fix retires this shape).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 136
-- check: architecture.file_budget
   path: server/app/db/migrations/jobs_workflow_key_alignment.py
   reason: The issue-211 Phase 3 v68 data migration aligns every stored workflow_key with the v62 binding
     across the live tables plus the node_code entity-key prefix. Each composite-unique surface carries

@@ -32,57 +32,54 @@ class ShardThreadLimiter:
 
     Fairness cursor (codex #662 review): overstaying sockets keep their
     slots across ticks, so a saturated snapshot may admit fewer shards
-    than MAX_INFLIGHT_SHARDS. ``note_skip`` records the admission index
-    of each shard the tick could NOT start — the FIRST one recorded wins
-    (the caller walks shards in admission order, so first-recorded IS the
-    earliest skipped); ``take_rotation`` returns where the next tick's
-    admission should begin — that shard becomes the head. Under a
-    persistent deficit of d slots this composes to full round-robin for
-    every d < N: each tick's head is the previous tick's first skip, so
-    no shard is skipped twice in a row and the worst wait before a
-    skipped shard's next admission is N-1 ticks — the #662 review P1's
-    starve-the-tail-to-lease-expiry cannot form. (Taking the MINIMUM skip
-    instead — an earlier draft — fails when the skip set wraps past
-    index 0: min() pins to 0 and the cursor 2-cycles, starving the
-    mid-list shards for d > N/2; first-wins has no wrap special case.)
+    than MAX_INFLIGHT_SHARDS. ``note_skip`` records the stable lease
+    identities in each shard the tick could not start, in admission order.
+    ``take_rotation`` resolves the first identity that still exists in the
+    next fresh snapshot and returns its current shard index. This makes the
+    first skipped live shard the next head without assuming snapshot indices
+    survive completions, pruning, or newly appended leases.
 
-    Index contract (codex #662 follow-up round): ``note_skip`` receives
-    ORIGINAL-snapshot shard indices — beat_sharded converts its
-    rotated-list position before recording, because ``take_rotation``'s
-    result is applied as an offset into the NEXT tick's fresh unrotated
-    list. Feeding it rotated indices would misplace the cursor whenever a
-    previous tick's rotation shifted the list.
+    Every lease identity from the skipped suffix is retained for one tick,
+    rather than only the first lease of the first shard: if that lease (or
+    the whole first skipped shard) settles between snapshots, resolution
+    advances to the next surviving member or shard. A clean tick records no
+    anchors, so the following tick naturally starts from the head.
     """
 
     def __init__(self, max_inflight: int = MAX_INFLIGHT_SHARDS) -> None:
         self._slots = threading.BoundedSemaphore(max_inflight)
         self._lock = threading.Lock()
-        self._first_skip: int | None = None
+        self._skipped_anchors: list[tuple[str, str]] = []
 
-    def note_skip(self, admission_index: int) -> None:
-        """Record one shard the tick could not admit, by ORIGINAL-snapshot
-        index (see the class docstring's index contract). The FIRST skip
-        wins — later skips in the same tick do not move the cursor —
-        because the caller records in admission order, so the first
-        recorded is the earliest skipped and the fairest next head
-        (minimum-instead would 2-cycle at wrap; see the class docstring).
-        Caller holds the round's result lock; this only needs its own
-        cursor lock for the cross-tick read in take_rotation."""
-        with self._lock:
-            if self._first_skip is None:
-                self._first_skip = admission_index
+    def note_skip(self, shard: list[tuple[str, str]]) -> None:
+        """Remember a skipped shard by stable lease identity.
 
-    def take_rotation(self, shard_count: int) -> int:
-        """The next tick's admission start: the first skipped shard's
-        ORIGINAL-snapshot index, consumed once (a clean tick with no skips
-        resets to the head; the caller applies it as an offset into the
-        fresh unrotated shard list)."""
+        The caller visits shards in admission order. Keeping the whole shard
+        gives the next tick a fallback when its leading lease settles before
+        the fresh snapshot is published.
+        """
         with self._lock:
-            skip = self._first_skip
-            self._first_skip = None
-        if skip is None or shard_count < 2:
+            self._skipped_anchors.extend(shard)
+
+    def take_rotation(self, shards: list[list[tuple[str, str]]]) -> int:
+        """Resolve the previous tick's first live skipped lease in ``shards``.
+
+        Anchors are consumed once. Snapshot churn can move an anchor to a
+        different numeric shard; matching identity before returning the
+        current index is what preserves fairness across that churn.
+        """
+        with self._lock:
+            anchors = self._skipped_anchors
+            self._skipped_anchors = []
+        if not anchors or len(shards) < 2:
             return 0
-        return skip % shard_count
+        shard_by_lease = {
+            lease: shard_index for shard_index, shard in enumerate(shards) for lease in shard
+        }
+        for anchor in anchors:
+            if (shard_index := shard_by_lease.get(anchor)) is not None:
+                return shard_index
+        return 0
 
     def start(self, target: Callable[[], None]) -> threading.Thread | None:
         """Start ``target`` when a slot is free; release only on real exit."""

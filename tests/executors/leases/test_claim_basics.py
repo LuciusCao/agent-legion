@@ -408,16 +408,10 @@ def test_active_counts_reflects_released_leases(
 def test_try_claim_many_sorts_writes_by_counter_key(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
-    """#609 P1-2: try_claim_many runs its claims in (class-82 ws lock key,
-    run_id, job_id) order — the shared counter-lock sequence #591's finish
-    batch writes in. job_id alone does not pin it: two jobs sorted X→Y by
-    job_id can live in workspaces ordered Y→X, and two multi-item
-    transactions visiting shared counter rows in opposite orders close a
-    40P01 ring the retry budget cannot always absorb. The workspace
-    component is the ACTUAL advisory lock int (hashtext), not text — the
-    int-vs-text distinction is pinned by
-    test_try_claim_many_orders_by_actual_ws_lock_key. Verdicts stay
-    positional in caller order."""
+    """try_claim_many keeps the stable workspace-hash/run/job order shared
+    with finish_many while returning verdicts in caller order. v82 no longer
+    relies on this ordering for counter safety, but changing it would create
+    avoidable batch scheduling churn."""
     import server.app.executors._lease_write_paths as _write_paths
 
     # Two workspaces with explicit ids (ws-a < ws-b), two jobs in ws-a with
@@ -482,11 +476,7 @@ def test_try_claim_many_sorts_writes_by_counter_key(
 def test_try_claim_many_orders_by_actual_ws_lock_key(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
-    """#662 codex 后续轮 P1-A：try_claim_many 的排序首键是实际 class-82
-    锁键（hashtext('ws:' || workspace_id)::int），不是 workspace 文本——
-    文本序与触发器内的 signed-int 锁序相反时（本测试固定播种一对反序
-    id），文本排序会把两个 claim 批的锁获取序排反，与 sweep / agent
-    claim 侧（同 int 域）对撞成 40P01 环。"""
+    """The deterministic leading key is the workspace hash, not text."""
     import server.app.executors._lease_write_paths as _write_paths
 
     # 播种一对「文本序与 hashtext int 序相反」的 workspace id：候选池里
@@ -538,4 +528,4 @@ def test_try_claim_many_orders_by_actual_ws_lock_key(
 
     assert all(r is not None for r in results), "capacity 99 must admit both"
     # 文本序在前（low）的 claim 必须按 int 键排到后面（low 的锁键更大）。
-    assert order == [job_high, job_low], "claims must follow the ACTUAL class-82 lock key"
+    assert order == [job_high, job_low], "claims must follow the stable workspace hash"

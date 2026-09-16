@@ -60,16 +60,8 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
             for update of r skip locked
             """
         ).fetchall()
-        # #659 v82 discipline: per-row jobs DML walks workspaces ascending
-        # by the ACTUAL class-82 lock key (hashtext int — same as the
-        # sibling sweepers and the claim batch's ws_lock_floor). NOT
-        # workspace TEXT: hashtext's signed-int order is unrelated to
-        # text order, so roughly half of all id pairs invert with no
-        # collision involved (a true collision instead collapses two ids
-        # onto ONE lock, where order is moot) — a text-sorted sweep
-        # diverges from the trigger's lock order routinely, reopening
-        # the cross-workspace ring window against claim batches (codex
-        # round on #662).
+        # Stable workspace-hash order; counter correctness no longer relies
+        # on it because v82 folders never wait.
         for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
             error = (
                 f"Agent definition {row['agent_id']!r} was disabled or changed"

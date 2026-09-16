@@ -225,7 +225,7 @@ def test_batch_claim_defers_workspace_below_lock_floor(job_db) -> None:
         keys = {
             str(row["workspace_id"]): int(row["k"])
             for row in conn.execute(
-                "select workspace_id, hashtext('ws:' || workspace_id)::int as k"
+                "select workspace_id, hashtext('agent-ws:' || workspace_id)::int as k"
                 " from jobs where id in ('job-a', 'job-b')"
             ).fetchall()
         }
@@ -241,8 +241,8 @@ def test_batch_claim_defers_workspace_below_lock_floor(job_db) -> None:
 
 
 def test_batch_claim_floor_follows_actual_lock_key(job_db) -> None:
-    """#662 自审 P3-4：ws_lock_floor 比较的是实际 class-82 锁键
-    （hashtext('ws:' || workspace_id)::int），不是 workspace 文本——
+    """ws_lock_floor 比较实际 agent-ws capacity 锁键
+    （hashtext('agent-ws:' || workspace_id)::int），不是 workspace 文本——
     文本序与 int 锁键序相反的 ws 对（约一半 id 对如此，无需碰撞）上，
     文本域的 floor 会让「文本较小、锁键较大」之后的候选下探，破坏批内
     升序纪律。钉子：播种一对反序 id，队首（文本较小、锁键较大）先领后，
@@ -253,7 +253,7 @@ def test_batch_claim_floor_follows_actual_lock_key(job_db) -> None:
     with job_db.connect() as conn:
         for i in range(200):
             wid = f"ws-f{i:03d}"
-            row = conn.execute("select hashtext('ws:' || %s)::int as k", (wid,)).fetchone()
+            row = conn.execute("select hashtext('agent-ws:' || %s)::int as k", (wid,)).fetchone()
             assert row is not None
             pool_ids.append((wid, int(row["k"])))
     ws_low, ws_high = "", ""
@@ -280,7 +280,7 @@ def test_batch_claim_floor_follows_actual_lock_key(job_db) -> None:
         keys = {
             str(row["workspace_id"]): int(row["k"])
             for row in conn.execute(
-                "select workspace_id, hashtext('ws:' || workspace_id)::int as k"
+                "select workspace_id, hashtext('agent-ws:' || workspace_id)::int as k"
                 " from jobs where id in ('job-lo', 'job-hi')"
             ).fetchall()
         }
@@ -295,6 +295,39 @@ def test_batch_claim_floor_follows_actual_lock_key(job_db) -> None:
     # 必须按 int 域 floor 让位到第二批。
     assert [claim.workspace_id for claim in first] == [ws_low]
     assert [claim.workspace_id for claim in second] == [ws_high]
+
+
+def test_code_candidates_ignore_agent_workspace_lock_floor(job_db) -> None:
+    """Code claims never enter the agent-ws capacity-lock domain."""
+    _seed_code_jobs(job_db, 1, prefix="code-floor")
+    with job_db.connect() as conn:
+        code_key = int(
+            conn.execute("select hashtext('agent-ws:test-workspace')::int as k").fetchone()["k"]
+        )
+        agent_workspace = next(
+            workspace_id
+            for workspace_id in (f"agent-floor-{i}" for i in range(5000))
+            if int(
+                conn.execute(
+                    "select hashtext('agent-ws:' || %s)::int as k", (workspace_id,)
+                ).fetchone()["k"]
+            )
+            > code_key
+        )
+    seed_request(job_db, job_id="agent-floor-job", workspace_id=agent_workspace)
+    _register_worker()
+
+    claims = claim_batch(
+        broker(job_db.jobs_dir.parent),
+        "worker-1",
+        None,
+        None,
+        limit=2,
+        agent_limit=1,
+        code_limit=1,
+    )
+
+    assert [claim.kind for claim in claims] == ["agent", "code"]
 
 
 def test_batch_claim_retries_once_on_deadlock(job_db, monkeypatch) -> None:
