@@ -21,6 +21,13 @@ re-validated right before the signal: the pid is compared against the
 process's own pgid, so a recycled or already-reaped pid can never aim the
 group signal at an unrelated process (AGENTS.md killpg discipline).
 
+#629 platform-level hard line: ``create`` refuses service-lifecycle commands
+(prod-down/prod-up/kill/launchctl/…) even when the permission chain already
+approved them — the approving surface dies with the session, so nothing can
+self-recover an interrupted prod-down. The denylist and its rationale live
+in terminal_guard.py; the block raises so the SDK turns it into a
+terminal/create JSON-RPC error the agent's Bash tool reports.
+
 Lifecycle: terminals live in a per-handle registry on the session loop's
 event loop; ``release``/``kill`` reap the process, and ``AcpTerminalStore.
 close_all`` (called from the handle teardown path) kills anything the agent
@@ -45,6 +52,8 @@ from acp.schema import (
     TerminalOutputResponse,
     WaitForTerminalExitResponse,
 )
+
+from server.app.studio_chat.terminal_guard import ensure_terminal_command_allowed
 
 if TYPE_CHECKING:
     from server.app.studio_chat.acp_session import AcpSessionHandle
@@ -88,6 +97,12 @@ class AcpTerminalStore:
         output_byte_limit: int | None,
         default_cwd: str,
     ) -> CreateTerminalResponse:
+        # #629: platform-level hard line BEFORE spawn — service-lifecycle
+        # commands are refused regardless of the permission chain outcome
+        # (terminal_guard.py documents the layering). Raising here propagates
+        # through the SDK's request handler as a terminal/create JSON-RPC
+        # error, which the agent's Bash tool surfaces as a failed command.
+        ensure_terminal_command_allowed(command, args)
         terminal_id = uuid4().hex
         limit = output_byte_limit or DEFAULT_OUTPUT_BYTE_LIMIT
         limit = max(limit, MIN_OUTPUT_BYTE_LIMIT)

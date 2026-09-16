@@ -252,6 +252,26 @@ TERMINAL_SCRIPT = {
     ]
 }
 
+# The #629 incident shape: the agent asks for a terminal whose shell command
+# takes the platform's services down mid-chain. The fake agent records the
+# outcome and keeps running (the turn must survive a refused terminal).
+BLOCKED_TERMINAL_SCRIPT = {
+    "on_prompt": [
+        {
+            "terminal": {
+                "command": "sh",
+                "args": ["-c", "make prod-down && make prod-up"],
+            }
+        },
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "terminal refused"},
+            }
+        },
+    ]
+}
+
 
 def test_initialize_advertises_terminal_capability(chat) -> None:
     """kimi's Bash/Grep tools only run when the client advertises
@@ -277,6 +297,26 @@ def test_terminal_roundtrip_runs_command_and_returns_output(chat) -> None:
     outcomes = [e["terminal_outcome"] for e in _read_sink(script_path) if "terminal_outcome" in e]
     assert outcomes and outcomes[0]["exitCode"] == 0
     assert "terminal says hi" in outcomes[0]["output"]
+
+
+def test_terminal_service_lifecycle_command_is_refused_and_session_survives(chat) -> None:
+    """#629：终端协议收到服务生命周期命令（事故原始形态）时，create 返回
+    JSON-RPC error 而不是 spawn——fake agent 端读不到 terminalId 且不崩；
+    会话本身回到 idle（拒绝一条命令不等于杀死会话，agent 能向用户转述
+    「需要人工在终端执行」）。这是审批链之上的平台级硬防线：与权限流
+    无交互，无需任何 human approval 参与。"""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(BLOCKED_TERMINAL_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "restart prod")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [e["terminal_outcome"] for e in _read_sink(script_path) if "terminal_outcome" in e]
+    # create 被拒：没有 terminalId 可用（错误经 SDK 落到 fake agent 的
+    # pending 响应里，_run_terminal 把它归一为 no-terminalId 错误）。
+    assert outcomes and outcomes[0].get("error")
+    # 终端从未创建，注册表为空；会话健康收尾。
+    assert service.get_session(session["id"])["status"] == "idle"
 
 
 def test_local_command_mentioning_tool_names_is_not_auto_approved(chat) -> None:
