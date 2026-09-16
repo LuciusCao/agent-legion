@@ -1,18 +1,18 @@
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined'
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined'
 import { useStudioNav } from '../shared/useStudioNavState'
+import { EntityDraftPublishButton } from './EntityDraftPublishButton'
 import { StudioDraftCardHeader } from './StudioDraftCardHeader'
-import { WorkflowDraftPublishButton } from './WorkflowDraftPublishAction'
 import type {
   AgentDefinitionDraftView,
   NodeCodeDraftView,
 } from './studioChatMessages'
 import styles from './StudioChatPanel.module.css'
 
-/* #692：Agent 定义 / 节点代码草稿卡。与 Workflow 卡共用发布入口
- * （WorkflowDraftPublishButton）：两类草稿保存即入服务端草稿区，发布
- * 随 revision 冻结——发布对象语义与顶栏一致（编辑器 YAML + 已保存的
- * 服务端草稿），卡片上直接可发起，不必跳编辑器找顶栏。 */
+/* #692：Agent 定义 / 节点代码草稿卡。两类草稿是独立实体，发布走各自的
+ * 实体端点（EntityDraftPublishButton，codex P1 修正：不能复用 workflow
+ * revision 的发布按钮——那发布的是编辑器 YAML，仅实体变更时会因无 diff
+ * 而禁用）。 */
 
 export function AgentDefinitionDraftCard({
   draft,
@@ -37,7 +37,7 @@ export function AgentDefinitionDraftCard({
         >
           查看草稿
         </button>
-        <WorkflowDraftPublishButton />
+        <EntityDraftPublishButton kind="agent" entityId={draft.agentId} />
       </div>
     </div>
   )
@@ -67,7 +67,7 @@ export function NodeCodeDraftCard(props: {
             查看草稿
           </button>
         )}
-        <WorkflowDraftPublishButton />
+        <EntityDraftPublishButton kind="code" entityId={props.draft.nodeKey} />
       </div>
     </div>
   )
