@@ -25,6 +25,8 @@
   PostgreSQL 运维见 [postgresql-runbook.md](postgresql-runbook.md)；远程执行见
   [remote-execution-runbook.md](remote-execution-runbook.md)）
 - **Studio chat MCP 集成** → 看 [studio-agent-mcp.md](studio-agent-mcp.md)
+- **外部系统免登录提交条目（workspace API token）** → 看
+  [workspace-api-tokens.md](workspace-api-tokens.md)
 - **想了解 `data/` 运行时目录布局** → 看 [data-layout.md](data-layout.md)
 - **发版 / 写 Release Notes 与 CHANGELOG** → 看 [release-notes.md](release-notes.md)（排版红线、正文模板、三条产品线差异）
 - **时点 review 报告**（系统性/性能质量 review 的归档）→ 看

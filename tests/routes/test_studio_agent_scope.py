@@ -102,8 +102,10 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-resume", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
     ("POST", "/api/workspaces/{workspace_id}/job-batches", None),
-    # Run creation from items (materials-and-runs design §4).
-    ("POST", "/api/workspaces/{workspace_id}/runs", None),
+    # Run creation from items (materials-and-runs design §4) moved to
+    # require_workspace_api_intake (#626) — it still refuses studio-agent
+    # scopes (same 403), but admits the workspace API intake token; pinned
+    # in the exempt map below and by tests/routes/test_workspace_api_tokens.py.
     ("POST", "/api/jobs/{job_id}/upgrade-workflow", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-upgrade-workflow", None),
     # Materials upload lifecycle (materials-and-runs design §6.4).
@@ -144,6 +146,11 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # effecting write (a scoped token must not mint itself a sibling token).
     ("POST", "/api/studio-agent-tokens", None),
     ("DELETE", "/api/studio-agent-tokens/{token_id}", None),
+    # Workspace API intake token lifecycle (#626): same privilege-extension
+    # rule — a scoped or api-token identity must not mint sibling credentials
+    # (the issue route mounts reject_studio_agent_scope; revoke is
+    # require_admin, which refuses scoped identities outright).
+    ("POST", "/api/workspaces/{workspace_id}/api-tokens", None),
     # Studio chat effecting endpoints: session lifecycle (create mints a
     # fresh scoped token; resume respawns the runtime and mints another),
     # message send/cancel, and permission answers
@@ -197,6 +204,13 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/admin/infra-connections/test"): "require_admin",
     ("POST", "/api/agent-register-tokens"): "require_admin",
     ("DELETE", "/api/agent-register-tokens/{token_id}"): "require_admin",
+    # Workspace API intake token lifecycle (#626): issue is in the guarded
+    # effecting set above (it mounts the scope guard); list/revoke are
+    # require_admin, which refuses scoped identities outright.
+    (
+        "DELETE",
+        "/api/workspaces/{workspace_id}/api-tokens/{token_id}",
+    ): "require_admin",
     ("DELETE", "/api/agent-workers/{worker_id}"): "require_admin",
     # Worker credential channel (x-agent-worker-token / register token, not a
     # user session; scoped Bearer tokens never authenticate here).
@@ -218,10 +232,14 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("PUT", "/api/agent-definitions/{agent_id}/draft"): "draft write",
     ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
     ("POST", "/api/skills/validate"): "validate only",
-    # batch-rerun/preview moved OUT of the exempt list (red-team R8 P2-2 on
-    # #745): it now mounts reject_studio_agent_scope like every other POST
-    # under job_group, so the guard's scoped effecting short-circuit never
-    # bypasses its workspace membership check.
+    # batch-rerun/preview is NOT exempt (red-team R8 P2-2 on #745): it mounts
+    # reject_studio_agent_scope like every other POST under job_group, so the
+    # guard's scoped effecting short-circuit never bypasses its workspace
+    # membership check.
+    # Run intake channel (#626): require_workspace_api_intake — refuses every
+    # scoped identity except the workspace API token on its OWN workspace;
+    # studio-agent scopes get the same 403 reject_studio_agent_scope gave.
+    ("POST", "/api/workspaces/{workspace_id}/runs"): "api intake channel guard",
     # Node prompt preview: read-only render, persists nothing.
     ("POST", "/api/workspaces/{workspace_id}/workflow/node-prompt-preview"): "preview only",
     # Scoped-only tool surface (require_studio_agent_scope): these endpoints

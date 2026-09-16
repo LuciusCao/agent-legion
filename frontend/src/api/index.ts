@@ -44,9 +44,13 @@ export type { MetricBucket, OpsGranularity, OpsMetricsParams, OpsMetricsResponse
 // prettier-ignore
 export { createRegisterToken, deleteRegisterToken, listRegisterTokens } from './workerTokens'
 // prettier-ignore
+export { createWorkspaceApiToken, listWorkspaceApiTokens, revokeWorkspaceApiToken } from './workspaceApiTokens'
+// prettier-ignore
 export { deleteAgentWorker, listAgentWorkers } from './agentWorkers'
 // prettier-ignore
 export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary } from './workerTokens'
+// prettier-ignore
+export type { WorkspaceApiTokenCreatedResponse, WorkspaceApiTokenSummary } from './workspaceApiTokens'
 // prettier-ignore
 export type { AgentWorkerSummary } from './agentWorkers'
 // prettier-ignore

@@ -22,6 +22,11 @@ def enforce_workspace_membership(
         return
     if workspace_id is None:
         raise HTTPException(status_code=403, detail="Admin role required for global metrics")
+    # #626 review hardening: a scoped machine identity (actor_scope='api')
+    # has no user row — the member lookup below would KeyError (500). It is
+    # also not a member: refuse like a non-member (404, no enumeration).
+    if user.get("actor_scope"):
+        raise HTTPException(status_code=404, detail="Workspace not found")
     role = request.app.state.job_db.get_workspace_role(workspace_id, str(user["id"]))
     if role is None:
         raise HTTPException(status_code=404, detail="Workspace not found")

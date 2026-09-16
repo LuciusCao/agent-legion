@@ -3,13 +3,26 @@
 ``POST /workspaces/{id}/runs`` creates a run from items (one job per item);
 the GET endpoints list and inspect runs. The legacy node-execution listing
 lives at ``/workspaces/{id}/node-runs`` (routes/workspace_runs.py).
+
+#626: the runs surface is also the machine-to-machine intake channel. POST
+mounts ``require_workspace_api_intake`` — it admits a workspace API token
+(actor_scope='api', bound to this workspace) while refusing every other
+scoped identity exactly like the retired ``reject_studio_agent_scope``
+mount (studio-agent runs included). The GET endpoints are read-only status
+queries the same external callers need: they pass ``require_workspace_access``
+via the api-scope read allowlist in auth/workspace_access.py (runs + jobs
+listings ONLY — nothing else on the app is reachable for the machine
+identity).
 """
 
-from typing import Annotated
+import logging
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
-from server.app.auth.dependencies import reject_studio_agent_scope
+from server.app.auth.api_intake import require_workspace_api_intake
+from server.app.auth.dependencies import get_current_user
+from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 from server.app.routes.job_http import (
     raise_job_http_error,
     reject_mismatched_workflow_key,
@@ -23,6 +36,8 @@ from server.app.routes.run_contracts import (
 from server.app.services.job_errors import JobServiceError
 from server.app.services.run_service import RunService
 
+logger = logging.getLogger(__name__)
+
 
 def create_runs_router(service: RunService) -> APIRouter:
     router = APIRouter()
@@ -30,9 +45,24 @@ def create_runs_router(service: RunService) -> APIRouter:
     @router.post(
         "/workspaces/{workspace_id}/runs",
         response_model=RunCreateResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
+        dependencies=[Depends(require_workspace_api_intake)],
     )
-    def create_run(workspace_id: str, payload: RunCreateRequest) -> RunCreateResponse:
+    def create_run(
+        workspace_id: str,
+        payload: RunCreateRequest,
+        user: Annotated[dict[str, Any], Depends(get_current_user)],
+    ) -> RunCreateResponse:
+        # #626 audit: an api-token submission attributes to the token id,
+        # never an impersonated user. The run row's created_by stays with
+        # its current semantics (empty for the items path); the request
+        # identity lands in the structured log — the same surface the worker
+        # registration handshake uses for its audit trail.
+        if user.get("actor_scope") == WORKSPACE_API_SCOPE:
+            logger.info(
+                "run submitted via workspace api token: token_id=%s workspace_id=%s",
+                user.get("api_token_id"),
+                workspace_id,
+            )
         # exclude_unset keeps input_json verbatim (no params={} filler); the
         # same dump feeds the deprecated workflow_key read (accessing the
         # field attribute itself would raise the deprecation warning, which

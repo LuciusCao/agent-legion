@@ -14,6 +14,9 @@ export const extraQueryKeys = {
   workspaceMaterials: (workspaceId: string) =>
     ['workspaceMaterials', workspaceId] as const,
   workerTokens: () => ['workerTokens'] as const,
+  // workspace 签发的 API intake token 列表（#626，按 workspace 作用域）。
+  workspaceApiTokens: (workspaceId: string) =>
+    ['workspaceApiTokens', workspaceId] as const,
   // workspace 视角的 worker 列表（按 scoped token 注册过滤，issue #35）。
   workspaceWorkers: (workspaceId: string) =>
     ['workspaceWorkers', workspaceId] as const,

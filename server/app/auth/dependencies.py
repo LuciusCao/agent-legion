@@ -6,7 +6,10 @@ ambient (CSRF-exempt — STUDIO-AGENT-001). Guards on ``get_current_user``:
 scoped identity — it inherits the minter's role), ``reject_studio_agent_
 scope`` (effecting endpoints), ``require_studio_agent_scope``/``_workspace``
 (tool surface), ``enforce_scoped_workspace_binding`` (bound tokens read only
-their own workspace). Worker-token auth (routes/agent_workers.py) and the
+their own workspace). The workspace API intake token (#626) resolves in the
+same chain into a machine identity (actor_scope='api'); the runs router
+mounts ``require_workspace_api_intake`` (auth/workspace_access.py) so only
+that surface admits it. Worker-token auth (routes/agent_workers.py) and the
 studio MCP mount (ASGI-level check) are not routed through here.
 """
 
@@ -18,6 +21,10 @@ from fastapi import Depends, Request
 from fastapi.exceptions import HTTPException
 
 from server.app.auth.scoped_tokens import STUDIO_AGENT_SCOPE
+from server.app.auth.workspace_api_tokens import (
+    WORKSPACE_API_SCOPE,
+    split_api_token,
+)
 
 SESSION_COOKIE = "agent_legion_session"
 CSRF_HEADER = "x-agent-legion-request"
@@ -43,6 +50,10 @@ def get_current_user(request: Request) -> dict[str, Any]:
     Cookie-authenticated mutations must carry the CSRF header (a cross-site
     form/fetch cannot set custom headers), which pins cookie auth to same-site
     frontend calls. Bearer-channel callers are exempt: they are not ambient.
+    Resolution order on the Bearer channel: user session → scoped token →
+    workspace API token (#626, ``{token_id}.{secret}`` shape only) → machine
+    identity dict with actor_scope='api' and NO user id — downstream guards
+    (workspace_access) treat it as an editor bound to its one workspace.
     """
     token, channel = extract_session_token(request)
     if token is None:
@@ -51,6 +62,17 @@ def get_current_user(request: Request) -> dict[str, Any]:
     if user is None and channel == "bearer":
         # Scoped tokens (studio agent runs) authenticate via Bearer only.
         user = request.app.state.auth_service.authenticate_scoped(token)
+    if user is None and channel == "bearer" and split_api_token(token) is not None:
+        # Workspace API intake tokens (#626): same Bearer-only, CSRF-exempt
+        # rule as scoped tokens. Only the {token_id}.{secret} shape reaches
+        # the store — a session/scoped token can never collide with it.
+        resolved = request.app.state.workspace_api_token_store.resolve_api_token(token)
+        if resolved is not None:
+            user = {
+                "actor_scope": WORKSPACE_API_SCOPE,
+                "scoped_workspace_id": resolved["workspace_id"],
+                "api_token_id": resolved["token_id"],
+            }
     if user is None:
         raise HTTPException(status_code=401, detail="Session expired or revoked")
     if (

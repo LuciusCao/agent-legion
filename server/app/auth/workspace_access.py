@@ -16,18 +16,56 @@ Two guards live here (#710):
   a job-ownership resolution for the job-id routes (``job_group`` only):
   bare ``/jobs/{job_id}`` endpoints had no workspace scope at all, so any
   logged-in user could read, mutate, or delete another workspace's jobs.
+- and the module stays under its file budget in its own home. #626 adds the
+  machine-identity arm: a workspace API intake token (actor_scope='api') is
+  the editor of exactly its bound workspace — never a member row, never an
+  admin, never another workspace.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any
 
 from fastapi import Depends, Request
 from fastapi.exceptions import HTTPException
 
 from server.app.auth.dependencies import _SAFE_METHODS, get_current_user
+from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 
 _MEMBER_ROLE_RANK = {"viewer": 1, "editor": 2}
+
+# #626 review: the surface allowlist for api-scope machine identities. The
+# intake channel's documented surface (#626) is submit + run/job status
+# reads: the runs router's POST/GETs and the workspace jobs listing.
+# Everything else under this guard — secrets/materials/chat-session/
+# preview-panel/metrics/etc. reads, and every scopeless or off-allowlist
+# mount — must refuse the machine identity (404, the no-enumeration
+# refusal) instead of inheriting the "editor of the bound workspace" pass.
+# (method, route template); templates compile to exact full-path patterns
+# ({param} → one path segment, no trailing anything) — a prefix or
+# substring match here would widen the surface again. POST /runs appears
+# here because the job_route_group mounts this guard on the whole runs
+# router; the route-level require_workspace_api_intake does the admission.
+_API_SCOPE_ALLOWLIST: tuple[tuple[str, str], ...] = (
+    ("POST", "/api/workspaces/{workspace_id}/runs"),
+    ("GET", "/api/workspaces/{workspace_id}/runs"),
+    ("GET", "/api/workspaces/{workspace_id}/runs/{run_id}"),
+    ("GET", "/api/workspaces/{workspace_id}/jobs"),
+)
+
+
+def _api_scope_route_allowed(method: str, path: str) -> bool:
+    """Exact match of (method, concrete path) against the allowlist."""
+    return any(
+        method == m and re.fullmatch(re.sub(r"\{[^/]+\}", r"[^/]+", template), path)
+        for m, template in _API_SCOPE_ALLOWLIST
+    )
+
+
+def _workspace_scope(request: Request) -> str | None:
+    """The workspace scope of the current route (path param, then query)."""
+    return request.path_params.get("workspace_id") or request.query_params.get("workspace_id")
 
 
 def _resolve_job_workspace_scope(request: Request, user: dict[str, Any]) -> str | None:
@@ -82,12 +120,38 @@ def require_workspace_access(
     the scope in the query string (``/api/worker/*``, ``/api/metrics/overview``).
     Routes without a workspace scope only require a logged-in user.
     Non-members get 404 (not 403) so workspace existence cannot be enumerated.
+
+    #626 review: the api-scope machine identity is NOT a general member of
+    the bound workspace — it is the runner of the intake channel only. Two
+    rules, both narrow (an api token's entire permission model is ONE
+    workspace and the documented intake surface):
+    1. hard equality with the route's workspace scope (a mismatched or
+       missing scope gets the same 404 as a non-member, no enumeration);
+    2. (method, path) must be on the intake allowlist (_API_SCOPE_ALLOWLIST:
+       POST/GET runs + jobs listing) — every other route under this guard,
+       including OTHER GETs (secrets, materials, chat sessions, preview
+       panels, metrics) and scopeless mounts, 404s the machine identity.
+       The POST /runs admission is dual-checked: the job_route_group mounts
+       this guard router-wide, and the route-level
+       require_workspace_api_intake (auth/api_intake.py) re-verifies the
+       binding — it is the ONLY effecting surface; the pre-fix "editor
+       pass" arm let the api token into every workspace-scoped GET plus the
+       scopeless-guard fall-through and crashed 500 on user['id'] handlers
+       (node-code and agent-definition draft writes, metrics overview).
     """
     if user.get("role") == "admin":
         return user
-    workspace_id = request.path_params.get("workspace_id") or request.query_params.get(
-        "workspace_id"
-    )
+    if user.get("actor_scope") == WORKSPACE_API_SCOPE:
+        scope = _workspace_scope(request)
+        bound = user.get("scoped_workspace_id")
+        if (
+            not scope
+            or bound != scope
+            or not _api_scope_route_allowed(request.method, request.url.path)
+        ):
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        return user
+    workspace_id = _workspace_scope(request)
     if not workspace_id:
         return user
     role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))

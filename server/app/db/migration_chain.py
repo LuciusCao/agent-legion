@@ -33,6 +33,7 @@ from server.app.db.migrations import (
     migrate_versioned_entities,
     migrate_workflow_catalog_retirement,
     migrate_workflow_node_explicit_types,
+    migrate_workspace_api_tokens,
     migrate_workspace_cms_config,
     migrate_workspace_execution_defaults,
     migrate_workspace_id_key_binding,
@@ -209,6 +210,10 @@ MIGRATIONS: list[SchemaMigration] = [
     # (usage_json + compacting) come from the schema-file replay, no data
     # migration. DDL-only, same guarded-ALTER home rule.
     SchemaMigration(83, "studio_chat_context_health"),
+    # v84 (#626): workspace-scoped API intake tokens — the machine-to-machine
+    # submission channel (POST /runs + run/job reads). Table DDL rides the
+    # apply fn (postgres_schema.sql is at its ceiling; v76 precedent).
+    SchemaMigration(84, "workspace_api_tokens", migrate_workspace_api_tokens),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

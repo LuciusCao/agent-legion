@@ -15,6 +15,7 @@ import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { DangerZone } from '../components/settings/DangerZone'
 import { PreviewConfigSection } from '../components/settings/PreviewConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
+import { WorkspaceApiTokensSection } from '../components/settings/WorkspaceApiTokensSection'
 import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
 import styles from './SettingsPage.module.css'
@@ -157,6 +158,9 @@ export function SettingsPage() {
               <WorkerTokensSection workspaceId={workspaceId ?? ''} />
             ) : (
               <WorkspaceWorkersSection workspaceId={workspaceId ?? ''} />
+            )}
+            {isAdmin && (
+              <WorkspaceApiTokensSection workspaceId={workspaceId ?? ''} />
             )}
           </section>
           {isAdmin && <WorkspaceMembersSection workspaceId={workspaceId} />}

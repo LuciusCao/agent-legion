@@ -78,6 +78,13 @@ def _build_session_router(auth_service: AuthService) -> APIRouter:
         response: Response,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> MeResponse:
+        # #626 review: /logout is a USER session endpoint — the api-scope
+        # machine identity has no user row and would 500 on the response
+        # contract (and there is no session to tear down either).
+        if user.get("actor_scope"):
+            raise HTTPException(
+                status_code=403, detail="Scoped tokens cannot use identity endpoints"
+            )
         token, _ = extract_session_token(request)
         if token is not None:
             auth_service.logout(token)
@@ -86,6 +93,11 @@ def _build_session_router(auth_service: AuthService) -> APIRouter:
 
     @router.get("/me", response_model=MeResponse)
     def me(user: Annotated[dict[str, Any], Depends(require_user)]) -> MeResponse:
+        # Same refusal as logout: /me is a USER identity endpoint (#626).
+        if user.get("actor_scope"):
+            raise HTTPException(
+                status_code=403, detail="Scoped tokens cannot use identity endpoints"
+            )
         return MeResponse(user=UserResponse(**user))
 
     @router.get("/bootstrap", response_model=BootstrapStatusResponse)
