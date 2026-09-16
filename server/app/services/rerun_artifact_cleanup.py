@@ -6,12 +6,18 @@ diagnostic re-check live here, the commit/teardown helper stays there.
 
 Ordering facts this module encodes (review R1): ``promote_all`` copies onto
 the authority key FIRST and writes the ``job_artifacts`` rows LAST (a
-mid-batch failure leaves orphans, never dangling rows) — so a re-read can
-miss a row whose fresh object copy already landed. The protection for that
-residual ordering is timing improbability (the re-attempt must fully promote
-inside this helper's millisecond read→remove gap), not a visibility
-invariant; the post-removal re-check makes the theoretical stranded row
-diagnosable instead of silent.
+mid-batch failure leaves orphans, never dangling rows) — so a manifest read
+can miss a row whose fresh object copy already landed. The rerun transaction
+commits the node reset and the manifest-row removal together; from that
+instant the job is schedulable again, so a re-attempt's ``promote_all`` can
+interleave with this cleanup at any point. Two guard layers keep the fresh
+authority copy alive (#683 review P1): the batch re-read at entry skips keys
+already re-registered when cleanup starts, and the per-object re-read
+re-checks the CURRENT manifest immediately before each removal — a key that
+reappeared inside the batch read→remove gap belongs to the new attempt. The
+residual per-object window (re-read → that object's removal call,
+milliseconds) is only closable by conditional removal or versioned keys; the
+post-removal re-check keeps it diagnosable instead of silent.
 """
 
 from __future__ import annotations
@@ -45,8 +51,13 @@ def delete_rerun_artifact_objects(
     Between the rerun transaction's commit and this cleanup the job is
     schedulable again — a fast re-attempt may register a NEW manifest row
     with the same stable authority key. Re-validate every row against the
-    CURRENT manifest before its deletion: a reappeared key belongs to the
-    new attempt and is skipped."""
+    CURRENT manifest before its removal: a reappeared key belongs to the
+    new attempt and is skipped. The re-check runs PER OBJECT, immediately
+    before that object's removal (#683 review P1): ``promote_all`` copies
+    the fresh object onto the authority key first and registers its
+    manifest row last, so a key can reappear between the batch snapshot
+    read and the removals — a snapshot-blind removal would strand the
+    fresh manifest row on a nonexistent object."""
     if object_store is None or not getattr(object_store, "enabled", False) or not deleted_rows:
         return
     live = _live_keys(object_store, job_id)
@@ -58,11 +69,31 @@ def delete_rerun_artifact_objects(
             job_id,
             len(deleted_rows) - len(stale_rows),
         )
-    object_store.delete_objects(stale_rows)
-    # Post-deletion re-check: a row appearing under a deleted key in the gap
-    # means the theoretical race fired — surface it (bucket lifecycle cannot
-    # repair a stranded manifest row).
-    raced = _live_keys(object_store, job_id) & {str(r["storage_key"]) for r in stale_rows}
+    spared: set[str] = set()
+    deleted_keys: set[str] = set()
+    for row in stale_rows:
+        # Re-validate against the CURRENT manifest immediately before this
+        # object's removal: a re-attempt completing promote_all after the
+        # snapshot read above re-registers this same stable authority key,
+        # and removing it would strand the fresh manifest row.
+        key = str(row["storage_key"])
+        if key in _live_keys(object_store, job_id):
+            spared.add(key)
+            continue
+        object_store.delete_objects([row])
+        deleted_keys.add(key)
+    if spared:
+        logger.info(
+            "rerun %s cleanup for job %s spared %d object(s) re-registered during cleanup: %s",
+            operation,
+            job_id,
+            len(spared),
+            sorted(spared)[:5],
+        )
+    # Post-removal re-check: a row appearing under a removed key in the
+    # residual per-object window means the race fired — surface it (bucket
+    # lifecycle cannot repair a stranded manifest row).
+    raced = _live_keys(object_store, job_id) & deleted_keys
     if raced:
         logger.warning(
             "rerun %s cleanup for job %s: %d manifest row(s) appeared under "
