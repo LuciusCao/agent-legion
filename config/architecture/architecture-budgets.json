@@ -316,6 +316,7 @@
     "frontend/src/features/workflowStudio/canvas/workflowStudioExecutionWarnings.ts": 63,
     "frontend/src/features/workflowStudio/canvas/workflowStudioGhostNode.ts": 60,
     "frontend/src/features/workflowStudio/canvas/workflowYamlDraftRecord.ts": 104,
+    "frontend/src/features/workflowStudio/chat/EntityDraftPublishButton.tsx": 73,
     "frontend/src/features/workflowStudio/chat/StudioChatAgentConfig.module.css": 67,
     "frontend/src/features/workflowStudio/chat/StudioChatAgentConfig.tsx": 110,
     "frontend/src/features/workflowStudio/chat/StudioChatAgentConfigFields.tsx": 115,

@@ -8,17 +8,18 @@ import {
   makeStudioView,
   withStudioProviders,
 } from '../shared/testStudioProviders'
+import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 import { publishAgent } from '../../../api'
 import { api } from '../../../api/core'
-import { expectConsoleError } from '../../../test-setup'
 
 /* #692：草稿卡类型化重做的钉子——MUI 线性图标 + 按实体类型发布。
  * 图标断言走 MUI 渲染出的 svg data-testid（aria-hidden，getByRole 查
  * 不到）。发布断言（codex P1 修正后）：Agent/节点代码卡各调自己的实体
  * 发布端点（publishAgent / nodes/{key}/code/publish），成功 toast 走
- * uiStore、失败内联展示——不再复用 workflow revision 的发布按钮。 */
+ * uiStore、失效 studio 查询并进入「已发布」终态，失败内联展示——不
+ * 再复用 workflow revision 的发布按钮。 */
 
 vi.mock('../../../api', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -36,7 +37,13 @@ function renderWithStudio(
   ui: React.ReactNode,
   studio: Record<string, unknown>
 ) {
-  return render(withStudioProviders(studio, makeStudioView(), ui))
+  // EntityDraftPublishButton 用 useQueryClient 失效查询，测试树需挂
+  // QueryClientProvider（每树独立 client，无重试无缓存）。
+  return render(
+    <TestQueryProvider>
+      {withStudioProviders(studio, makeStudioView(), ui)}
+    </TestQueryProvider>
+  )
 }
 
 function makeStudio(overrides: Record<string, unknown> = {}) {
@@ -59,17 +66,17 @@ function makeStudio(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  // zustand store 直改会令已挂载组件的订阅在 act 外更新（React 18 报
-  // console.error 级 act 警告）——本套件的 beforeEach 在 render 前重置
-  // store，警告来自前一个用例卸载竞态，登记吸收（PreviewPanelSection
-  // .test 的 warn 级同族）。
-  expectConsoleError(/not wrapped in act/)
   useSettingStore.setState({ workspaceId: 'ws1' })
   useUiStore.setState({ toast: null })
 })
 
-afterEach(() => {
-  useSettingStore.setState({ workspaceId: undefined })
+afterEach(async () => {
+  // 组件仍挂载时直改 zustand store 会触发 React 18 的 act 警告
+  // （RTL cleanup 在本钩子之后才卸载树）——重置包进 act 消化更新，
+  // 不用全文件级 expectConsoleError 吞掉未来用例的真实 act 缺陷。
+  await act(async () => {
+    useSettingStore.setState({ workspaceId: undefined })
+  })
 })
 
 describe('AgentDefinitionDraftCard（#692）', () => {
@@ -114,6 +121,21 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     await waitFor(() =>
       expect(useUiStore.getState().toast?.message).toContain('已发布')
     )
+  })
+
+  it('发布成功后按钮进入「已发布」终态且不可再点', async () => {
+    mockPublishAgent.mockResolvedValue({
+      version: 2,
+    } as Awaited<ReturnType<typeof publishAgent>>)
+    renderWithStudio(<AgentDefinitionDraftCard draft={draft} />, makeStudio())
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+    })
+    const done = await screen.findByRole('button', { name: '已发布' })
+    expect(done).toBeDisabled()
+    fireEvent.click(done)
+    expect(mockPublishAgent).toHaveBeenCalledTimes(1)
   })
 
   it('发布失败时按钮下方内联展示错误且不 toast 成功', async () => {
