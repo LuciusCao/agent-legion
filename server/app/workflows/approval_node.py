@@ -123,6 +123,13 @@ def strip_snapshot_placeholders(raw_node: dict[str, Any]) -> None:
     node drops the default ``accepted_item_types`` copy (start-only). For
     approval nodes the execution placeholder serializes as a dict of empty
     strings, so "empty" means every value falsy, not the container itself.
+
+    ``execution`` on an approval node is dropped even when non-empty: before
+    #680 the loader baked the workflow-level execution defaults into approval
+    nodes, so published snapshots carry provider/model values the gate never
+    reads. Stripping them here heals those revisions on read instead of
+    rejecting them (the mapping/yaml path still rejects a declared block —
+    this only runs on snapshots).
     """
     node_type = raw_node.get("type")
     if node_type == "start":
@@ -142,6 +149,8 @@ def strip_snapshot_placeholders(raw_node: dict[str, Any]) -> None:
     raw_node.pop("accepted_item_types", None)
     if node_type != APPROVAL_NODE_TYPE:
         return
+    # Baked execution defaults (pre-#680 snapshots) are dead data on a gate.
+    raw_node.pop("execution", None)
     # Same set as the forbidden declaration fields: strip the empty asdict
     # placeholders so a snapshot of an approval node reloads cleanly.
     for placeholder in _FORBIDDEN_APPROVAL_FIELDS:

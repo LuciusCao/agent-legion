@@ -200,3 +200,64 @@ def test_top_level_execution_does_not_bake_into_approval_node() -> None:
 
     reloaded = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
     assert reloaded.nodes["gate"].execution.provider == ""
+
+
+def test_poisoned_approval_snapshot_heals_on_load() -> None:
+    """存量兼容：修复前发布的 revision 快照里 approval 节点带着烘焙进去的
+    非空 execution。读路径必须静默剥离（approval 永不 dispatch，这些值是死数据），
+    而不是继续 500——否则升级后 active/stats 依旧打不开，得手工改库。"""
+    poisoned = {
+        "key": "wf",
+        "label": "WF",
+        "schema_version": 2,
+        "execution": {"provider": "top-provider", "model": "top-model", "thinking": ""},
+        "nodes": {
+            "entry": {"node_type": "start", "label": "入口"},
+            "write": {
+                "node_type": "agent",
+                "label": "写稿",
+                "capability": "write_script",
+                "outputs": ["script.md"],
+                "execution": {"provider": "top-provider", "model": "top-model", "thinking": ""},
+            },
+            "gate": {
+                "node_type": "approval",
+                "label": "审批",
+                "inputs": ["script.md"],
+                # 修复前 merge_execution_defaults 烘焙进来的值。
+                "execution": {"provider": "top-provider", "model": "top-model", "thinking": ""},
+            },
+        },
+        "edges": [
+            {"source": "entry", "target": "write"},
+            {"source": "write", "target": "gate"},
+        ],
+    }
+    definition = workflow_definition_from_dict(poisoned)
+
+    assert definition.nodes["gate"].execution.provider == ""
+    assert definition.nodes["gate"].execution.model == ""
+    # 非 approval 节点的值不受影响。
+    assert definition.nodes["write"].execution.provider == "top-provider"
+
+
+def test_mapping_path_still_rejects_execution_on_approval() -> None:
+    """剥离只发生在快照读路径；手写 yaml 给 approval 声明 execution 仍然拒绝。"""
+    raw = {
+        "key": "wf",
+        "label": "WF",
+        "schema_version": 2,
+        "nodes": {
+            "entry": {"type": "start", "label": "入口"},
+            "write": {"label": "写稿", "capability": "write_script", "outputs": ["script.md"]},
+            "gate": {
+                "type": "approval",
+                "label": "审批",
+                "inputs": ["script.md"],
+                "execution": {"provider": "top-provider"},
+            },
+        },
+        "edges": [{"from": "entry", "to": "write"}, {"from": "write", "to": "gate"}],
+    }
+    with pytest.raises(WorkflowDefinitionError, match="must not declare execution"):
+        workflow_definition_from_mapping(raw)
