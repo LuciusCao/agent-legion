@@ -91,8 +91,8 @@ describe('JobDetailActions', () => {
     expect(screen.getByLabelText('清空打包状态')).toHaveAttribute('disabled')
   })
 
-  it('calls onUpgradeWorkflow for an outdated job', async () => {
-    const onUpgradeWorkflow = vi.fn()
+  it('opens the upgrade dialog and forwards the selected mode', async () => {
+    const onUpgradeWorkflow = vi.fn().mockResolvedValue(undefined)
     renderActions({
       jobs: [
         makeJob({
@@ -109,8 +109,14 @@ describe('JobDetailActions', () => {
     await act(async () => {
       screen.getByLabelText('升级 workflow').click()
     })
+    expect(screen.getByText('升级 workflow')).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('确认升级').click()
+    })
 
     expect(onUpgradeWorkflow).toHaveBeenCalledTimes(1)
+    expect(onUpgradeWorkflow).toHaveBeenCalledWith('clean')
   })
 
   it('disables rerun and package for a running job', () => {

@@ -23,8 +23,13 @@ def batch_upgrade(
     *,
     job_filter: JobListFilter | None = None,
     exclude_ids: Collection[str] = (),
+    mode: str = "clean",
 ) -> list[dict[str, Any]]:
-    """Upgrade each selected job; explicit ids and filters resolve the same way."""
+    """Upgrade each selected job; explicit ids and filters resolve the same way.
+
+    ``mode`` 透传给每个 job 的 upgrade（issue #645：clean 全量重跑 / inherit
+    继承未变节点产物）。
+    """
     ids = resolve_batch_selection(service.job_db, workspace_id, job_ids, job_filter, exclude_ids)
     if not ids:
         raise EmptyJobSelectionError("No job_ids provided or matched by the filter")
@@ -35,5 +40,5 @@ def batch_upgrade(
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
-        results.append(service.upgrade(workspace_id, normalized))
+        results.append(service.upgrade(workspace_id, normalized, mode=mode))
     return results

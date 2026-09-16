@@ -30,10 +30,15 @@ export function rerunByFailureActions(set: JobStoreSet, get: () => JobState) {
         if (input.fromNodeKey) body.from_node_key = input.fromNodeKey
         const data = await rerunJobsByFailure(workspaceId, body)
         const results = data.results ?? []
+        // rerun_nodes 在 upgrade-workflow 语境是数量（int），在
+        // rerun-by-failure 语境是节点 key 列表——契约层声明为 unknown，
+        // 此处按本端点语义窄化（issue #645 的子类覆写）。
+        const rerunNodeKeys = (r: { rerun_nodes?: unknown }): string[] =>
+          Array.isArray(r.rerun_nodes) ? (r.rerun_nodes as string[]) : []
         const hasUpstreamRerun = results.some(
           (r) =>
             r.node_key != null &&
-            (r.rerun_nodes ?? []).some((node) => node !== r.node_key)
+            rerunNodeKeys(r).some((node) => node !== r.node_key)
         )
         applyMutationResults(
           set,

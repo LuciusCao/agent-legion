@@ -25,7 +25,7 @@ function setup(jobId: string | undefined) {
 }
 
 describe('useUpgradeWorkflowAction', () => {
-  it('upgrades, refreshes the detail, and toggles loading around the call', async () => {
+  it('upgrades with the default clean mode, refreshes the detail, and toggles loading', async () => {
     mockUpgrade.mockResolvedValue({
       job_id: 'job-1',
       operation: 'upgrade_workflow',
@@ -36,12 +36,25 @@ describe('useUpgradeWorkflowAction', () => {
     })
     const { result, refreshDetail, setActionLoading, setError } = setup('job-1')
 
-    await act(() => result.current())
+    await act(() => result.current('clean'))
 
-    expect(mockUpgrade).toHaveBeenCalledWith('job-1')
+    expect(mockUpgrade).toHaveBeenCalledWith('job-1', 'clean')
     expect(refreshDetail).toHaveBeenCalledTimes(1)
     expect(setActionLoading.mock.calls).toEqual([[true], [false]])
     expect(setError).not.toHaveBeenCalled()
+  })
+
+  it('passes the inherit mode through to the api', async () => {
+    mockUpgrade.mockResolvedValue({
+      job_id: 'job-1',
+      operation: 'upgrade_workflow',
+      status: 'succeeded',
+    })
+    const { result } = setup('job-1')
+
+    await act(() => result.current('inherit'))
+
+    expect(mockUpgrade).toHaveBeenCalledWith('job-1', 'inherit')
   })
 
   it('surfaces request failures and still clears loading', async () => {
@@ -68,7 +81,7 @@ describe('useUpgradeWorkflowAction', () => {
     const { result, refreshDetail, setActionLoading, setError } =
       setup(undefined)
 
-    await act(() => result.current())
+    await act(() => result.current('clean'))
 
     expect(mockUpgrade).not.toHaveBeenCalled()
     expect(refreshDetail).not.toHaveBeenCalled()

@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { upgradeJobWorkflow } from '../../api/jobWorkflowUpgradeApi'
-import type { JobDetail } from '../../types/jobTypes'
+import type { JobDetail, UpgradeMode } from '../../types/jobTypes'
 
 type RefreshDetail = () => Promise<JobDetail | null>
 
@@ -10,16 +10,19 @@ export function useUpgradeWorkflowAction(
   setActionLoading: (loading: boolean) => void,
   setError: (message: string) => void
 ) {
-  return useCallback(async () => {
-    if (!jobId) return
-    setActionLoading(true)
-    try {
-      await upgradeJobWorkflow(jobId)
-      await refreshDetail()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setActionLoading(false)
-    }
-  }, [jobId, refreshDetail, setActionLoading, setError])
+  return useCallback(
+    async (mode: UpgradeMode = 'clean') => {
+      if (!jobId) return
+      setActionLoading(true)
+      try {
+        await upgradeJobWorkflow(jobId, mode)
+        await refreshDetail()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setActionLoading(false)
+      }
+    },
+    [jobId, refreshDetail, setActionLoading, setError]
+  )
 }

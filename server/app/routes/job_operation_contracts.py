@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from typing import Literal, Self
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from server.app.routes.job_batch_filter_contracts import JobSelectionMixin
+
+#: upgrade-workflow 的重置模式（issue #645）：clean = 全量重跑（既有
+#: 行为，默认）；inherit = 未变节点保持 completed 继承产物，仅变更
+#: 子图重跑。
+UpgradeMode = Literal["clean", "inherit"]
 
 
 class JobMutationResultResponse(BaseModel):
@@ -16,6 +21,12 @@ class JobMutationResultResponse(BaseModel):
     node_key: str | None = None
     reason_code: str | None = None
     message: str | None = None
+    # upgrade_workflow 专属统计（issue #645）：其余 operation 不携带；
+    # Optional + default 让 OpenAPI 输出为可省略字段（旧客户端与非
+    # upgrade 结果的既有 fixture 不必补齐）。
+    mode: UpgradeMode | None = None
+    kept_nodes: int | None = Field(default=None, ge=0)
+    rerun_nodes: int | None = Field(default=None, ge=0)
 
 
 class BatchJobMutationResponse(BaseModel):
@@ -51,7 +62,11 @@ class BatchResumeJobsRequest(JobSelectionMixin):
 
 
 class BatchUpgradeWorkflowRequest(JobSelectionMixin):
-    pass
+    mode: UpgradeMode = "clean"
+
+
+class UpgradeWorkflowRequest(BaseModel):
+    mode: UpgradeMode = "clean"
 
 
 class RunToRequest(BaseModel):

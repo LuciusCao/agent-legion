@@ -59,10 +59,56 @@ def test_upgrade_workflow_route_upgrades_stale_job(tmp_path):
     assert body["job_id"] == job_id
     assert body["operation"] == "upgrade_workflow"
     assert body["status"] == "succeeded"
+    # 无 body 的既有调用面：默认 clean，统计字段恒在。
+    assert body["mode"] == "clean"
+    assert body["kept_nodes"] == 0
+    assert body["rerun_nodes"] > 0
     assert detail["job"]["workflow_revision_id"] == current["id"]
     assert detail["job"]["workflow_version"] == current["version"]
     assert detail["job"]["status"] == "queued"
     assert detail["job"]["is_workflow_outdated"] is False
+
+
+def test_upgrade_workflow_route_accepts_explicit_clean_mode(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id)
+        _publish_next_revision(app, ws_id)
+        response = c.post(f"/api/jobs/{job_id}/upgrade-workflow", json={"mode": "clean"})
+
+    assert response.status_code == 200
+    assert response.json()["mode"] == "clean"
+
+
+def test_upgrade_workflow_route_inherit_mode_reports_stats(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id)
+        _publish_next_revision(app, ws_id)
+        response = c.post(f"/api/jobs/{job_id}/upgrade-workflow", json={"mode": "inherit"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "inherit"
+    assert body["kept_nodes"] + body["rerun_nodes"] > 0
+
+
+def test_upgrade_workflow_route_rejects_invalid_mode(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id)
+        response = c.post(f"/api/jobs/{job_id}/upgrade-workflow", json={"mode": "bogus"})
+
+    assert response.status_code == 422
 
 
 def test_upgrade_workflow_route_rejects_already_current_job(tmp_path):
@@ -92,7 +138,7 @@ def test_upgrade_workflow_route_returns_404_for_missing_job(tmp_path):
 def test_upgrade_workflow_route_maps_service_not_found_to_404(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    def _not_found(self, workspace_id, job_id):
+    def _not_found(self, workspace_id, job_id, **kwargs):
         return {
             "job_id": job_id,
             "operation": "upgrade_workflow",
@@ -189,3 +235,56 @@ def test_batch_upgrade_workflow_route_validates_selection_shape(tmp_path):
 
     assert missing.status_code == 422
     assert both.status_code == 422
+
+
+def test_batch_upgrade_workflow_route_passes_inherit_mode(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job = _create_job(c, ws_id, question_id="Q421")
+        _publish_next_revision(app, ws_id)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
+            json={"job_ids": [job], "mode": "inherit"},
+        )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 1
+    assert results[0]["mode"] == "inherit"
+    assert results[0]["kept_nodes"] + results[0]["rerun_nodes"] > 0
+
+
+def test_batch_upgrade_workflow_route_defaults_to_clean_mode(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job = _create_job(c, ws_id, question_id="Q431")
+        _publish_next_revision(app, ws_id)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
+            json={"job_ids": [job]},
+        )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results[0]["mode"] == "clean"
+    assert results[0]["kept_nodes"] == 0
+
+
+def test_batch_upgrade_workflow_route_rejects_invalid_mode(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
+            json={"job_ids": ["j1"], "mode": "bogus"},
+        )
+
+    assert response.status_code == 422

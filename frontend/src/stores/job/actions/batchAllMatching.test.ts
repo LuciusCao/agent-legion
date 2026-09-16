@@ -204,12 +204,33 @@ describe('batch actions in allMatching selection mode', () => {
 
     await useJobStore.getState().batchUpgradeWorkflow('ws1')
 
-    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith('ws1', {
-      filter: SELECTION_FILTER,
-      excludeIds: ['j9'],
-    })
+    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith(
+      'ws1',
+      {
+        filter: SELECTION_FILTER,
+        excludeIds: ['j9'],
+      },
+      'clean'
+    )
     expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
     expect(useJobStore.getState().selectionMode).toBe('explicit')
+  })
+
+  it('batchUpgradeWorkflow passes the inherit mode through', async () => {
+    enterAllMatching()
+
+    await useJobStore
+      .getState()
+      .batchUpgradeWorkflow('ws1', undefined, 'inherit')
+
+    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith(
+      'ws1',
+      {
+        filter: SELECTION_FILTER,
+        excludeIds: ['j9'],
+      },
+      'inherit'
+    )
   })
 
   it('batchUpgradeWorkflow keeps per-job calls for explicit ids', async () => {
@@ -218,7 +239,7 @@ describe('batch actions in allMatching selection mode', () => {
     await useJobStore.getState().batchUpgradeWorkflow('ws1', ['j1'])
 
     expect(mockBatchUpgradeJobsWorkflow).not.toHaveBeenCalled()
-    expect(mockUpgradeJobWorkflow).toHaveBeenCalledWith('j1')
+    expect(mockUpgradeJobWorkflow).toHaveBeenCalledWith('j1', 'clean')
   })
 
   it('rerunByFailureCategory sends the filter payload with exclusions', async () => {

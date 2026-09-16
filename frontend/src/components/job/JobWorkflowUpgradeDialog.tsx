@@ -9,19 +9,18 @@ import {
 import type { UpgradeMode } from '../../types/jobTypes'
 import { UpgradeModeSelector } from './UpgradeModeSelector'
 
-interface JobAllMatchingUpgradeDialogProps {
+interface JobWorkflowUpgradeDialogProps {
   open: boolean
-  count: number
   onClose: () => void
   onConfirm: (mode: UpgradeMode) => void | Promise<void>
 }
 
-export function JobAllMatchingUpgradeDialog({
+/** 单 job 升级确认对话框（issue #645）：选择 clean / inherit 后升级。 */
+export function JobWorkflowUpgradeDialog({
   open,
-  count,
   onClose,
   onConfirm,
-}: JobAllMatchingUpgradeDialogProps) {
+}: JobWorkflowUpgradeDialogProps) {
   const [mode, setMode] = useState<UpgradeMode>('clean')
   const [isUpgrading, setIsUpgrading] = useState(false)
 
@@ -39,12 +38,13 @@ export function JobAllMatchingUpgradeDialog({
 
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogTitle>确认升级 workflow</DialogTitle>
+      <DialogTitle>升级 workflow</DialogTitle>
       <DialogContent>
         <UpgradeModeSelector value={mode} onChange={setMode} />
         <p>
-          将对符合筛选条件的 {count} 个 job 执行 workflow
-          升级。已是最新版本或运行中的 job 会自动跳过。
+          {mode === 'clean'
+            ? '升级后将重置全部节点并清空产物。'
+            : '未变节点将继承既有产物，仅重跑变化的子图。'}
         </p>
       </DialogContent>
       <DialogActions>

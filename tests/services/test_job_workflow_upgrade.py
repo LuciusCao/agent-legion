@@ -456,6 +456,221 @@ def _config_definition(config_schema: dict | None = None) -> WorkflowDefinition:
     )
 
 
+# ---- inherit 模式（issue #645）----
+
+
+def _inherit_chain_definition(b_cap: str = "cap_b") -> WorkflowDefinition:
+    """a → b → c 三级链（可执行节点，无 start 注入——publish 只吃定义）。"""
+    return WorkflowDefinition(
+        key="wfchain",
+        label="Wf Chain",
+        intake=WorkflowIntake(),
+        nodes={
+            "a": WorkflowNode(key="a", label="A", capability="cap_a"),
+            "b": WorkflowNode(key="b", label="B", capability=b_cap, after=["a"], config_schema={}),
+            "c": WorkflowNode(key="c", label="C", capability="cap_c", after=["b"]),
+        },
+    )
+
+
+def _inherit_setup(tmp_path: Path):
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("wschain", default_workflow_key="wfchain")
+    revisions = WorkflowRevisionService(queries)
+    original = revisions.publish_workspace_revision(workspace["id"], _inherit_chain_definition())
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+    )
+    return queries, workspace, revisions, original, service
+
+
+def _inherit_job(queries, workspace, original, node_keys):
+    job = queries.create_job(
+        workflow_key="wfchain",
+        source_type="question",
+        source_id="Q1",
+        run_id="batch1",
+        title="Question 1",
+        node_keys=node_keys,
+        workspace_id=workspace["id"],
+        workflow_revision_id=original["id"],
+        workflow_version=original["version"],
+        workflow_definition_hash=original["definition_hash"],
+        workflow_definition_snapshot_json=original["definition_json"],
+    )
+    return job
+
+
+def test_inherit_upgrade_keeps_unchanged_nodes_completed(tmp_path: Path) -> None:
+    queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
+    # 新 revision 只改 b 的 capability：期望 a 继承，b/c 重跑。
+    current = revisions.publish_workspace_revision(
+        workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
+    )
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job["id"], key, status="completed")
+    queries.update_job_status(job["id"], "completed")
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    upgraded = queries.get_job(job["id"])
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    assert result["status"] == "succeeded"
+    assert result["mode"] == "inherit"
+    assert result["kept_nodes"] == 1
+    assert result["rerun_nodes"] == 2
+    assert statuses == {"a": "completed", "b": "pending", "c": "pending"}
+    assert upgraded["workflow_revision_id"] == current["id"]
+    assert upgraded["status"] == "queued"
+
+
+def test_inherit_upgrade_reuses_unchanged_revision_by_default_clean(
+    tmp_path: Path,
+) -> None:
+    # 不传 mode（默认 clean）：既有全量重跑行为不变。
+    queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
+    current = revisions.publish_workspace_revision(
+        workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
+    )
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job["id"], key, status="completed")
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    assert result["mode"] == "clean"
+    assert result["kept_nodes"] == 0
+    assert result["rerun_nodes"] == 3
+    assert set(statuses.values()) == {"pending"}
+    assert queries.get_job(job["id"])["workflow_revision_id"] == current["id"]
+
+
+def test_inherit_upgrade_degrades_when_artifact_unreachable(tmp_path: Path) -> None:
+    # 产物不可达（无本地文件、无清单行）→ 拟继承节点退化重跑。
+    queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
+    current = revisions.publish_workspace_revision(
+        workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
+    )
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job["id"], key, status="completed")
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    # a 的产物 outputs 为空（未声明 outputs）→ 无依赖面，仍继承。
+    assert result["kept_nodes"] == 1
+    assert statuses["a"] == "completed"
+    assert queries.get_job(job["id"])["workflow_revision_id"] == current["id"]
+
+
+def test_inherit_upgrade_degrades_when_outputs_missing(tmp_path: Path) -> None:
+    # a 声明 outputs 但产物无本地文件也无清单行 → a 退化重跑（宁可多跑）。
+    queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
+    definition = _inherit_chain_definition()
+    # 手动改快照给 a 加 outputs：直接发布带 outputs 的新链。
+    import dataclasses
+
+    nodes = {
+        "a": dataclasses.replace(definition.nodes["a"], outputs=["a_out.json"]),
+        "b": definition.nodes["b"],
+        "c": definition.nodes["c"],
+    }
+    definition_with_outputs = dataclasses.replace(definition, nodes=nodes)
+    revisions.publish_workspace_revision(
+        workspace["id"], dataclasses.replace(definition_with_outputs)
+    )
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job["id"], key, status="completed")
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    # a 的 outputs 声明出现在新快照（upgrade 后 job 快照已指向新 revision）；
+    # 无本地文件 + 无清单行 → a 不可继承，全链重跑。
+    assert result["kept_nodes"] == 0
+    assert set(statuses.values()) == {"pending"}
+
+
+def test_inherit_upgrade_uncompleted_candidates_reset_pending(tmp_path: Path) -> None:
+    # 继承候选中未完成的节点没有产物可继承 → 重置 pending（与 clean 一致）。
+    queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
+    revisions.publish_workspace_revision(
+        workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
+    )
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
+    queries.update_job_node(job["id"], "a", status="failed")
+    queries.update_job_status(job["id"], "failed")
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    assert result["kept_nodes"] == 0
+    assert set(statuses.values()) == {"pending"}
+
+
+def test_inherit_upgrade_skipped_paths_carry_mode(tmp_path: Path) -> None:
+    # skipped/failed 结果同样带 mode/统计字段（前端与测试断言的稳定形状）。
+    queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
+
+    missing = service.upgrade(workspace["id"], "missing-job", mode="inherit")
+
+    assert missing["status"] == "failed"
+    assert missing["mode"] == "inherit"
+    assert missing["kept_nodes"] == 0
+    assert missing["rerun_nodes"] == 0
+
+
+def test_inherit_upgrade_keeps_manifest_rows_of_inherited_nodes(
+    tmp_path: Path,
+) -> None:
+    # 继承节点的 job_artifacts 清单行原样保留（零存储改动）。
+    from contextlib import closing
+
+    queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
+    current = revisions.publish_workspace_revision(
+        workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
+    )
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job["id"], key, status="completed")
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'a', 'a_out.json', %s, 1, 'hash-a')
+            """,
+            (job["id"], f"jobs/wschain/{job['id']}/a_out.json"),
+        )
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    assert result["kept_nodes"] == 1
+    names = queries.job_artifact_manifest_names_for_nodes(job["id"], {"a"})
+    assert names == {("a", "a_out.json")}
+    assert queries.get_job(job["id"])["workflow_revision_id"] == current["id"]
+
+
+def test_batch_upgrade_inherit_mode_passes_through(tmp_path: Path) -> None:
+    from server.app.services.job_workflow_upgrade_batch import batch_upgrade
+
+    queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
+    revisions.publish_workspace_revision(
+        workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
+    )
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
+    queries.update_job_node(job["id"], "a", status="completed")
+
+    results = batch_upgrade(service, workspace["id"], [job["id"]], mode="inherit")
+
+    assert results[0]["mode"] == "inherit"
+    assert queries.get_job_node(job["id"], "a")["status"] == "completed"
+
+
 def _config_setup(tmp_path: Path, config_schema: dict | None = None):
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="wf")

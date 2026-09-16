@@ -4039,6 +4039,12 @@ export interface components {
       filter?: components['schemas']['JobFilterPayload'] | null
       /** Job Ids */
       job_ids?: string[] | null
+      /**
+       * Mode
+       * @default clean
+       * @enum {string}
+       */
+      mode: 'clean' | 'inherit'
     }
     /** BootstrapRequest */
     BootstrapRequest: {
@@ -4677,8 +4683,12 @@ export interface components {
     JobMutationResultResponse: {
       /** Job Id */
       job_id: string
+      /** Kept Nodes */
+      kept_nodes?: number | null
       /** Message */
       message?: string | null
+      /** Mode */
+      mode?: ('clean' | 'inherit') | null
       /** Node Key */
       node_key?: string | null
       /**
@@ -4696,6 +4706,8 @@ export interface components {
         | 'resume'
       /** Reason Code */
       reason_code?: string | null
+      /** Rerun Nodes */
+      rerun_nodes?: number | null
       /**
        * Status
        * @enum {string}
@@ -4788,8 +4800,12 @@ export interface components {
     JobRerunByFailureResultResponse: {
       /** Job Id */
       job_id: string
+      /** Kept Nodes */
+      kept_nodes?: number | null
       /** Message */
       message?: string | null
+      /** Mode */
+      mode?: ('clean' | 'inherit') | null
       /** Node Key */
       node_key?: string | null
       /**
@@ -4808,7 +4824,7 @@ export interface components {
       /** Reason Code */
       reason_code?: string | null
       /** Rerun Nodes */
-      rerun_nodes?: string[]
+      rerun_nodes?: unknown
       /**
        * Status
        * @enum {string}
@@ -7353,6 +7369,15 @@ export interface components {
       summary: components['schemas']['TokenUsageSummary']
       /** Workspace Id */
       workspace_id: string
+    }
+    /** UpgradeWorkflowRequest */
+    UpgradeWorkflowRequest: {
+      /**
+       * Mode
+       * @default clean
+       * @enum {string}
+       */
+      mode: 'clean' | 'inherit'
     }
     /** UserCreateRequest */
     UserCreateRequest: {
@@ -10120,7 +10145,13 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json':
+          | components['schemas']['UpgradeWorkflowRequest']
+          | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

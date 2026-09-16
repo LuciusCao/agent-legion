@@ -81,6 +81,11 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
             "node_key": "intake_knowledge_points",
             "reason_code": None,
             "message": None,
+            # mode/kept_nodes/rerun_nodes 是 upgrade_workflow 专属统计
+            # （issue #645）；rerun 结果携带 None 占位。
+            "mode": None,
+            "kept_nodes": None,
+            "rerun_nodes": None,
         }
     ]
     assert detail["job"]["status"] == "queued"
@@ -156,6 +161,11 @@ def test_batch_rerun_from_failed_node(tmp_path):
             "node_key": "write_script",
             "reason_code": None,
             "message": None,
+            # mode/kept_nodes/rerun_nodes 是 upgrade_workflow 专属统计
+            # （issue #645）；rerun 结果携带 None 占位。
+            "mode": None,
+            "kept_nodes": None,
+            "rerun_nodes": None,
         }
     ]
     assert detail["job"]["status"] == "queued"

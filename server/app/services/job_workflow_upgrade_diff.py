@@ -1,0 +1,207 @@
+"""Per-node upgrade diff for the inherit upgrade mode (issue #645).
+
+``clean`` 模式的 upgrade 把全部 job_nodes 无条件重置 pending 全量重跑；
+``inherit`` 模式只重跑「真正变了」的子图。本模块计算那个 diff：对每个
+可执行节点算一个哈希，新 revision 的哈希与 job 旧快照的哈希逐节点比较，
+再沿边把变化向下游闭包传播（上游任一变则本节点必变，与
+``mark_nodes_for_rerun`` 的 pending/stale 语义一致——目标是变更节点、
+下游是 stale）。
+
+哈希输入（全部确定性归一化后 sha256）：
+
+1. 节点定义归一化：从 revision 快照反序列化出的 ``WorkflowNode`` 中取出
+   影响执行的每个字段（capability / node_type / after / inputs / outputs /
+   terminal / execution / config / config_schema / skill / tools / shard /
+   reduce / accepted_item_types），dataclass 序列化 + 顶层排序键 JSON。
+   **label 等纯展示字段刻意排除**——只改显示名不该烧掉已完成的产物。
+   进出节点（inputs/outputs/terminal）本身也在定义哈希里：改上游产出名
+   等于改契约，下游与自身都必须重跑。
+2. 该节点的冻结 config 段（upgrade 前 re-freeze 的
+   ``frozen_config_json``）：schema 默认值、节点 config、workspace 覆盖
+   的任何变化都改变节点执行输入，触发重跑。继承只对比 re-freeze 之后
+   的新旧两份值——workspace 层配置变化会自然体现在两份冻结值里。
+3. 上游节点哈希集合（拓扑序链式传播）：对上游「节点集」整体取哈希，
+   而不是逐上游拼接——这样旧快照里的上游重命名（A→A'，定义哈希不同）
+   与其下游在「上游集哈希」上等价坍缩，不再误判下游必须重跑。
+
+排除规则（issue 边界，一律不继承、永远重跑）：
+
+- ``skill: latest`` 节点：HEAD 漂移永不入锁（#322），diff 无法观测其
+  内容变化，参与继承会掩盖 skill 更新；
+- 分片节点（声明 ``shard:`` / ``reduce:``）：``node_shards`` 行级状态
+  是 fan-out 执行的一部分，继承聚合状态无法安全重放；
+- 审批门节点（``type: approval``）：人工决策语义（approve/rework）不
+  可从定义 diff 推导，重置回 ``awaiting_approval`` 前的 pending 由
+  人工重新决策。
+
+本模块是纯函数：不触库、不触文件系统。可达性退化（产物缺失退化为
+重跑）在服务层 ``job_workflow_upgrade.py`` 判定，与本模块解耦。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict
+from typing import Any
+
+from server.app.skills.config import LATEST_REF
+from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.schema import WorkflowEdge, WorkflowNode
+
+#: 展示专用字段：从节点定义哈希中剔除（改 label 不触发重跑）。
+_DISPLAY_ONLY_FIELDS = ("key", "label")
+
+#: 审批门节点类型常量（与 ``workflows/approval_node`` 一致；避免循环导入）。
+_APPROVAL_NODE_TYPE = "approval"
+
+
+def _stable_json(value: Any) -> str:
+    """排序键的紧凑 JSON：哈希前的唯一归一化形式。"""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def node_signature(node: WorkflowNode) -> dict[str, Any]:
+    """一个节点的执行语义视图：全部影响执行的字段，无展示字段。"""
+    payload = asdict(node)
+    for field in _DISPLAY_ONLY_FIELDS:
+        payload.pop(field, None)
+    return payload
+
+
+def node_definition_hash(node: WorkflowNode) -> str:
+    """归一化后的节点定义哈希。"""
+    return hashlib.sha256(_stable_json(node_signature(node)).encode("utf-8")).hexdigest()
+
+
+def _frozen_config_section(frozen_config_json: str | None, node_key: str) -> dict[str, Any]:
+    """该节点的冻结 config 段；无冻结或段缺失即空（与 dispatch 的空段一致）。"""
+    if not frozen_config_json:
+        return {}
+    try:
+        payload = json.loads(frozen_config_json)
+    except (TypeError, ValueError):
+        # 调用方（upgrade 服务）传的永远是刚序列化好的合法 JSON；旧 job
+        # 里损坏的冻结值也不进本函数（diff 用的是 re-freeze 后的新值）。
+        # 防御性空段即可：该节点按「无 config 变化」参与比较。
+        return {}
+    section = payload.get(node_key) if isinstance(payload, dict) else None
+    return section if isinstance(section, dict) else {}
+
+
+def node_is_inherit_excluded(node: WorkflowNode) -> bool:
+    """该节点不参与继承（issue #645 边界）：skill:latest / 分片 / 审批门。"""
+    if node.skill is not None and (node.skill.ref or LATEST_REF) == LATEST_REF:
+        return True
+    if node.shard is not None or node.reduce is not None:
+        return True
+    return node.node_type == _APPROVAL_NODE_TYPE
+
+
+def _upstream_map(definition: WorkflowDefinition) -> dict[str, list[str]]:
+    """node_key → 直接上游列表（按边声明序去重）。"""
+    upstream: dict[str, list[str]] = {key: [] for key in definition.nodes}
+    for edge in definition.edges:
+        upstream.setdefault(edge.target, [])
+        if edge.source not in upstream[edge.target]:
+            upstream[edge.target].append(edge.source)
+    return upstream
+
+
+def _incoming_edges_map(definition: WorkflowDefinition) -> dict[str, list[WorkflowEdge]]:
+    """node_key → 入边列表（含条件声明）：边的增删与 when 条件的变化
+    改变节点的调度语义（分支裁剪），必须参与 per-node 哈希。"""
+    incoming: dict[str, list[WorkflowEdge]] = {key: [] for key in definition.nodes}
+    for edge in definition.edges:
+        incoming.setdefault(edge.target, []).append(edge)
+    return incoming
+
+
+def compute_node_hashes(
+    definition: WorkflowDefinition,
+    frozen_config_json: str | None,
+) -> dict[str, str]:
+    """每个可执行节点的 per-node 哈希（定义 + 冻结 config 段 + 上游链）。
+
+    拓扑序链式传播：节点哈希本身包含其全部直接上游的哈希集合，因此上游
+    的任何变化（定义、config 或再上游的变化）都会改变本节点哈希。返回
+    的 dict 不含 start 节点（它从不执行、也从不进 job_nodes）。
+    """
+    upstream = _upstream_map(definition)
+    incoming = _incoming_edges_map(definition)
+    hashes: dict[str, str] = {}
+    resolved: set[str] = set()
+    # edges 已保证 DAG（loader 校验无环）；拓扑序按「上游全部已解析」推进。
+    pending = [key for key in definition.executable_nodes]
+    while pending:
+        progressed = False
+        remaining: list[str] = []
+        for key in pending:
+            parents = [
+                parent for parent in upstream.get(key, []) if parent in definition.executable_nodes
+            ]
+            if any(parent not in resolved for parent in parents):
+                remaining.append(key)
+                continue
+            node = definition.executable_nodes[key]
+            # 上游集哈希：对上游 (key, hash) 列表整体取摘要。
+            parent_hashes = [(parent, hashes[parent]) for parent in parents]
+            # 入边（含 when 条件）也进哈希：分支语义变化等价于调度变化。
+            edges = [
+                {"source": edge.source, "condition": asdict(edge.condition)}
+                if edge.condition is not None
+                else {"source": edge.source}
+                for edge in incoming.get(key, [])
+            ]
+            material = {
+                "definition": node_definition_hash(node),
+                "config": _frozen_config_section(frozen_config_json, key),
+                "upstream": hashlib.sha256(_stable_json(parent_hashes).encode()).hexdigest(),
+                "incoming_edges": edges,
+            }
+            hashes[key] = hashlib.sha256(_stable_json(material).encode("utf-8")).hexdigest()
+            resolved.add(key)
+            progressed = True
+        if not progressed:
+            # 不可达（DAG 保证收敛）；防御性兜底防死循环。
+            break
+        pending = remaining
+    return hashes
+
+
+def compute_inherit_reset_nodes(
+    old_definition: WorkflowDefinition,
+    old_frozen_config_json: str | None,
+    new_definition: WorkflowDefinition,
+    new_frozen_config_json: str | None,
+) -> set[str]:
+    """新 revision 下需要重跑的节点集（变更节点 + 其下游闭包）。
+
+      - 节点在旧快照中不存在（新增节点）→ 变更；
+      - 节点在新 revision 中不存在（删除节点）→ 不在结果里（job_nodes
+        会被 mutation 重建，只保留新定义的节点集）；
+    - per-node 哈希不等（定义/config/上游链任一变化）→ 变更；
+      - 节点命中排除规则（skill:latest / 分片 / 审批门）→ 无论新旧定义
+        是否相同都按变更处理（永远重跑，不继承）。
+    """
+    old_hashes = compute_node_hashes(old_definition, old_frozen_config_json)
+    new_hashes = compute_node_hashes(new_definition, new_frozen_config_json)
+    changed: set[str] = set()
+    for key, node in new_definition.executable_nodes.items():
+        if node_is_inherit_excluded(node) or old_hashes.get(key) != new_hashes[key]:
+            changed.add(key)
+    if not changed:
+        return set()
+    # 变更节点 + 下游闭包：与 mark_nodes_for_rerun 的 descendants 语义一致。
+    reset: set[str] = set(changed)
+    children: dict[str, list[str]] = {key: [] for key in new_definition.nodes}
+    for edge in new_definition.edges:
+        children[edge.source].append(edge.target)
+    stack = list(changed)
+    while stack:
+        key = stack.pop()
+        for child in children.get(key, []):
+            if child not in reset and child in new_definition.executable_nodes:
+                reset.add(child)
+                stack.append(child)
+    return reset
