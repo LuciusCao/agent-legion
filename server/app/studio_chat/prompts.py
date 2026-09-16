@@ -46,6 +46,7 @@ AGENT_LEGION_MCP_TOOL_NAMES = frozenset(
         "create_skill",
         "get_shared_materials",
         "save_shared_materials",
+        "sync_shared_materials",
     }
 )
 

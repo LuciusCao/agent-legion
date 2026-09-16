@@ -214,3 +214,39 @@ def test_plan_shared_sync_noop_without_shared(tmp_path: Path) -> None:
     _make_repo(base / "wf" / "review")
     plan = plan_shared_sync(base, _KEY, [("SKILL.md", "x")])
     assert plan.files == ()
+
+
+def test_intermediate_symlink_source_is_rejected(
+    service: SkillEditingService, base_dir: Path, tmp_path: Path
+) -> None:
+    """codex P1（#674）：`_shared/references -> 外部目录` 这类中间 symlink
+    不能把宿主文件 commit 进 skill 仓库——保存按「共享源不可读」422。"""
+    outside = tmp_path / "private"
+    outside.mkdir()
+    (outside / "prompt-style.md").write_text("smuggled\n", encoding="utf-8")
+    shared = _write_map(base_dir, [_MAP["materials"][0]])
+    (shared / "references").rmdir()
+    (shared / "references").symlink_to(outside)
+
+    with pytest.raises(SkillEditValidationError) as exc_info:
+        service.save_version(_KEY, [SkillFileWrite("SKILL.md", "# v2\n")], "v2.0.0", "m")
+    assert "unreadable" in exc_info.value.errors[0]["error"]
+    # 回滚纪律：仓库保持原样，外部内容没有进入任何提交。
+    assert _git(base_dir / "wf" / "review", "log", "-1", "--pretty=%s") == "init"
+
+
+def test_shared_dir_symlink_disables_the_sync(
+    service: SkillEditingService, base_dir: Path, tmp_path: Path
+) -> None:
+    """codex P1（#674 三轮）：`_shared` 自身为 symlink 时按无共享材料
+    处理——保存是 no-op（不注入任何同步文件），外部内容不进仓库。"""
+    outside = tmp_path / "private"
+    (outside / "references").mkdir(parents=True)
+    (outside / "map.json").write_text(json.dumps({"version": 1, "materials": _MAP["materials"]}))
+    (outside / "references" / "prompt-style.md").write_text("smuggled\n", encoding="utf-8")
+    (base_dir / "wf" / "_shared").symlink_to(outside)
+
+    result = service.save_version(_KEY, [SkillFileWrite("SKILL.md", "# v2\n")], "v2.0.0", "m")
+    assert result is not None
+    assert result["synced_files"] == []
+    assert result["files"] == ["SKILL.md"]

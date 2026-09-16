@@ -18,8 +18,8 @@ import { StudioChatThought } from './StudioChatThought'
 import {
   AgentDefinitionDraftCard,
   NodeCodeDraftCard,
-  WorkflowDraftCard,
 } from './StudioChatDraftCards'
+import { WorkflowDraftCard } from './WorkflowDraftCard'
 import styles from './StudioChatPanel.module.css'
 
 export type MessageItemProps = {

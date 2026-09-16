@@ -28,6 +28,32 @@ logger = logging.getLogger(__name__)
 _DEFAULT_NODE_TIMEOUT_SECONDS = 600
 _PRESIGN_EXPIRY_SLACK_SECONDS = 900
 
+# #356 spot-check sampling modulus (as a percent; see `spot_check_selected`).
+# Issue plan B: 1–5% of the trust-reported (non-download-verified) artifacts
+# still get a Host-side digest stream; the default sits in the middle of that
+# band. 0 (config kill-switch) selects nobody — full trust; 100 selects
+# everybody — the pre-#356 always-verify behavior.
+DEFAULT_SPOT_CHECK_PERCENT = 3
+_SPOT_SALT = "agent-legion-spot-check-v1"
+
+
+def spot_check_selected(name: str, ref: Any, percent: int) -> bool:
+    """Deterministic spot-check selection for one artifact (#356 plan B).
+
+    The pick derives from the (name, storage_key, size) triple via a stable
+    hash — the same artifact is always in or out across retries (a flaky
+    selection would make the sampling's failure semantics unreproducible),
+    and a Worker cannot steer itself out of the sample without changing the
+    content it reports. ``percent`` <= 0 selects nobody; >= 100 everybody.
+    """
+    if percent <= 0:
+        return False
+    if percent >= 100:
+        return True
+    key = f"{_SPOT_SALT}:{name}:{ref['storage_key']}:{ref.get('size_bytes')}"
+    bucket = int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], "big") % 10_000
+    return bucket < percent * 100
+
 
 def promote_remote(
     store: JobArtifactObjectStore,
@@ -165,16 +191,40 @@ def download_remote_artifact(
 
 
 def verify_remote_digest(
-    store: JobArtifactObjectStore, name: str, ref: Any, max_size_bytes: int | None = None
+    store: JobArtifactObjectStore,
+    name: str,
+    ref: Any,
+    max_size_bytes: int | None = None,
+    *,
+    spot_check_percent: int = DEFAULT_SPOT_CHECK_PERCENT,
 ) -> str:
-    """Digest-only stream of a verified staging object (cancelled runs); a
-    Worker-reported hash must match, an empty one registers the computed value.
-    ``max_size_bytes`` caps decompressed bytes mid-stream (#338)."""
+    """Digest-only stream of a verified staging object; a Worker-reported
+    hash must match, an empty one registers the computed value.
+    ``max_size_bytes`` caps decompressed bytes mid-stream (#338).
+
+    #356 plan B: when the ref carries a Worker-reported hash, the digest
+    stream runs only for the deterministic spot-check sample
+    (``spot_check_selected``); the unsampled majority trusts the reported
+    hash — the HEAD size check in phase 1 already bounded the object. An
+    EMPTY reported hash still streams unconditionally: there is nothing to
+    trust, the manifest row needs a Host-computed digest. Sampling off (0)
+    = the pre-#356 always-verify; 100 = always (the kill-switch inverse).
+
+    #356 review P1: a ``.gz`` ref NEVER takes the trust shortcut — its HEAD
+    size check bounds the COMPRESSED bytes only, so an unsampled gzip bomb
+    would register (and later read back) unbounded decompressed content.
+    The ``read_bounded`` decompression cap is a security property of the
+    stream itself, not part of the hash comparison; the spot check may skip
+    the digest match, never the cap. Bare keys keep the shortcut: for raw
+    objects the HEAD size IS the byte bound."""
+    declared = str(ref.get("content_hash") or "")
+    gzip_ref = is_gzip_key(str(ref["storage_key"]))
+    if declared and not gzip_ref and not spot_check_selected(name, ref, spot_check_percent):
+        return declared
     digest = hashlib.sha256()
     with store.open_stream({"storage_key": str(ref["storage_key"])}) as stream:
         for chunk in read_bounded(stream, max_size_bytes, name=name):
             digest.update(chunk)
-    declared = str(ref.get("content_hash") or "")
     if declared and digest.hexdigest() != declared:
         raise ValueError(f"artifact content hash mismatch: {name!r}")
     return declared or digest.hexdigest()

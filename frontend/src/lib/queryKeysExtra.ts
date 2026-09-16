@@ -93,4 +93,7 @@ export const extraQueryKeys = {
     ['qualityReplayDetail', workspaceId, replayId] as const,
   // Agent 发起的 workflow 发布请求（#416）：轮询 pending 弹确认对话框。
   studioPublishRequest: (ws: string) => k('studioPublishRequest', ws),
+  // workspace 设置页「Skill 共享材料」只读视图（#643）。
+  workspaceSharedMaterials: (workspaceId: string) =>
+    k('workspaceSharedMaterials', workspaceId),
 }

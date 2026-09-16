@@ -56,15 +56,17 @@ def test_schema_version_pin() -> None:
     # (result_stage_profile, #521) owns
     # tests/db/test_result_stage_profile_migration.py; v81
     # (claim_queue_wait_profile, #551) owns
-    # tests/db/test_claim_queue_wait_profile_migration.py — this copy stays as
+    # tests/db/test_claim_queue_wait_profile_migration.py; v82
+    # (job_status_counts_advisory_locks, #659) owns
+    # tests/db/test_status_counts_deadlock.py — this copy stays as
     # a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 81
+    assert SCHEMA_VERSION == 82
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "claim_queue_wait_profile"
+    assert row["name"] == "job_status_counts_advisory_locks"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

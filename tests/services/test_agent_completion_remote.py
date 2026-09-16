@@ -81,7 +81,10 @@ def _remote_ref(key: str = STAGING_KEY, size: int | None = None, content_hash: s
 
 
 def _make_handler(
-    tmp_path: Path, storage: FakeStorage | None, max_archive_bytes: int | None = None
+    tmp_path: Path,
+    storage: FakeStorage | None,
+    max_archive_bytes: int | None = None,
+    spot_check_percent: int | None = None,
 ) -> tuple[AgentCompletionHandler, _StubLeases, _StubArtifactStore, JobArtifactObjectStore, Path]:
     init_db(TEST_DATABASE_URL)
     with write_transaction(TEST_DATABASE_URL) as conn:
@@ -108,6 +111,7 @@ def _make_handler(
         skill_manager=None,
         object_store=object_store,
         max_archive_bytes=max_archive_bytes,
+        spot_check_percent=spot_check_percent,
     )
     return handler, leases, artifact_store, object_store, job_dir
 
@@ -329,10 +333,13 @@ def test_finish_remote_ref_size_over_limit_fails(tmp_path: Path) -> None:
 
 
 def test_finish_cancelled_hash_mismatch_fails(tmp_path: Path) -> None:
-    """cancelled 路径同样 digest 核验 staging 字节：自报 hash 不符整批失败。"""
+    """cancelled 路径被抽中时同样 digest 核验 staging 字节：自报 hash 不符
+    整批失败（percent=100 钉住「必抽中」分支；未抽中分支见下方专项测试）。"""
     storage = FakeStorage()
     storage.objects[STAGING_KEY] = PAYLOAD
-    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, spot_check_percent=100
+    )
 
     _finish(handler, {"out.json": _remote_ref(content_hash="0" * 64)}, status="cancelled")
 
@@ -693,3 +700,115 @@ def test_finish_gzip_cancelled_bomb_fails_on_digest_path(tmp_path: Path) -> None
     assert "decompresses beyond the size limit" in result.error_message
     assert not (job_dir / "out.json").exists()
     assert object_store.lookup("job-1", "out.json") is None
+
+
+def test_finish_cancelled_unsampled_trusts_reported_hash(tmp_path: Path) -> None:
+    """#356 plan B：cancelled 路径、自报 hash 且未入抽检样本 → 不下载字节，
+    登记自报值（kill-switch 0 = 全信任）。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, spot_check_percent=0
+    )
+
+    _finish(handler, {"out.json": _remote_ref()}, status="cancelled")
+
+    assert leases.results[0].status == "cancelled"
+    assert not (job_dir / "out.json").exists()
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH  # 自报值被登记
+    assert storage.opened == 0  # 未打开对象流——第二跳流量消除
+
+
+def test_finish_cancelled_empty_hash_always_streams(tmp_path: Path) -> None:
+    """#356：自报 hash 为空时无条件流式计算（无可信任值，manifest 行需要
+    Host 计算 digest）——即便 percent=0。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, spot_check_percent=0
+    )
+
+    _finish(handler, {"out.json": _remote_ref(content_hash="")}, status="cancelled")
+
+    assert leases.results[0].status == "cancelled"
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH  # Host 计算值
+    assert storage.opened == 1
+
+
+def test_finish_cancelled_sampled_mismatch_still_fails(tmp_path: Path) -> None:
+    """#356：抽中的样本照旧全量核验（percent=100 与专项 mismatch 测试互为
+    补充：本测试确认样本臂的失败语义未被信任路径吞掉）。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, _ = _make_handler(tmp_path, storage, spot_check_percent=100)
+
+    _finish(handler, {"out.json": _remote_ref(content_hash="0" * 64)}, status="cancelled")
+
+    assert leases.results[0].status == "failed"
+    assert "hash mismatch" in leases.results[0].error_message
+
+
+def test_finish_cancelled_unsampled_gzip_still_streams_for_the_cap(tmp_path: Path) -> None:
+    """#356 review P1：未抽样的 .gz 引用不得走信任捷径——HEAD 只约束压缩
+    字节，read_bounded 的解压上限是流本身的安全属性。percent=0（全信任）
+    也必须对 gzip 流式核验，防未抽样的解压炸弹被登记。"""
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, spot_check_percent=0
+    )
+
+    _finish(handler, {"out.json": _gz_ref()}, status="cancelled")
+
+    # 未抽样也打开了对象流（解压上限生效），登记自报 hash。
+    assert storage.opened == 1
+    assert leases.results[0].status == "cancelled"
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH
+
+
+def test_finish_cancelled_unsampled_gzip_bomb_fails(tmp_path: Path) -> None:
+    """解压后超限（max_archive_bytes 远小于解压结果）：即使未抽样、自报
+    hash 匹配，read_bounded 也拒绝——信任捷径不得绕过炸弹防护。"""
+    decompressed = b"x" * (4 * 1024 * 1024)
+    big = gzip.compress(decompressed)  # 压缩后很小
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = big
+    # 自报 hash（未压缩哈希）与 size（压缩后字节数）都如实——HEAD 两项
+    # 核验全过，唯一防线是 read_bounded 的解压上限。
+    import hashlib as _hashlib
+
+    honest = _hashlib.sha256(decompressed).hexdigest()
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, max_archive_bytes=1024, spot_check_percent=0
+    )
+    ref = _gz_ref(content_hash=honest)
+    ref["size_bytes"] = len(big)
+
+    _finish(handler, {"out.json": ref}, status="cancelled")
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "exceeds" in result.error_message
+    assert object_store.lookup("job-1", "out.json") is None
+    assert GZ_AUTHORITY_KEY not in storage.objects
+
+
+def test_finish_cancelled_unsampled_gzip_lying_hash_fails(tmp_path: Path) -> None:
+    """#356 review：percent=0（全信任）下撒谎的 gzip 自报 hash 仍必失败
+    ——区分「gzip 永远全量核验」与「裸键信任捷径」：同场景的裸键会
+    静默通过，gzip 不许。"""
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    handler, leases, _, _, _ = _make_handler(tmp_path, storage, spot_check_percent=0)
+
+    _finish(handler, {"out.json": _gz_ref(content_hash="0" * 64)}, status="cancelled")
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "hash mismatch" in result.error_message

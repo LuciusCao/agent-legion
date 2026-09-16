@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
-from worker import binary_resolution
+from shared import code_sandbox
 from worker.execution.prepare import prepare_execution
 
 pytestmark = pytest.mark.no_db
@@ -71,7 +71,7 @@ def test_argv0_resolves_to_bundled_copy_when_path_empty(
 ) -> None:
     bundled = tmp_path / "data" / "bin" / "velites"
     _write_executable(bundled)
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled.parent)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled.parent)  # #496 真实读取点
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
 
     command = _prepare(tmp_path, ["velites", "run", "--x"])
@@ -81,7 +81,9 @@ def test_argv0_resolves_to_bundled_copy_when_path_empty(
 
 
 def test_argv0_falls_back_to_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
+    monkeypatch.setattr(
+        code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled-bin"
+    )  # #496 真实读取点
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
 
     command = _prepare(tmp_path, ["velites", "run"])
@@ -94,7 +96,9 @@ def test_argv0_left_untouched_when_unresolvable(
 ) -> None:
     # 无法解析时保持原名（spawn 会报 FileNotFoundError 并作为失败执行上报）；
     # 绝对路径 argv[0] 不参与解析。
-    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
+    monkeypatch.setattr(
+        code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled-bin"
+    )  # #496 真实读取点
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
 
     assert _prepare(tmp_path, ["velites"])[0] == "velites"

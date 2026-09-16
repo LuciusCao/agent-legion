@@ -36,11 +36,12 @@ from server.app.mcp_server import (
     job_tools,
     preview_tools,
     prompt_tools,
+    schema_slim,
     shared_tools,
     skill_tools,
     workflow_tools,
 )
-from server.app.mcp_server.authoring_guide import AUTHORING_GUIDE
+from server.app.mcp_server.authoring_guide import guide_section
 from server.app.mcp_server.config import McpConfigError, McpServerConfig
 from server.app.mcp_server.tool_client import ToolClient
 
@@ -58,6 +59,11 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
 
         resolve = _static
     mcp = FastMCP("agent-legion-studio")
+    # #660 phase C: static external configs without a chat-session binding
+    # never register the two session-bound tools — unbound they can only
+    # answer "unavailable". The callable resolver (HTTP transport) always
+    # registers them: the binding arrives per request header.
+    session_bound = callable(config) or config.session_id is not None
 
     async def _client() -> tuple[McpServerConfig, ToolClient]:
         # Awaiting the resolver lets the HTTP transport's per-request config
@@ -65,28 +71,28 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         # thread instead of stalling the uvicorn loop (#158 review).
         return (resolved := await resolve()), ToolClient(resolved)
 
-    @mcp.tool()
-    def get_authoring_guide() -> str:
-        """The built-in workflow authoring playbook: capability naming, the
-        workflow YAML schema, code-node vs agent-node resolution, the
-        draft → validate → compare → human-publish flow, and common errors.
-        Read this BEFORE authoring from scratch. Served locally — no backend
-        call, always available."""
-        return AUTHORING_GUIDE
+    @mcp.tool(structured_output=False)
+    def get_authoring_guide(section: str | None = None) -> str:
+        """The built-in workflow authoring playbook. No section → FULL text;
+        pass one chapter key: tool-map, flow, yaml, capabilities, agents,
+        skills, errors. Read BEFORE authoring from scratch. Served locally —
+        no backend call."""
+        return guide_section(section)
 
-    @mcp.tool()
-    async def get_studio_context() -> str:
-        """Current Studio session context: the bound workspace, its active
-        workflow structure (nodes and capabilities), the node the human has
-        selected in Studio, and the canvas' unpublished draft YAML (both live
-        on every call). Takes no workspace_id — the session binding decides
-        which workspace you operate on. Call this first for context."""
-        config, client = await _client()
-        if config.session_id is None:
-            return "get_studio_context is unavailable: no chat session bound"
-        return await client.call("GET", f"/chat-sessions/{config.session_id}/context")
+    if session_bound:
 
-    @mcp.tool()
+        @mcp.tool(structured_output=False)
+        async def get_studio_context() -> str:
+            """Current Studio session context: bound workspace, its active
+            workflow structure, the human's selected node, and the canvas'
+            unpublished draft YAML (live every call). No workspace_id — the
+            session binding decides. Call first for context."""
+            config, client = await _client()
+            if config.session_id is None:
+                return "get_studio_context is unavailable: no chat session bound"
+            return await client.call("GET", f"/chat-sessions/{config.session_id}/context")
+
+    @mcp.tool(structured_output=False)
     async def save_node_code_draft(
         workspace_id: str,
         node_key: str,
@@ -94,12 +100,12 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         change_note: str = "",
         expected_capability: str | None = None,
     ) -> str:
-        """Save a draft of a code node's Python source (the module must expose
-        ``run(job, job_dir, runtime)``). Draft only — a human reviews and
-        publishes it in Studio. expected_capability declares the capability you
-        believe the node binds: a mismatch with an existing node is rejected;
-        a node absent from any published revision is accepted only with it
-        (skeleton draft ahead of the workflow draft introducing the node)."""
+        """Save a draft of a code node's Python source (module-level run
+        function required; get_authoring_guide §4). Draft only — a human
+        publishes in Studio. expected_capability declares the capability you
+        believe the node binds: mismatch with an existing node is rejected; a
+        node absent from any published revision is accepted only WITH it
+        (without it → 404)."""
         body: dict[str, Any] = {"code": code, "change_note": change_note or None}
         if expected_capability is not None:
             body["expected_capability"] = expected_capability
@@ -112,17 +118,17 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
             body,
         )
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def get_node_code(workspace_id: str, node_key: str) -> str:
-        """Read the current code state of a workflow code node: builtin source,
-        published custom code, and any pending draft."""
+        """Read a code node's current code state: builtin source, published
+        custom code, any pending draft."""
         _, client = await _client()
         return await client.call(
             "GET",
             f"/workspaces/{workspace_id}/nodes/{node_key}/code",
         )
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def save_agent_definition_draft(
         workspace_id: str,
         agent_id: str,
@@ -133,16 +139,13 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         requires_labels: dict[str, str] | None = None,
         config_schema: dict | None = None,
     ) -> str:
-        """Save a draft Agent definition (workspace-scoped) binding a capability
-        to a runtime and skill. runtime is one of: pi, velites. requires_labels
-        declares worker labels the agent requires ({"label": "value"}); config_schema
-        declares tunables as a JSON-Schema subset (see get_authoring_guide §5).
-        WARNING (full-payload semantics): omitted optional fields RESET to
-        their defaults (tools → catalog default tier, requires_labels → {},
-        config_schema → {}). To change just one field on an existing Agent,
-        first call get_agent_definitions and echo back every current value you
-        want kept. Draft only — a human publishes it in Studio before any job
-        can use it."""
+        """Save a draft Agent definition binding a capability to a runtime
+        (pi | velites) and skill (tunables: get_authoring_guide §5). WARNING:
+        FULL-PAYLOAD — omitted optional fields RESET to their defaults (tools
+        → catalog default tier, requires_labels → {}, config_schema → {}). To
+        change just one field on an existing Agent, first call
+        get_agent_definitions and echo back every current value you want
+        kept. Draft only — a human publishes it in Studio."""
         body: dict[str, Any] = {
             "capability": capability,
             "runtime": runtime,
@@ -181,8 +184,13 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
     agent_tools.register_agent_tools(mcp, _client)
     # Job observation tools (issue #329): read-only diagnosis surface —
     # context/detail/logs/artifacts/list/compare; no effecting operations.
-    job_tools.register_job_tools(mcp, _client)
+    job_tools.register_job_tools(mcp, _client, session_bound=session_bound)
 
+    # #660 phase A2: cosmetic de-fatting of the FastMCP-generated input
+    # schemas (per-parameter titles, explicit null defaults). tools/call
+    # validation runs on fn_metadata's pydantic model, not on the parameters
+    # dict, so rewriting the listing schema cannot change call semantics.
+    schema_slim.slim_tool_parameters(mcp)
     return mcp
 
 

@@ -63,8 +63,10 @@ class FakeJobDB:
         yield MagicMock(spec=DatabaseConnection)
 
     @staticmethod
-    def mark_nodes_for_rerun_in_transaction(conn, job_id, node_keys, downstream_map):
-        pass
+    def mark_nodes_for_rerun_in_transaction(
+        conn, job_id, node_keys, downstream_map, *, staged_artifact_names=frozenset()
+    ):
+        return []
 
     @staticmethod
     def resume_job(job_id):

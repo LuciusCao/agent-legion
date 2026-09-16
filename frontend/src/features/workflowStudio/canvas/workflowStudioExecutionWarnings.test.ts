@@ -185,4 +185,30 @@ describe('topLevelExecutionMissing', () => {
       )
     ).toBe(true)
   })
+
+  it('is false when every agent node has effective provider/model without defaults (#666)', () => {
+    // 顶层默认缺席但节点各自配齐（有效值已经 mergeNodeExecution 合并）——
+    // 没有真实缺口，不整体误报。
+    expect(
+      topLevelExecutionMissing(
+        makeWorkflow([
+          makeNode('a', 'agent', { provider: 'openai', model: 'gpt-5' }),
+          makeNode('b', 'agent', { provider: 'deepseek', model: 'r1' }),
+        ]),
+        {}
+      )
+    ).toBe(false)
+  })
+
+  it('is true when at least one agent node lacks effective provider/model', () => {
+    expect(
+      topLevelExecutionMissing(
+        makeWorkflow([
+          makeNode('a', 'agent', { provider: 'openai', model: 'gpt-5' }),
+          makeNode('b', 'agent', { provider: 'deepseek' }),
+        ]),
+        {}
+      )
+    ).toBe(true)
+  })
 })

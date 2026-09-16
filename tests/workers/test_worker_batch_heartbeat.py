@@ -544,3 +544,34 @@ def test_apply_beat_result_pair_matches_lost_and_dedups_cancelled() -> None:
     assert not new_lease_event.is_set(), "old lease's lost verdict must not touch the new attempt"
     assert gone_event.is_set()
     assert cancelled_calls == [["exec-9"]]
+
+
+def test_apply_beat_result_settled_prunes_without_ownership_lost() -> None:
+    """#590: settled verdicts (the completion followup — Host finished the
+    execution, the snapshot entry was stale) drop the entry quietly: no
+    ownership_lost fires, the next snapshot stops carrying the lease. Not
+    pair-matched by design (the probe answered for the execution); a
+    re-claimed execution re-registers before the next beat round."""
+    registry = BatchHeartbeatRegistry()
+    settled_event = _register(registry, "exec-settled", lease_id="lease-old")
+    keep_event = _register(registry, "exec-keep")
+
+    registry.apply_beat_result(lost=[], cancelled=[], settled=["exec-settled", "exec-absent"])
+
+    assert not settled_event.is_set(), "settled is not lost ownership"
+    assert not keep_event.is_set()
+    entries = {entry.execution_id for entry in registry.snapshot()}
+    assert entries == {"exec-keep"}, "settled entry must leave the beatable snapshot"
+
+
+def test_prune_settled_drops_only_named_executions() -> None:
+    """Direct prune_settled contract: empty input is a no-op (the common
+    pre-#590 beat round), named ids drop regardless of lease_id."""
+    registry = BatchHeartbeatRegistry()
+    _register(registry, "exec-1", lease_id="lease-a")
+    _register(registry, "exec-2")
+
+    registry.prune_settled([])
+    assert len(registry.snapshot()) == 2
+    registry.prune_settled(["exec-1"])
+    assert {entry.execution_id for entry in registry.snapshot()} == {"exec-2"}

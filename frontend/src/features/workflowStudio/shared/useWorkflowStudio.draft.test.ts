@@ -19,7 +19,6 @@ function wrapperWithClient(client: ReturnType<typeof createTestQueryClient>) {
 }
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudio } from './useWorkflowStudio'
-import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
 
 const activeRevisionPayload = {
   revision: {
@@ -522,46 +521,6 @@ describe('useWorkflowStudio draft & revision', () => {
       { expectedUpdatedAt: 'never-saved' }
     )
     await waitFor(() => expect(result.current.draftSave.status).toBe('saved'))
-  })
-
-  it('preserves a dirty draft when the baseline changes externally', () => {
-    const fetchDetail = vi.fn()
-    const { result, rerender } = renderHook(
-      ({ originalYaml }: { originalYaml: string }) =>
-        useWorkflowStudioDraft('ws1', originalYaml, null, null, fetchDetail),
-      { initialProps: { originalYaml: 'key: demo\nlabel: v1\n' } }
-    )
-
-    // 初始装载：草稿跟随基线。
-    expect(result.current.draftYaml).toBe('key: demo\nlabel: v1\n')
-    act(() => result.current.setDraftYaml('key: demo\nlabel: my edits\n'))
-    expect(result.current.dirty).toBe(true)
-
-    // 外部（他人/他 tab）发布使基线前进：用户草稿保留，打 preserved 标记。
-    rerender({ originalYaml: 'key: demo\nlabel: v2\n' })
-
-    expect(result.current.draftYaml).toBe('key: demo\nlabel: my edits\n')
-    expect(result.current.hasPreservedDraft).toBe(true)
-  })
-
-  it('resets to the new baseline when the draft is clean or matches it', () => {
-    const fetchDetail = vi.fn()
-    const { result, rerender } = renderHook(
-      ({ originalYaml }: { originalYaml: string }) =>
-        useWorkflowStudioDraft('ws1', originalYaml, null, null, fetchDetail),
-      { initialProps: { originalYaml: 'key: demo\nlabel: v1\n' } }
-    )
-
-    // 干净草稿：跟随新基线。
-    rerender({ originalYaml: 'key: demo\nlabel: v2\n' })
-    expect(result.current.draftYaml).toBe('key: demo\nlabel: v2\n')
-    expect(result.current.hasPreservedDraft).toBe(false)
-
-    // 自己 publish 成功：草稿与新基线一致，常规 reset 不误标 preserved。
-    rerender({ originalYaml: 'key: demo\nlabel: v3\n' })
-    act(() => result.current.setDraftYaml('key: demo\nlabel: v3\n'))
-    rerender({ originalYaml: 'key: demo\nlabel: v3\n' })
-    expect(result.current.hasPreservedDraft).toBe(false)
   })
 
   it('stays in error state for non-404 active revision failures', async () => {

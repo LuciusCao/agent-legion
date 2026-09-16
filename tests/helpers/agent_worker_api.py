@@ -233,13 +233,19 @@ def register(client: TestClient, credential: str | None = None, **overrides) -> 
 
 
 def claim(client: TestClient, token: str) -> dict:
+    """One claim via the default limit=1 batch request (#547: the single-object
+    response path is retired — a one-element ``claims`` list answers; this
+    helper keeps returning the bare claim for the many callers that read its
+    fields directly)."""
     response = client.post(
         "/api/agent-executions/claim",
         headers={"X-Agent-Worker-Token": token},
         json={"worker_id": "home-mini"},
     )
     assert response.status_code == 200, response.text
-    return dict(response.json())
+    claims = response.json()["claims"]
+    assert len(claims) == 1, f"expected one claim, got {len(claims)}"
+    return dict(claims[0])
 
 
 def empty_archive() -> bytes:

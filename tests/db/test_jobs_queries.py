@@ -22,11 +22,17 @@ def test_job_query_connections_use_postgres(tmp_path: Path) -> None:
 def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace("Cascade Workspace", default_workflow_key="demo_workflow")
+    batch_run = db.create_run(
+        workflow_key="demo_workflow",
+        source_kind="items",
+        digest_payload={"source": "cascade"},
+        workspace_id=workspace["id"],
+    )
     job = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-CASCADE",
-        run_id="",
+        run_id=batch_run["id"],
         title="Cascade",
         node_keys=["fetch_question_context"],
         workspace_id=workspace["id"],
@@ -38,12 +44,27 @@ def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
         conn.execute("delete from workspaces where id=%s", (workspace["id"],))
 
     with db._connect_read() as conn:
+        assert conn.execute("select 1 from runs where id=%s", (batch_run["id"],)).fetchone() is None
         assert conn.execute("select 1 from jobs where id=%s", (job["id"],)).fetchone() is None
         assert (
             conn.execute("select 1 from job_nodes where job_id=%s", (job["id"],)).fetchone() is None
         )
         assert (
             conn.execute("select 1 from node_runs where job_id=%s", (job["id"],)).fetchone() is None
+        )
+        assert (
+            conn.execute(
+                "select 1 from workspace_job_status_count_deltas where workspace_id=%s",
+                (workspace["id"],),
+            ).fetchone()
+            is None
+        )
+        assert (
+            conn.execute(
+                "select 1 from run_job_status_count_deltas where run_id=%s",
+                (batch_run["id"],),
+            ).fetchone()
+            is None
         )
 
 

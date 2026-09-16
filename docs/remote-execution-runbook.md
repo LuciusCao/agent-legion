@@ -342,20 +342,23 @@ The Worker data plane emits single-line JSON lifecycle events on both sides
 (`event` / `ts` + per-event payload). Host-side events go to stderr on the
 `agent_legion.worker_events` logger (INFO for transitions, DEBUG for the
 normal rhythm — enable debug when hunting); Worker-side events ride the
-supervisor console stream. Align the two sides by `execution_id` /
-`worker_id`.
+supervisor console stream AND persist to the structured-events sink
+`data/logs/events-<state dir 名>.jsonl` (#510; 5MB×3 rotation — the 500-line
+panel deque scrolls in 1–2 minutes under full load, the file keeps the
+low-frequency exception events reachable for a whole busy episode). Align
+the two sides by `execution_id` / `worker_id`.
 
 | Event | Side | Meaning / key fields |
 | --- | --- | --- |
 | `worker.registered` | Host | Registration committed: runtime version matrix, concurrency declarations, resolved workspace scope |
 | `worker.register_rejected` | Host | Registration refused (400/401): `reason` (`protocol_version_too_old` + `min_protocol_version`, `register_key_deleted`, `invalid_registration`) |
 | `worker.offline` | Host | A previously-online worker crossed the `last_seen` threshold (30 s); `last_seen_at` (the DB-true last seen) + `threshold_seconds`; fires once per transition |
-| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`); batch claim (#546) emits one line per claimed execution and the occupancy counters read the batch's FINAL pool state (the single-claim path snapshots at its own promote) |
+| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`); every claim is a batch claim since #547 retired the single path — one line per claimed execution, and the occupancy counters read the batch's FINAL pool state |
 | `claim.empty` | Host | 204 — queue drained for this worker's pools; `reasons` when the queue head was skipped (paused workspace, lock races…) |
 | `claim.rejected` | Host | Stock present but this worker was not admitted — see the reason codes below; when every pool is at its cap the scan never runs and the live pool state is the evidence (`capacity_full`/`code_capacity_full` synthesized from it) |
 | `execution.started` | Host | Reserved name in the event namespace (the claim→run start is covered by `claim.granted` + Worker-side `execution.claimed`) |
 | `execution.finished` | Host | Terminal commit: `outcome` (`completed`/`failed`/… or `rejected` with `reason: not_owned`), `exit_code`, `wall_seconds` (claim → committed result; `null` when the post-commit read failed) — committed outcomes are DEBUG rhythm, `outcome=rejected` is INFO (the last Host-side clue of that execution) |
-| `execution.heartbeat_rejected` | Host | Heartbeat refused: `reason: not_owned` or `lease_not_active` — the worker must stop beating |
+| `execution.heartbeat_rejected` | Host | Heartbeat refused: `reason: not_owned` or `lease_not_active` — the worker must stop beating. 完成态收尾（done/cancelled 执行的迟到心跳）不产生本事件：Host 在 beat 事务内分类后随 batch 响应的 `settled` 通道返回，Worker 静默摘除该租约（#590） |
 | `execution.lease_expired` | Host | The sweeper deleted an expired lease: `attempt`, `requeue_limit` (will it rerun here?) |
 | `deferring expired agent lease`（WARNING 日志行，非事件；`server.app.agent_broker.heartbeat_deferral`） | Host | #566 一期止血：claim 已越过 TTL 但 worker 控制面仍新鲜（claim 轮询在触活 `last_seen_at`）——执行面心跳饿死 ≠ worker 死亡，本次不删租约不重排，execution 续命等心跳恢复自愈；同一 execution 每跨一个 TTL 桶打一条。含义：该 worker 过载到心跳线程抢不到 GIL。心跳静默超过 2×TTL 后照常过期（此时才产生 `execution.lease_expired`）；它打断的是「过期 → 重排队 → 立即重 claim → 负载更高 → 再过期」的死亡螺旋放大器。盲区已于二期闭合：claim 循环虽只在领取预算为正时发 claim，但同循环的状态同步（`get_self`，每 `heartbeat_interval_seconds` 一拍）只要主循环存活就持续触活 `last_seen_at`；主循环整体饿死（executor 进程饱和）由 supervisor 进程内的租约心跳 relay（`worker/heartbeat_relay.py`）兜底——relay 按 executor 落的 `lease_snapshot.json` 发拍，同样触活 `last_seen_at`，让本延期在纯饱和场景也能生效 |
 | 心跳 relay 日志行（`worker/heartbeat_relay.py`，进 worker 控制台与滚动日志 `data/logs/executor-<state dir 名>.log`） | Worker | 「租约停拍（Host 硬兜底回收）；控制面 ping 继续」= executor 主循环超 60s 未刷新租约快照（进程卡死级饱和）：relay 停续租约（过期后由 Host 2×TTL 硬兜底回收），但继续用不续租的轻量已认证 ping（get_self → record_seen）维持 `last_seen_at` 新鲜——Host 侧 #570 deferral 因此仍能区分「执行面饥饿」与「worker 真离线」；「心跳 relay 批量拍失败」= Host 不可达，逐拍重试；「控制面 ping 失败」= 停拍期 ping 异常（每 episode 一条）。排查卡点看 executor 滚动日志（10MB×5 轮转） |

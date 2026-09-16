@@ -96,6 +96,9 @@ class HeartbeatOperations:
             document = {
                 "renewed": [str(value) for value in parsed.get("renewed", [])],
                 "lost": [str(value) for value in parsed.get("lost", [])],
+                # #590: completion followups — the Host classified them inside
+                # the beat transaction (terminal state), so no probe call.
+                "settled": [str(value) for value in parsed.get("settled", [])],
                 "cancelled_execution_ids": [
                     str(value) for value in parsed.get("cancelled_execution_ids", [])
                 ],

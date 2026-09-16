@@ -4,7 +4,10 @@
   align-items: center;
   gap: 8px 12px;
   padding: 6px 12px;
-  border-bottom: 1px solid #f0f0f0;
+  /* #658：位于消息列表与输入框之间——顶部细线与上方状态条分区，
+   * 浅灰底降低视觉权重，与输入区形成同一视觉组。 */
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
   font-size: 12px;
   color: #616161;
 }

@@ -36,6 +36,9 @@ class ServiceCallbacks:
     def on_turn_end(self, stop_reason: str) -> None:
         self._service._on_turn_end(self._session_id, stop_reason)
 
+    def on_turn_timeout(self) -> None:
+        self._service._on_turn_timeout(self._session_id)
+
     def on_turn_error(self, detail: str) -> None:
         self._service._on_error(self._session_id, detail, fatal=False)
 

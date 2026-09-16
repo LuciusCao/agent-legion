@@ -261,19 +261,22 @@ class StudioChatService:
         session = self.get_session(session_id, workspace_id)
         runtime = self.runtime(session_id)
         if runtime is not None:
-            with runtime.lock:
-                # A cancelled turn must not leave a permission prompt hanging:
-                # settle every pending request as denied before signalling the
-                # agent (AGENTS.md half-applied-state discipline). Pop each
-                # entry so a respond racing the cancel finds it gone (#158).
-                while runtime.pending_permissions:
-                    _request_id, pending = runtime.pending_permissions.popitem()
-                    pending.decision = {"deny": True}
-                    pending.event.set()
+            self._settle_pending_permissions(runtime)
             runtime.handle.cancel()
         if session["status"] in ("running", "awaiting_permission"):
             self.store.append_message(session_id, "status", "system", {"event": "cancel_requested"})
         return self.get_session(session_id)
+
+    @staticmethod
+    def _settle_pending_permissions(runtime: SessionRuntime) -> None:
+        """Deny every parked permission so a cancelled turn never leaves a
+        permission prompt hanging (AGENTS.md half-applied-state discipline).
+        Pop each entry so a respond racing the cancel finds it gone (#158)."""
+        with runtime.lock:
+            while runtime.pending_permissions:
+                _request_id, pending = runtime.pending_permissions.popitem()
+                pending.decision = {"deny": True}
+                pending.event.set()
 
     def set_allow_all_permissions(
         self, session_id: str, workspace_id: str, enabled: bool
@@ -348,6 +351,16 @@ class StudioChatService:
 
     def _on_turn_end(self, session_id: str, stop_reason: str) -> None:
         self._events().on_turn_end(session_id, stop_reason)
+
+    def _on_turn_timeout(self, session_id: str) -> None:
+        """#664: the prompt-turn ladder is about to auto-cancel a timed-out
+        turn. Settle parked permissions as denied first — an agent parked on
+        a permission response can only end its prompt after the reply
+        arrives, so skipping this would misread the healthy session as
+        wedged once the post-cancel grace expires."""
+        runtime = self.runtime(session_id)
+        if runtime is not None:
+            self._settle_pending_permissions(runtime)
 
     def _on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
         self._events().on_error(session_id, detail, fatal=fatal)

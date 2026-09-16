@@ -1,20 +1,20 @@
 import { SmartToy, SmartToyOutlined } from '@mui/icons-material'
 import { IconButton, Tooltip } from '@mui/material'
+import { useStudioView } from '../shared/studioStateContext'
 
-/** Agent 面板开关：出现在画布工具栏与节点详情面包屑右侧。 */
-export function StudioAgentPanelToggle(props: {
-  open: boolean
-  onToggle: () => void
-}) {
+/** Agent 面板开关：appbar（CommandBar）唯一入口（#668），开合状态读
+ * StudioViewContext（useWorkflowStudioPageView）。 */
+export function StudioAgentPanelToggle() {
+  const view = useStudioView()
   return (
-    <Tooltip title={props.open ? '收起 Agent 面板' : '展开 Agent 面板'}>
+    <Tooltip title={view.agentOpen ? '收起 Agent 面板' : '展开 Agent 面板'}>
       <IconButton
         size="small"
-        onClick={props.onToggle}
+        onClick={view.toggleAgent}
         aria-label="toggle agent panel"
-        color={props.open ? 'primary' : 'default'}
+        color={view.agentOpen ? 'primary' : 'default'}
       >
-        {props.open ? <SmartToy /> : <SmartToyOutlined />}
+        {view.agentOpen ? <SmartToy /> : <SmartToyOutlined />}
       </IconButton>
     </Tooltip>
   )

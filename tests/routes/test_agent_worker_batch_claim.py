@@ -1,9 +1,10 @@
-"""Batch claim route tests (issue #546).
+"""Batch claim route tests (issue #546; #547 retired the single-object path).
 
-``POST /api/agent-executions/claim`` with ``limit > 1`` promotes up to
-``limit`` executions in one transaction and answers ``{"claims": [...]}``
-(empty batch = the same 204); the default ``limit = 1`` keeps the legacy
-single-claim response byte-identical (no ``claims`` wrapper).
+``POST /api/agent-executions/claim`` promotes up to ``limit`` executions in
+one transaction and answers ``{"claims": [...]}`` (empty batch = 204). Since
+#547 EVERY request takes the batch path — the default ``limit=1`` answers a
+one-element ``claims`` list; the pre-#546 byte-identical single-object body
+is gone (batch claim shipped in 0.7.4, the mixed-fleet window closed).
 """
 
 from __future__ import annotations
@@ -67,9 +68,9 @@ def test_batch_claim_returns_claims_list(tmp_path: Path) -> None:
     assert len({claim["lease_id"] for claim in claims}) == 3
 
 
-def test_single_claim_response_shape_unchanged(tmp_path: Path) -> None:
-    """协议兼容回归：不发 limit（或 limit=1）时响应逐字段同 0.7.3——单对象、
-    无 claims 包装。"""
+def test_default_limit_answers_one_element_claims_list(tmp_path: Path) -> None:
+    """#547 回归：不发 limit（或 limit=1）也走批路径——单元素 claims 列表，
+    单对象响应形态已退役。"""
     app = make_app(tmp_path)
     seed_request(app.state.job_db, job_id="job-1", limit=2)
     seed_request(app.state.job_db, job_id="job-2", limit=2)
@@ -84,7 +85,10 @@ def test_single_claim_response_shape_unchanged(tmp_path: Path) -> None:
                 json=payload,
             )
             assert response.status_code == 200, response.text
-            assert set(response.json()) == _SINGLE_CLAIM_KEYS
+            body = response.json()
+            assert set(body) == {"claims"}
+            assert len(body["claims"]) == 1
+            assert set(body["claims"][0]) == _SINGLE_CLAIM_KEYS
 
 
 def test_batch_claim_empty_queue_is_204(tmp_path: Path) -> None:
@@ -133,9 +137,9 @@ def test_batch_claim_rejects_invalid_limit(tmp_path: Path) -> None:
     assert response.status_code == 422
 
 
-def test_pool_limits_alone_route_to_batch_path(tmp_path: Path) -> None:
-    """携带分池上限即批请求（即使 limit=1）——稳态补位（预算和=1）是最常见
-    形态，若只按 limit>1 分流，agent_limit=0 的池在单条路径上完全不受钳制。"""
+def test_pool_limits_alone_cap_per_pool(tmp_path: Path) -> None:
+    """分池上限在 limit=1 的稳态补位形态（预算和=1）仍然生效——
+    agent_limit=0 的池完全不受供给（#547 起全部请求共用本批路径）。"""
     app = make_app(tmp_path)
     seed_request(app.state.job_db, job_id="job-1", limit=10)
 

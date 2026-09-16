@@ -5,13 +5,17 @@ from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 class JobStatusQueriesMixin(ConnectionQueriesMixin):
     def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
-        # Reads the trigger-maintained counter table (DB-JOB-STATUS-COUNTS-001)
-        # instead of a group-by over the workspace's whole jobs slice.
+        # Read the compact base plus its normally tiny pending delta tail,
+        # never a group-by over the workspace's whole jobs slice.
         with self._connect_read() as conn:
             rows = conn.execute(
-                "select status, cnt from workspace_job_status_counts"
-                " where workspace_id = %s and cnt <> 0",
-                (workspace_id,),
+                "select status, sum(cnt) as cnt from ("
+                " select status, cnt from workspace_job_status_counts where workspace_id=%s"
+                " union all"
+                " select status, delta as cnt from workspace_job_status_count_deltas"
+                " where workspace_id=%s"
+                ") counts group by status having sum(cnt)<>0",
+                (workspace_id, workspace_id),
             )
             result: dict[str, int] = {}
             for row in rows:
