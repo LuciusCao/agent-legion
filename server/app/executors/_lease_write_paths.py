@@ -30,6 +30,15 @@ from server.app.workflows.sharding import delete_shards
 if TYPE_CHECKING:
     from server.app.executors.leases import ExecutorLeaseRepository
 
+# Sort sentinel for items whose workspace lock key cannot be resolved (the
+# jobs row vanished before this batch's per-request lookup — the claim itself
+# then fails without any jobs DML). hashtext's int domain is signed 32-bit, so
+# -(2**31) is a real possible key value; the sentinel only needs a
+# deterministic position (first — finish_many's legacy fallback was the ""
+# text key, this module's was the request's own workspace_id) — these items
+# fire no counter trigger at all, so their position cannot ring.
+_ORPHAN_WS_LOCK_KEY = -(2**31)
+
 
 def try_claim(repo: ExecutorLeaseRepository, request: LeaseClaimRequest) -> ClaimedExecution | None:
     with write_transaction(repo.path) as conn:
@@ -46,36 +55,26 @@ def try_claim_many(
 ) -> list[ClaimedExecution | None]:
     """Claim a batch of nodes in one transaction; None entries on capacity loss.
 
-    The claims run in (workspace_id, run_id, job_id) order — the shared
-    counter-lock sequence #591's finish batch writes in (#609 P1-2): the
-    claim's jobs promote and the finish's jobs flip take the same
-    (run_id, status)/(workspace_id, status) counter rows via the status
-    triggers, and two multi-item transactions visiting shared rows in
-    opposite orders close a 40P01 ring that repeated contention can
-    exhaust the retries on. The key comes from each request's jobs row
-    (resolved in-batch, same as the finish arm); queue position breaks
-    ties, verdicts are re-assembled in CALLER order so the flush zip and
-    per-request verdicts stay positional. Capacity semantics are order-
-    insensitive: every claim's capacity re-check reads the transaction's
-    own prior writes (a claim cannot see committed state mid-batch), so
-    which claim loses on a shared limit differs at most by the same
-    per-request tie-break the round-robin arrival order already produces.
+    Claims keep a stable (workspace hash, run_id, job_id) order shared with
+    ``finish_many``. v82 no longer relies on this order for counter safety —
+    trigger losers never wait — but retaining it keeps batch behavior
+    deterministic. Verdicts are reassembled in caller order.
     """
     with write_transaction(repo.path) as conn:
-        # (workspace_id, run_id, job_id, index, request): the first three
-        # are the counter keys the status triggers read — the full sort key
-        # #609 P1-2 pins, matching finish_many's write order.
-        keyed: list[tuple[str, str, str, int, LeaseClaimRequest]] = []
+        # Stable cross-batch order; not a counter-lock correctness boundary.
+        keyed: list[tuple[int, str, str, int, LeaseClaimRequest]] = []
         for index, request in enumerate(requests):
             job = conn.execute(
-                "select workspace_id, run_id from jobs where id = %s", (request.job_id,)
+                "select workspace_id, run_id, hashtext('ws:' || workspace_id)::int as ws_lock_key"
+                " from jobs where id = %s",
+                (request.job_id,),
             ).fetchone()
-            ws = str(job["workspace_id"]) if job else request.workspace_id
+            ws_key = int(job["ws_lock_key"]) if job else _ORPHAN_WS_LOCK_KEY
             run = str(job["run_id"] or "") if job else ""
-            keyed.append((ws, run, request.job_id, index, request))
+            keyed.append((ws_key, run, request.job_id, index, request))
         keyed.sort(key=lambda entry: entry[:4])
         by_index: dict[int, ClaimedExecution | None] = {}
-        for _ws, _run, _job_id, index, request in keyed:
+        for _ws_key, _run, _job_id, index, request in keyed:
             by_index[index] = claim_lease(conn, request, repo.data_dir)
         results = [by_index.get(index) for index in range(len(requests))]
     _broadcast_committed(repo, [str(r.job_id) for r in results if r is not None])
@@ -177,12 +176,17 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
     now_str = database_timestamp(now)
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
-            "select j.id from jobs j where j.status='running' and not exists"
+            "select j.id, j.workspace_id, hashtext('ws:' || j.workspace_id)::int as ws_lock_key"
+            " from jobs j where j.status='running' and not exists"
             " (select 1 from executor_leases l where l.job_id=j.id and l.status='active')"
         ).fetchall()
+        # Preserve deterministic recovery order; v82's try-fold triggers do
+        # not depend on this sort for deadlock safety.
         recovered = [
             job_id
-            for job_id in (str(row["id"]) for row in rows)
+            for job_id in (
+                str(row["id"]) for row in sorted(rows, key=lambda r: int(r["ws_lock_key"]))
+            )
             if _recover_orphaned_job(conn, job_id, now_str)
         ]
     _broadcast_committed(repo, recovered)

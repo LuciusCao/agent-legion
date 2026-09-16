@@ -408,20 +408,19 @@ def test_active_counts_reflects_released_leases(
 def test_try_claim_many_sorts_writes_by_counter_key(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
-    """#609 P1-2: try_claim_many runs its claims in (workspace_id, run_id,
-    job_id) order — the shared counter-lock sequence #591's finish batch
-    writes in. job_id alone does not pin it: two jobs sorted X→Y by job_id
-    can live in workspaces ordered Y→X, and two multi-item transactions
-    visiting shared counter rows in opposite orders close a 40P01 ring the
-    retry budget cannot always absorb. Verdicts stay positional in caller
-    order."""
+    """try_claim_many keeps the stable workspace-hash/run/job order shared
+    with finish_many while returning verdicts in caller order. v82 no longer
+    relies on this ordering for counter safety, but changing it would create
+    avoidable batch scheduling churn."""
     import server.app.executors._lease_write_paths as _write_paths
 
     # Two workspaces with explicit ids (ws-a < ws-b), two jobs in ws-a with
     # inverted run_id vs arrival order, one in ws-b. Caller order:
     # [ws-a/run-b, ws-b, ws-a/run-a]; write order must be
     # [ws-a/run-a, ws-a/run-b, ws-b] — both inversions (workspace and run)
-    # visible in one batch.
+    # visible in one batch. The ids are chosen so TEXT and lock-key order
+    # agree (verified in-test) — the inverted pair lives in the dedicated
+    # int-order test below.
     ws_a = str(
         queries.create_workspace(
             name="claim-ws-a", default_workflow_key="a-ws", workspace_id="a-ws"
@@ -439,6 +438,14 @@ def test_try_claim_many_sorts_writes_by_counter_key(
         conn.execute("update jobs set run_id='run-b' where id=%s", (job_a1,))
         conn.execute("update jobs set run_id='run-a' where id=%s", (job_a2,))
         conn.execute("update jobs set run_id='run-a' where id=%s", (job_b1,))
+        keys = conn.execute(
+            "select workspace_id, hashtext('ws:' || workspace_id)::int as ws_lock_key"
+            " from jobs where id in (%s, %s, %s) order by ws_lock_key",
+            (job_a1, job_a2, job_b1),
+        ).fetchall()
+        assert [str(k["workspace_id"]) for k in keys][:2] == [ws_a, ws_a] and keys[2][
+            "workspace_id"
+        ] == ws_b, "fixture ids must keep text and lock-key order aligned here"
 
     requests = [
         _claim_request(ws_a, job_a1, global_capacity=99, local_node_limit=None),
@@ -464,3 +471,61 @@ def test_try_claim_many_sorts_writes_by_counter_key(
     # Both inversions corrected: run-a before run-b inside ws-a, and all of
     # ws-a's claims before ws-b's despite ws-b arriving in the middle.
     assert order == [job_a2, job_a1, job_b1], "claims must run in (ws, run, job) order"
+
+
+def test_try_claim_many_orders_by_actual_ws_lock_key(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    """The deterministic leading key is the workspace hash, not text."""
+    import server.app.executors._lease_write_paths as _write_paths
+
+    # 播种一对「文本序与 hashtext int 序相反」的 workspace id：候选池里
+    # 文本较小的 id 锁键更大、文本较大的 id 锁键更小。
+    pool: list[tuple[str, int]] = []
+    with queries.connect() as conn:
+        for i in range(200):
+            wid = f"ws-k{i:03d}"
+            row = conn.execute("select hashtext(%s)::int as k", (f"ws:{wid}",)).fetchone()
+            assert row is not None
+            pool.append((wid, int(row["k"])))
+    ws_low, ws_high = "", ""
+    for wid, key in sorted(pool, key=lambda p: p[0]):
+        smaller = [w for w, other_key in pool if w > wid and other_key < key]
+        if smaller:
+            ws_low = wid
+            ws_high = min(smaller)
+            break
+    assert ws_low and ws_high, "expected an inverted (text, lock-key) pair among 200 candidates"
+    ws_low = str(
+        queries.create_workspace(
+            name="claim-ws-low", default_workflow_key=ws_low, workspace_id=ws_low
+        )["id"]
+    )
+    ws_high = str(
+        queries.create_workspace(
+            name="claim-ws-high", default_workflow_key=ws_high, workspace_id=ws_high
+        )["id"]
+    )
+    job_low = _create_job_in_workspace(queries, ws_low)
+    job_high = _create_job_in_workspace(queries, ws_high)
+
+    requests = [
+        _claim_request(ws_low, job_low, global_capacity=99, local_node_limit=None),
+        _claim_request(ws_high, job_high, global_capacity=99, local_node_limit=None),
+    ]
+    order: list[str] = []
+    real_claim_lease = _write_paths.claim_lease
+
+    def _recording_claim_lease(conn, request, data_dir=None):  # noqa: ANN001
+        order.append(request.job_id)
+        return real_claim_lease(conn, request, data_dir)
+
+    _write_paths.claim_lease = _recording_claim_lease
+    try:
+        results = repo_a.try_claim_many(requests)
+    finally:
+        _write_paths.claim_lease = real_claim_lease
+
+    assert all(r is not None for r in results), "capacity 99 must admit both"
+    # 文本序在前（low）的 claim 必须按 int 键排到后面（low 的锁键更大）。
+    assert order == [job_high, job_low], "claims must follow the stable workspace hash"

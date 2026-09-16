@@ -78,11 +78,27 @@ def beat_sharded(
     limiter: ShardThreadLimiter,
 ) -> ShardedBeat:
     """Beat every shard in parallel; verdicts merge, failures never sink
-    neighbours (see ShardedBeat for the outcome shape)."""
+    neighbours (see ShardedBeat for the outcome shape).
+
+    Admission rotates (codex #662 review): an overstaying socket from the
+    previous tick keeps its slot, so a saturated snapshot can have fewer
+    than MAX_INFLIGHT_SHARDS available — admitting always from shard 0
+    would starve the SAME tail every tick (stable insertion order) until
+    its leases expire. The limiter's fairness cursor rotates the admission
+    start to the first shard skipped last tick, so starvation becomes
+    round-robin delay instead. The cursor is keyed by stable lease identity,
+    not a shard array index: the next snapshot may prune completed leases
+    or append new ones, changing every later numeric position. Skipped
+    shards still read as unknown-round (retry semantics unchanged)."""
     shards = [
         leases[start : start + RELAY_BEAT_SHARD]
         for start in range(0, len(leases), RELAY_BEAT_SHARD)
     ]
+    if len(shards) > 1:
+        rotation = limiter.take_rotation(shards)
+        shards = shards[rotation:] + shards[:rotation]
+    else:
+        rotation = 0
     lost: list[tuple[str, str]] = []
     settled: list[str] = []
     cancelled: list[str] = []
@@ -128,9 +144,12 @@ def beat_sharded(
             # Every occupied slot belongs to an earlier request that has not
             # really returned. This shard is unknown for this tick, exactly
             # like a transport failure; retrying by spawning another socket
-            # would recreate the resource leak this limiter prevents.
+            # would recreate the resource leak this limiter prevents. The
+            # Record stable lease identities, not this rotated list's index:
+            # the next fresh snapshot may have pruned or appended leases.
             with lock:
                 failures += 1
+                limiter.note_skip(shard)
             log(f"心跳 relay 批量拍跳过（{len(shard)} 租约）：未完成分片已达上限")
             continue
         threads.append(thread)

@@ -625,3 +625,261 @@ def test_service_lifespan_owns_relay_thread_lifecycle(tmp_path: Path) -> None:
     while len(_relay_threads()) > baseline and time.monotonic() < deadline:
         time.sleep(0.05)
     assert len(_relay_threads()) == baseline
+
+
+def test_skipped_shards_rotate_to_the_head_next_tick_by_identity() -> None:
+    """codex #662 review P1：槽位被上一拍的慢请求跨拍占用时，固定从快照
+    首部准入会让同一尾部每拍被跳过（registry 插入序稳定）——饿死到租约
+    过期。轮转游标把本拍第一个被跳过的分片变成下一拍的准入头：持续
+    缺槽时尾部延迟变为轮转而非饥饿。"""
+    from worker.relay_thread_limiter import ShardThreadLimiter
+
+    limiter = ShardThreadLimiter(max_inflight=1)
+    # 模拟上一拍遗留的一个占用槽：占住唯一槽位。
+    assert limiter.start(lambda: None) is not None
+
+    shards = [[(f"exec-{i}", f"lease-{i}")] for i in range(3)]
+    # 本拍有 3 个分片：index 0 占到唯一槽位（上一拍的遗留），1/2 被跳过。
+    limiter.note_skip(shards[1])
+    limiter.note_skip(shards[2])
+    # take_rotation 消费锚点：下一拍从第一个仍存活的被跳分片开始。
+    assert limiter.take_rotation(shards) == 1
+    # 游标一次性消费：干净拍重置回头部。
+    assert limiter.take_rotation(shards) == 0
+
+    # 记录序即准入序，后记录的更小下标不得移动游标。
+    limiter.note_skip(shards[2])
+    limiter.note_skip(shards[1])
+    assert limiter.take_rotation(shards) == 2
+
+    # 首个被跳分片已全部完成时，顺延到下一个仍存在的锚点。
+    limiter.note_skip(shards[1])
+    limiter.note_skip(shards[2])
+    assert limiter.take_rotation([shards[0], shards[2]]) == 1
+
+    # 无跳过时恒为 0；分片数 < 2 时轮转无意义且会消费旧锚点。
+    limiter.note_skip(shards[2])
+    assert limiter.take_rotation([shards[2]]) == 0
+    assert limiter.take_rotation([]) == 0
+
+
+def test_beat_sharded_rotation_feeds_limiter_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """端到端：部分准入拍的游标 = 本拍第一个被跳过分片的原始位，下一拍
+    从那里起转（被跳分片先飞）；干净拍复位头部。（#662 自审替换：旧版
+    把唯一槽位预占到全 skip——rotation=0 时 first-skip 恒为 0，断言空转，
+    轮转路径一行都没走到。）"""
+    from worker import relay_shards
+    from worker.relay_thread_limiter import ShardThreadLimiter
+
+    monkeypatch.setattr(relay_shards, "RELAY_BEAT_SHARD", 2)
+    monkeypatch.setattr(relay_shards, "BATCH_BEAT_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(relay_shards, "_JOIN_MARGIN_SECONDS", 0.1)
+
+    hold = threading.Event()
+    park = threading.Event()
+    beats: list[str] = []
+    beats_lock = threading.Lock()
+
+    class _ParkedClient:
+        """准入的分片停在 park 上占住槽位；每拍结尾放行回收。"""
+
+        def heartbeat_batch(
+            self, executions: list[tuple[str, str]], timeout: float | None = None
+        ) -> tuple[int, dict[str, list[str]]]:
+            with beats_lock:
+                beats.append(executions[0][0])
+            park.wait(timeout=5)
+            return 200, {"lost": [], "settled": [], "cancelled_execution_ids": []}
+
+    def _tick(limiter: ShardThreadLimiter, leases: list[tuple[str, str]]) -> Any:
+        park.clear()
+        baseline = set(threading.enumerate())
+        outcome = relay_shards.beat_sharded(_ParkedClient(), leases, lambda _m: None, limiter)
+        assert outcome.verdicts is not None
+        park.set()
+        for thread in threading.enumerate():
+            if thread not in baseline:
+                thread.join(timeout=5)
+        return outcome
+
+    def _hold_slot() -> None:
+        hold.wait(timeout=5)
+
+    # 4 个租约 = 2 个分片；4 槽中 1 个被跨拍遗留占用，每拍可准入 1 个。
+    limiter = ShardThreadLimiter(max_inflight=2)
+    held = limiter.start(_hold_slot)
+    assert held is not None
+    leases = [
+        ("exec-0", "lease-0"),
+        ("exec-1", "lease-1"),
+        ("exec-2", "lease-2"),
+        ("exec-3", "lease-3"),
+    ]
+
+    # tick 1（rotation=0）：shard 0 准入并停住，shard 1 跳过 → 游标记 1
+    # （beat_sharded 下一拍自己消费，中间不偷看——take_rotation 是消费性的）。
+    _tick(limiter, leases)
+    assert beats == ["exec-0"]
+
+    # tick 2：beat_sharded 自取游标 1 → 轮转序 [shard1, shard0]，被跳过的
+    # shard 1 先飞（准入顺序钉住轮转真的发生），shard 0 让位 → 游标 0。
+    _tick(limiter, leases)
+    assert beats == ["exec-0", "exec-2"], "the skipped shard must fly first"
+    current_shards = [leases[:2], leases[2:]]
+    assert limiter.take_rotation(current_shards) == 0
+
+    # 收尾：放掉跨拍预占的槽位线程。
+    hold.set()
+    held.join(timeout=5)
+
+
+def test_skipped_shard_identity_survives_rotated_admission_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """跨三拍钉住 identity cursor 与轮转准入的组合语义。
+
+    每拍只准入 3/4 分片；无论当前列表已如何轮转，下一拍都必须从上一拍
+    首个被跳分片的稳定租约身份重新定位，而不是记录轮转后的相对下标。
+    """
+
+    from worker import relay_shards
+    from worker.relay_thread_limiter import ShardThreadLimiter
+
+    monkeypatch.setattr(relay_shards, "RELAY_BEAT_SHARD", 1)  # 1 lease = 1 shard
+    monkeypatch.setattr(relay_shards, "BATCH_BEAT_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(relay_shards, "_JOIN_MARGIN_SECONDS", 0.1)
+
+    release = threading.Event()
+    beats: list[str] = []
+    beats_lock = threading.Lock()
+
+    class _ParkedClient:
+        """记录分片首租约后停在 release 上：准入的分片整个 round 持有
+        槽位，跳过集成为轮转列表的确定后缀（槽位在 limiter.start 的
+        调用线程里取，与子线程调度无关）。"""
+
+        def heartbeat_batch(
+            self, executions: list[tuple[str, str]], timeout: float | None = None
+        ) -> tuple[int, dict[str, list[str]]]:
+            with beats_lock:
+                beats.append(executions[0][0])
+            release.wait(timeout=5)
+            return 200, {"lost": [], "settled": [], "cancelled_execution_ids": []}
+
+    def _run_round(
+        limiter: ShardThreadLimiter, client: _ParkedClient, leases: list[tuple[str, str]]
+    ) -> Any:
+        baseline = set(threading.enumerate())
+        outcome = relay_shards.beat_sharded(client, leases, lambda _m: None, limiter)
+        # 释放本拍准入的分片线程并等它们退出（槽位回收，下一拍干净起跑）。
+        release.set()
+        for thread in threading.enumerate():
+            if thread not in baseline:
+                thread.join(timeout=5)
+        release.clear()
+        return outcome
+
+    leases = [(f"exec-{i}", f"lease-{i}") for i in range(4)]  # 4 shards
+    client = _ParkedClient()
+    limiter = ShardThreadLimiter(max_inflight=3)
+
+    def _round_beats(round_leases: list[tuple[str, str]]) -> list[str]:
+        """Run one beat_sharded round; return this round's admitted heads."""
+        before = len(beats)
+        outcome = _run_round(limiter, client, round_leases)
+        assert outcome.verdicts is not None
+        return beats[before:]
+
+    # tick 1（无前置轮转，rotation=0）：原位 0/1/2 准入并停住，原位 3
+    # （轮转尾）跳过 → 游标 3。
+    assert sorted(_round_beats(leases)) == ["exec-0", "exec-1", "exec-2"]
+
+    # tick 2：从 exec-3 的身份重定位并轮转为 [3,0,1,2]；原位 2 被跳过。
+    assert sorted(_round_beats(leases)) == ["exec-0", "exec-1", "exec-3"]
+
+    # tick 3：exec-2 的身份在新一拍仍解析为轮转头。先占掉 2
+    # 个槽，让本拍只能准入轮转头——上一拍被跳过的原位 2 必须第一个
+    # （且是本拍唯一）被准入。
+    def _park() -> None:
+        release.wait(timeout=5)
+
+    parked = [limiter.start(_park) for _ in range(2)]
+    assert all(thread is not None for thread in parked)
+    assert _round_beats(leases) == ["exec-2"], (
+        "the shard skipped last tick (ORIGINAL position 2) must be admitted first"
+    )
+    # 收尾：释放并等掉预占槽位的两个线程。
+    release.set()
+    for thread in parked:
+        if thread is not None:
+            thread.join(timeout=5)
+
+
+def test_persistent_majority_deficit_rotates_every_shard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """持续缺槽 d > N/2 时，稳定身份游标仍须轮转到每个分片。
+
+    每拍只有一个空槽，下一拍必须从上一拍首个被跳过的存活身份开始；
+    N 拍内全部分片各飞一次，不能退化为固定前缀。生产可达：#617 的
+    慢滴 Host 实测 4/4 分片全部跨拍滞留。
+    """
+
+    from worker import relay_shards
+    from worker.relay_thread_limiter import ShardThreadLimiter
+
+    monkeypatch.setattr(relay_shards, "RELAY_BEAT_SHARD", 1)  # 1 lease = 1 shard
+    monkeypatch.setattr(relay_shards, "BATCH_BEAT_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(relay_shards, "_JOIN_MARGIN_SECONDS", 0.1)
+
+    hold = threading.Event()
+    park = threading.Event()
+    admitted: list[str] = []
+    admitted_lock = threading.Lock()
+
+    class _ParkedClient:
+        """准入的分片停到本拍结尾（占住本拍唯一可用槽）；hold 的三个预占
+        线程跨拍持续占槽——每拍恰好只有 1 个分片能飞。"""
+
+        def heartbeat_batch(
+            self, executions: list[tuple[str, str]], timeout: float | None = None
+        ) -> tuple[int, dict[str, list[str]]]:
+            with admitted_lock:
+                admitted.append(executions[0][0])
+            park.wait(timeout=5)
+            return 200, {"lost": [], "settled": [], "cancelled_execution_ids": []}
+
+    def _tick(limiter: ShardThreadLimiter, leases: list[tuple[str, str]]) -> None:
+        park.clear()
+        baseline = set(threading.enumerate())
+        outcome = relay_shards.beat_sharded(_ParkedClient(), leases, lambda _m: None, limiter)
+        assert outcome.verdicts is not None
+        park.set()
+        for thread in threading.enumerate():
+            if thread not in baseline:
+                thread.join(timeout=5)
+
+    def _hold_slot() -> None:
+        hold.wait(timeout=5)
+
+    # N=4 分片、持续 d=3 跨拍占用（4 槽里 3 个被 hold 预占）。
+    limiter = ShardThreadLimiter(max_inflight=4)
+    held = [limiter.start(_hold_slot) for _ in range(3)]
+    assert all(thread is not None for thread in held)
+    leases = [(f"exec-{i}", f"lease-{i}") for i in range(4)]
+
+    try:
+        for _ in range(4):  # N 拍：每个分片必须恰好飞过一次
+            _tick(limiter, leases)
+    finally:
+        park.set()
+        hold.set()
+        for thread in held:
+            if thread is not None:
+                thread.join(timeout=5)
+
+    # 准入序 [0,1,2,3]：每拍头部 = 上一拍第一个仍存活的被跳身份。
+    assert admitted == ["exec-0", "exec-1", "exec-2", "exec-3"], (
+        "a persistent majority deficit must rotate through EVERY shard, "
+        f"admission history: {admitted}"
+    )

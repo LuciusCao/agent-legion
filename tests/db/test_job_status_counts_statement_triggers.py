@@ -62,16 +62,24 @@ def _group_by(conn, run_id: str) -> dict[str, int]:
 
 def _run_counts(conn, run_id: str) -> dict[str, int]:
     rows = conn.execute(
-        "select status, cnt from run_job_status_counts where run_id=%s and cnt<>0",
-        (run_id,),
+        "select status, sum(cnt) as cnt from ("
+        " select status, cnt from run_job_status_counts where run_id=%s"
+        " union all select status, delta as cnt"
+        " from run_job_status_count_deltas where run_id=%s"
+        ") counts group by status having sum(cnt)<>0",
+        (run_id, run_id),
     ).fetchall()
     return {row["status"]: int(row["cnt"]) for row in rows}
 
 
 def _workspace_counts(conn, workspace_id: str) -> dict[str, int]:
     rows = conn.execute(
-        "select status, cnt from workspace_job_status_counts where workspace_id=%s and cnt<>0",
-        (workspace_id,),
+        "select status, sum(cnt) as cnt from ("
+        " select status, cnt from workspace_job_status_counts where workspace_id=%s"
+        " union all select status, delta as cnt"
+        " from workspace_job_status_count_deltas where workspace_id=%s"
+        ") counts group by status having sum(cnt)<>0",
+        (workspace_id, workspace_id),
     ).fetchall()
     return {row["status"]: int(row["cnt"]) for row in rows}
 

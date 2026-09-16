@@ -92,13 +92,14 @@ def test_relay_shard_admission_covers_the_ceiling() -> None:
     from worker.relay_shards import RELAY_BEAT_SHARD
     from worker.relay_thread_limiter import MAX_INFLIGHT_SHARDS
 
-    exact_cover = -(-MAX_DYNAMIC_CONCURRENCY // RELAY_BEAT_SHARD)
-    assert exact_cover == MAX_INFLIGHT_SHARDS
-    # Over-provision would defeat the limiter's purpose (bounding threads);
-    # under-provision starves a full snapshot's shards every tick. Exact
-    # cover is the design intent — slack requires a new comment + this test
-    # updated together.
-    assert exact_cover == 32
+    # Every live capacity plane rides the registry: agent + code executing
+    # pools (each ≤ ceiling) plus the upload lane's adopted leases — the
+    # upload share is capped at 2×ceiling by load_transfer_controls
+    # (upload_backlog_limit), so worst case ~4 × ceiling leases is
+    # ENFORCED. The limiter must cover that whole tail so no shard reads
+    # as an unknown round on a saturated snapshot.
+    worst_case_shards = -(-4 * MAX_DYNAMIC_CONCURRENCY // RELAY_BEAT_SHARD)
+    assert MAX_INFLIGHT_SHARDS == worst_case_shards == 128
 
 
 def test_load_shedding_decouples_from_the_concurrency_ceiling() -> None:

@@ -85,10 +85,12 @@ def main() -> int:
         # #546：claim_batch_limit 同款启动预检 fail-fast（非法批上限是配置
         # 错误，重试无意义）；缺省 = 默认值，行为见 worker/claim_batch.py。
         claim_batch_limit = load_claim_batch_limit(args.config)
+        # #662 review：传输面配置（含 upload_backlog_limit 的 relay 覆盖面
+        # 上界）同属预检——非法值重试无意义，exit 2 走人工修复路径。
+        transfer = load_transfer_controls(args.config)
     except ValueError as exc:
         print(f"Agent Worker 启动预检失败：{exc}", flush=True)
         return 2
-    transfer = load_transfer_controls(args.config)
     client = Client(str(config["host_url"]), transfer_timeout=transfer.transfer_timeout_seconds)
     stop = threading.Event()
     status = ExecutionStatusReporter.from_env()

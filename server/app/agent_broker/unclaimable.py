@@ -56,6 +56,8 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
         rows = conn.execute(
             """
             select r.execution_id, r.job_id, r.node_key, r.manifest_json,
+                   r.workspace_id,
+                   hashtext('ws:' || r.workspace_id)::int as ws_lock_key,
                    d.definition_json::jsonb->>'runtime' as runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
@@ -76,7 +78,8 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             """,
             (_SWEEP_LIMIT,),
         ).fetchall()
-        for row in rows:
+        # Stable workspace-hash order; v82 counter folders never wait.
+        for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
             try:
                 manifest = agent_claim_compatibility.live_claim_manifest(row)
             except ValueError as exc:
