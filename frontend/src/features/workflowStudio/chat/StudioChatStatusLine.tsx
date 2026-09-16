@@ -49,7 +49,7 @@ export function StatusLine({ message }: { message: ChatMessage }) {
   }
   const text =
     event === 'cancel_requested'
-      ? '已请求取消当前运行'
+      ? '已请求取消当前运行，等待 agent 收尾'
       : event === 'session_closed'
         ? '会话已关闭'
         : event === 'session_resumed'

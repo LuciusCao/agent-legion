@@ -99,5 +99,13 @@ describe('StatusLine', () => {
     )
     expect(container.querySelector('[role="alert"]')).toBeNull()
     expect(container).toHaveTextContent('正在压缩上下文')
+  it('frames cancel_requested as awaiting the agent wind-down, not failure', () => {
+    // #675：取消是请求（ACP SHOULD 语义），agent 仍在收尾；文案不得暗示
+    // 立即失败或工作丢失。
+    const { container } = render(
+      <StatusLine message={statusMessage('cancel_requested')} />
+    )
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+    expect(container).toHaveTextContent('已请求取消当前运行，等待 agent 收尾')
   })
 })

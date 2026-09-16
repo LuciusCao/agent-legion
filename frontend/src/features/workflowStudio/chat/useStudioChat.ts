@@ -247,8 +247,14 @@ export function useStudioChat(workspaceId: string | undefined) {
     })
   }
 
-  const { toolCalls, workflowDraft, agentDrafts, nodeDrafts, permissions } =
-    useMemo(() => deriveChatViews(messages), [messages])
+  const {
+    toolCalls,
+    workflowDraft,
+    agentDrafts,
+    nodeDrafts,
+    permissions,
+    lastRunCancelled,
+  } = useMemo(() => deriveChatViews(messages), [messages])
 
   // #693：最近一轮的终结类型——RunBar 据此区分「已完成」与「已超时终止」。
   const terminalEvent = useMemo(() => lastTerminalEvent(messages), [messages])
@@ -307,6 +313,7 @@ export function useStudioChat(workspaceId: string | undefined) {
     actionError,
     lastRunMs: runTiming.lastMs,
     lastTerminalEvent: terminalEvent,
+    lastRunCancelled,
     resume,
     resuming,
     selectSession: setActiveSessionId,

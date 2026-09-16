@@ -7,10 +7,12 @@ import {
   extractWorkflowDraft,
   groupToolCalls,
   lastTerminalEvent,
+  lastRunCancelled,
   maxSeq,
   parseFirstJson,
   permissionResolutionText,
   planEntries,
+  stopReason,
   streamingTextId,
   upsertMessage,
 } from './studioChatMessages'
@@ -272,7 +274,6 @@ describe('misc readers', () => {
 describe('streamingTextId', () => {
   const turnEnd = () =>
     message('status', 'system', { event: 'turn_end', stop_reason: 'end' })
-
   it('returns the last agent text message with no terminal status after it', () => {
     const first = message('text', 'agent', { text: '第一轮' })
     const second = message('text', 'agent', { text: '第二轮' })
@@ -313,5 +314,62 @@ describe('lastTerminalEvent', () => {
     const neutral = message('status', 'system', { event: 'cancel_requested' })
     expect(lastTerminalEvent([text, neutral])).toBeNull()
     expect(lastTerminalEvent([])).toBeNull()
+describe('lastRunCancelled', () => {
+  /** #675：取消轮收尾视图的取值来源——尾部最近一条终止状态消息。 */
+  const cancelledTurnEnd = () =>
+    message('status', 'system', { event: 'turn_end', stop_reason: 'cancelled' })
+
+  it('is true when the latest terminal status is a cancelled turn_end', () => {
+    expect(lastRunCancelled([cancelledTurnEnd()])).toBe(true)
+    expect(
+      lastRunCancelled([
+        message('text', 'agent', { text: '中断前的话' }),
+        cancelledTurnEnd(),
+      ])
+    ).toBe(true)
+  })
+
+  it('is false when the latest turn ended normally', () => {
+    expect(
+      lastRunCancelled([
+        cancelledTurnEnd(),
+        message('status', 'system', {
+          event: 'turn_end',
+          stop_reason: 'end_turn',
+        }),
+      ])
+    ).toBe(false)
+  })
+
+  it('is false for other terminal statuses (error / closed / resumed)', () => {
+    for (const event of ['error', 'session_closed', 'session_resumed']) {
+      expect(
+        lastRunCancelled([
+          cancelledTurnEnd(),
+          message('status', 'system', { event }),
+        ])
+      ).toBe(false)
+    }
+  })
+
+  it('ignores non-status tail rows and returns false without any terminal status', () => {
+    // 取消轮之后的工具收尾/新用户消息不带终止状态，不改变上一轮结论。
+    expect(
+      lastRunCancelled([
+        cancelledTurnEnd(),
+        toolCall('tc-agent', { title: 'Agent', status: 'completed' }),
+      ])
+    ).toBe(true)
+    expect(lastRunCancelled([message('text', 'user', { text: '问' })])).toBe(
+      false
+    )
+    expect(lastRunCancelled([])).toBe(false)
+  })
+
+  it('reads the stop reason from a status message', () => {
+    expect(stopReason(cancelledTurnEnd())).toBe('cancelled')
+    expect(stopReason(message('status', 'system', { event: 'turn_end' }))).toBe(
+      ''
+    )
   })
 })
