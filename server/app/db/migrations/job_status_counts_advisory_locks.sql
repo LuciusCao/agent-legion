@@ -97,11 +97,17 @@ begin
       perform try_fold_workspace_job_status_counts(k, lk);
     end loop;
   elsif TG_OP = 'DELETE' then
+    -- A workspace cascade deletes the parent before this AFTER trigger runs.
+    -- Skip its doomed negative deltas; ordinary job deletes still see and
+    -- lock the parent through the delta table's immediate foreign key.
     insert into workspace_job_status_count_deltas(workspace_id, status, delta)
-    select workspace_id, status, -count(*)::bigint from old_table group by 1, 2;
+    select o.workspace_id, o.status, -count(*)::bigint
+    from old_table o join workspaces w on w.id = o.workspace_id
+    group by 1, 2;
     for k, lk in
-      select workspace_id, hashtext('ws:' || workspace_id)::int
-      from old_table group by 1, 2 order by 2, 1
+      select o.workspace_id, hashtext('ws:' || o.workspace_id)::int
+      from old_table o join workspaces w on w.id = o.workspace_id
+      group by 1, 2 order by 2, 1
     loop
       perform try_fold_workspace_job_status_counts(k, lk);
     end loop;
@@ -146,13 +152,17 @@ begin
       perform try_fold_run_job_status_counts(k, ws_lk, run_lk);
     end loop;
   elsif TG_OP = 'DELETE' then
+    -- Same cascade guard as the workspace twin. Jobs with a real run_id hit
+    -- this trigger first, so both families must filter the vanished parent.
     insert into run_job_status_count_deltas(workspace_id, run_id, status, delta)
-    select workspace_id, run_id, status, -count(*)::bigint from old_table
-    where run_id <> '' group by 1, 2, 3;
+    select o.workspace_id, o.run_id, o.status, -count(*)::bigint
+    from old_table o join workspaces w on w.id = o.workspace_id
+    where o.run_id <> '' group by 1, 2, 3;
     for k, ws_lk, run_lk in
-      select run_id, hashtext('ws:' || workspace_id)::int,
-             hashtext('run:' || run_id)::int
-      from old_table where run_id <> '' group by 1, 2, 3 order by 2, 3, 1
+      select o.run_id, hashtext('ws:' || o.workspace_id)::int,
+             hashtext('run:' || o.run_id)::int
+      from old_table o join workspaces w on w.id = o.workspace_id
+      where o.run_id <> '' group by 1, 2, 3 order by 2, 3, 1
     loop
       perform try_fold_run_job_status_counts(k, ws_lk, run_lk);
     end loop;
