@@ -100,9 +100,12 @@ def preprocess_update(
             _apply_marker(backend, session_id, runtime, marker, text)
             return True
         if runtime is not None and runtime.loading:
-            # session/load replays history as fresh-looking chunks before
-            # on_ready; those messages are already on the persisted
-            # timeline, so persisting them again would duplicate it (#694).
+            # session/load replays history as fresh-looking chunks; those
+            # messages are already on the persisted timeline, so persisting
+            # them again would duplicate it (#694). The window is armed by
+            # spawn only for a load attempt and stays open until the first
+            # post-resume prompt — the SDK dispatches notifications
+            # asynchronously, so an on_ready boundary would race the replay.
             return True
     if runtime is not None and counts_as_turn_content(kind):
         with runtime.lock:
@@ -145,11 +148,12 @@ def _apply_marker(
 
 
 def note_ready(runtime: SessionRuntime | None) -> None:
-    """Fresh process = no replay window and no inherited compaction state."""
+    """Fresh process = no inherited compaction state. (The replay window is
+    NOT closed here — the SDK dispatches session/load replay notifications
+    asynchronously, so it stays armed until the first post-resume prompt.)"""
     if runtime is None:
         return
     with runtime.lock:
-        runtime.loading = False
         runtime.compacting = False
         runtime.compacting_since = None
 

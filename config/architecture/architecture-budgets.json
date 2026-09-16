@@ -1563,7 +1563,7 @@
     "server/app/studio_chat/callbacks.py": 37,
     "server/app/studio_chat/capabilities.py": 42,
     "server/app/studio_chat/channels.py": 13,
-    "server/app/studio_chat/compaction.py": 135,
+    "server/app/studio_chat/compaction.py": 134,
     "server/app/studio_chat/events.py": 128,
     "server/app/studio_chat/mcp_hint.py": 45,
     "server/app/studio_chat/payloads.py": 25,

@@ -203,7 +203,6 @@ def test_on_ready_clears_inherited_compacting_flag(direct) -> None:
         service._db.update_studio_chat_session(session_id, compacting=True)
         _ready(service, session_id)
         assert runtime.compacting is False
-        assert runtime.loading is False
         assert service.get_session(session_id)["compacting"] is False
     finally:
         service.shutdown()
@@ -261,14 +260,27 @@ def test_slow_or_slash_turns_are_not_flagged(direct) -> None:
 def test_replay_chunks_during_session_load_are_not_persisted(direct) -> None:
     service, _bus, session_id, runtime, workspace_id = direct
     try:
-        # Runtime starts in the loading window (session/load replay).
-        assert runtime.loading is True
+        # spawn_session_runtime arms the window only for a session/load
+        # attempt; simulate that state directly. The window outlives
+        # on_ready (the SDK dispatches replay notifications asynchronously)
+        # and closes at the first post-resume prompt.
+        with runtime.lock:
+            runtime.loading = True
         service._on_update(session_id, _chunk("历史消息一"))
+        _ready(service, session_id)
+        # Still inside the window after on_ready: late-dispatched replay
+        # chunks stay suppressed.
         service._on_update(session_id, _chunk("历史消息二"))
         assert _agent_texts(service, session_id, workspace_id) == []
-        _ready(service, session_id)
         service.send_message(session_id, workspace_id, "hello")
         service._on_update(session_id, _chunk("新回复"))
         assert _agent_texts(service, session_id, workspace_id) == ["新回复"]
     finally:
         service.shutdown()
+
+
+def test_loading_window_is_armed_only_for_session_load_attempts() -> None:
+    """#694 regression: a plain (non-resume) runtime must NOT suppress
+    chunks — the trailing-chunk fold after turn_end depends on it."""
+    runtime = SessionRuntime(_StubHandle(), token="t")
+    assert runtime.loading is False

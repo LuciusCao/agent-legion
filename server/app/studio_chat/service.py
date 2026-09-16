@@ -228,9 +228,13 @@ class StudioChatService:
         # (not at turn end) so trailing chunks of the finished turn — the ACP
         # SDK can deliver them after turn_end — keep folding into that turn's
         # rows instead of starting tail-only orphan rows (#98). The #694
-        # degenerate-turn bookkeeping rides the same critical section.
+        # degenerate-turn bookkeeping rides the same critical section, and
+        # the first prompt after a session/load closes the replay window
+        # (chunks before it can only be replay — the agent never speaks
+        # without a prompt).
         with runtime.lock:
             runtime.stream.reset()
+            runtime.loading = False
             runtime.turn_started_at = time.monotonic()
             runtime.turn_update_count = 0
             runtime.turn_slash_command = text.lstrip().startswith("/")

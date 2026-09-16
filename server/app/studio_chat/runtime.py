@@ -64,10 +64,13 @@ class SessionRuntime:
         self.config_lock = threading.Lock()
         self.config_version = 0
         # #694 context-health signals (compaction.py): loading suppresses
-        # session/load replay chunks until on_ready; compacting mirrors the
-        # kimi background-compaction window (send guard + UI), self-clearing
-        # after compaction.COMPACTING_TIMEOUT_SECONDS via compacting_since.
-        self.loading = True
+        # session/load replay chunks — armed by spawn_session_runtime only
+        # when a session/load is actually attempted (resume with a prior ACP
+        # session id), closed by the first post-resume prompt in
+        # send_message; compacting mirrors the kimi background-compaction
+        # window (send guard + UI), self-clearing after
+        # compaction.COMPACTING_TIMEOUT_SECONDS via compacting_since.
+        self.loading = False
         self.compacting = False
         self.compacting_since: float | None = None
         # Per-turn bookkeeping for the degenerate-turn detector: send_message
