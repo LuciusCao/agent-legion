@@ -435,7 +435,7 @@
     "frontend/src/features/workflowStudio/inspector/WorkflowRuntimeOptionsDatalist.tsx": 22,
     "frontend/src/features/workflowStudio/inspector/WorkflowSkillFileList.module.css": 36,
     "frontend/src/features/workflowStudio/inspector/WorkflowSkillFileList.tsx": 36,
-    "frontend/src/features/workflowStudio/inspector/WorkflowSkillFileTreeNode.tsx": 90,
+    "frontend/src/features/workflowStudio/inspector/WorkflowSkillFileTreeNode.tsx": 89,
     "frontend/src/features/workflowStudio/inspector/WorkflowSkillPreviewPanel.module.css": 81,
     "frontend/src/features/workflowStudio/inspector/WorkflowSkillPreviewPanel.tsx": 71,
     "frontend/src/features/workflowStudio/inspector/WorkflowSkillVersionSelect.tsx": 53,
