@@ -91,3 +91,18 @@ entries:
     themselves are stable in isolation (42+ consecutive local passes).
   observed: PR #636 backend-coverage lane (run 34765238572), 2026-09-13, rerun passed.
   deadline: 2026-10-13
+- id: FLAKY-011
+  nodeid: tests/workflows/test_workflow_execution_control.py::test_worker_runs_only_target_closure_in_until_node_mode
+  owner: test-infra
+  reason: >-
+    Reran once in the velites 0.5.4 release PR #684 CI (backend-coverage
+    lane, run 35056532267, 2026-09-16) — the retry passed and the lane's
+    only failure was the rerun-governance step (nodeid not yet
+    registered). The PR touches velites/Cargo.toml + install-worker.sh +
+    CHANGELOG only; the test is Python-plane (target-closure selection in
+    until-node mode) and cannot interact with the diff. Same loaded-runner
+    timing family as FLAKY-009/010 (2-core runner, three shards plus
+    coverage): registered for rerun absorption; 8 consecutive local
+    passes, no poll loop of its own (single worker._poll() call).
+  observed: PR #684 backend-coverage lane (run 35056532267), 2026-09-16, rerun passed and the lane count was green.
+  deadline: 2026-10-16
