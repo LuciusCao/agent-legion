@@ -87,6 +87,12 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   迁移文档），下一版本周期移除（config.rs + lib.rs gateway 兜底分支）。
   该文件仅供直调 CLI 兜底、结构上进不了 Worker 模型发现——新用户照旧
   教程配置后 Worker 完全看不见，表现为「任务无人认领」类困惑。
+- velites 0.5.3 → 0.5.4 落版：0.5.3 tag 后 velites 子树积了三个未随
+  任何 velites 版本线发布的改动——#542 契约读取三档回落（根目录
+  contract.yaml 为权威位置，畸形 fail-closed，嵌入块废弃信号）、
+  #602 迁移桥 deprecation 警告（上条）、其 R1 review 修正。独立版本
+  线随源码前进——三平台二进制经 velites-v0.5.4 tag 发布；
+  scripts/install-worker.sh 默认版本同步到 0.5.4。
 - Studio 对话配置区归位（issue #658）：权限模式/模型/思考档位配置条
   从 SessionBar 正下方移至状态栏与输入框之间（顶部 1px 分隔线 +
   浅灰底，读作输入区上方的低权重 footer 带，与输入框同视觉组）；
