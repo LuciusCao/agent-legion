@@ -2,12 +2,8 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { rerunJob, runToJob } from '../../api/jobApi'
 import { queryKeys } from '../../lib/queryKeys'
-import { StudioChatMessageList } from '../workflowStudio/chat/StudioChatMessageList'
-import { StudioChatRunBar } from '../workflowStudio/chat/StudioChatRunBar'
-import { StudioChatQueueBar } from '../workflowStudio/chat/StudioChatQueueBar'
-import { StudioChatInput } from '../workflowStudio/chat/StudioChatInput'
-import { StudioChatResumeBar } from '../workflowStudio/chat/StudioChatResumeBar'
-import { useStudioChatQueue } from '../workflowStudio/chat/useStudioChatQueue'
+import { AgentChatPanel } from '../workflowStudio/chat/AgentChatPanel'
+import shellStyles from '../workflowStudio/chat/AgentChatPanel.module.css'
 import {
   latestJobActionSuggestions,
   suggestionKey,
@@ -28,14 +24,13 @@ type Props = {
 
 /** 排查对话面板（#329）：复用 Studio 对话的全部传输与渲染件，差别只在
  * 会话引导（自动绑定 job/node 上下文）与动作确认卡片（agent 建议 → 人确认
- * → 宿主会话执行 rerunJob/runToJob）。 */
+ * → 宿主会话执行 rerunJob/runToJob）。外壳复用 AgentChatPanel 骨架（#695）。 */
 export function JobDiagnosisPanel({ workspaceId, target }: Props) {
   const queryClient = useQueryClient()
   const { chat, bootstrapError, retryBootstrap } = useJobDiagnosis(
     workspaceId,
     target
   )
-  const queue = useStudioChatQueue(chat.busy, chat.activeSessionId, chat.send)
   const [cardStates, setCardStates] = useState<Record<string, ActionCardState>>(
     {}
   )
@@ -82,81 +77,56 @@ export function JobDiagnosisPanel({ workspaceId, target }: Props) {
 
   if (chat.agentsError) {
     return (
-      <div className={styles.emptyState}>Agent 列表加载失败，请稍后重试</div>
+      <div className={shellStyles.emptyState}>
+        Agent 列表加载失败，请稍后重试
+      </div>
     )
   }
   if (!chat.agentsLoading && chat.agents.length === 0) {
     return (
-      <div className={styles.emptyState}>
+      <div className={shellStyles.emptyState}>
         未检测到可用的 ACP agent，请联系管理员配置
       </div>
     )
   }
 
-  const inputDisabled = !chat.session || chat.closed
-  const disabledReason = !chat.session
-    ? '正在创建排查会话…'
-    : chat.closed
-      ? '会话已关闭或出错，点「继续对话」恢复（上下文保留）'
-      : null
-
   return (
-    <div className={styles.chatPanel}>
-      {bootstrapError && (
-        <div className={styles.statusWarning} role="alert">
-          排查会话创建失败：{bootstrapError}
-          <button type="button" onClick={retryBootstrap}>
-            重试
-          </button>
-        </div>
-      )}
-      {chat.actionError && !bootstrapError && (
-        <div className={styles.statusWarning} role="alert">
-          {chat.actionError}
-        </div>
-      )}
-      {chat.activeSessionId === null ? (
-        <div className={styles.emptyState}>正在创建排查会话…</div>
-      ) : (
-        <StudioChatMessageList
-          chat={chat}
-          workspaceId={workspaceId}
-          // 排查面板没有画布可承接 workflow 草稿；agent 若仍产草稿，
-          // 草稿在 Studio 画布流程里照样可审。
-          onApplyWorkflowDraft={() => undefined}
-        />
-      )}
-      {visibleSuggestions.length > 0 && (
-        <div className={styles.actionArea}>
-          {visibleSuggestions.map((suggestion) => (
-            <JobDiagnosisActionCard
-              key={suggestionKey(suggestion)}
-              suggestion={suggestion}
-              state={
-                cardStates[suggestionKey(suggestion)] ?? { phase: 'pending' }
-              }
-              onConfirm={(item) => void confirm(item)}
-              onDismiss={dismiss}
-            />
-          ))}
-        </div>
-      )}
-      <StudioChatRunBar
-        status={chat.session?.status ?? null}
-        busy={chat.busy}
-        lastRunMs={chat.lastRunMs}
-        onCancel={() => void chat.cancel()}
-      />
-      {/* #558：会话 error/closed 时给恢复入口（此前只有禁用文案，闲置后
-       * 工具通道死亡的诊断会话只能废弃）。 */}
-      {chat.closed && chat.session && <StudioChatResumeBar chat={chat} />}
-      <StudioChatQueueBar queue={queue} />
-      <StudioChatInput
-        busy={chat.busy}
-        disabled={inputDisabled}
-        disabledReason={disabledReason}
-        onSend={queue.submit}
-      />
-    </div>
+    <AgentChatPanel
+      chat={chat}
+      workspaceId={workspaceId}
+      className={styles.chatShell}
+      bootstrapError={
+        bootstrapError
+          ? {
+              message: `排查会话创建失败：${bootstrapError}`,
+              onRetry: retryBootstrap,
+            }
+          : null
+      }
+      actionErrorTone="warning"
+      emptyState="正在创建排查会话…"
+      noSessionReason="正在创建排查会话…"
+      closedReason="会话已关闭或出错，点「继续对话」恢复（上下文保留）"
+      actionArea={
+        visibleSuggestions.length > 0 ? (
+          <div className={styles.actionArea}>
+            {visibleSuggestions.map((suggestion) => (
+              <JobDiagnosisActionCard
+                key={suggestionKey(suggestion)}
+                suggestion={suggestion}
+                state={
+                  cardStates[suggestionKey(suggestion)] ?? { phase: 'pending' }
+                }
+                onConfirm={(item) => void confirm(item)}
+                onDismiss={dismiss}
+              />
+            ))}
+          </div>
+        ) : null
+      }
+      // 排查面板没有画布可承接 workflow 草稿；agent 若仍产草稿，
+      // 草稿在 Studio 画布流程里照样可审。
+      onApplyWorkflowDraft={() => undefined}
+    />
   )
 }

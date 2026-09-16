@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
+from server.app.studio_chat import compaction, prompt_turn
 from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call, maybe_emit_mcp_hint
 from server.app.studio_chat.permissions import handle_permission_request
 from server.app.studio_chat.runtime import SessionRuntime
@@ -60,16 +61,24 @@ class AcpEventHandlers:
         # rides the UPDATE itself (#158): a re-read-then-write would leave a
         # check-and-set window for close to land in between. The agent config
         # surface fields (#368) ride the same UPDATE (session_config.py).
+        compaction.note_ready(self._backend.runtime(session_id))
         self._backend.db.update_studio_chat_session_if(
             session_id,
             status_not_in=("closed", "error"),
             status="idle",
+            # #694: a fresh process inherits no compaction window; the row
+            # mirror may still carry the old process's flag.
+            compacting=False,
             **session_config_fields(capabilities, opened),
         )
 
     def on_update(self, session_id: str, update: dict[str, Any]) -> None:
         kind = update.get("sessionUpdate")
         runtime = self._backend.runtime(session_id)
+        # #694 pre-dispatch: usage mirror, compaction markers, session/load
+        # replay suppression, per-turn content counting (compaction.py).
+        if compaction.preprocess_update(self._backend, session_id, runtime, update):
+            return
         if kind in ("agent_message_chunk", "agent_thought_chunk"):
             text = str((update.get("content") or {}).get("text") or "")
             slot = "thought" if kind == "agent_thought_chunk" else "text"
@@ -105,7 +114,8 @@ class AcpEventHandlers:
             return
         if apply_config_update(self._backend, session_id, update):
             return  # mode/config mirror rewrites (#368, session_config.py)
-        # user_message_chunk / usage updates: not persisted.
+        # user_message_chunk / session_info_update: not persisted (usage is
+        # mirrored in the pre-dispatch, compaction.py).
 
     def on_permission_request(
         self, session_id: str, tool_call: dict[str, Any], options: list[dict[str, Any]]
@@ -116,14 +126,28 @@ class AcpEventHandlers:
                 runtime.stream.reset()
         return handle_permission_request(self._backend, session_id, tool_call, options)
 
-    def on_turn_end(self, session_id: str, stop_reason: str) -> None:
+    def on_turn_end(self, session_id: str, stop_reason: str, *, timed_out: bool = False) -> None:
         # The MCP-visibility smoke signal is advisory only (mcp_hint.py): a
         # turn without an agent-legion tool call is not evidence of a wiring
-        # problem, so the hint fires once per session, never on cancels.
-        maybe_emit_mcp_hint(self._backend, session_id, stop_reason)
-        self._backend.store.append_message(
-            session_id, "status", "system", {"event": "turn_end", "stop_reason": stop_reason}
+        # problem, so the hint fires once per session, never on cancels — and
+        # never on timeout-terminated turns (#693), which are cancels too.
+        if not timed_out:
+            maybe_emit_mcp_hint(self._backend, session_id, stop_reason)
+        # #694: an instant zero-content end_turn means the prompt never
+        # reached the agent (quiescence window) — warn before the turn_end.
+        compaction.maybe_note_empty_turn(
+            self._backend, session_id, stop_reason, timed_out=timed_out
         )
+        if timed_out:
+            # #693: the turn was ended by the prompt-timeout ladder, not by
+            # the agent finishing — record it as its own visible event so the
+            # UI can say "terminated on timeout" instead of "done". Read the
+            # ladder constant through the module so tests can shrink it.
+            detail = f"运行超过 {int(prompt_turn.PROMPT_TIMEOUT_SECONDS // 3600)} 小时已被终止"
+            content = {"event": "turn_timeout", "stop_reason": stop_reason, "detail": detail}
+        else:
+            content = {"event": "turn_end", "stop_reason": stop_reason}
+        self._backend.store.append_message(session_id, "status", "system", content)
         # Guarded (#158): turn_end only moves a live turn back to idle; a
         # concurrent close/error owns the final state.
         self._backend.db.update_studio_chat_session_if(

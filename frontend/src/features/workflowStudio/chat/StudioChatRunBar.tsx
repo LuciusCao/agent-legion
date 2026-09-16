@@ -4,6 +4,7 @@ type Props = {
   status: string | null
   busy: boolean
   lastRunMs: number | null
+  lastTerminalEvent: string | null
   onCancel: () => void
 }
 
@@ -45,6 +46,15 @@ export function StudioChatRunBar(props: Props) {
     )
   }
   if (props.lastRunMs !== null) {
+    // #693：被平台超时终止的轮次不能显示「已完成」。
+    if (props.lastTerminalEvent === 'turn_timeout') {
+      return (
+        <div className={styles.runBar} aria-label="运行状态">
+          <span className={`${styles.runDot} ${styles.runDotError}`} />
+          <span>已超时终止 · 用时 {formatDuration(props.lastRunMs)}</span>
+        </div>
+      )
+    }
     return (
       <div className={styles.runBar} aria-label="运行状态">
         <span className={`${styles.runDot} ${styles.runDotDone}`} />
