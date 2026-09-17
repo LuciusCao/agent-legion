@@ -128,7 +128,9 @@
   color: #43474e;
 }
 
-.resultsList {
+.resultsList,
+/* 传播确认里「将被同步的全部文件」清单（#683 review P2-1）。 */
+.impactList {
   margin: 4px 0 0;
   padding-left: 18px;
   font-size: 13px;

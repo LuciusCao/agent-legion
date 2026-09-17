@@ -6,12 +6,24 @@ diagnostic re-check live here, the commit/teardown helper stays there.
 
 Ordering facts this module encodes (review R1): ``promote_all`` copies onto
 the authority key FIRST and writes the ``job_artifacts`` rows LAST (a
-mid-batch failure leaves orphans, never dangling rows) — so a re-read can
-miss a row whose fresh object copy already landed. The protection for that
-residual ordering is timing improbability (the re-attempt must fully promote
-inside this helper's millisecond read→remove gap), not a visibility
-invariant; the post-removal re-check makes the theoretical stranded row
-diagnosable instead of silent.
+mid-batch failure leaves orphans, never dangling rows) — so a manifest read
+can miss a row whose fresh object copy already landed. The rerun transaction
+commits the node reset and the manifest-row removal together; from that
+instant the job is schedulable again, so a re-attempt's ``promote_all`` can
+interleave with this cleanup at any point. Two guard layers keep the fresh
+authority copy alive (#683 review P1): the batch probe at entry skips keys
+already re-registered when cleanup starts, and the per-object re-probe
+re-checks the CURRENT manifest immediately before each removal — a key that
+reappeared inside the batch probe→remove gap belongs to the new attempt. The
+residual per-object window (re-probe → that object's removal call,
+milliseconds) is only closable by conditional removal or versioned keys; the
+post-removal re-check keeps it diagnosable instead of silent.
+
+Every probe is a targeted existence query (``live_keys_for``: job_id + the
+retired keys, #706 review P2): each removal re-verifies its key against the
+live manifest WITHOUT shipping the manifest — a full ``rows_for_job`` read
+per retired object degraded multi-artifact reruns to O(retired × manifest
+rows) on the sync request path, ahead of ``notify_schedulable_work()``.
 """
 
 from __future__ import annotations
@@ -22,12 +34,13 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _live_keys(object_store: Any, job_id: str) -> set[str]:
-    """Current manifest keys ({} when the store exposes no query seam)."""
-    return {
-        str(row["storage_key"])
-        for row in getattr(object_store, "rows_for_job", lambda _job: [])(job_id)
-    }
+def _live_keys(object_store: Any, job_id: str, keys: list[str]) -> set[str]:
+    """Targeted manifest existence probe for ``keys`` ({} when the store
+    exposes no query seam — the legacy degrade-to-removal-without-guard)."""
+    probe = getattr(object_store, "live_keys_for", None)
+    if probe is None:
+        return set()
+    return set(probe(job_id, keys))
 
 
 def delete_rerun_artifact_objects(
@@ -45,11 +58,17 @@ def delete_rerun_artifact_objects(
     Between the rerun transaction's commit and this cleanup the job is
     schedulable again — a fast re-attempt may register a NEW manifest row
     with the same stable authority key. Re-validate every row against the
-    CURRENT manifest before its deletion: a reappeared key belongs to the
-    new attempt and is skipped."""
+    CURRENT manifest before its removal: a reappeared key belongs to the
+    new attempt and is skipped. The re-check runs PER OBJECT, immediately
+    before that object's removal (#683 review P1): ``promote_all`` copies
+    the fresh object onto the authority key first and registers its
+    manifest row last, so a key can reappear between the batch probe and
+    the removals — a snapshot-blind removal would strand the fresh manifest
+    row on a nonexistent object. Each probe ships only the retired keys,
+    never the whole manifest (#706 review P2)."""
     if object_store is None or not getattr(object_store, "enabled", False) or not deleted_rows:
         return
-    live = _live_keys(object_store, job_id)
+    live = _live_keys(object_store, job_id, [str(row["storage_key"]) for row in deleted_rows])
     stale_rows = [row for row in deleted_rows if str(row["storage_key"]) not in live]
     if len(stale_rows) < len(deleted_rows):
         logger.info(
@@ -58,15 +77,38 @@ def delete_rerun_artifact_objects(
             job_id,
             len(deleted_rows) - len(stale_rows),
         )
-    object_store.delete_objects(stale_rows)
-    # Post-deletion re-check: a row appearing under a deleted key in the gap
-    # means the theoretical race fired — surface it (bucket lifecycle cannot
-    # repair a stranded manifest row).
-    raced = _live_keys(object_store, job_id) & {str(r["storage_key"]) for r in stale_rows}
+    spared: set[str] = set()
+    deleted_keys: set[str] = set()
+    for row in stale_rows:
+        # Re-validate against the CURRENT manifest immediately before this
+        # object's removal: a re-attempt completing promote_all after the
+        # batch probe above re-registers this same stable authority key,
+        # and removing it would strand the fresh manifest row.
+        key = str(row["storage_key"])
+        if key in _live_keys(object_store, job_id, [key]):
+            spared.add(key)
+            continue
+        object_store.delete_objects([row])
+        deleted_keys.add(key)
+    if spared:
+        logger.info(
+            "rerun %s cleanup for job %s spared %d object(s) re-registered during cleanup: %s",
+            operation,
+            job_id,
+            len(spared),
+            sorted(spared)[:5],
+        )
+    # Post-removal re-check: a row appearing under a removed key in the
+    # residual per-object window means the race fired — surface it (bucket
+    # lifecycle cannot repair a stranded manifest row). Nothing removed →
+    # trivially nothing raced, and the probe is skipped with it.
+    if not deleted_keys:
+        return
+    raced = _live_keys(object_store, job_id, sorted(deleted_keys)) & deleted_keys
     if raced:
         logger.warning(
             "rerun %s cleanup for job %s: %d manifest row(s) appeared under "
-            "just-deleted object key(s) %s — re-attempt raced the cleanup; "
+            "just-removed object key(s) %s — re-attempt raced the cleanup; "
             "re-run the node or re-upload to repair the authority copy",
             operation,
             job_id,

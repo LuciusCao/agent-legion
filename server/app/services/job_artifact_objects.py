@@ -311,6 +311,29 @@ class JobArtifactObjectStore:
             ).fetchall()
         return {str(row["name"]) for row in rows}
 
+    def live_keys_for(self, job_id: str, storage_keys: list[str]) -> set[str]:
+        """Targeted existence probe: which of ``storage_keys`` the job's
+        CURRENT manifest registers (#706 review P2).
+
+        The rerun cleanup's re-attempt guard needs per-key liveness, not the
+        manifest's contents — a full ``rows_for_job`` read per retired object
+        degraded multi-artifact reruns to O(retired x manifest rows) on the
+        sync request path. This probe ships only the queried keys both ways
+        (the job_id predicate rides the manifest PK prefix). Like
+        ``existing_object_storage_keys`` (#344) it is a read-then-act TOCTOU
+        guard, not an atomic conditional removal: a caller acting on the
+        answer must tolerate — and diagnose — a re-registration landing in
+        the probe-to-act gap.
+        """
+        if not storage_keys:
+            return set()
+        with read_connection(self._dsn) as conn:
+            rows = conn.execute(
+                "select storage_key from job_artifacts where job_id=%s and storage_key = ANY(%s)",
+                (job_id, storage_keys),
+            ).fetchall()
+        return {str(row["storage_key"]) for row in rows}
+
     def open_stream(self, row: dict[str, Any]) -> BinaryIO:
         """Content-byte stream: ``.gz`` objects decode transparently (#338);
         use ``open_object_stream`` for the stored bytes as-is."""
@@ -349,5 +372,5 @@ class JobArtifactObjectStore:
                 # failing an already-committed deletion. The traceback is
                 # logged so the residue is diagnosable.
                 logger.warning(
-                    "failed to delete artifact object %s", row["storage_key"], exc_info=True
+                    "artifact object removal failed for %s", row["storage_key"], exc_info=True
                 )
