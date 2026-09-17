@@ -44,7 +44,11 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     router = APIRouter()
 
     def _service() -> NodeCodeService:
-        return NodeCodeService(job_db, settings.executor_runtime.workflows.custom_nodes_enabled)
+        return NodeCodeService(
+            job_db,
+            settings.executor_runtime.workflows.custom_nodes_enabled,
+            settings.executor_runtime.workflows.node_code_max_bytes,
+        )
 
     def _resolve_key(workspace_id: str, workflow_key: str | None) -> str:
         """Codex P2 on #299: the deprecated segment (bound as a query param on
@@ -104,7 +108,12 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
 
         def _response(**kwargs: Any) -> WorkflowNodeCodeResponse:
             return WorkflowNodeCodeResponse(
-                has_draft=has_draft, draft_code=draft_code, draft_version=draft_version, **kwargs
+                has_draft=has_draft,
+                draft_code=draft_code,
+                draft_version=draft_version,
+                # #628: the editor displays the instance-level budget.
+                max_code_bytes=settings.executor_runtime.workflows.node_code_max_bytes,
+                **kwargs,
             )
 
         if published is not None:

@@ -290,6 +290,19 @@ describe('WorkflowNodeCodeSection', () => {
     expect(screen.getByLabelText('节点代码内容')).toHaveValue(DRAFT_CODE)
   })
 
+  it('shows the configured size ceiling in the editor (issue #628)', async () => {
+    // 编辑器展示后端下发的实例级体积上限（默认 64KB）。
+    mockApi.mockResolvedValue({ ...builtinResponse, max_code_bytes: 131072 })
+    renderSection()
+
+    await screen.findByText(/出厂版本/)
+    fireEvent.click(screen.getByRole('button', { name: 'fork 为自定义节点' }))
+
+    expect(
+      screen.getByText(/代码体积上限 128 KB（实例配置）/)
+    ).toBeInTheDocument()
+  })
+
   it('expands a version to view its code', async () => {
     mockApi.mockResolvedValue({ ...customResponse, version: 2 })
     renderSection()

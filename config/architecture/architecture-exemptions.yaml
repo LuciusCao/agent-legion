@@ -320,10 +320,13 @@ exemptions:
     backend.md). The deprecated aliases are the honest cost of the deprecation window; deleting them (Phase
     3/4 removal tracked in issue 211) drops the file back under the baseline ceiling and this exemption
     goes stale automatically. The Codex P2 fix on PR 299 adds _resolve_key (query-bound alias must equal
-    the workspace id), which is part of the same deprecation-window cost.
+    the workspace id), which is part of the same deprecation-window cost. Issue 692 (codex P1 round 4)
+    adds the optional expected_hash publish body (about 17 lines) — the server-side CAS guard for chat
+    draft cards; re-signed to 257, 2 beyond the prior 240+15 band, time-boxed per issue 641.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 240
+  ceiling: 257
+  expires: 2026-10-31
 - check: architecture.file_budget
   path: server/app/routes/job_http.py
   reason: The issue-211 Phase 3 read-binding guard (reject_mismatched_workflow_key, shared by five explicit-key
@@ -442,6 +445,16 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 189
+- check: architecture.file_budget
+  path: frontend/src/features/previewPanel/CustomizePreviewDialog.tsx
+  reason: 'Re-signed after the release/0.7.13 back-merge: #615 (dialog-embedded draft
+    preview, CustomizePreviewPane) regrew the dialog above the 149 floor our composer
+    round had ratcheted to. origin/main already carries ceiling 159 for this path, so
+    the merge result tracks main; the exemption lifts only the local anchor floor gap.
+    Drop when the branch lands on a base whose registry already has 159.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 159
 - check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
   reason: The Codex P2 review on PR 345 added bundle content into the PreviewPanelHost remount key plus
@@ -590,12 +603,12 @@ exemptions:
     draft-card type redesign (MUI icon header, per-type title/icon tones, draftError, shared publish
     entry) re-signed the ceiling from 356 to cover the growth to 395 effective lines — beyond the
     +15 growth allowance band, so time-boxed per #641. After merging base''s #695 skeleton
-    unification (shared panel rules moved out) the module sits at 374 effective lines; ceiling
-    ratchets DOWN with it (monotonic discipline). The draft-card family moving to its own module
-    remains the preferred next step; harvest at the #456 sweep.'
+    unification moved shared panel rules out and the module now sits at 306 effective lines
+    (merged-tree state); ceiling ratchets DOWN with it (monotonic discipline). The draft-card
+    family moving to its own module remains the preferred next step; harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 374
+  ceiling: 306
   expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/lib/queryKeysExtra.ts

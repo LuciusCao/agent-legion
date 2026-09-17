@@ -36,6 +36,11 @@ def _csv_parser(value: str) -> list[str]:
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
+def _int_parser(value: str) -> int:
+    """Parse an integer env override; ValueError fails the settings load."""
+    return int(value)
+
+
 # Reviewed mapping from environment variable to config path and parser.
 # Do not add arbitrary double-underscore mutation; every override is listed here.
 # ``database.url`` is deliberately absent: it is handled by
@@ -45,6 +50,13 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "AGENT_LEGION_CUSTOM_NODES_ENABLED": (
         ("workflows", "custom_nodes_enabled"),
         _bool_parser,
+    ),
+    # #628: byte budget for one custom node code version (default 64KB).
+    # int() raises ValueError on garbage, which surfaces at settings load
+    # (fail-fast); the ge=1024 bound is enforced by ExecutorRuntimeConfig.
+    "AGENT_LEGION_NODE_CODE_MAX_BYTES": (
+        ("workflows", "node_code_max_bytes"),
+        _int_parser,
     ),
     # AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE) removed with the global token
     # retirement (issue #35): registration is scoped-token-only now. A leftover

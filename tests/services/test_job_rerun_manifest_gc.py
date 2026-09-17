@@ -369,3 +369,66 @@ def test_rerun_object_cleanup_spares_re_registered_authority_keys(
     assert down_key in deleted_by_stale_call, "unre-registered orphan keys still delete"
     assert up_key in storage.objects
     assert store.lookup(job["id"], "up.json") is not None
+
+
+def test_rerun_object_cleanup_revalidates_per_object_mid_delete(
+    job_db, settings, chain_definition, monkeypatch
+):
+    """#683 review P1：批量探测与删除之间，新 attempt 的 promote_all 完成
+    （权威键对象先拷、清单行 record_remote_many 后提交）——入口批量重验看
+    不到它（读到的是旧状态），逐对象删除前的当前清单重验必须放过该键，
+    否则新清单行指向被删对象。用真实 store + FakeObjectStorage 走完整删除
+    路径，时序经 live_keys_for 靶向探针注入（#706 review P2：重验不传输
+    整份清单）。"""
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    store = JobArtifactObjectStore(job_db, storage)
+    up_key = f"jobs/{workspace['id']}/{job['id']}/up.json"
+    down_key = f"jobs/{workspace['id']}/{job['id']}/down.json"
+    # 模拟已提交的 rerun 事务：受影响闭包的清单行已删，快照即 deleted_rows。
+    with job_db.connect() as conn:
+        conn.execute("delete from job_artifacts where job_id=%s", (job["id"],))
+
+    real_live_keys_for = store.live_keys_for
+    probes = {"count": 0}
+
+    def live_keys_for_with_mid_cleanup_promote(job_id: str, storage_keys: list[str]) -> set[str]:
+        probes["count"] += 1
+        if probes["count"] == 2:
+            # 批量探测（第 1 次）之后、up 的逐对象重验（第 2 次）之前：
+            # 新 attempt 完成 promote_all——对象 copy 到同一权威键 +
+            # record_remote_many 一个事务提交新清单行。
+            storage.objects[up_key] = b"fresh attempt bytes!"
+            store.record_remote(
+                workspace_id=str(workspace["id"]),
+                job_id=job["id"],
+                node_key="up",
+                name="up.json",
+                storage_key=up_key,
+                size_bytes=20,
+                content_hash="hash-fresh",
+            )
+        return real_live_keys_for(job_id, storage_keys)
+
+    monkeypatch.setattr(store, "live_keys_for", live_keys_for_with_mid_cleanup_promote)
+
+    from server.app.services.job_staged_cleanup import delete_rerun_artifact_objects
+
+    delete_rerun_artifact_objects(
+        store,
+        [
+            {"node_key": "up", "name": "up.json", "storage_key": up_key},
+            {"node_key": "down", "name": "down.json", "storage_key": down_key},
+        ],
+        job["id"],
+        "rerun",
+    )
+
+    # 新 attempt 的对象与清单行都完好；未复现的孤儿键照删。
+    assert up_key in storage.objects, "fresh authority object must survive"
+    assert store.lookup(job["id"], "up.json") is not None
+    assert up_key not in storage.deleted
+    assert down_key in storage.deleted

@@ -131,6 +131,19 @@ class StudioChatQueriesMixin(StudioChatResumeQueriesMixin):
             ).fetchall()
         return [_session_record(row) for row in rows]
 
+    def clear_studio_chat_compacting_if_set(self, session_id: str) -> bool:
+        """Conditional compacting clear (#694 review R3-P2): only fires when
+        the row still says the window is open, so a stale self-clear timer
+        can never clobber a newer window's flag. Returns whether it fired."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "update studio_chat_sessions set compacting=false,"
+                " updated_at=current_timestamp where id=%s and compacting=true"
+                " returning id",
+                (session_id,),
+            ).fetchone()
+        return row is not None
+
     def update_studio_chat_session(self, session_id: str, **fields: Any) -> None:
         """Update whitelisted session columns; capability_snapshot is serialized here."""
         updates = _build_session_updates(fields)

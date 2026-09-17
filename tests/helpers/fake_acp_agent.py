@@ -96,7 +96,16 @@ class _FakeAgent:
                     "result": {
                         "protocolVersion": message["params"].get("protocolVersion", 1),
                         "agentCapabilities": self.script.get("capabilities", {}),
-                        "agentInfo": {"name": "fake-acp-agent", "title": "Fake ACP Agent"},
+                        "agentInfo": {
+                            # agent_name: declare the ACP identity (#694
+                            # review R2-P2 — the compaction marker gate only
+                            # trusts kimi-identity sessions). version is
+                            # required by the SDK schema; without it the
+                            # whole agentInfo is salvaged to None.
+                            "name": self.script.get("agent_name", "fake-acp-agent"),
+                            "title": "Fake ACP Agent",
+                            "version": "0.0.0-fake",
+                        },
                     },
                 }
             )

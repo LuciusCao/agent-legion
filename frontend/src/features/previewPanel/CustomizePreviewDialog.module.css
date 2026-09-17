@@ -1,0 +1,107 @@
+/*
+ * 「定制预览」对话框布局（issue #615）：聊天与内嵌草稿预览同屏分栏——
+ * 模态对话框锁滚动且遮挡左栏，预览渲染目标只在对话框外时人工验证
+ * 事实上不可用。宽屏左右分栏（聊天主导在左），窄屏堆叠为上下；
+ * 预览区自身滚动（iframe 自适应高度上限 6000px，超大草稿在 pane 内滚）。
+ * 对话框样式原居 PreviewPanelSection.module.css，随双栏改版迁出。
+ */
+
+/* 定高网格：聊天/预览两行独立内部滚动，footer 常驻底部。
+ * DialogContent（MUI）保持默认整块滚动——.body 定高后恰好填满，
+ * 不与 MUI 的 overflow 打架（jsdom 测不了滚动，布局契约由组件测试钉住）。 */
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'chat preview'
+    'footer footer';
+  gap: 10px;
+  height: min(72vh, 680px);
+}
+
+.chatColumn {
+  grid-area: chat;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.chatArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.previewPane {
+  grid-area: preview;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.previewHead {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary, #43474e);
+}
+
+/* 预览区自身滚动：iframe 按内容自适应高度，超出 pane 即滚。 */
+.previewBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border, #c3c6cf);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.previewHint {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #43474e);
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--color-text-secondary, #43474e);
+}
+
+.error {
+  color: #ba1a1a;
+  font-size: 13px;
+}
+
+.footer {
+  grid-area: footer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--color-border, #c3c6cf);
+  padding-top: 8px;
+}
+
+.footerStatus {
+  flex: 1;
+  font-size: 12px;
+  color: var(--color-text-secondary, #43474e);
+}
+
+/* 窄屏（对话框 95vw，视口宽 ≈ 对话框宽）：分栏堆叠为上下，聊天略高。 */
+@media (max-width: 880px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr) auto;
+    grid-template-areas:
+      'chat'
+      'preview'
+      'footer';
+    height: min(80vh, 760px);
+  }
+}

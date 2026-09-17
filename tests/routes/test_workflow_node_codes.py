@@ -283,3 +283,35 @@ def test_segment_free_path_rejects_mismatched_workflow_key_query(
     assert workspace_with_revision.put(mismatched, json={"code": CUSTOM_V1}).status_code == 400
     publish = f"/api/workspaces/{WF}/nodes/{NODE}/code/publish?workflow_key=other_flow"
     assert workspace_with_revision.post(publish).status_code == 400
+
+
+def test_get_advertises_default_byte_budget(workspace_with_revision) -> None:
+    """#628：GET 代码响应携带实例级体积上限（默认 64KB），前端编辑器展示。"""
+    body = workspace_with_revision.get(BASE).json()
+    assert body["max_code_bytes"] == 64 * 1024
+
+
+def test_configured_byte_budget_flows_to_validation_and_read(
+    workspace_with_revision, monkeypatch
+) -> None:
+    """#628：调大后的上限同时改变读展示与 PUT 校验——64KB 与 128KB 之间的
+    代码按配置放行/拒绝，错误信息带当前上限值。"""
+    monkeypatch.setattr(
+        workspace_with_revision.app.state.settings.executor_runtime.workflows,
+        "node_code_max_bytes",
+        128 * 1024,
+    )
+    between = CUSTOM_V1 + "#" * (100 * 1024)
+    body = workspace_with_revision.get(BASE).json()
+    assert body["max_code_bytes"] == 128 * 1024
+    # 100KB passes only under the raised budget.
+    assert workspace_with_revision.put(BASE, json={"code": between}).status_code == 200
+
+    monkeypatch.setattr(
+        workspace_with_revision.app.state.settings.executor_runtime.workflows,
+        "node_code_max_bytes",
+        64 * 1024,
+    )
+    rejected = workspace_with_revision.put(BASE, json={"code": between})
+    assert rejected.status_code == 400
+    assert "65536" in rejected.json()["detail"]

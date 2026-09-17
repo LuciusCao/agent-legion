@@ -25,6 +25,7 @@ import styles from './StudioChatPanel.module.css'
 export type MessageItemProps = {
   message: ChatMessage
   streaming: boolean
+  cancelSuperseded: boolean
   toolCall: ToolCallView | null
   permission: PermissionView | null
   draftAnchorId: string | null
@@ -52,6 +53,7 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
   const {
     message,
     streaming,
+    cancelSuperseded,
     toolCall,
     permission,
     draftAnchorId,
@@ -145,7 +147,7 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
     )
   }
   if (message.kind === 'status') {
-    return <StatusLine message={message} />
+    return <StatusLine message={message} cancelSuperseded={cancelSuperseded} />
   }
   return null
 })

@@ -130,6 +130,21 @@ def test_apply_strips_retired_openclaw_block(settings, job_db, store) -> None:
     assert not hasattr(settings.executor_runtime, "openclaw")
 
 
+def test_apply_preserves_env_configured_node_code_budget(settings, job_db, store) -> None:
+    """#628: node_code_max_bytes is env-only (AGENT_LEGION_NODE_CODE_MAX_BYTES),
+    deliberately NOT instance-settings managed — a stored document (even a
+    full-document PUT) must never overwrite the operator's env decision, the
+    same way a workflows PUT only hydrates its managed keys."""
+    settings.executor_runtime.workflows.node_code_max_bytes = 128 * 1024
+    store.put({"workflows": {"max_items_per_run": 500}})
+
+    apply_instance_settings(settings, job_db.dsn_identity)
+
+    runtime = settings.executor_runtime
+    assert runtime.workflows.max_items_per_run == 500  # managed key hydrates
+    assert runtime.workflows.node_code_max_bytes == 128 * 1024  # env survives
+
+
 def test_effective_document_strips_retired_openclaw_block_from_stored_document() -> None:
     """Deployments upgraded from before the openclaw retirement (#75) still
     carry an openclaw block in global_settings['instance']; the effective

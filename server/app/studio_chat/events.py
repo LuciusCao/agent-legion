@@ -61,7 +61,9 @@ class AcpEventHandlers:
         # rides the UPDATE itself (#158): a re-read-then-write would leave a
         # check-and-set window for close to land in between. The agent config
         # surface fields (#368) ride the same UPDATE (session_config.py).
-        compaction.note_ready(self._backend.runtime(session_id))
+        compaction.note_ready(
+            self._backend, session_id, self._backend.runtime(session_id), capabilities
+        )
         self._backend.db.update_studio_chat_session_if(
             session_id,
             status_not_in=("closed", "error"),
@@ -138,6 +140,7 @@ class AcpEventHandlers:
         compaction.maybe_note_empty_turn(
             self._backend, session_id, stop_reason, timed_out=timed_out
         )
+        compaction.note_turn_closed(self._backend.runtime(session_id))
         if timed_out:
             # #693: the turn was ended by the prompt-timeout ladder, not by
             # the agent finishing — record it as its own visible event so the
@@ -156,6 +159,7 @@ class AcpEventHandlers:
         self._backend.store.publish_session(session_id)
 
     def on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
+        compaction.note_turn_closed(self._backend.runtime(session_id))
         self._backend.store.append_message(
             session_id, "status", "system", {"event": "error", "detail": detail}
         )

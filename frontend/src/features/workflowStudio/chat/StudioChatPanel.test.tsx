@@ -119,8 +119,8 @@ describe('StudioChatPanel', () => {
     await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
   })
 
-  it('places the agent config between the message list and the input (#658)', async () => {
-    // 广告配置面的会话：配置区作为对话上下文呈现。
+  it('places the agent config chips inside the composer card (#658 / #695 R4)', async () => {
+    // 广告配置面的会话：配置芯片作为 composer 工具行呈现。
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({
         capability_snapshot: { sessionModes: true },
@@ -132,15 +132,19 @@ describe('StudioChatPanel', () => {
     ])
     renderPanel()
 
-    const configBar = await screen.findByRole('group', { name: 'Agent 配置' })
+    const configGroup = await screen.findByRole('group', { name: 'Agent 配置' })
     const following = Node.DOCUMENT_POSITION_FOLLOWING
-    // 会话管理（顶部）在配置区之前，配置区紧贴输入框之上。
+    // 会话管理（顶部）仍在配置芯片之前。
     const sessionPicker = screen.getByLabelText('选择会话')
     expect(
-      sessionPicker.compareDocumentPosition(configBar) & following
+      sessionPicker.compareDocumentPosition(configGroup) & following
     ).toBeTruthy()
+    // composer 一体化：配置芯片与输入框同一卡片，位于 textarea 之下的工具行。
     const input = screen.getByLabelText('消息输入')
-    expect(configBar.compareDocumentPosition(input) & following).toBeTruthy()
+    expect(input.compareDocumentPosition(configGroup) & following).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Agent 权限模式' })
+    ).toBeInTheDocument()
   })
 
   it('renders every message kind', async () => {
@@ -324,6 +328,61 @@ describe('StudioChatPanel', () => {
     )
   })
 
+  it('keeps the cancel line awaiting while no terminal event follows', async () => {
+    // #675 codex P2 场景 c：cancel_requested 之后只有收尾窗口内的行时，
+    // 「等待 agent 收尾」仍是当前态（原行为保留）。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'text', 'user', { text: '跑个分析' }),
+      chatMessage('m2', 2, 'status', 'system', { event: 'cancel_requested' }),
+      chatMessage('m3', 3, 'tool_call', 'agent', {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-1',
+        title: 'Agent',
+        status: 'in_progress',
+      }),
+    ])
+    renderPanel()
+
+    expect(
+      await screen.findByText('已请求取消当前运行，等待 agent 收尾')
+    ).toBeInTheDocument()
+  })
+
+  it('downgrades the cancel line once the cancelled turn_end arrives', async () => {
+    // #675 codex P2 场景 a：cancelled turn_end 被时间线隐藏后，状态行不得
+    // 再表达「等待收尾」，与 RunBar 的「已取消」并存不冲突。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'text', 'user', { text: '跑个分析' }),
+      chatMessage('m2', 2, 'status', 'system', { event: 'cancel_requested' }),
+      chatMessage('m3', 3, 'text', 'agent', { text: '已跑的部分如下' }),
+      chatMessage('m4', 4, 'status', 'system', {
+        event: 'turn_end',
+        stop_reason: 'cancelled',
+      }),
+    ])
+    renderPanel()
+
+    expect(await screen.findByText('已请求取消')).toBeInTheDocument()
+    expect(screen.queryByText(/等待 agent 收尾/)).not.toBeInTheDocument()
+    // RunBar 的取消轮结论同屏可见（#675 主行为不受影响）。
+    expect(screen.getByLabelText('运行状态')).toHaveTextContent('已取消')
+  })
+
+  it('downgrades the old cancel line once a newer turn starts', async () => {
+    // #675 codex P2 场景 b：后端重启丢失 turn_end 时靠新一轮用户消息
+    // 兜底——旧状态行不再停留在「等待收尾」。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'text', 'user', { text: '跑个分析' }),
+      chatMessage('m2', 2, 'status', 'system', { event: 'cancel_requested' }),
+      chatMessage('m3', 3, 'text', 'user', { text: '把刚才的结果说完' }),
+      chatMessage('m4', 4, 'text', 'agent', { text: '接上文' }),
+    ])
+    renderPanel()
+
+    expect(await screen.findByText('已请求取消')).toBeInTheDocument()
+    expect(screen.queryByText(/等待 agent 收尾/)).not.toBeInTheDocument()
+  })
+
   it('shows cancel while running and keeps the input enabled', async () => {
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({ status: 'running' }),
@@ -359,7 +418,7 @@ describe('StudioChatPanel', () => {
     })
     // busy：不直接发送，进入队列并显示队列条。
     expect(mockApi.sendStudioChatMessage).not.toHaveBeenCalled()
-    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getAllByText('排队中 1')[0]).toBeInTheDocument()
     expect(screen.getByText('排队消息')).toBeInTheDocument()
 
     // agent 一轮结束（会话快照翻转为 idle）→ 自动按 FIFO 发出队首。
@@ -377,7 +436,7 @@ describe('StudioChatPanel', () => {
       )
     )
     await waitFor(() =>
-      expect(screen.queryByText('排队中 1')).not.toBeInTheDocument()
+      expect(screen.queryAllByText('排队中 1')).toHaveLength(0)
     )
   })
 
@@ -393,12 +452,12 @@ describe('StudioChatPanel', () => {
     await act(async () => {
       fireEvent.keyDown(input, { key: 'Enter' })
     })
-    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getAllByText('排队中 1')[0]).toBeInTheDocument()
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '移除' }))
     })
-    expect(screen.queryByText('排队中 1')).not.toBeInTheDocument()
+    expect(screen.queryAllByText('排队中 1')).toHaveLength(0)
     expect(mockApi.sendStudioChatMessage).not.toHaveBeenCalled()
   })
 
