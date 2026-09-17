@@ -84,6 +84,55 @@ def test_publish_expected_hash_mismatch_conflicts_with_zero_side_effects(
     assert store.get_published("wf:node", workspace_id) is None
 
 
+# #692 R6 P1-1：SELECT-时核对在 READ COMMITTED 下不是原子的——并发
+# save_draft 在本事务 SELECT 与 UPDATE 之间提交时，EvalPlanCheck 对最新
+# 行版本重估 status 谓词，发布的是覆盖后的内容。CAS（hash 进 UPDATE 的
+# WHERE）后 rowcount=0 → Conflict，事务回滚。双连接按该交错时序钉住。
+def test_publish_expected_hash_cas_blocks_read_committed_interleave(
+    store, workspace_id, job_db
+) -> None:
+    import psycopg
+
+    from server.app.db.rows import string_dict_row
+
+    store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
+
+    # T1：开启发布事务，执行到 SELECT 之后（比对通过）暂停。
+    t1 = psycopg.connect(job_db.dsn_identity, autocommit=False, row_factory=string_dict_row)
+    try:
+        t1.execute("begin")
+        draft_row = t1.execute(
+            "select id, definition_hash from versioned_entities"
+            " where entity_type='node_code' and entity_key='wf:node'"
+            " and workspace_id=%s and status='draft'",
+            (workspace_id,),
+        ).fetchone()
+        assert draft_row is not None and draft_row["definition_hash"] == "hash1"
+
+        # T2：并发 save_draft 覆盖草稿（hash1 → hash2）并提交——落在 T1 的
+        # SELECT 与 UPDATE 之间。
+        store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u1")
+
+        # T1：继续 publish 的 CAS UPDATE——hash 不再匹配，rowcount=0。
+        cursor = t1.execute(
+            "update versioned_entities set status='published',"
+            " published_at=current_timestamp"
+            " where id=%s and status='draft' and definition_hash=%s",
+            (draft_row["id"], "hash1"),
+        )
+        assert cursor.rowcount == 0, "CAS must reject the interleaved overwrite"
+        t1.rollback()
+    finally:
+        t1.close()
+
+    # store 层面的同形验证：交错后发布抛 Conflict，草稿仍是 hash2。
+    with pytest.raises(ConflictError):
+        store.publish("wf:node", workspace_id, expected_hash="hash1")
+    statuses = {e.status for e in store.list_versions("wf:node", workspace_id)}
+    assert statuses == {"draft"}
+    assert store.get_published("wf:node", workspace_id) is None
+
+
 def test_publish_expected_hash_match_publishes(store, workspace_id) -> None:
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
 

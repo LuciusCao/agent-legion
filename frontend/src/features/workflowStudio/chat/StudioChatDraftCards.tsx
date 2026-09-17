@@ -42,10 +42,15 @@ function DraftPublishAction({
 }) {
   if (status !== 'completed' || saveFailed) return null
   if (draftHash === null) {
+    // P3-1（R6）：提示放块级 div 占满动作行（span 在 flex 行内会与
+    // 「查看草稿」并排错位；draftHint 的其他使用点都是行下方独立块）。
     return (
-      <span className={styles.draftHint} role="note">
+      <div
+        className={`${styles.draftHint} ${styles.draftHintBlock}`}
+        role="note"
+      >
         旧转录无法验证草稿版本，请在检查器面板中发布
-      </span>
+      </div>
     )
   }
   return (

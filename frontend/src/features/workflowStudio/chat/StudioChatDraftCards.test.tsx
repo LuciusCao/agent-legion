@@ -293,7 +293,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
       })
       await waitFor(() =>
         expect(screen.getByRole('alert')).toHaveTextContent(
-          '草稿已被其他会话或编辑器更新，请刷新后从最新草稿重新发布'
+          '草稿已被其他会话或编辑器更新，请在检查器面板中从最新草稿发布'
         )
       )
       expect(useUiStore.getState().toast).toBeNull()
