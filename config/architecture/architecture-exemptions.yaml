@@ -1148,6 +1148,6 @@ exemptions:
     (#431/#458 precedents). Remove when the registry moves to its own module
     or the file shrinks below the old floor.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/644
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/751
   ceiling: 210
   expires: 2027-03-31
