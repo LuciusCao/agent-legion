@@ -485,19 +485,29 @@ def test_list_artifacts_local_and_disabled_entries_have_no_url(job_db, settings)
         assert entry["expires_at"] is None
 
 
-def test_download_url_carries_no_credentials(job_db, settings):
-    """安全面：签出的 URL 是签名参数查询串，不是凭据载体——secret/access
-    key 不得出现在 URL 里（Fake 的 URL 模板里也没有；真实 S3StorageClient
-    由 tests/services/test_s3_client.py 的 SigV4 断言覆盖同一性质）。"""
+def test_presign_targets_exactly_the_manifest_row_key(job_db, settings):
+    """安全面（签名目标）：presign_get 收到的必须逐位等于权威 manifest 行
+    的 storage_key——行由服务端布局生成（record_remote/verify_remote 拒绝
+    布局外 key），这是「请求输入无法影响签名目标」的落点。测试从 DB 读回
+    行断言（不自己拼 key），并混入一条 gzip 行钉住签发名单精确性：签错
+    对象（拼名、漏 workspace 段、签成 .gz 孪生键、跨条目乱签）都会红。"""
     job = _seed_job(job_db)
     store = JobArtifactObjectStore(job_db, FakeObjectStorage())
     service = ExternalArtifactAccessService(job_db, settings, object_store=store)
-    _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+    bare_key = _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+    _seed_manifest_row(store, job, "report.json", b'{"r": 1}')  # .gz 孪生条目
+
+    rows = {str(row["name"]): row for row in store.rows_for_job(job["id"])}
+    assert str(rows["clip.mp4"]["storage_key"]) == bare_key  # 行与种子一致（自检）
+    settings.executor_runtime.agent_workers.artifact_download_presign_ttl_seconds = 7200
 
     listing = service.list_artifacts(job["workspace_id"], job["id"])
-    entry = next(e for e in listing["artifacts"] if e["name"] == "clip.mp4")
 
-    url = entry["download_url"]
-    assert url is not None
-    assert "secret" not in url.lower()
-    assert "Signature=" in url or "X-Amz-Signature" in url or "/download/" in url
+    entry = next(e for e in listing["artifacts"] if e["name"] == "clip.mp4")
+    # 签发名单：恰好一次、恰好 bare 行的 key（gzip 行不得混入）。
+    assert store.storage.presigned_gets == [str(rows["clip.mp4"]["storage_key"])]
+    # TTL 参数逐位等于实例配置值（防回落硬编码默认）。
+    assert store.storage.get_expiries == [7200]
+    # 响应字段就是那次调用的返回值（Fake 按 key 派生 URL——签错对象时两者
+    # 同时偏离，双保险）。
+    assert entry["download_url"] == f"https://s3.test/download/{bare_key}"
