@@ -5,11 +5,10 @@ import {
   advancedOptions,
   modeOptions,
   modelOptions,
-  THOUGHT_OFF_VALUE,
   thoughtOptions,
   thoughtText,
 } from './studioChatConfigOptions'
-import { UI_LEVELS, levelLabel, type UiLevel } from './thoughtLevel'
+import { levelLabel } from './thoughtLevel'
 import { useStudioChatAgentConfig } from './useStudioChatAgentConfig'
 import { useThoughtDrift } from './useThoughtDrift'
 import { StudioChatConfigChip } from './StudioChatConfigChip'
@@ -56,7 +55,7 @@ export function StudioChatComposerConfig(props: {
             title="这是 agent 自身的运行模式；平台侧「本次对话全部允许」在权限卡上独立设置，两层互不改写。"
             disabled={busy}
             options={modeOptions(view.modes)}
-            onPick={(value) => void config.setMode(value)}
+            onPick={(option) => void config.setMode(option.value)}
           />
         )}
         {drifted && view.thought?.map.current && (
@@ -79,7 +78,14 @@ export function StudioChatComposerConfig(props: {
             title={view.model.description}
             disabled={busy}
             options={modelOptions(view.model)}
-            onPick={(value) => void config.setOption(view.model!.id, value)}
+            onPick={(option) => {
+              // #733 R4-P2：提交走结构化载荷，不从展示字符串拆回 id/value。
+              if (option.submit)
+                void config.setOption(
+                  option.submit.configId,
+                  option.submit.value
+                )
+            }}
           />
         )}
         {view.thought && (
@@ -93,16 +99,14 @@ export function StudioChatComposerConfig(props: {
             }
             disabled={busy || view.thought.map.readOnly}
             options={thoughtOptions(view.thought)}
-            onPick={(value) => {
-              const { map } = view.thought!
-              // 通用档走映射；未知原生值与 off 原样透传（同原 ThoughtLevelField）。
-              const native =
-                value === THOUGHT_OFF_VALUE
-                  ? map.offValue!
-                  : (UI_LEVELS as readonly string[]).includes(value)
-                    ? (map.toNative[value as UiLevel] ?? value)
-                    : value
-              void config.setOption(view.thought!.id, native)
+            onPick={(option) => {
+              // 通用档→原生值的映射已在 thoughtOptions 内完成（含 off 关闭位
+              // 与未知原生值透传），这里直接提交结构化载荷。
+              if (option.submit)
+                void config.setOption(
+                  option.submit.configId,
+                  option.submit.value
+                )
             }}
           />
         )}
@@ -112,12 +116,12 @@ export function StudioChatComposerConfig(props: {
             text="高级"
             disabled={busy}
             options={advancedOptions(view.advanced)}
-            onPick={(value) => {
-              const separator = value.indexOf(':')
-              void config.setOption(
-                value.slice(0, separator),
-                value.slice(separator + 1)
-              )
+            onPick={(option) => {
+              if (option.submit)
+                void config.setOption(
+                  option.submit.configId,
+                  option.submit.value
+                )
             }}
           />
         )}

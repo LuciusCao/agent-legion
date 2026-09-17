@@ -243,6 +243,58 @@ describe('StudioChatComposer config chips (#695 R4)', () => {
     await act(async () => {})
   })
 
+  it('submits the exact id/value for advanced entries containing colons (#733 R4-P2)', async () => {
+    // 后端契约只要求 config id 非空、不禁止冒号：提交必须是结构化载荷，
+    // 不能从拼接的展示字符串拆回（拆回会把 id 截成错误前缀遭 400）。
+    mockApi.setStudioChatConfigOption.mockResolvedValue(record())
+    renderWithConfig(
+      record({
+        config_options: [
+          {
+            id: 'vendor:feature:flag',
+            name: 'Feature',
+            category: '_custom',
+            type: 'select',
+            currentValue: 'a:1',
+            options: [{ value: 'a:1' }, { value: 'b:2', name: 'B 档' }],
+          },
+        ],
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: '高级设置' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'B 档' }))
+    expect(mockApi.setStudioChatConfigOption).toHaveBeenCalledWith(
+      'ws1',
+      's1',
+      'vendor:feature:flag',
+      'b:2'
+    )
+    await act(async () => {})
+  })
+
+  it('passes unknown native thought values through verbatim', async () => {
+    mockApi.setStudioChatConfigOption.mockResolvedValue(record())
+    renderWithConfig(
+      record({
+        config_options: [
+          {
+            ...KIMI_OPTIONS[1],
+            options: [...KIMI_OPTIONS[1].options, { value: 'turbo' }],
+          },
+        ],
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: '思考档位' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'turbo' }))
+    expect(mockApi.setStudioChatConfigOption).toHaveBeenCalledWith(
+      'ws1',
+      's1',
+      'thinking',
+      'turbo'
+    )
+    await act(async () => {})
+  })
+
   it('degrades a single-level thought list to a disabled chip', () => {
     renderWithConfig(
       record({
