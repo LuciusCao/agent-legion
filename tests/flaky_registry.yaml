@@ -170,3 +170,17 @@ entries:
     PR #701 backend-coverage lane, 2026-09-16 (rerun absorbed); first
     observed on PR #684 (FLAKY-011).
   deadline: 2026-12-31
+- id: FLAKY-016
+  nodeid: tests/workers/test_execution_run.py::test_reclaim_serializes_old_attempt_teardown_and_new_attempt
+  owner: test-infra
+  reason: >-
+    Reran once in PR #696 backend-coverage lane (run 35185641060, 2026-09-17)
+    — the retry passed and the lane's only failure was the rerun-governance
+    step (nodeid not yet registered). The PR diff is frontend-only (chat
+    draft cards); the test is the worker reclaim plane (old-attempt teardown
+    vs new-attempt serialization) and cannot interact with it. Same
+    loaded-runner timing family as FLAKY-009/010/011 (2-core runner, three
+    postgres shards plus coverage): registered for rerun absorption; 4
+    consecutive local passes (1.0-1.7s each).
+  observed: PR #696 backend-coverage lane (run 35185641060), 2026-09-17, rerun passed and the lane count was green.
+  deadline: 2026-10-17
