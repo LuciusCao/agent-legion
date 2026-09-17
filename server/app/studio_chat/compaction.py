@@ -23,7 +23,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from server.app.studio_chat import compact_timer
+from server.app.studio_chat import compact_markers, compact_timer
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
@@ -120,8 +120,13 @@ def preprocess_update(
     if kind in ("agent_message_chunk", "agent_thought_chunk"):
         text = str((update.get("content") or {}).get("text") or "")
         marker = compact_marker(text) if kind == "agent_message_chunk" else None
-        if marker is not None:
-            _apply_marker(backend, session_id, runtime, marker, text)
+        # Gate (review R2-P2): the text prefix alone is not enough — the
+        # chunk must come from a kimi session in a turn context where kimi
+        # actually emits local compaction notices (compact_markers.py).
+        if marker is not None and compact_markers.marker_gate_open(runtime):
+            compact_markers.apply_marker(
+                backend, session_id, runtime, marker, text, timeout=COMPACTING_TIMEOUT_SECONDS
+            )
             return True
     if runtime is not None and counts_as_turn_content(kind):
         with runtime.lock:
@@ -129,55 +134,62 @@ def preprocess_update(
     return False
 
 
-def _apply_marker(
+def flag_live_locked(runtime: SessionRuntime) -> bool:
+    """Is the compaction window live? Caller must hold runtime.lock
+    (send_message's turn-start critical section, #694 review R2-P1)."""
+    if not runtime.compacting:
+        return False
+    since = runtime.compacting_since
+    return since is not None and time.monotonic() - since < COMPACTING_TIMEOUT_SECONDS
+
+
+def late_gate_blocked(db: Any, session_id: str, runtime: SessionRuntime, text: str) -> bool:
+    """#694 review R2-P1 late re-check inside send_message's turn-start
+    critical section (caller holds runtime.lock): a compaction marker
+    landing after the early send_blocked gate flips the flag before the
+    prompt hand-off — roll the turn claim back (guarded #158: a racing
+    close owns the final state) and report blocked, exactly like the early
+    refusal. ``/compact`` stays exempt, and a stale (timed-out) flag is
+    cleared so the send may proceed; a LIVE flag is never cleared here."""
+    live = flag_live_locked(runtime)
+    if live and not text.lstrip().startswith("/compact"):
+        db.update_studio_chat_session_if(session_id, status_in=("running",), status="idle")
+        return True
+    if runtime.compacting and not live:
+        runtime.compacting = False
+        runtime.compacting_since = None
+        db.update_studio_chat_session(session_id, compacting=False)
+    return False
+
+
+def note_turn_closed(runtime: SessionRuntime | None) -> None:
+    """Any turn close (end/cancel/timeout/error) re-opens the marker gate's
+    turn-context condition (#694 review R2-P2)."""
+    if runtime is None:
+        return
+    with runtime.lock:
+        runtime.turn_open = False
+
+
+def note_ready(
     backend: ServiceBackend,
     session_id: str,
     runtime: SessionRuntime | None,
-    marker: str,
-    text: str,
+    capabilities: dict[str, Any],
 ) -> None:
-    already = False
-    if runtime is not None:
-        with runtime.lock:
-            # The marker interrupts prose like a tool call does: close the
-            # open stream slots so later chunks start a fresh row.
-            runtime.stream.reset()
-            already = runtime.compacting and marker == "start"
-            runtime.compacting = marker == "start"
-            runtime.compacting_since = time.monotonic() if marker == "start" else None
-            since = runtime.compacting_since
-        if marker == "start":
-            compact_timer.arm_self_clear(
-                backend, session_id, runtime, since, timeout=COMPACTING_TIMEOUT_SECONDS
-            )
-        else:
-            compact_timer.cancel_self_clear(runtime)
-    backend.db.update_studio_chat_session(session_id, compacting=marker == "start")
-    if already:
-        # Duplicate start marker (re-arm only): one timeline notice is enough.
-        return
-    if marker == "start":
-        content: dict[str, Any] = {
-            "event": "compact_start",
-            "detail": "正在压缩上下文，期间发送的消息可能被静默丢弃，请等压缩完成后再发送",
-        }
-    elif text.strip().startswith("Compaction cancelled."):
-        content = {"event": "compact_done", "detail": "上下文压缩已取消，可继续发送"}
-    else:
-        # kimi's completion chunk carries the token stats lines — keep them.
-        content = {"event": "compact_done", "detail": text.strip()}
-    backend.store.append_message(session_id, "status", "system", content)
-    backend.store.publish_session(session_id)
-
-
-def note_ready(runtime: SessionRuntime | None) -> None:
-    """Fresh process = no inherited compaction state. (The replay window is
-    NOT closed here — the SDK dispatches session/load replay notifications
-    asynchronously, so it stays armed until the first post-resume prompt.)"""
+    """Fresh process = no inherited compaction state; also stamps the marker
+    gate's kimi identity (#694 review R2-P2) from the registry agent id and
+    the ACP agentInfo name. (The replay window is NOT closed here — the SDK
+    dispatches session/load replay notifications asynchronously, so it
+    stays armed until the first post-resume prompt.)"""
     if runtime is None:
         return
     compact_timer.cancel_self_clear(runtime)
+    name = str((capabilities.get("agentInfo") or {}).get("name") or "")
+    session = backend.db.get_studio_chat_session(session_id) or {}
+    agent_id = str(session.get("agent_id") or "")
     with runtime.lock:
+        runtime.kimi_agent = name.lower().startswith("kimi") or agent_id.lower().startswith("kimi")
         runtime.compacting = False
         runtime.compacting_since = None
 
@@ -215,11 +227,10 @@ def send_blocked(db: Any, session_id: str, runtime: SessionRuntime, text: str) -
     if text.lstrip().startswith("/compact"):
         return False
     with runtime.lock:
+        if flag_live_locked(runtime):
+            return True
         if not runtime.compacting:
             return False
-        since = runtime.compacting_since
-        if since is not None and time.monotonic() - since < COMPACTING_TIMEOUT_SECONDS:
-            return True
         runtime.compacting = False
         runtime.compacting_since = None
     db.update_studio_chat_session(session_id, compacting=False)

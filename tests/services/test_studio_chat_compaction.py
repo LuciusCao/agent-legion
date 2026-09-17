@@ -62,6 +62,11 @@ def direct(job_db, settings):
     session_id = job_db.create_studio_chat_session(workspace_id, user_id, "direct-agent")
     job_db.update_studio_chat_session(session_id, status="idle")
     runtime = SessionRuntime(_StubHandle(), token="direct-token")
+    # The direct-session pattern never goes through on_ready, which is where
+    # the marker gate's kimi identity gets stamped (#694 review R2-P2) —
+    # default the fixture to a kimi session; tests for the non-kimi gate
+    # flip it back explicitly.
+    runtime.kimi_agent = True
     with service._runtimes_lock:
         service._runtimes[session_id] = runtime
     yield service, bus, session_id, runtime, workspace_id
@@ -76,9 +81,11 @@ def _chunk(text: str) -> dict:
 
 
 def _ready(service, session_id: str) -> None:
+    # kimi identity rides the ACP agentInfo (kimi 0.42 reports "kimi-code-acp",
+    # #694 review R2-P2): on_ready stamps the marker gate from it.
     service._on_ready(
         session_id,
-        {"loadSession": True},
+        {"loadSession": True, "agentInfo": {"name": "kimi-code-acp"}},
         OpenedAcpSession("acp-1", True, None, None),
     )
 
@@ -305,12 +312,13 @@ def test_replay_window_suppresses_markers_and_usage_before_classification(direct
         session = service.get_session(session_id)
         assert session["compacting"] is False
         assert session["usage"] is None
-        # After the window closes (first prompt), markers classify normally.
+        # After the window closes (first prompt), markers classify normally
+        # again in a valid turn context (turn closed, #694 review R2-P2).
         service.send_message(session_id, workspace_id, "hello")
+        service._on_turn_end(session_id, "end_turn")
         service._on_update(session_id, _chunk("Compacting conversation context\n"))
-        assert [e["event"] for e in _status_events(service, session_id, workspace_id)] == [
-            "compact_start"
-        ]
+        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
+        assert "compact_start" in events
         assert runtime.compacting is True
     finally:
         service.shutdown()
@@ -326,8 +334,11 @@ def test_compact_timeout_timer_self_clears_and_recovers_input(direct, monkeypatc
         _ready(service, session_id)
         service._on_update(session_id, _chunk("Compacting conversation context\n"))
         assert runtime.compacting is True
-        wait_for_predicate(lambda: not runtime.compacting, timeout=10)
-        assert service.get_session(session_id)["compacting"] is False
+        # The timer flips the runtime flag first and writes the DB row after;
+        # wait on the DB row so the assertion cannot land between the two.
+        wait_for_predicate(
+            lambda: service.get_session(session_id)["compacting"] is False, timeout=10
+        )
         events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
         assert events == ["compact_start", "compact_timeout"]
         # Input recovered: the send path no longer refuses.
@@ -370,5 +381,168 @@ def test_stale_timer_firing_does_not_clear_a_rearmed_window(direct) -> None:
         assert service.get_session(session_id)["compacting"] is True
         events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
         assert events == ["compact_start"]
+    finally:
+        service.shutdown()
+
+
+def test_send_late_compacting_flip_rolls_back_claim(direct, monkeypatch) -> None:
+    """#694 review R2-P1: a compaction marker landing between the early
+    send_blocked gate and the prompt hand-off must not slip the prompt into
+    the quiescence window — the late re-check inside the turn-start
+    critical section rolls the claim back and refuses with the same 409."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        sent: list[str] = []
+        monkeypatch.setattr(
+            runtime.handle,
+            "send_prompt",
+            lambda text: sent.append(text) or True,
+        )
+
+        def flipping_gate(db, sid, rt, text):
+            # The ACP callback thread sets the flag right after the early
+            # gate passes (the real path is compact_markers.apply_marker).
+            with rt.lock:
+                rt.compacting = True
+                rt.compacting_since = time.monotonic()
+            return False
+
+        monkeypatch.setattr(compaction, "send_blocked", flipping_gate)
+        with pytest.raises(ConflictError, match="正在压缩上下文"):
+            service.send_message(session_id, workspace_id, "hello")
+        assert sent == []
+        assert service.get_session(session_id)["status"] == "idle"
+        # Like an early-gate refusal: no user message on the timeline.
+        assert service.list_messages(session_id, workspace_id) == []
+    finally:
+        service.shutdown()
+
+
+def test_send_late_expired_flag_clears_and_sends(direct, monkeypatch) -> None:
+    """The late re-check keeps send_blocked's stale-flag semantics: a flag
+    past the self-clear timeout is cleared and the send proceeds."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+
+        def expired_gate(db, sid, rt, text):
+            with rt.lock:
+                rt.compacting = True
+                rt.compacting_since = time.monotonic() - 10000
+            return False
+
+        monkeypatch.setattr(compaction, "send_blocked", expired_gate)
+        service.send_message(session_id, workspace_id, "hello")
+        assert service.get_session(session_id)["status"] == "running"
+        assert runtime.compacting is False
+    finally:
+        service.shutdown()
+
+
+def test_non_kimi_agent_marker_text_is_plain_text(direct) -> None:
+    """#694 review R2-P2: a non-kimi agent's chunk starting with the marker
+    prefix is ordinary prose — never swallowed, never flips the flag."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        with runtime.lock:
+            runtime.kimi_agent = False
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        assert _agent_texts(service, session_id, workspace_id) == [
+            "Compacting conversation context\n"
+        ]
+        assert _status_events(service, session_id, workspace_id) == []
+        assert runtime.compacting is False
+    finally:
+        service.shutdown()
+
+
+def test_in_turn_prose_with_marker_prefix_is_not_swallowed(direct) -> None:
+    """#694 review R2-P2: inside a normal prompt turn, even a kimi agent's
+    prose starting with the prefix is stream text — kimi only emits the
+    local notices outside turns (or inside a /compact turn)."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service.send_message(session_id, workspace_id, "解释 compact 机制")
+        service._on_update(session_id, _chunk("Compacting conversation context 的意思是压缩上下文"))
+        assert _agent_texts(service, session_id, workspace_id) == [
+            "Compacting conversation context 的意思是压缩上下文"
+        ]
+        assert _status_events(service, session_id, workspace_id) == []
+        assert runtime.compacting is False
+    finally:
+        service.shutdown()
+
+
+def test_manual_compact_turn_accepts_in_turn_markers(direct) -> None:
+    """Manual /compact emits its markers in-turn: the turn-context condition
+    must still recognize them (start in-turn, done after the turn closes)."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service.send_message(session_id, workspace_id, "/compact")
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        assert runtime.compacting is True
+        service._on_turn_end(session_id, "end_turn")
+        service._on_update(
+            session_id,
+            _chunk("Compaction completed.\n- Tokens before: 200,000\n- Tokens after: 80,000"),
+        )
+        assert runtime.compacting is False
+        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
+        assert "compact_start" in events and "compact_done" in events
+    finally:
+        service.shutdown()
+
+
+def test_on_ready_stamps_kimi_identity_for_the_marker_gate(direct) -> None:
+    """The gate identity comes from the ACP agentInfo name OR the registry
+    agent id (manual kimi-compatible registry rows keep working)."""
+    service, _bus, session_id, runtime, _workspace_id = direct
+    try:
+        with runtime.lock:
+            runtime.kimi_agent = False
+        _ready(service, session_id)  # agentInfo "kimi-code-acp"
+        assert runtime.kimi_agent is True
+
+        with runtime.lock:
+            runtime.kimi_agent = False
+        service._on_ready(
+            session_id,
+            {"loadSession": True, "agentInfo": {"name": "fake-acp-agent"}},
+            OpenedAcpSession("acp-1", True, None, None),
+        )
+        # agentInfo non-kimi and registry id "direct-agent" non-kimi.
+        assert runtime.kimi_agent is False
+
+        # agent_id 不在 session 更新白名单里：直接改行模拟手工注册的
+        # kimi 兼容 agent（registry id 是门控身份的第二个来源）。
+        with service._db.connect() as conn:
+            conn.execute(
+                "update studio_chat_sessions set agent_id='kimi' where id=%s", (session_id,)
+            )
+        service._on_ready(
+            session_id,
+            {"loadSession": True, "agentInfo": {"name": "fake-acp-agent"}},
+            OpenedAcpSession("acp-1", True, None, None),
+        )
+        assert runtime.kimi_agent is True
+    finally:
+        service.shutdown()
+
+
+def test_compact_command_inside_live_window_keeps_the_flag(direct) -> None:
+    """/compact 豁免拦截但不得清掉 live 窗口：发送后窗口仍是 live 状态，
+    后续普通消息仍被 409（窗口只能由 done 标记或超时自清关闭）。"""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        service.send_message(session_id, workspace_id, "/compact")
+        assert runtime.compacting is True
+        assert service.get_session(session_id)["compacting"] is True
+        service._on_turn_end(session_id, "end_turn")
+        with pytest.raises(ConflictError, match="正在压缩上下文"):
+            service.send_message(session_id, workspace_id, "普通消息")
     finally:
         service.shutdown()

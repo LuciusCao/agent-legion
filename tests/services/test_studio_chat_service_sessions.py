@@ -548,3 +548,73 @@ def test_turn_start_reset_cannot_land_between_stream_create_and_attach(
         assert _agent_texts(service, session_id, workspace_id) == ["Hello", "Second"]
     finally:
         service.shutdown()
+
+
+KIMI_COMPACT_SCRIPT = {
+    "capabilities": {"loadSession": False, "mcpCapabilities": {"http": False, "sse": False}},
+    # kimi 0.42 的 ACP 身份（#694 review R2-P2：压缩标记门控只信 kimi 会话）。
+    "agent_name": "kimi-code-acp",
+    "on_prompt": [
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "Compacting conversation context\n"},
+            }
+        },
+    ],
+}
+
+NON_KIMI_MARKER_SCRIPT = {
+    "capabilities": {"loadSession": False, "mcpCapabilities": {"http": False, "sse": False}},
+    "on_prompt": [
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "Compacting conversation context\n"},
+            }
+        },
+    ],
+}
+
+
+def test_kimi_identity_agent_marks_compaction_window_end_to_end(chat) -> None:
+    """#694 review R2-P2 集成：声明 kimi 身份的 agent 在 /compact turn 内
+    发出的本地压缩标记被识别——旗标置位、marker 块不进文本流。"""
+    service, _bus, register, workspace_id, user_id = chat
+    register(KIMI_COMPACT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    service.send_message(session["id"], workspace_id, "/compact")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    _wait_for(lambda: service.get_session(session["id"])["compacting"] is True)
+
+    messages = service.list_messages(session["id"], workspace_id)
+    assert [m for m in messages if m["kind"] == "text" and m["role"] == "agent"] == []
+    events = [m["content"]["event"] for m in messages if m["kind"] == "status"]
+    assert "compact_start" in events
+
+
+def test_non_kimi_agent_marker_text_stays_plain_text_end_to_end(chat) -> None:
+    """#694 review R2-P2 集成：非 kimi 身份的 agent 发出同前缀文本时按
+    普通回复处理——折叠进文本流、不置旗标、不写压缩状态消息。"""
+    service, _bus, register, workspace_id, user_id = chat
+    register(NON_KIMI_MARKER_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    service.send_message(session["id"], workspace_id, "echo the notice")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    _wait_for(
+        lambda: any(
+            m["kind"] == "text" and m["role"] == "agent"
+            for m in service.list_messages(session["id"], workspace_id)
+        )
+    )
+
+    messages = service.list_messages(session["id"], workspace_id)
+    agent_texts = [
+        m["content"]["text"] for m in messages if m["kind"] == "text" and m["role"] == "agent"
+    ]
+    assert agent_texts == ["Compacting conversation context\n"]
+    assert service.get_session(session["id"])["compacting"] is False
+    events = [m["content"]["event"] for m in messages if m["kind"] == "status"]
+    assert "compact_start" not in events
