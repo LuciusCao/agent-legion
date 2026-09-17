@@ -1149,6 +1149,7 @@
     "server/app/jobs/queries/studio_publish_request_reads.py": 55,
     "server/app/jobs/queries/studio_publish_request_writes.py": 50,
     "server/app/jobs/queries/studio_publish_requests.py": 110,
+    "server/app/jobs/queries/upgrade_staging.py": 35,
     "server/app/jobs/queries/workflow_draft_cas.py": 59,
     "server/app/jobs/queries/workflow_drafts.py": 40,
     "server/app/jobs/queries/workflow_revision_projection.py": 125,

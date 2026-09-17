@@ -8,11 +8,10 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.jobs.workflow_upgrade_mutation_inherit import upgrade_job_workflow_inherit
-from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_artifact_mutation import JobArtifactMutationService, StagedOutputs
 from server.app.services.job_workflow_upgrade_cleanup import (
     finalize_upgrade_staged_outputs,
     rollback_upgrade_staged_outputs,
-    stage_upgrade_reset_outputs,
 )
 from server.app.services.job_workflow_upgrade_gates import UpgradeContext, resolve_upgrade_context
 from server.app.services.job_workflow_upgrade_plan import plan_inherit_nodes
@@ -61,9 +60,7 @@ class JobWorkflowUpgradeService:
                 context.definition,
                 context.frozen_config_json,
             )
-        staged = stage_upgrade_reset_outputs(
-            self.artifact_mutation, context.job, context.definition, inherit_nodes
-        )
+        staged: StagedOutputs | None = None
         try:
             # The intake batch's node_code_versions deliberately stay frozen:
             # the batch payload is shared by every job in the batch. Since
@@ -74,6 +71,21 @@ class JobWorkflowUpgradeService:
                 context.now,
                 reject_running_nodes=True,
             ) as conn:
+                # codex P1-1：产物暂存必须在 lease guard 的事务内——事务外
+                # 先移文件时，queued job 在 resolve_upgrade_context 与本处
+                # 之间的窗口被调度器抢到（active lease/running node 由 guard
+                # 事务内复检拦截），执行中节点会读到缺失文件或写进暂存路径。
+                # rerun（job_rerun.single.commit_rerun）与 run_to（
+                # job_execution._run_to_with_start）同款模式。返回的实际继承
+                # 集按事务内节点状态收敛（P1-2 未完成候选并入重置面 + P1-3
+                # 共享纯输出名的候选一起重跑），mutation 消费它而非 diff 候选。
+                inherit_nodes, staged = self.job_db.stage_upgrade_reset_outputs_in_transaction(
+                    conn,
+                    self.artifact_mutation,
+                    context.job,
+                    context.definition,
+                    inherit_nodes,
+                )
                 stats = upgrade_job_workflow_inherit(
                     conn,
                     job_id,

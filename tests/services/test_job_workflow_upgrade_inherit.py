@@ -492,15 +492,19 @@ def test_inherit_upgrade_null_frozen_degrades_to_full_rerun(tmp_path: Path) -> N
     assert json.loads(upgraded["frozen_config_json"])["a"]["bank_version"] == "v9"
 
 
-def test_inherit_upgrade_shared_output_name_keeps_inherited_artifact(tmp_path: Path) -> None:
-    """A3（对抗审查）：继承节点与重置节点声明同名 output。
+def test_inherit_upgrade_shared_output_name_reruns_both_producers(tmp_path: Path) -> None:
+    """A3 + codex P1-3：继承节点与重置节点声明同名纯输出 → 一起重跑。
 
-    旧缺陷：stage_outputs 按名字全局收集、reset_keys 只按节点过滤——
-    b（重置）与 a（继承）都声明 shared.json 时，升级会把 job_dir 里的
-    shared.json（同时是 a 的产物）连带暂存删除，(a, shared.json) 清单行
-    却保留 → a completed 但产物物理丢失。修复后共享名不进暂存面：文件
-    留给 b 重跑时原地覆盖（RMW 同款语义），(b, shared.json) 行保留并
-    由 b 重跑后 upsert，(a, shared.json) 行与文件原样。
+    A3（对抗审查）发现文件系统暂存面会被同名击穿：stage_outputs 按名字
+    收集会把继承节点的产物连带暂存删除。A3 的修法（共享名不暂存、留给
+    重跑原地覆盖）只保住了本地文件，却挡不住对象存储串数据：权威对象键
+    ``jobs/<ws>/<job>/<name>`` 不含 node 身份，b（重置）重跑上传即按名字
+    覆盖共享对象，(a, shared.json) 清单行从此指向 b 的内容；且 b 本次没
+    真正写该文件时 ``_check_outputs`` 只查文件存在，会把 a 的旧字节当 b
+    本次输出重新上传。codex P1-3 修法：跨闭包同名生产者不能拆开——同名
+    output 的闭包外节点并入重跑闭包（保守方向：多跑不串数据）；文件系统
+    侧的同名排除（staging_output_names）降级为 rerun/run-to 闭包的既有
+    语义 + upgrade 路径的兜底。
     """
     import dataclasses
 
@@ -508,8 +512,9 @@ def test_inherit_upgrade_shared_output_name_keeps_inherited_artifact(tmp_path: P
     from server.app.storage_paths import resolve_job_dir
     from server.app.workflows.schema import WorkflowNode
 
-    # b 与 a 都声明 shared.json；c 独立（不经 b 的下游链传播），只有 b
-    # 因 capability 变化重置，a/c 继承。
+    # b 与 a 都声明 shared.json（b 不声明为输入，保持纯输出形态——
+    # RMW 排除（outputs - inputs）会把同名从暂存面拿掉，绕开判定点）；
+    # c 独立（无 outputs、不在 a/b 的下游链上），不受波及。
     nodes = {
         "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["shared.json"]),
         "b": WorkflowNode(
@@ -518,9 +523,6 @@ def test_inherit_upgrade_shared_output_name_keeps_inherited_artifact(tmp_path: P
             capability="cap_b",
             after=["a"],
             config_schema={},
-            # 注意：b 不把 shared.json 声明为输入——RMW 排除（outputs -
-            # inputs）会把同名从暂存面拿掉，绕开 A3 要验证的闭包外共享
-            # 过滤；只有纯输出形态才能真正到达 A3 的判定点。
             outputs=["shared.json"],
         ),
         "c": WorkflowNode(key="c", label="C", capability="cap_c"),
@@ -528,7 +530,8 @@ def test_inherit_upgrade_shared_output_name_keeps_inherited_artifact(tmp_path: P
     definition = dataclasses.replace(_inherit_chain_definition(), nodes=nodes, edges=[])
     queries, workspace, revisions, _, _ = _inherit_setup(tmp_path)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
-    # b 的 capability 变化 → 只有 b 重置；a/c 继承。
+    # b 的 capability 变化 → diff 重置面只有 b；a 与 b 共享 shared.json
+    # → a 一并移出继承集；c 独立继承。
     changed = dict(nodes)
     changed["b"] = dataclasses.replace(nodes["b"], capability="cap_b_new")
     current = revisions.publish_workspace_revision(
@@ -558,12 +561,14 @@ def test_inherit_upgrade_shared_output_name_keeps_inherited_artifact(tmp_path: P
     result = service.upgrade(workspace["id"], job["id"], mode="inherit")
 
     statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
-    assert result["kept_node_count"] == 2
-    assert statuses == {"a": "completed", "c": "completed", "b": "pending"}
-    # 继承节点 a 的产物物理存活、清单行原样；共享名不进 b 的暂存面。
-    assert (job_dir / "shared.json").read_text() == "old-shared"
+    # 同名生产者一起重跑：a/b 均 pending；c 独立继承。
+    assert result["kept_node_count"] == 1
+    assert statuses == {"a": "pending", "b": "pending", "c": "completed"}
+    # 两个生产者都在重置面：shared.json 本地暂存删除、清单行同事务清理，
+    # 重跑后按新 revision 语义重新产出与上传。
+    assert not (job_dir / "shared.json").exists()
     names = queries.job_artifact_manifest_names_for_nodes(job["id"], {"a", "b"})
-    assert names == {("a", "shared.json"), ("b", "shared.json")}
+    assert names == set()
     assert not (job_dir / ".staged").exists()
     assert queries.get_job(job["id"])["workflow_revision_id"] == current["id"]
 
