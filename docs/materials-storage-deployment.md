@@ -203,14 +203,21 @@ EOF
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
 - 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
-  （目前 v65）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
+  （目前 v82）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
   v55（`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
   状态计数）、v57（`studio_chat_sessions.draft_yaml`）、v58（scoped worker
   token——撤销存量全局 register token，行为变更）、v61（Studio workflow
   草稿表）、v62（workspace id 与 workflow key 绑定，存量 id 重命名）、
   v63（产物预览隐藏列表）、v64（workspace 级 Agent 默认配置三列退役
-  drop）、v65（`approval_decisions` 人工审批审计表）。v59（`jobs(run_id)` 索引）与 v60（register token ids 列）与本
-  部署面无直接关系。
+  drop）、v65（`approval_decisions` 人工审批审计表）、v66（workflow 节点
+  显式类型 `code`/`agent`，数据归一）、v68/v70（workflow_key 列对齐与
+  退役 DDL，#211 Phase 3）、v71（预览面板实体类型）、v72/v78/v80/v81
+  （`ops_runtime_profile_samples` 执行管线观测列族）、v73/v77/v82
+  （job 状态计数：行触发器 → 语句级聚合 → advisory-lock delta fold，
+  #437/#659 死锁根治线）、v76（`studio_publish_requests` 发布握手表）、
+  v79（shard 感知的唯一活跃请求索引）。v59（`jobs(run_id)` 索引）与
+  v60（register token ids 列）与本部署面无直接关系。
+  迁移明细以 `server/app/db/migration_chain.py` 为准。
 - bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外
   存储配置。
 - 上传一个文件验证闭环：`POST /api/workspaces/{id}/materials/presign`
