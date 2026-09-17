@@ -373,9 +373,9 @@ def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> Non
     # refusal fires for an existing job (the scoped effecting short-circuit
     # in require_job_workspace_access would also 403 a nonexistent id —
     # that weaker shape is pinned by test_studio_agent_job_tools).
-    from tests.routes.test_job_idor_matrix import _make_job
+    from tests.helpers import make_workspace_job
 
-    real_job = _make_job(client, workspace_id)
+    real_job = make_workspace_job(client, workspace_id)
     scoped = _scoped_client(client, job_db)
     for method, url, payload in _effecting_endpoints(workspace_id, {"job_id": real_job}):
         response = scoped.request(method, url, json=payload)
@@ -437,27 +437,12 @@ def test_full_session_still_reaches_effecting_endpoints(client, job_db) -> None:
     # Seed the workspace once, then mint one fresh job per mutating endpoint:
     # the admin pass really deletes its job, and re-seeding the workspace
     # agent definitions is not idempotent (entity version conflict).
-    from tests.helpers import (
-        publish_legacy_intake_revision,
-        seed_workspace_agent_definitions,
-    )
-
-    seed_workspace_agent_definitions(workspace_id)
-    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
+    from tests.helpers import make_workspace_job
 
     mint_seq = iter(range(10**9))
 
     def _mint_job() -> str:
-        created = client.post(
-            f"/api/workspaces/{workspace_id}/job-batches",
-            json={
-                "workflow_key": workspace_id,
-                "source_kind": "direct_ids",
-                "knowledge_point_ids": [f"scope_admin_{next(mint_seq)}"],
-            },
-        )
-        assert created.status_code == 200, created.text
-        return created.json()["jobs"][0]["id"]
+        return make_workspace_job(client, workspace_id, item_id=f"scope_admin_{next(mint_seq)}")
 
     scoped = _scoped_client(client, job_db)
     # Scoped round first, on a shared live job: every request is refused
@@ -471,16 +456,11 @@ def test_full_session_still_reaches_effecting_endpoints(client, job_db) -> None:
     # and still proves reachability, so minting is best-effort.
     for method, url, payload in _effecting_endpoints(workspace_id, {"job_id": None}):
         if "/jobs/" in url and client.get(f"/api/workspaces/{workspace_id}").status_code == 200:
-            created = client.post(
-                f"/api/workspaces/{workspace_id}/job-batches",
-                json={
-                    "workflow_key": workspace_id,
-                    "source_kind": "direct_ids",
-                    "knowledge_point_ids": [f"scope_admin_{next(mint_seq)}"],
-                },
-            )
-            if created.status_code == 200:
-                fresh = created.json()["jobs"][0]["id"]
+            try:
+                fresh = _mint_job()
+            except AssertionError:
+                fresh = None
+            if fresh is not None:
                 head, _, rest = url.partition("/jobs/")
                 job_segment, _, tail = rest.partition("/")
                 url = f"{head}/jobs/{fresh}/{tail}" if tail else f"{head}/jobs/{fresh}"
