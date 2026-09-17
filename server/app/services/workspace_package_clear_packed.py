@@ -44,8 +44,8 @@ class WorkspacePackageClearPackedMixin:
                     self._result(
                         normalized,
                         "failed",
-                        "wrong_workspace",
-                        f"Job does not belong to workspace {workspace_id}",
+                        "not_found",
+                        "Job not found",
                     )
                 )
                 continue

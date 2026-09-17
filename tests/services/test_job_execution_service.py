@@ -402,7 +402,7 @@ def test_run_to_rejects_wrong_workspace(
         execution_service.run_to("other-ws", job["id"], "write_script")
 
     assert exc_info.value.status == "failed"
-    assert exc_info.value.reason_code == "wrong_workspace"
+    assert exc_info.value.reason_code == "not_found"
 
 
 def test_continue_rejects_wrong_workspace(
@@ -414,7 +414,7 @@ def test_continue_rejects_wrong_workspace(
         execution_service.continue_job("other-ws", job["id"])
 
     assert exc_info.value.status == "failed"
-    assert exc_info.value.reason_code == "wrong_workspace"
+    assert exc_info.value.reason_code == "not_found"
 
 
 def test_batch_run_to_returns_mixed_results_in_request_order(

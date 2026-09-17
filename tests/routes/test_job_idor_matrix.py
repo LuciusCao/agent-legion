@@ -165,3 +165,68 @@ def test_admin_still_passes_and_unknown_job_404s(client, two_workspaces_with_job
     probe = _member_client(client, "enum-probe", "pw-enum")
     assert probe.get("/api/jobs/does_not_exist_job").status_code == 404
     assert probe.get("/api/jobs/does_not_exist_job/token-usage").status_code == 404
+
+
+def test_404_detail_does_not_leak_job_existence(client, two_workspaces_with_jobs) -> None:
+    """The bare-route guard's 404 detail must be identical for a missing job
+    and a foreign-workspace job — otherwise the status-code-uniform 404s
+    still form a per-request existence oracle (review R1 P3)."""
+    ws_a, _ws_b, job_a, _job_b = two_workspaces_with_jobs
+    _create_member(client, "detail-probe", "pw-detail")
+    probe = _member_client(client, "detail-probe", "pw-detail")
+    missing = probe.get("/api/jobs/no_such_job_anywhere").json()["detail"]
+    foreign = probe.get(f"/api/jobs/{job_a}").json()["detail"]
+    assert missing == foreign == "Job not found"
+
+
+def test_workspace_bound_scoped_token_cannot_read_other_workspace_job(
+    client, two_workspaces_with_jobs
+) -> None:
+    """A run token bound to workspace B must not read workspace A's jobs even
+    when the initiating user is a member of both — the #158 binding the bare
+    job routes previously bypassed (review R1 P3)."""
+    from server.app.auth import scoped_tokens
+
+    ws_a, ws_b, job_a, job_b = two_workspaces_with_jobs
+    member_id = _create_member(client, "dual-member", "pw-dual")
+    job_db = client.app.state.job_db
+    job_db.upsert_workspace_member(ws_a, member_id, "viewer")
+    job_db.upsert_workspace_member(ws_b, member_id, "viewer")
+
+    token = scoped_tokens.mint_scoped_token(job_db, member_id, workspace_id=ws_b)
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+
+    # Bound workspace's job stays readable...
+    assert scoped.get(f"/api/jobs/{job_b}").status_code == 200
+    # ...the other workspace's job is refused even though the minter is a
+    # member there (404, same shape as any foreign job).
+    assert scoped.get(f"/api/jobs/{job_a}").status_code == 404
+    assert scoped.get(f"/api/jobs/{job_a}/token-usage").status_code == 404
+
+
+def test_batch_endpoints_do_not_leak_foreign_job_existence(
+    client, two_workspaces_with_jobs
+) -> None:
+    """Batch mutation results must answer 'not_found' identically for a
+    foreign-workspace job and a truly missing id — the per-item
+    wrong_workspace/not_found split was a deterministic existence oracle
+    (review R1 P2)."""
+    ws_a, ws_b, job_a, _job_b = two_workspaces_with_jobs
+    member_id = _create_member(client, "batch-probe", "pw-batch")
+    client.app.state.job_db.upsert_workspace_member(ws_b, member_id, "editor")
+
+    beta = _member_client(client, "batch-probe", "pw-batch")
+    response = beta.request(
+        "DELETE",
+        f"/api/workspaces/{ws_b}/jobs/batch",
+        json={"job_ids": [job_a, "totally_unknown_job"]},
+    )
+    assert response.status_code == 200, response.text
+    results = {item["job_id"]: item for item in response.json()["results"]}
+    assert results[job_a]["reason_code"] == "not_found"
+    assert results["totally_unknown_job"]["reason_code"] == "not_found"
+    assert results[job_a]["message"] == results["totally_unknown_job"]["message"]
+    # And the foreign job survives.
+    assert client.get(f"/api/jobs/{job_a}", headers=CSRF).status_code == 200
+    _ = ws_a

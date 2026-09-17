@@ -17,31 +17,43 @@ from server.app.auth.dependencies import _SAFE_METHODS, get_current_user
 _MEMBER_ROLE_RANK = {"viewer": 1, "editor": 2}
 
 
-def _job_workspace_id(request: Request, workspace_id: str | None) -> str | None:
-    """Resolve the workspace a job-id-shaped route actually addresses (#710).
+def _resolve_workspace_scope(request: Request, user: dict[str, Any]) -> str | None:
+    """Resolve the workspace a route actually addresses (#710).
 
     ``job_id`` embeds its workspace (``{workspace_id}_{workflow_key}_{source_id}``)
     but the separator is legal inside workspace ids too, so the scope cannot
-    be parsed from the id — it is read from the job row itself:
+    be parsed from the id — it is read from the job row itself (id-only
+    projection; jobs rows carry KB-scale TEXT columns and this runs per
+    request):
 
     - bare ``/jobs/{job_id}`` routes: the job's workspace is the scope;
     - ``/workspaces/{workspace_id}/jobs/{job_id}`` routes: the path scope must
       match the job's actual workspace, so one's own workspace prefix cannot
       borrow another workspace's job id (defense in depth ahead of the
-      service-level ``_require_job`` checks).
+      service-level per-item checks).
 
-    Unknown jobs 404 like unknown workspaces — enumeration-safe.
+    A workspace-bound scoped token additionally refuses every workspace other
+    than its binding — same shape as ``enforce_scoped_workspace_binding``
+    (#158), which the bare job routes previously bypassed.
+
+    Unknown jobs 404 like unknown workspaces — enumeration-safe, and the
+    detail text is uniform so the two cases are indistinguishable.
     """
     job_id = request.path_params.get("job_id")
-    if job_id is None:
-        return workspace_id
-    job = request.app.state.job_db.get_job(str(job_id))
-    if job is None:
+    workspace_id = request.path_params.get("workspace_id") or request.query_params.get(
+        "workspace_id"
+    )
+    if job_id is not None:
+        job_workspace = request.app.state.job_db.get_job_workspace(str(job_id))
+        if job_workspace is None or (
+            workspace_id is not None and str(workspace_id) != job_workspace
+        ):
+            raise HTTPException(status_code=404, detail="Job not found")
+        workspace_id = job_workspace
+    bound = user.get("scoped_workspace_id")
+    if bound and workspace_id is not None and str(bound) != str(workspace_id):
         raise HTTPException(status_code=404, detail="Job not found")
-    job_workspace = str(job["workspace_id"])
-    if workspace_id is not None and str(workspace_id) != job_workspace:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job_workspace
+    return str(workspace_id) if workspace_id else None
 
 
 def require_workspace_access(
@@ -54,21 +66,26 @@ def require_workspace_access(
     falling back to the ``workspace_id`` query parameter for routes that take
     the scope in the query string (``/api/worker/*``, ``/api/metrics/overview``).
     On ``job_id``-shaped routes the scope comes from the job's own workspace
-    (see ``_job_workspace_id``). Routes without any workspace scope only
-    require a logged-in user. Non-members get 404 (not 403) so workspace
+    (see ``_resolve_workspace_scope``). Routes without any workspace scope
+    only require a logged-in user. Non-members get 404 (not 403) so workspace
     existence cannot be enumerated.
     """
     if user.get("role") == "admin":
         return user
-    workspace_id = request.path_params.get("workspace_id") or request.query_params.get(
-        "workspace_id"
-    )
-    workspace_id = _job_workspace_id(request, workspace_id)  # type: ignore[arg-type]
+    workspace_id = _resolve_workspace_scope(request, user)
     if not workspace_id:
         return user
     role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
     if role is None:
-        raise HTTPException(status_code=404, detail="Workspace not found")
+        # On job-id routes a membership 404 must read exactly like the
+        # unknown-job 404 above, or the differing detail strings become an
+        # existence oracle (review R1 P3).
+        detail = (
+            "Job not found"
+            if request.path_params.get("job_id") is not None
+            else ("Workspace not found")
+        )
+        raise HTTPException(status_code=404, detail=detail)
     minimum = "viewer" if request.method in _SAFE_METHODS else "editor"
     if _MEMBER_ROLE_RANK.get(role, 0) < _MEMBER_ROLE_RANK[minimum]:
         raise HTTPException(status_code=403, detail="Insufficient workspace role")

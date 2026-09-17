@@ -101,8 +101,8 @@ class JobExecutionService:
                 "run_to",
                 "failed",
                 target_node_key,
-                "wrong_workspace",
-                f"Job does not belong to workspace {workspace_id}",
+                "not_found",
+                "Job not found",
             )
         definition = self._definition(job)
         if target_node_key not in definition.nodes:
@@ -318,8 +318,8 @@ class JobExecutionService:
                 "continue",
                 "failed",
                 None,
-                "wrong_workspace",
-                f"Job does not belong to workspace {workspace_id}",
+                "not_found",
+                "Job not found",
             )
 
         try:

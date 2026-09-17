@@ -127,6 +127,14 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
             row = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
         return dict(row) if row else None
 
+    def get_job_workspace(self, job_id: str) -> str | None:
+        """Workspace-id projection for the auth guard (#710): jobs rows carry
+        KB-scale TEXT columns, and the guard runs on every job-id route —
+        selecting the single column keeps that per-request cost minimal."""
+        with self._connect_read() as conn:
+            row = conn.execute("select workspace_id from jobs where id=%s", (job_id,)).fetchone()
+        return str(row["workspace_id"]) if row else None
+
     def list_jobs_by_ids(self, workspace_id: str, job_ids: Sequence[str]) -> list[dict[str, Any]]:
         if not job_ids:
             return []
