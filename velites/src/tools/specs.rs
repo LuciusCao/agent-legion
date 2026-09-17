@@ -11,12 +11,12 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
     let (description, parameters) = match kind {
         ToolKind::Read => (
             "Read a UTF-8 text file inside the working directory or an \
-             enabled skill directory (read-only). \
-             Optional 1-based `offset` and `limit` select a line range. \
-             Output is truncated to the first 2000 lines or 50KB \
-             (whichever is hit first). Use offset/limit for large files; \
-             when you need the full file, continue with offset until \
-             complete.",
+             enabled skill directory (read-only). Optional 1-based `offset` \
+             and `limit` select a line range. Output is truncated to the \
+             first 2000 lines or 50KB (whichever is hit first). Files over \
+             4MB fail outright — offset/limit paging only works within the \
+             4MB limit; for larger files read them in chunks via bash \
+             (e.g. `sed -n '1,2000p' file`).",
             serde_json::json!({
                 "type": "object",
                 "properties": {

@@ -191,6 +191,11 @@ fn set(ctx: &ToolContext, path: &str, query: &str, value: Value) -> Result<ToolO
             )))
         }
     }
+    // codex round-2 P2：file 与 value 各自过限而合并结果超限（3 MiB 对象
+    // + 2 MiB 字段 / 两棵各 <300k 节点的树）时，旧代码会落盘一个下次
+    // json 操作与 output-contract 都拒绝的文件——同一预算在写临时文件前
+    // 先 gate 合并后的 root，超限诚实报错不落盘。
+    json_limits::check_value_size(&root).map_err(|budget| budget_error(path, budget))?;
     let bytes = store_json(&resolved, &root, path)?;
     Ok(ToolOutput::text(
         format!("set `{query}` in {path} (file now {bytes} bytes)"),

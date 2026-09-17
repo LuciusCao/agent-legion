@@ -144,6 +144,10 @@ pub fn parse_bounded(raw: &str) -> Result<(Value, usize), ParseBoundedError> {
 /// 32 MiB string could be written into a 4 MiB file (measured: 226 MB
 /// peak, 46 MiB on disk). Both checks run BEFORE the tree is mutated, so
 /// an oversized value never enters the tree or reaches the disk.
+/// The same budgets gate the MERGED root after the splice (codex round-2
+/// P2): the file and the value each pass alone while their sum can exceed
+/// both (3 MiB object + 2 MiB field, or two <300k-node trees), which
+/// would write a file every later json operation rejects.
 pub fn check_value_size(value: &Value) -> Result<(), JsonBudget> {
     if count_nodes(value, MAX_JSON_NODES).is_none() {
         return Err(JsonBudget::Nodes);

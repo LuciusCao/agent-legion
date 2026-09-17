@@ -10,11 +10,10 @@
 //!   legitimate `data:` payload is stream corruption, rejected at the line
 //!   buffer instead of growing it without bound (a junk flood with no
 //!   newline never reaches the aggregate caps).
-//! - [`MAX_STREAMED_FIELD_CHARS`]: one aggregated field (text/partial_json/
-//!   signature/...) may not exceed 32 MiB.
-//! - [`MAX_AGGREGATE_CHARS`]: the WHOLE aggregate (all blocks, all fields)
-//!   may not exceed 32 MiB — 1025 blocks × per-field-capped sizes would
-//!   otherwise be a compound storm the per-field cap alone cannot see.
+//! - [`MAX_STREAMED_FIELD_CHARS`]: one aggregated field (kind/text/id/name/
+//!   partial_json/signature/data) may not exceed 32 MiB; the WHOLE aggregate
+//!   ([`MAX_AGGREGATE_CHARS`]) too — 1025 blocks × per-field sizes would
+//!   otherwise be a storm the per-field cap alone cannot see.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -34,10 +33,9 @@ const DEFAULT_MAX_OUTPUT_TOKENS: u64 = 8192;
 /// 到不了聚合上限，只能在这里拦）。与 openai_compat 的同名常量同值。
 const MAX_SSE_LINE_BYTES: usize = 2 * 1024 * 1024;
 
-/// 单个聚合字段（text / partial_json / signature / ...）的防御性上限
-/// （#637）：32 MiB ≈ 800 万 token 的输出，正常路径下远够不到；只拦
-/// 网关/代理侧的异常流（delta 泛洪）。与 openai_compat 的
-/// MAX_STREAMED_TEXT_CHARS 同值。
+/// 单个聚合字段（kind/text/id/name/...）的防御性上限（#637）：32 MiB
+/// ≈ 800 万 token 的输出，正常路径下远够不到；只拦网关/代理侧的异常流
+/// （delta 泛洪）。与 openai_compat 的 MAX_STREAMED_TEXT_CHARS 同值。
 const MAX_STREAMED_FIELD_CHARS: usize = 32 * 1024 * 1024;
 
 /// 整个补全聚合的全局上限（#637）：Anthropic 的 `ensure` 允许 0..=1024
@@ -310,13 +308,13 @@ impl Aggregate {
                 self.ensure(index)?;
                 let block = event.get("content_block").unwrap_or(&Value::Null);
                 let target = &mut self.blocks[index];
-                target.kind = string_field(block, "type");
-                // #637: every gateway-controlled string funnels through
-                // push_bounded — content_block_start REPLACES the fields, but
-                // a block re-started with a huge payload is the same flood.
+                // #637: every gateway string funnels through push_bounded;
+                // kind/id/name too (codex P1) — plain assignment left them
+                // invisible to both caps (GiB heap).
+                push_bounded(&mut target.kind, &string_field(block, "type"))?;
                 push_bounded(&mut target.text, &string_field(block, "text"))?;
-                target.id = string_field(block, "id");
-                target.name = string_field(block, "name");
+                push_bounded(&mut target.id, &string_field(block, "id"))?;
+                push_bounded(&mut target.name, &string_field(block, "name"))?;
                 push_bounded(&mut target.signature, &string_field(block, "signature"))?;
                 push_bounded(&mut target.data, &string_field(block, "data"))?;
                 if let Some(input) = block.get("input").filter(|value| {
@@ -378,11 +376,10 @@ impl Aggregate {
                 )))
             }
         }
-        // Whole-aggregate check AFTER every event: the single growth
-        // chokepoint every bounded append and block resize passes through,
-        // so the aggregate cannot creep past the cap by spreading bytes
-        // across 1025 blocks that are each individually under the per-field
-        // limit.
+        // Whole-aggregate check AFTER every event: the single chokepoint
+        // every bounded append and resize passes through, so the aggregate
+        // cannot creep past the cap via bytes spread across 1025 blocks
+        // each under the per-field limit.
         self.check_total()
     }
 
@@ -396,13 +393,17 @@ impl Aggregate {
             .max(get("cache_creation_input_tokens"));
     }
 
-    /// 整个聚合的大小：每个 content block 的每个聚合字段（#637 全局
-    /// 上限据此判定）。
+    /// 整个聚合的大小：每个 block 的每个聚合字段（#637 全局上限据此
+    /// 判定）。kind/id/name 计入总量（codex round-2 P1，对齐
+    /// openai_compat）：漏计会放过带大 id/name 的块。
     fn total_chars(&self) -> usize {
         self.blocks
             .iter()
             .map(|block| {
-                block.text.len()
+                block.kind.len()
+                    + block.id.len()
+                    + block.name.len()
+                    + block.text.len()
                     + block.partial_json.len()
                     + block.signature.len()
                     + block.data.len()
@@ -412,7 +413,7 @@ impl Aggregate {
 
     /// Reject the stream once the WHOLE aggregate (not one field — see
     /// [`MAX_AGGREGATE_CHARS`]) passes the #637 cap. Checked after every
-    /// applied event, so no path grows the aggregate past the cap.
+    /// event, so no path grows the aggregate past the cap.
     fn check_total(&self) -> Result<(), ProviderError> {
         if self.total_chars() > MAX_AGGREGATE_CHARS {
             return Err(ProviderError::Transient(format!(
@@ -530,8 +531,7 @@ fn push_lines_bounded(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<Vec<String>,
 /// Append a streamed delta to an aggregated string, rejecting the stream
 /// once the field passes the #637 defensive cap (see
 /// [`MAX_STREAMED_FIELD_CHARS`]) — without it an anomalous/hostile gateway
-/// flooding `data:` deltas (the `max_tokens` request header only binds a
-/// well-behaved server) would grow the field without bound. Mirrors
+/// flooding `data:` deltas would grow the field without bound. Mirrors
 /// `Aggregated::push_bounded` in `openai_compat/aggregate.rs`.
 fn push_bounded(target: &mut String, delta: &str) -> Result<(), ProviderError> {
     if target.len() + delta.len() > MAX_STREAMED_FIELD_CHARS {
@@ -727,7 +727,7 @@ mod tests {
     fn aggregate_text_delta_past_the_cap_is_transient() {
         // #637: the per-field cap — a text_delta flood pushing one block's
         // text past MAX_STREAMED_FIELD_CHARS is rejected as transient, not
-        // grown without bound. The max_tokens request header only binds a
+        // grown without bound. The max_tokens header only binds a
         // well-behaved server; this is the client-side bound.
         let mut aggregate = Aggregate::default();
         aggregate
@@ -750,7 +750,12 @@ mod tests {
         }
         let err = err.expect("per-field cap must fire before 33 MiB accumulates");
         assert!(err.is_retryable(), "over-cap stream is transient: {err}");
-        assert!(err.to_string().contains("aggregate cap"), "got: {err}");
+        // Either cap may fire first (both 32 MiB transient rejects).
+        assert!(
+            err.to_string().contains("aggregate cap")
+                || err.to_string().contains("aggregate exceeds"),
+            "got: {err}"
+        );
         // The rejected delta was never appended — the field stays capped.
         assert!(aggregate.blocks[0].text.len() <= 32 * 1024 * 1024);
     }

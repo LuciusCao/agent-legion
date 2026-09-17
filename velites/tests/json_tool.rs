@@ -496,3 +496,100 @@ fn json_tool_fifo_over_cap_is_rejected_by_the_bounded_read() {
         "missing extraction hint: {text}"
     );
 }
+
+// codex round-2 P2 回归：file 与 value 各自过限、合并结果超限——旧代码
+// 会落盘一个 >4 MiB 或超节点预算的文件，之后的 json 操作与 output-contract
+// 校验都会拒绝这个"刚成功"的产物。合并后的 root 必须在写临时文件前过
+// 同一预算（节点数 + 紧凑序列化字节），超限诚实报错且原文件不动。
+#[tokio::test]
+async fn json_tool_set_rejects_byte_overrun_of_the_merged_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    // 3 MiB 字段（+结构开销）≈ 3 MiB 文件，低于 4 MiB 读侧上限。
+    let original = format!("{{\"keep\":\"{}\"}}", "k".repeat(3 * 1024 * 1024));
+    std::fs::write(cwd.join("spec.json"), &original).unwrap();
+    // 2 MiB value，低于 4 MiB value 上限；合并后 ≈ 5 MiB > 4 MiB。
+    let output = ToolKind::Json
+        .execute(
+            &serde_json::json!({
+                "op": "set", "path": "spec.json", "query": "add",
+                "value": "v".repeat(2 * 1024 * 1024)
+            }),
+            &inprocess_ctx(cwd),
+        )
+        .await;
+    assert!(output.is_error, "the merged >4 MiB result must be rejected");
+    let text = inprocess_text(&output);
+    assert!(
+        text.contains("too large for the json tool"),
+        "must name the file and the budget: {text}"
+    );
+    assert!(
+        text.contains("whole-file limit"),
+        "the merged cap is the whole-file limit: {text}"
+    );
+    // 原文件逐字节未动（拒绝发生在临时文件落盘之前）。
+    assert_eq!(
+        std::fs::read(cwd.join("spec.json")).unwrap(),
+        original.as_bytes()
+    );
+}
+
+// P2 节点维：两棵各 <300k 节点的树合并后 >300k——单侧预算全过，合并
+// 结果必须在落盘前被节点预算拒绝。
+#[tokio::test]
+async fn json_tool_set_rejects_node_overrun_of_the_merged_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    // 文件树 200,004 节点（root + key + array + 200,001 个数字），
+    // ~400 KB，字节与节点都在限内。
+    let original = format!("{{\"keep\":[{}]}}", vec!["1"; 200_001].join(","));
+    std::fs::write(cwd.join("spec.json"), &original).unwrap();
+    // value 树 200,002 节点，同样在限内；合并 400,007 > 300,000。
+    let output = ToolKind::Json
+        .execute(
+            &serde_json::json!({
+                "op": "set", "path": "spec.json", "query": "add",
+                "value": vec![1; 200_001]
+            }),
+            &inprocess_ctx(cwd),
+        )
+        .await;
+    assert!(
+        output.is_error,
+        "the merged >300k-node tree must be rejected"
+    );
+    let text = inprocess_text(&output);
+    assert!(
+        text.contains("300000 nodes"),
+        "missing the node-budget rejection: {text}"
+    );
+    assert_eq!(
+        std::fs::read(cwd.join("spec.json")).unwrap(),
+        original.as_bytes()
+    );
+}
+
+// P2 边界内合并成功：3 MiB 内的文件 + 1 MiB value 合并后仍在 4 MiB 与
+// 300k 节点内——预算检查不得误伤合法的大合并。
+#[tokio::test]
+async fn json_tool_set_allows_in_bounds_merge() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    let original = format!("{{\"keep\":\"{}\"}}", "k".repeat(2 * 1024 * 1024));
+    std::fs::write(cwd.join("spec.json"), &original).unwrap();
+    let output = ToolKind::Json
+        .execute(
+            &serde_json::json!({
+                "op": "set", "path": "spec.json", "query": "add",
+                "value": "v".repeat(1024 * 1024)
+            }),
+            &inprocess_ctx(cwd),
+        )
+        .await;
+    assert!(!output.is_error, "a 3 MiB merged result is within the cap");
+    let spec: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(cwd.join("spec.json")).unwrap()).unwrap();
+    assert_eq!(spec["keep"].as_str().unwrap().len(), 2 * 1024 * 1024);
+    assert_eq!(spec["add"].as_str().unwrap().len(), 1024 * 1024);
+}
