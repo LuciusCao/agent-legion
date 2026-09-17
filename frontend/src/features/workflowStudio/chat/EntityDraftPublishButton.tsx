@@ -23,7 +23,7 @@ import styles from './StudioChatPanel.module.css'
  * WorkflowNodeCodeSection）是 useEffect 本地 fetch，不在这批 query key
  * 上——已打开的面板不会自动刷新（hasDraft 徽标停留到下次挂载），面板
  * 侧的发布按钮再点会得到 404（下方已给友好文案）；面板刷新缺口在
- * follow-up issue（实体发布 nonce）跟踪。失败在按钮下方内联展示。实体
+ * follow-up #709（实体发布 nonce）跟踪。失败在按钮下方内联展示。实体
  * 发布与 workflow revision 发布是独立动作：revision 引用新版本时用户
  * 再走顶栏「发布新版本」。 */
 

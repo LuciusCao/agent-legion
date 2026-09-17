@@ -559,6 +559,17 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 87
 - check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/studioChatMessages.ts
+  reason: '#692 codex P1 (second round) added per-entity dedup (keepLatestPerEntity) plus its
+    honest-mechanism docstring to the extractor module: repeated saves of one entity keep only
+    the latest card, because publish carries only the entity id and an old card would silently
+    publish the newer server-side draft. 18 effective lines past the 320 ratchet baseline, 3
+    beyond the +15 growth band — filed as a first-time exemption (no prior floor). The module
+    stays the single chat view-model (extraction + grouping); harvest at the #456 sweep.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 338
+- check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/EntityDraftPublishButton.tsx
   reason: '#692 R2 follow-up grew the module past its 73-line ratchet baseline (registered at the
     codex-P1 fix commit): the honest-boundary docstring on the invalidation coverage and the

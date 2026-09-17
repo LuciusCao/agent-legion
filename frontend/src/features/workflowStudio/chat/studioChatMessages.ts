@@ -221,6 +221,23 @@ function compareMetaText(outputText: string): string | null {
   return parts.length > 0 ? parts.join(' · ') : '定义级变更'
 }
 
+/** #692 codex P1（第二轮）：按实体去重——同一实体的多次保存只保留
+ * 最新一张卡。发布请求只携带实体 ID，服务端发布的是当前服务端草稿
+ * （最新那份），旧卡的发布按钮实际会无提示地发布另一份（更新的）草
+ * 稿；保留旧卡也让用户以为能按卡发布历史内容。输入 calls 按 seq 有
+ * 序（groupToolCalls 保序），同一实体后出现的保存即更新的一份；唯一
+ * 不保证的边界是同一 tool block 内并发发起同实体两次保存（后启动 ≠
+ * 后落库，服务端 last-write-wins）。被去重的旧保存仍以 tool call 通用
+ * 卡留在转录里（可展开 rawInput/output 查看）——丢的只是发布/查看
+ * 入口，不是历史记录。 */
+function keepLatestPerEntity<T>(drafts: T[], keyOf: (draft: T) => string): T[] {
+  const latest = new Map<string, T>()
+  for (const draft of drafts) {
+    latest.set(keyOf(draft), draft)
+  }
+  return [...latest.values()]
+}
+
 export function extractAgentDefinitionDrafts(
   calls: ToolCallView[]
 ): AgentDefinitionDraftView[] {
@@ -238,7 +255,7 @@ export function extractAgentDefinitionDrafts(
       status: call.status,
     })
   }
-  return drafts
+  return keepLatestPerEntity(drafts, (draft) => draft.agentId)
 }
 
 export function extractNodeCodeDrafts(
@@ -251,7 +268,7 @@ export function extractNodeCodeDrafts(
     if (!nodeKey) continue
     drafts.push({ toolCallId: call.toolCallId, nodeKey, status: call.status })
   }
-  return drafts
+  return keepLatestPerEntity(drafts, (draft) => draft.nodeKey)
 }
 
 /** 待应答的权限请求：pending 消息存在且没有同 request_id 的 resolved 消息。 */

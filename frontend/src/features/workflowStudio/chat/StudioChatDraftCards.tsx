@@ -14,7 +14,9 @@ import styles from './StudioChatPanel.module.css'
  * revision 的发布按钮——那发布的是编辑器 YAML，仅实体变更时会因无 diff
  * 而禁用）。发布入口只对来源 tool call「完成」的草稿开放（R2 P2-1）：
  * pending/failed 的保存不保证草稿落库，开放发布会把更早的旧草稿发布
- * 出去、用户误以为新定义已生效。 */
+ * 出去、用户误以为新定义已生效。同一实体多次保存时 extractor 只保留
+ * 最新一张卡（codex P1 第二轮）——发布请求只带实体 ID，服务端发布的
+ * 是当前草稿，旧卡的按钮会无提示地发布另一份内容。 */
 
 /** 仅来源 tool call 完成的草稿渲染发布入口（R2 P2-1 门控）。 */
 function DraftPublishAction({
@@ -63,6 +65,15 @@ export function AgentDefinitionDraftCard({
   )
 }
 
+/** 节点代码卡的草稿状态文案（R3 P2-2：按来源 tool call 的 status 分支
+ * ——去重后只剩最新一张卡，「已存为服务端草稿」对 failed/pending 的
+ * 保存是假话：草稿未落库，服务端还是上一份 completed 的内容）。 */
+function nodeDraftStatusText(status: string): string {
+  if (status === 'completed') return '已存为服务端草稿，发布后新执行才使用'
+  if (status === 'failed') return '本次保存失败，草稿未更新'
+  return '保存中…'
+}
+
 export function NodeCodeDraftCard(props: {
   draft: NodeCodeDraftView
   onSelectNode?: (nodeKey: string) => void
@@ -73,7 +84,7 @@ export function NodeCodeDraftCard(props: {
         节点代码草稿：{props.draft.nodeKey}
       </StudioDraftCardHeader>
       <div className={styles.draftMeta}>
-        已存为服务端草稿，发布后新执行才使用
+        {nodeDraftStatusText(props.draft.status)}
       </div>
       {/* 定位与发布是独立能力：无 onSelectNode（无定位链路的调用方）
        * 只少了「查看草稿」，发布入口不受影响。 */}

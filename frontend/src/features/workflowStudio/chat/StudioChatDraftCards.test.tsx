@@ -236,6 +236,27 @@ describe('NodeCodeDraftCard（#692）', () => {
     ).toBeInTheDocument()
   })
 
+  // R3 P2-2：草稿状态文案按来源 status 分支——failed/pending 的保存说
+  // 「已存为服务端草稿」是假话（草稿未落库，服务端还是上一份）。
+  it('草稿状态文案按来源 tool call 状态分支', () => {
+    const cases = [
+      ['completed', /已存为服务端草稿，发布后新执行才使用/],
+      ['failed', /本次保存失败，草稿未更新/],
+      ['pending', /保存中…/],
+    ] as const
+    for (const [status, pattern] of cases) {
+      const { unmount } = renderWithStudio(
+        <NodeCodeDraftCard
+          draft={{ ...draft, status }}
+          onSelectNode={vi.fn()}
+        />,
+        makeStudio()
+      )
+      expect(screen.getByText(pattern)).toBeInTheDocument()
+      unmount()
+    }
+  })
+
   it('点击发布调节点代码 publish 端点并 toast 成功', async () => {
     mockApi.mockResolvedValue({} as never)
     renderWithStudio(
