@@ -3587,6 +3587,16 @@ export interface components {
       /** Agents */
       agents: components['schemas']['AgentListItem'][]
     }
+    /**
+     * AgentPublishRequest
+     * @description #692 codex P1: the caller's asserted draft hash — verified atomically
+     *     inside the publish transaction; mismatch raises 409 with zero publish
+     *     side effects. Absent (legacy callers) keeps the old no-check semantics.
+     */
+    AgentPublishRequest: {
+      /** Expected Hash */
+      expected_hash?: string | null
+    }
     /** AgentRegisterTokenCreatedResponse */
     AgentRegisterTokenCreatedResponse: {
       /** Label */
@@ -7470,6 +7480,17 @@ export interface components {
       /** Code */
       code: string
     }
+    /**
+     * WorkflowNodeCodePublishRequest
+     * @description #692 codex P1: the caller's asserted draft code_hash — verified
+     *     atomically inside the publish transaction; mismatch raises 409 with
+     *     zero publish side effects. Absent (legacy callers) keeps the old
+     *     no-check semantics.
+     */
+    WorkflowNodeCodePublishRequest: {
+      /** Expected Hash */
+      expected_hash?: string | null
+    }
     /** WorkflowNodeCodeResponse */
     WorkflowNodeCodeResponse: {
       /** Code */
@@ -8735,7 +8756,11 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['AgentPublishRequest'] | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
@@ -12998,7 +13023,13 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json':
+          | components['schemas']['WorkflowNodeCodePublishRequest']
+          | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
@@ -15166,7 +15197,13 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json':
+          | components['schemas']['WorkflowNodeCodePublishRequest']
+          | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

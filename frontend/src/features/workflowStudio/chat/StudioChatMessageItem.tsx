@@ -91,7 +91,11 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
         {agentDrafts
           .filter((draft) => draft.toolCallId === toolCall.toolCallId)
           .map((draft) => (
-            <AgentDefinitionDraftCard key={draft.toolCallId} draft={draft} />
+            <AgentDefinitionDraftCard
+              key={draft.toolCallId}
+              draft={draft}
+              workspaceId={workspaceId}
+            />
           ))}
         {nodeDrafts
           .filter((draft) => draft.toolCallId === toolCall.toolCallId)
@@ -99,6 +103,7 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
             <NodeCodeDraftCard
               key={draft.toolCallId}
               draft={draft}
+              workspaceId={workspaceId}
               onSelectNode={onSelectNode}
             />
           ))}

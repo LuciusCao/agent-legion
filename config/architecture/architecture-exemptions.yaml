@@ -320,10 +320,13 @@ exemptions:
     backend.md). The deprecated aliases are the honest cost of the deprecation window; deleting them (Phase
     3/4 removal tracked in issue 211) drops the file back under the baseline ceiling and this exemption
     goes stale automatically. The Codex P2 fix on PR 299 adds _resolve_key (query-bound alias must equal
-    the workspace id), which is part of the same deprecation-window cost.
+    the workspace id), which is part of the same deprecation-window cost. Issue 692 (codex P1 round 4)
+    adds the optional expected_hash publish body (about 17 lines) — the server-side CAS guard for chat
+    draft cards; re-signed to 257, 2 beyond the prior 240+15 band, time-boxed per issue 641.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 240
+  ceiling: 257
+  expires: 2026-10-31
 - check: architecture.file_budget
   path: server/app/routes/job_http.py
   reason: The issue-211 Phase 3 read-binding guard (reject_mismatched_workflow_key, shared by five explicit-key
@@ -558,6 +561,55 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 54
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/StudioChatDraftCards.tsx
+  reason: '#692 draft-card redesign grew the module past its 67-line base budget: the MUI icon
+    header, the per-entity publish gating (status-aware DraftPublishAction, R2 P2-1),
+    honest-boundary comments, and the R4 workspaceId prop plumbing (required — job-diagnosis
+    and customize-preview hosts render the cards under another workspace). The cards stay one
+    module (three siblings of one family); the next growth should split the node-code card or
+    move the publish actions to their own module. 114 effective lines (R5 added the saveFailed gate), 4 beyond the prior
+    87+15 band, re-signed time-boxed per #641); harvest at the #456 sweep.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 114
+  expires: 2026-10-31
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/studioChatMessages.ts
+  reason: '#692 draft-card lifecycle grew the extractor module past its 320 ratchet baseline in two
+    steps: codex P1 round 2 added per-entity dedup (keepLatestPerEntity) and codex P1 round 3
+    added the draft identity hash parsed from each save response (draftHashFromOutput) — publish
+    must verify the card against the server-side draft because the entity is workspace-level
+    state that another session can overwrite, plus the R5 saveFailed flag (HTTP-level save failures return error text, not exceptions). 44 effective lines past baseline (29 beyond the
+    +15 growth band), re-signed from the first exemption at 338 — time-boxed per #641. The
+    module stays the single chat view-model (extraction + grouping); harvest at the #456 sweep.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 364
+  expires: 2026-10-31
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/EntityDraftPublishButton.tsx
+  reason: '#692 grew past its 73-line ratchet baseline across review rounds, then SHRANK back
+    when the client-side precheck and post-publish hash warning were replaced by the atomic
+    server-side expected-hash check (codex P1 round 4): the button is now a thin publish call
+    passing draftHash as expected_hash plus invalidation and honest-boundary docs. 81 effective
+    lines, ceiling ratchets DOWN with it (monotonic discipline); harvest at the #456 sweep.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 81
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
+  reason: '#429 added scopeNoteDismiss (resolved-notice close button) flexing scopeNote; the #692
+    draft-card type redesign (MUI icon header, per-type title/icon tones, draftError, shared publish
+    entry) re-signed the ceiling from 356 to cover the growth to 395 effective lines — beyond the
+    +15 growth allowance band, so time-boxed per #641. After merging base''s #695 skeleton
+    unification moved shared panel rules out and the module now sits at 306 effective lines
+    (merged-tree state); ceiling ratchets DOWN with it (monotonic discipline). The draft-card
+    family moving to its own module remains the preferred next step; harvest at the #456 sweep.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 306
+  expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/lib/queryKeysExtra.ts
   reason: 'Merge-growth class (PR 317 precedent): develop''s #419 connectionKeys and #427 nodeRuns entries

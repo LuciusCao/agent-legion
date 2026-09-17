@@ -65,6 +65,75 @@ def test_publish_without_draft_raises(store, workspace_id) -> None:
         store.publish("wf:node", workspace_id)
 
 
+# #692 codex P1（第三轮补充）：expected_hash 在选择 draft 的同一事务内
+# 核对——不匹配 409 且零发布副作用（这是「读-比对-发布」TOCTOU 窗口的
+# 原子收口，替代客户端预检式核对）。
+def test_publish_expected_hash_mismatch_conflicts_with_zero_side_effects(
+    store, workspace_id
+) -> None:
+    store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
+    # 模拟其他会话在调用方预检后覆盖草稿（save_draft 原地 UPDATE，hash 变）。
+    store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u1")
+
+    with pytest.raises(ConflictError):
+        store.publish("wf:node", workspace_id, expected_hash="hash1")
+
+    # 零副作用：草稿仍是 hash2 的内容，无 published 行。
+    statuses = {e.status for e in store.list_versions("wf:node", workspace_id)}
+    assert statuses == {"draft"}
+    assert store.get_published("wf:node", workspace_id) is None
+
+
+# #692 R6 P1-1：SELECT-时核对在 READ COMMITTED 下不是原子的——并发
+# save_draft 在本事务 SELECT 与 UPDATE 之间提交时，EvalPlanCheck 对最新
+# 行版本重估 status 谓词，发布的是覆盖后的内容。CAS（hash 进 UPDATE 的
+# WHERE）后 rowcount=0 → Conflict，事务回滚。
+# 钉法（R7 P2-1）：monkeypatch 注入式——把 T2 的 save_draft 注入到生产
+# publish 事务内部的 SELECT 与 UPDATE 之间（同文件 :274/:290 的
+# _latest_with_status monkeypatch 先例），走完整生产路径。突变自证过：
+# 删掉生产 CAS 谓词时本测试必红（回归到 R6 P1-1 的静默穿透形态）。
+def test_publish_expected_hash_cas_blocks_read_committed_interleave(
+    store, workspace_id, monkeypatch
+) -> None:
+    import server.app.services.versioned_entities as ve
+
+    store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
+
+    original = ve._latest_with_status
+    fired: list[bool] = []
+
+    def interleaved(conn, *args, **kwargs):
+        row = original(conn, *args, **kwargs)
+        # 只在 publish 的 draft 查找上注入一次：T1 事务内 SELECT 返回
+        # hash1 快照之后、CAS UPDATE 之前，T2 覆盖并提交（hash2）。
+        if row is not None and row["status"] == "draft" and not fired:
+            fired.append(True)
+            store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u1")
+        return row
+
+    monkeypatch.setattr(ve, "_latest_with_status", interleaved)
+
+    with pytest.raises(ConflictError):
+        store.publish("wf:node", workspace_id, expected_hash="hash1")
+
+    # 交错确实发生（T2 在 T1 的 SELECT 后注入）。
+    assert fired == [True]
+    # 零副作用：CAS rowcount=0 回滚了 archive 语句——草稿仍是 hash2 的
+    # 内容，无 published 行（穿透形态则会是 published + hash2）。
+    statuses = {e.status for e in store.list_versions("wf:node", workspace_id)}
+    assert statuses == {"draft"}
+    assert store.get_published("wf:node", workspace_id) is None
+
+
+def test_publish_expected_hash_match_publishes(store, workspace_id) -> None:
+    store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
+
+    published = store.publish("wf:node", workspace_id, expected_hash="hash1")
+
+    assert published.status == "published"
+    assert store.get_published("wf:node", workspace_id).definition == DEFINITION_V1
+
+
 def test_rollback_republishes_old_version_as_new(store, workspace_id) -> None:
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
     store.publish("wf:node", workspace_id)

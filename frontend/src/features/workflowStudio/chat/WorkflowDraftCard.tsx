@@ -6,11 +6,13 @@ import {
   DialogContent,
   DialogTitle,
 } from '@mui/material'
+import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined'
 import { compareWorkflowDraft } from '../../../api/workflowDraftCompare'
 import { buildChangeSummary } from '../validation/workflowStudioChanges'
 import type { CompareResponse } from '../shared/useWorkflowDraftCompare.types'
 import { WorkflowChangeSummaryPanel } from '../validation/WorkflowChangeSummaryPanel'
 import { useStudioStateOptional } from '../shared/studioStateContext'
+import { StudioDraftCardHeader } from './StudioDraftCardHeader'
 import {
   WorkflowDraftPublishButton,
   WorkflowDraftStaleHint,
@@ -60,7 +62,9 @@ export function WorkflowDraftCard(props: WorkflowProps) {
 
   return (
     <div className={styles.draftCard}>
-      <div className={styles.draftTitle}>📄 Workflow 草稿</div>
+      <StudioDraftCardHeader icon={AccountTreeOutlinedIcon} tone="workflow">
+        Workflow 草稿
+      </StudioDraftCardHeader>
       <div className={styles.draftMeta}>
         {props.draft.compareMeta ?? 'agent 产出的定义草稿'}
         {props.draft.validated ? ' · 校验通过' : ' · 未通过校验'}
