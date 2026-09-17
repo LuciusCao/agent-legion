@@ -30,6 +30,11 @@ export type AgentDefinitionDraftView = {
    * 草稿落库成功，发布入口只对 completed 开放——否则失败的工具调用
    * 也能发布出更早的旧草稿，用户误以为新定义已生效。 */
   status: string
+  /** 保存响应返回的草稿身份（#692 codex P1 第三轮）：实体是 workspace
+   * 级状态，本会话的「最新」可能已被其他会话覆盖——发布前必须按它
+   * 与服务端当前草稿 hash 比对，不一致拦截。解析自 rawOutput 的响应
+   * 体（definition_hash 字段）。 */
+  draftHash: string | null
 }
 
 export type NodeCodeDraftView = {
@@ -37,6 +42,8 @@ export type NodeCodeDraftView = {
   nodeKey: string
   /** 同 AgentDefinitionDraftView.status。 */
   status: string
+  /** 同 AgentDefinitionDraftView.draftHash（code_hash 字段）。 */
+  draftHash: string | null
 }
 
 export type PermissionView = {
@@ -238,6 +245,20 @@ function keepLatestPerEntity<T>(drafts: T[], keyOf: (draft: T) => string): T[] {
   return [...latest.values()]
 }
 
+/** 保存响应体里的草稿身份 hash（#692 codex P1 第三轮）。save_*_draft
+ * 工具的 HTTP 响应带 definition_hash / code_hash，MCP 把响应体文本放进
+ * rawOutput 的 text block——与 extractWorkflowDraft 解析 outputText 同一
+ * 先例。解析不到返回 null（旧转录/非 JSON 响应），调用方按「无法核对
+ * 身份」处理。 */
+function draftHashFromOutput(
+  call: ToolCallView,
+  hashKey: 'definition_hash' | 'code_hash'
+): string | null {
+  const parsed = parseFirstJson(call.outputText)
+  const value = parsed?.[hashKey]
+  return typeof value === 'string' && value ? value : null
+}
+
 export function extractAgentDefinitionDrafts(
   calls: ToolCallView[]
 ): AgentDefinitionDraftView[] {
@@ -253,6 +274,7 @@ export function extractAgentDefinitionDrafts(
       runtime: asText(call.rawInput?.runtime) || null,
       skill: asText(call.rawInput?.skill) || null,
       status: call.status,
+      draftHash: draftHashFromOutput(call, 'definition_hash'),
     })
   }
   return keepLatestPerEntity(drafts, (draft) => draft.agentId)
@@ -266,7 +288,12 @@ export function extractNodeCodeDrafts(
     if (!toolNameMatches(call, 'save_node_code_draft')) continue
     const nodeKey = asText(call.rawInput?.node_key)
     if (!nodeKey) continue
-    drafts.push({ toolCallId: call.toolCallId, nodeKey, status: call.status })
+    drafts.push({
+      toolCallId: call.toolCallId,
+      nodeKey,
+      status: call.status,
+      draftHash: draftHashFromOutput(call, 'code_hash'),
+    })
   }
   return keepLatestPerEntity(drafts, (draft) => draft.nodeKey)
 }

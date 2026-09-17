@@ -18,18 +18,28 @@ import styles from './StudioChatPanel.module.css'
  * 最新一张卡（codex P1 第二轮）——发布请求只带实体 ID，服务端发布的
  * 是当前草稿，旧卡的按钮会无提示地发布另一份内容。 */
 
-/** 仅来源 tool call 完成的草稿渲染发布入口（R2 P2-1 门控）。 */
+/** 仅来源 tool call 完成的草稿渲染发布入口（R2 P2-1 门控），并把保存
+ * 响应的草稿身份 hash 传给发布按钮（codex P1 第三轮：发布前与服务端
+ * 当前草稿比对）。 */
 function DraftPublishAction({
   status,
   kind,
   entityId,
+  draftHash,
 }: {
   status: string
   kind: 'agent' | 'code'
   entityId: string
+  draftHash: string | null
 }) {
   if (status !== 'completed') return null
-  return <EntityDraftPublishButton kind={kind} entityId={entityId} />
+  return (
+    <EntityDraftPublishButton
+      kind={kind}
+      entityId={entityId}
+      draftHash={draftHash}
+    />
+  )
 }
 
 export function AgentDefinitionDraftCard({
@@ -59,6 +69,7 @@ export function AgentDefinitionDraftCard({
           status={draft.status}
           kind="agent"
           entityId={draft.agentId}
+          draftHash={draft.draftHash}
         />
       </div>
     </div>
@@ -102,6 +113,7 @@ export function NodeCodeDraftCard(props: {
           status={props.draft.status}
           kind="code"
           entityId={props.draft.nodeKey}
+          draftHash={props.draft.draftHash}
         />
       </div>
     </div>

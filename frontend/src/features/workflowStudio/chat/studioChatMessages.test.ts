@@ -197,7 +197,12 @@ describe('agent / node draft extraction', () => {
       }),
     ])
     expect(extractNodeCodeDrafts(calls)).toEqual([
-      { toolCallId: 't1', nodeKey: 'assess_difficulty', status: 'completed' },
+      {
+        toolCallId: 't1',
+        nodeKey: 'assess_difficulty',
+        status: 'completed',
+        draftHash: null,
+      },
     ])
   })
 
@@ -262,6 +267,7 @@ describe('agent / node draft extraction', () => {
         runtime: 'pi',
         skill: null,
         status: 'completed',
+        draftHash: null,
       },
     ])
     const nodeDrafts = extractNodeCodeDrafts(calls)
@@ -291,8 +297,63 @@ describe('agent / node draft extraction', () => {
       }),
     ])
     expect(extractNodeCodeDrafts(calls)).toEqual([
-      { toolCallId: 't2', nodeKey: 'fetch_url', status: 'failed' },
+      {
+        toolCallId: 't2',
+        nodeKey: 'fetch_url',
+        status: 'failed',
+        draftHash: null,
+      },
     ])
+  })
+
+  // #692 codex P1（第三轮）：draft view 携带保存响应返回的草稿身份
+  // hash（rawOutput 的响应体 JSON：agent=definition_hash / code=code_hash），
+  // 发布前与服务端当前草稿比对。响应不可解析的旧转录为 null。
+  it('draft views carry the draft hash parsed from the save response', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'save_agent_definition_draft',
+        status: 'completed',
+        rawInput: { agent_id: 'writer' },
+        rawOutput: {
+          content: [
+            {
+              type: 'text',
+              text: '{"id":"v2","version":2,"status":"draft","definition_hash":"dh-1","created_by":"u","created_at":"2026-01-01T00:00:00Z"}',
+            },
+          ],
+        },
+      }),
+      toolCall('t2', {
+        title: 'save_node_code_draft',
+        status: 'completed',
+        rawInput: { node_key: 'fetch_url' },
+        rawOutput: {
+          content: [
+            {
+              type: 'text',
+              text: '{"id":"v3","version":3,"status":"draft","code_hash":"ch-1","created_by":"u","created_at":"2026-01-01T00:00:00Z"}',
+            },
+          ],
+        },
+      }),
+      toolCall('t3', {
+        title: 'save_node_code_draft',
+        status: 'completed',
+        rawInput: { node_key: 'legacy_node' },
+        rawOutput: { content: [{ type: 'text', text: '草稿已保存' }] },
+      }),
+    ])
+    expect(extractAgentDefinitionDrafts(calls)[0].draftHash).toBe('dh-1')
+    expect(
+      extractNodeCodeDrafts(calls).find((d) => d.nodeKey === 'fetch_url')!
+        .draftHash
+    ).toBe('ch-1')
+    // 非 JSON 响应体（旧转录/工具输出变化）：null，发布侧按无法核对处理。
+    expect(
+      extractNodeCodeDrafts(calls).find((d) => d.nodeKey === 'legacy_node')!
+        .draftHash
+    ).toBeNull()
   })
 
   // R3 P2-3：去重的保序前提——消息乱序喂入（SSE 增量补齐形态）时

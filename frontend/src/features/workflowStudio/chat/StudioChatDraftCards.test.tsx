@@ -15,19 +15,22 @@ import {
 } from '../../../testing/testQueryClient'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
-import { publishAgent } from '../../../api'
+import { fetchAgentVersions, publishAgent } from '../../../api'
 import { api } from '../../../api/core'
 
 /* #692：草稿卡类型化重做的钉子——MUI 线性图标 + 按实体类型发布。
  * 图标断言走 MUI 渲染出的 svg data-testid（aria-hidden，getByRole 查
  * 不到）。发布断言（codex P1 修正后）：Agent/节点代码卡各调自己的实体
- * 发布端点（publishAgent / nodes/{key}/code/publish），成功 toast 走
- * uiStore、失效 studio 查询并进入「已发布」终态，失败内联展示——不
- * 再复用 workflow revision 的发布按钮。 */
+ * 发布端点（publishAgent / nodes/{key}/code/publish），发布前按卡片
+ * 携带的 draftHash 与服务端当前草稿比对（codex P1 第三轮：实体是
+ * workspace 级状态，本会话的「最新」可能已被覆盖）；一致才发。成功
+ * toast 走 uiStore、失效 studio 查询并进入「已发布」终态，失败内联
+ * 展示——不再复用 workflow revision 的发布按钮。 */
 
 vi.mock('../../../api', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   publishAgent: vi.fn(),
+  fetchAgentVersions: vi.fn(),
 }))
 vi.mock('../../../api/core', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -35,7 +38,38 @@ vi.mock('../../../api/core', async (importOriginal) => ({
 }))
 
 const mockPublishAgent = vi.mocked(publishAgent)
+const mockFetchAgentVersions = vi.mocked(fetchAgentVersions)
 const mockApi = vi.mocked(api)
+
+/** agent versions 响应：首个 draft 行即当前草稿（列表 version 降序）。 */
+function agentVersions(draftHash: string | null) {
+  return {
+    versions: [
+      ...(draftHash
+        ? [
+            {
+              agent_id: 'writer',
+              created_at: '2026-01-01T00:00:00Z',
+              created_by: 'u1',
+              definition_hash: draftHash,
+              id: 'v2',
+              status: 'draft' as const,
+              version: 2,
+            },
+          ]
+        : []),
+      {
+        agent_id: 'writer',
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'u1',
+        definition_hash: 'published-hash',
+        id: 'v1',
+        status: 'published' as const,
+        version: 1,
+      },
+    ],
+  }
+}
 
 function renderWithStudio(
   ui: React.ReactNode,
@@ -91,6 +125,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     runtime: 'pi',
     skill: null,
     status: 'completed',
+    draftHash: null,
   }
 
   it('渲染 MUI 图标（非 emoji）与实体发布按钮', () => {
@@ -216,10 +251,153 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     expect(keys.some((key) => key.includes('workflowStudioDraft'))).toBe(true)
     spy.mockRestore()
   })
+
+  // codex P1 第三轮：发布前核对服务端草稿身份。实体是 workspace 级状态，
+  // 本会话保存后其他会话（或用户在编辑器）可以覆盖——卡片 hash 与服务端
+  // 当前草稿一致才发。
+  describe('发布前草稿身份核对（codex P1 第三轮）', () => {
+    it('服务端当前草稿 hash 一致：正常发布', async () => {
+      mockFetchAgentVersions.mockResolvedValue(
+        agentVersions('hash-a') as Awaited<
+          ReturnType<typeof fetchAgentVersions>
+        >
+      )
+      mockPublishAgent.mockResolvedValue({
+        version: 2,
+      } as Awaited<ReturnType<typeof publishAgent>>)
+      renderWithStudio(
+        <AgentDefinitionDraftCard draft={{ ...draft, draftHash: 'hash-a' }} />,
+        makeStudio()
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+      })
+      await waitFor(() =>
+        expect(mockFetchAgentVersions).toHaveBeenCalledWith('ws1', 'writer')
+      )
+      await waitFor(() =>
+        expect(mockPublishAgent).toHaveBeenCalledWith('ws1', 'writer')
+      )
+    })
+
+    it('服务端草稿已被其他会话覆盖（hash 不一致）：拦截并提示，不发布', async () => {
+      mockFetchAgentVersions.mockResolvedValue(
+        agentVersions('hash-b') as Awaited<
+          ReturnType<typeof fetchAgentVersions>
+        >
+      )
+      renderWithStudio(
+        <AgentDefinitionDraftCard draft={{ ...draft, draftHash: 'hash-a' }} />,
+        makeStudio()
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+      })
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          '草稿已被其他会话或编辑器更新，当前卡片不再对应最新草稿'
+        )
+      )
+      expect(mockPublishAgent).not.toHaveBeenCalled()
+      // 按钮回到可点态（非终态）：提示用户去刷新/查看新草稿。
+      expect(
+        screen.getByRole('button', { name: '发布 Agent 定义' })
+      ).toBeEnabled()
+    })
+
+    it('服务端已无草稿（draft 行缺失）：拦截并提示刷新，不发布', async () => {
+      mockFetchAgentVersions.mockResolvedValue(
+        agentVersions(null) as Awaited<ReturnType<typeof fetchAgentVersions>>
+      )
+      renderWithStudio(
+        <AgentDefinitionDraftCard draft={{ ...draft, draftHash: 'hash-a' }} />,
+        makeStudio()
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+      })
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          '服务端草稿已变更（可能已被发布或覆盖），请刷新后重试'
+        )
+      )
+      expect(mockPublishAgent).not.toHaveBeenCalled()
+    })
+
+    it('旧转录 draftHash 为 null：跳过核对直接发布（404 兜底）', async () => {
+      mockPublishAgent.mockResolvedValue({
+        version: 2,
+      } as Awaited<ReturnType<typeof publishAgent>>)
+      renderWithStudio(
+        <AgentDefinitionDraftCard draft={{ ...draft, draftHash: null }} />,
+        makeStudio()
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+      })
+      await waitFor(() =>
+        expect(mockPublishAgent).toHaveBeenCalledWith('ws1', 'writer')
+      )
+      expect(mockFetchAgentVersions).not.toHaveBeenCalled()
+    })
+
+    it('节点代码卡同样核对：versions 首个 draft 行的 code_hash 不一致则拦截', async () => {
+      mockApi.mockResolvedValue({
+        versions: [
+          {
+            change_note: null,
+            code_hash: 'code-hash-b',
+            created_at: '2026-01-01T00:00:00Z',
+            created_by: 'u1',
+            id: 'v3',
+            published_at: null,
+            status: 'draft',
+            version: 3,
+          },
+        ],
+      } as never)
+      // NodeCode 卡的 fixture 形状（agent 组的 draft 无 nodeKey）。
+      const nodeDraft = {
+        toolCallId: 'tc2',
+        nodeKey: 'fetch_url',
+        status: 'completed',
+        draftHash: 'code-hash-a',
+      }
+      renderWithStudio(
+        <NodeCodeDraftCard draft={nodeDraft} onSelectNode={vi.fn()} />,
+        makeStudio()
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '发布节点代码' }))
+      })
+      await waitFor(() =>
+        expect(mockApi).toHaveBeenCalledWith(
+          '/api/workspaces/ws1/nodes/fetch_url/code/versions'
+        )
+      )
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          '草稿已被其他会话或编辑器更新，当前卡片不再对应最新草稿'
+        )
+      )
+      // publish 端点未被调用（唯一一次 api 调用是 versions 读取）。
+      expect(mockApi).toHaveBeenCalledTimes(1)
+    })
+  })
 })
 
 describe('NodeCodeDraftCard（#692）', () => {
-  const draft = { toolCallId: 'tc2', nodeKey: 'fetch_url', status: 'completed' }
+  const draft = {
+    toolCallId: 'tc2',
+    nodeKey: 'fetch_url',
+    status: 'completed',
+    draftHash: null,
+  }
 
   it('渲染 Code 图标与实体发布按钮', () => {
     const { container } = renderWithStudio(

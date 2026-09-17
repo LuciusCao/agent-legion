@@ -560,24 +560,30 @@ exemptions:
   ceiling: 87
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/studioChatMessages.ts
-  reason: '#692 codex P1 (second round) added per-entity dedup (keepLatestPerEntity) plus its
-    honest-mechanism docstring to the extractor module: repeated saves of one entity keep only
-    the latest card, because publish carries only the entity id and an old card would silently
-    publish the newer server-side draft. 18 effective lines past the 320 ratchet baseline, 3
-    beyond the +15 growth band — filed as a first-time exemption (no prior floor). The module
-    stays the single chat view-model (extraction + grouping); harvest at the #456 sweep.'
+  reason: '#692 draft-card lifecycle grew the extractor module past its 320 ratchet baseline in two
+    steps: codex P1 round 2 added per-entity dedup (keepLatestPerEntity) and codex P1 round 3
+    added the draft identity hash parsed from each save response (draftHashFromOutput) — publish
+    must verify the card against the server-side draft because the entity is workspace-level
+    state that another session can overwrite. 34 effective lines past baseline (19 beyond the
+    +15 growth band), re-signed from the first exemption at 338 — time-boxed per #641. The
+    module stays the single chat view-model (extraction + grouping); harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 338
+  ceiling: 354
+  expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/EntityDraftPublishButton.tsx
-  reason: '#692 R2 follow-up grew the module past its 73-line ratchet baseline (registered at the
-    codex-P1 fix commit): the honest-boundary docstring on the invalidation coverage and the
-    404 no-draft friendly message added 3 effective lines. Within the +15 growth band; the
-    button stays one focused component. Harvest at the #456 sweep.'
+  reason: '#692 grew past its 73-line ratchet baseline in two review rounds: the honest-boundary
+    docstring + 404 no-draft friendly message (R2), then the codex P1 round-3 server-side draft
+    identity check — publish reads the versions list (first draft row is the current draft)
+    and compares its hash with the card''s save-response hash, blocking when another session
+    has overwritten the draft. 109 effective lines (18 beyond the prior 76+15 band, re-signed
+    time-boxed per #641); the button stays one focused component (identity check + publish +
+    invalidation); harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 76
+  ceiling: 109
+  expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
   reason: '#429 added scopeNoteDismiss (resolved-notice close button) flexing scopeNote; the #692
