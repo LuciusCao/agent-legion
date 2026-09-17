@@ -1,5 +1,7 @@
 /**
  * PreviewPanelSection 回落路径与草稿显式预览的组件测试（issue #328 / #347 P1 / #615）：
+ * fixture 的 html_hash 一律为内容的 sha256（jsdom 24 无 crypto.subtle，
+ * 用 node:crypto 同步复算，与服务端 bundle_hash 同构）。
  * - 未定制 workspace（published=null）→ 渲染 fallback（现有通用预览）；
  * - 已发布 bundle → bundle host 接管，fallback 不再渲染；
  * - 「定制预览」对话期间草稿**不自动执行**（#347 P1）：左栏继续渲染已发布
@@ -7,6 +9,8 @@
  *   重开对话框回到默认态（不记忆执行态）。
  * - #615 wiring：对话框拿到的 previewDraft/jobId 与左栏草稿渲染吃同一
  *   授权判定（对话框内嵌预览的渲染细节在 CustomizePreviewDialog 测试）。
+ * - iframe 重挂语义（bundle 内容变化必换元素、同内容轮询不重挂）在姊妹
+ *   文件 PreviewPanelSection.remount.test.tsx。
  *
  * srcdoc 断言一律用「包含」：宿主会在 bundle 头部注入 CSP meta
  * （PreviewPanelHost 的出站网络红线），完整字符串不再等于 bundle 原文。
@@ -14,6 +18,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
+import { createHash } from 'node:crypto'
 import { PreviewPanelSection } from './PreviewPanelSection'
 import type { PreviewPanelState, PreviewPanelVersion } from './previewPanelApi'
 import { TestQueryProvider } from '../../testing/testQueryClient'
@@ -64,7 +69,7 @@ vi.mock('./CustomizePreviewDialog', () => ({
 function makeVersion(
   html: string,
   status: 'draft' | 'published',
-  htmlHash = 'hash-v1'
+  htmlHash: string
 ): PreviewPanelVersion {
   return {
     id: `id-${status}`,
@@ -81,10 +86,31 @@ function makeVersion(
   }
 }
 
+/**
+ * 服务端契约：html_hash = sha256(html)（preview_panels.bundle_hash）。
+ * fixture 的指纹不再手写——统一经 makeBundleSync 生成，hash 始终跟随
+ * 内容，避免「内容变化但 hash 未变」这种后端不可伪造的组合污染重挂/
+ * 授权用例（key 指纹吃的就是 html_hash，codex P2 修复）。
+ */
+function makeBundleSync(html: string, status: 'draft' | 'published') {
+  return makeVersion(html, status, sha256Hex(html))
+}
+
+/** 与服务端 bundle_hash 同算法（hashlib.sha256 → hex），node:crypto 同步实现。 */
+function sha256Hex(html: string): string {
+  return createHash('sha256').update(html, 'utf8').digest('hex')
+}
+
 const PUBLISHED_HTML =
   '<!doctype html><html><body>published panel</body></html>'
 const DRAFT_HTML = '<!doctype html><html><body>draft panel</body></html>'
 const DRAFT_V2_HTML = '<!doctype html><html><body>draft v2 panel</body></html>'
+
+// 服务端契约：published v1 与草稿 v1/v2 是互不相同的版本，html_hash 均为
+// 内容的 sha256（见 makeBundleSync）。
+const PUBLISHED = makeBundleSync(PUBLISHED_HTML, 'published')
+const DRAFT = makeBundleSync(DRAFT_HTML, 'draft')
+const DRAFT_V2 = makeBundleSync(DRAFT_V2_HTML, 'draft')
 
 function renderSection(ui?: ReactElement) {
   return render(
@@ -146,9 +172,7 @@ describe('PreviewPanelSection', () => {
   })
 
   it('已发布 bundle 接管左栏，fallback 不再渲染', async () => {
-    mockFetchPublished.mockResolvedValue(
-      makeVersion(PUBLISHED_HTML, 'published')
-    )
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
     renderSection()
 
     await waitFor(() =>
@@ -177,12 +201,10 @@ describe('PreviewPanelSection', () => {
   })
 
   it('定制对话期间草稿不自动执行：显式「预览此草稿」后执行，重开对话回到默认态（#347 P1）', async () => {
-    mockFetchPublished.mockResolvedValue(
-      makeVersion(PUBLISHED_HTML, 'published')
-    )
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
     mockFetchState.mockResolvedValue({
-      published: makeVersion(PUBLISHED_HTML, 'published'),
-      draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
+      published: PUBLISHED,
+      draft: DRAFT,
     })
     renderSection()
 
@@ -248,7 +270,7 @@ describe('PreviewPanelSection', () => {
     mockFetchPublished.mockResolvedValue(null)
     mockFetchState.mockResolvedValue({
       published: null,
-      draft: makeVersion(DRAFT_HTML, 'draft'),
+      draft: DRAFT,
     })
     renderSection()
 
@@ -284,13 +306,11 @@ describe('PreviewPanelSection', () => {
     expectConsoleError(/not wrapped in act/)
     vi.useFakeTimers()
     try {
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(PUBLISHED_HTML, 'published')
-      )
+      mockFetchPublished.mockResolvedValue(PUBLISHED)
       // 首轮：草稿 v1 就位。
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft'),
+        published: PUBLISHED,
+        draft: DRAFT,
       } satisfies PreviewPanelState)
       renderSection()
       await act(async () => {
@@ -316,7 +336,7 @@ describe('PreviewPanelSection', () => {
       // 发布草稿（对话框不关）：draft 变 null，左栏回落已发布版本，
       // 按钮回到「预览此草稿」——授权已失效，不能悬空成「预览草稿中」。
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
+        published: PUBLISHED,
         draft: null,
       } satisfies PreviewPanelState)
       await act(async () => {
@@ -335,8 +355,8 @@ describe('PreviewPanelSection', () => {
       // 工作流）：v2 必须重新显式预览，不得继承 v1 的授权自动执行
       // （html_hash 变化即回退未授权，#500 P1-5）。
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_V2_HTML, 'draft', 'hash-v2'),
+        published: PUBLISHED,
+        draft: DRAFT_V2,
       } satisfies PreviewPanelState)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3100)
@@ -373,7 +393,7 @@ describe('PreviewPanelSection', () => {
       mockFetchPublished.mockResolvedValue(null)
       mockFetchState.mockResolvedValue({
         published: null,
-        draft: makeVersion(DRAFT_HTML, 'draft'),
+        draft: DRAFT,
       } satisfies PreviewPanelState)
       renderSection()
       await act(async () => {
@@ -419,12 +439,10 @@ describe('PreviewPanelSection', () => {
     expectConsoleError(/not wrapped in act/)
     vi.useFakeTimers()
     try {
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(PUBLISHED_HTML, 'published')
-      )
+      mockFetchPublished.mockResolvedValue(PUBLISHED)
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft'),
+        published: PUBLISHED,
+        draft: DRAFT,
       } satisfies PreviewPanelState)
       const { rerender } = renderSection()
       await act(async () => {
@@ -508,9 +526,7 @@ describe('PreviewPanelSection', () => {
     act(() => {
       useAuthStore.setState({ user: { role: 'member' } as never })
     })
-    mockFetchPublished.mockResolvedValue(
-      makeVersion(PUBLISHED_HTML, 'published')
-    )
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
     renderSection()
 
     // 面板内容对成员照常渲染，但定制入口与治理面查询都不出现。
@@ -526,12 +542,10 @@ describe('PreviewPanelSection', () => {
     // act（known noise，同上各 fake-timer 用例的声明方式）。
     expectConsoleWarning(/not wrapped in act/)
     expectConsoleError(/not wrapped in act/)
-    mockFetchPublished.mockResolvedValue(
-      makeVersion(PUBLISHED_HTML, 'published')
-    )
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
     mockFetchState.mockResolvedValue({
-      published: makeVersion(PUBLISHED_HTML, 'published'),
-      draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
+      published: PUBLISHED,
+      draft: DRAFT,
     } satisfies PreviewPanelState)
     renderSection()
 
@@ -565,12 +579,10 @@ describe('PreviewPanelSection', () => {
     expectConsoleError(/not wrapped in act/)
     vi.useFakeTimers()
     try {
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(PUBLISHED_HTML, 'published')
-      )
+      mockFetchPublished.mockResolvedValue(PUBLISHED)
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
+        published: PUBLISHED,
+        draft: DRAFT,
       } satisfies PreviewPanelState)
       renderSection()
       await act(async () => {
@@ -597,8 +609,8 @@ describe('PreviewPanelSection', () => {
       // html_hash 变化、无 null 间隙）：授权不迁移到新内容——回到已发布
       // 版本，堵住「授权后无人值守期间被推送任意新 HTML 自动执行」。
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_V2_HTML, 'draft', 'hash-v2'),
+        published: PUBLISHED,
+        draft: DRAFT_V2,
       } satisfies PreviewPanelState)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3100)
@@ -639,12 +651,10 @@ describe('PreviewPanelSection', () => {
     // （jsdom 下 React 逐 commit 同步落 DOM）：若授权复位依赖被动
     // effect，jobId 变化的首帧会先以「新 jobId + 旧授权」渲染——观察者
     // 会捕获到 draft 内容的 srcdoc；render 期派生则首帧即 published。
-    mockFetchPublished.mockResolvedValue(
-      makeVersion(PUBLISHED_HTML, 'published')
-    )
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
     mockFetchState.mockResolvedValue({
-      published: makeVersion(PUBLISHED_HTML, 'published'),
-      draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
+      published: PUBLISHED,
+      draft: DRAFT,
     } satisfies PreviewPanelState)
     const { rerender } = renderSection()
     await waitFor(() =>
@@ -709,72 +719,5 @@ describe('PreviewPanelSection', () => {
         ?.getAttribute('srcdoc')
     ).toContain('draft panel')
     expect(screen.getByText('草稿预览中')).toBeInTheDocument()
-  })
-
-  it('bundle 内容变化时重挂 iframe（旧文档在途桥请求的响应无处可投，codex P2）', async () => {
-    // react-query 的 refetch 落在 fake-timer 区间外时，查询解析会脱离
-    // act 包裹（known noise），声明预期以聚焦本用例的断言。
-    expectConsoleWarning(/not wrapped in act/)
-    expectConsoleError(/not wrapped in act/)
-    vi.useFakeTimers()
-    try {
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(PUBLISHED_HTML, 'published')
-      )
-      // 首轮 state：草稿 v1（bundle-v1）就位。
-      mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft'),
-      } satisfies PreviewPanelState)
-      renderSection()
-      await act(async () => {
-        await vi.runOnlyPendingTimersAsync()
-      })
-      // 打开定制对话启用草稿轮询（3s refetchInterval）。草稿不自动执行
-      // （#347 P1）：显式预览后左栏才切到草稿 v1 渲染。
-      fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
-      await act(async () => {
-        await vi.runOnlyPendingTimersAsync()
-      })
-      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
-      await act(async () => {
-        await vi.runOnlyPendingTimersAsync()
-      })
-      const firstFrame = screen
-        .getByTestId('preview-panel-host')
-        .querySelector('iframe')
-      expect(firstFrame?.getAttribute('srcdoc')).toContain('draft panel')
-
-      // 轮询推进：同一草稿内容的轮询刷新（html_hash 不变、bundle 文本
-      // 因响应对象重建而内容一致——save_draft 未发生）。该场景 key 不变、
-      // iframe 不重挂（同内容重挂是无谓抖动）；真正需要重挂的是**内容
-      // 变化**，但其授权语义已由 #500 P1-5 用例覆盖（hash 变 → 回退未
-      // 授权，重挂的是 published）。key 含 bundle 内容 → 内容一旦变化
-      // iframe 元素必须被替换——沿用同一 contentWindow 做 srcDoc 导航
-      // 会让旧文档在途请求的响应错误应答新文档的同编号请求。这里用
-      // 「内容变化但绕开授权」的 published 更新来钉重挂语义。
-      mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
-      } satisfies PreviewPanelState)
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(
-          '<!doctype html><html><body>published panel v2</body></html>',
-          'published'
-        )
-      )
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(3100)
-      })
-
-      const secondFrame = screen
-        .getByTestId('preview-panel-host')
-        .querySelector('iframe')
-      // 草稿授权仍有效（hash 未变）：内容保持草稿。
-      expect(secondFrame?.getAttribute('srcdoc')).toContain('draft panel')
-      expect(secondFrame).toBe(firstFrame)
-    } finally {
-      vi.useRealTimers()
-    }
   })
 })

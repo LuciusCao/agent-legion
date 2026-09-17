@@ -44,7 +44,7 @@ export function CustomizePreviewPane({
       <div className={styles.previewBody}>
         {previewDraft && draft !== null ? (
           <PreviewPanelHost
-            key={previewHostKey(jobId, draft.html)}
+            key={previewHostKey(jobId, draft.html_hash)}
             jobId={jobId}
             html={draft.html}
             title="草稿预览（对话框内）"

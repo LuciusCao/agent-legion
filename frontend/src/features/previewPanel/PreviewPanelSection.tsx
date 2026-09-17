@@ -51,7 +51,9 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
   // 已发布版本。同一草稿内容（hash 不变）的轮询刷新自动跟随。
   const draftPreview =
     customizing && isAdmin && auth.isAuthorized && draft !== null
-  const bundle = draftPreview ? draft.html : published?.html
+  // 当前渲染的版本对象（草稿或已发布）：html 与挂载指纹（html_hash）必须
+  // 取自同一版本——指纹是服务端 sha256，前端不自算（codex P2，见 bundleKey）。
+  const bundleVersion = draftPreview ? draft : published
 
   const closeCustomizing = () => setCustomizing(false)
 
@@ -74,17 +76,17 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
           )}
         </header>
       )}
-      {bundle ? (
-        // key 含 bundle 内容（codex P2，指纹抽在 bundleKey）：草稿轮询更新
-        // bundle 时若沿用旧 iframe，React 在同一 contentWindow 上做 srcDoc
-        // 导航——旧文档仍在途的桥请求会由宿主把响应投递给同一个
-        // WindowProxy，而新文档的请求编号又从 1 重新计数，旧响应可能错误地
-        // 应答新文档的同编号请求。bundle 变化即整树重挂：旧窗口销毁，在途
-        // 响应无处可投。
+      {bundleVersion?.html ? (
+        // key = jobId + 服务端 html_hash（codex P2，指纹抽在 bundleKey）：
+        // 草稿轮询更新 bundle 时若沿用旧 iframe，React 在同一 contentWindow
+        // 上做 srcDoc 导航——旧文档仍在途的桥请求会由宿主把响应投递给同一
+        // 个 WindowProxy，而新文档的请求编号又从 1 重新计数，旧响应可能错误
+        // 地应答新文档的同编号请求。内容指纹随版本对象下发（sha256），变化
+        // 即整树重挂：旧窗口销毁，在途响应无处可投。
         <PreviewPanelHost
-          key={previewHostKey(jobId, bundle)}
+          key={previewHostKey(jobId, bundleVersion.html_hash)}
           jobId={jobId}
-          html={bundle}
+          html={bundleVersion.html}
         />
       ) : (
         fallback

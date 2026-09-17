@@ -78,42 +78,44 @@ export function CustomizePreviewDialog({
               草稿在对话框内与左栏同步渲染（仅本页可见），发布后才会对所有人
               可见。
             </div>
-        {chat.agentsError ? (
-          <div className={styles.error}>Agent 列表加载失败，请稍后重试</div>
-        ) : !chat.agentsLoading && chat.agents.length === 0 ? (
-          <div className={styles.hint}>
-            未检测到可用的 ACP agent，请联系管理员配置
-          </div>
-        ) : (
-          <AgentChatPanel
-            chat={chat}
-            workspaceId={workspaceId}
-            className={styles.chatArea}
-            header={
-              <StudioChatSessionBar
-                agents={chat.agents}
-                sessions={chat.sessions}
-                selectedAgentId={selectedAgentId}
-                activeSessionId={chat.activeSessionId}
-                onSelectAgent={setChosenAgentId}
-                onSelectSession={(sessionId) =>
-                  void chat.selectSession(sessionId)
+            {chat.agentsError ? (
+              <div className={styles.error}>Agent 列表加载失败，请稍后重试</div>
+            ) : !chat.agentsLoading && chat.agents.length === 0 ? (
+              <div className={styles.hint}>
+                未检测到可用的 ACP agent，请联系管理员配置
+              </div>
+            ) : (
+              <AgentChatPanel
+                chat={chat}
+                workspaceId={workspaceId}
+                className={styles.chatArea}
+                header={
+                  <StudioChatSessionBar
+                    agents={chat.agents}
+                    sessions={chat.sessions}
+                    selectedAgentId={selectedAgentId}
+                    activeSessionId={chat.activeSessionId}
+                    onSelectAgent={setChosenAgentId}
+                    onSelectSession={(sessionId) =>
+                      void chat.selectSession(sessionId)
+                    }
+                    onNewChat={() =>
+                      selectedAgentId && void chat.startSession(selectedAgentId)
+                    }
+                    newChatDisabled={!selectedAgentId || chat.starting}
+                  />
                 }
-                onNewChat={() =>
-                  selectedAgentId && void chat.startSession(selectedAgentId)
-                }
-                newChatDisabled={!selectedAgentId || chat.starting}
+                emptyState="选择 Agent，点「＋ 新对话」开始"
+                noSessionReason="先选择会话或新建对话"
+                closedReason="会话已关闭或中断，点「继续对话」恢复"
+                onApplyWorkflowDraft={() => undefined}
               />
-            }
-            emptyState="选择 Agent，点「＋ 新对话」开始"
-            noSessionReason="先选择会话或新建对话"
-            closedReason="会话已关闭或中断，点「继续对话」恢复"
-            onApplyWorkflowDraft={() => undefined}
-          />
-        )}
-        {actionError && (
-          <div className={styles.error} role="alert">
-            {actionError}
+            )}
+            {(actionError || chat.actionError) && (
+              <div className={styles.error} role="alert">
+                {actionError ?? chat.actionError}
+              </div>
+            )}
           </div>
           <CustomizePreviewPane
             jobId={jobId}
