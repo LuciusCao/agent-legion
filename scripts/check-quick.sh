@@ -1,6 +1,51 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# SIGPIPE immunity (issue #679): this gate runs as the pre-push hook process
+# (`.githooks/pre-push` execs run-local-gate.sh, which execs this script), so
+# its stdout IS git push's stdout. Under an agent harness (or `git push | tail`)
+# that stream is a pipe whose reader can go away mid-run — output caps,
+# truncation, a killed session. With the default disposition any write to the
+# dead pipe then kills the whole gate with SIGPIPE (141): git treats the hook
+# as failed and aborts the push AFTER the evidence was already recorded,
+# forcing the "push twice" ritual. Ignore SIGPIPE and let every guarded write
+# below (`|| true`) absorb EPIPE instead — the verdict must come from the
+# checks, never from whether the chatter could be drained.
+trap '' PIPE
+
+# Every stdout/stderr write goes through say() — one guarded place, so a
+# reader that walked away (output caps, `| head`, a killed session) costs the
+# write, never the gate. Builtin echo is shadowed so no call site is missed.
+say() {
+  printf '%s\n' "$*" || true
+}
+echo() {
+  say "$*"
+}
+# Lane output is capped rather than cat-ed through the hook's pipe (issue
+# #679): a full pytest/vitest/cargo log easily reaches megabytes, which is
+# what blew past reader caps and SIGPIPE'd the push in the first place. The
+# tail is where the summaries live; AGENT_LEGION_GATE_OUTPUT_LINES tunes the
+# cap and 0 restores the full cat for debugging.
+output_lines="${AGENT_LEGION_GATE_OUTPUT_LINES:-120}"
+[[ "$output_lines" =~ ^[0-9]+$ ]] || output_lines=120
+print_lane_output() {
+  local label="$1" log_file="$2" total
+  if [[ "$output_lines" -eq 0 ]]; then
+    say "=== ${label} Output ==="
+    cat "$log_file" || true
+    return 0
+  fi
+  total="$(wc -l <"$log_file" 2>/dev/null | tr -d ' ' || echo 0)"
+  if [[ "$total" -le "$output_lines" ]]; then
+    say "=== ${label} Output ==="
+    cat "$log_file" || true
+    return 0
+  fi
+  say "=== ${label} Output (last ${output_lines} of ${total} lines) ==="
+  tail -n "$output_lines" "$log_file" || true
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
@@ -122,7 +167,15 @@ if [[ -z "${KEEP_COVERAGE:-}" ]]; then
 fi
 
 log_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-legion-quick.XXXXXX")"
+# Failed runs keep the full lane logs for diagnosis (the capped stdout tail is
+# lossy); passing runs stay ephemeral. Declared before the trap so the failure
+# announcement below can set it.
+keep_log_dir=""
 cleanup_logs() {
+  if [[ -n "$keep_log_dir" ]]; then
+    say "Full lane logs kept for diagnosis: $keep_log_dir" >&2
+    return 0
+  fi
   rm -rf "$log_dir"
 }
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
@@ -132,7 +185,7 @@ else
 fi
 
 echo "=== Parallel Quick Gate ==="
-echo "Parallel static/test rounds; the API contract check runs once between them."
+say "Parallel static/test rounds; the API contract check runs once between them."
 lanes_started_at=$SECONDS
 
 # Shared per-lane job cap: worktree-aware (scripts/gate-jobs.sh) — the
@@ -242,7 +295,7 @@ run_round() {
       last_heartbeat=$SECONDS
       for lane in "${running[@]}"; do
         last_line="$(tail -n 1 "$log_dir/${lane}-${round}.log" 2>/dev/null | cut -c1-120)"
-        echo "[gate:${round}] $((SECONDS - lanes_started_at))s ${lane}: ${last_line}"
+        say "[gate:${round}] $((SECONDS - lanes_started_at))s ${lane}: ${last_line}"
       done
     fi
   done
@@ -261,20 +314,18 @@ run_round() {
   set -e
 
   if [[ -n "$backend_pid" ]]; then
-    echo "=== Backend ${round} Output ==="
-    cat "$backend_log"
+    print_lane_output "Backend ${round}" "$backend_log"
   fi
   if [[ -n "$frontend_pid" ]]; then
-    echo "=== Frontend ${round} Output ==="
-    cat "$frontend_log"
+    print_lane_output "Frontend ${round}" "$frontend_log"
   fi
   if [[ -n "$rust_pid" ]]; then
-    echo "=== Rust ${round} Output ==="
-    cat "$rust_log"
+    print_lane_output "Rust ${round}" "$rust_log"
   fi
 
   if [[ "$backend_status" -ne 0 || "$frontend_status" -ne 0 || "$rust_status" -ne 0 ]]; then
-    echo "Parallel ${round} round failed: backend=$backend_status frontend=$frontend_status rust=$rust_status" >&2
+    keep_log_dir="$log_dir"
+    echo "Parallel ${round} round failed: backend=$backend_status frontend=$frontend_status rust=$rust_status" >&2 || true
     return 1
   fi
 }
@@ -292,10 +343,24 @@ else
 fi
 # Integration step: the OpenAPI contract spans backend (schema export boots the
 # full app) and frontend (type generation), so it runs once here instead of
-# competing for CPU/memory inside the parallel static round.
+# competing for CPU/memory inside the parallel static round. Its output goes
+# through the same log-file + capped-tail path as the lanes (issue #679): it
+# used to stream inline through the hook's stdout pipe.
 if [[ "${GATE_SKIP_STATIC:-0}" != "1" ]] && lane_enabled backend && lane_enabled frontend; then
+  api_contract_log="$log_dir/api-contract.log"
+  # Status captured rather than left to set -e: a bare failure here used to
+  # kill the gate with the step's exit code and NO diagnostics anywhere — the
+  # output sat in the log file the EXIT trap then deleted. Report the capped
+  # tail, keep the full log dir, announce the failure, then fail.
+  api_contract_status=0
   FRONTEND_GATE_PHASE="api-contract" \
-    "$ROOT_DIR/scripts/check-quick-frontend.sh"
+    "$ROOT_DIR/scripts/check-quick-frontend.sh" >"$api_contract_log" 2>&1 || api_contract_status=$?
+  print_lane_output "API Contract" "$api_contract_log"
+  if [[ "$api_contract_status" -ne 0 ]]; then
+    keep_log_dir="$log_dir"
+    echo "API contract check failed (status=$api_contract_status); full log: $api_contract_log" >&2
+    exit 1
+  fi
 fi
 if [[ "$GATE_LANES" != "static" ]]; then
   # GATE_TIER=aff is the agent inner-loop combination: backend affected-test
@@ -330,4 +395,4 @@ if [[ "$GATE_LANES" != "static" ]]; then
   fi
 fi
 
-echo "Parallel quick gate passed in $((SECONDS - lanes_started_at))s."
+say "Parallel quick gate passed in $((SECONDS - lanes_started_at))s."
