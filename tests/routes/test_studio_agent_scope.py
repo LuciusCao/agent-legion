@@ -368,9 +368,10 @@ def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> Non
     workspace_id = str(
         job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-guard-ws")["id"]
     )
-    # #710's guard resolves the job's workspace before the route-level scope
-    # rejection, so a nonexistent placeholder job would 404 there instead of
-    # exercising the 403 the inventory asserts — seed a real one.
+    # Seed a real job: asserting the 403 on a live target proves the scope
+    # refusal fires for an existing job (the scoped effecting short-circuit
+    # in require_job_workspace_access would also 403 a nonexistent id —
+    # that weaker shape is pinned by test_studio_agent_job_tools).
     from tests.routes.test_job_idor_matrix import _make_job
 
     real_job = _make_job(client, workspace_id)

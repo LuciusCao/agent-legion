@@ -1,7 +1,7 @@
 """Cross-workspace access matrix for job-id-shaped routes (#710).
 
 ``require_workspace_access`` historically only checked membership when the
-route carried a ``workspace_id``; the 13 bare ``/jobs/{job_id}`` endpoints
+route carried a ``workspace_id``; the 12 bare ``/jobs/{job_id}`` endpoints
 (read detail/artifacts/logs/token-usage, delete, rerun/run-to/continue,
 upgrade-workflow, and the invalid-subpath catch-all) therefore let any
 logged-in user read, mutate, or delete another workspace's jobs. These
@@ -11,6 +11,8 @@ does not match the job's actual workspace is rejected even for members.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
@@ -305,3 +307,65 @@ def test_all_batch_surfaces_answer_foreign_and_unknown_identically(
     assert foreign.get("message") == unknown.get("message"), (method, url)
     assert client.get(f"/api/jobs/{job_a}", headers=CSRF).status_code == 200
     _ = ws_a
+
+
+# --- Skill catalog reads (red-team V1 on #710's audit) -----------------------
+#
+# GET /api/agent-catalog/skills/{workspace}/{capability} carried no
+# workspace_id path parameter, so the generic secured() guard passed any
+# logged-in user through: a low-privilege account could read any
+# workspace's full skill content (prompts, contracts, scripts). The fix
+# membership-checks the workspace segment of the skill key.
+
+
+def _make_skill_repo(repo: Path) -> None:
+    import subprocess
+
+    def git(*args: str) -> None:
+        env = {
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        }
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=env)
+
+    repo.mkdir(parents=True)
+    (repo / "SKILL.md").write_text("# secret skill\n", encoding="utf-8")
+    git("init", "-q")
+    git("add", ".")
+    git("commit", "-q", "-m", "init", "--no-gpg-sign")
+
+
+def test_skill_catalog_requires_workspace_membership(client, tmp_path, monkeypatch) -> None:
+    base = tmp_path / "home" / ".agents" / "skills"
+    skill_key = "ws_victim/secret_capability"
+    _make_skill_repo(base / skill_key)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    # Any logged-in non-member (no workspace at all) is refused with the
+    # unknown-skill 404 shape.
+    _create_member(client, "skill-outsider", "pw-skill")
+    outsider = _member_client(client, "skill-outsider", "pw-skill")
+    response = outsider.get(f"/api/agent-catalog/skills/{skill_key}")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Skill not found"
+    # Same shape for a key whose workspace segment does not exist at all —
+    # no oracle between "no such workspace" and "not a member".
+    missing_ws = outsider.get("/api/agent-catalog/skills/no_such_ws/secret_capability")
+    assert missing_ws.status_code == 404
+    assert missing_ws.json()["detail"] == "Skill not found"
+
+    # A member of the owning workspace reads it fine.
+    ws_victim = client.post(
+        "/api/workspaces", json={"id": "ws_victim", "name": "Victim"}, headers=CSRF
+    ).json()["workspace"]["id"]
+    member_id = client.app.state.job_db.get_user_credentials("skill-outsider")["id"]
+    client.app.state.job_db.upsert_workspace_member(ws_victim, member_id, "viewer")
+    ok = outsider.get(f"/api/agent-catalog/skills/{skill_key}")
+    assert ok.status_code == 200
+    assert any(f["path"] == "SKILL.md" for f in ok.json()["files"])
+
+    # Admin passes regardless of membership.
+    assert client.get(f"/api/agent-catalog/skills/{skill_key}", headers=CSRF).status_code == 200

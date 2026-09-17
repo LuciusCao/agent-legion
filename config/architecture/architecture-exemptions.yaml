@@ -1,5 +1,16 @@
 exemptions:
 - check: architecture.file_budget
+  path: server/app/routes/skills.py
+  reason: 'Issue #710 red-team follow-up (V1): the skills validate/tags endpoints take an
+    absolute skill path whose first base-relative segment is the workspace — the routes
+    carry no workspace_id path parameter, so the workspace extraction helper plus the
+    membership check add 24 effective lines past the 38 baseline. Remove when the path-
+    shaped skill routes move under a workspace-prefixed mount or a budget re-balance
+    re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/710
+  ceiling: 68
+- check: architecture.file_budget
   path: server/app/auth/workspace_access.py
   reason: 'Issue #710 splits the membership guard in two: require_workspace_access keeps
     its original semantics for the generic secured() surface, and the new
