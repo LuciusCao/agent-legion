@@ -374,11 +374,12 @@ def test_rerun_object_cleanup_spares_re_registered_authority_keys(
 def test_rerun_object_cleanup_revalidates_per_object_mid_delete(
     job_db, settings, chain_definition, monkeypatch
 ):
-    """#683 review P1：批量快照读与删除之间，新 attempt 的 promote_all 完成
+    """#683 review P1：批量探测与删除之间，新 attempt 的 promote_all 完成
     （权威键对象先拷、清单行 record_remote_many 后提交）——入口批量重验看
     不到它（读到的是旧状态），逐对象删除前的当前清单重验必须放过该键，
     否则新清单行指向被删对象。用真实 store + FakeObjectStorage 走完整删除
-    路径，时序经 rows_for_job 注入。"""
+    路径，时序经 live_keys_for 靶向探针注入（#706 review P2：重验不传输
+    整份清单）。"""
     storage = FakeObjectStorage()
     workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
     job = _seed_job_with_manifest(
@@ -391,14 +392,13 @@ def test_rerun_object_cleanup_revalidates_per_object_mid_delete(
     with job_db.connect() as conn:
         conn.execute("delete from job_artifacts where job_id=%s", (job["id"],))
 
-    real_rows_for_job = store.rows_for_job
-    reads = {"count": 0}
+    real_live_keys_for = store.live_keys_for
+    probes = {"count": 0}
 
-    def rows_for_job_with_mid_cleanup_promote(job_id: str):
-        reads["count"] += 1
-        rows = real_rows_for_job(job_id)
-        if reads["count"] == 2:
-            # 批量快照读（第 1 次）之后、up 的逐对象重验（第 2 次）之前：
+    def live_keys_for_with_mid_cleanup_promote(job_id: str, storage_keys: list[str]) -> set[str]:
+        probes["count"] += 1
+        if probes["count"] == 2:
+            # 批量探测（第 1 次）之后、up 的逐对象重验（第 2 次）之前：
             # 新 attempt 完成 promote_all——对象 copy 到同一权威键 +
             # record_remote_many 一个事务提交新清单行。
             storage.objects[up_key] = b"fresh attempt bytes!"
@@ -411,10 +411,9 @@ def test_rerun_object_cleanup_revalidates_per_object_mid_delete(
                 size_bytes=20,
                 content_hash="hash-fresh",
             )
-            rows = real_rows_for_job(job_id)
-        return rows
+        return real_live_keys_for(job_id, storage_keys)
 
-    monkeypatch.setattr(store, "rows_for_job", rows_for_job_with_mid_cleanup_promote)
+    monkeypatch.setattr(store, "live_keys_for", live_keys_for_with_mid_cleanup_promote)
 
     from server.app.services.job_staged_cleanup import delete_rerun_artifact_objects
 
