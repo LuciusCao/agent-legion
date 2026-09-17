@@ -205,3 +205,68 @@ def test_status_artifact_names_union(job_db, settings):
     payload = service.status(job["workspace_id"], job["id"])
 
     assert payload["artifacts"] == ["legacy.txt", "report.json"]
+
+
+# --- P2-1: 子路径名 -----------------------------------------------------------
+
+
+def test_list_artifacts_includes_local_subpath_names(job_db, settings):
+    """#631 review P2-1: local-only 子路径产物（reports/final.json）必须被
+    深度扫描列出（根级扫描漏掉子目录文件），名字与 raw 端点可下载名一致。"""
+    job = _seed_job(job_db)
+    service = ExternalArtifactAccessService(job_db, settings, object_store=_NoStorage())
+    storage = resolve_job_dir(job, job_db.jobs_dir)
+    (storage / "reports").mkdir(parents=True, exist_ok=True)
+    (storage / "reports" / "final.json").write_text("{}", encoding="utf-8")
+    (storage / "top.txt").write_text("top", encoding="utf-8")
+
+    payload = service.list_artifacts(job["workspace_id"], job["id"])
+
+    assert [e["name"] for e in payload["artifacts"]] == [
+        "reports/final.json",
+        "top.txt",
+    ]
+
+
+def test_status_lists_local_subpath_names(job_db, settings):
+    job = _seed_job(job_db)
+    service = ExternalArtifactAccessService(job_db, settings, object_store=_NoStorage())
+    storage = resolve_job_dir(job, job_db.jobs_dir)
+    (storage / "reports").mkdir(parents=True, exist_ok=True)
+    (storage / "reports" / "final.json").write_text("{}", encoding="utf-8")
+
+    payload = service.status(job["workspace_id"], job["id"])
+
+    assert payload["artifacts"] == ["reports/final.json"]
+
+
+# --- P2-2: raw 优先权威 manifest 对象 -----------------------------------------
+
+
+def test_open_raw_current_prefers_manifest_object_over_local(job_db):
+    """#631 review P2-2: manifest 行存在时 raw 读对象副本（清单刚把行的
+    content_hash 当当前结果公布），本地缓存可能滞后；无行才回落本地。"""
+    from server.app.services.job_artifacts import JobArtifactService
+
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    current = b'{"v": "current"}'
+    _seed_manifest_row(store, job, "report.json", current)
+    storage = resolve_job_dir(job, job_db.jobs_dir)
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "report.json").write_bytes(b'{"v": "stale-local"}')
+    service = JobArtifactService(job_db, store)
+
+    raw = service.open_raw_current(job["id"], "report.json")
+
+    assert raw.stream is not None
+    # .gz 行按存储字节透传（#338，Content-Encoding 由路由层加）——解压后
+    # 才是清单 content_hash 语义的内容字节。
+    assert gzip.decompress(raw.stream.read()) == current
+    assert raw.path is None
+
+    # 对照：无 manifest 行的 local-only 产物仍从本地文件读。
+    (storage / "legacy.txt").write_bytes(b"legacy")
+    legacy = service.open_raw_current(job["id"], "legacy.txt")
+    assert legacy.path is not None
+    assert legacy.path.read_bytes() == b"legacy"

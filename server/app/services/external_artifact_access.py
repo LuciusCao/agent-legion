@@ -15,7 +15,7 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_media import raw_media_type
 from server.app.services.job_errors import NotFoundError
-from server.app.services.job_query_presenters import artifact_names
+from server.app.services.job_query_presenters import artifact_names_deep
 from server.app.settings import Settings
 
 _JOB_STATUS_FIELDS = (
@@ -99,7 +99,9 @@ class ExternalArtifactAccessService:
         }
 
     def _artifact_names(self, job: dict[str, Any]) -> list[str]:
-        names = set(artifact_names(job, self.settings))
+        # 递归扫描（#631 review P2-1）：local-only 子路径产物（reports/
+        # final.json）也在名单里，名单成员与可下载名一一对应。
+        names = set(artifact_names_deep(job, self.settings))
         # enabled 门控（与 JobQueryService._artifact_names 同语义）：实例
         # 摘掉存储配置后清单里的名字读不到，不再列出。
         store = self._enabled_store()
@@ -124,7 +126,7 @@ class ExternalArtifactAccessService:
         entries: list[dict[str, Any]] = [
             self._entry_from_row(row) for row in object_backed.values()
         ]
-        local_names = set(artifact_names(job, self.settings))
+        local_names = set(artifact_names_deep(job, self.settings))
         if store is not None:
             local_names -= set(object_backed)
         entries.extend(self._local_entry(name) for name in sorted(local_names))

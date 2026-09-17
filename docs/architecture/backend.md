@@ -138,7 +138,7 @@ server/app/
 | GET | `/dashboard/events` | `dashboard_events` | routes/dashboard_events.py |
 | GET | `/workspaces/{workspace_id}/jobs/{job_id}` | `get_external_job_status` | routes/external_artifacts.py |
 | GET | `/workspaces/{workspace_id}/jobs/{job_id}/artifacts` | `list_external_artifacts` | routes/external_artifacts.py |
-| GET | `/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw` | `get_external_artifact_raw` | routes/external_artifacts.py |
+| GET | `/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name:path}/raw` | `get_external_artifact_raw` | routes/external_artifacts.py |
 | GET | `/workspaces/{workspace_id}/failed-node-runs` | `list_failed_node_runs` | routes/failed_node_runs.py |
 | POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
 | GET | `/admin/infra-connections` | `get_infra_connections` | routes/infra_connections.py |

@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from server.app.services.job_node_ordering import effective_after, ordered_job_nodes
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
@@ -48,3 +51,29 @@ def artifact_names(job: dict, settings: Settings) -> list[str]:
     if not base.exists():
         return []
     return sorted(path.name for path in base.iterdir() if path.is_file())
+
+
+# job_dir 里不是产物的子树：runs/ 是每节点的执行 run 目录（events.jsonl 等），
+# 点前缀目录是清理/解包暂存（.trash、.result-staging-*）。
+_NON_ARTIFACT_DIR_NAMES = {"runs"}
+
+
+def artifact_names_deep(job: dict, settings: Settings) -> list[str]:
+    """Recursive variant of ``artifact_names`` for read surfaces that serve
+    job-dir-relative subpath names (#631 review P2-1): declared outputs like
+    ``reports/final.json`` land in subdirectories, which the root-only scan
+    never sees.
+
+    Non-artifact subtrees (``runs/``, dot-directories) are pruned; symlinked
+    directories are not followed (os.walk default), so a planted link cannot
+    enumerate files outside the job_dir — serving goes through the
+    containment-checked ``JobArtifactService._artifact_path`` anyway.
+    """
+    base = resolve_job_dir(job, settings.jobs_dir)
+    if not base.is_dir():
+        return []
+    names: list[str] = []
+    for root, dirs, files in os.walk(base, followlinks=False):
+        dirs[:] = [d for d in dirs if d not in _NON_ARTIFACT_DIR_NAMES and not d.startswith(".")]
+        names.extend((Path(root) / name).relative_to(base).as_posix() for name in files)
+    return sorted(names)

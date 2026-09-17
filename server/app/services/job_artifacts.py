@@ -1,5 +1,5 @@
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -29,12 +29,22 @@ class JobArtifactService:
         return job
 
     def _artifact_path(self, job: dict[str, Any], artifact_name: str) -> Path:
-        if "/" in artifact_name or "\\" in artifact_name or artifact_name in {"", ".", ".."}:
+        # #631 review P2-1: 声明产物可以是 job_dir 相对子路径（reports/
+        # final.json——Worker 解包/promote 都保留子目录）。安全边界是
+        # 包含性校验而非「不含 /」：绝对名、``..`` 段与反斜杠照旧拒绝
+        # （与 result_unpack / download_remote_artifact 同一规则）。
+        relative = PurePosixPath(artifact_name)
+        if (
+            not relative.parts
+            or relative.is_absolute()
+            or ".." in relative.parts
+            or "\\" in artifact_name
+        ):
             raise InvalidOperationError("Invalid artifact name")
 
         base = resolve_job_dir(job, self.job_db.jobs_dir)
-        path = (base / artifact_name).resolve()
-        if path.parent != base:
+        path = (base / relative).resolve()
+        if not path.is_relative_to(base):
             raise InvalidOperationError("Invalid artifact path")
         return path
 
@@ -89,6 +99,25 @@ class JobArtifactService:
         job = self._job_or_404(job_id)
         path = self._artifact_path(job, artifact_name)
         return open_raw_artifact(path, self.object_store, job_id, artifact_name, range_header)
+
+    def open_raw_current(
+        self, job_id: str, artifact_name: str, range_header: str | None = None
+    ) -> RawArtifact:
+        """Manifest-first variant for surfaces that publish the manifest row
+        (#631 external access): with a ``job_artifacts`` row the object IS the
+        advertised copy (the listing answers the row's content_hash /
+        uploaded_at; the local cache may hold stale bytes — EXEC-ARTIFACT-
+        STORE-001), so it is served first; the local copy only without a row.
+        """
+        job = self._job_or_404(job_id)
+        return open_raw_artifact(
+            self._artifact_path(job, artifact_name),
+            self.object_store,
+            job_id,
+            artifact_name,
+            range_header,
+            manifest_first=True,
+        )
 
     def reject_subpath(self, job_id: str) -> None:
         self._job_or_404(job_id)

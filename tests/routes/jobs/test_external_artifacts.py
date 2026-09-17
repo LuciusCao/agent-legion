@@ -286,17 +286,17 @@ def test_raw_missing_artifact_is_404(two_workspaces):
 
 
 def test_raw_rejects_traversal(two_workspaces):
-    """Structural sub-path immunity: ``{artifact_name}`` is a single path
-    segment, so any encoded ``/`` (``%2F``) or ``..`` segment either gets
-    normalized away by the ASGI stack or fails to match the route — a
-    sub-path name can never reach the handler. (The bare
-    ``/jobs/{job_id}/artifacts/{artifact_name:path}`` route instead captures
-    the whole remainder and rejects in the service with 400.)"""
+    """Path-traversal immunity with the ``{artifact_name:path}`` converter
+    (#631 review P2-1): the converter deliberately captures subpath names
+    (``reports/final.json``), so the guard moved into the service — an
+    absolute name, ``..`` segment or backslash is a 400, never a file read
+    outside the job_dir (the bare ``/jobs/{job_id}/artifacts/{name:path}``
+    route rejects the same family in the same place)."""
     c, job_a, _ = two_workspaces
 
     for name in ("..%2Fagent_legion.sqlite", "%2e%2e%2Fagent_legion.sqlite"):
         response = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/{name}/raw")
-        assert response.status_code == 404
+        assert response.status_code == 400
 
 
 def test_raw_missing_object_is_404(two_workspaces, monkeypatch):
@@ -341,3 +341,149 @@ def test_raw_range_request_on_object_artifact(two_workspaces):
     assert response.status_code == 206
     assert response.headers["content-range"] == "bytes 2-5/10"
     assert response.content == b"2345"
+
+
+# --- P1: scoped-token workspace 绑定 -----------------------------------------
+
+
+def test_scoped_token_bound_to_other_workspace_is_404_on_all_three(two_workspaces, job_db):
+    """#631 review P1: a Bearer token bound to scoped_workspace_id=ws-a must
+    not read through ws-b even though the minting admin can see every
+    workspace (require_workspace_access checks the user, not the binding).
+    Mismatches are 404, not 403 — this surface answers cross-workspace probes
+    with not-found, keeping the no-enumeration semantics of the job check."""
+    from server.app.auth import scoped_tokens
+
+    c, job_a, job_b = two_workspaces
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id="ws-a")
+    scoped = c.__class__(c.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+    _register_object_artifact(c, job_b, "frame.png", b"\x89PNG-bytes")
+
+    # All three endpoints refuse the ws-b prefix for the ws-a-bound token.
+    assert scoped.get(f"/api/workspaces/ws-b/jobs/{job_b['id']}").status_code == 404
+    assert scoped.get(f"/api/workspaces/ws-b/jobs/{job_b['id']}/artifacts").status_code == 404
+    assert (
+        scoped.get(f"/api/workspaces/ws-b/jobs/{job_b['id']}/artifacts/frame.png/raw").status_code
+        == 404
+    )
+    # The bound workspace itself still reads normally (guard is a mismatch
+    # check, not a scoped-token ban).
+    assert scoped.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}").status_code == 200
+
+
+def test_unbound_scoped_token_still_reads_member_workspaces(two_workspaces, job_db):
+    """Unbound scoped tokens keep the membership-only behaviour (schema v45):
+    no scoped_workspace_id → nothing to compare, the parent membership guard
+    decides."""
+    from server.app.auth import scoped_tokens
+
+    c, job_a, _ = two_workspaces
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id)
+    scoped = c.__class__(c.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+
+    assert scoped.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}").status_code == 200
+
+
+# --- P2-1: 子路径产物名列出 + 下载往返 ---------------------------------------
+
+
+def test_subpath_artifact_roundtrip_object_backed(two_workspaces):
+    """#631 review P2-1: a declared output like ``reports/final.json`` keeps
+    its subdirectory through the Worker channel (unpack, promote, manifest
+    key) — the manifest lists it and the raw endpoint must be able to serve
+    exactly that name."""
+    c, job_a, _ = two_workspaces
+    payload = b'{"final": true}'
+    _register_object_artifact(c, job_a, "reports/final.json", payload)
+
+    listing = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+    entries = {e["name"]: e for e in listing["artifacts"]}
+    assert "reports/final.json" in entries
+    assert entries["reports/final.json"]["storage"] == "object"
+
+    response = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/reports/final.json/raw")
+    assert response.status_code == 200
+    assert response.content == payload
+
+    # status 端点的名单也含子路径名（manifest 名并入）。
+    status = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}").json()
+    assert "reports/final.json" in status["artifacts"]
+
+
+def test_subpath_artifact_local_only_roundtrip(client_factory, monkeypatch):
+    """Local-only subpath artifacts (instance without a bucket): the deep
+    listing finds files under subdirectories (the root-only scan missed
+    them) and the raw endpoint serves them from the local copy."""
+    with client_factory(fresh=True) as c:
+        monkeypatch.setattr(c.app.state.job_artifact_objects, "storage", None)
+        _seed_workspace(c, "ws-a")
+        job = _create_job(c, "ws-a")
+        storage = Path(job["storage_dir"])
+        (storage / "reports").mkdir(parents=True, exist_ok=True)
+        (storage / "reports" / "final.json").write_text('{"ok": 1}', encoding="utf-8")
+        (storage / "top.txt").write_text("top", encoding="utf-8")
+
+        listing = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts").json()
+        entries = {e["name"]: e for e in listing["artifacts"]}
+        assert entries["reports/final.json"]["storage"] == "local"
+        assert entries["top.txt"]["storage"] == "local"
+
+        response = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts/reports/final.json/raw")
+        assert response.status_code == 200
+        assert response.content == b'{"ok": 1}'
+
+        status = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}").json()
+        assert "reports/final.json" in status["artifacts"]
+
+
+def test_local_listing_prunes_runs_and_hidden_dirs(client_factory, monkeypatch):
+    """The deep scan lists artifacts, not job_dir internals: ``runs/`` holds
+    per-node run dirs (events.jsonl) and dot-directories are staging/trash —
+    neither may surface as a downloadable artifact name."""
+    with client_factory(fresh=True) as c:
+        monkeypatch.setattr(c.app.state.job_artifact_objects, "storage", None)
+        _seed_workspace(c, "ws-a")
+        job = _create_job(c, "ws-a")
+        storage = Path(job["storage_dir"])
+        (storage / "runs" / "node_a" / "token1").mkdir(parents=True, exist_ok=True)
+        (storage / "runs" / "node_a" / "token1" / "events.jsonl").write_text("{}", encoding="utf-8")
+        (storage / ".result-staging-x").mkdir(parents=True, exist_ok=True)
+        (storage / ".result-staging-x" / "leak.txt").write_text("x", encoding="utf-8")
+        (storage / "result.json").write_text("{}", encoding="utf-8")
+
+        listing = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts").json()
+
+        names = [e["name"] for e in listing["artifacts"]]
+        assert names == ["result.json"]
+
+
+# --- P2-2: raw 优先权威 manifest 对象 -----------------------------------------
+
+
+def test_raw_prefers_object_bytes_when_local_cache_stale(two_workspaces):
+    """#631 review P2-2: the listing just published the manifest row's
+    content_hash/uploaded_at as the current result — the download must serve
+    the object those fields describe. A stale local cache (rerun replaced the
+    file while the re-upload/row-upsert had not landed) must not win."""
+    c, job_a, _ = two_workspaces
+    current = b'{"execution": "current"}'
+    _register_object_artifact(c, job_a, "report.json", current)
+    # The stale cache: different bytes, same name (what a rerun left behind).
+    storage = Path(job_a["storage_dir"])
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "report.json").write_text('{"execution": "stale-local"}', encoding="utf-8")
+
+    # What the manifest advertises (the row's hash is over `current`).
+    listing = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+    entry = next(e for e in listing["artifacts"] if e["name"] == "report.json")
+    assert entry["storage"] == "object"
+
+    response = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/report.json/raw")
+
+    assert response.status_code == 200
+    assert response.content == current  # the object bytes, not the local copy
+    assert hashlib.sha256(response.content).hexdigest() == entry["content_hash"]

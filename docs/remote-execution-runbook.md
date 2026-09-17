@@ -455,13 +455,20 @@ with three read-only endpoints, all scoped by the workspace in the URL path:
 **鉴权.** 与其它 workspace 端点同一守卫（`require_workspace_access`）：
 会话 cookie 或 #626 的 workspace API token（`Authorization: Bearer <token>`
 ——Bearer 通道免 CSRF）。跨 workspace 的 job_id 一律 404（归属校验兼作
-存在性校验，不能枚举其它 workspace 的 job）。
+存在性校验，不能枚举其它 workspace 的 job）。#626 落地前的 scoped Bearer
+token 同样可用：绑定了 `scoped_workspace_id` 的 token 只能读绑定 workspace
+（不匹配同样 404，防枚举语义一致）。
 
 **读取语义.**
 
-- 产物优先从对象存储权威副本读取（`job_artifacts` manifest）——本地
-  job_dir 缓存被清理后仍可下载；对象存储未配置时清单降级为本地名并标
+- 产物优先从对象存储权威副本读取（`job_artifacts` manifest）——有
+  manifest 行的产物，下载字节与清单公布的 `content_hash`/`uploaded_at`
+  对应（本地 job_dir 缓存可能滞后于 manifest）；本地副本仅服务从未
+  上传的 legacy 产物。对象存储未配置时清单降级为本地名并标
   `object_storage_enabled: false`。
+- 产物名可以是 job_dir 相对子路径（`reports/final.json`）：清单列出
+  的名字即下载 URL 里的名字（`{artifact_name:path}`）；绝对名、`..`
+  段与反斜杠 400。
 - job 未完成时清单是空数组 + 当前 status（不是 404）——外部轮询以
   status 为准。
 - 重跑后清单/读取都回答「当前最新」执行：`content_hash` 与
