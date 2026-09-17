@@ -324,24 +324,38 @@ impl SseLineBuffer {
     /// Append one TCP chunk; returns every line completed by it.
     pub(super) fn push(&mut self, chunk: &[u8]) -> Result<Vec<String>, ProviderError> {
         self.buffer.extend_from_slice(chunk);
-        // #637: an unterminated line longer than any legitimate SSE data
-        // payload is stream corruption — reject instead of growing the
-        // buffer without bound (a junk flood with no newline never reaches
-        // the aggregate, so the aggregate caps cannot bound it). The buffer
-        // is cleared before returning, so a caller that ever catches the
-        // error and reuses the buffer starts from empty instead of
-        // immediately re-tripping on the retained junk.
+        let mut lines = Vec::new();
+        while let Some(pos) = self.buffer.iter().position(|b| *b == b'\n') {
+            let line: Vec<u8> = self.buffer.drain(..=pos).collect();
+            let line = &line[..line.len() - 1];
+            // #637: a COMPLETE line longer than any legitimate SSE data
+            // payload is stream corruption — the cap bounds one LINE, never
+            // the chunk (reqwest may deliver many legal lines in a single
+            // Bytes chunk whose total exceeds it; the response is not
+            // corrupt just because of how HTTP framed it).
+            if line.len() > MAX_SSE_LINE_BYTES {
+                self.buffer.clear();
+                return Err(ProviderError::Transient(format!(
+                    "SSE line exceeds {} bytes (stream corruption)",
+                    MAX_SSE_LINE_BYTES
+                )));
+            }
+            lines.push(String::from_utf8_lossy(line).into_owned());
+        }
+        // #637: an unterminated RESIDUAL longer than the cap is corruption
+        // too — reject instead of growing the buffer without bound (a junk
+        // flood with no newline never reaches the aggregate, so the
+        // aggregate caps cannot bound it). Only the residual is checked:
+        // every retained byte belongs to one still-open line. The buffer is
+        // cleared before returning, so a caller that ever catches the error
+        // and reuses the buffer starts from empty instead of immediately
+        // re-tripping on the retained junk.
         if self.buffer.len() > MAX_SSE_LINE_BYTES {
             self.buffer.clear();
             return Err(ProviderError::Transient(format!(
                 "SSE line exceeds {} bytes (stream corruption)",
                 MAX_SSE_LINE_BYTES
             )));
-        }
-        let mut lines = Vec::new();
-        while let Some(pos) = self.buffer.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = self.buffer.drain(..=pos).collect();
-            lines.push(String::from_utf8_lossy(&line[..line.len() - 1]).into_owned());
         }
         Ok(lines)
     }

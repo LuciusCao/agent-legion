@@ -259,6 +259,12 @@ fn truncate(text: &str, max: usize) -> &str {
     }
 }
 
+// The #689 SSE line-cap SseLineBuffer tests live in the child module
+// `sse_line_tests` (split for the file size budget); everything else stays
+// inline.
+#[cfg(test)]
+mod sse_line_tests;
+
 #[cfg(test)]
 mod tests {
     use super::aggregate::{

@@ -505,25 +505,38 @@ async fn read_stream(
 }
 
 /// #637: append one raw chunk to the SSE line buffer and return every line
-/// completed by it, rejecting an unterminated line longer than
-/// [`MAX_SSE_LINE_BYTES`] instead of growing it without bound — a junk flood
-/// with no newline never reaches the aggregate caps, so only this check
-/// bounds it. The buffer is cleared before returning the error (a caller
-/// that ever catches it and reuses the buffer starts from empty), mirroring
-/// `SseLineBuffer::push` in `openai_compat/aggregate.rs`.
+/// completed by it. The cap bounds one LINE, never the chunk: every
+/// COMPLETE line is checked individually (a newline-terminated line longer
+/// than [`MAX_SSE_LINE_BYTES`] is corruption), and only the trailing
+/// UNTERMINATED residual gets the cumulative check — rejecting instead of
+/// growing it without bound (a junk flood with no newline never reaches the
+/// aggregate caps, so only this check bounds it). reqwest may deliver many
+/// legal lines in one chunk whose total exceeds the cap; that response is
+/// not corrupt just because of how HTTP framed it. The buffer is cleared
+/// before returning the error (a caller that ever catches it and reuses the
+/// buffer starts from empty), mirroring `SseLineBuffer::push` in
+/// `openai_compat/aggregate.rs`.
 fn push_lines_bounded(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<Vec<String>, ProviderError> {
     buffer.extend_from_slice(chunk);
+    let mut lines = Vec::new();
+    while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
+        let line: Vec<u8> = buffer.drain(..=pos).collect();
+        let line = &line[..line.len() - 1];
+        if line.len() > MAX_SSE_LINE_BYTES {
+            buffer.clear();
+            return Err(ProviderError::Transient(format!(
+                "SSE line exceeds {} bytes (stream corruption)",
+                MAX_SSE_LINE_BYTES
+            )));
+        }
+        lines.push(String::from_utf8_lossy(line).into_owned());
+    }
     if buffer.len() > MAX_SSE_LINE_BYTES {
         buffer.clear();
         return Err(ProviderError::Transient(format!(
             "SSE line exceeds {} bytes (stream corruption)",
             MAX_SSE_LINE_BYTES
         )));
-    }
-    let mut lines = Vec::new();
-    while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
-        let line: Vec<u8> = buffer.drain(..=pos).collect();
-        lines.push(String::from_utf8_lossy(&line[..line.len() - 1]).into_owned());
     }
     Ok(lines)
 }
@@ -591,6 +604,11 @@ fn classify_http(status: u16, body: &str) -> ProviderError {
 fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
+
+// SSE line-cap tests live in the child module `sse_line_tests` (split for
+// the file size budget, #689); everything else stays inline.
+#[cfg(test)]
+mod sse_line_tests;
 
 #[cfg(test)]
 mod tests {
@@ -691,36 +709,6 @@ mod tests {
         assert!(
             matches!(&content[1], ContentBlock::ToolCall { arguments, .. } if arguments == &json!({"path":"a"}))
         );
-    }
-
-    #[test]
-    fn sse_line_buffer_rejects_overlong_line() {
-        // #637: an unterminated line longer than any legitimate SSE payload
-        // is corruption — the line buffer must reject it instead of growing
-        // without bound (a junk flood with no newline never reaches the
-        // aggregate caps). Mirrors the openai_compat SseLineBuffer test.
-        let mut buffer = Vec::new();
-        let junk = vec![b'x'; 2 * 1024 * 1024 + 1];
-        let err =
-            push_lines_bounded(&mut buffer, &junk).expect_err("overlong line must be rejected");
-        assert!(err.is_retryable(), "overlong line is transient: {err}");
-        assert!(err.to_string().contains("SSE line exceeds"), "got: {err}");
-        // The rejected buffer is cleared, not retained (defensive: a reused
-        // buffer must not immediately re-trip on the stale junk).
-        assert!(
-            buffer.is_empty(),
-            "buffer must be cleared on rejection, {} bytes retained",
-            buffer.len()
-        );
-
-        // Newline-terminated lines drain on every push, so the same total
-        // volume never trips the cap — only an UNTERMINATED line does.
-        let mut buffer = Vec::new();
-        for _ in 0..5 {
-            let lines = push_lines_bounded(&mut buffer, b"data: x\n").unwrap();
-            assert_eq!(lines, vec!["data: x".to_string()]);
-        }
-        assert!(buffer.is_empty());
     }
 
     #[test]
