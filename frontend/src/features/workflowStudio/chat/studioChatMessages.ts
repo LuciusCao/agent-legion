@@ -26,11 +26,17 @@ export type AgentDefinitionDraftView = {
   capability: string | null
   runtime: string | null
   skill: string | null
+  /** 来源 tool call 的状态（#692 R2 P2-1）：pending/failed 的保存不保证
+   * 草稿落库成功，发布入口只对 completed 开放——否则失败的工具调用
+   * 也能发布出更早的旧草稿，用户误以为新定义已生效。 */
+  status: string
 }
 
 export type NodeCodeDraftView = {
   toolCallId: string
   nodeKey: string
+  /** 同 AgentDefinitionDraftView.status。 */
+  status: string
 }
 
 export type PermissionView = {
@@ -229,6 +235,7 @@ export function extractAgentDefinitionDrafts(
       capability: asText(call.rawInput?.capability) || null,
       runtime: asText(call.rawInput?.runtime) || null,
       skill: asText(call.rawInput?.skill) || null,
+      status: call.status,
     })
   }
   return drafts
@@ -242,7 +249,7 @@ export function extractNodeCodeDrafts(
     if (!toolNameMatches(call, 'save_node_code_draft')) continue
     const nodeKey = asText(call.rawInput?.node_key)
     if (!nodeKey) continue
-    drafts.push({ toolCallId: call.toolCallId, nodeKey })
+    drafts.push({ toolCallId: call.toolCallId, nodeKey, status: call.status })
   }
   return drafts
 }

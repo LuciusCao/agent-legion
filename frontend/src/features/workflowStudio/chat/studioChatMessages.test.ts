@@ -167,6 +167,7 @@ describe('agent / node draft extraction', () => {
     const calls = groupToolCalls([
       toolCall('t1', {
         title: 'save_agent_definition_draft',
+        status: 'completed',
         rawInput: {
           agent_id: 'assess_agent',
           capability: 'assess',
@@ -179,12 +180,14 @@ describe('agent / node draft extraction', () => {
     expect(drafts).toHaveLength(1)
     expect(drafts[0].agentId).toBe('assess_agent')
     expect(drafts[0].runtime).toBe('velites')
+    expect(drafts[0].status).toBe('completed')
   })
 
   it('extracts node code drafts', () => {
     const calls = groupToolCalls([
       toolCall('t1', {
         title: 'save_node_code_draft',
+        status: 'completed',
         rawInput: {
           workflow_key: 'w',
           node_key: 'assess_difficulty',
@@ -193,8 +196,28 @@ describe('agent / node draft extraction', () => {
       }),
     ])
     expect(extractNodeCodeDrafts(calls)).toEqual([
-      { toolCallId: 't1', nodeKey: 'assess_difficulty' },
+      { toolCallId: 't1', nodeKey: 'assess_difficulty', status: 'completed' },
     ])
+  })
+
+  // #692 R2 P2-1：pending/failed 的保存也提取（卡片仍可查看），但 view
+  // 必须携带真实 status——发布入口按它门控，发布按钮不得对未完成的
+  // 保存开放（否则会把更早的旧草稿发布出去）。
+  it('draft views carry the tool call status even when pending or failed', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'save_agent_definition_draft',
+        status: 'failed',
+        rawInput: { agent_id: 'assess_agent' },
+      }),
+      toolCall('t2', {
+        title: 'save_node_code_draft',
+        status: 'pending',
+        rawInput: { node_key: 'assess_difficulty' },
+      }),
+    ])
+    expect(extractAgentDefinitionDrafts(calls)[0].status).toBe('failed')
+    expect(extractNodeCodeDrafts(calls)[0].status).toBe('pending')
   })
 })
 

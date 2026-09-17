@@ -559,16 +559,35 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 54
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
-  reason: '#429 added scopeNoteDismiss (resolved-notice close button) flexing scopeNote; the #692
-    draft-card type redesign (MUI icon header, per-type title/icon tones, shared publish entry)
-    re-signed the ceiling from 356 to cover the +34 effective lines — beyond the +15 growth
-    allowance band, so time-boxed per #641: expire after one 0.7.x cycle unless the draft-card
-    family moves to its own module (the preferred next step) or the sweep re-validates. The
-    module stays a flat stylesheet at the repo''s per-root CSS limit policy.'
+  path: frontend/src/features/workflowStudio/chat/StudioChatDraftCards.tsx
+  reason: '#692 draft-card redesign grew the module past its 67-line base budget: the MUI icon
+    header, the per-entity publish gating (status-aware DraftPublishAction, R2 P2-1) and the
+    honest-boundary comments. The cards stay one module (three siblings of one family); the next
+    growth should split the node-code card or move the publish actions to their own module.
+    Within the growth band at re-file time; harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 391
+  ceiling: 87
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/EntityDraftPublishButton.tsx
+  reason: '#692 R2 follow-up grew the module past its 73-line ratchet baseline (registered at the
+    codex-P1 fix commit): the honest-boundary docstring on the invalidation coverage and the
+    404 no-draft friendly message added 3 effective lines. Within the +15 growth band; the
+    button stays one focused component. Harvest at the #456 sweep.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 76
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
+  reason: '#429 added scopeNoteDismiss (resolved-notice close button) flexing scopeNote; the #692
+    draft-card type redesign (MUI icon header, per-type title/icon tones, draftError, shared publish
+    entry) re-signed the ceiling from 356 to cover the growth to 395 effective lines — beyond the
+    +15 growth allowance band, so time-boxed per #641: expire after one 0.7.x cycle unless the
+    draft-card family moves to its own module (the preferred next step) or the sweep re-validates.
+    The module stays a flat stylesheet at the repo''s per-root CSS limit policy.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 396
   expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/lib/queryKeysExtra.ts

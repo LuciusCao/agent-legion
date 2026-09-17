@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClientProvider } from '@tanstack/react-query'
 import {
   AgentDefinitionDraftCard,
   NodeCodeDraftCard,
@@ -8,7 +9,10 @@ import {
   makeStudioView,
   withStudioProviders,
 } from '../shared/testStudioProviders'
-import { TestQueryProvider } from '../../../testing/testQueryClient'
+import {
+  TestQueryProvider,
+  createTestQueryClient,
+} from '../../../testing/testQueryClient'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 import { publishAgent } from '../../../api'
@@ -86,6 +90,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     capability: null,
     runtime: 'pi',
     skill: null,
+    status: 'completed',
   }
 
   it('渲染 MUI 图标（非 emoji）与实体发布按钮', () => {
@@ -150,10 +155,71 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     )
     expect(useUiStore.getState().toast).toBeNull()
   })
+
+  it('404 no-draft 转成可行动的中文提示（R2 P2-2）', async () => {
+    const notFound = Object.assign(new Error('no draft for agent writer'), {
+      status: 404,
+    })
+    mockPublishAgent.mockRejectedValue(notFound)
+    renderWithStudio(<AgentDefinitionDraftCard draft={draft} />, makeStudio())
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+    })
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        '没有待发布的草稿（可能刚已发布过）'
+      )
+    )
+  })
+
+  // R2 P2-1：pending/failed 的保存不开放发布——否则会把更早的旧草稿
+  // 发布出去，用户误以为新定义已生效。
+  it('来源 tool call 未完成时不渲染发布入口（pending/failed）', () => {
+    for (const status of ['pending', 'failed']) {
+      const { unmount } = renderWithStudio(
+        <AgentDefinitionDraftCard draft={{ ...draft, status }} />,
+        makeStudio()
+      )
+      expect(
+        screen.queryByRole('button', { name: '发布 Agent 定义' })
+      ).not.toBeInTheDocument()
+      // 查看草稿不受影响：失败/等待中的草稿仍可查看。
+      expect(screen.getByRole('button', { name: '查看草稿' })).toBeEnabled()
+      unmount()
+    }
+  })
+
+  it('发布成功后失效 studio 查询（invalidation 接线，R2 P3-4）', async () => {
+    const client = createTestQueryClient()
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    render(
+      <QueryClientProvider client={client}>
+        {withStudioProviders(
+          makeStudio(),
+          makeStudioView(),
+          <AgentDefinitionDraftCard draft={draft} />
+        )}
+      </QueryClientProvider>
+    )
+
+    mockPublishAgent.mockResolvedValue({
+      version: 2,
+    } as Awaited<ReturnType<typeof publishAgent>>)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+    })
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    // 关键键在失效集里：Agent 目录 + 画布草稿（与 AgentEditor onChanged 等价）。
+    const keys = spy.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey))
+    expect(keys.some((key) => key.includes('studioAgentCatalog'))).toBe(true)
+    expect(keys.some((key) => key.includes('workflowStudioDraft'))).toBe(true)
+    spy.mockRestore()
+  })
 })
 
 describe('NodeCodeDraftCard（#692）', () => {
-  const draft = { toolCallId: 'tc2', nodeKey: 'fetch_url' }
+  const draft = { toolCallId: 'tc2', nodeKey: 'fetch_url', status: 'completed' }
 
   it('渲染 Code 图标与实体发布按钮', () => {
     const { container } = renderWithStudio(

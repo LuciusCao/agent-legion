@@ -52,6 +52,7 @@ const draftView: AgentDefinitionDraftView = {
   capability: 'generate_key_info',
   runtime: 'pi',
   skill: null,
+  status: 'completed',
 }
 
 function makeStudio(overrides: Partial<Studio> = {}): Studio {

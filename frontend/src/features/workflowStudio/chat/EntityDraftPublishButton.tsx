@@ -16,17 +16,25 @@ import styles from './StudioChatPanel.module.css'
  *   （api/agentDefinitions.publishAgent，AgentEditor.handlePublish 同一函数）
  * - 节点代码 → POST /api/workspaces/{ws}/nodes/{key}/code/publish
  *   （WorkflowNodeCodeSection.publish 同一端点）
- * 发布成功后走 AgentEditor 的 onChanged 等价物：失效 Agent 目录/定义
- * 与画布草稿查询（invalidateStudioTurnEndQueries——覆盖面正好是这两类
- * 实体的读取面），并把按钮置为「已发布」防重复提交（AgentEditor
- * setHasDraft(false) 的语义）；失败在按钮下方内联展示。实体发布与
- * workflow revision 发布是独立动作：revision 引用新版本时用户再走顶栏
- * 「发布新版本」。 */
+ * 发布成功后走 AgentEditor 的 onChanged 等价物：失效 react-query 侧的
+ * Agent 目录/定义与画布草稿查询（invalidateStudioTurnEndQueries）并把
+ * 按钮置为「已发布」防重复提交（AgentEditor setHasDraft(false) 的语义）。
+ * 失效覆盖面的如实边界：两个实体的编辑面板本体（AgentEditor /
+ * WorkflowNodeCodeSection）是 useEffect 本地 fetch，不在这批 query key
+ * 上——已打开的面板不会自动刷新（hasDraft 徽标停留到下次挂载），面板
+ * 侧的发布按钮再点会得到 404（下方已给友好文案）；面板刷新缺口在
+ * follow-up issue（实体发布 nonce）跟踪。失败在按钮下方内联展示。实体
+ * 发布与 workflow revision 发布是独立动作：revision 引用新版本时用户
+ * 再走顶栏「发布新版本」。 */
 
 type NodeCodeVersionResponse =
   components['schemas']['WorkflowNodeCodeVersionResponse']
 
 function errorMessage(err: unknown): string {
+  // 404 no draft：后端对无草稿实体（已发布过/竞态已发布）的拒绝，
+  // 原文是英文 "no draft for ..."——卡片语境给用户可行动的中文。
+  const status = (err as { status?: number } | null)?.status
+  if (status === 404) return '没有待发布的草稿（可能刚已发布过）'
   return err instanceof Error ? err.message : String(err)
 }
 

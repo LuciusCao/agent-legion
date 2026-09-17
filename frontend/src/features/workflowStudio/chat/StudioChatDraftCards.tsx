@@ -12,7 +12,23 @@ import styles from './StudioChatPanel.module.css'
 /* #692：Agent 定义 / 节点代码草稿卡。两类草稿是独立实体，发布走各自的
  * 实体端点（EntityDraftPublishButton，codex P1 修正：不能复用 workflow
  * revision 的发布按钮——那发布的是编辑器 YAML，仅实体变更时会因无 diff
- * 而禁用）。 */
+ * 而禁用）。发布入口只对来源 tool call「完成」的草稿开放（R2 P2-1）：
+ * pending/failed 的保存不保证草稿落库，开放发布会把更早的旧草稿发布
+ * 出去、用户误以为新定义已生效。 */
+
+/** 仅来源 tool call 完成的草稿渲染发布入口（R2 P2-1 门控）。 */
+function DraftPublishAction({
+  status,
+  kind,
+  entityId,
+}: {
+  status: string
+  kind: 'agent' | 'code'
+  entityId: string
+}) {
+  if (status !== 'completed') return null
+  return <EntityDraftPublishButton kind={kind} entityId={entityId} />
+}
 
 export function AgentDefinitionDraftCard({
   draft,
@@ -37,7 +53,11 @@ export function AgentDefinitionDraftCard({
         >
           查看草稿
         </button>
-        <EntityDraftPublishButton kind="agent" entityId={draft.agentId} />
+        <DraftPublishAction
+          status={draft.status}
+          kind="agent"
+          entityId={draft.agentId}
+        />
       </div>
     </div>
   )
@@ -67,7 +87,11 @@ export function NodeCodeDraftCard(props: {
             查看草稿
           </button>
         )}
-        <EntityDraftPublishButton kind="code" entityId={props.draft.nodeKey} />
+        <DraftPublishAction
+          status={props.draft.status}
+          kind="code"
+          entityId={props.draft.nodeKey}
+        />
       </div>
     </div>
   )
