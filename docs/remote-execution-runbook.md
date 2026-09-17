@@ -406,7 +406,8 @@ with its direct evidence — no more inferring from marker files.
 
 - **Tailnet ACLs:** restrict device-to-device traffic so workers can reach only
   port 8000 (Host API), port 8788 (gateway), and the object-storage public
-  endpoint (`AGENT_LEGION_S3_PUBLIC_ENDPOINT`, e.g. port 9000) on the laptop —
+  endpoint (`AGENT_LEGION_S3_PUBLIC_ENDPOINT`, e.g. port 8333 with the default
+  SeaweedFS backend; port 9000 only for the RustFS escape hatch) on the laptop —
   presigned GETs fetch materials/bundle members and presigned PUTs upload
   artifact staging. Nothing else on
   the laptop should be reachable from worker devices.

@@ -108,7 +108,7 @@ make stack-host-up
 curl http://192.0.2.1:8000/api/health
 ```
 
-该命令启动 PostgreSQL、Host 和部署机本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。本地 RustFS（材料对象存储）是否随 stack 启动由 `AGENT_LEGION_LOCAL_S3`（默认 `auto`）经 `scripts/local-s3-decide.sh` 决策：配置外部 S3 后自动跳过，详见 [materials-storage-deployment.md](materials-storage-deployment.md)。
+该命令启动 PostgreSQL、Host 和部署机本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。本地对象存储（默认 SeaweedFS，#340；RustFS 为存量逃生舱）是否随 stack 启动由 `AGENT_LEGION_LOCAL_S3`（默认 `auto`）经 `scripts/local-s3-decide.sh` 决策：配置外部 S3 后自动跳过，详见 [materials-storage-deployment.md](materials-storage-deployment.md)。
 
 **velites 二进制前置（#381）**：worker 镜像不含 agent runtime 执行器，启动 stack 前必须先把平台匹配的 velites 二进制放到 `VELITES_BIN`（默认 `../velites-bin/velites`，即仓库平级的 `velites-bin/`）——compose 用 long syntax bind mount，源文件缺失会**拒绝启动**（不会静默建目录）。产物获取与架构匹配见 §5「velites 二进制来源」的 Docker 小节。
 
