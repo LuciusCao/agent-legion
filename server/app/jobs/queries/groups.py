@@ -37,6 +37,7 @@ from server.app.jobs.queries.workflow_draft_cas import WorkflowDraftCasQueriesMi
 from server.app.jobs.queries.workflow_drafts import WorkflowDraftQueriesMixin
 from server.app.jobs.queries.workflow_revisions import WorkflowRevisionQueriesMixin
 from server.app.jobs.queries.workspace import WorkspaceQueriesMixin
+from server.app.jobs.queries.workspace_api_tokens import WorkspaceApiTokenQueriesMixin  # #626
 from server.app.jobs.queries.workspace_packages import WorkspacePackageQueriesMixin
 
 
@@ -44,9 +45,11 @@ class IdentityQueriesMixin(
     AuthQueriesMixin,
     ScopedTokenQueriesMixin,
     ScopedTokenManagementQueriesMixin,
+    WorkspaceApiTokenQueriesMixin,
     GlobalSettingsKVQueriesMixin,
 ):
-    """Auth, scoped tokens, and global_settings KV documents (#281)."""
+    """Auth, scoped tokens, workspace API intake tokens, and global_settings
+    KV documents (#281, #626)."""
 
 
 class WorkspaceDomainQueriesMixin(

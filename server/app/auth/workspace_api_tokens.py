@@ -18,6 +18,12 @@ tokens never needed. ``resolve`` is the hot path (one request per external
 call): a single indexed SELECT validates hash, expiry and revoke state, and
 ``last_used_at`` is refreshed at most once a minute per token (in-memory
 throttle) so a submission storm does not turn into a write storm.
+
+This module is the auth SEMANTICS layer only (BOUNDARY-DATA-001): hashing,
+hmac comparison, TTL / revoke interpretation and the refresh throttle. All
+persistence goes through the JobQueries facade
+(``queries.workspace_api_tokens``) — no SQL, no transaction-layer imports
+here (pinned by tests/scripts/test_workspace_api_token_boundary.py).
 """
 
 from __future__ import annotations
@@ -31,8 +37,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from server.app.db.dialect import ConnectSource
-from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries import JobQueries
 
 # Scope marker the auth chain keys on (see dependencies.workspace_access /
 # the runs router guard); deliberately distinct from STUDIO_AGENT_SCOPE so
@@ -67,11 +72,14 @@ def _parse_timestamp(value: Any) -> datetime | None:
 
 
 class WorkspaceApiTokenStore:
-    """Issue / resolve / revoke / list workspace API intake tokens (#626)."""
+    """Issue / resolve / revoke / list workspace API intake tokens (#626).
 
-    def __init__(self, database_dsn: ConnectSource) -> None:
-        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
-        self.database_dsn = database_dsn
+    Auth semantics on top of the JobQueries facade: the digest computation
+    and comparison, expiry interpretation, and the usage-watermark throttle.
+    """
+
+    def __init__(self, queries: JobQueries) -> None:
+        self._queries = queries
         self._last_used_at_refreshed: dict[str, float] = {}
         self._throttle_lock = threading.Lock()
 
@@ -95,17 +103,9 @@ class WorkspaceApiTokenStore:
         token_id = uuid.uuid4().hex
         secret = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(secret.encode()).hexdigest()
-        with write_transaction(self.database_dsn) as conn:
-            exists = conn.execute(
-                "select 1 from workspaces where id=%s", (workspace_id,)
-            ).fetchone()
-            if exists is None:
-                raise ValueError(f"workspace {workspace_id!r} does not exist")
-            conn.execute(
-                "insert into workspace_api_tokens(id, token_hash, workspace_id, label,"
-                " expires_at) values (%s, %s, %s, %s, %s)",
-                (token_id, token_hash, workspace_id, label, expires_at),
-            )
+        self._queries.create_workspace_api_token(
+            token_id, token_hash, workspace_id, label, expires_at
+        )
         return token_id, f"{token_id}.{secret}"
 
     def resolve_api_token(self, token: str) -> dict[str, Any] | None:
@@ -122,12 +122,7 @@ class WorkspaceApiTokenStore:
         if parts is None:
             return None
         token_id, secret = parts
-        with read_connection(self.database_dsn) as conn:
-            row = conn.execute(
-                "select token_hash, workspace_id, revoked_at, expires_at"
-                " from workspace_api_tokens where id=%s",
-                (token_id,),
-            ).fetchone()
+        row = self._queries.get_workspace_api_token_row(token_id)
         if row is None or row["revoked_at"] is not None:
             return None
         expires_at = _parse_timestamp(row["expires_at"])
@@ -149,12 +144,7 @@ class WorkspaceApiTokenStore:
                 return
             self._last_used_at_refreshed[token_id] = now
         try:
-            with write_transaction(self.database_dsn) as conn:
-                conn.execute(
-                    "update workspace_api_tokens set last_used_at=current_timestamp"
-                    " where id=%s and revoked_at is null",
-                    (token_id,),
-                )
+            self._queries.update_workspace_api_token_last_used(token_id)
         except Exception as exc:
             # #204 broad-except audit: the usage watermark is best-effort
             # telemetry for the admin panel — its failure modes (pool
@@ -170,44 +160,9 @@ class WorkspaceApiTokenStore:
 
     def list_api_tokens(self, workspace_id: str | None = None) -> list[dict[str, Any]]:
         """List tokens (one workspace's, or all); never hash or plaintext."""
-        with read_connection(self.database_dsn) as conn:
-            if workspace_id is None:
-                rows = conn.execute(
-                    "select * from workspace_api_tokens order by created_at, id"
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "select * from workspace_api_tokens where workspace_id=%s"
-                    " order by created_at, id",
-                    (workspace_id,),
-                ).fetchall()
-        return [
-            {
-                "token_id": row["id"],
-                "workspace_id": str(row["workspace_id"]),
-                "label": row["label"],
-                "created_at": row["created_at"],
-                "expires_at": row["expires_at"],
-                "revoked": row["revoked_at"] is not None,
-                "last_used_at": row["last_used_at"],
-            }
-            for row in rows
-        ]
+        return self._queries.list_workspace_api_tokens(workspace_id)
 
     def revoke_api_token(self, token_id: str, workspace_id: str | None = None) -> bool:
         """Soft-revoke a token; False when it does not exist (or belongs to
         another workspace when workspace_id is given — same False, no leak)."""
-        with write_transaction(self.database_dsn) as conn:
-            if workspace_id is None:
-                cursor = conn.execute(
-                    "update workspace_api_tokens set revoked_at=current_timestamp"
-                    " where id=%s and revoked_at is null",
-                    (token_id,),
-                )
-            else:
-                cursor = conn.execute(
-                    "update workspace_api_tokens set revoked_at=current_timestamp"
-                    " where id=%s and workspace_id=%s and revoked_at is null",
-                    (token_id, workspace_id),
-                )
-            return bool(cursor.rowcount)
+        return self._queries.revoke_workspace_api_token(token_id, workspace_id)
