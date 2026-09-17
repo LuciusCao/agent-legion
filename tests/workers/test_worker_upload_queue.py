@@ -378,30 +378,60 @@ def test_report_backoff_resume_keeps_lost_entry_out_of_beats(
     assert registry.snapshot() == []
 
 
-def test_report_backoff_resume_spares_reclaimed_entry(
+def test_reclaim_race_at_arm_condemns_old_task_without_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """旧事故面的两半都在这里钉住：单键覆盖式 register 会把重 claim 后新
-    attempt 的 entry（新 lease）整个替换成旧 lease 的 entry——新执行从此
-    无心跳、租约静默过期。_deliver_bulk 的初次 arm（register_upload，
-    #644 review）与退避 resume 都不得触碰不属于自己的 entry；配不上对就
-    不碰。"""
+    """#644 review P1 的端到端钉子：旧任务（lease-1）arm 时 registry 已持有
+    重 claim 后新 attempt 的 entry（lease-new）——arm 必须当场判死旧任务：
+    report 循环第一轮即终态放弃（一次 report 都不发、零退避重试），marker
+    删除、目录按 #564 归属收尾，新 entry 原样保留继续进快照。修复前该场景
+    下旧任务的 resume/quiesce 永远配不上对、也没有 beat 为死 lease 带 lost
+    verdict，report 会按 60 秒退避上限无限重试（`reports` 会是 1：耗尽
+    report_errors 后仍投递），钉死上传 lane 触发回压。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    # owner 标记仍指旧 lease：判死收尾可证明归属 → 整删（#564）。
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-1"})
+    client = QueueFakeClient()
+    client.report_errors = 5  # 修复前：退避 5 次后仍会投递（reports == 1）
+    registry = BatchHeartbeatRegistry()
+    # Host 重排后新 attempt 已注册（新 lease，executor arm 的 claim 时注册）。
+    registry.register("exec-1", "lease-new", threading.Event())
+    task = _task(work_root)  # 旧 attempt 的任务，lease-1
+    queue = _queue(client, registry=registry)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert task.ownership_lost.is_set(), "arm against a re-claimed lease did not condemn"
+    assert len(client.reports) == 0  # terminal before the first report attempt
+    assert not (work_root / "exec-1").exists()  # marker gone + owned dir discarded
+    entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+    assert entry.lease_id == "lease-new", "arm overwrote the re-claimed entry"
+    assert [e.lease_id for e in registry.snapshot()] == ["lease-new"]
+
+
+def test_report_backoff_resume_pair_matches_own_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """无竞态的 registry 模式退避回归：任务 arm 装入自己的 entry，一次瞬时
+    失败后 resume（pair 匹配）恢复自己的 entry，第二次 report 204 正常投递
+    ——arm 时的 lease 不匹配判死不得误伤无竞态路径（#644 review 修复的
+    反向护栏）。"""
     monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
     work_root = tmp_path / "work"
     _execution_dir(work_root)
     client = QueueFakeClient()
     client.report_errors = 1
     registry = BatchHeartbeatRegistry()
-    # Host 重排后新 attempt 已注册（新 lease）。
-    registry.register("exec-1", "lease-new", threading.Event())
-    task = _task(work_root)  # 旧 attempt，lease-1
     queue = _queue(client, registry=registry)
-    queue.submit(task)
+    queue.submit(_task(work_root))
     queue.shutdown()
-    assert len(client.reports) == 1  # 退避一次后 204，正常投递
 
-    entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
-    assert entry.lease_id == "lease-new", "arm/resume overwrote the re-claimed entry"
+    assert len(client.reports) == 1
+    assert not (work_root / "exec-1").exists()
+    # finalize 后自己的 entry 被 pair-matched prune 收走。
+    assert "exec-1" not in registry._entries  # type: ignore[reportPrivateUsage]
 
 
 def test_restore_requeues_pending_markers(tmp_path: Path) -> None:

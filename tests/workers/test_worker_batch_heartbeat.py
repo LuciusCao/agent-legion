@@ -353,6 +353,55 @@ def test_upload_prune_heartbeat_pair_matches_lease() -> None:
     assert legacy_stop.is_set()
 
 
+# ---------------------------------------------------------------------------
+# #644 review P1: a re-claim race at the upload arm — register_upload keeps
+# the re-claimed entry AND condemns the incoming old task, so its report
+# loop terminates instead of retrying to the backoff cap forever.
+
+
+def test_register_upload_mismatch_condemns_old_task_spares_new_entry() -> None:
+    """重 claim 竞态下的 arm：registry 已有新 lease 的 entry 时，
+    register_upload 必须在保留新 entry 的同时置位传入（旧）任务的
+    ownership_lost——旧 lease 的 quiesce/resume 永远配不上对，registry 里
+    也没有旧 lease 的 entry 能收到 lost verdict，不置位则旧任务的 report
+    循环按退避上限无限重试、钉死上传 lane。"""
+    registry = BatchHeartbeatRegistry()
+    new_lost = threading.Event()
+    registry.register("exec-1", "lease-new", new_lost)
+
+    old_lost = threading.Event()
+    returned = registry.register_upload("exec-1", "lease-old", old_lost)
+
+    assert old_lost.is_set(), "the old task's dead lease was not condemned"
+    assert returned.lease_id == "lease-new"
+    # 非覆写语义不变：新 entry 原样保留、继续进快照。
+    entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+    assert entry is returned
+    assert not new_lost.is_set(), "the old arm fired the new attempt's verdict"
+    assert [e.lease_id for e in registry.snapshot()] == ["lease-new"]
+    # 被判死任务的 pair-matched 操作仍是无害 no-op（resume 语义不受影响）。
+    registry.quiesce("exec-1", "lease-old")
+    assert entry.quiesced is False
+    registry.resume("exec-1", "lease-old")
+    assert entry.quiesced is False
+
+
+def test_register_upload_same_lease_rebinds_without_condemning() -> None:
+    """executor→upload 交接（同 lease）不受判死影响：entry 换绑到任务的共享
+    事件，任务不判死——arm 的 condemnation 只对 lease 不匹配（重 claim）生效。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    registry.register("exec-1", "lease-1", executor_lost)
+
+    task_lost = threading.Event()
+    entry = registry.register_upload("exec-1", "lease-1", task_lost)
+
+    assert not task_lost.is_set(), "the handover condemned a live lease"
+    assert entry.ownership_lost is task_lost  # rebind, not a verdict
+    assert registry._entries["exec-1"] is entry  # type: ignore[reportPrivateUsage]
+    assert not executor_lost.is_set()
+
+
 def test_registry_prunes_zombie_entry_on_snapshot() -> None:
     """A dead, unadopted agent process must stop being batched — the Host's
     orphan sweeper has to be able to reclaim the lease."""

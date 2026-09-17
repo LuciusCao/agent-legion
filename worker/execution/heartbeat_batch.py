@@ -131,7 +131,7 @@ class BatchHeartbeatRegistry:
         ownership_lost: threading.Event,
     ) -> _LeaseEntry:
         """#644: the upload arm's register — NEVER displaces a re-claimed
-        attempt's entry.
+        attempt's entry, and CONDEMNS an old task arming against one.
 
         The executor arm's ``register`` must overwrite a requeued execution's
         OLD entry with the new lease (claim time owns the slot). This arm arms
@@ -141,7 +141,16 @@ class BatchHeartbeatRegistry:
         execution ended up with NO entry, its new lease silently expired
         unrenewed (result loss + requeue spiral). Same-lease replacement (the
         executor→upload handover) stays: it rebinds the entry to the task's
-        shared ownership_lost event (#644)."""
+        shared ownership_lost event (#644).
+
+        A lease MISMATCH here means the registry already holds the re-claimed
+        attempt's entry — the incoming task's lease is by definition gone
+        (the Host reassigned it). The old task is condemned on the spot
+        (#644 review): its pair-matched quiesce/resume can never find an
+        entry, and no beat will ever return a lost verdict for the dead
+        lease, so without this its report loop would retry to the 60s cap
+        forever, pinning upload lanes (the storm engine this PR fixes). The
+        registry itself stays untouched — the new entry is returned as-is."""
         entry = _LeaseEntry(
             execution_id=execution_id,
             lease_id=lease_id,
@@ -150,7 +159,12 @@ class BatchHeartbeatRegistry:
         with self._lock:
             current = self._entries.get(execution_id)
             if current is not None and current.lease_id != lease_id:
-                return current  # a re-claimed attempt owns the slot; touch nothing
+                # A re-claimed attempt owns the slot: keep its entry, but the
+                # incoming (old) task must not outlive its dead lease — fire
+                # its terminal event so _report's next ownership check
+                # abandons the moot delivery instead of retrying.
+                ownership_lost.set()
+                return current
             self._entries[execution_id] = entry
             return entry
 

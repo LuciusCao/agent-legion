@@ -35,7 +35,12 @@ def start_upload_heartbeat(client: Any, task: Any, interval: float) -> threading
     NON-DISPLACING (``register_upload``) — this task may be an old
     attempt's queued/restored task racing a re-claim, and a displacing
     register here deleted the re-claimed attempt's entry (its new lease
-    then expired unrenewed). Legacy mode (no registry, e.g. unit tests
+    then expired unrenewed). A lease MISMATCH at arm time additionally
+    fires the task's ownership_lost (#644 review): the old lease is dead
+    by definition, and without the verdict the task's report loop would
+    retry to the backoff cap forever (its pair-matched resume/quiesce can
+    never find an entry, and no beat returns a lost verdict for a dead
+    lease). Legacy mode (no registry, e.g. unit tests
     driving the single-beat loop): start a daemon single-beat thread on
     the same shared event."""
     if task.heartbeat_registry is not None:
