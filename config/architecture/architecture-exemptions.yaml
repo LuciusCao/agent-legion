@@ -443,16 +443,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 189
 - check: architecture.file_budget
-  path: frontend/src/features/previewPanel/CustomizePreviewDialog.tsx
-  reason: '#347 P1: draft execution became an explicit per-session action (preview-draft gating). The
-    dialog footer gained the "预览此草稿" button with its previewing state plus the previewDraft/onPreviewDraft
-    contract toward PreviewPanelSection; the gating state itself lives in the section (single source,
-    dialog stays the thin chat wrapper). The added lines are the honest cost of the explicit consent UI;
-    re-evaluate when the preview-panel governance UI is next restructured (#347 follow-up).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 163
-- check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
   reason: The Codex P2 review on PR 345 added bundle content into the PreviewPanelHost remount key plus
     the hashBundle helper -- a cross-navigation bridge-request isolation fix that must stay at the composition
@@ -582,12 +572,13 @@ exemptions:
   reason: '#429 added scopeNoteDismiss (resolved-notice close button) flexing scopeNote; the #692
     draft-card type redesign (MUI icon header, per-type title/icon tones, draftError, shared publish
     entry) re-signed the ceiling from 356 to cover the growth to 395 effective lines — beyond the
-    +15 growth allowance band, so time-boxed per #641: expire after one 0.7.x cycle unless the
-    draft-card family moves to its own module (the preferred next step) or the sweep re-validates.
-    The module stays a flat stylesheet at the repo''s per-root CSS limit policy.'
+    +15 growth allowance band, so time-boxed per #641. After merging base''s #695 skeleton
+    unification (shared panel rules moved out) the module sits at 374 effective lines; ceiling
+    ratchets DOWN with it (monotonic discipline). The draft-card family moving to its own module
+    remains the preferred next step; harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 396
+  ceiling: 374
   expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/lib/queryKeysExtra.ts

@@ -205,6 +205,10 @@ MIGRATIONS: list[SchemaMigration] = [
     # and reads sum base + pending. Losing writers never wait after acquiring
     # jobs-row locks, removing both counter-row and row/advisory cycles.
     SchemaMigration(82, "job_status_counts_advisory_locks", _migrate_v82_locks),
+    # v83 (#694): studio_chat_sessions usage/compacting context-health mirrors
+    # (usage_json + compacting) come from the schema-file replay, no data
+    # migration. DDL-only, same guarded-ALTER home rule.
+    SchemaMigration(83, "studio_chat_context_health"),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

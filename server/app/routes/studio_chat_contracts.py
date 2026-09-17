@@ -51,6 +51,11 @@ class StudioChatSessionRecord(BaseModel):
     mcp_status: McpStatus
     selected_node_key: str | None
     draft_yaml: str | None = None
+    # Context-health mirrors (#694): usage = latest ACP usage_update
+    # ({used, size, cost?}; None = agent never reported), compacting = kimi
+    # background-compaction window (sends are refused meanwhile).
+    usage: dict[str, Any] | None = None
+    compacting: bool = False
     error_detail: str
     created_at: datetime
     updated_at: datetime

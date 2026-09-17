@@ -33,8 +33,8 @@ class ServiceCallbacks:
     ) -> dict[str, Any]:
         return self._service._on_permission_request(self._session_id, tool_call, options)
 
-    def on_turn_end(self, stop_reason: str) -> None:
-        self._service._on_turn_end(self._session_id, stop_reason)
+    def on_turn_end(self, stop_reason: str, *, timed_out: bool = False) -> None:
+        self._service._on_turn_end(self._session_id, stop_reason, timed_out=timed_out)
 
     def on_turn_timeout(self) -> None:
         self._service._on_turn_timeout(self._session_id)

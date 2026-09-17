@@ -19,6 +19,7 @@ function sessionRecord(): StudioChatSessionRecord {
     acp_session_id: null,
     capability_snapshot: {},
     allow_all_permissions: false,
+    compacting: false,
     mcp_status: 'unknown',
     selected_node_key: null,
     error_detail: '',

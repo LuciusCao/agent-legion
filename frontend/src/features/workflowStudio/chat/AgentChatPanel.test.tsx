@@ -1,0 +1,173 @@
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { AgentChatPanel } from './AgentChatPanel'
+import type { StudioChat } from './useStudioChat'
+import type { StudioChatSessionRecord } from './studioChatApi'
+import styles from './AgentChatPanel.module.css'
+
+function sessionRecord(
+  overrides?: Partial<StudioChatSessionRecord>
+): StudioChatSessionRecord {
+  return {
+    id: 's1',
+    workspace_id: 'ws1',
+    user_id: 'u1',
+    agent_id: 'kimi',
+    title: '',
+    status: 'idle',
+    acp_session_id: null,
+    capability_snapshot: {},
+    allow_all_permissions: false,
+    compacting: false,
+    mcp_status: 'unknown',
+    selected_node_key: null,
+    error_detail: '',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    closed_at: null,
+    ...overrides,
+  }
+}
+
+function fakeChat(overrides?: Record<string, unknown>): StudioChat {
+  return {
+    agents: [{ id: 'kimi', label: 'Kimi' }],
+    agentsLoading: false,
+    agentsError: false,
+    sessions: [sessionRecord()],
+    activeSessionId: 's1',
+    session: sessionRecord(),
+    messages: [],
+    toolCalls: [],
+    workflowDraft: null,
+    agentDrafts: [],
+    nodeDrafts: [],
+    permissions: [],
+    busy: false,
+    closed: false,
+    starting: false,
+    actionError: null,
+    lastRunMs: null,
+    lastTerminalEvent: null,
+    resume: vi.fn(),
+    resuming: false,
+    selectSession: vi.fn(),
+    startSession: vi.fn(),
+    send: vi.fn().mockResolvedValue(true),
+    cancel: vi.fn(),
+    setAllowAll: vi.fn(),
+    answerPermission: vi.fn(),
+    ...overrides,
+  } as unknown as StudioChat
+}
+
+function renderPanel(
+  chatOverrides?: Record<string, unknown>,
+  props?: Partial<Parameters<typeof AgentChatPanel>[0]>
+) {
+  return render(
+    <AgentChatPanel
+      chat={fakeChat(chatOverrides)}
+      workspaceId="ws1"
+      emptyState="选择 Agent，点「＋ 新对话」开始"
+      noSessionReason="先选择会话或新建对话"
+      closedReason="会话已关闭或中断，点「继续对话」恢复"
+      onApplyWorkflowDraft={vi.fn()}
+      {...props}
+    />
+  )
+}
+
+describe('AgentChatPanel', () => {
+  it('renders the header / configBar / actionArea slots', () => {
+    renderPanel(undefined, {
+      header: <div>头部插槽</div>,
+      configBar: <div>配置插槽</div>,
+      actionArea: <div>动作插槽</div>,
+    })
+    expect(screen.getByText('头部插槽')).toBeInTheDocument()
+    expect(screen.getByText('配置插槽')).toBeInTheDocument()
+    expect(screen.getByText('动作插槽')).toBeInTheDocument()
+    // #658：配置区紧贴输入框之上。
+    const following = Node.DOCUMENT_POSITION_FOLLOWING
+    const configBar = screen.getByText('配置插槽')
+    const input = screen.getByLabelText('消息输入')
+    expect(configBar.compareDocumentPosition(input) & following).toBeTruthy()
+  })
+
+  it('shows the empty state instead of the message list without a session', () => {
+    renderPanel({ activeSessionId: null, session: null })
+    expect(
+      screen.getByText('选择 Agent，点「＋ 新对话」开始')
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('消息输入')).toBeDisabled()
+  })
+
+  it('renders actionError as a red statusError banner by default', () => {
+    renderPanel({ actionError: '发送失败' })
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('发送失败')
+    expect(alert.className).toBe(styles.statusError)
+  })
+
+  it('renders actionError as an amber statusWarning banner with warning tone', () => {
+    renderPanel({ actionError: '操作失败' }, { actionErrorTone: 'warning' })
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('操作失败')
+    expect(alert.className).toBe(styles.statusWarning)
+  })
+
+  it('shows the bootstrap error with a retry button and suppresses actionError', () => {
+    const onRetry = vi.fn()
+    renderPanel(
+      { actionError: '会话创建失败：boom' },
+      {
+        bootstrapError: { message: '会话创建失败：boom', onRetry },
+      }
+    )
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('会话创建失败：boom')
+    expect(alert.className).toBe(styles.statusWarning)
+    // bootstrap 条展示期间压制 actionError（同一错误的两个呈现只留一个）。
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables the input while the session is compacting (#694)', () => {
+    renderPanel({ session: sessionRecord({ compacting: true }) })
+    const input = screen.getByLabelText('消息输入')
+    expect(input).toBeDisabled()
+    expect(input).toHaveAttribute(
+      'placeholder',
+      '正在压缩上下文，完成后即可发送'
+    )
+    expect(screen.getByText('正在压缩上下文…')).toBeInTheDocument()
+  })
+
+  it('shows the resume bar for a closed session', () => {
+    renderPanel({
+      session: sessionRecord({ status: 'closed' }),
+      closed: true,
+    })
+    expect(screen.getByRole('button', { name: '继续对话' })).toBeInTheDocument()
+    expect(screen.getByLabelText('消息输入')).toBeDisabled()
+  })
+
+  it('queues the message instead of sending directly while busy', async () => {
+    const send = vi.fn().mockResolvedValue(true)
+    renderPanel({
+      busy: true,
+      session: sessionRecord({ status: 'running' }),
+      send,
+    })
+    const input = screen.getByLabelText('消息输入')
+    fireEvent.change(input, { target: { value: '排队消息' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+    expect(send).not.toHaveBeenCalled()
+    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getByText('排队消息')).toBeInTheDocument()
+  })
+})

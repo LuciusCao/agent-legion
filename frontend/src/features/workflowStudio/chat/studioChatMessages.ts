@@ -337,10 +337,22 @@ export function textContent(message: ChatMessage): string {
 }
 
 // prettier-ignore
-export const TERMINAL = new Set(['turn_end', 'error', 'session_closed', 'session_resumed'])
+export const TERMINAL = new Set(['turn_end', 'turn_timeout', 'error', 'session_closed', 'session_resumed'])
+
+/** 最近一轮的终结事件（turn_end/turn_timeout/error/…，无则 null）：RunBar
+ * 用它区分「已完成」与「已超时终止」（#693）。 */
+export function lastTerminalEvent(messages: ChatMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i]
+    if (m.kind !== 'status') continue
+    const { event } = statusEvent(m)
+    if (TERMINAL.has(event)) return event
+  }
+  return null
+}
 
 /** 仍在流式聚合的 agent text 消息 id：从尾部扫描，先撞到 turn 终止事件
- * （turn_end/error/session_closed/session_resumed）则全部完成返回 null，先撞到 agent
+ * （TERMINAL：turn_end/turn_timeout/error/…）则全部完成返回 null，先撞到 agent
  * text 则该条仍在流式。 */
 export function streamingTextId(messages: ChatMessage[]): string | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {

@@ -6,6 +6,7 @@ import {
   extractNodeCodeDrafts,
   extractWorkflowDraft,
   groupToolCalls,
+  lastTerminalEvent,
   maxSeq,
   parseFirstJson,
   permissionResolutionText,
@@ -301,7 +302,7 @@ describe('streamingTextId', () => {
     expect(streamingTextId([first, turnEnd(), second])).toBe(second.id)
   })
 
-  it.each(['turn_end', 'error', 'session_closed'])(
+  it.each(['turn_end', 'turn_timeout', 'error', 'session_closed'])(
     'returns null once %s closed the stream slot',
     (event) => {
       const text = message('text', 'agent', { text: '好了' })
@@ -315,5 +316,25 @@ describe('streamingTextId', () => {
     const userText = message('text', 'user', { text: '问' })
     expect(streamingTextId([agentText, turnEnd(), userText])).toBeNull()
     expect(streamingTextId([userText, agentText])).toBe(agentText.id)
+  })
+})
+
+describe('lastTerminalEvent', () => {
+  it('returns the most recent terminal status event (#693)', () => {
+    const done = message('status', 'system', { event: 'turn_end' })
+    const timeout = message('status', 'system', {
+      event: 'turn_timeout',
+      detail: '运行超过 1 小时已被终止',
+    })
+    const text = message('text', 'agent', { text: '答' })
+    expect(lastTerminalEvent([done, text, timeout])).toBe('turn_timeout')
+    expect(lastTerminalEvent([timeout, text, done])).toBe('turn_end')
+  })
+
+  it('returns null when no terminal status exists yet', () => {
+    const text = message('text', 'agent', { text: '答' })
+    const neutral = message('status', 'system', { event: 'cancel_requested' })
+    expect(lastTerminalEvent([text, neutral])).toBeNull()
+    expect(lastTerminalEvent([])).toBeNull()
   })
 })

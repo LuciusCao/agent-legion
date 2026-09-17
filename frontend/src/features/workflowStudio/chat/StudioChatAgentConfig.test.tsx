@@ -64,6 +64,7 @@ function record(
     acp_session_id: 'acp-1',
     capability_snapshot: { sessionModes: true, sessionConfigOptions: true },
     allow_all_permissions: false,
+    compacting: false,
     mcp_status: 'unknown',
     selected_node_key: null,
     error_detail: '',
