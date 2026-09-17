@@ -102,4 +102,54 @@ describe('WorkflowSkillFileList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'notes.md' }))
     expect(onSelect).toHaveBeenCalledWith('references/deep/notes.md')
   })
+
+  it('pins SKILL.md and contract.yaml above directories and other root files (#676)', () => {
+    render(
+      <WorkflowSkillFileList
+        files={[
+          skillFile('zzz.md'),
+          skillFile('references/rules.md'),
+          skillFile('contract.yaml'),
+          skillFile('SKILL.md'),
+          skillFile('aaa.md'),
+          skillFile('references/SKILL.md'),
+        ]}
+        selected={undefined}
+        onSelect={() => {}}
+      />
+    )
+
+    // 核心文件置顶且 SKILL.md 在 contract.yaml 前；目录与其余文件维持
+    // 既有排序（目录 localeCompare 在前、根级其余文件在后）；子目录内
+    // 的同名 SKILL.md 不置顶、留在 references 内按 localeCompare 排。
+    expect(
+      screen.getAllByRole('button').map((button) => button.textContent)
+    ).toEqual([
+      'SKILL.md',
+      'contract.yaml',
+      'references',
+      'rules.md',
+      'SKILL.md',
+      'aaa.md',
+      'zzz.md',
+    ])
+  })
+
+  it('keeps directories ahead of plain root files when no core files exist', () => {
+    render(
+      <WorkflowSkillFileList
+        files={[
+          skillFile('zzz.md'),
+          skillFile('references/rules.md'),
+          skillFile('aaa.md'),
+        ]}
+        selected={undefined}
+        onSelect={() => {}}
+      />
+    )
+
+    expect(
+      screen.getAllByRole('button').map((button) => button.textContent)
+    ).toEqual(['references', 'rules.md', 'aaa.md', 'zzz.md'])
+  })
 })
