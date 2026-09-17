@@ -1001,3 +1001,16 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/647
   ceiling: 353
   expires: 2026-12-31
+- check: architecture.file_budget
+  path: server/app/studio_chat/terminal_guard.py
+  reason: 'Issue #629 review fixes: the codex P1 (complete sudo value-taking option list, short
+    and long forms) plus P2-1 (shell-order word splitting with per-word quote removal, so quoted
+    separator text and -c payloads stay data) and P2-2 (command builtin -v/-V query exemption)
+    grow the guard 226→307 effective lines. The parser is one cohesive shell-word state machine;
+    splitting it across modules would separate the denylist from the matching semantics it guards.
+    Time-boxed: fold into a terminal-guard parser module split or a budget re-balance that
+    re-registers the file while it is still unmerged.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/629
+  ceiling: 317
+  expires: 2026-12-31
