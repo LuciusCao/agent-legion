@@ -449,14 +449,17 @@ def test_api_token_cannot_reach_jobs_facets_or_other_frontend_routes(client) -> 
 
 # --- 白名单机制化契约测试（#734，#678 tool_names.py 同款形态） ------------------
 # 注册面（app 实际挂载的路由）与权威常量（api_scope_surface.py 的路由名
-# 清单）必须全等：漏挂 tag、漏登记名字或把 tag 挂到名单外路由，都在这里
-# 炸出来——#631 式的「新端点上线、白名单没人同步」从此是编译期红的测试
-# 而不是线上 404。
+# 清单）必须按计数全等：漏挂 tag、漏登记名字、tag 挂到名单外路由、或
+# 名单内名字被第二条路由复用，都在这里炸出来——#631 式的「新端点上线、
+# 白名单没人同步」从此是测试期必红而不是线上 404。
 
 
 def test_registered_intake_surface_matches_the_manifest(tmp_path) -> None:
-    """契约：app 注册面中带 api-scope-intake tag 的路由集合 == 权威常量
-    按名字展开 == tag 派生判定函数对名单内全放行、名单外全拒绝。"""
+    """契约：带 api-scope-intake tag 的路由名多重集 == 权威常量（Counter
+    语义，每个名字恰好一次）；运行期判定对每条注册路由严格等值（带 tag
+    放行、无 tag 拒绝）；文档化的闭环端点不被协调删除。"""
+    from collections import Counter
+
     from fastapi.routing import APIRoute
 
     from server.app.auth.api_scope_surface import (
@@ -467,35 +470,36 @@ def test_registered_intake_surface_matches_the_manifest(tmp_path) -> None:
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    tagged = [r for r in app.routes if isinstance(r, APIRoute) and API_SCOPE_INTAKE_TAG in r.tags]
-    tagged_names = {r.name for r in tagged}
+    api_routes = [r for r in app.routes if isinstance(r, APIRoute)]
+    tagged = [r for r in api_routes if API_SCOPE_INTAKE_TAG in r.tags]
+    tagged_counts = Counter(r.name for r in tagged)
+    manifest_counts = Counter(API_SCOPE_INTAKE_ROUTE_NAMES)
 
-    # 双向差集：tag 挂了名字没登记（名单漏收）与登记了名字没挂 tag（路由
-    # 漏挂）都是漂移。
-    assert tagged_names == set(API_SCOPE_INTAKE_ROUTE_NAMES), (
-        f"注册面与权威清单脱节：tag 未收录 {sorted(tagged_names - set(API_SCOPE_INTAKE_ROUTE_NAMES))}，"
-        f"清单虚列 {sorted(set(API_SCOPE_INTAKE_ROUTE_NAMES) - tagged_names)}"
+    # Counter 而非 set（二轮评审 P3-1）：复用名单内名字（如再来一个
+    # list_runs）且挂 tag 的新路由会计数为 2——set 去重后比较仍绿，重名
+    # 扩面通道就藏在这里；仓库已有 16 个重名路由（save_node_code_draft
+    # ×4 等），名字复用是真实文化。反方向同理：tag 挂到名单外路由、
+    # 名单名字漏挂 tag，多重集都不等。
+    assert tagged_counts == manifest_counts, (
+        f"注册面与权威清单脱节：tag 多挂/重名 "
+        f"{sorted((tagged_counts - manifest_counts).elements())}，"
+        f"清单虚列 {sorted((manifest_counts - tagged_counts).elements())}"
     )
 
-    # 名单内路由逐个过运行期判定（tag + 名单双条件），名单外全部拒绝。
-    all_routes = {r.name: r for r in app.routes if isinstance(r, APIRoute)}
-    for name in API_SCOPE_INTAKE_ROUTE_NAMES:
-        assert api_scope_route_allowed(all_routes[name]), name
-    for route in tagged:
-        assert api_scope_route_allowed(route), route.name
-    untagged = [
-        r for r in app.routes if isinstance(r, APIRoute) and API_SCOPE_INTAKE_TAG not in r.tags
-    ]
-    for route in untagged:
-        assert not api_scope_route_allowed(route), route.name
+    # 运行期判定逐路由等值：按路由对象迭代而非按名字建 dict（dict 同样
+    # 去重，是 set 之外的第二条掩盖通道）。带 tag（上面的多重集等式已
+    # 保证在名单内）必放行；无 tag 必拒绝——包括复用名单名字但漏挂 tag
+    # 的路由，fail-closed 在这里成立。
+    for route in api_routes:
+        if API_SCOPE_INTAKE_TAG in route.tags:
+            assert api_scope_route_allowed(route), route.name
+        else:
+            assert not api_scope_route_allowed(route), route.name
 
-
-def test_manifest_covers_the_external_loop_documented_surface() -> None:
-    """回归面钉住：#734 修复的三个 #631 产物端点路由名 + #626 的四个
-    intake 端点路由名 + codex3 P1 的 snapshot 都在权威清单内——缺一个
-    即说明清单又与文档面脱节。"""
-    from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_ROUTE_NAMES
-
+    # 协调删除守卫（原独立测试并入，二轮评审 P3-4）：名字与 tag 同时删
+    # 除时上面的断言全绿（两边一致地缩小，set/Counter 都看不出），这里
+    # 钉住文档化的闭环端面——#626 四端点 + codex3 P1 snapshot + #631
+    # 三端点——不被无声砍掉。
     assert {
         "create_run",
         "list_runs",

@@ -10,9 +10,10 @@ mounts ``require_workspace_api_intake`` — it admits a workspace API token
 scoped identity exactly like the retired ``reject_studio_agent_scope``
 mount (studio-agent runs included). The GET endpoints are read-only status
 queries the same external callers need: they pass ``require_workspace_access``
-via the api-scope read allowlist in auth/workspace_access.py (runs + the
-jobs listings, legacy and paginated — nothing else on the app is reachable
-for the machine identity).
+via the api-scope intake surface (the route tag + name manifest in
+auth/api_scope_surface.py — runs, the jobs listings legacy and paginated,
+and the #631 artifact endpoints; nothing else on the app is reachable for
+the machine identity).
 """
 
 import logging
