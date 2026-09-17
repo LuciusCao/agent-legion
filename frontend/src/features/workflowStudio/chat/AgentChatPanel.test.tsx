@@ -5,6 +5,8 @@ import type { StudioChat } from './useStudioChat'
 import type { StudioChatSessionRecord } from './studioChatApi'
 import styles from './AgentChatPanel.module.css'
 
+vi.mock('./studioChatConfigApi')
+
 function sessionRecord(
   overrides?: Partial<StudioChatSessionRecord>
 ): StudioChatSessionRecord {
@@ -79,20 +81,35 @@ function renderPanel(
 }
 
 describe('AgentChatPanel', () => {
-  it('renders the header / configBar / actionArea slots', () => {
+  it('renders the header / actionArea slots', () => {
     renderPanel(undefined, {
       header: <div>头部插槽</div>,
-      configBar: <div>配置插槽</div>,
       actionArea: <div>动作插槽</div>,
     })
     expect(screen.getByText('头部插槽')).toBeInTheDocument()
-    expect(screen.getByText('配置插槽')).toBeInTheDocument()
     expect(screen.getByText('动作插槽')).toBeInTheDocument()
-    // #658：配置区紧贴输入框之上。
-    const following = Node.DOCUMENT_POSITION_FOLLOWING
-    const configBar = screen.getByText('配置插槽')
-    const input = screen.getByLabelText('消息输入')
-    expect(configBar.compareDocumentPosition(input) & following).toBeTruthy()
+  })
+
+  it('renders composer config chips only with showAgentConfig (#695 R4)', () => {
+    const configured = sessionRecord({
+      capability_snapshot: { sessionModes: true },
+      session_modes: {
+        currentModeId: 'default',
+        availableModes: [{ id: 'default', name: 'Default' }],
+      },
+    })
+    const { unmount } = renderPanel(
+      { session: configured },
+      { showAgentConfig: true }
+    )
+    expect(
+      screen.getByRole('button', { name: 'Agent 权限模式' })
+    ).toBeInTheDocument()
+    unmount()
+    renderPanel({ session: configured })
+    expect(
+      screen.queryByRole('button', { name: 'Agent 权限模式' })
+    ).not.toBeInTheDocument()
   })
 
   it('shows the empty state instead of the message list without a session', () => {
@@ -167,7 +184,7 @@ describe('AgentChatPanel', () => {
       fireEvent.keyDown(input, { key: 'Enter' })
     })
     expect(send).not.toHaveBeenCalled()
-    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getAllByText('排队中 1')[0]).toBeInTheDocument()
     expect(screen.getByText('排队消息')).toBeInTheDocument()
   })
 })

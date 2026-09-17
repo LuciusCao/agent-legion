@@ -5,7 +5,6 @@ import { useStudioContextSync } from './useStudioContextSync'
 import { useStudioDraftSync } from './useStudioDraftSync'
 import { AgentChatPanel } from './AgentChatPanel'
 import { StudioChatSessionBar } from './StudioChatSessionBar'
-import { StudioChatAgentConfig } from './StudioChatAgentConfig'
 import styles from './StudioChatPanel.module.css'
 import shellStyles from './AgentChatPanel.module.css'
 
@@ -70,12 +69,7 @@ export function StudioChatPanel(props: Props) {
           </div>
         </>
       }
-      configBar={
-        <StudioChatAgentConfig
-          workspaceId={workspaceId}
-          session={chat.session}
-        />
-      }
+      showAgentConfig
       emptyState="选择 Agent，点「＋ 新对话」开始"
       noSessionReason="先选择会话或新建对话"
       closedReason="会话已关闭或中断，点「继续对话」恢复"

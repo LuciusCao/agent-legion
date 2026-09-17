@@ -1,0 +1,69 @@
+/* AgentChatStatusStrip（#695 R3）：消息列表与输入区之间的单行状态条。
+ * 视觉密度对齐 12px 字号体系；左右两组，右侧用量条 margin-left:auto 贴右。 */
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 12px;
+  color: #616161;
+}
+.runState {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.dotBusy {
+  background: #1976d2;
+}
+.dotDone {
+  background: #43a047;
+}
+.dotError {
+  background: #c62828;
+}
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.button {
+  flex: none;
+  border: 1px solid #e0e0e0;
+  background: #fff;
+  color: #424242;
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.button:disabled {
+  color: #9e9e9e;
+  cursor: default;
+}
+.cancelButton {
+  border-color: #ffcdd2;
+  color: #c62828;
+}
+.queue {
+  flex: none;
+  color: #757575;
+  white-space: nowrap;
+}
+.meter {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #757575;
+  white-space: nowrap;
+}

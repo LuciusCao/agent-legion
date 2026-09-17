@@ -1,0 +1,103 @@
+/* StudioChatComposer（#695 R4）：圆角卡片一体化输入区——textarea 与卡内底部
+ * 工具行是一个视觉整体；配置芯片（StudioChatComposerConfig）是卡内行内元素。 */
+.composerArea {
+  border-top: 1px solid #e0e0e0;
+  padding: 8px 12px;
+}
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #cfcfcf;
+  border-radius: 12px;
+  padding: 8px 10px 6px;
+  background: #fff;
+}
+.composer textarea {
+  border: none;
+  outline: none;
+  resize: none;
+  font-size: 13px;
+  font-family: inherit;
+  width: 100%;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+.configLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.configRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* 模型/思考档位芯片与发送按钮一起贴右（左侧是权限模式芯片）。 */
+  margin-left: auto;
+}
+.toolbarSpacer {
+  /* 无配置芯片的调用方（diagnosis/preview 与未广告配置面的 agent）：
+   * 占位把发送按钮推到右侧，三处留白一致，不造空槽位。 */
+  flex: 1;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 160px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+  color: #424242;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip:disabled {
+  color: #9e9e9e;
+  cursor: default;
+}
+.chipText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menuHeader {
+  font-size: 11px;
+  color: #9e9e9e;
+}
+.drift {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #7a5d00;
+}
+.error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #c62828;
+}
+/* 发送按钮是工具行最右端；右推由 configRight 的 margin-left:auto（有配置）
+ * 或 toolbarSpacer（无配置）承担。 */
+.sendButton {
+  flex: none;
+  background: #1976d2;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.sendButton:disabled {
+  background: #bbdefb;
+  cursor: default;
+}

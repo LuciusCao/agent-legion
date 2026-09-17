@@ -119,8 +119,8 @@ describe('StudioChatPanel', () => {
     await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
   })
 
-  it('places the agent config between the message list and the input (#658)', async () => {
-    // 广告配置面的会话：配置区作为对话上下文呈现。
+  it('places the agent config chips inside the composer card (#658 / #695 R4)', async () => {
+    // 广告配置面的会话：配置芯片作为 composer 工具行呈现。
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({
         capability_snapshot: { sessionModes: true },
@@ -132,15 +132,19 @@ describe('StudioChatPanel', () => {
     ])
     renderPanel()
 
-    const configBar = await screen.findByRole('group', { name: 'Agent 配置' })
+    const configGroup = await screen.findByRole('group', { name: 'Agent 配置' })
     const following = Node.DOCUMENT_POSITION_FOLLOWING
-    // 会话管理（顶部）在配置区之前，配置区紧贴输入框之上。
+    // 会话管理（顶部）仍在配置芯片之前。
     const sessionPicker = screen.getByLabelText('选择会话')
     expect(
-      sessionPicker.compareDocumentPosition(configBar) & following
+      sessionPicker.compareDocumentPosition(configGroup) & following
     ).toBeTruthy()
+    // composer 一体化：配置芯片与输入框同一卡片，位于 textarea 之下的工具行。
     const input = screen.getByLabelText('消息输入')
-    expect(configBar.compareDocumentPosition(input) & following).toBeTruthy()
+    expect(input.compareDocumentPosition(configGroup) & following).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Agent 权限模式' })
+    ).toBeInTheDocument()
   })
 
   it('renders every message kind', async () => {
@@ -359,7 +363,7 @@ describe('StudioChatPanel', () => {
     })
     // busy：不直接发送，进入队列并显示队列条。
     expect(mockApi.sendStudioChatMessage).not.toHaveBeenCalled()
-    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getAllByText('排队中 1')[0]).toBeInTheDocument()
     expect(screen.getByText('排队消息')).toBeInTheDocument()
 
     // agent 一轮结束（会话快照翻转为 idle）→ 自动按 FIFO 发出队首。
@@ -377,7 +381,7 @@ describe('StudioChatPanel', () => {
       )
     )
     await waitFor(() =>
-      expect(screen.queryByText('排队中 1')).not.toBeInTheDocument()
+      expect(screen.queryAllByText('排队中 1')).toHaveLength(0)
     )
   })
 
@@ -393,12 +397,12 @@ describe('StudioChatPanel', () => {
     await act(async () => {
       fireEvent.keyDown(input, { key: 'Enter' })
     })
-    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getAllByText('排队中 1')[0]).toBeInTheDocument()
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '移除' }))
     })
-    expect(screen.queryByText('排队中 1')).not.toBeInTheDocument()
+    expect(screen.queryAllByText('排队中 1')).toHaveLength(0)
     expect(mockApi.sendStudioChatMessage).not.toHaveBeenCalled()
   })
 
