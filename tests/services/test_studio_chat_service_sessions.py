@@ -436,6 +436,52 @@ def test_trailing_chunk_after_turn_end_folds_into_finished_turn_row(job_db, sett
         service.shutdown()
 
 
+def test_timed_out_turn_writes_turn_timeout_status_message(job_db, settings) -> None:
+    """#693: a turn ended by the prompt-timeout ladder (the agent honoured
+    the auto session/cancel) must be recorded as a user-visible turn_timeout
+    status message — never as a plain turn_end the UI reads as "done" —
+    while the session state machine still returns to idle."""
+    service, session_id, _runtime, workspace_id = _direct_session(job_db, settings)
+    try:
+        service.send_message(session_id, workspace_id, "long running")
+        service._on_turn_end(session_id, "cancelled", timed_out=True)
+
+        statuses = [
+            m["content"]
+            for m in service.list_messages(session_id, workspace_id)
+            if m["kind"] == "status"
+        ]
+        assert {
+            "event": "turn_timeout",
+            "stop_reason": "cancelled",
+            "detail": "运行超过 1 小时已被终止",
+        } in statuses
+        assert all(s.get("event") != "turn_end" for s in statuses)
+        assert service.get_session(session_id, workspace_id)["status"] == "idle"
+    finally:
+        service.shutdown()
+
+
+def test_normal_turn_end_still_writes_turn_end_status_message(job_db, settings) -> None:
+    """#693 guard: the non-timeout path is unchanged — a completed turn keeps
+    writing the plain turn_end status message and returns to idle."""
+    service, session_id, _runtime, workspace_id = _direct_session(job_db, settings)
+    try:
+        service.send_message(session_id, workspace_id, "quick")
+        service._on_turn_end(session_id, "end_turn")
+
+        statuses = [
+            m["content"]
+            for m in service.list_messages(session_id, workspace_id)
+            if m["kind"] == "status"
+        ]
+        assert {"event": "turn_end", "stop_reason": "end_turn"} in statuses
+        assert all(s.get("event") != "turn_timeout" for s in statuses)
+        assert service.get_session(session_id, workspace_id)["status"] == "idle"
+    finally:
+        service.shutdown()
+
+
 def test_turn_start_reset_cannot_land_between_stream_create_and_attach(
     job_db, settings, monkeypatch
 ) -> None:

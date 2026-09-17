@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from acp.schema import TextContentBlock
@@ -35,6 +36,18 @@ class PromptWedgedError(RuntimeError):
     session cannot continue — fatal, handled by the session's error path."""
 
 
+@dataclass(frozen=True)
+class PromptTurnResult:
+    """Turn outcome (#693): an agent that honours the post-timeout
+    session/cancel returns an ordinary-looking response (usually
+    stop_reason="cancelled"), so ``timed_out`` is the only way for the
+    caller to tell a timeout-terminated turn apart from a completed one
+    and surface it instead of reporting success."""
+
+    response: Any
+    timed_out: bool
+
+
 def _log_orphan_result(task: asyncio.Task[Any]) -> None:
     """Retrieve an orphaned prompt task's result so a failure never surfaces
     as an unretrieved-exception warning while the session loop tears down."""
@@ -53,7 +66,7 @@ def _orphan(task: asyncio.Task[Any]) -> None:
 
 async def run_prompt_turn(
     conn: Any, acp_session_id: str, text: str, *, on_timeout: Callable[[], None]
-) -> Any:
+) -> PromptTurnResult:
     """One prompt turn: prompt → on timeout settle+cancel → grace → wedged.
 
     The prompt runs as a task and asyncio.wait never cancels it on timeout,
@@ -70,7 +83,8 @@ async def run_prompt_turn(
         conn.prompt(acp_session_id, [TextContentBlock(type="text", text=text)])
     )
     done, _pending = await asyncio.wait({prompt_task}, timeout=PROMPT_TIMEOUT_SECONDS)
-    if not done:
+    timed_out = not done
+    if timed_out:
         try:
             on_timeout()
         except Exception:
@@ -104,4 +118,4 @@ async def run_prompt_turn(
     # Agent honoured the cancel (usually stop_reason="cancelled"), or the
     # turn finished in time; a task exception surfaces at result() and falls
     # into the caller's per-turn containment like any other turn failure.
-    return prompt_task.result()
+    return PromptTurnResult(response=prompt_task.result(), timed_out=timed_out)

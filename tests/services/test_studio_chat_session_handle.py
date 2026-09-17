@@ -35,7 +35,7 @@ class _Callbacks(SimpleNamespace):
             on_ready=lambda *a: None,
             on_update=lambda *a: None,
             on_permission_request=lambda *a: {},
-            on_turn_end=lambda *a: None,
+            on_turn_end=lambda *a, **k: None,
             on_turn_timeout=lambda *a: None,
             on_turn_error=lambda *a: None,
             on_error=lambda *a: None,
@@ -391,9 +391,19 @@ def short_turn_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(prompt_turn, "CANCEL_GRACE_SECONDS", 0.5)
 
 
-def _record_callbacks(handle: AcpSessionHandle) -> dict[str, list[str]]:
-    calls: dict[str, list[str]] = {"turn_end": [], "turn_error": [], "error": []}
-    handle.callbacks.on_turn_end = calls["turn_end"].append
+def _record_callbacks(handle: AcpSessionHandle) -> dict[str, list]:
+    calls: dict[str, list] = {
+        "turn_end": [],
+        "turn_end_timed_out": [],
+        "turn_error": [],
+        "error": [],
+    }
+
+    def _on_turn_end(stop_reason: str, *, timed_out: bool = False) -> None:
+        calls["turn_end"].append(stop_reason)
+        calls["turn_end_timed_out"].append(timed_out)
+
+    handle.callbacks.on_turn_end = _on_turn_end
     handle.callbacks.on_turn_error = calls["turn_error"].append
     handle.callbacks.on_error = calls["error"].append
     return calls
@@ -403,7 +413,9 @@ def _record_callbacks(handle: AcpSessionHandle) -> dict[str, list[str]]:
 def test_prompt_timeout_cancels_and_the_session_continues() -> None:
     """#664 path 1: the timeout sends session/cancel to the agent; an agent
     that honours it ends the turn (stop_reason=cancelled) through on_turn_end
-    and the loop serves the next prompt — no zombie session."""
+    and the loop serves the next prompt — no zombie session. #693: the
+    timeout-terminated turn is flagged to the callback so the service can
+    surface it instead of reporting success."""
     from server.app.studio_chat.acp_session import _CLOSE
 
     handle = _handle()
@@ -416,7 +428,33 @@ def test_prompt_timeout_cancels_and_the_session_continues() -> None:
     asyncio.run(handle._prompt_loop(conn, "s-1"))
 
     assert conn.cancel_calls == ["s-1", "s-1"]  # one cancel per timed-out turn
-    assert calls == {"turn_end": ["cancelled", "cancelled"], "turn_error": [], "error": []}
+    assert calls == {
+        "turn_end": ["cancelled", "cancelled"],
+        "turn_end_timed_out": [True, True],
+        "turn_error": [],
+        "error": [],
+    }
+
+
+@pytest.mark.usefixtures("short_turn_timeouts")
+def test_in_time_turn_reports_not_timed_out() -> None:
+    """#693: a turn that finishes inside the timeout reports timed_out=False
+    and never touches the ladder (no cancel, no timeout hook)."""
+    from server.app.studio_chat.acp_session import _CLOSE
+
+    handle = _handle()
+    calls = _record_callbacks(handle)
+    handle._queue.put("quick")
+    handle._queue.put(_CLOSE)
+
+    asyncio.run(handle._prompt_loop(_QuickConn(), "s-1"))
+
+    assert calls == {
+        "turn_end": ["end_turn"],
+        "turn_end_timed_out": [False],
+        "turn_error": [],
+        "error": [],
+    }
 
 
 @pytest.mark.usefixtures("short_turn_timeouts")
@@ -433,7 +471,7 @@ def test_prompt_grace_exhausted_escalates_wedged() -> None:
         asyncio.run(handle._prompt_loop(conn, "s-1"))
 
     assert conn.cancel_calls == 1  # the cancel WAS attempted before failing
-    assert calls == {"turn_end": [], "turn_error": [], "error": []}
+    assert calls == {"turn_end": [], "turn_end_timed_out": [], "turn_error": [], "error": []}
 
 
 @pytest.mark.usefixtures("short_turn_timeouts")
@@ -519,7 +557,7 @@ def test_on_turn_end_callback_failure_stays_per_turn() -> None:
     handle = _handle()
     calls = _record_callbacks(handle)
 
-    def _failing_turn_end(stop_reason: str) -> None:
+    def _failing_turn_end(stop_reason: str, *, timed_out: bool = False) -> None:
         raise RuntimeError("store down")
 
     handle.callbacks.on_turn_end = _failing_turn_end
@@ -550,4 +588,9 @@ def test_prompt_timeout_settles_permissions_before_cancel() -> None:
     asyncio.run(handle._prompt_loop(conn, "s-1"))
 
     assert conn.events == ["settle", "cancel"]  # hook strictly before cancel
-    assert calls == {"turn_end": ["cancelled"], "turn_error": [], "error": []}
+    assert calls == {
+        "turn_end": ["cancelled"],
+        "turn_end_timed_out": [True],
+        "turn_error": [],
+        "error": [],
+    }

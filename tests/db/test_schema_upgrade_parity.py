@@ -43,23 +43,24 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v82, job_status_counts_advisory_locks,
-# #659) must leave behind so the undo step rewinds a current-shape database
-# to exactly SCHEMA_VERSION-1. v82 re-creates the two counter trigger
-# FUNCTIONS plus the two pending-delta tables. The undo drops the tables and
-# helper functions, then rewinds the trigger bodies/purge function to v77/v73.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = (
-    "workspace_job_status_count_deltas",
-    "run_job_status_count_deltas",
+# Effects the newest migration (v83, studio_chat_context_health,
+# #694) must leave behind so the undo step rewinds a current-shape database
+# to exactly SCHEMA_VERSION-1. v83 is DDL-only via the schema-file replay:
+# studio_chat_sessions gains usage_json + compacting. The undo drops both
+# columns; v82's trigger-function rewrite stays in the (SCHEMA_VERSION-1)
+# shape, so none of the older rewind steps apply here.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("studio_chat_sessions", "usage_json", "text"),
+    ("studio_chat_sessions", "compacting", "boolean"),
 )
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "job_status_counts_advisory_locks"
+_NEWEST_MIGRATION_NAME = "studio_chat_context_health"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v77: the v77 trigger functions (no advisory lock), rebuilt from
-# the v77 migration module's own DDL so the rewind is shape-exact.
+# faithful v82 (empty for v83: v82 is exactly the current shape minus the
+# two dropped columns).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
@@ -72,17 +73,7 @@ _CatalogConstraints = set[tuple[str, str, str]]
 
 def _undo_newest_migration(database_dsn: str) -> None:
     """Rewind a current-shape database to SCHEMA_VERSION - 1."""
-    from server.app.db.migrations.job_status_counts_statement_triggers import (
-        _RUN_DDL as _V77_RUN_DDL,
-    )
-    from server.app.db.migrations.job_status_counts_statement_triggers import (
-        _WORKSPACE_DDL as _V77_WORKSPACE_DDL,
-    )
-    from server.app.db.migrations.run_job_status_counts import _TRIGGER_DDL as _V73_RUN_DDL
-
     with write_transaction(database_dsn) as conn:
-        conn.execute("drop function if exists try_fold_workspace_job_status_counts(text, int)")
-        conn.execute("drop function if exists try_fold_run_job_status_counts(text, int, int)")
         for table in _NEWEST_MIGRATION_TABLES:
             conn.execute(f"drop table if exists {table}")
         for table, column, _data_type in _NEWEST_MIGRATION_COLUMNS:
@@ -93,10 +84,6 @@ def _undo_newest_migration(database_dsn: str) -> None:
             conn.execute(f"alter table {table} add column if not exists {column_ddl}")
         for statement in _NEWEST_MIGRATION_UNDO_DDL:
             conn.execute(statement)
-        # Restore the v73 purge function, then the v77 statement triggers.
-        conn.execute(_V73_RUN_DDL)
-        conn.execute(_V77_RUN_DDL)
-        conn.execute(_V77_WORKSPACE_DDL)
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
 
 

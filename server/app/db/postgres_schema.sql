@@ -1075,6 +1075,10 @@ alter table studio_chat_sessions add column if not exists draft_yaml text;
 -- advertised; UI hides the control). The ALTER covers fresh + pre-v74
 -- databases; the create-table block omits both columns (one line each).
 alter table studio_chat_sessions add column if not exists session_modes_json text, add column if not exists config_options_json text;
+-- Context-health mirrors (v83, #694): usage_json = latest ACP usage_update
+-- ({used, size, optional cost}); compacting = kimi background-compaction
+-- window flag (send guard + UI input lock, self-clearing after a timeout).
+alter table studio_chat_sessions add column if not exists usage_json text, add column if not exists compacting boolean not null default false;
 
 create table if not exists studio_chat_messages (
   id text primary key,

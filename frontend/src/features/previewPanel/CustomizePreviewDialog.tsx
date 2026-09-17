@@ -1,6 +1,6 @@
 /**
  * 「定制预览」对话框（issue #328）：复用 workflowStudio/chat 的
- * useStudioChat + 展示组件的薄封装（不改 chat 现有文件）。agent 经 MCP
+ * useStudioChat + AgentChatPanel 骨架（#695）的薄封装。agent 经 MCP
  * 预览面板工具写草稿，发布/恢复默认是这里的人工动作（reject_studio_agent_scope
  * 在后端钉死）。草稿**不自动执行**（#347 P1）：agent（或提示注入产物）写入的
  * HTML 未经发布即作为 srcDoc 运行是风险放大器——左栏只渲染已发布版本，
@@ -9,10 +9,8 @@
 import { useState } from 'react'
 import { Button, Dialog, DialogContent, DialogTitle } from '@mui/material'
 import { useStudioChat } from '../workflowStudio/chat/useStudioChat'
+import { AgentChatPanel } from '../workflowStudio/chat/AgentChatPanel'
 import { StudioChatSessionBar } from '../workflowStudio/chat/StudioChatSessionBar'
-import { StudioChatMessageList } from '../workflowStudio/chat/StudioChatMessageList'
-import { StudioChatRunBar } from '../workflowStudio/chat/StudioChatRunBar'
-import { StudioChatInput } from '../workflowStudio/chat/StudioChatInput'
 import type { PreviewPanelState } from './previewPanelApi'
 import {
   useArchivePreviewPanel,
@@ -77,57 +75,35 @@ export function CustomizePreviewDialog({
             未检测到可用的 ACP agent，请联系管理员配置
           </div>
         ) : (
-          <>
-            <StudioChatSessionBar
-              agents={chat.agents}
-              sessions={chat.sessions}
-              selectedAgentId={selectedAgentId}
-              activeSessionId={chat.activeSessionId}
-              onSelectAgent={setChosenAgentId}
-              onSelectSession={(sessionId) =>
-                void chat.selectSession(sessionId)
-              }
-              onNewChat={() =>
-                selectedAgentId && void chat.startSession(selectedAgentId)
-              }
-              newChatDisabled={!selectedAgentId || chat.starting}
-            />
-            <div className={styles.chatArea}>
-              {chat.activeSessionId === null ? (
-                <div className={styles.hint}>
-                  选择 Agent，点「＋ 新对话」开始
-                </div>
-              ) : (
-                <StudioChatMessageList
-                  chat={chat}
-                  workspaceId={workspaceId}
-                  onApplyWorkflowDraft={() => undefined}
-                />
-              )}
-            </div>
-            <StudioChatRunBar
-              status={chat.session?.status ?? null}
-              busy={chat.busy}
-              lastRunMs={chat.lastRunMs}
-              onCancel={() => void chat.cancel()}
-            />
-            <StudioChatInput
-              busy={chat.busy}
-              disabled={!chat.session || chat.closed}
-              disabledReason={
-                !chat.session
-                  ? '先选择会话或新建对话'
-                  : chat.closed
-                    ? '会话已关闭或中断'
-                    : null
-              }
-              onSend={(text) => void chat.send(text)}
-            />
-          </>
+          <AgentChatPanel
+            chat={chat}
+            workspaceId={workspaceId}
+            className={styles.chatArea}
+            header={
+              <StudioChatSessionBar
+                agents={chat.agents}
+                sessions={chat.sessions}
+                selectedAgentId={selectedAgentId}
+                activeSessionId={chat.activeSessionId}
+                onSelectAgent={setChosenAgentId}
+                onSelectSession={(sessionId) =>
+                  void chat.selectSession(sessionId)
+                }
+                onNewChat={() =>
+                  selectedAgentId && void chat.startSession(selectedAgentId)
+                }
+                newChatDisabled={!selectedAgentId || chat.starting}
+              />
+            }
+            emptyState="选择 Agent，点「＋ 新对话」开始"
+            noSessionReason="先选择会话或新建对话"
+            closedReason="会话已关闭或中断，点「继续对话」恢复"
+            onApplyWorkflowDraft={() => undefined}
+          />
         )}
-        {(actionError || chat.actionError) && (
+        {actionError && (
           <div className={styles.error} role="alert">
-            {actionError ?? chat.actionError}
+            {actionError}
           </div>
         )}
         <div className={styles.footer}>
