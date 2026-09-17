@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import type { StudioChatSessionRecord } from './studioChatApi'
 import { StudioChatComposerConfig } from './StudioChatComposerConfig'
+import { StudioChatContextRing } from './StudioChatContextRing'
 import styles from './StudioChatComposer.module.css'
 
 type Props = {
@@ -15,11 +17,19 @@ type Props = {
     workspaceId: string | undefined
     session: StudioChatSessionRecord | null
   }
+  /** 会话状态行（运行/排队摘要/恢复入口，AgentChatStatusStrip），渲染为卡内
+   * textarea 与工具行之间的一行；为 null（无状态可显示）时不占行。 */
+  statusSlot?: ReactNode
+  /** 上下文用量：工具行右侧的圆环占比，hover 显示精确值；无数据不渲染。 */
+  usage?: { used: number | null; size: number | null } | null
+  /** 压缩窗口内圆环脉冲提示（发送禁用仍由 disabled/disabledReason 承担）。 */
+  compacting?: boolean
 }
 
 /** 三处 agent 对话共用的 composer（#695 R4）：圆角卡片一体化——上半 textarea，
- * 卡内底部工具行（左：权限模式芯片；右：模型/思考档位芯片 + 发送按钮）。
- * 配置控件是输入框容器内的行内元素，不再独立占行；快捷键提示并入
+ * 卡内底部工具行（左：权限模式芯片；右：上下文圆环 + 模型/思考档位芯片 +
+ * 发送按钮），状态行经 statusSlot 收进卡内（textarea 与工具行之间）。
+ * 配置控件与状态都是输入框容器内的行内元素，不再独立占行；快捷键提示并入
  * placeholder。compacting 禁用、disabledReason、IME 组合守卫、Enter /
  * Shift+Enter 语义与原 StudioChatInput 一致。 */
 export function StudioChatComposer(props: Props) {
@@ -32,6 +42,16 @@ export function StudioChatComposer(props: Props) {
     setText('')
   }
 
+  // 圆环位于右组最左（模型芯片左边）：有配置芯片时经 contextRing 注入右组，
+  // 无配置面时直接落在 spacer 与发送按钮之间。
+  const contextRing = (
+    <StudioChatContextRing
+      used={props.usage?.used ?? null}
+      size={props.usage?.size ?? null}
+      compacting={props.compacting ?? false}
+    />
+  )
+
   return (
     <div className={styles.composerArea}>
       <div className={styles.composer}>
@@ -43,7 +63,7 @@ export function StudioChatComposer(props: Props) {
           }
           value={text}
           disabled={props.disabled}
-          rows={2}
+          rows={3}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
             // 中文输入法组合中的回车是确认候选，不能当成发送。
@@ -57,14 +77,19 @@ export function StudioChatComposer(props: Props) {
             }
           }}
         />
+        {props.statusSlot}
         <div className={styles.toolbar}>
           {props.config ? (
             <StudioChatComposerConfig
               workspaceId={props.config.workspaceId}
               session={props.config.session}
+              contextRing={contextRing}
             />
           ) : (
-            <span className={styles.toolbarSpacer} />
+            <>
+              <span className={styles.toolbarSpacer} />
+              {contextRing}
+            </>
           )}
           <button
             type="button"

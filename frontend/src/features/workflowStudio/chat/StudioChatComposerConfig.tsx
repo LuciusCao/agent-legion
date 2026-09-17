@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import type { ReactNode } from 'react'
 import type { StudioChatSessionRecord } from './studioChatApi'
 import { agentConfigView, flattenOptions } from './agentConfigView'
 import {
@@ -18,11 +19,14 @@ import styles from './StudioChatComposer.module.css'
  * 原生 select 大盒子换成「文本 + ▾」chip + MUI Menu；取值、映射与提交完全
  * 复用同一数据层（useStudioChatAgentConfig / agentConfigView / thoughtLevel，
  * 权限模式语义 #658：agent 自律模式与平台「全部允许」两层互不改写）。
- * 左组（权限模式 + 漂移/错误提示）与右组（模型/思考档位/高级）经 fragment
- * 直接成为 toolbar 的 flex 子项，右推由 configRight 的 margin-left:auto 承担。 */
+ * 左组（权限模式 + 漂移/错误提示）与右组（上下文圆环 + 模型/思考档位/高级）
+ * 经 fragment 直接成为 toolbar 的 flex 子项，右推由 configRight 的
+ * margin-left:auto 承担；圆环经 contextRing 注入右组最左（模型芯片左边），
+ * 无配置面的 agent 也要保留圆环（spacer + 圆环）。 */
 export function StudioChatComposerConfig(props: {
   workspaceId: string | undefined
   session: StudioChatSessionRecord | null
+  contextRing: ReactNode
 }) {
   const config = useStudioChatAgentConfig(props.workspaceId, props.session)
   const view = useMemo(() => agentConfigView(config.session), [config.session])
@@ -31,7 +35,13 @@ export function StudioChatComposerConfig(props: {
     view.thought?.map.current ?? null,
     config.lastAction === view.thought?.id ? config.lastActionToken : null
   )
-  if (!view.visible) return <span className={styles.toolbarSpacer} />
+  if (!view.visible)
+    return (
+      <>
+        <span className={styles.toolbarSpacer} />
+        {props.contextRing}
+      </>
+    )
   // 与输入框的禁用条件对齐：终态会话（closed/error）上切配置只会得到 409。
   const status = config.session?.status
   const busy =
@@ -71,6 +81,7 @@ export function StudioChatComposerConfig(props: {
         )}
       </span>
       <span className={styles.configRight}>
+        {props.contextRing}
         {view.model && (
           <StudioChatConfigChip
             label="模型"

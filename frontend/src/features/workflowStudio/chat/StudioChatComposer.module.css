@@ -56,35 +56,8 @@
    * 占位把发送按钮推到右侧，三处留白一致，不造空槽位。 */
   flex: 1;
 }
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  /* #733 R6-P2：可收缩 + 文本截断（chipText ellipsis），长模型名在窄面板
-   * 里缩 chip 而不是撑破工具行。 */
-  min-width: 0;
-  max-width: 160px;
-  border: 1px solid #e0e0e0;
-  background: #fafafa;
-  color: #424242;
-  border-radius: 999px;
-  padding: 1px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.chip:disabled {
-  color: #9e9e9e;
-  cursor: default;
-}
-.chipText {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.menuHeader {
-  font-size: 11px;
-  color: #9e9e9e;
-}
+/* 芯片本体与下拉菜单样式已拆到 StudioChatConfigChip.module.css（组件内聚 +
+ * 本文件体积预算）。 */
 .drift {
   overflow: hidden;
   text-overflow: ellipsis;

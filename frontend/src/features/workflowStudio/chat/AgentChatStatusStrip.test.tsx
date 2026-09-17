@@ -172,36 +172,16 @@ describe('AgentChatStatusStrip', () => {
     expect(screen.getByLabelText('会话状态条')).toHaveTextContent('排队中 2')
   })
 
-  it('shows the context usage on the right side (#694)', () => {
-    renderStrip({
-      session: sessionRecord({ usage: { used: 12_345, size: 262_144 } }),
-    })
-    expect(screen.getByLabelText('上下文用量')).toHaveTextContent(
-      '上下文 12.3k / 262.1k tokens（5%）'
-    )
-  })
-
-  it('shows the compacting hint even without usage yet', () => {
-    renderStrip({ session: sessionRecord({ compacting: true }) })
-    expect(screen.getByLabelText('上下文用量')).toHaveTextContent(
-      '正在压缩上下文…'
-    )
-  })
-
-  it('combines run state, queue summary and usage in a single row', () => {
+  it('combines run state and queue summary in a single row', () => {
     renderStrip(
       {
         busy: true,
-        session: sessionRecord({
-          status: 'running',
-          usage: { used: 1000, size: 2000 },
-        }),
+        session: sessionRecord({ status: 'running' }),
       },
       1
     )
     const strip = screen.getByLabelText('会话状态条')
     expect(strip).toHaveTextContent('运行中')
     expect(strip).toHaveTextContent('排队中 1')
-    expect(strip).toHaveTextContent('上下文 1.0k / 2.0k tokens（50%）')
   })
 })

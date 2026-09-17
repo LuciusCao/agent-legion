@@ -13,30 +13,17 @@ function formatDuration(ms: number): string {
   return `${Math.floor(seconds / 60)}m${seconds % 60}s`
 }
 
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function formatTokens(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
-}
-
-/** #695 R3：ContextMeter / RunBar / ResumeBar 收敛成的单行 status strip——
- * 左侧运行状态（运行中+取消 / 已完成·用时 / 已超时终止 / 已取消 #675 /
- * 恢复入口）与排队摘要，右侧上下文用量（压缩提示并入）；各槽位无内容不占位，全空则整行
- * 不渲染。队列摘要只放「排队中 N」：排队文本与逐条移除保留在下方独立的
- * StudioChatQueueBar 行（仅队列非空时出现）——排队消息是用户待发内容，
- * 收进 popover 要多一次点击才能查看/移除，取舍为可见性优先；常态 idle 无
- * 队列时该行不出现，信息密度目标不受影响。 */
+/** #695 R3：RunBar / ResumeBar 收敛成的状态行——左侧运行状态（运行中+取消 /
+ * 已完成·用时 / 已超时终止 / 已取消 #675 / 恢复入口），右侧排队摘要；各槽位
+ * 无内容不占位，全空则整行不渲染。上下文用量已迁入 composer 工具行的圆环
+ * （StudioChatContextRing，含压缩提示）。本行经 composer 的 statusSlot 渲染在
+ * 输入卡片内（textarea 与工具行之间），不再是卡外独立 strip。队列摘要只放
+ * 「排队中 N」：排队文本与逐条移除保留在卡外独立的 StudioChatQueueBar 行
+ * （仅队列非空时出现）——排队消息是用户待发内容，收进 popover 要多一次点击
+ * 才能查看/移除，取舍为可见性优先。 */
 export function AgentChatStatusStrip({ chat, queue }: Props) {
   const status = chat.session?.status ?? null
-  const compacting = chat.session?.compacting ?? false
   const queued = queue.queuedMessages.length
-
-  const used = asNumber(chat.session?.usage?.used)
-  const size = asNumber(chat.session?.usage?.size)
-  const hasUsage = used !== null && size !== null && size > 0
-  const percent = hasUsage ? Math.min(100, Math.round((used / size) * 100)) : 0
 
   const resumable = chat.closed && chat.session !== null
   let runSlot = null
@@ -110,7 +97,7 @@ export function AgentChatStatusStrip({ chat, queue }: Props) {
     )
   }
 
-  if (!runSlot && queued === 0 && !hasUsage && !compacting) return null
+  if (!runSlot && queued === 0) return null
   return (
     <div className={styles.strip} aria-label="会话状态条">
       {runSlot && (
@@ -119,17 +106,6 @@ export function AgentChatStatusStrip({ chat, queue }: Props) {
         </span>
       )}
       {queued > 0 && <span className={styles.queue}>排队中 {queued}</span>}
-      {(hasUsage || compacting) && (
-        <span className={styles.meter} aria-label="上下文用量">
-          {hasUsage && (
-            <span>
-              上下文 {formatTokens(used)} / {formatTokens(size)} tokens（
-              {percent}%）
-            </span>
-          )}
-          {compacting && <span>正在压缩上下文…</span>}
-        </span>
-      )}
     </div>
   )
 }

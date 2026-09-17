@@ -159,7 +159,9 @@ describe('AgentChatPanel', () => {
       'placeholder',
       '正在压缩上下文，完成后即可发送'
     )
-    expect(screen.getByText('正在压缩上下文…')).toBeInTheDocument()
+    // 压缩提示迁入 composer 工具行的上下文圆环（脉冲 + hover 精确文案），
+    // 不再是 strip 里的独立文本。
+    expect(screen.getByLabelText('上下文用量')).toBeInTheDocument()
   })
 
   it('shows the resume bar for a closed session', () => {
