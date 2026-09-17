@@ -134,4 +134,8 @@ class StudioAgentToolsService:
         self, workspace_id: str, workflow_key: str, node_key: str
     ) -> dict[str, Any]:
         """Effective code plus any pending draft (mirrors the Studio read)."""
-        return self.node_codes.get_state(workspace_id, workflow_key, node_key)
+        state = dict(self.node_codes.get_state(workspace_id, workflow_key, node_key))
+        # #628: advertise the instance-level byte budget so agent-authored
+        # drafts self-reject before hitting the save endpoint.
+        state["max_code_bytes"] = self._settings.executor_runtime.workflows.node_code_max_bytes
+        return state

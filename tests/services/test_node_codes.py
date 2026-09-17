@@ -16,9 +16,10 @@ from server.app.services.node_code_resolution import (
     resolve_dispatch_node_code,
 )
 from server.app.services.node_codes import (
-    MAX_CODE_BYTES,
+    DEFAULT_MAX_CODE_BYTES,
     NodeCodeService,
     code_hash,
+    validate_node_code,
 )
 
 VALID_CODE = "def run(job, job_dir, runtime):\n    return None\n"
@@ -54,10 +55,47 @@ def test_save_draft_rejects_invalid_code(service, workspace_id) -> None:
         service.save_draft(workspace_id, WF, NODE, "def run(:\n", "user:u1")
     with pytest.raises(InvalidOperationError, match="module-level 'run'"):
         service.save_draft(workspace_id, WF, NODE, "X = 1\n", "user:u1")
-    oversized = VALID_CODE + "#" * MAX_CODE_BYTES
+    oversized = VALID_CODE + "#" * DEFAULT_MAX_CODE_BYTES
     with pytest.raises(InvalidOperationError, match="size limit"):
         service.save_draft(workspace_id, WF, NODE, oversized, "user:u1")
     assert service.list_versions(workspace_id, WF, NODE) == []
+
+
+@pytest.mark.no_db
+def test_validate_node_code_default_64kb_boundary() -> None:
+    """#628: the default budget is unchanged 64KB — at-limit passes, +1 byte
+    rejects, and the error names the configured limit."""
+    pad = "#" * (DEFAULT_MAX_CODE_BYTES - len(VALID_CODE.encode("utf-8")))
+    validate_node_code(VALID_CODE + pad)
+    with pytest.raises(InvalidOperationError, match=r"65536-byte size limit"):
+        validate_node_code(VALID_CODE + pad + "#")
+
+
+@pytest.mark.no_db
+def test_validate_node_code_custom_limit_applies() -> None:
+    """#628: an injected larger budget admits code the 64KB default rejects."""
+    limit = 128 * 1024
+    pad = "#" * (limit - len(VALID_CODE.encode("utf-8")))
+    oversized_for_default = VALID_CODE + pad
+    with pytest.raises(InvalidOperationError):
+        validate_node_code(oversized_for_default)
+    validate_node_code(oversized_for_default, limit)
+    with pytest.raises(InvalidOperationError, match=r"131072-byte"):
+        validate_node_code(oversized_for_default + "#", limit)
+
+
+def test_save_draft_custom_limit_via_service(job_db, workspace_id) -> None:
+    """#628: NodeCodeService carries the settings-injected limit through both
+    validating write paths (save_draft and seed_global)."""
+    limit = 2048
+    service = NodeCodeService(job_db.dsn_identity, max_code_bytes=limit)
+    pad = "#" * (limit - len(VALID_CODE.encode("utf-8")))
+    row = service.save_draft(workspace_id, WF, NODE, VALID_CODE + pad, "user:u1")
+    assert row["status"] == "draft"
+    with pytest.raises(InvalidOperationError, match="2048-byte"):
+        service.save_draft(workspace_id, WF, NODE, VALID_CODE + pad + "#", "user:u1")
+    with pytest.raises(InvalidOperationError, match="2048-byte"):
+        service.seed_global(WF, "seeded", VALID_CODE + pad + "#", "seed too big")
 
 
 def test_save_draft_overwrites_existing_draft(service, workspace_id) -> None:
@@ -246,6 +284,23 @@ def test_resolve_dispatch_node_code_fails_closed_on_missing_version(
         resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, frozen)
 
 
+@pytest.mark.no_db
+def test_frozen_dispatch_pin_prefers_snapshot_pins() -> None:
+    """#109: the job snapshot's node_code_pins win over the batch payload's
+    node_code_versions (upgrade refreshes only the former) — inside a
+    quality-replay batch, the only place pins still apply (#115)."""
+    snapshot_pins = {"n": {"version": 2, "code_hash": "h2"}}
+    batch_payload = {
+        "quality_replay": {"replay_id": "r1"},
+        "node_code_versions": {"n": {"version": 1, "code_hash": "h1"}},
+    }
+
+    assert frozen_dispatch_pin(snapshot_pins, batch_payload, "n") == {
+        "version": 2,
+        "code_hash": "h2",
+    }
+
+
 def test_save_draft_guard_rejects_concurrently_published_row(
     service, workspace_id, monkeypatch
 ) -> None:
@@ -347,23 +402,6 @@ def test_seed_global_tolerates_concurrent_seed_race(service, monkeypatch) -> Non
     other = "def run(job, job_dir, runtime):\n    return 'other'\n"
     assert not service.seed_global(WF, NODE, other, "concurrent seed")
     assert service.get_global_published(WF, NODE)["code"] == GLOBAL_CODE
-
-
-@pytest.mark.no_db
-def test_frozen_dispatch_pin_prefers_snapshot_pins() -> None:
-    """#109: the job snapshot's node_code_pins win over the batch payload's
-    node_code_versions (upgrade refreshes only the former) — inside a
-    quality-replay batch, the only place pins still apply (#115)."""
-    snapshot_pins = {"n": {"version": 2, "code_hash": "h2"}}
-    batch_payload = {
-        "quality_replay": {"replay_id": "r1"},
-        "node_code_versions": {"n": {"version": 1, "code_hash": "h1"}},
-    }
-
-    assert frozen_dispatch_pin(snapshot_pins, batch_payload, "n") == {
-        "version": 2,
-        "code_hash": "h2",
-    }
 
 
 @pytest.mark.no_db

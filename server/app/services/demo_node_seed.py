@@ -40,6 +40,7 @@ def seed_demo_workspace_node_codes(
     service = NodeCodeService(
         connect_source if connect_source is not None else settings.database_url,
         custom_nodes_enabled=True,
+        max_code_bytes=settings.executor_runtime.workflows.node_code_max_bytes,
     )
     seeded: list[str] = []
     for node_key, relative in DEMO_NODE_SOURCES:

@@ -53,6 +53,7 @@ from scripts.seed.seed_common import (
     validate_seed,
     workflow_capabilities,
 )
+from server.app.services.node_codes import DEFAULT_MAX_CODE_BYTES
 
 DEFAULT_CHANGE_NOTE = "seed export"
 
@@ -392,6 +393,16 @@ def main() -> int:
     )
     parser.add_argument("--change-note", default=DEFAULT_CHANGE_NOTE)
     parser.add_argument("--output", type=Path, default=Path("seed.json"))
+    # #628: the platform ceiling is instance-configurable; an instance that
+    # raised it (AGENT_LEGION_NODE_CODE_MAX_BYTES) must raise it here too or
+    # the exported seed fails its own validation.
+    parser.add_argument(
+        "--node-code-max-bytes",
+        type=int,
+        default=DEFAULT_MAX_CODE_BYTES,
+        help="byte budget for one node code version; must match the source "
+        f"instance's AGENT_LEGION_NODE_CODE_MAX_BYTES (default: {DEFAULT_MAX_CODE_BYTES})",
+    )
     args = parser.parse_args()
 
     forbidden = (
@@ -409,7 +420,7 @@ def main() -> int:
     seed["source"] = {"database": _masked_dsn(args.dsn)}
     seed["export_warnings"] = warnings
 
-    problems = validate_seed(seed, forbidden)
+    problems = validate_seed(seed, forbidden, args.node_code_max_bytes)
     print(
         f"workflows: {len(seed['workflows'])}  agents: {len(seed['agents'])}  "
         f"node_codes: {len(seed['node_codes'])}  "

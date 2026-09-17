@@ -334,6 +334,9 @@ def test_get_node_code_state_reads_builtin(client, job_db) -> None:
     assert payload["code"]
     assert "path" not in payload
     assert payload["has_draft"] is False
+    # #628: the read advertises the instance-level byte budget so an
+    # agent-authored draft can self-check before saving.
+    assert payload["max_code_bytes"] == 64 * 1024
 
 
 def test_get_node_code_state_reads_skeleton_node(client, job_db) -> None:
