@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from './studioChatMessages'
+import { lastRunCancelled, stopReason } from './studioChatCancelVisibility'
 import {
   buildPermissionViews,
   extractAgentDefinitionDrafts,
@@ -7,12 +8,10 @@ import {
   extractWorkflowDraft,
   groupToolCalls,
   lastTerminalEvent,
-  lastRunCancelled,
   maxSeq,
   parseFirstJson,
   permissionResolutionText,
   planEntries,
-  stopReason,
   streamingTextId,
   upsertMessage,
 } from './studioChatMessages'
@@ -314,6 +313,9 @@ describe('lastTerminalEvent', () => {
     const neutral = message('status', 'system', { event: 'cancel_requested' })
     expect(lastTerminalEvent([text, neutral])).toBeNull()
     expect(lastTerminalEvent([])).toBeNull()
+  })
+})
+
 describe('lastRunCancelled', () => {
   /** #675：取消轮收尾视图的取值来源——尾部最近一条终止状态消息。 */
   const cancelledTurnEnd = () =>

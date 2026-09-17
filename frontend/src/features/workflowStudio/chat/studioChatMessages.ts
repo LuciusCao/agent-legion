@@ -41,13 +41,13 @@ export type PermissionView = {
   decisionText: string | null
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null
 }
 
-function asText(value: unknown): string {
+export function asText(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
@@ -325,11 +325,6 @@ export function statusEvent(message: ChatMessage): {
   }
 }
 
-/** turn_end 状态行的停止原因（ACP stopReason，后端 events.on_turn_end 透传）。 */
-export function stopReason(message: ChatMessage): string {
-  return asText(asRecord(message.content)?.stop_reason)
-}
-
 export function textContent(message: ChatMessage): string {
   return asText(asRecord(message.content)?.text)
 }
@@ -372,19 +367,6 @@ function decisionText(resolved: Record<string, unknown>): string {
   return '已允许'
 }
 
-/** 最近一次已收尾的运行是否以「取消」结束：从尾部扫描，先撞到的终止状态
- * （turn_end/error/session_closed/session_resumed）定夺——stop_reason 为
- * cancelled 的 turn_end 即取消；后续新一轮的用户消息不再改变上一轮的结论
- * （新一轮 busy 期间本视图不被 RunBar 消费）。 */
-export function lastRunCancelled(messages: ChatMessage[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const m = messages[i]
-    if (m.kind !== 'status' || !TERMINAL.has(statusEvent(m).event)) continue
-    return statusEvent(m).event === 'turn_end' && stopReason(m) === 'cancelled'
-  }
-  return false
-}
-
 /** 消息列表的派生视图集合（hook 里单次 useMemo 消费，避免每个视图一条
  * memo 链）。 */
 export function deriveChatViews(messages: ChatMessage[]) {
@@ -395,6 +377,5 @@ export function deriveChatViews(messages: ChatMessage[]) {
     agentDrafts: extractAgentDefinitionDrafts(toolCalls),
     nodeDrafts: extractNodeCodeDrafts(toolCalls),
     permissions: buildPermissionViews(messages),
-    lastRunCancelled: lastRunCancelled(messages),
   }
 }
