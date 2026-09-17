@@ -307,3 +307,205 @@ def test_api_token_reads_jobs_by_run_id(client) -> None:
     assert tail.json()["next_cursor"] is None
     still_scoped = {job["id"] for job in paged.json()["jobs"] + tail.json()["jobs"]}
     assert len(still_scoped) == 6  # cursor kept the run scoping
+
+
+# --- #734: 外部闭环端点全集 + 白名单机制化 -------------------------------------
+# #703/#704 集成后 api token 打三个产物端点（#631）命中 #626 的手抄白名单
+# 被 404——「提交 → 轮询 → 下载」闭环断裂。#734 补齐端点并把白名单改为
+# tag 派生（auth/api_scope_surface.py）。以下正向测试钉住全集可达，负向
+# 钉住其余表面仍拒绝，契约测试对账注册面与权威常量防再漂移。
+
+
+def test_api_token_reaches_all_external_loop_endpoints(client) -> None:
+    """正向清单：api token 对外部闭环端点全集（POST /runs、GET /runs、
+    GET /runs/{run_id}、GET /jobs、GET /jobs/snapshot、GET /jobs/{job_id}、
+    产物清单、raw 下载）全部可达——8 个 (method, 路由名) 缺一不可，
+    少一个闭环就断一环。"""
+    _create_workspace(client, WORKSPACE)
+    _insert_material(client, WORKSPACE, "mat-1")
+    issued = _issue(client, WORKSPACE, label="cms")
+    api = _bearer_client(client, issued["api_token"])
+
+    # 1. 提交（POST /runs，唯一 effecting 面）。#467 A4：run 载荷不带
+    # job id，读回用 jobs 列表（真实外部调用方的同一轮询路径）。
+    submitted = _submit_run(api, WORKSPACE, "mat-1")
+    assert submitted.status_code == 200, submitted.text
+    run_id = submitted.json()["run"]["id"]
+    jobs = api.get(f"/api/workspaces/{WORKSPACE}/jobs").json()["jobs"]
+    assert len(jobs) == 1
+    job_id = jobs[0]["id"]
+
+    # 2. 轮询 run 状态（列表 + 单查）。
+    assert api.get(f"/api/workspaces/{WORKSPACE}/runs").status_code == 200
+    assert api.get(f"/api/workspaces/{WORKSPACE}/runs/{run_id}").status_code == 200
+
+    # 3. 轮询 job 状态（列表 + codex3 P1 分页 snapshot + #631 单查端点）。
+    assert api.get(f"/api/workspaces/{WORKSPACE}/jobs").status_code == 200
+    assert api.get(f"/api/workspaces/{WORKSPACE}/jobs/snapshot").status_code == 200
+    status = api.get(f"/api/workspaces/{WORKSPACE}/jobs/{job_id}")
+    assert status.status_code == 200, status.text
+    assert status.json()["job_id"] == job_id
+
+    # 4. 产物清单（#631）。
+    manifest = api.get(f"/api/workspaces/{WORKSPACE}/jobs/{job_id}/artifacts")
+    assert manifest.status_code == 200, manifest.text
+    assert manifest.json()["job_id"] == job_id
+
+
+def test_api_token_external_loop_end_to_end(client_factory, monkeypatch) -> None:
+    """端到端闭环（真实 HTTP 层）：Bearer token 提交 run → 轮询 job 状态 →
+    取产物清单 → raw 下载字节。产物经 Worker-direct 通道的对象副本登记
+    （FakeObjectStorage 换入共享 store 实例，与 test_external_artifacts
+    同款 setup），验证的是 #734 修复的完整语义而非单点放行。"""
+    from server.app.services.job_artifact_objects import JobArtifactObjectStore
+    from tests.fakes.storage import FakeObjectStorage
+
+    with client_factory(fresh=True) as c:
+        workspace = "e2e-ws"
+        c.post("/api/workspaces", json={"id": workspace, "name": workspace})
+        from tests.helpers import publish_legacy_intake_revision
+
+        publish_legacy_intake_revision(c.app.state.job_db, workspace)
+
+        issued = _issue(c, workspace, label="e2e")
+        api = _bearer_client(c, issued["api_token"])
+        _insert_material(c, workspace, "mat-e2e")
+
+        submitted = _submit_run(api, workspace, "mat-e2e")
+        assert submitted.status_code == 200, submitted.text
+        jobs = api.get(f"/api/workspaces/{workspace}/jobs").json()["jobs"]
+        assert len(jobs) == 1
+        job_id = jobs[0]["id"]
+
+        # 轮询 job 状态直至可查（无 worker，状态停在 queued 也算闭环通）。
+        status = api.get(f"/api/workspaces/{workspace}/jobs/{job_id}")
+        assert status.status_code == 200, status.text
+        assert status.json()["status"] in {"queued", "running", "completed"}
+
+        # 产物：登记一个 Worker-direct 对象副本（manifest 行 + 对象字节）。
+        payload = b'{"answer": 42}'
+        store: JobArtifactObjectStore = c.app.state.job_artifact_objects
+        monkeypatch.setattr(store, "storage", FakeObjectStorage())
+        import gzip
+        import hashlib
+
+        stored = gzip.compress(payload)
+        storage_key = f"jobs/{workspace}/{job_id}/report.json.gz"
+        store.storage.objects[storage_key] = stored
+        store.record_remote(
+            workspace_id=workspace,
+            job_id=job_id,
+            node_key="upstream",
+            name="report.json",
+            storage_key=storage_key,
+            size_bytes=len(stored),
+            content_hash=hashlib.sha256(payload).hexdigest(),
+        )
+
+        manifest = api.get(f"/api/workspaces/{workspace}/jobs/{job_id}/artifacts")
+        assert manifest.status_code == 200, manifest.text
+        entries = {e["name"]: e for e in manifest.json()["artifacts"]}
+        assert entries["report.json"]["storage"] == "object"
+        assert entries["report.json"]["content_hash"] == hashlib.sha256(payload).hexdigest()
+
+        # raw 下载：gzip 透明解压，字节完整。
+        raw = api.get(f"/api/workspaces/{workspace}/jobs/{job_id}/artifacts/report.json/raw")
+        assert raw.status_code == 200, raw.text
+        assert raw.content == payload
+
+
+def test_api_token_artifact_endpoints_stay_workspace_bound(client) -> None:
+    """负向保持：三个产物端点放进白名单后，跨 workspace 仍 404——
+    allowlist 只解决「哪个端点」，「哪个 workspace」仍由 scoped 绑定
+    硬等值把关（与 /runs、/jobs 列表同一规则）。"""
+    _create_workspace(client, WORKSPACE)
+    _create_workspace(client, OTHER, name="other")
+    _insert_material(client, WORKSPACE, "mat-1")
+    issued = _issue(client, WORKSPACE, label="cms")
+    api = _bearer_client(client, issued["api_token"])
+    assert _submit_run(api, WORKSPACE, "mat-1").status_code == 200
+
+    # OTHER workspace 前缀下的三个产物端点：全部 404（无枚举语义）。
+    assert api.get(f"/api/workspaces/{OTHER}/jobs/job-x").status_code == 404
+    assert api.get(f"/api/workspaces/{OTHER}/jobs/job-x/artifacts").status_code == 404
+    assert (
+        api.get(f"/api/workspaces/{OTHER}/jobs/job-x/artifacts/report.json/raw").status_code == 404
+    )
+    # 未知 job：bound workspace 内也是 404（不存在即不可枚举）。
+    assert api.get(f"/api/workspaces/{WORKSPACE}/jobs/never-created").status_code == 404
+
+
+def test_api_token_cannot_reach_jobs_facets_or_other_frontend_routes(client) -> None:
+    """负向钉死模板遮蔽面：GET /jobs/facets 是前端聚合端点，路径形态与
+    /jobs/{job_id} 相邻（{job_id} 模板在路径匹配上会吞掉 facets 这类
+    字面段）；tag 派生按请求实际命中的路由对象判定，facets 未挂 tag
+    必须照旧 404。（snapshot 自 codex3 P1 起在准入面内，正向覆盖见
+    test_api_token_reaches_all_external_loop_endpoints 与 paging 文件。）"""
+    _create_workspace(client, WORKSPACE)
+    issued = _issue(client, WORKSPACE, label="cms")
+    api = _bearer_client(client, issued["api_token"])
+    assert api.get(f"/api/workspaces/{WORKSPACE}/jobs/facets").status_code == 404
+
+
+# --- 白名单机制化契约测试（#734，#678 tool_names.py 同款形态） ------------------
+# 注册面（app 实际挂载的路由）与权威常量（api_scope_surface.py 的路由名
+# 清单）必须全等：漏挂 tag、漏登记名字或把 tag 挂到名单外路由，都在这里
+# 炸出来——#631 式的「新端点上线、白名单没人同步」从此是编译期红的测试
+# 而不是线上 404。
+
+
+def test_registered_intake_surface_matches_the_manifest(tmp_path) -> None:
+    """契约：app 注册面中带 api-scope-intake tag 的路由集合 == 权威常量
+    按名字展开 == tag 派生判定函数对名单内全放行、名单外全拒绝。"""
+    from fastapi.routing import APIRoute
+
+    from server.app.auth.api_scope_surface import (
+        API_SCOPE_INTAKE_ROUTE_NAMES,
+        API_SCOPE_INTAKE_TAG,
+        api_scope_route_allowed,
+    )
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    tagged = [r for r in app.routes if isinstance(r, APIRoute) and API_SCOPE_INTAKE_TAG in r.tags]
+    tagged_names = {r.name for r in tagged}
+
+    # 双向差集：tag 挂了名字没登记（名单漏收）与登记了名字没挂 tag（路由
+    # 漏挂）都是漂移。
+    assert tagged_names == set(API_SCOPE_INTAKE_ROUTE_NAMES), (
+        f"注册面与权威清单脱节：tag 未收录 {sorted(tagged_names - set(API_SCOPE_INTAKE_ROUTE_NAMES))}，"
+        f"清单虚列 {sorted(set(API_SCOPE_INTAKE_ROUTE_NAMES) - tagged_names)}"
+    )
+
+    # 名单内路由逐个过运行期判定（tag + 名单双条件），名单外全部拒绝。
+    all_routes = {r.name: r for r in app.routes if isinstance(r, APIRoute)}
+    for name in API_SCOPE_INTAKE_ROUTE_NAMES:
+        assert api_scope_route_allowed(all_routes[name]), name
+    for route in tagged:
+        assert api_scope_route_allowed(route), route.name
+    untagged = [
+        r for r in app.routes if isinstance(r, APIRoute) and API_SCOPE_INTAKE_TAG not in r.tags
+    ]
+    for route in untagged:
+        assert not api_scope_route_allowed(route), route.name
+
+
+def test_manifest_covers_the_external_loop_documented_surface() -> None:
+    """回归面钉住：#734 修复的三个 #631 产物端点路由名 + #626 的四个
+    intake 端点路由名 + codex3 P1 的 snapshot 都在权威清单内——缺一个
+    即说明清单又与文档面脱节。"""
+    from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_ROUTE_NAMES
+
+    assert {
+        "create_run",
+        "list_runs",
+        "get_run",
+        "list_workspace_jobs",
+        "snapshot_workspace_jobs",
+    } <= set(API_SCOPE_INTAKE_ROUTE_NAMES)
+    # #734 直接回归面：三个当初被手抄白名单漏掉的端点。
+    assert {
+        "get_external_job_status",
+        "list_external_artifacts",
+        "get_external_artifact_raw",
+    } <= set(API_SCOPE_INTAKE_ROUTE_NAMES)

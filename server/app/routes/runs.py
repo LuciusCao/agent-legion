@@ -21,6 +21,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.app.auth.api_intake import require_workspace_api_intake
+from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
 from server.app.auth.dependencies import get_current_user
 from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 from server.app.routes.job_http import (
@@ -47,6 +48,7 @@ def create_runs_router(service: RunService) -> APIRouter:
         "/workspaces/{workspace_id}/runs",
         response_model=RunCreateResponse,
         dependencies=[Depends(require_workspace_api_intake)],
+        tags=[API_SCOPE_INTAKE_TAG],
     )
     def create_run(
         workspace_id: str,
@@ -101,7 +103,11 @@ def create_runs_router(service: RunService) -> APIRouter:
             )
         return RunCreateResponse(**result)
 
-    @router.get("/workspaces/{workspace_id}/runs", response_model=RunListResponse)
+    @router.get(
+        "/workspaces/{workspace_id}/runs",
+        response_model=RunListResponse,
+        tags=[API_SCOPE_INTAKE_TAG],
+    )
     def list_runs(
         workspace_id: str,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
@@ -113,7 +119,11 @@ def create_runs_router(service: RunService) -> APIRouter:
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.get("/workspaces/{workspace_id}/runs/{run_id}", response_model=RunDetailResponse)
+    @router.get(
+        "/workspaces/{workspace_id}/runs/{run_id}",
+        response_model=RunDetailResponse,
+        tags=[API_SCOPE_INTAKE_TAG],
+    )
     def get_run(workspace_id: str, run_id: str) -> RunDetailResponse:
         try:
             return RunDetailResponse(**service.get_run(workspace_id, run_id))
