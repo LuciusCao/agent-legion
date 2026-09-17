@@ -90,14 +90,14 @@ def refuse_row_outside_job_prefix(row: dict[str, Any], job: dict[str, Any]) -> b
     True，调用方按 NotFound/None 处理。"""
     if row_key_in_job_prefix(row, job):
         return False
-    storage_key = str(row.get("storage_key") or "")
+    prefix = artifact_key_prefix(str(job.get("workspace_id") or ""), str(job.get("id") or ""))
     logger.warning(
         "job %s manifest row for %r has a storage_key outside the job's "
         "workspace prefix (length %d, expected prefix length %d); refusing to open",
         str(job.get("id") or ""),
         str(row.get("name") or ""),
-        len(storage_key),
-        len(artifact_key_prefix(str(job.get("workspace_id") or ""), str(job.get("id") or ""))),
+        len(str(row.get("storage_key") or "")),
+        len(prefix),
     )
     return True
 

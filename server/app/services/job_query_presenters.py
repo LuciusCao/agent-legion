@@ -1,7 +1,10 @@
 import os
 from pathlib import Path
 
-from server.app.services.job_artifact_names import NON_ARTIFACT_DIR_NAMES
+from server.app.services.job_artifact_names import (
+    NON_ARTIFACT_DIR_NAMES,
+    is_downloadable_artifact_name,
+)
 from server.app.services.job_node_ordering import effective_after, ordered_job_nodes
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
@@ -69,6 +72,21 @@ def artifact_names_deep(job: dict, settings: Settings) -> list[str]:
     directories are not followed (os.walk default), so a planted link cannot
     enumerate files outside the job_dir — serving goes through the
     containment-checked ``JobArtifactService._artifact_path`` anyway.
+
+    #631 codex round 3 (P2-1): every collected name also passes the
+    download-side whitelist (``is_downloadable_artifact_name``) — a file the
+    raw endpoint would reject (dot-prefix name, ``runs``/oversized/control-
+    char segments) must not appear in the listing either, keeping the
+    list→download contract symmetric. The directory pruning above stays as
+    the walk-time optimization; the whitelist is the correctness gate.
+
+    #703 review MEDIUM-1: symlink FILES are skipped too —
+    ``os.walk(followlinks=False)`` only refuses to descend into linked
+    DIRECTORIES; a linked file still lands in ``files``, passes the name
+    whitelist, and gets advertised, while the raw endpoint's containment
+    check (``(base / name).resolve()``) rejects targets outside the job_dir
+    with 400 — the same list→download asymmetry, reached via a filesystem
+    object instead of a name filter.
     """
     base = resolve_job_dir(job, settings.jobs_dir)
     if not base.is_dir():
@@ -76,5 +94,10 @@ def artifact_names_deep(job: dict, settings: Settings) -> list[str]:
     names: list[str] = []
     for root, dirs, files in os.walk(base, followlinks=False):
         dirs[:] = [d for d in dirs if d not in _NON_ARTIFACT_DIR_NAMES and not d.startswith(".")]
-        names.extend((Path(root) / name).relative_to(base).as_posix() for name in files)
+        for name in files:
+            if (Path(root) / name).is_symlink():
+                continue
+            relative = (Path(root) / name).relative_to(base).as_posix()
+            if is_downloadable_artifact_name(relative):
+                names.append(relative)
     return sorted(names)

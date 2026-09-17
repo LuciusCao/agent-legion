@@ -461,6 +461,142 @@ def test_local_listing_prunes_runs_and_hidden_dirs(client_factory, monkeypatch):
         assert names == ["result.json"]
 
 
+def test_list_and_status_only_advertise_downloadable_names(client_factory, monkeypatch, job_db):
+    """#631 codex round 3 (P2-1)：清单与下载白名单对称。工作流可声明并生
+    成下载侧必拒的名字（点前缀、``runs`` 段、超长段）——本地文件与对象
+    manifest 行都不得把它们当产物列出（list 与 status 两个列举面同门），
+    否则按清单调 raw 端点是 400，破坏 list→download 契约。声明期校验另
+    立 issue，本用例只钉列举侧对齐。"""
+    from server.app.db.transaction import write_transaction
+
+    with client_factory(fresh=True) as c:
+        monkeypatch.setattr(c.app.state.job_artifact_objects, "storage", FakeObjectStorage())
+        _seed_workspace(c, "ws-a")
+        job = _create_job(c, "ws-a")
+        storage = Path(job["storage_dir"])
+        storage.mkdir(parents=True, exist_ok=True)
+        # 本地落盘的必拒名：点前缀、runs 段、超长段（>200 字节）。
+        (storage / ".report.json").write_text("{}", encoding="utf-8")
+        (storage / "runs" / "node_a" / "token1").mkdir(parents=True, exist_ok=True)
+        (storage / "runs" / "node_a" / "token1" / "events.jsonl").write_text("{}", encoding="utf-8")
+        (storage / ("x" * 201 + ".json")).write_text("{}", encoding="utf-8")
+        (storage / "result.json").write_text("{}", encoding="utf-8")
+
+        listing = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts").json()
+        assert [e["name"] for e in listing["artifacts"]] == ["result.json"]
+        status = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}").json()
+        assert status["artifacts"] == ["result.json"]
+
+        # 对象 manifest 行同样过滤：绕过 Worker 校验直插一行点前缀名
+        # （模拟未来写入方失守/行被污染），清单不列、按名 raw 仍 400。
+        store: JobArtifactObjectStore = c.app.state.job_artifact_objects
+        storage_key = f"jobs/ws-a/{job['id']}/.hidden.json"
+        store.storage.objects[storage_key] = b"{}"
+        with write_transaction(job_db) as conn:
+            conn.execute(
+                "insert into job_artifacts(job_id, node_key, name, storage_key,"
+                " size_bytes, content_hash) values (%s, 'upstream', '.hidden.json',"
+                " %s, 2, '')",
+                (job["id"], storage_key),
+            )
+
+        listing = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts").json()
+        names = [e["name"] for e in listing["artifacts"]]
+        assert ".hidden.json" not in names
+        status = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}").json()
+        assert ".hidden.json" not in status["artifacts"]
+        assert (
+            c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts/.hidden.json/raw").status_code
+            == 400
+        )
+
+
+# --- #703 复审 MEDIUM-1/MEDIUM-2：列举与下载的两种新不对称 -------------------
+
+
+def test_symlink_files_are_not_advertised(client_factory, monkeypatch, tmp_path):
+    """#703 复审 MEDIUM-1：job_dir 内的 symlink 文件不进清单。
+    ``os.walk(followlinks=False)`` 只剪枝目录链接；链接文件会以合法名过
+    白名单进 list/status，而 raw 端包含性校验对指向 job_dir 外的目标答
+    400——清单列了但 raw 拒绝，破坏 list→download 契约。链接整体跳过
+    （与目录链接同语义），正常文件不受影响。"""
+    with client_factory(fresh=True) as c:
+        monkeypatch.setattr(c.app.state.job_artifact_objects, "storage", None)
+        _seed_workspace(c, "ws-a")
+        job = _create_job(c, "ws-a")
+        storage = Path(job["storage_dir"])
+        storage.mkdir(parents=True, exist_ok=True)
+        (storage / "result.json").write_text("{}", encoding="utf-8")
+        outside = tmp_path / "outside.json"
+        outside.write_text("outside-secret", encoding="utf-8")
+        (storage / "link.json").symlink_to(outside)
+
+        listing = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts").json()
+        assert [e["name"] for e in listing["artifacts"]] == ["result.json"]
+        status = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}").json()
+        assert status["artifacts"] == ["result.json"]
+
+        # raw 端语义不变：对链接名仍是包含性校验拒绝（400），且绝不读
+        # 到 job_dir 外的目标字节。
+        raw = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts/link.json/raw")
+        assert raw.status_code == 400
+        assert b"outside-secret" not in raw.content
+
+
+def test_prefix_refused_manifest_rows_are_not_advertised(two_workspaces, job_db):
+    """#703 复审 MEDIUM-2：名字过白名单但 storage_key 越界的 manifest 行。
+    raw 端 H1 兜底对越界行必 404（manifest-first 命中行就短路，本地副本
+    不再兜底），所以 list/status 不得以任何形态（object 条目或本地条目）
+    列出该名字——同名本地文件也不回填，否则清单照列、raw 照 404。"""
+    from server.app.db.transaction import write_transaction
+
+    c, job_a, job_b = two_workspaces
+    # 同名本地文件：没有它只是「行被过滤」；有它，旧的本地回填会把名字
+    # 以 storage=local 复活，同样破坏契约。
+    storage = Path(job_a["storage_dir"])
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "evil.json").write_text('{"local": true}', encoding="utf-8")
+    key = f"jobs/ws-b/{job_b['id']}/evil.json"  # storage_key 指向别的 job
+    store: JobArtifactObjectStore = c.app.state.job_artifact_objects
+    store.storage.objects[key] = b"{}"
+    with write_transaction(job_db) as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash) values (%s, 'upstream', 'evil.json', %s, 2, '')",
+            (job_a["id"], key),
+        )
+
+    listing = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+    assert [e["name"] for e in listing["artifacts"]] == []
+    status = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}").json()
+    assert status["artifacts"] == []
+    # raw 语义不变（H1 兜底）：越界行 404，本地副本不接管。
+    assert (
+        c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/evil.json/raw").status_code == 404
+    )
+
+    # 最新行判定（lookup 同语义）：同名行先合法后越界（显式更晚的
+    # uploaded_at），raw 端 lookup 取最新（越界）行必 404——清单也不得
+    # 拿旧行复活该名字。
+    _register_object_artifact(c, job_a, "stale.json", b'{"v": 1}')
+    with write_transaction(job_db) as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash, uploaded_at)"
+            " values (%s, 'evil_writer', 'stale.json', %s, 2, '', now() + interval '1 hour')",
+            (job_a["id"], f"jobs/ws-b/{job_b['id']}/stale.json"),
+        )
+
+    listing = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+    assert "stale.json" not in [e["name"] for e in listing["artifacts"]]
+    status = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}").json()
+    assert "stale.json" not in status["artifacts"]
+    assert (
+        c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/stale.json/raw").status_code
+        == 404
+    )
+
+
 # --- #631 攻击复审 M1/M2：下载侧名字白名单（与清单剪枝单一事实来源） --------
 
 
