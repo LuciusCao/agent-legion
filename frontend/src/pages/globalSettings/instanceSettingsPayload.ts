@@ -93,6 +93,10 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
         values,
         'agent_workers.max_concurrent_result_commits'
       ),
+      artifact_download_presign_ttl_seconds: parseNumber(
+        values,
+        'agent_workers.artifact_download_presign_ttl_seconds'
+      ),
     },
     agent_enqueue: {
       workers: parseNumber(values, 'agent_enqueue.workers'),

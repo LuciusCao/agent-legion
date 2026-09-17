@@ -136,6 +136,11 @@ export const FIELD_GROUPS: FieldGroup[] = [
         integer: true,
         allowZero: true,
       },
+      {
+        path: 'agent_workers.artifact_download_presign_ttl_seconds',
+        label: '外部产物下载直连 URL 有效期（秒）',
+        integer: true,
+      },
     ],
     toggles: [],
   },

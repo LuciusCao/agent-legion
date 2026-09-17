@@ -6,13 +6,24 @@ another workspace is a 404, not a 403, so ids cannot be probed across
 workspaces). All data access stays behind the JobQueries facade
 (BOUNDARY-DATA-001); the listing merges the object-storage manifest (the
 authoritative copy, EXEC-ARTIFACT-STORE-001) with legacy local job_dir names.
+
+#739 appends presigned GET download URLs to the object-backed entries: the
+signature covers ONLY the manifest row's storage_key (a server-generated key
+under jobs/{workspace_id}/{job_id}/ — record_remote/verify_remote reject any
+key outside that layout, so no request input reaches the signed string), and
+the URL carries just SigV4 query parameters — no credentials. gzip-stored
+rows (#338) get no URL: S3 answers a presigned GET with the compressed bytes
+and no Content-Encoding header, so the raw endpoint's transparent-gzip
+passthrough has no presigned equivalent (see _entry_from_row).
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from server.app.jobs import JobQueries
+from server.app.services.job_artifact_gzip import is_gzip_key
 from server.app.services.job_artifact_media import raw_media_type
 from server.app.services.job_artifact_names import (
     is_downloadable_artifact_name,
@@ -170,7 +181,12 @@ class ExternalArtifactAccessService:
         """Manifest listing for the job's CURRENT artifacts (rerun semantics
         #508): one entry per name — the manifest row's content_hash/uploaded_at
         identify which execution produced the bytes being served. Jobs that
-        are still running list what exists so far (stable: callers poll)."""
+        are still running list what exists so far (stable: callers poll).
+
+        #739: object-backed bare-key entries carry a fresh presigned
+        download_url (signed per request against the row's storage_key —
+        URLs are minted here, never persisted); expires_at tells the caller
+        when to re-fetch the manifest."""
         job = self._job_in_workspace_or_404(workspace_id, job_id)
         return {
             "job_id": job_id,
@@ -181,8 +197,24 @@ class ExternalArtifactAccessService:
         }
 
     def _entry_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        # Caller contract: only reached with an enabled store (list_artifacts
+        # iterates store.rows_for_job) — assert keeps mypy seeing the guard.
+        store = self._enabled_store()
+        assert store is not None
         name = str(row["name"])
         size = row.get("size_bytes")
+        storage_key = str(row["storage_key"])
+        gzipped = is_gzip_key(storage_key)
+        download_url: str | None = None
+        expires_at: datetime | None = None
+        # 只对非 .gz 对象签发（#338/#739）：S3 直接响应 presigned GET，无法附
+        # Content-Encoding: gzip 头，客户端会拿到压缩字节却无从分辨存储形
+        # 态——gzip 产物保留 raw 端点作为唯一通道（透传 + 响应头语义）。
+        if not gzipped:
+            workers = self.settings.executor_runtime.agent_workers
+            ttl = int(workers.artifact_download_presign_ttl_seconds)
+            download_url = store.storage.presign_get(storage_key, expires_seconds=ttl)
+            expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         return {
             "name": name,
             "storage": "object",
@@ -191,12 +223,18 @@ class ExternalArtifactAccessService:
             "content_hash": str(row.get("content_hash") or ""),
             "uploaded_at": row.get("uploaded_at"),
             "media_type": raw_media_type(name),
+            "download_url": download_url,
+            "expires_at": expires_at,
+            "content_encoding": "gzip" if gzipped else "",
         }
 
     def _local_entry(self, name: str) -> dict[str, Any]:
         # Legacy job_dir-only artifact (never uploaded): no manifest row, so
         # size/hash are unknown at listing time; the raw endpoint still
-        # serves it from the local copy.
+        # serves it from the local copy. #739: never presigned — there is no
+        # object to sign for; download_url/expires_at stay null and
+        # content_encoding is empty (the raw endpoint serves local files
+        # uncompressed).
         return {
             "name": name,
             "storage": "local",
@@ -205,4 +243,7 @@ class ExternalArtifactAccessService:
             "content_hash": "",
             "uploaded_at": None,
             "media_type": raw_media_type(name),
+            "download_url": None,
+            "expires_at": None,
+            "content_encoding": "",
         }

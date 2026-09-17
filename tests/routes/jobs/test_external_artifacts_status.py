@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+from pathlib import Path
 
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from tests.routes.jobs.external_artifact_testlib import _register_object_artifact
 
 # --- 状态端点 ----------------------------------------------------------------
@@ -108,3 +110,84 @@ def test_artifact_list_unfinished_job_is_empty_not_404(two_workspaces):
     body = response.json()
     assert body["artifacts"] == []
     assert body["status"] in {"queued", "running", "completed", "failed", "cancelled"}
+
+
+# --- #739: presigned download_url -------------------------------------------------
+
+
+def test_artifact_list_presigns_bare_key_rows(two_workspaces):
+    """#739: bare-key object rows carry a presigned download_url +
+    expires_at (S3 answers directly — big media downloads leave the Host
+    process alone); the raw endpoint stays available as the fallback."""
+    c, job_a, _ = two_workspaces
+    _register_object_artifact(c, job_a, "clip.mp4", b"0123456789", gzipped=False)
+    store: JobArtifactObjectStore = c.app.state.job_artifact_objects
+    storage_key = f"jobs/{job_a['workspace_id']}/{job_a['id']}/clip.mp4"
+
+    body = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+
+    entry = next(e for e in body["artifacts"] if e["name"] == "clip.mp4")
+    # The signature covers exactly the manifest row's storage_key (no request
+    # input beyond job_id/artifact_name can steer it).
+    assert store.storage.presigned_gets == [storage_key]
+    assert entry["download_url"] == f"https://s3.test/download/{storage_key}"
+    assert entry["content_encoding"] == ""
+    assert entry["expires_at"] is not None
+
+
+def test_artifact_list_gzip_rows_carry_no_url(two_workspaces):
+    """#338/#739: gzip-stored objects get NO download_url — a presigned GET
+    would serve the compressed bytes without the Content-Encoding: gzip header
+    the raw endpoint adds, so callers could not tell the stored form apart.
+    content_encoding marks the form; the raw endpoint is the only channel."""
+    c, job_a, _ = two_workspaces
+    _register_object_artifact(c, job_a, "report.json", b'{"r": 1}')  # gzipped=True
+    store: JobArtifactObjectStore = c.app.state.job_artifact_objects
+
+    body = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+
+    assert store.storage.presigned_gets == []
+    entry = next(e for e in body["artifacts"] if e["name"] == "report.json")
+    assert entry["download_url"] is None
+    assert entry["expires_at"] is None
+    assert entry["content_encoding"] == "gzip"
+    # The raw endpoint still serves it (Content-Encoding: gzip passthrough —
+    # httpx transparently decodes, so the visible content is the JSON itself).
+    response = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/report.json/raw")
+    assert response.status_code == 200
+    assert response.headers["content-encoding"] == "gzip"
+    assert response.content == b'{"r": 1}'
+
+
+def test_artifact_list_local_entries_have_no_url(two_workspaces):
+    """local rows and object storage keep download_url/expires_at null —
+    there is no object to presign for; the raw endpoint serves them.
+    ``script.md`` is a declared output in the job snapshot — the local
+    listing is narrowed to declared names (#703 codex round 4)."""
+    c, job_a, _ = two_workspaces
+    storage = Path(job_a["storage_dir"])
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "script.md").write_text("old", encoding="utf-8")
+
+    body = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+
+    entry = next(e for e in body["artifacts"] if e["name"] == "script.md")
+    assert entry["storage"] == "local"
+    assert entry["download_url"] is None
+    assert entry["expires_at"] is None
+    assert entry["content_encoding"] == ""
+
+
+def test_artifact_list_urls_refresh_per_request(two_workspaces):
+    """URLs are minted per request (never persisted): two listings both
+    answer fresh presign calls — the client-side expiry rule is re-fetch the
+    manifest, and the server honours it by re-signing every time."""
+    c, job_a, _ = two_workspaces
+    _register_object_artifact(c, job_a, "clip.mp4", b"0123456789", gzipped=False)
+    storage_key = f"jobs/{job_a['workspace_id']}/{job_a['id']}/clip.mp4"
+    store: JobArtifactObjectStore = c.app.state.job_artifact_objects
+
+    c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+    c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+
+    assert store.storage.presigned_gets == [storage_key, storage_key]

@@ -4306,13 +4306,38 @@ export interface components {
      *     job_artifacts manifest (size/content_hash/uploaded_at distinguish the
      *     current execution after a rerun, #508); ``local`` rows are legacy
      *     job_dir-only names with no manifest metadata.
+     *
+     *     #739: object-backed bare-key rows additionally carry a presigned GET
+     *     ``download_url`` (S3 answers it directly — big media downloads leave the
+     *     Host process alone) plus the ``expires_at`` moment the URL stops working
+     *     (re-fetch the manifest after it). ``.gz`` rows (#338) get NO url: S3 would
+     *     serve the compressed stored bytes without the ``Content-Encoding: gzip``
+     *     header the raw endpoint adds, so callers could not tell the two forms
+     *     apart — the raw endpoint stays the only channel for them. ``local`` rows
+     *     and instances without object storage keep both fields null.
      */
     ExternalArtifactEntry: {
+      /**
+       * Content Encoding
+       * @description Stored-form marker: "gzip" when the object holds gzip-compressed bytes (#338) and download_url is null — the raw endpoint serves those with Content-Encoding: gzip passthrough; empty otherwise
+       * @default
+       */
+      content_encoding: string
       /**
        * Content Hash
        * @default
        */
       content_hash: string
+      /**
+       * Download Url
+       * @description Presigned object-storage GET URL (storage=object and bare-key rows only); null for local entries, gzip-stored objects and instances without object storage — use the raw endpoint then
+       */
+      download_url?: string | null
+      /**
+       * Expires At
+       * @description When download_url stops working (re-fetch the manifest after); null whenever download_url is null
+       */
+      expires_at?: string | null
       /**
        * Media Type
        * @description Content-Type the raw endpoint serves (whitelist-gated; JSON/text and non-whitelisted extensions download as octet-stream)
@@ -4476,6 +4501,8 @@ export interface components {
     }
     /** InstanceAgentWorkersSettings */
     InstanceAgentWorkersSettings: {
+      /** Artifact Download Presign Ttl Seconds */
+      artifact_download_presign_ttl_seconds: number
       /** Artifact Spot Check Percent */
       artifact_spot_check_percent: number
       /** Max Archive Bytes */

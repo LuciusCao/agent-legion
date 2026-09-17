@@ -76,6 +76,23 @@ def _seed_manifest_row(
     )
 
 
+def _seed_bare_key_row(store, job, name: str, payload: bytes) -> str:
+    """Register an UNCOMPRESSED manifest row (legacy/older-Worker form): the
+    storage key carries no .gz suffix — the only form presigned for #739."""
+    storage_key = f"jobs/{job['workspace_id']}/{job['id']}/{name}"
+    store.storage.objects[storage_key] = payload
+    store.record_remote(
+        workspace_id=job["workspace_id"],
+        job_id=job["id"],
+        node_key="upstream",
+        name=name,
+        storage_key=storage_key,
+        size_bytes=len(payload),
+        content_hash=hashlib.sha256(payload).hexdigest(),
+    )
+    return storage_key
+
+
 # --- 归属校验 ----------------------------------------------------------------
 
 
@@ -370,3 +387,117 @@ def test_open_raw_current_prefers_manifest_object_over_local(job_db):
     legacy = service.open_raw_current(job["id"], "legacy.txt")
     assert legacy.path is not None
     assert legacy.path.read_bytes() == b"legacy"
+
+
+# --- #739: presigned download_url -------------------------------------------------
+
+
+def test_list_artifacts_presigns_bare_key_rows(job_db, settings):
+    """#739：非 .gz 对象行签发 presigned GET——URL 只针对行的 storage_key
+    （服务端布局生成的 key，无请求输入参与），expires_at = now + 实例 TTL。"""
+    from datetime import UTC, datetime, timedelta
+
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    key = _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+
+    before = datetime.now(UTC)
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+    after = datetime.now(UTC)
+
+    entry = next(e for e in listing["artifacts"] if e["name"] == "clip.mp4")
+    assert entry["storage"] == "object"
+    # FakeObjectStorage 的 presign_get 返回 key 派生 URL 并记录调用——签名
+    # 对象就是行的 storage_key，不是 job_id/name 拼接（防 key 注入面）。
+    assert store.storage.presigned_gets == [key]
+    assert entry["download_url"] == f"https://s3.test/download/{key}"
+    assert entry["content_encoding"] == ""
+    # TTL 断言：默认 3600（实例设置契约的默认值）。
+    assert store.storage.get_expiries == [3600]
+    assert (
+        before + timedelta(seconds=3600) <= entry["expires_at"] <= after + timedelta(seconds=3600)
+    )
+
+
+def test_list_artifacts_respects_instance_presign_ttl(job_db, settings):
+    """实例设置改 TTL（重启生效语义：测试直接改运行时块），签发秒数跟随。"""
+    settings.executor_runtime.agent_workers.artifact_download_presign_ttl_seconds = 600
+
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+
+    assert store.storage.get_expiries == [600]
+    entry = next(e for e in listing["artifacts"] if e["name"] == "clip.mp4")
+    assert entry["expires_at"] is not None
+
+
+def test_list_artifacts_gzip_rows_get_no_url(job_db, settings):
+    """#338/#739：.gz 对象不签发——S3 直接响应 presigned GET 无法附
+    Content-Encoding: gzip 头，客户端会拿到压缩字节却无从分辨存储态；
+    content_encoding 字段标 gzip，raw 端点保留为唯一通道。"""
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    _seed_manifest_row(store, job, "report.json", b'{"r": 1}')
+
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+
+    assert store.storage.presigned_gets == []  # 从不签发
+    entry = next(e for e in listing["artifacts"] if e["name"] == "report.json")
+    assert entry["download_url"] is None
+    assert entry["expires_at"] is None
+    assert entry["content_encoding"] == "gzip"
+
+
+def test_list_artifacts_local_and_disabled_entries_have_no_url(job_db, settings):
+    """local 条目与未配置对象存储时：download_url/expires_at 全空（对象存储
+    之外没有可签发的东西），object_storage_enabled 语义不变。
+    ``script.md`` 是 job 快照的声明产物名——local 清单收窄到声明名
+    （#703 codex round 4 P2-1）。"""
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+    storage = resolve_job_dir(job, job_db.jobs_dir)
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "script.md").write_text("old", encoding="utf-8")
+
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+    entries = {e["name"]: e for e in listing["artifacts"]}
+
+    assert entries["script.md"]["storage"] == "local"
+    assert entries["script.md"]["download_url"] is None
+    assert entries["script.md"]["expires_at"] is None
+    assert entries["script.md"]["content_encoding"] == ""
+    assert listing["object_storage_enabled"] is True
+
+    # 未配置 bucket（store disabled）：对象行本来就不会列出，local 行无 URL。
+    disabled = ExternalArtifactAccessService(job_db, settings, object_store=_NoStorage())
+    degraded = disabled.list_artifacts(job["workspace_id"], job["id"])
+    assert degraded["object_storage_enabled"] is False
+    for entry in degraded["artifacts"]:
+        assert entry["download_url"] is None
+        assert entry["expires_at"] is None
+
+
+def test_download_url_carries_no_credentials(job_db, settings):
+    """安全面：签出的 URL 是签名参数查询串，不是凭据载体——secret/access
+    key 不得出现在 URL 里（Fake 的 URL 模板里也没有；真实 S3StorageClient
+    由 tests/services/test_s3_client.py 的 SigV4 断言覆盖同一性质）。"""
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+    entry = next(e for e in listing["artifacts"] if e["name"] == "clip.mp4")
+
+    url = entry["download_url"]
+    assert url is not None
+    assert "secret" not in url.lower()
+    assert "Signature=" in url or "X-Amz-Signature" in url or "/download/" in url

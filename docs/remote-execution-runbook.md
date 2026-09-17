@@ -453,8 +453,8 @@ with three read-only endpoints, all scoped by the workspace in the URL path:
 | 端点 | 作用 |
 | --- | --- |
 | `GET /api/workspaces/{workspace_id}/jobs/{job_id}` | 轻量状态：status/outcome/进度/产物名单 |
-| `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts` | 产物清单（名字、形态、大小、content_hash、uploaded_at、媒体类型） |
-| `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw` | 产物字节流（支持 `Range`，媒体类型按白名单） |
+| `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts` | 产物清单（名字、形态、大小、content_hash、uploaded_at、媒体类型、#739 直连下载 URL 及其有效期） |
+| `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw` | 产物字节流（支持 `Range`，媒体类型按白名单；直连 URL 的兜底通道） |
 
 **鉴权.** 与其它 workspace 端点同一守卫（`require_workspace_access`）：
 会话 cookie 或 #626 的 workspace API token（`Authorization: Bearer <token>`
@@ -500,6 +500,42 @@ workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前�
   `jobs/{workspace}/{job_id}/` 前缀：行被污染/写歪（未来写入方失守、
   运维 SQL 误操作）时按 404 处理并记 warning，绝不读穿 workspace 边界。
 
+**直连下载（#739）.** 清单里 `storage=object` 的条目带
+`download_url`（presigned GET URL，指向对象存储，签名按
+`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 可达地址生成）和 `expires_at`（URL 失效
+时刻，TTL 由实例设置 `agent_workers.artifact_download_presign_ttl_seconds`
+控制，默认 3600 秒，重启生效）。大产物（视频等媒体）优先走 `download_url`
+直连——字节流由 S3 直接应答，不占 Host 的连接、线程池与出口带宽，
+与调度循环（claim/heartbeat）不再争资源：
+
+- **何时不用直连**：`download_url` 为 null 时一律回落 raw 端点——
+  `local` 条目（从未上传对象存储）、gzip 存储的产物（见下）与未配置
+  对象存储的实例（`object_storage_enabled: false`）。
+- **public endpoint 未配置的形态**：实例只配 `AGENT_LEGION_S3_ENDPOINT`
+  （无 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`）时，`download_url` 非 null 但按
+  内部端点签名——部署网络外不可达（连接超时/拒绝）。外部调用方对该形态
+  应以 raw 端点兜底（可用「直连请求失败即回落 raw」的顺序重试），或由
+  运维侧给实例配置 public endpoint 后重启。
+- **gzip 产物不签发直连**：Worker 侧对象层 gzip（#338）把产物压缩存进
+  `.gz` 后缀的 key。raw 端点透传存储字节并附 `Content-Encoding: gzip`
+  响应头（浏览器原生解码、API 客户端自行 gunzip）；presigned URL 由 S3
+  直接应答，Host 无法附加该头，客户端会拿到压缩字节却无从分辨存储态。
+  因此 gzip 产物（清单里 `content_encoding: "gzip"`）不签发
+  `download_url`，raw 端点是它们唯一通道。
+- **过期重取**：URL 过期后 S3 返回 403。客户端以 `expires_at` 为准，
+  到期（或收到 403）重新 GET 清单拿新 URL——每次清单请求都重新签发，
+  URL 不持久化。
+- **Range**：直连下载的 `Range` 请求由 S3 侧处理，行为与 raw 端点透传
+  一致（媒体 seek 可用），Host 无需干预。
+- **安全**：URL 的签名对象是服务端生成的 `storage_key`
+  （`jobs/{workspace_id}/{job_id}/{name}` 布局，`record_remote`/
+  `verify_remote` 拒绝布局之外的 key——请求输入除 job_id/产物名外无法
+  影响签名目标）；URL 只含 SigV4 签名参数，不含任何凭据。
+- **吊销残留窗口**：吊销 workspace API token **不会**使已签发的
+  presigned URL 立即失效——URL 是对对象存储的独立签名，在 TTL 内（默认
+  1 小时，实例可调至 7 天上限）仍可继续下载；job 删除会同步删除对象、
+  切断该 URL。对接方的吊销 SOP 应包含「必要时缩短实例 TTL / 删除产物」。
+
 **最小完整示例**（curl；token 签发与提交面细节见
 [workspace-api-tokens.md](workspace-api-tokens.md)——#626 的 workspace
 API token 唯一支持的提交面是 `POST /runs`：`/job-batches` 挂载
@@ -532,17 +568,30 @@ while :; do
   sleep 15
 done
 
-# 4) 取产物清单（content_hash / uploaded_at 区分执行）
-curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
-  -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
+# 4) 取产物清单（content_hash / uploaded_at 区分执行；#739：object 条目
+#    另带 download_url 直连地址 + expires_at 有效期）
+MANIFEST=$(curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
+  -H "Authorization: Bearer $WORKSPACE_API_TOKEN")
 
-# 5) 下载指定产物（JSON/HTML/PDF/视频同一入口；视频可带 Range）
+# 5) 下载指定产物——直连优先（S3 直接应答，不穿 Host 代理），null 则回落
+#    raw 端点（local 条目 / gzip 产物 / 未配置对象存储时的唯一通道）。
 #    产物名按 URL 路径段 percent-encode（safe=""）：清单名里的 # 或 ?
 #    不编码会被客户端当成 fragment/query 截断，服务端收到残缺名字
 NAME=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
   "report.pdf")
-curl -sS -o report.pdf "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/$NAME/raw" \
-  -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
+URL=$(printf '%s' "$MANIFEST" | python3 -c '
+import json,sys
+e = next(a for a in json.load(sys.stdin)["artifacts"] if a["name"] == "report.pdf")
+print(e["download_url"] or "")')
+if [ -n "$URL" ]; then
+  # 直连对象存储：不带 Authorization 头（S3 只按 URL 签名参数应答）；
+  # 过期(403)则重取清单
+  curl -sS -o report.pdf "$URL"
+else
+  curl -sS -o report.pdf \
+    "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/$NAME/raw" \
+    -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
+fi
 ```
 
 Python 等价（`requests`）：
@@ -569,11 +618,18 @@ while (st := s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()["status"]
 
 manifest = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts").json()
 for entry in manifest["artifacts"]:
-    # safe=""：名字里的 # 或 ? 必须 percent-encode——否则 # 起被当作
-    # fragment、? 起被当作 query，服务端收到截断后的名字（子路径名的 /
-    # 被一并编成 %2F 也无妨：服务端解码后仍按多段名走 {artifact_name:path}）
-    blob = s.get(
-        f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts/{quote(entry['name'], safe='')}/raw"
-    ).content
+    # 两条通道分开走：Host API 用带 Bearer 的 session；presigned 直连下载
+    # 必须用不带任何会话头的独立请求——requests.Session 的会话级头会合并进
+    # 每个请求（不区分目标主机），直接 s.get(download_url) 会把 workspace
+    # API token 原样发给对象存储主机。S3 只按 URL 里的 SigV4 签名参数应答。
+    if entry.get("download_url"):
+        blob = requests.get(entry["download_url"]).content  # 无鉴权头；过期(403)重取清单
+    else:
+        # safe=""：名字里的 # 或 ? 必须 percent-encode——否则 # 起被当作
+        # fragment、? 起被当作 query，服务端收到截断后的名字（子路径名的 /
+        # 被一并编成 %2F 也无妨：服务端解码后仍按多段名走 {artifact_name:path}）
+        blob = s.get(
+            f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts/{quote(entry['name'], safe='')}/raw"
+        ).content
     # entry["content_hash"] 是未压缩内容的 sha256，可校验完整性
 ```

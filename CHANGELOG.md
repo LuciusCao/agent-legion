@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - 主控制台的 Worker 控制台入口与接入说明：此前界面三处文案提到「Worker 控制台」却没有任何链接，新用户不知道去哪里粘贴 token、打开领取。workspace「设置 → Agent 与 Worker」顶部新增「Worker 与 Worker 控制台」卡片（控制台是什么、在哪台机器、接入三步、两个默认关闭的开关）；签发 Key 成功后追加「下一步」三步指引；设置页 Worker 列表与顶栏「运行中」弹层的空态都带「打开 Worker 控制台」链接（新标签页打开，不内嵌、不代理）。地址来自新增 env-only 配置 `AGENT_LEGION_WORKER_CONSOLE_URL`（`agent_workers.console_url`，随 `GET /api/agent-workers` 的 `console_url` 下发）：`make dev-up` 按 Worker 端口自动注入、`native-prod-up.sh` 与 Host compose 注入 `:8787`，显式留空则退化为纯文字说明；回环地址的链接悬停提示说明只能在 Worker 所在机器打开。
 **Breaking (deployments):** 自托管 SeaweedFS 的 volume 上限从「按磁盘余量自动推导」（`-volume.max=0`）改为显式上限 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`（默认 100，≈100 × 2GiB 可增长容量，volume 惰性创建不预占磁盘）。磁盘余量大的存量部署自动推导值可能远超 100——升级前请用 `weed shell` 的 `volume.list` 确认现有 volume 数低于新上限（不足时在 `deploy/.env` 调大，无需迁移数据），否则 master 停止分配新 volume、新写入返回 503。详见 docs/materials-storage-deployment.md「可写槽位耗尽」。
 
+### Added
+- 外部产物清单直连下载 URL（issue #739）：`GET .../jobs/{job_id}/artifacts` 的 object-backed 条目新增 `download_url`（presigned GET，签名按 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 可达地址生成、只含 SigV4 签名参数不含凭据）与 `expires_at`（失效时刻，TTL 由实例设置 `agent_workers.artifact_download_presign_ttl_seconds` 控制，默认 3600 秒、`ge=60 le=604800` 重启生效）。大产物（视频等媒体）改走 S3 直连应答，不再穿 Host 的 64KiB 块 StreamingResponse 代理（连接/线程池/出口带宽与调度循环争资源的问题）；raw 端点保留为兜底与 local 形态产物的唯一通道，`object_storage_enabled` 语义不变。gzip 存储产物（#338 `.gz` key）不签发直连——S3 直接应答无法附 `Content-Encoding: gzip` 头，客户端无法分辨存储态，清单改标 `content_encoding: "gzip"` 指引走 raw 透传；`local` 条目与未配置对象存储时 `download_url`/`expires_at` 为 null。URL 每次清单请求重新签发（不持久化），客户端以 `expires_at` 为准到期重取清单。用法见 docs/remote-execution-runbook.md §9。
+
 ### Fixed
 - SeaweedFS「假写满」（PutObject 全量 503 / master 日志 no free volumes，磁盘远未写满）：`-volume.max=0` 的自动推导在 volume server 注册信息 stale 时把可写槽位判成 0。上限改为显式可配（见上方部署警示），运维文档补充「可写槽位耗尽」机制说明与恢复步骤（重启重注册 + `volume.deleteEmpty` 回收空 volume）。
 
