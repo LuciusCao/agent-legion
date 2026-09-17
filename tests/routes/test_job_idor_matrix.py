@@ -200,9 +200,31 @@ def test_workspace_bound_scoped_token_cannot_read_other_workspace_job(
     # Bound workspace's job stays readable...
     assert scoped.get(f"/api/jobs/{job_b}").status_code == 200
     # ...the other workspace's job is refused even though the minter is a
-    # member there (404, same shape as any foreign job).
+    # member there (404, same shape as any foreign job). The binding guard
+    # covers the bare job routes; the generic workspace-prefixed surface
+    # keeps its original semantics (its own scoped contracts live on the
+    # studio-agent tool / chat-read surfaces).
     assert scoped.get(f"/api/jobs/{job_a}").status_code == 404
     assert scoped.get(f"/api/jobs/{job_a}/token-usage").status_code == 404
+
+
+def test_admin_minted_scoped_token_stays_workspace_bound(client, two_workspaces_with_jobs) -> None:
+    """Scoped tokens inherit the minter's role, so an admin-minted run token
+    must NOT take the admin fast path past the workspace binding (review
+    R2 P2) — the leaked-token blast radius stays the bound workspace."""
+    from server.app.auth import scoped_tokens
+
+    ws_a, ws_b, job_a, _job_b = two_workspaces_with_jobs
+    job_db = client.app.state.job_db
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id=ws_b)
+
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+    assert scoped.get(f"/api/jobs/{job_a}").status_code == 404
+    assert scoped.get(f"/api/jobs/{job_a}/token-usage").status_code == 404
+    # The admin session itself still passes everywhere (fast path intact).
+    assert client.get(f"/api/jobs/{job_a}", headers=CSRF).status_code == 200
 
 
 def test_batch_endpoints_do_not_leak_foreign_job_existence(
@@ -228,5 +250,58 @@ def test_batch_endpoints_do_not_leak_foreign_job_existence(
     assert results["totally_unknown_job"]["reason_code"] == "not_found"
     assert results[job_a]["message"] == results["totally_unknown_job"]["message"]
     # And the foreign job survives.
+    assert client.get(f"/api/jobs/{job_a}", headers=CSRF).status_code == 200
+    _ = ws_a
+
+
+# Every batch mutation surface that takes explicit job_ids must answer a
+# foreign-workspace id and an unknown id identically ((reason_code, message)
+# pairs) — a per-endpoint literal drifting apart would silently rebuild the
+# existence oracle (review R2 P3).
+_BATCH_SURFACES: list[tuple[str, str, dict]] = [
+    ("DELETE", "/api/workspaces/{ws}/jobs/batch", {"job_ids": ["{job_a}", "{unknown}"]}),
+    (
+        "POST",
+        "/api/workspaces/{ws}/jobs/batch-rerun",
+        {"job_ids": ["{job_a}", "{unknown}"], "from_failed_node": True},
+    ),
+    (
+        "POST",
+        "/api/workspaces/{ws}/jobs/batch-run-to",
+        {"job_ids": ["{job_a}", "{unknown}"], "target_node_key": "any"},
+    ),
+    (
+        "POST",
+        "/api/workspaces/{ws}/jobs/batch-upgrade-workflow",
+        {"job_ids": ["{job_a}", "{unknown}"]},
+    ),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "payload"), _BATCH_SURFACES)
+def test_all_batch_surfaces_answer_foreign_and_unknown_identically(
+    client, two_workspaces_with_jobs, method, path, payload
+) -> None:
+    ws_a, ws_b, job_a, _job_b = two_workspaces_with_jobs
+    member_id = _create_member(client, "batch-matrix", "pw-bm")
+    client.app.state.job_db.upsert_workspace_member(ws_b, member_id, "editor")
+
+    beta = _member_client(client, "batch-matrix", "pw-bm")
+    url = path.format(ws=ws_b)
+    body = {
+        key: [value.replace("{job_a}", job_a).replace("{unknown}", "no_such_job") for value in val]
+        if isinstance(val, list)
+        else val
+        for key, val in payload.items()
+    }
+    response = beta.request(method, url, json=body)
+    assert response.status_code == 200, (method, url, response.text)
+    items = response.json().get("results") or response.json().get("jobs") or []
+    by_id = {item.get("job_id"): item for item in items}
+    foreign = by_id.get(job_a)
+    unknown = by_id.get("no_such_job")
+    assert foreign is not None and unknown is not None, (method, url, items)
+    assert foreign.get("reason_code") == unknown.get("reason_code"), (method, url)
+    assert foreign.get("message") == unknown.get("message"), (method, url)
     assert client.get(f"/api/jobs/{job_a}", headers=CSRF).status_code == 200
     _ = ws_a

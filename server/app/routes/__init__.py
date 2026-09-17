@@ -3,7 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from ..auth.studio_authoring import require_studio_authoring
-from ..auth.workspace_access import require_workspace_access
+from ..auth.workspace_access import (
+    require_job_workspace_access,
+    require_workspace_access,
+)
 from .agent_definitions import create_agent_definitions_router
 from .agent_workers import create_agent_workers_router
 from .agents import create_agents_router
@@ -149,7 +152,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
             deps.studio_chat_service, job_event_manager=deps.job_event_manager
         )
         studio_secured(chat)
-    job_group = APIRouter(dependencies=[Depends(require_workspace_access)])
+    job_group = APIRouter(dependencies=[Depends(require_job_workspace_access)])
     include_job_routes(
         job_group,
         deps.job_db,

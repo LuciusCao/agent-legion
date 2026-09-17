@@ -335,8 +335,10 @@ _PATH_PARAM_VALUES = {
 }
 
 
-def _effecting_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
-    values = {**_PATH_PARAM_VALUES, "workspace_id": workspace_id}
+def _effecting_endpoints(
+    workspace_id: str, values_extra: dict | None = None
+) -> list[tuple[str, str, dict | None]]:
+    values = {**_PATH_PARAM_VALUES, "workspace_id": workspace_id, **(values_extra or {})}
     return [
         (
             method,
@@ -366,8 +368,14 @@ def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> Non
     workspace_id = str(
         job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-guard-ws")["id"]
     )
+    # #710's guard resolves the job's workspace before the route-level scope
+    # rejection, so a nonexistent placeholder job would 404 there instead of
+    # exercising the 403 the inventory asserts — seed a real one.
+    from tests.routes.test_job_idor_matrix import _make_job
+
+    real_job = _make_job(client, workspace_id)
     scoped = _scoped_client(client, job_db)
-    for method, url, payload in _effecting_endpoints(workspace_id):
+    for method, url, payload in _effecting_endpoints(workspace_id, {"job_id": real_job}):
         response = scoped.request(method, url, json=payload)
         assert response.status_code == 403, f"{method} {url} -> {response.status_code}"
         assert "Studio agent scope" in response.json()["detail"]
@@ -423,12 +431,59 @@ def test_full_session_still_reaches_effecting_endpoints(client, job_db) -> None:
     workspace_id = str(
         job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-admin-ws")["id"]
     )
+    # Same real-job requirement as the scoped-token inventory above (#710).
+    # Seed the workspace once, then mint one fresh job per mutating endpoint:
+    # the admin pass really deletes its job, and re-seeding the workspace
+    # agent definitions is not idempotent (entity version conflict).
+    from tests.helpers import (
+        publish_legacy_intake_revision,
+        seed_workspace_agent_definitions,
+    )
+
+    seed_workspace_agent_definitions(workspace_id)
+    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
+
+    mint_seq = iter(range(10**9))
+
+    def _mint_job() -> str:
+        created = client.post(
+            f"/api/workspaces/{workspace_id}/job-batches",
+            json={
+                "workflow_key": workspace_id,
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": [f"scope_admin_{next(mint_seq)}"],
+            },
+        )
+        assert created.status_code == 200, created.text
+        return created.json()["jobs"][0]["id"]
+
     scoped = _scoped_client(client, job_db)
-    for method, url, payload in _effecting_endpoints(workspace_id):
-        admin_response = client.request(method, url, json=payload)
-        assert admin_response.status_code != 403, f"{method} {url}"
+    # Scoped round first, on a shared live job: every request is refused
+    # with 403 and has no side effects.
+    for method, url, payload in _effecting_endpoints(workspace_id, {"job_id": _mint_job()}):
         scoped_response = scoped.request(method, url, json=payload)
         assert scoped_response.status_code == 403, f"{method} {url}"
+    # Admin round: reachability only (never 401/403). The DELETE workspace
+    # entry may remove the workspace mid-loop, and the DELETE job entries
+    # consume their jobs — a 404 on later entries is the admin's own doing
+    # and still proves reachability, so minting is best-effort.
+    for method, url, payload in _effecting_endpoints(workspace_id, {"job_id": None}):
+        if "/jobs/" in url and client.get(f"/api/workspaces/{workspace_id}").status_code == 200:
+            created = client.post(
+                f"/api/workspaces/{workspace_id}/job-batches",
+                json={
+                    "workflow_key": workspace_id,
+                    "source_kind": "direct_ids",
+                    "knowledge_point_ids": [f"scope_admin_{next(mint_seq)}"],
+                },
+            )
+            if created.status_code == 200:
+                fresh = created.json()["jobs"][0]["id"]
+                head, _, rest = url.partition("/jobs/")
+                job_segment, _, tail = rest.partition("/")
+                url = f"{head}/jobs/{fresh}/{tail}" if tail else f"{head}/jobs/{fresh}"
+        admin_response = client.request(method, url, json=payload)
+        assert admin_response.status_code not in (401, 403), f"{method} {url}"
 
 
 _ADMIN_ENDPOINTS: list[tuple[str, str, dict | None]] = [
