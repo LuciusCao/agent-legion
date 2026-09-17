@@ -8487,7 +8487,8 @@ export interface operations {
   }
   get_skill_api_agent_catalog_skills__skill_key__get: {
     parameters: {
-      query?: {
+      query: {
+        workspace_id: string
         ref?: string | null
       }
       header?: never
@@ -10009,6 +10010,7 @@ export interface operations {
     parameters: {
       query: {
         path: string
+        workspace_id: string
       }
       header?: never
       path?: never
@@ -10038,7 +10040,9 @@ export interface operations {
   }
   validate_skill_api_skills_validate_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path?: never
       cookie?: never

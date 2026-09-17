@@ -100,11 +100,17 @@ def test_get_skill_and_ref_preview(client_factory, job_db, skill_home) -> None:
 def test_preview_endpoint_ref_param(client_factory, skill_home) -> None:
     # The Studio panel surface shares the implementation with the MCP read.
     with client_factory(fresh=True) as client:
-        tagged = client.get(f"/api/agent-catalog/skills/{_KEY}", params={"ref": "v1.0.0"})
+        tagged = client.get(
+            f"/api/agent-catalog/skills/{_KEY}",
+            params={"ref": "v1.0.0", "workspace_id": _WS},
+        )
         assert tagged.status_code == 200, tagged.text
         assert tagged.json()["ref"] == "v1.0.0"
         assert (
-            client.get(f"/api/agent-catalog/skills/{_KEY}", params={"ref": "nope"}).status_code
+            client.get(
+                f"/api/agent-catalog/skills/{_KEY}",
+                params={"ref": "nope", "workspace_id": _WS},
+            ).status_code
             == 404
         )
 

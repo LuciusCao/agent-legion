@@ -348,14 +348,23 @@ def test_skill_catalog_requires_workspace_membership(client, tmp_path, monkeypat
     # unknown-skill 404 shape.
     _create_member(client, "skill-outsider", "pw-skill")
     outsider = _member_client(client, "skill-outsider", "pw-skill")
-    response = outsider.get(f"/api/agent-catalog/skills/{skill_key}")
+
+    def _read(c, ws="ws_victim"):
+        return c.get(f"/api/agent-catalog/skills/{skill_key}", params={"workspace_id": ws})
+
+    # Non-member probe before the workspace exists: uniform workspace-shaped
+    # 404 from the router-level guard — the same refusal every other
+    # query-scoped route gives, so no oracle between "no such workspace" and
+    # "not a member" on this surface.
+    response = _read(outsider)
     assert response.status_code == 404
-    assert response.json()["detail"] == "Skill not found"
-    # Same shape for a key whose workspace segment does not exist at all —
-    # no oracle between "no such workspace" and "not a member".
-    missing_ws = outsider.get("/api/agent-catalog/skills/no_such_ws/secret_capability")
+    assert response.json()["detail"] == "Workspace not found"
+    missing_ws = outsider.get(
+        "/api/agent-catalog/skills/no_such_ws/secret_capability",
+        params={"workspace_id": "no_such_ws"},
+    )
     assert missing_ws.status_code == 404
-    assert missing_ws.json()["detail"] == "Skill not found"
+    assert missing_ws.json()["detail"] == "Workspace not found"
 
     # A member of the owning workspace reads it fine.
     ws_victim = client.post(
@@ -363,9 +372,104 @@ def test_skill_catalog_requires_workspace_membership(client, tmp_path, monkeypat
     ).json()["workspace"]["id"]
     member_id = client.app.state.job_db.get_user_credentials("skill-outsider")["id"]
     client.app.state.job_db.upsert_workspace_member(ws_victim, member_id, "viewer")
-    ok = outsider.get(f"/api/agent-catalog/skills/{skill_key}")
+    ok = _read(outsider, ws_victim)
     assert ok.status_code == 200
     assert any(f["path"] == "SKILL.md" for f in ok.json()["files"])
 
+    # A member of ANOTHER workspace cannot read it through their own scope:
+    # the key's first segment is an existing workspace's id (create_skill
+    # layout), so workspace-directory strictness pins it to ws_victim.
+    ws_other = client.post(
+        "/api/workspaces", json={"id": "ws_other", "name": "Other"}, headers=CSRF
+    ).json()["workspace"]["id"]
+    other_member = _create_member(client, "skill-other", "pw-other")
+    client.app.state.job_db.upsert_workspace_member(ws_other, other_member, "viewer")
+    other = _member_client(client, "skill-other", "pw-other")
+    cross = other.get(f"/api/agent-catalog/skills/{skill_key}", params={"workspace_id": ws_other})
+    assert cross.status_code == 404
+    assert cross.json()["detail"] == "Skill not found"
+
     # Admin passes regardless of membership.
-    assert client.get(f"/api/agent-catalog/skills/{skill_key}", headers=CSRF).status_code == 200
+    assert _read(client, ws_victim).status_code == 200
+
+
+def test_skill_catalog_scoped_binding_is_enforced(client, tmp_path, monkeypatch) -> None:
+    """codex P1 on #745: a workspace-bound run token must not read another
+    workspace's skills through the catalog/validate/tags surfaces — even
+    when the minter is a member (or admin) of both."""
+    from server.app.auth import scoped_tokens
+
+    base = tmp_path / "home" / ".agents" / "skills"
+    skill_key = "ws_victim/secret_capability"
+    _make_skill_repo(base / skill_key)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ws_a = client.post(
+        "/api/workspaces", json={"id": "ws_victim", "name": "Victim"}, headers=CSRF
+    ).json()["workspace"]["id"]
+    ws_b = client.post(
+        "/api/workspaces", json={"id": "ws_reader", "name": "Reader"}, headers=CSRF
+    ).json()["workspace"]["id"]
+    member_id = _create_member(client, "skill-dual", "pw-dual")
+    job_db = client.app.state.job_db
+    job_db.upsert_workspace_member(ws_a, member_id, "viewer")
+    job_db.upsert_workspace_member(ws_b, member_id, "viewer")
+
+    token = scoped_tokens.mint_scoped_token(job_db, member_id, workspace_id=ws_b)
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+    # Bound to ws_reader: reading ws_victim's workspace-directory skill via
+    # ws_victim's scope is refused (binding, before any role logic) — even
+    # though the minter is a member of ws_victim.
+    response = scoped.get(f"/api/agent-catalog/skills/{skill_key}", params={"workspace_id": ws_a})
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Workspace not found"
+    # The tags surface shares the binding guard.
+    skill_path = str(base / skill_key)
+    assert (
+        scoped.get(
+            "/api/skills/tags", params={"path": skill_path, "workspace_id": ws_a}
+        ).status_code
+        == 404
+    )
+    # Sanity through the minter's own workspace: the ws_victim-directory key
+    # is refused by the directory strictness (key belongs to ws_victim), and
+    # a group-directory key under the same scope reads fine.
+    group_key = "shared-group/public-skill"
+    _make_skill_repo(base / group_key)
+    assert (
+        scoped.get(
+            f"/api/agent-catalog/skills/{skill_key}", params={"workspace_id": ws_b}
+        ).status_code
+        == 404
+    )
+    assert (
+        scoped.get(
+            f"/api/agent-catalog/skills/{group_key}", params={"workspace_id": ws_b}
+        ).status_code
+        == 200
+    )
+
+
+def test_skill_catalog_group_directory_is_shared_across_workspaces(
+    client, tmp_path, monkeypatch
+) -> None:
+    """codex P2 on #745: the demo layout has a GROUP directory whose name
+    differs from every workspace id (hyphens vs underscores). Such keys are
+    shared read surfaces: any member can read them through their own
+    workspace scope — the previous key-equals-workspace assumption locked
+    the demo out."""
+    base = tmp_path / "home" / ".agents" / "skills"
+    group_key = "education-video-problems-generation/write-script"
+    _make_skill_repo(base / group_key)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ws_demo = client.post(
+        "/api/workspaces",
+        json={"id": "education_video_problems_generation", "name": "Demo"},
+        headers=CSRF,
+    ).json()["workspace"]["id"]
+    member_id = _create_member(client, "demo-member", "pw-demo")
+    client.app.state.job_db.upsert_workspace_member(ws_demo, member_id, "viewer")
+    member = _member_client(client, "demo-member", "pw-demo")
+    ok = member.get(f"/api/agent-catalog/skills/{group_key}", params={"workspace_id": ws_demo})
+    assert ok.status_code == 200, ok.text
+    assert any(f["path"] == "SKILL.md" for f in ok.json()["files"])

@@ -6,16 +6,25 @@ import type {
 } from '../types'
 
 export async function validateSkillPath(
-  path: string
+  path: string,
+  workspaceId: string
 ): Promise<SkillValidateResponse> {
-  return api('/api/skills/validate', {
-    method: 'POST',
-    body: JSON.stringify({ path }),
-  })
+  return api(
+    `/api/skills/validate?workspace_id=${encodeURIComponent(workspaceId)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }
+  )
 }
 
-export async function fetchSkillTags(path: string): Promise<SkillTagsResponse> {
-  return api(`/api/skills/tags?path=${encodeURIComponent(path)}`)
+export async function fetchSkillTags(
+  path: string,
+  workspaceId: string
+): Promise<SkillTagsResponse> {
+  return api(
+    `/api/skills/tags?path=${encodeURIComponent(path)}&workspace_id=${encodeURIComponent(workspaceId)}`
+  )
 }
 
 export async function fetchSkillDirectories(

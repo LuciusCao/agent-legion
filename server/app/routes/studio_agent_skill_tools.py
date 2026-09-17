@@ -56,7 +56,7 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
     )
     def get_skill(workspace_id: str, skill_key: str, ref: str | None = None) -> SkillDetailResponse:
         try:
-            _require_skill_in_workspace(skill_key, workspace_id)
+            _require_skill_in_workspace(job_db, skill_key, workspace_id)
             return SkillDetailResponse(**catalog.detail(skill_key, ref=ref))
         except JobServiceError as exc:
             raise_job_http_error(exc)
@@ -67,7 +67,7 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
     )
     def validate_skill(workspace_id: str, skill_key: str) -> SkillValidateToolResponse:
         try:
-            _require_skill_in_workspace(skill_key, workspace_id)
+            _require_skill_in_workspace(job_db, skill_key, workspace_id)
             return SkillValidateToolResponse(**editing.validate(skill_key))
         except JobServiceError as exc:
             raise_job_http_error(exc)
@@ -82,7 +82,7 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
     ) -> SkillSaveVersionResponse:
         files = [SkillFileWrite(path=item.path, content=item.content) for item in payload.files]
         try:
-            _require_skill_in_workspace(skill_key, workspace_id)
+            _require_skill_in_workspace(job_db, skill_key, workspace_id)
             result = editing.save_version(skill_key, files, payload.new_tag, payload.message)
         except JobServiceError as exc:
             raise_job_http_error(exc)
@@ -97,13 +97,20 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
     return router
 
 
-def _require_skill_in_workspace(skill_key: str, workspace_id: str) -> None:
-    """A skill key's first segment IS its workspace directory (#710 red-team
-    follow-up): ``<workspace>/<capability>``. The router-level workspace
-    binding already pins the caller to one workspace; this check refuses a
-    key whose workspace segment disagrees with the path scope, so a bound
-    token cannot reach into a foreign workspace's skill repo through a
-    mismatched key."""
+def _require_skill_in_workspace(job_db: JobQueries, skill_key: str, workspace_id: str) -> None:
+    """Key/path agreement for the skill tool surface (#710, codex P2 on
+    #745): a skill key's first segment is a GROUP name, not necessarily a
+    workspace id (the demo ships group ``education-video-problems-generation``
+    under workspace ``education_video_problems_generation``). The router-level
+    guards already pin the caller to one workspace; this check adds the
+    workspace-directory strictness — when the key's first segment IS an
+    existing workspace's id (the create_skill layout), the key must belong
+    to the caller's workspace, so a bound token cannot reach into a foreign
+    workspace's skill repo through a mismatched key. Group directories stay
+    reachable from any workspace the caller is bound to (shared authoring
+    surface, demo layout)."""
     key_workspace = skill_key.partition("/")[0]
-    if key_workspace != workspace_id:
+    if key_workspace == workspace_id:
+        return
+    if job_db.get_workspace(key_workspace) is not None:
         raise NotFoundError(f"Skill not found in workspace {workspace_id}")

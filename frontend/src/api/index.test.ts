@@ -356,10 +356,10 @@ describe('agent catalog api', () => {
     const fetchMock = mockFetchJson({ key: 'demo/review', files: [] })
     global.fetch = fetchMock
 
-    await getSkillDetail('demo/review')
+    await getSkillDetail('demo/review', 'ws_demo')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-catalog/skills/demo/review',
+      '/api/agent-catalog/skills/demo/review?workspace_id=ws_demo',
       expect.objectContaining({ cache: 'no-store' })
     )
   })

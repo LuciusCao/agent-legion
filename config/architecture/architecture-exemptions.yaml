@@ -1,5 +1,27 @@
 exemptions:
 - check: architecture.file_budget
+  path: server/app/routes/skill_catalog_route.py
+  reason: 'Issue #710 codex follow-up (P1/P2 on #745): the skill detail route gains the
+    two-part guard — require_skill_scope_binding (workspace-bound run tokens, incl.
+    admin-minted, refused off their binding) and require_skill_key_in_workspace
+    (group-vs-workspace directory strictness; the demo group differs from every
+    workspace id) — plus the workspace_id query scope, 17 effective lines past the
+    27 baseline. Remove when the guard pair moves into auth/dependencies or a budget
+    re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/710
+  ceiling: 47
+- check: architecture.file_budget
+  path: server/app/routes/studio_agent_skill_tools.py
+  reason: 'Issue #710 codex follow-up (P2 on #745): _require_skill_in_workspace gains
+    the group-vs-workspace directory check (get_workspace lookup for the create_skill
+    layout) on top of the #710 workspace-scoped mount — 17 effective lines past the
+    57 baseline. Remove when the key-agreement guards consolidate with
+    skill_catalog_route or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/710
+  ceiling: 77
+- check: architecture.file_budget
   path: server/app/routes/skills.py
   reason: 'Issue #710 red-team follow-up (V1): the skills validate/tags endpoints take an
     absolute skill path whose first base-relative segment is the workspace — the routes
