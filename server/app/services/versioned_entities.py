@@ -287,9 +287,11 @@ class VersionedEntityStore:
                 raise _integrity_conflict(exc, self._entity_type) from exc
             if cursor.rowcount == 0:
                 if expected_hash is not None:
+                    # 中性表述（R7 P3-2）：该分支同时覆盖「被覆盖」与
+                    # 「并发 publish 已把它发掉」两种形态，不能只说前者。
                     raise ConflictError(
                         f"draft hash mismatch for {self._entity_type} {entity_key}:"
-                        " the draft was overwritten by another session; reload and retry"
+                        " the draft changed or was published concurrently; reload and retry"
                     )
                 raise ConflictError("entity draft changed concurrently; reload and retry")
             return _get_entity_by_id(conn, draft["id"])
