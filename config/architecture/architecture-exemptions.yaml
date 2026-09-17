@@ -1031,3 +1031,18 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
   ceiling: 543
   expires: 2027-03-31
+- check: architecture.file_budget
+  path: velites/src/provider/anthropic.rs
+  reason: 'Issue #637 review follow-up closes the same three unbounded surfaces
+    the openai_compat caps sealed (per codex round-2 P2-1): a 2 MiB SSE line
+    cap via push_lines_bounded, 32 MiB per-field caps via push_bounded over
+    content_block_start/delta payloads, and a 32 MiB whole-response aggregate
+    via Aggregate::total_chars + check_total at the apply tail — mechanically
+    ported so an anomalous Anthropic gateway cannot OOM the agent. Ceiling at
+    actual + 10 per the dated-exemption convention. Remove when the bounded
+    helpers consolidate into a shared provider module or the file shrinks
+    below the old floor.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
+  ceiling: 691
+  expires: 2027-03-31

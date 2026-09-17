@@ -68,8 +68,11 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
 /// Resolve one file against the sandbox and parse it as JSON.
 fn load_json(ctx: &ToolContext, path: &str) -> Result<(PathBuf, Value), ToolError> {
     let resolved = resolve_in_cwd(&ctx.cwd, path)?;
-    // #637 内存防线：与 read 工具同一大小上限（read_to_string 整文件
-    // 读入）；超限直接报错，提示改走 bash 提取字段。
+    // #637 内存防线：与 read 工具同一大小上限（整文件读入）；超限直接
+    // 报错，提示改走 bash 提取字段。metadata 快照只是普通文件的快速
+    // 路径；真正执行上限的是 read_to_string_bounded 的有界读取
+    // （#689 review P1：FIFO 的 len() 恒为 0、普通文件检查后仍可增长，
+    // 单靠快照可被完全绕过）。
     let size = std::fs::metadata(&resolved)?.len();
     if size > truncate::MAX_CAPTURE_BYTES {
         return Err(ToolError::TooLarge(format!(
@@ -78,7 +81,17 @@ fn load_json(ctx: &ToolContext, path: &str) -> Result<(PathBuf, Value), ToolErro
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
         )));
     }
-    let raw = std::fs::read_to_string(&resolved)?;
+    let raw = match truncate::read_to_string_bounded(&resolved)? {
+        truncate::BoundedRead::Content(raw) => raw,
+        // 读到 cap+1 字节仍未到 EOF：快照撒谎了（FIFO/增长中的文件），
+        // 上限由读取本身强制执行。真实总大小不可知，文案不伪造精确值。
+        truncate::BoundedRead::Oversized => {
+            return Err(ToolError::TooLarge(format!(
+                "{path} exceeds the {} whole-file limit of the json tool (growing/FIFO sources report no exact size). Extract the needed fields via bash (e.g. jq/python) instead",
+                truncate::MAX_CAPTURE_BYTES_DISPLAY,
+            )));
+        }
+    };
     let value: Value = serde_json::from_str(&raw)
         .map_err(|err| ToolError::InvalidArgs(format!("{path} is not valid JSON: {err}")))?;
     Ok((resolved, value))

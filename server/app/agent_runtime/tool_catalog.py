@@ -79,7 +79,7 @@ VELITES_TOOL_CATALOG: tuple[ToolCatalogEntry, ...] = (
             "saved to a temp file (unless output capture hit the 4MB "
             "per-stream cap — then the head is kept, the tail is dropped, "
             "and nothing is saved: redirect to a file and read it in "
-            "chunks instead). On timeout the whole process group "
+            "chunks with bash instead). On timeout the whole process group "
             "gets SIGTERM, then SIGKILL after a grace period. "
             "Full-disk scan commands (e.g. `find /`) are rejected; "
             "search within the working directory or a specific "

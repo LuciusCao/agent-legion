@@ -18,7 +18,8 @@
 //! buffer without bound. `output_bytes` still reports the FULL volume
 //! (kept + dropped), and the capped run's notice says the tail was dropped
 //! and NO full-output file exists (there is nothing complete to write),
-//! pointing the model at file redirection + chunked reads instead.
+//! pointing the model at file redirection + chunked bash reads instead
+//! (the `read` tool rejects over-cap whole files even with offset/limit).
 //!
 //! #469 phase instrumentation: the tool result carries `timing` with the
 //! phase decomposition `totalMs ≈ spawnMs + firstByteMs + restMs + reapMs`
@@ -251,13 +252,21 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         // #637 触顶分支：保留的是流头部、尾部已被丢弃——完整输出在内存
         // 中已不存在，绝不能走 write_full_output（那会假装有完整输出可
         // 指认）。展示层保留头部的前 2000 行 / 50KB，通知说清「尾部已
-        // 丢弃、无完整输出文件」，并指路：重定向到文件再用 read 工具
-        // 分段读取。与 tail 截断方向相反（那边错误/结果在末尾、保尾；
-        // 触顶后尾部已丢，只能保头）。
+        // 丢弃、无完整输出文件」，并指路：重定向到文件再用 bash 流式
+        // 分段命令读取。与 tail 截断方向相反（那边错误/结果在末尾、保
+        // 尾；触顶后尾部已丢，只能保头）。
+        //
+        // #689 review P2：恢复提示必须与 read 工具的自洽——read 对超过
+        // 4 MiB 的整文件在读前直接报错（上限检查先于 offset/limit 行
+        // 选取），「用 read 的 offset/limit 分段读」这个流程走不通，模型
+        // 会陷入「重定向 → read 报错 → 重定向」死循环。bash 分段命令
+        // （sed 按行窗、tail+head 翻页）与 read 超限时自己的提示同构，
+        // 是唯一可走通的出口。
         let truncation = truncate::truncate_head(&text);
         let notice = format!(
-            "[Output capture stopped after {} at the {} per-stream cap: the head above is kept, the tail was dropped. No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with the read tool's offset/limit.]",
+            "[Output capture stopped after {} at the {} per-stream cap: the head above is kept, the tail was dropped. No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log`, `tail -n +2001 out.log | head -n 2000` (the read tool rejects whole files over {} even with offset/limit).]",
             truncate::format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
+            truncate::MAX_CAPTURE_BYTES_DISPLAY,
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
         );
         if truncation.content.is_empty() {
@@ -265,10 +274,11 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
             // 独立成文，不加前导空行——且不说「head above is kept」，
             // 上面没有任何内容。
             text = format!(
-                "[Output capture stopped after {} at the {} per-stream cap (the first line alone exceeds the {} display limit, so no content is shown; the tail was dropped). No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with the read tool's offset/limit.]",
+                "[Output capture stopped after {} at the {} per-stream cap (the first line alone exceeds the {} display limit, so no content is shown; the tail was dropped). No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log` (the read tool rejects whole files over {} even with offset/limit).]",
                 truncate::format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
                 truncate::MAX_CAPTURE_BYTES_DISPLAY,
                 truncate::MAX_BYTES_DISPLAY,
+                truncate::MAX_CAPTURE_BYTES_DISPLAY,
             );
         } else {
             text = truncation.content;

@@ -40,8 +40,10 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
     let resolved = resolve_readable(&ctx.cwd, &ctx.read_roots, path)?;
     // #637 内存防线：read_to_string 会把整个文件读进内存——行级
     // offset/limit 只是选取，挡不住读入本身（50KB 展示截断发生在读取
-    // 之后）。读前按 metadata 检查大小，超限直接报错并提示用 bash
-    // 分段读取。
+    // 之后）。读前 metadata 快照只是普通文件的快速路径（可报出精确
+    // 大小）；真正执行上限的是 read_to_string_bounded 的有界读取
+    // （#689 review P1：FIFO 的 len() 恒为 0、普通文件检查后仍可增长，
+    // 单靠快照可被完全绕过）。超限直接报错并提示用 bash 分段读取。
     let size = std::fs::metadata(&resolved)?.len();
     if size > truncate::MAX_CAPTURE_BYTES {
         return Err(ToolError::TooLarge(format!(
@@ -50,7 +52,17 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
         )));
     }
-    let text = std::fs::read_to_string(&resolved)?;
+    let text = match truncate::read_to_string_bounded(&resolved)? {
+        truncate::BoundedRead::Content(text) => text,
+        // 读到 cap+1 字节仍未到 EOF：快照撒谎了（FIFO/增长中的文件），
+        // 上限由读取本身强制执行。真实总大小不可知，文案不伪造精确值。
+        truncate::BoundedRead::Oversized => {
+            return Err(ToolError::TooLarge(format!(
+                "{path} exceeds the {} whole-file limit of the read tool (growing/FIFO sources report no exact size). Read it in chunks via bash, e.g. `sed -n '1,2000p' {path}`",
+                truncate::MAX_CAPTURE_BYTES_DISPLAY,
+            )));
+        }
+    };
     // Same counting as truncate::split_lines: a trailing newline does not
     // add an empty line.
     let lines: Vec<&str> = if text.is_empty() {

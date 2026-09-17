@@ -31,6 +31,42 @@ pub const MAX_CAPTURE_BYTES: u64 = 4 * 1024 * 1024;
 /// Human-readable form of [`MAX_CAPTURE_BYTES`] used in notices.
 pub const MAX_CAPTURE_BYTES_DISPLAY: &str = "4MB";
 
+/// One #637 bounded whole-file read outcome: the content (at most
+/// [`MAX_CAPTURE_BYTES`] bytes, read to EOF), or the observation that the
+/// source produced more than the cap.
+#[derive(Debug)]
+pub(crate) enum BoundedRead {
+    Content(String),
+    Oversized,
+}
+
+/// #637 读侧硬上限：从已打开的句柄最多读入 `MAX_CAPTURE_BYTES + 1` 字节
+/// （`read`/`json` 的整文件加载共用）。
+///
+/// 真正执行上限的是这次读取本身，而不是读前的 `metadata().len()` 快照
+/// ——FIFO 的 `len()` 恒为 0、普通文件在检查后仍可被继续写入，快照都可
+/// 被绕过（调用方保留快照仅作为普通文件的快速路径，可给出精确大小）。
+/// 多读的 1 字节用于区分「恰好等于上限」（合法）与「超过上限」（报
+/// [`BoundedRead::Oversized`]），内存峰值因此是 cap+1 而非两倍 cap。
+/// UTF-8 校验失败复用 `read_to_string` 的错误消息（InvalidData）。
+pub(crate) fn read_to_string_bounded(path: &std::path::Path) -> std::io::Result<BoundedRead> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let cap = usize::try_from(MAX_CAPTURE_BYTES).unwrap_or(usize::MAX);
+    let mut raw = Vec::new();
+    file.take(MAX_CAPTURE_BYTES + 1).read_to_end(&mut raw)?;
+    if raw.len() > cap {
+        return Ok(BoundedRead::Oversized);
+    }
+    match String::from_utf8(raw) {
+        Ok(text) => Ok(BoundedRead::Content(text)),
+        Err(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        )),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TruncatedBy {
     Lines,

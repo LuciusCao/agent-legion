@@ -327,8 +327,12 @@ impl SseLineBuffer {
         // #637: an unterminated line longer than any legitimate SSE data
         // payload is stream corruption — reject instead of growing the
         // buffer without bound (a junk flood with no newline never reaches
-        // the aggregate, so the aggregate caps cannot bound it).
+        // the aggregate, so the aggregate caps cannot bound it). The buffer
+        // is cleared before returning, so a caller that ever catches the
+        // error and reuses the buffer starts from empty instead of
+        // immediately re-tripping on the retained junk.
         if self.buffer.len() > MAX_SSE_LINE_BYTES {
+            self.buffer.clear();
             return Err(ProviderError::Transient(format!(
                 "SSE line exceeds {} bytes (stream corruption)",
                 MAX_SSE_LINE_BYTES

@@ -273,9 +273,23 @@ async fn bash_output_over_capture_cap_keeps_head_drops_tail() {
         "missing cap notice: {text}"
     );
     assert!(text.contains("4MB"), "missing cap value: {text}");
+    // #689 review P2: the remediation must point at CHUNKED BASH reads
+    // (`sed`/`tail` windows), never at the read tool's offset/limit — read
+    // rejects over-cap whole files BEFORE offset/limit are applied, so that
+    // hint would send the model into a redirect → read-error loop.
     assert!(
         text.contains("tail was dropped") && text.contains("Rerun with output redirected"),
         "missing remediation hint: {text}"
+    );
+    assert!(
+        text.contains("read it in chunks with bash")
+            && text.contains("sed -n '1,2000p' out.log")
+            && text.contains("tail -n +2001 out.log"),
+        "remediation must name concrete bash chunk commands: {text}"
+    );
+    assert!(
+        !text.contains("the read tool's offset/limit"),
+        "must not point at the read tool (it rejects over-cap files): {text}"
     );
     assert!(
         !text.contains("Full output: "),
@@ -401,6 +415,17 @@ async fn bash_capped_output_with_unshowable_first_line_names_display_limit() {
     assert!(
         text.contains("Rerun with output redirected"),
         "remediation hint survives: {text}"
+    );
+    // Same P2 discipline as the showable-head case above: the chunked-read
+    // hint must stay bash-based, never the read tool's offset/limit.
+    assert!(
+        text.contains("read it in chunks with bash")
+            && text.contains("sed -n '1,2000p' out.log"),
+        "remediation must name a concrete bash chunk command: {text}"
+    );
+    assert!(
+        !text.contains("the read tool's offset/limit"),
+        "must not point at the read tool (it rejects over-cap files): {text}"
     );
     assert!(
         !text.contains("Full output: "),
