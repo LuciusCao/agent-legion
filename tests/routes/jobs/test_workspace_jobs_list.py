@@ -1,9 +1,9 @@
-"""GET /workspaces/{id}/jobs guard + run_id filter coverage.
+"""GET /workspaces/{id}/jobs guard + run_id filter + truncation coverage.
 
-#211 Phase 3 (workflow_key guard) and #735 (run_id filter: external callers
-enumerate one run's jobs after POST /runs returned its job_ids — the legacy
-endpoint's 500 cap makes the unfiltered list unreliable for that in a busy
-workspace).
+#211 Phase 3 (workflow_key guard), #735 (run_id filter: external callers
+enumerate one run's jobs after POST /runs returned its job_ids) and #735
+review P2-1 (bounded limit with an explicit `truncated` marker — truncation
+is never silent).
 """
 
 from __future__ import annotations
@@ -142,3 +142,76 @@ def test_list_jobs_run_id_combines_with_status_filter(client, job_db):
     )
     assert running.status_code == 200
     assert running.json()["jobs"] == []
+
+
+def _create_505_job_run(client, job_db) -> tuple[str, list[str]]:
+    """505-job run（max_items_per_run 默认 20000，合法）：review P2-1 的
+    截断现场——默认 limit 500 < 505。"""
+    workspace_id = _create_runs_workspace(client)
+    material_ids = [f"mat-big-{i}" for i in range(505)]
+    with job_db.connect() as conn:
+        for material_id in material_ids:
+            conn.execute(
+                "insert into materials(id, workspace_id, content_hash, filename, content_type,"
+                " size_bytes, storage_key, status, created_by)"
+                " values (%s, %s, %s, 'doc.txt', 'text/plain', 10, %s, 'ready', 'tester')",
+                (
+                    material_id,
+                    workspace_id,
+                    f"hash-{material_id}",
+                    f"{workspace_id}/hash-{material_id}/doc.txt",
+                ),
+            )
+    run = _create_run(client, workspace_id, material_ids)
+    assert run["created_count"] == 505
+    assert len(run["job_ids"]) == 505
+    return workspace_id, run["job_ids"]
+
+
+def test_list_jobs_signals_truncation_at_default_limit(client, job_db):
+    """review P2-1：505-job run 在默认 limit 500 下回 500 条 + truncated=true
+    ——截断永不静默，调用方（崩溃重启后对账的场景）不会得出「只有 500
+    个 job」的错误结论。"""
+    workspace_id, job_ids = _create_505_job_run(client, job_db)
+
+    response = client.get(f"/api/workspaces/{workspace_id}/jobs")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["jobs"]) == 500
+    assert body["truncated"] is True
+    assert {job["id"] for job in body["jobs"]} <= set(job_ids)
+
+
+def test_list_jobs_explicit_limit_covers_run(client, job_db):
+    """review P2-1：显式 limit=600 覆盖 505-job run——505 条 + truncated=false
+    （limit+1 探测行没有命中上限）。"""
+    workspace_id, job_ids = _create_505_job_run(client, job_db)
+
+    response = client.get(f"/api/workspaces/{workspace_id}/jobs", params={"limit": 600})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["jobs"]) == 505
+    assert body["truncated"] is False
+    assert {job["id"] for job in body["jobs"]} == set(job_ids)
+
+
+def test_list_jobs_limit_contract_bounds(client, job_db):
+    """review P2-1：limit 契约边界 [1, 2000]——越界 422；省略时与旧行为
+    一致（默认 500，响应新增 truncated 字段之外的形状不变）。"""
+    workspace_id = _create_runs_workspace(client)
+    _insert_material(job_db, workspace_id, "mat-bnd")
+    run = _create_run(client, workspace_id, ["mat-bnd"])
+
+    too_big = client.get(f"/api/workspaces/{workspace_id}/jobs", params={"limit": 2001})
+    assert too_big.status_code == 422, too_big.text
+
+    too_small = client.get(f"/api/workspaces/{workspace_id}/jobs", params={"limit": 0})
+    assert too_small.status_code == 422
+
+    # 无参数：旧行为（默认 500）+ 新字段 truncated=false（< 500 匹配）。
+    legacy = client.get(f"/api/workspaces/{workspace_id}/jobs")
+    assert legacy.status_code == 200, legacy.text
+    body = legacy.json()
+    assert set(body) == {"jobs", "truncated"}
+    assert {job["id"] for job in body["jobs"]} == set(run["job_ids"])
+    assert body["truncated"] is False

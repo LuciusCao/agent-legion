@@ -29,18 +29,18 @@ def create_jobs_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    # #272: legacy unbounded list endpoint. The frontend already uses the
-    # paginated /jobs/snapshot endpoint; this cap is API-compat protection
-    # (select * carries KB-scale TEXT columns, so an unbounded response is a
-    # memory and latency hazard). The bound lives on JobQueries.list_jobs as a
-    # defaulted parameter (clamped to [1, 500] there), so JobQueryService
-    # callers inherit it without signature changes. A fixed constant (not a
-    # query parameter) keeps the OpenAPI contract and generated frontend
-    # types unchanged.
-    # #735: run_id turns this endpoint into a per-run read for external
-    # callers — POST /runs returns job_ids, but a busy workspace still needs
-    # a server-side way to enumerate one run's jobs (the 500-cap makes the
-    # unfiltered list unreliable for that). Filter semantics, not resource
+    # #272: legacy list endpoint (the frontend already uses the paginated
+    # /jobs/snapshot). select * carries KB-scale TEXT columns, so the
+    # response stays bounded: limit defaults to the historical fixed cap
+    # (500) and is contract-bounded to [1, 2000] by Query below; JobQueries
+    # .list_jobs keeps its own clamp (with probe headroom, see job_nodes.py).
+    # #735 review P2-1: truncation is NEVER silent — the route probes
+    # limit+1 rows and sets the response's `truncated` when the bound cut
+    # anything. run_id turns this endpoint into a per-run read for external
+    # callers (a busy workspace's unfiltered list stays unreliable at the
+    # default bound); a run larger than the 2000 ceiling is reconciled
+    # through the POST /runs response's job_ids (the primary loop — poll
+    # each id on #703's per-job endpoints). Filter semantics, not resource
     # addressing: a run_id from another workspace (or a missing run) yields
     # an empty list, not a 404.
     @router.get(
@@ -56,19 +56,26 @@ def create_jobs_router(
         ] = None,
         status: str | None = None,
         run_id: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=2000)] = 500,
     ) -> JobsResponse:
         # Subagent review P3-1 on #307: guard parity with failed-node-runs —
         # a mismatched key can no longer narrow (the column filter is the
         # next read-binding batch); reject instead of silently widening.
         reject_mismatched_workflow_key(workspace_id, workflow_key)
         try:
+            # limit+1 probe: the extra row decides `truncated` before the
+            # response is cut to the requested bound.
+            jobs = job_queries.list_jobs(
+                workspace_id,
+                workflow_key=workflow_key,
+                status=status,
+                run_id=run_id,
+                limit=limit + 1,
+            )
+            truncated = len(jobs) > limit
             return JobsResponse(
-                jobs=cast(
-                    list[JobSummaryResponse],
-                    job_queries.list_jobs(
-                        workspace_id, workflow_key=workflow_key, status=status, run_id=run_id
-                    ),
-                )
+                jobs=cast(list[JobSummaryResponse], jobs[:limit] if truncated else jobs),
+                truncated=truncated,
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)

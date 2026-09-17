@@ -420,6 +420,10 @@ def test_create_response_job_ids_match_db_truth(client, job_db) -> None:
         rows = conn.execute(
             "select id, run_id from jobs where workspace_id=%s order by id", (workspace_id,)
         ).fetchall()
+    # review P3-2：先去重——列表有重复时集合恒等会静默掩盖（两个响应
+    # 各一次），DB 真值断言才有防御深度。
+    assert len(body["job_ids"]) == len(set(body["job_ids"]))
+    assert len(second["job_ids"]) == len(set(second["job_ids"]))
     assert {str(row["id"]) for row in rows} == set(body["job_ids"]) | set(second["job_ids"])
 
 
@@ -447,18 +451,19 @@ def test_healed_resubmission_returns_empty_job_ids(client, job_db) -> None:
     assert healed["job_ids"] == []
 
 
-def test_run_create_response_contract_pins_job_ids_without_rows(tmp_path) -> None:
+def test_run_create_response_contract_pins_job_ids_without_rows() -> None:
     """#467 A4 原始动机回归钉（#735 收口）：响应 schema 有 job_ids（字符串
     数组）且没有 jobs 字段——万级 items 响应体积不能随 #735 回退。"""
-    from server.app.main import create_app
+    from server.app.routes.run_contracts import RunCreateResponse
 
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    schema = app.openapi()["components"]["schemas"]["RunCreateResponse"]
+    schema = RunCreateResponse.model_json_schema()
 
     assert set(schema["required"]) == {"run", "created_count", "job_ids"}
     assert set(schema["properties"]) == {"run", "created_count", "job_ids"}
-    assert schema["properties"]["job_ids"] == {
-        "items": {"type": "string"},
-        "title": "Job Ids",
-        "type": "array",
-    }
+    # review P3-1：契约级描述进 OpenAPI（外部调用方在生成的类型里就能
+    # 看到「新建、非 run 全量、全重复为空」的语义，不用翻 issue）。
+    job_ids_schema = schema["properties"]["job_ids"]
+    assert job_ids_schema["items"] == {"type": "string"}
+    assert job_ids_schema["type"] == "array"
+    assert "新建" in job_ids_schema["description"]
+    assert "#501" in job_ids_schema["description"]

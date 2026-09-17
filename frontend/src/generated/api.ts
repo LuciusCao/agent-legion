@@ -4946,6 +4946,8 @@ export interface components {
     JobsResponse: {
       /** Jobs */
       jobs: components['schemas']['JobSummaryResponse'][]
+      /** Truncated */
+      truncated: boolean
     }
     /** LogEventResponse */
     LogEventResponse: {
@@ -5964,7 +5966,10 @@ export interface components {
     RunCreateResponse: {
       /** Created Count */
       created_count: number
-      /** Job Ids */
+      /**
+       * Job Ids
+       * @description 本次提交新建的 job id 列表（非 run 全量）；全部 item 已存在时为空数组（重复提交治愈语义，见 #501）。
+       */
       job_ids: string[]
       run: components['schemas']['RunRecord']
     }
@@ -12370,6 +12375,7 @@ export interface operations {
         workflow_key?: string | null
         status?: string | null
         run_id?: string | null
+        limit?: number
       }
       header?: never
       path: {

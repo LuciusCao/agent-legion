@@ -84,7 +84,9 @@ class RunCreateResponse(BaseModel):
     created_count: int
     # #501 全重复治愈路径：created_count=0 时必为空列表（该次提交没有
     # 新建任何 job，jobs 早已由他路补齐）。
-    job_ids: list[str]
+    job_ids: list[str] = Field(
+        description="本次提交新建的 job id 列表（非 run 全量）；全部 item 已存在时为空数组（重复提交治愈语义，见 #501）。"
+    )
 
 
 class RunListResponse(BaseModel):
