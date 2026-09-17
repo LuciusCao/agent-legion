@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.helpers import publish_legacy_intake_revision
@@ -454,10 +455,23 @@ def test_api_token_cannot_reach_jobs_facets_or_other_frontend_routes(client) -> 
 # 白名单没人同步」从此是测试期必红而不是线上 404。
 
 
+# 显式 postgres 标记（二轮评审 P2-1）：断言面本身是纯路由结构（app.routes
+# 上的 Counter 比较），但 create_app 会 init_db 写 TEST_DATABASE_URL 的
+# search_path schema——该 schema 只由 session 级 fixture 对带标记的测试
+# 建立。同文件其它测试靠 client fixture 隐式获得标记，本测试是唯一裸用
+# tmp_path 的：不加标记时 unit tier（-m "not postgres" + 不可达 DB URL）
+# 必红，xdist 冷 worker 先跑到它则 InvalidSchemaName 间歇 flake。
+@pytest.mark.postgres
 def test_registered_intake_surface_matches_the_manifest(tmp_path) -> None:
     """契约：带 api-scope-intake tag 的路由名多重集 == 权威常量（Counter
     语义，每个名字恰好一次）；运行期判定对每条注册路由严格等值（带 tag
-    放行、无 tag 拒绝）；文档化的闭环端点不被协调删除。"""
+    放行、无 tag 拒绝）；文档化的闭环端点不被协调删除。
+
+    隔离形态（P3-2 评估结论）：不复用 client fixture 的共享 app——那会
+    引入认证 bootstrap 与 session 级 data_dir，换取的是与本测试无关的
+    生命周期；create_app 的启动写操作（reset_all_to_paused 等）落在共享
+    schema 上，由 postgres 标记进入 _isolate_postgres_database 的
+    TRUNCATE 隔离契约兜底，无跨测试污染。"""
     from collections import Counter
 
     from fastapi.routing import APIRoute
