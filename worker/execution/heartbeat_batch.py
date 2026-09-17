@@ -114,6 +114,23 @@ class BatchHeartbeatRegistry:
         ownership_lost: threading.Event,
         on_cancelled: Callable[[list[str]], Any] | None = None,
     ) -> _LeaseEntry:
+        """The executor arm's claim-time register: OVERWRITES any entry under
+        this execution_id (claim time owns the slot — a Host requeue + this
+        Worker's re-claim replaces the old attempt's entry wholesale).
+
+        #644 attack review: an entry being displaced here belongs to a lease
+        the Host has already reassigned, and that lease may still have a
+        live consumer on the upload side (an armed queued task whose
+        pair-matched quiesce/resume can never match again, and whose lease
+        will never appear in another beat — the new snapshot carries only
+        the NEW lease). By definition that old lease is dead: fire the
+        displaced entry's ownership_lost so the old task's report loop
+        takes its terminal abandon instead of retrying to the 60s cap
+        forever under a report-plane partition (pinning upload lanes).
+        Same lease never lands here — the rebind path is register_upload's
+        own branch — and the incoming claim's event is never touched, so a
+        healthy re-claim cannot be mis-condemned (isomorphic to the
+        mismatch-arm argument in ``register_upload``)."""
         entry = _LeaseEntry(
             execution_id=execution_id,
             lease_id=lease_id,
@@ -121,6 +138,9 @@ class BatchHeartbeatRegistry:
             on_cancelled=on_cancelled,
         )
         with self._lock:
+            current = self._entries.get(execution_id)
+            if current is not None and current is not entry:
+                current.ownership_lost.set()
             self._entries[execution_id] = entry
         return entry
 
@@ -150,7 +170,19 @@ class BatchHeartbeatRegistry:
         entry, and no beat will ever return a lost verdict for the dead
         lease, so without this its report loop would retry to the 60s cap
         forever, pinning upload lanes (the storm engine this PR fixes). The
-        registry itself stays untouched — the new entry is returned as-is."""
+        registry itself stays untouched — the new entry is returned as-is.
+
+        Same-lease rebind (the executor→upload handover) inherits the
+        displaced entry's terminal state (#644 attack review): a lost
+        verdict that landed on the executor-era entry — during the
+        adopt→submit gap or in flight against a snapshotted entry while the
+        rebound entry was being installed — must not vanish with the old
+        entry object, or the task's report loop would retry to the cap
+        forever under a report-plane partition. quiesce is deliberately NOT
+        inherited: the report lane owns that flag from here on (the rebind
+        happens before the first quiesce). proc_ref/adopted are inherited
+        (the adopt semantics ride the entry, not the caller's timing — a
+        rebind before adopt must not resurrect the zombie stop)."""
         entry = _LeaseEntry(
             execution_id=execution_id,
             lease_id=lease_id,
@@ -165,6 +197,19 @@ class BatchHeartbeatRegistry:
                 # abandons the moot delivery instead of retrying.
                 ownership_lost.set()
                 return current
+            if current is not None:
+                # #644 attack review: the handover rebind — inherit the
+                # executor-era entry's terminal verdict (a beat 409 that
+                # landed on it during the adopt→submit gap or in flight
+                # against the snapshotted old entry object; without the
+                # inheritance the verdict dies with the old entry and the
+                # task retries forever). Events are idempotent — set() on a
+                # fresh event for a live lease is a no-op that cannot fire.
+                if current.ownership_lost.is_set():
+                    ownership_lost.set()
+                entry.proc_ref = current.proc_ref
+                if current.adopted.is_set():
+                    entry.adopted.set()
             self._entries[execution_id] = entry
             return entry
 

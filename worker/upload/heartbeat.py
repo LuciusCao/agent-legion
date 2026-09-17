@@ -14,7 +14,11 @@ keeps the old thread stop/join semantics.
 task's ``ownership_lost`` event, so a beat-plane lost verdict (batch 409
 family) reaches ``_report`` regardless of which arm is currently beating —
 and a resume can never resurrect an already-condemned lease or erase its
-verdict.
+verdict. #644 attack review closed the handover gaps: a verdict landing on
+the executor-era entry during the adopt→submit gap (or in flight against a
+snapshotted entry while the rebind installs) is INHERITED by the same-lease
+rebind, and an entry displaced by a re-claim's executor arm is condemned at
+displacement — no verdict can die with an entry object anymore.
 """
 
 from __future__ import annotations

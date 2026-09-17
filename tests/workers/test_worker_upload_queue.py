@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import time
 from pathlib import Path
 
 import pytest
 
-from worker.execution.heartbeat_batch import BatchHeartbeatRegistry
+from worker.execution.heartbeat import start_lease_heartbeat
+from worker.execution.heartbeat_batch import BatchHeartbeatRegistry, batch_heartbeat_loop
 from worker.execution.lifecycle import HeartbeatConfig, heartbeat_loop
 from worker.execution.ownership import OWNER_FILENAME, write_owner_marker
 from worker.status import ExecutionStatusReporter
@@ -45,6 +47,13 @@ class QueueFakeClient:
     def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
         self.heartbeats += 1
         return 204, []
+
+    def heartbeat_batch(self, leases: list[tuple[str, str]]) -> tuple[int, dict]:
+        return 200, {
+            "renewed": [execution_id for execution_id, _ in leases],
+            "lost": [],
+            "cancelled_execution_ids": [],
+        }
 
 
 def _execution_dir(work_root: Path, execution_id: str = "exec-1") -> Path:
@@ -432,6 +441,132 @@ def test_report_backoff_resume_pair_matches_own_entry(
     assert not (work_root / "exec-1").exists()
     # finalize 后自己的 entry 被 pair-matched prune 收走。
     assert "exec-1" not in registry._entries  # type: ignore[reportPrivateUsage]
+
+
+# ---------------------------------------------------------------------------
+# #644 attack review：交接/覆盖窗口的 verdict 丢失（HIGH-1/HIGH-2）——死租约
+# 任务在 report 长分区下不得钉住上传 lane。
+
+
+def _wait_depth_zero(queue: UploadQueue, timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while queue.depth > 0:
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.005)
+    return True
+
+
+def test_handover_gap_verdict_terminates_report_loop_under_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 attack HIGH-1（attack9 场景）：executor→upload 交接 gap 内 beat
+    判死落在 executor-era 事件（event_A）上，task arm 换绑（event_B）必须
+    继承该终态——report 面持续分区（恒瞬时失败）时 report 循环终态放弃：
+    depth 归零、marker 删除、零 report 发出。修复前 verdict 随旧 entry 对象
+    消失，lane 被钉到 60s 退避上限无限重试。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    client.report_errors = 10**9  # report 面持续分区：恒瞬时失败
+    registry = BatchHeartbeatRegistry()
+    queue = _queue(client, registry=registry)
+
+    # run.py 的交付前形态：executor entry 挂 event_A，adopt 后、submit 前
+    # （gap 内）真 beat 线程带回 409 verdict——只发给 arm 前的 entry。
+    state = {"armed": False}
+
+    def one_shot_lost_batch(leases):  # type: ignore[no-untyped-def]
+        lost = [eid for eid, lease in leases if lease == "lease-1" and not state["armed"]]
+        return 200, {
+            "renewed": [eid for eid, _ in leases if eid not in lost],
+            "lost": lost,
+            "cancelled_execution_ids": [],
+        }
+
+    client.heartbeat_batch = one_shot_lost_batch  # type: ignore[method-assign]
+    beat_stop = threading.Event()
+    beat_thread = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, beat_stop, 0.005), daemon=True
+    )
+    beat_thread.start()
+    executor_lost = threading.Event()
+    heartbeat = start_lease_heartbeat(
+        client, "exec-1", "lease-1", 15.0, executor_lost, registry=registry
+    )
+    heartbeat.adopt()
+    assert executor_lost.wait(10), "precondition: the verdict landed on the executor-era event"
+    original_register_upload = registry.register_upload
+
+    def arming_register_upload(*args, **kwargs):  # type: ignore[no-untyped-def]
+        result = original_register_upload(*args, **kwargs)
+        state["armed"] = True
+        return result
+
+    registry.register_upload = arming_register_upload  # type: ignore[method-assign]
+
+    # 生产形态：task 的 ownership_lost 是全新事件（run.py 构造不传）。
+    task = _task(work_root)
+    queue.submit(task)
+
+    try:
+        assert _wait_depth_zero(queue), "lane pinned: the gap verdict never reached _report"
+        assert task.ownership_lost.is_set(), "the rebind dropped the handover-gap verdict"
+        assert len(client.reports) == 0  # terminal before the first report attempt
+        assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    finally:
+        beat_stop.set()
+        beat_thread.join(timeout=2)
+        queue._stop.set()  # 失败路径下解开 report 循环，让 shutdown 可返回
+        queue.shutdown()
+
+
+def test_arm_first_overwrite_terminates_report_loop_under_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 attack HIGH-2（attack8 场景）：旧任务 arm 在先、本 worker 新 claim
+    的 register 覆盖在后——旧 lease 从此不在任何拍里，不可能再有 beat 为它
+    带 verdict；覆盖必须向被换下 entry 的事件补发判死，report 分区下旧任务
+    终态放弃（depth 归零、marker 删除），新 claim 的 entry 原样保留。修复前
+    该排列没有任何判死出口，lane 被钉到 60s 退避上限无限重试。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    client.report_errors = 10**9  # report 面持续分区：恒瞬时失败
+    registry = BatchHeartbeatRegistry()
+    queue = _queue(client, registry=registry)
+
+    task = _task(work_root)  # 旧 attempt 的任务，lease-1
+    first_report_attempted = threading.Event()
+    original_report = client.report
+
+    def report_and_signal(*args, **kwargs):  # type: ignore[no-untyped-def]
+        first_report_attempted.set()
+        return original_report(*args, **kwargs)
+
+    client.report = report_and_signal  # type: ignore[method-assign]
+    queue.submit(task)
+    # 等任务进入 report 循环（已 arm、已发出第一次 report）再覆盖——arm-先
+    # 覆盖-后排列。
+    assert first_report_attempted.wait(10), "the old task never reached its report loop"
+
+    new_lost = threading.Event()
+    registry.register("exec-1", "lease-new", new_lost)  # 本 worker 重新 claim
+
+    try:
+        assert _wait_depth_zero(queue), "lane pinned: the overwrite left the old task uncondemned"
+        assert task.ownership_lost.is_set(), "the overwrite did not condemn the displaced lease"
+        assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+        assert not new_lost.is_set(), "the re-claim fired its own verdict"
+        # 新 claim 的 entry 原样保留、继续进拍面。
+        entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+        assert entry.lease_id == "lease-new"
+        assert [item.lease_id for item in registry.snapshot()] == ["lease-new"]
+    finally:
+        queue._stop.set()  # 失败路径下解开 report 循环，让 shutdown 可返回
+        queue.shutdown()
 
 
 def test_restore_requeues_pending_markers(tmp_path: Path) -> None:
