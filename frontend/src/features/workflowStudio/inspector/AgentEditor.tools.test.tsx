@@ -225,4 +225,86 @@ describe('AgentEditor tool catalog (#476)', () => {
       tools: ['read', 'write', 'bash'],
     })
   })
+
+  // #749：检查器面板的发布迁移到 CAS——expected_hash 取自草稿身份（本
+  // 面板保存的响应，或详情读取里的草稿行），与聊天草稿卡同一语义；409
+  // 用引导重来的专用文案（同一交互模式），不发明新 UI。
+  describe('发布的 CAS 令牌（#749）', () => {
+    const draftDetail = {
+      latest: {
+        status: 'draft',
+        definition_hash: 'hash-load',
+        definition: {
+          capability: 'gen',
+          runtime: 'velites',
+          skill: '',
+        },
+      },
+      published: null,
+    }
+
+    it('发布请求携带详情读取的草稿 definition_hash', async () => {
+      mocks.fetchAgentDefinition.mockResolvedValue(draftDetail)
+      mocks.publishAgent.mockResolvedValue({ status: 'published' })
+      renderEditor('agent-a')
+      const publish = await screen.findByRole('button', { name: '发布' })
+      expect(publish).toBeEnabled()
+
+      await act(async () => {
+        fireEvent.click(publish)
+      })
+      expect(mocks.publishAgent).toHaveBeenCalledWith('ws1', 'agent-a', 'hash-load')
+    })
+
+    it('保存草稿后发布携带保存响应的新 hash', async () => {
+      mocks.fetchAgentDefinition.mockResolvedValue(draftDetail)
+      mocks.saveAgentDraft.mockResolvedValue({ definition_hash: 'hash-save-2' })
+      renderEditor('agent-a')
+      await screen.findByRole('button', { name: '发布' })
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '发布' }))
+      })
+      expect(mocks.publishAgent).toHaveBeenCalledWith('ws1', 'agent-a', 'hash-save-2')
+    })
+
+    it('服务端 409（草稿被覆盖）：专用文案内联提示，无成功 toast，按钮可重试', async () => {
+      mocks.fetchAgentDefinition.mockResolvedValue(draftDetail)
+      mocks.publishAgent.mockRejectedValue(
+        Object.assign(new Error('draft hash mismatch for agent agent-a'), {
+          status: 409,
+        })
+      )
+      const { useUiStore } = await import('../../../stores/uiStore')
+      useUiStore.setState({ toast: null })
+      renderEditor('agent-a')
+      const publish = await screen.findByRole('button', { name: '发布' })
+
+      await act(async () => {
+        fireEvent.click(publish)
+      })
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        '草稿已被其他会话或编辑器更新，请刷新后重新保存再发布'
+      )
+      expect(useUiStore.getState().toast).toBeNull()
+      expect(screen.getByRole('button', { name: '发布' })).toBeEnabled()
+    })
+
+    it('无草稿身份（definition_hash 缺失）时发布按钮禁用', async () => {
+      // 异常形态：draft 行存在但响应缺 hash——无 CAS 令牌不发布（与聊天
+      // 卡 codex P1 第四轮同一立场：无法验证身份的发布会静默发别人的内容）。
+      mocks.fetchAgentDefinition.mockResolvedValue({
+        latest: {
+          status: 'draft',
+          definition: { capability: 'gen', runtime: 'velites', skill: '' },
+        },
+        published: null,
+      })
+      renderEditor('agent-a')
+      expect(await screen.findByRole('button', { name: '发布' })).toBeDisabled()
+    })
+  })
 })

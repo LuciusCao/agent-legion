@@ -7497,6 +7497,8 @@ export interface components {
       code: string
       /** Draft Code */
       draft_code?: string | null
+      /** Draft Code Hash */
+      draft_code_hash?: string | null
       /** Draft Version */
       draft_version?: number | null
       /**

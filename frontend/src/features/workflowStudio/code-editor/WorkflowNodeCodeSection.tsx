@@ -14,6 +14,11 @@ import { fetchNodeCodeTemplate } from './workflowNodeCodeLookup'
 
 type NodeCodeResponse = components['schemas']['WorkflowNodeCodeResponse']
 
+// #749：发布 CAS（expected_hash）被服务端拒绝的专用文案——草稿在加载后被
+// 其他会话/编辑器覆盖。与聊天草稿卡的 409 文案同一交互模式：内联提示 +
+// 引导重新加载，不发明新 UI。
+const DRAFT_OVERRIDDEN_HINT = '草稿已被其他会话或编辑器更新，请重新加载后再保存发布'
+
 function codeUrl(workspaceId: string, nodeKey: string) {
   // workflows/{workflowKey} 路径段已退役（#211）：key 与 workspace id 自
   // schema v62 起恒等，节点代码路由改挂 workspace 下。
@@ -68,6 +73,14 @@ export function WorkflowNodeCodeSection(props: {
   if (!url || !codeBound) return null
 
   const toast = useUiStore.getState().showToast
+  // #749：错误展示区分 CAS 拒绝（409）——保存→发布之间草稿被其他会话/
+  // 编辑器覆盖，正是 expected_hash 要抓的竞态；专用文案引导重新加载。
+  const errorFor = (err: unknown) =>
+    (err as { status?: number } | null)?.status === 409
+      ? DRAFT_OVERRIDDEN_HINT
+      : err instanceof Error
+        ? err.message
+        : '操作失败'
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true)
     setError('')
@@ -79,7 +92,7 @@ export function WorkflowNodeCodeSection(props: {
       setVersionsToken((token) => token + 1)
       reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '操作失败')
+      setError(errorFor(err))
     } finally {
       setBusy(false)
     }
@@ -97,9 +110,19 @@ export function WorkflowNodeCodeSection(props: {
       async () => putDraft((await fetchNodeCodeTemplate()).code),
       '已从模板创建草稿'
     )
+  // #749：发布带 expected_hash（详情读取的 draft_code_hash——自己保存的
+  // 草稿由保存响应的 reload 回填，MCP 工具面保存的草稿由 GET 带出），服务
+  // 端在发布事务内 CAS 核对，不匹配 409 零副作用。无草稿 hash（异常形态）
+  // 不发布——null 进请求会退回无核对语义，静默发布被覆盖前的旧草稿。
   const publish = () =>
     run(
-      () => api(`${url}/publish`, { method: 'POST' }),
+      () =>
+        data?.draft_code_hash
+          ? api(`${url}/publish`, {
+              method: 'POST',
+              body: JSON.stringify({ expected_hash: data.draft_code_hash }),
+            })
+          : Promise.reject(new Error(DRAFT_OVERRIDDEN_HINT)),
       '已发布，新执行立即生效'
     )
   const rollback = (version: number) =>

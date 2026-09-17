@@ -134,17 +134,21 @@ describe('agentDefinitions api', () => {
     )
   })
 
-  it('publishes an agent', async () => {
+  it('publishes an agent with the CAS draft hash', async () => {
     const payload = { id: 'v2', status: 'published' }
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await publishAgent(WS, 'agent-1')
+    // #749：expectedHash 必填——发布事务内 CAS 核对的草稿身份。
+    const result = await publishAgent(WS, 'agent-1', 'hash-1')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/agent-definitions/agent-1/publish${WS_QUERY}`,
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ expected_hash: 'hash-1' }),
+      })
     )
   })
 

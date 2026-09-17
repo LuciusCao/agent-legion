@@ -44,9 +44,14 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-// api() 给非 2xx 错误挂 status（409 = capability 被占用）。
+// api() 给非 2xx 错误挂 status（409 = capability 被占用 / #749 CAS 草稿被覆盖）。
 const isConflictError = (err: unknown) =>
   (err as { status?: number } | null)?.status === 409
+
+// #749：发布 CAS（expected_hash）被服务端拒绝的专用文案——草稿在保存后被
+// 其他会话/编辑器覆盖，本地表单已不是要发布的身份。与聊天草稿卡的 409
+// 文案同一交互模式：内联提示 + 引导从最新草稿重来，不发明新 UI。
+const DRAFT_OVERRIDDEN_HINT = '草稿已被其他会话或编辑器更新，请刷新后重新保存再发布'
 
 /**
  * Agent 定义编辑器。发布后的 definition 不可变：编辑已发布 Agent 就是
@@ -85,6 +90,12 @@ export function AgentEditor({
   >(undefined)
   const [configSchemaText, setConfigSchemaText] = useState('')
   const [hasDraft, setHasDraft] = useState(false)
+  // #749：当前草稿的 definition_hash——发布的 CAS 令牌。三个来源同步它：
+  // 创建/保存草稿的响应（本面板写入的身份）、详情加载里的草稿行（发布
+  // 别处保存的草稿，如 MCP 工具面建的）、发布成功后清空。空值 = 无可核
+  // 验身份，发布按钮禁用（无 hash 的发布在草稿被覆盖时会静默发别人的
+  // 内容，与聊天卡 codex P1 第四轮同一立场）。
+  const [draftHash, setDraftHash] = useState('')
   const [loading, setLoading] = useState(!creating)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -109,6 +120,9 @@ export function AgentEditor({
         const draft = detail.latest?.status === 'draft' ? detail.latest : null
         const source = draft ?? detail.published ?? detail.latest
         setHasDraft(draft !== null)
+        // #749：草稿身份随详情同步（如 MCP 工具面保存的草稿，本面板只
+        // 发布不保存）；无草稿时清空，禁用发布按钮。
+        setDraftHash(draft?.definition_hash ?? '')
         const definition = (source?.definition ?? {}) as Record<string, unknown>
         setCapability(String(definition.capability ?? ''))
         setRuntime((definition.runtime as AgentRuntime) ?? 'velites')
@@ -209,10 +223,14 @@ export function AgentEditor({
         // 后续跳转都用服务端返回的 agent_id。
         const created = await createAgentDefinition(workspaceId, payload)
         showToast(`Agent「${created.agent_id}」草稿已创建`, 'success')
+        // #749：创建响应即草稿身份，发布时作为 expected_hash 带回。
+        setDraftHash(created.definition_hash)
         onSaved(created.agent_id)
       } else {
-        await saveAgentDraft(workspaceId, agentId, payload)
+        const saved = await saveAgentDraft(workspaceId, agentId, payload)
         setHasDraft(true)
+        // #749：保存响应的 hash 是新草稿身份（后续发布的 CAS 令牌）。
+        setDraftHash(saved.definition_hash)
         showToast('草稿已保存', 'success')
         onChanged()
       }
@@ -231,12 +249,17 @@ export function AgentEditor({
     setError('')
     setBusy(true)
     try {
-      await publishAgent(workspaceId, agentId)
+      // #749：带上保存/加载时的草稿 hash，服务端在发布事务内 CAS 核对
+      // ——不匹配 409 零副作用。draftHash 为空（异常形态）不发布。
+      await publishAgent(workspaceId, agentId, draftHash)
       setHasDraft(false)
+      setDraftHash('')
       showToast('已发布', 'success')
       onChanged()
     } catch (err) {
-      setError(errorMessage(err))
+      // 409 双语义：CAS 拒绝（草稿被覆盖）用引导刷新的专用文案（与聊天
+      // 草稿卡同一模式）；capability 占用仍是后端 detail 直显。
+      setError(isConflictError(err) ? DRAFT_OVERRIDDEN_HINT : errorMessage(err))
     } finally {
       setBusy(false)
     }
@@ -379,7 +402,7 @@ export function AgentEditor({
           <Button
             variant="outlined"
             onClick={() => void handlePublish()}
-            disabled={busy || !hasDraft}
+            disabled={busy || !hasDraft || !draftHash}
           >
             发布
           </Button>
@@ -409,8 +432,11 @@ export function AgentEditor({
           onRolledBack={() => {
             setVersionsOpen(false)
             // 后端 rollback 直接落 published 新版本（无 draft）：重新拉取详情
-            // 同步表单，并清掉 draft 标记。
-            void load().then(() => setHasDraft(false))
+            // 同步表单，并清掉 draft 标记与草稿身份（#749）。
+            void load().then(() => {
+              setHasDraft(false)
+              setDraftHash('')
+            })
             onChanged()
           }}
         />
