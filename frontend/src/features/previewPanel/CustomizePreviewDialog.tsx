@@ -111,9 +111,9 @@ export function CustomizePreviewDialog({
                 onApplyWorkflowDraft={() => undefined}
               />
             )}
-            {(actionError || chat.actionError) && (
+            {actionError && (
               <div className={styles.error} role="alert">
-                {actionError ?? chat.actionError}
+                {actionError}
               </div>
             )}
           </div>

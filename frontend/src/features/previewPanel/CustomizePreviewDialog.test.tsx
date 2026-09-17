@@ -277,7 +277,7 @@ describe('CustomizePreviewDialog', () => {
     })
     // busy：不直接发送（直发会被后端单 turn 原子认领 409 拒绝），进入队列。
     expect(mockChatApi.sendStudioChatMessage).not.toHaveBeenCalled()
-    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getAllByText('排队中 1')[0]).toBeInTheDocument()
     expect(screen.getByText('排队消息')).toBeInTheDocument()
   })
 

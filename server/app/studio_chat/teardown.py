@@ -60,12 +60,18 @@ def teardown_runtime(
         return owned
     with runtime.lock:
         runtime.closed = True
+        # A pending compaction self-clear must not fire into a torn-down
+        # runtime (its generation check would no-op anyway; cancel to be
+        # exact, #694 review P1).
+        timer, runtime.compact_timer = runtime.compact_timer, None
         # Pop each waiter so a respond racing the settle finds the request
         # gone (dict membership is the not-yet-settled criterion, #158).
         while runtime.pending_permissions:
             _request_id, pending = runtime.pending_permissions.popitem()
             pending.decision = {"deny": True}
             pending.event.set()
+    if timer is not None:
+        timer.cancel()
     if close_handle:
         runtime.handle.close()
     try:

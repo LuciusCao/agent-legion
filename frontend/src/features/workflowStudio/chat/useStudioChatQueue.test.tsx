@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useStudioChatQueue } from './useStudioChatQueue'
 
-type HookProps = { busy: boolean; sessionKey: string | null }
+type HookProps = { busy: boolean; sessionKey: string | null; blocked?: boolean }
 
 function renderQueue(
   send: (text: string) => Promise<boolean>,
@@ -10,7 +10,12 @@ function renderQueue(
 ) {
   return renderHook(
     (props: HookProps) =>
-      useStudioChatQueue(props.busy, props.sessionKey, send),
+      useStudioChatQueue(
+        props.busy,
+        props.blocked ?? false,
+        props.sessionKey,
+        send
+      ),
     { initialProps: initial }
   )
 }
@@ -179,5 +184,71 @@ describe('useStudioChatQueue', () => {
       await Promise.resolve()
     })
     expect(send).not.toHaveBeenCalled()
+  })
+
+  it('holds the head while blocked and auto-flushes on the unblock edge (#694 review P2-a)', async () => {
+    // 压缩开始晚于 busy 结束：busy 翻转沿被 blocked 门控压住，队首不发；
+    // 压缩完成（或后端超时自清）把 blocked 翻回 false 时队首自动发出。
+    const send = vi.fn().mockResolvedValue(true)
+    const { result, rerender } = renderQueue(send, {
+      busy: true,
+      blocked: false,
+      sessionKey: 's1',
+    })
+    act(() => result.current.submit('排队消息'))
+    rerender({ busy: false, blocked: true, sessionKey: 's1' })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(send).not.toHaveBeenCalled()
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
+      '排队消息',
+    ])
+
+    rerender({ busy: false, blocked: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith('排队消息'))
+    await waitFor(() => expect(result.current.queuedMessages).toEqual([]))
+  })
+
+  it('enqueues a submit made while blocked instead of direct-sending', () => {
+    const send = vi.fn().mockResolvedValue(true)
+    const { result } = renderQueue(send, {
+      busy: false,
+      blocked: true,
+      sessionKey: 's1',
+    })
+    act(() => result.current.submit('压缩中提交'))
+    expect(send).not.toHaveBeenCalled()
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
+      '压缩中提交',
+    ])
+  })
+
+  it('does not spin after a flush failed inside the compaction window', async () => {
+    // 409 保留队首但不触发重试：只有下一次门控翻转沿才会重发，不会空转。
+    const send = vi.fn().mockResolvedValue(false)
+    const { result, rerender } = renderQueue(send, {
+      busy: true,
+      blocked: false,
+      sessionKey: 's1',
+    })
+    act(() => result.current.submit('第一条'))
+    rerender({ busy: false, blocked: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 同帧重复渲染（blocked 不变）不再重发。
+    rerender({ busy: false, blocked: false, sessionKey: 's1' })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['第一条'])
+    // blocked 翻转沿（压缩开始又结束）才重发同一队首，且只发一次。
+    rerender({ busy: false, blocked: true, sessionKey: 's1' })
+    rerender({ busy: false, blocked: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+    expect(send).toHaveBeenLastCalledWith('第一条')
   })
 })

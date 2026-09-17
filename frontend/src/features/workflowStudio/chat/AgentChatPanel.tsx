@@ -2,11 +2,9 @@ import type { ReactNode } from 'react'
 import type { StudioChat } from './useStudioChat'
 import { useStudioChatQueue } from './useStudioChatQueue'
 import { StudioChatMessageList } from './StudioChatMessageList'
-import { StudioChatContextMeter } from './StudioChatContextMeter'
-import { StudioChatRunBar } from './StudioChatRunBar'
+import { AgentChatStatusStrip } from './AgentChatStatusStrip'
 import { StudioChatQueueBar } from './StudioChatQueueBar'
-import { StudioChatResumeBar } from './StudioChatResumeBar'
-import { StudioChatInput } from './StudioChatInput'
+import { StudioChatComposer } from './StudioChatComposer'
 import styles from './AgentChatPanel.module.css'
 
 type Props = {
@@ -14,8 +12,9 @@ type Props = {
   workspaceId: string
   /** 面板顶部插槽（会话管理条等）。job 排查不传——会话自动创建，不暴露选择。 */
   header?: ReactNode
-  /** 紧贴输入框上方的插槽（#658 执行配置面，仅 Studio 传）。 */
-  configBar?: ReactNode
+  /** composer 工具行注入执行配置芯片（权限模式/模型/思考档位，#658/#695 R4，
+   * 仅 Studio 传；diagnosis/preview 的工具行只有发送按钮）。 */
+  showAgentConfig?: boolean
   /** 消息列表与运行条之间的插槽（job 排查的动作确认卡区）。 */
   actionArea?: ReactNode
   /** 无激活会话时的占位内容。 */
@@ -33,16 +32,23 @@ type Props = {
   onSelectNode?: (nodeKey: string) => void
 }
 
-/** 三处 agent 对话界面共用的对话骨架（#695）：消息列表 + 上下文用量条 +
- * 运行条 + 发送队列 + 恢复条 + 输入框 + 统一错误条，发送队列在此内部接线
- * （busy 时发送入队而非直发撞后端单 turn 原子认领的 409）。差异点全部经
- * 插槽/参数注入；agent 列表守卫与各载体的治理面（发布/归档等）留在调用方。 */
+/** 三处 agent 对话界面共用的对话骨架（#695）：消息列表 + 单行 status strip
+ * （运行/排队摘要/上下文用量/恢复，#695 R3 由 ContextMeter/RunBar/ResumeBar
+ * 收敛）+ 队列详情行 + 输入框 + 统一错误条，发送队列在此内部接线（busy 时
+ * 发送入队而非直发撞后端单 turn 原子认领的 409）。差异点全部经插槽/参数
+ * 注入；agent 列表守卫与各载体的治理面（发布/归档等）留在调用方。 */
 export function AgentChatPanel(props: Props) {
   const { chat } = props
-  const queue = useStudioChatQueue(chat.busy, chat.activeSessionId, chat.send)
   // busy（运行中）不再禁用输入：发送会进入前端队列（见 useStudioChatQueue）。
-  // #694：压缩窗口内禁用——此刻发出的消息会被 agent 静默排队后丢弃。
+  // #694：压缩窗口内禁用——此刻发出的消息会被 agent 静默排队后丢弃；队列
+  // 门控与重发同样吃 compacting（#694 review P2-a）。
   const compacting = chat.session?.compacting ?? false
+  const queue = useStudioChatQueue(
+    chat.busy,
+    compacting,
+    chat.activeSessionId,
+    chat.send
+  )
   const inputDisabled = !chat.session || chat.closed || compacting
   const disabledReason = !chat.session
     ? props.noSessionReason
@@ -96,26 +102,19 @@ export function AgentChatPanel(props: Props) {
         />
       )}
       {props.actionArea}
-      <StudioChatContextMeter
-        usage={chat.session?.usage ?? null}
-        compacting={compacting}
-      />
-      <StudioChatRunBar
-        status={chat.session?.status ?? null}
-        busy={chat.busy}
-        lastRunMs={chat.lastRunMs}
-        lastTerminalEvent={chat.lastTerminalEvent}
-        lastRunCancelled={chat.lastRunCancelled}
-        onCancel={() => void chat.cancel()}
-      />
+      {/* #695 R3：运行/用量/恢复收敛为单行 strip；队列详情行仅非空时出现。 */}
+      <AgentChatStatusStrip chat={chat} queue={queue} />
       <StudioChatQueueBar queue={queue} />
-      {chat.closed && chat.session && <StudioChatResumeBar chat={chat} />}
-      {props.configBar}
-      <StudioChatInput
+      <StudioChatComposer
         busy={chat.busy}
         disabled={inputDisabled}
         disabledReason={disabledReason}
         onSend={queue.submit}
+        config={
+          props.showAgentConfig
+            ? { workspaceId: props.workspaceId, session: chat.session }
+            : undefined
+        }
       />
     </div>
   )
