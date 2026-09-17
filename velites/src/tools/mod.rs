@@ -13,6 +13,9 @@ pub mod catalog;
 pub mod command_guard;
 pub(super) mod command_paths;
 pub mod json;
+/// Bounded parse/serialize helpers shared by the `json` tool and the
+/// contract engine (`pub(crate)` for the latter).
+pub(crate) mod json_limits;
 pub mod read;
 mod specs;
 pub mod truncate;

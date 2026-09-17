@@ -175,6 +175,207 @@ fn json_tool_oversized_file_is_rejected_before_loading() {
     );
 }
 
+// #689 攻击报告 HIGH-2/3 复测钉子：读后放大（Value 树 + pretty 重序列化）
+// 与 set 的 value 无上限，都在 4 MiB 读侧 cap 之外。这里是预算行为的空间
+// 钉子（内存峰值复测见修复报告）；载荷与攻击报告同构。
+use velites::tools::{ToolContext, ToolKind};
+
+fn inprocess_ctx(cwd: &Path) -> ToolContext {
+    ToolContext {
+        cwd: cwd.canonicalize().unwrap(),
+        cancel: velites::cancel::CancelToken::default(),
+        sandbox: None,
+        read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
+    }
+}
+
+fn inprocess_text(output: &velites::tools::ToolOutput) -> String {
+    match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    }
+}
+
+// HIGH-2 树侧：4 MiB 内的全数字文件（最密形态，一个字节一个节点）把
+// Value 树撑到字节数的 ~33x——节点预算必须在 pretty/输出之前拒绝。
+#[tokio::test]
+async fn json_tool_rejects_over_budget_trees_before_any_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    // 300,004 nodes (root + entry + array + 300,001 numbers) at ~600 KB —
+    // comfortably inside the 4 MiB byte cap, over the 300k node budget.
+    let dense = format!("{{\"k\":[{}]}}", vec!["1"; 300_001].join(","));
+    std::fs::write(cwd.join("dense.json"), &dense).unwrap();
+
+    for op in ["get", "set"] {
+        let mut args = serde_json::json!({"op": op, "path": "dense.json", "query": "k"});
+        if op == "set" {
+            args["value"] = serde_json::json!(1);
+        }
+        let output = ToolKind::Json.execute(&args, &inprocess_ctx(cwd)).await;
+        assert!(output.is_error, "{op} must reject the over-budget tree");
+        let text = inprocess_text(&output);
+        assert!(
+            text.contains("content too large for in-memory processing"),
+            "missing the TooLarge prefix: {text}"
+        );
+        assert!(
+            text.contains("300000 nodes"),
+            "missing the node-budget rejection: {text}"
+        );
+    }
+}
+
+// HIGH-2 写侧：深嵌套链在节点与字节预算内、compact 300 KB，pretty 展开
+// 却到 ~36 MB——pretty 输出预算在序列化途中封顶（瞬态字符串同受预算）。
+// 查询命中携带整棵数组的字段（`k`），而非单条链。
+#[tokio::test]
+async fn json_tool_get_caps_pretty_width_amplification() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    // 1240 chains of depth 120: ~299k nodes, ~300 KB compact, ~36 MB pretty.
+    let chain = format!("{}0{}", "[".repeat(120), "]".repeat(120));
+    let dense = format!("{{\"k\":[{}]}}", vec![chain.as_str(); 1240].join(","));
+    assert!(
+        dense.len() < 4 * 1024 * 1024,
+        "fixture must be under the byte cap"
+    );
+    std::fs::write(cwd.join("deep.json"), &dense).unwrap();
+
+    let output = ToolKind::Json
+        .execute(
+            &serde_json::json!({"op": "get", "path": "deep.json", "query": "k"}),
+            &inprocess_ctx(cwd),
+        )
+        .await;
+    assert!(output.is_error, "the wide pretty output must be rejected");
+    let text = inprocess_text(&output);
+    assert!(
+        text.contains("content too large for in-memory processing"),
+        "missing the TooLarge prefix: {text}"
+    );
+    assert!(
+        text.contains("8.0MB"),
+        "missing the output-budget rejection: {text}"
+    );
+    assert!(
+        text.contains("too large for the json tool"),
+        "the error must name the file and the budget: {text}"
+    );
+}
+
+// HIGH-3：value 只受上游 32 MiB arguments cap 约束——超整文件上限的
+// value 必须在树被改动、文件被写回之前拒绝；合法的较大 value 仍然可用。
+#[tokio::test]
+async fn json_tool_set_caps_value_size() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    write_spec(cwd);
+
+    // Over the byte budget: a 4 MiB + 1 string.
+    let oversized = serde_json::json!("x".repeat(4 * 1024 * 1024 + 1));
+    let output = ToolKind::Json
+        .execute(
+            &serde_json::json!({
+                "op": "set", "path": "key_info_spec.json",
+                "query": "entries[0].content", "value": oversized
+            }),
+            &inprocess_ctx(cwd),
+        )
+        .await;
+    assert!(output.is_error, "an over-cap value must be rejected");
+    let text = inprocess_text(&output);
+    assert!(
+        text.contains("content too large for in-memory processing"),
+        "missing the TooLarge prefix: {text}"
+    );
+    assert!(
+        text.contains("4MB"),
+        "missing the value-cap wording: {text}"
+    );
+    assert!(
+        text.contains("whole-file limit"),
+        "the value cap is the whole-file limit: {text}"
+    );
+    // The file is untouched.
+    let spec: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(cwd.join("key_info_spec.json")).unwrap())
+            .unwrap();
+    assert_eq!(spec["entries"][0]["content"], "needs fixing");
+
+    // Over the node budget: a 300k+1 element array.
+    let output = ToolKind::Json
+        .execute(
+            &serde_json::json!({
+                "op": "set", "path": "key_info_spec.json",
+                "query": "entries[0].content", "value": vec![1; 300_001]
+            }),
+            &inprocess_ctx(cwd),
+        )
+        .await;
+    assert!(output.is_error);
+    assert!(inprocess_text(&output).contains("300000 nodes"));
+
+    // Positive control: a large-but-legal value (1 MiB string) still lands.
+    let legal = serde_json::json!("y".repeat(1024 * 1024));
+    let output = ToolKind::Json
+        .execute(
+            &serde_json::json!({
+                "op": "set", "path": "key_info_spec.json",
+                "query": "entries[0].content", "value": legal
+            }),
+            &inprocess_ctx(cwd),
+        )
+        .await;
+    assert!(!output.is_error, "a 1 MiB value is within the cap");
+    let spec: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(cwd.join("key_info_spec.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        spec["entries"][0]["content"].as_str().unwrap().len(),
+        1024 * 1024
+    );
+}
+
+// #518 行为面（跟上）：写回现在是 compact——文件保持一次 `get` 可读，
+// 且同一次 set 的确认文案报出落盘字节数。
+#[tokio::test]
+async fn json_tool_set_writes_back_compact_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    write_spec(cwd);
+    let output = ToolKind::Json
+        .execute(
+            &serde_json::json!({
+                "op": "set", "path": "key_info_spec.json",
+                "query": "meta.version", "value": 2
+            }),
+            &inprocess_ctx(cwd),
+        )
+        .await;
+    assert!(!output.is_error);
+    let on_disk = std::fs::read_to_string(cwd.join("key_info_spec.json")).unwrap();
+    assert!(
+        !on_disk.contains("\n"),
+        "set must write compact JSON, got pretty: {on_disk}"
+    );
+    assert_eq!(
+        on_disk,
+        serde_json::to_string(&serde_json::from_str::<serde_json::Value>(&on_disk).unwrap())
+            .unwrap()
+    );
+    // The compact file still round-trips through get.
+    let output = ToolKind::Json
+        .execute(
+            &serde_json::json!({"op": "get", "path": "key_info_spec.json", "query": "meta"}),
+            &inprocess_ctx(cwd),
+        )
+        .await;
+    assert!(!output.is_error);
+    assert_eq!(inprocess_text(&output), "{\n  \"version\": 2\n}");
+}
+
 // #689 review P1: the metadata().len() pre-check is bypassable — a FIFO
 // reports len() == 0 forever, so the old unbounded read_to_string inside
 // load_json sailed past the cap to EOF. The cap must be enforced by the
@@ -231,13 +432,13 @@ fn json_tool_fifo_over_cap_is_rejected_by_the_bounded_read() {
                 Err(err) => panic!("fifo write failed: {err}"),
             }
         }
-        drop(file); // close → any remaining reader sees EOF
         // #689 review P2-2: the EPIPE is the OBSERVABLE proof that the read
         // side was bounded (closed its end at cap+1) rather than draining
         // the whole 5 MiB and rejecting on a length check afterwards. If the
         // take(cap+1) ever regresses to an unbounded read, the reader only
         // closes after EOF — the writer pushes all 5 MiB, never sees EPIPE,
         // and this assertion fails instead of the test quietly passing.
+        drop(file); // close → any remaining reader sees EOF
         assert!(
             saw_epipe,
             "writer drained the full {total} bytes without EPIPE — the reader \

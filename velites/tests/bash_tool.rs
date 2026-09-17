@@ -419,8 +419,7 @@ async fn bash_capped_output_with_unshowable_first_line_names_display_limit() {
     // Same P2 discipline as the showable-head case above: the chunked-read
     // hint must stay bash-based, never the read tool's offset/limit.
     assert!(
-        text.contains("read it in chunks with bash")
-            && text.contains("sed -n '1,2000p' out.log"),
+        text.contains("read it in chunks with bash") && text.contains("sed -n '1,2000p' out.log"),
         "remediation must name a concrete bash chunk command: {text}"
     );
     assert!(

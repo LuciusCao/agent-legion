@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
+use super::json_limits::{self, JsonBudget, ParseBoundedError};
 use super::{resolve_in_cwd, truncate, ToolContext, ToolError, ToolOutput};
 
 /// Upper bound for one path expression — a legit nested path is a few
@@ -54,9 +55,12 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         "set" => {
             let value = args
                 .get("value")
-                .cloned()
                 .ok_or_else(|| ToolError::InvalidArgs("missing field `value`".into()))?;
-            set(ctx, path, query, value)
+            // 攻击报告 HIGH-3：value 只受上游 32 MiB arguments cap 约束
+            // （4 MiB 文件 + 32 MiB value 实测 226 MB 峰值、46 MiB 落盘）。
+            // 节点与紧凑字节双预算在改树前检查，超限诚实报错。
+            json_limits::check_value_size(value).map_err(|budget| budget_error(path, budget))?;
+            set(ctx, path, query, value.clone())
         }
         "delete" => delete(ctx, path, query),
         other => Err(ToolError::InvalidArgs(format!(
@@ -65,7 +69,11 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
     }
 }
 
-/// Resolve one file against the sandbox and parse it as JSON.
+/// Resolve one file against the sandbox and parse it as JSON under the
+/// #637 read-side caps: raw bytes bounded by
+/// [`truncate::MAX_CAPTURE_BYTES`], the parsed tree by the node budget
+/// (`json_limits::MAX_JSON_NODES` — a 4 MiB all-numbers file parses into
+/// a 33.6x heap without it).
 fn load_json(ctx: &ToolContext, path: &str) -> Result<(PathBuf, Value), ToolError> {
     let resolved = resolve_in_cwd(&ctx.cwd, path)?;
     // #637 内存防线：与 read 工具同一大小上限（整文件读入）；超限直接
@@ -92,23 +100,40 @@ fn load_json(ctx: &ToolContext, path: &str) -> Result<(PathBuf, Value), ToolErro
             )));
         }
     };
-    let value: Value = serde_json::from_str(&raw)
-        .map_err(|err| ToolError::InvalidArgs(format!("{path} is not valid JSON: {err}")))?;
-    Ok((resolved, value))
+    match json_limits::parse_bounded(&raw) {
+        Ok((value, _nodes)) => Ok((resolved, value)),
+        Err(ParseBoundedError::Syntax(err)) => Err(ToolError::InvalidArgs(format!(
+            "{path} is not valid JSON: {err}"
+        ))),
+        // 攻击报告 HIGH-2：合法字节量里的高节点数文档会让 Value 树吃掉
+        // 30x+ 字节的堆——树侧预算封在读侧上限之外。
+        Err(ParseBoundedError::Budget(budget)) => Err(budget_error(path, budget)),
+    }
 }
 
-/// Serialize the whole document back and atomically replace the file
-/// (tmp + rename, same protocol as the `write` tool).
+/// Map one budget rejection to the honest tool error.
+fn budget_error(path: &str, budget: JsonBudget) -> ToolError {
+    ToolError::TooLarge(format!(
+        "{path} is too large for the json tool: it has {budget}. \
+         Extract or rewrite the needed fields via bash (e.g. jq/python) instead"
+    ))
+}
+
+/// Serialize the whole document back compactly (bounded by the tree budget
+/// — compact output never exceeds the pretty form of the same tree) and
+/// atomically replace the file (tmp + rename, same protocol as the `write`
+/// tool). #518 shipped pretty files; the width amplification (2-2.5x per
+/// pretty line, attack-report HIGH-2) moved the format to compact so the
+/// on-disk size cannot balloon past the read cap that governs every later
+/// operation on the same file.
 fn store_json(resolved: &std::path::Path, root: &Value, path: &str) -> Result<u64, ToolError> {
-    let text = serde_json::to_string_pretty(root)
+    let text = json_limits::serialize(root, false)
         .map_err(|err| ToolError::InvalidArgs(format!("re-serializing {path} failed: {err}")))?;
-    let tmp = resolved.with_file_name(format!(
-        "{}.velites-tmp",
-        resolved
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("velites-tmp")
-    ));
+    let name = resolved
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("velites-tmp");
+    let tmp = resolved.with_file_name(format!("{name}.velites-tmp"));
     let write_result = std::fs::write(&tmp, &text).and_then(|_| std::fs::rename(&tmp, resolved));
     if let Err(err) = write_result {
         let _ = std::fs::remove_file(&tmp);
@@ -121,9 +146,9 @@ fn get(ctx: &ToolContext, path: &str, query: &str) -> Result<ToolOutput, ToolErr
     let (_resolved, root) = load_json(ctx, path)?;
     let found = query_json(&root, query)?;
     let text = match found {
-        Some(value) => serde_json::to_string_pretty(value).map_err(|err| {
-            ToolError::InvalidArgs(format!("serializing the queried value failed: {err}"))
-        })?,
+        // 攻击报告 HIGH-2：查询结果子树可达整树规模，pretty 序列化必须在
+        // 写出侧有字节预算（序列化途中封顶，瞬态字符串同受预算约束）。
+        Some(value) => json_limits::serialize_pretty(value).map_err(|b| budget_error(path, b))?,
         None => "null".to_string(),
     };
     // The all-tools truncation contract (design §8): a queried subtree can
@@ -146,7 +171,7 @@ fn set(ctx: &ToolContext, path: &str, query: &str, value: Value) -> Result<ToolO
     let last = last_segment(query, path)?;
     match parent {
         Value::Object(map) => {
-            map.insert(last.key, value.clone());
+            map.insert(last.key, value);
         }
         Value::Array(items) => {
             let index = last.index.ok_or_else(|| {
@@ -158,7 +183,7 @@ fn set(ctx: &ToolContext, path: &str, query: &str, value: Value) -> Result<ToolO
                     items.len()
                 )));
             }
-            items[index] = value.clone();
+            items[index] = value;
         }
         _ => {
             return Err(ToolError::InvalidArgs(format!(

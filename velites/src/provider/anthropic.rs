@@ -331,9 +331,7 @@ impl Aggregate {
                 let delta = event.get("delta").unwrap_or(&Value::Null);
                 let target = &mut self.blocks[index];
                 match delta.get("type").and_then(Value::as_str).unwrap_or("") {
-                    "text_delta" => {
-                        push_bounded(&mut target.text, &string_field(delta, "text"))?
-                    }
+                    "text_delta" => push_bounded(&mut target.text, &string_field(delta, "text"))?,
                     "thinking_delta" => {
                         push_bounded(&mut target.text, &string_field(delta, "thinking"))?
                     }
@@ -703,8 +701,8 @@ mod tests {
         // aggregate caps). Mirrors the openai_compat SseLineBuffer test.
         let mut buffer = Vec::new();
         let junk = vec![b'x'; 2 * 1024 * 1024 + 1];
-        let err = push_lines_bounded(&mut buffer, &junk)
-            .expect_err("overlong line must be rejected");
+        let err =
+            push_lines_bounded(&mut buffer, &junk).expect_err("overlong line must be rejected");
         assert!(err.is_retryable(), "overlong line is transient: {err}");
         assert!(err.to_string().contains("SSE line exceeds"), "got: {err}");
         // The rejected buffer is cleared, not retained (defensive: a reused

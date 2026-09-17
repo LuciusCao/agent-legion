@@ -93,6 +93,49 @@ async fn read_first_line_over_50kb_points_at_sed_fallback() {
     );
 }
 
+// 攻击报告 MEDIUM-5：恢复提示把模型可控的文件名原样拼进可直接执行的
+// sed 命令模板——`evil; rm -rf ~ .txt` 里的 `;` 会成为第二条命令。
+// 提示里的路径必须 shell 引用（安全字符集免引号，其余单引号包裹并
+// 转义内嵌单引号）。
+#[tokio::test]
+async fn read_over_cap_hint_shell_quotes_unsafe_filenames() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut content = vec![b'x'; 5 * 1024 * 1024];
+    content.push(b'\n');
+    std::fs::write(dir.path().join("evil; rm -rf ~ .txt"), &content).unwrap();
+
+    let output = ToolKind::Read
+        .execute(
+            &serde_json::json!({"path": "evil; rm -rf ~ .txt"}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(output.is_error);
+    let text = result_text(&output);
+    assert!(
+        text.contains("`sed -n '1,2000p' 'evil; rm -rf ~ .txt'`"),
+        "the unsafe filename must be single-quoted in the hint: {text}"
+    );
+}
+
+#[tokio::test]
+async fn read_huge_line_hint_shell_quotes_unsafe_filenames() {
+    let dir = tempfile::tempdir().unwrap();
+    let name = "a`whoami`b.txt";
+    let content = format!("{}\nshort\n", "x".repeat(60 * 1024));
+    std::fs::write(dir.path().join(name), &content).unwrap();
+
+    let output = ToolKind::Read
+        .execute(&serde_json::json!({"path": name}), &ctx(dir.path()))
+        .await;
+    assert!(!output.is_error);
+    let text = result_text(&output);
+    assert!(
+        text.contains(&format!("sed -n '1p' '{name}' | head -c 51200")),
+        "the backticked filename must be quoted in the hint: {text}"
+    );
+}
+
 #[tokio::test]
 async fn read_user_limit_with_remaining_file_offers_offset() {
     let dir = tempfile::tempdir().unwrap();
@@ -264,13 +307,13 @@ async fn read_fifo_over_cap_is_rejected_by_the_bounded_read() {
                 Err(err) => panic!("fifo write failed: {err}"),
             }
         }
-        drop(file); // close → any remaining reader sees EOF
         // #689 review P2-2: the EPIPE is the OBSERVABLE proof that the read
         // side was bounded (closed its end at cap+1) rather than draining
         // the whole 5 MiB and rejecting on a length check afterwards. If the
         // take(cap+1) ever regresses to an unbounded read, the reader only
         // closes after EOF — the writer pushes all 5 MiB, never sees EPIPE,
         // and this assertion fails instead of the test quietly passing.
+        drop(file); // close → any remaining reader sees EOF
         assert!(
             saw_epipe,
             "writer drained the full {total} bytes without EPIPE — the reader \
@@ -343,7 +386,10 @@ async fn read_fifo_under_cap_reads_to_eof() {
     });
 
     let output = ToolKind::Read
-        .execute(&serde_json::json!({"path": "small-pipe.txt"}), &ctx(dir.path()))
+        .execute(
+            &serde_json::json!({"path": "small-pipe.txt"}),
+            &ctx(dir.path()),
+        )
         .await;
     writer.join().expect("writer thread panicked");
 

@@ -11,6 +11,21 @@ use super::truncate::{self, TruncatedBy};
 use super::{resolve_readable, ToolContext, ToolError, ToolOutput};
 use crate::events::ContentBlock;
 
+/// Quote a model-supplied path for shell use in the recovery hints
+/// (attack report MEDIUM-5): single quotes with every embedded `'` closed
+/// and reopened (`'` → `'\''`), so a filename like `evil; rm -rf ~ .txt`
+/// cannot break out of the hint and become a second command when the model
+/// copies it verbatim into bash.
+fn shell_quoted(path: &str) -> String {
+    if path
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c))
+    {
+        return path.to_string();
+    }
+    format!("'{}'", path.replace('\'', r"'\''"))
+}
+
 pub async fn run(args: &Value, ctx: &ToolContext) -> ToolOutput {
     match run_inner(args, ctx) {
         Ok(output) => output,
@@ -46,10 +61,11 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
     // 单靠快照可被完全绕过）。超限直接报错并提示用 bash 分段读取。
     let size = std::fs::metadata(&resolved)?.len();
     if size > truncate::MAX_CAPTURE_BYTES {
+        let size_text = truncate::format_size(usize::try_from(size).unwrap_or(usize::MAX));
         return Err(ToolError::TooLarge(format!(
-            "{path} is {}, over the {} whole-file limit of the read tool. Read it in chunks via bash, e.g. `sed -n '1,2000p' {path}`",
-            truncate::format_size(usize::try_from(size).unwrap_or(usize::MAX)),
+            "{path} is {size_text}, over the {} whole-file limit of the read tool. Read it in chunks via bash, e.g. `sed -n '1,2000p' {quoted}`",
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
+            quoted = shell_quoted(path),
         )));
     }
     let text = match truncate::read_to_string_bounded(&resolved)? {
@@ -58,8 +74,9 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         // 上限由读取本身强制执行。真实总大小不可知，文案不伪造精确值。
         truncate::BoundedRead::Oversized => {
             return Err(ToolError::TooLarge(format!(
-                "{path} exceeds the {} whole-file limit of the read tool (growing/FIFO sources report no exact size). Read it in chunks via bash, e.g. `sed -n '1,2000p' {path}`",
+                "{path} exceeds the {} whole-file limit of the read tool (growing/FIFO sources report no exact size). Read it in chunks via bash, e.g. `sed -n '1,2000p' {quoted}`",
                 truncate::MAX_CAPTURE_BYTES_DISPLAY,
+                quoted = shell_quoted(path),
             )));
         }
     };
@@ -91,14 +108,12 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         // model at a bash fallback (pi read.js semantics). `get` guards the
         // empty selection (offset at/past EOF), where no line exists.
         let line_size = truncate::format_size(lines.get(start).map_or(0, |line| line.len()));
+        let sed_line = start + 1;
+        let display = truncate::MAX_BYTES_DISPLAY;
         format!(
-            "[Line {} is {}, exceeds {} limit. Use bash: sed -n '{}p' {} | head -c {}]",
-            start + 1,
-            line_size,
-            truncate::MAX_BYTES_DISPLAY,
-            start + 1,
-            path,
+            "[Line {sed_line} is {line_size}, exceeds {display} limit. Use bash: sed -n '{sed_line}p' {quoted} | head -c {}]",
             truncate::DEFAULT_MAX_BYTES,
+            quoted = shell_quoted(path),
         )
     } else if truncation.truncated {
         let end_display = start + truncation.output_lines.max(1);
@@ -107,23 +122,18 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
             Some(TruncatedBy::Bytes) => format!(" ({} limit)", truncate::MAX_BYTES_DISPLAY),
             _ => String::new(),
         };
+        let from = start + 1;
         format!(
-            "{}\n\n[Showing lines {}-{} of {}{}. Use offset={} to continue.]",
-            truncation.content,
-            start + 1,
-            end_display,
-            total_file_lines,
-            limit_note,
-            next_offset,
+            "{}\n\n[Showing lines {from}-{end_display} of {total_file_lines}{limit_note}. Use offset={next_offset} to continue.]",
+            truncation.content
         )
     } else if limit.is_some() && end < total_file_lines {
         // The user's explicit limit stopped early but the file has more.
         let remaining = total_file_lines - end;
+        let next = end + 1;
         format!(
-            "{}\n\n[{} more lines in file. Use offset={} to continue.]",
-            truncation.content,
-            remaining,
-            end + 1,
+            "{}\n\n[{remaining} more lines in file. Use offset={next} to continue.]",
+            truncation.content
         )
     } else {
         truncation.content

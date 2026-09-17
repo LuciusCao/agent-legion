@@ -85,12 +85,13 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
              you produced. NEVER rewrite a whole JSON file (write tool) to \
              change one field, and NEVER shell out to python for this. `get` \
              returns the value at the path (null when absent). `set` writes \
-             any JSON value at the path and saves the file (pretty-printed, \
-             atomically). `delete` removes the key/array element at the \
-             path. Paths: dotted keys and [index] segments, e.g. \
-             `steps[2].content` or `[\"a key.with.dots\"].sub`; missing \
-             intermediate keys are an error for set/delete (no auto-create), \
-             and get reports null instead.",
+             any JSON value at the path and saves the file (compactly, \
+             atomically; the value is capped at the 4MB whole-file limit). \
+             `delete` removes the key/array element at the path. Paths: \
+             dotted keys and [index] segments, e.g. `steps[2].content` or \
+             `[\"a key.with.dots\"].sub`; missing intermediate keys are an \
+             error for set/delete (no auto-create), and get reports null \
+             instead.",
             serde_json::json!({
                 "type": "object",
                 "properties": {

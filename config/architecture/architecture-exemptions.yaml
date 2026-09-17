@@ -1044,5 +1044,5 @@ exemptions:
     below the old floor.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
-  ceiling: 691
+  ceiling: 679
   expires: 2027-03-31
