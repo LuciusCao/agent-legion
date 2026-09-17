@@ -1,6 +1,6 @@
-"""Schema v83 (#626): workspace_api_tokens — the machine-to-machine intake
+"""Schema v84 (#626): workspace_api_tokens — the machine-to-machine intake
 credential table. DDL rides the migration's apply fn (postgres_schema.sql
-is at its ceiling; v76 precedent), so fresh and pre-v83 databases both run
+is at its ceiling; v76 precedent), so fresh and pre-v84 databases both run
 this module and the parity test pins the shapes equal."""
 
 from __future__ import annotations

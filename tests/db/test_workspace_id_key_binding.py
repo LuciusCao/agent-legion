@@ -58,8 +58,8 @@ def test_schema_version_pin() -> None:
     # (claim_queue_wait_profile, #551) owns
     # tests/db/test_claim_queue_wait_profile_migration.py; v82
     # (job_status_counts_advisory_locks, #659) owns
-    # tests/db/test_status_counts_deadlock.py; v83
-    # (workspace_api_tokens, #626) owns
+    # tests/db/test_status_counts_deadlock.py; v83 (studio_chat_context_health)
+    # v84 (workspace_api_tokens, #626) owns
     # tests/db/test_workspace_api_tokens_migration.py — this copy stays as
     # a backstop that the chain tail stays in sync.
     assert SCHEMA_VERSION == 84

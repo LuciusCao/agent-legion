@@ -1,4 +1,4 @@
-"""Schema v83 (#626): workspace-scoped API intake tokens.
+"""Schema v84 (#626): workspace-scoped API intake tokens.
 
 ``workspace_api_tokens`` holds the machine-to-machine intake credentials:
 an external system (CMS / form / cron / other agent) presents one via
@@ -20,7 +20,7 @@ register tokens never needed: ``expires_at`` (optional TTL),
 ``last_used_at`` (throttled usage watermark for the admin panel).
 
 This module owns the table's DDL — postgres_schema.sql sits at its budget
-ceiling (the v76 studio_publish_requests precedent): fresh and pre-v83
+ceiling (the v76 studio_publish_requests precedent): fresh and pre-v84
 databases both run this apply fn, and the parity test pins the shapes equal.
 """
 
@@ -45,5 +45,5 @@ create index if not exists idx_workspace_api_tokens_workspace
 
 
 def migrate_workspace_api_tokens(conn: Any) -> None:
-    """Create the workspace API intake token table (v83, #626); idempotent."""
+    """Create the workspace API intake token table (v84, #626); idempotent."""
     conn.execute(_WORKSPACE_API_TOKENS_DDL)
