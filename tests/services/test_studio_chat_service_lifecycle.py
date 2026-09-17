@@ -50,7 +50,7 @@ TEXT_SCRIPT = {
             "notify": {
                 "sessionUpdate": "tool_call",
                 "toolCallId": "tc-1",
-                "title": "agent-legion-studio__list_workflows",
+                "title": "agent-legion-studio__list_jobs",
                 "kind": "other",
                 "status": "completed",
             }

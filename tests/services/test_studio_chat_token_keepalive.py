@@ -68,7 +68,7 @@ def _tool_call(update_id: str) -> dict:
     return {
         "sessionUpdate": "tool_call",
         "toolCallId": update_id,
-        "title": "agent-legion-studio__list_workflows",
+        "title": "agent-legion-studio__list_jobs",
         "kind": "other",
         "status": "completed",
     }
@@ -543,7 +543,7 @@ def test_live_agent_tool_call_keeps_token_alive_end_to_end(job_db, settings, tmp
                 "notify": {
                     "sessionUpdate": "tool_call",
                     "toolCallId": "tc-live",
-                    "title": "agent-legion-studio__list_workflows",
+                    "title": "agent-legion-studio__list_jobs",
                     "kind": "other",
                     "status": "completed",
                 }

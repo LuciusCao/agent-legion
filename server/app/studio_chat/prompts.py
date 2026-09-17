@@ -28,13 +28,21 @@ STUDIO_AUTHORING_BOOTSTRAP = (
 # imported — three-way equality (registered == manifest == this
 # reference) is pinned by tests/mcp_server/test_tool_names.py.
 
-# The MCP server name passed in session/new; agents typically prefix tool
-# calls with it (e.g. "agent-legion-studio__list_workflows").
+# The MCP server name passed in session/new; agents prefix tool calls with
+# it (e.g. "agent-legion-studio__list_jobs"). The mcp-prefixed variant
+# ("mcp__agent-legion-studio__list_jobs", how e.g. Claude Code surfaces MCP
+# tools) is accepted too. #678 review follow-up: the identity matcher only
+# accepts these structured prefixes followed by a real manifest tool name —
+# never a tool-name token embedded in a longer title.
 AGENT_LEGION_MCP_SERVER_NAME = "agent-legion-studio"
+_AGENT_LEGION_MCP_TITLE_PREFIXES = (
+    f"{AGENT_LEGION_MCP_SERVER_NAME}__",
+    f"mcp__{AGENT_LEGION_MCP_SERVER_NAME}__",
+)
 
 
 def looks_like_agent_legion_tool_call(text: str) -> bool:
-    """Heuristic: whether a tool-call identity field references our MCP tools.
+    """Whether a tool-call identity field is exactly one of our MCP tool names.
 
     ACP gives the client no direct view into the agent's MCP wiring, so MCP
     visibility and permission auto-approve both key off the tool-call text the
@@ -42,14 +50,17 @@ def looks_like_agent_legion_tool_call(text: str) -> bool:
     structured identity fields (title/kind/name) — never a serialization of
     the whole payload, whose rawInput would let an agent's local command text
     (e.g. a Bash line mentioning a tool name) impersonate an MCP call.
-    Matching is deliberately conservative (server name or an exact tool-name
-    token) — a false negative only degrades to the safe path (human-confirmed
-    permission, one-time mcp_status advisory).
+    #678 review follow-up: a field counts only when it *equals* a manifest
+    tool name, after stripping one of the documented server prefixes. A
+    token inside a longer title ("Bash: list_jobs && rm -rf /") is not
+    evidence of an MCP call — matching is exact, so growing the manifest can
+    never widen the auto-approve surface to command text. A false negative
+    only degrades to the safe path (human-confirmed permission, one-time
+    mcp_status advisory).
     """
     lowered = text.lower()
-    if AGENT_LEGION_MCP_SERVER_NAME in lowered:
-        return True
-    for name in AGENT_LEGION_MCP_TOOL_NAMES:
-        if f" {name} " in f" {lowered} " or f"{name}(" in lowered or f"__{name}" in lowered:
-            return True
-    return False
+    for prefix in _AGENT_LEGION_MCP_TITLE_PREFIXES:
+        if lowered.startswith(prefix):
+            lowered = lowered[len(prefix) :]
+            break
+    return lowered in AGENT_LEGION_MCP_TOOL_NAMES

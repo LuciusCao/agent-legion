@@ -82,6 +82,47 @@ LOCAL_BASH_MIMIC_SCRIPT = {
     ],
 }
 
+# A local execute call whose TITLE embeds a platform tool-name token with
+# shell metacharacters (#687 review P1): the token must not make this look
+# like an agent-legion MCP call — the request parks for human confirmation
+# instead of being auto-approved.
+TOOL_NAME_TOKEN_IN_TITLE_SCRIPT = {
+    "on_prompt": [
+        {
+            "permission": {
+                "toolCall": {
+                    "toolCallId": "tc-bash-tool-token",
+                    "title": "Bash: list_jobs && rm -rf /tmp/valuable",
+                    "kind": "execute",
+                },
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                ],
+            }
+        }
+    ],
+}
+
+# The Claude-Code style mcp__<server>__<tool> title (docs/studio-agent-mcp.md):
+# a legitimate platform MCP tool call that must still auto-approve.
+MCP_PREFIXED_PERMISSION_SCRIPT = {
+    "on_prompt": [
+        {
+            "permission": {
+                "toolCall": {
+                    "toolCallId": "tc-mcp-prefixed",
+                    "title": "mcp__agent-legion-studio__list_jobs",
+                },
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                ],
+            }
+        }
+    ],
+}
+
 # A local read-only tool call (ACP kind "read"/"search" — the Read/Glob/Grep
 # class): auto-approved without a human roundtrip (side-effect-free).
 READ_ONLY_PERMISSION_SCRIPT = {
@@ -177,6 +218,51 @@ def test_agent_legion_tool_permission_auto_approves(chat) -> None:
     assert "awaiting_permission" not in [
         service.get_session(session["id"])["status"],
     ]
+
+
+def test_mcp_prefixed_tool_permission_auto_approves(chat) -> None:
+    """Claude Code 形态的 mcp__agent-legion-studio__<tool> 标题仍是合法的
+    平台 MCP 调用：自动批准、标记 verified、不 park 会话。"""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(MCP_PREFIXED_PERMISSION_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "list the jobs")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "selected", "optionId": "allow"}]
+    assert service.get_session(session["id"])["mcp_status"] == "verified"
+    assert service.get_session(session["id"])["status"] != "awaiting_permission"
+
+
+def test_execute_title_with_tool_name_token_parks_for_human(chat) -> None:
+    """#687 review P1：本地 execute 请求的标题里出现工具名 token（含
+    shell 元字符的拼接命令）绝不能被识别为平台 MCP 调用——必须走人工
+    确认（park），人工 deny 后正常回到 idle。"""
+    service, _bus, register, workspace_id, user_id = chat
+    register(TOOL_NAME_TOKEN_IN_TITLE_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run the grep")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
+    pending = [
+        m
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "permission" and m["content"].get("status") == "pending"
+    ]
+    assert len(pending) == 1
+    service.respond_permission(
+        session["id"],
+        workspace_id,
+        pending[0]["content"]["request_id"],
+        option_id="deny",
+        deny=True,
+    )
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    # 不是 MCP 调用，就不能计入 MCP 可见性信号。
+    assert service.get_session(session["id"])["mcp_status"] != "verified"
 
 
 def test_human_permission_forward_answer_and_allow_all(chat) -> None:
