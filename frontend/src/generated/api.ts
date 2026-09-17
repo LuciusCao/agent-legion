@@ -5956,11 +5956,16 @@ export interface components {
     }
     /**
      * RunCreateResponse
-     * @description #467 A4：run + created_count only；job 行移到读取路径（#420）。
+     * @description #467 A4 响应瘦身保持：run + created_count only，永不物化 job 行
+     *     （万级 items 的响应体积回归由测试钉住）；#735 加回 job_ids——服务层
+     *     本就返回的字符串 id 列表（体积与 job rows 差一个数量级），外部系统
+     *     提交后即可拿到 job_id 去 #703 的单 job 端点轮询。
      */
     RunCreateResponse: {
       /** Created Count */
       created_count: number
+      /** Job Ids */
+      job_ids: string[]
       run: components['schemas']['RunRecord']
     }
     /** RunDetailResponse */
@@ -12364,6 +12369,7 @@ export interface operations {
          */
         workflow_key?: string | null
         status?: string | null
+        run_id?: string | null
       }
       header?: never
       path: {

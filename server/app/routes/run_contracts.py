@@ -75,10 +75,16 @@ class RunRecord(BaseModel):
 
 
 class RunCreateResponse(BaseModel):
-    """#467 A4：run + created_count only；job 行移到读取路径（#420）。"""
+    """#467 A4 响应瘦身保持：run + created_count only，永不物化 job 行
+    （万级 items 的响应体积回归由测试钉住）；#735 加回 job_ids——服务层
+    本就返回的字符串 id 列表（体积与 job rows 差一个数量级），外部系统
+    提交后即可拿到 job_id 去 #703 的单 job 端点轮询。"""
 
     run: RunRecord
     created_count: int
+    # #501 全重复治愈路径：created_count=0 时必为空列表（该次提交没有
+    # 新建任何 job，jobs 早已由他路补齐）。
+    job_ids: list[str]
 
 
 class RunListResponse(BaseModel):

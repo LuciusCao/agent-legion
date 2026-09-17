@@ -37,6 +37,12 @@ def create_jobs_router(
     # callers inherit it without signature changes. A fixed constant (not a
     # query parameter) keeps the OpenAPI contract and generated frontend
     # types unchanged.
+    # #735: run_id turns this endpoint into a per-run read for external
+    # callers — POST /runs returns job_ids, but a busy workspace still needs
+    # a server-side way to enumerate one run's jobs (the 500-cap makes the
+    # unfiltered list unreliable for that). Filter semantics, not resource
+    # addressing: a run_id from another workspace (or a missing run) yields
+    # an empty list, not a 404.
     @router.get(
         "/workspaces/{workspace_id}/jobs",
         response_model=JobsResponse,
@@ -49,6 +55,7 @@ def create_jobs_router(
             Query(deprecated=True, description=_DEPRECATED_QUERY),
         ] = None,
         status: str | None = None,
+        run_id: str | None = None,
     ) -> JobsResponse:
         # Subagent review P3-1 on #307: guard parity with failed-node-runs —
         # a mismatched key can no longer narrow (the column filter is the
@@ -58,7 +65,9 @@ def create_jobs_router(
             return JobsResponse(
                 jobs=cast(
                     list[JobSummaryResponse],
-                    job_queries.list_jobs(workspace_id, workflow_key=workflow_key, status=status),
+                    job_queries.list_jobs(
+                        workspace_id, workflow_key=workflow_key, status=status, run_id=run_id
+                    ),
                 )
             )
         except JobServiceError as exc:

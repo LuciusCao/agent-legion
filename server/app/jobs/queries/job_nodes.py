@@ -93,6 +93,7 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
         workspace_id: str | None = None,
         source_id: str | None = None,
         status_not_in: Sequence[str] | None = None,
+        run_id: str | None = None,
         limit: int = 500,
     ) -> list[dict[str, Any]]:
         # workflow_key is inert (#211 M2 dropped the column): callers may keep
@@ -104,6 +105,10 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
             ("workspace_id", workspace_id),
             ("status", status),
             ("source_id", source_id),
+            # #735: run filter, not resource addressing — a run_id belonging
+            # to another workspace simply yields no rows here (empty list at
+            # the API surface), never a lookup error.
+            ("run_id", run_id),
         ):
             if val:
                 clauses.append(f"{col}=%s")

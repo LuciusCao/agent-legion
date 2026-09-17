@@ -13,7 +13,9 @@ retirement slice.
 chunked set-based existence probes, the dedup scan loads only this request's
 keys, job insertion commits in bounded chunks, and the create response no
 longer materializes job rows (run id + created_count; the detail endpoint and
-#358's counter tables carry the rest).
+#358's counter tables carry the rest). #735 restores the bare ``job_ids``
+string list on the response — ids only, the row-slimming contract of #467 A4
+stays in force (regression-pinned by tests).
 """
 
 from __future__ import annotations
@@ -284,9 +286,10 @@ class RunService:
             self.job_event_manager.broadcast_jobs_created(
                 workspace_id, [{"id": job_id} for job_id in job_ids], {}
             )
-        # #467 A4: the response carries run + created_count only; job rows
-        # moved to the read paths (run detail + paginated job list), so a
-        # 万级-items run no longer serializes a proportional JSON payload
+        # #467 A4: the response carries run + created_count plus job_ids only
+        # (#735 re-added the id list so external callers can poll #703's
+        # per-job endpoints right after submit — ids, never job rows); a
+        # 万级-items run still does not serialize a proportional JSON payload
         # inside the request thread.
         return {"run": _run_record(run), "created_count": len(job_ids), "job_ids": job_ids}
 

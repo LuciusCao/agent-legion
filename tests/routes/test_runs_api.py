@@ -142,9 +142,17 @@ def test_create_list_and_detail(client, job_db) -> None:
     assert run["source_kind"] == "items"
     assert run["status"] == "created"
     assert run["created_count"] == 2
-    # #467 A4: the create response no longer materializes job rows; the
-    # job list endpoint (and run detail counters) is the read path.
+    # #735: job_ids 回到响应（外部系统提交后即可拿到 job_id 去 #703 的
+    # 单 job 端点轮询）；与 GET /jobs?run_id= 的读取路径互相印证。
+    assert len(body["job_ids"]) == 2
+    jobs_response = client.get(f"/api/workspaces/{workspace_id}/jobs", params={"run_id": run["id"]})
+    assert jobs_response.status_code == 200, jobs_response.text
+    assert {job["id"] for job in jobs_response.json()["jobs"]} == set(body["job_ids"])
+    # #467 A4 体积回归保护：响应只携带字符串 id 列表，永不物化 job 行
+    # （万级 items 的 JSON 序列化体积是当年砍 jobs 字段的原始动机）。
     assert "jobs" not in body
+    for job_id in body["job_ids"]:
+        assert isinstance(job_id, str)
     jobs_response = client.get(f"/api/workspaces/{workspace_id}/jobs")
     assert jobs_response.status_code == 200, jobs_response.text
     jobs = jobs_response.json()["jobs"]
@@ -382,3 +390,75 @@ def test_partial_run_failure_returns_structured_progress(client, job_db, monkeyp
     assert body["run"]["status"] == "failed"
     assert body["run"]["created_count"] == 1
     assert "already created" in body["run"]["error_message"]
+
+
+def test_create_response_job_ids_match_db_truth(client, job_db) -> None:
+    """#735：job_ids 是本次提交新建 job 的完整列表（与 DB 真值一致），
+    不是 workspace 既有 job、也不含 dedup 过滤掉的 item。"""
+    workspace_id = _create_workspace(client)
+    _insert_material(job_db, workspace_id, "mat-a")
+    _insert_material(job_db, workspace_id, "mat-b")
+
+    body = _create_run(client, workspace_id, [{"type": "material", "material_id": "mat-a"}]).json()
+    assert len(body["job_ids"]) == 1
+
+    # 第二次提交（一个旧 item + 一个新 item）：只有新 item 的 job 进
+    # job_ids —— created_count 与 job_ids 恒等长（服务层契约）。
+    second = _create_run(
+        client,
+        workspace_id,
+        [
+            {"type": "material", "material_id": "mat-a"},
+            {"type": "material", "material_id": "mat-b"},
+        ],
+    ).json()
+    assert second["created_count"] == 1
+    assert len(second["job_ids"]) == 1
+    assert second["job_ids"][0] not in body["job_ids"]
+
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            "select id, run_id from jobs where workspace_id=%s order by id", (workspace_id,)
+        ).fetchall()
+    assert {str(row["id"]) for row in rows} == set(body["job_ids"]) | set(second["job_ids"])
+
+
+def test_healed_resubmission_returns_empty_job_ids(client, job_db) -> None:
+    """#501 治愈路径的 job_ids 语义（#735 钉住）：全重复提交治愈 failed run
+    时 created_count=0、job_ids=[]——该次提交没有新建任何 job（jobs 早已由
+    他路补齐），绝不能回填 run 全量 job_ids（那会让外部调用方把已存在的
+    job 当成本次新建的重复处理）。"""
+    workspace_id = _create_workspace(client)
+    _insert_material(job_db, workspace_id, "mat-heal")
+    items = [{"type": "material", "material_id": "mat-heal"}]
+    first = _create_run(client, workspace_id, items).json()
+    run_id = first["run"]["id"]
+
+    # 人工制造 failed 现场（等价于 _mark_partial_run_failed 的落库形态）。
+    with job_db.connect() as conn:
+        conn.execute(
+            "update runs set status='failed', error_message='partway' where id=%s",
+            (run_id,),
+        )
+
+    healed = _create_run(client, workspace_id, items).json()
+    assert healed["run"]["id"] == run_id
+    assert healed["created_count"] == 0
+    assert healed["job_ids"] == []
+
+
+def test_run_create_response_contract_pins_job_ids_without_rows(tmp_path) -> None:
+    """#467 A4 原始动机回归钉（#735 收口）：响应 schema 有 job_ids（字符串
+    数组）且没有 jobs 字段——万级 items 响应体积不能随 #735 回退。"""
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    schema = app.openapi()["components"]["schemas"]["RunCreateResponse"]
+
+    assert set(schema["required"]) == {"run", "created_count", "job_ids"}
+    assert set(schema["properties"]) == {"run", "created_count", "job_ids"}
+    assert schema["properties"]["job_ids"] == {
+        "items": {"type": "string"},
+        "title": "Job Ids",
+        "type": "array",
+    }
