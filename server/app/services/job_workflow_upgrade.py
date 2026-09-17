@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from datetime import UTC, datetime
 from typing import Any
 
 from server.app.events import JobEventManager
@@ -10,10 +8,15 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.jobs.workflow_upgrade_mutation_inherit import upgrade_job_workflow_inherit
-from server.app.services.job_workflow_upgrade_config import intake_frozen_config_json
+from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_workflow_upgrade_cleanup import (
+    finalize_upgrade_staged_outputs,
+    rollback_upgrade_staged_outputs,
+    stage_upgrade_reset_outputs,
+)
+from server.app.services.job_workflow_upgrade_gates import UpgradeContext, resolve_upgrade_context
 from server.app.services.job_workflow_upgrade_plan import plan_inherit_nodes
 from server.app.services.job_workflow_upgrade_result import upgrade_result
-from server.app.workflows.definition import workflow_definition_from_dict
 
 UPGRADE_MODES = ("clean", "inherit")
 
@@ -25,74 +28,43 @@ class JobWorkflowUpgradeService:
         lease_repo: ExecutorLeaseRepository,
         job_event_manager: JobEventManager | None = None,
         job_event_buffer: Any | None = None,
+        artifact_mutation: JobArtifactMutationService | None = None,
+        object_store: Any = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
+        # #508 同款产物清理件（review P1-3）：重置闭包的本地产物暂存、
+        # 清单行同事务删除与提交后对象清理的编排见
+        # job_workflow_upgrade_cleanup。None 时（裸构造的服务）退化为
+        # 不做本地产物暂存，仅清单行清理。
+        self.artifact_mutation = artifact_mutation
+        self.object_store = object_store
 
     def upgrade(self, workspace_id: str, job_id: str, *, mode: str = "clean") -> dict[str, Any]:
         if mode not in UPGRADE_MODES:
             raise ValueError(f"Unknown upgrade mode: {mode!r}")
-        job = self.job_db.get_job(job_id)
-        if job is None:
-            return upgrade_result(job_id, "failed", "not_found", "Job not found", mode=mode)
-        if job["workspace_id"] != workspace_id:
-            return upgrade_result(
-                job_id,
-                "failed",
-                "not_found",
-                "Job not found",
-                mode=mode,
-            )
-
-        active = self.job_db.get_active_workflow_revision(
-            str(job["workspace_id"]), str(job["workspace_id"])
+        context = resolve_upgrade_context(
+            self.job_db, self.lease_repo, workspace_id, job_id, mode=mode
         )
-        if active is None:
-            return upgrade_result(
-                job_id,
-                "failed",
-                "no_active_revision",
-                "Workspace has no active workflow revision",
-                mode=mode,
-            )
-        # Skip only when the job truly matches the active revision. A job can
-        # pin the active revision id yet carry a stale definition snapshot
-        # (older upgrade paths moved the pin without swapping the snapshot);
-        # dispatch resolves node execution/config from that snapshot, so such
-        # jobs must be re-pinned to heal instead of being skipped forever.
-        # The actual snapshot content is compared, not the independently
-        # stored hash column — the two have no consistency constraint.
-        if str(job.get("workflow_revision_id") or "") == str(active["id"]) and str(
-            job.get("workflow_definition_snapshot_json") or ""
-        ) == str(active["definition_json"]):
-            return upgrade_result(
-                job_id, "skipped", "already_current", "Job is already current", mode=mode
-            )
-
-        now = datetime.now(UTC)
-        if self.lease_repo.has_active_for_job(job_id, now):
-            return upgrade_result(
-                job_id, "skipped", "busy", "Job has an active executor lease", mode=mode
-            )
-
-        definition = workflow_definition_from_dict(json.loads(active["definition_json"]))
-        try:
-            # Re-freeze node config as intake would on the active revision, so
-            # node-level config fixes reach old jobs via upgrade instead of
-            # forcing a re-intake. Validated fully before any mutation below.
-            frozen_config_json = intake_frozen_config_json(self.job_db, workspace_id, definition)
-        except ValueError as exc:
-            return upgrade_result(job_id, "failed", "invalid_node_config", str(exc), mode=mode)
+        if not isinstance(context, UpgradeContext):
+            return context
 
         # inherit 模式的继承集在事务外规划（读路径，纯函数见
         # job_workflow_upgrade_plan）；校验备妥后才进入统一应用。
         inherit_nodes: frozenset[str] = frozenset()
         if mode == "inherit":
             inherit_nodes = plan_inherit_nodes(
-                self.job_db, job, workspace_id, definition, frozen_config_json
+                self.job_db,
+                context.job,
+                workspace_id,
+                context.definition,
+                context.frozen_config_json,
             )
+        staged = stage_upgrade_reset_outputs(
+            self.artifact_mutation, context.job, context.definition, inherit_nodes
+        )
         try:
             # The intake batch's node_code_versions deliberately stay frozen:
             # the batch payload is shared by every job in the batch. Since
@@ -100,23 +72,36 @@ class JobWorkflowUpgradeService:
             # the frozen pins only matter to quality-replay batches.
             with self.job_db.lease_guarded_mutation(
                 job_id,
-                now,
+                context.now,
                 reject_running_nodes=True,
             ) as conn:
                 stats = upgrade_job_workflow_inherit(
                     conn,
                     job_id,
-                    workflow_revision_id=str(active["id"]),
-                    workflow_version=int(active["version"]),
-                    workflow_definition_hash=str(active["definition_hash"]),
-                    workflow_definition_snapshot_json=str(active["definition_json"]),
-                    node_keys=list(definition.executable_nodes),
-                    frozen_config_json=frozen_config_json,
+                    workflow_revision_id=str(context.active["id"]),
+                    workflow_version=int(context.active["version"]),
+                    workflow_definition_hash=str(context.active["definition_hash"]),
+                    workflow_definition_snapshot_json=str(context.active["definition_json"]),
+                    node_keys=list(context.definition.executable_nodes),
+                    frozen_config_json=context.frozen_config_json,
                     inherit_nodes=inherit_nodes,
+                    staged_artifact_names=(
+                        staged.artifact_names if staged is not None else frozenset()
+                    ),
                 )
         except JobMutationConflict as exc:
+            rollback_upgrade_staged_outputs(staged)
             return upgrade_result(job_id, "skipped", exc.reason_code, str(exc), mode=mode)
+        except BaseException:
+            # #204 broad-except audit: upgrade 的暂存件安全网（与
+            # job_execution.run_to / job_rerun.commit_rerun 同款）。事务
+            # 冲突臂已在上面剥离；这里兜住其余一切失败（DB 断连、产物
+            # 清理缺陷等），先把已移出原位的本地产物回滚复位再原样上抛
+            # ——否则节点产物会从 job_dir 消失而 DB 仍标记存在。
+            rollback_upgrade_staged_outputs(staged)
+            raise
 
+        finalize_upgrade_staged_outputs(staged, self.object_store, stats["deleted_rows"], job_id)
         if self.job_event_buffer is not None:
             record_job_update(self.job_db, self.job_event_buffer, job_id)
         elif self.job_event_manager is not None:

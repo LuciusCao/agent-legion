@@ -23,10 +23,11 @@ class JobMutationResultResponse(BaseModel):
     message: str | None = None
     # upgrade_workflow 专属统计（issue #645）：其余 operation 不携带；
     # Optional + default 让 OpenAPI 输出为可省略字段（旧客户端与非
-    # upgrade 结果的既有 fixture 不必补齐）。
+    # upgrade 结果的既有 fixture 不必补齐）。字段名带 _node_count 后缀，
+    # 避免与子类把 rerun_nodes 特化为节点 key 列表的语义相撞（review P2）。
     mode: UpgradeMode | None = None
-    kept_nodes: int | None = Field(default=None, ge=0)
-    rerun_nodes: int | None = Field(default=None, ge=0)
+    kept_node_count: int | None = Field(default=None, ge=0)
+    rerun_node_count: int | None = Field(default=None, ge=0)
 
 
 class BatchJobMutationResponse(BaseModel):

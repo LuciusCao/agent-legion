@@ -4683,8 +4683,8 @@ export interface components {
     JobMutationResultResponse: {
       /** Job Id */
       job_id: string
-      /** Kept Nodes */
-      kept_nodes?: number | null
+      /** Kept Node Count */
+      kept_node_count?: number | null
       /** Message */
       message?: string | null
       /** Mode */
@@ -4706,8 +4706,8 @@ export interface components {
         | 'resume'
       /** Reason Code */
       reason_code?: string | null
-      /** Rerun Nodes */
-      rerun_nodes?: number | null
+      /** Rerun Node Count */
+      rerun_node_count?: number | null
       /**
        * Status
        * @enum {string}
@@ -4800,8 +4800,8 @@ export interface components {
     JobRerunByFailureResultResponse: {
       /** Job Id */
       job_id: string
-      /** Kept Nodes */
-      kept_nodes?: number | null
+      /** Kept Node Count */
+      kept_node_count?: number | null
       /** Message */
       message?: string | null
       /** Mode */
@@ -4823,8 +4823,10 @@ export interface components {
         | 'resume'
       /** Reason Code */
       reason_code?: string | null
+      /** Rerun Node Count */
+      rerun_node_count?: number | null
       /** Rerun Nodes */
-      rerun_nodes?: unknown
+      rerun_nodes?: string[]
       /**
        * Status
        * @enum {string}

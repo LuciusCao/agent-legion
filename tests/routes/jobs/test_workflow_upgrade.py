@@ -61,8 +61,8 @@ def test_upgrade_workflow_route_upgrades_stale_job(tmp_path):
     assert body["status"] == "succeeded"
     # 无 body 的既有调用面：默认 clean，统计字段恒在。
     assert body["mode"] == "clean"
-    assert body["kept_nodes"] == 0
-    assert body["rerun_nodes"] > 0
+    assert body["kept_node_count"] == 0
+    assert body["rerun_node_count"] > 0
     assert detail["job"]["workflow_revision_id"] == current["id"]
     assert detail["job"]["workflow_version"] == current["version"]
     assert detail["job"]["status"] == "queued"
@@ -96,7 +96,7 @@ def test_upgrade_workflow_route_inherit_mode_reports_stats(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["mode"] == "inherit"
-    assert body["kept_nodes"] + body["rerun_nodes"] > 0
+    assert body["kept_node_count"] + body["rerun_node_count"] > 0
 
 
 def test_upgrade_workflow_route_rejects_invalid_mode(tmp_path):
@@ -254,7 +254,7 @@ def test_batch_upgrade_workflow_route_passes_inherit_mode(tmp_path):
     results = response.json()["results"]
     assert len(results) == 1
     assert results[0]["mode"] == "inherit"
-    assert results[0]["kept_nodes"] + results[0]["rerun_nodes"] > 0
+    assert results[0]["kept_node_count"] + results[0]["rerun_node_count"] > 0
 
 
 def test_batch_upgrade_workflow_route_defaults_to_clean_mode(tmp_path):
@@ -273,7 +273,7 @@ def test_batch_upgrade_workflow_route_defaults_to_clean_mode(tmp_path):
     assert response.status_code == 200
     results = response.json()["results"]
     assert results[0]["mode"] == "clean"
-    assert results[0]["kept_nodes"] == 0
+    assert results[0]["kept_node_count"] == 0
 
 
 def test_batch_upgrade_workflow_route_rejects_invalid_mode(tmp_path):

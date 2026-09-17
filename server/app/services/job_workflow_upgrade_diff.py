@@ -16,10 +16,11 @@
    **label 等纯展示字段刻意排除**——只改显示名不该烧掉已完成的产物。
    进出节点（inputs/outputs/terminal）本身也在定义哈希里：改上游产出名
    等于改契约，下游与自身都必须重跑。
-2. 该节点的冻结 config 段（upgrade 前 re-freeze 的
-   ``frozen_config_json``）：schema 默认值、节点 config、workspace 覆盖
-   的任何变化都改变节点执行输入，触发重跑。继承只对比 re-freeze 之后
-   的新旧两份值——workspace 层配置变化会自然体现在两份冻结值里。
+2. 该节点的冻结 config 段：新侧是 upgrade 前 re-freeze 的
+   ``frozen_config_json``（schema 默认值、节点 config、workspace 覆盖），
+   旧侧优先用 job 的存量冻结值（intake 冻结，产物按它产出）；任何一侧
+   的执行输入变化都触发重跑。workspace 层配置变化体现在新侧 freeze 里，
+   与 job 存量冻结值的差异即「配置演进」，受影响节点重跑。
 3. 上游节点哈希集合（拓扑序链式传播）：对上游「节点集」整体取哈希，
    而不是逐上游拼接——这样旧快照里的上游重命名（A→A'，定义哈希不同）
    与其下游在「上游集哈希」上等价坍缩，不再误判下游必须重跑。
@@ -75,15 +76,16 @@ def node_definition_hash(node: WorkflowNode) -> str:
 
 
 def _frozen_config_section(frozen_config_json: str | None, node_key: str) -> dict[str, Any]:
-    """该节点的冻结 config 段；无冻结或段缺失即空（与 dispatch 的空段一致）。"""
+    """该节点的冻结 config 段；无冻结或段缺失即空（与 dispatch 的空段一致）。
+
+    损坏/非对象的冻结值按空段参与比较：dispatch 侧 ``parse_object``
+    对同样内容也是同一降级（RUN-FREEZE-001），两侧语义对齐。
+    """
     if not frozen_config_json:
         return {}
     try:
         payload = json.loads(frozen_config_json)
     except (TypeError, ValueError):
-        # 调用方（upgrade 服务）传的永远是刚序列化好的合法 JSON；旧 job
-        # 里损坏的冻结值也不进本函数（diff 用的是 re-freeze 后的新值）。
-        # 防御性空段即可：该节点按「无 config 变化」参与比较。
         return {}
     section = payload.get(node_key) if isinstance(payload, dict) else None
     return section if isinstance(section, dict) else {}

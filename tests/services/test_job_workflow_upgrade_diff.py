@@ -250,3 +250,25 @@ def test_branching_fanout_propagation():
     reset = compute_inherit_reset_nodes(old_def, None, new_def, None)
 
     assert reset == {"d"}
+
+
+def test_workspace_config_drift_between_old_freeze_and_new_freeze_resets():
+    """review P1-2：旧侧是 job 存量冻结值、新侧是 re-freeze——两份值的
+    差异（workspace 配置演进）必须触发受影响节点重跑，不能因两侧同源
+    re-freeze 而相等误判「未变」。"""
+    definition = _chain_definition()
+    old_frozen = '{"a": {"k": "v1"}}'
+    new_frozen = '{"a": {"k": "v2"}}'
+
+    reset = compute_inherit_reset_nodes(definition, old_frozen, definition, new_frozen)
+
+    # a 的配置演进 → a 与下游闭包 b/c 全部重跑。
+    assert reset == {"a", "b", "c"}
+
+
+def test_matching_old_frozen_value_keeps_nodes_inheritable():
+    """P1-2 配对：旧冻结值与新 re-freeze 相等 → 节点可继承（diff 空）。"""
+    definition = _chain_definition()
+    frozen = '{"a": {"k": "v1"}}'
+
+    assert compute_inherit_reset_nodes(definition, frozen, definition, frozen) == set()

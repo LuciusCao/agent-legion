@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -41,11 +41,10 @@ class JobRerunByFailureRequest(BaseModel):
 
 
 class JobRerunByFailureResultResponse(JobMutationResultResponse):
-    # rerun_nodes 在父类是 upgrade-workflow 的继承统计（int，issue #645）；
-    # 失败类别批量重跑把它特化为「实际重跑的节点 key 列表」，语义随
-    # operation=rerun 而非 upgrade_workflow。mypy 视角是窄化类型覆写，
-    # Field annotation 放宽为 Any 保持静态检查诚实。
-    rerun_nodes: Any = Field(default_factory=list)
+    # rerun_nodes 是本端点的「实际重跑节点 key 列表」（父类不再携带该
+    # 字段——upgrade 统计改用 kept_node_count / rerun_node_count，issue
+    # #645 review P2）。list[str] 保持 OpenAPI string[] 与 Pydantic 校验。
+    rerun_nodes: list[str] = Field(default_factory=list)
 
 
 class JobRerunByFailureResponse(BaseModel):
