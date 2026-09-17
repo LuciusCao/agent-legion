@@ -37,12 +37,12 @@ export function StudioChatConfigChip(props: {
       >
         {props.options.map((option) =>
           option.header ? (
-            <MenuItem key={option.value} disabled className={styles.menuHeader}>
+            <MenuItem key={option.key} disabled className={styles.menuHeader}>
               {option.label}
             </MenuItem>
           ) : (
             <MenuItem
-              key={option.value}
+              key={option.key}
               selected={option.current}
               disabled={option.disabled}
               title={option.title}

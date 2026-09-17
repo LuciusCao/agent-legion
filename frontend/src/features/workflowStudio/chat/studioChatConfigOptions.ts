@@ -9,10 +9,15 @@ import { UI_LEVELS, levelLabel } from './thoughtLevel'
  * 提交一律走结构化 `submit`（configId/value 分开携带，闭包数据）：#733 R4-P2
  * ——后端契约只要求 config id 非空、不禁止冒号，此前高级项把 id:value 拼成
  * 字符串再按首个冒号拆回，id 含冒号时被截成错误前缀遭 `Unknown config
- * option` 拒绝；字符串编码同样被「未知原生值恰等于哨兵」这类碰撞威胁。 */
+ * option` 拒绝；字符串编码同样被「未知原生值恰等于哨兵」这类碰撞威胁。
+ * React key 同理（#733 R7-P2-a）：`key` 由构建期的「前缀 + 序号」生成，
+ * 同级唯一且稳定，不从用户可控的 id/value 拼——`id="a:b"` 的组头与
+ * `id="a"` 的 `value="b"` 选项拼出来的字符串曾是同一个 key。 */
 
 export type ChipOption = {
-  /** 仅作 React key / 菜单标识，永不参与解析拆回。 */
+  /** React key / 菜单标识（构建期生成，同级唯一且稳定），永不参与解析拆回。 */
+  key: string
+  /** 语义值（权限模式芯片提交用；其余芯片提交走 submit）。 */
   value: string
   label: string
   title?: string
@@ -24,7 +29,8 @@ export type ChipOption = {
 }
 
 export function modeOptions(modes: ModeView): ChipOption[] {
-  return modes.available.map((mode) => ({
+  return modes.available.map((mode, index) => ({
+    key: `mode:${index}`,
     value: mode.id,
     label: mode.name,
     title: mode.description,
@@ -33,11 +39,14 @@ export function modeOptions(modes: ModeView): ChipOption[] {
 }
 
 export function modelOptions(entry: ConfigEntry): ChipOption[] {
+  let seq = 0
+  const nextKey = () => `model:${(seq += 1)}`
   return entry.options.flatMap((option) =>
     isGroup(option)
       ? [
-          { value: `group:${option.group}`, label: option.name, header: true },
+          { key: nextKey(), value: '', label: option.name, header: true },
           ...option.options.map((item) => ({
+            key: nextKey(),
             value: item.value,
             label: item.name ?? item.value,
             title: item.description,
@@ -47,6 +56,7 @@ export function modelOptions(entry: ConfigEntry): ChipOption[] {
         ]
       : [
           {
+            key: nextKey(),
             value: option.value,
             label: option.name ?? option.value,
             title: option.description,
@@ -59,9 +69,12 @@ export function modelOptions(entry: ConfigEntry): ChipOption[] {
 
 export function thoughtOptions(thought: ThoughtView): ChipOption[] {
   const { map } = thought
+  let seq = 0
+  const nextKey = () => `thought:${(seq += 1)}`
   const options: ChipOption[] = []
   if (map.offValue !== null) {
     options.push({
+      key: nextKey(),
       value: 'off',
       label: '关闭',
       current: map.current === 'off',
@@ -73,7 +86,8 @@ export function thoughtOptions(thought: ThoughtView): ChipOption[] {
     if (native === undefined) continue
     // 通用档走映射；提交的是原生值，不是档位词。
     options.push({
-      value: `ui:${ui}`,
+      key: nextKey(),
+      value: ui,
       label: levelLabel(ui, native),
       current: map.current === ui,
       submit: { configId: thought.id, value: native },
@@ -82,7 +96,8 @@ export function thoughtOptions(thought: ThoughtView): ChipOption[] {
   for (const value of map.unknownValues) {
     // 未知原生值原样透传（看得见、选得到、切走后切得回）。
     options.push({
-      value: `native:${value}`,
+      key: nextKey(),
+      value,
       label: value,
       current: map.current === null && thought.currentValue === value,
       submit: { configId: thought.id, value },
@@ -101,20 +116,24 @@ export function thoughtText(thought: ThoughtView): string {
 }
 
 export function advancedOptions(entries: ConfigEntry[]): ChipOption[] {
+  let seq = 0
+  const nextKey = () => `adv:${(seq += 1)}`
   return entries.flatMap((entry): ChipOption[] => {
     if (entry.type !== 'select') {
       return [
         {
-          value: `entry:${entry.id}`,
+          key: nextKey(),
+          value: '',
           label: `${entry.name}：${entry.currentValue}（只读）`,
           disabled: true,
         },
       ]
     }
     return [
-      { value: `entry:${entry.id}`, label: entry.name, header: true },
+      { key: nextKey(), value: '', label: entry.name, header: true },
       ...flattenOptions(entry.options).map((option) => ({
-        value: `entry:${entry.id}:${option.value}`,
+        key: nextKey(),
+        value: option.value,
         label: option.name ?? option.value,
         title: option.description,
         current: option.value === entry.currentValue,

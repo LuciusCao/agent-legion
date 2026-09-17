@@ -272,6 +272,51 @@ describe('StudioChatComposer config chips (#695 R4)', () => {
     await act(async () => {})
   })
 
+  it('keeps menu keys unique for colon-containing ids (#733 R7-P2-a)', async () => {
+    // id="a:b" 的组头与 id="a" + value="b" 的选项在旧编码下共享同一个
+    // React key（entry:a:b）；菜单必须完整渲染两项、提交精确、无重复 key 告警。
+    mockApi.setStudioChatConfigOption.mockResolvedValue(record())
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    renderWithConfig(
+      record({
+        config_options: [
+          {
+            id: 'a:b',
+            name: 'AB',
+            category: '_x',
+            type: 'select',
+            currentValue: 'v',
+            options: [{ value: 'v' }],
+          },
+          {
+            id: 'a',
+            name: 'A',
+            category: '_y',
+            type: 'select',
+            currentValue: 'b',
+            options: [{ value: 'b', name: 'B 档' }],
+          },
+        ],
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: '高级设置' }))
+    expect(await screen.findByText('AB')).toBeInTheDocument()
+    expect(screen.getByText('A')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'B 档' }))
+    expect(mockApi.setStudioChatConfigOption).toHaveBeenCalledWith(
+      'ws1',
+      's1',
+      'a',
+      'b'
+    )
+    const keyWarnings = consoleSpy.mock.calls.filter((args) =>
+      String(args[0]).includes('unique "key"')
+    )
+    consoleSpy.mockRestore()
+    expect(keyWarnings).toHaveLength(0)
+    await act(async () => {})
+  })
+
   it('passes unknown native thought values through verbatim', async () => {
     mockApi.setStudioChatConfigOption.mockResolvedValue(record())
     renderWithConfig(

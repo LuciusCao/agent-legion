@@ -1,9 +1,13 @@
 /* AgentChatStatusStrip（#695 R3）：消息列表与输入区之间的单行状态条。
- * 视觉密度对齐 12px 字号体系；左右两组，右侧用量条 margin-left:auto 贴右。 */
+ * 视觉密度对齐 12px 字号体系；左右两组，右侧用量条 margin-left:auto 贴右。
+ * #733 R7-P2-b：窄面板（Studio 右栏可拖至 320px / 预览对话框分栏）下各槽
+ * 位同时出现时单行放不下——允许换行 + 各槽可收缩（min-width:0 + ellipsis），
+ * 按钮恒 flex:none 不被压缩（同 R6 composer 工具行的修法）。 */
 .strip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   padding: 4px 12px;
   border-top: 1px solid #f0f0f0;
   font-size: 12px;
@@ -14,6 +18,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  flex-shrink: 1;
 }
 .dot {
   width: 8px;
@@ -34,6 +39,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* flex 子项默认 min-width:auto 拒不收缩，显式归零才能 ellipsis。 */
+  min-width: 0;
 }
 .button {
   flex: none;
@@ -55,7 +62,10 @@
   color: #c62828;
 }
 .queue {
-  flex: none;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: #757575;
   white-space: nowrap;
 }
@@ -64,6 +74,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex-shrink: 1;
   color: #757575;
   white-space: nowrap;
+}
+.meter span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
