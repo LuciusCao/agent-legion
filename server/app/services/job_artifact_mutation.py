@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from server.app.services.job_artifact_staging_scope import staging_output_names
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.workflow_branching import downstream_nodes
@@ -19,11 +20,15 @@ class StagedOutputs:
     `commit()` permanently removes staged files; `rollback()` restores them to
     their original locations. ``artifact_names`` are the output names staged
     for the affected closure (#508: the same set whose ``job_artifacts``
-    manifest rows the rerun transaction deletes).
+    manifest rows the rerun transaction deletes); names shared with nodes
+    outside the closure are never staged (see ``stage_outputs``).
     """
 
     def __init__(
-        self, staged_dir: Path, moves: list[tuple[Path, Path]], artifact_names: set[str]
+        self,
+        staged_dir: Path,
+        moves: list[tuple[Path, Path]],
+        artifact_names: set[str],
     ) -> None:
         self._staged_dir = staged_dir
         self._moves = list(moves)
@@ -87,6 +92,9 @@ class JobArtifactMutationService:
         When ``closure`` is provided, only outputs declared by nodes inside the
         closure are staged. This supports targeted rerun-to operations where
         descendants outside the target closure must keep their artifacts.
+        Staging is also name-scoped: an output name declared by any node
+        outside the closure is left in place (adversarial review A3 — see
+        ``job_artifact_staging_scope.staging_output_names``).
 
         Read-modify-write artifacts (declared as both an input and an output of
         the same node) are never staged: removing them would leave the node
@@ -112,10 +120,9 @@ class JobArtifactMutationService:
         if closure is not None:
             affected_keys &= set(closure)
 
-        outputs: set[str] = set()
-        for key in affected_keys:
-            node = definition.nodes[key]
-            outputs.update(set(node.outputs) - set(node.inputs))
+        # Node-scoped staging (adversarial review A3): a name shared with a
+        # node outside the closure is never staged — see the pure helper.
+        outputs = staging_output_names(definition, affected_keys)
 
         paths = set(outputs)
         paths.update(f"runs/{key}" for key in affected_keys)

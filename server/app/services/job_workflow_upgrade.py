@@ -58,7 +58,6 @@ class JobWorkflowUpgradeService:
             inherit_nodes = plan_inherit_nodes(
                 self.job_db,
                 context.job,
-                workspace_id,
                 context.definition,
                 context.frozen_config_json,
             )

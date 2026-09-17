@@ -1,7 +1,8 @@
 """Job workflow upgrade 的节点重置 mutation（issue #645 双模式）。
 
 ``upgrade_job_workflow_inherit`` 是唯一的写入口（clean = inherit_nodes
-为空集）；``workflow_upgrade_mutation.py`` 保留旧签名薄封装。
+为空集）；``workflow_upgrade_mutation.py`` 保留旧签名薄封装，
+``workflow_upgrade_artifact_rows.py`` 承载清单行清理 SQL（文件预算拆分）。
 """
 
 from __future__ import annotations
@@ -9,6 +10,11 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
+from server.app.jobs.atomic_mutations import _cancel_queued_sql
+from server.app.jobs.workflow_upgrade_artifact_rows import (
+    delete_reset_artifact_rows,
+    existing_node_states,
+)
 from server.app.workflows.sharding import delete_shards
 
 
@@ -36,17 +42,19 @@ def upgrade_job_workflow_inherit(
 
     重置节点的清理对照 ``mark_nodes_for_rerun``（#508）：``node_runs``
     目录引用清空（历史日志不指向将被覆盖的目录）、shard 行删除（下次
-    tick 重新物化）；``staged_artifact_names`` 是调用方 ``stage_outputs``
-    为同一重置闭包暂存的本地产物名（outputs 减 RMW）——它们的
-    ``job_artifacts`` 清单行在本事务内删除，避免重跑失败时 API 仍展示
-    /回填旧产物（review P1-3）。继承节点的行不在重置集里，天然保留
-    （零存储改动）。
+    tick 重新物化）、queued agent 请求取消（旧 revision 的 manifest 不
+    允许在新 revision 作业上抢跑）；``staged_artifact_names`` 是调用方
+    ``stage_outputs`` 为同一重置闭包暂存的本地产物名（outputs 减 RMW）
+    ——它们的 ``job_artifacts`` 清单行在本事务内删除，避免重跑失败时
+    API 仍展示/回填旧产物（review P1-3）；新 revision 中已消失的旧节点
+    key（rename 前身份）的同名行一并删除（A4）。继承节点的行不在重置
+    集里，天然保留（零存储改动）。
 
     返回 ``{"kept": …, "rerun": …, "deleted_rows": […]}``（clean 模式恒为
     全 rerun；``deleted_rows`` 携带 ``storage_key`` 供提交后 best-effort
     对象删除）。
     """
-    existing_rows = _existing_node_states(conn, job_id)
+    existing_rows = existing_node_states(conn, job_id)
     kept_nodes = {
         key
         for key in inherit_nodes
@@ -85,7 +93,16 @@ def upgrade_job_workflow_inherit(
             (job_id, *sorted(reset_nodes)),
         )
         delete_shards(conn, job_id, reset_nodes)
-    deleted_rows = _delete_reset_artifact_rows(conn, job_id, reset_nodes, staged_artifact_names)
+        # A2：旧 revision 入队的 queued agent 请求必须取消（manifest 携带
+        # 旧语义，claim 复查链在新 pending 行上放行会抢跑），与
+        # mark_nodes_for_rerun 同款；clean 模式自 base 起同样缺失，一并补上。
+        conn.execute(_cancel_queued_sql(placeholders), (job_id, *sorted(reset_nodes)))
+    # A4：新 revision 已消失的旧节点 key（rename 前身份）的同名清单行一并
+    # 清理（行匹配不到按新 key 构建的 reset 集，不删就是永久孤儿行）。
+    renamed_from_nodes = frozenset(existing_rows) - frozenset(node_keys)
+    deleted_rows = delete_reset_artifact_rows(
+        conn, job_id, reset_nodes, staged_artifact_names, renamed_from_nodes
+    )
     conn.execute(
         """
         update jobs
@@ -113,39 +130,3 @@ def upgrade_job_workflow_inherit(
         ),
     )
     return {"kept": len(kept_nodes), "rerun": len(reset_nodes), "deleted_rows": deleted_rows}
-
-
-def _delete_reset_artifact_rows(
-    conn: DatabaseConnection,
-    job_id: str,
-    reset_nodes: list[str],
-    staged_artifact_names: frozenset[str] | set[str],
-) -> list[dict[str, Any]]:
-    """删除重置节点已暂存产物的 ``job_artifacts`` 行（同一事务，#508 语义）。
-
-    只删 ``staged_artifact_names`` 内的名字：本地文件已被调用方移进
-    ``.staged`` 的产物才清清单，RMW 产物（未暂存）保留行与文件。返回删
-    除行（含 ``storage_key``）供提交后对象存储清理。
-    """
-    if not reset_nodes or not staged_artifact_names:
-        return []
-    placeholders = ",".join("%s" for _ in reset_nodes)
-    name_marks = ",".join("%s" for _ in staged_artifact_names)
-    return [
-        dict(row)
-        for row in conn.execute(
-            f"""
-            delete from job_artifacts
-            where job_id=%s and node_key in ({placeholders}) and name in ({name_marks})
-            returning node_key, name, storage_key
-            """,
-            (job_id, *sorted(reset_nodes), *sorted(staged_artifact_names)),
-        ).fetchall()
-    ]
-
-
-def _existing_node_states(conn: DatabaseConnection, job_id: str) -> dict[str, Any]:
-    rows = conn.execute(
-        "select node_key, status from job_nodes where job_id=%s", (job_id,)
-    ).fetchall()
-    return {str(row["node_key"]): str(row["status"]) if row["status"] else None for row in rows}
