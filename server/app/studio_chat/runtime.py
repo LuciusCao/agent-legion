@@ -73,6 +73,9 @@ class SessionRuntime:
         self.loading = False
         self.compacting = False
         self.compacting_since: float | None = None
+        # Active self-clear timer for the current compaction window
+        # (compaction.py #694 review P1); cancelled on completion/teardown.
+        self.compact_timer: threading.Timer | None = None
         # Per-turn bookkeeping for the degenerate-turn detector: send_message
         # stamps turn_started_at / zeroes turn_update_count / records whether
         # the prompt was a slash command; on_update counts content updates.

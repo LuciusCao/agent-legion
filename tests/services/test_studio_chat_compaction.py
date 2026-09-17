@@ -14,10 +14,11 @@ import time
 import pytest
 
 from server.app.services.job_errors import ConflictError
-from server.app.studio_chat import compaction
+from server.app.studio_chat import compact_timer, compaction
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.service import StudioChatService
 from server.app.studio_chat.session_config_state import OpenedAcpSession
+from tests.helpers import wait_for_predicate
 
 
 class RecordingBus:
@@ -284,3 +285,90 @@ def test_loading_window_is_armed_only_for_session_load_attempts() -> None:
     chunks — the trailing-chunk fold after turn_end depends on it."""
     runtime = SessionRuntime(_StubHandle(), token="t")
     assert runtime.loading is False
+
+
+def test_replay_window_suppresses_markers_and_usage_before_classification(direct) -> None:
+    """#694 review P2-b: replayed compaction markers must not rewrite the
+    flag or append duplicate status messages on every resume; replayed
+    usage is a stale historical mirror and is filtered too."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        with runtime.lock:
+            runtime.loading = True
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        service._on_update(session_id, _chunk("Compaction completed.\n- Tokens after: 80,000"))
+        service._on_update(
+            session_id, {"sessionUpdate": "usage_update", "used": 999, "size": 262144}
+        )
+        assert _status_events(service, session_id, workspace_id) == []
+        assert runtime.compacting is False
+        session = service.get_session(session_id)
+        assert session["compacting"] is False
+        assert session["usage"] is None
+        # After the window closes (first prompt), markers classify normally.
+        service.send_message(session_id, workspace_id, "hello")
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        assert [e["event"] for e in _status_events(service, session_id, workspace_id)] == [
+            "compact_start"
+        ]
+        assert runtime.compacting is True
+    finally:
+        service.shutdown()
+
+
+def test_compact_timeout_timer_self_clears_and_recovers_input(direct, monkeypatch) -> None:
+    """#694 review P1: a lost completion marker must not dead-lock the input
+    forever — the armed timer clears the flag, writes a visible status
+    message, and the send path works again without any user action."""
+    monkeypatch.setattr(compaction, "COMPACTING_TIMEOUT_SECONDS", 0.3)
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        assert runtime.compacting is True
+        wait_for_predicate(lambda: not runtime.compacting, timeout=10)
+        assert service.get_session(session_id)["compacting"] is False
+        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
+        assert events == ["compact_start", "compact_timeout"]
+        # Input recovered: the send path no longer refuses.
+        service.send_message(session_id, workspace_id, "恢复后的消息")
+        assert service.get_session(session_id)["status"] == "running"
+    finally:
+        service.shutdown()
+
+
+def test_compact_done_cancels_the_self_clear_timer(direct, monkeypatch) -> None:
+    """A normal completion cancels the timer: no late compact_timeout notice
+    fires into the timeline after the window already closed cleanly."""
+    monkeypatch.setattr(compaction, "COMPACTING_TIMEOUT_SECONDS", 0.3)
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        service._on_update(session_id, _chunk("Compaction completed.\n- Tokens after: 80,000"))
+        assert runtime.compact_timer is None
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
+        assert events == ["compact_start", "compact_done"]
+    finally:
+        service.shutdown()
+
+
+def test_stale_timer_firing_does_not_clear_a_rearmed_window(direct) -> None:
+    """Generation pinning: a timer from an older window (fired late, e.g. its
+    cancel lost a race) must not clear the current window's flag."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        with runtime.lock:
+            current_since = runtime.compacting_since
+        compact_timer._fire(service, session_id, runtime, (current_since or 0) - 1)
+        assert runtime.compacting is True
+        assert service.get_session(session_id)["compacting"] is True
+        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
+        assert events == ["compact_start"]
+    finally:
+        service.shutdown()

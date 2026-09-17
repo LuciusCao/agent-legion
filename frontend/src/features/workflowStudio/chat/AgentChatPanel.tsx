@@ -39,10 +39,16 @@ type Props = {
  * 插槽/参数注入；agent 列表守卫与各载体的治理面（发布/归档等）留在调用方。 */
 export function AgentChatPanel(props: Props) {
   const { chat } = props
-  const queue = useStudioChatQueue(chat.busy, chat.activeSessionId, chat.send)
   // busy（运行中）不再禁用输入：发送会进入前端队列（见 useStudioChatQueue）。
-  // #694：压缩窗口内禁用——此刻发出的消息会被 agent 静默排队后丢弃。
+  // #694：压缩窗口内禁用——此刻发出的消息会被 agent 静默排队后丢弃；队列
+  // 门控与重发同样吃 compacting（#694 review P2-a）。
   const compacting = chat.session?.compacting ?? false
+  const queue = useStudioChatQueue(
+    chat.busy,
+    compacting,
+    chat.activeSessionId,
+    chat.send
+  )
   const inputDisabled = !chat.session || chat.closed || compacting
   const disabledReason = !chat.session
     ? props.noSessionReason
