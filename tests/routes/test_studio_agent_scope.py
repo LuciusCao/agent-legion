@@ -277,16 +277,17 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
         "POST",
         "/api/studio-agent/tools/workspaces/{workspace_id}/workflow/publish-request",
     ): "scoped-only tool surface",
-    # Skill read/validate/save-version tools (issue #217): draft-only — the
-    # save endpoint commits+tags a local skill repo but never touches the
-    # skill lock (release stays a human admin relock).
+    # Skill read/validate/save-version tools (issue #217; workspace-scoped
+    # since #710 — skills are workspace-isolated): draft-only — the save
+    # endpoint commits+tags a local skill repo but never touches the skill
+    # lock (release stays a human admin relock).
     (
         "POST",
-        "/api/studio-agent/tools/skills/{skill_key:path}/validate",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key:path}/validate",
     ): "scoped-only tool surface",
     (
         "POST",
-        "/api/studio-agent/tools/skills/{skill_key:path}/versions",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key:path}/versions",
     ): "scoped-only tool surface",
     # Skill creation tool (#633, workspace-scoped): draft-only like the save
     # — creates a fresh local skill repo under the workspace's skill dir and

@@ -117,14 +117,27 @@ def require_studio_agent_scope(
 
 def require_studio_agent_workspace(
     workspace_id: str,
+    request: Request,
     user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
 ) -> dict[str, Any]:
-    """Refuse a workspace-bound run token operating on another workspace."""
-    # Schema v45 (STUDIO-AGENT-001): unbound self-service tokens keep the
-    # previous membership-only behaviour.
+    """Refuse a workspace-bound run token operating on another workspace.
+
+    #710 follow-up (product decision: skills and the whole studio-agent tool
+    surface are workspace-isolated): an UNBOUND self-service token (origin
+    'user', no workspace binding) now falls back to a membership check — the
+    minter must be a member of the addressed workspace (viewer suffices for
+    reads; the write routes gate mutating verbs themselves via the tool
+    contracts). Previously bound=None passed through with no workspace
+    relation at all, which on the skill tools meant a leaked unbound token
+    held read AND commit+tag rights over every workspace's skill repos."""
     bound = user.get("scoped_workspace_id")
     if bound and bound != workspace_id:
         raise HTTPException(status_code=403, detail="Scoped token bound to another workspace")
+    if not bound and user.get("role") != "admin":
+        role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
+        if role is None:
+            # 404, matching the workspace guard's enumeration-safe refusal.
+            raise HTTPException(status_code=404, detail="Workspace not found")
     return user
 
 

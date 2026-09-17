@@ -228,9 +228,9 @@ server/app/
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared` | `save_shared_materials` | routes/studio_agent_shared_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/skills-shared/propagate` | `propagate_shared_materials_endpoint` | routes/studio_agent_shared_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/skills` | `create_skill` | routes/studio_agent_skill_creation_tools.py |
-| GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
-| POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
-| POST | `/studio-agent/tools/skills/{skill_key:path}/versions` | `save_skill_version` | routes/studio_agent_skill_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
+| POST | `/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
+| POST | `/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key:path}/versions` | `save_skill_version` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent-tokens` | `mint_token` | routes/studio_agent_tokens.py |
 | GET | `/studio-agent-tokens` | `list_tokens` | routes/studio_agent_tokens.py |
 | DELETE | `/studio-agent-tokens/{token_id}` | `revoke_token` | routes/studio_agent_tokens.py |
