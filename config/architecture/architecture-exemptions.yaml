@@ -443,6 +443,16 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 189
 - check: architecture.file_budget
+  path: frontend/src/features/previewPanel/CustomizePreviewDialog.tsx
+  reason: 'Re-signed after the release/0.7.13 back-merge: #615 (dialog-embedded draft
+    preview, CustomizePreviewPane) regrew the dialog above the 149 floor our composer
+    round had ratcheted to. origin/main already carries ceiling 159 for this path, so
+    the merge result tracks main; the exemption lifts only the local anchor floor gap.
+    Drop when the branch lands on a base whose registry already has 159.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 159
+- check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
   reason: The Codex P2 review on PR 345 added bundle content into the PreviewPanelHost remount key plus
     the hashBundle helper -- a cross-navigation bridge-request isolation fix that must stay at the composition

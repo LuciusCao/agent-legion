@@ -35,6 +35,7 @@ function fakeChat(overrides?: Record<string, unknown>): StudioChat {
     closed: false,
     lastRunMs: null,
     lastTerminalEvent: null,
+    lastRunCancelled: false,
     resuming: false,
     resume: vi.fn(),
     cancel: vi.fn(),
@@ -109,6 +110,40 @@ describe('AgentChatStatusStrip', () => {
     const runState = screen.getByLabelText('运行状态')
     expect(runState).toHaveTextContent('已超时终止 · 用时 60m0s')
     expect(runState).not.toHaveTextContent('已完成')
+  })
+
+  /** #675：取消轮的收尾展示——stopReason=cancelled 的 turn_end 不再伪装成
+   * 「已完成」（已完成的工具成果其实是真实存在的），也不再静默无提示。 */
+  it('renders the cancelled run distinctly from a completed run (#675)', () => {
+    renderStrip({
+      lastRunMs: 65_000,
+      lastTerminalEvent: 'turn_end',
+      lastRunCancelled: true,
+    })
+    const runState = screen.getByLabelText('运行状态')
+    expect(runState).toHaveTextContent('已取消')
+    expect(runState).toHaveTextContent('已运行 1m5s')
+    expect(runState).toHaveTextContent('可继续追问结果')
+    expect(runState).not.toHaveTextContent('已完成')
+  })
+
+  it('shows 已取消 without a duration when the run timing is unavailable (#675)', () => {
+    renderStrip({ lastRunCancelled: true })
+    const runState = screen.getByLabelText('运行状态')
+    expect(runState).toHaveTextContent('已取消')
+    expect(runState).not.toHaveTextContent('已运行')
+  })
+
+  it('keeps the resumable (error/closed) branch ahead of the cancelled branch (#675)', () => {
+    renderStrip({
+      closed: true,
+      session: sessionRecord({ status: 'error' }),
+      lastRunCancelled: true,
+    })
+    const runState = screen.getByLabelText('运行状态')
+    expect(runState).toHaveTextContent('会话已中断')
+    expect(runState).not.toHaveTextContent('已取消')
+    expect(screen.getByRole('button', { name: '继续对话' })).toBeInTheDocument()
   })
 
   it('offers 继续对话 for a closed session and resumes on click', () => {

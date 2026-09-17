@@ -7484,6 +7484,11 @@ export interface components {
        */
       has_draft: boolean
       /**
+       * Max Code Bytes
+       * @default 65536
+       */
+      max_code_bytes: number
+      /**
        * Origin
        * @enum {string}
        */

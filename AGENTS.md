@@ -127,4 +127,5 @@ CodeExecutor(...).execute(context)
 ## 9. Where to look next
 
 - 项目结构 / 运行细节：[README.md](README.md) / [docs/architecture/](docs/architecture/)
+- 发版与 Release Notes / CHANGELOG 排版：[docs/release-notes.md](docs/release-notes.md)——CHANGELOG 与 release 正文一条 bullet 一个逻辑行，禁止句中手工断行（GitHub 对单换行的渲染会劣化排版）
 - 远程执行运维手册：[docs/remote-execution-runbook.md](docs/remote-execution-runbook.md)

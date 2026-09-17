@@ -57,6 +57,7 @@ from scripts.seed.seed_common import (
     lock_entry_refs,
     workflow_capabilities,
 )
+from server.app.services.node_codes import DEFAULT_MAX_CODE_BYTES
 
 CSRF_HEADERS = {"x-agent-legion-request": "1"}
 
@@ -502,9 +503,19 @@ def main() -> int:
         "default: none (only already-bound workspaces are targeted)",
     )
     parser.add_argument("--dry-run", action="store_true", help="read-only comparison + plan")
+    # #628: the platform ceiling is instance-configurable; the TARGET
+    # instance's budget decides what a seed may carry (the platform PUT
+    # re-validates on publish anyway — this only avoids a doomed round-trip).
+    parser.add_argument(
+        "--node-code-max-bytes",
+        type=int,
+        default=DEFAULT_MAX_CODE_BYTES,
+        help="byte budget for one node code version; must match the target "
+        f"instance's AGENT_LEGION_NODE_CODE_MAX_BYTES (default: {DEFAULT_MAX_CODE_BYTES})",
+    )
     args = parser.parse_args()
 
-    seed = load_seed(args.seed)
+    seed = load_seed(args.seed, max_code_bytes=args.node_code_max_bytes)
     if seed.get("executors"):
         print(
             "note: the seed's legacy 'executors' section is ignored "

@@ -22,8 +22,8 @@ function formatTokens(n: number): string {
 }
 
 /** #695 R3：ContextMeter / RunBar / ResumeBar 收敛成的单行 status strip——
- * 左侧运行状态（运行中+取消 / 已完成·用时 / 已超时终止 / 恢复入口）与排队
- * 摘要，右侧上下文用量（压缩提示并入）；各槽位无内容不占位，全空则整行
+ * 左侧运行状态（运行中+取消 / 已完成·用时 / 已超时终止 / 已取消 #675 /
+ * 恢复入口）与排队摘要，右侧上下文用量（压缩提示并入）；各槽位无内容不占位，全空则整行
  * 不渲染。队列摘要只放「排队中 N」：排队文本与逐条移除保留在下方独立的
  * StudioChatQueueBar 行（仅队列非空时出现）——排队消息是用户待发内容，
  * 收进 popover 要多一次点击才能查看/移除，取舍为可见性优先；常态 idle 无
@@ -76,6 +76,22 @@ export function AgentChatStatusStrip({ chat, queue }: Props) {
         >
           取消
         </button>
+      </>
+    )
+  } else if (chat.lastRunCancelled) {
+    // #675：取消（stopReason=cancelled）不是失败也不是「已完成」——中断时
+    // 被派发的子代理在 CLI 内部继续跑完是常见实证，工具卡片里的末次状态
+    // 才是真实收尾；取消轮之后的下一条消息可让它继续收尾汇报。
+    runSlot = (
+      <>
+        <span className={`${styles.dot} ${styles.dotDone}`} />
+        <span className={styles.label}>
+          已取消
+          {chat.lastRunMs !== null
+            ? ` · 已运行 ${formatDuration(chat.lastRunMs)}`
+            : ''}
+          ，agent 未收尾的工作可继续追问结果
+        </span>
       </>
     )
   } else if (chat.lastRunMs !== null) {

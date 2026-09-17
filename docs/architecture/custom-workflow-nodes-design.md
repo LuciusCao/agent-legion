@@ -119,7 +119,8 @@ API（workspace 作用域，鉴权走 `require_workspace_access`，非 admin-onl
 
 - AST 解析通过；模块级存在 `run` callable（与现有
   `routes/workflow_node_files.py` 的写入校验同一套 helper，抽到 service 复用）；
-- 大小上限（建议 64KB，超出即拒绝——自定义节点应保持单文件内聚）；
+- 大小上限（默认 64KB，超出即拒绝——自定义节点应保持单文件内聚；#628 起
+  实例级可配，见 `node-sdk-and-worker-execution-design.md` §10）；
 - **不做** import 白名单之类的静态内容过滤（可绕过，虚假安全感）；不受信问题
   由执行隔离解决（§7）。
 
