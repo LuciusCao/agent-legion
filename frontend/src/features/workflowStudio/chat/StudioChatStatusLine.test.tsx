@@ -100,4 +100,28 @@ describe('StatusLine', () => {
     expect(container.querySelector('[role="alert"]')).toBeNull()
     expect(container).toHaveTextContent('正在压缩上下文')
   })
+
+  it('frames cancel_requested as awaiting the agent wind-down, not failure', () => {
+    // #675：取消是请求（ACP SHOULD 语义），agent 仍在收尾；文案不得暗示
+    // 立即失败或工作丢失。尚无终止事件时保持「等待收尾」的当前态。
+    const { container } = render(
+      <StatusLine message={statusMessage('cancel_requested')} />
+    )
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+    expect(container).toHaveTextContent('已请求取消当前运行，等待 agent 收尾')
+  })
+
+  it('downgrades a superseded cancel line to history wording', () => {
+    // codex P2：turn_end（被本组件隐藏）或新一轮到达后，「等待收尾」与
+    // RunBar 的「已取消」冲突——降级为不再表达当前等待的历史措辞。
+    const { container } = render(
+      <StatusLine
+        message={statusMessage('cancel_requested')}
+        cancelSuperseded
+      />
+    )
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+    expect(container).toHaveTextContent('已请求取消')
+    expect(container).not.toHaveTextContent('等待')
+  })
 })

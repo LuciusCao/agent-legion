@@ -324,6 +324,61 @@ describe('StudioChatPanel', () => {
     )
   })
 
+  it('keeps the cancel line awaiting while no terminal event follows', async () => {
+    // #675 codex P2 场景 c：cancel_requested 之后只有收尾窗口内的行时，
+    // 「等待 agent 收尾」仍是当前态（原行为保留）。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'text', 'user', { text: '跑个分析' }),
+      chatMessage('m2', 2, 'status', 'system', { event: 'cancel_requested' }),
+      chatMessage('m3', 3, 'tool_call', 'agent', {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-1',
+        title: 'Agent',
+        status: 'in_progress',
+      }),
+    ])
+    renderPanel()
+
+    expect(
+      await screen.findByText('已请求取消当前运行，等待 agent 收尾')
+    ).toBeInTheDocument()
+  })
+
+  it('downgrades the cancel line once the cancelled turn_end arrives', async () => {
+    // #675 codex P2 场景 a：cancelled turn_end 被时间线隐藏后，状态行不得
+    // 再表达「等待收尾」，与 RunBar 的「已取消」并存不冲突。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'text', 'user', { text: '跑个分析' }),
+      chatMessage('m2', 2, 'status', 'system', { event: 'cancel_requested' }),
+      chatMessage('m3', 3, 'text', 'agent', { text: '已跑的部分如下' }),
+      chatMessage('m4', 4, 'status', 'system', {
+        event: 'turn_end',
+        stop_reason: 'cancelled',
+      }),
+    ])
+    renderPanel()
+
+    expect(await screen.findByText('已请求取消')).toBeInTheDocument()
+    expect(screen.queryByText(/等待 agent 收尾/)).not.toBeInTheDocument()
+    // RunBar 的取消轮结论同屏可见（#675 主行为不受影响）。
+    expect(screen.getByLabelText('运行状态')).toHaveTextContent('已取消')
+  })
+
+  it('downgrades the old cancel line once a newer turn starts', async () => {
+    // #675 codex P2 场景 b：后端重启丢失 turn_end 时靠新一轮用户消息
+    // 兜底——旧状态行不再停留在「等待收尾」。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'text', 'user', { text: '跑个分析' }),
+      chatMessage('m2', 2, 'status', 'system', { event: 'cancel_requested' }),
+      chatMessage('m3', 3, 'text', 'user', { text: '把刚才的结果说完' }),
+      chatMessage('m4', 4, 'text', 'agent', { text: '接上文' }),
+    ])
+    renderPanel()
+
+    expect(await screen.findByText('已请求取消')).toBeInTheDocument()
+    expect(screen.queryByText(/等待 agent 收尾/)).not.toBeInTheDocument()
+  })
+
   it('shows cancel while running and keeps the input enabled', async () => {
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({ status: 'running' }),

@@ -105,6 +105,7 @@ export function AgentChatPanel(props: Props) {
         busy={chat.busy}
         lastRunMs={chat.lastRunMs}
         lastTerminalEvent={chat.lastTerminalEvent}
+        lastRunCancelled={chat.lastRunCancelled}
         onCancel={() => void chat.cancel()}
       />
       <StudioChatQueueBar queue={queue} />

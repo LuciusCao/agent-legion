@@ -5,6 +5,7 @@ type Props = {
   busy: boolean
   lastRunMs: number | null
   lastTerminalEvent: string | null
+  lastRunCancelled: boolean
   onCancel: () => void
 }
 
@@ -42,6 +43,23 @@ export function StudioChatRunBar(props: Props) {
       <div className={styles.runBar} aria-label="运行状态">
         <span className={`${styles.runDot} ${styles.runDotError}`} />
         <span>会话出错，可点「继续对话」恢复</span>
+      </div>
+    )
+  }
+  // #675：取消（stopReason=cancelled）不是失败也不是「已完成」——
+  // 中断时被派发的子代理在 CLI 内部继续跑完是常见实证，工具卡片里的
+  // 末次状态才是真实收尾；取消轮之后的下一条消息可让它继续收尾汇报。
+  if (props.lastRunCancelled) {
+    return (
+      <div className={styles.runBar} aria-label="运行状态">
+        <span className={`${styles.runDot} ${styles.runDotDone}`} />
+        <span>
+          已取消
+          {props.lastRunMs !== null
+            ? ` · 已运行 ${formatDuration(props.lastRunMs)}`
+            : ''}
+          ，agent 未收尾的工作可继续追问结果
+        </span>
       </div>
     )
   }
