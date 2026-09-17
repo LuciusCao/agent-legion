@@ -26,11 +26,15 @@ function DraftPublishAction({
   kind,
   entityId,
   draftHash,
+  workspaceId,
 }: {
   status: string
   kind: 'agent' | 'code'
   entityId: string
   draftHash: string | null
+  /** 路由/调用方传入的 workspace（R4 P1：不能读全局 store——job 排查/
+   * 定制预览载体在别的 workspace 下渲染，store 里的值是别处的）。 */
+  workspaceId: string
 }) {
   if (status !== 'completed') return null
   return (
@@ -38,14 +42,17 @@ function DraftPublishAction({
       kind={kind}
       entityId={entityId}
       draftHash={draftHash}
+      workspaceId={workspaceId}
     />
   )
 }
 
 export function AgentDefinitionDraftCard({
   draft,
+  workspaceId,
 }: {
   draft: AgentDefinitionDraftView
+  workspaceId: string
 }) {
   const nav = useStudioNav()
   const meta = [draft.runtime ? `runtime: ${draft.runtime}` : null]
@@ -70,6 +77,7 @@ export function AgentDefinitionDraftCard({
           kind="agent"
           entityId={draft.agentId}
           draftHash={draft.draftHash}
+          workspaceId={workspaceId}
         />
       </div>
     </div>
@@ -87,6 +95,7 @@ function nodeDraftStatusText(status: string): string {
 
 export function NodeCodeDraftCard(props: {
   draft: NodeCodeDraftView
+  workspaceId: string
   onSelectNode?: (nodeKey: string) => void
 }) {
   return (
@@ -114,6 +123,7 @@ export function NodeCodeDraftCard(props: {
           kind="code"
           entityId={props.draft.nodeKey}
           draftHash={props.draft.draftHash}
+          workspaceId={props.workspaceId}
         />
       </div>
     </div>

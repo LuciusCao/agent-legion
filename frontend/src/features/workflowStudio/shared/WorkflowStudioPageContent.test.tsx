@@ -68,7 +68,9 @@ function makeStudio(overrides: Partial<Studio> = {}): Studio {
 
 // Layout stub：把草稿卡片挂进 NavProvider 子树，模拟聊天面板的挂载位置。
 vi.mock('./WorkflowStudioLayout', () => ({
-  WorkflowStudioLayout: () => <AgentDefinitionDraftCard draft={draftView} />,
+  WorkflowStudioLayout: () => (
+    <AgentDefinitionDraftCard draft={draftView} workspaceId="ws1" />
+  ),
 }))
 
 function renderPage(studio: Studio) {

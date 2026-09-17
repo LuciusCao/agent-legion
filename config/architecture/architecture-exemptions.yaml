@@ -551,13 +551,16 @@ exemptions:
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/StudioChatDraftCards.tsx
   reason: '#692 draft-card redesign grew the module past its 67-line base budget: the MUI icon
-    header, the per-entity publish gating (status-aware DraftPublishAction, R2 P2-1) and the
-    honest-boundary comments. The cards stay one module (three siblings of one family); the next
-    growth should split the node-code card or move the publish actions to their own module.
-    Within the growth band at re-file time; harvest at the #456 sweep.'
+    header, the per-entity publish gating (status-aware DraftPublishAction, R2 P2-1),
+    honest-boundary comments, and the R4 workspaceId prop plumbing (required — job-diagnosis
+    and customize-preview hosts render the cards under another workspace). The cards stay one
+    module (three siblings of one family); the next growth should split the node-code card or
+    move the publish actions to their own module. 110 effective lines (8 beyond the prior
+    87+15 band, re-signed time-boxed per #641); harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 87
+  ceiling: 110
+  expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/studioChatMessages.ts
   reason: '#692 draft-card lifecycle grew the extractor module past its 320 ratchet baseline in two
@@ -573,16 +576,17 @@ exemptions:
   expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/EntityDraftPublishButton.tsx
-  reason: '#692 grew past its 73-line ratchet baseline in two review rounds: the honest-boundary
-    docstring + 404 no-draft friendly message (R2), then the codex P1 round-3 server-side draft
-    identity check — publish reads the versions list (first draft row is the current draft)
-    and compares its hash with the card''s save-response hash, blocking when another session
-    has overwritten the draft. 109 effective lines (18 beyond the prior 76+15 band, re-signed
-    time-boxed per #641); the button stays one focused component (identity check + publish +
-    invalidation); harvest at the #456 sweep.'
+  reason: '#692 grew past its 73-line ratchet baseline across review rounds: honest-boundary
+    docstring + 404 friendly message (R2), the codex P1 round-3 server-side draft identity
+    check (versions first-draft-row hash comparison), then the R4 hardening — workspaceId as a
+    required prop (job-diagnosis/customize-preview hosts render under another workspace),
+    publish-response hash comparison warning for the residual TOCTOU window, and a distinct
+    message for versions-read failures. 128 effective lines (19 beyond the prior 109+15 band,
+    re-signed time-boxed per #641); the button stays one focused component (identity check +
+    publish + invalidation); harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 109
+  ceiling: 128
   expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css

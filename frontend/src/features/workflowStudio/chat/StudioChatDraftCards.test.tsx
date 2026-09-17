@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClientProvider } from '@tanstack/react-query'
 import {
   AgentDefinitionDraftCard,
@@ -13,7 +13,6 @@ import {
   TestQueryProvider,
   createTestQueryClient,
 } from '../../../testing/testQueryClient'
-import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 import { fetchAgentVersions, publishAgent } from '../../../api'
 import { api } from '../../../api/core'
@@ -104,17 +103,7 @@ function makeStudio(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useSettingStore.setState({ workspaceId: 'ws1' })
   useUiStore.setState({ toast: null })
-})
-
-afterEach(async () => {
-  // 组件仍挂载时直改 zustand store 会触发 React 18 的 act 警告
-  // （RTL cleanup 在本钩子之后才卸载树）——重置包进 act 消化更新，
-  // 不用全文件级 expectConsoleError 吞掉未来用例的真实 act 缺陷。
-  await act(async () => {
-    useSettingStore.setState({ workspaceId: undefined })
-  })
 })
 
 describe('AgentDefinitionDraftCard（#692）', () => {
@@ -130,7 +119,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
 
   it('渲染 MUI 图标（非 emoji）与实体发布按钮', () => {
     const { container } = renderWithStudio(
-      <AgentDefinitionDraftCard draft={draft} />,
+      <AgentDefinitionDraftCard draft={draft} workspaceId="ws1" />,
       makeStudio()
     )
     expect(screen.getByText('Agent 定义草稿：writer')).toBeInTheDocument()
@@ -149,7 +138,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     mockPublishAgent.mockResolvedValue({
       version: 2,
     } as Awaited<ReturnType<typeof publishAgent>>)
-    renderWithStudio(<AgentDefinitionDraftCard draft={draft} />, makeStudio())
+    renderWithStudio(
+      <AgentDefinitionDraftCard draft={draft} workspaceId="ws1" />,
+      makeStudio()
+    )
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
@@ -167,7 +159,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     mockPublishAgent.mockResolvedValue({
       version: 2,
     } as Awaited<ReturnType<typeof publishAgent>>)
-    renderWithStudio(<AgentDefinitionDraftCard draft={draft} />, makeStudio())
+    renderWithStudio(
+      <AgentDefinitionDraftCard draft={draft} workspaceId="ws1" />,
+      makeStudio()
+    )
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
@@ -180,7 +175,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
 
   it('发布失败时按钮下方内联展示错误且不 toast 成功', async () => {
     mockPublishAgent.mockRejectedValue(new Error('capability 被占用'))
-    renderWithStudio(<AgentDefinitionDraftCard draft={draft} />, makeStudio())
+    renderWithStudio(
+      <AgentDefinitionDraftCard draft={draft} workspaceId="ws1" />,
+      makeStudio()
+    )
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
@@ -196,7 +194,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
       status: 404,
     })
     mockPublishAgent.mockRejectedValue(notFound)
-    renderWithStudio(<AgentDefinitionDraftCard draft={draft} />, makeStudio())
+    renderWithStudio(
+      <AgentDefinitionDraftCard draft={draft} workspaceId="ws1" />,
+      makeStudio()
+    )
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
@@ -213,7 +214,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
   it('来源 tool call 未完成时不渲染发布入口（pending/failed）', () => {
     for (const status of ['pending', 'failed']) {
       const { unmount } = renderWithStudio(
-        <AgentDefinitionDraftCard draft={{ ...draft, status }} />,
+        <AgentDefinitionDraftCard
+          draft={{ ...draft, status }}
+          workspaceId="ws1"
+        />,
         makeStudio()
       )
       expect(
@@ -233,7 +237,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
         {withStudioProviders(
           makeStudio(),
           makeStudioView(),
-          <AgentDefinitionDraftCard draft={draft} />
+          <AgentDefinitionDraftCard draft={draft} workspaceId="ws1" />
         )}
       </QueryClientProvider>
     )
@@ -266,7 +270,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
         version: 2,
       } as Awaited<ReturnType<typeof publishAgent>>)
       renderWithStudio(
-        <AgentDefinitionDraftCard draft={{ ...draft, draftHash: 'hash-a' }} />,
+        <AgentDefinitionDraftCard
+          draft={{ ...draft, draftHash: 'hash-a' }}
+          workspaceId="ws1"
+        />,
         makeStudio()
       )
 
@@ -288,7 +295,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
         >
       )
       renderWithStudio(
-        <AgentDefinitionDraftCard draft={{ ...draft, draftHash: 'hash-a' }} />,
+        <AgentDefinitionDraftCard
+          draft={{ ...draft, draftHash: 'hash-a' }}
+          workspaceId="ws1"
+        />,
         makeStudio()
       )
 
@@ -312,7 +322,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
         agentVersions(null) as Awaited<ReturnType<typeof fetchAgentVersions>>
       )
       renderWithStudio(
-        <AgentDefinitionDraftCard draft={{ ...draft, draftHash: 'hash-a' }} />,
+        <AgentDefinitionDraftCard
+          draft={{ ...draft, draftHash: 'hash-a' }}
+          workspaceId="ws1"
+        />,
         makeStudio()
       )
 
@@ -332,7 +345,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
         version: 2,
       } as Awaited<ReturnType<typeof publishAgent>>)
       renderWithStudio(
-        <AgentDefinitionDraftCard draft={{ ...draft, draftHash: null }} />,
+        <AgentDefinitionDraftCard
+          draft={{ ...draft, draftHash: null }}
+          workspaceId="ws1"
+        />,
         makeStudio()
       )
 
@@ -368,7 +384,11 @@ describe('AgentDefinitionDraftCard（#692）', () => {
         draftHash: 'code-hash-a',
       }
       renderWithStudio(
-        <NodeCodeDraftCard draft={nodeDraft} onSelectNode={vi.fn()} />,
+        <NodeCodeDraftCard
+          draft={nodeDraft}
+          workspaceId="ws1"
+          onSelectNode={vi.fn()}
+        />,
         makeStudio()
       )
 
@@ -388,6 +408,85 @@ describe('AgentDefinitionDraftCard（#692）', () => {
       // publish 端点未被调用（唯一一次 api 调用是 versions 读取）。
       expect(mockApi).toHaveBeenCalledTimes(1)
     })
+
+    // R4 P2 残窗检测：核对通过后、发布落地前被覆盖——发布响应 hash 与
+    // 卡片不一致时，成功 toast 之外必须再出一条警告。
+    it('发布响应 hash 与卡片不一致：警告 toast 提示内容已被覆盖', async () => {
+      mockFetchAgentVersions.mockResolvedValue(
+        agentVersions('hash-a') as Awaited<
+          ReturnType<typeof fetchAgentVersions>
+        >
+      )
+      mockPublishAgent.mockResolvedValue({
+        definition_hash: 'hash-b',
+      } as Awaited<ReturnType<typeof publishAgent>>)
+      renderWithStudio(
+        <AgentDefinitionDraftCard
+          draft={{ ...draft, draftHash: 'hash-a' }}
+          workspaceId="ws1"
+        />,
+        makeStudio()
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+      })
+      await waitFor(() =>
+        expect(useUiStore.getState().toast?.message).toContain(
+          '发布的内容已非卡片生成时的版本'
+        )
+      )
+      expect(useUiStore.getState().toast?.type).toBe('error')
+    })
+
+    // R4 P1：workspaceId 来自 prop（路由/调用方），不读全局 store——
+    // job 排查/定制预览载体在别的 workspace 下渲染时不得发到 store 里
+    // 的旧 workspace。
+    it('发布调用使用 prop 的 workspaceId（不读全局 store）', async () => {
+      mockPublishAgent.mockResolvedValue({
+        definition_hash: 'hash-a',
+      } as Awaited<ReturnType<typeof publishAgent>>)
+      renderWithStudio(
+        <AgentDefinitionDraftCard
+          draft={{ ...draft, draftHash: null }}
+          workspaceId="ws-job-context"
+        />,
+        makeStudio()
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+      })
+      await waitFor(() =>
+        expect(mockPublishAgent).toHaveBeenCalledWith(
+          'ws-job-context',
+          'writer'
+        )
+      )
+    })
+
+    // R4 P3-1：versions 读取失败（含 404 实体不存在）与发布 404 的文案
+    // 区分——读取失败不说「没有待发布的草稿」。
+    it('versions 读取失败：提示网络/读取问题而非无草稿', async () => {
+      mockFetchAgentVersions.mockRejectedValue(new Error('network down'))
+      renderWithStudio(
+        <AgentDefinitionDraftCard
+          draft={{ ...draft, draftHash: 'hash-a' }}
+          workspaceId="ws1"
+        />,
+        makeStudio()
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
+      })
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          '无法读取服务端草稿状态，请检查网络后重试'
+        )
+      )
+      expect(mockPublishAgent).not.toHaveBeenCalled()
+    })
   })
 })
 
@@ -401,7 +500,11 @@ describe('NodeCodeDraftCard（#692）', () => {
 
   it('渲染 Code 图标与实体发布按钮', () => {
     const { container } = renderWithStudio(
-      <NodeCodeDraftCard draft={draft} onSelectNode={vi.fn()} />,
+      <NodeCodeDraftCard
+        draft={draft}
+        workspaceId="ws1"
+        onSelectNode={vi.fn()}
+      />,
       makeStudio()
     )
     expect(screen.getByText('节点代码草稿：fetch_url')).toBeInTheDocument()
@@ -426,6 +529,7 @@ describe('NodeCodeDraftCard（#692）', () => {
       const { unmount } = renderWithStudio(
         <NodeCodeDraftCard
           draft={{ ...draft, status }}
+          workspaceId="ws1"
           onSelectNode={vi.fn()}
         />,
         makeStudio()
@@ -438,7 +542,11 @@ describe('NodeCodeDraftCard（#692）', () => {
   it('点击发布调节点代码 publish 端点并 toast 成功', async () => {
     mockApi.mockResolvedValue({} as never)
     renderWithStudio(
-      <NodeCodeDraftCard draft={draft} onSelectNode={vi.fn()} />,
+      <NodeCodeDraftCard
+        draft={draft}
+        workspaceId="ws1"
+        onSelectNode={vi.fn()}
+      />,
       makeStudio()
     )
 
@@ -460,7 +568,11 @@ describe('NodeCodeDraftCard（#692）', () => {
   it('发布失败时内联展示错误', async () => {
     mockApi.mockRejectedValue(new Error('网络错误') as never)
     renderWithStudio(
-      <NodeCodeDraftCard draft={draft} onSelectNode={vi.fn()} />,
+      <NodeCodeDraftCard
+        draft={draft}
+        workspaceId="ws1"
+        onSelectNode={vi.fn()}
+      />,
       makeStudio()
     )
 
@@ -473,13 +585,20 @@ describe('NodeCodeDraftCard（#692）', () => {
   })
 
   it('无 onSelectNode（无定位链路）时仍有发布入口', () => {
-    renderWithStudio(<NodeCodeDraftCard draft={draft} />, makeStudio())
+    renderWithStudio(
+      <NodeCodeDraftCard draft={draft} workspaceId="ws1" />,
+      makeStudio()
+    )
     expect(screen.getByRole('button', { name: '发布节点代码' })).toBeEnabled()
   })
 
   it('文案说明草稿语义：发布后新执行才使用', () => {
     renderWithStudio(
-      <NodeCodeDraftCard draft={draft} onSelectNode={vi.fn()} />,
+      <NodeCodeDraftCard
+        draft={draft}
+        workspaceId="ws1"
+        onSelectNode={vi.fn()}
+      />,
       makeStudio()
     )
     expect(
