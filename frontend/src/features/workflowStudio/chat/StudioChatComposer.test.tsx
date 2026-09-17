@@ -399,3 +399,50 @@ describe('StudioChatComposer config chips (#695 R4)', () => {
     expect(screen.getByRole('button', { name: '思考档位' })).toBeDisabled()
   })
 })
+
+describe('StudioChatComposer status slot & context ring', () => {
+  it('renders the status slot between the textarea and the toolbar', () => {
+    renderComposer({
+      statusSlot: <div aria-label="会话状态条">运行中</div>,
+    })
+    expect(screen.getByLabelText('会话状态条')).toHaveTextContent('运行中')
+  })
+
+  it('renders the context ring to the left of the model chip', () => {
+    renderComposer({
+      config: { workspaceId: 'ws1', session: record() },
+      usage: { used: 1000, size: 2000 },
+    })
+    const ring = screen.getByLabelText('上下文用量')
+    const modelChip = screen.getByRole('button', { name: '模型' })
+    // 圆环在模型芯片左边：模型芯片在文档序上跟随圆环。
+    expect(
+      ring.compareDocumentPosition(modelChip) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('keeps the ring for agents that advertise no config surface', () => {
+    renderComposer({
+      config: {
+        workspaceId: 'ws1',
+        session: record({
+          capability_snapshot: {},
+          session_modes: null,
+          config_options: null,
+        }),
+      },
+      usage: { used: 1000, size: 2000 },
+    })
+    expect(screen.getByLabelText('上下文用量')).toBeInTheDocument()
+  })
+
+  it('renders the ring without the config prop too (diagnosis/preview)', () => {
+    renderComposer({ usage: { used: 1000, size: 2000 } })
+    expect(screen.getByLabelText('上下文用量')).toBeInTheDocument()
+  })
+
+  it('hides the ring when there is no usage and no compaction', () => {
+    renderComposer()
+    expect(screen.queryByLabelText('上下文用量')).not.toBeInTheDocument()
+  })
+})
