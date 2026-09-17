@@ -48,9 +48,16 @@ export const saveAgentDraft = (
     body: JSON.stringify(payload),
   })
 
-export const publishAgent = (workspaceId: string, agentId: string) =>
+// #692 codex P1：expectedHash 是调用方认定的草稿 definition_hash，服务端
+// 在发布事务内原子核对——不匹配 409 零副作用（TOCTOU 窗口的根治）。
+export const publishAgent = (
+  workspaceId: string,
+  agentId: string,
+  expectedHash?: string
+) =>
   api<AgentVersion>(scoped(`${item(agentId)}/publish`, workspaceId), {
     method: 'POST',
+    body: JSON.stringify({ expected_hash: expectedHash ?? null }),
   })
 
 export const rollbackAgent = (

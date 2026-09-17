@@ -48,12 +48,16 @@ def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
 def merge_execution_defaults(node: WorkflowNode, defaults: WorkflowNodeExecution) -> WorkflowNode:
     """Fill a node's empty execution fields from the workflow-level defaults.
 
-    Start nodes are exempt (they never execute); code-routed nodes simply
-    never read the execution block, so merging into every non-start node
-    keeps the loader routing-agnostic — the merge happens at definition load
-    time where Agent bindings are not yet known.
+    Start and approval nodes are exempt (they never execute) — baking values
+    into an approval node would persist into the revision snapshot (asdict)
+    and fail its own must-not-declare-execution rule on the next load.
+    Snapshots published before this exemption are healed on read by
+    ``strip_snapshot_placeholders`` (approval ``execution`` dropped outright).
+    Code-routed nodes simply never read the execution block, so merging into
+    every other node keeps the loader routing-agnostic — the merge happens
+    at definition load time where Agent bindings are not yet known.
     """
-    if node.node_type == "start":
+    if node.node_type in ("start", "approval"):
         return node
     execution = node.execution
     merged = WorkflowNodeExecution(
