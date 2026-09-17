@@ -30,7 +30,17 @@ export function StudioChatPermission(props: Props) {
           <span className={styles.permissionBadge}>需要你的确认</span>
         )}
         Agent 请求权限：<code>{permission.toolTitle}</code>
+        {permission.toolKind && (
+          <span className={styles.permissionKind}>
+            （类型：{permission.toolKind}）
+          </span>
+        )}
       </div>
+      {permission.rawInputSummary && (
+        <div className={styles.permissionRawInput}>
+          输入内容：<code>{permission.rawInputSummary}</code>
+        </div>
+      )}
       {permission.resolved ? (
         <div className={styles.permissionResolved}>
           {permission.decisionText ?? '已处理'}
@@ -70,7 +80,7 @@ export function StudioChatPermission(props: Props) {
               checked={props.allowAll}
               onChange={(event) => props.onToggleAllowAll(event.target.checked)}
             />
-            本次对话全部允许（仍仅限草稿类操作）
+            本次对话全部允许（之后本会话的所有权限请求均不再询问）
           </label>
         </>
       )}

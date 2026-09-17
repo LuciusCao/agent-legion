@@ -1158,6 +1158,7 @@
     "server/app/mcp_server/skill_tools.py": 42,
     "server/app/mcp_server/tool_client.py": 37,
     "server/app/mcp_server/tool_names.py": 49,
+    "server/app/mcp_server/tool_schemas.py": 63,
     "server/app/mcp_server/workflow_tools.py": 42,
     "server/app/ops_metrics_background.py": 26,
     "server/app/routes/__init__.py": 137,

@@ -192,6 +192,17 @@
 .permissionTitle {
   margin-bottom: 8px;
 }
+.permissionKind {
+  color: #616161;
+}
+.permissionRawInput {
+  margin: -2px 0 8px;
+  word-break: break-all;
+}
+.permissionRawInput code {
+  font-size: 11px;
+  color: #795548;
+}
 .permissionActions {
   display: flex;
   gap: 8px;

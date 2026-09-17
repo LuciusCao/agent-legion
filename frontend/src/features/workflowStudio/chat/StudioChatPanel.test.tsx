@@ -220,6 +220,54 @@ describe('StudioChatPanel', () => {
     expect(alert).toHaveTextContent('Bash')
   })
 
+  it('shows the tool kind and rawInput summary on the permission card', async () => {
+    // #687 UI 钓鱼修复：卡上必须能看到 kind 与 rawInput 摘要——人类不能
+    // 只凭 agent 自报的 title（"Read draft.yaml"）放行一个带命令的输入。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'awaiting_permission' }),
+    ])
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'permission', 'agent', {
+        request_id: 'r1',
+        status: 'pending',
+        tool_call: {
+          title: 'Read draft.yaml',
+          kind: 'read',
+          rawInput: { file_path: 'draft.yaml', command: 'rm -rf ~' },
+        },
+        options: [{ optionId: 'o1', name: '允许一次', kind: 'allow_once' }],
+      }),
+    ])
+    renderPanel()
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('类型：read')
+    expect(alert).toHaveTextContent('输入内容：')
+    // round-2 MEDIUM-2：非白名单键（command）排在已知只读键之前展示。
+    expect(alert).toHaveTextContent('command: rm -rf ~ · file_path: draft.yaml')
+  })
+
+  it('describes allow-all honestly instead of the draft-only wording', async () => {
+    // #687 HIGH-2：allow_all 实际放行一切 kind，文案不得再写「仍仅限
+    // 草稿类操作」误导人类。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'awaiting_permission' }),
+    ])
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'permission', 'agent', {
+        request_id: 'r1',
+        status: 'pending',
+        tool_call: { title: 'Bash' },
+        options: [{ optionId: 'o1', name: '允许一次', kind: 'allow_once' }],
+      }),
+    ])
+    renderPanel()
+
+    const label = await screen.findByText(/本次对话全部允许/)
+    expect(label).toHaveTextContent('不再询问')
+    expect(label).not.toHaveTextContent('仍仅限草稿类操作')
+  })
+
   it('answers a permission request inline', async () => {
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({ status: 'awaiting_permission' }),

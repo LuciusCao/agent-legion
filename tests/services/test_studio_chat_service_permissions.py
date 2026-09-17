@@ -2,10 +2,12 @@
 
 Split from tests/services/test_studio_chat_service.py to stay clear of the
 test-file line budget (#207); session/turn streaming lives in
-test_studio_chat_service_sessions.py and teardown/failure cases in
-test_studio_chat_service_lifecycle.py. Shared scripts, the RecordingBus and
-the ``chat`` fixture are duplicated per sibling (each file registers its own
-fake-agent scripts), matching the convention of the workers suite split.
+test_studio_chat_service_sessions.py, teardown/failure cases in
+test_studio_chat_service_lifecycle.py, and the #687 attack/fail-closed
+payloads in test_studio_chat_permission_attacks.py. Shared scripts, the
+RecordingBus and the ``chat`` fixture are duplicated per sibling (each file
+registers its own fake-agent scripts), matching the convention of the
+workers suite split.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ MCP_PERMISSION_SCRIPT = {
                 "toolCall": {
                     "toolCallId": "tc-mcp",
                     "title": "agent-legion-studio__validate_workflow",
+                    "rawInput": {"workspace_id": "ws-chat", "definition_yaml": "nodes: {}"},
                 },
                 "options": [
                     {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
@@ -56,54 +59,6 @@ HUMAN_PERMISSION_SCRIPT = {
     ],
 }
 
-# A local Bash call whose rawInput merely mentions platform tool names; the
-# identity fields (title/kind) carry no MCP reference, so this must take the
-# human-confirmation path instead of an MCP auto-approve.
-LOCAL_BASH_MIMIC_SCRIPT = {
-    "on_prompt": [
-        {
-            "permission": {
-                "toolCall": {
-                    "toolCallId": "tc-local-bash",
-                    "title": "Bash",
-                    "kind": "execute",
-                    "rawInput": {
-                        "command": (
-                            "grep -rn agent-legion-studio . && validate_workflow draft.yaml"
-                        )
-                    },
-                },
-                "options": [
-                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
-                ],
-            }
-        }
-    ],
-}
-
-# A local execute call whose TITLE embeds a platform tool-name token with
-# shell metacharacters (#687 review P1): the token must not make this look
-# like an agent-legion MCP call — the request parks for human confirmation
-# instead of being auto-approved.
-TOOL_NAME_TOKEN_IN_TITLE_SCRIPT = {
-    "on_prompt": [
-        {
-            "permission": {
-                "toolCall": {
-                    "toolCallId": "tc-bash-tool-token",
-                    "title": "Bash: list_jobs && rm -rf /tmp/valuable",
-                    "kind": "execute",
-                },
-                "options": [
-                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
-                ],
-            }
-        }
-    ],
-}
-
 # The Claude-Code style mcp__<server>__<tool> title (docs/studio-agent-mcp.md):
 # a legitimate platform MCP tool call that must still auto-approve.
 MCP_PREFIXED_PERMISSION_SCRIPT = {
@@ -113,6 +68,8 @@ MCP_PREFIXED_PERMISSION_SCRIPT = {
                 "toolCall": {
                     "toolCallId": "tc-mcp-prefixed",
                     "title": "mcp__agent-legion-studio__list_jobs",
+                    "kind": "execute",
+                    "rawInput": {"workspace_id": "ws-chat", "limit": 5},
                 },
                 "options": [
                     {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
@@ -124,12 +81,39 @@ MCP_PREFIXED_PERMISSION_SCRIPT = {
 }
 
 # A local read-only tool call (ACP kind "read"/"search" — the Read/Glob/Grep
-# class): auto-approved without a human roundtrip (side-effect-free).
+# class): auto-approved without a human roundtrip (side-effect-free). The
+# rawInput shape matters (#687): a path/pattern profile auto-approves.
 READ_ONLY_PERMISSION_SCRIPT = {
     "on_prompt": [
         {
             "permission": {
-                "toolCall": {"toolCallId": "tc-read", "title": "Read", "kind": "read"},
+                "toolCall": {
+                    "toolCallId": "tc-read",
+                    "title": "Read",
+                    "kind": "read",
+                    "rawInput": {"file_path": "draft.yaml"},
+                },
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                ],
+            }
+        }
+    ],
+}
+
+# The Grep-style read-only flow: kind "search" with a pattern profile — the
+# same auto-approve as Read (kimi runs its Grep tool with kind=search).
+SEARCH_ONLY_PERMISSION_SCRIPT = {
+    "on_prompt": [
+        {
+            "permission": {
+                "toolCall": {
+                    "toolCallId": "tc-search",
+                    "title": "Grep",
+                    "kind": "search",
+                    "rawInput": {"pattern": "list_jobs", "path": "."},
+                },
                 "options": [
                     {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
                     {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
@@ -237,34 +221,6 @@ def test_mcp_prefixed_tool_permission_auto_approves(chat) -> None:
     assert service.get_session(session["id"])["status"] != "awaiting_permission"
 
 
-def test_execute_title_with_tool_name_token_parks_for_human(chat) -> None:
-    """#687 review P1：本地 execute 请求的标题里出现工具名 token（含
-    shell 元字符的拼接命令）绝不能被识别为平台 MCP 调用——必须走人工
-    确认（park），人工 deny 后正常回到 idle。"""
-    service, _bus, register, workspace_id, user_id = chat
-    register(TOOL_NAME_TOKEN_IN_TITLE_SCRIPT)
-    session = service.create_session(workspace_id, user_id, "fake-agent")
-    service.send_message(session["id"], workspace_id, "run the grep")
-
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
-    pending = [
-        m
-        for m in service.list_messages(session["id"], workspace_id)
-        if m["kind"] == "permission" and m["content"].get("status") == "pending"
-    ]
-    assert len(pending) == 1
-    service.respond_permission(
-        session["id"],
-        workspace_id,
-        pending[0]["content"]["request_id"],
-        option_id="deny",
-        deny=True,
-    )
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
-    # 不是 MCP 调用，就不能计入 MCP 可见性信号。
-    assert service.get_session(session["id"])["mcp_status"] != "verified"
-
-
 def test_human_permission_forward_answer_and_allow_all(chat) -> None:
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(HUMAN_PERMISSION_SCRIPT)
@@ -296,6 +252,29 @@ def test_human_permission_forward_answer_and_allow_all(chat) -> None:
         e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
     ]
     assert outcomes[-1] == {"outcome": "selected", "optionId": "allow"}
+
+
+def test_search_kind_with_pattern_profile_auto_approves(chat) -> None:
+    """Grep 形态（kind=search + pattern/path 输入面）与 Read 同走只读自动
+    批准。注意：kimi 0.42.0 实际把 Grep 映射为 kind=read 且 permission
+    请求不带 rawInput（会 park，见 test_studio_chat_permission_attacks.py
+    的 HIGH-3 决策钉子）；本测试钉的是 kind=search 形态本身的零交互。"""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(SEARCH_ONLY_PERMISSION_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "grep the repo")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "selected", "optionId": "allow"}]
+    decisions = [
+        m["content"]["decision"]
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "permission" and m["content"].get("status") == "resolved"
+    ]
+    assert decisions and decisions[-1]["via"] == "auto_read_only"
 
 
 def test_read_only_tool_permission_auto_approves(chat) -> None:
@@ -363,31 +342,6 @@ def test_terminal_roundtrip_runs_command_and_returns_output(chat) -> None:
     outcomes = [e["terminal_outcome"] for e in _read_sink(script_path) if "terminal_outcome" in e]
     assert outcomes and outcomes[0]["exitCode"] == 0
     assert "terminal says hi" in outcomes[0]["output"]
-
-
-def test_local_command_mentioning_tool_names_is_not_auto_approved(chat) -> None:
-    service, _bus, register, workspace_id, user_id = chat
-    register(LOCAL_BASH_MIMIC_SCRIPT)
-    session = service.create_session(workspace_id, user_id, "fake-agent")
-    service.send_message(session["id"], workspace_id, "grep the repo")
-
-    # rawInput mentions server/tool names, but identity fields do not: the
-    # request parks for human confirmation instead of auto-approving.
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
-    pending = [
-        m
-        for m in service.list_messages(session["id"], workspace_id)
-        if m["kind"] == "permission" and m["content"].get("status") == "pending"
-    ]
-    assert len(pending) == 1
-    service.respond_permission(
-        session["id"],
-        workspace_id,
-        pending[0]["content"]["request_id"],
-        option_id="deny",
-        deny=True,
-    )
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
 
 
 def test_unanswered_permission_auto_denies_after_timeout(chat, monkeypatch) -> None:

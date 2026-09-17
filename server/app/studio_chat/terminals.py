@@ -7,12 +7,17 @@ via ``terminal/output``. Until the backend implemented the five
 capability is unavailable" — the agent never even asked for permission.
 
 Security model: the agent-side Bash tool is permission-gated by
-``session/request_permission`` BEFORE ``terminal/create`` reaches us (kimi
-requests approval, the human answers, only then does it spawn). The methods
-here therefore only run commands the human already approved (or that were
-auto-approved by the platform's read-only policy). Output is capped at
-``output_byte_limit`` (the agent sets 4 MiB) with head-truncation to keep the
-retained tail, mirroring the protocol's truncation contract.
+``session/request_permission`` BEFORE ``terminal/create`` reaches us for
+COOPERATIVE agents (kimi requests approval, the human answers, only then
+does it spawn). Important boundary (#687 attack report root cause #9, round-2
+review HIGH-2): terminal/create has NO binding to the permission outcome —
+a rogue agent can call it directly without ever requesting permission, and
+a human deny does not prevent subsequent terminal calls. The permission
+system is therefore a cooperative-agent guardrail, not a containment
+boundary; binding terminal/create to an approval (id / command hash) is
+follow-up work outside this fix. Output is capped at ``output_byte_limit``
+(the agent sets 4 MiB) with head-truncation to keep the retained tail,
+mirroring the protocol's truncation contract.
 
 Each terminal runs in its own process group (``start_new_session=True``);
 kill/release terminate the whole group so pipelines and background children

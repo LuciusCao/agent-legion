@@ -36,6 +36,8 @@ export type NodeCodeDraftView = {
 export type PermissionView = {
   requestId: string
   toolTitle: string
+  toolKind: string
+  rawInputSummary: string | null
   options: { optionId: string; name: string; kind: string }[]
   resolved: boolean
   decisionText: string | null
@@ -49,6 +51,75 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+/** 后端只读形态白名单的展示层镜像（server/app/studio_chat/permissions.py
+ * 的 READ_ONLY_INPUT_FIELDS，kimi 0.42.0 线上取证键名）。只用于摘要排序，
+ * 不参与放行判定；与后端列表保持同步（后端有 disjoint 断言 + 单测钉住）。 */
+const KNOWN_READ_FIELD_KEYS = new Set([
+  'file_path',
+  'file_paths',
+  'path',
+  'paths',
+  'pattern',
+  'regex',
+  'glob',
+  'search',
+  'include',
+  'exclude',
+  'include_ignored',
+  'type',
+  'line_offset',
+  'n_lines',
+  'max_chars',
+  'offset',
+  'limit',
+  'max_results',
+  'output_mode',
+  'head_limit',
+  '-n',
+  '-i',
+  '-A',
+  '-B',
+  '-C',
+  'multiline',
+  'case_sensitive',
+  'context_lines',
+  'before_context',
+  'after_context',
+  'show_line_numbers',
+])
+
+/** 权限卡片的 rawInput 摘要：人必须看到实际要放行的输入，而不是只有
+ * agent 自报的 title（#687 UI 钓鱼）。
+ *
+ * 键名全集展示（round-2 MEDIUM-2）：旧实现 slice(0,8) 折叠剩余字段，
+ * 攻击载荷把 hostile 键排在第 9 位即可完全隐身；现在每个键名都展示，
+ * 且非白名单键排在最前——人类第一眼看到的就是需要警觉的字段（已知
+ * 只读键排后，排序稳定保持出现序）。取舍：rawInput 本就是已落库消息
+ * 的一部分，键名全集不产生新的放大面；值仍截断 120 字符并带 … 标记。 */
+function rawInputSummary(rawInput: unknown): string | null {
+  const record = asRecord(rawInput)
+  if (!record) return null
+  const keys = Object.keys(record)
+  if (keys.length === 0) return null
+  const ordered = [
+    ...keys.filter((key) => !KNOWN_READ_FIELD_KEYS.has(key)),
+    ...keys.filter((key) => KNOWN_READ_FIELD_KEYS.has(key)),
+  ]
+  const parts = ordered.map((key) => {
+    const value = record[key]
+    if (typeof value === 'string') {
+      const shown = value.length > 120 ? `${value.slice(0, 120)}…` : value
+      return `${key}: ${shown}`
+    }
+    try {
+      return `${key}: ${JSON.stringify(value)}`
+    } catch {
+      return `${key}: <?>`
+    }
+  })
+  return parts.join(' · ')
 }
 
 /** SSE 流式文本更新只携带 id/kind/role/content（无 seq/created_at）：
@@ -272,6 +343,8 @@ export function buildPermissionViews(
     views.push({
       requestId,
       toolTitle: asText(toolCall?.title) || '工具调用',
+      toolKind: asText(toolCall?.kind),
+      rawInputSummary: rawInputSummary(toolCall?.rawInput),
       options: options
         .map((option) => asRecord(option))
         .filter((option): option is Record<string, unknown> => option !== null)

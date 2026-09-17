@@ -560,12 +560,14 @@ exemptions:
   ceiling: 54
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
-  reason: 'The #429 fix adds scopeNoteDismiss (the resolved-notice close button) and flexes scopeNote
-    to host it; the module is a flat stylesheet at the repo''s per-root CSS limit policy, and the 7-line
-    growth is one rule plus its comment. Revisit at the next stylesheet cleanup pass.'
+  reason: 'Re-file over the #429-era entry (ceiling 356): #687 UI 钓鱼修复 adds
+    permissionKind / permissionRawInput（权限卡展示 kind 与 rawInput 摘要），
+    356→376 有效行超 growth_allowance 带。时间盒：权限卡样式拆独立 module 时
+    重登预算。'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 356
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/678
+  ceiling: 376
+  expires: 2027-03-31
 - check: architecture.file_budget
   path: frontend/src/lib/queryKeysExtra.ts
   reason: 'Merge-growth class (PR 317 precedent): develop''s #419 connectionKeys and #427 nodeRuns entries
@@ -1001,3 +1003,31 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/647
   ceiling: 353
   expires: 2026-12-31
+- check: architecture.file_budget
+  path: server/app/studio_chat/permissions.py
+  reason: '#687 攻击修复：MCP 自动批准绑定 rawInput 输入 schema 校验 + read
+    只读形态门（双 fail-closed 门禁：执行类字段黑名单 / 只读字段白名单
+    / 未知键、schema 校验失败与不可得一律 park 人工）。判定与拒绝原因的
+    注释是安全语义的一部分，压行等于压可审计性；121→185 有效行超
+    growth_allowance 带。时间盒：识别/校验/门禁三层拆入独立 sibling 模块
+    （如 tool_identity.py）时重登预算。round-2 复审回炉（HIGH-1/3）：read
+    白名单按 kimi 0.42.0 线上取证键名重造并逐键标注来源、新增
+    WRITE_SEMANTIC_KEYS 与白名单不相交断言、validator 异常 fail-closed
+    兜底，185→208 全部为键级注释与门禁注释，非功能增长。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/678
+  ceiling: 208
+  expires: 2027-03-31
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/studioChatMessages.ts
+  reason: '#687 UI 钓鱼修复：PermissionView 增加 toolKind/rawInputSummary 字段
+    与 rawInputSummary 提取器（截断长值、非字符串折叠 JSON），人类审批
+    卡片必须展示实际输入而非仅 agent 自报 title。
+    320→343 有效行超 growth_allowance 带。时间盒：rawInput 摘要与权限
+    视图构造拆入 sibling 模块时重登预算。round-2 复审回炉（MEDIUM-2）：
+    摘要键名全集展示 + 非白名单键优先排序（slice(0,8) 可藏 hostile 键
+    进第 9 位），新增 KNOWN_READ_FIELD_KEYS 展示层镜像，343→379。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/678
+  ceiling: 379
+  expires: 2027-03-31

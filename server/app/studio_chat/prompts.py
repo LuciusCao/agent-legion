@@ -41,6 +41,23 @@ _AGENT_LEGION_MCP_TITLE_PREFIXES = (
 )
 
 
+def agent_legion_tool_name(text: str) -> str | None:
+    """The manifest tool name a tool-call identity field carries, else None.
+
+    Same matching as :func:`looks_like_agent_legion_tool_call` (exact equality
+    after stripping one documented server prefix), but returns the matched
+    name so the caller can bind the decision to that specific tool — the
+    permission auto-approve validates rawInput against the matched tool's
+    input schema instead of trusting the title alone (#687 attack fix).
+    """
+    lowered = text.lower()
+    for prefix in _AGENT_LEGION_MCP_TITLE_PREFIXES:
+        if lowered.startswith(prefix):
+            lowered = lowered[len(prefix) :]
+            break
+    return lowered if lowered in AGENT_LEGION_MCP_TOOL_NAMES else None
+
+
 def looks_like_agent_legion_tool_call(text: str) -> bool:
     """Whether a tool-call identity field is exactly one of our MCP tool names.
 
@@ -58,9 +75,4 @@ def looks_like_agent_legion_tool_call(text: str) -> bool:
     only degrades to the safe path (human-confirmed permission, one-time
     mcp_status advisory).
     """
-    lowered = text.lower()
-    for prefix in _AGENT_LEGION_MCP_TITLE_PREFIXES:
-        if lowered.startswith(prefix):
-            lowered = lowered[len(prefix) :]
-            break
-    return lowered in AGENT_LEGION_MCP_TOOL_NAMES
+    return agent_legion_tool_name(text) is not None
