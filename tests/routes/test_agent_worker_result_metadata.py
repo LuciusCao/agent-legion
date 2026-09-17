@@ -83,3 +83,41 @@ def test_artifact_count_cap_unchanged() -> None:
     artifacts = {f"out-{i}.json": f"sha256:{_HASH}" for i in range(129)}
     with pytest.raises(ValueError, match="invalid output artifacts"):
         parse_result_metadata(_payload(artifacts))
+
+
+def test_agent_stderr_tail_accepted_and_bounded() -> None:
+    """#748: crash 结果可选携带 agent_stderr_tail——读进 outcome/record，超限
+    防御性截断（写侧已截，读侧兜底老/异构 Worker）。"""
+    payload = json.dumps(
+        {
+            "status": "failed",
+            "exit_code": 3,
+            "error_message": "Agent process exited 3: ValueError: boom",
+            "command": [],
+            "output_artifacts": {},
+            "agent_stderr_tail": "Traceback (most recent call last):\nValueError: boom",
+        }
+    )
+    outcome, record = parse_result_metadata(payload)
+    assert outcome.agent_stderr_tail.startswith("Traceback")
+    assert outcome.agent_stderr_tail == record["agent_stderr_tail"]
+
+    oversized = json.dumps(
+        {
+            "status": "failed",
+            "exit_code": 3,
+            "error_message": "x",
+            "command": [],
+            "output_artifacts": {},
+            "agent_stderr_tail": "y" * 5000,
+        }
+    )
+    outcome_over, _ = parse_result_metadata(oversized)
+    assert len(outcome_over.agent_stderr_tail) == 4000
+
+
+def test_agent_stderr_tail_absent_defaults_empty() -> None:
+    """旧 Worker / 非崩溃结果不带该键：outcome 与 record 均为空串，不报错。"""
+    outcome, record = parse_result_metadata(_payload({}))
+    assert outcome.agent_stderr_tail == ""
+    assert record["agent_stderr_tail"] == ""

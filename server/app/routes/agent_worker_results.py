@@ -15,6 +15,10 @@ _MAX_OUTPUT_ARTIFACTS = 128
 _MAX_ERROR_MESSAGE_CHARS = 4000
 _MAX_RUN_DIR_CHARS = 256
 _MAX_CONNECTION_KEY_CHARS = MAX_CONNECTION_KEY_CHARS
+# #748: optional agent-crash stderr tail the Worker appends to the result
+# metadata; capped at the error_message budget (the Worker truncates to the
+# same bound, the reader re-truncates defensively for older/other writers).
+_MAX_AGENT_STDERR_TAIL_CHARS = 4000
 
 
 def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
@@ -54,6 +58,9 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
     auth_failure_raw = metadata.get("auth_failure_connection", "")
     if not isinstance(auth_failure_raw, str) or len(auth_failure_raw) > _MAX_CONNECTION_KEY_CHARS:
         raise ValueError("invalid auth_failure_connection")
+    # #748: bounded, optional stderr tail for agent-crash attribution
+    # (absent for completed/cancelled/timeout runs and older Workers).
+    agent_stderr_tail = str(metadata.get("agent_stderr_tail", ""))[:_MAX_AGENT_STDERR_TAIL_CHARS]
     outcome = AgentOutcome(
         status=status,  # type: ignore[arg-type]
         exit_code=exit_code,
@@ -62,6 +69,7 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         output_artifacts=output_artifacts,
         run_dir=run_dir,
         auth_failure_connection=auth_failure_raw.strip(),
+        agent_stderr_tail=agent_stderr_tail,
     )
     record = {
         "status": status,
@@ -70,5 +78,6 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         "output_artifacts": output_artifacts,
         "run_dir": run_dir,
         "auth_failure_connection": auth_failure_raw.strip(),
+        "agent_stderr_tail": agent_stderr_tail,
     }
     return outcome, record

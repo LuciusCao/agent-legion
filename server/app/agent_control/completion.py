@@ -49,6 +49,11 @@ class AgentOutcome:
     # token to be invalidated (upstream auth failure); the commit path
     # performs the privileged invalidation. Empty = no request.
     auth_failure_connection: str = ""
+    # #748: bounded tail of the crashed agent's stderr (merged into the
+    # events stream at spawn, retained by the upload-side compression pass).
+    # Surfaces the crash cause in the result record without unpacking the
+    # archive's agent-stderr.log member; empty for non-crash outcomes.
+    agent_stderr_tail: str = ""
 
 
 def report_auth_failure_safe(database_dsn: ConnectSource, connection_key: str) -> None:

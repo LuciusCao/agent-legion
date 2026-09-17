@@ -265,6 +265,30 @@ def test_run_execution_model_error_with_exit_zero_reports_failed(tmp_path: Path)
     assert "401" in report["error_message"]
 
 
+def test_run_execution_crash_exit_surfaces_stderr(tmp_path: Path) -> None:
+    """#748 端到端：agent 进程非零退出且向 stderr 打了崩溃栈（spawn 侧
+    stderr 合并进 stdout 管道、pump 原样落 events.jsonl）——上报的
+    error_message 带上崩溃尾行，metadata 携带尾部。"""
+    script = _write_executable(
+        tmp_path / "fake_pi",
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "print('Traceback (most recent call last):', file=sys.stderr)\n"
+        "print('ValueError: corrupt tool output payload', file=sys.stderr)\n"
+        "sys.exit(3)\n",
+    )
+    client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
+    _run(client, tmp_path / "work")
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert report["exit_code"] == 3
+    assert (
+        report["error_message"] == "Agent process exited 3: ValueError: corrupt tool output payload"
+    )
+    assert "Traceback" in report["agent_stderr_tail"]
+
+
 def test_run_execution_degraded_single_heartbeat_409_kills_run(
     tmp_path: Path,
 ) -> None:

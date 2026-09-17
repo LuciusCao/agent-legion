@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tarfile
 import threading
 from pathlib import Path
 
@@ -344,3 +345,114 @@ def test_submit_existing_entry_only_updates_phase(tmp_path: Path) -> None:
         client.release.set()
         queue.shutdown()
     assert len(client.reports) == 1
+
+
+# -- #748: agent 进程非零退出的可归因（error_message + 留痕文件 + metadata）--
+
+
+def _events_with_stderr(work_root: Path, stderr_lines: list[str]) -> None:
+    """往既有 events.jsonl 前置非 JSON 行（spawn 侧 stderr 合并进 stdout 管道，
+    pump 原样落进 events.jsonl——非 JSON 行就是 agent 的 stderr 文本）。"""
+    run_dir = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker"
+    events = run_dir / "events.jsonl"
+    events.write_text("\n".join([*stderr_lines, '{"type":"agent_end"}']) + "\n", encoding="utf-8")
+
+
+def test_crash_exit_reports_stderr_summary_and_leaves_trace(tmp_path: Path) -> None:
+    """非零退出 + stderr 有内容：error_message 带上尾部首行，run 目录留下
+    agent-stderr.log，metadata 携带 agent_stderr_tail，归档内含该文件。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _events_with_stderr(
+        work_root, ["INFO: boot", "thread panicked at src/main.rs:42:", "assertion failed"]
+    )
+    client = QueueFakeClient()
+    queue = _queue(client)
+    archived: dict[str, bytes] = {}
+    original_report = client.report
+
+    def report_and_capture(
+        execution_id: str, lease_id: str, metadata: dict, archive: Path
+    ) -> tuple[int, bytes]:
+        # 归档在 report 成功后随 execution dir 一起被清掉，必须在此刻取内容。
+        with tarfile.open(archive, "r:gz") as tar:
+            member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
+            extracted = tar.extractfile(member)
+            assert extracted is not None
+            archived[member.name] = extracted.read()
+        return original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_and_capture  # type: ignore[method-assign]
+    queue.submit(_task(work_root, exit_code=1))
+    queue.shutdown()
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert report["exit_code"] == 1
+    # 尾行才是崩溃头（保尾：INFO: boot 是启动噪音，panic 栈以最后一行收尾）。
+    assert report["error_message"] == "Agent process exited 1: assertion failed"
+    assert "panicked" in report["agent_stderr_tail"]
+    assert report["agent_stderr_tail"].endswith("assertion failed")
+    assert any(b"thread panicked" in content for content in archived.values())
+
+
+def test_crash_exit_without_stderr_keeps_legacy_message(tmp_path: Path) -> None:
+    """非零退出 + stderr 无内容：error_message 保持旧形态（只有退出码），
+    不写 agent-stderr.log，metadata 不带 agent_stderr_tail。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)  # events.jsonl 只有 JSON 行
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=2))
+    queue.shutdown()
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert report["error_message"] == "Agent process exited 2"
+    assert "agent_stderr_tail" not in report
+
+
+def test_cancel_exit_130_unchanged_by_stderr(tmp_path: Path) -> None:
+    """130 取消语义不被 stderr 污染：即使 stderr 尾部有内容（SIGTERM 残留
+    输出），error_message 仍是既定的关机文案，metadata 不带尾部。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _events_with_stderr(work_root, ["interrupted by signal 15"])
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=130))
+    queue.shutdown()
+    report = client.reports[0]
+    assert report["status"] == "cancelled"
+    assert report["error_message"] == "Agent Worker is shutting down"
+    assert "agent_stderr_tail" not in report
+
+
+def test_timeout_exit_124_reports_timeout_not_crash(tmp_path: Path) -> None:
+    """124 超时语义独立：error_message 归因到超时（可被 failure_classification
+    的 timeout 规则接住），不把半程 stderr 噪音当成崩溃原因。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _events_with_stderr(work_root, ["still working on it..."])
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=124))
+    queue.shutdown()
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert report["error_message"] == "Agent process timed out"
+    assert "agent_stderr_tail" not in report
+
+
+def test_completed_exit_zero_writes_stderr_trace_without_failing(tmp_path: Path) -> None:
+    """exit 0 + events 里混有非 JSON 行：状态照旧 completed（model-error 扫描
+    优先），留痕文件照写（事后排查面），metadata 不带 agent_stderr_tail。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _events_with_stderr(work_root, ["WARN: deprecation notice"])
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+    report = client.reports[0]
+    assert report["status"] == "completed"
+    assert report["error_message"] == ""
+    assert "agent_stderr_tail" not in report
