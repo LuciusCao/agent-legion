@@ -461,6 +461,212 @@ def test_local_listing_prunes_runs_and_hidden_dirs(client_factory, monkeypatch):
         assert names == ["result.json"]
 
 
+# --- #631 攻击复审 M1/M2：下载侧名字白名单（与清单剪枝单一事实来源） --------
+
+
+def test_raw_serves_runs_dir_file_only_via_manifest_row(two_workspaces):
+    """M2 不对称收口：``runs/`` 是执行内部数据（events.jsonl），清单剪掉
+    它；下载侧此前只做包含性校验、不认识 runs/——文件一旦落盘即可按名
+    下载（清单不列但可达）。现在 ``_artifact_path`` 拒绝 runs/ 前缀段与
+    点前缀段，与 ``artifact_names_deep`` 的剪枝规则同一份名单。"""
+    c, job_a, _ = two_workspaces
+    storage = Path(job_a["storage_dir"])
+    (storage / "runs" / "node_a" / "token1").mkdir(parents=True, exist_ok=True)
+    (storage / "runs" / "node_a" / "token1" / "events.jsonl").write_text(
+        '{"internal": "run-events"}', encoding="utf-8"
+    )
+    (storage / ".result-staging-x").mkdir(parents=True, exist_ok=True)
+    (storage / ".result-staging-x" / "leak.txt").write_text("staged", encoding="utf-8")
+
+    runs_read = c.get(
+        f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/runs/node_a/token1/events.jsonl/raw"
+    )
+    dot_read = c.get(
+        f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/.result-staging-x/leak.txt/raw"
+    )
+
+    assert runs_read.status_code == 400
+    assert dot_read.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "result.json%00",  # NUL：decode 后是控制字符
+        "x" * 300,  # 超长段：ENAMETOOLONG 家族
+        "y" * 201,  # 段上限（200 字节）刚过线
+    ],
+)
+def test_raw_rejects_control_char_and_oversized_names(two_workspaces, name):
+    """M1：畸形名字必须是 400，不是让 lstat/stat 炸 500（no-enumeration
+    语义：500 vs 404 把「名字是否畸形」变成侧信道）。"""
+    c, job_a, _ = two_workspaces
+    storage = Path(job_a["storage_dir"])
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "result.json").write_text("{}", encoding="utf-8")
+
+    response = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/{name}/raw")
+
+    assert response.status_code == 400
+
+
+def test_raw_null_byte_name_is_400_not_500(two_workspaces):
+    """M1：``%00`` 解码后进 lstat 是 ValueError（embedded null）——修复前
+    逃出端点成 500（TestClient 直接 raise），修复后名字白名单先拒。"""
+    c, job_a, _ = two_workspaces
+
+    response = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/result.json%00/raw")
+
+    assert response.status_code == 400
+
+
+def test_status_null_byte_job_id_is_400_not_500(two_workspaces):
+    """M1：``%00`` 进 job_id 修复前让 psycopg 抛 DataError（500）；现在
+    路由层早拒 400（status / artifacts / raw 三端点同门）。"""
+    c, _, _ = two_workspaces
+
+    status = c.get("/api/workspaces/ws-a/jobs/%00foo")
+    listing = c.get("/api/workspaces/ws-a/jobs/%00foo/artifacts")
+    raw = c.get("/api/workspaces/ws-a/jobs/%00foo/artifacts/x.json/raw")
+
+    assert status.status_code == 400
+    assert listing.status_code == 400
+    assert raw.status_code == 400
+
+
+def test_deep_subpath_and_bare_names_still_serve(two_workspaces):
+    """白名单不误伤：合法子路径产物（深目录）、普通名照常 200。"""
+    c, job_a, _ = two_workspaces
+    storage = Path(job_a["storage_dir"])
+    deep = storage
+    for i in range(8):
+        deep = deep / f"level{i}"
+    deep.mkdir(parents=True, exist_ok=True)
+    (deep / "final.json").write_text("{}", encoding="utf-8")
+    (storage / "top.png").write_bytes(b"\x89PNG")
+
+    name = "/".join(f"level{i}" for i in range(8)) + "/final.json"
+    deep_read = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/{name}/raw")
+    top_read = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/top.png/raw")
+
+    assert deep_read.status_code == 200
+    assert deep_read.content == b"{}"
+    assert top_read.status_code == 200
+
+
+# --- #631 攻击复审 H1：读侧 storage_key 前缀兜底 ------------------------------
+
+
+def test_raw_refuses_manifest_row_pointing_outside_job_prefix(two_workspaces, job_db):
+    """H1：manifest 行是对象读路径的唯一权威（表上没有 workspace 列）。
+    直接 SQL 把 ws-a job 的行指向 ws-b 的对象 key（模拟行被污染/未来
+    写入方失守）——读侧兜底必须 404，绝不读穿 workspace 边界。"""
+    import gzip
+    import hashlib
+
+    from server.app.db.transaction import write_transaction
+
+    c, job_a, job_b = two_workspaces
+    secret_b = b"WSB-SECRET-FRAME-BYTES"
+    stored = gzip.compress(secret_b)
+    key_b = f"jobs/ws-b/{job_b['id']}/frame.png.gz"
+    store: JobArtifactObjectStore = c.app.state.job_artifact_objects
+    store.storage.objects[key_b] = stored
+
+    with write_transaction(job_db) as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash) values (%s, 'upstream', 'leak.png', %s, %s, %s)",
+            (
+                job_a["id"],
+                key_b,
+                len(stored),
+                hashlib.sha256(secret_b).hexdigest(),
+            ),
+        )
+
+    response = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/leak.png/raw")
+
+    assert response.status_code == 404
+
+
+def test_text_read_refuses_manifest_row_pointing_outside_job_prefix(two_workspaces, job_db):
+    """H1 文本分支：``/artifacts/{name}`` 的 legacy 读路径同样兜底（修复
+    前清单照常列出、文本读照常返回跨 workspace 字节）。"""
+    import gzip
+    import hashlib
+
+    from server.app.db.transaction import write_transaction
+
+    c, job_a, job_b = two_workspaces
+    secret_b = b"WSB-SECRET-NOTES"
+    stored = gzip.compress(secret_b)
+    key_b = f"jobs/ws-b/{job_b['id']}/notes.json.gz"
+    store: JobArtifactObjectStore = c.app.state.job_artifact_objects
+    store.storage.objects[key_b] = stored
+
+    with write_transaction(job_db) as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash) values (%s, 'upstream', 'notes.json', %s, %s, %s)",
+            (job_a["id"], key_b, len(stored), hashlib.sha256(secret_b).hexdigest()),
+        )
+
+    response = c.get(f"/api/jobs/{job_a['id']}/artifacts/notes.json")
+
+    assert response.status_code == 404
+
+
+def test_raw_serves_rows_within_job_prefix_after_guard(two_workspaces):
+    """兜底不误伤：本 job 前缀内的行（.gz 与裸 key 两种形态）照常读。"""
+    c, job_a, _ = two_workspaces
+    payload = b"\x89PNG-current"
+    _register_object_artifact(c, job_a, "frame.png", payload)
+    _register_object_artifact(c, job_a, "clip.mp4", b"0123456789", gzipped=False)
+
+    gz_read = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/frame.png/raw")
+    bare_read = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/clip.mp4/raw")
+
+    assert gz_read.status_code == 200 and gz_read.content == payload
+    assert bare_read.status_code == 200 and bare_read.content == b"0123456789"
+
+
+# --- #631 攻击复审 H2：legacy 裸路由对 scoped token 的低成本收口 ----------
+
+
+def test_bare_job_read_routes_refuse_scoped_tokens(two_workspaces, job_db):
+    """H2 收口：裸路由（无 workspace 前缀）修复前对任意 scoped Bearer
+    token 全开——绑定 ws-a 的 token 可读 ws-b 的 job 详情、清单、raw 字
+    节、日志与 token 用量，整体绕过 #631 的 workspace 隔离。现在整个
+    ``/api/jobs/{job_id}`` GET 家族对 scoped 身份一律 404（防枚举语义：
+    探测任意 job id 得常量信号），scoped 身份的 sanctioned 读面是
+    studio-agent 工具面与本 PR 的前缀端点。"""
+    from server.app.auth import scoped_tokens
+
+    c, job_a, job_b = two_workspaces
+    _register_object_artifact(c, job_b, "frame.png", b"\x89PNG-bytes")
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id="ws-a")
+    scoped = c.__class__(c.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+
+    # 绑定 ws-a 的 token 走裸路由读 ws-b 的产物字节：修复前 200。
+    assert scoped.get(f"/api/jobs/{job_b['id']}").status_code == 404
+    assert scoped.get(f"/api/jobs/{job_b['id']}/artifacts/frame.png/raw").status_code == 404
+    assert scoped.get(f"/api/jobs/{job_b['id']}/artifacts/frame.json").status_code == 404
+    assert scoped.get(f"/api/jobs/{job_b['id']}/runs/1/log").status_code == 404
+    assert scoped.get(f"/api/jobs/{job_b['id']}/token-usage").status_code == 404
+    assert scoped.get(f"/api/jobs/{job_b['id']}/runs/1/token-usage").status_code == 404
+    # 不存在的 job 同样 404：常量信号，无探测差异。
+    assert scoped.get("/api/jobs/nope").status_code == 404
+
+    # 全会话用户不受影响（前端控制台在用的面）。
+    assert c.get(f"/api/jobs/{job_a['id']}").status_code == 200
+
+    # scoped 身份的 sanctioned 读面照常：绑定 ws-a 读 ws-a 前缀端点 200。
+    assert scoped.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}").status_code == 200
+
+
 # --- P2-2: raw 优先权威 manifest 对象 -----------------------------------------
 
 

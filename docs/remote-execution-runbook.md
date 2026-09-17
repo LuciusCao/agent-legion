@@ -459,6 +459,17 @@ with three read-only endpoints, all scoped by the workspace in the URL path:
 token 同样可用：绑定了 `scoped_workspace_id` 的 token 只能读绑定 workspace
 （不匹配同样 404，防枚举语义一致）。
 
+**边界声明（legacy 裸路由）.** workspace 隔离只覆盖上表三个前缀端点。
+控制台前端仍在用的 legacy 裸路由（`GET /api/jobs/{job_id}`、
+`GET /api/jobs/{job_id}/artifacts/{name}`、`.../raw`、`/runs/{run_id}/log`、
+`/token-usage`）不带 workspace 前缀，两个 workspace guard 都不触发：任意
+已登录用户（含任意 scoped Bearer token）可经它们读任意 workspace 的 job
+详情与产物字节。这是存量行为、非 #631 引入；外部系统的接入契约是「只用
+上面三个前缀端点」，裸路由的 workspace 收口（前端调用方迁移
+`frontend/src/api/jobsApi.ts` / `jobApi.ts` / `jobArtifactText.ts` 等 +
+路由补归属校验）需要独立 PR 处理。若威胁模型包含「workspace API token
+泄露后只能读该 workspace」的要求，在收口落地前裸路由是已知的绕过面。
+
 **读取语义.**
 
 - 产物优先从对象存储权威副本读取（`job_artifacts` manifest）——有
@@ -468,12 +479,16 @@ token 同样可用：绑定了 `scoped_workspace_id` 的 token 只能读绑定 w
   `object_storage_enabled: false`。
 - 产物名可以是 job_dir 相对子路径（`reports/final.json`）：清单列出
   的名字即下载 URL 里的名字（`{artifact_name:path}`）；绝对名、`..`
-  段与反斜杠 400。
+  段、反斜杠、`runs/` 前缀、点前缀段与含控制字符（含 `%00`）或超长
+  段（>200 字节）的名字一律 400。
 - job 未完成时清单是空数组 + 当前 status（不是 404）——外部轮询以
   status 为准。
 - 重跑后清单/读取都回答「当前最新」执行：`content_hash` 与
   `uploaded_at` 标识这次下载对应哪次执行（#508）。
 - 对象被 bucket lifecycle 删除时 raw 下载 404（不是 500）。
+- manifest 行的 `storage_key` 读侧强制校验本 job 的
+  `jobs/{workspace}/{job_id}/` 前缀：行被污染/写歪（未来写入方失守、
+  运维 SQL 误操作）时按 404 处理并记 warning，绝不读穿 workspace 边界。
 
 **最小完整示例**（curl；提交一步引用 #626 的 workspace API token 用法，
 token 发放机制落地前可先用控制台会话 cookie）：

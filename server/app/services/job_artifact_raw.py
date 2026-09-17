@@ -14,11 +14,14 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from server.app.http_range import parse_range_header
 from server.app.services.job_artifact_gzip import is_gzip_key
-from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from server.app.services.job_artifact_objects import (
+    JobArtifactObjectStore,
+    refuse_row_outside_job_prefix,
+)
 from server.app.services.job_artifact_raw_types import RawArtifact
+from server.app.services.job_errors import NotFoundError
 
 __all__ = ["RawArtifact", "open_raw_artifact", "open_raw_row"]
-from server.app.services.job_errors import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,8 @@ def open_raw_row(
     row: dict[str, Any],
     artifact_name: str,
     range_header: str | None = None,
+    *,
+    job: dict[str, Any] | None = None,
 ) -> RawArtifact:
     """Open the object a manifest row points at (#631 external access).
 
@@ -35,7 +40,15 @@ def open_raw_row(
     resolve the row themselves (manifest-first reads): same semantics —
     ``.gz`` objects pass stored bytes through, others honour the parsed
     single range, storage failures degrade to NotFoundError.
+
+    ``job``（#631 攻击复审 H1）：行所属 job 的记录行（``get_job`` 的
+    返回形状），传入时先做读侧 storage_key 前缀兜底
+    （``refuse_row_outside_job_prefix``——行是对象读路径的唯一权威，
+    写歪的行不读穿 workspace 边界，404 语义）；None 表示调用方无法提
+    供 job 语境（测试桩直连），生产调用链都传入。
     """
+    if job is not None and refuse_row_outside_job_prefix(row, job):
+        raise NotFoundError("Artifact not found")
     size = row.get("size_bytes")
     size_bytes = int(size) if isinstance(size, int) else None
     gzipped = is_gzip_key(str(row["storage_key"]))
@@ -80,6 +93,7 @@ def open_raw_artifact(
     range_header: str | None = None,
     *,
     manifest_first: bool = False,
+    job: dict[str, Any] | None = None,
 ) -> RawArtifact:
     """Locate a binary-servable artifact: local job_dir file first, then the
     object-store stream (mirrors the text read()'s ordering).
@@ -93,6 +107,9 @@ def open_raw_artifact(
     （content_hash/uploaded_at）一致，本地缓存可能滞后。行缺失时回到
     本地优先序（legacy 本地产物）。单次 lookup，无窗口竞态。
 
+    ``job``（#631 攻击复审 H1）：传入时对象分支先做 storage_key 前缀
+    兜底（见 ``open_raw_row``）。
+
     #338 双形态：``.gz`` 对象按存储字节透传（``content_encoding="gzip"``，
     路由层加 Content-Encoding 响应头），manifest ``size_bytes`` 是压缩后
     字节数（与透传 body 的 Content-Length 一致）。gzip 流不支持分段解
@@ -103,12 +120,12 @@ def open_raw_artifact(
     if manifest_first and store is not None and store.enabled:
         row = store.lookup(job_id, artifact_name)
         if row is not None:
-            return open_raw_row(store, row, artifact_name, range_header)
+            return open_raw_row(store, row, artifact_name, range_header, job=job)
     if artifact_path.exists() and artifact_path.is_file():
         return RawArtifact(name=artifact_name, path=artifact_path)
     if store is not None and store.enabled:
         if row is None:
             row = store.lookup(job_id, artifact_name)
         if row is not None:
-            return open_raw_row(store, row, artifact_name, range_header)
+            return open_raw_row(store, row, artifact_name, range_header, job=job)
     raise NotFoundError("Artifact not found")

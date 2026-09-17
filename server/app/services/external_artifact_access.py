@@ -14,7 +14,8 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_media import raw_media_type
-from server.app.services.job_errors import NotFoundError
+from server.app.services.job_artifact_names import is_plausible_job_id
+from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_query_presenters import artifact_names_deep
 from server.app.settings import Settings
 
@@ -46,6 +47,11 @@ class ExternalArtifactAccessService:
         # #631: the workspace check doubles as the existence check — a job id
         # from another workspace is a 404 (not 403), so ids cannot be probed
         # across workspaces (same pattern as studio_agent_job_tools).
+        # 攻击复审 M1：控制字符 job_id（%00）在 SQL 参数化时炸 psycopg
+        # DataError（500）；这里按输入形状早拒（InvalidOperationError →
+        # 400），保持 404/400 边界不变成 500。
+        if not is_plausible_job_id(job_id):
+            raise InvalidOperationError("Invalid job id")
         job = self.job_db.get_job(job_id)
         if job is None or str(job["workspace_id"]) != workspace_id:
             raise NotFoundError("Job not found")

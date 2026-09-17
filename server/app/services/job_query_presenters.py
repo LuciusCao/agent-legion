@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from server.app.services.job_artifact_names import NON_ARTIFACT_DIR_NAMES
 from server.app.services.job_node_ordering import effective_after, ordered_job_nodes
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
@@ -53,9 +54,9 @@ def artifact_names(job: dict, settings: Settings) -> list[str]:
     return sorted(path.name for path in base.iterdir() if path.is_file())
 
 
-# job_dir 里不是产物的子树：runs/ 是每节点的执行 run 目录（events.jsonl 等），
-# 点前缀目录是清理/解包暂存（.trash、.result-staging-*）。
-_NON_ARTIFACT_DIR_NAMES = {"runs"}
+# 剪枝名单与下载侧白名单的单一事实来源在 job_artifact_names（#631 攻击
+# 复审 M2：清单剪枝与 serve 拒绝必须同一份规则）。
+_NON_ARTIFACT_DIR_NAMES = NON_ARTIFACT_DIR_NAMES
 
 
 def artifact_names_deep(job: dict, settings: Settings) -> list[str]:

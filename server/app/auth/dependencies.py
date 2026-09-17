@@ -9,11 +9,13 @@ of ANY scoped identity — it inherits the minter's role),
 ``reject_studio_agent_
 scope`` (effecting endpoints), ``require_studio_agent_scope``/``_workspace``
 (tool surface), ``enforce_scoped_workspace_binding`` (bound tokens read only
-their own workspace). The workspace API intake token (#626) resolves in the
-same chain into a machine identity (actor_scope='api'); the runs router
-mounts ``require_workspace_api_intake`` (auth/workspace_access.py) so only
-that surface admits it. Worker-token auth (routes/agent_workers.py) and the
-studio MCP mount (ASGI-level check) are not routed through here.
+their own workspace), ``reject_scoped_token_on_bare_job_route`` (legacy bare
+job reads answer scoped identities with 404). The workspace API intake token
+(#626) resolves in the same chain into a machine identity (actor_scope='api');
+the runs router mounts ``require_workspace_api_intake``
+(auth/workspace_access.py) so only that surface admits it. Worker-token auth
+(routes/agent_workers.py) and the studio MCP mount (ASGI-level check) are not
+routed through here.
 """
 
 from __future__ import annotations
@@ -195,4 +197,26 @@ def enforce_scoped_workspace_binding(
     bound = user.get("scoped_workspace_id")
     if bound and bound != workspace_id:
         raise HTTPException(status_code=403, detail="Scoped token bound to another workspace")
+    return user
+
+
+def reject_scoped_token_on_bare_job_route(
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+) -> dict[str, Any]:
+    """#631 攻击审查 H2（低成本收口）：legacy 裸 job 读路由（无 workspace
+    前缀的 ``/api/jobs/{job_id}`` 家族）对 scoped token 一律 404。
+
+    两个 workspace guard（require_workspace_access /
+    require_scoped_workspace_match）都从路径/查询参数取 workspace_id，
+    裸路由两者皆无——修复前任意 scoped Bearer token（含 ws 绑定 token）
+    可经它们读任意 workspace 的 job 详情与产物字节，整体绕过 #631 的
+    workspace 隔离叙事。scoped 身份的 sanctioned 读面是 studio-agent
+    工具面（/studio-agent/tools/workspaces/...）与 #631 的前缀端点；
+    全会话用户（前端控制台）不受影响。404（而非 403）保持该面「对
+    scoped 身份恒为不存在」的防枚举语义：探测任意 job id 得到常量信号。
+    裸路由对全会话用户的 workspace 归属校验是独立收口 issue（前端调用
+    方迁移），不在本守卫范围。
+    """
+    if user.get("actor_scope"):
+        raise HTTPException(status_code=404, detail="Job not found")
     return user

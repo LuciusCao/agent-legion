@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from server.app.auth.dependencies import reject_scoped_token_on_bare_job_route
 from server.app.routes.job_http import (
     raise_job_http_error,
     reject_mismatched_workflow_key,
@@ -59,8 +60,19 @@ def create_jobs_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
+    @router.get(
+        "/jobs/{job_id}",
+        response_model=JobDetailResponse,
+        dependencies=[Depends(reject_scoped_token_on_bare_job_route)],
+    )
     def get_job(job_id: str) -> JobDetailResponse:
+        # Legacy bare route（#631 攻击审查边界声明）：无 workspace 前缀，
+        # job_group 的 require_workspace_access / require_scoped_workspace_
+        # match 都不触发（两者都从路径/查询参数取 workspace_id）。#631
+        # 攻击审查 H2 的低成本收口：scoped token 一律 404（守卫在上），
+        # 全会话用户保持存量行为——对他们的 workspace 归属校验需要前端
+        # 调用方（frontend/src/api/jobsApi.ts 等）迁移到
+        # /workspaces/{ws}/jobs/{job_id}，随裸路由收口 issue 独立处理。
         try:
             return JobDetailResponse(**job_queries.detail(job_id))
         except JobServiceError as exc:

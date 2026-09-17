@@ -1374,6 +1374,7 @@
     "server/app/services/job_artifact_maintenance.py": 257,
     "server/app/services/job_artifact_media.py": 32,
     "server/app/services/job_artifact_mutation.py": 110,
+    "server/app/services/job_artifact_names.py": 32,
     "server/app/services/job_artifact_objects.py": 243,
     "server/app/services/job_artifact_raw.py": 62,
     "server/app/services/job_artifact_raw_types.py": 23,

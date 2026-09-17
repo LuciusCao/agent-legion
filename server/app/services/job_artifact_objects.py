@@ -63,6 +63,45 @@ def artifact_storage_key(workspace_id: str, job_id: str, name: str) -> str:
     return f"{KEY_PREFIX}/{workspace_id}/{job_id}/{name}"
 
 
+def artifact_key_prefix(workspace_id: str, job_id: str) -> str:
+    """Read-side authority prefix for a job's manifest rows (#631 攻击复审
+    H1): every legal ``storage_key`` of this job — bare or ``.gz`` — starts
+    with ``jobs/{workspace_id}/{job_id}/``; the read path enforces this so a
+    corrupted/miswritten row degrades to 404 instead of reading through the
+    workspace boundary."""
+    return f"{KEY_PREFIX}/{workspace_id}/{job_id}/"
+
+
+def row_key_in_job_prefix(row: dict[str, Any], job: dict[str, Any]) -> bool:
+    """Manifest 行的 storage_key 是否落在本 job 的 workspace 前缀内。
+
+    #631 攻击复审 H1 的共享判定：读侧兜底（raw 与文本两条读路径）都在
+    打开对象前调它；job_id 取 job 记录行的 id（get_job 形状），不信任
+    manifest 行的自述。
+    """
+    return str(row.get("storage_key") or "").startswith(
+        artifact_key_prefix(str(job.get("workspace_id") or ""), str(job.get("id") or ""))
+    )
+
+
+def refuse_row_outside_job_prefix(row: dict[str, Any], job: dict[str, Any]) -> bool:
+    """前缀外行的统一拒绝口（raw 与文本读路径共用）：不匹配记 warning
+    （不含 key 全文，只记长度与 job 标识——key 可能含敏感段落）并返回
+    True，调用方按 NotFound/None 处理。"""
+    if row_key_in_job_prefix(row, job):
+        return False
+    storage_key = str(row.get("storage_key") or "")
+    logger.warning(
+        "job %s manifest row for %r has a storage_key outside the job's "
+        "workspace prefix (length %d, expected prefix length %d); refusing to open",
+        str(job.get("id") or ""),
+        str(row.get("name") or ""),
+        len(storage_key),
+        len(artifact_key_prefix(str(job.get("workspace_id") or ""), str(job.get("id") or ""))),
+    )
+    return True
+
+
 def artifact_staging_key(workspace_id: str, job_id: str, execution_id: str, name: str) -> str:
     return f"{STAGING_KEY_PREFIX}/{workspace_id}/{job_id}/{execution_id}/{name}"
 

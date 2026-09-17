@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from server.app.auth.dependencies import reject_scoped_token_on_bare_job_route
 from server.app.routes.token_usage_contracts import (
     TokenUsageJobResponse,
     TokenUsageWorkspaceResponse,
@@ -25,8 +26,13 @@ def create_token_usage_router(job_queries, settings: Settings) -> APIRouter:
     def effective_config() -> dict:
         return pricing_store.effective_config(settings.config)
 
-    @router.get("/jobs/{job_id}/runs/{run_id}/token-usage", response_model=TokenUsageRunResponse)
+    @router.get(
+        "/jobs/{job_id}/runs/{run_id}/token-usage",
+        response_model=TokenUsageRunResponse,
+        dependencies=[Depends(reject_scoped_token_on_bare_job_route)],
+    )
     def get_run_token_usage(job_id: str, run_id: int) -> TokenUsageRunResponse:
+        # Legacy bare route（#631 攻击审查 H2 收口）：scoped token 404。
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -37,8 +43,13 @@ def create_token_usage_router(job_queries, settings: Settings) -> APIRouter:
             **build_run_usage_response(job_queries.job_db, run, effective_config())
         )
 
-    @router.get("/jobs/{job_id}/token-usage", response_model=TokenUsageJobResponse)
+    @router.get(
+        "/jobs/{job_id}/token-usage",
+        response_model=TokenUsageJobResponse,
+        dependencies=[Depends(reject_scoped_token_on_bare_job_route)],
+    )
     def get_job_token_usage(job_id: str) -> TokenUsageJobResponse:
+        # Legacy bare route（#631 攻击审查 H2 收口）：scoped token 404。
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
