@@ -691,3 +691,55 @@ def test_timer_clear_and_new_window_on_same_runtime_serialize(direct, monkeypatc
             service.send_message(session_id, workspace_id, "still compacting")
     finally:
         service.shutdown()
+
+
+def test_timer_timeout_notice_orders_before_a_rearmed_window(direct, monkeypatch) -> None:
+    """#694 review R6-P2: the compact_timeout notice is appended inside the
+    same critical section as the clear, so a window re-armed while the clear
+    is in flight can only land its compact_start AFTER the notice — the
+    timeline never claims "input recovered" after the new window opened
+    (old shape: notice appended after lock release, order inverted)."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        with runtime.lock:
+            armed_since = runtime.compacting_since
+        real_clear = service._db.clear_studio_chat_compacting_if_set
+        clear_entered = threading.Event()
+        proceed = threading.Event()
+
+        def instrumented_clear(sid):
+            clear_entered.set()
+            assert proceed.wait(timeout=10)
+            return real_clear(sid)
+
+        monkeypatch.setattr(service._db, "clear_studio_chat_compacting_if_set", instrumented_clear)
+        timer_done = threading.Event()
+
+        def run_timer() -> None:
+            compact_timer._fire(service, session_id, runtime, armed_since)
+            timer_done.set()
+
+        timer_thread = threading.Thread(target=run_timer)
+        timer_thread.start()
+        assert clear_entered.wait(timeout=10)
+        # A new start marker re-arms the window while the timer's clear is in
+        # flight; it blocks on runtime.lock until the timer's whole section
+        # (clear + notice) completes.
+        marker_thread = threading.Thread(
+            target=service._on_update,
+            args=(session_id, _chunk("Compacting conversation context\n")),
+        )
+        marker_thread.start()
+        proceed.set()
+        timer_thread.join(timeout=10)
+        marker_thread.join(timeout=10)
+        assert timer_done.is_set() and not marker_thread.is_alive()
+
+        assert runtime.compacting is True
+        assert service.get_session(session_id)["compacting"] is True
+        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
+        assert events == ["compact_start", "compact_timeout", "compact_start"]
+    finally:
+        service.shutdown()

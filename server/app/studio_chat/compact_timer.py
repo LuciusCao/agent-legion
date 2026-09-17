@@ -78,15 +78,21 @@ def _fire(
         # lands after our clear). The row boolean alone would not
         # distinguish old/new windows; the lock order does.
         cleared = backend.db.clear_studio_chat_compacting_if_set(session_id)
-    # The notice only rides a successful conditional clear — when the row's
-    # window was already closed (resume's on_ready) the stale timeout notice
-    # is dropped instead of polluting the new owner's timeline (R3-P2).
-    if not cleared:
-        return
-    backend.store.append_message(
-        session_id,
-        "status",
-        "system",
-        {"event": "compact_timeout", "detail": COMPACT_TIMEOUT_DETAIL},
-    )
-    backend.store.publish_session(session_id)
+        # #694 review R6-P2: the timeout notice also joins this section —
+        # appended after release it could land AFTER a re-armed window's
+        # compact_start, claiming "input recovered" while the send gate is
+        # locked again. INSERT + bus publish under the lock follow the
+        # store.append_stream_chunk precedent (EventBus.publish is
+        # non-blocking; only non-blocking local calls here).
+        if cleared:
+            # The notice only rides a successful conditional clear — when the
+            # row's window was already closed (resume's on_ready) the stale
+            # timeout notice is dropped instead of polluting the new owner's
+            # timeline (R3-P2).
+            backend.store.append_message(
+                session_id,
+                "status",
+                "system",
+                {"event": "compact_timeout", "detail": COMPACT_TIMEOUT_DETAIL},
+            )
+            backend.store.publish_session(session_id)
