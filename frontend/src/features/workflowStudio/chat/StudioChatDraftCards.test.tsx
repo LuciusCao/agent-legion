@@ -41,36 +41,6 @@ const mockPublishAgent = vi.mocked(publishAgent)
 const mockFetchAgentVersions = vi.mocked(fetchAgentVersions)
 const mockApi = vi.mocked(api)
 
-/** agent versions 响应：首个 draft 行即当前草稿（列表 version 降序）。 */
-function agentVersions(draftHash: string | null) {
-  return {
-    versions: [
-      ...(draftHash
-        ? [
-            {
-              agent_id: 'writer',
-              created_at: '2026-01-01T00:00:00Z',
-              created_by: 'u1',
-              definition_hash: draftHash,
-              id: 'v2',
-              status: 'draft' as const,
-              version: 2,
-            },
-          ]
-        : []),
-      {
-        agent_id: 'writer',
-        created_at: '2026-01-01T00:00:00Z',
-        created_by: 'u1',
-        definition_hash: 'published-hash',
-        id: 'v1',
-        status: 'published' as const,
-        version: 1,
-      },
-    ],
-  }
-}
-
 function renderWithStudio(
   ui: React.ReactNode,
   studio: Record<string, unknown>
@@ -115,7 +85,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     runtime: 'pi',
     skill: null,
     status: 'completed',
-    draftHash: null,
+    draftHash: 'hash-a',
     saveFailed: false,
   }
 
@@ -149,7 +119,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
       fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
     })
     await waitFor(() =>
-      expect(mockPublishAgent).toHaveBeenCalledWith('ws1', 'writer')
+      expect(mockPublishAgent).toHaveBeenCalledWith('ws1', 'writer', 'hash-a')
     )
     expect(mockApi).not.toHaveBeenCalled()
     await waitFor(() =>
@@ -279,15 +249,13 @@ describe('AgentDefinitionDraftCard（#692）', () => {
   // codex P1 第三轮：发布前核对服务端草稿身份。实体是 workspace 级状态，
   // 本会话保存后其他会话（或用户在编辑器）可以覆盖——卡片 hash 与服务端
   // 当前草稿一致才发。
-  describe('发布前草稿身份核对（codex P1 第三轮）', () => {
-    it('服务端当前草稿 hash 一致：正常发布', async () => {
-      mockFetchAgentVersions.mockResolvedValue(
-        agentVersions('hash-a') as Awaited<
-          ReturnType<typeof fetchAgentVersions>
-        >
-      )
+  describe('草稿身份的原子核对（codex P1 第三/四轮合并收口）', () => {
+    // 发布请求携带 expected_hash（卡片的 draftHash），服务端在发布事务
+    // 内核对——不匹配 409 零副作用。预检式 versions 读取已被原子核对
+    // 取代（组件不再调 fetchAgentVersions）。
+    it('发布请求携带 expected_hash 交给服务端原子核对', async () => {
       mockPublishAgent.mockResolvedValue({
-        version: 2,
+        definition_hash: 'hash-a',
       } as Awaited<ReturnType<typeof publishAgent>>)
       renderWithStudio(
         <AgentDefinitionDraftCard
@@ -301,19 +269,17 @@ describe('AgentDefinitionDraftCard（#692）', () => {
         fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
       })
       await waitFor(() =>
-        expect(mockFetchAgentVersions).toHaveBeenCalledWith('ws1', 'writer')
+        expect(mockPublishAgent).toHaveBeenCalledWith('ws1', 'writer', 'hash-a')
       )
-      await waitFor(() =>
-        expect(mockPublishAgent).toHaveBeenCalledWith('ws1', 'writer')
-      )
+      expect(mockFetchAgentVersions).not.toHaveBeenCalled()
     })
 
-    it('服务端草稿已被其他会话覆盖（hash 不一致）：拦截并提示，不发布', async () => {
-      mockFetchAgentVersions.mockResolvedValue(
-        agentVersions('hash-b') as Awaited<
-          ReturnType<typeof fetchAgentVersions>
-        >
+    it('服务端 409（草稿被覆盖）：内联提示刷新，无成功 toast，按钮可重试', async () => {
+      const conflict = Object.assign(
+        new Error('draft hash mismatch for agent writer'),
+        { status: 409 }
       )
+      mockPublishAgent.mockRejectedValue(conflict)
       renderWithStudio(
         <AgentDefinitionDraftCard
           draft={{ ...draft, draftHash: 'hash-a' }}
@@ -327,76 +293,17 @@ describe('AgentDefinitionDraftCard（#692）', () => {
       })
       await waitFor(() =>
         expect(screen.getByRole('alert')).toHaveTextContent(
-          '草稿已被其他会话或编辑器更新，当前卡片不再对应最新草稿'
+          '草稿已被其他会话或编辑器更新，请刷新后从最新草稿重新发布'
         )
       )
-      expect(mockPublishAgent).not.toHaveBeenCalled()
-      // 按钮回到可点态（非终态）：提示用户去刷新/查看新草稿。
+      expect(useUiStore.getState().toast).toBeNull()
       expect(
         screen.getByRole('button', { name: '发布 Agent 定义' })
       ).toBeEnabled()
     })
 
-    it('服务端已无草稿（draft 行缺失）：拦截并提示刷新，不发布', async () => {
-      mockFetchAgentVersions.mockResolvedValue(
-        agentVersions(null) as Awaited<ReturnType<typeof fetchAgentVersions>>
-      )
-      renderWithStudio(
-        <AgentDefinitionDraftCard
-          draft={{ ...draft, draftHash: 'hash-a' }}
-          workspaceId="ws1"
-        />,
-        makeStudio()
-      )
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
-      })
-      await waitFor(() =>
-        expect(screen.getByRole('alert')).toHaveTextContent(
-          '服务端草稿已变更（可能已被发布或覆盖），请刷新后重试'
-        )
-      )
-      expect(mockPublishAgent).not.toHaveBeenCalled()
-    })
-
-    it('旧转录 draftHash 为 null：跳过核对直接发布（404 兜底）', async () => {
-      mockPublishAgent.mockResolvedValue({
-        version: 2,
-      } as Awaited<ReturnType<typeof publishAgent>>)
-      renderWithStudio(
-        <AgentDefinitionDraftCard
-          draft={{ ...draft, draftHash: null }}
-          workspaceId="ws1"
-        />,
-        makeStudio()
-      )
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
-      })
-      await waitFor(() =>
-        expect(mockPublishAgent).toHaveBeenCalledWith('ws1', 'writer')
-      )
-      expect(mockFetchAgentVersions).not.toHaveBeenCalled()
-    })
-
-    it('节点代码卡同样核对：versions 首个 draft 行的 code_hash 不一致则拦截', async () => {
-      mockApi.mockResolvedValue({
-        versions: [
-          {
-            change_note: null,
-            code_hash: 'code-hash-b',
-            created_at: '2026-01-01T00:00:00Z',
-            created_by: 'u1',
-            id: 'v3',
-            published_at: null,
-            status: 'draft',
-            version: 3,
-          },
-        ],
-      } as never)
-      // NodeCode 卡的 fixture 形状（agent 组的 draft 无 nodeKey）。
+    it('节点代码卡的发布同样携带 expected_hash', async () => {
+      mockApi.mockResolvedValue({ code_hash: 'code-hash-a' } as never)
       const nodeDraft = {
         toolCallId: 'tc2',
         nodeKey: 'fetch_url',
@@ -418,46 +325,33 @@ describe('AgentDefinitionDraftCard（#692）', () => {
       })
       await waitFor(() =>
         expect(mockApi).toHaveBeenCalledWith(
-          '/api/workspaces/ws1/nodes/fetch_url/code/versions'
+          '/api/workspaces/ws1/nodes/fetch_url/code/publish',
+          {
+            method: 'POST',
+            body: JSON.stringify({ expected_hash: 'code-hash-a' }),
+          }
         )
       )
-      await waitFor(() =>
-        expect(screen.getByRole('alert')).toHaveTextContent(
-          '草稿已被其他会话或编辑器更新，当前卡片不再对应最新草稿'
-        )
-      )
-      // publish 端点未被调用（唯一一次 api 调用是 versions 读取）。
-      expect(mockApi).toHaveBeenCalledTimes(1)
     })
 
-    // R4 P2 残窗检测：核对通过后、发布落地前被覆盖——发布响应 hash 与
-    // 卡片不一致时，成功 toast 之外必须再出一条警告。
-    it('发布响应 hash 与卡片不一致：警告 toast 提示内容已被覆盖', async () => {
-      mockFetchAgentVersions.mockResolvedValue(
-        agentVersions('hash-a') as Awaited<
-          ReturnType<typeof fetchAgentVersions>
-        >
-      )
-      mockPublishAgent.mockResolvedValue({
-        definition_hash: 'hash-b',
-      } as Awaited<ReturnType<typeof publishAgent>>)
+    // codex P1 第四轮：draftHash null 的旧转录卡不渲染发布入口——无法
+    // 参与原子核对的发布在草稿被覆盖时会静默发出别人的内容。
+    it('旧转录 draftHash 为 null：不渲染发布入口，提示走检查器面板', () => {
       renderWithStudio(
         <AgentDefinitionDraftCard
-          draft={{ ...draft, draftHash: 'hash-a' }}
+          draft={{ ...draft, draftHash: null }}
           workspaceId="ws1"
         />,
         makeStudio()
       )
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
-      })
-      await waitFor(() =>
-        expect(useUiStore.getState().toast?.message).toContain(
-          '发布的内容已非卡片生成时的版本'
-        )
-      )
-      expect(useUiStore.getState().toast?.type).toBe('error')
+      expect(
+        screen.queryByRole('button', { name: '发布 Agent 定义' })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.getByText(/旧转录无法验证草稿版本，请在检查器面板中发布/)
+      ).toBeInTheDocument()
+      // 查看草稿不受影响。
+      expect(screen.getByRole('button', { name: '查看草稿' })).toBeEnabled()
     })
 
     // R4 P1：workspaceId 来自 prop（路由/调用方），不读全局 store——
@@ -472,7 +366,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
       useSettingStore.setState({ workspaceId: 'ws-store' })
       renderWithStudio(
         <AgentDefinitionDraftCard
-          draft={{ ...draft, draftHash: null }}
+          draft={{ ...draft, draftHash: 'hash-a' }}
           workspaceId="ws-job-context"
         />,
         makeStudio()
@@ -484,32 +378,10 @@ describe('AgentDefinitionDraftCard（#692）', () => {
       await waitFor(() =>
         expect(mockPublishAgent).toHaveBeenCalledWith(
           'ws-job-context',
-          'writer'
+          'writer',
+          'hash-a'
         )
       )
-    })
-
-    // R4 P3-1：versions 读取失败（含 404 实体不存在）与发布 404 的文案
-    // 区分——读取失败不说「没有待发布的草稿」。
-    it('versions 读取失败：提示网络/读取问题而非无草稿', async () => {
-      mockFetchAgentVersions.mockRejectedValue(new Error('network down'))
-      renderWithStudio(
-        <AgentDefinitionDraftCard
-          draft={{ ...draft, draftHash: 'hash-a' }}
-          workspaceId="ws1"
-        />,
-        makeStudio()
-      )
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: '发布 Agent 定义' }))
-      })
-      await waitFor(() =>
-        expect(screen.getByRole('alert')).toHaveTextContent(
-          '无法读取服务端草稿状态，请检查网络后重试'
-        )
-      )
-      expect(mockPublishAgent).not.toHaveBeenCalled()
     })
   })
 })
@@ -519,7 +391,7 @@ describe('NodeCodeDraftCard（#692）', () => {
     toolCallId: 'tc2',
     nodeKey: 'fetch_url',
     status: 'completed',
-    draftHash: null,
+    draftHash: 'code-hash-a',
     saveFailed: false,
   }
 
@@ -581,7 +453,10 @@ describe('NodeCodeDraftCard（#692）', () => {
     await waitFor(() =>
       expect(mockApi).toHaveBeenCalledWith(
         '/api/workspaces/ws1/nodes/fetch_url/code/publish',
-        { method: 'POST' }
+        {
+          method: 'POST',
+          body: JSON.stringify({ expected_hash: 'code-hash-a' }),
+        }
       )
     )
     expect(mockPublishAgent).not.toHaveBeenCalled()

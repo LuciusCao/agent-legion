@@ -25,6 +25,15 @@ class WorkflowNodeCodeDraftRequest(BaseModel):
     change_note: str | None = None
 
 
+class WorkflowNodeCodePublishRequest(BaseModel):
+    """#692 codex P1: the caller's asserted draft code_hash — verified
+    atomically inside the publish transaction; mismatch raises 409 with
+    zero publish side effects. Absent (legacy callers) keeps the old
+    no-check semantics."""
+
+    expected_hash: str | None = None
+
+
 class WorkflowNodeCodeVersionResponse(BaseModel):
     id: str
     version: int

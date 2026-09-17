@@ -18,11 +18,11 @@ import styles from './StudioChatPanel.module.css'
  * 最新一张卡（codex P1 第二轮）——发布请求只带实体 ID，服务端发布的
  * 是当前草稿，旧卡的按钮会无提示地发布另一份内容。 */
 
-/** 仅来源 tool call 完成、且保存 HTTP 层成功的草稿渲染发布入口
- * （R2 P2-1 + R5 P2-1 门控：ToolClient 对非 2xx 返回失败文本而不抛
- * 异常，completed 但 saveFailed 的卡发布会静默发出旧草稿），并把保存
- * 响应的草稿身份 hash 传给发布按钮（codex P1 第三轮：发布前与服务端
- * 当前草稿比对）。 */
+/** 仅来源 tool call 完成、保存 HTTP 层成功、且有可验证草稿身份 hash
+ * 的卡渲染发布入口（R2 P2-1 + R5 P2-1 + codex P1 第四轮门控：
+ * saveFailed 的卡会静默发出旧草稿；draftHash null 的卡无法参与服务端
+ * 原子核对，被覆盖时同样静默错发——这类旧转录卡给出提示而非按钮，
+ * 用户从检查器面板的权威状态发布）。 */
 function DraftPublishAction({
   status,
   saveFailed,
@@ -41,6 +41,13 @@ function DraftPublishAction({
   workspaceId: string
 }) {
   if (status !== 'completed' || saveFailed) return null
+  if (draftHash === null) {
+    return (
+      <span className={styles.draftHint} role="note">
+        旧转录无法验证草稿版本，请在检查器面板中发布
+      </span>
+    )
+  }
   return (
     <EntityDraftPublishButton
       kind={kind}

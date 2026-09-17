@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { api, fetchAgentVersions, publishAgent } from '../../../api'
+import { api, publishAgent } from '../../../api'
 import type { components } from '../../../generated/api'
 import { useUiStore } from '../../../stores/uiStore'
 import { invalidateStudioTurnEndQueries } from './studioChatInvalidation'
@@ -16,21 +16,15 @@ import styles from './StudioChatPanel.module.css'
  * - 节点代码 → POST /api/workspaces/{ws}/nodes/{key}/code/publish
  *   （WorkflowNodeCodeSection.publish 同一端点）
  *
- * #692 codex P1（第三轮）——发布前核对服务端草稿身份：实体是 workspace
- * 级状态，本会话保存后其他会话（或用户在编辑器）可以覆盖同一实体的
- * 草稿；卡片携带保存响应返回的 draftHash，发布前先读服务端当前草稿
- * 的 hash 比对，一致才发。比对用的是 versions 列表的首个 draft 行
- * （两端点的 versions 列表都 version 降序且 save_draft 原地覆盖，至多
- * 一条 draft）。核对收窄但不消除跨会话覆盖竞态（R4 P2 声明的残窗）：
- * 读 versions → 比对 → 发布是两个 HTTP 往返，窗口内的新覆盖仍会被发
- * 布——发布后的响应 hash 与卡片 hash 比对（不一致时 toast + 卡片内联
- * 警告，R5 P3-1：toast 只活 3 秒，inline 才是持久痕迹）作检测；彻底
- * 关闭需要服务端条件发布（expected-hash 参数，#633 的 workflow 草稿
- * CAS 同型），开 follow-up 跟踪。draftHash 为 null 的旧转录按「无法核
- * 对身份」处理：不拦截（否则历史会话的卡永远不能发），风险依赖 404
- * 兜底——该兜底只覆盖「服务端已无草稿」的形态；HTTP 失败的保存
- * （completed 但 saveFailed，无 draftHash 且残窗检测同样跳过）由上游
- * 门控直接不给发布入口（R5 P2-1），不依赖这里。
+ * #692 codex P1（第三/四轮合并收口）——草稿身份的服务端原子核对：实体
+ * 是 workspace 级状态，本会话保存后其他会话（或用户在编辑器）可以覆盖
+ * 同一草稿。卡片携带保存响应返回的 draftHash，发布请求把它作为
+ * expected_hash 传入——服务端在选择 draft 的同一事务内核对，不匹配 409
+ * 且零发布副作用。这是「读-比对-发布」TOCTOU 窗口的根治（客户端预检式
+ * 核对与发布后 hash 告警两版先前的缓解均已删除，被原子核对取代）。
+ * draftHash 为 null 的卡（旧转录/无法解析保存响应）不渲染发布入口
+ * （codex P1 第四轮）：无法验证身份的发布在草稿被覆盖时会静默发布别人
+ * 的内容，且 404 兜底只覆盖「服务端已无草稿」的形态。
  *
  * workspaceId 是必填 prop（R4 P1）：job 排查 / 定制预览载体在非当前
  * workspace 下渲染本卡，读全局 settingStore 会发布到错误的 workspace。
@@ -46,24 +40,14 @@ import styles from './StudioChatPanel.module.css'
 
 type NodeCodeVersionResponse =
   components['schemas']['WorkflowNodeCodeVersionResponse']
-type NodeCodeVersionsResponse =
-  components['schemas']['WorkflowNodeCodeVersionsResponse']
-
-/** 服务端当前草稿的 hash：versions 列表 version 降序，首个 draft 行
- * 即当前草稿；没有 draft（已发布/被归档）返回 null。 */
-function currentDraftHash(
-  versions: { status: string }[],
-  hashKey: string
-): string | null {
-  const draft = versions.find((row) => row.status === 'draft')
-  const value = draft ? (draft as Record<string, unknown>)[hashKey] : null
-  return typeof value === 'string' && value ? value : null
-}
 
 function errorMessage(err: unknown): string {
+  const status = (err as { status?: number } | null)?.status
+  // 服务端原子核对的拒绝：草稿在保存后被其他会话/编辑器覆盖。
+  if (status === 409)
+    return '草稿已被其他会话或编辑器更新，请刷新后从最新草稿重新发布'
   // 404 no draft：后端对无草稿实体（已发布过/竞态已发布）的拒绝，
   // 原文是英文 "no draft for ..."——卡片语境给用户可行动的中文。
-  const status = (err as { status?: number } | null)?.status
   if (status === 404) return '没有待发布的草稿（可能刚已发布过）'
   return err instanceof Error ? err.message : String(err)
 }
@@ -76,7 +60,7 @@ export function EntityDraftPublishButton({
 }: {
   kind: 'agent' | 'code'
   entityId: string
-  draftHash: string | null
+  draftHash: string
   workspaceId: string
 }) {
   const showToast = useUiStore((s) => s.showToast)
@@ -85,67 +69,21 @@ export function EntityDraftPublishButton({
   const [published, setPublished] = useState(false)
   const [error, setError] = useState('')
 
-  /** 读服务端当前草稿的 hash（workspace 级权威状态）。读取失败（含
-   * 404 实体不存在）按核对失败处理，文案与发布 404 区分（R4 P3-1）。 */
-  async function serverDraftHash(): Promise<string | null | 'read-failed'> {
-    try {
-      if (kind === 'agent') {
-        const versions = await fetchAgentVersions(workspaceId, entityId)
-        return currentDraftHash(versions.versions, 'definition_hash')
-      }
-      const base = `/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(entityId)}/code`
-      const versions = await api<NodeCodeVersionsResponse>(`${base}/versions`)
-      return currentDraftHash(versions.versions, 'code_hash')
-    } catch {
-      return 'read-failed'
-    }
-  }
-
   async function publish() {
     if (busy || published) return
     setError('')
     setBusy(true)
     try {
-      if (draftHash !== null) {
-        const current = await serverDraftHash()
-        if (current === 'read-failed') {
-          setError('无法读取服务端草稿状态，请检查网络后重试')
-          return
-        }
-        if (current !== draftHash) {
-          setError(
-            current === null
-              ? '服务端草稿已变更（可能已被发布或覆盖），请刷新后重试'
-              : '草稿已被其他会话或编辑器更新，当前卡片不再对应最新草稿'
-          )
-          return
-        }
-      }
-      let overwroteDuringPublish = false
       if (kind === 'agent') {
-        const result = await publishAgent(workspaceId, entityId)
+        await publishAgent(workspaceId, entityId, draftHash)
         showToast(`Agent「${entityId}」已发布`, 'success')
-        // R4 P2 残窗检测：发布响应的 hash 与卡片不一致 = 核对通过后、
-        // 发布落地前被覆盖——发布了别人的内容，必须警告而非只报成功。
-        overwroteDuringPublish =
-          draftHash !== null && result.definition_hash !== draftHash
       } else {
         const base = `/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(entityId)}/code`
-        const result = await api<NodeCodeVersionResponse>(`${base}/publish`, {
+        await api<NodeCodeVersionResponse>(`${base}/publish`, {
           method: 'POST',
+          body: JSON.stringify({ expected_hash: draftHash }),
         })
         showToast(`节点代码「${entityId}」已发布，新执行立即生效`, 'success')
-        overwroteDuringPublish =
-          draftHash !== null && result.code_hash !== draftHash
-      }
-      if (overwroteDuringPublish) {
-        // P3-1（R5）：toast 只活 3 秒且被后续覆盖——残窗警告必须同时落
-        // 在卡片上（按钮已是「已发布」终态，这行是唯一持久痕迹）。
-        showToast(
-          '注意：发布的内容已非卡片生成时的版本（已被其他会话或编辑器覆盖）',
-          'error'
-        )
-        setError('发布完成，但内容已被其他会话或编辑器覆盖——非卡片显示的版本')
       }
       setPublished(true)
       invalidateStudioTurnEndQueries(queryClient, workspaceId)

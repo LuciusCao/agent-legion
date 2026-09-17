@@ -1,7 +1,7 @@
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.jobs import JobQueries
@@ -9,6 +9,7 @@ from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workflow_node_code_contracts import (
     WorkflowNodeCodeArchiveResponse,
     WorkflowNodeCodeDraftRequest,
+    WorkflowNodeCodePublishRequest,
     WorkflowNodeCodeResponse,
     WorkflowNodeCodeRollbackRequest,
     WorkflowNodeCodeTemplateResponse,
@@ -160,12 +161,20 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         dependencies=_EDIT_GUARD,
     )
     def publish_node_code(
-        workspace_id: str, node_key: str, workflow_key: str | None = None
+        workspace_id: str,
+        node_key: str,
+        request: Annotated[WorkflowNodeCodePublishRequest | None, Body()] = None,
+        workflow_key: str | None = None,
     ) -> WorkflowNodeCodeVersionResponse:
         key = _resolve_key(workspace_id, workflow_key)
         _reject_start_node(workspace_id, key, node_key)
         try:
-            row = _service().publish(workspace_id, key, node_key)
+            row = _service().publish(
+                workspace_id,
+                key,
+                node_key,
+                request.expected_hash if request else None,
+            )
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return WorkflowNodeCodeVersionResponse(**row)

@@ -228,12 +228,33 @@ class VersionedEntityStore:
                 raise ConflictError("entity version allocated concurrently; retry") from exc
             return _get_entity_by_id(conn, row_id)
 
-    def publish(self, entity_key: str, workspace_id: str | None) -> VersionedEntity:
-        """Publish the current draft; the previously published version archives."""
+    def publish(
+        self,
+        entity_key: str,
+        workspace_id: str | None,
+        expected_hash: str | None = None,
+    ) -> VersionedEntity:
+        """Publish the current draft; the previously published version archives.
+
+        ``expected_hash`` (#692, codex P1): the caller's asserted draft content
+        hash, verified inside the SAME transaction that selects the draft — a
+        mismatch raises Conflict (409, zero publish side effects). This is the
+        atomic close of the read-compare-publish TOCTOU window: an overwrite
+        by another session between the caller's precheck and this transaction
+        (save_draft rewrites the draft row in place, so the hash changes) is
+        rejected here. None keeps the old semantics (no check) for callers
+        with no verifiable hash (AgentEditor and other legacy entries) to
+        migrate incrementally.
+        """
         with write_transaction(self._dsn) as conn:
             draft = _latest_with_status(conn, self._entity_type, workspace_id, entity_key, "draft")
             if draft is None:
                 raise NotFoundError(f"no draft for {self._entity_type} {entity_key}")
+            if expected_hash is not None and draft["definition_hash"] != expected_hash:
+                raise ConflictError(
+                    f"draft hash mismatch for {self._entity_type} {entity_key}:"
+                    " the draft was overwritten by another session; reload and retry"
+                )
             conn.execute(
                 "update versioned_entities set status='archived'"
                 f" where {_ENTITY_FILTER} and status='published'",

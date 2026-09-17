@@ -183,10 +183,21 @@ class NodeCodeService:
         )
         return _to_row(entity)
 
-    def publish(self, workspace_id: str, workflow_key: str, node_key: str) -> dict[str, Any]:
-        """Publish the current draft; the previously published version archives."""
+    def publish(
+        self,
+        workspace_id: str,
+        workflow_key: str,
+        node_key: str,
+        expected_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """Publish the current draft; the previously published version archives.
+        ``expected_hash`` (#692): verified atomically inside the store's
+        publish transaction — mismatch raises Conflict with zero side
+        effects."""
         self._require_enabled()
-        row = _to_row(self._store.publish(_entity_key(workflow_key, node_key), workspace_id))
+        row = _to_row(
+            self._store.publish(_entity_key(workflow_key, node_key), workspace_id, expected_hash)
+        )
         _bump_publish_generation()
         return row
 

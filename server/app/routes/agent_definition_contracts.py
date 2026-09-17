@@ -33,6 +33,14 @@ class AgentRollbackRequest(BaseModel):
     version: int = Field(ge=1)
 
 
+class AgentPublishRequest(BaseModel):
+    """#692 codex P1: the caller's asserted draft hash — verified atomically
+    inside the publish transaction; mismatch raises 409 with zero publish
+    side effects. Absent (legacy callers) keeps the old no-check semantics."""
+
+    expected_hash: str | None = None
+
+
 class AgentVersionResponse(BaseModel):
     id: str
     agent_id: str

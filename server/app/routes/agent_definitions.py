@@ -1,6 +1,6 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import ValidationError
 
 from server.app.agent_catalog import AgentDefinition
@@ -14,6 +14,7 @@ from server.app.routes.agent_definition_contracts import (
     AgentDetailResponse,
     AgentListItem,
     AgentListResponse,
+    AgentPublishRequest,
     AgentRollbackRequest,
     AgentVersionResponse,
     AgentVersionsResponse,
@@ -151,10 +152,15 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
 
     @router.post("/agent-definitions/{agent_id}/publish", response_model=AgentVersionResponse)
     def publish_agent_definition(
-        agent_id: str, workspace_id: WorkspaceId, _guard: ScopeGuard = None
+        agent_id: str,
+        workspace_id: WorkspaceId,
+        request: Annotated[AgentPublishRequest | None, Body()] = None,
+        _guard: ScopeGuard = None,
     ) -> AgentVersionResponse:
         try:
-            entity = _service(workspace_id).publish(agent_id)
+            entity = _service(workspace_id).publish(
+                agent_id, request.expected_hash if request else None
+            )
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return _version_response(entity)

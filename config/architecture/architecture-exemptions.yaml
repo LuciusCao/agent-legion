@@ -576,18 +576,14 @@ exemptions:
   expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/EntityDraftPublishButton.tsx
-  reason: '#692 grew past its 73-line ratchet baseline across review rounds: honest-boundary
-    docstring + 404 friendly message (R2), the codex P1 round-3 server-side draft identity
-    check (versions first-draft-row hash comparison), then the R4 hardening — workspaceId as a
-    required prop (job-diagnosis/customize-preview hosts render under another workspace),
-    publish-response hash comparison warning for the residual TOCTOU window, and a distinct
-    message for versions-read failures. 128 effective lines (19 beyond the prior 109+15 band,
-    re-signed time-boxed per #641); the button stays one focused component (identity check +
-    publish + invalidation); harvest at the #456 sweep.'
+  reason: '#692 grew past its 73-line ratchet baseline across review rounds, then SHRANK back
+    when the client-side precheck and post-publish hash warning were replaced by the atomic
+    server-side expected-hash check (codex P1 round 4): the button is now a thin publish call
+    passing draftHash as expected_hash plus invalidation and honest-boundary docs. 81 effective
+    lines, ceiling ratchets DOWN with it (monotonic discipline); harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 128
-  expires: 2026-10-31
+  ceiling: 81
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
   reason: '#429 added scopeNoteDismiss (resolved-notice close button) flexing scopeNote; the #692

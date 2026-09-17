@@ -65,6 +65,34 @@ def test_publish_without_draft_raises(store, workspace_id) -> None:
         store.publish("wf:node", workspace_id)
 
 
+# #692 codex P1（第三轮补充）：expected_hash 在选择 draft 的同一事务内
+# 核对——不匹配 409 且零发布副作用（这是「读-比对-发布」TOCTOU 窗口的
+# 原子收口，替代客户端预检式核对）。
+def test_publish_expected_hash_mismatch_conflicts_with_zero_side_effects(
+    store, workspace_id
+) -> None:
+    store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
+    # 模拟其他会话在调用方预检后覆盖草稿（save_draft 原地 UPDATE，hash 变）。
+    store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u1")
+
+    with pytest.raises(ConflictError):
+        store.publish("wf:node", workspace_id, expected_hash="hash1")
+
+    # 零副作用：草稿仍是 hash2 的内容，无 published 行。
+    statuses = {e.status for e in store.list_versions("wf:node", workspace_id)}
+    assert statuses == {"draft"}
+    assert store.get_published("wf:node", workspace_id) is None
+
+
+def test_publish_expected_hash_match_publishes(store, workspace_id) -> None:
+    store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
+
+    published = store.publish("wf:node", workspace_id, expected_hash="hash1")
+
+    assert published.status == "published"
+    assert store.get_published("wf:node", workspace_id).definition == DEFINITION_V1
+
+
 def test_rollback_republishes_old_version_as_new(store, workspace_id) -> None:
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
     store.publish("wf:node", workspace_id)
