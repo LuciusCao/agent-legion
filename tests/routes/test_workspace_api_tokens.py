@@ -158,6 +158,10 @@ def test_bearer_token_submits_runs_without_csrf(client) -> None:
     jobs = api.get(f"/api/workspaces/{WORKSPACE}/jobs")
     assert jobs.status_code == 200
     assert len(jobs.json()["jobs"]) == 1
+    snapshot = api.get(f"/api/workspaces/{WORKSPACE}/jobs/snapshot")
+    assert snapshot.status_code == 200, snapshot.text
+    assert snapshot.json()["total"] == 1
+    assert [j["id"] for j in snapshot.json()["jobs"]] == [j["id"] for j in jobs.json()["jobs"]]
 
 
 def test_api_token_reads_jobs_of_bound_workspace_only(client) -> None:
@@ -454,18 +458,20 @@ def test_api_token_refused_on_scopeless_guard_routes(client) -> None:
 def test_api_token_read_surface_is_the_intake_allowlist_only(client) -> None:
     """Review P1 pin: the api identity is NOT a general member of its bound
     workspace — its GET surface is exactly the documented intake reads
-    (runs list/detail + jobs listing). Every other workspace-scoped GET
-    under the membership guard must 404 it: secrets, materials, chat
-    sessions, preview panels, stats. (Before this pin the guard's
-    "editor of the bound workspace" pass let the machine credential read
-    all of these; secret NAMES are an existence oracle.)"""
+    (runs list/detail + the jobs listings: legacy AND paginated snapshot).
+    Every other workspace-scoped GET under the membership guard must 404
+    it: secrets, materials, chat sessions, preview panels, stats. (Before
+    this pin the guard's "editor of the bound workspace" pass let the
+    machine credential read all of these; secret NAMES are an existence
+    oracle.)"""
     _create_workspace(client, WORKSPACE)
     _create_workspace(client, OTHER, name="other")
     issued = _issue(client, WORKSPACE, label="cms")
     api = _bearer_client(client, issued["api_token"])
-    # The allowlist: all three read shapes work on the bound workspace.
+    # The allowlist: all four read shapes work on the bound workspace.
     assert api.get(f"/api/workspaces/{WORKSPACE}/runs").status_code == 200
     assert api.get(f"/api/workspaces/{WORKSPACE}/jobs").status_code == 200
+    assert api.get(f"/api/workspaces/{WORKSPACE}/jobs/snapshot").status_code == 200
     # Everything else: refused on its OWN workspace (not just cross-workspace).
     refused_reads = [
         f"/api/workspaces/{WORKSPACE}/secrets",
@@ -473,7 +479,7 @@ def test_api_token_read_surface_is_the_intake_allowlist_only(client) -> None:
         f"/api/workspaces/{WORKSPACE}/studio-chat/sessions",
         f"/api/workspaces/{WORKSPACE}/preview-panel",
         f"/api/workspaces/{WORKSPACE}/stats",
-        f"/api/workspaces/{WORKSPACE}/jobs/snapshot",
+        f"/api/workspaces/{WORKSPACE}/jobs/facets",
         f"/api/metrics/overview?workspace_id={WORKSPACE}",
     ]
     for url in refused_reads:
@@ -481,6 +487,7 @@ def test_api_token_read_surface_is_the_intake_allowlist_only(client) -> None:
     # Cross-workspace allowlist reads stay 404 as well.
     assert api.get(f"/api/workspaces/{OTHER}/runs").status_code == 404
     assert api.get(f"/api/workspaces/{OTHER}/jobs").status_code == 404
+    assert api.get(f"/api/workspaces/{OTHER}/jobs/snapshot").status_code == 404
     # Full sessions keep every one of these reads.
     for url in refused_reads:
         assert client.get(url).status_code == 200, f"admin session GET {url} broke"
@@ -609,10 +616,12 @@ def test_studio_agent_scope_still_passes_require_user(client, job_db) -> None:
 
 
 def test_revoked_token_attempts_still_stamp_last_used(client) -> None:
-    """M-3 pin: a revoked credential that keeps being presented must still
-    refresh the usage watermark — after an emergency revocation the admin
-    listing needs to show whether attempts continue. Access stays cut (401)
-    while the telemetry records the attempt."""
+    """M-3 pin (codex3 P2 refinement): a revoked credential that keeps
+    being presented — with the CORRECT secret — must still refresh the
+    usage watermark; after an emergency revocation the admin listing needs
+    to show whether attempts continue. Access stays cut (401) while the
+    telemetry records the attempt. The wrong-secret variant (no stamp) is
+    pinned separately below."""
     _create_workspace(client, WORKSPACE)
     issued = _issue(client, WORKSPACE, label="leaked")
     # Revoke BEFORE any successful resolve so the throttle map is empty and
@@ -627,6 +636,26 @@ def test_revoked_token_attempts_still_stamp_last_used(client) -> None:
     entry = next(t for t in listed if t["token_id"] == issued["token_id"])
     assert entry["revoked"] is True
     assert entry["last_used_at"] is not None, "revoked attempt left no watermark"
+
+
+def test_revoked_token_wrong_secret_does_not_stamp_last_used(client) -> None:
+    """codex3 P2 pin: a public token_id plus an arbitrary WRONG secret must
+    NOT refresh last_used_at — otherwise anyone who ever saw the token id
+    could forge the "revoked credential still in use" audit signal. Access
+    is refused either way (401); only the digest match separates the
+    telemetry outcome."""
+    _create_workspace(client, WORKSPACE)
+    issued = _issue(client, WORKSPACE, label="leaked")
+    assert (
+        client.delete(f"/api/workspaces/{WORKSPACE}/api-tokens/{issued['token_id']}").status_code
+        == 200
+    )
+    wrong = _bearer_client(client, f"{issued['token_id']}.wrong-secret-entirely")
+    assert wrong.get(f"/api/workspaces/{WORKSPACE}/runs").status_code == 401
+    listed = client.get(f"/api/workspaces/{WORKSPACE}/api-tokens").json()["tokens"]
+    entry = next(t for t in listed if t["token_id"] == issued["token_id"])
+    assert entry["revoked"] is True
+    assert entry["last_used_at"] is None, "wrong secret forged a usage watermark"
 
 
 @pytest.mark.no_db
@@ -688,12 +717,23 @@ def test_resolve_failure_paths_do_equal_hash_work(monkeypatch) -> None:
     monkeypatch.setattr(token_store_module.hashlib, "sha256", _counting_sha256)
     monkeypatch.setattr(token_store_module.hmac, "compare_digest", _counting_compare)
 
-    # Revoked row: refused, watermark stamped, and the dummy work ran.
+    # Revoked row with the CORRECT secret: refused, watermark stamped
+    # (codex3 P2: the caller demonstrably holds the secret), and the real
+    # compare doubles as the M-1 equalizer work.
     counts.update(sha256=0, compare=0)
     revoked_store = token_store_module.WorkspaceApiTokenStore(_StubQueries(revoked_row))  # type: ignore[arg-type]
     assert _resolved(revoked_store, "correct-secret") is None
     assert counts == {"sha256": 1, "compare": 1}, "revoked path skipped the equalizer"
     assert revoked_store._queries.stamped  # type: ignore[attr-defined]
+
+    # Revoked row with a WRONG secret (codex3 P2): same 401, same 1+1
+    # primitive work — and NO watermark: a public token_id must not be
+    # able to forge "the revoked credential is still in use".
+    counts.update(sha256=0, compare=0)
+    revoked_wrong = token_store_module.WorkspaceApiTokenStore(_StubQueries(revoked_row))  # type: ignore[arg-type]
+    assert _resolved(revoked_wrong, "wrong-secret") is None
+    assert counts == {"sha256": 1, "compare": 1}
+    assert not revoked_wrong._queries.stamped  # type: ignore[attr-defined]
 
     # Expired row: refused, dummy work ran, no watermark (not an attempt on
     # a revoked credential).
@@ -714,3 +754,113 @@ def test_resolve_failure_paths_do_equal_hash_work(monkeypatch) -> None:
     counts.update(sha256=0, compare=0)
     assert _resolved(live_store, "wrong-secret") is None
     assert counts == {"sha256": 1, "compare": 1}
+
+
+# --- codex3 P1: paginated, run-scoped job status reads --------------------------
+
+
+def _seed_jobs(client: TestClient, workspace_id: str, count: int, run_id: str) -> list[str]:
+    """Insert `count` queued jobs into one run (single transaction)."""
+    job_db = client.app.state.job_db
+    job_ids = [f"{workspace_id}:question_id:{run_id}-{i:04d}" for i in range(count)]
+    with job_db.connect() as conn:
+        for i, job_id in enumerate(job_ids):
+            conn.execute(
+                "insert into jobs(id, workspace_id, source_type, source_id, run_id, title,"
+                " storage_dir) values (%s, %s, 'question_id', %s, %s, %s, '')",
+                (job_id, workspace_id, f"{run_id}-{i:04d}", run_id, f"bulk {i:04d}"),
+            )
+    return job_ids
+
+
+def test_api_token_pages_past_legacy_jobs_cap(client) -> None:
+    """codex3 P1: the legacy GET /jobs is capped at 500 rows with no cursor
+    — a machine caller with more than 500 jobs in its workspace could never
+    read the rest. The paginated /jobs/snapshot (on the intake allowlist
+    since this fix) must let the same identity walk the WHOLE list with
+    limit+cursor."""
+    _create_workspace(client, WORKSPACE)
+    _seed_jobs(client, WORKSPACE, count=502, run_id="run-bulk")
+    issued = _issue(client, WORKSPACE, label="cms")
+    api = _bearer_client(client, issued["api_token"])
+
+    # The legacy surface: capped at 500 (API-compat behavior, unchanged).
+    legacy = api.get(f"/api/workspaces/{WORKSPACE}/jobs")
+    assert legacy.status_code == 200
+    assert len(legacy.json()["jobs"]) == 500
+
+    # The paginated surface: 500 + 2 with the same credential.
+    collected: list[str] = []
+    cursor = None
+    pages = 0
+    while True:
+        url = f"/api/workspaces/{WORKSPACE}/jobs/snapshot?limit=500"
+        if cursor is not None:
+            url += f"&cursor={cursor}"
+        page = api.get(url)
+        assert page.status_code == 200, page.text
+        body = page.json()
+        collected.extend(job["id"] for job in body["jobs"])
+        pages += 1
+        cursor = body["next_cursor"]
+        if cursor is None:
+            break
+        assert pages < 10, "pagination did not converge"
+    assert len(collected) == 502
+    assert len(set(collected)) == 502  # cursor pages never repeat a row
+    assert collected == sorted(collected, reverse=True)  # created_at desc, id desc
+
+
+def test_api_token_reads_jobs_by_run_id(client) -> None:
+    """codex3 P1: a machine caller's primary question is "what happened to
+    MY run" — with newer jobs from other runs in the workspace, the legacy
+    listing may not even include this run's items. snapshot?run_id= must
+    scope the page (and its total) to the caller's run; the run itself is
+    always obtained from the create response."""
+    _create_workspace(client, WORKSPACE)
+    _insert_material(client, WORKSPACE, "mat-1")
+    issued = _issue(client, WORKSPACE, label="cms")
+    api = _bearer_client(client, issued["api_token"])
+    response = _submit_run(api, WORKSPACE, "mat-1")
+    assert response.status_code == 200, response.text
+    run_id = response.json()["run"]["id"]
+    # Newer jobs in OTHER runs crowd the legacy 500-cap listing.
+    _seed_jobs(client, WORKSPACE, count=6, run_id="run-other-1")
+    _seed_jobs(client, WORKSPACE, count=6, run_id="run-other-2")
+
+    legacy = api.get(f"/api/workspaces/{WORKSPACE}/jobs")
+    assert legacy.status_code == 200
+    assert len(legacy.json()["jobs"]) == 13  # nothing hidden yet — but the
+    # ordering is created_at desc; the run's job is last, and with >500
+    # newer jobs it drops out entirely (the codex3 P1 scenario).
+
+    scoped = api.get(f"/api/workspaces/{WORKSPACE}/jobs/snapshot?run_id={run_id}")
+    assert scoped.status_code == 200, scoped.text
+    body = scoped.json()
+    assert body["total"] == 1
+    scoped_jobs = [job["id"] for job in body["jobs"]]
+    assert len(scoped_jobs) == 1
+    # The scoping is by run, not by recency: the other runs' jobs stay out.
+    other = api.get(f"/api/workspaces/{WORKSPACE}/jobs/snapshot?run_id=run-other-1")
+    assert other.status_code == 200
+    assert other.json()["total"] == 6
+    assert {job["id"] for job in other.json()["jobs"]}.isdisjoint(scoped_jobs)
+    # An unknown run is an empty page, not an error.
+    missing = api.get(f"/api/workspaces/{WORKSPACE}/jobs/snapshot?run_id=no-such-run")
+    assert missing.status_code == 200
+    assert missing.json()["total"] == 0
+    assert missing.json()["jobs"] == []
+    # run_id composes with the pagination cursor and the status filter.
+    paged = api.get(f"/api/workspaces/{WORKSPACE}/jobs/snapshot?run_id=run-other-1&limit=4")
+    assert paged.status_code == 200
+    assert len(paged.json()["jobs"]) == 4
+    assert paged.json()["next_cursor"] is not None
+    tail = api.get(
+        f"/api/workspaces/{WORKSPACE}/jobs/snapshot?run_id=run-other-1&limit=4"
+        f"&cursor={paged.json()['next_cursor']}"
+    )
+    assert tail.status_code == 200
+    assert len(tail.json()["jobs"]) == 2
+    assert tail.json()["next_cursor"] is None
+    still_scoped = {job["id"] for job in paged.json()["jobs"] + tail.json()["jobs"]}
+    assert len(still_scoped) == 6  # cursor kept the run scoping

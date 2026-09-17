@@ -39,6 +39,11 @@ machine-to-machine 凭据：绑定且仅绑定一个 workspace，权限是 edito
      -H "Authorization: Bearer $API_TOKEN"
    curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs" \
      -H "Authorization: Bearer $API_TOKEN"
+   # 一个 run 的 job 可能远超 500 条：legacy /jobs 固定只返回最近 500 条，
+   # 分页/按 run 查询走 /jobs/snapshot（limit ≤ 500 + next_cursor 循环；
+   # run_id 来自创建响应）。
+   curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs/snapshot?run_id=$RUN_ID&limit=500" \
+     -H "Authorization: Bearer $API_TOKEN"
    ```
 
 Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在设置面板
@@ -50,11 +55,13 @@ Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在�
   约定——库内只存 sha256，明文只在签发响应出现一次。支持签发时指定
   `ttl_hours` 过期时间，支持随时吊销（软吊销，行保留审计）。
 - **权限面**：`POST /runs`（提交）与 `GET /runs` / `GET /runs/{id}` /
-  `GET /jobs`（只读查询）。跨 workspace 访问与其它 workspace 路由一律
+  `GET /jobs`（legacy，最近 500 条）/ `GET /jobs/snapshot`（分页 +
+  `run_id` 过滤，只读查询）。跨 workspace 访问与其它 workspace 路由一律
   404（与不存在同一形态，不可枚举）；管理端点 403；token 不能签发新
   token、不能改 workflow 定义。
 - **审计**：经 API token 提交的 run 在服务端结构化日志里记录 token_id
   （不冒充任何用户身份）；列表展示 `last_used_at` 最近使用水位（每分钟
-  至多刷新一次）。
+  至多刷新一次；吊销后的重试也刷新水位，但仅当调用方持有正确 secret——
+  只知道 token_id 的错误凭据刷不动它）。
 - **不做的事（初版）**：per-token 速率限制/配额（后续项）；管理员面
   按标签检索。

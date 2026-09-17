@@ -132,9 +132,12 @@ class WorkspaceApiTokenStore:
         Every failure path also runs one dummy hash + compare so the timing
         cannot distinguish them either (attack review M-1).
         Side effects: throttled ``last_used_at`` refresh (per-token, at most
-        one UPDATE per minute) on success AND on a revoked-row attempt — a
-        revoked credential still being presented is exactly the signal an
-        admin needs after an emergency revocation (attack review M-3).
+        one UPDATE per minute) whenever the presented secret MATCHES the
+        stored digest — on success, and on a revoked-row attempt: a revoked
+        credential still being presented is exactly the signal an admin
+        needs after an emergency revocation (attack review M-3, codex3 P2:
+        only a digest match refreshes; a public token_id with an arbitrary
+        wrong secret must not be able to forge that audit signal).
         """
         parts = split_api_token(token)
         if parts is None:
@@ -145,12 +148,17 @@ class WorkspaceApiTokenStore:
             _timing_equal_compare(secret)
             return None
         if row["revoked_at"] is not None:
-            # Refused (the "revoke cuts access" semantics are unchanged) —
-            # but the attempt still refreshes the usage watermark so the
-            # admin listing shows whether a revoked credential keeps being
-            # retried (M-3; throttled like the success path).
-            _timing_equal_compare(secret)
-            self._refresh_last_used(token_id)
+            # Refused (the "revoke cuts access" semantics are unchanged).
+            # codex3 P2 on the M-3 fix: the usage watermark refreshes only
+            # when the caller demonstrably holds the secret — the digest
+            # match — so knowing the public token_id alone cannot forge
+            # "the revoked credential is still in use". The real compare
+            # here IS the M-1 equalizer work for this path (one sha256 +
+            # one compare on every attempt, match or not; the result feeds
+            # only the watermark, never the 401), so no dummy call runs.
+            digest = hashlib.sha256(secret.encode()).hexdigest()
+            if hmac.compare_digest(digest, row["token_hash"]):
+                self._refresh_last_used(token_id)
             return None
         expires_at = _parse_timestamp(row["expires_at"])
         if expires_at is not None and expires_at <= datetime.now(UTC):

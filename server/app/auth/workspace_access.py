@@ -37,7 +37,7 @@ _MEMBER_ROLE_RANK = {"viewer": 1, "editor": 2}
 
 # #626 review: the surface allowlist for api-scope machine identities. The
 # intake channel's documented surface (#626) is submit + run/job status
-# reads: the runs router's POST/GETs and the workspace jobs listing.
+# reads: the runs router's POST/GETs and the workspace jobs listings.
 # Everything else under this guard — secrets/materials/chat-session/
 # preview-panel/metrics/etc. reads, and every scopeless or off-allowlist
 # mount — must refuse the machine identity (404, the no-enumeration
@@ -47,11 +47,16 @@ _MEMBER_ROLE_RANK = {"viewer": 1, "editor": 2}
 # substring match here would widen the surface again. POST /runs appears
 # here because the job_route_group mounts this guard on the whole runs
 # router; the route-level require_workspace_api_intake does the admission.
+# GET /jobs is the legacy 500-cap listing; codex3 P1 adds the paginated
+# /jobs/snapshot (cursor + run_id filter) so a machine caller can actually
+# reach the WHOLE job status surface — a run with more items than the
+# legacy cap, or a workspace with newer jobs, is otherwise unreadable.
 _API_SCOPE_ALLOWLIST: tuple[tuple[str, str], ...] = (
     ("POST", "/api/workspaces/{workspace_id}/runs"),
     ("GET", "/api/workspaces/{workspace_id}/runs"),
     ("GET", "/api/workspaces/{workspace_id}/runs/{run_id}"),
     ("GET", "/api/workspaces/{workspace_id}/jobs"),
+    ("GET", "/api/workspaces/{workspace_id}/jobs/snapshot"),
 )
 
 
@@ -128,9 +133,10 @@ def require_workspace_access(
     1. hard equality with the route's workspace scope (a mismatched or
        missing scope gets the same 404 as a non-member, no enumeration);
     2. (method, path) must be on the intake allowlist (_API_SCOPE_ALLOWLIST:
-       POST/GET runs + jobs listing) — every other route under this guard,
-       including OTHER GETs (secrets, materials, chat sessions, preview
-       panels, metrics) and scopeless mounts, 404s the machine identity.
+       POST/GET runs + the jobs listings, legacy AND paginated) — every
+       other route under this guard, including OTHER GETs (secrets,
+       materials, chat sessions, preview panels, metrics) and scopeless
+       mounts, 404s the machine identity.
        The POST /runs admission is dual-checked: the job_route_group mounts
        this guard router-wide, and the route-level
        require_workspace_api_intake (auth/api_intake.py) re-verifies the
