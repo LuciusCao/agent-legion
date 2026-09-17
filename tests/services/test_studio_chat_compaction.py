@@ -337,8 +337,10 @@ def test_compact_timeout_timer_self_clears_and_recovers_input(direct, monkeypatc
         assert runtime.compacting is True
         # The timer flips the runtime flag first and writes the DB row after;
         # wait on the DB row so the assertion cannot land between the two.
+        # Generous timeout: under gate-queue load the timer thread itself can
+        # be starved well past the shrunk 0.3s.
         wait_for_predicate(
-            lambda: service.get_session(session_id)["compacting"] is False, timeout=10
+            lambda: service.get_session(session_id)["compacting"] is False, timeout=30
         )
         events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
         assert events == ["compact_start", "compact_timeout"]
@@ -631,5 +633,61 @@ def test_timer_fire_with_already_closed_row_window_drops_the_notice(direct) -> N
         assert runtime.compacting is False
         events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
         assert events == ["compact_start"]
+    finally:
+        service.shutdown()
+
+
+def test_timer_clear_and_new_window_on_same_runtime_serialize(direct, monkeypatch) -> None:
+    """#694 review R5-P2: the stale timer's conditional clear runs inside the
+    same runtime.lock critical section as the generation check, so a new
+    window arming on the SAME runtime while the clear is in flight can only
+    land after it — its flag and row mirror survive (old shape: clear
+    outside the lock could wipe the new window's row while the runtime flag
+    stayed open — split-brain)."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        with runtime.lock:
+            armed_since = runtime.compacting_since
+        real_clear = service._db.clear_studio_chat_compacting_if_set
+        clear_entered = threading.Event()
+        proceed = threading.Event()
+
+        def instrumented_clear(sid):
+            clear_entered.set()
+            assert proceed.wait(timeout=10)
+            return real_clear(sid)
+
+        monkeypatch.setattr(service._db, "clear_studio_chat_compacting_if_set", instrumented_clear)
+        timer_done = threading.Event()
+
+        def run_timer() -> None:
+            compact_timer._fire(service, session_id, runtime, armed_since)
+            timer_done.set()
+
+        timer_thread = threading.Thread(target=run_timer)
+        timer_thread.start()
+        assert clear_entered.wait(timeout=10)
+        # While the timer's clear is in flight, a new start marker re-arms
+        # the window on the same runtime (duplicate-start re-arm path). The
+        # marker runs on its own thread: it blocks on runtime.lock until the
+        # timer's critical section completes.
+        marker_thread = threading.Thread(
+            target=service._on_update,
+            args=(session_id, _chunk("Compacting conversation context\n")),
+        )
+        marker_thread.start()
+        proceed.set()
+        timer_thread.join(timeout=10)
+        marker_thread.join(timeout=10)
+        assert timer_done.is_set() and not marker_thread.is_alive()
+
+        # The re-armed window is intact on both sides of the mirror.
+        assert runtime.compacting is True
+        assert service.get_session(session_id)["compacting"] is True
+        # And the send guard honours the surviving window.
+        with pytest.raises(ConflictError, match="正在压缩上下文"):
+            service.send_message(session_id, workspace_id, "still compacting")
     finally:
         service.shutdown()

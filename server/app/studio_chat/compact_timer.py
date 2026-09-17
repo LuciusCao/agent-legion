@@ -69,11 +69,19 @@ def _fire(
         runtime.compacting = False
         runtime.compacting_since = None
         runtime.compact_timer = None
-    # Persist only when the row still has the window open; when the row was
-    # already cleared (resume's on_ready) or re-armed by a newer window, the
-    # conditional update misses and the stale timeout notice is dropped
-    # instead of polluting the new owner's timeline.
-    if not backend.db.clear_studio_chat_compacting_if_set(session_id):
+        # #694 review R5-P2: the conditional clear rides the SAME critical
+        # section as the generation check. The marker path
+        # (compact_markers.apply_marker_gated) flips the in-memory window
+        # under this lock and persists it right after, so the two sections
+        # are mutually exclusive: a new window either arms before this
+        # section (the generation check fails) or after it (its persist
+        # lands after our clear). The row boolean alone would not
+        # distinguish old/new windows; the lock order does.
+        cleared = backend.db.clear_studio_chat_compacting_if_set(session_id)
+    # The notice only rides a successful conditional clear — when the row's
+    # window was already closed (resume's on_ready) the stale timeout notice
+    # is dropped instead of polluting the new owner's timeline (R3-P2).
+    if not cleared:
         return
     backend.store.append_message(
         session_id,
