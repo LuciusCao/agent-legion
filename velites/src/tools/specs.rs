@@ -94,7 +94,16 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
                     "op": {"type": "string", "enum": ["get", "set", "delete"], "description": "Operation to perform."},
                     "path": {"type": "string", "description": "JSON file path, relative to the working directory."},
                     "query": {"type": "string", "description": "JSON path to the field, e.g. `steps[2].content` or `[\"a key\"].sub` (max 512 chars)."},
-                    "value": {"description": "set: any JSON value to write at the path (objects/arrays/strings/numbers/booleans/null)."}
+                    // #747：value 可以是任意 JSON 标量，JSON Schema 无简洁的
+                    // 「any」写法——保持无 type（宽松类型，两 provider 均原样
+                    // 透传 schema），description 用正反例钉住「容器直接以
+                    // JSON 值传入」，并声明运行时的宽容解析行为。
+                    "value": {"description": "set: any JSON value to write at the path \
+            (objects/arrays/strings/numbers/booleans/null). Pass containers directly as \
+            JSON — value: [\"1.5\", \"2.5\"] or {\"k\": 1} — never as a string holding \
+            JSON text like \"[\\\"1.5\\\", \\\"2.5\\\"]\". A value string that parses as a \
+            JSON array/object is parsed as that container before writing; to store such \
+            text literally, use the `write` tool."}
                 },
                 "required": ["op", "path", "query"]
             }),

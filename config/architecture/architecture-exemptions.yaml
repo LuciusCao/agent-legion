@@ -1001,3 +1001,14 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/647
   ceiling: 353
   expires: 2026-12-31
+- check: architecture.file_budget
+  path: velites/src/tools/json.rs
+  reason: '#747 json set 的 value 二次编码兜底：宽容解析函数（parse_double_encoded_container，
+    容器文本判定 + 解析）、set 的改写注记输出、四组单测（正确传法 / 二次编码数组+对象 /
+    字面 JSON-looking 字符串）。单测与实现同居是 Rust 惯例（velites tests/ 目录只放跨二进制
+    集成测试）；实现本体 +5 行、单测 +98 行，515→618 超出 growth_allowance 带。时间盒：
+    下次 velites 落版波次若工具测试面拆出共享 fixture 模块，单测随迁重新登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/747
+  ceiling: 628
+  expires: 2026-12-31

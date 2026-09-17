@@ -180,9 +180,18 @@ VELITES_TOOL_CATALOG: tuple[ToolCatalogEntry, ...] = (
                     ),
                 },
                 "value": {
+                    # #747：与 velites specs.rs 逐字镜像（跨二进制契约测试锁
+                    # 全等）——容器直接以 JSON 值传入的正反例 + 运行时宽容
+                    # 解析行为 + 字面字符串的 write 工具逃生通道。
                     "description": (
                         "set: any JSON value to write at the path "
-                        "(objects/arrays/strings/numbers/booleans/null)."
+                        "(objects/arrays/strings/numbers/booleans/null). Pass "
+                        'containers directly as JSON — value: ["1.5", '
+                        '"2.5"] or {"k": 1} — never as a string holding '
+                        'JSON text like "[\\"1.5\\", \\"2.5\\"]". A value '
+                        "string that parses as a JSON array/object is parsed "
+                        "as that container before writing; to store such text "
+                        "literally, use the `write` tool."
                     )
                 },
             },
