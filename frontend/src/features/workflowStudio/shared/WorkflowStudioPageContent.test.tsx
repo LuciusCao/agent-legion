@@ -54,6 +54,7 @@ const draftView: AgentDefinitionDraftView = {
   skill: null,
   status: 'completed',
   draftHash: null,
+  saveFailed: false,
 }
 
 function makeStudio(overrides: Partial<Studio> = {}): Studio {

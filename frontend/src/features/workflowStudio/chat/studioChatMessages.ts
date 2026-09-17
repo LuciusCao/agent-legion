@@ -35,6 +35,12 @@ export type AgentDefinitionDraftView = {
    * 与服务端当前草稿 hash 比对，不一致拦截。解析自 rawOutput 的响应
    * 体（definition_hash 字段）。 */
   draftHash: string | null
+  /** 保存的 HTTP 层失败（R5 P2-1）：MCP ToolClient 对非 2xx 不抛异常、
+   * 返回 "HTTP 4xx: …" / "request failed: …" 文本（tool_client.py:67-75），
+   * 协议层 tool call 仍 completed——仅看 status 挡不住这类卡，发布会
+   * 静默发出服务端的旧草稿（saveFailed 卡也无 draftHash，双重跳过
+   * 核对与残窗警告）。 */
+  saveFailed: boolean
 }
 
 export type NodeCodeDraftView = {
@@ -44,6 +50,8 @@ export type NodeCodeDraftView = {
   status: string
   /** 同 AgentDefinitionDraftView.draftHash（code_hash 字段）。 */
   draftHash: string | null
+  /** 同 AgentDefinitionDraftView.saveFailed。 */
+  saveFailed: boolean
 }
 
 export type PermissionView = {
@@ -259,6 +267,18 @@ function draftHashFromOutput(
   return typeof value === 'string' && value ? value : null
 }
 
+/** 保存的 HTTP 层失败（R5 P2-1）：ToolClient 对非 2xx/网络错误返回
+ * 固定前缀的文本（"HTTP 4xx: …" / "request failed: …"）而不抛异常，
+ * tool call 在协议层仍 completed。成功响应恒为 2xx JSON 文本，这两种
+ * 前缀只出现在失败上（前缀判断在前，失败文本里的 JSON detail 不会
+ * 被误当成功体解析）。 */
+function saveFailedFromOutput(call: ToolCallView): boolean {
+  return (
+    call.outputText.startsWith('HTTP ') ||
+    call.outputText.startsWith('request failed: ')
+  )
+}
+
 export function extractAgentDefinitionDrafts(
   calls: ToolCallView[]
 ): AgentDefinitionDraftView[] {
@@ -275,6 +295,7 @@ export function extractAgentDefinitionDrafts(
       skill: asText(call.rawInput?.skill) || null,
       status: call.status,
       draftHash: draftHashFromOutput(call, 'definition_hash'),
+      saveFailed: saveFailedFromOutput(call),
     })
   }
   return keepLatestPerEntity(drafts, (draft) => draft.agentId)
@@ -293,6 +314,7 @@ export function extractNodeCodeDrafts(
       nodeKey,
       status: call.status,
       draftHash: draftHashFromOutput(call, 'code_hash'),
+      saveFailed: saveFailedFromOutput(call),
     })
   }
   return keepLatestPerEntity(drafts, (draft) => draft.nodeKey)

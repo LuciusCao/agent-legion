@@ -202,6 +202,7 @@ describe('agent / node draft extraction', () => {
         nodeKey: 'assess_difficulty',
         status: 'completed',
         draftHash: null,
+        saveFailed: false,
       },
     ])
   })
@@ -268,6 +269,7 @@ describe('agent / node draft extraction', () => {
         skill: null,
         status: 'completed',
         draftHash: null,
+        saveFailed: false,
       },
     ])
     const nodeDrafts = extractNodeCodeDrafts(calls)
@@ -302,6 +304,7 @@ describe('agent / node draft extraction', () => {
         nodeKey: 'fetch_url',
         status: 'failed',
         draftHash: null,
+        saveFailed: false,
       },
     ])
   })

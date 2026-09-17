@@ -555,11 +555,11 @@ exemptions:
     honest-boundary comments, and the R4 workspaceId prop plumbing (required — job-diagnosis
     and customize-preview hosts render the cards under another workspace). The cards stay one
     module (three siblings of one family); the next growth should split the node-code card or
-    move the publish actions to their own module. 110 effective lines (8 beyond the prior
+    move the publish actions to their own module. 114 effective lines (R5 added the saveFailed gate), 4 beyond the prior
     87+15 band, re-signed time-boxed per #641); harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 110
+  ceiling: 114
   expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/studioChatMessages.ts
@@ -567,12 +567,12 @@ exemptions:
     steps: codex P1 round 2 added per-entity dedup (keepLatestPerEntity) and codex P1 round 3
     added the draft identity hash parsed from each save response (draftHashFromOutput) — publish
     must verify the card against the server-side draft because the entity is workspace-level
-    state that another session can overwrite. 34 effective lines past baseline (19 beyond the
+    state that another session can overwrite, plus the R5 saveFailed flag (HTTP-level save failures return error text, not exceptions). 44 effective lines past baseline (29 beyond the
     +15 growth band), re-signed from the first exemption at 338 — time-boxed per #641. The
     module stays the single chat view-model (extraction + grouping); harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 354
+  ceiling: 364
   expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/EntityDraftPublishButton.tsx

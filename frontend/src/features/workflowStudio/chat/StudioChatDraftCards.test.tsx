@@ -13,6 +13,7 @@ import {
   TestQueryProvider,
   createTestQueryClient,
 } from '../../../testing/testQueryClient'
+import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 import { fetchAgentVersions, publishAgent } from '../../../api'
 import { api } from '../../../api/core'
@@ -115,6 +116,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     skill: null,
     status: 'completed',
     draftHash: null,
+    saveFailed: false,
   }
 
   it('渲染 MUI 图标（非 emoji）与实体发布按钮', () => {
@@ -207,6 +209,24 @@ describe('AgentDefinitionDraftCard（#692）', () => {
         '没有待发布的草稿（可能刚已发布过）'
       )
     )
+  })
+
+  // R5 P2-1：MCP ToolClient 对非 2xx 返回 "HTTP 4xx: …" 文本而不抛异常，
+  // tool call 在协议层仍 completed——仅 status 门挡不住，会静默发布旧
+  // 草稿（无 draftHash 也跳过核对与残窗警告）。
+  it('HTTP 层失败的保存（completed + 失败文本）不渲染发布入口', () => {
+    renderWithStudio(
+      <AgentDefinitionDraftCard
+        draft={{ ...draft, saveFailed: true, draftHash: null }}
+        workspaceId="ws1"
+      />,
+      makeStudio()
+    )
+    expect(
+      screen.queryByRole('button', { name: '发布 Agent 定义' })
+    ).not.toBeInTheDocument()
+    // 查看草稿不受影响。
+    expect(screen.getByRole('button', { name: '查看草稿' })).toBeEnabled()
   })
 
   // R2 P2-1：pending/failed 的保存不开放发布——否则会把更早的旧草稿
@@ -382,6 +402,7 @@ describe('AgentDefinitionDraftCard（#692）', () => {
         nodeKey: 'fetch_url',
         status: 'completed',
         draftHash: 'code-hash-a',
+        saveFailed: false,
       }
       renderWithStudio(
         <NodeCodeDraftCard
@@ -442,10 +463,13 @@ describe('AgentDefinitionDraftCard（#692）', () => {
     // R4 P1：workspaceId 来自 prop（路由/调用方），不读全局 store——
     // job 排查/定制预览载体在别的 workspace 下渲染时不得发到 store 里
     // 的旧 workspace。
-    it('发布调用使用 prop 的 workspaceId（不读全局 store）', async () => {
+    it('发布调用使用 prop 的 workspaceId（store 设冲突值也以 prop 为准）', async () => {
       mockPublishAgent.mockResolvedValue({
         definition_hash: 'hash-a',
       } as Awaited<ReturnType<typeof publishAgent>>)
+      // P3-2（R5）：store 设冲突值——若未来有人加回 store 兜底，此用例
+      // 必红（旧代码会因读 store 发布到 ws-store）。
+      useSettingStore.setState({ workspaceId: 'ws-store' })
       renderWithStudio(
         <AgentDefinitionDraftCard
           draft={{ ...draft, draftHash: null }}
@@ -496,6 +520,7 @@ describe('NodeCodeDraftCard（#692）', () => {
     nodeKey: 'fetch_url',
     status: 'completed',
     draftHash: null,
+    saveFailed: false,
   }
 
   it('渲染 Code 图标与实体发布按钮', () => {

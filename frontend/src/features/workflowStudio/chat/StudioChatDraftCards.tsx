@@ -18,17 +18,21 @@ import styles from './StudioChatPanel.module.css'
  * 最新一张卡（codex P1 第二轮）——发布请求只带实体 ID，服务端发布的
  * 是当前草稿，旧卡的按钮会无提示地发布另一份内容。 */
 
-/** 仅来源 tool call 完成的草稿渲染发布入口（R2 P2-1 门控），并把保存
+/** 仅来源 tool call 完成、且保存 HTTP 层成功的草稿渲染发布入口
+ * （R2 P2-1 + R5 P2-1 门控：ToolClient 对非 2xx 返回失败文本而不抛
+ * 异常，completed 但 saveFailed 的卡发布会静默发出旧草稿），并把保存
  * 响应的草稿身份 hash 传给发布按钮（codex P1 第三轮：发布前与服务端
  * 当前草稿比对）。 */
 function DraftPublishAction({
   status,
+  saveFailed,
   kind,
   entityId,
   draftHash,
   workspaceId,
 }: {
   status: string
+  saveFailed: boolean
   kind: 'agent' | 'code'
   entityId: string
   draftHash: string | null
@@ -36,7 +40,7 @@ function DraftPublishAction({
    * 定制预览载体在别的 workspace 下渲染，store 里的值是别处的）。 */
   workspaceId: string
 }) {
-  if (status !== 'completed') return null
+  if (status !== 'completed' || saveFailed) return null
   return (
     <EntityDraftPublishButton
       kind={kind}
@@ -74,6 +78,7 @@ export function AgentDefinitionDraftCard({
         </button>
         <DraftPublishAction
           status={draft.status}
+          saveFailed={draft.saveFailed}
           kind="agent"
           entityId={draft.agentId}
           draftHash={draft.draftHash}
@@ -86,10 +91,11 @@ export function AgentDefinitionDraftCard({
 
 /** 节点代码卡的草稿状态文案（R3 P2-2：按来源 tool call 的 status 分支
  * ——去重后只剩最新一张卡，「已存为服务端草稿」对 failed/pending 的
- * 保存是假话：草稿未落库，服务端还是上一份 completed 的内容）。 */
-function nodeDraftStatusText(status: string): string {
+ * 保存是假话：草稿未落库，服务端还是上一份 completed 的内容。R5 P2-1：
+ * HTTP 层失败（saveFailed）与 tool call failed 同语义，文案分支覆盖）。 */
+function nodeDraftStatusText(status: string, saveFailed: boolean): string {
+  if (saveFailed || status === 'failed') return '本次保存失败，草稿未更新'
   if (status === 'completed') return '已存为服务端草稿，发布后新执行才使用'
-  if (status === 'failed') return '本次保存失败，草稿未更新'
   return '保存中…'
 }
 
@@ -104,7 +110,7 @@ export function NodeCodeDraftCard(props: {
         节点代码草稿：{props.draft.nodeKey}
       </StudioDraftCardHeader>
       <div className={styles.draftMeta}>
-        {nodeDraftStatusText(props.draft.status)}
+        {nodeDraftStatusText(props.draft.status, props.draft.saveFailed)}
       </div>
       {/* 定位与发布是独立能力：无 onSelectNode（无定位链路的调用方）
        * 只少了「查看草稿」，发布入口不受影响。 */}
@@ -120,6 +126,7 @@ export function NodeCodeDraftCard(props: {
         )}
         <DraftPublishAction
           status={props.draft.status}
+          saveFailed={props.draft.saveFailed}
           kind="code"
           entityId={props.draft.nodeKey}
           draftHash={props.draft.draftHash}

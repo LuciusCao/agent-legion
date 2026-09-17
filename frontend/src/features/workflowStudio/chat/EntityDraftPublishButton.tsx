@@ -23,11 +23,14 @@ import styles from './StudioChatPanel.module.css'
  * （两端点的 versions 列表都 version 降序且 save_draft 原地覆盖，至多
  * 一条 draft）。核对收窄但不消除跨会话覆盖竞态（R4 P2 声明的残窗）：
  * 读 versions → 比对 → 发布是两个 HTTP 往返，窗口内的新覆盖仍会被发
- * 布——发布后的响应 hash 与卡片 hash 比对（不一致时警告 toast）作检
- * 测；彻底关闭需要服务端条件发布（expected-hash 参数，#633 的 workflow
- * 草稿 CAS 同型），开 follow-up 跟踪。draftHash 为 null 的旧转录按
- * 「无法核对身份」处理：不拦截（否则历史会话的卡永远不能发），风险
- * 依赖 404 兜底。
+ * 布——发布后的响应 hash 与卡片 hash 比对（不一致时 toast + 卡片内联
+ * 警告，R5 P3-1：toast 只活 3 秒，inline 才是持久痕迹）作检测；彻底
+ * 关闭需要服务端条件发布（expected-hash 参数，#633 的 workflow 草稿
+ * CAS 同型），开 follow-up 跟踪。draftHash 为 null 的旧转录按「无法核
+ * 对身份」处理：不拦截（否则历史会话的卡永远不能发），风险依赖 404
+ * 兜底——该兜底只覆盖「服务端已无草稿」的形态；HTTP 失败的保存
+ * （completed 但 saveFailed，无 draftHash 且残窗检测同样跳过）由上游
+ * 门控直接不给发布入口（R5 P2-1），不依赖这里。
  *
  * workspaceId 是必填 prop（R4 P1）：job 排查 / 定制预览载体在非当前
  * workspace 下渲染本卡，读全局 settingStore 会发布到错误的 workspace。
@@ -118,29 +121,31 @@ export function EntityDraftPublishButton({
           return
         }
       }
+      let overwroteDuringPublish = false
       if (kind === 'agent') {
         const result = await publishAgent(workspaceId, entityId)
         showToast(`Agent「${entityId}」已发布`, 'success')
         // R4 P2 残窗检测：发布响应的 hash 与卡片不一致 = 核对通过后、
-        // 发布落地前被覆盖——发布了别人的内容，必须警告而非报成功。
-        if (draftHash !== null && result.definition_hash !== draftHash) {
-          showToast(
-            `注意：发布的内容已非卡片生成时的版本（已被其他会话覆盖）`,
-            'error'
-          )
-        }
+        // 发布落地前被覆盖——发布了别人的内容，必须警告而非只报成功。
+        overwroteDuringPublish =
+          draftHash !== null && result.definition_hash !== draftHash
       } else {
         const base = `/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(entityId)}/code`
         const result = await api<NodeCodeVersionResponse>(`${base}/publish`, {
           method: 'POST',
         })
         showToast(`节点代码「${entityId}」已发布，新执行立即生效`, 'success')
-        if (draftHash !== null && result.code_hash !== draftHash) {
-          showToast(
-            `注意：发布的内容已非卡片生成时的版本（已被其他会话覆盖）`,
-            'error'
-          )
-        }
+        overwroteDuringPublish =
+          draftHash !== null && result.code_hash !== draftHash
+      }
+      if (overwroteDuringPublish) {
+        // P3-1（R5）：toast 只活 3 秒且被后续覆盖——残窗警告必须同时落
+        // 在卡片上（按钮已是「已发布」终态，这行是唯一持久痕迹）。
+        showToast(
+          '注意：发布的内容已非卡片生成时的版本（已被其他会话或编辑器覆盖）',
+          'error'
+        )
+        setError('发布完成，但内容已被其他会话或编辑器覆盖——非卡片显示的版本')
       }
       setPublished(true)
       invalidateStudioTurnEndQueries(queryClient, workspaceId)
