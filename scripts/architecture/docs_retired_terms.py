@@ -330,9 +330,16 @@ def _extract_section(text: str, heading_prefix: str) -> str | None:
 if __name__ == "__main__":
     # Standalone entry for the CI docs-terms job (which runs this module in a
     # --no-project env with only pyyaml) and for local debugging; the full
-    # gate path stays check_repository.
+    # gate path stays check_repository. Runs the fact-consistency guard too:
+    # a docs-only PR can drift a stated fact (schema version, default
+    # backend) just as easily as it can reintroduce retired terminology,
+    # and this job is the only gate such a PR executes (backend-unit with
+    # check_repository is skipped when backend=false).
+    from scripts.architecture.docs_consistency import check_docs_consistency
+
     repo_root = Path(__file__).resolve().parents[2]
     failures = check_docs_retired_terms(repo_root)
+    failures.extend(check_docs_consistency(repo_root))
     for failure in failures:
         print(f"ERROR: {failure}")
     raise SystemExit(1 if failures else 0)
