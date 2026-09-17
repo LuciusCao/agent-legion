@@ -56,7 +56,11 @@ def register_preview_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         """Save a preview panel draft: one self-contained HTML document
         (inline <style>/<script>, no external origins) rendering the job
         detail left column via the read-only bridge (get_preview_guide).
-        Draft only — a human publishes from the job detail page."""
+        Draft only — a human publishes from the job detail page. The
+        response carries html_hash — #749 contract note: the panel publish
+        route has no expected_hash plumbing yet (the one publish path still
+        on the None branch); when it gains CAS, the hash-consuming publish
+        flow MUST assert the save response's hash, never publish hash-less."""
         _, client = await client_factory()
         body: dict[str, Any] = {"html": html, "change_note": change_note or None}
         return await client.call("PUT", f"/workspaces/{workspace_id}/preview/panel/draft", body)

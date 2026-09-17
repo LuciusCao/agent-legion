@@ -60,6 +60,8 @@ const builtinWithDraft = {
   has_draft: true,
   draft_code: DRAFT_CODE,
   draft_version: 1,
+  // #749：GET 带出草稿身份（发布的 CAS 令牌），接口见后端 #749 契约。
+  draft_code_hash: 'code-hash-draft',
 }
 
 function versionRow(version: number, status: string, note?: string) {
@@ -174,7 +176,7 @@ describe('WorkflowNodeCodeSection', () => {
   })
 
   it('publishes the draft of a custom node', async () => {
-    mockApi.mockResolvedValue({ ...customResponse, has_draft: true })
+    mockApi.mockResolvedValue({ ...customResponse, has_draft: true, draft_code_hash: 'h1' })
     renderSection()
     await screen.findByText(/自定义 v1/)
 
@@ -187,8 +189,34 @@ describe('WorkflowNodeCodeSection', () => {
         '已发布，新执行立即生效'
       )
     )
-    expect(mockApi.mock.calls[1][0]).toBe(`${BASE}/publish`)
-    expect(mockApi.mock.calls[1][1]?.method).toBe('POST')
+    const [url, init] = mockApi.mock.calls[1]
+    expect(url).toBe(`${BASE}/publish`)
+    expect(init?.method).toBe('POST')
+    // #749：发布携带详情读取的草稿 hash（expected_hash CAS）。
+    expect(JSON.parse(String(init?.body))).toEqual({ expected_hash: 'h1' })
+  })
+
+  // #749：保存→发布之间草稿被其他会话/编辑器覆盖，正是 expected_hash 要
+  // 抓的竞态。409 专用文案引导重新加载（与聊天草稿卡同一交互模式）。
+  it('shows the CAS conflict hint when publish returns 409', async () => {
+    mockApi.mockResolvedValue({ ...customResponse, has_draft: true, draft_code_hash: 'h1' })
+    renderSection()
+    await screen.findByText(/自定义 v1/)
+
+    mockApi.mockRejectedValueOnce(
+      Object.assign(new Error('draft hash mismatch for node_code wf:fetch_items'), {
+        status: 409,
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        '草稿已被其他会话或编辑器更新，请重新加载后再保存发布'
+      )
+    )
+    expect(useUiStore.getState().toast).toBeNull()
+    expect(screen.getByRole('button', { name: '发布' })).toBeEnabled()
   })
 
   it('lists versions and rolls back to an old one', async () => {
@@ -278,6 +306,11 @@ describe('WorkflowNodeCodeSection', () => {
       )
     )
     expect(mockApi.mock.calls[1][0]).toBe(`${BASE}/publish`)
+    // #749：builtin+草稿形态同样携带草稿 hash（MCP 工具面保存的草稿由
+    // GET 带出身份，人从检查器面板发布）。
+    expect(JSON.parse(String(mockApi.mock.calls[1][1]?.body))).toEqual({
+      expected_hash: 'code-hash-draft',
+    })
   })
 
   it('loads the pending draft into the editor instead of the builtin code', async () => {

@@ -105,7 +105,11 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         publishes in Studio. expected_capability declares the capability you
         believe the node binds: mismatch with an existing node is rejected; a
         node absent from any published revision is accepted only WITH it
-        (without it → 404)."""
+        (without it → 404). The response carries code_hash — #749 contract
+        note: this surface NEVER publishes (STUDIO-AGENT-001), but the human
+        publish flow CAS-verifies the draft identity, so any future tool-side
+        publish MUST pass the save response's code_hash as expected_hash
+        (409 on mismatch), never publish hash-less."""
         body: dict[str, Any] = {"code": code, "change_note": change_note or None}
         if expected_capability is not None:
             body["expected_capability"] = expected_capability
@@ -145,7 +149,12 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         → catalog default tier, requires_labels → {}, config_schema → {}). To
         change just one field on an existing Agent, first call
         get_agent_definitions and echo back every current value you want
-        kept. Draft only — a human publishes it in Studio."""
+        kept. Draft only — a human publishes it in Studio. The response
+        carries definition_hash — #749 contract note: this surface NEVER
+        publishes (STUDIO-AGENT-001), but the human publish flow CAS-verifies
+        the draft identity, so any future tool-side publish MUST pass the
+        save response's definition_hash as expected_hash (409 on mismatch),
+        never publish hash-less."""
         body: dict[str, Any] = {
             "capability": capability,
             "runtime": runtime,
