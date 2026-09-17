@@ -569,6 +569,228 @@ def test_arm_first_overwrite_terminates_report_loop_under_partition(
         queue.shutdown()
 
 
+# ---------------------------------------------------------------------------
+# #644 codex3 P1：判死任务在 bulk 入口终止——租约不匹配（已被重 claim）的
+# 任务绝不进入 prepare/upload，execution_dir 可能已是新 attempt 的重建。
+
+
+def test_condemned_task_skips_bulk_and_spares_reclaimed_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex3 P1 端到端：旧任务进 bulk lane 时 arm 当场判死（registry 已
+    持重 claim 后的新 entry）——必须跳过全部 prepare/transfer：零压缩（新
+    attempt 重建的 events.jsonl 逐字节不变、无 result.tar.gz）、零产物上传、
+    零 report，marker 删除、目录按 #564 归属保留（owner 标记指新 lease），
+    新 entry 原样进拍面。修复前旧任务会压缩替换新执行的 events.jsonl（数据
+    串线）。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    # 新 attempt 已重建目录：owner 标记指新 lease，events.jsonl 是新执行的。
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-new"})
+    new_attempt_events = (
+        work_root / "exec-1" / "job" / "runs" / "node_a" / "worker" / "events.jsonl"
+    )
+    new_attempt_events.write_text(
+        "\n".join(
+            json.dumps({"type": "message_end", "message": {"role": "assistant", "seq": i}})
+            for i in range(50)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    events_before = new_attempt_events.read_bytes()
+    client = QueueFakeClient()
+    client.report_errors = 5  # 修复前判死任务会退避重试后再投递
+    registry = BatchHeartbeatRegistry()
+    registry.register("exec-1", "lease-new", threading.Event())
+    queue = _queue(client, registry=registry)
+
+    queue.submit(_task(work_root))  # 旧 attempt 的任务，lease-1
+    queue.shutdown()
+
+    # 零动作：没有 report、没有产物上传、没有归档构建。
+    assert client.reports == [], "a condemned task sent its moot result"
+    assert client.uploads == {}, "a condemned task uploaded the new attempt's artifacts"
+    assert not (work_root / "exec-1" / "result.tar.gz").exists(), "prepare ran for a dead lease"
+    # 新 attempt 的执行日志逐字节未动（修复前会被压缩重写）。
+    assert new_attempt_events.read_bytes() == events_before
+    # 终态收尾：marker 删除；目录归属新 lease，保留。
+    assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    assert (work_root / "exec-1").is_dir()
+    assert (work_root / "exec-1" / OWNER_FILENAME).is_file()
+    # 新 entry 原样保留、继续进拍面。
+    entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+    assert entry.lease_id == "lease-new"
+    assert [item.lease_id for item in registry.snapshot()] == ["lease-new"]
+
+
+def test_condemned_bulk_task_walks_terminal_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex3 P1 单元钉子（提前判死形态）：任务在 submit 前事件已置位
+    （如恢复任务的首拍判死先于 lane 排到）——bulk 车道同样短路：零 report、
+    零上传、无归档，且终态收尾完整执行（marker 删除、可证明归属时目录整删、
+    depth 归零）——短路不是吞任务。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-1"})
+    client = QueueFakeClient()
+    queue = _queue(client)  # legacy 模式即可：短路点在车道入口，与 arm 模式无关
+
+    task = _task(work_root)
+    task.ownership_lost = threading.Event()
+    task.ownership_lost.set()  # 进 lane 前已判死
+    queue.submit(task)
+    queue.shutdown()
+
+    assert client.reports == []
+    assert client.uploads == {}
+    assert not (work_root / "exec-1" / "result.tar.gz").exists()
+    assert queue.depth == 0
+    # 终态收尾完整：marker 删除 + 归属可证明（owner 标记指本 lease）→ 整删。
+    assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    assert not (work_root / "exec-1").exists()
+
+
+# ---------------------------------------------------------------------------
+# #644 codex3 P2：换绑丢在途 verdict——快照已带旧 entry 对象出门、换绑后
+# 响应才回来的 409，必须落到 task 的事件上（重定向被换下对象的事件字段）。
+
+
+class _GatedBatchClient(QueueFakeClient):
+    """heartbeat_batch parks on a gate so the rebind can land mid-flight."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.batch_entered = threading.Event()
+        self.batch_release = threading.Event()
+        self.batch_calls_after_first = 0
+
+    def heartbeat_batch(self, leases: list[tuple[str, str]]) -> tuple[int, dict]:
+        if self.batch_entered.is_set():
+            # 重试拍不得兜底判别力：在途 409 之后循环停止（harness 停拍），
+            # verdict 是否穿透换绑只由那一发在途响应决定。
+            self.batch_calls_after_first += 1
+            return 200, {"renewed": [], "lost": [], "cancelled_execution_ids": []}
+        self.batch_entered.set()
+        assert self.batch_release.wait(10)
+        # Everyone in the (pre-rebind) snapshot is lost — the verdict the
+        # in-flight beat delivers to the OLD entry object after the rebind.
+        return 200, {
+            "renewed": [],
+            "lost": [execution_id for execution_id, _ in leases],
+            "cancelled_execution_ids": [],
+        }
+
+
+class _GatedSingleClient(QueueFakeClient):
+    """Degraded-mode twin: heartbeat parks on a gate (beat_single's writer)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.single_entered = threading.Event()
+        self.single_release = threading.Event()
+        self.single_calls_after_first = 0
+
+    def heartbeat(self, execution_id: str, lease_id: str, timeout: float | None = None):
+        if self.single_entered.is_set():
+            self.single_calls_after_first += 1
+            return 204, []
+        self.single_entered.set()
+        assert self.single_release.wait(10)
+        return 409, []
+
+
+def test_inflight_batch_verdict_crosses_rebind_under_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex3 P2（batch 路径，attack9 的在途残余排列）：拍已从 registry
+    取出旧 entry 快照（请求挂起）→ register_upload 同 lease 换绑 → 响应回来
+    409 由 _beat_batch_chunk 对快照旧对象 set。换绑必须把被换下对象的事件
+    字段重定向到 task 的事件，否则 verdict 落在 executor-era 事件上、task
+    收不到——report 持续分区下 lane 被钉到 60s 退避上限。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = _GatedBatchClient()
+    client.report_errors = 10**9  # report 面持续分区：恒瞬时失败
+    registry = BatchHeartbeatRegistry()
+    queue = _queue(client, registry=registry)
+
+    # executor 侧注册（event_A），adopt 后一拍出门、响应挂起（在途）。
+    beat_stop = threading.Event()
+    beat_thread = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, beat_stop, 0.05), daemon=True
+    )
+    beat_thread.start()
+    executor_lost = threading.Event()
+    heartbeat = start_lease_heartbeat(
+        client, "exec-1", "lease-1", 15.0, executor_lost, registry=registry
+    )
+    heartbeat.adopt()
+    assert client.batch_entered.wait(10), "the in-flight beat never left"
+
+    # 换绑发生在响应回来之前（快照里是旧 entry 对象）。
+    task = _task(work_root)
+    queue.submit(task)
+    client.batch_release.set()  # 409 现在到达：set 的是快照里的旧对象
+
+    try:
+        assert _wait_depth_zero(queue), "lane pinned: the in-flight verdict never reached _report"
+        assert task.ownership_lost.is_set(), "the rebind dropped the in-flight verdict"
+        assert len(client.reports) == 0  # terminal before the first report attempt
+        assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    finally:
+        beat_stop.set()
+        beat_thread.join(timeout=2)
+        queue._stop.set()  # 失败路径下解开 report 循环，让 shutdown 可返回
+        queue.shutdown()
+
+
+def test_inflight_degraded_verdict_crosses_rebind_under_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex3 P2（degraded 单拍路径）：beat_single 的短生命周期线程对
+    快照旧对象写 409——同一重定向语义必须覆盖另一条 writer。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = _GatedSingleClient()
+    client.report_errors = 10**9
+    registry = BatchHeartbeatRegistry()
+    registry.degraded_to_single = True  # pre-v5 Host：循环走逐条拍
+    queue = _queue(client, registry=registry)
+
+    beat_stop = threading.Event()
+    beat_thread = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, beat_stop, 0.05), daemon=True
+    )
+    beat_thread.start()
+    executor_lost = threading.Event()
+    heartbeat = start_lease_heartbeat(
+        client, "exec-1", "lease-1", 15.0, executor_lost, registry=registry
+    )
+    heartbeat.adopt()
+    assert client.single_entered.wait(10), "the in-flight single beat never left"
+
+    task = _task(work_root)
+    queue.submit(task)
+    client.single_release.set()  # 409 arrives against the pre-rebind snapshot
+
+    try:
+        assert _wait_depth_zero(queue), "lane pinned: the degraded in-flight verdict was dropped"
+        assert task.ownership_lost.is_set()
+        assert len(client.reports) == 0
+        assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    finally:
+        beat_stop.set()
+        beat_thread.join(timeout=2)
+        queue._stop.set()
+        queue.shutdown()
+
+
 def test_restore_requeues_pending_markers(tmp_path: Path) -> None:
     work_root = tmp_path / "work"
     (work_root / "exec-1").mkdir(parents=True)

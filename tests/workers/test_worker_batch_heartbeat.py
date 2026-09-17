@@ -451,6 +451,73 @@ def test_register_upload_rebind_of_live_lease_inherits_nothing() -> None:
     assert [item.execution_id for item in registry.snapshot()] == ["exec-1"]
 
 
+def test_register_upload_rebind_redirects_displaced_event_to_caller() -> None:
+    """#644 codex3 P2（换绑丢在途 verdict）：batch/degraded 心跳已从 registry
+    取出旧 _LeaseEntry 快照、随后 register_upload 同 lease 换绑时，旧对象的
+    事件字段必须被重定向到调用方（task）的事件——稍后返回的 409 由
+    _beat_batch_chunk/beat_single 对**快照里的旧对象** set，不重定向则 verdict
+    落在 executor-era 事件上，task 的事件收不到；若 task 随即进 _report 且
+    report 持续失败，会拿死租约退避重试到 60s 上限（lane 占用重现）。
+    entry 自身的事件仍是调用方事件（task 接线不变），只有被换下对象的字段
+    被指向它——迟到的 set 全部汇合到 delivery 面轮询的事件上。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    start_lease_heartbeat(None, "exec-1", "lease-1", 15.0, executor_lost, registry=registry)
+    displaced = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+
+    task_lost = threading.Event()
+    entry = registry.register_upload("exec-1", "lease-1", task_lost)
+
+    # task 接线不变：entry 的事件就是 task 的事件（未判死、未换对象）。
+    assert not task_lost.is_set()
+    assert entry.ownership_lost is task_lost
+    assert registry._entries["exec-1"] is entry  # type: ignore[reportPrivateUsage]
+    assert [item.execution_id for item in registry.snapshot()] == ["exec-1"]
+    # P2 核心：被换下对象（在途拍手里那份快照）的事件字段已重定向。
+    assert displaced is not entry
+    assert displaced.ownership_lost is task_lost
+
+    # 在途拍响应到达：对快照里的旧对象 set —— 落在 task 的事件上。
+    displaced.ownership_lost.set()
+    assert task_lost.is_set(), "the in-flight verdict landed on a stranded event"
+
+
+def test_register_upload_rearm_with_set_event_keeps_caller_event() -> None:
+    """codex3 P2 反向护栏：调用方传入的事件**已置位**（重 arm 竞态里 verdict
+    刚落到任务事件上）时不得丢——entry 仍挂调用方事件，重定向是 no-op（迟到
+    set 落在已置位事件上），且不把终态倒灌 executor-era 事件。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    start_lease_heartbeat(None, "exec-1", "lease-1", 15.0, executor_lost, registry=registry)
+
+    task_lost = threading.Event()
+    task_lost.set()
+    entry = registry.register_upload("exec-1", "lease-1", task_lost)
+
+    assert entry.ownership_lost is task_lost
+    assert task_lost.is_set()
+    assert not executor_lost.is_set()  # 误传终态不倒灌旧引用持有者
+
+
+def test_rebind_redirected_event_survives_displacement() -> None:
+    """codex3 P2 补充排列：换绑重定向后，本 worker 新 claim 的 register 覆盖
+    entry——被换下 entry 的事件（= 重定向后的 task 事件）必须已置位（「被
+    覆盖的租约按定义已死」，HIGH-2 语义），task 当场收到 verdict。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    start_lease_heartbeat(None, "exec-1", "lease-1", 15.0, executor_lost, registry=registry)
+
+    task_lost = threading.Event()
+    registry.register_upload("exec-1", "lease-1", task_lost)
+
+    new_lost = threading.Event()
+    registry.register("exec-1", "lease-new", new_lost)  # 本 worker 重新 claim
+
+    assert task_lost.is_set(), "the displaced (redirected) event never learned the death"
+    assert not new_lost.is_set()
+    assert [entry.lease_id for entry in registry.snapshot()] == ["lease-new"]
+
+
 def test_register_overwrite_condemns_displaced_entry() -> None:
     """#644 attack HIGH-2（arm-先覆盖-后）：本 worker 新 claim 的 executor 臂
     register 覆盖旧 entry 时，必须向被换下 entry 的事件补发判死——旧 lease

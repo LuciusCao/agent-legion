@@ -27,7 +27,9 @@ verdict (409 family) or a 409 report answer is TERMINAL for the delivery —
 the task's shared ``ownership_lost`` event stops the retry loop, the marker
 is dropped and the execution dir is discarded via the #564 ownership check,
 so a dead lease can neither spin unbounded report retries nor hammer the
-Host with re-registered beats.
+Host with re-registered beats. A task condemned before bulk skips prepare
+and transfer outright (codex3 P1): the execution dir may already be the
+new attempt's rebuild.
 """
 
 from __future__ import annotations
@@ -90,8 +92,7 @@ class UploadQueue:
         self._scheduler = LaneScheduler(
             MAX_DYNAMIC_CONCURRENCY, max_concurrency, thread_name_prefix="agent-upload"
         )
-        self._lock = threading.Lock()
-        self._depth = 0
+        self._lock, self._depth = threading.Lock(), 0
 
     def set_heartbeat_registry(self, registry: BatchHeartbeatRegistry) -> None:
         """Attach the per-Worker batch heartbeat coordinator (#352), once,
@@ -170,6 +171,17 @@ class UploadQueue:
             task.heartbeat_thread = upload_heartbeat.start_upload_heartbeat(
                 self._client, task, self._heartbeat_interval
             )
+        # #644 codex3 P1：判死任务在 bulk 入口终止（危害链与论证见
+        # _condemned_before_bulk 的 docstring）——零压缩、零上传、零 report。
+        if self._condemned_before_bulk(task):
+            print(
+                f"upload task condemned for {task.execution_id}: lease lost"
+                " before bulk; skipping prepare and transfer",
+                flush=True,
+            )
+            self._drop_marker(task)
+            self._finalize(task, "lost")
+            return
         try:
             ready = self._bulk_transfer(task)
         except Exception as exc:
@@ -230,6 +242,19 @@ class UploadQueue:
         with self._lock:
             self._depth -= 1
 
+    def _upload_one_artifact(
+        self, job_dir: Path, name: str, task: UploadTask, direct: bool
+    ) -> dict[str, Any] | str | None:
+        """Upload one output: presigned PUT (#160 D12, dict refs) or the
+        retrying CAS channel (string refs); None = stopped (retry next
+        startup). Terminal 4xx propagates (HostRequestError): the caller
+        reports the run failed instead of retrying a verdict."""
+        if direct:
+            return upload_artifact_direct(
+                job_dir / PurePosixPath(name), task.artifact_uploads[name], stop=self._stop
+            )
+        return self._upload_with_retry(job_dir / PurePosixPath(name))
+
     def _bulk_transfer(self, task: UploadTask) -> bool:
         """prepare + artifact 上传；True = 可进 report 车道，False = 中止（marker 保留）。"""
         if self._stop.is_set():
@@ -247,15 +272,7 @@ class UploadQueue:
             restart = False
             for name in outputs:
                 try:
-                    if direct:
-                        # direct refs are dicts, CAS refs are strings (union).
-                        ref: dict[str, Any] | str | None = upload_artifact_direct(
-                            job_dir / PurePosixPath(name),
-                            task.artifact_uploads[name],
-                            stop=self._stop,
-                        )
-                    else:
-                        ref = self._upload_with_retry(job_dir / PurePosixPath(name))
+                    ref = self._upload_one_artifact(job_dir, name, task, direct)
                 except DirectUploadError as exc:
                     # 直传失败（4xx / 重试耗尽 / 规格畸形）不判 run failed：清掉
                     # 上传规格重跑 prepare（tar 自动内嵌产物），重启循环走无限
@@ -286,19 +303,16 @@ class UploadQueue:
     def _report(self, task: UploadTask) -> str:
         metadata = task.prepared_metadata or {}
         archive = task.prepared_archive or (task.execution_dir / "result.tar.gz")
-        # Quiesce the heartbeat before the final report: a beat racing the
-        # commit loses the row lock and logs a spurious "lost ownership" 409.
-        # Resume only while a transient report failure backs off.
-        # Deliberately NOT run_with_retry: each backoff window must re-arm the
-        # lease heartbeat, which the shared plain-sleep loop cannot express.
+        # Quiesce before the final report（拍撞 commit 会记一条假 409）；退避
+        # 窗口再 resume。刻意不用 run_with_retry：每个退避窗口要重新 arm
+        # 心跳，共享的 plain-sleep 循环表达不了。
         upload_heartbeat.quiesce_task_heartbeat(task, _HEARTBEAT_JOIN_SECONDS)
         # #551：归档随 report 成功后的目录清理删除——字节数先落进计时器
         # （execution.reported 在 finalize 才发射）。
         if task.report_timer is not None and archive.is_file():
             task.report_timer.archive_bytes = archive.stat().st_size
         backoff = _RETRY_BASE_SECONDS
-        status_code = 0
-        lost = False
+        status_code, lost = 0, False
         while not self._stop.is_set():
             # #644：心跳面已判死（beat 409/lost verdict）——租约不归本
             # worker，结果 moot：终态放弃，不再发 report、不再续拍。退避
@@ -306,8 +320,8 @@ class UploadQueue:
             if task.ownership_lost.is_set():
                 lost = True
                 print(
-                    f"result report abandoned for {task.execution_id}:"
-                    " lease lost (heartbeat 409 family); discarding result",
+                    f"result report abandoned for {task.execution_id}: lease lost"
+                    " (heartbeat 409 family); discarding result",
                     flush=True,
                 )
                 break
@@ -316,10 +330,7 @@ class UploadQueue:
                     task.execution_id, task.lease_id, metadata, archive
                 )
             except RuntimeError as exc:
-                print(
-                    f"result report retry for {task.execution_id}: {exc}",
-                    flush=True,
-                )
+                print(f"result report retry for {task.execution_id}: {exc}", flush=True)
                 # An unbounded backoff chain can outlive the lease TTL.
                 # #644：resume（pair-matched）而非重新 register——register
                 # 按 execution_id 单键覆盖，会以全新 entry 抹掉已触发的
@@ -338,33 +349,51 @@ class UploadQueue:
             # Other 4xx: the Host rejected the payload itself; keep the log,
             # drop the result, never retry a verdict.
             print(
-                f"result report rejected for {task.execution_id}:"
-                f" HTTP {status_code}: {body[:200]!r}",
+                f"result report rejected for {task.execution_id}: HTTP"
+                f" {status_code}: {body[:200]!r}",
                 flush=True,
             )
             break
         else:
             return "aborted"  # stopped before the report resolved; marker stays
-        marker = task.execution_dir / PENDING_FILENAME
-        marker.unlink(missing_ok=True)
         if status_code == 204:
             # 204 已把请求行置为 done（终态，该请求不可能再被重排/重 claim
             # 占用本目录），无归属竞态，整删。
+            self._drop_marker(task)
             shutil.rmtree(task.execution_dir, ignore_errors=True)
             return "delivered"
         # 409（rejected）或心跳判死（lost）：结果 moot。#564：目录可能已被
         # 重排后的新 attempt 以新 lease 重建占用，只删仍能证明归自己的
         # （owner 标记匹配本 lease）；判不了归属的留给 stale sweeper。
         # marker 已删——重启 restore 不会重投这条已 moot 的结果。
-        # 函数内延迟导入：worker.execution.ownership 反向 import 本模块的
-        # PENDING_FILENAME（#564），模块级互相 import 会成环（先 import 哪边
-        # 都会在对方半初始化时取不到名字）；同族先例见 upload/heartbeat.py
-        # 的 legacy 分支。
+        self._drop_marker(task)
+        return "lost" if lost else "rejected"
+
+    def _drop_marker(self, task: UploadTask) -> bool:
+        """moot 结果（判死/409）的目录收尾：marker 删除 + 按 #564 归属清理
+        ——只整删仍能证明归自己的目录（owner 标记匹配本 lease），证明不了
+        的留给 stale sweeper；返回是否整删。顺序纪律（#688 防误删线）：
+        marker 必须先删——discard_owned_dir 的 #203 否决权以 marker 存在为
+        信号，先判归属后删 marker 会把「两步之间新 claim 的 prepare 已拒
+        绝（marker 挡下）、整删被否决」的目录错判成可删。延迟导入：
+        worker.execution.ownership 反向 import 本模块的 PENDING_FILENAME，
+        模块级互相 import 会成环。"""
         from worker.execution.ownership import discard_owned_dir
 
+        (task.execution_dir / PENDING_FILENAME).unlink(missing_ok=True)
         if discard_owned_dir(task.execution_dir, task.lease_id):
             shutil.rmtree(task.execution_dir, ignore_errors=True)
-        return "lost" if lost else "rejected"
+            return True
+        return False
+
+    def _condemned_before_bulk(self, task: UploadTask) -> bool:
+        """#644 codex3 P1：arm 当场判死（mismatch-arm / 提前置位）的任务在
+        bulk 车道入口终止。判死意味着 lease 已被 Host 重排：新 attempt 可能
+        已用同一 execution_dir 重建并正在运行，旧任务照跑 bulk 会压缩替换新
+        执行的 events.jsonl（scan_and_compress 原地 rewrite）并上传其产物
+        （数据串线）。检查点是 _report 循环顶的前移：判死租约在任何
+        prepare/upload 前停手，走同一套终态收尾（marker 删除 + #564 归属）。"""
+        return task.ownership_lost.is_set()
 
     def _upload_with_retry(self, path: Path) -> str | None:
         """Upload one artifact; None = stopped (retry next startup); 4xx propagates."""

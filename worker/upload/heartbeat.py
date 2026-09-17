@@ -18,7 +18,13 @@ verdict. #644 attack review closed the handover gaps: a verdict landing on
 the executor-era entry during the adopt→submit gap (or in flight against a
 snapshotted entry while the rebind installs) is INHERITED by the same-lease
 rebind, and an entry displaced by a re-claim's executor arm is condemned at
-displacement — no verdict can die with an entry object anymore.
+displacement — no verdict can die with an entry object anymore. codex3 P2
+closed the in-flight residual: the same-lease rebind REDIRECTS the displaced
+entry's event field to the task's event, so a 409 the in-flight beat
+delivers to the old entry object AFTER the rebind still sets the very event
+``_report`` polls. codex3 P1 additionally condemns a task whose lease died
+BEFORE bulk: the queue's bulk lane skips prepare/transfer outright (the
+execution dir may already be the new attempt's rebuild).
 """
 
 from __future__ import annotations

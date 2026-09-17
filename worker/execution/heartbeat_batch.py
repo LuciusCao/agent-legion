@@ -182,7 +182,26 @@ class BatchHeartbeatRegistry:
         inherited: the report lane owns that flag from here on (the rebind
         happens before the first quiesce). proc_ref/adopted are inherited
         (the adopt semantics ride the entry, not the caller's timing — a
-        rebind before adopt must not resurrect the zombie stop)."""
+        rebind before adopt must not resurrect the zombie stop).
+        #644 codex3 P2: the rebind additionally REDIRECTS the displaced
+        entry's event field to the caller's (task's) event object before
+        the displaced object leaves the registry. A beat already in flight
+        against the displaced object (batch chunk, degraded single-beat
+        thread, relay round racing the snapshot) sets
+        ``entry.ownership_lost`` when its response ARRIVES — after this
+        rebind already read ``is_set()`` — and without the redirect that
+        late set lands on the executor-era event object, which the task's
+        ``_report`` never polls (the state inheritance above cannot see a
+        verdict that has not landed yet). The entry's own event stays the
+        caller's (the task wiring is unchanged); only the displaced
+        object's field is pointed at it, so every late set converges on the
+        event the delivery plane polls. Events are never cleared, so the
+        redirect is safe in every branch: on an already-set caller event
+        the late set is a no-op, and a torn read (setter grabbed the old
+        object just before the swap) is covered by the next beat round —
+        the Host's per-item predicate is idempotent and re-judges the same
+        dead lease, and a lease that left the beat plane entirely is
+        condemned at displacement by ``register``."""
         entry = _LeaseEntry(
             execution_id=execution_id,
             lease_id=lease_id,
@@ -207,6 +226,10 @@ class BatchHeartbeatRegistry:
                 # fresh event for a live lease is a no-op that cannot fire.
                 if current.ownership_lost.is_set():
                     ownership_lost.set()
+                # codex3 P2: redirect the displaced object's event field to
+                # the caller's event so the in-flight verdict lands on the
+                # event _report polls (see method docstring).
+                current.ownership_lost = ownership_lost
                 entry.proc_ref = current.proc_ref
                 if current.adopted.is_set():
                     entry.adopted.set()
