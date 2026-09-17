@@ -14,7 +14,7 @@
 | `packages/` | Workspace 打包导出 | 导出包 `packages/workspace-<workspace_id>/workspace-jobs-*.zip`（`server/app/services/workspace_package_create.py`、`server/app/services/job_packages.py`） | 导出产物，可重新生成 |
 | `artifacts/` | `ArtifactStore` | 内容寻址存储：`artifacts/<digest[:2]>/<digest>`，外加 `.staging/` 暂存区（`server/app/services/artifact_store.py:46-57`） | legacy 兼容路径：`/api/artifacts` 的本地 CAS 服务旧版 Worker（逐文件 POST）与存量 blob 读取。新 Worker 产物回传默认走 claim 注入的 presigned PUT（对象存储 `jobs-staging/` 前缀，Host HEAD 核验后 promote 到 `jobs/` 权威 key）；claim 缺上传规格、直传失败或崩溃恢复重进时回落这里的 CAS POST 旧通道（Host 两种形态都收，`worker/upload/queue.py`），新 Worker 代码不得主动 POST 到这里（`server/app/routes/artifacts.py:5-6`）。GC 两条路径对存量 legacy blob 仍有效：job 删除时回收其引用过的零引用 blob（`job_artifact_gc.py`）；全库零引用孤儿扫描由周期 orphan GC（默认 1h 一轮，随 sweeper 副本运行，`server/app/services/artifact_orphan_gc.py`）或 `scripts/gc_artifacts.py`（默认 dry-run）执行，删除统一走 `delete_unreferenced` 的事务内 refcount + grace 复查 |
 | `agent_bundles/` | `AgentExecutionBroker` / dispatch | 派发给 Worker 的 bundle `<execution_id>.tar.gz`，Worker 回传的结果包 `*.result.tar.gz`（`server/app/agent_broker/dispatch.py` 的 bundle 命名、`server/app/agent_broker/agent_result_commit.py` 的 archive 命名） | 在途传输文件。结果提交后即删除，孤儿文件由 reaper 清扫（`server/app/agent_broker/broker.py` 的 `reap_terminal_bundles` 入口、`server/app/agent_broker/reaper.py` 的孤儿清扫循环） |
-| `materials_cache/` | 材料物化缓存（Host 与 Worker 各自一份，Worker 侧在 `{work_root}/materials_cache`） | 内容寻址：`materials_cache/<hash[:2]>/<hash>`（hash 本身即文件名，原始 filename 不进缓存路径），dispatch 时从对象存储（RustFS/S3）流式物化（`shared/material_cache.py`），沙箱静态 allow-read；bundle 条目（文件夹整体一个条目）也物化到同一缓存根下，为确定地址的硬链接目录树 `{cache_root}/{address[:2]}/{address}/{relpath}`（`shared/material_bundle.py`） | 可淘汰缓存，随时可清空（下次 dispatch 重新下载）。容量上限 `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES`（默认 50GiB），超限按 mtime 最旧先删；worker 的 cleanup/stale_sweep 按名字豁免该目录 |
+| `materials_cache/` | 材料物化缓存（Host 与 Worker 各自一份，Worker 侧在 `{work_root}/materials_cache`） | 内容寻址：`materials_cache/<hash[:2]>/<hash>`（hash 本身即文件名，原始 filename 不进缓存路径），dispatch 时从对象存储（SeaweedFS/S3）流式物化（`shared/material_cache.py`），沙箱静态 allow-read；bundle 条目（文件夹整体一个条目）也物化到同一缓存根下，为确定地址的硬链接目录树 `{cache_root}/{address[:2]}/{address}/{relpath}`（`shared/material_bundle.py`） | 可淘汰缓存，随时可清空（下次 dispatch 重新下载）。容量上限 `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES`（默认 50GiB），超限按 mtime 最旧先删；worker 的 cleanup/stale_sweep 按名字豁免该目录 |
 
 清理节奏由 DB 实例设置（`global_settings` 表 `instance` 文档的 `cleanup` 段：`log_retention_days`、`run_dir_retention_days`、`interval_seconds`，admin API `/api/admin/instance-settings` 维护）控制，加载逻辑见 `server/app/services/log_cleanup.py:21-34`。
 
@@ -34,7 +34,7 @@ Worker 不读写 Host 的 `data/`，它持有自己的目录：
 
 ## 3. 部署形态映射
 
-- `deploy/compose.host.yaml`：Host 服务设 `AGENT_LEGION_DATA_DIR=/var/lib/agent-legion` 并挂载命名卷 `host-data`；同机 Worker 挂 `worker-data` → `/var/lib/agent-legion-worker`、`worker-control` → `/var/lib/agent-legion-worker-control`（见 `deploy/compose.host.yaml` 的 `volumes` 段）；PostgreSQL 数据在独立卷 `postgres-data`，本地 RustFS 对象存储数据在 `rustfs-data` 卷。
+- `deploy/compose.host.yaml`：Host 服务设 `AGENT_LEGION_DATA_DIR=/var/lib/agent-legion` 并挂载命名卷 `host-data`；同机 Worker 挂 `worker-data` → `/var/lib/agent-legion-worker`、`worker-control` → `/var/lib/agent-legion-worker-control`（见 `deploy/compose.host.yaml` 的 `volumes` 段）；PostgreSQL 数据在独立卷 `postgres-data`，本地对象存储数据在 `seaweedfs-data` 卷（默认后端；rustfs 逃生舱为 `rustfs-data` 卷）。
 - `deploy/compose.worker.yaml`：独立部署的 Worker 只挂 `worker-data` 与 `worker-control` 两个卷（见 `deploy/compose.worker.yaml` 的 `volumes` 段）。
 
 ## 4. 多 worktree 隔离

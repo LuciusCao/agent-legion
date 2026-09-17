@@ -63,7 +63,7 @@ repeatable, auditable production process.
 git clone https://github.com/LuciusCao/agent-legion.git
 cd agent-legion
 make install    # install prerequisites, uv sync, create the agent_legion_dev
-                # database, generate .env (with random local-RustFS
+                # database, generate .env (with random local object-storage
                 # credentials), generate the vault master key, build velites,
                 # install frontend deps, seed the worker config — idempotent,
                 # safe to re-run
@@ -74,26 +74,26 @@ bare `agent_legion`: the bare name is the shared/prod database, and
 `init_db` refuses to migrate it without `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1`
 (the shared-database schema guard).
 
-Object storage defaults to local **RustFS** (`make dev-up` starts the
+Object storage defaults to local **SeaweedFS** (`make dev-up` starts the
 container and creates the bucket automatically; credentials are generated
 into `.env` by `make install`), so it works out of the box. To switch to a
 cloud S3 (AWS or any compatible service), change `AGENT_LEGION_S3_ENDPOINT` /
-credentials / `AGENT_LEGION_S3_BUCKET` in `.env` — the local RustFS is then
-skipped automatically (see
+credentials / `AGENT_LEGION_S3_BUCKET` in `.env` — the local object storage
+is then skipped automatically (see
 [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md)).
 
 When Docker is unavailable (not installed or not running), `make dev-up`
-skips the local RustFS: demo material seeding is skipped, materials-related
-APIs degrade to 503, everything else keeps working. Once Docker is up,
-re-running `make dev-up` restores storage (the RustFS container + bucket);
-if demo material seeding was skipped in the meantime (you had already run
-`make import-demo`), run `make import-demo` again (idempotent) to seed the
-materials — `make dev-up` itself never re-seeds them.
+skips the local object storage: demo material seeding is skipped,
+materials-related APIs degrade to 503, everything else keeps working. Once
+Docker is up, re-running `make dev-up` restores storage (the container +
+bucket); if demo material seeding was skipped in the meantime (you had
+already run `make import-demo`), run `make import-demo` again (idempotent)
+to seed the materials — `make dev-up` itself never re-seeds them.
 
 ### 2. Start everything
 
 ```bash
-make dev-up         # local RustFS + backend :8001 + console :5174 + worker :8789 — idempotent
+make dev-up         # local SeaweedFS + backend :8001 + console :5174 + worker :8789 — idempotent
 make dev-status     # show component status and URLs
 make dev-down       # stop everything
 ```
@@ -156,7 +156,7 @@ Then in the console:
 |------------|------|
 | Get it running / run the demo | this file + `examples/README.md` |
 | Operate it (deploy, workers, remote execution) | [docs/](docs/README.md) — deployment, worker, and runbook docs |
-| Material storage (RustFS/S3) | [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md) |
+| Material storage (SeaweedFS/S3) | [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md) |
 | Understand how it works (architecture, config reference, runtimes) | [docs/architecture/](docs/architecture/README.md) |
 | Contribute code | [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) |
 | Track changes | [CHANGELOG.md](CHANGELOG.md) |

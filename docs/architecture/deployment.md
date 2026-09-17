@@ -43,8 +43,8 @@ scripts/
       清单表），本地 job_dir 只是执行暂存与可淘汰缓存
 ```
 
-产物对象存储依赖 `AGENT_LEGION_S3_*` env 配置（自建可用 RustFS），部署细节见
-[../materials-storage-deployment.md](../materials-storage-deployment.md)。
+产物对象存储依赖 `AGENT_LEGION_S3_*` env 配置（自建可用 SeaweedFS/RustFS），
+部署细节见 [../materials-storage-deployment.md](../materials-storage-deployment.md)。
 
 > 生产环境使用 8000/5173；dev worktree 默认 8001/5174，避免与 prod 端口冲突。
 

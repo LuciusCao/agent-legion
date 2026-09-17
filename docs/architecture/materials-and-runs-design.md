@@ -30,7 +30,7 @@ source_kind / intake mode 才能提交任务。这带来三个问题：
 | # | 决策 | 结论 |
 |---|---|---|
 | D1 | 主场景 | 浏览器上传（场景 B）；本地路径/挂载卷引用为后续增强 |
-| D2 | 材料存储 | S3 兼容对象存储，默认部署 RustFS；代码只对 S3 API 编程 |
+| D2 | 材料存储 | S3 兼容对象存储，默认部署 SeaweedFS（#340；RustFS 为存量逃生舱）；代码只对 S3 API 编程 |
 | D3 | 材料地位 | 一等资源：内容 hash dedup、归属 workspace、大小可计、TTL 可配 |
 | D4 | job 输入抽象 | 条目（item）= 材料（material）\| 外部引用（ref）；一条目一 job |
 | D5 | 解析时机 | 永远是节点执行时（pull 模型）；提交时不调任何外部接口 |
@@ -41,7 +41,7 @@ source_kind / intake mode 才能提交任务。这带来三个问题：
 | D10 | connector | = external_connection（配置）+ 首节点拉取代码（逻辑），不新增实体类型；连接声明方向（source/sink），用户不选 connector，由 workflow 绑定 |
 | D11 | 产物治理 | 不在本文档范围：打包整体重设计见 Issue #120 |
 | D12 | 产物存储 | job 产物与材料统一走对象存储；job_dir 仅为执行暂存与本地缓存（已落地，#160 / schema v54，§6.5） |
-| D13 | 存储路径 | 无 filesystem fallback，只走 S3 API；开发机共享一个 RustFS，按 worktree 派生 bucket |
+| D13 | 存储路径 | 无 filesystem fallback，只走 S3 API；开发机共享一个本地对象存储，按 worktree 派生 bucket |
 | D14 | demo seed | 示例 workflow 同步迁移：示例材料随 demo workspace 播种，example_intake 改读材料输入 |
 
 ## 3. 用户场景与动线
@@ -223,7 +223,7 @@ material_bundle_members
 
 ## 6. 存储层
 
-### 6.1 为什么 S3 兼容（默认 RustFS）
+### 6.1 为什么 S3 兼容（默认 SeaweedFS，#340；RustFS 为存量逃生舱）
 
 - **上传不过后端**：presigned URL 浏览器直传，FastAPI 只发签名、记元数据。
 - **remote worker 天然可用**：worker 有网络，直接从对象存储拉材料——
@@ -233,7 +233,8 @@ material_bundle_members
   不是业务 connector——endpoint/bucket/密钥按 `database.url` 同一模式
   env-only 注入（`AGENT_LEGION_S3_*`，密钥值不落 tracked yaml / 日志），
   开发环境由 `init-worktree.sh` 写进 worktree `.env`；`deploy/` 加一个
-  compose 服务（RustFS，Apache 2.0）。业务 connector 的凭据仍走
+  compose 服务（SeaweedFS，Apache 2.0，#340 后默认；RustFS 为存量逃生舱）。
+  业务 connector 的凭据仍走
   `external_connections` + 实例 vault（SECURITY-EXTERNAL-CONNECTION-001），
   两者不混。
 
@@ -257,15 +258,15 @@ Host/Worker 一致），节点看到的是一个只读文件夹。
 ### 6.3 开发与测试环境（无 filesystem fallback，D13）
 
 **决策：不做 fs fallback**，代码只有一条存储路径（S3 API），避免双路径的
-长期维护与行为漂移。RustFS 是自托管服务（单 Rust 二进制 / 单 Docker
-镜像，Apache 2.0，资源占用与 MinIO 同级），开发环境成本可控：
+长期维护与行为漂移。本地对象存储是自托管服务（默认 SeaweedFS 单容器
+all-in-one，#340；RustFS 为存量逃生舱），开发环境成本可控：
 
-- 每台开发机跑**一个共享 RustFS 实例**（compose 或裸二进制），按
+- 每台开发机跑**一个共享本地对象存储实例**（compose 或裸二进制），按
   worktree 名派生独立 bucket——与 per-worktree Postgres 库同一模式；
   `scripts/init-worktree.sh` 负责建 bucket，并把 endpoint / bucket /
   凭据写进 worktree 的 `.env`（同 `AGENT_LEGION_DATABASE_URL` 派生）。
 - 测试不碰真实 S3：单元/集成测试在存储客户端接口上打 test double；
-  CI 需要端到端时跑一个 rustfs service 容器。
+  CI 需要端到端时跑一个本地 S3 兼容 service 容器。
 
 ### 6.4 上传协议
 
@@ -283,7 +284,7 @@ SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete �
 以部分唯一索引实现（`content_hash` 可选，空串不参与唯一）。
 
 签发地址与直连地址分离：后端用内部 endpoint（`AGENT_LEGION_S3_ENDPOINT`，
-compose 内 `http://rustfs:9000`）做 HEAD/GET/DELETE；签发给浏览器 /
+compose 内 `http://seaweedfs:8333`）做 HEAD/GET/DELETE；签发给浏览器 /
 remote worker 的 presigned URL 用 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`
 （未配置则回落内部 endpoint）——SigV4 把 Host 签进签名，URL 必须以
 客户端实际可达的地址签发，不能签后改写 host。
@@ -333,9 +334,9 @@ remote worker 的 presigned URL 用 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`
 ### 6.6 可平行迁移到 Amazon S3
 
 代码只对 S3 API 编程（presign、GET/PUT、multipart、lifecycle），不依赖
-任何 RustFS 特性。因此部署后端可以平行替换：自研/私有化用 RustFS，
-上云直接切 Amazon S3（或 MinIO/Garage），只改 external_connections 的
-endpoint 与凭据配置，零代码变更。数据搬迁用 bucket 间同步工具
+任何后端特有功能。因此部署后端可以平行替换：自研/私有化用 SeaweedFS
+（或 RustFS/MinIO/Garage），上云直接切 Amazon S3，只改 external_connections
+的 endpoint 与凭据配置，零代码变更。数据搬迁用 bucket 间同步工具
 （`aws s3 sync` / `rclone`）即可，存储 key 布局与后端无关。
 
 ## 7. Connector 模型
@@ -465,6 +466,6 @@ Host 沙箱 allow-read 碰巧含 `examples/`（Worker 上根本不存在该目�
 - **安全面**：presigned URL 限 workspace 作用域与过期时间；complete 时
   服务端校验 size/hash 防声明与实际不符；ref 的 connection_key 校验
   workspace 可见性；材料下载走 `download.py` 的 SSRF 守卫。
-- **风险**：RustFS 项目较年轻 → 代码只对 S3 API 编程，可换 MinIO/Garage/
-  AWS S3；迁移涉及全量历史行 → 迁移脚本必须幂等、可重入，先在 prod
-  副本上演练。
+- **风险**：本地后端选型可变（RustFS → SeaweedFS，#340）→ 代码只对 S3 API
+  编程，可换 MinIO/Garage/AWS S3；迁移涉及全量历史行 → 迁移脚本必须幂等、
+  可重入，先在 prod 副本上演练。
