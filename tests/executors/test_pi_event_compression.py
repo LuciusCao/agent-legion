@@ -73,7 +73,7 @@ def test_scan_and_compress_matches_separate_calls(tmp_path):
 
     combined = tmp_path / "combined.jsonl"
     combined.write_text(payload + "\n")
-    model_error, original, compressed = scan_and_compress_pi_events(combined)
+    model_error, original, compressed, _ = scan_and_compress_pi_events(combined)
 
     assert model_error == expected_error is None
     assert original == len(payload) + 1
@@ -88,7 +88,7 @@ def test_scan_and_compress_reports_unrecovered_error(tmp_path):
     events.write_text(
         '{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"400 bad request"}}\n'
     )
-    model_error, original, compressed = scan_and_compress_pi_events(events)
+    model_error, original, compressed, _ = scan_and_compress_pi_events(events)
     assert model_error == "400 bad request"
     assert original > 0 and compressed > 0
 
@@ -96,7 +96,7 @@ def test_scan_and_compress_reports_unrecovered_error(tmp_path):
 def test_scan_and_compress_skips_missing_file(tmp_path):
     from shared.pi_events import scan_and_compress_pi_events
 
-    assert scan_and_compress_pi_events(tmp_path / "missing.jsonl") == (None, 0, 0)
+    assert scan_and_compress_pi_events(tmp_path / "missing.jsonl") == (None, 0, 0, b"")
 
 
 def test_scan_and_compress_velites_retry_stream_judged_recovered(tmp_path):
@@ -120,7 +120,7 @@ def test_scan_and_compress_velites_retry_stream_judged_recovered(tmp_path):
         )
         + "\n"
     )
-    model_error, original, compressed = scan_and_compress_pi_events(events)
+    model_error, original, compressed, _ = scan_and_compress_pi_events(events)
     assert model_error is None, "recovered retry must not be judged a model failure"
     assert original > 0 and compressed > 0
 
@@ -136,3 +136,60 @@ def test_scan_and_compress_velites_retry_stream_judged_recovered(tmp_path):
         "message_end",
         "agent_end",
     ]
+
+
+def test_scan_and_compress_captures_stderr_tail(tmp_path):
+    """#748: 非 JSON 行（合并进 stdout 管道的 agent stderr）在压缩 rewrite
+    丢弃它们之前被保尾捕获——崩溃栈必须可从返回值取回。"""
+    from shared.pi_events import scan_and_compress_pi_events
+
+    events = tmp_path / "events.jsonl"
+    events.write_text(
+        "\n".join(
+            [
+                '{"type":"session"}',
+                "INFO: starting up",
+                '{"type":"message_end","message":{"role":"assistant"}}',
+                "thread panicked at src/main.rs:42:",
+                "assertion `left == right` failed",
+            ]
+        )
+        + "\n"
+    )
+    model_error, _, _, stderr_tail = scan_and_compress_pi_events(events)
+    assert model_error is None
+    assert (
+        stderr_tail
+        == b"INFO: starting up\nthread panicked at src/main.rs:42:\nassertion `left == right` failed"
+    )
+    # 压缩后的文件本身照旧只留 JSON 事件（stderr 只活在返回值里）。
+    assert "panicked" not in events.read_text(encoding="utf-8")
+
+
+def test_scan_and_compress_stderr_tail_bounded_keep_tail(tmp_path):
+    """#748 有界性（#637 教训）：超限的 stderr 只保尾部、且上限是硬字节
+    上限——单行巨型乱码与海量小行两种形态都不允许无界缓冲。"""
+    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+
+    events = tmp_path / "events.jsonl"
+    events.write_text("x" * (STDERR_TAIL_BYTES * 4) + "\ncrash: the real cause\n")
+    _, _, _, stderr_tail = scan_and_compress_pi_events(events)
+    assert len(stderr_tail) <= STDERR_TAIL_BYTES
+    assert stderr_tail.endswith(b"crash: the real cause")
+
+    many = tmp_path / "many.jsonl"
+    many.write_text("".join(f"noise-{i:05d}\n" for i in range(1000)) + "final: panic header\n")
+    _, _, _, many_tail = scan_and_compress_pi_events(many)
+    assert len(many_tail) <= STDERR_TAIL_BYTES
+    assert many_tail.endswith(b"final: panic header")
+    # 保尾：最早的无意义行已被挤掉。
+    assert b"noise-00000" not in many_tail
+
+
+def test_scan_and_compress_no_stderr_yields_empty_tail(tmp_path):
+    from shared.pi_events import scan_and_compress_pi_events
+
+    events = tmp_path / "events.jsonl"
+    events.write_text('{"type":"session"}\n{"type":"agent_end"}\n')
+    _, _, _, stderr_tail = scan_and_compress_pi_events(events)
+    assert stderr_tail == b""

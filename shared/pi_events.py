@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections import deque
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,15 @@ from typing import Any
 from shared.pi_model_error import fold_model_error
 
 logger = logging.getLogger(__name__)
+
+# #748: hard byte cap of the stderr tail retained by the compression pass.
+# Non-JSON lines are the agent's stderr text (the spawn merges stderr into
+# the stdout pipe, so both pumps write them into events.jsonl raw), and the
+# compression rewrite below discards them — this tail is the only survivor,
+# so it must be bounded (#637 lesson: nothing on the events path may buffer
+# without a cap). Keep-the-tail, not keep-the-head: a crash stack ends the
+# stream.
+STDERR_TAIL_BYTES = 8 * 1024
 
 
 # Event types that the job log renderer consumes.  All message_update deltas
@@ -45,27 +55,39 @@ RELEVANT_EVENT_TYPES = frozenset(
 )
 
 
-def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int]:
-    """One pass: fold the model-error state AND rewrite the file compressed.
+def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int, bytes]:
+    """One pass: fold the model-error state, capture the stderr tail, and
+    rewrite the file compressed.
 
     Equivalent to ``detect_model_error(events_path)`` followed by
     ``compress_pi_events(events_path)``, but reads the file once instead of
     twice — the raw events stream runs to hundreds of MB per execution, so
-    the second full scan dominated the upload pipeline's CPU time.
+    the second full scan dominated the upload pipeline's CPU time. The
+    #748 stderr-tail capture rides the same pass for the same reason.
 
-    Returns ``(model_error, original_bytes, compressed_bytes)``.  If the
-    file cannot be processed it is left unchanged and ``(None, 0, 0)`` is
-    returned, matching the two functions' individual failure modes.
+    Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``.
+    ``stderr_tail`` is the bounded keep-the-tail capture of the non-JSON
+    lines (the agent's merged stderr — crash traces, panic headers) that the
+    compression rewrite is about to drop; ``b""`` when there are none. If
+    the file cannot be processed it is left unchanged and
+    ``(None, 0, 0, b"")`` is returned, matching the individual failure
+    modes of the two-function equivalent.
     """
     if not events_path.is_file():
-        return None, 0, 0
+        return None, 0, 0, b""
 
     original_size = events_path.stat().st_size
     if original_size == 0:
-        return None, 0, 0
+        return None, 0, 0, b""
 
     compressed_path = events_path.with_suffix(".jsonl.compressing")
     model_error: str | None = None
+    # Bounded deque of non-JSON lines (chars): per-line pre-trim plus the
+    # running-total pop keeps the in-memory footprint capped even against a
+    # single multi-MB garbled line (the pumps' own line caps allow those);
+    # the final encode+slice enforces the hard byte bound.
+    stderr_tail: deque[str] = deque()
+    stderr_chars = 0
     try:
         with (
             events_path.open("r", encoding="utf-8", errors="replace") as src,
@@ -78,6 +100,12 @@ def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int
                 try:
                     event: Any = json.loads(line)
                 except json.JSONDecodeError:
+                    if len(line) > STDERR_TAIL_BYTES:
+                        line = line[-STDERR_TAIL_BYTES:]
+                    stderr_tail.append(line)
+                    stderr_chars += len(line)
+                    while stderr_chars > STDERR_TAIL_BYTES and len(stderr_tail) > 1:
+                        stderr_chars -= len(stderr_tail.popleft())
                     continue
                 if not isinstance(event, dict):
                     continue
@@ -91,16 +119,17 @@ def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int
         logger.exception("Failed to compress Pi events: %s", events_path)
         with suppress(OSError):
             compressed_path.unlink(missing_ok=True)
-        return None, 0, 0
+        return None, 0, 0, b""
 
     try:
         compressed_path.replace(events_path)
     except OSError:
         logger.exception("Failed to replace events file: %s", events_path)
-        return None, 0, 0
+        return None, 0, 0, b""
 
     compressed_size = events_path.stat().st_size
-    return model_error, original_size, compressed_size
+    tail = "\n".join(stderr_tail).encode("utf-8", "replace")
+    return model_error, original_size, compressed_size, tail[-STDERR_TAIL_BYTES:]
 
 
 def compress_pi_events(events_path: Path) -> tuple[int, int]:
@@ -109,5 +138,5 @@ def compress_pi_events(events_path: Path) -> tuple[int, int]:
     Returns ``(original_bytes, compressed_bytes)``.  If the file cannot be
     processed it is left unchanged and ``(0, 0)`` is returned.
     """
-    _, original, compressed = scan_and_compress_pi_events(events_path)
+    _, original, compressed, _ = scan_and_compress_pi_events(events_path)
     return original, compressed

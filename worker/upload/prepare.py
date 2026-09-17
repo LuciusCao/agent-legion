@@ -11,14 +11,34 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from shared.pi_events import (
-    compress_pi_events,
-    scan_and_compress_pi_events,
+from shared.pi_events import scan_and_compress_pi_events
+from worker.upload.result_metadata import (
+    MAX_ERROR_MESSAGE_CHARS,
+    failed_metadata,
+    write_empty_archive,
 )
-from worker.upload.result_metadata import failed_metadata, write_empty_archive
 
 if TYPE_CHECKING:
     from worker.upload.queue import UploadTask
+
+# #748: run-dir member carrying the retained agent-stderr tail (see
+# pi_events.STDERR_TAIL_BYTES). The whole run dir ships in the archive, so
+# the Host-side job dir keeps the evidence beside the promoted events.jsonl.
+AGENT_STDERR_FILENAME = "agent-stderr.log"
+
+
+def _stderr_error_message(exit_code: int, stderr_tail: bytes) -> str:
+    """#748: error_message for a crashed agent process — exit code plus the
+    retained stderr tail's LAST line (the crash header: a panic/trace ends
+    the stream, so the newest — and most explanatory — line is the last one;
+    the external API's error_summary truncates at 240 chars). The full
+    multi-line tail rides the archive member + metadata; the empty tail
+    keeps the legacy message unchanged."""
+    summary = stderr_tail.decode("utf-8", "replace").strip()
+    if not summary:
+        return f"Agent process exited {exit_code}"
+    last_line = " ".join(summary.splitlines()[-1].split())
+    return f"Agent process exited {exit_code}: {last_line[:200]}"
 
 
 def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
@@ -61,11 +81,17 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     events = run_dir / "events.jsonl"
     # Pi exits 0 even when the model call fails (e.g. provider 401); one
     # pass folds the model-error scan into the compression rewrite.
+    # #748: every path captures the non-JSON (merged-stderr) tail — the
+    # compression rewrite is what destroys it, so this is the last chance.
     if task.exit_code == 0:
-        model_error, _, _ = scan_and_compress_pi_events(events)
+        model_error, _, _, stderr_tail = scan_and_compress_pi_events(events)
     else:
         model_error = None
-        compress_pi_events(events)
+        _, _, _, stderr_tail = scan_and_compress_pi_events(events)
+    if stderr_tail:
+        # 落盘在压缩 rewrite 之后（scan 已把 events.jsonl 原地收紧），文件
+        # 本身随 tar.add(run_dir) 进归档、随 run_dir 被 Host 提升。
+        (run_dir / AGENT_STDERR_FILENAME).write_bytes(stderr_tail)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
     if task.exit_code == 130:
         result_status, error = "cancelled", "Agent Worker is shutting down"
@@ -74,8 +100,13 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
             result_status, error = "failed", model_error
         else:
             result_status, error = "completed", ""
+    elif task.exit_code == 124:
+        # Timeout kill (synthetic 124 from wait_for_exit): stderr at this
+        # point is partial-run noise, not a crash cause — keep the
+        # established timeout attribution (#609) untouched.
+        result_status, error = "failed", "Agent process timed out"
     else:
-        result_status, error = "failed", f"Agent process exited {task.exit_code}"
+        result_status, error = "failed", _stderr_error_message(task.exit_code, stderr_tail)
     metadata = {
         "status": result_status,
         "exit_code": task.exit_code,
@@ -84,6 +115,13 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         "output_artifacts": {},
         "run_dir": PurePosixPath(run_dir.relative_to(job_dir)).as_posix(),
     }
+    # #748: agent_stderr_tail rides the report metadata (not just the
+    # archive) so the DB row + external error_summary surface the crash
+    # reason without unpacking the archive.
+    if task.exit_code not in (0, 130, 124) and stderr_tail:
+        metadata["agent_stderr_tail"] = stderr_tail.decode("utf-8", "replace")[
+            :MAX_ERROR_MESSAGE_CHARS
+        ]
     # #160 D12：与 upload_queue._bulk_transfer 同一直传判定（#201 收敛进
     # UploadTask.is_direct_upload）；直传时产物不再内嵌归档（字节走 presigned PUT）。
     direct = task.is_direct_upload(outputs)

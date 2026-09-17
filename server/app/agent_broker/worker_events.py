@@ -243,6 +243,14 @@ def note_execution_finished(
             "job_id": str(payload["job_id"]),
             "outcome": str(outcome.status),
             "exit_code": int(outcome.exit_code),
+            # #748: crash-attribution tail rides the terminal event so the
+            # structured-events timeline (jq) shows the stderr first line
+            # without a DB round-trip; absent for non-crash outcomes.
+            **(
+                {"stderr_head": outcome.agent_stderr_tail[:200]}
+                if getattr(outcome, "agent_stderr_tail", "")
+                else {}
+            ),
             "wall_seconds": (
                 round((datetime.now(UTC) - started_at).total_seconds(), 3)
                 if started_at is not None
