@@ -231,7 +231,7 @@ class StudioChatService:
         # #694 review R2-P1: the compacting re-check, the turn-start
         # bookkeeping, and the prompt hand-off share ONE runtime.lock
         # critical section — the compaction marker takes the same lock
-        # (compact_markers.apply_marker), so a marker landing after the
+        # (compact_markers.apply_marker_gated), so a marker landing after the
         # early gate cannot slip this prompt into the quiescence window:
         # the late check rolls the claim back and 409s instead. Lock
         # discipline (same as store.append_stream_chunk): non-blocking

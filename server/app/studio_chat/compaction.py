@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 # Self-clear backstop: a compaction that never reports completion must not
 # lock the session's send path forever (the agent could die mid-compaction).
-# Enforced actively by the per-window timer armed in _apply_marker — the
+# Enforced actively by the per-window timer armed in apply_marker_gated — the
 # frontend disables the input while the flag is set, so the lazy check in
 # send_blocked alone could never fire (#694 review P1); the lazy check
 # stays as the backstop for runtimes spawned before the timer existed.
@@ -120,13 +120,14 @@ def preprocess_update(
     if kind in ("agent_message_chunk", "agent_thought_chunk"):
         text = str((update.get("content") or {}).get("text") or "")
         marker = compact_marker(text) if kind == "agent_message_chunk" else None
-        # Gate (review R2-P2): the text prefix alone is not enough — the
-        # chunk must come from a kimi session in a turn context where kimi
-        # actually emits local compaction notices (compact_markers.py).
-        if marker is not None and compact_markers.marker_gate_open(runtime):
-            compact_markers.apply_marker(
-                backend, session_id, runtime, marker, text, timeout=COMPACTING_TIMEOUT_SECONDS
-            )
+        # Gate + application share one critical section (#694 review R3-P1,
+        # compact_markers.apply_marker_gated) so marker application and the
+        # send path's late gate serialize on runtime.lock in a total order;
+        # a marker-shaped chunk that fails the gate falls through as
+        # ordinary stream text.
+        if marker is not None and compact_markers.apply_marker_gated(
+            backend, session_id, runtime, marker, text, timeout=COMPACTING_TIMEOUT_SECONDS
+        ):
             return True
     if runtime is not None and counts_as_turn_content(kind):
         with runtime.lock:

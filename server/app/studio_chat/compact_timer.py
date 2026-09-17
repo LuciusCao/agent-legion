@@ -54,13 +54,27 @@ def cancel_self_clear(runtime: SessionRuntime) -> None:
 def _fire(
     backend: ServiceBackend, session_id: str, runtime: SessionRuntime, armed_since: float | None
 ) -> None:
+    # Identity BEFORE the lock (registry lookup takes runtimes_lock, and the
+    # lock order is runtimes_lock -> runtime.lock — teardown takes them in
+    # that order, so taking runtime.lock first here would invert it). A
+    # close/resume that re-homed the session to a NEW runtime makes this
+    # timer's whole outcome stale: nothing is ours to clear (#694 review
+    # R3-P2). The registry could still swap right after this read — the
+    # conditional DB clear below is the atomic arbiter for that residue.
+    if backend.runtime(session_id) is not runtime:
+        return
     with runtime.lock:
         if runtime.closed or not runtime.compacting or runtime.compacting_since != armed_since:
             return
         runtime.compacting = False
         runtime.compacting_since = None
         runtime.compact_timer = None
-    backend.db.update_studio_chat_session(session_id, compacting=False)
+    # Persist only when the row still has the window open; when the row was
+    # already cleared (resume's on_ready) or re-armed by a newer window, the
+    # conditional update misses and the stale timeout notice is dropped
+    # instead of polluting the new owner's timeline.
+    if not backend.db.clear_studio_chat_compacting_if_set(session_id):
+        return
     backend.store.append_message(
         session_id,
         "status",

@@ -9,6 +9,7 @@ same pattern as test_studio_chat_service_sessions.py's _direct_session.
 from __future__ import annotations
 
 import json
+import threading
 import time
 
 import pytest
@@ -401,7 +402,7 @@ def test_send_late_compacting_flip_rolls_back_claim(direct, monkeypatch) -> None
 
         def flipping_gate(db, sid, rt, text):
             # The ACP callback thread sets the flag right after the early
-            # gate passes (the real path is compact_markers.apply_marker).
+            # gate passes (the real path is compact_markers.apply_marker_gated).
             with rt.lock:
                 rt.compacting = True
                 rt.compacting_since = time.monotonic()
@@ -544,5 +545,91 @@ def test_compact_command_inside_live_window_keeps_the_flag(direct) -> None:
         service._on_turn_end(session_id, "end_turn")
         with pytest.raises(ConflictError, match="正在压缩上下文"):
             service.send_message(session_id, workspace_id, "普通消息")
+    finally:
+        service.shutdown()
+
+
+def test_marker_gate_is_reevaluated_inside_the_apply_critical_section(direct) -> None:
+    """#694 review R3-P1: the gate is read under runtime.lock at apply time.
+    A marker chunk that arrives during a /compact turn (gate-open context)
+    but is applied only after the turn boundary flipped to a normal turn
+    must be rejected as prose — the old shape (gate read before the lock)
+    would have let it flip the flag."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service.send_message(session_id, workspace_id, "/compact")
+        assert runtime.turn_open is True and runtime.turn_may_compact is True
+
+        # Hold the lock so the marker thread blocks inside
+        # apply_marker_gated; flip the turn context while it waits (the
+        # /compact turn closed and a normal turn opened).
+        with runtime.lock:
+            marker_thread = threading.Thread(
+                target=service._on_update,
+                args=(session_id, _chunk("Compacting conversation context\n")),
+            )
+            marker_thread.start()
+            runtime.turn_may_compact = False
+            time.sleep(0.3)  # let the marker thread reach and block on the lock
+        marker_thread.join(timeout=5)
+
+        assert not marker_thread.is_alive()
+        assert runtime.compacting is False
+        assert _agent_texts(service, session_id, workspace_id) == [
+            "Compacting conversation context\n"
+        ]
+        assert all(
+            e["event"] != "compact_start" for e in _status_events(service, session_id, workspace_id)
+        )
+    finally:
+        service.shutdown()
+
+
+def test_stale_timer_after_resume_does_not_touch_the_new_runtime(direct) -> None:
+    """#694 review R3-P2: a timer from the OLD runtime must not write into a
+    session that resume re-homed to a new runtime — the registry identity
+    re-check makes the whole firing a no-op (no flag clobber, no notice)."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        with runtime.lock:
+            armed_since = runtime.compacting_since
+        assert service.get_session(session_id)["compacting"] is True
+        # Resume swaps the registry to a NEW runtime for the same session.
+        new_runtime = SessionRuntime(_StubHandle(), token="new-token")
+        with service._runtimes_lock:
+            service._runtimes[session_id] = new_runtime
+        compact_timer._fire(service, session_id, runtime, armed_since)
+        # The row flag is untouched (still the old window's True; the real
+        # resume path clears it via on_ready) and no stale notice lands.
+        assert service.get_session(session_id)["compacting"] is True
+        assert all(
+            e["event"] != "compact_timeout"
+            for e in _status_events(service, session_id, workspace_id)
+        )
+    finally:
+        service.shutdown()
+
+
+def test_timer_fire_with_already_closed_row_window_drops_the_notice(direct) -> None:
+    """#694 review R3-P2: the conditional DB clear is the atomic arbiter —
+    when the row no longer has the window open (cleared by resume's
+    on_ready), the stale timeout notice is dropped, not appended."""
+    service, _bus, session_id, runtime, workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        with runtime.lock:
+            armed_since = runtime.compacting_since
+        # The row's window is already closed (e.g. resume's on_ready ran).
+        assert service._db.clear_studio_chat_compacting_if_set(session_id) is True
+        compact_timer._fire(service, session_id, runtime, armed_since)
+        # The in-memory flag was ours to clear, but the notice only rides a
+        # successful conditional clear.
+        assert runtime.compacting is False
+        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
+        assert events == ["compact_start"]
     finally:
         service.shutdown()
