@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+from server.app.studio_chat.terminal_guard import TerminalCommandBlockedError
 from server.app.studio_chat.terminals import AcpTerminalStore
 
 # Pure subprocess unit tests: no database access, skip TRUNCATE isolation.
@@ -213,5 +214,72 @@ def test_kill_takes_down_the_whole_process_group() -> None:
         ]
         assert surviving == []
         await store.release(created.terminalId)
+
+    asyncio.run(_run())
+
+
+def test_create_refuses_service_lifecycle_shell_commands() -> None:
+    """#629：terminal/create 对服务生命周期命令在 spawn 前拒绝——审批链
+    （人类已批准的 Bash 工具调用）之上叠平台级硬防线。拒绝以异常抛出，
+    经 acp SDK 变成 terminal/create 的 JSON-RPC error 让 agent 的 Bash
+    工具收到失败结果；错误信息指路人工入口 ./scripts/prod-restart.sh。"""
+
+    async def _run() -> None:
+        store = AcpTerminalStore()
+        # 事故原始形态：shell -c 的完整命令串（kimi Bash 工具的实际路径）。
+        with pytest.raises(TerminalCommandBlockedError) as exc_info:
+            await store.create(
+                command="sh",
+                args=["-c", "make prod-down && make prod-up"],
+                env=None,
+                cwd=None,
+                output_byte_limit=None,
+                default_cwd=".",
+            )
+        assert "prod-restart.sh" in str(exc_info.value)
+        # 链中位置无关：prod-down 在链尾同样拒绝。
+        with pytest.raises(TerminalCommandBlockedError):
+            await store.create(
+                command="sh",
+                args=["-c", "echo start; make prod-down"],
+                env=None,
+                cwd=None,
+                output_byte_limit=None,
+                default_cwd=".",
+            )
+        # 直接 exec 形态：command 本身是脚本。
+        with pytest.raises(TerminalCommandBlockedError):
+            await store.create(
+                command="./scripts/native-prod-down.sh",
+                args=None,
+                env=None,
+                cwd=None,
+                output_byte_limit=None,
+                default_cwd=".",
+            )
+        # 拒绝发生在 spawn 前：注册表里没有任何 terminal 留下。
+        assert not store._terminals
+
+    asyncio.run(_run())
+
+
+def test_create_allows_string_mentions_of_blocked_names() -> None:
+    """拒绝是命令级匹配而不是子串匹配：字符串里提到 prod-down 的普通
+    命令照常执行（误伤面反例）。"""
+
+    async def _run() -> None:
+        store = AcpTerminalStore()
+        created = await store.create(
+            command=sys.executable,
+            args=["-c", "print('run make prod-down manually')"],
+            env=None,
+            cwd=None,
+            output_byte_limit=None,
+            default_cwd=".",
+        )
+        awaited = await store.wait_for_exit(created.terminalId)
+        assert awaited.exit_code == 0
+        state = await store.output(created.terminalId)
+        assert "prod-down" in state.output
 
     asyncio.run(_run())

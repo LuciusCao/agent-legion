@@ -112,6 +112,10 @@ else
 	./scripts/native-prod-down.sh
 endif
 
+.PHONY: prod-restart
+prod-restart: ## 原子化重启生产环境（down+up+健康检查一个单元，失败自动重试拉起；仅原生形态）
+	./scripts/prod-restart.sh
+
 .PHONY: stack-host-down
 stack-host-down: ## 停止部署机 Agent Legion stack
 	docker compose $(COMPOSE_HOST_FILES) down

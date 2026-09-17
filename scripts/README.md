@@ -65,6 +65,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `resume-workspaces.sh` | 按需恢复本 worktree 全部 workspace 调度（后端每次启动重置为暂停；须在后端首次启动建表后执行，未建表时退出码 1 并提示）。 |
 | `dev_stack.sh` | 开发环境一键启停（`make dev-up` / `dev-down` / `dev-status`）：后台编排 backend + frontend + worker（复用 Makefile `dev-*` target），幂等，日志在 `data/logs/dev-*.log`，up 完成后打印各服务 URL。 |
 | `native-prod-up.sh` / `native-prod-down.sh` | 启停原生（非 Docker）生产环境（后端 8000 + worker 8787，前端由后端直接服务 `frontend/dist`；幂等，仅 prod worktree 使用）。由 `make prod-up` / `make prod-down` 调用。 |
+| `prod-restart.sh` | 原子化重启原生生产环境（#629）：down + up + 健康检查一个不可中断单元，up 失败自动清残留重试（`PROD_RESTART_UP_RETRIES` / `PROD_RESTART_UP_RETRY_WAIT_SECONDS` 覆盖），仍失败打印诊断与手动恢复指引后非零退出。由 `make prod-restart` 调用；**人工终端专用**——Studio agent 会话的 terminal 已拒绝服务生命周期命令（`server/app/studio_chat/terminal_guard.py`），重启走本入口。 |
 | `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、全 stack 健康等待（仅 prod worktree 使用）。由 `make prod-up docker` 调用，停止用 `make prod-down docker`。 |
 | `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。无 make target，直接 `uv run python scripts/seed_from_prod.py` 调用。 |
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |

@@ -1583,6 +1583,7 @@
     "server/app/studio_chat/store.py": 70,
     "server/app/studio_chat/streaming.py": 35,
     "server/app/studio_chat/teardown.py": 57,
+    "server/app/studio_chat/terminal_guard.py": 226,
     "server/app/studio_chat/terminals.py": 196,
     "server/app/studio_chat/token_keepalive.py": 61,
     "server/app/sweeper_owned_startup.py": 48,

@@ -4,6 +4,8 @@
 
 **权限边界**：MCP server 只是薄转发，真正的约束在后端——scoped token 只能走工具面（草稿/校验/读取），发布、回滚、归档等生效操作永远由人在 Studio 里完成（STUDIO-AGENT-001）。token 只存 sha256 digest，明文只在铸造时返回一次。Studio 对话内铸造的 run token（origin='run'）还绑定会话所在 workspace（schema v45，绑定与 token 行同一条 INSERT 原子写入）：带 workspace 路径的工具端点对其它 workspace 一律 403；自助 token（origin='user'，本文档流程铸造的）不带绑定，按 workspace 成员关系校验（成员/admin 放行，非成员 404）。注意铸造端点自 P4 起 admin-only——「自助」仅指 admin 用户自助，member 无法铸造新 token（已铸造未过期的 token 在 TTL 内仍可用）。
 
+**服务生命周期命令需人工执行（#629）**：Studio 对话会话里 agent 的 Bash 工具（ACP terminal 协议路径）对影响服务生命周期的命令一律拒绝：`make prod-up` / `prod-down` / `prod-restart` / `stack-*` / `dev-*` 启停 target、`scripts/native-prod-*.sh`、`kill` / `pkill` / `killall`、`launchctl` / `systemctl`、`shutdown` / `reboot`、`docker compose down|stop|restart`、`brew services stop|restart`。这是审批链之上的平台级硬防线——人工批准也放行不了：批准面（Studio 聊天）本身就是这些命令的受害者，会话断线后没有任何东西能自恢复一个已执行的 prod-down（生产后端曾因此停摆）。匹配按命令词而非子串（`echo "prod-down"`、`grep prod-down Makefile` 不受影响）。重启生产环境的人工入口是宿主机终端里的 `make prod-restart`（`scripts/prod-restart.sh`，down+up+健康检查原子单元，失败自动重试）。
+
 ## 1. 铸造 token
 
 token 是 **admin 用户**签发的长效 scoped token（P4 起 `POST /api/studio-agent-tokens` 及 list/DELETE 端点全部 admin-only，非 admin 403；origin='user'，默认 168h，上限 720h）：
