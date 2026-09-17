@@ -83,12 +83,15 @@ address — per
 [agent-worker-deployment.md §7](agent-worker-deployment.md#7-tailnet-冒烟验证上线前必须执行).
 The storage endpoint is load-bearing: presigned GETs fetch materials and
 bundle members, presigned PUTs return artifacts; the compose-internal
-`rustfs:9000` is unreachable from remote devices. When the Host uses the
-bundled RustFS, setting `AGENT_LEGION_S3_PUBLIC_ENDPOINT` alone is not
-enough — `deploy/compose.host.yaml` publishes port 9000 on
-`${AGENT_LEGION_S3_BIND:-127.0.0.1}`, so also set
+`seaweedfs:8333` (the default local backend; `rustfs:9000` on the legacy
+escape hatch) is unreachable from remote devices. When the Host uses the
+bundled object storage, setting `AGENT_LEGION_S3_PUBLIC_ENDPOINT` alone is
+not enough — `deploy/compose.host.yaml` publishes the backend port on
+`${AGENT_LEGION_S3_BIND:-127.0.0.1}` (8333 for SeaweedFS, 9000 for the
+RustFS escape hatch), so also set
 `AGENT_LEGION_S3_BIND=<laptop-tailnet-ip>` in `deploy/.env` (and
-`AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<laptop-tailnet-ip>:9000`;
+`AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<laptop-tailnet-ip>:8333` with the
+default SeaweedFS backend;
 presigned URLs are signed with that host) before running the smoke test.
 If the container cannot reach the tailnet, design a dedicated Tailscale
 sidecar; do not bake Tailscale into the Worker image.

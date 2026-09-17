@@ -53,7 +53,7 @@ Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的
 git clone https://github.com/LuciusCao/agent-legion.git
 cd agent-legion
 make install    # 装依赖、uv sync、建开发库 agent_legion_dev、生成 .env（含本地
-                # RustFS 随机凭据）、生成 vault 主密钥、构建 velites、装前端
+                # 对象存储随机凭据）、生成 vault 主密钥、构建 velites、装前端
                 # 依赖、种子 worker 配置——幂等，可重跑
 ```
 
@@ -61,22 +61,22 @@ make install    # 装依赖、uv sync、建开发库 agent_legion_dev、生成 .
 库，`init_db` 在没有 `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` 时会拒绝迁移它
 （共享库 schema 守卫）。
 
-对象存储默认使用本地 **RustFS**（`make dev-up` 自动启动容器并建好 bucket，
+对象存储默认使用本地 **SeaweedFS**（`make dev-up` 自动启动容器并建好 bucket，
 凭据由 `make install` 生成进 `.env`），开箱即用；要切换到云端 S3（AWS 或
 其他兼容服务），只需在 `.env` 里改 `AGENT_LEGION_S3_ENDPOINT` / 凭据 /
-`AGENT_LEGION_S3_BUCKET` 三样，本地 RustFS 会被自动跳过（详见
+`AGENT_LEGION_S3_BUCKET` 三样，本地对象存储会被自动跳过（详见
 [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md)）。
 
-docker 不可用（未安装或未启动）时 `make dev-up` 会跳过本地 RustFS：
+docker 不可用（未安装或未启动）时 `make dev-up` 会跳过本地对象存储：
 示例材料播种同步跳过、材料相关 API 降级返回 503，其余功能不受影响。
-docker 就绪后重跑 `make dev-up` 可补齐存储（RustFS 容器 + bucket）；若当时
+docker 就绪后重跑 `make dev-up` 可补齐存储（容器 + bucket）；若当时
 已跑过 `make import-demo`、示例材料被跳过，还需再跑一次
 `make import-demo`（幂等）补播种——`make dev-up` 本身不会重播材料。
 
 ### 2. 启动
 
 ```bash
-make dev-up         # 本地 RustFS + 后端 :8001 + 控制台 :5174 + worker :8789——幂等
+make dev-up         # 本地 SeaweedFS + 后端 :8001 + 控制台 :5174 + worker :8789——幂等
 make dev-status     # 查看各组件状态与 URL
 make dev-down       # 全部停止
 ```
@@ -133,7 +133,7 @@ make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed
 |-------|--------|
 | 把系统跑起来 / 跑 demo | 本文件 + `examples/README.md` |
 | 运维（部署、worker、远程执行） | [docs/](docs/README.md)——部署、worker 与 runbook 文档 |
-| 材料存储（RustFS/S3） | [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md) |
+| 材料存储（SeaweedFS/S3） | [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md) |
 | 理解原理（架构、配置参考、runtime） | [docs/architecture/](docs/architecture/README.md) |
 | 贡献代码 | [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md](AGENTS.md) |
 | 跟踪变更 | [CHANGELOG.md](CHANGELOG.md) |
