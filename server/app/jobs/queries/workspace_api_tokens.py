@@ -59,11 +59,18 @@ class WorkspaceApiTokenQueriesMixin(ConnectionQueriesMixin):
         return dict(row) if row is not None else None
 
     def update_workspace_api_token_last_used(self, token_id: str) -> None:
-        """Stamp last_used_at; revoked rows are deliberately left untouched."""
+        """Stamp last_used_at for one token, revoked or not.
+
+        #626 attack review (M-3): the watermark is best-effort telemetry for
+        the admin listing, and a revoked credential still being presented is
+        precisely what an admin must see after an emergency revocation — so
+        failed attempts on a revoked row also stamp it. Access control never
+        reads this column back (resolve refuses the row first), so stamping
+        a revoked token cannot reopen anything.
+        """
         with self.connect() as conn:
             conn.execute(
-                "update workspace_api_tokens set last_used_at=current_timestamp"
-                " where id=%s and revoked_at is null",
+                "update workspace_api_tokens set last_used_at=current_timestamp where id=%s",
                 (token_id,),
             )
 

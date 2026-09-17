@@ -7,7 +7,10 @@ on the ONE workspace the token is bound to. Everything else stays refused:
 ``require_admin`` refuses any non-empty actor_scope (so the admin plane,
 including this file's own management routes, is closed), the generic
 effecting guard ``reject_studio_agent_scope`` keeps refusing every scope
-type (studio-agent AND api alike — the blast radius never widens), and only
+type (studio-agent AND api alike — the blast radius never widens),
+``require_user`` refuses the api scope outright (HIGH-1: the machine
+identity has no user row, so scopeless user-surface mounts — the global
+worker listing, connection keys, agent statuses — refuse it too), and only
 the runs router swaps in ``require_workspace_api_intake`` which admits the
 api scope there while still refusing studio-agent scoped tokens.
 
@@ -48,6 +51,17 @@ _MAX_TOKEN_LABEL_LENGTH = 128
 # last_used_at refresh cadence (#626): per-token in-memory throttle. Best
 # effort only — a missed write costs display freshness, never access.
 _LAST_USED_THROTTLE_SECONDS = 60.0
+# Timing equalizer (#626 attack review M-1): a fixed digest the failure paths
+# compare against so the miss (unknown id), revoked and expired paths run the
+# same sha256 + hmac.compare_digest work as the bad-secret path — the 401s
+# stay indistinguishable in timing as well as in body.
+_DUMMY_TOKEN_HASH = hashlib.sha256(b"workspace-api-token-miss-equalizer").hexdigest()
+
+
+def _timing_equal_compare(secret: str) -> None:
+    """Hash + compare on the failure paths (constant-work, result dropped)."""
+    digest = hashlib.sha256(secret.encode()).hexdigest()
+    hmac.compare_digest(digest, _DUMMY_TOKEN_HASH)
 
 
 def split_api_token(token: str) -> tuple[str, str] | None:
@@ -115,18 +129,32 @@ class WorkspaceApiTokenStore:
         non-expired) token whose secret matches the stored digest; None for
         unknown ids, bad secrets, revoked and expired tokens — callers treat
         all four identically (401), so the reasons are not distinguished.
-        Side effect: throttled ``last_used_at`` refresh (per-token, at most
-        one UPDATE per minute).
+        Every failure path also runs one dummy hash + compare so the timing
+        cannot distinguish them either (attack review M-1).
+        Side effects: throttled ``last_used_at`` refresh (per-token, at most
+        one UPDATE per minute) on success AND on a revoked-row attempt — a
+        revoked credential still being presented is exactly the signal an
+        admin needs after an emergency revocation (attack review M-3).
         """
         parts = split_api_token(token)
         if parts is None:
             return None
         token_id, secret = parts
         row = self._queries.get_workspace_api_token_row(token_id)
-        if row is None or row["revoked_at"] is not None:
+        if row is None:
+            _timing_equal_compare(secret)
+            return None
+        if row["revoked_at"] is not None:
+            # Refused (the "revoke cuts access" semantics are unchanged) —
+            # but the attempt still refreshes the usage watermark so the
+            # admin listing shows whether a revoked credential keeps being
+            # retried (M-3; throttled like the success path).
+            _timing_equal_compare(secret)
+            self._refresh_last_used(token_id)
             return None
         expires_at = _parse_timestamp(row["expires_at"])
         if expires_at is not None and expires_at <= datetime.now(UTC):
+            _timing_equal_compare(secret)
             return None
         digest = hashlib.sha256(secret.encode()).hexdigest()
         if not hmac.compare_digest(digest, row["token_hash"]):

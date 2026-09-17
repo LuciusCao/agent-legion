@@ -12,8 +12,11 @@ plaintext, last_used_at watermark).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.helpers import publish_legacy_intake_revision
@@ -559,3 +562,155 @@ def test_api_token_cannot_read_foreign_job_detail(client) -> None:
     issued = _issue(client, WORKSPACE, label="cms")
     api = _bearer_client(client, issued["api_token"])
     assert api.get(f"/api/jobs/{job_id}").status_code == 404
+
+
+# --- attack-review hardening (PR #704 red-team pass) ----------------------------
+
+
+def test_api_token_refused_on_scopeless_user_routes(client) -> None:
+    """HIGH-1 pin: the three scopeless require_user GET mounts — the GLOBAL
+    worker listing (allowed_workspaces / register_token_ids / model-rack
+    topology, instance-wide, not bound-workspace-filtered), the instance
+    connection keys, the agent statuses — refuse the api machine identity
+    (403 from require_user: the machine identity has no user row). Full
+    sessions keep every one of these reads."""
+    _create_workspace(client, WORKSPACE)
+    issued = _issue(client, WORKSPACE, label="cms")
+    api = _bearer_client(client, issued["api_token"])
+    for url in ("/api/agent-workers", "/api/connections/keys", "/api/agents"):
+        response = api.get(url)
+        assert response.status_code == 403, f"GET {url} -> {response.status_code}"
+        assert "Workspace API tokens" in response.json()["detail"]
+    # The same endpoints stay open for real user sessions.
+    for url in ("/api/agent-workers", "/api/connections/keys", "/api/agents"):
+        assert client.get(url).status_code == 200, f"session GET {url} broke"
+
+
+def test_studio_agent_scope_still_passes_require_user(client, job_db) -> None:
+    """HIGH-1 boundary: the require_user refusal targets the api scope ONLY
+    — a studio-agent scoped token carries the initiating user's row, so the
+    require_user surface it legitimately uses (draft/validate endpoints,
+    STUDIO-AGENT-001) must keep working. The refusal must not widen to
+    every scoped identity."""
+    _create_workspace(client, WORKSPACE)
+    from server.app.auth import scoped_tokens
+
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id)
+    scoped_client = _bearer_client(client, token)
+    # A scopeless require_user read (the same route family HIGH-1 closed for
+    # api tokens) and a draft write: both stay reachable for the scoped token.
+    assert scoped_client.get("/api/agent-workers").status_code == 200
+    draft = scoped_client.put(
+        f"/api/workspaces/{WORKSPACE}/nodes/n1/code",
+        json={"code": "def run(job, job_dir, runtime):\n    pass\n"},
+    )
+    assert draft.status_code not in (401, 403) and draft.status_code < 500
+
+
+def test_revoked_token_attempts_still_stamp_last_used(client) -> None:
+    """M-3 pin: a revoked credential that keeps being presented must still
+    refresh the usage watermark — after an emergency revocation the admin
+    listing needs to show whether attempts continue. Access stays cut (401)
+    while the telemetry records the attempt."""
+    _create_workspace(client, WORKSPACE)
+    issued = _issue(client, WORKSPACE, label="leaked")
+    # Revoke BEFORE any successful resolve so the throttle map is empty and
+    # the revoked-row attempt is what stamps the watermark.
+    assert (
+        client.delete(f"/api/workspaces/{WORKSPACE}/api-tokens/{issued['token_id']}").status_code
+        == 200
+    )
+    api = _bearer_client(client, issued["api_token"])
+    assert api.get(f"/api/workspaces/{WORKSPACE}/runs").status_code == 401
+    listed = client.get(f"/api/workspaces/{WORKSPACE}/api-tokens").json()["tokens"]
+    entry = next(t for t in listed if t["token_id"] == issued["token_id"])
+    assert entry["revoked"] is True
+    assert entry["last_used_at"] is not None, "revoked attempt left no watermark"
+
+
+@pytest.mark.no_db
+def test_resolve_failure_paths_do_equal_hash_work(monkeypatch) -> None:
+    """M-1 pin: every 401 path of resolve_api_token (unknown id, revoked,
+    expired, bad secret) must run the same sha256 + compare_digest work —
+    the miss paths perform the dummy comparison, so the outcomes are
+    indistinguishable by timing as well as by response body.
+
+    Store-level unit with a stubbed queries facade: the counting window
+    must contain nothing but the store's own primitives. monkeypatch
+    restores the real hashlib/hmac for the rest of the session."""
+
+    class _StubQueries:
+        def __init__(self, row: dict | None) -> None:
+            self._row = row
+            self.stamped: list[str] = []
+
+        def get_workspace_api_token_row(self, token_id: str) -> dict | None:
+            return self._row
+
+        def update_workspace_api_token_last_used(self, token_id: str) -> None:
+            self.stamped.append(token_id)
+
+    live_row = {
+        "token_hash": hashlib.sha256(b"correct-secret").hexdigest(),
+        "workspace_id": "ws-x",
+        "revoked_at": None,
+        "expires_at": None,
+    }
+    revoked_row = {**live_row, "revoked_at": "2026-01-01T00:00:00+00:00"}
+    expired_row = {**live_row, "expires_at": "2020-01-01T00:00:00+00:00"}
+    token_id = "a".ljust(32, "0")
+
+    from server.app.auth import workspace_api_tokens as token_store_module
+
+    def _resolved(store: token_store_module.WorkspaceApiTokenStore, secret: str):
+        return store.resolve_api_token(f"{token_id}.{secret}")
+
+    # Sanity: the stubbed live row resolves and stamps the watermark.
+    live_store = token_store_module.WorkspaceApiTokenStore(_StubQueries(live_row))  # type: ignore[arg-type]
+    assert _resolved(live_store, "correct-secret") == {
+        "token_id": token_id,
+        "workspace_id": "ws-x",
+    }
+    assert live_store._queries.stamped  # type: ignore[attr-defined]
+
+    counts = {"sha256": 0, "compare": 0}
+    real_sha256, real_compare = hashlib.sha256, hmac.compare_digest
+
+    def _counting_sha256(data=b""):  # type: ignore[no-untyped-def]
+        counts["sha256"] += 1
+        return real_sha256(data)
+
+    def _counting_compare(left: str, right: str) -> bool:
+        counts["compare"] += 1
+        return real_compare(left, right)
+
+    monkeypatch.setattr(token_store_module.hashlib, "sha256", _counting_sha256)
+    monkeypatch.setattr(token_store_module.hmac, "compare_digest", _counting_compare)
+
+    # Revoked row: refused, watermark stamped, and the dummy work ran.
+    counts.update(sha256=0, compare=0)
+    revoked_store = token_store_module.WorkspaceApiTokenStore(_StubQueries(revoked_row))  # type: ignore[arg-type]
+    assert _resolved(revoked_store, "correct-secret") is None
+    assert counts == {"sha256": 1, "compare": 1}, "revoked path skipped the equalizer"
+    assert revoked_store._queries.stamped  # type: ignore[attr-defined]
+
+    # Expired row: refused, dummy work ran, no watermark (not an attempt on
+    # a revoked credential).
+    counts.update(sha256=0, compare=0)
+    expired_store = token_store_module.WorkspaceApiTokenStore(_StubQueries(expired_row))  # type: ignore[arg-type]
+    assert _resolved(expired_store, "correct-secret") is None
+    assert counts == {"sha256": 1, "compare": 1}, "expired path skipped the equalizer"
+    assert not expired_store._queries.stamped  # type: ignore[attr-defined]
+
+    # Unknown id: the miss path must hash + compare once too.
+    counts.update(sha256=0, compare=0)
+    miss_store = token_store_module.WorkspaceApiTokenStore(_StubQueries(None))  # type: ignore[arg-type]
+    assert _resolved(miss_store, "any-secret") is None
+    assert counts == {"sha256": 1, "compare": 1}, "miss path skipped the equalizer"
+    assert not miss_store._queries.stamped  # type: ignore[attr-defined]
+
+    # Bad secret on a live row: the same amount of primitive work.
+    counts.update(sha256=0, compare=0)
+    assert _resolved(live_store, "wrong-secret") is None
+    assert counts == {"sha256": 1, "compare": 1}
