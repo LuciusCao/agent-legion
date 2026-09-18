@@ -5,6 +5,7 @@ import {
   fireEvent,
   waitFor,
   within,
+  act,
 } from '@testing-library/react'
 import { WorkflowNodeCodeSection } from './WorkflowNodeCodeSection'
 import { api } from '../../../api'
@@ -82,6 +83,49 @@ function renderSection(
   overrides?: Partial<Parameters<typeof WorkflowNodeCodeSection>[0]>
 ) {
   return render(<WorkflowNodeCodeSection node={node} {...overrides} />)
+}
+
+// codex #756 场景的起点形态：已有草稿的 custom 节点（version 2 的草稿，
+// hash 'h-old'）。
+const existingDraft = {
+  ...customResponse,
+  has_draft: true,
+  draft_code: DRAFT_CODE,
+  draft_version: 2,
+  draft_code_hash: 'h-old',
+}
+
+// codex #756 场景脚手架：BASE GET 不自动落地，而是按调用顺序产出由测试
+// 控制放行时机的 deferred（mount GET 与每次保存后的后台 reload GET 都在
+// 队列里）；PUT 依次回 h1 / h2 两次保存响应——save_draft 原地更新已有
+// 草稿，version 恒 2、hash 每次都变（后端 versioned_entities.save_draft
+// 的 in-place update 语义），正是版本比较失灵的形态。
+function mockPendingReloadSaves() {
+  const gets: {
+    promise: Promise<unknown>
+    resolve: (value: unknown) => void
+  }[] = []
+  const puts = [
+    { ...versionRow(2, 'draft'), code_hash: 'h1' },
+    { ...versionRow(2, 'draft'), code_hash: 'h2' },
+  ]
+  mockApi.mockImplementation((path: unknown, init?: unknown) => {
+    const method = (init as { method?: string } | undefined)?.method
+    if (method === 'PUT') return Promise.resolve(puts.shift())
+    if (path === `${BASE}/publish`) {
+      return Promise.resolve(versionRow(2, 'published'))
+    }
+    if (String(path).startsWith(BASE)) {
+      let resolve!: (value: unknown) => void
+      const promise = new Promise<unknown>((r) => {
+        resolve = r
+      })
+      gets.push({ promise, resolve })
+      return promise
+    }
+    return Promise.resolve(customResponse)
+  })
+  return gets
 }
 
 describe('WorkflowNodeCodeSection', () => {
@@ -320,6 +364,86 @@ describe('WorkflowNodeCodeSection', () => {
     expect(JSON.parse(String(publishCall![1]?.body))).toEqual({
       expected_hash: 'abc',
     })
+  })
+
+  // #749 修（codex #756 P2）：用户连续保存同一份已有草稿——save_draft
+  // 原地更新草稿行、draft_version 不递增。保存 #1 触发的后台 reload 在
+  // 保存 #2 完成后才返回：其版本与本地新草稿相等，版本比较（`<`）判
+  // false，旧 draft_code_hash（h1）会覆盖保存 #2 回填的新 hash（h2）→
+  // 发布带旧 expected_hash 稳定 409。修：reload 响应按请求代次丢弃，
+  // 非最新代次的响应整体作废，与版本号无关。
+  it("keeps the second save hash when the first save's stale reload returns late", async () => {
+    const gets = mockPendingReloadSaves()
+    renderSection()
+    gets[0].resolve(existingDraft) // mount GET（gen 1）落地
+    await screen.findByText(/有未发布草稿/)
+
+    // 保存 #1（gen 2 的 reload 挂起不放行）→ 保存响应回填 h1。
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('草稿已保存')
+    )
+    // 保存 #2（gen 3 的 reload 挂起）→ 回填 h2。
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('草稿已保存')
+    )
+
+    // 保存 #1 触发的旧 reload（gen 2）此刻才返回：version 与本地相等、
+    // hash 是保存 #1 的 h1——codex 场景的毒响应。修后必须被代次门整体
+    // 丢弃，不碰保存 #2 回填的 h2。
+    gets[1].resolve({ ...existingDraft, draft_code_hash: 'h1' })
+    await act(async () => {}) // 冲刷微任务：旧响应的 .then 先于发布执行
+
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe(
+        '已发布，新执行立即生效'
+      )
+    )
+    const publishCall = mockApi.mock.calls.find(
+      ([path]) => path === `${BASE}/publish`
+    )
+    expect(publishCall).toBeDefined()
+    // h2 只能来自保存 #2 的同步回填：若旧 reload 覆盖了它，这里会是 h1
+    //（突变自检：去掉代次校验本断言必红，发布携带 h1）。
+    expect(JSON.parse(String(publishCall![1]?.body))).toEqual({
+      expected_hash: 'h2',
+    })
+  })
+
+  // #749 修（codex #756 P2）配套：代次门只丢「被更新的 reload 覆盖的旧
+  // 请求」，最新发出的 reload 必须正常落地——「他端更新」场景里本地最后
+  // 发出的 reload 就是最新代次，不能被误杀。这里旧 reload（gen 2）滞后
+  // 返回被丢弃，最新 reload（gen 3）随后带回他端已发布的快照并正常采纳。
+  it('lets the latest reload land when an older one resolves late', async () => {
+    const gets = mockPendingReloadSaves()
+    renderSection()
+    gets[0].resolve(existingDraft)
+    await screen.findByText(/有未发布草稿/)
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('草稿已保存')
+    )
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('草稿已保存')
+    )
+
+    // 旧 reload（gen 2，保存 #1 触发）带 h1 滞后返回：被代次门丢弃。
+    gets[1].resolve({ ...existingDraft, draft_code_hash: 'h1' })
+    await act(async () => {})
+    // 最新 reload（gen 3，保存 #2 触发）返回：他端已把草稿发布——
+    // has_draft false、版本 3。正常落地，不被误丢。
+    gets[2].resolve({ ...customResponse, version: 3 })
+
+    expect(await screen.findByText(/自定义 v3/)).toBeInTheDocument()
+    expect(screen.queryByText(/有未发布草稿/)).not.toBeInTheDocument()
   })
 
   // #749 修（review P3-2）：GET 有草稿但没带回 draft_code_hash（版本偏斜，
