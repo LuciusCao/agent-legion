@@ -247,9 +247,13 @@ class VersionedEntityStore:
         affected-row count the authoritative verdict: a mismatch (or a
         concurrent publish) touches zero rows → Conflict, and the enclosing
         transaction rolls back the archive statement with it — zero publish
-        side effects. None keeps the old semantics (no hash guard) for
-        callers with no verifiable hash (AgentEditor and other legacy
-        entries) to migrate incrementally.
+        side effects. None keeps the old no-check semantics for callers
+        outside the CAS rollout: same-process system seeding (save → publish
+        with the content known locally) and the preview-panel publish route,
+        whose plumbing has no request contract yet (#749 leftover). Every
+        HTTP publish entry that can assert a draft identity — the #692 chat
+        draft cards and, since #749, the Studio inspector panels — carries
+        the caller's hash.
         """
         with write_transaction(self._dsn) as conn:
             draft = _latest_with_status(conn, self._entity_type, workspace_id, entity_key, "draft")

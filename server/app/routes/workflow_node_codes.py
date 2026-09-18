@@ -105,12 +105,17 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         has_draft = draft is not None
         draft_code = str(draft["code"]) if draft is not None else None
         draft_version = int(draft["version"]) if draft is not None else None
+        # #749: the draft's code_hash rides the GET so the inspector panel
+        # can CAS-publish a draft it never saved itself (e.g. agent-drafted
+        # via the MCP tool surface — STUDIO-AGENT-001 keeps publishing human).
+        draft_code_hash = str(draft["code_hash"]) if draft is not None else None
 
         def _response(**kwargs: Any) -> WorkflowNodeCodeResponse:
             return WorkflowNodeCodeResponse(
                 has_draft=has_draft,
                 draft_code=draft_code,
                 draft_version=draft_version,
+                draft_code_hash=draft_code_hash,
                 # #628: the editor displays the instance-level budget.
                 max_code_bytes=settings.executor_runtime.workflows.node_code_max_bytes,
                 **kwargs,

@@ -14,6 +14,11 @@ class WorkflowNodeCodeResponse(BaseModel):
     # Current draft content, when one exists (drafts are editable user data).
     draft_code: str | None = None
     draft_version: int | None = None
+    # #749: the current draft's code_hash — the CAS token the inspector
+    # panel carries back as expected_hash on publish (same pattern as the
+    # #692 chat draft cards: the publisher must assert the identity of the
+    # draft it saw). None when no draft exists.
+    draft_code_hash: str | None = None
     # Instance-level byte budget for one code version (#628): the Studio
     # editor and the studio-agent draft loop display/self-check against it.
     # Read-only, server-injected; the default keeps old clients rendering.

@@ -174,6 +174,23 @@ def test_get_returns_draft_content(workspace_with_revision) -> None:
     assert body["draft_version"] == 2
 
 
+def test_get_exposes_draft_code_hash_for_cas_publish(workspace_with_revision) -> None:
+    """#749：GET 带出草稿 code_hash（检查器面板发布时的 expected_hash 令牌）。
+
+    只测接线（字段随草稿行同源、无草稿为 null）；CAS 语义本身（409 零副
+    作用、交错时序）由 #692 的 test_versioned_entities 覆盖，不在此重复。
+    """
+    # 无草稿：null。
+    assert workspace_with_revision.get(BASE).json()["draft_code_hash"] is None
+
+    draft = workspace_with_revision.put(BASE, json={"code": CUSTOM_V1}).json()
+    body = workspace_with_revision.get(BASE).json()
+    assert body["draft_code_hash"] == draft["code_hash"]
+    # 草稿覆盖后 hash 跟随新内容（旧令牌即失效）。
+    overwritten = workspace_with_revision.put(BASE, json={"code": CUSTOM_V2}).json()
+    assert workspace_with_revision.get(BASE).json()["draft_code_hash"] == overwritten["code_hash"]
+
+
 def test_get_version_returns_code_for_any_status(workspace_with_revision) -> None:
     workspace_with_revision.put(BASE, json={"code": CUSTOM_V1})
     workspace_with_revision.post(f"{BASE}/publish")
