@@ -253,7 +253,11 @@ describe('AgentEditor tool catalog (#476)', () => {
       await act(async () => {
         fireEvent.click(publish)
       })
-      expect(mocks.publishAgent).toHaveBeenCalledWith('ws1', 'agent-a', 'hash-load')
+      expect(mocks.publishAgent).toHaveBeenCalledWith(
+        'ws1',
+        'agent-a',
+        'hash-load'
+      )
     })
 
     it('保存草稿后发布携带保存响应的新 hash', async () => {
@@ -268,7 +272,11 @@ describe('AgentEditor tool catalog (#476)', () => {
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: '发布' }))
       })
-      expect(mocks.publishAgent).toHaveBeenCalledWith('ws1', 'agent-a', 'hash-save-2')
+      expect(mocks.publishAgent).toHaveBeenCalledWith(
+        'ws1',
+        'agent-a',
+        'hash-save-2'
+      )
     })
 
     it('服务端 409（草稿被覆盖）：专用文案内联提示，无成功 toast，按钮可重试', async () => {

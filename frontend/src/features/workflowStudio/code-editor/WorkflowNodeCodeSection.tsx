@@ -13,20 +13,22 @@ import styles from './WorkflowNodeCodeSection.module.css'
 import { fetchNodeCodeTemplate } from './workflowNodeCodeLookup'
 
 type NodeCodeResponse = components['schemas']['WorkflowNodeCodeResponse']
-type NodeCodeVersionResponse = components['schemas']['WorkflowNodeCodeVersionResponse']
+type NodeCodeVersionResponse =
+  components['schemas']['WorkflowNodeCodeVersionResponse']
 
 // #749：发布 CAS（expected_hash）被服务端拒绝的专用文案——草稿在加载后被
 // 其他会话/编辑器覆盖。与聊天草稿卡的 409 文案同一交互模式：内联提示 +
 // 引导重新加载，不发明新 UI。
-const DRAFT_OVERRIDDEN_HINT = '草稿已被其他会话或编辑器更新，请重新加载后再保存发布'
+const DRAFT_OVERRIDDEN_HINT =
+  '草稿已被其他会话或编辑器更新，请重新加载后再保存发布'
 
 // #749：详情 GET 不带草稿 hash 的兜底提示（版本偏斜：旧后端不回
 // draft_code_hash）——对齐 EntityDraftPublishButton 的 null-hash 立场：
 // 无 CAS 令牌的发布会退回无核对语义，静默发出可能已被覆盖的旧草稿。
-const NO_DRAFT_HASH_HINT = '草稿缺少可核对的版本标识（后端版本偏斜），请升级后端再发布'
+const NO_DRAFT_HASH_HINT =
+  '草稿缺少可核对的版本标识（后端版本偏斜），请升级后端再发布'
 
-const statusOf = (err: unknown) =>
-  (err as { status?: number } | null)?.status
+const statusOf = (err: unknown) => (err as { status?: number } | null)?.status
 
 function codeUrl(workspaceId: string, nodeKey: string) {
   // workflows/{workflowKey} 路径段已退役（#211）：key 与 workspace id 自
@@ -65,7 +67,24 @@ export function WorkflowNodeCodeSection(props: {
     api<NodeCodeResponse>(url)
       .then((result) => {
         if (cancelled) return
-        setData(result)
+        // #749 修（R2 P3）：reload 的响应可能滞留（请求发出早于本会话的
+        // 保存）——整体覆盖会把保存回填的新草稿身份打回旧值，下次发布撞
+        // 假 409。函数式合并按 draft_version 保留较新一侧的草稿身份
+        // （hash / version / code 同属一个保存，一起保留），其余字段以
+        // reload 为准（后台刷新的本意）；响应侧无草稿（已发布/已回落）
+        // 或不比本地新时原样采纳。
+        setData((prev) =>
+          prev?.draft_code_hash &&
+          result.has_draft &&
+          (result.draft_version ?? 0) < (prev.draft_version ?? 0)
+            ? {
+                ...result,
+                draft_code: prev.draft_code,
+                draft_version: prev.draft_version,
+                draft_code_hash: prev.draft_code_hash,
+              }
+            : result
+        )
         setLoadState('ready')
       })
       .catch((err: unknown) => {
@@ -92,7 +111,10 @@ export function WorkflowNodeCodeSection(props: {
         : '操作失败'
   // #749 修：404 分支只挂发布路径——无草稿可发（刚在别处发布过），与
   // 聊天草稿卡同款可行动文案（EntityDraftPublishButton）；保存/回滚的
-  // 404（start node 拒绝、版本不存在）仍直显后端 detail。
+  // 404（版本不存在）仍直显后端 detail。
+  // （start node 拒绝同样走 404 且同样命中发布路径——publish_node_code
+  // 也先跑 _reject_start_node——该形态下此文案不精确，但发布仍被拦；
+  // 低概率路径，不为它拆分支，对齐 EntityDraftPublishButton 的明文承认。）
   const publishErrorFor = (err: unknown) =>
     statusOf(err) === 404 ? '没有待发布的草稿（可能刚已发布过）' : errorFor(err)
   const run = async (
