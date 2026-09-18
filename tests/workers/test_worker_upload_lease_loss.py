@@ -1,0 +1,785 @@
+"""Lease-loss semantics for the Worker upload queue (#644 family).
+
+Split from ``test_worker_upload_queue.py`` for the file-size budget (AGENTS
+test hygiene): the lease-loss / handover / bulk-condemnation scenarios that
+came with #644 live here — verdict-condemned tasks must terminate cleanly
+(drop the moot result without touching a re-claimed attempt's directory or
+fresh marker) under every arm/handover/in-flight ordering, including
+sustained report-plane partitions. The queue's baseline delivery behavior
+and marker durability stay covered by the parent file; the harness below
+(``QueueFakeClient`` / ``_execution_dir`` / ``_task`` / ``_queue``) is
+duplicated verbatim from it because test modules must not import each
+other (tests/app/test_pytest_postgres_boundaries.py).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+from worker._atomic import atomic_write
+from worker.artifact.upload import DirectUploadError
+from worker.execution.heartbeat import start_lease_heartbeat
+from worker.execution.heartbeat_batch import BatchHeartbeatRegistry, batch_heartbeat_loop
+from worker.execution.ownership import OWNER_FILENAME, write_owner_marker
+from worker.status import ExecutionStatusReporter
+from worker.upload import queue as upload_queue
+from worker.upload.queue import PENDING_FILENAME, UploadQueue, UploadTask
+
+
+class QueueFakeClient:
+    def __init__(self, report_status: int = 204) -> None:
+        self.reports: list[dict] = []
+        self.uploads: dict[str, bytes] = {}
+        self.heartbeats = 0
+        self.report_status = report_status
+        self.report_errors = 0
+        self.heartbeats_at_report: list[int] = []
+
+    def upload_artifact(self, path: Path) -> str:
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        self.uploads[digest] = data
+        return f"sha256:{digest}"
+
+    def report(
+        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
+    ) -> tuple[int, bytes]:
+        self.heartbeats_at_report.append(self.heartbeats)
+        if self.report_errors > 0:
+            self.report_errors -= 1
+            raise RuntimeError("download failed: /x: timed out")
+        self.reports.append(metadata)
+        return self.report_status, b""
+
+    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
+        self.heartbeats += 1
+        return 204, []
+
+    def heartbeat_batch(self, leases: list[tuple[str, str]]) -> tuple[int, dict]:
+        return 200, {
+            "renewed": [execution_id for execution_id, _ in leases],
+            "lost": [],
+            "cancelled_execution_ids": [],
+        }
+
+
+def _execution_dir(work_root: Path, execution_id: str = "exec-1") -> Path:
+    run_dir = work_root / execution_id / "job" / "runs" / "node_a" / "worker"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text(
+        json.dumps({"type": "message_end", "message": {"role": "assistant"}}) + "\n",
+        encoding="utf-8",
+    )
+    (work_root / execution_id / "job" / "output.json").write_text("{}", encoding="utf-8")
+    return work_root / execution_id
+
+
+def _task(
+    work_root: Path, kind: str = "process", execution_id: str = "exec-1", **kwargs
+) -> UploadTask:
+    defaults: dict = {
+        "execution_id": execution_id,
+        "lease_id": "lease-1",
+        "execution_dir": work_root / execution_id,
+        "node_key": "node_a",
+        "status_fields": {
+            "job_id": "job-1",
+            "node_key": "node_a",
+            "workspace_id": "ws-1",
+            "agent_id": "agent",
+            "run_dir": "run",
+        },
+        "kind": kind,
+    }
+    if kind == "process":
+        defaults.update({"exit_code": 0, "expected_outputs": ("output.json",), "command": ("pi",)})
+    defaults.update(kwargs)
+    return UploadTask(**defaults)
+
+
+def _queue(
+    client: QueueFakeClient,
+    stop: threading.Event | None = None,
+    registry: BatchHeartbeatRegistry | None = None,
+) -> UploadQueue:
+    # #644：registry 不传 = legacy 单拍模式。registry 模式的用例必须经
+    # heartbeat_registry 接线进 queue——_deliver_bulk 会用 queue 的 registry
+    # 覆盖 task 的（executor.py 的生产接线同形），只在 task 上预置 registry
+    # 测不到 registry 车道（退避 resume 用例曾因此空转）。
+    return UploadQueue(
+        client,
+        ExecutionStatusReporter(None),
+        max_concurrency=2,
+        heartbeat_interval=0.05,
+        stop=stop or threading.Event(),
+        heartbeat_registry=registry,
+    )
+
+
+# ---------------------------------------------------------------------------
+# #644：registry 模式退避期 resume 的语义钉子（生产形态：批量心跳 + 退避）
+
+
+def test_report_backoff_resume_does_not_resurrect_lost_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 风暴引擎的正面钉子：退避期 resume 必须 pair-matched 恢复现有
+    entry，而不是重新 register——register 会以全新 entry（全新
+    ownership_lost 事件、quiesced=False）把已判死的租约重新塞回每一拍，
+    死租约被无限续拍、report 无限重试（同 execution 的 409 连打）。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    client.report_errors = 1  # 一次退避窗口，之后 204
+    registry = BatchHeartbeatRegistry()
+    task = _task(work_root)
+    queue = _queue(client, registry=registry)
+    original_report = client.report
+
+    def report_then_lose(execution_id, lease_id, metadata, archive):  # type: ignore[no-untyped-def]
+        # 模拟批拍在退避窗口内带回 lost verdict：共享事件被置位。
+        task.ownership_lost.set()
+        return original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_then_lose  # type: ignore[method-assign]
+    queue.submit(task)
+    queue.shutdown()
+
+    # 首次 report 抛瞬时错 → 退避窗口内判死 → 下一轮终态放弃：不再发 report。
+    assert len(client.reports) == 0
+    entry = registry._entries.get("exec-1")  # type: ignore[reportPrivateUsage]
+    assert entry is None, "lost task's lease must be pruned at finalize"
+
+
+def test_report_backoff_resume_keeps_lost_entry_out_of_beats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """resume 后已判死的 entry 不得回到快照（BatchHeartbeatRegistry.resume
+    的既有语义），且 entry 的事件对象保持共享——lost verdict 置位后 task
+    侧必须可见（这是 #644 把 register 接线到 task.ownership_lost 的目的）。"""
+    registry = BatchHeartbeatRegistry()
+    task = UploadTask(
+        execution_id="exec-1",
+        lease_id="lease-1",
+        execution_dir=Path("/tmp/nonexistent-exec-1"),
+        node_key="node_a",
+        status_fields={},
+        kind="prebuilt",
+        prebuilt_metadata={"status": "failed", "exit_code": 1, "error_message": "x"},
+    )
+    task.heartbeat_registry = registry
+    from worker.upload.heartbeat import resume_upload_heartbeat, start_upload_heartbeat
+
+    start_upload_heartbeat(None, task, 15.0)
+    entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+    assert entry.ownership_lost is task.ownership_lost
+
+    registry.apply_beat_result(lost=[("exec-1", "lease-1")], cancelled=[])
+    assert task.ownership_lost.is_set()
+
+    registry.quiesce("exec-1", "lease-1")
+    resume_upload_heartbeat(None, task, 15.0)
+    # resume 只清 quiesce：lost verdict 不被抹掉，entry 不再回到拍面。
+    assert entry.quiesced is False
+    assert task.ownership_lost.is_set()
+    assert registry.snapshot() == []
+
+
+def test_reclaim_race_at_arm_condemns_old_task_without_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 review P1 的端到端钉子：旧任务（lease-1）arm 时 registry 已持有
+    重 claim 后新 attempt 的 entry（lease-new）——arm 必须当场判死旧任务：
+    report 循环第一轮即终态放弃（一次 report 都不发、零退避重试），marker
+    删除、目录按 #564 归属收尾，新 entry 原样保留继续进快照。修复前该场景
+    下旧任务的 resume/quiesce 永远配不上对、也没有 beat 为死 lease 带 lost
+    verdict，report 会按 60 秒退避上限无限重试（`reports` 会是 1：耗尽
+    report_errors 后仍投递），钉死上传 lane 触发回压。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    # owner 标记仍指旧 lease：判死收尾可证明归属 → 整删（#564）。
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-1"})
+    client = QueueFakeClient()
+    client.report_errors = 5  # 修复前：退避 5 次后仍会投递（reports == 1）
+    registry = BatchHeartbeatRegistry()
+    # Host 重排后新 attempt 已注册（新 lease，executor arm 的 claim 时注册）。
+    registry.register("exec-1", "lease-new", threading.Event())
+    task = _task(work_root)  # 旧 attempt 的任务，lease-1
+    queue = _queue(client, registry=registry)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert task.ownership_lost.is_set(), "arm against a re-claimed lease did not condemn"
+    assert len(client.reports) == 0  # terminal before the first report attempt
+    assert not (work_root / "exec-1").exists()  # marker gone + owned dir discarded
+    entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+    assert entry.lease_id == "lease-new", "arm overwrote the re-claimed entry"
+    assert [e.lease_id for e in registry.snapshot()] == ["lease-new"]
+
+
+def test_report_backoff_resume_pair_matches_own_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """无竞态的 registry 模式退避回归：任务 arm 装入自己的 entry，一次瞬时
+    失败后 resume（pair 匹配）恢复自己的 entry，第二次 report 204 正常投递
+    ——arm 时的 lease 不匹配判死不得误伤无竞态路径（#644 review 修复的
+    反向护栏）。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    client.report_errors = 1
+    registry = BatchHeartbeatRegistry()
+    queue = _queue(client, registry=registry)
+    queue.submit(_task(work_root))
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+    assert not (work_root / "exec-1").exists()
+    # finalize 后自己的 entry 被 pair-matched prune 收走。
+    assert "exec-1" not in registry._entries  # type: ignore[reportPrivateUsage]
+
+
+# ---------------------------------------------------------------------------
+# #644 attack review：交接/覆盖窗口的 verdict 丢失（HIGH-1/HIGH-2）——死租约
+# 任务在 report 长分区下不得钉住上传 lane。
+
+
+def _wait_depth_zero(queue: UploadQueue, timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while queue.depth > 0:
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.005)
+    return True
+
+
+def test_handover_gap_verdict_terminates_report_loop_under_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 attack HIGH-1（attack9 场景）：executor→upload 交接 gap 内 beat
+    判死落在 executor-era 事件（event_A）上，task arm 换绑（event_B）必须
+    继承该终态——report 面持续分区（恒瞬时失败）时 report 循环终态放弃：
+    depth 归零、marker 删除、零 report 发出。修复前 verdict 随旧 entry 对象
+    消失，lane 被钉到 60s 退避上限无限重试。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    client.report_errors = 10**9  # report 面持续分区：恒瞬时失败
+    registry = BatchHeartbeatRegistry()
+    queue = _queue(client, registry=registry)
+
+    # run.py 的交付前形态：executor entry 挂 event_A，adopt 后、submit 前
+    # （gap 内）真 beat 线程带回 409 verdict——只发给 arm 前的 entry。
+    state = {"armed": False}
+
+    def one_shot_lost_batch(leases):  # type: ignore[no-untyped-def]
+        lost = [eid for eid, lease in leases if lease == "lease-1" and not state["armed"]]
+        return 200, {
+            "renewed": [eid for eid, _ in leases if eid not in lost],
+            "lost": lost,
+            "cancelled_execution_ids": [],
+        }
+
+    client.heartbeat_batch = one_shot_lost_batch  # type: ignore[method-assign]
+    beat_stop = threading.Event()
+    beat_thread = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, beat_stop, 0.005), daemon=True
+    )
+    beat_thread.start()
+    executor_lost = threading.Event()
+    heartbeat = start_lease_heartbeat(
+        client, "exec-1", "lease-1", 15.0, executor_lost, registry=registry
+    )
+    heartbeat.adopt()
+    assert executor_lost.wait(10), "precondition: the verdict landed on the executor-era event"
+    original_register_upload = registry.register_upload
+
+    def arming_register_upload(*args, **kwargs):  # type: ignore[no-untyped-def]
+        result = original_register_upload(*args, **kwargs)
+        state["armed"] = True
+        return result
+
+    registry.register_upload = arming_register_upload  # type: ignore[method-assign]
+
+    # 生产形态：task 的 ownership_lost 是全新事件（run.py 构造不传）。
+    task = _task(work_root)
+    queue.submit(task)
+
+    try:
+        assert _wait_depth_zero(queue), "lane pinned: the gap verdict never reached _report"
+        assert task.ownership_lost.is_set(), "the rebind dropped the handover-gap verdict"
+        assert len(client.reports) == 0  # terminal before the first report attempt
+        assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    finally:
+        beat_stop.set()
+        beat_thread.join(timeout=2)
+        queue._stop.set()  # 失败路径下解开 report 循环，让 shutdown 可返回
+        queue.shutdown()
+
+
+def test_arm_first_overwrite_terminates_report_loop_under_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 attack HIGH-2（attack8 场景）：旧任务 arm 在先、本 worker 新 claim
+    的 register 覆盖在后——旧 lease 从此不在任何拍里，不可能再有 beat 为它
+    带 verdict；覆盖必须向被换下 entry 的事件补发判死，report 分区下旧任务
+    终态放弃（depth 归零、marker 删除），新 claim 的 entry 原样保留。修复前
+    该排列没有任何判死出口，lane 被钉到 60s 退避上限无限重试。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    client.report_errors = 10**9  # report 面持续分区：恒瞬时失败
+    registry = BatchHeartbeatRegistry()
+    queue = _queue(client, registry=registry)
+
+    task = _task(work_root)  # 旧 attempt 的任务，lease-1
+    first_report_attempted = threading.Event()
+    original_report = client.report
+
+    def report_and_signal(*args, **kwargs):  # type: ignore[no-untyped-def]
+        first_report_attempted.set()
+        return original_report(*args, **kwargs)
+
+    client.report = report_and_signal  # type: ignore[method-assign]
+    queue.submit(task)
+    # 等任务进入 report 循环（已 arm、已发出第一次 report）再覆盖——arm-先
+    # 覆盖-后排列。
+    assert first_report_attempted.wait(10), "the old task never reached its report loop"
+
+    new_lost = threading.Event()
+    registry.register("exec-1", "lease-new", new_lost)  # 本 worker 重新 claim
+
+    try:
+        assert _wait_depth_zero(queue), "lane pinned: the overwrite left the old task uncondemned"
+        assert task.ownership_lost.is_set(), "the overwrite did not condemn the displaced lease"
+        assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+        assert not new_lost.is_set(), "the re-claim fired its own verdict"
+        # 新 claim 的 entry 原样保留、继续进拍面。
+        entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+        assert entry.lease_id == "lease-new"
+        assert [item.lease_id for item in registry.snapshot()] == ["lease-new"]
+    finally:
+        queue._stop.set()  # 失败路径下解开 report 循环，让 shutdown 可返回
+        queue.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# #644 codex3 P1：判死任务在 bulk 入口终止——租约不匹配（已被重 claim）的
+# 任务绝不进入 prepare/upload，execution_dir 可能已是新 attempt 的重建。
+
+
+def test_condemned_task_skips_bulk_and_spares_reclaimed_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex3 P1 端到端：旧任务进 bulk lane 时 arm 当场判死（registry 已
+    持重 claim 后的新 entry）——必须跳过全部 prepare/transfer：零压缩（新
+    attempt 重建的 events.jsonl 逐字节不变、无 result.tar.gz）、零产物上传、
+    零 report，marker 删除、目录按 #564 归属保留（owner 标记指新 lease），
+    新 entry 原样进拍面。修复前旧任务会压缩替换新执行的 events.jsonl（数据
+    串线）。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    # 新 attempt 已重建目录：owner 标记指新 lease，events.jsonl 是新执行的。
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-new"})
+    new_attempt_events = (
+        work_root / "exec-1" / "job" / "runs" / "node_a" / "worker" / "events.jsonl"
+    )
+    new_attempt_events.write_text(
+        "\n".join(
+            json.dumps({"type": "message_end", "message": {"role": "assistant", "seq": i}})
+            for i in range(50)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    events_before = new_attempt_events.read_bytes()
+    client = QueueFakeClient()
+    client.report_errors = 5  # 修复前判死任务会退避重试后再投递
+    registry = BatchHeartbeatRegistry()
+    registry.register("exec-1", "lease-new", threading.Event())
+    queue = _queue(client, registry=registry)
+
+    queue.submit(_task(work_root))  # 旧 attempt 的任务，lease-1
+    queue.shutdown()
+
+    # 零动作：没有 report、没有产物上传、没有归档构建。
+    assert client.reports == [], "a condemned task sent its moot result"
+    assert client.uploads == {}, "a condemned task uploaded the new attempt's artifacts"
+    assert not (work_root / "exec-1" / "result.tar.gz").exists(), "prepare ran for a dead lease"
+    # 新 attempt 的执行日志逐字节未动（修复前会被压缩重写）。
+    assert new_attempt_events.read_bytes() == events_before
+    # 终态收尾：marker 删除；目录归属新 lease，保留。
+    assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    assert (work_root / "exec-1").is_dir()
+    assert (work_root / "exec-1" / OWNER_FILENAME).is_file()
+    # 新 entry 原样保留、继续进拍面。
+    entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+    assert entry.lease_id == "lease-new"
+    assert [item.lease_id for item in registry.snapshot()] == ["lease-new"]
+
+
+def test_condemned_bulk_task_walks_terminal_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex3 P1 单元钉子（提前判死形态）：任务在 submit 前事件已置位
+    （如恢复任务的首拍判死先于 lane 排到）——bulk 车道同样短路：零 report、
+    零上传、无归档，且终态收尾完整执行（marker 删除、可证明归属时目录整删、
+    depth 归零）——短路不是吞任务。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-1"})
+    client = QueueFakeClient()
+    queue = _queue(client)  # legacy 模式即可：短路点在车道入口，与 arm 模式无关
+
+    task = _task(work_root)
+    task.ownership_lost = threading.Event()
+    task.ownership_lost.set()  # 进 lane 前已判死
+    queue.submit(task)
+    queue.shutdown()
+
+    assert client.reports == []
+    assert client.uploads == {}
+    assert not (work_root / "exec-1" / "result.tar.gz").exists()
+    assert queue.depth == 0
+    # 终态收尾完整：marker 删除 + 归属可证明（owner 标记指本 lease）→ 整删。
+    assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    assert not (work_root / "exec-1").exists()
+
+
+# ---------------------------------------------------------------------------
+# #644 codex3 P2：换绑丢在途 verdict——快照已带旧 entry 对象出门、换绑后
+# 响应才回来的 409，必须落到 task 的事件上（重定向被换下对象的事件字段）。
+
+
+class _GatedBatchClient(QueueFakeClient):
+    """heartbeat_batch parks on a gate so the rebind can land mid-flight."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.batch_entered = threading.Event()
+        self.batch_release = threading.Event()
+        self.batch_calls_after_first = 0
+
+    def heartbeat_batch(self, leases: list[tuple[str, str]]) -> tuple[int, dict]:
+        if self.batch_entered.is_set():
+            # 重试拍不得兜底判别力：在途 409 之后循环停止（harness 停拍），
+            # verdict 是否穿透换绑只由那一发在途响应决定。
+            self.batch_calls_after_first += 1
+            return 200, {"renewed": [], "lost": [], "cancelled_execution_ids": []}
+        self.batch_entered.set()
+        assert self.batch_release.wait(10)
+        # Everyone in the (pre-rebind) snapshot is lost — the verdict the
+        # in-flight beat delivers to the OLD entry object after the rebind.
+        return 200, {
+            "renewed": [],
+            "lost": [execution_id for execution_id, _ in leases],
+            "cancelled_execution_ids": [],
+        }
+
+
+class _GatedSingleClient(QueueFakeClient):
+    """Degraded-mode twin: heartbeat parks on a gate (beat_single's writer)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.single_entered = threading.Event()
+        self.single_release = threading.Event()
+        self.single_calls_after_first = 0
+
+    def heartbeat(self, execution_id: str, lease_id: str, timeout: float | None = None):
+        if self.single_entered.is_set():
+            self.single_calls_after_first += 1
+            return 204, []
+        self.single_entered.set()
+        assert self.single_release.wait(10)
+        return 409, []
+
+
+def test_inflight_batch_verdict_crosses_rebind_under_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex3 P2（batch 路径，attack9 的在途残余排列）：拍已从 registry
+    取出旧 entry 快照（请求挂起）→ register_upload 同 lease 换绑 → 响应回来
+    409 由 _beat_batch_chunk 对快照旧对象 set。换绑必须把被换下对象的事件
+    字段重定向到 task 的事件，否则 verdict 落在 executor-era 事件上、task
+    收不到——report 持续分区下 lane 被钉到 60s 退避上限。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = _GatedBatchClient()
+    client.report_errors = 10**9  # report 面持续分区：恒瞬时失败
+    registry = BatchHeartbeatRegistry()
+    queue = _queue(client, registry=registry)
+
+    # executor 侧注册（event_A），adopt 后一拍出门、响应挂起（在途）。
+    beat_stop = threading.Event()
+    beat_thread = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, beat_stop, 0.05), daemon=True
+    )
+    beat_thread.start()
+    executor_lost = threading.Event()
+    heartbeat = start_lease_heartbeat(
+        client, "exec-1", "lease-1", 15.0, executor_lost, registry=registry
+    )
+    heartbeat.adopt()
+    assert client.batch_entered.wait(10), "the in-flight beat never left"
+
+    # 换绑发生在响应回来之前（快照里是旧 entry 对象）。
+    task = _task(work_root)
+    queue.submit(task)
+    client.batch_release.set()  # 409 现在到达：set 的是快照里的旧对象
+
+    try:
+        assert _wait_depth_zero(queue), "lane pinned: the in-flight verdict never reached _report"
+        assert task.ownership_lost.is_set(), "the rebind dropped the in-flight verdict"
+        assert len(client.reports) == 0  # terminal before the first report attempt
+        assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    finally:
+        beat_stop.set()
+        beat_thread.join(timeout=2)
+        queue._stop.set()  # 失败路径下解开 report 循环，让 shutdown 可返回
+        queue.shutdown()
+
+
+def test_inflight_degraded_verdict_crosses_rebind_under_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex3 P2（degraded 单拍路径）：beat_single 的短生命周期线程对
+    快照旧对象写 409——同一重定向语义必须覆盖另一条 writer。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = _GatedSingleClient()
+    client.report_errors = 10**9
+    registry = BatchHeartbeatRegistry()
+    registry.degraded_to_single = True  # pre-v5 Host：循环走逐条拍
+    queue = _queue(client, registry=registry)
+
+    beat_stop = threading.Event()
+    beat_thread = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, beat_stop, 0.05), daemon=True
+    )
+    beat_thread.start()
+    executor_lost = threading.Event()
+    heartbeat = start_lease_heartbeat(
+        client, "exec-1", "lease-1", 15.0, executor_lost, registry=registry
+    )
+    heartbeat.adopt()
+    assert client.single_entered.wait(10), "the in-flight single beat never left"
+
+    task = _task(work_root)
+    queue.submit(task)
+    client.single_release.set()  # 409 arrives against the pre-rebind snapshot
+
+    try:
+        assert _wait_depth_zero(queue), "lane pinned: the degraded in-flight verdict was dropped"
+        assert task.ownership_lost.is_set()
+        assert len(client.reports) == 0
+        assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    finally:
+        beat_stop.set()
+        beat_thread.join(timeout=2)
+        queue._stop.set()
+        queue.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# #644 codex4 P1：入口检查通过后（arm 时刻未判死）租约在 bulk 途中过期且
+# 本 worker 重 claim——循环内每个跨 attempt 的文件动作前必须重验判死。
+
+
+class _MidBulkLostClient(QueueFakeClient):
+    """首个 CAS 上传 park 在 gate 上：释放前判死，构造「入口检查已过、
+    途中判死」的精确排列；后续上传若被调用即证据（新 attempt 数据串线）。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.upload_entered = threading.Event()
+        self.release_upload = threading.Event()
+        self.uploads_after_release = 0
+
+    def upload_artifact(self, path: Path) -> str:
+        if not self.upload_entered.is_set():
+            self.upload_entered.set()
+            assert self.release_upload.wait(10)
+        else:
+            self.uploads_after_release += 1
+        return super().upload_artifact(path)
+
+
+def test_mid_bulk_condemnation_stops_remaining_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex4 P1：入口（arm 时刻）检查通过、第一个 artifact 上传在途时
+    beat 判死 → 剩余 artifact 不得再上传、不走 report、终态收尾（marker 删
+    除、depth 归零）。修复前循环不重验，判死任务会把新 attempt 重建目录里
+    的产物继续上传（数据串线）。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    # 新 attempt 重建的目录：owner 标记指新 lease（判死收尾不得整删）。
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-new"})
+    new_attempt_output = work_root / "exec-1" / "job" / "output.json"
+    new_attempt_output.write_text('{"attempt": 2}', encoding="utf-8")
+    second_output = work_root / "exec-1" / "job" / "second.json"
+    second_output.write_text('{"attempt": 2, "n": 2}', encoding="utf-8")
+    output_before = new_attempt_output.read_bytes()
+    client = _MidBulkLostClient()
+    registry = BatchHeartbeatRegistry()
+    queue = _queue(client, registry=registry)
+
+    # 两个产出：第一个上传 park（入口检查已过的证据），判死后第二个不得上传。
+    task = _task(work_root, expected_outputs=("output.json", "second.json"))
+    queue.submit(task)  # arm 时刻 registry 干净：入口检查通过
+    assert client.upload_entered.wait(10), "the first artifact upload never started"
+    # 入口检查已过（上传已开始）；此刻重 claim 覆盖 entry → 覆盖判死旧租约。
+    registry.register("exec-1", "lease-new", threading.Event())
+    client.release_upload.set()
+
+    assert _wait_depth_zero(queue), "lane pinned: mid-bulk condemnation did not terminate"
+    assert task.ownership_lost.is_set()
+    # 第一个上传后的判死：第二个 artifact 零上传（修复前会照传）、零 report。
+    assert client.uploads_after_release == 0, "a condemned task uploaded the new attempt's artifact"
+    assert client.reports == []
+    # 新 attempt 的目录内容未被触碰。
+    assert new_attempt_output.read_bytes() == output_before
+    # 终态收尾：旧 lease 的 marker 已删（归本任务）；目录归新 lease 保留。
+    assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    assert (work_root / "exec-1").is_dir()
+    assert (work_root / "exec-1" / OWNER_FILENAME).is_file()
+
+
+def test_mid_bulk_condemnation_stops_fallback_prepare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex4 P1（回落 prepare 分支）：直传 4xx 回落重跑 prepare 前/
+    重跑后判死——回落循环的每轮迭代都要重验，判死即中止，不再 CAS 上传。
+    钉的是 DirectUploadError 分支里 prepare_or_failed 重跑之后的第二轮循
+    环迭代（prepare 会压缩改写新 attempt 的 events.jsonl）。"""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.02)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-new"})
+
+    # 直传首战即 403：DirectUploadError → 回落分支重跑 prepare（判死必须在
+    # 这次 prepare 之后、CAS 上传之前拦下）。
+    def raise_terminal(*args: object, **kwargs: object) -> dict | None:
+        raise DirectUploadError("HTTP 403")
+
+    monkeypatch.setattr("worker.upload.queue.upload_artifact_direct", raise_terminal)
+    client = _MidBulkLostClient()
+    registry = BatchHeartbeatRegistry()
+    queue = _queue(client, registry=registry)
+
+    # 两个产出：直传双双 403 → 回落 prepare 重跑 → 循环第二轮的 artifact1
+    # CAS park（证明重跑已发生）；判死后 artifact2 不得再上传。
+    task = _task(
+        work_root,
+        expected_outputs=("output.json", "second.json"),
+        artifact_uploads={
+            "output.json": {"url": "https://x", "storage_key": "k"},
+            "second.json": {"url": "https://y", "storage_key": "j"},
+        },
+    )
+    (work_root / "exec-1" / "job" / "second.json").write_text("{}", encoding="utf-8")
+    queue.submit(task)  # arm 时刻 registry 干净：入口检查通过
+    assert client.upload_entered.wait(10), "the fallback CAS upload never started"
+    # 回落 prepare 已重跑（第一轮直传 403）；CAS 上传在途时重 claim 覆盖。
+    registry.register("exec-1", "lease-new", threading.Event())
+    client.release_upload.set()
+
+    assert _wait_depth_zero(queue)
+    assert client.uploads_after_release == 0, "the condemned fallback loop kept uploading"
+    assert client.reports == []
+    assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+    assert (work_root / "exec-1").is_dir()
+
+
+# ---------------------------------------------------------------------------
+# #644 codex4 P2：marker 删除必须校验归属——判死旧任务不得删掉新 lease
+# 重建目录后写入的新 marker（worker 崩溃重启的投递凭据）。
+
+
+def test_condemned_old_task_spares_new_lease_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex4 P2 核心：旧任务（lease-1）判死时，新 attempt（lease-new）
+    已重建目录并由 submit 写入自己的 upload_pending.json——旧任务的收尾不
+    得删它。修复前 marker 无条件 unlink，新任务崩溃后重启 restore 看不到
+    自己的结果（结果丢失）。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-new"})
+    client = QueueFakeClient(report_status=409)
+    queue = _queue(client)
+
+    task = _task(work_root)  # 旧任务，lease-1
+    queue.submit(task)
+    # 409 report 判死前的窗口：新 attempt 重建目录并写入自己的 marker
+    # （覆盖旧任务的 marker——submit 的原子写语义）。
+    new_task = _task(
+        work_root,
+        execution_id="exec-1",
+        lease_id="lease-new",
+        kind="prebuilt",
+        prebuilt_metadata={"status": "completed", "exit_code": 0},
+    )
+    marker = work_root / "exec-1" / PENDING_FILENAME
+    atomic_write(marker, json.dumps(new_task.to_json()))
+    queue.shutdown()
+
+    # 旧任务的 moot 结果已被放弃（409 verdict 保留），但新 lease 的 marker
+    # 必须原样存活——重启 restore 会照常重投新任务的结果。
+    assert len(client.reports) == 1  # the old task's verdict
+    assert marker.is_file(), "the condemned old task deleted the new lease's marker"
+    assert json.loads(marker.read_text(encoding="utf-8"))["lease_id"] == "lease-new"
+    # 目录归新 lease（owner 标记），保留。
+    assert (work_root / "exec-1").is_dir()
+
+
+def test_kept_marker_survives_crash_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#644 codex4 P2 的崩溃恢复语义端到端：旧任务判死收尾保住了新 lease 的
+    marker → 模拟 worker 崩溃重启（新 queue 实例 restore）→ 新任务的结
+    果照常重新投递。marker 若被旧任务误删，这里 restore 计数归零、report
+    丢失。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    write_owner_marker(work_root / "exec-1", {"execution_id": "exec-1", "lease_id": "lease-new"})
+    client = QueueFakeClient(report_status=409)
+    queue = _queue(client)
+
+    task = _task(work_root)  # 旧任务，lease-1
+    queue.submit(task)
+    new_task = _task(
+        work_root,
+        execution_id="exec-1",
+        lease_id="lease-new",
+        kind="prebuilt",
+        prebuilt_metadata={"status": "completed", "exit_code": 0},
+    )
+    marker = work_root / "exec-1" / PENDING_FILENAME
+    atomic_write(marker, json.dumps(new_task.to_json()))
+    queue.shutdown()
+    assert marker.is_file(), "precondition: the new lease's marker survived the old task"
+
+    # 崩溃重启：restore 必须重新入队新任务（新 client/queue 模拟新进程）。
+    restarted_client = QueueFakeClient()
+    restarted_queue = _queue(restarted_client)
+    assert restarted_queue.restore(work_root) == 1
+    restarted_queue.shutdown()
+    assert len(restarted_client.reports) == 1  # the NEW task's result was delivered
+    assert not (work_root / "exec-1").exists()  # delivered → cleaned up
