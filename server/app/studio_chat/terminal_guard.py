@@ -2,24 +2,23 @@
 
 Incident: an agent ran ``make prod-down && make prod-up`` through its ACP
 terminal; the session died between the two halves and production stayed down
-until a human noticed. Principle from the issue: an agent may do anything
-*reversible* — operations that cannot self-recover once interrupted belong to
-a human at a real terminal.
+until a human noticed. Principle: an agent may do anything *reversible* —
+operations that cannot self-recover once interrupted belong to a human at a real terminal.
 
 Layering with the permission chain: the agent-side Bash tool is gated by
 ``session/request_permission`` BEFORE ``terminal/create`` (terminals.py), so
 commands reaching this guard were in principle already approved. This guard
 is a platform-level hard line ON TOP of that approval chain: the approving
 surface (the chat UI served by the very backend these commands take down)
-dies with the session, so chat-side approval can never make these commands
-safe — they are refused unconditionally and the operator runs them in a real
-terminal. ``scripts/prod-restart.sh`` is the atomic human entry for restarts
+dies with the session, so chat-side approval can never make them safe —
+they are refused unconditionally and the operator uses a real terminal.
+``scripts/prod-restart.sh`` is the atomic human entry for restarts
 (down + up + health-check + failure retry), which the block message points
 to. Same philosophy as velites' ``command_guard.rs`` (the footgun-guard
-precedent): a heuristic over shell text, NOT a security boundary — an
-adversarial agent can evade via variables (``D=kill; $D 1``) or command
-substitution (``make $(echo prod-down)``); those gaps are accepted because
-the realistic threat is a well-meaning agent doing ops casually.
+precedent): a heuristic over shell text, NOT a security boundary —
+adversarial evasion via variables (``D=kill; $D 1``) or command
+substitution (``make $(echo prod-down)``) is accepted because the threat
+model is a well-meaning agent doing ops casually.
 
 Matching is command-level, never substring-level: text is split into shell
 segments (``;`` ``|`` ``&`` ``&&`` newlines/CR, parens and command
@@ -27,17 +26,18 @@ substitutions — quote-aware; the state machines live in the sister module
 terminal_guard_words.py), each segment is split into words by shell
 semantics and quote-removed per word, the real command is identified
 behind shell keywords and wrappers (if/while/!/coproc, sudo/env/nice/
-timeout/xargs/…), and only that command word (plus, for ``make``/``sh``/``source``/``docker``,
-their operands) is compared against the denylist. Backtick bodies are
-re-lexed with backtick rules (``\\<newline>`` joins the line inside ``'…'``
-regions of the span too — round-7 C1), ``$(…)`` bodies keep single-quote
-regions literal (round-6 M2) — the segmenter carries the distinction.
+timeout/xargs/…), and only that command word (plus the operands of
+``make``/``sh``/``source``/``docker``) is compared against the denylist.
+Backtick bodies are re-lexed with backtick rules (``\\<newline>`` joins
+inside ``'…'`` regions of the span — round-7 C1 — and a case pattern's
+``)`` is span text, never a frame closer — round-8 C1'); ``$(…)`` bodies
+keep single-quote regions literal (round-6 M2).
 ``echo "prod-down"`` and ``grep prod-down Makefile`` therefore stay allowed
 — and because quote removal happens per word AFTER the split, quoted text
 containing separators (``echo 'safe; make prod-down'``, a ``-c`` payload
-that merely prints lifecycle names) stays data. Nested shells (``bash -c
-'…'``, including short-option clusters like ``-lc``) and ``eval`` recurse
-into their command string with its inner quoting intact.
+that merely prints lifecycle names) stays data. Nested shells (``bash
+-c '…'``, including short-option clusters like ``-lc``) and ``eval``
+recurse into their command string with its inner quoting intact.
 
 Known gaps (explicitly registered after the #707 adversarial review): the
 runner family is open-ended and NOT fully enumerated — ``expect``,
@@ -45,31 +45,27 @@ runner family is open-ended and NOT fully enumerated — ``expect``,
 from ``-c``/``-e`` strings (``python3 -c "os.system(…)"``) and stdin-fed
 or process-substitution-fed shells (``bash <(echo …)``, ``curl … | sh``)
 all pass; only the high-frequency wrappers (``watch``, ``find -exec``) are
-recursed into. So do: unresolved variables (``! $CMD``, ``D=kill; $D 1``
-— a ``!`` prefix does not change the variable-gap status, but the keywords
-scan no longer swallows the words after ``!``), brace expansion, heredoc
-bodies, backslash-newline continuations, ``exec``/``su``/``ssh`` prefixes,
-leading redirections (``2>&1 cmd``), ``env -S 'VAR=x cmd …'`` (the string
-is re-parsed by env itself, not recursed into), ``make -f -`` reading a
-makefile from stdin, and bash builtins (``builtin kill``, ``enable -f``)
-— while ``builtin export/declare/typeset`` and ``declare``/``typeset -x``
-DO reach the env-injection gate (round-3 M1). ``$'…'`` ANSI-C escapes are
+recursed into. So do: unresolved variables (``! $CMD``, ``D=kill; $D 1``),
+brace expansion, heredoc bodies, backslash-newline continuations,
+``exec``/``su``/``ssh`` prefixes, leading redirections (``2>&1 cmd``),
+``env -S 'VAR=x cmd …'`` (the string is re-parsed by env itself, not
+recursed into), ``make -f -`` reading a makefile from stdin, and bash
+builtins (``builtin kill``, ``enable -f``) — while ``builtin export/
+declare/typeset`` and ``declare``/``typeset -x`` DO reach the env-injection
+gate (round-3 M1). ``$'…'`` ANSI-C escapes are
 in the same family (round-6 I5): bash/zsh/sh/ksh evaluate ``$'\x70kill'``
-into a real pkill while the guard keeps the backslash literal — command_
-guard.rs's ANSI-C gap is closed only for plainly-spelled names (they are
-pure ASCII here), never for escape-evaluated ones. Malformed text — an
-unterminated quote or command substitution — is refused outright rather
-than parsed: escape-ambiguous substitution bodies execute differently
-across shells (ksh vs POSIX), so no single parse can be right (round-3
-H1).
+into a real pkill while the guard keeps the backslash literal — the gap is
+closed only for plainly-spelled names (pure ASCII here), never for
+escape-evaluated ones. Malformed text — an unterminated quote or command
+substitution — is refused outright: escape-ambiguous substitution bodies
+execute differently across shells (ksh vs POSIX), so no single parse can
+be right (round-3 H1).
 
 Env-injection keys (BASH_ENV/ENV/ZDOTDIR/PROMPT_COMMAND/SHELLOPTS/
-BASHOPTS and relative-segment PATH) are refused on every channel they
-can reach this guard through: terminal/create's env overrides,
-command-line assignment prefixes (``BASH_ENV=x.sh bash -c …``, ``sudo
-VAR=… cmd``), ``env`` arguments and the ``export``/``declare -x``/
-``typeset -x``/``builtin export`` spellings — the same table, the same
-risk (a startup script sourced before/around the checked command).
+BASHOPTS, relative-segment PATH) are refused on every channel that can
+reach this guard — env overrides, assignment prefixes, ``env`` arguments
+and the export spellings — one table, one risk (a startup script sourced
+before/around the checked command).
 """
 
 from __future__ import annotations
@@ -144,6 +140,18 @@ BLOCKED_DOCKER_SUBCOMMANDS = frozenset({"stop", "kill", "restart", "rm"})
 # gap below (positional-mask/pid/lock-file operands their first non-option
 # word is NOT the command, or root-only/namespace-attack-only reach).
 WRAPPERS = frozenset("sudo env time nice nohup setsid stdbuf xargs ionice".split())  # noqa: SIM905
+# ionice's act-on-running-process MODE flags: once one is peeled — in ANY
+# spelling, glued ``-p123``, split ``-p 123`` or inline ``--pid=123`` — the
+# real tool (util-linux 2.38, live) treats every remaining word as a PID/
+# PGID/UID argument and errors out without running any command, so no
+# command position remains and _identify drops the rest (round-8 M3': the
+# glued form used to peel ``-p123`` as a boolean and land pkill in the
+# command slot — the split form's mirror image, both must not block).
+# ``--t`` is deliberately absent everywhere: it is ``--ignore``'s unique
+# GNU prefix and BOOLEAN — adding it (or --ignore/--i/--ig) to the value
+# table would make ``ionice --t kill`` eat ``kill`` as the value and MISS a
+# real execution; the current BLOCK on it is exactly right.
+_IONICE_PID_MODE = ("-p", "-P", "-u", "--pid", "--pgid", "--uid")
 # Shells whose `-c <string>` argument is a full shell command text (recursed
 # into); without `-c` their file operands are script invocations (basename
 # check). Combined short clusters (`-xc`, `-lc`) count as `-c`.
@@ -387,9 +395,7 @@ def _check_export_arguments(cmd: str, args: list[str]) -> None:
             if letters and all(char in "aAfFgiIlnrtux" for char in letters):
                 exported = exported or ("x" in letters and arg[1] != "+")
             continue
-        if not exported:
-            continue
-        if (name := _assignment_env_name(arg)) is not None:
+        if exported and (name := _assignment_env_name(arg)) is not None:
             _refuse_injected_env(name, arg.partition("=")[2])
 
 
@@ -424,12 +430,10 @@ def _check_runner_args(cmd: str, args: list[str], _depth: int) -> None:
     # find: the -exec/-execdir template is the words after the flag up to
     # the terminator `;` / `+` (or end of args — an unterminated template is
     # a find syntax error; checking it anyway only errs on the strict side).
-    index = 0
-    while index < len(args):
-        if args[index] in ("-exec", "-execdir", "-ok", "-okdir"):
+    for index, arg in enumerate(args):
+        if arg in ("-exec", "-execdir", "-ok", "-okdir"):
             template = list(takewhile(lambda word: word not in (";", "+"), args[index + 1 :]))
             _check_shell_text(" ".join(template), _depth + 1)
-        index += 1
 
 
 def _host_root_mount(spec: str) -> bool:
@@ -610,9 +614,8 @@ def _wrapper_value_opts(wrapper: str) -> tuple[str, ...]:
         ),
         "nice": ("-n", "--adjustment"),
         # ionice (util-linux 2.38, live: -c/--class and -n/--classdata take
-        # values; -t/--ignore is boolean; -p/-P/-u switch to act-on-running-
-        # process modes where extra words are PID/UID arguments — an error,
-        # never a command — so they stay out of the table, round-7 M1).
+        # values; -t/--ignore is boolean; -p/-P/-u are MODE flags handled
+        # in _identify via _IONICE_PID_MODE — never value entries here).
         "ionice": ("-c", "-n", "--class", "--classdata"),
         "env": ("-u", "-C", "-S", "--unset", "--chdir", "--split-string"),
         "stdbuf": ("-i", "-o", "-e", "--input", "--output", "--error"),
@@ -730,7 +733,10 @@ def _identify(tokens: list[str], _depth: int = 0) -> tuple[str, list[str]] | Non
                 return None
             rest = after
         elif _basename(head) in WRAPPERS:
-            _, rest = _skip_options(rest[1:], _wrapper_value_opts(_basename(head)))
+            base = _basename(head)
+            opts, rest = _skip_options(rest[1:], _wrapper_value_opts(base))
+            if base == "ionice" and any(opt.startswith(_IONICE_PID_MODE) for opt in opts):
+                rest = []
         else:
             return _basename(head), rest[1:]
     return None

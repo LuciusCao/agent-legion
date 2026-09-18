@@ -18,13 +18,18 @@ subshell parens and command substitutions (``$(…)`` and backticks — both
 execute inside double quotes too, so they open segments there as well;
 single quotes suppress everything). A command substitution opened INSIDE a
 double-quoted string must restore the double-quote state when it closes:
-both ``)`` and the closing backtick pop the same stack, whose frames carry
-(restore_double, body_is_backtick) — the kind is what makes ``\\<newline>``
-a continuation inside ``'…'`` regions of a backtick SPAN (round-7 C1). A
-backtick closing that does not pop leaks the stale True, and the closing
-quote of the host string is then misread as OPENING one — everything after
-it, including a whole ``; make prod-down``, was swallowed into the quoted
-word (attack report #707 CRITICAL-1).
+closers pop a stack whose frames carry (restore_double, body_is_backtick)
+— and round-8 gave the two closer kinds SEPARATE pop rules, because they
+are not the same animal: ``)`` closes only a ``$(…)``/paren body, while a
+backtick SPAN closes only at the first unescaped backtick. A case
+pattern's ``)`` inside a span is body text (the round-7 shared closer
+popped the frame mid-span and the payload was re-lexed at top level while
+five shells ran it, review #707 round-7 C1'); the frame kind is what makes
+``\\<newline>`` a continuation inside ``'…'`` regions of a backtick SPAN
+(round-7 C1). A closing that does not pop leaks the stale True, and the
+closing quote of the host string is then misread as OPENING one —
+everything after it, including a whole ``; make prod-down``, was swallowed
+into the quoted word (attack report #707 CRITICAL-1).
 
 A backslash outside single quotes pairs with the next character, and the
 pair travels into the segment text RAW (round-4 P2 for the unquoted
@@ -120,12 +125,15 @@ def _segments(command: str) -> list[str]:
     in_double = False
     # Open command-substitution/paren bodies as (restore_double, body_is_
     # backtick) frames. restore_double: a body opened inside ``"…"`` must
-    # restore the double-quote state when it closes — ``)`` and the closing
-    # backtick pop the same stack. body_is_backtick (round-7 C1): a
-    # backtick body is re-lexed with backtick rules by every shell, where
-    # ``\\<newline>`` is a continuation everywhere in the span — ``'…'``
-    # regions and nested ``$(…)`` bodies included — so any open backtick
-    # frame re-enables the continuation branch.
+    # restore the double-quote state when it closes. The closers are NOT
+    # interchangeable (round-8 C1'): ``)`` pops only a ``$(…)``/paren
+    # frame — a backtick span pops ONLY at an unescaped backtick, because
+    # a case pattern's ``)`` inside a span is body text in every shell.
+    # body_is_backtick (round-7 C1): a backtick body is re-lexed with
+    # backtick rules by every shell, where ``\\<newline>`` is a
+    # continuation everywhere in the span — ``'…'`` regions and nested
+    # ``$(…)`` bodies included — so any open backtick frame re-enables the
+    # continuation branch.
     bodies: list[tuple[bool, bool]] = []
     chars = iter(command)
     lookahead = None
@@ -226,21 +234,36 @@ def _segments(command: str) -> list[str]:
             segments.append("".join(current).strip())
             current = []
             bodies.append((False, False))
-        elif char in (")", "`"):
-            # ``)`` closes a ``$(…)``/paren body; a backtick outside quotes
-            # either CLOSES an open backtick body (the innermost frame is a
-            # backtick one) or OPENS a bare one at top level / inside a
-            # $() body — pushing the frame whose kind re-enables ``'…'``
-            # continuations there (round-7 C1). Both closers pop the same
-            # stack, else a stale True leaks and the host string's closing
-            # quote is misread as opening one, drowning `; make prod-down`
-            # in the quoted word (#707 C-1); any frame left open at EOF is
-            # the round-3 H1 refusal.
+        elif char == ")":
+            # ``)`` closes ONLY a ``$(…)``/paren body — never a backtick
+            # span (round-8 C1'): a span's terminator is the first
+            # UNESCAPED backtick alone, so a case pattern's ``)`` inside a
+            # span is body text, not a closer. The round-7 shared closer
+            # popped the frame mid-span and the rest was re-lexed at top
+            # level while five shells ran the joined payload
+            # (``echo `case y in *) make 'prod-\<NL>down';; esac` ``). The
+            # separator break still fires inside a span — the body is shell
+            # text whose own tokens (``case x in *) arm``) segment there,
+            # which is what keeps the benign twin ALLOWED (round-8 M1');
+            # a closer must pop when it fires, else a stale True leaks and
+            # the host string's closing quote is misread as opening one,
+            # drowning `; make prod-down` in the quoted word (#707 C-1);
+            # any frame left open at EOF is the round-3 H1 refusal.
             segments.append("".join(current).strip())
             current = []
-            if char == "`" and not (bodies and bodies[-1][1]):
+            if bodies and not bodies[-1][1] and bodies.pop()[0]:
+                in_double = True
+        elif char == "`":
+            # A bare backtick either CLOSES the innermost span (the frame
+            # on top is a backtick one — this is the ONLY thing that closes
+            # it, escaped ones never reach here) or OPENS a nested one at
+            # top level / inside a $() body, pushing the frame whose kind
+            # re-enables ``'…'`` continuations there (round-7 C1).
+            segments.append("".join(current).strip())
+            current = []
+            if not (bodies and bodies[-1][1]):
                 bodies.append((False, True))
-            elif bodies and bodies.pop()[0]:
+            elif bodies.pop()[0]:
                 in_double = True
         elif char in _SEGMENT_SEPARATORS:
             segments.append("".join(current).strip())
