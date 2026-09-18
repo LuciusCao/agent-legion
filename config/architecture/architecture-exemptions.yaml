@@ -1009,8 +1009,9 @@ exemptions:
     MAX_LENIENT_PARSE_BYTES 256KB 解析闸 + set 三分支注记；测试 +82：边界矩阵与超闸两个新单测）。
     774 原始行超出 velites/src 绝对上限 800 在即，按本豁免的时间盒拆出：宽容解析机制迁
     json_lenient.rs（新条目 66 有效行），#747 全部单测迁 velites/tests/json_lenient.rs 集成测试
-    （tests/ 不纳入预算）——json.rs 回落 552 有效行（+28 于初版前基线），在 baseline 524 +
-    growth_allowance 带内。时间盒已兑现，豁免保留至 #747 关闭后随下轮 ratchet 回收。'
+    （tests/ 不纳入预算）。拆出后 json.rs 为 552 有效行，超 baseline 524 + growth_allowance
+    的带内上限（539）13 行，由本豁免 ceiling 562 覆盖。豁免移除前提：json.rs 再减 ≥13
+    有效行，或预算再平衡。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/747
   ceiling: 562

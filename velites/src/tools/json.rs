@@ -162,11 +162,11 @@ fn set(ctx: &ToolContext, path: &str, query: &str, value: Value) -> Result<ToolO
                     format_gate_size()
                 )
             } else {
-                " — value looks like JSON container text but contains numbers \
-                 that would not survive parsing losslessly (high-precision \
-                 floats or very large integers), so it was written as the \
-                 literal string; if you meant a JSON container, pass it \
-                 directly as a JSON value"
+                " — value looks like JSON container text, but numbers in \
+                 this text would not survive parsing losslessly (scientific \
+                 notation, high-precision floats, or very large integers), \
+                 so it was written as the literal string; if you meant a \
+                 JSON container, pass it directly as a JSON value"
                     .to_string()
             },
         ),

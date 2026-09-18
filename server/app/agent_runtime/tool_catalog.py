@@ -182,8 +182,8 @@ VELITES_TOOL_CATALOG: tuple[ToolCatalogEntry, ...] = (
                 "value": {
                     # #747：与 velites specs.rs 逐字镜像（跨二进制契约测试锁
                     # 全等）——容器直接以 JSON 值传入的正反例 + 运行时宽容
-                    # 解析行为（含无损与闸内两个前提，见 velites json.rs 的
-                    # parse_double_encoded_container）。
+                    # 解析行为（含无损与闸内两个前提，见 velites
+                    # json_lenient.rs 的 parse_double_encoded_container）。
                     "description": (
                         "set: any JSON value to write at the path "
                         "(objects/arrays/strings/numbers/booleans/null). Pass "

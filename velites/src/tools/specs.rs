@@ -98,7 +98,8 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
                     // 「any」写法——保持无 type（宽松类型，两 provider 均原样
                     // 透传 schema），description 用正反例钉住「容器直接以
                     // JSON 值传入」，并声明运行时的宽容解析行为（含无损与
-                    // 闸内两个前提，见 json.rs 的 parse_double_encoded_container）。
+                    // 闸内两个前提，见 json_lenient.rs 的
+                    // parse_double_encoded_container）。
                     "value": {"description": "set: any JSON value to write at the path \
             (objects/arrays/strings/numbers/booleans/null). Pass containers directly as \
             JSON — value: [\"1.5\", \"2.5\"] or {\"k\": 1} — never as a string holding \
