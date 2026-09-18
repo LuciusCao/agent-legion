@@ -1016,3 +1016,20 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/747
   ceiling: 562
   expires: 2026-12-31
+- check: architecture.file_budget
+  path: velites/src/tools/json_lenient.rs
+  reason: '#747 codex review（P2）重复对象键拒绝：宽容解析新增 serde 自定义 Visitor 检测重复键
+    （deserialize_any + 显式 DeserializeSeed 递归，next_key 先查本层 HashSet 再 next_value，在
+    serde 默认路径只保留最后一个键值、静默改坏输入之前报错；键相等以解析后字符串为准，"a" 与
+    "\u0061" 同键）。行数按仓库 counter 实测（有效行）：66→171（+105）。构成：Decline 失败
+    分类 + parse_detecting_duplicate_keys（含 deserializer.end() 补齐 from_str 的尾随内容
+    整串拒绝语义，行为与拆出前一致）+ DuplicateKeyVisitor（visit_unit/bool/u64/i64/f64/
+    str/seq/map 全形状，seq/map 经 Seed 递归防嵌套层漏检）+ 文档与注记措辞更新。本修复的
+    全部测试按 #747 惯例放 velites/tests/json_lenient.rs 集成测试（tests/ 不纳入预算），
+    文件无内联 #[cfg(test)]。超 baseline 76 + growth_allowance 带内上限（91）80 行，由本
+    豁免 ceiling 171 覆盖。豁免移除前提：宽容解析机制迁出（如并入通用 JSON 工具库）或预算
+    再平衡。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/747
+  ceiling: 171
+  expires: 2026-12-31

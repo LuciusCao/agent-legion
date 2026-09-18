@@ -192,9 +192,10 @@ VELITES_TOOL_CATALOG: tuple[ToolCatalogEntry, ...] = (
                         'JSON text like "[\\"1.5\\", \\"2.5\\"]". A value '
                         "string that parses losslessly as a JSON array/object "
                         "(within a size gate) is parsed as that container "
-                        "before writing; container text with lossy numbers or "
-                        "over the gate stays literal, with a note saying so. "
-                        "To store JSON text literally, use the `write` tool."
+                        "before writing; container text with lossy numbers, "
+                        "duplicate object keys, or over the gate stays "
+                        "literal, with a note saying so. To store JSON text "
+                        "literally, use the `write` tool."
                     )
                 },
             },
