@@ -29,6 +29,7 @@ class JobWorkflowUpgradeService:
         job_event_buffer: Any | None = None,
         artifact_mutation: JobArtifactMutationService | None = None,
         object_store: Any = None,
+        custom_nodes_enabled: bool = True,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
@@ -40,6 +41,10 @@ class JobWorkflowUpgradeService:
         # 不做本地产物暂存，仅清单行清理。
         self.artifact_mutation = artifact_mutation
         self.object_store = object_store
+        # P1-1（codex 四轮）：实现身份解析的 gate，与 dispatch 侧
+        # ``workflows.custom_nodes_enabled`` 同源；关闭时 code 节点实现
+        # 全部占位（保守重跑）。
+        self.custom_nodes_enabled = custom_nodes_enabled
 
     def upgrade(self, workspace_id: str, job_id: str, *, mode: str = "clean") -> dict[str, Any]:
         if mode not in UPGRADE_MODES:
@@ -59,6 +64,7 @@ class JobWorkflowUpgradeService:
                 context.job,
                 context.definition,
                 context.frozen_config_json,
+                custom_nodes_enabled=self.custom_nodes_enabled,
             )
         staged: StagedOutputs | None = None
         try:

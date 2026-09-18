@@ -183,8 +183,13 @@ def test_inherit_upgrade_stages_leftover_outputs_of_uncompleted_candidates(
     # 处于 failed（上次运行写了一半 a_out.json 就崩了），b completed。
     revisions.publish_workspace_revision(workspace["id"], definition)
     job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
+    # a/b 的实现身份均可证明（P1-1）：a 播种后再置 failed——无记录的
+    # completed 会被保守排除并沿下游闭包把 b 连带重置，遮蔽本用例的
+    # 「未完成候选遗留输出暂存」判别点。a 保持 failed 无产物。
+    from tests.services.test_job_workflow_upgrade_inherit import _seed_impl_identity
+
+    _seed_impl_identity(queries, workspace, job_id, ["a", "b"])
     queries.update_job_node(job_id, "a", status="failed")
-    queries.update_job_node(job_id, "b", status="completed")
     job = queries.get_job(job_id)
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     job_dir.mkdir(parents=True, exist_ok=True)

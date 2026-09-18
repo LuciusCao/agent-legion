@@ -14,6 +14,7 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifact_staging_scope import shared_name_rerun_closure
 from server.app.services.job_workflow_upgrade_config import intake_frozen_config_json
 from server.app.services.job_workflow_upgrade_diff import compute_inherit_reset_nodes
+from server.app.services.job_workflow_upgrade_impl import implementation_excluded_nodes
 from server.app.services.job_workflow_upgrade_inherit import unreachable_inherit_nodes
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
@@ -25,8 +26,15 @@ def plan_inherit_nodes(
     job: dict[str, Any],
     new_definition: WorkflowDefinition,
     new_frozen_config_json: str | None,
+    *,
+    custom_nodes_enabled: bool = True,
 ) -> frozenset[str]:
     """最终继承集 = 新定义可执行节点 − 变更子图 − 不可达子图（含下游闭包）。
+
+    ``custom_nodes_enabled``（P1-1）与 dispatch 侧同一特性 gate
+    （``workflows.custom_nodes_enabled``）：关闭时 code 节点当前身份
+    不可解析，全部保守重跑（与「关闭特性时 dispatch 无 code 可跑」的
+    现实一致）。
 
     旧侧配置基准只用 job 的存量 ``frozen_config_json``（intake 冻结值，
     RUN-FREEZE-001）：产物是按那份冻结配置产出的，同基比较必须以它为
@@ -56,6 +64,16 @@ def plan_inherit_nodes(
     与重置面共享纯输出名的节点（及其下游闭包）移出继承集；升级事务内
     还会按实际保留集复算一次（``job_workflow_upgrade_cleanup``），覆盖
     未完成候选并入重置面的组合场景。
+
+    实现身份（codex 四轮 P1-1）：实现重发布而节点定义未变时，定义
+    哈希两侧相等——旧产物按旧实现产出、升级后同节点重跑执行新实现。
+    ``job_workflow_upgrade_impl`` 比较该节点最新完成请求的执行时身份
+    （``agent_execution_requests.agent_definition_hash``）与当前
+    published 身份：证明相等才可继承；漂移或不可证明（记录被 retention
+    清扫、本地池执行无记录、实现未发布）→ 该节点及下游闭包重跑。
+    复审 HIGH-2：Agent 定义 schema 含 runtime_mutable 键的 agent 节点
+    同在排除集——定义不变、只翻转 override 值再翻回时 frozen/实现身份
+    两侧全等，diff 层节点自声明判定覆盖不到定义侧键（详见 impl 模块）。
     """
     old_definition = definition_from_job_snapshot(job)
     if old_definition is None:
@@ -75,11 +93,15 @@ def plan_inherit_nodes(
             # 旧侧基准不可证明（A1）：保守退化到 clean 语义（全量重跑），
             # 不再走「旧定义 re-freeze 当前配置」的恒等回退。
             return frozenset()
+    implementation_excluded = implementation_excluded_nodes(
+        job_db, job, new_definition, custom_nodes_enabled=custom_nodes_enabled
+    )
     reset_nodes = compute_inherit_reset_nodes(
         old_definition,
         old_frozen_config_json,
         new_definition,
         new_frozen_config_json,
+        implementation_excluded,
     )
     candidates = frozenset(new_definition.executable_nodes) - reset_nodes
     unreachable = unreachable_inherit_nodes(job_db, job, _jobs_dir(job_db), candidates)

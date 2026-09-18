@@ -77,6 +77,29 @@ def _inherit_job(queries, workspace, original, node_keys):
     return job
 
 
+def _seed_impl_identity(queries, workspace, job_id: str, node_keys) -> None:
+    """给拟继承节点播种可证明的实现身份（codex 四轮 P1-1 后的测试基准）。
+
+    普通继承用例的 completed 节点现在还要求「执行时身份 == 当前
+    published 身份」：published node_code + 最新完成请求携带同一
+    code_hash。不播种的节点按「实现不可证明」保守重跑（P1-1 语义，
+    判别用例见 codex4 姊妹文件）。
+    """
+    from tests.services.test_job_workflow_upgrade_inherit_codex4 import (
+        _publish_node_code,
+        _seed_done_execution,
+    )
+
+    for node_key in node_keys:
+        code_hash = _publish_node_code(
+            queries, workspace["id"], node_key, f"def run(ctx):\n    return {{{node_key!r}}}\n"
+        )
+        queries.update_job_node(job_id, node_key, status="pending")
+        _seed_done_execution(
+            queries, workspace["id"], job_id, node_key, kind="code", impl_hash=code_hash
+        )
+
+
 def test_inherit_upgrade_keeps_unchanged_nodes_completed(tmp_path: Path) -> None:
     queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
     # 新 revision 只改 b 的 capability：期望 a 继承，b/c 重跑。
@@ -84,8 +107,7 @@ def test_inherit_upgrade_keeps_unchanged_nodes_completed(tmp_path: Path) -> None
         workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
     )
     job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
-    for key in ("a", "b", "c"):
-        queries.update_job_node(job["id"], key, status="completed")
+    _seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
     queries.update_job_status(job["id"], "completed")
 
     result = service.upgrade(workspace["id"], job["id"], mode="inherit")
@@ -130,8 +152,7 @@ def test_inherit_upgrade_degrades_when_artifact_unreachable(tmp_path: Path) -> N
         workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
     )
     job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
-    for key in ("a", "b", "c"):
-        queries.update_job_node(job["id"], key, status="completed")
+    _seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
 
     result = service.upgrade(workspace["id"], job["id"], mode="inherit")
 
@@ -211,8 +232,7 @@ def test_inherit_upgrade_keeps_manifest_rows_of_inherited_nodes(
         workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
     )
     job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
-    for key in ("a", "b", "c"):
-        queries.update_job_node(job["id"], key, status="completed")
+    _seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
     with closing(connect_database(queries.dsn_identity)) as conn, conn:
         conn.execute(
             """
@@ -329,8 +349,7 @@ def test_inherit_upgrade_keeps_nodes_when_frozen_config_unchanged(tmp_path: Path
     )
     revisions.publish_workspace_revision(workspace["id"], _config_schema_chain_definition())
     job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
-    for key in ("a", "b", "c"):
-        queries.update_job_node(job["id"], key, status="completed")
+    _seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
     # workspace override 与 intake 冻结值相同（都解析为 v5）；job 的存量
     # 冻结值按 intake 的完整形状播种（含平台保留执行键与全部节点段）。
     queries.update_workspace(
@@ -383,8 +402,7 @@ def test_inherit_upgrade_stages_and_removes_reset_local_outputs(tmp_path: Path) 
         workspace["id"], dataclasses.replace(definition, nodes=changed_nodes)
     )
     job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
-    for key in ("a", "b", "c"):
-        queries.update_job_node(job["id"], key, status="completed")
+    _seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
     from server.app.storage_paths import resolve_job_dir
 
     job_dir = resolve_job_dir(job, queries.jobs_dir)
@@ -427,7 +445,7 @@ def test_batch_upgrade_inherit_mode_passes_through(tmp_path: Path) -> None:
         workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
     )
     job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
-    queries.update_job_node(job["id"], "a", status="completed")
+    _seed_impl_identity(queries, workspace, job["id"], ["a"])
 
     results = batch_upgrade(service, workspace["id"], [job["id"]], mode="inherit")
 
@@ -538,8 +556,7 @@ def test_inherit_upgrade_shared_output_name_reruns_both_producers(tmp_path: Path
         workspace["id"], dataclasses.replace(definition, nodes=changed)
     )
     job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
-    for key in ("a", "b", "c"):
-        queries.update_job_node(job["id"], key, status="completed")
+    _seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "shared.json").write_text("old-shared")

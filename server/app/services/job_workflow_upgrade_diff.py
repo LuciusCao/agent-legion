@@ -25,7 +25,7 @@
    而不是逐上游拼接——这样旧快照里的上游重命名（A→A'，定义哈希不同）
    与其下游在「上游集哈希」上等价坍缩，不再误判下游必须重跑。
 
-排除规则（issue 边界，一律不继承、永远重跑）：
+排除规则（issue 边界 + codex 四轮，一律不继承、永远重跑）：
 
 - ``skill: latest`` 节点：HEAD 漂移永不入锁（#322），diff 无法观测其
   内容变化，参与继承会掩盖 skill 更新；
@@ -33,10 +33,31 @@
   是 fan-out 执行的一部分，继承聚合状态无法安全重放；
 - 审批门节点（``type: approval``）：人工决策语义（approve/rework）不
   可从定义 diff 推导，重置回 ``awaiting_approval`` 前的 pending 由
-  人工重新决策。
+  人工重新决策；
+- 含 ``runtime_mutable`` config 键的节点（codex 四轮 P1-3）：这些键
+  每次 dispatch 现场重解析（CONFIG-RUNTIME-MUTABLE-001），frozen 段
+  只是 intake 时刻的快照——override intake 后改 B、节点按 B 完成、
+  升级前改回 A 时新旧 frozen 哈希相等，继承的却是按 B 产出的产物。
+  执行侧虽有 ``node_runs.config_snapshot_json`` 审计，但它是按 run 行
+  的全量 config 快照（多 attempt / 多 shard 各一行、三条执行路径的
+  manifest 键投影各异），拿它做「继承节点该次产出的实际配置」的比较
+  无法证明完备——保守排除，含此类键的节点恒重跑（排除面见
+  ``runtime_mutable_excluded_nodes``）；**agent 节点的有效 schema 主体
+  来自 Agent 定义**（节点自声明被定义覆盖），定义侧键由 plan 层
+  ``job_workflow_upgrade_impl`` 解析 AgentDefinition.config_schema 后
+  并入执行面排除集（codex 四轮复审 HIGH-2），本模块的节点自声明判定
+  只覆盖 code 节点面；
+- 实现身份不可证明的节点（codex 四轮 P1-1）：普通 job 不 pin 版本，
+  dispatch 现场解析 workspace 当前 published 的 node_code（code 节点）
+  或 Agent 定义（agent 节点）——执行时身份（``agent_execution_requests.
+  agent_definition_hash``）与当前 published 身份无法证明相等（记录被
+  retention 清扫、本地路径不留 code hash、实现未发布）时，旧产物按
+  哪份实现产出不可知 → 恒重跑（``implementation_drifted_nodes``）。
 
-本模块是纯函数：不触库、不触文件系统。可达性退化（产物缺失退化为
-重跑）在服务层 ``job_workflow_upgrade.py`` 判定，与本模块解耦。
+本模块是纯函数：不触库、不触文件系统。实现身份与 runtime_mutable 的
+解析由调用方（plan 层）先完成并传入，本模块只消费排除集。可达性退化
+（产物缺失退化为重跑）在服务层 ``job_workflow_upgrade.py`` 判定，与
+本模块解耦。
 """
 
 from __future__ import annotations
@@ -46,6 +67,7 @@ import json
 from dataclasses import asdict
 from typing import Any
 
+from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.skills.config import LATEST_REF
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.schema import WorkflowEdge, WorkflowNode
@@ -91,13 +113,41 @@ def _frozen_config_section(frozen_config_json: str | None, node_key: str) -> dic
     return section if isinstance(section, dict) else {}
 
 
+def _has_runtime_mutable_keys(node: WorkflowNode) -> bool:
+    """节点自声明 config_schema 是否含 ``runtime_mutable: true`` 业务键。
+
+    保留执行键由 loader 禁止重声明、``runtime_mutable_keys`` 本身剔除，
+    节点声明即完备口径。Agent 节点的 schema 主体在 Agent 定义里（节点
+    自声明被定义覆盖）——定义侧键由 plan 层
+    ``job_workflow_upgrade_impl._agent_definition_mutable_nodes`` 解析
+    AgentDefinition.config_schema 并入排除集（复审 HIGH-2），本函数只
+    覆盖节点自声明面。
+    """
+    return bool(runtime_mutable_keys(node.config_schema or {}))
+
+
+def runtime_mutable_excluded_nodes(definition: WorkflowDefinition) -> set[str]:
+    """含 runtime_mutable 键的可执行节点集（codex 四轮 P1-3 排除面）。"""
+    return {
+        key for key, node in definition.executable_nodes.items() if _has_runtime_mutable_keys(node)
+    }
+
+
 def node_is_inherit_excluded(node: WorkflowNode) -> bool:
-    """该节点不参与继承（issue #645 边界）：skill:latest / 分片 / 审批门。"""
+    """该节点不参与继承（issue #645 边界）：skill:latest / 分片 / 审批门
+    / 含 runtime_mutable config 键。
+
+    实现身份不可证明的排除（P1-1）不在此处：它需要执行记录与当前
+    published 的解析结果，由 plan 层算好传进
+    ``compute_inherit_reset_nodes``。
+    """
     if node.skill is not None and (node.skill.ref or LATEST_REF) == LATEST_REF:
         return True
     if node.shard is not None or node.reduce is not None:
         return True
-    return node.node_type == _APPROVAL_NODE_TYPE
+    if node.node_type == _APPROVAL_NODE_TYPE:
+        return True
+    return _has_runtime_mutable_keys(node)
 
 
 def _upstream_map(definition: WorkflowDefinition) -> dict[str, list[str]]:
@@ -176,6 +226,7 @@ def compute_inherit_reset_nodes(
     old_frozen_config_json: str | None,
     new_definition: WorkflowDefinition,
     new_frozen_config_json: str | None,
+    implementation_excluded: frozenset[str] | set[str] = frozenset(),
 ) -> set[str]:
     """新 revision 下需要重跑的节点集（变更节点 + 其下游闭包）。
 
@@ -183,12 +234,17 @@ def compute_inherit_reset_nodes(
       - 节点在新 revision 中不存在（删除节点）→ 不在结果里（job_nodes
         会被 mutation 重建，只保留新定义的节点集）；
     - per-node 哈希不等（定义/config/上游链任一变化）→ 变更；
-      - 节点命中排除规则（skill:latest / 分片 / 审批门）→ 无论新旧定义
-        是否相同都按变更处理（永远重跑，不继承）。
+      - 节点命中排除规则（skill:latest / 分片 / 审批门 /
+        runtime_mutable 键 / 实现身份不可证明）→ 无论新旧定义是否相同
+        都按变更处理（永远重跑，不继承）。
+
+    ``implementation_excluded``（P1-1）是 plan 层解析好的「实现身份
+    不可证明或已漂移」节点集（``job_workflow_upgrade_impl``）：执行时
+    身份与当前 published 身份证明相等且未漂移的节点才可继承。
     """
     old_hashes = compute_node_hashes(old_definition, old_frozen_config_json)
     new_hashes = compute_node_hashes(new_definition, new_frozen_config_json)
-    changed: set[str] = set()
+    changed: set[str] = set(implementation_excluded)
     for key, node in new_definition.executable_nodes.items():
         if node_is_inherit_excluded(node) or old_hashes.get(key) != new_hashes[key]:
             changed.add(key)

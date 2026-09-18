@@ -22,6 +22,11 @@ issue #645）在 lease guard 事务内调用，返回 ``(暂存件, 实际继承
   <name>`` 不含 node 身份，跨闭包重名只能一起重跑）——plan 阶段已按
   diff 重置面做过确定性排除，这里覆盖「未完成候选并入重置面」的组合
   场景与 plan/事务间的状态漂移。
+- P1-2（codex 四轮）：旧快照中被移除的 output 名与被删节点的产物不
+  留残——新 definition 的暂存名之外，旧快照侧「重置节点的被移除纯
+  输出名 + 被删节点的全部纯输出名与 runs 目录」一并暂存/清清单行
+  （``job_workflow_upgrade_removed_outputs`` 纯函数算面，A3 口径过滤：
+  保留节点声明的名字不碰）。
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from server.app.services.job_staged_cleanup import (
     commit_staged_outputs,
     delete_rerun_artifact_objects,
 )
+from server.app.services.job_workflow_upgrade_removed_outputs import removed_artifact_face
 
 if TYPE_CHECKING:
     from server.app.workflows.definition import WorkflowDefinition
@@ -68,13 +74,33 @@ def stage_upgrade_reset_outputs(
         set(definition.executable_nodes) - keep_keys,
     )
     reset_keys = [key for key in definition.executable_nodes if key not in keep_keys]
-    if artifact_mutation is None or not reset_keys:
+    if artifact_mutation is None:
+        return frozenset(keep_keys), None
+    # codex 四轮 P1-2：旧快照（事务前 job 快照仍是旧 revision）补出被移除
+    # output 名与被删节点面；无 artifact_mutation 时清单清理本就不生效
+    # （裸构造的安全子集，与上方 None 臂一致），有则进暂存面与 artifact_names。
+    from server.app.services.workflow_revision_format import definition_from_job_snapshot
+
+    removed = removed_artifact_face(
+        definition_from_job_snapshot(job), definition, frozenset(keep_keys), frozenset(reset_keys)
+    )
+    # codex 四轮复审 CRITICAL-1：被删节点的清理独立于重置面——只删终端
+    # 节点、其余全继承时 reset_keys 为空，旧 guard ``not reset_keys`` 直接
+    # 早退，被删节点的文件 / runs 目录 / 清单行全部遗留。removed 非空时
+    # 即使 reset_keys 为空也走 stage_outputs：staging_output_names(∅) 为
+    # 空、移动面只含 extra，安全。
+    if not reset_keys and not removed:
         return frozenset(keep_keys), None
     # closure=reset_keys：不沿下游再扩散。rerun 语义的下游闭包对 upgrade
     # 不成立——实际重置面（P1-2 的未完成候选并入后）可能不是下游封闭的，
     # 保留节点的产物与运行历史不许被重置节点的下游传播顺带暂存。
     return frozenset(keep_keys), artifact_mutation.stage_outputs(
-        job, reset_keys, definition, closure=frozenset(reset_keys)
+        job,
+        reset_keys,
+        definition,
+        closure=frozenset(reset_keys),
+        extra_names=removed.names,
+        extra_run_keys=removed.run_keys,
     )
 
 

@@ -86,6 +86,8 @@ class JobArtifactMutationService:
         definition: WorkflowDefinition,
         *,
         closure: set[str] | frozenset[str] | None = None,
+        extra_names: frozenset[str] | set[str] = frozenset(),
+        extra_run_keys: frozenset[str] | set[str] = frozenset(),
     ) -> StagedOutputs:
         """Move rerun outputs and run histories to reversible staging.
 
@@ -100,6 +102,11 @@ class JobArtifactMutationService:
         the same node) are never staged: removing them would leave the node
         waiting forever on an input no rerun producer rewrites (#114). On a
         successful rerun the node rewrites them, so run semantics are unchanged.
+
+        ``extra_names``/``extra_run_keys``（#645 codex 四轮 P1-2，upgrade
+        专用）：新 definition 声明面之外、需要一并暂存的旧产物名与被删
+        节点的运行历史目录（调用方从旧快照算好并按 A3 口径过滤）。它们
+        进入 ``artifact_names``（清单行删除同集合）与文件移动面。
 
         Returns a :class:`StagedOutputs` handle. Callers should invoke
         ``commit()`` after a successful database transaction, or ``rollback()``
@@ -122,10 +129,10 @@ class JobArtifactMutationService:
 
         # Node-scoped staging (adversarial review A3): a name shared with a
         # node outside the closure is never staged — see the pure helper.
-        outputs = staging_output_names(definition, affected_keys)
+        outputs = staging_output_names(definition, affected_keys) | set(extra_names)
 
         paths = set(outputs)
-        paths.update(f"runs/{key}" for key in affected_keys)
+        paths.update(f"runs/{key}" for key in affected_keys | set(extra_run_keys))
 
         staged_dir = storage_dir / ".staged"
         staged_dir.mkdir(parents=True, exist_ok=True)
