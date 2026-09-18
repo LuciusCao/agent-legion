@@ -133,6 +133,24 @@ def test_upload_artifact_direct_retries_5xx(
     assert ref is not None and ref["content_hash"] == HASH
 
 
+def test_upload_artifact_direct_does_not_reopen_after_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "output.json"
+    path.write_bytes(PAYLOAD)
+    stop = threading.Event()
+    received: list[bytes] = []
+
+    def _put(url: str, stream: BinaryIO, size_bytes: int) -> int:
+        received.append(stream.read())
+        stop.set()
+        return 500
+
+    monkeypatch.setattr(artifact_upload, "_put_stream", _put)
+    assert upload_artifact_direct(path, SPEC, stop=stop) is None
+    assert received == [PAYLOAD]
+
+
 def test_upload_artifact_direct_rejects_incomplete_spec(tmp_path: Path) -> None:
     path = tmp_path / "output.json"
     path.write_bytes(PAYLOAD)

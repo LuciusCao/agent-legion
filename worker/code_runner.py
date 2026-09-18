@@ -307,6 +307,8 @@ def execute_code(
     proc: subprocess.Popen[bytes] | None = None
     try:
         prepared = prepare_code_execution(client, claim, execution_dir, download_slots)
+        if ownership_lost.is_set():
+            return None
         manifest = prepared.manifest
         velites = resolve_sandbox_binary()
         if velites is None:
@@ -339,6 +341,10 @@ def execute_code(
         payload = pickle.dumps(
             build_child_payload(manifest, prepared.code_text, job_dir, materials=materials)
         )
+        # Materialization and payload construction can outlive the lease too;
+        # revalidate immediately before the sandbox process gains side effects.
+        if ownership_lost.is_set():
+            return None
         status.set_phase(execution_id, "running")
         log_fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
         try:
