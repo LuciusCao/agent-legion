@@ -13,6 +13,8 @@ def create_job_invalid_paths_router(
 
     @router.get("/jobs/{job_id}/{invalid_path:path}", response_model=ArtifactResponse)
     def reject_invalid_job_subpath(job_id: str, invalid_path: str) -> None:
+        # Legacy bare catch-all：scoped/成员/admin 语义由 job_group 的
+        # require_job_workspace_access 统一裁决（#745 job 归属守卫）。
         try:
             service.reject_subpath(job_id)
         except JobServiceError as exc:

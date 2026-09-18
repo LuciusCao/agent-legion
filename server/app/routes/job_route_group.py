@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
+from server.app.routes.external_artifacts import create_external_artifact_router
 from server.app.routes.failed_node_runs import create_failed_node_runs_router
 from server.app.routes.job_approvals import create_job_approvals_router
 from server.app.routes.job_artifacts import create_job_artifacts_router
@@ -25,6 +26,7 @@ from server.app.routes.runs import create_runs_router
 from server.app.routes.token_usage import create_token_usage_router
 from server.app.routes.workspace_runs import create_workspace_runs_router
 from server.app.services.artifact_store import ArtifactStore
+from server.app.services.external_artifact_access import ExternalArtifactAccessService
 from server.app.services.job_service_factory import JobServices
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
@@ -70,6 +72,18 @@ def include_job_routes(
     )
     router.include_router(create_job_workflow_upgrade_batch_router(services.workflow_upgrade))
     router.include_router(create_job_artifacts_router(services.artifacts, settings, services.logs))
+    # #631: workspace-prefixed read surface for external systems (status +
+    # manifest + raw). Mounted in job_group so require_workspace_access applies
+    # (the #626 workspace API token uses it unchanged); the service adds the
+    # explicit job.workspace_id comparison that /jobs/{job_id}-shaped routes
+    # cannot get from the path-param guard.
+    router.include_router(
+        create_external_artifact_router(
+            ExternalArtifactAccessService(
+                job_db, settings, object_store=object_store, artifact_service=services.artifacts
+            )
+        )
+    )
     router.include_router(create_token_usage_router(services.queries, settings))
     router.include_router(create_job_invalid_paths_router(services.artifacts))
     router.include_router(create_workspace_runs_router(services.queries))

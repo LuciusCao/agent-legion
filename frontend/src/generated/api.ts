@@ -2177,6 +2177,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get External Job Status */
+    get: operations['get_external_job_status_api_workspaces__workspace_id__jobs__job_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/{job_id}/approvals': {
     parameters: {
       query?: never
@@ -2186,6 +2203,40 @@ export interface paths {
     }
     /** List Approval Decisions */
     get: operations['list_approval_decisions_api_workspaces__workspace_id__jobs__job_id__approvals_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List External Artifacts */
+    get: operations['list_external_artifacts_api_workspaces__workspace_id__jobs__job_id__artifacts_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get External Artifact Raw */
+    get: operations['get_external_artifact_raw_api_workspaces__workspace_id__jobs__job_id__artifacts__artifact_name__raw_get']
     put?: never
     post?: never
     delete?: never
@@ -4204,6 +4255,97 @@ export interface components {
       paused: boolean
       /** Target Node Key */
       target_node_key?: string | null
+    }
+    /**
+     * ExternalArtifactEntry
+     * @description One manifest entry: ``storage=object`` rows come from the authoritative
+     *     job_artifacts manifest (size/content_hash/uploaded_at distinguish the
+     *     current execution after a rerun, #508); ``local`` rows are legacy
+     *     job_dir-only names with no manifest metadata.
+     */
+    ExternalArtifactEntry: {
+      /**
+       * Content Hash
+       * @default
+       */
+      content_hash: string
+      /**
+       * Media Type
+       * @description Content-Type the raw endpoint serves (whitelist-gated; JSON/text and non-whitelisted extensions download as octet-stream)
+       * @default application/octet-stream
+       */
+      media_type: string
+      /** Name */
+      name: string
+      /**
+       * Node Key
+       * @default
+       */
+      node_key: string
+      /** Size Bytes */
+      size_bytes?: number | null
+      /**
+       * Storage
+       * @description "object" (authoritative manifest row) or "local"
+       */
+      storage: string
+      /** Uploaded At */
+      uploaded_at?: string | null
+    }
+    /** ExternalArtifactListResponse */
+    ExternalArtifactListResponse: {
+      /** Artifacts */
+      artifacts?: components['schemas']['ExternalArtifactEntry'][]
+      /** Job Id */
+      job_id: string
+      /**
+       * Object Storage Enabled
+       * @description False when the instance has no bucket configured: object-backed artifacts are unreadable and only local job_dir names list
+       */
+      object_storage_enabled: boolean
+      /** Status */
+      status: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /**
+     * ExternalJobStatusResponse
+     * @description Lightweight job view for the poll-then-download loop: callers need
+     *     status and the artifact manifest, not the full JobDetail payload.
+     */
+    ExternalJobStatusResponse: {
+      /** Artifacts */
+      artifacts?: string[]
+      /**
+       * Completed Nodes
+       * @default 0
+       */
+      completed_nodes: number
+      /** Created At */
+      created_at?: string | null
+      /**
+       * Error Summary
+       * @default
+       */
+      error_summary: string
+      /** Job Id */
+      job_id: string
+      /**
+       * Outcome
+       * @default
+       */
+      outcome: string
+      /** Status */
+      status: string
+      /**
+       * Total Nodes
+       * @default 0
+       */
+      total_nodes: number
+      /** Updated At */
+      updated_at?: string | null
+      /** Workspace Id */
+      workspace_id: string
     }
     /** FailedNodeRunItem */
     FailedNodeRunItem: {
@@ -9748,6 +9890,17 @@ export interface operations {
           'application/octet-stream': unknown
         }
       }
+      /** @description Partial Content (Range request) */
+      206: {
+        headers: {
+          'Content-Length'?: string
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -12595,6 +12748,38 @@ export interface operations {
       }
     }
   }
+  get_external_job_status_api_workspaces__workspace_id__jobs__job_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalJobStatusResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_approval_decisions_api_workspaces__workspace_id__jobs__job_id__approvals_get: {
     parameters: {
       query?: never
@@ -12614,6 +12799,84 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ApprovalDecisionListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_external_artifacts_api_workspaces__workspace_id__jobs__job_id__artifacts_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalArtifactListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_external_artifact_raw_api_workspaces__workspace_id__jobs__job_id__artifacts__artifact_name__raw_get: {
+    parameters: {
+      query?: never
+      header?: {
+        Range?: string | null
+      }
+      path: {
+        workspace_id: string
+        job_id: string
+        artifact_name: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
+      /** @description Partial Content (Range request) */
+      206: {
+        headers: {
+          'Content-Length'?: string
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
         }
       }
       /** @description Validation Error */

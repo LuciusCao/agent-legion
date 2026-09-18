@@ -440,3 +440,114 @@ with its direct evidence — no more inferring from marker files.
   longer embeds artifacts (`worker/upload/queue.py`).
 - **Policy:** precondition 1 (§2) is a hard blocker — encrypted transport is
   not policy approval.
+
+## 9. External artifact access: submit → poll → download (issue #631)
+
+External systems that submit jobs through the workspace API read results back
+with three read-only endpoints, all scoped by the workspace in the URL path:
+
+| 端点 | 作用 |
+| --- | --- |
+| `GET /api/workspaces/{workspace_id}/jobs/{job_id}` | 轻量状态：status/outcome/进度/产物名单 |
+| `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts` | 产物清单（名字、形态、大小、content_hash、uploaded_at、媒体类型） |
+| `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw` | 产物字节流（支持 `Range`，媒体类型按白名单） |
+
+**鉴权.** 与其它 workspace 端点同一守卫（`require_workspace_access`）：
+会话 cookie 或 #626 的 workspace API token（`Authorization: Bearer <token>`
+——Bearer 通道免 CSRF）。跨 workspace 的 job_id 一律 404（归属校验兼作
+存在性校验，不能枚举其它 workspace 的 job）。#626 落地前的 scoped Bearer
+token 同样可用：绑定了 `scoped_workspace_id` 的 token 只能读绑定 workspace
+（不匹配同样 404，防枚举语义一致）。
+
+**边界声明（legacy 裸路由）.** workspace 隔离原本只覆盖上表三个前缀端点，
+控制台前端仍在用的 legacy 裸路由（`GET /api/jobs/{job_id}`、
+`GET /api/jobs/{job_id}/artifacts/{name}`、`.../raw`、`/runs/{run_id}/log`、
+`/token-usage`）不带 workspace 前缀。#745 起 job 路由组统一挂
+`require_job_workspace_access`——按 job 行反查授权域，裸路由与前缀家族
+同一语义：绑定 `scoped_workspace_id` 的 scoped token 只读绑定 workspace
+（跨 workspace 与未知 job 一律 404，防枚举语义一致），成员按 membership
+（viewer 只读），全会话 admin 走 fast path。#631 攻击审查 H2 曾以路由级
+`reject_scoped_token_on_bare_job_route`（scoped 一律 404）收口，rebase
+#745 后该守卫唯一存留效果是误杀「绑定 token 读自己 workspace」（#745
+的 IDOR 矩阵钉为既有行为），已随 rebase 移除——防枚举与跨 workspace
+隔离由 router 级守卫以同一强度保证。剩余边界：裸路由对全会话用户的
+workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前缀端点一
+致）。外部系统的接入契约不变：只用上面三个前缀端点。
+
+**读取语义.**
+
+- 产物优先从对象存储权威副本读取（`job_artifacts` manifest）——有
+  manifest 行的产物，下载字节与清单公布的 `content_hash`/`uploaded_at`
+  对应（本地 job_dir 缓存可能滞后于 manifest）；本地副本仅服务从未
+  上传的 legacy 产物。对象存储未配置时清单降级为本地名并标
+  `object_storage_enabled: false`。
+- 产物名可以是 job_dir 相对子路径（`reports/final.json`）：清单列出
+  的名字即下载 URL 里的名字（`{artifact_name:path}`）；绝对名、`..`
+  段、反斜杠、`runs/` 前缀、点前缀段与含控制字符（含 `%00`）或超长
+  段（>200 字节）的名字一律 400。
+- job 未完成时清单是空数组 + 当前 status（不是 404）——外部轮询以
+  status 为准。
+- 重跑后清单/读取都回答「当前最新」执行：`content_hash` 与
+  `uploaded_at` 标识这次下载对应哪次执行（#508）。
+- 对象被 bucket lifecycle 删除时 raw 下载 404（不是 500）。
+- manifest 行的 `storage_key` 读侧强制校验本 job 的
+  `jobs/{workspace}/{job_id}/` 前缀：行被污染/写歪（未来写入方失守、
+  运维 SQL 误操作）时按 404 处理并记 warning，绝不读穿 workspace 边界。
+
+**最小完整示例**（curl；提交一步引用 #626 的 workspace API token 用法，
+token 发放机制落地前可先用控制台会话 cookie）：
+
+```bash
+HOST="https://agent-legion.example.com"
+WS="my-workspace"
+# 1) 提交（#626 workspace API token；未落地时用控制台登录的会话 cookie）
+JOB_ID=$(curl -sS -X POST "$HOST/api/workspaces/$WS/job-batches" \
+  -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source_kind": "direct_ids", "knowledge_point_ids": ["Q003"]}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["jobs"][0]["id"])')
+
+# 2) 轮询状态直到 completed / failed
+while :; do
+  STATUS=$(curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
+    -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
+  echo "status: $STATUS"
+  case "$STATUS" in completed|failed|cancelled) break;; esac
+  sleep 15
+done
+
+# 3) 取产物清单（content_hash / uploaded_at 区分执行）
+curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
+  -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
+
+# 4) 下载指定产物（JSON/HTML/PDF/视频同一入口；视频可带 Range）
+curl -sS -o report.pdf "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/report.pdf/raw" \
+  -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
+```
+
+Python 等价（`requests`）：
+
+```python
+import time, requests
+
+s = requests.Session()
+s.headers["Authorization"] = f"Bearer {WORKSPACE_API_TOKEN}"  # #626
+
+job_id = s.post(
+    f"{HOST}/api/workspaces/{WS}/job-batches",
+    json={"source_kind": "direct_ids", "knowledge_point_ids": ["Q003"]},
+).json()["jobs"][0]["id"]
+
+while (st := s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()["status"]) not in {
+    "completed", "failed", "cancelled"
+}:
+    time.sleep(15)
+
+manifest = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts").json()
+for entry in manifest["artifacts"]:
+    blob = s.get(
+        f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts/{entry['name']}/raw"
+    ).content
+    # entry["content_hash"] 是未压缩内容的 sha256，可校验完整性
+```

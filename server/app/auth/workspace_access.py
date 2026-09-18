@@ -140,6 +140,12 @@ def require_job_workspace_access(
         return user
     if refuse_off_allowlist_api_scope(request, user):
         return user
+    # Malformed job ids (NUL bytes etc.) are rejected before the job lookup:
+    # the scope resolution queries by the raw path param, and psycopg would
+    # turn an embedded NUL into a DataError (500) instead of a clean miss.
+    job_id = request.path_params.get("job_id")
+    if job_id is not None and not job_id.isprintable():
+        raise HTTPException(status_code=400, detail="Invalid job id")
     # Scoped-token binding runs before the admin fast path (see
     # _resolve_job_workspace_scope): a workspace-bound run token must stay
     # bound even when the minter is an admin.
@@ -162,4 +168,26 @@ def require_job_workspace_access(
     minimum = "viewer" if request.method in _SAFE_METHODS else "editor"
     if _MEMBER_ROLE_RANK.get(role, 0) < _MEMBER_ROLE_RANK[minimum]:
         raise HTTPException(status_code=403, detail="Insufficient workspace role")
+    return user
+
+
+def require_scoped_workspace_match(
+    workspace_id: str,
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Scoped-token binding guard with no-enumeration semantics (#631).
+
+    Companion to require_workspace_access for mixed-audience read surfaces
+    that answer cross-workspace probes with 404: the membership guard checks
+    the minting user's role/membership and cannot see the Bearer token's
+    ``scoped_workspace_id``, so without this check a workspace-bound scoped
+    token could read through any workspace its user can see. A 403 would leak
+    which workspaces exist for that user — mismatches stay 404. Full sessions
+    and unbound scoped tokens pass (membership-only, schema v45 / #158); for
+    403-style enforcement see ``enforce_scoped_workspace_binding``
+    (auth/dependencies.py, studio chat).
+    """
+    bound = user.get("scoped_workspace_id")
+    if bound and bound != workspace_id:
+        raise HTTPException(status_code=404, detail="Workspace not found")
     return user

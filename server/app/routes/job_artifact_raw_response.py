@@ -10,10 +10,10 @@ from __future__ import annotations
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from server.app.routes.job_artifact_media import (
+from server.app.services.job_artifact_media import (
     FALLBACK_MEDIA_TYPE as _FALLBACK_MEDIA_TYPE,
 )
-from server.app.routes.job_artifact_media import (
+from server.app.services.job_artifact_media import (
     raw_media_type,
 )
 from server.app.services.job_artifact_raw import RawArtifact
