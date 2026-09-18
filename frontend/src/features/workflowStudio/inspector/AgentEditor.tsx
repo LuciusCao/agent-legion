@@ -44,14 +44,25 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-// api() 给非 2xx 错误挂 status（409 = capability 被占用 / #749 CAS 草稿被覆盖）。
-const isConflictError = (err: unknown) =>
-  (err as { status?: number } | null)?.status === 409
+const statusOf = (err: unknown) =>
+  (err as { status?: number } | null)?.status
+
+// #749：发布 409 双语义分流。capability 占用（AgentService.publish 先跑
+// _require_free_capability）的 detail 以 "capability" 起头并含 "already
+// published"（agent_service.py / versioned_entities.py 的 _integrity_conflict
+// 两种来路同款特征）——按提示「刷新重存」永远不可能成功（capability 被
+// 别的 Agent 占着），必须直显后端 detail（改 capability / 归档占用者），
+// 这是 #749 前的基线行为。其余 409 是 CAS 拒绝（draft hash mismatch）。
+const isCapabilityConflict = (err: unknown) => {
+  const message = errorMessage(err).toLowerCase()
+  return message.startsWith('capability') && message.includes('already published')
+}
 
 // #749：发布 CAS（expected_hash）被服务端拒绝的专用文案——草稿在保存后被
 // 其他会话/编辑器覆盖，本地表单已不是要发布的身份。与聊天草稿卡的 409
-// 文案同一交互模式：内联提示 + 引导从最新草稿重来，不发明新 UI。
-const DRAFT_OVERRIDDEN_HINT = '草稿已被其他会话或编辑器更新，请刷新后重新保存再发布'
+// 文案同一交互模式：内联提示 + 引导重新拉取，不发明新 UI（本面板无刷新
+// 入口，重新打开节点详情即重拉）。
+const DRAFT_OVERRIDDEN_HINT = '草稿已被其他会话或编辑器更新，请重新打开面板从最新草稿发布'
 
 /**
  * Agent 定义编辑器。发布后的 definition 不可变：编辑已发布 Agent 就是
@@ -238,7 +249,7 @@ export function AgentEditor({
       setError(errorMessage(err))
       // #436 独立复审：创建 409 引导「请直接编辑」，但占用者可能还没进
       // 列表缓存——对 409 同样触发 onChanged 失效重取，引导入口一键可达。
-      if (creating && isConflictError(err)) onChanged()
+      if (creating && statusOf(err) === 409) onChanged()
     } finally {
       setBusy(false)
     }
@@ -257,9 +268,19 @@ export function AgentEditor({
       showToast('已发布', 'success')
       onChanged()
     } catch (err) {
-      // 409 双语义：CAS 拒绝（草稿被覆盖）用引导刷新的专用文案（与聊天
-      // 草稿卡同一模式）；capability 占用仍是后端 detail 直显。
-      setError(isConflictError(err) ? DRAFT_OVERRIDDEN_HINT : errorMessage(err))
+      // #749 修真双分支：409 双语义不能共用 CAS 文案——capability 被占用
+      // 时按「刷新重存」引导是误导死循环（真实出路是改 capability 或归档
+      // 占用者，直显后端 detail，#749 前的基线行为）；CAS 拒绝（草稿被
+      // 覆盖）才用引导重来的专用文案。
+      if (statusOf(err) === 409) {
+        setError(isCapabilityConflict(err) ? errorMessage(err) : DRAFT_OVERRIDDEN_HINT)
+      } else if (statusOf(err) === 404) {
+        // 无草稿可发：实体刚被别处发布过（409 之外的常见竞态收尾），
+        // 与聊天草稿卡同款可行动文案（EntityDraftPublishButton）。
+        setError('没有待发布的草稿（可能刚已发布过）')
+      } else {
+        setError(errorMessage(err))
+      }
     } finally {
       setBusy(false)
     }
@@ -431,12 +452,13 @@ export function AgentEditor({
           onClose={() => setVersionsOpen(false)}
           onRolledBack={() => {
             setVersionsOpen(false)
-            // 后端 rollback 直接落 published 新版本（无 draft）：重新拉取详情
-            // 同步表单，并清掉 draft 标记与草稿身份（#749）。
-            void load().then(() => {
-              setHasDraft(false)
-              setDraftHash('')
-            })
+            // 后端 rollback 不删草稿行（versioned_entities.rollback 只归档
+            // published + 插新 published）：有草稿时草稿仍在，发布入口保持
+            // 可用——详情重拉会把 draftHash 同步成草稿行的现值，这里不再
+            // 强清（#749 修：强清会让「回滚→发布」多一步无谓的重新保存）。
+            // 无草稿时 load() 里 setHasDraft(false) / setDraftHash('') 本就
+            // 落定（pre-existing），.then 的强清对它是冗余兜底。
+            void load()
             onChanged()
           }}
         />

@@ -741,10 +741,16 @@ exemptions:
     join the existing form lifecycle. The catalog plumbing is already split out (useAgentRuntimes hook);
     what stays here is the interaction itself — splitting render from state would separate the two halves
     of every conditional being tested. Remove when the editor gains a shared tool-picker component with
-    WorkflowNodeToolsEditor.'
+    WorkflowNodeToolsEditor. #749 re-signs the ceiling to 373: the review fix (409 true two-branch —
+    isCapabilityConflict distinguishes capability occupancy from CAS rejection per the agent_service /
+    _integrity_conflict detail signature, the former shows the backend detail verbatim; the 404 branch
+    copy; rollback no longer force-clears the draft identity since VersionedEntityStore.rollback keeps
+    the draft row) grew the module past the 357+15 band. Time-boxed per #641; harvest at the #456 sweep
+    or split the error dispatch / versions orchestration.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 357
+  ceiling: 373
+  expires: 2026-12-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.ts
   reason: '#443/#476 add patchWorkflowNodeTools — one patchNode call site with the empty-means-undeclared
@@ -1044,4 +1050,18 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/647
   ceiling: 353
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodeSection.tsx
+  reason: '#749 review 修复（P2-2/P3-2/P3-3）把 CAS 发布的时序与门控做实：保存响应
+    的 code_hash 同步回填（runSavingDraft 包装 run，消灭保存→立即发布的假 409 窗口）、
+    发布 404 分支文案（publishErrorFor）、缺 draft_code_hash 时按钮 disabled + title
+    提示（publishDisabled/publishDisabledReason 两个 props 经 WorkflowNodeCodeActions
+    透传）。修前版本靠可点后 reject 封 hash 缺失口、靠 fire-and-forget reload 回填
+    hash，都是时序谎言；修复的诚实成本使有效行 184→213（超 179+15 带 19 行）。面板
+    仍是节点代码检查器的单一 section 组件；下一次增长应拆 actions 编排或错误文案
+    模块。时间盒：#456 预算清扫时重签或拆分。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 213
   expires: 2026-12-31

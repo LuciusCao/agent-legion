@@ -219,6 +219,111 @@ describe('WorkflowNodeCodeSection', () => {
     expect(screen.getByRole('button', { name: '发布' })).toBeEnabled()
   })
 
+  // #749 修（review P3-3）：404 = 无草稿可发（刚在别处发布过），对齐
+  // EntityDraftPublishButton 的可行动文案。
+  it('shows the no-draft hint when publish returns 404', async () => {
+    mockApi.mockResolvedValue({ ...customResponse, has_draft: true, draft_code_hash: 'h1' })
+    renderSection()
+    await screen.findByText(/自定义 v1/)
+
+    mockApi.mockRejectedValueOnce(
+      Object.assign(new Error('no draft for node_code wf:fetch_items'), { status: 404 })
+    )
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        '没有待发布的草稿（可能刚已发布过）'
+      )
+    )
+  })
+
+  // #749 修（review P2-2）：保存→立即发布必须携带保存响应回填的新 hash
+  // ——PUT 响应的 code_hash 同步进 state，不等 fire-and-forget 的 reload
+  // （对齐 AgentEditor.handleSaveDraft；修前闭包里还是旧 hash，撞假 409）。
+  it('publishes immediately after saving, carrying the saved draft hash', async () => {
+    mockApi.mockResolvedValue(customResponse)
+    renderSection()
+    await screen.findByText(/自定义 v1/)
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.change(screen.getByLabelText('节点代码内容'), {
+      target: { value: DRAFT_CODE },
+    })
+    // 保存流程会触发两次 BASE GET（保存后的后台 reload、发布后的 reload），
+    // 与用户的「立即发布」赛跑。按 BASE GET 的次数分流：第 1 次是保存后的
+    // reload（草稿在，回填逻辑已先行同步了同值）；第 2 次起是发布后的
+    // reload（无草稿）。PUT 与 publish 各自独立响应。
+    let baseGetCount = 0
+    mockApi.mockImplementation(async (path: unknown, init?: unknown) => {
+      if (init && (init as { method?: string }).method === 'PUT') {
+        return versionRow(2, 'draft')
+      }
+      if (path === `${BASE}/publish`) {
+        return versionRow(2, 'published')
+      }
+      if (String(path).startsWith(BASE)) {
+        baseGetCount += 1
+        if (baseGetCount === 1) {
+          return {
+            ...customResponse,
+            has_draft: true,
+            draft_code: DRAFT_CODE,
+            draft_version: 2,
+            draft_code_hash: 'abc',
+          }
+        }
+        return { ...customResponse, version: 2 }
+      }
+      return customResponse
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('草稿已保存')
+    )
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('已发布，新执行立即生效')
+    )
+    const publishCall = mockApi.mock.calls.find(
+      ([path]) => path === `${BASE}/publish`
+    )
+    expect(publishCall).toBeDefined()
+    expect(publishCall![1]?.method).toBe('POST')
+    // versionRow 的 code_hash 是 'abc'：保存响应同步回填，不等 reload
+    //（此断言正是修的目标：回填先行，发布不撞旧 hash 的假 409）。
+    expect(JSON.parse(String(publishCall![1]?.body))).toEqual({
+      expected_hash: 'abc',
+    })
+  })
+
+  // #749 修（review P3-2）：GET 有草稿但没带回 draft_code_hash（版本偏斜，
+  // 旧后端）→ 发布按钮禁用 + title 说明，而不是可点后 reject（对齐
+  // EntityDraftPublishButton 的 null-hash 立场：无令牌发布退回无核对语义）。
+  it('disables publish with a title hint when a draft has no hash (old backend)', async () => {
+    mockApi.mockResolvedValue({
+      ...customResponse,
+      has_draft: true,
+      draft_code: DRAFT_CODE,
+      draft_code_hash: null,
+    })
+    renderSection()
+    await screen.findByText(/有未发布草稿/)
+
+    const publishButton = screen.getByRole('button', { name: '发布' })
+    expect(publishButton).toBeDisabled()
+    // 禁用按钮不触发自身 hover——title 挂在外层 span 上（与聊天草稿卡
+    // 同一可达性形态）。
+    expect(publishButton.closest('span')).toHaveAttribute(
+      'title',
+      '草稿缺少可核对的版本标识（后端版本偏斜），请升级后端再发布'
+    )
+    fireEvent.click(publishButton)
+    expect(mockApi.mock.calls).toHaveLength(1)
+  })
+
   it('lists versions and rolls back to an old one', async () => {
     mockApi.mockResolvedValue({ ...customResponse, version: 2 })
     renderSection()

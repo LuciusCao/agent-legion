@@ -287,10 +287,55 @@ describe('AgentEditor tool catalog (#476)', () => {
         fireEvent.click(publish)
       })
       expect(screen.getByRole('alert')).toHaveTextContent(
-        '草稿已被其他会话或编辑器更新，请刷新后重新保存再发布'
+        '草稿已被其他会话或编辑器更新，请重新打开面板从最新草稿发布'
       )
       expect(useUiStore.getState().toast).toBeNull()
       expect(screen.getByRole('button', { name: '发布' })).toBeEnabled()
+    })
+
+    // #749 修（review P2-1）：capability 占用的 409 与 CAS 拒绝共用状态码，
+    // 但出路完全不同（改 capability / 归档占用者，而非「刷新重存」）——
+    // 必须直显后端 detail，否则按 CAS 文案引导是误导死循环（回归到
+    // #749 前的基线行为）。
+    it('服务端 409（capability 被占用）：直显后端 detail，不用 CAS 文案', async () => {
+      mocks.fetchAgentDefinition.mockResolvedValue(draftDetail)
+      mocks.publishAgent.mockRejectedValue(
+        Object.assign(
+          new Error(
+            "capability 'gen' is already published by Agent 'agent-b' in this workspace; exactly one published Agent per capability"
+          ),
+          { status: 409 }
+        )
+      )
+      renderEditor('agent-a')
+      const publish = await screen.findByRole('button', { name: '发布' })
+
+      await act(async () => {
+        fireEvent.click(publish)
+      })
+      const alert = screen.getByRole('alert')
+      expect(alert).toHaveTextContent("capability 'gen' is already published")
+      expect(alert).toHaveTextContent("Agent 'agent-b'")
+      // 没有被 CAS 文案吞掉（那是误导死循环）。
+      expect(alert).not.toHaveTextContent('草稿已被其他会话或编辑器更新')
+    })
+
+    // #749 修（review P3-3）：404 = 无草稿可发（刚在别处发布过），对齐
+    // EntityDraftPublishButton 的可行动文案。
+    it('服务端 404（无草稿可发）：可行动文案而非英文 detail', async () => {
+      mocks.fetchAgentDefinition.mockResolvedValue(draftDetail)
+      mocks.publishAgent.mockRejectedValue(
+        Object.assign(new Error('no draft for agent agent-a'), { status: 404 })
+      )
+      renderEditor('agent-a')
+      const publish = await screen.findByRole('button', { name: '发布' })
+
+      await act(async () => {
+        fireEvent.click(publish)
+      })
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        '没有待发布的草稿（可能刚已发布过）'
+      )
     })
 
     it('无草稿身份（definition_hash 缺失）时发布按钮禁用', async () => {
