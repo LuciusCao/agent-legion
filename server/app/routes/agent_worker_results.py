@@ -15,6 +15,34 @@ _MAX_OUTPUT_ARTIFACTS = 128
 _MAX_ERROR_MESSAGE_CHARS = 4000
 _MAX_RUN_DIR_CHARS = 256
 _MAX_CONNECTION_KEY_CHARS = MAX_CONNECTION_KEY_CHARS
+# #748: optional agent-crash stderr tail the Worker appends to the result
+# metadata; capped at the error_message budget (the Worker truncates to the
+# same bound, the reader re-truncates defensively for older/other writers).
+_MAX_AGENT_STDERR_TAIL_CHARS = 4000
+# #748 R2 P2-1: the Worker's X-Agent-Result byte budget (h11 caps one HTTP
+# event at 16 KiB) can force a 128-entry direct-upload artifact manifest to
+# degrade to a kept PREFIX (or, at the extreme, an empty list). The Worker
+# stamps these markers so the reader can tell "truncated by the writer"
+# apart from "reported none"; both keys are optional and tolerated-absent
+# like agent_stderr_tail above (older Workers / non-truncating shapes).
+ARTIFACTS_TRUNCATED_KEY = "output_artifacts_truncated"
+ARTIFACTS_TOTAL_KEY = "output_artifacts_total"
+
+
+def _recover_result_header(raw: str) -> str:
+    """Undo the transport decoding of the X-Agent-Result header (#748 P2).
+
+    The Worker sends the metadata JSON as raw UTF-8 BYTES (h11 keeps header
+    values as bytes; Starlette decodes them latin-1 — the roundtrip is
+    verified against the real uvicorn+h11+requests chain). This reverses
+    exactly that: latin-1 re-encode → UTF-8 decode. The escape hatch keeps
+    legacy all-ASCII payloads (already identical in both encodings) and
+    hand-built test inputs working — any value that is not valid UTF-8 in
+    this direction is passed through untouched."""
+    try:
+        return raw.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return raw
 
 
 def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
@@ -54,6 +82,16 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
     auth_failure_raw = metadata.get("auth_failure_connection", "")
     if not isinstance(auth_failure_raw, str) or len(auth_failure_raw) > _MAX_CONNECTION_KEY_CHARS:
         raise ValueError("invalid auth_failure_connection")
+    # #748: bounded, optional stderr tail for agent-crash attribution
+    # (absent for completed/cancelled/timeout runs and older Workers).
+    agent_stderr_tail = str(metadata.get("agent_stderr_tail", ""))[:_MAX_AGENT_STDERR_TAIL_CHARS]
+    # #748 R2 P2-1: writer-side artifact-list truncation markers. The Worker
+    # only emits them when the byte budget forced a degrade, and then
+    # ALWAYS as a pair; tolerate a lone/missing half the same way (absent =
+    # full list, non-int total = treat as truncated with unknown origin).
+    artifacts_truncated = metadata.get(ARTIFACTS_TRUNCATED_KEY) is True
+    artifacts_total_raw = metadata.get(ARTIFACTS_TOTAL_KEY, 0)
+    artifacts_total = artifacts_total_raw if type(artifacts_total_raw) is int else 0
     outcome = AgentOutcome(
         status=status,  # type: ignore[arg-type]
         exit_code=exit_code,
@@ -62,6 +100,9 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         output_artifacts=output_artifacts,
         run_dir=run_dir,
         auth_failure_connection=auth_failure_raw.strip(),
+        agent_stderr_tail=agent_stderr_tail,
+        output_artifacts_truncated=artifacts_truncated,
+        output_artifacts_total=artifacts_total,
     )
     record = {
         "status": status,
@@ -70,5 +111,8 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         "output_artifacts": output_artifacts,
         "run_dir": run_dir,
         "auth_failure_connection": auth_failure_raw.strip(),
+        "agent_stderr_tail": agent_stderr_tail,
+        ARTIFACTS_TRUNCATED_KEY: artifacts_truncated,
+        ARTIFACTS_TOTAL_KEY: artifacts_total,
     }
     return outcome, record

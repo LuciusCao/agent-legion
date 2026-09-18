@@ -1001,3 +1001,43 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/647
   ceiling: 353
   expires: 2026-12-31
+- check: architecture.file_budget
+  path: shared/pi_events.py
+  reason: '#748 攻击性 review P1/P2：stderr 抢救的幂等锚点落进扫描本趟——
+    scan_and_compress_pi_events 增加 stderr_sink 参数（重写前把脱敏后的
+    tail 原子写盘，非 JSON 行在 replace 后永久消失，直传回落/重启恢复的
+    二趟 prepare 从锚点文件读回而非二扫），外加 sink 写失败的调用点
+    best-effort 捕获（压缩永不因 sink 不可写失败）。防御性正确性代码使
+    有效行 77→102（超 growth_allowance 带）。时间盒：stderr 留痕管线
+    稳定后若下沉为独立 sink 模块（shared 侧 stdlib-only 约束内的拆分），
+    重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 102
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: worker/host/transfer.py
+  reason: '#748 R2 复审 P2-1：X-Agent-Result 头预算的第三级降级——output_artifacts
+    直传 ref 形态（128 条 ~25KB）把头推破 h11 16KB，成功运行同样中招（成功上报
+    也带产物清单）。收缩循环扩展为多级降级（tail → error_message → 产物前缀
+    截断 + output_artifacts_truncated/total 标记，清单整体可降级为空列表保投递）。
+    防御性正确性代码使有效行 126→142（超 growth_allowance 带）。时间盒：若
+    结果头改走 body 或产物清单下沉独立通道（协议 v6 候选），收缩循环随之
+    退役并重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 142
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: worker/upload/stderr_evidence.py
+  reason: '#748 R2 复审 P2-2/P2-3/P3-3b/P3-4：脱敏先于截断（跨 200 边界密钥
+    残段不再漏出）、register_secrets 注册 worker 配置 environment 块的值
+    （secret 注入 agent 子进程的官方通道此前零覆盖，含线程安全锁）、值长
+    降序替换 + 字节阈值 + ghp_/gho_/xox[bap]- 形态族、锚点重写失败降级为
+    截断为空（宁丢证据不外发密钥）。防御性正确性代码使有效行 47→67（超
+    growth_allowance 带）。时间盒：脱敏面若与 worker 配置加载统一收口
+    （敏感值集中注册），此处重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 67
+  expires: 2026-12-31

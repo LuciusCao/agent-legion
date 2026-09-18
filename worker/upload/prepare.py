@@ -11,11 +11,17 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from shared.pi_events import (
-    compress_pi_events,
-    scan_and_compress_pi_events,
+from shared.pi_events import scan_and_compress_pi_events
+from worker.upload.result_metadata import (
+    MAX_ERROR_MESSAGE_CHARS,
+    failed_metadata,
+    write_empty_archive,
 )
-from worker.upload.result_metadata import failed_metadata, write_empty_archive
+from worker.upload.stderr_evidence import (
+    AGENT_STDERR_FILENAME,
+    stderr_error_message,
+    stderr_tail_for_run,
+)
 
 if TYPE_CHECKING:
     from worker.upload.queue import UploadTask
@@ -61,11 +67,20 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     events = run_dir / "events.jsonl"
     # Pi exits 0 even when the model call fails (e.g. provider 401); one
     # pass folds the model-error scan into the compression rewrite.
+    # #748: the pass persists the non-JSON (merged-stderr) tail to the sink
+    # file at scan time; stderr_tail_for_run reads it back when a re-entry
+    # (direct-upload fallback / worker-restart restore) finds the events
+    # file already compressed — a second scan would yield nothing.
     if task.exit_code == 0:
-        model_error, _, _ = scan_and_compress_pi_events(events)
+        model_error, _, _, scanned_tail = scan_and_compress_pi_events(
+            events, stderr_sink=run_dir / AGENT_STDERR_FILENAME
+        )
     else:
         model_error = None
-        compress_pi_events(events)
+        _, _, _, scanned_tail = scan_and_compress_pi_events(
+            events, stderr_sink=run_dir / AGENT_STDERR_FILENAME
+        )
+    stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
     if task.exit_code == 130:
         result_status, error = "cancelled", "Agent Worker is shutting down"
@@ -74,8 +89,13 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
             result_status, error = "failed", model_error
         else:
             result_status, error = "completed", ""
+    elif task.exit_code == 124:
+        # Timeout kill (synthetic 124 from wait_for_exit): stderr at this
+        # point is partial-run noise, not a crash cause — keep the
+        # established timeout attribution (#609) untouched.
+        result_status, error = "failed", "Agent process timed out"
     else:
-        result_status, error = "failed", f"Agent process exited {task.exit_code}"
+        result_status, error = "failed", stderr_error_message(task.exit_code, stderr_tail)
     metadata = {
         "status": result_status,
         "exit_code": task.exit_code,
@@ -84,6 +104,13 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         "output_artifacts": {},
         "run_dir": PurePosixPath(run_dir.relative_to(job_dir)).as_posix(),
     }
+    # #748: agent_stderr_tail rides the report metadata (not just the
+    # archive) so the DB row + external error_summary surface the crash
+    # reason without unpacking the archive.
+    if task.exit_code not in (0, 130, 124) and stderr_tail:
+        metadata["agent_stderr_tail"] = stderr_tail.decode("utf-8", "replace")[
+            :MAX_ERROR_MESSAGE_CHARS
+        ]
     # #160 D12：与 upload_queue._bulk_transfer 同一直传判定（#201 收敛进
     # UploadTask.is_direct_upload）；直传时产物不再内嵌归档（字节走 presigned PUT）。
     direct = task.is_direct_upload(outputs)
