@@ -263,6 +263,45 @@ def test_create_refuses_service_lifecycle_shell_commands() -> None:
     asyncio.run(_run())
 
 
+def test_create_refuses_env_injection_despite_clean_argv() -> None:
+    """#707 HIGH-4：env 覆盖是 argv 之外的第二命令通道——BASH_ENV 让非交互
+    bash 在被检查的命令之前 source 攻击脚本（实测：BASH_ENV=x.sh bash -c 先
+    输出脚本内容再跑命令）。guard 拒绝发生在 spawn 前，且注册表无残留。"""
+
+    async def _run() -> None:
+        store = AcpTerminalStore()
+
+        class _Env:
+            def __init__(self, name: str, value: str) -> None:
+                self.name = name
+                self.value = value
+
+        # argv 完全干净，注入藏在 env。
+        with pytest.raises(TerminalCommandBlockedError) as exc_info:
+            await store.create(
+                command="bash",
+                args=["-c", "echo hi"],
+                env=[_Env("BASH_ENV", "/tmp/evil.sh")],
+                cwd=None,
+                output_byte_limit=None,
+                default_cwd=".",
+            )
+        assert "BASH_ENV" in str(exc_info.value)
+        # PATH 含相对段（. 或空段）同样拒绝：CWD 内的假 make 影子解析。
+        with pytest.raises(TerminalCommandBlockedError):
+            await store.create(
+                command="make",
+                args=["check"],
+                env=[_Env("PATH", "/tmp/evil:.")],
+                cwd=None,
+                output_byte_limit=None,
+                default_cwd=".",
+            )
+        assert not store._terminals
+
+    asyncio.run(_run())
+
+
 def test_create_allows_string_mentions_of_blocked_names() -> None:
     """拒绝是命令级匹配而不是子串匹配：字符串里提到 prod-down 的普通
     命令照常执行（误伤面反例）。"""

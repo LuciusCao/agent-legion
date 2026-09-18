@@ -102,7 +102,12 @@ class AcpTerminalStore:
         # (terminal_guard.py documents the layering). Raising here propagates
         # through the SDK's request handler as a terminal/create JSON-RPC
         # error, which the agent's Bash tool surfaces as a failed command.
-        ensure_terminal_command_allowed(command, args)
+        # env goes through the same gate (#707 HIGH-4): the process
+        # environment is a second command channel — BASH_ENV names a script
+        # a non-interactive bash sources BEFORE the checked command runs, so
+        # env overrides are part of the denylist surface, not just argv.
+        env_pairs = [(str(item.name), str(item.value)) for item in env] if env else None
+        ensure_terminal_command_allowed(command, args, env_pairs)
         terminal_id = uuid4().hex
         limit = output_byte_limit or DEFAULT_OUTPUT_BYTE_LIMIT
         limit = max(limit, MIN_OUTPUT_BYTE_LIMIT)
@@ -112,8 +117,8 @@ class AcpTerminalStore:
         # client's behaviour — an agent that sends only overrides must not
         # lose the base environment.
         process_env: dict[str, str] | None = None
-        if env:
-            process_env = {**os.environ, **{str(item.name): str(item.value) for item in env}}
+        if env_pairs:
+            process_env = {**os.environ, **dict(env_pairs)}
         process = await asyncio.create_subprocess_exec(
             command,
             *(args or []),
