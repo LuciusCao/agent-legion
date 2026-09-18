@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createWorkspaceApiToken,
@@ -36,6 +36,21 @@ export function WorkspaceApiTokensSection({
   const [pendingRevoke, setPendingRevoke] =
     useState<WorkspaceApiTokenSummary | null>(null)
   const queryClient = useQueryClient()
+
+  // React Router 复用组件实例：A→B 切换 workspace 时，A 的明文 token
+  // （以及本次会话的临时输入/确认态）不能继续显示在 B 的面板上——面板
+  // 文案把凭据描述为绑定当前 workspace，跨 workspace 残留即误导。
+  const prevWorkspaceIdRef = useRef(workspaceId)
+  useEffect(() => {
+    if (prevWorkspaceIdRef.current === workspaceId) return
+    prevWorkspaceIdRef.current = workspaceId
+    setCreatedToken(null)
+    setCopied(false)
+    setLabel('')
+    setTtlHours('')
+    setError('')
+    setPendingRevoke(null)
+  }, [workspaceId])
 
   const { data: tokens, error: listQueryError } = useQuery({
     queryKey: extraQueryKeys.workspaceApiTokens(workspaceId),

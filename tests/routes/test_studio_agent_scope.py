@@ -105,7 +105,7 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # Run creation from items (materials-and-runs design §4) moved to
     # require_workspace_api_intake (#626) — it still refuses studio-agent
     # scopes (same 403), but admits the workspace API intake token; pinned
-    # in the exempt map below and by tests/routes/test_workspace_api_tokens.py.
+    # in the exempt map below and by tests/routes/test_workspace_api_token_boundaries.py.
     ("POST", "/api/jobs/{job_id}/upgrade-workflow", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-upgrade-workflow", None),
     # Materials upload lifecycle (materials-and-runs design §6.4).

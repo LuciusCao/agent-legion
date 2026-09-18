@@ -35,10 +35,10 @@ beforeEach(() => {
   mockList.mockResolvedValue([sampleToken])
 })
 
-function renderSection() {
+function renderSection(workspaceId: string = WORKSPACE_ID) {
   return render(
     <TestQueryProvider>
-      <WorkspaceApiTokensSection workspaceId={WORKSPACE_ID} />
+      <WorkspaceApiTokensSection workspaceId={workspaceId} />
     </TestQueryProvider>
   )
 }
@@ -149,6 +149,40 @@ describe('WorkspaceApiTokensSection', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('alert').textContent).toContain('boom')
+    })
+  })
+
+  it('clears the created plaintext when the workspace switches', async () => {
+    // React Router 复用组件实例：A→B 切换时 A 的明文 token 不能继续
+    // 显示在 B 的面板上（面板文案声称凭据绑定当前 workspace）。
+    mockCreate.mockResolvedValue({
+      token_id: 'tok-4',
+      api_token: 'tok-4.secret-value',
+      workspace_id: WORKSPACE_ID,
+      label: 'form-agent',
+    })
+    const { rerender } = renderSection(WORKSPACE_ID)
+
+    fireEvent.change(screen.getByLabelText('API Token 名称'), {
+      target: { value: 'form-agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '签发' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('created-api-token')).toBeTruthy()
+    })
+    expect(screen.getByText('tok-4.secret-value')).toBeTruthy()
+
+    // 切到 workspace B：同一个组件实例重新渲染。
+    rerender(
+      <TestQueryProvider>
+        <WorkspaceApiTokensSection workspaceId="ws-other" />
+      </TestQueryProvider>
+    )
+
+    expect(screen.queryByTestId('created-api-token')).toBeNull()
+    expect(screen.queryByText('tok-4.secret-value')).toBeNull()
+    await waitFor(() => {
+      expect(mockList).toHaveBeenCalledWith('ws-other')
     })
   })
 })

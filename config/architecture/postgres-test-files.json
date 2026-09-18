@@ -106,6 +106,8 @@
     "tests/routes/test_workflow_draft_publish_routes.py",
     "tests/routes/test_workflow_draft_validate.py",
     "tests/routes/test_workspace_agent_routes.py",
+    "tests/routes/test_workspace_api_token_boundaries.py",
+    "tests/routes/test_workspace_api_tokens.py",
     "tests/routes/test_workspace_runtime_models.py",
     "tests/routes/test_workspace_secrets.py",
     "tests/services/test_agent_artifact_inject.py",
