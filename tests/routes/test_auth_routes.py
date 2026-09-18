@@ -166,3 +166,31 @@ def test_login_unknown_user_does_not_leak(anon_client) -> None:
     unknown = _login(anon_client, username="ghost")
     assert unknown.status_code == 401
     assert unknown.json()["detail"] == "Invalid username or password"
+
+
+def test_scoped_token_keeps_me_and_logout(client, job_db) -> None:
+    """codex P2-1 on #626 (PR #704): /me and /logout are user identity
+    endpoints, and a studio-agent scoped token IS a user identity — it
+    carries the initiating user's row (STUDIO-AGENT-001, require_user
+    deliberately admits it; POST /api/auth/logout sits in the exempt map as
+    "session teardown, no platform effect"). The #626 handler-level refusal
+    must target the api machine identity only, not every actor_scope."""
+    from server.app.auth import scoped_tokens
+
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id)
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+
+    me = scoped.get("/api/auth/me")
+    assert me.status_code == 200, me.text
+    assert me.json()["user"]["username"] == "admin"
+
+    # Bearer-channel logout is CSRF-exempt and returns the user row.
+    out = scoped.post("/api/auth/logout")
+    assert out.status_code == 200, out.text
+    assert out.json()["user"]["username"] == "admin"
+    # A scoped token has no session row: the logout is a no-op teardown and
+    # the same credential keeps authenticating (the run token dies with its
+    # own revoke path, never with /logout).
+    assert scoped.get("/api/auth/me").status_code == 200

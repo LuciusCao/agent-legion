@@ -16,6 +16,11 @@ Two guards live here (#710):
   a job-ownership resolution for the job-id routes (``job_group`` only):
   bare ``/jobs/{job_id}`` endpoints had no workspace scope at all, so any
   logged-in user could read, mutate, or delete another workspace's jobs.
+
+#626 adds the machine-identity arm both guards share: a workspace API
+intake token (actor_scope='api') is the editor of exactly its bound
+workspace — never a member row, never an admin, never another workspace;
+that arm lives in ``workspace_api_scope`` (file budget).
 """
 
 from __future__ import annotations
@@ -26,6 +31,12 @@ from fastapi import Depends, Request
 from fastapi.exceptions import HTTPException
 
 from server.app.auth.dependencies import _SAFE_METHODS, get_current_user
+from server.app.auth.workspace_api_scope import (
+    api_scope_route_scope as _workspace_scope,
+)
+from server.app.auth.workspace_api_scope import (
+    refuse_off_allowlist_api_scope,
+)
 
 _MEMBER_ROLE_RANK = {"viewer": 1, "editor": 2}
 
@@ -82,12 +93,18 @@ def require_workspace_access(
     the scope in the query string (``/api/worker/*``, ``/api/metrics/overview``).
     Routes without a workspace scope only require a logged-in user.
     Non-members get 404 (not 403) so workspace existence cannot be enumerated.
+
+    #626 review: the api-scope machine identity is NOT a general member of
+    # the bound workspace — it is the runner of the intake channel only
+    # (bound-workspace equality + the intake allowlist; 404 off-surface —
+    # see refuse_off_allowlist_api_scope for the two narrow rules and the
+    # dual-check on POST /runs).
     """
     if user.get("role") == "admin":
         return user
-    workspace_id = request.path_params.get("workspace_id") or request.query_params.get(
-        "workspace_id"
-    )
+    if refuse_off_allowlist_api_scope(request, user):
+        return user
+    workspace_id = _workspace_scope(request)
     if not workspace_id:
         return user
     role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
@@ -112,8 +129,16 @@ def require_job_workspace_access(
     ``reject_studio_agent_scope`` and answers 403 regardless of whether the
     job exists — the scope refusal stays ahead of any job existence signal
     (test_studio_agent_job_tools pins this ordering).
+
+    #626: the api-scope machine identity carries no member row and no
+    user['id'], so it must never reach the membership lookup — same shared
+    arm as ``require_workspace_access`` (refuse_off_allowlist_api_scope);
+    POST /runs gets past the scoped effecting short-circuit above and is
+    admitted (or not) by the route-level ``require_workspace_api_intake``.
     """
     if user.get("actor_scope") and request.method not in _SAFE_METHODS:
+        return user
+    if refuse_off_allowlist_api_scope(request, user):
         return user
     # Scoped-token binding runs before the admin fast path (see
     # _resolve_job_workspace_scope): a workspace-bound run token must stay

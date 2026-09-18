@@ -43,24 +43,18 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v83, studio_chat_context_health,
-# #694) must leave behind so the undo step rewinds a current-shape database
-# to exactly SCHEMA_VERSION-1. v83 is DDL-only via the schema-file replay:
-# studio_chat_sessions gains usage_json + compacting. The undo drops both
-# columns; v82's trigger-function rewrite stays in the (SCHEMA_VERSION-1)
-# shape, so none of the older rewind steps apply here.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("studio_chat_sessions", "usage_json", "text"),
-    ("studio_chat_sessions", "compacting", "boolean"),
-)
+# Effects the newest migration (v84, workspace_api_tokens, #626) must leave
+# behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v84 creates the one API-intake token table plus its
+# workspace index; the undo drops the table (the index goes with it).
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("workspace_api_tokens",)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "studio_chat_context_health"
+_NEWEST_MIGRATION_NAME = "workspace_api_tokens"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v82 (empty for v83: v82 is exactly the current shape minus the
-# two dropped columns).
+# faithful v82. v84 creates only its own table, so nothing needs restoring.
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

@@ -1819,6 +1819,41 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/api-tokens': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Api Tokens */
+    get: operations['list_api_tokens_api_workspaces__workspace_id__api_tokens_get']
+    put?: never
+    /** Create Api Token */
+    post: operations['create_api_token_api_workspaces__workspace_id__api_tokens_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/api-tokens/{token_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /** Revoke Api Token */
+    delete: operations['revoke_api_token_api_workspaces__workspace_id__api_tokens__token_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/configuration': {
     parameters: {
       query?: never
@@ -4108,6 +4143,16 @@ export interface components {
       label: string
       /** Workspace Id */
       workspace_id: string
+    }
+    /** CreateWorkspaceApiTokenRequest */
+    CreateWorkspaceApiTokenRequest: {
+      /**
+       * Label
+       * @default
+       */
+      label: string
+      /** Ttl Hours */
+      ttl_hours?: number | null
     }
     /**
      * DatabaseConnectionView
@@ -7726,6 +7771,46 @@ export interface components {
     WorkspaceAgentRoutesResponse: {
       /** Routes */
       routes: components['schemas']['WorkspaceAgentRouteEntry'][]
+    }
+    /** WorkspaceApiTokenCreatedResponse */
+    WorkspaceApiTokenCreatedResponse: {
+      /** Api Token */
+      api_token: string
+      /** Label */
+      label: string
+      /** Token Id */
+      token_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** WorkspaceApiTokenRevokeResponse */
+    WorkspaceApiTokenRevokeResponse: {
+      /** Revoked */
+      revoked: boolean
+      /** Token Id */
+      token_id: string
+    }
+    /** WorkspaceApiTokenSummary */
+    WorkspaceApiTokenSummary: {
+      /** Created At */
+      created_at: string
+      /** Expires At */
+      expires_at?: string | null
+      /** Label */
+      label: string
+      /** Last Used At */
+      last_used_at?: string | null
+      /** Revoked */
+      revoked: boolean
+      /** Token Id */
+      token_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** WorkspaceApiTokensResponse */
+    WorkspaceApiTokensResponse: {
+      /** Tokens */
+      tokens: components['schemas']['WorkspaceApiTokenSummary'][]
     }
     /** WorkspaceConfigurationRequest */
     WorkspaceConfigurationRequest: {
@@ -11739,6 +11824,104 @@ export interface operations {
       }
     }
   }
+  list_api_tokens_api_workspaces__workspace_id__api_tokens_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceApiTokensResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_api_token_api_workspaces__workspace_id__api_tokens_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateWorkspaceApiTokenRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceApiTokenCreatedResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  revoke_api_token_api_workspaces__workspace_id__api_tokens__token_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        token_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceApiTokenRevokeResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   replace_workspace_configuration_api_workspaces__workspace_id__configuration_put: {
     parameters: {
       query?: never
@@ -12270,6 +12453,7 @@ export interface operations {
         active_node_key?: string | null
         packed?: number | null
         paused?: boolean | null
+        run_id?: string | null
       }
       header?: never
       path: {
@@ -12381,6 +12565,7 @@ export interface operations {
         active_node_key?: string | null
         packed?: number | null
         paused?: boolean | null
+        run_id?: string | null
       }
       header?: never
       path: {

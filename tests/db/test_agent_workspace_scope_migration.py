@@ -244,5 +244,5 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    # The registry tail at the CURRENT schema version (v83, #694).
-    assert migration["name"] == "studio_chat_context_health"
+    # The registry tail at the CURRENT schema version (v84, #626).
+    assert migration["name"] == "workspace_api_tokens"

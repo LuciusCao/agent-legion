@@ -297,6 +297,9 @@ server/app/
 | GET | `/agent-catalog` | `get_agent_catalog` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/execution-configuration` | `get_workspace_execution_configuration` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/agent-routes` | `get_workspace_agent_routes` | routes/workspace_agent_routes.py |
+| POST | `/workspaces/{workspace_id}/api-tokens` | `create_api_token` | routes/workspace_api_tokens.py |
+| GET | `/workspaces/{workspace_id}/api-tokens` | `list_api_tokens` | routes/workspace_api_tokens.py |
+| DELETE | `/workspaces/{workspace_id}/api-tokens/{token_id}` | `revoke_api_token` | routes/workspace_api_tokens.py |
 | PUT | `/workspaces/{workspace_id}/configuration` | `replace_workspace_configuration` | routes/workspace_configuration.py |
 | GET | `/workspaces/{workspace_id}/node-runs` | `list_workspace_runs` | routes/workspace_runs.py |
 | GET | `/workspaces/{workspace_id}/dag` | `get_workspace_dag` | routes/workspace_runs.py |
@@ -639,6 +642,11 @@ server/app/
 | WorkflowDraftValidationResponse | BaseModel | valid: bool, errors: list[str] | app/routes/workflow_revisions_contracts.py |
 | ActiveWorkflowRevisionResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionDetailResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
+| CreateWorkspaceApiTokenRequest | BaseModel | label: str, ttl_hours: int | None | app/routes/workspace_api_token_contracts.py |
+| WorkspaceApiTokenCreatedResponse | BaseModel | token_id: str, api_token: str, workspace_id: str, label: str | app/routes/workspace_api_token_contracts.py |
+| WorkspaceApiTokenSummary | BaseModel | token_id: str, workspace_id: str, label: str, created_at: str, expires_at: st... | app/routes/workspace_api_token_contracts.py |
+| WorkspaceApiTokensResponse | BaseModel | tokens: list[WorkspaceApiTokenSummary] | app/routes/workspace_api_token_contracts.py |
+| WorkspaceApiTokenRevokeResponse | BaseModel | token_id: str, revoked: bool | app/routes/workspace_api_token_contracts.py |
 | WorkspaceRecord | BaseModel | id: str, name: str, description: str, default_workflow_key: str, default_enti... | app/routes/workspace_contracts.py |
 | NodeLimitRequest | BaseModel | workflow_key: str, node_key: str, concurrency_limit: int | app/routes/workspace_execution_contracts.py |
 | WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitEntry], migration_warnings: list[str], agent_capac... | app/routes/workspace_execution_contracts.py |

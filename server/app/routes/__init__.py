@@ -38,6 +38,7 @@ from .workflow_node_codes import create_workflow_node_codes_router
 from .workflow_revisions import create_workflow_revisions_router
 from .workspace_agent_catalog import create_workspace_agent_catalog_router
 from .workspace_agent_routes import create_workspace_agent_routes_router
+from .workspace_api_tokens import create_workspace_api_tokens_router
 from .workspace_configuration import create_workspace_configuration_router
 from .workspace_settings import create_workspace_settings_router
 from .workspace_shared_materials import create_workspace_shared_materials_router
@@ -117,6 +118,11 @@ def create_router(deps: RouterDeps) -> APIRouter:
     )
     secured(workspaces_router)
     secured(create_workspace_settings_router(deps.workspace_configuration, deps.settings))
+    # #626: workspace API intake token management (admin-only inside the
+    # router; member-level require_workspace_access from secured() so the
+    # 404-not-403 enumeration rule applies to non-members too).
+    if deps.workspace_api_token_store is not None:
+        secured(create_workspace_api_tokens_router(deps.workspace_api_token_store))
     if deps.materials_service is not None:
         secured(create_materials_router(deps.materials_service))
     studio_secured(create_workflow_revisions_router(deps.job_db, deps.settings))
