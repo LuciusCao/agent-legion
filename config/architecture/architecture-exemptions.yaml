@@ -1225,12 +1225,14 @@ exemptions:
     直传 ref 形态（128 条 ~25KB）把头推破 h11 16KB，成功运行同样中招（成功上报
     也带产物清单）。收缩循环扩展为多级降级（tail → error_message → 产物前缀
     截断 + output_artifacts_truncated/total 标记，清单整体可降级为空列表保投递）。
-    防御性正确性代码使有效行 126→142（超 growth_allowance 带）。时间盒：若
+    防御性正确性代码使有效行 126→142；rebase 到 0.7.13 基线叠加 report()
+    的 stop 取消通道形参（基线新增，与 #748 的 **_extra 兼容形参并存）
+    进一步到 161（均超 growth_allowance 带）。时间盒：若
     结果头改走 body 或产物清单下沉独立通道（协议 v6 候选），收缩循环随之
     退役并重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
-  ceiling: 142
+  ceiling: 171
   expires: 2026-12-31
 - check: architecture.file_budget
   path: worker/upload/stderr_evidence.py
@@ -1244,4 +1246,20 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
   ceiling: 67
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: worker/upload/report.py
+  reason: '#748 R3（codex review P1）：头预算咬到直传产物清单时的整体换轨——
+    report_task 接住 ResultHeaderOverflow，清空直传规格重跑 prepare（归档内嵌
+    模式，CAS 引用 ~78B/条天然落预算）、CAS 通道重传全部产物后重报；含
+    换轨期间心跳重新武装/quiesce 与 CAS 4xx 终态降级。防死循环双闸：序列
+    化侧按 ref 形态判信号（CAS 形态不抛、走最后手段截断）+ 一次性
+    回退闸。rebase 到 0.7.13 基线后换轨逻辑随 report 车道迁入本模块
+    （基线把 queue._report 拆为 report_task），防御性正确性代码使有效行
+    83→112（超 growth_allowance 带）。时间盒：回退链若与
+    DirectUploadError 回退路径统一收口为单一换轨助手（report 车道与
+    bulk 车道共享），此处重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 122
   expires: 2026-12-31

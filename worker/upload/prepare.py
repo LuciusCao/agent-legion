@@ -19,6 +19,7 @@ from worker.upload.result_metadata import (
 )
 from worker.upload.stderr_evidence import (
     AGENT_STDERR_FILENAME,
+    redact_secrets_bytes,
     stderr_error_message,
     stderr_tail_for_run,
 )
@@ -71,14 +72,22 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # file at scan time; stderr_tail_for_run reads it back when a re-entry
     # (direct-upload fallback / worker-restart restore) finds the events
     # file already compressed — a second scan would yield nothing.
+    # #748 R3 (codex review P1): the sink write is REDACTED at scan time
+    # (redact_secrets_bytes injected as the shared-sink callback) — the
+    # anchor file must never hold plaintext secrets, even if the Worker
+    # exits between this scan and any later prepare pass.
     if task.exit_code == 0:
         model_error, _, _, scanned_tail = scan_and_compress_pi_events(
-            events, stderr_sink=run_dir / AGENT_STDERR_FILENAME
+            events,
+            stderr_sink=run_dir / AGENT_STDERR_FILENAME,
+            redact=redact_secrets_bytes,
         )
     else:
         model_error = None
         _, _, _, scanned_tail = scan_and_compress_pi_events(
-            events, stderr_sink=run_dir / AGENT_STDERR_FILENAME
+            events,
+            stderr_sink=run_dir / AGENT_STDERR_FILENAME,
+            redact=redact_secrets_bytes,
         )
     stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]

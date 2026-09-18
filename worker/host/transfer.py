@@ -41,11 +41,42 @@ _RESULT_HEADER_BUDGET = 14 * 1024
 # and the Host-side cap is 128 (_MAX_OUTPUT_ARTIFACTS) — a full 128-ref
 # manifest serializes to ~25 KB, blowing the budget exactly like the CJK
 # tail did (report retry exhaustion -> lease expiry = the UNDELIVERABLE
-# form this PR exists to kill). When even keeping a FRACTION of the refs
-# cannot fit, the whole list degrades to empty + the truncation markers:
-# the artifact BYTES are still in the result archive (and already in object
-# storage for direct uploads), so the loss is "performance falls back to
-# the archive channel", never data loss.
+# form this PR exists to kill). #748 R3 (codex review P1): a kept PREFIX
+# is NOT an acceptable degrade — in direct-upload mode prepare_result
+# deliberately does NOT embed the artifact bytes in the archive, and the
+# Host's completion handler does not reconstruct the dropped refs from
+# the truncation markers, so every ref missing from the header is a
+# missing file in job_dir and the run flips to "Missing outputs". When
+# the budget forces the artifact list itself to shrink we therefore
+# raise ResultHeaderOverflow instead: the upload queue catches it and
+# falls back to the archive-embed channel (same as the direct-upload
+# failure path), where the refs are CAS strings (~78 B each, 128 entries
+# ~= 10 KB, inside the budget naturally). Only a payload that STILL
+# overflows after that fallback reaches the truncation break below — the
+# last resort, see the comment there.
+
+
+class ResultHeaderOverflow(RuntimeError):
+    """#748 R3 (codex review P1): the result header cannot carry the full
+    direct-upload artifact manifest within the byte budget.
+
+    Raised by ``_result_header_value`` when a non-empty ``output_artifacts``
+    carrying DIRECT-UPLOAD dict refs still overflows the budget. The upload
+    queue catches it, clears the direct-upload spec, and re-runs prepare with
+    the artifact bytes embedded in the tar (CAS string refs are ~78 B each,
+    128 entries ~= 12 KB, inside the budget naturally)."""
+
+
+def _has_direct_refs(artifacts: dict[str, Any]) -> bool:
+    """True when the artifact manifest carries direct-upload dict refs.
+
+    The ref form IS the transport verdict (worker/artifact/upload.py returns
+    dicts for presigned PUT, the legacy channel returns "sha256:..." strings),
+    so the presence of ANY dict ref means the result archive was built in
+    direct mode — artifact bytes NOT embedded — and a header prefix would
+    lose refs for good. String/CAS refs mean the bytes ride the archive, so
+    those payloads go straight to the last-resort truncation instead."""
+    return any(isinstance(ref, dict) for ref in artifacts.values())
 
 
 def _result_header_value(metadata: dict[str, Any]) -> bytes:
@@ -61,12 +92,16 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
     #748 R2 P2-1: the byte budget is enforced by a THREE-STAGE degrade —
     (1) shrink ``agent_stderr_tail`` (10% steps), (2) shrink
     ``error_message`` (the classification surface, so only after the tail),
-    (3) truncate ``output_artifacts`` to a prefix that fits, stamping
-    ``output_artifacts_truncated: true`` + ``output_artifacts_total`` so the
-    Host reader (parse_result_metadata) knows the list is a prefix. If not
-    even the minimum artifact prefix fits, the list degrades to empty with
-    the same markers — the artifact bytes still ride the archive.
-    """
+    (3) the artifact list. Stage 3 #748 R3 (codex review P1) now dispatches
+    on the REF FORM: direct-upload dict refs raise ``ResultHeaderOverflow``
+    (fallback signal — the archive carries no artifact bytes, so a prefix
+    loses refs for good; the queue re-prepares via the archive-embed
+    channel, whose CAS refs are ~78 B each and fit the budget naturally);
+    CAS string refs already have the bytes IN the archive, so they take the
+    last-resort truncation directly (see that comment). This is the
+    dead-loop guard for free: the fallback's rebuilt manifest is CAS-form,
+    so a second overflow can never re-signal — at most one fallback per
+    result, and the queue's fallback path is additionally once-only."""
     payload = dict(metadata)
 
     def _serialized() -> bytes:
@@ -82,20 +117,39 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
             payload["error_message"] = error[: int(len(error) * 0.9)]
             continue
         artifacts = payload.get("output_artifacts")
+        if isinstance(artifacts, dict) and artifacts and _has_direct_refs(artifacts):
+            # #748 R3 (codex review P1): do NOT truncate a direct-upload
+            # manifest — the result archive was built WITHOUT the artifact
+            # bytes (direct mode skips the tar embed), and the Host does
+            # not reconstruct the dropped refs from the truncation markers,
+            # so every ref missing from the header is a file missing from
+            # job_dir and the run flips to "Missing outputs". Signal the
+            # caller to switch to the archive-embed channel instead.
+            raise ResultHeaderOverflow(
+                "result header over budget with direct-upload output_artifacts"
+                f" ({len(artifacts)} refs); archive-embed fallback required"
+            )
         if isinstance(artifacts, dict) and artifacts:
-            total = len(artifacts)
+            # LAST RESORT truncation, reached in exactly two shapes:
+            # (a) CAS string refs — the artifact bytes are already IN the
+            # archive this header ships with, so the Host unpacks them into
+            # job_dir regardless of the header manifest; the loss is the
+            # ref registration only.
+            # (b) direct refs AFTER the queue's archive-embed fallback —
+            # only reachable if the fallback could not rebuild (prepare
+            # failure degrade path), an already-degenerate shape.
+            # Either way the payload still overflows through faces nobody
+            # can rebuild (e.g. a giant command near the budget alone —
+            # R3's known unshrinkable residue), and delivery with partial
+            # data beats the UNDELIVERABLE alternative (report retry
+            # exhaustion -> lease expiry -> full re-run).
+            # HONEST MARKER SEMANTICS (codex review P1): the Host records
+            # output_artifacts_truncated/total but does NOT use them to
+            # recover the dropped refs — the markers are bookkeeping, not a
+            # recovery contract.
+            payload["output_artifacts_total"] = len(artifacts)
             payload["output_artifacts_truncated"] = True
-            payload["output_artifacts_total"] = total
-            # Halve the kept prefix each pass (rounding down, min 0): each
-            # retry re-serializes, so the loop converges geometrically and
-            # the last passes just drop the markers + empty list.
-            keep = total // 2
-            payload["output_artifacts"] = dict(list(artifacts.items())[:keep])
-            continue
-        # Nothing left to shrink (all faces minimal or absent) — ship what
-        # we have; an over-budget residue can only come from exotic shapes
-        # (e.g. a single ref near the budget alone), where delivery with
-        # partial data still beats the UNDELIVERABLE alternative.
+            payload["output_artifacts"] = {}
         break
     return _serialized()
 
@@ -247,9 +301,15 @@ class TransferOperations:
         archive: Path,
         *,
         stop: StopSignal | None = None,
+        **_extra: Any,
     ) -> tuple[int, bytes]:
         """Submit the execution result; returns (status, body) for the caller
-        to distinguish a committed report (204) from a lost lease (409)."""
+        to distinguish a committed report (204) from a lost lease (409).
+
+        ``**_extra`` keeps older/newer queue and client shapes compatible
+        across the #748 R3 fallback plumbing (the queue passes the report
+        lane's keyword tail through; the serializer decides signal-vs-
+        truncate from the ref FORM, not from a flag)."""
         # requests accepts a bytes value for a header: urllib3 writes it
         # verbatim (the latin-1 str refusal does not apply), which is how
         # the raw-UTF-8 result header gets on the wire.

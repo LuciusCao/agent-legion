@@ -255,6 +255,7 @@ class UploadQueue:
                 retry_base_seconds=_RETRY_BASE_SECONDS,
                 retry_cap_seconds=_RETRY_CAP_SECONDS,
                 heartbeat_join_seconds=_HEARTBEAT_JOIN_SECONDS,
+                upload_cas_artifact=lambda path: self._upload_with_retry(path, task),
             )
         except Exception as exc:
             # #204 broad-except audit: report 车道任务的存活安全网（同

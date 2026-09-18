@@ -241,3 +241,50 @@ def test_scan_and_compress_sink_write_failure_never_fails(tmp_path, monkeypatch)
     )
     assert original > 0 and compressed > 0
     assert stderr_tail == b"panic: real cause"
+
+
+def test_scan_and_compress_redacts_sink_before_durable_write(tmp_path):
+    """#748 R3（codex review P1）：redact 回调在 durable write 前生效——落盘的
+    anchor 文件是脱敏后字节，返回值保持 RAW（shared 只管落盘面，调用方的出口
+    面各自脱敏）。回调 None 时行为不变（raw 落盘，兼容直接调 shared 的场景）。"""
+    from shared.pi_events import scan_and_compress_pi_events
+
+    secret = "sk-live-supersecretgatewaytoken123"
+    events = tmp_path / "events.jsonl"
+    events.write_text(f'{{"type":"session"}}\nauth failed for {secret}\n')
+    sink = tmp_path / "agent-stderr.log"
+    _, _, _, stderr_tail = scan_and_compress_pi_events(
+        events,
+        stderr_sink=sink,
+        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+    )
+    assert stderr_tail == f"auth failed for {secret}".encode()  # 返回值 raw
+    assert sink.read_bytes() == b"auth failed for ***"  # 落盘脱敏
+    # 回调 None：raw 落盘（旧行为）。
+    events2 = tmp_path / "events2.jsonl"
+    events2.write_text(f'{{"type":"session"}}\nauth failed for {secret}\n')
+    sink2 = tmp_path / "agent-stderr2.log"
+    scan_and_compress_pi_events(events2, stderr_sink=sink2)
+    assert sink2.read_bytes() == f"auth failed for {secret}".encode()
+
+
+def test_persist_stderr_tail_cleans_staging_on_replace_failure(tmp_path, monkeypatch):
+    """#748 R3（codex review P1）：os.replace 失败时 delete=False 的 staging
+    文件必须被清理——不清理则永久残留（内容虽已脱敏，但会随 run 目录进归档）。"""
+    import os
+
+    from shared import pi_events
+    from shared.pi_events import _persist_stderr_tail
+
+    def failing_replace(src, dst):
+        raise OSError("cross-device link")
+
+    monkeypatch.setattr(pi_events.os, "replace", failing_replace)
+    try:
+        _persist_stderr_tail(tmp_path / "agent-stderr.log", b"redacted tail")
+    except OSError:
+        pass  # 预期：replace 失败原样上抛（调用点 best-effort 捕获）
+    finally:
+        monkeypatch.setattr(pi_events.os, "replace", os.replace)
+    assert list(tmp_path.glob(".agent-stderr.*")) == []  # staging 已清理
+    assert not (tmp_path / "agent-stderr.log").exists()  # sink 未落盘

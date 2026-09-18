@@ -13,6 +13,7 @@ import logging
 import os
 import tempfile
 from collections import deque
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -61,7 +62,9 @@ RELEVANT_EVENT_TYPES = frozenset(
 
 
 def scan_and_compress_pi_events(
-    events_path: Path, stderr_sink: Path | None = None
+    events_path: Path,
+    stderr_sink: Path | None = None,
+    redact: Callable[[bytes], bytes] | None = None,
 ) -> tuple[str | None, int, int, bytes]:
     """One pass: fold the model-error state, capture the stderr tail, and
     rewrite the file compressed.
@@ -79,6 +82,15 @@ def scan_and_compress_pi_events(
     worker-restart restore) must read the tail back FROM THE SINK FILE, not
     from a second scan. Best-effort: an unwritable sink is logged and never
     fails the compression (the in-memory tail still rides the return value).
+
+    ``redact`` (#748 R3, codex review P1) is applied BEFORE any durable
+    write: the sink file never holds the raw tail, so a Worker exiting
+    between this pass and a later rewrite cannot leave plaintext secrets
+    in ``agent-stderr.log``. The callback is injected by the caller
+    (shared/ is stdlib-only and must not import worker modules); ``None``
+    writes the raw bytes (tests / non-secret callers). The RETURN value
+    stays RAW — the caller-facing faces (error_message etc.) redact with
+    their own, richer context (worker/upload/stderr_evidence.py).
 
     Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``.
     ``stderr_tail`` is the bounded keep-the-tail capture of the non-JSON
@@ -143,12 +155,11 @@ def scan_and_compress_pi_events(
         # The catch lives here, not inside _persist_stderr_tail, so a
         # sink-failure in ANY form (patched, unwritable dir, os.replace
         # across devices) degrades instead of escaping into the scan.
-        # shared/ is stdlib-only by design (see shared/__init__.py), so the
-        # sink write carries the RAW tail — the Worker-side caller redacts
-        # the file in place right after (worker/upload/stderr_evidence.py:
-        # the sink IS the outbound archive face).
+        # #748 R3 (codex review P1): redaction happens BEFORE the durable
+        # write — the sink file must never hold the raw tail (the return
+        # value stays raw; the caller redacts its own faces separately).
         try:
-            _persist_stderr_tail(stderr_sink, tail)
+            _persist_stderr_tail(stderr_sink, redact(tail) if redact is not None else tail)
         except OSError:
             logger.exception("Failed to persist the stderr tail: %s", stderr_sink)
     try:
@@ -162,7 +173,7 @@ def scan_and_compress_pi_events(
 
 
 def _persist_stderr_tail(sink: Path, tail: bytes) -> None:
-    """Best-effort durable copy of the rescued tail (same-dir temp + replace).
+    """Best-effort durable copy of the REDACTED tail (same-dir temp + replace).
 
     No fsync: the sink must survive process crashes (worker restart →
     restore() re-runs prepare), not power loss — page-cache write-back is
@@ -170,12 +181,24 @@ def _persist_stderr_tail(sink: Path, tail: bytes) -> None:
     unwritable sink (the tail still rides the return value). OSError
     handling lives at the CALL SITE in scan_and_compress_pi_events, where
     any failure form (patched, unwritable dir, os.replace across devices)
-    degrades to a log line instead of escaping into the scan."""
+    degrades to a log line instead of escaping into the scan.
+
+    #748 R3 (codex review P1): the caller passes already-redacted bytes, and
+    a failed replace must not leave the staging file behind either — the
+    temp file holds the same (redacted) content, but a leaked
+    ``.agent-stderr.*`` staging file in the run dir ships in the result
+    archive. Cleanup is best-effort (unlink of an already-gone file is
+    suppressed), and never masks the original replace failure."""
     with tempfile.NamedTemporaryFile(
         dir=sink.parent, prefix=".agent-stderr.", delete=False
     ) as staging:
         staging.write(tail)
-    os.replace(staging.name, sink)
+    try:
+        os.replace(staging.name, sink)
+    except BaseException:
+        with suppress(OSError):
+            os.unlink(staging.name)
+        raise
 
 
 def compress_pi_events(events_path: Path) -> tuple[int, int]:

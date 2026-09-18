@@ -630,6 +630,79 @@ def test_direct_upload_fallback_keeps_stderr_attribution(
     assert "thread panicked" in report["agent_stderr_tail"]
 
 
+def test_result_header_overflow_falls_back_to_archive_embed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#748 R3（codex review P1）队列级复现：128 个产物的直传任务，成功运行
+    的直传 ref 清单 ~25KB 撞破 14KB 头预算。修复前 _result_header_value 把清
+    单截成前缀（Host 不用截断标记恢复引用 → Missing outputs 改判成功执行）；
+    修复后 report 抛 ResultHeaderOverflow，_report 清空直传规格重跑 prepare
+    （tar 内嵌产物）、CAS 通道重传全部 128 个产物后以完整 CAS 清单上报。"""
+    from worker.host.transfer import ResultHeaderOverflow
+
+    outputs = tuple(f"output-{i:03d}.json" for i in range(128))
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    job_dir = work_root / "exec-1" / "job"
+    for name in outputs:
+        (job_dir / name).write_text("{}", encoding="utf-8")
+    attempts = {"n": 0}
+
+    class OverflowFirstReportClient(QueueFakeClient):
+        """首趟 report 模拟真实 Client：头序列化对直传形态抛溢出信号。"""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.upload_calls = 0
+
+        def upload_artifact(self, path: Path) -> str:
+            self.upload_calls += 1  # CAS 通道按文件调用（内容相同时 dict 去重）
+            return super().upload_artifact(path)
+
+        def report(self, execution_id, lease_id, metadata, archive):
+            attempts["n"] += 1
+            return super().report(execution_id, lease_id, metadata, archive)
+
+    def direct_upload_ok(path: Path, spec: object, **_kw: object) -> dict:
+        return {
+            "storage_key": str(dict(spec)["storage_key"]),
+            "size_bytes": 2,
+            "content_hash": "a" * 64,
+        }
+
+    monkeypatch.setattr(upload_queue, "upload_artifact_direct", direct_upload_ok)
+    client = OverflowFirstReportClient()
+    task = _task(work_root, expected_outputs=outputs)
+    task.artifact_uploads = {
+        name: {"storage_key": f"jobs-staging/x/{name}", "url": "http://x"} for name in outputs
+    }
+    # 直传形态的 report：队列把直传 ref 填进 metadata 后调用 client.report，
+    # 真实 Client 的头序列化在此抛溢出——模拟之。
+    original_report = client.report
+
+    def report_with_overflow(execution_id, lease_id, metadata, archive):
+        if any(isinstance(ref, dict) for ref in metadata.get("output_artifacts", {}).values()):
+            raise ResultHeaderOverflow("result header over budget with direct-upload refs")
+        return original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_with_overflow  # type: ignore[method-assign]
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+    report = client.reports[0]
+    assert report["status"] == "completed"
+    # 回退终点：CAS 形态全量清单（128 条 sha256 字符串），无截断标记。
+    assert set(report["output_artifacts"]) == set(outputs)
+    assert all(
+        isinstance(ref, str) and ref.startswith("sha256:")
+        for ref in report["output_artifacts"].values()
+    )
+    assert "output_artifacts_truncated" not in report
+    # 回退后确实重传了 128 个产物（CAS 通道逐文件调用），且只 report 一趟成功。
+    assert client.upload_calls == 128
+    assert attempts["n"] == 1
+
+
 def test_restore_reentry_keeps_stderr_attribution(tmp_path: Path) -> None:
     """review P1 复现（restore 路径）：崩溃后重启，marker 恢复的任务重进 bulk
     车道时 events.jsonl 早已压缩——归因必须从 agent-stderr.log 锚点读回。"""
@@ -659,9 +732,12 @@ def test_restore_reentry_keeps_stderr_attribution(tmp_path: Path) -> None:
 def test_crash_stderr_redacts_secret_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """review P2：stderr 回显里的密钥字面量（env 值 + 形态规则）必须在三个
-    出口面被替换为 ***——error_message、metadata.agent_stderr_tail、归档里的
-    agent-stderr.log（脱敏发生在 sink 落盘时刻，锚点文件本身就不含密钥）。"""
+    """review P2 + R3（codex review P1）：stderr 回显里的密钥字面量（env 值 +
+    形态规则）必须在出口面被替换为 ***——error_message、metadata.agent_stderr_tail、
+    归档里的 agent-stderr.log。脱敏发生在 sink 落盘时刻（R3：redact 回调注入
+    shared 扫描，durable write 前完成——Worker 在落盘后、任何后续重写前退出，
+    磁盘上也从无明文密钥；此前是先落盘明文、prepare 后段再就地重写，窗口期内
+    崩溃即泄漏）。"""
     monkeypatch.setenv("LLM_GATEWAY_TOKEN", "sk-live-supersecretgatewaytoken123")
     work_root = tmp_path / "work"
     _execution_dir(work_root)
@@ -702,6 +778,31 @@ def test_crash_stderr_redacts_secret_values(
     assert b"sk-live-supersecretgatewaytoken123" not in archived_tail
     assert b"SflKxwRJSMeKKF2QT4fwp" not in archived_tail
     assert archived_tail.count(b"***") >= 2
+
+
+def test_anchor_file_on_disk_never_holds_plaintext_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#748 R3（codex review P1）直接证据：脱敏后的字节先落锚点文件——在
+    prepare 完成前（模拟 Worker 在 _persist_stderr_tail 返回后、任何后续
+    重写前退出）直接读磁盘上的 agent-stderr.log，内容必须已不含密钥。"""
+    from worker.upload.prepare import prepare_or_failed
+
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", "sk-live-supersecretgatewaytoken123")
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _events_with_stderr(work_root, ["auth failed for key sk-live-supersecretgatewaytoken123"])
+    task = _task(work_root, exit_code=5)
+    # 只跑到 prepare（scan 落盘锚点即停——等价于 Worker 在此后任意时刻崩溃）。
+    prepare_or_failed(task)
+    sink = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker" / "agent-stderr.log"
+    assert sink.is_file()
+    content = sink.read_bytes()
+    # 落盘文件本身不含密钥：durable write 前已完成脱敏（而非先落盘再重写）。
+    assert b"sk-live-supersecretgatewaytoken123" not in content
+    assert b"***" in content
+    # 无 staging 残留（temp+replace 成功路径不留 .agent-stderr.* 文件）。
+    assert list(sink.parent.glob(".agent-stderr.*")) == []
 
 
 # -- #748 R2 P2-2/P2-3/P3-4：脱敏顺序、配置 environment 通道、规则边界 --
@@ -812,46 +913,55 @@ def test_redact_secrets_covers_github_and_slack_shapes() -> None:
         assert secret not in redact_secrets(f"echo {secret} failed")
 
 
-def test_sink_rewrite_failure_truncates_anchor_empty(
+def test_sink_persist_failure_cleans_staging_and_never_fails_scan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """R2 P3-3(b)：锚点重写失败（sink 不可写）时降级为截断为空——宁丢证据
-    不外发密钥（修复前裸密钥文件进归档）。"""
-    from pathlib import Path as _Path
+    """#748 R3（codex review P1）staging 残留：os.replace 失败（如跨设备/目标
+    被占用）时 delete=False 的临时文件必须被清理——修复前 staging 永久残留在
+    run 目录里（且随归档外发）。落盘失败本身仍是 best-effort：压缩照常完成、
+    返回值照常携带（脱敏后的）tail。"""
+    import os as _os
 
-    from worker.upload import stderr_evidence
+    from shared import pi_events
+    from worker.upload.stderr_evidence import AGENT_STDERR_FILENAME
 
     secret = "sk-live-supersecretgatewaytoken123"
     monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    sink = run_dir / stderr_evidence.AGENT_STDERR_FILENAME
-    sink.write_bytes(f"auth failed for {secret}".encode())
-    real_write_bytes = _Path.write_bytes
-    writes: list[bytes] = []
+    events = run_dir / "events.jsonl"
+    events.write_text(f'{{"type":"session"}}\nauth failed for {secret}\n', encoding="utf-8")
+    real_replace = _os.replace  # patch 前捕获原始实现
 
-    def always_fails(self: Path, data: bytes) -> int:
-        writes.append(data)
-        raise OSError("disk full")  # 重写与截断都失败：最后一级防御失效形态
+    def failing_replace(src, dst):
+        # 只对 sink 锚点失败（压缩 rewrite 自身的 replace 不受影响）。
+        if str(dst).endswith(AGENT_STDERR_FILENAME):
+            raise OSError("cross-device link")  # replace 失败：staging 必须被清理
+        return real_replace(src, dst)
 
-    monkeypatch.setattr(_Path, "write_bytes", always_fails)
-    tail = stderr_evidence.stderr_tail_for_run(run_dir, b"")
-    # 内存返回值仍是脱敏后的 tail（证据面丢的是锚点文件，不是 metadata）。
-    assert secret.encode() not in tail
-    assert b"***" in tail
-    # 两次落盘尝试（脱敏形态 + 空形态），写出的字节面从未含密钥。
-    assert len(writes) == 2
-    assert b"***" in writes[0] and secret.encode() not in writes[0]
-    assert writes[1] == b""
+    monkeypatch.setattr(pi_events.os, "replace", failing_replace)
+    _, original, compressed, tail = pi_events.scan_and_compress_pi_events(
+        events,
+        stderr_sink=run_dir / AGENT_STDERR_FILENAME,
+        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+    )
+    assert original > 0 and compressed > 0  # 压缩未因 sink 失败中断
+    # 返回值保持 RAW（调用方自行脱敏自己的出口面——shared 只管落盘脱敏）。
+    assert tail == f"auth failed for {secret}".encode()
+    # staging 已清理；sink 未落盘（replace 失败，无半截文件）。
+    assert list(run_dir.glob(".agent-stderr.*")) == []
+    assert not (run_dir / AGENT_STDERR_FILENAME).exists()
 
-    # 截断成功形态：重写失败、截断成功 → 锚点终态为空文件。
-    monkeypatch.setattr(_Path, "write_bytes", real_write_bytes)
 
-    def first_fails_only(self: Path, data: bytes) -> int:
-        if b"***" in data:
-            raise OSError("first write fails")
-        return real_write_bytes(self, data)
+def test_sink_replace_success_leaves_no_staging(tmp_path: Path) -> None:
+    """成功路径对照：replace 成功后 run 目录里只有锚点文件，无 staging 残留。"""
+    from shared import pi_events
 
-    monkeypatch.setattr(_Path, "write_bytes", first_fails_only)
-    stderr_evidence.stderr_tail_for_run(run_dir, b"")
-    assert sink.read_bytes() == b""  # 截断成功 → 锚点为空，无密钥外发
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    events = run_dir / "events.jsonl"
+    events.write_text('{"type":"session"}\npanic: real cause\n', encoding="utf-8")
+    sink = run_dir / "agent-stderr.log"
+    pi_events.scan_and_compress_pi_events(events, stderr_sink=sink)
+    assert sink.read_bytes() == b"panic: real cause"
+    assert list(run_dir.glob(".agent-stderr.*")) == []

@@ -18,8 +18,9 @@ tokens (``xox[bap]/``) plus JWTs and Bearer credentials. NOT covered: env
 values shorter than the byte threshold, secret-named values from OTHER
 machines not echoed through this process, and custom gateway tokens with
 no recognizable shape — a custom-token echo in stderr survives redaction
-(known best-effort boundary; the sink file is the durable evidence face
-and is redacted by the same pass).
+(known best-effort boundary; the durable anchor is written ALREADY
+REDACTED via the shared-sink redact callback, #748 R3 codex review P1 —
+no plaintext secret ever touches disk on the anchor path).
 """
 
 from __future__ import annotations
@@ -27,7 +28,6 @@ from __future__ import annotations
 import os
 import re
 import threading
-from contextlib import suppress
 from pathlib import Path
 
 from shared.pi_events import STDERR_TAIL_BYTES
@@ -124,6 +124,20 @@ def redact_secrets(text: str) -> str:
     return _SECRET_SHAPES.sub(_REDACTED, text)
 
 
+def redact_secrets_bytes(tail: bytes) -> bytes:
+    """Bytes face of redact_secrets for the shared-sink callback (#748 R3,
+    codex review P1): ``scan_and_compress_pi_events`` persists the stderr
+    anchor BEFORE the compression rewrite, and that durable write must carry
+    redacted bytes — the Worker may exit between the scan and any later
+    rewrite, so the anchor on disk can never hold plaintext secrets. The
+    callback decodes with replacement (the tail is bounded raw stderr),
+    redacts, and re-slices to the same byte bound shared/ enforces (the
+    redaction only ever SHRINKS — replacements are shorter — so the slice
+    is a no-op safety net). shared/ stays stdlib-only: the callback is
+    injected here, never imported there."""
+    return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[:STDERR_TAIL_BYTES]
+
+
 def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
     """The idempotent stderr tail for one prepare pass (#748 review P1).
 
@@ -131,33 +145,25 @@ def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
     scan-time sink file exists (a previous pass already rescued and
     compressed the events — direct-upload fallback, worker-restart restore),
     the file IS the tail: the compression rewrite destroyed the raw lines,
-    so nothing else can recover them. Returns redacted bytes AND rewrites
-    the sink file in place with them (the scan writes the RAW tail — shared/
-    is stdlib-only and cannot redact — while the file is the outbound
-    archive face: it ships in the result tar and anchors every later
-    re-entry, so the on-disk anchor must never hold a secret echo; a
-    rewrite failure TRUNCATES the anchor to empty — better to lose the
-    evidence than to ship the secret — and never fails prepare)."""
+    so nothing else can recover them.
+
+    #748 R3 (codex review P1): the sink is written ALREADY REDACTED (the
+    scan's ``redact`` callback — worker side injects redact_secrets_bytes),
+    so this reader only needs to slice it back to the byte bound (defensive
+    against older/pre-redaction anchors) and redact the FRESH scan capture
+    for its in-memory faces. The old in-place rewrite step is gone: the
+    anchor never holds plaintext, so there is nothing to sanitize on read
+    and no truncate-to-empty degradation path left to carry."""
     tail = scanned_tail
     if not tail:
         sink = run_dir / AGENT_STDERR_FILENAME
         if sink.is_file():
             tail = sink.read_bytes()[:STDERR_TAIL_BYTES]
+            if tail:
+                return tail
     if not tail:
         return b""
-    redacted = redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[:STDERR_TAIL_BYTES]
-    if redacted != tail:
-        try:
-            (run_dir / AGENT_STDERR_FILENAME).write_bytes(redacted)
-        except OSError:
-            # P3-3(b): a failed rewrite used to leave the RAW sink in place
-            # — the archive would then carry the unredacted secret echo.
-            # Truncate to empty instead: the evidence is lost, but a secret
-            # never leaves the machine (the in-memory redacted tail above
-            # still rides the metadata faces). Best-effort, never raises.
-            with suppress(OSError):
-                (run_dir / AGENT_STDERR_FILENAME).write_bytes(b"")
-    return redacted
+    return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[:STDERR_TAIL_BYTES]
 
 
 def stderr_error_message(exit_code: int, stderr_tail: bytes) -> str:

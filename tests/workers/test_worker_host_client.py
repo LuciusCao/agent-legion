@@ -345,7 +345,8 @@ def test_result_header_value_escapes_cjk_as_raw_utf8_bytes() -> None:
 
 def test_result_header_value_shrinks_oversized_tail_under_budget() -> None:
     """超预算时按 tail 优先收缩（error_message 是分类面，最后动）：收缩后
-    必须落在预算内，且 error_message 一字不动。"""
+    必须落在预算内，且 error_message 一字不动。产物清单为空（成功直传前
+    的元数据骨架），不触发第三级。"""
     from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
 
     metadata = {
@@ -353,12 +354,62 @@ def test_result_header_value_shrinks_oversized_tail_under_budget() -> None:
         "exit_code": 1,
         "error_message": "Agent process exited 1: ValueError: boom",
         "agent_stderr_tail": "错" * 8000 + "x" * 2000,  # 远超预算
+        "output_artifacts": {},
     }
     header = _result_header_value(metadata)
     assert len(header) <= _RESULT_HEADER_BUDGET
     decoded = json.loads(header.decode("utf-8"))
     assert decoded["error_message"] == "Agent process exited 1: ValueError: boom"
     assert len(decoded["agent_stderr_tail"]) > 0
+
+
+def test_result_header_value_stage_order_tail_error_then_artifact_signal() -> None:
+    """多级顺序：tail 先缩、error_message 次之、直传清单最后——三面同时
+    超预算时前两级先收敛（分类面优先于产物清单之前保住），收敛后清单仍
+    放不下时才抛回退信号（不是截断）。"""
+    from worker.host.transfer import ResultHeaderOverflow, _result_header_value
+
+    artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(128)}
+    metadata = {
+        "status": "failed",
+        "exit_code": 1,
+        "error_message": "Agent process exited 1: ValueError: boom",
+        "command": ["pi"],
+        "output_artifacts": artifacts,
+        "run_dir": "runs/node_a/worker",
+        "agent_stderr_tail": "错" * 8000 + "x" * 2000,
+    }
+    with pytest.raises(ResultHeaderOverflow):
+        _result_header_value(metadata)
+    # 前两级是真收缩（可观察面）：同载荷去掉产物清单后，tail/error 收敛
+    # 落预算且 error_message 完整——证明信号只在两级收缩之后才触发。
+    shrunk = dict(metadata, output_artifacts={})
+    decoded = json.loads(_result_header_value(shrunk).decode("utf-8"))
+    assert decoded["error_message"] == "Agent process exited 1: ValueError: boom"
+    assert len(decoded["agent_stderr_tail"]) > 0
+
+
+def test_result_header_value_giant_direct_ref_still_signals_fallback() -> None:
+    """单条 ref 自身就超预算（超长 storage_key）的直传形态：同样抛回退信号
+    而非降级为空清单——回退后 CAS 形态（或 prepare 降级失败形态）才是
+    最后手段截断的入口，头永不因直传形态而直接不可投递。"""
+    from worker.host.transfer import ResultHeaderOverflow, _result_header_value
+
+    giant = {
+        "storage_key": "jobs-staging/" + "x" * 20_000,
+        "size_bytes": 1,
+        "content_hash": "a" * 64,
+    }
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "error_message": "",
+        "command": ["pi"],
+        "output_artifacts": {"a.json": giant},
+        "run_dir": "runs/node_a/worker",
+    }
+    with pytest.raises(ResultHeaderOverflow):
+        _result_header_value(metadata)
 
 
 def test_result_header_value_ascii_metadata_unchanged() -> None:
@@ -379,14 +430,37 @@ def _direct_ref(i: int) -> dict:
     }
 
 
-def test_result_header_value_truncates_128_direct_refs_under_budget() -> None:
-    """#748 R2 P2-1：128 个直传 ref（Host 侧 _MAX_OUTPUT_ARTIFACTS 上限）全 ref
-    形态 ~25KB，撞破 14KB 预算——成功运行同样中招（成功上报也带产物清单）。
-    多级降级第三级：截断 output_artifacts 为前缀 + 截断标记；序列化字节必须
-    落在预算内，保留的 ref 逐字节原样（前缀，不是改写）。"""
-    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
+def test_result_header_value_signals_fallback_for_128_direct_refs() -> None:
+    """#748 R3（codex review P1）：128 个直传 ref（Host 侧 _MAX_OUTPUT_ARTIFACTS
+    上限）全 ref 形态 ~25KB，撞破 14KB 预算——成功运行同样中招（成功上报也带
+    产物清单）。修复前第三级截断为前缀 + 标记，但直传模式的归档不带产物字节、
+    Host 也不用截断标记恢复引用——前缀之外的产物进不了 job_dir，成功的执行被
+    改判 Missing outputs。修复后该形态抛 ResultHeaderOverflow 回退信号：上传
+    队列清空直传规格重跑 prepare（归档内嵌模式），引用回到 CAS 形态。"""
+    from worker.host.transfer import ResultHeaderOverflow, _result_header_value
 
     artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(128)}
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "error_message": "",
+        "command": ["pi"],
+        "output_artifacts": artifacts,
+        "run_dir": "runs/node_a/worker",
+    }
+    with pytest.raises(ResultHeaderOverflow, match="archive-embed fallback"):
+        _result_header_value(metadata)
+    # 输入 dict 不被信号破坏（回退重备用的是原始 metadata）。
+    assert metadata["output_artifacts"] == artifacts
+
+
+def test_result_header_value_cas_refs_fit_budget_without_truncation() -> None:
+    """#748 R3（codex review P1）回退终点：归档内嵌模式下引用是 CAS 字符串
+    （~78B/条），128 条全量 ~12KB 天然落预算——无需任何截断/标记，全部产物
+    引用完整上报（codex 指出的问题形态在回退后彻底消失）。"""
+    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
+
+    artifacts = {f"output-{i:03d}.json": f"sha256:{'a' * 64}" for i in range(128)}
     metadata = {
         "status": "completed",
         "exit_code": 0,
@@ -398,67 +472,40 @@ def test_result_header_value_truncates_128_direct_refs_under_budget() -> None:
     header = _result_header_value(metadata)
     assert len(header) <= _RESULT_HEADER_BUDGET
     decoded = json.loads(header.decode("utf-8"))
-    kept = decoded["output_artifacts"]
-    assert 0 < len(kept) < 128
-    # 前缀保序：保留的是前 N 个，ref 内容逐字节未动。
-    kept_names = list(kept)
-    assert kept_names == [f"output-{i:03d}.json" for i in range(len(kept))]
-    for name, ref in kept.items():
-        assert ref == artifacts[name]
-    # 截断标记：truncated=true + 原数量。
-    assert decoded["output_artifacts_truncated"] is True
-    assert decoded["output_artifacts_total"] == 128
+    assert decoded["output_artifacts"] == artifacts  # 128 条全量、逐字节原样
+    assert "output_artifacts_truncated" not in decoded
+    assert "output_artifacts_total" not in decoded
 
 
-def test_result_header_value_degrades_giant_refs_to_empty_with_markers() -> None:
-    """降级到极致：单条 ref 自身就超预算（超长 storage_key）时，清单整体
-    降级为空列表 + 截断标记——头仍可投递（这是本修复的存活底线），产物
-    字节仍在归档里（直传 ref 丢失面是「回退归档通道」而非数据丢失）。"""
+def test_result_header_value_last_resort_truncates_cas_refs_to_empty() -> None:
+    """最后手段兜底（R3 已知的不可缩面，如巨型 command）：CAS 形态的清单在
+    仍超预算时降级为空 + 截断标记——CAS 引用意味着产物字节已在归档里，Host
+    解包仍能拿到文件，丢的只是头部清单。标记语义如实：Host 只做记录，不用它
+    恢复引用。total 只 stamp 一次（128，不是逐趟漂移后的残值）。头部字节数
+    不再回落预算内：command 是谁也缩不掉的面，delivery-with-overflow 优于
+    UNDELIVERABLE（租约过期 → 整执行重跑）。"""
     from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
 
-    giant = {
-        "storage_key": "jobs-staging/" + "x" * 20_000,
-        "size_bytes": 1,
-        "content_hash": "a" * 64,
-    }
+    artifacts = {f"output-{i:03d}.json": f"sha256:{'a' * 64}" for i in range(128)}
     metadata = {
         "status": "completed",
         "exit_code": 0,
         "error_message": "",
-        "command": ["pi"],
-        "output_artifacts": {"a.json": giant},
+        "command": ["pi", "x" * 20_000],  # 不可缩面：单条 command 逼近预算
+        "output_artifacts": artifacts,
         "run_dir": "runs/node_a/worker",
     }
     header = _result_header_value(metadata)
-    assert len(header) <= _RESULT_HEADER_BUDGET
     decoded = json.loads(header.decode("utf-8"))
+    # 清单被整体降级为空（最后手段），标记 + 一次性 total。
     assert decoded["output_artifacts"] == {}
     assert decoded["output_artifacts_truncated"] is True
-    assert decoded["output_artifacts_total"] == 1
-
-
-def test_result_header_value_truncates_after_tail_and_error_shrink() -> None:
-    """多级顺序：tail 先缩、error_message 次之、产物清单最后——三面同时
-    超预算时前两级先收敛（分类面优先于产物清单之前保住）。"""
-    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
-
-    artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(128)}
-    metadata = {
-        "status": "failed",
-        "exit_code": 1,
-        "error_message": "Agent process exited 1: ValueError: boom",
-        "command": ["pi"],
-        "output_artifacts": artifacts,
-        "run_dir": "runs/node_a/worker",
-        "agent_stderr_tail": "错" * 8000 + "x" * 2000,
-    }
-    header = _result_header_value(metadata)
-    assert len(header) <= _RESULT_HEADER_BUDGET
-    decoded = json.loads(header.decode("utf-8"))
-    # error_message 是分类面：第三级介入前必须完整。
-    assert decoded["error_message"] == "Agent process exited 1: ValueError: boom"
-    assert decoded["output_artifacts_truncated"] is True
-    assert len(decoded["output_artifacts"]) < 128
+    assert decoded["output_artifacts_total"] == 128
+    # 去掉清单后残差 = 纯 command 面（不可缩），证明产物面已退出预算竞争。
+    residue = dict(metadata, output_artifacts={}, command=["pi"])
+    assert len(header) - (_RESULT_HEADER_BUDGET - len(_result_header_value(residue))) > 0
+    assert len(header) > _RESULT_HEADER_BUDGET  # 不可缩面原样投递
+    assert "x" * 100 in decoded["command"][1]  # command 内容一字不丢
 
 
 def test_cjk_result_header_roundtrips_through_real_h11_uvicorn_starlette() -> None:

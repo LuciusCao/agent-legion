@@ -148,18 +148,18 @@ def test_artifact_truncation_markers_accepted_absent_defaults() -> None:
 
 @_parse_only
 def test_artifact_truncation_roundtrip_worker_header_to_host_parse() -> None:
-    """#748 R2 P2-1 roundtrip：Worker 侧 128 直传 ref 头收缩（前缀 + 标记）
-    经真实传输形态（UTF-8 字节 → latin-1 视图 → _recover_result_header 反解）
-    被 Host 读进 outcome/record——截断标记与保留前缀逐项还原。"""
+    """#748 R3（codex review P1）roundtrip：128 条产物清单超头预算时，Worker
+    侧不再截断直传 ref 前缀（Host 不用截断标记恢复引用，产物会 Missing），
+    而是抛 ResultHeaderOverflow 回退归档内嵌模式——CAS 字符串 ref（~78B/条）
+    全量 128 条 ~12KB 天然落预算。经真实传输形态（UTF-8 字节 → latin-1 视图
+    → _recover_result_header 反解）被 Host 读进 outcome/record：全量引用逐项
+    还原、无截断标记。"""
     from server.app.routes.agent_worker_results import _recover_result_header
     from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
 
-    ref = {
-        "storage_key": "jobs-staging/ws-1/job-1/exec-1/out.json",
-        "size_bytes": 3,
-        "content_hash": _HASH,
-    }
-    artifacts = {f"out-{i:03d}.json": dict(ref) for i in range(128)}
+    # 回退终点形态：归档内嵌模式下的 CAS 字符串引用（直传规格清空后
+    # prepare_result 重备的 output_artifacts 形态）。
+    artifacts = {f"out-{i:03d}.json": f"sha256:{_HASH}" for i in range(128)}
     metadata = {
         "status": "completed",
         "exit_code": 0,
@@ -170,17 +170,45 @@ def test_artifact_truncation_roundtrip_worker_header_to_host_parse() -> None:
     }
     header = _result_header_value(metadata)
     assert len(header) > _RESULT_HEADER_BUDGET * 0.8  # 真实大头场景
+    assert len(header) <= _RESULT_HEADER_BUDGET  # CAS 形态天然落预算
     outcome, record = parse_result_metadata(_recover_result_header(header.decode("latin-1")))
     kept = outcome.output_artifacts
-    assert 0 < len(kept) < 128
-    assert list(kept) == [f"out-{i:03d}.json" for i in range(len(kept))]
-    assert all(kept[name] == ref for name in kept)
+    # 全量 128 条 CAS 引用逐项还原——不截断、无标记。
+    assert len(kept) == 128
+    assert list(kept) == [f"out-{i:03d}.json" for i in range(128)]
+    assert all(kept[name] == f"sha256:{_HASH}" for name in kept)
+    assert outcome.output_artifacts_truncated is False
+    assert outcome.output_artifacts_total == 0
+    assert record["output_artifacts_truncated"] is False
+    assert record["output_artifacts_total"] == 0
+    # CJK error_message 同链路原样（非 ASCII 头不受回退影响）。
+    assert outcome.error_message == "任务完成"
+
+
+@_parse_only
+def test_artifact_truncation_markers_parse_for_last_resort_shape() -> None:
+    """最后手段形态（R3 不可缩面，如巨型 command + CAS 引用）经真实传输形态
+    被 Host 读进 outcome/record：清单为空 + truncated/total 标记如实记录——
+    标记是记账面，Host 不用它恢复引用（codex review P1 的语义如实化）。"""
+    from server.app.routes.agent_worker_results import _recover_result_header
+    from worker.host.transfer import _result_header_value
+
+    artifacts = {f"out-{i:03d}.json": f"sha256:{_HASH}" for i in range(128)}
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "error_message": "任务完成",
+        "command": ["pi", "x" * 20_000],  # 不可缩面
+        "output_artifacts": artifacts,
+        "run_dir": "runs/node_a/worker",
+    }
+    header = _result_header_value(metadata)
+    outcome, record = parse_result_metadata(_recover_result_header(header.decode("latin-1")))
+    assert outcome.output_artifacts == {}
     assert outcome.output_artifacts_truncated is True
     assert outcome.output_artifacts_total == 128
     assert record["output_artifacts_truncated"] is True
     assert record["output_artifacts_total"] == 128
-    # CJK error_message 同链路原样（非 ASCII 头不被截断标记破坏）。
-    assert outcome.error_message == "任务完成"
 
 
 @pytest.mark.postgres
