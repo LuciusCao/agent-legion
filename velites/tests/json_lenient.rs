@@ -213,6 +213,81 @@ async fn set_oversized_container_text_skips_the_parse_attempt() {
     assert_eq!(raw.len(), 300_003);
 }
 
+/// #747 codex review（P2）：重复对象键拒绝宽容解析。`{"k":1,"k":2}`
+/// 反序列化为 `Value` 只保留最后一个键值——宽容解析会把此前按字面保存
+/// 的输入静默改坏，所以任一层对象出现重复键（含嵌套层与数组内对象）
+/// 都按字面写入 + lossless 注记；无重复键的合法文本照常解析（不误伤）。
+#[tokio::test]
+async fn set_duplicate_object_keys_stay_literal() {
+    let dir = tempfile::tempdir().unwrap();
+    write_spec(dir.path());
+    let lossy = "would not survive parsing losslessly";
+    let declined = lossy;
+    // (key, value, 应字面写入?, 期待注记子串)
+    let cases: Vec<(&str, serde_json::Value, bool, Option<&str>)> = vec![
+        // codex 评论原始形态：顶层重复键。
+        (
+            "a",
+            serde_json::json!("{\"k\":1,\"k\":2}"),
+            true,
+            Some(declined),
+        ),
+        // 嵌套对象里的重复键：整个容器字面保留。
+        (
+            "b",
+            serde_json::json!("{\"a\":{\"x\":1,\"x\":2}}"),
+            true,
+            Some(declined),
+        ),
+        // 数组内对象的重复键：同理拒绝。
+        (
+            "c",
+            serde_json::json!("[{\"k\":1,\"k\":2}]"),
+            true,
+            Some(declined),
+        ),
+        // 不误伤：无重复键的对象（值里重复出现的字符串是数据不是键）。
+        (
+            "d",
+            serde_json::json!("{\"a\":1,\"b\":\"a\",\"l\":[\"d\",\"d\"]}"),
+            false,
+            Some("parsed as an object"),
+        ),
+        // 键相等以解析后的字符串为准："a" 与 "\u0061" 是同一个键。
+        (
+            "e",
+            serde_json::json!("{\"a\":1,\"\\u0061\":2}"),
+            true,
+            Some(declined),
+        ),
+        // 第一个重复之后还有键：整个容器一并拒绝（部分解析无意义）。
+        (
+            "f",
+            serde_json::json!("{\"k\":1,\"k\":2,\"z\":3}"),
+            true,
+            Some(declined),
+        ),
+        // 反直觉但正确的旧行为：-0 的 Number 往返重序列化为 0，判 lossy、
+        // 字面保留（数字拒绝零行为变化，重复键修复不动它）。
+        ("g", serde_json::json!("[0, -0]"), true, Some(lossy)),
+    ];
+    for (key, value, expect_literal, expect_note) in cases {
+        let query = format!("meta.{key}");
+        let output = ToolKind::Json
+            .execute(&args("set", &query, Some(value.clone())), &ctx(dir.path()))
+            .await;
+        assert!(!output.is_error, "{query}");
+        let note = text(&output);
+        assert!(note.contains(expect_note.unwrap()), "{query}: {note}");
+        let written = &read_spec(dir.path())["meta"][key];
+        if expect_literal {
+            assert_eq!(written, &value, "{query} must stay the literal string");
+        } else {
+            assert_ne!(written, &value, "{query} must be parsed, not literal");
+        }
+    }
+}
+
 /// #747 字面字符串场景：不以 `[`/`{` 开头或不可解析的 JSON-looking
 /// 文本、标量形态字符串——一律按字面写入，不触发宽容解析。
 #[tokio::test]
