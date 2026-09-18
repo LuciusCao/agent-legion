@@ -75,8 +75,8 @@ def plan_rerun_target(
             "rerun",
             "failed",
             node_key,
-            "wrong_workspace",
-            f"Job does not belong to workspace {workspace_id}",
+            "not_found",
+            "Job not found",
         )
     nodes = pre.nodes_by_job.get(job_id, [])
     try:
@@ -187,8 +187,8 @@ def rerun_by_failure_category(
             results[job_id] = job_failure_result(
                 job_id,
                 "failed",
-                "wrong_workspace",
-                f"Job does not belong to workspace {workspace_id}",
+                "not_found",
+                "Job not found",
             )
             continue
         definition = pre.definitions.for_job(job)

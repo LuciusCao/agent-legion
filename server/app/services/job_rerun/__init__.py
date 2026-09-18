@@ -76,8 +76,8 @@ class JobRerunService:
                 "rerun",
                 "failed",
                 node_key,
-                "wrong_workspace",
-                f"Job does not belong to workspace {workspace_id}",
+                "not_found",
+                "Job not found",
             )
 
         actual_node_key = resolve_rerun_node(self.job_db, job_id, job, node_key, from_failed_node)

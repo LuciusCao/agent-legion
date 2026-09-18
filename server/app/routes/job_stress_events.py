@@ -4,8 +4,10 @@ import os
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from server.app.auth.dependencies import reject_studio_agent_scope
 
 
 class StressEventRecord(BaseModel):
@@ -33,6 +35,10 @@ def create_job_stress_events_router(
     @router.post(
         "/workspaces/{workspace_id}/events/stress",
         response_model=StressEventBatchResponse,
+        # Same as batch-rerun/preview (red-team R8 P2-2 on #745): the job
+        # guard's scoped effecting short-circuit must meet a scope refusal
+        # here, not a skipped membership check.
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def record_stress_events(
         workspace_id: str,

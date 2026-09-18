@@ -93,6 +93,10 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/jobs/{job_id}/run-to", None),
     ("POST", "/api/jobs/{job_id}/continue", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun", None),
+    # R8 P2-2 on #745: preview now mounts reject_studio_agent_scope like the
+    # other job POSTs (the job guard's scoped effecting short-circuit relies
+    # on this), so it belongs to the guarded effecting set.
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun/preview", {"node_key": "n1"}),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-run-to", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-pause", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-resume", None),
@@ -214,7 +218,10 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("PUT", "/api/agent-definitions/{agent_id}/draft"): "draft write",
     ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
     ("POST", "/api/skills/validate"): "validate only",
-    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun/preview"): "preview only",
+    # batch-rerun/preview moved OUT of the exempt list (red-team R8 P2-2 on
+    # #745): it now mounts reject_studio_agent_scope like every other POST
+    # under job_group, so the guard's scoped effecting short-circuit never
+    # bypasses its workspace membership check.
     # Node prompt preview: read-only render, persists nothing.
     ("POST", "/api/workspaces/{workspace_id}/workflow/node-prompt-preview"): "preview only",
     # Scoped-only tool surface (require_studio_agent_scope): these endpoints
@@ -277,16 +284,17 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
         "POST",
         "/api/studio-agent/tools/workspaces/{workspace_id}/workflow/publish-request",
     ): "scoped-only tool surface",
-    # Skill read/validate/save-version tools (issue #217): draft-only — the
-    # save endpoint commits+tags a local skill repo but never touches the
-    # skill lock (release stays a human admin relock).
+    # Skill read/validate/save-version tools (issue #217; workspace-scoped
+    # since #710 — skills are workspace-isolated): draft-only — the save
+    # endpoint commits+tags a local skill repo but never touches the skill
+    # lock (release stays a human admin relock).
     (
         "POST",
-        "/api/studio-agent/tools/skills/{skill_key:path}/validate",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key:path}/validate",
     ): "scoped-only tool surface",
     (
         "POST",
-        "/api/studio-agent/tools/skills/{skill_key:path}/versions",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key:path}/versions",
     ): "scoped-only tool surface",
     # Skill creation tool (#633, workspace-scoped): draft-only like the save
     # — creates a fresh local skill repo under the workspace's skill dir and
@@ -335,8 +343,10 @@ _PATH_PARAM_VALUES = {
 }
 
 
-def _effecting_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
-    values = {**_PATH_PARAM_VALUES, "workspace_id": workspace_id}
+def _effecting_endpoints(
+    workspace_id: str, values_extra: dict | None = None
+) -> list[tuple[str, str, dict | None]]:
+    values = {**_PATH_PARAM_VALUES, "workspace_id": workspace_id, **(values_extra or {})}
     return [
         (
             method,
@@ -366,8 +376,15 @@ def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> Non
     workspace_id = str(
         job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-guard-ws")["id"]
     )
+    # Seed a real job: asserting the 403 on a live target proves the scope
+    # refusal fires for an existing job (the scoped effecting short-circuit
+    # in require_job_workspace_access would also 403 a nonexistent id —
+    # that weaker shape is pinned by test_studio_agent_job_tools).
+    from tests.helpers import make_workspace_job
+
+    real_job = make_workspace_job(client, workspace_id)
     scoped = _scoped_client(client, job_db)
-    for method, url, payload in _effecting_endpoints(workspace_id):
+    for method, url, payload in _effecting_endpoints(workspace_id, {"job_id": real_job}):
         response = scoped.request(method, url, json=payload)
         assert response.status_code == 403, f"{method} {url} -> {response.status_code}"
         assert "Studio agent scope" in response.json()["detail"]
@@ -423,12 +440,39 @@ def test_full_session_still_reaches_effecting_endpoints(client, job_db) -> None:
     workspace_id = str(
         job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-admin-ws")["id"]
     )
+    # Same real-job requirement as the scoped-token inventory above (#710).
+    # Seed the workspace once, then mint one fresh job per mutating endpoint:
+    # the admin pass really deletes its job, and re-seeding the workspace
+    # agent definitions is not idempotent (entity version conflict).
+    from tests.helpers import make_workspace_job
+
+    mint_seq = iter(range(10**9))
+
+    def _mint_job() -> str:
+        return make_workspace_job(client, workspace_id, item_id=f"scope_admin_{next(mint_seq)}")
+
     scoped = _scoped_client(client, job_db)
-    for method, url, payload in _effecting_endpoints(workspace_id):
-        admin_response = client.request(method, url, json=payload)
-        assert admin_response.status_code != 403, f"{method} {url}"
+    # Scoped round first, on a shared live job: every request is refused
+    # with 403 and has no side effects.
+    for method, url, payload in _effecting_endpoints(workspace_id, {"job_id": _mint_job()}):
         scoped_response = scoped.request(method, url, json=payload)
         assert scoped_response.status_code == 403, f"{method} {url}"
+    # Admin round: reachability only (never 401/403). The DELETE workspace
+    # entry may remove the workspace mid-loop, and the DELETE job entries
+    # consume their jobs — a 404 on later entries is the admin's own doing
+    # and still proves reachability, so minting is best-effort.
+    for method, url, payload in _effecting_endpoints(workspace_id, {"job_id": None}):
+        if "/jobs/" in url and client.get(f"/api/workspaces/{workspace_id}").status_code == 200:
+            try:
+                fresh = _mint_job()
+            except AssertionError:
+                fresh = None
+            if fresh is not None:
+                head, _, rest = url.partition("/jobs/")
+                job_segment, _, tail = rest.partition("/")
+                url = f"{head}/jobs/{fresh}/{tail}" if tail else f"{head}/jobs/{fresh}"
+        admin_response = client.request(method, url, json=payload)
+        assert admin_response.status_code not in (401, 403), f"{method} {url}"
 
 
 _ADMIN_ENDPOINTS: list[tuple[str, str, dict | None]] = [

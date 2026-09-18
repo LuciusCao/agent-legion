@@ -51,8 +51,8 @@ class JobWorkflowUpgradeService:
             return self._result(
                 job_id,
                 "failed",
-                "wrong_workspace",
-                f"Job does not belong to workspace {workspace_id}",
+                "not_found",
+                "Job not found",
             )
 
         active = self.job_db.get_active_workflow_revision(

@@ -104,7 +104,7 @@ def test_create_skill_materializes_repo_with_trio_commit_and_tag(
             assert (repo / path).is_file()
 
         # The created skill immediately reads through the existing tools.
-        detail = scoped.get(f"/api/studio-agent/tools/skills/{_WS}/generate-quiz")
+        detail = scoped.get(f"/api/studio-agent/tools/workspaces/{_WS}/skills/{_WS}/generate-quiz")
         assert detail.status_code == 200, detail.text
         assert detail.json()["tags"] == ["v0.1.0"]
 

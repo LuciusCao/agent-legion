@@ -273,7 +273,7 @@ def test_upgrade_job_workflow_fails_for_missing_or_wrong_workspace(tmp_path: Pat
     assert missing["status"] == "failed"
     assert missing["reason_code"] == "not_found"
     assert wrong_workspace["status"] == "failed"
-    assert wrong_workspace["reason_code"] == "wrong_workspace"
+    assert wrong_workspace["reason_code"] == "not_found"
 
 
 def test_upgrade_job_workflow_records_event_buffer_update(tmp_path: Path) -> None:

@@ -63,8 +63,13 @@ export const extraQueryKeys = {
     ['studioAgentCatalog', workspaceId] as const,
   // Studio 节点详情的技能文件预览；ref 进 key（版本切换重取），Studio 对话
   // turn_end 按首段 'studioSkillDetail' 前缀整体失效（useStudioChat）。
-  studioSkillDetail: (skillKey: string, ref: string | null) =>
-    ['studioSkillDetail', skillKey, ref] as const,
+  // workspaceId 进 key（#745）：skill 读取按 workspace 鉴权，切 workspace
+  // 后同 key 不同 scope 的缓存不得复用。
+  studioSkillDetail: (
+    skillKey: string,
+    workspaceId: string,
+    ref: string | null
+  ) => ['studioSkillDetail', skillKey, workspaceId, ref] as const,
   // #410：节点检查器 Skill 区块 latest 绑定的实际执行版本回显（最近 run
   // 的 skill_version）。
   // #410：节点检查器 Skill 区块 latest 绑定的实际执行版本回显（最近 run

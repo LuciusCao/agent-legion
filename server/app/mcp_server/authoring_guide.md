@@ -95,14 +95,22 @@ Studio. Nothing you do takes effect in production by itself.
 - `save_node_prompt(workspace_id, node_key, prompt)` — write a custom
   `execution.prompt` for one node into the workspace's unpublished draft
   YAML; an empty string clears it back to the auto-assembled default.
-- `get_skill(skill_key, ref=None)` — a skill's configured ref, repo tags
+- `get_skill(workspace_id, skill_key, ref=None)` — a skill's configured ref,
+  repo tags
   (latest first), and text files: the LOCKED commit's content when the lock
   pins one, else the working tree; `ref` previews one git tag without moving
   the lock.
-- `validate_skill(skill_key)` — the runtime skill contract as a structured
+- `validate_skill(workspace_id, skill_key)` — the runtime skill contract as a
+  structured
   error list. Persists nothing.
-- `save_skill_version(skill_key, files, new_tag, message)` — commit + tag a
+- `save_skill_version(workspace_id, skill_key, files, new_tag, message)` —
+  commit + tag a
   new version in the skill's LOCAL source repo (section 6). Lock untouched.
+  WORKSPACE-OWNED keys only: a skill whose key's first segment is a group
+  directory (e.g. the demo's `education-video-problems-generation/...`,
+  shared by every referencing workspace) is read-only for you — saving
+  returns 404. To iterate on a group skill, first `create_skill` a
+  workspace-owned copy under your workspace and point the node at it.
 - `create_skill(workspace_id, skill_name, files, new_tag, message)` — create
   a BRAND-NEW skill repo at `<skills root>/<workspace_id>/<skill_name>`
   (#633, workspace-scoped): the files must carry the full contract set of
@@ -398,19 +406,28 @@ reviews the git diff and re-pins.
    (author agent-legion-studio) tagged `new_tag` (e.g. `v0.1.0`). Everything
    is validated first; a name that already exists is a 409, and a failed
    create leaves no directory behind, so you can retry safely.
-2. `get_skill(skill_key)` — the working tree at HEAD (`latest`), or
+2. `get_skill(workspace_id, skill_key)` — the working tree at HEAD
+   (`latest`), or
    `ref=<tag>` to preview one tag, e.g. one another agent just created; an
    unknown tag is a structured 404 and changes
    nothing.
-3. Edit the file contents in your draft, then `validate_skill(skill_key)` —
+3. Edit the file contents in your draft, then
+   `validate_skill(workspace_id, skill_key)` —
    the runtime contract: non-empty SKILL.md + references/output-contract.md +
    scripts/validate_output.py, plus a strict parse of the root
    `contract.yaml` when present. Fix every reported error; reported
    `warnings` (a missing root contract.yaml) do not fail the verdict but
    tell you the machine contract is either on the deprecated embedded
    block or missing entirely.
-4. `save_skill_version(skill_key, files, new_tag, message)` — writes into the
-   skill's in-place repo. Every path is validated before any
+4. `save_skill_version(workspace_id, skill_key, files, new_tag, message)` —
+   writes into the
+   skill's in-place repo — workspace-owned keys only. Group-directory keys
+   (first segment not a workspace id, e.g. the demo's
+   `education-video-problems-generation/<name>`) are shared read-only
+   surfaces: saving them returns 404. To change one, `create_skill` a
+   workspace-owned copy under your workspace, port the changes there, and
+   rebind the node — shared-group edits are an instance-level (human admin)
+   act, never yours. Every path is validated before any
    write (inside the skill dir, no `..`/absolute paths, no `.git`, no
    overwriting untracked files); after writing, the contract check re-runs
    and a failure (including a malformed root `contract.yaml`) rolls the

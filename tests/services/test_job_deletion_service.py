@@ -260,7 +260,7 @@ def test_delete_rejects_wrong_workspace(job_db: JobQueries, tmp_path: Path) -> N
     assert error.job_id == job["id"]
     assert error.operation == "delete"
     assert error.status == "failed"
-    assert error.reason_code == "wrong_workspace"
+    assert error.reason_code == "not_found"
 
 
 def test_delete_rejects_missing_job(job_db: JobQueries, tmp_path: Path) -> None:
@@ -297,7 +297,7 @@ def test_batch_delete_returns_ordered_results(job_db: JobQueries, tmp_path: Path
     assert results[1]["status"] == "failed"
     assert results[1]["reason_code"] == "active_lease"
     assert results[2]["status"] == "failed"
-    assert results[2]["reason_code"] == "wrong_workspace"
+    assert results[2]["reason_code"] == "not_found"
     assert results[3]["status"] == "failed"
     assert results[3]["reason_code"] == "not_found"
 

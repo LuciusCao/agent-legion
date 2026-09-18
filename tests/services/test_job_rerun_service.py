@@ -279,7 +279,7 @@ def test_rerun_wrong_workspace(rerun_service, job):
         rerun_service.rerun("other", job["id"], "write_script")
 
     assert exc_info.value.status == "failed"
-    assert exc_info.value.reason_code == "wrong_workspace"
+    assert exc_info.value.reason_code == "not_found"
 
 
 def test_rerun_stages_and_removes_artifacts(rerun_service, job, settings):

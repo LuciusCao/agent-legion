@@ -96,13 +96,14 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
         ("GET", f"{base}/agent-runtimes", None),
         ("GET", f"{base}/workflows/wf/nodes/node/code", None),
         ("GET", "/api/studio-agent/tools/chat-sessions/session-x/context", None),
-        # Skill tools (issue #217): unknown skill keys 404, which still proves
-        # the scope guard let the token through.
-        ("GET", "/api/studio-agent/tools/skills/wf/review", None),
-        ("POST", "/api/studio-agent/tools/skills/wf/review/validate", None),
+        # Skill tools (issue #217; workspace-scoped since #710 — the skill
+        # key's first segment must equal the path workspace): unknown skill
+        # keys 404, which still proves the scope guard let the token through.
+        ("GET", "/api/studio-agent/tools/workspaces/wf/skills/wf/review", None),
+        ("POST", "/api/studio-agent/tools/workspaces/wf/skills/wf/review/validate", None),
         (
             "POST",
-            "/api/studio-agent/tools/skills/wf/review/versions",
+            "/api/studio-agent/tools/workspaces/wf/skills/wf/review/versions",
             {"files": [{"path": "SKILL.md", "content": "x"}], "new_tag": "v2", "message": "m"},
         ),
         # Skill creation tool (#633, workspace-scoped): invalid skill name is

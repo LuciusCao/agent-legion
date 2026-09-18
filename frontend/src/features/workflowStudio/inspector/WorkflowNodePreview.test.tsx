@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getSkillDetail } from '../../../api/agentCatalogApi'
+import { useSettingStore } from '../../../stores/settingStore'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import type { WorkflowNodeRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
@@ -11,6 +12,10 @@ vi.mock('../../../api/agentCatalogApi', () => ({
 }))
 
 const mockGetSkillDetail = vi.mocked(getSkillDetail)
+
+beforeEach(() => {
+  useSettingStore.setState({ workspaceId: 'ws-test' })
+})
 
 const node: WorkflowNodeRecord = {
   key: 'n1',
@@ -74,6 +79,7 @@ describe('WorkflowNodePreview skill key resolution', () => {
     expect(await screen.findByText('demo/node-skill')).toBeInTheDocument()
     expect(mockGetSkillDetail).toHaveBeenCalledWith(
       'demo/node-skill',
+      'ws-test',
       undefined
     )
   })
@@ -85,7 +91,11 @@ describe('WorkflowNodePreview skill key resolution', () => {
     })
 
     expect(await screen.findByText('demo/node-skill')).toBeInTheDocument()
-    expect(mockGetSkillDetail).toHaveBeenCalledWith('demo/node-skill', 'v9')
+    expect(mockGetSkillDetail).toHaveBeenCalledWith(
+      'demo/node-skill',
+      'ws-test',
+      'v9'
+    )
   })
 
   it('echoes the published node skill when the draft has no such node', async () => {
@@ -97,6 +107,7 @@ describe('WorkflowNodePreview skill key resolution', () => {
     expect(await screen.findByText('demo/published-skill')).toBeInTheDocument()
     expect(mockGetSkillDetail).toHaveBeenCalledWith(
       'demo/published-skill',
+      'ws-test',
       'v7'
     )
   })
@@ -111,6 +122,7 @@ describe('WorkflowNodePreview skill key resolution', () => {
     expect(await screen.findByText('demo/agent-skill')).toBeInTheDocument()
     expect(mockGetSkillDetail).not.toHaveBeenCalledWith(
       'demo/published-skill',
+      expect.anything(),
       expect.anything()
     )
   })
@@ -121,6 +133,7 @@ describe('WorkflowNodePreview skill key resolution', () => {
     expect(await screen.findByText('demo/agent-skill')).toBeInTheDocument()
     expect(mockGetSkillDetail).toHaveBeenCalledWith(
       'demo/agent-skill',
+      'ws-test',
       undefined
     )
   })

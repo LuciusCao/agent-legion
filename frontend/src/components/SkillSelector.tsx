@@ -36,7 +36,7 @@ export function SkillSelector(props: Props) {
   const { prefix, rootReady, rootLoadFailed } = useSkillsRootPrefix(workspaceId)
   // 校验上下文 = 绑定 key + 节点身份（codex 三轮 P1 on #427）。
   const { validating, validate, invalidateInFlight, resultFor } =
-    useSkillValidation(prefix, props.onChange, { value, nodeKey })
+    useSkillValidation(prefix, props.onChange, { value, nodeKey, workspaceId })
   // 绑定上下文（节点切换/换绑）变化即作废在飞校验（codex 二轮 P1 /
   // 三轮 P1 on #427）：节点 A 的迟到请求不得再触发 A 版 onChange 覆盖 B
   // 的草稿。上下文含 nodeKey——A、B 都未绑定（value 都为空串）时切换节点
@@ -44,18 +44,19 @@ export function SkillSelector(props: Props) {
   // 复审 P2 on #427——useEffect 在 commit 后的宏任务里执行，studio 节点
   // 切换提交期间 settle 的响应恰好绕过两道保险）。作废不影响 invalid
   // 结果展示——换绑输错时 value 未变（P2），快照归属仍命中。
-  const prevContext = useRef({ value, nodeKey })
+  const prevContext = useRef({ value, nodeKey, workspaceId })
   useLayoutEffect(() => {
-    if (sameContext(prevContext.current, { value, nodeKey })) return
-    prevContext.current = { value, nodeKey }
+    if (sameContext(prevContext.current, { value, nodeKey, workspaceId }))
+      return
+    prevContext.current = { value, nodeKey, workspaceId }
     invalidateInFlight()
-  }, [value, nodeKey, invalidateInFlight])
+  }, [value, nodeKey, workspaceId, invalidateInFlight])
   // 回显绑定时的 tag 数据源：技能详情端点（不带 ref = 工作区 HEAD），
   // 与预览面板同一查询缓存（extraQueryKeys.studioSkillDetail）。
   const boundDetailQuery = useQuery({
-    queryKey: extraQueryKeys.studioSkillDetail(value, null),
-    queryFn: () => getSkillDetail(value),
-    enabled: Boolean(value),
+    queryKey: extraQueryKeys.studioSkillDetail(value, workspaceId, null),
+    queryFn: () => getSkillDetail(value, workspaceId),
+    enabled: Boolean(value) && Boolean(workspaceId),
   })
   // 结果按 key 归属（codex P1 on #427）：节点切换后旧结果视为无结果，tags
   // 回落到当前绑定自己的详情端点；invalid 结果属于「校验发起时的绑定」

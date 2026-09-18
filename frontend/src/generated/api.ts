@@ -1143,57 +1143,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/studio-agent/tools/skills/{skill_key}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Skill */
-    get: operations['get_skill_api_studio_agent_tools_skills__skill_key__get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/studio-agent/tools/skills/{skill_key}/validate': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Validate Skill */
-    post: operations['validate_skill_api_studio_agent_tools_skills__skill_key__validate_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/studio-agent/tools/skills/{skill_key}/versions': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Save Skill Version */
-    post: operations['save_skill_version_api_studio_agent_tools_skills__skill_key__versions_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions': {
     parameters: {
       query?: never
@@ -1523,6 +1472,57 @@ export interface paths {
     put?: never
     /** Propagate Shared Materials Endpoint */
     post: operations['propagate_shared_materials_endpoint_api_studio_agent_tools_workspaces__workspace_id__skills_shared_propagate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Skill */
+    get: operations['get_skill_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key}/validate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Validate Skill */
+    post: operations['validate_skill_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__validate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Save Skill Version */
+    post: operations['save_skill_version_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__versions_post']
     delete?: never
     options?: never
     head?: never
@@ -8508,7 +8508,8 @@ export interface operations {
   }
   get_skill_api_agent_catalog_skills__skill_key__get: {
     parameters: {
-      query?: {
+      query: {
+        workspace_id: string
         ref?: string | null
       }
       header?: never
@@ -10034,6 +10035,7 @@ export interface operations {
     parameters: {
       query: {
         path: string
+        workspace_id: string
       }
       header?: never
       path?: never
@@ -10063,7 +10065,9 @@ export interface operations {
   }
   validate_skill_api_skills_validate_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path?: never
       cookie?: never
@@ -10261,105 +10265,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StudioAgentPublishRequestStatusResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_skill_api_studio_agent_tools_skills__skill_key__get: {
-    parameters: {
-      query?: {
-        ref?: string | null
-      }
-      header?: never
-      path: {
-        skill_key: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['SkillDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  validate_skill_api_studio_agent_tools_skills__skill_key__validate_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        skill_key: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['SkillValidateToolResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  save_skill_version_api_studio_agent_tools_skills__skill_key__versions_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        skill_key: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['SkillSaveVersionRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      201: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['SkillSaveVersionResponse']
         }
       }
       /** @description Validation Error */
@@ -11069,6 +10974,108 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['SharedMaterialsPropagateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_skill_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__get: {
+    parameters: {
+      query?: {
+        ref?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  validate_skill_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__validate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillValidateToolResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_skill_version_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__versions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillSaveVersionRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSaveVersionResponse']
         }
       }
       /** @description Validation Error */

@@ -24,11 +24,11 @@ describe('agentCatalogApi', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await getSkillDetail('demo/review')
+    const result = await getSkillDetail('demo/review', 'ws_demo')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-catalog/skills/demo/review',
+      '/api/agent-catalog/skills/demo/review?workspace_id=ws_demo',
       expect.anything()
     )
   })
@@ -38,11 +38,11 @@ describe('agentCatalogApi', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await getSkillDetail('demo/review', 'v1.3.0')
+    const result = await getSkillDetail('demo/review', 'ws_demo', 'v1.3.0')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-catalog/skills/demo/review?ref=v1.3.0',
+      '/api/agent-catalog/skills/demo/review?workspace_id=ws_demo&ref=v1.3.0',
       expect.anything()
     )
   })

@@ -25,7 +25,9 @@ def skills_base(tmp_path, monkeypatch):
 
 def test_validate_endpoint(skills_base, client) -> None:
     response = client.post(
-        "/api/skills/validate", json={"path": str(skills_base / "wf" / "review")}
+        "/api/skills/validate",
+        params={"workspace_id": "wf"},
+        json={"path": str(skills_base / "wf" / "review")},
     )
 
     assert response.status_code == 200
@@ -37,7 +39,9 @@ def test_validate_endpoint(skills_base, client) -> None:
 
 
 def test_validate_endpoint_rejects_invalid_path(skills_base, client) -> None:
-    response = client.post("/api/skills/validate", json={"path": "/etc"})
+    response = client.post(
+        "/api/skills/validate", params={"workspace_id": "wf"}, json={"path": "/etc"}
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -46,7 +50,10 @@ def test_validate_endpoint_rejects_invalid_path(skills_base, client) -> None:
 
 
 def test_tags_endpoint(skills_base, client) -> None:
-    response = client.get("/api/skills/tags", params={"path": str(skills_base / "wf" / "review")})
+    response = client.get(
+        "/api/skills/tags",
+        params={"path": str(skills_base / "wf" / "review"), "workspace_id": "wf"},
+    )
 
     assert response.status_code == 200
     body = response.json()
