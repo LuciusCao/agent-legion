@@ -16,6 +16,10 @@ from server.app.routes.agent_worker_results import parse_result_metadata
 
 pytestmark = pytest.mark.no_db
 
+# 下方 test_cjk_result_header_lands_in_database_intact 需要真实 app + 数据库
+# （与上方纯 parse 测试不同），单独挂 postgres 标记覆盖模块级 no_db。
+_db_test = pytest.mark.postgres
+
 _HASH = "a" * 64
 _REMOTE_REF = {
     "storage_key": "jobs-staging/ws-1/job-1/exec-1/out.json",
@@ -121,3 +125,70 @@ def test_agent_stderr_tail_absent_defaults_empty() -> None:
     outcome, record = parse_result_metadata(_payload({}))
     assert outcome.agent_stderr_tail == ""
     assert record["agent_stderr_tail"] == ""
+
+
+@_db_test
+def test_cjk_result_header_lands_in_database_intact(tmp_path) -> None:
+    """#748 review P2 路由级验证：Worker 按「UTF-8 字节头」投递 CJK metadata
+    （worker.host.transfer._result_header_value 的形态），路由经
+    _recover_result_header 反解后 204 落库——outcome_json 里的 CJK
+    error_message / agent_stderr_tail 逐字符原样，latin-1 mojibake 不入库。"""
+    from fastapi.testclient import TestClient
+
+    from tests.helpers.agent_worker_api import (
+        claim as _claim,
+    )
+    from tests.helpers.agent_worker_api import (
+        empty_archive as _empty_archive,
+    )
+    from tests.helpers.agent_worker_api import (
+        make_app as _make_app,
+    )
+    from tests.helpers.agent_worker_api import (
+        register as _register,
+    )
+    from tests.helpers.agent_worker_api import (
+        seed_request as _seed_request,
+    )
+    from worker.host.transfer import _result_header_value
+
+    tail = "追踪" * 500  # 1000 个 CJK 字符（3 字节/字）
+    metadata = {
+        "status": "failed",
+        "exit_code": 3,
+        "error_message": "Agent process exited 3: 任务执行失败",
+        "command": ["pi"],
+        "output_artifacts": {},
+        "run_dir": "runs/node_a/worker",
+        "agent_stderr_tail": tail,
+    }
+    header_bytes = _result_header_value(metadata)
+    assert len(header_bytes) > 3 * 1024  # 真实的 CJK 头场景，非 ASCII 转义
+
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-cjk", limit=2)
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        claimed = _claim(client, token)
+        response = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/result",
+            headers={
+                "X-Agent-Worker-Token": token,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+                "X-Agent-Result": header_bytes,
+            },
+            content=_empty_archive(),
+        )
+        assert response.status_code == 204, response.text
+
+        with app.state.job_db.connect() as conn:
+            row = conn.execute(
+                "select outcome_json from agent_execution_requests where execution_id=%s",
+                (claimed["execution_id"],),
+            ).fetchone()
+        assert row is not None
+        stored = json.loads(row["outcome_json"])
+        assert stored["error_message"] == "Agent process exited 3: 任务执行失败"
+        assert stored["agent_stderr_tail"] == tail
+        # latin-1 mojibake 形态绝不能入库（反解失败时的透传会留下痕迹）。
+        assert "\\u" not in row["outcome_json"]

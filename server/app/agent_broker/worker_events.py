@@ -243,9 +243,12 @@ def note_execution_finished(
             "job_id": str(payload["job_id"]),
             "outcome": str(outcome.status),
             "exit_code": int(outcome.exit_code),
-            # #748: crash-attribution tail rides the terminal event so the
-            # structured-events timeline (jq) shows the stderr first line
-            # without a DB round-trip; absent for non-crash outcomes.
+            # #748: crash-attribution head of the stderr tail rides the
+            # terminal event — the first 200 chars of the retained tail
+            # (a Traceback opens with its header line there), so the jq
+            # timeline shows the crash cause without a DB round-trip;
+            # absent for non-crash outcomes. The crash HEADER for
+            # error_message is the tail's last line (see stderr_evidence).
             **(
                 {"stderr_head": outcome.agent_stderr_tail[:200]}
                 if getattr(outcome, "agent_stderr_tail", "")

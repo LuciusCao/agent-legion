@@ -19,7 +19,7 @@ from server.app.auth.dependencies import require_admin, require_user
 from server.app.routes.agent_register_tokens import create_agent_register_tokens_router
 from server.app.routes.agent_worker_claims import create_agent_worker_claim_router
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
-from server.app.routes.agent_worker_results import parse_result_metadata
+from server.app.routes.agent_worker_results import _recover_result_header, parse_result_metadata
 from server.app.routes.agent_workers_contracts import (
     AgentWorkerDeleteResponse,
     AgentWorkersResponse,
@@ -242,7 +242,12 @@ def create_agent_workers_router(
         # Validate metadata fully BEFORE writing the archive: malformed input
         # must produce a 400, never a 500 with an orphan file on disk.
         try:
-            outcome, record = parse_result_metadata(request.headers.get("x-agent-result", "{}"))
+            # #748 P2: the Worker ships the metadata as raw UTF-8 header
+            # bytes; Starlette hands it over latin-1-decoded, so reverse the
+            # transport decoding before parsing (no-op for legacy ASCII).
+            outcome, record = parse_result_metadata(
+                _recover_result_header(request.headers.get("x-agent-result", "{}"))
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="invalid Agent result metadata") from exc
         # Size gate: reject on the declared length before spooling the body.

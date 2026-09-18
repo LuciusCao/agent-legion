@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from collections import deque
 from contextlib import suppress
 from pathlib import Path
@@ -20,7 +21,11 @@ from shared.pi_model_error import fold_model_error
 
 logger = logging.getLogger(__name__)
 
-# #748: hard byte cap of the stderr tail retained by the compression pass.
+# #748: the stderr-tail budget retained by the compression pass. The bound is
+# enforced as two character budgets (per-line pre-trim + running-total deque
+# pop, both against this value in chars) with a final byte-slice backstop
+# after the UTF-8 encode — chars↔bytes can diverge up to 4x, so the slice is
+# the hard byte guarantee and the char budgets are the working bound.
 # Non-JSON lines are the agent's stderr text (the spawn merges stderr into
 # the stdout pipe, so both pumps write them into events.jsonl raw), and the
 # compression rewrite below discards them — this tail is the only survivor,
@@ -55,7 +60,9 @@ RELEVANT_EVENT_TYPES = frozenset(
 )
 
 
-def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int, bytes]:
+def scan_and_compress_pi_events(
+    events_path: Path, stderr_sink: Path | None = None
+) -> tuple[str | None, int, int, bytes]:
     """One pass: fold the model-error state, capture the stderr tail, and
     rewrite the file compressed.
 
@@ -64,6 +71,14 @@ def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int
     twice — the raw events stream runs to hundreds of MB per execution, so
     the second full scan dominated the upload pipeline's CPU time. The
     #748 stderr-tail capture rides the same pass for the same reason.
+
+    ``stderr_sink`` (#748 review P1) makes the capture durable AT SCAN TIME:
+    when the tail is non-empty it is persisted to the sink path BEFORE the
+    rewrite replaces the events file — after the replace the non-JSON lines
+    are gone forever, so a caller that re-runs this scan (upload fallback,
+    worker-restart restore) must read the tail back FROM THE SINK FILE, not
+    from a second scan. Best-effort: an unwritable sink is logged and never
+    fails the compression (the in-memory tail still rides the return value).
 
     Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``.
     ``stderr_tail`` is the bounded keep-the-tail capture of the non-JSON
@@ -82,10 +97,10 @@ def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int
 
     compressed_path = events_path.with_suffix(".jsonl.compressing")
     model_error: str | None = None
-    # Bounded deque of non-JSON lines (chars): per-line pre-trim plus the
-    # running-total pop keeps the in-memory footprint capped even against a
-    # single multi-MB garbled line (the pumps' own line caps allow those);
-    # the final encode+slice enforces the hard byte bound.
+    # 两重字符预算（单行预截 STDERR_TAIL_BYTES 字符 + deque 运行总量 pop 到
+    # STDERR_TAIL_BYTES 字符以内），最终 encode 后再按 STDERR_TAIL_BYTES 字节
+    # 切片兜底——bytes 与 chars 的比例上限是 4（UTF-8），兜底切片只在
+    # 多字节字符把字符预算换算放大时收紧，不会放松上限。
     stderr_tail: deque[str] = deque()
     stderr_chars = 0
     try:
@@ -121,6 +136,21 @@ def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int
             compressed_path.unlink(missing_ok=True)
         return None, 0, 0, b""
 
+    tail = "\n".join(stderr_tail).encode("utf-8", "replace")[-STDERR_TAIL_BYTES:]
+    if stderr_sink is not None and tail:
+        # Best-effort AT THE CALL SITE: an unwritable sink must never fail
+        # the compression (the in-memory tail still rides the return value).
+        # The catch lives here, not inside _persist_stderr_tail, so a
+        # sink-failure in ANY form (patched, unwritable dir, os.replace
+        # across devices) degrades instead of escaping into the scan.
+        # shared/ is stdlib-only by design (see shared/__init__.py), so the
+        # sink write carries the RAW tail — the Worker-side caller redacts
+        # the file in place right after (worker/upload/stderr_evidence.py:
+        # the sink IS the outbound archive face).
+        try:
+            _persist_stderr_tail(stderr_sink, tail)
+        except OSError:
+            logger.exception("Failed to persist the stderr tail: %s", stderr_sink)
     try:
         compressed_path.replace(events_path)
     except OSError:
@@ -128,8 +158,24 @@ def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int
         return None, 0, 0, b""
 
     compressed_size = events_path.stat().st_size
-    tail = "\n".join(stderr_tail).encode("utf-8", "replace")
-    return model_error, original_size, compressed_size, tail[-STDERR_TAIL_BYTES:]
+    return model_error, original_size, compressed_size, tail
+
+
+def _persist_stderr_tail(sink: Path, tail: bytes) -> None:
+    """Best-effort durable copy of the rescued tail (same-dir temp + replace).
+
+    No fsync: the sink must survive process crashes (worker restart →
+    restore() re-runs prepare), not power loss — page-cache write-back is
+    enough for that, and the compression pass must never fail on an
+    unwritable sink (the tail still rides the return value)."""
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=sink.parent, prefix=".agent-stderr.", delete=False
+        ) as staging:
+            staging.write(tail)
+        os.replace(staging.name, sink)
+    except OSError:
+        logger.exception("Failed to persist the stderr tail: %s", sink)
 
 
 def compress_pi_events(events_path: Path) -> tuple[int, int]:
