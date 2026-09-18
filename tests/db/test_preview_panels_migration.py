@@ -71,12 +71,12 @@ def test_migration_widens_legacy_check_and_is_idempotent() -> None:
 def test_upgrade_from_v70_applies_the_widening() -> None:
     # Upgrade path: a database recorded at v70 replays the schema file (a no-op
     # for the existing table) and runs the v71+ migrations. At SCHEMA_VERSION
-    # 83 the chain tail is workspace_api_tokens: init_db's
+    # 85 the chain tail is node_runs_impl_identity: init_db's
     # high-water skip means the test must drop v71 AND every later version
     # (82 included) to force the replay; the extra migrations' applies are
     # idempotent.
-    assert SCHEMA_VERSION == 84
-    assert MIGRATIONS[-1].name == "workspace_api_tokens"
+    assert SCHEMA_VERSION == 85
+    assert MIGRATIONS[-1].name == "node_runs_impl_identity"
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version >= 71")
         conn.execute(_LEGACY_CHECK_DDL)

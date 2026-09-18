@@ -214,6 +214,14 @@ MIGRATIONS: list[SchemaMigration] = [
     # submission channel (POST /runs + run/job reads). Table DDL rides the
     # apply fn (postgres_schema.sql is at its ceiling; v76 precedent).
     SchemaMigration(84, "workspace_api_tokens", migrate_workspace_api_tokens),
+    # v85 (#645): node_runs.agent_definition_hash — the claim-time
+    # implementation-identity mirror (agent rows = Agent definition hash,
+    # code rows = sha256 of the code text). The inherit upgrade's identity
+    # check reads this retention-proof column first, falling back to the
+    # request rows for pre-v85 executions. DDL-only via the schema-file
+    # replay, no backfill (design §2.5: retention-deleted request rows
+    # cannot be reconstructed; unprovable = conservative rerun).
+    SchemaMigration(85, "node_runs_impl_identity"),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

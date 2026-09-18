@@ -759,6 +759,154 @@ def test_agent_definition_without_mutable_keys_stays_inheritable(tmp_path: Path)
     assert (job_dir / "b_out.json").read_text() == "old-b"
 
 
+# ---------------------------------------------------------------------------
+# P1-1 补充：本地池执行 hash 记录（#645 v85，node_runs.agent_definition_hash）
+# ---------------------------------------------------------------------------
+
+
+def _seed_local_pool_execution(
+    queries: JobQueries, job_id: str, node_key: str, impl_hash: str
+) -> None:
+    """播种本地池形态的完成执行：node_run(completed) 带身份列、无请求行。
+
+    本地 code 池从不写 agent_execution_requests——v85 起身份记录落在
+    node_runs（claim_lease 的 insert），这是该路径的播种镜像。
+    """
+    run = queries.start_node_run(
+        job_id, node_key, ["python", "run.py"], "", agent_definition_hash=impl_hash
+    )
+    assert run is not None
+    queries.finish_node_run(int(run["id"]), "completed", 0, "")
+
+
+def test_impl_identity_local_pool_record_matching_keeps_node(tmp_path: Path) -> None:
+    """#645 v85 主用例：本地池执行有 node_runs 身份记录且匹配 → 可继承。
+
+    旧行为：本地 code 池执行无任何身份记录（请求行不写、node_runs 无列）
+    → 恒「不可证明」恒重跑——默认部署的 inherit 退化。修复后 claim 落列，
+    记录与当前 published code_hash 相等即继承。判别点：无请求行（本地池
+    形态）也可证明；下游无记录仍保守重跑，排除不外溢到上游。
+    """
+    definition = _chain({"a": ["a_out.json"], "b": ["b_out.json"]})
+    queries, workspace, revisions, original = _setup(tmp_path, definition)
+    revisions.publish_workspace_revision(workspace["id"], definition)
+    a_hash = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {}\n")
+    b_hash = _publish_node_code(queries, workspace["id"], "b", "def run(ctx):\n    return {}\n")
+    job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job_id, key, status="pending")
+    _seed_local_pool_execution(queries, job_id, "a", a_hash)
+    _seed_local_pool_execution(queries, job_id, "b", b_hash)
+    queries.update_job_status(job_id, "completed")
+    from server.app.storage_paths import resolve_job_dir
+
+    job_dir = resolve_job_dir(queries.get_job(job_id), queries.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "a_out.json").write_text("old-a")
+    (job_dir / "b_out.json").write_text("old-b")
+    service = _make_service(tmp_path, queries)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    # a/b 的 node_runs 身份与当前 published 相等 → 继承；c 无执行记录 →
+    # 保守重跑（本地池形态下没有请求行 fallback 可兜）。
+    assert result["kept_node_count"] == 2
+    assert statuses["a"] == "completed"
+    assert statuses["b"] == "completed"
+    assert statuses["c"] == "pending"
+    assert (job_dir / "a_out.json").read_text() == "old-a"
+
+
+def test_impl_identity_local_pool_record_drift_reruns_downstream(tmp_path: Path) -> None:
+    """#645 v85 漂移用例：node_runs 记录 V1、当前 published V2 → 节点及下游重跑。
+
+    本地池形态（无请求行）：身份漂移经 node_runs 直查暴露，节点进重置面、
+    下游沿闭包传播重跑——不再有「本地池执行躲过身份判定」的盲区。
+    """
+    definition = _chain({"b": ["b_out.json"]})
+    queries, workspace, revisions, original = _setup(tmp_path, definition)
+    revisions.publish_workspace_revision(workspace["id"], definition)
+    old_hash = _publish_node_code(
+        queries, workspace["id"], "b", "def run(ctx):\n    return {'v': 1}\n"
+    )
+    job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job_id, key, status="pending")
+    _seed_local_pool_execution(queries, job_id, "b", old_hash)
+    queries.update_job_status(job_id, "completed")
+    from server.app.storage_paths import resolve_job_dir
+
+    job_dir = resolve_job_dir(queries.get_job(job_id), queries.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "b_out.json").write_text("produced-by-v1")
+    # b 的实现重发布（workflow 定义未动）→ node_runs 记录的 V1 hash 漂移。
+    _publish_node_code(queries, workspace["id"], "b", "def run(ctx):\n    return {'v': 2}\n")
+    service = _make_service(tmp_path, queries)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    assert result["kept_node_count"] == 0
+    assert statuses == {"a": "pending", "b": "pending", "c": "pending"}
+    # b 重跑前其旧实现产物进暂存删除（不会以 v1 字节冒充 v2 产物）。
+    assert not (job_dir / "b_out.json").exists()
+
+
+def test_impl_identity_node_runs_takes_precedence_over_request_row(tmp_path: Path) -> None:
+    """#645 v85 合并优先级：node_runs 记录优先于请求行，逐 node_key 二选一。
+
+    b 同时有 v85 前的 done 请求行（记录 V1）与新 node_runs 记录（V2）：
+    读取端必须取 node_runs 段（claim 时刻身份、retention 不受窗口影响），
+    而不是混行取旧。a 只有请求行（历史 Worker 作业形态）→ fallback 命中。
+    """
+    definition = _chain({"a": ["a_out.json"], "b": ["b_out.json"]})
+    queries, workspace, revisions, original = _setup(tmp_path, definition)
+    revisions.publish_workspace_revision(workspace["id"], definition)
+    a_hash = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {}\n")
+    v1_hash = _publish_node_code(
+        queries, workspace["id"], "b", "def run(ctx):\n    return {'v': 1}\n"
+    )
+    job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job_id, key, status="pending")
+    # a：历史形态（只有请求行）；b：请求行记录 V1 + node_runs 记录 V1。
+    _seed_done_execution(queries, workspace["id"], job_id, "a", kind="code", impl_hash=a_hash)
+    _seed_done_execution(queries, workspace["id"], job_id, "b", kind="code", impl_hash=v1_hash)
+    queries.update_job_status(job_id, "completed")
+    # b 重发布 V2：此时补一条带 V2 身份的 node_runs completed 行（模拟
+    # v85 后的又一次本地池执行）——node_runs 段最新 completed 记录 V2。
+    # （先把 b 拉回 pending：done 请求播种只置 run 行 completed，这里
+    # 复位 job_node 以便 start_node_run 的 pending→running 守卫放行。）
+    queries.update_job_node(job_id, "b", status="pending")
+    _seed_local_pool_execution(
+        queries,
+        job_id,
+        "b",
+        _publish_node_code(queries, workspace["id"], "b", "def run(ctx):\n    return {'v': 2}\n"),
+    )
+    from server.app.storage_paths import resolve_job_dir
+
+    job_dir = resolve_job_dir(queries.get_job(job_id), queries.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "a_out.json").write_text("old-a")
+    # b 的产物在位（本地池执行播种不写文件，这里补上——隔离不可达退化，
+    # 判别点收敛在读取端的段合并优先级上）。
+    (job_dir / "b_out.json").write_text("old-b")
+    service = _make_service(tmp_path, queries)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    # a 走请求行 fallback、身份匹配 → 继承；b 的 node_runs 段最新记录 V2
+    # 与当前 published 相等 → 继承（若误用请求行 V1 会误判漂移重跑）。
+    assert result["kept_node_count"] == 2
+    assert statuses["a"] == "completed"
+    assert statuses["b"] == "completed"
+    assert statuses["c"] == "pending"
+    assert (job_dir / "b_out.json").read_text() == "old-b"
+
+
 def dataclasses_replace_definition(
     definition: WorkflowDefinition, nodes: dict
 ) -> WorkflowDefinition:

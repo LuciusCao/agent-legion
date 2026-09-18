@@ -8,17 +8,17 @@ workspace 当前 published 的 node_code（code 节点）或 Agent 定义（agen
 
 判定（``implementation_excluded_nodes``）：
 
-- **执行时身份**：``agent_execution_requests.agent_definition_hash`` ——
-  agent 行存 dispatch 解析到的 Agent 定义哈希、code 行存 code 文本
-  sha256（``CodeDispatchService.enqueue``）。取该节点**最新一次**完成
-  请求（``node_run_id`` 关联的 run 行按 id 倒序第一条；completed 节点
-  的产物由它产出）。
+- **执行时身份**：``node_runs.agent_definition_hash``（schema v85）优先
+  ——claim 时刻写入的身份镜像（agent 行 = dispatch 解析到的 Agent 定义
+  哈希、code 行 = code 文本 sha256），retention 永不删除 run 行，本地
+  code 池执行的身份记录也在此；请求行 fallback 覆盖 v85 前的
+  Worker/Agent 历史作业。取该节点**最新一次** completed 执行。
 - **当前身份**：与 dispatch 同款解析——code 节点
   ``NodeCodeService.get_effective_code`` 的 ``code_hash``；agent 节点按
   capability 解析唯一 published Agent 的 ``definition_hash()``。
-- 两者**证明相等**才可继承；不可证明（请求行已被 retention 清扫、节点
-  从未走 broker 路径、实现未发布、capability 漂移、解析异常）或**已
-  漂移**（不等）→ 排除继承，该节点及下游闭包重跑。
+- 两者**证明相等**才可继承；不可证明（两侧记录都缺失、实现未发布、
+  capability 漂移、解析异常）或**已漂移**（不等）→ 排除继承，该节点及
+  下游闭包重跑。
 - **Agent 定义侧 runtime_mutable 键**（codex 四轮复审 HIGH-2）：agent
   节点的有效 config_schema 主体来自 Agent 定义（dispatch 侧
   ``merge_reserved_execution_schema(definition.config_schema, …)``，节点
@@ -28,11 +28,8 @@ workspace 当前 published 的 node_code（code 节点）或 Agent 定义（agen
   并入本排除集（恒重跑），解析不到唯一 published 的节点 P1-1 已排除、
   不重复计入。
 
-为什么 code 节点没有对称的执行时记录：本地隐含 code 池的
-``LeaseClaimRequest`` 不携带 node_code 文本（执行时按 capability 现取），
-``node_runs`` 也无 code hash 列——本地执行过的 code 节点一律「不可
-证明」→ 恒重跑。这是保守方向：多跑不串数据；影响面见模块报告（真实
-工作流的产物由 Worker/Agent 路径生产时记录可查，纯本地池少见）。
+v85 之前本地 code 池执行无身份记录 → 一律「不可证明」恒重跑；v85 起
+claim 落列，本地池 code 节点与 Worker/Agent 节点同权可证明。
 """
 
 from __future__ import annotations
@@ -48,18 +45,21 @@ from server.app.workflows.definition import WorkflowDefinition
 logger = logging.getLogger(__name__)
 
 #: 请求行的 kind='code'（与 agent_execution_requests 检查约束一致）。
+#: v85 起比较口径按 node_type 选（见 implementation_excluded_nodes），
+#: 请求行 kind 只在读取端 fallback 的 SQL 里参与 done 请求筛选。
 _CODE_KIND = "code"
 
 
 def _latest_execution_identities(
     job_db: JobQueries, job_id: str, node_keys: frozenset[str]
 ) -> dict[str, tuple[str, str]]:
-    """node_key → 该节点最新完成请求的 ``(kind, agent_definition_hash)``。
+    """node_key → 该节点最新完成执行的 ``(kind, agent_definition_hash)``。
 
     走 ``JobQueries.latest_done_request_identities`` 门面
-    （``jobs/queries/upgrade_impl_identity``，BOUNDARY-DATA-001）；无关联
-    请求（本地池执行 / retention 已清扫）→ 该节点不在返回值里（调用方
-    按不可证明处理）。
+    （``jobs/queries/upgrade_impl_identity``，BOUNDARY-DATA-001）：node_runs
+    身份列优先（v85+ 执行 / 本地 code 池），请求行 fallback（历史
+    Worker/Agent 作业）；无任何记录（本地池 v85 前执行 / retention 已
+    清扫）→ 该节点不在返回值里（调用方按不可证明处理）。
     """
     return job_db.latest_done_request_identities(job_id, node_keys)
 
@@ -212,11 +212,14 @@ def implementation_excluded_nodes(
         if not executed_hash:
             excluded.add(key)
             continue
-        current = (
-            agent_current.get(key)
-            if node.node_type == "agent" or kind != _CODE_KIND
-            else code_current.get(key)
-        )
+        # 比较口径按 node_type 选（#645 v85）：node_runs 段无 kind 列，
+        # agent 节点对 Agent 定义哈希、code 节点对 code_hash。请求行
+        # fallback 的 kind 错乱防御（agent 节点挂 code 请求行）由哈希
+        # 值域天然覆盖：Agent definition_hash（定义 JSON 序列化摘要）与
+        # code sha256 相等概率可忽略，错乱即不等即保守排除。node_runs
+        # 段的 kind 是空串哨兵（非 'code'）——口径选择必须只看 node_type，
+        # 不能让哨兵值把 code 节点误路由到 agent catalog。
+        current = agent_current.get(key) if node.node_type == "agent" else code_current.get(key)
         if current is None or current != executed_hash:
             # 当前无 published 身份或与执行时身份不等 → 漂移/不可证明。
             excluded.add(key)

@@ -37,6 +37,7 @@
     "tests/db/test_materials_schema.py",
     "tests/db/test_monitoring_hotpath_indexes.py",
     "tests/db/test_node_cms_config_migration.py",
+    "tests/db/test_node_runs_impl_identity_schema.py",
     "tests/db/test_postgres_runtime.py",
     "tests/db/test_preview_panels_migration.py",
     "tests/db/test_quality_loop_schema.py",

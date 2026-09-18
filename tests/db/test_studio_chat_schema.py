@@ -24,13 +24,13 @@ def test_schema_v57_recorded() -> None:
     """Latest-migration record pin (moved from
     tests/db/test_job_node_status_counts_migration.py, v56)."""
     # The pin narrative now lives in tests/db/test_workspace_id_key_binding.py;
-    # v84 (workspace_api_tokens, #626) is the current chain tail.
+    # v85 (node_runs_impl_identity, #645) is the current chain tail.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "workspace_api_tokens"
+    assert row["name"] == "node_runs_impl_identity"
 
 
 def test_studio_chat_tables_exist() -> None:
@@ -81,7 +81,7 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "workspace_api_tokens"
+        assert migration["name"] == "node_runs_impl_identity"
 
 
 @pytest.mark.fresh_schema
@@ -114,7 +114,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "workspace_api_tokens"
+        assert migration["name"] == "node_runs_impl_identity"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).
@@ -153,9 +153,12 @@ def test_v73_database_gains_agent_config_columns_via_init_db() -> None:
 @pytest.mark.fresh_schema
 def test_v82_database_gains_context_health_columns_via_init_db() -> None:
     # Pre-v83 databases lack the context-health mirrors (#694); init_db
-    # replays the schema file whose ALTER adds both columns.
+    # replays the schema file whose ALTER adds both columns. SCHEMA_VERSION
+    # is v85 now: deleting only the v83 row makes init_db's high-water skip
+    # (max applied 83 < 84) still trigger the replay, so the DDL path under
+    # test is unchanged.
     with write_transaction(TEST_DATABASE_URL) as conn:
-        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+        conn.execute("delete from schema_migrations where version in (83, 84, 85)")
         conn.execute("alter table studio_chat_sessions drop column usage_json")
         conn.execute("alter table studio_chat_sessions drop column compacting")
 

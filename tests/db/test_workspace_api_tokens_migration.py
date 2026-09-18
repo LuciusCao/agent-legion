@@ -49,7 +49,12 @@ def test_v82_database_upgrades_via_init_db() -> None:
     """A v82 database (table absent) upgrades in place; rows survive."""
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("drop table workspace_api_tokens")
-        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+        # v84→v85 renumber on the 0.7.13 rebase: v85 (node_runs_impl_identity,
+        # #645) trails this table's own v84, so rewinding to a pre-v84 shape
+        # must drop both rows — deleting only SCHEMA_VERSION (85) would leave
+        # max(applied)=84 and the high-water skip would never re-run v84's
+        # table-creating apply fn.
+        conn.execute("delete from schema_migrations where version in (84, 85)")
         conn.execute(
             "insert into workspaces(id, default_workflow_key, name)"
             " values ('ws-v83-upgrade', 'ws-v83-upgrade', 'upgrade witness')"
@@ -76,10 +81,16 @@ def test_v82_database_upgrades_via_init_db() -> None:
         row = conn.execute(
             "select label from workspace_api_tokens where id='tok-legacy'"
         ).fetchone()
-        migration = conn.execute(
+        migration = conn.execute("select name from schema_migrations where version=84").fetchone()
+        tail = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert columns == _EXPECTED_COLUMNS
     assert row is not None and row["label"] == "pre-upgrade row"
     assert migration is not None
     assert migration["name"] == "workspace_api_tokens"
+    # After the v84→v85 renumber on the 0.7.13 rebase, v84 is no longer the
+    # registry tail — the #645 v85 entry (node_runs_impl_identity) is. Both
+    # rows must exist after the upgrade replay (one per registry entry).
+    assert tail is not None
+    assert tail["name"] == "node_runs_impl_identity"
