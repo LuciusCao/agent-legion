@@ -193,3 +193,51 @@ def test_scan_and_compress_no_stderr_yields_empty_tail(tmp_path):
     events.write_text('{"type":"session"}\n{"type":"agent_end"}\n')
     _, _, _, stderr_tail = scan_and_compress_pi_events(events)
     assert stderr_tail == b""
+
+
+def test_scan_and_compress_persists_tail_to_sink_at_scan_time(tmp_path):
+    """#748 review P1：非空 tail 在扫描时刻即落盘 sink 文件（rewrite 之前），
+    重入方（直传回落 / 重启恢复）读文件而非二次扫描。"""
+    from shared.pi_events import scan_and_compress_pi_events
+
+    events = tmp_path / "events.jsonl"
+    events.write_text('{"type":"session"}\nthread panicked at src/main.rs:42:\nassertion failed\n')
+    sink = tmp_path / "agent-stderr.log"
+    model_error, _, _, stderr_tail = scan_and_compress_pi_events(events, stderr_sink=sink)
+    assert model_error is None
+    assert (
+        sink.read_bytes() == stderr_tail == b"thread panicked at src/main.rs:42:\nassertion failed"
+    )
+    # 二次扫描（events 已压缩）tail 为空——幂等锚点在文件里。
+    _, _, _, second_scan = scan_and_compress_pi_events(events, stderr_sink=sink)
+    assert second_scan == b""
+    assert sink.read_bytes() == b"thread panicked at src/main.rs:42:\nassertion failed"
+
+
+def test_scan_and_compress_empty_tail_writes_no_sink(tmp_path):
+    """无 stderr 时不动 sink 文件（不留空文件占位、不覆盖既有内容）。"""
+    from shared.pi_events import scan_and_compress_pi_events
+
+    events = tmp_path / "events.jsonl"
+    events.write_text('{"type":"session"}\n{"type":"agent_end"}\n')
+    sink = tmp_path / "agent-stderr.log"
+    scan_and_compress_pi_events(events, stderr_sink=sink)
+    assert not sink.exists()
+
+
+def test_scan_and_compress_sink_write_failure_never_fails(tmp_path, monkeypatch):
+    """sink 不可写（OSError）不炸压缩：返回值仍带 tail，压缩照常完成。"""
+    from shared import pi_events
+    from shared.pi_events import scan_and_compress_pi_events
+
+    def broken_persist(_sink, _tail):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pi_events, "_persist_stderr_tail", broken_persist)
+    events = tmp_path / "events.jsonl"
+    events.write_text('{"type":"session"}\npanic: real cause\n')
+    _, original, compressed, stderr_tail = scan_and_compress_pi_events(
+        events, stderr_sink=tmp_path / "agent-stderr.log"
+    )
+    assert original > 0 and compressed > 0
+    assert stderr_tail == b"panic: real cause"

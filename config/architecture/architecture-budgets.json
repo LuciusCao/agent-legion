@@ -1796,6 +1796,7 @@
     "worker/upload/report_events.py": 49,
     "worker/upload/result_metadata.py": 28,
     "worker/upload/scheduler.py": 75,
+    "worker/upload/stderr_evidence.py": 47,
     "worker/upload/task.py": 76,
     "worker/worker_declarations.py": 51,
     "workspace_libs/__init__.py": 10,

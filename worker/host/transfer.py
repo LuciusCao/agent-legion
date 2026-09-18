@@ -28,6 +28,48 @@ _TRANSIENT_ERRORS = (requests.RequestException, TimeoutError, ConnectionError)
 
 DEFAULT_TRANSFER_TIMEOUT = 120
 
+# #748 review P2: byte budget of the X-Agent-Result header. h11 caps one
+# HTTP event (request line + ALL headers) at max_incomplete_event, default
+# 16 KiB — a CJK-heavy tail at the metadata char budget serializes to ~24 KB
+# even with ensure_ascii=False (6x with True) and would make the result
+# UNDELIVERABLE (worse than the original bug). 14 KiB leaves headroom for
+# the request line, the lease header, and proxy hop headers.
+_RESULT_HEADER_BUDGET = 14 * 1024
+
+
+def _result_header_value(metadata: dict[str, Any]) -> bytes:
+    """Serialize the result metadata into the X-Agent-Result header value.
+
+    #748 review P2: ``ensure_ascii=False`` + UTF-8 BYTES — the escaping form
+    blew every CJK char up to a 6-byte ``\\uXXXX`` sequence, and ``requests``
+    refuses non-latin-1 str header values, so raw UTF-8 must go in as bytes.
+    Verified roundtrip: h11 keeps header values as bytes, Starlette decodes
+    latin-1, and the Host reader reverses exactly that (see
+    ``_recover_result_header`` in agent_worker_results.py). The byte budget
+    above is enforced by shrinking the two free-text fields (stderr tail
+    first — error_message carries the classification surface).
+    """
+    payload = dict(metadata)
+
+    def _serialized() -> bytes:
+        return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    while len(_serialized()) > _RESULT_HEADER_BUDGET:
+        tail = payload.get("agent_stderr_tail")
+        if isinstance(tail, str) and len(tail) > 200:
+            payload["agent_stderr_tail"] = tail[: int(len(tail) * 0.9)]
+            continue
+        error = payload.get("error_message")
+        if isinstance(error, str) and len(error) > 200:
+            payload["error_message"] = error[: int(len(error) * 0.9)]
+            continue
+        # Both fields already minimal (or absent) — nothing left to shrink
+        # without touching the contract keys; ship what we have. The
+        # metadata char caps keep even pathological shapes under h11's
+        # 16 KiB in this branch.
+        break
+    return _serialized()
+
 
 class HostRequestError(RuntimeError):
     """Terminal non-retryable Host response (4xx); ``status`` carries the code."""
@@ -56,7 +98,9 @@ class TransferOperations:
         path: str,
         *,
         data: bytes | BinaryIO | None = None,
-        headers: dict[str, str] | None = None,
+        # #748: X-Agent-Result ships as raw UTF-8 BYTES (CJK-heavy metadata
+        # is not latin-1-encodable as str; requests refuses the str form).
+        headers: dict[str, str | bytes] | None = None,
         timeout: float | None = None,
         stream_to: Path | None = None,
     ) -> tuple[int, bytes]:
@@ -70,7 +114,7 @@ class TransferOperations:
         label: str,
         timeout: float,
         data: bytes | Callable[[], BinaryIO] | None = None,
-        headers: dict[str, str] | None = None,
+        headers: dict[str, str | bytes] | None = None,
         stream_to: Path | None = None,
     ) -> tuple[int, bytes]:
         """Request with backoff on transient network errors and Host 5xx.
@@ -161,14 +205,18 @@ class TransferOperations:
     ) -> tuple[int, bytes]:
         """Submit the execution result; returns (status, body) for the caller
         to distinguish a committed report (204) from a lost lease (409)."""
+        # requests accepts a bytes value for a header: urllib3 writes it
+        # verbatim (the latin-1 str refusal does not apply), which is how
+        # the raw-UTF-8 result header gets on the wire.
+        headers: dict[str, str | bytes] = {
+            "X-Agent-Result": _result_header_value(metadata),
+            "X-Agent-Lease-Id": lease_id,
+        }
         return self._request_with_retry(
             "POST",
             f"/api/agent-executions/{execution_id}/result",
             data=lambda: archive.open("rb"),
-            headers={
-                "X-Agent-Result": json.dumps(metadata, ensure_ascii=True),
-                "X-Agent-Lease-Id": lease_id,
-            },
+            headers=headers,
             label=f"result report failed: {execution_id}",
             timeout=self.transfer_timeout,
         )

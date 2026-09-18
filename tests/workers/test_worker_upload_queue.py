@@ -24,6 +24,8 @@ class QueueFakeClient:
         self.report_status = report_status
         self.report_errors = 0
         self.heartbeats_at_report: list[int] = []
+        # report 时刻 execution dir 还在（成功后即被清）：记录留痕文件此刻的存在。
+        self.stderr_trace_seen: list[bool] = []
 
     def upload_artifact(self, path: Path) -> str:
         data = path.read_bytes()
@@ -35,6 +37,9 @@ class QueueFakeClient:
         self, execution_id: str, lease_id: str, metadata: dict, archive: Path
     ) -> tuple[int, bytes]:
         self.heartbeats_at_report.append(self.heartbeats)
+        self.stderr_trace_seen.append(
+            (archive.parent / "job" / "runs" / "node_a" / "worker" / "agent-stderr.log").is_file()
+        )
         if self.report_errors > 0:
             self.report_errors -= 1
             raise RuntimeError("download failed: /x: timed out")
@@ -359,8 +364,9 @@ def _events_with_stderr(work_root: Path, stderr_lines: list[str]) -> None:
 
 
 def test_crash_exit_reports_stderr_summary_and_leaves_trace(tmp_path: Path) -> None:
-    """非零退出 + stderr 有内容：error_message 带上尾部首行，run 目录留下
-    agent-stderr.log，metadata 携带 agent_stderr_tail，归档内含该文件。"""
+    """非零退出 + stderr 有内容：error_message 带上尾部末行（崩溃头收尾在流的
+    最后），run 目录留下 agent-stderr.log，metadata 携带 agent_stderr_tail，
+    归档内含该文件。"""
     work_root = tmp_path / "work"
     _execution_dir(work_root)
     _events_with_stderr(
@@ -456,3 +462,110 @@ def test_completed_exit_zero_writes_stderr_trace_without_failing(tmp_path: Path)
     assert report["status"] == "completed"
     assert report["error_message"] == ""
     assert "agent_stderr_tail" not in report
+    # 留痕文件确实落盘（投递成功后 execution dir 已被清掉，断言 report 时刻的观测）。
+    assert client.stderr_trace_seen == [True]
+
+
+# -- #748 review P1/P2：重入幂等（直传回落 / 重启恢复）与出口脱敏 --
+
+
+def test_direct_upload_fallback_keeps_stderr_attribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """review P1 复现：首趟 prepare（tail 落盘 + 压缩 rewrite）→ 直传失败回落
+    → 二趟 prepare 重跑。修复前第二趟扫的是已压缩的 events.jsonl，tail 为空、
+    归因全丢；修复后 agent-stderr.log 是幂等锚点，二趟从文件读回。"""
+    from worker.artifact.upload import DirectUploadError
+
+    def failing_direct(_path: Path, _spec: object, **_kw: object) -> str:
+        raise DirectUploadError("4xx: presigned PUT rejected")
+
+    monkeypatch.setattr(upload_queue, "upload_artifact_direct", failing_direct)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _events_with_stderr(work_root, ["thread panicked at src/main.rs:42:", "assertion failed"])
+    client = QueueFakeClient()
+    task = _task(work_root, exit_code=3)
+    task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+    # 二趟 prepare 后 metadata 仍然带尾部摘要 + agent_stderr_tail。
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert report["error_message"] == "Agent process exited 3: assertion failed"
+    assert "thread panicked" in report["agent_stderr_tail"]
+
+
+def test_restore_reentry_keeps_stderr_attribution(tmp_path: Path) -> None:
+    """review P1 复现（restore 路径）：崩溃后重启，marker 恢复的任务重进 bulk
+    车道时 events.jsonl 早已压缩——归因必须从 agent-stderr.log 锚点读回。"""
+    from worker.upload.prepare import prepare_or_failed
+
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _events_with_stderr(work_root, ["Traceback (most recent call last):", "ValueError: boom"])
+    task = _task(work_root, exit_code=1)
+    # 首趟 prepare 完成（tail 落盘、events 压缩）——崩溃点在投递前。
+    prepare_or_failed(task)
+    run_dir = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker"
+    assert (run_dir / "agent-stderr.log").is_file()
+    assert "Traceback" not in (run_dir / "events.jsonl").read_text(encoding="utf-8")
+    # 重启恢复：marker 经 restore() 重建 task 重进 bulk 车道（二趟 prepare）。
+    marker = work_root / "exec-1" / PENDING_FILENAME
+    marker.write_text(json.dumps(task.to_json()), encoding="utf-8")
+    client = QueueFakeClient()
+    queue = _queue(client)
+    assert queue.restore(work_root) == 1
+    queue.shutdown()
+    report = client.reports[0]
+    assert report["error_message"] == "Agent process exited 1: ValueError: boom"
+    assert "Traceback" in report["agent_stderr_tail"]
+
+
+def test_crash_stderr_redacts_secret_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """review P2：stderr 回显里的密钥字面量（env 值 + 形态规则）必须在三个
+    出口面被替换为 ***——error_message、metadata.agent_stderr_tail、归档里的
+    agent-stderr.log（脱敏发生在 sink 落盘时刻，锚点文件本身就不含密钥）。"""
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", "sk-live-supersecretgatewaytoken123")
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _events_with_stderr(
+        work_root,
+        [
+            "auth failed for key sk-live-supersecretgatewaytoken123",
+            "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ3In0.SflKxwRJSMeKKF2QT4fwp",
+        ],
+    )
+    client = QueueFakeClient()
+    archived: dict[str, bytes] = {}
+    original_report = client.report
+
+    def report_and_capture(
+        execution_id: str, lease_id: str, metadata: dict, archive: Path
+    ) -> tuple[int, bytes]:
+        with tarfile.open(archive, "r:gz") as tar:
+            member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
+            extracted = tar.extractfile(member)
+            assert extracted is not None
+            archived[member.name] = extracted.read()
+        return original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_and_capture  # type: ignore[method-assign]
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=5))
+    queue.shutdown()
+    report = client.reports[0]
+    # 面 1+2：error_message（尾行是 Bearer 行，scheme 词保留）+ metadata。
+    assert report["error_message"] == "Agent process exited 5: Bearer ***"
+    combined = report["error_message"] + report["agent_stderr_tail"]
+    assert "sk-live-supersecretgatewaytoken123" not in combined
+    assert "SflKxwRJSMeKKF2QT4fwp" not in combined
+    assert combined.count("***") >= 2
+    # 面 3：归档成员（sink 落盘即脱敏——锚点文件对重入/宿主侧同样安全）。
+    [archived_tail] = archived.values()
+    assert b"sk-live-supersecretgatewaytoken123" not in archived_tail
+    assert b"SflKxwRJSMeKKF2QT4fwp" not in archived_tail
+    assert archived_tail.count(b"***") >= 2

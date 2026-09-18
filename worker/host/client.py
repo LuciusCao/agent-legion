@@ -55,7 +55,9 @@ class Client(ClaimOperations, HeartbeatOperations, TransferOperations):
         path: str,
         *,
         data: bytes | BinaryIO | None = None,
-        headers: dict[str, str] | None = None,
+        # #748: X-Agent-Result ships as raw UTF-8 BYTES (CJK-heavy metadata
+        # is not latin-1-encodable as str; requests refuses the str form).
+        headers: dict[str, str | bytes] | None = None,
         timeout: float | None = None,
         stream_to: Path | None = None,
     ) -> tuple[int, bytes]:

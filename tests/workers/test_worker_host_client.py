@@ -5,11 +5,13 @@ from __future__ import annotations
 import http.server
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 import requests
+from fastapi import FastAPI, Request
 
 from worker.host.client import Client, WorkerAuthError
 from worker.host.transfer import HostRequestError
@@ -274,3 +276,132 @@ def test_download_retries_mid_stream_connection_error(
     assert list(tmp_path.glob("*.part")) == []
     assert len(sleeps) == 1
     assert 0 <= sleeps[0] <= 1.0
+
+
+# -- #748 review P2：X-Agent-Result 头的 CJK 膨胀——序列化选型与真链路回读 --
+
+
+def test_result_header_value_escapes_cjk_as_raw_utf8_bytes() -> None:
+    """选型证据：ensure_ascii=False + UTF-8 字节。4000 个 CJK 字符的 tail
+    序列化后必须 ~12KB（真 CJK 3 字节/字），而不是转义形态的 ~24KB——
+    转义形态会撞破 h11 的 16KB 单事件上限，让结果永久不可投递。"""
+    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
+
+    metadata = {
+        "status": "failed",
+        "exit_code": 1,
+        "error_message": "Agent process exited 1: 任务失败",
+        "command": ["pi"],
+        "output_artifacts": {},
+        "run_dir": "runs/node_a/worker",
+        "agent_stderr_tail": "错误" * 2000,  # 4000 个 CJK 字符
+    }
+    header = _result_header_value(metadata)
+    # 转义形态 ~24KB；非转义 + 字节预算 < 14KB 预算。
+    assert len(header) < _RESULT_HEADER_BUDGET
+    assert len(header) < 16 * 1024  # h11 max_incomplete_event 余量内
+    # 内容不丢骨架：CJK 原样（非 \uXXXX），error_message 完整保留。
+    decoded = json.loads(header.decode("utf-8"))
+    assert decoded["error_message"] == "Agent process exited 1: 任务失败"
+    assert "\\u" not in header.decode("utf-8")
+
+
+def test_result_header_value_shrinks_oversized_tail_under_budget() -> None:
+    """超预算时按 tail 优先收缩（error_message 是分类面，最后动）：收缩后
+    必须落在预算内，且 error_message 一字不动。"""
+    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
+
+    metadata = {
+        "status": "failed",
+        "exit_code": 1,
+        "error_message": "Agent process exited 1: ValueError: boom",
+        "agent_stderr_tail": "错" * 8000 + "x" * 2000,  # 远超预算
+    }
+    header = _result_header_value(metadata)
+    assert len(header) <= _RESULT_HEADER_BUDGET
+    decoded = json.loads(header.decode("utf-8"))
+    assert decoded["error_message"] == "Agent process exited 1: ValueError: boom"
+    assert len(decoded["agent_stderr_tail"]) > 0
+
+
+def test_result_header_value_ascii_metadata_unchanged() -> None:
+    """纯 ASCII metadata 的序列化与旧 ensure_ascii=True 形态逐字节一致——
+    旧 Worker/Host 兼容面不动。"""
+    from worker.host.transfer import _result_header_value
+
+    metadata = {"status": "failed", "exit_code": 3, "error_message": "x"}
+    assert _result_header_value(metadata) == json.dumps(metadata).encode()
+
+
+def test_cjk_result_header_roundtrips_through_real_h11_uvicorn_starlette() -> None:
+    """真链路验证（#748 review P2 选型依据）：requests(字节头) → h11 →
+    uvicorn → Starlette latin-1 解码 → Host 侧 _recover_result_header 反解。
+    4000 字 CJK tail 在真实 uvicorn+h11 服务上原样读回——非 ASCII 头不被
+    拒收，json.loads 后逐字段相等。"""
+    import uvicorn
+
+    from server.app.routes.agent_worker_results import _recover_result_header
+    from worker.host.transfer import _result_header_value
+
+    metadata = {
+        "status": "failed",
+        "exit_code": 3,
+        "error_message": "Agent process exited 3: 任务执行失败",
+        "command": ["pi"],
+        "output_artifacts": {},
+        "run_dir": "runs/node_a/worker",
+        "agent_stderr_tail": "追踪" * 2000,  # 4000 个 CJK 字符
+    }
+    header_bytes = _result_header_value(metadata)
+    assert len(header_bytes) > 11 * 1024  # 真实的大头场景（4k CJK 字 ~12KB）
+    seen: dict[str, str] = {}
+
+    app = FastAPI()
+
+    @app.post("/result")
+    async def result(request: Request) -> object:
+        raw = request.headers.get("x-agent-result", "")
+        seen["latin1"] = raw
+        seen["recovered"] = _recover_result_header(raw)
+        return {"ok": True}
+
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning", access_log=False)
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    port = None
+    for _ in range(200):
+        sockets = getattr(server, "servers", None)
+        if sockets:
+            port = sockets[0].sockets[0].getsockname()[1]
+            break
+        time.sleep(0.05)
+    assert port is not None, "uvicorn did not start"
+    try:
+        response = requests.post(
+            f"http://127.0.0.1:{port}/result",
+            data=b"",
+            headers={"X-Agent-Result": header_bytes, "X-Agent-Lease-Id": "lease-1"},
+            timeout=10,
+        )
+        assert response.status_code == 200, response.text
+        # Starlette 交出来的是 latin-1 解码视图（mojibake 形态）。
+        assert seen["latin1"] != metadata["agent_stderr_tail"][:100]
+        # 反解后逐字段还原。
+        assert json.loads(seen["recovered"]) == metadata
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_recover_result_header_keeps_legacy_ascii_and_mojibake_as_is() -> None:
+    """Host 侧反解的兜底：纯 ASCII（新旧编码同形）原样；已破坏（非合法
+    UTF-8 的 latin-1 序列）不炸、原样透传。"""
+    from server.app.routes.agent_worker_results import _recover_result_header
+
+    assert _recover_result_header('{"status": "failed"}') == '{"status": "failed"}'
+    # 单字节 latin-1 扩展区（é = U+00E9）不是合法 UTF-8 多字节序列的起点
+    # 之列时保持原样——不抛错、不改写。
+    raw = "caf\xe9"
+    assert _recover_result_header(raw) == raw

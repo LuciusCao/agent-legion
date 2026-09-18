@@ -494,3 +494,98 @@ def test_non_transient_details_are_not_retryable():
     assert not is_transient_retryable("provider_stream")
     assert not is_transient_retryable("database")
     assert not is_transient_retryable("")
+
+
+# -- #748 review P2：带 stderr 摘要的新 crash 消息形态不击穿分类器 --
+
+# 六组输入矩阵：同一退出码在「裸退出码行」与「码行+摘要」两形态下归因必须
+# 一致——摘要（agent stderr 自由文本）完全不参与规则匹配，既不能制造
+# 假归因（timed out/terminated/Connection error/connection/CmsClientError
+# 子串），也不能把既有码语义（124→timeout）挤掉；非 124 的崩溃码在两形态
+# 下都落 unknown/execution_error（真正的崩溃原因在 agent_stderr_tail 里）。
+_CRASH_MATRIX = [
+    # (exit_code, bare message, summarized message, expected)
+    (
+        None,
+        "Agent process exited 124",
+        "Agent process exited 124: still working on it... request timed out mid-stream",
+        ("technical", "timeout"),
+    ),
+    (
+        1,
+        "Agent process exited 3",
+        "Agent process exited 3: ValueError: boom",
+        ("unknown", "execution_error"),
+    ),
+    (
+        1,
+        "Agent process exited 4",
+        "Agent process exited 4: the stream was terminated by peer at flush",
+        ("unknown", "execution_error"),
+    ),
+    (
+        1,
+        "Agent process exited 6",
+        "Agent process exited 6: requests.exceptions.Connection error: read failed",
+        ("unknown", "execution_error"),
+    ),
+    (
+        None,
+        "Agent process exited 1",
+        "Agent process exited 1: connection 'cms-internal' 不存在",
+        ("unknown", "execution_error"),
+    ),
+    (
+        1,
+        "Agent process exited 5",
+        "Agent process exited 5: CmsClientError: CMS request failed: 503 Service Unavailable",
+        ("unknown", "execution_error"),
+    ),
+]
+
+
+def test_crash_summary_forms_match_bare_forms() -> None:
+    """矩阵主体：带摘要的消息与裸退出码行的 (category, detail) 必须一致。"""
+    for exit_code, bare, summarized, expected in _CRASH_MATRIX:
+        assert classify_failure(exit_code, bare) == expected, bare
+        assert classify_failure(exit_code, summarized) == expected, summarized
+
+
+def test_crash_summary_substrings_cannot_fake_attribution() -> None:
+    """假归因专项：摘要子串（timed out / terminated / Connection error）在
+    退出码本身无对应语义时，不得触发对应规则——必须落到矩阵同款的
+    unknown/execution_error，而不是 timeout/provider_stream。"""
+    # 裸形态已是 unknown：exit 7 没有任何既有语义。
+    assert classify_failure(None, "Agent process exited 7") == ("unknown", "execution_error")
+    # 摘要里塞满会误触发的子串，归因纹丝不动。
+    assert classify_failure(None, "Agent process exited 7: retrying after request timed out") == (
+        "unknown",
+        "execution_error",
+    )
+    assert classify_failure(None, "Agent process exited 7: worker was terminated unexpectedly") == (
+        "unknown",
+        "execution_error",
+    )
+    assert classify_failure(None, "Agent process exited 7: Connection error during shutdown") == (
+        "unknown",
+        "execution_error",
+    )
+
+
+def test_crash_summary_preserves_exit_code_124_timeout_semantics() -> None:
+    """摘要形态下 exit 124 的超时语义来自退出码组本身，且摘要子串不能把
+    非 124 退出码伪装成超时；124+不含子串的摘要仍是 timeout。"""
+    # 124 归因在两形态下都成立（退出码组 / exit_code 参数）。
+    assert classify_failure(1, "Agent process exited 124: whatever the tail said") == (
+        "technical",
+        "timeout",
+    )
+    assert classify_failure(124, "Agent process exited 124: whatever the tail said") == (
+        "technical",
+        "timeout",
+    )
+    # 非 124 + 摘要无 timeout 证据 → unknown/execution_error（矩阵第 2 组再现）。
+    assert classify_failure(None, "Agent process exited 3: ValueError: boom") == (
+        "unknown",
+        "execution_error",
+    )

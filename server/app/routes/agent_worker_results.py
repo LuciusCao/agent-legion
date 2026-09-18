@@ -21,6 +21,22 @@ _MAX_CONNECTION_KEY_CHARS = MAX_CONNECTION_KEY_CHARS
 _MAX_AGENT_STDERR_TAIL_CHARS = 4000
 
 
+def _recover_result_header(raw: str) -> str:
+    """Undo the transport decoding of the X-Agent-Result header (#748 P2).
+
+    The Worker sends the metadata JSON as raw UTF-8 BYTES (h11 keeps header
+    values as bytes; Starlette decodes them latin-1 — the roundtrip is
+    verified against the real uvicorn+h11+requests chain). This reverses
+    exactly that: latin-1 re-encode → UTF-8 decode. The escape hatch keeps
+    legacy all-ASCII payloads (already identical in both encodings) and
+    hand-built test inputs working — any value that is not valid UTF-8 in
+    this direction is passed through untouched."""
+    try:
+        return raw.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return raw
+
+
 def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
     """Validate worker result metadata into an outcome and stored record."""
     try:
