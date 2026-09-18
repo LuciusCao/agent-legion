@@ -181,8 +181,52 @@ describe('WorkspaceApiTokensSection', () => {
 
     expect(screen.queryByTestId('created-api-token')).toBeNull()
     expect(screen.queryByText('tok-4.secret-value')).toBeNull()
+  })
+
+  it('discards the late issuance response when the workspace switches mid-flight', async () => {
+    // 签发竞态：A 的 Promise 在切换到 B 之后 resolve，A 的一次性明文
+    // 不能出现在 B 面板（面板文案声称凭据绑定当前 workspace）。
+    let resolveCreate: (value: {
+      token_id: string
+      api_token: string
+      workspace_id: string
+      label: string
+    }) => void
+    mockCreate.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve
+      })
+    )
+    const { rerender } = renderSection(WORKSPACE_ID)
+
+    fireEvent.change(screen.getByLabelText('API Token 名称'), {
+      target: { value: 'form-agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '签发' }))
+    await waitFor(() => {
+      expect(mockCreate).toHaveBeenCalledWith(WORKSPACE_ID, {
+        label: 'form-agent',
+        ttl_hours: undefined,
+      })
+    })
+
+    // 切到 workspace B，A 的响应才返回：过期响应必须被丢弃。
+    rerender(
+      <TestQueryProvider>
+        <WorkspaceApiTokensSection workspaceId="ws-other" />
+      </TestQueryProvider>
+    )
+    resolveCreate!({
+      token_id: 'tok-5',
+      api_token: 'tok-5.secret-value',
+      workspace_id: WORKSPACE_ID,
+      label: 'form-agent',
+    })
+
     await waitFor(() => {
       expect(mockList).toHaveBeenCalledWith('ws-other')
     })
+    expect(screen.queryByTestId('created-api-token')).toBeNull()
+    expect(screen.queryByText('tok-5.secret-value')).toBeNull()
   })
 })

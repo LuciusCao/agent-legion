@@ -56,10 +56,14 @@ def create_runs_router(service: RunService) -> APIRouter:
         # never an impersonated user. The run row's created_by stays with
         # its current semantics (empty for the items path); the request
         # identity lands in the structured log — the same surface the worker
-        # registration handshake uses for its audit trail.
+        # registration handshake uses for its audit trail. This first record
+        # is the ATTEMPT (pre-validation observability); the success record
+        # below only fires after service.create_run actually created the
+        # run, so a rejected submission (mismatched workflow_key, unknown
+        # material, no active revision, duplicate) never logs a success.
         if user.get("actor_scope") == WORKSPACE_API_SCOPE:
             logger.info(
-                "run submitted via workspace api token: token_id=%s workspace_id=%s",
+                "run submission attempt via workspace api token: token_id=%s workspace_id=%s",
                 user.get("api_token_id"),
                 workspace_id,
             )
@@ -82,6 +86,13 @@ def create_runs_router(service: RunService) -> APIRouter:
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)
+        if user.get("actor_scope") == WORKSPACE_API_SCOPE:
+            logger.info(
+                "run submitted via workspace api token: token_id=%s workspace_id=%s run_id=%s",
+                user.get("api_token_id"),
+                workspace_id,
+                result["run"]["id"],
+            )
         return RunCreateResponse(**result)
 
     @router.get("/workspaces/{workspace_id}/runs", response_model=RunListResponse)

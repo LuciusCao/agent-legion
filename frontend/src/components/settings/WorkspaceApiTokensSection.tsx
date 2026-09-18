@@ -40,6 +40,10 @@ export function WorkspaceApiTokensSection({
   // React Router 复用组件实例：A→B 切换 workspace 时，A 的明文 token
   // （以及本次会话的临时输入/确认态）不能继续显示在 B 的面板上——面板
   // 文案把凭据描述为绑定当前 workspace，跨 workspace 残留即误导。
+  // prevWorkspaceIdRef 由切换 effect 维护、始终等于最新 workspace，因此
+  // 兼任异步响应的身份锚点：handleCreate 闭包捕获的是发起时的
+  // workspace，响应返回时若已切走（A→B）就整体丢弃，A 的一次性明文
+  // 不能漏进 B 面板。
   const prevWorkspaceIdRef = useRef(workspaceId)
   useEffect(() => {
     if (prevWorkspaceIdRef.current === workspaceId) return
@@ -65,8 +69,7 @@ export function WorkspaceApiTokensSection({
   }
 
   async function handleCreate() {
-    const trimmedLabel = label.trim()
-    if (!trimmedLabel || !workspaceId) return
+    if (!label.trim() || !workspaceId) return
     const ttl = ttlHours.trim() === '' ? undefined : Number(ttlHours)
     if (ttl !== undefined && (!Number.isInteger(ttl) || ttl < 1)) {
       setError('有效期必须是正整数小时，或留空表示永不过期')
@@ -76,9 +79,10 @@ export function WorkspaceApiTokensSection({
     setLoading(true)
     try {
       const created = await createWorkspaceApiToken(workspaceId, {
-        label: trimmedLabel,
+        label: label.trim(),
         ttl_hours: ttl,
       })
+      if (prevWorkspaceIdRef.current !== workspaceId) return
       setCreatedToken(created)
       setCopied(false)
       setLabel('')

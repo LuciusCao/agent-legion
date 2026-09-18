@@ -267,7 +267,10 @@ def test_full_session_still_submits_runs(client) -> None:
 
 def test_api_submission_logs_token_id_not_a_user(client, caplog) -> None:
     """#626 audit: the structured log carries the token id — the machine
-    identity is never laundered into a user attribution."""
+    identity is never laundered into a user attribution. The success record
+    only fires after the service created the run, and it carries the run id
+    (codex5 P2: an audit that claims a success that never happened is worse
+    than no audit at all)."""
     import logging
 
     _create_workspace(client, WORKSPACE)
@@ -277,11 +280,37 @@ def test_api_submission_logs_token_id_not_a_user(client, caplog) -> None:
     with caplog.at_level(logging.INFO, logger="server.app.routes.runs"):
         response = _submit_run(api, WORKSPACE, "mat-1")
     assert response.status_code == 200
-    records = [r for r in caplog.records if "workspace api token" in r.getMessage()]
-    assert records, "expected an api-token submission audit record"
-    message = records[0].getMessage()
-    assert f"token_id={issued['token_id']}" in message
-    assert f"workspace_id={WORKSPACE}" in message
+    run_id = response.json()["run"]["id"]
+    messages = [r.getMessage() for r in caplog.records if "workspace api token" in r.getMessage()]
+    assert messages, "expected an api-token submission audit record"
+    attempts = [m for m in messages if "attempt" in m]
+    assert attempts, "expected a pre-validation attempt record"
+    assert f"token_id={issued['token_id']}" in attempts[0]
+    assert f"workspace_id={WORKSPACE}" in attempts[0]
+    assert "run_id=" not in attempts[0]
+    successes = [m for m in messages if "attempt" not in m]
+    assert len(successes) == 1, "expected exactly one post-service success record"
+    assert f"token_id={issued['token_id']}" in successes[0]
+    assert f"run_id={run_id}" in successes[0]
+
+
+def test_rejected_api_submission_never_logs_success(client, caplog) -> None:
+    """codex5 P2 pin: a token-authenticated submission that fails business
+    validation (unknown material) writes the ATTEMPT record only — the
+    'run submitted' success audit must never fire for a run that was never
+    created."""
+    import logging
+
+    _create_workspace(client, WORKSPACE)
+    issued = _issue(client, WORKSPACE, label="cms")
+    api = _bearer_client(client, issued["api_token"])
+    with caplog.at_level(logging.INFO, logger="server.app.routes.runs"):
+        response = _submit_run(api, WORKSPACE, "mat-missing")
+    assert response.status_code != 200, "unknown material unexpectedly succeeded"
+    messages = [r.getMessage() for r in caplog.records if "workspace api token" in r.getMessage()]
+    assert messages, "expected the attempt record for the rejected submission"
+    assert all("attempt" in m for m in messages), messages
+    assert not any("run submitted" in m for m in messages), messages
 
 
 # --- review hardening (#626 code review) ---------------------------------------
