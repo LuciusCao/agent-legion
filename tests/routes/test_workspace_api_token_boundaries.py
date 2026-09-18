@@ -220,12 +220,14 @@ def test_api_token_rejected_on_other_effecting_endpoints(client) -> None:
     ]
     # #626 review: the intake allowlist (POST/GET runs + jobs listing) 404s
     # the api identity on every other workspace-scoped route before the
-    # route-level guards' 403 — and on scopeless mounts too.
+    # route-level guards' 403 — and on scopeless mounts too. Exception after
+    # the #745 rebase: the job_group's require_job_workspace_access lets a
+    # scoped identity's effecting request short-circuit past the job lookup,
+    # so those job routes' reject_studio_agent_scope answers first with its
+    # 403 (the same refusal-ahead-of-existence ordering #745 pinned) — 403,
+    # not 404.
     scopeless_404 = {
         ("POST", "/api/workspaces"),
-        ("POST", f"/api/workspaces/{WORKSPACE}/job-batches"),
-        ("DELETE", "/api/jobs/job-x"),
-        ("POST", "/api/jobs/job-x/run-to"),
         ("POST", "/api/worker/pause"),
         ("POST", "/api/studio-agent-tokens"),
         ("POST", f"/api/workspaces/{WORKSPACE}/workflow-drafts/publish"),

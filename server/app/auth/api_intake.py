@@ -15,10 +15,8 @@ from fastapi.exceptions import HTTPException
 
 from server.app.auth.dependencies import get_current_user
 from server.app.auth.scoped_tokens import STUDIO_AGENT_SCOPE
-from server.app.auth.workspace_access import (
-    _workspace_scope,
-    require_workspace_access,
-)
+from server.app.auth.workspace_access import require_workspace_access
+from server.app.auth.workspace_api_scope import api_scope_route_scope as _workspace_scope
 from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 
 
