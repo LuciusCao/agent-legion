@@ -1,13 +1,13 @@
-"""Per-node upgrade diff for the inherit upgrade mode (issue #645).
+"""Per-node upgrade diff comparators for the inherit upgrade mode (issue #645).
 
 ``clean`` 模式的 upgrade 把全部 job_nodes 无条件重置 pending 全量重跑；
-``inherit`` 模式只重跑「真正变了」的子图。本模块计算那个 diff：对每个
-可执行节点算一个哈希，新 revision 的哈希与 job 旧快照的哈希逐节点比较，
-再沿边把变化向下游闭包传播（上游任一变则本节点必变，与
-``mark_nodes_for_rerun`` 的 pending/stale 语义一致——目标是变更节点、
-下游是 stale）。
+``inherit`` 模式只重跑「真正变了」的子图。本模块提供种子判定所需的
+**单侧纯比较器**：节点定义归一化哈希、冻结 config 段、入边声明、排除
+规则。种子的编排（新旧双侧比较）在 ``job_workflow_upgrade_propagation``
+（种子集 + 传播闭包），``compute_inherit_reset_nodes`` 是它的既有签名
+wrapper。
 
-哈希输入（全部确定性归一化后 sha256）：
+比较器语义：
 
 1. 节点定义归一化：从 revision 快照反序列化出的 ``WorkflowNode`` 中取出
    影响执行的每个字段（capability / node_type / after / inputs / outputs /
@@ -16,14 +16,11 @@
    **label 等纯展示字段刻意排除**——只改显示名不该烧掉已完成的产物。
    进出节点（inputs/outputs/terminal）本身也在定义哈希里：改上游产出名
    等于改契约，下游与自身都必须重跑。
-2. 该节点的冻结 config 段：新侧是 upgrade 前 re-freeze 的
-   ``frozen_config_json``（schema 默认值、节点 config、workspace 覆盖），
-   旧侧优先用 job 的存量冻结值（intake 冻结，产物按它产出）；任何一侧
-   的执行输入变化都触发重跑。workspace 层配置变化体现在新侧 freeze 里，
-   与 job 存量冻结值的差异即「配置演进」，受影响节点重跑。
-3. 上游节点哈希集合（拓扑序链式传播）：对上游「节点集」整体取哈希，
-   而不是逐上游拼接——这样旧快照里的上游重命名（A→A'，定义哈希不同）
-   与其下游在「上游集哈希」上等价坍缩，不再误判下游必须重跑。
+2. 冻结 config 段：新侧是 upgrade 前 re-freeze 的 ``frozen_config_json``
+   （schema 默认值、节点 config、workspace 覆盖），旧侧优先用 job 的
+   存量冻结值（intake 冻结，产物按它产出）；任何一侧的执行输入变化都
+   触发重跑。workspace 层配置变化体现在新侧 freeze 里，与 job 存量冻结
+   值的差异即「配置演进」，受影响节点重跑。
 
 排除规则（issue 边界 + codex 四轮，一律不继承、永远重跑）：
 
@@ -49,10 +46,11 @@
   只覆盖 code 节点面；
 - 实现身份不可证明的节点（codex 四轮 P1-1）：普通 job 不 pin 版本，
   dispatch 现场解析 workspace 当前 published 的 node_code（code 节点）
-  或 Agent 定义（agent 节点）——执行时身份（``agent_execution_requests.
-  agent_definition_hash``）与当前 published 身份无法证明相等（记录被
-  retention 清扫、本地路径不留 code hash、实现未发布）时，旧产物按
-  哪份实现产出不可知 → 恒重跑（``implementation_drifted_nodes``）。
+  或 Agent 定义（agent 节点）——执行时身份（v84 起
+  ``node_runs.agent_definition_hash``，请求行 fallback）与当前
+  published 身份无法证明相等（记录被 retention 清扫、实现未发布）时，
+  旧产物按哪份实现产出不可知 → 恒重跑（plan 层解析后经
+  ``implementation_excluded`` 种子传入）。
 
 本模块是纯函数：不触库、不触文件系统。实现身份与 runtime_mutable 的
 解析由调用方（plan 层）先完成并传入，本模块只消费排除集。可达性退化
@@ -150,75 +148,13 @@ def node_is_inherit_excluded(node: WorkflowNode) -> bool:
     return _has_runtime_mutable_keys(node)
 
 
-def _upstream_map(definition: WorkflowDefinition) -> dict[str, list[str]]:
-    """node_key → 直接上游列表（按边声明序去重）。"""
-    upstream: dict[str, list[str]] = {key: [] for key in definition.nodes}
-    for edge in definition.edges:
-        upstream.setdefault(edge.target, [])
-        if edge.source not in upstream[edge.target]:
-            upstream[edge.target].append(edge.source)
-    return upstream
-
-
 def _incoming_edges_map(definition: WorkflowDefinition) -> dict[str, list[WorkflowEdge]]:
     """node_key → 入边列表（含条件声明）：边的增删与 when 条件的变化
-    改变节点的调度语义（分支裁剪），必须参与 per-node 哈希。"""
+    改变节点的调度语义（分支裁剪），是独立的入边种子判定输入。"""
     incoming: dict[str, list[WorkflowEdge]] = {key: [] for key in definition.nodes}
     for edge in definition.edges:
         incoming.setdefault(edge.target, []).append(edge)
     return incoming
-
-
-def compute_node_hashes(
-    definition: WorkflowDefinition,
-    frozen_config_json: str | None,
-) -> dict[str, str]:
-    """每个可执行节点的 per-node 哈希（定义 + 冻结 config 段 + 上游链）。
-
-    拓扑序链式传播：节点哈希本身包含其全部直接上游的哈希集合，因此上游
-    的任何变化（定义、config 或再上游的变化）都会改变本节点哈希。返回
-    的 dict 不含 start 节点（它从不执行、也从不进 job_nodes）。
-    """
-    upstream = _upstream_map(definition)
-    incoming = _incoming_edges_map(definition)
-    hashes: dict[str, str] = {}
-    resolved: set[str] = set()
-    # edges 已保证 DAG（loader 校验无环）；拓扑序按「上游全部已解析」推进。
-    pending = [key for key in definition.executable_nodes]
-    while pending:
-        progressed = False
-        remaining: list[str] = []
-        for key in pending:
-            parents = [
-                parent for parent in upstream.get(key, []) if parent in definition.executable_nodes
-            ]
-            if any(parent not in resolved for parent in parents):
-                remaining.append(key)
-                continue
-            node = definition.executable_nodes[key]
-            # 上游集哈希：对上游 (key, hash) 列表整体取摘要。
-            parent_hashes = [(parent, hashes[parent]) for parent in parents]
-            # 入边（含 when 条件）也进哈希：分支语义变化等价于调度变化。
-            edges = [
-                {"source": edge.source, "condition": asdict(edge.condition)}
-                if edge.condition is not None
-                else {"source": edge.source}
-                for edge in incoming.get(key, [])
-            ]
-            material = {
-                "definition": node_definition_hash(node),
-                "config": _frozen_config_section(frozen_config_json, key),
-                "upstream": hashlib.sha256(_stable_json(parent_hashes).encode()).hexdigest(),
-                "incoming_edges": edges,
-            }
-            hashes[key] = hashlib.sha256(_stable_json(material).encode("utf-8")).hexdigest()
-            resolved.add(key)
-            progressed = True
-        if not progressed:
-            # 不可达（DAG 保证收敛）；防御性兜底防死循环。
-            break
-        pending = remaining
-    return hashes
 
 
 def compute_inherit_reset_nodes(
@@ -228,38 +164,30 @@ def compute_inherit_reset_nodes(
     new_frozen_config_json: str | None,
     implementation_excluded: frozenset[str] | set[str] = frozenset(),
 ) -> set[str]:
-    """新 revision 下需要重跑的节点集（变更节点 + 其下游闭包）。
+    """新 revision 下需要重跑的节点集（种子 + 双通道传播闭包）。
+
+    702 传播闭包重构后本函数是 ``job_workflow_upgrade_propagation`` 的
+    thin wrapper（签名不变，既有 40 用例断言零改动承重）：
+    ``collect_change_seeds``（S1 定义 / S2 config / S3 入边 / S4 实现身份
+    / S5 排除规则的纯局部种子）→ ``rerun_closure``（通道 A 全下游边传播
+    + 通道 B 同名生产者 fixpoint）。上游一致性不再由 per-node 哈希链
+    间接证明，而由「全部上游都不在重跑闭包里」直接定义。
 
       - 节点在旧快照中不存在（新增节点）→ 变更；
       - 节点在新 revision 中不存在（删除节点）→ 不在结果里（job_nodes
         会被 mutation 重建，只保留新定义的节点集）；
-    - per-node 哈希不等（定义/config/上游链任一变化）→ 变更；
-      - 节点命中排除规则（skill:latest / 分片 / 审批门 /
-        runtime_mutable 键 / 实现身份不可证明）→ 无论新旧定义是否相同
-        都按变更处理（永远重跑，不继承）。
-
-    ``implementation_excluded``（P1-1）是 plan 层解析好的「实现身份
-    不可证明或已漂移」节点集（``job_workflow_upgrade_impl``）：执行时
-    身份与当前 published 身份证明相等且未漂移的节点才可继承。
+      - 种子（定义/config/入边/排除/实现身份任一变化）→ 变更 + 下游闭包。
     """
-    old_hashes = compute_node_hashes(old_definition, old_frozen_config_json)
-    new_hashes = compute_node_hashes(new_definition, new_frozen_config_json)
-    changed: set[str] = set(implementation_excluded)
-    for key, node in new_definition.executable_nodes.items():
-        if node_is_inherit_excluded(node) or old_hashes.get(key) != new_hashes[key]:
-            changed.add(key)
-    if not changed:
-        return set()
-    # 变更节点 + 下游闭包：与 mark_nodes_for_rerun 的 descendants 语义一致。
-    reset: set[str] = set(changed)
-    children: dict[str, list[str]] = {key: [] for key in new_definition.nodes}
-    for edge in new_definition.edges:
-        children[edge.source].append(edge.target)
-    stack = list(changed)
-    while stack:
-        key = stack.pop()
-        for child in children.get(key, []):
-            if child not in reset and child in new_definition.executable_nodes:
-                reset.add(child)
-                stack.append(child)
-    return reset
+    from server.app.services.job_workflow_upgrade_propagation import (
+        collect_change_seeds,
+        rerun_closure,
+    )
+
+    seeds = collect_change_seeds(
+        old_definition,
+        old_frozen_config_json,
+        new_definition,
+        new_frozen_config_json,
+        implementation_excluded,
+    )
+    return rerun_closure(new_definition, seeds)

@@ -3,6 +3,13 @@
 从 ``job_workflow_upgrade`` 的 diff 编排拆出：per-node diff（新旧定义
 两侧 re-freeze 同基比较）+ 可达性退化，产出最终的 ``inherit_nodes`` 集
 合。纯规划（读路径），事务外调用；失败语义只有「保守退化到更多重跑」。
+
+702 传播闭包重构：``plan_inherit_nodes`` 总装种子集 + 闭包——S1–S5 局部
+种子经 ``collect_change_seeds``（diff 比较器双侧编排），S6 可达性种子
+对「未被 S1–S5 命中的候选」探测后并入种子再闭包（保持既有短路：闭包
+内节点必然重跑，无需探测可达性）。``rerun_closure`` 是唯一的重置面来
+源（通道 A 边传播 + 通道 B 同名生产者 fixpoint）——上游一致性由「全部
+上游都不在重跑闭包里」直接定义。
 """
 
 from __future__ import annotations
@@ -11,14 +18,15 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.services.job_artifact_staging_scope import shared_name_rerun_closure
 from server.app.services.job_workflow_upgrade_config import intake_frozen_config_json
-from server.app.services.job_workflow_upgrade_diff import compute_inherit_reset_nodes
 from server.app.services.job_workflow_upgrade_impl import implementation_excluded_nodes
 from server.app.services.job_workflow_upgrade_inherit import unreachable_inherit_nodes
+from server.app.services.job_workflow_upgrade_propagation import (
+    collect_change_seeds,
+    rerun_closure,
+)
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_branching import downstream_nodes
 
 
 def plan_inherit_nodes(
@@ -29,7 +37,7 @@ def plan_inherit_nodes(
     *,
     custom_nodes_enabled: bool = True,
 ) -> frozenset[str]:
-    """最终继承集 = 新定义可执行节点 − 变更子图 − 不可达子图（含下游闭包）。
+    """最终继承集 = 新定义可执行节点 −（S1–S5 种子 ∪ S6 可达性种子）的传播闭包。
 
     ``custom_nodes_enabled``（P1-1）与 dispatch 侧同一特性 gate
     （``workflows.custom_nodes_enabled``）：关闭时 code 节点当前身份
@@ -51,26 +59,26 @@ def plan_inherit_nodes(
     场景从「继承」变「全量」；两份 re-freeze 全空（无可冻结 config）时
     退化后哈希仍相等，继承面不受影响。
 
-    产物不可达的节点除自身外，其在新图中的下游闭包一并移出继承集
-    （review P1）：上游按新 revision 重跑后，其旧产物语义上已被替换，
-    下游若继续继承旧输出，最终产物将基于已被丢弃的上游结果。下游
-    闭包按新定义的边计算——新图里不再可达的节点本来就不在继承候选里。
+    产物不可达的节点（S6）作为种子并入闭包（review P1）：上游按新
+    revision 重跑后其旧产物语义上已被替换，下游若继续继承旧输出，最终
+    产物将基于已被丢弃的上游结果——闭包传播天然覆盖下游。S6 只对未被
+    S1–S5 命中的候选探测（闭包内节点必然重跑，无需探测）。
 
     跨闭包同名输出（codex P1-3）：继承候选与重置面声明同名纯输出时，
     对象键 ``jobs/<ws>/<job>/<name>`` 不含 node 身份——重置节点重跑后
     上传按名字覆盖权威对象，继承节点的清单行从此指向别人的内容；暂存
     侧的同名排除（A3）在重置节点本次没真正写该文件时失效（
-    ``_check_outputs`` 只查文件存在）。因此同名生产者一起重跑：候选中
-    与重置面共享纯输出名的节点（及其下游闭包）移出继承集；升级事务内
-    还会按实际保留集复算一次（``job_workflow_upgrade_cleanup``），覆盖
-    未完成候选并入重置面的组合场景。
+    ``_check_outputs`` 只查文件存在）。因此同名生产者一起重跑（通道 B，
+    ``rerun_closure`` 内的 ``shared_name_rerun_closure`` fixpoint）；升级
+    事务内还会按实际保留集复算一次（``job_workflow_upgrade_cleanup``），
+    覆盖未完成候选并入重置面的组合场景。
 
     实现身份（codex 四轮 P1-1）：实现重发布而节点定义未变时，定义
     哈希两侧相等——旧产物按旧实现产出、升级后同节点重跑执行新实现。
-    ``job_workflow_upgrade_impl`` 比较该节点最新完成请求的执行时身份
-    （``agent_execution_requests.agent_definition_hash``）与当前
-    published 身份：证明相等才可继承；漂移或不可证明（记录被 retention
-    清扫、本地池执行无记录、实现未发布）→ 该节点及下游闭包重跑。
+    ``job_workflow_upgrade_impl`` 比较该节点最新完成执行的记录身份
+    （v84 起 ``node_runs.agent_definition_hash`` 优先、请求行 fallback）
+    与当前 published 身份：证明相等才可继承；漂移或不可证明（记录被
+    retention 清扫、实现未发布）→ 该节点进 S4 种子，经闭包传播到下游。
     复审 HIGH-2：Agent 定义 schema 含 runtime_mutable 键的 agent 节点
     同在排除集——定义不变、只翻转 override 值再翻回时 frozen/实现身份
     两侧全等，diff 层节点自声明判定覆盖不到定义侧键（详见 impl 模块）。
@@ -96,24 +104,21 @@ def plan_inherit_nodes(
     implementation_excluded = implementation_excluded_nodes(
         job_db, job, new_definition, custom_nodes_enabled=custom_nodes_enabled
     )
-    reset_nodes = compute_inherit_reset_nodes(
+    seeds = collect_change_seeds(
         old_definition,
         old_frozen_config_json,
         new_definition,
         new_frozen_config_json,
         implementation_excluded,
     )
+    reset_nodes = rerun_closure(new_definition, seeds)
     candidates = frozenset(new_definition.executable_nodes) - reset_nodes
     unreachable = unreachable_inherit_nodes(job_db, job, _jobs_dir(job_db), candidates)
     if unreachable:
-        unreachable_closure: set[str] = set(unreachable)
-        for node_key in unreachable:
-            unreachable_closure.update(downstream_nodes(new_definition, node_key))
-        candidates -= frozenset(unreachable_closure)
-        # 不可达退化并入重置面：退化节点会重跑，共享其纯输出名的候选
-        # 同样必须移出继承集（见下方 codex P1-3 排除）。
-        reset_nodes |= unreachable_closure
-    candidates -= shared_name_rerun_closure(new_definition, candidates, reset_nodes)
+        # S6 可达性种子并入再闭包：不可达候选的下游沿闭包传播重跑，
+        # 共享其纯输出名的候选经通道 B 一并移出继承集。
+        reset_nodes = rerun_closure(new_definition, seeds | set(unreachable))
+        candidates = frozenset(new_definition.executable_nodes) - reset_nodes
     return candidates
 
 

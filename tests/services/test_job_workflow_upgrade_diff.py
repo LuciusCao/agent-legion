@@ -2,7 +2,11 @@
 
 全部不触库：构造 WorkflowDefinition 对，验证哈希稳定性与语义边界
 （展示字段不触发、config 变化触发、上游传播、skill:latest / 分片 /
-审批门排除、上游重命名坍缩）。
+审批门排除、上游重命名坍缩）。702 传播闭包重构后，
+``compute_node_hashes``（upstream 集哈希 + 拓扑序链式传播）已删除，
+原「per-node 哈希传播」用例的断言迁移到
+``compute_inherit_reset_nodes``（wrapper：种子 → 闭包）上——传播语义
+不变（下游闭包），观测面从哈希值换成重置集。
 """
 
 from __future__ import annotations
@@ -11,7 +15,6 @@ from dataclasses import replace
 
 from server.app.services.job_workflow_upgrade_diff import (
     compute_inherit_reset_nodes,
-    compute_node_hashes,
     node_definition_hash,
     node_is_inherit_excluded,
 )
@@ -69,44 +72,47 @@ def test_capability_and_execution_changes_do_change_definition_hash():
 
 
 def test_node_hashes_are_stable_for_identical_definitions():
-    one = compute_node_hashes(_chain_definition(), None)
-    two = compute_node_hashes(_chain_definition(), None)
+    """局部哈希稳定性（原 compute_node_hashes 删除，断言迁移到 wrapper）：
 
-    assert one == two
+    同一定义两次计算零种子 → 全继承（reset 空）；种子收集是纯函数，
+    相同输入产出相同种子集。
+    """
+    one = compute_inherit_reset_nodes(_chain_definition(), None, _chain_definition(), None)
+    two = compute_inherit_reset_nodes(_chain_definition(), None, _chain_definition(), None)
+
+    assert one == two == set()
 
 
 def test_frozen_config_section_change_propagates_downstream():
     definition = _chain_definition()
-    # a 的 config 段变化：a 自身变；b 的上游链含 a、c 的上游链含 b，
-    # 链式传播让整个下游闭包一起变（与 reset 的下游闭包语义一致）。
-    before = compute_node_hashes(definition, '{"a": {"k": "v1"}}')
-    after = compute_node_hashes(definition, '{"a": {"k": "v2"}}')
+    # a 的 config 段变化：a 自身变；b 是 a 的下游、c 是 b 的下游——闭包
+    # 传播（原哈希链语义的 wrapper 等价面）让整个下游一起重跑。
+    reset = compute_inherit_reset_nodes(
+        definition, '{"a": {"k": "v1"}}', definition, '{"a": {"k": "v2"}}'
+    )
 
-    assert before["a"] != after["a"]
-    assert before["b"] != after["b"]
-    assert before["c"] != after["c"]
+    assert reset == {"a", "b", "c"}
 
 
 def test_frozen_config_section_of_other_node_does_not_leak():
     definition = _chain_definition()
-    # c 的 config 段变化：a/b 的哈希不受影响（无上游反向传播）。
-    before = compute_node_hashes(definition, '{"c": {"k": "v1"}}')
-    after = compute_node_hashes(definition, '{"c": {"k": "v2"}}')
+    # c 的 config 段变化：a/b 不受影响（无上游反向传播）。
+    reset = compute_inherit_reset_nodes(
+        definition, '{"c": {"k": "v1"}}', definition, '{"c": {"k": "v2"}}'
+    )
 
-    assert before["a"] == after["a"]
-    assert before["b"] == after["b"]
-    assert before["c"] != after["c"]
+    assert reset == {"c"}
 
 
 def test_upstream_change_propagates_downstream_through_config_chain():
     definition = _chain_definition()
-    # 只有 a 的 config 变：b/c 的定义与 config 未变，但 b 的上游链哈希
-    # 变化，c 的上游链（含 b）也随之变化——链式传播。
-    before = compute_node_hashes(definition, '{"a": {"k": "v1"}}')
-    after = compute_node_hashes(definition, '{"a": {"k": "v2"}}')
+    # 只有 a 的 config 变：b/c 的定义与 config 未变，但 a 是种子、闭包
+    # 把 b/c（下游）一并重置——下游传播。
+    reset = compute_inherit_reset_nodes(
+        definition, '{"a": {"k": "v1"}}', definition, '{"a": {"k": "v2"}}'
+    )
 
-    assert before["b"] != after["b"]
-    assert before["c"] != after["c"]
+    assert reset == {"a", "b", "c"}
 
 
 def test_compute_inherit_reset_nodes_only_resets_changed_subgraph():
