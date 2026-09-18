@@ -9,11 +9,24 @@
 //! `set`/`delete` mutate it and write the file back atomically (tmp +
 //! rename, same as `write`). The `write` tool keeps its whole-file
 //! semantics; this one is the complement, not a replacement.
+//!
+//! #747: `set`'s `value` accepts any JSON value, but models sometimes
+//! double-encode containers — passing `"[\"1.5\", \"2.5\"]"` (a string
+//! holding JSON text) instead of `["1.5", "2.5"]`. Writing that verbatim
+//! used to succeed silently, leaving the agent unable to tell a tool bug
+//! from its own argument mistake and burning turns re-probing (observed
+//! in production as multi-turn probe loops). `set` now salvages such
+//! strings into the container they hold and says so in its output — but
+//! only when the parse is lossless (every number must round-trip, no
+//! object may repeat a key) and within a size gate; otherwise the string
+//! is written literally with a note explaining why. The salvage decision
+//! lives in [`json_lenient::parse_double_encoded_container`].
 
 use std::path::PathBuf;
 
 use serde_json::Value;
 
+use super::json_lenient::{format_gate_size, parse_double_encoded_container, LenientParse};
 use super::{resolve_in_cwd, truncate, ToolContext, ToolError, ToolOutput};
 
 /// Upper bound for one path expression — a legit nested path is a few
@@ -118,6 +131,47 @@ fn get(ctx: &ToolContext, path: &str, query: &str) -> Result<ToolOutput, ToolErr
 
 fn set(ctx: &ToolContext, path: &str, query: &str, value: Value) -> Result<ToolOutput, ToolError> {
     let (resolved, mut root) = load_json(ctx, path)?;
+    // #747：value 若是装着 JSON 容器文本的字符串，且解析无损（数字可往返、
+    // 无重复键）、闸内，则宽容解析为容器再写入（帮模型成功而不是考它——与
+    // validate 工具 #443 同哲学）；候选成立但被拒（超闸 / 数字不可无损往返 /
+    // 重复对象键）时按字面写入并注记原因。三条路径的输出注记都让行为对模型
+    // 可预期。
+    let (value, note) = match parse_double_encoded_container(&value) {
+        LenientParse::Container(container) => {
+            let kind = if container.is_array() {
+                "an array"
+            } else {
+                "an object"
+            };
+            (
+                container,
+                format!(
+                    " — value was a string holding JSON text, parsed as {kind} \
+                     before writing; to store such text literally, use the `write` tool"
+                ),
+            )
+        }
+        LenientParse::NotCandidate => (value, String::new()),
+        LenientParse::Declined { oversized } => (
+            value,
+            if oversized {
+                format!(
+                    " — value looks like JSON container text but is over the \
+                     {} lenient-parse gate, so it was written as the literal \
+                     string; if you meant a JSON container, pass it directly \
+                     as a JSON value",
+                    format_gate_size()
+                )
+            } else {
+                " — value looks like JSON container text, but it would not \
+                 survive parsing losslessly (scientific notation, \
+                 high-precision floats, very large integers, or duplicate \
+                 object keys), so it was written as the literal string; if \
+                 you meant a JSON container, pass it directly as a JSON value"
+                    .to_string()
+            },
+        ),
+    };
     // descend to the PARENT of the last segment, then set/delete there.
     let parent = descend_mut(&mut root, query, path)?;
     let last = last_segment(query, path)?;
@@ -145,7 +199,7 @@ fn set(ctx: &ToolContext, path: &str, query: &str, value: Value) -> Result<ToolO
     }
     let bytes = store_json(&resolved, &root, path)?;
     Ok(ToolOutput::text(
-        format!("set `{query}` in {path} (file now {bytes} bytes)"),
+        format!("set `{query}` in {path} (file now {bytes} bytes){note}"),
         false,
     ))
 }

@@ -487,3 +487,53 @@ async fn remediation_turn_writing_the_artifact_ends_exit_zero() {
     assert_eq!(validations.len(), 1);
     assert!(validations[0].missing.is_empty());
 }
+
+/// #747：json set 宽容解析的注记必须真实进入下一轮模型请求的
+/// tool_result——可发现性依赖这条回传链路（agent.rs 的 result_message
+/// push），而不是只在事件流里可见。ScriptedProvider 录制每次请求的
+/// messages，直接断言第二请求中的 ToolResult 内容。
+#[tokio::test]
+async fn json_lenient_parse_note_reaches_the_next_model_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().canonicalize().unwrap();
+    std::fs::write(
+        dir.path().join("spec.json"),
+        r#"{"entries": [{"content": "old"}]}"#,
+    )
+    .unwrap();
+    let mut config = base_config(cwd);
+    config.tools = vec![ToolKind::Json];
+
+    let provider = ScriptedProvider::new(vec![
+        assistant_tool_call(
+            "call-0-0",
+            "json",
+            serde_json::json!({
+                "op": "set",
+                "path": "spec.json",
+                "query": "entries[0].content",
+                // issue #747 的原始二次编码形态：字符串装着 JSON 数组文本。
+                "value": "[\"1.5\", \"2.5\"]",
+            }),
+        ),
+        assistant_text("patched", StopReason::Stop),
+    ]);
+    let mut sink = MemorySink::default();
+
+    let code = run(config, &provider, &mut sink).await.unwrap();
+    assert_eq!(code, 0);
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2, "tool round + final turn");
+    let result = &requests[1][2];
+    assert_eq!(result.role, Role::ToolResult);
+    assert_eq!(result.tool_call_id.as_deref(), Some("call-0-0"));
+    assert_eq!(result.is_error, Some(false));
+    match &result.content[0] {
+        ContentBlock::Text { text } => {
+            assert!(text.contains("parsed as an array"), "got: {text}");
+            assert!(text.contains("`write` tool"), "got: {text}");
+        }
+        other => panic!("expected text content, got {other:?}"),
+    }
+}

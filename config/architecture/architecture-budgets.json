@@ -1688,6 +1688,7 @@
     "velites/src/tools/command_guard.rs": 567,
     "velites/src/tools/command_paths.rs": 137,
     "velites/src/tools/json.rs": 524,
+    "velites/src/tools/json_lenient.rs": 76,
     "velites/src/tools/mod.rs": 143,
     "velites/src/tools/read.rs": 98,
     "velites/src/tools/specs.rs": 89,

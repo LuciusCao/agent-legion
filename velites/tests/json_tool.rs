@@ -131,3 +131,47 @@ fn json_tool_not_enabled_reports_not_enabled() {
             .unwrap();
     assert_eq!(spec["entries"][0]["content"], "needs fixing");
 }
+
+/// #747 dispatch 级验证：模型以二次编码形态传 set 的容器 value（字符串
+/// 装着 JSON 数组文本，issue 中的原始形态），工具宽容解析为容器写入，
+/// 输出注记说明改写与字面字符串的去处——agent 无需再试探。
+#[test]
+fn json_set_double_encoded_container_value_is_parsed() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    write_spec(cwd);
+    write(&cwd.join("prompt.md"), "Patch the spec.");
+    write(
+        &cwd.join("fixture.json"),
+        r#"{
+  "responses": [
+    {"content": [{"type": "toolCall", "name": "json", "arguments": {"op": "set", "path": "key_info_spec.json", "query": "entries[0].content", "value": "[\"1.5\", \"2.5\"]"}}]},
+    {"content": [{"type": "text", "text": "patched"}], "stopReason": "stop"}
+  ]
+}"#,
+    );
+
+    let output = run_velites(cwd, "read,write,bash,json");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let events = tool_events(&output.stdout);
+    assert_eq!(events.len(), 1, "one json tool round must run");
+    assert_eq!(events[0]["toolName"], "json");
+    assert_eq!(events[0]["isError"], false);
+    let text = events[0]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("parsed as an array"), "got: {text}");
+    assert!(text.contains("`write` tool"), "got: {text}");
+
+    // 文件里是真正的数组，不是装着 JSON 文本的字符串。
+    let patched: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(cwd.join("key_info_spec.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        patched["entries"][0]["content"],
+        serde_json::json!(["1.5", "2.5"])
+    );
+}
