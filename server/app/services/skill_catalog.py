@@ -39,6 +39,19 @@ class SkillCatalogService:
         repo_dir = self._skill_dir(skill_key)
         return skill_detail.skill_detail(skill_key, repo_dir, ref, self._files)
 
+    def has_dir(self, skill_key: str) -> bool:
+        """Whether the skill's directory exists on disk (key validation via
+        _skill_dir, so malformed keys answer False rather than raising).
+
+        #745 follow-up: the catalog route refuses a group key with no
+        directory as a 404 — indistinguishable from a foreign workspace-owned
+        key — so the workspace-id namespace cannot be probed through this
+        endpoint (red-team R9 P3-1)."""
+        try:
+            return self._skill_dir(skill_key).is_dir()
+        except NotFoundError:
+            return False
+
     def _skill_dir(self, skill_key: str) -> Path:
         parts = skill_key.split("/")
         if len(parts) != 2 or not all(parts) or ".." in parts:
