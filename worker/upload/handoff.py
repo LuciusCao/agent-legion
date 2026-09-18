@@ -39,19 +39,34 @@ class UploadHandoff:
             task.finalize_started = True
             task.delivery_done.set()
 
-    def wait_for_prior(self, execution_id: str, lease_id: str, stop: threading.Event) -> bool:
-        """Condemn a prior lease and wait through its complete filesystem teardown."""
+    def wait_for_prior(
+        self,
+        execution_id: str,
+        lease_id: str,
+        stop: threading.Event,
+        ownership_lost: threading.Event | None = None,
+    ) -> bool:
+        """Condemn a prior lease and wait through its complete filesystem teardown.
+
+        The incoming lease may itself expire while the old uploader drains;
+        that verdict interrupts the wait just like Worker shutdown.
+        """
+
+        def interrupted() -> bool:
+            return stop.is_set() or (ownership_lost is not None and ownership_lost.is_set())
+
         with self._lock:
             prior = self._active.get(execution_id)
             if prior is None:
-                return True
+                return not interrupted()
             done = prior.delivery_done
             if prior.lease_id != lease_id:
                 prior.ownership_lost.set()
-        while not done.wait(0.1):
-            if stop.is_set():
+        while True:
+            if interrupted():
                 return False
-        return True
+            if done.wait(0.1):
+                return not interrupted()
 
     def start_finalize(self, task: UploadTask) -> bool:
         with self._lock:

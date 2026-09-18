@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
+from worker.execution import run as execution_run_module
 from worker.execution.heartbeat_batch import BatchHeartbeatRegistry, batch_heartbeat_loop
 from worker.execution.ownership import execution_mutex
 from worker.execution.run import run_execution
@@ -535,6 +536,67 @@ class _StatusCapture:
 
     def finish(self, execution_id: str) -> None:
         pass
+
+
+def test_run_execution_rechecks_incoming_lease_after_upload_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new claim lost during handoff must not download or start its job."""
+    client = FakeClient(_make_bundle(tmp_path, _manifest(["true"])))
+    downloads = 0
+    original_download = client.download
+
+    def counting_download(path: str, destination: Path) -> None:
+        nonlocal downloads
+        downloads += 1
+        original_download(path, destination)
+
+    client.download = counting_download  # type: ignore[method-assign]
+    heartbeats = []
+    real_start = execution_run_module.start_lease_heartbeat
+
+    def capture_heartbeat(*args: object, **kwargs: object):
+        heartbeat = real_start(*args, **kwargs)  # type: ignore[arg-type]
+        heartbeats.append(heartbeat)
+        return heartbeat
+
+    monkeypatch.setattr(execution_run_module, "start_lease_heartbeat", capture_heartbeat)
+
+    class LosingHandoff:
+        submitted = False
+
+        def wait_for_prior_upload(
+            self,
+            execution_id: str,
+            lease_id: str,
+            stop: threading.Event,
+            ownership_lost: threading.Event,
+        ) -> bool:
+            ownership_lost.set()  # verdict races the old uploader's completion
+            return True
+
+        def submit(self, task: object) -> None:
+            self.submitted = True
+
+    uploads = LosingHandoff()
+    status = _StatusCapture()
+    run_execution(
+        client,
+        _claim(),
+        tmp_path / "work",
+        {},
+        0.05,
+        threading.Event(),
+        1,
+        status,  # type: ignore[arg-type]
+        uploads,  # type: ignore[arg-type]
+        threading.Semaphore(4),
+    )
+
+    assert downloads == 0
+    assert status.fields is None
+    assert not uploads.submitted
+    assert heartbeats and heartbeats[0].stop.is_set()
 
 
 def test_reclaim_serializes_old_attempt_teardown_and_new_attempt(tmp_path: Path) -> None:

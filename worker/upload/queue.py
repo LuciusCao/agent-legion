@@ -140,6 +140,7 @@ class UploadQueue:
         execution_id: str,
         lease_id: str,
         stop: threading.Event,
+        ownership_lost: threading.Event | None = None,
     ) -> bool:
         """Fence execution-dir reuse behind the prior upload's full teardown.
 
@@ -150,9 +151,10 @@ class UploadQueue:
         that directory: a different-lease uploader is condemned, then the new
         lane waits until marker/directory cleanup and queue accounting finish.
 
-        Returns False only when Worker shutdown interrupts the wait.
+        Returns False when Worker shutdown or the incoming lease's own lost
+        verdict interrupts the wait.
         """
-        return self._handoff.wait_for_prior(execution_id, lease_id, stop)
+        return self._handoff.wait_for_prior(execution_id, lease_id, stop, ownership_lost)
 
     def restore(self, work_root: Path) -> int:
         """Re-queue executions whose results never reached the Host."""

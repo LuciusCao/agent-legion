@@ -37,6 +37,10 @@ from worker.upload.queue import (
 )
 
 
+class _OwnershipLostBeforeStart(RuntimeError):
+    """The lease died during preparation, before the child was spawned."""
+
+
 def agent_subprocess_env(environment: dict[str, str]) -> dict[str, str]:
     """Env for one agent subprocess: worker env + config overrides."""
     # Prepend the worker interpreter's bin dir (its own venv, carrying
@@ -179,10 +183,26 @@ def run_execution(
         # 消除 check→文件打开之间的 TOCTOU，这个 handoff 才是唯一复用边界。
         # 新 lease 的 heartbeat 已经注册，等待期间仍会续租；status.start 放
         # 在屏障之后，避免旧任务的迟到 finish 删除新 attempt 的状态记录。
-        if not uploads.wait_for_prior_upload(execution_id, lease_id, shutdown):
+        try:
+            if (
+                not uploads.wait_for_prior_upload(execution_id, lease_id, shutdown, ownership_lost)
+                or ownership_lost.is_set()
+            ):
+                # The new lease can itself expire while the old uploader drains.
+                # Revalidate after the handoff before any directory rebuild or
+                # Agent/code side effect; the wait also observes this event so a
+                # long in-flight transfer does not pin the dead claim here.
+                heartbeat.shutdown()
+                return
+            status.start(execution_id, **status_fields)
+        except Exception:
+            # #204 broad-except audit: heartbeat registration now precedes
+            # handoff/status publication. Any unexpected local failure in
+            # those two collaborators must compensate that registration or
+            # an unstarted claim stays renewed forever. Bare re-raise keeps
+            # the original failure visible to the executor future reaper.
             heartbeat.shutdown()
-            return
-        status.start(execution_id, **status_fields)
+            raise
         proc: subprocess.Popen[bytes] | None = None
         task: UploadTask | None = None
         try:
@@ -221,6 +241,8 @@ def run_execution(
                 manifest = prepared.manifest
                 command = prepared.command
                 events_file = run_dir / "events.jsonl"
+                if ownership_lost.is_set():
+                    raise _OwnershipLostBeforeStart
                 status.set_phase(execution_id, "running")
                 with events_file.open("wb") as output:
                     proc = subprocess.Popen(
@@ -265,6 +287,11 @@ def run_execution(
             # #490 execution.completed：exit_code 读 task（agent 分支的局部变量
             # 在 code 分支未定义，读它会把每个 code claim 炸成 NameError）。
             events.note_run_outcome(claim, task, started_monotonic)
+        except _OwnershipLostBeforeStart:
+            # Preparation can spend long enough in bundle/input downloads for
+            # the lease to expire. Do not start a command with side effects;
+            # task stays None and the shared discard tail stops the heartbeat.
+            print(f"abandoning prepared execution {execution_id}: lease lost", flush=True)
         except PendingUploadExists:
             # #203：execution_dir 属于本 claim 租约的排队中 pending 上传。上报假
             # failed 会经 submit() 覆盖 marker 丢掉旧结果，所以本次 claim 直接放
