@@ -14,6 +14,7 @@ from ..auth.dependencies import (
 )
 from ..auth.service import AuthError, AuthService
 from ..auth.sessions import SESSION_TTL
+from ..auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 from .auth_contracts import (
     BootstrapRequest,
     BootstrapStatusResponse,
@@ -78,10 +79,15 @@ def _build_session_router(auth_service: AuthService) -> APIRouter:
         response: Response,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> MeResponse:
-        # #626 review: /logout is a USER session endpoint — the api-scope
-        # machine identity has no user row and would 500 on the response
-        # contract (and there is no session to tear down either).
-        if user.get("actor_scope"):
+        # #626 review (codex P2-1): /logout is a USER session endpoint — the
+        # api-scope machine identity has no user row and would 500 on the
+        # response contract (and there is no session to tear down either).
+        # require_user already refuses that scope (HIGH-1); this handler-level
+        # check is defense in depth for the same ONE scope. It must NOT widen
+        # to every actor_scope: a studio-agent scoped token carries the
+        # initiating user's row and keeps its pre-#626 access to /logout (the
+        # _EXEMPT_WRITE_ROUTES pin: "session teardown, no platform effect").
+        if user.get("actor_scope") == WORKSPACE_API_SCOPE:
             raise HTTPException(
                 status_code=403, detail="Scoped tokens cannot use identity endpoints"
             )
@@ -93,8 +99,9 @@ def _build_session_router(auth_service: AuthService) -> APIRouter:
 
     @router.get("/me", response_model=MeResponse)
     def me(user: Annotated[dict[str, Any], Depends(require_user)]) -> MeResponse:
-        # Same refusal as logout: /me is a USER identity endpoint (#626).
-        if user.get("actor_scope"):
+        # Same refusal as logout: /me is a USER identity endpoint (#626, codex
+        # P2-1) — api scope only, for the same reason as above.
+        if user.get("actor_scope") == WORKSPACE_API_SCOPE:
             raise HTTPException(
                 status_code=403, detail="Scoped tokens cannot use identity endpoints"
             )
