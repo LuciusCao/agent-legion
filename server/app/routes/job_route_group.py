@@ -79,8 +79,9 @@ def include_job_routes(
     # cannot get from the path-param guard.
     router.include_router(
         create_external_artifact_router(
-            ExternalArtifactAccessService(job_db, settings, object_store=object_store),
-            services.artifacts,
+            ExternalArtifactAccessService(
+                job_db, settings, object_store=object_store, artifact_service=services.artifacts
+            )
         )
     )
     router.include_router(create_token_usage_router(services.queries, settings))

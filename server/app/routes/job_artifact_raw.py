@@ -30,11 +30,24 @@ def register_raw_artifact_route(
     # raw 必须先于 {artifact_name:path} 注册（在 job_artifacts.py 的
     # create_job_artifacts_router 里调用），否则 "foo.json/raw" 会被吞成
     # 名为 "foo.json/raw" 的 artifact 查询。
+    # 206 声明（#703 codex round 4 P2-2，与外部 raw 路由同修）：Range 时
+    # raw_response 答分段 206 + Content-Range，契约只写 200 会让生成客
+    # 户端把分段下载当异常。
     @router.get(
         "/jobs/{job_id}/artifacts/{artifact_name}/raw",
         response_class=FileResponse,
         response_model=None,
-        responses={200: {"content": {"application/octet-stream": {}}}},
+        responses={
+            200: {"content": {"application/octet-stream": {}}},
+            206: {
+                "description": "Partial Content (Range request)",
+                "content": {"application/octet-stream": {}},
+                "headers": {
+                    "Content-Range": {"schema": {"type": "string"}},
+                    "Content-Length": {"schema": {"type": "string"}},
+                },
+            },
+        },
         dependencies=[Depends(reject_scoped_token_on_bare_job_route)],
     )
     def get_artifact_raw(

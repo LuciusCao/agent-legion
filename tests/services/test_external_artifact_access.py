@@ -12,6 +12,8 @@ from __future__ import annotations
 import gzip
 import hashlib
 
+import pytest
+
 from server.app.services.external_artifact_access import ExternalArtifactAccessService
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import NotFoundError
@@ -32,22 +34,29 @@ class _NoStorage:
 
 
 def _seed_job(job_db, workspace_id: str = "ws-a") -> dict:
-    job_db.create_workspace(workspace_id, default_workflow_key="demo_workflow")
+    """Workspace + job WITH the intake-frozen definition snapshot (the shape
+    production intake creates): the demo legacy-intake revision is published
+    first so create_jobs_bulk freezes its JSON onto the job row — the
+    declared-outputs gate (#703 codex round 4 P2-1) reads that snapshot."""
+    from tests.helpers import publish_legacy_intake_revision
+
+    job_db.create_workspace(workspace_id, default_workflow_key=workspace_id)
+    revision = publish_legacy_intake_revision(job_db, workspace_id)
     batch = job_db.create_run(
-        "demo_workflow",
+        workspace_id,
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace_id,
     )
-    return job_db.create_job(
-        workflow_key="demo_workflow",
-        source_type="question",
-        source_id="Q1",
+    job_ids = job_db.create_jobs_bulk(
+        candidates=[{"entity_id": "Q1", "entity_type": "question", "title": "Question 1"}],
+        workflow_key=workspace_id,
         run_id=batch["id"],
-        title="Question 1",
         node_keys=["question_understanding"],
         workspace_id=workspace_id,
+        revision=revision,
     )
+    return job_db.get_job(job_ids[0])
 
 
 def _seed_manifest_row(
@@ -151,15 +160,16 @@ def test_list_artifacts_merges_local_only_names(job_db, settings):
     _seed_manifest_row(store, job, "report.json", b"{}")
     storage = resolve_job_dir(job, job_db.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / "legacy.txt").write_text("old", encoding="utf-8")
+    # 声明名（demo 快照的 outputs）：#703 codex4 后未声明名不再列出。
+    (storage / "script.md").write_text("old", encoding="utf-8")
 
     listing = service.list_artifacts(job["workspace_id"], job["id"])
 
     entries = {e["name"]: e for e in listing["artifacts"]}
     assert entries["report.json"]["storage"] == "object"
-    assert entries["legacy.txt"]["storage"] == "local"
-    assert entries["legacy.txt"]["size_bytes"] is None
-    assert entries["legacy.txt"]["uploaded_at"] is None
+    assert entries["script.md"]["storage"] == "local"
+    assert entries["script.md"]["size_bytes"] is None
+    assert entries["script.md"]["uploaded_at"] is None
 
 
 def test_list_artifacts_latest_row_per_name_after_rerun(job_db, settings):
@@ -183,12 +193,12 @@ def test_list_artifacts_disabled_store_lists_local_names(job_db, settings):
     service = ExternalArtifactAccessService(job_db, settings, object_store=_NoStorage())
     storage = resolve_job_dir(job, job_db.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / "result.json").write_text("{}", encoding="utf-8")
+    (storage / "script.md").write_text("{}", encoding="utf-8")
 
     listing = service.list_artifacts(job["workspace_id"], job["id"])
 
     assert listing["object_storage_enabled"] is False
-    assert [e["name"] for e in listing["artifacts"]] == ["result.json"]
+    assert [e["name"] for e in listing["artifacts"]] == ["script.md"]
     assert listing["artifacts"][0]["storage"] == "local"
 
 
@@ -200,36 +210,67 @@ def test_status_artifact_names_union(job_db, settings):
     _seed_manifest_row(store, job, "report.json", b"{}")
     storage = resolve_job_dir(job, job_db.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / "legacy.txt").write_text("old", encoding="utf-8")
+    (storage / "script.md").write_text("old", encoding="utf-8")
 
     payload = service.status(job["workspace_id"], job["id"])
 
-    assert payload["artifacts"] == ["legacy.txt", "report.json"]
+    assert payload["artifacts"] == ["report.json", "script.md"]
 
 
 # --- P2-1: 子路径名 -----------------------------------------------------------
 
 
+def _seed_job_with_subpath_output(job_db, workspace_id: str = "ws-a") -> dict:
+    """Demo variant whose publish node declares the nested output
+    ``reports/final.json`` — the declared-subpath shape #631 P2-1 serves."""
+    import dataclasses
+
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from tests.helpers import load_demo_legacy_intake_definition
+
+    job_db.create_workspace(workspace_id, default_workflow_key=workspace_id)
+    definition = load_demo_legacy_intake_definition()
+    nodes = dict(definition.nodes)
+    nodes["publish_content"] = dataclasses.replace(
+        nodes["publish_content"], outputs=["reports/final.json"]
+    )
+    definition = dataclasses.replace(definition, key=workspace_id, nodes=nodes)
+    revision = WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
+    batch = job_db.create_run(
+        workspace_id, "batch_by_ids", {"question_ids": ["Q1"]}, workspace_id=workspace_id
+    )
+    job_ids = job_db.create_jobs_bulk(
+        candidates=[{"entity_id": "Q1", "entity_type": "question", "title": "Q1"}],
+        workflow_key=workspace_id,
+        run_id=batch["id"],
+        node_keys=["question_understanding"],
+        workspace_id=workspace_id,
+        revision=revision,
+    )
+    return job_db.get_job(job_ids[0])
+
+
 def test_list_artifacts_includes_local_subpath_names(job_db, settings):
-    """#631 review P2-1: local-only 子路径产物（reports/final.json）必须被
-    深度扫描列出（根级扫描漏掉子目录文件），名字与 raw 端点可下载名一致。"""
-    job = _seed_job(job_db)
+    """#631 review P2-1: local-only 子路径产物（reports/final.json——声明
+    outputs 里的嵌套名）必须被深度扫描列出（根级扫描漏掉子目录文件），
+    名字与 raw 端点可下载名一致。"""
+    job = _seed_job_with_subpath_output(job_db)
     service = ExternalArtifactAccessService(job_db, settings, object_store=_NoStorage())
     storage = resolve_job_dir(job, job_db.jobs_dir)
     (storage / "reports").mkdir(parents=True, exist_ok=True)
     (storage / "reports" / "final.json").write_text("{}", encoding="utf-8")
-    (storage / "top.txt").write_text("top", encoding="utf-8")
+    (storage / "script.md").write_text("top", encoding="utf-8")
 
     payload = service.list_artifacts(job["workspace_id"], job["id"])
 
     assert [e["name"] for e in payload["artifacts"]] == [
         "reports/final.json",
-        "top.txt",
+        "script.md",
     ]
 
 
 def test_status_lists_local_subpath_names(job_db, settings):
-    job = _seed_job(job_db)
+    job = _seed_job_with_subpath_output(job_db)
     service = ExternalArtifactAccessService(job_db, settings, object_store=_NoStorage())
     storage = resolve_job_dir(job, job_db.jobs_dir)
     (storage / "reports").mkdir(parents=True, exist_ok=True)
@@ -238,6 +279,65 @@ def test_status_lists_local_subpath_names(job_db, settings):
     payload = service.status(job["workspace_id"], job["id"])
 
     assert payload["artifacts"] == ["reports/final.json"]
+
+
+def _seed_job_with_deep_output(job_db, workspace_id: str = "ws-a") -> dict:
+    """Variant declaring a multi-level output ``reports/2026/final.json`` —
+    the walk-pruning regression probe (#703 codex round 4 P2-1)：中途目录
+    不是声明名本身，剪枝判据必须按前缀链下探，不能只认首段。"""
+    import dataclasses
+
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from tests.helpers import load_demo_legacy_intake_definition
+
+    job_db.create_workspace(workspace_id, default_workflow_key=workspace_id)
+    definition = load_demo_legacy_intake_definition()
+    nodes = dict(definition.nodes)
+    nodes["publish_content"] = dataclasses.replace(
+        nodes["publish_content"], outputs=["reports/2026/final.json"]
+    )
+    definition = dataclasses.replace(definition, key=workspace_id, nodes=nodes)
+    revision = WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
+    batch = job_db.create_run(
+        workspace_id, "batch_by_ids", {"question_ids": ["Q1"]}, workspace_id=workspace_id
+    )
+    job_ids = job_db.create_jobs_bulk(
+        candidates=[{"entity_id": "Q1", "entity_type": "question", "title": "Q1"}],
+        workflow_key=workspace_id,
+        run_id=batch["id"],
+        node_keys=["question_understanding"],
+        workspace_id=workspace_id,
+        revision=revision,
+    )
+    return job_db.get_job(job_ids[0])
+
+
+def test_multi_level_declared_output_is_walked_and_downloadable(job_db, settings):
+    """多级声明 outputs（reports/2026/final.json）照常列举与下载：walk 中
+    途目录（reports/2026）不在声明名集合里，但它是声明名的目录前缀——
+    剪枝按前缀链下探（首段判据会把它剪掉，深度声明产物平白消失）。"""
+    from server.app.services.job_artifacts import JobArtifactService
+
+    job = _seed_job_with_deep_output(job_db)
+    service = ExternalArtifactAccessService(
+        job_db, settings, artifact_service=JobArtifactService(job_db, None)
+    )
+    storage = resolve_job_dir(job, job_db.jobs_dir)
+    (storage / "reports" / "2026").mkdir(parents=True, exist_ok=True)
+    (storage / "reports" / "2026" / "final.json").write_text('{"deep": 1}', encoding="utf-8")
+    (storage / "reports" / "notes.txt").write_text("undeclared sibling", encoding="utf-8")
+
+    payload = service.list_artifacts(job["workspace_id"], job["id"])
+
+    assert [e["name"] for e in payload["artifacts"]] == ["reports/2026/final.json"]
+
+    raw = service.open_raw_current(job["workspace_id"], job["id"], "reports/2026/final.json")
+    assert raw.path is not None
+    assert raw.path.read_bytes() == b'{"deep": 1}'
+
+    # 未声明邻居名：下载门 404（NotFoundError）。
+    with pytest.raises(NotFoundError):
+        service.open_raw_current(job["workspace_id"], job["id"], "reports/notes.txt")
 
 
 # --- P2-2: raw 优先权威 manifest 对象 -----------------------------------------

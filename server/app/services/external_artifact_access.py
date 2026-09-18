@@ -10,7 +10,7 @@ authoritative copy, EXEC-ARTIFACT-STORE-001) with legacy local job_dir names.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_media import raw_media_type
@@ -19,18 +19,10 @@ from server.app.services.job_artifact_names import (
     is_plausible_job_id,
 )
 from server.app.services.job_artifact_objects import refuse_row_outside_job_prefix
+from server.app.services.job_artifact_raw_types import RawArtifact
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.job_query_presenters import artifact_names_deep
+from server.app.services.job_query_presenters import _declared_output_names, artifact_names_deep
 from server.app.settings import Settings
-
-_JOB_STATUS_FIELDS = (
-    "id",
-    "workspace_id",
-    "status",
-    "outcome",
-    "created_at",
-    "updated_at",
-)
 
 
 def _listing_rows(store: Any, job: dict[str, Any]) -> tuple[set[str], dict[str, dict[str, Any]]]:
@@ -62,21 +54,19 @@ class ExternalArtifactAccessService:
         job_db: JobQueries,
         settings: Settings,
         object_store: Any | None = None,
+        artifact_service: Any | None = None,
     ) -> None:
         self.job_db = job_db
         self.settings = settings
-        # Typed Any like the studio-agent tool surface: the composition root
-        # (routes/__init__.py) passes the JobArtifactObjectStore; tests inject
-        # fakes exposing enabled/rows_for_job/lookup/open_*.
+        # object_store：typed Any（组合根传 JobArtifactObjectStore，测试桩注入）；
+        # artifact_service：raw 句柄查找（JobArtifactService，同裸路由实例）。
         self.object_store = object_store
+        self._artifact_service = artifact_service
 
     def _job_in_workspace_or_404(self, workspace_id: str, job_id: str) -> dict[str, Any]:
-        # #631: the workspace check doubles as the existence check — a job id
-        # from another workspace is a 404 (not 403), so ids cannot be probed
-        # across workspaces (same pattern as studio_agent_job_tools).
-        # 攻击复审 M1：控制字符 job_id（%00）在 SQL 参数化时炸 psycopg
-        # DataError（500）；这里按输入形状早拒（InvalidOperationError →
-        # 400），保持 404/400 边界不变成 500。
+        # #631：workspace 检查兼存在性检查——跨 workspace 的 job_id 是 404
+        # 不是 403（不可探测）。攻击复审 M1：控制字符 job_id（%00）在 SQL
+        # 参数化时炸 psycopg DataError（500）；形状早拒 400。
         if not is_plausible_job_id(job_id):
             raise InvalidOperationError("Invalid job id")
         job = self.job_db.get_job(job_id)
@@ -85,9 +75,7 @@ class ExternalArtifactAccessService:
         return job
 
     def require_job_in_workspace(self, workspace_id: str, job_id: str) -> None:
-        """Guard-only variant for endpoints that read through another service
-        (the raw download reuses JobArtifactService.open_raw, which has no
-        workspace context of its own)."""
+        """Guard-only variant（沿用 JobArtifactService 读路径的路由用）。"""
         self._job_in_workspace_or_404(workspace_id, job_id)
 
     def _object_storage_enabled(self) -> bool:
@@ -102,15 +90,9 @@ class ExternalArtifactAccessService:
 
     def _node_progress(self, job_id: str) -> tuple[int, int, str]:
         nodes = self.job_db.list_job_nodes(job_id)
-        completed = sum(1 for node in nodes if str(node.get("status")) == "completed")
-        failed = next(
-            (
-                str(node.get("error_message") or "")[:240]
-                for node in nodes
-                if str(node.get("status")) == "failed"
-            ),
-            "",
-        )
+        statuses = [(str(n.get("status")), str(n.get("error_message") or "")) for n in nodes]
+        completed = sum(1 for s, _ in statuses if s == "completed")
+        failed = next((msg[:240] for s, msg in statuses if s == "failed"), "")
         return completed, len(nodes), failed
 
     def status(self, workspace_id: str, job_id: str) -> dict[str, Any]:
@@ -139,25 +121,50 @@ class ExternalArtifactAccessService:
 
     def _artifact_entries(self, job: dict[str, Any]) -> list[dict[str, Any]]:
         # 对象 manifest 行 + 本地 job_dir 名的合并清单（list 与 status 共
-        # 用，两个列举面永远一致）。enabled 门控（与
-        # JobQueryService._artifact_names 同语义）：实例摘掉存储配置后清单
-        # 里的名字读不到，不再列出。#631 codex round 3 (P2-1)：行的名字过
-        # 下载侧白名单——清单把 raw 端点必拒（400）的名字当产物下发即破坏
-        # list→download 契约（声明期校验另立 issue）。#703 复审 M2：行还须
-        # 与读侧对称——最新行（lookup 同语义）的 storage_key 越界（H1 兜底
-        # 404）不列；有行名字一律以行为准，本地副本不回填（manifest-first
-        # 读到行就短路本地分支，被拒行是 404 不是本地 200）。
+        # 用）。enabled 门控：实例摘掉存储配置后清单里的名字读不到，不再
+        # 列出。行过滤：名字过下载侧白名单（raw 必拒的名字不列，#631
+        # codex3）；最新行的 storage_key 越界（H1 兜底 404）不列，有行名字
+        # 一律以行为准、本地副本不回填（manifest-first 读到行就短路本地
+        # 分支，被拒行是 404，#703 复审 M2）。本地扫描过声明门（#703
+        # codex4 P2-1）：快照解析一次，walk 与下载门共用。
         store = self._enabled_store()
         row_names: set[str] = set()
         object_backed: dict[str, dict[str, Any]] = {}
         if store is not None:
             row_names, object_backed = _listing_rows(store, job)
         entries = [self._entry_from_row(row) for row in object_backed.values()]
-        local_names = set(artifact_names_deep(job, self.settings))
+        local_names = set(artifact_names_deep(job, self.settings, _declared_output_names(job)))
         if store is not None:
             local_names -= row_names
         entries.extend(self._local_entry(name) for name in sorted(local_names))
         return entries
+
+    def open_raw_current(
+        self, workspace_id: str, job_id: str, artifact_name: str, range_header: str | None = None
+    ) -> RawArtifact:
+        """外部 raw 读：workspace 守卫 + 本地子路径下载门，再走
+        manifest-first 句柄（有行读对象副本，无行回落本地文件）。
+
+        #703 codex round 4 (P2-1)：本地 job_dir 是执行暂存面——名字没进
+        job 快照的声明 outputs（scratch/debug.json 这类未声明嵌套文件）
+        不可下载（404）；对象 manifest 行不受此门（行是执行产物的登记
+        面），有行照常读。名字白名单先于声明门（#631 M1/M2：畸形名/越界
+        名保持 400 语义，不被声明门的 404 吞掉）。
+        """
+        job = self._job_in_workspace_or_404(workspace_id, job_id)
+        if not is_downloadable_artifact_name(artifact_name):
+            raise InvalidOperationError("Invalid artifact name")
+        store = self._enabled_store()
+        # 无 manifest 行的名字才过声明门（行是登记面，不受此门）。
+        if (store is None or store.lookup(str(job["id"]), artifact_name) is None) and (
+            artifact_name not in _declared_output_names(job)
+        ):
+            raise NotFoundError("Artifact not found")
+        service = self._artifact_service
+        if service is None:
+            raise NotFoundError("Artifact not found")
+        # 组合根传 JobArtifactService（同裸路由实例）；cast 只收窄 Any。
+        return cast(RawArtifact, service.open_raw_current(job_id, artifact_name, range_header))
 
     def list_artifacts(self, workspace_id: str, job_id: str) -> dict[str, Any]:
         """Manifest listing for the job's CURRENT artifacts (rerun semantics

@@ -74,6 +74,15 @@ def test_external_artifact_routes_contract(tmp_path):
         "/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw"
     ]
     assert "application/octet-stream" in raw_path["get"]["responses"]["200"]["content"]
+    # #703 codex round 4 (P2-2)：Range 请求实际答 206（raw_response 的对象
+    # 分支带 Content-Range）——契约必须声明，生成客户端才不把分段下载当
+    # 异常；206 携带 Content-Range/Content-Length 头描述。
+    partial = raw_path["get"]["responses"]["206"]
+    assert "application/octet-stream" in partial["content"]
+    assert set(partial["headers"]) == {"Content-Range", "Content-Length"}
+    # 裸路由同修（同一 raw_response 构建器，Range 同样 206）。
+    bare_path = schema["paths"]["/api/jobs/{job_id}/artifacts/{artifact_name}/raw"]
+    assert "application/octet-stream" in bare_path["get"]["responses"]["206"]["content"]
 
     schemas = schema["components"]["schemas"]
     entry = schemas["ExternalArtifactEntry"]

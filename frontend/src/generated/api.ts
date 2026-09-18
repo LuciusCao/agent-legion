@@ -9890,6 +9890,17 @@ export interface operations {
           'application/octet-stream': unknown
         }
       }
+      /** @description Partial Content (Range request) */
+      206: {
+        headers: {
+          'Content-Length'?: string
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -12851,6 +12862,17 @@ export interface operations {
       /** @description Successful Response */
       200: {
         headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
+      /** @description Partial Content (Range request) */
+      206: {
+        headers: {
+          'Content-Length'?: string
+          'Content-Range'?: string
           [name: string]: unknown
         }
         content: {

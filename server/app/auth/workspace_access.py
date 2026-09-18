@@ -140,6 +140,12 @@ def require_job_workspace_access(
         return user
     if refuse_off_allowlist_api_scope(request, user):
         return user
+    # Malformed job ids (NUL bytes etc.) are rejected before the job lookup:
+    # the scope resolution queries by the raw path param, and psycopg would
+    # turn an embedded NUL into a DataError (500) instead of a clean miss.
+    job_id = request.path_params.get("job_id")
+    if job_id is not None and not job_id.isprintable():
+        raise HTTPException(status_code=400, detail="Invalid job id")
     # Scoped-token binding runs before the admin fast path (see
     # _resolve_job_workspace_scope): a workspace-bound run token must stay
     # bound even when the minter is an admin.
@@ -162,6 +168,7 @@ def require_job_workspace_access(
     minimum = "viewer" if request.method in _SAFE_METHODS else "editor"
     if _MEMBER_ROLE_RANK.get(role, 0) < _MEMBER_ROLE_RANK[minimum]:
         raise HTTPException(status_code=403, detail="Insufficient workspace role")
+    return user
 
 
 def require_scoped_workspace_match(
