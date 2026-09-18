@@ -54,7 +54,12 @@ class SkillValidator:
         base_dir: Path,
         lock_getter: Callable[[], SkillsLock | None] | None = None,
     ) -> None:
-        self._base_dir = base_dir.expanduser()
+        # Resolve once: _resolve_inside_base compares and returns
+        # physically-resolved paths, so a symlinked skills root (e.g.
+        # ~/.agents via symlink) must not keep its spelling here —
+        # relative_to() against the spelling raises ValueError and turns a
+        # valid skill read into a 500 (codex P2 on #753).
+        self._base_dir = base_dir.expanduser().resolve()
         self._lock_getter = lock_getter
 
     def validate(self, raw_path: str) -> SkillValidation:
