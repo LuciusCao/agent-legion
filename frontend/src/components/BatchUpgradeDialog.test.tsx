@@ -113,7 +113,7 @@ describe('BatchUpgradeDialog', () => {
         onConfirm={onConfirm}
       />
     )
-    fireEvent.click(screen.getByText('继承未变节点产物'))
+    fireEvent.click(screen.getByText(/继承未变节点产物/))
     await act(async () => {
       fireEvent.click(screen.getByText('升级 1 个任务'))
     })

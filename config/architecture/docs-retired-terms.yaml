@@ -52,5 +52,16 @@ terms:
     note: config.json 是仅供直调 CLI 的迁移桥，结构上进不了 Worker 模型
       发现；配置入口是 ~/.velites/models.json。迁移历史上下文（velites-
       model-registry.md 的 0.1.x 迁移节与 deprecation 公告）豁免
+  - pattern: 'upstream chain'
+    retired_in: '#645/#702（inherit 传播闭包重构）'
+    note: inherit 判定的上游一致性不再由 per-node 哈希链间接证明；现行
+      说法是变更种子集 + 下游传播闭包（严格传播）
+  - pattern: '上游集哈希'
+    retired_in: '#645/#702（inherit 传播闭包重构）'
+    note: 中文语境的同义表述；旧实现的「对上游 (key, hash) 列表整体取
+      摘要」已删除，上游维度由闭包直接定义
+  - pattern: '上游哈希链'
+    retired_in: '#645/#702（inherit 传播闭包重构）'
+    note: 「上游哈希链式传播」的简称变体，同 upstream chain
 
 exemptions: []

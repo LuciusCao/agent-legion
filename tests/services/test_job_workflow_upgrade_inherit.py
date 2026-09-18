@@ -725,3 +725,136 @@ def test_clean_upgrade_cancels_queued_agent_requests(tmp_path: Path) -> None:
             (execution_id,),
         ).fetchone()["state"]
     assert state == "cancelled"
+
+
+def test_inherit_upgrade_code_republish_with_inserted_node_reruns_all(tmp_path: Path) -> None:
+    """702 用户反例端到端：实现身份种子必须经闭包传播到全部下游。
+
+    反例图：A(code)→B(agent)→C、B→D。A 的 node_code 重发布 V1→V2
+    （**工作流定义不变**）+ 新 revision 在 B/C 间插入 E。旧行为的架构
+    缺陷：B 的上游一致性由定义侧基准间接证明——A 的身份排除若只做
+    候选过滤而不并入种子，B/C/D 会被错误继承，B 的 input（A 的新产物）
+    与 B 的产物不一致。重构后：A 进 S4 种子 → 闭包把 B/C/D 全部带进
+    重置面；E 是新增节点（S1）同样重跑——kept == 0。
+    """
+    from server.app.agent_catalog import AgentDefinition
+    from server.app.services.job_artifact_mutation import JobArtifactMutationService
+    from server.app.storage_paths import resolve_job_dir
+    from tests.helpers import replace_agent_catalog
+    from tests.services.test_job_workflow_upgrade_inherit_codex4 import (
+        _publish_node_code,
+        _seed_local_pool_execution,
+    )
+
+    def _graph(with_e: bool) -> WorkflowDefinition:
+        nodes = {
+            "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["a_out.json"]),
+            "b": WorkflowNode(
+                key="b",
+                label="B",
+                node_type="agent",
+                capability="cap_b",
+                after=["a"],
+                outputs=["b_out.json"],
+            ),
+            "c": WorkflowNode(
+                key="c", label="C", capability="cap_c", after=["b"], outputs=["c_out.json"]
+            ),
+            "d": WorkflowNode(key="d", label="D", capability="cap_d", after=["b"]),
+        }
+        if with_e:
+            nodes["e"] = WorkflowNode(
+                key="e", label="E", capability="cap_e", after=["b"], outputs=["e_out.json"]
+            )
+            nodes["c"] = WorkflowNode(
+                key="c", label="C", capability="cap_c", after=["e"], outputs=["c_out.json"]
+            )
+        return WorkflowDefinition(
+            key="wfchain",
+            label="Wf Chain",
+            intake=WorkflowIntake(),
+            nodes=nodes,
+        )
+
+    queries, workspace, revisions, original, _ = _inherit_setup(tmp_path)
+    original = revisions.publish_workspace_revision(workspace["id"], _graph(with_e=False))
+    # A 的 code V1 发布 + B 的 published Agent（当前身份）。
+    a_v1 = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {'v': 1}\n")
+    agent_v1 = AgentDefinition(capability="cap_b", runtime="pi", skill="g/n")
+    replace_agent_catalog(workspace["id"], {"agent-b": agent_v1})
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c", "d"])
+    # 播种执行记录：A 记 V1 hash（本地池形态，node_runs 直查命中）；
+    # B/C/D 记各自当前身份（done 请求行——Worker/Agent 形态）。
+    from tests.services.test_job_workflow_upgrade_inherit_codex4 import _seed_done_execution
+
+    queries.update_job_node(job["id"], "a", status="pending")
+    _seed_local_pool_execution(queries, job["id"], "a", a_v1)
+    for node_key in ("b", "c", "d"):
+        queries.update_job_node(job["id"], node_key, status="pending")
+    _seed_done_execution(
+        queries,
+        workspace["id"],
+        job["id"],
+        "b",
+        kind="agent",
+        impl_hash=agent_v1.definition_hash(),
+    )
+    c_hash = _publish_node_code(queries, workspace["id"], "c", "def run(ctx):\n    return {'c'}\n")
+    _seed_done_execution(queries, workspace["id"], job["id"], "c", kind="code", impl_hash=c_hash)
+    d_hash = _publish_node_code(queries, workspace["id"], "d", "def run(ctx):\n    return {'d'}\n")
+    _seed_done_execution(queries, workspace["id"], job["id"], "d", kind="code", impl_hash=d_hash)
+    queries.update_job_status(job["id"], "completed")
+    # 产物可达（隔离不可达退化维度）。
+    job_dir = resolve_job_dir(job, queries.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("a_out.json", "b_out.json", "c_out.json"):
+        (job_dir / name).write_text(f"old-{name}")
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        for node_key, name in (
+            ("a", "a_out.json"),
+            ("b", "b_out.json"),
+            ("c", "c_out.json"),
+        ):
+            conn.execute(
+                """
+                insert into job_artifacts(job_id, node_key, name, storage_key,
+                                          size_bytes, content_hash)
+                values (%s, %s, %s, %s, 1, 'hash')
+                """,
+                (job["id"], node_key, name, f"jobs/wschain/{job['id']}/{name}"),
+            )
+    # 变更：A 的 node_code 重发布 V1→V2（工作流定义不动）+ 插入 E。
+    _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {'v': 2}\n")
+    current = revisions.publish_workspace_revision(workspace["id"], _graph(with_e=True))
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+        artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
+    )
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    # 反例闭合：A 身份漂移（S4 种子）→ B/C/D（全部下游）+ E（新增 S1）
+    # 一起重跑，无任何节点被错误继承。
+    assert result["status"] == "succeeded"
+    assert result["kept_node_count"] == 0
+    assert statuses == {
+        "a": "pending",
+        "b": "pending",
+        "c": "pending",
+        "d": "pending",
+        "e": "pending",
+    }
+    # 重置节点的本地产物进暂存删除（不会以旧实现字节冒充新产物）。
+    assert not (job_dir / "a_out.json").exists()
+    assert not (job_dir / "b_out.json").exists()
+    assert not (job_dir / "c_out.json").exists()
+    assert not (job_dir / ".staged").exists()
+    # job_artifacts 清单行同事务清理。
+    names = queries.job_artifact_manifest_names_for_nodes(job["id"], {"a", "b", "c", "d", "e"})
+    assert names == set()
+    # job 重 pin 新 revision + frozen 更新。
+    upgraded = queries.get_job(job["id"])
+    assert upgraded["workflow_revision_id"] == current["id"]
+    assert upgraded["status"] == "queued"
