@@ -1003,12 +1003,15 @@ exemptions:
   expires: 2026-12-31
 - check: architecture.file_budget
   path: velites/src/tools/json.rs
-  reason: '#747 json set 的 value 二次编码兜底：宽容解析函数（parse_double_encoded_container，
-    容器文本判定 + 解析）、set 的改写注记输出、四组单测（正确传法 / 二次编码数组+对象 /
-    字面 JSON-looking 字符串）。单测与实现同居是 Rust 惯例（velites tests/ 目录只放跨二进制
-    集成测试）；实现本体 +5 行、单测 +98 行，515→618 超出 growth_allowance 带。时间盒：
-    下次 velites 落版波次若工具测试面拆出共享 fixture 模块，单测随迁重新登预算。'
+  reason: '#747 json set 的 value 二次编码兜底（含对抗 review 修复轮）。行数构成按仓库 counter
+    实测（有效行，实现段 = #[cfg(test)] 之前）：初版 515→618（实现 +27、测试 +76，3 个新单测）；
+    review 修复轮 618→774（实现 +74：LenientParse 三态 + numbers_round_trip 数字无损往返校验 +
+    MAX_LENIENT_PARSE_BYTES 256KB 解析闸 + set 三分支注记；测试 +82：边界矩阵与超闸两个新单测）。
+    774 原始行超出 velites/src 绝对上限 800 在即，按本豁免的时间盒拆出：宽容解析机制迁
+    json_lenient.rs（新条目 66 有效行），#747 全部单测迁 velites/tests/json_lenient.rs 集成测试
+    （tests/ 不纳入预算）——json.rs 回落 552 有效行（+28 于初版前基线），在 baseline 524 +
+    growth_allowance 带内。时间盒已兑现，豁免保留至 #747 关闭后随下轮 ratchet 回收。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/747
-  ceiling: 628
+  ceiling: 562
   expires: 2026-12-31

@@ -97,13 +97,16 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
                     // #747：value 可以是任意 JSON 标量，JSON Schema 无简洁的
                     // 「any」写法——保持无 type（宽松类型，两 provider 均原样
                     // 透传 schema），description 用正反例钉住「容器直接以
-                    // JSON 值传入」，并声明运行时的宽容解析行为。
+                    // JSON 值传入」，并声明运行时的宽容解析行为（含无损与
+                    // 闸内两个前提，见 json.rs 的 parse_double_encoded_container）。
                     "value": {"description": "set: any JSON value to write at the path \
             (objects/arrays/strings/numbers/booleans/null). Pass containers directly as \
             JSON — value: [\"1.5\", \"2.5\"] or {\"k\": 1} — never as a string holding \
-            JSON text like \"[\\\"1.5\\\", \\\"2.5\\\"]\". A value string that parses as a \
-            JSON array/object is parsed as that container before writing; to store such \
-            text literally, use the `write` tool."}
+            JSON text like \"[\\\"1.5\\\", \\\"2.5\\\"]\". A value string that parses \
+            losslessly as a JSON array/object (within a size gate) is parsed as that \
+            container before writing; container text with lossy numbers or over the \
+            gate stays literal, with a note saying so. To store JSON text literally, \
+            use the `write` tool."}
                 },
                 "required": ["op", "path", "query"]
             }),

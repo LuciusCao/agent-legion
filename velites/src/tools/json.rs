@@ -15,14 +15,18 @@
 //! holding JSON text) instead of `["1.5", "2.5"]`. Writing that verbatim
 //! used to succeed silently, leaving the agent unable to tell a tool bug
 //! from its own argument mistake and burning turns re-probing (observed
-//! in production as multi-turn probe loops). `set` now parses such
-//! strings into the container they hold and says so in its output; see
-//! [`parse_double_encoded_container`].
+//! in production as multi-turn probe loops). `set` now salvages such
+//! strings into the container they hold and says so in its output — but
+//! only when the parse is lossless (every number must round-trip) and
+//! within a size gate; otherwise the string is written literally with a
+//! note explaining why. The salvage decision lives in
+//! [`json_lenient::parse_double_encoded_container`].
 
 use std::path::PathBuf;
 
 use serde_json::Value;
 
+use super::json_lenient::{format_gate_size, parse_double_encoded_container, LenientParse};
 use super::{resolve_in_cwd, truncate, ToolContext, ToolError, ToolOutput};
 
 /// Upper bound for one path expression — a legit nested path is a few
@@ -125,32 +129,47 @@ fn get(ctx: &ToolContext, path: &str, query: &str) -> Result<ToolOutput, ToolErr
     })
 }
 
-/// #747 宽容解析：`value` 为字符串且 strip 后恰为合法 JSON 数组/对象文本
-/// （模型二次编码容器的常见失误）时，返回解析后的容器。只认容器——标量
-/// 形态的字符串（"123"、"true"、"null"）按字面写入：字符串字段装着数字
-/// 样文本是合法数据，生产观察到的失误形态只有容器二次编码。设计上不给
-/// 「字面容器文本」留带内逃生语法（任何以 `[`/`{` 开头且可解析的字符串都
-/// 会被解析）：逃生通道是 write 工具，输出注记与 schema description 都
-/// 明说，行为可预期。
-fn parse_double_encoded_container(value: &Value) -> Option<Value> {
-    let text = value.as_str()?.trim();
-    if !text.starts_with(['[', '{']) {
-        return None;
-    }
-    match serde_json::from_str::<Value>(text) {
-        Ok(container @ (Value::Array(_) | Value::Object(_))) => Some(container),
-        _ => None,
-    }
-}
-
 fn set(ctx: &ToolContext, path: &str, query: &str, value: Value) -> Result<ToolOutput, ToolError> {
     let (resolved, mut root) = load_json(ctx, path)?;
-    // #747：value 若是装着 JSON 容器文本的字符串，宽容解析为容器再写入
-    // （帮模型成功而不是考它——与 validate 工具 #443 同哲学），下面的输出
-    // 注记让改写行为对模型可见。
-    let (value, parsed_from_text) = match parse_double_encoded_container(&value) {
-        Some(container) => (container, true),
-        None => (value, false),
+    // #747：value 若是装着 JSON 容器文本的字符串，且解析无损、闸内，则
+    // 宽容解析为容器再写入（帮模型成功而不是考它——与 validate 工具 #443
+    // 同哲学）；候选成立但被拒（超闸 / 数字不可无损往返）时按字面写入并
+    // 注记原因。三条路径的输出注记都让行为对模型可预期。
+    let (value, note) = match parse_double_encoded_container(&value) {
+        LenientParse::Container(container) => {
+            let kind = if container.is_array() {
+                "an array"
+            } else {
+                "an object"
+            };
+            (
+                container,
+                format!(
+                    " — value was a string holding JSON text, parsed as {kind} \
+                     before writing; to store such text literally, use the `write` tool"
+                ),
+            )
+        }
+        LenientParse::NotCandidate => (value, String::new()),
+        LenientParse::Declined { oversized } => (
+            value,
+            if oversized {
+                format!(
+                    " — value looks like JSON container text but is over the \
+                     {} lenient-parse gate, so it was written as the literal \
+                     string; if you meant a JSON container, pass it directly \
+                     as a JSON value",
+                    format_gate_size()
+                )
+            } else {
+                " — value looks like JSON container text but contains numbers \
+                 that would not survive parsing losslessly (high-precision \
+                 floats or very large integers), so it was written as the \
+                 literal string; if you meant a JSON container, pass it \
+                 directly as a JSON value"
+                    .to_string()
+            },
+        ),
     };
     // descend to the PARENT of the last segment, then set/delete there.
     let parent = descend_mut(&mut root, query, path)?;
@@ -178,21 +197,6 @@ fn set(ctx: &ToolContext, path: &str, query: &str, value: Value) -> Result<ToolO
         }
     }
     let bytes = store_json(&resolved, &root, path)?;
-    // 宽容解析必须自我声明（#747）：模型需要知道发生了改写，以及字面
-    // JSON-looking 字符串的正确去处（write 工具——本工具无带内逃生语法）。
-    let note = if parsed_from_text {
-        let kind = if value.is_array() {
-            "an array"
-        } else {
-            "an object"
-        };
-        format!(
-            " — value was a string holding JSON text, parsed as {kind} \
-             before writing; to store such text literally, use the `write` tool"
-        )
-    } else {
-        String::new()
-    };
     Ok(ToolOutput::text(
         format!("set `{query}` in {path} (file now {bytes} bytes){note}"),
         false,
@@ -511,92 +515,6 @@ mod tests {
         let updated = read_spec(dir.path());
         assert_eq!(updated["meta"]["version"], 2);
         assert_eq!(updated["meta"]["note"], "bumped");
-    }
-
-    /// #747 正确传法：容器直接以 JSON 值传入——原样写入，输出不带解析
-    /// 注记（注记只在发生宽容解析时出现）。
-    #[tokio::test]
-    async fn set_container_value_passed_directly_is_written_verbatim() {
-        let dir = tempfile::tempdir().unwrap();
-        write_spec(dir.path());
-        let output = run(
-            &args("set", "meta.tags", Some(serde_json::json!(["a", "b"]))),
-            &ctx(dir.path()),
-        )
-        .await;
-        assert!(!output.is_error);
-        let text = text(&output);
-        assert!(!text.contains("parsed"), "got: {text}");
-        let updated = read_spec(dir.path());
-        assert_eq!(updated["meta"]["tags"], serde_json::json!(["a", "b"]));
-        assert_eq!(updated["meta"]["version"], 1);
-    }
-
-    /// #747 二次编码：装着 JSON 容器文本的字符串（带首尾空白）——解析为
-    /// 容器写入，输出明说发生了改写与字面字符串的去处。
-    #[tokio::test]
-    async fn set_double_encoded_container_text_is_parsed_with_a_note() {
-        let dir = tempfile::tempdir().unwrap();
-        write_spec(dir.path());
-        let output = run(
-            &args(
-                "set",
-                "entries[0].content",
-                Some(serde_json::json!("  [\"fixed\", \"also fixed\"]  ")),
-            ),
-            &ctx(dir.path()),
-        )
-        .await;
-        assert!(!output.is_error);
-        let note = text(&output);
-        assert!(note.contains("parsed as an array"), "got: {note}");
-        assert!(note.contains("`write` tool"), "got: {note}");
-        let updated = read_spec(dir.path());
-        assert_eq!(
-            updated["entries"][0]["content"],
-            serde_json::json!(["fixed", "also fixed"])
-        );
-        // 对象文本同理。
-        let output = run(
-            &args(
-                "set",
-                "entries[1].content",
-                Some(serde_json::json!("{\"k\": 1}")),
-            ),
-            &ctx(dir.path()),
-        )
-        .await;
-        assert!(!output.is_error);
-        assert!(text(&output).contains("parsed as an object"));
-        let updated = read_spec(dir.path());
-        assert_eq!(updated["entries"][1]["content"]["k"], 1);
-    }
-
-    /// #747 字面字符串场景：不以 `[`/`{` 开头或不可解析的 JSON-looking
-    /// 文本、标量形态字符串——一律按字面写入，不触发宽容解析。
-    #[tokio::test]
-    async fn set_json_looking_non_container_strings_stay_literal() {
-        let dir = tempfile::tempdir().unwrap();
-        write_spec(dir.path());
-        for (query, value) in [
-            ("entries[0].content", "[pending review]"),
-            ("entries[1].content", "123"),
-            ("meta.note", "true"),
-        ] {
-            let output = run(
-                &args("set", query, Some(serde_json::json!(value))),
-                &ctx(dir.path()),
-            )
-            .await;
-            assert!(!output.is_error, "{query}");
-            let text = text(&output);
-            assert!(!text.contains("parsed"), "{query}: {text}");
-        }
-        let updated = read_spec(dir.path());
-        assert_eq!(updated["entries"][0]["content"], "[pending review]");
-        assert_eq!(updated["entries"][1]["content"], "123");
-        assert_eq!(updated["meta"]["note"], "true");
-        assert_eq!(updated["meta"]["version"], 1);
     }
 
     #[tokio::test]

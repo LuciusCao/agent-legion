@@ -13,6 +13,7 @@ pub mod catalog;
 pub mod command_guard;
 pub(super) mod command_paths;
 pub mod json;
+mod json_lenient;
 pub mod read;
 mod specs;
 pub mod truncate;
