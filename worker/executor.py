@@ -53,6 +53,7 @@ from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import load_transfer_controls
 from worker.upload.queue import UploadQueue
+from worker.upload.stderr_evidence import register_secrets as _register_secrets
 
 
 def _print(message: str) -> None:
@@ -110,6 +111,10 @@ def main() -> int:
         return 2
     work_root = Path(str(config.get("work_root", "/var/lib/agent-legion-worker"))).resolve()
     environment = {str(key): str(value) for key, value in config.get("environment", {}).items()}
+    # #748 R2 P2-3：environment 块是给 agent 子进程注入 secret 的官方通道，
+    # 但出口脱敏只扫 os.environ——该通道零覆盖。在这里（持有 config 的唯一
+    # 启动点）把值注册进脱敏面一次；upload 车道经 stderr_evidence 读取。
+    _register_secrets(environment.values())
     interval = float(config.get("heartbeat_interval_seconds", 15))
     shutdown_grace = float(config.get("shutdown_grace_seconds", 25))
     uploads = UploadQueue(

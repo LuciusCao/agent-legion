@@ -19,6 +19,14 @@ _MAX_CONNECTION_KEY_CHARS = MAX_CONNECTION_KEY_CHARS
 # metadata; capped at the error_message budget (the Worker truncates to the
 # same bound, the reader re-truncates defensively for older/other writers).
 _MAX_AGENT_STDERR_TAIL_CHARS = 4000
+# #748 R2 P2-1: the Worker's X-Agent-Result byte budget (h11 caps one HTTP
+# event at 16 KiB) can force a 128-entry direct-upload artifact manifest to
+# degrade to a kept PREFIX (or, at the extreme, an empty list). The Worker
+# stamps these markers so the reader can tell "truncated by the writer"
+# apart from "reported none"; both keys are optional and tolerated-absent
+# like agent_stderr_tail above (older Workers / non-truncating shapes).
+ARTIFACTS_TRUNCATED_KEY = "output_artifacts_truncated"
+ARTIFACTS_TOTAL_KEY = "output_artifacts_total"
 
 
 def _recover_result_header(raw: str) -> str:
@@ -77,6 +85,13 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
     # #748: bounded, optional stderr tail for agent-crash attribution
     # (absent for completed/cancelled/timeout runs and older Workers).
     agent_stderr_tail = str(metadata.get("agent_stderr_tail", ""))[:_MAX_AGENT_STDERR_TAIL_CHARS]
+    # #748 R2 P2-1: writer-side artifact-list truncation markers. The Worker
+    # only emits them when the byte budget forced a degrade, and then
+    # ALWAYS as a pair; tolerate a lone/missing half the same way (absent =
+    # full list, non-int total = treat as truncated with unknown origin).
+    artifacts_truncated = metadata.get(ARTIFACTS_TRUNCATED_KEY) is True
+    artifacts_total_raw = metadata.get(ARTIFACTS_TOTAL_KEY, 0)
+    artifacts_total = artifacts_total_raw if type(artifacts_total_raw) is int else 0
     outcome = AgentOutcome(
         status=status,  # type: ignore[arg-type]
         exit_code=exit_code,
@@ -86,6 +101,8 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         run_dir=run_dir,
         auth_failure_connection=auth_failure_raw.strip(),
         agent_stderr_tail=agent_stderr_tail,
+        output_artifacts_truncated=artifacts_truncated,
+        output_artifacts_total=artifacts_total,
     )
     record = {
         "status": status,
@@ -95,5 +112,7 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         "run_dir": run_dir,
         "auth_failure_connection": auth_failure_raw.strip(),
         "agent_stderr_tail": agent_stderr_tail,
+        ARTIFACTS_TRUNCATED_KEY: artifacts_truncated,
+        ARTIFACTS_TOTAL_KEY: artifacts_total,
     }
     return outcome, record

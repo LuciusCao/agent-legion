@@ -36,6 +36,17 @@ DEFAULT_TRANSFER_TIMEOUT = 120
 # the request line, the lease header, and proxy hop headers.
 _RESULT_HEADER_BUDGET = 14 * 1024
 
+# #748 R2 P2-1: output_artifacts are the THIRD budget face. Direct-upload
+# refs (~200 bytes each, dict form) ride the SAME header on SUCCESS runs,
+# and the Host-side cap is 128 (_MAX_OUTPUT_ARTIFACTS) — a full 128-ref
+# manifest serializes to ~25 KB, blowing the budget exactly like the CJK
+# tail did (report retry exhaustion -> lease expiry = the UNDELIVERABLE
+# form this PR exists to kill). When even keeping a FRACTION of the refs
+# cannot fit, the whole list degrades to empty + the truncation markers:
+# the artifact BYTES are still in the result archive (and already in object
+# storage for direct uploads), so the loss is "performance falls back to
+# the archive channel", never data loss.
+
 
 def _result_header_value(metadata: dict[str, Any]) -> bytes:
     """Serialize the result metadata into the X-Agent-Result header value.
@@ -45,9 +56,16 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
     refuses non-latin-1 str header values, so raw UTF-8 must go in as bytes.
     Verified roundtrip: h11 keeps header values as bytes, Starlette decodes
     latin-1, and the Host reader reverses exactly that (see
-    ``_recover_result_header`` in agent_worker_results.py). The byte budget
-    above is enforced by shrinking the two free-text fields (stderr tail
-    first — error_message carries the classification surface).
+    ``_recover_result_header`` in agent_worker_results.py).
+
+    #748 R2 P2-1: the byte budget is enforced by a THREE-STAGE degrade —
+    (1) shrink ``agent_stderr_tail`` (10% steps), (2) shrink
+    ``error_message`` (the classification surface, so only after the tail),
+    (3) truncate ``output_artifacts`` to a prefix that fits, stamping
+    ``output_artifacts_truncated: true`` + ``output_artifacts_total`` so the
+    Host reader (parse_result_metadata) knows the list is a prefix. If not
+    even the minimum artifact prefix fits, the list degrades to empty with
+    the same markers — the artifact bytes still ride the archive.
     """
     payload = dict(metadata)
 
@@ -63,10 +81,21 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
         if isinstance(error, str) and len(error) > 200:
             payload["error_message"] = error[: int(len(error) * 0.9)]
             continue
-        # Both fields already minimal (or absent) — nothing left to shrink
-        # without touching the contract keys; ship what we have. The
-        # metadata char caps keep even pathological shapes under h11's
-        # 16 KiB in this branch.
+        artifacts = payload.get("output_artifacts")
+        if isinstance(artifacts, dict) and artifacts:
+            total = len(artifacts)
+            payload["output_artifacts_truncated"] = True
+            payload["output_artifacts_total"] = total
+            # Halve the kept prefix each pass (rounding down, min 0): each
+            # retry re-serializes, so the loop converges geometrically and
+            # the last passes just drop the markers + empty list.
+            keep = total // 2
+            payload["output_artifacts"] = dict(list(artifacts.items())[:keep])
+            continue
+        # Nothing left to shrink (all faces minimal or absent) — ship what
+        # we have; an over-budget residue can only come from exotic shapes
+        # (e.g. a single ref near the budget alone), where delivery with
+        # partial data still beats the UNDELIVERABLE alternative.
         break
     return _serialized()
 

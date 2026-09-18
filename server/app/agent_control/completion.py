@@ -54,6 +54,14 @@ class AgentOutcome:
     # Surfaces the crash cause in the result record without unpacking the
     # archive's agent-stderr.log member; empty for non-crash outcomes.
     agent_stderr_tail: str = ""
+    # #748 R2 P2-1: the Worker's result-header byte budget may force the
+    # direct-upload artifact manifest to a kept prefix (or empty list);
+    # ``output_artifacts_truncated`` says the dict is NOT the full set and
+    # ``output_artifacts_total`` carries the pre-truncation count. The
+    # bytes themselves still ride the result archive — consumers use these
+    # only to know the header list was degraded, not to infer absence.
+    output_artifacts_truncated: bool = False
+    output_artifacts_total: int = 0
 
 
 def report_auth_failure_safe(database_dsn: ConnectSource, connection_key: str) -> None:

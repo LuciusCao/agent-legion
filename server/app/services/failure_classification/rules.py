@@ -66,7 +66,6 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     exited = _PROCESS_EXITED_RE.match(message)
     if exited is not None and exited.group(2) == ":":
         message = message[: exited.end() - 1]
-        message = message[: exited.end() - 1]
 
     if message.startswith(_REVIEW_REJECTED_MARKERS):
         return CATEGORY_BUSINESS, "review_rejected"

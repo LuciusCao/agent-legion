@@ -167,15 +167,15 @@ def _persist_stderr_tail(sink: Path, tail: bytes) -> None:
     No fsync: the sink must survive process crashes (worker restart →
     restore() re-runs prepare), not power loss — page-cache write-back is
     enough for that, and the compression pass must never fail on an
-    unwritable sink (the tail still rides the return value)."""
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=sink.parent, prefix=".agent-stderr.", delete=False
-        ) as staging:
-            staging.write(tail)
-        os.replace(staging.name, sink)
-    except OSError:
-        logger.exception("Failed to persist the stderr tail: %s", sink)
+    unwritable sink (the tail still rides the return value). OSError
+    handling lives at the CALL SITE in scan_and_compress_pi_events, where
+    any failure form (patched, unwritable dir, os.replace across devices)
+    degrades to a log line instead of escaping into the scan."""
+    with tempfile.NamedTemporaryFile(
+        dir=sink.parent, prefix=".agent-stderr.", delete=False
+    ) as staging:
+        staging.write(tail)
+    os.replace(staging.name, sink)
 
 
 def compress_pi_events(events_path: Path) -> tuple[int, int]:

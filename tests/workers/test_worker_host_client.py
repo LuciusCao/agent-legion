@@ -333,6 +333,97 @@ def test_result_header_value_ascii_metadata_unchanged() -> None:
     assert _result_header_value(metadata) == json.dumps(metadata).encode()
 
 
+def _direct_ref(i: int) -> dict:
+    # #160 D12 直传产物 ref 形态（worker/artifact/upload.py 的返回值）。
+    return {
+        "storage_key": f"jobs-staging/ws-1/job-1/exec-1/output-{i:03d}.json",
+        "size_bytes": 12345,
+        "content_hash": "a" * 64,
+    }
+
+
+def test_result_header_value_truncates_128_direct_refs_under_budget() -> None:
+    """#748 R2 P2-1：128 个直传 ref（Host 侧 _MAX_OUTPUT_ARTIFACTS 上限）全 ref
+    形态 ~25KB，撞破 14KB 预算——成功运行同样中招（成功上报也带产物清单）。
+    多级降级第三级：截断 output_artifacts 为前缀 + 截断标记；序列化字节必须
+    落在预算内，保留的 ref 逐字节原样（前缀，不是改写）。"""
+    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
+
+    artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(128)}
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "error_message": "",
+        "command": ["pi"],
+        "output_artifacts": artifacts,
+        "run_dir": "runs/node_a/worker",
+    }
+    header = _result_header_value(metadata)
+    assert len(header) <= _RESULT_HEADER_BUDGET
+    decoded = json.loads(header.decode("utf-8"))
+    kept = decoded["output_artifacts"]
+    assert 0 < len(kept) < 128
+    # 前缀保序：保留的是前 N 个，ref 内容逐字节未动。
+    kept_names = list(kept)
+    assert kept_names == [f"output-{i:03d}.json" for i in range(len(kept))]
+    for name, ref in kept.items():
+        assert ref == artifacts[name]
+    # 截断标记：truncated=true + 原数量。
+    assert decoded["output_artifacts_truncated"] is True
+    assert decoded["output_artifacts_total"] == 128
+
+
+def test_result_header_value_degrades_giant_refs_to_empty_with_markers() -> None:
+    """降级到极致：单条 ref 自身就超预算（超长 storage_key）时，清单整体
+    降级为空列表 + 截断标记——头仍可投递（这是本修复的存活底线），产物
+    字节仍在归档里（直传 ref 丢失面是「回退归档通道」而非数据丢失）。"""
+    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
+
+    giant = {
+        "storage_key": "jobs-staging/" + "x" * 20_000,
+        "size_bytes": 1,
+        "content_hash": "a" * 64,
+    }
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "error_message": "",
+        "command": ["pi"],
+        "output_artifacts": {"a.json": giant},
+        "run_dir": "runs/node_a/worker",
+    }
+    header = _result_header_value(metadata)
+    assert len(header) <= _RESULT_HEADER_BUDGET
+    decoded = json.loads(header.decode("utf-8"))
+    assert decoded["output_artifacts"] == {}
+    assert decoded["output_artifacts_truncated"] is True
+    assert decoded["output_artifacts_total"] == 1
+
+
+def test_result_header_value_truncates_after_tail_and_error_shrink() -> None:
+    """多级顺序：tail 先缩、error_message 次之、产物清单最后——三面同时
+    超预算时前两级先收敛（分类面优先于产物清单之前保住）。"""
+    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
+
+    artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(128)}
+    metadata = {
+        "status": "failed",
+        "exit_code": 1,
+        "error_message": "Agent process exited 1: ValueError: boom",
+        "command": ["pi"],
+        "output_artifacts": artifacts,
+        "run_dir": "runs/node_a/worker",
+        "agent_stderr_tail": "错" * 8000 + "x" * 2000,
+    }
+    header = _result_header_value(metadata)
+    assert len(header) <= _RESULT_HEADER_BUDGET
+    decoded = json.loads(header.decode("utf-8"))
+    # error_message 是分类面：第三级介入前必须完整。
+    assert decoded["error_message"] == "Agent process exited 1: ValueError: boom"
+    assert decoded["output_artifacts_truncated"] is True
+    assert len(decoded["output_artifacts"]) < 128
+
+
 def test_cjk_result_header_roundtrips_through_real_h11_uvicorn_starlette() -> None:
     """真链路验证（#748 review P2 选型依据）：requests(字节头) → h11 →
     uvicorn → Starlette latin-1 解码 → Host 侧 _recover_result_header 反解。
