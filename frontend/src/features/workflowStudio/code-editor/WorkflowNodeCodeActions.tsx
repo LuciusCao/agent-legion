@@ -10,6 +10,10 @@ export function WorkflowNodeCodeActions(props: {
   hasBuiltin: boolean
   hasDraft: boolean
   busy: boolean
+  // #749：有草稿但缺 CAS 令牌（draft_code_hash，旧后端不回）时禁用发布，
+  // 禁用原因由 title 提示（title 挂在外层 span：禁用按钮不触发自身 hover）。
+  publishDisabled?: boolean
+  publishDisabledReason?: string
   confirmingReset: boolean
   onEdit: () => void
   onCreateFromTemplate: () => void
@@ -42,14 +46,16 @@ export function WorkflowNodeCodeActions(props: {
         </Button>
       )}
       {props.hasDraft && (
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={props.onPublish}
-          disabled={props.busy}
-        >
-          发布
-        </Button>
+        <span title={props.publishDisabled ? props.publishDisabledReason : undefined}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={props.onPublish}
+            disabled={props.busy || props.publishDisabled}
+          >
+            发布
+          </Button>
+        </span>
       )}
       <Button
         variant="text"
