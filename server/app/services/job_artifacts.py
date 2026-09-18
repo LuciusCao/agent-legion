@@ -5,9 +5,10 @@ from typing import Any
 from botocore.exceptions import BotoCoreError, ClientError
 
 from server.app.jobs import JobQueries
-from server.app.services import job_artifact_names, job_artifact_objects
+from server.app.services import job_artifact_names
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_artifact_raw import RawArtifact, open_raw_artifact
+from server.app.services.job_artifact_row_prefix import refuse_row_outside_job_prefix
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.storage_paths import resolve_job_dir
 
@@ -74,7 +75,7 @@ class JobArtifactService:
             return None
         job_id = str(job["id"])
         row = store.lookup(job_id, name)
-        if row is None or job_artifact_objects.refuse_row_outside_job_prefix(row, job):
+        if row is None or refuse_row_outside_job_prefix(row, job):
             # #631 攻击复审 H1（文本分支）：storage_key 指向本 job 前缀之外
             # 的行按未找到处理——读路径不为写歪的行跨 workspace 取字节。
             return None

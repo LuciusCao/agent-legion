@@ -14,11 +14,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from server.app.http_range import parse_range_header
 from server.app.services.job_artifact_gzip import is_gzip_key
-from server.app.services.job_artifact_objects import (
-    JobArtifactObjectStore,
-    refuse_row_outside_job_prefix,
-)
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_artifact_raw_types import RawArtifact
+from server.app.services.job_artifact_row_prefix import refuse_row_outside_job_prefix
 from server.app.services.job_errors import NotFoundError
 
 __all__ = ["RawArtifact", "open_raw_artifact", "open_raw_row"]

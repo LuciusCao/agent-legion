@@ -1378,6 +1378,7 @@
     "server/app/services/job_artifact_objects.py": 243,
     "server/app/services/job_artifact_raw.py": 62,
     "server/app/services/job_artifact_raw_types.py": 23,
+    "server/app/services/job_artifact_row_prefix.py": 34,
     "server/app/services/job_artifact_rows.py": 29,
     "server/app/services/job_artifacts.py": 72,
     "server/app/services/job_deletion.py": 193,

@@ -18,8 +18,8 @@ from server.app.services.job_artifact_names import (
     is_downloadable_artifact_name,
     is_plausible_job_id,
 )
-from server.app.services.job_artifact_objects import refuse_row_outside_job_prefix
 from server.app.services.job_artifact_raw_types import RawArtifact
+from server.app.services.job_artifact_row_prefix import refuse_row_outside_job_prefix
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_query_presenters import _declared_output_names, artifact_names_deep
 from server.app.settings import Settings
