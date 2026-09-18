@@ -36,13 +36,16 @@ def plan_inherit_nodes(
     new_frozen_config_json: str | None,
     *,
     custom_nodes_enabled: bool = True,
+    skill_manager: Any = None,
 ) -> frozenset[str]:
     """最终继承集 = 新定义可执行节点 −（S1–S5 种子 ∪ S6 可达性种子）的传播闭包。
 
     ``custom_nodes_enabled``（P1-1）与 dispatch 侧同一特性 gate
     （``workflows.custom_nodes_enabled``）：关闭时 code 节点当前身份
     不可解析，全部保守重跑（与「关闭特性时 dispatch 无 code 可跑」的
-    现实一致）。
+    现实一致）。``skill_manager``（codex 五轮 P1-A）是 skill 内容身份
+    比较的解析器（latest=live HEAD / tag=DB 锁，与 dispatch 同源），
+    None 时跳过 skill 面（裸构造形态，见 skill 模块）。
 
     旧侧配置基准只用 job 的存量 ``frozen_config_json``（intake 冻结值，
     RUN-FREEZE-001）：产物是按那份冻结配置产出的，同基比较必须以它为
@@ -102,7 +105,11 @@ def plan_inherit_nodes(
             # 不再走「旧定义 re-freeze 当前配置」的恒等回退。
             return frozenset()
     implementation_excluded = implementation_excluded_nodes(
-        job_db, job, new_definition, custom_nodes_enabled=custom_nodes_enabled
+        job_db,
+        job,
+        new_definition,
+        custom_nodes_enabled=custom_nodes_enabled,
+        skill_manager=skill_manager,
     )
     seeds = collect_change_seeds(
         old_definition,

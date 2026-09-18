@@ -27,6 +27,15 @@ workspace 当前 published 的 node_code（code 节点）或 Agent 定义（agen
   节点自声明判定覆盖不到定义侧键。定义 schema 含此类键的 agent 节点
   并入本排除集（恒重跑），解析不到唯一 published 的节点 P1-1 已排除、
   不重复计入。
+- **skill 内容身份**（codex 五轮 P1-A）：agent 节点的执行内容还有
+  skill 绑定（``effective_node_skill``：节点绑定优先，
+  ``AgentDefinition.skill`` 的 legacy 兜底皆空即节点失败）。S5 只排除
+  节点显式声明 ``skill: latest`` 的面——legacy 兜底与显式具体 tag 都
+  逃过 S5；仓库 HEAD 前进或 ``make skills-lock`` 重解析 tag 后，节点
+  定义与 Agent 定义哈希都不变，inherit 保留按旧 skill commit 产出的
+  产物而 dispatch 已会执行新 commit。判定在姊妹模块
+  ``job_workflow_upgrade_skill``（``skill_excluded_nodes``）：执行记录
+  的 skill 身份与当前有效绑定解析出的 commit 比较，证明相等才可继承。
 
 v85 之前本地 code 池执行无身份记录 → 一律「不可证明」恒重跑；v85 起
 claim 落列，本地池 code 节点与 Worker/Agent 节点同权可证明。
@@ -39,6 +48,7 @@ from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.jobs import JobQueries
+from server.app.services.job_workflow_upgrade_skill import skill_excluded_nodes
 from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -52,14 +62,14 @@ _CODE_KIND = "code"
 
 def _latest_execution_identities(
     job_db: JobQueries, job_id: str, node_keys: frozenset[str]
-) -> dict[str, tuple[str, str]]:
-    """node_key → 该节点最新完成执行的 ``(kind, agent_definition_hash)``。
+) -> dict[str, tuple[str, str, str, str]]:
+    """node_key → 该节点最新完成执行的身份记录（BOUNDARY-DATA-001 门面）。
 
-    走 ``JobQueries.latest_done_request_identities`` 门面
-    （``jobs/queries/upgrade_impl_identity``，BOUNDARY-DATA-001）：node_runs
-    身份列优先（v85+ 执行 / 本地 code 池），请求行 fallback（历史
-    Worker/Agent 作业）；无任何记录（本地池 v85 前执行 / retention 已
-    清扫）→ 该节点不在返回值里（调用方按不可证明处理）。
+    走 ``JobQueries.latest_done_request_identities``
+    （``jobs/queries/upgrade_impl_identity``）：node_runs 身份列优先
+    （v85+ 执行 / 本地 code 池），请求行 fallback（历史 Worker/Agent
+    作业）；无任何记录（本地池 v85 前执行 / retention 已清扫）→ 该节点
+    不在返回值里（调用方按不可证明处理）。
     """
     return job_db.latest_done_request_identities(job_id, node_keys)
 
@@ -70,9 +80,9 @@ def _published_catalog(job_db: JobQueries, workspace_id: str) -> dict[str, Agent
     P1-1 身份比较是安全敏感读（产物冒充检查）：``published_agent_definitions``
     的 ~5s 缓存会把「重发布不可见」的 stale 窗口人为拉宽（复审 MEDIUM-1
     注记）——升级是低频管理操作，这里直读 store（一次 DB 往返）消除该
-    拉宽面。plan 与升级事务之间的 TOCTOU 本体仍属后续加固（事务内不
-    复算身份），本函数只去掉缓存这个额外放大器。读取失败返回 None
-    （保守处理）。"""
+    拉宽面。plan 与升级事务之间的 TOCTOU 由 upgrade 事务内的重验收口
+    （codex 五轮 P2-C），本函数只去掉缓存这个额外放大器。读取失败返回
+    None（保守处理）。"""
     from server.app.services.versioned_entities import EntityType, VersionedEntityStore
 
     try:
@@ -182,6 +192,7 @@ def implementation_excluded_nodes(
     definition: WorkflowDefinition,
     *,
     custom_nodes_enabled: bool = True,
+    skill_manager: Any = None,
 ) -> frozenset[str]:
     """执行面排除集：实现身份不可证明/已漂移 + Agent 定义 runtime_mutable 键。
 
@@ -201,6 +212,11 @@ def implementation_excluded_nodes(
     agent_current = _current_agent_identities(catalog, definition)
     code_current = _current_code_identities(job_db, custom_nodes_enabled, workspace_id, definition)
     excluded: set[str] = set(_agent_definition_mutable_nodes(catalog, definition))
+    # codex 五轮 P1-A：skill 内容身份（姊妹模块）——skill_manager 是与
+    # dispatch 同源的 SkillManager（latest=live HEAD、tag=DB 锁）。
+    excluded |= skill_excluded_nodes(
+        _resolved_agent_nodes(catalog, definition), definition, executed, skill_manager
+    )
     for key, node in definition.executable_nodes.items():
         record = executed.get(key)
         if record is None:
@@ -208,7 +224,7 @@ def implementation_excluded_nodes(
             # 旧产物按哪份实现产出不可知 → 恒重跑。
             excluded.add(key)
             continue
-        kind, executed_hash = record
+        executed_hash = record[1]
         if not executed_hash:
             excluded.add(key)
             continue

@@ -56,6 +56,34 @@ def _pure_outputs(node: WorkflowNode) -> set[str]:
     return set(node.outputs) - set(node.inputs)
 
 
+def unprotected_input_names(definition: WorkflowDefinition) -> frozenset[str]:
+    """新图中「有声明输入面但无生产者」的名字（codex 五轮 P2-D）。
+
+    clean 语义的全量清单清理以此作保护集：RMW 名（输入 ∩ 输出，重置
+    节点的启动输入）与外部输入（无节点产出）保留清单行——删行会让
+    ``restore_missing_inputs`` 无清单可回、节点永久等输入（#114 语义）；
+    有生产者的输入名不受保护（生产者重跑重新产出）。
+    """
+    inputs: set[str] = set()
+    produced: set[str] = set()
+    for node in definition.executable_nodes.values():
+        inputs.update(node.inputs)
+        produced.update(_pure_outputs(node))
+    return frozenset(inputs - produced)
+
+
+def _rmw_names(node: WorkflowNode) -> set[str]:
+    """节点声明的 RMW 名（inputs ∩ outputs）。
+
+    codex 五轮 P1-B：升级把旧纯输出 x 变成新 RMW（inputs=[x],
+    outputs=[x]）时，x 是重置节点的**启动输入**——暂存删除会让
+    ``restore_missing_inputs`` 无清单可回（x 没有别的生产者），节点
+    永久等不到输入。与 ``stage_outputs`` 不暂存 RMW 的 #114 语义
+    同源：重跑成功后节点原地重写，清理面不碰。
+    """
+    return set(node.outputs) & set(node.inputs)
+
+
 def removed_artifact_face(
     old_definition: WorkflowDefinition | None,
     new_definition: WorkflowDefinition,
@@ -67,8 +95,9 @@ def removed_artifact_face(
     ``keep_keys``/``reset_keys`` 按新 definition 的可执行节点划分（升级
     事务内的实际保留/重置面）。旧快照不可解析（None）时返回空面——
     该场景 plan 阶段已保守退化到全量重跑（clean 语义），不存在继承
-    节点，重置面的新 outputs 走既有暂存路径；旧快照节点缺失的行留给
-    对象存储生命周期兜底（与 A4 的保守子集语义一致）。
+    节点，重置面的新 outputs 走既有暂存路径（codex 五轮 P2-D 补齐了
+    该分支的清单行清理）；旧快照节点缺失的行留给对象存储生命周期
+    兜底（与 A4 的保守子集语义一致）。
     """
     if old_definition is None:
         return RemovedArtifactFace()
@@ -84,7 +113,9 @@ def removed_artifact_face(
         node = old_definition.nodes.get(key)
         if node is not None:
             keep_io.update(node.inputs, node.outputs)
-    # 重置节点：旧纯输出 − 新纯输出 → 被移除的名。
+    # 重置节点：旧纯输出 − 新纯输出 → 被移除的名；新 RMW 名排除
+    # （P1-B：升级后变成 RMW 输入的旧产物是重置节点的启动输入，
+    # 与 rerun 保留 RMW 输入的 #114 语义一致，不进清理面）。
     for key in reset_keys:
         old_node = old_definition.nodes.get(key)
         if old_node is None:
@@ -93,6 +124,8 @@ def removed_artifact_face(
         removed = _pure_outputs(old_node) - (
             _pure_outputs(new_node) if new_node is not None else set()
         )
+        if new_node is not None:
+            removed -= _rmw_names(new_node)
         builder.names.update(removed)
     # 被删节点（旧有新无）：全部纯输出名 + 运行历史目录。
     for key, old_node in old_definition.nodes.items():

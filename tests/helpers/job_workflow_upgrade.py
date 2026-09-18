@@ -24,18 +24,32 @@ def seed_done_execution(
     *,
     kind: str,
     impl_hash: str,
+    skill: str = "",
+    skill_version: str = "",
+    skill_commit: str = "",
 ) -> None:
     """播种该节点的一次完成执行：node_run(completed) + done 请求行。
 
     请求行携带执行时实现身份（``agent_definition_hash``：agent 行是
     Agent 定义哈希、code 行是 code 文本 sha256），与真实 dispatch 链
     （``CodeDispatchService.enqueue`` / ``AgentDispatchService.enqueue``）
-    的落库形状一致。
+    的落库形状一致。skill 三件（codex 五轮 P1-A）镜像 dispatch 的
+    ``SkillCheckout.manifest_pins()``：请求行 manifest 携带完整
+    ``skill_commit``（mark_done trim 保留该键），node_runs 行携带
+    ``skill_version``（``ref@commit12``，v75 列）；默认空串 = 无 skill
+    记录（既有用例零改动）。
     """
-    run = queries.start_node_run(job_id, node_key, ["pi"], "")
+    run = queries.start_node_run(
+        job_id, node_key, ["pi"], "", skill_version=skill_version, skill=skill
+    )
     assert run is not None
     queries.finish_node_run(int(run["id"]), "completed", 0, "")
     execution_id = str(uuid.uuid4())
+    manifest = {"kind": kind, "node_key": node_key}
+    if skill:
+        manifest.update(
+            {"skill": skill, "skill_version": skill_version, "skill_commit": skill_commit}
+        )
     with closing(connect_database(queries.dsn_identity)) as conn, conn:
         conn.execute(
             """
@@ -55,7 +69,7 @@ def seed_done_execution(
                 f"cap_{node_key}",
                 impl_hash,
                 int(run["id"]),
-                json.dumps({"kind": kind, "node_key": node_key}),
+                json.dumps(manifest),
             ),
         )
 

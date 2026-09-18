@@ -305,3 +305,77 @@ def test_no_staged_names_leaves_manifest_rows_alone(tmp_path: Path) -> None:
 
     assert stats["deleted_rows"] == []
     assert _manifest_rows(queries, job) == {("b", "b_out.json")}
+
+
+def test_full_manifest_cleanup_clears_legacy_rows_except_inputs(tmp_path: Path) -> None:
+    """codex 五轮 P2-D：clean 语义 + full_manifest_cleanup → 清空全部清单行。
+
+    无任何继承节点（显式 clean 或 inherit 保守退化）且调用方装配了暂存
+    （服务侧 ``artifact_mutation is not None``）时，旧节点 key / 改名输出
+    的残留行一并清空；新图声明的输入名（RMW/外部输入）保留——重置节点
+    的启动输入，restore_missing_inputs 依赖清单回填。
+    """
+    queries, job = _setup(tmp_path)
+    _insert_manifest_rows(
+        queries,
+        job,
+        [
+            ("a", "a_out.json", f"jobs/wsmut/{job['id']}/a_out.json"),
+            ("b", "b_out.json", f"jobs/wsmut/{job['id']}/b_out.json"),
+            ("old", "renamed_out.json", f"jobs/wsmut/{job['id']}/renamed_out.json"),
+            ("b", "x.json", f"jobs/wsmut/{job['id']}/x.json"),
+        ],
+    )
+
+    with _mutation_conn(queries) as conn:
+        stats = upgrade_job_workflow_inherit(
+            conn,
+            job["id"],
+            workflow_revision_id="rev-11",
+            workflow_version=11,
+            workflow_definition_hash="hash-11",
+            workflow_definition_snapshot_json='{"key": "wfmut"}',
+            node_keys=["a", "b"],
+            frozen_config_json=None,
+            # 新图声明 x.json 为输入（RMW/外部输入面）。
+            keep_input_names=frozenset({"x.json"}),
+            full_manifest_cleanup=True,
+        )
+
+    # 全部作废（含旧 key 的孤儿行），只有受保护输入名的行保留；
+    # 删除行携带 storage_key 供对象清理。
+    assert stats["kept"] == 0
+    remaining = _manifest_rows(queries, job)
+    assert ("b", "x.json") in remaining
+    assert ("a", "a_out.json") not in remaining
+    assert ("old", "renamed_out.json") not in remaining
+    deleted = {(row["node_key"], row["name"]) for row in stats["deleted_rows"]}
+    assert deleted == {("a", "a_out.json"), ("b", "b_out.json"), ("old", "renamed_out.json")}
+
+
+def test_full_manifest_cleanup_not_requested_keeps_legacy_rows(tmp_path: Path) -> None:
+    """P2-D 对照：裸构造面（full_manifest_cleanup=False）维持既有按名删除。"""
+    queries, job = _setup(tmp_path)
+    _insert_manifest_rows(
+        queries,
+        job,
+        [("old", "renamed_out.json", f"jobs/wsmut/{job['id']}/renamed_out.json")],
+    )
+
+    with _mutation_conn(queries) as conn:
+        stats = upgrade_job_workflow_inherit(
+            conn,
+            job["id"],
+            workflow_revision_id="rev-12",
+            workflow_version=12,
+            workflow_definition_hash="hash-12",
+            workflow_definition_snapshot_json='{"key": "wfmut"}',
+            node_keys=["a", "b"],
+            frozen_config_json=None,
+        )
+
+    # 旧行为：不在暂存名集合内的行不动（裸构造的安全子集）。
+    assert stats["deleted_rows"] == []
+    assert queries.job_artifact_manifest_names_for_nodes(job["id"], {"old"}) == {
+        ("old", "renamed_out.json")
+    }

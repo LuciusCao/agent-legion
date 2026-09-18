@@ -1857,6 +1857,7 @@
     "workspace_libs/media.py": 76,
     "workspace_libs/node_artifacts.py": 44,
     "workspace_libs/node_sdk.py": 110,
-    "workspace_libs/url_guard.py": 33
+    "workspace_libs/url_guard.py": 33,
+    "server/app/services/job_workflow_upgrade_skill.py": 67
   }
 }

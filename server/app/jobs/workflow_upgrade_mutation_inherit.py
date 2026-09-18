@@ -12,6 +12,7 @@ from typing import Any
 from server.app.db.connection import DatabaseConnection
 from server.app.jobs.atomic_mutations import _cancel_queued_sql
 from server.app.jobs.workflow_upgrade_artifact_rows import (
+    delete_all_artifact_rows,
     delete_reset_artifact_rows,
     existing_node_states,
 )
@@ -30,6 +31,8 @@ def upgrade_job_workflow_inherit(
     frozen_config_json: str | None = None,
     inherit_nodes: frozenset[str] = frozenset(),
     staged_artifact_names: frozenset[str] | set[str] = frozenset(),
+    keep_input_names: frozenset[str] | set[str] = frozenset(),
+    full_manifest_cleanup: bool = False,
 ) -> dict[str, Any]:
     """Re-pin a job to a revision, resetting node states per upgrade mode.
 
@@ -48,7 +51,10 @@ def upgrade_job_workflow_inherit(
     ——它们的 ``job_artifacts`` 清单行在本事务内删除，避免重跑失败时
     API 仍展示/回填旧产物（review P1-3）；新 revision 中已消失的旧节点
     key（rename 前身份）的同名行一并删除（A4）。继承节点的行不在重置
-    集里，天然保留（零存储改动）。
+    集里，天然保留（零存储改动）。**无任何继承节点时**（显式 clean 或
+    inherit 保守退化：旧快照损坏 / NULL frozen 不可证明）全部清单行
+    清空（codex 五轮 P2-D）——退化 clean 的语义是旧产物全部作废，
+    按名字暂存的删除匹配不到旧 key / 改名输出的行。
 
     返回 ``{"kept": …, "rerun": …, "deleted_rows": […]}``（clean 模式恒为
     全 rerun；``deleted_rows`` 携带 ``storage_key`` 供提交后 best-effort
@@ -100,9 +106,19 @@ def upgrade_job_workflow_inherit(
     # A4：新 revision 已消失的旧节点 key（rename 前身份）的同名清单行一并
     # 清理（行匹配不到按新 key 构建的 reset 集，不删就是永久孤儿行）。
     renamed_from_nodes = frozenset(existing_rows) - frozenset(node_keys)
-    deleted_rows = delete_reset_artifact_rows(
-        conn, job_id, reset_nodes, staged_artifact_names, renamed_from_nodes
-    )
+    if kept_nodes or not full_manifest_cleanup:
+        # 继承分支按名删除（继承节点的行不在重置面，天然保留）；裸构造
+        # 服务（未装配暂存）同样走既有按名删除——full_manifest_cleanup
+        # 默认 False，直连 mutation 的调用面行为不变。
+        deleted_rows = delete_reset_artifact_rows(
+            conn, job_id, reset_nodes, staged_artifact_names, renamed_from_nodes
+        )
+    else:
+        # codex 五轮 P2-D：无任何继承节点（显式 clean 或 inherit 保守退化）
+        # = 全部产物作废——清空全部清单行（除新图声明的输入名：RMW/外部
+        # 输入是重置节点的启动输入，#114 语义），覆盖按名字暂存匹配不到
+        # 的旧 key / 改名输出 / 损坏快照侧的残留面。
+        deleted_rows = delete_all_artifact_rows(conn, job_id, frozenset(keep_input_names))
     conn.execute(
         """
         update jobs

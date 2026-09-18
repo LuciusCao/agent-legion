@@ -23,6 +23,7 @@ from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import Settings
+from server.app.skills.runtime import build_skill_manager
 
 
 class JobServices:
@@ -86,6 +87,9 @@ class JobServices:
             artifact_mutation=JobArtifactMutationService(settings.jobs_dir),
             object_store=object_store,
             custom_nodes_enabled=settings.executor_runtime.workflows.custom_nodes_enabled,
+            # codex 五轮 P1-A：skill 内容身份比较的解析器（latest=live
+            # HEAD / tag=DB 锁），与 AgentDispatchService 同源装配。
+            skill_manager=build_skill_manager(job_db, settings.skills_runs_dir),
         )
         self.execution = JobExecutionService(
             job_db,

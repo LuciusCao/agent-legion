@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from contextlib import closing
 
@@ -243,9 +244,11 @@ def test_latest_done_request_identities_node_runs_first(job_db) -> None:
 
     identities = job_db.latest_done_request_identities("impl-read-job", ["a", "b", "c"])
 
-    # a 走请求行 fallback（kind 保留）；b 取 node_runs 段（kind 空哨兵）；
-    # c 缺席（不可证明）。
-    assert identities == {"a": ("code", "hash-a-request"), "b": ("", "hash-b-run")}
+    # a 走请求行 fallback（kind 保留，skill 面空——manifest 无 skill 键）；
+    # b 取 node_runs 段（kind/skill_commit 空哨兵，skill_version 空串——
+    # 播种未带）；c 缺席（不可证明）。codex 五轮 P1-A 起记录面是 4 元组
+    # ``(kind, hash, skill_commit, skill_version)``。
+    assert identities == {"a": ("code", "hash-a-request", "", ""), "b": ("", "hash-b-run", "", "")}
 
 
 def test_latest_done_request_identities_empty_run_hash_falls_back(job_db) -> None:
@@ -292,4 +295,81 @@ def test_latest_done_request_identities_empty_run_hash_falls_back(job_db) -> Non
         )
 
     identities = job_db.latest_done_request_identities("impl-read-empty", ["a"])
-    assert identities == {"a": ("agent", "hash-a-request")}
+    assert identities == {"a": ("agent", "hash-a-request", "", "")}
+
+
+def test_latest_done_request_identities_projects_skill_face(job_db) -> None:
+    """codex 五轮 P1-A：skill 身份投影（段 2 manifest / 段 1 skill_version）。
+
+    请求行 manifest 携带完整 ``skill_commit``（mark_done trim 保留该键）
+    → 段 2 返回完整 sha 与 version；node_runs 段只有 v75 的
+    ``skill_version``（ref@commit12）→ 段 1 的 skill_commit 是空串哨兵、
+    version 尾段是 12 位前缀（服务层按前缀比较）。
+    """
+    workspace_id = "test-workspace"
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key)"
+            " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            (workspace_id,),
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values ('impl-read-skill', %s, 'question', 'q')",
+            (workspace_id,),
+        )
+        for key in ("a", "b"):
+            conn.execute(
+                "insert into job_nodes(job_id, node_key) values ('impl-read-skill', %s)", (key,)
+            )
+
+    # a：请求行形态（manifest 带 skill 四件，模拟真实 dispatch 的
+    # SkillCheckout.manifest_pins()）。
+    run = job_db.start_node_run("impl-read-skill", "a", ["pi"], "")
+    assert run is not None
+    job_db.finish_node_run(int(run["id"]), "completed", 0, "")
+    with closing(connect_database(job_db.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into agent_execution_requests(
+              execution_id, workspace_id, job_id, node_key, kind, agent_id,
+              agent_definition_hash, node_concurrency_limit, state,
+              queued_at, claimed_at, finished_at, node_run_id, manifest_json)
+            values (%s, %s, %s, %s, 'agent', 'cap_a', 'hash-a', 1, 'done',
+                    current_timestamp, current_timestamp, current_timestamp, %s, %s)
+            """,
+            (
+                str(uuid.uuid4()),
+                workspace_id,
+                "impl-read-skill",
+                "a",
+                int(run["id"]),
+                json.dumps(
+                    {
+                        "skill": "g/n",
+                        "skill_ref": "latest",
+                        "skill_version": "latest@0123456789ab",
+                        "skill_commit": "0" * 40,
+                    }
+                ),
+            ),
+        )
+    # b：node_runs 形态（v75 skill_version 列；无请求行）。
+    run_b = job_db.start_node_run(
+        "impl-read-skill",
+        "b",
+        ["pi"],
+        "",
+        skill_version="v1@abcdef123456",
+        skill="g/n",
+        agent_definition_hash="hash-b-run",
+    )
+    assert run_b is not None
+    job_db.finish_node_run(int(run_b["id"]), "completed", 0, "")
+
+    identities = job_db.latest_done_request_identities("impl-read-skill", ["a", "b"])
+
+    assert identities["a"] == ("agent", "hash-a", "0" * 40, "latest@0123456789ab")
+    # b：node_runs 段（impl hash 非空才进段 1；skill_commit 空哨兵 +
+    # skill_version 前缀，服务层从尾段恢复 12 位前缀比较）。
+    assert identities["b"] == ("", "hash-b-run", "", "v1@abcdef123456")

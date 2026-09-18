@@ -14,7 +14,9 @@ from server.app.services.job_workflow_upgrade_cleanup import (
     rollback_upgrade_staged_outputs,
 )
 from server.app.services.job_workflow_upgrade_gates import UpgradeContext, resolve_upgrade_context
+from server.app.services.job_workflow_upgrade_impl import implementation_excluded_nodes
 from server.app.services.job_workflow_upgrade_plan import plan_inherit_nodes
+from server.app.services.job_workflow_upgrade_removed_outputs import unprotected_input_names
 from server.app.services.job_workflow_upgrade_result import upgrade_result
 
 UPGRADE_MODES = ("clean", "inherit")
@@ -30,6 +32,7 @@ class JobWorkflowUpgradeService:
         artifact_mutation: JobArtifactMutationService | None = None,
         object_store: Any = None,
         custom_nodes_enabled: bool = True,
+        skill_manager: Any = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
@@ -45,6 +48,10 @@ class JobWorkflowUpgradeService:
         # ``workflows.custom_nodes_enabled`` 同源；关闭时 code 节点实现
         # 全部占位（保守重跑）。
         self.custom_nodes_enabled = custom_nodes_enabled
+        # codex 五轮 P1-A：skill 内容身份比较的解析器（latest=live HEAD /
+        # tag=DB 锁，与 dispatch 的 AgentDispatchService 同源装配）。
+        # None 时（裸构造）agent 节点按 skill 不可证明保守重跑。
+        self.skill_manager = skill_manager
 
     def upgrade(self, workspace_id: str, job_id: str, *, mode: str = "clean") -> dict[str, Any]:
         if mode not in UPGRADE_MODES:
@@ -65,6 +72,7 @@ class JobWorkflowUpgradeService:
                 context.definition,
                 context.frozen_config_json,
                 custom_nodes_enabled=self.custom_nodes_enabled,
+                skill_manager=self.skill_manager,
             )
         staged: StagedOutputs | None = None
         try:
@@ -85,6 +93,21 @@ class JobWorkflowUpgradeService:
                 # job_execution._run_to_with_start）同款模式。返回的实际继承
                 # 集按事务内节点状态收敛（P1-2 未完成候选并入重置面 + P1-3
                 # 共享纯输出名的候选一起重跑），mutation 消费它而非 diff 候选。
+                # codex 五轮 P2-C：实现身份在同一防线内重验——plan 与本事务
+                # 之间 Agent/node code/skill 锁被重新发布时，guard 只查
+                # lease/running 不验 published 身份，事务会消费旧继承集
+                # （旧实现产物冒充新实现）。重验与事务内收敛层
+                # （keep ∩ completed + shared_name 复算）同款风格：漂移节点
+                # 放弃继承（降级重跑），传播面（下游/同名）由收敛层接管。
+                if inherit_nodes:
+                    revalidated = implementation_excluded_nodes(
+                        self.job_db,
+                        context.job,
+                        context.definition,
+                        custom_nodes_enabled=self.custom_nodes_enabled,
+                        skill_manager=self.skill_manager,
+                    )
+                    inherit_nodes -= revalidated
                 inherit_nodes, staged = self.job_db.stage_upgrade_reset_outputs_in_transaction(
                     conn,
                     self.artifact_mutation,
@@ -105,6 +128,16 @@ class JobWorkflowUpgradeService:
                     staged_artifact_names=(
                         staged.artifact_names if staged is not None else frozenset()
                     ),
+                    # codex 五轮 P2-D：clean 语义分支（无任何继承节点）的
+                    # 全量清单清理输入——新图中「有声明输入面但无生产者」的
+                    # 名字（RMW 名 + 外部输入）受保护：删行会让
+                    # restore_missing_inputs 无清单可回、节点永久等输入
+                    # （#114 语义）；有生产者的输入名不受保护（生产者重跑
+                    # 重新产出，rename 场景的旧 key 行仍被清理）。裸构造
+                    # 服务（无 artifact_mutation）维持旧行为的安全子集
+                    # （不做全量清单清理）。
+                    keep_input_names=unprotected_input_names(context.definition),
+                    full_manifest_cleanup=self.artifact_mutation is not None,
                 )
         except JobMutationConflict as exc:
             rollback_upgrade_staged_outputs(staged)
