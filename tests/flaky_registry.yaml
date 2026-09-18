@@ -184,3 +184,18 @@ entries:
     consecutive local passes (1.0-1.7s each).
   observed: PR #696 backend-coverage lane (run 35185641060), 2026-09-17, rerun passed and the lane count was green.
   deadline: 2026-10-17
+- id: FLAKY-017
+  nodeid: tests/services/test_job_workflow_upgrade_inherit.py::test_inherit_upgrade_code_republish_with_inserted_node_reruns_all
+  owner: test-infra
+  reason: >-
+    Reran once in PR #702 CI (backend-postgres-a shard 1/3, run 35317067107,
+    2026-09-18) — the retry passed and the lane's only failure was the
+    rerun-governance step. The first attempt's setup phase held the slot for
+    30.03s (slowest setup in the whole lane); the test seeds five nodes with
+    execution records plus artifacts, and under the 2-core runner with three
+    postgres shards plus coverage the fixture setup can transiently exceed
+    the rerun threshold. Assertions themselves are stable: 3 consecutive
+    local passes (0.7-0.9s each). Same loaded-runner timing family as
+    FLAKY-009/010/011/016.
+  observed: PR #702 backend-postgres-a lane (run 35317067107), 2026-09-18, rerun passed and the lane count was green.
+  deadline: 2026-10-18
