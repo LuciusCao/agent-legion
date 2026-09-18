@@ -206,3 +206,52 @@ async fn round_trips_private_thinking_blocks_after_tool_use() {
         "tool_result"
     );
 }
+
+// codex round-2 P1 回归：异常流用不同 index 发大量 content_block_start、
+// 把字节塞进 id/name——kind/id/name 原本既不进 push_bounded 也不进
+// total_chars，2 MiB 单行上限 + 1025 块上限的每项检查全过，而全局 32 MiB
+// 上限看不到这些字段，堆可以涨到数 GiB（OOM 重现形态）。修复后 id/name
+// 计入总量（对齐 openai_compat 侧 id/name 过 push_bounded 且计入的语义），
+// 同款攻击流必须在 32 MiB 处被拒绝。
+#[tokio::test]
+async fn many_block_starts_with_large_ids_hit_the_global_cap() {
+    // 每块 id/name 各 ~700 KiB（序列化单行 ~1.4 MiB，低于 2 MiB 行上限）：
+    // 单字段 32 MiB 内、块数 1025 内；24 块后聚合过 32 MiB（旧的
+    // total_chars 只数 text/partial_json/signature/data——对 id/name
+    // 恒为 0，永不触发）。
+    let mut events = vec![json!({"type":"message_start","message":{"usage":{"input_tokens":1}}})];
+    for index in 0..40u64 {
+        events.push(json!({
+            "type":"content_block_start","index":index,
+            "content_block":{"type":"tool_use",
+                "id":"i".repeat(700 * 1024), "name":"n".repeat(700 * 1024)}
+        }));
+    }
+    events.push(json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}));
+    let server = MockServer::start(vec![MockResponse::sse(sse_body(&events))]).await;
+    let provider = AnthropicProvider::new(
+        "anthropic".into(),
+        server.url.clone(),
+        "sk-ant-test".into(),
+        "2023-06-01".into(),
+        Some(8192),
+        BTreeMap::from([("high".into(), 4096)]),
+    )
+    .unwrap();
+
+    let err = provider
+        .complete(&CompletionRequest {
+            model: "claude-sonnet",
+            system: "",
+            messages: &[Message::user("hi".into())],
+            tools: &[],
+            thinking: None,
+        })
+        .await
+        .expect_err("the id/name compound storm must be rejected");
+    assert!(err.is_retryable(), "over-cap aggregate is transient: {err}");
+    assert!(
+        err.to_string().contains("aggregate exceeds"),
+        "must be the global-cap rejection, got: {err}"
+    );
+}
