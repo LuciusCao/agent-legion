@@ -612,3 +612,48 @@ def test_scoped_token_cannot_reach_unguarded_job_group_posts(client, job_db) -> 
     )
     assert preview.status_code == 403, preview.text
     assert "cannot take effect" in preview.json()["detail"]
+
+
+def test_skill_catalog_no_workspace_existence_oracle(client, tmp_path, monkeypatch) -> None:
+    """red-team R9 P3-1 on #745: a member probing candidate first segments
+    through the catalog must not distinguish "existing workspace id" (404)
+    from "no such workspace" (200-with-available=false) — a missing group
+    directory now 404s identically."""
+    base = tmp_path / "home" / ".agents" / "skills"
+    _make_skill_repo(base / "ws_victim/private_cap")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    client.post("/api/workspaces", json={"id": "ws_victim", "name": "Victim"}, headers=CSRF)
+    ws_probe = client.post(
+        "/api/workspaces", json={"id": "ws_probe", "name": "Probe"}, headers=CSRF
+    ).json()["workspace"]["id"]
+    member_id = _create_member(client, "oracle-probe", "pw-oracle")
+    client.app.state.job_db.upsert_workspace_member(ws_probe, member_id, "viewer")
+    probe = _member_client(client, "oracle-probe", "pw-oracle")
+
+    existing_ws = probe.get(
+        "/api/agent-catalog/skills/ws_victim/private_cap", params={"workspace_id": ws_probe}
+    )
+    missing_group = probe.get(
+        "/api/agent-catalog/skills/no_such_group/whatever", params={"workspace_id": ws_probe}
+    )
+    assert existing_ws.status_code == 404
+    assert missing_group.status_code == 404
+    assert existing_ws.json()["detail"] == missing_group.json()["detail"]
+    # A real group directory through the member's own scope still reads.
+    _make_skill_repo(base / "real-group/shared_cap")
+    assert (
+        probe.get(
+            "/api/agent-catalog/skills/real-group/shared_cap", params={"workspace_id": ws_probe}
+        ).status_code
+        == 200
+    )
+
+
+def test_sibling_endpoints_reject_empty_workspace_id(client, job_db) -> None:
+    """#745 follow-up (R9 P3-2): the sibling query-scoped endpoints share the
+    min_length=1 contract — an empty workspace_id is a 422, not a silently
+    skipped membership check."""
+    _create_member(client, "sibling-probe", "pw-sibling")
+    probe = _member_client(client, "sibling-probe", "pw-sibling")
+    assert probe.get("/api/agent-catalog?workspace_id=").status_code == 422
+    assert probe.get("/api/skills/directories?workspace_id=").status_code == 422

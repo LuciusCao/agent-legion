@@ -114,7 +114,15 @@ def create_skill_catalog_router(
         # endpoint); min_length=1 keeps an empty value from skipping that
         # check (red-team R8: empty workspace_id fail-opened the guard).
         require_skill_scope_binding(workspace_id, user)
-        require_skill_key_in_workspace(request.app.state.job_db, skill_key, workspace_id)
+        job_db = request.app.state.job_db
+        require_skill_key_in_workspace(job_db, skill_key, workspace_id)
+        # A group key whose directory does not exist 404s like a foreign
+        # workspace-owned key (red-team R9 P3-1 on #745): the previous
+        # 200-with-available=false let any member probe whether a candidate
+        # first segment is an existing workspace id (404) or not (200) —
+        # an existence oracle on the workspace namespace.
+        if resolve_skill_key_owner(job_db, skill_key) is None and not _skills().has_dir(skill_key):
+            raise _skill_not_found()
         try:
             # ref (a git tag of the skill repo) previews that tag's content;
             # an unknown tag is a 404 (see SkillDetailResponse).
