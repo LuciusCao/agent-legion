@@ -9,7 +9,7 @@
   上游维度完全交给闭包（"全部上游都不在重跑闭包里"直接定义，取代
   旧实现把祖先变化压进 per-node 哈希的链式压缩）；
 - 闭包通道 A（边）：种子节点的全部新图下游（``downstream_nodes``，
-  条件边含在 children map）；通道 B（名字）：与重置面共享纯输出名的
+  条件边含在 children map）；通道 B（名字）：与重置面共享输出名（含 RMW）的
   候选一起重跑（``shared_name_rerun_closure`` 的 fixpoint）。
 
 任何重跑原因（定义 diff、配置漂移、实现身份、可达性、排除规则、名字
@@ -101,7 +101,7 @@ def rerun_closure(definition: WorkflowDefinition, seeds: set[str]) -> set[str]:
 
     通道 A：每个种子的全部新图下游（``downstream_nodes`` 全边 children
     map，条件边含在内；自带 seen 防环——新图经 loader _validate_acyclic，
-    环防御是兜底）。通道 B：与重置面共享纯输出名的候选一起重跑
+    环防御是兜底）。通道 B：与重置面共享输出名（含 RMW）的候选一起重跑
     （``shared_name_rerun_closure`` 的 fixpoint，每次排除扩大重置面，
     新排除节点的下游也并入）。返回值限于新图可执行节点。
 

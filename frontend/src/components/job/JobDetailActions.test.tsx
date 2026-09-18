@@ -119,6 +119,35 @@ describe('JobDetailActions', () => {
     expect(onUpgradeWorkflow).toHaveBeenCalledWith('clean')
   })
 
+  it('keeps the upgrade dialog open when the request fails', async () => {
+    const onUpgradeWorkflow = vi
+      .fn()
+      .mockRejectedValue(new Error('upgrade failed'))
+    renderActions({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'completed',
+          is_workflow_outdated: true,
+          workflow_version: 1,
+          current_workflow_revision_version: 2,
+        }),
+      ],
+      onUpgradeWorkflow,
+    })
+
+    await act(async () => {
+      screen.getByLabelText('升级 workflow').click()
+    })
+    await act(async () => {
+      screen.getByText('确认升级').click()
+    })
+
+    expect(onUpgradeWorkflow).toHaveBeenCalledWith('clean')
+    expect(screen.getByText('升级 workflow')).toBeInTheDocument()
+    expect(screen.getByText('确认升级')).not.toHaveAttribute('disabled')
+  })
+
   it('disables rerun and package for a running job', () => {
     renderActions({ jobs: [makeJob({ id: 'j1', status: 'running' })] })
     expect(screen.getByLabelText('重跑')).toHaveAttribute('disabled')

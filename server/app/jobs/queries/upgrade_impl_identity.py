@@ -1,6 +1,7 @@
 """升级实现身份判定读取（issue #645 codex 四轮 P1-1，数据层 SQL）。
 
-实现身份有两条同源记录，读取按 **node_runs 优先** 合并（#645 v85）：
+实现身份有两条同源记录，读取先固定每个节点的**最新 completed run**，
+再在同一次 run 内按 **node_runs 优先** 合并（#645 v85）：
 
 - ``node_runs.agent_definition_hash``（schema v85）：claim 时刻写入的
   身份镜像（agent 行 = Agent 定义哈希、code 行 = code 文本 sha256）。
@@ -8,9 +9,10 @@
   retention 窗口影响；本地 code 池执行（从不写请求行）的身份记录
   也落在这里。
 - ``agent_execution_requests.agent_definition_hash``：dispatch 时刻的
-  身份，请求行本身有独立消费者（claim 路由解析 join），对**段 1 未
-  覆盖**的 node_key 作为 fallback——历史 Worker/Agent 作业（v85 前
-  执行、请求行仍在 retention 窗内）由此保持零退化。
+  身份，请求行本身有独立消费者（claim 路由解析 join），只对**同一个
+  最新 run** 作为 fallback——历史 Worker/Agent 作业（v85 前执行、请求
+  行仍在 retention 窗内）由此保持零退化。绝不越过最新的不可证明 run
+  去借用更老执行的身份，否则旧身份会冒充当前产物的执行证据。
 
 skill 内容身份（codex 五轮 P1-A）与实现身份同读：段 1 取 run 行的
 ``skill_version``（v75 列，``ref@commit12``——dispatch 的
@@ -42,73 +44,55 @@ class UpgradeImplIdentityQueriesMixin(ConnectionQueriesMixin):
     ) -> dict[str, tuple[str, str, str, str]]:
         """node_key → 最新完成执行的 ``(kind, hash, skill_commit, skill_version)``。
 
-        段 1（node_runs 直查，v85+ 新执行）：每 node_key 取最新一条
-        completed run 的身份列（``agent_definition_hash <> ''``——空串 =
-        不可证明，不进段 1）与 ``skill_version``。段 2（fallback）：现行
-        请求行 SQL 扩展了 manifest 投影（``skill_commit`` / ``skill_ref``
-        / ``skill``，jsonb 提取；trim 保留这些键），只对段 1 未覆盖的
-        node_key 执行——历史 Worker/Agent 作业在 retention 窗内仍有
-        done 请求行。两段逐 node_key 二选一合并，node_runs 优先，不混行。
-        无任何记录 → 该节点不在返回值里，调用方按「实现身份不可证明」
-        处理。
+        每个 node_key 先取最新一条 completed ``node_runs``。该 run 的身份
+        列非空时优先使用；为空时仅回落到 ``node_run_id`` 指向这条 run 的
+        done 请求。请求 manifest 同时投影 ``skill_commit`` /
+        ``skill_version``（trim 保留这些键）；即使 run 身份非空，也可从
+        同一请求取得完整 skill commit，比 run 的 12 位 version 后缀更强。
+        无 completed run → 该节点不在返回值里；最新 run 的两侧身份均空
+        → 返回空 hash，由调用方按「不可证明」处理。
         """
         keys = sorted({str(key) for key in node_keys})
         if not keys:
             return {}
         with self._connect_read() as conn:
-            # 段 1 哨兵：kind/skill_commit 空串（run 行没有请求行属性，
-            # 也没有完整 skill sha——只有 12 位前缀的 skill_version，服务层
-            # 从尾段恢复前缀比较，P1-A）；空串不等于任何真实值，不撞口径。
-            identities: dict[str, tuple[str, str, str, str]] = {
-                str(row["node_key"]): (
-                    "",
-                    str(row["agent_definition_hash"]),
-                    "",
-                    str(row["skill_version"] or ""),
-                )
-                for row in conn.execute(
-                    """
-                    select distinct on (node_key) node_key, agent_definition_hash, skill_version
-                    from node_runs
-                    where job_id=%s
-                      and node_key=any(%s)
-                      and status='completed'
-                      and agent_definition_hash<>''
-                    order by node_key, id desc
-                    """,
-                    (job_id, keys),
-                ).fetchall()
-            }
-            fallback_keys = [key for key in keys if key not in identities]
-            if not fallback_keys:
-                return identities
-            request_rows = conn.execute(
+            rows = conn.execute(
                 """
-                select distinct on (r.node_key)
-                       r.node_key, r.kind, r.agent_definition_hash,
-                       r.manifest_json::jsonb ->> 'skill_commit' as skill_commit,
-                       r.manifest_json::jsonb ->> 'skill_version' as skill_version
-                from agent_execution_requests r
-                join node_runs n on n.id = r.node_run_id
-                where r.job_id = %s
-                  and r.node_key = any(%s)
-                  and r.state = 'done'
-                  and n.status = 'completed'
-                order by r.node_key, n.id desc
+                with latest_runs as (
+                  select distinct on (node_key)
+                         id, node_key, agent_definition_hash, skill_version
+                  from node_runs
+                  where job_id=%s
+                    and node_key=any(%s)
+                    and status='completed'
+                  order by node_key, id desc
+                )
+                select n.node_key,
+                       coalesce(r.kind, '') as kind,
+                       coalesce(nullif(n.agent_definition_hash, ''),
+                                r.agent_definition_hash, '') as implementation_hash,
+                       coalesce(r.manifest_json::jsonb ->> 'skill_commit', '')
+                         as skill_commit,
+                       coalesce(nullif(n.skill_version, ''),
+                                r.manifest_json::jsonb ->> 'skill_version', '')
+                         as skill_version
+                from latest_runs n
+                left join lateral (
+                  select kind, agent_definition_hash, manifest_json
+                  from agent_execution_requests
+                  where node_run_id=n.id and state='done'
+                  order by finished_at desc nulls last, execution_id desc
+                  limit 1
+                ) r on true
                 """,
-                (job_id, fallback_keys),
+                (job_id, keys),
             ).fetchall()
-        for row in request_rows:
-            key = str(row["node_key"])
-            # 段 1 未覆盖才落请求行——两段不混：请求行是 enqueue 时刻身份、
-            # 可能已被 retention 清扫，node_runs 是 claim 时刻身份，混用会
-            # 拿旧值覆盖新判定。
-            if key in identities:
-                continue
-            identities[key] = (
-                str(row["kind"]),
-                str(row["agent_definition_hash"] or ""),
+        return {
+            str(row["node_key"]): (
+                str(row["kind"] or ""),
+                str(row["implementation_hash"] or ""),
                 str(row["skill_commit"] or ""),
                 str(row["skill_version"] or ""),
             )
-        return identities
+            for row in rows
+        }

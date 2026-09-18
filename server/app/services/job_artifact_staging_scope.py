@@ -42,19 +42,21 @@ def staging_output_names(
     outside_outputs: set[str] = set()
     for key, node in definition.nodes.items():
         if key not in affected_keys:
-            outside_outputs.update(set(node.outputs) - set(node.inputs))
-    outputs: set[str] = set()
-    for key in affected_keys:
-        node = definition.nodes[key]
-        outputs.update(set(node.outputs) - set(node.inputs))
-    return outputs - outside_outputs
+            # RMW names are still outputs owned by the outside node.  An
+            # affected pure producer with the same name must not strand it.
+            outside_outputs.update(node.outputs)
+    affected_nodes = [definition.nodes[key] for key in affected_keys]
+    outputs = {name for node in affected_nodes for name in set(node.outputs) - set(node.inputs)}
+    affected_rmw = {
+        name for node in affected_nodes for name in set(node.outputs) & set(node.inputs)
+    }
+    # RMW is name-scoped here: any affected node that needs the current value
+    # as startup input protects the shared path from staging.
+    return outputs - outside_outputs - affected_rmw
 
 
-def _pure_outputs(definition: WorkflowDefinition, key: str) -> set[str]:
-    node = definition.nodes.get(key)
-    if node is None:
-        return set()
-    return set(node.outputs) - set(node.inputs)
+def _producer_outputs(definition: WorkflowDefinition, key: str) -> set[str]:
+    return set(definition.nodes[key].outputs)
 
 
 def shared_name_rerun_closure(
@@ -62,7 +64,7 @@ def shared_name_rerun_closure(
     keep: frozenset[str],
     reset_face: set[str],
 ) -> set[str]:
-    """Keep-set nodes that must rerun because they share a pure-output name
+    """Keep-set nodes that must rerun because they share an output name
     with the reset face, plus their downstream closure (codex P1-3).
 
     Same-name producers cannot be split across the inherit/reset boundary:
@@ -79,10 +81,10 @@ def shared_name_rerun_closure(
         face = reset_face | excluded
         face_names: set[str] = set()
         for key in face:
-            face_names.update(_pure_outputs(definition, key))
+            face_names.update(_producer_outputs(definition, key))
         if not face_names:
             return excluded
-        newly = {key for key in keep - excluded if _pure_outputs(definition, key) & face_names}
+        newly = {key for key in keep - excluded if _producer_outputs(definition, key) & face_names}
         if not newly:
             return excluded
         excluded |= newly

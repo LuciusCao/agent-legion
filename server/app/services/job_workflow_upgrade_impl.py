@@ -68,8 +68,9 @@ def _latest_execution_identities(
     走 ``JobQueries.latest_done_request_identities``
     （``jobs/queries/upgrade_impl_identity``）：node_runs 身份列优先
     （v85+ 执行 / 本地 code 池），请求行 fallback（历史 Worker/Agent
-    作业）；无任何记录（本地池 v85 前执行 / retention 已清扫）→ 该节点
-    不在返回值里（调用方按不可证明处理）。
+    作业）；无 completed run 时该节点不在返回值里，最新 run 的身份与
+    同 run 请求证据都为空时返回空 hash（两种形态均由调用方按不可证明
+    处理，且绝不借用更老 run 的身份）。
     """
     return job_db.latest_done_request_identities(job_id, node_keys)
 

@@ -18,7 +18,7 @@ issue #645）在 lease guard 事务内调用，返回 ``(暂存件, 实际继承
 - P1-2：未变候选若处于 failed/pending 且遗留部分输出，diff 集不会把它
   并进暂存，但 mutation 会把它重置 pending——旧文件与清单行残留会让
   executor 的输出存在性检查把上次失败/中断的半成品当作本次有效输出。
-- P1-3：保留集不得与实际重置面共享纯输出名（对象键 ``jobs/<ws>/<job>/
+- P1-3：保留集不得与实际重置面共享输出名（含 RMW；对象键 ``jobs/<ws>/<job>/
   <name>`` 不含 node 身份，跨闭包重名只能一起重跑）——plan 阶段已按
   diff 重置面做过确定性排除，这里覆盖「未完成候选并入重置面」的组合
   场景与 plan/事务间的状态漂移。
@@ -35,11 +35,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.job_artifact_mutation import JobArtifactMutationService, StagedOutputs
-from server.app.services.job_artifact_staging_scope import shared_name_rerun_closure
 from server.app.services.job_staged_cleanup import (
     commit_staged_outputs,
     delete_rerun_artifact_objects,
 )
+from server.app.services.job_workflow_upgrade_propagation import rerun_closure
 from server.app.services.job_workflow_upgrade_removed_outputs import removed_artifact_face
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ def stage_upgrade_reset_outputs(
 
     只在 ``lease_guarded_mutation`` 的事务内调用（``existing_node_statuses``
     是调用门面在同一事务内读到的 ``job_nodes`` 状态，BOUNDARY-DATA-001）：
-    实际继承集 = 候选 ∩ 当前 completed，再剔除与实际重置面共享纯输出名
+    实际继承集 = 候选 ∩ 当前 completed，再剔除与实际重置面共享输出名（含 RMW）
     的候选（codex P1-3，含下游闭包，见模块 docstring）；调用方应把返回
     的继承集传给 mutation，而非事务外的 diff 候选集。服务未装配
     ``artifact_mutation``（裸构造）时跳过本地暂存——清单行清理仍生效，
@@ -68,11 +68,11 @@ def stage_upgrade_reset_outputs(
     （#114）。
     """
     keep_keys = {key for key in inherit_nodes if existing_node_statuses.get(key) == "completed"}
-    keep_keys -= shared_name_rerun_closure(
-        definition,
-        frozenset(keep_keys),
-        set(definition.executable_nodes) - keep_keys,
-    )
+    # 事务内新出现的 reset 节点（例如计划时是候选、应用时已 failed）与
+    # plan/revalidation 的种子同权：必须重新走统一的下游 + 同名生产者闭包。
+    # 只做 shared-name 收敛会错误保留该节点的 completed 下游。
+    reset_face = set(definition.executable_nodes) - keep_keys
+    keep_keys -= rerun_closure(definition, reset_face)
     reset_keys = [key for key in definition.executable_nodes if key not in keep_keys]
     if artifact_mutation is None:
         return frozenset(keep_keys), None

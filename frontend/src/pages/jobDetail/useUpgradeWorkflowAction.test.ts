@@ -61,8 +61,16 @@ describe('useUpgradeWorkflowAction', () => {
     mockUpgrade.mockRejectedValue(new Error('Job is already current'))
     const { result, refreshDetail, setActionLoading, setError } = setup('job-1')
 
-    await act(() => result.current())
+    let caught: unknown
+    await act(async () => {
+      try {
+        await result.current()
+      } catch (err) {
+        caught = err
+      }
+    })
 
+    expect(caught).toEqual(new Error('Job is already current'))
     expect(setError).toHaveBeenCalledWith('Job is already current')
     expect(refreshDetail).not.toHaveBeenCalled()
     expect(setActionLoading.mock.calls).toEqual([[true], [false]])
@@ -72,8 +80,16 @@ describe('useUpgradeWorkflowAction', () => {
     mockUpgrade.mockRejectedValue('plain failure')
     const { result, setError } = setup('job-1')
 
-    await act(() => result.current())
+    let caught: unknown
+    await act(async () => {
+      try {
+        await result.current()
+      } catch (err) {
+        caught = err
+      }
+    })
 
+    expect(caught).toBe('plain failure')
     expect(setError).toHaveBeenCalledWith('plain failure')
   })
 

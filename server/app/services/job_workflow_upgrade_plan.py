@@ -67,7 +67,8 @@ def plan_inherit_nodes(
     产物将基于已被丢弃的上游结果——闭包传播天然覆盖下游。S6 只对未被
     S1–S5 命中的候选探测（闭包内节点必然重跑，无需探测）。
 
-    跨闭包同名输出（codex P1-3）：继承候选与重置面声明同名纯输出时，
+    跨闭包同名输出（codex P1-3）：继承候选与重置面声明同名输出（含
+    RMW）时，
     对象键 ``jobs/<ws>/<job>/<name>`` 不含 node 身份——重置节点重跑后
     上传按名字覆盖权威对象，继承节点的清单行从此指向别人的内容；暂存
     侧的同名排除（A3）在重置节点本次没真正写该文件时失效（
@@ -123,7 +124,7 @@ def plan_inherit_nodes(
     unreachable = unreachable_inherit_nodes(job_db, job, _jobs_dir(job_db), candidates)
     if unreachable:
         # S6 可达性种子并入再闭包：不可达候选的下游沿闭包传播重跑，
-        # 共享其纯输出名的候选经通道 B 一并移出继承集。
+        # 共享其输出名（含 RMW）的候选经通道 B 一并移出继承集。
         reset_nodes = rerun_closure(new_definition, seeds | set(unreachable))
         candidates = frozenset(new_definition.executable_nodes) - reset_nodes
     return candidates

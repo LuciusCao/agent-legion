@@ -37,8 +37,9 @@ class UpgradeStagingQueriesMixin(ConnectionQueriesMixin):
         """upgrade 事务内的重置闭包产物暂存（#645 codex P1-1/P1-2/P1-3）。
 
         返回 ``(实际继承集, 暂存件)``：继承集 = 候选 ∩ 事务内 completed，
-        再剔除与实际重置面共享纯输出名的候选（对象键不含 node 身份，
-        跨闭包重名只能一起重跑）。详见 cleanup 模块 docstring。
+        再剔除与实际重置面共享输出名（含 RMW）的候选及其下游（对象键
+        不含 node 身份，跨闭包重名只能一起重跑）。详见 cleanup 模块
+        docstring。
         """
         from server.app.services.job_workflow_upgrade_cleanup import (
             stage_upgrade_reset_outputs,

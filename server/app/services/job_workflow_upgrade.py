@@ -16,6 +16,7 @@ from server.app.services.job_workflow_upgrade_cleanup import (
 from server.app.services.job_workflow_upgrade_gates import UpgradeContext, resolve_upgrade_context
 from server.app.services.job_workflow_upgrade_impl import implementation_excluded_nodes
 from server.app.services.job_workflow_upgrade_plan import plan_inherit_nodes
+from server.app.services.job_workflow_upgrade_propagation import rerun_closure
 from server.app.services.job_workflow_upgrade_removed_outputs import unprotected_input_names
 from server.app.services.job_workflow_upgrade_result import upgrade_result
 
@@ -92,7 +93,7 @@ class JobWorkflowUpgradeService:
                 # rerun（job_rerun.single.commit_rerun）与 run_to（
                 # job_execution._run_to_with_start）同款模式。返回的实际继承
                 # 集按事务内节点状态收敛（P1-2 未完成候选并入重置面 + P1-3
-                # 共享纯输出名的候选一起重跑），mutation 消费它而非 diff 候选。
+                # 共享输出名（含 RMW）的候选一起重跑），mutation 消费它而非 diff 候选。
                 # codex 五轮 P2-C：实现身份在同一防线内重验——plan 与本事务
                 # 之间 Agent/node code/skill 锁被重新发布时，guard 只查
                 # lease/running 不验 published 身份，事务会消费旧继承集
@@ -107,7 +108,13 @@ class JobWorkflowUpgradeService:
                         custom_nodes_enabled=self.custom_nodes_enabled,
                         skill_manager=self.skill_manager,
                     )
-                    inherit_nodes -= revalidated
+                    if revalidated:
+                        # 重验得到的是新的变更种子，不只是要从 keep 集剔除
+                        # 的孤立节点：实现漂移会使全部下游结果失效，同名
+                        # 生产者也必须留在重置边界的同一侧。
+                        inherit_nodes -= frozenset(
+                            rerun_closure(context.definition, set(revalidated))
+                        )
                 inherit_nodes, staged = self.job_db.stage_upgrade_reset_outputs_in_transaction(
                     conn,
                     self.artifact_mutation,

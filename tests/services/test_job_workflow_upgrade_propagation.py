@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.services.job_artifact_staging_scope import staging_output_names
 from server.app.services.job_workflow_upgrade_propagation import (
     collect_change_seeds,
     rerun_closure,
@@ -251,6 +252,56 @@ def test_closure_shared_name_producer_reruns_together() -> None:
 
     # b 是种子；c 与 b 共享 out.json → c 进闭包；d 是 c 的下游 → 边通道级联。
     assert closure == {"b", "c", "d"}
+
+
+def test_closure_shared_name_includes_rmw_producer() -> None:
+    """RMW outputs still own the shared object key and cannot remain inherited."""
+    definition = _definition(
+        {
+            "pure": _node("pure", outputs=["shared.json"]),
+            "rmw": _node(
+                "rmw",
+                inputs=["shared.json"],
+                outputs=["shared.json"],
+            ),
+            "child": _node("child", after=["rmw"]),
+        },
+        [WorkflowEdge(source="rmw", target="child")],
+    )
+
+    assert rerun_closure(definition, {"pure"}) == {"pure", "rmw", "child"}
+
+
+def test_staging_shared_pure_output_preserves_affected_rmw_input() -> None:
+    """A shared pure producer must not move a reset RMW node's startup input."""
+    definition = _definition(
+        {
+            "pure": _node("pure", outputs=["shared.json"]),
+            "rmw": _node(
+                "rmw",
+                inputs=["shared.json"],
+                outputs=["shared.json"],
+            ),
+        }
+    )
+
+    assert staging_output_names(definition, {"pure", "rmw"}) == set()
+
+
+def test_staging_does_not_strand_outside_rmw_producer() -> None:
+    """An inherited RMW producer protects its shared path from staging."""
+    definition = _definition(
+        {
+            "pure": _node("pure", outputs=["shared.json"]),
+            "rmw": _node(
+                "rmw",
+                inputs=["shared.json"],
+                outputs=["shared.json"],
+            ),
+        }
+    )
+
+    assert staging_output_names(definition, {"pure"}) == set()
 
 
 def test_closure_name_and_edge_dual_channel_cascade() -> None:

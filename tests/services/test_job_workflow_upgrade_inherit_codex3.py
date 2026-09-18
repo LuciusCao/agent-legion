@@ -209,15 +209,15 @@ def test_inherit_upgrade_stages_leftover_outputs_of_uncompleted_candidates(
     result = service.upgrade(workspace["id"], job_id, mode="inherit")
 
     statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
-    # b completed 候选继承（文件与清单行原样）；a 未完成 → 重置 pending，
-    # 遗留半成品进暂存面（本地删除 + 清单行清理），不会骗过 executor
-    # 的输出存在性检查。
-    assert result["kept_node_count"] == 1
-    assert statuses == {"a": "pending", "b": "completed", "c": "pending"}
+    # a 未完成 → 作为事务内新 reset 种子；统一闭包必须把其 completed
+    # 下游 b 一并重置，否则 b 会继续保留基于旧 a 结果的产物。a 的半成品
+    # 与 b 的旧下游产物都进暂存面，不会骗过 executor 的存在性检查。
+    assert result["kept_node_count"] == 0
+    assert statuses == {"a": "pending", "b": "pending", "c": "pending"}
     assert not (job_dir / "a_out.json").exists()
-    assert (job_dir / "b_out.json").read_text() == "old-b"
+    assert not (job_dir / "b_out.json").exists()
     names = queries.job_artifact_manifest_names_for_nodes(job_id, {"a", "b"})
-    assert names == {("b", "b_out.json")}
+    assert names == set()
     assert not (job_dir / ".staged").exists()
 
 

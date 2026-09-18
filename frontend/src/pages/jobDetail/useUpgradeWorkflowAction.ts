@@ -19,6 +19,7 @@ export function useUpgradeWorkflowAction(
         await refreshDetail()
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
+        throw err
       } finally {
         setActionLoading(false)
       }

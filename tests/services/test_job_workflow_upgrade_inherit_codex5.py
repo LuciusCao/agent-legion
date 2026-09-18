@@ -465,25 +465,27 @@ def test_guard_revalidates_agent_identity_republished_after_plan(tmp_path: Path)
     replace_agent_catalog(workspace["id"], {"agent-b": v1})
     job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
     a_hash = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {}\n")
-    for key in ("a", "b"):
+    c_hash = _publish_node_code(queries, workspace["id"], "c", "def run(ctx):\n    return {}\n")
+    for key in ("a", "b", "c"):
         queries.update_job_node(job_id, key, status="pending")
     _seed_done_execution(queries, workspace["id"], job_id, "a", kind="code", impl_hash=a_hash)
     _seed_done_execution(
         queries, workspace["id"], job_id, "b", kind="agent", impl_hash=v1.definition_hash()
     )
+    _seed_done_execution(queries, workspace["id"], job_id, "c", kind="code", impl_hash=c_hash)
     queries.update_job_status(job_id, "completed")
     job_dir = _seed_reachable_outputs(queries, job_id, ["a_out.json", "b_out.json"])
     service = _make_service(tmp_path, queries)
 
     # 竞争窗口：plan_inherit_nodes 内（返回前）重发布 Agent 定义——
-    # plan 消费 V1 catalog 得到继承集 {a, b}，guard 事务看到的已是 V2。
+    # plan 消费 V1 catalog 得到继承集 {a, b, c}，guard 事务看到的已是 V2。
     from server.app.services import job_workflow_upgrade as upgrade_module
 
     real_plan = upgrade_module.plan_inherit_nodes
 
     def plan_then_republish(job_db, job, new_definition, frozen_json, **kwargs):
         inherit = real_plan(job_db, job, new_definition, frozen_json, **kwargs)
-        assert "b" in inherit  # plan 时 V1 身份匹配 → b 进继承集
+        assert {"b", "c"} <= inherit  # plan 时 V1 与下游身份都匹配
         v2 = AgentDefinition(capability="cap_b", runtime="pi", skill="g/n2")
         replace_agent_catalog(workspace["id"], {"agent-b": v2})
         return inherit
@@ -529,6 +531,175 @@ def test_guard_revalidation_no_drift_keeps_planned_inherit(tmp_path: Path) -> No
     # 重验与 plan 同源同时刻（无漂移）→ a/b 照常继承；c 无记录保守重跑。
     assert result["kept_node_count"] == 2
     assert statuses == {"a": "completed", "b": "completed", "c": "pending"}
+
+
+# ---------------------------------------------------------------------------
+# codex 六轮 P1：RMW 输出纳入同名生产者闭包
+# ---------------------------------------------------------------------------
+
+
+def test_inherit_rmw_output_same_name_as_reset_pure_output_reruns_together(
+    tmp_path: Path,
+) -> None:
+    """codex 六轮 P1：被继承节点声明 RMW（同名为 input+output），重置节点
+    把该名声明为普通 output。
+
+    旧缺陷：``shared_name_rerun_closure`` 的名字面用 ``outputs - inputs``
+    （纯输出）——RMW 名被完全忽略，RMW 候选不会被拉进重跑面。随后暂存
+    移走共享名的本地文件、mutation 只删重置节点清单行、提交后按共享对象
+    键删除——被保留的 completed RMW 节点有清单行却无可达产物（本地文件
+    在 .staged、权威对象已被 best-effort 清理）。修复：跨继承/重置边界
+    的冲突检测覆盖 RMW output（生产者面 = 全部 outputs），RMW 节点与其
+    下游一起重跑。
+
+    图：a → rmw(b)，b 声明 inputs=[x.json], outputs=[x.json]；c 重置后
+    与 b 共享 x.json（纯输出）。b 是唯一可继承候选（新旧定义与实现身份
+    全部可证明）；c 变更进重置面。
+
+    与 P1-B（本文件 ``test_upgrade_to_rmw_input_keeps_old_artifact_as_
+    startup_input``）的边界：那是「清理面不删 RMW 节点自己的启动输入」
+    （removed_artifact_face 排除 _rmw_names），这是「名字闭包把冲突对方
+    拉进重跑」——两个方向互补，不得互相打架。
+    """
+    old_definition = WorkflowDefinition(
+        key="wfchain",
+        label="Wf Chain",
+        intake=WorkflowIntake(),
+        nodes={
+            "a": WorkflowNode(key="a", label="A", capability="cap_a"),
+            "b": WorkflowNode(
+                key="b",
+                label="B",
+                capability="cap_b",
+                after=["a"],
+                inputs=["x.json"],
+                outputs=["x.json"],
+                config_schema={},
+            ),
+            "c": WorkflowNode(key="c", label="C", capability="cap_c", after=["b"]),
+        },
+    )
+    queries, workspace, revisions, original = _setup(tmp_path, old_definition)
+    # 新 revision：c 变更（capability 变化进重置面）并把 x.json 声明为
+    # 普通 output——与被继承的 RMW 节点 b 共享对象键。
+    new_nodes = dict(old_definition.nodes)
+    new_nodes["c"] = dataclasses.replace(
+        old_definition.nodes["c"], capability="cap_c_new", outputs=["x.json"]
+    )
+    current = revisions.publish_workspace_revision(
+        workspace["id"], dataclasses.replace(old_definition, nodes=new_nodes)
+    )
+    job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
+    # a/b 的实现身份可证明（publish + 记录一致）→ a/b 都是继承候选；
+    # c 变更（S1 种子）进重置面并声明 x.json 为普通 output。
+    from tests.helpers.job_workflow_upgrade import (
+        seed_local_pool_execution as _seed_local_pool_execution,
+    )
+
+    a_hash = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {}\n")
+    b_hash = _publish_node_code(queries, workspace["id"], "b", "def run(ctx):\n    return {}\n")
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job_id, key, status="pending")
+    _seed_local_pool_execution(queries, job_id, "a", a_hash)
+    _seed_local_pool_execution(queries, job_id, "b", b_hash)
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job_id, key, status="completed")
+    queries.update_job_status(job_id, "completed")
+    job_dir = _seed_reachable_outputs(queries, job_id, ["x.json"])
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'b', 'x.json', %s, 1, 'hash')
+            """,
+            (job_id, f"jobs/wschain/{job_id}/x.json"),
+        )
+    service = _make_service(tmp_path, queries)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    # 端到端断言：RMW 节点 b 必须被拉进重跑（x.json 与重置节点 c 冲突），
+    # 其下游语义随之作废——b/c pending，只有无冲突的 a 保留。
+    assert result["status"] == "succeeded"
+    assert result["kept_node_count"] == 1
+    assert statuses == {"a": "completed", "b": "pending", "c": "pending"}
+    # b 虽进入重跑面，x.json 仍是它的 RMW 启动输入，必须保留文件与清单
+    # 行；否则节点会永久等待一个没有上游重新生产的输入（#114/P1-B）。
+    assert (job_dir / "x.json").read_text() == "old-x.json"
+    names = queries.job_artifact_manifest_names_for_nodes(job_id, {"a", "b", "c"})
+    assert names == {("b", "x.json")}
+    assert queries.get_job(job_id)["workflow_revision_id"] == current["id"]
+
+
+def test_inherit_rmw_node_without_name_conflict_stays_inherited(tmp_path: Path) -> None:
+    """codex 六轮 P1 对照组：RMW 节点的名字无跨边界冲突 → 照常继承。
+
+    证明判别点是「冲突检测覆盖 RMW output」，而非「RMW 节点一律排除」
+    的粗面——重置节点不声明 x.json 时，b 的 RMW 语义（启动输入保留，
+    #114/P1-B）原样成立：本地文件与清单行保留、节点 completed。
+    """
+    old_definition = WorkflowDefinition(
+        key="wfchain",
+        label="Wf Chain",
+        intake=WorkflowIntake(),
+        nodes={
+            "a": WorkflowNode(key="a", label="A", capability="cap_a"),
+            "b": WorkflowNode(
+                key="b",
+                label="B",
+                capability="cap_b",
+                after=["a"],
+                inputs=["x.json"],
+                outputs=["x.json"],
+                config_schema={},
+            ),
+            "c": WorkflowNode(key="c", label="C", capability="cap_c", after=["b"]),
+        },
+    )
+    queries, workspace, revisions, original = _setup(tmp_path, old_definition)
+    # 新 revision：c 变更但输出名与 b 的 RMW 名不冲突。
+    new_nodes = dict(old_definition.nodes)
+    new_nodes["c"] = dataclasses.replace(
+        old_definition.nodes["c"], capability="cap_c_new", outputs=["c_out.json"]
+    )
+    revisions.publish_workspace_revision(
+        workspace["id"], dataclasses.replace(old_definition, nodes=new_nodes)
+    )
+    job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
+    from tests.helpers.job_workflow_upgrade import (
+        seed_local_pool_execution as _seed_local_pool_execution,
+    )
+
+    a_hash = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {}\n")
+    b_hash = _publish_node_code(queries, workspace["id"], "b", "def run(ctx):\n    return {}\n")
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job_id, key, status="pending")
+    _seed_local_pool_execution(queries, job_id, "a", a_hash)
+    _seed_local_pool_execution(queries, job_id, "b", b_hash)
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job_id, key, status="completed")
+    queries.update_job_status(job_id, "completed")
+    job_dir = _seed_reachable_outputs(queries, job_id, ["x.json", "c_out.json"])
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'b', 'x.json', %s, 1, 'hash')
+            """,
+            (job_id, f"jobs/wschain/{job_id}/x.json"),
+        )
+    service = _make_service(tmp_path, queries)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    # a/b 身份均可证明且 b 的 RMW 名无冲突 → 两者继承；c 变更重跑。
+    assert result["kept_node_count"] == 2
+    assert statuses == {"a": "completed", "b": "completed", "c": "pending"}
+    assert (job_dir / "x.json").read_text() == "old-x.json"
+    names = queries.job_artifact_manifest_names_for_nodes(job_id, {"b"})
+    assert ("b", "x.json") in names
 
 
 # ---------------------------------------------------------------------------

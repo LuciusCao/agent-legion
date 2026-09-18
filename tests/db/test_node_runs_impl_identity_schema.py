@@ -298,6 +298,44 @@ def test_latest_done_request_identities_empty_run_hash_falls_back(job_db) -> Non
     assert identities == {"a": ("agent", "hash-a-request", "", "")}
 
 
+def test_latest_done_request_identities_never_borrows_older_run_identity(job_db) -> None:
+    """最新 completed run 不可证明时，不得越过它借用旧 run 的身份。
+
+    当前产物由最新 run 产生；若读取 SQL 先过滤空 hash，再按 id 倒序，
+    就会把更老执行的可证明身份冒充当前产物证据，错误允许 inherit。
+    """
+    workspace_id = "test-workspace"
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key)"
+            " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            (workspace_id,),
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values ('impl-read-latest-empty', %s, 'question', 'q')",
+            (workspace_id,),
+        )
+        conn.execute(
+            "insert into job_nodes(job_id, node_key) values ('impl-read-latest-empty', 'a')"
+        )
+
+    old_run = job_db.start_node_run(
+        "impl-read-latest-empty", "a", ["pi"], "", agent_definition_hash="old-hash"
+    )
+    assert old_run is not None
+    job_db.finish_node_run(int(old_run["id"]), "completed", 0, "")
+
+    job_db.update_job_node("impl-read-latest-empty", "a", status="pending")
+    latest_run = job_db.start_node_run("impl-read-latest-empty", "a", ["pi"], "")
+    assert latest_run is not None
+    job_db.finish_node_run(int(latest_run["id"]), "completed", 0, "")
+
+    identities = job_db.latest_done_request_identities("impl-read-latest-empty", ["a"])
+
+    assert identities == {"a": ("", "", "", "")}
+
+
 def test_latest_done_request_identities_projects_skill_face(job_db) -> None:
     """codex 五轮 P1-A：skill 身份投影（段 2 manifest / 段 1 skill_version）。
 
