@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from contextlib import closing
 from pathlib import Path
 
@@ -21,6 +20,15 @@ from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from tests.helpers import replace_agent_catalog
+from tests.helpers.job_workflow_upgrade import (
+    publish_node_code as _publish_node_code,
+)
+from tests.helpers.job_workflow_upgrade import (
+    seed_done_execution as _seed_done_execution,
+)
+from tests.helpers.job_workflow_upgrade import (
+    seed_local_pool_execution as _seed_local_pool_execution,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -88,61 +96,6 @@ def _make_service(tmp_path: Path, queries: JobQueries, **kwargs) -> JobWorkflowU
         artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
         **kwargs,
     )
-
-
-def _seed_done_execution(
-    queries: JobQueries,
-    workspace_id: str,
-    job_id: str,
-    node_key: str,
-    *,
-    kind: str,
-    impl_hash: str,
-) -> None:
-    """播种该节点的一次完成执行：node_run(completed) + done 请求行。
-
-    请求行携带执行时实现身份（``agent_definition_hash``：agent 行是
-    Agent 定义哈希、code 行是 code 文本 sha256），与真实 dispatch 链
-    （``CodeDispatchService.enqueue`` / ``AgentDispatchService.enqueue``）
-    的落库形状一致。
-    """
-    run = queries.start_node_run(job_id, node_key, ["pi"], "")
-    assert run is not None
-    queries.finish_node_run(int(run["id"]), "completed", 0, "")
-    execution_id = str(uuid.uuid4())
-    with closing(connect_database(queries.dsn_identity)) as conn, conn:
-        conn.execute(
-            """
-            insert into agent_execution_requests(
-              execution_id, workspace_id, job_id, node_key, kind, agent_id,
-              agent_definition_hash, node_concurrency_limit, state,
-              queued_at, claimed_at, finished_at, node_run_id, manifest_json)
-            values (%s, %s, %s, %s, %s, %s, %s, 1, 'done',
-                    current_timestamp, current_timestamp, current_timestamp, %s, %s)
-            """,
-            (
-                execution_id,
-                workspace_id,
-                job_id,
-                node_key,
-                kind,
-                f"cap_{node_key}",
-                impl_hash,
-                int(run["id"]),
-                json.dumps({"kind": kind, "node_key": node_key}),
-            ),
-        )
-
-
-def _publish_node_code(queries: JobQueries, workspace_id: str, node_key: str, code: str) -> str:
-    """发布 node_code 并返回其 code_hash（与 NodeCodeService 同款）。"""
-
-    from server.app.services.node_codes import NodeCodeService
-
-    service = NodeCodeService(queries, custom_nodes_enabled=True)
-    service.save_draft(workspace_id, "wfchain", node_key, code, "test")
-    row = service.publish(workspace_id, "wfchain", node_key)
-    return str(row["code_hash"])
 
 
 # ---------------------------------------------------------------------------
@@ -762,21 +715,6 @@ def test_agent_definition_without_mutable_keys_stays_inheritable(tmp_path: Path)
 # ---------------------------------------------------------------------------
 # P1-1 补充：本地池执行 hash 记录（#645 v85，node_runs.agent_definition_hash）
 # ---------------------------------------------------------------------------
-
-
-def _seed_local_pool_execution(
-    queries: JobQueries, job_id: str, node_key: str, impl_hash: str
-) -> None:
-    """播种本地池形态的完成执行：node_run(completed) 带身份列、无请求行。
-
-    本地 code 池从不写 agent_execution_requests——v85 起身份记录落在
-    node_runs（claim_lease 的 insert），这是该路径的播种镜像。
-    """
-    run = queries.start_node_run(
-        job_id, node_key, ["python", "run.py"], "", agent_definition_hash=impl_hash
-    )
-    assert run is not None
-    queries.finish_node_run(int(run["id"]), "completed", 0, "")
 
 
 def test_impl_identity_local_pool_record_matching_keeps_node(tmp_path: Path) -> None:

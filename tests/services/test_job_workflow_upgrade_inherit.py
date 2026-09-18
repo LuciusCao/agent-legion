@@ -17,6 +17,7 @@ from server.app.jobs import JobQueries
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
+from tests.helpers.job_workflow_upgrade import seed_impl_identity as _seed_impl_identity
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -75,29 +76,6 @@ def _inherit_job(queries, workspace, original, node_keys):
                 (frozen, job["id"]),
             )
     return job
-
-
-def _seed_impl_identity(queries, workspace, job_id: str, node_keys) -> None:
-    """给拟继承节点播种可证明的实现身份（codex 四轮 P1-1 后的测试基准）。
-
-    普通继承用例的 completed 节点现在还要求「执行时身份 == 当前
-    published 身份」：published node_code + 最新完成请求携带同一
-    code_hash。不播种的节点按「实现不可证明」保守重跑（P1-1 语义，
-    判别用例见 codex4 姊妹文件）。
-    """
-    from tests.services.test_job_workflow_upgrade_inherit_codex4 import (
-        _publish_node_code,
-        _seed_done_execution,
-    )
-
-    for node_key in node_keys:
-        code_hash = _publish_node_code(
-            queries, workspace["id"], node_key, f"def run(ctx):\n    return {{{node_key!r}}}\n"
-        )
-        queries.update_job_node(job_id, node_key, status="pending")
-        _seed_done_execution(
-            queries, workspace["id"], job_id, node_key, kind="code", impl_hash=code_hash
-        )
 
 
 def test_inherit_upgrade_keeps_unchanged_nodes_completed(tmp_path: Path) -> None:
@@ -741,9 +719,11 @@ def test_inherit_upgrade_code_republish_with_inserted_node_reruns_all(tmp_path: 
     from server.app.services.job_artifact_mutation import JobArtifactMutationService
     from server.app.storage_paths import resolve_job_dir
     from tests.helpers import replace_agent_catalog
-    from tests.services.test_job_workflow_upgrade_inherit_codex4 import (
-        _publish_node_code,
-        _seed_local_pool_execution,
+    from tests.helpers.job_workflow_upgrade import (
+        publish_node_code as _publish_node_code,
+    )
+    from tests.helpers.job_workflow_upgrade import (
+        seed_local_pool_execution as _seed_local_pool_execution,
     )
 
     def _graph(with_e: bool) -> WorkflowDefinition:
@@ -785,7 +765,7 @@ def test_inherit_upgrade_code_republish_with_inserted_node_reruns_all(tmp_path: 
     job = _inherit_job(queries, workspace, original, ["a", "b", "c", "d"])
     # 播种执行记录：A 记 V1 hash（本地池形态，node_runs 直查命中）；
     # B/C/D 记各自当前身份（done 请求行——Worker/Agent 形态）。
-    from tests.services.test_job_workflow_upgrade_inherit_codex4 import _seed_done_execution
+    from tests.helpers.job_workflow_upgrade import seed_done_execution as _seed_done_execution
 
     queries.update_job_node(job["id"], "a", status="pending")
     _seed_local_pool_execution(queries, job["id"], "a", a_v1)
