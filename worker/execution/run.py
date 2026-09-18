@@ -162,7 +162,6 @@ def run_execution(
         # agent 进程组记录：executor 被 SIGKILL 时 supervisor 按此 killpg 兜底。
         pgid_record = execution_dir / AGENT_PGID_FILENAME
         status_fields = events.status_fields(claim, run_dir, exec_kind)
-        status.start(execution_id, **status_fields)
         ownership_lost = threading.Event()
         heartbeat = start_lease_heartbeat(
             client,
@@ -174,6 +173,16 @@ def run_execution(
             on_cancelled=cancel_executions,
             registry=heartbeat_registry,
         )
+        # #644 共享目录代际屏障：新 claim 的 register 会先判死旧 lease；在
+        # prepare 删除/重建 work_root/<execution_id> 前，再等待旧 UploadTask
+        # 完成 marker/目录收尾。散落在上传动作前的 ownership_lost 检查无法
+        # 消除 check→文件打开之间的 TOCTOU，这个 handoff 才是唯一复用边界。
+        # 新 lease 的 heartbeat 已经注册，等待期间仍会续租；status.start 放
+        # 在屏障之后，避免旧任务的迟到 finish 删除新 attempt 的状态记录。
+        if not uploads.wait_for_prior_upload(execution_id, lease_id, shutdown):
+            heartbeat.shutdown()
+            return
+        status.start(execution_id, **status_fields)
         proc: subprocess.Popen[bytes] | None = None
         task: UploadTask | None = None
         try:

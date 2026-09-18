@@ -59,6 +59,15 @@ class UploadTask:
     # 运行态不持久化：重启恢复的任务从「未判死」起步，由恢复后的首拍或首次
     # report 重新判定（409 report 本身仍是终态出口）。
     ownership_lost: threading.Event = field(default_factory=threading.Event)
+    # UploadQueue 的本机 handoff barrier：同 execution_id 的新 attempt 在
+    # 重用 execution_dir 前先判死旧上传并等待此事件。它只在旧任务完成全部
+    # 文件收尾、registry/status/depth 记账后置位，因此目录不会被两代 attempt
+    # 同时读写（#644 收口）。运行态，不持久化。
+    delivery_done: threading.Event = field(default_factory=threading.Event)
+    # _finalize 的幂等闩；只在 UploadHandoff 的锁下读写。正常结构只有车道
+    # 外层一个 finalize owner，这个字段是防御线，避免未来异常分支再次把
+    # depth 减成负数或重复发 execution.reported。
+    finalize_started: bool = False
     # bulk 车道产物，交给 report 车道；运行时状态，不持久化——崩溃恢复的任务
     # 一律从 bulk 车道重进，prepare 与 artifact 上传会原样重做。
     prepared_metadata: dict[str, Any] | None = None

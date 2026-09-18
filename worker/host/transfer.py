@@ -14,7 +14,7 @@ from typing import Any, BinaryIO, cast
 
 import requests
 
-from worker._retry import run_with_retry
+from worker._retry import StopSignal, run_with_retry
 
 # Transient network errors (timeout/reset/refused) and Host 5xx get
 # exponential backoff (1s, 2s, 4s, …). requests wraps socket timeouts as
@@ -39,6 +39,10 @@ class HostRequestError(RuntimeError):
 
 class _TransientTransferError(RuntimeError):
     """Internal carrier for one retried attempt's failure message."""
+
+
+class TransferStopped(RuntimeError):
+    """A transfer stopped before another file-open/retry attempt began."""
 
 
 class TransferOperations:
@@ -72,6 +76,7 @@ class TransferOperations:
         data: bytes | Callable[[], BinaryIO] | None = None,
         headers: dict[str, str] | None = None,
         stream_to: Path | None = None,
+        stop: StopSignal | None = None,
     ) -> tuple[int, bytes]:
         """Request with backoff on transient network errors and Host 5xx.
 
@@ -82,6 +87,8 @@ class TransferOperations:
         """
 
         def attempt() -> tuple[int, bytes]:
+            if stop is not None and stop.is_set():
+                raise TransferStopped(f"{label}: stopped")
             payload = data() if callable(data) else data
             try:
                 status, body = self.request(
@@ -107,10 +114,12 @@ class TransferOperations:
                 retriable=(_TransientTransferError,),
                 base_seconds=_RETRY_BACKOFF_BASE_SECONDS,
                 max_attempts=_RETRY_MAX_ATTEMPTS,
+                stop=stop,
             )
         except _TransientTransferError as exc:
             raise RuntimeError(f"{label}: {exc}") from exc
-        assert result is not None  # no stop event: the loop exits via return/raise
+        if result is None:
+            raise TransferStopped(f"{label}: stopped")
         return result
 
     def download(self, path: str, destination: Path) -> None:
@@ -125,7 +134,7 @@ class TransferOperations:
         if status != 200:
             raise HostRequestError(f"download failed: {path}: HTTP {status}", status)
 
-    def upload_artifact(self, path: Path) -> str:
+    def upload_artifact(self, path: Path, *, stop: StopSignal | None = None) -> str:
         """Upload one output artifact, retrying transient Host failures.
 
         5xx responses and connection-level errors (including socket timeouts)
@@ -138,6 +147,7 @@ class TransferOperations:
             data=lambda: path.open("rb"),
             label="artifact upload failed",
             timeout=self.transfer_timeout,
+            stop=stop,
         )
         if status != 201:
             raise HostRequestError(f"artifact upload failed: HTTP {status}: {body[:200]!r}", status)
@@ -157,7 +167,13 @@ class TransferOperations:
         return status
 
     def report(
-        self, execution_id: str, lease_id: str, metadata: dict[str, Any], archive: Path
+        self,
+        execution_id: str,
+        lease_id: str,
+        metadata: dict[str, Any],
+        archive: Path,
+        *,
+        stop: StopSignal | None = None,
     ) -> tuple[int, bytes]:
         """Submit the execution result; returns (status, body) for the caller
         to distinguish a committed report (204) from a lost lease (409)."""
@@ -171,4 +187,5 @@ class TransferOperations:
             },
             label=f"result report failed: {execution_id}",
             timeout=self.transfer_timeout,
+            stop=stop,
         )

@@ -370,6 +370,38 @@ def test_depth_gauge_tracks_queued_work(tmp_path: Path) -> None:
     assert queue.depth == 0
 
 
+def test_submit_serialization_failure_unwinds_handoff(tmp_path: Path) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    queue = _queue(QueueFakeClient())
+
+    with pytest.raises(TypeError):
+        queue.submit(_task(work_root, status_fields={"not_json": object()}))
+
+    assert queue.depth == 0
+    queue.shutdown()
+
+
+def test_condemned_cleanup_failure_still_releases_handoff(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    task = _task(work_root)
+    task.ownership_lost.set()
+    queue = _queue(QueueFakeClient())
+
+    def fail_cleanup(_task: UploadTask) -> bool:
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(upload_queue, "drop_marker", fail_cleanup)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert queue.depth == 0
+    assert task.delivery_done.is_set()
+
+
 class BlockingReportClient(QueueFakeClient):
     """Report call parks on a gate so queue depth can be observed deterministically."""
 

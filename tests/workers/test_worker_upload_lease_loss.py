@@ -255,11 +255,15 @@ def test_report_backoff_resume_pair_matches_own_entry(
 
 def _wait_depth_zero(queue: UploadQueue, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
-    while queue.depth > 0:
+    while True:
+        depth = queue.depth
+        if depth == 0:
+            return True
+        if depth < 0:
+            return False
         if time.monotonic() > deadline:
             return False
         time.sleep(0.005)
-    return True
 
 
 def test_handover_gap_verdict_terminates_report_loop_under_partition(
@@ -639,6 +643,12 @@ def test_mid_bulk_condemnation_stops_remaining_artifacts(
     client = _MidBulkLostClient()
     registry = BatchHeartbeatRegistry()
     queue = _queue(client, registry=registry)
+    outcomes: list[str] = []
+    monkeypatch.setattr(
+        upload_queue.report_events,
+        "note_execution_reported",
+        lambda _task, outcome: outcomes.append(outcome),
+    )
 
     # 两个产出：第一个上传 park（入口检查已过的证据），判死后第二个不得上传。
     task = _task(work_root, expected_outputs=("output.json", "second.json"))
@@ -649,6 +659,8 @@ def test_mid_bulk_condemnation_stops_remaining_artifacts(
     client.release_upload.set()
 
     assert _wait_depth_zero(queue), "lane pinned: mid-bulk condemnation did not terminate"
+    assert queue.depth == 0
+    assert outcomes == ["lost"], "one task must finalize and emit exactly once"
     assert task.ownership_lost.is_set()
     # 第一个上传后的判死：第二个 artifact 零上传（修复前会照传）、零 report。
     assert client.uploads_after_release == 0, "a condemned task uploaded the new attempt's artifact"
@@ -701,6 +713,7 @@ def test_mid_bulk_condemnation_stops_fallback_prepare(
     client.release_upload.set()
 
     assert _wait_depth_zero(queue)
+    assert queue.depth == 0
     assert client.uploads_after_release == 0, "the condemned fallback loop kept uploading"
     assert client.reports == []
     assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
