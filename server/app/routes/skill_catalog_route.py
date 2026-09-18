@@ -56,11 +56,16 @@ def resolve_skill_key_owner(job_db: JobQueries, skill_key: str) -> str | None:
         # id whose lowercase form equals this segment's makes it a variant.
         for candidate in _lowercase_workspace_ids(job_db):
             if candidate == key_workspace.lower():
-                raise _SKILL_NOT_FOUND
+                raise _skill_not_found()
     return None
 
 
-_SKILL_NOT_FOUND = HTTPException(status_code=404, detail="Skill not found")
+def _skill_not_found() -> HTTPException:
+    """A FRESH 404 per refusal (codex R10 P2 on #745): re-raising one shared
+    exception instance appends every raise's traceback onto the same object,
+    and the module-level reference would keep each refused request's stack
+    alive — unbounded memory growth for a caller looping on refusals."""
+    return HTTPException(status_code=404, detail="Skill not found")
 
 
 def _lowercase_workspace_ids(job_db: JobQueries) -> list[str]:
@@ -81,7 +86,7 @@ def require_skill_key_in_workspace(job_db: JobQueries, skill_key: str, workspace
     studio_agent_skill_tools)."""
     owner = resolve_skill_key_owner(job_db, skill_key)
     if owner is not None and owner != str(workspace_id):
-        raise _SKILL_NOT_FOUND
+        raise _skill_not_found()
 
 
 def create_skill_catalog_router(

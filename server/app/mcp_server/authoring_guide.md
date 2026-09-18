@@ -106,6 +106,11 @@ Studio. Nothing you do takes effect in production by itself.
 - `save_skill_version(workspace_id, skill_key, files, new_tag, message)` —
   commit + tag a
   new version in the skill's LOCAL source repo (section 6). Lock untouched.
+  WORKSPACE-OWNED keys only: a skill whose key's first segment is a group
+  directory (e.g. the demo's `education-video-problems-generation/...`,
+  shared by every referencing workspace) is read-only for you — saving
+  returns 404. To iterate on a group skill, first `create_skill` a
+  workspace-owned copy under your workspace and point the node at it.
 - `create_skill(workspace_id, skill_name, files, new_tag, message)` — create
   a BRAND-NEW skill repo at `<skills root>/<workspace_id>/<skill_name>`
   (#633, workspace-scoped): the files must carry the full contract set of
@@ -416,7 +421,13 @@ reviews the git diff and re-pins.
    block or missing entirely.
 4. `save_skill_version(workspace_id, skill_key, files, new_tag, message)` —
    writes into the
-   skill's in-place repo. Every path is validated before any
+   skill's in-place repo — workspace-owned keys only. Group-directory keys
+   (first segment not a workspace id, e.g. the demo's
+   `education-video-problems-generation/<name>`) are shared read-only
+   surfaces: saving them returns 404. To change one, `create_skill` a
+   workspace-owned copy under your workspace, port the changes there, and
+   rebind the node — shared-group edits are an instance-level (human admin)
+   act, never yours. Every path is validated before any
    write (inside the skill dir, no `..`/absolute paths, no `.git`, no
    overwriting untracked files); after writing, the contract check re-runs
    and a failure (including a malformed root `contract.yaml`) rolls the
