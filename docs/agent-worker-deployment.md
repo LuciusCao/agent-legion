@@ -310,7 +310,11 @@ Host 孤儿 sweeper 回收。升级必须遵循 **Host first, Worker second**：
 携带 `host_protocol_version`，新 Worker 若发现 Host 低于自身协议版本（旧响应缺少
 该字段也视为旧 Host）会以退出码 2 fail-closed，不进入 claim，避免旧 Host 把
 runtime-scoped 模型降成二元 provider/model 后误投到另一个 runtime。确认 Host 健康
-后再逐台重启 Worker。
+后再逐台重启 Worker。**结果上报头（#748）**：`X-Agent-Result` 携带原始 UTF-8
+字节（CJK 错误摘要是非 ASCII 头值），Worker → Host 链路上的反向代理 / LB / 网关
+必须容忍非 ASCII 头值透传（改写或拒收会导致结果不可投递、租约过期重投）；同头
+受 14 KiB 字节预算约束，超预算时 Worker 会按 stderr 尾部 → error_message →
+产物清单前缀的顺序降级并在 metadata 里打 `output_artifacts_truncated` 标记。
 
 **workflow_key 兼容窗口期（issue #211，截止 2026-10-31）**：claim 响应中的
 `workflow_key` 字段已 deprecated（与 `workspace_id` 恒等，schema v62 绑定）。字段
