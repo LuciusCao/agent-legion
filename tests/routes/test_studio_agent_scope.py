@@ -93,6 +93,10 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/jobs/{job_id}/run-to", None),
     ("POST", "/api/jobs/{job_id}/continue", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun", None),
+    # R8 P2-2 on #745: preview now mounts reject_studio_agent_scope like the
+    # other job POSTs (the job guard's scoped effecting short-circuit relies
+    # on this), so it belongs to the guarded effecting set.
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun/preview", {"node_key": "n1"}),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-run-to", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-pause", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-resume", None),
@@ -214,7 +218,10 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("PUT", "/api/agent-definitions/{agent_id}/draft"): "draft write",
     ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
     ("POST", "/api/skills/validate"): "validate only",
-    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun/preview"): "preview only",
+    # batch-rerun/preview moved OUT of the exempt list (red-team R8 P2-2 on
+    # #745): it now mounts reject_studio_agent_scope like every other POST
+    # under job_group, so the guard's scoped effecting short-circuit never
+    # bypasses its workspace membership check.
     # Node prompt preview: read-only render, persists nothing.
     ("POST", "/api/workspaces/{workspace_id}/workflow/node-prompt-preview"): "preview only",
     # Scoped-only tool surface (require_studio_agent_scope): these endpoints

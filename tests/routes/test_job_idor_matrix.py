@@ -473,3 +473,142 @@ def test_skill_catalog_group_directory_is_shared_across_workspaces(
     ok = member.get(f"/api/agent-catalog/skills/{group_key}", params={"workspace_id": ws_demo})
     assert ok.status_code == 200, ok.text
     assert any(f["path"] == "SKILL.md" for f in ok.json()["files"])
+
+
+def test_skill_catalog_case_variant_key_is_refused(client, tmp_path, monkeypatch) -> None:
+    """red-team R8 P1-1: on case-insensitive filesystems (macOS) a mixed-case
+    first segment misses the exact workspace lookup, was treated as a group
+    directory, and the FS resolved it to the real repo — cross-workspace
+    private-skill read. Case variants are now refused outright."""
+    base = tmp_path / "home" / ".agents" / "skills"
+    skill_key = "ws_victim/private_cap"
+    _make_skill_repo(base / skill_key)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ws_attacker = client.post(
+        "/api/workspaces", json={"id": "ws_attacker", "name": "Attacker"}, headers=CSRF
+    ).json()["workspace"]["id"]
+    ws_victim = client.post(
+        "/api/workspaces", json={"id": "ws_victim", "name": "Victim"}, headers=CSRF
+    ).json()["workspace"]["id"]
+    member_id = _create_member(client, "case-probe", "pw-case")
+    client.app.state.job_db.upsert_workspace_member(ws_attacker, member_id, "editor")
+    attacker = _member_client(client, "case-probe", "pw-case")
+
+    for variant in ("WS_Victim/private_cap", "Ws_Victim/private_cap", "WS_VICTIM/private_cap"):
+        response = attacker.get(
+            f"/api/agent-catalog/skills/{variant}", params={"workspace_id": ws_attacker}
+        )
+        assert response.status_code == 404, variant
+    # The exact lowercase key through the victim scope still works for
+    # members (sanity that the resolver did not lock everything out).
+    client.app.state.job_db.upsert_workspace_member(ws_victim, member_id, "viewer")
+    assert (
+        attacker.get(
+            f"/api/agent-catalog/skills/{skill_key}", params={"workspace_id": ws_victim}
+        ).status_code
+        == 200
+    )
+
+
+def test_skill_catalog_empty_workspace_id_is_rejected(client, tmp_path, monkeypatch) -> None:
+    """red-team R8 P2-1: an empty workspace_id query used to skip the
+    router-level membership check entirely (guard treats falsy as absent) —
+    any logged-in user read group skills with zero workspace relation. The
+    parameter is now min_length=1 (422), fail-closed."""
+    base = tmp_path / "home" / ".agents" / "skills"
+    _make_skill_repo(base / "shared-group/group_cap")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _create_member(client, "empty-ws-probe", "pw-empty")
+    probe = _member_client(client, "empty-ws-probe", "pw-empty")
+    response = probe.get("/api/agent-catalog/skills/shared-group/group_cap?workspace_id=")
+    assert response.status_code == 422
+    assert (
+        probe.get(
+            "/api/skills/tags",
+            params={"path": str(base / "shared-group/group_cap"), "workspace_id": ""},
+        ).status_code
+        == 422
+    )
+
+
+def test_group_skill_write_is_refused_for_scoped_tokens(
+    client, job_db, tmp_path, monkeypatch
+) -> None:
+    """red-team R8 P1-2: group directories are shared runtime surfaces —
+    every referencing workspace executes their prompts/validators — so
+    committing/tagging into them must not be reachable by any workspace's
+    scoped token (the previous model allowed exactly that: 201 from a
+    foreign workspace's run token poisoning shared skills)."""
+    from server.app.auth import scoped_tokens
+
+    base = tmp_path / "home" / ".agents" / "skills"
+    group_key = "shared-group/group_cap"
+    _make_skill_repo(base / group_key)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ws_a = client.post("/api/workspaces", json={"id": "ws_a", "name": "A"}, headers=CSRF).json()[
+        "workspace"
+    ]["id"]
+
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id=ws_a)
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+
+    # Reads of the group skill stay fine through any workspace scope...
+    assert (
+        scoped.get(f"/api/studio-agent/tools/workspaces/{ws_a}/skills/{group_key}").status_code
+        == 200
+    )
+    # ...but the write surface refuses group keys outright.
+    import subprocess as sp
+
+    repo = base / group_key
+    head_before = sp.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    write = scoped.post(
+        f"/api/studio-agent/tools/workspaces/{ws_a}/skills/{group_key}/versions",
+        json={
+            "files": [{"path": "SKILL.md", "content": "# poisoned\n"}],
+            "new_tag": "v9.9.9",
+            "message": "poison",
+        },
+    )
+    assert write.status_code == 404, write.text
+    head_after = sp.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert head_before == head_after  # repo untouched
+
+
+def test_scoped_token_cannot_reach_unguarded_job_group_posts(client, job_db) -> None:
+    """red-team R8 P2-2: the job guard's scoped effecting short-circuit
+    assumed every POST under job_group refuses scoped tokens; the two routes
+    without reject_studio_agent_scope (batch-rerun/preview, stress events)
+    used to skip the membership check for scoped callers. Both now mount the
+    refusal explicitly."""
+    from server.app.auth import scoped_tokens
+
+    ws_victim = client.post(
+        "/api/workspaces", json={"id": "ws_victim", "name": "Victim"}, headers=CSRF
+    ).json()["workspace"]["id"]
+    ws_attacker = client.post(
+        "/api/workspaces", json={"id": "ws_attacker", "name": "Attacker"}, headers=CSRF
+    ).json()["workspace"]["id"]
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id=ws_attacker)
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+
+    preview = scoped.post(
+        f"/api/workspaces/{ws_victim}/jobs/batch-rerun/preview",
+        json={"node_key": "n1"},
+    )
+    assert preview.status_code == 403, preview.text
+    assert "cannot take effect" in preview.json()["detail"]

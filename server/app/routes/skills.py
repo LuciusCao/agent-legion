@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from server.app.auth.dependencies import get_current_user
 from server.app.jobs import JobQueries
@@ -29,9 +29,9 @@ def create_skills_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     first base-relative segment is a GROUP name that only coincidentally
     matches a workspace for create_skill-authored skills; the demo's group
     differs from its workspace id). The query parameter doubles as the
-    membership scope for the router-level guard; the handler adds the
-    scoped-token binding and the workspace-directory strictness (#710,
-    codex P1/P2 on #745)."""
+    membership scope for the router-level guard (``min_length=1``: an empty
+    value must not skip it, red-team R8); the handler adds the scoped-token
+    binding and the ownership strictness (#710, codex P1/P2 + R8 on #745)."""
     router = APIRouter()
 
     def _validator() -> SkillValidator:
@@ -59,12 +59,12 @@ def create_skills_router(job_db: JobQueries, settings: Settings) -> APIRouter:
         request: SkillValidateRequest,
         http_request: Request,
         user: Annotated[dict[str, Any], Depends(get_current_user)],
-        workspace_id: str,
+        workspace_id: Annotated[str, Query(min_length=1)],
     ) -> SkillValidateResponse:
         require_skill_scope_binding(workspace_id, user)
         key = _key_of_path(request.path)
         if key is not None:
-            require_skill_key_in_workspace(http_request, key, workspace_id)
+            require_skill_key_in_workspace(http_request.app.state.job_db, key, workspace_id)
         result = _validator().validate(request.path)
         return SkillValidateResponse(
             valid=result.valid,
@@ -80,14 +80,14 @@ def create_skills_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     @router.get("/skills/tags", response_model=SkillTagsResponse)
     def list_skill_tags(
         path: str,
-        workspace_id: str,
+        workspace_id: Annotated[str, Query(min_length=1)],
         request: Request,
         user: Annotated[dict[str, Any], Depends(get_current_user)],
     ) -> SkillTagsResponse:
         require_skill_scope_binding(workspace_id, user)
         key = _key_of_path(path)
         if key is not None:
-            require_skill_key_in_workspace(request, key, workspace_id)
+            require_skill_key_in_workspace(request.app.state.job_db, key, workspace_id)
         result = _validator().list_tags(path)
         return SkillTagsResponse(
             path=result.path, tags=list(result.tags), latest_tag=result.latest_tag

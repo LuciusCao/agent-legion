@@ -24,6 +24,10 @@ from server.app.auth.dependencies import (
 )
 from server.app.jobs import JobQueries
 from server.app.routes.job_http import raise_job_http_error
+from server.app.routes.skill_catalog_route import (
+    require_skill_key_in_workspace,
+    resolve_skill_key_owner,
+)
 from server.app.routes.skill_contracts import SkillDetailResponse
 from server.app.routes.studio_agent_skill_contracts import (
     SkillSaveVersionRequest,
@@ -82,7 +86,7 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
     ) -> SkillSaveVersionResponse:
         files = [SkillFileWrite(path=item.path, content=item.content) for item in payload.files]
         try:
-            _require_skill_in_workspace(job_db, skill_key, workspace_id)
+            _require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
             result = editing.save_version(skill_key, files, payload.new_tag, payload.message)
         except JobServiceError as exc:
             raise_job_http_error(exc)
@@ -98,19 +102,25 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
 
 
 def _require_skill_in_workspace(job_db: JobQueries, skill_key: str, workspace_id: str) -> None:
-    """Key/path agreement for the skill tool surface (#710, codex P2 on
-    #745): a skill key's first segment is a GROUP name, not necessarily a
-    workspace id (the demo ships group ``education-video-problems-generation``
-    under workspace ``education_video_problems_generation``). The router-level
-    guards already pin the caller to one workspace; this check adds the
-    workspace-directory strictness — when the key's first segment IS an
-    existing workspace's id (the create_skill layout), the key must belong
-    to the caller's workspace, so a bound token cannot reach into a foreign
-    workspace's skill repo through a mismatched key. Group directories stay
-    reachable from any workspace the caller is bound to (shared authoring
-    surface, demo layout)."""
-    key_workspace = skill_key.partition("/")[0]
-    if key_workspace == workspace_id:
-        return
-    if job_db.get_workspace(key_workspace) is not None:
+    """Read/validate-side ownership for the skill tool surface (#710, codex
+    P2 + red-team R8 on #745). Delegates to the shared resolver: a key whose
+    first segment belongs to an existing workspace is that workspace's
+    private asset (case-variant keys are refused inside the resolver — the
+    case-insensitive-filesystem bypass); group directories stay shared READ
+    surfaces."""
+    require_skill_key_in_workspace(job_db, skill_key, workspace_id)
+
+
+def _require_skill_writable_in_workspace(
+    job_db: JobQueries, skill_key: str, workspace_id: str
+) -> None:
+    """Write-side ownership (red-team R8 P1-2 on #745): a group directory is
+    consumed by every workspace that references it, so committing/tagging
+    into it is an instance-level act — scoped tokens (the only audience of
+    this surface) never qualify. Workspace-directory keys keep the read-side
+    ownership rule."""
+    owner = resolve_skill_key_owner(job_db, skill_key)
+    if owner is None:
+        raise NotFoundError("Group skills are read-only for studio agents")
+    if owner != workspace_id:
         raise NotFoundError(f"Skill not found in workspace {workspace_id}")
