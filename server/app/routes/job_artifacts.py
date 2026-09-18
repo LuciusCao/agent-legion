@@ -1,7 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
-from server.app.auth.dependencies import reject_scoped_token_on_bare_job_route
 from server.app.routes.job_artifact_raw import register_raw_artifact_route
 from server.app.routes.job_contracts import ArtifactResponse
 from server.app.routes.job_http import raise_job_http_error
@@ -21,26 +20,19 @@ def create_job_artifacts_router(
     # 注册顺序敏感：raw 端点必须先于 {artifact_name:path} 注册。
     register_raw_artifact_route(router, service, settings)
 
-    @router.get(
-        "/jobs/{job_id}/artifacts/{artifact_name:path}",
-        response_model=ArtifactResponse,
-        dependencies=[Depends(reject_scoped_token_on_bare_job_route)],
-    )
+    @router.get("/jobs/{job_id}/artifacts/{artifact_name:path}", response_model=ArtifactResponse)
     def get_artifact(job_id: str, artifact_name: str) -> ArtifactResponse:
-        # Legacy bare route（#631 攻击审查 H2 收口）：scoped token 404
-        # （守卫在上）；全会话用户的 workspace 归属校验随收口 issue 处理。
+        # Legacy bare route：scoped/成员/admin 语义由 job_group 的
+        # require_job_workspace_access 统一裁决（#745 按 job 行反查授权域；
+        # 见 jobs.py get_job 的注释）。
         try:
             return ArtifactResponse(**service.read(job_id, artifact_name))
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.get(
-        "/jobs/{job_id}/runs/{run_id}/log",
-        response_model=JobLogResponse,
-        dependencies=[Depends(reject_scoped_token_on_bare_job_route)],
-    )
+    @router.get("/jobs/{job_id}/runs/{run_id}/log", response_model=JobLogResponse)
     def get_job_run_log(job_id: str, run_id: int, raw: bool = False):
-        # Legacy bare route（#631 攻击审查 H2 收口）：同上，scoped token 404。
+        # Legacy bare route：同上（#745 job 归属守卫统一裁决）。
         try:
             if raw:
                 return PlainTextResponse(

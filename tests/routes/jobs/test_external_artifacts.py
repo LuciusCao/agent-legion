@@ -875,26 +875,29 @@ def test_raw_serves_rows_within_job_prefix_after_guard(two_workspaces):
     assert bare_read.status_code == 200 and bare_read.content == b"0123456789"
 
 
-# --- #631 攻击复审 H2：legacy 裸路由对 scoped token 的低成本收口 ----------
+# --- #631 攻击复审 H2：legacy 裸路由的 scoped 语义（#745 rebase 后） ----------
 
 
-def test_bare_job_read_routes_refuse_scoped_tokens(two_workspaces, job_db):
-    """H2 收口：裸路由（无 workspace 前缀）修复前对任意 scoped Bearer
-    token 全开——绑定 ws-a 的 token 可读 ws-b 的 job 详情、清单、raw 字
-    节、日志与 token 用量，整体绕过 #631 的 workspace 隔离。现在整个
-    ``/api/jobs/{job_id}`` GET 家族对 scoped 身份一律 404（防枚举语义：
-    探测任意 job id 得常量信号），scoped 身份的 sanctioned 读面是
-    studio-agent 工具面与本 PR 的前缀端点。"""
+def test_bare_job_read_routes_scope_scoped_tokens_by_binding(two_workspaces, job_db):
+    """H2 收口的 rebase 修正（#703 CI 失败）：裸路由（无 workspace 前缀）
+    修复前对任意 scoped Bearer token 全开——绑定 ws-a 的 token 可读 ws-b
+    的 job 详情、清单、raw 字节、日志与 token 用量，整体绕过 #631 的
+    workspace 隔离。#631 曾以路由级 scoped-一律-404 收口；rebase #745 后
+    job_group 的 require_job_workspace_access 按 job 行反查授权域，裸路
+    由与前缀家族同一语义——绑定 token 读自己 workspace 的裸路由保持
+    200（#745 IDOR 矩阵钉住的既有行为），跨 workspace 与未知 job 同为
+    404（防枚举常量信号，与 #631 的收口强度一致）。"""
     from server.app.auth import scoped_tokens
 
     c, job_a, job_b = two_workspaces
+    _register_object_artifact(c, job_a, "frame-a.png", b"\x89PNG-a")
     _register_object_artifact(c, job_b, "frame.png", b"\x89PNG-bytes")
     admin_id = str(job_db.get_user_credentials("admin")["id"])
     token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id="ws-a")
     scoped = c.__class__(c.app)
     scoped.headers["authorization"] = f"Bearer {token}"
 
-    # 绑定 ws-a 的 token 走裸路由读 ws-b 的产物字节：修复前 200。
+    # 绑定 ws-a 的 token 走裸路由读 ws-b 的产物字节：拒绝（404）。
     assert scoped.get(f"/api/jobs/{job_b['id']}").status_code == 404
     assert scoped.get(f"/api/jobs/{job_b['id']}/artifacts/frame.png/raw").status_code == 404
     assert scoped.get(f"/api/jobs/{job_b['id']}/artifacts/frame.json").status_code == 404
@@ -903,6 +906,10 @@ def test_bare_job_read_routes_refuse_scoped_tokens(two_workspaces, job_db):
     assert scoped.get(f"/api/jobs/{job_b['id']}/runs/1/token-usage").status_code == 404
     # 不存在的 job 同样 404：常量信号，无探测差异。
     assert scoped.get("/api/jobs/nope").status_code == 404
+
+    # 绑定 workspace 自己的 job：裸路由照常可读（#745 的既有行为——
+    # 守卫是归属校验，不是 scoped 一刀切）。
+    assert scoped.get(f"/api/jobs/{job_a['id']}").status_code == 200
 
     # 全会话用户不受影响（前端控制台在用的面）。
     assert c.get(f"/api/jobs/{job_a['id']}").status_code == 200

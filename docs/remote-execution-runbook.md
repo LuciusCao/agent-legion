@@ -459,20 +459,20 @@ with three read-only endpoints, all scoped by the workspace in the URL path:
 token 同样可用：绑定了 `scoped_workspace_id` 的 token 只能读绑定 workspace
 （不匹配同样 404，防枚举语义一致）。
 
-**边界声明（legacy 裸路由）.** workspace 隔离只覆盖上表三个前缀端点。
+**边界声明（legacy 裸路由）.** workspace 隔离原本只覆盖上表三个前缀端点，
 控制台前端仍在用的 legacy 裸路由（`GET /api/jobs/{job_id}`、
 `GET /api/jobs/{job_id}/artifacts/{name}`、`.../raw`、`/runs/{run_id}/log`、
-`/token-usage`）不带 workspace 前缀，两个 workspace guard 都不触发。#631
-攻击审查 H2 的收口已落地：上述 7 个裸 GET 全部挂
-`reject_scoped_token_on_bare_job_route`——任意 scoped 身份（含绑定
-`scoped_workspace_id` 的 Bearer token、studio-agent 的 run token）对这些
-路由一律 404（防枚举常量信号），scoped 身份的 sanctioned 读面是
-studio-agent 工具面与本节三个前缀端点；全会话用户（前端控制台）不受影
-响。剩余边界：裸路由对全会话用户仍无 workspace 归属校验（任意已登录的
-全会话用户可读任意 workspace 的 job 详情与产物字节），这是存量行为、非
-#631 引入，其收口（前端调用方迁移 `frontend/src/api/jobsApi.ts` /
-`jobApi.ts` / `jobArtifactText.ts` 等 + 路由补归属校验）需要独立 PR 处
-理。外部系统的接入契约不变：只用上面三个前缀端点。
+`/token-usage`）不带 workspace 前缀。#745 起 job 路由组统一挂
+`require_job_workspace_access`——按 job 行反查授权域，裸路由与前缀家族
+同一语义：绑定 `scoped_workspace_id` 的 scoped token 只读绑定 workspace
+（跨 workspace 与未知 job 一律 404，防枚举语义一致），成员按 membership
+（viewer 只读），全会话 admin 走 fast path。#631 攻击审查 H2 曾以路由级
+`reject_scoped_token_on_bare_job_route`（scoped 一律 404）收口，rebase
+#745 后该守卫唯一存留效果是误杀「绑定 token 读自己 workspace」（#745
+的 IDOR 矩阵钉为既有行为），已随 rebase 移除——防枚举与跨 workspace
+隔离由 router 级守卫以同一强度保证。剩余边界：裸路由对全会话用户的
+workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前缀端点一
+致）。外部系统的接入契约不变：只用上面三个前缀端点。
 
 **读取语义.**
 
