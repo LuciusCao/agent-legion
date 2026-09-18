@@ -44,8 +44,7 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-const statusOf = (err: unknown) =>
-  (err as { status?: number } | null)?.status
+const statusOf = (err: unknown) => (err as { status?: number } | null)?.status
 
 // #749：发布 409 双语义分流。capability 占用（AgentService.publish 先跑
 // _require_free_capability）的 detail 以 "capability" 起头并含 "already
@@ -55,14 +54,17 @@ const statusOf = (err: unknown) =>
 // 这是 #749 前的基线行为。其余 409 是 CAS 拒绝（draft hash mismatch）。
 const isCapabilityConflict = (err: unknown) => {
   const message = errorMessage(err).toLowerCase()
-  return message.startsWith('capability') && message.includes('already published')
+  return (
+    message.startsWith('capability') && message.includes('already published')
+  )
 }
 
 // #749：发布 CAS（expected_hash）被服务端拒绝的专用文案——草稿在保存后被
 // 其他会话/编辑器覆盖，本地表单已不是要发布的身份。与聊天草稿卡的 409
 // 文案同一交互模式：内联提示 + 引导重新拉取，不发明新 UI（本面板无刷新
 // 入口，重新打开节点详情即重拉）。
-const DRAFT_OVERRIDDEN_HINT = '草稿已被其他会话或编辑器更新，请重新打开面板从最新草稿发布'
+const DRAFT_OVERRIDDEN_HINT =
+  '草稿已被其他会话或编辑器更新，请重新打开面板从最新草稿发布'
 
 /**
  * Agent 定义编辑器。发布后的 definition 不可变：编辑已发布 Agent 就是
@@ -273,7 +275,9 @@ export function AgentEditor({
       // 占用者，直显后端 detail，#749 前的基线行为）；CAS 拒绝（草稿被
       // 覆盖）才用引导重来的专用文案。
       if (statusOf(err) === 409) {
-        setError(isCapabilityConflict(err) ? errorMessage(err) : DRAFT_OVERRIDDEN_HINT)
+        setError(
+          isCapabilityConflict(err) ? errorMessage(err) : DRAFT_OVERRIDDEN_HINT
+        )
       } else if (statusOf(err) === 404) {
         // 无草稿可发：实体刚被别处发布过（409 之外的常见竞态收尾），
         // 与聊天草稿卡同款可行动文案（EntityDraftPublishButton）。

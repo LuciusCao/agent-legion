@@ -176,7 +176,11 @@ describe('WorkflowNodeCodeSection', () => {
   })
 
   it('publishes the draft of a custom node', async () => {
-    mockApi.mockResolvedValue({ ...customResponse, has_draft: true, draft_code_hash: 'h1' })
+    mockApi.mockResolvedValue({
+      ...customResponse,
+      has_draft: true,
+      draft_code_hash: 'h1',
+    })
     renderSection()
     await screen.findByText(/自定义 v1/)
 
@@ -199,14 +203,21 @@ describe('WorkflowNodeCodeSection', () => {
   // #749：保存→发布之间草稿被其他会话/编辑器覆盖，正是 expected_hash 要
   // 抓的竞态。409 专用文案引导重新加载（与聊天草稿卡同一交互模式）。
   it('shows the CAS conflict hint when publish returns 409', async () => {
-    mockApi.mockResolvedValue({ ...customResponse, has_draft: true, draft_code_hash: 'h1' })
+    mockApi.mockResolvedValue({
+      ...customResponse,
+      has_draft: true,
+      draft_code_hash: 'h1',
+    })
     renderSection()
     await screen.findByText(/自定义 v1/)
 
     mockApi.mockRejectedValueOnce(
-      Object.assign(new Error('draft hash mismatch for node_code wf:fetch_items'), {
-        status: 409,
-      })
+      Object.assign(
+        new Error('draft hash mismatch for node_code wf:fetch_items'),
+        {
+          status: 409,
+        }
+      )
     )
     fireEvent.click(screen.getByRole('button', { name: '发布' }))
 
@@ -222,12 +233,18 @@ describe('WorkflowNodeCodeSection', () => {
   // #749 修（review P3-3）：404 = 无草稿可发（刚在别处发布过），对齐
   // EntityDraftPublishButton 的可行动文案。
   it('shows the no-draft hint when publish returns 404', async () => {
-    mockApi.mockResolvedValue({ ...customResponse, has_draft: true, draft_code_hash: 'h1' })
+    mockApi.mockResolvedValue({
+      ...customResponse,
+      has_draft: true,
+      draft_code_hash: 'h1',
+    })
     renderSection()
     await screen.findByText(/自定义 v1/)
 
     mockApi.mockRejectedValueOnce(
-      Object.assign(new Error('no draft for node_code wf:fetch_items'), { status: 404 })
+      Object.assign(new Error('no draft for node_code wf:fetch_items'), {
+        status: 404,
+      })
     )
     fireEvent.click(screen.getByRole('button', { name: '发布' }))
 
@@ -251,9 +268,12 @@ describe('WorkflowNodeCodeSection', () => {
       target: { value: DRAFT_CODE },
     })
     // 保存流程会触发两次 BASE GET（保存后的后台 reload、发布后的 reload），
-    // 与用户的「立即发布」赛跑。按 BASE GET 的次数分流：第 1 次是保存后的
-    // reload（草稿在，回填逻辑已先行同步了同值）；第 2 次起是发布后的
-    // reload（无草稿）。PUT 与 publish 各自独立响应。
+    // 与用户的「立即发布」赛跑。R2 P2 修：第 1 次 reload 回 pre-save 形态
+    // ——旧草稿身份（hash 'stale-from-reload'、draft_version 1），使断言
+    // 的 'abc' 只能来自 PUT 响应的同步回填：删掉回填代码本测试必红（突变
+    // 自检已在本地验证）。旧 draft_version（1 < 回填的 2）同时驱动 reload
+    // 的函数式合并保留较新身份（R2 P3）。第 2 次起是发布后的 reload
+    // （无草稿）。PUT 与 publish 各自独立响应。
     let baseGetCount = 0
     mockApi.mockImplementation(async (path: unknown, init?: unknown) => {
       if (init && (init as { method?: string }).method === 'PUT') {
@@ -269,8 +289,8 @@ describe('WorkflowNodeCodeSection', () => {
             ...customResponse,
             has_draft: true,
             draft_code: DRAFT_CODE,
-            draft_version: 2,
-            draft_code_hash: 'abc',
+            draft_version: 1,
+            draft_code_hash: 'stale-from-reload',
           }
         }
         return { ...customResponse, version: 2 }
@@ -285,7 +305,9 @@ describe('WorkflowNodeCodeSection', () => {
     fireEvent.click(screen.getByRole('button', { name: '发布' }))
 
     await waitFor(() =>
-      expect(useUiStore.getState().toast?.message).toBe('已发布，新执行立即生效')
+      expect(useUiStore.getState().toast?.message).toBe(
+        '已发布，新执行立即生效'
+      )
     )
     const publishCall = mockApi.mock.calls.find(
       ([path]) => path === `${BASE}/publish`
@@ -293,7 +315,8 @@ describe('WorkflowNodeCodeSection', () => {
     expect(publishCall).toBeDefined()
     expect(publishCall![1]?.method).toBe('POST')
     // versionRow 的 code_hash 是 'abc'：保存响应同步回填，不等 reload
-    //（此断言正是修的目标：回填先行，发布不撞旧 hash 的假 409）。
+    //（reload GET 全程不出现 'abc'——首个 reload 回的是旧身份
+    // 'stale-from-reload'，此断言只能由回填路径满足）。
     expect(JSON.parse(String(publishCall![1]?.body))).toEqual({
       expected_hash: 'abc',
     })

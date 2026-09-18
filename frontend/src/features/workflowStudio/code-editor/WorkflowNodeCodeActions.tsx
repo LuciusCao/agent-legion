@@ -46,7 +46,11 @@ export function WorkflowNodeCodeActions(props: {
         </Button>
       )}
       {props.hasDraft && (
-        <span title={props.publishDisabled ? props.publishDisabledReason : undefined}>
+        <span
+          title={
+            props.publishDisabled ? props.publishDisabledReason : undefined
+          }
+        >
           <Button
             variant="outlined"
             size="small"

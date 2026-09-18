@@ -616,7 +616,7 @@ server/app/
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
 | WorkflowDraftStoreRequest | BaseModel | definition_yaml: str, expected_updated_at: str | None | app/routes/workflow_draft_store_contracts.py |
 | WorkflowDraftStoreResponse | BaseModel | definition_yaml: str | None, updated_at: str | None | app/routes/workflow_draft_store_contracts.py |
-| WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None, has_draft: bool, draft_code: str | None, draft_version: int | None, draft_code_hash: str | None, max_code_bytes: int | app/routes/workflow_node_code_contracts.py |
+| WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodePublishRequest | BaseModel | expected_hash: str | None | app/routes/workflow_node_code_contracts.py |
