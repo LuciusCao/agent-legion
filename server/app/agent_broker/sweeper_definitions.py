@@ -5,6 +5,11 @@ outgrew the parent's size budget. This sweep owns a separate concern
 from Worker-loss requeue: a queued request whose pinned definition was
 disabled or edited would sit queued forever while ``has_active_request``
 blocks re-enqueue.
+
+EXEC-GENERATION-001 (#759): the sweep is a protocol member — per candidate
+it runs ``sweep_generation.lock_sweep_candidate`` (job-mutation advisory
+lock → request row lock → generation CAS) before any write, and a
+stale-generation request is cancelled instead of failed.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ import json
 from typing import TYPE_CHECKING
 
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
+from server.app.agent_broker.sweep_generation import lock_sweep_candidate
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
 from server.app.services import failure_classification
@@ -36,11 +42,16 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
     forever while ``has_active_request`` blocks re-enqueue."""
     failed: list[str] = []
     with write_transaction(broker.database_dsn) as conn:
+        # Lock-free scan: the request row's FOR UPDATE moved after the
+        # per-job advisory lock (lock_sweep_candidate), mirroring
+        # claim_evaluate's reorder — locking request rows here and then
+        # writing job_nodes/jobs would AB-BA against the mutation side's
+        # job-mutation → _cancel_queued_sql (request row) order.
         rows = conn.execute(
             """
             select r.execution_id, r.job_id, r.node_key, r.agent_id,
                    r.workspace_id,
-                   hashtext('ws:' || r.workspace_id)::int as ws_lock_key
+                   hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key
             from agent_execution_requests r
             where r.state='queued'
               -- kind='code' payloads are self-contained: no versioned Agent
@@ -57,12 +68,14 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
                           and d.version=r.pinned_agent_version)
                          or (r.pinned_agent_version is null and d.status='published'))
               )
-            for update of r skip locked
             """
         ).fetchall()
-        # Stable workspace-hash order; counter correctness no longer relies
-        # on it because v82 folders never wait.
-        for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
+        # EXEC-GENERATION-001 single global batch order (ws lock key,
+        # job_id): advisory xact locks accumulate until COMMIT, so the walk
+        # order must match finish_many / the claim batch / the other sweeps.
+        for row in sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["job_id"]))):
+            if not lock_sweep_candidate(conn, row):
+                continue
             error = (
                 f"Agent definition {row['agent_id']!r} was disabled or changed"
                 " while the request was queued"
