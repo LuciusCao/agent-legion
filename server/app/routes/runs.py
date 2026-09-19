@@ -18,7 +18,7 @@ for the machine identity).
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.app.auth.api_intake import require_workspace_api_intake
 from server.app.auth.dependencies import get_current_user
@@ -34,6 +34,7 @@ from server.app.routes.run_contracts import (
     RunListResponse,
 )
 from server.app.services.job_errors import JobServiceError
+from server.app.services.materials import MaterialStorageUnavailableError
 from server.app.services.run_service import RunService
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,9 @@ def create_runs_router(service: RunService) -> APIRouter:
                 workflow_key=body.get("workflow_key") or workspace_id,
                 items=body["items"],
             )
+        except MaterialStorageUnavailableError as exc:
+            # text items need the object store (same 503 as the materials API).
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except JobServiceError as exc:
             raise_job_http_error(exc)
         if user.get("actor_scope") == WORKSPACE_API_SCOPE:

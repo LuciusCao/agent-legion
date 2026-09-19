@@ -39,6 +39,17 @@ All notable changes to this project are documented here. The format follows [Kee
 - 开发环境对齐（issue #526/#483）：`uv run` 全量 `--frozen`（镜像 index 不再污染 uv.lock），`.python-version` 钉 3.13；含 sigterm 用例竞态根治。
 - Release Notes / CHANGELOG 排版规范落版（#697）：`docs/release-notes.md` 收编排版红线与三条产品线（主仓 / worker / velites）的发布说明模板，velites release notes 改为按 conventional 前缀自动分组生成；存量 CHANGELOG（0.1.0–0.7.12 段）一次性重排为一条 bullet 一个逻辑行。
 
+## [Unreleased]
+
+### Added
+- 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进
+  run 请求，`RunService` 在全部校验通过后把它落成一份 ready 的 Markdown
+  材料（sha256 内容寻址、对象先写行后插、`.md`/`.txt` 白名单、UTF-8
+  ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker
+  物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio
+  入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。设计
+  见 docs/architecture/materials-and-runs-design.md §4.1。
+
 ## [0.7.12] - 2026-09-16
 
 执行平面收尾与系统性还债版本；发布窗口内合入 #659 状态计数死锁修复与 Studio 交互线（#658/#660/#664/#666/#667/#668/#643+#673）。

@@ -10,7 +10,9 @@ class WorkflowDefinitionError(ValueError):
     """Raised when a workflow YAML file is invalid."""
 
 
-ACCEPTED_ITEM_TYPES = ("material", "ref", "bundle")
+#: ``text`` = requirement text typed straight into the add-items dialog; it
+#: is persisted as a ready material before resolution (run_text_items.py).
+ACCEPTED_ITEM_TYPES = ("material", "ref", "bundle", "text")
 
 #: Item types a start node accepts when it does not declare a contract;
 #: also the synthetic start's contract for pre-start definitions (D3).

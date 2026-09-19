@@ -13,12 +13,19 @@ import { api, createRun } from '../api'
 import { useUiStore } from '../stores/uiStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
-import { acceptedItemTypes, itemTypeLabel } from '../lib/acceptedItemTypes'
+import { acceptedItemTypes } from '../lib/acceptedItemTypes'
 import { parseRefIds } from '../lib/addItems'
 import type { RunItem, WorkspaceResponse } from '../types'
 import { AddItemsBundlePanel } from './AddItemsBundlePanel'
+import { AddItemsContractHint } from './AddItemsContractHint'
 import { AddItemsExistingMaterials } from './AddItemsExistingMaterials'
 import { AddItemsRefPanel } from './AddItemsRefPanel'
+import {
+  AddItemsTextPanel,
+  DEFAULT_TEXT_FILENAME,
+  textItemReady,
+  textRunItem,
+} from './AddItemsTextPanel'
 import { AddItemsUploadPanel } from './AddItemsUploadPanel'
 import { useBundleUploads } from './useBundleUploads'
 import { useMaterialUploads } from './useMaterialUploads'
@@ -30,12 +37,12 @@ type AddItemsDialogProps = {
   workspaceId?: string
 }
 
-type TabKey = 'upload' | 'ref' | 'existing' | 'bundle'
+type TabKey = 'upload' | 'ref' | 'existing' | 'bundle' | 'text'
 
 /**
  * 添加条目对话框：按条目类型各一个面板组件（上传材料 / 粘贴 ID /
- * 已有材料），可用的类型由 workflow start 节点的入口契约决定
- * （EXEC-WORKFLOW-START-001）。
+ * 已有材料 / 文件夹打包 / 输入需求），可用的类型由 workflow start 节点的
+ * 入口契约决定（EXEC-WORKFLOW-START-001）。
  */
 export function AddItemsDialog({
   open,
@@ -47,6 +54,8 @@ export function AddItemsDialog({
   const [refText, setRefText] = useState('')
   const [connectionKey, setConnectionKey] = useState('')
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
+  const [text, setText] = useState('')
+  const [textFilename, setTextFilename] = useState(DEFAULT_TEXT_FILENAME)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const {
@@ -87,19 +96,20 @@ export function AddItemsDialog({
   const materialAccepted = acceptedTypes.includes('material')
   const refAccepted = acceptedTypes.includes('ref')
   const bundleAccepted = acceptedTypes.includes('bundle')
-  // 当前 tab 不被契约接受时落到可用 tab（派生值，不触发额外渲染循环）。
-  const fallbackTab: TabKey = materialAccepted
-    ? 'upload'
-    : bundleAccepted
-      ? 'bundle'
-      : 'ref'
-  const tabAllowed =
-    tab === 'ref'
-      ? refAccepted
-      : tab === 'bundle'
-        ? bundleAccepted
-        : materialAccepted
-  const activeTab = tabAllowed ? tab : fallbackTab
+  const textAccepted = acceptedTypes.includes('text')
+  const tabAllowedByKey: Record<TabKey, boolean> = {
+    upload: materialAccepted,
+    existing: materialAccepted,
+    bundle: bundleAccepted,
+    ref: refAccepted,
+    text: textAccepted,
+  }
+  // 当前 tab 不被契约接受时落到首个可用 tab（派生值，不触发额外渲染循环）。
+  const fallbackTab =
+    (['upload', 'bundle', 'text', 'ref'] as const).find(
+      (key) => tabAllowedByKey[key]
+    ) ?? 'upload'
+  const activeTab = tabAllowedByKey[tab] ? tab : fallbackTab
 
   const toggleMaterial = useCallback((materialId: string) => {
     setSelectedMaterialIds((prev) =>
@@ -115,15 +125,20 @@ export function AddItemsDialog({
     setRefText('')
     setConnectionKey('')
     setSelectedMaterialIds([])
+    setText('')
+    setTextFilename(DEFAULT_TEXT_FILENAME)
     setTab('upload')
   }, [resetUploads, resetBundles])
 
   const refIds = useMemo(() => parseRefIds(refText), [refText])
+  // 一段需求文本 = 1 个条目；空白或超长不计数。
+  const textItems = textAccepted && textItemReady(text) ? 1 : 0
   // 契约解析后收窄的窗口期：隐藏面板里残留的条目不计数、不提交。
   const totalItems =
     (materialAccepted ? doneEntries.length + selectedMaterialIds.length : 0) +
     (bundleAccepted ? readyBundles.length : 0) +
-    (refAccepted ? refIds.length : 0)
+    (refAccepted ? refIds.length : 0) +
+    textItems
 
   const handleClose = useCallback(() => {
     resetState()
@@ -150,6 +165,7 @@ export function AddItemsDialog({
         connection_key: connectionKey.trim(),
         external_id: id,
       })),
+      ...(textItems ? [textRunItem(text, textFilename)] : []),
     ]
     setIsSubmitting(true)
     try {
@@ -178,6 +194,9 @@ export function AddItemsDialog({
     readyBundles,
     refIds,
     connectionKey,
+    textItems,
+    text,
+    textFilename,
     showToast,
     resetState,
     onClose,
@@ -214,25 +233,9 @@ export function AddItemsDialog({
               disabled={!materialAccepted}
             />
             <Tab label="文件夹打包" value="bundle" disabled={!bundleAccepted} />
+            <Tab label="输入需求" value="text" disabled={!textAccepted} />
           </Tabs>
-          {(!materialAccepted || !refAccepted || !bundleAccepted) && (
-            <div className={styles.errorHint} data-testid="item-type-hint">
-              当前工作流只接受：
-              {
-                // 规范顺序 material/ref/bundle：逐布尔展开（而不是 filter
-                // acceptedTypes）让顺序与契约常量 ACCEPTED_ITEM_TYPES 解耦，
-                // 改数组顺序不会意外改变展示顺序。
-                [
-                  materialAccepted && itemTypeLabel('material'),
-                  refAccepted && itemTypeLabel('ref'),
-                  bundleAccepted && itemTypeLabel('bundle'),
-                ]
-                  .filter(Boolean)
-                  .join('、')
-              }
-              。其他提交方式已隐藏，可在 Studio 的入口节点调整。
-            </div>
-          )}
+          <AddItemsContractHint accepted={acceptedTypes} />
           {activeTab === 'upload' && (
             <AddItemsUploadPanel
               entries={entries}
@@ -263,6 +266,14 @@ export function AddItemsDialog({
               onAddFolder={addFolder}
               onRetry={retryBundle}
               onRemove={removeBundle}
+            />
+          )}
+          {activeTab === 'text' && (
+            <AddItemsTextPanel
+              text={text}
+              filename={textFilename}
+              onTextChange={setText}
+              onFilenameChange={setTextFilename}
             />
           )}
           {!workflowKey && !workspaceQuery.isLoading && (

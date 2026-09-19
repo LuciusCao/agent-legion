@@ -19,7 +19,7 @@ longer materializes job rows (run id + created_count; the detail endpoint and
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from server.app.db.rowmap import iso_optional, parse_object
 from server.app.events import JobEventManager
@@ -33,7 +33,11 @@ from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.run_item_resolution import resolve_run_items
 from server.app.services.run_item_types import validate_run_item_types
 from server.app.services.run_partial_failure import compensate_partial_creation
+from server.app.services.run_text_items import materialize_text_items
 from server.app.settings import Settings
+
+if TYPE_CHECKING:
+    from server.app.services.materials import MaterialsService
 from server.app.workflows.definition import workflow_definition_from_dict
 
 # Runs created from items carry this marker in source_kind; legacy rows keep
@@ -70,11 +74,15 @@ class RunService:
         settings: Settings,
         job_event_manager: JobEventManager | None = None,
         job_event_buffer: Any | None = None,
+        materials_service: MaterialsService | None = None,
     ):
         self.job_db = job_db
         self.settings = settings
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
+        # Object store seam for ``text`` items (run_text_items); None keeps
+        # text submissions failing closed with 503 like the materials API.
+        self.materials_service = materials_service
 
     def create_run(
         self,
@@ -108,9 +116,8 @@ class RunService:
 
         profile.note_run_intake(len(items))
 
-        # Validate everything (items, node config, pins) before the first
+        # Validate everything (node config, pins, items) before the first
         # write so a rejected request leaves no half-created run behind.
-        candidates = resolve_run_items(self.job_db, workspace_id, items)
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
@@ -125,6 +132,14 @@ class RunService:
             workspace_id,
             workflow_key,
             list(definition.executable_nodes),
+        )
+        # Text items become ready materials here (the module docstring of
+        # run_text_items explains why this write keeps the fail-closed
+        # contract); everything else resolves read-only as before.
+        candidates = resolve_run_items(
+            self.job_db,
+            workspace_id,
+            materialize_text_items(self.job_db, self.materials_service, workspace_id, items),
         )
 
         # Same dedup contract as intake: items whose (source_type, source_id)
