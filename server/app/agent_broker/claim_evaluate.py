@@ -156,16 +156,20 @@ def evaluate_candidate(
             int(shard_index),
             selected["execution_id"],
             datetime.now(UTC),
+            execution_generation=request_generation,
         ):
             cancel_request(conn, selected["execution_id"])
             state.skip_reasons["shard_not_pending"] += 1
             return None
     else:
+        # EXEC-GENERATION-001：与 code 池 claim_lease 同纪律——翻 running 盖
+        # 当前代次戳（CAS 已验证 == jobs 现值），否则旁支旧戳行在 claim 后
+        # 仍带旧戳，成孤儿时 recover 的代次闸门会拒绝复位。
         updated = conn.execute(
             "update job_nodes set status='running', stale_reason='', error_message='',"
-            " started_at=current_timestamp, finished_at=null"
+            " started_at=current_timestamp, finished_at=null, execution_generation=%s"
             " where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')",
-            (selected["job_id"], selected["node_key"]),
+            (request_generation, selected["job_id"], selected["node_key"]),
         )
         if updated.rowcount == 0:
             cancel_request(conn, selected["execution_id"])

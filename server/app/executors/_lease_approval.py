@@ -10,10 +10,12 @@ in one poll pass), and job status re-derives via ``sync_job_status``.
 EXEC-GENERATION-001: the park transaction takes the per-job mutation
 advisory lock and CAS-checks the candidate's epoch against
 jobs.execution_generation (a reset since evaluation skips the park — the
-next poll pass re-parks against the new epoch). A successful park stamps
-the job_nodes row with the current epoch (park itself never bumps it), so
-the later approve/reject decision can prove its target is not a pre-reset
-leftover.
+next poll pass re-parks against the new epoch). A successful park also
+stamps the job_nodes row with the current epoch (provenance for which
+epoch parked it; park itself never bumps it). Decisions on the parked
+gate are guarded by status alone (``_guard_awaiting``): a reset of the
+gate flips it out of awaiting_approval before any decision can land,
+while a bump from an untouched sibling branch must not brick the gate.
 """
 
 from __future__ import annotations

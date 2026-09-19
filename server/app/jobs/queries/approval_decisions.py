@@ -34,14 +34,14 @@ class ApprovalGateConflict(ValueError):
 def _lock_job_mutation(conn: Any, job_id: str) -> None:
     """EXEC-GENERATION-001: decision writes serialize with the mutation side
     (``lease_guarded_mutation``) on the per-job advisory lock — taken as the
-    transaction's first statement so the generation guard below reads a state
-    no concurrent reset can still change."""
+    transaction's first statement so the status guard below reads a state no
+    concurrent reset can still change."""
     conn.execute("select pg_advisory_xact_lock(hashtext('job-mutation:' || %s))", (job_id,))
 
 
 def _guard_awaiting(conn: Any, job_id: str, node_key: str) -> None:
     row = conn.execute(
-        "select status, execution_generation from job_nodes where job_id=%s and node_key=%s",
+        "select status from job_nodes where job_id=%s and node_key=%s",
         (job_id, node_key),
     ).fetchone()
     if row is None:
@@ -50,19 +50,12 @@ def _guard_awaiting(conn: Any, job_id: str, node_key: str) -> None:
         raise ApprovalGateConflict(
             f"Node {node_key} is not awaiting approval (status: {row['status']})"
         )
-    # EXEC-GENERATION-001: the parked gate row carries the epoch that parked
-    # it; a rerun/run-to/upgrade bump since then makes this decision target
-    # stale — the gate the reviewer looked at no longer exists.
-    job_row = conn.execute(
-        "select execution_generation from jobs where id=%s", (job_id,)
-    ).fetchone()
-    current_generation = int(job_row["execution_generation"]) if job_row is not None else None
-    if current_generation != int(row["execution_generation"]):
-        raise ApprovalGateConflict(
-            f"Node {node_key} approval target is stale"
-            f" (node generation {row['execution_generation']}, job generation"
-            f" {current_generation}); the gate was reset by a rerun/upgrade"
-        )
+    # EXEC-GENERATION-001：这里刻意不做「gate 行代次戳 == jobs 现值」比较。
+    # bump 是无条件全局的（分支 B 的 rerun 也 bump），而重置只给闭包内节点
+    # 盖戳——全局比较会把未被重置的已 park gate 误判过期（awaiting_approval
+    # 不可重新 park，等于永久 brick）。gate 自身被重置时状态先离开
+    # awaiting_approval（pending/stale），状态守卫已拦住针对旧 gate 的迟到
+    # 决策；重新 park 后到达的决策面向的是新一轮待审，接受即正确。
 
 
 def _insert_decision(conn: Any, decision: dict[str, Any]) -> None:

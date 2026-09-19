@@ -15,7 +15,9 @@ lock_timeout=5s（有环必现、意外等待有界），thread.join(timeout=30)
    JobMutationConflict(busy)。
 2. claim-after-guard：mutation 先持锁 bump 代次，claim 阻塞后 CAS 不符 →
    取消请求（cancelled + manifest trim），不 promote。
-3. late enqueue：upgrade 提交后按旧代次 enqueue+claim → claim CAS 取消。
+3. late enqueue：upgrade 提交后按旧代次 enqueue → #645 评审 P1 起 enqueue
+   事务内 CAS 直接拒绝插入（返回 None、零行）；claim CAS 对「重置闭包之外
+   节点的存量请求」的兜底由案例 2 钉住。
 4. late local claim：code 池 LeaseClaimRequest 旧代次 → None，零写入。
 5. late approval：旧代次 park 的 gate 在 upgrade 重置后 → approve_gate_atomic
    ApprovalGateConflict，job_nodes 不被翻转。
@@ -25,6 +27,9 @@ lock_timeout=5s（有环必现、意外等待有界），thread.join(timeout=30)
 8. 批 AB-BA 回归（阶段 7 任务 A）：finish_many 与 agent claim 批跨两个
    workspace 反向 job 序并发——统一 (ws 锁键, job_id) 批序下无 40P01、双方
    提交；旧纯 job_id 序下本案必死锁（突变自检覆盖）。
+9. claim 盖戳（审查 P2-b）：兄弟节点 rerun bump 代次后，旁支 pending 行
+   （旧戳）上的 agent claim 翻 running 必须盖 jobs 现值戳——否则该行成
+   孤儿时 recover 的代次闸门拒绝复位，节点永久 running。
 
 xdist 兼容：所有同步都走 pg_locks 观测 + join 超时，不用跨用例状态；每个
 用例的 job/workspace id 独立，TRUNCATE 隔离照常。
@@ -371,11 +376,16 @@ def test_claim_after_guard_loses_generation_cas(job_db) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_late_enqueue_with_stale_generation_is_cancelled_at_claim(job_db) -> None:
-    """钉住「enqueue 携带的代次在 claim 处兜底」：upgrade 提交后才按旧代次
-    入队的请求（评估缓存过期产物）在 claim CAS 处被取消（cancelled +
-    manifest trim），job_nodes 不动（保持 upgrade 后的 pending 新戳）。
-    最终状态 == 串行序「upgrade → 迟到入队 → claim 拒」。"""
+def test_late_enqueue_with_stale_generation_is_refused_at_enqueue(job_db) -> None:
+    """钉住「enqueue 事务内的代次 CAS」（#645 评审 P1）：upgrade 提交后才按
+    旧代次入队的请求（评估缓存过期产物）在 INSERT 前被拒——返回 None、
+    零行插入，job_nodes 不动（保持 upgrade 后的 pending 新戳）。最终状态
+    == 串行序「upgrade → 迟到入队被拒」。
+
+    拒绝前（P1 修复前）的语义由本用例的旧版钉住：迟到行落在 claim CAS 的
+    取消面内，但远端 Worker 离线时 claim 永不发生，has_active_request 会
+    把新代次节点的重派无限期挡住——故 CAS 前移到 enqueue 事务内。claim 侧
+    CAS 对存量请求的兜底仍由案例 2 钉住。"""
     job_id = "race3-job"
     _seed_agent_lane(job_db, workspace_id="race3-ws", job_id=job_id)
     with lease_guarded_mutation(
@@ -383,19 +393,28 @@ def test_late_enqueue_with_stale_generation_is_cancelled_at_claim(job_db) -> Non
     ) as conn:
         _upgrade_mutation(conn, job_id, ["generate"])
     # upgrade 提交后才入队的旧代次请求（dispatch 评估发生在 bump 之前）。
-    execution_id = _enqueue(job_db, workspace_id="race3-ws", job_id=job_id, generation=0)
-    _register_worker("worker-race3")
-    broker = AgentExecutionBroker(TIMED_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
-
-    claimed = broker.claim("worker-race3")
-
-    assert claimed is None
-    request = _fetchone(
-        "select state, manifest_json from agent_execution_requests where execution_id=%s",
-        (execution_id,),
+    stale = AgentExecutionBroker(TIMED_DATABASE_URL, data_dir=job_db.jobs_dir.parent).enqueue(
+        AgentExecutionRequest(
+            workspace_id="race3-ws",
+            job_id=job_id,
+            workflow_key="questions",
+            node_key="generate",
+            agent_id="generator-v1",
+            agent_definition_hash=_DEFINITION.definition_hash(),
+            manifest={
+                "job_id": job_id,
+                "log_path": f"logs/{job_id}.log",
+                "execution": {"provider": "gateway", "model": "test-model"},
+            },
+            execution_generation=0,
+        )
     )
-    assert request["state"] == "cancelled"
-    assert '"trimmed": true' in str(request["manifest_json"])
+
+    assert stale is None  # 代次不符：不插入
+    assert (
+        _count("select count(*) as cnt from agent_execution_requests where job_id=%s", (job_id,))
+        == 0
+    )
     node = _node_row(job_id, "generate")
     assert node["status"] == "pending"
     assert int(node["execution_generation"]) == 1  # upgrade 的新戳原样保留
@@ -703,3 +722,35 @@ def test_finish_many_vs_agent_claim_batch_no_ab_ba(job_db) -> None:
         assert lease["status"] == "released"
         request = _fetchone("select state from agent_execution_requests where job_id=%s", (job_id,))
         assert request["state"] == "claimed"
+
+
+# ---------------------------------------------------------------------------
+# 9. claim 盖戳（审查 P2-b）
+# ---------------------------------------------------------------------------
+
+
+def test_claim_stamps_running_node_with_current_generation(job_db) -> None:
+    """钉住「agent claim 翻 running 盖当前代次戳」（与 code 池 claim_lease、
+    park_awaiting_approval 对称）：兄弟节点 rerun 把代次 bump 到 1 后，旁支
+    pending 行（旧戳 0）上的新请求（代次 1）claim 成功，job_nodes 行必须
+    盖新戳 1——不盖戳的行成孤儿时 recover 的代次闸门拒绝复位，节点永久
+    卡 running。"""
+    job_id = "race9-job"
+    _seed_agent_lane(job_db, workspace_id="race9-ws", job_id=job_id)
+    _add_node(job_db, job_id, "sibling")
+    with lease_guarded_mutation(
+        TIMED_DATABASE_URL, job_id, datetime.now(UTC), reject_running_nodes=True
+    ) as conn:
+        mark_nodes_for_rerun(conn, job_id, ["sibling"], {"sibling": []})
+    node = _node_row(job_id, "generate")
+    assert int(node["execution_generation"]) == 0  # 旁支行旧戳
+    _enqueue(job_db, workspace_id="race9-ws", job_id=job_id, generation=1)
+    _register_worker("worker-race9")
+    broker = AgentExecutionBroker(TIMED_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    claimed = broker.claim("worker-race9")
+
+    assert claimed is not None
+    node = _node_row(job_id, "generate")
+    assert node["status"] == "running"
+    assert int(node["execution_generation"]) == 1  # == jobs 现值

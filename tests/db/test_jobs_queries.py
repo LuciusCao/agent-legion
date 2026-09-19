@@ -1,9 +1,16 @@
+import threading
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 from psycopg import IntegrityError
 
+from server.app.jobs.job_state_mutations import (
+    JobMutationConflict,
+)
+from server.app.jobs.job_state_mutations import (
+    resume_job as resume_job_mutation,
+)
 from server.app.jobs.queries import JobQueries
 from server.app.jobs.storage_layout import job_storage_dir
 from tests.helpers.job_dirs import job_storage_ref
@@ -330,6 +337,83 @@ def test_execution_control_mutations_raise_for_unknown_job(tmp_path: Path) -> No
 
     with pytest.raises(ValueError):
         db.clear_job_execution_target("missing-job")
+
+
+def test_resume_job_does_not_clobber_concurrent_run_to(tmp_path: Path) -> None:
+    """EXEC-GENERATION-001 审查 P2-a：resume 的守卫必须收进 UPDATE 谓词。
+
+    B 线程的 resume 先 SELECT 到 paused/target_reached 旧态；SELECT 与
+    UPDATE 之间（代理连接在此处放行）主连接提交 run-to 终态
+    （until_node/node_b）。B 的 UPDATE 在 READ COMMITTED 下重评估谓词 →
+    不命中 → JobMutationConflict；run-to 已提交的 execution_mode/
+    target_node_key 不被抹回 'full'/null。旧实现（无守卫谓词）下 B 按
+    SELECT 旧值落笔，末尾三条断言变红。
+    """
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = db.create_workspace("Resume Race Workspace", default_workflow_key="demo_workflow")
+    job = db.create_job(
+        workflow_key="demo_workflow",
+        source_type="question_id",
+        source_id="Q-RESUME-RACE",
+        run_id="",
+        title="Resume Race Job",
+        node_keys=["node_a", "node_b"],
+        workspace_id=workspace["id"],
+    )
+    db.set_job_execution_target(job["id"], "node_a")
+    db.pause_job(job["id"], "target_reached")
+    with db.connect() as conn:
+        conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
+
+    selected = threading.Event()
+    proceed = threading.Event()
+    outcome: dict[str, object] = {}
+
+    class _GateConn:
+        """在 resume 的 SELECT 之后、UPDATE 之前挂起，让主连接插入已提交的
+        run-to 变更——确定性复现 SELECT-then-UPDATE 交错（无需行锁观测）。"""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def execute(self, sql, params=None):
+            result = self._inner.execute(sql, params)
+            if str(sql).lstrip().lower().startswith("select status, pause_reason"):
+                selected.set()
+                assert proceed.wait(timeout=10), "main side never released the resume"
+            return result
+
+    def _resume() -> None:
+        ctx = db.connect()
+        conn_b = ctx.__enter__()
+        try:
+            resume_job_mutation(_GateConn(conn_b), job["id"])
+        except JobMutationConflict as exc:
+            outcome["error"] = exc
+        finally:
+            ctx.__exit__(None, None, None)
+
+    thread = threading.Thread(target=_resume, daemon=True)
+    thread.start()
+    assert selected.wait(timeout=10), "resume SELECT never ran"
+    # B 停在 SELECT 与 UPDATE 之间；此刻提交 run-to 终态。
+    with db.connect() as conn:
+        conn.execute(
+            "update jobs set status='queued', execution_mode='until_node',"
+            " target_node_key='node_b', execution_paused=0, pause_reason='' where id=%s",
+            (job["id"],),
+        )
+    proceed.set()
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "resume never resolved"
+
+    error = outcome.get("error")
+    assert isinstance(error, JobMutationConflict) and error.reason_code == "not_resumable"
+    control = db.get_job_execution_control(job["id"])
+    assert control is not None
+    assert control["execution_mode"] == "until_node"
+    assert control["target_node_key"] == "node_b"
+    assert control["execution_paused"] is False
 
 
 def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:

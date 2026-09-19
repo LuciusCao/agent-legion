@@ -91,12 +91,17 @@ def try_start_shard(
     shard_index: int,
     execution_id: str,
     started_at: datetime | str,
+    *,
+    execution_generation: int | None = None,
 ) -> bool:
     """Flip one pending shard to running under its own execution_id.
 
     Returns False when the shard is no longer claimable (already claimed, or
     the owning node left a runnable state). Also flips ``job_nodes`` to
     running on the first shard claim; later shard claims leave it running.
+    ``execution_generation`` (EXEC-GENERATION-001) stamps the job_nodes row
+    with the claim-time epoch — the same stamp the non-shard claim writes, so
+    the orphan-recovery generation gate accepts the row later.
     """
     node = conn.execute(
         "select status from job_nodes where job_id=%s and node_key=%s",
@@ -114,14 +119,26 @@ def try_start_shard(
     )
     if cursor.rowcount == 0:
         return False
-    conn.execute(
-        """
-        update job_nodes
-        set status='running', stale_reason='', error_message='', started_at=%s, finished_at=null
-        where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
-        """,
-        (started_at, job_id, node_key),
-    )
+    if execution_generation is None:
+        conn.execute(
+            """
+            update job_nodes
+            set status='running', stale_reason='', error_message='',
+                started_at=%s, finished_at=null
+            where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
+            """,
+            (started_at, job_id, node_key),
+        )
+    else:
+        conn.execute(
+            """
+            update job_nodes
+            set status='running', stale_reason='', error_message='',
+                started_at=%s, finished_at=null, execution_generation=%s
+            where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
+            """,
+            (started_at, execution_generation, job_id, node_key),
+        )
     return True
 
 

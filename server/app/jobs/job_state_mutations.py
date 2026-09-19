@@ -71,8 +71,11 @@ _RESUMABLE_JOB_STATUSES = {"paused"}
 def resume_job(conn: DatabaseConnection, job_id: str) -> None:
     """Resume a job inside an active transaction.
 
-    Only ``paused`` jobs may be resumed. The status check and the state
-    transition happen in the same transaction.
+    Only ``paused`` jobs may be resumed. The guard lives in the UPDATE
+    predicate itself (same discipline as ``execution_pause.py``): the SELECT
+    above only picks the branch and produces error messages — a concurrent
+    run-to committing between SELECT and UPDATE turns the rowcount to 0
+    instead of being overwritten with the stale read's values.
     """
     job = conn.execute(
         "select status, pause_reason from jobs where id=%s",
@@ -85,7 +88,8 @@ def resume_job(conn: DatabaseConnection, job_id: str) -> None:
             "not_resumable",
             f"Job is {job['status']}, only paused jobs can be resumed",
         )
-    if job["pause_reason"] == "target_reached":
+    pause_reason = str(job["pause_reason"] or "")
+    if pause_reason == "target_reached":
         cursor = conn.execute(
             """
             update jobs
@@ -95,7 +99,7 @@ def resume_job(conn: DatabaseConnection, job_id: str) -> None:
                 target_node_key=null,
                 pause_reason='',
                 updated_at=current_timestamp
-            where id=%s
+            where id=%s and status='paused' and pause_reason='target_reached'
             """,
             (job_id,),
         )
@@ -107,9 +111,18 @@ def resume_job(conn: DatabaseConnection, job_id: str) -> None:
                 execution_paused=0,
                 pause_reason='',
                 updated_at=current_timestamp
-            where id=%s
+            where id=%s and status='paused' and pause_reason=%s
             """,
-            (job_id,),
+            (job_id, pause_reason),
         )
     if cursor.rowcount == 0:
-        raise ValueError("Job not found")
+        # 守卫谓词不命中 = SELECT 与 UPDATE 之间状态被并发 mutation 改写
+        # （典型：run-to 已提交并接管 execution_mode/target_node_key）。
+        # 不落 SELECT 时的旧值，按冲突语义拒绝。
+        current = conn.execute("select status from jobs where id=%s", (job_id,)).fetchone()
+        if current is None:
+            raise ValueError("Job not found")
+        raise JobMutationConflict(
+            "not_resumable",
+            f"Job is {current['status']}, only paused jobs can be resumed",
+        )

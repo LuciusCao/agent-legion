@@ -467,18 +467,36 @@ def _decision(job_id: str, node_key: str, verdict: str) -> dict:
     }
 
 
-def test_approve_after_generation_bump_conflicts(tmp_path: Path) -> None:
-    """park 后 mutation bump 代次 → approve 旧代次节点行返回冲突，job_nodes 状态不变。"""
+def test_approve_after_bare_generation_bump_still_succeeds(tmp_path: Path) -> None:
+    """审查 P1：bump 是无条件全局的而重置只盖闭包内节点——闭包外已 park
+    的 gate（分支 B 重跑、分支 A 待审）不得被代次误判 brick；旧实现此处
+    抛 ApprovalGateConflict。gate 自身被重置时由状态守卫拦截（重置把行
+    带离 awaiting_approval；见 races 文件案 5 与 approval flow 测试）。"""
     queries, job = _seed_claimable_job(tmp_path)
     repo = ExecutorLeaseRepository(TEST_DATABASE_URL, data_dir=tmp_path)
     assert repo.park_awaiting_approval(job["id"], "a", execution_generation=0) is True
     _bump_generation(job["id"])
 
+    queries.approve_gate_atomic(_decision(job["id"], "a", "approved"))
+
+    node = _node_rows(queries, job["id"])["a"]
+    assert node["status"] == "completed"
+    assert queries.count_approval_decisions(job["id"], "a") == 1
+
+
+def test_approve_after_gate_reset_conflicts_on_status(tmp_path: Path) -> None:
+    """gate 自身被重置（bump + 行回 pending 盖新戳）后，旧决策被状态守卫
+    拦住——移除代次比较后这是防「评审员看到的旧 gate」的唯一闸门。"""
+    queries, job = _seed_claimable_job(tmp_path)
+    repo = ExecutorLeaseRepository(TEST_DATABASE_URL, data_dir=tmp_path)
+    assert repo.park_awaiting_approval(job["id"], "a", execution_generation=0) is True
+    _bump_and_reset_node(job["id"], "a")
+
     with pytest.raises(ApprovalGateConflict):
         queries.approve_gate_atomic(_decision(job["id"], "a", "approved"))
 
     node = _node_rows(queries, job["id"])["a"]
-    assert node["status"] == "awaiting_approval"
+    assert node["status"] == "pending"
     assert queries.count_approval_decisions(job["id"], "a") == 0
 
 
