@@ -184,3 +184,91 @@ def test_text_item_without_storage_returns_503(client, job_db, monkeypatch) -> N
 
     assert response.status_code == 503
     assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
+
+
+def test_text_items_mixed_with_materials_keep_order_and_dedup(client, storage, job_db) -> None:
+    """[text A, material, text A, text B]: one material per distinct text, job
+    order follows item order, the duplicate text dedups like a re-uploaded file."""
+    from tests.routes.test_runs_api import _insert_material
+
+    workspace_id = _create_workspace(client)
+    _accept_text_items(job_db, workspace_id)
+    _insert_material(job_db, workspace_id, "m-doc")
+
+    response = _create_run(
+        client,
+        workspace_id,
+        [
+            {"type": "text", "content": "A", "filename": "a.md"},
+            {"type": "material", "material_id": "m-doc"},
+            {"type": "text", "content": "A", "filename": "a.md"},
+            {"type": "text", "content": "B", "filename": "b.txt"},
+        ],
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["created_count"] == 3
+    materials = {m["filename"]: m for m in _materials(client, workspace_id)}
+    assert set(materials) == {"a.md", "b.txt", "doc.txt"}
+    assert materials["b.txt"]["content_type"] == "text/plain; charset=utf-8"
+    # Uploads record the user; text materials must too.
+    assert materials["a.md"]["created_by"] != ""
+    jobs = client.get(f"/api/workspaces/{workspace_id}/jobs?limit=10").json()["jobs"]
+    titles = sorted(job["title"] for job in jobs)
+    assert titles == ["a.md", "b.txt", "doc.txt"]
+
+
+def test_text_item_reuses_ready_row_without_writing_a_second_object(
+    client, storage, job_db
+) -> None:
+    """Same bytes already ready under another filename: reuse the row, no new object."""
+    workspace_id = _create_workspace(client)
+    _accept_text_items(job_db, workspace_id)
+    first = _create_run(
+        client, workspace_id, [{"type": "text", "content": REQUIREMENT, "filename": "a.md"}]
+    )
+    assert first.status_code == 200, first.text
+    puts_before = storage.put_calls
+
+    second = _create_run(
+        client, workspace_id, [{"type": "text", "content": REQUIREMENT, "filename": "b.md"}]
+    )
+
+    # Same material → same job dedup key → nothing new, and no orphan object.
+    assert second.status_code == 400
+    assert "No tasks were resolved" in second.json()["detail"]
+    assert storage.put_calls == puts_before
+    assert [k.rsplit("/", 1)[1] for k in storage.objects] == ["a.md"]
+
+
+def test_text_item_storage_failure_returns_503_without_a_run(client, storage, job_db) -> None:
+    workspace_id = _create_workspace(client)
+    _accept_text_items(job_db, workspace_id)
+    storage.fail_put = True
+
+    response = _create_run(client, workspace_id, [{"type": "text", "content": REQUIREMENT}])
+
+    assert response.status_code == 503
+    assert "unreachable" in response.json()["detail"]
+    assert _materials(client, workspace_id) == []
+    assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
+
+
+def test_missing_material_is_reported_before_text_is_stored(client, storage, job_db) -> None:
+    """Stored items are validated first: an unknown material id 404s before any
+    text material is written (error precedence of the pre-text path)."""
+    workspace_id = _create_workspace(client)
+    _accept_text_items(job_db, workspace_id)
+
+    response = _create_run(
+        client,
+        workspace_id,
+        [
+            {"type": "text", "content": REQUIREMENT},
+            {"type": "material", "material_id": "m-missing"},
+        ],
+    )
+
+    assert response.status_code == 404
+    assert _materials(client, workspace_id) == []
+    assert storage.objects == {}

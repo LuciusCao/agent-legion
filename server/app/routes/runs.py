@@ -54,14 +54,15 @@ def create_runs_router(service: RunService) -> APIRouter:
         user: Annotated[dict[str, Any], Depends(get_current_user)],
     ) -> RunCreateResponse:
         # #626 audit: an api-token submission attributes to the token id,
-        # never an impersonated user. The run row's created_by stays with
-        # its current semantics (empty for the items path); the request
-        # identity lands in the structured log — the same surface the worker
-        # registration handshake uses for its audit trail. This first record
-        # is the ATTEMPT (pre-validation observability); the success record
-        # below only fires after service.create_run actually created the
-        # run, so a rejected submission (mismatched workflow_key, unknown
-        # material, no active revision, duplicate) never logs a success.
+        # never an impersonated user — the api-scope identity carries no
+        # user id, so created_by below stays empty for the machine channel
+        # and only session users are recorded. The request identity lands
+        # in the structured log — the same surface the worker registration
+        # handshake uses for its audit trail. This first record is the
+        # ATTEMPT (pre-validation observability); the success record below
+        # only fires after service.create_run actually created the run, so
+        # a rejected submission (mismatched workflow_key, unknown material,
+        # no active revision, duplicate) never logs a success.
         if user.get("actor_scope") == WORKSPACE_API_SCOPE:
             logger.info(
                 "run submission attempt via workspace api token: token_id=%s workspace_id=%s",
@@ -84,6 +85,7 @@ def create_runs_router(service: RunService) -> APIRouter:
                 workspace_id,
                 workflow_key=body.get("workflow_key") or workspace_id,
                 items=body["items"],
+                created_by=str(user.get("id") or ""),
             )
         except MaterialStorageUnavailableError as exc:
             # text items need the object store (same 503 as the materials API).
