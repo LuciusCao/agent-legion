@@ -34,6 +34,15 @@ describe('EmptyStateGuide', () => {
     expect(document.querySelector('svg')).toBeInTheDocument()
   })
 
+  it('numbers the steps in order (Step 1, Step 2)', () => {
+    render(<EmptyStateGuide steps={steps} />)
+
+    const cards = document.querySelectorAll('[data-step]')
+    expect(cards[0].textContent).toContain('Step 1')
+    expect(cards[1].textContent).toContain('Step 2')
+    expect(screen.queryByText('Step 3')).toBeNull()
+  })
+
   it('renders each step title and description', () => {
     render(<EmptyStateGuide steps={steps} />)
 
