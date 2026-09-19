@@ -5,6 +5,7 @@ import {
   parseWorkflowEdgeConditions,
   parseWorkflowNode,
 } from '../shared/workflowStudioYamlDraft.parse'
+import { normalizeTextInput } from '../shared/workflowStudioYamlDraft.textInput'
 
 type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
 
@@ -51,6 +52,7 @@ export function ghostDraftNodeDetails(
       ? {
           node_type: 'start',
           accepted_item_types: parsed.accepted_item_types ?? [],
+          text_input: normalizeTextInput(parsed.text_input),
         }
       : {
           node_type:

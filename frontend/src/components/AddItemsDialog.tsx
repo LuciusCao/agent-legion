@@ -14,18 +14,14 @@ import { useUiStore } from '../stores/uiStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { acceptedItemTypes } from '../lib/acceptedItemTypes'
+import { resolveTextItem, startTextInput, textRunItem } from '../lib/textItem'
 import { parseRefIds } from '../lib/addItems'
 import type { RunItem, WorkspaceResponse } from '../types'
 import { AddItemsBundlePanel } from './AddItemsBundlePanel'
 import { AddItemsContractHint } from './AddItemsContractHint'
 import { AddItemsExistingMaterials } from './AddItemsExistingMaterials'
 import { AddItemsRefPanel } from './AddItemsRefPanel'
-import {
-  AddItemsTextPanel,
-  DEFAULT_TEXT_FILENAME,
-  textItemReady,
-  textRunItem,
-} from './AddItemsTextPanel'
+import { AddItemsTextPanel } from './AddItemsTextPanel'
 import { AddItemsUploadPanel } from './AddItemsUploadPanel'
 import { useBundleUploads } from './useBundleUploads'
 import { useMaterialUploads } from './useMaterialUploads'
@@ -54,8 +50,9 @@ export function AddItemsDialog({
   const [refText, setRefText] = useState('')
   const [connectionKey, setConnectionKey] = useState('')
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
-  const [text, setText] = useState('')
-  const [textFilename, setTextFilename] = useState(DEFAULT_TEXT_FILENAME)
+  // null = 用户未输入，回落到入口节点 text_input 的模板 / 文件名。
+  const [text, setText] = useState<string | null>(null)
+  const [textFilename, setTextFilename] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const {
@@ -125,14 +122,16 @@ export function AddItemsDialog({
     setRefText('')
     setConnectionKey('')
     setSelectedMaterialIds([])
-    setText('')
-    setTextFilename(DEFAULT_TEXT_FILENAME)
+    setText(null)
+    setTextFilename(null)
     setTab('upload')
   }, [resetUploads, resetBundles])
 
   const refIds = useMemo(() => parseRefIds(refText), [refText])
-  // 一段需求文本 = 1 个条目；空白或超长不计数。
-  const textItems = textAccepted && textItemReady(text) ? 1 : 0
+  // 一段需求文本 = 1 个条目；空白、超长或模板未改不计数。
+  const textConfig = startTextInput(workflowQuery.data)
+  const textItem = resolveTextItem(text, textFilename, textConfig)
+  const textItems = textAccepted && textItem.ready ? 1 : 0
   // 契约解析后收窄的窗口期：隐藏面板里残留的条目不计数、不提交。
   const totalItems =
     (materialAccepted ? doneEntries.length + selectedMaterialIds.length : 0) +
@@ -165,7 +164,7 @@ export function AddItemsDialog({
         connection_key: connectionKey.trim(),
         external_id: id,
       })),
-      ...(textItems ? [textRunItem(text, textFilename)] : []),
+      ...(textItems ? [textRunItem(textItem)] : []),
     ]
     setIsSubmitting(true)
     try {
@@ -195,8 +194,7 @@ export function AddItemsDialog({
     refIds,
     connectionKey,
     textItems,
-    text,
-    textFilename,
+    textItem,
     showToast,
     resetState,
     onClose,
@@ -270,8 +268,8 @@ export function AddItemsDialog({
           )}
           {activeTab === 'text' && (
             <AddItemsTextPanel
-              text={text}
-              filename={textFilename}
+              item={textItem}
+              config={textConfig}
               onTextChange={setText}
               onFilenameChange={setTextFilename}
             />
