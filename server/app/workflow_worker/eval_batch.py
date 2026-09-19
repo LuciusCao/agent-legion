@@ -61,9 +61,14 @@ def evaluate_changed_jobs(
         # missing after the attempt is NOT cached in job_evals (the next
         # poll pass re-evaluates and retries; a missing object may be
         # transient) and any stale cache entry is dropped so no candidate
-        # built on the pre-eviction state can be claimed.
+        # built on the pre-eviction state can be claimed. #702 P1: hydration
+        # brackets the restores with two jobs.execution_generation reads — a
+        # reset mutation committing mid-flight invalidates the manifest rows
+        # the restores came from, so a changed epoch discards exactly this
+        # round's restored files and defers the job the same way.
         unrestored = hydrate_job_artifacts(
             worker.artifact_object_store,
+            worker.job_db,
             job_id=str(job["id"]),
             job_dir=job_dir,
             definition=definition_to_run,

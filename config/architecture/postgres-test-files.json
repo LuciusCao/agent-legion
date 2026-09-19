@@ -53,6 +53,7 @@
     "tests/db/test_status_counts_deadlock.py",
     "tests/db/test_studio_chat_schema.py",
     "tests/db/test_studio_publish_requests_schema.py",
+    "tests/db/test_upgrade_lock_domains.py",
     "tests/db/test_versioned_entities_migration.py",
     "tests/db/test_workflow_catalog_retirement.py",
     "tests/db/test_workflow_node_explicit_types_migration.py",

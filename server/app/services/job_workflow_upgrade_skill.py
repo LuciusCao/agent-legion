@@ -28,6 +28,12 @@ FileLock、不写锁文档——判定只剩纯 DB 读（``read_skill_lock``）
 + 字符串比较，因此可以在持有 ``implementation-publication`` advisory 锁的
 guard 事务内安全重验（``job_workflow_upgrade_apply``），事务回滚不留任何
 skill 面副作用。
+
+#759 P2-B：锁文档写（dispatch 首次 pin 与 ``make skills-lock`` 重锁，
+均经 ``SkillLockStore.put_lock``）与 upgrade 的读共享 ``skill-lock``
+全域 advisory 锁——plan 阶段短事务取锁+读，guard 事务内先取锁再无锁
+读（``domain_held``），重验到提交之间 relock 被挡住；dispatch 热路径
+的解析读不进本域。
 """
 
 from __future__ import annotations
@@ -44,7 +50,7 @@ from server.app.workflows.workflow_node_skill import effective_node_skill
 logger = logging.getLogger(__name__)
 
 
-def read_skill_lock(job_db: JobQueries) -> SkillsLock | None:
+def read_skill_lock(job_db: JobQueries, *, domain_held: bool = False) -> SkillsLock | None:
     """skill 锁文档的 DB 直读（照 ``_published_catalog`` 模板）。
 
     skill 身份判定是安全敏感读（产物冒充检查）：``SkillManager._doc_cache``
@@ -53,11 +59,19 @@ def read_skill_lock(job_db: JobQueries) -> SkillsLock | None:
     直读 ``global_settings.skill_lock``（BOUNDARY-DATA-001 门面），plan 与
     guard 事务内重验走同一权威读取。只读不写：upgrade 永不触发首次 pin
     （pin 写只属于 dispatch 热路径与 ``make skills-lock``）。读取失败返回
-    None（保守：全部 skill 绑定节点不可证明 → 重跑）。"""
+    None（保守：全部 skill 绑定节点不可证明 → 重跑）。
+
+    #759 P2-B（skill-lock 全域 advisory 锁）：``domain_held=False``
+    （plan 阶段）经 ``get_lock_locked`` 短事务取锁+读——读到的锁文档
+    不旧于任何已完成的 relock；``domain_held=True``（guard 事务内重验）
+    由调用方先在 guard 连接上取锁（xact 锁不可跨连接重入，另起短事务
+    会与 guard 事务自锁），本读走无锁 ``get_lock``，重验到提交之间
+    relock 被挡住。"""
     from server.app.services.skill_lock_store import SkillLockStore
 
     try:
-        return SkillLockStore(job_db).get_lock()
+        store = SkillLockStore(job_db)
+        return store.get_lock() if domain_held else store.get_lock_locked()
     except Exception:
         # #204 broad-except audit: 锁文档读取失败（DB 断连、文档损坏等
         # 数据态故障）降级为「skill 面全部不可证明」——保守重跑，不让升级

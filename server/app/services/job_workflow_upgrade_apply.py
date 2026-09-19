@@ -1,10 +1,13 @@
 """upgrade-workflow 的单次应用尝试（#759 4.4 的重试单元；文件预算拆分）。
 
 一次尝试 = ``resolve_upgrade_context`` → ``plan_inherit_nodes`` →
-lease guard 事务 → 提交后收尾。guard 事务**首步**重读 workspace 当前
-active revision（``assert_context_revision_current``）：revision 发布
-不经 job-mutation 锁，plan 与应用之间的发布（TOCTOU）只能靠事务内
-重读兜底——与 ``context.active`` 不符即抛 ``ActiveRevisionChangedError``
+lease guard 事务 → 提交后收尾。guard 事务**首步**取
+``implementation-publication`` workspace advisory 锁（无条件，#759 P2-A），
+随后在锁下重读 workspace 当前 active revision
+（``assert_context_revision_current``）：revision 发布不经 job-mutation
+锁，但发布/原地编辑与 upgrade 重验共享同一 publication 锁域——重读到
+提交之间的发布被挡住，锁下重读兜底 plan 与应用之间已完成的发布
+（TOCTOU）——与 ``context.active`` 不符即抛 ``ActiveRevisionChangedError``
 整个尝试作废，service 层整体重试一次（重解 context + 重 plan + 重进
 事务；plan、frozen config、继承集全部来自同一份新 context.active，
 禁止半应用状态）。重读先于任何产物暂存与写操作，作废的尝试零副作用。
@@ -90,16 +93,27 @@ def apply_upgrade_once(
             # #759 P1：重验只剩纯 DB 读 + 字符串比较——skill 面直读锁
             # 文档（绕 5s doc cache）、latest 恒定排除、upgrade 永不
             # pin/不跑 git 子进程，事务回滚不留 skill 面副作用。
+            # #759 P2-A（锁序：job-mutation → implementation-publication →
+            # skill-lock，写进 EXEC-GENERATION-001）：publication 锁无条件
+            # 取且在 active revision 重读之前（clean 模式/空继承候选同取，
+            # 一次 advisory 锁的成本）——revision 发布与 runtime-only 原地
+            # 编辑已入同域，重读到本事务提交之间 active revision 不可变。
+            service.job_db.acquire_implementation_publication_lock(conn, workspace_id)
             assert_context_revision_current(service.job_db, workspace_id, context)
             if inherit_nodes:
                 # 与 Agent/node-code 的 publish/rollback/archive 共用
                 # workspace 事务锁，重验到提交之间 published 身份不可变。
-                service.job_db.acquire_implementation_publication_lock(conn, workspace_id)
+                # #759 P2-B：skill-lock 全域锁在重验读锁文档之前取——重验
+                # 到提交之间 relock/首次 pin 被挡住；读侧不再自取
+                # （domain_held=True，xact advisory 锁不可跨连接重入，
+                # 另起短事务取锁会与 guard 事务自锁）。
+                service.job_db.acquire_skill_lock_domain_lock(conn)
                 revalidated = implementation_excluded_nodes(
                     service.job_db,
                     context.job,
                     context.definition,
                     custom_nodes_enabled=service.custom_nodes_enabled,
+                    skill_lock_domain_held=True,
                 )
                 if revalidated:
                     # 重验得到的是新的变更种子，不只是要从 keep 集剔除

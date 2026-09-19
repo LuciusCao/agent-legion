@@ -37,8 +37,10 @@ class UpgradeContext:
 class ActiveRevisionChangedError(Exception):
     """guard 事务内重读的 active revision 与 ``context.active`` 不符（#759 4.4）。
 
-    revision 发布不经 job-mutation 锁：plan 与应用之间的发布只能靠在
-    guard 事务内重读兜底。service 层捕获本信号后**整体重试一次**
+    revision 发布不经 job-mutation 锁，但与 upgrade 重验共享
+    ``implementation-publication`` advisory 锁域（#759 P2-A）：guard 在
+    重读前无条件取该锁，plan 与应用之间**已完成**的发布由锁下重读兜底，
+    重读到提交之间的发布被锁挡住。service 层捕获本信号后**整体重试一次**
     （重解 context + 重 plan + 重进事务），第二次仍不符以冲突结果返回。
     """
 

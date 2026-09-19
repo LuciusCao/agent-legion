@@ -362,6 +362,99 @@ def test_missing_object_defers_evaluation_without_caching(tmp_path: Path) -> Non
     worker.stop()
 
 
+def test_generation_bump_during_hydration_discards_restored_files(tmp_path: Path) -> None:
+    """代次复核（#702 P1）：恢复写与复核之间 mutation 提交 → 恢复文件被删除。
+
+    交错构造：包装 ``rows_for_job``，在 hydration 读到清单行之后、恢复写
+    与第二次代次读取之前，模拟 mutation 提交的两件事（删清单行 + bump
+    ``jobs.execution_generation``，与 mark_nodes_for_rerun 同事务）。断言：
+    本轮恢复落盘的文件被删除、不写评估缓存、节点保持 pending、下一轮
+    不再回填（清单行已删）。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    definition = WorkflowDefinition(
+        key="test",
+        label="Test",
+        intake=WorkflowIntake(),
+        nodes={
+            "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["a_out.json"]),
+            "b": WorkflowNode(
+                key="b",
+                label="B",
+                capability="cap_b",
+                after=["a"],
+                inputs=["a_out.json"],
+                outputs=["b_out.json"],
+            ),
+        },
+    )
+    job = queries.create_job(
+        workflow_key="test",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["a", "b"],
+        workspace_id=workspace["id"],
+    )
+    queries.update_job_node(job["id"], "a", status="completed")
+    job_dir = resolve_job_dir(job, queries.jobs_dir)
+    storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
+    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
+    assert not (job_dir / "a_out.json").exists()
+
+    store = JobArtifactObjectStore(
+        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: _A_PAYLOAD})
+    )
+    original_rows_for_job = store.rows_for_job
+    mutation_committed = False
+
+    def mutating_rows_for_job(job_id: str):
+        rows = original_rows_for_job(job_id)
+        nonlocal mutation_committed
+        if not mutation_committed:
+            mutation_committed = True
+            # 模拟 reset mutation 在 hydration 的两次代次读取之间提交：
+            # 清单行删除与代次 bump 在真实路径上是同一事务（EXEC-GENERATION-001）。
+            with closing(connect_database(queries.dsn_identity)) as conn, conn:
+                conn.execute(
+                    "delete from job_artifacts where job_id=%s and name='a_out.json'", (job_id,)
+                )
+                conn.execute(
+                    "update jobs set execution_generation=execution_generation+1 where id=%s",
+                    (job_id,),
+                )
+        return rows
+
+    store.rows_for_job = mutating_rows_for_job  # type: ignore[method-assign]
+    # 播种 b 的 published code：排除「无 code」成为不 claim 的混杂因素。
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "test", "b")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path, TEST_DATABASE_URL, executor, [definition], artifact_object_store=store
+    )
+
+    worker._poll()
+
+    # 代次失配：恢复的字节被丢弃（文件不存在）、b 保持 pending、无 claim、
+    # 不写 job_evals 缓存（恢复不全按不缓存纪律处理）。
+    assert mutation_committed
+    assert not (job_dir / "a_out.json").exists()
+    assert queries.get_job_node(job["id"], "b")["status"] == "pending"
+    assert worker.leases.active_counts("code").get("global", 0) == 0
+    assert job["id"] not in worker.state.job_evals
+
+    worker._poll()
+
+    # 清单行已删：下一轮不再回填；本轮评估为不 ready 并正常缓存。
+    assert not (job_dir / "a_out.json").exists()
+    assert queries.get_job_node(job["id"], "b")["status"] == "pending"
+    assert worker.state.job_evals[job["id"]][1] == []
+
+    worker.stop()
+
+
 def test_no_object_storage_keeps_pre_hydration_behavior(tmp_path: Path) -> None:
     """未配置对象存储（store=None）→ hydration no-op，行为与现状一致。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")

@@ -192,6 +192,7 @@ def implementation_excluded_nodes(
     definition: WorkflowDefinition,
     *,
     custom_nodes_enabled: bool = True,
+    skill_lock_domain_held: bool = False,
 ) -> frozenset[str]:
     """执行面排除集：实现身份不可证明/已漂移 + Agent 定义 runtime_mutable 键。
 
@@ -200,6 +201,10 @@ def implementation_excluded_nodes(
     定义侧 runtime_mutable 键（定义不变、只翻转 override 值再翻回时
     frozen/身份两侧全等）并入同一排除集——对 ``compute_inherit_reset_
     nodes`` 而言都是「无论 diff 是否变化都强制重跑」的节点。
+
+    ``skill_lock_domain_held``（#759 P2-B）：True 表示调用方已在 guard
+    事务内持有 skill-lock advisory 锁（锁文档读不再自取）；plan 阶段
+    为 False，``read_skill_lock`` 走短事务取锁+读。
     """
     executable = frozenset(definition.executable_nodes)
     if not executable:
@@ -214,7 +219,8 @@ def implementation_excluded_nodes(
     # codex 五轮 P1-A（#759 收紧）：skill 内容身份（姊妹模块）——锁文档
     # 直读 DB 权威值，latest 恒定排除，pinned 无锁条目即不可证明。
     resolved_agents = _resolved_agent_nodes(catalog, definition)
-    excluded |= skill_excluded_nodes(resolved_agents, definition, executed, read_skill_lock(job_db))
+    skill_lock = read_skill_lock(job_db, domain_held=skill_lock_domain_held)
+    excluded |= skill_excluded_nodes(resolved_agents, definition, executed, skill_lock)
     for key, node in definition.executable_nodes.items():
         record = executed.get(key)
         if record is None:

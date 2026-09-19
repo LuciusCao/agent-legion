@@ -42,7 +42,18 @@ _PUBLICATION_LOCK_PREFIX = "implementation-publication:"
 
 
 def acquire_implementation_publication_lock(conn: Any, workspace_id: str | None) -> None:
-    """Serialize published Agent/node-code changes with upgrade revalidation."""
+    """Serialize published Agent/node-code changes with upgrade revalidation.
+
+    锁域三成员（#759 P2-A 补全）：versioned_entities 的 Agent/node_code
+    publish/rollback/archive（``services/versioned_entities.py``）、
+    workflow revision 发布与 runtime-only 原地编辑
+    （``workflow_revision_projection.create_workflow_revision_with_projection``
+    / ``workflow_revision_runtime.save_revision_runtime_or_publish``）、
+    upgrade guard 事务内的 active revision 重读 + 实现身份重验
+    （``job_workflow_upgrade_apply``）。加锁序写死在
+    EXEC-GENERATION-001：job-mutation → implementation-publication →
+    skill-lock；发布侧不取 job-mutation 锁（不碰 job 行），无环。
+    """
     scope = workspace_id if workspace_id is not None else "<global>"
     conn.execute(
         "select pg_advisory_xact_lock(hashtext(%s))",
