@@ -24,7 +24,7 @@ revision）补出清理面：
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from server.app.services.job_artifact_staging_scope import staging_output_names
 from server.app.workflows.definition import WorkflowDefinition
@@ -42,16 +42,6 @@ class RemovedArtifactFace:
 
     def __bool__(self) -> bool:
         return bool(self.names or self.run_keys)
-
-    @property
-    def is_empty(self) -> bool:
-        return not (self.names or self.run_keys)
-
-
-@dataclass
-class _FaceBuilder:
-    names: set[str] = field(default_factory=set)
-    run_keys: set[str] = field(default_factory=set)
 
 
 def deleted_node_keys(
@@ -77,33 +67,45 @@ def unprotected_input_names(definition: WorkflowDefinition) -> frozenset[str]:
 
     名 X 失去保护 ⇔ 新图中 X 的**每个** consumer 都保证在 X 的某个
     producer 之后执行：自举生产者（纯 producer，自身不消费 X，无需旧
-    对象即可产出）经依赖邻接（显式边 ∪ 同名以外的隐式消费边——X 自己
-    的隐式边正是被保留的启动对象所满足的等待，不能当保证证据）可达
-    全部 consumer；RMW producer 自己被保证先行时加入自举集（fixpoint）。
-    同名 producer 不能保证先于 consumer（反例：q 是 x 的 RMW 节点，
-    q→p 且 p 纯产 x）时保留保护——旧 x 仍是 q 首跑的启动输入。
+    对象即可产出）经依赖邻接可达全部 consumer；RMW producer 自己被保证
+    先行时加入自举集（内层 fixpoint）。
+
+    #759 复审 P1（跨名互证）：判定「保证先行」时路径上经由的隐式消费边
+    所跨的名字本身必须会在本次清理中缺席——经由 RMW 名（不暂存，旧文件
+    存活）或受保护名（清单行保留）的隐式边不构成因果序：旧文件在场，
+    consumer 的 ready gate 不会等其 producer 重跑。名字的保护状态因此
+    互相依赖（X 的证明借 W 的边、W 的证明借 X 边即互证反例），判定是
+    名集合上的**最小**不动点：从空集（无任何名的隐式边可作证据）向上
+    迭代，一轮只用上一轮已证明缺席的名的隐式边（判 X 时 X 未入集，
+    自己的隐式边天然被排除，防自证）；算子单调（缺席集越大可用边越
+    多）、名集有限，至多 |names| 轮收敛；任何证不出的名保留保护——
+    保守方向是多留清单行/旧对象，从不错删。
     """
     executable = definition.executable_nodes
-    unprotected: set[str] = set()
     names = {name for node in executable.values() for name in node.inputs}
-    for name in sorted(names):
-        producers = {key for key, node in executable.items() if name in node.outputs}
-        sufficient = {key for key in producers if name not in executable[key].inputs}
-        if not sufficient:
-            # 外部输入 / 纯 RMW 互依赖：没有无需旧对象即可产出的生产者。
-            unprotected.add(name)
-            continue
-        children = dependency_children(definition, skip_consumption_names={name})
-        while True:
-            covered = walk_downstream(children, sufficient)
-            grown = sufficient | (producers & covered)
-            if grown == sufficient:
-                break
-            sufficient = grown
-        consumers = {key for key, node in executable.items() if name in node.inputs}
-        if not consumers <= walk_downstream(children, sufficient):
-            unprotected.add(name)
-    return frozenset(unprotected)
+    cleanable: set[str] = set()
+    while True:
+        children = dependency_children(definition, skip_consumption_names=names - cleanable)
+        grown = set(cleanable)
+        for name in sorted(names - cleanable):
+            producers = {key for key, node in executable.items() if name in node.outputs}
+            sufficient = {key for key in producers if name not in executable[key].inputs}
+            if not sufficient:
+                # 外部输入 / 纯 RMW 互依赖：没有无需旧对象即可产出的生产者。
+                continue
+            while True:
+                covered = walk_downstream(children, sufficient)
+                expanded = sufficient | (producers & covered)
+                if expanded == sufficient:
+                    break
+                sufficient = expanded
+            consumers = {key for key, node in executable.items() if name in node.inputs}
+            if consumers <= walk_downstream(children, sufficient):
+                grown.add(name)
+        if grown == cleanable:
+            break
+        cleanable = grown
+    return frozenset(names - cleanable)
 
 
 def removed_artifact_face(
@@ -123,7 +125,8 @@ def removed_artifact_face(
     """
     if old_definition is None:
         return RemovedArtifactFace()
-    builder = _FaceBuilder()
+    names: set[str] = set()
+    run_keys: set[str] = set()
     # 保留节点声明的输入 ∪ 输出：清理面不得触碰（A3 口径）。
     keep_io: set[str] = set()
     for key in keep_keys:
@@ -146,15 +149,15 @@ def removed_artifact_face(
             continue
         new_node = new_definition.nodes.get(key)
         declared = set() if new_node is None else set(new_node.outputs) | set(new_node.inputs)
-        builder.names.update(set(old_node.outputs) - declared)
+        names.update(set(old_node.outputs) - declared)
     # 被删节点（旧有新无）：全部输出名（4.2 起含 RMW 名）+ 运行历史目录。
     for key, old_node in old_definition.nodes.items():
         if key not in new_definition.nodes:
-            builder.names.update(old_node.outputs)
-            builder.run_keys.add(key)
-    builder.names -= keep_io
-    builder.names -= unprotected_input_names(new_definition)
+            names.update(old_node.outputs)
+            run_keys.add(key)
+    names -= keep_io
+    names -= unprotected_input_names(new_definition)
     # 与既有暂存面重叠的名（重置节点的新输出）不重复计——stage_outputs
     # 的正常路径已覆盖。
-    builder.names -= staging_output_names(new_definition, set(reset_keys))
-    return RemovedArtifactFace(frozenset(builder.names), frozenset(builder.run_keys))
+    names -= staging_output_names(new_definition, set(reset_keys))
+    return RemovedArtifactFace(frozenset(names), frozenset(run_keys))

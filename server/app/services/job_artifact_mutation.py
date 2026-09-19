@@ -9,7 +9,7 @@ from typing import Any
 from server.app.services.job_artifact_staging_scope import staging_output_names
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import dependency_children, walk_downstream
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +119,18 @@ class JobArtifactMutationService:
             storage_dir.mkdir(parents=True, exist_ok=True)
 
         affected_keys: set[str] = set(node_keys)
+        # #759 复审 P2：暂存面与重置面（stale 标记，调用方均传
+        # dependency_downstream）同一闭包口径——显式边 ∪ 隐式消费边的合并
+        # 下游。loader 不要求 input 的生产者有显式边：隐式消费者被标
+        # stale 参与重跑，其旧产物不暂存/不清行的话，重跑未完成的窗口里
+        # API 继续展示旧字节（#508 语义对隐式消费者失效）。upgrade 路径
+        # 传 closure=reset_keys 且 node_keys == closure，交集截断后与
+        # 重置面恒等，不沿下游扩散的截断语义不变。
+        children = dependency_children(definition)
         for node_key in node_keys:
             if node_key not in definition.nodes:
                 raise ValueError(f"Unknown node: {node_key}")
-            affected_keys.update(downstream_nodes(definition, node_key))
+            affected_keys.update(walk_downstream(children, [node_key]))
 
         if closure is not None:
             affected_keys &= set(closure)

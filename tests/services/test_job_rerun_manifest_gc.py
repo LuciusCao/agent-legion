@@ -64,44 +64,39 @@ def _seed_job_with_manifest(
     workspace: Any,
     storage: FakeObjectStorage,
     source_id: str = "Q1",
+    node_outputs: tuple[tuple[str, str], ...] = (("up", "up.json"), ("down", "down.json")),
 ) -> dict[str, Any]:
+    node_keys = [key for key, _ in node_outputs]
     batch = job_db.create_run(
-        "chain_workflow",
+        definition.key,
         "batch_by_ids",
         {"question_ids": [source_id]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="chain_workflow",
+        workflow_key=definition.key,
         source_type="question",
         source_id=source_id,
         run_id=batch["id"],
         title="Question 1",
-        node_keys=["up", "down"],
+        node_keys=node_keys,
         workspace_id=workspace["id"],
         workflow_definition_snapshot_json=serialize_definition(definition),
     )
-    job_db.update_job_node(job["id"], "up", status="completed")
-    job_db.update_job_node(job["id"], "down", status="completed")
+    for key in node_keys:
+        job_db.update_job_node(job["id"], key, status="completed")
     storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("up.json", "down.json"):
-        (storage_dir / name).write_text(f"{name} content")
     store = JobArtifactObjectStore(job_db, storage)
-    store.upload(
-        workspace_id=str(workspace["id"]),
-        job_id=job["id"],
-        node_key="up",
-        name="up.json",
-        local_path=storage_dir / "up.json",
-    )
-    store.upload(
-        workspace_id=str(workspace["id"]),
-        job_id=job["id"],
-        node_key="down",
-        name="down.json",
-        local_path=storage_dir / "down.json",
-    )
+    for node_key, name in node_outputs:
+        (storage_dir / name).write_text(f"{name} content")
+        store.upload(
+            workspace_id=str(workspace["id"]),
+            job_id=job["id"],
+            node_key=node_key,
+            name=name,
+            local_path=storage_dir / name,
+        )
     return job
 
 
@@ -505,3 +500,138 @@ def test_batch_rerun_continues_when_post_commit_cleanup_fails(
 
     assert [r["job_id"] for r in results] == [job_a["id"], job_b["id"]]
     assert [r["status"] for r in results] == ["succeeded", "succeeded"]
+
+
+# ---------------------------------------------------------------------------
+# #759 复审 P2：暂存面与重置面同一合并下游口径（隐式消费者）
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def implicit_consumer_definition():
+    """down 隐式消费 up.json（声明 input 但无显式入边）。"""
+    return WorkflowDefinition(
+        key="chain_workflow",
+        label="Chain",
+        intake=WorkflowIntake(),
+        nodes={
+            "up": WorkflowNode(key="up", label="Up", capability="up", outputs=["up.json"]),
+            "down": WorkflowNode(
+                key="down",
+                label="Down",
+                capability="down",
+                inputs=["up.json"],
+                outputs=["down.json"],
+            ),
+        },
+    )
+
+
+def test_rerun_stages_implicit_consumer_outputs_and_rows(
+    job_db, settings, implicit_consumer_definition
+):
+    """#759 复审 P2：隐式消费者的产物与清单行随同一闭包暂存/删除。
+
+    down 是 up 的隐式消费者（无显式入边）：stale 面
+    （``dependency_downstream``，显式边 ∪ 隐式消费边）已把 down 并入重
+    跑，但暂存面此前按显式边 ``downstream_nodes`` 扩展——down 被标
+    stale、``node_runs`` 引用清空，旧产物文件与清单行却存活：重跑未完成
+    （重跑失败）的窗口里 artifact API 继续展示并回填旧字节（#508 语义对
+    隐式消费者失效）。修复后暂存面与重置面同口径：down.json 本地暂存
+    （提交后删除）、清单行事务内删除、对象 best-effort 清理。
+    """
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, implicit_consumer_definition, workspace=workspace, storage=storage
+    )
+    service = _make_rerun_service(job_db, settings, storage)
+
+    result = service.rerun(workspace["id"], job["id"], "up")
+
+    assert result["status"] == "succeeded"
+    nodes = {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job["id"])}
+    assert nodes == {"up": "pending", "down": "stale"}
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
+    assert not (storage_dir / "up.json").exists()
+    assert not (storage_dir / "down.json").exists()
+    # 重跑尚未完成的窗口内，down 的旧产物不再出 API 清单、也不再可回填。
+    store = JobArtifactObjectStore(job_db, storage)
+    assert store.names_for_job(job["id"]) == set()
+    deleted_names = {key.rsplit("/", 1)[-1] for key in storage.deleted}
+    assert deleted_names == {"up.json", "down.json"}
+
+
+def test_run_to_stages_implicit_consumer_inside_target_closure(job_db, settings):
+    """#759 复审 P2（run-to 入口）：目标闭包内的隐式消费者同口径暂存，
+    闭包外下游的产物保持不动（closure 截断语义不变）。
+
+    mid 隐式消费 up.json（无显式入边）但经 mid→target 显式边落在
+    target 的 ancestor closure 内；post 在闭包外。run_to(target,
+    start=up) 的 stale 面按合并下游覆盖 mid/post，暂存面只覆盖闭包内：
+    mid.json 暂存/清行，post.json 保留。
+    """
+    definition = WorkflowDefinition(
+        key="chain_workflow",
+        label="Chain",
+        intake=WorkflowIntake(),
+        nodes={
+            "up": WorkflowNode(key="up", label="Up", capability="up", outputs=["up.json"]),
+            "mid": WorkflowNode(
+                key="mid",
+                label="Mid",
+                capability="mid",
+                inputs=["up.json"],
+                outputs=["mid.json"],
+            ),
+            "target": WorkflowNode(
+                key="target",
+                label="Target",
+                capability="target",
+                after=["up", "mid"],
+                inputs=["mid.json"],
+                outputs=["t.json"],
+            ),
+            "post": WorkflowNode(
+                key="post",
+                label="Post",
+                capability="post",
+                after=["target"],
+                outputs=["post.json"],
+            ),
+        },
+    )
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db,
+        settings,
+        definition,
+        workspace=workspace,
+        storage=storage,
+        node_outputs=(
+            ("up", "up.json"),
+            ("mid", "mid.json"),
+            ("target", "t.json"),
+            ("post", "post.json"),
+        ),
+    )
+    store = JobArtifactObjectStore(job_db, storage)
+    service = JobExecutionService(
+        job_db,
+        JobArtifactMutationService(settings.jobs_dir),
+        ExecutorLeaseRepository(job_db, data_dir=settings.data_dir),
+        object_store=store,
+    )
+
+    result = service.run_to(workspace["id"], job["id"], "target", start_node_key="up")
+
+    assert result["status"] == "succeeded"
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
+    # 闭包内（含隐式消费者 mid）：产物暂存删除、清单行清除。
+    assert not (storage_dir / "up.json").exists()
+    assert not (storage_dir / "mid.json").exists()
+    assert not (storage_dir / "t.json").exists()
+    # 闭包外下游 post：产物与清单行保留（截断语义不变）。
+    assert (storage_dir / "post.json").exists()
+    assert store.names_for_job(job["id"]) == {"post.json"}

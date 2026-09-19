@@ -27,7 +27,10 @@ def consumer_edges(
     ``skip_names``（#759 4.1）：排除经由这些名字的隐式边。判定「名 X 的
     consumer 是否保证在某 producer 之后执行」时，X 自己的隐式边正是被
     保留的启动对象 / manifest 回填所满足的等待——拿它当保证证据是循环
-    论证，必须由调用方排除。
+    论证，必须由调用方排除。复审 P1（跨名互证）起调用方把排除面扩大到
+    「所有尚未证明本次清理缺席的名字」：经由 RMW 名（不暂存，旧文件存
+    活）或受保护名的隐式边不构成因果序，见
+    ``job_workflow_upgrade_removed_outputs.unprotected_input_names``。
     """
     skipped = set(skip_names)
     producers: dict[str, set[str]] = {}
