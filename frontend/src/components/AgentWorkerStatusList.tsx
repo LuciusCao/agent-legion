@@ -54,6 +54,7 @@ export function AgentWorkerStatusList({
             )}
             <span className={styles.name}>{row.name}</span>
             <span className={styles.workload}>{row.workload}</span>
+            <WorkerConsoleLink url={row.consoleUrl} label="控制台" />
           </div>
         ))
       )}

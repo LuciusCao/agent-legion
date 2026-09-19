@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import requests
 
 from worker._retry import run_with_retry
+from worker.console_url import registration_config
 from worker.host.client import Client, TransientHostError, WorkerAuthError
 from worker.registration.token import registration_tokens
 
@@ -25,9 +27,13 @@ def register_from_config(
     a partial registration can never silently narrow the worker's scope."""
     tokens = [row["token"] for row in registration_tokens(config, state_dir)]
     poll_interval = float(config.get("poll_interval_seconds", 2))
+    # labels 带上 service 经 AGENT_WORKER_CONSOLE_URL 传来的控制台地址（保留键
+    # console_url），主控制台据此按 Worker 显示入口；副本不改动运行配置。
     return (
         poll_interval,
-        register_with_retry(client, config, tokens, stop, poll_interval),
+        register_with_retry(
+            client, registration_config(config, os.environ), tokens, stop, poll_interval
+        ),
     )
 
 

@@ -22,6 +22,9 @@ class RegisterAgentWorkerRequest(BaseModel):
     max_concurrency: int = Field(gt=0, le=MAX_DYNAMIC_CONCURRENCY)
     # Code-execution capacity pool (batch 2); 0/absent = agent-only Worker.
     max_code_concurrency: int = Field(default=0, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
+    # Free-form operator labels, stored verbatim. Reserved key ``console_url``:
+    # the Worker's self-reported console address (worker/console_url.py); the
+    # Host UI renders it as that Worker's 「控制台」 entry. Older Workers omit it.
     labels: dict[str, Any] = Field(default_factory=dict)
     protocol_version: int = Field(default=1, ge=1)
     # Informational only: no agent_workers column stores it yet.
