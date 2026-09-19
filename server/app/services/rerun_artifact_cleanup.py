@@ -18,6 +18,10 @@ reappeared inside the batch probe→remove gap belongs to the new attempt. The
 residual per-object window (re-probe → that object's removal call,
 milliseconds) is only closable by conditional removal or versioned keys; the
 post-removal re-check keeps it diagnosable instead of silent.
+``delete_rerun_artifact_objects`` never raises (#759 P1): the cleanup runs
+after the mutation transaction committed, so a store/probe failure is logged,
+not propagated — a 500 would misreport the committed success and, in batch
+callers, abort the remaining jobs.
 
 Every probe is a targeted existence query (``live_keys_for``: job_id + the
 retired keys, #706 review P2): each removal re-verifies its key against the
@@ -65,9 +69,33 @@ def delete_rerun_artifact_objects(
     manifest row last, so a key can reappear between the batch probe and
     the removals — a snapshot-blind removal would strand the fresh manifest
     row on a nonexistent object. Each probe ships only the retired keys,
-    never the whole manifest (#706 review P2)."""
+    never the whole manifest (#706 review P2).
+
+    Never raises (#759 P1): see the module docstring — a cleanup failure is
+    logged with the job_id and operation, not propagated."""
     if object_store is None or not getattr(object_store, "enabled", False) or not deleted_rows:
         return
+    try:
+        _delete_retired_objects(object_store, deleted_rows, job_id, operation)
+    except Exception:
+        # #204 broad-except audit: post-commit best-effort teardown. The
+        # rerun/upgrade/run-to transaction has COMMITTED by the time this
+        # runs — the operation succeeded — so a failure here (object-store
+        # SDK/network errors from live_keys_for/delete_objects, probe races;
+        # not a business family this module could enumerate) must not
+        # retroactively fail the committed mutation: a 500 would misreport
+        # the success and, in batch callers, abort the remaining jobs
+        # (#759 P1). The residue is orphaned objects, which the bucket
+        # lifecycle rule reaps — never a listed-but-stale artifact (the
+        # manifest rows are already gone). logger.exception keeps the
+        # traceback with the job_id and the calling operation's domain.
+        logger.exception("rerun %s cleanup failed for job %s", operation, job_id)
+
+
+def _delete_retired_objects(
+    object_store: Any, deleted_rows: list[dict[str, Any]], job_id: str, operation: str
+) -> None:
+    """The removal walk of ``delete_rerun_artifact_objects`` (raising body)."""
     live = _live_keys(object_store, job_id, [str(row["storage_key"]) for row in deleted_rows])
     stale_rows = [row for row in deleted_rows if str(row["storage_key"]) not in live]
     if len(stale_rows) < len(deleted_rows):

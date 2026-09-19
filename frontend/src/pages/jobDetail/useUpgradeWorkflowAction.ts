@@ -18,6 +18,12 @@ export function useUpgradeWorkflowAction(
         await upgradeJobWorkflow(jobId, mode)
         await refreshDetail()
       } catch (err) {
+        // The upgrade may have committed server-side while the response was
+        // lost (e.g. a post-commit failure turned into a 500) — refresh the
+        // authoritative detail state before surfacing the error so the UI
+        // never shows stale pre-upgrade data. A failed refresh must not mask
+        // the original error.
+        await refreshDetail().catch(() => null)
         setError(err instanceof Error ? err.message : String(err))
         throw err
       } finally {

@@ -32,6 +32,9 @@ export function JobAllMatchingUpgradeDialog({
     try {
       await onConfirm(mode)
       onClose()
+    } catch {
+      // The action owns error presentation. Keep the dialog (and selected
+      // mode) open so the user can retry after a failed request.
     } finally {
       setIsUpgrading(false)
     }

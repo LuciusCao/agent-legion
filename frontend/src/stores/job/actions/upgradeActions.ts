@@ -32,6 +32,11 @@ export function upgradeActions(set: JobStoreSet, get: () => JobState) {
           err instanceof Error ? err.message : 'Batch workflow upgrade failed'
         set({ error: message })
         useUiStore.getState().showToast(message, 'error')
+        // The batch may have partially succeeded server-side while the
+        // response was lost — refresh the list so it reflects the
+        // authoritative state. A failed refresh must not mask the original
+        // error.
+        await refreshAfterBatchOperation(get, workspaceId).catch(() => {})
         throw err
       } finally {
         set({ batchUpgradeWorkflowLoading: false })

@@ -288,3 +288,79 @@ def test_batch_upgrade_workflow_route_rejects_invalid_mode(tmp_path):
         )
 
     assert response.status_code == 422
+
+
+def test_upgrade_workflow_route_survives_post_commit_cleanup_failure(tmp_path, monkeypatch):
+    """#759 P1：post-commit 对象清理抛错不得把已提交的升级报告成 500。
+
+    经 app.state.job_artifact_objects（与 upgrade 服务共享的同一实例）
+    注入故障：enabled 置真 + live_keys_for 抛错，且播种清单行使
+    deleted_rows 非空（不是空清理假绿）。
+    """
+    from fastapi.testclient import TestClient
+
+    from server.app.services.job_artifact_objects import JobArtifactObjectStore
+
+    def _boom(self, job_id, storage_keys):
+        raise RuntimeError("object store is down")
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id)
+        current = _publish_next_revision(app, ws_id)
+        with app.state.job_db.connect() as conn:
+            conn.execute(
+                """
+                insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+                values (%s, 'intake_knowledge_points', 'legacy.json', %s, 1, 'hash')
+                """,
+                (job_id, f"jobs/{ws_id}/{job_id}/legacy.json"),
+            )
+        # 注入点放在 job 创建之后：enabled 置真的影响面只落在升级路径上。
+        monkeypatch.setattr(JobArtifactObjectStore, "enabled", property(lambda self: True))
+        monkeypatch.setattr(JobArtifactObjectStore, "live_keys_for", _boom)
+        response = c.post(f"/api/jobs/{job_id}/upgrade-workflow")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "succeeded"
+    assert body["operation"] == "upgrade_workflow"
+    upgraded = app.state.job_db.get_job(job_id)
+    assert upgraded["workflow_revision_id"] == current["id"]
+
+
+def test_batch_upgrade_workflow_route_isolates_per_job_failure(tmp_path, monkeypatch):
+    """#759 P1：单 job 的意外异常归一化为该 job 的 failed 结果项
+    （reason_code=upgrade_failed），后续 job 照常处理，响应 200 且含
+    全部结果项（与 BatchJobMutationResponse 契约一致）。
+    """
+    from fastapi.testclient import TestClient
+
+    real_upgrade = JobWorkflowUpgradeService.upgrade
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_a = _create_job(c, ws_id, question_id="Q501")
+        job_b = _create_job(c, ws_id, question_id="Q502")
+        _publish_next_revision(app, ws_id)
+
+        def _flaky(self, workspace_id, job_id, *, mode="clean"):
+            if job_id == job_a:
+                raise RuntimeError("unexpected boom")
+            return real_upgrade(self, workspace_id, job_id, mode=mode)
+
+        monkeypatch.setattr(JobWorkflowUpgradeService, "upgrade", _flaky)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
+            json={"job_ids": [job_a, job_b]},
+        )
+
+    assert response.status_code == 200
+    results = {r["job_id"]: r for r in response.json()["results"]}
+    assert set(results) == {job_a, job_b}
+    assert results[job_a]["status"] == "failed"
+    assert results[job_a]["reason_code"] == "upgrade_failed"
+    assert "unexpected boom" in results[job_a]["message"]
+    assert results[job_b]["status"] == "succeeded"
