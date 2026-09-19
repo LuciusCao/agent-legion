@@ -581,4 +581,111 @@ describe('AddItemsDialog', () => {
     // 其余 tab 被禁用后落到 bundle tab。
     expect(screen.getByTestId('add-items-bundle-input')).toBeInTheDocument()
   })
+
+  it('shows no hint when only the opt-in text type is missing', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'ref', 'bundle'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '文件夹打包' })).toBeEnabled()
+    )
+    expect(screen.getByRole('tab', { name: '输入需求' })).toBeDisabled()
+    expect(screen.queryByTestId('item-type-hint')).toBeNull()
+  })
+
+  it('keeps the text tab disabled under the default contract', async () => {
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '输入需求' })).toBeDisabled()
+    )
+    expect(screen.getByTestId('item-type-hint')).not.toHaveTextContent(
+      '直接输入需求'
+    )
+  })
+
+  it('counts typed requirement text as one item and submits a text item', async () => {
+    const onClose = vi.fn()
+    mockRevisionWithAcceptedTypes(['material', 'text'])
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 1,
+    } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+    )
+    const textTab = screen.getByRole('tab', { name: '输入需求' })
+    await waitFor(() => expect(textTab).toBeEnabled())
+    expect(screen.getByTestId('item-type-hint')).toHaveTextContent(
+      '上传文件、直接输入需求'
+    )
+    fireEvent.click(textTab)
+
+    // 空白不计数。
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '   \n' },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
+    expect(screen.getByRole('button', { name: '创建运行' })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '# 歌曲创作需求\n- 主题：告别' },
+    })
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: ' 创作需求.md ' },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+    expect(screen.getByTestId('text-summary')).toHaveTextContent(
+      '将作为 1 个条目提交'
+    )
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [
+        {
+          type: 'text',
+          content: '# 歌曲创作需求\n- 主题：告别',
+          filename: '创作需求.md',
+        },
+      ],
+    })
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('falls back to the default filename and rejects oversized text', async () => {
+    mockRevisionWithAcceptedTypes(['text'])
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 1,
+    } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    // 其余 tab 被禁用后落到 text tab。
+    await waitFor(() =>
+      expect(screen.getByLabelText('需求内容')).toBeInTheDocument()
+    )
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '需'.repeat(30000) },
+    })
+    expect(screen.getByTestId('text-summary')).toHaveTextContent('内容过长')
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
+
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '短需求' },
+    })
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [{ type: 'text', content: '短需求', filename: '需求.md' }],
+    })
+  })
 })

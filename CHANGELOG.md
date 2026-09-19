@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Added
+- 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进
+  run 请求，`RunService` 在全部校验通过后把它落成一份 ready 的 Markdown
+  材料（sha256 内容寻址、对象先写行后插、`.md`/`.txt` 白名单、UTF-8
+  ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker
+  物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio
+  入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。设计
+  见 docs/architecture/materials-and-runs-design.md §4.1。
+
 ## [0.7.12] - 2026-09-16
 
 执行平面收尾与系统性还债版本；发布窗口内合入 #659 状态计数死锁
