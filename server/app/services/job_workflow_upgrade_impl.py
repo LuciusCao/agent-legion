@@ -27,15 +27,14 @@ workspace 当前 published 的 node_code（code 节点）或 Agent 定义（agen
   节点自声明判定覆盖不到定义侧键。定义 schema 含此类键的 agent 节点
   并入本排除集（恒重跑），解析不到唯一 published 的节点 P1-1 已排除、
   不重复计入。
-- **skill 内容身份**（codex 五轮 P1-A）：agent 节点的执行内容还有
-  skill 绑定（``effective_node_skill``：节点绑定优先，
-  ``AgentDefinition.skill`` 的 legacy 兜底皆空即节点失败）。S5 只排除
-  节点显式声明 ``skill: latest`` 的面——legacy 兜底与显式具体 tag 都
-  逃过 S5；仓库 HEAD 前进或 ``make skills-lock`` 重解析 tag 后，节点
-  定义与 Agent 定义哈希都不变，inherit 保留按旧 skill commit 产出的
-  产物而 dispatch 已会执行新 commit。判定在姊妹模块
-  ``job_workflow_upgrade_skill``（``skill_excluded_nodes``）：执行记录
-  的 skill 身份与当前有效绑定解析出的 commit 比较，证明相等才可继承。
+- **skill 内容身份**（codex 五轮 P1-A，#759 P1 收紧）：agent 节点的执行
+  内容还有 skill 绑定（``effective_node_skill``：节点绑定优先，
+  ``AgentDefinition.skill`` 的 legacy 兜底皆空即节点失败）。判定在姊妹
+  模块 ``job_workflow_upgrade_skill``（``skill_excluded_nodes``）：
+  latest 绑定（显式/空归一/legacy 兜底）恒定排除；pinned ref 与 DB 锁
+  文档直读值（``read_skill_lock``，绕开 SkillManager 的 5s doc cache）
+  比较；锁内无条目 → 不可证明 → 排除。skill 面零 git I/O、零锁文档写（upgrade 永不 pin），guard 事务内重验只剩纯 DB 读 +
+  字符串比较。
 
 v85 之前本地 code 池执行无身份记录 → 一律「不可证明」恒重跑；v85 起
 claim 落列，本地池 code 节点与 Worker/Agent 节点同权可证明。
@@ -48,7 +47,7 @@ from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.jobs import JobQueries
-from server.app.services.job_workflow_upgrade_skill import skill_excluded_nodes
+from server.app.services.job_workflow_upgrade_skill import read_skill_lock, skill_excluded_nodes
 from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -193,7 +192,6 @@ def implementation_excluded_nodes(
     definition: WorkflowDefinition,
     *,
     custom_nodes_enabled: bool = True,
-    skill_manager: Any = None,
 ) -> frozenset[str]:
     """执行面排除集：实现身份不可证明/已漂移 + Agent 定义 runtime_mutable 键。
 
@@ -213,11 +211,10 @@ def implementation_excluded_nodes(
     agent_current = _current_agent_identities(catalog, definition)
     code_current = _current_code_identities(job_db, custom_nodes_enabled, workspace_id, definition)
     excluded: set[str] = set(_agent_definition_mutable_nodes(catalog, definition))
-    # codex 五轮 P1-A：skill 内容身份（姊妹模块）——skill_manager 是与
-    # dispatch 同源的 SkillManager（latest=live HEAD、tag=DB 锁）。
-    excluded |= skill_excluded_nodes(
-        _resolved_agent_nodes(catalog, definition), definition, executed, skill_manager
-    )
+    # codex 五轮 P1-A（#759 收紧）：skill 内容身份（姊妹模块）——锁文档
+    # 直读 DB 权威值，latest 恒定排除，pinned 无锁条目即不可证明。
+    resolved_agents = _resolved_agent_nodes(catalog, definition)
+    excluded |= skill_excluded_nodes(resolved_agents, definition, executed, read_skill_lock(job_db))
     for key, node in definition.executable_nodes.items():
         record = executed.get(key)
         if record is None:

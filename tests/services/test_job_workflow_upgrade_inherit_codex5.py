@@ -1,15 +1,16 @@
-"""codex 第五轮修复的 inherit 升级测试（issue #645，PR #702）。
+"""codex 第五轮修复的 inherit 升级测试（issue #645，PR #702；#759 P1 收紧）。
 
 从 codex4 姊妹文件按轮次拆出（文件预算）：
 
-- P1-A：skill 绑定按**实际 commit** 判定可继承——执行记录的 skill
-  commit（node_runs.skill_version / 请求行 manifest）与当前有效绑定
-  解析出的 commit 比较，不可证明一致时保守重跑（legacy fallback 的
-  latest 漂移 + 显式 tag 的重解析漂移两个面）；
+- P1-A（#759 收紧后语义）：skill 绑定三态判定——latest（节点显式 /
+  空归一 / AgentDefinition legacy 兜底）恒定排除、pinned ref 与 DB 锁
+  文档直读值（``global_settings.skill_lock``，绕开 SkillManager 的 5s
+  doc cache）比较、锁内无条目即不可证明排除；upgrade 全链路零 git I/O、
+  永不触发首次 pin；
 - P1-B：升级后变成 RMW 输入的旧产物保留（removed_artifact_face 排除
   新节点的 RMW 名，与 rerun 的 #114 语义对齐）；
 - P2-C：guard 事务内重验实现身份（plan→mutation TOCTOU，设计 §3 #14
-  由 codex 五轮新证据提前纳入）；
+  由 codex 五轮新证据提前纳入；#759 后重验只剩纯 DB 读 + 字符串比较）；
 - P2-D：无旧快照作业（退化 clean）清理全部旧清单行。
 """
 
@@ -26,7 +27,9 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
+from server.app.services.skill_lock_store import SkillLockStore
 from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.skills.config import SkillsLock
 from server.app.skills.manager import SkillManager
 from server.app.workflows.schema import (
     WorkflowDefinition,
@@ -41,16 +44,12 @@ from tests.helpers.job_workflow_upgrade import (
 from tests.helpers.job_workflow_upgrade import (
     seed_done_execution as _seed_done_execution,
 )
-from tests.helpers.skill_git import (
-    _commit_skill_update,
-    _head_commit,
-    _make_skill_repo,
-    _tag,
-)
-from tests.helpers.skill_store import memory_skill_store
 from tests.postgres_support import TEST_DATABASE_URL
 
 _SKILL_KEY = "wschain/sk"
+#: 假 commit（upgrade 判定零 git I/O，不需要真实仓库对象）。
+_COMMIT_V1 = "1" * 40
+_COMMIT_V2 = "2" * 40
 
 
 def _chain(outputs_by_node: dict[str, list[str]] | None = None) -> WorkflowDefinition:
@@ -118,27 +117,34 @@ def _seed_job(queries, workspace, original, node_keys) -> str:
     return str(job["id"])
 
 
-def _make_service(
-    tmp_path: Path,
-    queries: JobQueries,
-    *,
-    skill_manager: SkillManager | None = None,
-) -> JobWorkflowUpgradeService:
+def _make_service(tmp_path: Path, queries: JobQueries) -> JobWorkflowUpgradeService:
     return JobWorkflowUpgradeService(
         queries,
         ExecutorLeaseRepository(queries, data_dir=tmp_path),
         artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
-        skill_manager=skill_manager,
     )
 
 
-def _make_skill_manager(tmp_path: Path, lock: dict | None = None) -> SkillManager:
-    """测试专用 SkillManager：base_dir/runs_dir 落 tmp，锁文档可播种。"""
-    return SkillManager(
-        store=memory_skill_store(lock=lock),
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+def _put_lock(queries: JobQueries, skills: dict) -> None:
+    """把锁文档写进 DB 权威存储（``global_settings.skill_lock``）。
+
+    模拟「另一进程」的 relock（``make skills-lock`` / dispatch 首次 pin）：
+    直写 store，不经过任何 SkillManager 的 doc cache——upgrade 判定必须
+    读到这里的最新值（#759 P1）。
+    """
+    SkillLockStore(queries).put_lock(SkillsLock.model_validate({"skills": skills}))
+
+
+def _no_git_spy(monkeypatch) -> list[list[str]]:
+    """钉住「upgrade 全链路零 git I/O」：_run_git 被调用即失败。"""
+    calls: list[list[str]] = []
+
+    def _spy(self, args, check: bool = True):
+        calls.append(list(args))
+        raise AssertionError(f"upgrade path must not run git: {args}")
+
+    monkeypatch.setattr(SkillManager, "_run_git", _spy)
+    return calls
 
 
 def _seed_reachable_outputs(queries: JobQueries, job_id: str, names: list[str]) -> Path:
@@ -152,187 +158,261 @@ def _seed_reachable_outputs(queries: JobQueries, job_id: str, names: list[str]) 
 
 
 # ---------------------------------------------------------------------------
-# P1-A：skill 绑定按实际 commit 判定可继承
+# P1-A：skill 内容身份三态判定（#759 收紧：latest 恒排除 / pinned 锁比对 /
+# 无锁条目排除；upgrade 零 git I/O、永不 pin）
 # ---------------------------------------------------------------------------
 
 
-def test_skill_legacy_fallback_head_drift_reruns_node_and_downstream(tmp_path: Path) -> None:
-    """codex 五轮 P1-A 主场景：Agent definition 的 legacy skill 兜底（latest）。
-
-    旧缺陷：节点未声明 node.skill 而用 ``AgentDefinition.skill`` 时，
-    S5 的 skill:latest 排除只查 node.skill 完全不命中——skill 仓库 HEAD
-    前进后，节点定义与 Agent definition hash 两侧全等，inherit 保留按旧
-    commit 产出的产物，而 dispatch 已会执行新 commit。修复：执行记录的
-    skill commit（node_runs.skill_version 的 ref@commit12 / 请求行 manifest
-    的 skill_commit）与当前有效绑定解析出的 commit 比较，不可证明一致时
-    保守重跑。
-    """
+def _skill_bound_job(
+    tmp_path: Path,
+    *,
+    node_skill: WorkflowNodeSkill | None = None,
+    agent_skill: str = "",
+    skill_version: str = "",
+    skill_commit: str = "",
+):
+    """b 为 agent 节点的三级链 + 身份记录完备的 completed job（skill 身份可注入）。"""
     definition = _agent_chain({"a": ["a_out.json"], "b": ["b_out.json"]})
+    if node_skill is not None:
+        nodes = dict(definition.nodes)
+        nodes["b"] = dataclasses.replace(nodes["b"], skill=node_skill)
+        definition = dataclasses.replace(definition, nodes=nodes)
     queries, workspace, revisions, original = _setup(tmp_path, definition)
     revisions.publish_workspace_revision(workspace["id"], definition)
-    repo = _make_skill_repo(tmp_path / "skills", key=_SKILL_KEY)
-    head_v1 = _head_commit(repo)
-    v1 = AgentDefinition(capability="cap_b", runtime="pi", skill=_SKILL_KEY)
-    replace_agent_catalog(workspace["id"], {"agent-b": v1})
+    agent = AgentDefinition(capability="cap_b", runtime="pi", skill=agent_skill)
+    replace_agent_catalog(workspace["id"], {"agent-b": agent})
     job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
     a_hash = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {}\n")
     for key in ("a", "b"):
         queries.update_job_node(job_id, key, status="pending")
     _seed_done_execution(queries, workspace["id"], job_id, "a", kind="code", impl_hash=a_hash)
-    # b 的执行记录携带 skill 身份：node_runs.skill_version（latest@commit12）
-    # + 请求行 manifest 的完整 skill_commit（trim 保留形态）。
     _seed_done_execution(
         queries,
         workspace["id"],
         job_id,
         "b",
         kind="agent",
-        impl_hash=v1.definition_hash(),
+        impl_hash=agent.definition_hash(),
         skill=_SKILL_KEY,
-        skill_version=f"latest@{head_v1[:12]}",
-        skill_commit=head_v1,
+        skill_version=skill_version,
+        skill_commit=skill_commit,
     )
     queries.update_job_status(job_id, "completed")
     _seed_reachable_outputs(queries, job_id, ["a_out.json", "b_out.json"])
-    # skill 仓库 HEAD 前进（latest 跟随 HEAD，定义与 Agent hash 均不变）。
-    _commit_skill_update(repo, "# skill v2\n")
-    service = _make_service(tmp_path, queries, skill_manager=_make_skill_manager(tmp_path))
+    return queries, workspace, job_id
+
+
+def test_skill_legacy_fallback_latest_binding_always_reruns_node(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#759 P1 语义反转：legacy fallback（ref 恒 latest）恒定排除，零 git I/O。
+
+    旧语义（本用例前身 ``test_skill_legacy_fallback_matching_commit_keeps_node``
+    的反转）：执行记录 commit 与 live HEAD 解析相等即可继承——但 upgrade
+    判定之后 HEAD 仍可前进，commit 对比证明不了继承安全性，且判定本身要跑
+    git 子进程（rev-parse HEAD）。新语义：latest 绑定（含空 ref 归一与
+    AgentDefinition legacy 兜底）不做任何 git 解析，直接排除。
+    """
+    git_calls = _no_git_spy(monkeypatch)
+    queries, workspace, job_id = _skill_bound_job(
+        tmp_path,
+        agent_skill=_SKILL_KEY,
+        skill_version=f"latest@{_COMMIT_V1[:12]}",
+        skill_commit=_COMMIT_V1,
+    )
+    service = _make_service(tmp_path, queries)
 
     result = service.upgrade(workspace["id"], job_id, mode="inherit")
 
     statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
-    # b 的 skill commit 漂移（latest 跟随新 HEAD）→ b 及下游 c 重跑；
-    # a 无 skill 面、身份可证明 → 继承。
+    # b 的 latest 绑定恒定排除 → b 及下游 c 重跑；a 无 skill 面 → 继承。
     assert result["kept_node_count"] == 1
     assert statuses == {"a": "completed", "b": "pending", "c": "pending"}
+    assert git_calls == []
 
 
-def test_skill_legacy_fallback_matching_commit_keeps_node(tmp_path: Path) -> None:
-    """P1-A 对照组：执行时 skill commit 与当前解析一致 → 照常继承。
-
-    证明判别点是 commit 比较本身，而非「带 skill 的 agent 节点一律排除」
-    的粗面——HEAD 未动时 latest 解析与执行记录相等，b 继承。
-    """
-    definition = _agent_chain({"a": ["a_out.json"], "b": ["b_out.json"]})
-    queries, workspace, revisions, original = _setup(tmp_path, definition)
-    revisions.publish_workspace_revision(workspace["id"], definition)
-    repo = _make_skill_repo(tmp_path / "skills", key=_SKILL_KEY)
-    head_v1 = _head_commit(repo)
-    v1 = AgentDefinition(capability="cap_b", runtime="pi", skill=_SKILL_KEY)
-    replace_agent_catalog(workspace["id"], {"agent-b": v1})
-    job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
-    a_hash = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {}\n")
-    for key in ("a", "b"):
-        queries.update_job_node(job_id, key, status="pending")
-    _seed_done_execution(queries, workspace["id"], job_id, "a", kind="code", impl_hash=a_hash)
-    _seed_done_execution(
-        queries,
-        workspace["id"],
-        job_id,
-        "b",
-        kind="agent",
-        impl_hash=v1.definition_hash(),
-        skill=_SKILL_KEY,
-        skill_version=f"latest@{head_v1[:12]}",
-        skill_commit=head_v1,
+def test_skill_explicit_latest_ref_always_reruns_node(tmp_path: Path, monkeypatch) -> None:
+    """节点显式 ``skill: latest``：S5 与 P1-A skill 面同向排除，零 git I/O。"""
+    git_calls = _no_git_spy(monkeypatch)
+    queries, workspace, job_id = _skill_bound_job(
+        tmp_path,
+        node_skill=WorkflowNodeSkill(key=_SKILL_KEY, ref="latest"),
+        skill_version=f"latest@{_COMMIT_V1[:12]}",
+        skill_commit=_COMMIT_V1,
     )
-    queries.update_job_status(job_id, "completed")
-    _seed_reachable_outputs(queries, job_id, ["a_out.json", "b_out.json"])
-    service = _make_service(tmp_path, queries, skill_manager=_make_skill_manager(tmp_path))
+    service = _make_service(tmp_path, queries)
 
     result = service.upgrade(workspace["id"], job_id, mode="inherit")
 
     statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
-    # skill commit 匹配 → a/b 继承；c 无执行记录 → 保守重跑（既有语义）。
+    assert result["kept_node_count"] == 1
+    assert statuses == {"a": "completed", "b": "pending", "c": "pending"}
+    assert git_calls == []
+
+
+def test_skill_pinned_matching_lock_commit_keeps_node(tmp_path: Path, monkeypatch) -> None:
+    """pinned 正面对照：锁内 refs[ref] 与执行记录 commit 相等 → 照常继承。
+
+    证明 pinned 面的判别点是锁内 commit 比较本身，而非「带 skill 的 agent
+    节点一律排除」的粗面。
+    """
+    git_calls = _no_git_spy(monkeypatch)
+    queries, workspace, job_id = _skill_bound_job(
+        tmp_path,
+        node_skill=WorkflowNodeSkill(key=_SKILL_KEY, ref="v1"),
+        skill_version=f"v1@{_COMMIT_V1[:12]}",
+        skill_commit=_COMMIT_V1,
+    )
+    _put_lock(queries, {_SKILL_KEY: {"repo": "", "refs": {"v1": _COMMIT_V1}}})
+    service = _make_service(tmp_path, queries)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    # 锁内 v1 == 执行记录 commit → a/b 继承；c 无执行记录 → 保守重跑。
+    assert result["kept_node_count"] == 2
+    assert statuses == {"a": "completed", "b": "completed", "c": "pending"}
+    assert git_calls == []
+
+
+def test_skill_pinned_matching_lock_prefix_record_keeps_node(tmp_path: Path) -> None:
+    """pinned 前缀形态：记录只有 node_runs 的 ``ref@commit12`` 时按前缀等长截断比较。"""
+    queries, workspace, job_id = _skill_bound_job(
+        tmp_path,
+        node_skill=WorkflowNodeSkill(key=_SKILL_KEY, ref="v1"),
+        skill_version=f"v1@{_COMMIT_V1[:12]}",
+        skill_commit="",  # 请求行 manifest 无完整 sha → 回落 version 前缀
+    )
+    _put_lock(queries, {_SKILL_KEY: {"repo": "", "refs": {"v1": _COMMIT_V1}}})
+    service = _make_service(tmp_path, queries)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
     assert result["kept_node_count"] == 2
     assert statuses == {"a": "completed", "b": "completed", "c": "pending"}
 
 
-def test_skill_pinned_tag_relock_drift_reruns_node(tmp_path: Path) -> None:
-    """P1-A 显式 tag 面：make skills-lock 重解析后锁内 commit 漂移。
+def test_skill_pinned_relock_drift_reruns_node(tmp_path: Path) -> None:
+    """pinned 漂移面：make skills-lock 重解析后锁内 commit ≠ 执行记录 → 重跑。
 
-    节点显式绑定 ``skill: {key, ref: v1}``（S5 不排除具体 tag）：tag 被
-    retag 且锁经 ``make skills-lock`` 重解析后，节点定义与 Agent hash 都
-    不变，但 dispatch 解析出的 commit 已漂移——比较面必须命中锁内新
-    commit 与执行记录的不一致。
+    节点定义与 Agent hash 都不变，但 dispatch 经锁解析出的 commit 已漂移
+    （旧 ``test_skill_pinned_tag_relock_drift_reruns_node`` 的 DB 锁形态）。
     """
-    nodes_override = {
-        "b": dataclasses.replace(
-            _chain({"b": ["b_out.json"]}).nodes["b"],
-            node_type="agent",
-            skill=WorkflowNodeSkill(key=_SKILL_KEY, ref="v1"),
-        )
-    }
-    definition = _chain({"b": ["b_out.json"]})
-    nodes = dict(definition.nodes)
-    nodes["b"] = nodes_override["b"]
-    definition = dataclasses.replace(definition, nodes=nodes)
-    queries, workspace, revisions, original = _setup(tmp_path, definition)
-    revisions.publish_workspace_revision(workspace["id"], definition)
-    repo = _make_skill_repo(tmp_path / "skills", key=_SKILL_KEY)
-    commit_v1 = _tag(repo, "v1")
-    v1 = AgentDefinition(capability="cap_b", runtime="pi")
-    replace_agent_catalog(workspace["id"], {"agent-b": v1})
-    job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
-    a_hash = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {}\n")
-    for key in ("a", "b"):
-        queries.update_job_node(job_id, key, status="pending")
-    _seed_done_execution(queries, workspace["id"], job_id, "a", kind="code", impl_hash=a_hash)
-    _seed_done_execution(
-        queries,
-        workspace["id"],
-        job_id,
-        "b",
-        kind="agent",
-        impl_hash=v1.definition_hash(),
-        skill=_SKILL_KEY,
-        skill_version=f"v1@{commit_v1[:12]}",
-        skill_commit=commit_v1,
+    queries, workspace, job_id = _skill_bound_job(
+        tmp_path,
+        node_skill=WorkflowNodeSkill(key=_SKILL_KEY, ref="v1"),
+        skill_version=f"v1@{_COMMIT_V1[:12]}",
+        skill_commit=_COMMIT_V1,
     )
-    queries.update_job_status(job_id, "completed")
-    _seed_reachable_outputs(queries, job_id, ["a_out.json", "b_out.json"])
-    # tag 重解析：HEAD 前进 + tag force 移动 + 锁内 v1 → 新 commit
-    # （make skills-lock 的等价手动形态；真实链路里锁由 CLI 刷新）。
-    commit_v2 = _commit_skill_update(repo, "# skill v2\n")
-    _tag(repo, "v1", force=True)
-    lock = {
-        "version": "2",
-        "skills": {_SKILL_KEY: {"repo": "", "refs": {"v1": commit_v2}}},
-    }
-    service = _make_service(tmp_path, queries, skill_manager=_make_skill_manager(tmp_path, lock))
+    _put_lock(queries, {_SKILL_KEY: {"repo": "", "refs": {"v1": _COMMIT_V2}}})
+    service = _make_service(tmp_path, queries)
 
     result = service.upgrade(workspace["id"], job_id, mode="inherit")
 
     statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
-    # 锁内 v1 解析到新 commit ≠ 执行记录 commit_v1 → b 及下游 c 重跑。
+    # 锁内 v1=C2 ≠ 执行记录 C1 → b 及下游 c 重跑；a 继承。
     assert result["kept_node_count"] == 1
     assert statuses == {"a": "completed", "b": "pending", "c": "pending"}
 
 
+def test_skill_pinned_ref_missing_from_lock_reruns_node(tmp_path: Path) -> None:
+    """锁内无该 ref → 不可证明 → 排除（upgrade 永不触发首次 pin）。
+
+    pin 写只属于 dispatch 热路径与 ``make skills-lock``；upgrade 看到
+    未 pin 的 ref 只能保守重跑。
+    """
+    queries, workspace, job_id = _skill_bound_job(
+        tmp_path,
+        node_skill=WorkflowNodeSkill(key=_SKILL_KEY, ref="v1"),
+        skill_version=f"v1@{_COMMIT_V1[:12]}",
+        skill_commit=_COMMIT_V1,
+    )
+    # 锁文档存在、该 skill 有条目，但 refs 里没有 v1。
+    _put_lock(queries, {_SKILL_KEY: {"repo": "", "refs": {"v2": _COMMIT_V2}}})
+    service = _make_service(tmp_path, queries)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    assert result["kept_node_count"] == 1
+    assert statuses == {"a": "completed", "b": "pending", "c": "pending"}
+
+
+def test_skill_pinned_without_lock_document_reruns_node(tmp_path: Path) -> None:
+    """锁文档整体缺失（从未播种）→ pinned 绑定同样不可证明 → 排除。"""
+    queries, workspace, job_id = _skill_bound_job(
+        tmp_path,
+        node_skill=WorkflowNodeSkill(key=_SKILL_KEY, ref="v1"),
+        skill_version=f"v1@{_COMMIT_V1[:12]}",
+        skill_commit=_COMMIT_V1,
+    )
+    service = _make_service(tmp_path, queries)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    assert result["kept_node_count"] == 1
+    assert statuses == {"a": "completed", "b": "pending", "c": "pending"}
+
+
+def test_skill_relock_between_plan_and_guard_uses_fresh_lock(tmp_path: Path, monkeypatch) -> None:
+    """#759 P1 跨进程 relock 交错：guard 重验必须读到 DB 最新锁文档。
+
+    旧缺陷：pinned 判定经 ``SkillManager._doc_cache``（5s TTL）——plan 读
+    {v1→C1} 后另一进程 ``put_lock`` 改写为 {v1→C2}，5s 窗口内 guard 事务
+    内重验读到的仍是 C1（stale），已漂移节点被继承。修复后 plan 与重验
+    都直读 DB（绕开 doc cache）：plan 消费 C1 得出继承集，重验读到 C2 →
+    b 放弃继承。同时钉住 guard 重验路径零 git I/O。
+    """
+    git_calls = _no_git_spy(monkeypatch)
+    queries, workspace, job_id = _skill_bound_job(
+        tmp_path,
+        node_skill=WorkflowNodeSkill(key=_SKILL_KEY, ref="v1"),
+        skill_version=f"v1@{_COMMIT_V1[:12]}",
+        skill_commit=_COMMIT_V1,
+    )
+    _put_lock(queries, {_SKILL_KEY: {"repo": "", "refs": {"v1": _COMMIT_V1}}})
+    service = _make_service(tmp_path, queries)
+
+    from server.app.services import job_workflow_upgrade_apply as upgrade_module
+
+    real_plan = upgrade_module.plan_inherit_nodes
+
+    def plan_then_relock(job_db, job, new_definition, frozen_json, **kwargs):
+        inherit = real_plan(job_db, job, new_definition, frozen_json, **kwargs)
+        assert "b" in inherit  # plan 时锁内 v1=C1，与执行记录一致
+        # 另一「进程」（make skills-lock）relock：v1 → C2（直写 DB，绕过
+        # 任何本进程 doc cache）。
+        _put_lock(job_db, {_SKILL_KEY: {"repo": "", "refs": {"v1": _COMMIT_V2}}})
+        return inherit
+
+    monkeypatch.setattr(upgrade_module, "plan_inherit_nodes", plan_then_relock)
+
+    result = service.upgrade(workspace["id"], job_id, mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    # guard 重验读到 C2 ≠ 执行记录 C1 → b 放弃继承（降级重跑，下游 c 跟随）。
+    assert result["kept_node_count"] == 1
+    assert statuses == {"a": "completed", "b": "pending", "c": "pending"}
+    assert git_calls == []
+
+
 def test_skill_no_execution_record_excludes_agent_node(tmp_path: Path) -> None:
-    """P1-A 不可证明面：带 skill 绑定但执行记录无 skill commit → 保守重跑。
+    """P1-A 不可证明面：pinned 绑定但执行记录无 skill commit → 保守重跑。
 
     v75 前的 node_runs 无 skill_version、请求行 manifest 也无 skill 键时
-    （数据态或旧执行），旧产物按哪份 skill 内容产出不可知。
+    （数据态或旧执行），旧产物按哪份 skill 内容产出不可知——即使锁内
+    有该 ref 也无法证明一致。
     """
-    definition = _agent_chain({"a": ["a_out.json"], "b": ["b_out.json"]})
-    queries, workspace, revisions, original = _setup(tmp_path, definition)
-    revisions.publish_workspace_revision(workspace["id"], definition)
-    _make_skill_repo(tmp_path / "skills", key=_SKILL_KEY)
-    v1 = AgentDefinition(capability="cap_b", runtime="pi", skill=_SKILL_KEY)
-    replace_agent_catalog(workspace["id"], {"agent-b": v1})
-    job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
-    a_hash = _publish_node_code(queries, workspace["id"], "a", "def run(ctx):\n    return {}\n")
-    for key in ("a", "b"):
-        queries.update_job_node(job_id, key, status="pending")
-    _seed_done_execution(queries, workspace["id"], job_id, "a", kind="code", impl_hash=a_hash)
-    # b 有 Agent 定义哈希记录（P1-1 可证明）但无 skill 身份记录。
-    _seed_done_execution(
-        queries, workspace["id"], job_id, "b", kind="agent", impl_hash=v1.definition_hash()
+    queries, workspace, job_id = _skill_bound_job(
+        tmp_path,
+        node_skill=WorkflowNodeSkill(key=_SKILL_KEY, ref="v1"),
+        skill_version="",
+        skill_commit="",
     )
-    queries.update_job_status(job_id, "completed")
-    _seed_reachable_outputs(queries, job_id, ["a_out.json", "b_out.json"])
-    service = _make_service(tmp_path, queries, skill_manager=_make_skill_manager(tmp_path))
+    _put_lock(queries, {_SKILL_KEY: {"repo": "", "refs": {"v1": _COMMIT_V1}}})
+    service = _make_service(tmp_path, queries)
 
     result = service.upgrade(workspace["id"], job_id, mode="inherit")
 
@@ -459,7 +539,9 @@ def test_guard_revalidates_agent_identity_republished_after_plan(
     事务消费旧继承集，旧实现产物冒充新实现。修复：在受序列化保护的
     应用阶段（guard 事务内）重验实现身份，漂移节点放弃继承（降级重跑，
     与事务内收敛层的 keep ∩ completed + shared_name 复算同一防线风格）。
+    #759 P1：重验路径同时钉住零 git I/O（skill 面直读 DB 锁文档）。
     """
+    git_calls = _no_git_spy(monkeypatch)
     definition = _agent_chain({"a": ["a_out.json"], "b": ["b_out.json"]})
     queries, workspace, revisions, original = _setup(tmp_path, definition)
     revisions.publish_workspace_revision(workspace["id"], definition)
@@ -481,7 +563,7 @@ def test_guard_revalidates_agent_identity_republished_after_plan(
 
     # 竞争窗口：plan_inherit_nodes 内（返回前）重发布 Agent 定义——
     # plan 消费 V1 catalog 得到继承集 {a, b, c}，guard 事务看到的已是 V2。
-    from server.app.services import job_workflow_upgrade as upgrade_module
+    from server.app.services import job_workflow_upgrade_apply as upgrade_module
 
     real_plan = upgrade_module.plan_inherit_nodes
     real_revalidate = upgrade_module.implementation_excluded_nodes
@@ -502,7 +584,13 @@ def test_guard_revalidates_agent_identity_republished_after_plan(
     def plan_then_republish(job_db, job, new_definition, frozen_json, **kwargs):
         inherit = real_plan(job_db, job, new_definition, frozen_json, **kwargs)
         assert {"b", "c"} <= inherit  # plan 时 V1 与下游身份都匹配
-        v2 = AgentDefinition(capability="cap_b", runtime="pi", skill="g/n2")
+        # 不携带 skill：latest 绑定恒定排除（P1-A）会掩盖本用例的哈希
+        # 漂移判别点。
+        v2 = AgentDefinition(
+            capability="cap_b",
+            runtime="pi",
+            config_schema={"type": "object", "properties": {"k": {"type": "string"}}},
+        )
         replace_agent_catalog(workspace["id"], {"agent-b": v2})
         return inherit
 
@@ -520,6 +608,7 @@ def test_guard_revalidates_agent_identity_republished_after_plan(
     # b 的旧产物进暂存删除（不会以 V1 字节冒充 V2 产物）。
     assert not (job_dir / "b_out.json").exists()
     assert (job_dir / "a_out.json").read_text() == "old-a_out.json"
+    assert git_calls == []
 
 
 def test_guard_revalidation_no_drift_keeps_planned_inherit(tmp_path: Path) -> None:

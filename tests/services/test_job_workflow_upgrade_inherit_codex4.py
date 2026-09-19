@@ -227,7 +227,7 @@ def test_impl_identity_agent_republish_reruns_node(tmp_path: Path) -> None:
     definition = dataclasses.replace(definition, nodes=agent_nodes)
     queries, workspace, revisions, original = _setup(tmp_path, definition)
     current = revisions.publish_workspace_revision(workspace["id"], definition)
-    v1 = AgentDefinition(capability="cap_b", runtime="pi", skill="g/n")
+    v1 = AgentDefinition(capability="cap_b", runtime="pi")
     replace_agent_catalog(workspace["id"], {"agent-b": v1})
     job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
     for key in ("a", "b", "c"):
@@ -236,8 +236,14 @@ def test_impl_identity_agent_republish_reruns_node(tmp_path: Path) -> None:
         queries, workspace["id"], job_id, "b", kind="agent", impl_hash=v1.definition_hash()
     )
     queries.update_job_status(job_id, "completed")
-    # Agent 定义重发布：同 capability、不同 skill → definition_hash 漂移。
-    v2 = AgentDefinition(capability="cap_b", runtime="pi", skill="g/n2")
+    # Agent 定义重发布：同 capability、config_schema 变化 → definition_hash
+    # 漂移。（不携带 skill：skill 绑定由 codex5 的 P1-A 面恒定排除 latest，
+    # 这里隔离哈希维度。）
+    v2 = AgentDefinition(
+        capability="cap_b",
+        runtime="pi",
+        config_schema={"type": "object", "properties": {"k": {"type": "string"}}},
+    )
     replace_agent_catalog(workspace["id"], {"agent-b": v2})
     service = _make_service(tmp_path, queries)
 
@@ -623,7 +629,9 @@ def test_agent_definition_runtime_mutable_key_reruns_node(tmp_path: Path) -> Non
     current = revisions.publish_workspace_revision(workspace["id"], definition)
     # Agent 定义带 runtime_mutable 键（b 的节点级 config_schema 为空——
     # 旧缺陷：有效 schema 主体在 Agent 定义里，节点自声明判定覆盖不到）。
-    v1 = AgentDefinition(capability="cap_b", runtime="pi", skill="g/n", config_schema=schema)
+    # 不携带 skill：latest 绑定在 #759 后恒定排除（codex5 P1-A 面），会
+    # 掩盖本用例的 HIGH-2 判别点。
+    v1 = AgentDefinition(capability="cap_b", runtime="pi", config_schema=schema)
     replace_agent_catalog(workspace["id"], {"agent-b": v1})
     job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
     for key in ("a", "b", "c"):
@@ -675,9 +683,10 @@ def test_agent_definition_without_mutable_keys_stays_inheritable(tmp_path: Path)
     v1 = AgentDefinition(
         capability="cap_b",
         runtime="pi",
-        skill="g/n",
         # 有 schema、但无 runtime_mutable 键（对照组：排除判定不因
-        # 「定义携带 schema」而扩大）。
+        # 「定义携带 schema」而扩大）。不携带 skill：latest 绑定在 #759
+        # 后恒定排除（codex5 P1-A 面），会让 b 无法继承、掩盖本对照组的
+        # 判别点。
         config_schema={
             "type": "object",
             "properties": {"threshold": {"type": "integer", "default": 1}},
