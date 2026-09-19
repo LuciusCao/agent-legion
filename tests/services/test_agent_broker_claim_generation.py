@@ -2,15 +2,17 @@
 
 钉住 EXEC-GENERATION-001 的 claim 侧语义：
 
-1. enqueue 把期望代次落进 ``agent_execution_requests.execution_generation``；
+1. enqueue 把期望代次落进 ``agent_execution_requests.execution_generation``
+   （#645 评审 P1 起 enqueue 事务先取 job-mutation 锁复核代次，不等即不插入
+   ——故本文件的非零代次播种都在 enqueue 前把 jobs 代次抬到位）；
 2. claim 事务在 advisory 锁梯（agent-ws → agent-worker → job-mutation）之后
    对请求行代次与 jobs 现值做 CAS——不等即按 mutation 侧
    ``_cancel_queued_sql`` 的同语义取消该请求（state='cancelled' + manifest
    trim）并跳过，不 promote、不写 node_runs/executor_leases；
 3. 代次匹配的正常 promote 给 node_runs / executor_leases 落同一戳；
-4. 批写入段按（code 优先按 job_id、agent 按 (ws_lock_key, job_id)）的稳定
-   序进入 evaluate/promote——SAVEPOINT 不释放 advisory xact 锁，无排序的
-   两个并发批会在 job-mutation 域成环。
+4. 批写入段按统一全序 (ws_lock_key, job_id) 进入 evaluate/promote（code
+   候选不取 agent-ws 锁，仅借同一排序键参与全序）——SAVEPOINT 不释放
+   advisory xact 锁，无排序的两个并发批会在 job-mutation 域成环。
 """
 
 from __future__ import annotations
@@ -52,7 +54,10 @@ def _register_worker() -> None:
 
 
 def _seed_generation_request(job_db, *, job_id: str, generation: int) -> str:
-    """同 tests.helpers.agent_worker_api.seed_request 的播种，但显式携带代次。"""
+    """同 tests.helpers.agent_worker_api.seed_request 的播种，但显式携带代次。
+
+    #645 评审 P1 起 enqueue 事务在插入前复核代次，非零代次的播种必须先把
+    jobs 行抬到同一代次，否则 enqueue 直接拒绝插入。"""
     definition = AgentDefinition(
         capability="generate",
         runtime="pi",
@@ -69,6 +74,12 @@ def _seed_generation_request(job_db, *, job_id: str, generation: int) -> str:
         workspace_id="test-workspace",
         agent_id="generator-v1",
     )
+    if generation != 0:
+        with write_transaction(TEST_DATABASE_URL) as conn:
+            conn.execute(
+                "update jobs set execution_generation=%s where id=%s",
+                (generation, job_id),
+            )
     execution_id = _make_broker(job_db.jobs_dir.parent).enqueue(
         AgentExecutionRequest(
             workspace_id="test-workspace",
@@ -147,10 +158,6 @@ def test_claim_cancels_stale_generation_request(job_db) -> None:
 def test_claim_promote_stamps_generation(job_db) -> None:
     """代次匹配的正常 claim：node_runs / executor_leases 落请求行代次。"""
     execution_id = _seed_generation_request(job_db, job_id="gen-match", generation=2)
-    with write_transaction(TEST_DATABASE_URL) as conn:
-        conn.execute(
-            "update jobs set execution_generation=2 where id='gen-match'",
-        )
     _register_worker()
 
     claimed = _make_broker(job_db.jobs_dir.parent).claim(_WORKER_ID)
@@ -206,10 +213,11 @@ def test_batch_claim_cancels_only_stale_candidates(job_db) -> None:
     assert _request_row(fresh_id)["state"] == "claimed"
 
 
-def test_lock_order_sorted_places_code_first_then_agent_ws_job() -> None:
-    """批写入段排序：code 候选（不取 agent-ws 锁）按 job_id 在前，agent 候选
-    按 (ws_lock_key, job_id) 升序——SAVEPOINT 不释放 advisory xact 锁，两个
-    并发批若按不同顺序取 job-mutation 锁即成环。"""
+def test_lock_order_sorted_uses_single_ws_job_order_for_all_kinds() -> None:
+    """批写入段排序（#645 评审 P2）：全部候选——code 候选不取 agent-ws 锁，
+    仅借同一排序键——统一按 (ws_lock_key, job_id) 升序，与 finish_many /
+    try_claim_many / sweeper 的全库批序同一；SAVEPOINT 不释放 advisory
+    xact 锁，两个并发批若按不同顺序取 job-mutation 锁即成环。"""
     candidates = (
         {"kind": "agent", "ws_lock_key": 20, "job_id": "job-b"},
         {"kind": "code", "ws_lock_key": 99, "job_id": "job-z"},
@@ -222,10 +230,10 @@ def test_lock_order_sorted_places_code_first_then_agent_ws_job() -> None:
 
     assert [(row["kind"], row["job_id"]) for row in ordered] == [
         ("code", "job-a"),
-        ("code", "job-z"),
         ("agent", "job-x"),
         ("agent", "job-y"),
         ("agent", "job-b"),
+        ("code", "job-z"),
     ]
 
 

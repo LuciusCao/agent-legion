@@ -15,6 +15,7 @@ from psycopg import IntegrityError
 
 from server.app.agent_broker.manifest_guard import require_routable_execution
 from server.app.db.transaction import write_transaction
+from server.app.executors._lease_control import lock_job_mutation_and_read_generation
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
@@ -23,13 +24,26 @@ _ACTIVE_LEASE_CONSTRAINT = "idx_agent_requests_one_active_node"
 
 
 def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest) -> str | None:
-    """Insert one queued request; None when the node already has an active one."""
+    """Insert one queued request; None when the node already has an active one
+    or the request's expected generation is stale (EXEC-GENERATION-001, #645
+    review P1 — callers treat both with the existing skip semantics: the node
+    stays pending and the next dispatch pass re-enqueues on the fresh epoch)."""
     # Fail fast on unroutable manifests (placeholder/empty model): they
     # would otherwise poison the queue head forever (issue #13).
     require_routable_execution(request.manifest)
     execution_id = request.execution_id or str(uuid.uuid4())
     try:
         with write_transaction(broker.database_dsn) as conn:
+            # EXEC-GENERATION-001：打包（dispatch 按代次 N 评估）与 INSERT 之间
+            # 可能夹着一次 rerun/upgrade 提交（代次 N+1）。入队事务先取
+            # job-mutation 锁与 mutation 侧互斥再复核代次——不等即不插入；
+            # 否则无人 claim 的 stale queued 行（如远端 Worker 离线）会把
+            # has_active_request 的代次闸门外重派无限期挡住。enqueue 不持任何
+            # 池级锁，直接取 job-mutation，全局锁序（池锁 → job-mutation →
+            # 行锁）保持无环。
+            current_generation = lock_job_mutation_and_read_generation(conn, request.job_id)
+            if current_generation is None or current_generation != request.execution_generation:
+                return None
             # Code requests are executor-routed (not Agent-routed) and carry
             # no versioned Agent definition; dispatch validated the binding,
             # code hash and worker eligibility already.

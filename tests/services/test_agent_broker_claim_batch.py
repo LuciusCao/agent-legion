@@ -327,9 +327,10 @@ def test_code_candidates_ignore_agent_workspace_lock_floor(job_db) -> None:
         code_limit=1,
     )
 
-    # 写入段的稳定锁序（EXEC-GENERATION-001：SAVEPOINT 不释放 advisory xact
-    # 锁）把 code 候选排在 agent 候选之前；本测试只钉「code 候选不被
-    # agent-ws floor 过滤」——两类在同一批都领到。
+    # 写入段的稳定锁序（EXEC-GENERATION-001 #645 P2：SAVEPOINT 不释放
+    # advisory xact 锁）把 code 候选与 agent 候选统一按 (ws_lock_key,
+    # job_id) 排序；本测试只钉「code 候选不被 agent-ws floor 过滤」——
+    # 两类在同一批都领到。
     assert sorted(claim.kind for claim in claims) == ["agent", "code"]
 
 

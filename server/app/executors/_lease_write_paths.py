@@ -52,16 +52,15 @@ def try_claim_many(
     """Claim a batch of nodes in one transaction; None entries on capacity loss.
 
     Claims run in the single global job-mutation batch order shared with
-    ``finish_many`` / expire / recover / the agent sweep and the agent claim
-    batch's agent block (EXEC-GENERATION-001, #759 phases 1c+7):
+    ``finish_many`` / expire / recover / the agent sweep and the claim
+    batch's all-kinds order (EXEC-GENERATION-001, #759 phases 1c+7):
     ``(hashtext('agent-ws:' || workspace_id)::int, job_id)`` — every claim
     takes the ``job-mutation:<job_id>`` advisory xact lock, never released
     before COMMIT, so one cross-batch order prevents AB-BA on that domain.
-    The agent batch's code-first block stays job_id-ordered (code candidates
-    take no ``agent-ws:*`` lock); a remote code candidate crossing this local
-    batch on the same two jobs is the accepted residual, covered by the
-    40P01 retry wrappers on both sides. Verdicts are reassembled in caller
-    order.
+    Since #645 review P2 the claim batch's code candidates join the same
+    order (they take no ``agent-ws:*`` lock and borrow the ws key purely as
+    a sort position), so no cross-batch pair walks the same two jobs in
+    different orders. Verdicts are reassembled in caller order.
     """
     with write_transaction(repo.path) as conn:
         # The ws lock key is server-side (hashtext), so resolve it for the

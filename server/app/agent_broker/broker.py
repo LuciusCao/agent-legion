@@ -141,7 +141,10 @@ class AgentExecutionBroker:
         return row is not None
 
     def enqueue(self, request: AgentExecutionRequest) -> str | None:
-        """Insert one queued request; None when the node has an active one.
+        """Insert one queued request; None when the node has an active one or
+        the request's expected generation no longer matches the jobs row
+        (EXEC-GENERATION-001 — both outcomes share the existing skip
+        semantics: no row, node stays pending, next pass re-dispatches).
 
         The transaction lives in ``enqueue.py`` (file-size budget).
         """

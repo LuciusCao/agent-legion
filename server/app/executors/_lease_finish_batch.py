@@ -12,8 +12,8 @@ Two disciplines the codex review on #609 added:
 - **Deterministic item order**: finish and claim batches share one global
   ``(workspace lock key, job_id)`` order (EXEC-GENERATION-001, #759 phase 7:
   the job-mutation advisory xact locks every finish/claim takes survive the
-  batcher's per-item boundaries, so one global order — the agent claim
-  batch's agent-block order, ``claim_batch_tx._lock_order_sorted`` —
+  batcher's per-item boundaries, so one global order — the claim batch's
+  single all-kinds order, ``claim_batch_tx._lock_order_sorted`` —
   prevents cross-batch AB-BA) and restore queue-order verdicts. v82's
   append-and-try-fold counters no longer require this ordering for
   deadlock safety, but preserving it avoids unnecessary scheduling churn.
@@ -67,7 +67,7 @@ def finish_many(
         # batcher's per-item boundaries), so ALL multi-job batches on this
         # domain walk jobs in one global order — (ws lock key, job_id) with
         # the ws key being hashtext('agent-ws:' || workspace_id)::int, the
-        # exact key of the agent claim batch's agent block
+        # exact key of the claim batch's single all-kinds order
         # (claim_batch_tx._lock_order_sorted), shared with try_claim_many /
         # expire / recover / the agent sweep. Two concurrent batches walking
         # the same jobs in different orders would AB-BA on the job-mutation
