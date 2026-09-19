@@ -1,6 +1,5 @@
-import { IconButton } from '@mui/material'
 import type { JobSummary } from '../../types'
-import { MaterialIcon } from '../MaterialIcon'
+import { LabeledIconButton } from '../LabeledIconButton'
 
 export function JobWorkflowUpgradeButton({
   jobs,
@@ -18,13 +17,12 @@ export function JobWorkflowUpgradeButton({
     jobs[0].status === 'running'
 
   return (
-    <IconButton
-      aria-label="升级 workflow"
-      title="升级 workflow"
+    <LabeledIconButton
+      icon="arrow_circle_up"
+      label="升级"
+      ariaLabel="升级 workflow"
       disabled={disabled}
       onClick={onUpgradeWorkflow}
-    >
-      <MaterialIcon name="arrow_circle_up" />
-    </IconButton>
+    />
   )
 }

@@ -6,6 +6,7 @@ import {
   waitFor,
   cleanup,
   act,
+  within,
 } from '@testing-library/react'
 import { Route, Routes } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
@@ -520,7 +521,7 @@ describe('JobDetailPage', () => {
     expect(screen.getByText(/确定删除任务/)).toBeInTheDocument()
 
     await act(async () => {
-      screen.getByText('删除').click()
+      within(screen.getByRole('dialog')).getByText('删除').click()
     })
 
     await waitFor(() => {
@@ -632,7 +633,7 @@ describe('JobDetailPage', () => {
     })
   })
 
-  it('renders actions as icon buttons in app bar, not text buttons in body', async () => {
+  it('renders actions in the app bar action slot, not in the page body', async () => {
     vi.stubGlobal('fetch', createFetchMock({ detailStatus: 'completed' }))
 
     renderPage()
@@ -640,13 +641,13 @@ describe('JobDetailPage', () => {
       expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
-    expect(screen.getByLabelText('重跑')).toBeInTheDocument()
-    expect(screen.getByLabelText('打包')).toBeInTheDocument()
-    // The old body action bar used text buttons with labels;
-    // app bar actions are now icon buttons with aria-label.
-    expect(
-      screen.queryByText('重跑', { selector: 'button' })
-    ).not.toBeInTheDocument()
+    // Toolbar actions are icon + short label buttons (LabeledIconButton)
+    // rendered through the app bar slot; the page body no longer hosts an
+    // action bar of its own.
+    const actions = screen.getByTestId('job-detail-actions')
+    expect(within(actions).getByLabelText('重跑')).toBeInTheDocument()
+    expect(within(actions).getByLabelText('打包')).toBeInTheDocument()
+    expect(screen.getAllByText('重跑', { selector: 'button' })).toHaveLength(1)
   })
 
   it('opens artifact list after opening and closing fullscreen DAG dialog', async () => {
