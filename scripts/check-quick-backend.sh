@@ -213,7 +213,13 @@ run_tests() {
       # merges its xdist worker shards into that path itself, so a separate
       # `coverage combine` step is unnecessary (and would fail with "No data
       # to combine" once the shards are already merged).
+      # KEEP_COVERAGE follows the check.sh full-gate pattern: tests in the
+      # suite spawn nested gates (git hook simulations) that inherit
+      # COVERAGE_FILE; without this their exit trap deletes the live worker
+      # shards mid-run, and the next per-test context flush crashes on the
+      # schema-less replacement file ("no such table: context").
       export COVERAGE_FILE="$aff_index_cov_file"
+      export KEEP_COVERAGE=1
       AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
         UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
