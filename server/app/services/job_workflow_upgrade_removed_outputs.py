@@ -1,4 +1,4 @@
-"""旧快照中被移除/被删节点的产物名清理面（#645 codex 四轮 P1-2）。
+"""旧快照中被移除/被删节点的产物名清理面（#645 codex 四轮 P1-2，#759 4.1/4.2）。
 
 节点 output 从 ``old.json`` 改成 ``new.json``、或生产节点被删除时，
 ``stage_outputs`` 只按**新** definition 得暂存名——``old.json`` 不在
@@ -8,9 +8,11 @@ staged_artifact_names，清单行与本地文件全部保留：API 继续展示�
 revision）补出清理面：
 
 - **移除的 output 名**：重置面节点在旧 definition 声明、新 definition
-  不再声明的纯输出名（outputs − inputs）；新图仍依赖且没有生产者的
-  输入不清理——RMW 与纯外部输入都需要旧清单作为启动输入；
-- **被删节点的全部纯输出名 + 运行历史目录**：A4 的
+  不再声明的输出名（#759 4.2 起含 RMW 名——旧 RMW 产物在新图完全不再
+  被引用时必须退役，不能永久留在 artifact API）；新图仍依赖且没有
+  「保证先行」生产者的输入不清理（``unprotected_input_names``，#759
+  4.1）——RMW 与纯外部输入都需要旧清单作为启动输入/回填来源；
+- **被删节点的全部输出名 + 运行历史目录**：A4 的
   ``renamed_from_nodes`` 机制已处理「节点消失」的清单行（按新节点
   暂存名匹配），这里补「节点在但 output 名变了」与被删节点自身
   声明名的本地文件清理。
@@ -26,14 +28,14 @@ from dataclasses import dataclass, field
 
 from server.app.services.job_artifact_staging_scope import staging_output_names
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.schema import WorkflowNode
+from server.app.workflows.workflow_consumption import dependency_children, walk_downstream
 
 
 @dataclass(frozen=True)
 class RemovedArtifactFace:
     """旧快照侧需要补清理的产物面（P1-2）。"""
 
-    #: 被移除的纯输出名（重置节点的旧名 + 被删节点的全部纯输出名）。
+    #: 被移除的输出名（重置节点的旧名 + 被删节点的全部输出名，#759 4.2 起含 RMW 名）。
     names: frozenset[str] = frozenset()
     #: 被删节点的 key（其 ``runs/<key>`` 执行历史目录一并暂存）。
     run_keys: frozenset[str] = frozenset()
@@ -52,24 +54,56 @@ class _FaceBuilder:
     run_keys: set[str] = field(default_factory=set)
 
 
-def _pure_outputs(node: WorkflowNode) -> set[str]:
-    return set(node.outputs) - set(node.inputs)
+def deleted_node_keys(
+    old_definition: WorkflowDefinition | None, new_definition: WorkflowDefinition
+) -> frozenset[str]:
+    """被删节点身份 = 旧快照有、新图无的节点 key（#759 4.3）。
+
+    与 ``removed_artifact_face`` 的产物名/runs 目录面同源（definition 差集），
+    替代按 ``job_nodes`` 现存行推导——行缺失/多行的漂移场景口径一致。
+    """
+    if old_definition is None:
+        return frozenset()
+    return frozenset(old_definition.nodes) - frozenset(new_definition.nodes)
 
 
 def unprotected_input_names(definition: WorkflowDefinition) -> frozenset[str]:
-    """新图中「有声明输入面但无生产者」的名字（codex 五轮 P2-D）。
+    """新图中「有声明输入面但无保证先行的生产者」的名字（#759 4.1）。
 
-    clean 语义的全量清单清理以此作保护集：RMW 名（输入 ∩ 输出，重置
-    节点的启动输入）与外部输入（无节点产出）保留清单行——删行会让
-    ``restore_missing_inputs`` 无清单可回、节点永久等输入（#114 语义）；
-    有生产者的输入名不受保护（生产者重跑重新产出）。
+    clean 语义的全量清单清理与 ``removed_artifact_face`` 以此作保护集：
+    外部输入（无生产者）与 RMW 启动名保留清单行/对象——删掉会让
+    hydration/``restore_missing_inputs`` 无清单可回、节点永久等输入
+    （#114 语义）。
+
+    名 X 失去保护 ⇔ 新图中 X 的**每个** consumer 都保证在 X 的某个
+    producer 之后执行：自举生产者（纯 producer，自身不消费 X，无需旧
+    对象即可产出）经依赖邻接（显式边 ∪ 同名以外的隐式消费边——X 自己
+    的隐式边正是被保留的启动对象所满足的等待，不能当保证证据）可达
+    全部 consumer；RMW producer 自己被保证先行时加入自举集（fixpoint）。
+    同名 producer 不能保证先于 consumer（反例：q 是 x 的 RMW 节点，
+    q→p 且 p 纯产 x）时保留保护——旧 x 仍是 q 首跑的启动输入。
     """
-    inputs: set[str] = set()
-    produced: set[str] = set()
-    for node in definition.executable_nodes.values():
-        inputs.update(node.inputs)
-        produced.update(_pure_outputs(node))
-    return frozenset(inputs - produced)
+    executable = definition.executable_nodes
+    unprotected: set[str] = set()
+    names = {name for node in executable.values() for name in node.inputs}
+    for name in sorted(names):
+        producers = {key for key, node in executable.items() if name in node.outputs}
+        sufficient = {key for key in producers if name not in executable[key].inputs}
+        if not sufficient:
+            # 外部输入 / 纯 RMW 互依赖：没有无需旧对象即可产出的生产者。
+            unprotected.add(name)
+            continue
+        children = dependency_children(definition, skip_consumption_names={name})
+        while True:
+            covered = walk_downstream(children, sufficient)
+            grown = sufficient | (producers & covered)
+            if grown == sufficient:
+                break
+            sufficient = grown
+        consumers = {key for key, node in executable.items() if name in node.inputs}
+        if not consumers <= walk_downstream(children, sufficient):
+            unprotected.add(name)
+    return frozenset(unprotected)
 
 
 def removed_artifact_face(
@@ -101,22 +135,22 @@ def removed_artifact_face(
         node = old_definition.nodes.get(key)
         if node is not None:
             keep_io.update(node.inputs, node.outputs)
-    # 重置节点：旧纯输出 − 新纯输出 → 被移除的名。新图仍需消费且没有
-    # 生产者的输入（RMW 启动输入 + 纯外部输入）统一在收尾保护；删掉它们
-    # 会让 restore_missing_inputs 无清单可回、节点永久等待输入。
+    # 重置节点：旧输出 − 新声明面（outputs ∪ inputs）→ 被移除的名。#759
+    # 4.2 起 RMW 名（inputs∩outputs）同样进候选：新图完全不再引用的旧
+    # RMW 产物必须退役；仍被引用的名字由下方 unprotected_input_names
+    # （4.1 的保证先行判定）与 keep_io 过滤兜底——删掉仍受保护的名会让
+    # hydration/restore_missing_inputs 无清单可回、节点永久等待输入。
     for key in reset_keys:
         old_node = old_definition.nodes.get(key)
         if old_node is None:
             continue
         new_node = new_definition.nodes.get(key)
-        removed = _pure_outputs(old_node) - (
-            _pure_outputs(new_node) if new_node is not None else set()
-        )
-        builder.names.update(removed)
-    # 被删节点（旧有新无）：全部纯输出名 + 运行历史目录。
+        declared = set() if new_node is None else set(new_node.outputs) | set(new_node.inputs)
+        builder.names.update(set(old_node.outputs) - declared)
+    # 被删节点（旧有新无）：全部输出名（4.2 起含 RMW 名）+ 运行历史目录。
     for key, old_node in old_definition.nodes.items():
         if key not in new_definition.nodes:
-            builder.names.update(_pure_outputs(old_node))
+            builder.names.update(old_node.outputs)
             builder.run_keys.add(key)
     builder.names -= keep_io
     builder.names -= unprotected_input_names(new_definition)

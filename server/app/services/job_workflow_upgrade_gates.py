@@ -34,6 +34,36 @@ class UpgradeContext:
     now: datetime
 
 
+class ActiveRevisionChangedError(Exception):
+    """guard 事务内重读的 active revision 与 ``context.active`` 不符（#759 4.4）。
+
+    revision 发布不经 job-mutation 锁：plan 与应用之间的发布只能靠在
+    guard 事务内重读兜底。service 层捕获本信号后**整体重试一次**
+    （重解 context + 重 plan + 重进事务），第二次仍不符以冲突结果返回。
+    """
+
+
+def assert_context_revision_current(
+    job_db: JobQueries, workspace_id: str, context: UpgradeContext
+) -> None:
+    """guard 事务内重读 workspace 当前 active revision；漂移即抛信号。
+
+    比对口径与 ``resolve_upgrade_context`` 的 already_current 判定一致
+    （revision id + definition_json 实际内容，不信任独立的 hash 列）。
+    必须在事务内、任何产物暂存/写操作之前调用——不符时整个尝试作废，
+    不允许半应用状态。
+    """
+    current = job_db.get_active_workflow_revision(workspace_id, workspace_id)
+    if (
+        current is None
+        or str(current["id"]) != str(context.active["id"])
+        or str(current["definition_json"]) != str(context.active["definition_json"])
+    ):
+        raise ActiveRevisionChangedError(
+            f"Active workflow revision changed during upgrade of job {context.job['id']}"
+        )
+
+
 def resolve_upgrade_context(
     job_db: JobQueries,
     lease_repo: ExecutorLeaseRepository,
