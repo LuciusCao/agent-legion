@@ -83,6 +83,12 @@ class _FakeArtifactStore:
         self._objects = objects or {}
         self._upload_error = upload_error
         self.uploaded: list[str] = []
+        # #645 P2-b: the EXEC-GENERATION-001 artifact write gate; True =
+        # the lease still owns the job's current generation (uploads proceed).
+        self.gate_open = True
+
+    def artifact_write_gate_open(self, *, job_id: str, lease_id: str) -> bool:
+        return self.gate_open
 
     def lookup(self, job_id: str, name: str) -> dict | None:
         return self._rows.get(name)
@@ -227,6 +233,44 @@ def test_upload_mirrors_only_declared_expected_outputs(context: ExecutionContext
     assert store.uploaded == ["out.json"]
 
 
+def test_upload_skipped_when_lease_write_gate_closed(context: ExecutionContext) -> None:
+    """#645 P2-b: an orphaned execution (lease lost / generation bumped, gate
+    closed) uploads nothing — the node result is unaffected (best-effort
+    mirror); the local copy stays for the reconciler."""
+    (context.job_dir / "out.json").write_text("{}", encoding="utf-8")
+    store = _FakeArtifactStore()
+    store.gate_open = False
+    executor = _executor()
+    executor._artifact_objects = store
+
+    result = executor._check_outputs(context)
+
+    assert result.status == "completed"
+    assert result.produced_artifacts == ("out.json",)
+    assert store.uploaded == []  # 旧代次字节不上传、不登记
+
+
+def test_upload_skipped_when_gate_check_raises(context: ExecutionContext) -> None:
+    """闸的 DB 复查自身失败（DB 不可达/池超时）时按 fail-closed 跳过上传：
+    闸不可读即无法证明 lease 仍持有当前代次，且镜像路径的纪律是绝不给节点
+    引入新的失败模式（EXEC-ARTIFACT-STORE-001）；本地副本留存，reconciler
+    之后重传。"""
+    (context.job_dir / "out.json").write_text("{}", encoding="utf-8")
+    store = _FakeArtifactStore()
+
+    def _boom(*, job_id: str, lease_id: str) -> bool:
+        raise RuntimeError("db unreachable")
+
+    store.artifact_write_gate_open = _boom  # type: ignore[assignment]
+    executor = _executor()
+    executor._artifact_objects = store
+
+    result = executor._check_outputs(context)
+
+    assert result.status == "completed"
+    assert store.uploaded == []
+
+
 def test_execute_restores_evicted_inputs_before_sandboxed_run(
     context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -266,6 +310,9 @@ def test_artifact_store_dsn_resolves_both_connect_source_shapes(
     class _FakeStore:
         def __init__(self, storage: object, dsn: str | None) -> None:
             self.dsn = dsn
+
+        def artifact_write_gate_open(self, *, job_id: str, lease_id: str) -> bool:
+            return True
 
     built: list[_FakeStore] = []
     monkeypatch.setattr(

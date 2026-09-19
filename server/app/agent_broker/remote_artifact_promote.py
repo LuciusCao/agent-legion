@@ -2,17 +2,21 @@
 
 Split out of ``remote_artifacts.py`` for the file-size budget: the result-commit
 module stays the verify-then-apply orchestrator, this module owns the apply
-phase — authority-key copy with rollback backup, atomic promote into the job
-dir, one-transaction manifest registration, staging cleanup.
+phase — authority-key copy with rollback backup, then the guarded
+registration tail (job-dir file promote + manifest rows in one gated
+transaction, ``remote_artifact_gate.py``), staging cleanup.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
+from server.app.agent_broker.remote_artifact_gate import (
+    register_remote_rows_guarded,
+    restore_authority_backups,
+)
 from server.app.agent_broker.remote_artifact_support import (
     build_manifest_rows,
     discard_staging,
@@ -38,15 +42,16 @@ def promote_all(
     staged: dict[str, Path],
     content_hashes: dict[str, str],
     execution_id: str,
-) -> None:
+    lease_id: str,
+) -> bool:
     """Copy to authority keys, promote staged files, register rows, clean up.
 
     Undeclared names are promoted/registered but never land in the job dir
     (the same whitelist as the tar unpack path). Copies precede row writes:
     a failure between them leaves orphaned authority objects (lifecycle
     backstop), never dangling manifest rows. All manifest rows upsert in ONE
-    transaction (record_remote_many): a mid-batch failure rolls back instead
-    of leaving a half-registered manifest.
+    transaction (the guarded registration): a mid-batch failure rolls back
+    instead of leaving a half-registered manifest.
 
     Re-runs overwrite existing authority keys, so every pre-existing
     authority object is first backed up (server-side copy to a rollback key
@@ -60,9 +65,29 @@ def promote_all(
     bare). A form-changing re-run targets a key that does not exist yet, so
     nothing is overwritten or backed up; the previous-form object stays for
     the still-pointing manifest row until the row upsert retargets it.
+
+    #645 P2-a (EXEC-GENERATION-001 artifact byte plane): the promote runs
+    BEFORE the finish generation CAS, so the write gate
+    (``lease_artifact_write_current``) guards it twice — a lock-free pre-check
+    before any byte copy, and the authoritative re-check inside the
+    registration transaction (job-dir file promotion and manifest row writes
+    ride the same job-mutation lock, so no reset can intervene between the
+    check and the row writes). Returns False when the gate rejects: nothing
+    was copied/registered, or the copies were already restored from their
+    backups; the caller turns this into the commit path's rejection
+    semantics. Staging objects survive a rejected promote exactly like a
+    failed one (lifecycle reaps them).
     """
     assert object_store.storage is not None
     storage = object_store.storage
+    if not object_store.artifact_write_gate_open(job_id=job_id, lease_id=lease_id):
+        logger.info(
+            "discarding stale promote pre-copy (lease %s): job=%s node=%s",
+            lease_id,
+            job_id,
+            node_key,
+        )
+        return False
     authority_keys = {
         name: artifact_storage_key(workspace_id, job_id, name)
         + (GZIP_SUFFIX if is_gzip_key(str(ref["storage_key"])) else "")
@@ -78,57 +103,54 @@ def promote_all(
             backups[name] = backup_key
     promoted: list[str] = []
     try:
-        for name, ref in remote.items():
-            promote_remote(
-                object_store,
-                workspace_id=workspace_id,
-                job_id=job_id,
-                name=name,
-                storage_key=str(ref["storage_key"]),
-            )
-            promoted.append(name)
-    except Exception:
-        # #204 broad-except audit: compensate-then-bare-re-raise (#233
-        # pattern). The batch loop's outcome space is mixed — storage-layer
-        # errors (botocore surface), ValueError from Worker-untrusted refs,
-        # and programming errors all must roll back the already-overwritten
-        # authority keys before propagating; the re-raise preserves the
-        # original type for apply_remote_artifact_refs' classification, so
-        # nothing is converted or masked. The rollback loop below is itself
-        # per-key best-effort: a failed restore logs a warning and the next
-        # key is still attempted.
-        # Roll back the keys this batch already overwrote; keys without a
-        # backup had no prior object (the orphan is lifecycle's backstop).
-        for name in promoted:
-            rollback_key = backups.get(name)
-            if rollback_key is None:
-                continue
-            try:
-                storage.copy_object(rollback_key, authority_keys[name])
-            except Exception:
-                # #204 broad-except audit: best-effort per-key restore inside
-                # the compensation loop of the audited batch catch above —
-                # same mixed outcome space (botocore storage surface), and
-                # per-key containment is the point: the warning names the key
-                # that still holds new bytes while its manifest row points at
-                # old bytes (the mismatch the backup exists to prevent), the
-                # remaining keys are still attempted, and the orphan-GC/
-                # lifecycle pass is the backstop for the leftovers. The
-                # original promote error keeps propagating regardless; the
-                # traceback rides the warning (exc_info).
-                logger.warning(
-                    "failed to roll back artifact object %s", authority_keys[name], exc_info=True
+        try:
+            for name, ref in remote.items():
+                promote_remote(
+                    object_store,
+                    workspace_id=workspace_id,
+                    job_id=job_id,
+                    name=name,
+                    storage_key=str(ref["storage_key"]),
                 )
-        raise
+                promoted.append(name)
+        except Exception:
+            # #204 broad-except audit: compensate-then-bare-re-raise (#233
+            # pattern). The batch loop's outcome space is mixed — storage-layer
+            # errors (botocore surface), ValueError from Worker-untrusted refs,
+            # and programming errors all must roll back the already-overwritten
+            # authority keys before propagating; the re-raise preserves the
+            # original type for apply_remote_artifact_refs' classification, so
+            # nothing is converted or masked.
+            restore_authority_backups(storage, promoted, backups, authority_keys)
+            raise
+        applied = register_remote_rows_guarded(
+            object_store,
+            build_manifest_rows(
+                workspace_id, job_id, node_key, remote, authority_keys, content_hashes
+            ),
+            job_id=job_id,
+            lease_id=lease_id,
+            staged=staged,
+            job_dir=job_dir,
+        )
+        if not applied:
+            # The stale write gate rejected the registration: a sweep/reset
+            # committed between the pre-check and here. Undo the byte copies
+            # from the backups so the old (or absent) authority objects keep
+            # matching the surviving manifest rows; no job-dir writes and no
+            # row registrations happened.
+            restore_authority_backups(storage, promoted, backups, authority_keys)
+            logger.info(
+                "discarded stale promote post-copy (lease %s): job=%s node=%s",
+                lease_id,
+                job_id,
+                node_key,
+            )
     finally:
         for backup_key in backups.values():
             discard_staging(object_store, backup_key)
-    for name, staged_path in staged.items():
-        target = job_dir / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staged_path, target)
-    object_store.record_remote_many(
-        build_manifest_rows(workspace_id, job_id, node_key, remote, authority_keys, content_hashes)
-    )
+    if not applied:
+        return False
     for ref in remote.values():
         discard_staging(object_store, str(ref["storage_key"]))
+    return True

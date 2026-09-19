@@ -22,7 +22,12 @@ def _clear_agent_legion_env(monkeypatch):
         "BASECMS_SECRET",
         "BASECMS_TOKEN_URL",
         "AGENT_LEGION_CMS_TOKEN",
-        "AGENT_LEGION_SKIP_DOTENV",
+        # AGENT_LEGION_SKIP_DOTENV 刻意不在此列：删掉它会让本文件的
+        # load_settings 用例加载真实项目 .env，而 load_dotenv 直写
+        # os.environ（绕过 monkeypatch），把 AGENT_LEGION_S3_BUCKET 等键
+        # 泄漏给同一 xdist worker 里的后续测试（曾使 code executor 测试的
+        # 产物镜像意外走真 S3/DB）。需要 dotenv 行为的用例自行 delenv
+        # （见 test_load_settings_reads_project_dotenv_by_default）。
     ):
         monkeypatch.delenv(key, raising=False)
 

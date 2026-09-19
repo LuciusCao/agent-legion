@@ -25,6 +25,7 @@ from typing import Any, BinaryIO
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.executors._lease_write_gate import lease_artifact_write_current
 from server.app.services.job_artifact_gzip import GZIP_SUFFIX, content_stream
 from server.app.services.job_artifact_rows import upsert_artifact_row_tx
 from server.app.storage import ObjectStorage
@@ -85,6 +86,23 @@ class JobArtifactObjectStore:
     def enabled(self) -> bool:
         return self.storage is not None
 
+    @property
+    def database_dsn(self) -> ConnectSource:
+        """The connection source; the guarded promote registration opens its
+        own transaction on it (agent_broker.remote_artifact_gate)."""
+        return self._dsn
+
+    def artifact_write_gate_open(self, *, job_id: str, lease_id: str) -> bool:
+        """EXEC-GENERATION-001 产物写闸的一次性复查（#645 P2）。
+
+        True = lease 仍是本 job 当前代次的 active lease，调用方可以继续做
+        字节级上传/copy。这只是锁外快路径——重置落在复查之后时，权威的拦
+        截在清单行登记事务里（``_register_row`` 的 lease 臂 /
+        remote_artifact_gate.register_remote_rows_guarded）。
+        """
+        with write_transaction(self._dsn) as conn:
+            return lease_artifact_write_current(conn, lease_id, job_id)
+
     def upload(
         self,
         *,
@@ -93,13 +111,19 @@ class JobArtifactObjectStore:
         node_key: str,
         name: str,
         local_path: Path,
+        lease_id: str = "",
     ) -> dict[str, Any] | None:
         """Upload one produced artifact and upsert its manifest row.
 
         Returns None when object storage is not configured. Raises after
         bounded retries on persistent storage errors — the completion hooks
         catch, log and continue (the local copy stays; the reconciler
-        re-uploads later).
+        re-uploads later). With ``lease_id`` the manifest-row write is gated
+        by the EXEC-GENERATION-001 artifact write check (#645 P2-b): an
+        orphaned local execution (lease lost mid-run, or a reset landed
+        between the upload loop's entry check and this row write) registers
+        nothing and returns None; the uploaded object is then an unreferenced
+        orphan the reconciler/lifecycle reaps.
         """
         if self.storage is None:
             return None
@@ -145,6 +169,7 @@ class JobArtifactObjectStore:
             storage_key=storage_key,
             size_bytes=size_bytes,
             content_hash=content_hash,
+            lease_id=lease_id,
         )
 
     def verify_remote(
@@ -263,9 +288,19 @@ class JobArtifactObjectStore:
         storage_key: str,
         size_bytes: int,
         content_hash: str,
-    ) -> dict[str, Any]:
-        """Single-row upsert in its own transaction (batch path inlines it)."""
+        lease_id: str = "",
+    ) -> dict[str, Any] | None:
+        """Single-row upsert in its own transaction (batch path inlines it).
+
+        With ``lease_id`` the row write is gated (#645 P2-b): the same
+        transaction takes the job-mutation lock and re-checks the lease epoch;
+        a stale/orphaned write is skipped (None) with a log, so a reset
+        landing mid-upload-loop cannot resurrect a removed manifest row.
+        """
         with write_transaction(self._dsn) as conn:
+            if lease_id and not lease_artifact_write_current(conn, lease_id, job_id):
+                logger.info("artifact row write skipped (stale lease %s, job %s)", lease_id, job_id)
+                return None
             return upsert_artifact_row_tx(
                 conn,
                 _UPSERT_ROW_SQL,

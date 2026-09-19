@@ -68,6 +68,7 @@ def apply_remote_artifact_refs(
     output_artifacts: dict[str, Any],
     download: bool,
     execution_id: str,
+    lease_id: str,
     max_size_bytes: int | None = None,
     spot_check_percent: int | None = None,
 ) -> tuple[set[str], str | None]:
@@ -80,6 +81,9 @@ def apply_remote_artifact_refs(
     path; their staging bytes are still digest-verified, so the registered
     hash always comes from Host-verified content. ``max_size_bytes`` applies
     the instance artifact size ceiling (``agent_workers.max_archive_bytes``).
+    ``lease_id`` feeds the EXEC-GENERATION-001 promote write gate (#645
+    P2-a): a gate rejection surfaces as the same "lease is no longer active"
+    failure the finish CAS would have produced.
     """
     remote = {name: ref for name, ref in output_artifacts.items() if isinstance(ref, dict)}
     if not remote:
@@ -136,7 +140,7 @@ def apply_remote_artifact_refs(
                             ),
                         )
                 # Phase 3: all verified — promote copies, files, and rows.
-                promote_all(
+                if not promote_all(
                     object_store,
                     workspace_id,
                     job_id,
@@ -146,7 +150,9 @@ def apply_remote_artifact_refs(
                     staged,
                     content_hashes,
                     execution_id,
-                )
+                    lease_id,
+                ):
+                    return set(remote), "execution lease is no longer active"
                 return set(remote), None
         # Cancelled path: no download; a reported hash is trusted outside
         # the #356 spot-check sample, an empty one still streams to compute
@@ -161,7 +167,7 @@ def apply_remote_artifact_refs(
                     DEFAULT_SPOT_CHECK_PERCENT if spot_check_percent is None else spot_check_percent
                 ),
             )
-        promote_all(
+        if not promote_all(
             object_store,
             workspace_id,
             job_id,
@@ -171,7 +177,9 @@ def apply_remote_artifact_refs(
             staged,
             content_hashes,
             execution_id,
-        )
+            lease_id,
+        ):
+            return set(remote), "execution lease is no longer active"
     except Exception as exc:
         # #204 broad-except audit: deliberate whole-batch containment. The
         # guarded block's outcome space is mixed by design — Worker-report

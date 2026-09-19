@@ -175,6 +175,7 @@ class AgentCompletionHandler:
             output_artifacts=outcome.output_artifacts,
             download=not cancelled,
             execution_id=str(manifest.get("execution_id") or ""),
+            lease_id=lease_id,
             max_size_bytes=self.max_archive_bytes,
             spot_check_percent=self.spot_check_percent,
         )
