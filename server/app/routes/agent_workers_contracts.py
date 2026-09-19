@@ -117,6 +117,11 @@ class AgentWorkerSummary(BaseModel):
 
 class AgentWorkersResponse(BaseModel):
     workers: list[AgentWorkerSummary]
+    # Instance-configured Worker console address (AGENT_LEGION_WORKER_CONSOLE_URL,
+    # usually the deployment machine's local Worker): the "open the Worker
+    # console" entry the Host UI shows next to worker lists and after key
+    # issuance. "" = not configured (the UI falls back to plain guidance).
+    console_url: str = ""
 
 
 class AgentWorkerDeleteResponse(BaseModel):

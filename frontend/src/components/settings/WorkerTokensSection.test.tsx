@@ -27,6 +27,10 @@ vi.mock('../../api', () => ({
   fetchWorkspaces: vi.fn(),
 }))
 
+vi.mock('../../hooks/useWorkerConsoleUrl', () => ({
+  useWorkerConsoleUrl: () => 'http://127.0.0.1:8789',
+}))
+
 const mockListRegisterTokens = vi.mocked(listRegisterTokens)
 const mockListAgentWorkers = vi.mocked(listAgentWorkers)
 const mockCreateRegisterToken = vi.mocked(createRegisterToken)
@@ -158,6 +162,45 @@ describe('WorkerTokensSection', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert').textContent).toContain('HTTP 500')
     })
+  })
+
+  it('guides the admin to the Worker console after issuing a key', async () => {
+    mockCreateRegisterToken.mockResolvedValue({
+      token_id: 't2',
+      register_token: 'plain-secret',
+      workspace_id: WORKSPACE_ID,
+      label: 'new-worker',
+    })
+    renderSection()
+    await waitFor(() => screen.getByText('home-mac-mini'))
+
+    fireEvent.change(screen.getByLabelText('Key 名称'), {
+      target: { value: 'new-worker' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '签发' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('created-token-next-steps')).toBeTruthy()
+    })
+    // 下一步三步：复制 → 控制台「Workspace 访问」粘贴 → 「开始领取」。
+    const steps = screen.getByTestId('created-token-next-steps')
+    expect(steps.textContent).toContain('Workspace 访问')
+    expect(steps.textContent).toContain('开始领取')
+    expect(
+      within(steps).getByTestId('worker-console-link').getAttribute('href')
+    ).toBe('http://127.0.0.1:8789')
+  })
+
+  it('links the empty registered-worker list to the Worker console', async () => {
+    mockListAgentWorkers.mockResolvedValue([])
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText(/暂无已注册 Worker/)).toBeTruthy()
+    })
+    expect(screen.getByTestId('worker-console-link').getAttribute('href')).toBe(
+      'http://127.0.0.1:8789'
+    )
   })
 
   it('issues a key pinned to the current workspace (no workspace picker)', async () => {

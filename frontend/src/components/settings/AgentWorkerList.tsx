@@ -4,6 +4,7 @@ import type { AgentRegisterTokenSummary, AgentWorkerSummary } from '../../api'
 import { formatDateTime } from '../../lib/formatters'
 import { toErrorMessage } from '../../lib/queryError'
 import { ConfirmDialog } from '../ConfirmDialog'
+import { WorkerConsoleLink } from '../WorkerConsoleLink'
 import styles from './WorkerTokensSection.module.css'
 
 export function workerName(worker: AgentWorkerSummary): string {
@@ -18,6 +19,8 @@ interface AgentWorkerListProps {
   workspaceName: (workspaceId: string | null) => string
   onChanged: () => void
   onError: (message: string) => void
+  /** 「打开 Worker 控制台」入口地址（空串 = 未配置，只留文字说明）。 */
+  consoleUrl?: string
 }
 
 /**
@@ -34,6 +37,7 @@ export function AgentWorkerList({
   workspaceName,
   onChanged,
   onError,
+  consoleUrl = '',
 }: AgentWorkerListProps) {
   const tokenById = new Map(tokens.map((token) => [token.token_id, token]))
   const [pendingDeleteWorker, setPendingDeleteWorker] =
@@ -66,7 +70,11 @@ export function AgentWorkerList({
     <>
       <h3 className={styles.heading}>已注册 Worker</h3>
       {workers.length === 0 ? (
-        <p className={styles.empty}>暂无已注册 Worker</p>
+        <p className={styles.empty}>
+          暂无已注册 Worker：在 Worker 控制台「配置 → Workspace 访问」添加本
+          workspace 的 Key 后，Worker 会出现在这里。{' '}
+          <WorkerConsoleLink url={consoleUrl} />
+        </p>
       ) : (
         <ul className={styles.list}>
           {workers.map((worker) => (

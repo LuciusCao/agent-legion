@@ -82,6 +82,14 @@ class AgentWorkersRuntimeConfig(BaseModel):
     # (kill-switch), 100 = always verify (pre-#356 behavior). Restart-
     # effective, instance-settings managed.
     artifact_spot_check_percent: int = Field(default=3, ge=0, le=100)
+    # Worker 控制台入口：Host 主控制台「打开 Worker 控制台」链接指向的地址，
+    # 通常是部署机本地 Worker 的控制台（dev 栈 http://127.0.0.1:8789、原生
+    # prod :8787，由各启动脚本按 Worker 端口注入）。env-only
+    # （AGENT_LEGION_WORKER_CONSOLE_URL）、不进实例设置文档——它描述部署
+    # 拓扑而非运行时调优；空串 = 未配置，前端退化为纯文字说明。Worker 注册
+    # 时自报的控制台地址（后续按 Worker 逐个显示）落地后，此值只作尚无
+    # Worker 注册时的兜底入口。
+    console_url: str = ""
 
 
 class ExecutorRuntimeConfig(BaseModel):
