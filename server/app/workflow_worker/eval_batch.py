@@ -38,7 +38,10 @@ def evaluate_changed_jobs(
     caller stores in ``worker.state.job_evals``.
     """
     eval_contexts: list[dict[str, Any]] = []
-    not_applicable_entries: list[tuple[str, list[str], str]] = []
+    # (job_id, node_keys, reason, expected execution_generation) — the epoch
+    # the evaluation read (scan's fat job row); the batch write re-checks it
+    # under the job-mutation lock and skips stale entries (EXEC-GENERATION-001).
+    not_applicable_entries: list[tuple[str, list[str], str, int]] = []
     shard_node_pairs: list[tuple[str, str]] = []
 
     for definition, mark in changed:
@@ -65,7 +68,10 @@ def evaluate_changed_jobs(
         # brackets the restores with two jobs.execution_generation reads — a
         # reset mutation committing mid-flight invalidates the manifest rows
         # the restores came from, so a changed epoch discards exactly this
-        # round's restored files and defers the job the same way.
+        # round's restored files and defers the job the same way. The two
+        # READ failures (manifest query / generation pre-read) return None
+        # and defer identically: a local miss must never be cached as a true
+        # miss while the authoritative manifest is unreadable.
         unrestored = hydrate_job_artifacts(
             worker.artifact_object_store,
             worker.job_db,
@@ -73,13 +79,13 @@ def evaluate_changed_jobs(
             job_dir=job_dir,
             definition=definition_to_run,
         )
-        if unrestored:
+        if unrestored is None or unrestored:
             worker.state.job_evals.pop(str(job["id"]), None)
             logger.warning(
-                "job %s still misses manifest-backed inputs %s after hydration; "
+                "job %s hydration incomplete (read failure, or unrestored inputs %s); "
                 "evaluation deferred to the next poll pass",
                 job["id"],
-                sorted(unrestored),
+                sorted(unrestored) if unrestored else "-",
             )
             continue
         branch_evaluation = evaluate_branches(definition_to_run, statuses, job_dir)
@@ -97,7 +103,12 @@ def evaluate_changed_jobs(
         )
         if branch_evaluation.not_applicable:
             not_applicable_entries.append(
-                (job["id"], sorted(branch_evaluation.not_applicable), "unselected workflow branch")
+                (
+                    job["id"],
+                    sorted(branch_evaluation.not_applicable),
+                    "unselected workflow branch",
+                    int(job.get("execution_generation") or 0),
+                )
             )
         for node in definition_to_run.nodes.values():
             if node.shard is not None and statuses.get(node.key) == "running":

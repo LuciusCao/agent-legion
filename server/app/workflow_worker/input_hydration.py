@@ -16,7 +16,12 @@ the exact ``restore_missing_inputs`` semantics (``.part`` + sha256 +
 ``find_ready_nodes``; the caller (``eval_batch``) runs it before branch and
 ready evaluation and defers — without caching — any job that still has
 manifest-backed inputs missing after the attempt, so the next poll pass
-retries (a missing object may be transient).
+retries (a missing object may be transient). The same defer-without-cache
+discipline covers the two READ failures (manifest query, generation
+pre-read): the manifest is the authoritative artifact copy
+(EXEC-ARTIFACT-STORE-001), so a read failure must never be cached as a true
+local miss — that would park the job at queued forever, the scan mark being
+unchanged once the fault clears.
 
 Threading: the poll thread evaluates jobs sequentially, and
 ``JobArtifactObjectStore`` is already shared across the route/maintenance/
@@ -84,7 +89,7 @@ def hydrate_job_artifacts(
     job_id: str,
     job_dir: Path,
     definition: WorkflowDefinition,
-) -> frozenset[str]:
+) -> frozenset[str] | None:
     """Re-materialize manifest-backed inputs missing from the job_dir.
 
     Best-effort; no-op without a configured object store. Returns the names
@@ -94,6 +99,18 @@ def hydrate_job_artifacts(
     pass retries. Inputs with no manifest row are genuinely absent and are
     not hydration's business: they are left out of the returned set so the
     job evaluates (and caches) as not-ready.
+
+    ``None`` means the evaluation basis itself could not be read: the
+    manifest query failed, or the pre-read of ``jobs.execution_generation``
+    failed / the job row is gone. The object-store manifest is the
+    authoritative artifact copy (EXEC-ARTIFACT-STORE-001), so a read failure
+    must NOT degrade to "evaluate with local files only" — a local miss
+    would then be cached as a true miss and, the scan mark being unchanged,
+    the manifest would never be re-read after the fault clears (the
+    parked-at-queued-forever regression). The caller treats ``None`` exactly
+    like a non-empty unrestored set: no caching, no candidates, retry next
+    pass. A SUCCESSFUL read that finds no manifest row for a name is not
+    deferred — it is the genuine-absent case above.
 
     Generation bracket (#702 review P1): the epoch is read before the
     manifest query and again after every restore write; a mismatch means a
@@ -111,25 +128,26 @@ def hydrate_job_artifacts(
         return frozenset()
     generation_before = _current_generation(queries, job_id)
     if generation_before is None:
-        # Job row gone mid-pass, or the read failed: skip hydration entirely
-        # (the pre-#759 degrade — evaluate with local files only).
-        return frozenset()
+        # Job row gone mid-pass, or the read failed: the manifest state is
+        # unknowable, so defer (uncached) rather than cache a local-files-only
+        # evaluation that would stick after the fault clears.
+        return None
     try:
         rows = store.rows_for_job(job_id)
     except Exception:
         # #204 broad-except audit: the manifest read is the one failure the
         # per-file containment cannot see (it happens before any per-file
-        # work). A transient DB outage must degrade to the pre-#759 behavior
-        # — evaluate with local files only — rather than fail the whole
-        # evaluation pass; the outcome space is the psycopg/pool surface of
-        # that one query. The traceback is logged so the silent degradation
-        # stays visible.
+        # work). The outcome space is the psycopg/pool surface of that one
+        # query. Returning None defers the job WITHOUT caching (same
+        # discipline as an incomplete restore) so the next poll pass re-reads
+        # the manifest once the outage clears; the traceback is logged so the
+        # deferral stays visible.
         logger.warning(
-            "artifact manifest read failed for job %s; evaluating without hydration",
+            "artifact manifest read failed for job %s; deferring evaluation",
             job_id,
             exc_info=True,
         )
-        return frozenset()
+        return None
     # rows_for_job orders by uploaded_at ascending; the dict keeps the last
     # write per name, matching lookup()'s latest-row semantics.
     rows_by_name = {str(row["name"]): row for row in rows}
@@ -178,10 +196,10 @@ def _current_generation(queries: JobQueries, job_id: str) -> int | None:
     except Exception:
         # #204 broad-except audit: None collapses "job deleted" and "transient
         # DB outage" because both callers want the same outcome for each —
-        # the pre-write read degrades to no hydration (pre-#759 behavior),
-        # the post-write recheck fails closed (mismatch ⇒ discard this
-        # round's files; self-healing, the next pass restores them again).
-        # The outcome space is the psycopg/pool surface of one query;
-        # exc_info keeps the root cause visible.
+        # the pre-write read defers the job without caching (never a sticky
+        # local-files-only evaluation), the post-write recheck fails closed
+        # (mismatch ⇒ discard this round's files; self-healing, the next pass
+        # restores them again). The outcome space is the psycopg/pool surface
+        # of one query; exc_info keeps the root cause visible.
         logger.warning("generation read failed for job %s", job_id, exc_info=True)
         return None

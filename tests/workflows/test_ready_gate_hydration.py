@@ -504,3 +504,183 @@ def test_no_object_storage_keeps_pre_hydration_behavior(tmp_path: Path) -> None:
     assert worker.state.job_evals[job["id"]][1] == []
 
     worker.stop()
+
+
+def _pending_b_job(queries: JobQueries, workspace: dict) -> dict:
+    """a completed、b pending 的最小 job（wfchain 定义）。"""
+    job = queries.create_job(
+        workflow_key="wfchain",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["a", "b"],
+        workspace_id=workspace["id"],
+    )
+    queries.update_job_node(job["id"], "a", status="completed")
+    return job
+
+
+def test_manifest_read_failure_defers_without_caching_and_recovers(tmp_path: Path) -> None:
+    """清单读抛错 → 不缓存、不产候选、下轮重试；故障清除后重新读清单并 claim。
+
+    对象存储清单是产物权威副本（EXEC-ARTIFACT-STORE-001）：读失败时本地缺失
+    不得被缓存为真缺失——否则 mark 不再变化、故障恢复后清单永不再读，job
+    永久停 queued（parked-forever 回归）。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
+    )
+    job = _pending_b_job(queries, workspace)
+    job_dir = resolve_job_dir(job, queries.jobs_dir)
+    storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
+    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
+
+    store = JobArtifactObjectStore(
+        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: _A_PAYLOAD})
+    )
+    manifest_reads = 0
+    original_rows_for_job = store.rows_for_job
+    failing = True
+
+    def flaky_rows_for_job(job_id: str):
+        nonlocal manifest_reads
+        manifest_reads += 1
+        if failing:
+            raise RuntimeError("manifest read boom")
+        return original_rows_for_job(job_id)
+
+    store.rows_for_job = flaky_rows_for_job  # type: ignore[method-assign]
+    # 播种 b 的 published code：排除「无 code」成为不 claim 的混杂因素。
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfchain", "b")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path, TEST_DATABASE_URL, executor, [_chain_definition()], artifact_object_store=store
+    )
+
+    worker._poll()
+
+    # 读失败按「恢复不全」同款处理：不缓存、不产候选、节点保持 pending。
+    assert manifest_reads == 1
+    assert queries.get_job_node(job["id"], "b")["status"] == "pending"
+    assert worker.leases.active_counts("code").get("global", 0) == 0
+    assert not (job_dir / "a_out.json").exists()
+    assert job["id"] not in worker.state.job_evals
+
+    worker._poll()
+
+    assert manifest_reads == 2  # 未缓存 → 下轮重试清单读
+
+    failing = False
+    worker._poll()
+
+    # 故障恢复后同轮重新读清单、回填、越过 ready gate 被 claim（不停 queued）。
+    assert (job_dir / "a_out.json").read_bytes() == _A_PAYLOAD
+    _claimed_b(worker, queries, job["id"])
+
+    executor.block_event.set()
+    worker.stop()
+
+
+def test_generation_preread_failure_defers_without_caching(tmp_path: Path) -> None:
+    """代次预读失败 → 不读清单、不缓存、下轮重试；读恢复后正常 hydration 并 claim。"""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
+    )
+    job = _pending_b_job(queries, workspace)
+    job_dir = resolve_job_dir(job, queries.jobs_dir)
+    storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
+    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
+
+    store = JobArtifactObjectStore(
+        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: _A_PAYLOAD})
+    )
+    manifest_reads = 0
+    original_rows_for_job = store.rows_for_job
+
+    def counting_rows_for_job(job_id: str):
+        nonlocal manifest_reads
+        manifest_reads += 1
+        return original_rows_for_job(job_id)
+
+    store.rows_for_job = counting_rows_for_job  # type: ignore[method-assign]
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfchain", "b")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path, TEST_DATABASE_URL, executor, [_chain_definition()], artifact_object_store=store
+    )
+    original_get_generation = worker.job_db.get_job_execution_generation
+
+    def raising_get_generation(job_id: str):
+        raise RuntimeError("generation read boom")
+
+    worker.job_db.get_job_execution_generation = raising_get_generation  # type: ignore[method-assign]
+
+    worker._poll()
+
+    # 预读失败在清单读之前短路：不读清单、不缓存、节点保持 pending。
+    assert manifest_reads == 0
+    assert queries.get_job_node(job["id"], "b")["status"] == "pending"
+    assert worker.leases.active_counts("code").get("global", 0) == 0
+    assert job["id"] not in worker.state.job_evals
+
+    worker.job_db.get_job_execution_generation = original_get_generation  # type: ignore[method-assign]
+    worker._poll()
+
+    # 读恢复后重新评估：清单被读取、输入回填、b 被 claim。
+    assert manifest_reads == 1
+    assert (job_dir / "a_out.json").read_bytes() == _A_PAYLOAD
+    _claimed_b(worker, queries, job["id"])
+
+    executor.block_event.set()
+    worker.stop()
+
+
+def test_successful_manifest_read_without_rows_caches_evaluation(tmp_path: Path) -> None:
+    """清单读成功但该名字无清单行 → 真缺失：正常评估为 not-ready 并缓存。
+
+    防过修：defer 只覆盖「读失败/恢复不全」，「读成功且无行」必须沿用可缓存
+    的正常评估（该降级重跑的场景已在 upgrade plan 拦过），否则每个真缺失输入
+    的 job 每轮都做无谓的清单重读。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
+    )
+    job = _pending_b_job(queries, workspace)
+    job_dir = resolve_job_dir(job, queries.jobs_dir)
+    # 本地无 a_out.json，也刻意不播种清单行：输入真缺失。
+
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    manifest_reads = 0
+    original_rows_for_job = store.rows_for_job
+
+    def counting_rows_for_job(job_id: str):
+        nonlocal manifest_reads
+        manifest_reads += 1
+        return original_rows_for_job(job_id)
+
+    store.rows_for_job = counting_rows_for_job  # type: ignore[method-assign]
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfchain", "b")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path, TEST_DATABASE_URL, executor, [_chain_definition()], artifact_object_store=store
+    )
+
+    worker._poll()
+
+    assert manifest_reads == 1
+    assert queries.get_job_node(job["id"], "b")["status"] == "pending"
+    assert not (job_dir / "a_out.json").exists()
+    assert job["id"] in worker.state.job_evals
+    assert worker.state.job_evals[job["id"]][1] == []
+
+    worker._poll()
+
+    # 缓存命中：不再重读清单、不重评。
+    assert manifest_reads == 1
+    assert queries.get_job_node(job["id"], "b")["status"] == "pending"
+
+    worker.stop()
