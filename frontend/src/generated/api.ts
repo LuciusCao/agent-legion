@@ -5723,6 +5723,7 @@ export interface components {
         | components['schemas']['RunItemMaterial']
         | components['schemas']['RunItemRef']
         | components['schemas']['RunItemBundle']
+        | components['schemas']['RunItemText']
       )[]
       /**
        * Workflow Key
@@ -5780,6 +5781,21 @@ export interface components {
        * @enum {string}
        */
       type: 'ref'
+    }
+    /**
+     * RunItemText
+     * @description Requirement text typed inline; persisted as a material before resolution.
+     */
+    RunItemText: {
+      /** Content */
+      content: string
+      /** Filename */
+      filename?: string | null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'text'
     }
     /** RunJobStats */
     RunJobStats: {

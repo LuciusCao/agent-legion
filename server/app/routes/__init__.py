@@ -159,6 +159,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
         deps.job_event_buffer,
         artifact_store=deps.artifact_store,
         object_store=deps.job_artifact_objects,
+        materials_service=deps.materials_service,
     )
     router.include_router(job_group)
 

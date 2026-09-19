@@ -24,6 +24,7 @@ from server.app.jobs.queries.job_nodes import JobNodeQueriesMixin
 from server.app.jobs.queries.job_rerun_states import JobRerunStateQueriesMixin
 from server.app.jobs.queries.job_scan_delta import JobScanDeltaMixin
 from server.app.jobs.queries.job_scan_marks import JobScanMarksMixin
+from server.app.jobs.queries.material_inline import InlineMaterialQueriesMixin
 from server.app.jobs.queries.path_hygiene import PathHygieneQueriesMixin
 from server.app.jobs.queries.quality_replays import QualityReplayQueriesMixin
 from server.app.jobs.queries.run_item_probes import RunItemProbeQueriesMixin
@@ -64,6 +65,7 @@ class RunDomainQueriesMixin(
     RunQueriesMixin,
     JobBulkQueriesMixin,
     RunItemProbeQueriesMixin,
+    InlineMaterialQueriesMixin,
     JobNodeQueriesMixin,
     JobRerunStateQueriesMixin,
     FailedNodeRunQueriesMixin,

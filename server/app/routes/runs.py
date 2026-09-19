@@ -7,7 +7,7 @@ lives at ``/workspaces/{id}/node-runs`` (routes/workspace_runs.py).
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.routes.job_http import (
@@ -21,6 +21,7 @@ from server.app.routes.run_contracts import (
     RunListResponse,
 )
 from server.app.services.job_errors import JobServiceError
+from server.app.services.materials import MaterialStorageUnavailableError
 from server.app.services.run_service import RunService
 
 
@@ -50,6 +51,9 @@ def create_runs_router(service: RunService) -> APIRouter:
                 workflow_key=body.get("workflow_key") or workspace_id,
                 items=body["items"],
             )
+        except MaterialStorageUnavailableError as exc:
+            # text items need the object store (same 503 as the materials API).
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return RunCreateResponse(**result)

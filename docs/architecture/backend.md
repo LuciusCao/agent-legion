@@ -499,6 +499,7 @@ server/app/
 | RunItemMaterial | BaseModel | type: Literal['material'], material_id: str | app/routes/run_contracts.py |
 | RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_contracts.py |
 | RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str | app/routes/run_contracts.py |
+| RunItemText | BaseModel | type: Literal['text'], content: str, filename: str | None | app/routes/run_contracts.py |
 | RunCreateRequest | BaseModel | workflow_key: str | None, items: list[RunItem] | app/routes/run_contracts.py |
 | RunRecord | BaseModel | id: str, workspace_id: str, workflow_key: str, source_kind: str, status: str,... | app/routes/run_contracts.py |
 | RunCreateResponse | BaseModel | run: RunRecord, created_count: int | app/routes/run_contracts.py |
