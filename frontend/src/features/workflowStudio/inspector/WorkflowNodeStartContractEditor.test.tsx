@@ -128,4 +128,41 @@ describe('WorkflowNodeStartContractEditor', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /外部平台内容/ }))
     expect(setDefinitionYaml).not.toHaveBeenCalled()
   })
+
+  it('clears the text_input block when 直接输入需求 is unticked', () => {
+    const setDefinitionYaml = vi.fn()
+    const node = {
+      key: '_start',
+      node_type: 'start',
+      accepted_item_types: ['material', 'text'],
+      text_input: { label: '创作需求', filename: '', template: '# 需求\n' },
+    } as unknown as WorkflowNodeRecord
+    const yamlWithBlock = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '    accepted_item_types: [material, text]',
+      '    text_input:',
+      '      label: 创作需求',
+      '      template: "# 需求\\n"',
+      '',
+    ].join('\n')
+    render(
+      <MemoryRouter>
+        <WorkflowNodeStartContractEditor
+          node={node}
+          definitionYaml={yamlWithBlock}
+          setDefinitionYaml={setDefinitionYaml}
+        />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /直接输入需求/ }))
+
+    const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
+    expect(nextYaml).not.toContain('- text')
+    expect(nextYaml).not.toContain('text_input')
+    expect(nextYaml).toContain('- material')
+  })
 })
