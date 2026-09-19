@@ -177,7 +177,7 @@
     "frontend/src/components/job/JobAllMatchingRerunDialog.tsx": 110,
     "frontend/src/components/job/JobAllMatchingRerunFooter.tsx": 61,
     "frontend/src/components/job/JobAllMatchingUpgradeDialog.tsx": 65,
-    "frontend/src/components/job/JobApprovalActionButton.tsx": 36,
+    "frontend/src/components/job/JobApprovalActionButton.tsx": 33,
     "frontend/src/components/job/JobApprovalDialog.module.css": 64,
     "frontend/src/components/job/JobApprovalDialog.tsx": 243,
     "frontend/src/components/job/JobDeleteDialog.tsx": 64,
