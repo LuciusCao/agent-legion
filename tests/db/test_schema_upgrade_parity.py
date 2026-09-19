@@ -43,23 +43,28 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v85, node_runs_impl_identity, #645) must
+# Effects the newest migration (v86, execution_generation, #759) must
 # leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v85 is DDL-only via the schema-file replay: node_runs
-# gains agent_definition_hash. The undo drops the column; v84's
-# workspace_api_tokens table stays in the (SCHEMA_VERSION-1) shape, so none
-# of the older rewind steps apply here.
+# SCHEMA_VERSION-1. v86 rides the apply fn (schema file at its raw-line
+# ceiling, v76/v84 precedent): jobs / job_nodes / node_runs /
+# executor_leases / agent_execution_requests each gain an
+# execution_generation column. The undo drops the five columns; v85's
+# node_runs.agent_definition_hash stays in the (SCHEMA_VERSION-1) shape.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("node_runs", "agent_definition_hash", "text"),
+    ("jobs", "execution_generation", "integer"),
+    ("job_nodes", "execution_generation", "integer"),
+    ("node_runs", "execution_generation", "integer"),
+    ("executor_leases", "execution_generation", "integer"),
+    ("agent_execution_requests", "execution_generation", "integer"),
 )
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "node_runs_impl_identity"
+_NEWEST_MIGRATION_NAME = "execution_generation"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v84 (empty for v85: v84 is exactly the current shape minus the
-# dropped column).
+# faithful v85 (empty for v86: v85 is exactly the current shape minus the
+# dropped columns).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

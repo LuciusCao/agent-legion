@@ -29,6 +29,10 @@ def mark_key(mark: dict[str, Any]) -> tuple[Any, ...]:
         mark.get("execution_mode"),
         mark.get("target_node_key"),
         mark.get("workflow_definition_hash"),
+        # EXEC-GENERATION-001：代次 bump 必须让缓存的旧候选失效——否则
+        # upgrade/rerun 后 claim 携带的是旧代次，CAS 会拒绝（fail-closed），
+        # 候选直到其他字段变化才被重评。
+        mark.get("execution_generation"),
         mark.get("updated_at"),
     )
 

@@ -3512,6 +3512,11 @@ export interface components {
       agent_id: string
       /** Bundle Url */
       bundle_url: string
+      /**
+       * Execution Generation
+       * @default 0
+       */
+      execution_generation: number
       /** Execution Id */
       execution_id: string
       /** Job Id */

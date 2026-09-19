@@ -37,13 +37,18 @@ def promote_claim(
     selected: Mapping[str, Any],
     manifest: dict[str, Any],
     kind: str,
+    *,
+    execution_generation: int,
 ) -> tuple[str, int]:
     """Write the claim: run row, lease, request flip, job promote.
 
     Returns ``(lease_id, node_run_id)``; raises ``ClaimRacedError`` when the
     job left the runnable set mid-claim (the caller's transaction — or the
     batch's savepoint, #546 — rolls the attempt back). Must run inside the
-    caller's write transaction.
+    caller's write transaction. ``execution_generation`` is the request row's
+    epoch, already CAS-verified against jobs under the job-mutation lock by
+    the caller (EXEC-GENERATION-001); it is stamped onto the node_runs and
+    executor_leases rows this claim creates.
     """
     log_path = claim_log_path(manifest, broker.data_dir)
     # Dispatch-time config audit (CONFIG-RUNTIME-MUTABLE-001): the manifest
@@ -61,11 +66,18 @@ def promote_claim(
         """
         insert into node_runs(
           job_id, node_key, status, command_json, log_path, run_dir, session_dir,
-          started_at, config_snapshot_json, agent_definition_hash
-        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp, %s, %s)
+          started_at, config_snapshot_json, agent_definition_hash, execution_generation
+        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp, %s, %s, %s)
         returning id
         """,
-        (selected["job_id"], selected["node_key"], log_path, config_snapshot_json, impl_hash),
+        (
+            selected["job_id"],
+            selected["node_key"],
+            log_path,
+            config_snapshot_json,
+            impl_hash,
+            execution_generation,
+        ),
     ).fetchone()
     if run is None:
         raise RuntimeError("node run insert did not return an id")
@@ -80,8 +92,9 @@ def promote_claim(
         """
         insert into executor_leases(
           id, execution_id, executor_id, workspace_id, job_id,
-          node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-        ) values (%s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s)
+          node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at,
+          execution_generation
+        ) values (%s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s, %s)
         """,
         (
             lease_id,
@@ -92,6 +105,7 @@ def promote_claim(
             selected["node_key"],
             run["id"],
             expires_at,
+            execution_generation,
         ),
     )
     conn.execute(

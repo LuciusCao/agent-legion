@@ -31,9 +31,17 @@ class ApprovalGateConflict(ValueError):
         self.missing = missing
 
 
+def _lock_job_mutation(conn: Any, job_id: str) -> None:
+    """EXEC-GENERATION-001: decision writes serialize with the mutation side
+    (``lease_guarded_mutation``) on the per-job advisory lock — taken as the
+    transaction's first statement so the generation guard below reads a state
+    no concurrent reset can still change."""
+    conn.execute("select pg_advisory_xact_lock(hashtext('job-mutation:' || %s))", (job_id,))
+
+
 def _guard_awaiting(conn: Any, job_id: str, node_key: str) -> None:
     row = conn.execute(
-        "select status from job_nodes where job_id=%s and node_key=%s",
+        "select status, execution_generation from job_nodes where job_id=%s and node_key=%s",
         (job_id, node_key),
     ).fetchone()
     if row is None:
@@ -41,6 +49,19 @@ def _guard_awaiting(conn: Any, job_id: str, node_key: str) -> None:
     if row["status"] != _AWAITING:
         raise ApprovalGateConflict(
             f"Node {node_key} is not awaiting approval (status: {row['status']})"
+        )
+    # EXEC-GENERATION-001: the parked gate row carries the epoch that parked
+    # it; a rerun/run-to/upgrade bump since then makes this decision target
+    # stale — the gate the reviewer looked at no longer exists.
+    job_row = conn.execute(
+        "select execution_generation from jobs where id=%s", (job_id,)
+    ).fetchone()
+    current_generation = int(job_row["execution_generation"]) if job_row is not None else None
+    if current_generation != int(row["execution_generation"]):
+        raise ApprovalGateConflict(
+            f"Node {node_key} approval target is stale"
+            f" (node generation {row['execution_generation']}, job generation"
+            f" {current_generation}); the gate was reset by a rerun/upgrade"
         )
 
 
@@ -91,6 +112,7 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
 
         job_id, node_key = decision["job_id"], decision["node_key"]
         with self.write() as conn:
+            _lock_job_mutation(conn, job_id)
             _guard_awaiting(conn, job_id, node_key)
             _insert_decision(conn, decision)
             conn.execute(
@@ -109,6 +131,7 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
 
         job_id, node_key = decision["job_id"], decision["node_key"]
         with self.write() as conn:
+            _lock_job_mutation(conn, job_id)
             _guard_awaiting(conn, job_id, node_key)
             _insert_decision(conn, decision)
             conn.execute(

@@ -33,6 +33,7 @@ def upgrade_job_workflow_inherit(
     staged_artifact_names: frozenset[str] | set[str] = frozenset(),
     keep_input_names: frozenset[str] | set[str] = frozenset(),
     full_manifest_cleanup: bool = False,
+    removed_node_keys: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Re-pin a job to a revision, resetting node states per upgrade mode.
 
@@ -55,6 +56,9 @@ def upgrade_job_workflow_inherit(
     inherit 保守退化：旧快照损坏 / NULL frozen 不可证明）全部清单行
     清空（codex 五轮 P2-D）——退化 clean 的语义是旧产物全部作废，
     按名字暂存的删除匹配不到旧 key / 改名输出的行。
+    ``removed_node_keys``（#759 4.3）是被删节点身份的权威来源
+    （old/new definition 差集，由服务层从旧快照算出）；None 时回退
+    为按 job_nodes 现存行推导（直连 mutation 的调用面行为不变）。
 
     返回 ``{"kept": …, "rerun": …, "deleted_rows": […]}``（clean 模式恒为
     全 rerun；``deleted_rows`` 携带 ``storage_key`` 供提交后 best-effort
@@ -66,6 +70,42 @@ def upgrade_job_workflow_inherit(
         for key in inherit_nodes
         if key in set(node_keys) and existing_rows.get(key) == "completed"
     }
+
+    # EXEC-GENERATION-001：upgrade 的唯一 bump 点——代次 +1 fold 进 jobs
+    # re-pin UPDATE（原子），returning 拿新代次，给下面删除重建为 pending
+    # 的 job_nodes 行盖同一戳；继承保留的 completed 行不动（连同行上的
+    # 旧代次戳原样保留）。
+    bumped = conn.execute(
+        """
+        update jobs
+        set status='queued',
+            error_message='',
+            workflow_revision_id=%s,
+            workflow_version=%s,
+            workflow_definition_hash=%s,
+            workflow_definition_snapshot_json=%s,
+            frozen_config_json=%s,
+            execution_mode='full',
+            target_node_key=null,
+            execution_paused=0,
+            pause_reason='',
+            execution_generation=execution_generation+1,
+            updated_at=current_timestamp
+        where id=%s
+        returning execution_generation
+        """,
+        (
+            workflow_revision_id,
+            workflow_version,
+            workflow_definition_hash,
+            workflow_definition_snapshot_json,
+            frozen_config_json,
+            job_id,
+        ),
+    ).fetchone()
+    if bumped is None:
+        raise ValueError(f"Job not found: {job_id}")
+    generation = int(bumped["execution_generation"])
 
     if kept_nodes:
         keep_marks = ",".join("%s" for _ in kept_nodes)
@@ -82,10 +122,10 @@ def upgrade_job_workflow_inherit(
         reset_nodes.append(node_key)
         conn.execute(
             """
-            insert into job_nodes(job_id, node_key, status, created_at)
-            values (%s, %s, 'pending', current_timestamp)
+            insert into job_nodes(job_id, node_key, status, created_at, execution_generation)
+            values (%s, %s, 'pending', current_timestamp, %s)
             """,
-            (job_id, node_key),
+            (job_id, node_key, generation),
         )
 
     if reset_nodes:
@@ -105,7 +145,15 @@ def upgrade_job_workflow_inherit(
         conn.execute(_cancel_queued_sql(placeholders), (job_id, *sorted(reset_nodes)))
     # A4：新 revision 已消失的旧节点 key（rename 前身份）的同名清单行一并
     # 清理（行匹配不到按新 key 构建的 reset 集，不删就是永久孤儿行）。
-    renamed_from_nodes = frozenset(existing_rows) - frozenset(node_keys)
+    # #759 4.3：身份来源是调用方从 old/new definition 差集算出的
+    # ``removed_node_keys``（与 removed_artifact_face 的产物名/runs 目录
+    # 面同源）——job_nodes 行缺失/多行的漂移场景口径一致；None（裸构造
+    # 调用面）回退为按现存行推导。
+    renamed_from_nodes = (
+        frozenset(removed_node_keys)
+        if removed_node_keys is not None
+        else frozenset(existing_rows) - frozenset(node_keys)
+    )
     if kept_nodes or not full_manifest_cleanup:
         # 继承分支按名删除（继承节点的行不在重置面，天然保留）；裸构造
         # 服务（未装配暂存）同样走既有按名删除——full_manifest_cleanup
@@ -119,30 +167,4 @@ def upgrade_job_workflow_inherit(
         # 输入是重置节点的启动输入，#114 语义），覆盖按名字暂存匹配不到
         # 的旧 key / 改名输出 / 损坏快照侧的残留面。
         deleted_rows = delete_all_artifact_rows(conn, job_id, frozenset(keep_input_names))
-    conn.execute(
-        """
-        update jobs
-        set status='queued',
-            error_message='',
-            workflow_revision_id=%s,
-            workflow_version=%s,
-            workflow_definition_hash=%s,
-            workflow_definition_snapshot_json=%s,
-            frozen_config_json=%s,
-            execution_mode='full',
-            target_node_key=null,
-            execution_paused=0,
-            pause_reason='',
-            updated_at=current_timestamp
-        where id=%s
-        """,
-        (
-            workflow_revision_id,
-            workflow_version,
-            workflow_definition_hash,
-            workflow_definition_snapshot_json,
-            frozen_config_json,
-            job_id,
-        ),
-    )
     return {"kept": len(kept_nodes), "rerun": len(reset_nodes), "deleted_rows": deleted_rows}

@@ -56,6 +56,9 @@ class AgentExecutionRequest:
     # (code text + hash ride the bundle) and the dispatch path already
     # validated the executor binding and worker eligibility.
     kind: str = "agent"
+    # Expected jobs.execution_generation at enqueue time (EXEC-GENERATION-001);
+    # persisted on the request row, CAS-checked at claim.
+    execution_generation: int = 0
 
 
 class AgentExecutionBroker:

@@ -39,8 +39,8 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
                 insert into agent_execution_requests(
                   execution_id, workspace_id, job_id, node_key,
                   kind, agent_id, agent_definition_hash, node_concurrency_limit,
-                  queued_at, manifest_json, pinned_agent_version
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, current_timestamp, %s, %s)
+                  queued_at, manifest_json, pinned_agent_version, execution_generation
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, current_timestamp, %s, %s, %s)
                 """,
                 (
                     execution_id,
@@ -53,6 +53,7 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
                     stored_limit,
                     json.dumps(dict(request.manifest), ensure_ascii=False, sort_keys=True),
                     request.pinned_agent_version,
+                    request.execution_generation,
                 ),
             )
     except IntegrityError as exc:

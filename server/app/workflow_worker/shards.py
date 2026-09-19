@@ -57,6 +57,8 @@ def claim_shard_node(
     control_snapshot: dict[str, Any] | None,
     allowed_node_keys: frozenset[str] | None,
     snapshot: CapacitySnapshot,
+    *,
+    execution_generation: int = 0,
 ) -> bool:
     """Materialize (once) and claim pending shards of a shard node."""
     shard = node.shard
@@ -78,7 +80,16 @@ def claim_shard_node(
         try:
             inputs = _resolve_shard_inputs(node, job_dir)
         except ValueError as exc:
-            _fail_node(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+            _fail_node(
+                worker,
+                workspace_id,
+                job,
+                workflow_key,
+                node,
+                log_path,
+                str(exc),
+                execution_generation=execution_generation,
+            )
             return True
         try:
             with write_transaction(worker.leases.path) as conn:
@@ -90,7 +101,16 @@ def claim_shard_node(
                     # with empty outputs; the reduce fan-in reads an empty array.
                     complete_empty_shard_node(conn, job["id"], node_key)
         except ShardLimitExceeded as exc:
-            _fail_node(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+            _fail_node(
+                worker,
+                workspace_id,
+                job,
+                workflow_key,
+                node,
+                log_path,
+                str(exc),
+                execution_generation=execution_generation,
+            )
             return True
         rows = _read_shard_rows(worker, job["id"], node_key)
         if not rows:
@@ -131,6 +151,7 @@ def claim_shard_node(
             tuple(node.inputs),
             workflow_key,
             shard_runtime={"shard_index": shard_index, "shard_input": shard_input},
+            execution_generation=execution_generation,
         ):
             running += 1
             claimed_any = True
@@ -154,6 +175,7 @@ def claim_shard_node(
             control_snapshot=control_snapshot,
             allowed_node_keys=allowed_node_keys,
             snapshot=snapshot,
+            execution_generation=execution_generation,
         ):
             running += 1
             claimed_any = True
@@ -212,6 +234,8 @@ def _fail_node(
     node: WorkflowNode,
     log_path: Path,
     message: str,
+    *,
+    execution_generation: int = 0,
 ) -> None:
     worker.leases.fail_without_lease(
         ConfigurationFailureRequest(
@@ -221,6 +245,7 @@ def _fail_node(
             node_key=node.key,
             capability=node.capability,
             log_path=str(log_path),
+            execution_generation=execution_generation,
         ),
         message,
     )

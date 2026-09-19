@@ -172,6 +172,7 @@ class CodeDispatchService:
         config: dict[str, Any],
         secret_config: dict[str, Any],
         shard_runtime: dict[str, Any] | None = None,
+        execution_generation: int = 0,
     ) -> bool:
         """Stage inputs, build the bundle, and enqueue a kind='code' request.
 
@@ -202,6 +203,8 @@ class CodeDispatchService:
             "capability": capability,
             "code_hash": digest,
             "custom_code": custom_code,
+            # EXEC-GENERATION-001：观测镜像（权威副本在请求行列上，同 agent 路径）。
+            "execution_generation": execution_generation,
             # Frozen so claim-time injection validates against the same
             # schema the config was resolved with.
             "config_schema": capability_config.config_schema,
@@ -286,6 +289,7 @@ class CodeDispatchService:
                     manifest=manifest,
                     execution_id=execution_id,
                     kind="code",
+                    execution_generation=execution_generation,
                 )
             )
             if queued is None:

@@ -47,6 +47,10 @@ class AgentClaim:
     # Resolved runtime ('code' for code claims): the scan row carries it;
     # #490's claim.granted reads it here instead of re-parsing the manifest.
     runtime: str = ""
+    # EXEC-GENERATION-001: the request row's epoch, CAS-verified against
+    # jobs.execution_generation under the job-mutation lock before promote;
+    # surfaced on the Worker claim response for observability.
+    execution_generation: int = 0
 
 
 @dataclass(frozen=True)

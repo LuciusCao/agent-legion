@@ -34,11 +34,17 @@ def finish_shard_execution(
     lease: dict[str, Any],
     result: ExecutionResult,
     now_str: str,
+    *,
+    generation_stale: bool = False,
 ) -> bool:
     """Advance shard + aggregate state for a shard lease; True when handled.
 
     Returns False for non-shard leases so the caller falls through to the
-    regular node finish path.
+    regular node finish path. ``generation_stale`` (EXEC-GENERATION-001): the
+    lease's epoch no longer matches jobs.execution_generation — the shard row
+    (an execution record, like node_runs) still settles, but the job_nodes
+    flip, status re-derivation and until_node pause are skipped so a late
+    finish never overwrites a post-reset row.
     """
     shard_index = shard_index_for_execution(
         conn, lease["job_id"], lease["node_key"], lease["execution_id"]
@@ -55,7 +61,7 @@ def finish_shard_execution(
         output_json=result.output_json if status == "completed" else "",
         error_message=result.error_message,
     )
-    if aggregate in ("completed", "failed"):
+    if aggregate in ("completed", "failed") and not generation_stale:
         error_message = failed_shard_error(conn, lease["job_id"], lease["node_key"])
         # Status guard mirrors complete_empty_shard_node: the shard row locks
         # already serialize concurrent finishers, but a late finish racing a

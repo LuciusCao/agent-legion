@@ -98,6 +98,12 @@ class LeaseClaimRequest:
     # agent_execution_requests.agent_definition_hash, mirrored onto the
     # node_runs row so the inherit upgrade can prove local-pool executions.
     agent_definition_hash: str = ""
+    # Expected jobs.execution_generation at claim time (EXEC-GENERATION-001):
+    # the claim transaction CAS-checks it against the jobs row under the
+    # job-mutation advisory lock and refuses the claim on mismatch
+    # (fail-closed). Production constructors must pass the real epoch read at
+    # evaluation time; 0 only matches jobs that were never reset.
+    execution_generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -108,6 +114,11 @@ class ConfigurationFailureRequest:
     node_key: str
     capability: str
     log_path: str
+    # Expected jobs.execution_generation at evaluation time
+    # (EXEC-GENERATION-001): the record transaction CAS-checks it under the
+    # job-mutation advisory lock and skips the fail on mismatch — the node
+    # stays pending for the next pass to re-evaluate against the new epoch.
+    execution_generation: int = 0
 
 
 @dataclass(frozen=True)
