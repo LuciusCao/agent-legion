@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, within } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import { JobDetailActions } from './JobDetailActions'
@@ -157,7 +157,7 @@ describe('JobDetailActions', () => {
     expect(screen.getByText(/确定删除任务/)).toBeInTheDocument()
     expect(onDelete).not.toHaveBeenCalled()
     await act(async () => {
-      screen.getByText('删除').click()
+      within(screen.getByRole('dialog')).getByText('删除').click()
     })
     expect(onDelete).toHaveBeenCalledTimes(1)
   })

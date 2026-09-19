@@ -108,6 +108,10 @@ export function JobRunToDialog({
       <DialogTitle>选择运行到节点</DialogTitle>
       <DialogContent>
         <div className={styles.content}>
+          <p className={styles.summary} style={{ margin: 0 }}>
+            流程只会执行到你选定的目标节点，然后暂停；后面的节点不会自动运行。
+            想继续时，在工具栏点「继续」即可跑完剩余流程。
+          </p>
           {orderedNodes.length === 0 ? (
             <p className={styles.empty}>没有可运行到的公共节点</p>
           ) : (

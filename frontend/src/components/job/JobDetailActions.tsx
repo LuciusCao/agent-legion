@@ -1,11 +1,10 @@
 import { useState } from 'react'
-import { IconButton } from '@mui/material'
 import type { JobSummary } from '../../types'
 import type { NodeCatalog } from '../../lib/nodeCatalog'
 import { JobRerunDialog, type WorkflowNodesByKey } from '../JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobDeleteDialog } from './JobDeleteDialog'
-import { MaterialIcon } from '../MaterialIcon'
+import { LabeledIconButton } from '../LabeledIconButton'
 import { canContinueJob, computeActionDisabled } from '../jobActionEligibility'
 import { JobApprovalActionButton } from './JobApprovalActionButton'
 import { JobWorkflowUpgradeButton } from './JobWorkflowUpgradeButton'
@@ -58,14 +57,13 @@ export function JobDetailActions({
           loading={loading}
           onOpenApproval={onOpenApproval}
         />
-        <IconButton
-          aria-label="重跑"
-          title="重跑"
+        <LabeledIconButton
+          icon="restart_alt"
+          label="重跑"
+          tooltip="从选定的节点开始，一路重新执行到流程结束"
           disabled={disabled.rerun}
           onClick={() => setRerunOpen(true)}
-        >
-          <MaterialIcon name="restart_alt" />
-        </IconButton>
+        />
         {onUpgradeWorkflow && (
           <JobWorkflowUpgradeButton
             jobs={jobs}
@@ -73,59 +71,53 @@ export function JobDetailActions({
             onUpgradeWorkflow={onUpgradeWorkflow}
           />
         )}
-        <IconButton
-          aria-label="运行到"
-          title="运行到"
+        <LabeledIconButton
+          icon="play_circle"
+          label="运行到节点"
+          ariaLabel="运行到"
+          tooltip="只执行到你选定的节点就暂停，后面的节点不会自动跑；之后可点「继续」跑完剩余流程"
           disabled={disabled.runTo}
           onClick={() => setRunToOpen(true)}
-        >
-          <MaterialIcon name="play_circle" />
-        </IconButton>
+        />
         {showContinue && onContinue && (
-          <IconButton
-            aria-label="继续完整流程"
-            title="继续完整流程"
+          <LabeledIconButton
+            icon="skip_next"
+            label="继续"
+            ariaLabel="继续完整流程"
+            tooltip="接着「运行到节点」停下的位置，把剩余节点全部跑完"
             disabled={disabled.continue}
             onClick={onContinue}
-          >
-            <MaterialIcon name="skip_next" />
-          </IconButton>
+          />
         )}
-        <IconButton
-          aria-label="打包"
-          title="打包"
+        <LabeledIconButton
+          icon="inventory_2"
+          label="打包"
           disabled={disabled.package}
           onClick={onPackage}
-        >
-          <MaterialIcon name="inventory_2" />
-        </IconButton>
+        />
         {onClearPacked && (
-          <IconButton
-            aria-label="清空打包状态"
-            title="清空打包状态"
+          <LabeledIconButton
+            icon="unarchive"
+            label="清空打包"
+            ariaLabel="清空打包状态"
             disabled={loading || !jobs.some((job) => job.packed)}
             onClick={onClearPacked}
-          >
-            <MaterialIcon name="unarchive" />
-          </IconButton>
+          />
         )}
-        <IconButton
-          aria-label="删除"
-          title="删除"
+        <LabeledIconButton
+          icon="delete"
+          label="删除"
           color="error"
           disabled={disabled.delete}
           onClick={() => setDeleteOpen(true)}
-        >
-          <MaterialIcon name="delete" />
-        </IconButton>
-        <IconButton
-          aria-label="产物文件"
-          title="产物文件"
+        />
+        <LabeledIconButton
+          icon="folder_open"
+          label="产物"
+          ariaLabel="产物文件"
           disabled={loading}
           onClick={onOpenArtifacts}
-        >
-          <MaterialIcon name="folder_open" />
-        </IconButton>
+        />
       </div>
 
       <JobRerunDialog
