@@ -48,6 +48,22 @@ def _accept_text_items(job_db, workspace_id: str) -> None:
     )
 
 
+def _insert_ready_material(job_db, workspace_id: str, material_id: str) -> None:
+    """A ready upload row (doc.txt) for mixing stored items with text items."""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename, content_type,"
+            " size_bytes, storage_key, status, created_by)"
+            " values (%s, %s, %s, 'doc.txt', 'text/plain', 10, %s, 'ready', 'tester')",
+            (
+                material_id,
+                workspace_id,
+                f"hash-{material_id}",
+                f"{workspace_id}/hash-{material_id}/doc.txt",
+            ),
+        )
+
+
 def _create_run(client, workspace_id: str, items: list[dict]):
     return client.post(
         f"/api/workspaces/{workspace_id}/runs",
@@ -189,11 +205,9 @@ def test_text_item_without_storage_returns_503(client, job_db, monkeypatch) -> N
 def test_text_items_mixed_with_materials_keep_order_and_dedup(client, storage, job_db) -> None:
     """[text A, material, text A, text B]: one material per distinct text, job
     order follows item order, the duplicate text dedups like a re-uploaded file."""
-    from tests.routes.test_runs_api import _insert_material
-
     workspace_id = _create_workspace(client)
     _accept_text_items(job_db, workspace_id)
-    _insert_material(job_db, workspace_id, "m-doc")
+    _insert_ready_material(job_db, workspace_id, "m-doc")
 
     response = _create_run(
         client,
