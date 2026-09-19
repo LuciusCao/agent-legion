@@ -33,7 +33,7 @@ from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.run_item_resolution import resolve_run_items
 from server.app.services.run_item_types import validate_run_item_types
 from server.app.services.run_partial_failure import compensate_partial_creation
-from server.app.services.run_text_items import materialize_text_items
+from server.app.services.run_text_items import is_text_item, materialize_text_items
 from server.app.settings import Settings
 
 if TYPE_CHECKING:
@@ -90,6 +90,7 @@ class RunService:
         *,
         workflow_key: str,
         items: list[dict[str, Any]],
+        created_by: str = "",
     ) -> dict[str, Any]:
         workspace = get_workspace(self.job_db, workspace_id)
         active_revision = self.job_db.get_active_workflow_revision(workspace_id, workflow_key)
@@ -116,8 +117,13 @@ class RunService:
 
         profile.note_run_intake(len(items))
 
-        # Validate everything (node config, pins, items) before the first
+        # Validate everything (items, node config, pins) before the first
         # write so a rejected request leaves no half-created run behind.
+        # Text items are the one exception: they become materials after the
+        # read-only checks (see run_text_items), so the stored items are
+        # probed first and the full list re-resolved once texts exist.
+        stored_items = [item for item in items if not is_text_item(item)]
+        candidates = resolve_run_items(self.job_db, workspace_id, stored_items)
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
@@ -133,14 +139,18 @@ class RunService:
             workflow_key,
             list(definition.executable_nodes),
         )
-        # Text items become ready materials here (the module docstring of
-        # run_text_items explains why this write keeps the fail-closed
-        # contract); everything else resolves read-only as before.
-        candidates = resolve_run_items(
-            self.job_db,
-            workspace_id,
-            materialize_text_items(self.job_db, self.materials_service, workspace_id, items),
-        )
+        if len(stored_items) != len(items):
+            candidates = resolve_run_items(
+                self.job_db,
+                workspace_id,
+                materialize_text_items(
+                    self.job_db,
+                    self.materials_service,
+                    workspace_id,
+                    items,
+                    created_by=created_by,
+                ),
+            )
 
         # Same dedup contract as intake: items whose (source_type, source_id)
         # already has a job in this workflow drop out; accepted keys grow the

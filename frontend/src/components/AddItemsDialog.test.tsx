@@ -582,6 +582,18 @@ describe('AddItemsDialog', () => {
     expect(screen.getByTestId('add-items-bundle-input')).toBeInTheDocument()
   })
 
+  it('shows no hint when only the opt-in text type is missing', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'ref', 'bundle'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '文件夹打包' })).toBeEnabled()
+    )
+    expect(screen.getByRole('tab', { name: '输入需求' })).toBeDisabled()
+    expect(screen.queryByTestId('item-type-hint')).toBeNull()
+  })
+
   it('keeps the text tab disabled under the default contract', async () => {
     renderWithClient(
       <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />

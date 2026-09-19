@@ -31,10 +31,16 @@ _UPSERT_SQL = (
     " where materials.status <> 'ready'"
     " returning id"
 )
-_LOOKUP_SQL = "select id from materials where workspace_id=%s and content_hash=%s"
+_LOOKUP_SQL = "select id, status from materials where workspace_id=%s and content_hash=%s"
 
 
 class InlineMaterialQueriesMixin(ConnectionQueriesMixin):
+    def find_material_by_hash(self, workspace_id: str, content_hash: str) -> dict[str, str] | None:
+        """``{id, status}`` of the workspace's row for this content hash, or None."""
+        with self._connect_read() as conn:
+            row = conn.execute(_LOOKUP_SQL, (workspace_id, content_hash)).fetchone()
+        return None if row is None else {"id": str(row["id"]), "status": str(row["status"])}
+
     def upsert_ready_material(
         self,
         workspace_id: str,
