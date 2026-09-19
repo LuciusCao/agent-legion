@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 - 主控制台的 Worker 控制台入口与接入说明：此前界面三处文案提到「Worker 控制台」却没有任何链接，新用户不知道去哪里粘贴 token、打开领取。workspace「设置 → Agent 与 Worker」顶部新增「Worker 与 Worker 控制台」卡片（控制台是什么、在哪台机器、接入三步、两个默认关闭的开关）；签发 Key 成功后追加「下一步」三步指引；设置页 Worker 列表与顶栏「运行中」弹层的空态都带「打开 Worker 控制台」链接（新标签页打开，不内嵌、不代理）。地址来自新增 env-only 配置 `AGENT_LEGION_WORKER_CONSOLE_URL`（`agent_workers.console_url`，随 `GET /api/agent-workers` 的 `console_url` 下发）：`make dev-up` 按 Worker 端口自动注入、`native-prod-up.sh` 与 Host compose 注入 `:8787`，显式留空则退化为纯文字说明；回环地址的链接悬停提示说明只能在 Worker 所在机器打开。
 - Worker 自报控制台地址，主控制台按 Worker 逐行显示「控制台」入口：Worker Service 按控制面绑定地址推导（通配绑定回落 127.0.0.1），经环境变量 `AGENT_WORKER_CONSOLE_URL` 交给 executor，注册时注入 labels 保留键 `console_url`（`worker/console_url.py`，零协议/schema 变更；旧版 Worker 缺键即不显示）。三份 worker compose 按 `AGENT_WORKER_UI_BIND` 的端口发布预填该变量，显式留空 = 不上报。设置页「已注册 Worker」、成员视角 Worker 列表与顶栏弹层的每一行都用自报地址渲染入口，空态仍用部署级兜底地址。
+- Worker 领取开关状态闭环（schema v87 `agent_workers.claim_enabled`）：Worker 的状态同步改走 `POST /api/agent-workers/self/presence` 上报 `claim_enabled`（旧 Host 无该路由时回落 `GET /self`），一次 claim 轮询即记为 True；主控制台的 Worker 状态从「在线／离线」扩为「在线·领取中／在线·未领取／离线」，「未领取」直接给出去 Worker 控制台打开的入口。新 workspace 引导加回 PRD 的「接入 Worker」「打开执行开关」两步（完成判定分别是本 workspace 有 Worker 在线、有 Worker 允许领取且调度未暂停）；任务列表有「等待中」任务而调度暂停／无 Worker 在线／无 Worker 领取时，顶部出现排查横幅，逐项给出跳转与一键恢复调度。
 
 ## [0.7.13] - 2026-09-26
 

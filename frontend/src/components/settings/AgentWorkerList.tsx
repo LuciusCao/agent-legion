@@ -4,6 +4,12 @@ import type { AgentRegisterTokenSummary, AgentWorkerSummary } from '../../api'
 import { formatDateTime } from '../../lib/formatters'
 import { toErrorMessage } from '../../lib/queryError'
 import { workerConsoleUrl } from '../../lib/workerConsoleUrl'
+import {
+  PRESENCE_LABEL,
+  presenceChipClass,
+  presenceTitle,
+  workerPresence,
+} from '../../lib/workerPresence'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
 import styles from './WorkerTokensSection.module.css'
@@ -86,12 +92,13 @@ export function AgentWorkerList({
             >
               <span className={styles.itemLabel}>{workerName(worker)}</span>
               <span
-                className={`${styles.chip} ${
-                  worker.online ? styles.chipActive : ''
-                }`}
-                title={`最近心跳 ${formatDateTime(worker.last_seen_at)}`}
+                className={`${styles.chip} ${presenceChipClass(workerPresence(worker), styles)}`}
+                title={presenceTitle(
+                  workerPresence(worker),
+                  `最近心跳 ${formatDateTime(worker.last_seen_at)}`
+                )}
               >
-                {worker.online ? '在线' : '离线'}
+                {PRESENCE_LABEL[workerPresence(worker)]}
               </span>
               {worker.allowed_workspaces.length === 0 ? (
                 <span

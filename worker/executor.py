@@ -104,7 +104,7 @@ def main() -> int:
     # 首次同步前的兜底视图：get_self 失败时控制台仍有 worker_id 可显示。
     host_worker: dict[str, Any] | None = {"worker_id": worker_id, "revoked": False}
     try:
-        host_worker = sync_host_status(client, status, metrics, host_worker)
+        host_worker = sync_host_status(client, status, metrics, host_worker, claim_enabled)
     except WorkerAuthError as exc:
         print(f"Agent Worker status authentication rejected: {exc}", flush=True)
         return 2
@@ -193,7 +193,9 @@ def main() -> int:
         while not stop.is_set():
             if time.monotonic() >= next_host_status:
                 try:
-                    host_worker = sync_host_status(client, status, metrics, host_worker)
+                    host_worker = sync_host_status(
+                        client, status, metrics, host_worker, claim_enabled
+                    )
                 except WorkerAuthError as exc:
                     print(
                         f"Agent Worker rejected by server: {exc}; re-register required", flush=True

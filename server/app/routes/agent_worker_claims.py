@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.claim_batch import claim_batch
+from server.app.agent_control.claim_state import record_claim_state
 from server.app.routes.agent_worker_claim_contracts import (
     BatchAgentClaimResponse,
     ClaimAgentExecutionRequest,
@@ -39,6 +40,9 @@ def create_agent_worker_claim_router(
         payload: ClaimAgentExecutionRequest, request: Request
     ) -> Response | BatchAgentClaimResponse:
         worker = authorize_worker(request, payload.worker_id)
+        # A claim poll only happens with the switch on: settle the v83 state
+        # to True (no write once it already is) even before a presence sync.
+        record_claim_state(broker.database_dsn, worker, True)
         # #546 batch claim, #547 single-path retirement: every request is a
         # batch request now (the default limit=1 answers a one-element
         # ``claims`` list; the pre-#546 byte-identical single-object body is
