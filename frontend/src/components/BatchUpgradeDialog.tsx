@@ -57,7 +57,12 @@ export function BatchUpgradeDialog({
   const completedCount = jobs.filter((j) => j.status === 'completed').length
 
   const handleConfirm = async () => {
-    await onConfirm(upgradableJobIds, mode)
+    try {
+      await onConfirm(upgradableJobIds, mode)
+    } catch {
+      // The action owns error presentation. Keep the dialog (and selected
+      // mode) open so the user can retry after a failed request.
+    }
   }
 
   return (

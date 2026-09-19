@@ -30,13 +30,14 @@ export function JobWorkflowUpgradeButton({
       >
         <MaterialIcon name="arrow_circle_up" />
       </IconButton>
-      {!disabled && (
-        <JobWorkflowUpgradeDialog
-          open={open}
-          onClose={() => setOpen(false)}
-          onConfirm={onUpgradeWorkflow}
-        />
-      )}
+      {/* Always mounted: `disabled` flips to true the moment the upgrade
+          request starts (loading), and unmounting here would destroy the
+          dialog's selected mode before a failed request can be retried. */}
+      <JobWorkflowUpgradeDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        onConfirm={onUpgradeWorkflow}
+      />
     </>
   )
 }
