@@ -1,54 +1,46 @@
-import { TextField } from '@mui/material'
+import { Button, TextField } from '@mui/material'
 
+import {
+  DEFAULT_TEXT_FILENAME,
+  TEXT_ITEM_MAX_BYTES,
+  type ResolvedTextItem,
+  type StartTextInput,
+} from '../lib/textItem'
 import styles from './AddItemsDialog.module.css'
 
-/** 与后端 run_text_items.TEXT_ITEM_MAX_BYTES 一致（UTF-8 字节数）。 */
-export const TEXT_ITEM_MAX_BYTES = 64 * 1024
-/** 与后端 run_text_items.DEFAULT_TEXT_FILENAME 一致。 */
-export const DEFAULT_TEXT_FILENAME = '需求.md'
-
-const encoder = new TextEncoder()
-
-/** 文本条目的 UTF-8 字节数（后端按字节限长，中文一字三字节）。 */
-export const textItemBytes = (text: string): number =>
-  encoder.encode(text).length
-
-/** 文本条目是否可提交：非空白且不超长。 */
-export const textItemReady = (text: string): boolean =>
-  text.trim().length > 0 && textItemBytes(text) <= TEXT_ITEM_MAX_BYTES
-
-/** 提交给 runs API 的 text 条目；空文件名回落默认值。 */
-export const textRunItem = (text: string, filename: string) => ({
-  type: 'text' as const,
-  content: text,
-  filename: filename.trim() || DEFAULT_TEXT_FILENAME,
-})
-
 type AddItemsTextPanelProps = {
-  text: string
-  filename: string
-  onTextChange: (value: string) => void
+  item: ResolvedTextItem
+  config: StartTextInput
+  onTextChange: (value: string | null) => void
   onFilenameChange: (value: string) => void
+}
+
+function summaryText(item: ResolvedTextItem): string {
+  if (item.tooLong)
+    return `内容过长：${item.bytes} 字节，上限 ${TEXT_ITEM_MAX_BYTES} 字节`
+  if (item.untouchedTemplate) return '请先按你的方向修改模板，再创建运行'
+  if (item.content.trim()) return `将作为 1 个条目提交（${item.bytes} 字节）`
+  return '填写后作为 1 个条目提交'
 }
 
 /**
  * Text item type panel: requirement text typed straight into the dialog.
  * 一段文本 = 1 个条目 = 1 个 job；后端存成一份 Markdown 材料，后续节点看到的
- * 与手动上传同名文件完全一样。
+ * 与手动上传同名文件完全一样。模板与文件名默认值来自 Studio 入口节点的
+ * text_input 配置。
  */
 export function AddItemsTextPanel({
-  text,
-  filename,
+  item,
+  config,
   onTextChange,
   onFilenameChange,
 }: AddItemsTextPanelProps) {
-  const bytes = textItemBytes(text)
-  const tooLong = bytes > TEXT_ITEM_MAX_BYTES
+  const warn = item.tooLong || item.untouchedTemplate
   return (
     <>
       <TextField
         label="文件名"
-        value={filename}
+        value={item.filename}
         onChange={(event) => onFilenameChange(event.target.value)}
         placeholder={DEFAULT_TEXT_FILENAME}
         helperText="存成材料时使用的文件名，.md 或 .txt"
@@ -59,22 +51,28 @@ export function AddItemsTextPanel({
         multiline
         minRows={10}
         maxRows={20}
-        label="需求内容"
+        label={config.label || '需求内容'}
         placeholder="直接写下这次任务的需求，例如参考对象、目标、风格与交付要求"
-        value={text}
+        value={item.content}
         onChange={(event) => onTextChange(event.target.value)}
-        error={tooLong}
+        error={item.tooLong}
         fullWidth
       />
       <div
-        className={tooLong ? styles.errorHint : styles.summary}
+        style={{ display: 'flex', alignItems: 'center', gap: '12px' }}
+        className={warn ? styles.errorHint : styles.summary}
         data-testid="text-summary"
       >
-        {tooLong
-          ? `内容过长：${bytes} 字节，上限 ${TEXT_ITEM_MAX_BYTES} 字节`
-          : text.trim()
-            ? `将作为 1 个条目提交（${bytes} 字节）`
-            : '填写后作为 1 个条目提交'}
+        <span style={{ flex: 1 }}>{summaryText(item)}</span>
+        {config.template && item.content !== config.template && (
+          <Button
+            size="small"
+            variant="text"
+            onClick={() => onTextChange(null)}
+          >
+            恢复模板
+          </Button>
+        )}
       </div>
     </>
   )

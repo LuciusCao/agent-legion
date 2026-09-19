@@ -81,6 +81,15 @@ class WorkflowNodeSkill:
 
 
 @dataclass(frozen=True)
+class WorkflowTextInput:
+    """Start-node presentation of the ``text`` item (start_text_input.py)."""
+
+    label: str = ""
+    filename: str = ""
+    template: str = ""
+
+
+@dataclass(frozen=True)
 class WorkflowNode:
     key: str
     label: str
@@ -105,6 +114,8 @@ class WorkflowNode:
     # a missing ``type`` to ``code``.
     node_type: str = "code"
     accepted_item_types: tuple[str, ...] = DEFAULT_ACCEPTED_ITEM_TYPES
+    # start-only, optional: how the add-items dialog presents ``text`` items.
+    text_input: WorkflowTextInput | None = None
     # Agent-routed nodes may declare the tool whitelist they run with (#443);
     # empty means undeclared — dispatch falls back to the Agent definition's
     # tools. Only ``agent`` nodes may declare a non-empty list.

@@ -14,6 +14,12 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio
   入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。设计
   见 docs/architecture/materials-and-runs-design.md §4.1。
+- start 节点可选 `text_input {label, filename, template}` 块：Studio 入口
+  节点勾选「直接输入需求」后可配置输入框标题、落盘文件名与预填模板；
+  「添加条目 · 输入需求」按它预填，模板一字未改不能提交（可一键恢复
+  模板），未带文件名的 text 条目按配置命名。呈现层配置：loader 只做形状
+  校验（字符串、长度、`.md`/`.txt` 裸文件名），不勾 `text` 时块惰性；
+  echo / 快照往返对称，compare 记 info 级变更。
 
 ## [0.7.12] - 2026-09-16
 

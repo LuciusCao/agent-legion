@@ -10,6 +10,7 @@ import yaml
 
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
 from server.app.workflows.schema import WorkflowNode
+from server.app.workflows.start_text_input import text_input_payload
 from server.app.workflows.workflow_node_skill import apply_skill_echo
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "capability": node.capability,
                 "node_type": node.node_type,
                 "accepted_item_types": list(node.accepted_item_types),
+                "text_input": text_input_payload(node.text_input),
                 "after": node.after,
                 "inputs": node.inputs,
                 "outputs": node.outputs,
@@ -149,6 +151,8 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         raw_node["type"] = node.node_type
         if node.node_type == "start":
             raw_node["accepted_item_types"] = list(node.accepted_item_types)
+            if node.text_input is not None:
+                raw_node["text_input"] = text_input_payload(node.text_input)
         if node.node_type not in ("start", "approval"):
             raw_node["capability"] = node.capability
         raw_node["after"] = node.after

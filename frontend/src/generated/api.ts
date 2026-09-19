@@ -7611,6 +7611,7 @@ export interface components {
       outputs: string[]
       skill?: components['schemas']['WorkflowNodeSkillResponse'] | null
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
+      text_input?: components['schemas']['WorkflowTextInputResponse'] | null
       /** Tools */
       tools?: string[]
     }
@@ -7692,6 +7693,24 @@ export interface components {
     WorkflowTerminalResponse: {
       /** Outcome */
       outcome: string
+    }
+    /** WorkflowTextInputResponse */
+    WorkflowTextInputResponse: {
+      /**
+       * Filename
+       * @default
+       */
+      filename: string
+      /**
+       * Label
+       * @default
+       */
+      label: string
+      /**
+       * Template
+       * @default
+       */
+      template: string
     }
     /** WorkspaceAgentRouteEntry */
     WorkspaceAgentRouteEntry: {

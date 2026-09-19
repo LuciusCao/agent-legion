@@ -627,6 +627,7 @@ server/app/
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str, prompt_mode: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeSkillResponse | BaseModel | key: str, ref: str | app/routes/workflow_node_contracts.py |
+| WorkflowTextInputResponse | BaseModel | label: str, filename: str, template: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, node_type: str, accepted_item_types: l... | app/routes/workflow_node_contracts.py |
 | NodePromptPreviewRequest | BaseModel | node_key: str, definition_yaml: str | None | app/routes/workflow_node_prompt_contracts.py |
 | NodePromptPreviewResponse | BaseModel | effective_prompt: str, platform_prompt: str, default_instructions: str, custo... | app/routes/workflow_node_prompt_contracts.py |

@@ -312,7 +312,10 @@ describe('AddItemsDialog', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
-  function mockRevisionWithAcceptedTypes(accepted: string[]) {
+  function mockRevisionWithAcceptedTypes(
+    accepted: string[],
+    textInput?: { label: string; filename: string; template: string }
+  ) {
     mockFetchRevision.mockResolvedValue({
       definition_yaml: '',
       revision: { id: 'r1', version: 1 },
@@ -327,6 +330,7 @@ describe('AddItemsDialog', () => {
             capability: '',
             node_type: 'start',
             accepted_item_types: accepted,
+            text_input: textInput ?? null,
             after: [],
             inputs: [],
             outputs: [],
@@ -686,6 +690,53 @@ describe('AddItemsDialog', () => {
     expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
       workflow_key: 'demo_workflow',
       items: [{ type: 'text', content: '短需求', filename: '需求.md' }],
+    })
+  })
+
+  it('prefills the start-node template, blocks an unedited template and restores it', async () => {
+    const template = '# 歌曲创作需求\n- 参考歌曲：\n- 新歌主题：'
+    mockRevisionWithAcceptedTypes(['text'], {
+      label: '创作需求',
+      filename: '创作需求.md',
+      template,
+    })
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 1,
+    } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    // 契约 resolve 后：输入框标题、模板与文件名都来自 text_input。
+    await waitFor(() =>
+      expect(screen.getByLabelText('创作需求')).toHaveValue(template)
+    )
+    expect(screen.getByLabelText('文件名')).toHaveValue('创作需求.md')
+    expect(screen.getByTestId('text-summary')).toHaveTextContent(
+      '请先按你的方向修改模板'
+    )
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
+    expect(screen.queryByRole('button', { name: '恢复模板' })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('创作需求'), {
+      target: { value: `${template}告别` },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复模板' }))
+    expect(screen.getByLabelText('创作需求')).toHaveValue(template)
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
+
+    fireEvent.change(screen.getByLabelText('创作需求'), {
+      target: { value: `${template}告别` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [
+        { type: 'text', content: `${template}告别`, filename: '创作需求.md' },
+      ],
     })
   })
 })

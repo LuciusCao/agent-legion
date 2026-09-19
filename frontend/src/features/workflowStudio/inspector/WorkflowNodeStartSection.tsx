@@ -2,6 +2,7 @@ import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import { itemTypeLabels } from '../../../lib/acceptedItemTypes'
 import { WorkflowNodeDependencySection } from './WorkflowNodeDependencySection'
 import { WorkflowNodeStartContractEditor } from './WorkflowNodeStartContractEditor'
+import { WorkflowNodeStartTextInputEditor } from './WorkflowNodeStartTextInputEditor'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 
 // Start nodes carry the entry contract (type: start) and never execute: the
@@ -27,6 +28,13 @@ export function WorkflowNodeStartSection(props: {
           <div className={inspectorStyles.value}>接受条目类型：{types}</div>
         ) : (
           <WorkflowNodeStartContractEditor
+            node={node}
+            definitionYaml={props.definitionYaml}
+            setDefinitionYaml={props.setDefinitionYaml}
+          />
+        )}
+        {!props.readOnly && node.accepted_item_types?.includes('text') && (
+          <WorkflowNodeStartTextInputEditor
             node={node}
             definitionYaml={props.definitionYaml}
             setDefinitionYaml={props.setDefinitionYaml}

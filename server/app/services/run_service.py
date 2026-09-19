@@ -140,6 +140,8 @@ class RunService:
             list(definition.executable_nodes),
         )
         if len(stored_items) != len(items):
+            start_node = definition.start_node
+            text_input = start_node.text_input if start_node is not None else None
             candidates = resolve_run_items(
                 self.job_db,
                 workspace_id,
@@ -149,6 +151,7 @@ class RunService:
                     workspace_id,
                     items,
                     created_by=created_by,
+                    default_filename=text_input.filename if text_input is not None else "",
                 ),
             )
 

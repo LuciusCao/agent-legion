@@ -59,6 +59,8 @@ def validate_non_start_fields(
         raise WorkflowDefinitionError(
             f"Node {node_key}.accepted_item_types is only valid on a start node"
         )
+    if raw_node.get("text_input") is not None:
+        raise WorkflowDefinitionError(f"Node {node_key}.text_input is only valid on a start node")
     if node_type == APPROVAL_NODE_TYPE:
         validate_approval_fields(raw_node, node_key)
 
@@ -140,6 +142,7 @@ def strip_snapshot_placeholders(raw_node: dict[str, Any]) -> None:
             raw_node.pop(placeholder, None)
         return
     raw_node.pop("accepted_item_types", None)
+    raw_node.pop("text_input", None)
     if node_type != APPROVAL_NODE_TYPE:
         return
     # Same set as the forbidden declaration fields: strip the empty asdict

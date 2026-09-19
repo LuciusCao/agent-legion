@@ -19,7 +19,9 @@ from server.app.workflows.schema import (
     WorkflowDefinitionError,
     WorkflowEdge,
     WorkflowNode,
+    WorkflowTextInput,
 )
+from server.app.workflows.start_text_input import load_text_input
 
 START_NODE_TYPE = "start"
 _EXECUTION_FIELDS = ("capability", "execution", "shard", "reduce", "terminal", "skill")
@@ -28,8 +30,10 @@ _CONFIG_FIELDS = ("config", "config_schema")
 _FORBIDDEN_START_FIELDS = _EXECUTION_FIELDS + _CONFIG_FIELDS
 
 
-def load_start_fields(raw_node: dict[str, Any], node_key: str) -> tuple[str, tuple[str, ...]]:
-    """Parse ``type``/``accepted_item_types`` and enforce per-type field rules."""
+def load_start_fields(
+    raw_node: dict[str, Any], node_key: str
+) -> tuple[str, tuple[str, ...], WorkflowTextInput | None]:
+    """Parse ``type``/``accepted_item_types``/``text_input``; enforce per-type field rules."""
     # ``code``/``agent`` are the explicit execution kinds (#284); ``node`` is
     # the legacy alias (also for an omitted type) and normalizes to ``code``.
     node_type = raw_node.get("type", "code")
@@ -42,12 +46,13 @@ def load_start_fields(raw_node: dict[str, Any], node_key: str) -> tuple[str, tup
     raw_types = raw_node.get("accepted_item_types")
     if node_type != START_NODE_TYPE:
         validate_non_start_fields(raw_node, node_key, node_type, raw_types)
-        return node_type, DEFAULT_ACCEPTED_ITEM_TYPES
+        return node_type, DEFAULT_ACCEPTED_ITEM_TYPES, None
     for forbidden in _FORBIDDEN_START_FIELDS:
         if forbidden in raw_node:
             raise WorkflowDefinitionError(f"Start node {node_key} must not declare {forbidden}")
+    text_input = load_text_input(raw_node.get("text_input"), node_key)
     if raw_types is None:
-        return node_type, DEFAULT_ACCEPTED_ITEM_TYPES
+        return node_type, DEFAULT_ACCEPTED_ITEM_TYPES, text_input
     if (
         not isinstance(raw_types, list)
         or not raw_types
@@ -57,7 +62,7 @@ def load_start_fields(raw_node: dict[str, Any], node_key: str) -> tuple[str, tup
             f"Start node {node_key}.accepted_item_types must be a non-empty subset"
             f" of {list(ACCEPTED_ITEM_TYPES)}"
         )
-    return node_type, tuple(dict.fromkeys(raw_types))
+    return node_type, tuple(dict.fromkeys(raw_types)), text_input
 
 
 def ensure_start_node(

@@ -54,6 +54,8 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
         fields.append("terminal")
     if base.accepted_item_types != draft.accepted_item_types:
         fields.append("accepted_item_types")
+    if base.text_input != draft.text_input:
+        fields.append("text_input")
     # Issue #431: the remaining structural fields. Each of these version with
     # the revision via ``_structural_payload`` (asdict + ``==``), so the
     # compare must see them too or a same-set-different-order draft shows
@@ -130,6 +132,9 @@ def _node_field_risks(base: WorkflowNode, draft: WorkflowNode) -> dict[str, str]
         risks["terminal"] = "breaking"
     if base.accepted_item_types != draft.accepted_item_types:
         risks["accepted_item_types"] = "breaking"
+    # Presentation only (prefill/label/filename): nothing already submitted changes.
+    if base.text_input != draft.text_input:
+        risks["text_input"] = "info"
 
     # Issue #431: the remaining structural fields keep compare and publish
     # aligned. A node_type switch (code→agent) changes what executes the
