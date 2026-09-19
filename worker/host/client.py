@@ -155,6 +155,26 @@ class Client(ClaimOperations, HeartbeatOperations, TransferOperations):
             raise RuntimeError(f"Agent Worker status failed: HTTP {status}: {body[:300]!r}")
         return dict(json.loads(body))
 
+    def report_presence(self, claim_enabled: bool) -> dict[str, Any]:
+        """Presence sync (v83): refresh liveness and report the claim switch.
+
+        Answers the same self record as ``get_self``. A pre-v83 Host has no
+        presence route (404/405): fall back to the plain self read so a Worker
+        upgraded ahead of its Host keeps its status sync (mixed-fleet rule)."""
+        status, body = self.request(
+            "POST",
+            "/api/agent-workers/self/presence",
+            data=json.dumps({"claim_enabled": claim_enabled}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        if status in (404, 405):
+            return self.get_self()
+        if status in (401, 409):
+            raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
+        if status != 200:
+            raise RuntimeError(f"Agent Worker presence failed: HTTP {status}: {body[:300]!r}")
+        return dict(json.loads(body))
+
     def get_ops_metrics(self, granularity: str) -> dict[str, Any]:
         """Fetch this Worker's metrics with its issued Worker token."""
         query = urllib.parse.urlencode({"granularity": granularity})

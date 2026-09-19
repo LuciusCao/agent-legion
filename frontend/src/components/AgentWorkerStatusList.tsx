@@ -5,8 +5,21 @@ import { queryKeys } from '../lib/queryKeys'
 import { useAgentsStore } from '../stores/agentsStore'
 import { buildWorkerRows } from './agentWorkerRows'
 import { useWorkerConsoleUrl } from '../hooks/useWorkerConsoleUrl'
+import {
+  PRESENCE_LABEL,
+  presenceTitle,
+  type WorkerPresence,
+} from '../lib/workerPresence'
 import { WorkerConsoleLink } from './WorkerConsoleLink'
 import styles from './AgentWorkerStatusList.module.css'
+
+// 「在线·未领取」用警示色：它是「任务一直等待中」的首要嫌疑。
+const PRESENCE_CLASS: Record<WorkerPresence, string> = {
+  offline: styles.chipOffline,
+  online: styles.chipOnline,
+  claiming: styles.chipOnline,
+  not_claiming: styles.chipIdle,
+}
 
 export interface AgentWorkerStatusListProps {
   workspaceId: string
@@ -46,10 +59,10 @@ export function AgentWorkerStatusList({
               </span>
             ) : (
               <span
-                className={`${styles.chip} ${row.online ? styles.chipOnline : styles.chipOffline}`}
-                title={row.heartbeatTitle}
+                className={`${styles.chip} ${PRESENCE_CLASS[row.presence]}`}
+                title={presenceTitle(row.presence, row.heartbeatTitle)}
               >
-                {row.online ? '在线' : '离线'}
+                {PRESENCE_LABEL[row.presence]}
               </span>
             )}
             <span className={styles.name}>{row.name}</span>

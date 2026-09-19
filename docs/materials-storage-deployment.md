@@ -203,7 +203,7 @@ EOF
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
 - 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
-  （目前 v82）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
+  （目前 v83）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
   v55（`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
   状态计数）、v57（`studio_chat_sessions.draft_yaml`）、v58（scoped worker
   token——撤销存量全局 register token，行为变更）、v61（Studio workflow
@@ -215,7 +215,8 @@ EOF
   （`ops_runtime_profile_samples` 执行管线观测列族）、v73/v77/v82
   （job 状态计数：行触发器 → 语句级聚合 → advisory-lock delta fold，
   #437/#659 死锁根治线）、v76（`studio_publish_requests` 发布握手表）、
-  v79（shard 感知的唯一活跃请求索引）。v59（`jobs(run_id)` 索引）与
+  v79（shard 感知的唯一活跃请求索引）、v83（`agent_workers.claim_enabled`
+  Worker 自报的领取开关列，主控制台据此区分「在线·未领取」）。v59（`jobs(run_id)` 索引）与
   v60（register token ids 列）与本部署面无直接关系。
   迁移明细以 `server/app/db/migration_chain.py` 为准。
 - bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外

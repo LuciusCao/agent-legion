@@ -4,6 +4,12 @@ import type { AgentWorkerSummary } from '../../api'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { useWorkerConsoleUrl } from '../../hooks/useWorkerConsoleUrl'
 import { workerConsoleUrl } from '../../lib/workerConsoleUrl'
+import {
+  PRESENCE_LABEL,
+  presenceChipClass,
+  presenceTitle,
+  workerPresence,
+} from '../../lib/workerPresence'
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
 import styles from './WorkspaceWorkersSection.module.css'
 
@@ -69,12 +75,13 @@ export function WorkspaceWorkersSection({
                 {worker.name || worker.worker_id}
               </span>
               <span
-                className={`${styles.chip} ${
-                  worker.online ? styles.chipActive : ''
-                }`}
-                title={`最近心跳 ${formatLastSeen(worker.last_seen_at)}`}
+                className={`${styles.chip} ${presenceChipClass(workerPresence(worker), styles)}`}
+                title={presenceTitle(
+                  workerPresence(worker),
+                  `最近心跳 ${formatLastSeen(worker.last_seen_at)}`
+                )}
               >
-                {worker.online ? '在线' : '离线'}
+                {PRESENCE_LABEL[workerPresence(worker)]}
               </span>
               <span className={styles.chip}>{worker.runtimes.join(', ')}</span>
               <span className={styles.chip}>

@@ -19,6 +19,7 @@ from server.app.auth.dependencies import require_admin, require_user
 from server.app.routes.agent_register_tokens import create_agent_register_tokens_router
 from server.app.routes.agent_worker_claims import create_agent_worker_claim_router
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
+from server.app.routes.agent_worker_presence import register_presence_route
 from server.app.routes.agent_worker_results import parse_result_metadata
 from server.app.routes.agent_workers_contracts import (
     AgentWorkerDeleteResponse,
@@ -108,6 +109,9 @@ def create_agent_workers_router(
             broker, settings, authorize_worker, require_lease_id, job_artifact_objects
         )
     )
+
+    # v83 presence sync: the self read plus the reported claim switch.
+    register_presence_route(router, registry.database_dsn, authorize_worker)
 
     @router.post(
         "/agent-workers/register", status_code=201, response_model=RegisterAgentWorkerResponse

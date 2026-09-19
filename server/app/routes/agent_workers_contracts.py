@@ -116,6 +116,14 @@ class AgentWorkerSummary(BaseModel):
     # threshold; registered-but-silent Workers show as offline.
     online: bool
     revoked: bool
+    # Worker-reported claim switch (v83): False = online but not picking up
+    # work (the「一直等待中」first suspect); None = never reported (older
+    # Worker), rendered as plain online.
+    claim_enabled: bool | None = None
+
+
+class WorkerPresenceRequest(BaseModel):
+    claim_enabled: bool
 
 
 class AgentWorkersResponse(BaseModel):

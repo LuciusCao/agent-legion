@@ -474,6 +474,38 @@ def test_list_workers_carries_configured_console_url(tmp_path: Path, monkeypatch
     assert body["workers"] == []
 
 
+def test_presence_sync_records_claim_switch_and_claim_implies_enabled(tmp_path: Path) -> None:
+    # v83：Worker 每次状态同步上报 claim 开关；未上报前为 None（旧 Worker），
+    # 上报 False 后主控制台可区分「在线·未领取」；一次 claim 轮询即回到 True。
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-1", limit=2)
+
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        token = _register(client)["worker_token"]
+        auth = {"X-Agent-Worker-Token": token}
+        assert client.get("/api/agent-workers").json()["workers"][0]["claim_enabled"] is None
+
+        presence = client.post(
+            "/api/agent-workers/self/presence", headers=auth, json={"claim_enabled": False}
+        )
+        assert presence.status_code == 200, presence.text
+        assert presence.json()["claim_enabled"] is False
+        assert presence.json()["worker_id"] == "home-mini"
+        assert client.get("/api/agent-workers").json()["workers"][0]["claim_enabled"] is False
+
+        _claim(client, token)
+        assert client.get("/api/agent-workers").json()["workers"][0]["claim_enabled"] is True
+
+        # 未认证的上报被拒：状态只能由 Worker 自己用 worker token 写。
+        assert (
+            client.post(
+                "/api/agent-workers/self/presence", json={"claim_enabled": True}
+            ).status_code
+            == 401
+        )
+
+
 def _archive_with_events(events_lines: list[str]) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:

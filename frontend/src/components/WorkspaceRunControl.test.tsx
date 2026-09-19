@@ -281,6 +281,27 @@ describe('WorkspaceRunControl', () => {
     expect(screen.queryByText('Other Mac')).not.toBeInTheDocument()
   })
 
+  it('flags an online worker whose claim switch is off', async () => {
+    listAgentWorkersMock.mockResolvedValue([
+      makeWorker({
+        worker_id: 'w-idle',
+        name: 'Idle Mac',
+        claim_enabled: false,
+      }),
+      makeWorker({
+        worker_id: 'w-busy',
+        name: 'Busy Mac',
+        claim_enabled: true,
+      }),
+    ])
+    renderControl()
+    await screen.findByText('Idle Mac')
+    // v83：领取开关关闭的 Worker 不再是普通「在线」，悬停先讲怎么修。
+    const idle = screen.getByText('在线·未领取')
+    expect(idle).toHaveAttribute('title', expect.stringContaining('开始领取'))
+    expect(screen.getByText('在线·领取中')).toBeInTheDocument()
+  })
+
   it('links each registered worker row to its self-reported console', async () => {
     listAgentWorkersMock.mockResolvedValue([
       makeWorker({

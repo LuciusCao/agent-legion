@@ -42,6 +42,12 @@ vi.mock('../api', () => ({
   fetchActiveWorkflowRevision: (
     ...args: Parameters<typeof fetchActiveWorkflowRevision>
   ) => mockFetchWorkflowDefinition(...args),
+  // 引导「接入 Worker / 打开执行开关」两步的数据源：默认无 Worker。
+  listAgentWorkers: () => Promise.resolve([]),
+}))
+
+vi.mock('../hooks/useWorkerConsoleUrl', () => ({
+  useWorkerConsoleUrl: () => '',
 }))
 
 const mockGetWorkspaceExecutionConfiguration = vi.fn()

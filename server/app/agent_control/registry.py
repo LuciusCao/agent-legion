@@ -289,4 +289,6 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "online": online,
         "revoked": row["revoked_at"] is not None,
+        # v83 Worker-reported claim switch; None for rows never reported.
+        "claim_enabled": row.get("claim_enabled"),
     }
