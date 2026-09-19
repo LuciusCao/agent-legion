@@ -146,3 +146,9 @@ def test_compare_sees_text_input_as_info_change() -> None:
     assert _node_change_fields(base, draft) == ["text_input"]
     assert _node_field_risks(base, draft) == {"text_input": "info"}
     assert _node_change_fields(base, base) == []
+
+
+def test_whitespace_only_template_is_undeclared() -> None:
+    assert _definition({"text_input": {"template": " \n\n "}}).start_node.text_input is None
+    kept = _definition({"text_input": {"template": "  # 需求\n"}}).start_node.text_input
+    assert kept is not None and kept.template == "  # 需求\n"

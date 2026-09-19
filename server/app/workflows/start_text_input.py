@@ -52,7 +52,10 @@ def load_text_input(raw: Any, node_key: str) -> WorkflowTextInput | None:
             raise WorkflowDefinitionError(
                 f"Start node {node_key}.text_input.{key} must be a string of at most {limit} chars"
             )
-        values[key] = value.strip() if key != "template" else value
+        # label/filename are trimmed; the template keeps its inner layout but
+        # a whitespace-only template is no template (the dialog could never
+        # tell "untouched" from "empty").
+        values[key] = value.strip() if key != "template" else (value if value.strip() else "")
     filename = values["filename"]
     if filename and (
         "/" in filename
