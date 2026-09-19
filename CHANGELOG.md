@@ -18,6 +18,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `console_url` 下发）：`make dev-up` 按 Worker 端口自动注入、
   `native-prod-up.sh` 与 Host compose 注入 `:8787`，显式留空则退化为纯
   文字说明；回环地址的链接悬停提示说明只能在 Worker 所在机器打开。
+- Worker 自报控制台地址，主控制台按 Worker 逐行显示「控制台」入口：Worker
+  Service 按控制面绑定地址推导（通配绑定回落 127.0.0.1），经环境变量
+  `AGENT_WORKER_CONSOLE_URL` 交给 executor，注册时注入 labels 保留键
+  `console_url`（`worker/console_url.py`，零协议/schema 变更；旧版 Worker
+  缺键即不显示）。三份 worker compose 按 `AGENT_WORKER_UI_BIND` 的端口发布
+  预填该变量，显式留空 = 不上报。设置页「已注册 Worker」、成员视角 Worker
+  列表与顶栏弹层的每一行都用自报地址渲染入口，空态仍用部署级兜底地址。
 
 ## [0.7.12] - 2026-09-16
 

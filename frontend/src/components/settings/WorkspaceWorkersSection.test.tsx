@@ -63,6 +63,20 @@ describe('WorkspaceWorkersSection', () => {
     )
   })
 
+  it('links a worker row to its self-reported console address', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      { ...sampleWorker, labels: { console_url: 'http://10.0.0.8:8787' } },
+    ])
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('workspace-worker-w1')).toBeTruthy()
+    })
+    const link = screen.getByTestId('worker-console-link')
+    expect(link.getAttribute('href')).toBe('http://10.0.0.8:8787')
+    expect(link.textContent).toContain('控制台')
+  })
+
   it('lists the workspace workers with their online state', async () => {
     mockListAgentWorkers.mockResolvedValue([sampleWorker])
     renderSection()

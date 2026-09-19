@@ -281,6 +281,24 @@ describe('WorkspaceRunControl', () => {
     expect(screen.queryByText('Other Mac')).not.toBeInTheDocument()
   })
 
+  it('links each registered worker row to its self-reported console', async () => {
+    listAgentWorkersMock.mockResolvedValue([
+      makeWorker({
+        worker_id: 'w-a',
+        name: 'Mac A',
+        labels: { console_url: 'http://10.0.0.8:8787' },
+      }),
+      makeWorker({ worker_id: 'w-b', name: 'Mac B' }),
+    ])
+    renderControl()
+    await screen.findByText('Mac A')
+    // 只有自报了地址（labels.console_url）的 Worker 行才有入口；旧版 Worker 没有。
+    const links = screen.getAllByTestId('worker-console-link')
+    expect(links).toHaveLength(1)
+    expect(links[0]).toHaveAttribute('href', 'http://10.0.0.8:8787')
+    expect(links[0]).toHaveTextContent('控制台')
+  })
+
   it('does not show revoked workers', async () => {
     listAgentWorkersMock.mockResolvedValue([
       makeWorker({
