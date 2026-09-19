@@ -124,6 +124,52 @@ def test_get_self_uses_worker_token_and_returns_own_record(
     assert seen == [("GET", "/api/agent-workers/self")]
 
 
+def test_report_presence_posts_claim_switch_and_returns_self_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[tuple[str, str, bytes | None]] = []
+
+    def fake_request(self, method: str, path: str, **kwargs) -> tuple[int, bytes]:
+        seen.append((method, path, kwargs.get("data")))
+        return 200, b'{"worker_id":"worker-1","claim_enabled":false}'
+
+    monkeypatch.setattr(Client, "request", fake_request)
+
+    record = Client("http://host", "worker-token").report_presence(False)
+
+    assert record == {"worker_id": "worker-1", "claim_enabled": False}
+    assert seen == [("POST", "/api/agent-workers/self/presence", b'{"claim_enabled": false}')]
+
+
+def test_report_presence_falls_back_to_get_self_on_pre_v83_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Mixed fleet: a Worker upgraded ahead of its Host must keep its status
+    # sync alive — the missing route degrades to the plain self read.
+    seen: list[tuple[str, str]] = []
+
+    def fake_request(self, method: str, path: str, **kwargs) -> tuple[int, bytes]:
+        seen.append((method, path))
+        if method == "POST":
+            return 404, b"not found"
+        return 200, b'{"worker_id":"worker-1"}'
+
+    monkeypatch.setattr(Client, "request", fake_request)
+
+    assert Client("http://host", "worker-token").report_presence(True)["worker_id"] == "worker-1"
+    assert seen == [
+        ("POST", "/api/agent-workers/self/presence"),
+        ("GET", "/api/agent-workers/self"),
+    ]
+
+
+def test_report_presence_rejects_invalid_worker_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Client, "request", lambda *args, **kwargs: (401, b"invalid token"))
+
+    with pytest.raises(WorkerAuthError):
+        Client("http://host", "bad-token").report_presence(True)
+
+
 def test_get_self_rejects_invalid_worker_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Client, "request", lambda *args, **kwargs: (401, b"invalid token"))
 

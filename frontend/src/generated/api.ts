@@ -582,6 +582,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-workers/self/presence': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Report Presence
+     * @description Refresh liveness and record the Worker's claim switch; answers the self record.
+     */
+    post: operations['report_presence_api_agent_workers_self_presence_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-workers/{worker_id}': {
     parameters: {
       query?: never
@@ -3724,6 +3744,8 @@ export interface components {
       allowed_workspaces: string[]
       /** Capabilities */
       capabilities: string[]
+      /** Claim Enabled */
+      claim_enabled?: boolean | null
       /** Labels */
       labels: {
         [key: string]: string
@@ -7221,6 +7243,11 @@ export interface components {
       /** Error Type */
       type: string
     }
+    /** WorkerPresenceRequest */
+    WorkerPresenceRequest: {
+      /** Claim Enabled */
+      claim_enabled: boolean
+    }
     /** WorkerStatusResponse */
     WorkerStatusResponse: {
       /** Paused */
@@ -9210,6 +9237,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['OpsMetricsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  report_presence_api_agent_workers_self_presence_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkerPresenceRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentWorkerSummary']
         }
       }
       /** @description Validation Error */

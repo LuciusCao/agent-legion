@@ -101,6 +101,31 @@ def test_sync_host_unreachable_filters_by_last_known_scope(tmp_path: Path) -> No
     assert [row["workspace_id"] for row in remote["workspaces"]] == ["ws-1"]
 
 
+def test_sync_reports_claim_switch_through_presence(tmp_path: Path) -> None:
+    """v83：带 claim_enabled 时走 report_presence（Host 据此标「在线·未领取」）；
+    不带（旧调用方）仍是纯 get_self。"""
+    calls: list[tuple[str, Any]] = []
+
+    class PresenceClient(_FakeClient):
+        def report_presence(self, claim_enabled: bool) -> dict[str, Any]:
+            calls.append(("presence", claim_enabled))
+            return {"worker_id": "worker-1", "revoked": False, "claim_enabled": claim_enabled}
+
+        def get_self(self) -> dict[str, Any]:
+            calls.append(("self", None))
+            return super().get_self()
+
+    status = ExecutionStatusReporter(tmp_path / "status.json")
+    metrics = WorkerMetricsCache(tmp_path / "metrics.json", refresh_seconds=60)
+    worker = sync_host_status(PresenceClient(), status, metrics, None, False)  # type: ignore[arg-type]
+    assert worker is not None and worker["claim_enabled"] is False
+    assert calls == [("presence", False)]
+
+    calls.clear()
+    sync_host_status(PresenceClient(), status, metrics, None)  # type: ignore[arg-type]
+    assert calls == [("self", None)]
+
+
 def test_sync_without_workspaces_omits_the_field(tmp_path: Path) -> None:
     """尚未注册成功（明细为空）时字段缺省，不写空列表占位。"""
 

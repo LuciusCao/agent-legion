@@ -1,0 +1,47 @@
+.banner {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #fff4e0;
+  color: #7a4f00;
+  border: 1px solid #f3d9a4;
+}
+.icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.body {
+  flex: 1;
+  min-width: 0;
+}
+.title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.action {
+  padding: 2px 10px;
+  border: 1px solid #7a4f00;
+  border-radius: 999px;
+  background: #fff;
+  color: #7a4f00;
+  font-size: 12px;
+  cursor: pointer;
+}
+.action:hover {
+  background: #fbe9c8;
+}

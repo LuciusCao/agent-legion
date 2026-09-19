@@ -34,6 +34,11 @@
   background: #f0f0f0;
   color: #74777f;
 }
+/* 在线·未领取（v83 领取开关关闭）：警示色 */
+.chipIdle {
+  background: #fff4e0;
+  color: #7a4f00;
+}
 .chipHidden {
   visibility: hidden;
 }

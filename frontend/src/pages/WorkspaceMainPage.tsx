@@ -17,6 +17,7 @@ import { shouldShowEmptyGuide } from '../lib/onboardingReadiness'
 import { JobFilterBar } from '../components/job/JobFilterBar'
 import { JobList } from '../components/job/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
+import { WorkerReadinessBanner } from '../components/WorkerReadinessBanner'
 import {
   JobActionBar,
   type JobActionBarFilter,
@@ -65,6 +66,14 @@ export default function WorkspaceMainPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
   const filterCounts = useJobStore(selectFilterCounts)
+  // 「等待中」排查横幅的输入：等待任务数与「是否需要 Worker」（纯 code
+  // workflow 由 Host 本地执行，不查 Worker 在线/领取）。
+  const waitingCount =
+    (workspaceStats?.job_stats?.queued ?? 0) +
+    (workspaceStats?.job_stats?.pending ?? 0)
+  const needsWorker =
+    workflowDefinition?.nodes.some((node) => node.node_type === 'agent') ??
+    false
   const totalJobs = useJobStore((state) => state.totalJobs) ?? jobIds.length
   const filtersActive =
     filterConfig.status !== null ||
@@ -183,6 +192,13 @@ export default function WorkspaceMainPage() {
 
       {!showEmptyGuide && (
         <>
+          {workspaceId && (
+            <WorkerReadinessBanner
+              workspaceId={workspaceId}
+              waitingCount={waitingCount}
+              needsWorker={needsWorker}
+            />
+          )}
           <section>
             <JobFilterBar
               key={workspaceId}

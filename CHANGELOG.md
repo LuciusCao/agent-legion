@@ -25,6 +25,15 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   缺键即不显示）。三份 worker compose 按 `AGENT_WORKER_UI_BIND` 的端口发布
   预填该变量，显式留空 = 不上报。设置页「已注册 Worker」、成员视角 Worker
   列表与顶栏弹层的每一行都用自报地址渲染入口，空态仍用部署级兜底地址。
+- Worker 领取开关状态闭环（schema v83 `agent_workers.claim_enabled`）：
+  Worker 的状态同步改走 `POST /api/agent-workers/self/presence` 上报
+  `claim_enabled`（旧 Host 无该路由时回落 `GET /self`），一次 claim 轮询即
+  记为 True；主控制台的 Worker 状态从「在线／离线」扩为「在线·领取中／
+  在线·未领取／离线」，「未领取」直接给出去 Worker 控制台打开的入口。新
+  workspace 引导加回 PRD 的「接入 Worker」「打开执行开关」两步（完成判定
+  分别是本 workspace 有 Worker 在线、有 Worker 允许领取且调度未暂停）；
+  任务列表有「等待中」任务而调度暂停／无 Worker 在线／无 Worker 领取时，
+  顶部出现排查横幅，逐项给出跳转与一键恢复调度。
 
 ## [0.7.12] - 2026-09-16
 

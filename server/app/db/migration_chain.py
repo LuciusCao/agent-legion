@@ -39,6 +39,7 @@ from server.app.db.migrations import (
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
+from server.app.db.migrations.agent_worker_claim_state import migrate_agent_worker_claim_state
 from server.app.db.migrations.claim_queue_wait_profile import migrate_claim_queue_wait_profile
 from server.app.db.migrations.claim_stage_profile import migrate_claim_stage_profile
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
@@ -205,6 +206,9 @@ MIGRATIONS: list[SchemaMigration] = [
     # and reads sum base + pending. Losing writers never wait after acquiring
     # jobs-row locks, removing both counter-row and row/advisory cycles.
     SchemaMigration(82, "job_status_counts_advisory_locks", _migrate_v82_locks),
+    # v83: Worker-reported claim switch column (agent_workers.claim_enabled,
+    # nullable) — the Host UI's「在线·未领取」signal. DDL-only, guarded rule.
+    SchemaMigration(83, "agent_worker_claim_state", migrate_agent_worker_claim_state),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

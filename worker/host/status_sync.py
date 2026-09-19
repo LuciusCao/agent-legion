@@ -46,10 +46,17 @@ def sync_host_status(
     status: ExecutionStatusReporter,
     metrics: WorkerMetricsCache,
     previous: dict[str, Any] | None,
+    claim_enabled: bool | None = None,
 ) -> dict[str, Any] | None:
-    """Publish Host status; authentication rejection remains fatal to the caller."""
+    """Publish Host status; authentication rejection remains fatal to the caller.
+
+    ``claim_enabled`` rides along as the presence report (v83): the Host
+    renders「在线·未领取」instead of a plain online dot while the switch is
+    off. None = legacy callers, plain self read."""
     try:
-        worker = client.get_self()
+        worker = (
+            client.get_self() if claim_enabled is None else client.report_presence(claim_enabled)
+        )
     except WorkerAuthError as exc:
         status.set_remote(_remote_status(None, host_reachable=True, connection_error=str(exc)))
         raise
