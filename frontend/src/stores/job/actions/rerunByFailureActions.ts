@@ -30,6 +30,8 @@ export function rerunByFailureActions(set: JobStoreSet, get: () => JobState) {
         if (input.fromNodeKey) body.from_node_key = input.fromNodeKey
         const data = await rerunJobsByFailure(workspaceId, body)
         const results = data.results ?? []
+        // rerun_nodes 在本端点是「实际重跑的节点 key 列表」（string[]）；
+        // upgrade-workflow 的数量统计走 kept_node_count / rerun_node_count。
         const hasUpstreamRerun = results.some(
           (r) =>
             r.node_key != null &&

@@ -28,7 +28,7 @@ from server.app.workflows.approval_node import (
     approval_rework_target,
 )
 from server.app.workflows.execution_control import ancestor_closure
-from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
     from server.app.services.approval_decisions import ApprovalDecisionService
@@ -94,7 +94,8 @@ def execute_rework(
     )
     # One guarded transaction commits the audit row and the node reset
     # together: staged output cleanup rolls back with the transaction.
-    stale_nodes = downstream_nodes(definition, target)
+    # #759: 与 rerun 同一合并下游口径（显式边 ∪ 隐式消费边）。
+    stale_nodes = dependency_downstream(definition, target)
     staged = None
     deleted_rows: list[dict[str, Any]] = []
     try:

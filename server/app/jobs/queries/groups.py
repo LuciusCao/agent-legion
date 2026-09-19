@@ -33,6 +33,8 @@ from server.app.jobs.queries.scoped_tokens import ScopedTokenQueriesMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
 from server.app.jobs.queries.studio_chat import StudioChatQueriesMixin
 from server.app.jobs.queries.studio_publish_requests import StudioPublishRequestQueriesMixin  # #416
+from server.app.jobs.queries.upgrade_impl_identity import UpgradeImplIdentityQueriesMixin  # #645
+from server.app.jobs.queries.upgrade_staging import UpgradeStagingQueriesMixin  # #645
 from server.app.jobs.queries.workflow_draft_cas import WorkflowDraftCasQueriesMixin
 from server.app.jobs.queries.workflow_drafts import WorkflowDraftQueriesMixin
 from server.app.jobs.queries.workflow_revisions import WorkflowRevisionQueriesMixin
@@ -81,6 +83,8 @@ class RunDomainQueriesMixin(
     ExecutionRetentionQueriesMixin,
     PathHygieneQueriesMixin,
     AtomicJobMutationsMixin,
+    UpgradeStagingQueriesMixin,
+    UpgradeImplIdentityQueriesMixin,
     JobExecutionControlMixin,
 ):
     """Runs, jobs, nodes, scans, reruns, quality replays, approvals, retention, and execution control."""

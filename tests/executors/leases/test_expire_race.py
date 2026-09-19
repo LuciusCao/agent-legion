@@ -22,7 +22,7 @@ from tests.executors.leases.helpers import _claim_request, _setup_workspace
 from tests.postgres_support import TEST_DATABASE_URL
 
 _STALE_SELECT = """
-    select id, job_id, node_key, node_run_id, execution_id
+    select id, job_id, node_key, node_run_id, execution_id, execution_generation
     from executor_leases
     where status='active' and expires_at<=%s
 """

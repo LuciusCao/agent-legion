@@ -1338,3 +1338,24 @@ invariants:
       - kind: contract
         target: tests/routes/test_studio_agent_scope.py
         gate: quick
+
+  - id: EXEC-GENERATION-001
+    statement: "Execution generation protocol (#759): jobs.execution_generation is the monotone epoch source of truth, mirrored onto job_nodes/node_runs/executor_leases/agent_execution_requests rows. Every mutation that resets execution state (rerun, run-to, approval rework, workflow upgrade) runs inside lease_guarded_mutation, whose transaction first takes the unified per-job advisory lock pg_advisory_xact_lock(hashtext('job-mutation:' || job_id)) — lock order: pool locks (code-pool/agent-ws/agent-worker) → job-mutation:<job_id> → row locks, and the mutation side never takes a pool lock — and bumps jobs.execution_generation exactly once, folded into the mutation's own jobs UPDATE (returning the new epoch), stamping the job_nodes rows it resets/rebuilds with that new value; kept inherit rows and non-reset mutations (resume, delete) never bump. Claim/enqueue side (phase 1c): the workflow worker's dirty-tracking mark_key carries execution_generation so a bump invalidates cached ready candidates; every claim transaction takes the job-mutation lock under its pool locks and CAS-checks the expected epoch (LeaseClaimRequest / the agent_execution_requests row) against the jobs row — the local code pool refuses the claim without writing (fail-closed), the Agent/remote lane cancels the stale request with the mutation side's cancel semantics and skips the candidate — and stamps the epoch onto the node_runs/executor_leases rows it creates; the batch claim re-sorts candidates (code by job_id, then agent by (ws lock key, job_id)) because savepoint rollback never releases advisory xact locks. Finish/fail/approval/sweep side (phase 1d): every late-write path takes the job-mutation lock and CAS-checks its epoch before touching job_nodes — finish_lease (incl. the shard arm) releases the lease and settles the node_runs/shard history rows unconditionally but skips the job_nodes flip, sync_job_status and until_node pause when the lease's epoch is stale; fail_without_lease skips the config-failure record entirely (the node stays pending for the next pass); park_awaiting_approval CAS-checks the candidate epoch and stamps the parked row with the current epoch (park never bumps), so approve_gate_atomic/reject_gate_atomic can reject a decision whose parked gate predates a bump with the existing ApprovalGateConflict conflict semantics; expire_stale_leases, recover_orphaned_running_jobs (node-row stamp vs current epoch on the reset predicate) and the agent sweeper's requeue/terminal job_nodes writes are likewise gated (the sweeper cancels a stale request instead of requeueing it — requeue would double-execute). Every multi-job batch taking job-mutation locks (finish_many, try_claim_many, expire, recover, agent sweep, and the agent claim batch's agent block) walks jobs in one global (workspace lock key hashtext('agent-ws:' || workspace_id)::int, job_id) order because advisory xact locks are never released before COMMIT (phase 7 alignment; the agent batch's code-first block stays job_id-ordered — code candidates take no agent-ws lock — and its crossing with a local code batch on the same two jobs is the accepted 40P01-retried residual). Upgrade-side publication domains (#759 P2): the workflow-upgrade guard transaction additionally takes pg_advisory_xact_lock(hashtext('implementation-publication:' || workspace_id)) unconditionally before its active-revision re-read — a domain shared with versioned_entities agent/node_code publish/rollback/archive, active workflow-revision publication, and runtime-only in-place revision edits (publishers never touch job rows or take a job-mutation lock, so the order stays acyclic) — and, for inherit revalidation, pg_advisory_xact_lock(hashtext('skill-lock')), a global single-document domain shared with every skill_lock write (SkillLockStore.put_lock: dispatch first-pin and make skills-lock refresh) and the upgrade plan-phase locked read, while dispatch hot-path reads stay outside the domain; the full order is pool locks → job-mutation → implementation-publication → skill-lock → row locks."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/db/test_execution_generation_schema.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker_claim_generation.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker_sweep_generation.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_execution_generation_races.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_upgrade_lock_domains.py
+        gate: quick

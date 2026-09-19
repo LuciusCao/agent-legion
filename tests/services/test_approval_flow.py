@@ -190,13 +190,16 @@ def test_rework_resets_upstream_and_writes_feedback(approval_setup):
     assert _node_status(job_db, job_id, "write") == "pending"
     assert _node_status(job_db, job_id, "gate") == "stale"
     assert _job_status(job_db, job_id) == "queued"
-    # Second round: complete the upstream again, park, approve.
+    # Second round: complete the upstream again, park, approve. The rework
+    # bumped the job's execution generation (EXEC-GENERATION-001), so the
+    # re-park candidate carries the fresh epoch.
     with job_db.connect() as conn:
         conn.execute(
             "update job_nodes set status='completed' where job_id=%s and node_key='write'",
             (job_id,),
         )
-    assert leases.park_awaiting_approval(job_id, "gate") is True
+    generation = int(job_db.get_job(job_id)["execution_generation"])
+    assert leases.park_awaiting_approval(job_id, "gate", execution_generation=generation) is True
     service.decide(workspace_id, job_id, "gate", verdict="approved", decided_by="user:u1")
     history = service.list_decisions(workspace_id, job_id)
     assert [d["verdict"] for d in history] == ["approved", "rework"]

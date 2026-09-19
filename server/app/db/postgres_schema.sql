@@ -1079,6 +1079,15 @@ alter table studio_chat_sessions add column if not exists session_modes_json tex
 -- ({used, size, optional cost}); compacting = kimi background-compaction
 -- window flag (send guard + UI input lock, self-clearing after a timeout).
 alter table studio_chat_sessions add column if not exists usage_json text, add column if not exists compacting boolean not null default false;
+-- Implementation identity of the run's dispatch (schema v85, #645): the
+-- claim-time mirror of agent_execution_requests.agent_definition_hash
+-- (agent rows = Agent definition hash, code rows = sha256 of the code
+-- text). node_runs is the retention-proof audit trail (sweeps never delete
+-- run rows), so the inherit upgrade's implementation-identity check reads
+-- it first; '' = unprovable (local-pool rows predating v85, node_code
+-- missing at claim time). Like v75's skill column, the ALTER alone covers
+-- fresh and pre-v85 databases (the create-table block omits the column).
+alter table node_runs add column if not exists agent_definition_hash text not null default '';
 
 create table if not exists studio_chat_messages (
   id text primary key,

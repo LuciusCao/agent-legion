@@ -7,6 +7,9 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from server.app.jobs.queries.upgrade_impl_identity import (
+    acquire_implementation_publication_lock,
+)
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
 
@@ -60,6 +63,11 @@ def save_revision_runtime_or_publish(
     current_pins = json.loads(str(active["definition_json"])).get("node_code_pins")
     definition_json = embed_node_code_pins(definition_json, current_pins or {})
     with job_db.connect() as conn:
+        # #759 P2-A：runtime-only 原地编辑改写 active revision 的
+        # definition_json/definition_hash，同属 implementation-publication
+        # 锁域（与发布同事务锁）——否则 upgrade guard 重读到提交之间可被
+        # 原地编辑穿插，upgrade pin 到已被改写的 revision 内容。
+        acquire_implementation_publication_lock(conn, workspace_id)
         row = conn.execute(
             "update workflow_revisions set definition_json=%s, definition_hash=%s"
             " where id=%s returning *",

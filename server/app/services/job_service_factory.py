@@ -83,6 +83,9 @@ class JobServices:
             self.executor_leases,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
+            artifact_mutation=JobArtifactMutationService(settings.jobs_dir),
+            object_store=object_store,
+            custom_nodes_enabled=settings.executor_runtime.workflows.custom_nodes_enabled,
         )
         self.execution = JobExecutionService(
             job_db,

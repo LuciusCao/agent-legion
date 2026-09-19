@@ -63,17 +63,18 @@ def _seed_job_with_manifest(
     *,
     workspace: Any,
     storage: FakeObjectStorage,
+    source_id: str = "Q1",
 ) -> dict[str, Any]:
     batch = job_db.create_run(
         "chain_workflow",
         "batch_by_ids",
-        {"question_ids": ["Q1"]},
+        {"question_ids": [source_id]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
         workflow_key="chain_workflow",
         source_type="question",
-        source_id="Q1",
+        source_id=source_id,
         run_id=batch["id"],
         title="Question 1",
         node_keys=["up", "down"],
@@ -432,3 +433,75 @@ def test_rerun_object_cleanup_revalidates_per_object_mid_delete(
     assert store.lookup(job["id"], "up.json") is not None
     assert up_key not in storage.deleted
     assert down_key in storage.deleted
+
+
+def _boom_live_keys(job_id: str, storage_keys: list[str]) -> set[str]:
+    raise RuntimeError("manifest probe boom")
+
+
+def test_rerun_post_commit_cleanup_failure_still_succeeds(
+    job_db, settings, chain_definition, monkeypatch
+):
+    """#759 P1：rerun 的 post-commit 对象清理抛错不得反转已提交的重置——
+    结果仍 succeeded，清单行（事务内删除）保持已删。突变自检锚点：无兜底
+    的实现会让 RuntimeError 冒出 rerun()，本用例变红。"""
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    service = _make_rerun_service(job_db, settings, storage)
+    monkeypatch.setattr(service.object_store, "live_keys_for", _boom_live_keys)
+
+    result = service.rerun(workspace["id"], job["id"], "up")
+
+    assert result["status"] == "succeeded"
+    assert JobArtifactObjectStore(job_db, storage).names_for_job(job["id"]) == set()
+    nodes = {n["node_key"]: n["status"] for n in job_db.list_job_nodes(job["id"])}
+    assert nodes["up"] == "pending"
+
+
+def test_run_to_post_commit_cleanup_failure_still_succeeds(
+    job_db, settings, chain_definition, monkeypatch
+):
+    """#759 P1：run-to 共享同一 post-commit 清理，抛错同样不反转结果。"""
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    store = JobArtifactObjectStore(job_db, storage)
+    monkeypatch.setattr(store, "live_keys_for", _boom_live_keys)
+    service = JobExecutionService(
+        job_db,
+        JobArtifactMutationService(settings.jobs_dir),
+        ExecutorLeaseRepository(job_db, data_dir=settings.data_dir),
+        object_store=store,
+    )
+
+    result = service.run_to(workspace["id"], job["id"], "down", start_node_key="up")
+
+    assert result["status"] == "succeeded"
+    assert JobArtifactObjectStore(job_db, storage).names_for_job(job["id"]) == set()
+
+
+def test_batch_rerun_continues_when_post_commit_cleanup_fails(
+    job_db, settings, chain_definition, monkeypatch
+):
+    """#759 P1：批量 rerun 的每个 job 共享同一清理兜底——清理抛错不进入
+    per-job 结果，也不中断整批（两个 job 都 succeeded）。"""
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job_a = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    job_b = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage, source_id="Q2"
+    )
+    service = _make_rerun_service(job_db, settings, storage)
+    monkeypatch.setattr(service.object_store, "live_keys_for", _boom_live_keys)
+
+    results = service.batch_rerun(workspace["id"], [job_a["id"], job_b["id"]], "up")
+
+    assert [r["job_id"] for r in results] == [job_a["id"], job_b["id"]]
+    assert [r["status"] for r in results] == ["succeeded", "succeeded"]

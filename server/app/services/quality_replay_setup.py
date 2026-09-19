@@ -16,7 +16,7 @@ import logging
 import shutil
 from typing import TYPE_CHECKING, Any
 
-from server.app.jobs.atomic_mutations import prepare_replay_copy
+from server.app.jobs.job_state_mutations import prepare_replay_copy
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import InvalidOperationError, JobServiceError
 from server.app.services.node_config_batch import frozen_node_config, run_frozen_payload

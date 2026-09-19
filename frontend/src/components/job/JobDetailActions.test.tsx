@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
-import type { ReactElement } from 'react'
+import { render, screen, act, fireEvent } from '@testing-library/react'
+import { useState, type ReactElement } from 'react'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import { JobDetailActions } from './JobDetailActions'
 import { makeJob } from '../../testing/fixtures'
-import type { WorkflowDefinitionRecord } from '../../types'
+import type { UpgradeMode, WorkflowDefinitionRecord } from '../../types'
 
 const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
@@ -54,6 +54,43 @@ function renderWithClient(ui: ReactElement) {
   return render(ui, { wrapper: TestQueryProvider })
 }
 
+const upgradeableJob = () =>
+  makeJob({
+    id: 'j1',
+    status: 'completed',
+    is_workflow_outdated: true,
+    workflow_version: 1,
+    current_workflow_revision_version: 2,
+  })
+
+/** Mirrors useUpgradeWorkflowAction: loading flips true for the whole request. */
+function UpgradeHarness({
+  onUpgradeWorkflow,
+}: {
+  onUpgradeWorkflow: (mode: UpgradeMode) => Promise<void>
+}) {
+  const [loading, setLoading] = useState(false)
+  return (
+    <JobDetailActions
+      jobs={[upgradeableJob()]}
+      workflowDefinition={workflow}
+      loading={loading}
+      onRerun={vi.fn()}
+      onPackage={vi.fn()}
+      onDelete={vi.fn()}
+      onOpenArtifacts={vi.fn()}
+      onUpgradeWorkflow={async (mode: UpgradeMode) => {
+        setLoading(true)
+        try {
+          await onUpgradeWorkflow(mode)
+        } finally {
+          setLoading(false)
+        }
+      }}
+    />
+  )
+}
+
 describe('JobDetailActions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -91,8 +128,8 @@ describe('JobDetailActions', () => {
     expect(screen.getByLabelText('清空打包状态')).toHaveAttribute('disabled')
   })
 
-  it('calls onUpgradeWorkflow for an outdated job', async () => {
-    const onUpgradeWorkflow = vi.fn()
+  it('opens the upgrade dialog and forwards the selected mode', async () => {
+    const onUpgradeWorkflow = vi.fn().mockResolvedValue(undefined)
     renderActions({
       jobs: [
         makeJob({
@@ -109,8 +146,48 @@ describe('JobDetailActions', () => {
     await act(async () => {
       screen.getByLabelText('升级 workflow').click()
     })
+    expect(screen.getByText('升级 workflow')).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('确认升级').click()
+    })
 
     expect(onUpgradeWorkflow).toHaveBeenCalledTimes(1)
+    expect(onUpgradeWorkflow).toHaveBeenCalledWith('clean')
+  })
+
+  it('keeps the dialog mounted while upgrading and preserves the selected mode after failure', async () => {
+    let rejectUpgrade: (err: Error) => void = () => {}
+    const onUpgradeWorkflow = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectUpgrade = reject
+        })
+    )
+    renderWithClient(<UpgradeHarness onUpgradeWorkflow={onUpgradeWorkflow} />)
+
+    await act(async () => {
+      screen.getByLabelText('升级 workflow').click()
+    })
+    fireEvent.click(screen.getByText(/继承未变节点产物/))
+    await act(async () => {
+      screen.getByText('确认升级').click()
+    })
+
+    // loading=true while the request is in flight must not unmount the dialog.
+    expect(screen.getByTitle('升级 workflow')).toHaveAttribute('disabled')
+    expect(screen.getByText('升级中...')).toBeInTheDocument()
+
+    await act(async () => {
+      rejectUpgrade(new Error('upgrade failed'))
+    })
+
+    expect(onUpgradeWorkflow).toHaveBeenCalledWith('inherit')
+    expect(screen.getByText('升级 workflow')).toBeInTheDocument()
+    expect(screen.getByText('确认升级')).not.toHaveAttribute('disabled')
+    expect(
+      screen.getByRole('radio', { name: /继承未变节点产物/ })
+    ).toBeChecked()
   })
 
   it('disables rerun and package for a running job', () => {

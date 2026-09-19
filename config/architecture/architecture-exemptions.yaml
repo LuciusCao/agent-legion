@@ -1151,3 +1151,29 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/751
   ceiling: 210
   expires: 2027-03-31
+- check: architecture.file_budget
+  path: server/app/jobs/queries/upgrade_impl_identity.py
+  reason: 'Issue #645 codex round-5 P1-A: the inherit upgrade''s implementation-identity
+    read projects the skill content identity alongside the agent/code hash — the
+    request-row fallback extracts skill_commit/skill_version from the persisted
+    manifest (mark_done trim keeps those keys) and the node_runs segment carries
+    the v75 skill_version column, so the merged record widens to a 4-tuple. 7
+    effective lines past the 39 baseline + allowance band, all of it the skill
+    projection. Remove when the record type consolidates into a dataclass or a
+    budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/645
+  ceiling: 61
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: server/app/services/job_workflow_upgrade_plan.py
+  reason: 'Issue #645 codex round-5 P1-A: plan_inherit_nodes threads the skill_manager
+    (dispatch-same SkillManager for the skill content identity comparison) through
+    to implementation_excluded_nodes — one parameter plus the keyword forwarding,
+    1 effective line past the 42 baseline + allowance band. Remove when a
+    resolution-context object consolidates the plan''s optional resolvers or a
+    budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/645
+  ceiling: 58
+  expires: 2026-12-31

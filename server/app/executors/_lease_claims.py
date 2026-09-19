@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,6 +16,8 @@ from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors._path_canonicalization import canonicalize_data_path
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
 from server.app.workflows.sharding import try_start_shard
+
+logger = logging.getLogger(__name__)
 
 
 def claim_lease(
@@ -37,7 +40,26 @@ def claim_lease(
         ("code-pool",),
     )
 
+    # EXEC-GENERATION-001：锁序 code-pool → job-mutation → 行锁。与 mutation
+    # 侧（rerun/run-to/upgrade，lease_guarded_mutation）互斥后做代次 CAS：
+    # 期望代次与 jobs 现值不等 = 评估缓存过期，拒绝本次 claim（不写任何行），
+    # 下一 poll pass 以新代次重新评估入队。fail-closed：对不上就拒。
+    conn.execute(
+        "select pg_advisory_xact_lock(hashtext(%s))",
+        (f"job-mutation:{request.job_id}",),
+    )
     current_control = _read_job_execution_control(conn, request.job_id)
+    current_generation = current_control["execution_generation"]
+    if current_generation is None or current_generation != request.execution_generation:
+        logger.warning(
+            "claim rejected by execution-generation CAS: job=%s node=%s expected=%s current=%s",
+            request.job_id,
+            request.node_key,
+            request.execution_generation,
+            current_generation,
+        )
+        return None
+
     if _execution_control_rejects_claim(request, current_control):
         return None
     if current_control["status"] in TERMINAL_JOB_STATUSES:
@@ -122,9 +144,9 @@ def claim_lease(
         """
         insert into node_runs(
             job_id, node_key, status, command_json, log_path, run_dir, session_dir,
-            started_at, config_snapshot_json
+            started_at, config_snapshot_json, agent_definition_hash, execution_generation
         )
-        values (%s, %s, 'running', %s, %s, '', '', %s, %s)
+        values (%s, %s, 'running', %s, %s, '', '', %s, %s, %s, %s)
         returning id
         """,
         (
@@ -134,6 +156,8 @@ def claim_lease(
             log_path,
             now_str,
             request.config_snapshot_json,
+            request.agent_definition_hash,
+            request.execution_generation,
         ),
     )
     inserted = cursor.fetchone()
@@ -145,9 +169,10 @@ def claim_lease(
         """
         insert into executor_leases(
             id, execution_id, executor_id, workspace_id, job_id,
-            node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
+            node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at,
+            execution_generation
         )
-        values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+        values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s)
         """,
         (
             lease_id,
@@ -160,6 +185,7 @@ def claim_lease(
             now_str,
             now_str,
             database_timestamp(expires_at),
+            request.execution_generation,
         ),
     )
 

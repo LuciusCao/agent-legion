@@ -3512,6 +3512,11 @@ export interface components {
       agent_id: string
       /** Bundle Url */
       bundle_url: string
+      /**
+       * Execution Generation
+       * @default 0
+       */
+      execution_generation: number
       /** Execution Id */
       execution_id: string
       /** Job Id */
@@ -4039,6 +4044,12 @@ export interface components {
       filter?: components['schemas']['JobFilterPayload'] | null
       /** Job Ids */
       job_ids?: string[] | null
+      /**
+       * Mode
+       * @default clean
+       * @enum {string}
+       */
+      mode: 'clean' | 'inherit'
     }
     /** BootstrapRequest */
     BootstrapRequest: {
@@ -4677,8 +4688,12 @@ export interface components {
     JobMutationResultResponse: {
       /** Job Id */
       job_id: string
+      /** Kept Node Count */
+      kept_node_count?: number | null
       /** Message */
       message?: string | null
+      /** Mode */
+      mode?: ('clean' | 'inherit') | null
       /** Node Key */
       node_key?: string | null
       /**
@@ -4696,6 +4711,8 @@ export interface components {
         | 'resume'
       /** Reason Code */
       reason_code?: string | null
+      /** Rerun Node Count */
+      rerun_node_count?: number | null
       /**
        * Status
        * @enum {string}
@@ -4788,8 +4805,12 @@ export interface components {
     JobRerunByFailureResultResponse: {
       /** Job Id */
       job_id: string
+      /** Kept Node Count */
+      kept_node_count?: number | null
       /** Message */
       message?: string | null
+      /** Mode */
+      mode?: ('clean' | 'inherit') | null
       /** Node Key */
       node_key?: string | null
       /**
@@ -4807,6 +4828,8 @@ export interface components {
         | 'resume'
       /** Reason Code */
       reason_code?: string | null
+      /** Rerun Node Count */
+      rerun_node_count?: number | null
       /** Rerun Nodes */
       rerun_nodes?: string[]
       /**
@@ -7353,6 +7376,15 @@ export interface components {
       summary: components['schemas']['TokenUsageSummary']
       /** Workspace Id */
       workspace_id: string
+    }
+    /** UpgradeWorkflowRequest */
+    UpgradeWorkflowRequest: {
+      /**
+       * Mode
+       * @default clean
+       * @enum {string}
+       */
+      mode: 'clean' | 'inherit'
     }
     /** UserCreateRequest */
     UserCreateRequest: {
@@ -10120,7 +10152,13 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json':
+          | components['schemas']['UpgradeWorkflowRequest']
+          | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
