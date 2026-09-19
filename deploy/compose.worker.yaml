@@ -58,6 +58,11 @@ services:
       # 无冒号的 ${VAR-默认值} 形式：deploy/.env 显式写空值时生效为「禁用
       # 守卫」（零 runtime 注册合法，如纯 code 池形态），不会被默认值盖掉。
       AGENT_WORKER_EXPECT_RUNTIMES: ${AGENT_WORKER_EXPECT_RUNTIMES-velites}
+      # Worker 自报控制台地址（注册 labels.console_url，主控制台按 Worker 显示
+      # 「控制台」入口，worker/console_url.py）：容器内绑定 0.0.0.0 推导不出
+      # 宿主机可达地址，这里按端口发布预填；经反向代理暴露时在 deploy/.env
+      # 显式配置。无冒号形式：显式留空 = 不上报。
+      AGENT_WORKER_CONSOLE_URL: ${AGENT_WORKER_CONSOLE_URL-http://${AGENT_WORKER_UI_BIND:-127.0.0.1}:8787}
     stop_grace_period: 30s
     healthcheck:
       # Healthy = 服务可达，且控制面未进入 failed，且（Worker 进程在跑或尚未配置）。

@@ -191,6 +191,29 @@ describe('WorkerTokensSection', () => {
     ).toBe('http://127.0.0.1:8789')
   })
 
+  it('links a registered worker row to its self-reported console', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      { ...sampleWorker, labels: { console_url: 'http://10.0.0.8:8787' } },
+      { ...sampleWorker, worker_id: 'w2', name: 'legacy-mac' },
+    ])
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('worker-w1')).toBeTruthy()
+    })
+    expect(
+      within(screen.getByTestId('worker-w1'))
+        .getByTestId('worker-console-link')
+        .getAttribute('href')
+    ).toBe('http://10.0.0.8:8787')
+    // 旧版 Worker 不自报地址：该行没有入口。
+    expect(
+      within(screen.getByTestId('worker-w2')).queryByTestId(
+        'worker-console-link'
+      )
+    ).toBeNull()
+  })
+
   it('links the empty registered-worker list to the Worker console', async () => {
     mockListAgentWorkers.mockResolvedValue([])
     renderSection()

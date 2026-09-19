@@ -402,7 +402,14 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
    `AGENT_LEGION_WORKER_CONSOLE_URL`（`make dev-up` 按 Worker 端口自动注入，
    `native-prod-up.sh` / Host compose 注入 `:8787`；Worker 控制台经其它地址
    暴露时在 `.env` 显式配置，显式留空则不显示链接）。回环地址只能在 Worker
-   所在机器的浏览器里打开，链接的悬停提示会说明这一点。
+   所在机器的浏览器里打开，链接的悬停提示会说明这一点。Worker 注册成功后，
+   主控制台每一行 Worker 还会带该 Worker **自报**的「控制台」链接：Worker
+   Service 按自己的控制面绑定地址推导（通配绑定 `0.0.0.0` 回落
+   `127.0.0.1`），经环境变量 `AGENT_WORKER_CONSOLE_URL` 交给 executor，注册时
+   写进 labels 的保留键 `console_url`（`worker/console_url.py`）。控制台经反向
+   代理或映射到非回环地址时，在 Worker 侧显式设置该变量（三份 compose 文件
+   已按 `AGENT_WORKER_UI_BIND` 的端口发布预填），显式空串 = 不上报；旧版
+   Worker 不上报，对应行只保留部署级入口。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
 

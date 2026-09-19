@@ -55,6 +55,9 @@ services:
       # 即 fail-fast（退出码 2）。纯 code 池形态置空并去掉 velites bind
       # mount（参照 compose.worker.zero-runtime.yaml）。
       AGENT_WORKER_EXPECT_RUNTIMES: ${AGENT_WORKER_EXPECT_RUNTIMES-velites}
+      # Worker 自报控制台地址（注册 labels.console_url；容器内绑定 0.0.0.0
+      # 推导不出宿主机地址，按上方端口发布预填；显式留空 = 不上报）。
+      AGENT_WORKER_CONSOLE_URL: ${AGENT_WORKER_CONSOLE_URL-http://${AGENT_WORKER_UI_BIND:-127.0.0.1}:${AGENT_WORKER_UI_PORT:-8787}}
     stop_grace_period: 30s
     healthcheck:
       # Healthy = 服务可达，且控制面未进入 failed，且（Worker 进程在跑或尚未配置）。

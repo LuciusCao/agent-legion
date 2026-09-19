@@ -3,6 +3,7 @@ import { deleteAgentWorker } from '../../api'
 import type { AgentRegisterTokenSummary, AgentWorkerSummary } from '../../api'
 import { formatDateTime } from '../../lib/formatters'
 import { toErrorMessage } from '../../lib/queryError'
+import { workerConsoleUrl } from '../../lib/workerConsoleUrl'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
 import styles from './WorkerTokensSection.module.css'
@@ -120,6 +121,10 @@ export function AgentWorkerList({
                   已失效（旧版吊销）
                 </span>
               )}
+              <WorkerConsoleLink
+                url={workerConsoleUrl(worker)}
+                label="控制台"
+              />
               {deletable(worker) && (
                 <button
                   type="button"
