@@ -19,7 +19,7 @@ codex P1-3：同名排除对 **rerun/run-to 闭包**仍是正确语义（共享�
 from __future__ import annotations
 
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import dependency_children, walk_downstream
 
 
 def staging_output_names(
@@ -72,11 +72,15 @@ def shared_name_rerun_closure(
     manifest row points at foreign content. Returns the subset of ``keep``
     to move into the reset face, computed to a fixpoint — each exclusion
     joins the face and may cascade through further name sharing or
-    downstream edges (an excluded node reruns, so its old outputs are
+    downstream dependencies (an excluded node reruns, so its old outputs are
     semantically replaced and its kept descendants cannot inherit them).
-    Conservative direction: extra reruns, never crossed data.
+    The cascade walks the merged adjacency (explicit edges ∪ implicit
+    consumption edges, #759): a consumer with no declared edge still reads
+    the excluded node's outputs. Conservative direction: extra reruns, never
+    crossed data.
     """
     excluded: set[str] = set()
+    children = dependency_children(definition)
     while True:
         face = reset_face | excluded
         face_names: set[str] = set()
@@ -88,5 +92,4 @@ def shared_name_rerun_closure(
         if not newly:
             return excluded
         excluded |= newly
-        for node_key in newly:
-            excluded.update(set(downstream_nodes(definition, node_key)) & (set(keep) - excluded))
+        excluded.update(walk_downstream(children, newly) & (set(keep) - excluded))

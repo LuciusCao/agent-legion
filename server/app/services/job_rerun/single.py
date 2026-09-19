@@ -14,7 +14,7 @@ from server.app.services.job_staged_cleanup import (
 )
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
-from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
@@ -81,7 +81,9 @@ def commit_rerun(
             service.job_db, str(job["workspace_id"]), str(job["workspace_id"])
         )
 
-    stale_nodes = downstream_nodes(definition, actual_node_key)
+    # #759: stale 面走合并下游（显式边 ∪ 隐式消费边）——loader 不要求 input
+    # 的生产者有显式边，漏掉隐式消费者会让其产物静默基于旧输入。
+    stale_nodes = dependency_downstream(definition, actual_node_key)
     staged = None
     deleted_rows: list[dict[str, Any]] = []
     try:

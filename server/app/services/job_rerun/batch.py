@@ -32,7 +32,7 @@ from server.app.services.job_rerun.preview_checks import (
 )
 from server.app.services.job_rerun.single import commit_rerun_result
 from server.app.services.job_selection_resolver import resolve_batch_selection
-from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
@@ -195,7 +195,10 @@ def rerun_by_failure_category(
         if from_node_key is not None:
             # Explicit start node: only jobs whose matching failure is the node
             # itself or downstream of it rerun, starting from from_node_key.
-            downstream = set(downstream_nodes(definition, from_node_key))
+            # #759: downstream includes implicit consumers (input names resolve
+            # to producers without a declared edge) — commit_rerun marks the
+            # same merged closure stale.
+            downstream = set(dependency_downstream(definition, from_node_key))
             if not any(node == from_node_key or node in downstream for node in failed_nodes):
                 results[job_id] = job_failure_result(
                     job_id,

@@ -2,15 +2,18 @@
 
 判定基准：节点 N 可继承 ⟺ 其全部输入（上游产物 + 配置 + 实现）可证明
 与产出当前产物的执行一致，且 N 不在重跑闭包里。本模块把这个基准拆成
-**种子收集**（``collect_change_seeds``，纯局部判定）与**双通道传播闭包**
+**种子收集**（``collect_change_seeds``，纯局部判定）与**三通道传播闭包**
 （``rerun_closure``，结构依赖 + 存储键依赖）两层：
 
 - 种子（S1–S5）只看本节点的新旧快照与执行记录，不含任何上游信息——
   上游维度完全交给闭包（"全部上游都不在重跑闭包里"直接定义，取代
   旧实现把祖先变化压进 per-node 哈希的链式压缩）；
-- 闭包通道 A（边）：种子节点的全部新图下游（``downstream_nodes``，
-  条件边含在 children map）；通道 B（名字）：与重置面共享输出名（含 RMW）的
-  候选一起重跑（``shared_name_rerun_closure`` 的 fixpoint）。
+- 闭包通道 A（边）：种子的全部新图显式边下游；通道 C（隐式消费边，
+  issue #759）：input 名的生产者→消费者边与显式边合并为一张邻接表
+  （``workflow_consumption.dependency_children``，loader 不要求 input
+  的生产者有显式边，调度器靠输入文件出现解锁），A∪C 一次遍历到底；
+  通道 B（名字）：与重置面共享输出名（含 RMW）的候选一起重跑
+  （``shared_name_rerun_closure`` 的 fixpoint，级联同样走合并邻接表）。
 
 任何重跑原因（定义 diff、配置漂移、实现身份、可达性、排除规则、名字
 共享）接入时只要进种子集，就自动获得全下游传播——新增判定源不可能
@@ -34,7 +37,7 @@ from server.app.services.job_workflow_upgrade_diff import (
     node_is_inherit_excluded,
 )
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import dependency_children, walk_downstream
 
 
 def collect_change_seeds(
@@ -97,20 +100,20 @@ def collect_change_seeds(
 
 
 def rerun_closure(definition: WorkflowDefinition, seeds: set[str]) -> set[str]:
-    """种子集的重跑闭包（通道 A 边传播 + 通道 B 名字传播）。
+    """种子集的重跑闭包（通道 A 显式边 + 通道 B 同名 + 通道 C 隐式消费边）。
 
-    通道 A：每个种子的全部新图下游（``downstream_nodes`` 全边 children
-    map，条件边含在内；自带 seen 防环——新图经 loader _validate_acyclic，
-    环防御是兜底）。通道 B：与重置面共享输出名（含 RMW）的候选一起重跑
-    （``shared_name_rerun_closure`` 的 fixpoint，每次排除扩大重置面，
-    新排除节点的下游也并入）。返回值限于新图可执行节点。
+    通道 A/C 合并为一张邻接表（``dependency_children``：显式边 ∪ 隐式消费边，
+    条件边含在内，RMW 不自边、外部 input 不产生边），种子在其上一次遍历
+    到底（seen 防环——新图显式边经 loader _validate_acyclic，隐式边可能
+    成环，环内互染是保守方向）。通道 B：与重置面共享输出名（含 RMW）的
+    候选一起重跑（``shared_name_rerun_closure`` 的 fixpoint，每次排除扩大
+    重置面，新排除节点的合并下游也并入）。返回值限于新图可执行节点。
 
     这是**唯一**的重置面来源：任何种子自动获得全下游传播。
     """
     executable = definition.executable_nodes
+    children = dependency_children(definition)
     reset = {key for key in seeds if key in executable}
-    for key in list(reset):
-        reset.update(downstream_nodes(definition, key))
-    reset &= set(executable)
+    reset |= {key for key in walk_downstream(children, reset) if key in executable}
     excluded = shared_name_rerun_closure(definition, frozenset(executable) - reset, reset)
     return reset | excluded

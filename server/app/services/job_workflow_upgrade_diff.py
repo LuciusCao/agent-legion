@@ -164,14 +164,14 @@ def compute_inherit_reset_nodes(
     new_frozen_config_json: str | None,
     implementation_excluded: frozenset[str] | set[str] = frozenset(),
 ) -> set[str]:
-    """新 revision 下需要重跑的节点集（种子 + 双通道传播闭包）。
+    """新 revision 下需要重跑的节点集（种子 + 三通道传播闭包）。
 
     702 传播闭包重构后本函数是 ``job_workflow_upgrade_propagation`` 的
     thin wrapper（签名不变，既有 40 用例断言零改动承重）：
     ``collect_change_seeds``（S1 定义 / S2 config / S3 入边 / S4 实现身份
-    / S5 排除规则的纯局部种子）→ ``rerun_closure``（通道 A 全下游边传播
-    + 通道 B 同名生产者 fixpoint）。上游一致性不再由 per-node 哈希链
-    间接证明，而由「全部上游都不在重跑闭包里」直接定义。
+    / S5 排除规则的纯局部种子）→ ``rerun_closure``（通道 A 显式边传播
+    + 通道 B 同名生产者 fixpoint + 通道 C 隐式消费边，#759）。上游一致性
+    不再由 per-node 哈希链间接证明，而由「全部上游都不在重跑闭包里」直接定义。
 
       - 节点在旧快照中不存在（新增节点）→ 变更；
       - 节点在新 revision 中不存在（删除节点）→ 不在结果里（job_nodes

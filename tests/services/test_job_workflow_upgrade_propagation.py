@@ -1,7 +1,8 @@
 """传播闭包与种子收集的纯函数测试（issue #645，702 传播闭包重构）。
 
 全部不触库：``collect_change_seeds``（S1–S5 纯局部种子）与
-``rerun_closure``（通道 A 边传播 + 通道 B 同名 fixpoint）的判定面。
+``rerun_closure``（通道 A 显式边 + 通道 B 同名 fixpoint + 通道 C
+隐式消费边，issue #759）的判定面。
 等价性声明由既有 74 用例（diff/inherit/codex3/codex4/mutation/routes，
 断言零改动）承重；本文件钉住新模块的机制面——种子判定的维度切换、
 双通道级联、以及判别力反转（去传播必红，防未来种子漏接）。
@@ -26,6 +27,8 @@ from server.app.workflows.schema import (
     WorkflowNodeSkill,
     WorkflowShardSpec,
 )
+from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import consumer_edges
 
 
 def _node(key: str, **overrides) -> WorkflowNode:
@@ -381,6 +384,96 @@ def test_closure_s6_seed_merge_recomputes() -> None:
     merged = rerun_closure(definition, {"a"} | ({"b"} & candidates))
 
     assert merged == {"a", "b", "c", "d"}
+
+
+# ---------------------------------------------------------------------------
+# rerun_closure：通道 C（隐式消费边，issue #759 P1）
+# ---------------------------------------------------------------------------
+
+
+def test_closure_implicit_consumption_chain_without_edges() -> None:
+    """issue 最小反例回归：无显式边的多级 output→input 链，p 变 → q/r 全进闭包。"""
+    definition = _definition(
+        {
+            "p": _node("p", outputs=["x"]),
+            "q": _node("q", inputs=["x"], outputs=["y"]),
+            "r": _node("r", inputs=["y"]),
+            "s": _node("s", outputs=["z"]),
+        }
+    )
+
+    closure = rerun_closure(definition, {"p"})
+
+    assert closure == {"p", "q", "r"}
+    # 无关节点（无共享名、无消费关系）保持继承。
+    assert "s" not in closure
+    # 突变自检锚点：通道 C 退化为仅显式边时 p 无任何下游，q/r 被错误继承。
+    assert downstream_nodes(definition, "p") == []
+
+
+def test_closure_implicit_explicit_shared_name_fixpoint() -> None:
+    """三通道混合 fixpoint：C 级联命中同名通道 B，B 的级联再走 A 与 C。"""
+    definition = _definition(
+        {
+            "p": _node("p", outputs=["x"]),
+            "q": _node("q", inputs=["x"], outputs=["shared.json"]),
+            "r": _node("r", outputs=["shared.json"]),
+            "s": _node("s", after=["r"]),
+            "u": _node("u", inputs=["shared.json"]),
+            "t": _node("t", outputs=["t.json"]),
+        },
+        [WorkflowEdge(source="r", target="s")],
+    )
+
+    closure = rerun_closure(definition, {"p"})
+
+    # C：p→q；B：q 与 r 共享 shared.json → r 进面；A：r→s（显式边）；
+    # C：shared.json 的消费者 u 随 q/r 进闭包（通道 B fixpoint 级联走合并邻接表）。
+    assert closure == {"p", "q", "r", "s", "u"}
+    assert "t" not in closure
+
+
+def test_closure_rmw_no_self_edge_but_propagates_to_consumers() -> None:
+    """RMW 纪律：input 与自己 output 同名不构成自边，但作为生产者传播到其他 consumer。"""
+    definition = _definition(
+        {
+            "rmw": _node("rmw", inputs=["x"], outputs=["x"]),
+            "q": _node("q", inputs=["x"], outputs=["y"]),
+        }
+    )
+
+    # rmw 是 x 的唯一声明生产者：自边被排除（突变自检：放开自边此断言即红），
+    # q 仍经 rmw→q 隐式消费边进闭包。
+    assert "rmw" not in consumer_edges(definition)["rmw"]
+    assert rerun_closure(definition, {"rmw"}) == {"rmw", "q"}
+
+
+def test_closure_rmw_consumer_reruns_with_upstream_producer() -> None:
+    """RMW 节点的上游生产者漂移：p 变 → RMW 与其余 consumer 一起进闭包。"""
+    definition = _definition(
+        {
+            "p": _node("p", outputs=["x"]),
+            "rmw": _node("rmw", inputs=["x"], outputs=["x"]),
+            "q": _node("q", inputs=["x"]),
+        }
+    )
+
+    assert rerun_closure(definition, {"p"}) == {"p", "rmw", "q"}
+
+
+def test_closure_external_input_does_not_propagate() -> None:
+    """外部 input（无任何生产者）不产生隐式边：不被牵连，也不反向传播。"""
+    definition = _definition(
+        {
+            "p": _node("p", outputs=["x"]),
+            "q": _node("q", inputs=["external.json"], outputs=["y"]),
+            "r": _node("r", inputs=["external.json"]),
+        }
+    )
+
+    assert rerun_closure(definition, {"p"}) == {"p"}
+    # 消费外部名的节点自身做种子：外部名无生产者，无反向扩散。
+    assert rerun_closure(definition, {"q"}) == {"q"}
 
 
 # ---------------------------------------------------------------------------
