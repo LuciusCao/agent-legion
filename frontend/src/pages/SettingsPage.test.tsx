@@ -46,6 +46,10 @@ vi.mock('../hooks/useWorkflowDefinitionQuery', () => ({
   })),
 }))
 
+vi.mock('../hooks/useWorkerConsoleUrl', () => ({
+  useWorkerConsoleUrl: () => 'http://127.0.0.1:8789',
+}))
+
 vi.mock('../api', () => ({
   api: vi.fn(),
   fetchWorkspaces: vi.fn(),

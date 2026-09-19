@@ -131,6 +131,10 @@ services:
       PGPASSFILE: /run/secrets/postgres_pgpass
       AGENT_LEGION_VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
       AGENT_LEGION_DATA_DIR: /var/lib/agent-legion
+      # 主控制台「打开 Worker 控制台」入口地址：Host stack 配套的本机 Worker
+      # 控制台默认发布在宿主机 127.0.0.1:8787（compose.worker.yaml）；经其它
+      # 地址暴露时在 deploy/.env 显式配置。无冒号形式：显式留空 = 不显示链接。
+      AGENT_LEGION_WORKER_CONSOLE_URL: ${AGENT_LEGION_WORKER_CONSOLE_URL-http://127.0.0.1:8787}
       # 无冒号的 ${VAR-默认值} 形式：deploy/.env 显式写 AGENT_LEGION_S3_ENDPOINT=
       # （空值）时生效为「AWS 默认端点」，不会被默认值盖掉；外部 S3 在这里
       # 配远程地址后，local-s3-decide.sh 会同步跳过本地后端。

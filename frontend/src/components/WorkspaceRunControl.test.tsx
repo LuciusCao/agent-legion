@@ -24,6 +24,12 @@ const listAgentWorkersMock = vi.fn()
 
 vi.mock('../api/agentWorkers', () => ({
   listAgentWorkers: () => listAgentWorkersMock(),
+  fetchAgentWorkers: () =>
+    Promise.resolve({ workers: [], console_url: 'http://127.0.0.1:8789' }),
+}))
+
+vi.mock('../hooks/useWorkerConsoleUrl', () => ({
+  useWorkerConsoleUrl: () => 'http://127.0.0.1:8789',
 }))
 
 function makeWorker(overrides: Partial<WorkerSummary> = {}): WorkerSummary {
@@ -189,10 +195,15 @@ describe('WorkspaceRunControl', () => {
     expect(screen.getByText('忙碌 3/16')).toBeInTheDocument()
   })
 
-  it('shows empty state when no worker is available', () => {
+  it('shows empty state with a Worker console entry when no worker is available', () => {
     mockAgents = []
     renderControl()
-    expect(screen.getByText('暂无可用 Worker')).toBeInTheDocument()
+    expect(screen.getByText(/暂无可用 Worker/)).toBeInTheDocument()
+    // 空态直接把人送到 Worker 控制台（添加 Key、开始领取都在那边）。
+    expect(screen.getByTestId('worker-console-link')).toHaveAttribute(
+      'href',
+      'http://127.0.0.1:8789'
+    )
   })
 
   it('shows a disconnected status dot when the agents channel is closed', () => {

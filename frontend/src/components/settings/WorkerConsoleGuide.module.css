@@ -1,0 +1,66 @@
+.card {
+  border: 1px solid #c3c6cf;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;
+  background: #f7f9fc;
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.heading {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+  color: #43474e;
+}
+.text {
+  font-size: 13px;
+  color: #43474e;
+  margin: 0 0 10px;
+  line-height: 1.6;
+}
+.text code,
+.hint code {
+  font-family: monospace;
+  font-size: 12px;
+  background: #eef1f6;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.subheading {
+  font-size: 13px;
+  font-weight: 500;
+  color: #43474e;
+  margin: 0 0 4px;
+}
+.steps {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  font-size: 13px;
+  color: #43474e;
+  line-height: 1.6;
+}
+.steps li + li {
+  margin-top: 2px;
+}
+.notice {
+  font-size: 13px;
+  color: #7a4f00;
+  background: #fff4e0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+  line-height: 1.6;
+}
+.hint {
+  font-size: 12px;
+  color: #74777f;
+  margin: 10px 0 0;
+  line-height: 1.6;
+}

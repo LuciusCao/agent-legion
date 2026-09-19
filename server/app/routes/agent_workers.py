@@ -208,7 +208,14 @@ def create_agent_workers_router(
         parameter every logged-in user still sees the full list — the UI is
         responsible for passing the current workspace, and the admin settings
         page intentionally keeps the unfiltered view."""
-        return AgentWorkersResponse.model_validate({"workers": registry.list_workers(workspace_id)})
+        return AgentWorkersResponse.model_validate(
+            {
+                "workers": registry.list_workers(workspace_id),
+                # Deployment-level fallback entry to the Worker console (a
+                # Worker-reported per-machine address is the follow-up).
+                "console_url": config.console_url,
+            }
+        )
 
     @router.get("/agent-executions/{execution_id}/bundle")
     def bundle(execution_id: str, request: Request) -> FileResponse:

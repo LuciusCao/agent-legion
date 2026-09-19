@@ -396,7 +396,13 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
 2. 起后端并登录 Host Web UI，在 workspace「设置 → Agent 与 Worker」为目标
    workspace 签发 scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
    「Workspace 访问（Scoped Token）」区块粘贴添加。Worker 侧 token 随时可以
-   补——注册失败只影响 Worker 自身，不需要重启后端。
+   补——注册失败只影响 Worker 自身，不需要重启后端。该设置页顶部的
+   「Worker 与 Worker 控制台」卡片、签发成功后的「下一步」以及各处 Worker
+   列表空态都带「打开 Worker 控制台」入口：地址来自后端 env
+   `AGENT_LEGION_WORKER_CONSOLE_URL`（`make dev-up` 按 Worker 端口自动注入，
+   `native-prod-up.sh` / Host compose 注入 `:8787`；Worker 控制台经其它地址
+   暴露时在 `.env` 显式配置，显式留空则不显示链接）。回环地址只能在 Worker
+   所在机器的浏览器里打开，链接的悬停提示会说明这一点。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
 

@@ -4,6 +4,8 @@ import { listAgentWorkers } from '../api/agentWorkers'
 import { queryKeys } from '../lib/queryKeys'
 import { useAgentsStore } from '../stores/agentsStore'
 import { buildWorkerRows } from './agentWorkerRows'
+import { useWorkerConsoleUrl } from '../hooks/useWorkerConsoleUrl'
+import { WorkerConsoleLink } from './WorkerConsoleLink'
 import styles from './AgentWorkerStatusList.module.css'
 
 export interface AgentWorkerStatusListProps {
@@ -20,6 +22,7 @@ export function AgentWorkerStatusList({
     refetchInterval: 15_000,
   })
   const allAgents = useAgentsStore((state) => state.agents)
+  const consoleUrl = useWorkerConsoleUrl() ?? ''
 
   const rows = useMemo(
     () => buildWorkerRows(workers, allAgents, workspaceId),
@@ -30,7 +33,10 @@ export function AgentWorkerStatusList({
     <>
       <div className={styles.sectionLabel}>已注册 Worker</div>
       {rows.length === 0 ? (
-        <div className={styles.empty}>暂无可用 Worker</div>
+        <div className={styles.empty}>
+          暂无可用 Worker：需在 Worker 控制台添加本 workspace 的 Key
+          并「开始领取」。 <WorkerConsoleLink url={consoleUrl} />
+        </div>
       ) : (
         rows.map((row) => (
           <div className={styles.row} key={row.key}>
