@@ -5723,6 +5723,7 @@ export interface components {
         | components['schemas']['RunItemMaterial']
         | components['schemas']['RunItemRef']
         | components['schemas']['RunItemBundle']
+        | components['schemas']['RunItemText']
       )[]
       /**
        * Workflow Key
@@ -5780,6 +5781,21 @@ export interface components {
        * @enum {string}
        */
       type: 'ref'
+    }
+    /**
+     * RunItemText
+     * @description Requirement text typed inline; persisted as a material before resolution.
+     */
+    RunItemText: {
+      /** Content */
+      content: string
+      /** Filename */
+      filename?: string | null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'text'
     }
     /** RunJobStats */
     RunJobStats: {
@@ -7595,6 +7611,7 @@ export interface components {
       outputs: string[]
       skill?: components['schemas']['WorkflowNodeSkillResponse'] | null
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
+      text_input?: components['schemas']['WorkflowTextInputResponse'] | null
       /** Tools */
       tools?: string[]
     }
@@ -7676,6 +7693,24 @@ export interface components {
     WorkflowTerminalResponse: {
       /** Outcome */
       outcome: string
+    }
+    /** WorkflowTextInputResponse */
+    WorkflowTextInputResponse: {
+      /**
+       * Filename
+       * @default
+       */
+      filename: string
+      /**
+       * Label
+       * @default
+       */
+      label: string
+      /**
+       * Template
+       * @default
+       */
+      template: string
     }
     /** WorkspaceAgentRouteEntry */
     WorkspaceAgentRouteEntry: {

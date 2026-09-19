@@ -5,11 +5,12 @@ the GET endpoints list and inspect runs. The legacy node-execution listing
 lives at ``/workspaces/{id}/node-runs`` (routes/workspace_runs.py).
 """
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.app.auth.dependencies import reject_studio_agent_scope
+from server.app.auth.workspace_access import require_workspace_access
 from server.app.routes.job_http import (
     raise_job_http_error,
     reject_mismatched_workflow_key,
@@ -21,6 +22,7 @@ from server.app.routes.run_contracts import (
     RunListResponse,
 )
 from server.app.services.job_errors import JobServiceError
+from server.app.services.materials import MaterialStorageUnavailableError
 from server.app.services.run_service import RunService
 
 
@@ -32,7 +34,11 @@ def create_runs_router(service: RunService) -> APIRouter:
         response_model=RunCreateResponse,
         dependencies=[Depends(reject_studio_agent_scope)],
     )
-    def create_run(workspace_id: str, payload: RunCreateRequest) -> RunCreateResponse:
+    def create_run(
+        workspace_id: str,
+        payload: RunCreateRequest,
+        user: Annotated[dict[str, Any], Depends(require_workspace_access)],
+    ) -> RunCreateResponse:
         # exclude_unset keeps input_json verbatim (no params={} filler); the
         # same dump feeds the deprecated workflow_key read (accessing the
         # field attribute itself would raise the deprecation warning, which
@@ -49,7 +55,11 @@ def create_runs_router(service: RunService) -> APIRouter:
                 workspace_id,
                 workflow_key=body.get("workflow_key") or workspace_id,
                 items=body["items"],
+                created_by=str(user.get("id") or ""),
             )
+        except MaterialStorageUnavailableError as exc:
+            # text items need the object store (same 503 as the materials API).
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return RunCreateResponse(**result)

@@ -125,6 +125,24 @@ nodes:
   source/target）去重且 condition 以派生边为准（重复显式边上的 condition
   静默丢弃）。这是快照重载对称的前提：快照携带的物化边（含注入的 start
   出边）能与派生边集正确合并。
+- **`text` 条目（直接输入需求）**：`{type:"text", content, filename?}` 把需求
+  文字直接写进 run 请求；`RunService` 在契约/节点配置/pin 全部校验通过后、
+  run 行写入前，把它落成一份 ready 材料（sha256 内容寻址，对象先写、行后插，
+  `.md`/`.txt` 文件名白名单，UTF-8 ≤ 64 KiB，`run_text_items.py` +
+  `jobs/queries/material_inline.py`），再改写成普通 `material` 条目进入解析——
+  `input_json`、manifest、Worker 物化、skill 看到的与手动上传同名文件完全
+  一样。这是 run 创建前唯一的写：材料是 workspace 资产（无引用时 TTL 回收），
+  与「先上传再被拒」留下的状态等价，fail-closed 契约不变；对象存储未配置
+  时整条请求 503。同一文本重复提交命中同一材料、同一 job dedup 键。契约
+  缺省不含 `text`（存量 fail-closed），Studio 入口节点显式勾选「直接输入
+  需求」后「添加条目」出现「输入需求」Tab。
+- **`text_input` 呈现配置（start 节点可选块，`start_text_input.py`）**：
+  `{label, filename, template}` 三项全可选，分别是输入框标题、未带文件名的
+  text 条目落盘名（`RunService` 回落顺序：条目 filename → 该项 → `需求.md`）、
+  打开「输入需求」时的预填模板。纯呈现层：不参与契约判定，不勾 `text` 时
+  惰性；loader 只做形状校验（字符串、长度上限、裸 `.md`/`.txt` 文件名），
+  全空块归一为未声明，echo / 快照往返对称，compare 记 info 级变更。前端
+  模板一字未改不计条目（提示先修改，可一键恢复模板）。
 - 后续切片（folder 整体式/bundle 等新条目类型）的配置也挂在 start 节点上——
   这正是 start 存在的意义。
 
@@ -440,6 +458,9 @@ Host 沙箱 allow-read 碰巧含 `examples/`（Worker 上根本不存在该目�
 | v2 | workflow 输入契约声明；question/video 导入改造为 connector 形态；场景 C 原地引用 | workflow 声明更直白 |
 | 并行 | 产物上云后的打包重设计（Issue #120） | prod 体积受控、出站回传 |
 | v1.2 | 文件夹作为单 job 输入（bundle 条目，manifest 引用式，§5.4，#156） | 「添加条目」支持文件夹整体打包 |
+| v1.3 | 直接输入需求（text 条目，服务端落成 Markdown 材料，§4.1） | 「添加条目」支持直接输入需求文字启动 |
+| v1.4 | start 节点 `text_input`（输入框标题 / 落盘文件名 / 预填模板，§4.1） | 「输入需求」按工作流预填需求模板，模板未改不能提交 |
+| future | 需求文本 + 附件合成一个 bundle 条目 | — |
 | future | connector 实体化 | — |
 | future（已立项，方案待讨论） | **异步建 job 的进度与结果可见性**：万级 job 走异步队列创建时，界面只看到数量上涨，看不到创建进度与结果分布（成功 / 因重复被 dedup / 校验失败及原因）。需求：run 维度展示创建进度条与结果明细。具体方案另行讨论后补本节 | — |
 

@@ -5,6 +5,10 @@ import {
   type AcceptedItemType,
 } from '../../../lib/acceptedItemTypes'
 import { patchWorkflowNodeAcceptedItemTypes } from '../shared/workflowStudioYamlDraft'
+import {
+  EMPTY_TEXT_INPUT,
+  patchWorkflowNodeTextInput,
+} from '../shared/workflowStudioYamlDraft.textInput'
 import styles from './WorkflowStructuredEditor.module.css'
 
 // 规范写回顺序 = ITEM_TYPE_DISPLAY 的 key 顺序（material/ref/bundle）。
@@ -28,13 +32,17 @@ export function WorkflowNodeStartContractEditor(props: Props) {
       v === value ? checked : selected.includes(v)
     )
     if (next.length === 0) return
-    props.setDefinitionYaml(
-      patchWorkflowNodeAcceptedItemTypes(
-        props.definitionYaml,
-        props.node.key,
-        next
-      )
+    let yaml = patchWorkflowNodeAcceptedItemTypes(
+      props.definitionYaml,
+      props.node.key,
+      next
     )
+    // 取消「直接输入需求」时一并清掉 text_input：编辑器随之隐藏，不留
+    // 看不见却会在重新勾选时复活的旧模板。
+    if (value === 'text' && !checked) {
+      yaml = patchWorkflowNodeTextInput(yaml, props.node.key, EMPTY_TEXT_INPUT)
+    }
+    props.setDefinitionYaml(yaml)
   }
   return (
     <div className={styles.fieldGroup}>

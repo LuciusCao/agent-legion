@@ -19,6 +19,12 @@ class WorkflowNodeSkillResponse(BaseModel):
     ref: str = ""
 
 
+class WorkflowTextInputResponse(BaseModel):
+    label: str = ""
+    filename: str = ""
+    template: str = ""
+
+
 class WorkflowNodeResponse(BaseModel):
     key: str
     label: str
@@ -33,6 +39,8 @@ class WorkflowNodeResponse(BaseModel):
     # as ``execution`` below; response payloads always carry both fields.
     node_type: str = Field(default_factory=lambda: "code")
     accepted_item_types: list[str] = Field(default_factory=lambda: ["material", "ref"])
+    # Start-only presentation of ``text`` items (label / filename / template).
+    text_input: WorkflowTextInputResponse | None = None
     after: list[str]
     inputs: list[str]
     outputs: list[str]

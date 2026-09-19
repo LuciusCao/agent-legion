@@ -312,7 +312,10 @@ describe('AddItemsDialog', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
-  function mockRevisionWithAcceptedTypes(accepted: string[]) {
+  function mockRevisionWithAcceptedTypes(
+    accepted: string[],
+    textInput?: { label: string; filename: string; template: string }
+  ) {
     mockFetchRevision.mockResolvedValue({
       definition_yaml: '',
       revision: { id: 'r1', version: 1 },
@@ -327,6 +330,7 @@ describe('AddItemsDialog', () => {
             capability: '',
             node_type: 'start',
             accepted_item_types: accepted,
+            text_input: textInput ?? null,
             after: [],
             inputs: [],
             outputs: [],
@@ -580,5 +584,159 @@ describe('AddItemsDialog', () => {
     )
     // 其余 tab 被禁用后落到 bundle tab。
     expect(screen.getByTestId('add-items-bundle-input')).toBeInTheDocument()
+  })
+
+  it('shows no hint when only the opt-in text type is missing', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'ref', 'bundle'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '文件夹打包' })).toBeEnabled()
+    )
+    expect(screen.getByRole('tab', { name: '输入需求' })).toBeDisabled()
+    expect(screen.queryByTestId('item-type-hint')).toBeNull()
+  })
+
+  it('keeps the text tab disabled under the default contract', async () => {
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '输入需求' })).toBeDisabled()
+    )
+    expect(screen.getByTestId('item-type-hint')).not.toHaveTextContent(
+      '直接输入需求'
+    )
+  })
+
+  it('counts typed requirement text as one item and submits a text item', async () => {
+    const onClose = vi.fn()
+    mockRevisionWithAcceptedTypes(['material', 'text'])
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 1,
+    } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+    )
+    const textTab = screen.getByRole('tab', { name: '输入需求' })
+    await waitFor(() => expect(textTab).toBeEnabled())
+    expect(screen.getByTestId('item-type-hint')).toHaveTextContent(
+      '上传文件、直接输入需求'
+    )
+    fireEvent.click(textTab)
+
+    // 空白不计数。
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '   \n' },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
+    expect(screen.getByRole('button', { name: '创建运行' })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '# 歌曲创作需求\n- 主题：告别' },
+    })
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: ' 创作需求.md ' },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+    expect(screen.getByTestId('text-summary')).toHaveTextContent(
+      '将作为 1 个条目提交'
+    )
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [
+        {
+          type: 'text',
+          content: '# 歌曲创作需求\n- 主题：告别',
+          filename: '创作需求.md',
+        },
+      ],
+    })
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('falls back to the default filename and rejects oversized text', async () => {
+    mockRevisionWithAcceptedTypes(['text'])
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 1,
+    } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    // 其余 tab 被禁用后落到 text tab。
+    await waitFor(() =>
+      expect(screen.getByLabelText('需求内容')).toBeInTheDocument()
+    )
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '需'.repeat(30000) },
+    })
+    expect(screen.getByTestId('text-summary')).toHaveTextContent('内容过长')
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
+
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '短需求' },
+    })
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [{ type: 'text', content: '短需求', filename: '需求.md' }],
+    })
+  })
+
+  it('prefills the start-node template, blocks an unedited template and restores it', async () => {
+    const template = '# 歌曲创作需求\n- 参考歌曲：\n- 新歌主题：'
+    mockRevisionWithAcceptedTypes(['text'], {
+      label: '创作需求',
+      filename: '创作需求.md',
+      template,
+    })
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 1,
+    } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    // 契约 resolve 后：输入框标题、模板与文件名都来自 text_input。
+    await waitFor(() =>
+      expect(screen.getByLabelText('创作需求')).toHaveValue(template)
+    )
+    expect(screen.getByLabelText('文件名')).toHaveValue('创作需求.md')
+    expect(screen.getByTestId('text-summary')).toHaveTextContent(
+      '请先按你的方向修改模板'
+    )
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
+    expect(screen.queryByRole('button', { name: '恢复模板' })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('创作需求'), {
+      target: { value: `${template}告别` },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复模板' }))
+    expect(screen.getByLabelText('创作需求')).toHaveValue(template)
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
+
+    fireEvent.change(screen.getByLabelText('创作需求'), {
+      target: { value: `${template}告别` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [
+        { type: 'text', content: `${template}告别`, filename: '创作需求.md' },
+      ],
+    })
   })
 })

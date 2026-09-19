@@ -29,6 +29,7 @@ const FIELD_LABELS: Record<string, string> = {
   execution: '执行配置',
   skill: 'Skill 绑定',
   accepted_item_types: '入口条目类型',
+  text_input: '直接输入需求的呈现配置',
   node_type: '节点类型',
   after: '依赖顺序',
   shard: '分片',
