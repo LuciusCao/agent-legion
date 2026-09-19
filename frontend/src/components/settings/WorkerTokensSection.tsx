@@ -16,7 +16,9 @@ import { queryKeys } from '../../lib/queryKeys'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { toErrorMessage } from '../../lib/queryError'
 import { ConfirmDialog } from '../ConfirmDialog'
+import { useWorkerConsoleUrl } from '../../hooks/useWorkerConsoleUrl'
 import { AgentWorkerList, workerName } from './AgentWorkerList'
+import { WorkerTokenNextSteps } from './WorkerTokenNextSteps'
 import styles from './WorkerTokensSection.module.css'
 
 /**
@@ -41,6 +43,8 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
   const [pendingDeleteToken, setPendingDeleteToken] =
     useState<AgentRegisterTokenSummary | null>(null)
   const queryClient = useQueryClient()
+  // 签发后的「下一步」与已注册 Worker 空态都要把人送到 Worker 控制台。
+  const consoleUrl = useWorkerConsoleUrl() ?? ''
 
   const { data: lists, error: listQueryError } = useQuery({
     queryKey: extraQueryKeys.workerTokens(),
@@ -183,6 +187,7 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
             <p className={styles.warning}>
               明文 token 仅显示这一次，关闭后无法再查看，请立即复制保存。
             </p>
+            <WorkerTokenNextSteps consoleUrl={consoleUrl} />
           </div>
         )}
       </div>
@@ -242,6 +247,7 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
       <AgentWorkerList
         workers={workers}
         tokens={allTokens}
+        consoleUrl={consoleUrl}
         workspaceName={workspaceName}
         onChanged={refresh}
         onError={setError}

@@ -3766,6 +3766,11 @@ export interface components {
     }
     /** AgentWorkersResponse */
     AgentWorkersResponse: {
+      /**
+       * Console Url
+       * @default
+       */
+      console_url: string
       /** Workers */
       workers: components['schemas']['AgentWorkerSummary'][]
     }

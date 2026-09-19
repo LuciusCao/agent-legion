@@ -44,11 +44,11 @@ export type { MetricBucket, OpsGranularity, OpsMetricsParams, OpsMetricsResponse
 // prettier-ignore
 export { createRegisterToken, deleteRegisterToken, listRegisterTokens } from './workerTokens'
 // prettier-ignore
-export { deleteAgentWorker, listAgentWorkers } from './agentWorkers'
+export { deleteAgentWorker, fetchAgentWorkers, listAgentWorkers } from './agentWorkers'
 // prettier-ignore
 export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary } from './workerTokens'
 // prettier-ignore
-export type { AgentWorkerSummary } from './agentWorkers'
+export type { AgentWorkerSummary, AgentWorkersResponse } from './agentWorkers'
 // prettier-ignore
 export { getWorkspaceSharedMaterials, getWorkspaceSharedMaterialFile, propagateWorkspaceSharedMaterials } from './workspaceSharedMaterials'
 // prettier-ignore

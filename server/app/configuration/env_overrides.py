@@ -56,6 +56,9 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY_FILE": (("vault", "master_key_file"), _path_parser),
     "AGENT_LEGION_SKILLS_RUNS_DIR": (("skills", "runs_dir"), _path_parser),
+    # 主控制台里「打开 Worker 控制台」链接的地址（部署拓扑，env-only；见
+    # AgentWorkersRuntimeConfig.console_url）。
+    "AGENT_LEGION_WORKER_CONSOLE_URL": (("agent_workers", "console_url"), _str_parser),
 }
 
 _DATABASE_URL_ENV = "AGENT_LEGION_DATABASE_URL"

@@ -168,6 +168,13 @@ cmd_up() {
         (cd frontend && npm ci)
     fi
 
+    # 主控制台「打开 Worker 控制台」入口地址（AgentWorkersRuntimeConfig.console_url，
+    # env-only）：dev 栈 Worker 与后端同机，按 Worker 端口注入。进程环境或根
+    # .env 已显式给出（含显式留空 = 不显示链接）时不动。
+    if [[ -z "${AGENT_LEGION_WORKER_CONSOLE_URL+x}" ]] \
+        && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?AGENT_LEGION_WORKER_CONSOLE_URL=' .env 2>/dev/null; then
+        export AGENT_LEGION_WORKER_CONSOLE_URL="http://127.0.0.1:${WORKER_PORT}"
+    fi
     start_component "后端" "$BACKEND_PORT" dev-backend "$LOG_DIR/dev-backend.log"
     start_component "前端" "$FRONTEND_PORT" dev-frontend "$LOG_DIR/dev-frontend.log"
     # worker 唯一生效配置是状态副本（issue #323）；无状态副本的 worktree 跳过 Worker

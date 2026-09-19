@@ -185,6 +185,16 @@ if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
 else
     echo "启动后端 $BACKEND_BIND:$BACKEND_PORT …"
     ulimit -n 65535
+    # 主控制台「打开 Worker 控制台」入口地址（AgentWorkersRuntimeConfig.console_url，
+    # env-only）：原生形态 Worker 与后端同机，按 Worker 绑定地址/端口注入
+    # （0.0.0.0 绑定对浏览器无意义，回落 127.0.0.1）。进程环境或 .env 已显式
+    # 给出（含显式留空 = 不显示链接）时不动。
+    if [[ -z "${AGENT_LEGION_WORKER_CONSOLE_URL+x}" ]] \
+        && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?AGENT_LEGION_WORKER_CONSOLE_URL=' .env 2>/dev/null; then
+        console_host="$WORKER_BIND"
+        [[ "$console_host" == "0.0.0.0" ]] && console_host="127.0.0.1"
+        export AGENT_LEGION_WORKER_CONSOLE_URL="http://${console_host}:${WORKER_PORT}"
+    fi
     # 共享库 schema 门（server/app/db/schema.py）：prod 是有意迁移裸
     # agent_legion 库的操作者，显式授予 opt-in；误连该库的工具脚本
     # （缺 .env 的 worktree export_openapi 等）则被硬拦。

@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Added
+- 主控制台的 Worker 控制台入口与接入说明：此前界面三处文案提到「Worker
+  控制台」却没有任何链接，新用户不知道去哪里粘贴 token、打开领取。
+  workspace「设置 → Agent 与 Worker」顶部新增「Worker 与 Worker 控制台」
+  卡片（控制台是什么、在哪台机器、接入三步、两个默认关闭的开关）；签发
+  Key 成功后追加「下一步」三步指引；设置页 Worker 列表与顶栏「运行中」
+  弹层的空态都带「打开 Worker 控制台」链接（新标签页打开，不内嵌、不代理）。
+  地址来自新增 env-only 配置 `AGENT_LEGION_WORKER_CONSOLE_URL`
+  （`agent_workers.console_url`，随 `GET /api/agent-workers` 的
+  `console_url` 下发）：`make dev-up` 按 Worker 端口自动注入、
+  `native-prod-up.sh` 与 Host compose 注入 `:8787`，显式留空则退化为纯
+  文字说明；回环地址的链接悬停提示说明只能在 Worker 所在机器打开。
+
 ## [0.7.12] - 2026-09-16
 
 执行平面收尾与系统性还债版本；发布窗口内合入 #659 状态计数死锁

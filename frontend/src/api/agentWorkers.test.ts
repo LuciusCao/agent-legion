@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { deleteAgentWorker, listAgentWorkers } from './agentWorkers'
+import {
+  deleteAgentWorker,
+  fetchAgentWorkers,
+  listAgentWorkers,
+} from './agentWorkers'
 
 const originalFetch = global.fetch
 
@@ -26,6 +30,22 @@ describe('agent workers api', () => {
     const workers = await listAgentWorkers()
 
     expect(workers).toEqual([{ worker_id: 'w1' }])
+  })
+
+  it('fetches the full response including the console url', async () => {
+    const fetchMock = mockFetchJson({
+      workers: [],
+      console_url: 'http://127.0.0.1:8789',
+    })
+    global.fetch = fetchMock
+
+    const data = await fetchAgentWorkers('ws 1')
+
+    expect(data.console_url).toBe('http://127.0.0.1:8789')
+    expect(data.workers).toEqual([])
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/agent-workers?workspace_id=ws%201'
+    )
   })
 
   it('deletes an agent worker', async () => {

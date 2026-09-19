@@ -14,6 +14,9 @@ export const extraQueryKeys = {
   workspaceMaterials: (workspaceId: string) =>
     ['workspaceMaterials', workspaceId] as const,
   workerTokens: () => ['workerTokens'] as const,
+  // 「打开 Worker 控制台」入口地址（GET /api/agent-workers 的 console_url，
+  // 部署级兜底）；多个入口共享一次请求（useWorkerConsoleUrl）。
+  workerConsole: () => ['workerConsole'] as const,
   // workspace 视角的 worker 列表（按 scoped token 注册过滤，issue #35）。
   workspaceWorkers: (workspaceId: string) =>
     ['workspaceWorkers', workspaceId] as const,
