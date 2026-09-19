@@ -81,9 +81,9 @@ def _published_catalog(job_db: JobQueries, workspace_id: str) -> dict[str, Agent
     P1-1 身份比较是安全敏感读（产物冒充检查）：``published_agent_definitions``
     的 ~5s 缓存会把「重发布不可见」的 stale 窗口人为拉宽（复审 MEDIUM-1
     注记）——升级是低频管理操作，这里直读 store（一次 DB 往返）消除该
-    拉宽面。plan 与升级事务之间的 TOCTOU 由 upgrade 事务内的重验收口
-    （codex 五轮 P2-C），本函数只去掉缓存这个额外放大器。读取失败返回
-    None（保守处理）。"""
+    拉宽面。plan 到应用阶段的 TOCTOU 由事务内重验收口；重验到提交的
+    窗口由 Agent/node-code 发布路径共享的 workspace 事务锁封闭。本函数
+    只去掉缓存这个额外放大器；读取失败返回 None（保守处理）。"""
     from server.app.services.versioned_entities import EntityType, VersionedEntityStore
 
     try:

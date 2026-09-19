@@ -16,6 +16,7 @@ from server.app.services.job_workflow_upgrade_propagation import (
     collect_change_seeds,
     rerun_closure,
 )
+from server.app.services.job_workflow_upgrade_removed_outputs import removed_artifact_face
 from server.app.workflows.schema import (
     WorkflowCondition,
     WorkflowDefinition,
@@ -302,6 +303,43 @@ def test_staging_does_not_strand_outside_rmw_producer() -> None:
     )
 
     assert staging_output_names(definition, {"pure"}) == set()
+
+
+def test_removed_output_changed_to_external_input_is_protected() -> None:
+    """旧 output 变成无生产者 input 时，权威清单仍是节点的启动输入。"""
+    old_definition = _definition(
+        {"transform": _node("transform", outputs=["source.json", "stale.json"])}
+    )
+    new_definition = _definition({"transform": _node("transform", inputs=["source.json"])})
+
+    face = removed_artifact_face(
+        old_definition,
+        new_definition,
+        keep_keys=frozenset(),
+        reset_keys={"transform"},
+    )
+
+    assert face.names == frozenset({"stale.json"})
+
+
+def test_removed_output_changed_to_produced_input_uses_normal_staging() -> None:
+    """有新生产者的同名 input 不受保护；生产者重跑会生成新字节。"""
+    old_definition = _definition({"transform": _node("transform", outputs=["source.json"])})
+    new_definition = _definition(
+        {
+            "transform": _node("transform", inputs=["source.json"]),
+            "producer": _node("producer", outputs=["source.json"]),
+        }
+    )
+
+    face = removed_artifact_face(
+        old_definition,
+        new_definition,
+        keep_keys=frozenset(),
+        reset_keys={"transform", "producer"},
+    )
+
+    assert face.names == frozenset()
 
 
 def test_closure_name_and_edge_dual_channel_cascade() -> None:

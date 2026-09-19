@@ -101,6 +101,9 @@ class JobWorkflowUpgradeService:
                 # （keep ∩ completed + shared_name 复算）同款风格：漂移节点
                 # 放弃继承（降级重跑），传播面（下游/同名）由收敛层接管。
                 if inherit_nodes:
+                    # 与 Agent/node-code 的 publish/rollback/archive 共用
+                    # workspace 事务锁，重验到提交之间 published 身份不可变。
+                    self.job_db.acquire_implementation_publication_lock(conn, workspace_id)
                     revalidated = implementation_excluded_nodes(
                         self.job_db,
                         context.job,

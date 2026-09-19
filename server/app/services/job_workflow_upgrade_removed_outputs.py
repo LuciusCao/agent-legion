@@ -8,8 +8,8 @@ staged_artifact_names，清单行与本地文件全部保留：API 继续展示�
 revision）补出清理面：
 
 - **移除的 output 名**：重置面节点在旧 definition 声明、新 definition
-  不再声明的纯输出名（outputs − inputs，RMW 名不清理：#114 同款——
-  移除一个无人再生产的输入会饿死下游）；
+  不再声明的纯输出名（outputs − inputs）；新图仍依赖且没有生产者的
+  输入不清理——RMW 与纯外部输入都需要旧清单作为启动输入；
 - **被删节点的全部纯输出名 + 运行历史目录**：A4 的
   ``renamed_from_nodes`` 机制已处理「节点消失」的清单行（按新节点
   暂存名匹配），这里补「节点在但 output 名变了」与被删节点自身
@@ -72,18 +72,6 @@ def unprotected_input_names(definition: WorkflowDefinition) -> frozenset[str]:
     return frozenset(inputs - produced)
 
 
-def _rmw_names(node: WorkflowNode) -> set[str]:
-    """节点声明的 RMW 名（inputs ∩ outputs）。
-
-    codex 五轮 P1-B：升级把旧纯输出 x 变成新 RMW（inputs=[x],
-    outputs=[x]）时，x 是重置节点的**启动输入**——暂存删除会让
-    ``restore_missing_inputs`` 无清单可回（x 没有别的生产者），节点
-    永久等不到输入。与 ``stage_outputs`` 不暂存 RMW 的 #114 语义
-    同源：重跑成功后节点原地重写，清理面不碰。
-    """
-    return set(node.outputs) & set(node.inputs)
-
-
 def removed_artifact_face(
     old_definition: WorkflowDefinition | None,
     new_definition: WorkflowDefinition,
@@ -113,9 +101,9 @@ def removed_artifact_face(
         node = old_definition.nodes.get(key)
         if node is not None:
             keep_io.update(node.inputs, node.outputs)
-    # 重置节点：旧纯输出 − 新纯输出 → 被移除的名；新 RMW 名排除
-    # （P1-B：升级后变成 RMW 输入的旧产物是重置节点的启动输入，
-    # 与 rerun 保留 RMW 输入的 #114 语义一致，不进清理面）。
+    # 重置节点：旧纯输出 − 新纯输出 → 被移除的名。新图仍需消费且没有
+    # 生产者的输入（RMW 启动输入 + 纯外部输入）统一在收尾保护；删掉它们
+    # 会让 restore_missing_inputs 无清单可回、节点永久等待输入。
     for key in reset_keys:
         old_node = old_definition.nodes.get(key)
         if old_node is None:
@@ -124,8 +112,6 @@ def removed_artifact_face(
         removed = _pure_outputs(old_node) - (
             _pure_outputs(new_node) if new_node is not None else set()
         )
-        if new_node is not None:
-            removed -= _rmw_names(new_node)
         builder.names.update(removed)
     # 被删节点（旧有新无）：全部纯输出名 + 运行历史目录。
     for key, old_node in old_definition.nodes.items():
@@ -133,6 +119,7 @@ def removed_artifact_face(
             builder.names.update(_pure_outputs(old_node))
             builder.run_keys.add(key)
     builder.names -= keep_io
+    builder.names -= unprotected_input_names(new_definition)
     # 与既有暂存面重叠的名（重置节点的新输出）不重复计——stage_outputs
     # 的正常路径已覆盖。
     builder.names -= staging_output_names(new_definition, set(reset_keys))

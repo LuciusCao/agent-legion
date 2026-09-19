@@ -28,6 +28,7 @@ skill 内容身份（codex 五轮 P1-A）与实现身份同读：段 1 取 run �
 from __future__ import annotations
 
 from collections.abc import Collection
+from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
@@ -37,8 +38,23 @@ from server.app.jobs.queries.connection import ConnectionQueriesMixin
 #: （段 2 的 legacy manifest 或段 1 的无 skill 执行）；skill_version
 #: 空串 = 无 ref@commit 记录。
 
+_PUBLICATION_LOCK_PREFIX = "implementation-publication:"
+
+
+def acquire_implementation_publication_lock(conn: Any, workspace_id: str | None) -> None:
+    """Serialize published Agent/node-code changes with upgrade revalidation."""
+    scope = workspace_id if workspace_id is not None else "<global>"
+    conn.execute(
+        "select pg_advisory_xact_lock(hashtext(%s))",
+        (_PUBLICATION_LOCK_PREFIX + scope,),
+    )
+
 
 class UpgradeImplIdentityQueriesMixin(ConnectionQueriesMixin):
+    @staticmethod
+    def acquire_implementation_publication_lock(conn: Any, workspace_id: str) -> None:
+        acquire_implementation_publication_lock(conn, workspace_id)
+
     def latest_done_request_identities(
         self, job_id: str, node_keys: Collection[str]
     ) -> dict[str, tuple[str, str, str, str]]:

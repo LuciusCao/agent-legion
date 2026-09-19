@@ -448,7 +448,9 @@ def test_upgrade_to_rmw_input_still_cleans_other_removed_outputs(tmp_path: Path)
 # ---------------------------------------------------------------------------
 
 
-def test_guard_revalidates_agent_identity_republished_after_plan(tmp_path: Path) -> None:
+def test_guard_revalidates_agent_identity_republished_after_plan(
+    tmp_path: Path, monkeypatch
+) -> None:
     """codex 五轮 P2-C：plan 之后、guard 事务前 Agent 重发布 → 降级重跑。
 
     旧缺陷（``_published_catalog`` 注释自认）：继承集在事务外规划，
@@ -482,6 +484,20 @@ def test_guard_revalidates_agent_identity_republished_after_plan(tmp_path: Path)
     from server.app.services import job_workflow_upgrade as upgrade_module
 
     real_plan = upgrade_module.plan_inherit_nodes
+    real_revalidate = upgrade_module.implementation_excluded_nodes
+    real_lock = queries.acquire_implementation_publication_lock
+    lock_held: list[bool] = []
+
+    def acquire_lock(conn, workspace_id):
+        real_lock(conn, workspace_id)
+        lock_held.append(True)
+
+    def revalidate(*args, **kwargs):
+        assert lock_held == [True]
+        return real_revalidate(*args, **kwargs)
+
+    monkeypatch.setattr(queries, "acquire_implementation_publication_lock", acquire_lock)
+    monkeypatch.setattr(upgrade_module, "implementation_excluded_nodes", revalidate)
 
     def plan_then_republish(job_db, job, new_definition, frozen_json, **kwargs):
         inherit = real_plan(job_db, job, new_definition, frozen_json, **kwargs)
