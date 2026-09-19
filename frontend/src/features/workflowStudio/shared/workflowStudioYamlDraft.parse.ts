@@ -15,6 +15,8 @@ export type WorkflowYamlNode = {
   // 'node' 是 #284 前的遗留写法（后端 loader 归一化为 'code'），仅作读取容忍。
   type?: 'start' | 'node' | 'approval' | 'code' | 'agent'
   accepted_item_types?: string[]
+  // start 节点 text 条目的呈现配置（写路径 patchWorkflowNodeTextInput）。
+  text_input?: { label?: string; filename?: string; template?: string }
   label?: string
   capability?: string
   // #76：节点级 skill 内容绑定。字符串形态（`skill: <key>`）与 mapping 形态

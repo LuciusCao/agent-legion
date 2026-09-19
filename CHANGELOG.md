@@ -44,6 +44,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 - 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进 run 请求，`RunService` 在全部校验通过后把它落成 ready 的 Markdown 材料（sha256 内容寻址、对象先暂存、材料行整批事务提交、`.md`/`.txt` 白名单、UTF-8 ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker 物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio 入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。同 hash 仅复用 ready 材料，上传中、失败或已过期材料返回 409，避免抢占浏览器上传或改写既有对象归属。设计见 docs/architecture/materials-and-runs-design.md §4.1。
+- start 节点可选 `text_input {label, filename, template}` 块：Studio 入口节点勾选「直接输入需求」后可配置输入框标题、落盘文件名与预填模板；「添加条目 · 输入需求」按它预填，模板一字未改不能提交（可一键恢复模板），未带文件名的 text 条目按配置命名。呈现层配置：loader 只做形状校验（字符串、长度、`.md`/`.txt` 裸文件名），不勾 `text` 时块惰性；echo / 快照往返对称，compare 记 info 级变更。
 
 ## [0.7.12] - 2026-09-16
 

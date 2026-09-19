@@ -12,6 +12,7 @@ import {
   type WorkflowYamlExecutionDefaults,
 } from '../shared/workflowStudioYamlDraft.executionDefaults'
 import { normalizeNodeSkill } from '../shared/workflowStudioYamlDraft.skill'
+import { normalizeTextInput } from '../shared/workflowStudioYamlDraft.textInput'
 import { mergeNodeExecution } from './workflowStudioExecutionWarnings'
 
 /** 草稿 YAML → WorkflowDefinitionRecord：让画布/inspector 直接以草稿为数据
@@ -89,6 +90,7 @@ function mapNode(
       ? {
           node_type: 'start',
           accepted_item_types: node.accepted_item_types ?? [],
+          text_input: normalizeTextInput(node.text_input),
         }
       : {
           node_type:
