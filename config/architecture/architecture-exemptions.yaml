@@ -236,15 +236,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 92
 - check: architecture.file_budget
-  path: server/app/agent_control/completion.py
-  reason: 'Issue #521 adds the stage boundary marks (unpack/artifacts_verify/ validate/artifacts_upload)
-    inline between the physical steps they separate; each mark is one line at the exact boundary it names.
-    The marks retire with the stage split''s phase 2 rework (per-stage slimming restructures finish()
-    and re-budgets the module).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 176
-- check: architecture.file_budget
   path: server/app/executors/leases.py
   reason: 'Issue #521 threads the optional stage_timer keyword through finish() into _lease_write_paths;
     the parameter must ride the same retry wrapper as the result it instruments (a retry re-runs the stages

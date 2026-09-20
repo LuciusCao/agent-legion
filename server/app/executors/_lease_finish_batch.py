@@ -97,8 +97,11 @@ def finish_many(
             )
         resolved.sort(key=lambda entry: entry[:3])
         by_index: dict[int, bool] = {}
+        stale_by_index: dict[int, bool] = {}
         for _ws_key, _job_id, index, lease_id, result, _timer in resolved:
-            by_index[index] = finish_lease(conn, lease_id, result, repo.data_dir)
+            verdict = finish_lease(conn, lease_id, result, repo.data_dir)
+            by_index[index] = verdict.applied
+            stale_by_index[index] = verdict.generation_stale
     outcomes = [by_index.get(index, False) for index in range(len(writes))]
 
     # Post-commit work, back to the submitting thread (#591 C5). The #609
@@ -138,7 +141,16 @@ def finish_many(
 
     for _ws, job_id, index, lease_id, result, stage_timer in sorted(resolved, key=lambda i: i[2]):
         result_flag = by_index[index]
-        events_ran = result_flag and result.status in ("completed", "failed")
+        # #759 review P2: a stale-generation finish settles the lease/history
+        # rows but the shared run_dir may already hold the NEW generation's
+        # events.jsonl — token capture would misattribute and PI compression
+        # could truncate it, so the events family stays closed on a stale
+        # verdict (same gate as the direct path).
+        events_ran = (
+            result_flag
+            and not stale_by_index.get(index, False)
+            and result.status in ("completed", "failed")
+        )
         with_broadcast = result_flag and job_id not in claimed_jobs
         if result_flag:
             claimed_jobs.add(job_id)

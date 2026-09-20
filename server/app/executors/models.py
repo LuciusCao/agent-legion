@@ -67,6 +67,28 @@ class ExecutionResult:
     # Shard executions return their per-shard output payload here; the lease
     # finish path persists it into node_shards.output_json for reduce fan-in.
     output_json: str = ""
+    # #759 review P1-1: (target, source) absolute-path file moves the finish
+    # transaction promotes into place ONLY when the lease still owns the
+    # current generation — the Worker result archive is unpacked into a
+    # staging dir first, so a stale (post-reset) completion can neither
+    # overwrite the new generation's job_dir inputs nor plant its events
+    # log. Empty for every caller outside the Worker completion path.
+    staged_file_moves: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class FinishVerdict:
+    """finish_lease 的判定结果（#759 review P2）。
+
+    ``applied``：lease 仍是 active 且收尾已提交（沿用旧 bool 返回值语义）。
+    ``generation_stale``：本次是 reset 后的迟到 finish——job_nodes 翻转与
+    staged 文件提升已被跳过，调用方（两条 finish 路径的 events 后处理）
+    必须据此跳过 token capture / PI compression：run_dir 路径跨代次复用，
+    旧代次 run 解析到的 events.jsonl 可能属于新代次的 run（错归属 + 截断）。
+    """
+
+    applied: bool
+    generation_stale: bool = False
 
 
 @dataclass(frozen=True)

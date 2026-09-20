@@ -16,6 +16,14 @@ P3（空 fan-out 完成无 CAS）：``complete_empty_shard_node`` 的锁 + 代�
 ``materialize_shards_guarded`` 把锁提到 node_shards 行写之前（锁序：
 job-mutation advisory → 行锁；mutation 侧持同锁删 shard 行）。
 
+#759 复审 P1-2（登记异常路径）：锁内登记抛异常时 promote 按回滚备份恢复
+authority，且已落盘的新文件经 FilePromotionGuard 整体回滚——旧清单行永远
+指向匹配的旧字节，不留半应用 job_dir。
+
+#759 复审 P1-1（Worker 结果归档）：归档只解包到 staging 目录，文件提升经
+``ExecutionResult.staged_file_moves`` 挤进 finish 的代次 CAS——迟到 finish
+不再覆盖新现场的 job_dir；completion 镜像上传带 lease 过闸，旧代次零登记。
+
 交错手法比照 tests/db/test_execution_generation_races.py：TIMED_DATABASE_URL
 带 deadlock_timeout/lock_timeout，同步点走 pg_locks 观测或 storage hook
 内同步提交 reset，不用裸 sleep。
@@ -33,11 +41,15 @@ from typing import Any
 from urllib.parse import quote
 
 import psycopg
+import pytest
 
 from server.app.db.transaction import write_transaction
+from server.app.executors import _artifact_promotion
 from server.app.executors._lease_control import lock_job_mutation_and_read_generation
 from server.app.executors._lease_shards import complete_empty_shard_node
 from server.app.executors.artifact_mirror import upload_produced_artifacts
+from server.app.executors.leases import ExecutorLeaseRepository
+from server.app.executors.models import ExecutionResult
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import lease_guarded_mutation, mark_nodes_for_rerun
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
@@ -503,3 +515,270 @@ def test_guarded_fanout_materializes_and_completes_on_current_epoch(
         {"shard_index": 0, "status": "pending"},
         {"shard_index": 1, "status": "pending"},
     ]
+
+
+# ---------------------------------------------------------------------------
+# #759 复审 P1-2：登记异常路径的 authority 恢复 + 文件提升整体回滚
+# ---------------------------------------------------------------------------
+
+
+def test_registration_exception_restores_authority_and_rolls_back_files(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """upsert 在锁内文件提升之后抛异常：promote 必须把已覆盖的 authority
+    按回滚备份恢复（旧清单行继续指向匹配的旧字节）、把已落盘的新文件整体
+    回滚（旧文件归位、无半应用现场），清单事务回滚不留新行，异常原样上抛。"""
+    _seed_job(job_db, workspace_id="gate7-ws", job_id="gate7-job")
+    _seed_lease(job_db, workspace_id="gate7-ws", job_id="gate7-job")
+    storage = FakeObjectStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    old_row = _seed_authority_object(
+        store, tmp_path, workspace_id="gate7-ws", job_id="gate7-job", payload=b"old-bytes"
+    )
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    (job_dir / "out.json").write_bytes(b"old-local-bytes")
+    staged_dir = tmp_path / "staged"
+    staged_dir.mkdir()
+    (staged_dir / "out.json").write_bytes(b"new-local-bytes")
+    staging_key = "jobs/gate7-ws/gate7-job/staging/lease-1/out.json"
+    authority_key = "jobs/gate7-ws/gate7-job/out.json"
+    rollback_key = "jobs/gate7-ws/gate7-job/staging/lease-1/.rollback/out.json"
+    storage.objects[staging_key] = b"new-bytes"
+
+    def _boom(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("injected upsert failure")
+
+    monkeypatch.setattr(_artifact_promotion, "upsert_artifact_row_tx", _boom)
+
+    with pytest.raises(RuntimeError, match="injected upsert failure"):
+        _artifact_promotion.promote_to_authority_guarded(
+            storage,
+            TEST_DATABASE_URL,
+            job_id="gate7-job",
+            lease_id="lease-1",
+            copies=[
+                _artifact_promotion.AuthorityCopy(
+                    name="out.json",
+                    staging_key=staging_key,
+                    authority_key=authority_key,
+                    rollback_key=rollback_key,
+                )
+            ],
+            rows=[
+                {
+                    "job_id": "gate7-job",
+                    "node_key": "node_a",
+                    "name": "out.json",
+                    "storage_key": authority_key,
+                    "size_bytes": 9,
+                    "content_hash": "injected",
+                }
+            ],
+            staged_files={"out.json": staged_dir / "out.json"},
+            job_dir=job_dir,
+        )
+
+    assert storage.objects[authority_key] == b"old-bytes"  # 回滚备份恢复
+    row = store.row_for_node("gate7-job", "node_a", "out.json")
+    assert row is not None
+    assert row["content_hash"] == old_row["content_hash"]  # 清单行未被部分登记
+    assert (job_dir / "out.json").read_bytes() == b"old-local-bytes"  # 文件提升回滚
+    assert not list(job_dir.glob(".promote-rollback-*"))  # 备份目录已清
+    assert not any(".rollback" in key for key in storage.objects)  # 回滚对象已清
+
+
+def test_file_moves_guarded_mid_batch_failure_rolls_back(tmp_path: Path) -> None:
+    """多文件提升中途失败：已移动的第一个文件回滚归位，未留下第二个文件，
+    备份目录清理——不留半应用的 job_dir。"""
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    (job_dir / "a.json").write_bytes(b"old-a")
+    staged_dir = tmp_path / "staged"
+    staged_dir.mkdir()
+    (staged_dir / "a.json").write_bytes(b"new-a")
+    moves = [
+        (job_dir / "a.json", staged_dir / "a.json"),
+        (job_dir / "b.json", staged_dir / "missing.json"),
+    ]
+
+    with pytest.raises(FileNotFoundError):
+        _artifact_promotion.promote_file_moves_guarded(moves, backup_parent=job_dir)
+
+    assert (job_dir / "a.json").read_bytes() == b"old-a"
+    assert not (job_dir / "b.json").exists()
+    assert not list(job_dir.glob(".promote-rollback-*"))
+
+
+# ---------------------------------------------------------------------------
+# #759 复审 P1-1：Worker 结果归档的文件提升只发生在 finish 代次闸内
+# ---------------------------------------------------------------------------
+
+
+def test_finish_promotes_staged_files_under_current_generation(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """对照组：代次一致时 finish 在闸内把 staged 文件提升进 job_dir，节点
+    照常翻 completed。"""
+    _seed_job(job_db, workspace_id="gate8-ws", job_id="gate8-job")
+    _seed_lease(job_db, workspace_id="gate8-ws", job_id="gate8-job")
+    job_dir = tmp_path / "jobdir"
+    job_dir.mkdir()
+    staged_dir = tmp_path / "staged"
+    staged_dir.mkdir()
+    (staged_dir / "out.json").write_bytes(b"new-bytes")
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+
+    ok = repo.finish(
+        "lease-1",
+        ExecutionResult(
+            status="completed",
+            exit_code=0,
+            staged_file_moves=((str(job_dir / "out.json"), str(staged_dir / "out.json")),),
+        ),
+    )
+
+    assert ok is True
+    assert (job_dir / "out.json").read_bytes() == b"new-bytes"
+    assert _node_row("gate8-job", "node_a")["status"] == "completed"
+
+
+def test_finish_skips_staged_files_when_generation_stale(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """reset bump 代次后迟到的 finish：节点翻转被 CAS 跳过（既有语义），
+    staged 文件也绝不落盘——新现场的 job_dir 文件不被旧代次归档字节覆盖，
+    staging 源文件未被消费（调用方负责清理）。"""
+    _seed_job(job_db, workspace_id="gate9-ws", job_id="gate9-job")
+    _seed_lease(job_db, workspace_id="gate9-ws", job_id="gate9-job")
+    job_dir = tmp_path / "jobdir"
+    job_dir.mkdir()
+    (job_dir / "out.json").write_bytes(b"current-generation-bytes")
+    staged_dir = tmp_path / "staged"
+    staged_dir.mkdir()
+    (staged_dir / "out.json").write_bytes(b"stale-epoch-bytes")
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update jobs set execution_generation=execution_generation+1 where id=%s",
+            ("gate9-job",),
+        )
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+
+    ok = repo.finish(
+        "lease-1",
+        ExecutionResult(
+            status="completed",
+            exit_code=0,
+            staged_file_moves=((str(job_dir / "out.json"), str(staged_dir / "out.json")),),
+        ),
+    )
+
+    assert ok is True  # lease 释放与 node_runs 历史行照常收尾
+    assert (job_dir / "out.json").read_bytes() == b"current-generation-bytes"
+    assert (staged_dir / "out.json").read_bytes() == b"stale-epoch-bytes"
+    assert _node_row("gate9-job", "node_a")["status"] == "pending"
+
+
+# ---------------------------------------------------------------------------
+# #759 对抗复审 P2-2：批重放幂等
+# ---------------------------------------------------------------------------
+
+
+def test_file_moves_guarded_skips_already_promoted_on_replay(tmp_path: Path) -> None:
+    """finish 批事务整批回滚重放：第一次尝试已把 source 移走，重放时
+    source 缺席而 target 在场 = 已提升，按成功跳过且不破坏既有内容；
+    source 与 target 都缺席才是真正的错误。"""
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    staged_dir = tmp_path / "staged"
+    staged_dir.mkdir()
+    (job_dir / "out.json").write_bytes(b"already-promoted")
+
+    guard = _artifact_promotion.promote_file_moves_guarded(
+        [(job_dir / "out.json", staged_dir / "out.json")], backup_parent=job_dir
+    )
+    guard.discard()
+
+    assert (job_dir / "out.json").read_bytes() == b"already-promoted"
+    assert not list(job_dir.glob(".promote-rollback-*"))
+    with pytest.raises(FileNotFoundError):
+        _artifact_promotion.promote_file_moves_guarded(
+            [(job_dir / "missing.json", staged_dir / "missing.json")], backup_parent=job_dir
+        )
+
+
+# ---------------------------------------------------------------------------
+# #759 对抗复审 P2-1：stale finish 不做 events 后处理
+# ---------------------------------------------------------------------------
+
+
+def _record_events_post_processing(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "server.app.services.token_usage_lease.capture_token_usage_after_lease_finish",
+        lambda *args, **kwargs: calls.append("capture"),
+    )
+    monkeypatch.setattr(
+        "shared.pi_events.compress_pi_events",
+        lambda *args, **kwargs: calls.append("compress"),
+    )
+    return calls
+
+
+def test_finish_runs_events_post_processing_under_current_generation(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """对照组：代次一致的 completed finish 照常跑 token capture + PI
+    compression。"""
+    calls = _record_events_post_processing(monkeypatch)
+    _seed_job(job_db, workspace_id="gate12-ws", job_id="gate12-job")
+    _seed_lease(job_db, workspace_id="gate12-ws", job_id="gate12-job")
+    run_dir = tmp_path / "jobs" / "gate12-ws" / "gate12-job" / "runs" / "node_a"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+
+    ok = repo.finish(
+        "lease-1",
+        ExecutionResult(
+            status="completed",
+            exit_code=0,
+            run_dir="jobs/gate12-ws/gate12-job/runs/node_a",
+        ),
+    )
+
+    assert ok is True
+    assert calls == ["capture", "compress"]
+
+
+def test_finish_skips_events_post_processing_when_generation_stale(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """reset bump 代次后迟到的 finish：run_dir 路径跨代次复用，token
+    capture 会把新代次的 events 记到旧 run（双计）、PI compression 可能
+    截断新 run 的 events.jsonl——stale 判定下 events 族整体跳过。"""
+    calls = _record_events_post_processing(monkeypatch)
+    _seed_job(job_db, workspace_id="gate13-ws", job_id="gate13-job")
+    _seed_lease(job_db, workspace_id="gate13-ws", job_id="gate13-job")
+    run_dir = tmp_path / "jobs" / "gate13-ws" / "gate13-job" / "runs" / "node_a"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text('{"new":"generation"}\n', encoding="utf-8")
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update jobs set execution_generation=execution_generation+1 where id=%s",
+            ("gate13-job",),
+        )
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+
+    ok = repo.finish(
+        "lease-1",
+        ExecutionResult(
+            status="completed",
+            exit_code=0,
+            run_dir="jobs/gate13-ws/gate13-job/runs/node_a",
+        ),
+    )
+
+    assert ok is True
+    assert calls == []
+    assert (run_dir / "events.jsonl").read_text(encoding="utf-8") == '{"new":"generation"}\n'

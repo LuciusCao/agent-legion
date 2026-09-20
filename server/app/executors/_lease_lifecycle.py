@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
+from server.app.executors._file_promotion import promote_result_staged_moves
 from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
     lock_job_mutation_and_read_generation,
@@ -16,7 +17,7 @@ from server.app.executors._lease_shards import finish_shard_execution
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors._lease_transient_retry import try_return_node_to_pending
 from server.app.executors._path_canonicalization import canonicalize_finish_paths
-from server.app.executors.models import ExecutionResult
+from server.app.executors.models import ExecutionResult, FinishVerdict
 from server.app.services import failure_classification
 from server.app.services.job_run_dir_probe import finish_job_dir_candidates
 from server.app.workflows.sharding import (
@@ -53,12 +54,12 @@ def heartbeat_lease(conn: DatabaseConnection, lease_id: str, ttl_seconds: int) -
 
 def finish_lease(
     conn: DatabaseConnection, lease_id: str, result: ExecutionResult, data_dir: Path | None = None
-) -> bool:
+) -> FinishVerdict:
     now = datetime.now(UTC)
     now_str = database_timestamp(now)
     lease = conn.execute("select * from executor_leases where id=%s", (lease_id,)).fetchone()
     if lease is None or lease["status"] != "active":
-        return False
+        return FinishVerdict(False)
 
     # EXEC-GENERATION-001：与 mutation 侧（lease_guarded_mutation）互斥后做
     # 代次 CAS。lease 落戳代次 != jobs 现值 = reset 后的迟到 finish：lease
@@ -75,6 +76,12 @@ def finish_lease(
             lease["node_key"],
             lease["execution_generation"],
         )
+    elif result.staged_file_moves:
+        # #759 review P1-1：Worker 结果归档的文件提升只在本代次闸内发生——
+        # 解包先于闸落到 staging 目录，迟到（reset 后）的 finish 在此跳过，
+        # 旧代次字节永远进不了新现场的 job_dir。提升失败整体回滚再上抛，
+        # 不留半应用文件（与产物清单登记同一 FilePromotionGuard 纪律）。
+        promote_result_staged_moves(result.staged_file_moves)
 
     conn.execute("update executor_leases set status='released' where id=%s", (lease_id,))
 
@@ -119,14 +126,14 @@ def finish_lease(
         ),
     )
     if finish_shard_execution(conn, lease, result, now_str, generation_stale=generation_stale):
-        return True
+        return FinishVerdict(True, generation_stale)
 
     if generation_stale:
-        return True
+        return FinishVerdict(True, True)
 
     if try_return_node_to_pending(conn, lease, result, failure_category, failure_detail):
         sync_job_status(conn, lease["job_id"])
-        return True
+        return FinishVerdict(True)
 
     conn.execute(
         """
@@ -149,7 +156,7 @@ def finish_lease(
     if result.status == "completed":
         _pause_job_on_target_completion(conn, lease["job_id"], lease["node_key"], now_str)
 
-    return True
+    return FinishVerdict(True)
 
 
 def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:

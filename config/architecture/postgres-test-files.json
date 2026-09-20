@@ -21,6 +21,7 @@
     "tests/db/test_custom_node_codes_migration.py",
     "tests/db/test_db.py",
     "tests/db/test_enqueue_generation_races.py",
+    "tests/db/test_completion_generation_gates.py",
     "tests/db/test_execution_generation_races.py",
     "tests/db/test_execution_generation_schema.py",
     "tests/db/test_executor_retirement_migration.py",

@@ -276,9 +276,16 @@ Job 产物与执行状态分布在三个平面，代次协议对每个平面各�
      key（lease_id 即 execution 维度）后走同一 primitive——循环中途落地的
      reset 既登记不进去，也不会让 authority 对象被旧代次字节覆盖（闸拒时按
      备份恢复，staging 残留逐结局清理）。
+   - Worker 结果归档的本地文件平面（#759 复审 P1-1）：`AgentCompletionHandler.finish`
+     把归档只解包到 job_dir 内的 staging 目录，校验/分片读/镜像（同样携带
+     lease_id）都读该视图；expected 输出、events.jsonl 与 node.log 的提升经
+     `ExecutionResult.staged_file_moves` 挤进 `finish_lease` 的代次 CAS——
+     代次不匹配时文件永不落盘，旧代次归档覆盖不了新现场的本地输入。
 
    因为行删除与行登记在同一把锁下互斥，清单平面不存在「旧代次行复活」的交错；
    字节面由「staging 先行 + 闸拒回滚」保证不存在「保留行指向污染字节」的交错。
+   锁内登记抛异常（upsert/落盘失败）时 promote 按回滚备份恢复 authority、
+   已落盘文件经 `FilePromotionGuard` 整体回滚后再原样上抛（#759 复审 P1-2）。
 
 ## 4. 对抗审查 checklist
 
@@ -349,10 +356,13 @@ Job 产物与执行状态分布在三个平面，代次协议对每个平面各�
    部分（落盘 + 清单行）在锁内单事务完成。本地上传（lease 臂）与远端
    promote 共用同一 primitive（`executors/_artifact_promotion.py`），两侧
    残余面相同；无备份时的孤儿 authority 对象由 bucket lifecycle 兜底。
-3. **AgentCompletionHandler.finish 的 D12 镜像调用未加闸**：
-   `server/app/agent_control/completion.py` 的 `upload_produced_artifacts` 调用
-   不传 lease_id（本地 code 执行路径传）。agent 本地产物镜像因此可能把旧代次
-   字节登记进清单；`job_nodes` 面由 finish CAS 护住，但该写口值得后续加闸。
+3. **闸内文件提升的提交前窗口**：`finish_lease` 与 `register_rows_guarded` 的
+   staged 文件提升都在代次 CAS 之后、事务提交之前完成（本地 rename，毫秒级）；
+   提升成功后同事务后续 SQL 失败的崩溃窗口会留下「当前代次自身产物」的已落盘
+   文件，lease 仍 active、重试自然覆盖——不跨代次污染，不再收窄。finish 批
+   事务（`finish_many`）整批回滚重放由「source 缺席 + target 在场 = 已提升」
+   的幂等跳过兜住（`promote_file_moves_guarded`），瞬时 DB 冲突不会被放大成
+   确定性 500。
 4. **hydration 残余窗口**：突变可在通过的代次复查之后提交。upgrade 侧对
    「缺席即闸」名由提交后 sweep（`job_workflow_upgrade_sweep`）收掉——恢复写
    先于代次复查，复查通过的复活必落在提交前、必被 sweep 覆盖——残余仅剩
@@ -360,8 +370,11 @@ Job 产物与执行状态分布在三个平面，代次协议对每个平面各�
    rerun/run-to 路径保留原有的毫秒级（单事务 staging→commit 跨度、按文件计）
    窗口，三层兜底论证见 `input_hydration.py` 模块 docstring。
 
-后续方向：给 agent 完成路径的镜像上传补 lease_id 闸；评估 hydration 是否可在
-不阻塞突变的前提下收掉残余窗口（如按名字级的版本化暂存目录）。
+后续方向：评估 hydration 是否可在不阻塞突变的前提下收掉残余窗口（如按名字级
+的版本化暂存目录）；评估 immutable/versioned authority key + manifest 原子切换
+（#759 复审增补的长期项）；`.result-staging-*` / `.artifact-staging-*` /
+`.promote-rollback-*` 的进程崩溃残留目前无 reaper（纯磁盘泄漏，消费者按名
+读取不受影响），值得一个 sweeper 或启动清理的后续项。
 
 ## 6. 验证与测试手法
 

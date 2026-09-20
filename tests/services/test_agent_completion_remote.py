@@ -604,3 +604,58 @@ def test_promote_rejected_on_generation_mismatch_with_live_lease(tmp_path: Path)
     assert storage.objects == {STAGING_KEY: PAYLOAD}
     assert object_store.lookup("job-1", "out.json") is None
     assert not (job_dir / "out.json").exists()
+
+
+def test_finish_remote_ref_invalid_name_fails(tmp_path: Path) -> None:
+    """#759 对抗复审 P2：Worker 自选的 dict-ref 名是不可信输入——含路径
+    分隔符的名（如 .rollback/out.json）会与 promote 的回滚 key 命名空间
+    碰撞（备份 copy 覆盖 Worker 自己的 staging 对象，清单行指向 hash 不
+    匹配的字节）。按本地上传同一把尺（valid_artifact_name）拒收，整个
+    结果翻 failed，零 copy、零登记。"""
+    storage = FakeStorage()
+    handler, leases, _artifact_store, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(
+        handler,
+        {
+            ".rollback/out.json": _remote_ref(
+                key="jobs-staging/ws-1/job-1/exec-1/.rollback/out.json"
+            )
+        },
+    )
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "invalid artifact name" in result.error_message
+    assert storage.objects == {}
+    assert object_store.lookup("job-1", ".rollback/out.json") is None
+    assert not (job_dir / ".rollback").exists()
+
+
+def test_finish_remote_ref_nested_name_accepted(tmp_path: Path) -> None:
+    """对照（#631 祝福的嵌套声明名）：reports/final.json 这类合法嵌套名
+    不受非法名拒收影响，全链路照常 promote + 登记。"""
+    nested = "reports/final.json"
+    staging_key = "jobs-staging/ws-1/job-1/exec-1/reports/final.json"
+    storage = FakeStorage()
+    storage.objects[staging_key] = PAYLOAD
+    handler, leases, _artifact_store, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="job-1",
+        node_key="node_a",
+        manifest={"expected_outputs": [nested], "execution_id": "exec-1"},
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            output_artifacts={nested: _remote_ref(key=staging_key)},
+        ),
+        archive_name="",
+    )
+
+    assert leases.results[0].status == "completed"
+    assert (job_dir / "reports" / "final.json").read_bytes() == PAYLOAD
+    row = object_store.lookup("job-1", nested)
+    assert row is not None

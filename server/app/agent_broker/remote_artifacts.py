@@ -35,6 +35,7 @@ from server.app.agent_broker.remote_artifact_support import (
     verify_remote_digest,
 )
 from server.app.executors.models import ExecutionResult
+from server.app.services.job_artifact_names import is_downloadable_artifact_name
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,14 @@ def apply_remote_artifact_refs(
     remote = {name: ref for name, ref in output_artifacts.items() if isinstance(ref, dict)}
     if not remote:
         return set(), None
+    # Worker-reported names are untrusted (#759 review P2): a name whose
+    # segments carry a dot-prefix (e.g. ".rollback/out.json") would collide
+    # with the promote primitive's rollback-key namespace inside the staging
+    # layout — the backup copy could overwrite the Worker staging object and
+    # leave the manifest row pointing at hash-mismatched bytes. Reject with
+    # the #631 serve-side whitelist (nested declared names stay welcome).
+    if bad := next((n for n in sorted(remote) if not is_downloadable_artifact_name(n)), None):
+        return set(remote), f"Agent Worker reported invalid artifact name: {bad!r}"
     if object_store is None or not object_store.enabled:
         return set(remote), (
             "Agent Worker reported object-storage artifacts "
@@ -95,6 +104,7 @@ def apply_remote_artifact_refs(
         )
     if not execution_id:
         return set(remote), "Agent Worker result is missing its execution id"
+    percent = DEFAULT_SPOT_CHECK_PERCENT if spot_check_percent is None else spot_check_percent
     try:
         # Phase 1: verify EVERY ref (staging layout bound to this execution,
         # size ceiling, HEAD size) before anything is copied, downloaded, or
@@ -129,15 +139,7 @@ def apply_remote_artifact_refs(
                         # spot-check sample, an empty one still streams (the
                         # manifest row needs a Host-computed digest).
                         content_hashes[name] = verify_remote_digest(
-                            object_store,
-                            name,
-                            ref,
-                            max_size_bytes,
-                            spot_check_percent=(
-                                DEFAULT_SPOT_CHECK_PERCENT
-                                if spot_check_percent is None
-                                else spot_check_percent
-                            ),
+                            object_store, name, ref, max_size_bytes, spot_check_percent=percent
                         )
                 # Phase 3: all verified — promote copies, files, and rows.
                 if not promote_all(
@@ -159,13 +161,7 @@ def apply_remote_artifact_refs(
         # the digest (stream, never persisted).
         for name, ref in remote.items():
             content_hashes[name] = verify_remote_digest(
-                object_store,
-                name,
-                ref,
-                max_size_bytes,
-                spot_check_percent=(
-                    DEFAULT_SPOT_CHECK_PERCENT if spot_check_percent is None else spot_check_percent
-                ),
+                object_store, name, ref, max_size_bytes, spot_check_percent=percent
             )
         if not promote_all(
             object_store,
