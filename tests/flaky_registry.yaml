@@ -214,3 +214,19 @@ entries:
     consecutive local passes (1.3-5.3s each).
   observed: PR #702 backend-postgres-c lane (run 35347504160), 2026-09-18, rerun passed and the lane count was green.
   deadline: 2026-10-18
+- id: FLAKY-019
+  nodeid: tests/services/test_studio_chat_compaction.py::test_compact_timeout_timer_self_clears_and_recovers_input
+  owner: test-infra
+  reason: >-
+    Reran once in PR #702 CI (backend-coverage aggregation, run
+    35468147331, 2026-09-19) — the retry passed and the lane's only failure
+    was the rerun-governance step. The test arms a daemon Timer with a
+    shrunk 0.3s compacting timeout and waits up to 30s on the DB row via
+    wait_for_predicate; on the loaded 2-core runner (three postgres shards
+    plus coverage) the timer thread can be starved past the window. The PR
+    diff is the workflow-upgrade inherit/generation plane; it does not
+    touch studio chat compaction. Same loaded-runner timing family as
+    FLAKY-009/010/011/016/017/018. Assertions are stable: 4 consecutive
+    local passes (0.85-1.06s each).
+  observed: PR #702 backend-coverage lane (run 35468147331), 2026-09-19, rerun passed and the lane count was green.
+  deadline: 2026-10-19
