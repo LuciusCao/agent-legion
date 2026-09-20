@@ -198,6 +198,30 @@ fail closed：
 分支的全量清单清理（`keep_input_names`）；`sweep` 集（依赖缺席判定的非
 RMW 名）在提交后再扫一次本地文件复活（见 §3 文件平面与 §5 残余面 4）。
 
+### 2.9 写面登记与静态强制（EXEC-GENERATION-002）
+
+本协议经多轮对抗审查收敛后，同一类残余风险只剩一种形态：新写面绕过共享
+helper/primitive 直写执行态或产物。因此写面全集由机器钉住
+（`config/architecture/execution-write-surfaces.json`，检查脚本
+`scripts/architecture/execution_write_surfaces.py`，接入
+`scripts/check_architecture.py` 管线）：
+
+- **执行态写面**：字符串 SQL 中对 `jobs` / `job_nodes` / `node_runs` /
+  `executor_leases` / `agent_execution_requests` 五表的 `insert into` /
+  `update`，模块级白名单 `state_write_modules`；
+- **产物字节写面**：artifact key 的 `put_stream(` / `copy_object(` 调用点，
+  白名单 `artifact_byte_write_sites`（storage 层自身实现豁免——它是抽象
+  本体而非写面）；
+- **产物清单行写面**：`upsert_artifact_row_tx` / `ARTIFACT_ROW_UPSERT_SQL`
+  引用点，白名单 `manifest_row_write_sites`（helper 定义模块豁免）。
+
+命中注册表外的写面即 CI 报错；注册表条目对应的写面消失（文件删除或重构）
+同样报错——注册表与实际扫描双向一致，防漂移。新增写面的正规通道：走
+`lease_guarded_mutation` / `lock_job_mutation_and_read_generation` /
+`promote_to_authority_guarded` / `upsert_artifact_row_tx` 等共享入口，并把
+条目（含 `via` 指向的 helper）加进注册表；机器检查是兜底，§4 的人工切面
+（降级语义、锁序、批序）不变。
+
 ## 3. 三平面一致性论证
 
 Job 产物与执行状态分布在三个平面，代次协议对每个平面各有一道闸：
@@ -280,8 +304,11 @@ Job 产物与执行状态分布在三个平面，代次协议对每个平面各�
 
 ### 4.2 协议覆盖完备性切面
 
-- [ ] 新写面（任何写 `job_nodes`/`jobs`/`agent_execution_requests`/清单行的路径）
-      是否走了 CAS 或共享 helper？重点扫边缘路径：sweeper、审批、enqueue、
+- [ ] 机器兜底先行：`scripts/architecture/execution_write_surfaces.py`
+      （EXEC-GENERATION-002）钉住执行态/产物字节/清单行三类写面全集
+      （`config/architecture/execution-write-surfaces.json`），注册表外的
+      写面 CI 直接拒绝——本切面的人工部分只审「新登记的写面是否真走了 CAS
+      或共享 helper」：重点扫边缘路径：sweeper、审批、enqueue、
       not_applicable 批写、分片 fan-out、失败记录——历史上每一个都曾是漏网面。
 - [ ] 降级臂是否会产生缓存污染？读失败 / 部分成功时，评估结果是否被当成确定性
       结论缓存（ hydration 纪律：manifest 是权威副本，读失败 = 推迟且不缓存，

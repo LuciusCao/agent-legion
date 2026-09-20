@@ -1380,3 +1380,14 @@ invariants:
       - kind: integration
         target: tests/services/test_agent_completion_remote.py
         gate: quick
+  - id: EXEC-GENERATION-002
+    statement: "Execution write-surface registry (#759 governance): the complete set of modules allowed to write execution state (INSERT/UPDATE on jobs / job_nodes / node_runs / executor_leases / agent_execution_requests), artifact bytes (put_stream/copy_object on artifact keys, excluding the storage layer's own implementation), and artifact manifest rows (upsert_artifact_row_tx / ARTIFACT_ROW_UPSERT_SQL references) is pinned by config/architecture/execution-write-surfaces.json and machine-enforced by scripts/architecture/execution_write_surfaces.py — a write site outside the registry fails check_architecture, and a registry entry whose write site no longer exists fails as stale (registry and scan must match in both directions). Any NEW write surface must go through the shared helpers/primitives (lease_guarded_mutation, lock_job_mutation_and_read_generation, promote_to_authority_guarded, upsert_artifact_row_tx) and register its entry with the via helper it rides, instead of writing execution state, artifact bytes or manifest rows directly."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: static
+        target: scripts/architecture/execution_write_surfaces.py
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_execution_write_surfaces.py
+        gate: quick
