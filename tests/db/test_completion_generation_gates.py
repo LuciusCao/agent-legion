@@ -305,3 +305,20 @@ def test_completion_ref_channel_wins_over_duplicate_archive_member(
     row = store.row_for_node("gate16-job", "node_a", "out.json")
     assert row is not None
     assert row["content_hash"] == hashlib.sha256(b"ref-bytes").hexdigest()
+
+
+def test_completion_missing_job_dir_fails_result_not_commit(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """CI 回归（routes 套件抓到）：job_dir 从未存在过时，staging 目录创建
+    的 FileNotFoundError 必须走失败转换——结果翻 failed 收尾 lease，而
+    不是炸穿结果提交（staging 化前该异常由解包函数内的同一 except 臂
+    兜住）。"""
+    _seed_completion_job(job_db, workspace_id="gate17-ws", job_id="gate17-job")
+    storage = FakeObjectStorage()
+    handler, _store, _jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    _result_archive(tmp_path / "bundles" / "result.tar.gz", {"out.json": b"x"})
+
+    assert _finish_with_archive(handler, job_id="gate17-job") is True
+
+    assert _node_row("gate17-job", "node_a")["status"] == "failed"

@@ -129,8 +129,12 @@ class AgentCompletionHandler:
         staged_moves: list[tuple[Path, Path]] = []
         view_dir = job_dir
         if archive_name and (not cancelled or log_target is not None):
-            staging_cm = tempfile.TemporaryDirectory(prefix=".result-staging-", dir=job_dir)
             try:
+                # staging 目录的创建也在 try 内：job_dir 缺失（从未有过本地产物
+                # 的 job）时 mkdtemp 的 FileNotFoundError 同样走下面的失败
+                # 转换，而不是炸穿结果提交（staging 化前该异常在解包函数内
+                # 被同一 except 臂兜住）。
+                staging_cm = tempfile.TemporaryDirectory(prefix=".result-staging-", dir=job_dir)
                 # #552：解包是纯 CPU 段（tar/gzip + member 校验），下沉进程池
                 # ——HTTP 平面线程只停在 future.result() 的 GIL 释放等待上，
                 # 完成波不再挤单核；坏包炸子进程不炸主进程。
@@ -147,7 +151,8 @@ class AgentCompletionHandler:
                     log_target,
                 )
             except Exception as exc:
-                staging_cm.cleanup()
+                if staging_cm is not None:
+                    staging_cm.cleanup()
                 # #204 broad-except audit: per-result containment that
                 # CONVERTS, not masks — the Worker's untrusted archive
                 # surface (gzip/tar corruption, unsafe member paths raising
