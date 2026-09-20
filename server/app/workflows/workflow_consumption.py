@@ -39,14 +39,9 @@ def artifact_consumption_index(definition: WorkflowDefinition) -> dict[str, froz
       自身即消费者——索引键集因此恒等于「ready gate 的本地探针全集」）；
     - ``edge.condition.artifact``：边的 target 是消费者（分支评估替它读
       文件）。
-<<<<<<< HEAD
     索引键集即「这个名字会被本地探针/分支评估读取」的全集；hydration、
-    分支裁决屏障与升级死名判定（``revision_diff.dropped_artifact_names``）
-    都以本索引为准，不允许各自重遍历定义。
-=======
-    无生产者的声明名（外部输入）也出现在索引里——hydration 的恢复面与
-    upgrade 保护计划的消费面都以本索引为准，不允许各自重遍历定义。
->>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
+    分支裁决屏障、升级死名判定（``revision_diff.dropped_artifact_names``）
+    与升级保护计划都以本索引为准，不允许各自重遍历定义。
     """
     index: dict[str, set[str]] = {}
     for key, node in definition.nodes.items():
@@ -58,28 +53,11 @@ def artifact_consumption_index(definition: WorkflowDefinition) -> dict[str, froz
     return {name: frozenset(consumers) for name, consumers in index.items()}
 
 
-<<<<<<< HEAD
-def consumer_edges(
-    definition: WorkflowDefinition, *, skip_names: Iterable[str] = ()
-) -> dict[str, list[str]]:
-    """隐式消费边索引：producer key → 排序后的 consumer key 列表。
-
-    ``skip_names``（#759 4.1）：排除经由这些名字的隐式边。判定「名 X 的
-    consumer 是否保证在某 producer 之后执行」时，X 自己的隐式边正是被
-    保留的启动对象 / manifest 回填所满足的等待——拿它当保证证据是循环
-    论证，必须由调用方排除。当前是 ④ 层（upgrade-inherit）的前置 API，
-    生产调用方随 ④ 落地。
-    """
-    skipped = set(skip_names)
-    producers = artifact_producers(definition)
-=======
 def consumer_edges(definition: WorkflowDefinition) -> dict[str, list[str]]:
-    """隐式消费边索引：producer key → 排序后的 consumer key 列表。"""
-    producers: dict[str, set[str]] = {}
-    for key, node in definition.nodes.items():
-        for name in node.outputs:
-            producers.setdefault(name, set()).add(key)
->>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
+    """隐式消费边索引：producer key → 排序后的 consumer key 列表（与调度
+    屏障共用 ``artifact_producers``——skip 参数已随 ④ 层保护计划的自证
+    逻辑退役）。"""
+    producers = artifact_producers(definition)
     edges: dict[str, set[str]] = {key: set() for key in definition.nodes}
     for name, consumers in artifact_consumption_index(definition).items():
         for consumer in consumers:
@@ -89,7 +67,6 @@ def consumer_edges(definition: WorkflowDefinition) -> dict[str, list[str]]:
     return {key: sorted(targets) for key, targets in edges.items()}
 
 
-<<<<<<< HEAD
 def artifact_producers(definition: WorkflowDefinition) -> dict[str, set[str]]:
     """产物名 → 声明其为 output 的节点集合（调度完成屏障与隐式边共用）。
 
@@ -104,19 +81,8 @@ def artifact_producers(definition: WorkflowDefinition) -> dict[str, set[str]]:
     return producers
 
 
-def dependency_children(
-    definition: WorkflowDefinition, *, skip_consumption_names: Iterable[str] = ()
-) -> dict[str, list[str]]:
-    """合并邻接表：显式边 ∪ 隐式消费边（key → 排序后的直接下游）。
-
-    ``skip_consumption_names``（#759 4.1）：排除经由这些名字的隐式消费
-    边，语义见 ``consumer_edges``——只在判定「名 X 的 consumer 是否保证
-    在 producer 之后执行」时使用。
-    """
-=======
 def dependency_children(definition: WorkflowDefinition) -> dict[str, list[str]]:
     """合并邻接表：显式边 ∪ 隐式消费边（key → 排序后的直接下游）。"""
->>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
     children: dict[str, set[str]] = {key: set() for key in definition.nodes}
     for edge in definition.edges:
         children[edge.source].add(edge.target)
@@ -143,9 +109,7 @@ def dependency_downstream(definition: WorkflowDefinition, node_key: str) -> list
     return sorted(walk_downstream(dependency_children(definition), [node_key]))
 
 
-def dependency_parents(
-    definition: WorkflowDefinition, *, skip_consumption_names: Iterable[str] = ()
-) -> dict[str, list[str]]:
+def dependency_parents(definition: WorkflowDefinition) -> dict[str, list[str]]:
     """合并上游邻接表：显式边 ∪ 隐式生产边（key → 排序后的直接上游）。
 
     下游合并了而上游没有，会让「隐式生产者 failed」逃出所有 failed-
@@ -153,9 +117,7 @@ def dependency_parents(
     永久阻塞目标（#759 自审 P1）。上游判定必须与下游同一张合并图。
     """
     parents: dict[str, set[str]] = {key: set() for key in definition.nodes}
-    for source, targets in dependency_children(
-        definition, skip_consumption_names=skip_consumption_names
-    ).items():
+    for source, targets in dependency_children(definition).items():
         for target in targets:
             parents[target].add(source)
     return {key: sorted(sources) for key, sources in parents.items()}
