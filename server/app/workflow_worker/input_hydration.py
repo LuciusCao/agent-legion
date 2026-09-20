@@ -66,6 +66,7 @@ from typing import TYPE_CHECKING
 
 from server.app.executors.artifact_restore import restore_from_manifest_row
 from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.workflow_consumption import artifact_consumption_index
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -75,11 +76,11 @@ logger = logging.getLogger(__name__)
 
 
 def declared_artifact_names(definition: WorkflowDefinition) -> frozenset[str]:
-    """Every artifact name the ready gate probes locally: node inputs ∪
-    branch-condition artifacts."""
-    names = {name for node in definition.nodes.values() for name in node.inputs}
-    names.update(edge.condition.artifact for edge in definition.edges if edge.condition is not None)
-    return frozenset(names)
+    """Every artifact name the ready gate probes locally — the keys of the
+    shared consumption index (node inputs ∪ branch-condition artifacts,
+    workflows/workflow_consumption.artifact_consumption_index, the single
+    enumeration every consumer of the consumption relation must use)."""
+    return frozenset(artifact_consumption_index(definition))
 
 
 def hydrate_job_artifacts(

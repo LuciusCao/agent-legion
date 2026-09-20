@@ -124,19 +124,26 @@ agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 
 孤儿项用哨兵 `-(2**31)` 定位（`_ORPHAN_WS_LOCK_KEY`），job_id 收尾决胜。单一
 全序保证任意两批不会以相反顺序走同一对 job。
 
-### 2.6 下游消费闭包：显式边 ∪ 隐式 input 消费边
+### 2.6 artifact 消费关系索引：唯一枚举处
 
-「哪些节点必须跟着重跑」依赖下游闭包的正确性。loader 不要求 `inputs` 的生产者
-有显式边，而调度器纯文件驱动（输入文件出现即解锁）——`p.outputs=[x]`、
-`q.inputs=[x]` 无边时，q 若遗漏出闭包会被静默继承旧 x。统一邻接表在
-`server/app/workflows/workflow_consumption.py`：output 名 → 生产者索引构成
-producer→consumer **隐式消费边**，与显式边合并（RMW 不自边但传播至其他
-consumer，无生产者的外部 input 不产生边，隐式边可能成环、环内互染是保守
-方向）。rerun / run-to / approval rework 的下游计算一律走
-`dependency_downstream` / `dependency_children`，不允许各自重遍历定义。
+「谁消费哪个 artifact 名」由
+`server/app/workflows/workflow_consumption.py` 的
+`artifact_consumption_index` 统一枚举，三条渠道：
 
-这是代次协议的前提：闭包划错，CAS 护住的现场本身就是错的。upgrade inherit
-模式的种子+传播闭包在同一邻接表上构建（后续 upgrade-inherit 层接入）。
+- `node.inputs` 声明：名 X 的生产者 → 声明 X 的节点；
+- RMW：inputs ∩ outputs 同名不构成自边，但仍作为生产者向其他 consumer 传播；
+- `edge.condition.artifact`：分支评估在 source 完成后读该文件决定是否激活
+  target——target 是该名的隐式消费者。条件产物可以与边不相邻（任意节点
+  生产），此时 producer→target 隐式边是唯一的传播通道；少了它，重跑/升级
+  会留下旧条件字节，分支评估静默走错分支。
+
+下游闭包 = 显式边 ∪ 索引导出的隐式消费边（`dependency_children` /
+`dependency_downstream`，隐式边可能成环、环内互染是保守方向）；rerun /
+run-to / approval rework 一律走它，不允许各自重遍历定义。hydration 的恢复面
+（`input_hydration.declared_artifact_names`）直接取索引键集；upgrade inherit
+的输入保护计划在同一索引上判定（后续 upgrade-inherit 层接入）。
+
+这是代次协议的前提：闭包划错，CAS 护住的现场本身就是错的。
 
 ### 2.7 写面登记与静态强制（EXEC-GENERATION-002）
 
@@ -372,9 +379,11 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    #774 P1）：回滚簿活到事务提交之后，commit 时刻失败时本地面随清单
    行/authority 同面回滚——残余只剩进程硬崩（SIGKILL）与 commit 歧义
    的已提交半边（选边与 authority 侧一致，§4 第 2 条）。
-4. **ready 前输入恢复（hydration）尚无代次夹逼**：清单驱动的输入恢复与
-   消费关系索引（含 `edge.condition.artifact` 等隐式消费面）的统一建模是后续
-   artifact-dependency-model 层的内容。
+4. **hydration 残余窗口**：hydration 刻意不取 job-mutation 锁（对象存储下载
+   可能数秒，不能挡住每个 rerun/upgrade），以代次双读夹逼代替；突变仍可在
+   通过的复查之后提交——恢复写先于复查，本轮候选带旧代次会被 claim CAS 拒、
+   下一轮评估不再恢复已删行的名字，残余为毫秒级提交窗口（详见
+   `input_hydration.py` 模块 docstring）。
 5. **upgrade inherit 模式**（保留未变节点产物）与发布/skill 锁域接入同一
    协议是后续 upgrade-inherit 层的内容。
 
