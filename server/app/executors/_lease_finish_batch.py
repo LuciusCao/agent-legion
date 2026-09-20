@@ -9,9 +9,13 @@ for a non-active row — a 409 is data, not an error).
 
 Two disciplines the codex review on #609 added:
 
-- **Deterministic item order**: finish and claim batches share a stable
-  (workspace hash, run_id, job_id) order and restore queue-order verdicts.
-  v82's append-and-try-fold counters no longer require this ordering for
+- **Deterministic item order**: finish and claim batches share one global
+  ``(workspace lock key, job_id)`` order (EXEC-GENERATION-001, #759 phase 7:
+  the job-mutation advisory xact locks every finish/claim takes survive the
+  batcher's per-item boundaries, so one global order — the claim batch's
+  single all-kinds order, ``claim_batch_tx._lock_order_sorted`` —
+  prevents cross-batch AB-BA) and restore queue-order verdicts. v82's
+  append-and-try-fold counters no longer require this ordering for
   deadlock safety, but preserving it avoids unnecessary scheduling churn.
 - **The writer thread owns only the shared transaction** (#591 C5): events
   post-processing (token capture + PI compression, two full-file scans per
@@ -28,9 +32,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from server.app.db.retry import retry_on_database_conflict
 from server.app.db.transaction import write_transaction
+from server.app.executors._lease_control import _ORPHAN_WS_LOCK_KEY
 from server.app.executors._lease_lifecycle import finish_lease
 from server.app.executors._lease_write_paths import (
-    _ORPHAN_WS_LOCK_KEY,
     _mark_result_stage,
     finish_events_post_processing,
 )
@@ -58,31 +62,42 @@ def finish_many(
     (record_job_update reads current stats, so N broadcasts are noise).
     """
     with write_transaction(repo.path) as conn:
-        # Stable item order shared with try_claim_many; queue position keeps
-        # same-key ordering and verdicts are restored to queue order below.
-        resolved: list[tuple[int, str, str, int, str, ExecutionResult, Any]] = []
+        # EXEC-GENERATION-001 batch order: every finish_lease takes the
+        # job-mutation:<job_id> advisory xact lock (never released by the
+        # batcher's per-item boundaries), so ALL multi-job batches on this
+        # domain walk jobs in one global order — (ws lock key, job_id) with
+        # the ws key being hashtext('agent-ws:' || workspace_id)::int, the
+        # exact key of the claim batch's single all-kinds order
+        # (claim_batch_tx._lock_order_sorted), shared with try_claim_many /
+        # expire / recover / the agent sweep. Two concurrent batches walking
+        # the same jobs in different orders would AB-BA on the job-mutation
+        # domain. Queue position keeps same-job ordering and verdicts are
+        # restored to queue order below.
+        resolved: list[tuple[int, str, int, str, ExecutionResult, Any]] = []
         for index, (lease_id, result, stage_timer) in enumerate(writes):
             lease = conn.execute(
-                "select l.job_id, j.workspace_id, j.run_id,"
-                " hashtext('ws:' || j.workspace_id)::int as ws_lock_key"
+                "select l.job_id, hashtext('agent-ws:' || j.workspace_id)::int as ws_lock_key"
                 " from executor_leases l"
                 " left join jobs j on j.id = l.job_id where l.id = %s",
                 (lease_id,),
             ).fetchone()
             resolved.append(
                 (
-                    int(lease["ws_lock_key"]) if lease is not None else _ORPHAN_WS_LOCK_KEY,
-                    str(lease.get("run_id") or "") if lease else "",
-                    str(lease.get("job_id")) if lease else "",
+                    (
+                        int(lease["ws_lock_key"])
+                        if lease is not None and lease["ws_lock_key"] is not None
+                        else _ORPHAN_WS_LOCK_KEY
+                    ),
+                    str(lease["job_id"]) if lease is not None else "",
                     index,
                     lease_id,
                     result,
                     stage_timer,
                 )
             )
-        resolved.sort(key=lambda entry: entry[:4])
+        resolved.sort(key=lambda entry: entry[:3])
         by_index: dict[int, bool] = {}
-        for _ws_key, _run, _job_id, index, lease_id, result, _timer in resolved:
+        for _ws_key, _job_id, index, lease_id, result, _timer in resolved:
             by_index[index] = finish_lease(conn, lease_id, result, repo.data_dir)
     outcomes = [by_index.get(index, False) for index in range(len(writes))]
 
@@ -121,9 +136,7 @@ def finish_many(
 
         return run
 
-    for _ws, _run, job_id, index, lease_id, result, stage_timer in sorted(
-        resolved, key=lambda i: i[3]
-    ):
+    for _ws, job_id, index, lease_id, result, stage_timer in sorted(resolved, key=lambda i: i[2]):
         result_flag = by_index[index]
         events_ran = result_flag and result.status in ("completed", "failed")
         with_broadcast = result_flag and job_id not in claimed_jobs

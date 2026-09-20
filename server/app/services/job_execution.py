@@ -23,7 +23,7 @@ from server.app.services.workflow_revision_format import definition_from_job_sna
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.execution_control import ExecutionControlError, ancestor_closure
 from server.app.workflows.start_node import START_NODE_TYPE
-from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import dependency_downstream
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,7 @@ class JobExecutionService:
         staged = None
         deleted_rows: list[dict[str, Any]] = []
         try:
-            descendants = downstream_nodes(definition, start_node_key)
+            descendants = dependency_downstream(definition, start_node_key)
             with self.job_db.lease_guarded_mutation(
                 job_id,
                 self._now(),

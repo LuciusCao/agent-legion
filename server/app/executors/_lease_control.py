@@ -14,7 +14,8 @@ TERMINAL_JOB_STATUSES = ("completed", "failed")
 def _read_job_execution_control(conn: DatabaseConnection, job_id: str) -> dict[str, Any]:
     row = conn.execute(
         """
-        select execution_mode, target_node_key, execution_paused, pause_reason, status
+        select execution_mode, target_node_key, execution_paused, pause_reason, status,
+               execution_generation
         from jobs
         where id=%s
         """,
@@ -27,6 +28,7 @@ def _read_job_execution_control(conn: DatabaseConnection, job_id: str) -> dict[s
             "execution_paused": False,
             "pause_reason": "",
             "status": None,
+            "execution_generation": None,
         }
     return {
         "execution_mode": row["execution_mode"],
@@ -34,6 +36,7 @@ def _read_job_execution_control(conn: DatabaseConnection, job_id: str) -> dict[s
         "execution_paused": bool(row["execution_paused"]),
         "pause_reason": row["pause_reason"],
         "status": row["status"],
+        "execution_generation": int(row["execution_generation"]),
     }
 
 
@@ -54,6 +57,41 @@ def _execution_control_rejects_claim(
         if current_control["target_node_key"] != request.target_node_key:
             return True
         return request.node_key not in request.allowed_node_keys
+
+
+def lock_job_mutation_and_read_generation(conn: DatabaseConnection, job_id: str) -> int | None:
+    """Take the per-job mutation advisory lock and read the current epoch.
+
+    EXEC-GENERATION-001 (#759 phase 1d): finish/fail/expire/recover writers
+    serialize with the mutation side (``lease_guarded_mutation``) on this lock
+    before their CAS check; taking it re-reads the jobs row against a state no
+    concurrent reset can still change. None when the jobs row is gone (every
+    expected epoch then counts as stale).
+    """
+    conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"job-mutation:{job_id}",))
+    row = conn.execute("select execution_generation from jobs where id=%s", (job_id,)).fetchone()
+    return int(row["execution_generation"]) if row is not None else None
+
+
+# Sort sentinel for batch items whose workspace lock key cannot be resolved
+# (the jobs row vanished before the batch's lookup — the item then fails the
+# generation CAS without writing). hashtext's int domain is signed 32-bit, so
+# -(2**31) is a real possible key value; the sentinel only needs a
+# deterministic position, and the job_id tiebreak keeps even that collision
+# consistent across batches.
+_ORPHAN_WS_LOCK_KEY = -(2**31)
+
+
+def ws_lock_keys_by_job(conn: DatabaseConnection, job_ids: list[str]) -> dict[str, int]:
+    """EXEC-GENERATION-001 全库唯一批序的 ws 分量：每 job 的
+    hashtext('agent-ws:' || workspace_id)::int——与 agent claim 批的
+    ``_lock_order_sorted``（claim_scan 的 ws_lock_key 列）同源同事。"""
+    rows = conn.execute(
+        "select id, hashtext('agent-ws:' || workspace_id)::int as ws_lock_key"
+        " from jobs where id = any(%s)",
+        (sorted(set(job_ids)),),
+    ).fetchall()
+    return {str(row["id"]): int(row["ws_lock_key"]) for row in rows}
 
 
 def sync_job_status(conn: DatabaseConnection, job_id: str) -> None:

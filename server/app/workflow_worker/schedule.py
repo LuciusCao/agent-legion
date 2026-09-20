@@ -1,42 +1,24 @@
 """Lease claiming for the workflow worker's ready candidates.
 
-Extracted from the worker thread to keep it within its size budget. The
-capacity snapshot checks here are optimization hints that skip pointless
-``try_claim`` write-lock acquisitions; the lease claim transaction remains the
-authoritative capacity enforcement. Ready candidates are collected once per
-poll pass by ``server.app.workflow_worker.ready``.
+Extracted from the worker thread to keep it within its size budget; the
+single-candidate dispatch decision lives in ``claim_submit`` (same budget
+split). The capacity snapshot checks there are optimization hints that skip
+pointless ``try_claim`` write-lock acquisitions; the lease claim transaction
+remains the authoritative capacity enforcement. Ready candidates are
+collected once per poll pass by ``server.app.workflow_worker.ready``.
 """
 
 from __future__ import annotations
 
-import logging
 from collections import deque
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.scheduling.capacity import CapacitySnapshot
-from server.app.services.job_errors import JobServiceError
-from server.app.services.vault import VaultError
-from server.app.storage_paths import job_log_dir
-from server.app.workflow_worker.agent_claim import (
-    cached_run_payload,
-    claim_agent_node,
-    fail_node_config,
-)
-from server.app.workflow_worker.code_claim import try_claim_code_worker_node
-from server.app.workflow_worker.code_dispatch import resolve_code_node_dispatch
-from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_config
-from server.app.workflow_worker.executor_claim import claim_executor_node
-from server.app.workflow_worker.routing import resolve_node_route
-from server.app.workflow_worker.shards import assemble_reduce_inputs, claim_shard_node
-from server.app.workflows.approval_node import APPROVAL_NODE_TYPE
-from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
+from server.app.workflow_worker.claim_submit import try_claim_and_submit
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.ready import ReadyCandidate
     from server.app.workflow_worker.thread import WorkflowWorkerThread
-
-logger = logging.getLogger(__name__)
 
 
 def claim_ready_queues(
@@ -88,136 +70,7 @@ def claim_next_candidate(
             candidate.control_snapshot,
             candidate.allowed,
             snapshot,
+            execution_generation=candidate.execution_generation,
         ):
             return True
     return False
-
-
-def try_claim_and_submit(
-    worker: WorkflowWorkerThread,
-    workspace: dict[str, Any],
-    definition: WorkflowDefinition,
-    job: dict[str, Any],
-    node: WorkflowNode,
-    job_dir: Path,
-    control_snapshot: dict[str, Any] | None,
-    allowed_node_keys: frozenset[str] | None,
-    snapshot: CapacitySnapshot,
-) -> bool:
-    workspace_id = workspace["id"]
-    workflow_key = definition.key
-    node_key = node.key
-    # Approval gates never dispatch: park the node at awaiting_approval and
-    # let the approval API move it on (EXEC-APPROVAL-001). Counts as work
-    # for the pass cadence; a False return (lost race) is simply skipped.
-    if node.node_type == APPROVAL_NODE_TYPE:
-        return worker.leases.park_awaiting_approval(job["id"], node_key)
-    if node.shard is not None:
-        return claim_shard_node(
-            worker, workspace, job, node, job_dir, control_snapshot, allowed_node_keys, snapshot
-        )
-    inputs = tuple(node.inputs)
-    if node.reduce is not None:
-        assemble_reduce_inputs(worker, job["id"], node, job_dir)
-        inputs = (*inputs, f"{node.key}.shards.json")
-    # #618: the jobs log dir is resolved+ensured once per process; the old
-    # per-attempt resolve + mkdir pair was the top write-type fsevent item.
-    log_path = job_log_dir(worker.settings.logs_dir) / f"{job['id']}-{node_key}.log"
-
-    resolved = resolve_node_route(worker, workspace_id, workflow_key, node_key, node.capability)
-    if resolved.kind == "error":
-        return fail_node_config(
-            worker, workspace_id, job, workflow_key, node, log_path, resolved.error_message
-        )
-    if resolved.kind == "agent":
-        # Once the enqueue pool filled up this pass, skip remaining agent
-        # candidates outright (route came from the TTL cache: zero DB).
-        if worker.state.agent_pass.pool_full is True:
-            return False
-        return claim_agent_node(
-            worker,
-            workspace,
-            job,
-            node,
-            job_dir,
-            log_path,
-            inputs,
-            resolved.target_id,
-            workflow_key,
-        )
-
-    executor_id = resolved.target_id
-
-    # Batch 2: a code-pool candidate with an online code-capable Worker and a
-    # Worker-eligible payload is enqueued to the broker. Pure-remote mode
-    # (#389, code_capacity == 0) stops here: the local fallback below is
-    # structurally unavailable, so an unshippable payload parks the node for
-    # the next pass (remote-first candidates whose payload is Worker-
-    # ineligible need an online worker or operator attention, never a local
-    # sandbox that does not exist).
-    if try_claim_code_worker_node(
-        worker, workspace, job, node, job_dir, log_path, inputs, workflow_key
-    ):
-        return True
-
-    if worker.settings.executor_runtime.code_capacity <= 0:
-        return False
-
-    # Cheap gate before config resolution: when the pass snapshot says the
-    # code pool (or this node's limit) is out of capacity, the claim cannot
-    # succeed (claim_executor_node re-checks authoritatively), so skip the
-    # per-pop batch lookup and config resolution for the thousands of doomed
-    # candidates that pile up behind a saturated pool. In pure-remote mode
-    # this snapshot always reports zero global capacity.
-    if not snapshot.has_capacity(workspace_id, node_key):
-        return False
-
-    try:
-        run_payload = cached_run_payload(worker, job)
-        # Frozen snapshot (runtime-mutable keys re-resolved live) → vault
-        # secret_refs → connection config + token; all in-memory only
-        # (VAULT-SECRET-001, CONFIG-MANIFEST-001). The non-secret snapshot is
-        # persisted onto the node_runs row as the dispatch-time audit
-        # (CONFIG-RUNTIME-MUTABLE-001).
-        node_config, config_snapshot_json = resolve_dispatch_node_config(
-            worker, node, workflow_key, workspace_id, workspace, run_payload
-        )
-    except (ValueError, VaultError, JobServiceError) as exc:
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
-
-    # Node code (EXEC-CODE-002): since #115 ordinary jobs dispatch the
-    # currently published workspace code; the frozen pins (job snapshot's
-    # node_code_pins, then the
-    # intake batch's node_code_versions) are honored only for quality-replay
-    # batches, where a hash mismatch fails the node (fail closed,
-    # EXEC-CODE-003).
-    try:
-        node_code = resolve_code_node_dispatch(
-            worker, workspace_id, workflow_key, node, run_payload, job.get("node_code_pins")
-        )
-    except ValueError as exc:
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
-
-    claimed = claim_executor_node(
-        worker,
-        workspace,
-        job,
-        node,
-        job_dir,
-        log_path,
-        inputs,
-        executor_id,
-        resolved.local_node_limit,
-        workflow_key,
-        control_snapshot,
-        allowed_node_keys,
-        snapshot,
-        node_config,
-        node_code,
-        config_snapshot_json,
-    )
-    if claimed:
-        worker.state.pass_claim_counts[executor_id] = (
-            worker.state.pass_claim_counts.get(executor_id, 0) + 1
-        )
-    return claimed

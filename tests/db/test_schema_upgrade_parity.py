@@ -43,18 +43,28 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v84, workspace_api_tokens, #626) must leave
-# behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v84 creates the one API-intake token table plus its
-# workspace index; the undo drops the table (the index goes with it).
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("workspace_api_tokens",)
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+# Effects the newest migration (v85, execution_generation, #759) must
+# leave behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v85 rides the apply fn (schema file at its raw-line
+# ceiling, v76/v84 precedent): jobs / job_nodes / node_runs /
+# executor_leases / agent_execution_requests each gain an
+# execution_generation column. The undo drops the five columns; v84's
+# workspace_api_tokens table stays in the (SCHEMA_VERSION-1) shape.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("jobs", "execution_generation", "integer"),
+    ("job_nodes", "execution_generation", "integer"),
+    ("node_runs", "execution_generation", "integer"),
+    ("executor_leases", "execution_generation", "integer"),
+    ("agent_execution_requests", "execution_generation", "integer"),
+)
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "workspace_api_tokens"
+_NEWEST_MIGRATION_NAME = "execution_generation"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v82. v84 creates only its own table, so nothing needs restoring.
+# faithful v84 (empty: v84's workspace_api_tokens table is untouched by the
+# undo and stays in the (SCHEMA_VERSION-1) shape).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

@@ -4,8 +4,8 @@ from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
 from server.app.db.connection import DatabaseConnection
-from server.app.jobs.atomic_mutations import resume_job as resume_job_mutation
 from server.app.jobs.execution_pause import JobExecutionPauseMixin
+from server.app.jobs.job_state_mutations import resume_job as resume_job_mutation
 
 
 class _JobQueries(Protocol):

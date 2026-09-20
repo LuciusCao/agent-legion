@@ -9,13 +9,17 @@ from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.db.connection import DatabaseConnection
 from server.app.db.rowmap import utc_datetime
 from server.app.db.transaction import write_transaction
+from server.app.jobs.job_state_mutations import JobMutationConflict, delete_job
 from server.app.workflows.sharding import delete_shards
 
-
-class JobMutationConflict(ValueError):
-    def __init__(self, reason_code: str, message: str) -> None:
-        super().__init__(message)
-        self.reason_code = reason_code
+__all__ = [
+    "AtomicJobMutationsMixin",
+    "JobMutationConflict",
+    "apply_run_to",
+    "lease_guarded_mutation",
+    "mark_nodes_for_rerun",
+    "set_run_to_control",
+]
 
 
 class _AtomicMutationQueries(Protocol):
@@ -43,6 +47,10 @@ def lease_guarded_mutation(
 ) -> Iterator[DatabaseConnection]:
     """Serialize a Job mutation with lease claims and validate busy state."""
     with write_transaction(path) as conn:
+        # EXEC-GENERATION-001：全库统一的 per-job 锁域，事务首句获取。
+        # 锁序：池级锁（code-pool/agent-ws/agent-worker）→
+        # job-mutation:<job_id> → 行锁；mutation 侧只取本锁，不取池级锁。
+        conn.execute("select pg_advisory_xact_lock(hashtext('job-mutation:' || %s))", (job_id,))
         active_lease = conn.execute(
             """
             select 1 from executor_leases
@@ -83,36 +91,66 @@ def apply_run_to(
     placeholders = ",".join("%s" for _ in closure)
     if not placeholders:
         raise ValueError("Run-to closure cannot be empty")
+    # EXEC-GENERATION-001：run-to（无起始节点）路径的唯一 bump 点，fold 进
+    # set_run_to_control 的 jobs UPDATE（run-to-with-start 在同事务里改走
+    # mark_nodes_for_rerun 的 jobs UPDATE bump，这里不再 bump，整事务恰好一次）。
+    generation = set_run_to_control(conn, job_id, target_node_key, bump_generation=True)
     conn.execute(
         f"""
         update job_nodes
         set status='pending', stale_reason='', error_message='',
-            started_at=null, finished_at=null, created_at=current_timestamp
+            started_at=null, finished_at=null, created_at=current_timestamp,
+            execution_generation=%s
         where job_id=%s and node_key in ({placeholders}) and status != 'completed'
         """,
-        (job_id, *sorted(closure)),
+        (generation, job_id, *sorted(closure)),
     )
     # 已入队的 queued agent 请求不复查上游，重置节点前必须取消（见 mark_nodes_for_rerun）。
     conn.execute(_cancel_queued_sql(placeholders), (job_id, *sorted(closure)))
     delete_shards(conn, job_id, closure)
-    set_run_to_control(conn, job_id, target_node_key)
 
 
 def set_run_to_control(
     conn: DatabaseConnection,
     job_id: str,
     target_node_key: str,
-) -> None:
-    conn.execute(
+    *,
+    bump_generation: bool = False,
+) -> int | None:
+    """Write the run-to execution control row; optionally bump the epoch.
+
+    ``bump_generation=True``（仅 ``apply_run_to``）把 EXEC-GENERATION-001 的
+    代次 +1 fold 进同一条 jobs UPDATE 并返回新代次，供调用方给重置的
+    job_nodes 行盖戳；默认 False 供 run-to-with-start 使用——同事务的
+    bump 已由 mark_nodes_for_rerun 承担，这里再 bump 就是双重 +1。
+    """
+    if not bump_generation:
+        conn.execute(
+            """
+            update jobs
+            set status='queued', execution_mode='until_node', target_node_key=%s,
+                execution_paused=0, pause_reason='', error_message='',
+                updated_at=current_timestamp
+            where id=%s
+            """,
+            (target_node_key, job_id),
+        )
+        return None
+    row = conn.execute(
         """
         update jobs
         set status='queued', execution_mode='until_node', target_node_key=%s,
             execution_paused=0, pause_reason='', error_message='',
+            execution_generation=execution_generation+1,
             updated_at=current_timestamp
         where id=%s
+        returning execution_generation
         """,
         (target_node_key, job_id),
-    )
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"Job not found: {job_id}")
+    return int(row["execution_generation"])
 
 
 def mark_nodes_for_rerun(
@@ -131,6 +169,8 @@ def mark_nodes_for_rerun(
     rerun removed, so their ``job_artifacts`` rows must go in the SAME
     transaction — otherwise a rerun that never completes leaves the job
     listing (and serving) the previous run's artifacts from object storage.
+    Bumps ``jobs.execution_generation`` once (EXEC-GENERATION-001) and
+    stamps the reset node rows with the new epoch.
     Returns the deleted manifest rows (with ``storage_key``) for the caller's
     post-commit best-effort object deletion.
     """
@@ -165,16 +205,33 @@ def mark_nodes_for_rerun(
         (job_id, *sorted(affected_nodes)),
     )
     delete_shards(conn, job_id, affected_nodes)
+    # EXEC-GENERATION-001：rerun / approval rework / run-to-with-start 共用
+    # 的唯一 bump 点——代次 +1 fold 进本条 jobs UPDATE（原子），returning
+    # 拿新代次，给下面重置的 job_nodes 行（pending 目标 + stale 下游）盖
+    # 同一戳；未被重置的节点行不动。
+    bumped = conn.execute(
+        """
+        update jobs
+        set status='queued', error_message='', packed=0,
+            execution_generation=execution_generation+1, updated_at=current_timestamp
+        where id=%s returning execution_generation
+        """,
+        (job_id,),
+    ).fetchone()
+    if bumped is None:
+        raise ValueError(f"Job not found: {job_id}")
+    generation = int(bumped["execution_generation"])
     for node_key in node_keys:
         cursor = conn.execute(
             """
             update job_nodes
             set status='pending', stale_reason='', error_message='',
                 failure_category='', failure_detail='',
-                started_at=null, finished_at=null, created_at=current_timestamp
+                started_at=null, finished_at=null, created_at=current_timestamp,
+                execution_generation=%s
             where job_id=%s and node_key=%s
             """,
-            (job_id, node_key),
+            (generation, job_id, node_key),
         )
         if cursor.rowcount == 0:
             raise ValueError(f"Unknown job node: {job_id}.{node_key}")
@@ -184,120 +241,18 @@ def mark_nodes_for_rerun(
             update job_nodes
             set status='stale', stale_reason='upstream rerun', error_message='',
                 failure_category='', failure_detail='',
-                created_at=current_timestamp
+                created_at=current_timestamp,
+                execution_generation=%s
             where job_id=%s and node_key=%s
             """,
-            (job_id, descendant),
+            (generation, job_id, descendant),
         )
     # rerun 前合法入队的 queued agent 请求在 claim 侧只复查节点自身状态
     # （stale 会放行），不复查上游；rerun 又已删除下游产出，不取消就会在
     # 输入未重生成前抢跑（generate_possible_errors 缺输入失败事故）。
     # claimed/reporting 的请求持有 active lease，lease_guarded_mutation 已拦。
     conn.execute(_cancel_queued_sql(placeholders), (job_id, *sorted(affected_nodes)))
-    conn.execute(
-        """
-        update jobs
-        set status='queued', error_message='', packed=0, updated_at=current_timestamp
-        where id=%s
-        """,
-        (job_id,),
-    )
     return deleted_rows
-
-
-def prepare_replay_copy(
-    conn: DatabaseConnection,
-    job_id: str,
-    *,
-    completed_nodes: Sequence[str],
-    skipped_nodes: Sequence[str],
-) -> None:
-    """Set up a quality-replay copy job's node states (schema v29).
-
-    Upstream nodes are marked completed without running (their frozen output
-    files were copied into the copy's job directory); downstream nodes are
-    marked not_applicable so the copy never schedules past the replayed node
-    and converges to completed once the target finishes.
-    """
-    for node_key in completed_nodes:
-        cursor = conn.execute(
-            """
-            update job_nodes
-            set status='completed', finished_at=current_timestamp
-            where job_id=%s and node_key=%s and status='pending'
-            """,
-            (job_id, node_key),
-        )
-        if cursor.rowcount == 0:
-            raise ValueError(f"Unknown job node: {job_id}.{node_key}")
-    if skipped_nodes:
-        placeholders = ",".join("%s" for _ in skipped_nodes)
-        conn.execute(
-            f"""
-            update job_nodes
-            set status='not_applicable', stale_reason='quality replay copy',
-                finished_at=current_timestamp
-            where job_id=%s and node_key in ({placeholders})
-              and status in ('pending', 'ready', 'stale')
-            """,
-            (job_id, *skipped_nodes),
-        )
-
-
-def delete_job(conn: DatabaseConnection, job_id: str) -> None:
-    cursor = conn.execute("delete from jobs where id=%s", (job_id,))
-    if cursor.rowcount == 0:
-        raise ValueError("Job not found")
-
-
-_RESUMABLE_JOB_STATUSES = {"paused"}
-
-
-def resume_job(conn: DatabaseConnection, job_id: str) -> None:
-    """Resume a job inside an active transaction.
-
-    Only ``paused`` jobs may be resumed. The status check and the state
-    transition happen in the same transaction.
-    """
-    job = conn.execute(
-        "select status, pause_reason from jobs where id=%s",
-        (job_id,),
-    ).fetchone()
-    if job is None:
-        raise ValueError("Job not found")
-    if job["status"] not in _RESUMABLE_JOB_STATUSES:
-        raise JobMutationConflict(
-            "not_resumable",
-            f"Job is {job['status']}, only paused jobs can be resumed",
-        )
-    if job["pause_reason"] == "target_reached":
-        cursor = conn.execute(
-            """
-            update jobs
-            set status='queued',
-                execution_paused=0,
-                execution_mode='full',
-                target_node_key=null,
-                pause_reason='',
-                updated_at=current_timestamp
-            where id=%s
-            """,
-            (job_id,),
-        )
-    else:
-        cursor = conn.execute(
-            """
-            update jobs
-            set status='queued',
-                execution_paused=0,
-                pause_reason='',
-                updated_at=current_timestamp
-            where id=%s
-            """,
-            (job_id,),
-        )
-    if cursor.rowcount == 0:
-        raise ValueError("Job not found")
 
 
 class AtomicJobMutationsMixin:

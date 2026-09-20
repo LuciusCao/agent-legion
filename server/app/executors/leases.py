@@ -122,9 +122,15 @@ class ExecutorLeaseRepository:
         self._broadcast_job_update(job_id)
         return run_id
 
-    def park_awaiting_approval(self, job_id: str, node_key: str) -> bool:
+    def park_awaiting_approval(
+        self, job_id: str, node_key: str, *, execution_generation: int = 0
+    ) -> bool:
         """Park a ready approval node (EXEC-APPROVAL-001); no lease, no node_run."""
-        if retry_on_database_conflict(lambda: park_awaiting_approval_repo(self, job_id, node_key)):
+        if retry_on_database_conflict(
+            lambda: park_awaiting_approval_repo(
+                self, job_id, node_key, execution_generation=execution_generation
+            )
+        ):
             self._broadcast_job_update(job_id)
             return True
         return False

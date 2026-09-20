@@ -30,17 +30,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.transaction import write_transaction
-from server.app.executors._lease_shards import complete_empty_shard_node
 from server.app.executors.models import ConfigurationFailureRequest
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
 from server.app.storage_paths import job_log_dir
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.shard_dispatch import claim_shard_locally
+from server.app.workflow_worker.shard_fanout import materialize_shards_guarded
 from server.app.workflows.definition import WorkflowNode
 from server.app.workflows.sharding import (
     ShardLimitExceeded,
-    materialize_shards,
     read_shard_outputs,
 )
 
@@ -57,6 +56,8 @@ def claim_shard_node(
     control_snapshot: dict[str, Any] | None,
     allowed_node_keys: frozenset[str] | None,
     snapshot: CapacitySnapshot,
+    *,
+    execution_generation: int = 0,
 ) -> bool:
     """Materialize (once) and claim pending shards of a shard node."""
     shard = node.shard
@@ -78,23 +79,42 @@ def claim_shard_node(
         try:
             inputs = _resolve_shard_inputs(node, job_dir)
         except ValueError as exc:
-            _fail_node(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+            _fail_node(
+                worker,
+                workspace_id,
+                job,
+                workflow_key,
+                node,
+                log_path,
+                str(exc),
+                execution_generation=execution_generation,
+            )
             return True
         try:
             with write_transaction(worker.leases.path) as conn:
-                total = materialize_shards(
-                    conn, job["id"], node_key, inputs, max_shards=shard.max_shards
+                # EXEC-GENERATION-001（#645 P3）：代次闸在事务最前端——
+                # mutation 侧持 job-mutation 锁删 shard 行，先写行再取锁会
+                # AB-BA；代次不符整段跳过（不物化、不完成），节点留 pending。
+                materialize_shards_guarded(
+                    conn, job["id"], node_key, inputs, shard.max_shards, execution_generation
                 )
-                if total == 0:
-                    # Empty fan-out: zero shards aggregate to a completed node
-                    # with empty outputs; the reduce fan-in reads an empty array.
-                    complete_empty_shard_node(conn, job["id"], node_key)
         except ShardLimitExceeded as exc:
-            _fail_node(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+            _fail_node(
+                worker,
+                workspace_id,
+                job,
+                workflow_key,
+                node,
+                log_path,
+                str(exc),
+                execution_generation=execution_generation,
+            )
             return True
         rows = _read_shard_rows(worker, job["id"], node_key)
         if not rows:
-            return True  # empty fan-out; the node was resolved above
+            # 空 fan-out 已由守卫内完成，或代次闸跳过（节点留 pending，下轮
+            # 按新代次重新物化）。
+            return True
 
     running = sum(1 for row in rows if row["status"] == "running")
     claimed_any = False
@@ -131,6 +151,7 @@ def claim_shard_node(
             tuple(node.inputs),
             workflow_key,
             shard_runtime={"shard_index": shard_index, "shard_input": shard_input},
+            execution_generation=execution_generation,
         ):
             running += 1
             claimed_any = True
@@ -154,6 +175,7 @@ def claim_shard_node(
             control_snapshot=control_snapshot,
             allowed_node_keys=allowed_node_keys,
             snapshot=snapshot,
+            execution_generation=execution_generation,
         ):
             running += 1
             claimed_any = True
@@ -212,6 +234,8 @@ def _fail_node(
     node: WorkflowNode,
     log_path: Path,
     message: str,
+    *,
+    execution_generation: int = 0,
 ) -> None:
     worker.leases.fail_without_lease(
         ConfigurationFailureRequest(
@@ -221,6 +245,7 @@ def _fail_node(
             node_key=node.key,
             capability=node.capability,
             log_path=str(log_path),
+            execution_generation=execution_generation,
         ),
         message,
     )

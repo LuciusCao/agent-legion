@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ from typing import Any
 from server.app.db.connection import DatabaseConnection
 from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
+    lock_job_mutation_and_read_generation,
     sync_job_status,
 )
 from server.app.executors._lease_shards import finish_shard_execution
@@ -22,6 +24,8 @@ from server.app.workflows.sharding import (
     on_shard_finished,
     shard_index_for_execution,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def heartbeat_lease(conn: DatabaseConnection, lease_id: str, ttl_seconds: int) -> bool:
@@ -55,6 +59,22 @@ def finish_lease(
     lease = conn.execute("select * from executor_leases where id=%s", (lease_id,)).fetchone()
     if lease is None or lease["status"] != "active":
         return False
+
+    # EXEC-GENERATION-001：与 mutation 侧（lease_guarded_mutation）互斥后做
+    # 代次 CAS。lease 落戳代次 != jobs 现值 = reset 后的迟到 finish：lease
+    # 释放与 node_runs 历史行照常收尾，但跳过 job_nodes 翻转、
+    # sync_job_status 与 until_node 暂停副作用，绝不盖掉新代次的重置行。
+    generation_stale = lock_job_mutation_and_read_generation(conn, str(lease["job_id"])) != int(
+        lease["execution_generation"]
+    )
+    if generation_stale:
+        logger.info(
+            "finish skipped node flip (stale generation): lease=%s job=%s node=%s gen=%s",
+            lease_id,
+            lease["job_id"],
+            lease["node_key"],
+            lease["execution_generation"],
+        )
 
     conn.execute("update executor_leases set status='released' where id=%s", (lease_id,))
 
@@ -98,7 +118,10 @@ def finish_lease(
             lease["node_run_id"],
         ),
     )
-    if finish_shard_execution(conn, lease, result, now_str):
+    if finish_shard_execution(conn, lease, result, now_str, generation_stale=generation_stale):
+        return True
+
+    if generation_stale:
         return True
 
     if try_return_node_to_pending(conn, lease, result, failure_category, failure_detail):
@@ -138,8 +161,8 @@ def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
     rows = conn.execute(
         """
         select l.id, l.job_id, l.node_key, l.node_run_id, l.execution_id,
-               j.workspace_id,
-               hashtext('ws:' || j.workspace_id)::int as ws_lock_key
+               l.execution_generation, j.workspace_id,
+               hashtext('agent-ws:' || j.workspace_id)::int as ws_lock_key
         from executor_leases l
         join jobs j on j.id = l.job_id
         where l.status='active' and l.expires_at<=%s
@@ -148,8 +171,12 @@ def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
         (now_str,),
     ).fetchall()
     expired: list[str] = []
-    # Stable sweep order; v82's non-blocking folds do not depend on it.
-    for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
+    # EXEC-GENERATION-001：每行会取 job-mutation advisory 锁（xact 级、不随
+    # 语句/SAVEPOINT 释放），全库批路径共用唯一序 (ws 锁键, job_id)——与
+    # agent claim 批的 agent 块（claim_batch_tx._lock_order_sorted，同一
+    # hashtext('agent-ws:' || workspace_id) 键）及 finish_many/recover/
+    # sweep 相同，防批间 AB-BA。
+    for row in sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["job_id"]))):
         if _expire_lease_row(conn, row, now_str):
             expired.append(row["id"])
     return expired
@@ -162,7 +189,15 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
     committed row version when a concurrent finish/heartbeat touched the row
     after this transaction's SELECT, so a lease that was released or renewed
     in between is left untouched instead of being clobbered to 'expired'.
+
+    EXEC-GENERATION-001: the lease/run side (lease → expired, node_run →
+    failed) always settles; the job_nodes/jobs flip runs only when the lease's
+    epoch still matches jobs.execution_generation — a late expiry from an old
+    epoch must not fail nodes a reset just re-queued.
     """
+    generation_stale = lock_job_mutation_and_read_generation(conn, str(row["job_id"])) != int(
+        row["execution_generation"]
+    )
     cursor = conn.execute(
         """
         update executor_leases set status='expired'
@@ -180,13 +215,20 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
         """,
         (now_str, row["node_run_id"]),
     )
+    if generation_stale:
+        logger.info(
+            "lease expiry skipped node flip (stale generation): lease=%s job=%s node=%s gen=%s",
+            row["id"],
+            row["job_id"],
+            row["node_key"],
+            row["execution_generation"],
+        )
     shard_index = shard_index_for_execution(
-        conn,
-        str(row["job_id"]),
-        str(row["node_key"]),
-        str(row["execution_id"]),
+        conn, str(row["job_id"]), str(row["node_key"]), str(row["execution_id"])
     )
     if shard_index is not None:
+        # node_shards 行是执行记录（与 node_runs 同侧），照常收尾；只有
+        # job_nodes 聚合翻转与 sync 走代次闸门。
         aggregate = on_shard_finished(
             conn,
             str(row["job_id"]),
@@ -195,12 +237,8 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
             "failed",
             error_message="lease expired",
         )
-        if aggregate in ("completed", "failed"):
-            error_message = failed_shard_error(
-                conn,
-                str(row["job_id"]),
-                str(row["node_key"]),
-            )
+        if aggregate in ("completed", "failed") and not generation_stale:
+            error_message = failed_shard_error(conn, str(row["job_id"]), str(row["node_key"]))
             # Status guard mirrors finish_shard_execution: a late expiry
             # racing a reset/rerun must not overwrite a terminal node.
             conn.execute(
@@ -210,15 +248,11 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
                 where job_id=%s and node_key=%s
                     and status in ('pending', 'ready', 'stale', 'running')
                 """,
-                (
-                    aggregate,
-                    error_message,
-                    now_str,
-                    row["job_id"],
-                    row["node_key"],
-                ),
+                (aggregate, error_message, now_str, row["job_id"], row["node_key"]),
             )
             sync_job_status(conn, str(row["job_id"]))
+        return True
+    if generation_stale:
         return True
     conn.execute(
         """
