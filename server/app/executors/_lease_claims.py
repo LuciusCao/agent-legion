@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from server.app.db.connection import DatabaseConnection
+from server.app.executors._lease_claim_limits import check_claim_capacity
 from server.app.executors._lease_control import (
     TERMINAL_JOB_STATUSES,
     _execution_control_rejects_claim,
@@ -68,62 +69,27 @@ def claim_lease(
         # 认领事务内必须以当前 jobs.status 为准。
         return None
 
-    if request.local_node_limit is not None:
-        # #211 Phase 3 (read-layer binding): predicates key on
-        # (workspace_id, node_key) — workflow_key equals the workspace id on
-        # every row (v62 binding, aligned by v68).
-        limit_row = conn.execute(
-            """
-            select concurrency_limit
-            from workspace_node_limits
-            where workspace_id=%s and node_key=%s
-            """,
-            (request.workspace_id, request.node_key),
-        ).fetchone()
-        if limit_row is None:
-            raise ValueError(
-                f"No local node limit for {request.node_key} in {request.workspace_id}/{request.workflow_key}"
-            )
-        if limit_row["concurrency_limit"] != request.local_node_limit:
-            raise ValueError(
-                f"Local node limit mismatch for {request.node_key}: "
-                f"persisted {limit_row['concurrency_limit']} vs requested {request.local_node_limit}"
-            )
-
     now_str = database_timestamp(now)
-    global_count_row = conn.execute(
-        """
-        select count(*) as cnt
-        from executor_leases
-        where executor_id=%s and status='active' and expires_at>%s
-        """,
-        (request.executor_id, now_str),
-    ).fetchone()
-    global_count = int(global_count_row["cnt"]) if global_count_row is not None else 0
-
-    if global_count >= request.global_capacity:
+    if not check_claim_capacity(conn, request, now_str):
         return None
-
-    if request.local_node_limit is not None:
-        node_count_row = conn.execute(
-            """
-            select count(*) as cnt
-            from executor_leases
-            where workspace_id=%s and node_key=%s and status='active' and expires_at>%s
-            """,
-            (request.workspace_id, request.node_key, now_str),
-        ).fetchone()
-        node_count = int(node_count_row["cnt"]) if node_count_row is not None else 0
-        if node_count >= request.local_node_limit:
-            return None
 
     if request.shard_index is not None:
         started = try_start_shard(
-            conn, request.job_id, request.node_key, request.shard_index, execution_id, now_str
+            conn,
+            request.job_id,
+            request.node_key,
+            request.shard_index,
+            execution_id,
+            now_str,
+            execution_generation=current_generation,
         )
         if not started:
             return None
     else:
+        # EXEC-GENERATION-001：翻 running 同时盖当前代次戳（CAS 已验证
+        # == jobs 现值），与 park_awaiting_approval 对称——recover 的代次
+        # 闸门（_recover_orphaned_job）只认现值戳，不盖戳的旧戳 running 行
+        # 成孤儿后会被拒绝复位、永久卡在 running。
         cursor = conn.execute(
             """
             update job_nodes
@@ -131,10 +97,11 @@ def claim_lease(
                 stale_reason='',
                 error_message='',
                 started_at=%s,
-                finished_at=null
+                finished_at=null,
+                execution_generation=%s
             where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
             """,
-            (now_str, request.job_id, request.node_key),
+            (now_str, current_generation, request.job_id, request.node_key),
         )
         if cursor.rowcount == 0:
             return None
