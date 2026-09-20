@@ -99,7 +99,9 @@ def finish(
             "select job_id from executor_leases where id=%s", (lease_id,)
         ).fetchone()
         job_id = str(lease["job_id"]) if lease else None
-        result_flag = finish_lease(conn, lease_id, result, repo.data_dir)
+        verdict = finish_lease(conn, lease_id, result, repo.data_dir)
+        result_flag = verdict.applied
+        generation_stale = verdict.generation_stale
     # #521 result-stage split: the terminal-state write transaction is its
     # own segment; the events post-processing below (two full events.jsonl
     # scans today) is the next one — marked only when that work actually
@@ -113,8 +115,12 @@ def finish(
     # capture helper opens its own short write tx only for the persist.
     # The helper still expects a caller-provided connection (its own
     # migration is Task 3), so hand it a fresh one now that the commit
-    # has landed.
-    events_ran = result_flag and result.status in ("completed", "failed")
+    # has landed. A stale-generation finish (#759 review P2) settles the
+    # lease/history rows but the shared run_dir path may already belong
+    # to the NEW generation's run — token capture would misattribute and
+    # PI compression could truncate the new run's events.jsonl, so the
+    # events family is skipped on a stale verdict.
+    events_ran = result_flag and not generation_stale and result.status in ("completed", "failed")
     if events_ran:
         finish_events_post_processing(repo, lease_id, result)
         _mark_result_stage(stage_timer, "events")

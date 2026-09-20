@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.agent_broker.remote_artifacts import apply_worker_artifact_refs
+from server.app.agent_broker.agent_bundle import extract_agent_result
 from server.app.agent_broker.result_timing import mark as mark_result_stage
-from server.app.agent_broker.result_unpack import (
-    code_result_log_target,
-    safe_relative_dir,
-    unpack_agent_result,
-)
+from server.app.agent_broker.result_unpack import code_result_log_target, plan_agent_result_moves
 from server.app.agent_broker.result_unpack_pool import unpack_in_pool
+from server.app.agent_control import completion_staged
 from server.app.db.dialect import ConnectSource
-from server.app.executors._shard_contract import read_shard_output
-from server.app.executors.artifact_mirror import upload_produced_artifacts
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, ExecutionStatus
 from server.app.services.artifact_store import ArtifactStore
@@ -23,7 +19,6 @@ from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
-from server.app.workflows.worker_output_validation import validate_worker_outputs
 
 if TYPE_CHECKING:
     from server.app.agent_broker.result_timing import ResultStageTimer
@@ -124,20 +119,40 @@ class AgentCompletionHandler:
         # never promoted into the job dir — only the partial log is.
         log_target = code_result_log_target(manifest, self.leases.data_dir or self.jobs_dir.parent)
         cancelled = outcome.status == "cancelled"
+        # #759 review P1-1: the archive is extracted into a staging dir and
+        # NOTHING lands in job_dir here — the file promotion rides the
+        # lease-finish generation gate (ExecutionResult.staged_file_moves),
+        # so a stale (post-reset) completion can never overwrite the new
+        # generation's local inputs. view_dir is the read view every
+        # pre-finish consumer (validation, shard read, mirror upload) uses.
+        staging_cm: tempfile.TemporaryDirectory[str] | None = None
+        staged_moves: list[tuple[Path, Path]] = []
+        view_dir = job_dir
         if archive_name and (not cancelled or log_target is not None):
             try:
+                # staging 目录的创建也在 try 内：job_dir 缺失（从未有过本地产物
+                # 的 job）时 mkdtemp 的 FileNotFoundError 同样走下面的失败
+                # 转换，而不是炸穿结果提交（staging 化前该异常在解包函数内
+                # 被同一 except 臂兜住）。
+                staging_cm = tempfile.TemporaryDirectory(prefix=".result-staging-", dir=job_dir)
                 # #552：解包是纯 CPU 段（tar/gzip + member 校验），下沉进程池
                 # ——HTTP 平面线程只停在 future.result() 的 GIL 释放等待上，
                 # 完成波不再挤单核；坏包炸子进程不炸主进程。
                 unpack_in_pool(
-                    unpack_agent_result,
+                    extract_agent_result,
                     self.bundle_dir / archive_name,
+                    Path(staging_cm.name),
+                )
+                staged_moves, _staged_produced = plan_agent_result_moves(
+                    Path(staging_cm.name),
                     job_dir,
                     () if cancelled else expected,
                     "" if cancelled else outcome.run_dir,
                     log_target,
                 )
             except Exception as exc:
+                if staging_cm is not None:
+                    staging_cm.cleanup()
                 # #204 broad-except audit: per-result containment that
                 # CONVERTS, not masks — the Worker's untrusted archive
                 # surface (gzip/tar corruption, unsafe member paths raising
@@ -159,96 +174,25 @@ class AgentCompletionHandler:
                     ),
                     stage_timer=stage_timer,
                 )
+            view_dir = Path(staging_cm.name)
         mark_result_stage(stage_timer, "unpack")
-        # #160 D12: dict-form refs mean the Worker uploaded straight to S3
-        # (per-execution staging keys); verify ALL refs, then promote +
-        # download + register (no half-applied state). Any failure flips the
-        # whole result to failed.
-        remote_names, remote_failure = apply_worker_artifact_refs(
-            self.object_store,
-            runner=worker_id,
-            workspace_id=str(job["workspace_id"]),
-            job_id=job_id,
-            node_key=node_key,
-            job_dir=job_dir,
-            expected=expected,
-            output_artifacts=outcome.output_artifacts,
-            download=not cancelled,
-            execution_id=str(manifest.get("execution_id") or ""),
-            max_size_bytes=self.max_archive_bytes,
-            spot_check_percent=self.spot_check_percent,
-        )
-        if remote_failure is not None:
-            mark_result_stage(stage_timer, "artifacts_verify")
-            return self.leases.finish(lease_id, remote_failure, stage_timer=stage_timer)
-        for name, ref in outcome.output_artifacts.items():
-            if name not in remote_names:
-                self.artifact_store.add_ref(job_id, node_key, name, str(ref).split(":", 1)[-1])
-        mark_result_stage(stage_timer, "artifacts_verify")
-        produced = tuple(name for name in expected if (job_dir / name).is_file())
-        status = outcome.status
-        exit_code = outcome.exit_code
-        error = outcome.error_message
-        if status == "completed" and expected and not outcome.output_artifacts:
-            status, exit_code, error = "failed", 1, "Agent Worker did not report output artifacts"
-        missing = [name for name in expected if name not in produced]
-        if status == "completed" and missing:
-            status, exit_code, error = "failed", 1, f"Missing outputs: {', '.join(missing)}"
-        # Worker results are untrusted: validate Host-side like the Pi runner.
-        if status == "completed" and self.skill_manager is not None:
-            validation_error = validate_worker_outputs(self.skill_manager, manifest, job_dir)
-            if validation_error:
-                status, exit_code, error = "failed", 1, validation_error
-        mark_result_stage(stage_timer, "validate")
-        # D12: mirror produced artifacts into object storage (best-effort —
-        # a storage outage never flips the node; the reconciler retries).
-        if status == "completed" and produced:
-            upload_produced_artifacts(
-                self.object_store,
-                workspace_id=str(job["workspace_id"]),
+        try:
+            return completion_staged.finish_staged(
+                self,
+                lease_id=lease_id,
+                worker_id=worker_id,
                 job_id=job_id,
                 node_key=node_key,
+                job=job,
+                manifest=manifest,
+                outcome=outcome,
                 job_dir=job_dir,
-                produced=produced,
-                skip=remote_names,
+                view_dir=view_dir,
+                expected=expected,
+                staged_moves=staged_moves,
+                cancelled=cancelled,
+                stage_timer=stage_timer,
             )
-        mark_result_stage(stage_timer, "artifacts_upload")
-        return self.leases.finish(
-            lease_id,
-            ExecutionResult(
-                status=status,
-                exit_code=exit_code,
-                error_message=error,
-                command=outcome.command,
-                # The promoted events.jsonl feeds log display and token usage
-                # only; success/failure decisions above never read it.
-                run_dir=self._stored_run_dir(job_dir, outcome.run_dir),
-                session_dir="",
-                skill_version=str(manifest.get("skill_version", "")),
-                # #410 (v75): the binding identity for the studio latest-run
-                # echo — skill_version's ref prefix is not the skill key.
-                skill=str(manifest.get("skill", "")),
-                produced_artifacts=produced,
-                runner=worker_id,
-                # Shard runs (#389): the per-shard payload rides the archive
-                # as a regular expected output (shard_output-<index>.json);
-                # read it from the unpacked job_dir — the same file the local
-                # executor would have produced, no size-capped metadata hop.
-                output_json=read_shard_output(job_dir, manifest) if status == "completed" else "",
-            ),
-            stage_timer=stage_timer,
-        )
-
-    def _stored_run_dir(self, job_dir: Path, run_dir: str) -> str:
-        """Data-dir-relative path of the promoted Worker run dir, or "".
-
-        Empty when the Worker did not declare one or nothing was promoted, so
-        older Workers and cancelled runs behave exactly as before."""
-        run_dir_relative = safe_relative_dir(run_dir)
-        if run_dir_relative is None or not (job_dir / run_dir_relative).is_dir():
-            return ""
-        base = self.leases.data_dir or self.jobs_dir.parent
-        try:
-            return (job_dir / run_dir_relative).resolve().relative_to(base.resolve()).as_posix()
-        except ValueError:
-            return ""
+        finally:
+            if staging_cm is not None:
+                staging_cm.cleanup()

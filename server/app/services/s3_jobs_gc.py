@@ -9,8 +9,8 @@ job 删除路径（``job_deletion`` → ``job_artifacts.delete_objects``）只�
 - ``jobs/{ws}/{job_id}/{name}``：key 不在 ``job_artifacts.storage_key``
   集合中且 LastModified 超过宽限窗 → 孤儿；
 - ``jobs-staging/{ws}/{job_id}/{exec_id}/{name}``：超宽限窗即回收候选
-  （``discard_staging`` 是 best-effort，文档明言 lifecycle 是 backstop；
-  docs/materials-storage-deployment.md 规划的 1 天短保留）。
+  （promote 的 staging 清理是 best-effort，文档明言 lifecycle 是
+  backstop；docs/materials-storage-deployment.md 规划的 1 天短保留）。
 
 设计约束：
 - 判定核心（``scan_orphans``）只依赖注入的列举器与 key 存在性函数，
