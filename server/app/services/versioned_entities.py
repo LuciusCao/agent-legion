@@ -28,6 +28,7 @@ from psycopg import IntegrityError
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries.upgrade_impl_identity import acquire_implementation_publication_lock
 from server.app.services.job_errors import ConflictError, NotFoundError
 
 EntityType = Literal["node_code", "agent", "executor", "preview_panel"]
@@ -252,6 +253,8 @@ class VersionedEntityStore:
         entries) to migrate incrementally.
         """
         with write_transaction(self._dsn) as conn:
+            if self._entity_type in {"agent", "node_code"}:
+                acquire_implementation_publication_lock(conn, workspace_id)
             draft = _latest_with_status(conn, self._entity_type, workspace_id, entity_key, "draft")
             if draft is None:
                 raise NotFoundError(f"no draft for {self._entity_type} {entity_key}")
@@ -310,6 +313,8 @@ class VersionedEntityStore:
         change note); the definition hash always stays the source version's.
         """
         with write_transaction(self._dsn) as conn:
+            if self._entity_type in {"agent", "node_code"}:
+                acquire_implementation_publication_lock(conn, workspace_id)
             source = conn.execute(
                 f"select {_COLUMNS} from versioned_entities where {_ENTITY_FILTER} and version=%s",
                 (self._entity_type, workspace_id, entity_key, version),
@@ -350,6 +355,8 @@ class VersionedEntityStore:
     def archive_all(self, entity_key: str, workspace_id: str | None) -> int:
         """Archive every version of the entity; returns the archived count."""
         with write_transaction(self._dsn) as conn:
+            if self._entity_type in {"agent", "node_code"}:
+                acquire_implementation_publication_lock(conn, workspace_id)
             cursor = conn.execute(
                 "update versioned_entities set status='archived'"
                 f" where {_ENTITY_FILTER} and status != 'archived'",

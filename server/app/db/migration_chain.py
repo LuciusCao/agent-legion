@@ -222,6 +222,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # DDL rides the apply fn (postgres_schema.sql is at its raw-line
     # ceiling; v76/v84 precedent); default 0 keeps legacy rows consistent.
     SchemaMigration(85, "execution_generation", migrate_execution_generation),
+    # v86 (#645): node_runs.agent_definition_hash — claim-time implementation
+    # identity mirror (DDL rides the schema-file replay, no apply fn;
+    # retention-deleted request rows cannot be backfilled: unprovable =
+    # conservative rerun).
+    SchemaMigration(86, "node_runs_impl_identity"),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

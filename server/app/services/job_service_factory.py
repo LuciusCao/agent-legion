@@ -84,7 +84,13 @@ class JobServices:
             JobArtifactMutationService(settings.jobs_dir),
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
+<<<<<<< HEAD
             object_store=object_store,
+=======
+            artifact_mutation=JobArtifactMutationService(settings.jobs_dir),
+            object_store=object_store,
+            custom_nodes_enabled=settings.executor_runtime.workflows.custom_nodes_enabled,
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
         )
         self.execution = JobExecutionService(
             job_db,

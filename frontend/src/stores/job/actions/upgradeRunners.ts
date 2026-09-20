@@ -1,21 +1,24 @@
 import { batchUpgradeJobsWorkflow } from '../../../api/jobBatchUpgradeWorkflowApi'
 import { upgradeJobWorkflow } from '../../../api/jobWorkflowUpgradeApi'
-import type { JobMutationResult } from '../../../types/jobTypes'
+import type { JobMutationResult, UpgradeMode } from '../../../types/jobTypes'
 import type { JobState } from '../state'
 
 /** Per-job upgrade loop for explicit selections: failures stay per-job results. */
-async function upgradeEachJob(jobIds: string[]): Promise<JobMutationResult[]> {
+async function upgradeEachJob(
+  jobIds: string[],
+  mode: UpgradeMode
+): Promise<JobMutationResult[]> {
   const results: JobMutationResult[] = []
   for (const jobId of jobIds) {
     try {
-      results.push(await upgradeJobWorkflow(jobId))
+      results.push(await upgradeJobWorkflow(jobId, mode))
     } catch (err) {
       results.push({
         job_id: jobId,
         operation: 'upgrade_workflow',
         status: 'failed',
         message: err instanceof Error ? err.message : String(err),
-      })
+      } as JobMutationResult)
     }
   }
   return results
@@ -35,14 +38,19 @@ export function isAllMatchingUpgrade(
 export async function fetchUpgradeResults(
   state: JobState,
   workspaceId: string,
-  jobIds?: string[]
+  jobIds?: string[],
+  mode: UpgradeMode = 'clean'
 ): Promise<JobMutationResult[]> {
   if (isAllMatchingUpgrade(state, jobIds) && state.selectionFilter) {
-    const data = await batchUpgradeJobsWorkflow(workspaceId, {
-      filter: state.selectionFilter,
-      excludeIds: [...state.excludedIds],
-    })
+    const data = await batchUpgradeJobsWorkflow(
+      workspaceId,
+      {
+        filter: state.selectionFilter,
+        excludeIds: [...state.excludedIds],
+      },
+      mode
+    )
     return data.results ?? []
   }
-  return upgradeEachJob(jobIds ?? [])
+  return upgradeEachJob(jobIds ?? [], mode)
 }

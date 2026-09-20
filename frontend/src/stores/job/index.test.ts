@@ -180,8 +180,8 @@ describe('useJobStore batchUpgradeWorkflow', () => {
       .batchUpgradeWorkflow('ws1', ['j1', 'j2'])
 
     expect(upgradeJobWorkflow).toHaveBeenCalledTimes(2)
-    expect(upgradeJobWorkflow).toHaveBeenNthCalledWith(1, 'j1')
-    expect(upgradeJobWorkflow).toHaveBeenNthCalledWith(2, 'j2')
+    expect(upgradeJobWorkflow).toHaveBeenNthCalledWith(1, 'j1', 'clean')
+    expect(upgradeJobWorkflow).toHaveBeenNthCalledWith(2, 'j2', 'clean')
     expect(result.results).toHaveLength(2)
     expect(useJobStore.getState().selectedIds).toEqual(new Set())
     expect(useJobStore.getState().selectMode).toBe(false)

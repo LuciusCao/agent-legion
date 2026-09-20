@@ -17,6 +17,12 @@ loader 同样不要求该名的生产者与边相邻。因此重跑/重置语义
 隐式边可能成环（loader 的 acyclic 校验只管显式边）：``walk_downstream``
 以 seen 防环，环内节点互相视为下游——保守方向（一起重跑），永不漏。
 纯函数：不触库、不触文件系统。
+
+注意：本模块的隐式边只表达「文件级消费关系」，不构成执行顺序证据——
+consumer 是否真的等 producer 重跑取决于该名字本次是否三面删除（缺席
+即闸）。upgrade 输入保护计划的「保证先行」判定在
+``server/app/services/job_workflow_upgrade_protection.py``，那里只把
+「唯一生产者且本次会缺席」的名字的隐式边当排序证据（#759 复审 P1-A）。
 """
 
 from __future__ import annotations
@@ -33,9 +39,14 @@ def artifact_consumption_index(definition: WorkflowDefinition) -> dict[str, froz
       自身即消费者——索引键集因此恒等于「ready gate 的本地探针全集」）；
     - ``edge.condition.artifact``：边的 target 是消费者（分支评估替它读
       文件）。
+<<<<<<< HEAD
     索引键集即「这个名字会被本地探针/分支评估读取」的全集；hydration、
     分支裁决屏障与升级死名判定（``revision_diff.dropped_artifact_names``）
     都以本索引为准，不允许各自重遍历定义。
+=======
+    无生产者的声明名（外部输入）也出现在索引里——hydration 的恢复面与
+    upgrade 保护计划的消费面都以本索引为准，不允许各自重遍历定义。
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
     """
     index: dict[str, set[str]] = {}
     for key, node in definition.nodes.items():
@@ -47,6 +58,7 @@ def artifact_consumption_index(definition: WorkflowDefinition) -> dict[str, froz
     return {name: frozenset(consumers) for name, consumers in index.items()}
 
 
+<<<<<<< HEAD
 def consumer_edges(
     definition: WorkflowDefinition, *, skip_names: Iterable[str] = ()
 ) -> dict[str, list[str]]:
@@ -60,10 +72,16 @@ def consumer_edges(
     """
     skipped = set(skip_names)
     producers = artifact_producers(definition)
+=======
+def consumer_edges(definition: WorkflowDefinition) -> dict[str, list[str]]:
+    """隐式消费边索引：producer key → 排序后的 consumer key 列表。"""
+    producers: dict[str, set[str]] = {}
+    for key, node in definition.nodes.items():
+        for name in node.outputs:
+            producers.setdefault(name, set()).add(key)
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
     edges: dict[str, set[str]] = {key: set() for key in definition.nodes}
     for name, consumers in artifact_consumption_index(definition).items():
-        if name in skipped:
-            continue
         for consumer in consumers:
             for producer in producers.get(name, ()):
                 if producer != consumer:
@@ -71,6 +89,7 @@ def consumer_edges(
     return {key: sorted(targets) for key, targets in edges.items()}
 
 
+<<<<<<< HEAD
 def artifact_producers(definition: WorkflowDefinition) -> dict[str, set[str]]:
     """产物名 → 声明其为 output 的节点集合（调度完成屏障与隐式边共用）。
 
@@ -94,10 +113,14 @@ def dependency_children(
     边，语义见 ``consumer_edges``——只在判定「名 X 的 consumer 是否保证
     在 producer 之后执行」时使用。
     """
+=======
+def dependency_children(definition: WorkflowDefinition) -> dict[str, list[str]]:
+    """合并邻接表：显式边 ∪ 隐式消费边（key → 排序后的直接下游）。"""
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
     children: dict[str, set[str]] = {key: set() for key in definition.nodes}
     for edge in definition.edges:
         children[edge.source].add(edge.target)
-    for source, targets in consumer_edges(definition, skip_names=skip_consumption_names).items():
+    for source, targets in consumer_edges(definition).items():
         children[source].update(targets)
     return {key: sorted(targets) for key, targets in children.items()}
 

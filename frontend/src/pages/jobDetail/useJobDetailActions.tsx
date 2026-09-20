@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useUiStore } from '../../stores/uiStore'
 import { JobDetailActions } from '../../components/job/JobDetailActions'
 import type { NodeCatalog } from '../../lib/nodeCatalog'
-import type { JobDetail } from '../../types/jobTypes'
+import type { JobDetail, UpgradeMode } from '../../types/jobTypes'
 
 type Options = {
   detail: JobDetail | null
@@ -11,7 +11,7 @@ type Options = {
   onRerun: (nodeKey: string | null, fromFailedNode?: boolean) => void
   onRunTo: (targetKey: string, startKey?: string) => void
   onContinue: () => void
-  onUpgradeWorkflow: () => void
+  onUpgradeWorkflow: (mode: UpgradeMode) => void | Promise<void>
   onPackage: () => void
   onClearPacked: () => void
   onDelete: () => void

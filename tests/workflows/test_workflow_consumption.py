@@ -116,6 +116,7 @@ def test_condition_artifact_self_producer_excluded() -> None:
     children = dependency_children(definition)
     assert children["b"] == []
     assert children["a"] == ["b"]
+<<<<<<< HEAD
 
 
 def test_skip_names_still_filters_consumption_edges() -> None:
@@ -158,3 +159,5 @@ def test_dropped_artifact_names_keep_condition_consumed_seeds() -> None:
     )
 
     assert dropped_artifact_names(new, old) == {"stale.json"}  # verdict.json 保留
+=======
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)

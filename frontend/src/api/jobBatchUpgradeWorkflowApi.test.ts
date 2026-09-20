@@ -33,7 +33,7 @@ describe('batch upgrade jobs workflow api', () => {
       '/api/workspaces/ws1/jobs/batch-upgrade-workflow',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ job_ids: ['j1', 'j2'] }),
+        body: JSON.stringify({ job_ids: ['j1', 'j2'], mode: 'clean' }),
       })
     )
   })
@@ -54,7 +54,23 @@ describe('batch upgrade jobs workflow api', () => {
         body: JSON.stringify({
           filter: { status: 'pending', workflow_version_none: false },
           exclude_ids: ['j9'],
+          mode: 'clean',
         }),
+      })
+    )
+  })
+
+  it('passes the inherit mode through to the batch endpoint', async () => {
+    const fetchMock = mockFetchJson({ results: [] })
+    global.fetch = fetchMock
+
+    await batchUpgradeJobsWorkflow('ws1', { jobIds: ['j1'] }, 'inherit')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/ws1/jobs/batch-upgrade-workflow',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ job_ids: ['j1'], mode: 'inherit' }),
       })
     )
   })

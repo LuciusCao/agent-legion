@@ -54,7 +54,7 @@ from server.app.executors.models import (
     LeaseClaimRequest,
 )
 from server.app.jobs.atomic_mutations import lease_guarded_mutation
-from server.app.jobs.workflow_upgrade_mutation import upgrade_job_workflow
+from server.app.jobs.workflow_upgrade_mutation_inherit import upgrade_job_workflow_inherit
 from tests.helpers import replace_agent_catalog
 from tests.helpers.agent_worker_api import insert_job_rows
 from tests.postgres_support import BASE_DATABASE_URL, TEST_SCHEMA
@@ -242,7 +242,7 @@ def _await_job_mutation_waiter(job_id: str, timeout: float = 10.0) -> None:
 
 def _upgrade_mutation(conn, job_id: str, node_keys: list[str]) -> None:
     """真实 upgrade mutation（clean 模式）：bump 代次并删除重建节点为 pending。"""
-    upgrade_job_workflow(
+    upgrade_job_workflow_inherit(
         conn,
         job_id,
         workflow_revision_id="rev-race",

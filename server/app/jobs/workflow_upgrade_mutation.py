@@ -4,7 +4,15 @@ from typing import Any
 
 from server.app.agent_broker.manifest_trim import cancel_queued_requests_for_job
 from server.app.db.connection import DatabaseConnection
+<<<<<<< HEAD
 from server.app.jobs.artifact_row_cleanup import delete_job_artifact_rows_tx
+=======
+from server.app.jobs.workflow_upgrade_mutation_inherit import (
+    upgrade_job_workflow_inherit,
+)
+
+__all__ = ["upgrade_job_workflow", "upgrade_job_workflow_inherit"]
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
 
 
 def upgrade_job_workflow(
@@ -17,6 +25,7 @@ def upgrade_job_workflow(
     workflow_definition_snapshot_json: str,
     node_keys: list[str],
     frozen_config_json: str | None = None,
+<<<<<<< HEAD
     staged_artifact_names: frozenset[str] | set[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """重置类突变：bump 代次、了结 queued 请求、删产物清单行并重建节点。
@@ -85,3 +94,18 @@ def upgrade_job_workflow(
             (job_id, node_key, generation),
         )
     return deleted_rows
+=======
+) -> None:
+    """Clean-mode legacy signature（issue #645 前的调用面）：全量 pending 重置。"""
+    upgrade_job_workflow_inherit(
+        conn,
+        job_id,
+        workflow_revision_id=workflow_revision_id,
+        workflow_version=workflow_version,
+        workflow_definition_hash=workflow_definition_hash,
+        workflow_definition_snapshot_json=workflow_definition_snapshot_json,
+        node_keys=node_keys,
+        frozen_config_json=frozen_config_json,
+        inherit_nodes=frozenset(),
+    )
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)

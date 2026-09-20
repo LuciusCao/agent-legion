@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.services import versioned_entities as versioned_entities_module
 from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.services.versioned_entities import VersionedEntityStore
 
@@ -58,6 +59,26 @@ def test_publish_flow_archives_previous_published(store, workspace_id) -> None:
     assert republished.version == 2
     versions = {e.version: e.status for e in store.list_versions("wf:node", workspace_id)}
     assert versions == {1: "archived", 2: "published"}
+
+
+def test_published_state_changes_take_implementation_revalidation_lock(
+    store, workspace_id, monkeypatch
+) -> None:
+    """publish/rollback/archive 都必须加入升级重验的 workspace 锁域。"""
+    store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
+    lock_scopes: list[str | None] = []
+
+    def observed_lock(conn, scope):
+        lock_scopes.append(scope)
+
+    monkeypatch.setattr(
+        versioned_entities_module, "acquire_implementation_publication_lock", observed_lock
+    )
+    store.publish("wf:node", workspace_id)
+    store.rollback("wf:node", 1, workspace_id, "user:ops")
+    store.archive_all("wf:node", workspace_id)
+
+    assert lock_scopes == [workspace_id, workspace_id, workspace_id]
 
 
 def test_publish_without_draft_raises(store, workspace_id) -> None:

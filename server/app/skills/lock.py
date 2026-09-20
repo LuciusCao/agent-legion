@@ -42,6 +42,8 @@ def refresh_lock(store: SkillStore, base_dir: Path, runs_dir: Path | None = None
             # skill_roots + key); record the canonical in-place path.
             refreshed[skill_key] = LockedSkill(repo=str(cache_dir), refs=refs)
     with manager._lock_write_lock:
+        # 进程内 threading 锁管 RMW 读旧基；跨进程/对 upgrade 重验的串行
+        # 由 put_lock 内的 skill-lock advisory 锁兜底（#759 P2-B）。
         manager._write_lock_unlocked(SkillsLock(skills=refreshed))
 
 

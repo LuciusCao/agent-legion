@@ -201,3 +201,55 @@ def test_post_check_probe_skipped_when_nothing_removed():
 
     assert store.deleted_keys == []
     assert len(store.probed_keys) == 1, "batch probe only — no per-object or post-check probes"
+
+
+def test_probe_failure_is_logged_not_raised(caplog):
+    """#759 P1：post-commit 清理不得反转已提交的 mutation——批量探针
+    （live_keys_for）抛错只记日志、不上抛（否则路由把成功报成 500、批量
+    调用方中断整批）。突变自检锚点：无兜底的实现会让 RuntimeError 直接
+    冒出，本用例变红。"""
+    probes = {"count": 0}
+
+    class _FailingProbeStore:
+        enabled = True
+
+        def live_keys_for(self, job_id: str, storage_keys: list[str]) -> set[str]:
+            probes["count"] += 1
+            raise RuntimeError("manifest probe boom")
+
+        def delete_objects(self, rows: list[dict[str, Any]]) -> None:
+            raise AssertionError("unreachable: the batch probe already failed")
+
+    with caplog.at_level(logging.ERROR, logger="server.app.services.rerun_artifact_cleanup"):
+        delete_rerun_artifact_objects(_FailingProbeStore(), _SNAPSHOT, "job-1", "rerun")
+
+    assert probes["count"] == 1
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1
+    assert "job-1" in errors[0].message
+    assert "rerun" in errors[0].message
+
+
+def test_delete_failure_is_logged_not_raised(caplog):
+    """#759 P1：逐对象删除（delete_objects）抛错同样被吞并记日志（带
+    job_id 与调用方域名），不向 upgrade/rerun/run-to 的调用方传播。"""
+    calls = {"count": 0}
+
+    class _FailingDeleteStore:
+        enabled = True
+
+        def live_keys_for(self, job_id: str, storage_keys: list[str]) -> set[str]:
+            return set()
+
+        def delete_objects(self, rows: list[dict[str, Any]]) -> None:
+            calls["count"] += 1
+            raise RuntimeError("delete boom")
+
+    with caplog.at_level(logging.ERROR, logger="server.app.services.rerun_artifact_cleanup"):
+        delete_rerun_artifact_objects(_FailingDeleteStore(), _SNAPSHOT, "job-1", "upgrade-workflow")
+
+    assert calls["count"] == 1, "the first failing delete aborts the walk; contained"
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1
+    assert "job-1" in errors[0].message
+    assert "upgrade-workflow" in errors[0].message

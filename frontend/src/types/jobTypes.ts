@@ -14,6 +14,7 @@ export type JobBatchResponse = components['schemas']['JobBatchResponse']
 export type JobLogResponse = components['schemas']['JobLogResponse']
 export type JobMutationResult =
   components['schemas']['JobMutationResultResponse']
+export type UpgradeMode = NonNullable<JobMutationResult['mode']>
 export type BatchJobMutationResult =
   components['schemas']['BatchJobMutationResponse']
 export type JobBatchRerunRequest = components['schemas']['JobBatchRerunRequest']

@@ -6,8 +6,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from server.app.services.job_artifact_staging_scope import staging_output_names
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
+<<<<<<< HEAD
+=======
+from server.app.workflows.workflow_consumption import dependency_children, walk_downstream
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +23,15 @@ class StagedOutputs:
     `commit()` permanently removes staged files; `rollback()` restores them to
     their original locations. ``artifact_names`` are the output names staged
     for the affected closure (#508: the same set whose ``job_artifacts``
-    manifest rows the rerun transaction deletes).
+    manifest rows the rerun transaction deletes); names shared with nodes
+    outside the closure are never staged (see ``stage_outputs``).
     """
 
     def __init__(
-        self, staged_dir: Path, moves: list[tuple[Path, Path]], artifact_names: set[str]
+        self,
+        staged_dir: Path,
+        moves: list[tuple[Path, Path]],
+        artifact_names: set[str],
     ) -> None:
         self._staged_dir = staged_dir
         self._moves = list(moves)
@@ -79,11 +88,18 @@ class JobArtifactMutationService:
         affected_keys: Sequence[str],
         definition: WorkflowDefinition,
         *,
+<<<<<<< HEAD
         extra_names: Sequence[str] = (),
         include_outputs: bool = True,
+=======
+        closure: set[str] | frozenset[str] | None = None,
+        extra_names: frozenset[str] | set[str] = frozenset(),
+        extra_run_keys: frozenset[str] | set[str] = frozenset(),
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
     ) -> StagedOutputs:
         """Move the given nodes' outputs and run histories to reversible staging.
 
+<<<<<<< HEAD
         ``affected_keys`` is authoritative: exactly these nodes' outputs are
         staged. Callers MUST pass the same set they reset in the database
         (#759) — the reset set and the staged set being equal is the invariant
@@ -103,11 +119,24 @@ class JobArtifactMutationService:
         output enumeration must not re-stage a name the by-name closure
         preserved — e.g. a removed producer whose output became another
         node's input seed (#759 codex P1).
+=======
+        When ``closure`` is provided, only outputs declared by nodes inside the
+        closure are staged. This supports targeted rerun-to operations where
+        descendants outside the target closure must keep their artifacts.
+        Staging is also name-scoped: an output name declared by any node
+        outside the closure is left in place (adversarial review A3 — see
+        ``job_artifact_staging_scope.staging_output_names``).
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
 
         Read-modify-write artifacts (declared as both an input and an output of
         the same node) are never staged: removing them would leave the node
         waiting forever on an input no rerun producer rewrites (#114). On a
         successful rerun the node rewrites them, so run semantics are unchanged.
+
+        ``extra_names``/``extra_run_keys``（#645 codex 四轮 P1-2，upgrade
+        专用）：新 definition 声明面之外、需要一并暂存的旧产物名与被删
+        节点的运行历史目录（调用方从旧快照算好并按 A3 口径过滤）。它们
+        进入 ``artifact_names``（清单行删除同集合）与文件移动面。
 
         Returns a :class:`StagedOutputs` handle. Callers should invoke
         ``commit()`` after a successful database transaction, or ``rollback()``
@@ -119,6 +148,7 @@ class JobArtifactMutationService:
         if not storage_dir.exists():
             storage_dir.mkdir(parents=True, exist_ok=True)
 
+<<<<<<< HEAD
         affected: set[str] = set()
         for node_key in affected_keys:
             if node_key not in definition.nodes:
@@ -133,6 +163,31 @@ class JobArtifactMutationService:
 
         paths = set(outputs)
         paths.update(f"runs/{key}" for key in affected)
+=======
+        affected_keys: set[str] = set(node_keys)
+        # #759 复审 P2：暂存面与重置面（stale 标记，调用方均传
+        # dependency_downstream）同一闭包口径——显式边 ∪ 隐式消费边的合并
+        # 下游。loader 不要求 input 的生产者有显式边：隐式消费者被标
+        # stale 参与重跑，其旧产物不暂存/不清行的话，重跑未完成的窗口里
+        # API 继续展示旧字节（#508 语义对隐式消费者失效）。upgrade 路径
+        # 传 closure=reset_keys 且 node_keys == closure，交集截断后与
+        # 重置面恒等，不沿下游扩散的截断语义不变。
+        children = dependency_children(definition)
+        for node_key in node_keys:
+            if node_key not in definition.nodes:
+                raise ValueError(f"Unknown node: {node_key}")
+            affected_keys.update(walk_downstream(children, [node_key]))
+
+        if closure is not None:
+            affected_keys &= set(closure)
+
+        # Node-scoped staging (adversarial review A3): a name shared with a
+        # node outside the closure is never staged — see the pure helper.
+        outputs = staging_output_names(definition, affected_keys) | set(extra_names)
+
+        paths = set(outputs)
+        paths.update(f"runs/{key}" for key in affected_keys | set(extra_run_keys))
+>>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
 
         staged_dir = storage_dir / ".staged"
         staged_dir.mkdir(parents=True, exist_ok=True)

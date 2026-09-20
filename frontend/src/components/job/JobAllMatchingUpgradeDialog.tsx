@@ -6,12 +6,14 @@ import {
   DialogContent,
   DialogTitle,
 } from '@mui/material'
+import type { UpgradeMode } from '../../types/jobTypes'
+import { UpgradeModeSelector } from './UpgradeModeSelector'
 
 interface JobAllMatchingUpgradeDialogProps {
   open: boolean
   count: number
   onClose: () => void
-  onConfirm: () => void | Promise<void>
+  onConfirm: (mode: UpgradeMode) => void | Promise<void>
 }
 
 export function JobAllMatchingUpgradeDialog({
@@ -20,6 +22,7 @@ export function JobAllMatchingUpgradeDialog({
   onClose,
   onConfirm,
 }: JobAllMatchingUpgradeDialogProps) {
+  const [mode, setMode] = useState<UpgradeMode>('clean')
   const [isUpgrading, setIsUpgrading] = useState(false)
 
   if (!open) return null
@@ -27,8 +30,11 @@ export function JobAllMatchingUpgradeDialog({
   const handleConfirm = async () => {
     setIsUpgrading(true)
     try {
-      await onConfirm()
+      await onConfirm(mode)
       onClose()
+    } catch {
+      // The action owns error presentation. Keep the dialog (and selected
+      // mode) open so the user can retry after a failed request.
     } finally {
       setIsUpgrading(false)
     }
@@ -38,6 +44,7 @@ export function JobAllMatchingUpgradeDialog({
     <Dialog open={open} onClose={onClose}>
       <DialogTitle>确认升级 workflow</DialogTitle>
       <DialogContent>
+        <UpgradeModeSelector value={mode} onChange={setMode} />
         <p>
           将对符合筛选条件的 {count} 个 job 执行 workflow
           升级。已是最新版本或运行中的 job 会自动跳过。

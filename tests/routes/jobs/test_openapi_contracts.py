@@ -92,3 +92,39 @@ def test_external_artifact_routes_contract(tmp_path):
     assert {"content_hash", "uploaded_at", "size_bytes", "node_key", "media_type"} <= set(
         entry["properties"]
     )
+
+
+def test_mutation_result_rerun_nodes_stay_string_array(tmp_path):
+    """issue #645 review P2：JobRerunByFailureResultResponse.rerun_nodes 是
+    string[]（OpenAPI 不得退化为 unknown、Pydantic 必须校验）；upgrade 的
+    数量统计改用不冲突的 kept_node_count / rerun_node_count。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from server.app.main import create_app
+    from server.app.routes.job_rerun_by_failure_contracts import (
+        JobRerunByFailureResultResponse,
+    )
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    schemas = app.openapi()["components"]["schemas"]
+
+    rerun_schema = schemas["JobRerunByFailureResultResponse"]["properties"]["rerun_nodes"]
+    assert rerun_schema["type"] == "array"
+    assert rerun_schema["items"]["type"] == "string"
+
+    mutation_schema = schemas["JobMutationResultResponse"]["properties"]
+    assert "rerun_nodes" not in mutation_schema
+    # Optional int 字段在 OpenAPI 里是 anyOf [integer, null]（ge=0）。
+    assert mutation_schema["kept_node_count"]["anyOf"][0]["type"] == "integer"
+    assert mutation_schema["rerun_node_count"]["anyOf"][0]["type"] == "integer"
+
+    # Pydantic 校验恢复：字符串列表通过，非字符串成员被拒。
+    ok = JobRerunByFailureResultResponse.model_validate(
+        {"job_id": "j1", "operation": "rerun", "status": "succeeded", "rerun_nodes": ["a", "b"]}
+    )
+    assert ok.rerun_nodes == ["a", "b"]
+    with pytest.raises(ValidationError):
+        JobRerunByFailureResultResponse.model_validate(
+            {"job_id": "j1", "operation": "rerun", "status": "succeeded", "rerun_nodes": [1, 2]}
+        )

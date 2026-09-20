@@ -43,28 +43,22 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v85, execution_generation, #759) must
+# Effects the newest migration (v86, node_runs_impl_identity, #645) must
 # leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v85 rides the apply fn (schema file at its raw-line
-# ceiling, v76/v84 precedent): jobs / job_nodes / node_runs /
-# executor_leases / agent_execution_requests each gain an
-# execution_generation column. The undo drops the five columns; v84's
-# workspace_api_tokens table stays in the (SCHEMA_VERSION-1) shape.
+# SCHEMA_VERSION-1. v86 is DDL-only via the schema-file replay: node_runs
+# gains agent_definition_hash. The undo drops the column; v85's five
+# execution_generation columns stay in the (SCHEMA_VERSION-1) shape.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("jobs", "execution_generation", "integer"),
-    ("job_nodes", "execution_generation", "integer"),
-    ("node_runs", "execution_generation", "integer"),
-    ("executor_leases", "execution_generation", "integer"),
-    ("agent_execution_requests", "execution_generation", "integer"),
+    ("node_runs", "agent_definition_hash", "text"),
 )
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "execution_generation"
+_NEWEST_MIGRATION_NAME = "node_runs_impl_identity"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v84 (empty: v84's workspace_api_tokens table is untouched by the
-# undo and stays in the (SCHEMA_VERSION-1) shape).
+# faithful v85 (empty: v85's execution_generation columns are untouched by
+# the undo and stay in the (SCHEMA_VERSION-1) shape).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
