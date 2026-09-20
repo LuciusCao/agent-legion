@@ -1,9 +1,13 @@
-"""EXEC-GENERATION-001 产物写面与空 fan-out 完成面的代次闸（#645 P2-b/P3）。
+"""EXEC-GENERATION-001 产物写面与空 fan-out 完成面的代次闸（#645 P2-b/P3，#759 复审 P1-B）。
 
 P2-b（本地 code 孤儿执行的迟来上传）：心跳丢失后沙箱子进程是协作式取消，
 可跑完再进 ``_check_outputs`` → ``upload_produced_artifacts``。写闸
-（lease active + 心跳新鲜 + 落戳代次 == jobs 现值）不过则整批不上传；
-逐行登记事务内的复查兜底「入口闸通过后、行写入前 reset 提交」的窗口。
+（lease active + 心跳新鲜 + 落戳代次 == jobs 现值）不过则整批不上传。
+P1-B 起 lease 臂上传改走 staging：字节先落 per-lease staging key，再经共享
+primitive（``executors._artifact_promotion.promote_to_authority_guarded``）
+备份 → 锁外 copy → 锁内复查 + 登记 → 闸拒按回滚备份恢复 authority——
+「入口闸通过后、登记前 reset 提交」的窗口既不复活已删清单行，也不让保留
+的旧行指向被污染的字节。
 lease_lost 的正常收尾语义（runtime 置失败结果、finish CAS）不在本文件，
 由 tests/executors/test_executor_runtime.py 钉住。
 
@@ -13,11 +17,13 @@ P3（空 fan-out 完成无 CAS）：``complete_empty_shard_node`` 的锁 + 代�
 job-mutation advisory → 行锁；mutation 侧持同锁删 shard 行）。
 
 交错手法比照 tests/db/test_execution_generation_races.py：TIMED_DATABASE_URL
-带 deadlock_timeout/lock_timeout，同步点走 pg_locks 观测，不用裸 sleep。
+带 deadlock_timeout/lock_timeout，同步点走 pg_locks 观测或 storage hook
+内同步提交 reset，不用裸 sleep。
 """
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from collections.abc import Callable
@@ -29,6 +35,7 @@ from urllib.parse import quote
 import psycopg
 
 from server.app.db.transaction import write_transaction
+from server.app.executors._lease_control import lock_job_mutation_and_read_generation
 from server.app.executors._lease_shards import complete_empty_shard_node
 from server.app.executors.artifact_mirror import upload_produced_artifacts
 from server.app.jobs import JobQueries
@@ -231,48 +238,186 @@ def test_upload_skipped_when_generation_bumped(job_db: JobQueries, tmp_path: Pat
     assert store.row_for_node("gate3-job", "node_a", "out.json") is None
 
 
-class _ResetOnPutStorage(FakeObjectStorage):
-    """put_stream 的同一瞬间提交 reset（入口闸之后、行登记之前的窗口）。"""
+class _ResetAfterStagingPutStorage(FakeObjectStorage):
+    """staging put 落字节的同一瞬间在另一连接提交 reset。
 
-    def __init__(self, *, job_id: str) -> None:
+    精确命中 P1-B 窗口：入口闸已通过、staging 字节已写、promote（备份 →
+    copy → 锁内登记）尚未开始。``delete_row`` 选分支：True 模拟 clean 重置
+    （删清单行），False 模拟 RMW/输入保护保留旧行（只 bump 代次）。
+    ``armed`` 让种下旧行/旧字节的种子上传不触发 reset。
+    """
+
+    def __init__(self, *, job_id: str, delete_row: bool) -> None:
         super().__init__()
         self._job_id = job_id
+        self._delete_row = delete_row
+        self.armed = False
 
     def put_stream(
         self, storage_key: str, stream: Any, size_bytes: int, content_type: str = ""
     ) -> None:
         super().put_stream(storage_key, stream, size_bytes, content_type)
+        if not self.armed:
+            return
         with write_transaction(TEST_DATABASE_URL) as conn:
             conn.execute(
                 "update jobs set execution_generation=execution_generation+1 where id=%s",
                 (self._job_id,),
             )
+            if self._delete_row:
+                conn.execute("delete from job_artifacts where job_id=%s", (self._job_id,))
+
+
+def _seed_authority_object(
+    store: JobArtifactObjectStore,
+    tmp_path: Path,
+    *,
+    workspace_id: str,
+    job_id: str,
+    payload: bytes,
+) -> dict[str, Any]:
+    """无 lease 直写种子：旧清单行 + 旧 authority 字节；返回旧清单行。"""
+    (tmp_path / "out.json").write_bytes(payload)
+    row = store.upload(
+        workspace_id=workspace_id,
+        job_id=job_id,
+        node_key="node_a",
+        name="out.json",
+        local_path=tmp_path / "out.json",
+    )
+    assert row is not None
+    return row
+
+
+def _assert_no_staging_residue(storage: FakeObjectStorage) -> None:
+    assert not [key for key in storage.objects if key.startswith("jobs-staging/")]
 
 
 def test_registration_gate_catches_reset_after_entry_check(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
-    """交错用例：入口闸通过后才提交 reset——字节已上传（幂等残留，reconciler/
-    lifecycle 兜底），但清单行登记必须被事务内复查拒绝，已删行不复活。"""
+    """交错用例（P1-B，RMW/输入保护分支：reset 保留旧清单行）：入口闸通过、
+    staging 字节落盘后 reset 提交 bump 代次——promote 的锁内复查拒绝登记，
+    并按回滚备份恢复 authority：旧行的 content_hash/size_bytes 不变、
+    authority 仍是旧字节、staging 与回滚残留都清理干净。
+    （修复前语义——旧字节已被覆盖、旧行指向污染字节——由本用例的逐字节
+    断言钉死为不再发生。）"""
     _seed_job(job_db, workspace_id="gate4-ws", job_id="gate4-job")
     _seed_lease(job_db, workspace_id="gate4-ws", job_id="gate4-job")
-    (tmp_path / "out.json").write_bytes(b"old-bytes")
-    store = JobArtifactObjectStore(TEST_DATABASE_URL, _ResetOnPutStorage(job_id="gate4-job"))
+    storage = _ResetAfterStagingPutStorage(job_id="gate4-job", delete_row=False)
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    old_row = _seed_authority_object(
+        store, tmp_path, workspace_id="gate4-ws", job_id="gate4-job", payload=b"old-bytes"
+    )
+    # 入口闸（artifact_mirror 循环级预检）在 reset 之前通过。
+    assert store.artifact_write_gate_open(job_id="gate4-job", lease_id="lease-1")
+    storage.armed = True
+    (tmp_path / "out.json").write_bytes(b"new-bytes-from-stale-epoch")
 
-    upload_produced_artifacts(
-        store,
+    result = store.upload(
         workspace_id="gate4-ws",
         job_id="gate4-job",
         node_key="node_a",
-        job_dir=tmp_path,
-        produced=("out.json",),
+        name="out.json",
+        local_path=tmp_path / "out.json",
         lease_id="lease-1",
     )
 
-    storage = store.storage
-    assert isinstance(storage, FakeObjectStorage)
-    assert storage.put_calls == 1  # 入口闸已过，字节已写（幂等残留）
-    assert store.row_for_node("gate4-job", "node_a", "out.json") is None  # 行未登记
+    assert result is None  # 锁内复查拒绝登记
+    row = store.row_for_node("gate4-job", "node_a", "out.json")
+    assert row is not None  # RMW 保留的旧行不被复活式覆盖
+    assert row["content_hash"] == old_row["content_hash"]
+    assert row["size_bytes"] == old_row["size_bytes"]
+    authority_key = "jobs/gate4-ws/gate4-job/out.json"
+    assert storage.objects[authority_key] == b"old-bytes"  # 回滚备份恢复，未被污染
+    assert storage.put_calls == 2  # 种子直写 + staging put；authority 只经 copy
+    _assert_no_staging_residue(storage)
+
+
+def test_registration_gate_catches_reset_that_removed_row(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """交错用例（P1-B，clean 重置分支：reset 删除旧清单行）：同一窗口下闸拒
+    后已删行不复活；authority 对象同样按备份恢复旧字节（此时旧对象已成
+    孤儿，lifecycle 兜底，但字节绝不被旧代次污染）。"""
+    _seed_job(job_db, workspace_id="gate4b-ws", job_id="gate4b-job")
+    _seed_lease(job_db, workspace_id="gate4b-ws", job_id="gate4b-job")
+    storage = _ResetAfterStagingPutStorage(job_id="gate4b-job", delete_row=True)
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    _seed_authority_object(
+        store, tmp_path, workspace_id="gate4b-ws", job_id="gate4b-job", payload=b"old-bytes"
+    )
+    assert store.artifact_write_gate_open(job_id="gate4b-job", lease_id="lease-1")
+    storage.armed = True
+    (tmp_path / "out.json").write_bytes(b"new-bytes-from-stale-epoch")
+
+    result = store.upload(
+        workspace_id="gate4b-ws",
+        job_id="gate4b-job",
+        node_key="node_a",
+        name="out.json",
+        local_path=tmp_path / "out.json",
+        lease_id="lease-1",
+    )
+
+    assert result is None
+    assert store.row_for_node("gate4b-job", "node_a", "out.json") is None  # 已删行不复活
+    authority_key = "jobs/gate4b-ws/gate4b-job/out.json"
+    assert storage.objects[authority_key] == b"old-bytes"  # 备份恢复
+    _assert_no_staging_residue(storage)
+
+
+def test_upload_registration_waits_on_mutation_lock_then_rolls_back(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """锁序交错（pg_locks 观测）：mutation 持 job-mutation 锁、未提交 bump 时，
+    upload 的登记事务必须先等锁（证明锁内复查与 mutation 互斥）；mutation
+    提交（代次 → 1、旧行保留）后闸拒并恢复 authority。最终状态 == 串行序
+    「reset → 旧代次上传被拒」。
+
+    突变自检：登记事务若不取 job-mutation 锁，B 不会在 pg_locks 里出现
+    （同步点超时），且会在 mutation 提交前登记成功（result 非 None）。"""
+    _seed_job(job_db, workspace_id="gate4c-ws", job_id="gate4c-job")
+    _seed_lease(job_db, workspace_id="gate4c-ws", job_id="gate4c-job")
+    storage = FakeObjectStorage()
+    store = JobArtifactObjectStore(TIMED_DATABASE_URL, storage)
+    old_row = _seed_authority_object(
+        store, tmp_path, workspace_id="gate4c-ws", job_id="gate4c-job", payload=b"old-bytes"
+    )
+    assert store.artifact_write_gate_open(job_id="gate4c-job", lease_id="lease-1")
+    (tmp_path / "out.json").write_bytes(b"new-bytes-from-stale-epoch")
+
+    stack = contextlib.ExitStack()
+    conn_a = stack.enter_context(write_transaction(TIMED_DATABASE_URL))
+    assert lock_job_mutation_and_read_generation(conn_a, "gate4c-job") == 0
+    conn_a.execute(
+        "update jobs set execution_generation=execution_generation+1 where id='gate4c-job'"
+    )
+
+    def _late_upload() -> Any:
+        return store.upload(
+            workspace_id="gate4c-ws",
+            job_id="gate4c-job",
+            node_key="node_a",
+            name="out.json",
+            local_path=tmp_path / "out.json",
+            lease_id="lease-1",
+        )
+
+    thread, outcome = _start(_late_upload)
+    _await_job_mutation_waiter("gate4c-job")  # B 的登记事务卡在 advisory 锁上
+    stack.close()  # 提交 reset
+    _join(thread)
+
+    assert outcome.get("error") is None
+    assert outcome.get("result") is None  # 闸拒
+    row = store.row_for_node("gate4c-job", "node_a", "out.json")
+    assert row is not None
+    assert row["content_hash"] == old_row["content_hash"]
+    assert row["size_bytes"] == old_row["size_bytes"]
+    authority_key = "jobs/gate4c-ws/gate4c-job/out.json"
+    assert storage.objects[authority_key] == b"old-bytes"
+    _assert_no_staging_residue(storage)
 
 
 # ---------------------------------------------------------------------------

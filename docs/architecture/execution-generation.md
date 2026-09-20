@@ -195,19 +195,29 @@ Job 产物与执行状态分布在三个平面，代次协议对每个平面各�
    清理，`keep_input_names` 保护 RMW 启动名与外部输入）。写面闸是
    `lease_artifact_write_current`（`server/app/executors/_lease_write_gate.py`：
    job-mutation 锁下复查 lease 仍 active、心跳未过期、落戳代次 == jobs 现值），
-   两个在 finish CAS **之前**落地的字节写口都是协议成员：
-   - Worker 回传 promote：`remote_artifact_promote.promote_all` 先做无锁预检，
-     权威复查在 `remote_artifact_gate.register_remote_rows_guarded`
-     （`server/app/agent_broker/remote_artifact_gate.py`）——**一个事务**内取锁、
-     复查、把 staged 文件落盘、upsert 清单行。与突变侧只有两种序：登记先提交
-     （随后被突变当作重置面删除），或突变先提交（闸拒绝登记）。被拒的 promote
-     用回滚备份恢复已完成的 authority-key copy，不落盘、不复活清单行，结果提交
-     面呈现既有 409 语义。
+   两个在 finish CAS **之前**落地的字节写口都是协议成员，且（#759 复审 P1-B
+   起）共用同一个 promote primitive
+   `executors/_artifact_promotion.promote_to_authority_guarded`：字节先落
+   per-execution/lease 的 staging key（**绝不直写 authority key**），既有
+   authority 对象先 server-side 备份到回滚 key，锁外 copy
+   staging→authority，权威复查在 `register_rows_guarded`——**一个事务**内
+   取锁、复查、（远端臂）把 staged 文件落盘、upsert 清单行。与突变侧只有
+   两种序：登记先提交（随后被突变当作重置面删除），或突变先提交（闸拒绝
+   登记）。被拒的 promote 用回滚备份恢复已完成的 authority-key copy，不
+   落盘、不复活清单行、不让保留行指向污染字节，结果提交面呈现既有 409
+   语义。
+   - Worker 回传 promote：`remote_artifact_promote.promote_all` 在任何字节
+     copy 前先做无锁预检，随后走上述共享序列（execution_id 为 staging/回滚
+     key 的 execution 维度）。
    - 本地 code 执行的 D12 镜像上传：`artifact_mirror.upload_produced_artifacts`
-     携带 context 的 lease_id，入口闸关闭即整批跳过，且每行登记事务内复查——
-     循环中途落地的 reset 也登记不进去。
+     携带 context 的 lease_id，入口闸关闭即整批跳过；未跳过则由
+     `JobArtifactObjectStore.upload` 的 lease 臂把字节写到 per-lease staging
+     key（lease_id 即 execution 维度）后走同一 primitive——循环中途落地的
+     reset 既登记不进去，也不会让 authority 对象被旧代次字节覆盖（闸拒时按
+     备份恢复，staging 残留逐结局清理）。
 
-   因为行删除与行登记在同一把锁下互斥，清单平面不存在「旧代次行复活」的交错。
+   因为行删除与行登记在同一把锁下互斥，清单平面不存在「旧代次行复活」的交错；
+   字节面由「staging 先行 + 闸拒回滚」保证不存在「保留行指向污染字节」的交错。
 
 ## 4. 对抗审查 checklist
 
@@ -272,7 +282,9 @@ Job 产物与执行状态分布在三个平面，代次协议对每个平面各�
    内文件的旧字节由「新代次生产者重跑覆盖 + 暂存/清理」兜底。
 2. **promote 的锁外 authority-key copy**：字节 copy 在锁外执行（可中断的大
    字节量不该持锁），靠回滚备份兜底（`restore_authority_backups`）；权威性
-   部分（落盘 + 清单行）在锁内单事务完成。
+   部分（落盘 + 清单行）在锁内单事务完成。本地上传（lease 臂）与远端
+   promote 共用同一 primitive（`executors/_artifact_promotion.py`），两侧
+   残余面相同；无备份时的孤儿 authority 对象由 bucket lifecycle 兜底。
 3. **AgentCompletionHandler.finish 的 D12 镜像调用未加闸**：
    `server/app/agent_control/completion.py` 的 `upload_produced_artifacts` 调用
    不传 lease_id（本地 code 执行路径传）。agent 本地产物镜像因此可能把旧代次

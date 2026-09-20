@@ -13,18 +13,31 @@ under a ``.gz``-suffixed ``storage_key``; the suffix is the form marker and
 ``open_stream`` decodes transparently (scheme: ``job_artifact_gzip``).
 ``size_bytes`` on a ``.gz`` row is the stored (compressed) size — the only
 HEAD-verifiable number.
+
+EXEC-GENERATION-001 byte plane (#759 review P1-B): the ``lease_id`` arm of
+``upload`` never writes the authority key directly — bytes land on a per-lease
+staging key and are promoted through the shared
+``executors._artifact_promotion.promote_to_authority_guarded`` primitive
+(backup → lock-free copy → in-transaction generation recheck + manifest row →
+rollback restore on rejection), the same sequence the Worker-result promote
+uses, so a reset landing after the entry gate cannot leave old manifest rows
+pointing at polluted bytes.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import time
 from pathlib import Path
 from typing import Any, BinaryIO
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.executors._artifact_promotion import (
+    ARTIFACT_ROW_UPSERT_SQL,
+    hash_local_file,
+    put_stream_with_retries,
+    upload_via_staging_guarded,
+)
 from server.app.executors._lease_write_gate import lease_artifact_write_current
 from server.app.services.job_artifact_gzip import GZIP_SUFFIX, content_stream
 from server.app.services.job_artifact_rows import upsert_artifact_row_tx
@@ -32,23 +45,9 @@ from server.app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
 
-_UPLOAD_ATTEMPTS = 3
-_UPLOAD_BACKOFF_SECONDS = 0.5
 # Public: the claim-time injector derives longer presign TTLs from the node
 # timeout on top of this floor (agent_broker.remote_artifact_support).
 DEFAULT_PRESIGN_EXPIRY_SECONDS = 3600
-
-_UPSERT_ROW_SQL = """
-insert into job_artifacts(
-  job_id, node_key, name, storage_key, size_bytes, content_hash
-) values (%s, %s, %s, %s, %s, %s)
-on conflict (job_id, node_key, name) do update
-set storage_key=excluded.storage_key,
-    size_bytes=excluded.size_bytes,
-    content_hash=excluded.content_hash,
-    uploaded_at=current_timestamp
-returning *
-"""
 
 # Bucket key prefix for job artifacts (materials keys live at the bucket
 # root); the prefix lets bucket lifecycle rules target artifacts separately.
@@ -89,7 +88,7 @@ class JobArtifactObjectStore:
     @property
     def database_dsn(self) -> ConnectSource:
         """The connection source; the guarded promote registration opens its
-        own transaction on it (agent_broker.remote_artifact_gate)."""
+        own transaction on it (executors._artifact_promotion.register_rows_guarded)."""
         return self._dsn
 
     def artifact_write_gate_open(self, *, job_id: str, lease_id: str) -> bool:
@@ -97,8 +96,8 @@ class JobArtifactObjectStore:
 
         True = lease 仍是本 job 当前代次的 active lease，调用方可以继续做
         字节级上传/copy。这只是锁外快路径——重置落在复查之后时，权威的拦
-        截在清单行登记事务里（``_register_row`` 的 lease 臂 /
-        remote_artifact_gate.register_remote_rows_guarded）。
+        截在共享 promote primitive 的清单行登记事务里
+        （``executors._artifact_promotion.register_rows_guarded``）。
         """
         with write_transaction(self._dsn) as conn:
             return lease_artifact_write_current(conn, lease_id, job_id)
@@ -118,50 +117,58 @@ class JobArtifactObjectStore:
         Returns None when object storage is not configured. Raises after
         bounded retries on persistent storage errors — the completion hooks
         catch, log and continue (the local copy stays; the reconciler
-        re-uploads later). With ``lease_id`` the manifest-row write is gated
-        by the EXEC-GENERATION-001 artifact write check (#645 P2-b): an
-        orphaned local execution (lease lost mid-run, or a reset landed
-        between the upload loop's entry check and this row write) registers
-        nothing and returns None; the uploaded object is then an unreferenced
-        orphan the reconciler/lifecycle reaps.
+        re-uploads later).
+
+        With ``lease_id`` the write goes through the EXEC-GENERATION-001
+        artifact byte plane (#759 review P1-B): bytes land on a per-lease
+        staging key first and are promoted by the shared
+        ``promote_to_authority_guarded`` primitive — the manifest row
+        registers only if the lease still owns the current generation inside
+        the job-mutation-locked transaction, and a rejected promote restores
+        the authority object from its rollback backup, so a reset landing
+        between the upload loop's entry check and the row write can neither
+        resurrect a removed manifest row nor leave a kept row pointing at
+        polluted bytes. Returns None on such a rejection.
+
+        Without ``lease_id`` (reconciler re-uploads, approval artifact
+        promotion) the legacy direct write stays: those callers run outside
+        any lease context, so there is no execution generation to CAS against
+        — the write gate could never open for them, and their upsert semantics
+        (refresh the manifest row to match the bytes on disk) are the desired
+        reconciliation behavior.
         """
         if self.storage is None:
             return None
         if not valid_artifact_name(name):
             raise ValueError(f"invalid artifact name: {name!r}")
-        size_bytes = local_path.stat().st_size
-        with local_path.open("rb") as handle:
-            content_hash = hashlib.file_digest(handle, "sha256").hexdigest()
+        size_bytes, content_hash = hash_local_file(local_path)
         storage_key = artifact_storage_key(workspace_id, job_id, name)
-        last_error: Exception | None = None
-        for attempt in range(_UPLOAD_ATTEMPTS):
-            try:
-                with local_path.open("rb") as stream:
-                    self.storage.put_stream(storage_key, stream, size_bytes)
-                break
-            except Exception as exc:  # storage outage must not fail the node
-                # #204 broad-except audit: retry loop over the boto3 data
-                # plane. put_stream's outcome space is genuinely mixed —
-                # transport errors (ClientError/BotoCoreError), connection
-                # resets (OSError), and the injected test fakes' own exception
-                # types all take the same bounded-retry path, and the final
-                # attempt re-raises for the completion hooks to contain. A
-                # narrow family cannot enumerate the storage layer here
-                # without also changing the public seam the tests inject.
-                last_error = exc
-                logger.warning(
-                    "artifact upload attempt %d/%d failed for job %s %s: %s",
-                    attempt + 1,
-                    _UPLOAD_ATTEMPTS,
-                    job_id,
-                    name,
-                    exc,
-                )
-                if attempt + 1 < _UPLOAD_ATTEMPTS:
-                    time.sleep(_UPLOAD_BACKOFF_SECONDS * (2**attempt))
-        else:
-            assert last_error is not None
-            raise last_error
+        if lease_id:
+            return upload_via_staging_guarded(
+                self.storage,
+                self._dsn,
+                job_id=job_id,
+                lease_id=lease_id,
+                name=name,
+                local_path=local_path,
+                size_bytes=size_bytes,
+                staging_key=artifact_staging_key(workspace_id, job_id, lease_id, name),
+                authority_key=storage_key,
+                rollback_key=artifact_staging_key(
+                    workspace_id, job_id, lease_id, f".rollback/{name}"
+                ),
+                row={
+                    "job_id": job_id,
+                    "node_key": node_key,
+                    "name": name,
+                    "storage_key": storage_key,
+                    "size_bytes": size_bytes,
+                    "content_hash": content_hash,
+                },
+            )
+        put_stream_with_retries(
+            self.storage, storage_key, local_path, size_bytes, job_id=job_id, name=name
+        )
         return self._register_row(
             job_id=job_id,
             node_key=node_key,
@@ -169,7 +176,6 @@ class JobArtifactObjectStore:
             storage_key=storage_key,
             size_bytes=size_bytes,
             content_hash=content_hash,
-            lease_id=lease_id,
         )
 
     def verify_remote(
@@ -268,7 +274,7 @@ class JobArtifactObjectStore:
             return [
                 upsert_artifact_row_tx(
                     conn,
-                    _UPSERT_ROW_SQL,
+                    ARTIFACT_ROW_UPSERT_SQL,
                     job_id=str(row["job_id"]),
                     node_key=str(row["node_key"]),
                     name=str(row["name"]),
@@ -288,22 +294,18 @@ class JobArtifactObjectStore:
         storage_key: str,
         size_bytes: int,
         content_hash: str,
-        lease_id: str = "",
     ) -> dict[str, Any] | None:
         """Single-row upsert in its own transaction (batch path inlines it).
 
-        With ``lease_id`` the row write is gated (#645 P2-b): the same
-        transaction takes the job-mutation lock and re-checks the lease epoch;
-        a stale/orphaned write is skipped (None) with a log, so a reset
-        landing mid-upload-loop cannot resurrect a removed manifest row.
+        Ungated by design: the only callers left are the no-lease paths
+        (``record_remote`` HEAD-verified registrations, the reconciler and
+        approval direct writes) — lease-carrying writes go through
+        ``register_rows_guarded`` inside the shared promote primitive.
         """
         with write_transaction(self._dsn) as conn:
-            if lease_id and not lease_artifact_write_current(conn, lease_id, job_id):
-                logger.info("artifact row write skipped (stale lease %s, job %s)", lease_id, job_id)
-                return None
             return upsert_artifact_row_tx(
                 conn,
-                _UPSERT_ROW_SQL,
+                ARTIFACT_ROW_UPSERT_SQL,
                 job_id=job_id,
                 node_key=node_key,
                 name=name,
