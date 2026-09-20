@@ -190,6 +190,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 workspace_worker_control=workspace_worker_control,
                 agent_manager=agent_manager,
                 agent_dispatch=agent_plane.dispatch,
+                job_artifact_objects=job_artifact_objects,
             )
             app.state.worker_startup = worker_status
             # Routes pick the thread up here to trigger scan-list reloads
