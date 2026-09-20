@@ -17,6 +17,7 @@ from server.app.services.job_workflow_upgrade_propagation import (
     collect_change_seeds,
     rerun_closure,
 )
+from server.app.services.job_workflow_upgrade_protection import input_protection_plan
 from server.app.services.job_workflow_upgrade_removed_outputs import removed_artifact_face
 from server.app.workflows.schema import (
     WorkflowCondition,
@@ -320,6 +321,14 @@ def test_removed_output_changed_to_external_input_is_protected() -> None:
         new_definition,
         keep_keys=frozenset(),
         reset_keys={"transform"},
+        # #759 复审 P1-A：保护集来自 reset-aware 保护计划（source.json 无
+        # 生产者 ⇒ 外部输入，keep）。
+        protected_names=input_protection_plan(
+            new_definition,
+            keep_nodes=frozenset(),
+            reset_nodes=frozenset({"transform"}),
+            staged_names=frozenset(staging_output_names(new_definition, {"transform"})),
+        ).keep,
     )
 
     assert face.names == frozenset({"stale.json"})
@@ -340,6 +349,13 @@ def test_removed_output_changed_to_produced_input_uses_normal_staging() -> None:
         new_definition,
         keep_keys=frozenset(),
         reset_keys={"transform", "producer"},
+        # producer 是 source.json 的重置纯生产者且会重生成 ⇒ clean，不受保护。
+        protected_names=input_protection_plan(
+            new_definition,
+            keep_nodes=frozenset(),
+            reset_nodes=frozenset({"transform", "producer"}),
+            staged_names=frozenset(staging_output_names(new_definition, {"transform", "producer"})),
+        ).keep,
     )
 
     assert face.names == frozenset()

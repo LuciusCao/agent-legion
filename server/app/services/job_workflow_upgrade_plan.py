@@ -74,7 +74,7 @@ def plan_inherit_nodes(
     侧的同名排除（A3）在重置节点本次没真正写该文件时失效（
     ``_check_outputs`` 只查文件存在）。因此同名生产者一起重跑（通道 B，
     ``rerun_closure`` 内的 ``shared_name_rerun_closure`` fixpoint）；升级
-    事务内还会按实际保留集复算一次（``job_workflow_upgrade_cleanup``），
+    事务内还会按实际保留集复算一次（``job_workflow_upgrade_staging``），
     覆盖未完成候选并入重置面的组合场景。
 
     实现身份（codex 四轮 P1-1）：实现重发布而节点定义未变时，定义

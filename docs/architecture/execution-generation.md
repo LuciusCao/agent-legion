@@ -169,6 +169,35 @@ doc cache）；`latest` 绑定**恒定排除**（跟随 live HEAD，不做 live 
 任何新重跑原因只要进种子集就自动获得全下游传播——这是「新判定源不可能忘了
 传播」的结构保证，也是代次协议的前提：闭包划错，CAS 护住的现场本身就是错的。
 
+### 2.8 升级输入保护计划（#759 复审 P1-A）
+
+升级决定「哪些输入名的旧字节必须随升级作废、哪些必须保留」时，两个方向都
+没有保守可选：删多（外部输入/RMW 启动输入丢失）是永久等待，留多（旧
+revision 字节复活被新 revision 消费）是静默错误。因此保护计划
+（`server/app/services/job_workflow_upgrade_protection.py` 的
+`input_protection_plan`，纯函数）必须同时证明两个方向，任一不可证明即
+fail closed：
+
+- **liveness**：删除后名字在新一轮执行中会变得可用——未被作废的名字
+  （外部输入、保留节点产物、纯 RMW 链）为种子做最小不动点，重置节点的
+  全部输入可用 ⇒ 其输出可用；循环互依赖的生产者证不出可运行。
+- **freshness**：没有 consumer 读到旧字节。非 RMW 名三面删除后「缺席即
+  闸」（ready gate 只探本地文件，名字缺席 ⇒ consumer 必然等到重置生产者
+  重写）；RMW 附着名的旧文件不进暂存面（#114）而存活 ⇒ 每个重置
+  consumer 必须有排序证据（显式边 ∪ 经由「唯一生产者且本次缺席」名字的
+  隐式边，多生产者名字的隐式边不作证据）。
+- **keep 侧也要证**：名字被重置纯生产者作废后，保留旧字节给无排序证据的
+  纯 consumer 吃同样是静默错误——只有「未被作废」或「纯 consumer 全部被
+  覆盖、仅未覆盖的 RMW consumer 需要启动输入」才可保留。
+
+计划的输入是收敛后的实际保留/重置面与本次删除面（暂存名集合），在升级事务
+内、任何文件暂存之前计算；`unprovable` 非空 ⇒ 抛
+`UpgradeProtectionUnprovableError`，升级以 `skipped/protection_unprovable`
+返回且零副作用（事务整体回滚，不猜保留也不猜删除）。计划的 keep 集同时喂
+给 removed 面（`removed_artifact_face` 的 `protected_names`）与 clean/全退化
+分支的全量清单清理（`keep_input_names`）；`sweep` 集（依赖缺席判定的非
+RMW 名）在提交后再扫一次本地文件复活（见 §3 文件平面与 §5 残余面 4）。
+
 ## 3. 三平面一致性论证
 
 Job 产物与执行状态分布在三个平面，代次协议对每个平面各有一道闸：
@@ -188,11 +217,19 @@ Job 产物与执行状态分布在三个平面，代次协议对每个平面各�
    读失败 / 代次预读失败）返回 None 同样不缓存——清单是权威副本，读失败绝不能
    退化成「只看本地文件」的粘性误判。残余窗口（突变在通过的复查之后提交）由三层
    兜底：本轮候选带旧代次会被 claim CAS 拒；下一轮重评估时该名字的清单行已消失、
-   不再恢复；`unprotected_input_names` 保证无保证先行生产者的输入名不被误用。
+   不再恢复；upgrade 侧的输入保护计划（`job_workflow_upgrade_protection`，
+   #759 复审 P1-A）把删行名分成两类——RMW 附着名的本地文件本就不进暂存面，
+   其全部重置 consumer 都有排序证据（硬阻塞到生产者重写）；「缺席即闸」名
+   （非 RMW、三面删除）由提交后 sweep（`job_workflow_upgrade_sweep`）再删一次
+   本地文件——恢复写先于代次复查，复查通过的复活必落在提交前、必被 sweep
+   覆盖，复查落在提交后的恢复自我丢弃，窗口收小到提交与 sweep 之间的亚毫秒
+   跨度（rerun/run-to 路径保留原有的毫秒级窗口，见 §5）。
 3. **对象存储清单平面**（`job_artifacts` 清单 + 对象字节）：清单行是权威副本
    （EXEC-ARTIFACT-STORE-001）。突变侧在同一事务删除被重置产物的清单行（rerun
    的 `mark_nodes_for_rerun` 删 staged 行；upgrade clean 语义分支做全量清单
-   清理，`keep_input_names` 保护 RMW 启动名与外部输入）。写面闸是
+   清理，`keep_input_names` 取保护计划的 keep 集——只保留「旧字节即权威」的
+   名字：外部输入、RMW 启动名、保留节点声明面；被重置纯生产者作废且会重生
+   成的名字必须删行，否则 hydration 会在 ready 前复活旧字节）。写面闸是
    `lease_artifact_write_current`（`server/app/executors/_lease_write_gate.py`：
    job-mutation 锁下复查 lease 仍 active、心跳未过期、落戳代次 == jobs 现值），
    两个在 finish CAS **之前**落地的字节写口都是协议成员，且（#759 复审 P1-B
@@ -289,9 +326,12 @@ Job 产物与执行状态分布在三个平面，代次协议对每个平面各�
    `server/app/agent_control/completion.py` 的 `upload_produced_artifacts` 调用
    不传 lease_id（本地 code 执行路径传）。agent 本地产物镜像因此可能把旧代次
    字节登记进清单；`job_nodes` 面由 finish CAS 护住，但该写口值得后续加闸。
-4. **hydration 残余窗口**：突变可在通过的代次复查之后提交，留下一个毫秒级
-   （单事务 staging→commit 跨度、按文件计）的旧字节文件；三层兜底论证见
-   `input_hydration.py` 模块 docstring。
+4. **hydration 残余窗口**：突变可在通过的代次复查之后提交。upgrade 侧对
+   「缺席即闸」名由提交后 sweep（`job_workflow_upgrade_sweep`）收掉——恢复写
+   先于代次复查，复查通过的复活必落在提交前、必被 sweep 覆盖——残余仅剩
+   提交与 sweep 之间的亚毫秒跨度（且需前置 hydration 恰在窗口前复活该名）；
+   rerun/run-to 路径保留原有的毫秒级（单事务 staging→commit 跨度、按文件计）
+   窗口，三层兜底论证见 `input_hydration.py` 模块 docstring。
 
 后续方向：给 agent 完成路径的镜像上传补 lease_id 闸；评估 hydration 是否可在
 不阻塞突变的前提下收掉残余窗口（如按名字级的版本化暂存目录）。
@@ -310,6 +350,12 @@ Job 产物与执行状态分布在三个平面，代次协议对每个平面各�
   本案必死锁。
 - 协议成员名单与证据：`config/architecture/architecture-invariants.yaml` 的
   EXEC-GENERATION-001 条目（正式表述 + evidence 列表）。
+- 升级输入保护计划（§2.8）：`tests/services/test_job_workflow_upgrade_protection.py`
+  的表驱动纯函数用例（liveness/freshness 三分区：最小反例、RMW 对照、循环
+  互证、跨名互借、删除面漂移）+ 服务级三面断言（本地文件/清单行/权威对象）
+  与 fail-closed 零副作用用例；
+  `tests/workflows/test_upgrade_input_protection.py` 把反例推进到
+  ready/claim/执行结果（consumer 只消费新字节；clean 与 inherit 全退化两分支）。
 
 ## 7. 相关文档
 

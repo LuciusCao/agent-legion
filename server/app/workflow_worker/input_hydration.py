@@ -40,22 +40,27 @@ the files this round restored are deleted again and the job defers (uncached)
 to the next poll pass.
 
 Residual window: a mutation can still commit AFTER a passing recheck, leaving
-a stale restored file on disk for the new epoch. That is safe on three
-grounds: (1) candidates built this round carry the pre-bump epoch — the
-mutation bumps the mark_key (``scan.mark_key`` includes the epoch), so the
-cache is invalidated and the claim-time generation CAS fails closed on any
-stale candidate; (2) the next pass re-evaluates and hydration never restores
-the name again (its manifest row is gone); (3) the surviving stale file can
-only pass the new epoch's ready gate for a node whose readiness does not
-explicitly wait on the reset producer — but ``unprotected_input_names``
-protects exactly the names whose consumers lack a guaranteed-prior producer,
-so a deleted-row name has every consumer covered: consumers on an explicit
-edge path from a reset node are hard-blocked until that chain re-completes
-(the producer re-runs first and overwrites the file), and a purely
-implicit-edge consumer additionally needs every other gating input present,
-each of which was staged away by the same mutation and can only reappear by
-winning this same commit-window race. The window is the millisecond-scale
-staging→commit span of one transaction, per file.
+a stale restored file on disk for the new epoch. Mitigations: (1) candidates
+built this round carry the pre-bump epoch — the mutation bumps the mark_key
+(``scan.mark_key`` includes the epoch), so the cache is invalidated and the
+claim-time generation CAS fails closed on any stale candidate; (2) the next
+pass re-evaluates and hydration never restores the name again (its manifest
+row is gone); (3) on the upgrade path the reset-aware protection plan
+(``server/app/services/job_workflow_upgrade_protection.py``, #759 review
+P1-A) splits deleted-row names into two classes: RMW-attached names whose
+local file legitimately survives staging keep every reset consumer
+edge-covered (hard-blocked until the chain re-completes and the producer
+overwrites the file), and absence-cleaned (non-RMW, three-face-deleted)
+names are swept again right after the commit
+(``server/app/services/job_workflow_upgrade_sweep.py``) — restore writes
+precede the generation recheck in this module, so any restore that passed
+the recheck landed before the commit and is removed by the sweep, while a
+restore whose recheck lands after the commit discards itself. The residue
+shrinks to the sub-millisecond commit→sweep span on the upgrade path;
+rerun/run-to keep the pre-existing millisecond-scale window (their reset
+closures are downstream-closed over the merged adjacency, so a stale
+survivor can only satisfy a consumer that is itself being reset and whose
+other gating inputs were staged away by the same mutation).
 """
 
 from __future__ import annotations

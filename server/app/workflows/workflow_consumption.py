@@ -10,6 +10,12 @@ loader 对节点 ``inputs`` 只做字符串列表解析，不要求其生产者�
 隐式边可能成环（loader 的 acyclic 校验只管显式边）：``walk_downstream``
 以 seen 防环，环内节点互相视为下游——保守方向（一起重跑），永不漏。
 纯函数：不触库、不触文件系统。
+
+注意：本模块的隐式边只表达「文件级消费关系」，不构成执行顺序证据——
+consumer 是否真的等 producer 重跑取决于该名字本次是否三面删除（缺席
+即闸）。upgrade 输入保护计划的「保证先行」判定在
+``server/app/services/job_workflow_upgrade_protection.py``，那里只把
+「唯一生产者且本次会缺席」的名字的隐式边当排序证据（#759 复审 P1-A）。
 """
 
 from __future__ import annotations
@@ -19,20 +25,8 @@ from collections.abc import Iterable, Mapping
 from server.app.workflows.definition import WorkflowDefinition
 
 
-def consumer_edges(
-    definition: WorkflowDefinition, *, skip_names: Iterable[str] = ()
-) -> dict[str, list[str]]:
-    """隐式消费边索引：producer key → 排序后的 consumer key 列表。
-
-    ``skip_names``（#759 4.1）：排除经由这些名字的隐式边。判定「名 X 的
-    consumer 是否保证在某 producer 之后执行」时，X 自己的隐式边正是被
-    保留的启动对象 / manifest 回填所满足的等待——拿它当保证证据是循环
-    论证，必须由调用方排除。复审 P1（跨名互证）起调用方把排除面扩大到
-    「所有尚未证明本次清理缺席的名字」：经由 RMW 名（不暂存，旧文件存
-    活）或受保护名的隐式边不构成因果序，见
-    ``job_workflow_upgrade_removed_outputs.unprotected_input_names``。
-    """
-    skipped = set(skip_names)
+def consumer_edges(definition: WorkflowDefinition) -> dict[str, list[str]]:
+    """隐式消费边索引：producer key → 排序后的 consumer key 列表。"""
     producers: dict[str, set[str]] = {}
     for key, node in definition.nodes.items():
         for name in node.outputs:
@@ -40,27 +34,18 @@ def consumer_edges(
     edges: dict[str, set[str]] = {key: set() for key in definition.nodes}
     for key, node in definition.nodes.items():
         for name in node.inputs:
-            if name in skipped:
-                continue
             for producer in producers.get(name, ()):
                 if producer != key:
                     edges[producer].add(key)
     return {key: sorted(targets) for key, targets in edges.items()}
 
 
-def dependency_children(
-    definition: WorkflowDefinition, *, skip_consumption_names: Iterable[str] = ()
-) -> dict[str, list[str]]:
-    """合并邻接表：显式边 ∪ 隐式消费边（key → 排序后的直接下游）。
-
-    ``skip_consumption_names``（#759 4.1）：排除经由这些名字的隐式消费
-    边，语义见 ``consumer_edges``——只在判定「名 X 的 consumer 是否保证
-    在 producer 之后执行」时使用。
-    """
+def dependency_children(definition: WorkflowDefinition) -> dict[str, list[str]]:
+    """合并邻接表：显式边 ∪ 隐式消费边（key → 排序后的直接下游）。"""
     children: dict[str, set[str]] = {key: set() for key in definition.nodes}
     for edge in definition.edges:
         children[edge.source].add(edge.target)
-    for source, targets in consumer_edges(definition, skip_names=skip_consumption_names).items():
+    for source, targets in consumer_edges(definition).items():
         children[source].update(targets)
     return {key: sorted(targets) for key, targets in children.items()}
 

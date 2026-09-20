@@ -33,10 +33,8 @@ from server.app.services.job_workflow_upgrade_gates import (
 from server.app.services.job_workflow_upgrade_impl import implementation_excluded_nodes
 from server.app.services.job_workflow_upgrade_plan import plan_inherit_nodes
 from server.app.services.job_workflow_upgrade_propagation import rerun_closure
-from server.app.services.job_workflow_upgrade_removed_outputs import (
-    deleted_node_keys,
-    unprotected_input_names,
-)
+from server.app.services.job_workflow_upgrade_protection import UpgradeProtectionUnprovableError
+from server.app.services.job_workflow_upgrade_removed_outputs import deleted_node_keys
 from server.app.services.job_workflow_upgrade_result import upgrade_result
 from server.app.workflows.revision_format import definition_from_job_snapshot
 
@@ -120,12 +118,14 @@ def apply_upgrade_once(
                     # 的孤立节点：实现漂移会使全部下游结果失效，同名
                     # 生产者也必须留在重置边界的同一侧。
                     inherit_nodes -= frozenset(rerun_closure(context.definition, set(revalidated)))
-            inherit_nodes, staged = service.job_db.stage_upgrade_reset_outputs_in_transaction(
-                conn,
-                service.artifact_mutation,
-                context.job,
-                context.definition,
-                inherit_nodes,
+            inherit_nodes, staged, protection = (
+                service.job_db.stage_upgrade_reset_outputs_in_transaction(
+                    conn,
+                    service.artifact_mutation,
+                    context.job,
+                    context.definition,
+                    inherit_nodes,
+                )
             )
             stats = upgrade_job_workflow_inherit(
                 conn,
@@ -141,12 +141,15 @@ def apply_upgrade_once(
                     staged.artifact_names if staged is not None else frozenset()
                 ),
                 # codex 五轮 P2-D：clean 语义分支（无任何继承节点）的
-                # 全量清单清理输入——新图中「无保证先行生产者」的输入名
-                # （#759 4.1：RMW 启动名 + 外部输入）受保护：删行会让
-                # hydration/restore_missing_inputs 无清单可回、节点永久
-                # 等输入（#114 语义）。裸构造服务（无 artifact_mutation）
-                # 维持旧行为的安全子集（不做全量清单清理）。
-                keep_input_names=unprotected_input_names(context.definition),
+                # 全量清单清理输入——#759 复审 P1-A 起为保护计划的 keep 集
+                # （reset-aware liveness/freshness 判定，在收敛后的实际
+                # 保留/重置面上计算）：只有「旧字节即权威」的名字（外部
+                # 输入、RMW 启动名、保留节点声明面）受保护；被重置纯
+                # 生产者作废且会重生成的名字必须删行，否则 hydration 会
+                # 在 ready 前复活旧字节（P1-A 反例）。裸构造服务（无
+                # artifact_mutation）维持旧行为的安全子集（不做全量清单
+                # 清理）。
+                keep_input_names=protection.keep,
                 full_manifest_cleanup=service.artifact_mutation is not None,
                 # #759 4.3：被删节点身份来自 old/new definition 差集（与
                 # removed_artifact_face 的产物名/runs 目录面同源），
@@ -158,6 +161,13 @@ def apply_upgrade_once(
     except JobMutationConflict as exc:
         rollback_upgrade_staged_outputs(staged)
         return upgrade_result(job_id, "skipped", exc.reason_code, str(exc), mode=mode)
+    except UpgradeProtectionUnprovableError as exc:
+        # #759 复审 P1-A fail closed：保护计划在收敛后的保留/重置面上
+        # 证不出 liveness/freshness（循环互证、跨名互借等）——抛点先于
+        # 任何文件暂存（staged 必为 None），事务整体回滚零副作用；留多
+        # （旧字节复活）与删多（启动输入丢失）都不可证时不许猜。
+        rollback_upgrade_staged_outputs(staged)
+        return upgrade_result(job_id, "skipped", "protection_unprovable", str(exc), mode=mode)
     except BaseException:
         # #204 broad-except audit: upgrade 的暂存件安全网（与
         # job_execution.run_to / job_rerun.commit_rerun 同款）。事务
@@ -169,7 +179,20 @@ def apply_upgrade_once(
         rollback_upgrade_staged_outputs(staged)
         raise
 
-    finalize_upgrade_staged_outputs(staged, service.object_store, stats["deleted_rows"], job_id)
+    # #759 复审 P1-A：三面已删的「缺席即闸」名在提交后再扫一次本地文件——
+    # hydration 不取 job-mutation 锁，可能在提交前从旧清单复活旧字节且代次
+    # 复查恰好通过（残余窗口）；恢复写先于复查，复查通过的复活必落在提交
+    # 前，提交后 sweep 必然覆盖（详见 job_workflow_upgrade_sweep docstring）。
+    deleted_names = frozenset(str(row["name"]) for row in stats["deleted_rows"])
+    finalize_upgrade_staged_outputs(
+        staged,
+        service.object_store,
+        stats["deleted_rows"],
+        job_id,
+        job=context.job,
+        jobs_dir=service.job_db.jobs_dir,
+        sweep_names=protection.sweep & deleted_names,
+    )
     if service.job_event_buffer is not None:
         record_job_update(service.job_db, service.job_event_buffer, job_id)
     elif service.job_event_manager is not None:

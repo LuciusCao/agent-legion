@@ -163,12 +163,12 @@ def test_rmw_startup_name_protected_when_pure_producer_runs_after_consumer(
 ) -> None:
     """4.1 反例：q 是 x 的 RMW 节点，p 纯产 x 但 q→p（p 排在 q 之后）。
 
-    旧缺陷：``unprotected_input_names`` = inputs − 纯输出——图中存在任意
-    同名 pure producer（p）即判 x 不受保护，旧 x 的清单行/本地文件进清理
-    面；但 p 排在 q 之后，q 的首跑失去启动输入（restore/hydration 也无
-    清单可回）。修复：只有保证先于**全部** consumer 执行的 producer 才能
-    替代启动对象——可达性判定排除 x 自己的隐式消费边（那条边正是被保留
-    的启动对象所满足的等待，循环论证）。
+    旧缺陷：保护判定 = inputs − 纯输出——图中存在任意同名 pure
+    producer（p）即判 x 不受保护，旧 x 的清单行/本地文件进清理面；但 p
+    排在 q 之后，q 的首跑失去启动输入（restore/hydration 也无清单可回）。
+    现行语义（#759 复审 P1-A，``input_protection_plan``）：x 是 RMW 附着名
+    （旧文件不进暂存面而存活），其唯一 consumer q 没有对 p 的排序证据
+    （RMW 名的隐式边不构成因果序）⇒ keep——保留旧 x 作 q 的启动输入。
     """
     old, new = _rmw_late_producer_definitions()
     queries, workspace, revisions, original = _setup(tmp_path, old)
@@ -202,9 +202,9 @@ def test_rmw_startup_name_unprotected_when_producer_guaranteed_before_consumers(
 ) -> None:
     """4.1 放行：p 纯产 x 且经显式边保证先于唯一 consumer（q RMW）。
 
-    p→q 显式边使 q 在依赖邻接（排除 x 自己的隐式消费边）上可达——p 重跑
-    重新产出 x 后 q 才解锁，旧 x 的清单行与本地文件可安全清理。证明判别
-    点是「保证先行」而非「存在同名 producer 即一律保护」的粗面。
+    p→q 显式边使 q 有对 p 的排序证据——p 重跑重新产出 x 后 q 才解锁，
+    旧 x 的清单行与本地文件可安全清理。证明判别点是「保证先行」而非
+    「存在同名 producer 即一律保护」的粗面。
     """
     old, _ = _rmw_late_producer_definitions()
     new = _definition(

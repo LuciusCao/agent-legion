@@ -28,10 +28,10 @@ class JobWorkflowUpgradeService:
         self.lease_repo = lease_repo
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
-        # #508 同款产物清理件（review P1-3）：重置闭包的本地产物暂存、
-        # 清单行同事务删除与提交后对象清理的编排见
-        # job_workflow_upgrade_cleanup。None 时（裸构造的服务）退化为
-        # 不做本地产物暂存，仅清单行清理。
+        # #508 同款产物清理件（review P1-3）：重置闭包的本地产物暂存编排见
+        # job_workflow_upgrade_staging（含 #759 复审 P1-A 的保护计划
+        # fail-closed 闸），提交后收尾见 job_workflow_upgrade_cleanup。
+        # None 时（裸构造的服务）退化为不做本地产物暂存，仅清单行清理。
         self.artifact_mutation = artifact_mutation
         self.object_store = object_store
         # P1-1（codex 四轮）：实现身份解析的 gate，与 dispatch 侧

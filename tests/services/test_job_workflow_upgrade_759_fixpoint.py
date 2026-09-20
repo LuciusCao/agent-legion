@@ -1,10 +1,18 @@
-"""issue #759 复审 P1：``unprotected_input_names`` 的名集合不动点语义。
+"""issue #759 复审 P1/P1-A：输入保护计划的跨名证据与 fail-closed 语义。
 
-「保证先行」判定里经由的隐式消费边所跨名字必须会在本次清理中缺席：
-- 跨名互证反例（双 RMW 互借对方隐式边）→ 两个名都保留保护；
-- 显式边链的「producer 真先行」对照 → 仍放行清理；
-- 链式 RMW（X 的 RMW 依赖 W 的 RMW）→ W 先落地、X 第二轮经 W 的隐式
-  边放行，钉住多轮迭代表达力（单轮实现会把 X 留在保护集）。
+「保证先行」判定里经由的隐式消费边所跨名字必须会在本次清理中三面缺席
+（本地文件/清单行/权威对象）——经 RMW 名（不暂存，旧文件存活）的隐式
+边不构成因果序。#759 复审 P1-A 起判定改由
+``job_workflow_upgrade_protection.input_protection_plan`` 承担（reset-aware
+liveness/freshness 双判定，表驱动纯函数用例见
+``test_job_workflow_upgrade_protection.py``），本文件钉住三个服务级形态：
+
+- 跨名互证反例（双 RMW 互借对方隐式边 + 无显式入边的纯 consumer）→
+  两方向均不可证明（留：纯 consumer 经存活旧文件吃旧字节；删：RMW 面
+  不暂存文件同样吃到）⇒ upgrade fail closed（skipped），不是「保守保留」
+  ——保留在这里同样是静默错误，没有保守方向可选；
+- 链式 RMW（纯 consumer c 对 x 无排序证据）⇒ 同样 fail closed；
+- 显式边链的「producer 真先行」对照 ⇒ 仍放行清理（freshness 可证）。
 
 与 ``test_job_workflow_upgrade_759_boundaries.py`` 同源（800 行纪律拆出
 的姊妹文件），helper 形状保持一致。
@@ -110,7 +118,7 @@ def _seed_clean_job(
     manifest_rows: dict[str, list[str]],
 ) -> tuple[JobQueries, str, Path, dict[str, Any]]:
     """播种旧 revision 的 completed job（全部节点 completed + 清单行 +
-    本地文件），发布新 revision，返回 clean 升级前的现场。"""
+    本地文件），发布新 revision，执行 clean 升级并返回结果。"""
     queries, workspace, revisions, original = _setup(tmp_path, old)
     revisions.publish_workspace_revision(workspace["id"], new)
     job_id = _seed_job(queries, workspace, original, node_keys)
@@ -124,19 +132,20 @@ def _seed_clean_job(
             (job_dir / name).write_text(f"old-{name}")
             _insert_manifest_row(queries, job_id, node_key, name)
     result = _make_service(tmp_path, queries).upgrade(workspace["id"], job_id, mode="clean")
-    assert result["status"] == "succeeded"
     return queries, job_id, job_dir, result
 
 
-def test_cross_name_mutual_proof_keeps_both_rmw_startup_rows(tmp_path: Path) -> None:
-    """复审 P1 互证反例：双 RMW 互借对方隐式边不得完成「保证先行」证明。
+def test_cross_name_mutual_proof_fails_closed(tmp_path: Path) -> None:
+    """复审 P1 互证反例（P1-A 起 fail closed）：双 RMW 互借对方隐式边。
 
     p 纯产 x/w；q 是 x 的 RMW（p→q）；m 是 w 的 RMW（p→m）；c 声明
-    inputs [x, w]、无显式入边。旧判定：判 x 时 c 经 m→c（w 的隐式边）
-    可达、判 w 时 c 经 q→c（x 的隐式边）可达——两个名互相借对方的边
+    inputs [x, w]、无显式入边。判 x 时 c 只能经 m→c（w 的隐式边）可达、
+    判 w 时 c 只能经 q→c（x 的隐式边）可达——两个名互相借对方的边
     「证明」对方缺席，但 RMW 名不暂存、旧文件存活，经由它们的隐式边不
-    构成因果序。最小不动点下双方都无不依赖对方的证据链 → 都保留保护
-    （清单行是 RMW 首跑的启动输入/hydration 回填来源，#114 语义）。
+    构成因果序。旧语义把两名留在保护集（保守保留），但保留同样是静默
+    错误：c 无显式入边、旧 x/w 文件在场 ⇒ ready gate 立刻放行，c 在
+    p/q/m 重跑前消费旧 revision 字节。两方向均不可证明 ⇒ upgrade 必须
+    fail closed（skipped/protection_unprovable），零副作用。
     """
     old = _definition(
         {
@@ -153,7 +162,7 @@ def test_cross_name_mutual_proof_keeps_both_rmw_startup_rows(tmp_path: Path) -> 
             "c": _node("c", inputs=["x.json", "w.json"]),
         }
     )
-    queries, job_id, job_dir, _ = _seed_clean_job(
+    queries, job_id, job_dir, result = _seed_clean_job(
         tmp_path,
         old,
         new,
@@ -161,21 +170,25 @@ def test_cross_name_mutual_proof_keeps_both_rmw_startup_rows(tmp_path: Path) -> 
         {"q": ["x.json"], "m": ["w.json"]},
     )
 
+    assert result["status"] == "skipped"
+    assert result["reason_code"] == "protection_unprovable"
+    assert "x.json" in result["message"] and "w.json" in result["message"]
+    # 零副作用：节点状态、清单行、本地文件全部保持升级前原样。
     statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
-    assert set(statuses.values()) == {"pending"}
-    # x 与 w 都保留保护：清单行不删（RMW 名的本地文件本就不进暂存面）。
+    assert set(statuses.values()) == {"completed"}
     assert ("q", "x.json") in _manifest_names(queries, job_id, {"q"})
     assert ("m", "w.json") in _manifest_names(queries, job_id, {"m"})
     assert (job_dir / "x.json").read_text() == "old-x.json"
     assert (job_dir / "w.json").read_text() == "old-w.json"
+    assert not (job_dir / ".staged").exists()
 
 
 def test_explicit_chain_producer_still_unprotects_startup_row(tmp_path: Path) -> None:
     """放行对照：p→q→c 显式边链的「producer 真先行」不依赖任何隐式边。
 
     p 纯产 x，q 是 x 的 RMW（p→q），c 消费 x（q→c）——c 被显式边硬阻塞
-    到链重跑完成，x 的清理证据在第一轮（空缺席集）就成立，不动点收紧
-    不得误伤这类真先行场景。
+    到链重跑完成，x 的全部 consumer 都有排序证据（freshness 可证）⇒
+    放行清理；fail-closed 收紧不得误伤这类真先行场景。
     """
     old = _definition(
         {
@@ -190,7 +203,7 @@ def test_explicit_chain_producer_still_unprotects_startup_row(tmp_path: Path) ->
             "c": _node("c", after=["q"], inputs=["x.json"]),
         }
     )
-    queries, job_id, job_dir, _ = _seed_clean_job(
+    queries, job_id, job_dir, result = _seed_clean_job(
         tmp_path,
         old,
         new,
@@ -198,20 +211,23 @@ def test_explicit_chain_producer_still_unprotects_startup_row(tmp_path: Path) ->
         {"q": ["x.json"]},
     )
 
+    assert result["status"] == "succeeded"
     # x 失去保护：清单行清理（p 重跑重新产出 x 后 q/c 才解锁）。
     assert _manifest_names(queries, job_id, {"p", "q"}) == set()
     # RMW 名的本地文件不进暂存面（#114），清理的是清单行/权威对象。
     assert (job_dir / "x.json").read_text() == "old-x.json"
 
 
-def test_chained_rmw_unprotects_second_round_via_proven_absent_name(tmp_path: Path) -> None:
-    """链式 RMW：x 的 RMW（q）依赖 w 的 RMW（m），x 的证明第二轮才成立。
+def test_chained_rmw_without_pure_consumer_evidence_fails_closed(tmp_path: Path) -> None:
+    """链式 RMW 反例（P1-A 起 fail closed）：c 对 x 没有任何排序证据。
 
     px 纯产 x、p 纯产 w（互无显式边）；m 是 w 的 RMW（p→m、px→m）；q 是
-    x 的 RMW（m→q）；c 消费 [x, w]，显式 after=[p]。w 的第一轮证明走纯
-    显式边（m、c 都是 p 的显式下游）→ w 缺席落地；x 的证明必须借 w 的
-    隐式边 m→c（c 无 px 侧显式路径）→ 第二轮才成立。单轮实现会把 x 留
-    在保护集（突变锚点）；互证反例里的双向借边则永远不落地。
+    x 的 RMW（m→q）；c 消费 [x, w]，显式 after=[p]。c 对 x 的唯一可达
+    路径要借 w 的隐式边 m→c——但 w 是 RMW 名（不暂存、旧文件存活），该
+    边不构成「c 在 m 之后」的因果序；且 c 只显式等 p，px 尚未重跑时旧
+    x 文件已在场 ⇒ c 可能消费旧 revision 的 x。w 自身的全部 consumer
+    （m 经 p→m、c 经 p→c 显式边）都有排序证据 ⇒ w 可清；x 的纯 consumer
+    c 无证据 ⇒ 整体 fail closed（不留「半清理」的猜测态）。
     """
     old = _definition(
         {
@@ -230,7 +246,7 @@ def test_chained_rmw_unprotects_second_round_via_proven_absent_name(tmp_path: Pa
             "c": _node("c", after=["p"], inputs=["x.json", "w.json"]),
         }
     )
-    queries, job_id, _, _ = _seed_clean_job(
+    queries, job_id, job_dir, result = _seed_clean_job(
         tmp_path,
         old,
         new,
@@ -238,5 +254,14 @@ def test_chained_rmw_unprotects_second_round_via_proven_absent_name(tmp_path: Pa
         {"q": ["x.json"], "m": ["w.json"]},
     )
 
-    # w 第一轮、x 第二轮相继失去保护：两个名的清单行都清理。
-    assert _manifest_names(queries, job_id, {"px", "p", "m", "q"}) == set()
+    assert result["status"] == "skipped"
+    assert result["reason_code"] == "protection_unprovable"
+    assert "x.json" in result["message"]
+    # 零副作用：w 虽单独可证 clean，unprovable 非空 ⇒ 整体不应用。
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    assert set(statuses.values()) == {"completed"}
+    assert ("q", "x.json") in _manifest_names(queries, job_id, {"q"})
+    assert ("m", "w.json") in _manifest_names(queries, job_id, {"m"})
+    assert (job_dir / "x.json").read_text() == "old-x.json"
+    assert (job_dir / "w.json").read_text() == "old-w.json"
+    assert not (job_dir / ".staged").exists()

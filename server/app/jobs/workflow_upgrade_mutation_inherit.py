@@ -56,6 +56,12 @@ def upgrade_job_workflow_inherit(
     inherit 保守退化：旧快照损坏 / NULL frozen 不可证明）全部清单行
     清空（codex 五轮 P2-D）——退化 clean 的语义是旧产物全部作废，
     按名字暂存的删除匹配不到旧 key / 改名输出的行。
+    ``keep_input_names``（#759 复审 P1-A 起 = 输入保护计划的 keep 集，
+    在收敛后的保留/重置面上算出）：只有「旧字节即权威」的名字（外部
+    输入、RMW 启动名、保留节点声明面）受保护；被重置纯生产者作废且
+    会重生成的名字必须删行，否则 hydration 会在 ready 前复活旧字节
+    （P1-A 反例）。保护计划 unprovable 的升级到不了这里——服务层已
+    fail closed（protection_unprovable）。
     ``removed_node_keys``（#759 4.3）是被删节点身份的权威来源
     （old/new definition 差集，由服务层从旧快照算出）；None 时回退
     为按 job_nodes 现存行推导（直连 mutation 的调用面行为不变）。

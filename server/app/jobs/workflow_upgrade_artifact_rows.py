@@ -60,10 +60,10 @@ def delete_all_artifact_rows(
     全部行是退化 clean 语义的应有之义（与 A1/S7 的「退化 = 全量重跑 =
     旧产物作废」对齐）。
 
-    ``keep_input_names``（新图全部节点声明的 inputs）例外：这些名字是
-    重置节点的启动输入（RMW 名 + 外部输入名），删行会让
-    ``restore_missing_inputs`` 无清单可回、节点永久等输入——与 rerun
-    保留 RMW 输入的 #114 语义一致。返回删除行供提交后对象清理。
+    ``keep_input_names``（#759 复审 P1-A 起 = 保护计划 keep 集）例外：
+    这些名字的旧字节即权威（外部输入 / RMW 启动名 / 保留节点声明面），
+    删行会让 ``restore_missing_inputs`` 无清单可回、节点永久等输入——
+    与 rerun 保留 RMW 输入的 #114 语义一致。返回删除行供提交后对象清理。
     """
     if keep_input_names:
         name_marks = ",".join("%s" for _ in keep_input_names)
