@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "state_write_modules": {
+    "server/app/agent_broker/broker.py": {
+      "via": [
+        "MANIFEST_TRIM"
+      ],
+      "note": "agent 结果提交的请求终态写（state='done' + manifest trim），随 finish 臂收尾语义"
+    },
+    "server/app/agent_broker/claim_evaluate.py": {
+      "via": [
+        "evaluate_candidate",
+        "lock_job_mutation_and_read_generation"
+      ],
+      "note": "agent/远端 claim 的代次 CAS 评估；过期请求按突变侧语义取消（EXEC-GENERATION-001 §2.3）"
+    },
+    "server/app/agent_broker/claim_promote.py": {
+      "via": [
+        "promote_claim"
+      ],
+      "note": "claim 落库：node_runs/executor_leases 盖戳 INSERT 与请求/jobs 更新，在 claim CAS 事务内"
+    },
+    "server/app/agent_broker/enqueue.py": {
+      "via": [
+        "enqueue_request",
+        "lock_job_mutation_and_read_generation"
+      ],
+      "note": "agent 请求入队：job-mutation 锁下重读代次，不匹配则零写入"
+    },
+    "server/app/agent_broker/heartbeat_batch.py": {
+      "via": [
+        "batch_heartbeat"
+      ],
+      "note": "请求心跳续期，只刷心跳列、不翻转执行态"
+    },
+    "server/app/agent_broker/heartbeat_single.py": {
+      "via": [
+        "single_heartbeat"
+      ],
+      "note": "请求心跳续期，只刷心跳列、不翻转执行态"
+    },
+    "server/app/agent_broker/manifest_trim.py": {
+      "via": [
+        "cancel_request",
+        "MANIFEST_TRIM"
+      ],
+      "note": "突变侧同款取消语义的共享 SQL 片段（终态 + manifest trim）"
+    },
+    "server/app/agent_broker/mark_done_batch.py": {
+      "via": [
+        "mark_done_many"
+      ],
+      "note": "结果回报批终态写，与 finish 臂同序"
+    },
+    "server/app/agent_broker/release.py": {
+      "via": [
+        "release_slot"
+      ],
+      "note": "release-slot 翻转 reporting，释放 agent 容量槽"
+    },
+    "server/app/agent_broker/sweeper_definitions.py": {
+      "via": [
+        "fail_stale_definition_requests",
+        "lock_sweep_candidate"
+      ],
+      "note": "queued-request sweeper：无锁扫描 + 锁内复查两段式，过期请求取消而非 fail 节点"
+    },
+    "server/app/agent_broker/sweepers.py": {
+      "via": [
+        "sweep_expired_claims",
+        "lock_sweep_candidate"
+      ],
+      "note": "agent sweeper：过期代次取消请求而非 requeue，job_nodes 绝不动"
+    },
+    "server/app/agent_broker/unclaimable.py": {
+      "via": [
+        "fail_unclaimable_model_requests",
+        "lock_sweep_candidate"
+      ],
+      "note": "queued-request sweeper：同 sweeper_definitions 两段式"
+    },
+    "server/app/db/migrations/runs_sql.py": {
+      "via": [],
+      "note": "schema 迁移回填 SQL（DDL 层一次性数据订正，非运行时写面）"
+    },
+    "server/app/executors/_failed_node_recording.py": {
+      "via": [
+        "record_failed_node_without_execution"
+      ],
+      "note": "失败记录臂：node_runs 补记 + job_nodes 翻转，在 finish/失败记录 CAS 语义内"
+    },
+    "server/app/executors/_lease_approval.py": {
+      "via": [
+        "park_awaiting_approval"
+      ],
+      "note": "approval park：评估代次过期则跳过，成功 park 盖当前戳"
+    },
+    "server/app/executors/_lease_claims.py": {
+      "via": [
+        "claim_lease",
+        "lock_job_mutation_and_read_generation"
+      ],
+      "note": "code 池 claim：池锁后取 job-mutation 锁做 CAS，成功时给 node_runs/executor_leases 盖戳"
+    },
+    "server/app/executors/_lease_control.py": {
+      "via": [
+        "lock_job_mutation_and_read_generation"
+      ],
+      "note": "共享 CAS helper 所在模块（取锁 + 读 jobs 现值一步完成）"
+    },
+    "server/app/executors/_lease_lifecycle.py": {
+      "via": [
+        "finish_lease",
+        "expire_stale_leases"
+      ],
+      "note": "finish（含分片臂）与 lease 过期清扫：过期代次只收尾不翻转"
+    },
+    "server/app/executors/_lease_shards.py": {
+      "via": [
+        "finish_shard_execution",
+        "complete_empty_shard_node"
+      ],
+      "note": "分片 finish 臂与空 fan-out 完成：锁 + CAS 先于任何 node_shards 写"
+    },
+    "server/app/executors/_lease_transient_retry.py": {
+      "via": [
+        "try_return_node_to_pending"
+      ],
+      "note": "瞬时失败把节点放回 pending（DB-FAILURE-002），在 finish CAS 语义内"
+    },
+    "server/app/executors/_lease_write_paths.py": {
+      "via": [
+        "recover_orphaned_running_jobs"
+      ],
+      "note": "孤儿 running 恢复：只认盖了现值戳的 running 行"
+    },
+    "server/app/jobs/atomic_mutations.py": {
+      "via": [
+        "lease_guarded_mutation",
+        "mark_nodes_for_rerun"
+      ],
+      "note": "突变侧唯一锁域与 bump 点：lease_guarded_mutation 定义模块"
+    },
+    "server/app/jobs/execution_control.py": {
+      "via": [],
+      "note": "JobQueries 控制面 mixin：execution_mode/target 列，刻意不参与代次 bump"
+    },
+    "server/app/jobs/execution_pause.py": {
+      "via": [
+        "mark_execution_paused"
+      ],
+      "note": "JobQueries 暂停标记 mixin：pause/resume 不 bump（EXEC-GENERATION-001 §2.2）"
+    },
+    "server/app/jobs/job_state_mutations.py": {
+      "via": [
+        "resume_job",
+        "delete_job"
+      ],
+      "note": "job 级突变 helper：resume/delete 刻意不 bump"
+    },
+    "server/app/jobs/queries/approval_decisions.py": {
+      "via": [
+        "approve_gate_atomic",
+        "reject_gate_atomic"
+      ],
+      "note": "审批决策：job-mutation 锁下状态守卫，刻意不做代次比较（§2.4）"
+    },
+    "server/app/jobs/queries/job_bulk_sql.py": {
+      "via": [],
+      "note": "JobQueries 数据层门面：job 创建 INSERT（BOUNDARY-DATA-001）"
+    },
+    "server/app/jobs/queries/job_node_lifecycle.py": {
+      "via": [
+        "mark_nodes_not_applicable_many",
+        "lock_job_mutation_and_read_generation"
+      ],
+      "note": "ready-gate not_applicable 批写：逐 job 锁下重读代次，过期条目跳过"
+    },
+    "server/app/jobs/queries/job_node_runs.py": {
+      "via": [],
+      "note": "JobQueries 数据层门面：node_runs/job_nodes 记录读写（BOUNDARY-DATA-001）"
+    },
+    "server/app/jobs/queries/job_nodes.py": {
+      "via": [],
+      "note": "JobQueries 数据层门面：jobs/job_nodes CRUD（BOUNDARY-DATA-001）"
+    },
+    "server/app/jobs/queries/workspace_packages.py": {
+      "via": [],
+      "note": "JobQueries 数据层门面：jobs.packed 打包标记，非执行态翻转"
+    },
+    "server/app/services/cleanup_sweep.py": {
+      "via": [],
+      "note": "历史 run_dir 簿记清理（只清 run_dir/session_dir 列，非状态翻转）"
+    },
+    "server/app/services/quality_replay_setup.py": {
+      "via": [],
+      "note": "replay 副本 job 建即失败的收尾臂：job 从未进入调度，无 lease 上下文"
+    },
+    "server/app/services/run_dir_cleanup.py": {
+      "via": [],
+      "note": "历史 run_dir 簿记清理（只清 run_dir/session_dir 列，非状态翻转）"
+    },
+    "server/app/workflows/sharding.py": {
+      "via": [
+        "try_start_shard"
+      ],
+      "note": "分片表读写模块：job_nodes 翻 running 只在 claim 路径内并随 claim 盖戳（EXEC-SHARD-001）"
+    },
+    "server/app/jobs/workflow_upgrade_mutation.py": {
+      "via": [
+        "lease_guarded_mutation"
+      ],
+      "note": "clean 模式 workflow 升级突变：job-mutation 锁内 bump 代次并重建节点行（inherit 模式在后续层接入同一锁域）"
+    }
+  },
+  "artifact_byte_write_sites": {
+    "server/app/agent_broker/remote_artifact_promote.py": {
+      "via": [],
+      "note": "Worker 回传产物 promote（直写 authority key）；artifact-commit-protocol 层收口进 promote_to_authority_guarded"
+    },
+    "server/app/agent_broker/remote_artifact_support.py": {
+      "via": [],
+      "note": "远端产物支撑（presigned/暂存辅助）；字节写面随 promote 臂一并在后续层收口"
+    },
+    "server/app/services/job_artifact_objects.py": {
+      "via": [
+        "upsert_artifact_row_tx"
+      ],
+      "note": "本地/孤儿执行上传臂（直写 authority key）；artifact-commit-protocol 层改 staging + 共享 primitive"
+    }
+  },
+  "manifest_row_write_sites": {
+    "server/app/services/job_artifact_objects.py": {
+      "via": [
+        "record_remote_many",
+        "upsert_artifact_row_tx"
+      ],
+      "note": "清单行 upsert 唯一运行时入口；artifact-commit-protocol 层把登记迁入锁内闸"
+    }
+  }
+}
