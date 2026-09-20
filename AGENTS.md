@@ -87,7 +87,7 @@
 - Agent 执行的 provider/model/thinking 解析链：节点 `execution.*` → workflow 顶层 `execution` → 报错，不要加 workspace/yaml/全局兜底；解析结果按 catalog adapter 声明的 `ExecutionContract` 校验（必填缺失或配置了 runtime 不支持的键 → dispatch/claim fail-fast，EXEC-RUNTIME-DISPATCH-001）。一个 capability 每个 workspace 只允许一个 published Agent。测试的 Agent 目录用 `tests/helpers.seed_workspace_agent_definitions` 播种，不从 yaml sync。
 - 多步变更必须先全部校验/备妥再统一应用：中间结果放临时变量，禁止半应用状态；跨进程/跨事务动作（killpg、目录迁移、重排队）前必须重新校验目标身份与状态。这是代码评审最高发的缺陷族。
 - Job 产物权威副本在实例对象存储（`job_artifacts` 清单 + `server/app/services/job_artifact_objects.py`），本地 job_dir 只是执行暂存与可淘汰缓存（EXEC-ARTIFACT-STORE-001）。Worker 产物回传只走 claim 注入的 presigned S3 通道，禁止新增独立回传协议（EXEC-ARTIFACT-WORKER-001）；`/api/artifacts` 本地 CAS 是 legacy 兼容路径，不要加新功能。
-- 执行态（jobs/job_nodes/node_runs/executor_leases/agent_execution_requests）、产物字节（artifact key 的 put_stream/copy_object）与清单行（upsert_artifact_row_tx）写面全集由 `config/architecture/execution-write-surfaces.json` 机器钉住（EXEC-GENERATION-002）：新写面必须走共享 helper/primitive（`lease_guarded_mutation` / `lock_job_mutation_and_read_generation` / `upsert_artifact_row_tx`）并登记注册表，协议细节见 [docs/architecture/execution-generation.md](docs/architecture/execution-generation.md)。
+- 执行态（jobs/job_nodes/node_runs/executor_leases/agent_execution_requests）、产物字节（artifact key 的 put_stream/copy_object）与清单行（upsert_artifact_row_tx）写面全集由 `config/architecture/execution-write-surfaces.json` 机器钉住（EXEC-GENERATION-002）：新写面必须走共享 helper/primitive（`lease_guarded_mutation` / `lock_job_mutation_and_read_generation` / `promote_to_authority_guarded` / `upsert_artifact_row_tx`）并登记注册表，协议细节见 [docs/architecture/execution-generation.md](docs/architecture/execution-generation.md)。
 
 典型反例：
 

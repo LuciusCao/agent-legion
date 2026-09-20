@@ -159,9 +159,35 @@ helper 直写执行态。因此写面全集由机器钉住
 `upsert_artifact_row_tx` 等共享入口，并把条目（含 `via` 指向的 helper）加进
 注册表；机器检查是兜底，§3 的人工切面（降级语义、锁序、批序）不变。
 
-产物字节写面本层按现状登记（`remote_artifact_promote` /
-`remote_artifact_support` / `job_artifact_objects`），尚未过代次闸——收口进
-共享 promotion primitive 是后续 artifact-commit-protocol 层的内容（见 §4）。
+### 2.8 产物字节与清单平面：统一 promotion 协议
+
+在 finish CAS **之前**落地的产物写口（Worker 回传 promote、本地 code 执行的
+D12 镜像上传）与 finish 内的清单登记共用同一个 primitive
+（`server/app/executors/_artifact_promotion.py` 的
+`promote_to_authority_guarded`）：
+
+1. **staging 先行**：字节永远先落 per-execution/lease 的 staging key，**绝不直写
+   authority key**；既有 authority 对象先 server-side 备份到回滚 key；
+2. **锁外 copy**：staging→authority 的字节 copy 不持锁（大字节量可中断）；
+3. **锁内单事务权威复查**（`register_rows_guarded`）：取 `job-mutation` 锁 →
+   复查 lease 代次（`lease_artifact_write_current`：lease 仍 active、心跳未过期、
+   落戳代次 == jobs 现值）→（远端臂）staged 文件落盘 → upsert 清单行。
+   与突变侧只有两种序：登记先提交（随后被突变当作重置面删除），或突变先提交
+   （闸拒绝登记）；
+4. **失败回滚**：闸拒时用回滚备份恢复已完成的 authority-key copy，不落盘、不
+   复活清单行；锁内登记抛异常时文件提升经 `FilePromotionGuard` 整体回滚、
+   authority 按备份恢复后再原样上抛——旧清单行永不指向 hash/size 不符的字节。
+
+两个写口的接入点：Worker 回传 `remote_artifact_promote.promote_all` 在任何字节
+copy 前先做无锁预检再走共享序列；本地上传由 `JobArtifactObjectStore.upload` 的
+lease 臂把字节写到 per-lease staging key 后走同一 primitive，循环中途落地的
+reset 既登记不进去也污染不了 authority 对象。
+
+**Worker 结果归档的本地文件平面**：`AgentCompletionHandler.finish` 把归档只解包
+到 job_dir 内的 staging 目录（校验/分片读/镜像都读该视图，镜像同样携带
+lease_id）；expected 输出、events.jsonl 与 node.log 的提升经
+`ExecutionResult.staged_file_moves` 挤进 `finish_lease` 的代次 CAS——代次不匹配
+时文件永不落盘，旧代次归档覆盖不了新现场的本地输入。
 
 ## 3. 对抗审查 checklist
 
@@ -201,6 +227,9 @@ helper 直写执行态。因此写面全集由机器钉住
       中间态。
 - [ ] 盖戳义务是否完整？翻 running / park 等新状态时必须盖当前代次戳，否则下游
       代次闸门（如孤儿恢复只认现值戳）会把该行永久卡住。
+- [ ] 产物字节写面是否纳入闸？凡在 finish CAS 之前/之外落地的字节或清单写口
+      （promote、镜像上传、fan-out 物化）都要过 `lease_artifact_write_current`
+      或等价的锁内复查。
 - [ ] 重置/重建 `job_nodes` 的 mutation 是否同事务了结受影响的 queued
       请求？节点级重置走 `_cancel_queued_sql`；节点集合整体重建（clean
       upgrade）走 `cancel_queued_requests_for_job`（按节点过滤会漏掉已不
@@ -244,50 +273,62 @@ helper 直写执行态。因此写面全集由机器钉住
 1. **执行进程沙箱内直写 job_dir** 只靠 lease 生命周期约束：运行中的沙箱进程
    对 job_dir 的写入不经过代次闸；reset 拦在 claim/finish 两面，进程内文件的
    旧字节由「新代次生产者重跑覆盖 + 暂存/清理」兜底。
-2. **产物字节写面未过代次闸**：Worker 回传 promote 与本地镜像上传仍直写
-   authority key（注册表 `artifact_byte_write_sites` 按现状登记）。收口为
-   「staging + 锁内闸 + 失败回滚」的共享 promotion primitive 是后续
-   artifact-commit-protocol 层的内容。
-3. **ready 前输入恢复（hydration）尚无代次夹逼**：清单驱动的输入恢复与
+2. **promote 的锁外 authority-key copy**：字节 copy 在锁外执行（可中断的大
+   字节量不该持锁），靠回滚备份兜底（`restore_authority_backups`）；权威性
+   部分（落盘 + 清单行）在锁内单事务完成；无备份时的孤儿 authority 对象由
+   bucket lifecycle 兜底。
+3. **闸内文件提升的提交前窗口**：`finish_lease` 与 `register_rows_guarded` 的
+   staged 文件提升都在代次 CAS 之后、事务提交之前完成（本地 rename，毫秒级）；
+   提升成功后同事务后续 SQL 失败的崩溃窗口会留下「当前代次自身产物」的已落盘
+   文件，lease 仍 active、重试自然覆盖——不跨代次污染，不再收窄。finish 批
+   事务（`finish_many`）整批回滚重放由「source 缺席 + target 在场 = 已提升」
+   的幂等跳过兜住（`promote_file_moves_guarded`），瞬时 DB 冲突不会被放大成
+   确定性 500。
+4. **ready 前输入恢复（hydration）尚无代次夹逼**：清单驱动的输入恢复与
    消费关系索引（含 `edge.condition.artifact` 等隐式消费面）的统一建模是后续
    artifact-dependency-model 层的内容。
-4. **upgrade inherit 模式**（保留未变节点产物）与发布/skill 锁域接入同一
+5. **upgrade inherit 模式**（保留未变节点产物）与发布/skill 锁域接入同一
    协议是后续 upgrade-inherit 层的内容。
 
 #759 五面对抗自审（2026-09）登记、经 triage 暂不修的残余项（多为
 pre-existing 或需后续层设计；评审时按现状接受，不许扩大）：
 
-5. **eviction 淘汰输入文件后 targeted rerun 永不 ready**：`restore` 挂在
+6. **eviction 淘汰输入文件后 targeted rerun 永不 ready**：`restore` 挂在
    claim 后的 `execute()`，而 `_inputs_exist` 在 ready 评估就把它挡死——
    恢复路径逻辑上不可达，job 静默卡 queued。修复需 hydration 下沉到
    ready/dispatch 评估前（归 artifact-dependency-model 层）。
-6. **not_applicable 化已失效生产者困死纯隐式消费者**：rerun 重置并失效
+7. **not_applicable 化已失效生产者困死纯隐式消费者**：rerun 重置并失效
    产物后，分支条件把生产者翻 not_applicable，文件永不再生、隐式消费者
    永久 pending。修复需 ready-gate 沿合并邻接传播 not_applicable（同上层）。
-7. **审批 approve 产物文件事务前写**：并发决策下败者的文件可能覆写胜者
+8. **审批 approve 产物文件事务前写**：并发决策下败者的文件可能覆写胜者
    的上传内容（窗口窄）；round_no 锁外计数可重号。rework 的 feedback
    已在锁内紧随暂存之后写入（自审修复：提交后写有 stale/missing-read
    窗口，事务前写会被暂存扫走），回滚残留的新 note 由下轮覆盖。
-8. **单 claim 多候选单事务的 advisory 锁累积**：§2.5 的全序论证只覆盖
+9. **单 claim 多候选单事务的 advisory 锁累积**：§2.5 的全序论证只覆盖
    批路径；单 claim 面靠 40P01 一次重试 + deadlock_timeout 缓解。
-9. **`mark_nodes_not_applicable_many` 翻 not_applicable 不盖代次戳**：
-   当前无任何按戳消费方，登记为不对称点；后续若按戳判别归属须先补戳。
-10. **run-to 两臂下游语义差**：with-start 把目标下游翻 stale，without-start
+10. **`mark_nodes_not_applicable_many` 翻 not_applicable 不盖代次戳**：
+    当前无任何按戳消费方，登记为不对称点；后续若按戳判别归属须先补戳。
+11. **run-to 两臂下游语义差**：with-start 把目标下游翻 stale，without-start
     只重置 closure ∩ 非 completed（文档化差异，刻意性待产品确认）。
-11. **legacy 无快照 job 的 clean upgrade**：旧定义不可知，本地产物文件
+12. **legacy 无快照 job 的 clean upgrade**：旧定义不可知，本地产物文件
     无法暂存（清单行/对象仍失效），残留文件可能解锁无生产者 input。
-12. **sweeper 遗留**：lease 行消失后 claimed/reporting 请求无归属
+13. **sweeper 遗留**：lease 行消失后 claimed/reporting 请求无归属
     （`lease is None: continue`）；agent sweep requeue 守卫含 failed 可
     复活聚合判死的节点；unclaimable sweep 固定头 256 窗口尾部饿死。
-13. **retention**：keyset 游标无 skew 重叠窗（近同时提交的行可永久漏删）；
+14. **retention**：keyset 游标无 skew 重叠窗（近同时提交的行可永久漏删）；
     retention 删请求行与 reaper 删 bundle 文件无顺序保证（极端停摆下
     bundle 文件泄漏）。
-14. **批/单发对 start 节点的拒绝 reason_code 不一致**；run-to 两臂与
+15. **批/单发对 start 节点的拒绝 reason_code 不一致**；run-to 两臂与
     upgrade 提交后未 `notify_schedulable_work`（有周期扫描兜底则为延迟
     差异）；run-to 不清 `node_runs.run_dir/session_dir`（日志路径 404）。
-15. **迟到旧代次 Worker 结果的登记先于 finish 代次 CAS**（§4.2 的交互
+16. **迟到旧代次 Worker 结果的登记先于 finish 代次 CAS**（§4.2 的交互
     放大）：cleanup 的「键复现 = 新 attempt」启发式会把旧代次迟到登记
     误判为新产物放过，陈旧行/对象在新一代重跑完成前可被服务。
+
+后续方向：评估 immutable/versioned authority key + manifest 原子切换（#759
+复审增补的长期项）；`.result-staging-*` / `.promote-rollback-*` 的进程崩溃残留
+目前无 reaper（纯磁盘泄漏，消费者按名读取不受影响），值得一个 sweeper 或启动
+清理的后续项。
 
 ## 5. 验证与测试手法
 
@@ -299,6 +340,9 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
   `thread.join(timeout)` 后断言线程已死防假绿；每案断言「双方合理收尾 + 最终
   状态 == 某种合法串行序的结果」。批序回归案带突变自检：在旧的纯 job_id 序下
   本案必死锁。
+- 产物写面闸：`tests/db/test_generation_write_gates.py`（字节闸交错案）与
+  `tests/db/test_completion_generation_gates.py`（归档 staging + finish 闸内
+  提升）、`tests/services/test_agent_completion_remote.py` 系列。
 - 协议成员名单与证据：`config/architecture/architecture-invariants.yaml` 的
   EXEC-GENERATION-001 条目（正式表述 + evidence 列表）。
 
