@@ -648,3 +648,20 @@ def test_run_to_without_start_deletes_shards_only_for_reset_nodes(
             ).fetchall()
         }
     assert remaining == {"intake_knowledge_points"}
+
+
+def test_run_to_without_start_resets_failed_ancestors(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace
+):
+    """钉住 without-start 臂的文档化豁免（#759 自审误伤回滚）：closure 内
+    failed 祖先一并翻 pending 重跑，不做 failed-upstream 拒绝。"""
+    job = _create_job(job_db, workspace["id"])
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
+    job_db.update_job_node(job["id"], "write_script", status="failed")
+
+    result = execution_service.run_to(workspace["id"], job["id"], "review_script")
+
+    assert result["status"] == "succeeded"
+    statuses = _node_statuses(job_db, job["id"])
+    assert statuses["write_script"] == "pending"
+    assert statuses["review_script"] == "pending"

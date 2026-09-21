@@ -15,23 +15,17 @@ from server.app.db.connection import DatabaseConnection
 def delete_job_artifact_rows_tx(
     conn: DatabaseConnection,
     job_id: str,
-    *,
-    preserve_names: frozenset[str] | set[str] = frozenset(),
+    names: frozenset[str] | set[str],
 ) -> list[dict[str, Any]]:
-    """删除一个 job 的全部清单行（``preserve_names`` 豁免，如 RMW 名）。"""
-    if preserve_names:
-        return [
-            dict(row)
-            for row in conn.execute(
-                "delete from job_artifacts where job_id=%s and not (name = any(%s))"
-                " returning node_key, name, storage_key",
-                (job_id, sorted(preserve_names)),
-            ).fetchall()
-        ]
+    """按名精确删除清单行（与暂存集严格互补，同 rerun 的删除语义）。"""
+    if not names:
+        return []
+    marks = ",".join("%s" for _ in names)
     return [
         dict(row)
         for row in conn.execute(
-            "delete from job_artifacts where job_id=%s returning node_key, name, storage_key",
-            (job_id,),
+            f"delete from job_artifacts where job_id=%s and name in ({marks})"
+            " returning node_key, name, storage_key",
+            (job_id, *sorted(names)),
         ).fetchall()
     ]

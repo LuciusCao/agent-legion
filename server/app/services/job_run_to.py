@@ -11,7 +11,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from server.app.events.aggregator import broadcast_job_update, record_job_update
-from server.app.jobs.atomic_mutations import JobMutationConflict, apply_run_to
+from server.app.jobs.atomic_mutations import JobMutationConflict
+from server.app.jobs.run_to_mutation import apply_run_to
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.upstream_guard import (
     raise_if_failed_upstream,
@@ -69,10 +70,10 @@ def run_to_without_start(
         ) as conn:
             current_statuses = service.job_db.list_job_node_statuses_in_transaction(conn, job_id)
             reset_nodes = sorted(key for key in closure if current_statuses.get(key) != "completed")
-            # #759 invariant 5：failed-upstream 资格在锁内用当前状态重查。
-            raise_if_failed_upstream_in_tx(
-                service.job_db, conn, definition, target_node_key, job_id, "run_to", target_node_key
-            )
+            # 本臂刻意不做 failed-upstream 守卫（与 with-start 不对称是
+            # 设计）：failed 祖先必落在 closure ∩ 非 completed 的重置集里，
+            # 一并翻 pending 重跑，无「遗留 failed 祖先 → 永远 queued」
+            # 的隐患（test_job_run_to_upstream_guard 模块 docstring 钉住）。
             staged = service.artifact_mutation.stage_outputs(job, reset_nodes, definition)
             deleted_rows = apply_run_to(
                 conn,
@@ -185,7 +186,14 @@ def run_to_with_start(
         ) as conn:
             # #759 invariant 5：failed-upstream 资格在锁内用当前状态重查。
             raise_if_failed_upstream_in_tx(
-                service.job_db, conn, definition, start_node_key, job_id, "run_to", target_node_key
+                service.job_db,
+                conn,
+                definition,
+                start_node_key,
+                job_id,
+                "run_to",
+                target_node_key,
+                stale_nodes=descendants,
             )
             staged = service.artifact_mutation.stage_outputs(job, affected, definition)
             deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(

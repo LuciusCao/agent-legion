@@ -60,7 +60,7 @@ per-job advisory 锁 `pg_advisory_xact_lock(hashtext('job-mutation:' || job_id))
 | --- | --- | --- |
 | rerun / approval rework / run-to-with-start | `mark_nodes_for_rerun`（`server/app/jobs/atomic_mutations.py`） | 共用的唯一 bump 点；同事务取消受影响节点的 queued agent 请求（`_cancel_queued_sql`，含 manifest trim）、删分片行、删被暂存产物的 `job_artifacts` 清单行 |
 | run-to（无起始节点） | `apply_run_to` → `set_run_to_control(bump_generation=True)` | run-to-with-start 同事务已由 `mark_nodes_for_rerun` bump，这里不再 bump——整事务恰好一次；重置集 = closure ∩ 非 completed，同事务暂存其产物并删清单行 |
-| workflow upgrade（clean） | `upgrade_job_workflow`（`server/app/jobs/workflow_upgrade_mutation.py`） | fold 进 revision 切换的 jobs UPDATE；bump 先于节点行重建，重建行盖新戳；节点集合整体替换，同事务按 job 作用域了结全部 queued 请求（`cancel_queued_requests_for_job`）——遗留行无人 claim 时会把 `has_active_request` 的闸门外重派无限期挡住；新旧定义可执行节点之并的全部产物暂存失效、清单行全删 |
+| workflow upgrade（clean） | `upgrade_job_workflow`（`server/app/jobs/workflow_upgrade_mutation.py`） | fold 进 revision 切换的 jobs UPDATE；bump 先于节点行重建，重建行盖新戳；节点集合整体替换，同事务按 job 作用域了结全部 queued 请求（`cancel_queued_requests_for_job`）——遗留行无人 claim 时会把 `has_active_request` 的闸门外重派无限期挡住；产物失效按名（旧 output − 新 output − 新 input），清单行**按暂存名精确删除**（同 rerun）——「保留 ⇔ 未暂存」构造性成立，无独立 preserve 集；node_shards 按 job 作用域删除 |
 
 不 bump 的突变：resume、delete、approval park（park 只盖当前戳，自身不推进
 代次）。delete 不需要了结 queued 请求：`agent_execution_requests` 对
@@ -259,8 +259,10 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
 6. **not_applicable 化已失效生产者困死纯隐式消费者**：rerun 重置并失效
    产物后，分支条件把生产者翻 not_applicable，文件永不再生、隐式消费者
    永久 pending。修复需 ready-gate 沿合并邻接传播 not_applicable（同上层）。
-7. **审批产物文件事务前写**：并发决策下败者的文件可能覆写胜者的上传
-   内容（窗口窄）；round_no 锁外计数可重号。
+7. **审批 approve 产物文件事务前写**：并发决策下败者的文件可能覆写胜者
+   的上传内容（窗口窄）；round_no 锁外计数可重号。rework 的 feedback
+   已在锁内紧随暂存之后写入（自审修复：提交后写有 stale/missing-read
+   窗口，事务前写会被暂存扫走），回滚残留的新 note 由下轮覆盖。
 8. **单 claim 多候选单事务的 advisory 锁累积**：§2.5 的全序论证只覆盖
    批路径；单 claim 面靠 40P01 一次重试 + deadlock_timeout 缓解。
 9. **`mark_nodes_not_applicable_many` 翻 not_applicable 不盖代次戳**：

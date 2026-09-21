@@ -263,3 +263,50 @@ def test_rerun_failed_upstream_rechecked_under_mutation_lock(rerun_service, job_
 
 def _node_statuses(job_db, job_id):
     return {n["node_key"]: n["status"] for n in job_db.list_job_nodes(job_id)}
+
+
+def test_rerun_rejected_when_cross_branch_producer_failed(rerun_service, job_db):
+    """#759 自审：stale 集内节点的隐式生产者若在重置集外且 failed，放行
+    后调度的隐式生产者屏障会把 stale 节点永久阻塞——守卫必须拦住。"""
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    definition = workflow_definition_from_dict(
+        {
+            "key": "wf759_xbranch",
+            "label": "wf759_xbranch",
+            "nodes": {
+                "a": {"capability": "cap_a", "outputs": ["a.json"]},
+                "b": {
+                    "capability": "cap_b",
+                    "after": ["a"],
+                    "inputs": ["a.json", "p.json"],
+                    "outputs": ["b.json"],
+                },
+                "p": {"capability": "cap_p", "outputs": ["p.json"]},
+            },
+            "edges": [],
+        }
+    )
+    workspace = job_db.create_workspace("guard-xbranch", default_workflow_key="wf759_xbranch")
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
+    batch = job_db.create_run(
+        "wf759_xbranch", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]
+    )
+    job = job_db.create_job(
+        workflow_key="wf759_xbranch",
+        source_type="question",
+        source_id="1",
+        run_id=batch["id"],
+        title="xbranch",
+        node_keys=["a", "b", "p"],
+        workspace_id=workspace["id"],
+    )
+    job_db.update_job_node(job["id"], "p", status="failed")
+
+    import pytest as _pytest
+
+    with _pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(workspace["id"], job["id"], "a")
+
+    assert exc_info.value.reason_code == "upstream_failed"

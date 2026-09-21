@@ -870,3 +870,59 @@ def test_upgrade_staging_rolls_back_first_batch_when_second_fails(
 
     assert (job_dir / "a.json").read_text(encoding="utf-8") == "a"
     assert queries.get_job(job["id"])["status"] == "completed"
+
+
+def test_upgrade_preserves_cross_node_seed_and_stages_removed_rmw(tmp_path: Path) -> None:
+    """#759 自审：跨节点 output→input 转移（旧 k 产出、新 e 消费、新定义
+    无生产者）的种子三平面全保留；被删节点的 RMW 名三者全失效（节点已
+    消失，#114 死等理由不成立）。"""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace, job, service = _two_revision_env(
+        queries,
+        tmp_path,
+        {
+            "k": WorkflowNode(key="k", label="K", capability="c", outputs=["x.json"]),
+            "e": WorkflowNode(
+                key="e", label="E", capability="c2", inputs=["x.json"], outputs=["y.json"]
+            ),
+            "d": WorkflowNode(
+                key="d",
+                label="D",
+                capability="c3",
+                inputs=["z.json"],
+                outputs=["z.json"],
+            ),
+        },
+        {
+            "k": WorkflowNode(key="k", label="K", capability="c", outputs=["a.json"]),
+            "e": WorkflowNode(
+                key="e", label="E", capability="c2", inputs=["x.json"], outputs=["y.json"]
+            ),
+        },
+    )
+    job_dir = resolve_job_dir(job, tmp_path / "jobs")
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "x.json").write_text("seed", encoding="utf-8")
+    (job_dir / "z.json").write_text("rmw", encoding="utf-8")
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash) values"
+            " (%s, 'k', 'x.json', 'k/x.json', 1, ''),"
+            " (%s, 'd', 'z.json', 'k/z.json', 1, '')",
+            (job["id"], job["id"]),
+        )
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert (job_dir / "x.json").read_text(encoding="utf-8") == "seed"
+    assert not (job_dir / "z.json").exists()
+    with queries.connect() as conn:
+        remaining = {
+            row["name"]
+            for row in conn.execute(
+                "select name from job_artifacts where job_id=%s", (job["id"],)
+            ).fetchall()
+        }
+    assert remaining == {"x.json"}

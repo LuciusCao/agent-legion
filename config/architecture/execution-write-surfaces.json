@@ -138,9 +138,10 @@
     "server/app/jobs/atomic_mutations.py": {
       "via": [
         "lease_guarded_mutation",
-        "mark_nodes_for_rerun"
+        "mark_nodes_for_rerun",
+        "cancel_queued_sql"
       ],
-      "note": "突变侧唯一锁域与 bump 点：lease_guarded_mutation 定义模块"
+      "note": "突变侧唯一锁域与 rerun bump 点：lease_guarded_mutation 定义模块；apply_run_to 已拆至 run_to_mutation.py"
     },
     "server/app/jobs/execution_control.py": {
       "via": [],
@@ -188,6 +189,14 @@
     "server/app/jobs/queries/workspace_packages.py": {
       "via": [],
       "note": "JobQueries 数据层门面：jobs.packed 打包标记，非执行态翻转"
+    },
+    "server/app/jobs/run_to_mutation.py": {
+      "via": [
+        "apply_run_to",
+        "set_run_to_control",
+        "cancel_queued_sql"
+      ],
+      "note": "run-to（无起始节点）突变：锁内现算重置集（closure ∩ 非 completed），清单删除/分片删除/queued 取消同一集合驱动，bump fold 进 control UPDATE"
     },
     "server/app/services/cleanup_sweep.py": {
       "via": [],

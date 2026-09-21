@@ -37,7 +37,11 @@ APPROVAL_VERDICTS = ("approved", "rework", "rejected")
 DEFAULT_FEEDBACK_ARTIFACT = "review_feedback.json"
 
 # Execution fields are meaningless on a node that never dispatches; reject
-# them at load time instead of letting them sit silently inert.
+# them at load time instead of letting them sit silently inert. ``outputs``
+# joins them (#759 自审): a gate declaring an output becomes an implicit
+# producer — after rework the gate goes stale, its consumers are blocked by
+# the implicit-producer barrier, but the gate re-parks only after they
+# complete: deadlock.
 _FORBIDDEN_APPROVAL_FIELDS = (
     "capability",
     "execution",
@@ -46,6 +50,7 @@ _FORBIDDEN_APPROVAL_FIELDS = (
     "config_schema",
     "skill",
     "tools",
+    "outputs",
 )
 
 _ALLOWED_CONFIG_KEYS = ("rework_target", "feedback_artifact")
@@ -66,6 +71,12 @@ def validate_non_start_fields(
 def validate_approval_fields(raw_node: dict[str, Any], node_key: str) -> None:
     """Enforce the approval-node field rules at definition load time."""
     for forbidden in _FORBIDDEN_APPROVAL_FIELDS:
+        if forbidden == "outputs":
+            # 只拦非空声明：序列化回环会显式带 outputs: []，空列表无生产者
+            # 语义（#759 自审的死锁场景需要真实产物名）。
+            if raw_node.get("outputs"):
+                raise WorkflowDefinitionError(f"Approval node {node_key} must not declare outputs")
+            continue
         if forbidden in raw_node:
             raise WorkflowDefinitionError(f"Approval node {node_key} must not declare {forbidden}")
     raw_config = raw_node.get("config") or {}

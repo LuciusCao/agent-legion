@@ -99,7 +99,14 @@ def commit_rerun(
             # #759 invariant 5：failed-upstream 资格在锁内用当前状态重查
             # （锁外预检到取锁之间上游可能转 failed）。
             raise_if_failed_upstream_in_tx(
-                service.job_db, conn, definition, actual_node_key, job_id, "rerun", actual_node_key
+                service.job_db,
+                conn,
+                definition,
+                actual_node_key,
+                job_id,
+                "rerun",
+                actual_node_key,
+                stale_nodes=stale_nodes,
             )
             staged = service.artifact_service.stage_outputs(job, affected, definition)
             deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(

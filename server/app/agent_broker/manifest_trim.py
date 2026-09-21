@@ -97,6 +97,15 @@ def cancel_request(conn: Any, execution_id: str) -> None:
     )
 
 
+def cancel_queued_sql(placeholders: str) -> str:
+    """节点级 queued 取消 SQL（rerun 类路径；同事务 manifest trim）。"""
+    return (
+        "update agent_execution_requests set state='cancelled', finished_at=current_timestamp,"
+        f" manifest_json={MANIFEST_TRIM} where job_id=%s and node_key in ({placeholders})"
+        " and state='queued'"
+    )
+
+
 def cancel_queued_requests_for_job(conn: Any, job_id: str) -> None:
     """了结一个 job 的全部 queued 请求（同事务，manifest 同步 trim）。
 

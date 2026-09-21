@@ -420,7 +420,7 @@ def test_rerun_shard_node_rematerializes_shards(tmp_path):
 
 def test_apply_run_to_clears_shard_rows(tmp_path):
     from server.app.db.transaction import write_transaction
-    from server.app.jobs.atomic_mutations import apply_run_to
+    from server.app.jobs.run_to_mutation import apply_run_to
     from server.app.workflows.sharding import materialize_shards
 
     executor = FakeShardExecutor()

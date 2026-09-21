@@ -10,10 +10,11 @@ rejects such selections with the same error.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from server.app.services.job_operation_error import JobOperationError
-from server.app.workflows.workflow_consumption import dependency_ancestors
+from server.app.workflows.workflow_consumption import dependency_ancestors, dependency_parents
 
 
 def failed_upstream_node_keys(
@@ -61,10 +62,29 @@ def raise_if_failed_upstream_in_tx(
     job_id: str,
     operation: str,
     error_node_key: str,
+    *,
+    stale_nodes: Iterable[str] = (),
 ) -> None:
     """mutation 锁内的 failed-upstream 重查（#759 invariant 5 / TOCTOU）：
     锁外预检到取锁之间上游可能转 failed（无 lease 的 config-failure 路径
-    拦不住），状态相关的资格判定必须在锁内用当前状态重算。"""
+    拦不住），状态相关的资格判定必须在锁内用当前状态重算。
+
+    ``stale_nodes``：除起点祖先外，还检查「stale 集内节点的隐式/显式
+    生产者 ∖ 重置集」中的 failed 节点——跨分支的失败生产者不在重置
+    范围，放行后调度的隐式生产者屏障会把 stale 节点永久阻塞。
+    """
     statuses = job_db.list_job_node_statuses_in_transaction(conn, job_id)
     nodes = [{"node_key": key, "status": status} for key, status in statuses.items()]
     raise_if_failed_upstream(definition, nodes, start_node_key, job_id, operation, error_node_key)
+    reset_set = {start_node_key, *stale_nodes}
+    parents = dependency_parents(definition)
+    blocked = sorted(
+        {
+            parent
+            for key in reset_set
+            for parent in parents.get(key, [])
+            if parent not in reset_set and statuses.get(parent) == "failed"
+        }
+    )
+    if blocked:
+        raise upstream_failed_error(job_id, error_node_key, blocked, operation=operation)

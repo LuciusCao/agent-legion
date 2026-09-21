@@ -17,14 +17,14 @@ def upgrade_job_workflow(
     workflow_definition_snapshot_json: str,
     node_keys: list[str],
     frozen_config_json: str | None = None,
-    preserve_artifact_names: frozenset[str] | set[str] = frozenset(),
+    staged_artifact_names: frozenset[str] | set[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """重置类突变：bump 代次、了结 queued 请求、删产物清单行并重建节点。
 
-    ``preserve_artifact_names``（RMW 名，#114/#759）的清单行与对象保留——
-    rerun/run-to 入口对 RMW 三者全保留，升级不能让 RMW 种子只剩本地单
-    副本。返回被删的 ``job_artifacts`` 行（含 ``storage_key``），供调用方
-    在提交后做对象存储的 best-effort 删除（同 mark_nodes_for_rerun 的约定）。
+    ``staged_artifact_names`` 是调用方已暂存的产物名集合（与 stage_outputs
+    同源）——清单行按名精确删除，「保留 ⇔ 未暂存」构造性成立（同
+    mark_nodes_for_rerun 的约定）。返回被删的 ``job_artifacts`` 行（含
+    ``storage_key``），供调用方在提交后做对象存储的 best-effort 删除。
     """
     # EXEC-GENERATION-001：clean 升级是重置类突变，bump 恰好一次并 fold 进
     # 自身的 jobs UPDATE（returning 新代次），重建的 job_nodes 行盖同一戳。
@@ -66,11 +66,11 @@ def upgrade_job_workflow(
     # 重派无限期挡住（#759 review P1）。与 rerun 的 _cancel_queued_sql
     # 同语义，只是作用域为整个 job。
     cancel_queued_requests_for_job(conn, job_id)
-    # clean 升级全量重跑：旧 revision 的全部产物（含新定义里已删除节点的）
-    # 一律失效，清单行在同事务删除——否则全节点 pending 期间作业仍在从
-    # 对象存储提供上一轮产物，且隐式消费者会被旧输入文件立即解锁（#759）。
-    # RMW 名豁免（保留清单行与对象，与 rerun/run-to 的 RMW 全保留对齐）。
-    deleted_rows = delete_job_artifact_rows_tx(conn, job_id, preserve_names=preserve_artifact_names)
+    # clean 升级全量重跑：被暂存的产物（含新定义里已删除节点的）一律
+    # 失效，清单行按暂存名在同事务精确删除——否则全节点 pending 期间
+    # 作业仍在从对象存储提供上一轮产物，且隐式消费者会被旧输入文件
+    # 立即解锁（#759）。
+    deleted_rows = delete_job_artifact_rows_tx(conn, job_id, staged_artifact_names)
     # 分片行只 FK 到 jobs（不随 job_nodes 级联）：节点集合整体替换时必须
     # 按 job 作用域删除——否则新 revision 同名分片节点的物化被旧行跳过，
     # 沿用上一轮 input_json/状态（#759 自审 P1；rerun/run-to 都删）。
