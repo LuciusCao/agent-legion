@@ -24,16 +24,3 @@ def removed_node_keys(
 ) -> list[str]:
     """旧定义有、新定义没有的可执行节点（排序确定序）。"""
     return sorted(set(old_definition.executable_nodes) - set(new_definition.executable_nodes))
-
-
-def removed_rmw_names(old_definition: WorkflowDefinition, removed_keys: list[str]) -> list[str]:
-    """被删节点的 RMW 名（同名 input+output）：节点已消失，#114 的死等
-    理由不成立，必须强制暂存让三者全失效。"""
-    return sorted(
-        {
-            name
-            for key in removed_keys
-            for name in set(old_definition.nodes[key].outputs)
-            & set(old_definition.nodes[key].inputs)
-        }
-    )

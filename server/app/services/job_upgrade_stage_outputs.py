@@ -3,8 +3,11 @@
 失效判定**按名**而非按节点对（#759 自审）：dropped = 旧定义全部
 output − 新定义全部 output − 新定义全部 input——旧产出若在新定义
 仍被任一节点消费（含跨节点转移、新 RMW 名）就是种子而非垃圾。
-被删节点的 RMW 名经 extra_names 强制暂存（节点已消失，#114 的死等
-理由不成立，三者全失效才一致）。清单行删除与暂存集严格互补
+旧产物名的存亡由此闭包**唯一**判定：第一段 extra_names 已覆盖全部
+死名（含被删节点的，dropped 遍历旧定义全节点）；第二段对被删节点
+只清 run history，不再按旧定义重枚举 outputs——被删生产者的产物
+若已转移为新定义的输入，按节点枚举会把种子误暂存、清单行删除后
+消费者永久无法 ready（#759 codex P1）。清单行删除与暂存集严格互补
 （``upgrade_job_workflow`` 按暂存名删除，同 rerun）。
 """
 
@@ -18,7 +21,6 @@ from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.revision_diff import (
     dropped_artifact_names,
     removed_node_keys,
-    removed_rmw_names,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,7 +40,7 @@ def stage_upgrade_outputs(
     new_definition: WorkflowDefinition,
     old_definition: WorkflowDefinition | None,
 ) -> list[StagedOutputs]:
-    """暂存新旧定义可执行节点之并的产物；每个 handle 独立 commit/rollback。
+    """暂存新定义可执行节点的产物 + 死名 + 被删节点的 run history。
 
     第二段及以后失败时回滚已收集的 handle，不允许半程丢失。
     """
@@ -64,7 +66,7 @@ def stage_upgrade_outputs(
                     job,
                     removed,
                     old_definition,
-                    extra_names=removed_rmw_names(old_definition, removed),
+                    include_outputs=False,
                 )
             )
     except Exception:

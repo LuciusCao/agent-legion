@@ -1671,7 +1671,7 @@
     "server/app/workflows/output_validation.py": 47,
     "server/app/workflows/pi_protocol.py": 82,
     "server/app/workflows/registry.py": 14,
-    "server/app/workflows/revision_diff.py": 32,
+    "server/app/workflows/revision_diff.py": 23,
     "server/app/workflows/revision_format.py": 131,
     "server/app/workflows/scheduler.py": 65,
     "server/app/workflows/schema.py": 101,

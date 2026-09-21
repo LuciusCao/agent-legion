@@ -80,6 +80,7 @@ class JobArtifactMutationService:
         definition: WorkflowDefinition,
         *,
         extra_names: Sequence[str] = (),
+        include_outputs: bool = True,
     ) -> StagedOutputs:
         """Move the given nodes' outputs and run histories to reversible staging.
 
@@ -95,6 +96,13 @@ class JobArtifactMutationService:
         ``extra_names`` stages additional artifact names verbatim (e.g. an
         output a new workflow revision dropped from a shared node, #759);
         the caller owns their RMW exclusion.
+
+        ``include_outputs=False`` stages only run histories (plus any
+        ``extra_names``): for nodes whose artifact-name liveness is decided
+        by name upstream (``dropped_artifact_names`` on upgrade), per-node
+        output enumeration must not re-stage a name the by-name closure
+        preserved — e.g. a removed producer whose output became another
+        node's input seed (#759 codex P1).
 
         Read-modify-write artifacts (declared as both an input and an output of
         the same node) are never staged: removing them would leave the node
@@ -118,9 +126,10 @@ class JobArtifactMutationService:
             affected.add(node_key)
 
         outputs: set[str] = set(extra_names)
-        for key in affected:
-            node = definition.nodes[key]
-            outputs.update(set(node.outputs) - set(node.inputs))
+        if include_outputs:
+            for key in affected:
+                node = definition.nodes[key]
+                outputs.update(set(node.outputs) - set(node.inputs))
 
         paths = set(outputs)
         paths.update(f"runs/{key}" for key in affected)

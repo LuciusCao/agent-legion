@@ -56,8 +56,10 @@ def test_execution_generation_columns_exist_with_default_zero() -> None:
             assert row["column_default"] == "0", table
 
 
+@pytest.mark.fresh_schema
 def test_migrate_execution_generation_is_idempotent() -> None:
-    """apply fn 重复执行无副作用（升级库与 fresh 库同径）。"""
+    """apply fn 重复执行无副作用（升级库与 fresh 库同径）。DDL 用例按
+    仓库隔离约定走 fresh_schema 完整重建，不把结构漂移泄漏给同 worker。"""
     with write_transaction(TEST_DATABASE_URL) as conn:
         migrate_execution_generation(conn)
         migrate_execution_generation(conn)

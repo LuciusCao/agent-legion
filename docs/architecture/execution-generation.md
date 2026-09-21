@@ -60,7 +60,7 @@ per-job advisory 锁 `pg_advisory_xact_lock(hashtext('job-mutation:' || job_id))
 | --- | --- | --- |
 | rerun / approval rework / run-to-with-start | `mark_nodes_for_rerun`（`server/app/jobs/atomic_mutations.py`） | 共用的唯一 bump 点；同事务取消受影响节点的 queued agent 请求（`_cancel_queued_sql`，含 manifest trim）、删分片行、删被暂存产物的 `job_artifacts` 清单行 |
 | run-to（无起始节点） | `apply_run_to` → `set_run_to_control(bump_generation=True)` | run-to-with-start 同事务已由 `mark_nodes_for_rerun` bump，这里不再 bump——整事务恰好一次；重置集 = closure ∩ 非 completed，同事务暂存其产物并删清单行 |
-| workflow upgrade（clean） | `upgrade_job_workflow`（`server/app/jobs/workflow_upgrade_mutation.py`） | fold 进 revision 切换的 jobs UPDATE；bump 先于节点行重建，重建行盖新戳；节点集合整体替换，同事务按 job 作用域了结全部 queued 请求（`cancel_queued_requests_for_job`）——遗留行无人 claim 时会把 `has_active_request` 的闸门外重派无限期挡住；产物失效按名（旧 output − 新 output − 新 input），清单行**按暂存名精确删除**（同 rerun）——「保留 ⇔ 未暂存」构造性成立，无独立 preserve 集；node_shards 按 job 作用域删除 |
+| workflow upgrade（clean） | `upgrade_job_workflow`（`server/app/jobs/workflow_upgrade_mutation.py`） | fold 进 revision 切换的 jobs UPDATE；bump 先于节点行重建，重建行盖新戳；节点集合整体替换，同事务按 job 作用域了结全部 queued 请求（`cancel_queued_requests_for_job`）——遗留行无人 claim 时会把 `has_active_request` 的闸门外重派无限期挡住；产物失效按名（旧 output − 新 output − 新 input），清单行**按暂存名精确删除**（同 rerun）——「保留 ⇔ 未暂存」构造性成立，无独立 preserve 集；旧产物名的存亡由按名闭包**唯一**判定，被删节点只清 run history（`include_outputs=False`），不按旧定义重枚举 outputs——被删生产者的产物若已转移为新输入，枚举会把种子误暂存、消费者永久无法 ready；node_shards 按 job 作用域删除 |
 
 不 bump 的突变：resume、delete、approval park（park 只盖当前戳，自身不推进
 代次）。delete 不需要了结 queued 请求：`agent_execution_requests` 对
@@ -210,6 +210,11 @@ helper 直写执行态。因此写面全集由机器钉住
       （无下游扩展、无闭包过滤），只消费调用方传入的权威集合；调用方用
       计算重置集的同一个变量喂给它。执行范围过滤器（如 run-to 的
       `closure`）不得参与暂存判定——闭包外的隐式消费者同样在重置集里。
+- [ ] 旧产物名的存亡是否由按名闭包唯一判定？跨 revision 比较（upgrade）
+      里「旧 output − 新 output − 新 input」是唯一的死活判据；任何按节点
+      的 output 枚举（无论新旧定义）都不得再决定名的存亡——被删生产者的
+      产物若已转移为新输入，枚举会把种子误删。被删节点只清 run history
+      （`include_outputs=False`）。
 - [ ] 状态相关的决策集合是否在 mutation 锁内重算？锁外读数到取锁之间，
       目标可能被 claim/完成/重置（所有写入方持同一把 job-mutation 锁，
       锁内读数才是最终态）。集合与状态无关（纯图闭包）则无此面；一旦
