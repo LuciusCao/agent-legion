@@ -60,10 +60,12 @@ per-job advisory 锁 `pg_advisory_xact_lock(hashtext('job-mutation:' || job_id))
 | --- | --- | --- |
 | rerun / approval rework / run-to-with-start | `mark_nodes_for_rerun`（`server/app/jobs/atomic_mutations.py`） | 共用的唯一 bump 点；同事务取消受影响节点的 queued agent 请求（`_cancel_queued_sql`，含 manifest trim）、删分片行、删被暂存产物的 `job_artifacts` 清单行 |
 | run-to（无起始节点） | `apply_run_to` → `set_run_to_control(bump_generation=True)` | run-to-with-start 同事务已由 `mark_nodes_for_rerun` bump，这里不再 bump——整事务恰好一次 |
-| workflow upgrade（clean） | `upgrade_job_workflow`（`server/app/jobs/workflow_upgrade_mutation.py`） | fold 进 revision 切换的 jobs UPDATE；bump 先于节点行重建，重建行盖新戳 |
+| workflow upgrade（clean） | `upgrade_job_workflow`（`server/app/jobs/workflow_upgrade_mutation.py`） | fold 进 revision 切换的 jobs UPDATE；bump 先于节点行重建，重建行盖新戳；节点集合整体替换，同事务按 job 作用域了结全部 queued 请求（`cancel_queued_requests_for_job`）——遗留行无人 claim 时会把 `has_active_request` 的闸门外重派无限期挡住 |
 
 不 bump 的突变：resume、delete、approval park（park 只盖当前戳，自身不推进
-代次）。未被重置的节点行永不改戳——这是审批门语义成立的前提（见 2.4）。
+代次）。delete 不需要了结 queued 请求：`agent_execution_requests` 对
+jobs/workspaces 均为 on delete cascade，行随删除物理消失。未被重置的节点行
+永不改戳——这是审批门语义成立的前提（见 2.4）。
 
 ### 2.3 执行态写面：CAS 面清单
 
@@ -199,6 +201,10 @@ helper 直写执行态。因此写面全集由机器钉住
       中间态。
 - [ ] 盖戳义务是否完整？翻 running / park 等新状态时必须盖当前代次戳，否则下游
       代次闸门（如孤儿恢复只认现值戳）会把该行永久卡住。
+- [ ] 重置/重建 `job_nodes` 的 mutation 是否同事务了结受影响的 queued
+      请求？节点级重置走 `_cancel_queued_sql`；节点集合整体重建（clean
+      upgrade）走 `cancel_queued_requests_for_job`（按节点过滤会漏掉已不
+      在新定义里的旧节点）。job/workspace 删除走 FK cascade，无需取消。
 
 ### 3.3 纯逻辑正确性切面
 

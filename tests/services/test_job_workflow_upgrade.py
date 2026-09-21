@@ -77,6 +77,62 @@ def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path
     assert {node["status"] for node in queries.list_job_nodes(job["id"])} == {"pending"}
 
 
+def test_upgrade_job_workflow_cancels_queued_requests(tmp_path: Path) -> None:
+    """#759：clean 升级整体重建节点集合，必须同事务了结全部 queued 请求。
+
+    能认领旧 payload 的 Worker 离线时，遗留 queued 行不触发任何代次 CAS
+    清理，却一直被 has_active_request 视为 active，新 revision 的重派会被
+    无限期挡住。取消按 job 作用域（不按节点过滤——旧节点可能已不在新
+    定义里）。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
+    revisions = WorkflowRevisionService(queries)
+    original = revisions.publish_workspace_revision(workspace["id"], definition)
+    revisions.publish_workspace_revision(workspace["id"], definition)
+    job = queries.create_job(
+        workflow_key=definition.key,
+        source_type="question",
+        source_id="Q1",
+        run_id="batch1",
+        title="Question 1",
+        node_keys=["fetch_items"],
+        workspace_id=workspace["id"],
+        workflow_revision_id=original["id"],
+        workflow_version=original["version"],
+        workflow_definition_hash=original["definition_hash"],
+        workflow_definition_snapshot_json=original["definition_json"],
+    )
+    queries.update_job_node(job["id"], "fetch_items", status="completed")
+    queries.update_job_status(job["id"], "completed")
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into agent_execution_requests("
+            " execution_id, workspace_id, job_id, node_key,"
+            " agent_id, agent_definition_hash, node_concurrency_limit,"
+            " state, queued_at, manifest_json)"
+            " values ('exec-upgrade-queued', %s, %s, 'fetch_items',"
+            " 'generator-v1', 'sha256:whatever', 1, 'queued', current_timestamp, '{}')",
+            (workspace["id"], job["id"]),
+        )
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+    )
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    with queries.connect() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where execution_id='exec-upgrade-queued'"
+        ).fetchone()
+    assert row["state"] == "cancelled"
+
+
 def test_upgrade_job_workflow_updates_null_version_job(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(

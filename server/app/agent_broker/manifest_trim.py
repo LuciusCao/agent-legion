@@ -95,3 +95,26 @@ def cancel_request(conn: Any, execution_id: str) -> None:
         " finished_at=current_timestamp, manifest_json=" + MANIFEST_TRIM + " where execution_id=%s",
         (execution_id,),
     )
+
+
+def cancel_queued_requests_for_job(conn: Any, job_id: str) -> None:
+    """了结一个 job 的全部 queued 请求（同事务，manifest 同步 trim）。
+
+    EXEC-GENERATION-001：凡整体重建 job_nodes 的 mutation（clean upgrade）
+    必须在同一事务了结 queued 请求。节点集合被整体替换时不能按节点过滤
+    （旧节点可能已不在新定义里），按 job 取消。enqueue 与本类 mutation
+    共用 job-mutation 锁，锁内取消不存在新代次并发入队的窗口；遗留的
+    旧代次 queued 行若无人 claim（如 Worker 离线），不会触发任何代次
+    CAS 清理，却一直被 has_active_request 视为 active，把新代次的重派
+    无限期挡住（#759 review P1）。rerun 类路径的节点级取消见
+    atomic_mutations._cancel_queued_sql；job/workspace 删除路径不需要
+    本 helper——agent_execution_requests 对两者都是 on delete cascade，
+    行随删除物理消失。
+    """
+    conn.execute(
+        "update agent_execution_requests set state='cancelled',"
+        " finished_at=current_timestamp, manifest_json="
+        + MANIFEST_TRIM
+        + " where job_id=%s and state='queued'",
+        (job_id,),
+    )

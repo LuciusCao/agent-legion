@@ -42,9 +42,10 @@
     "server/app/agent_broker/manifest_trim.py": {
       "via": [
         "cancel_request",
+        "cancel_queued_requests_for_job",
         "MANIFEST_TRIM"
       ],
-      "note": "突变侧同款取消语义的共享 SQL 片段（终态 + manifest trim）"
+      "note": "突变侧同款取消语义的共享 SQL 片段（终态 + manifest trim）；job 级 queued 请求了结 helper 也在此（供无环 import）"
     },
     "server/app/agent_broker/mark_done_batch.py": {
       "via": [
@@ -208,9 +209,10 @@
     },
     "server/app/jobs/workflow_upgrade_mutation.py": {
       "via": [
-        "lease_guarded_mutation"
+        "lease_guarded_mutation",
+        "cancel_queued_requests_for_job"
       ],
-      "note": "clean 模式 workflow 升级突变：job-mutation 锁内 bump 代次并重建节点行（inherit 模式在后续层接入同一锁域）"
+      "note": "clean 模式 workflow 升级突变：job-mutation 锁内 bump 代次、了结全部 queued 请求并重建节点行（inherit 模式在后续层接入同一锁域）"
     }
   },
   "artifact_byte_write_sites": {

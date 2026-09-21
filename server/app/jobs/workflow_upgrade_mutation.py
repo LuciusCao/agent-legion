@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from server.app.agent_broker.manifest_trim import cancel_queued_requests_for_job
 from server.app.db.connection import DatabaseConnection
 
 
@@ -48,6 +49,12 @@ def upgrade_job_workflow(
     if row is None:
         raise ValueError(f"Unknown job: {job_id}")
     generation = row["execution_generation"]
+    # 节点集合整体重建前了结全部 queued 请求（含已不在新定义里的旧节点）：
+    # 能认领旧 payload 的 Worker 离线时，遗留 queued 行不会触发任何代次
+    # CAS 清理，却一直被 has_active_request 视为 active，把新 revision 的
+    # 重派无限期挡住（#759 review P1）。与 rerun 的 _cancel_queued_sql
+    # 同语义，只是作用域为整个 job。
+    cancel_queued_requests_for_job(conn, job_id)
     conn.execute("delete from job_nodes where job_id=%s", (job_id,))
     for node_key in node_keys:
         conn.execute(
