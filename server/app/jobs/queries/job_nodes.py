@@ -163,6 +163,19 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
             rows = conn.execute("select * from job_nodes where job_id=%s order by id", (job_id,))
             return [dict(row) for row in rows]
 
+    @staticmethod
+    def list_job_node_statuses_in_transaction(conn: Any, job_id: str) -> dict[str, str]:
+        """锁内重读节点状态。run-to 重置集的 TOCTOU 纪律（#759）：重置、
+        暂存与清单删除必须由同一份锁内当前状态驱动——锁外读数到取锁之间
+        节点可能被 claim 并完成，用过期集合暂存会清掉已完成节点的权威
+        产物。"""
+        return {
+            str(row["node_key"]): str(row["status"])
+            for row in conn.execute(
+                "select node_key, status from job_nodes where job_id=%s", (job_id,)
+            )
+        }
+
     def list_job_nodes_for_jobs(self, job_ids: Sequence[str]) -> dict[str, list[dict[str, Any]]]:
         if not job_ids:
             return {}

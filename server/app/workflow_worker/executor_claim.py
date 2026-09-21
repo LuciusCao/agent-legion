@@ -38,6 +38,8 @@ def claim_executor_node(
     node_config: dict[str, Any],
     node_code: str | None = None,
     config_snapshot_json: str = "",
+    *,
+    execution_generation: int = 0,
 ) -> bool:
     """Buffer an executor claim for the pass-end batch lease; False on capacity loss."""
     workspace_id = workspace["id"]
@@ -72,6 +74,7 @@ def claim_executor_node(
                 else None,
                 allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
                 config_snapshot_json=config_snapshot_json,
+                execution_generation=execution_generation,
             ),
             executor_id=executor_id,
             workspace=workspace,

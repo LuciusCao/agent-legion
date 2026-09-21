@@ -9,8 +9,9 @@ from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
-from server.app.jobs.workflow_upgrade_mutation import upgrade_job_workflow
+from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_workflow_upgrade_config import intake_frozen_config_json
+from server.app.services.job_workflow_upgrade_staging import execute_staged_upgrade
 from server.app.workflows.definition import workflow_definition_from_dict
 
 
@@ -19,13 +20,20 @@ class JobWorkflowUpgradeService:
         self,
         job_db: JobQueries,
         lease_repo: ExecutorLeaseRepository,
+        artifact_service: JobArtifactMutationService | None = None,
         job_event_manager: JobEventManager | None = None,
         job_event_buffer: Any | None = None,
+        object_store: Any = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
+        self.artifact_service = artifact_service or JobArtifactMutationService(
+            getattr(job_db, "jobs_dir", None)
+        )
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
+        # #508 同款：清单行 GC 需要提交后的对象删除；None = 无对象存储。
+        self.object_store = object_store
 
     def _result(
         self,
@@ -94,21 +102,7 @@ class JobWorkflowUpgradeService:
             # the batch payload is shared by every job in the batch. Since
             # #115 ordinary jobs dispatch the latest published code anyway;
             # the frozen pins only matter to quality-replay batches.
-            with self.job_db.lease_guarded_mutation(
-                job_id,
-                now,
-                reject_running_nodes=True,
-            ) as conn:
-                upgrade_job_workflow(
-                    conn,
-                    job_id,
-                    workflow_revision_id=str(active["id"]),
-                    workflow_version=int(active["version"]),
-                    workflow_definition_hash=str(active["definition_hash"]),
-                    workflow_definition_snapshot_json=str(active["definition_json"]),
-                    node_keys=list(definition.executable_nodes),
-                    frozen_config_json=frozen_config_json,
-                )
+            execute_staged_upgrade(self, job, job_id, active, definition, frozen_config_json, now)
         except JobMutationConflict as exc:
             return self._result(job_id, "skipped", exc.reason_code, str(exc))
 

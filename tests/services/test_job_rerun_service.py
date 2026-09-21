@@ -10,7 +10,10 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService, StagedOutputs
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_rerun import JobRerunService
+from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflows.definition import workflow_definition_from_dict
+from server.app.workflows.workflow_branching import downstream_nodes
 from tests.helpers import load_builtin_definition, publish_builtin_revision
 
 
@@ -127,6 +130,106 @@ def test_rerun_selected_node_and_descendants_are_stale(rerun_service, job):
     # The other diamond branch is not downstream of write_script.
     assert nodes["generate_questions"] == "pending"
     assert nodes["review_questions"] == "pending"
+
+
+def test_rerun_marks_implicit_consumers_stale(rerun_service, job_db):
+    """#759：无显式边的 input 消费者随生产者一起 stale（隐式消费边并入下游闭包）。
+
+    p.outputs=["x.json"]、q.inputs=["x.json"]，无 p→q 边：旧口径 q 保持
+    原状、产物静默基于旧 x；修复后 q 进 stale 集。突变自检锚点：q 不在
+    p 的显式下游里，本用例只能靠隐式消费边变绿。
+    """
+    definition = workflow_definition_from_dict(
+        {
+            "key": "wf759_implicit",
+            "label": "wf759_implicit",
+            "nodes": {
+                "p": {"capability": "cap_p", "outputs": ["x.json"]},
+                "q": {"capability": "cap_q", "inputs": ["x.json"], "outputs": ["y.json"]},
+            },
+            "edges": [],
+        }
+    )
+    assert downstream_nodes(definition, "p") == []
+    workspace = job_db.create_workspace("default", default_workflow_key="wf759_implicit")
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
+    batch = job_db.create_run(
+        "wf759_implicit", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]
+    )
+    implicit_job = job_db.create_job(
+        workflow_key="wf759_implicit",
+        source_type="question",
+        source_id="1",
+        run_id=batch["id"],
+        title="implicit-consumer",
+        node_keys=["p", "q"],
+        workspace_id=workspace["id"],
+    )
+
+    result = rerun_service.rerun(workspace["id"], implicit_job["id"], "p")
+
+    assert result["status"] == "succeeded"
+    nodes = {n["node_key"]: n["status"] for n in job_db.list_job_nodes(implicit_job["id"])}
+    assert nodes["p"] == "pending"
+    assert nodes["q"] == "stale"
+
+
+def test_rerun_stages_implicit_consumer_outputs(rerun_service, job_db):
+    """#759：隐式消费者的产物与 manifest 行随生产者 rerun 一起清理。
+
+    与 test_rerun_marks_implicit_consumers_stale 同一定义。stale 标记走
+    合并闭包后，stage_outputs 必须用同一闭包，否则 q 的旧 y.json 文件与
+    job_artifacts 行残留，q 重跑前其他消费者可能读到旧产物。突变自检锚点：
+    q 不在 p 的显式下游里，y.json 的清理只能靠隐式消费边变绿。
+    """
+    definition = workflow_definition_from_dict(
+        {
+            "key": "wf759_implicit_stage",
+            "label": "wf759_implicit_stage",
+            "nodes": {
+                "p": {"capability": "cap_p", "outputs": ["x.json"]},
+                "q": {"capability": "cap_q", "inputs": ["x.json"], "outputs": ["y.json"]},
+            },
+            "edges": [],
+        }
+    )
+    workspace = job_db.create_workspace("default", default_workflow_key="wf759_implicit_stage")
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
+    batch = job_db.create_run(
+        "wf759_implicit_stage", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]
+    )
+    implicit_job = job_db.create_job(
+        workflow_key="wf759_implicit_stage",
+        source_type="question",
+        source_id="1",
+        run_id=batch["id"],
+        title="implicit-consumer-staging",
+        node_keys=["p", "q"],
+        workspace_id=workspace["id"],
+    )
+    job_dir = resolve_job_dir(implicit_job, job_db.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "x.json").write_text("x", encoding="utf-8")
+    (job_dir / "y.json").write_text("y", encoding="utf-8")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash) values"
+            " (%s, 'p', 'x.json', 'k/x.json', 1, ''),"
+            " (%s, 'q', 'y.json', 'k/y.json', 1, '')",
+            (implicit_job["id"], implicit_job["id"]),
+        )
+
+    result = rerun_service.rerun(workspace["id"], implicit_job["id"], "p")
+
+    assert result["status"] == "succeeded"
+    assert not (job_dir / "x.json").exists()
+    assert not (job_dir / "y.json").exists()
+    with job_db.connect() as conn:
+        remaining = conn.execute(
+            "select name from job_artifacts where job_id=%s", (implicit_job["id"],)
+        ).fetchall()
+    assert remaining == []
 
 
 def test_rerun_cancels_queued_agent_requests(rerun_service, job, job_db):

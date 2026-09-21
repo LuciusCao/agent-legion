@@ -8,7 +8,6 @@ from typing import Any
 
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_branching import downstream_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +76,33 @@ class JobArtifactMutationService:
     def stage_outputs(
         self,
         job: dict[str, Any],
-        node_keys: Sequence[str],
+        affected_keys: Sequence[str],
         definition: WorkflowDefinition,
         *,
-        closure: set[str] | frozenset[str] | None = None,
+        extra_names: Sequence[str] = (),
+        include_outputs: bool = True,
     ) -> StagedOutputs:
-        """Move rerun outputs and run histories to reversible staging.
+        """Move the given nodes' outputs and run histories to reversible staging.
 
-        When ``closure`` is provided, only outputs declared by nodes inside the
-        closure are staged. This supports targeted rerun-to operations where
-        descendants outside the target closure must keep their artifacts.
+        ``affected_keys`` is authoritative: exactly these nodes' outputs are
+        staged. Callers MUST pass the same set they reset in the database
+        (#759) — the reset set and the staged set being equal is the invariant
+        that keeps file-driven consumers from reading stale outputs. The set
+        is computed by the caller via the merged downstream closure
+        (``dependency_downstream``) or an operation-specific filter; this
+        service deliberately performs no graph traversal of its own, so no
+        second enumeration can diverge from the reset logic.
+
+        ``extra_names`` stages additional artifact names verbatim (e.g. an
+        output a new workflow revision dropped from a shared node, #759);
+        the caller owns their RMW exclusion.
+
+        ``include_outputs=False`` stages only run histories (plus any
+        ``extra_names``): for nodes whose artifact-name liveness is decided
+        by name upstream (``dropped_artifact_names`` on upgrade), per-node
+        output enumeration must not re-stage a name the by-name closure
+        preserved — e.g. a removed producer whose output became another
+        node's input seed (#759 codex P1).
 
         Read-modify-write artifacts (declared as both an input and an output of
         the same node) are never staged: removing them would leave the node
@@ -103,22 +119,20 @@ class JobArtifactMutationService:
         if not storage_dir.exists():
             storage_dir.mkdir(parents=True, exist_ok=True)
 
-        affected_keys: set[str] = set(node_keys)
-        for node_key in node_keys:
+        affected: set[str] = set()
+        for node_key in affected_keys:
             if node_key not in definition.nodes:
                 raise ValueError(f"Unknown node: {node_key}")
-            affected_keys.update(downstream_nodes(definition, node_key))
+            affected.add(node_key)
 
-        if closure is not None:
-            affected_keys &= set(closure)
-
-        outputs: set[str] = set()
-        for key in affected_keys:
-            node = definition.nodes[key]
-            outputs.update(set(node.outputs) - set(node.inputs))
+        outputs: set[str] = set(extra_names)
+        if include_outputs:
+            for key in affected:
+                node = definition.nodes[key]
+                outputs.update(set(node.outputs) - set(node.inputs))
 
         paths = set(outputs)
-        paths.update(f"runs/{key}" for key in affected_keys)
+        paths.update(f"runs/{key}" for key in affected)
 
         staged_dir = storage_dir / ".staged"
         staged_dir.mkdir(parents=True, exist_ok=True)

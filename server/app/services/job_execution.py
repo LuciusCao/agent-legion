@@ -13,17 +13,12 @@ from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.batch_ops import batch_run_to as _batch_run_to
-from server.app.services.job_rerun.upstream_guard import raise_if_failed_upstream
-from server.app.services.job_staged_cleanup import (
-    commit_staged_outputs,
-    delete_rerun_artifact_objects,
-)
+from server.app.services.job_run_to import run_to_with_start, run_to_without_start
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.execution_control import ExecutionControlError, ancestor_closure
 from server.app.workflows.start_node import START_NODE_TYPE
-from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import dependency_ancestors
 
 logger = logging.getLogger(__name__)
 
@@ -124,17 +119,9 @@ class JobExecutionService:
                 f"Node {target_node_key} is an entry (type: start) node and never executes",
             )
 
-        try:
-            closure = ancestor_closure(definition, target_node_key)
-        except ExecutionControlError as exc:
-            raise JobOperationError(
-                job_id,
-                "run_to",
-                "failed",
-                target_node_key,
-                "node_not_found",
-                str(exc),
-            ) from exc
+        # #759：closure 走合并上游（显式边 ∪ 隐式生产边）——隐式生产者也
+        # 必须进重置集并重跑，否则调度的隐式生产者完成屏障会永久阻塞目标。
+        closure = frozenset({target_node_key, *dependency_ancestors(definition, target_node_key)})
 
         if self._has_active_lease(job_id):
             raise JobOperationError(
@@ -147,164 +134,8 @@ class JobExecutionService:
             )
 
         if start_node_key is None:
-            return self._run_to_without_start(job, definition, target_node_key, closure)
-        return self._run_to_with_start(job, definition, target_node_key, start_node_key, closure)
-
-    def _run_to_without_start(
-        self,
-        job: dict[str, Any],
-        definition: WorkflowDefinition,
-        target_node_key: str,
-        closure: frozenset[str],
-    ) -> JobOperationResult:
-        job_id = str(job["id"])
-        node_statuses = {
-            node["node_key"]: node["status"] for node in self.job_db.list_job_nodes(job_id)
-        }
-
-        if node_statuses.get(target_node_key) == "completed":
-            raise JobOperationError(
-                job_id,
-                "run_to",
-                "skipped",
-                target_node_key,
-                "target_already_completed",
-                "Target node is already completed",
-            )
-
-        try:
-            self.job_db.apply_run_to_atomic(job_id, target_node_key, closure, now=self._now())
-        except JobMutationConflict as exc:
-            raise JobOperationError(
-                job_id,
-                "run_to",
-                "skipped",
-                target_node_key,
-                exc.reason_code,
-                str(exc),
-            ) from exc
-        except ValueError as exc:
-            raise JobOperationError(
-                job_id, "run_to", "failed", target_node_key, "node_not_found", str(exc)
-            ) from exc
-
-        if self.job_event_buffer is not None:
-            record_job_update(self.job_db, self.job_event_buffer, job_id, str(job["workspace_id"]))
-        elif self.job_event_manager is not None:
-            broadcast_job_update(self.job_db, self.job_event_manager, job_id)
-        return self._result(job_id, "run_to", "succeeded", target_node_key)
-
-    def _run_to_with_start(
-        self,
-        job: dict[str, Any],
-        definition: WorkflowDefinition,
-        target_node_key: str,
-        start_node_key: str,
-        closure: frozenset[str],
-    ) -> JobOperationResult:
-        job_id = str(job["id"])
-        if start_node_key not in definition.nodes:
-            raise JobOperationError(
-                job_id,
-                "run_to",
-                "failed",
-                target_node_key,
-                "node_not_found",
-                f"Start node {start_node_key} not found in workflow",
-            )
-        if definition.nodes[start_node_key].node_type == START_NODE_TYPE:
-            raise JobOperationError(
-                job_id,
-                "run_to",
-                "failed",
-                target_node_key,
-                "node_not_executable",
-                f"Node {start_node_key} is an entry (type: start) node and never executes",
-            )
-
-        if start_node_key not in closure:
-            raise JobOperationError(
-                job_id,
-                "run_to",
-                "failed",
-                target_node_key,
-                "invalid_start",
-                f"Start node {start_node_key} is not in the target closure",
-            )
-
-        # Same hazard as rerun: only the start node and its downstream are
-        # reset, so a failed ancestor would strand the job in queued forever.
-        raise_if_failed_upstream(
-            definition,
-            self.job_db.list_job_nodes(job_id),
-            start_node_key,
-            job_id,
-            "run_to",
-            target_node_key,
-        )
-
-        staged = None
-        deleted_rows: list[dict[str, Any]] = []
-        try:
-            descendants = downstream_nodes(definition, start_node_key)
-            with self.job_db.lease_guarded_mutation(
-                job_id,
-                self._now(),
-                reject_running_nodes=True,
-            ) as conn:
-                staged = self.artifact_mutation.stage_outputs(
-                    job, [start_node_key], definition, closure=closure
-                )
-                deleted_rows = self.job_db.mark_nodes_for_rerun_in_transaction(
-                    conn,
-                    job_id,
-                    [start_node_key],
-                    {start_node_key: descendants},
-                    staged_artifact_names=staged.artifact_names,
-                )
-                self.job_db.set_run_to_control_in_transaction(conn, job_id, target_node_key)
-        except JobMutationConflict as exc:
-            if staged is not None:
-                staged.rollback()
-            raise JobOperationError(
-                job_id, "run_to", "skipped", target_node_key, exc.reason_code, str(exc)
-            ) from exc
-        except ValueError as exc:
-            if staged is not None:
-                staged.rollback()
-            raise JobOperationError(
-                job_id, "run_to", "failed", target_node_key, "cleanup_failed", str(exc)
-            ) from exc
-        except Exception as exc:
-            # #204 broad-except audit: the terminal safety net of a
-            # staged filesystem + DB mutation sequence. The business arms
-            # above already peeled off the concurrency conflict
-            # (JobMutationConflict → skipped) and the staged-output
-            # contract violations (ValueError → cleanup_failed); what lands
-            # here is the genuinely unexpected (DB connectivity mid-mutation,
-            # a bug). Either way the staged files must be rolled back before
-            # normalizing to JobOperationError — leaving them staged would
-            # strand artifacts the rerun just removed from their original
-            # locations. logger.exception keeps the traceback.
-            logger.exception("Failed to persist run-to target for job %s", job_id)
-            if staged is not None:
-                staged.rollback()
-            raise JobOperationError(
-                job_id,
-                "run_to",
-                "failed",
-                target_node_key,
-                "rerun_failed",
-                str(exc),
-            ) from exc
-
-        commit_staged_outputs(staged, job_id, "run-to")
-        delete_rerun_artifact_objects(self.object_store, deleted_rows, job_id, "run-to")
-        if self.job_event_buffer is not None:
-            record_job_update(self.job_db, self.job_event_buffer, job_id, str(job["workspace_id"]))
-        elif self.job_event_manager is not None:
-            broadcast_job_update(self.job_db, self.job_event_manager, job_id)
-        return self._result(job_id, "run_to", "succeeded", target_node_key)
+            return run_to_without_start(self, job, definition, target_node_key, closure)
+        return run_to_with_start(self, job, definition, target_node_key, start_node_key, closure)
 
     def continue_job(self, workspace_id: str, job_id: str) -> JobOperationResult:
         job = self.job_db.get_job(job_id)

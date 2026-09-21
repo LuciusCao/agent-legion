@@ -176,6 +176,37 @@ def test_delete_succeeds_for_inactive_job(job_db: JobQueries, tmp_path: Path) ->
     assert not storage_dir.exists()
 
 
+def test_delete_cancels_queued_agent_requests(job_db: JobQueries, tmp_path: Path) -> None:
+    """#759：job 删除后其 queued 请求行随之物理消失（on delete cascade）。
+
+    钉住升级路径修复依赖的契约：删除类路径无需取消 queued 请求的前提
+    是 FK cascade——若有人移除 cascade，遗留的孤儿 queued 行无人 claim
+    时永驻队列表。"""
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+    job = _create_job(job_db, "ws-cancel", "Q009", status="queued")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into agent_execution_requests("
+            " execution_id, workspace_id, job_id, node_key,"
+            " agent_id, agent_definition_hash, node_concurrency_limit,"
+            " state, queued_at, manifest_json)"
+            " values ('exec-delete-queued', %s, %s, 'extract_question',"
+            " 'generator-v1', 'sha256:whatever', 1, 'queued', current_timestamp, '{}')",
+            (job["workspace_id"], job["id"]),
+        )
+
+    result: JobDeleteResult = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where execution_id='exec-delete-queued'"
+        ).fetchone()
+    assert row is None
+
+
 def _create_artifact_store(job_db: JobQueries, tmp_path: Path) -> ArtifactStore:
     return ArtifactStore(tmp_path / "artifacts", job_db.dsn_identity)
 

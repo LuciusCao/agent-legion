@@ -165,10 +165,14 @@ def test_batch_claim_respects_workspace_capacity_across_the_batch(job_db) -> Non
     assert _queued_count(job_db) == 3
 
 
-def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db) -> None:
+def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) -> None:
     """ClaimRacedError 的 savepoint 容错：第 k 个候选 promote 时 job 已离开
-    runnable 集（此处用 awaiting_approval 构造——重检放行、promote 条件不
-    含它），批保留前 k-1 个并终止，不整体回滚。"""
+    runnable 集，批保留前 k-1 个并终止，不整体回滚。
+
+    #759 后 awaiting_approval 成为 promote 的合法起点（EXEC-APPROVAL-001
+    并行分支可认领），不能再用来构造竞态——改为在第 2 个候选的 promote
+    上直接注入 ClaimRacedError（测试主题是 savepoint 容错本身）。
+    """
     _seed_agent_jobs(job_db, 3)
     # 队列序：job-0（正常）→ job-1（竞态）→ job-2（不应被领到——批在竞态
     # 处终止）。
@@ -179,8 +183,19 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db) -> None:
                 "update agent_execution_requests set queued_at=%s where job_id=%s",
                 (base + timedelta(seconds=offset), f"job-{offset}"),
             )
-        conn.execute("update jobs set status='awaiting_approval' where id='job-1'")
     _register_worker()
+
+    import server.app.agent_broker.claim_evaluate as evaluate_module
+    from server.app.agent_broker.claim_scan import ClaimRacedError
+
+    original_promote = evaluate_module.promote_claim
+
+    def raced_promote(broker, conn, worker_id, selected, manifest, kind, **kwargs):
+        if selected["job_id"] == "job-1":
+            raise ClaimRacedError()
+        return original_promote(broker, conn, worker_id, selected, manifest, kind, **kwargs)
+
+    monkeypatch.setattr(evaluate_module, "promote_claim", raced_promote)
 
     claims = claim_batch(broker(job_db.jobs_dir.parent), "worker-1", None, None, limit=3)
 
@@ -327,7 +342,11 @@ def test_code_candidates_ignore_agent_workspace_lock_floor(job_db) -> None:
         code_limit=1,
     )
 
-    assert [claim.kind for claim in claims] == ["agent", "code"]
+    # 写入段的稳定锁序（EXEC-GENERATION-001 #645 P2：SAVEPOINT 不释放
+    # advisory xact 锁）把 code 候选与 agent 候选统一按 (ws_lock_key,
+    # job_id) 排序；本测试只钉「code 候选不被 agent-ws floor 过滤」——
+    # 两类在同一批都领到。
+    assert sorted(claim.kind for claim in claims) == ["agent", "code"]
 
 
 def test_batch_claim_retries_once_on_deadlock(job_db, monkeypatch) -> None:
@@ -736,3 +755,25 @@ def test_mark_done_touch_throttled_and_zero_interval_kill_switch(job_db) -> None
     fresh = _worker_last_seen(job_db)
     assert len(claim_batch(pool_zero, "worker-1", None, None, limit=1)) == 1
     assert _worker_last_seen(job_db) > fresh
+
+
+def test_batch_claim_promotes_awaiting_approval_job(job_db) -> None:
+    """#759 自审 P1：审批门 park（job=awaiting_approval）期间并行分支的
+    远程 claim 必须能 promote（对齐本地 claim_lease 的语义）——否则请求在
+    gate 决策前永远 ClaimRacedError，成为队首毒药饿死其后全部候选。"""
+    _seed_agent_jobs(job_db, 2)
+    base = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
+    with job_db.connect() as conn:
+        for offset in range(2):
+            conn.execute(
+                "update agent_execution_requests set queued_at=%s where job_id=%s",
+                (base + timedelta(seconds=offset), f"job-{offset}"),
+            )
+        conn.execute("update jobs set status='awaiting_approval' where id='job-0'")
+    _register_worker()
+
+    claims = claim_batch(broker(job_db.jobs_dir.parent), "worker-1", None, None, limit=2)
+
+    assert [claim.job_id for claim in claims] == ["job-0", "job-1"]
+    job = job_db.get_job("job-0")
+    assert job["status"] == "running"

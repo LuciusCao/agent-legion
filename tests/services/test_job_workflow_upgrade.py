@@ -12,6 +12,7 @@ from server.app.services.job_selection_resolver import EmptyJobSelectionError
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.job_workflow_upgrade_batch import batch_upgrade
 from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from tests.helpers import load_builtin_definition
 from tests.postgres_support import TEST_DATABASE_URL
@@ -75,6 +76,115 @@ def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path
         definition.executable_nodes
     )
     assert {node["status"] for node in queries.list_job_nodes(job["id"])} == {"pending"}
+
+
+def test_upgrade_job_workflow_stages_old_outputs_and_manifest_rows(tmp_path: Path) -> None:
+    """#759：clean 升级全量重跑，旧产物文件与权威清单行必须一并失效——
+    否则全节点 pending 期间作业仍从对象存储提供上一轮产物，且隐式消费者
+    会被旧输入文件立即解锁、读到上一轮结果。"""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
+    revisions = WorkflowRevisionService(queries)
+    original = revisions.publish_workspace_revision(workspace["id"], definition)
+    revisions.publish_workspace_revision(workspace["id"], definition)
+    job = queries.create_job(
+        workflow_key=definition.key,
+        source_type="question",
+        source_id="Q1",
+        run_id="batch1",
+        title="Question 1",
+        node_keys=["fetch_items"],
+        workspace_id=workspace["id"],
+        workflow_revision_id=original["id"],
+        workflow_version=original["version"],
+        workflow_definition_hash=original["definition_hash"],
+        workflow_definition_snapshot_json=original["definition_json"],
+    )
+    queries.update_job_node(job["id"], "fetch_items", status="completed")
+    queries.update_job_status(job["id"], "completed")
+    job_dir = resolve_job_dir(job, tmp_path / "jobs")
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "knowledge_point.json").write_text("stale", encoding="utf-8")
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash) values (%s, 'fetch_items', 'knowledge_point.json',"
+            " 'k/knowledge_point.json', 1, '')",
+            (job["id"],),
+        )
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+    )
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert not (job_dir / "knowledge_point.json").exists()
+    with queries.connect() as conn:
+        remaining = conn.execute(
+            "select name from job_artifacts where job_id=%s", (job["id"],)
+        ).fetchall()
+    assert remaining == []
+
+
+def test_upgrade_job_workflow_cancels_queued_requests(tmp_path: Path) -> None:
+    """#759：clean 升级整体重建节点集合，必须同事务了结全部 queued 请求。
+
+    能认领旧 payload 的 Worker 离线时，遗留 queued 行不触发任何代次 CAS
+    清理，却一直被 has_active_request 视为 active，新 revision 的重派会被
+    无限期挡住。取消按 job 作用域（不按节点过滤——旧节点可能已不在新
+    定义里）。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
+    revisions = WorkflowRevisionService(queries)
+    original = revisions.publish_workspace_revision(workspace["id"], definition)
+    revisions.publish_workspace_revision(workspace["id"], definition)
+    job = queries.create_job(
+        workflow_key=definition.key,
+        source_type="question",
+        source_id="Q1",
+        run_id="batch1",
+        title="Question 1",
+        node_keys=["fetch_items"],
+        workspace_id=workspace["id"],
+        workflow_revision_id=original["id"],
+        workflow_version=original["version"],
+        workflow_definition_hash=original["definition_hash"],
+        workflow_definition_snapshot_json=original["definition_json"],
+    )
+    queries.update_job_node(job["id"], "fetch_items", status="completed")
+    queries.update_job_status(job["id"], "completed")
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into agent_execution_requests("
+            " execution_id, workspace_id, job_id, node_key,"
+            " agent_id, agent_definition_hash, node_concurrency_limit,"
+            " state, queued_at, manifest_json)"
+            " values ('exec-upgrade-queued', %s, %s, 'fetch_items',"
+            " 'generator-v1', 'sha256:whatever', 1, 'queued', current_timestamp, '{}')",
+            (workspace["id"], job["id"]),
+        )
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+    )
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    with queries.connect() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where execution_id='exec-upgrade-queued'"
+        ).fetchone()
+    assert row["state"] == "cancelled"
 
 
 def test_upgrade_job_workflow_updates_null_version_job(tmp_path: Path) -> None:

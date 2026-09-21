@@ -2,8 +2,9 @@
 
 Split out of ``claim_scan.py`` for the file-size budget: given one candidate
 row (from the bounded window scan, or from the #555 batch read phase) and
-the Worker view, try to claim it — admission, row lock, job re-check,
-capacity enforcement. The lock-free admission filters live in
+the Worker view, try to claim it — admission, the advisory-lock ladder, the
+row lock, the job re-check + execution-generation CAS, capacity enforcement.
+The lock-free admission filters live in
 ``claim_admission.py`` (#555 — shared with the batch read phase, which runs
 them outside any lock window); the promote write sequence (run row / lease /
 request flip / jobs promote / queue-wait gauge) lives in
@@ -56,21 +57,39 @@ def evaluate_candidate(
         return None
     kind = str(selected["kind"])
     state.attempts += 1
+    # Fixed lock order across all capacity domains (issue #351), extended with
+    # the EXEC-GENERATION-001 job-mutation domain (#759 phase 1c):
+    # agent-ws (agent kind only — that domain is agent-only, so taking it for
+    # code would be pure queueing overhead) → agent-worker → job-mutation:<job>
+    # → request row. The request-row FOR UPDATE moved AFTER the job-mutation
+    # advisory lock: the mutation side (lease_guarded_mutation) holds
+    # job-mutation while cancelling queued request rows (_cancel_queued_sql),
+    # so the pre-#759 order (request row → …) would AB-BA against
+    # job-mutation → request row. The v82 counter folder uses non-blocking
+    # try-locks and adds no ordering edge.
+    if kind != "code":
+        ws_domain = f"agent-ws:{selected['workspace_id']}"
+        conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domain,))
+    conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"agent-worker:{worker_id}",))
+    conn.execute(
+        "select pg_advisory_xact_lock(hashtext(%s))",
+        (f"job-mutation:{selected['job_id']}",),
+    )
     # Lock just this row; a competitor holding it (or a state change since
     # the unlocked read) skips to the next candidate.
     locked = conn.execute(
-        "select execution_id from agent_execution_requests"
+        "select execution_id, execution_generation from agent_execution_requests"
         " where execution_id=%s and state='queued' for update skip locked",
         (selected["execution_id"],),
     ).fetchone()
     if locked is None:
         state.skip_reasons["lock_raced"] += 1
         return None
-    # Re-check job control state: paused jobs keep the request queued for
-    # resume; terminal jobs get their request cancelled so no zombie claims
-    # resurrect them.
+    # Re-check job control state (under the job-mutation lock no mutation can
+    # interleave): paused jobs keep the request queued for resume; terminal
+    # jobs get their request cancelled so no zombie claims resurrect them.
     job = conn.execute(
-        "select status, execution_paused from jobs where id=%s",
+        "select status, execution_paused, execution_generation from jobs where id=%s",
         (selected["job_id"],),
     ).fetchone()
     if job is None:
@@ -84,16 +103,16 @@ def evaluate_candidate(
         cancel_request(conn, selected["execution_id"])
         state.skip_reasons["job_terminal"] += 1
         return None
-    # Fixed lock order across all capacity domains (issue #351): workspace
-    # Agent domain first, then the Worker machine domain. A code claim skips
-    # the agent-ws CAPACITY lock entirely — that domain is agent-only, so
-    # taking it for code would be pure queueing overhead. The order stays
-    # acyclic: agent takes ws→worker, code takes only worker. The v82
-    # counter folder uses non-blocking try-locks and adds no ordering edge.
-    if kind != "code":
-        ws_domain = f"agent-ws:{selected['workspace_id']}"
-        conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domain,))
-    conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"agent-worker:{worker_id}",))
+    # EXEC-GENERATION-001 CAS: the request carries the epoch the dispatch
+    # evaluated; a rerun/run-to/upgrade bump since then makes this claim
+    # stale. Cancel with the same semantics as the mutation side's
+    # _cancel_queued_sql (terminal state + manifest trim); the node stays
+    # pending and the next poll pass re-enqueues against the fresh epoch.
+    request_generation = int(locked["execution_generation"])
+    if int(job["execution_generation"]) != request_generation:
+        cancel_request(conn, selected["execution_id"])
+        state.skip_reasons["generation_stale"] += 1
+        return None
 
     # Workspace-level capacity is agent-only (batch 2 decision 2); the ws
     # lock and the cap check are both agent-branch-only.
@@ -137,16 +156,20 @@ def evaluate_candidate(
             int(shard_index),
             selected["execution_id"],
             datetime.now(UTC),
+            execution_generation=request_generation,
         ):
             cancel_request(conn, selected["execution_id"])
             state.skip_reasons["shard_not_pending"] += 1
             return None
     else:
+        # EXEC-GENERATION-001：与 code 池 claim_lease 同纪律——翻 running 盖
+        # 当前代次戳（CAS 已验证 == jobs 现值），否则旁支旧戳行在 claim 后
+        # 仍带旧戳，成孤儿时 recover 的代次闸门会拒绝复位。
         updated = conn.execute(
             "update job_nodes set status='running', stale_reason='', error_message='',"
-            " started_at=current_timestamp, finished_at=null"
+            " started_at=current_timestamp, finished_at=null, execution_generation=%s"
             " where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')",
-            (selected["job_id"], selected["node_key"]),
+            (request_generation, selected["job_id"], selected["node_key"]),
         )
         if updated.rowcount == 0:
             cancel_request(conn, selected["execution_id"])
@@ -155,7 +178,15 @@ def evaluate_candidate(
 
     # Promote 写入段（node_runs/lease/request/jobs + #551 queue_wait 折叠）
     # 在 claim_promote.py——预算拆分，evaluate 只留准入与竞态语义。
-    lease_id, node_run_id = promote_claim(broker, conn, worker_id, selected, manifest, kind)
+    lease_id, node_run_id = promote_claim(
+        broker,
+        conn,
+        worker_id,
+        selected,
+        manifest,
+        kind,
+        execution_generation=request_generation,
+    )
     return AgentClaim(
         execution_id=selected["execution_id"],
         workspace_id=selected["workspace_id"],
@@ -168,4 +199,5 @@ def evaluate_candidate(
         kind=kind,
         # #490: claim.granted reads the resolved runtime off the claim.
         runtime=str(selected["runtime"]),
+        execution_generation=request_generation,
     )

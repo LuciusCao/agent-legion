@@ -321,3 +321,91 @@ def test_allowed_nodes_exclude_start() -> None:
     )
     assert start_key not in until
     assert until == frozenset({"intake_knowledge_points", "write_script", "review_script"})
+
+
+def _implicit_definition():
+    from server.app.workflows.definition import (
+        WorkflowDefinition,
+        WorkflowIntake,
+        WorkflowNode,
+    )
+
+    return WorkflowDefinition(
+        key="implicit",
+        label="implicit",
+        intake=WorkflowIntake(),
+        nodes={
+            "p": WorkflowNode(
+                key="p", label="P", capability="p", inputs=["x.json"], outputs=["x.json"]
+            ),
+            "q": WorkflowNode(
+                key="q", label="Q", capability="q", inputs=["x.json"], outputs=["y.json"]
+            ),
+        },
+    )
+
+
+def test_find_ready_nodes_blocks_implicit_consumer_until_producer_finishes(tmp_path):
+    """#759 codex P1：RMW 产物重置后被刻意保留，文件在不代表已重写——隐式
+    消费者必须等生产者完成，否则两者并发重跑、消费者读到旧值。突变自检
+    锚点：p、q 间无显式边，屏障只能来自隐式消费边。"""
+    definition = _implicit_definition()
+    (tmp_path / "x.json").write_text("old", encoding="utf-8")
+    statuses = {"p": "pending", "q": "stale"}
+
+    ready = find_ready_nodes(definition, statuses, artifact_dir=tmp_path)
+    assert [node.key for node in ready] == ["p"]
+
+    statuses["p"] = "completed"
+    ready = find_ready_nodes(definition, statuses, artifact_dir=tmp_path)
+    assert [node.key for node in ready] == ["q"]
+
+
+def test_find_ready_nodes_implicit_barrier_ignores_terminal_producers(tmp_path):
+    """completed / not_applicable 生产者不设障（not_applicable 的产物本轮
+    不刷新，读既有文件与文件存在语义一致）。"""
+    definition = _implicit_definition()
+    (tmp_path / "x.json").write_text("old", encoding="utf-8")
+
+    statuses = {"p": "not_applicable", "q": "pending"}
+    ready = find_ready_nodes(definition, statuses, artifact_dir=tmp_path)
+    assert [node.key for node in ready] == ["q"]
+
+
+def test_find_ready_nodes_rmw_self_production_does_not_block(tmp_path):
+    """RMW 自身回传不构成自障（p 输入与输出同名，自己不等自己）。"""
+    definition = _implicit_definition()
+    (tmp_path / "x.json").write_text("old", encoding="utf-8")
+    statuses = {"p": "pending", "q": "completed"}
+
+    ready = find_ready_nodes(definition, statuses, artifact_dir=tmp_path)
+    assert [node.key for node in ready] == ["p"]
+
+
+def test_find_ready_nodes_implicit_cycle_fails_closed(tmp_path):
+    """隐式边成环且双方产物都在：互堵停住（fail-closed），不静默并发读
+    旧值——环本来就没有正确顺序，停住是操作员可见的。"""
+    from server.app.workflows.definition import (
+        WorkflowDefinition,
+        WorkflowIntake,
+        WorkflowNode,
+    )
+
+    definition = WorkflowDefinition(
+        key="cycle",
+        label="cycle",
+        intake=WorkflowIntake(),
+        nodes={
+            "p": WorkflowNode(
+                key="p", label="P", capability="p", inputs=["y.json"], outputs=["x.json"]
+            ),
+            "q": WorkflowNode(
+                key="q", label="Q", capability="q", inputs=["x.json"], outputs=["y.json"]
+            ),
+        },
+    )
+    (tmp_path / "x.json").write_text("old", encoding="utf-8")
+    (tmp_path / "y.json").write_text("old", encoding="utf-8")
+    statuses = {"p": "pending", "q": "pending"}
+
+    assert find_ready_nodes(definition, statuses, artifact_dir=tmp_path) == []

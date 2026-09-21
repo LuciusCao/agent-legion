@@ -81,8 +81,10 @@ class JobServices:
         self.workflow_upgrade = JobWorkflowUpgradeService(
             job_db,
             self.executor_leases,
+            JobArtifactMutationService(settings.jobs_dir),
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
+            object_store=object_store,
         )
         self.execution = JobExecutionService(
             job_db,

@@ -12,6 +12,7 @@ from server.app.db.migrations import (
     migrate_agent_request_kind_window,
     migrate_agent_workspace_scope,
     migrate_code_executor_bindings,
+    migrate_execution_generation,
     migrate_executor_asr_config_schema,
     migrate_executor_entity_type,
     migrate_executor_retirement,
@@ -214,6 +215,13 @@ MIGRATIONS: list[SchemaMigration] = [
     # submission channel (POST /runs + run/job reads). Table DDL rides the
     # apply fn (postgres_schema.sql is at its ceiling; v76 precedent).
     SchemaMigration(84, "workspace_api_tokens", migrate_workspace_api_tokens),
+    # v85 (#759): execution_generation epoch columns on jobs (source of
+    # truth, bumped by every resetting mutation) plus job_nodes / node_runs
+    # / executor_leases / agent_execution_requests mirrors — the CAS
+    # substrate of the job-mutation lock protocol (EXEC-GENERATION-001).
+    # DDL rides the apply fn (postgres_schema.sql is at its raw-line
+    # ceiling; v76/v84 precedent); default 0 keeps legacy rows consistent.
+    SchemaMigration(85, "execution_generation", migrate_execution_generation),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

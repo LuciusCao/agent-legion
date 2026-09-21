@@ -89,6 +89,7 @@ def _claim_request(
     target_node_key: str | None = None,
     allowed_node_keys: tuple[str, ...] = (),
     shard_index: int | None = None,
+    execution_generation: int = 0,
 ) -> LeaseClaimRequest:
     return LeaseClaimRequest(
         executor_id=executor_id,
@@ -105,4 +106,5 @@ def _claim_request(
         target_node_key=target_node_key,
         allowed_node_keys=allowed_node_keys,
         shard_index=shard_index,
+        execution_generation=execution_generation,
     )

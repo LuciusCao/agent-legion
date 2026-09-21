@@ -56,6 +56,9 @@ class AgentExecutionRequest:
     # (code text + hash ride the bundle) and the dispatch path already
     # validated the executor binding and worker eligibility.
     kind: str = "agent"
+    # Expected jobs.execution_generation at enqueue time (EXEC-GENERATION-001);
+    # persisted on the request row, CAS-checked at claim.
+    execution_generation: int = 0
 
 
 class AgentExecutionBroker:
@@ -138,7 +141,10 @@ class AgentExecutionBroker:
         return row is not None
 
     def enqueue(self, request: AgentExecutionRequest) -> str | None:
-        """Insert one queued request; None when the node has an active one.
+        """Insert one queued request; None when the node has an active one or
+        the request's expected generation no longer matches the jobs row
+        (EXEC-GENERATION-001 — both outcomes share the existing skip
+        semantics: no row, node stays pending, next pass re-dispatches).
 
         The transaction lives in ``enqueue.py`` (file-size budget).
         """

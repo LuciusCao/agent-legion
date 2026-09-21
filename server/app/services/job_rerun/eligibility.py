@@ -18,7 +18,7 @@ from server.app.services.job_rerun.upstream_guard import (
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.start_node import START_NODE_TYPE
-from server.app.workflows.workflow_branching import upstream_nodes
+from server.app.workflows.workflow_consumption import dependency_parents
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
@@ -138,10 +138,15 @@ def failed_nodes_by_job(
 def resolve_failure_rerun_targets(
     definition: Any, failed_nodes: list[str], strategy: str
 ) -> list[str]:
-    """Target nodes for the category strategy (rerun_self / rerun_upstream)."""
+    """Target nodes for the category strategy (rerun_self / rerun_upstream).
+
+    合并上游（#759）：隐式生产者也是合法的重跑起点——隐式生产者 failed
+    时若退化成 rerun_self，调度的隐式生产者屏障会永久阻塞下游。
+    """
+    parents = dependency_parents(definition)
     targets: list[str] = []
     for node_key in failed_nodes:
-        resolved = upstream_nodes(definition, node_key) if strategy == "rerun_upstream" else []
+        resolved = parents.get(node_key, []) if strategy == "rerun_upstream" else []
         # A node without upstreams is rerun itself: it is the root candidate.
         for target in resolved or [node_key]:
             if target not in targets:

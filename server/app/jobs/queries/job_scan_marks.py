@@ -14,7 +14,7 @@ from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 _ACTIVE_MARK_COLUMNS = (
     "id, workspace_id, source_id, status, execution_paused, execution_mode,"
-    " target_node_key, workflow_definition_hash, created_at, updated_at"
+    " target_node_key, workflow_definition_hash, execution_generation, created_at, updated_at"
 )
 
 # The predicate must stay in sync with the idx_jobs_workspace_active_marks

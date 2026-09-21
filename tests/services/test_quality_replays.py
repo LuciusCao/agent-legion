@@ -60,14 +60,21 @@ def _definition() -> WorkflowDefinition:
 
 
 class _Env:
-    def __init__(self, job_db, tmp_path: Path, route_kind: str) -> None:
+    def __init__(
+        self,
+        job_db,
+        tmp_path: Path,
+        route_kind: str,
+        definition: WorkflowDefinition | None = None,
+        target_node: str = "generate",
+    ) -> None:
         self.job_db = job_db
         self.tmp_path = tmp_path
         ws = job_db.create_workspace(
             default_workflow_key="education_video_problems_generation", name="Replay WS"
         )
         self.workspace_id = str(ws["id"])
-        definition = _definition()
+        definition = definition or _definition()
         snapshot = serialize_definition(definition)
         self.job = job_db.create_job(
             workflow_key="test",
@@ -95,8 +102,8 @@ class _Env:
             conn.execute(
                 "insert into workspace_node_routes("
                 "workspace_id, node_key, target_kind, target_id)"
-                " values (%s, 'generate', %s, %s)",
-                (self.workspace_id, route_kind, target_id),
+                " values (%s, %s, %s, %s)",
+                (self.workspace_id, target_node, route_kind, target_id),
             )
             conn.execute(
                 "update job_nodes set status='completed', finished_at=current_timestamp"
@@ -104,9 +111,9 @@ class _Env:
                 (self.job_id,),
             )
             run = conn.execute(
-                "insert into node_runs(job_id, node_key, status) values (%s, 'generate', 'completed')"
+                "insert into node_runs(job_id, node_key, status) values (%s, %s, 'completed')"
                 " returning id",
-                (self.job_id,),
+                (self.job_id, target_node),
             ).fetchone()
             conn.execute(
                 "insert into quality_sample_batches(id, workspace_id, name, sample_size)"
@@ -116,8 +123,8 @@ class _Env:
             conn.execute(
                 "insert into quality_sample_items("
                 "id, batch_id, node_run_id, job_id, node_key, capability)"
-                " values ('item-1', 'batch-1', %s, %s, 'generate', %s)",
-                (run["id"], self.job_id, CAPABILITY),
+                " values ('item-1', 'batch-1', %s, %s, %s, %s)",
+                (run["id"], self.job_id, target_node, CAPABILITY),
             )
 
     def service(self, artifact_store: ArtifactStore | None = None) -> QualityReplayService:
@@ -181,6 +188,71 @@ def test_create_replay_builds_isolated_copy_job(env) -> None:
         copy_job["workflow_definition_snapshot_json"]
         == (env.job["workflow_definition_snapshot_json"])
     )
+
+
+def test_create_replay_skips_implicit_consumers(job_db, tmp_path) -> None:
+    """#759：隐式下游（无显式边的 input 消费者）在 replay 副本中必须跳过。
+
+    目标节点产物落地后调度器靠输入文件出现解锁，不跳过的隐式消费者会在
+    副本里被调度执行，违背「副本永不调度到被回放节点之后」的语义。突变
+    自检锚点：consumer 不在 gen 的显式下游里，not_applicable 只能靠隐式
+    消费边变绿。
+    """
+    definition = WorkflowDefinition(
+        key="test",
+        label="Test",
+        intake=WorkflowIntake(),
+        nodes={
+            "gen": WorkflowNode(key="gen", label="gen", capability=CAPABILITY, outputs=["k.json"]),
+            "consumer": WorkflowNode(
+                key="consumer",
+                label="consumer",
+                capability="assemble",
+                inputs=["k.json"],
+                outputs=["c.json"],
+            ),
+        },
+    )
+    env = _Env(job_db, tmp_path, "handler_executor", definition=definition, target_node="gen")
+
+    replay = env.service().create_replay(env.workspace_id, "item-1", created_by="user:test")
+
+    assert replay["status"] == "pending"
+    statuses = env.node_statuses(str(replay["replay_job_id"]))
+    assert statuses == {"gen": "pending", "consumer": "not_applicable"}
+
+
+def test_create_replay_skips_implicit_producer(job_db, tmp_path) -> None:
+    """#759：回放隐式消费者时，其无显式边的生产者同样不得留在 pending。
+
+    skipped 按「全部可执行节点 − 祖先 − 目标」集差构造：任何未建模的依赖
+    渠道（含平行分支）都不会让副本出现永不收敛的 pending 节点。
+    """
+    definition = WorkflowDefinition(
+        key="test",
+        label="Test",
+        intake=WorkflowIntake(),
+        nodes={
+            "producer": WorkflowNode(
+                key="producer", label="producer", capability="assemble", outputs=["k.json"]
+            ),
+            "gen": WorkflowNode(
+                key="gen",
+                label="gen",
+                capability=CAPABILITY,
+                inputs=["k.json"],
+                outputs=["c.json"],
+            ),
+        },
+    )
+    env = _Env(job_db, tmp_path, "handler_executor", definition=definition, target_node="gen")
+    (resolve_job_dir(env.job, job_db.jobs_dir) / "k.json").write_text("{}", encoding="utf-8")
+
+    replay = env.service().create_replay(env.workspace_id, "item-1", created_by="user:test")
+
+    assert replay["status"] == "pending"
+    statuses = env.node_statuses(str(replay["replay_job_id"]))
+    assert statuses == {"producer": "not_applicable", "gen": "pending"}
 
 
 def test_replay_status_reconciles_from_copy_job(env) -> None:

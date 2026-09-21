@@ -37,7 +37,10 @@ def evaluate_changed_jobs(
     caller stores in ``worker.state.job_evals``.
     """
     eval_contexts: list[dict[str, Any]] = []
-    not_applicable_entries: list[tuple[str, list[str], str]] = []
+    # (job_id, node_keys, reason, expected execution_generation) — the epoch
+    # the evaluation read (scan's fat job row); the batch write re-checks it
+    # under the job-mutation lock and skips stale entries (EXEC-GENERATION-001).
+    not_applicable_entries: list[tuple[str, list[str], str, int]] = []
     shard_node_pairs: list[tuple[str, str]] = []
 
     for definition, mark in changed:
@@ -67,7 +70,12 @@ def evaluate_changed_jobs(
         )
         if branch_evaluation.not_applicable:
             not_applicable_entries.append(
-                (job["id"], sorted(branch_evaluation.not_applicable), "unselected workflow branch")
+                (
+                    job["id"],
+                    sorted(branch_evaluation.not_applicable),
+                    "unselected workflow branch",
+                    int(job.get("execution_generation") or 0),
+                )
             )
         for node in definition_to_run.nodes.values():
             if node.shard is not None and statuses.get(node.key) == "running":

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from server.app.db.connection import DatabaseConnection
+from server.app.executors._lease_claim_limits import check_claim_capacity
 from server.app.executors._lease_control import (
     TERMINAL_JOB_STATUSES,
     _execution_control_rejects_claim,
@@ -15,6 +17,8 @@ from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors._path_canonicalization import canonicalize_data_path
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
 from server.app.workflows.sharding import try_start_shard
+
+logger = logging.getLogger(__name__)
 
 
 def claim_lease(
@@ -37,7 +41,26 @@ def claim_lease(
         ("code-pool",),
     )
 
+    # EXEC-GENERATION-001：锁序 code-pool → job-mutation → 行锁。与 mutation
+    # 侧（rerun/run-to/upgrade，lease_guarded_mutation）互斥后做代次 CAS：
+    # 期望代次与 jobs 现值不等 = 评估缓存过期，拒绝本次 claim（不写任何行），
+    # 下一 poll pass 以新代次重新评估入队。fail-closed：对不上就拒。
+    conn.execute(
+        "select pg_advisory_xact_lock(hashtext(%s))",
+        (f"job-mutation:{request.job_id}",),
+    )
     current_control = _read_job_execution_control(conn, request.job_id)
+    current_generation = current_control["execution_generation"]
+    if current_generation is None or current_generation != request.execution_generation:
+        logger.warning(
+            "claim rejected by execution-generation CAS: job=%s node=%s expected=%s current=%s",
+            request.job_id,
+            request.node_key,
+            request.execution_generation,
+            current_generation,
+        )
+        return None
+
     if _execution_control_rejects_claim(request, current_control):
         return None
     if current_control["status"] in TERMINAL_JOB_STATUSES:
@@ -46,62 +69,27 @@ def claim_lease(
         # 认领事务内必须以当前 jobs.status 为准。
         return None
 
-    if request.local_node_limit is not None:
-        # #211 Phase 3 (read-layer binding): predicates key on
-        # (workspace_id, node_key) — workflow_key equals the workspace id on
-        # every row (v62 binding, aligned by v68).
-        limit_row = conn.execute(
-            """
-            select concurrency_limit
-            from workspace_node_limits
-            where workspace_id=%s and node_key=%s
-            """,
-            (request.workspace_id, request.node_key),
-        ).fetchone()
-        if limit_row is None:
-            raise ValueError(
-                f"No local node limit for {request.node_key} in {request.workspace_id}/{request.workflow_key}"
-            )
-        if limit_row["concurrency_limit"] != request.local_node_limit:
-            raise ValueError(
-                f"Local node limit mismatch for {request.node_key}: "
-                f"persisted {limit_row['concurrency_limit']} vs requested {request.local_node_limit}"
-            )
-
     now_str = database_timestamp(now)
-    global_count_row = conn.execute(
-        """
-        select count(*) as cnt
-        from executor_leases
-        where executor_id=%s and status='active' and expires_at>%s
-        """,
-        (request.executor_id, now_str),
-    ).fetchone()
-    global_count = int(global_count_row["cnt"]) if global_count_row is not None else 0
-
-    if global_count >= request.global_capacity:
+    if not check_claim_capacity(conn, request, now_str):
         return None
-
-    if request.local_node_limit is not None:
-        node_count_row = conn.execute(
-            """
-            select count(*) as cnt
-            from executor_leases
-            where workspace_id=%s and node_key=%s and status='active' and expires_at>%s
-            """,
-            (request.workspace_id, request.node_key, now_str),
-        ).fetchone()
-        node_count = int(node_count_row["cnt"]) if node_count_row is not None else 0
-        if node_count >= request.local_node_limit:
-            return None
 
     if request.shard_index is not None:
         started = try_start_shard(
-            conn, request.job_id, request.node_key, request.shard_index, execution_id, now_str
+            conn,
+            request.job_id,
+            request.node_key,
+            request.shard_index,
+            execution_id,
+            now_str,
+            execution_generation=current_generation,
         )
         if not started:
             return None
     else:
+        # EXEC-GENERATION-001：翻 running 同时盖当前代次戳（CAS 已验证
+        # == jobs 现值），与 park_awaiting_approval 对称——recover 的代次
+        # 闸门（_recover_orphaned_job）只认现值戳，不盖戳的旧戳 running 行
+        # 成孤儿后会被拒绝复位、永久卡在 running。
         cursor = conn.execute(
             """
             update job_nodes
@@ -109,10 +97,11 @@ def claim_lease(
                 stale_reason='',
                 error_message='',
                 started_at=%s,
-                finished_at=null
+                finished_at=null,
+                execution_generation=%s
             where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
             """,
-            (now_str, request.job_id, request.node_key),
+            (now_str, current_generation, request.job_id, request.node_key),
         )
         if cursor.rowcount == 0:
             return None
@@ -122,9 +111,9 @@ def claim_lease(
         """
         insert into node_runs(
             job_id, node_key, status, command_json, log_path, run_dir, session_dir,
-            started_at, config_snapshot_json
+            started_at, config_snapshot_json, execution_generation
         )
-        values (%s, %s, 'running', %s, %s, '', '', %s, %s)
+        values (%s, %s, 'running', %s, %s, '', '', %s, %s, %s)
         returning id
         """,
         (
@@ -134,6 +123,7 @@ def claim_lease(
             log_path,
             now_str,
             request.config_snapshot_json,
+            request.execution_generation,
         ),
     )
     inserted = cursor.fetchone()
@@ -145,9 +135,10 @@ def claim_lease(
         """
         insert into executor_leases(
             id, execution_id, executor_id, workspace_id, job_id,
-            node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
+            node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at,
+            execution_generation
         )
-        values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+        values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s)
         """,
         (
             lease_id,
@@ -160,6 +151,7 @@ def claim_lease(
             now_str,
             now_str,
             database_timestamp(expires_at),
+            request.execution_generation,
         ),
     )
 
