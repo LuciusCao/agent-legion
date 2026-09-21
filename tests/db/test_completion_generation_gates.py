@@ -17,6 +17,7 @@ import pytest
 
 from server.app.agent_control.completion import AgentCompletionHandler, AgentOutcome
 from server.app.db.transaction import write_transaction
+from server.app.executors import _lease_lifecycle
 from server.app.executors._lease_finish_batch import finish_many
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult
@@ -544,3 +545,54 @@ def test_completion_reserved_log_member_clash_fails_cleanly(
     assert store.row_for_node("gate22-job", "node_a", "node.log") is None
     assert not (job_dir / "node.log").exists()  # 同 source 双 move 回滚零残留
     assert not (tmp_path / "logs" / "jobs" / "gate22-job" / "node_a.log").exists()
+
+
+def test_finish_after_worker_loss_sweep_settles_nothing(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex #774 P1 回归：finish 锁前读到 active lease，worker-loss sweep
+    随后持 job-mutation 锁删 lease 并重排队（不 bump 代次）——锁内重读让
+    迟到 finish 什么也不做：不提升文件、不翻转 node_run/job_nodes（旧代
+    码只复查代次，sweep 不 bump 代次，重排队现场会被盖成旧结果）。"""
+    _seed_completion_job(job_db, workspace_id="gate23-ws", job_id="gate23-job")
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+    job_dir = tmp_path / "jobs" / "gate23-ws" / "gate23-job"
+    (job_dir / ".result-staging-x").mkdir(parents=True)
+    source = job_dir / ".result-staging-x" / "out.json"
+    source.write_bytes(b"stale-bytes")
+    target = job_dir / "out.json"
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update job_nodes set status='running' where job_id='gate23-job' and node_key='node_a'"
+        )
+
+    real_lock = _lease_lifecycle.lock_job_mutation_and_read_generation
+
+    def sweep_then_lock(conn: Any, job_id: str) -> int:
+        # worker-loss sweep 的已提交效果（sweepers.py：删 lease + 重排队）。
+        with write_transaction(TEST_DATABASE_URL) as sweep_conn:
+            sweep_conn.execute("delete from executor_leases where id='lease-1'")
+            sweep_conn.execute(
+                "update job_nodes set status='pending', started_at=null, finished_at=null"
+                " where job_id='gate23-job' and node_key='node_a'"
+            )
+        return real_lock(conn, job_id)
+
+    monkeypatch.setattr(_lease_lifecycle, "lock_job_mutation_and_read_generation", sweep_then_lock)
+
+    ok = repo.finish(
+        "lease-1",
+        ExecutionResult(
+            status="completed", exit_code=0, staged_file_moves=((str(target), str(source)),)
+        ),
+    )
+
+    assert ok is False  # 锁内重读发现 lease 已删 → 409 语义
+    assert _node_row("gate23-job", "node_a")["status"] == "pending"  # 重排队现场原样
+    assert not target.exists()  # 旧代次字节零落盘
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        run = conn.execute(
+            "select status from node_runs where job_id='gate23-job' and node_key='node_a'"
+        ).fetchone()
+    assert run is not None
+    assert run["status"] == "running"  # node_run 也不被翻转

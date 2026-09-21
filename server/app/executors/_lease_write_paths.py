@@ -19,11 +19,8 @@ from server.app.executors._lease_control import (
     sync_job_status,
     ws_lock_keys_by_job,
 )
-from server.app.executors._lease_lifecycle import (
-    expire_stale_leases,
-    finish_lease,
-    heartbeat_lease,
-)
+from server.app.executors._lease_expiry import expire_stale_leases
+from server.app.executors._lease_lifecycle import finish_lease, heartbeat_lease
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,

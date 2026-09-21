@@ -111,10 +111,15 @@
     },
     "server/app/executors/_lease_lifecycle.py": {
       "via": [
-        "finish_lease",
+        "finish_lease"
+      ],
+      "note": "finish（含分片臂）：锁内重读 lease 仍 active 才收尾（codex #774 P1），过期代次只收尾不翻转"
+    },
+    "server/app/executors/_lease_expiry.py": {
+      "via": [
         "expire_stale_leases"
       ],
-      "note": "finish（含分片臂）与 lease 过期清扫：过期代次只收尾不翻转"
+      "note": "lease 过期清扫（自 _lease_lifecycle 拆出的预算姊妹模块）：过期代次只收尾不翻转"
     },
     "server/app/executors/_lease_shards.py": {
       "via": [

@@ -81,11 +81,11 @@ jobs/workspaces 均为 on delete cascade，行随删除物理消失。未被重�
 | code 池 claim | `claim_lease`（`server/app/executors/_lease_claims.py`） | 拒绝 claim，零写入；claim 成功时给 `node_runs` / `executor_leases` 盖当前戳 |
 | agent/远端 claim | `evaluate_candidate`（`server/app/agent_broker/claim_evaluate.py`） | 按突变侧同款语义取消 queued 请求（终态 + manifest trim），节点保持 pending，下一调度轮以新代次重新入队 |
 | agent 请求入队 | `enqueue_request`（`server/app/agent_broker/enqueue.py`） | 打包（按代次 N 评估）与 INSERT 之间夹着 bump 时直接不插入；否则无人 claim 的过期 queued 行会把重派挡在 `has_active_request` 之外 |
-| finish（含分片臂） | `finish_lease`（`server/app/executors/_lease_lifecycle.py`） | lease 释放与 `node_runs` 终态照常收尾，但跳过 `job_nodes` 翻转、`sync_job_status` 与 until_node 暂停 |
+| finish（含分片臂） | `finish_lease`（`server/app/executors/_lease_lifecycle.py`） | 锁内重读 lease 仍 active 才收尾（codex #774 P1）；lease 释放与 `node_runs` 终态照常，但跳过 `job_nodes` 翻转、`sync_job_status` 与 until_node 暂停 |
 | fail_without_lease | `server/app/executors/_lease_config_failure.py` | 整个配置失败记录跳过，节点保持 pending 等下一轮 |
 | approval park | `park_awaiting_approval`（`server/app/executors/_lease_approval.py`） | 评估代次过期则跳过 park；成功的 park 给 gate 行盖当前戳 |
 | approval 决策 | `approve_gate_atomic` / `reject_gate_atomic`（`server/app/jobs/queries/approval_decisions.py`） | 锁下状态守卫（`ApprovalGateConflict`）；**刻意不做代次比较**，见 2.4 |
-| lease 过期清扫 | `expire_stale_leases`（`server/app/executors/_lease_lifecycle.py` 等） | 过期代次的回写跳过 |
+| lease 过期清扫 | `expire_stale_leases`（`server/app/executors/_lease_expiry.py` 等） | 过期代次的回写跳过 |
 | 孤儿 running 恢复 | `recover_orphaned_running_jobs`（`server/app/executors/_lease_write_paths.py`） | 只认盖了现值戳的 running 行，旧戳行拒绝复位（防永久卡 running 的闸门由 claim 盖戳保证） |
 | agent sweeper | `sweep_expired_claims`（`server/app/agent_broker/sweepers.py`） | 过期代次：lease/node_run 对账照常，请求**取消而非 requeue**（requeue 会双跑），`job_nodes` 绝不动 |
 | 两个 queued-request sweeper | `fail_stale_definition_requests`（`server/app/agent_broker/sweeper_definitions.py`）、`fail_unclaimable_model_requests`（`server/app/agent_broker/unclaimable.py`） | 无锁扫描 + 逐候选 `sweep_generation.lock_sweep_candidate` 前奏（advisory 锁先于请求行 FOR UPDATE，防 AB-BA）；过期请求按突变侧语义取消，同代次保留原 fail 语义 |
