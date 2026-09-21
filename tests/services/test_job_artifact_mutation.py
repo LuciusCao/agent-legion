@@ -56,6 +56,37 @@ def test_stage_outputs_moves_selected_and_descendant_outputs(
     assert not (storage_dir / ".staged" / "c.json").exists()
 
 
+def test_stage_outputs_includes_implicit_consumers(tmp_path, mutation_service):
+    """#759：无显式边的隐式消费者（inputs/outputs 挂接）并入暂存闭包。
+
+    突变自检锚点：q 不在 p 的显式下游里，y.json 被暂存只能靠隐式消费边。
+    """
+    implicit = WorkflowDefinition(
+        key="test_workflow",
+        label="Test Workflow",
+        intake=WorkflowIntake(),
+        nodes={
+            "p": WorkflowNode(key="p", label="P", capability="p", outputs=["x.json"]),
+            "q": WorkflowNode(
+                key="q", label="Q", capability="q", inputs=["x.json"], outputs=["y.json"]
+            ),
+        },
+    )
+    data_dir = tmp_path
+    storage_dir = data_dir / "jobs" / "job"
+    storage_dir.mkdir(parents=True)
+    (storage_dir / "x.json").write_text("x")
+    (storage_dir / "y.json").write_text("y")
+
+    job = _make_job(storage_dir, data_dir)
+    staged = mutation_service.stage_outputs(job, ["p"], implicit)
+
+    assert not (storage_dir / "x.json").exists()
+    assert not (storage_dir / "y.json").exists()
+    assert staged.artifact_names == frozenset({"x.json", "y.json"})
+    staged.commit()
+
+
 def test_stage_outputs_rollback_restores_files(tmp_path, mutation_service, definition):
     data_dir = tmp_path
     storage_dir = data_dir / "jobs" / "job"

@@ -8,7 +8,7 @@ from typing import Any
 
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_branching import downstream_nodes
+from server.app.workflows.workflow_consumption import dependency_downstream
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,11 @@ class JobArtifactMutationService:
         closure are staged. This supports targeted rerun-to operations where
         descendants outside the target closure must keep their artifacts.
 
+        The affected set uses the merged downstream closure (explicit edges ∪
+        implicit consumption edges, #759) — the same enumeration the callers'
+        stale-marking uses, so the staged artifacts and the reset node set can
+        never diverge for nodes linked only via inputs/outputs.
+
         Read-modify-write artifacts (declared as both an input and an output of
         the same node) are never staged: removing them would leave the node
         waiting forever on an input no rerun producer rewrites (#114). On a
@@ -107,7 +112,7 @@ class JobArtifactMutationService:
         for node_key in node_keys:
             if node_key not in definition.nodes:
                 raise ValueError(f"Unknown node: {node_key}")
-            affected_keys.update(downstream_nodes(definition, node_key))
+            affected_keys.update(dependency_downstream(definition, node_key))
 
         if closure is not None:
             affected_keys &= set(closure)

@@ -174,6 +174,64 @@ def test_rerun_marks_implicit_consumers_stale(rerun_service, job_db):
     assert nodes["q"] == "stale"
 
 
+def test_rerun_stages_implicit_consumer_outputs(rerun_service, job_db):
+    """#759：隐式消费者的产物与 manifest 行随生产者 rerun 一起清理。
+
+    与 test_rerun_marks_implicit_consumers_stale 同一定义。stale 标记走
+    合并闭包后，stage_outputs 必须用同一闭包，否则 q 的旧 y.json 文件与
+    job_artifacts 行残留，q 重跑前其他消费者可能读到旧产物。突变自检锚点：
+    q 不在 p 的显式下游里，y.json 的清理只能靠隐式消费边变绿。
+    """
+    definition = workflow_definition_from_dict(
+        {
+            "key": "wf759_implicit_stage",
+            "label": "wf759_implicit_stage",
+            "nodes": {
+                "p": {"capability": "cap_p", "outputs": ["x.json"]},
+                "q": {"capability": "cap_q", "inputs": ["x.json"], "outputs": ["y.json"]},
+            },
+            "edges": [],
+        }
+    )
+    workspace = job_db.create_workspace("default", default_workflow_key="wf759_implicit_stage")
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
+    batch = job_db.create_run(
+        "wf759_implicit_stage", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]
+    )
+    implicit_job = job_db.create_job(
+        workflow_key="wf759_implicit_stage",
+        source_type="question",
+        source_id="1",
+        run_id=batch["id"],
+        title="implicit-consumer-staging",
+        node_keys=["p", "q"],
+        workspace_id=workspace["id"],
+    )
+    job_dir = resolve_job_dir(implicit_job, job_db.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "x.json").write_text("x", encoding="utf-8")
+    (job_dir / "y.json").write_text("y", encoding="utf-8")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash) values"
+            " (%s, 'p', 'x.json', 'k/x.json', 1, ''),"
+            " (%s, 'q', 'y.json', 'k/y.json', 1, '')",
+            (implicit_job["id"], implicit_job["id"]),
+        )
+
+    result = rerun_service.rerun(workspace["id"], implicit_job["id"], "p")
+
+    assert result["status"] == "succeeded"
+    assert not (job_dir / "x.json").exists()
+    assert not (job_dir / "y.json").exists()
+    with job_db.connect() as conn:
+        remaining = conn.execute(
+            "select name from job_artifacts where job_id=%s", (implicit_job["id"],)
+        ).fetchall()
+    assert remaining == []
+
+
 def test_rerun_cancels_queued_agent_requests(rerun_service, job, job_db):
     """rerun 前已入队的 queued agent 请求必须取消：claim 侧不复查上游，
     不取消会在上游重跑完成前抢跑（输入 artifact 已被 rerun 删除）。"""

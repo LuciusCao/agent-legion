@@ -23,7 +23,6 @@ from server.app.services.node_config_batch import frozen_node_config, run_frozen
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.execution_control import ancestor_closure
-from server.app.workflows.workflow_branching import downstream_nodes
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -132,10 +131,15 @@ class QualityReplaySetup:
                 (ancestor_closure(definition, node.key) - {node.key})
                 & definition.executable_nodes.keys()
             )
-            downstream = sorted(downstream_nodes(definition, node.key))
+            # #759：skipped 取「全部可执行节点 − 已标记完成的祖先 − 目标」，
+            # 不按任何下游枚举——隐式消费边（无显式边的 inputs/outputs
+            # 挂接）下的消费者若留在 pending，会在目标产物落地后被输入解锁
+            # 调度，违背副本「永不调度到被回放节点之后并随之收敛」的语义；
+            # 集差构造对未建模的依赖渠道天然免疫。
+            skipped = sorted(set(definition.executable_nodes) - set(ancestors) - {node.key})
             with self.job_db.write() as conn:
                 prepare_replay_copy(
-                    conn, copy_job_id, completed_nodes=ancestors, skipped_nodes=downstream
+                    conn, copy_job_id, completed_nodes=ancestors, skipped_nodes=skipped
                 )
         except Exception:
             # #204 broad-except audit: mixed outcome space (InvalidOperationError from missing

@@ -1467,7 +1467,7 @@
     "server/app/services/preview_panels.py": 156,
     "server/app/services/quality_artifact_contents.py": 61,
     "server/app/services/quality_labels.py": 196,
-    "server/app/services/quality_replay_setup.py": 164,
+    "server/app/services/quality_replay_setup.py": 163,
     "server/app/services/quality_replays.py": 294,
     "server/app/services/quality_sampling.py": 173,
     "server/app/services/quality_stats.py": 99,
