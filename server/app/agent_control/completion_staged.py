@@ -2,17 +2,15 @@
 
 Split out of ``completion.py`` for the file-size budget: once the result
 archive is extracted into a staging dir, this module owns everything from the
-read-view construction through the gated finish — the Worker-direct refs
+landing preflight through the gated finish — the Worker-direct refs
 verification, the unified read view (hardlinked remote downloads + staged
-archive outputs), the Host-side validation, the lease-armed artifact mirror,
-and the final ``leases.finish`` whose ``staged_file_moves`` ride the
-generation gate.
+archive outputs; the link mechanics live in ``completion_view``), the
+Host-side validation, the lease-armed artifact mirror, and the final
+``leases.finish`` whose ``staged_file_moves`` ride the generation gate.
 """
 
 from __future__ import annotations
 
-import os
-import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -20,6 +18,11 @@ from typing import TYPE_CHECKING, Any
 from server.app.agent_broker.remote_artifacts import apply_worker_artifact_refs
 from server.app.agent_broker.result_timing import mark as mark_result_stage
 from server.app.agent_broker.result_unpack import safe_relative_dir
+from server.app.agent_control.completion_preflight import (
+    find_landing_conflict,
+    gate_safe_staged_moves,
+)
+from server.app.agent_control.completion_view import link_into_view
 from server.app.executors._shard_contract import read_shard_output
 from server.app.executors.artifact_mirror import upload_produced_artifacts
 from server.app.executors.models import ExecutionResult
@@ -49,12 +52,48 @@ def finish_staged(
 ) -> bool:
     """Completion tail after the archive is staged: verify refs, validate
     against the read view, mirror, then finish with the gated promotion."""
+    # #759 对抗复审 P2 族：任何字节移动之前先做路径形态预检——两个通道
+    # （归档暂存提升 / remote ref 落盘）各自宣称的形状若单文件系统不可能
+    # 同时成立（前缀相撞），或落点祖先被现场非目录挡住，继续 apply 只会
+    # 在 remote promote 已提交之后炸穿结果提交（codex #774 P2）。预检失
+    # 败 = 干净 failed：零字节应用，staging key 保留，闸安全的归档 moves
+    # （node.log 等）照常随失败 finish 落盘。
+    remote_landing_names = (
+        ()
+        if cancelled
+        else tuple(
+            name
+            for name, ref in outcome.output_artifacts.items()
+            if isinstance(ref, dict) and name in expected
+        )
+    )
+    conflict = find_landing_conflict(
+        job_dir=job_dir,
+        view_dir=view_dir,
+        staged_moves=staged_moves,
+        remote_landing_names=remote_landing_names,
+    )
+    if conflict is not None:
+        return handler.leases.finish(
+            lease_id,
+            ExecutionResult(
+                status="failed",
+                exit_code=1,
+                error_message=conflict,
+                runner=worker_id,
+                staged_file_moves=tuple(
+                    (str(target), str(source))
+                    for target, source in gate_safe_staged_moves(staged_moves)
+                ),
+            ),
+            stage_timer=stage_timer,
+        )
     # The read view must cover both channels: archive outputs live in the
     # staging dir, Worker-direct downloads already landed in job_dir via the
     # gated promote — hardlink the latter into the view (same FS, zero-copy)
     # so validation/shard-read/mirror see one unified dir.
     if view_dir is not job_dir:
-        _link_into_view(expected, job_dir, view_dir)
+        link_into_view(expected, job_dir, view_dir)
     # #160 D12: dict-form refs mean the Worker uploaded straight to S3
     # (per-execution staging keys); verify ALL refs, then promote +
     # download + register (no half-applied state). Any failure flips the
@@ -90,7 +129,7 @@ def finish_staged(
     # and the view must track THIS attempt's bytes, not the previous
     # inode's (#759 review P1).
     if view_dir is not job_dir:
-        _link_into_view(tuple(remote_names), job_dir, view_dir, overwrite=True)
+        link_into_view(tuple(remote_names), job_dir, view_dir, overwrite=True)
     if remote_names and staged_moves:
         # A redundant Worker reporting the same name in BOTH the archive and
         # a dict-ref: the ref channel must win on every plane (#759 review
@@ -184,25 +223,3 @@ def stored_run_dir(
         return (job_dir / run_dir_relative).resolve().relative_to(base.resolve()).as_posix()
     except ValueError:
         return ""
-
-
-def _link_into_view(
-    names: tuple[str, ...] | Any, job_dir: Path, view_dir: Path, *, overwrite: bool = False
-) -> None:
-    for name in names:
-        landed = job_dir / name
-        view_spot = view_dir / name
-        if not landed.is_file():
-            continue
-        if view_spot.exists():
-            if not overwrite:
-                continue
-            view_spot.unlink()
-        view_spot.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            os.link(landed, view_spot)
-        except OSError:
-            # 不支持硬链接的挂载（P3 部署边缘）：退化为同内容拷贝，读视图
-            # 语义不变——视图只用于 finish 前的读取，随后整个 staging 目录
-            # 被清理。
-            shutil.copy2(landed, view_spot)

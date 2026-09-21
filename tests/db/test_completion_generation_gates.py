@@ -36,6 +36,16 @@ def _node_row(job_id: str, node_key: str) -> dict[str, Any]:
     return dict(row)
 
 
+def _node_error(job_id: str, node_key: str) -> str:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select error_message from job_nodes where job_id=%s and node_key=%s",
+            (job_id, node_key),
+        ).fetchone()
+    assert row is not None
+    return str(row["error_message"])
+
+
 class _StubArtifactStore:
     def __init__(self) -> None:
         self.refs: list[tuple[str, str, str, str]] = []
@@ -322,3 +332,215 @@ def test_completion_missing_job_dir_fails_result_not_commit(
     assert _finish_with_archive(handler, job_id="gate17-job") is True
 
     assert _node_row("gate17-job", "node_a")["status"] == "failed"
+
+
+def test_completion_ref_channel_survives_archive_directory_collision(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """codex #774 P2 回归：归档在 expected 名上解出目录 + 同名 dict-ref——
+    预检判形状兼容（目录不产生归档落点），ref 通道三面胜出，overwrite
+    遍清掉视图垃圾目录后正常链接。旧代码在视图链接 unlink 目录抛
+    IsADirectoryError：remote promote 已提交、staging key 已删、lease
+    卡死——现在结果照常 completed。"""
+    _seed_completion_job(job_db, workspace_id="gate18-ws", job_id="gate18-job")
+    storage = FakeObjectStorage()
+    staging_key = "jobs-staging/gate18-ws/gate18-job/exec-1/out.json"
+    storage.objects[staging_key] = b"ref-bytes"
+    handler, store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "gate18-ws" / "gate18-job"
+    job_dir.mkdir(parents=True)
+    # 归档只带目录成员（解包出 out.json/ 目录与垃圾文件），不产生归档落点。
+    _result_archive(tmp_path / "bundles" / "result.tar.gz", {"out.json/junk.txt": b"junk"})
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="gate18-job",
+        node_key="node_a",
+        manifest={"expected_outputs": ["out.json"], "execution_id": "exec-1"},
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            output_artifacts={
+                "out.json": {"storage_key": staging_key, "size_bytes": 9, "content_hash": ""}
+            },
+        ),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("gate18-job", "node_a")["status"] == "completed"
+    assert (job_dir / "out.json").is_file()
+    assert (job_dir / "out.json").read_bytes() == b"ref-bytes"
+    assert storage.objects["jobs/gate18-ws/gate18-job/out.json"] == b"ref-bytes"
+    assert staging_key not in storage.objects  # promote 成功后 staging 已清
+    assert store.row_for_node("gate18-job", "node_a", "out.json") is not None
+
+
+def test_completion_prefix_clash_fails_cleanly_before_any_apply(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """预检结构性修复：归档落点 reports（文件）与 remote ref 落点
+    reports/out.json 前缀相撞——任何字节移动之前判 failed：authority 零
+    copy（Worker staging 对象原样保留待 lifecycle）、清单零登记、remote
+    字节零落盘；闸安全的 node.log 仍随失败 finish 落盘（P3 parity）。
+    旧代码会在闸内把已 promote 的 remote 文件随目录备份静默删掉，或在
+    视图链接炸穿结果提交。"""
+    _seed_completion_job(job_db, workspace_id="gate19-ws", job_id="gate19-job")
+    storage = FakeObjectStorage()
+    staging_key = "jobs-staging/gate19-ws/gate19-job/exec-1/reports/out.json"
+    storage.objects[staging_key] = b"ref-bytes"
+    handler, store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "gate19-ws" / "gate19-job"
+    job_dir.mkdir(parents=True)
+    _result_archive(
+        tmp_path / "bundles" / "result.tar.gz",
+        {"reports": b"archive-bytes", "node.log": b"partial log"},
+    )
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="gate19-job",
+        node_key="node_a",
+        manifest={
+            "kind": "code",
+            "log_path": "logs/jobs/gate19-job/node_a.log",
+            "expected_outputs": ["reports", "reports/out.json"],
+            "execution_id": "exec-1",
+        },
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            output_artifacts={
+                "reports/out.json": {
+                    "storage_key": staging_key,
+                    "size_bytes": 9,
+                    "content_hash": "",
+                }
+            },
+        ),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("gate19-job", "node_a")["status"] == "failed"
+    assert "conflicting output paths" in _node_error("gate19-job", "node_a")
+    assert storage.objects == {staging_key: b"ref-bytes"}  # 零 authority copy
+    assert store.row_for_node("gate19-job", "node_a", "reports/out.json") is None
+    assert not (job_dir / "reports").is_dir()  # remote 字节从未落盘
+    # 失败 finish 的归档提升 parity：闸安全的 moves（含 reports 输出与
+    # node.log）照常落盘。
+    assert (job_dir / "reports").read_bytes() == b"archive-bytes"
+    assert (tmp_path / "logs" / "jobs" / "gate19-job" / "node_a.log").read_bytes() == b"partial log"
+
+
+def test_completion_blocked_ancestor_fails_cleanly(job_db: JobQueries, tmp_path: Path) -> None:
+    """job_dir 现场污染（前代次残留文件）挡住落点祖先——预检判 failed、
+    现场原样保留；闸内 promote 的 mkdir 不再整批回滚上抛毒化 lease。"""
+    _seed_completion_job(job_db, workspace_id="gate20-ws", job_id="gate20-job")
+    storage = FakeObjectStorage()
+    handler, _store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "gate20-ws" / "gate20-job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "reports").write_bytes(b"previous-generation-leftover")
+    _result_archive(tmp_path / "bundles" / "result.tar.gz", {"reports/out.json": b"bytes"})
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="gate20-job",
+        node_key="node_a",
+        manifest={"expected_outputs": ["reports/out.json"], "execution_id": "exec-1"},
+        outcome=AgentOutcome(status="completed", exit_code=0, output_artifacts={}),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("gate20-job", "node_a")["status"] == "failed"
+    assert "blocked" in _node_error("gate20-job", "node_a")
+    assert (job_dir / "reports").read_bytes() == b"previous-generation-leftover"
+    assert not (job_dir / "reports").is_dir()
+
+
+def test_finish_gate_promotion_failure_converts_to_failed_not_wedge(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """闸内兜底（预检无锁盖不住的残余竞态面）：staged_file_moves 提升在
+    闸内失败时不再炸穿 finish 事务——guard 整体回滚后 completed 转
+    failed 照常提交，lease 正常释放，节点不毒化成重试循环。"""
+    _seed_completion_job(job_db, workspace_id="gate21-ws", job_id="gate21-job")
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+    job_dir = tmp_path / "jobs" / "gate21-ws" / "gate21-job"
+    job_dir.mkdir(parents=True)
+    missing_source = job_dir / ".result-staging-x" / "out.json"
+    target = job_dir / "out.json"
+
+    ok = repo.finish(
+        "lease-1",
+        ExecutionResult(
+            status="completed",
+            exit_code=0,
+            staged_file_moves=((str(target), str(missing_source)),),
+        ),
+    )
+
+    assert ok is True
+    node = _node_row("gate21-job", "node_a")
+    assert node["status"] == "failed"
+    assert "failed to promote result files" in _node_error("gate21-job", "node_a")
+    assert not target.exists()  # 半应用零残留（guard 回滚）
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        lease = conn.execute(
+            "select status from executor_leases where id=%s", ("lease-1",)
+        ).fetchone()
+    assert lease is not None
+    assert lease["status"] == "released"
+
+
+def test_completion_reserved_log_member_clash_fails_cleanly(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """P2-B 回归（#759 对抗复审）：kind=code 节点声明输出名 node.log（撞
+    保留结果成员 CODE_RESULT_LOG_MEMBER）且 Worker 以 dict-ref 上报——
+    预检判 failed、零字节应用。旧代码在 overwrite 遍把归档 node.log
+    （log move 的 source）unlink 掉，闸内 FileNotFoundError 把执行成功
+    的节点判 failed、重跑必复现。本用例同时钉住失败 finish 挂载的「同
+    source 双 move」经 guard 回滚 + 闸内兜底后零残留。"""
+    _seed_completion_job(job_db, workspace_id="gate22-ws", job_id="gate22-job")
+    storage = FakeObjectStorage()
+    staging_key = "jobs-staging/gate22-ws/gate22-job/exec-1/node.log"
+    storage.objects[staging_key] = b"ref-bytes"
+    handler, store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "gate22-ws" / "gate22-job"
+    job_dir.mkdir(parents=True)
+    _result_archive(tmp_path / "bundles" / "result.tar.gz", {"node.log": b"captured stdout"})
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="gate22-job",
+        node_key="node_a",
+        manifest={
+            "kind": "code",
+            "log_path": "logs/jobs/gate22-job/node_a.log",
+            "expected_outputs": ["node.log"],
+            "execution_id": "exec-1",
+        },
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            output_artifacts={
+                "node.log": {"storage_key": staging_key, "size_bytes": 9, "content_hash": ""}
+            },
+        ),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("gate22-job", "node_a")["status"] == "failed"
+    assert "reserved result member" in _node_error("gate22-job", "node_a")
+    assert storage.objects == {staging_key: b"ref-bytes"}  # 零 authority copy
+    assert store.row_for_node("gate22-job", "node_a", "node.log") is None
+    assert not (job_dir / "node.log").exists()  # 同 source 双 move 回滚零残留
+    assert not (tmp_path / "logs" / "jobs" / "gate22-job" / "node_a.log").exists()

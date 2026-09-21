@@ -201,6 +201,25 @@ lease_id）；expected 输出、events.jsonl 与 node.log 的提升经
 `ExecutionResult.staged_file_moves` 挤进 `finish_lease` 的代次 CAS——代次不匹配
 时文件永不落盘，旧代次归档覆盖不了新现场的本地输入。
 
+**落点形态的三层纪律**（#759 对抗复审 P2 族，codex #774 P2）：归档与 remote
+ref 两个通道各自宣称的路径形状若单文件系统不可能同时成立（`reports` 是文件、
+`reports/out.json` 也是文件），任何中途发现都会在其他面已提交之后炸穿结果提交。
+因此：
+
+1. **预检**（`agent_control/completion_preflight.py`）：任何字节移动之前核算全部
+   计划落点——跨通道前缀互斥、祖先畅通（现场非目录挡位）、保留源保护
+   （node.log 的 staging source 不落 job_dir 落点集，remote 落点与之同位或位于其
+   下会抹掉它）——纯路径数学零写入；冲突即整个结果干净 failed（零字节应用、
+   Worker staging key 保留），闸安全的归档 moves（node.log 等）照常随失败 finish
+   落盘；
+2. **全域读视图**（`agent_control/completion_view.py`）：staging 视图是私有
+   scratch，链接对归档垃圾形状（同名目录、文件祖先、symlink）与源消失 TOCTOU
+   全域——overwrite 遍清挡位垃圾（预检保证删不到暂存源），第一遍遇挡位跳过按
+   未产出判 missing，永不炸异常；
+3. **闸内兜底**（`executors/_lease_finish_promotion.py`）：预检无锁，盖不住跨
+   节点 finish 之间现场变坏的残余竞态——`staged_file_moves` 提升失败经 guard
+   整体回滚后 completed 转 failed 照常提交，lease 不再被异常回滚毒化成重试循环。
+
 ## 3. 对抗审查 checklist
 
 本协议经多轮对抗审查收敛；把发现过真实问题的三个切面固化为 checklist。审查

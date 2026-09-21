@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
-from server.app.executors._file_promotion import promote_result_staged_moves
 from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
     lock_job_mutation_and_read_generation,
     sync_job_status,
 )
+from server.app.executors._lease_finish_promotion import promote_result_staged_moves_contained
 from server.app.executors._lease_shards import finish_shard_execution
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors._lease_transient_retry import try_return_node_to_pending
@@ -79,9 +79,10 @@ def finish_lease(
     elif result.staged_file_moves:
         # #759 review P1-1：Worker 结果归档的文件提升只在本代次闸内发生——
         # 解包先于闸落到 staging 目录，迟到（reset 后）的 finish 在此跳过，
-        # 旧代次字节永远进不了新现场的 job_dir。提升失败整体回滚再上抛，
-        # 不留半应用文件（与产物清单登记同一 FilePromotionGuard 纪律）。
-        promote_result_staged_moves(result.staged_file_moves)
+        # 旧代次字节永远进不了新现场的 job_dir。提升失败整体回滚、
+        # completed 转 failed 照常提交（_lease_finish_promotion 的兜底臂，
+        # #759 对抗复审 P2 族），不留半应用文件也不毒化 lease。
+        result = promote_result_staged_moves_contained(result, lease_id=lease_id)
 
     conn.execute("update executor_leases set status='released' where id=%s", (lease_id,))
 
