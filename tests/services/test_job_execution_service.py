@@ -620,3 +620,31 @@ def test_batch_run_to_returns_mixed_results_in_request_order(
     assert results[1]["job_id"] == "missing-job"
     assert results[1]["status"] == "failed"
     assert results[1]["reason_code"] == "not_found"
+
+
+def test_run_to_without_start_deletes_shards_only_for_reset_nodes(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace
+):
+    """#759 自审 P1：delete_shards 必须与节点重置同一集合——按全 closure
+    删会把保持 completed 的分片节点的 output_json 永久抹掉。"""
+    job = _create_job(job_db, workspace["id"])
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into node_shards(job_id, node_key, shard_index, status, input_json)"
+            " values (%s, 'intake_knowledge_points', 0, 'completed', '{}'),"
+            " (%s, 'write_script', 0, 'pending', '{}')",
+            (job["id"], job["id"]),
+        )
+
+    result = execution_service.run_to(workspace["id"], job["id"], "write_script")
+
+    assert result["status"] == "succeeded"
+    with job_db.connect() as conn:
+        remaining = {
+            row["node_key"]
+            for row in conn.execute(
+                "select node_key from node_shards where job_id=%s", (job["id"],)
+            ).fetchall()
+        }
+    assert remaining == {"intake_knowledge_points"}

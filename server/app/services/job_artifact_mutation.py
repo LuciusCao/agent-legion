@@ -78,6 +78,8 @@ class JobArtifactMutationService:
         job: dict[str, Any],
         affected_keys: Sequence[str],
         definition: WorkflowDefinition,
+        *,
+        extra_names: Sequence[str] = (),
     ) -> StagedOutputs:
         """Move the given nodes' outputs and run histories to reversible staging.
 
@@ -89,6 +91,10 @@ class JobArtifactMutationService:
         (``dependency_downstream``) or an operation-specific filter; this
         service deliberately performs no graph traversal of its own, so no
         second enumeration can diverge from the reset logic.
+
+        ``extra_names`` stages additional artifact names verbatim (e.g. an
+        output a new workflow revision dropped from a shared node, #759);
+        the caller owns their RMW exclusion.
 
         Read-modify-write artifacts (declared as both an input and an output of
         the same node) are never staged: removing them would leave the node
@@ -111,7 +117,7 @@ class JobArtifactMutationService:
                 raise ValueError(f"Unknown node: {node_key}")
             affected.add(node_key)
 
-        outputs: set[str] = set()
+        outputs: set[str] = set(extra_names)
         for key in affected:
             node = definition.nodes[key]
             outputs.update(set(node.outputs) - set(node.inputs))

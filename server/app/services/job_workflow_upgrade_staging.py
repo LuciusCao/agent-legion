@@ -17,6 +17,7 @@ from server.app.services.job_staged_cleanup import (
 )
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.workflow_consumption import rmw_artifact_names
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -30,16 +31,45 @@ def stage_upgrade_outputs(
     new_definition: WorkflowDefinition,
     old_definition: WorkflowDefinition | None,
 ) -> list[StagedOutputs]:
-    """暂存新旧定义可执行节点之并的产物；每个 handle 独立 commit/rollback。"""
-    staged = [
-        artifact_service.stage_outputs(job, sorted(new_definition.executable_nodes), new_definition)
-    ]
-    if old_definition is not None:
-        removed = sorted(
-            set(old_definition.executable_nodes) - set(new_definition.executable_nodes)
+    """暂存新旧定义可执行节点之并的产物；每个 handle 独立 commit/rollback。
+
+    共有节点在新 revision 中被删掉的 output 名也一并暂存（旧定义视角的
+    产物全集才算「全部失效」）；第二段及以后失败时回滚已收集的 handle，
+    不允许半程丢失（#759 自审 P1）。
+    """
+    staged: list[StagedOutputs] = []
+    try:
+        dropped_names: set[str] = set()
+        if old_definition is not None:
+            for key in set(old_definition.executable_nodes) & set(new_definition.executable_nodes):
+                old_node = old_definition.nodes[key]
+                new_node = new_definition.nodes[key]
+                dropped_names.update(
+                    (set(old_node.outputs) - set(new_node.outputs)) - set(new_node.inputs)
+                )
+        staged.append(
+            artifact_service.stage_outputs(
+                job,
+                sorted(new_definition.executable_nodes),
+                new_definition,
+                extra_names=sorted(dropped_names),
+            )
         )
-        if removed:
-            staged.append(artifact_service.stage_outputs(job, removed, old_definition))
+        if old_definition is not None:
+            removed = sorted(
+                set(old_definition.executable_nodes) - set(new_definition.executable_nodes)
+            )
+            if removed:
+                staged.append(artifact_service.stage_outputs(job, removed, old_definition))
+    except Exception:
+        # #204 broad-except audit: 两段暂存的组合回滚——第二段及以后失败
+        # （OSError/ValueError 来自 stage_outputs 的 fs 移动与路径校验）时
+        # 已收集 handle 的产物必须全部回到原位，否则 DB 未变而第一批文件
+        # 滞留 .staged（#759 自审 P1）。原异常类型原样上抛给
+        # execute_staged_upgrade 的分类臂。
+        for handle in staged:
+            handle.rollback()
+        raise
     return staged
 
 
@@ -60,8 +90,9 @@ def execute_staged_upgrade(
             now,
             reject_running_nodes=True,
         ) as conn:
+            old_definition = definition_from_job_snapshot(job)
             staged = stage_upgrade_outputs(
-                service.artifact_service, job, definition, definition_from_job_snapshot(job)
+                service.artifact_service, job, definition, old_definition
             )
             deleted_rows = upgrade_job_workflow(
                 conn,
@@ -72,6 +103,7 @@ def execute_staged_upgrade(
                 workflow_definition_snapshot_json=str(active["definition_json"]),
                 node_keys=list(definition.executable_nodes),
                 frozen_config_json=frozen_config_json,
+                preserve_artifact_names=rmw_artifact_names(definition, old_definition),
             )
     except Exception:
         # #204 broad-except audit: staged filesystem + DB mutation sequence,

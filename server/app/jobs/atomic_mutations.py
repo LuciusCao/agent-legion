@@ -132,7 +132,9 @@ def apply_run_to(
     )
     # 已入队的 queued agent 请求不复查上游，重置节点前必须取消（见 mark_nodes_for_rerun）。
     conn.execute(_cancel_queued_sql(placeholders), (job_id, *sorted(closure)))
-    delete_shards(conn, job_id, closure)
+    # #759：分片行删除与节点重置同一集合——按全 closure 删会把保持
+    # completed 的分片节点的 output_json 永久抹掉（reduce 重跑拼出空输入）。
+    delete_shards(conn, job_id, reset_nodes if reset_nodes is not None else closure)
     return deleted_rows
 
 

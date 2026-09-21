@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.workflow_consumption import dependency_ancestors
 
 
 class ExecutionControlError(ValueError):
@@ -51,6 +52,12 @@ def allowed_nodes(
         target = execution_control.get("target_node_key")
         if not target:
             raise ExecutionControlError("target_node_key is required for until_node execution mode")
-        closure = ancestor_closure(definition, target)
+        if target not in definition.nodes:
+            raise ExecutionControlError(
+                f"Unknown target node {target!r} in workflow {definition.key!r}"
+            )
+        # #759：合并上游（显式边 ∪ 隐式生产边）——until_node 模式下被重置的
+        # 隐式生产者也必须允许执行，否则作业永远到不了目标。
+        closure = {target, *dependency_ancestors(definition, target)}
         return frozenset(key for key in closure if definition.nodes[key].node_type != "start")
     raise ExecutionControlError(f"Invalid execution_mode: {mode!r}")

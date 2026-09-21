@@ -13,7 +13,10 @@ from typing import TYPE_CHECKING, Any
 from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.jobs.atomic_mutations import JobMutationConflict, apply_run_to
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
-from server.app.services.job_rerun.upstream_guard import raise_if_failed_upstream
+from server.app.services.job_rerun.upstream_guard import (
+    raise_if_failed_upstream,
+    raise_if_failed_upstream_in_tx,
+)
 from server.app.services.job_staged_cleanup import (
     commit_staged_outputs,
     delete_rerun_artifact_objects,
@@ -66,6 +69,10 @@ def run_to_without_start(
         ) as conn:
             current_statuses = service.job_db.list_job_node_statuses_in_transaction(conn, job_id)
             reset_nodes = sorted(key for key in closure if current_statuses.get(key) != "completed")
+            # #759 invariant 5：failed-upstream 资格在锁内用当前状态重查。
+            raise_if_failed_upstream_in_tx(
+                service.job_db, conn, definition, target_node_key, job_id, "run_to", target_node_key
+            )
             staged = service.artifact_mutation.stage_outputs(job, reset_nodes, definition)
             deleted_rows = apply_run_to(
                 conn,
@@ -176,6 +183,10 @@ def run_to_with_start(
             service._now(),
             reject_running_nodes=True,
         ) as conn:
+            # #759 invariant 5：failed-upstream 资格在锁内用当前状态重查。
+            raise_if_failed_upstream_in_tx(
+                service.job_db, conn, definition, start_node_key, job_id, "run_to", target_node_key
+            )
             staged = service.artifact_mutation.stage_outputs(job, affected, definition)
             deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(
                 conn,
@@ -191,6 +202,11 @@ def run_to_with_start(
         raise JobOperationError(
             job_id, "run_to", "skipped", target_node_key, exc.reason_code, str(exc)
         ) from exc
+    except JobOperationError:
+        # 锁内 failed-upstream 重查的业务拒绝：回滚暂存后原样抛出。
+        if staged is not None:
+            staged.rollback()
+        raise
     except ValueError as exc:
         if staged is not None:
             staged.rollback()

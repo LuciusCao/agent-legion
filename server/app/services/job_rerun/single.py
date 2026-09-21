@@ -8,6 +8,7 @@ from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.eligibility import check_rerun_eligibility
+from server.app.services.job_rerun.upstream_guard import raise_if_failed_upstream_in_tx
 from server.app.services.job_staged_cleanup import (
     commit_staged_outputs,
     delete_rerun_artifact_objects,
@@ -95,6 +96,11 @@ def commit_rerun(
             service._now(),
             reject_running_nodes=True,
         ) as conn:
+            # #759 invariant 5：failed-upstream 资格在锁内用当前状态重查
+            # （锁外预检到取锁之间上游可能转 failed）。
+            raise_if_failed_upstream_in_tx(
+                service.job_db, conn, definition, actual_node_key, job_id, "rerun", actual_node_key
+            )
             staged = service.artifact_service.stage_outputs(job, affected, definition)
             deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(
                 conn,
@@ -109,6 +115,12 @@ def commit_rerun(
         raise JobOperationError(
             job_id, "rerun", "skipped", actual_node_key, exc.reason_code, str(exc)
         ) from exc
+    except JobOperationError:
+        # 锁内 failed-upstream 重查的业务拒绝：回滚暂存后原样抛出（不
+        # 归一化为 rerun_failed）。
+        if staged is not None:
+            staged.rollback()
+        raise
     except ValueError as exc:
         if staged is not None:
             staged.rollback()

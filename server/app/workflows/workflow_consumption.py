@@ -30,10 +30,7 @@ def consumer_edges(
     论证，必须由调用方排除。
     """
     skipped = set(skip_names)
-    producers: dict[str, set[str]] = {}
-    for key, node in definition.nodes.items():
-        for name in node.outputs:
-            producers.setdefault(name, set()).add(key)
+    producers = artifact_producers(definition)
     edges: dict[str, set[str]] = {key: set() for key in definition.nodes}
     for key, node in definition.nodes.items():
         for name in node.inputs:
@@ -43,6 +40,20 @@ def consumer_edges(
                 if producer != key:
                     edges[producer].add(key)
     return {key: sorted(targets) for key, targets in edges.items()}
+
+
+def artifact_producers(definition: WorkflowDefinition) -> dict[str, set[str]]:
+    """产物名 → 声明其为 output 的节点集合（调度完成屏障与隐式边共用）。
+
+    调度器（find_ready_nodes）与重置语义（本模块的隐式边）必须使用同一个
+    生产者索引，否则「RMW 产物在重置后被刻意保留」的场景里消费者会和
+    生产者并发重跑、读到旧值（#759 codex P1）。
+    """
+    producers: dict[str, set[str]] = {}
+    for key, node in definition.nodes.items():
+        for name in node.outputs:
+            producers.setdefault(name, set()).add(key)
+    return producers
 
 
 def dependency_children(
@@ -78,3 +89,42 @@ def walk_downstream(children: Mapping[str, Iterable[str]], starts: Iterable[str]
 def dependency_downstream(definition: WorkflowDefinition, node_key: str) -> list[str]:
     """节点的合并传递下游（显式边 ∪ 隐式消费边），排序确定序。"""
     return sorted(walk_downstream(dependency_children(definition), [node_key]))
+
+
+def dependency_parents(
+    definition: WorkflowDefinition, *, skip_consumption_names: Iterable[str] = ()
+) -> dict[str, list[str]]:
+    """合并上游邻接表：显式边 ∪ 隐式生产边（key → 排序后的直接上游）。
+
+    下游合并了而上游没有，会让「隐式生产者 failed」逃出所有 failed-
+    upstream 防线：守卫放行 → 重置提交 → 调度的隐式生产者完成屏障
+    永久阻塞目标（#759 自审 P1）。上游判定必须与下游同一张合并图。
+    """
+    parents: dict[str, set[str]] = {key: set() for key in definition.nodes}
+    for source, targets in dependency_children(
+        definition, skip_consumption_names=skip_consumption_names
+    ).items():
+        for target in targets:
+            parents[target].add(source)
+    return {key: sorted(sources) for key, sources in parents.items()}
+
+
+def dependency_ancestors(definition: WorkflowDefinition, node_key: str) -> list[str]:
+    """节点的合并传递上游（显式边 ∪ 隐式生产边），排序确定序。"""
+    return sorted(walk_downstream(dependency_parents(definition), [node_key]))
+
+
+def rmw_artifact_names(*definitions: WorkflowDefinition | None) -> set[str]:
+    """任一定义里同名 input+output 的产物名集合（#114 RMW）。
+
+    clean 升级的清单行删除必须豁免这些名：rerun/run-to 入口对 RMW 是
+    文件/清单/对象三者全保留，升级若删行删对象会让 RMW 种子只剩本地
+    单副本（#759 自审 P2）。
+    """
+    names: set[str] = set()
+    for definition in definitions:
+        if definition is None:
+            continue
+        for node in definition.nodes.values():
+            names.update(set(node.outputs) & set(node.inputs))
+    return names

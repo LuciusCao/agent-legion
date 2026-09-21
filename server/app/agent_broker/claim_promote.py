@@ -114,9 +114,14 @@ def promote_claim(
     # #555: 收窄为 queued→running 的真实跃迁——多节点 job 的每个后继节点
     # claim 都曾对同一 jobs 行做「值不变的重写+重锁」，与 result commit 侧
     # 同批 job 的写正面相撞。已 running 的 job 无需再写。
+    # #759 自审：awaiting_approval 同样是合法起点——审批门 park 期间并行
+    # 分支必须保持可认领（EXEC-APPROVAL-001，本地 claim_lease 的 promote
+    # 条件 not in ('running','completed','failed') 本就接受它）；漏了它
+    # 会让远程 claim 在 gate 决策前永远 ClaimRacedError，queued 请求变
+    # 队首毒药饿死其后全部候选。
     promoted = conn.execute(
         "update jobs set status='running', updated_at=current_timestamp"
-        " where id=%s and status='queued' and execution_paused=0",
+        " where id=%s and status in ('queued', 'awaiting_approval') and execution_paused=0",
         (selected["job_id"],),
     )
     if promoted.rowcount == 0:

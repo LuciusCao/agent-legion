@@ -336,3 +336,80 @@ def test_decision_after_gate_branch_reset_is_blocked_by_status_guard(branch_appr
         service.decide(workspace_id, job_id, "gate", verdict="approved", decided_by="user:u1")
     assert service.list_decisions(workspace_id, job_id) == []
     assert _node_status(job_db, job_id, "gate") == "pending"
+
+
+def test_rework_rolls_back_staged_outputs_on_unexpected_error(approval_setup, monkeypatch):
+    """#759 自审 P1：rework 事务内意外异常（非冲突/非 ValueError 族）时，
+    已暂存的产物必须回滚——不允许 DB 未变而文件消失。"""
+    job_db, leases, service, workspace_id, job_id, job_dir = approval_setup
+    leases.park_awaiting_approval(job_id, "gate")
+
+    def broken_mark(*args, **kwargs):
+        raise RuntimeError("db connectivity lost")
+
+    monkeypatch.setattr(job_db, "mark_nodes_for_rerun_in_transaction", broken_mark)
+
+    import pytest as _pytest
+
+    with _pytest.raises(RuntimeError, match="db connectivity lost"):
+        service.decide(
+            workspace_id, job_id, "gate", verdict="rework", note="重写", decided_by="user:u1"
+        )
+
+    assert (job_dir / "script.md").read_text(encoding="utf-8") == "# 逐字稿草稿"
+    assert _node_status(job_db, job_id, "write") == "completed"
+    assert _node_status(job_db, job_id, "gate") == "awaiting_approval"
+
+
+def test_rework_feedback_survives_when_declared_as_node_output(approval_setup):
+    """#759 自审：feedback 名被受影响节点声明为 output 时，评审意见不得
+    被同事务的暂存当作旧产物清掉——feedback 在提交后写入。"""
+    job_db, leases, service, workspace_id, job_id, job_dir = approval_setup
+    # write 节点把默认 feedback 名也声明为 output 的 workflow 变体。
+    definition = workflow_definition_from_mapping(
+        {
+            **APPROVAL_DAG,
+            "nodes": {
+                **APPROVAL_DAG["nodes"],
+                "write": {
+                    "label": "写稿",
+                    "capability": "write_script",
+                    "outputs": ["script.md", "review_feedback.json"],
+                },
+            },
+        }
+    )
+    ws = job_db.create_workspace(name="approval-ws-fb", default_workflow_key=definition.key)
+    WorkflowRevisionService(job_db).ensure_active_revision(str(ws["id"]), definition)
+    job = job_db.create_job(
+        workflow_key=definition.key,
+        source_type="material",
+        source_id="chapter-2",
+        run_id="",
+        title="第二章",
+        node_keys=list(definition.executable_nodes),
+        workspace_id=str(ws["id"]),
+    )
+    fb_dir = resolve_job_dir(job, job_db.jobs_dir)
+    fb_dir.mkdir(parents=True, exist_ok=True)
+    (fb_dir / "script.md").write_text("# 旧稿", encoding="utf-8")
+    (fb_dir / "review_feedback.json").write_text('{"round": 0}', encoding="utf-8")
+    with job_db.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='completed', finished_at=current_timestamp"
+            " where job_id=%s and node_key='write'",
+            (job["id"],),
+        )
+    leases.park_awaiting_approval(str(job["id"]), "gate")
+
+    service.decide(
+        str(ws["id"]),
+        str(job["id"]),
+        "gate",
+        verdict="rework",
+        note="案例前置",
+        decided_by="user:u1",
+    )
+
+    feedback = json.loads((fb_dir / "review_feedback.json").read_text(encoding="utf-8"))
+    assert feedback["note"] == "案例前置"

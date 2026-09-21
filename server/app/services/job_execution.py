@@ -17,8 +17,8 @@ from server.app.services.job_run_to import run_to_with_start, run_to_without_sta
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.execution_control import ExecutionControlError, ancestor_closure
 from server.app.workflows.start_node import START_NODE_TYPE
+from server.app.workflows.workflow_consumption import dependency_ancestors
 
 logger = logging.getLogger(__name__)
 
@@ -119,17 +119,9 @@ class JobExecutionService:
                 f"Node {target_node_key} is an entry (type: start) node and never executes",
             )
 
-        try:
-            closure = ancestor_closure(definition, target_node_key)
-        except ExecutionControlError as exc:
-            raise JobOperationError(
-                job_id,
-                "run_to",
-                "failed",
-                target_node_key,
-                "node_not_found",
-                str(exc),
-            ) from exc
+        # #759：closure 走合并上游（显式边 ∪ 隐式生产边）——隐式生产者也
+        # 必须进重置集并重跑，否则调度的隐式生产者完成屏障会永久阻塞目标。
+        closure = frozenset({target_node_key, *dependency_ancestors(definition, target_node_key)})
 
         if self._has_active_lease(job_id):
             raise JobOperationError(

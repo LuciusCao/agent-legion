@@ -183,3 +183,83 @@ def test_preview_excludes_failed_upstream(rerun_service, job_db):
     )
 
     assert preview == {"total_count": 2, "eligible_count": 1}
+
+
+def _seed_implicit_job(job_db):
+    """p（隐式生产者，无显式边）→ q（inputs x.json）的 workflow 与 job。"""
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    definition = workflow_definition_from_dict(
+        {
+            "key": "wf759_guard",
+            "label": "wf759_guard",
+            "nodes": {
+                "p": {"capability": "cap_p", "outputs": ["x.json"]},
+                "q": {"capability": "cap_q", "inputs": ["x.json"], "outputs": ["y.json"]},
+            },
+            "edges": [],
+        }
+    )
+    workspace = job_db.create_workspace("guard-implicit", default_workflow_key="wf759_guard")
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
+    batch = job_db.create_run(
+        "wf759_guard", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]
+    )
+    job = job_db.create_job(
+        workflow_key="wf759_guard",
+        source_type="question",
+        source_id="1",
+        run_id=batch["id"],
+        title="implicit-guard",
+        node_keys=["p", "q"],
+        workspace_id=workspace["id"],
+    )
+    return workspace, job
+
+
+def test_rerun_rejected_when_implicit_producer_failed(rerun_service, job_db):
+    """#759 自审 P1：failed-upstream 守卫走合并上游——隐式生产者 failed 时
+    放行会让调度的隐式生产者屏障永久阻塞目标（job 卡死）。"""
+    workspace, job = _seed_implicit_job(job_db)
+    job_db.update_job_node(job["id"], "p", status="failed")
+
+    import pytest as _pytest
+
+    with _pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(workspace["id"], job["id"], "q")
+
+    assert exc_info.value.reason_code == "upstream_failed"
+
+
+def test_rerun_failed_upstream_rechecked_under_mutation_lock(rerun_service, job_db, monkeypatch):
+    """#759 invariant 5：锁外预检通过到取锁之间上游转 failed，锁内重查
+    必须拦住（TOCTOU）。"""
+    workspace_id = _seed_workspace(job_db)
+    job = _create_job(job_db, workspace_id, "Q-lock-race")
+
+    from contextlib import contextmanager
+
+    original = job_db.lease_guarded_mutation
+
+    @contextmanager
+    def race(job_id, now, *, reject_running_nodes):
+        # 取锁前 write_script 转 failed（无 lease 的 config-failure 路径
+        # 不会被 busy 复查拦住）。
+        job_db.update_job_node(job_id, "write_script", status="failed")
+        with original(job_id, now, reject_running_nodes=reject_running_nodes) as conn:
+            yield conn
+
+    monkeypatch.setattr(job_db, "lease_guarded_mutation", race)
+
+    import pytest as _pytest
+
+    with _pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(workspace_id, job["id"], "publish_content")
+
+    assert exc_info.value.reason_code == "upstream_failed"
+    assert _node_statuses(job_db, job["id"])["publish_content"] == "pending"
+
+
+def _node_statuses(job_db, job_id):
+    return {n["node_key"]: n["status"] for n in job_db.list_job_nodes(job_id)}

@@ -225,8 +225,12 @@ helper 直写执行态。因此写面全集由机器钉住
       确实同域？
 - [ ] 失败补偿是否成对出现且幂等：暂存↔回滚、备份↔恢复、登记↔删除；补偿失败
       是否 per-item 兜住而不中断其余补偿？
-- [ ] 新下游判据是否进了 `workflow_consumption` 的统一邻接表（显式边 ∪ 隐式
-      消费边），而不是手补下游列表？
+- [ ] 新下游/上游判据是否进了 `workflow_consumption` 的统一邻接表
+      （显式边 ∪ 隐式消费/生产边，`dependency_children` /
+      `dependency_parents`），而不是手补列表？下游（重置闭包）与上游
+      （failed-upstream 守卫、run-to closure、rework 目标、until_node
+      允许集）必须用同一张合并图；调度就绪的隐式生产者完成屏障与
+      隐式边共用 `artifact_producers` 同一索引。
 
 ## 4. 已知残余面与后续方向
 
@@ -244,6 +248,39 @@ helper 直写执行态。因此写面全集由机器钉住
    artifact-dependency-model 层的内容。
 4. **upgrade inherit 模式**（保留未变节点产物）与发布/skill 锁域接入同一
    协议是后续 upgrade-inherit 层的内容。
+
+#759 五面对抗自审（2026-09）登记、经 triage 暂不修的残余项（多为
+pre-existing 或需后续层设计；评审时按现状接受，不许扩大）：
+
+5. **eviction 淘汰输入文件后 targeted rerun 永不 ready**：`restore` 挂在
+   claim 后的 `execute()`，而 `_inputs_exist` 在 ready 评估就把它挡死——
+   恢复路径逻辑上不可达，job 静默卡 queued。修复需 hydration 下沉到
+   ready/dispatch 评估前（归 artifact-dependency-model 层）。
+6. **not_applicable 化已失效生产者困死纯隐式消费者**：rerun 重置并失效
+   产物后，分支条件把生产者翻 not_applicable，文件永不再生、隐式消费者
+   永久 pending。修复需 ready-gate 沿合并邻接传播 not_applicable（同上层）。
+7. **审批产物文件事务前写**：并发决策下败者的文件可能覆写胜者的上传
+   内容（窗口窄）；round_no 锁外计数可重号。
+8. **单 claim 多候选单事务的 advisory 锁累积**：§2.5 的全序论证只覆盖
+   批路径；单 claim 面靠 40P01 一次重试 + deadlock_timeout 缓解。
+9. **`mark_nodes_not_applicable_many` 翻 not_applicable 不盖代次戳**：
+   当前无任何按戳消费方，登记为不对称点；后续若按戳判别归属须先补戳。
+10. **run-to 两臂下游语义差**：with-start 把目标下游翻 stale，without-start
+    只重置 closure ∩ 非 completed（文档化差异，刻意性待产品确认）。
+11. **legacy 无快照 job 的 clean upgrade**：旧定义不可知，本地产物文件
+    无法暂存（清单行/对象仍失效），残留文件可能解锁无生产者 input。
+12. **sweeper 遗留**：lease 行消失后 claimed/reporting 请求无归属
+    （`lease is None: continue`）；agent sweep requeue 守卫含 failed 可
+    复活聚合判死的节点；unclaimable sweep 固定头 256 窗口尾部饿死。
+13. **retention**：keyset 游标无 skew 重叠窗（近同时提交的行可永久漏删）；
+    retention 删请求行与 reaper 删 bundle 文件无顺序保证（极端停摆下
+    bundle 文件泄漏）。
+14. **批/单发对 start 节点的拒绝 reason_code 不一致**；run-to 两臂与
+    upgrade 提交后未 `notify_schedulable_work`（有周期扫描兜底则为延迟
+    差异）；run-to 不清 `node_runs.run_dir/session_dir`（日志路径 404）。
+15. **迟到旧代次 Worker 结果的登记先于 finish 代次 CAS**（§4.2 的交互
+    放大）：cleanup 的「键复现 = 新 attempt」启发式会把旧代次迟到登记
+    误判为新产物放过，陈旧行/对象在新一代重跑完成前可被服务。
 
 ## 5. 验证与测试手法
 
