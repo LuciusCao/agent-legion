@@ -1,0 +1,227 @@
+"""run-to 的两个执行臂（#759 预算拆分自 ``job_execution``）。
+
+与 ``job_rerun/single.py`` 同模式：模块级函数以 service 为首参，服务层只留
+路由与校验。两条臂共享同一个 invariant——重置集 ≡ 暂存集（stage_outputs
+不做任何图遍历，权威集合由本模块计算）。
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+from server.app.events.aggregator import broadcast_job_update, record_job_update
+from server.app.jobs.atomic_mutations import JobMutationConflict, apply_run_to
+from server.app.services.job_operation_error import JobOperationError, JobOperationResult
+from server.app.services.job_rerun.upstream_guard import raise_if_failed_upstream
+from server.app.services.job_staged_cleanup import (
+    commit_staged_outputs,
+    delete_rerun_artifact_objects,
+)
+from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.start_node import START_NODE_TYPE
+from server.app.workflows.workflow_consumption import dependency_downstream
+
+if TYPE_CHECKING:
+    from server.app.services.job_execution import JobExecutionService
+
+logger = logging.getLogger(__name__)
+
+
+def run_to_without_start(
+    service: JobExecutionService,
+    job: dict[str, Any],
+    definition: WorkflowDefinition,
+    target_node_key: str,
+    closure: frozenset[str],
+) -> JobOperationResult:
+    job_id = str(job["id"])
+    node_statuses = {
+        node["node_key"]: node["status"] for node in service.job_db.list_job_nodes(job_id)
+    }
+
+    if node_statuses.get(target_node_key) == "completed":
+        raise JobOperationError(
+            job_id,
+            "run_to",
+            "skipped",
+            target_node_key,
+            "target_already_completed",
+            "Target node is already completed",
+        )
+
+    # #759：重置集 = closure ∩ 非 completed（reject_running_nodes
+    # 下读数在锁内不变——running 会当场冲突），暂存与重置同源；
+    # 不暂存的话隐式消费者会在生产者重跑期间读到旧输出文件。
+    reset_nodes = sorted(key for key in closure if node_statuses.get(key) != "completed")
+    staged = None
+    deleted_rows: list[dict[str, Any]] = []
+    try:
+        with service.job_db.lease_guarded_mutation(
+            job_id,
+            service._now(),
+            reject_running_nodes=True,
+        ) as conn:
+            staged = service.artifact_mutation.stage_outputs(job, reset_nodes, definition)
+            deleted_rows = apply_run_to(
+                conn,
+                job_id,
+                target_node_key,
+                closure,
+                reset_nodes=reset_nodes,
+                staged_artifact_names=staged.artifact_names,
+            )
+    except JobMutationConflict as exc:
+        if staged is not None:
+            staged.rollback()
+        raise JobOperationError(
+            job_id,
+            "run_to",
+            "skipped",
+            target_node_key,
+            exc.reason_code,
+            str(exc),
+        ) from exc
+    except ValueError as exc:
+        if staged is not None:
+            staged.rollback()
+        raise JobOperationError(
+            job_id, "run_to", "failed", target_node_key, "node_not_found", str(exc)
+        ) from exc
+    except Exception:
+        # #204 broad-except audit: terminal safety net of the staged
+        # run-to mutation, mirroring the with-start arm below. Conflict
+        # (→ skipped) and contract (ValueError → failed) are handled
+        # above; this arm guarantees the staged artifacts are rolled
+        # back before an unexpected error escapes — otherwise outputs
+        # vanish from the job dir while the DB still marks them present.
+        if staged is not None:
+            staged.rollback()
+        raise
+    commit_staged_outputs(staged, job_id, "run_to")
+    delete_rerun_artifact_objects(service.object_store, deleted_rows, job_id, "run_to")
+
+    if service.job_event_buffer is not None:
+        record_job_update(
+            service.job_db, service.job_event_buffer, job_id, str(job["workspace_id"])
+        )
+    elif service.job_event_manager is not None:
+        broadcast_job_update(service.job_db, service.job_event_manager, job_id)
+    return service._result(job_id, "run_to", "succeeded", target_node_key)
+
+
+def run_to_with_start(
+    service: JobExecutionService,
+    job: dict[str, Any],
+    definition: WorkflowDefinition,
+    target_node_key: str,
+    start_node_key: str,
+    closure: frozenset[str],
+) -> JobOperationResult:
+    job_id = str(job["id"])
+    if start_node_key not in definition.nodes:
+        raise JobOperationError(
+            job_id,
+            "run_to",
+            "failed",
+            target_node_key,
+            "node_not_found",
+            f"Start node {start_node_key} not found in workflow",
+        )
+    if definition.nodes[start_node_key].node_type == START_NODE_TYPE:
+        raise JobOperationError(
+            job_id,
+            "run_to",
+            "failed",
+            target_node_key,
+            "node_not_executable",
+            f"Node {start_node_key} is an entry (type: start) node and never executes",
+        )
+
+    if start_node_key not in closure:
+        raise JobOperationError(
+            job_id,
+            "run_to",
+            "failed",
+            target_node_key,
+            "invalid_start",
+            f"Start node {start_node_key} is not in the target closure",
+        )
+
+    # Same hazard as rerun: only the start node and its downstream are
+    # reset, so a failed ancestor would strand the job in queued forever.
+    raise_if_failed_upstream(
+        definition,
+        service.job_db.list_job_nodes(job_id),
+        start_node_key,
+        job_id,
+        "run_to",
+        target_node_key,
+    )
+
+    staged = None
+    deleted_rows: list[dict[str, Any]] = []
+    try:
+        # #759：暂存集合与重置集合同源——closure 只界定 run-to 的执行
+        # 范围，不参与暂存判定；目标闭包外的隐式下游同样在重置集里，
+        # 其旧产物必须一并失效（stage_outputs 不做任何图遍历）。
+        descendants = dependency_downstream(definition, start_node_key)
+        affected = sorted({start_node_key, *descendants})
+        with service.job_db.lease_guarded_mutation(
+            job_id,
+            service._now(),
+            reject_running_nodes=True,
+        ) as conn:
+            staged = service.artifact_mutation.stage_outputs(job, affected, definition)
+            deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(
+                conn,
+                job_id,
+                [start_node_key],
+                {start_node_key: descendants},
+                staged_artifact_names=staged.artifact_names,
+            )
+            service.job_db.set_run_to_control_in_transaction(conn, job_id, target_node_key)
+    except JobMutationConflict as exc:
+        if staged is not None:
+            staged.rollback()
+        raise JobOperationError(
+            job_id, "run_to", "skipped", target_node_key, exc.reason_code, str(exc)
+        ) from exc
+    except ValueError as exc:
+        if staged is not None:
+            staged.rollback()
+        raise JobOperationError(
+            job_id, "run_to", "failed", target_node_key, "cleanup_failed", str(exc)
+        ) from exc
+    except Exception as exc:
+        # #204 broad-except audit: the terminal safety net of a
+        # staged filesystem + DB mutation sequence. The business arms
+        # above already peeled off the concurrency conflict
+        # (JobMutationConflict → skipped) and the staged-output
+        # contract violations (ValueError → cleanup_failed); what lands
+        # here is the genuinely unexpected (DB connectivity mid-mutation,
+        # a bug). Either way the staged files must be rolled back before
+        # normalizing to JobOperationError — leaving them staged would
+        # strand artifacts the rerun just removed from their original
+        # locations. logger.exception keeps the traceback.
+        logger.exception("Failed to persist run-to target for job %s", job_id)
+        if staged is not None:
+            staged.rollback()
+        raise JobOperationError(
+            job_id,
+            "run_to",
+            "failed",
+            target_node_key,
+            "rerun_failed",
+            str(exc),
+        ) from exc
+
+    commit_staged_outputs(staged, job_id, "run-to")
+    delete_rerun_artifact_objects(service.object_store, deleted_rows, job_id, "run-to")
+    if service.job_event_buffer is not None:
+        record_job_update(
+            service.job_db, service.job_event_buffer, job_id, str(job["workspace_id"])
+        )
+    elif service.job_event_manager is not None:
+        broadcast_job_update(service.job_db, service.job_event_manager, job_id)
+    return service._result(job_id, "run_to", "succeeded", target_node_key)

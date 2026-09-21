@@ -94,15 +94,17 @@ def execute_rework(
     )
     # One guarded transaction commits the audit row and the node reset
     # together: staged output cleanup rolls back with the transaction.
-    # #759: 与 rerun 同一合并下游口径（显式边 ∪ 隐式消费边）。
+    # #759: 与 rerun 同一合并下游口径（显式边 ∪ 隐式消费边）；暂存集合
+    # 与重置集合同源（stage_outputs 不做任何图遍历）。
     stale_nodes = dependency_downstream(definition, target)
+    affected = sorted({target, *stale_nodes})
     staged = None
     deleted_rows: list[dict[str, Any]] = []
     try:
         with service.job_db.lease_guarded_mutation(
             job_id, datetime.now(UTC), reject_running_nodes=True
         ) as conn:
-            staged = service.rerun.artifact_service.stage_outputs(job, [target], definition)
+            staged = service.rerun.artifact_service.stage_outputs(job, affected, definition)
             service.job_db.record_rework_decision_in_transaction(conn, decision)
             deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(
                 conn,

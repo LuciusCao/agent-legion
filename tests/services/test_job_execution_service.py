@@ -9,7 +9,9 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_execution import JobExecutionService
 from server.app.services.job_operation_error import JobOperationError
+from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.registry import load_registered_workflow
 from tests.helpers import publish_builtin_revision
 
@@ -224,6 +226,144 @@ def test_run_to_with_start_reruns_within_target_closure(
     assert control["target_node_key"] == "write_script"
 
 
+def _seed_implicit_workflow_job(
+    job_db: JobQueries,
+    settings,
+    definition_dict: dict,
+    node_keys: list[str],
+) -> tuple[dict, dict]:
+    workspace = job_db.create_workspace("exec-implicit", default_workflow_key="wf759_runto")
+    definition = workflow_definition_from_dict(definition_dict)
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
+    batch = job_db.create_run(
+        "wf759_runto", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]
+    )
+    job = job_db.create_job(
+        workflow_key="wf759_runto",
+        source_type="question",
+        source_id="1",
+        run_id=batch["id"],
+        title="implicit",
+        node_keys=node_keys,
+        workspace_id=workspace["id"],
+    )
+    storage = resolve_job_dir(job, settings.jobs_dir)
+    storage.mkdir(parents=True, exist_ok=True)
+    return job, storage
+
+
+def test_run_to_with_start_stages_implicit_consumers_outside_closure(
+    execution_service: JobExecutionService, job_db: JobQueries, settings
+):
+    """#759 codex P1：目标闭包外的隐式消费者同样在重置集里，产物必须一并
+    暂存——closure 只界定 run-to 的执行范围，不参与暂存判定；否则 run-to
+    到达目标继续执行时，隐式消费者会与生产者同时就绪并读到旧输出。"""
+    job, storage = _seed_implicit_workflow_job(
+        job_db,
+        settings,
+        {
+            "key": "wf759_runto",
+            "label": "wf759_runto",
+            "nodes": {
+                "s": {"capability": "cap_s", "outputs": ["x.json"]},
+                "a": {
+                    "capability": "cap_a",
+                    "after": ["s"],
+                    "inputs": ["x.json"],
+                    "outputs": ["y.json"],
+                },
+                "t": {
+                    "capability": "cap_t",
+                    "after": ["a"],
+                    "inputs": ["y.json"],
+                    "outputs": ["z.json"],
+                },
+                # c 只经 inputs/outputs 挂接 s，无任何显式边——不在 t 的
+                # 显式祖先闭包里，本用例的突变自检锚点。
+                "c": {"capability": "cap_c", "inputs": ["x.json"], "outputs": ["c.json"]},
+            },
+        },
+        ["s", "a", "t", "c"],
+    )
+    for name in ("x.json", "y.json", "c.json"):
+        (storage / name).write_text(name, encoding="utf-8")
+    for node_key in ("s", "a", "c"):
+        job_db.update_job_node(job["id"], node_key, status="completed")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash) values"
+            " (%s, 's', 'x.json', 'k/x.json', 1, ''),"
+            " (%s, 'c', 'c.json', 'k/c.json', 1, '')",
+            (job["id"], job["id"]),
+        )
+
+    result = execution_service.run_to(job["workspace_id"], job["id"], "t", start_node_key="s")
+
+    assert result["status"] == "succeeded"
+    statuses = _node_statuses(job_db, job["id"])
+    assert statuses["s"] == "pending"
+    assert statuses["c"] == "stale"
+    assert not (storage / "x.json").exists()
+    assert not (storage / "c.json").exists()
+    with job_db.connect() as conn:
+        remaining = conn.execute(
+            "select name from job_artifacts where job_id=%s", (job["id"],)
+        ).fetchall()
+    assert remaining == []
+
+
+def test_run_to_without_start_stages_reset_outputs(
+    execution_service: JobExecutionService, job_db: JobQueries, settings
+):
+    """#759：无起始节点的 run-to 同样必须暂存重置节点的产物——否则隐式链
+    上的旧输出文件会让下游在生产者重跑期间读到旧结果。"""
+    job, storage = _seed_implicit_workflow_job(
+        job_db,
+        settings,
+        {
+            "key": "wf759_runto",
+            "label": "wf759_runto",
+            "nodes": {
+                "n": {"capability": "cap_n", "outputs": ["x.json"]},
+                # n→m 只有隐式消费边；m→t 是显式边（t 的闭包只含 m/t）。
+                "m": {"capability": "cap_m", "inputs": ["x.json"], "outputs": ["y.json"]},
+                "t": {
+                    "capability": "cap_t",
+                    "after": ["m"],
+                    "inputs": ["y.json"],
+                    "outputs": ["z.json"],
+                },
+            },
+        },
+        ["n", "m", "t"],
+    )
+    (storage / "x.json").write_text("fresh", encoding="utf-8")
+    (storage / "y.json").write_text("stale", encoding="utf-8")
+    job_db.update_job_node(job["id"], "n", status="completed")
+    job_db.update_job_node(job["id"], "m", status="stale", stale_reason="upstream rerun")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into job_artifacts(job_id, node_key, name, storage_key,"
+            " size_bytes, content_hash) values (%s, 'm', 'y.json', 'k/y.json', 1, '')",
+            (job["id"],),
+        )
+
+    result = execution_service.run_to(job["workspace_id"], job["id"], "t")
+
+    assert result["status"] == "succeeded"
+    statuses = _node_statuses(job_db, job["id"])
+    assert statuses["m"] == "pending"
+    assert statuses["t"] == "pending"
+    assert (storage / "x.json").read_text(encoding="utf-8") == "fresh"
+    assert not (storage / "y.json").exists()
+    with job_db.connect() as conn:
+        remaining = conn.execute(
+            "select name from job_artifacts where job_id=%s", (job["id"],)
+        ).fetchall()
+    assert remaining == []
+
+
 def test_run_to_rejects_start_node_outside_target_closure(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):
@@ -307,19 +447,15 @@ def test_run_to_uses_atomic_execution_control_mutation(
     job = _create_job(job_db, workspace["id"])
     calls: list[tuple[str, str, frozenset[str]]] = []
 
-    original = job_db.apply_run_to_atomic
+    from server.app.services import job_run_to as run_to_module
 
-    def tracked(
-        job_id: str,
-        target_node_key: str,
-        closure: frozenset[str],
-        *,
-        now=None,
-    ) -> None:
+    original = run_to_module.apply_run_to
+
+    def tracked(conn, job_id, target_node_key, closure, **kwargs):
         calls.append((job_id, target_node_key, closure))
-        original(job_id, target_node_key, closure, now=now)
+        return original(conn, job_id, target_node_key, closure, **kwargs)
 
-    monkeypatch.setattr(job_db, "apply_run_to_atomic", tracked)
+    monkeypatch.setattr(run_to_module, "apply_run_to", tracked)
 
     result = execution_service.run_to(workspace["id"], job["id"], "write_script")
 
@@ -339,15 +475,20 @@ def test_run_to_atomic_guard_catches_lease_created_after_precheck(
     execution_service: JobExecutionService, job_db: JobQueries, workspace, monkeypatch
 ):
     job = _create_job(job_db, workspace["id"])
-    original = job_db.apply_run_to_atomic
-
     monkeypatch.setattr(execution_service, "_has_active_lease", lambda _job_id: False)
 
-    def race(job_id: str, target_node_key: str, closure: frozenset[str], *, now=None):
-        _create_active_lease(job_db, job, "intake_knowledge_points")
-        original(job_id, target_node_key, closure, now=now)
+    from contextlib import contextmanager
 
-    monkeypatch.setattr(job_db, "apply_run_to_atomic", race)
+    original = job_db.lease_guarded_mutation
+
+    @contextmanager
+    def race(job_id, now, *, reject_running_nodes):
+        # 预检之后、原子 guard 之前插入 lease：guard 必须当场抓获。
+        _create_active_lease(job_db, job, "intake_knowledge_points")
+        with original(job_id, now, reject_running_nodes=reject_running_nodes) as conn:
+            yield conn
+
+    monkeypatch.setattr(job_db, "lease_guarded_mutation", race)
 
     with pytest.raises(JobOperationError) as exc_info:
         execution_service.run_to(workspace["id"], job["id"], "write_script")

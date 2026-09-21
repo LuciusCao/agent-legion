@@ -82,8 +82,11 @@ def commit_rerun(
         )
 
     # #759: stale 面走合并下游（显式边 ∪ 隐式消费边）——loader 不要求 input
-    # 的生产者有显式边，漏掉隐式消费者会让其产物静默基于旧输入。
+    # 的生产者有显式边，漏掉隐式消费者会让其产物静默基于旧输入。暂存集合
+    # 与重置集合必须是同一个（stage_outputs 不做任何图遍历），否则隐式
+    # 下游的旧产物残留、消费者可能读到旧结果。
     stale_nodes = dependency_downstream(definition, actual_node_key)
+    affected = sorted({actual_node_key, *stale_nodes})
     staged = None
     deleted_rows: list[dict[str, Any]] = []
     try:
@@ -92,7 +95,7 @@ def commit_rerun(
             service._now(),
             reject_running_nodes=True,
         ) as conn:
-            staged = service.artifact_service.stage_outputs(job, [actual_node_key], definition)
+            staged = service.artifact_service.stage_outputs(job, affected, definition)
             deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(
                 conn,
                 job_id,
