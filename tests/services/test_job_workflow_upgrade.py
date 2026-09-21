@@ -782,7 +782,7 @@ def test_upgrade_stages_dropped_outputs_and_preserves_rmw_rows(tmp_path: Path) -
                 label="K",
                 capability="c",
                 inputs=["rmw.json"],
-                outputs=["a.json", "b.json", "rmw.json"],
+                outputs=["a.json", "b.json", "rmw.json", "seed.json"],
             )
         },
         {
@@ -790,7 +790,7 @@ def test_upgrade_stages_dropped_outputs_and_preserves_rmw_rows(tmp_path: Path) -
                 key="k",
                 label="K",
                 capability="c",
-                inputs=["rmw.json"],
+                inputs=["rmw.json", "seed.json"],
                 outputs=["a.json", "rmw.json"],
             )
         },
@@ -799,13 +799,15 @@ def test_upgrade_stages_dropped_outputs_and_preserves_rmw_rows(tmp_path: Path) -
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "b.json").write_text("stale", encoding="utf-8")
     (job_dir / "rmw.json").write_text("seed", encoding="utf-8")
+    (job_dir / "seed.json").write_text("seed2", encoding="utf-8")
     with queries.connect() as conn:
         conn.execute(
             "insert into job_artifacts(job_id, node_key, name, storage_key,"
             " size_bytes, content_hash) values"
             " (%s, 'k', 'b.json', 'k/b.json', 1, ''),"
-            " (%s, 'k', 'rmw.json', 'k/rmw.json', 1, '')",
-            (job["id"], job["id"]),
+            " (%s, 'k', 'rmw.json', 'k/rmw.json', 1, ''),"
+            " (%s, 'k', 'seed.json', 'k/seed.json', 1, '')",
+            (job["id"], job["id"], job["id"]),
         )
 
     result = service.upgrade(workspace["id"], job["id"])
@@ -813,6 +815,7 @@ def test_upgrade_stages_dropped_outputs_and_preserves_rmw_rows(tmp_path: Path) -
     assert result["status"] == "succeeded"
     assert not (job_dir / "b.json").exists()
     assert (job_dir / "rmw.json").read_text(encoding="utf-8") == "seed"
+    assert (job_dir / "seed.json").read_text(encoding="utf-8") == "seed2"
     with queries.connect() as conn:
         remaining = {
             row["name"]
@@ -820,7 +823,10 @@ def test_upgrade_stages_dropped_outputs_and_preserves_rmw_rows(tmp_path: Path) -
                 "select name from job_artifacts where job_id=%s", (job["id"],)
             ).fetchall()
         }
-    assert remaining == {"rmw.json"}
+    # RMW 名与 output→input 转移名（seed.json：旧 output、新纯 input）的
+    # 清单行都必须保留——本地文件只是可淘汰缓存，权威副本删了输入不可
+    # 恢复（#759 codex P1）。
+    assert remaining == {"rmw.json", "seed.json"}
 
 
 def test_upgrade_staging_rolls_back_first_batch_when_second_fails(

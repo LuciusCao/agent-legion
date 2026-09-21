@@ -17,7 +17,7 @@ from server.app.services.job_staged_cleanup import (
 )
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_consumption import rmw_artifact_names
+from server.app.workflows.rmw_names import upgrade_preserve_artifact_names
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -103,7 +103,7 @@ def execute_staged_upgrade(
                 workflow_definition_snapshot_json=str(active["definition_json"]),
                 node_keys=list(definition.executable_nodes),
                 frozen_config_json=frozen_config_json,
-                preserve_artifact_names=rmw_artifact_names(definition, old_definition),
+                preserve_artifact_names=upgrade_preserve_artifact_names(definition, old_definition),
             )
     except Exception:
         # #204 broad-except audit: staged filesystem + DB mutation sequence,

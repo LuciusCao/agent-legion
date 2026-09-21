@@ -112,19 +112,3 @@ def dependency_parents(
 def dependency_ancestors(definition: WorkflowDefinition, node_key: str) -> list[str]:
     """节点的合并传递上游（显式边 ∪ 隐式生产边），排序确定序。"""
     return sorted(walk_downstream(dependency_parents(definition), [node_key]))
-
-
-def rmw_artifact_names(*definitions: WorkflowDefinition | None) -> set[str]:
-    """任一定义里同名 input+output 的产物名集合（#114 RMW）。
-
-    clean 升级的清单行删除必须豁免这些名：rerun/run-to 入口对 RMW 是
-    文件/清单/对象三者全保留，升级若删行删对象会让 RMW 种子只剩本地
-    单副本（#759 自审 P2）。
-    """
-    names: set[str] = set()
-    for definition in definitions:
-        if definition is None:
-            continue
-        for node in definition.nodes.values():
-            names.update(set(node.outputs) & set(node.inputs))
-    return names
