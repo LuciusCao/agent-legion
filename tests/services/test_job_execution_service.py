@@ -313,6 +313,51 @@ def test_run_to_with_start_stages_implicit_consumers_outside_closure(
     assert remaining == []
 
 
+def test_run_to_without_start_rereads_statuses_under_lock(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace, settings, monkeypatch
+):
+    """#759 TOCTOU：锁外读数到取锁之间完成的节点不得被暂存/失效——重置集
+    必须在 mutation 锁内重读，由同一当前集合驱动暂存、清单删除与节点重置。"""
+    job = _create_job(job_db, workspace["id"])
+    storage = resolve_job_dir(job, settings.jobs_dir)
+    storage.mkdir(parents=True, exist_ok=True)
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
+
+    from contextlib import contextmanager
+
+    original = job_db.lease_guarded_mutation
+
+    @contextmanager
+    def race(job_id, now, *, reject_running_nodes):
+        # 取锁前 write_script 完成（新鲜产物 + 权威清单行）。
+        job_db.update_job_node(job["id"], "write_script", status="completed")
+        (storage / "script.md").write_text("fresh", encoding="utf-8")
+        with job_db.connect() as conn:
+            conn.execute(
+                "insert into job_artifacts(job_id, node_key, name, storage_key,"
+                " size_bytes, content_hash) values (%s, 'write_script', 'script.md',"
+                " 'k/script.md', 1, '')",
+                (job["id"],),
+            )
+        with original(job_id, now, reject_running_nodes=reject_running_nodes) as conn:
+            yield conn
+
+    monkeypatch.setattr(job_db, "lease_guarded_mutation", race)
+
+    result = execution_service.run_to(workspace["id"], job["id"], "publish_content")
+
+    assert result["status"] == "succeeded"
+    statuses = _node_statuses(job_db, job["id"])
+    assert statuses["write_script"] == "completed"
+    assert (storage / "script.md").read_text(encoding="utf-8") == "fresh"
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select name from job_artifacts where job_id=%s and name='script.md'",
+            (job["id"],),
+        ).fetchone()
+    assert row is not None
+
+
 def test_run_to_without_start_stages_reset_outputs(
     execution_service: JobExecutionService, job_db: JobQueries, settings
 ):

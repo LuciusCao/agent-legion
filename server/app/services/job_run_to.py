@@ -50,10 +50,12 @@ def run_to_without_start(
             "Target node is already completed",
         )
 
-    # #759：重置集 = closure ∩ 非 completed（reject_running_nodes
-    # 下读数在锁内不变——running 会当场冲突），暂存与重置同源；
-    # 不暂存的话隐式消费者会在生产者重跑期间读到旧输出文件。
-    reset_nodes = sorted(key for key in closure if node_statuses.get(key) != "completed")
+    # #759：重置集 = closure ∩ 非 completed，且必须在 mutation 锁内重读
+    # （TOCTOU：锁外读数到取锁之间节点可能被 claim 并完成——用过期集合
+    # 暂存会清掉已完成节点的权威产物，而节点 UPDATE 的 status 谓词又把它
+    # 留在 completed，永久失去产物且不重跑）。锁内读数是最终状态：所有
+    # 状态写入方都持同一把 job-mutation 锁。暂存/清单删除/节点重置由这
+    # 同一个当前集合驱动，三者不可能再分叉。
     staged = None
     deleted_rows: list[dict[str, Any]] = []
     try:
@@ -62,6 +64,8 @@ def run_to_without_start(
             service._now(),
             reject_running_nodes=True,
         ) as conn:
+            current_statuses = service.job_db.list_job_node_statuses_in_transaction(conn, job_id)
+            reset_nodes = sorted(key for key in closure if current_statuses.get(key) != "completed")
             staged = service.artifact_mutation.stage_outputs(job, reset_nodes, definition)
             deleted_rows = apply_run_to(
                 conn,

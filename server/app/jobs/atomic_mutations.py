@@ -94,6 +94,9 @@ def apply_run_to(
     placeholders = ",".join("%s" for _ in closure)
     if not placeholders:
         raise ValueError("Run-to closure cannot be empty")
+    # 正规化：调用方（或测试替身）给的任何可迭代都收敛成集合再判空，
+    # 空集合必须跳过清单删除——空 join 会生成 name in () 语法错误。
+    staged_artifact_names = frozenset(staged_artifact_names)
     deleted_rows: list[dict[str, Any]] = []
     if staged_artifact_names and reset_nodes:
         # #759：与 mark_nodes_for_rerun 同 invariant——被暂存产物（本地文件
