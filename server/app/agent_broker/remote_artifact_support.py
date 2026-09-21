@@ -134,7 +134,7 @@ def download_remote_artifact(
     ``max_size_bytes``-capped on decompressed bytes, #338); returns (path, hash).
     """
     relative = PurePosixPath(name)
-    if relative.is_absolute() or ".." in relative.parts:
+    if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != name:
         raise ValueError(f"unsafe expected output name: {name!r}")
     target = staging_dir / relative
     target.parent.mkdir(parents=True, exist_ok=True)

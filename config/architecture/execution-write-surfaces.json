@@ -230,7 +230,7 @@
         "promote_to_authority_guarded",
         "put_stream_with_retries"
       ],
-      "note": "唯一合法的 artifact key 字节写 primitive：staging 先行 + 回滚备份 + 锁内闸复查"
+      "note": "唯一合法的 artifact key 字节写 primitive：staging 先行 + 回滚备份 + 按 key advisory 锁串行 + 锁内闸复查"
     }
   },
   "manifest_row_write_sites": {

@@ -7,17 +7,26 @@
 1. 字节一律先落在 per-execution/lease 的 staging key（``artifact_staging_key``
    布局，lease_id 即本地上传的 execution 维度），绝不直写 authority key——
    入口闸通过后才提交的 reset 因此不会被旧代次字节抢跑污染 authority 对象。
-2. 已存在的 authority 对象先 server-side copy 到回滚 key（零字节下载），再锁外
-   copy staging→authority（可中断的大字节量不该持锁；锁外可回滚）。
-3. 权威部分在**一个事务**内完成：取 ``job-mutation:<job_id>`` advisory 锁、
-   ``lease_artifact_write_current`` 复查代次、（远端臂）staged 文件落盘、
-   upsert 清单行。mutation 侧（rerun/upgrade/sweep teardown）持同一把锁，所以
-   只有两种序：登记先提交（随后被 reset 当作重置面删除），或 reset 先提交
-   （闸拒登记）——迟到 promote 既不复活已删清单行，也不污染保留行指向的字节。
-4. 闸拒或 copy 中途失败时用回滚备份恢复已覆盖的 authority key；无备份说明此前
-   无对象，残留是孤儿，由 bucket lifecycle 兜底。回滚 key 在任何结局都清理。
+2. 同一 authority key 的并发 promote 经 ``artifact-authority:<key>`` advisory
+   锁（升序、任何字节操作之前取）**全程串行**：备份、copy、闸内登记与
+   失败恢复（commit 时刻失败除外，见第 4 条残余）都在同一事务的同一把
+   按 key 锁内——过期 promote 的恢复在构造上不可能插进新代次 promote 的
+   copy 与登记之间（#759 复审 P1-C）。大字节量的 copy 仍不持 job-mutation
+   锁（mutation 侧不取 artifact 锁，不被阻塞）；copy 持有按 key 锁只让
+   同 key 的 promote 排队——那本来就必须串行。
+3. 权威部分在**一个事务**内完成：按 key 锁升序 → 备份/copy → 取
+   ``job-mutation:<job_id>`` advisory 锁、``lease_artifact_write_current``
+   复查代次、（远端臂）staged 文件落盘、upsert 清单行。mutation 侧（rerun/
+   upgrade/sweep teardown）持同一把 job-mutation 锁，所以只有两种序：登记先
+   提交（随后被 reset 当作重置面删除），或 reset 先提交（闸拒登记）——迟到
+   promote 既不复活已删清单行，也不污染保留行指向的字节。
+4. 闸拒与 copy/登记中途失败时用回滚备份恢复已覆盖的 authority key（事务
+   死亡前、仍在按 key 锁内）；commit 时刻失败（连接死亡）是不可约例外：
+   锁随会话释放，恢复降级为无串行 best-effort，选边偏向 commit 歧义中远
+   更常见的 rollback half（docs §4）。无备份说明此前无对象，残留是孤儿，
+   由 bucket lifecycle 兜底。回滚 key 在任何结局都清理。
 
-锁外 copy 的残余面论证见 docs/architecture/execution-generation.md §5。
+锁序与残余面论证见 docs/architecture/execution-generation.md §2.8/§4。
 """
 
 from __future__ import annotations
@@ -29,6 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from server.app.db.connection import DatabaseConnection
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import write_transaction
 from server.app.executors._file_promotion import FilePromotionGuard, promote_file_moves_guarded
@@ -161,8 +171,20 @@ def discard_object(storage: ObjectStorage, storage_key: str) -> None:
         logger.warning("failed to delete staging object %s", storage_key, exc_info=True)
 
 
+def _lock_authority_keys_tx(conn: DatabaseConnection, authority_keys: list[str]) -> None:
+    """按 key 串行化同一 authority key 的并发 promote（#759 复审 P1-C）。
+
+    升序取 ``artifact-authority:<key>`` advisory xact 锁——备份、copy、闸内
+    登记与失败恢复全程互斥，过期 promote 的恢复永远插不进新代次 promote
+    的中途。锁序：artifact-authority:* → job-mutation:*（闸复查在同事务
+    后段取后者；mutation 侧不取 artifact 锁，单项偏序不成环）。调用方须
+    在写事务内、任何字节操作之前调用。"""
+    for key in authority_keys:
+        conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"artifact-authority:{key}",))
+
+
 def register_rows_guarded(
-    database_dsn: ConnectSource,
+    conn: DatabaseConnection,
     rows: list[dict[str, Any]],
     *,
     job_id: str,
@@ -170,52 +192,52 @@ def register_rows_guarded(
     staged_files: dict[str, Path] | None = None,
     job_dir: Path | None = None,
 ) -> list[dict[str, Any]] | None:
-    """锁内复查 + 锁内落盘 + 清单行登记，一个事务；None = 闸关（零写入）。
+    """锁内复查 + 锁内落盘 + 清单行登记；None = 闸关（零写入）。
 
-    复查通过后先在锁内把 staged 文件 os.replace 进 job_dir（已存在的目标
-    先备份）、再 upsert 清单行——复查与登记之间没有 reset 可介入的窗口。
-    闸关时落盘与登记都不发生，调用方负责用备份恢复已完成的 authority
-    copy 并按拒绝语义收尾。登记异常（upsert 失败）时已落盘的文件经
-    FilePromotionGuard 整体回滚、事务回滚清单行，异常原样上抛——调用方
-    随后恢复 authority copy（#759 复审 P1-2）。
+    调用方在写事务内调用（``promote_to_authority_guarded`` 的按 key 串行
+    事务）：复查 lease 代次通过后先在锁内把 staged 文件 os.replace 进
+    job_dir（已存在的目标先备份）、再 upsert 清单行——复查与登记之间没有
+    reset 可介入的窗口。闸关时落盘与登记都不发生，调用方负责用备份恢复已
+    完成的 authority copy 并按拒绝语义收尾。登记异常（upsert 失败）时已
+    落盘的文件经 FilePromotionGuard 整体回滚、事务回滚清单行，异常原样上
+    抛——调用方随后恢复 authority copy（#759 复审 P1-2）。
     """
-    with write_transaction(database_dsn) as conn:
-        if not lease_artifact_write_current(conn, lease_id, job_id):
-            return None
-        guard = FilePromotionGuard()
-        if staged_files:
-            assert job_dir is not None
-            guard = promote_file_moves_guarded(
-                [(job_dir / name, staged_path) for name, staged_path in staged_files.items()],
-                backup_parent=job_dir,
+    if not lease_artifact_write_current(conn, lease_id, job_id):
+        return None
+    guard = FilePromotionGuard()
+    if staged_files:
+        assert job_dir is not None
+        guard = promote_file_moves_guarded(
+            [(job_dir / name, staged_path) for name, staged_path in staged_files.items()],
+            backup_parent=job_dir,
+        )
+    try:
+        registered = [
+            upsert_artifact_row_tx(
+                conn,
+                ARTIFACT_ROW_UPSERT_SQL,
+                job_id=str(row["job_id"]),
+                node_key=str(row["node_key"]),
+                name=str(row["name"]),
+                storage_key=str(row["storage_key"]),
+                size_bytes=int(row["size_bytes"]),
+                content_hash=str(row.get("content_hash") or ""),
             )
-        try:
-            registered = [
-                upsert_artifact_row_tx(
-                    conn,
-                    ARTIFACT_ROW_UPSERT_SQL,
-                    job_id=str(row["job_id"]),
-                    node_key=str(row["node_key"]),
-                    name=str(row["name"]),
-                    storage_key=str(row["storage_key"]),
-                    size_bytes=int(row["size_bytes"]),
-                    content_hash=str(row.get("content_hash") or ""),
-                )
-                for row in rows
-            ]
-        except Exception:
-            # #204 broad-except audit: compensate-then-bare-re-raise (#233
-            # pattern). The upsert loop's outcome space is the psycopg/DB
-            # surface (constraint violation, dropped connection) plus
-            # programming errors; the file promotion that already landed
-            # inside this transaction is not transactional, so every flavor
-            # must roll it back via the guard before the exception propagates
-            # (the caller then restores the authority copies). The bare raise
-            # preserves the original type; nothing is converted or masked.
-            guard.rollback()
-            raise
-        guard.discard()
-        return registered
+            for row in rows
+        ]
+    except Exception:
+        # #204 broad-except audit: compensate-then-bare-re-raise (#233
+        # pattern). The upsert loop's outcome space is the psycopg/DB
+        # surface (constraint violation, dropped connection) plus
+        # programming errors; the file promotion that already landed
+        # inside this transaction is not transactional, so every flavor
+        # must roll it back via the guard before the exception propagates
+        # (the caller then restores the authority copies). The bare raise
+        # preserves the original type; nothing is converted or masked.
+        guard.rollback()
+        raise
+    guard.discard()
+    return registered
 
 
 def promote_to_authority_guarded(
@@ -229,63 +251,94 @@ def promote_to_authority_guarded(
     staged_files: dict[str, Path] | None = None,
     job_dir: Path | None = None,
 ) -> list[dict[str, Any]] | None:
-    """备份 → 锁外 copy → 锁内闸 + 登记 → 失败恢复 → 清理备份（两端共用）。
+    """备份 → copy → 锁内闸 + 登记 → 失败恢复 → 清理备份（两端共用）。
 
-    ``rows[i]`` 登记 ``copies[i]`` 的 authority key（调用方按同一批产物构
-    造）。返回登记的清单行；None = 锁内闸拒——已 copy 的 authority key 已
-    按回滚备份恢复、staged 文件未落盘、清单行未登记，残留 staging/无备份
-    的 authority 新对象是孤儿，lifecycle 兜底。copy 中途失败同样先恢复再
-    原样上抛。登记阶段抛异常（upsert/落盘失败）也先恢复 authority copy
-    再上抛——登记事务已回滚清单行、文件提升已整体反向回滚，authority
-    对象不恢复就会让幸存旧清单行指向 hash/size 不匹配的新字节（#759 复审
-    P1-2）。回滚备份在任何结局都清理。
+    全程一个事务：先按 key 升序取 artifact-authority advisory 锁，同一
+    authority key 的备份/copy/闸内登记/失败恢复（commit 时刻失败除外，见
+    残余面）与任何并发 promote 互斥（#759 复审 P1-C）——过期 promote 的
+    恢复在构造上不可能踩掉新代次 promote 的字节。``rows[i]`` 登记
+    ``copies[i]`` 的 authority key（调用方按同一批产物构造）。返回登记的
+    清单行；None = 锁内闸拒——已 copy 的 authority key 已按回滚备份恢
+    复、staged 文件未落盘、清单行未登记，残留 staging/无备份的
+    authority 新对象是孤儿，lifecycle 兜底。备份/copy 中途失败与登记阶段
+    抛异常（upsert/落盘失败）在事务死亡前于锁内恢复；commit 时刻失败
+    （连接死亡）在锁外 best-effort 恢复——事务回滚后幸存的旧清单行永不
+    指向 hash/size 不匹配的新字节（#759 复审 P1-2 与对抗复审 P1）。回滚
+    备份在任何结局都清理（提交/回滚后锁外执行，幂等）。
+
+    残余面：DB 连接中途死亡（含 commit 时刻）时按 key 锁随会话释放，恢
+    复降级为无串行的 best-effort；commit 歧义的另一半（ack 丢失、服务端
+    实际已提交）下恢复会把旧字节盖回——选边偏向远更常见的 rollback
+    half（连接死于 commit 到达前、序列化失败、死锁都是回滚），登记为不
+    再收窄的残余面（docs/architecture/execution-generation.md §4）。
     """
     authority_keys = {spec.name: spec.authority_key for spec in copies}
     backups: dict[str, str] = {}  # name -> rollback key of the pre-existing object
-    for spec in copies:
-        if storage.head_object(spec.authority_key) is not None:
-            storage.copy_object(spec.authority_key, spec.rollback_key)
-            backups[spec.name] = spec.rollback_key
     promoted: list[str] = []
+    restored = False
     try:
-        try:
-            for spec in copies:
-                storage.copy_object(spec.staging_key, spec.authority_key)
-                promoted.append(spec.name)
-        except Exception:
-            # #204 broad-except audit: compensate-then-bare-re-raise (#233
-            # pattern). The batch loop's outcome space is mixed — storage-layer
-            # errors (botocore surface), ValueError from Worker-untrusted refs,
-            # and programming errors all must roll back the already-overwritten
-            # authority keys before propagating; the re-raise preserves the
-            # original type for the caller's classification, so nothing is
-            # converted or masked.
+        with write_transaction(database_dsn) as conn:
+            _lock_authority_keys_tx(conn, sorted(authority_keys.values()))
+            try:
+                for spec in copies:
+                    if storage.head_object(spec.authority_key) is not None:
+                        storage.copy_object(spec.authority_key, spec.rollback_key)
+                        backups[spec.name] = spec.rollback_key
+                for spec in copies:
+                    storage.copy_object(spec.staging_key, spec.authority_key)
+                    promoted.append(spec.name)
+                registered = register_rows_guarded(
+                    conn,
+                    rows,
+                    job_id=job_id,
+                    lease_id=lease_id,
+                    staged_files=staged_files,
+                    job_dir=job_dir,
+                )
+            except Exception:
+                # #204 broad-except audit: in-transaction compensate-then-
+                # bare-re-raise (#233 pattern). Backup/copy/registration
+                # failures (botocore family, Worker-untrusted ValueErrors,
+                # psycopg/file surface) reach this arm before __exit__:
+                # failures that leave the session alive (storage/validation/
+                # file errors) still hold the per-key advisory locks and the
+                # restore keeps the per-key serialization the protocol
+                # promises, while a mid-transaction connection death already
+                # dropped them and the same restore is then the documented
+                # unlocked best-effort (docs §4) — either way it runs HERE,
+                # never after __exit__ (a restore after tx death was the
+                # #759 对抗复审 P1 race). The bare raise then rolls the
+                # transaction back; the outer arm skips its own restore via
+                # ``restored`` (an unlocked second restore could stomp a
+                # concurrent promote that took the lock between the arms —
+                # suppressing it is correctness, not mere idempotence).
+                # Original type propagates for caller classification;
+                # nothing is converted or masked.
+                restore_authority_backups(storage, promoted, backups, authority_keys)
+                restored = True
+                raise
+            if registered is None:
+                # 锁内闸拒：reset 落在入口预检与登记之间。按 key 锁内用备份
+                # 恢复 authority copy——同 key 的新代次 promote 还在等锁，
+                # 恢复绝不踩掉它的字节；幸存（或缺失）的旧清单行仍指向匹配
+                # 的旧字节。
+                restore_authority_backups(storage, promoted, backups, authority_keys)
+                restored = True
+    except Exception:
+        # #204 broad-except audit: commit-time failure arm ONLY (#759 对抗
+        # 复审 P1). A connection death at ``__exit__`` (server rolls the
+        # transaction back) is the one failure whose restore cannot ride
+        # the per-key locks — the dead session already dropped them — so
+        # this restore is the documented unlocked best-effort (docs §4),
+        # biased to the far-more-common rollback half of the commit
+        # ambiguity. With-body failures restored above while still locked
+        # and set ``restored``; an unlocked second restore here could stomp
+        # a concurrent promote that took the lock between the arms, so it
+        # is skipped rather than merely idempotent. Bare raise preserves
+        # the original type for the caller's classification.
+        if not restored:
             restore_authority_backups(storage, promoted, backups, authority_keys)
-            raise
-        try:
-            registered = register_rows_guarded(
-                database_dsn,
-                rows,
-                job_id=job_id,
-                lease_id=lease_id,
-                staged_files=staged_files,
-                job_dir=job_dir,
-            )
-        except Exception:
-            # #204 broad-except audit: same compensate-then-bare-re-raise
-            # pattern as the copy loop above — the registration surface mixes
-            # storage-layer file errors (the locked promote's os.replace) and
-            # the psycopg/DB family (upsert failure, dropped connection), and
-            # every flavor leaves overwritten authority keys whose manifest
-            # rows just rolled back; restoring from the rollback backups is
-            # unconditional, the original exception type rides through for
-            # the caller's classification.
-            restore_authority_backups(storage, promoted, backups, authority_keys)
-            raise
-        if registered is None:
-            # 锁内闸拒：reset 落在入口预检与登记之间。用备份恢复 authority
-            # copy，让幸存（或缺失）的旧清单行仍指向匹配的旧字节。
-            restore_authority_backups(storage, promoted, backups, authority_keys)
+        raise
     finally:
         for rollback_key in backups.values():
             discard_object(storage, rollback_key)

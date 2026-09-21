@@ -4,8 +4,9 @@ Split out of ``remote_artifacts.py`` for the file-size budget: the result-commit
 module stays the verify-then-apply orchestrator; this module owns the apply
 phase's per-execution wiring — authority/staging/rollback key derivation and
 the entry pre-check — and delegates the byte-plane sequence itself (rollback
-backup → lock-free staging→authority copy → in-transaction gated registration
-→ restore on rejection) to the shared primitive
+backup → staging→authority copy → in-transaction gated registration → restore
+on rejection, the whole per-key sequence serialized by a per-authority-key
+advisory lock) to the shared primitive
 ``executors._artifact_promotion.promote_to_authority_guarded`` (#759 review
 P1-B), which the local lease-arm upload uses identically.
 """

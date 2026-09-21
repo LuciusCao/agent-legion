@@ -83,8 +83,32 @@ def promote_file_moves_guarded(
     source 移走——staging 目录在调用方阻塞等待期间一直存活，source
     不可能因其他原因消失；跳过的条目不进回滚簿，保持第一次尝试的
     落盘结果）。
+
+    完全相同的 (target, source) 对先去重（#759 对抗复审 P1）：finish 批
+    重放与工作流重复声明 outputs（``outputs: ["out.json", "out.json"]``
+    的笔误）都会产生相同对，是良性形态——重复声明的工作流不得被预检
+    误杀成永久卡死。去重后仍重复 target 的（同 target 异 source）才是
+    别名冲突，应用前 ValueError（#759 复审 P2）：两个逻辑产物名归一到
+    同一路径（如 ``reports/out.json`` 与 ``reports//out.json`` 携不同
+    staging 文件）时，若只凭「source 缺席 + target 在场」判定，第二项
+    会被误当重放静默跳过——两条清单行指向两份 S3 字节，本地却只有一
+    份文件。每个条目在可能失败的 source→target 替换之前登记回滚簿
+    （同 P2）：替换失败时旧目标的备份可被回滚臂恢复，而不是连备份一
+    起清掉。
     """
     guard = FilePromotionGuard()
+    deduped: list[tuple[Path, Path]] = []
+    seen_pairs: set[tuple[Path, Path]] = set()
+    for pair in moves:
+        if pair not in seen_pairs:
+            seen_pairs.add(pair)
+            deduped.append(pair)
+    seen_targets: set[Path] = set()
+    for target, _source in deduped:
+        if target in seen_targets:
+            raise ValueError(f"duplicate promote target: {target}")
+        seen_targets.add(target)
+    moves = deduped
     if not moves:
         return guard
     backup_dir = Path(tempfile.mkdtemp(prefix=".promote-rollback-", dir=backup_parent))
@@ -100,8 +124,8 @@ def promote_file_moves_guarded(
             if target.exists() or target.is_symlink():
                 backup = backup_dir / str(index)
                 _replace_file(target, backup)
-            _replace_file(source, target)
             guard._moved.append((target, backup))
+            _replace_file(source, target)
     except Exception:
         # #204 broad-except audit: compensate-then-bare-re-raise (#233
         # pattern). The move loop's outcome space is the filesystem surface

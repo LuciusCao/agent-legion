@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from server.app.agent_broker.remote_artifact_promote import promote_all
@@ -108,8 +108,12 @@ def apply_remote_artifact_refs(
     try:
         # Phase 1: verify EVERY ref (staging layout bound to this execution,
         # size ceiling, HEAD size) before anything is copied, downloaded, or
-        # registered.
+        # registered. Non-canonical names (``reports//out.json``) are rejected
+        # here too (#759 复审 P2): two aliasing names would share one staging
+        # path and one job_dir target while registering two manifest rows.
         for name, ref in remote.items():
+            if PurePosixPath(name).as_posix() != name:
+                raise ValueError(f"non-canonical artifact name: {name!r}")
             object_store.verify_remote(
                 workspace_id=workspace_id,
                 job_id=job_id,

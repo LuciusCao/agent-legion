@@ -109,11 +109,13 @@ brick。现行语义：决策写在 `job-mutation` 锁下只做状态守卫—�
 | 层级 | 锁域 | 持有者 |
 | --- | --- | --- |
 | 1（最外） | 池级锁：`code-pool` / `agent-ws:<workspace_id>` / `agent-worker:<worker_id>` | claim 与批路径；mutation 侧**永不取** |
+| 1.5 | `artifact-authority:<key>` | promote 事务首句（多 key 升序），串行化产物字节面的备份/copy/登记/恢复；mutation 侧不取，与池锁无共持 |
 | 2 | `job-mutation:<job_id>` | mutation 侧首句；所有执行态写面在池锁之后（或无池锁直接）取 |
 | 3（最内） | 行锁（`FOR UPDATE` 等） | 各写面自身 |
 
-无环论证：mutation 侧不取池锁，跨层只有单向边。enqueue 不持池锁、直接取
-job-mutation，环保持无环。
+无环论证：mutation 侧不取池锁也不取 artifact 锁，跨层只有单向边
+（artifact-authority → job-mutation；池锁 → job-mutation）。enqueue 不持
+池锁、直接取 job-mutation，环保持无环。
 
 **批序全序**：每个跨 job 的批（finish_many、try_claim_many、expire、recover、
 agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 也包括，
@@ -168,15 +170,25 @@ D12 镜像上传）与 finish 内的清单登记共用同一个 primitive
 
 1. **staging 先行**：字节永远先落 per-execution/lease 的 staging key，**绝不直写
    authority key**；既有 authority 对象先 server-side 备份到回滚 key；
-2. **锁外 copy**：staging→authority 的字节 copy 不持锁（大字节量可中断）；
+2. **按 key 串行**：同一 authority key 的并发 promote 经
+   `artifact-authority:<key>` advisory 锁（升序、任何字节操作之前取）全程
+   互斥——备份、copy、权威复查与失败恢复（commit 时刻失败除外，见 §4）
+   都在同一事务的同一把按 key 锁内，过期 promote 的恢复在构造上不可能插进
+   新代次 promote 的 copy 与登记之间（#759 复审 P1-C）。copy 仍不持
+   `job-mutation` 锁（大字节量可中断；mutation 侧不取 artifact 锁，不被阻
+   塞）——锁序 artifact-authority:* → job-mutation:*；
 3. **锁内单事务权威复查**（`register_rows_guarded`）：取 `job-mutation` 锁 →
    复查 lease 代次（`lease_artifact_write_current`：lease 仍 active、心跳未过期、
    落戳代次 == jobs 现值）→（远端臂）staged 文件落盘 → upsert 清单行。
    与突变侧只有两种序：登记先提交（随后被突变当作重置面删除），或突变先提交
    （闸拒绝登记）；
-4. **失败回滚**：闸拒时用回滚备份恢复已完成的 authority-key copy，不落盘、不
-   复活清单行；锁内登记抛异常时文件提升经 `FilePromotionGuard` 整体回滚、
-   authority 按备份恢复后再原样上抛——旧清单行永不指向 hash/size 不符的字节。
+4. **失败回滚**：闸拒与 copy/登记中途失败时用回滚备份恢复已完成的
+   authority-key copy（事务死亡前、仍在按 key 锁内；闸拒恢复在闸复查之后，
+   `job-mutation` xact 锁随事务持到恢复完成——有界阻塞，无环），不落盘、
+   不复活清单行；锁内登记抛异常时文件提升经 `FilePromotionGuard` 整体回滚、
+   authority 按备份恢复后再原样上抛——旧清单行永不指向 hash/size 不符的
+   字节。commit 时刻失败（连接死亡）是不可约例外：锁随会话释放，恢复降级
+   为无串行 best-effort（§4）。
 
 两个写口的接入点：Worker 回传 `remote_artifact_promote.promote_all` 在任何字节
 copy 前先做无锁预检再走共享序列；本地上传由 `JobArtifactObjectStore.upload` 的
@@ -273,10 +285,13 @@ lease_id）；expected 输出、events.jsonl 与 node.log 的提升经
 1. **执行进程沙箱内直写 job_dir** 只靠 lease 生命周期约束：运行中的沙箱进程
    对 job_dir 的写入不经过代次闸；reset 拦在 claim/finish 两面，进程内文件的
    旧字节由「新代次生产者重跑覆盖 + 暂存/清理」兜底。
-2. **promote 的锁外 authority-key copy**：字节 copy 在锁外执行（可中断的大
-   字节量不该持锁），靠回滚备份兜底（`restore_authority_backups`）；权威性
-   部分（落盘 + 清单行）在锁内单事务完成；无备份时的孤儿 authority 对象由
-   bucket lifecycle 兜底。
+2. **promote 的 DB 连接死亡窗口**：备份/copy/权威复查/失败恢复都在按 key
+   advisory 锁内（§2.8），但 DB 连接中途死亡（含 commit 时刻）时锁随会话
+   释放，失败恢复降级为无串行的 best-effort（`restore_authority_backups`）。
+   commit 歧义的另一半（ack 丢失、服务端实际已提交）下恢复会把旧字节盖回、
+   与已提交的新清单行错位——选边偏向远更常见的 rollback half（连接死于
+   commit 到达前、序列化失败、死锁都是回滚），不再收窄；无备份时的孤儿
+   authority 对象由 bucket lifecycle 兜底。
 3. **闸内文件提升的提交前窗口**：`finish_lease` 与 `register_rows_guarded` 的
    staged 文件提升都在代次 CAS 之后、事务提交之前完成（本地 rename，毫秒级）；
    提升成功后同事务后续 SQL 失败的崩溃窗口会留下「当前代次自身产物」的已落盘

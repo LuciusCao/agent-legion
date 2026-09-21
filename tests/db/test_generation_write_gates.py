@@ -5,9 +5,10 @@ P2-b（本地 code 孤儿执行的迟来上传）：心跳丢失后沙箱子进�
 （lease active + 心跳新鲜 + 落戳代次 == jobs 现值）不过则整批不上传。
 P1-B 起 lease 臂上传改走 staging：字节先落 per-lease staging key，再经共享
 primitive（``executors._artifact_promotion.promote_to_authority_guarded``）
-备份 → 锁外 copy → 锁内复查 + 登记 → 闸拒按回滚备份恢复 authority——
-「入口闸通过后、登记前 reset 提交」的窗口既不复活已删清单行，也不让保留
-的旧行指向被污染的字节。
+备份 → copy → 锁内复查 + 登记 → 闸拒按回滚备份恢复 authority——整个
+按 key 序列经 ``artifact-authority:<key>`` advisory 锁串行（同一事务内，
+commit 时刻失败除外），「入口闸通过后、登记前 reset 提交」的窗口既不复活
+已删清单行，也不让保留的旧行指向被污染的字节。
 lease_lost 的正常收尾语义（runtime 置失败结果、finish CAS）不在本文件，
 由 tests/executors/test_executor_runtime.py 钉住。
 

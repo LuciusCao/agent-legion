@@ -18,8 +18,9 @@ EXEC-GENERATION-001 byte plane (#759 review P1-B): the ``lease_id`` arm of
 ``upload`` never writes the authority key directly — bytes land on a per-lease
 staging key and are promoted through the shared
 ``executors._artifact_promotion.promote_to_authority_guarded`` primitive
-(backup → lock-free copy → in-transaction generation recheck + manifest row →
-rollback restore on rejection), the same sequence the Worker-result promote
+(backup → copy → in-transaction generation recheck + manifest row → rollback
+restore on rejection, the whole per-key sequence serialized by a
+per-authority-key advisory lock), the same sequence the Worker-result promote
 uses, so a reset landing after the entry gate cannot leave old manifest rows
 pointing at polluted bytes.
 """
@@ -87,8 +88,8 @@ class JobArtifactObjectStore:
 
     @property
     def database_dsn(self) -> ConnectSource:
-        """The connection source; the guarded promote registration opens its
-        own transaction on it (executors._artifact_promotion.register_rows_guarded)."""
+        """The connection source; the guarded promote opens its serialized
+        transaction on it (executors._artifact_promotion.promote_to_authority_guarded)."""
         return self._dsn
 
     def artifact_write_gate_open(self, *, job_id: str, lease_id: str) -> bool:
