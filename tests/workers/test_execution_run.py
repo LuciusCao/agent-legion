@@ -627,11 +627,17 @@ def test_reclaim_serializes_old_attempt_teardown_and_new_attempt(tmp_path: Path)
     bundle_b = _make_bundle(tmp_path, _manifest([finisher]))
 
     class ReclaimClient(FakeClient):
-        """lease-1 的批量心跳一律判 lost（Host 已重排），lease-2 正常续期。"""
+        """lease-1 的批量心跳在主线程武装后判 lost（Host 已重排），lease-2 正常续期。"""
 
         def __init__(self) -> None:
             super().__init__(bundle_a)
             self.a_done = threading.Event()
+            # 判死武装：主线程观测到 prompt.md（attempt A 进入运行态）后才
+            # 允许心跳把 lease-1 判 lost。心跳协调器先于 thread_a 启动，
+            # 高负载下首批心跳可能抢在 A 通过 wait_for_prior_upload 的
+            # ownership 复查之前判死 lease-1，A 提前放弃、prompt.md 永不
+            # 出现——主线程只能在 10s Deadline 报 "never reached running"。
+            self.lost_armed = threading.Event()
             self.download_saw_a_done: list[bool] = []
 
         def download(self, path: str, destination: Path) -> None:
@@ -643,7 +649,9 @@ def test_reclaim_serializes_old_attempt_teardown_and_new_attempt(tmp_path: Path)
         def heartbeat_batch(
             self, executions: list[tuple[str, str]]
         ) -> tuple[int, dict[str, list[str]]]:
-            lost = [eid for eid, lease in executions if lease == "lease-1"]
+            lost = [
+                eid for eid, lease in executions if lease == "lease-1" and self.lost_armed.is_set()
+            ]
             renewed = [eid for eid, _ in executions if eid not in lost]
             return 200, {"renewed": renewed, "lost": lost, "cancelled_execution_ids": []}
 
@@ -699,6 +707,8 @@ def test_reclaim_serializes_old_attempt_teardown_and_new_attempt(tmp_path: Path)
     while not prompt.is_file():
         assert time.monotonic() < deadline, "attempt A never reached running phase"
         time.sleep(0.01)
+    # A 已进入运行态，此刻起允许心跳把 lease-1 判 lost（ reclaim 剧情开始）。
+    client.lost_armed.set()
     thread_b = threading.Thread(target=run_one, args=(claim_b,))
     thread_b.start()
     thread_a.join(timeout=30)
