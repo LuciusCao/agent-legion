@@ -165,8 +165,8 @@ def register_rows_guarded(
     lease_id: str,
     staged_files: dict[str, Path] | None = None,
     job_dir: Path | None = None,
-) -> list[dict[str, Any]] | None:
-    """锁内复查 + 锁内落盘 + 清单行登记；None = 闸关（零写入）。
+) -> tuple[list[dict[str, Any]] | None, FilePromotionGuard]:
+    """锁内复查 + 锁内落盘 + 清单行登记；(None, 空簿) = 闸关（零写入）。
 
     调用方在写事务内调用（``promote_to_authority_guarded`` 的按 key 串行
     事务）：复查 lease 代次通过后先在锁内把 staged 文件 os.replace 进
@@ -175,9 +175,15 @@ def register_rows_guarded(
     完成的 authority copy 并按拒绝语义收尾。登记异常（upsert 失败）时已
     落盘的文件经 FilePromotionGuard 整体回滚、事务回滚清单行，异常原样上
     抛——调用方随后恢复 authority copy（#759 复审 P1-2）。
+
+    登记成功后**不丢弃回滚簿**——guard 交还调用方活到外层事务提交之后
+    （codex #774 P1）：commit 时刻连接死亡/事务回滚时，本地面必须与清单
+    行、authority 同面回滚（旧文件回位、新文件移除）；提交成功才
+    ``discard()``。提前丢弃会让 local-first 读取独自携带未提交的新字节
+    （三面分叉）。
     """
     if not lease_artifact_write_current(conn, lease_id, job_id):
-        return None
+        return None, FilePromotionGuard()
     guard = FilePromotionGuard()
     if staged_files:
         assert job_dir is not None
@@ -212,8 +218,7 @@ def register_rows_guarded(
         # nothing is converted or masked.
         guard.rollback()
         raise
-    guard.discard()
-    return registered
+    return registered, guard
 
 
 def promote_to_authority_guarded(
@@ -239,8 +244,12 @@ def promote_to_authority_guarded(
     authority 新对象是孤儿，lifecycle 兜底。备份/copy 中途失败与登记阶段
     抛异常（upsert/落盘失败）在事务死亡前于锁内恢复；commit 时刻失败
     （连接死亡）在锁外 best-effort 恢复——事务回滚后幸存的旧清单行永不
-    指向 hash/size 不匹配的新字节（#759 复审 P1-2 与对抗复审 P1）。回滚
-    备份的清理以其防范状态已解除为前提（登记提交、恢复成功或该 key 的
+    指向 hash/size 不匹配的新字节（#759 复审 P1-2 与对抗复审 P1）。本地
+    文件提升的回滚簿活到事务提交之后（codex #774 P1）：commit 时刻失败
+    时本地面随清单行/authority 同面回滚（旧文件回位、新文件移除），提交
+    成功才丢弃备份——提前丢弃会让 local-first 读取独自携带未提交的新字
+    节（三面分叉）。回滚备份的清理以其防范状态已解除为前提（登记提交、
+    恢复成功或该 key 的
     copy 从未被尝试——ack 歧义下尝试过即视为可能已覆盖；codex #774 P1
     族）——锁外执行、只触本次调用 attempt 命名空间内的 key（调用方按调
     用唯一化 rollback key），并发重试的备份互不误删；恢复最终失败的备
@@ -261,6 +270,7 @@ def promote_to_authority_guarded(
     promoted: list[str] = []
     restored = False
     unrecoverable: set[str] = set()  # 恢复最终失败的 name：其备份是最后恢复源，禁止清理
+    file_guard = FilePromotionGuard()  # 本地回滚簿活到事务提交之后（codex #774 P1）
     try:
         with write_transaction(database_dsn) as conn:
             _lock_authority_keys_tx(conn, sorted(authority_keys.values()))
@@ -276,7 +286,7 @@ def promote_to_authority_guarded(
                     # 当冗余删除，错位静默永久化，#774 对抗复审 P1）。
                     promoted.append(spec.name)
                     storage.copy_object(spec.staging_key, spec.authority_key)
-                registered = register_rows_guarded(
+                registered, file_guard = register_rows_guarded(
                     conn,
                     rows,
                     job_id=job_id,
@@ -349,11 +359,21 @@ def promote_to_authority_guarded(
         # that took the lock between the arms, so it is skipped rather than
         # merely idempotent. Bare raise preserves the original type for the
         # caller's classification.
-        if not restored:
-            unrecoverable |= restore_authority_backups(
-                storage, promoted, backups, authority_keys, max_attempts=1
-            )
+        try:
+            if not restored:
+                unrecoverable |= restore_authority_backups(
+                    storage, promoted, backups, authority_keys, max_attempts=1
+                )
+        finally:
+            # commit 时刻失败：本地面必须与清单行/authority 同面回滚（codex
+            # #774 P1）——旧文件回位、新文件移除；闸拒/登记前失败时此簿为
+            # 空（no-op），真正干活的唯一路径是 commit 失败后未收尾的登记
+            # 簿。finally 保护：KI 打断上面的单发恢复时本地面照样回滚。
+            file_guard.rollback()
         raise
+    else:
+        # 事务提交成功才丢弃本地备份（闸拒/无 staged 文件时是空簿，幂等）。
+        file_guard.discard()
     finally:
         for name, rollback_key in backups.items():
             # 删除前提（codex #774 P1）：备份只在它防范的状态已确认解除时

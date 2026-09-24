@@ -134,7 +134,7 @@ def promote_result_staged_moves(staged_file_moves: tuple[tuple[str, str], ...]) 
     """``ExecutionResult.staged_file_moves`` 的提升入口（finish 代次闸内调用）。
 
     提升失败整体回滚再上抛；成功即丢弃备份——同事务后续 SQL 失败的崩溃
-    窗口残余见 docs/architecture/execution-generation.md §5.3。
+    窗口残余见 docs/architecture/execution-generation.md §4 第 3 条。
     """
     moves = [(Path(target), Path(source)) for target, source in staged_file_moves]
     if not moves:

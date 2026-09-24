@@ -433,3 +433,71 @@ def test_commit_time_failure_with_restore_failure_retains_backup(
     row = store.row_for_node("ctf-job", "node_a", "out.json")
     assert row is not None  # 事务回滚：幸存清单行仍指向旧字节——备份留存的存在理由
     assert row["content_hash"] == hashlib.sha256(b"old-bytes").hexdigest()
+
+
+def test_commit_time_failure_rolls_back_landed_files_too(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex #774 P1：upsert 全成功但外层事务 commit 时刻连接死亡——本地
+    落盘必须与清单行/authority 同面回滚（旧文件回位、新文件移除），而不
+    是回滚簿在提交前就被 discard、job_dir 独自携带未提交的新字节（三面
+    分叉：local-first 读新、行与 authority 读旧）。"""
+    _seed_job(job_db, workspace_id="cfl-ws", job_id="cfl-job")
+    _seed_lease(job_db, workspace_id="cfl-ws", job_id="cfl-job", lease_id="lease-1", generation=0)
+    k1_auth = artifact_storage_key("cfl-ws", "cfl-job", "k1.json")
+    storage = FakeObjectStorage()
+    storage.objects.update({k1_auth: b"old-1", "stg1": b"a1-new"})
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    (job_dir / "k1.json").write_bytes(b"old-local")
+    staged_dir = tmp_path / "staged"
+    staged_dir.mkdir()
+    (staged_dir / "k1.json").write_bytes(b"new-local")
+
+    real_write_transaction = ap.write_transaction
+
+    @contextlib.contextmanager
+    def commit_failing(dsn):
+        inner = real_write_transaction(dsn)
+        conn = inner.__enter__()
+        try:
+            yield conn
+        finally:
+            # 模拟 commit 时刻连接死亡：服务端事务回滚（不提交）。
+            inner.__exit__(ConnectionError, ConnectionError("lost"), None)
+        raise ConnectionError("simulated commit failure")
+
+    monkeypatch.setattr(ap, "write_transaction", commit_failing)
+
+    with pytest.raises(ConnectionError, match="simulated commit failure"):
+        promote_to_authority_guarded(
+            storage,
+            TEST_DATABASE_URL,
+            job_id="cfl-job",
+            lease_id="lease-1",
+            copies=[
+                AuthorityCopy(
+                    name="k1.json",
+                    staging_key="stg1",
+                    authority_key=k1_auth,
+                    rollback_key="jobs-staging/cfl-ws/cfl-job/e1/.rollback/k1.json",
+                )
+            ],
+            rows=[
+                {
+                    "job_id": "cfl-job",
+                    "node_key": "node_a",
+                    "name": "k1.json",
+                    "storage_key": k1_auth,
+                    "size_bytes": 6,
+                    "content_hash": hashlib.sha256(b"a1-new").hexdigest(),
+                }
+            ],
+            staged_files={"k1.json": staged_dir / "k1.json"},
+            job_dir=job_dir,
+        )
+
+    assert (job_dir / "k1.json").read_bytes() == b"old-local"  # 本地面同面回滚
+    assert storage.objects[k1_auth] == b"old-1"  # authority 同面恢复
+    assert _manifest_row_count(job_db, "cfl-job") == 0  # 清单行随事务回滚
+    assert not list(job_dir.glob(".promote-rollback-*"))  # 回滚成功：备份目录已清

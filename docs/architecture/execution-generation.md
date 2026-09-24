@@ -214,7 +214,7 @@ D12 镜像上传）与 finish 内的清单登记共用同一个 primitive
 | 回滚备份对象（`.rollback/*`） | authority 已覆盖但新状态未提交 | 登记提交 ∥ 恢复 copy 成功 ∥ 该 key 的 copy **从未被尝试**（备份冗余——ack 歧义下「尝试过但失败」必须按「可能已覆盖」进恢复集，#774 对抗复审 P1） | `promote_to_authority_guarded` finally 按 `unrecoverable` 集过滤；恢复最终失败的备份保留，ERROR 日志携带 authority/backup key 作恢复指针；`s3_jobs_gc` 对 `/.rollback/` 段豁免回收（bucket lifecycle 的子串不可豁免性见 materials-storage-deployment.md） |
 | 本地臂 staging 对象（per-invocation key） | 字节未 promote | promote 终局已定（提交或闸拒）——调用方私有 key，finally 清理 | `upload_via_staging_guarded` finally |
 | 远端臂 staging 对象（per-execution key，Worker 共享落点） | 字节未 promote 且并发 /result 重试仍要 verify/promote | finish 提交后由完成方删除；其余结局交 bucket lifecycle / `s3_jobs_gc` | `completion_staged.finish_staged` 尾部 |
-| 文件提升备份目录（`.promote-rollback-*`） | 文件已移动但登记未提交 | 登记成功（`discard`）∥ 已**完整**回滚（`rollback` 部分失败时备份目录整体保留 + ERROR 日志带路径，失败项备份是旧目标的最后本地恢复源）；**可逆性前提**：target/source 必须是文件——真实目录在任何移动之前整批拒绝，备份后立即复查收口预检↔移动间的 TOCTOU 换形（codex #774 P2 族） | `_file_promotion.py` 预检 + 备份后复查 + `FilePromotionGuard` |
+| 文件提升备份目录（`.promote-rollback-*`） | 文件已移动但登记未提交 | 登记事务**提交成功**（`discard` 活到 commit 之后——commit 时刻失败时本地面随清单行/authority 同面回滚，codex #774 P1）∥ 已**完整**回滚（`rollback` 部分失败时备份目录整体保留 + ERROR 日志带路径，失败项备份是旧目标的最后本地恢复源）；**可逆性前提**：target/source 必须是文件——真实目录在任何移动之前整批拒绝，备份后立即复查收口预检↔移动间的 TOCTOU 换形（codex #774 P2 族） | `_file_promotion.py` 预检 + 备份后复查 + `FilePromotionGuard` |
 
 恢复 copy 的重试分级（#774 对抗复审 P2）：按 key 锁仍持有的臂（闸拒、
 存储/文件/校验面失败）带界重试吸收瞬时存储故障；锁已随会话释放或正在
@@ -362,13 +362,16 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    commit 到达前、序列化失败、死锁都是回滚），不再收窄；恢复最终失败的
    备份对象保留（最后恢复源，ERROR 日志带 key；`s3_jobs_gc` 豁免
    `/.rollback/` 段），无备份时的孤儿 authority 对象由 bucket lifecycle 兜底。
-3. **闸内文件提升的提交前窗口**：`finish_lease` 与 `register_rows_guarded` 的
-   staged 文件提升都在代次 CAS 之后、事务提交之前完成（本地 rename，毫秒级）；
-   提升成功后同事务后续 SQL 失败的崩溃窗口会留下「当前代次自身产物」的已落盘
-   文件，lease 仍 active、重试自然覆盖——不跨代次污染，不再收窄。finish 批
-   事务（`finish_many`）整批回滚重放由「source 缺席 + target 在场 = 已提升」
-   的幂等跳过兜住（`promote_file_moves_guarded`），瞬时 DB 冲突不会被放大成
-   确定性 500。
+3. **闸内文件提升的提交前窗口**：`finish_lease` 的 staged 文件提升在代次
+   CAS 之后、事务提交之前完成（本地 rename，毫秒级），提升成功后同事务
+   后续 SQL 失败的崩溃窗口会留下「当前代次自身产物」的已落盘文件，
+   lease 仍 active、重试自然覆盖——不跨代次污染，不再收窄。finish 批
+   事务（`finish_many`）整批回滚重放由「source 缺席 + target 在场 =
+   已提升」的幂等跳过兜住（`promote_file_moves_guarded`），瞬时 DB 冲
+   突不会被放大成确定性 500。`register_rows_guarded` 臂已收窄（codex
+   #774 P1）：回滚簿活到事务提交之后，commit 时刻失败时本地面随清单
+   行/authority 同面回滚——残余只剩进程硬崩（SIGKILL）与 commit 歧义
+   的已提交半边（选边与 authority 侧一致，§4 第 2 条）。
 4. **ready 前输入恢复（hydration）尚无代次夹逼**：清单驱动的输入恢复与
    消费关系索引（含 `edge.condition.artifact` 等隐式消费面）的统一建模是后续
    artifact-dependency-model 层的内容。
