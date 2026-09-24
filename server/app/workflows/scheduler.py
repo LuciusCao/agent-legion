@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+from server.app.workflows.condition_barrier import (
+    TERMINAL_SUCCESS_STATUSES,
+    any_condition_producer_in_flight,
+)
 from server.app.workflows.conditions import selected_edges
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.workflow_branching import (
@@ -11,8 +14,6 @@ from server.app.workflows.workflow_branching import (
     effective_node_statuses,
 )
 from server.app.workflows.workflow_consumption import artifact_producers
-
-TERMINAL_SUCCESS_STATUSES = {"completed", "not_applicable"}
 
 
 def _inputs_exist(node: WorkflowNode, artifact_dir: Path) -> bool:
@@ -42,22 +43,6 @@ def _has_unfinished_implicit_producer(
     return False
 
 
-def _node_statuses(job_db: Any, job_id: str) -> dict[str, str]:
-    return {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job_id)}
-
-
-def _refresh_job_status(job_db: Any, job_id: str) -> None:
-    nodes = job_db.list_job_nodes(job_id)
-    status = summarize_job_status([node["status"] for node in nodes])
-    error_message = ""
-    if status == "failed":
-        error_message = next(
-            (str(node["error_message"]) for node in nodes if node.get("error_message")),
-            "",
-        )
-    job_db.update_job_status(job_id, status, error_message)
-
-
 def find_ready_nodes(
     definition: WorkflowDefinition,
     node_statuses: dict[str, str],
@@ -78,6 +63,12 @@ def find_ready_nodes(
         if any(node_statuses.get(edge.source) == "not_applicable" for edge in active_incoming):
             continue
         if any(node_statuses.get(edge.source) != "completed" for edge in active_incoming):
+            continue
+        if any_condition_producer_in_flight(
+            incoming[node.key], producers, node_statuses, definition
+        ):
+            # 条件产物的生产者在途：当前选中/落选判定建立在缺失或旧字节上，
+            # 不就绪——等生产者终态后重评（同 evaluate_branches 的推迟裁决）。
             continue
         if not _inputs_exist(node, artifact_dir):
             continue

@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from server.app.workflows.condition_barrier import branch_gated_keys, condition_producer_in_flight
 from server.app.workflows.conditions import selected_edges
 from server.app.workflows.definition import WorkflowDefinition, WorkflowEdge
+from server.app.workflows.workflow_consumption import artifact_producers, dependency_downstream
 
 RUNNABLE_STATUSES = {"pending", "ready", "stale"}
 
@@ -50,7 +52,9 @@ def evaluate_branches(
     artifact_dir: Path,
 ) -> BranchEvaluation:
     not_applicable: set[str] = set()
+    deferred: set[str] = set()  # 在途条件边的 target 可达集（本轮不可标）
     node_statuses = effective_node_statuses(definition, node_statuses)
+    producers = artifact_producers(definition)
     outgoing: dict[str, list[WorkflowEdge]] = {key: [] for key in definition.nodes}
     for edge in definition.edges:
         outgoing[edge.source].append(edge)
@@ -59,13 +63,30 @@ def evaluate_branches(
             continue
         if not any(edge.condition is not None for edge in edges):
             continue
-        selected = selected_edges(edges, artifact_dir)
+        # 逐边推迟（#759 ③ 终审 P1）：生产者在途的边进 deferred（其 target
+        # 可达集本轮不可标），可判定的边照常裁决——整源推迟会把可判定的
+        # 兄弟边挟持住：兄弟 target 不钉死 → 其分支内的生产者永远跑不到
+        # → 在途永不解除（永久静默挂起，基线行为是可终止）。
+        decidable: list[WorkflowEdge] = []
+        for edge in edges:
+            if condition_producer_in_flight(
+                edge,
+                producers,
+                node_statuses,
+                excluded=branch_gated_keys(definition, edge.target),
+            ):
+                deferred |= {edge.target} | set(dependency_downstream(definition, edge.target))
+            else:
+                decidable.append(edge)
+        if not decidable:
+            continue
+        selected = selected_edges(decidable, artifact_dir)
         selected_targets = {edge.target for edge in selected}
-        unselected_targets = {edge.target for edge in edges} - selected_targets
+        unselected_targets = {edge.target for edge in decidable} - selected_targets
         selected_reachable = _reachable_from(definition, selected_targets)
         unselected_reachable = _reachable_from(definition, unselected_targets)
         not_applicable.update(unselected_reachable - selected_reachable)
-    return BranchEvaluation(not_applicable=not_applicable)
+    return BranchEvaluation(not_applicable=not_applicable - deferred)
 
 
 def _incoming_edges(definition: WorkflowDefinition) -> dict[str, list[WorkflowEdge]]:

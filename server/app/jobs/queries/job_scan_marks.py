@@ -48,3 +48,19 @@ class JobScanMarksMixin(ConnectionQueriesMixin):
                 (definition_hash,),
             ).fetchone()
         return str(row["workflow_definition_snapshot_json"]) if row else ""
+
+    def get_job_execution_generation(self, job_id: str) -> int | None:
+        """The job's live execution epoch (EXEC-GENERATION-001); None if gone.
+
+        Ready-gate hydration (#759) brackets its manifest read + local
+        re-materialization with two reads of this value: every reset mutation
+        (rerun / upgrade / run-to / approval rework) bumps the epoch in the
+        same ``lease_guarded_mutation`` transaction that deletes the reset
+        outputs' manifest rows, so an unchanged epoch proves the restored
+        bytes were not invalidated mid-flight.
+        """
+        with self._connect_read() as conn:
+            row = conn.execute(
+                "select execution_generation from jobs where id=%s", (job_id,)
+            ).fetchone()
+        return int(row["execution_generation"]) if row is not None else None

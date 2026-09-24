@@ -329,11 +329,16 @@ class JobArtifactObjectStore:
             )
 
     def lookup(self, job_id: str, name: str) -> dict[str, Any] | None:
-        """Latest manifest row for an artifact name (internal: has storage_key)."""
+        """Latest manifest row for an artifact name (internal: has storage_key).
+
+        同名多行（跨节点共名）的「最新」判定与 ``rows_for_job`` 共用同一个
+        确定性决胜：``uploaded_at`` 并列（同事务批量登记同事务时间戳）时按
+        ``node_key`` 决胜——两条读路径永远选中同一行（#775 对抗复审 P2）。
+        """
         with read_connection(self._dsn) as conn:
             row = conn.execute(
                 "select * from job_artifacts where job_id=%s and name=%s"
-                " order by uploaded_at desc limit 1",
+                " order by uploaded_at desc, node_key desc limit 1",
                 (job_id, name),
             ).fetchone()
         return dict(row) if row is not None else None
@@ -347,9 +352,11 @@ class JobArtifactObjectStore:
         return dict(row) if row is not None else None
 
     def rows_for_job(self, job_id: str) -> list[dict[str, Any]]:
+        """全清单行，``uploaded_at, node_key`` 升序——同名多行时与
+        ``lookup`` 共用同一决胜序（hydration 按此序留尾即「最新」行）。"""
         with read_connection(self._dsn) as conn:
             rows = conn.execute(
-                "select * from job_artifacts where job_id=%s order by uploaded_at",
+                "select * from job_artifacts where job_id=%s order by uploaded_at, node_key",
                 (job_id,),
             ).fetchall()
         return [dict(row) for row in rows]

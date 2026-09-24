@@ -12,6 +12,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflow_worker.input_hydration import hydrate_job_artifacts
 from server.app.workflow_worker.ready_cache import evaluate_job_ready, resolve_cached_definition
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.sharding_batch import has_pending_shards_many
@@ -55,6 +56,38 @@ def evaluate_changed_jobs(
             continue
         statuses = {node["node_key"]: node["status"] for node in nodes_by_job.get(job["id"], [])}
         job_dir = resolve_job_dir(job, worker.settings.jobs_dir)
+        # Ready-gate hydration (#759 P1): manifest-backed inputs whose local
+        # copy was evicted (EXEC-ARTIFACT-STORE-001) are re-materialized
+        # BEFORE branch/ready evaluation — both probe the local filesystem
+        # only, so a manifest-only input would otherwise park the job at
+        # queued forever. A job whose manifest-backed inputs are still
+        # missing after the attempt is NOT cached in job_evals (the next
+        # poll pass re-evaluates and retries; a missing object may be
+        # transient) and any stale cache entry is dropped so no candidate
+        # built on the pre-eviction state can be claimed. #702 P1: hydration
+        # brackets the restores with two jobs.execution_generation reads — a
+        # reset mutation committing mid-flight invalidates the manifest rows
+        # the restores came from, so a changed epoch discards exactly this
+        # round's restored files and defers the job the same way. The two
+        # READ failures (manifest query / generation pre-read) return None
+        # and defer identically: a local miss must never be cached as a true
+        # miss while the authoritative manifest is unreadable.
+        unrestored = hydrate_job_artifacts(
+            worker.artifact_object_store,
+            worker.job_db,
+            job_id=str(job["id"]),
+            job_dir=job_dir,
+            definition=definition_to_run,
+        )
+        if unrestored is None or unrestored:
+            worker.state.job_evals.pop(str(job["id"]), None)
+            logger.warning(
+                "job %s hydration incomplete (read failure, or unrestored inputs %s); "
+                "evaluation deferred to the next poll pass",
+                job["id"],
+                sorted(unrestored) if unrestored else "-",
+            )
+            continue
         branch_evaluation = evaluate_branches(definition_to_run, statuses, job_dir)
         for key in branch_evaluation.not_applicable:
             if statuses.get(key) in RUNNABLE_STATUSES:

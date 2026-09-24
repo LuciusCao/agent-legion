@@ -1,11 +1,18 @@
-"""隐式消费边与合并下游闭包（issue #759 P1）。
+"""artifact 消费关系单一事实源与合并下游闭包（issue #759）。
 
 loader 对节点 ``inputs`` 只做字符串列表解析，不要求其生产者在显式边
-上游——调度器靠输入文件出现解锁。因此重跑/重置语义的「下游」必须是
-显式边 ∪ 隐式消费边：全图 ``output 名 → producer 集合`` 索引，节点 N
-的每个有生产者的 input 名构成隐式边 producer→N。RMW 纪律：节点输入
-与自己的 output 同名不构成自边（不回传自己），但仍作为生产者向该名
-的其他消费者传播；无任何生产者的外部 input 不产生边。
+上游——调度器靠输入文件出现解锁；``edge.condition.artifact`` 同理：
+分支评估在 source 完成后读 job_dir 里的条件文件决定是否激活 target，
+loader 同样不要求该名的生产者与边相邻。因此重跑/重置语义的「下游」
+必须覆盖全部消费渠道，本模块是唯一枚举处（``artifact_consumption_index``）：
+
+- ``node.inputs`` 声明：名 X 的每个生产者 → 声明 X 的节点；
+- RMW：节点输入与自己的 output 同名不构成自边（不回传自己），但仍作为
+  生产者向该名的其他消费者传播；无任何生产者的外部 input 不产生边；
+- 分支条件产物：``edge.condition.artifact`` 的每个生产者 → 该边的
+  target（分支评估替 target 读这份文件；生产者与 source 不相邻时这是
+  唯一的传播通道——少了它，重跑/升级会留下旧条件字节，分支评估静默
+  走错分支）。
 
 隐式边可能成环（loader 的 acyclic 校验只管显式边）：``walk_downstream``
 以 seen 防环，环内节点互相视为下游——保守方向（一起重跑），永不漏。
@@ -19,6 +26,27 @@ from collections.abc import Iterable, Mapping
 from server.app.workflows.definition import WorkflowDefinition
 
 
+def artifact_consumption_index(definition: WorkflowDefinition) -> dict[str, frozenset[str]]:
+    """artifact 名 → 消费它的节点 key 集合（全部消费渠道的唯一枚举）。
+
+    - 节点 ``inputs`` 里的每个名字：声明节点是消费者（外部输入的声明节点
+      自身即消费者——索引键集因此恒等于「ready gate 的本地探针全集」）；
+    - ``edge.condition.artifact``：边的 target 是消费者（分支评估替它读
+      文件）。
+    索引键集即「这个名字会被本地探针/分支评估读取」的全集；hydration、
+    分支裁决屏障与升级死名判定（``revision_diff.dropped_artifact_names``）
+    都以本索引为准，不允许各自重遍历定义。
+    """
+    index: dict[str, set[str]] = {}
+    for key, node in definition.nodes.items():
+        for name in node.inputs:
+            index.setdefault(name, set()).add(key)
+    for edge in definition.edges:
+        if edge.condition is not None:
+            index.setdefault(edge.condition.artifact, set()).add(edge.target)
+    return {name: frozenset(consumers) for name, consumers in index.items()}
+
+
 def consumer_edges(
     definition: WorkflowDefinition, *, skip_names: Iterable[str] = ()
 ) -> dict[str, list[str]]:
@@ -27,18 +55,19 @@ def consumer_edges(
     ``skip_names``（#759 4.1）：排除经由这些名字的隐式边。判定「名 X 的
     consumer 是否保证在某 producer 之后执行」时，X 自己的隐式边正是被
     保留的启动对象 / manifest 回填所满足的等待——拿它当保证证据是循环
-    论证，必须由调用方排除。
+    论证，必须由调用方排除。当前是 ④ 层（upgrade-inherit）的前置 API，
+    生产调用方随 ④ 落地。
     """
     skipped = set(skip_names)
     producers = artifact_producers(definition)
     edges: dict[str, set[str]] = {key: set() for key in definition.nodes}
-    for key, node in definition.nodes.items():
-        for name in node.inputs:
-            if name in skipped:
-                continue
+    for name, consumers in artifact_consumption_index(definition).items():
+        if name in skipped:
+            continue
+        for consumer in consumers:
             for producer in producers.get(name, ()):
-                if producer != key:
-                    edges[producer].add(key)
+                if producer != consumer:
+                    edges[producer].add(consumer)
     return {key: sorted(targets) for key, targets in edges.items()}
 
 

@@ -1,8 +1,9 @@
 """clean 升级的两段产物暂存（#759 预算拆分自 ``job_workflow_upgrade_staging``）。
 
 失效判定**按名**而非按节点对（#759 自审）：dropped = 旧定义全部
-output − 新定义全部 output − 新定义全部 input——旧产出若在新定义
-仍被任一节点消费（含跨节点转移、新 RMW 名）就是种子而非垃圾。
+output − 新定义全部 output − 新定义全部消费名（统一索引键集，含分支
+条件产物——`revision_diff.dropped_artifact_names`）——旧产出若在新定
+义仍被消费（含跨节点转移、新 RMW 名、分支条件种子）就是种子而非垃圾。
 旧产物名的存亡由此闭包**唯一**判定：第一段 extra_names 已覆盖全部
 死名（含被删节点的，dropped 遍历旧定义全节点）；第二段对被删节点
 只清 run history，不再按旧定义重枚举 outputs——被删生产者的产物
