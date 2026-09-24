@@ -9,8 +9,12 @@ job 删除路径（``job_deletion`` → ``job_artifacts.delete_objects``）只�
 - ``jobs/{ws}/{job_id}/{name}``：key 不在 ``job_artifacts.storage_key``
   集合中且 LastModified 超过宽限窗 → 孤儿；
 - ``jobs-staging/{ws}/{job_id}/{exec_id}/{name}``：超宽限窗即回收候选
-  （``discard_staging`` 是 best-effort，文档明言 lifecycle 是 backstop；
-  docs/materials-storage-deployment.md 规划的 1 天短保留）。
+  （Worker 直传的 staging 源只在 finish 提交后由完成方删除——失败/冲
+  突/闸拒/进程崩溃的残留走本工具或 bucket lifecycle；docs/materials-
+  storage-deployment.md 规划的 1 天短保留）。``/.rollback/`` 段的
+  promote 回滚备份例外豁免：恢复最终失败时它是旧字节的最后恢复源
+  （codex #774 P1 族），正常结局的备份由 promote 自身清理、不经过本
+  工具。
 
 设计约束：
 - 判定核心（``scan_orphans``）只依赖注入的列举器与 key 存在性函数，
@@ -140,9 +144,19 @@ def _staging_orphans_in(
     entries: list[ObjectEntry], key_exists: KeyExistence, cutoff: datetime
 ) -> list[ObjectEntry]:
     """超宽限窗且 DB 无行：staging 的 DB 对照救的是撞名 workspace 的
-    materials（正常 staging 对象本就无行，宽限窗是它们的唯一防线）。"""
+    materials（正常 staging 对象本就无行，宽限窗是它们的唯一防线）。
+    ``/.rollback/`` 段的回滚备份一律豁免（codex #774 P1 族）：promote 恢
+    复最终失败时被刻意保留的备份是幸存清单行所指向旧字节的最后恢复源，
+    其生命周期归运维处置（ERROR 日志带 key）；代价是崩溃残留的
+    `.rollback` 孤儿不再被本 GC 回收（备份只在 authority 已存在时创建、
+    崩溃窗口毫秒级，量可忽略）。bucket lifecycle 的子串不可豁免性见
+    docs/materials-storage-deployment.md。"""
     known = key_exists([e.key for e in entries])
-    return [e for e in entries if e.key not in known and _past_grace(e, cutoff)]
+    return [
+        entry
+        for entry in entries
+        if entry.key not in known and "/.rollback/" not in entry.key and _past_grace(entry, cutoff)
+    ]
 
 
 def make_db_key_existence(queries: JobQueries) -> KeyExistence:
@@ -227,22 +241,27 @@ def apply_gc(
     """
     deleted = 0
     skipped = 0
+    # 纵深防御（#774 对抗复审）：回滚备份在任何路径都不可删——正常报告来
+    # 自 scan 层的豁免，但手工构造的 OrphanReport 会绕过它；把「GC 永不删
+    # 恢复备份」钉在删除动作本身上。
+    authority_orphans = [e for e in report.authority_orphans if "/.rollback/" not in e.key]
+    staging_orphans = [e for e in report.staging_orphans if "/.rollback/" not in e.key]
     if revalidate is not None:
-        for batch in _batches(report.authority_orphans):
+        for batch in _batches(authority_orphans):
             known = revalidate([e.key for e in batch])
             still_orphans = [e for e in batch if e.key not in known]
             skipped += len(batch) - len(still_orphans)
             if still_orphans:
                 deleted += _delete_batch(client, bucket, still_orphans)
-        for batch in _batches(report.staging_orphans):
+        for batch in _batches(staging_orphans):
             known = revalidate([e.key for e in batch])
             still_orphans = [e for e in batch if e.key not in known]
             skipped += len(batch) - len(still_orphans)
             if still_orphans:
                 deleted += _delete_batch(client, bucket, still_orphans)
     else:
-        deleted += delete_entries(client, bucket, report.authority_orphans)
-        deleted += delete_entries(client, bucket, report.staging_orphans)
+        deleted += delete_entries(client, bucket, authority_orphans)
+        deleted += delete_entries(client, bucket, staging_orphans)
     return ApplyResult(deleted=deleted, skipped_revalidated=skipped)
 
 

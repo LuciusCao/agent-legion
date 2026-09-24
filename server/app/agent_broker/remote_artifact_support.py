@@ -18,7 +18,6 @@ from server.app.services.job_artifact_objects import (
     DEFAULT_PRESIGN_EXPIRY_SECONDS,
     JobArtifactObjectStore,
     artifact_staging_key,
-    artifact_storage_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,43 +52,6 @@ def spot_check_selected(name: str, ref: Any, percent: int) -> bool:
     key = f"{_SPOT_SALT}:{name}:{ref['storage_key']}:{ref.get('size_bytes')}"
     bucket = int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], "big") % 10_000
     return bucket < percent * 100
-
-
-def promote_remote(
-    store: JobArtifactObjectStore,
-    *,
-    workspace_id: str,
-    job_id: str,
-    name: str,
-    storage_key: str,
-) -> str:
-    """Copy a verified staging object onto the authority key (server-side);
-    returns the authority key. The ``.gz`` form marker (#338) carries over:
-    server-side copy preserves bytes, so the key keeps the staging suffix.
-    """
-    assert store.storage is not None
-    authority_key = artifact_storage_key(workspace_id, job_id, name)
-    authority_key += GZIP_SUFFIX if is_gzip_key(storage_key) else ""
-    store.storage.copy_object(storage_key, authority_key)
-    return authority_key
-
-
-def discard_staging(store: JobArtifactObjectStore, storage_key: str) -> None:
-    """Best-effort staging-object cleanup after promotion."""
-    if store.storage is None:
-        return
-    try:
-        store.storage.delete_object(storage_key)
-    except Exception:
-        # #204 broad-except audit: deliberate best-effort staging cleanup.
-        # This runs in the promote success path AND in promote_all's finally
-        # after a failure — either way the caller's outcome must not change:
-        # an orphaned staging object is explicitly lifecycle's backstop
-        # (documented across this module family), so a storage error during
-        # its deletion is only worth a warning with the traceback. The
-        # storage layer is third-party surface (botocore); no business
-        # exception family could enumerate it.
-        logger.warning("failed to delete staging object %s", storage_key, exc_info=True)
 
 
 def presign_expiry_seconds(manifest: dict[str, Any]) -> int:
@@ -172,7 +134,7 @@ def download_remote_artifact(
     ``max_size_bytes``-capped on decompressed bytes, #338); returns (path, hash).
     """
     relative = PurePosixPath(name)
-    if relative.is_absolute() or ".." in relative.parts:
+    if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != name:
         raise ValueError(f"unsafe expected output name: {name!r}")
     target = staging_dir / relative
     target.parent.mkdir(parents=True, exist_ok=True)

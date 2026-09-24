@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from server.app.db.transaction import read_connection, write_transaction
-from server.app.executors._lease_lifecycle import _expire_lease_row
+from server.app.executors._lease_expiry import _expire_lease_row
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult

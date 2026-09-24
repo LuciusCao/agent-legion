@@ -48,9 +48,9 @@ _MANIFEST_DEF_MODULES = ("server/app/services/job_artifact_rows.py",)
 
 _GUIDANCE = (
     "execution write surface outside config/architecture/execution-write-surfaces.json; "
-    "新写面必须走共享 helper（lease_guarded_mutation / "
-    "lock_job_mutation_and_read_generation / upsert_artifact_row_tx）"
-    "并把条目加进注册表，检查清单见 "
+    "新写面必须走共享 helper/primitive（lease_guarded_mutation / "
+    "lock_job_mutation_and_read_generation / promote_to_authority_guarded / "
+    "upsert_artifact_row_tx）并把条目加进注册表，检查清单见 "
     "docs/architecture/execution-generation.md §3.2"
 )
 

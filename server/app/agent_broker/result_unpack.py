@@ -50,6 +50,49 @@ def code_result_log_target(manifest: dict[str, Any], data_dir: Path) -> Path | N
     return data_dir / relative if relative is not None else None
 
 
+def plan_agent_result_moves(
+    staging_dir: Path,
+    job_dir: Path,
+    expected: tuple[str, ...],
+    run_dir: str = "",
+    log_target: Path | None = None,
+) -> tuple[list[tuple[Path, Path]], tuple[str, ...]]:
+    """Plan the (target, source) promotions out of an extracted staging dir.
+
+    Returns the absolute-path move list plus the produced expected-output
+    names; nothing is moved here — the caller decides where the promotion
+    happens (``unpack_agent_result`` moves immediately; the completion path
+    defers it into the lease-finish generation gate, #759 review P1-1).
+    Worker archives are untrusted: nothing outside ``expected``, that single
+    log file, and — for kind='code' results — the fixed ``node.log`` member
+    may land on disk, so a Worker cannot clobber other nodes' inputs/outputs
+    or plant files to spoof server-side decisions (log display and token
+    parsing are read-only consumers).
+    """
+    moves: list[tuple[Path, Path]] = []
+    produced: list[str] = []
+    for name in expected:
+        relative = PurePosixPath(name)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise AgentBundleError(f"unsafe expected output name: {name!r}")
+        source = staging_dir / relative
+        if source.is_file():
+            moves.append((job_dir / relative, source))
+            produced.append(name)
+    run_dir_relative = safe_relative_dir(run_dir)
+    if run_dir_relative is not None:
+        events_source = staging_dir / run_dir_relative / "events.jsonl"
+        if events_source.is_file():
+            moves.append((job_dir / run_dir_relative / "events.jsonl", events_source))
+    if log_target is not None:
+        log_source = staging_dir / CODE_RESULT_LOG_MEMBER
+        if log_source.is_file():
+            # #618: code results land node.log in the shared logs/jobs dir
+            # (the claim insert already points node_runs there).
+            moves.append((log_target, log_source))
+    return moves, tuple(produced)
+
+
 def unpack_agent_result(
     archive_path: Path,
     job_dir: Path,
@@ -60,34 +103,16 @@ def unpack_agent_result(
     """Extract into a staging dir, then promote declared expected outputs plus
     the Worker run dir's ``events.jsonl``.
 
-    Worker archives are untrusted: nothing outside ``expected``, that single
-    log file, and — for kind='code' results — the fixed ``node.log`` member
-    lands on disk, so a Worker cannot clobber other nodes' inputs/outputs or
-    plant files to spoof server-side decisions (log display and token parsing
-    are read-only consumers)."""
+    Immediate-promotion variant for tests and other non-gated callers; the
+    completion path instead extracts with ``extract_agent_result`` and
+    defers the promotion via ``plan_agent_result_moves`` into the
+    lease-finish generation gate."""
     with tempfile.TemporaryDirectory(prefix=".result-staging-", dir=job_dir) as staging:
         staging_dir = Path(staging)
         extract_agent_result(archive_path, staging_dir)
-        for name in expected:
-            relative = PurePosixPath(name)
-            if relative.is_absolute() or ".." in relative.parts:
-                raise AgentBundleError(f"unsafe expected output name: {name!r}")
-            source = staging_dir / relative
-            if source.is_file():
-                target = job_dir / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(target))
-        run_dir_relative = safe_relative_dir(run_dir)
-        if run_dir_relative is not None:
-            events_source = staging_dir / run_dir_relative / "events.jsonl"
-            if events_source.is_file():
-                events_target = job_dir / run_dir_relative / "events.jsonl"
-                events_target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(events_source), str(events_target))
-        if log_target is not None:
-            log_source = staging_dir / CODE_RESULT_LOG_MEMBER
-            if log_source.is_file():
-                # #618: code results land node.log in the shared logs/jobs
-                # dir (the claim insert already points node_runs there).
-                ensure_dir_once(log_target.parent)
-                shutil.move(str(log_source), str(log_target))
+        moves, _produced = plan_agent_result_moves(
+            staging_dir, job_dir, expected, run_dir, log_target
+        )
+        for target, source in moves:
+            ensure_dir_once(target.parent)
+            shutil.move(str(source), str(target))
