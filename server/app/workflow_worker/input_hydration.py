@@ -45,17 +45,15 @@ grounds: (1) candidates built this round carry the pre-bump epoch — the
 mutation bumps the mark_key (``scan.mark_key`` includes the epoch), so the
 cache is invalidated and the claim-time generation CAS fails closed on any
 stale candidate; (2) the next pass re-evaluates and hydration never restores
-the name again (its manifest row is gone); (3) the surviving stale file can
-only pass the new epoch's ready gate for a node whose readiness does not
-explicitly wait on the reset producer — but ``unprotected_input_names``
-protects exactly the names whose consumers lack a guaranteed-prior producer,
-so a deleted-row name has every consumer covered: consumers on an explicit
-edge path from a reset node are hard-blocked until that chain re-completes
-(the producer re-runs first and overwrites the file), and a purely
-implicit-edge consumer additionally needs every other gating input present,
-each of which was staged away by the same mutation and can only reappear by
-winning this same commit-window race. The window is the millisecond-scale
-staging→commit span of one transaction, per file.
+the name again (its manifest row is gone); (3) the surviving stale file
+cannot drive any consumer's verdict in the new epoch: a deleted-row name has
+a reset (non-terminal) producer, and every consumer channel is barriered on
+non-terminal producers — node inputs via
+``scheduler._has_unfinished_implicit_producer``, branch-condition artifacts
+via ``workflow_branching.condition_producer_in_flight`` (#759 ③ 对抗复审
+P1) — so every consumer defers until the producer re-runs and overwrites the
+file. The window is the millisecond-scale staging→commit span of one
+transaction, per file.
 """
 
 from __future__ import annotations
@@ -149,8 +147,9 @@ def hydrate_job_artifacts(
             exc_info=True,
         )
         return None
-    # rows_for_job orders by uploaded_at ascending; the dict keeps the last
-    # write per name, matching lookup()'s latest-row semantics.
+    # rows_for_job 按 (uploaded_at, node_key) 升序；dict 留尾 = 同名取决胜
+    # 序的最大行，与 lookup() 的「最新」判定同源（#775 对抗复审 P2——并列
+    # 时间戳下两条读路径曾可能选中不同行，把 hydration 卡进永久 defer）。
     rows_by_name = {str(row["name"]): row for row in rows}
     unrestored: set[str] = set()
     for name in missing:

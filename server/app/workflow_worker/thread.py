@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import AgentDispatchService
 from server.app.agent_broker.code_dispatch import CodeDispatchService, has_online_code_workers
@@ -31,6 +31,9 @@ from server.app.workflow_worker.shutdown import stop_worker
 from server.app.workflow_worker.state import WorkflowWorkerState
 from server.app.workflows.definition import WorkflowDefinition
 
+if TYPE_CHECKING:
+    from server.app.services.job_artifact_objects import JobArtifactObjectStore
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +48,7 @@ class WorkflowWorkerThread:
         agent_dispatch: AgentDispatchService | None = None,
         code_dispatch: CodeDispatchService | None = None,
         runtime: ExecutionRuntime | None = None,
-        artifact_object_store: Any | None = None,
+        artifact_object_store: JobArtifactObjectStore | None = None,
     ):
         self.job_db = job_db
         self.leases = leases

@@ -29,12 +29,13 @@ from server.app.workflows.definition import WorkflowDefinition
 def artifact_consumption_index(definition: WorkflowDefinition) -> dict[str, frozenset[str]]:
     """artifact 名 → 消费它的节点 key 集合（全部消费渠道的唯一枚举）。
 
-    - 节点 ``inputs`` 里的每个名字：声明节点是消费者；
+    - 节点 ``inputs`` 里的每个名字：声明节点是消费者（外部输入的声明节点
+      自身即消费者——索引键集因此恒等于「ready gate 的本地探针全集」）；
     - ``edge.condition.artifact``：边的 target 是消费者（分支评估替它读
       文件）。
-    无消费者的声明名（外部输入）也出现在索引里——消费者集合非空即
-    「这个名字会被本地探针/分支评估读取」，hydration 与升级保护计划都
-    以本索引为准，不允许各自重遍历定义。
+    索引键集即「这个名字会被本地探针/分支评估读取」的全集；hydration、
+    分支裁决屏障与升级死名判定（``revision_diff.dropped_artifact_names``）
+    都以本索引为准，不允许各自重遍历定义。
     """
     index: dict[str, set[str]] = {}
     for key, node in definition.nodes.items():
@@ -54,7 +55,8 @@ def consumer_edges(
     ``skip_names``（#759 4.1）：排除经由这些名字的隐式边。判定「名 X 的
     consumer 是否保证在某 producer 之后执行」时，X 自己的隐式边正是被
     保留的启动对象 / manifest 回填所满足的等待——拿它当保证证据是循环
-    论证，必须由调用方排除。
+    论证，必须由调用方排除。当前是 ④ 层（upgrade-inherit）的前置 API，
+    生产调用方随 ④ 落地。
     """
     skipped = set(skip_names)
     producers = artifact_producers(definition)

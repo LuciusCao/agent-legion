@@ -145,6 +145,14 @@ run-to / approval rework 一律走它，不允许各自重遍历定义。hydrati
 
 这是代次协议的前提：闭包划错，CAS 护住的现场本身就是错的。
 
+**条件产物的生产者屏障**（#759 ③ 对抗复审 P1）：把 `edge.condition.artifact`
+纳入闭包后，分支评估侧必须配对状态屏障——条件 artifact 有非终态生产者时，
+`evaluate_branches` 推迟整个 source 的裁决（不选边、不标 not_applicable），
+`find_ready_nodes` 不就绪相关 target（`workflow_branching.condition_producer_in_flight`，
+与调度侧隐式生产者屏障共用同一张 `artifact_producers` 索引与同一组终态集合）。
+否则重跑条件生产者会把「暂存删除后的缺失」当成条件 false，把 gated 分支永久
+标成 not_applicable；RMW 保留的旧字节会被当真值走错分支。
+
 ### 2.7 写面登记与静态强制（EXEC-GENERATION-002）
 
 本协议经多轮对抗审查收敛后，同一类残余风险只剩一种形态：新写面绕过共享
@@ -438,6 +446,13 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
     无补偿删除。窗口窄（需镜像全成功 + 落盘失败），后果惰性：失败节点
     的产物行不被下游消费（producer 失败即阻断下游 ready），rerun/reset
     按暂存名删除清单行自愈；补偿删除会让 finish 闸耦合镜像层，不修。
+19. **hydration defer 无退避**（#775 对抗复审 P2）：清单行在而对象永久
+    缺失/hash 不符时，job 每个 poll 周期全量重试下载（不缓存即重试是
+    刻意纪律——防 parked-forever）；方向 fail-closed 正确，代价是
+    warning 与 S3 GET 的固定频率噪音。后续方向：只存 next-retry 时刻的
+    负缓存（不存评估结论）。另：`.part` 固定暂存名在 hydration 与 claim
+    侧 `restore_missing_inputs` 并发恢复同名时互相截断、双方 digest 失
+    败后各自重试——自愈，仅浪费一次下载，不修。
 
 后续方向：评估 immutable/versioned authority key + manifest 原子切换（#759
 复审增补的长期项）；`.result-staging-*` / `.promote-rollback-*` 的进程崩溃残留

@@ -409,3 +409,97 @@ def test_find_ready_nodes_implicit_cycle_fails_closed(tmp_path):
     statuses = {"p": "pending", "q": "pending"}
 
     assert find_ready_nodes(definition, statuses, artifact_dir=tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# ③ 759 对抗复审 P1：条件产物生产者屏障（condition_producer_in_flight）
+# ---------------------------------------------------------------------------
+
+
+def _write_condition_producer_definition(path: Path) -> None:
+    """条件产物生产者（scorer）与分支源（gate）不相邻：重跑 scorer 时 gate
+    保持 completed——生产者屏障必须挡住「缺失/旧字节当判定」。"""
+    path.write_text(
+        """
+key: cond_producer
+label: t
+schema_version: 2
+nodes:
+  root:
+    label: Root
+    capability: root
+  scorer:
+    label: Scorer
+    capability: score
+    after: [root]
+    outputs: [decision.json]
+  gate:
+    label: Gate
+    capability: gate
+    after: [root]
+  good:
+    label: Good
+    capability: good
+    after: [gate]
+  skipped:
+    label: Skipped
+    capability: skipped
+edges:
+  - {from: gate, to: good, when: {artifact: decision.json, path: "$.eligible", equals: true}}
+  - {from: gate, to: skipped, when: {artifact: decision.json, path: "$.eligible", equals: false}}
+""",
+        encoding="utf-8",
+    )
+
+
+def test_evaluate_branches_defers_when_condition_producer_in_flight(tmp_path):
+    """生产者在途（重跑中、条件文件被暂存删除）时，分支裁决推迟——good/
+    skipped 都不标 not_applicable；生产者完成后按新字节恢复裁决。"""
+    path = tmp_path / "wf.yaml"
+    _write_condition_producer_definition(path)
+    definition = load_workflow_definition(path)
+    statuses = {key: "pending" for key in definition.nodes}
+    statuses.update({"root": "completed", "gate": "completed"})  # scorer 在途
+
+    result = evaluate_branches(definition, statuses, tmp_path)
+    assert result.not_applicable == set()  # 推迟：不标任何 not_applicable
+
+    (tmp_path / "decision.json").write_text(json.dumps({"eligible": False}), encoding="utf-8")
+    statuses["scorer"] = "completed"
+    result = evaluate_branches(definition, statuses, tmp_path)
+    assert "good" in result.not_applicable  # 裁决恢复：新字节选定 skipped 支
+    assert "skipped" not in result.not_applicable
+
+
+def test_evaluate_branches_does_not_defer_for_terminal_producer(tmp_path):
+    """not_applicable 生产者不设障：其产物本轮不刷新，读既有文件与文件存
+    在语义一致（与调度侧隐式生产者屏障同纪律）。"""
+    path = tmp_path / "wf.yaml"
+    _write_condition_producer_definition(path)
+    definition = load_workflow_definition(path)
+    (tmp_path / "decision.json").write_text(json.dumps({"eligible": False}), encoding="utf-8")
+    statuses = {key: "pending" for key in definition.nodes}
+    statuses.update({"root": "completed", "gate": "completed", "scorer": "not_applicable"})
+
+    result = evaluate_branches(definition, statuses, tmp_path)
+
+    assert "good" in result.not_applicable  # 裁决照常进行
+    assert "skipped" not in result.not_applicable
+
+
+def test_find_ready_nodes_defers_when_condition_producer_in_flight(tmp_path):
+    """RMW/保留旧字节面：条件文件在场（选中 good）但生产者在途——good 不
+    就绪（等生产者重跑后按新字节重评）；生产者完成后就绪。"""
+    path = tmp_path / "wf.yaml"
+    _write_condition_producer_definition(path)
+    definition = load_workflow_definition(path)
+    (tmp_path / "decision.json").write_text(json.dumps({"eligible": True}), encoding="utf-8")
+    statuses = {key: "pending" for key in definition.nodes}
+    statuses.update({"root": "completed", "gate": "completed", "scorer": "pending"})
+
+    ready = {node.key for node in find_ready_nodes(definition, statuses, tmp_path)}
+    assert "good" not in ready
+
+    statuses["scorer"] = "completed"
+    ready = {node.key for node in find_ready_nodes(definition, statuses, tmp_path)}
+    assert "good" in ready

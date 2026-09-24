@@ -11,6 +11,7 @@ miss 路径挂 hydration（``workflow_worker/input_hydration.py``），本文件
 from __future__ import annotations
 
 import hashlib
+import time
 from contextlib import closing
 from pathlib import Path
 
@@ -141,6 +142,8 @@ def test_evicted_upstream_input_restored_after_downstream_rerun(tmp_path: Path) 
 def test_branch_condition_artifact_hydrated_before_branch_evaluation(tmp_path: Path) -> None:
     """分支条件引用的产物同样回填：hydration 先于 evaluate_branches 跑。
 
+    b 的唯一依赖渠道是边条件（无 inputs 声明——#775 对抗复审 P2：带
+    inputs 时本用例在 condition 渠道完全失效的突变下也绿，是假绿）。
     不回填时 condition_matches 读不到本地文件 → 条件为假 → b 被错误标记
     not_applicable（永远不会 ready）。
     """
@@ -156,7 +159,6 @@ def test_branch_condition_artifact_hydrated_before_branch_evaluation(tmp_path: P
                 key="b",
                 label="B",
                 capability="cap_b",
-                inputs=["a_out.json"],
                 outputs=["b_out.json"],
             ),
         },
@@ -592,4 +594,118 @@ def test_successful_manifest_read_without_rows_caches_evaluation(tmp_path: Path)
     assert manifest_reads == 1
     assert queries.get_job_node(job["id"], "b")["status"] == "pending"
 
+    worker.stop()
+
+
+def test_rerun_condition_producer_defers_branch_until_producer_completes(
+    tmp_path: Path,
+) -> None:
+    """#759 ③ 对抗复审 P1 端到端：重跑条件产物生产者（与分支源不相邻）时，
+    gated 分支的裁决推迟到生产者完成——缺失的条件文件不被当成 false（不
+    标 not_applicable 终态），生产者完成后按新字节正常选中、claim。
+
+    修复前：rerun 的暂存删掉 verdict.json 后，下一轮评估条件为假 → gated
+    被永久标 not_applicable（job 以「分支被跳过」静默完成）。"""
+    from server.app.workflows.workflow_consumption import dependency_downstream
+
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    definition = WorkflowDefinition(
+        key="test",
+        label="Test",
+        intake=WorkflowIntake(),
+        nodes={
+            "entry": WorkflowNode(key="entry", label="E", capability="cap_e"),
+            "scorer": WorkflowNode(
+                key="scorer",
+                label="S",
+                capability="cap_s",
+                after=["entry"],
+                outputs=["verdict.json"],
+            ),
+            "gated": WorkflowNode(
+                key="gated",
+                label="G",
+                capability="cap_g",
+                after=["entry"],
+                outputs=["g.json"],
+            ),
+        },
+        edges=[
+            WorkflowEdge(source="entry", target="scorer"),
+            WorkflowEdge(
+                source="entry",
+                target="gated",
+                condition=WorkflowCondition(artifact="verdict.json", path="$.done", equals=True),
+            ),
+        ],
+    )
+    job = queries.create_job(
+        workflow_key="test",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["entry", "scorer", "gated"],
+        workspace_id=workspace["id"],
+    )
+    for key in ("entry", "scorer", "gated"):
+        queries.update_job_node(job["id"], key, status="completed")
+    queries.update_job_status(job["id"], "completed")
+    job_dir = resolve_job_dir(job, queries.jobs_dir)
+    verdict = b'{"done": true}'
+    (job_dir / "verdict.json").write_bytes(verdict)
+    (job_dir / "g.json").write_bytes(verdict)
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'scorer', 'verdict.json', %s, %s, %s)
+            """,
+            (
+                job["id"],
+                f"jobs/test/{job['id']}/verdict.json",
+                len(verdict),
+                hashlib.sha256(verdict).hexdigest(),
+            ),
+        )
+
+    # rerun scorer（真实闭包 + 原子突变）：gated 经条件消费边进 stale，
+    # verdict.json 暂存删除（本地文件随暂存消失、清单行删除）。
+    downstream = dependency_downstream(definition, "scorer")
+    assert "gated" in downstream  # 条件消费边进闭包（③ 层的前提）
+    (job_dir / "verdict.json").unlink()  # 暂存的本地面效果
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        mark_nodes_for_rerun(
+            conn,
+            job["id"],
+            ["scorer"],
+            {"scorer": downstream},
+            staged_artifact_names=frozenset({"verdict.json"}),
+        )
+
+    for key in ("scorer", "gated"):
+        _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "test", key)
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path, TEST_DATABASE_URL, executor, [definition], artifact_object_store=None
+    )
+
+    worker._poll()
+
+    # 屏障生效：gated 不被标 not_applicable（stale 等待生产者）；scorer 已
+    # 被 claim（重跑在途）。
+    assert queries.get_job_node(job["id"], "gated")["status"] == "stale"
+    assert queries.get_job_node(job["id"], "scorer")["status"] == "running"
+
+    executor.block_event.set()  # scorer 重跑完成：写回 verdict.json
+    # 完成回收发生在下一轮 poll 开头（reap_futures）——xdist 负载下执行器线
+    # 程可能赶不上紧随的一轮，轮询到有界上限（等不到即红）。
+    deadline = time.monotonic() + 15
+    while queries.get_job_node(job["id"], "gated")["status"] != "running":
+        assert time.monotonic() < deadline, "gated was never claimed after the producer re-ran"
+        worker._poll()
+
+    # 生产者完成后按新字节裁决：gated 被选中并 claim（永不曾 not_applicable）。
+    assert queries.get_job_node(job["id"], "scorer")["status"] == "completed"
     worker.stop()

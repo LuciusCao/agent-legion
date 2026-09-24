@@ -128,3 +128,33 @@ def test_skip_names_still_filters_consumption_edges() -> None:
     )
     assert consumer_edges(definition, skip_names=["x"])["p"] == []
     assert consumer_edges(definition)["p"] == ["q"]
+
+
+def test_dropped_artifact_names_keep_condition_consumed_seeds() -> None:
+    """#775 对抗复审 P1：clean upgrade 的死名判定走统一索引——旧产出仅被
+    新定义的分支条件消费（不再产出、不在任何节点 inputs）时是种子不是垃
+    圾：删掉它会让在途 job 的分支评估永远读不到条件文件。对照组：彻底
+    无人消费的名字仍判死。"""
+    from server.app.workflows.revision_diff import dropped_artifact_names
+
+    old = _definition(
+        {
+            "entry": _node("entry"),
+            "scorer": _node("scorer", outputs=["verdict.json"]),
+            "extra": _node("extra", outputs=["stale.json"]),
+        },
+        [WorkflowEdge(source="entry", target="scorer")],
+    )
+    new = _definition(
+        {"entry": _node("entry"), "gated": _node("gated")},
+        [
+            WorkflowEdge(source="entry", target="gated"),
+            WorkflowEdge(
+                source="entry",
+                target="gated",
+                condition=WorkflowCondition(artifact="verdict.json", path="$.ok", equals=True),
+            ),
+        ],
+    )
+
+    assert dropped_artifact_names(new, old) == {"stale.json"}  # verdict.json 保留
