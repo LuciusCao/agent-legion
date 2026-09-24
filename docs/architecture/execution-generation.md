@@ -237,6 +237,13 @@ lease_id）；expected 输出、events.jsonl 与 node.log 的提升经
 `ExecutionResult.staged_file_moves` 挤进 `finish_lease` 的代次 CAS——代次不匹配
 时文件永不落盘，旧代次归档覆盖不了新现场的本地输入。
 
+**同一 lease 的结果提交按 lease 串行**（`agent_control/_lease_completion_locks.py`，
+codex #774 P1）：镜像登记走 finish 之前的 lease 写闸、文件落盘走 finish 之内
+的代次闸——两道闸的胜者可以不同（A 镜像、B 镜像、A finish 获胜 → 本地面=A、
+权威面=B 永久分叉）。`completion.finish` 在 `finish_staged` 临界区（remote
+promote + 镜像 + finish 闸）上按 lease 加互斥：串行后到者的镜像写闸看到已释放
+的 lease 直接拒写，所有平面只剩获胜者。锁表按 waiters 计数自清。
+
 **落点形态的三层纪律**（#759 对抗复审 P2 族，codex #774 P2）：归档与 remote
 ref 两个通道各自宣称的路径形状若单文件系统不可能同时成立（`reports` 是文件、
 `reports/out.json` 也是文件），任何中途发现都会在其他面已提交之后炸穿结果提交。

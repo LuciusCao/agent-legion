@@ -952,6 +952,7 @@
     "server/app/agent_catalog/builtin.py": 36,
     "server/app/agent_catalog/definition.py": 52,
     "server/app/agent_control/__init__.py": 25,
+    "server/app/agent_control/_lease_completion_locks.py": 39,
     "server/app/agent_control/completion.py": 143,
     "server/app/agent_control/completion_moves.py": 39,
     "server/app/agent_control/completion_preflight.py": 70,

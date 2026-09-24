@@ -737,6 +737,83 @@ def test_concurrent_duplicate_result_finishes_never_flip_node_to_failed(
     assert row["size_bytes"] == 9
 
 
+class _BarrierTimer:
+    """ResultStageTimer 的最小替身：在指定 stage 名处停下等主线程放行。"""
+
+    def __init__(self, gate_stage: str) -> None:
+        self._gate_stage = gate_stage
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def stage(self, name: str) -> None:
+        if name == self._gate_stage:
+            self.entered.set()
+            # 等不到放行即红（不静默退化为无序交错）。
+            assert self.release.wait(timeout=10), "main thread never released the stage gate"
+
+
+def test_concurrent_same_lease_results_commit_only_the_finish_winner(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """codex #774 P1：同 lease 两个并发 /result（同名不同字节归档）。镜像登
+    记走 finish 前的 lease 写闸、文件落盘走 finish 内的代次闸——两道闸的
+    胜者可以不同：A 镜像、B 镜像、A finish 获胜时本地面=A、权威面/清单
+    面=B 永久分叉（local-first 读 A，淘汰后 S3 读 B）。按 lease 串行后到
+    者的镜像写闸看到已释放的 lease 直接拒写，所有面只剩获胜者。
+
+    交错构造：A、B 都在镜像之后（``artifacts_upload`` stage）停下等放行；
+    串行锁下 B 到不了该 stage（卡在锁上），主线程先放 A 完成 finish（获
+    胜）、再放 B。突变自检（去掉 completion_locks.acquire）：B 的镜像在
+    A finish 前完成，authority/清单=B 而 job_dir=A——三条同源断言全红。"""
+    import hashlib
+
+    _seed_completion_job(job_db, workspace_id="dup-ws", job_id="dup-job")
+    storage = FakeObjectStorage()
+    handler, store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "dup-ws" / "dup-job"
+    job_dir.mkdir(parents=True)
+    bundles = tmp_path / "bundles"
+    _result_archive(bundles / "result-a.tar.gz", {"out.json": b"bytes-a"})
+    _result_archive(bundles / "result-b.tar.gz", {"out.json": b"bytes-b"})
+    timer_a = _BarrierTimer("artifacts_upload")
+    timer_b = _BarrierTimer("artifacts_upload")
+
+    def _finish(archive_name: str, timer: _BarrierTimer) -> Any:
+        return handler.finish(
+            lease_id="lease-1",
+            worker_id="worker-1",
+            job_id="dup-job",
+            node_key="node_a",
+            manifest={"expected_outputs": ["out.json"], "execution_id": "exec-1"},
+            outcome=AgentOutcome(
+                status="completed",
+                exit_code=0,
+                output_artifacts={"out.json": "sha256:deadbeef"},
+            ),
+            archive_name=archive_name,
+            stage_timer=timer,  # type: ignore[arg-type]
+        )
+
+    thread_a, outcome_a = _start(lambda: _finish("result-a.tar.gz", timer_a))
+    assert timer_a.entered.wait(timeout=10)  # A 镜像完成、finish 前停下
+    thread_b, outcome_b = _start(lambda: _finish("result-b.tar.gz", timer_b))
+    assert not timer_b.entered.wait(timeout=1.0)  # B 卡在临界区外（未进镜像后段）
+    timer_a.release.set()  # A finish 获胜
+    _join(thread_a)
+    assert outcome_a.get("error") is None
+    assert outcome_a["result"] is True
+    timer_b.release.set()  # B 进临界区：镜像写闸已随 lease 释放关闭
+    _join(thread_b)
+    assert outcome_b.get("error") is None
+    assert outcome_b["result"] is False  # 迟到 finish = 409 语义
+
+    assert storage.objects["jobs/dup-ws/dup-job/out.json"] == b"bytes-a"  # 权威面=获胜者
+    assert (job_dir / "out.json").read_bytes() == b"bytes-a"  # 本地面=获胜者
+    row = store.row_for_node("dup-job", "node_a", "out.json")
+    assert row is not None
+    assert row["content_hash"] == hashlib.sha256(b"bytes-a").hexdigest()  # 清单面=获胜者
+
+
 # ---------------------------------------------------------------------------
 # codex #774 对抗复审 P2：多重/兄弟冲突的全量摘除
 # ---------------------------------------------------------------------------

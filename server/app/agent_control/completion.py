@@ -11,6 +11,7 @@ from server.app.agent_broker.result_timing import mark as mark_result_stage
 from server.app.agent_broker.result_unpack import code_result_log_target, plan_agent_result_moves
 from server.app.agent_broker.result_unpack_pool import unpack_in_pool
 from server.app.agent_control import completion_staged
+from server.app.agent_control._lease_completion_locks import LeaseCompletionLocks
 from server.app.db.dialect import ConnectSource
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, ExecutionStatus
@@ -90,6 +91,13 @@ class AgentCompletionHandler:
         # #356 plan B: the trust-reported artifacts' spot-check percent
         # (agent_workers.artifact_spot_check_percent); None = module default.
         self.spot_check_percent = spot_check_percent
+        # codex #774 P1：同一 lease 的并发 /result（网络重投/超时双发）在
+        # finish_staged 临界区（remote promote + 镜像 + finish 代次闸）上
+        # 按 lease 串行——镜像登记走 finish 前的 lease 写闸、文件落盘走
+        # finish 内的代次闸，不串行时两道闸的胜者可以不同（A 镜像、B 镜像、
+        # A finish 获胜 → 本地面=A、权威面=B 永久分叉）。串行后到者的镜像
+        # 写闸看到已释放的 lease 直接拒写，所有面只剩获胜者。
+        self.completion_locks = LeaseCompletionLocks()
 
     def finish(
         self,
@@ -177,22 +185,25 @@ class AgentCompletionHandler:
             view_dir = Path(staging_cm.name)
         mark_result_stage(stage_timer, "unpack")
         try:
-            return completion_staged.finish_staged(
-                self,
-                lease_id=lease_id,
-                worker_id=worker_id,
-                job_id=job_id,
-                node_key=node_key,
-                job=job,
-                manifest=manifest,
-                outcome=outcome,
-                job_dir=job_dir,
-                view_dir=view_dir,
-                expected=expected,
-                staged_moves=staged_moves,
-                cancelled=cancelled,
-                stage_timer=stage_timer,
-            )
+            # codex #774 P1：临界区（remote promote + 镜像 + finish 代次闸）
+            # 按 lease 串行——同 lease 并发 /result 的两道闸胜者必须同源。
+            with self.completion_locks.acquire(lease_id):
+                return completion_staged.finish_staged(
+                    self,
+                    lease_id=lease_id,
+                    worker_id=worker_id,
+                    job_id=job_id,
+                    node_key=node_key,
+                    job=job,
+                    manifest=manifest,
+                    outcome=outcome,
+                    job_dir=job_dir,
+                    view_dir=view_dir,
+                    expected=expected,
+                    staged_moves=staged_moves,
+                    cancelled=cancelled,
+                    stage_timer=stage_timer,
+                )
         finally:
             if staging_cm is not None:
                 staging_cm.cleanup()
