@@ -184,6 +184,54 @@ def test_completion_stale_finish_never_lands_bytes_or_rows(
     assert not list(job_dir.glob(".result-staging-*"))
 
 
+def test_completion_stale_finish_never_persists_view_probed_run_dir(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """codex #774 P2：reset 落在暂存与 finish 取锁之间时 staged moves 全部
+    跳过，但 run_dir 是视图探出的 job_dir 路径——事件文件从未落盘、临时
+    视图随后被清理，持久化它会留下一个 404（甚至被复用后指向别次执行日
+    志）的路径。闸内把它置空回退文件系统派生：只记录真实存在的路径。"""
+    _seed_completion_job(job_db, workspace_id="gate27-ws", job_id="gate27-job")
+    storage = FakeObjectStorage()
+    handler, store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "gate27-ws" / "gate27-job"
+    job_dir.mkdir(parents=True)
+    _result_archive(
+        tmp_path / "bundles" / "result.tar.gz",
+        {"out.json": b"stale-epoch-bytes", "runs/node_a/worker/events.jsonl": b"{}\n"},
+    )
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update jobs set execution_generation=execution_generation+1 where id=%s",
+            ("gate27-job",),
+        )
+
+    finished = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="gate27-job",
+        node_key="node_a",
+        manifest={"expected_outputs": ["out.json"], "execution_id": "exec-1"},
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            output_artifacts={"out.json": "sha256:deadbeef"},
+            run_dir="runs/node_a/worker",
+        ),
+        archive_name="result.tar.gz",
+    )
+
+    assert finished is True
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select run_dir from node_runs where job_id=%s and node_key='node_a'",
+            ("gate27-job",),
+        ).fetchone()
+    assert row is not None
+    assert row["run_dir"] == ""  # 未落盘的路径不持久化（文件系统派生也找不到）
+    assert not (job_dir / "out.json").exists()  # 与 gate11 同语义：旧代次零落盘
+
+
 def test_completion_failed_refs_still_lands_node_log(job_db: JobQueries, tmp_path: Path) -> None:
     """#759 对抗复审 P3-2：dict-ref 校验失败（staging 对象缺失）→ 结果翻
     failed，但归档里的 node.log 仍随失败 finish 的 staged_file_moves 落盘

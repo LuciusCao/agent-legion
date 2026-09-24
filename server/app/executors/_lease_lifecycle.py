@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -78,6 +79,12 @@ def finish_lease(
             lease["node_key"],
             lease["execution_generation"],
         )
+        if result.staged_file_moves:
+            # codex #774 P2：staged moves 随闸全部跳过意味着 view 探出的
+            # run_dir（归档成员的落点）从未落盘、临时视图随后被清理——置
+            # 空让 canonicalize 回退到文件系统派生（只记录真实存在的路
+            # 径），旧 node_run 不再持久化一个从未落盘且可能被复用的位置。
+            result = replace(result, run_dir="")
     elif result.staged_file_moves:
         # #759 review P1-1：Worker 结果归档的文件提升只在本代次闸内发生——
         # 解包先于闸落到 staging 目录，迟到（reset 后）的 finish 在此跳过，

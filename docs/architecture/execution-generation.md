@@ -412,6 +412,13 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
     上传持久失败 + reconciler 已成功」的组合。后续方向：reconciler 加
     active-lease 复查（`_job_still_evictable` 同款）或 legacy 臂进同一
     按 key 锁域（锁-only，不过闸）。
+18. **镜像上传先于 finish 与闸内失败转换的张力**（codex #774 P2）：D12
+    镜像必须在 finish 之前上传（写闸要求 lease 仍 active，finish 提交
+    后闸即关闭），而 staged_file_moves 提升失败→completed 转 failed 的
+    转换发生在 finish 闸内——转换后失败的节点已留下镜像清单行与对象，
+    无补偿删除。窗口窄（需镜像全成功 + 落盘失败），后果惰性：失败节点
+    的产物行不被下游消费（producer 失败即阻断下游 ready），rerun/reset
+    按暂存名删除清单行自愈；补偿删除会让 finish 闸耦合镜像层，不修。
 
 后续方向：评估 immutable/versioned authority key + manifest 原子切换（#759
 复审增补的长期项）；`.result-staging-*` / `.promote-rollback-*` 的进程崩溃残留
