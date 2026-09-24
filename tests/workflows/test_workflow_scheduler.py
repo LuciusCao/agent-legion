@@ -503,3 +503,208 @@ def test_find_ready_nodes_defers_when_condition_producer_in_flight(tmp_path):
     statuses["scorer"] = "completed"
     ready = {node.key for node in find_ready_nodes(definition, statuses, tmp_path)}
     assert "good" in ready
+
+
+# ---------------------------------------------------------------------------
+# ③ 759 二轮对抗复审：自门控排除集 + 多源汇合的推迟减法
+# ---------------------------------------------------------------------------
+
+
+def test_self_produced_condition_does_not_deadlock(tmp_path):
+    """条件产物由被门控 target 自己生产（loader 允许的合法定义）：自门控
+    生产者本来就跑不到（等分支被选中），对它设障是循环等待——排除集让
+    这类定义按文件语义评估（缺失即 false），与屏障引入前一致。"""
+    path = tmp_path / "self_gated.yaml"
+    path.write_text(
+        """
+key: self_gated
+label: t
+schema_version: 2
+nodes:
+  gate:
+    label: Gate
+    capability: gate
+  worker:
+    label: Worker
+    capability: worker
+    after: [gate]
+    outputs: [progress.json]
+edges:
+  - {from: gate, to: worker, when: {artifact: progress.json, path: "$.ok", equals: true}}
+""",
+        encoding="utf-8",
+    )
+    definition = load_workflow_definition(path)
+    statuses = {"gate": "completed", "worker": "pending"}
+
+    result = evaluate_branches(definition, statuses, tmp_path)
+
+    assert "worker" in result.not_applicable  # 文件缺失即 false：可终止（不死锁）
+
+
+def test_producer_inside_gated_branch_does_not_deadlock(tmp_path):
+    """条件产物由被门控分支内部节点生产（gate→good 条件、good→reporter、
+    reporter 产 decision.json）：同样按文件语义评估，不永久推迟。"""
+    path = tmp_path / "inner.yaml"
+    path.write_text(
+        """
+key: inner
+label: t
+schema_version: 2
+nodes:
+  gate:
+    label: Gate
+    capability: gate
+  good:
+    label: Good
+    capability: good
+    after: [gate]
+  reporter:
+    label: Reporter
+    capability: reporter
+    after: [good]
+    outputs: [decision.json]
+edges:
+  - {from: gate, to: good, when: {artifact: decision.json, path: "$.eligible", equals: true}}
+  - {from: good, to: reporter}
+""",
+        encoding="utf-8",
+    )
+    definition = load_workflow_definition(path)
+    statuses = {"gate": "completed", "good": "pending", "reporter": "pending"}
+
+    result = evaluate_branches(definition, statuses, tmp_path)
+
+    assert "good" in result.not_applicable
+    assert "reporter" in result.not_applicable
+
+
+def test_mixed_producers_only_external_ones_gate(tmp_path):
+    """混合生产者：外部生产者已终态 + 分支内生产者在途——外部不挡、内部
+    被排除，裁决照常（按在场文件）。"""
+    path = tmp_path / "mixed.yaml"
+    path.write_text(
+        """
+key: mixed
+label: t
+schema_version: 2
+nodes:
+  root:
+    label: Root
+    capability: root
+  scorer:
+    label: Scorer
+    capability: score
+    after: [root]
+    outputs: [decision.json]
+  gate:
+    label: Gate
+    capability: gate
+    after: [root]
+  good:
+    label: Good
+    capability: good
+    after: [gate]
+  reporter:
+    label: Reporter
+    capability: reporter
+    after: [good]
+    outputs: [decision.json]
+edges:
+  - {from: gate, to: good, when: {artifact: decision.json, path: "$.eligible", equals: true}}
+  - {from: good, to: reporter}
+""",
+        encoding="utf-8",
+    )
+    definition = load_workflow_definition(path)
+    (tmp_path / "decision.json").write_text(json.dumps({"eligible": False}), encoding="utf-8")
+    statuses = {key: "pending" for key in definition.nodes}
+    statuses.update(
+        {"root": "completed", "gate": "completed", "scorer": "completed"}  # reporter 在途
+    )
+
+    result = evaluate_branches(definition, statuses, tmp_path)
+
+    assert "good" in result.not_applicable  # 外部已终态 + 内部被排除：按文件裁决
+    assert "reporter" in result.not_applicable
+
+
+def test_deferred_source_target_survives_other_sources_verdict(tmp_path):
+    """多源汇合：x 有两条条件入边——a→x（生产者 p1 在途，a 推迟）与 b→x
+    （p2 已终态、条件为假，b 正常评估）。推迟 source 的 target 不得被其他
+    source 的评估钉成 not_applicable（a 之后仍可能选中它）。"""
+    path = tmp_path / "confluence.yaml"
+    path.write_text(
+        """
+key: confluence
+label: t
+schema_version: 2
+nodes:
+  p1:
+    label: P1
+    capability: p1
+    outputs: [c1.json]
+  p2:
+    label: P2
+    capability: p2
+    outputs: [c2.json]
+  a:
+    label: A
+    capability: a
+  b:
+    label: B
+    capability: b
+  x:
+    label: X
+    capability: x
+edges:
+  - {from: a, to: x, when: {artifact: c1.json, path: "$.ok", equals: true}}
+  - {from: b, to: x, when: {artifact: c2.json, path: "$.ok", equals: true}}
+""",
+        encoding="utf-8",
+    )
+    definition = load_workflow_definition(path)
+    (tmp_path / "c2.json").write_text(json.dumps({"ok": False}), encoding="utf-8")
+    statuses = {
+        "p1": "pending",  # a 的条件生产者在途 → a 推迟
+        "p2": "completed",
+        "a": "completed",
+        "b": "completed",
+        "x": "pending",
+    }
+
+    result = evaluate_branches(definition, statuses, tmp_path)
+
+    assert result.not_applicable == set()  # x 既未被 a 选中评估、也不被 b 钉死
+
+
+def test_find_ready_nodes_self_gated_producer_does_not_block(tmp_path):
+    """就绪侧同纪律：target 自产条件产物且文件在场时，自门控生产者在途
+    不设障——worker 按文件语义就绪（不永久卡住）。"""
+    path = tmp_path / "self_gated.yaml"
+    path.write_text(
+        """
+key: self_gated
+label: t
+schema_version: 2
+nodes:
+  gate:
+    label: Gate
+    capability: gate
+  worker:
+    label: Worker
+    capability: worker
+    after: [gate]
+    outputs: [progress.json]
+edges:
+  - {from: gate, to: worker, when: {artifact: progress.json, path: "$.ok", equals: true}}
+""",
+        encoding="utf-8",
+    )
+    definition = load_workflow_definition(path)
+    (tmp_path / "progress.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+    statuses = {"gate": "completed", "worker": "pending"}
+
+    ready = {node.key for node in find_ready_nodes(definition, statuses, tmp_path)}
+
+    assert "worker" in ready

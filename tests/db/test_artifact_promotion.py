@@ -705,3 +705,33 @@ def test_concurrent_retry_rollback_backup_survives_first_committer_cleanup(
     assert row is not None
     assert row["content_hash"] == hashlib.sha256(b"one").hexdigest()
     assert not [key for key in storage.objects if key.startswith("jobs-staging/")]
+
+
+def test_lookup_and_rows_for_job_agree_on_tied_uploaded_at(job_db: JobQueries) -> None:
+    """#775 对抗复审 P2：同名跨节点多行 + 同事务登记（uploaded_at 并列）时，
+    ``lookup()`` 与 ``rows_for_job``（hydration 留尾取「最新」行）必须选中
+    同一行——决胜列 (uploaded_at, node_key)。修复前两处排序在并列时都未
+    定义，可能选中不同行（hash 过期的行让 hydration 永久 defer）。"""
+    _seed_job(job_db, workspace_id="tie-ws", job_id="tie-job")
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        for node_key, payload in (("node_a", b"aaa"), ("node_b", b"bbb")):
+            conn.execute(
+                "insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes,"
+                " content_hash, uploaded_at) values (%s, %s, 'out.json', %s, %s, %s,"
+                " timestamp '2026-01-01 00:00:00+00')",
+                (
+                    "tie-job",
+                    node_key,
+                    f"k-{node_key}",
+                    len(payload),
+                    hashlib.sha256(payload).hexdigest(),
+                ),
+            )
+
+    latest = store.lookup("tie-job", "out.json")
+    rows = store.rows_for_job("tie-job")
+    assert latest is not None
+    assert len(rows) == 2
+    assert latest["storage_key"] == rows[-1]["storage_key"]  # 两条读路径选中同一行
+    assert latest["node_key"] == "node_b"  # 决胜序的最大行
