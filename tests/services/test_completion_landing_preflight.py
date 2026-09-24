@@ -132,6 +132,25 @@ def test_existing_file_ancestor_blocks(tmp_path: Path) -> None:
     assert conflict.names == {PurePosixPath("reports/out.json")}
 
 
+def test_landing_spot_that_is_existing_directory_conflicts(tmp_path: Path) -> None:
+    """#774 对抗复审 P3：落点自身当前是真实目录（前代次产出
+    ``reports/out.json``、本节点声明文件 ``reports``）在预检即判死——
+    确定性形状冲突不应走到 S3 备份/copy/恢复补偿之后才失败；闸内文件守
+    卫的目录拒绝只是无锁预检盖不住竞态时的兜底。symlink 形态例外：替换
+    symlink 本体对文件守卫可逆，不判死。"""
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "out.json").write_bytes(b"prior")
+    (tmp_path / "linked").symlink_to(tmp_path / "reports")
+
+    conflict = _conflict(tmp_path, [_move(tmp_path, "reports")], (), job_dir=tmp_path)
+
+    assert conflict is not None
+    assert "existing directory" in conflict.message
+    assert conflict.names == {PurePosixPath("reports")}
+    # 指向目录的 symlink 不是真实目录：文件守卫按 symlink 本体可逆处理。
+    assert _conflict(tmp_path, [_move(tmp_path, "linked")], (), job_dir=tmp_path) is None
+
+
 def test_existing_dir_ancestor_and_missing_ancestors_pass(tmp_path: Path) -> None:
     (tmp_path / "reports").mkdir()
     assert (

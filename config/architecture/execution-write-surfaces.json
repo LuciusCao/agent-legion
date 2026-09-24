@@ -236,6 +236,12 @@
         "put_stream_with_retries"
       ],
       "note": "唯一合法的 artifact key 字节写 primitive：staging 先行 + 回滚备份 + 按 key advisory 锁串行 + 锁内闸复查"
+    },
+    "server/app/executors/_artifact_restore.py": {
+      "via": [
+        "restore_authority_backups"
+      ],
+      "note": "_artifact_promotion 的补偿原语叶子模块（体积预算拆分）：恢复 copy（rollback→authority）只经 promote 的失败臂调用，沿用同一套删除前提纪律"
     }
   },
   "manifest_row_write_sites": {

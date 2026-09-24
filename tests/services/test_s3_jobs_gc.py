@@ -67,6 +67,28 @@ def test_staging_orphans_only_past_grace() -> None:
     assert report.authority_orphans == []
 
 
+def test_staging_orphans_exempt_rollback_backups() -> None:
+    """codex #774 P1 族：``/.rollback/`` 段的 promote 回滚备份一律豁免回收
+    ——恢复最终失败时被保留的备份是幸存清单行所指向旧字节的最后恢复源，
+    其生命周期归运维处置；超窗、DB 无行都不构成删除理由。"""
+    report = scan_orphans(
+        _lister(
+            {
+                "jobs-staging/": [
+                    _entry("jobs-staging/ws-1/job-1/exec-1/.rollback/att-1/out.json"),
+                    _entry("jobs-staging/ws-1/job-1/exec-1/.rollback/att-1/out.json.gz"),
+                    _entry("jobs-staging/ws-1/job-1/exec-1/plain-staging.json"),
+                ]
+            }
+        ),
+        lambda keys: set(),
+        now=NOW,
+    )
+    assert [o.key for o in report.staging_orphans] == [
+        "jobs-staging/ws-1/job-1/exec-1/plain-staging.json"
+    ]
+
+
 def test_authority_grace_window_keeps_recent_unknown_keys() -> None:
     """宽限窗内的未知 authority key 不是孤儿（上传在途/行未写场景）。"""
     report = scan_orphans(
@@ -150,6 +172,29 @@ def _report_with(authority: list[str], staging: list[str] = ()) -> s3_jobs_gc.Or
         authority_orphans=[_entry(k) for k in authority],
         staging_orphans=[_entry(k) for k in staging],
     )
+
+
+def test_apply_gc_never_deletes_rollback_backup_keys() -> None:
+    """#774 对抗复审（纵深防御）：``/.rollback/`` 备份的豁免钉在删除动作本
+    身——即使 OrphanReport 被手工构造（绕过 scan 层豁免），apply 也不删
+    恢复失败时留存的最后恢复源。revalidate 救不了它们（回滚 key 永无 DB
+    行），所以过滤必须先于反查。"""
+    deleter = _RecordingDeleter()
+    report = _report_with(
+        authority=["jobs/ws-1/job-1/.rollback/x.json", "jobs/ws-1/job-1/gone.json"],
+        staging=[
+            "jobs-staging/ws-1/job-1/e1/.rollback/att-1/out.json",
+            "jobs-staging/ws-1/job-1/e1/plain.json",
+        ],
+    )
+
+    result = s3_jobs_gc.apply_gc(deleter, "bkt", report)  # 无 revalidate 的最坏路径
+
+    assert sorted(deleter.deleted) == [
+        "jobs-staging/ws-1/job-1/e1/plain.json",
+        "jobs/ws-1/job-1/gone.json",
+    ]
+    assert result.deleted == 2
 
 
 def test_apply_revalidate_skips_keys_that_gained_rows() -> None:

@@ -201,8 +201,30 @@ D12 镜像上传）与 finish 内的清单登记共用同一个 primitive
    `job-mutation` xact 锁随事务持到恢复完成——有界阻塞，无环），不落盘、
    不复活清单行；锁内登记抛异常时文件提升经 `FilePromotionGuard` 整体回滚、
    authority 按备份恢复后再原样上抛——旧清单行永不指向 hash/size 不符的
-   字节。commit 时刻失败（连接死亡）是不可约例外：锁随会话释放，恢复降级
+   字节。恢复 copy 自带与上传同策的有界重试（瞬时存储故障在原地收敛）；
+   commit 时刻失败（连接死亡）是不可约例外：锁随会话释放，恢复降级
    为无串行 best-effort（§4）。
+
+**补偿资源的删除前提**（codex #774 P1 族的结构收敛）：协议里每个暂存/备份
+对象都是为防范某个中间态而存在的，**删除它的前提是那个中间态已确认解除**——
+不满足前提的删除就是「清理动作抹掉最后恢复源」这族 P1 的温床。全集：
+
+| 资源 | 防范的中间态 | 删除前提（满足其一） | 实现位置 |
+| --- | --- | --- | --- |
+| 回滚备份对象（`.rollback/*`） | authority 已覆盖但新状态未提交 | 登记提交 ∥ 恢复 copy 成功 ∥ 该 key 的 copy **从未被尝试**（备份冗余——ack 歧义下「尝试过但失败」必须按「可能已覆盖」进恢复集，#774 对抗复审 P1） | `promote_to_authority_guarded` finally 按 `unrecoverable` 集过滤；恢复最终失败的备份保留，ERROR 日志携带 authority/backup key 作恢复指针；`s3_jobs_gc` 对 `/.rollback/` 段豁免回收（bucket lifecycle 的子串不可豁免性见 materials-storage-deployment.md） |
+| 本地臂 staging 对象（per-invocation key） | 字节未 promote | promote 终局已定（提交或闸拒）——调用方私有 key，finally 清理 | `upload_via_staging_guarded` finally |
+| 远端臂 staging 对象（per-execution key，Worker 共享落点） | 字节未 promote 且并发 /result 重试仍要 verify/promote | finish 提交后由完成方删除；其余结局交 bucket lifecycle / `s3_jobs_gc` | `completion_staged.finish_staged` 尾部 |
+| 文件提升备份目录（`.promote-rollback-*`） | 文件已移动但登记未提交 | 登记成功（`discard`）∥ 已**完整**回滚（`rollback` 部分失败时备份目录整体保留 + ERROR 日志带路径，失败项备份是旧目标的最后本地恢复源）；**可逆性前提**：target/source 必须是文件——真实目录在任何移动之前整批拒绝，备份后立即复查收口预检↔移动间的 TOCTOU 换形（codex #774 P2 族） | `_file_promotion.py` 预检 + 备份后复查 + `FilePromotionGuard` |
+
+恢复 copy 的重试分级（#774 对抗复审 P2）：按 key 锁仍持有的臂（闸拒、
+存储/文件/校验面失败）带界重试吸收瞬时存储故障；锁已随会话释放或正在
+解栈的臂（psycopg 族异常、commit 时刻失败、非 Exception 中断）**单发**
+——无串行化时的退避 sleep 只放大迟到恢复踩并发新 promote 的窗口。
+补偿臂捕 BaseException：KeyboardInterrupt/SystemExit 中途也得在锁仍持有
+时恢复，而不是让 finally 在中间态未解除时清掉备份。
+
+审查任何新增清理动作时先问：它删的资源防范什么中间态、该状态此刻是否已
+确认解除、删除失败/删除过早各是什么后果。
 
 两个写口的接入点：Worker 回传 `remote_artifact_promote.promote_all` 在任何字节
 copy 前先做无锁预检再走共享序列；本地上传由 `JobArtifactObjectStore.upload` 的
@@ -307,6 +329,9 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
       确实同域？
 - [ ] 失败补偿是否成对出现且幂等：暂存↔回滚、备份↔恢复、登记↔删除；补偿失败
       是否 per-item 兜住而不中断其余补偿？
+- [ ] 清理动作的删除前提是否成立（§2.8 补偿资源表）：被删资源防范的中间态此刻
+      是否已确认解除？补偿自身失败（恢复 copy 失败、回滚遇目录形态）时，最后
+      恢复源是否被保留且有可追寻的日志指针？
 - [ ] 新下游/上游判据是否进了 `workflow_consumption` 的统一邻接表
       （显式边 ∪ 隐式消费/生产边，`dependency_children` /
       `dependency_parents`），而不是手补列表？下游（重置闭包）与上游
@@ -323,11 +348,13 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    旧字节由「新代次生产者重跑覆盖 + 暂存/清理」兜底。
 2. **promote 的 DB 连接死亡窗口**：备份/copy/权威复查/失败恢复都在按 key
    advisory 锁内（§2.8），但 DB 连接中途死亡（含 commit 时刻）时锁随会话
-   释放，失败恢复降级为无串行的 best-effort（`restore_authority_backups`）。
+   释放，失败恢复降级为无串行的 best-effort（`restore_authority_backups`，
+   **单发**——锁已不在，退避只放大本窗口）。
    commit 歧义的另一半（ack 丢失、服务端实际已提交）下恢复会把旧字节盖回、
    与已提交的新清单行错位——选边偏向远更常见的 rollback half（连接死于
-   commit 到达前、序列化失败、死锁都是回滚），不再收窄；无备份时的孤儿
-   authority 对象由 bucket lifecycle 兜底。
+   commit 到达前、序列化失败、死锁都是回滚），不再收窄；恢复最终失败的
+   备份对象保留（最后恢复源，ERROR 日志带 key；`s3_jobs_gc` 豁免
+   `/.rollback/` 段），无备份时的孤儿 authority 对象由 bucket lifecycle 兜底。
 3. **闸内文件提升的提交前窗口**：`finish_lease` 与 `register_rows_guarded` 的
    staged 文件提升都在代次 CAS 之后、事务提交之前完成（本地 rename，毫秒级）；
    提升成功后同事务后续 SQL 失败的崩溃窗口会留下「当前代次自身产物」的已落盘
@@ -375,6 +402,16 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
 16. **迟到旧代次 Worker 结果的登记先于 finish 代次 CAS**（§4.2 的交互
     放大）：cleanup 的「键复现 = 新 attempt」启发式会把旧代次迟到登记
     误判为新产物放过，陈旧行/对象在新一代重跑完成前可被服务。
+17. **legacy 无锁直写臂与 guarded promote 恢复臂的竞态**：无 lease 的
+    upload（reconciler `reupload_missing`、approval 附件上传）直写
+    authority key、不进 `artifact-authority` 锁域——与 guarded promote
+    的闸拒/失败恢复交错时，恢复可能把旧字节盖回直写臂刚写入的对象，
+    而清单行指向直写字节（hash/size 错位潜伏：读路径 local-first，本地
+    副本与行同 hash；eviction 淘汰本地后 S3 回落才暴露）。收敛论证：
+    当前代次 finish 的合法 promote 会覆盖收敛；残留条件是「当前代次
+    上传持久失败 + reconciler 已成功」的组合。后续方向：reconciler 加
+    active-lease 复查（`_job_still_evictable` 同款）或 legacy 臂进同一
+    按 key 锁域（锁-only，不过闸）。
 
 后续方向：评估 immutable/versioned authority key + manifest 原子切换（#759
 复审增补的长期项）；`.result-staging-*` / `.promote-rollback-*` 的进程崩溃残留

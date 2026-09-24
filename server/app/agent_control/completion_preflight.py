@@ -2,8 +2,8 @@
 
 validate-then-apply 的形状半边：任何字节移动之前（remote promote、读视
 图链接、finish 闸内文件提升），先核算全部计划的 job_dir 落点——归档
-暂存提升、Worker 直传 ref 的下载落盘、events.jsonl——做两条纯路径判
-定（只 stat、不改现场）：
+暂存提升、Worker 直传 ref 的下载落盘、events.jsonl——做三条判定（前
+缀互斥与保留源保护是纯路径数学，祖先畅通/落点形态才 stat；都不改现场）：
 
 1. 跨通道前缀互斥：没有任何落点名是另一落点名的真祖先。「reports 是
    文件、reports/out.json 也是文件」在单文件系统上不可能同时成立——两
@@ -16,7 +16,10 @@ validate-then-apply 的形状半边：任何字节移动之前（remote promote�
    mkdir(parents=True) 撞上会整批回滚再上抛，把 lease 毒化成重试循环；
    预检把它提前成一次干净 failed（闸内仍留兜底转换，见
    executors._lease_lifecycle——预检无锁，盖不住跨节点 finish 之间现
-   场变坏的残余竞态）。
+   场变坏的残余竞态）。落点**自身**当前是真实目录同判死（前代次产出
+   `reports/out.json`、本节点声明文件 `reports`）：闸内文件守卫虽也会
+   拒，但那是 S3 备份/copy/恢复补偿跑完一轮之后的事，确定性形状冲突
+   应在任何字节操作之前失败（#774 对抗复审 P3）。
 3. 保留源保护：logs 树 move（node.log）的 **source** 与 remote 落点共
    用同一个 staging 命名空间，而它的 target 不在 job_dir 内、不进前两条
    的落点集。overwrite 遍的 spot/blocker 清理会删掉与它同位（或位于它
@@ -129,6 +132,14 @@ def find_landing_conflict(
                 first_message = (
                     f"output path {name.as_posix()!r} ({channel}) is blocked by "
                     f"existing non-directory {blocker}"
+                )
+            names.add(name)
+        landing = job_dir / name
+        if landing.is_dir() and not landing.is_symlink():
+            if first_message is None:
+                first_message = (
+                    f"output path {name.as_posix()!r} ({channel}) collides with "
+                    f"an existing directory"
                 )
             names.add(name)
     if first_message is None:

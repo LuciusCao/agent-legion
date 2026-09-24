@@ -238,8 +238,12 @@ EOF
   分开配规则——材料侧按你们对上传内容的数据分级策略设保留期（务必
   显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），`jobs/`
   前缀按产物保留策略另设，`jobs-staging/` 配短保留（如 1 天，孤儿
-  暂存对象只是失败残留）。手工清理可用 console（rustfs `:9001`；seaweedfs
-  为 master UI `:9333`）。
+  暂存对象只是失败残留）。注意 promote 回滚备份（key 含 `/.rollback/`
+  段）也在该前缀下：promote 恢复最终失败时被刻意保留的备份是幸存清单
+  行所指向旧字节的最后恢复源（`s3_jobs_gc` 对它们豁免回收，codex #774
+  P1 族）——bucket lifecycle 规则只能按前缀过滤、无法按子串豁免，配
+  `jobs-staging/` 短保留即接受「恢复处置死线 = 保留天数」。手工清理可用
+  console（rustfs `:9001`；seaweedfs 为 master UI `:9333`）。
   - `jobs/` 与 `jobs-staging/` 的孤儿对象（行已删但删除失败/未执行、
     promote 中途失败的结果报告丢失残留）由
     `scripts/gc-s3-jobs.py` 回收：按前缀列举对照 `job_artifacts`

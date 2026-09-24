@@ -27,9 +27,16 @@
    死亡前、仍在按 key 锁内）；commit 时刻失败（连接死亡）是不可约例外：
    锁随会话释放，恢复降级为无串行 best-effort，选边偏向 commit 歧义中远
    更常见的 rollback half（docs §4）。无备份说明此前无对象，残留是孤儿，
-   由 bucket lifecycle 兜底。回滚 key 由调用方按调用唯一化（attempt 维
-   度，codex #774 P1）——锁外清理只删自己 attempt 的备份，并发重试的
-   备份互不误删；备份在任何结局都清理。
+   由 bucket lifecycle 兜底（ack 歧义下「copy 尝试过但失败」一律按「可能
+   已覆盖」进恢复集，只有从未尝试的 key 才按冗余删备份，#774 对抗复审
+   P1）。回滚 key 由调用方按调用唯一化（attempt 维度，codex #774 P1）
+   ——锁外清理只删自己 attempt 的备份，并发重试的备份互不误删。**备份
+   删除的前提是它所防范的状态已确认解除**（登记提交、恢复成功或该 key
+   的 copy 从未被尝试）：恢复 copy 在锁仍持有的臂带界重试、锁已随会话
+   释放的臂单发（退避只放大无锁踩新代次的窗口，#774 对抗复审）；重试
+   耗尽仍失败的备份是幸存清单行所指向旧字节的最后恢复源，必须保留
+   （codex #774 P1——无条件删除会把清单行与 authority 字节的错位变成
+   永久不可恢复），ERROR 日志携带 authority/backup key 作为恢复指针。
 
 锁序与残余面论证见 docs/architecture/execution-generation.md §2.8/§4。
 """
@@ -43,18 +50,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import psycopg
+
 from server.app.db.connection import DatabaseConnection
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import write_transaction
+from server.app.executors._artifact_restore import (
+    _STORAGE_OP_ATTEMPTS,
+    _STORAGE_OP_BACKOFF_SECONDS,
+    discard_object,
+    restore_authority_backups,
+)
 from server.app.executors._file_promotion import FilePromotionGuard, promote_file_moves_guarded
 from server.app.executors._lease_write_gate import lease_artifact_write_current
 from server.app.services.job_artifact_rows import upsert_artifact_row_tx
 from server.app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
-
-_UPLOAD_ATTEMPTS = 3
-_UPLOAD_BACKOFF_SECONDS = 0.5
 
 # 清单行 upsert 行形的单一事实来源（两端 promote 与 legacy 直写共用；
 # 自 services.job_artifact_objects 迁入本模块，靠近唯一使用它的锁内登记）。
@@ -104,7 +116,7 @@ def put_stream_with_retries(
     """Bounded-retry streaming put; re-raises the last error after the final
     attempt for the caller's best-effort wrapper to contain."""
     last_error: Exception | None = None
-    for attempt in range(_UPLOAD_ATTEMPTS):
+    for attempt in range(_STORAGE_OP_ATTEMPTS):
         try:
             with local_path.open("rb") as stream:
                 storage.put_stream(storage_key, stream, size_bytes)
@@ -122,62 +134,15 @@ def put_stream_with_retries(
             logger.warning(
                 "artifact upload attempt %d/%d failed for job %s %s: %s",
                 attempt + 1,
-                _UPLOAD_ATTEMPTS,
+                _STORAGE_OP_ATTEMPTS,
                 job_id,
                 name,
                 exc,
             )
-            if attempt + 1 < _UPLOAD_ATTEMPTS:
-                time.sleep(_UPLOAD_BACKOFF_SECONDS * (2**attempt))
+            if attempt + 1 < _STORAGE_OP_ATTEMPTS:
+                time.sleep(_STORAGE_OP_BACKOFF_SECONDS * (2**attempt))
     assert last_error is not None
     raise last_error
-
-
-def restore_authority_backups(
-    storage: ObjectStorage,
-    promoted: list[str],
-    backups: dict[str, str],
-    authority_keys: dict[str, str],
-) -> None:
-    """Re-overwrite already-promoted authority keys from their rollback backups.
-
-    Shared by the mid-batch copy failure path and the stale write-gate path.
-    Per-key best-effort: a failed restore logs a warning and the next key is
-    still attempted; keys without a backup had no prior object (the orphan is
-    lifecycle's backstop)."""
-    for name in promoted:
-        rollback_key = backups.get(name)
-        if rollback_key is None:
-            continue
-        try:
-            storage.copy_object(rollback_key, authority_keys[name])
-        except Exception:
-            # #204 broad-except audit: best-effort per-key restore inside the
-            # compensation path — the outcome space is the storage layer
-            # (botocore surface), and per-key containment is the point: the
-            # warning names the key that still holds new bytes while its
-            # manifest row points at old bytes (the mismatch the backup exists
-            # to prevent), the remaining keys are still attempted, and the
-            # traceback rides the warning (exc_info).
-            logger.warning(
-                "failed to roll back artifact object %s", authority_keys[name], exc_info=True
-            )
-
-
-def discard_object(storage: ObjectStorage, storage_key: str) -> None:
-    """Best-effort staging/rollback-object cleanup after promotion."""
-    try:
-        storage.delete_object(storage_key)
-    except Exception:
-        # #204 broad-except audit: deliberate best-effort staging cleanup.
-        # This runs in the promote success path AND in the finally after a
-        # failure — either way the caller's outcome must not change: an
-        # orphaned staging object is explicitly lifecycle's backstop
-        # (documented across this module family), so a storage error during
-        # its deletion is only worth a warning with the traceback. The
-        # storage layer is third-party surface (botocore); no business
-        # exception family could enumerate it.
-        logger.warning("failed to delete staging object %s", storage_key, exc_info=True)
 
 
 def _lock_authority_keys_tx(conn: DatabaseConnection, authority_keys: list[str]) -> None:
@@ -234,15 +199,17 @@ def register_rows_guarded(
             )
             for row in rows
         ]
-    except Exception:
+    except BaseException:
         # #204 broad-except audit: compensate-then-bare-re-raise (#233
-        # pattern). The upsert loop's outcome space is the psycopg/DB
-        # surface (constraint violation, dropped connection) plus
-        # programming errors; the file promotion that already landed
-        # inside this transaction is not transactional, so every flavor
-        # must roll it back via the guard before the exception propagates
-        # (the caller then restores the authority copies). The bare raise
-        # preserves the original type; nothing is converted or masked.
+        # pattern), BaseException so even KeyboardInterrupt/SystemExit mid-
+        # registration roll the landed files back before propagating. The
+        # upsert loop's outcome space is the psycopg/DB surface (constraint
+        # violation, dropped connection) plus programming errors; the file
+        # promotion that already landed inside this transaction is not
+        # transactional, so every flavor must roll it back via the guard
+        # before the exception propagates (the caller then restores the
+        # authority copies). The bare raise preserves the original type;
+        # nothing is converted or masked.
         guard.rollback()
         raise
     guard.discard()
@@ -273,9 +240,12 @@ def promote_to_authority_guarded(
     抛异常（upsert/落盘失败）在事务死亡前于锁内恢复；commit 时刻失败
     （连接死亡）在锁外 best-effort 恢复——事务回滚后幸存的旧清单行永不
     指向 hash/size 不匹配的新字节（#759 复审 P1-2 与对抗复审 P1）。回滚
-    备份在任何结局都清理（提交/回滚后锁外执行）——清理只触本次调用
-    attempt 命名空间内的 key（调用方按调用唯一化 rollback key，codex
-    #774 P1），并发重试的备份互不误删。
+    备份的清理以其防范状态已解除为前提（登记提交、恢复成功或该 key 的
+    copy 从未被尝试——ack 歧义下尝试过即视为可能已覆盖；codex #774 P1
+    族）——锁外执行、只触本次调用 attempt 命名空间内的 key（调用方按调
+    用唯一化 rollback key），并发重试的备份互不误删；恢复最终失败的备
+    份保留（旧字节的最后恢复源，ERROR 日志带 key，GC 对 ``/.rollback/``
+    段豁免——见 s3_jobs_gc）。
 
     残余面：DB 连接中途死亡（含 commit 时刻）时按 key 锁随会话释放，恢
     复降级为无串行的 best-effort；commit 歧义的另一半（ack 丢失、服务端
@@ -284,9 +254,13 @@ def promote_to_authority_guarded(
     再收窄的残余面（docs/architecture/execution-generation.md §4）。
     """
     authority_keys = {spec.name: spec.authority_key for spec in copies}
+    assert len(authority_keys) == len(copies), (
+        f"duplicate artifact names in copies: {[spec.name for spec in copies]}"
+    )
     backups: dict[str, str] = {}  # name -> rollback key of the pre-existing object
     promoted: list[str] = []
     restored = False
+    unrecoverable: set[str] = set()  # 恢复最终失败的 name：其备份是最后恢复源，禁止清理
     try:
         with write_transaction(database_dsn) as conn:
             _lock_authority_keys_tx(conn, sorted(authority_keys.values()))
@@ -296,8 +270,12 @@ def promote_to_authority_guarded(
                         storage.copy_object(spec.authority_key, spec.rollback_key)
                         backups[spec.name] = spec.rollback_key
                 for spec in copies:
-                    storage.copy_object(spec.staging_key, spec.authority_key)
+                    # copy 尝试即入 promoted（ack 歧义：服务端可能已落字节
+                    # 而响应丢失——尝试过就必须按「可能已覆盖」进恢复集，恢
+                    # 复对未落地的 key 幂等无害；漏恢则其备份在 finally 被
+                    # 当冗余删除，错位静默永久化，#774 对抗复审 P1）。
                     promoted.append(spec.name)
+                    storage.copy_object(spec.staging_key, spec.authority_key)
                 registered = register_rows_guarded(
                     conn,
                     rows,
@@ -306,53 +284,85 @@ def promote_to_authority_guarded(
                     staged_files=staged_files,
                     job_dir=job_dir,
                 )
-            except Exception:
+            except BaseException as exc:
                 # #204 broad-except audit: in-transaction compensate-then-
-                # bare-re-raise (#233 pattern). Backup/copy/registration
-                # failures (botocore family, Worker-untrusted ValueErrors,
-                # psycopg/file surface) reach this arm before __exit__:
-                # failures that leave the session alive (storage/validation/
-                # file errors) still hold the per-key advisory locks and the
-                # restore keeps the per-key serialization the protocol
-                # promises, while a mid-transaction connection death already
-                # dropped them and the same restore is then the documented
-                # unlocked best-effort (docs §4) — either way it runs HERE,
-                # never after __exit__ (a restore after tx death was the
-                # #759 对抗复审 P1 race). The bare raise then rolls the
-                # transaction back; the outer arm skips its own restore via
-                # ``restored`` (an unlocked second restore could stomp a
-                # concurrent promote that took the lock between the arms —
-                # suppressing it is correctness, not mere idempotence).
-                # Original type propagates for caller classification;
-                # nothing is converted or masked.
-                restore_authority_backups(storage, promoted, backups, authority_keys)
+                # bare-re-raise (#233 pattern), widened to BaseException so
+                # KeyboardInterrupt/SystemExit mid-promote still run the
+                # compensation before propagating — otherwise the finally
+                # cleanup would delete backups whose guarded state was never
+                # resolved (same family as codex #774 P1). Backup/copy/
+                # registration failures (botocore family, Worker-untrusted
+                # ValueErrors, psycopg/file surface) reach this arm before
+                # __exit__: failures that leave the session alive (storage/
+                # validation/file errors) still hold the per-key advisory
+                # locks and the restore keeps the per-key serialization the
+                # protocol promises (bounded retry absorbs transient flaps),
+                # while a psycopg-surface or non-Exception failure means the
+                # session (and its locks) is gone or unwinding — the same
+                # restore then runs SINGLE-SHOT, because a backoff sleep
+                # without serialization only widens the window where a late
+                # restore stomps a newer committed promote (#774 对抗复审).
+                # Either way it runs HERE, never after __exit__ (a restore
+                # after tx death was the #759 对抗复审 P1 race). The bare
+                # raise then rolls the transaction back; the outer arm skips
+                # its own restore via ``restored`` (an unlocked second
+                # restore could stomp a concurrent promote that took the
+                # lock between the arms — suppressing it is correctness, not
+                # mere idempotence). Original type propagates for caller
+                # classification; nothing is converted or masked.
+                attempts = (
+                    _STORAGE_OP_ATTEMPTS
+                    if isinstance(exc, Exception) and not isinstance(exc, psycopg.Error)
+                    else 1
+                )
+                unrecoverable |= restore_authority_backups(
+                    storage, promoted, backups, authority_keys, max_attempts=attempts
+                )
                 restored = True
                 raise
             if registered is None:
                 # 锁内闸拒：reset 落在入口预检与登记之间。按 key 锁内用备份
                 # 恢复 authority copy——同 key 的新代次 promote 还在等锁，
                 # 恢复绝不踩掉它的字节；幸存（或缺失）的旧清单行仍指向匹配
-                # 的旧字节。
-                restore_authority_backups(storage, promoted, backups, authority_keys)
+                # 的旧字节。会话健康、锁在握，恢复带界重试。
+                unrecoverable |= restore_authority_backups(
+                    storage, promoted, backups, authority_keys, max_attempts=_STORAGE_OP_ATTEMPTS
+                )
                 restored = True
-    except Exception:
-        # #204 broad-except audit: commit-time failure arm ONLY (#759 对抗
-        # 复审 P1). A connection death at ``__exit__`` (server rolls the
-        # transaction back) is the one failure whose restore cannot ride
-        # the per-key locks — the dead session already dropped them — so
-        # this restore is the documented unlocked best-effort (docs §4),
-        # biased to the far-more-common rollback half of the commit
-        # ambiguity. With-body failures restored above while still locked
-        # and set ``restored``; an unlocked second restore here could stomp
-        # a concurrent promote that took the lock between the arms, so it
-        # is skipped rather than merely idempotent. Bare raise preserves
-        # the original type for the caller's classification.
+    except BaseException:
+        # #204 broad-except audit: outer arm, reached ONLY by (a) commit-time
+        # failure — a connection death at ``__exit__`` (server rolls the
+        # transaction back) is the one failure whose restore cannot ride the
+        # per-key locks, the dead session already dropped them — and (b) a
+        # BaseException interrupting a locked arm's restore BEFORE it set
+        # ``restored`` (the unwind drops the session and its locks the same
+        # way). Both share the same shape: locks gone, transaction state
+        # unknown — so this restore is the documented unlocked best-effort
+        # (docs §4), biased to the far-more-common rollback half of the
+        # commit ambiguity, idempotent for keys the interrupted restore
+        # already fixed, and SINGLE-SHOT: a backoff sleep here (locks gone)
+        # only widens the stomp window (#774 对抗复审). BaseException so a
+        # KeyboardInterrupt at commit still gets the biased restore rather
+        # than deleting backups for an unresolved state. With-body failures
+        # restored above while still locked and set ``restored``; an
+        # unlocked second restore here could stomp a concurrent promote
+        # that took the lock between the arms, so it is skipped rather than
+        # merely idempotent. Bare raise preserves the original type for the
+        # caller's classification.
         if not restored:
-            restore_authority_backups(storage, promoted, backups, authority_keys)
+            unrecoverable |= restore_authority_backups(
+                storage, promoted, backups, authority_keys, max_attempts=1
+            )
         raise
     finally:
-        for rollback_key in backups.values():
-            discard_object(storage, rollback_key)
+        for name, rollback_key in backups.items():
+            # 删除前提（codex #774 P1）：备份只在它防范的状态已确认解除时
+            # 才可删——登记提交（新字节权威化）、恢复成功（旧字节回位）或
+            # 该 key 从未被覆盖（备份本就冗余）。恢复最终失败的备份是幸存
+            # 清单行仍指向的旧字节的最后恢复源，保留并由上面的 ERROR 日志
+            # 提供恢复指针。
+            if name not in unrecoverable:
+                discard_object(storage, rollback_key)
     return registered
 
 

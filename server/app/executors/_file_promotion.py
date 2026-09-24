@@ -4,69 +4,29 @@
 （``register_rows_guarded``）与 lease finish（``finish_lease`` 的
 ``staged_file_moves`` 臂）共用同一份「先备份旧目标、整体提升、失败整体
 回滚、成功丢弃备份」纪律——两个调用面都不允许留下半应用的 job_dir。
+回滚簿句柄与替换原语在叶子模块 ``_file_promotion_guard``（体积预算再拆
+分；回滚簿的删除前提纪律见该模块 docstring）。
 """
 
 from __future__ import annotations
 
-import errno
-import logging
-import os
-import shutil
 import tempfile
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from server.app.executors._file_promotion_guard import FilePromotionGuard, _replace_file
+
+# 测试 patch 缝隙：move 循环经本模块命名空间解析 ``_replace_file``（patch
+# 点在本模块）；``FilePromotionGuard.rollback`` 的恢复调用走
+# ``_file_promotion_guard`` 自己的命名空间（patch 点在那侧）。
 
 
-class FilePromotionGuard:
-    """可回滚的锁内文件提升句柄。
+def _is_real_directory(path: Path) -> bool:
+    """真实目录（不含指向目录的 symlink——os.replace 对 symlink 本体的
+    备份/替换/回滚都按文件语义成立，只有真实目录让替换与回滚双向不可逆）。
 
-    登记事务内把 staged 文件 os.replace 进目标位置前，先把每个已存在的
-    目标改名为同目录临时备份；``rollback``（异常路径）反向恢复——新文件
-    移除、旧文件归位，不留半应用现场；``discard``（成功）丢弃备份。两个
-    收尾都幂等。
-    """
-
-    def __init__(self) -> None:
-        self._moved: list[tuple[Path, Path | None]] = []  # (target, backup)
-        self._backup_dir: Path | None = None
-        self._settled = False
-
-    def rollback(self) -> None:
-        """反向恢复已提升的文件；自身失败的单项只告警、不中断其余恢复。"""
-        if self._settled:
-            return
-        self._settled = True
-        for target, backup in reversed(self._moved):
-            try:
-                if backup is not None:
-                    _replace_file(backup, target)
-                else:
-                    target.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("failed to roll back promoted file %s", target, exc_info=True)
-        if self._backup_dir is not None:
-            shutil.rmtree(self._backup_dir, ignore_errors=True)
-
-    def discard(self) -> None:
-        """登记成功：丢弃旧文件备份（新文件已在目标位置）。"""
-        if self._settled:
-            return
-        self._settled = True
-        if self._backup_dir is not None:
-            shutil.rmtree(self._backup_dir, ignore_errors=True)
-
-
-def _replace_file(source: Path, target: Path) -> None:
-    """os.replace with a cross-device fallback (P3 deployment edge: logs or
-    jobs mounted on separate filesystems). The fallback is a copy+unlink —
-    non-atomic, acceptable outside the single-data-dir default layout."""
-    try:
-        os.replace(source, target)
-    except OSError as exc:
-        if exc.errno != errno.EXDEV:
-            raise
-        shutil.move(str(source), str(target))
+    同一谓词在 ``completion_preflight.find_landing_conflict`` 内联了一份
+    （预检层，保持 agent_control 不 import 本模块）——改动须两侧同步。"""
+    return path.is_dir() and not path.is_symlink()
 
 
 def promote_file_moves_guarded(
@@ -95,6 +55,18 @@ def promote_file_moves_guarded(
     份文件。每个条目在可能失败的 source→target 替换之前登记回滚簿
     （同 P2）：替换失败时旧目标的备份可被回滚臂恢复，而不是连备份一
     起清掉。
+
+    真实目录形态的 target/source 在任何移动之前拒绝（codex #774 P2）：
+    回滚簿的可逆性只对文件成立——target 是目录时整棵目录会被挪进备份、
+    成功收尾被 rmtree 递归删除（同目录下其他产物的本地副本随清单行仍在
+    而消失），且回滚臂无法把目录 os.replace 回已存在的文件上；source 是
+    目录时提升一半的现场同样无法经 unlink 回滚。预检零副作用，留给上层
+    （completion preflight 的祖先畅通检查之外的形状面）以干净失败收尾。
+    预检与移动之间的竞态残余（现场被并发写入换成目录）由备份后的立即
+    复查收口：命中即整体回滚再拒绝，窗口只剩单次 rename 本身；source 侧
+    的对称竞态（微秒级、需 staging 目录内的病态并发写）登记为残余不闭
+    合。回滚自身部分失败时备份目录整体保留（最后恢复源，ERROR 日志带路
+    径）——与 S3 侧备份的删除前提同族。
     """
     guard = FilePromotionGuard()
     deduped: list[tuple[Path, Path]] = []
@@ -108,11 +80,17 @@ def promote_file_moves_guarded(
         if target in seen_targets:
             raise ValueError(f"duplicate promote target: {target}")
         seen_targets.add(target)
+    for target, source in deduped:
+        if _is_real_directory(target):
+            raise ValueError(f"promote target is a directory: {target}")
+        if _is_real_directory(source):
+            raise ValueError(f"promote source is a directory: {source}")
     moves = deduped
     if not moves:
         return guard
+    backup_parent.mkdir(parents=True, exist_ok=True)  # 预检通过之后才落任何副作用
     backup_dir = Path(tempfile.mkdtemp(prefix=".promote-rollback-", dir=backup_parent))
-    guard._backup_dir = backup_dir
+    guard.attach_backup_dir(backup_dir)
     try:
         for index, (target, source) in enumerate(moves):
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -124,16 +102,29 @@ def promote_file_moves_guarded(
             if target.exists() or target.is_symlink():
                 backup = backup_dir / str(index)
                 _replace_file(target, backup)
-            guard._moved.append((target, backup))
+                if _is_real_directory(backup):
+                    # 预检与移动之间现场被并发写入换成目录（运行中的沙箱进程
+                    # 直写 job_dir 不经代次闸，docs §4 残余面 #1）——登记回滚
+                    # 簿后整体回滚再拒绝，把窗口收拢到单次 rename 本身；绝不
+                    # 走到成功收尾的 rmtree 毁整棵目录（codex #774 P2 的竞态
+                    # 残余）。回滚自身失败时备份目录按删除前提保留。
+                    guard.record_move(target, backup)
+                    guard.rollback()
+                    raise ValueError(f"promote target became a directory: {target}")
+            guard.record_move(target, backup)
             _replace_file(source, target)
-    except Exception:
+    except BaseException:
         # #204 broad-except audit: compensate-then-bare-re-raise (#233
-        # pattern). The move loop's outcome space is the filesystem surface
-        # (OSError family from os.replace/mkdir — missing source, permission,
-        # cross-device) plus programming errors, and every flavor must roll
-        # back the already-moved files before propagating so no half-applied
-        # job_dir survives; the bare raise preserves the original type for
-        # the caller's classification, nothing is converted or masked.
+        # pattern), BaseException so even KeyboardInterrupt/SystemExit mid-
+        # loop rolls the moved files back — the caller-side guard variable
+        # never receives the internal handle when this raises, so the
+        # rollback must happen HERE. The move loop's outcome space is the
+        # filesystem surface (OSError family from os.replace/mkdir — missing
+        # source, permission, cross-device) plus programming errors, and
+        # every flavor must roll back the already-moved files before
+        # propagating so no half-applied job_dir survives; the bare raise
+        # preserves the original type for the caller's classification,
+        # nothing is converted or masked.
         guard.rollback()
         raise
     return guard
@@ -146,7 +137,8 @@ def promote_result_staged_moves(staged_file_moves: tuple[tuple[str, str], ...]) 
     窗口残余见 docs/architecture/execution-generation.md §5.3。
     """
     moves = [(Path(target), Path(source)) for target, source in staged_file_moves]
+    if not moves:
+        return
     backup_parent = moves[0][0].parent
-    backup_parent.mkdir(parents=True, exist_ok=True)
     guard = promote_file_moves_guarded(moves, backup_parent=backup_parent)
     guard.discard()

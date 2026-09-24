@@ -21,9 +21,9 @@ from uuid import uuid4
 from server.app.agent_broker.remote_artifact_support import build_manifest_rows
 from server.app.executors._artifact_promotion import (
     AuthorityCopy,
-    discard_object,
     promote_to_authority_guarded,
 )
+from server.app.executors._artifact_restore import discard_object
 from server.app.services.job_artifact_gzip import GZIP_SUFFIX, is_gzip_key
 from server.app.services.job_artifact_objects import (
     JobArtifactObjectStore,
@@ -62,11 +62,16 @@ def promote_all(
     authority object is first backed up (server-side copy to a per-invocation
     rollback key under this execution's staging prefix, no byte downloads). A
     mid-batch copy failure or a rejected registration restores the
-    already-overwritten keys from their backups (best-effort; a failed
-    restore logs a warning) — otherwise the old manifest rows would keep
-    pointing at objects whose bytes no longer match the recorded hash/size.
-    Backup keys are unique per invocation (concurrent /result retries never
-    share them) and are cleaned up on every outcome.
+    already-overwritten keys from their backups (bounded retry while the
+    per-key locks are held; single-shot once they are gone) — otherwise the
+    old manifest rows would keep pointing at objects whose bytes no longer
+    match the recorded hash/size. Backup keys are unique per invocation
+    (concurrent /result retries never share them). Cleanup follows the
+    deletion precondition (codex #774 P1): a backup is discarded only once
+    the state it guards is resolved (registration committed, restore
+    succeeded, or its copy was never attempted); a backup whose restore
+    ultimately failed is RETAINED as the last recovery source (ERROR log
+    carries the key; s3_jobs_gc exempts the ``/.rollback/`` segment).
 
     #338: the authority key keeps the staging ref's form marker (``.gz`` or
     bare). A form-changing re-run targets a key that does not exist yet, so

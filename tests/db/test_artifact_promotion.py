@@ -1,10 +1,11 @@
-"""共享 promote primitive 的按 key 串行与文件提升守卫（#759 复审 P1-C/P2）。
+"""共享 promote primitive 的按 key 串行与恢复臂语义（#759 复审 P1-C/P2）。
 
 P1-C：过期 promote 的失败恢复与并发新代次 promote 经
 ``artifact-authority:<key>`` advisory 锁全程互斥——恢复在构造上不可能
-踩掉新代次已 copy 的 authority 字节。P2：``promote_file_moves_guarded``
-在应用前拒绝重复的规范化 target、在可能失败的替换之前登记回滚簿；
-非规范产物名（``reports//out.json``）在下载/登记前整批拒止。
+踩掉新代次已 copy 的 authority 字节。非规范产物名（``reports//out.json``）
+在下载/登记前整批拒止。``promote_file_moves_guarded`` 的文件面用例在同
+目录姊妹文件 ``test_file_promotion.py``；恢复失败时备份留存（codex #774
+P1）的用例在 ``test_artifact_promotion_restore.py``。
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ import pytest
 from server.app.agent_broker.remote_artifact_support import download_remote_artifact
 from server.app.agent_broker.remote_artifacts import apply_worker_artifact_refs
 from server.app.db.transaction import write_transaction
-from server.app.executors._file_promotion import promote_file_moves_guarded
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from tests.fakes.storage import FakeObjectStorage
@@ -130,7 +130,8 @@ class _RestoreBarrierStorage(FakeObjectStorage):
         super().copy_object(source_key, destination_key)
         if is_restore:
             self.restore_entered.set()
-            self.release_restore.wait(timeout=10)
+            # 等不到放行即红（不静默退化为无序交错）。
+            assert self.release_restore.wait(timeout=10), "main thread never released the restore"
 
 
 def test_stale_restore_serialized_against_concurrent_promotion(
@@ -209,73 +210,6 @@ def test_stale_restore_serialized_against_concurrent_promotion(
     assert row["size_bytes"] == len(b"fresh-new-bytes")
     assert row["content_hash"] == hashlib.sha256(b"fresh-new-bytes").hexdigest()
     assert not [key for key in storage.objects if key.startswith("jobs-staging/")]
-
-
-def test_file_moves_guarded_restores_current_backup_when_replace_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """#759 复审 P2：目标已备份而 source→target 替换失败时，本条目已在回滚
-    簿内——旧目标从备份恢复，备份目录不滞留。修复前回滚簿在替换成功后才
-    登记，回滚臂会连备份一起删掉、旧目标永久丢失。"""
-    target = tmp_path / "out.json"
-    target.write_text("old", encoding="utf-8")
-    source = tmp_path / "staged.json"
-    source.write_text("new", encoding="utf-8")
-
-    import server.app.executors._file_promotion as fp
-
-    original = fp._replace_file
-    calls = {"n": 0}
-
-    def failing_second(src: Path, dst: Path) -> None:
-        calls["n"] += 1
-        if calls["n"] == 2:  # 第一次是 target→备份；第二次才是 source→target
-            raise OSError("disk failure")
-        original(src, dst)
-
-    monkeypatch.setattr(fp, "_replace_file", failing_second)
-
-    with pytest.raises(OSError, match="disk failure"):
-        promote_file_moves_guarded([(target, source)], backup_parent=tmp_path)
-
-    assert target.read_text(encoding="utf-8") == "old"
-    assert source.read_text(encoding="utf-8") == "new"
-    assert not list(tmp_path.glob(".promote-rollback-*"))
-
-
-def test_file_moves_guarded_rejects_duplicate_normalized_targets(tmp_path: Path) -> None:
-    """#759 复审 P2：两个归一到同一路径的产物名（异 staging source）在应用
-    前拒绝——不允许第二项被「source 缺席 + target 在场」误当重放静默跳过。"""
-    source_a = tmp_path / "staged-a.json"
-    source_a.write_text("a", encoding="utf-8")
-    source_b = tmp_path / "staged-b.json"
-    source_b.write_text("b", encoding="utf-8")
-    moves = [
-        (tmp_path / "reports/out.json", source_a),
-        (Path(f"{tmp_path}/reports//out.json"), source_b),
-    ]
-
-    with pytest.raises(ValueError, match="duplicate promote target"):
-        promote_file_moves_guarded(moves, backup_parent=tmp_path)
-
-    assert not (tmp_path / "reports").exists()  # 应用前拒绝：零副作用
-    assert not list(tmp_path.glob(".promote-rollback-*"))
-
-
-def test_file_moves_guarded_dedupes_identical_pairs(tmp_path: Path) -> None:
-    """#759 对抗复审 P1：完全相同的 (target, source) 对是良性形态（finish 批
-    重放、工作流重复声明 outputs 的笔误）——去重后正常提升，不得被重复
-    target 预检误杀成 finish 永久卡死。"""
-    target = tmp_path / "out.json"
-    source = tmp_path / "staged.json"
-    source.write_text("payload", encoding="utf-8")
-
-    guard = promote_file_moves_guarded([(target, source), (target, source)], backup_parent=tmp_path)
-    guard.discard()
-
-    assert target.read_text(encoding="utf-8") == "payload"
-    assert not source.exists()  # 恰好提升一次
-    assert not list(tmp_path.glob(".promote-rollback-*"))
 
 
 def test_download_remote_artifact_rejects_noncanonical_name(tmp_path: Path) -> None:
@@ -390,7 +324,8 @@ class _FailSecondCopyBarrierStorage(FakeObjectStorage):
         super().copy_object(source_key, destination_key)
         if is_restore:
             self.restore_entered.set()
-            self.release_restore.wait(timeout=10)
+            # 等不到放行即红（不静默退化为无序交错）。
+            assert self.release_restore.wait(timeout=10), "main thread never released the restore"
 
 
 def test_copy_failure_restore_serialized_against_concurrent_promotion(
