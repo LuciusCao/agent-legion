@@ -168,7 +168,8 @@ def test_finish_gzip_ref_promotes_decoded_and_registers(tmp_path: Path) -> None:
 
     assert leases.results[0].status == "completed"
     assert (job_dir / "out.json").read_bytes() == PAYLOAD  # 解压落盘
-    assert storage.objects == {GZ_AUTHORITY_KEY: GZ_PAYLOAD}  # 提升保形态
+    # 提升保形态；staging 源在 finish 提交后由完成方删除。
+    assert storage.objects == {GZ_AUTHORITY_KEY: GZ_PAYLOAD}
     row = object_store.lookup("job-1", "out.json")
     assert row is not None
     assert row["storage_key"] == GZ_AUTHORITY_KEY
@@ -220,7 +221,7 @@ def test_finish_gzip_cancelled_empty_hash_registers_host_computed(tmp_path: Path
     row = object_store.lookup("job-1", "out.json")
     assert row is not None
     assert row["content_hash"] == HASH
-    assert storage.objects == {GZ_AUTHORITY_KEY: GZ_PAYLOAD}
+    assert storage.objects == {GZ_AUTHORITY_KEY: GZ_PAYLOAD}  # staging 在 finish 后删除
 
 
 def test_finish_rerun_form_change_raw_to_gzip(tmp_path: Path) -> None:
@@ -246,7 +247,8 @@ def test_finish_rerun_form_change_raw_to_gzip(tmp_path: Path) -> None:
 
     assert leases.results[0].status == "completed"
     assert (job_dir / "out.json").read_bytes() == PAYLOAD
-    # 旧裸对象未被覆盖（新 key 不存在即无备份/回滚），新对象带后缀。
+    # 旧裸对象未被覆盖（新 key 不存在即无备份/回滚），新对象带后缀；
+    # staging 源在 finish 提交后删除。
     assert storage.objects == {AUTHORITY_KEY: b"previous-raw-bytes", GZ_AUTHORITY_KEY: GZ_PAYLOAD}
     row = object_store.lookup("job-1", "out.json")
     assert row is not None

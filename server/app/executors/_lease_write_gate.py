@@ -20,16 +20,24 @@ def lease_artifact_write_current(conn: DatabaseConnection, lease_id: str, job_id
     """True = 该 lease 仍持有本 job 当前代次的产物写权；调用方须在写事务内。
 
     锁序与协议一致：job-mutation advisory 锁先于一切行读；锁下读到的代次
-    不存在并发 reset 还能改写的窗口。lease 行不存在（agent sweep 删行）、
-    已 released/expired（本地孤儿、已 finish）、心跳已过期（sweeper 介入
-    前的孤儿窗口）或代次不符（reset 已 bump）一律 False。
+    不存在并发 reset 还能改写的窗口。判活谓词与 ``finish_lease`` / broker
+    清扫完全同源——lease 行存在、属于本 job、status='active'、落戳代次
+    == 现值；ownership 的唯一撤销通道是 sweeper/expiry/finish 对 lease
+    行的删除或状态翻转，它们同持 job-mutation 锁、与本复查互斥。
+
+    不按 ``expires_at`` 单独判死（codex #774 P1）：心跳饥饿但控制面新鲜
+    的 Worker 会被 HeartbeatDeferral 刻意保留 lease（静默 < 2×TTL 不清
+    扫），``finish_lease`` 也只按 active 判活——写闸若额外按 expires_at
+    关闸，会把仍被承认的结果的字节面判死，finish 再把成功节点永久翻成
+    失败。清扫未介入的孤儿窗口（过期但行仍 active）里放行是良性竞态：
+    此刻不存在竞争 attempt，sweep 提交后行即消失、闸自然关闭。
     """
     current = lock_job_mutation_and_read_generation(conn, job_id)
     if current is None:
         return False
     row = conn.execute(
         "select execution_generation from executor_leases"
-        " where id=%s and job_id=%s and status='active' and expires_at > current_timestamp",
+        " where id=%s and job_id=%s and status='active'",
         (lease_id, job_id),
     ).fetchone()
     if row is None:

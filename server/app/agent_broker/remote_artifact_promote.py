@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from server.app.agent_broker.remote_artifact_support import build_manifest_rows
 from server.app.executors._artifact_promotion import (
@@ -45,23 +46,27 @@ def promote_all(
     execution_id: str,
     lease_id: str,
 ) -> bool:
-    """Copy to authority keys, promote staged files, register rows, clean up.
+    """Copy to authority keys, promote staged files, register rows.
 
     Undeclared names are promoted/registered but never land in the job dir
     (the same whitelist as the tar unpack path). Copies precede row writes:
     a failure between them leaves orphaned authority objects (lifecycle
     backstop), never dangling manifest rows. All manifest rows upsert in ONE
     transaction (the guarded registration): a mid-batch failure rolls back
-    instead of leaving a half-registered manifest.
+    instead of leaving a half-registered manifest. Worker staging objects
+    are NEVER deleted here — concurrent /result retries still need them
+    between the first committer's promote and its finish (lifecycle and
+    s3_jobs_gc reap them on every outcome, #774 对抗复审 P1).
 
     Re-runs overwrite existing authority keys, so every pre-existing
-    authority object is first backed up (server-side copy to a rollback key
-    under this execution's staging prefix, no byte downloads). A mid-batch
-    copy failure or a rejected registration restores the already-overwritten
-    keys from their backups (best-effort; a failed restore logs a warning) —
-    otherwise the old manifest rows would keep pointing at objects whose
-    bytes no longer match the recorded hash/size. Backup keys are cleaned up
-    on every outcome.
+    authority object is first backed up (server-side copy to a per-invocation
+    rollback key under this execution's staging prefix, no byte downloads). A
+    mid-batch copy failure or a rejected registration restores the
+    already-overwritten keys from their backups (best-effort; a failed
+    restore logs a warning) — otherwise the old manifest rows would keep
+    pointing at objects whose bytes no longer match the recorded hash/size.
+    Backup keys are unique per invocation (concurrent /result retries never
+    share them) and are cleaned up on every outcome.
 
     #338: the authority key keeps the staging ref's form marker (``.gz`` or
     bare). A form-changing re-run targets a key that does not exist yet, so
@@ -77,8 +82,9 @@ def promote_all(
     intervene between the check and the row writes). Returns False when the
     gate rejects: nothing was copied/registered, or the copies were already
     restored from their backups; the caller turns this into the commit
-    path's rejection semantics. Staging objects survive a rejected promote
-    exactly like a failed one (lifecycle reaps them).
+    path's rejection semantics. Staging objects survive every promote
+    outcome — success included — for the lifecycle/GC backstop and for
+    concurrent retries (see above).
     """
     assert object_store.storage is not None
     storage = object_store.storage
@@ -95,6 +101,14 @@ def promote_all(
         + (GZIP_SUFFIX if is_gzip_key(str(ref["storage_key"])) else "")
         for name, ref in remote.items()
     }
+    # 回滚备份落 per-invocation key（codex #774 P1）：并发 /result 重试
+    # （同 execution、同名）若共享 rollback key，先提交者的锁外清理会删掉
+    # 后者的备份，后者闸拒/登记失败时恢复无备份可取——旧清单行指向新字
+    # 节。staging key 是协议固定的 Worker 上传落点（同一 execution 的重试
+    # 携带相同 refs、字节相同），不引入 attempt 维度；相应地成功路径也
+    # 绝不删除 staging 源——重试在其 promote 与 finish 之间仍需读到它
+    # （#774 对抗复审 P1），残留统一交 lifecycle/GC。
+    attempt = uuid4().hex
     registered = promote_to_authority_guarded(
         storage,
         object_store.database_dsn,
@@ -106,7 +120,7 @@ def promote_all(
                 staging_key=str(ref["storage_key"]),
                 authority_key=authority_keys[name],
                 rollback_key=artifact_staging_key(
-                    workspace_id, job_id, execution_id, f".rollback/{name}"
+                    workspace_id, job_id, execution_id, f".rollback/{attempt}/{name}"
                 ),
             )
             for name, ref in remote.items()
@@ -130,6 +144,29 @@ def promote_all(
             node_key,
         )
         return False
-    for ref in remote.values():
-        discard_object(storage, str(ref["storage_key"]))
+    # promote 自身绝不删 staging 源（#774 对抗复审 P1）：promote 提交与
+    # finish 之间隔着 mirror 上传与校验，并发 /result 重试此刻仍要
+    # verify/promote 同一份 staging 字节——删源会让后到者的 HEAD 核验看
+    # 到虚假存储故障，其失败 finish 抢在成功 finish 之前把已完成节点永
+    # 久冤判 failed。staging 的唯一安全删除点是 finish 提交之后（由
+    # completion_staged 的失败/成功收尾经 ``discard_staging_refs`` 执
+    # 行）；其余结局（预检判死、verify 失败、闸拒、进程崩溃）的残留由
+    # bucket lifecycle / GC 兜底。
     return True
+
+
+def discard_staging_refs(
+    object_store: JobArtifactObjectStore,
+    output_artifacts: dict[str, Any],
+    remote_names: set[str] | list[str],
+) -> None:
+    """finish 提交后的 Worker staging 源清理（#774 对抗复审：唯一安全删
+    除点——迟到重试的 verify 即使撞见缺源，其 finish 因 lease 已释放拿
+    到 verdict False，伤不到已提交节点）。"""
+    storage = object_store.storage
+    if storage is None:
+        return
+    for name in remote_names:
+        ref = output_artifacts.get(name)
+        if isinstance(ref, dict):
+            discard_object(storage, str(ref["storage_key"]))

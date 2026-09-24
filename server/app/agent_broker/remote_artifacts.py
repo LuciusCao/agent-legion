@@ -11,8 +11,11 @@ ceiling, HEAD size), downloads declared outputs into a staging dir next to
 the job dir and hash-checks them (cancelled runs skip the download but still
 digest-verify the bytes), and only then applies: server-side copy onto the
 authority key, atomic promote into the job dir, manifest rows in ONE
-transaction, staging cleanup. Any earlier failure applies nothing — no
-half-applied outputs.
+transaction. Staging objects are never deleted inside this window — the
+completion tail deletes them only AFTER the finish commits (concurrent
+/result retries still read them in between, #774 对抗复审 P1); residue of
+every other outcome belongs to the bucket lifecycle / ``s3_jobs_gc``.
+Any earlier failure applies nothing — no half-applied outputs.
 
 #338: refs are dual-form — a ``.gz``-suffixed staging key holds gzip bytes
 (HEAD verifies the compressed size the Worker reports; downloads decode

@@ -487,3 +487,286 @@ def test_copy_failure_restore_serialized_against_concurrent_promotion(
     assert storage.objects[k2_auth] == b"old-2"  # 未 promoted 的 key 不被恢复
     assert store.row_for_node("cfx-job", "node_a", "k2.json") is None
     assert not [key for key in storage.objects if "/.rollback/" in key]
+
+
+# ---------------------------------------------------------------------------
+# codex #774 P1×2：并发重试的 staging/rollback key 按调用唯一化
+# ---------------------------------------------------------------------------
+
+
+def test_same_lease_uploads_get_per_invocation_staging_and_rollback_keys(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """构造性钉（本地臂）：同 lease 的每次 upload 派生独立 staging/rollback
+    key——并发重试的 put_stream（锁外）互不覆盖、finally 清理互不误删。
+    共享 key 时后写者字节会被先写者 promote 进 authority、却登记先写者的
+    size/hash（清单行与字节错位）。"""
+    _seed_job(job_db, workspace_id="pik-ws", job_id="pik-job")
+    _seed_lease(job_db, workspace_id="pik-ws", job_id="pik-job", lease_id="lease-1", generation=0)
+    captured: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "server.app.services.job_artifact_objects.upload_via_staging_guarded",
+        lambda *args, **kwargs: captured.append(kwargs) or None,
+    )
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    (tmp_path / "a.json").write_bytes(b"a")
+    (tmp_path / "b.json").write_bytes(b"b")
+
+    store.upload(
+        workspace_id="pik-ws",
+        job_id="pik-job",
+        node_key="node_a",
+        name="out.json",
+        local_path=tmp_path / "a.json",
+        lease_id="lease-1",
+    )
+    store.upload(
+        workspace_id="pik-ws",
+        job_id="pik-job",
+        node_key="node_a",
+        name="out.json",
+        local_path=tmp_path / "b.json",
+        lease_id="lease-1",
+    )
+
+    assert len(captured) == 2
+    assert captured[0]["staging_key"] != captured[1]["staging_key"]
+    assert captured[0]["rollback_key"] != captured[1]["rollback_key"]
+    assert all("lease-1" in str(call["staging_key"]) for call in captured)
+    assert all("lease-1" in str(call["rollback_key"]) for call in captured)
+
+
+def test_remote_promote_gets_per_invocation_rollback_keys(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """构造性钉（远端臂）：并发 /result 重试（同 execution、同名产物）的
+    回滚备份 key 按调用唯一化——先提交者的锁外清理删不到后者的备份，
+    后者闸拒/登记失败时恢复有备份可取。staging key 保持协议固定的
+    per-execution 落点（Worker 上传通道，重试字节相同）。"""
+    from server.app.agent_broker.remote_artifact_promote import promote_all
+
+    _seed_job(job_db, workspace_id="rbk-ws", job_id="rbk-job")
+    _seed_lease(job_db, workspace_id="rbk-ws", job_id="rbk-job", lease_id="lease-1", generation=0)
+    captured: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "server.app.agent_broker.remote_artifact_promote.promote_to_authority_guarded",
+        lambda *args, **kwargs: captured.append(kwargs) or [],
+    )
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    remote = {
+        "out.json": {
+            "storage_key": "jobs-staging/rbk-ws/rbk-job/exec-1/out.json",
+            "size_bytes": 1,
+            "content_hash": "",
+        }
+    }
+
+    hashes = {"out.json": ""}
+    assert promote_all(
+        store, "rbk-ws", "rbk-job", "node_a", tmp_path, remote, {}, hashes, "e1", "lease-1"
+    )
+    assert promote_all(
+        store, "rbk-ws", "rbk-job", "node_a", tmp_path, remote, {}, hashes, "e1", "lease-1"
+    )
+
+    assert len(captured) == 2
+    rollback_keys = [str(call["copies"][0].rollback_key) for call in captured]
+    assert rollback_keys[0] != rollback_keys[1]
+    staging_keys = [str(call["copies"][0].staging_key) for call in captured]
+    assert staging_keys == [remote["out.json"]["storage_key"]] * 2  # 协议落点不变
+
+
+class _CopyAfterPutBarrierStorage(FakeObjectStorage):
+    """A（小负载）的 staging→authority copy 停住，等 B（大负载）的 put 落盘。
+
+    确定性排出 codex #774 P1 的字节面交错：A 的 staging 字节已写、promote
+    copy 未发时，B 的 put 覆盖同一 staging key（修复前共享）——A 把 B 的
+    字节 copy 进 authority 却登记自己的 size/hash。barrier 必须挡在 copy
+    侧：挡 put 侧会让 A 的字节成为 staging 最终内容，交错退化为无害序
+    （测试在修复前也绿，#774 对抗复审 F1）。等不到放行即 AssertionError
+    （红方向，不静默假绿）。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.a_copy_entered = threading.Event()
+        self.b_put_done = threading.Event()
+        self.allow_a_copy = threading.Event()
+        self._puts = 0
+        self._copy_consumed = False
+
+    def put_stream(
+        self, storage_key: str, stream: Any, size_bytes: int, content_type: str = ""
+    ) -> None:
+        super().put_stream(storage_key, stream, size_bytes, content_type)
+        self._puts += 1
+        if self._puts == 2:  # A 的 put 先于其 copy；第二个 put 必是 B 的
+            self.b_put_done.set()
+
+    def copy_object(self, source_key: str, destination_key: str) -> None:
+        if (
+            not self._copy_consumed
+            and "jobs-staging/" in source_key
+            and "/.rollback/" not in destination_key
+        ):
+            self._copy_consumed = True
+            self.a_copy_entered.set()
+            assert self.allow_a_copy.wait(timeout=10), "main thread never released A's copy"
+        super().copy_object(source_key, destination_key)
+
+
+def test_concurrent_same_lease_uploads_never_mix_bytes_and_rows(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """交错用例（codex #774 P1）：同 lease 两个并发 upload（同名、不同字
+    节）——A 的 staging put 完成、promote copy 待发时，B 的 put 落盘。
+    per-invocation staging key 下两次 promote 各自读自己的字节——最终
+    authority 字节与清单行的 size/hash 必定同源（whichever promote 后提
+    交）。共享 staging key 时 B 的 put 覆盖了 A 的 staging：A 把 B 的字
+    节 promote 进 authority 却登记自己的 size/hash（清单行与 authority
+    字节永久错位），且 A 的 finally 还会删掉 B 等待提升的 staging 源。"""
+    _seed_job(job_db, workspace_id="mix-ws", job_id="mix-job")
+    _seed_lease(job_db, workspace_id="mix-ws", job_id="mix-job", lease_id="lease-1", generation=0)
+    payload_small = b"A" * 10
+    payload_large = b"B" * 20
+    storage = _CopyAfterPutBarrierStorage()
+    store = JobArtifactObjectStore(TIMED_DATABASE_URL, storage)
+    (tmp_path / "small.json").write_bytes(payload_small)
+    (tmp_path / "large.json").write_bytes(payload_large)
+
+    def _upload(local: str) -> Any:
+        return store.upload(
+            workspace_id="mix-ws",
+            job_id="mix-job",
+            node_key="node_a",
+            name="out.json",
+            local_path=tmp_path / local,
+            lease_id="lease-1",
+        )
+
+    thread_a, outcome_a = _start(lambda: _upload("small.json"))
+    assert storage.a_copy_entered.wait(timeout=10)
+    thread_b, outcome_b = _start(lambda: _upload("large.json"))
+    assert storage.b_put_done.wait(timeout=10)
+    storage.allow_a_copy.set()  # A 此刻 copy 的 staging 内容在修复前已是 B 的字节
+    _join(thread_a)
+    _join(thread_b)
+
+    assert outcome_a.get("error") is None
+    assert outcome_b.get("error") is None
+    authority_key = "jobs/mix-ws/mix-job/out.json"
+    authority = storage.objects[authority_key]
+    assert authority in {payload_small, payload_large}
+    row = store.row_for_node("mix-job", "node_a", "out.json")
+    assert row is not None
+    # 不变量：清单行与 authority 字节同源——共享 staging key 时这里错位。
+    assert row["size_bytes"] == len(authority)
+    assert row["content_hash"] == hashlib.sha256(authority).hexdigest()
+    assert not [key for key in storage.objects if key.startswith("jobs-staging/")]
+
+
+class _RollbackClobberStorage(FakeObjectStorage):
+    """T1 的回滚清理 delete 停住；主线程观测到 T2 的备份写完成后放行。
+
+    copy_object 的 destination 含 ``/.rollback/`` = 备份写；source 含
+    ``/.rollback/`` = 恢复读（比照 _RestoreBarrierStorage 的约定）。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.watch_t2_backup = False
+        self.t1_delete_entered = threading.Event()
+        self.allow_t1_delete = threading.Event()
+        self.t1_deleted = threading.Event()
+        self.t2_backup_written = threading.Event()
+        self.allow_t2_copy = threading.Event()
+        self._t1_delete_consumed = False
+
+    def delete_object(self, storage_key: str) -> None:
+        if "/.rollback/" in storage_key and not self._t1_delete_consumed:
+            self._t1_delete_consumed = True
+            self.t1_delete_entered.set()
+            # 等不到放行即红（不静默退化为无序交错）。
+            assert self.allow_t1_delete.wait(timeout=10), "main thread never released T1's delete"
+            super().delete_object(storage_key)
+            self.t1_deleted.set()
+            return
+        super().delete_object(storage_key)
+
+    def copy_object(self, source_key: str, destination_key: str) -> None:
+        if "/.rollback/" in destination_key and self.watch_t2_backup:
+            super().copy_object(source_key, destination_key)
+            self.t2_backup_written.set()
+            return
+        if (
+            self.watch_t2_backup
+            and "jobs-staging/" in source_key
+            and "/.rollback/" not in source_key
+        ):
+            # T2 的 staging→authority copy 等主线程把代次 bump 提交——闸拒
+            # 时序确定性（否则 bump 与 T2 的闸内复查竞争，T2 可能抢跑登记）。
+            assert self.allow_t2_copy.wait(timeout=10), "main thread never released T2's copy"
+        if "/.rollback/" in source_key:
+            # 恢复读必须等到 T1 的锁外清理完成——确定性排出「先清理后恢复」。
+            assert self.t1_deleted.wait(timeout=10), "T1's cleanup never completed"
+        super().copy_object(source_key, destination_key)
+
+
+def test_concurrent_retry_rollback_backup_survives_first_committer_cleanup(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """交错用例（codex #774 P1）：T1 promote 提交并释放按 key 锁后，T2
+    （同 lease 重试）取得锁写入自己的回滚备份；T1 的锁外清理此刻才执行。
+    per-invocation rollback key 下 T1 只删自己的备份，T2 闸拒后按备份恢
+    复——authority 与幸存的 T1 清单行逐字节一致。共享 rollback key 时
+    T1 的清理连 T2 的备份一起删掉，T2 恢复无备份可取：authority 停在
+    T2 字节而清单行指向 T1（hash 断言失败）。"""
+    _seed_job(job_db, workspace_id="clb-ws", job_id="clb-job")
+    _seed_lease(job_db, workspace_id="clb-ws", job_id="clb-job", lease_id="lease-1", generation=0)
+    storage = _RollbackClobberStorage()
+    store = JobArtifactObjectStore(TIMED_DATABASE_URL, storage)
+    (tmp_path / "seed.json").write_bytes(b"old-bytes")
+    assert (
+        store.upload(
+            workspace_id="clb-ws",
+            job_id="clb-job",
+            node_key="node_a",
+            name="out.json",
+            local_path=tmp_path / "seed.json",
+        )
+        is not None
+    )
+    (tmp_path / "one.json").write_bytes(b"one")
+    (tmp_path / "two.json").write_bytes(b"two")
+
+    def _upload(local: str) -> Any:
+        return store.upload(
+            workspace_id="clb-ws",
+            job_id="clb-job",
+            node_key="node_a",
+            name="out.json",
+            local_path=tmp_path / local,
+            lease_id="lease-1",
+        )
+
+    thread_a, outcome_a = _start(lambda: _upload("one.json"))
+    assert storage.t1_delete_entered.wait(timeout=10)  # T1 已提交，卡在锁外清理
+    storage.watch_t2_backup = True
+    thread_b, outcome_b = _start(lambda: _upload("two.json"))
+    assert storage.t2_backup_written.wait(timeout=10)  # T2 已写入自己的回滚备份
+    # T2 的闸内登记前 bump 代次 → T2 闸拒、必须按备份恢复。
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("update jobs set execution_generation=1 where id='clb-job'")
+    storage.allow_t2_copy.set()  # T2 继续 copy → 闸拒 → 恢复
+    storage.allow_t1_delete.set()  # T1 的清理落在 T2 的备份与恢复之间
+    _join(thread_a)
+    _join(thread_b)
+
+    assert outcome_a.get("error") is None
+    assert outcome_a["result"] is not None  # T1 提交
+    assert outcome_b.get("error") is None
+    assert outcome_b["result"] is None  # T2 闸拒
+    authority_key = "jobs/clb-ws/clb-job/out.json"
+    assert storage.objects[authority_key] == b"one"  # T2 按备份恢复，未停在 T2 字节
+    row = store.row_for_node("clb-job", "node_a", "out.json")
+    assert row is not None
+    assert row["content_hash"] == hashlib.sha256(b"one").hexdigest()
+    assert not [key for key in storage.objects if key.startswith("jobs-staging/")]

@@ -1,8 +1,10 @@
 """EXEC-GENERATION-001 产物写面与空 fan-out 完成面的代次闸（#645 P2-b/P3，#759 复审 P1-B）。
 
 P2-b（本地 code 孤儿执行的迟来上传）：心跳丢失后沙箱子进程是协作式取消，
-可跑完再进 ``_check_outputs`` → ``upload_produced_artifacts``。写闸
-（lease active + 心跳新鲜 + 落戳代次 == jobs 现值）不过则整批不上传。
+可跑完再进 ``_check_outputs`` → ``upload_produced_artifacts``。写闸与
+broker ownership 同源（lease 行 active + 落戳代次 == jobs 现值；心跳饥
+饿的延迟清扫由 HeartbeatDeferral 语义覆盖，不按 expires_at 单独判死，
+codex #774 P1）不过则整批不上传。
 P1-B 起 lease 臂上传改走 staging：字节先落 per-lease staging key，再经共享
 primitive（``executors._artifact_promotion.promote_to_authority_guarded``）
 备份 → copy → 锁内复查 + 登记 → 闸拒按回滚备份恢复 authority——整个
@@ -196,6 +198,45 @@ def test_upload_writes_when_lease_owns_current_generation(
     row = store.row_for_node("gate1-job", "node_a", "out.json")
     assert row is not None
     assert row["storage_key"] == "jobs/gate1-ws/gate1-job/out.json"
+
+
+def test_upload_writes_when_lease_expired_but_still_active(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """codex #774 P1（写闸与 broker ownership 同源）：expires_at 已过但
+    status 仍 active 的 lease——HeartbeatDeferral 刻意保留的延迟清扫窗
+    （Worker 控制面新鲜、心跳静默 < 2×TTL）——写闸必须放行：闸若按
+    expires_at 单独判死，会把仍被 finish_lease 承认的结果的字节面判死，
+    成功节点被永久翻成失败。ownership 的唯一撤销通道是 lease 行的删除/
+    状态翻转（sweeper/expiry/finish 持 job-mutation 锁），不是时间戳。"""
+    _seed_job(job_db, workspace_id="gate1b-ws", job_id="gate1b-job")
+    _seed_lease(job_db, workspace_id="gate1b-ws", job_id="gate1b-job")
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update executor_leases"
+            " set expires_at=current_timestamp - interval '5 minutes',"
+            " heartbeat_at=current_timestamp - interval '5 minutes'"
+            " where id='lease-1'"
+        )
+    (tmp_path / "out.json").write_bytes(b'{"deferred": true}')
+    store = _store()
+
+    upload_produced_artifacts(
+        store,
+        workspace_id="gate1b-ws",
+        job_id="gate1b-job",
+        node_key="node_a",
+        job_dir=tmp_path,
+        produced=("out.json",),
+        lease_id="lease-1",
+    )
+
+    storage = store.storage
+    assert isinstance(storage, FakeObjectStorage)
+    assert storage.objects == {"jobs/gate1b-ws/gate1b-job/out.json": b'{"deferred": true}'}
+    row = store.row_for_node("gate1b-job", "node_a", "out.json")
+    assert row is not None
+    assert row["storage_key"] == "jobs/gate1b-ws/gate1b-job/out.json"
 
 
 def test_upload_skipped_when_lease_expired(job_db: JobQueries, tmp_path: Path) -> None:

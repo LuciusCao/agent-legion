@@ -233,7 +233,8 @@ EOF
   重试）。孤儿对象兜底分前缀治理（`#340`）：材料 key 在 bucket 根
   （`{workspace_id}/{content_hash}/{filename}`），产物在 `jobs/` 前缀
   下，Worker 直传的暂存对象在 `jobs-staging/` 前缀下（Host 核验后服务端
-  copy 提升到 `jobs/` 权威 key 并 best-effort 删除暂存对象），三条前缀
+  copy 提升到 `jobs/` 权威 key；暂存源只在 finish 提交后由完成方删除，
+  失败/冲突残留由 GC/lifecycle 兜底），三条前缀
   分开配规则——材料侧按你们对上传内容的数据分级策略设保留期（务必
   显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），`jobs/`
   前缀按产物保留策略另设，`jobs-staging/` 配短保留（如 1 天，孤儿

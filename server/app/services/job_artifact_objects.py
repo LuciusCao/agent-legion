@@ -15,8 +15,10 @@ under a ``.gz``-suffixed ``storage_key``; the suffix is the form marker and
 HEAD-verifiable number.
 
 EXEC-GENERATION-001 byte plane (#759 review P1-B): the ``lease_id`` arm of
-``upload`` never writes the authority key directly — bytes land on a per-lease
-staging key and are promoted through the shared
+``upload`` never writes the authority key directly — bytes land on a
+per-invocation staging key (unique attempt namespace per call, so concurrent
+same-lease retries never share staging/rollback objects) and are promoted
+through the shared
 ``executors._artifact_promotion.promote_to_authority_guarded`` primitive
 (backup → copy → in-transaction generation recheck + manifest row → rollback
 restore on rejection, the whole per-key sequence serialized by a
@@ -30,6 +32,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any, BinaryIO
+from uuid import uuid4
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
@@ -121,7 +124,7 @@ class JobArtifactObjectStore:
         re-uploads later).
 
         With ``lease_id`` the write goes through the EXEC-GENERATION-001
-        artifact byte plane (#759 review P1-B): bytes land on a per-lease
+        artifact byte plane (#759 review P1-B): bytes land on a per-invocation
         staging key first and are promoted by the shared
         ``promote_to_authority_guarded`` primitive — the manifest row
         registers only if the lease still owns the current generation inside
@@ -145,6 +148,14 @@ class JobArtifactObjectStore:
         size_bytes, content_hash = hash_local_file(local_path)
         storage_key = artifact_storage_key(workspace_id, job_id, name)
         if lease_id:
+            # 每次调用独立 attempt 命名空间（codex #774 P1×2）：并发重试
+            # （同 lease 同名、不同字节）的 staging/rollback 对象若共享
+            # key，put_stream 在锁外会让后写者覆盖先写者的 staging 字节
+            # （先写者把后写者字节 promote 进 authority、却登记自己的
+            # size/hash），先行者的 finally 还会删掉后者的 staging/rollback
+            # 对象（后者闸拒/登记失败时恢复无备份可取）。per-invocation
+            # key 从构造上拆掉这两条跨调用通道。
+            attempt = uuid4().hex
             return upload_via_staging_guarded(
                 self.storage,
                 self._dsn,
@@ -153,10 +164,12 @@ class JobArtifactObjectStore:
                 name=name,
                 local_path=local_path,
                 size_bytes=size_bytes,
-                staging_key=artifact_staging_key(workspace_id, job_id, lease_id, name),
+                staging_key=artifact_staging_key(
+                    workspace_id, job_id, f"{lease_id}/{attempt}", name
+                ),
                 authority_key=storage_key,
                 rollback_key=artifact_staging_key(
-                    workspace_id, job_id, lease_id, f".rollback/{name}"
+                    workspace_id, job_id, lease_id, f".rollback/{attempt}/{name}"
                 ),
                 row={
                     "job_id": job_id,

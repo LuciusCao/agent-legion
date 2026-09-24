@@ -168,8 +168,17 @@ D12 镜像上传）与 finish 内的清单登记共用同一个 primitive
 （`server/app/executors/_artifact_promotion.py` 的
 `promote_to_authority_guarded`）：
 
-1. **staging 先行**：字节永远先落 per-execution/lease 的 staging key，**绝不直写
-   authority key**；既有 authority 对象先 server-side 备份到回滚 key；
+1. **staging 先行**：字节永远先落 staging key，**绝不直写 authority key**——
+   本地臂每次调用生成独立 attempt 命名空间（并发同 lease 重试的锁外
+   `put_stream` 互不覆盖、finally 清理互不误删，codex #774 P1）；远端臂
+   沿用协议固定的 per-execution key（重试携带相同 refs、字节相同），且
+   **promote→finish 提交之间的窗口内绝不删 staging 源**——并发 /result
+   重试在此窗口仍要 verify/promote 它，先提交者删源会把已完成节点冤判成
+   failed（#774 对抗复审 P1）；staging 源只在 finish 提交后由完成方删除，
+   其余结局的残留交 bucket lifecycle / `s3_jobs_gc`。
+   既有 authority 对象先 server-side 备份到**按调用唯一化**的回滚 key
+   （attempt 维度——先提交者的锁外清理删不到并发重试者的备份，codex
+   #774 P1）；
 2. **按 key 串行**：同一 authority key 的并发 promote 经
    `artifact-authority:<key>` advisory 锁（升序、任何字节操作之前取）全程
    互斥——备份、copy、权威复查与失败恢复（commit 时刻失败除外，见 §4）
@@ -178,8 +187,13 @@ D12 镜像上传）与 finish 内的清单登记共用同一个 primitive
    `job-mutation` 锁（大字节量可中断；mutation 侧不取 artifact 锁，不被阻
    塞）——锁序 artifact-authority:* → job-mutation:*；
 3. **锁内单事务权威复查**（`register_rows_guarded`）：取 `job-mutation` 锁 →
-   复查 lease 代次（`lease_artifact_write_current`：lease 仍 active、心跳未过期、
-   落戳代次 == jobs 现值）→（远端臂）staged 文件落盘 → upsert 清单行。
+   复查 lease 代次（`lease_artifact_write_current`：lease 行存在、仍 active、
+   落戳代次 == jobs 现值——判活谓词与 `finish_lease`/broker 清扫完全同源，
+   **不按 `expires_at` 单独判死**：心跳饥饿但控制面新鲜的 Worker 由
+   HeartbeatDeferral 刻意保留 lease，闸若按时间戳关闸会把仍被承认的结果
+   字节面判死、成功节点被 finish 永久翻失败，codex #774 P1；ownership 的
+   唯一撤销通道是 sweeper/expiry/finish 对 lease 行的删除或状态翻转，同持
+   `job-mutation` 锁与本复查互斥）→（远端臂）staged 文件落盘 → upsert 清单行。
    与突变侧只有两种序：登记先提交（随后被突变当作重置面删除），或突变先提交
    （闸拒绝登记）；
 4. **失败回滚**：闸拒与 copy/登记中途失败时用回滚备份恢复已完成的
@@ -192,7 +206,7 @@ D12 镜像上传）与 finish 内的清单登记共用同一个 primitive
 
 两个写口的接入点：Worker 回传 `remote_artifact_promote.promote_all` 在任何字节
 copy 前先做无锁预检再走共享序列；本地上传由 `JobArtifactObjectStore.upload` 的
-lease 臂把字节写到 per-lease staging key 后走同一 primitive，循环中途落地的
+lease 臂把字节写到 per-invocation staging key 后走同一 primitive，循环中途落地的
 reset 既登记不进去也污染不了 authority 对象。
 
 **Worker 结果归档的本地文件平面**：`AgentCompletionHandler.finish` 把归档只解包
@@ -210,8 +224,11 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    计划落点——跨通道前缀互斥、祖先畅通（现场非目录挡位）、保留源保护
    （node.log 的 staging source 不落 job_dir 落点集，remote 落点与之同位或位于其
    下会抹掉它）——纯路径数学零写入；冲突即整个结果干净 failed（零字节应用、
-   Worker staging key 保留），闸安全的归档 moves（node.log 等）照常随失败 finish
-   落盘；
+   Worker staging key 保留）。预检**收集全部冲突**（不短路）：`LandingConflict.names`
+   是全集，失败 finish 只挂闸安全且未参与冲突的归档 moves（node.log 等观测
+   parity）——冲突 move 不挂，其 staging source 不再被抢先消耗，同名观测 move
+   随之能真正落盘而不是被误当事务重放跳过（codex #774 P2；只带第一对会让兄弟
+   落点/第二对冲突漏摘，#774 对抗复审 P2）；
 2. **全域读视图**（`agent_control/completion_view.py`）：staging 视图是私有
    scratch，链接对归档垃圾形状（同名目录、文件祖先、symlink）与源消失 TOCTOU
    全域——overwrite 遍清挡位垃圾（预检保证删不到暂存源），第一遍遇挡位跳过按

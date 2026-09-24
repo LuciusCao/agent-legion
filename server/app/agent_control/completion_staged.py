@@ -15,13 +15,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from server.app.agent_broker.remote_artifact_promote import discard_staging_refs
 from server.app.agent_broker.remote_artifacts import apply_worker_artifact_refs
 from server.app.agent_broker.result_timing import mark as mark_result_stage
 from server.app.agent_broker.result_unpack import safe_relative_dir
-from server.app.agent_control.completion_preflight import (
-    find_landing_conflict,
-    gate_safe_staged_moves,
-)
+from server.app.agent_control.completion_moves import gate_safe_staged_moves
+from server.app.agent_control.completion_preflight import find_landing_conflict
 from server.app.agent_control.completion_view import link_into_view
 from server.app.executors._shard_contract import read_shard_output
 from server.app.executors.artifact_mirror import upload_produced_artifacts
@@ -56,8 +55,10 @@ def finish_staged(
     # （归档暂存提升 / remote ref 落盘）各自宣称的形状若单文件系统不可能
     # 同时成立（前缀相撞），或落点祖先被现场非目录挡住，继续 apply 只会
     # 在 remote promote 已提交之后炸穿结果提交（codex #774 P2）。预检失
-    # 败 = 干净 failed：零字节应用，staging key 保留，闸安全的归档 moves
-    # （node.log 等）照常随失败 finish 落盘。
+    # 败 = 干净 failed：零字节应用，staging key 保留；闸安全且未参与冲
+    # 突的归档 moves（node.log 等）照常随失败 finish 落盘——冲突 move
+    # 不挂，其 staging source 不再被抢先消耗，同名观测 move 随之能真正
+    # 落盘而不是被误当重放跳过（codex #774 P2）。
     remote_landing_names = (
         ()
         if cancelled
@@ -79,11 +80,13 @@ def finish_staged(
             ExecutionResult(
                 status="failed",
                 exit_code=1,
-                error_message=conflict,
+                error_message=conflict.full_message(),
                 runner=worker_id,
                 staged_file_moves=tuple(
                     (str(target), str(source))
-                    for target, source in gate_safe_staged_moves(staged_moves)
+                    for target, source in gate_safe_staged_moves(
+                        staged_moves, job_dir=job_dir, excluding=conflict.names
+                    )
                 ),
             ),
             stage_timer=stage_timer,
@@ -118,9 +121,15 @@ def finish_staged(
         # The staged promotion still rides the finish gate so the failed
         # node's node.log / events.jsonl land (observability parity with the
         # pre-staging behavior, #759 review P3) — staleness stays guarded.
+        # 与冲突分支同一纪律：只挂闸安全的 moves（祖先挡位重检）——预检
+        # 无锁，ref 验证期间现场可能已变坏，未过滤的被挡 move 会在闸内炸
+        # 开并连带观测 moves 被整体回滚（#774 对抗复审 P2）。
         remote_failure = replace(
             remote_failure,
-            staged_file_moves=tuple((str(target), str(source)) for target, source in staged_moves),
+            staged_file_moves=tuple(
+                (str(target), str(source))
+                for target, source in gate_safe_staged_moves(staged_moves)
+            ),
         )
         return handler.leases.finish(lease_id, remote_failure, stage_timer=stage_timer)
     # Refs applied after the view was built must be linked in too — with
@@ -174,7 +183,7 @@ def finish_staged(
             lease_id=lease_id,
         )
     mark_result_stage(stage_timer, "artifacts_upload")
-    return handler.leases.finish(
+    finished = handler.leases.finish(
         lease_id,
         ExecutionResult(
             status=status,
@@ -202,6 +211,14 @@ def finish_staged(
         ),
         stage_timer=stage_timer,
     )
+    if finished and remote_names and handler.object_store is not None:
+        # staging 源的唯一安全删除点（#774 对抗复审）：promote→finish 窗
+        # 口内绝不删（并发重试仍要 verify/promote 同一份字节，先删会让
+        # 后到者的失败 finish 抢跑冤判已完成节点）；finish 提交后迟到
+        # 重试只会拿到 verdict False（409）。两个早退臂（预检冲突 /
+        # remote_failure）与 verdict False 路径不删，残留由 GC 兜底。
+        discard_staging_refs(handler.object_store, outcome.output_artifacts, remote_names)
+    return finished
 
 
 def stored_run_dir(

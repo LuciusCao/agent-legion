@@ -94,8 +94,9 @@ def _make_handler(
             "insert into jobs(id, workspace_id, source_type, source_id, "
             " title, status, storage_dir) values ('job-1', 'ws-1', 's', 's1', 't', 'pending', 'd')"
         )
-        # #645 P2-a：promote 的代次写闸要求活跃 lease（active + 心跳新鲜 +
-        # 落戳代次 == jobs 现值，默认双双为 0）。
+        # #645 P2-a：promote 的代次写闸要求活跃 lease（行存在 + active +
+        # 落戳代次 == jobs 现值，默认双双为 0；codex #774 P1 起不按
+        # expires_at 单独判死——与 finish_lease/broker 清扫同谓词）。
         cursor = conn.execute(
             "insert into node_runs(job_id, node_key, status, command_json, log_path,"
             " run_dir, session_dir, started_at)"
@@ -154,7 +155,8 @@ def test_finish_remote_ref_promotes_downloads_and_registers(tmp_path: Path) -> N
     assert leases.results[0].status == "completed"
     assert leases.results[0].produced_artifacts == ("out.json",)
     assert (job_dir / "out.json").read_bytes() == PAYLOAD
-    # 服务端 copy 提升到权威 key，staging 对象被 best-effort 删除。
+    # 服务端 copy 提升到权威 key；staging 对象在 finish 提交后由完成方
+    # 删除（promote→finish 窗口内绝不删，#774 对抗复审 P1）。
     assert storage.objects == {AUTHORITY_KEY: PAYLOAD}
     row = object_store.lookup("job-1", "out.json")
     assert row is not None
@@ -308,7 +310,7 @@ def test_finish_cancelled_registers_without_download(tmp_path: Path) -> None:
     assert leases.results[0].status == "cancelled"
     assert not (job_dir / "out.json").exists()
     assert object_store.lookup("job-1", "out.json") is not None
-    assert storage.objects == {AUTHORITY_KEY: PAYLOAD}
+    assert storage.objects == {AUTHORITY_KEY: PAYLOAD}  # staging 在 finish 提交后删除
 
 
 def test_finish_mixed_refs_registers_both_channels(tmp_path: Path) -> None:
@@ -420,7 +422,7 @@ def test_finish_completed_undeclared_empty_hash_registers_host_computed(
     assert storage.objects == {
         AUTHORITY_KEY: PAYLOAD,
         "jobs/ws-1/job-1/extra.json": PAYLOAD,
-    }
+    }  # 两个 staging 源都在 finish 提交后删除
 
 
 class _FlakyCopyStorage(FakeStorage):
@@ -472,7 +474,8 @@ def test_promote_mid_batch_copy_failure_rolls_back_authority_keys(tmp_path: Path
 
 
 def test_promote_rerun_success_cleans_up_backups(tmp_path: Path) -> None:
-    """成功路径：旧 authority 对象被新字节覆盖，备份 key 同样清理。"""
+    """成功路径：旧 authority 对象被新字节覆盖，per-invocation 备份 key 与
+    staging 源都在 finish 提交后清理干净。"""
     storage = FakeStorage()
     storage.objects[STAGING_KEY] = PAYLOAD
     storage.objects[AUTHORITY_KEY] = b"stale-authority-bytes"

@@ -4,9 +4,12 @@
 （``agent_broker.remote_artifact_promote.promote_all``）共用同一套
 「备份 → copy → 锁内闸 + 登记 → 失败恢复」序列，杜绝两套相似实现：
 
-1. 字节一律先落在 per-execution/lease 的 staging key（``artifact_staging_key``
-   布局，lease_id 即本地上传的 execution 维度），绝不直写 authority key——
-   入口闸通过后才提交的 reset 因此不会被旧代次字节抢跑污染 authority 对象。
+1. 字节一律先落在 staging key（``artifact_staging_key`` 布局）——本地臂为
+   每次调用生成独立 attempt 命名空间，并发同 lease 重试的 put_stream
+   （锁外）互不覆盖、finally 清理互不误删（codex #774 P1）；远端臂沿用
+   协议固定的 per-execution key（重试携带相同 refs、字节相同）。绝不直
+   写 authority key——入口闸通过后才提交的 reset 因此不会被旧代次字节
+   抢跑污染 authority 对象。
 2. 同一 authority key 的并发 promote 经 ``artifact-authority:<key>`` advisory
    锁（升序、任何字节操作之前取）**全程串行**：备份、copy、闸内登记与
    失败恢复（commit 时刻失败除外，见第 4 条残余）都在同一事务的同一把
@@ -24,7 +27,9 @@
    死亡前、仍在按 key 锁内）；commit 时刻失败（连接死亡）是不可约例外：
    锁随会话释放，恢复降级为无串行 best-effort，选边偏向 commit 歧义中远
    更常见的 rollback half（docs §4）。无备份说明此前无对象，残留是孤儿，
-   由 bucket lifecycle 兜底。回滚 key 在任何结局都清理。
+   由 bucket lifecycle 兜底。回滚 key 由调用方按调用唯一化（attempt 维
+   度，codex #774 P1）——锁外清理只删自己 attempt 的备份，并发重试的
+   备份互不误删；备份在任何结局都清理。
 
 锁序与残余面论证见 docs/architecture/execution-generation.md §2.8/§4。
 """
@@ -68,7 +73,11 @@ returning *
 
 @dataclass(frozen=True)
 class AuthorityCopy:
-    """一条 staging→authority 字节提升；rollback_key 是既有对象的备份落点。"""
+    """一条 staging→authority 字节提升；rollback_key 是既有对象的备份落点。
+
+    rollback_key 必须由调用方按调用唯一化（attempt 维度）：并发 promote
+    同名产物的重试共享 rollback key 时，先提交者的锁外清理会删掉后者的
+    备份（codex #774 P1）。"""
 
     name: str
     staging_key: str
@@ -264,7 +273,9 @@ def promote_to_authority_guarded(
     抛异常（upsert/落盘失败）在事务死亡前于锁内恢复；commit 时刻失败
     （连接死亡）在锁外 best-effort 恢复——事务回滚后幸存的旧清单行永不
     指向 hash/size 不匹配的新字节（#759 复审 P1-2 与对抗复审 P1）。回滚
-    备份在任何结局都清理（提交/回滚后锁外执行，幂等）。
+    备份在任何结局都清理（提交/回滚后锁外执行）——清理只触本次调用
+    attempt 命名空间内的 key（调用方按调用唯一化 rollback key，codex
+    #774 P1），并发重试的备份互不误删。
 
     残余面：DB 连接中途死亡（含 commit 时刻）时按 key 锁随会话释放，恢
     复降级为无串行的 best-effort；commit 歧义的另一半（ack 丢失、服务端
@@ -359,13 +370,14 @@ def upload_via_staging_guarded(
     rollback_key: str,
     row: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """本地 lease 臂上传：字节先落 per-lease staging key，再走共享 primitive。
+    """本地 lease 臂上传：字节先落 per-invocation staging key，再走共享 primitive。
 
-    单产物版的 promote：调用方（``JobArtifactObjectStore.upload``）推导
-    staging/authority/rollback key（lease_id 即 execution 维度）与清单行。
-    闸拒返回 None——authority 对象已按回滚备份恢复，保留的旧清单行仍指向
-    匹配的旧字节；staging key 在任何结局都清理（本地臂自建自删；远端臂的
-    Worker staging 失败时留给 lifecycle，语义不同）。
+    单产物版的 promote：调用方（``JobArtifactObjectStore.upload``）为每次
+    调用派生独立 attempt 命名空间（staging/rollback key 都含 uuid）与清单
+    行。闸拒返回 None——authority 对象已按回滚备份恢复，保留的旧清单行
+    仍指向匹配的旧字节；staging key 在任何结局都清理（本地臂自建自删、
+    key 私有；远端臂的 Worker staging 是共享协议落点，只在 finish 提交后
+    由完成方删除，语义不同）。
     """
     copy_spec = AuthorityCopy(
         name=name,

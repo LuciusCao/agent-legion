@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import io
 import tarfile
+import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -374,7 +376,8 @@ def test_completion_ref_channel_survives_archive_directory_collision(
     assert (job_dir / "out.json").is_file()
     assert (job_dir / "out.json").read_bytes() == b"ref-bytes"
     assert storage.objects["jobs/gate18-ws/gate18-job/out.json"] == b"ref-bytes"
-    assert staging_key not in storage.objects  # promote 成功后 staging 已清
+    # staging 源在 finish 提交后由完成方删除（窗口内绝不删，#774 对抗复审）。
+    assert staging_key not in storage.objects
     assert store.row_for_node("gate18-job", "node_a", "out.json") is not None
 
 
@@ -384,9 +387,10 @@ def test_completion_prefix_clash_fails_cleanly_before_any_apply(
     """预检结构性修复：归档落点 reports（文件）与 remote ref 落点
     reports/out.json 前缀相撞——任何字节移动之前判 failed：authority 零
     copy（Worker staging 对象原样保留待 lifecycle）、清单零登记、remote
-    字节零落盘；闸安全的 node.log 仍随失败 finish 落盘（P3 parity）。
-    旧代码会在闸内把已 promote 的 remote 文件随目录备份静默删掉，或在
-    视图链接炸穿结果提交。"""
+    字节零落盘；参与冲突的输出 moves 不随失败 finish 落盘（codex #774
+    P2——挂上会让失败结果污染 job_dir），未参与冲突的 node.log 观测
+    move 照常落盘（P3 parity）。旧代码会在闸内把已 promote 的 remote
+    文件随目录备份静默删掉，或在视图链接炸穿结果提交。"""
     _seed_completion_job(job_db, workspace_id="gate19-ws", job_id="gate19-job")
     storage = FakeObjectStorage()
     staging_key = "jobs-staging/gate19-ws/gate19-job/exec-1/reports/out.json"
@@ -430,9 +434,9 @@ def test_completion_prefix_clash_fails_cleanly_before_any_apply(
     assert storage.objects == {staging_key: b"ref-bytes"}  # 零 authority copy
     assert store.row_for_node("gate19-job", "node_a", "reports/out.json") is None
     assert not (job_dir / "reports").is_dir()  # remote 字节从未落盘
-    # 失败 finish 的归档提升 parity：闸安全的 moves（含 reports 输出与
-    # node.log）照常落盘。
-    assert (job_dir / "reports").read_bytes() == b"archive-bytes"
+    # codex #774 P2：参与冲突的输出 move 不挂——失败结果不污染 job_dir；
+    # 未参与冲突的 node.log 观测 move 照常落盘（失败节点的日志 parity）。
+    assert not (job_dir / "reports").exists()
     assert (tmp_path / "logs" / "jobs" / "gate19-job" / "node_a.log").read_bytes() == b"partial log"
 
 
@@ -506,8 +510,9 @@ def test_completion_reserved_log_member_clash_fails_cleanly(
     保留结果成员 CODE_RESULT_LOG_MEMBER）且 Worker 以 dict-ref 上报——
     预检判 failed、零字节应用。旧代码在 overwrite 遍把归档 node.log
     （log move 的 source）unlink 掉，闸内 FileNotFoundError 把执行成功
-    的节点判 failed、重跑必复现。本用例同时钉住失败 finish 挂载的「同
-    source 双 move」经 guard 回滚 + 闸内兜底后零残留。"""
+    的节点判 failed、重跑必复现。codex #774 P2 起失败 finish 只挂未参
+    与冲突的观测 move：输出 move（job_dir/node.log）摘除不污染现场，
+    保留源不再被它抢先消耗，node.log 观测 move 真正落盘。"""
     _seed_completion_job(job_db, workspace_id="gate22-ws", job_id="gate22-job")
     storage = FakeObjectStorage()
     staging_key = "jobs-staging/gate22-ws/gate22-job/exec-1/node.log"
@@ -543,8 +548,12 @@ def test_completion_reserved_log_member_clash_fails_cleanly(
     assert "reserved result member" in _node_error("gate22-job", "node_a")
     assert storage.objects == {staging_key: b"ref-bytes"}  # 零 authority copy
     assert store.row_for_node("gate22-job", "node_a", "node.log") is None
-    assert not (job_dir / "node.log").exists()  # 同 source 双 move 回滚零残留
-    assert not (tmp_path / "logs" / "jobs" / "gate22-job" / "node_a.log").exists()
+    assert not (job_dir / "node.log").exists()  # 冲突输出 move 摘除，零污染
+    # 保留源不再被冲突 move 消耗：node.log 观测 move 真正落盘（旧代码两个
+    # move 都挂，第一个消耗源、第二个被误当事务重放跳过，日志反而丢失）。
+    assert (
+        tmp_path / "logs" / "jobs" / "gate22-job" / "node_a.log"
+    ).read_bytes() == b"captured stdout"
 
 
 def test_finish_after_worker_loss_sweep_settles_nothing(
@@ -596,3 +605,217 @@ def test_finish_after_worker_loss_sweep_settles_nothing(
         ).fetchone()
     assert run is not None
     assert run["status"] == "running"  # node_run 也不被翻转
+
+
+# ---------------------------------------------------------------------------
+# codex #774 对抗复审 P1：并发 /result 重试与 staging 源保留
+# ---------------------------------------------------------------------------
+
+
+def _start(fn: Callable[[], Any]) -> tuple[threading.Thread, dict[str, Any]]:
+    outcome: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome["result"] = fn()
+        except Exception as exc:
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread, outcome
+
+
+def _join(thread: threading.Thread) -> None:
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "concurrent finish never resolved"
+
+
+def test_concurrent_duplicate_result_finishes_never_flip_node_to_failed(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """同一 execution 的两个并发 /result 重试收敛到 completed：赢家的
+    staging 源删除发生在 finish **提交之后**（promote→finish 窗口内绝不
+    删，否则后到者的 HEAD 核验撞见虚假存储故障，失败 finish 抢跑冤判
+    已完成节点）；输家重复 promote 幂等、finish 竞争落败为零副作用
+    （409 语义）。本用例钉死两条不变量：任意交错下节点 completed、双
+    finish 结束后 staging 源已被赢家清理（删除点确实在 finish 之后且
+    只删一次不炸）。"""
+    _seed_completion_job(job_db, workspace_id="gate24-ws", job_id="gate24-job")
+    storage = FakeObjectStorage()
+    staging_key = "jobs-staging/gate24-ws/gate24-job/exec-1/out.json"
+    storage.objects[staging_key] = b"ref-bytes"
+    handler, store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "gate24-ws" / "gate24-job"
+    job_dir.mkdir(parents=True)
+    _result_archive(tmp_path / "bundles" / "result.tar.gz", {})
+
+    def _finish() -> bool:
+        return handler.finish(
+            lease_id="lease-1",
+            worker_id="worker-1",
+            job_id="gate24-job",
+            node_key="node_a",
+            manifest={"expected_outputs": ["out.json"], "execution_id": "exec-1"},
+            outcome=AgentOutcome(
+                status="completed",
+                exit_code=0,
+                output_artifacts={
+                    "out.json": {
+                        "storage_key": staging_key,
+                        "size_bytes": 9,
+                        "content_hash": "",
+                    }
+                },
+            ),
+            archive_name="result.tar.gz",
+        )
+
+    thread_a, outcome_a = _start(_finish)
+    thread_b, outcome_b = _start(_finish)
+    _join(thread_a)
+    _join(thread_b)
+
+    assert outcome_a.get("error") is None
+    assert outcome_b.get("error") is None
+    assert _node_row("gate24-job", "node_a")["status"] == "completed"
+    assert (job_dir / "out.json").read_bytes() == b"ref-bytes"
+    # 赢家在 finish 提交后删了 staging 源（重复删除幂等、不炸）；authority
+    # 字节与清单行不受并发重试影响。
+    assert staging_key not in storage.objects
+    assert storage.objects["jobs/gate24-ws/gate24-job/out.json"] == b"ref-bytes"
+    row = store.row_for_node("gate24-job", "node_a", "out.json")
+    assert row is not None
+    assert row["size_bytes"] == 9
+
+
+# ---------------------------------------------------------------------------
+# codex #774 对抗复审 P2：多重/兄弟冲突的全量摘除
+# ---------------------------------------------------------------------------
+
+
+def test_completion_disjoint_conflicts_drop_every_conflicting_move(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """两对不相交的前缀冲突（归档 a vs ref a/b、归档 x vs ref x/y）：names
+    必须是全集——失败 finish 把四者全部摘除（零污染），未参与冲突的
+    node.log 观测 move 照常落盘。修复前只摘除第一对，第二对干净落盘污
+    染失败节点的 job_dir（或闸内炸开连带 node.log 被整体回滚）。"""
+    _seed_completion_job(job_db, workspace_id="gate25-ws", job_id="gate25-job")
+    storage = FakeObjectStorage()
+    handler, _store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "gate25-ws" / "gate25-job"
+    job_dir.mkdir(parents=True)
+    # 归档只带文件成员 a / x / node.log（a/b 与 x/y 若同进 tar，解包本身
+    # 就会撞 File exists——那是另一条更早的防线）；嵌套名由 ref 通道宣称。
+    _result_archive(
+        tmp_path / "bundles" / "result.tar.gz",
+        {"a": b"a-bytes", "x": b"x-bytes", "node.log": b"partial log"},
+    )
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="gate25-job",
+        node_key="node_a",
+        manifest={
+            "kind": "code",
+            "log_path": "logs/jobs/gate25-job/node_a.log",
+            "expected_outputs": ["a", "a/b", "x", "x/y"],
+            "execution_id": "exec-1",
+        },
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            output_artifacts={
+                "a/b": {
+                    "storage_key": "jobs-staging/gate25-ws/gate25-job/exec-1/a/b",
+                    "size_bytes": 8,
+                    "content_hash": "",
+                },
+                "x/y": {
+                    "storage_key": "jobs-staging/gate25-ws/gate25-job/exec-1/x/y",
+                    "size_bytes": 8,
+                    "content_hash": "",
+                },
+            },
+        ),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("gate25-job", "node_a")["status"] == "failed"
+    assert "conflicting output paths" in _node_error("gate25-job", "node_a")
+    for rel in ("a", "a/b", "x", "x/y"):
+        assert not (job_dir / rel).exists(), f"conflicting move {rel} must not land"
+    assert storage.objects == {}  # 冲突在 verify 之前判死，零字节应用
+    assert (tmp_path / "logs" / "jobs" / "gate25-job" / "node_a.log").read_bytes() == b"partial log"
+
+
+class _VerifyFailAndPolluteStorage(FakeObjectStorage):
+    """ref 核验的 HEAD 期间在 job_dir 制造挡位文件，然后报告对象缺失。
+
+    模拟「预检无锁通过 → ref 验证期间现场被并发节点 finish 污染」的残
+    余窗口（预检 docstring 自认盖不住的那条竞态）。"""
+
+    def __init__(self, blocker: Path) -> None:
+        super().__init__()
+        self._blocker = blocker
+
+    def head_object(self, storage_key: str) -> Any:
+        self._blocker.write_bytes(b"leftover-from-concurrent-node")
+        return None
+
+
+def test_completion_remote_failure_drops_blocked_moves_and_keeps_log(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """#774 对抗复审（remote_failure 分支过滤）：ref 核验失败（staging 对
+    象缺失）且现场在预检后被污染（reports 落为文件挡住 reports/out.json）
+    ——失败 finish 只挂闸安全的 moves：被挡 move 不进闸（否则闸内炸开
+    连带 node.log 被整体回滚丢失），ok.json 与 node.log 照常落盘，污染
+    现场原样保留。"""
+    _seed_completion_job(job_db, workspace_id="gate26-ws", job_id="gate26-job")
+    job_dir = tmp_path / "jobs" / "gate26-ws" / "gate26-job"
+    blocker = job_dir / "reports"
+    storage = _VerifyFailAndPolluteStorage(blocker)
+    handler, _store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    jobs_dir.joinpath("gate26-ws", "gate26-job").mkdir(parents=True)
+    _result_archive(
+        tmp_path / "bundles" / "result.tar.gz",
+        {"ok.json": b"ok", "reports/out.json": b"bytes", "node.log": b"log bytes"},
+    )
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="gate26-job",
+        node_key="node_a",
+        manifest={
+            "kind": "code",
+            "log_path": "logs/jobs/gate26-job/node_a.log",
+            "expected_outputs": ["ok.json", "reports/out.json"],
+            "execution_id": "exec-1",
+        },
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            output_artifacts={
+                "ok.json": {
+                    "storage_key": "jobs-staging/gate26-ws/gate26-job/exec-1/ok.json",
+                    "size_bytes": 2,
+                    "content_hash": "",
+                }
+            },
+        ),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("gate26-job", "node_a")["status"] == "failed"
+    assert "missing" in _node_error("gate26-job", "node_a")
+    assert blocker.read_bytes() == b"leftover-from-concurrent-node"  # 现场原样
+    assert not blocker.is_dir()
+    assert (job_dir / "ok.json").read_bytes() == b"ok"  # 闸安全的归档输出照常落盘
+    assert not (job_dir / "reports" / "out.json").exists()  # 被挡 move 摘除
+    assert (tmp_path / "logs" / "jobs" / "gate26-job" / "node_a.log").read_bytes() == b"log bytes"

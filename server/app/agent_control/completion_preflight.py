@@ -28,14 +28,45 @@ validate-then-apply 的形状半边：任何字节移动之前（remote promote�
 
 判失败时调用方仍把「闸安全的」归档 moves（``gate_safe_staged_moves``
 过滤后的日志类条目）挂上失败 finish：node.log / events.jsonl 照常落
-盘（#759 review P3 的可观测性 parity），被挡的输出 moves 不挂——它
-们正是会在闸内炸开的那批。
+盘（#759 review P3 的可观测性 parity）；被挡的输出 moves 与**参与冲
+突的落点 moves**（``LandingConflict.names``）不挂——前者会在闸内炸
+开，后者会让失败结果污染 job_dir、并把共享同一 staging source 的观
+测 move 误当重放跳过（codex #774 P2）。过滤器本体在姊妹模块
+``completion_moves``（体积预算拆分）。
 """
 
 from __future__ import annotations
 
-import os
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+
+from server.app.agent_control.completion_moves import (
+    blocking_ancestor,
+)
+from server.app.agent_control.completion_moves import (
+    relative_or_none as _relative_or_none,
+)
+
+
+@dataclass(frozen=True)
+class LandingConflict:
+    """落点冲突：人读描述（第一处目击）+ 全部冲突的 job_dir 相对落点名集。
+
+    ``names`` 供失败 finish 过滤 staged moves：参与冲突的落点 move 不挂
+    （它们正是预检判死的形状），未参与的观测 move（node.log 等）照常随
+    失败 finish 落盘。names 必须是全集——只带第一对会让兄弟落点/第二
+    对冲突漏摘（#774 对抗复审 P2）。"""
+
+    message: str
+    names: frozenset[PurePosixPath]
+
+    def full_message(self) -> str:
+        """第一处目击 + 全部冲突落点名（operator 诊断面：只带第一处时无法
+        解释其余被摘除落点的去向，#774 对抗复审）。"""
+        return (
+            f"{self.message}; conflicting outputs: "
+            f"{', '.join(sorted(name.as_posix() for name in self.names))}"
+        )
 
 
 def find_landing_conflict(
@@ -44,8 +75,8 @@ def find_landing_conflict(
     view_dir: Path,
     staged_moves: list[tuple[Path, Path]],
     remote_landing_names: tuple[str, ...],
-) -> str | None:
-    """核算计划的落点与保留源，返回冲突描述；None = 形状兼容，可以 apply。
+) -> LandingConflict | None:
+    """核算计划的落点与保留源，返回冲突；None = 形状兼容，可以 apply。
 
     ``staged_moves`` 是 ``plan_agent_result_moves`` 规划的 (target, source)
     绝对路径对——target 在 job_dir 树内的计入落点集（前缀互斥 + 祖先畅
@@ -54,6 +85,12 @@ def find_landing_conflict(
     落盘的 dict-ref 名（调用方已按 cancelled / expected 过滤）。所有名只
     做路径数学，不信任的 Worker 名（``..``、非规范形）由 apply 阶段另行
     拒绝，这里撞上它们不会做任何文件系统写。
+
+    不短路、收集**全部**冲突：``names`` 被调用方当作失败 finish 的摘除
+    集消费，只带回第一对会让同前缀兄弟落点与第二对冲突的 moves 漏摘—
+    —它们照样随失败 finish 落盘污染 job_dir，或在闸内炸开连带观测
+    moves 被整体回滚（node.log 静默丢失，#774 对抗复审 P2）。message
+    保留第一处目击（人读定位起点），names 是全集。
     """
     landings: list[tuple[PurePosixPath, str]] = []
     protected_sources: list[PurePosixPath] = []
@@ -66,56 +103,37 @@ def find_landing_conflict(
         if protected is not None:
             protected_sources.append(protected)
     landings.extend((PurePosixPath(name), "remote ref") for name in remote_landing_names)
+    first_message: str | None = None
+    names: set[PurePosixPath] = set()
     for index, (name, channel) in enumerate(landings):
         for other, other_channel in landings[index + 1 :]:
             if _is_proper_prefix(name, other) or _is_proper_prefix(other, name):
-                return (
-                    f"conflicting output paths: {name.as_posix()!r} ({channel}) vs "
-                    f"{other.as_posix()!r} ({other_channel})"
-                )
+                if first_message is None:
+                    first_message = (
+                        f"conflicting output paths: {name.as_posix()!r} ({channel}) vs "
+                        f"{other.as_posix()!r} ({other_channel})"
+                    )
+                names.update({name, other})
         for protected in protected_sources:
             if name == protected or _is_proper_prefix(protected, name):
-                return (
-                    f"output path {name.as_posix()!r} ({channel}) conflicts with "
-                    f"the reserved result member {protected.as_posix()!r}"
-                )
+                if first_message is None:
+                    first_message = (
+                        f"output path {name.as_posix()!r} ({channel}) conflicts with "
+                        f"the reserved result member {protected.as_posix()!r}"
+                    )
+                names.add(name)
     for name, channel in landings:
         blocker = blocking_ancestor(job_dir / name)
         if blocker is not None:
-            return (
-                f"output path {name.as_posix()!r} ({channel}) is blocked by "
-                f"existing non-directory {blocker}"
-            )
-    return None
-
-
-def gate_safe_staged_moves(
-    staged_moves: list[tuple[Path, Path]],
-) -> list[tuple[Path, Path]]:
-    """过滤出闸内提升不会撞祖先的 moves（失败 finish 的日志 parity 用）。"""
-    return [move for move in staged_moves if blocking_ancestor(move[0]) is None]
-
-
-def blocking_ancestor(target: Path) -> Path | None:
-    """target 的祖先链上第一个已存在的条目是非目录时返回它。
-
-    mkdir(parents=True, exist_ok=True) 恰恰只在这种条目上炸开；向上走
-    到第一个已存在条目即停——它是目录则其上全是目录。lexists：破 symlink
-    同样挡住 mkdir（exists 会漏判）。
-    """
-    parent = target.parent
-    while parent != parent.parent:
-        if os.path.lexists(parent):
-            return None if parent.is_dir() else parent
-        parent = parent.parent
-    return None
-
-
-def _relative_or_none(path: Path, base: Path) -> PurePosixPath | None:
-    try:
-        return PurePosixPath(path.relative_to(base).as_posix())
-    except ValueError:
+            if first_message is None:
+                first_message = (
+                    f"output path {name.as_posix()!r} ({channel}) is blocked by "
+                    f"existing non-directory {blocker}"
+                )
+            names.add(name)
+    if first_message is None:
         return None
+    return LandingConflict(message=first_message, names=frozenset(names))
 
 
 def _is_proper_prefix(name: PurePosixPath, other: PurePosixPath) -> bool:
