@@ -1674,7 +1674,7 @@
     "server/app/workflows/approval_node.py": 104,
     "server/app/workflows/builtin.py": 25,
     "server/app/workflows/builtin_demo.py": 87,
-    "server/app/workflows/condition_barrier.py": 59,
+    "server/app/workflows/condition_barrier.py": 47,
     "server/app/workflows/conditions.py": 43,
     "server/app/workflows/definition.py": 40,
     "server/app/workflows/execution_control.py": 44,

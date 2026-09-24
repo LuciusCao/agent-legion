@@ -12,10 +12,13 @@ not_applicable），保留的旧字节（RMW）会被当真值走错分支。判
 无害（failed-upstream 防线会先拦住整条支路，job 已失败）。
 
 自门控排除集（#759 ③ 二轮对抗复审 P1）：被门控分支内部（含 target 自
-身）的生产者本来就跑不到（等分支被选中），对它们设障是循环等待（永久
-静默挂起）——这类「条件由分支内部产物决定」的定义按文件语义评估（缺
-失即 false），与屏障引入前一致。调用方以 ``branch_gated_keys`` 计算排除
-集（``any_condition_producer_in_flight`` 已内置逐边计算）。
+身，含合并闭包意义上的隐式下游）的生产者本来就跑不到（等分支被选中），
+对它们设障是循环等待（永久静默挂起）——这类「条件由分支内部产物决定」
+的定义按文件语义评估（缺失即 false），与屏障引入前一致。已知交互（③ 三
+轮对抗复审登记，接受）：自门控定义下 rerun target 的上游会重置分支内生
+产者并暂存删除条件文件，target 随之被标 not_applicable——该 rerun 意图
+被静默吞掉，属文件语义的固有取舍。调用方以 ``branch_gated_keys`` 计算排
+除集（``any_condition_producer_in_flight`` 已内置逐边计算）。
 
 自 ``workflow_branching`` 拆出的体积预算姊妹模块。
 """
@@ -25,24 +28,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from server.app.workflows.definition import WorkflowDefinition, WorkflowEdge
+from server.app.workflows.workflow_consumption import dependency_downstream
 
 TERMINAL_SUCCESS_STATUSES = {"completed", "not_applicable"}
-
-
-def _explicit_reachable(definition: WorkflowDefinition, start: str) -> set[str]:
-    """显式边的传递下游（含 start 自身）。"""
-    children: dict[str, list[str]] = {key: [] for key in definition.nodes}
-    for edge in definition.edges:
-        children[edge.source].append(edge.target)
-    seen: set[str] = set()
-    stack = [start]
-    while stack:
-        key = stack.pop()
-        if key in seen:
-            continue
-        seen.add(key)
-        stack.extend(children.get(key, []))
-    return seen
 
 
 def condition_producer_in_flight(
@@ -64,9 +52,16 @@ def condition_producer_in_flight(
 
 
 def branch_gated_keys(definition: WorkflowDefinition, target: str) -> frozenset[str]:
-    """target 及其显式下游闭包——条件产物生产者的自门控排除集（见
-    ``condition_producer_in_flight`` 的 ``excluded``）。"""
-    return frozenset(_explicit_reachable(definition, target) | {target})
+    """target 及其**合并**下游闭包（显式边 ∪ 隐式消费边，
+    ``dependency_downstream``）——条件产物生产者的自门控排除集。
+
+    必须用合并闭包而非显式-only（#759 ③ 三轮对抗复审 P1）：loader 不要求
+    inputs 的生产者与消费者相邻，「条件产物由 target 的隐式下游生产」
+    （probe 消费 target 的 output、产出 gate→target 的条件）的合法定义在
+    显式闭包里看不到 probe——probe 永远跑不到（它等 target 的 output），
+    对它设障是循环等待（永久静默挂起）。合并闭包正是本仓库的单一事实源
+    （`workflow_consumption`），屏障与重置闭包因此同图。"""
+    return frozenset(dependency_downstream(definition, target)) | {target}
 
 
 def any_condition_producer_in_flight(

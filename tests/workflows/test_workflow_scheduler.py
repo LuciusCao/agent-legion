@@ -708,3 +708,42 @@ edges:
     ready = {node.key for node in find_ready_nodes(definition, statuses, tmp_path)}
 
     assert "worker" in ready
+
+
+def test_producer_implicit_downstream_of_target_does_not_deadlock(tmp_path):
+    """③ 三轮对抗复审 P1：条件产物由 target 的**隐式**下游生产（probe 消费
+    target 的 output、产出 gate→target 的条件；loader 不要求 inputs 相邻，
+    无显式边）——排除集必须是合并闭包（显式 ∪ 隐式消费边），否则 probe
+    永远跑不到（等 target 的 output），对它设障是循环等待（永久静默挂
+    起）。修复后按文件语义评估（缺失即 false），可终止。"""
+    path = tmp_path / "implicit_self_gated.yaml"
+    path.write_text(
+        """
+key: implicit_self_gated
+label: t
+schema_version: 2
+nodes:
+  gate:
+    label: Gate
+    capability: gate
+  target:
+    label: Target
+    capability: target
+    after: [gate]
+    outputs: [out.json]
+  probe:
+    label: Probe
+    capability: probe
+    inputs: [out.json]
+    outputs: [progress.json]
+edges:
+  - {from: gate, to: target, when: {artifact: progress.json, path: "$.ok", equals: true}}
+""",
+        encoding="utf-8",
+    )
+    definition = load_workflow_definition(path)
+    statuses = {"gate": "completed", "target": "pending", "probe": "pending"}
+
+    result = evaluate_branches(definition, statuses, tmp_path)
+
+    assert "target" in result.not_applicable  # 合并闭包排除 probe：按文件语义可终止

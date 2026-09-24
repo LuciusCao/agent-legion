@@ -50,7 +50,7 @@ cannot drive any consumer's verdict in the new epoch: a deleted-row name has
 a reset (non-terminal) producer, and every consumer channel is barriered on
 non-terminal producers — node inputs via
 ``scheduler._has_unfinished_implicit_producer``, branch-condition artifacts
-via ``workflow_branching.condition_producer_in_flight`` (#759 ③ 对抗复审
+via ``condition_barrier.condition_producer_in_flight`` (#759 ③ 对抗复审
 P1) — so every consumer defers until the producer re-runs and overwrites the
 file. The window is the millisecond-scale staging→commit span of one
 transaction, per file.

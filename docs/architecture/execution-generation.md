@@ -148,7 +148,7 @@ run-to / approval rework 一律走它，不允许各自重遍历定义。hydrati
 **条件产物的生产者屏障**（#759 ③ 对抗复审 P1）：把 `edge.condition.artifact`
 纳入闭包后，分支评估侧必须配对状态屏障——条件 artifact 有非终态生产者时，
 `evaluate_branches` 推迟整个 source 的裁决（不选边、不标 not_applicable），
-`find_ready_nodes` 不就绪相关 target（`workflow_branching.condition_producer_in_flight`，
+`find_ready_nodes` 不就绪相关 target（`condition_barrier.condition_producer_in_flight`，
 与调度侧隐式生产者屏障共用同一张 `artifact_producers` 索引与同一组终态集合）。
 否则重跑条件生产者会把「暂存删除后的缺失」当成条件 false，把 gated 分支永久
 标成 not_applicable；RMW 保留的旧字节会被当真值走错分支。屏障排除「自门控」
