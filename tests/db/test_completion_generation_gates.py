@@ -535,6 +535,9 @@ def test_finish_gate_promotion_failure_converts_to_failed_not_wedge(
             status="completed",
             exit_code=0,
             staged_file_moves=((str(target), str(missing_source)),),
+            # codex #774 P2：提升失败整体回滚后，视图探出的 run_dir 随
+            # staging 目录失效——必须置空回退文件系统派生，不持久化悬空路径。
+            run_dir="jobs/gate21-ws/gate21-job/runs/node_a/worker",
         ),
     )
 
@@ -547,8 +550,13 @@ def test_finish_gate_promotion_failure_converts_to_failed_not_wedge(
         lease = conn.execute(
             "select status from executor_leases where id=%s", ("lease-1",)
         ).fetchone()
+        run = conn.execute(
+            "select run_dir from node_runs where job_id='gate21-job' and node_key='node_a'"
+        ).fetchone()
     assert lease is not None
     assert lease["status"] == "released"
+    assert run is not None
+    assert run["run_dir"] == ""  # 悬空路径不持久化（文件系统派生也找不到）
 
 
 def test_completion_reserved_log_member_clash_fails_cleanly(

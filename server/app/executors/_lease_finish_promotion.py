@@ -24,8 +24,12 @@ def promote_result_staged_moves_contained(
 
     成功返回原 result。提升失败时 guard 已整体回滚：completed 转 failed
     照常提交——上抛会回滚整个 finish 事务，lease 不得释放、节点停在
-    running，重试撞同一现场毒化成循环。非 completed 结果保留原状（原错
-    误信息更有诊断价值，提升失败只进日志）。
+    running，重试撞同一现场毒化成循环。两臂都置空 ``run_dir``（codex
+    #774 P2）：回滚已撤销全部落盘（含 events.jsonl），从暂存视图探出的
+    run_dir 随之失效——置空让 ``canonicalize_finish_paths`` 回退到文件
+    系统派生（只记录真实存在的路径），而不是持久化一个随 staging 目录
+    删除/指向旧执行日志的路径。非 completed 结果保留原状态与错误信息
+    （原错误更有诊断价值，提升失败只进日志）。
     """
     try:
         promote_result_staged_moves(result.staged_file_moves)
@@ -47,5 +51,7 @@ def promote_result_staged_moves_contained(
                 status="failed",
                 exit_code=1,
                 error_message=f"failed to promote result files: {exc}",
+                run_dir="",
             )
+        return replace(result, run_dir="")
     return result
