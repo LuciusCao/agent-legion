@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from server.app.workflows.condition_barrier import any_condition_producer_in_flight
+from server.app.workflows.condition_barrier import branch_gated_keys, condition_producer_in_flight
 from server.app.workflows.conditions import selected_edges
 from server.app.workflows.definition import WorkflowDefinition, WorkflowEdge
 from server.app.workflows.workflow_consumption import artifact_producers
@@ -52,7 +52,7 @@ def evaluate_branches(
     artifact_dir: Path,
 ) -> BranchEvaluation:
     not_applicable: set[str] = set()
-    deferred: set[str] = set()  # 推迟 source 的条件 target 可达集（本轮不可标）
+    deferred: set[str] = set()  # 在途条件边的 target 可达集（本轮不可标）
     node_statuses = effective_node_statuses(definition, node_statuses)
     producers = artifact_producers(definition)
     outgoing: dict[str, list[WorkflowEdge]] = {key: [] for key in definition.nodes}
@@ -63,20 +63,26 @@ def evaluate_branches(
             continue
         if not any(edge.condition is not None for edge in edges):
             continue
-        if any_condition_producer_in_flight(edges, producers, node_statuses, definition):
-            # 条件产物的生产者在途（重跑/尚未产出）：缺失或旧字节都不可信，
-            # 推迟整个 source 的分支裁决——不选边、不把任何 target 标成
-            # not_applicable（终态无复活路径），等生产者完成后用新字节评估。
-            # 其条件 target 的可达集进 deferred：多源汇合拓扑下，其他 source
-            # 本轮的合法评估同样不能把该 target 钉死（本 source 之后仍可能
-            # 选中它，#759 ③ 二轮对抗复审 P2）。
-            deferred |= _reachable_from(
-                definition, {edge.target for edge in edges if edge.condition is not None}
-            )
+        # 逐边推迟（#759 ③ 终审 P1）：生产者在途的边进 deferred（其 target
+        # 可达集本轮不可标），可判定的边照常裁决——整源推迟会把可判定的
+        # 兄弟边挟持住：兄弟 target 不钉死 → 其分支内的生产者永远跑不到
+        # → 在途永不解除（永久静默挂起，基线行为是可终止）。
+        decidable: list[WorkflowEdge] = []
+        for edge in edges:
+            if condition_producer_in_flight(
+                edge,
+                producers,
+                node_statuses,
+                excluded=branch_gated_keys(definition, edge.target),
+            ):
+                deferred |= _reachable_from(definition, {edge.target})
+            else:
+                decidable.append(edge)
+        if not decidable:
             continue
-        selected = selected_edges(edges, artifact_dir)
+        selected = selected_edges(decidable, artifact_dir)
         selected_targets = {edge.target for edge in selected}
-        unselected_targets = {edge.target for edge in edges} - selected_targets
+        unselected_targets = {edge.target for edge in decidable} - selected_targets
         selected_reachable = _reachable_from(definition, selected_targets)
         unselected_reachable = _reachable_from(definition, unselected_targets)
         not_applicable.update(unselected_reachable - selected_reachable)

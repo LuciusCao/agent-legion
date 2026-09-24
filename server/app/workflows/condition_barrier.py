@@ -3,7 +3,9 @@
 条件 artifact 有非终态生产者时，分支判定不可信——缺失（暂存删除/尚未
 产出）会被 ``condition_matches`` 当 false（gated 分支被永久标
 not_applicable），保留的旧字节（RMW）会被当真值走错分支。判定推迟到
-生产者终态之后：不选边、不标 not_applicable、不就绪。
+生产者终态之后：**逐边**推迟（``evaluate_branches``：可判定的兄弟边照
+常裁决，在途边的 target 可达集本轮不参与 not_applicable 标记——整源
+推迟会把可判定兄弟边挟持成永久挂起，③ 终审 P1），就绪侧不就绪。
 
 与调度就绪的隐式生产者屏障（scheduler.find_ready_nodes 的
 ``_has_unfinished_implicit_producer``）共用同一张生产者索引

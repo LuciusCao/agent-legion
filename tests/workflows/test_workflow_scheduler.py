@@ -747,3 +747,55 @@ edges:
     result = evaluate_branches(definition, statuses, tmp_path)
 
     assert "target" in result.not_applicable  # 合并闭包排除 probe：按文件语义可终止
+
+
+def test_sibling_branch_producer_does_not_hold_decidable_edges_hostage(tmp_path):
+    """③ 终审 P1：同 source 两条条件边——a 边条件产物外部缺失（可判定为
+    假），b 边条件产物由 a 分支内的 probe 生产（在途）。逐边推迟：a 支当
+    轮钉死（probe 随之终态），b 推迟——下一轮 b 按语义收尾。整源推迟
+    （修复前）把可判定的 a 边挟持住：a 不钉死 → probe 永不跑 → 屏障永不
+    解除，job 永久静默挂起（基线行为可终止）。"""
+    path = tmp_path / "sibling.yaml"
+    path.write_text(
+        """
+key: sibling
+label: t
+schema_version: 2
+nodes:
+  gate:
+    label: Gate
+    capability: gate
+  a:
+    label: A
+    capability: a
+    after: [gate]
+  b:
+    label: B
+    capability: b
+    after: [gate]
+  probe:
+    label: Probe
+    capability: probe
+    outputs: [d.json]
+edges:
+  - {from: gate, to: a, when: {artifact: c.json, path: "$.ok", equals: true}}
+  - {from: gate, to: b, when: {artifact: d.json, path: "$.ok", equals: true}}
+  - {from: a, to: probe}
+""",
+        encoding="utf-8",
+    )
+    definition = load_workflow_definition(path)
+    # c.json 缺失（外部产物、无生产者）：a 边可判定为假；d.json 由 a 分支内
+    # 的 probe 生产且在途：b 边推迟。
+    statuses = {"gate": "completed", "a": "pending", "b": "pending", "probe": "pending"}
+
+    result = evaluate_branches(definition, statuses, tmp_path)
+
+    assert "a" in result.not_applicable  # 可判定的兄弟边照常裁决（钉死）
+    assert "probe" in result.not_applicable  # a 的下游随钉（probe 终态）
+    assert "b" not in result.not_applicable  # 在途边推迟：不标
+
+    # probe 终态后下一轮：b 边按文件语义裁决（缺失即假）——job 可终止。
+    statuses.update({"a": "not_applicable", "probe": "not_applicable"})
+    result = evaluate_branches(definition, statuses, tmp_path)
+    assert "b" in result.not_applicable

@@ -145,17 +145,19 @@ run-to / approval rework 一律走它，不允许各自重遍历定义。hydrati
 
 这是代次协议的前提：闭包划错，CAS 护住的现场本身就是错的。
 
-**条件产物的生产者屏障**（#759 ③ 对抗复审 P1）：把 `edge.condition.artifact`
-纳入闭包后，分支评估侧必须配对状态屏障——条件 artifact 有非终态生产者时，
-`evaluate_branches` 推迟整个 source 的裁决（不选边、不标 not_applicable），
-`find_ready_nodes` 不就绪相关 target（`condition_barrier.condition_producer_in_flight`，
-与调度侧隐式生产者屏障共用同一张 `artifact_producers` 索引与同一组终态集合）。
-否则重跑条件生产者会把「暂存删除后的缺失」当成条件 false，把 gated 分支永久
-标成 not_applicable；RMW 保留的旧字节会被当真值走错分支。屏障排除「自门控」
-生产者（`branch_gated_keys` = target 及其显式下游闭包）：条件由被门控分支内部
-产物决定的定义按文件语义评估（缺失即 false），对它们设障是循环等待（② 轮对
-抗复审 P1）；推迟 source 的条件 target 可达集本轮不参与 not_applicable 标记
-（多源汇合下不被其他 source 的评估钉死，② 轮对抗复审 P2）。
+**条件产物的生产者屏障**（#759 ③ 对抗复审 P1 族）：把 `edge.condition.artifact`
+纳入闭包后，分支评估侧必须配对状态屏障——条件 artifact 有非终态生产者时判定
+不可信：`evaluate_branches` 逐边推迟在途条件边（可判定的兄弟边照常裁决，在途边
+的 target 可达集本轮不参与 not_applicable 标记——整源推迟会把可判定兄弟边挟持
+成永久挂起，多源汇合下其他 source 也不能钉死推迟 target），`find_ready_nodes`
+不就绪相关 target（`condition_barrier.condition_producer_in_flight`，与调度侧隐式
+生产者屏障共用同一张 `artifact_producers` 索引与同一组终态集合）。否则重跑条件
+生产者会把「暂存删除后的缺失」当成条件 false，把 gated 分支永久标成
+not_applicable；RMW 保留的旧字节会被当真值走错分支。屏障排除「自门控」生产者
+（`branch_gated_keys` = target 及其**合并**下游闭包——显式边 ∪ 隐式消费边，
+`dependency_downstream`）：条件由被门控分支内部产物决定的定义按文件语义评估
+（缺失即 false），对它们设障是循环等待（显式与隐式两种自门控形态都会永久
+静默挂起，③ 二/三轮对抗复审）。
 
 ### 2.7 写面登记与静态强制（EXEC-GENERATION-002）
 
