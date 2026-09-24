@@ -6,7 +6,7 @@ from pathlib import Path
 from server.app.workflows.condition_barrier import branch_gated_keys, condition_producer_in_flight
 from server.app.workflows.conditions import selected_edges
 from server.app.workflows.definition import WorkflowDefinition, WorkflowEdge
-from server.app.workflows.workflow_consumption import artifact_producers
+from server.app.workflows.workflow_consumption import artifact_producers, dependency_downstream
 
 RUNNABLE_STATUSES = {"pending", "ready", "stale"}
 
@@ -75,7 +75,7 @@ def evaluate_branches(
                 node_statuses,
                 excluded=branch_gated_keys(definition, edge.target),
             ):
-                deferred |= _reachable_from(definition, {edge.target})
+                deferred |= {edge.target} | set(dependency_downstream(definition, edge.target))
             else:
                 decidable.append(edge)
         if not decidable:
