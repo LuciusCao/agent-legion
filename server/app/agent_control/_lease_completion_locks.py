@@ -5,7 +5,10 @@
 lease 写闸、文件落盘走 finish 之内的代次闸，不串行时两道闸的胜者可以
 不同——A 镜像、B 镜像、A finish 获胜，本地面=A 而权威面/清单面=B，永
 久分叉。串行后到者的镜像写闸看到已释放的 lease 直接拒写
-（``lease_artifact_write_current``），所有面只剩获胜者。
+（``lease_artifact_write_current``），所有面只剩获胜者。解包失败的失
+败收尾（``completion.finish`` 的转换臂）同样在该临界区内提交（#759
+复审 P2）：锁外释放 lease 会让在途成功路径的 finish 落败，其已登记
+的产物面与获胜的失败结果分裂。
 
 锁表按 waiters 计数自清（零等待即删），lease id 不随执行量累积。
 """
