@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.app.agent_broker.manifest_trim import (
+    cancel_queued_requests_for_job,
+    cancel_queued_sql,
+)
 from server.app.db.connection import DatabaseConnection
-from server.app.jobs.atomic_mutations import _cancel_queued_sql
 from server.app.jobs.workflow_upgrade_artifact_rows import (
     delete_all_artifact_rows,
     delete_reset_artifact_rows,
@@ -134,21 +137,6 @@ def upgrade_job_workflow_inherit(
             (job_id, node_key, generation),
         )
 
-    if reset_nodes:
-        placeholders = ",".join("%s" for _ in reset_nodes)
-        conn.execute(
-            f"""
-            update node_runs
-            set run_dir='', session_dir=''
-            where job_id=%s and node_key in ({placeholders})
-            """,
-            (job_id, *sorted(reset_nodes)),
-        )
-        delete_shards(conn, job_id, reset_nodes)
-        # A2：旧 revision 入队的 queued agent 请求必须取消（manifest 携带
-        # 旧语义，claim 复查链在新 pending 行上放行会抢跑），与
-        # mark_nodes_for_rerun 同款；clean 模式自 base 起同样缺失，一并补上。
-        conn.execute(_cancel_queued_sql(placeholders), (job_id, *sorted(reset_nodes)))
     # A4：新 revision 已消失的旧节点 key（rename 前身份）的同名清单行一并
     # 清理（行匹配不到按新 key 构建的 reset 集，不删就是永久孤儿行）。
     # #759 4.3：身份来源是调用方从 old/new definition 差集算出的
@@ -160,6 +148,36 @@ def upgrade_job_workflow_inherit(
         if removed_node_keys is not None
         else frozenset(existing_rows) - frozenset(node_keys)
     )
+    if reset_nodes:
+        placeholders = ",".join("%s" for _ in reset_nodes)
+        conn.execute(
+            f"""
+            update node_runs
+            set run_dir='', session_dir=''
+            where job_id=%s and node_key in ({placeholders})
+            """,
+            (job_id, *sorted(reset_nodes)),
+        )
+    if kept_nodes:
+        # A2（inherit 臂，rerun 类节点级口径）：分片行与旧 revision 入队的
+        # queued agent 请求一并清理（manifest 携带旧语义，claim 复查链在新
+        # pending 行上放行会抢跑），与 mark_nodes_for_rerun 同款；作用域 =
+        # 重置节点 ∪ 被删旧节点（后者不在按新 key 构建的 reset 集里，其分片
+        # 行只 FK 到 jobs、queued 行无人取消，不删就是永久孤儿，A4 同款）。
+        cleanup_scope = sorted(set(reset_nodes) | set(renamed_from_nodes))
+        if cleanup_scope:
+            delete_shards(conn, job_id, cleanup_scope)
+            cancel_marks = ",".join("%s" for _ in cleanup_scope)
+            conn.execute(cancel_queued_sql(cancel_marks), (job_id, *cleanup_scope))
+    else:
+        # clean / inherit 保守退化（无任何继承节点）：节点集合整体重建，
+        # 分片行与 queued 请求按 job 作用域了结——旧节点可能已不在新定义
+        # 里，节点级过滤会漏掉它们的孤儿行/请求；能认领旧 payload 的
+        # Worker 离线时，遗留 queued 行不触发任何代次 CAS 清理，却一直被
+        # has_active_request 视为 active，把新 revision 的重派无限期挡住
+        # （#759 review P1）。
+        conn.execute("delete from node_shards where job_id=%s", (job_id,))
+        cancel_queued_requests_for_job(conn, job_id)
     if kept_nodes or not full_manifest_cleanup:
         # 继承分支按名删除（继承节点的行不在重置面，天然保留）；裸构造
         # 服务（未装配暂存）同样走既有按名删除——full_manifest_cleanup

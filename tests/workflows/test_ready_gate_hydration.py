@@ -11,11 +11,8 @@ miss 路径挂 hydration（``workflow_worker/input_hydration.py``），本文件
 from __future__ import annotations
 
 import hashlib
-<<<<<<< HEAD
-import time
-=======
 import json
->>>>>>> 3f038f6d7 (feat(jobs)：workflow 升级 inherit 模式全量——revision diff/实现身份/保护计划/cleanup + 发布锁域 #645 #759)
+import time
 from contextlib import closing
 from pathlib import Path
 

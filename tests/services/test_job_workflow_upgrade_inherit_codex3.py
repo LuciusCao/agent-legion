@@ -139,9 +139,9 @@ def test_inherit_upgrade_stages_outputs_inside_lease_guard(tmp_path: Path, monke
     stage_calls: list[bool] = []
     real_stage = JobArtifactMutationService.stage_outputs
 
-    def probing_stage(self, job, node_keys, definition, *, closure=None):
+    def probing_stage(self, job, node_keys, definition, **kwargs):
         stage_calls.append(True)
-        return real_stage(self, job, node_keys, definition, closure=closure)
+        return real_stage(self, job, node_keys, definition, **kwargs)
 
     monkeypatch.setattr(JobArtifactMutationService, "stage_outputs", probing_stage)
     service = JobWorkflowUpgradeService(

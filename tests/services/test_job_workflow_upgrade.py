@@ -8,6 +8,7 @@ from server.app.db.connection import connect_database
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_filtering import JobListFilter
+from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_selection_resolver import EmptyJobSelectionError
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.job_workflow_upgrade_batch import batch_upgrade
@@ -118,6 +119,7 @@ def test_upgrade_job_workflow_stages_old_outputs_and_manifest_rows(tmp_path: Pat
     service = JobWorkflowUpgradeService(
         queries,
         ExecutorLeaseRepository(queries, data_dir=tmp_path),
+        artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
     )
 
     result = service.upgrade(workspace["id"], job["id"])
@@ -731,8 +733,6 @@ def test_upgrade_post_commit_cleanup_failure_still_reports_success(tmp_path: Pat
     突变自检锚点：无兜底的实现会让 store 的 RuntimeError 冒出 upgrade()
     （单任务路由 500），本用例变红。
     """
-    from server.app.services.job_artifact_mutation import JobArtifactMutationService
-
     queries, workspace, current, make_stale, _ = _batch_setup(tmp_path)
     job = make_stale("Q1")
     with closing(connect_database(queries.dsn_identity)) as conn, conn:

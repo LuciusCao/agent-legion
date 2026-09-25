@@ -563,13 +563,13 @@ def test_rerun_stages_implicit_consumer_outputs_and_rows(
 
 
 def test_run_to_stages_implicit_consumer_inside_target_closure(job_db, settings):
-    """#759 复审 P2（run-to 入口）：目标闭包内的隐式消费者同口径暂存，
-    闭包外下游的产物保持不动（closure 截断语义不变）。
+    """#759 复审 P2（run-to 入口）：目标闭包内的隐式消费者同口径暂存。
 
     mid 隐式消费 up.json（无显式入边）但经 mid→target 显式边落在
-    target 的 ancestor closure 内；post 在闭包外。run_to(target,
-    start=up) 的 stale 面按合并下游覆盖 mid/post，暂存面只覆盖闭包内：
-    mid.json 暂存/清行，post.json 保留。
+    target 的 ancestor closure 内。run_to(target, start=up) 的 stale 面按
+    合并下游覆盖 mid/post：#759 codex P1（937b02744）起 closure 只界定
+    run-to 的执行范围、不参与暂存判定——闭包外下游 post 的产物同样在
+    重置集里，一并失效（否则 run-to 到达目标继续执行时 post 读到旧输入）。
     """
     definition = WorkflowDefinition(
         key="chain_workflow",
@@ -632,6 +632,7 @@ def test_run_to_stages_implicit_consumer_inside_target_closure(job_db, settings)
     assert not (storage_dir / "up.json").exists()
     assert not (storage_dir / "mid.json").exists()
     assert not (storage_dir / "t.json").exists()
-    # 闭包外下游 post：产物与清单行保留（截断语义不变）。
-    assert (storage_dir / "post.json").exists()
-    assert store.names_for_job(job["id"]) == {"post.json"}
+    # 闭包外下游 post：自 #759 codex P1 起同样在重置集里（重置集≡暂存集，
+    # closure 只界定执行范围），产物与清单行一并失效。
+    assert not (storage_dir / "post.json").exists()
+    assert store.names_for_job(job["id"]) == set()
