@@ -7,13 +7,22 @@
   hydration 在没有任何可恢复清单行时不得做第二次代次读——恢复写为空、
   夹逼没有保护对象，否则扫描退化为每轮每 job 三次串行 DB 查询的 N+1
   （codex 复审 P1，eval_batch / input_hydration）。
+- 恢复/defer 面按当前 node statuses 收窄：已完成并被淘汰缓存的 job 做
+  单分支 targeted rerun 时，其他终态分支永久丢失/损坏的对象不得挟持
+  整个 job 的评估（codex 复审 P1，input_hydration 的恢复面从全定义消
+  费索引键集收窄为本轮探针集）。
 """
 
 from __future__ import annotations
 
+import hashlib
+from contextlib import closing
 from pathlib import Path
 
+from server.app.db.connection import connect_database
+from server.app.db.transaction import write_transaction
 from server.app.jobs import JobQueries
+from server.app.jobs.atomic_mutations import mark_nodes_for_rerun
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from tests.fakes.storage import FakeObjectStorage
@@ -104,6 +113,96 @@ def test_running_job_without_recoverable_rows_skips_generation_recheck(tmp_path:
     # 每轮清单读 1 次 + 代次预读 1 次，无第二次代次读。
     assert manifest_reads == 2
     assert generation_reads == 2
+
+    executor.block_event.set()
+    worker.stop()
+
+
+def _two_branch_definition() -> WorkflowDefinition:
+    """a1 → a2（a2 消费 a1_out.json）与独立分支 b：两条互不相干的支路。"""
+    return WorkflowDefinition(
+        key="wf2br",
+        label="Wf Two Branch",
+        intake=WorkflowIntake(),
+        nodes={
+            "a1": WorkflowNode(key="a1", label="A1", capability="cap_a1", outputs=["a1_out.json"]),
+            "a2": WorkflowNode(
+                key="a2",
+                label="A2",
+                capability="cap_a2",
+                after=["a1"],
+                inputs=["a1_out.json"],
+                outputs=["a2_out.json"],
+            ),
+            "b": WorkflowNode(key="b", label="B", capability="cap_b", outputs=["b_out.json"]),
+        },
+    )
+
+
+def test_terminal_branch_lost_object_does_not_block_targeted_rerun(tmp_path: Path) -> None:
+    """已完成并被淘汰缓存的 job 单分支 targeted rerun：另一终态分支的
+    manifest-only 产物对象永久丢失也不得挟持本轮评估。
+
+    修复前恢复面是整个定义的消费索引键集：a1_out.json（消费者 a2 已
+    completed）恢复失败 → 非空 unrestored 跳过整个 job 的评估缓存，b 的
+    rerun 永远到不了 claim。收窄后 a1_out.json 不在本轮探针集（其唯一消
+    费者终态），b 照常评估并被 claim。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "wf2br", default_workflow_key="wf2br", workspace_id="wf2br"
+    )
+    job = queries.create_job(
+        workflow_key="wf2br",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["a1", "a2", "b"],
+        workspace_id=workspace["id"],
+    )
+    for key in ("a1", "a2", "b"):
+        queries.update_job_node(job["id"], key, status="completed")
+    queries.update_job_status(job["id"], "completed")
+    # 终态分支的清单行在、本地文件被淘汰、对象永久丢失（FakeObjectStorage
+    # 刻意为空）——该对象本轮没有任何可运行/可评估的消费者。
+    payload = b'{"from": "a1"}'
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'a1', 'a1_out.json', %s, %s, %s)
+            """,
+            (
+                job["id"],
+                f"jobs/{workspace['id']}/{job['id']}/a1_out.json",
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
+            ),
+        )
+
+    # targeted rerun b（真实原子 mutation：b 回 pending、bump 代次）。
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        mark_nodes_for_rerun(conn, job["id"], ["b"], {"b": []})
+
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wf2br", "b")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path,
+        TEST_DATABASE_URL,
+        executor,
+        [_two_branch_definition()],
+        artifact_object_store=store,
+    )
+
+    worker._poll()
+
+    # 无关终态分支的丢失对象不进入 defer 集：b 的 rerun 越过评估直接被
+    # claim（本地 code 池持租约 + future 已提交）。
+    assert queries.get_job_node(job["id"], "b")["status"] == "running"
+    assert worker.leases.active_counts("code").get("global", 0) == 1
+    assert queries.get_job_node(job["id"], "a2")["status"] == "completed"  # 终态分支原样
 
     executor.block_event.set()
     worker.stop()

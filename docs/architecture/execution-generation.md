@@ -140,7 +140,10 @@ agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 
 下游闭包 = 显式边 ∪ 索引导出的隐式消费边（`dependency_children` /
 `dependency_downstream`，隐式边可能成环、环内互染是保守方向）；rerun /
 run-to / approval rework 一律走它，不允许各自重遍历定义。hydration 的恢复面
-（`input_hydration.declared_artifact_names`）直接取索引键集；upgrade inherit
+（`input_hydration.live_probe_names`）以索引键集为全集、再按本轮 node
+statuses 收窄：只恢复「有可运行消费者的 inputs ∪ 可评估条件边（target 可运行
+或 source completed）的条件产物」——终态分支的历史消费名不再是全 job 屏障
+（#759 复审 P1）；upgrade inherit
 的输入保护计划在同一索引上判定（后续 upgrade-inherit 层接入）。
 
 这是代次协议的前提：闭包划错，CAS 护住的现场本身就是错的。

@@ -79,6 +79,7 @@ def evaluate_changed_jobs(
             job_id=str(job["id"]),
             job_dir=job_dir,
             definition=definition_to_run,
+            node_statuses=statuses,
         )
         if unrestored is None or unrestored:
             worker.state.job_evals.pop(str(job["id"]), None)
