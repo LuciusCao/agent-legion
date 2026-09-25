@@ -37,7 +37,11 @@ reset mutation bumps the epoch in the same transaction that deletes the reset
 outputs' manifest rows, so an epoch change observed after the writes means
 the restored bytes came from a manifest the mutation has since invalidated —
 the files this round restored are deleted again and the job defers (uncached)
-to the next poll pass.
+to the next poll pass. Rounds that restore NOTHING skip the recheck read
+(#759 review P1: a running job is re-evaluated every poll pass, and the
+per-job double read with an empty write set degrades the scan into a steady
+O(running jobs) N+1); with no restores there is nothing to invalidate, and
+epoch invalidation still rides the mark_key / claim-time CAS.
 
 Residual window: a mutation can still commit AFTER a passing recheck, leaving
 a stale restored file on disk for the new epoch. That is safe on three
@@ -115,7 +119,10 @@ def hydrate_job_artifacts(
     manifest query and again after every restore write; a mismatch means a
     reset mutation committed mid-flight and invalidated the manifest rows
     this round restored from, so exactly those files are deleted again and
-    returned as unrestored (defer, never cache). See the module docstring
+    returned as unrestored (defer, never cache). Rounds whose restore set is
+    EMPTY skip the recheck read (#759 review P1) — there are no restored
+    bytes to invalidate, and skipping it halves the per-job query cost of
+    re-evaluating running jobs every poll pass. See the module docstring
     for the residual-window argument.
     """
     if store is None or not store.enabled:
@@ -158,6 +165,13 @@ def hydrate_job_artifacts(
         ):
             unrestored.add(name)
     restored = {name for name in missing if name in rows_by_name} - unrestored
+    if not restored:
+        # 本轮零恢复写：代次复核没有保护对象，跳过第二次代次读（#759 复审
+        # P1——running job 每轮绕过评估缓存重评，无可恢复清单行时的逐 job
+        # 双读会把扫描拖成持续的 O(运行中 job 数) N+1 查询）。代次中途变化
+        # 无需检测：候选/mark 失效由代次进 mark_key 与 claim CAS 兜底，
+        # unrestored 非空时本就不缓存。
+        return frozenset(unrestored)
     generation_after = _current_generation(queries, job_id)
     if generation_after == generation_before:
         return frozenset(unrestored)

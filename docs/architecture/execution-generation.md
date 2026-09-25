@@ -394,7 +394,9 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    行/authority 同面回滚——残余只剩进程硬崩（SIGKILL）与 commit 歧义
    的已提交半边（选边与 authority 侧一致，§4 第 2 条）。
 4. **hydration 残余窗口**：hydration 刻意不取 job-mutation 锁（对象存储下载
-   可能数秒，不能挡住每个 rerun/upgrade），以代次双读夹逼代替；突变仍可在
+   可能数秒，不能挡住每个 rerun/upgrade），以代次双读夹逼代替（本轮恢复写
+   为空时跳过第二次读——无恢复字节可失效，#759 复审 P1 的 N+1 收口）；突变
+   仍可在
    通过的复查之后提交——恢复写先于复查，本轮候选带旧代次会被 claim CAS 拒、
    下一轮评估不再恢复已删行的名字，残余为毫秒级提交窗口（详见
    `input_hydration.py` 模块 docstring）。

@@ -204,6 +204,7 @@
     "tests/workers/test_workspace_scan.py",
     "tests/workflows/test_not_applicable_generation_guard.py",
     "tests/workflows/test_ready_gate_hydration.py",
+    "tests/workflows/test_ready_gate_hydration_scope.py",
     "tests/workflows/test_shard_pass_budget.py",
     "tests/workflows/test_sharding.py",
     "tests/workflows/test_sharding_concurrency.py",

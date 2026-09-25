@@ -68,10 +68,11 @@ def evaluate_changed_jobs(
         # brackets the restores with two jobs.execution_generation reads — a
         # reset mutation committing mid-flight invalidates the manifest rows
         # the restores came from, so a changed epoch discards exactly this
-        # round's restored files and defers the job the same way. The two
-        # READ failures (manifest query / generation pre-read) return None
-        # and defer identically: a local miss must never be cached as a true
-        # miss while the authoritative manifest is unreadable.
+        # round's restored files and defers the job the same way (rounds
+        # with an empty restore set skip the recheck read, #759 review P1).
+        # The two READ failures (manifest query / generation pre-read) return
+        # None and defer identically: a local miss must never be cached as a
+        # true miss while the authoritative manifest is unreadable.
         unrestored = hydrate_job_artifacts(
             worker.artifact_object_store,
             worker.job_db,
