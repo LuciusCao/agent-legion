@@ -97,7 +97,9 @@ def live_probe_names(
     分支 targeted rerun 时，其他终态分支永久丢失/损坏的对象不再把整个
     job 的评估卡死在 defer 上（复审前恢复面是索引键集全集，任一历史消费
     项都是全 job 屏障）。状态是每轮现场传入的，未来某轮 rerun 把终态节
-    点重置回可运行时其消费名自动回到探针集。
+    点重置回可运行时其消费名自动回到探针集。调用方（eval_batch）传入的
+    是分片有效状态：running 但有 pending shard 的节点已按 ready gate 稍
+    后的同一翻转改回 pending（#759 复审 P2），其 inputs 因此在探针集内。
     """
     statuses = effective_node_statuses(definition, node_statuses)
     runnable = {key for key, status in statuses.items() if status in RUNNABLE_STATUSES}

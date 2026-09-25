@@ -7,15 +7,19 @@ including the EXEC-SHARD-001 evidence assertion).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
+from server.app.db.connection import connect_database
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.workflows.definition import WorkflowNode
 from server.app.workflows.schema import WorkflowReduceSpec, WorkflowShardSpec
 from server.app.workflows.sharding import (
@@ -24,6 +28,7 @@ from server.app.workflows.sharding import (
     materialize_shards,
     on_shard_finished,
 )
+from tests.fakes.storage import FakeObjectStorage
 from tests.helpers.executor_worker import make_definition
 from tests.helpers.sharding import (
     FakeShardExecutor,
@@ -468,4 +473,78 @@ def test_empty_shard_over_completes_node_and_reduce_gets_empty_array(tmp_path):
         assert executor.merged_shards == []
         assert job_db.get_job(job["id"])["status"] == "completed"
     finally:
+        worker.stop()
+
+
+def test_running_shard_node_with_pending_shards_gets_inputs_hydrated(tmp_path):
+    """codex 复审 P2（#759）：running 且仍有 pending shard 的节点会在
+    evaluate_job_ready 里被临时翻回 pending 重过 ready gate（_inputs_exist
+    读本地 inputs）——hydration 的探针集必须按同一套有效状态收窄，否则
+    本地被淘汰/重启丢失的输入永不恢复，剩余 shard 永久无法 claim。
+
+    修复前：hydration 看到的是 DB 原始状态（review=running 不在
+    RUNNABLE_STATUSES），questions.json 不进探针集 → 不恢复 →
+    ready gate 每轮返回空 → shard 1 永远 pending。"""
+    gate = threading.Event()
+    executor = FakeShardExecutor(gate=gate, parse_items=[{"q": 0}, {"q": 1}])
+    # max_concurrency=1：shard 0 阻塞在 gate 上时 shard 1 稳定 pending，
+    # review 保持 running——这正是「running 但仍有 pending shard」的现场。
+    definition = make_definition(
+        [
+            WorkflowNode(
+                key="parse", label="parse", capability="parse", outputs=["questions.json"]
+            ),
+            WorkflowNode(
+                key="review",
+                label="review",
+                capability="review",
+                after=["parse"],
+                inputs=["questions.json"],
+                outputs=["review.json"],
+                shard=WorkflowShardSpec(over="inputs.questions.json", max_concurrency=1),
+            ),
+            WorkflowNode(
+                key="aggregate",
+                label="aggregate",
+                capability="merge",
+                after=["review"],
+                outputs=["merged.json"],
+                reduce=WorkflowReduceSpec(from_node="review"),
+            ),
+        ]
+    )
+    worker, job_db, job, job_dir = _make_e2e(tmp_path, definition, executor)
+    db_path = worker.leases.path
+    payload = json.dumps([{"q": 0}, {"q": 1}]).encode()  # parse 写 questions.json 的内容
+    workspace_id = str(job_db.get_job(job["id"])["workspace_id"])
+    storage_key = f"jobs/{workspace_id}/{job['id']}/questions.json"
+    storage = FakeObjectStorage(objects={storage_key: payload})
+    worker.artifact_object_store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    try:
+        # shard 0 持 lease 阻塞在 gate 上、shard 1 pending：review 稳定 running。
+        ok = _poll_until(worker, lambda: _active_lease_count(db_path, job["id"], "review") == 1)
+        assert ok, "shard 0 未被 claim"
+        # parse 的清单行（finish 镜像的等价物）就位后，本地文件被淘汰。
+        with closing(connect_database(TEST_DATABASE_URL)) as conn, conn:
+            conn.execute(
+                """
+                insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+                values (%s, 'parse', 'questions.json', %s, %s, %s)
+                """,
+                (job["id"], storage_key, len(payload), hashlib.sha256(payload).hexdigest()),
+            )
+        (job_dir / "questions.json").unlink()
+
+        # 放行 shard 0 完成后 review 仍 running（shard 1 pending）：hydration
+        # 按有效状态（review 翻回 pending）恢复输入 → shard 1 被 claim。
+        gate.set()
+        ok = _poll_until(
+            worker,
+            lambda: _node_shards(db_path, job["id"], "review")[1]["status"] != "pending",
+            timeout=5,
+        )
+        assert ok, "剩余 shard 未被 claim（running 节点的输入未被 hydration 恢复）"
+        assert (job_dir / "questions.json").read_bytes() == payload
+    finally:
+        gate.set()
         worker.stop()
