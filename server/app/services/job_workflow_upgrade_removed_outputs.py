@@ -16,7 +16,9 @@ revision）补出清理面：
 - **被删节点的全部输出名 + 运行历史目录**：A4 的
   ``renamed_from_nodes`` 机制已处理「节点消失」的清单行（按新节点
   暂存名匹配），这里补「节点在但 output 名变了」与被删节点自身
-  声明名的本地文件清理。
+  声明名的本地文件清理；删除面比较 ``executable_nodes``——同 key 从
+  可执行转为 ``type: start`` 按删除旧执行节点处理（codex #776 复审
+  P2 R5），其旧 outputs/run 目录/queued 请求不逃逸清理。
 
 安全口径（与 ``staging_output_names`` 的 A3 语义对齐）：任何被**保留**
 节点在新图中声明为输入或输出的名字不进清理面——那是继承节点的产物
@@ -47,14 +49,20 @@ class RemovedArtifactFace:
 def deleted_node_keys(
     old_definition: WorkflowDefinition | None, new_definition: WorkflowDefinition
 ) -> frozenset[str]:
-    """被删节点身份 = 旧快照有、新图无的节点 key（#759 4.3）。
+    """被删节点身份 = 旧快照有、新图无的节点 key ∪ 转为 start 的旧执行节点。
 
     与 ``removed_artifact_face`` 的产物名/runs 目录面同源（definition 差集），
     替代按 ``job_nodes`` 现存行推导——行缺失/多行的漂移场景口径一致。
+    codex #776 复审 P2（R5）：同 key 节点从可执行转为 ``type: start`` 时
+    全节点 key 差集识别不到（start 节点仍在 ``nodes`` 里），但它已不在新图
+    执行面——旧 outputs/运行历史/queued 请求必须按删除处理。对称面
+    （start→可执行）由新增节点种子天然覆盖（S1）。
     """
     if old_definition is None:
         return frozenset()
-    return frozenset(old_definition.nodes) - frozenset(new_definition.nodes)
+    return (frozenset(old_definition.nodes) - frozenset(new_definition.nodes)) | (
+        frozenset(old_definition.executable_nodes) - frozenset(new_definition.executable_nodes)
+    )
 
 
 def removed_artifact_face(
@@ -104,11 +112,13 @@ def removed_artifact_face(
         new_node = new_definition.nodes.get(key)
         declared = set() if new_node is None else set(new_node.outputs) | set(new_node.inputs)
         names.update(set(old_node.outputs) - declared)
-    # 被删节点（旧有新无）：全部输出名（4.2 起含 RMW 名）+ 运行历史目录。
-    for key, old_node in old_definition.nodes.items():
-        if key not in new_definition.nodes:
-            names.update(old_node.outputs)
-            run_keys.add(key)
+    # 被删节点（旧有新无，含 executable→start 转换——codex #776 复审 P2
+    # （R5），与 deleted_node_keys 同口径）：全部输出名（4.2 起含 RMW 名）
+    # + 运行历史目录。
+    for key in sorted(deleted_node_keys(old_definition, new_definition)):
+        old_node = old_definition.nodes[key]
+        names.update(old_node.outputs)
+        run_keys.add(key)
     names -= keep_io
     names -= set(protected_names)
     # 与既有暂存面重叠的名（重置节点的新输出）不重复计——stage_outputs

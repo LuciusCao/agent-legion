@@ -436,3 +436,117 @@ def test_inherit_upgrade_code_republish_with_inserted_node_reruns_all(tmp_path: 
     upgraded = queries.get_job(job["id"])
     assert upgraded["workflow_revision_id"] == current["id"]
     assert upgraded["status"] == "queued"
+
+
+def test_inherit_upgrade_node_converted_to_start_is_treated_as_deleted(tmp_path: Path) -> None:
+    """codex #776 复审 P2（R5）：executable→start 转换按删除旧执行节点处理。
+
+    旧 revision 的 d 是可执行生产节点（outputs x.json/y.json）；新 revision
+    保留同 key 但改为 ``type: start``（入口）——全节点 key 差集识别不到它，
+    它又不在新图 executable_nodes/reset 面：旧 outputs 清单行、run 目录与
+    queued 请求全部逃逸清理。新图把 x.json 改作外部输入（保护计划保留为
+    种子——与「被删生产者的名被消费即保留」同设计），y.json 无任何引用
+    必须退役。修复：删除面比较 executable_nodes（转换即删除旧执行节点）。
+    """
+    from server.app.services.job_artifact_mutation import JobArtifactMutationService
+    from server.app.storage_paths import resolve_job_dir
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    queries, workspace, revisions, original, _ = setup_inherit_env(tmp_path)
+    old = workflow_definition_from_dict(
+        {
+            "key": "wfchain",
+            "label": "Wf Chain",
+            "nodes": {
+                "a": {"label": "A", "capability": "cap_a"},
+                "d": {
+                    "label": "D",
+                    "capability": "cap_d",
+                    "after": ["a"],
+                    "outputs": ["x.json", "y.json"],
+                },
+                "z": {
+                    "label": "Z",
+                    "capability": "cap_z",
+                    "after": ["d"],
+                    "outputs": ["z_out.json"],
+                },
+            },
+        }
+    )
+    original = revisions.publish_workspace_revision(workspace["id"], old)
+    # 新 revision：d 转为 start 入口（a/z 的入边改挂 d），x.json 改作 a 的
+    # 外部输入（新图无生产者），y.json 彻底无人引用。
+    new = workflow_definition_from_dict(
+        {
+            "key": "wfchain",
+            "label": "Wf Chain",
+            "nodes": {
+                "d": {"label": "D", "type": "start"},
+                "a": {
+                    "label": "A",
+                    "capability": "cap_a",
+                    "after": ["d"],
+                    "inputs": ["x.json"],
+                },
+                "z": {
+                    "label": "Z",
+                    "capability": "cap_z",
+                    "after": ["d"],
+                    "outputs": ["z_out.json"],
+                },
+            },
+        }
+    )
+    current = revisions.publish_workspace_revision(workspace["id"], new)
+    job = seed_inherit_job(queries, workspace, original, ["a", "d", "z"])
+    # z 不变（入边签名同为 d→z）且身份可证明 + 产物可达 → 唯一继承节点。
+    seed_impl_identity(queries, workspace, job["id"], ["z"])
+    for key in ("a", "d", "z"):
+        queries.update_job_node(job["id"], key, status="completed")
+    queries.update_job_status(job["id"], "completed")
+    job_dir = resolve_job_dir(job, queries.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("x.json", "y.json", "z_out.json"):
+        (job_dir / name).write_text(f"old-{name}")
+    (job_dir / "runs" / "d").mkdir(parents=True, exist_ok=True)
+    (job_dir / "runs" / "d" / "log.txt").write_text("history")
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        for node_key, name in (("d", "x.json"), ("d", "y.json"), ("z", "z_out.json")):
+            conn.execute(
+                """
+                insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+                values (%s, %s, %s, %s, 1, 'hash')
+                """,
+                (job["id"], node_key, name, f"jobs/wschain/{job['id']}/{name}"),
+            )
+        d_request = _queued_request(conn, workspace["id"], job["id"], "d")
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+        artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
+    )
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    assert result["status"] == "succeeded"
+    assert result["kept_node_count"] == 1
+    assert result["rerun_node_count"] == 1
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    # d 的执行行随删除面消失；a 重置、z 继承。
+    assert statuses == {"a": "pending", "z": "completed"}
+    # y.json 三面退役；x.json 作为新图外部输入（种子）保留；z 原样。
+    assert not (job_dir / "y.json").exists()
+    assert (job_dir / "x.json").read_text() == "old-x.json"
+    assert (job_dir / "z_out.json").read_text() == "old-z_out.json"
+    names = queries.job_artifact_manifest_names_for_nodes(job["id"], {"d", "z"})
+    assert names == {("d", "x.json"), ("z", "z_out.json")}
+    # 运行历史目录与 queued 请求一并了结（A2/A4 同口径）。
+    assert not (job_dir / "runs" / "d").exists()
+    with closing(connect_database(queries.dsn_identity)) as conn:
+        state = conn.execute(
+            "select state from agent_execution_requests where execution_id=%s",
+            (d_request,),
+        ).fetchone()["state"]
+    assert state == "cancelled"
+    assert queries.get_job(job["id"])["workflow_revision_id"] == current["id"]
