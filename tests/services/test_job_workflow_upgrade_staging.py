@@ -1,13 +1,16 @@
 """clean 升级的暂存与清单删除行为（#759 预算拆分自 ``test_job_workflow_upgrade``）。
 
-核心不变式：旧产物名的存亡由按名闭包（旧 output − 新 output − 新 input）
-唯一判定，「保留 ⇔ 未暂存」构造性成立；被删节点只清 run history。
+核心不变式：旧产物名的存亡由输入保护计划（``job_workflow_upgrade_protection``
+的 keep 集）与 removed 面（``job_workflow_upgrade_removed_outputs``）唯一判定，
+「保留 ⇔ 未暂存」构造性成立；被删节点的产物名进 removed 面、run history 经
+``extra_run_keys`` 一并暂存。
 """
 
 from pathlib import Path
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.storage_paths import resolve_job_dir
@@ -44,6 +47,7 @@ def _two_revision_env(queries, tmp_path, old_nodes, new_nodes):
     service = JobWorkflowUpgradeService(
         queries,
         ExecutorLeaseRepository(queries, data_dir=tmp_path),
+        artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
     )
     return workspace, job, service
 
@@ -136,11 +140,11 @@ def test_upgrade_stages_dropped_outputs_and_preserves_rmw_rows(tmp_path: Path) -
     assert remaining == {"rmw.json", "seed.json"}
 
 
-def test_upgrade_staging_rolls_back_first_batch_when_second_fails(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """#759 自审 P1：两段暂存的第二段失败时，第一批已移走的产物必须回滚——
-    不允许 DB 未变而文件滞留在 .staged。"""
+def test_upgrade_staging_failure_leaves_no_partial_state(tmp_path: Path, monkeypatch) -> None:
+    """#759 自审 P1：暂存失败时 DB 与文件都必须零半程——不允许 DB 未变而
+    产物滞留在 .staged。（单次 stage_outputs 内部的部分移动回滚由
+    test_job_artifact_mutation 的 partial-move 用例钉住；本用例钉服务层
+    失败臂：异常原样上抛、作业状态不变、无暂存残留。）"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace, job, service = _two_revision_env(
         queries,
@@ -157,18 +161,10 @@ def test_upgrade_staging_rolls_back_first_batch_when_second_fails(
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "a.json").write_text("a", encoding="utf-8")
 
-    from server.app.services.job_artifact_mutation import JobArtifactMutationService
+    def failing_stage(self, job_arg, keys, definition, **kwargs):
+        raise OSError("disk failure")
 
-    original = JobArtifactMutationService.stage_outputs
-    calls = {"n": 0}
-
-    def failing_second(self, job_arg, keys, definition, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 2:
-            raise OSError("disk failure")
-        return original(self, job_arg, keys, definition, **kwargs)
-
-    monkeypatch.setattr(JobArtifactMutationService, "stage_outputs", failing_second)
+    monkeypatch.setattr(JobArtifactMutationService, "stage_outputs", failing_stage)
 
     import pytest as _pytest
 
@@ -176,6 +172,7 @@ def test_upgrade_staging_rolls_back_first_batch_when_second_fails(
         service.upgrade(workspace["id"], job["id"])
 
     assert (job_dir / "a.json").read_text(encoding="utf-8") == "a"
+    assert not (job_dir / ".staged").exists()
     assert queries.get_job(job["id"])["status"] == "completed"
 
 
@@ -304,9 +301,10 @@ def test_upgrade_preserves_seed_from_removed_producer(tmp_path: Path) -> None:
 def test_upgrade_rolls_back_staged_outputs_when_db_mutation_fails(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """review P2：两段暂存全部成功后 DB 突变失败——execute_staged_upgrade 的
-    补偿臂必须把两个 handle 都回滚（文件回原位、DB 无半程）。既有的回滚
-    用例失败点在第二段内部（stage_upgrade_outputs 自己补偿），覆盖不到本臂。"""
+    """review P2：暂存成功后 DB 突变失败——apply 的补偿臂必须把暂存件回滚
+    （文件回原位、DB 无半程）。暂存自身失败的补偿由
+    test_upgrade_staging_failure_leaves_no_partial_state 覆盖，本用例钉住
+    暂存成功、mutation 抛错这一臂。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace, job, service = _two_revision_env(
         queries,
@@ -325,12 +323,12 @@ def test_upgrade_rolls_back_staged_outputs_when_db_mutation_fails(
     (job_dir / "a.json").write_text("a", encoding="utf-8")
     (job_dir / "z.json").write_text("z", encoding="utf-8")
 
-    import server.app.services.job_workflow_upgrade_staging as staging_mod
+    from server.app.services import job_workflow_upgrade_apply as apply_module
 
     def boom(*_args, **_kwargs):
         raise OSError("db boom")
 
-    monkeypatch.setattr(staging_mod, "upgrade_job_workflow", boom)
+    monkeypatch.setattr(apply_module, "upgrade_job_workflow_inherit", boom)
 
     import pytest as _pytest
 
@@ -418,6 +416,7 @@ def test_upgrade_deletes_objects_only_for_staged_names(tmp_path: Path) -> None:
     service = JobWorkflowUpgradeService(
         queries,
         ExecutorLeaseRepository(queries, data_dir=tmp_path),
+        artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
         object_store=store,
     )
     job_dir = resolve_job_dir(job, tmp_path / "jobs")

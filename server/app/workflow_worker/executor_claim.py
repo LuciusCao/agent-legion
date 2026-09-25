@@ -9,6 +9,7 @@ the lease claim transaction remains the authoritative capacity enforcement.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +54,12 @@ def claim_executor_node(
     if not snapshot.has_capacity(workspace_id, node.key):
         return False
 
+    # Implementation identity (schema v85, #645): the claim-time mirror of
+    # CodeDispatchService's enqueue digest — sha256 over the same code text
+    # (a quality-replay frozen pin records the pinned version's hash). ''
+    # (node_code missing) means unprovable to the inherit upgrade; the
+    # schedule pass resolves code before claiming, so this is a corner.
+    impl_hash = hashlib.sha256(node_code.encode("utf-8")).hexdigest() if node_code else ""
     worker.state.pending_claims.append(
         PreparedClaim(
             request=LeaseClaimRequest(
@@ -74,6 +81,7 @@ def claim_executor_node(
                 else None,
                 allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
                 config_snapshot_json=config_snapshot_json,
+                agent_definition_hash=impl_hash,
                 execution_generation=execution_generation,
             ),
             executor_id=executor_id,

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { IconButton } from '@mui/material'
-import type { JobSummary } from '../../types'
+import type { JobSummary, UpgradeMode } from '../../types'
 import type { NodeCatalog } from '../../lib/nodeCatalog'
 import { JobRerunDialog, type WorkflowNodesByKey } from '../JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
@@ -23,7 +23,7 @@ export type JobDetailActionsProps = {
   onClearPacked?: () => void | Promise<void>
   onDelete: () => void | Promise<void>
   onOpenArtifacts: () => void
-  onUpgradeWorkflow?: () => void | Promise<void>
+  onUpgradeWorkflow?: (mode: UpgradeMode) => void | Promise<void>
   onOpenApproval?: () => void
 }
 

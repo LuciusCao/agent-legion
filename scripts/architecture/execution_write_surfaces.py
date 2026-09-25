@@ -51,7 +51,7 @@ _GUIDANCE = (
     "新写面必须走共享 helper/primitive（lease_guarded_mutation / "
     "lock_job_mutation_and_read_generation / promote_to_authority_guarded / "
     "upsert_artifact_row_tx）并把条目加进注册表，检查清单见 "
-    "docs/architecture/execution-generation.md §3.2"
+    "docs/architecture/execution-generation.md §4.2"
 )
 
 

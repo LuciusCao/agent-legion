@@ -408,6 +408,17 @@ class JobArtifactObjectStore:
         assert self.storage is not None
         return self.storage.open_range(str(row["storage_key"]), start, end)
 
+    def delete_objects_guarded(self, rows: list[dict[str, Any]], job_id: str) -> set[str]:
+        """按 promote 同款 ``artifact-authority`` 锁复核后删除（codex #776 R7 P2-A）。
+
+        供突变提交后的退役对象清理（``rerun_artifact_cleanup`` 按 duck seam
+        探测）使用；实现体在 ``job_artifact_guarded_delete``（预算叶子）。
+        返回实际删除的 storage_key 集。
+        """
+        from server.app.services.job_artifact_guarded_delete import delete_objects_guarded
+
+        return delete_objects_guarded(self, rows, job_id)
+
     def delete_objects(self, rows: list[dict[str, Any]]) -> None:
         """Best-effort object deletion for manifest rows snapshot before a
         job deletion (the rows themselves cascade away with the job row, so

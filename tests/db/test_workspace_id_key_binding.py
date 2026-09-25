@@ -64,15 +64,17 @@ def test_schema_version_pin() -> None:
     # (workspace_api_tokens, #626) owns
     # tests/db/test_workspace_api_tokens_migration.py; v85
     # (execution_generation, #759) owns
-    # tests/db/test_execution_generation_schema.py — this copy stays as
+    # tests/db/test_execution_generation_schema.py; v86
+    # (node_runs_impl_identity, #645) owns
+    # tests/db/test_node_runs_impl_identity_schema.py — this copy stays as
     # a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 85
+    assert SCHEMA_VERSION == 86
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "execution_generation"
+    assert row["name"] == "node_runs_impl_identity"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

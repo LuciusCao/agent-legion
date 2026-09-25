@@ -60,7 +60,8 @@ per-job advisory 锁 `pg_advisory_xact_lock(hashtext('job-mutation:' || job_id))
 | --- | --- | --- |
 | rerun / approval rework / run-to-with-start | `mark_nodes_for_rerun`（`server/app/jobs/atomic_mutations.py`） | 共用的唯一 bump 点；同事务取消受影响节点的 queued agent 请求（`_cancel_queued_sql`，含 manifest trim）、删分片行、删被暂存产物的 `job_artifacts` 清单行 |
 | run-to（无起始节点） | `apply_run_to` → `set_run_to_control(bump_generation=True)` | run-to-with-start 同事务已由 `mark_nodes_for_rerun` bump，这里不再 bump——整事务恰好一次；重置集 = closure ∩ 非 completed，同事务暂存其产物并删清单行 |
-| workflow upgrade（clean） | `upgrade_job_workflow`（`server/app/jobs/workflow_upgrade_mutation.py`） | fold 进 revision 切换的 jobs UPDATE；bump 先于节点行重建，重建行盖新戳；节点集合整体替换，同事务按 job 作用域了结全部 queued 请求（`cancel_queued_requests_for_job`）——遗留行无人 claim 时会把 `has_active_request` 的闸门外重派无限期挡住；产物失效按名（旧 output − 新 output − 新 input），清单行**按暂存名精确删除**（同 rerun）——「保留 ⇔ 未暂存」构造性成立，无独立 preserve 集；旧产物名的存亡由按名闭包**唯一**判定，被删节点只清 run history（`include_outputs=False`），不按旧定义重枚举 outputs——被删生产者的产物若已转移为新输入，枚举会把种子误暂存、消费者永久无法 ready；node_shards 按 job 作用域删除 |
+| workflow upgrade（clean） | `upgrade_job_workflow_inherit`（`inherit_nodes=∅`；`server/app/jobs/workflow_upgrade_mutation.py` 为 legacy 薄封装） | fold 进 revision 切换的 jobs UPDATE；bump 先于节点行重建，重建行盖新戳；节点集合整体替换，同事务按 job 作用域了结全部 queued 请求（`cancel_queued_requests_for_job`）——遗留行无人 claim 时会把 `has_active_request` 的闸门外重派无限期挡住；产物失效由输入保护计划（`input_protection_plan` 的 keep 集）与 removed 面（`removed_artifact_face`，按名判定：旧 output − 新 output − 新消费名）**唯一**判定，服务装配暂存时清单行全量清空（除 keep 集，`full_manifest_cleanup`）——被删生产者的产物若已转移为新输入则受保护，不按旧定义重枚举 outputs；被删节点的 run history 经 `extra_run_keys` 一并暂存；node_shards 按 job 作用域删除 |
+| workflow upgrade（inherit） | `upgrade_job_workflow_inherit`（`server/app/jobs/workflow_upgrade_mutation_inherit.py`） | fold 进 revision 切换的 jobs UPDATE；保留的 inherit 行不改戳，新增/重置行盖新戳；零重跑（全部继承，如只改展示字段）时作业状态按保留节点终态推导（全 completed → completed），不翻 queued——零重跑不会再产生执行事件来聚合状态（codex #776 复审 P1） |
 
 不 bump 的突变：resume、delete、approval park（park 只盖当前戳，自身不推进
 代次）。delete 不需要了结 queued 请求：`agent_execution_requests` 对
@@ -111,11 +112,14 @@ brick。现行语义：决策写在 `job-mutation` 锁下只做状态守卫—�
 | 1（最外） | 池级锁：`code-pool` / `agent-ws:<workspace_id>` / `agent-worker:<worker_id>` | claim 与批路径；mutation 侧**永不取** |
 | 1.5 | `artifact-authority:<key>` | promote 事务首句（多 key 升序），串行化产物字节面的备份/copy/登记/恢复；mutation 侧不取，与池锁无共持 |
 | 2 | `job-mutation:<job_id>` | mutation 侧首句；所有执行态写面在池锁之后（或无池锁直接）取 |
-| 3（最内） | 行锁（`FOR UPDATE` 等） | 各写面自身 |
+| 3 | `implementation-publication:<workspace_id>` | upgrade guard 事务（无条件，先于 active revision 重读）；发布侧共享（见 2.9） |
+| 4 | `skill-lock`（全局单文档域） | skill 锁文档写与 upgrade 重验（见 2.9） |
+| 5（最内） | 行锁（`FOR UPDATE` 等） | 各写面自身 |
 
-无环论证：mutation 侧不取池锁也不取 artifact 锁，跨层只有单向边
-（artifact-authority → job-mutation；池锁 → job-mutation）。enqueue 不持
-池锁、直接取 job-mutation，环保持无环。
+无环论证：mutation 侧不取池锁也不取 artifact 锁，发布侧不碰 job 行也不取
+job-mutation 锁，跨层只有单向边（artifact-authority → job-mutation；池锁 →
+job-mutation；job-mutation → implementation-publication → skill-lock）。
+enqueue 不持池锁、直接取 job-mutation，环保持无环。
 
 **批序全序**：每个跨 job 的批（finish_many、try_claim_many、expire、recover、
 agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 也包括，
@@ -239,6 +243,7 @@ D12 镜像上传）与 finish 内的清单登记共用同一个 primitive
 | 本地臂 staging 对象（per-invocation key） | 字节未 promote | promote 终局已定（提交或闸拒）——调用方私有 key，finally 清理 | `upload_via_staging_guarded` finally |
 | 远端臂 staging 对象（per-execution key，Worker 共享落点） | 字节未 promote 且并发 /result 重试仍要 verify/promote | finish 提交后由完成方删除；其余结局交 bucket lifecycle / `s3_jobs_gc` | `completion_staged.finish_staged` 尾部 |
 | 文件提升备份目录（`.promote-rollback-*`） | 文件已移动但登记未提交 | 登记事务**提交成功**（`discard` 活到 commit 之后——commit 时刻失败时本地面随清单行/authority 同面回滚，codex #774 P1）∥ 已**完整**回滚（`rollback` 部分失败时备份目录整体保留 + ERROR 日志带路径，失败项备份是旧目标的最后本地恢复源）；**可逆性前提**：target/source 必须是文件——真实目录在任何移动之前整批拒绝，备份后立即复查收口预检↔移动间的 TOCTOU 换形（codex #774 P2 族） | `_file_promotion.py` 预检 + 备份后复查 + `FilePromotionGuard` |
+| 退役 authority 对象（rerun/run-to/upgrade 提交后清理） | 旧清单行已删，但在途 promote 可能已 copy 同名新字节、登记未提交（探针必 miss） | 共享 promote 的 `artifact-authority:<key>` 锁：try-lock 不可得（在途 promote 持有）∥ 锁内复核清单行存活 → 跳过删除（保守方向：旧对象成孤儿由 lifecycle 兜底，绝不误删新代次字节，codex #776 R7 P2-A） | `job_artifact_guarded_delete.delete_objects_guarded`（经 `JobArtifactObjectStore.delete_objects_guarded` duck seam） |
 
 恢复 copy 的重试分级（#774 对抗复审 P2）：按 key 锁仍持有的臂（闸拒、
 存储/文件/校验面失败）带界重试吸收瞬时存储故障；锁已随会话释放或正在
@@ -290,6 +295,78 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    节点 finish 之间现场变坏的残余竞态——`staged_file_moves` 提升失败经 guard
    整体回滚后 completed 转 failed 照常提交，lease 不再被异常回滚毒化成重试循环。
 
+### 2.9 升级侧的发布锁域与 RMW 保护
+
+workflow upgrade 的单次应用尝试（`apply_upgrade_once`，
+`server/app/services/job_workflow_upgrade_apply.py`）按「先全部校验备妥、再统一
+应用」组织：inherit 继承集在事务外规划（纯函数），guard 事务内的首步**无条件**
+取 `implementation-publication:<ws>` advisory 锁，然后锁下重读 active revision
+（`assert_context_revision_current`）——与 plan 之间已完成的发布即 TOCTOU，
+抛 `ActiveRevisionChangedError`，整个尝试作废并由 service 层整体重试一次（重解
+context + 重 plan + 重进事务，禁止半应用状态）。锁下还会重读 **job 行本身**的
+revision 钉 + 快照（`assert_context_job_current`，codex #776 复审 P1）：并发升级
+在 job-mutation 锁上等待期间，双生请求提交的是**同一** revision——active 复查
+不变、只有 job 的钉变了；不复查就会用过期计划二次重置（删掉对端刚产出的产物、
+重复 bump generation）。不符同样抛信号作废重试，重解 context 后即见
+already_current。有继承候选时再取全局
+`skill-lock` 域做实现身份重验（漂移节点放弃继承、降级重跑，传播面由收敛层
+接管）。
+
+两个发布锁域的成员：
+
+- `implementation-publication:<ws>`：`versioned_entities` 的 Agent / node_code
+  发布、回滚、归档（`server/app/jobs/queries/upgrade_impl_identity.py`）、
+  active workflow revision 发布
+  （`server/app/jobs/queries/workflow_revision_projection.py`）、runtime-only
+  原地编辑（`server/app/services/workflow_revision_runtime.py`）。
+- `skill-lock`（全局）：`SkillLockStore.put_lock` 的全部写（dispatch 首次 pin、
+  `make skills-lock` 重锁）与 upgrade plan 阶段的锁内读
+  （`server/app/services/skill_lock_store.py`）。dispatch 热路径的解析读不进
+  本域。
+
+skill 内容身份判定（`server/app/services/job_workflow_upgrade_skill.py`）是安全
+敏感读，纪律为：直读 DB 锁文档（`read_skill_lock` 经 `SkillLockStore` 绕开 5s
+doc cache）；`latest` 绑定**恒定排除**（跟随 live HEAD，不做 live rev-parse 就
+证明不了任何东西）；pinned ref 与锁文档 `refs[ref]` 比较才可继承；锁内无 ref /
+无锁文档 = 不可证明 → 排除；upgrade **永不触发首次 pin**、不跑 git 子进程，
+事务回滚不留 skill 面副作用。
+
+### 2.10 升级输入保护计划（#759 复审 P1-A）
+
+升级决定「哪些输入名的旧字节必须随升级作废、哪些必须保留」时，两个方向都
+没有保守可选：删多（外部输入/RMW 启动输入丢失）是永久等待，留多（旧
+revision 字节复活被新 revision 消费）是静默错误。因此保护计划
+（`server/app/services/job_workflow_upgrade_protection.py` 的
+`input_protection_plan`，纯函数）必须同时证明两个方向，任一不可证明即
+fail closed：
+
+- **liveness**：删除后名字在新一轮执行中会变得可用——未被作废的名字
+  （外部输入、保留节点产物、纯 RMW 链）为种子做最小不动点，重置节点的
+  全部输入可用 ⇒ 其输出可用；循环互依赖的生产者证不出可运行。
+- **freshness**：没有 consumer 读到旧字节。非 RMW 名三面删除后「缺席即
+  闸」（ready gate 只探本地文件，名字缺席 ⇒ consumer 必然等到重置生产者
+  重写）；RMW 附着名先要求每个重置 consumer 有排序证据（显式边 ∪ 经由
+  「唯一生产者且本次缺席」名字的隐式边，多生产者名字的隐式边不作证据）：
+  全部被覆盖 ⇒ clean 且**强制进删除面**（`rmw_retire` 集并入事务内暂存
+  名——判定与删除面不得脱节，否则暂存面的 #114 RMW 排除会让旧文件与
+  清单行存活、`_check_outputs` 把旧字节当新输出，codex #776 R8 P1-A）；
+  有未覆盖的 RMW consumer ⇒ 其启动输入保留（#114）；有未覆盖的纯
+  consumer ⇒ fail closed。
+- **keep 侧也要证**：名字被重置纯生产者作废后，保留旧字节给无排序证据的
+  纯 consumer 吃同样是静默错误——只有「未被作废」或「纯 consumer 全部被
+  覆盖、仅未覆盖的 RMW consumer 需要启动输入」才可保留。
+
+计划的输入是收敛后的实际保留/重置面与本次删除面（暂存名集合），在升级事务
+内、任何文件暂存之前计算；`unprovable` 非空 ⇒ 抛
+`UpgradeProtectionUnprovableError`，升级以 `skipped/protection_unprovable`
+返回且零副作用（事务整体回滚，不猜保留也不猜删除）。计划的 keep 集同时喂
+给 removed 面（`removed_artifact_face` 的 `protected_names`）与 clean/全退化
+分支的全量清单清理（`keep_input_names`）；`sweep` 集（= clean 全集：非
+RMW 名加 rmw_retire 强制删除面覆盖的 RMW 名）在提交后再扫一次本地文件复活（见 §4 残余面）——删除前在
+job-mutation 锁内复核（`sweep_delete_guard`：清单行已重登记或生产者
+running/completed 的名跳过），不误删新代次写回的新字节（codex #776
+复审 P2-A）。
+
 ## 3. 对抗审查 checklist
 
 本协议经多轮对抗审查收敛；把发现过真实问题的三个切面固化为 checklist。审查
@@ -340,11 +417,17 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
       （无下游扩展、无闭包过滤），只消费调用方传入的权威集合；调用方用
       计算重置集的同一个变量喂给它。执行范围过滤器（如 run-to 的
       `closure`）不得参与暂存判定——闭包外的隐式消费者同样在重置集里。
+      同名纯输出（含 RMW）不能跨重置边界拆分（对象键按名、不含 node
+      身份）：重置集必须经 `job_reset_closure` 收敛同名生产者及其下游
+      （codex #776 复审 P1）——面外生产者留着的共享名既不暂存也不删行，
+      重置节点本次没写该文件时 `_check_outputs` 只查存在性，会把面外
+      旧字节当本次输出。
 - [ ] 旧产物名的存亡是否由按名闭包唯一判定？跨 revision 比较（upgrade）
-      里「旧 output − 新 output − 新 input」是唯一的死活判据；任何按节点
-      的 output 枚举（无论新旧定义）都不得再决定名的存亡——被删生产者的
-      产物若已转移为新输入，枚举会把种子误删。被删节点只清 run history
-      （`include_outputs=False`）。
+      里「旧 output − 新 output − 新消费名」（`removed_artifact_face`，
+      消费名含分支条件产物，取自 `artifact_consumption_index` 键集）是唯一
+      的死活判据；任何按节点的 output 枚举（无论新旧定义）都不得再决定名
+      的存亡——被删生产者的产物若已转移为新输入，枚举会把种子误删。被删
+      节点的 run history 经 `extra_run_keys` 暂存，产物名走 removed 面。
 - [ ] 状态相关的决策集合是否在 mutation 锁内重算？锁外读数到取锁之间，
       目标可能被 claim/完成/重置（所有写入方持同一把 job-mutation 锁，
       锁内读数才是最终态）。集合与状态无关（纯图闭包）则无此面；一旦

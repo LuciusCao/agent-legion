@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import shutil
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from server.app.services.job_artifact_staging_scope import staging_output_names
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -18,11 +19,15 @@ class StagedOutputs:
     `commit()` permanently removes staged files; `rollback()` restores them to
     their original locations. ``artifact_names`` are the output names staged
     for the affected closure (#508: the same set whose ``job_artifacts``
-    manifest rows the rerun transaction deletes).
+    manifest rows the rerun transaction deletes); names shared with nodes
+    outside the closure are never staged (see ``stage_outputs``).
     """
 
     def __init__(
-        self, staged_dir: Path, moves: list[tuple[Path, Path]], artifact_names: set[str]
+        self,
+        staged_dir: Path,
+        moves: list[tuple[Path, Path]],
+        artifact_names: set[str],
     ) -> None:
         self._staged_dir = staged_dir
         self._moves = list(moves)
@@ -79,8 +84,8 @@ class JobArtifactMutationService:
         affected_keys: Sequence[str],
         definition: WorkflowDefinition,
         *,
-        extra_names: Sequence[str] = (),
-        include_outputs: bool = True,
+        extra_names: Iterable[str] = (),
+        extra_run_keys: Iterable[str] = (),
     ) -> StagedOutputs:
         """Move the given nodes' outputs and run histories to reversible staging.
 
@@ -93,21 +98,21 @@ class JobArtifactMutationService:
         service deliberately performs no graph traversal of its own, so no
         second enumeration can diverge from the reset logic.
 
-        ``extra_names`` stages additional artifact names verbatim (e.g. an
-        output a new workflow revision dropped from a shared node, #759);
-        the caller owns their RMW exclusion.
-
-        ``include_outputs=False`` stages only run histories (plus any
-        ``extra_names``): for nodes whose artifact-name liveness is decided
-        by name upstream (``dropped_artifact_names`` on upgrade), per-node
-        output enumeration must not re-stage a name the by-name closure
-        preserved — e.g. a removed producer whose output became another
-        node's input seed (#759 codex P1).
+        Staging is also name-scoped (adversarial review A3): an output name
+        declared by any node outside the affected set is never staged — the
+        local file may be that outside node's artifact, and deleting it would
+        strand a completed node whose ``job_artifacts`` row then points at
+        nothing (see ``job_artifact_staging_scope.staging_output_names``).
 
         Read-modify-write artifacts (declared as both an input and an output of
         the same node) are never staged: removing them would leave the node
         waiting forever on an input no rerun producer rewrites (#114). On a
         successful rerun the node rewrites them, so run semantics are unchanged.
+
+        ``extra_names``/``extra_run_keys``（#645 codex 四轮 P1-2，upgrade
+        专用）：新 definition 声明面之外、需要一并暂存的旧产物名与被删
+        节点的运行历史目录（调用方从旧快照算好并按 A3 口径过滤）。它们
+        进入 ``artifact_names``（清单行删除同集合）与文件移动面。
 
         Returns a :class:`StagedOutputs` handle. Callers should invoke
         ``commit()`` after a successful database transaction, or ``rollback()``
@@ -125,14 +130,10 @@ class JobArtifactMutationService:
                 raise ValueError(f"Unknown node: {node_key}")
             affected.add(node_key)
 
-        outputs: set[str] = set(extra_names)
-        if include_outputs:
-            for key in affected:
-                node = definition.nodes[key]
-                outputs.update(set(node.outputs) - set(node.inputs))
+        outputs = staging_output_names(definition, affected) | set(extra_names)
 
         paths = set(outputs)
-        paths.update(f"runs/{key}" for key in affected)
+        paths.update(f"runs/{key}" for key in affected | set(extra_run_keys))
 
         staged_dir = storage_dir / ".staged"
         staged_dir.mkdir(parents=True, exist_ok=True)

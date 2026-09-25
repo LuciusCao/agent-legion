@@ -27,7 +27,7 @@ from server.app.executors.models import (
 )
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.approval_decisions import ApprovalGateConflict
-from server.app.jobs.workflow_upgrade_mutation import upgrade_job_workflow
+from server.app.jobs.workflow_upgrade_mutation import upgrade_job_workflow_inherit
 from tests.postgres_support import TEST_DATABASE_URL
 
 _EPOCH_TABLES = (
@@ -144,10 +144,10 @@ def test_apply_run_to_bumps_once_and_stamps_reset_nodes(tmp_path: Path) -> None:
 
 
 def test_upgrade_mutation_bumps_and_stamps_reinserted_rows(tmp_path: Path) -> None:
-    """upgrade mutation（clean）：jobs 代次 +1，重建的 pending 行盖新戳。"""
+    """upgrade mutation：jobs 代次 +1，重建的 pending 行盖新戳，继承行不动。"""
     queries, job = _seed_job(tmp_path)
     with write_transaction(queries.dsn_identity) as conn:
-        upgrade_job_workflow(
+        stats = upgrade_job_workflow_inherit(
             conn,
             job["id"],
             workflow_revision_id="rev-gen",
@@ -156,11 +156,15 @@ def test_upgrade_mutation_bumps_and_stamps_reinserted_rows(tmp_path: Path) -> No
             workflow_definition_snapshot_json='{"key": "wfgen"}',
             node_keys=["a", "b", "c"],
             frozen_config_json=None,
+            inherit_nodes=frozenset({"a"}),
         )
 
+    assert stats["kept"] == 1
     assert _generation(queries, job["id"]) == 1
     nodes = _node_rows(queries, job["id"])
-    for key in ("a", "b", "c"):
+    assert nodes["a"]["status"] == "completed"
+    assert nodes["a"]["execution_generation"] == 0
+    for key in ("b", "c"):
         assert nodes[key]["status"] == "pending"
         assert nodes[key]["execution_generation"] == 1
 

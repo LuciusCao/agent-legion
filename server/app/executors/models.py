@@ -113,6 +113,13 @@ class LeaseClaimRequest:
     # Non-secret resolved node config at dispatch (CONFIG-RUNTIME-MUTABLE-001
     # audit); persisted onto the node_runs row created by the claim.
     config_snapshot_json: str = ""
+    # Implementation identity at dispatch (schema v85, #645): sha256 of the
+    # node_code text the claim will execute ('' when the code is unavailable
+    # — fail_node_config intercepts that earlier, so '' is an unprovable
+    # corner, never a silent mismatch). Same column and caliber as
+    # agent_execution_requests.agent_definition_hash, mirrored onto the
+    # node_runs row so the inherit upgrade can prove local-pool executions.
+    agent_definition_hash: str = ""
     # Expected jobs.execution_generation at claim time (EXEC-GENERATION-001):
     # the claim transaction CAS-checks it against the jobs row under the
     # job-mutation advisory lock and refuses the claim on mismatch

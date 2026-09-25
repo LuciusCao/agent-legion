@@ -8,6 +8,7 @@ from server.app.db.connection import connect_database
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_filtering import JobListFilter
+from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_selection_resolver import EmptyJobSelectionError
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.job_workflow_upgrade_batch import batch_upgrade
@@ -118,6 +119,7 @@ def test_upgrade_job_workflow_stages_old_outputs_and_manifest_rows(tmp_path: Pat
     service = JobWorkflowUpgradeService(
         queries,
         ExecutorLeaseRepository(queries, data_dir=tmp_path),
+        artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
     )
 
     result = service.upgrade(workspace["id"], job["id"])
@@ -706,3 +708,86 @@ def test_upgrade_job_workflow_fails_on_invalid_node_config_without_mutation(
     upgraded = queries.get_job(job["id"])
     assert upgraded["workflow_definition_hash"] == "stale-hash"
     assert upgraded["status"] == "failed"
+
+
+class _FailingObjectStore:
+    """#759 P1 fault injection：post-commit 对象清理的每次调用都抛错。"""
+
+    enabled = True
+
+    def __init__(self) -> None:
+        self.probes = 0
+
+    def live_keys_for(self, job_id: str, keys: list[str]) -> set[str]:
+        self.probes += 1
+        raise RuntimeError("object store is down")
+
+    def delete_objects(self, rows: list[dict]) -> None:
+        raise AssertionError("unreachable: the batch probe already failed")
+
+
+def test_upgrade_post_commit_cleanup_failure_still_reports_success(tmp_path: Path) -> None:
+    """#759 P1：DB 已提交后对象清理抛错不得反转结果——返回 succeeded、
+    job 已 pin 到新 revision、清单行已在事务内删除。
+
+    突变自检锚点：无兜底的实现会让 store 的 RuntimeError 冒出 upgrade()
+    （单任务路由 500），本用例变红。
+    """
+    queries, workspace, current, make_stale, _ = _batch_setup(tmp_path)
+    job = make_stale("Q1")
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'fetch_items', 'legacy.json', %s, 1, 'hash')
+            """,
+            (job["id"], f"jobs/{workspace['id']}/{job['id']}/legacy.json"),
+        )
+    store = _FailingObjectStore()
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+        artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
+        object_store=store,
+    )
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    # 清理确实触达了故障 store（deleted_rows 非空，不是空清理假绿）。
+    assert store.probes == 1
+    upgraded = queries.get_job(job["id"])
+    assert upgraded["workflow_revision_id"] == current["id"]
+    # 清单行删除是事务内的：post-commit 清理失败不影响已提交结果。
+    assert queries.job_artifact_manifest_names_for_nodes(job["id"], {"fetch_items"}) == set()
+
+
+def test_batch_upgrade_isolates_per_job_failures(tmp_path: Path, monkeypatch) -> None:
+    """#759 P1：单 job 的意外异常归一化为该 job 的 failed 结果项
+    （reason_code=upgrade_failed），不中断整批、不丢已处理 job 的结果。
+
+    突变自检锚点：无 per-job try/except 的实现会让第一个 job 的异常直接
+    冒出 batch_upgrade，后续 job 的结果丢失，本用例变红。
+    """
+    queries, workspace, current, make_stale, service = _batch_setup(tmp_path)
+    job_a = make_stale("Q1")
+    job_b = make_stale("Q2")
+    real_upgrade = service.upgrade
+
+    def flaky_upgrade(workspace_id, job_id, *, mode="clean"):
+        if job_id == job_a["id"]:
+            raise RuntimeError("unexpected boom")
+        return real_upgrade(workspace_id, job_id, mode=mode)
+
+    monkeypatch.setattr(service, "upgrade", flaky_upgrade)
+
+    results = batch_upgrade(service, workspace["id"], [job_a["id"], job_b["id"]])
+
+    assert [r["job_id"] for r in results] == [job_a["id"], job_b["id"]]
+    by_id = {r["job_id"]: r for r in results}
+    assert by_id[job_a["id"]]["status"] == "failed"
+    assert by_id[job_a["id"]]["reason_code"] == "upgrade_failed"
+    assert "unexpected boom" in by_id[job_a["id"]]["message"]
+    assert by_id[job_b["id"]]["status"] == "succeeded"
+    assert by_id[job_b["id"]]["mode"] == "clean"
+    assert queries.get_job(job_b["id"])["workflow_revision_id"] == current["id"]

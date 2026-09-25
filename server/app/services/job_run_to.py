@@ -18,13 +18,13 @@ from server.app.services.job_rerun.upstream_guard import (
     raise_if_failed_upstream,
     raise_if_failed_upstream_in_tx,
 )
+from server.app.services.job_reset_closure import rerun_reset_closure, run_to_reset_nodes
 from server.app.services.job_staged_cleanup import (
     commit_staged_outputs,
     delete_rerun_artifact_objects,
 )
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.start_node import START_NODE_TYPE
-from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
     from server.app.services.job_execution import JobExecutionService
@@ -69,7 +69,10 @@ def run_to_without_start(
             reject_running_nodes=True,
         ) as conn:
             current_statuses = service.job_db.list_job_node_statuses_in_transaction(conn, job_id)
-            reset_nodes = sorted(key for key in closure if current_statuses.get(key) != "completed")
+            # codex #776 复审 P1：同名纯输出生产者一并进重置面（与 rerun /
+            # with-start 同语义）。重置集 ≡ 暂存集：收敛后的同一集合同喂
+            # stage_outputs 与 apply_run_to。
+            reset_nodes = run_to_reset_nodes(definition, closure, current_statuses)
             # 本臂刻意不做 failed-upstream 守卫（与 with-start 不对称是
             # 设计）：failed 祖先必落在 closure ∩ 非 completed 的重置集里，
             # 一并翻 pending 重跑，无「遗留 failed 祖先 → 永远 queued」
@@ -177,8 +180,10 @@ def run_to_with_start(
         # #759：暂存集合与重置集合同源——closure 只界定 run-to 的执行
         # 范围，不参与暂存判定；目标闭包外的隐式下游同样在重置集里，
         # 其旧产物必须一并失效（stage_outputs 不做任何图遍历）。
-        descendants = dependency_downstream(definition, start_node_key)
-        affected = sorted({start_node_key, *descendants})
+        # codex #776 复审 P1：同名纯输出生产者一并进重置面
+        # （rerun_reset_closure 统一收敛，与 rerun 同语义）。
+        affected = sorted(rerun_reset_closure(definition, [start_node_key]))
+        descendants = [key for key in affected if key != start_node_key]
         with service.job_db.lease_guarded_mutation(
             job_id,
             service._now(),

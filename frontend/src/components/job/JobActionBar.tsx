@@ -1,5 +1,5 @@
 import { Button } from '@mui/material'
-import type { JobSummary } from '../../types'
+import type { JobSummary, UpgradeMode } from '../../types'
 import type { NodeCatalog } from '../../lib/nodeCatalog'
 import type { FailureCategory } from '../../types/failureTypes'
 import type { WorkflowNodesByKey } from '../JobRerunDialog'
@@ -50,7 +50,10 @@ export type JobActionBarProps = {
   onDelete: () => void | Promise<void>
   onPause?: () => void | Promise<void>
   onResume?: () => void | Promise<void>
-  onUpgradeWorkflow?: (jobIds?: string[]) => void | Promise<void>
+  onUpgradeWorkflow?: (
+    jobIds?: string[],
+    mode?: UpgradeMode
+  ) => void | Promise<void>
   itemLabel?: string
 }
 

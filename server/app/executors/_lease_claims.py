@@ -111,9 +111,9 @@ def claim_lease(
         """
         insert into node_runs(
             job_id, node_key, status, command_json, log_path, run_dir, session_dir,
-            started_at, config_snapshot_json, execution_generation
+            started_at, config_snapshot_json, agent_definition_hash, execution_generation
         )
-        values (%s, %s, 'running', %s, %s, '', '', %s, %s, %s)
+        values (%s, %s, 'running', %s, %s, '', '', %s, %s, %s, %s)
         returning id
         """,
         (
@@ -123,6 +123,7 @@ def claim_lease(
             log_path,
             now_str,
             request.config_snapshot_json,
+            request.agent_definition_hash,
             request.execution_generation,
         ),
     )

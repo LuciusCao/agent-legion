@@ -4,7 +4,7 @@ EXEC-GENERATION-001：``resume_job``（paused→queued 只是恢复调度）、
 ``delete_job``（删除无所谓代次）与 ``prepare_replay_copy``（replay 副本
 初始化，非既有 job 的执行状态重置）都不 bump ``jobs.execution_generation``；
 重置类 mutation（rerun / run-to / upgrade）见 ``atomic_mutations`` 与
-``workflow_upgrade_mutation``。
+``workflow_upgrade_mutation_inherit``。
 """
 
 from __future__ import annotations

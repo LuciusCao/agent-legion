@@ -57,12 +57,17 @@ def promote_claim(
     # enqueue-time re-resolution. Secret values never enter the manifest
     # (CONFIG-MANIFEST-001), so this is safe to persist.
     config_snapshot_json = json.dumps(manifest.get("config") or {}, sort_keys=True, default=str)
+    # Implementation identity mirror (schema v85, #645): the scan's
+    # ``select r.*`` carries the request row's agent_definition_hash
+    # (enqueue-time resolution); persisting it here gives node_runs the same
+    # claim-time identity, retention-proof for the inherit upgrade.
+    impl_hash = str(selected.get("agent_definition_hash") or "")
     run = conn.execute(
         """
         insert into node_runs(
           job_id, node_key, status, command_json, log_path, run_dir, session_dir,
-          started_at, config_snapshot_json, execution_generation
-        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp, %s, %s)
+          started_at, config_snapshot_json, agent_definition_hash, execution_generation
+        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp, %s, %s, %s)
         returning id
         """,
         (
@@ -70,6 +75,7 @@ def promote_claim(
             selected["node_key"],
             log_path,
             config_snapshot_json,
+            impl_hash,
             execution_generation,
         ),
     ).fetchone()

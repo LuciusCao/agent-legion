@@ -221,12 +221,14 @@
       ],
       "note": "分片表读写模块：job_nodes 翻 running 只在 claim 路径内并随 claim 盖戳（EXEC-SHARD-001）"
     },
-    "server/app/jobs/workflow_upgrade_mutation.py": {
+    "server/app/jobs/workflow_upgrade_mutation_inherit.py": {
       "via": [
+        "upgrade_job_workflow_inherit",
         "lease_guarded_mutation",
-        "cancel_queued_requests_for_job"
+        "cancel_queued_requests_for_job",
+        "cancel_queued_sql"
       ],
-      "note": "clean 模式 workflow 升级突变：job-mutation 锁内 bump 代次、了结全部 queued 请求并重建节点行（inherit 模式在后续层接入同一锁域）"
+      "note": "workflow upgrade（clean/inherit）唯一写入口：job-mutation 锁内 bump 代次 fold 进 revision 切换的 jobs UPDATE；clean/全退化按 job 作用域了结 queued 请求与分片行，inherit 按重置∪被删节点集；legacy 薄封装 workflow_upgrade_mutation.py 无写面"
     }
   },
   "artifact_byte_write_sites": {
