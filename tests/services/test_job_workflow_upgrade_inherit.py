@@ -281,3 +281,43 @@ def test_batch_upgrade_inherit_mode_passes_through(tmp_path: Path) -> None:
 
     assert results[0]["mode"] == "inherit"
     assert queries.get_job_node(job["id"], "a")["status"] == "completed"
+
+
+def test_inherit_upgrade_label_only_change_keeps_job_completed(tmp_path: Path) -> None:
+    """codex #776 复审 P1：全部节点可继承（零重跑）时不得把作业改 queued。
+
+    仅改展示字段（label）的升级：定义哈希两侧相等（label 排除在节点哈希
+    外）→ 无种子 → 全部继承、reset_nodes 为空。零重跑不会再产生任何
+    lease 完成事件来 sync_job_status，workflow worker 的就绪评估也不聚合
+    作业状态——无条件 queued 会让已完成作业永久显示排队中。修复：零重
+    跑时按保留节点终态（全 completed）推导，作业保持 completed。
+    """
+    import dataclasses
+
+    queries, workspace, revisions, original, service = setup_inherit_env(tmp_path)
+    definition = inherit_chain_definition()
+    # 只改 label（展示字段，不进节点定义哈希）。
+    nodes = {
+        key: dataclasses.replace(node, label=f"{node.label} v2")
+        for key, node in definition.nodes.items()
+    }
+    current = revisions.publish_workspace_revision(
+        workspace["id"], dataclasses.replace(definition, nodes=nodes)
+    )
+    job = seed_inherit_job(queries, workspace, original, ["a", "b", "c"])
+    seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job["id"], key, status="completed")
+    queries.update_job_status(job["id"], "completed")
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    assert result["status"] == "succeeded"
+    assert result["kept_node_count"] == 3
+    assert result["rerun_node_count"] == 0
+    upgraded = queries.get_job(job["id"])
+    assert upgraded["workflow_revision_id"] == current["id"]
+    # 零重跑：作业状态保持 completed（而非永久 queued）。
+    assert upgraded["status"] == "completed"
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    assert set(statuses.values()) == {"completed"}

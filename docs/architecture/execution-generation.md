@@ -61,7 +61,7 @@ per-job advisory 锁 `pg_advisory_xact_lock(hashtext('job-mutation:' || job_id))
 | rerun / approval rework / run-to-with-start | `mark_nodes_for_rerun`（`server/app/jobs/atomic_mutations.py`） | 共用的唯一 bump 点；同事务取消受影响节点的 queued agent 请求（`_cancel_queued_sql`，含 manifest trim）、删分片行、删被暂存产物的 `job_artifacts` 清单行 |
 | run-to（无起始节点） | `apply_run_to` → `set_run_to_control(bump_generation=True)` | run-to-with-start 同事务已由 `mark_nodes_for_rerun` bump，这里不再 bump——整事务恰好一次；重置集 = closure ∩ 非 completed，同事务暂存其产物并删清单行 |
 | workflow upgrade（clean） | `upgrade_job_workflow_inherit`（`inherit_nodes=∅`；`server/app/jobs/workflow_upgrade_mutation.py` 为 legacy 薄封装） | fold 进 revision 切换的 jobs UPDATE；bump 先于节点行重建，重建行盖新戳；节点集合整体替换，同事务按 job 作用域了结全部 queued 请求（`cancel_queued_requests_for_job`）——遗留行无人 claim 时会把 `has_active_request` 的闸门外重派无限期挡住；产物失效由输入保护计划（`input_protection_plan` 的 keep 集）与 removed 面（`removed_artifact_face`，按名判定：旧 output − 新 output − 新消费名）**唯一**判定，服务装配暂存时清单行全量清空（除 keep 集，`full_manifest_cleanup`）——被删生产者的产物若已转移为新输入则受保护，不按旧定义重枚举 outputs；被删节点的 run history 经 `extra_run_keys` 一并暂存；node_shards 按 job 作用域删除 |
-| workflow upgrade（inherit） | `upgrade_job_workflow_inherit`（`server/app/jobs/workflow_upgrade_mutation_inherit.py`） | fold 进 revision 切换的 jobs UPDATE；保留的 inherit 行不改戳，新增/重置行盖新戳 |
+| workflow upgrade（inherit） | `upgrade_job_workflow_inherit`（`server/app/jobs/workflow_upgrade_mutation_inherit.py`） | fold 进 revision 切换的 jobs UPDATE；保留的 inherit 行不改戳，新增/重置行盖新戳；零重跑（全部继承，如只改展示字段）时作业状态按保留节点终态推导（全 completed → completed），不翻 queued——零重跑不会再产生执行事件来聚合状态（codex #776 复审 P1） |
 
 不 bump 的突变：resume、delete、approval park（park 只盖当前戳，自身不推进
 代次）。delete 不需要了结 queued 请求：`agent_execution_requests` 对

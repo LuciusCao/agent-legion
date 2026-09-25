@@ -19,6 +19,7 @@ from server.app.jobs.workflow_upgrade_artifact_rows import (
     delete_reset_artifact_rows,
     existing_node_states,
 )
+from server.app.workflows.scheduler import summarize_job_status
 from server.app.workflows.sharding import delete_shards
 
 
@@ -46,6 +47,9 @@ def upgrade_job_workflow_inherit(
     物——状态与时间戳原样，调度器按节点状态 + 输入文件调度，completed
     天然跳过）；其余节点（变更/新增/未完成的继承候选）删除重插 pending。
     继承候选中未完成的节点本来就没有产物可继承，重置与 clean 语义一致。
+    零重跑（全部节点继承）时作业状态按保留节点终态推导（全 completed →
+    completed，``summarize_job_status``）而不是翻 queued——不会再产生任何
+    执行事件来聚合状态（codex #776 复审 P1）。
 
     重置节点的清理对照 ``mark_nodes_for_rerun``（#508）：``node_runs``
     目录引用清空（历史日志不指向将被覆盖的目录）、shard 行删除（下次
@@ -79,6 +83,16 @@ def upgrade_job_workflow_inherit(
         for key in inherit_nodes
         if key in set(node_keys) and existing_rows.get(key) == "completed"
     }
+    reset_keys = [key for key in node_keys if key not in kept_nodes]
+    # codex #776 复审 P1：零重跑（全部继承，如只改 label 等展示字段）时不
+    # 得把作业翻 queued——不会再产生任何 lease 完成事件来 sync_job_status，
+    # workflow worker 的就绪评估也不聚合作业状态，completed 作业会永久显示
+    # 排队中。零重置 ⇒ 保留行全 completed（failed 节点不可继承必进重置），
+    # 按既有状态机推导（summarize_job_status）得 completed；有重跑节点时
+    # 维持原 queued 语义。
+    derived_status = (
+        "queued" if reset_keys else summarize_job_status([existing_rows[key] for key in kept_nodes])
+    )
 
     # EXEC-GENERATION-001：upgrade 的唯一 bump 点——代次 +1 fold 进 jobs
     # re-pin UPDATE（原子），returning 拿新代次，给下面删除重建为 pending
@@ -87,7 +101,7 @@ def upgrade_job_workflow_inherit(
     bumped = conn.execute(
         """
         update jobs
-        set status='queued',
+        set status=%s,
             error_message='',
             workflow_revision_id=%s,
             workflow_version=%s,
@@ -104,6 +118,7 @@ def upgrade_job_workflow_inherit(
         returning execution_generation
         """,
         (
+            derived_status,
             workflow_revision_id,
             workflow_version,
             workflow_definition_hash,
@@ -124,11 +139,8 @@ def upgrade_job_workflow_inherit(
         )
     else:
         conn.execute("delete from job_nodes where job_id=%s", (job_id,))
-    reset_nodes: list[str] = []
-    for node_key in node_keys:
-        if node_key in kept_nodes:
-            continue
-        reset_nodes.append(node_key)
+    reset_nodes = reset_keys
+    for node_key in reset_nodes:
         conn.execute(
             """
             insert into job_nodes(job_id, node_key, status, created_at, execution_generation)
