@@ -172,16 +172,23 @@ class AgentCompletionHandler:
                 # ExecutionResult.error_message; the Worker-side traceback
                 # stays in the Worker's own log.
                 mark_result_stage(stage_timer, "unpack")
-                return self.leases.finish(
-                    lease_id,
-                    ExecutionResult(
-                        status="failed",
-                        exit_code=1,
-                        error_message=f"failed to unpack Agent result: {exc}",
-                        runner=worker_id,
-                    ),
-                    stage_timer=stage_timer,
-                )
+                # codex 复审 P2（#759）：失败收尾与 finish_staged 共用同一
+                # lease 临界区——锁外释放 lease 会让并发成功路径的 finish
+                # 拿 409，而它已登记的镜像/清单/authority 面与获胜的失败
+                # 结果来自不同请求（三面分裂）。串行后到者的 finish 看到已
+                # 释放的 lease 走 409 语义（False），所有面只剩获胜者。
+                # 此处未持有任何其他锁、锁不可重入但本臂即返回，无死锁面。
+                with self.completion_locks.acquire(lease_id):
+                    return self.leases.finish(
+                        lease_id,
+                        ExecutionResult(
+                            status="failed",
+                            exit_code=1,
+                            error_message=f"failed to unpack Agent result: {exc}",
+                            runner=worker_id,
+                        ),
+                        stage_timer=stage_timer,
+                    )
             view_dir = Path(staging_cm.name)
         mark_result_stage(stage_timer, "unpack")
         try:

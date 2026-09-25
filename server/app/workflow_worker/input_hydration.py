@@ -10,7 +10,9 @@ could never reach.
 
 This module closes the gap on the evaluation-miss path: for each evaluated
 job it batch-fetches the manifest rows once and re-materializes the missing
-locally declared inputs (node ``inputs`` ∪ branch-condition artifacts) with
+locally declared inputs this round actually probes (``live_probe_names``:
+node ``inputs`` with a runnable consumer ∪ branch-condition artifacts of
+evaluatable edges, #759 review P1) with
 the exact ``restore_missing_inputs`` semantics (``.part`` + sha256 +
 ``os.replace``, per-file best-effort). It deliberately stays OUT of the pure
 ``find_ready_nodes``; the caller (``eval_batch``) runs it before branch and
@@ -37,7 +39,11 @@ reset mutation bumps the epoch in the same transaction that deletes the reset
 outputs' manifest rows, so an epoch change observed after the writes means
 the restored bytes came from a manifest the mutation has since invalidated —
 the files this round restored are deleted again and the job defers (uncached)
-to the next poll pass.
+to the next poll pass. Rounds that restore NOTHING skip the recheck read
+(#759 review P1: a running job is re-evaluated every poll pass, and the
+per-job double read with an empty write set degrades the scan into a steady
+O(running jobs) N+1); with no restores there is nothing to invalidate, and
+epoch invalidation still rides the mark_key / claim-time CAS.
 
 Residual window: a mutation can still commit AFTER a passing recheck, leaving
 a stale restored file on disk for the new epoch. That is safe on three
@@ -64,6 +70,7 @@ from typing import TYPE_CHECKING
 
 from server.app.executors.artifact_restore import restore_from_manifest_row
 from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, effective_node_statuses
 from server.app.workflows.workflow_consumption import artifact_consumption_index
 
 if TYPE_CHECKING:
@@ -73,12 +80,40 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def declared_artifact_names(definition: WorkflowDefinition) -> frozenset[str]:
-    """Every artifact name the ready gate probes locally — the keys of the
-    shared consumption index (node inputs ∪ branch-condition artifacts,
-    workflows/workflow_consumption.artifact_consumption_index, the single
-    enumeration every consumer of the consumption relation must use)."""
-    return frozenset(artifact_consumption_index(definition))
+def live_probe_names(
+    definition: WorkflowDefinition, node_statuses: dict[str, str]
+) -> frozenset[str]:
+    """本轮评估真正会本地探针的产物名（#759 复审 P1）：共享消费索引
+    （``artifact_consumption_index``，唯一枚举处）按当前 node statuses
+    收窄——
+
+    - 节点 ``inputs``：至少一个消费者处于 RUNNABLE_STATUSES
+      （``find_ready_nodes`` 只为可运行节点探 inputs 与入边选择）；
+    - ``edge.condition.artifact``：target 可运行（就绪闸探入边选择）或
+      source 为 completed（``evaluate_branches`` 逐 completed source 裁决，
+      条件文件在场与否决定 not_applicable 标记， verdict 必须稳定）。
+
+    终态分支的消费名由此退出恢复/defer 集：已完成并被淘汰缓存的 job 做单
+    分支 targeted rerun 时，其他终态分支永久丢失/损坏的对象不再把整个
+    job 的评估卡死在 defer 上（复审前恢复面是索引键集全集，任一历史消费
+    项都是全 job 屏障）。状态是每轮现场传入的，未来某轮 rerun 把终态节
+    点重置回可运行时其消费名自动回到探针集。调用方（eval_batch）传入的
+    是分片有效状态：running 但有 pending shard 的节点已按 ready gate 稍
+    后的同一翻转改回 pending（#759 复审 P2），其 inputs 因此在探针集内。
+    """
+    statuses = effective_node_statuses(definition, node_statuses)
+    runnable = {key for key, status in statuses.items() if status in RUNNABLE_STATUSES}
+    names = {
+        name
+        for name, consumers in artifact_consumption_index(definition).items()
+        if consumers & runnable
+    }
+    names.update(
+        edge.condition.artifact
+        for edge in definition.edges
+        if edge.condition is not None and statuses.get(edge.source) == "completed"
+    )
+    return frozenset(names)
 
 
 def hydrate_job_artifacts(
@@ -88,16 +123,22 @@ def hydrate_job_artifacts(
     job_id: str,
     job_dir: Path,
     definition: WorkflowDefinition,
+    node_statuses: dict[str, str],
 ) -> frozenset[str] | None:
     """Re-materialize manifest-backed inputs missing from the job_dir.
 
-    Best-effort; no-op without a configured object store. Returns the names
-    that STILL lack a local file despite having a manifest row (restore
-    failed / object missing / discarded by the generation recheck) — the
-    caller must not cache the evaluation of such a job, so the next poll
-    pass retries. Inputs with no manifest row are genuinely absent and are
-    not hydration's business: they are left out of the returned set so the
-    job evaluates (and caches) as not-ready.
+    Best-effort; no-op without a configured object store. The restore/defer
+    surface is ``live_probe_names`` — the consumption-index names this
+    round's evaluation actually probes given current node statuses (#759
+    review P1: the pre-review surface was the whole definition's index key
+    set, so a permanently lost object consumed only by terminal sibling
+    branches held every targeted rerun of the job hostage). Returns the
+    names that STILL lack a local file despite having a manifest row
+    (restore failed / object missing / discarded by the generation recheck)
+    — the caller must not cache the evaluation of such a job, so the next
+    poll pass retries. Inputs with no manifest row are genuinely absent and
+    are not hydration's business: they are left out of the returned set so
+    the job evaluates (and caches) as not-ready.
 
     ``None`` means the evaluation basis itself could not be read: the
     manifest query failed, or the pre-read of ``jobs.execution_generation``
@@ -115,13 +156,18 @@ def hydrate_job_artifacts(
     manifest query and again after every restore write; a mismatch means a
     reset mutation committed mid-flight and invalidated the manifest rows
     this round restored from, so exactly those files are deleted again and
-    returned as unrestored (defer, never cache). See the module docstring
+    returned as unrestored (defer, never cache). Rounds whose restore set is
+    EMPTY skip the recheck read (#759 review P1) — there are no restored
+    bytes to invalidate, and skipping it halves the per-job query cost of
+    re-evaluating running jobs every poll pass. See the module docstring
     for the residual-window argument.
     """
     if store is None or not store.enabled:
         return frozenset()
     missing = [
-        name for name in declared_artifact_names(definition) if not (job_dir / name).is_file()
+        name
+        for name in live_probe_names(definition, node_statuses)
+        if not (job_dir / name).is_file()
     ]
     if not missing:
         return frozenset()
@@ -158,6 +204,13 @@ def hydrate_job_artifacts(
         ):
             unrestored.add(name)
     restored = {name for name in missing if name in rows_by_name} - unrestored
+    if not restored:
+        # 本轮零恢复写：代次复核没有保护对象，跳过第二次代次读（#759 复审
+        # P1——running job 每轮绕过评估缓存重评，无可恢复清单行时的逐 job
+        # 双读会把扫描拖成持续的 O(运行中 job 数) N+1 查询）。代次中途变化
+        # 无需检测：候选/mark 失效由代次进 mark_key 与 claim CAS 兜底，
+        # unrestored 非空时本就不缓存。
+        return frozenset(unrestored)
     generation_after = _current_generation(queries, job_id)
     if generation_after == generation_before:
         return frozenset(unrestored)

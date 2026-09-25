@@ -140,7 +140,10 @@ agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 
 下游闭包 = 显式边 ∪ 索引导出的隐式消费边（`dependency_children` /
 `dependency_downstream`，隐式边可能成环、环内互染是保守方向）；rerun /
 run-to / approval rework 一律走它，不允许各自重遍历定义。hydration 的恢复面
-（`input_hydration.declared_artifact_names`）直接取索引键集；upgrade inherit
+（`input_hydration.live_probe_names`）以索引键集为全集、再按本轮 node
+statuses 收窄：只恢复「有可运行消费者的 inputs ∪ 可评估条件边（target 可运行
+或 source completed）的条件产物」——终态分支的历史消费名不再是全 job 屏障
+（#759 复审 P1）；upgrade inherit
 的输入保护计划在同一索引上判定（后续 upgrade-inherit 层接入）。
 
 这是代次协议的前提：闭包划错，CAS 护住的现场本身就是错的。
@@ -394,7 +397,9 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    行/authority 同面回滚——残余只剩进程硬崩（SIGKILL）与 commit 歧义
    的已提交半边（选边与 authority 侧一致，§4 第 2 条）。
 4. **hydration 残余窗口**：hydration 刻意不取 job-mutation 锁（对象存储下载
-   可能数秒，不能挡住每个 rerun/upgrade），以代次双读夹逼代替；突变仍可在
+   可能数秒，不能挡住每个 rerun/upgrade），以代次双读夹逼代替（本轮恢复写
+   为空时跳过第二次读——无恢复字节可失效，#759 复审 P1 的 N+1 收口）；突变
+   仍可在
    通过的复查之后提交——恢复写先于复查，本轮候选带旧代次会被 claim CAS 拒、
    下一轮评估不再恢复已删行的名字，残余为毫秒级提交窗口（详见
    `input_hydration.py` 模块 docstring）。

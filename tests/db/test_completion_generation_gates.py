@@ -4,131 +4,36 @@
 Worker 结果归档「只解包到 staging、文件提升挤进 finish 代次 CAS」的
 completion 层语义，以及批 finish（finish_many）的 stale events 族门。
 交错手法与姊妹文件一致：直接 SQL bump 模拟已提交 reset，不用裸 sleep。
+
+同 lease 并发 /result 的收尾串行用例在姊妹文件
+tests/db/test_completion_lease_concurrency.py（同一条 800 行拆分线）；
+共享种子/工具见 tests/db/completion_helpers.py。
 """
 
 from __future__ import annotations
 
-import io
-import tarfile
-import threading
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from server.app.agent_control.completion import AgentCompletionHandler, AgentOutcome
+from server.app.agent_control.completion import AgentOutcome
 from server.app.db.transaction import write_transaction
 from server.app.executors import _lease_lifecycle
 from server.app.executors._lease_finish_batch import finish_many
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult
 from server.app.jobs import JobQueries
-from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from tests.db.completion_helpers import (
+    _completion_handler,
+    _finish_with_archive,
+    _node_error,
+    _node_row,
+    _result_archive,
+    _seed_completion_job,
+)
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
-
-
-def _node_row(job_id: str, node_key: str) -> dict[str, Any]:
-    with write_transaction(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select status, execution_generation from job_nodes where job_id=%s and node_key=%s",
-            (job_id, node_key),
-        ).fetchone()
-    assert row is not None
-    return dict(row)
-
-
-def _node_error(job_id: str, node_key: str) -> str:
-    with write_transaction(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select error_message from job_nodes where job_id=%s and node_key=%s",
-            (job_id, node_key),
-        ).fetchone()
-    assert row is not None
-    return str(row["error_message"])
-
-
-class _StubArtifactStore:
-    def __init__(self) -> None:
-        self.refs: list[tuple[str, str, str, str]] = []
-
-    def add_ref(self, job_id: str, node_key: str, name: str, ref: str) -> None:
-        self.refs.append((job_id, node_key, name, ref))
-
-
-def _seed_completion_job(
-    job_db: JobQueries, *, workspace_id: str, job_id: str, lease_id: str = "lease-1"
-) -> None:
-    """completion 层用例的种子：带 storage_dir 的 job + running 节点 + active
-    lease（executor_id 'agent:worker-1'，走 Agent broker 完成路径）。"""
-    with job_db.connect() as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, 'ws', 'demo_workflow')"
-            " on conflict (id) do nothing",
-            (workspace_id,),
-        )
-        conn.execute(
-            "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
-            " values (%s, %s, 's', 's1', %s)",
-            (job_id, workspace_id, f"jobs/{workspace_id}/{job_id}"),
-        )
-        conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'node_a')", (job_id,))
-        cursor = conn.execute(
-            "insert into node_runs(job_id, node_key, status, command_json, log_path,"
-            " run_dir, session_dir, started_at)"
-            " values (%s, 'node_a', 'running', '[]', '', '', '', current_timestamp) returning id",
-            (job_id,),
-        )
-        conn.execute(
-            "insert into executor_leases(id, execution_id, executor_id, workspace_id,"
-            " job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at)"
-            " values (%s, %s, 'agent:worker-1', %s, %s, 'node_a', %s,"
-            " 'active', current_timestamp, current_timestamp,"
-            " current_timestamp + interval '1 hour')",
-            (lease_id, f"exec-{lease_id}", workspace_id, job_id, cursor.fetchone()["id"]),
-        )
-
-
-def _result_archive(archive: Path, members: dict[str, bytes]) -> None:
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive, "w:gz") as tar:
-        for name, payload in members.items():
-            info = tarfile.TarInfo(name)
-            info.size = len(payload)
-            tar.addfile(info, io.BytesIO(payload))
-
-
-def _completion_handler(
-    job_db: JobQueries, tmp_path: Path, storage: FakeObjectStorage
-) -> tuple[AgentCompletionHandler, JobArtifactObjectStore, Path]:
-    jobs_dir = tmp_path / "jobs"
-    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
-    handler = AgentCompletionHandler(
-        ExecutorLeaseRepository(job_db, data_dir=tmp_path),
-        _StubArtifactStore(),  # type: ignore[arg-type]
-        jobs_dir,
-        tmp_path / "bundles",
-        skill_manager=None,
-        object_store=store,
-    )
-    return handler, store, jobs_dir
-
-
-def _finish_with_archive(handler: AgentCompletionHandler, *, job_id: str) -> bool:
-    return handler.finish(
-        lease_id="lease-1",
-        worker_id="worker-1",
-        job_id=job_id,
-        node_key="node_a",
-        manifest={"expected_outputs": ["out.json"], "execution_id": "exec-1"},
-        outcome=AgentOutcome(
-            status="completed",
-            exit_code=0,
-            output_artifacts={"out.json": "sha256:deadbeef"},
-        ),
-        archive_name="result.tar.gz",
-    )
 
 
 def test_completion_lands_archive_outputs_and_mirror_under_current_generation(
@@ -661,165 +566,6 @@ def test_finish_after_worker_loss_sweep_settles_nothing(
         ).fetchone()
     assert run is not None
     assert run["status"] == "running"  # node_run 也不被翻转
-
-
-# ---------------------------------------------------------------------------
-# codex #774 对抗复审 P1：并发 /result 重试与 staging 源保留
-# ---------------------------------------------------------------------------
-
-
-def _start(fn: Callable[[], Any]) -> tuple[threading.Thread, dict[str, Any]]:
-    outcome: dict[str, Any] = {}
-
-    def run() -> None:
-        try:
-            outcome["result"] = fn()
-        except Exception as exc:
-            outcome["error"] = exc
-
-    thread = threading.Thread(target=run, daemon=True)
-    thread.start()
-    return thread, outcome
-
-
-def _join(thread: threading.Thread) -> None:
-    thread.join(timeout=30)
-    assert not thread.is_alive(), "concurrent finish never resolved"
-
-
-def test_concurrent_duplicate_result_finishes_never_flip_node_to_failed(
-    job_db: JobQueries, tmp_path: Path
-) -> None:
-    """同一 execution 的两个并发 /result 重试收敛到 completed：赢家的
-    staging 源删除发生在 finish **提交之后**（promote→finish 窗口内绝不
-    删，否则后到者的 HEAD 核验撞见虚假存储故障，失败 finish 抢跑冤判
-    已完成节点）；输家重复 promote 幂等、finish 竞争落败为零副作用
-    （409 语义）。本用例钉死两条不变量：任意交错下节点 completed、双
-    finish 结束后 staging 源已被赢家清理（删除点确实在 finish 之后且
-    只删一次不炸）。"""
-    _seed_completion_job(job_db, workspace_id="gate24-ws", job_id="gate24-job")
-    storage = FakeObjectStorage()
-    staging_key = "jobs-staging/gate24-ws/gate24-job/exec-1/out.json"
-    storage.objects[staging_key] = b"ref-bytes"
-    handler, store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
-    job_dir = jobs_dir / "gate24-ws" / "gate24-job"
-    job_dir.mkdir(parents=True)
-    _result_archive(tmp_path / "bundles" / "result.tar.gz", {})
-
-    def _finish() -> bool:
-        return handler.finish(
-            lease_id="lease-1",
-            worker_id="worker-1",
-            job_id="gate24-job",
-            node_key="node_a",
-            manifest={"expected_outputs": ["out.json"], "execution_id": "exec-1"},
-            outcome=AgentOutcome(
-                status="completed",
-                exit_code=0,
-                output_artifacts={
-                    "out.json": {
-                        "storage_key": staging_key,
-                        "size_bytes": 9,
-                        "content_hash": "",
-                    }
-                },
-            ),
-            archive_name="result.tar.gz",
-        )
-
-    thread_a, outcome_a = _start(_finish)
-    thread_b, outcome_b = _start(_finish)
-    _join(thread_a)
-    _join(thread_b)
-
-    assert outcome_a.get("error") is None
-    assert outcome_b.get("error") is None
-    assert _node_row("gate24-job", "node_a")["status"] == "completed"
-    assert (job_dir / "out.json").read_bytes() == b"ref-bytes"
-    # 赢家在 finish 提交后删了 staging 源（重复删除幂等、不炸）；authority
-    # 字节与清单行不受并发重试影响。
-    assert staging_key not in storage.objects
-    assert storage.objects["jobs/gate24-ws/gate24-job/out.json"] == b"ref-bytes"
-    row = store.row_for_node("gate24-job", "node_a", "out.json")
-    assert row is not None
-    assert row["size_bytes"] == 9
-
-
-class _BarrierTimer:
-    """ResultStageTimer 的最小替身：在指定 stage 名处停下等主线程放行。"""
-
-    def __init__(self, gate_stage: str) -> None:
-        self._gate_stage = gate_stage
-        self.entered = threading.Event()
-        self.release = threading.Event()
-
-    def stage(self, name: str) -> None:
-        if name == self._gate_stage:
-            self.entered.set()
-            # 等不到放行即红（不静默退化为无序交错）。
-            assert self.release.wait(timeout=10), "main thread never released the stage gate"
-
-
-def test_concurrent_same_lease_results_commit_only_the_finish_winner(
-    job_db: JobQueries, tmp_path: Path
-) -> None:
-    """codex #774 P1：同 lease 两个并发 /result（同名不同字节归档）。镜像登
-    记走 finish 前的 lease 写闸、文件落盘走 finish 内的代次闸——两道闸的
-    胜者可以不同：A 镜像、B 镜像、A finish 获胜时本地面=A、权威面/清单
-    面=B 永久分叉（local-first 读 A，淘汰后 S3 读 B）。按 lease 串行后到
-    者的镜像写闸看到已释放的 lease 直接拒写，所有面只剩获胜者。
-
-    交错构造：A、B 都在镜像之后（``artifacts_upload`` stage）停下等放行；
-    串行锁下 B 到不了该 stage（卡在锁上），主线程先放 A 完成 finish（获
-    胜）、再放 B。突变自检（去掉 completion_locks.acquire）：B 的镜像在
-    A finish 前完成，authority/清单=B 而 job_dir=A——三条同源断言全红。"""
-    import hashlib
-
-    _seed_completion_job(job_db, workspace_id="dup-ws", job_id="dup-job")
-    storage = FakeObjectStorage()
-    handler, store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
-    job_dir = jobs_dir / "dup-ws" / "dup-job"
-    job_dir.mkdir(parents=True)
-    bundles = tmp_path / "bundles"
-    _result_archive(bundles / "result-a.tar.gz", {"out.json": b"bytes-a"})
-    _result_archive(bundles / "result-b.tar.gz", {"out.json": b"bytes-b"})
-    timer_a = _BarrierTimer("artifacts_upload")
-    timer_b = _BarrierTimer("artifacts_upload")
-
-    def _finish(archive_name: str, timer: _BarrierTimer) -> Any:
-        return handler.finish(
-            lease_id="lease-1",
-            worker_id="worker-1",
-            job_id="dup-job",
-            node_key="node_a",
-            manifest={"expected_outputs": ["out.json"], "execution_id": "exec-1"},
-            outcome=AgentOutcome(
-                status="completed",
-                exit_code=0,
-                output_artifacts={"out.json": "sha256:deadbeef"},
-            ),
-            archive_name=archive_name,
-            stage_timer=timer,  # type: ignore[arg-type]
-        )
-
-    thread_a, outcome_a = _start(lambda: _finish("result-a.tar.gz", timer_a))
-    assert timer_a.entered.wait(timeout=10)  # A 镜像完成、finish 前停下
-    thread_b, outcome_b = _start(lambda: _finish("result-b.tar.gz", timer_b))
-    assert not timer_b.entered.wait(timeout=1.0)  # B 卡在临界区外（未进镜像后段）
-    timer_a.release.set()  # A finish 获胜
-    _join(thread_a)
-    assert outcome_a.get("error") is None
-    assert outcome_a["result"] is True
-    timer_b.release.set()  # B 进临界区：镜像写闸已随 lease 释放关闭
-    _join(thread_b)
-    assert outcome_b.get("error") is None
-    assert outcome_b["result"] is False  # 迟到 finish = 409 语义
-
-    assert storage.objects["jobs/dup-ws/dup-job/out.json"] == b"bytes-a"  # 权威面=获胜者
-    assert (job_dir / "out.json").read_bytes() == b"bytes-a"  # 本地面=获胜者
-    row = store.row_for_node("dup-job", "node_a", "out.json")
-    assert row is not None
-    assert row["content_hash"] == hashlib.sha256(b"bytes-a").hexdigest()  # 清单面=获胜者
 
 
 # ---------------------------------------------------------------------------
