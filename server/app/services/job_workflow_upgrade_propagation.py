@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from server.app.services.job_artifact_staging_scope import shared_name_rerun_closure
+from server.app.services.job_reset_closure import shared_name_rerun_closure
 from server.app.services.job_workflow_upgrade_diff import (
     _frozen_config_section,
     _incoming_edges_map,

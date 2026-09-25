@@ -341,6 +341,8 @@ def test_retired_rmw_output_of_rewritten_node_cleaned_three_faces(tmp_path: Path
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "a_out.json").write_text("old-a")
     (job_dir / "x.json").write_text("stale-rmw")
+    # codex #776 复审 P2：权威层启用时保留节点的每个 output 都要清单行。
+    _insert_manifest_row(queries, job_id, "a", "a_out.json")
     x_key = _insert_manifest_row(queries, job_id, "b", "x.json")
     store = _RecordingObjectStore()
     service = _make_service(tmp_path, queries, object_store=store)

@@ -2,8 +2,10 @@
 
 EXEC-GENERATION-001：本路径的唯一 bump 点是 ``set_run_to_control`` 的
 jobs UPDATE（run-to-with-start 同事务改由 ``mark_nodes_for_rerun`` bump）。
-重置集（closure ∩ 非 completed）在锁内确定，清单删除与分片行删除都由
-同一集合驱动（重置集 ≡ 暂存集 ≡ 分片删除集）。
+重置集（closure ∩ 非 completed，服务路径再经同名生产者收敛——codex
+#776 复审 P1）在锁内确定，清单删除与分片行删除都由同一集合驱动
+（重置集 ≡ 暂存集 ≡ 分片删除集）。闭包内的重置节点翻 pending 本轮
+重跑；闭包外的翻 stale 失效（until_node 不可执行，下次 full run 重跑）。
 """
 
 from __future__ import annotations
@@ -38,9 +40,10 @@ def apply_run_to(
         raise JobMutationConflict("target_already_completed", "Target node is already completed")
 
     if reset_nodes is None:
-        # facade 路径（apply_run_to_atomic）：reset 集在锁内现算——绝不能
-        # 回落到全 closure（会把保持 completed 的分片节点行抹掉，与
-        # status != 'completed' 的 UPDATE 谓词分叉）。
+        # facade 路径（apply_run_to_atomic，仅测试在用）：reset 集在锁内现算
+        # ——绝不能回落到全 closure（会把保持 completed 的分片节点行抹掉）。
+        # 同名生产者收敛（codex #776 P1）只在服务路径做——直连 mutation 的
+        # 调用面行为不变。
         current = {
             str(row["node_key"]): row["status"]
             for row in conn.execute(
@@ -78,18 +81,41 @@ def apply_run_to(
     # set_run_to_control 的 jobs UPDATE（run-to-with-start 在同事务里改走
     # mark_nodes_for_rerun 的 jobs UPDATE bump，这里不再 bump，整事务恰好一次）。
     generation = set_run_to_control(conn, job_id, target_node_key, bump_generation=True)
-    conn.execute(
-        f"""
-        update job_nodes
-        set status='pending', stale_reason='', error_message='',
-            started_at=null, finished_at=null, created_at=current_timestamp,
-            execution_generation=%s
-        where job_id=%s and node_key in ({placeholders}) and status != 'completed'
-        """,
-        (generation, job_id, *sorted(closure)),
-    )
+    # codex #776 复审 P1：reset_nodes 是调用方收敛后的权威重置集（含同名
+    # 生产者）。闭包内的翻 pending 本轮重跑（until_node 允许集内，completed
+    # 同名生产者也必须翻——不带 status != 'completed' 谓词，reset_nodes 已
+    # 是锁内最终集合）；闭包外的翻 stale 失效（until_node 不可执行，下次
+    # full run 重跑，与 with-start 臂对闭包外下游的既有语义一致）。
+    pending_nodes = sorted(set(reset_nodes) & set(closure))
+    if pending_nodes:
+        pending_marks = ",".join("%s" for _ in pending_nodes)
+        conn.execute(
+            f"""
+            update job_nodes
+            set status='pending', stale_reason='', error_message='',
+                started_at=null, finished_at=null, created_at=current_timestamp,
+                execution_generation=%s
+            where job_id=%s and node_key in ({pending_marks})
+            """,
+            (generation, job_id, *pending_nodes),
+        )
+    stale_nodes = sorted(set(reset_nodes) - set(closure))
+    if stale_nodes:
+        stale_marks = ",".join("%s" for _ in stale_nodes)
+        conn.execute(
+            f"""
+            update job_nodes
+            set status='stale', stale_reason='shared-name producer rerun',
+                error_message='', created_at=current_timestamp,
+                execution_generation=%s
+            where job_id=%s and node_key in ({stale_marks})
+            """,
+            (generation, job_id, *stale_nodes),
+        )
     # 已入队的 queued agent 请求不复查上游，重置节点前必须取消（见 mark_nodes_for_rerun）。
-    conn.execute(cancel_queued_sql(placeholders), (job_id, *sorted(closure)))
+    cancel_scope = sorted(set(closure) | set(reset_nodes))
+    cancel_marks = ",".join("%s" for _ in cancel_scope)
+    conn.execute(cancel_queued_sql(cancel_marks), (job_id, *cancel_scope))
     # #759：分片行删除与节点重置同一集合——按全 closure 删会把保持
     # completed 的分片节点的 output_json 永久抹掉（reduce 重跑拼出空输入）。
     delete_shards(conn, job_id, reset_nodes)

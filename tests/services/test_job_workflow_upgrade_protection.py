@@ -529,6 +529,9 @@ def test_inherit_with_kept_node_counterexample_deletes_three_faces(tmp_path: Pat
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "a_out.json").write_text("old-a")
     (job_dir / "x.json").write_text("old-x")
+    # codex #776 复审 P2：权威层启用时保留节点的每个 output 都要清单行
+    # （本地文件只是可淘汰缓存），a 的可达性证据补清单行。
+    _insert_manifest_row(queries, job_id, "a", "a_out.json")
     x_key = _insert_manifest_row(queries, job_id, "p", "x.json")
     store = _RecordingObjectStore()
     service = _make_service(tmp_path, queries, object_store=store)
@@ -576,6 +579,8 @@ def test_rmw_startup_control_keeps_three_faces(tmp_path: Path) -> None:
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "a_out.json").write_text("old-a")
     (job_dir / "x.json").write_text("startup-x")
+    # codex #776 复审 P2：权威层启用时保留节点的每个 output 都要清单行。
+    _insert_manifest_row(queries, job_id, "a", "a_out.json")
     _insert_manifest_row(queries, job_id, "q", "x.json")
     store = _RecordingObjectStore()
     service = _make_service(tmp_path, queries, object_store=store)

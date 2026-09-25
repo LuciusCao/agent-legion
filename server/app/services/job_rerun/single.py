@@ -9,13 +9,13 @@ from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.eligibility import check_rerun_eligibility
 from server.app.services.job_rerun.upstream_guard import raise_if_failed_upstream_in_tx
+from server.app.services.job_reset_closure import rerun_reset_closure
 from server.app.services.job_staged_cleanup import (
     commit_staged_outputs,
     delete_rerun_artifact_objects,
 )
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
-from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
@@ -85,9 +85,11 @@ def commit_rerun(
     # #759: stale 面走合并下游（显式边 ∪ 隐式消费边）——loader 不要求 input
     # 的生产者有显式边，漏掉隐式消费者会让其产物静默基于旧输入。暂存集合
     # 与重置集合必须是同一个（stage_outputs 不做任何图遍历），否则隐式
-    # 下游的旧产物残留、消费者可能读到旧结果。
-    stale_nodes = dependency_downstream(definition, actual_node_key)
-    affected = sorted({actual_node_key, *stale_nodes})
+    # 下游的旧产物残留、消费者可能读到旧结果。codex #776 复审 P1：同名
+    # 纯输出生产者一并进重置面（对象键按名，拆分重置会静默串用旧字节），
+    # 由 rerun_reset_closure 统一收敛。
+    affected = sorted(rerun_reset_closure(definition, [actual_node_key]))
+    stale_nodes = [key for key in affected if key != actual_node_key]
     staged = None
     deleted_rows: list[dict[str, Any]] = []
     try:

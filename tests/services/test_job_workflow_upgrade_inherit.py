@@ -170,6 +170,59 @@ def test_inherit_upgrade_degrades_when_outputs_missing(tmp_path: Path) -> None:
     assert set(statuses.values()) == {"pending"}
 
 
+def test_inherit_upgrade_requires_manifest_row_when_authority_enabled(tmp_path: Path) -> None:
+    # codex 复审 P2（#776）：对象存储权威层启用时，仅本地缓存文件不足证可达。
+    # completed 节点只有本地文件、无 job_artifacts 清单行（上传失败/补传未完
+    # 成）时，本地副本是可淘汰缓存、hydration 只能按清单行恢复——判为可继承
+    # 会在淘汰后让下游永久等输入。修复：权威层启用时 keep 要求清单行存在，
+    # 否则退化重跑（宁可多跑）。
+    import dataclasses
+
+    from server.app.services.job_artifact_objects import JobArtifactObjectStore
+    from server.app.storage_paths import resolve_job_dir
+    from tests.fakes.storage import FakeObjectStorage
+
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("wschain", default_workflow_key="wfchain")
+    revisions = WorkflowRevisionService(queries)
+    definition = _inherit_chain_definition()
+    nodes = {
+        "a": dataclasses.replace(definition.nodes["a"], outputs=["a_out.json"]),
+        "b": definition.nodes["b"],
+        "c": definition.nodes["c"],
+    }
+    original = revisions.publish_workspace_revision(
+        workspace["id"], dataclasses.replace(definition, nodes=nodes)
+    )
+    revisions.publish_workspace_revision(
+        workspace["id"],
+        dataclasses.replace(
+            definition,
+            nodes={**nodes, "b": dataclasses.replace(nodes["b"], capability="cap_b_new")},
+        ),
+    )
+    # 权威层启用（enabled store），但不 seed 任何清单行——a 只有本地文件。
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+        object_store=JobArtifactObjectStore(queries, FakeObjectStorage()),
+    )
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
+    _seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job["id"], key, status="completed")
+    job_dir = resolve_job_dir(job, queries.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "a_out.json").write_text("{}")
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    # a 有本地文件但无清单行 → 权威层启用时不可证可达 → a 退化，全链重跑。
+    assert result["kept_node_count"] == 0
+    assert set(statuses.values()) == {"pending"}
+
+
 def test_inherit_upgrade_uncompleted_candidates_reset_pending(tmp_path: Path) -> None:
     # 继承候选中未完成的节点没有产物可继承 → 重置 pending（与 clean 一致）。
     queries, workspace, revisions, original, service = _inherit_setup(tmp_path)

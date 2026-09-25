@@ -62,6 +62,11 @@ def apply_upgrade_once(
             context.definition,
             context.frozen_config_json,
             custom_nodes_enabled=service.custom_nodes_enabled,
+            # codex #776 复审 P2：对象存储权威层启用时，S6 可达性要求清单
+            # 行存在——本地文件只是可淘汰缓存（EXEC-ARTIFACT-STORE-001）。
+            require_manifest_rows=bool(
+                service.object_store is not None and getattr(service.object_store, "enabled", False)
+            ),
         )
     staged: StagedOutputs | None = None
     try:

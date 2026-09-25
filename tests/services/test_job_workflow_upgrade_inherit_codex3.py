@@ -16,7 +16,7 @@ from server.app.db.connection import connect_database
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
-from server.app.services.job_artifact_staging_scope import shared_name_rerun_closure
+from server.app.services.job_reset_closure import shared_name_rerun_closure
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode

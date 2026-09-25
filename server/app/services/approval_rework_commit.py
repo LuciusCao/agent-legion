@@ -17,11 +17,11 @@ from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_rerun.upstream_guard import raise_if_failed_upstream_in_tx
+from server.app.services.job_reset_closure import rerun_reset_closure
 from server.app.services.job_staged_cleanup import (
     commit_staged_outputs,
     delete_rerun_artifact_objects,
 )
-from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
     from server.app.services.approval_decisions import ApprovalDecisionService
@@ -43,9 +43,10 @@ def commit_rework(
 ) -> dict[str, Any]:
     job_id = str(job["id"])
     # #759: 与 rerun 同一合并下游口径（显式边 ∪ 隐式消费边）；暂存集合
-    # 与重置集合同源（stage_outputs 不做任何图遍历）。
-    stale_nodes = dependency_downstream(definition, target)
-    affected = sorted({target, *stale_nodes})
+    # 与重置集合同源（stage_outputs 不做任何图遍历）。codex #776 复审 P1：
+    # 同名纯输出生产者一并进重置面（rerun_reset_closure 统一收敛）。
+    affected = sorted(rerun_reset_closure(definition, [target]))
+    stale_nodes = [key for key in affected if key != target]
     staged = None
     deleted_rows: list[dict[str, Any]] = []
     try:

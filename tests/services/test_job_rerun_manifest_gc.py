@@ -636,3 +636,180 @@ def test_run_to_stages_implicit_consumer_inside_target_closure(job_db, settings)
     # closure 只界定执行范围），产物与清单行一并失效。
     assert not (storage_dir / "post.json").exists()
     assert store.names_for_job(job["id"]) == set()
+
+
+# ---------------------------------------------------------------------------
+# codex 复审 P1（#776）：同名纯输出的生产者必须随重置闭包一起重置
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def shared_output_definition():
+    """b/c 声明同名纯输出 x.json（对象键按名、不含 node 身份）。"""
+    return WorkflowDefinition(
+        key="chain_workflow",
+        label="Chain",
+        intake=WorkflowIntake(),
+        nodes={
+            "b": WorkflowNode(key="b", label="B", capability="b", outputs=["x.json"]),
+            "c": WorkflowNode(key="c", label="C", capability="c", outputs=["x.json"]),
+        },
+    )
+
+
+def test_rerun_resets_same_name_producer(job_db, settings, shared_output_definition):
+    """codex 复审 P1：同名纯输出的生产者与重置节点一起重置（rerun 入口）。
+
+    只重置 b 时 A3 同名排除让 x.json 既不暂存也不删行：b 的新 attempt
+    若没写该文件，``_check_outputs`` 只查存在性，会把 c 遗留的旧字节
+    当 b 的本次输出（静默串用）。与 upgrade 的同名生产者收敛（通道 B）
+    同语义：c 一并 stale、x.json 暂存、两条清单行同事务删除。
+    """
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db,
+        settings,
+        shared_output_definition,
+        workspace=workspace,
+        storage=storage,
+        node_outputs=(("b", "x.json"), ("c", "x.json")),
+    )
+    service = _make_rerun_service(job_db, settings, storage)
+
+    result = service.rerun(workspace["id"], job["id"], "b")
+
+    assert result["status"] == "succeeded"
+    nodes = {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job["id"])}
+    assert nodes == {"b": "pending", "c": "stale"}
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
+    assert not (storage_dir / "x.json").exists()
+    store = JobArtifactObjectStore(job_db, storage)
+    assert store.names_for_job(job["id"]) == set()
+
+
+def _make_execution_service(job_db, settings, storage) -> JobExecutionService:
+    return JobExecutionService(
+        job_db,
+        JobArtifactMutationService(settings.jobs_dir),
+        ExecutorLeaseRepository(job_db, data_dir=settings.data_dir),
+        object_store=JobArtifactObjectStore(job_db, storage),
+    )
+
+
+def test_run_to_resets_completed_same_name_producer_inside_closure(job_db, settings):
+    """codex 复审 P1：run-to（无起始节点）闭包内 completed 同名生产者翻 pending。
+
+    p1/p2 声明同名纯输出 s.json，target 消费之。p2 failed（入重置集）、
+    p1 completed：p1 不重置则 p2 重跑不写真出文件时吃 p1 旧字节，或
+    p2 写出后 p1 的清单行指向别人的内容。修复后 p1 一并翻 pending
+    （p1 在目标闭包内、until_node 模式可执行），s.json 暂存 + 删行。
+    """
+    definition = WorkflowDefinition(
+        key="chain_workflow",
+        label="Chain",
+        intake=WorkflowIntake(),
+        nodes={
+            "p1": WorkflowNode(key="p1", label="P1", capability="p1", outputs=["s.json"]),
+            "p2": WorkflowNode(key="p2", label="P2", capability="p2", outputs=["s.json"]),
+            "target": WorkflowNode(
+                key="target",
+                label="Target",
+                capability="target",
+                after=["p1", "p2"],
+                inputs=["s.json"],
+                outputs=["t.json"],
+            ),
+        },
+    )
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db,
+        settings,
+        definition,
+        workspace=workspace,
+        storage=storage,
+        node_outputs=(("p1", "s.json"), ("p2", "s.json"), ("target", "t.json")),
+    )
+    job_db.update_job_node(job["id"], "p2", status="failed")
+    job_db.update_job_node(job["id"], "target", status="pending")
+    service = _make_execution_service(job_db, settings, storage)
+
+    result = service.run_to(workspace["id"], job["id"], "target")
+
+    assert result["status"] == "succeeded"
+    nodes = {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job["id"])}
+    assert nodes == {"p1": "pending", "p2": "pending", "target": "pending"}
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
+    assert not (storage_dir / "s.json").exists()
+    store = JobArtifactObjectStore(job_db, storage)
+    assert store.names_for_job(job["id"]) == set()
+
+
+def test_run_to_stales_same_name_producer_outside_closure(job_db, settings):
+    """codex 复审 P1：run-to 闭包外的同名生产者 stale 失效（本轮不执行）。
+
+    mid failed 入重置集；c 与 mid 共享纯输出 shared.json（无任何消费者，
+    合并上游也到不了 c——若共享的是 mid.json，c 会经隐式生产边落入目标
+    闭包而翻 pending 本轮重跑）。c 在 until_node 模式下不可执行，按
+    run-to-with-start 对闭包外下游的既有语义 stale 失效（下次 full run
+    重跑），其产物与清单行一并失效——否则 mid 重跑不写文件时吃 c 的
+    旧字节。up 不受影响。
+    """
+    definition = WorkflowDefinition(
+        key="chain_workflow",
+        label="Chain",
+        intake=WorkflowIntake(),
+        nodes={
+            "up": WorkflowNode(key="up", label="Up", capability="up", outputs=["up.json"]),
+            "mid": WorkflowNode(
+                key="mid",
+                label="Mid",
+                capability="mid",
+                after=["up"],
+                inputs=["up.json"],
+                outputs=["mid.json", "shared.json"],
+            ),
+            "target": WorkflowNode(
+                key="target",
+                label="Target",
+                capability="target",
+                after=["mid"],
+                inputs=["mid.json"],
+                outputs=["t.json"],
+            ),
+            "c": WorkflowNode(key="c", label="C", capability="c", outputs=["shared.json"]),
+        },
+    )
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db,
+        settings,
+        definition,
+        workspace=workspace,
+        storage=storage,
+        node_outputs=(
+            ("up", "up.json"),
+            ("mid", "mid.json"),
+            ("mid", "shared.json"),
+            ("c", "shared.json"),
+            ("target", "t.json"),
+        ),
+    )
+    job_db.update_job_node(job["id"], "mid", status="failed")
+    job_db.update_job_node(job["id"], "target", status="pending")
+    service = _make_execution_service(job_db, settings, storage)
+
+    result = service.run_to(workspace["id"], job["id"], "target")
+
+    assert result["status"] == "succeeded"
+    nodes = {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job["id"])}
+    assert nodes == {"up": "completed", "mid": "pending", "target": "pending", "c": "stale"}
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
+    assert not (storage_dir / "mid.json").exists()
+    assert not (storage_dir / "shared.json").exists()
+    assert (storage_dir / "up.json").exists()
+    store = JobArtifactObjectStore(job_db, storage)
+    assert store.names_for_job(job["id"]) == {"up.json"}

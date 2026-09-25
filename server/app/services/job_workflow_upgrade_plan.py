@@ -36,6 +36,7 @@ def plan_inherit_nodes(
     new_frozen_config_json: str | None,
     *,
     custom_nodes_enabled: bool = True,
+    require_manifest_rows: bool = False,
 ) -> frozenset[str]:
     """最终继承集 = 新定义可执行节点 −（S1–S5 种子 ∪ S6 可达性种子）的传播闭包。
 
@@ -46,6 +47,11 @@ def plan_inherit_nodes(
     ``implementation_excluded_nodes`` 直读 DB 锁文档判定（latest 恒定
     排除、pinned 无锁条目即不可证明、upgrade 永不 pin/不跑 git），与
     guard 事务内重验走同一权威读取。
+
+    ``require_manifest_rows``（codex #776 复审 P2）：对象存储权威层启用
+    时 S6 可达性要求每个声明 output 都有 ``job_artifacts`` 清单行——
+    本地文件是可淘汰缓存（EXEC-ARTIFACT-STORE-001），仅有本地文件的
+    completed 节点退化重跑（重跑会重新上传，自愈缺失的权威副本）。
 
     旧侧配置基准只用 job 的存量 ``frozen_config_json``（intake 冻结值，
     RUN-FREEZE-001）：产物是按那份冻结配置产出的，同基比较必须以它为
@@ -120,7 +126,13 @@ def plan_inherit_nodes(
     )
     reset_nodes = rerun_closure(new_definition, seeds)
     candidates = frozenset(new_definition.executable_nodes) - reset_nodes
-    unreachable = unreachable_inherit_nodes(job_db, job, _jobs_dir(job_db), candidates)
+    unreachable = unreachable_inherit_nodes(
+        job_db,
+        job,
+        _jobs_dir(job_db),
+        candidates,
+        require_manifest_rows=require_manifest_rows,
+    )
     if unreachable:
         # S6 可达性种子并入再闭包：不可达候选的下游沿闭包传播重跑，
         # 共享其输出名（含 RMW）的候选经通道 B 一并移出继承集。
