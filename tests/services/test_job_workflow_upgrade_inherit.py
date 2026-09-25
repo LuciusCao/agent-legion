@@ -891,3 +891,45 @@ def test_inherit_upgrade_code_republish_with_inserted_node_reruns_all(tmp_path: 
     upgraded = queries.get_job(job["id"])
     assert upgraded["workflow_revision_id"] == current["id"]
     assert upgraded["status"] == "queued"
+
+
+def test_inherit_upgrade_null_frozen_without_intake_evidence_degrades(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """codex #776 复审 P2：NULL frozen = legacy 作业，生产时配置不可证明 → 退化。
+
+    legacy 作业 dispatch 走现场解析（run_payload 的 frozen=None 臂），生产时
+    的 workspace override 可能已删除；按**当前** override 重算旧定义得到空
+    配置不构成「旧侧为空」的证据。修复：NULL 恒退化 clean，不再探测当前
+    配置面。monkeypatch 把 re-freeze 压成空（模拟当前配置面为空的历史
+    场景），钉住「NULL 即退化」不再因探针为空而放行继承。
+    """
+    queries, workspace, revisions, original, service = _inherit_setup(tmp_path)
+    revisions.publish_workspace_revision(
+        workspace["id"], _inherit_chain_definition(b_cap="cap_b_new")
+    )
+    job = _inherit_job(queries, workspace, original, ["a", "b", "c"])
+    # 强制 legacy 形态：frozen_config_json IS NULL（覆盖 _inherit_job 的播种）。
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute("update jobs set frozen_config_json=null where id=%s", (job["id"],))
+    _seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job["id"], key, status="completed")
+
+    import server.app.services.job_workflow_upgrade_gates as gates_module
+    import server.app.services.job_workflow_upgrade_plan as plan_module
+
+    # 修复前 plan 的探针决定 NULL 是否放行：把 gates/plan 两处 re-freeze 都
+    # 压成 None（模拟当前配置面为空的历史场景——新侧冻结也为空，S2 比较
+    # 退化为 {} == {}），旧代码在此放行继承 → 本用例红；修复后 NULL 恒
+    # 退化、plan 探针已删除（raising=False 惰性化），用例钉住终态语义。
+    _empty_refreeze = lambda *args, **kwargs: None  # noqa: E731
+    monkeypatch.setattr(gates_module, "intake_frozen_config_json", _empty_refreeze)
+    monkeypatch.setattr(plan_module, "intake_frozen_config_json", _empty_refreeze, raising=False)
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    # NULL + 当前配置面为空也不许继承：全量重跑。
+    assert result["kept_node_count"] == 0
+    assert set(statuses.values()) == {"pending"}

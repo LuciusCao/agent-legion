@@ -66,6 +66,27 @@ def assert_context_revision_current(
         )
 
 
+def assert_context_job_current(job_db: JobQueries, conn: Any, context: UpgradeContext) -> None:
+    """guard 事务内重读 job 行的 revision 钉 + 快照；漂移即抛信号（codex #776 P1）。
+
+    并发升级请求从同一旧 revision 解析出 context 后在 job-mutation 锁上
+    等待：前者提交 re-pin 后，后者若只复查 workspace active revision（未
+    变）会用过期计划二次重置——删掉第一轮刚产出的产物、重复 bump
+    generation。锁内重读与 ``context.job`` 不符即抛
+    ``ActiveRevisionChangedError``：service 层整体重试，重解 context 后
+    即见 already_current（双生完成同一升级）或以新基准重 plan。比对口径
+    与 already_current 判定一致（空值归一为 ""）。
+    """
+    identity = job_db.job_revision_identity_in_transaction(conn, str(context.job["id"]))
+    if identity is None or identity != (
+        str(context.job.get("workflow_revision_id") or ""),
+        str(context.job.get("workflow_definition_snapshot_json") or ""),
+    ):
+        raise ActiveRevisionChangedError(
+            f"Job {context.job['id']} was re-pinned during upgrade lock wait"
+        )
+
+
 def resolve_upgrade_context(
     job_db: JobQueries,
     lease_repo: ExecutorLeaseRepository,

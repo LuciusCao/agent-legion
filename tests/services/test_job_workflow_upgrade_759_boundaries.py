@@ -591,3 +591,56 @@ def test_revision_change_twice_returns_conflict_without_side_effects(tmp_path, m
     assert set(statuses.values()) == {"completed"}
     # 无暂存残留（重读失败先于任何产物暂存）。
     assert not (_job_dir(queries, job_id) / ".staged").exists()
+
+
+def test_concurrent_twin_upgrade_repin_detected_in_lock(tmp_path, monkeypatch) -> None:
+    """codex #776 复审 P1：并发升级在锁等待期间已提交时，锁内必须复查 job 行。
+
+    两个升级请求从同一旧 revision 解析出 context；第一个提交后第二个获锁，
+    只复查 workspace active revision（未变）会放过期计划二次重置——删掉
+    第一轮刚产出的产物、重复 bump generation。修复：锁内重读 job 的
+    revision 钉 + 快照，与 context.job 不符即作废重试（重解后即见
+    already_current）。本用例在 guard 事务内（publication 锁获取点）用另一
+    连接模拟双生请求提交 re-pin。
+    """
+    from server.app.jobs import JobQueries as _JobQueries
+    from server.app.jobs.queries.upgrade_impl_identity import (
+        acquire_implementation_publication_lock as real_lock,
+    )
+
+    queries, workspace, revisions, original = _setup(tmp_path, _chain_v("cap_b"))
+    current = revisions.publish_workspace_revision(workspace["id"], _chain_v("cap_b_v1"))
+    job_id = _seed_job(queries, workspace, original, ["a", "b", "c"])
+    for key in ("a", "b", "c"):
+        queries.update_job_node(job_id, key, status="completed")
+    queries.update_job_status(job_id, "completed")
+    _seed_frozen(queries, job_id, ["a", "b", "c"])
+    before = queries.get_job(job_id)
+    service = _make_service(tmp_path, queries)
+
+    def twin_repins_first(*args):
+        # 双生请求在本事务获锁前已提交同一升级（job 已 pin 到 current）。
+        with closing(connect_database(queries.dsn_identity)) as twin_conn, twin_conn:
+            twin_conn.execute(
+                "update jobs set workflow_revision_id=%s,"
+                " workflow_definition_snapshot_json=%s where id=%s",
+                (current["id"], current["definition_json"], job_id),
+            )
+        return real_lock(args[-2], args[-1])
+
+    monkeypatch.setattr(
+        _JobQueries, "acquire_implementation_publication_lock", staticmethod(twin_repins_first)
+    )
+
+    result = service.upgrade(workspace["id"], job_id, mode="clean")
+
+    # 锁内复查发现 job 已升级 → 作废重试 → 重解 context 即 already_current；
+    # 节点保持 completed（不二次重置）、代次只被「双生」的语义外 SQL 保留
+    # 原样（本请求零写）。
+    assert result["status"] == "skipped"
+    assert result["reason_code"] == "already_current"
+    after = queries.get_job(job_id)
+    assert after["execution_generation"] == before["execution_generation"]
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
+    assert set(statuses.values()) == {"completed"}
+    assert not (_job_dir(queries, job_id) / ".staged").exists()

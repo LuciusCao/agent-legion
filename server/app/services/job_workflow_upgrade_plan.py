@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.services.job_workflow_upgrade_config import intake_frozen_config_json
 from server.app.services.job_workflow_upgrade_impl import implementation_excluded_nodes
 from server.app.services.job_workflow_upgrade_inherit import unreachable_inherit_nodes
 from server.app.services.job_workflow_upgrade_propagation import (
@@ -55,18 +54,16 @@ def plan_inherit_nodes(
 
     旧侧配置基准只用 job 的存量 ``frozen_config_json``（intake 冻结值，
     RUN-FREEZE-001）：产物是按那份冻结配置产出的，同基比较必须以它为
-    旧侧输入。存量 NULL（legacy 作业或 config 面全空的作业）或快照解析
-    失败都意味着**旧侧基准不可证明**：legacy 作业 dispatch 走现场解析，
-    其产物基准是生产时刻的 workspace 配置，与升级时刻无关——在旧定义上
-    按今天的配置 re-freeze 只会把配置演进吸收进旧侧（新旧同串恒等），
-    让旧配置产物冒充新 revision 产物（对抗审查 A1）。旧定义按当前配置
+    旧侧输入。存量 NULL 一律是 legacy 作业（#550 起保留执行键并入每个
+    可执行节点的冻结 schema，机制后 intake 的冻结恒非空）——legacy
+    dispatch 走现场解析，其产物基准是生产时刻的 workspace 配置：生产时
+    的 override 可能已删除，按**当前**配置面重算出空并不构成「旧侧为
+    空」的证据（codex #776 复审 P2）。NULL 即旧侧基准不可证明：保守
+    退化为全量重跑，不再探测当前配置面。旧定义按当前配置
     re-parse 抛 ``ValueError``（当前 override 对新 revision 有效但不满足
     旧快照的 config_schema，codex P2）同样不可证明，捕获后保守退化到
     全量重跑——与损坏快照 JSON 的降级方向一致：无法证明旧 config 等价
     → 保守退化为全量重跑，升级本身不因 legacy 配置漂移而失败。
-    代价评估：NULL frozen 且新侧 re-freeze 非空（存在 config 面）的交集
-    场景从「继承」变「全量」；两份 re-freeze 全空（无可冻结 config）时
-    退化后哈希仍相等，继承面不受影响。
 
     产物不可达的节点（S6）作为种子并入闭包（review P1）：上游按新
     revision 重跑后其旧产物语义上已被替换，下游若继续继承旧输出，最终
@@ -99,18 +96,11 @@ def plan_inherit_nodes(
         return frozenset()
     old_frozen_config_json = job.get("frozen_config_json") or None
     if old_frozen_config_json is None:
-        try:
-            old_side_has_config = bool(
-                intake_frozen_config_json(job_db, job["workspace_id"], old_definition)
-            )
-        except ValueError:
-            # 旧快照按当前配置解析失败（codex P2）：旧侧基准不可证明，
-            # 保守退化到 clean 语义（全量重跑）。
-            return frozenset()
-        if old_side_has_config:
-            # 旧侧基准不可证明（A1）：保守退化到 clean 语义（全量重跑），
-            # 不再走「旧定义 re-freeze 当前配置」的恒等回退。
-            return frozenset()
+        # codex #776 复审 P2：NULL 一律是 legacy 作业（#550 起保留执行键
+        # 并入冻结，机制后 intake 恒非空），dispatch 走现场解析——生产时
+        # 的 workspace  override 可能已删除，按当前配置面 re-freeze 出空
+        # 不构成「旧侧为空」的证据。旧侧基准不可证明，保守退化全量重跑。
+        return frozenset()
     implementation_excluded = implementation_excluded_nodes(
         job_db,
         job,

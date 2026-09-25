@@ -302,7 +302,12 @@ workflow upgrade 的单次应用尝试（`apply_upgrade_once`，
 取 `implementation-publication:<ws>` advisory 锁，然后锁下重读 active revision
 （`assert_context_revision_current`）——与 plan 之间已完成的发布即 TOCTOU，
 抛 `ActiveRevisionChangedError`，整个尝试作废并由 service 层整体重试一次（重解
-context + 重 plan + 重进事务，禁止半应用状态）。有继承候选时再取全局
+context + 重 plan + 重进事务，禁止半应用状态）。锁下还会重读 **job 行本身**的
+revision 钉 + 快照（`assert_context_job_current`，codex #776 复审 P1）：并发升级
+在 job-mutation 锁上等待期间，双生请求提交的是**同一** revision——active 复查
+不变、只有 job 的钉变了；不复查就会用过期计划二次重置（删掉对端刚产出的产物、
+重复 bump generation）。不符同样抛信号作废重试，重解 context 后即见
+already_current。有继承候选时再取全局
 `skill-lock` 域做实现身份重验（漂移节点放弃继承、降级重跑，传播面由收敛层
 接管）。
 

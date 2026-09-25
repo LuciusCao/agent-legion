@@ -27,6 +27,7 @@ from server.app.services.job_workflow_upgrade_cleanup import (
 )
 from server.app.services.job_workflow_upgrade_gates import (
     UpgradeContext,
+    assert_context_job_current,
     assert_context_revision_current,
     resolve_upgrade_context,
 )
@@ -103,6 +104,12 @@ def apply_upgrade_once(
             # 编辑已入同域，重读到本事务提交之间 active revision 不可变。
             service.job_db.acquire_implementation_publication_lock(conn, workspace_id)
             assert_context_revision_current(service.job_db, workspace_id, context)
+            # codex #776 复审 P1：锁内复查 job 行本身——并发升级在锁等待
+            # 期间已提交同一升级时，active revision 不变、只有 job 的钉变
+            # 了；不复查就会用过期计划二次重置（删掉对端刚产出的产物、
+            # 重复 bump）。不符抛信号由 service 层整体重试（重解后即见
+            # already_current）。先于任何暂存与写操作，作废零副作用。
+            assert_context_job_current(service.job_db, conn, context)
             if inherit_nodes:
                 # 与 Agent/node-code 的 publish/rollback/archive 共用
                 # workspace 事务锁，重验到提交之间 published 身份不可变。

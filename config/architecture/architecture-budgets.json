@@ -1460,7 +1460,7 @@
     "server/app/services/job_workflow_upgrade_gates.py": 92,
     "server/app/services/job_workflow_upgrade_impl.py": 130,
     "server/app/services/job_workflow_upgrade_inherit.py": 53,
-    "server/app/services/job_workflow_upgrade_plan.py": 66,
+    "server/app/services/job_workflow_upgrade_plan.py": 65,
     "server/app/services/job_workflow_upgrade_propagation.py": 62,
     "server/app/services/job_workflow_upgrade_protection.py": 144,
     "server/app/services/job_workflow_upgrade_removed_outputs.py": 62,
