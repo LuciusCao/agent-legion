@@ -11,6 +11,7 @@ from scripts.architecture.agent_catalog_contracts import (
 from scripts.architecture.broad_except_audit import check_broad_except_audit
 from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
 from scripts.architecture.configuration import check_configuration_ownership
+from scripts.architecture.docs_consistency import check_docs_consistency
 from scripts.architecture.docs_retired_terms import check_docs_retired_terms
 from scripts.architecture.execution_write_surfaces import check_execution_write_surfaces
 from scripts.architecture.executor_decoupling import (
@@ -173,6 +174,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_broad_except_audit(root))
     errors.extend(check_execution_write_surfaces(root))
     errors.extend(check_docs_retired_terms(root))
+    errors.extend(check_docs_consistency(root))
     errors.extend(check_script_permissions(root))
 
     try:

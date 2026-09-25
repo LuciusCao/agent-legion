@@ -812,6 +812,7 @@
     "scripts/architecture/budget_policy.py": 153,
     "scripts/architecture/budget_registry_history.py": 89,
     "scripts/architecture/configuration.py": 43,
+    "scripts/architecture/docs_consistency.py": 118,
     "scripts/architecture/docs_retired_terms.py": 240,
     "scripts/architecture/effective_lines.py": 88,
     "scripts/architecture/execution_write_surfaces.py": 158,
