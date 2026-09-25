@@ -110,11 +110,14 @@ def stage_upgrade_reset_outputs(
     # 暂存集合与重置集合同源（#759 重置集≡暂存集）：reset_keys 即事务内
     # 收敛出的实际重置面，stage_outputs 不再做任何图遍历；upgrade 的下游
     # 传播已在上面由 rerun_closure 收敛进 keep/reset 划分。
+    # codex #776 R8 P1-A：判为 clean 的 RMW 附着名（protection.rmw_retire）
+    # 不在 staging_output_names 的暂存面内（#114 排除），但其先行顺序证据
+    # 已证明删除安全——强制并入暂存名集合，判定与删除面保持一致。
     staged = artifact_mutation.stage_outputs(
         job,
         reset_keys,
         definition,
-        extra_names=removed.names,
+        extra_names=sorted(set(removed.names) | set(protection.rmw_retire)),
         extra_run_keys=removed.run_keys,
     )
     return frozenset(keep_keys), staged, protection

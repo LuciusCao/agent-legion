@@ -345,9 +345,13 @@ fail closed：
   全部输入可用 ⇒ 其输出可用；循环互依赖的生产者证不出可运行。
 - **freshness**：没有 consumer 读到旧字节。非 RMW 名三面删除后「缺席即
   闸」（ready gate 只探本地文件，名字缺席 ⇒ consumer 必然等到重置生产者
-  重写）；RMW 附着名的旧文件不进暂存面（#114）而存活 ⇒ 每个重置
-  consumer 必须有排序证据（显式边 ∪ 经由「唯一生产者且本次缺席」名字的
-  隐式边，多生产者名字的隐式边不作证据）。
+  重写）；RMW 附着名先要求每个重置 consumer 有排序证据（显式边 ∪ 经由
+  「唯一生产者且本次缺席」名字的隐式边，多生产者名字的隐式边不作证据）：
+  全部被覆盖 ⇒ clean 且**强制进删除面**（`rmw_retire` 集并入事务内暂存
+  名——判定与删除面不得脱节，否则暂存面的 #114 RMW 排除会让旧文件与
+  清单行存活、`_check_outputs` 把旧字节当新输出，codex #776 R8 P1-A）；
+  有未覆盖的 RMW consumer ⇒ 其启动输入保留（#114）；有未覆盖的纯
+  consumer ⇒ fail closed。
 - **keep 侧也要证**：名字被重置纯生产者作废后，保留旧字节给无排序证据的
   纯 consumer 吃同样是静默错误——只有「未被作废」或「纯 consumer 全部被
   覆盖、仅未覆盖的 RMW consumer 需要启动输入」才可保留。
@@ -357,8 +361,8 @@ fail closed：
 `UpgradeProtectionUnprovableError`，升级以 `skipped/protection_unprovable`
 返回且零副作用（事务整体回滚，不猜保留也不猜删除）。计划的 keep 集同时喂
 给 removed 面（`removed_artifact_face` 的 `protected_names`）与 clean/全退化
-分支的全量清单清理（`keep_input_names`）；`sweep` 集（依赖缺席判定的非
-RMW 名）在提交后再扫一次本地文件复活（见 §4 残余面）——删除前在
+分支的全量清单清理（`keep_input_names`）；`sweep` 集（= clean 全集：非
+RMW 名加 rmw_retire 强制删除面覆盖的 RMW 名）在提交后再扫一次本地文件复活（见 §4 残余面）——删除前在
 job-mutation 锁内复核（`sweep_delete_guard`：清单行已重登记或生产者
 running/completed 的名跳过），不误删新代次写回的新字节（codex #776
 复审 P2-A）。

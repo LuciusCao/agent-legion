@@ -550,3 +550,74 @@ def test_inherit_upgrade_node_converted_to_start_is_treated_as_deleted(tmp_path:
         ).fetchone()["state"]
     assert state == "cancelled"
     assert queries.get_job(job["id"])["workflow_revision_id"] == current["id"]
+
+
+def test_inherit_upgrade_rmw_name_of_covered_consumer_is_retired(tmp_path: Path) -> None:
+    """codex #776 R8 P1-A：判为 clean 的 RMW 附着名必须实际进删除面。
+
+    p 纯产 x、q 是 p 显式下游的 RMW 节点（inputs/outputs 同 x），升级把
+    两者都重置：保护计划凭 p→q 先行证据判 x 为 clean——但暂存面的 RMW
+    排除（#114）与提交后 sweep 的 RMW 排除让旧 x 的本地文件与清单行都
+    存活；p 重跑若没写 x，``_check_outputs`` 只查存在性就会把旧字节登记
+    为 p 的新输出、q 消费旧 revision 的结果。修复：有先行顺序证明的
+    clean RMW 名强制进事务内暂存 + 清单删除（并进提交后 sweep 面）。
+    """
+    import dataclasses
+
+    from server.app.services.job_artifact_mutation import JobArtifactMutationService
+    from server.app.storage_paths import resolve_job_dir
+
+    queries, workspace, revisions, _, _ = setup_inherit_env(tmp_path)
+    nodes = {
+        "p": WorkflowNode(key="p", label="P", capability="cap_p", outputs=["x.json"]),
+        "q": WorkflowNode(
+            key="q",
+            label="Q",
+            capability="cap_q",
+            after=["p"],
+            inputs=["x.json"],
+            outputs=["x.json"],
+        ),
+    }
+    original = revisions.publish_workspace_revision(
+        workspace["id"],
+        WorkflowDefinition(key="wfchain", label="Wf Chain", intake=WorkflowIntake(), nodes=nodes),
+    )
+    # p 的 capability 变化 → p 与显式下游 q 都进重置面。
+    changed = {
+        **nodes,
+        "p": dataclasses.replace(nodes["p"], capability="cap_p_new"),
+    }
+    revisions.publish_workspace_revision(
+        workspace["id"],
+        WorkflowDefinition(key="wfchain", label="Wf Chain", intake=WorkflowIntake(), nodes=changed),
+    )
+    job = seed_inherit_job(queries, workspace, original, ["p", "q"])
+    for key in ("p", "q"):
+        queries.update_job_node(job["id"], key, status="completed")
+    queries.update_job_status(job["id"], "completed")
+    job_dir = resolve_job_dir(job, queries.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "x.json").write_text("old-x")
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'p', 'x.json', %s, 1, 'hash')
+            """,
+            (job["id"], f"jobs/wschain/{job['id']}/x.json"),
+        )
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+        artifact_mutation=JobArtifactMutationService(queries.jobs_dir),
+    )
+
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+
+    assert result["status"] == "succeeded"
+    assert result["rerun_node_count"] == 2
+    # clean 判定与删除面一致：旧 x 的本地文件与清单行都退役（p 重跑必须
+    # 真写 x，否则响亮失败——不会把旧字节当新输出）。
+    assert not (job_dir / "x.json").exists()
+    assert queries.job_artifact_manifest_names_for_nodes(job["id"], {"p", "q"}) == set()

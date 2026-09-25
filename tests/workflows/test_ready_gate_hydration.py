@@ -5,25 +5,19 @@
 探测本地文件，manifest-only 输入会把 job 永久卡在 queued——
 restore_missing_inputs 的唯一旧调用点在 claim 之后，到不了。修复在评估
 miss 路径挂 hydration（``workflow_worker/input_hydration.py``），本文件
-的用例都必须推进到 ready/claim，不只断言中间状态。
+的用例都必须推进到 ready/claim，不只断言中间状态。upgrade/rerun 联动
+场景见姊妹文件 ``test_ready_gate_hydration_upgrade.py``（codex #776 R8
+拆分）。
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
-import time
 from contextlib import closing
 from pathlib import Path
 
 from server.app.db.connection import connect_database
-from server.app.db.transaction import write_transaction
-from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
-from server.app.jobs.atomic_mutations import mark_nodes_for_rerun
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
-from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.schema import (
     WorkflowCondition,
@@ -33,201 +27,15 @@ from server.app.workflows.schema import (
     WorkflowNode,
 )
 from tests.fakes.storage import FakeObjectStorage
-from tests.helpers.job_workflow_upgrade import seed_impl_identity
+from tests.helpers.ready_gate_hydration import (
+    A_PAYLOAD,
+    assert_claimed_b,
+    chain_definition,
+    pending_b_job,
+    seed_manifest_row,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import RecordingExecutor, _make_worker, _seed_trivial_node_code
-
-_A_PAYLOAD = b'{"from": "a"}'
-
-
-def _chain_definition(b_cap: str = "cap_b") -> WorkflowDefinition:
-    """a → b 两级链：a 产出 a_out.json，b 声明它为输入。"""
-    return WorkflowDefinition(
-        key="wfchain",
-        label="Wf Chain",
-        intake=WorkflowIntake(),
-        nodes={
-            "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["a_out.json"]),
-            "b": WorkflowNode(
-                key="b",
-                label="B",
-                capability=b_cap,
-                after=["a"],
-                config_schema={},
-                inputs=["a_out.json"],
-                outputs=["b_out.json"],
-            ),
-        },
-    )
-
-
-def _seed_manifest_row(queries: JobQueries, job_id: str, storage_key: str, payload: bytes) -> None:
-    """落一条 (a, a_out.json) 清单行，内容与 FakeObjectStorage 中的对象一致。"""
-    with closing(connect_database(queries.dsn_identity)) as conn, conn:
-        conn.execute(
-            """
-            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
-            values (%s, 'a', 'a_out.json', %s, %s, %s)
-            """,
-            (job_id, storage_key, len(payload), hashlib.sha256(payload).hexdigest()),
-        )
-
-
-def _reset_downstream(queries: JobQueries, job_id: str) -> None:
-    """下游 b 被 rerun/reset 的最小真实路径（rerun 的原子 mutation）。"""
-    with write_transaction(TEST_DATABASE_URL) as conn:
-        mark_nodes_for_rerun(conn, job_id, ["b"], {"b": []})
-
-
-def _claimed_b(worker, queries: JobQueries, job_id: str) -> None:
-    """b 已 claim（本地 code 池持租约 + future 已提交）。"""
-    assert worker.leases.active_counts("code").get("global", 0) == 1
-    assert len(worker.state.futures) == 1
-    assert queries.get_job_node(job_id, "b")["status"] == "running"
-
-
-def test_inherit_upgrade_manifest_only_artifact_reaches_claim(tmp_path: Path) -> None:
-    """upgrade inherit 后被继承产物只剩清单行 → hydration 回填 → b ready → claim。"""
-    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
-    )
-    revisions = WorkflowRevisionService(queries)
-    original = revisions.publish_workspace_revision(workspace["id"], _chain_definition())
-    current = revisions.publish_workspace_revision(
-        workspace["id"], _chain_definition(b_cap="cap_b_new")
-    )
-    service = JobWorkflowUpgradeService(
-        queries,
-        ExecutorLeaseRepository(queries, data_dir=tmp_path),
-    )
-    job = queries.create_job(
-        workflow_key="wfchain",
-        source_type="question",
-        source_id="Q1",
-        run_id="",
-        title="Q1",
-        node_keys=["a", "b"],
-        workspace_id=workspace["id"],
-        workflow_revision_id=original["id"],
-        workflow_version=original["version"],
-        workflow_definition_hash=original["definition_hash"],
-        workflow_definition_snapshot_json=original["definition_json"],
-    )
-    # 播种真实 intake 会冻结的 frozen_config_json（legacy NULL-frozen 的旧侧
-    # 配置基准不可证明，会保守退化为全量重跑）。
-    from server.app.services.job_workflow_upgrade_config import intake_frozen_config_json
-    from server.app.workflows.definition import workflow_definition_from_dict
-
-    frozen = intake_frozen_config_json(
-        queries,
-        workspace["id"],
-        workflow_definition_from_dict(json.loads(original["definition_json"])),
-    )
-    if frozen is not None:
-        with closing(connect_database(queries.dsn_identity)) as conn, conn:
-            conn.execute(
-                "update jobs set frozen_config_json=%s where id=%s",
-                (frozen, job["id"]),
-            )
-    # a 完成且实现身份可证明（published code + 完成执行同 hash）；b 旧 revision
-    # 已完成（capability 变更后必重置，无需身份）。
-    seed_impl_identity(queries, workspace, job["id"], ["a"])
-    queries.update_job_node(job["id"], "b", status="completed")
-    queries.update_job_status(job["id"], "completed")
-    # a 的产物 manifest-only：本地文件从未落盘（等价于淘汰后形态），可达性
-    # 预检靠清单行放行继承。
-    job_dir = resolve_job_dir(job, queries.jobs_dir)
-    storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
-    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
-    assert not (job_dir / "a_out.json").exists()
-
-    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
-
-    assert result["status"] == "succeeded"
-    assert result["kept_node_count"] == 1
-    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
-    assert statuses == {"a": "completed", "b": "pending"}
-
-    storage = FakeObjectStorage(objects={storage_key: _A_PAYLOAD})
-    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
-    # b 的 claim 需要新 revision 下 published node code（EXEC-CODE-002）。
-    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfchain", "b")
-    executor = RecordingExecutor("code")
-    worker = _make_worker(
-        tmp_path,
-        TEST_DATABASE_URL,
-        executor,
-        [_chain_definition(b_cap="cap_b_new")],
-        artifact_object_store=store,
-    )
-    worker._poll()
-
-    # hydration 把 a_out.json 从对象存储回填到 job_dir，b 越过 ready gate 被 claim。
-    assert (job_dir / "a_out.json").read_bytes() == _A_PAYLOAD
-    assert queries.get_job(job["id"])["workflow_revision_id"] == current["id"]
-    _claimed_b(worker, queries, job["id"])
-
-    executor.block_event.set()
-    worker.stop()
-
-
-def test_evicted_upstream_input_restored_after_downstream_rerun(tmp_path: Path) -> None:
-    """本地淘汰场景：completed 上游产物本地被淘汰、下游 rerun → 下一轮评估回填后 ready。"""
-    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
-    definition = WorkflowDefinition(
-        key="test",
-        label="Test",
-        intake=WorkflowIntake(),
-        nodes={
-            "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["a_out.json"]),
-            "b": WorkflowNode(
-                key="b",
-                label="B",
-                capability="cap_b",
-                after=["a"],
-                inputs=["a_out.json"],
-                outputs=["b_out.json"],
-            ),
-        },
-    )
-    job = queries.create_job(
-        workflow_key="test",
-        source_type="question",
-        source_id="Q1",
-        run_id="",
-        title="Q1",
-        node_keys=["a", "b"],
-        workspace_id=workspace["id"],
-    )
-    queries.update_job_node(job["id"], "a", status="completed")
-    queries.update_job_node(job["id"], "b", status="completed")
-    queries.update_job_status(job["id"], "completed")
-    job_dir = resolve_job_dir(job, queries.jobs_dir)
-    (job_dir / "a_out.json").write_bytes(_A_PAYLOAD)
-    storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
-    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
-
-    # 维护线程淘汰本地产物（清单行已确认持久化），随后下游被 rerun。
-    (job_dir / "a_out.json").unlink()
-    _reset_downstream(queries, job["id"])
-
-    storage = FakeObjectStorage(objects={storage_key: _A_PAYLOAD})
-    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
-    # b 的 claim 需要 published node code（EXEC-CODE-002）。
-    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "test", "b")
-    executor = RecordingExecutor("code")
-    worker = _make_worker(
-        tmp_path, TEST_DATABASE_URL, executor, [definition], artifact_object_store=store
-    )
-    worker._poll()
-
-    assert (job_dir / "a_out.json").read_bytes() == _A_PAYLOAD
-    _claimed_b(worker, queries, job["id"])
-
-    executor.block_event.set()
-    worker.stop()
 
 
 def test_branch_condition_artifact_hydrated_before_branch_evaluation(tmp_path: Path) -> None:
@@ -273,11 +81,11 @@ def test_branch_condition_artifact_hydrated_before_branch_evaluation(tmp_path: P
     queries.update_job_node(job["id"], "a", status="completed")
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
-    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
+    seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)
     assert not (job_dir / "a_out.json").exists()
 
     store = JobArtifactObjectStore(
-        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: _A_PAYLOAD})
+        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: A_PAYLOAD})
     )
     _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "test", "b")
     executor = RecordingExecutor("code")
@@ -288,7 +96,7 @@ def test_branch_condition_artifact_hydrated_before_branch_evaluation(tmp_path: P
 
     # 分支条件为真（回填后可读）→ b 未被标记 not_applicable，直接 ready → claim。
     assert queries.get_job_node(job["id"], "b")["status"] != "not_applicable"
-    _claimed_b(worker, queries, job["id"])
+    assert_claimed_b(worker, queries, job["id"])
 
     executor.block_event.set()
     worker.stop()
@@ -326,7 +134,7 @@ def test_missing_object_defers_evaluation_without_caching(tmp_path: Path) -> Non
     queries.update_job_node(job["id"], "a", status="completed")
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
-    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
+    seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)
     # 对象存储里刻意没有该 key：open_stream 抛错 → 单文件恢复失败。
 
     store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
@@ -403,11 +211,11 @@ def test_generation_bump_during_hydration_discards_restored_files(tmp_path: Path
     queries.update_job_node(job["id"], "a", status="completed")
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
-    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
+    seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)
     assert not (job_dir / "a_out.json").exists()
 
     store = JobArtifactObjectStore(
-        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: _A_PAYLOAD})
+        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: A_PAYLOAD})
     )
     original_rows_for_job = store.rows_for_job
     mutation_committed = False
@@ -489,7 +297,7 @@ def test_no_object_storage_keeps_pre_hydration_behavior(tmp_path: Path) -> None:
     queries.update_job_node(job["id"], "a", status="completed")
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
-    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
+    seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)
 
     # 播种 b 的 published code：同上，唯一阻塞因素应只是缺失的输入。
     _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "test", "b")
@@ -508,21 +316,6 @@ def test_no_object_storage_keeps_pre_hydration_behavior(tmp_path: Path) -> None:
     worker.stop()
 
 
-def _pending_b_job(queries: JobQueries, workspace: dict) -> dict:
-    """a completed、b pending 的最小 job（wfchain 定义）。"""
-    job = queries.create_job(
-        workflow_key="wfchain",
-        source_type="question",
-        source_id="Q1",
-        run_id="",
-        title="Q1",
-        node_keys=["a", "b"],
-        workspace_id=workspace["id"],
-    )
-    queries.update_job_node(job["id"], "a", status="completed")
-    return job
-
-
 def test_manifest_read_failure_defers_without_caching_and_recovers(tmp_path: Path) -> None:
     """清单读抛错 → 不缓存、不产候选、下轮重试；故障清除后重新读清单并 claim。
 
@@ -534,13 +327,13 @@ def test_manifest_read_failure_defers_without_caching_and_recovers(tmp_path: Pat
     workspace = queries.create_workspace(
         "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
     )
-    job = _pending_b_job(queries, workspace)
+    job = pending_b_job(queries, workspace)
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
-    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
+    seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)
 
     store = JobArtifactObjectStore(
-        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: _A_PAYLOAD})
+        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: A_PAYLOAD})
     )
     manifest_reads = 0
     original_rows_for_job = store.rows_for_job
@@ -558,7 +351,7 @@ def test_manifest_read_failure_defers_without_caching_and_recovers(tmp_path: Pat
     _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfchain", "b")
     executor = RecordingExecutor("code")
     worker = _make_worker(
-        tmp_path, TEST_DATABASE_URL, executor, [_chain_definition()], artifact_object_store=store
+        tmp_path, TEST_DATABASE_URL, executor, [chain_definition()], artifact_object_store=store
     )
 
     worker._poll()
@@ -578,8 +371,8 @@ def test_manifest_read_failure_defers_without_caching_and_recovers(tmp_path: Pat
     worker._poll()
 
     # 故障恢复后同轮重新读清单、回填、越过 ready gate 被 claim（不停 queued）。
-    assert (job_dir / "a_out.json").read_bytes() == _A_PAYLOAD
-    _claimed_b(worker, queries, job["id"])
+    assert (job_dir / "a_out.json").read_bytes() == A_PAYLOAD
+    assert_claimed_b(worker, queries, job["id"])
 
     executor.block_event.set()
     worker.stop()
@@ -591,13 +384,13 @@ def test_generation_preread_failure_defers_without_caching(tmp_path: Path) -> No
     workspace = queries.create_workspace(
         "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
     )
-    job = _pending_b_job(queries, workspace)
+    job = pending_b_job(queries, workspace)
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
-    _seed_manifest_row(queries, job["id"], storage_key, _A_PAYLOAD)
+    seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)
 
     store = JobArtifactObjectStore(
-        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: _A_PAYLOAD})
+        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: A_PAYLOAD})
     )
     manifest_reads = 0
     original_rows_for_job = store.rows_for_job
@@ -611,7 +404,7 @@ def test_generation_preread_failure_defers_without_caching(tmp_path: Path) -> No
     _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfchain", "b")
     executor = RecordingExecutor("code")
     worker = _make_worker(
-        tmp_path, TEST_DATABASE_URL, executor, [_chain_definition()], artifact_object_store=store
+        tmp_path, TEST_DATABASE_URL, executor, [chain_definition()], artifact_object_store=store
     )
     original_get_generation = worker.job_db.get_job_execution_generation
 
@@ -633,8 +426,8 @@ def test_generation_preread_failure_defers_without_caching(tmp_path: Path) -> No
 
     # 读恢复后重新评估：清单被读取、输入回填、b 被 claim。
     assert manifest_reads == 1
-    assert (job_dir / "a_out.json").read_bytes() == _A_PAYLOAD
-    _claimed_b(worker, queries, job["id"])
+    assert (job_dir / "a_out.json").read_bytes() == A_PAYLOAD
+    assert_claimed_b(worker, queries, job["id"])
 
     executor.block_event.set()
     worker.stop()
@@ -651,7 +444,7 @@ def test_successful_manifest_read_without_rows_caches_evaluation(tmp_path: Path)
     workspace = queries.create_workspace(
         "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
     )
-    job = _pending_b_job(queries, workspace)
+    job = pending_b_job(queries, workspace)
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     # 本地无 a_out.json，也刻意不播种清单行：输入真缺失。
 
@@ -668,7 +461,7 @@ def test_successful_manifest_read_without_rows_caches_evaluation(tmp_path: Path)
     _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfchain", "b")
     executor = RecordingExecutor("code")
     worker = _make_worker(
-        tmp_path, TEST_DATABASE_URL, executor, [_chain_definition()], artifact_object_store=store
+        tmp_path, TEST_DATABASE_URL, executor, [chain_definition()], artifact_object_store=store
     )
 
     worker._poll()
@@ -685,118 +478,4 @@ def test_successful_manifest_read_without_rows_caches_evaluation(tmp_path: Path)
     assert manifest_reads == 1
     assert queries.get_job_node(job["id"], "b")["status"] == "pending"
 
-    worker.stop()
-
-
-def test_rerun_condition_producer_defers_branch_until_producer_completes(
-    tmp_path: Path,
-) -> None:
-    """#759 ③ 对抗复审 P1 端到端：重跑条件产物生产者（与分支源不相邻）时，
-    gated 分支的裁决推迟到生产者完成——缺失的条件文件不被当成 false（不
-    标 not_applicable 终态），生产者完成后按新字节正常选中、claim。
-
-    修复前：rerun 的暂存删掉 verdict.json 后，下一轮评估条件为假 → gated
-    被永久标 not_applicable（job 以「分支被跳过」静默完成）。"""
-    from server.app.workflows.workflow_consumption import dependency_downstream
-
-    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
-    definition = WorkflowDefinition(
-        key="test",
-        label="Test",
-        intake=WorkflowIntake(),
-        nodes={
-            "entry": WorkflowNode(key="entry", label="E", capability="cap_e"),
-            "scorer": WorkflowNode(
-                key="scorer",
-                label="S",
-                capability="cap_s",
-                after=["entry"],
-                outputs=["verdict.json"],
-            ),
-            "gated": WorkflowNode(
-                key="gated",
-                label="G",
-                capability="cap_g",
-                after=["entry"],
-                outputs=["g.json"],
-            ),
-        },
-        edges=[
-            WorkflowEdge(source="entry", target="scorer"),
-            WorkflowEdge(
-                source="entry",
-                target="gated",
-                condition=WorkflowCondition(artifact="verdict.json", path="$.done", equals=True),
-            ),
-        ],
-    )
-    job = queries.create_job(
-        workflow_key="test",
-        source_type="question",
-        source_id="Q1",
-        run_id="",
-        title="Q1",
-        node_keys=["entry", "scorer", "gated"],
-        workspace_id=workspace["id"],
-    )
-    for key in ("entry", "scorer", "gated"):
-        queries.update_job_node(job["id"], key, status="completed")
-    queries.update_job_status(job["id"], "completed")
-    job_dir = resolve_job_dir(job, queries.jobs_dir)
-    verdict = b'{"done": true}'
-    (job_dir / "verdict.json").write_bytes(verdict)
-    (job_dir / "g.json").write_bytes(verdict)
-    with closing(connect_database(queries.dsn_identity)) as conn, conn:
-        conn.execute(
-            """
-            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
-            values (%s, 'scorer', 'verdict.json', %s, %s, %s)
-            """,
-            (
-                job["id"],
-                f"jobs/test/{job['id']}/verdict.json",
-                len(verdict),
-                hashlib.sha256(verdict).hexdigest(),
-            ),
-        )
-
-    # rerun scorer（真实闭包 + 原子突变）：gated 经条件消费边进 stale，
-    # verdict.json 暂存删除（本地文件随暂存消失、清单行删除）。
-    downstream = dependency_downstream(definition, "scorer")
-    assert "gated" in downstream  # 条件消费边进闭包（③ 层的前提）
-    (job_dir / "verdict.json").unlink()  # 暂存的本地面效果
-    with write_transaction(TEST_DATABASE_URL) as conn:
-        mark_nodes_for_rerun(
-            conn,
-            job["id"],
-            ["scorer"],
-            {"scorer": downstream},
-            staged_artifact_names=frozenset({"verdict.json"}),
-        )
-
-    for key in ("scorer", "gated"):
-        _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "test", key)
-    executor = RecordingExecutor("code")
-    worker = _make_worker(
-        tmp_path, TEST_DATABASE_URL, executor, [definition], artifact_object_store=None
-    )
-
-    worker._poll()
-
-    # 屏障生效：gated 不被标 not_applicable（stale 等待生产者）；scorer 已
-    # 被 claim（重跑在途）。
-    assert queries.get_job_node(job["id"], "gated")["status"] == "stale"
-    assert queries.get_job_node(job["id"], "scorer")["status"] == "running"
-
-    executor.block_event.set()  # scorer 重跑完成：写回 verdict.json
-    # 完成回收发生在下一轮 poll 开头（reap_futures）——xdist 负载下执行器线
-    # 程可能赶不上紧随的一轮，轮询到有界上限（等不到即红）。
-    deadline = time.monotonic() + 15
-    while queries.get_job_node(job["id"], "gated")["status"] != "running":
-        assert time.monotonic() < deadline, "gated was never claimed after the producer re-ran"
-        worker._poll()
-
-    # 生产者完成后按新字节裁决：gated 被选中并 claim（永不曾 not_applicable）。
-    assert queries.get_job_node(job["id"], "scorer")["status"] == "completed"
     worker.stop()

@@ -214,8 +214,10 @@ def test_explicit_chain_producer_still_unprotects_startup_row(tmp_path: Path) ->
     assert result["status"] == "succeeded"
     # x 失去保护：清单行清理（p 重跑重新产出 x 后 q/c 才解锁）。
     assert _manifest_names(queries, job_id, {"p", "q"}) == set()
-    # RMW 名的本地文件不进暂存面（#114），清理的是清单行/权威对象。
-    assert (job_dir / "x.json").read_text() == "old-x.json"
+    # codex #776 R8 P1-A：全部被覆盖的 clean RMW 名强制进删除面——本地
+    # 文件同样退役（rmw_retire 并入暂存面），否则 p 重跑未写 x 时旧字节
+    # 会被 _check_outputs 当新输出。
+    assert not (job_dir / "x.json").exists()
 
 
 def test_chained_rmw_without_pure_consumer_evidence_fails_closed(tmp_path: Path) -> None:

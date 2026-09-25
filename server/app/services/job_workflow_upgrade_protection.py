@@ -16,9 +16,12 @@ hydration 立即复活旧字节，C 在 P 重跑前消费旧 revision 产物。�
 - **freshness**：没有 consumer 会读到旧字节。非 RMW 名三面删除后「缺席即闸」
   ——ready gate 只探本地文件，名字缺席 ⇒ consumer 必然等到重置生产者重写
   （自己的隐式边在此是合法证据：删除是我们自己做的，缺席自证成立，前提是
-  名字确实进了本次删除面）；RMW 附着名的旧文件不进暂存面（#114）而存活，
-  缺席不成立 ⇒ 每个重置 consumer 必须有排序证据：经显式边 ∪ 经由「唯一
-  生产者且本次会缺席」名字的隐式边，可达某个重置纯生产者的下游。
+  名字确实进了本次删除面）；RMW 附着名先要求每个重置 consumer 有排序证据
+  （经显式边 ∪ 经由「唯一生产者且本次会缺席」名字的隐式边，可达某个重置
+  纯生产者的下游）：全部被覆盖 ⇒ clean 且强制进删除面（``rmw_retire``，
+  codex #776 R8 P1-A——判定与删除面不得脱节）；有未覆盖的 RMW consumer ⇒
+  其启动输入必须保留（#114）；有未覆盖的纯 consumer ⇒ 两方向都错，
+  fail closed。
 - **keep 侧同样要证**：名字被重置纯生产者作废后，保留旧字节给纯 consumer
   吃是静默错误；只有「未被作废」（外部输入/保留节点产物/纯 RMW 链）或
   「纯 consumer 全部被覆盖、仅未覆盖的 RMW consumer 需要启动输入」才可保留。
@@ -46,15 +49,21 @@ class InputProtectionPlan:
     节点声明面、无重置纯生产者的名、以及有未覆盖 RMW consumer 的启动名）。
     ``clean``：可三面清理（本地文件/清单行/对象）的名字（liveness +
     freshness 均证明）。``unprovable``：两方向均不可证明——非空即 fail
-    closed。``sweep``：``clean`` 中依赖「缺席即闸」的非 RMW 名——提交后需
-    再扫一次本地文件（hydration 与提交交错可能在窗口内复活旧字节，见
-    docs/architecture/execution-generation.md §5 残余面）。
+    closed。``sweep``：``clean`` 全集——提交后需再扫一次本地文件
+    （hydration 与提交交错可能在窗口内复活旧字节，见
+    docs/architecture/execution-generation.md §5 残余面）。``rmw_retire``：
+    ``clean`` 中的 RMW 附着名（codex #776 R8 P1-A）——暂存面的 RMW 排除
+    （#114 启动输入保护）把它们留在删除面外，判定与删除面会脱节（旧文件
+    与清单行存活、``_check_outputs`` 把旧字节当新输出）；调用方必须把它们
+    强制并入事务内暂存名集合（先行顺序证据保证 RMW consumer 在重置纯
+    生产者之后起跑，启动输入是新字节）。
     """
 
     keep: frozenset[str] = frozenset()
     clean: frozenset[str] = frozenset()
     unprovable: frozenset[str] = frozenset()
     sweep: frozenset[str] = frozenset()
+    rmw_retire: frozenset[str] = frozenset()
 
 
 class UpgradeProtectionUnprovableError(Exception):
@@ -190,6 +199,7 @@ def input_protection_plan(
     keep: set[str] = set()
     clean: set[str] = set()
     unprovable: set[str] = set()
+    rmw_retire: set[str] = set()
     for name in sorted(input_names):
         if name in kept_declared or name not in invalidated:
             # A3 保留面 / 外部输入 / 纯 RMW 链：旧字节即权威，保留才正确。
@@ -232,6 +242,13 @@ def input_protection_plan(
             # consumer 仍经排序证据等新字节，保留无害。
             keep.add(name)
         else:
+            # codex #776 R8 P1-A：全部被覆盖 ⇒ clean——但 RMW 附着名不在
+            # 暂存面（#114 排除），必须随 rmw_retire 强制并入事务内删除面，
+            # 否则判定与删除脱节：旧文件与清单行存活，重置纯生产者本次没
+            # 写该名时旧字节被当新输出。
             clean.add(name)
-    sweep = frozenset(name for name in clean if name not in rmw_attached)
-    return InputProtectionPlan(frozenset(keep), frozenset(clean), frozenset(unprovable), sweep)
+            rmw_retire.add(name)
+    sweep = frozenset(clean)
+    return InputProtectionPlan(
+        frozenset(keep), frozenset(clean), frozenset(unprovable), sweep, frozenset(rmw_retire)
+    )
