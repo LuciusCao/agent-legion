@@ -35,16 +35,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from server.app.services.job_artifact_guarded_delete import delete_retired_objects
+
 logger = logging.getLogger(__name__)
-
-
-def _live_keys(object_store: Any, job_id: str, keys: list[str]) -> set[str]:
-    """Targeted manifest existence probe for ``keys`` ({} when the store
-    exposes no query seam — the legacy degrade-to-removal-without-guard)."""
-    probe = getattr(object_store, "live_keys_for", None)
-    if probe is None:
-        return set()
-    return set(probe(job_id, keys))
 
 
 def delete_rerun_artifact_objects(
@@ -76,7 +69,7 @@ def delete_rerun_artifact_objects(
     if object_store is None or not getattr(object_store, "enabled", False) or not deleted_rows:
         return
     try:
-        _delete_retired_objects(object_store, deleted_rows, job_id, operation)
+        delete_retired_objects(object_store, deleted_rows, job_id, operation)
     except Exception:
         # #204 broad-except audit: post-commit best-effort teardown. The
         # rerun/upgrade/run-to transaction has COMMITTED by the time this
@@ -90,56 +83,3 @@ def delete_rerun_artifact_objects(
         # manifest rows are already gone). logger.exception keeps the
         # traceback with the job_id and the calling operation's domain.
         logger.exception("rerun %s cleanup failed for job %s", operation, job_id)
-
-
-def _delete_retired_objects(
-    object_store: Any, deleted_rows: list[dict[str, Any]], job_id: str, operation: str
-) -> None:
-    """The removal walk of ``delete_rerun_artifact_objects`` (raising body)."""
-    live = _live_keys(object_store, job_id, [str(row["storage_key"]) for row in deleted_rows])
-    stale_rows = [row for row in deleted_rows if str(row["storage_key"]) not in live]
-    if len(stale_rows) < len(deleted_rows):
-        logger.info(
-            "rerun %s cleanup for job %s skipped %d re-registered object(s)",
-            operation,
-            job_id,
-            len(deleted_rows) - len(stale_rows),
-        )
-    spared: set[str] = set()
-    deleted_keys: set[str] = set()
-    for row in stale_rows:
-        # Re-validate against the CURRENT manifest immediately before this
-        # object's removal: a re-attempt completing promote_all after the
-        # batch probe above re-registers this same stable authority key,
-        # and removing it would strand the fresh manifest row.
-        key = str(row["storage_key"])
-        if key in _live_keys(object_store, job_id, [key]):
-            spared.add(key)
-            continue
-        object_store.delete_objects([row])
-        deleted_keys.add(key)
-    if spared:
-        logger.info(
-            "rerun %s cleanup for job %s spared %d object(s) re-registered during cleanup: %s",
-            operation,
-            job_id,
-            len(spared),
-            sorted(spared)[:5],
-        )
-    # Post-removal re-check: a row appearing under a removed key in the
-    # residual per-object window means the race fired — surface it (bucket
-    # lifecycle cannot repair a stranded manifest row). Nothing removed →
-    # trivially nothing raced, and the probe is skipped with it.
-    if not deleted_keys:
-        return
-    raced = _live_keys(object_store, job_id, sorted(deleted_keys)) & deleted_keys
-    if raced:
-        logger.warning(
-            "rerun %s cleanup for job %s: %d manifest row(s) appeared under "
-            "just-removed object key(s) %s — re-attempt raced the cleanup; "
-            "re-run the node or re-upload to repair the authority copy",
-            operation,
-            job_id,
-            len(raced),
-            sorted(raced)[:5],
-        )

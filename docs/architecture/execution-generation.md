@@ -243,6 +243,7 @@ D12 镜像上传）与 finish 内的清单登记共用同一个 primitive
 | 本地臂 staging 对象（per-invocation key） | 字节未 promote | promote 终局已定（提交或闸拒）——调用方私有 key，finally 清理 | `upload_via_staging_guarded` finally |
 | 远端臂 staging 对象（per-execution key，Worker 共享落点） | 字节未 promote 且并发 /result 重试仍要 verify/promote | finish 提交后由完成方删除；其余结局交 bucket lifecycle / `s3_jobs_gc` | `completion_staged.finish_staged` 尾部 |
 | 文件提升备份目录（`.promote-rollback-*`） | 文件已移动但登记未提交 | 登记事务**提交成功**（`discard` 活到 commit 之后——commit 时刻失败时本地面随清单行/authority 同面回滚，codex #774 P1）∥ 已**完整**回滚（`rollback` 部分失败时备份目录整体保留 + ERROR 日志带路径，失败项备份是旧目标的最后本地恢复源）；**可逆性前提**：target/source 必须是文件——真实目录在任何移动之前整批拒绝，备份后立即复查收口预检↔移动间的 TOCTOU 换形（codex #774 P2 族） | `_file_promotion.py` 预检 + 备份后复查 + `FilePromotionGuard` |
+| 退役 authority 对象（rerun/run-to/upgrade 提交后清理） | 旧清单行已删，但在途 promote 可能已 copy 同名新字节、登记未提交（探针必 miss） | 共享 promote 的 `artifact-authority:<key>` 锁：try-lock 不可得（在途 promote 持有）∥ 锁内复核清单行存活 → 跳过删除（保守方向：旧对象成孤儿由 lifecycle 兜底，绝不误删新代次字节，codex #776 R7 P2-A） | `job_artifact_guarded_delete.delete_objects_guarded`（经 `JobArtifactObjectStore.delete_objects_guarded` duck seam） |
 
 恢复 copy 的重试分级（#774 对抗复审 P2）：按 key 锁仍持有的臂（闸拒、
 存储/文件/校验面失败）带界重试吸收瞬时存储故障；锁已随会话释放或正在

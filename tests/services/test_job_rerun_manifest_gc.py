@@ -502,3 +502,65 @@ def test_batch_rerun_continues_when_post_commit_cleanup_fails(
 
     assert [r["job_id"] for r in results] == [job_a["id"], job_b["id"]]
     assert [r["status"] for r in results] == ["succeeded", "succeeded"]
+
+
+def test_object_cleanup_skips_key_while_promote_holds_authority_lock(
+    job_db, settings, chain_definition
+):
+    """codex #776 R7 P2-A：cleanup 与在途 promote 共享 artifact-authority 锁。
+
+    在途 promote 已把新字节 copy 到稳定 authority key、但尚未登记清单行
+    （同一事务的锁内后段）时，cleanup 的清单探针看不到行——无锁的清理会
+    把刚写入的新对象删掉，随后 promote 登记留下悬挂行。修复后 cleanup
+    的删除在该 key 的锁被持有时跳过（保守方向：旧对象成孤儿由 bucket
+    lifecycle 兜底，绝不误删新字节）；锁释放后（promote 已提交，行可见）
+    复核命中存活行同样跳过。本用例用另一连接真实持有 advisory 锁模拟
+    在途 promote。
+    """
+    from server.app.db.transaction import write_transaction
+    from server.app.services.job_staged_cleanup import delete_rerun_artifact_objects
+
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    store = JobArtifactObjectStore(job_db, storage)
+    up_key = f"jobs/{workspace['id']}/{job['id']}/up.json"
+
+    # 升级/rerun 已在事务内删除清单行（模拟 post-commit 清理的输入态）；
+    # 在途 promote 已把新字节 copy 到 authority key（行尚未登记）。
+    from contextlib import closing
+
+    from server.app.db.connection import connect_database
+
+    with closing(connect_database(job_db.dsn_identity)) as conn, conn:
+        conn.execute("delete from job_artifacts where job_id=%s", (job["id"],))
+    storage.objects[up_key] = b"new generation bytes"
+    storage.deleted.clear()
+    stale_rows = [{"node_key": "up", "name": "up.json", "storage_key": up_key}]
+
+    with write_transaction(job_db.dsn_identity) as promote_conn:
+        # 在途 promote：持 artifact-authority 锁（copy 与登记之间的中段）。
+        promote_conn.execute(
+            "select pg_advisory_xact_lock(hashtext(%s))", (f"artifact-authority:{up_key}",)
+        )
+        delete_rerun_artifact_objects(store, stale_rows, job["id"], "rerun")
+        # 锁被持有 → cleanup 跳过删除，新字节存活。
+        assert up_key not in storage.deleted
+        assert storage.objects[up_key] == b"new generation bytes"
+        # promote 后段：登记清单行并提交（锁随提交释放）。
+        store.record_remote(
+            workspace_id=str(workspace["id"]),
+            job_id=job["id"],
+            node_key="up",
+            name="up.json",
+            storage_key=up_key,
+            size_bytes=20,
+            content_hash="hash-new",
+        )
+
+    # 锁释放后再清理：锁可得，但清单行已登记 → 复核命中，同样不删。
+    delete_rerun_artifact_objects(store, stale_rows, job["id"], "rerun")
+    assert up_key not in storage.deleted
+    assert storage.objects[up_key] == b"new generation bytes"
