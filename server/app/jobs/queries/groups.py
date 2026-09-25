@@ -33,6 +33,7 @@ from server.app.jobs.queries.scoped_tokens import ScopedTokenQueriesMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
 from server.app.jobs.queries.studio_chat import StudioChatQueriesMixin
 from server.app.jobs.queries.studio_publish_requests import StudioPublishRequestQueriesMixin  # #416
+from server.app.jobs.queries.sweep_guard import SweepGuardQueriesMixin
 from server.app.jobs.queries.upgrade_impl_identity import UpgradeImplIdentityQueriesMixin  # #645
 from server.app.jobs.queries.upgrade_staging import UpgradeStagingQueriesMixin  # #645
 from server.app.jobs.queries.workflow_draft_cas import WorkflowDraftCasQueriesMixin
@@ -77,6 +78,7 @@ class RunDomainQueriesMixin(
     JobStatusQueriesMixin,
     JobKeyQueriesMixin,
     JobArtifactKeyQueriesMixin,
+    SweepGuardQueriesMixin,
     QualityReplayQueriesMixin,
     ApprovalDecisionQueriesMixin,
     RuntimeProfileQueriesMixin,

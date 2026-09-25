@@ -1166,6 +1166,7 @@
     "server/app/jobs/queries/studio_publish_request_reads.py": 55,
     "server/app/jobs/queries/studio_publish_request_writes.py": 50,
     "server/app/jobs/queries/studio_publish_requests.py": 110,
+    "server/app/jobs/queries/sweep_guard.py": 64,
     "server/app/jobs/queries/upgrade_impl_identity.py": 72,
     "server/app/jobs/queries/upgrade_staging.py": 41,
     "server/app/jobs/queries/workflow_draft_cas.py": 59,

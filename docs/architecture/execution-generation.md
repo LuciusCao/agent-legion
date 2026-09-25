@@ -357,7 +357,10 @@ fail closed：
 返回且零副作用（事务整体回滚，不猜保留也不猜删除）。计划的 keep 集同时喂
 给 removed 面（`removed_artifact_face` 的 `protected_names`）与 clean/全退化
 分支的全量清单清理（`keep_input_names`）；`sweep` 集（依赖缺席判定的非
-RMW 名）在提交后再扫一次本地文件复活（见 §4 残余面）。
+RMW 名）在提交后再扫一次本地文件复活（见 §4 残余面）——删除前在
+job-mutation 锁内复核（`sweep_delete_guard`：清单行已重登记或生产者
+running/completed 的名跳过），不误删新代次写回的新字节（codex #776
+复审 P2-A）。
 
 ## 3. 对抗审查 checklist
 

@@ -196,6 +196,16 @@ def apply_upgrade_once(
     # 复查恰好通过（残余窗口）；恢复写先于复查，复查通过的复活必落在提交
     # 前，提交后 sweep 必然覆盖（详见 job_workflow_upgrade_sweep docstring）。
     deleted_names = frozenset(str(row["name"]) for row in stats["deleted_rows"])
+    sweep_names = protection.sweep & deleted_names
+    # codex #776 复审 P2-A：sweep 删除前锁内复核需要新图生产者映射——
+    # 新 attempt 已登记清单行或生产者 running/completed 的名跳过删除
+    # （不误删新代次写回的新字节）。
+    sweep_producers: dict[str, list[str]] = {}
+    if sweep_names:
+        for key, node in context.definition.executable_nodes.items():
+            for name in node.outputs:
+                if name in sweep_names:
+                    sweep_producers.setdefault(name, []).append(key)
     finalize_upgrade_staged_outputs(
         staged,
         service.object_store,
@@ -203,7 +213,9 @@ def apply_upgrade_once(
         job_id,
         job=context.job,
         jobs_dir=service.job_db.jobs_dir,
-        sweep_names=protection.sweep & deleted_names,
+        sweep_names=sweep_names,
+        sweep_producers=sweep_producers,
+        job_db=service.job_db,
     )
     if service.job_event_buffer is not None:
         record_job_update(service.job_db, service.job_event_buffer, job_id)

@@ -39,9 +39,11 @@ def finalize_upgrade_staged_outputs(
     job: dict[str, Any] | None = None,
     jobs_dir: Path | None = None,
     sweep_names: frozenset[str] | set[str] = frozenset(),
+    sweep_producers: dict[str, list[str]] | None = None,
+    job_db: Any = None,
 ) -> None:
     """提交后的收尾：缺席名复活 sweep + 暂存件彻底删除 + 对象存储 best-effort 清理。"""
-    if job is not None and jobs_dir is not None:
-        sweep_absent_input_files(job, jobs_dir, sweep_names, job_id)
+    if job is not None and jobs_dir is not None and job_db is not None:
+        sweep_absent_input_files(job_db, job, jobs_dir, sweep_names, sweep_producers or {}, job_id)
     commit_staged_outputs(staged, job_id, "upgrade-workflow")
     delete_rerun_artifact_objects(object_store, deleted_rows, job_id, "upgrade-workflow")

@@ -160,15 +160,20 @@ def upgrade_job_workflow_inherit(
         if removed_node_keys is not None
         else frozenset(existing_rows) - frozenset(node_keys)
     )
-    if reset_nodes:
-        placeholders = ",".join("%s" for _ in reset_nodes)
+    # codex #776 复审 P2（R6-B）：run_dir/session_dir 清空范围 = 重置节点 ∪
+    # 被删旧节点——被删节点的 runs/<key> 目录由 extra_run_keys 在提交后
+    # 永久删除，历史 node_runs 行保留（审计）但目录引用必须清，否则作业
+    # 详情/日志读取解析失效路径。
+    dir_clear_scope = sorted(set(reset_nodes) | set(renamed_from_nodes))
+    if dir_clear_scope:
+        placeholders = ",".join("%s" for _ in dir_clear_scope)
         conn.execute(
             f"""
             update node_runs
             set run_dir='', session_dir=''
             where job_id=%s and node_key in ({placeholders})
             """,
-            (job_id, *sorted(reset_nodes)),
+            (job_id, *dir_clear_scope),
         )
     if kept_nodes:
         # A2（inherit 臂，rerun 类节点级口径）：分片行与旧 revision 入队的

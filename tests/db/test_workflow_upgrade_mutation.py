@@ -379,3 +379,40 @@ def test_full_manifest_cleanup_not_requested_keeps_legacy_rows(tmp_path: Path) -
     assert queries.job_artifact_manifest_names_for_nodes(job["id"], {"old"}) == {
         ("old", "renamed_out.json")
     }
+
+
+def test_inherit_mode_clears_run_dirs_of_removed_nodes(tmp_path: Path) -> None:
+    """codex #776 复审 P2（R6-B）：被删节点的历史 node_runs 行保留（审计），
+    但 run_dir/session_dir 引用必须清空——extra_run_keys 已在提交后删除
+    ``runs/<key>`` 目录，保留引用会让日志读取解析失效路径。清空范围 =
+    重置节点 ∪ 被删节点（含 executable→start 转换，R5 同面）。"""
+    queries, job = _setup(tmp_path)
+    with _mutation_conn(queries) as conn:
+        # c 不在新 node_keys（被删节点）：播种带目录引用的历史行。
+        conn.execute(
+            """
+            insert into node_runs(job_id, node_key, status, run_dir, session_dir)
+            values (%s, 'c', 'done', 'old/run-c', 'old/session-c')
+            """,
+            (job["id"],),
+        )
+
+    with _mutation_conn(queries) as conn:
+        stats = upgrade_job_workflow_inherit(
+            conn,
+            job["id"],
+            workflow_revision_id="rev-13",
+            workflow_version=13,
+            workflow_definition_hash="hash-13",
+            workflow_definition_snapshot_json='{"key": "wfmut"}',
+            node_keys=["a", "b"],
+            frozen_config_json=None,
+            inherit_nodes=frozenset({"a"}),
+        )
+
+    assert stats["kept"] == 1
+    assert stats["rerun"] == 1
+    run_c = next((r for r in queries.list_node_runs(job["id"]) if r["node_key"] == "c"), None)
+    assert run_c is not None  # 历史行保留（审计）
+    assert run_c["run_dir"] == ""
+    assert run_c["session_dir"] == ""

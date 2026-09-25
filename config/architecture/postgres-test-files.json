@@ -179,6 +179,7 @@
     "tests/services/test_job_workflow_upgrade_inherit_skill.py",
     "tests/services/test_job_workflow_upgrade_protection.py",
     "tests/services/test_job_workflow_upgrade_staging.py",
+    "tests/services/test_job_workflow_upgrade_sweep.py",
     "tests/services/test_log_cleanup.py",
     "tests/services/test_material_ttl.py",
     "tests/services/test_ops_metrics.py",
