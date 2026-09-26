@@ -163,6 +163,46 @@ async fn bash_output_under_capture_cap_is_unchanged() {
     assert!(text.contains("3000"), "tail kept: {text}");
 }
 
+// #779 列车 R4 复审 P2：stdout 头部独占 50KB 展示预算时，完整采集到的
+// stderr 不得被挤出触顶分支的展示面——失败命令的错误原因恰恰在 stderr。
+#[tokio::test]
+async fn bash_capped_stdout_keeps_stderr_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let total = 5 * 1024 * 1024usize;
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({
+                // stdout 5 MiB（触顶，头部独占旧展示预算）；stderr 带最终错误。
+                "command": "head -c 5242880 /dev/zero | tr '\\0' 'a'; echo 'FATAL: disk full' 1>&2"
+            }),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error, "capping is not an error");
+    assert_eq!(
+        output.output_bytes,
+        (total + b"FATAL: disk full\n".len()) as u64
+    );
+    let text = match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+
+    // stdout 头部仍保留、cap 通知仍在。
+    assert!(
+        text.contains("[Output capture stopped after 5.0MB at the 4MB per-stream cap"),
+        "missing cap notice: {text}"
+    );
+    // stderr 必须出现在展示面（修复前被 stdout 头部挤没）。
+    assert!(text.contains("[stderr]"), "stderr marker lost: {text}");
+    assert!(
+        text.contains("FATAL: disk full"),
+        "stderr error reason must survive stdout capping: {text}"
+    );
+    // 总展示预算不变：展示内容仍有界（stderr 预留一半预算，stdout 用剩余）。
+    assert!(text.len() < 60 * 1024, "shown content must stay small");
+}
+
 // Cap + display edge case: the first output line alone exceeds the 50KB
 // display limit, so nothing can be shown. The notice must NOT claim "the
 // head above is kept" (there is nothing above it) — it names the display

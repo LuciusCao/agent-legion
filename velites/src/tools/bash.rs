@@ -238,7 +238,9 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     let stdout_text = String::from_utf8_lossy(&stdout.head);
     let stderr_text = String::from_utf8_lossy(&stderr.head);
 
-    let mut text = stdout_text.into_owned();
+    // 触顶分支另行按流分配展示预算（下方），这里的合并文本服务 tail 截断
+    // 分支——clone 而非 move，两个分支各自可读流文本。
+    let mut text = stdout_text.clone().into_owned();
     if !stderr_text.is_empty() {
         if !text.is_empty() {
             text.push('\n');
@@ -262,14 +264,40 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         // 会陷入「重定向 → read 报错 → 重定向」死循环。bash 分段命令
         // （sed 按行窗、tail+head 翻页）与 read 超限时自己的提示同构，
         // 是唯一可走通的出口。
-        let truncation = truncate::truncate_head(&text);
+        //
+        // #779 列车 R4 复审 P2：展示预算按流分配——stderr 先预留总预算的
+        // 一半（其实际所需为限），stdout 头部用剩余。合并文本再整体保头
+        // 会让 stdout 的 4 MiB 头部把完整采集到的 stderr 全部挤出展示面，
+        // 失败命令的错误原因随之丢失。stderr 在预留份额内不可展示（首行
+        // 即超限，如无换行的超长行）时仅保留分节标记——与修复前合并文本
+        // 截断后的形状一致。
+        let stderr_truncation = truncate::truncate_head_within(
+            &stderr_text,
+            truncate::DEFAULT_MAX_LINES / 2,
+            truncate::DEFAULT_MAX_BYTES / 2,
+        );
+        let stdout_truncation = truncate::truncate_head_within(
+            &stdout_text,
+            truncate::DEFAULT_MAX_LINES - stderr_truncation.output_lines,
+            truncate::DEFAULT_MAX_BYTES - stderr_truncation.output_bytes,
+        );
+        let mut kept = stdout_truncation.content;
+        if !stderr_text.is_empty() {
+            // 采集到 stderr 就保留 [stderr] 分节标记（份额内不可展示时
+            // 内容为空，与修复前合并文本截断后的形状一致）。
+            if !kept.is_empty() {
+                kept.push('\n');
+            }
+            kept.push_str("[stderr]\n");
+            kept.push_str(&stderr_truncation.content);
+        }
         let notice = format!(
             "[Output capture stopped after {} at the {} per-stream cap: the head above is kept, the tail was dropped. No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log`, `tail -n +2001 out.log | head -n 2000` (the read tool rejects whole files over {} even with offset/limit).]",
             truncate::format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
         );
-        if truncation.content.is_empty() {
+        if kept.is_empty() {
             // 首行就超过展示上限（如单个超长行）：无内容可展示，通知
             // 独立成文，不加前导空行——且不说「head above is kept」，
             // 上面没有任何内容。
@@ -281,7 +309,7 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
                 truncate::MAX_CAPTURE_BYTES_DISPLAY,
             );
         } else {
-            text = truncation.content;
+            text = kept;
             text.push_str("\n\n");
             text.push_str(&notice);
         }

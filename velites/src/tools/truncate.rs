@@ -132,13 +132,21 @@ fn split_lines(content: &str) -> Vec<&str> {
 
 /// Truncate from the head, keeping the first lines (file-read semantics).
 pub fn truncate_head(content: &str) -> Truncation {
+    truncate_head_within(content, DEFAULT_MAX_LINES, DEFAULT_MAX_BYTES)
+}
+
+/// [`truncate_head`] with an explicit budget — the bash capture-capped branch
+/// splits the display budget between the two stream heads (#779 train R4
+/// review P2: stdout's kept head must not squeeze the fully captured stderr
+/// out of the display).
+pub fn truncate_head_within(content: &str, max_lines: usize, max_bytes: usize) -> Truncation {
     let total_bytes = content.len();
     let lines = split_lines(content);
     let total_lines = lines.len();
-    if total_lines <= DEFAULT_MAX_LINES && total_bytes <= DEFAULT_MAX_BYTES {
+    if total_lines <= max_lines && total_bytes <= max_bytes {
         return Truncation::untruncated(content, total_lines);
     }
-    if lines[0].len() > DEFAULT_MAX_BYTES {
+    if max_lines == 0 || lines[0].len() > max_bytes {
         return Truncation {
             content: String::new(),
             truncated: true,
@@ -154,17 +162,17 @@ pub fn truncate_head(content: &str) -> Truncation {
     let mut kept: Vec<&str> = Vec::new();
     let mut kept_bytes = 0usize;
     let mut truncated_by = TruncatedBy::Lines;
-    for (index, line) in lines.iter().enumerate().take(DEFAULT_MAX_LINES) {
+    for (index, line) in lines.iter().enumerate().take(max_lines) {
         // +1 for the newline separator between kept lines (same as pi).
         let line_bytes = line.len() + usize::from(index > 0);
-        if kept_bytes + line_bytes > DEFAULT_MAX_BYTES {
+        if kept_bytes + line_bytes > max_bytes {
             truncated_by = TruncatedBy::Bytes;
             break;
         }
         kept.push(line);
         kept_bytes += line_bytes;
     }
-    if kept.len() >= DEFAULT_MAX_LINES && kept_bytes <= DEFAULT_MAX_BYTES {
+    if kept.len() >= max_lines && kept_bytes <= max_bytes {
         truncated_by = TruncatedBy::Lines;
     }
     let content = kept.join("\n");

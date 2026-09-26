@@ -1086,6 +1086,23 @@ exemptions:
   ceiling: 383
   expires: 2027-03-31
 - check: architecture.file_budget
+  path: velites/src/tools/truncate.rs
+  reason: '#779 train R4 review P2 (#689 follow-up): the bash capture-capped
+    display branch now splits the 2000-line/50KB budget between the two stream
+    heads (stderr gets a reserved half-share so a capped 4 MiB stdout head can
+    no longer squeeze the fully captured stderr — the error reason of the
+    failing command — out of the display). The budget-splitting primitive
+    (truncate_head_within) belongs in the shared truncation module, the home
+    the bash.rs exemption already names for the capped-display branches.
+    Ceiling at actual + 10 per the dated-exemption convention (#431/#458).
+    Remove when the bash capped-display branch migrates here per the bash.rs
+    exemption and the pair is re-balanced, or the module shrinks below the old
+    floor.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/689
+  ceiling: 340
+  expires: 2027-03-31
+- check: architecture.file_budget
   path: velites/src/provider/openai_compat/aggregate.rs
   reason: 'Issue #637 closes the compound-storm surface the per-field cap
     missed: MAX_AGGREGATE_CHARS adds a whole-completion aggregate cap over
