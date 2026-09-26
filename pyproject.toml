@@ -1,6 +1,6 @@
 [project]
 name = "agent-legion"
-version = "0.7.12"
+version = "0.7.13"
 description = "Local processing console for educational videos and Agent Legion workflows"
 requires-python = ">=3.11"
 dependencies = [

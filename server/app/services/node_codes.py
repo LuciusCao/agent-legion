@@ -16,8 +16,6 @@ and raises ``CustomNodesDisabledError`` when it is off.
 
 from __future__ import annotations
 
-import ast
-import hashlib
 import logging
 from typing import Any
 
@@ -28,32 +26,18 @@ from server.app.services.job_errors import (
     InvalidOperationError,
     NotFoundError,
 )
+from server.app.services.node_code_validation import (
+    DEFAULT_MAX_CODE_BYTES,
+    _entity_key,
+    _split_entity_key,
+    code_hash,
+    validate_node_code,
+)
 from server.app.services.versioned_entities import EntityType, VersionedEntity, VersionedEntityStore
 
 logger = logging.getLogger(__name__)
 
-# Custom nodes stay single-file and cohesive; oversized code is rejected.
-# The byte ceiling is instance-configurable (#628: heavy self-contained
-# nodes outgrew the hardcode) — DEFAULT_MAX_CODE_BYTES mirrors the
-# ``executor_runtime.workflows.node_code_max_bytes`` default
-# (AGENT_LEGION_NODE_CODE_MAX_BYTES); both must stay in sync.
-DEFAULT_MAX_CODE_BYTES = 64 * 1024
-
 _ENTITY_TYPE: EntityType = "node_code"
-_ENTITY_KEY_SEPARATOR = ":"
-
-
-def _entity_key(workflow_key: str, node_key: str) -> str:
-    if _ENTITY_KEY_SEPARATOR in workflow_key:
-        raise InvalidOperationError(
-            f"workflow key must not contain {_ENTITY_KEY_SEPARATOR!r}: {workflow_key}"
-        )
-    return f"{workflow_key}{_ENTITY_KEY_SEPARATOR}{node_key}"
-
-
-def _split_entity_key(entity_key: str) -> tuple[str, str]:
-    workflow_key, _, node_key = entity_key.partition(_ENTITY_KEY_SEPARATOR)
-    return workflow_key, node_key
 
 
 # Process-local publish generation (issue #124): the workflow worker's
@@ -94,34 +78,6 @@ def _to_row(entity: VersionedEntity) -> dict[str, Any]:
     }
 
 
-def validate_node_code(code: str, max_code_bytes: int = DEFAULT_MAX_CODE_BYTES) -> None:
-    """Syntax + module-level ``run`` + size contract for custom node code.
-
-    ``max_code_bytes`` (#628): the instance-level byte budget, injected by
-    callers that hold Settings (route layer passes
-    ``settings.executor_runtime.workflows.node_code_max_bytes``); the module
-    default is the unchanged 64KB, which keeps the historical behavior for
-    non-DI constructions (workers/tests/seed paths).
-    """
-    if len(code.encode("utf-8")) > max_code_bytes:
-        raise InvalidOperationError(
-            f"node code exceeds the {max_code_bytes}-byte size limit"
-            f" (node_code_max_bytes, default {DEFAULT_MAX_CODE_BYTES})"
-        )
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as exc:
-        raise InvalidOperationError(f"node code is not valid Python: {exc}") from exc
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
-            return
-    raise InvalidOperationError("node code must define a module-level 'run' function")
-
-
-def code_hash(code: str) -> str:
-    return hashlib.sha256(code.encode("utf-8")).hexdigest()
-
-
 class NodeCodeService:
     """Versioned custom node code storage and publish flow.
 
@@ -142,6 +98,29 @@ class NodeCodeService:
     def _require_enabled(self) -> None:
         if not self._enabled:
             raise CustomNodesDisabledError("custom workflow nodes are disabled")
+
+    def _check_publish_size(self, code: str, action: str) -> None:
+        """#628 review P2: re-check the byte ceiling on the content being published.
+
+        ``node_code_max_bytes`` is restart-effective: a draft or historical
+        version saved under a larger budget would otherwise re-enter the
+        effective code path (and the claim bundle) after the instance lowers
+        the limit.
+        """
+        size = len(code.encode("utf-8"))
+        if size > self._max_code_bytes:
+            raise InvalidOperationError(
+                f"cannot {action} node code of {size} bytes: it exceeds the current"
+                f" {self._max_code_bytes}-byte node_code_max_bytes (default"
+                f" {DEFAULT_MAX_CODE_BYTES}); the limit was lowered after this version was saved"
+            )
+
+    def _current_draft(self, workspace_id: str, workflow_key: str, node_key: str) -> dict[str, Any]:
+        key = _entity_key(workflow_key, node_key)
+        entity = self._store.get_draft(key, workspace_id)
+        if entity is None:
+            raise NotFoundError(f"no draft for {_ENTITY_TYPE} {key}")
+        return _to_row(entity)
 
     def get_effective_code(
         self, workspace_id: str, workflow_key: str, node_key: str
@@ -213,10 +192,32 @@ class NodeCodeService:
         """Publish the current draft; the previously published version archives.
         ``expected_hash`` (#692): verified atomically inside the store's
         publish transaction — mismatch raises Conflict with zero side
-        effects."""
+        effects.
+
+        #628 review P2: the draft's bytes are re-validated against the current
+        ``node_code_max_bytes`` BEFORE the publish — an oversized draft (saved
+        under a since-lowered budget) is rejected up front, leaving the
+        previous published version effective. The publish is then bound to
+        exactly the validated bytes through the store's expected_hash CAS
+        (#692): a concurrent draft overwrite between the validation read and
+        the publish fails as Conflict instead of slipping unvalidated content
+        through.
+        """
         self._require_enabled()
+        draft = self._current_draft(workspace_id, workflow_key, node_key)
+        self._check_publish_size(str(draft["code"]), "publish")
+        # #779 列车 R2 复审 P2-A：CAS 恒绑定已校验草稿的哈希。调用方携带
+        # 的 expected_hash 只是乐观并发断言——与预读草稿不一致即刻拒为
+        # Conflict；若改用它做 CAS，并发覆盖成调用方断言的（未校验）内容
+        # 即可绕过上限复检。
+        draft_hash = str(draft["code_hash"])
+        if expected_hash is not None and expected_hash != draft_hash:
+            raise ConflictError(
+                f"draft hash mismatch for {_ENTITY_TYPE} {_entity_key(workflow_key, node_key)}:"
+                " the draft was overwritten by another session; reload and retry"
+            )
         row = _to_row(
-            self._store.publish(_entity_key(workflow_key, node_key), workspace_id, expected_hash)
+            self._store.publish(_entity_key(workflow_key, node_key), workspace_id, draft_hash)
         )
         _bump_publish_generation()
         return row
@@ -230,16 +231,32 @@ class NodeCodeService:
         created_by: str,
         change_note: str | None = None,
     ) -> dict[str, Any]:
-        """Re-publish an old version as a new version (versions stay immutable)."""
+        """Re-publish an old version as a new version (versions stay immutable).
+
+        #628 review P2: the source version's bytes are re-validated against
+        the current ``node_code_max_bytes`` before the rollback; a rejection
+        leaves the currently published version untouched. The pre-read is
+        race-free only for published/archived sources: a DRAFT row is
+        overwritten in place by save_draft, so its version number would
+        re-resolve to unvalidated content when the store re-reads it inside
+        the rollback transaction — drafts are refused as rollback sources
+        (#779 train R2 follow-up; a draft is editable in place, so rolling
+        back to it is meaningless anyway).
+        """
         self._require_enabled()
+        key = _entity_key(workflow_key, node_key)
+        source = self.get_code_by_version(workspace_id, workflow_key, node_key, version)
+        if source is None:
+            raise NotFoundError(f"no version {version} for {_ENTITY_TYPE} {key}")
+        if source["status"] == "draft":
+            raise InvalidOperationError(
+                "cannot rollback a draft version: drafts are editable in place;"
+                " publish the draft or pick a published/archived version"
+            )
+        self._check_publish_size(str(source["code"]), "rollback")
+        note = change_note if change_note is not None else f"rollback to v{version}"
         entity = self._store.rollback(
-            _entity_key(workflow_key, node_key),
-            version,
-            workspace_id,
-            created_by,
-            definition_patch={
-                "change_note": change_note if change_note is not None else f"rollback to v{version}"
-            },
+            key, version, workspace_id, created_by, definition_patch={"change_note": note}
         )
         _bump_publish_generation()
         return _to_row(entity)

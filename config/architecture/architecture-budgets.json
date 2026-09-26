@@ -1483,6 +1483,7 @@
     "server/app/services/node_code_resolution.py": 81,
     "server/app/services/node_code_seeding.py": 36,
     "server/app/services/node_code_template.py": 35,
+    "server/app/services/node_code_validation.py": 41,
     "server/app/services/node_codes.py": 178,
     "server/app/services/node_config.py": 137,
     "server/app/services/node_config_batch.py": 33,
