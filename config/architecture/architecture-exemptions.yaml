@@ -488,9 +488,10 @@ exemptions:
     column, title row with collapse/close and the action-error wiring in one
     composition site; footer and positioning sx were already split out
     (CustomizePreviewFooter.tsx, customizePreviewOverlaySx.ts) and further
-    splits would scatter the non-modal contract. The 160 actual sits above
-    the 149 registry floor but inside the growth-allowance band; the
-    exemption covers the floor gap.'
+    splits would scatter the non-modal contract. The 167 actual (after the
+    codex P2 round: Portal+Paper modeless surface, focus handoff, collapse
+    without unmount) sits above the 149 registry floor but inside the
+    growth-allowance band; the exemption covers the floor gap.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 159

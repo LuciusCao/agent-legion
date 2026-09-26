@@ -72,7 +72,8 @@ function makeVersion(
 function renderDialog(
   state: previewPanelApi.PreviewPanelState | null,
   previewDraft = false,
-  onPreviewDraft: () => void = vi.fn()
+  onPreviewDraft: () => void = vi.fn(),
+  onClose: () => void = () => undefined
 ) {
   return {
     onPreviewDraft,
@@ -83,7 +84,7 @@ function renderDialog(
           state={state}
           previewDraft={previewDraft}
           onPreviewDraft={onPreviewDraft}
-          onClose={() => undefined}
+          onClose={onClose}
         />
       ) as ReactElement,
       { wrapper: TestQueryProvider }
@@ -125,7 +126,44 @@ describe('CustomizePreviewDialog', () => {
     expect(screen.queryByText(/草稿预览（仅本页可见/)).toBeNull()
   })
 
-  it('折叠为右下角小条后对话保持存活，点小条恢复面板', async () => {
+  it('codex P2-B：真正的非模态 surface——底层页面不进 aria-hidden，无 MuiModal 体系', async () => {
+    render(
+      (
+        <div>
+          <button type="button">底层左栏按钮</button>
+          <CustomizePreviewDialog
+            workspaceId="ws1"
+            state={null}
+            previewDraft={false}
+            onPreviewDraft={() => undefined}
+            onClose={() => undefined}
+          />
+        </div>
+      ) as ReactElement,
+      { wrapper: TestQueryProvider }
+    )
+    const surface = await screen.findByRole('dialog', { name: '定制预览面板' })
+    // role=dialog 但 aria-modal=false：读屏器知道这是非模态表面。
+    expect(surface).toHaveAttribute('aria-modal', 'false')
+    // 不走 MUI Modal/ModalManager：没有 Modal 根节点，portal 外的应用内容
+    // 不会被打进 aria-hidden（「左栏全程可交互」对读屏器同样成立）。
+    expect(document.querySelector('.MuiModal-root')).toBeNull()
+    const underlying = screen.getByRole('button', { name: '底层左栏按钮' })
+    expect(underlying.closest('[aria-hidden="true"]')).toBeNull()
+  })
+
+  it('Escape 关闭（焦点在面板内时，自实现的 keydown——已无 MUI Modal 代劳）', async () => {
+    const onClose = vi.fn()
+    renderDialog(null, false, vi.fn(), onClose)
+    const surface = await screen.findByRole('dialog', { name: '定制预览面板' })
+    fireEvent.keyDown(surface, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('折叠为右下角小条后聊天子树保持挂载，点小条恢复面板', async () => {
+    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi' },
+    ] as never)
     renderDialog(null)
     expect(await screen.findByText('定制预览面板')).toBeInTheDocument()
 
@@ -133,15 +171,53 @@ describe('CustomizePreviewDialog', () => {
     const pill = await screen.findByRole('button', {
       name: /定制预览对话（已折叠，点击展开）/,
     })
-    // 折叠只是换掉 Paper 内容（组件不卸载、会话保持存活），dialog 仍在。
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(screen.queryByText('定制预览面板')).toBeNull()
+    // 折叠只是 display:none 隐藏内容（codex P2-A：卸载会丢队列/输入），
+    // 聊天子树保持挂载——输入框仍在 DOM 里。
+    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
 
     fireEvent.click(pill)
-    expect(await screen.findByText('定制预览面板')).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: /已折叠，点击展开/ })
-    ).toBeNull()
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /已折叠，点击展开/ })
+      ).toBeNull()
+    )
+    expect(screen.getByText('定制预览面板')).toBeInTheDocument()
+  })
+
+  it('codex P2-A：折叠/展开不丢聊天状态——排队消息与未发送输入原样保留', async () => {
+    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi' },
+    ] as never)
+    mockChatApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'running' }),
+    ])
+    mockChatApi.sendStudioChatMessage.mockResolvedValue({} as never)
+    renderDialog(null)
+
+    const input = await screen.findByLabelText('消息输入')
+    await waitFor(() => expect(input).toBeEnabled())
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    // busy 时发送进入队列（不直发撞 409），再留一段未发送输入。
+    fireEvent.change(input, { target: { value: '排队消息' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+    expect(screen.getByText('排队消息')).toBeInTheDocument()
+    fireEvent.change(input, { target: { value: '未发送草稿' } })
+
+    // 折叠 → 展开：队列 chip 与 composer 输入都必须原样还在。
+    fireEvent.click(screen.getByRole('button', { name: '折叠对话' }))
+    const pill = await screen.findByRole('button', {
+      name: /已折叠，点击展开/,
+    })
+    fireEvent.click(pill)
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /已折叠，点击展开/ })
+      ).toBeNull()
+    )
+    expect(screen.getByText('排队消息')).toBeInTheDocument()
+    expect(screen.getByLabelText('消息输入')).toHaveValue('未发送草稿')
   })
 
   it('无可用 agent 时提示配置', async () => {

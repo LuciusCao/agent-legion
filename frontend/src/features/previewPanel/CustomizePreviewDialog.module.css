@@ -2,25 +2,44 @@
  * 「定制预览」覆盖面板样式（#615 方向 A，推翻 #701 对话框内嵌预览）：
  * 非模态覆盖层——宽屏停靠右侧盖住 job progress 列、不遮挡左栏预览区、
  * 不锁底层滚动（定位/尺寸契约在组件 sx 里，随 MUI lg=1200 断点降级为
- * 右下浮动卡片）；这里只管面板内部的聊天列与 footer 布局。折叠后只剩
- * 右下角小条（collapsedPill），对话会话保持存活。
+ * 右下浮动卡片）；这里只管面板内部的聊天列与 footer 布局。codex P2-B 后
+ * surface 是 Portal + Paper 的自定义 modeless 容器（无 DialogContent/
+ * DialogTitle 代劳），padding/滚动/标题排版由 .content/.titleRow 承担；
+ * 折叠只 display:none 隐藏内容区（.contentHidden，P2-A：卸载会丢队列与
+ * 未发送输入），露出右下角小条（collapsedPill）。
  */
 
-/* 定高纵列：聊天区内部滚动，footer 常驻底部。Paper 已是 flex 列容器，
- * DialogContent 填满剩余高度后 .body 再定高——不与 MUI 的 overflow 打架
- * （jsdom 测不了滚动，布局契约由组件测试钉住）。 */
+/* 面板内容壳：承担原 DialogContent 的 padding 与整列滚动（Paper 已是
+ * flex 列容器且定高——jsdom 测不了滚动，布局契约由组件测试钉住）。 */
+.content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 8px 16px 16px;
+  overflow-y: auto;
+}
+
+/* 折叠时隐藏内容区但不卸载（P2-A：聊天子树的本地 state 保持存活）。 */
+.contentHidden {
+  display: none;
+}
+
 .body {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: 100%;
+  min-height: 0;
 }
 
 .titleRow {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-bottom: 4px;
+  padding: 4px 0;
+  font-size: 1.1rem;
+  font-weight: 500;
 }
 
 .titleText {
