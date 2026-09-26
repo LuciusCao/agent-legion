@@ -116,13 +116,12 @@ class NodeCodeService:
             )
 
     def _current_draft(self, workspace_id: str, workflow_key: str, node_key: str) -> dict[str, Any]:
-        rows = self.list_versions(workspace_id, workflow_key, node_key)
-        drafts = [row for row in rows if row["status"] == "draft"]
-        if not drafts:
+        entity = self._store.get_draft(_entity_key(workflow_key, node_key), workspace_id)
+        if entity is None:
             raise NotFoundError(
                 f"no draft for {_ENTITY_TYPE} {_entity_key(workflow_key, node_key)}"
             )
-        return max(drafts, key=lambda row: row["version"])
+        return _to_row(entity)
 
     def get_effective_code(
         self, workspace_id: str, workflow_key: str, node_key: str
@@ -208,9 +207,18 @@ class NodeCodeService:
         self._require_enabled()
         draft = self._current_draft(workspace_id, workflow_key, node_key)
         self._check_publish_size(str(draft["code"]), "publish")
-        bound_hash = expected_hash if expected_hash is not None else str(draft["code_hash"])
+        # #779 列车 R2 复审 P2-A：CAS 恒绑定已校验草稿的哈希。调用方携带
+        # 的 expected_hash 只是乐观并发断言——与预读草稿不一致即刻拒为
+        # Conflict；若改用它做 CAS，并发覆盖成调用方断言的（未校验）内容
+        # 即可绕过上限复检。
+        draft_hash = str(draft["code_hash"])
+        if expected_hash is not None and expected_hash != draft_hash:
+            raise ConflictError(
+                f"draft hash mismatch for {_ENTITY_TYPE} {_entity_key(workflow_key, node_key)}:"
+                " the draft was overwritten by another session; reload and retry"
+            )
         row = _to_row(
-            self._store.publish(_entity_key(workflow_key, node_key), workspace_id, bound_hash)
+            self._store.publish(_entity_key(workflow_key, node_key), workspace_id, draft_hash)
         )
         _bump_publish_generation()
         return row

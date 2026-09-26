@@ -111,7 +111,7 @@ def test_publish_expected_hash_mismatch_conflicts_with_zero_side_effects(
 # WHERE）后 rowcount=0 → Conflict，事务回滚。
 # 钉法（R7 P2-1）：monkeypatch 注入式——把 T2 的 save_draft 注入到生产
 # publish 事务内部的 SELECT 与 UPDATE 之间（同文件 :274/:290 的
-# _latest_with_status monkeypatch 先例），走完整生产路径。突变自证过：
+# _latest_status_row monkeypatch 先例），走完整生产路径。突变自证过：
 # 删掉生产 CAS 谓词时本测试必红（回归到 R6 P1-1 的静默穿透形态）。
 def test_publish_expected_hash_cas_blocks_read_committed_interleave(
     store, workspace_id, monkeypatch
@@ -120,7 +120,7 @@ def test_publish_expected_hash_cas_blocks_read_committed_interleave(
 
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
 
-    original = ve._latest_with_status
+    original = ve._latest_status_row
     fired: list[bool] = []
 
     def interleaved(conn, *args, **kwargs):
@@ -132,7 +132,7 @@ def test_publish_expected_hash_cas_blocks_read_committed_interleave(
             store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u1")
         return row
 
-    monkeypatch.setattr(ve, "_latest_with_status", interleaved)
+    monkeypatch.setattr(ve, "_latest_status_row", interleaved)
 
     with pytest.raises(ConflictError):
         store.publish("wf:node", workspace_id, expected_hash="hash1")
@@ -292,8 +292,15 @@ def test_save_draft_guard_rejects_concurrently_published_row(
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
     store.publish("wf:node", workspace_id)
     published = store.get_published("wf:node", workspace_id)
+    # 只拦截 draft 读取（save_draft/publish 的写路径）；get_published 的
+    # 断言读走原实现（get_published 与写路径共用 _latest_status_row 查询件）。
+    original = versioned_entities._latest_status_row
     monkeypatch.setattr(
-        versioned_entities, "_latest_with_status", lambda *args: {"id": published.id}
+        versioned_entities,
+        "_latest_status_row",
+        lambda conn, et, ws, key, status: (
+            {"id": published.id} if status == "draft" else original(conn, et, ws, key, status)
+        ),
     )
     with pytest.raises(ConflictError):
         store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u2")
@@ -308,7 +315,15 @@ def test_publish_guard_rejects_concurrently_archived_draft(
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
     draft_id = store.list_versions("wf:node", workspace_id)[0].id
     store.archive_all("wf:node", workspace_id)
-    monkeypatch.setattr(versioned_entities, "_latest_with_status", lambda *args: {"id": draft_id})
+    # 只拦截 draft 读取（publish 的写路径）；get_published 的断言读走原实现。
+    original = versioned_entities._latest_status_row
+    monkeypatch.setattr(
+        versioned_entities,
+        "_latest_status_row",
+        lambda conn, et, ws, key, status: (
+            {"id": draft_id} if status == "draft" else original(conn, et, ws, key, status)
+        ),
+    )
     with pytest.raises(ConflictError):
         store.publish("wf:node", workspace_id)
     assert store.get_published("wf:node", workspace_id) is None
@@ -322,3 +337,23 @@ def test_insert_version_collision_maps_to_conflict_error(store, workspace_id, mo
     monkeypatch.setattr(versioned_entities, "_next_version", lambda *args: 1)
     with pytest.raises(ConflictError):
         store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u1")
+
+
+def test_get_draft_returns_only_the_current_draft(store, workspace_id) -> None:
+    """#779 列车 R2 复审 P2-B 的窄读取路径：只取当前 draft 行（不读全部
+    永久版本历史）；无草稿/草稿已发布后返回 None。"""
+    assert store.get_draft("wf:node", workspace_id) is None
+    store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
+    draft = store.get_draft("wf:node", workspace_id)
+    assert draft is not None
+    assert draft.status == "draft"
+    assert draft.definition == DEFINITION_V1
+
+    store.publish("wf:node", workspace_id)
+    assert store.get_draft("wf:node", workspace_id) is None
+
+    store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u2")
+    draft = store.get_draft("wf:node", workspace_id)
+    assert draft is not None
+    assert draft.version == 2
+    assert draft.definition == DEFINITION_V2

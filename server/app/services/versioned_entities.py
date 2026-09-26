@@ -113,13 +113,19 @@ class VersionedEntityStore:
         return self._dsn
 
     def get_published(self, entity_key: str, workspace_id: str | None) -> VersionedEntity | None:
+        # 部分唯一索引保证每个实体至多一条 published——等价于该状态滤下的
+        # 最新行；与 get_draft 共用同一查询件（boundary 基线只降不升，
+        # 不为同一形态登记第二条 SQL 字面量）。
         with read_connection(self._dsn) as conn:
-            row = conn.execute(
-                f"select {_COLUMNS} from versioned_entities"
-                f" where {_ENTITY_FILTER} and status='published'",
-                (self._entity_type, workspace_id, entity_key),
-            ).fetchone()
-        return _to_entity(dict(row)) if row else None
+            row = _latest_status_row(conn, self._entity_type, workspace_id, entity_key, "published")
+        return _to_entity(row) if row else None
+
+    def get_draft(self, entity_key: str, workspace_id: str | None) -> VersionedEntity | None:
+        """The current draft entity, or None（#779 列车 R2 复审 P2-B：发布
+        预读的窄路径——只取 status='draft' 行，不读全部永久版本历史）。"""
+        with read_connection(self._dsn) as conn:
+            row = _latest_status_row(conn, self._entity_type, workspace_id, entity_key, "draft")
+        return _to_entity(row) if row else None
 
     def get_version(
         self, entity_key: str, version: int, workspace_id: str | None
@@ -193,7 +199,7 @@ class VersionedEntityStore:
         serializes concurrent writers.
         """
         with write_transaction(self._dsn) as conn:
-            draft = _latest_with_status(conn, self._entity_type, workspace_id, entity_key, "draft")
+            draft = _latest_status_row(conn, self._entity_type, workspace_id, entity_key, "draft")
             if draft is not None:
                 # Guard the status transition: a concurrent publish between the
                 # select above and this update must not let the write land on
@@ -255,7 +261,7 @@ class VersionedEntityStore:
         with write_transaction(self._dsn) as conn:
             if self._entity_type in {"agent", "node_code"}:
                 acquire_implementation_publication_lock(conn, workspace_id)
-            draft = _latest_with_status(conn, self._entity_type, workspace_id, entity_key, "draft")
+            draft = _latest_status_row(conn, self._entity_type, workspace_id, entity_key, "draft")
             if draft is None:
                 raise NotFoundError(f"no draft for {self._entity_type} {entity_key}")
             if expected_hash is not None and draft["definition_hash"] != expected_hash:
@@ -401,7 +407,7 @@ class VersionedEntityStore:
             return _get_entity_by_id(conn, row_id)
 
 
-def _latest_with_status(
+def _latest_status_row(
     conn: Any, entity_type: str, workspace_id: str | None, entity_key: str, status: str
 ) -> dict[str, Any] | None:
     row = conn.execute(

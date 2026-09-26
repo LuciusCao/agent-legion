@@ -157,6 +157,50 @@ def test_publish_binds_validated_bytes_via_hash_cas(job_db, workspace_id, monkey
     assert versions == {1: "draft"}
 
 
+def test_publish_cas_binds_validated_draft_not_caller_hash(
+    job_db, workspace_id, monkeypatch
+) -> None:
+    """#779 列车 R2 复审 P2-A：携带「覆盖后内容」哈希的发布请求不得成功。
+    体积校验针对预读草稿 A，CAS 必须恒用 A 的哈希——若改用调用方哈希，
+    滚动重启期旧实例把草稿覆盖为超限 B、请求带 B 的哈希时 CAS 匹配 B，
+    上限绕过窗口重开。调用方哈希与预读草稿不一致应先拒 Conflict。"""
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=1024)
+    lowered.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+    oversized = _padded_code(2048)
+
+    def overwrite_after_validation(code: str, action: str) -> None:
+        roomy.save_draft(workspace_id, WF, NODE, oversized, "user:u2")
+
+    monkeypatch.setattr(lowered, "_check_publish_size", overwrite_after_validation)
+
+    with pytest.raises(ConflictError, match="draft hash mismatch"):
+        lowered.publish(workspace_id, WF, NODE, expected_hash=code_hash(oversized))
+
+    assert lowered.get_effective_code(workspace_id, WF, NODE) is None
+
+
+def test_publish_pre_reads_only_the_draft_row(job_db, workspace_id, monkeypatch) -> None:
+    """#779 列车 R2 复审 P2-B：发布的预读只取当前草稿行（窄查询），不为
+    找草稿而反序列化全部永久版本历史。突变自检：_current_draft 回落到
+    list_versions 全量读，本测试即红。"""
+    from server.app.services.versioned_entities import VersionedEntityStore
+
+    service = NodeCodeService(job_db.dsn_identity)
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1", "v2")
+
+    def no_full_history(*args, **kwargs):
+        raise AssertionError("publish pre-read pulled the full version history")
+
+    monkeypatch.setattr(VersionedEntityStore, "list_versions", no_full_history)
+
+    published = service.publish(workspace_id, WF, NODE)
+    assert published["version"] == 2
+    assert published["status"] == "published"
+
+
 def test_rollback_rejects_old_version_over_lowered_limit(job_db, workspace_id) -> None:
     """#628 review P2: rollback re-publishes a historical version as a NEW
     publish — the bytes must clear the CURRENT limit too, or the rejection
@@ -409,7 +453,16 @@ def test_save_draft_guard_rejects_concurrently_published_row(
 
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
     published = service.publish(workspace_id, WF, NODE)
-    monkeypatch.setattr(versioned_entities, "_latest_with_status", lambda *args: dict(published))
+    # 只拦截 draft 读取（save_draft 的写路径）；get_published 的断言读走
+    # 原实现（get_published 与写路径共用 _latest_status_row 查询件）。
+    original = versioned_entities._latest_status_row
+    monkeypatch.setattr(
+        versioned_entities,
+        "_latest_status_row",
+        lambda conn, et, ws, key, status: (
+            dict(published) if status == "draft" else original(conn, et, ws, key, status)
+        ),
+    )
     with pytest.raises(ConflictError):
         service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u2")
     # The published row is untouched.
