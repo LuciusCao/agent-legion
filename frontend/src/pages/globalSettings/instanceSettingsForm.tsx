@@ -26,7 +26,7 @@ export function FieldGroupFields({
             id={`instance-${field.path}`}
             className={styles.currencyInput}
             type="number"
-            min="0"
+            min={field.min ?? 0}
             max={field.max}
             step={field.integer ? '1' : 'any'}
             value={String(values[field.path] ?? '')}

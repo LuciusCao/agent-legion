@@ -1,0 +1,51 @@
+/* AgentChatPanel（#695）：三处 agent 对话界面共用的外壳样式。
+ * 错误条语义二分：statusError=红（动作失败等错误），statusWarning=琥珀
+ * （可重试的引导失败等警告）——此前三处同名 statusWarning 两义（Studio 红 /
+ * 排查琥珀），统一后调用方按语义选类。 */
+.chatPanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.emptyState {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #757575;
+}
+.statusError {
+  margin: 0 12px;
+  padding: 8px 10px;
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #b71c1c;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.statusWarning {
+  margin: 0 12px;
+  padding: 8px 10px;
+  background: var(--warning-bg, #fff7e6);
+  border: 1px solid var(--warning-border, #ffe0b2);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--warning-text, #b26a00);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.statusRetry {
+  margin-left: auto;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}

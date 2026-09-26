@@ -48,7 +48,8 @@ describe('SkillSelector', () => {
     )
     // 相对名拼上 workspace 技能根前缀（后端 validator 自行展开 ~）。
     expect(mockValidate).toHaveBeenCalledWith(
-      '~/.agents/skills/ws-1/write-script'
+      '~/.agents/skills/ws-1/write-script',
+      'ws-1'
     )
     // 回填后输入仍是发起校验的相对名（受控跟随绑定，codex r2 P1 on #427；
     // codex 三轮 P2 on #427：首段 workspaceId 与只读前缀重复，回显余段，
@@ -89,7 +90,8 @@ describe('SkillSelector', () => {
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
     await waitFor(() =>
       expect(mockValidate).toHaveBeenCalledWith(
-        '~/.agents/skills/ws-1/write-script'
+        '~/.agents/skills/ws-1/write-script',
+        'ws-1'
       )
     )
     view.rerenderWith({ value: 'ws-1/write-script', skillRef: '' })
@@ -147,7 +149,7 @@ describe('SkillSelector', () => {
     renderSelector({ value: 'ns/skill', skillRef: 'v1.2.0' })
 
     await waitFor(() =>
-      expect(mockGetSkillDetail).toHaveBeenCalledWith('ns/skill')
+      expect(mockGetSkillDetail).toHaveBeenCalledWith('ns/skill', 'ws-1')
     )
     // 选中 tag 经 combobox 文本断言（未绑定校验流程时同样可选版本）。
     expect(screen.getByRole('combobox', { name: '版本' })).toHaveTextContent(
@@ -198,7 +200,8 @@ describe('SkillSelector', () => {
 
     await waitFor(() =>
       expect(mockValidate).toHaveBeenCalledWith(
-        '~/.agents/skills/ws-1/write-script'
+        '~/.agents/skills/ws-1/write-script',
+        'ws-1'
       )
     )
   })
@@ -223,7 +226,8 @@ describe('SkillSelector', () => {
 
     await waitFor(() =>
       expect(mockValidate).toHaveBeenCalledWith(
-        '/data/skills/ws-1/write-script'
+        '/data/skills/ws-1/write-script',
+        'ws-1'
       )
     )
   })
@@ -258,7 +262,8 @@ describe('SkillSelector', () => {
 
     await waitFor(() =>
       expect(mockValidate).toHaveBeenCalledWith(
-        '~/.agents/skills/ws-1/write-script'
+        '~/.agents/skills/ws-1/write-script',
+        'ws-1'
       )
     )
   })

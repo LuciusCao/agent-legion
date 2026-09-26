@@ -1,5 +1,50 @@
 exemptions:
 - check: architecture.file_budget
+  path: server/app/routes/skill_catalog_route.py
+  reason: 'Issue #710 codex follow-up (P1/P2 on #745): the skill detail route gains the
+    two-part guard — require_skill_scope_binding (workspace-bound run tokens, incl.
+    admin-minted, refused off their binding) and require_skill_key_in_workspace
+    (group-vs-workspace directory strictness; the demo group differs from every
+    workspace id) — plus the workspace_id query scope, 17 effective lines past the
+    27 baseline. Remove when the guard pair moves into auth/dependencies or a budget
+    re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/710
+  ceiling: 47
+- check: architecture.file_budget
+  path: server/app/routes/studio_agent_skill_tools.py
+  reason: 'Issue #710 codex follow-up (P2 on #745): _require_skill_in_workspace gains
+    the group-vs-workspace directory check (get_workspace lookup for the create_skill
+    layout) on top of the #710 workspace-scoped mount — 17 effective lines past the
+    57 baseline. Remove when the key-agreement guards consolidate with
+    skill_catalog_route or a budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/710
+  ceiling: 77
+- check: architecture.file_budget
+  path: server/app/routes/skills.py
+  reason: 'Issue #710 red-team follow-up (V1): the skills validate/tags endpoints take an
+    absolute skill path whose first base-relative segment is the workspace — the routes
+    carry no workspace_id path parameter, so the workspace extraction helper plus the
+    membership check add 24 effective lines past the 38 baseline. Remove when the path-
+    shaped skill routes move under a workspace-prefixed mount or a budget re-balance
+    re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/710
+  ceiling: 68
+- check: architecture.file_budget
+  path: server/app/auth/workspace_access.py
+  reason: 'Issue #710 splits the membership guard in two: require_workspace_access keeps
+    its original semantics for the generic secured() surface, and the new
+    require_job_workspace_access adds job-ownership resolution (get_job_workspace lookup,
+    path-scope agreement, scoped-token binding, scoped effecting short-circuit) for the
+    job routes — 28 effective lines past the 34 baseline, all of it the IDOR fix proper.
+    Remove when the job-ownership resolution moves into a dedicated auth module or a
+    budget re-balance re-registers it.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/710
+  ceiling: 68
+- check: architecture.file_budget
   path: scripts/architecture/budget_monotonicity.py
   reason: 'Issue #641 opens the exemption re-file channel: the exemption layer of
     ceiling_regression_errors now admits a re-file within growth_allowance of the floor
@@ -191,15 +236,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 92
 - check: architecture.file_budget
-  path: server/app/agent_control/completion.py
-  reason: 'Issue #521 adds the stage boundary marks (unpack/artifacts_verify/ validate/artifacts_upload)
-    inline between the physical steps they separate; each mark is one line at the exact boundary it names.
-    The marks retire with the stage split''s phase 2 rework (per-stage slimming restructures finish()
-    and re-budgets the module).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 176
-- check: architecture.file_budget
   path: server/app/executors/leases.py
   reason: 'Issue #521 threads the optional stage_timer keyword through finish() into _lease_write_paths;
     the parameter must ride the same retry wrapper as the result it instruments (a retry re-runs the stages
@@ -320,10 +356,13 @@ exemptions:
     backend.md). The deprecated aliases are the honest cost of the deprecation window; deleting them (Phase
     3/4 removal tracked in issue 211) drops the file back under the baseline ceiling and this exemption
     goes stale automatically. The Codex P2 fix on PR 299 adds _resolve_key (query-bound alias must equal
-    the workspace id), which is part of the same deprecation-window cost.
+    the workspace id), which is part of the same deprecation-window cost. Issue 692 (codex P1 round 4)
+    adds the optional expected_hash publish body (about 17 lines) — the server-side CAS guard for chat
+    draft cards; re-signed to 257, 2 beyond the prior 240+15 band, time-boxed per issue 641.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 240
+  ceiling: 257
+  expires: 2026-10-31
 - check: architecture.file_budget
   path: server/app/routes/job_http.py
   reason: The issue-211 Phase 3 read-binding guard (reject_mismatched_workflow_key, shared by five explicit-key
@@ -444,14 +483,14 @@ exemptions:
   ceiling: 189
 - check: architecture.file_budget
   path: frontend/src/features/previewPanel/CustomizePreviewDialog.tsx
-  reason: '#347 P1: draft execution became an explicit per-session action (preview-draft gating). The
-    dialog footer gained the "预览此草稿" button with its previewing state plus the previewDraft/onPreviewDraft
-    contract toward PreviewPanelSection; the gating state itself lives in the section (single source,
-    dialog stays the thin chat wrapper). The added lines are the honest cost of the explicit consent UI;
-    re-evaluate when the preview-panel governance UI is next restructured (#347 follow-up).'
+  reason: 'Re-signed after the release/0.7.13 back-merge: #615 (dialog-embedded draft
+    preview, CustomizePreviewPane) regrew the dialog above the 149 floor our composer
+    round had ratcheted to. origin/main already carries ceiling 159 for this path, so
+    the merge result tracks main; the exemption lifts only the local anchor floor gap.
+    Drop when the branch lands on a base whose registry already has 159.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 163
+  ceiling: 159
 - check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
   reason: The Codex P2 review on PR 345 added bundle content into the PreviewPanelHost remount key plus
@@ -559,13 +598,54 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 54
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
-  reason: 'The #429 fix adds scopeNoteDismiss (the resolved-notice close button) and flexes scopeNote
-    to host it; the module is a flat stylesheet at the repo''s per-root CSS limit policy, and the 7-line
-    growth is one rule plus its comment. Revisit at the next stylesheet cleanup pass.'
+  path: frontend/src/features/workflowStudio/chat/StudioChatDraftCards.tsx
+  reason: '#692 draft-card redesign grew the module past its 67-line base budget: the MUI icon
+    header, the per-entity publish gating (status-aware DraftPublishAction, R2 P2-1),
+    honest-boundary comments, and the R4 workspaceId prop plumbing (required — job-diagnosis
+    and customize-preview hosts render the cards under another workspace). The cards stay one
+    module (three siblings of one family); the next growth should split the node-code card or
+    move the publish actions to their own module. 114 effective lines (R5 added the saveFailed gate), 4 beyond the prior
+    87+15 band, re-signed time-boxed per #641); harvest at the #456 sweep.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 356
+  ceiling: 114
+  expires: 2026-10-31
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/studioChatMessages.ts
+  reason: '#692 draft-card lifecycle grew the extractor module past its 320 ratchet baseline in two
+    steps: codex P1 round 2 added per-entity dedup (keepLatestPerEntity) and codex P1 round 3
+    added the draft identity hash parsed from each save response (draftHashFromOutput) — publish
+    must verify the card against the server-side draft because the entity is workspace-level
+    state that another session can overwrite, plus the R5 saveFailed flag (HTTP-level save failures return error text, not exceptions). 44 effective lines past baseline (29 beyond the
+    +15 growth band), re-signed from the first exemption at 338 — time-boxed per #641. The
+    module stays the single chat view-model (extraction + grouping); harvest at the #456 sweep.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 364
+  expires: 2026-10-31
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/EntityDraftPublishButton.tsx
+  reason: '#692 grew past its 73-line ratchet baseline across review rounds, then SHRANK back
+    when the client-side precheck and post-publish hash warning were replaced by the atomic
+    server-side expected-hash check (codex P1 round 4): the button is now a thin publish call
+    passing draftHash as expected_hash plus invalidation and honest-boundary docs. 81 effective
+    lines, ceiling ratchets DOWN with it (monotonic discipline); harvest at the #456 sweep.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 81
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
+  reason: '#429 added scopeNoteDismiss (resolved-notice close button) flexing scopeNote; the #692
+    draft-card type redesign (MUI icon header, per-type title/icon tones, draftError, shared publish
+    entry) re-signed the ceiling from 356 to cover the growth to 395 effective lines — beyond the
+    +15 growth allowance band, so time-boxed per #641. After merging base''s #695 skeleton
+    unification moved shared panel rules out and the module now sits at 306 effective lines
+    (merged-tree state); ceiling ratchets DOWN with it (monotonic discipline). The draft-card
+    family moving to its own module remains the preferred next step; harvest at the #456 sweep.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 306
+  expires: 2026-10-31
 - check: architecture.file_budget
   path: frontend/src/lib/queryKeysExtra.ts
   reason: 'Merge-growth class (PR 317 precedent): develop''s #419 connectionKeys and #427 nodeRuns entries
@@ -636,19 +716,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
   ceiling: 484
-- check: architecture.file_budget
-  path: velites/src/tools/bash.rs
-  reason: 'Issue #469 instruments the bash tool with the phase decomposition the stall forensics asked
-    for: spawn timing, first-output-byte reading (read_with_first_byte replaces read_to_end with identical
-    byte/error semantics; the first byte is the earlier of the two streams), the reap-phase branch, and
-    the module docstring documenting the observation axes and the harness-read-vs-child-write caveat.
-    The tool is one cohesive spawn/read/terminate flow; splitting instrumentation out would fork the child
-    lifecycle across modules. Ceiling at actual + 10 per the dated-exemption convention (#431 / #458 precedents)
-    — the module is in active observation tuning. Remove when #469''s follow-up (once the write() stall
-    trigger is pinned) retires or reshapes the instrumentation.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
-  ceiling: 264
 - check: architecture.file_budget
   path: velites/src/tools/mod.rs
   reason: 'Issue #469 review fix makes the ToolKind::execute dispatch boundary the single totalMs timing
@@ -1001,3 +1068,97 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/647
   ceiling: 353
   expires: 2026-12-31
+- check: architecture.file_budget
+  path: velites/src/tools/bash.rs
+  reason: 'Issue #637 hardens the bash tool against unbounded pipe reads (the
+    allocation-storm incident): read_with_first_byte returns a PipeCapture
+    (head kept to the per-stream 4 MiB cap, total_bytes counted, hit_cap flag),
+    the drain loop keeps reading to EOF past the cap (no pipe backpressure on
+    the child), and the capped-output display branch (truncate_head + the
+    honest no-full-output notice) grew alongside. The capture cap, its tests,
+    and the display branches are one cohesive read/display flow; splitting
+    them would fork the child-output lifecycle across modules. #779 train R4
+    review P2 grew the same capped-display branch further (per-stream display
+    budgets: stderr gets a reserved half-share, each stream keeps its head
+    when capture-capped and its tail when fully collected). Ceiling re-seated
+    at actual + 10 per the dated-exemption convention (#431/#458
+    precedents). Remove when the capped-display branches move into
+    truncate.rs or the module gets a bash-output split.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
+  ceiling: 411
+  expires: 2027-03-31
+- check: architecture.file_budget
+  path: velites/src/tools/truncate.rs
+  reason: '#779 train R4 review P2 (#689 follow-up): the bash capture-capped
+    display branch now splits the 2000-line/50KB budget between the two stream
+    heads (stderr gets a reserved half-share so a capped 4 MiB stdout head can
+    no longer squeeze the fully captured stderr — the error reason of the
+    failing command — out of the display). The budget-splitting primitive
+    (truncate_head_within) belongs in the shared truncation module, the home
+    the bash.rs exemption already names for the capped-display branches.
+    Ceiling at actual + 10 per the dated-exemption convention (#431/#458).
+    Remove when the bash capped-display branch migrates here per the bash.rs
+    exemption and the pair is re-balanced, or the module shrinks below the old
+    floor.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/689
+  ceiling: 340
+  expires: 2027-03-31
+- check: architecture.file_budget
+  path: velites/src/provider/openai_compat/aggregate.rs
+  reason: 'Issue #637 closes the compound-storm surface the per-field cap
+    missed: MAX_AGGREGATE_CHARS adds a whole-completion aggregate cap over
+    text/thinking/tool-call id/name/arguments (check_total at the single
+    growth chokepoint), and MAX_SSE_LINE_BYTES bounds an unterminated SSE
+    line in SseLineBuffer (push returns Result, callers propagate). The
+    checks live with the structs they guard. Ceiling at actual + 10 per the
+    dated-exemption convention. Remove when the bounded-buffer helpers move
+    into a shared provider module or the file shrinks below the old floor.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
+  ceiling: 400
+  expires: 2027-03-31
+- check: architecture.file_budget
+  path: velites/src/provider/openai_compat/mod.rs
+  reason: 'Issue #637 threads the SSE-line cap through read_sse_stream: the
+    two push call sites propagate ProviderError instead of unwrapping, and
+    the non-streaming JSON dialect notes the remaining unbounded body read.
+    Ceiling at actual + 10 per the dated-exemption convention. Remove when
+    the non-streaming body read gets its own byte cap and the file shrinks
+    below the old floor.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
+  ceiling: 543
+  expires: 2027-03-31
+- check: architecture.file_budget
+  path: velites/src/provider/anthropic.rs
+  reason: 'Issue #637 review follow-up closes the same three unbounded surfaces
+    the openai_compat caps sealed (per codex round-2 P2-1): a 2 MiB SSE line
+    cap via push_lines_bounded, 32 MiB per-field caps via push_bounded over
+    content_block_start/delta payloads, and a 32 MiB whole-response aggregate
+    via Aggregate::total_chars + check_total at the apply tail — mechanically
+    ported so an anomalous Anthropic gateway cannot OOM the agent. Ceiling at
+    actual + 10 per the dated-exemption convention. Remove when the bounded
+    helpers consolidate into a shared provider module or the file shrinks
+    below the old floor.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
+  ceiling: 679
+
+- check: architecture.file_budget
+  path: worker/execution/heartbeat_batch.py
+  reason: 'Issue #644 closes the result-report 409 storm: register_upload is the
+    non-clobbering registration path for the upload-side lease heartbeat (a
+    mismatched (execution_id, lease_id) pair returns the existing entry instead
+    of overwriting a re-claimed attempt''s entry), and the executor-to-upload
+    handover rebinds the shared ownership_lost event in place. The three
+    lookup arms plus the pair-matching comments are one registry surface;
+    splitting them would fork the heartbeat entry lifecycle across modules.
+    Ceiling re-seated at actual + 10 per the dated-exemption convention
+    (#431/#458 precedents). Remove when the registry moves to its own module
+    or the file shrinks below the old floor.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/751
+  ceiling: 210
+  expires: 2027-03-31

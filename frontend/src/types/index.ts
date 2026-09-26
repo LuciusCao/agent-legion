@@ -12,6 +12,7 @@ export type {
   NodeRun,
   JobsResponse,
   JobBatchResponse,
+  UpgradeMode,
 } from './jobTypes'
 export type {
   TokenUsageRunResponse,

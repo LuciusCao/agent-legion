@@ -171,9 +171,11 @@ def test_rerun_by_failure_route_reruns_matching_jobs(tmp_path):
     assert len(results) == 1
     assert results[0]["job_id"] == job_id
     assert results[0]["status"] == "succeeded"
-    assert results[0]["rerun_nodes"] == ["write_script"]
+    # rerun_upstream 走合并上游（#759）：write_script ∪ intake_knowledge_points。
+    assert results[0]["rerun_nodes"] == ["intake_knowledge_points", "write_script"]
     nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
     assert nodes["write_script"] == "pending"
+    assert nodes["intake_knowledge_points"] == "pending"
     assert nodes["review_script"] == "stale"
 
 

@@ -1,4 +1,5 @@
 import { useJobStore } from '../stores/jobStore'
+import type { UpgradeMode } from '../types/jobTypes'
 
 export function useWorkspacePackageActions(workspaceId: string | undefined) {
   const batchPackage = useJobStore((state) => state.batchPackage)
@@ -18,9 +19,12 @@ export function useWorkspacePackageActions(workspaceId: string | undefined) {
     await batchClearPacked(workspaceId)
   }
 
-  const handleUpgradeWorkflow = async (jobIds?: string[]) => {
+  const handleUpgradeWorkflow = async (
+    jobIds?: string[],
+    mode: UpgradeMode = 'clean'
+  ) => {
     if (!workspaceId) return
-    await batchUpgradeWorkflow(workspaceId, jobIds)
+    await batchUpgradeWorkflow(workspaceId, jobIds, mode)
   }
 
   return { handlePackage, handleClearPacked, handleUpgradeWorkflow }

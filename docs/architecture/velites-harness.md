@@ -369,8 +369,10 @@ fail-closed 报错，内置节点不受影响。
 - **json（#518，opt-in，仅 velites runtime）**：JSON 字段级读-改-写原语，`op` 三态
   （`get`/`set`/`delete`）+ `path`（文件）+ `query`（JSON path：点分 key 与
   `[index]` 段，如 `steps[2].content`；带引号 key 可含点号）。`get` 返回路径值
-  （缺失报 `null` 不报错）；`set` 写任意 JSON 值并整文件写回（pretty-print，
-  tmp+rename 原子替换，与 write 同协议）；`delete` 删 key 或数组元素。set/delete
+  （缺失报 `null` 不报错）；`set` 写任意 JSON 值并整文件写回（**compact** 单行
+  序列化——#637 起 set/delete 落盘统一 compact，防 pretty 宽度放大越过读侧
+  4MB 上限；value 本身受 4MB 整文件上限约束，tmp+rename 原子替换，与 write
+  同协议）；`delete` 删 key 或数组元素。set/delete
   对缺失中间 key 报错不自动建（模型应显式建父级或用 write）。动机：模型对自己
   产出的较大 JSON 只改一个字段时，整文件重写费 token 且易引入新错误，曾退化为
   bash heredoc 手写 python 读-改-写（高并发下的不稳定因素）——本工具把该形态

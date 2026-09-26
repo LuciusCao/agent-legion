@@ -182,7 +182,7 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
           open={upgradeOpen}
           count={allMatchingCount ?? 0}
           onClose={() => setUpgradeOpen(false)}
-          onConfirm={() => onUpgradeWorkflow?.()}
+          onConfirm={(mode) => onUpgradeWorkflow?.(undefined, mode)}
         />
       )}
     </>

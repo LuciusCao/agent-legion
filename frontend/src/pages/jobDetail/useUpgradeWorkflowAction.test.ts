@@ -25,7 +25,7 @@ function setup(jobId: string | undefined) {
 }
 
 describe('useUpgradeWorkflowAction', () => {
-  it('upgrades, refreshes the detail, and toggles loading around the call', async () => {
+  it('upgrades with the default clean mode, refreshes the detail, and toggles loading', async () => {
     mockUpgrade.mockResolvedValue({
       job_id: 'job-1',
       operation: 'upgrade_workflow',
@@ -36,31 +36,81 @@ describe('useUpgradeWorkflowAction', () => {
     })
     const { result, refreshDetail, setActionLoading, setError } = setup('job-1')
 
-    await act(() => result.current())
+    await act(() => result.current('clean'))
 
-    expect(mockUpgrade).toHaveBeenCalledWith('job-1')
+    expect(mockUpgrade).toHaveBeenCalledWith('job-1', 'clean')
     expect(refreshDetail).toHaveBeenCalledTimes(1)
     expect(setActionLoading.mock.calls).toEqual([[true], [false]])
     expect(setError).not.toHaveBeenCalled()
   })
 
-  it('surfaces request failures and still clears loading', async () => {
+  it('passes the inherit mode through to the api', async () => {
+    mockUpgrade.mockResolvedValue({
+      job_id: 'job-1',
+      operation: 'upgrade_workflow',
+      status: 'succeeded',
+    })
+    const { result } = setup('job-1')
+
+    await act(() => result.current('inherit'))
+
+    expect(mockUpgrade).toHaveBeenCalledWith('job-1', 'inherit')
+  })
+
+  it('surfaces request failures, refreshes authoritative state, and still clears loading', async () => {
+    // #759 P1: the upgrade may have committed server-side while the response
+    // was lost — the failure branch refreshes the detail so the UI never
+    // shows stale pre-upgrade state.
     mockUpgrade.mockRejectedValue(new Error('Job is already current'))
     const { result, refreshDetail, setActionLoading, setError } = setup('job-1')
 
-    await act(() => result.current())
+    let caught: unknown
+    await act(async () => {
+      try {
+        await result.current()
+      } catch (err) {
+        caught = err
+      }
+    })
 
+    expect(caught).toEqual(new Error('Job is already current'))
     expect(setError).toHaveBeenCalledWith('Job is already current')
-    expect(refreshDetail).not.toHaveBeenCalled()
+    expect(refreshDetail).toHaveBeenCalledTimes(1)
     expect(setActionLoading.mock.calls).toEqual([[true], [false]])
+  })
+
+  it('a failed refresh on the failure branch does not mask the original error', async () => {
+    mockUpgrade.mockRejectedValue(new Error('Request failed with status 500'))
+    const { result, refreshDetail, setError } = setup('job-1')
+    refreshDetail.mockRejectedValue(new Error('refresh boom'))
+
+    let caught: unknown
+    await act(async () => {
+      try {
+        await result.current()
+      } catch (err) {
+        caught = err
+      }
+    })
+
+    expect(caught).toEqual(new Error('Request failed with status 500'))
+    expect(setError).toHaveBeenCalledWith('Request failed with status 500')
   })
 
   it('stringifies non-error rejections', async () => {
     mockUpgrade.mockRejectedValue('plain failure')
     const { result, setError } = setup('job-1')
 
-    await act(() => result.current())
+    let caught: unknown
+    await act(async () => {
+      try {
+        await result.current()
+      } catch (err) {
+        caught = err
+      }
+    })
 
+    expect(caught).toBe('plain failure')
     expect(setError).toHaveBeenCalledWith('plain failure')
   })
 
@@ -68,7 +118,7 @@ describe('useUpgradeWorkflowAction', () => {
     const { result, refreshDetail, setActionLoading, setError } =
       setup(undefined)
 
-    await act(() => result.current())
+    await act(() => result.current('clean'))
 
     expect(mockUpgrade).not.toHaveBeenCalled()
     expect(refreshDetail).not.toHaveBeenCalled()

@@ -19,7 +19,7 @@ fi
 # 显式传入本 worktree 的专属 URL：load_settings() 以 override=False 加载 .env，
 # 调用 shell 若已导出 AGENT_LEGION_DATABASE_URL（指向基准/生产实例）会盖过
 # .env，导致在错误数据库里恢复调度。
-if PYTHONPATH="$ROOT" AGENT_LEGION_DATABASE_URL="$DB_URL" UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
+if PYTHONPATH="$ROOT" AGENT_LEGION_DATABASE_URL="$DB_URL" UV_CACHE_DIR=.uv-cache uv run --frozen python - <<'PY'
 from server.app.db.transaction import read_connection
 from server.app.settings import load_settings
 from server.app.worker_control import WorkspaceWorkerControl

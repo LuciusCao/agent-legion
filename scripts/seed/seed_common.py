@@ -36,11 +36,17 @@ import re
 from pathlib import Path
 from typing import Any
 
+from server.app.services.node_codes import DEFAULT_MAX_CODE_BYTES
+
 SEED_SCHEMA_VERSION = 1
 
-# Custom node code single-file limit (mirrors
-# server/app/services/node_codes.py MAX_CODE_BYTES, EXEC-CODE-002).
-MAX_CODE_BYTES = 64 * 1024
+# Custom node code single-file limit (EXEC-CODE-002). The seed tool mirrors
+# the platform default (imported, so the two can never drift). #628 made the
+# platform ceiling instance-configurable (default 64KB); #786 moved the knob
+# into the admin instance settings (env AGENT_LEGION_NODE_CODE_MAX_BYTES
+# remains the default source). An instance that raised it must pass its
+# elevated budget through (``--node-code-max-bytes`` on export/import),
+# otherwise code the platform already accepted fails seed validation here.
 
 # Import prefixes that custom node code must never use: platform internals
 # are not importable inside the sandbox (EXEC-CODE-003). Callers may extend
@@ -105,14 +111,20 @@ def filter_agent_definition(definition: dict[str, Any]) -> dict[str, Any]:
 def code_violations(
     code: str,
     forbidden_prefixes: tuple[str, ...] = DEFAULT_FORBIDDEN_IMPORT_PREFIXES,
+    max_code_bytes: int = DEFAULT_MAX_CODE_BYTES,
 ) -> list[str]:
     """Per-file checks for one node code text: size, syntax, module-level
     ``run``, forbidden imports (same contract as the platform's
-    ``validate_node_code`` plus the sandbox import policy)."""
+    ``validate_node_code`` plus the sandbox import policy).
+
+    ``max_code_bytes`` (#628/#786): defaults to the platform 64KB; an instance
+    that raised its budget (admin instance settings, or the
+    AGENT_LEGION_NODE_CODE_MAX_BYTES env default source) passes the elevated
+    value through so seed validation matches what the platform accepts."""
     problems: list[str] = []
     size = len(code.encode("utf-8"))
-    if size > MAX_CODE_BYTES:
-        problems.append(f"exceeds the {MAX_CODE_BYTES}-byte size limit ({size} bytes)")
+    if size > max_code_bytes:
+        problems.append(f"exceeds the {max_code_bytes}-byte size limit ({size} bytes)")
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
@@ -169,6 +181,7 @@ def lock_entry_refs(entry: dict[str, Any], default_ref: str | None = None) -> di
 def validate_seed(
     seed: dict[str, Any],
     forbidden_prefixes: tuple[str, ...] = DEFAULT_FORBIDDEN_IMPORT_PREFIXES,
+    max_code_bytes: int = DEFAULT_MAX_CODE_BYTES,
 ) -> list[str]:
     """Structural validation of a seed package; returns problems ([] = ok)."""
     problems: list[str] = []
@@ -239,7 +252,7 @@ def validate_seed(
                 problems.append(f"{label}: capability {capability!r} belongs to node {expected!r}")
         if entry.get("code_sha256") != sha256_text(code):
             problems.append(f"{label}: code_sha256 mismatch")
-        for problem in code_violations(code, forbidden_prefixes):
+        for problem in code_violations(code, forbidden_prefixes, max_code_bytes):
             problems.append(f"{label}: {problem}")
 
     skills = seed.get("skills")
@@ -266,11 +279,12 @@ def validate_seed(
 def load_seed(
     path: Path,
     forbidden_prefixes: tuple[str, ...] = DEFAULT_FORBIDDEN_IMPORT_PREFIXES,
+    max_code_bytes: int = DEFAULT_MAX_CODE_BYTES,
 ) -> dict[str, Any]:
     seed = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(seed, dict):
         raise SystemExit(f"{path}: seed.json must be a JSON object")
-    problems = validate_seed(seed, forbidden_prefixes)
+    problems = validate_seed(seed, forbidden_prefixes, max_code_bytes)
     if problems:
         details = "\n".join(f"  - {problem}" for problem in problems)
         raise SystemExit(f"{path}: seed validation failed ({len(problems)} problems):\n{details}")

@@ -130,6 +130,47 @@ def test_apply_strips_retired_openclaw_block(settings, job_db, store) -> None:
     assert not hasattr(settings.executor_runtime, "openclaw")
 
 
+def test_apply_hydrates_node_code_max_bytes_with_env_fallback(settings, job_db, store) -> None:
+    """#786: node_code_max_bytes became instance-settings managed (reversing
+    the #628 env-only decision). Resolution chain: stored document > env
+    (AGENT_LEGION_NODE_CODE_MAX_BYTES) > 64KB code default — a legacy stored
+    document without the key must not clobber the operator's env value."""
+    settings.executor_runtime.workflows.node_code_max_bytes = 128 * 1024
+    store.put({"workflows": {"max_items_per_run": 500}})
+
+    apply_instance_settings(settings, job_db.dsn_identity)
+
+    runtime = settings.executor_runtime
+    assert runtime.workflows.max_items_per_run == 500  # managed key hydrates
+    # Legacy document without the key: the env-loaded value survives.
+    assert runtime.workflows.node_code_max_bytes == 128 * 1024
+
+    # A stored value (admin PUT) wins over env.
+    store.put({"workflows": {"node_code_max_bytes": 256 * 1024}})
+    apply_instance_settings(settings, job_db.dsn_identity)
+    assert settings.executor_runtime.workflows.node_code_max_bytes == 256 * 1024
+
+
+def test_effective_document_node_code_max_bytes_falls_back_to_loaded_runtime() -> None:
+    """#786: the GET-side effective document takes node_code_max_bytes from
+    the loaded runtime (env > code default) when the stored document lacks
+    the key, so the admin form shows the value that would actually apply."""
+    from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
+    from server.app.services.instance_settings import effective_instance_document
+
+    runtime = ExecutorRuntimeConfig()
+    runtime.workflows.node_code_max_bytes = 128 * 1024
+
+    document = effective_instance_document({"workflows": {"max_items_per_run": 500}}, runtime)
+
+    assert document["workflows"]["node_code_max_bytes"] == 128 * 1024
+    # A stored value still wins over the loaded runtime.
+    overridden = effective_instance_document(
+        {"workflows": {"node_code_max_bytes": 256 * 1024}}, runtime
+    )
+    assert overridden["workflows"]["node_code_max_bytes"] == 256 * 1024
+
+
 def test_effective_document_strips_retired_openclaw_block_from_stored_document() -> None:
     """Deployments upgraded from before the openclaw retirement (#75) still
     carry an openclaw block in global_settings['instance']; the effective

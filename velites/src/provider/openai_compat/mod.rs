@@ -259,6 +259,12 @@ fn truncate(text: &str, max: usize) -> &str {
     }
 }
 
+// The #689 SSE line-cap SseLineBuffer tests live in the child module
+// `sse_line_tests` (split for the file size budget); everything else stays
+// inline.
+#[cfg(test)]
+mod sse_line_tests;
+
 #[cfg(test)]
 mod tests {
     use super::aggregate::{
@@ -499,10 +505,10 @@ mod tests {
             .expect("test line must contain a split point");
         let mut buffer = SseLineBuffer::default();
         assert!(
-            buffer.push(&bytes[..split]).is_empty(),
+            buffer.push(&bytes[..split]).unwrap().is_empty(),
             "no complete line yet"
         );
-        let lines = buffer.push(&bytes[split..]);
+        let lines = buffer.push(&bytes[split..]).unwrap();
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("你好"), "got: {}", lines[0]);
         assert!(buffer.finish().is_none());
@@ -511,10 +517,25 @@ mod tests {
     #[test]
     fn sse_line_buffer_flushes_unterminated_tail() {
         let mut buffer = SseLineBuffer::default();
-        let lines = buffer.push(b"data: [DONE]\ndata: tail");
+        let lines = buffer.push(b"data: [DONE]\ndata: tail").unwrap();
         assert_eq!(lines, vec!["data: [DONE]".to_string()]);
         let rest = buffer.finish().expect("tail must flush");
         assert_eq!(rest, "data: tail");
+    }
+
+    #[test]
+    fn sse_line_buffer_rejects_overlong_line() {
+        // #637: an unterminated line longer than any legitimate SSE payload
+        // is corruption — the buffer must reject it instead of growing
+        // without bound (a junk flood with no newline never reaches the
+        // aggregate caps).
+        let mut buffer = SseLineBuffer::default();
+        let junk = vec![b'x'; 2 * 1024 * 1024 + 1];
+        let err = buffer
+            .push(&junk)
+            .expect_err("overlong line must be rejected");
+        assert!(err.is_retryable(), "overlong line is transient: {err}");
+        assert!(err.to_string().contains("SSE line exceeds"), "got: {err}");
     }
 
     #[test]
@@ -569,5 +590,108 @@ mod tests {
         let wire = wire_message(&with_call);
         assert_eq!(wire["content"], Value::Null);
         assert_eq!(wire["tool_calls"][0]["id"], json!("c1"));
+    }
+
+    #[test]
+    fn aggregate_text_past_the_cap_is_transient() {
+        // #637: the per-completion aggregate is defensively bounded — a
+        // stream whose accumulated text passes MAX_STREAMED_TEXT_CHARS is
+        // rejected as transient (retryable), not grown without bound. The
+        // OpenAI-compatible path sends no max_tokens, so the client-side
+        // cap is the only bound on a runaway/garbage stream.
+        let mut aggregated = Aggregated::default();
+        let mut err = None;
+        // 33 × 1 MiB deltas push the text buffer past the 32 MiB cap.
+        for _ in 0..33 {
+            let chunk = json!({"choices": [{"delta": {"content": "a".repeat(1024 * 1024)}}]});
+            if let Err(e) = aggregated.apply_chunk(&chunk) {
+                err = Some(e);
+                break;
+            }
+        }
+        let err = err.expect("cap must fire before 33 MiB accumulates");
+        assert!(err.is_retryable(), "over-cap stream is transient: {err}");
+        assert!(err.to_string().contains("aggregate cap"), "got: {err}");
+        // The rejected buffer stays capped around the limit — the delta
+        // that crossed it was never appended.
+        assert!(aggregated.text.len() <= 32 * 1024 * 1024 + 10);
+    }
+
+    #[test]
+    fn aggregate_tool_arguments_past_the_cap_is_transient() {
+        // Same cap on streamed tool_call arguments — a junk-delta flood on
+        // the arguments field is bounded too.
+        let mut aggregated = Aggregated::default();
+        let mut err = None;
+        for _ in 0..33 {
+            let chunk = json!({
+                "choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "function": {"arguments": "b".repeat(1024 * 1024)}}
+                ]}}]
+            });
+            if let Err(e) = aggregated.apply_chunk(&chunk) {
+                err = Some(e);
+                break;
+            }
+        }
+        let err = err.expect("cap must fire on arguments too");
+        assert!(err.is_retryable(), "over-cap stream is transient: {err}");
+    }
+
+    #[test]
+    fn aggregate_many_small_tool_calls_hit_the_global_cap() {
+        // #637 compound-storm regression: 1025 tool_calls × 1 MiB arguments
+        // each — every single field is UNDER MAX_STREAMED_TEXT_CHARS (so the
+        // per-field cap alone passes), while the whole aggregate is 1 GiB
+        // and would grow toward 32 GiB at the per-field cap. Only the
+        // WHOLE-completion cap rejects this shape. Scaled down 32× (1 GiB
+        // path compressed to ~32 MiB) to stay CI-friendly: 33 calls of
+        // 1 MiB each cross the global cap.
+        let mut aggregated = Aggregated::default();
+        let mut err = None;
+        for index in 0..40u64 {
+            let chunk = json!({
+                "choices": [{"delta": {"tool_calls": [
+                    {"index": index, "id": format!("call-{index}"),
+                     "function": {"name": "read", "arguments": "c".repeat(1024 * 1024)}}
+                ]}}]
+            });
+            if let Err(e) = aggregated.apply_chunk(&chunk) {
+                err = Some(e);
+                break;
+            }
+        }
+        let err = err.expect("global cap must fire on many small tool calls");
+        assert!(err.is_retryable(), "over-cap aggregate is transient: {err}");
+        assert!(err.to_string().contains("aggregate exceeds"), "got: {err}");
+    }
+
+    #[test]
+    fn aggregate_junk_flood_on_unbounded_fields_is_bounded() {
+        // #637: id/name were previously unbounded push_str targets. A flood
+        // on the id field (each delta tiny) is rejected by the global cap.
+        let mut aggregated = Aggregated::default();
+        let mut err = None;
+        for _ in 0..33 {
+            let chunk = json!({
+                "choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "id": "d".repeat(1024 * 1024)}
+                ]}}]
+            });
+            if let Err(e) = aggregated.apply_chunk(&chunk) {
+                err = Some(e);
+                break;
+            }
+        }
+        let err = err.expect("global cap must fire on the id flood too");
+        assert!(err.is_retryable(), "over-cap id stream is transient: {err}");
+        // The whole aggregate stays at/below the global cap (the rejected
+        // delta was never appended — the per-field cap on id fired first,
+        // and past it the global check keeps the aggregate from creeping).
+        assert!(
+            aggregated.total_chars() <= 32 * 1024 * 1024 + 1024 * 1024,
+            "aggregate must stay bounded: {}",
+            aggregated.total_chars()
+        );
     }
 }

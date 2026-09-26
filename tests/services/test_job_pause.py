@@ -105,13 +105,13 @@ def test_pause_unknown_and_foreign_results(pause_service, seeded):
     assert missing_exc.value.reason_code == "not_found"
     with pytest.raises(JobOperationError) as foreign_exc:
         pause_service.pause(seeded["ws_id"], str(seeded["foreign"]["id"]))
-    assert foreign_exc.value.reason_code == "wrong_workspace"
+    assert foreign_exc.value.reason_code == "not_found"
 
     results = pause_service.batch_pause(
         seeded["ws_id"], ["missing-job", str(seeded["foreign"]["id"])], None
     )
     assert [r["status"] for r in results] == ["failed", "failed"]
-    assert [r["reason_code"] for r in results] == ["not_found", "wrong_workspace"]
+    assert [r["reason_code"] for r in results] == ["not_found", "not_found"]
 
 
 def test_batch_pause_resolves_filter_selection(pause_service, job_db, seeded):

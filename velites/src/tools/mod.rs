@@ -13,6 +13,9 @@ pub mod catalog;
 pub mod command_guard;
 pub(super) mod command_paths;
 pub mod json;
+/// Bounded parse/serialize helpers shared by the `json` tool and the
+/// contract engine (`pub(crate)` for the latter).
+pub(crate) mod json_limits;
 pub mod read;
 mod specs;
 pub mod truncate;
@@ -113,6 +116,10 @@ pub enum ToolError {
     InvalidArgs(String),
     #[error("command blocked by velites guard: {0}")]
     CommandBlocked(String),
+    /// 读入内容超过内存上限（#637）——文件大小 / 捕获量在读前检查，
+    /// 超限报错并提示分段读取的替代路径，而不是把内容堆进内存。
+    #[error("content too large for in-memory processing: {0}")]
+    TooLarge(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

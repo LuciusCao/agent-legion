@@ -1,28 +1,10 @@
 /* 排查对话面板（#329）：布局类复用 Studio 对话面板的视觉语言，动作卡片
- * 是新增的确认面（agent 建议 → 人确认执行）。 */
+ * 是新增的确认面（agent 建议 → 人确认执行）。#695 起外壳（chatPanel /
+ * emptyState / 错误条）归 workflowStudio/chat 的 AgentChatPanel 骨架。 */
 
-.chatPanel {
-  display: flex;
-  flex-direction: column;
+.chatShell {
   gap: 8px;
   min-height: 320px;
-}
-
-.emptyState {
-  color: var(--text-secondary, #666);
-  text-align: center;
-  padding: 24px 0;
-}
-
-.statusWarning {
-  color: var(--warning-text, #b26a00);
-  background: var(--warning-bg, #fff7e6);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .dialogTitle {

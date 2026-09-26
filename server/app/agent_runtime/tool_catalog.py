@@ -27,9 +27,9 @@ VELITES_TOOL_CATALOG: tuple[ToolCatalogEntry, ...] = (
             "Read a UTF-8 text file inside the working directory or an enabled "
             "skill directory (read-only). Optional 1-based `offset` and `limit` "
             "select a line range. Output is truncated to the first 2000 lines "
-            "or 50KB (whichever is hit first). Use offset/limit for large "
-            "files; when you need the full file, continue with offset until "
-            "complete."
+            "or 50KB (whichever is hit first). Files over 4MB fail outright — "
+            "offset/limit paging only works within the 4MB limit; for larger "
+            "files read them in chunks via bash (e.g. `sed -n '1,2000p' file`)."
         ),
         parameters={
             "type": "object",
@@ -76,7 +76,10 @@ VELITES_TOOL_CATALOG: tuple[ToolCatalogEntry, ...] = (
             "Run a bash command in the working directory (env inherited). "
             "Output is truncated to the last 2000 lines or 50KB "
             "(whichever is hit first); if truncated, the full output is "
-            "saved to a temp file. On timeout the whole process group "
+            "saved to a temp file (unless output capture hit the 4MB "
+            "per-stream cap — then the head is kept, the tail is dropped, "
+            "and nothing is saved: redirect to a file and read it in "
+            "chunks with bash instead). On timeout the whole process group "
             "gets SIGTERM, then SIGKILL after a grace period. "
             "Full-disk scan commands (e.g. `find /`) are rejected; "
             "search within the working directory or a specific "
@@ -153,8 +156,9 @@ VELITES_TOOL_CATALOG: tuple[ToolCatalogEntry, ...] = (
             "you produced. NEVER rewrite a whole JSON file (write tool) to "
             "change one field, and NEVER shell out to python for this. `get` "
             "returns the value at the path (null when absent). `set` writes "
-            "any JSON value at the path and saves the file (pretty-printed, "
-            "atomically). `delete` removes the key/array element at the "
+            "any JSON value at the path and saves the file (compactly, "
+            "atomically; the value is capped at the 4MB whole-file limit). "
+            "`delete` removes the key/array element at the "
             "path. Paths: dotted keys and [index] segments, e.g. "
             '`steps[2].content` or `["a key.with.dots"].sub`; missing '
             "intermediate keys are an error for set/delete (no auto-create), "

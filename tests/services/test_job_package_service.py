@@ -99,7 +99,7 @@ def test_package_returns_ordered_results_with_reason_codes(
     assert results[0].get("reason_code") is None
 
     assert results[1]["status"] == "failed"
-    assert results[1]["reason_code"] == "wrong_workspace"
+    assert results[1]["reason_code"] == "not_found"
 
     assert results[2]["status"] == "failed"
     assert results[2]["reason_code"] == "not_found"
@@ -205,7 +205,7 @@ def test_clear_packed_status_rejects_jobs_outside_workspace(
     results = service.clear_packed_status("target-workspace", [job["id"], "missing"])
 
     assert [result["reason_code"] for result in results] == [
-        "wrong_workspace",
+        "not_found",
         "not_found",
     ]
     assert job_db.get_job(job["id"])["packed"] == 1

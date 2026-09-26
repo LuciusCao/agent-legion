@@ -22,7 +22,12 @@ def _clear_agent_legion_env(monkeypatch):
         "BASECMS_SECRET",
         "BASECMS_TOKEN_URL",
         "AGENT_LEGION_CMS_TOKEN",
-        "AGENT_LEGION_SKIP_DOTENV",
+        # AGENT_LEGION_SKIP_DOTENV 刻意不在此列：删掉它会让本文件的
+        # load_settings 用例加载真实项目 .env，而 load_dotenv 直写
+        # os.environ（绕过 monkeypatch），把 AGENT_LEGION_S3_BUCKET 等键
+        # 泄漏给同一 xdist worker 里的后续测试（曾使 code executor 测试的
+        # 产物镜像意外走真 S3/DB）。需要 dotenv 行为的用例自行 delenv
+        # （见 test_load_settings_reads_project_dotenv_by_default）。
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -437,3 +442,59 @@ def test_env_example_documents_skills_runs_dir():
     example_path = Path(__file__).resolve().parents[2] / ".env.example"
     example = example_path.read_text(encoding="utf-8")
     assert "AGENT_LEGION_SKILLS_RUNS_DIR=" in example
+
+
+# --- #628: node code byte budget (AGENT_LEGION_NODE_CODE_MAX_BYTES) ---
+
+
+def test_node_code_max_bytes_defaults_to_64kb(tmp_path, monkeypatch):
+    """#628：默认 64KB 不变——未设置 env 时行为与历史硬编码一致。"""
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    monkeypatch.delenv("AGENT_LEGION_NODE_CODE_MAX_BYTES", raising=False)
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text("data_dir: data\n", encoding="utf-8")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.executor_runtime.workflows.node_code_max_bytes == 64 * 1024
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [
+        ("131072", 128 * 1024),
+        ("2097152", 2 * 1024 * 1024),
+        ("1024", 1024),
+    ],
+)
+def test_node_code_max_bytes_env_override(tmp_path, monkeypatch, env_value, expected):
+    """#628：env 覆盖生效（可调大，也允许收到 1KB 下限）。"""
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    monkeypatch.setenv("AGENT_LEGION_NODE_CODE_MAX_BYTES", env_value)
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text("data_dir: data\n", encoding="utf-8")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.executor_runtime.workflows.node_code_max_bytes == expected
+
+
+@pytest.mark.parametrize(
+    ("env_value", "match"),
+    [
+        # 非整数：int parser 在 settings 加载时 fail-fast。
+        ("not-a-number", "invalid literal|invalid int"),
+        # 低于 1KB 下限：pydantic ge=1024 拒绝。
+        ("1023", "greater than or equal to 1024"),
+        ("0", "greater than or equal to 1024"),
+    ],
+)
+def test_node_code_max_bytes_rejects_invalid_env(tmp_path, monkeypatch, env_value, match):
+    """#628：非法 env 值在启动时 fail-fast，不落到静默默认。"""
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    monkeypatch.setenv("AGENT_LEGION_NODE_CODE_MAX_BYTES", env_value)
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text("data_dir: data\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=match):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)

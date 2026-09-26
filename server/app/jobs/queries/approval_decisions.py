@@ -31,6 +31,14 @@ class ApprovalGateConflict(ValueError):
         self.missing = missing
 
 
+def _lock_job_mutation(conn: Any, job_id: str) -> None:
+    """EXEC-GENERATION-001: decision writes serialize with the mutation side
+    (``lease_guarded_mutation``) on the per-job advisory lock — taken as the
+    transaction's first statement so the status guard below reads a state no
+    concurrent reset can still change."""
+    conn.execute("select pg_advisory_xact_lock(hashtext('job-mutation:' || %s))", (job_id,))
+
+
 def _guard_awaiting(conn: Any, job_id: str, node_key: str) -> None:
     row = conn.execute(
         "select status from job_nodes where job_id=%s and node_key=%s",
@@ -42,6 +50,12 @@ def _guard_awaiting(conn: Any, job_id: str, node_key: str) -> None:
         raise ApprovalGateConflict(
             f"Node {node_key} is not awaiting approval (status: {row['status']})"
         )
+    # EXEC-GENERATION-001：这里刻意不做「gate 行代次戳 == jobs 现值」比较。
+    # bump 是无条件全局的（分支 B 的 rerun 也 bump），而重置只给闭包内节点
+    # 盖戳——全局比较会把未被重置的已 park gate 误判过期（awaiting_approval
+    # 不可重新 park，等于永久 brick）。gate 自身被重置时状态先离开
+    # awaiting_approval（pending/stale），状态守卫已拦住针对旧 gate 的迟到
+    # 决策；重新 park 后到达的决策面向的是新一轮待审，接受即正确。
 
 
 def _insert_decision(conn: Any, decision: dict[str, Any]) -> None:
@@ -91,6 +105,7 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
 
         job_id, node_key = decision["job_id"], decision["node_key"]
         with self.write() as conn:
+            _lock_job_mutation(conn, job_id)
             _guard_awaiting(conn, job_id, node_key)
             _insert_decision(conn, decision)
             conn.execute(
@@ -109,6 +124,7 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
 
         job_id, node_key = decision["job_id"], decision["node_key"]
         with self.write() as conn:
+            _lock_job_mutation(conn, job_id)
             _guard_awaiting(conn, job_id, node_key)
             _insert_decision(conn, decision)
             conn.execute(

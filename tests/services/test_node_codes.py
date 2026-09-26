@@ -16,9 +16,10 @@ from server.app.services.node_code_resolution import (
     resolve_dispatch_node_code,
 )
 from server.app.services.node_codes import (
-    MAX_CODE_BYTES,
+    DEFAULT_MAX_CODE_BYTES,
     NodeCodeService,
     code_hash,
+    validate_node_code,
 )
 
 VALID_CODE = "def run(job, job_dir, runtime):\n    return None\n"
@@ -54,10 +55,223 @@ def test_save_draft_rejects_invalid_code(service, workspace_id) -> None:
         service.save_draft(workspace_id, WF, NODE, "def run(:\n", "user:u1")
     with pytest.raises(InvalidOperationError, match="module-level 'run'"):
         service.save_draft(workspace_id, WF, NODE, "X = 1\n", "user:u1")
-    oversized = VALID_CODE + "#" * MAX_CODE_BYTES
+    oversized = VALID_CODE + "#" * DEFAULT_MAX_CODE_BYTES
     with pytest.raises(InvalidOperationError, match="size limit"):
         service.save_draft(workspace_id, WF, NODE, oversized, "user:u1")
     assert service.list_versions(workspace_id, WF, NODE) == []
+
+
+@pytest.mark.no_db
+def test_validate_node_code_default_64kb_boundary() -> None:
+    """#628: the default budget is unchanged 64KB — at-limit passes, +1 byte
+    rejects, and the error names the configured limit."""
+    pad = "#" * (DEFAULT_MAX_CODE_BYTES - len(VALID_CODE.encode("utf-8")))
+    validate_node_code(VALID_CODE + pad)
+    with pytest.raises(InvalidOperationError, match=r"65536-byte size limit"):
+        validate_node_code(VALID_CODE + pad + "#")
+
+
+@pytest.mark.no_db
+def test_validate_node_code_custom_limit_applies() -> None:
+    """#628: an injected larger budget admits code the 64KB default rejects."""
+    limit = 128 * 1024
+    pad = "#" * (limit - len(VALID_CODE.encode("utf-8")))
+    oversized_for_default = VALID_CODE + pad
+    with pytest.raises(InvalidOperationError):
+        validate_node_code(oversized_for_default)
+    validate_node_code(oversized_for_default, limit)
+    with pytest.raises(InvalidOperationError, match=r"131072-byte"):
+        validate_node_code(oversized_for_default + "#", limit)
+
+
+def test_save_draft_custom_limit_via_service(job_db, workspace_id) -> None:
+    """#628: NodeCodeService carries the settings-injected limit through both
+    validating write paths (save_draft and seed_global)."""
+    limit = 2048
+    service = NodeCodeService(job_db.dsn_identity, max_code_bytes=limit)
+    pad = "#" * (limit - len(VALID_CODE.encode("utf-8")))
+    row = service.save_draft(workspace_id, WF, NODE, VALID_CODE + pad, "user:u1")
+    assert row["status"] == "draft"
+    with pytest.raises(InvalidOperationError, match="2048-byte"):
+        service.save_draft(workspace_id, WF, NODE, VALID_CODE + pad + "#", "user:u1")
+    with pytest.raises(InvalidOperationError, match="2048-byte"):
+        service.seed_global(WF, "seeded", VALID_CODE + pad + "#", "seed too big")
+
+
+def _padded_code(pad_to: int) -> str:
+    return VALID_CODE + "#" * (pad_to - len(VALID_CODE.encode("utf-8")))
+
+
+def test_publish_rejects_draft_over_lowered_limit(job_db, workspace_id) -> None:
+    """#628 review P2: node_code_max_bytes is restart-effective. A draft saved
+    under a higher budget must not survive a publish after the instance
+    lowered the limit — and the rejection leaves the previous published
+    version effective and the draft intact (nothing was archived)."""
+    big = _padded_code(4096)
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+    roomy.save_draft(workspace_id, WF, NODE, big, "user:u1")
+    roomy.publish(workspace_id, WF, NODE)
+
+    roomy.save_draft(workspace_id, WF, NODE, _padded_code(2048), "user:u1", "smaller")
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=1024)
+    with pytest.raises(
+        InvalidOperationError,
+        match=r"cannot publish node code of \d+ bytes: it exceeds the current 1024-byte",
+    ) as exc_info:
+        lowered.publish(workspace_id, WF, NODE)
+    assert "lowered after this version was saved" in str(exc_info.value)
+    # The previous published version stays effective; the rejected draft survives.
+    assert lowered.get_effective_code(workspace_id, WF, NODE)["code"] == big
+    versions = {
+        row["version"]: row["status"] for row in lowered.list_versions(workspace_id, WF, NODE)
+    }
+    assert versions == {1: "published", 2: "draft"}
+
+
+def test_publish_binds_validated_bytes_via_hash_cas(job_db, workspace_id, monkeypatch) -> None:
+    """#628 review P2 + #692：校验读与发布之间草稿被并发覆盖（换成超限内
+    容）时，发布绑定的是「校验过的那份字节」——expected_hash CAS 让本次
+    发布以 Conflict 失败，超限字节绝不进 published。注入点：
+    ``_check_publish_size`` 恰在预读之后、store 发布之前。突变自检：若
+    publish 不绑定校验读到的 hash（传 None），覆盖后的内容被静默发布，
+    本测试即红。"""
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=1024)
+    lowered.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+
+    def overwrite_after_validation(code: str, action: str) -> None:
+        # 预读返回的是 VALID_CODE 草稿（对 1024 上限合法）；此刻另一会话
+        # 把草稿覆盖为超限内容——本实例校验的是覆盖前读到的字节，放行。
+        roomy.save_draft(workspace_id, WF, NODE, _padded_code(2048), "user:u2")
+
+    monkeypatch.setattr(lowered, "_check_publish_size", overwrite_after_validation)
+
+    with pytest.raises(ConflictError, match="draft hash mismatch"):
+        lowered.publish(workspace_id, WF, NODE)
+
+    # 零发布副作用：无 published 行；超限内容仍是草稿，等待人工处置。
+    assert lowered.get_effective_code(workspace_id, WF, NODE) is None
+    versions = {
+        row["version"]: row["status"] for row in lowered.list_versions(workspace_id, WF, NODE)
+    }
+    assert versions == {1: "draft"}
+
+
+def test_publish_cas_binds_validated_draft_not_caller_hash(
+    job_db, workspace_id, monkeypatch
+) -> None:
+    """#779 列车 R2 复审 P2-A：携带「覆盖后内容」哈希的发布请求不得成功。
+    体积校验针对预读草稿 A，CAS 必须恒用 A 的哈希——若改用调用方哈希，
+    滚动重启期旧实例把草稿覆盖为超限 B、请求带 B 的哈希时 CAS 匹配 B，
+    上限绕过窗口重开。调用方哈希与预读草稿不一致应先拒 Conflict。"""
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=1024)
+    lowered.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+    oversized = _padded_code(2048)
+
+    def overwrite_after_validation(code: str, action: str) -> None:
+        roomy.save_draft(workspace_id, WF, NODE, oversized, "user:u2")
+
+    monkeypatch.setattr(lowered, "_check_publish_size", overwrite_after_validation)
+
+    with pytest.raises(ConflictError, match="draft hash mismatch"):
+        lowered.publish(workspace_id, WF, NODE, expected_hash=code_hash(oversized))
+
+    assert lowered.get_effective_code(workspace_id, WF, NODE) is None
+
+
+def test_publish_pre_reads_only_the_draft_row(job_db, workspace_id, monkeypatch) -> None:
+    """#779 列车 R2 复审 P2-B：发布的预读只取当前草稿行（窄查询），不为
+    找草稿而反序列化全部永久版本历史。突变自检：_current_draft 回落到
+    list_versions 全量读，本测试即红。"""
+    from server.app.services.versioned_entities import VersionedEntityStore
+
+    service = NodeCodeService(job_db.dsn_identity)
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1", "v2")
+
+    def no_full_history(*args, **kwargs):
+        raise AssertionError("publish pre-read pulled the full version history")
+
+    monkeypatch.setattr(VersionedEntityStore, "list_versions", no_full_history)
+
+    published = service.publish(workspace_id, WF, NODE)
+    assert published["version"] == 2
+    assert published["status"] == "published"
+
+
+def test_rollback_rejects_old_version_over_lowered_limit(job_db, workspace_id) -> None:
+    """#628 review P2: rollback re-publishes a historical version as a NEW
+    publish — the bytes must clear the CURRENT limit too, or the rejection
+    leaves the currently published version untouched."""
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+    roomy.save_draft(workspace_id, WF, NODE, _padded_code(4096), "user:u1", "big")
+    roomy.publish(workspace_id, WF, NODE)
+    roomy.save_draft(workspace_id, WF, NODE, _padded_code(1024), "user:u1", "small")
+    roomy.publish(workspace_id, WF, NODE)
+
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=2048)
+    with pytest.raises(InvalidOperationError, match="cannot rollback node code"):
+        lowered.rollback(workspace_id, WF, NODE, 1, "user:ops")
+    versions = {
+        row["version"]: row["status"] for row in lowered.list_versions(workspace_id, WF, NODE)
+    }
+    # v2 stays published; no v3 was created.
+    assert versions == {1: "archived", 2: "published"}
+    assert lowered.get_effective_code(workspace_id, WF, NODE)["code"] == _padded_code(1024)
+
+
+def test_rollback_refuses_draft_source(job_db, workspace_id, monkeypatch) -> None:
+    """#779 列车 R2 复审 P2 跟进：draft 不是回滚源。版本不可变的前提只覆盖
+    published/archived 行——draft 会被 save_draft 原地 UPDATE，以其版本号
+    为源的 rollback 在「预读校验 → store 事务内按版本号重读」之间可被并发
+    覆盖成超限内容（滚动重启期旧高上限实例仍可写）。draft 本来就能原地
+    编辑，回滚到它没有意义——直接拒绝，超限/竞态窗口一并关闭。"""
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+    roomy.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    roomy.publish(workspace_id, WF, NODE)  # v1 published
+    roomy.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")  # v2 draft
+
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=1024)
+    with pytest.raises(InvalidOperationError, match="draft"):
+        lowered.rollback(workspace_id, WF, NODE, 2, "user:ops")
+
+    # 零副作用：v1 仍 published，v2 仍 draft，没有 v3。
+    versions = {
+        row["version"]: row["status"] for row in lowered.list_versions(workspace_id, WF, NODE)
+    }
+    assert versions == {1: "published", 2: "draft"}
+
+    # 竞态形态钉：预读看到 draft（合法内容）后、store 重读前被并发覆盖为
+    # 超限内容——拒绝在预读处已发生，覆盖与否都进不了发布。
+    def overwrite_after_read(code: str, action: str) -> None:
+        roomy.save_draft(workspace_id, WF, NODE, _padded_code(2048), "user:u2")
+
+    monkeypatch.setattr(lowered, "_check_publish_size", overwrite_after_read)
+    with pytest.raises(InvalidOperationError, match="draft"):
+        lowered.rollback(workspace_id, WF, NODE, 2, "user:ops")
+    assert lowered.get_effective_code(workspace_id, WF, NODE)["code"] == VALID_CODE
+
+
+def test_publish_and_rollback_within_limit_still_succeed(job_db, workspace_id) -> None:
+    """#628 review P2: code under the CURRENT limit publishes and rolls back
+    unchanged — the guard adds no false rejections. The exact-at-limit draft
+    (2048 bytes under a 2048 limit) exercises the boundary."""
+    service = NodeCodeService(job_db.dsn_identity, max_code_bytes=2048)
+    at_limit = _padded_code(2048)
+    service.save_draft(workspace_id, WF, NODE, at_limit, "user:u1")
+    published = service.publish(workspace_id, WF, NODE)
+    assert published["status"] == "published"
+
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1", "smaller")
+    published = service.publish(workspace_id, WF, NODE)
+    assert published["version"] == 2
+    rolled = service.rollback(workspace_id, WF, NODE, 1, "user:ops")
+    assert rolled["version"] == 3
+    assert rolled["status"] == "published"
+    assert rolled["code"] == at_limit
+    assert service.get_effective_code(workspace_id, WF, NODE)["code"] == at_limit
 
 
 def test_save_draft_overwrites_existing_draft(service, workspace_id) -> None:
@@ -246,6 +460,23 @@ def test_resolve_dispatch_node_code_fails_closed_on_missing_version(
         resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, frozen)
 
 
+@pytest.mark.no_db
+def test_frozen_dispatch_pin_prefers_snapshot_pins() -> None:
+    """#109: the job snapshot's node_code_pins win over the batch payload's
+    node_code_versions (upgrade refreshes only the former) — inside a
+    quality-replay batch, the only place pins still apply (#115)."""
+    snapshot_pins = {"n": {"version": 2, "code_hash": "h2"}}
+    batch_payload = {
+        "quality_replay": {"replay_id": "r1"},
+        "node_code_versions": {"n": {"version": 1, "code_hash": "h1"}},
+    }
+
+    assert frozen_dispatch_pin(snapshot_pins, batch_payload, "n") == {
+        "version": 2,
+        "code_hash": "h2",
+    }
+
+
 def test_save_draft_guard_rejects_concurrently_published_row(
     service, workspace_id, monkeypatch
 ) -> None:
@@ -254,24 +485,33 @@ def test_save_draft_guard_rejects_concurrently_published_row(
 
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
     published = service.publish(workspace_id, WF, NODE)
-    monkeypatch.setattr(versioned_entities, "_latest_with_status", lambda *args: dict(published))
+    # 只拦截 draft 读取（save_draft 的写路径）；get_published 的断言读走
+    # 原实现（get_published 与写路径共用 _latest_status_row 查询件）。
+    original = versioned_entities._latest_status_row
+    monkeypatch.setattr(
+        versioned_entities,
+        "_latest_status_row",
+        lambda conn, et, ws, key, status: (
+            dict(published) if status == "draft" else original(conn, et, ws, key, status)
+        ),
+    )
     with pytest.raises(ConflictError):
         service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u2")
     # The published row is untouched.
     assert service.get_effective_code(workspace_id, WF, NODE)["code"] == VALID_CODE
 
 
-def test_publish_guard_rejects_concurrently_archived_draft(
-    service, workspace_id, monkeypatch
-) -> None:
-    """A stale draft view must not resurrect an archived row into published."""
-    import server.app.services.versioned_entities as versioned_entities
+def test_publish_guard_rejects_concurrently_archived_draft(service, workspace_id) -> None:
+    """A stale draft view must not resurrect an archived row into published.
 
+    #628 review P2（CAS 复检设计）后服务侧 publish 先预读当前草稿：草稿
+    已被并发归档时预读即找不到草稿，NotFound（404）先行；残余窗口（预读
+    之后才归档）由 store 的 status 谓词 CAS 兜底为 Conflict——store 层
+    语义由 tests/services/test_versioned_entities.py 的同名钉保持。
+    """
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
-    stale_draft = service.list_versions(workspace_id, WF, NODE)[0]
     service.archive_all(workspace_id, WF, NODE)
-    monkeypatch.setattr(versioned_entities, "_latest_with_status", lambda *args: dict(stale_draft))
-    with pytest.raises(ConflictError):
+    with pytest.raises(NotFoundError):
         service.publish(workspace_id, WF, NODE)
     assert service.get_effective_code(workspace_id, WF, NODE) is None
 
@@ -347,23 +587,6 @@ def test_seed_global_tolerates_concurrent_seed_race(service, monkeypatch) -> Non
     other = "def run(job, job_dir, runtime):\n    return 'other'\n"
     assert not service.seed_global(WF, NODE, other, "concurrent seed")
     assert service.get_global_published(WF, NODE)["code"] == GLOBAL_CODE
-
-
-@pytest.mark.no_db
-def test_frozen_dispatch_pin_prefers_snapshot_pins() -> None:
-    """#109: the job snapshot's node_code_pins win over the batch payload's
-    node_code_versions (upgrade refreshes only the former) — inside a
-    quality-replay batch, the only place pins still apply (#115)."""
-    snapshot_pins = {"n": {"version": 2, "code_hash": "h2"}}
-    batch_payload = {
-        "quality_replay": {"replay_id": "r1"},
-        "node_code_versions": {"n": {"version": 1, "code_hash": "h1"}},
-    }
-
-    assert frozen_dispatch_pin(snapshot_pins, batch_payload, "n") == {
-        "version": 2,
-        "code_hash": "h2",
-    }
 
 
 @pytest.mark.no_db

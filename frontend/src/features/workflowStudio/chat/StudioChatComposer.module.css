@@ -1,0 +1,109 @@
+/* StudioChatComposer（#695 R4）：圆角卡片一体化输入区——textarea 与卡内底部
+ * 工具行是一个视觉整体；配置芯片（StudioChatComposerConfig）是卡内行内元素。 */
+.composerArea {
+  border-top: 1px solid #e0e0e0;
+  padding: 8px 12px;
+}
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #cfcfcf;
+  border-radius: 12px;
+  padding: 8px 10px 6px;
+  background: #fff;
+}
+.composer textarea {
+  border: none;
+  outline: none;
+  resize: none;
+  font-size: 13px;
+  font-family: inherit;
+  width: 100%;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  /* #733 R6-P2：窄面板（移动布局 / 拖窄的桌面右栏）下四个芯片 + 发送按钮
+   * 单行放不下——允许换行（对齐旧配置栏的换行行为），行距收紧保持紧凑。 */
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-height: 24px;
+}
+.configLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* 可收缩：窄视口下让出宽度（内部芯片/提示各自 ellipsis），不把发送按钮
+   * 挤出 composer。 */
+  min-width: 0;
+  flex-shrink: 1;
+}
+.configRight {
+  display: flex;
+  align-items: center;
+  gap: 4px 6px;
+  /* 模型/思考档位芯片与发送按钮一起贴右（左侧是权限模式芯片）。
+   * #733 R6-P2：默认 min-width:auto 会让整组拒不收缩、把发送按钮挤出卡片，
+   * 改为可收缩 + 组内换行。 */
+  min-width: 0;
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.toolbarSpacer {
+  /* 无配置芯片的调用方（diagnosis/preview 与未广告配置面的 agent）：
+   * 占位把发送按钮推到右侧，三处留白一致，不造空槽位。 */
+  flex: 1;
+}
+/* 芯片本体与下拉菜单样式已拆到 StudioChatConfigChip.module.css（组件内聚 +
+ * 本文件体积预算）。 */
+.drift {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* flex 子项默认 min-width:auto 拒不收缩，显式归零才能 ellipsis。 */
+  min-width: 0;
+  font-size: 12px;
+  color: #7a5d00;
+}
+.error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-size: 12px;
+  color: #c62828;
+}
+/* #787：取消按钮在发送按钮左侧，次级破坏性动作——描边小一号、弱红色，
+ * 不抢主操作（发送/排队）的视觉权重；仅运行中渲染，不运行时不占位。 */
+.cancelButton {
+  flex: none;
+  border: 1px solid #ffcdd2;
+  background: #fff;
+  color: #c62828;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cancelButton:hover {
+  background: #fff5f5;
+}
+/* 发送按钮是工具行最右端；右推由 configRight 的 margin-left:auto（有配置）
+ * 或 toolbarSpacer（无配置）承担。 */
+.sendButton {
+  flex: none;
+  background: #1976d2;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.sendButton:disabled {
+  background: #bbdefb;
+  cursor: default;
+}

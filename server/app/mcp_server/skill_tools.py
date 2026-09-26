@@ -23,36 +23,45 @@ from server.app.mcp_server.tool_client import ToolClient
 ClientFactory = Callable[[], Awaitable[tuple[McpServerConfig, ToolClient]]]
 
 
-def _skill_path(skill_key: str) -> str:
+def _skill_path(workspace_id: str, skill_key: str) -> str:
+    """Workspace-scoped URL for a skill (keys are <workspace>/<name>; the
+    path scope must agree with the key's own workspace segment — #710)."""
+    return f"/workspaces/{quote(workspace_id, safe='')}/skills/{_skill_key_path(skill_key)}"
+
+
+def _skill_key_path(skill_key: str) -> str:
     """URL-encode each skill-key segment (keys are <group>/<name>)."""
     return "/".join(quote(segment, safe="") for segment in skill_key.split("/"))
 
 
 def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     @mcp.tool(structured_output=False)
-    async def get_skill(skill_key: str, ref: str | None = None) -> str:
+    async def get_skill(workspace_id: str, skill_key: str, ref: str | None = None) -> str:
         """Read a skill: key, git tags (latest first), text files (SKILL.md +
-        references/ + scripts/). No ref → working tree at HEAD (the latest
-        semantics); ref previews one tag without moving the lock (unknown tag
-        → 404)."""
+        references/ + scripts/). workspace_id must match the skill key's own
+        workspace segment (skills are workspace-isolated). No ref → working
+        tree at HEAD (the latest semantics); ref previews one tag without
+        moving the lock (unknown tag → 404)."""
         _, client = await client_factory()
-        path = f"/skills/{_skill_path(skill_key)}"
+        path = _skill_path(workspace_id, skill_key)
         if ref is not None:
             path += f"?ref={quote(ref, safe='')}"
         return await client.call("GET", path)
 
     @mcp.tool(structured_output=False)
-    async def validate_skill(skill_key: str) -> str:
+    async def validate_skill(workspace_id: str, skill_key: str) -> str:
         """Check a skill against the dispatch-time runtime contract (SKILL.md
         + references/output-contract.md + scripts/validate_output.py + root
-        contract.yaml parse). Returns {valid, errors, warnings} — a MISSING
+        contract.yaml parse). workspace_id must match the skill key's own
+        workspace segment. Returns {valid, errors, warnings} — a MISSING
         contract.yaml only warns. Persists nothing; run before
         save_skill_version."""
         _, client = await client_factory()
-        return await client.call("POST", f"/skills/{_skill_path(skill_key)}/validate")
+        return await client.call("POST", f"{_skill_path(workspace_id, skill_key)}/validate")
 
     @mcp.tool(structured_output=False)
     async def save_skill_version(
+        workspace_id: str,
         skill_key: str,
         files: list[dict[str, str]],
         new_tag: str,
@@ -62,11 +71,12 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         validated (inside the skill dir, no '..'/absolute), contract
         re-checked (malformed root contract.yaml rolls the repo back; missing
         only warns), then commit + tag new_tag (existing tag = conflict).
-        Skill lock untouched — pinned nodes keep the locked commit, latest
-        nodes follow the new HEAD; a human reviews, re-pins, relocks."""
+        workspace_id must match the skill key's own workspace segment. Skill
+        lock untouched — pinned nodes keep the locked commit, latest nodes
+        follow the new HEAD; a human reviews, re-pins, relocks."""
         _, client = await client_factory()
         body: dict[str, Any] = {"files": files, "new_tag": new_tag, "message": message}
-        return await client.call("POST", f"/skills/{_skill_path(skill_key)}/versions", body)
+        return await client.call("POST", f"{_skill_path(workspace_id, skill_key)}/versions", body)
 
     @mcp.tool(structured_output=False)
     async def create_skill(

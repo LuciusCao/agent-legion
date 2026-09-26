@@ -186,6 +186,7 @@ function SharedMaterialsDrawer({
         {confirmRow && (
           <SharedMaterialsPropagateConfirmDialog
             row={confirmRow}
+            rows={rows}
             pending={mutation.isPending}
             onCancel={() => setConfirmRow(null)}
             onConfirm={() => mutation.mutate([confirmRow.path])}

@@ -436,6 +436,52 @@ def test_trailing_chunk_after_turn_end_folds_into_finished_turn_row(job_db, sett
         service.shutdown()
 
 
+def test_timed_out_turn_writes_turn_timeout_status_message(job_db, settings) -> None:
+    """#693: a turn ended by the prompt-timeout ladder (the agent honoured
+    the auto session/cancel) must be recorded as a user-visible turn_timeout
+    status message — never as a plain turn_end the UI reads as "done" —
+    while the session state machine still returns to idle."""
+    service, session_id, _runtime, workspace_id = _direct_session(job_db, settings)
+    try:
+        service.send_message(session_id, workspace_id, "long running")
+        service._on_turn_end(session_id, "cancelled", timed_out=True)
+
+        statuses = [
+            m["content"]
+            for m in service.list_messages(session_id, workspace_id)
+            if m["kind"] == "status"
+        ]
+        assert {
+            "event": "turn_timeout",
+            "stop_reason": "cancelled",
+            "detail": "运行超过 1 小时已被终止",
+        } in statuses
+        assert all(s.get("event") != "turn_end" for s in statuses)
+        assert service.get_session(session_id, workspace_id)["status"] == "idle"
+    finally:
+        service.shutdown()
+
+
+def test_normal_turn_end_still_writes_turn_end_status_message(job_db, settings) -> None:
+    """#693 guard: the non-timeout path is unchanged — a completed turn keeps
+    writing the plain turn_end status message and returns to idle."""
+    service, session_id, _runtime, workspace_id = _direct_session(job_db, settings)
+    try:
+        service.send_message(session_id, workspace_id, "quick")
+        service._on_turn_end(session_id, "end_turn")
+
+        statuses = [
+            m["content"]
+            for m in service.list_messages(session_id, workspace_id)
+            if m["kind"] == "status"
+        ]
+        assert {"event": "turn_end", "stop_reason": "end_turn"} in statuses
+        assert all(s.get("event") != "turn_timeout" for s in statuses)
+        assert service.get_session(session_id, workspace_id)["status"] == "idle"
+    finally:
+        service.shutdown()
+
+
 def test_turn_start_reset_cannot_land_between_stream_create_and_attach(
     job_db, settings, monkeypatch
 ) -> None:
@@ -502,3 +548,73 @@ def test_turn_start_reset_cannot_land_between_stream_create_and_attach(
         assert _agent_texts(service, session_id, workspace_id) == ["Hello", "Second"]
     finally:
         service.shutdown()
+
+
+KIMI_COMPACT_SCRIPT = {
+    "capabilities": {"loadSession": False, "mcpCapabilities": {"http": False, "sse": False}},
+    # kimi 0.42 的 ACP 身份（#694 review R2-P2：压缩标记门控只信 kimi 会话）。
+    "agent_name": "kimi-code-acp",
+    "on_prompt": [
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "Compacting conversation context\n"},
+            }
+        },
+    ],
+}
+
+NON_KIMI_MARKER_SCRIPT = {
+    "capabilities": {"loadSession": False, "mcpCapabilities": {"http": False, "sse": False}},
+    "on_prompt": [
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "Compacting conversation context\n"},
+            }
+        },
+    ],
+}
+
+
+def test_kimi_identity_agent_marks_compaction_window_end_to_end(chat) -> None:
+    """#694 review R2-P2 集成：声明 kimi 身份的 agent 在 /compact turn 内
+    发出的本地压缩标记被识别——旗标置位、marker 块不进文本流。"""
+    service, _bus, register, workspace_id, user_id = chat
+    register(KIMI_COMPACT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    service.send_message(session["id"], workspace_id, "/compact")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    _wait_for(lambda: service.get_session(session["id"])["compacting"] is True)
+
+    messages = service.list_messages(session["id"], workspace_id)
+    assert [m for m in messages if m["kind"] == "text" and m["role"] == "agent"] == []
+    events = [m["content"]["event"] for m in messages if m["kind"] == "status"]
+    assert "compact_start" in events
+
+
+def test_non_kimi_agent_marker_text_stays_plain_text_end_to_end(chat) -> None:
+    """#694 review R2-P2 集成：非 kimi 身份的 agent 发出同前缀文本时按
+    普通回复处理——折叠进文本流、不置旗标、不写压缩状态消息。"""
+    service, _bus, register, workspace_id, user_id = chat
+    register(NON_KIMI_MARKER_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    service.send_message(session["id"], workspace_id, "echo the notice")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    _wait_for(
+        lambda: any(
+            m["kind"] == "text" and m["role"] == "agent"
+            for m in service.list_messages(session["id"], workspace_id)
+        )
+    )
+
+    messages = service.list_messages(session["id"], workspace_id)
+    agent_texts = [
+        m["content"]["text"] for m in messages if m["kind"] == "text" and m["role"] == "agent"
+    ]
+    assert agent_texts == ["Compacting conversation context\n"]
+    assert service.get_session(session["id"])["compacting"] is False
+    events = [m["content"]["event"] for m in messages if m["kind"] == "status"]
+    assert "compact_start" not in events

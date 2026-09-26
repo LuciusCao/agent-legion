@@ -14,6 +14,7 @@ from typing import Any
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_control import AgentCompletionHandler, AgentWorkerRegistry
+from server.app.auth.workspace_api_tokens import WorkspaceApiTokenStore
 from server.app.events import JobEventManager
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
@@ -63,3 +64,5 @@ class RouterDeps:
     studio_chat_service: StudioChatService | None = None
     materials_service: MaterialsService | None = None
     job_artifact_objects: Any | None = None
+    # #626: workspace API intake token store (issue/resolve/revoke/list).
+    workspace_api_token_store: WorkspaceApiTokenStore | None = None

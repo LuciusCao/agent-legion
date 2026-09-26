@@ -3,8 +3,9 @@ from typing import Any
 from server.app.db.rowmap import wire_batch_id
 from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs import JobQueries
+from server.app.services.job_artifact_names import is_plausible_job_id
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.services.job_errors import NotFoundError
+from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_node_ordering import ordered_job_nodes
 from server.app.services.job_node_worker_projection import agent_route_map, claimed_worker_map
 from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
@@ -47,6 +48,10 @@ class JobQueryService:
         self.object_store = object_store
 
     def _job_or_404(self, job_id: str) -> dict[str, Any]:
+        # #631 攻击复审 M1：控制字符 job_id（%00）会在 SQL 参数化时炸
+        # psycopg DataError（500）；形状早拒（400）后再查库。
+        if not is_plausible_job_id(job_id):
+            raise InvalidOperationError("Invalid job id")
         job = self.job_db.get_job(job_id)
         if job is None:
             raise NotFoundError("Job not found")

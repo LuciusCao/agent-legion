@@ -55,6 +55,10 @@ class AgentClaimResponse(BaseModel):
     # self-contained code payload in the manifest and the Worker executes it
     # through the velites sandbox instead of an Agent runtime.
     kind: str = "agent"
+    # EXEC-GENERATION-001 (observational): the request row's execution epoch,
+    # CAS-verified against jobs.execution_generation at claim time. Workers
+    # may log it; the Host remains the only enforcer.
+    execution_generation: int = 0
     manifest: dict[str, Any]
     bundle_url: str
 

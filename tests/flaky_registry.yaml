@@ -106,3 +106,157 @@ entries:
     passes, no poll loop of its own (single worker._poll() call).
   observed: PR #684 backend-coverage lane (run 35056532267), 2026-09-16, rerun passed and the lane count was green.
   deadline: 2026-10-16
+
+- id: FLAKY-012
+  nodeid: tests/scripts/test_quality_gate_scripts.py::test_quick_gate_backend_test_failure_still_runs_frontend_round
+  owner: test-infra
+  reason: >-
+    Loaded-runner timing flake, observed on 0.7.13 development PRs (#701/#704
+    backend-coverage rerun governance; also hit once during local #628 review
+    under a full-suite batch run). The test drives the REAL check-quick.sh
+    inside a fixture repo and asserts the stub lanes' start/end ordering via
+    marker files; under heavy parallel runner load the poll loop's
+    marker-file visibility window can race the stub's own writing, so the
+    first attempt fails and the --reruns 1 retry passes in isolation. Fix
+    direction (deadline item): make the stub lanes fsync their markers or
+    add a bounded wait on the marker file instead of relying on immediate
+    visibility.
+  observed: >-
+    PR #701 and #704 backend-coverage lanes, 2026-09-16 (rerun absorbed);
+    single-attempt local reproduction under batch load only.
+  deadline: 2026-12-31
+- id: FLAKY-013
+  nodeid: tests/services/test_studio_chat_service_permissions.py::test_turn_timeout_settles_parked_permission_and_session_survives
+  owner: test-infra
+  reason: >-
+    Same async-persistence timing family as FLAKY-007 (the #664 timeout
+    ladder's settle test): under loaded CI runners the parked-permission
+    settle assertion can read session state in the window before the
+    timeout ladder's final status write lands; the --reruns 1 retry passes.
+    Observed once on the 0.7.13 #708 backend-coverage lane (2026-09-16),
+    also hit during local #675 review under a full-suite batch run where
+    the clean-tree baseline reproduced it once. Fix direction: bound the
+    wait on the terminal session status like #525 did for FLAKY-007.
+  observed: >-
+    PR #708 backend-coverage lane rerun governance, 2026-09-16; local batch
+    load reproduction once, isolated rerun green.
+  deadline: 2026-12-31
+- id: FLAKY-014
+  nodeid: tests/workflows/test_workflow_worker_concurrency.py::test_target_completion_pauses_job_and_stops_further_claims
+  owner: test-infra
+  reason: >-
+    Loaded-runner rerun absorbed on 0.7.13 PRs #704/#708 backend-coverage
+    lanes (runs 35126791591/35126795788, 2026-09-16): first attempt failed,
+    retry green, lane counts green — only rerun governance tripped. Same
+    loaded-runner timing family as FLAKY-009/010/011 (worker-concurrency
+    poll timing under 2-core shard runners); the 0.7.13 diffs (#626 auth,
+    #679 gate scripts) have no interaction surface with the Python worker
+    concurrency plane. Registered for rerun absorption; fix direction is
+    the shared family item (bounded wait on the terminal job status).
+  observed: >-
+    PR #704 and #708 backend-coverage lanes, 2026-09-16 (rerun absorbed).
+  deadline: 2026-12-31
+- id: FLAKY-015
+  nodeid: tests/workflows/test_workflow_execution_control.py::test_worker_runs_only_target_closure_in_until_node_mode
+  owner: test-infra
+  reason: >-
+    Same nodeid as FLAKY-011 (registered on the velites-0.5.4 release line,
+    not yet on develop when the 0.7.13 wave branched): loaded-runner rerun
+    absorbed again on 0.7.13 PR #701 backend-coverage lane (run 35126787623,
+    2026-09-16). The 0.7.13 diff (#615, frontend-only) cannot interact with
+    the Python target-closure plane. Entry mirrors FLAKY-011 until the
+    release line merges and the dedupe lands on develop.
+  observed: >-
+    PR #701 backend-coverage lane, 2026-09-16 (rerun absorbed); first
+    observed on PR #684 (FLAKY-011).
+  deadline: 2026-12-31
+- id: FLAKY-016
+  nodeid: tests/workers/test_execution_run.py::test_reclaim_serializes_old_attempt_teardown_and_new_attempt
+  owner: test-infra
+  reason: >-
+    Reran once in PR #696 backend-coverage lane (run 35185641060, 2026-09-17)
+    — the retry passed and the lane's only failure was the rerun-governance
+    step (nodeid not yet registered). The PR diff is frontend-only (chat
+    draft cards); the test is the worker reclaim plane (old-attempt teardown
+    vs new-attempt serialization) and cannot interact with it. Same
+    loaded-runner timing family as FLAKY-009/010/011 (2-core runner, three
+    postgres shards plus coverage): registered for rerun absorption; 4
+    consecutive local passes (1.0-1.7s each).
+  observed: PR #696 backend-coverage lane (run 35185641060), 2026-09-17, rerun passed and the lane count was green.
+  deadline: 2026-10-17
+- id: FLAKY-017
+  nodeid: tests/services/test_job_workflow_upgrade_inherit.py::test_inherit_upgrade_code_republish_with_inserted_node_reruns_all
+  owner: test-infra
+  reason: >-
+    Reran once in PR #702 CI (backend-postgres-a shard 1/3, run 35317067107,
+    2026-09-18) — the retry passed and the lane's only failure was the
+    rerun-governance step. The first attempt's setup phase held the slot for
+    30.03s (slowest setup in the whole lane); the test seeds five nodes with
+    execution records plus artifacts, and under the 2-core runner with three
+    postgres shards plus coverage the fixture setup can transiently exceed
+    the rerun threshold. Assertions themselves are stable: 3 consecutive
+    local passes (0.7-0.9s each). Same loaded-runner timing family as
+    FLAKY-009/010/011/016.
+  observed: PR #702 backend-postgres-a lane (run 35317067107), 2026-09-18, rerun passed and the lane count was green.
+  deadline: 2026-10-18
+- id: FLAKY-018
+  nodeid: tests/routes/test_agent_workers.py::test_worker_metrics_require_token_and_are_forced_to_own_worker
+  owner: test-infra
+  reason: >-
+    Reran once in PR #702 CI (backend-postgres-c shard 3/3, run 35347504160,
+    2026-09-18, call phase) — the retry passed and the lane's only failure
+    was the rerun-governance step. The PR diff is the workflow-upgrade
+    inherit/staging/identity plane plus a frontend dialog; it cannot
+    interact with the agent-worker metrics endpoint, but the PR adds tests
+    and shifts the hash-sharded lane membership, so this is the same
+    loaded-runner timing family as FLAKY-009/010/011/016/017 (2-core
+    runner, three postgres shards plus coverage). Assertions are stable: 5
+    consecutive local passes (1.3-5.3s each).
+  observed: PR #702 backend-postgres-c lane (run 35347504160), 2026-09-18, rerun passed and the lane count was green.
+  deadline: 2026-10-18
+- id: FLAKY-019
+  nodeid: tests/services/test_studio_chat_compaction.py::test_compact_timeout_timer_self_clears_and_recovers_input
+  owner: test-infra
+  reason: >-
+    Reran once in PR #702 CI (backend-coverage aggregation, run
+    35468147331, 2026-09-19) — the retry passed and the lane's only failure
+    was the rerun-governance step. The test arms a daemon Timer with a
+    shrunk 0.3s compacting timeout and waits up to 30s on the DB row via
+    wait_for_predicate; on the loaded 2-core runner (three postgres shards
+    plus coverage) the timer thread can be starved past the window. The PR
+    diff is the workflow-upgrade inherit/generation plane; it does not
+    touch studio chat compaction. Same loaded-runner timing family as
+    FLAKY-009/010/011/016/017/018. Assertions are stable: 4 consecutive
+    local passes (0.85-1.06s each).
+  observed: PR #702 backend-coverage lane (run 35468147331), 2026-09-19, rerun passed and the lane count was green.
+  deadline: 2026-10-19
+- id: FLAKY-020
+  nodeid: tests/services/test_job_workflow_upgrade_inherit_cleanup.py::test_inherit_upgrade_rmw_name_of_covered_consumer_is_retired
+  owner: test-infra
+  reason: >-
+    Reran once in PR #790 CI (backend-postgres-a shard, run 36245071412,
+    2026-09-26) — the retry passed and the lane's only failure was the
+    rerun-governance step. The rerun report records the first attempt's
+    failure in the SETUP phase: the per-test schema isolation TRUNCATE
+    (tests/conftest.py _reset_schema_data, lock_timeout 30s) hit
+    "canceling statement due to lock timeout" in the postgres container log
+    (13:27:04 UTC) — a leaked open transaction from a PRECEDING test on the
+    same xdist worker schema held a table lock (the documented shape in
+    conftest: e.g. a TestClient anyio-threadpool request leaving `update
+    agent_workers` open on a pooled connection). The victim slot is
+    arbitrary: the same day produced a different unregistered victim
+    (tests/workers/test_pure_remote_mode.py, runs 36236296814/36235488884).
+    This test itself is timing-free and leak-free (no threads, no polling,
+    all DB access scoped in context managers; the PR diff's upgrade
+    rmw_retire plane cannot hold a lock past its own commit). Local: solo
+    pass, file-level 3/3, -n 4 pass, 110-test upgrade-family sweep pass.
+    Registered for rerun absorption; fix direction (deadline item): make the
+    first-attempt failure body (the conftest's blocking-session attribution
+    from _fail_on_leaked_locks) survive into the rerun report so the leaker
+    test is identifiable, and/or sweep tests/services for TestClient request
+    handlers that can outlive their test with an open transaction.
+  observed: >-
+    PR #790 backend-postgres-a lane (run 36245071412), 2026-09-26, rerun
+    passed and the shard was green; backend-coverage failed only on the
+    registry check.
+  deadline: 2026-10-26

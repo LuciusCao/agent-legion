@@ -314,8 +314,11 @@ def test_rerun_by_failure_filter_and_exclude_ids(client_factory):
         results = response.json()["results"]
         assert [r["job_id"] for r in results] == [job_a]
         assert results[0]["status"] == "succeeded"
-        assert results[0]["rerun_nodes"] == ["write_script"]
+        # rerun_upstream 走合并上游（#759）：write_script（script.md）∪
+        # intake_knowledge_points（knowledge_point.json）。
+        assert results[0]["rerun_nodes"] == ["intake_knowledge_points", "write_script"]
         nodes = {
             n["node_key"]: n["status"] for n in client.get(f"/api/jobs/{job_a}").json()["nodes"]
         }
         assert nodes["write_script"] == "pending"
+        assert nodes["intake_knowledge_points"] == "pending"

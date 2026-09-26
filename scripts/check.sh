@@ -1,6 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# SIGPIPE immunity + bounded output (issue #679): this script is the local
+# full gate and runs as the pre-push hook process for
+# AGENT_LEGION_GATE_LEVEL=full pushes, so its stdout is git push's own stdout.
+# A reader that walks away mid-push (agent harness output caps, `git push |
+# head`, a killed session) must not kill the gate with SIGPIPE (141) — git
+# would abort the push after the gate had already passed. Same contract as
+# scripts/check-quick.sh: ignore SIGPIPE, guard every write, cap the per-lane
+# log cat (AGENT_LEGION_GATE_OUTPUT_LINES, 0 = full cat).
+trap '' PIPE
+say() {
+  printf '%s\n' "$*" || true
+}
+echo() {
+  say "$*"
+}
+output_lines="${AGENT_LEGION_GATE_OUTPUT_LINES:-120}"
+[[ "$output_lines" =~ ^[0-9]+$ ]] || output_lines=120
+print_lane_output() {
+  local label="$1" log_file="$2" total
+  if [[ "$output_lines" -eq 0 ]]; then
+    say "=== ${label} Output ==="
+    cat "$log_file" || true
+    return 0
+  fi
+  total="$(wc -l <"$log_file" 2>/dev/null | tr -d ' ' || echo 0)"
+  if [[ "$total" -le "$output_lines" ]]; then
+    say "=== ${label} Output ==="
+    cat "$log_file" || true
+    return 0
+  fi
+  say "=== ${label} Output (last ${output_lines} of ${total} lines) ==="
+  tail -n "$output_lines" "$log_file" || true
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 COVERAGE_FILE="${COVERAGE_FILE:-$ROOT_DIR/.coverage.check.$$}"
@@ -57,7 +91,14 @@ echo "--- Segment 2: frontend + rust lanes (no backend coverage) ---"
 GATE_LANES="frontend rust" FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
 
 log_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-legion-full.XXXXXX")"
+# Failed runs keep the full lane logs for diagnosis (the capped stdout tail is
+# lossy); passing runs stay ephemeral.
+keep_log_dir=""
 cleanup_logs() {
+  if [[ -n "$keep_log_dir" ]]; then
+    say "Full lane logs kept for diagnosis: $keep_log_dir" >&2
+    return 0
+  fi
   rm -rf "$log_dir"
 }
 trap 'cleanup_coverage; cleanup_logs' EXIT
@@ -71,7 +112,7 @@ extensions_started_at=$SECONDS
 
 (
   cd "$ROOT_DIR"
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q tests/full \
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q tests/full \
     -m full_gate --reruns 1 --reruns-delay 2 \
     --cov=server --cov=worker --cov-report= --cov-append
 ) >"$full_log" 2>&1 &
@@ -89,20 +130,33 @@ wait "$build_pid"
 build_status=$?
 set -e
 
-echo "Parallel full extensions finished in $((SECONDS - extensions_started_at))s."
-echo "=== Full Backend Lane Output ==="
-cat "$full_log"
-echo "=== Frontend Build Lane Output ==="
-cat "$build_log"
+say "Parallel full extensions finished in $((SECONDS - extensions_started_at))s."
+print_lane_output "Full Backend Lane" "$full_log"
+print_lane_output "Frontend Build Lane" "$build_log"
 
 if [[ "$full_status" -ne 0 || "$build_status" -ne 0 ]]; then
+  keep_log_dir="$log_dir"
   echo "Parallel full gate extension failed: backend=$full_status build=$build_status" >&2
   exit 1
 fi
 
 echo "=== Combined Coverage Report ==="
 cd "$ROOT_DIR"
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run coverage report
+# The report goes through the same log-file + capped-tail path as the lanes
+# (issue #679): written raw it streams hundreds of lines through the push's
+# own stdout pipe, where a departed reader's EPIPE would fail the full gate
+# after every check had passed. Status is captured so a real report failure
+# still fails the gate — but with its diagnostics kept and announced, not
+# silently discarded by the cleanup trap.
+coverage_report_log="$log_dir/coverage-report.log"
+coverage_status=0
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen coverage report >"$coverage_report_log" 2>&1 || coverage_status=$?
+print_lane_output "Combined Coverage" "$coverage_report_log"
+if [[ "$coverage_status" -ne 0 ]]; then
+  keep_log_dir="$log_dir"
+  echo "Combined coverage report failed (status=$coverage_status); full log: $coverage_report_log" >&2
+  exit 1
+fi
 
 echo "=== Coverage Partition Report ==="
 # Per-partition floors keep key modules from hiding behind the global average.
@@ -111,14 +165,14 @@ echo "=== Coverage Partition Report ==="
 # violations into a failure — CI's backend-coverage job runs the worker
 # execution-plane floor (issue #275) in enforce mode, where the merged
 # shard data is complete.
-if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_coverage_partitions.py \
+if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python scripts/check_coverage_partitions.py \
   --backend "$COVERAGE_FILE" \
   --frontend "$ROOT_DIR/frontend/coverage/coverage-final.json"; then
   echo "WARNING: coverage partition check reported violations (non-blocking)." >&2
 fi
 
 echo "=== Exemption Age Check (non-blocking) ==="
-if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_exemption_age; then
+if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_exemption_age; then
   echo "WARNING: exemption age check reported overdue exemptions (non-blocking)." >&2
 fi
 

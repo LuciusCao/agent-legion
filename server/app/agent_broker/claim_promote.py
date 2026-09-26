@@ -37,13 +37,18 @@ def promote_claim(
     selected: Mapping[str, Any],
     manifest: dict[str, Any],
     kind: str,
+    *,
+    execution_generation: int,
 ) -> tuple[str, int]:
     """Write the claim: run row, lease, request flip, job promote.
 
     Returns ``(lease_id, node_run_id)``; raises ``ClaimRacedError`` when the
     job left the runnable set mid-claim (the caller's transaction — or the
     batch's savepoint, #546 — rolls the attempt back). Must run inside the
-    caller's write transaction.
+    caller's write transaction. ``execution_generation`` is the request row's
+    epoch, already CAS-verified against jobs under the job-mutation lock by
+    the caller (EXEC-GENERATION-001); it is stamped onto the node_runs and
+    executor_leases rows this claim creates.
     """
     log_path = claim_log_path(manifest, broker.data_dir)
     # Dispatch-time config audit (CONFIG-RUNTIME-MUTABLE-001): the manifest
@@ -52,15 +57,27 @@ def promote_claim(
     # enqueue-time re-resolution. Secret values never enter the manifest
     # (CONFIG-MANIFEST-001), so this is safe to persist.
     config_snapshot_json = json.dumps(manifest.get("config") or {}, sort_keys=True, default=str)
+    # Implementation identity mirror (schema v85, #645): the scan's
+    # ``select r.*`` carries the request row's agent_definition_hash
+    # (enqueue-time resolution); persisting it here gives node_runs the same
+    # claim-time identity, retention-proof for the inherit upgrade.
+    impl_hash = str(selected.get("agent_definition_hash") or "")
     run = conn.execute(
         """
         insert into node_runs(
           job_id, node_key, status, command_json, log_path, run_dir, session_dir,
-          started_at, config_snapshot_json
-        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp, %s)
+          started_at, config_snapshot_json, agent_definition_hash, execution_generation
+        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp, %s, %s, %s)
         returning id
         """,
-        (selected["job_id"], selected["node_key"], log_path, config_snapshot_json),
+        (
+            selected["job_id"],
+            selected["node_key"],
+            log_path,
+            config_snapshot_json,
+            impl_hash,
+            execution_generation,
+        ),
     ).fetchone()
     if run is None:
         raise RuntimeError("node run insert did not return an id")
@@ -75,8 +92,9 @@ def promote_claim(
         """
         insert into executor_leases(
           id, execution_id, executor_id, workspace_id, job_id,
-          node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-        ) values (%s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s)
+          node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at,
+          execution_generation
+        ) values (%s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s, %s)
         """,
         (
             lease_id,
@@ -87,6 +105,7 @@ def promote_claim(
             selected["node_key"],
             run["id"],
             expires_at,
+            execution_generation,
         ),
     )
     conn.execute(
@@ -101,9 +120,14 @@ def promote_claim(
     # #555: 收窄为 queued→running 的真实跃迁——多节点 job 的每个后继节点
     # claim 都曾对同一 jobs 行做「值不变的重写+重锁」，与 result commit 侧
     # 同批 job 的写正面相撞。已 running 的 job 无需再写。
+    # #759 自审：awaiting_approval 同样是合法起点——审批门 park 期间并行
+    # 分支必须保持可认领（EXEC-APPROVAL-001，本地 claim_lease 的 promote
+    # 条件 not in ('running','completed','failed') 本就接受它）；漏了它
+    # 会让远程 claim 在 gate 决策前永远 ClaimRacedError，queued 请求变
+    # 队首毒药饿死其后全部候选。
     promoted = conn.execute(
         "update jobs set status='running', updated_at=current_timestamp"
-        " where id=%s and status='queued' and execution_paused=0",
+        " where id=%s and status in ('queued', 'awaiting_approval') and execution_paused=0",
         (selected["job_id"],),
     )
     if promoted.rowcount == 0:

@@ -96,6 +96,7 @@ def build_claim_response(
         node_key=claimed.node_key,
         agent_id=claimed.agent_id,
         kind=claimed.kind,
+        execution_generation=claimed.execution_generation,
         manifest=manifest,
         bundle_url=f"/api/agent-executions/{claimed.execution_id}/bundle",
     )

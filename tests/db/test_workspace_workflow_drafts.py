@@ -50,3 +50,37 @@ def test_workspace_delete_cascades_to_the_draft(job_db) -> None:
     job_db.delete_workspace(workspace["id"])
 
     assert job_db.get_workspace_workflow_draft(workspace["id"]) is None
+
+
+def test_workspace_delete_cancels_queued_requests(job_db) -> None:
+    """#759：workspace 删除后其 queued 请求行随之物理消失（on delete
+    cascade）——钉住升级路径修复依赖的 cascade 契约。"""
+    workspace = job_db.create_workspace("ws-cancel-cascade", default_workflow_key="wf")
+    batch = job_db.create_run("wf", "batch_by_ids", {"ids": ["1"]}, workspace["id"])
+    job = job_db.create_job(
+        workflow_key="wf",
+        source_type="question",
+        source_id="1",
+        run_id=batch["id"],
+        title="j1",
+        node_keys=["n1"],
+        workspace_id=workspace["id"],
+    )
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into agent_execution_requests("
+            " execution_id, workspace_id, job_id, node_key,"
+            " agent_id, agent_definition_hash, node_concurrency_limit,"
+            " state, queued_at, manifest_json)"
+            " values ('exec-ws-queued', %s, %s, 'n1',"
+            " 'generator-v1', 'sha256:whatever', 1, 'queued', current_timestamp, '{}')",
+            (workspace["id"], job["id"]),
+        )
+
+    job_db.delete_workspace(workspace["id"])
+
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where execution_id='exec-ws-queued'"
+        ).fetchone()
+    assert row is None

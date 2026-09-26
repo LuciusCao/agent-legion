@@ -1,4 +1,6 @@
-"""Studio-agent skill tool endpoints (/api/studio-agent/tools/skills/*, #217).
+"""Studio-agent skill tool endpoints
+(/api/studio-agent/tools/workspaces/{id}/skills/*, #217 — workspace-scoped
+since #710: skills are workspace-isolated, matching create_skill #633).
 
 Scoped tokens get read/validate/save-version over the LOCAL skill repos;
 full user sessions are refused at the scope guard (see
@@ -19,8 +21,9 @@ from server.app.auth import scoped_tokens
 from server.app.services.skill_lock_store import SkillLockStore
 from server.app.skills.config import LockedSkill, SkillsLock
 
-_KEY = "education-video-problems-generation/write-script"
-_TOOLS = "/api/studio-agent/tools/skills"
+_WS = "education-video-problems-generation"
+_KEY = f"{_WS}/write-script"
+_TOOLS = f"/api/studio-agent/tools/workspaces/{_WS}/skills"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -54,16 +57,19 @@ def _make_skill_repo(repo: Path, tag: str = "v1.0.0") -> None:
 
 
 @pytest.fixture
-def skill_home(tmp_path, monkeypatch):
+def skill_home(tmp_path, monkeypatch, job_db):
     base = tmp_path / "home" / ".agents" / "skills"
     _make_skill_repo(base / _KEY)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # The endpoints are workspace-bound (#710): the skill key's first
+    # segment must be a real workspace the token is bound to.
+    job_db.create_workspace(_WS, default_workflow_key=_WS, workspace_id=_WS)
     return base / _KEY
 
 
 def _scoped(client, job_db):
     admin_id = str(job_db.get_user_credentials("admin")["id"])
-    token = scoped_tokens.mint_scoped_token(job_db, admin_id)
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id=_WS)
     scoped = client.__class__(client.app)
     scoped.headers["authorization"] = f"Bearer {token}"
     return scoped
@@ -94,11 +100,17 @@ def test_get_skill_and_ref_preview(client_factory, job_db, skill_home) -> None:
 def test_preview_endpoint_ref_param(client_factory, skill_home) -> None:
     # The Studio panel surface shares the implementation with the MCP read.
     with client_factory(fresh=True) as client:
-        tagged = client.get(f"/api/agent-catalog/skills/{_KEY}", params={"ref": "v1.0.0"})
+        tagged = client.get(
+            f"/api/agent-catalog/skills/{_KEY}",
+            params={"ref": "v1.0.0", "workspace_id": _WS},
+        )
         assert tagged.status_code == 200, tagged.text
         assert tagged.json()["ref"] == "v1.0.0"
         assert (
-            client.get(f"/api/agent-catalog/skills/{_KEY}", params={"ref": "nope"}).status_code
+            client.get(
+                f"/api/agent-catalog/skills/{_KEY}",
+                params={"ref": "nope", "workspace_id": _WS},
+            ).status_code
             == 404
         )
 
@@ -325,3 +337,103 @@ def test_default_detail_follows_head_after_save(client_factory, job_db, skill_ho
 
         # The seeded pin is untouched by the save.
         assert (store.get_lock() or SkillsLock()).skills[_KEY].refs == {"v1.0.0": old_head}
+
+
+def test_foreign_workspace_binding_is_refused(client_factory, job_db, skill_home) -> None:
+    """#710: a run token bound to another workspace cannot read/validate/
+    version this workspace's skills — the tool surface matches create_skill
+    (#633) and the job tools (require_studio_agent_workspace)."""
+    with client_factory(fresh=True) as client:
+        admin_id = str(job_db.get_user_credentials("admin")["id"])
+        other = job_db.create_workspace(
+            "Other WS", default_workflow_key="other_ws_flow", workspace_id="other_ws_flow"
+        )
+        bound_token = scoped_tokens.mint_scoped_token(
+            job_db, admin_id, workspace_id=str(other["id"])
+        )
+        bound = client.__class__(client.app)
+        bound.headers["authorization"] = f"Bearer {bound_token}"
+        assert bound.get(f"{_TOOLS}/{_KEY}").status_code == 403
+        assert bound.post(f"{_TOOLS}/{_KEY}/validate").status_code == 403
+        assert (
+            bound.post(
+                f"{_TOOLS}/{_KEY}/versions",
+                json={
+                    "files": [{"path": "SKILL.md", "content": "# hijack\n"}],
+                    "new_tag": "v9.9.9",
+                    "message": "hijack",
+                },
+            ).status_code
+            == 403
+        )
+        # The repo is untouched.
+        assert _git(skill_home, "rev-parse", "HEAD") == _git(
+            skill_home, "rev-parse", "v1.0.0^{commit}"
+        )
+
+
+def test_skill_key_workspace_mismatch_is_refused(client_factory, job_db, skill_home) -> None:
+    """A bound token cannot reach a foreign workspace's skill through a key
+    whose workspace segment disagrees with the path scope (the key IS
+    <workspace>/<name>; a mismatched pair 404s like an unknown skill)."""
+    with client_factory(fresh=True) as client:
+        other = job_db.create_workspace(
+            "Other WS", default_workflow_key="other_ws_flow", workspace_id="other_ws_flow"
+        )
+        # Token bound to the OTHER workspace, calling the OTHER workspace's
+        # path scope but with THIS workspace's skill key: the key's own
+        # workspace segment wins — 404, not a cross-workspace read.
+        admin_id = str(job_db.get_user_credentials("admin")["id"])
+        token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id=str(other["id"]))
+        scoped = client.__class__(client.app)
+        scoped.headers["authorization"] = f"Bearer {token}"
+        mismatched = f"/api/studio-agent/tools/workspaces/other_ws_flow/skills/{_KEY}"
+        assert scoped.get(mismatched).status_code == 404
+        assert scoped.post(f"{mismatched}/validate").status_code == 404
+
+
+def test_unbound_token_requires_workspace_membership(client_factory, job_db, skill_home) -> None:
+    """#710 follow-up: an UNBOUND self-service token (origin 'user', the MCP
+    server's external-agent credential) falls back to a membership check —
+    the minter must be a member of the addressed workspace. A leaked unbound
+    token no longer reads or commit+tags every workspace's skill repos."""
+    with client_factory(fresh=True) as client:
+        member_id = client.post(
+            "/api/users",
+            json={"username": "ws_member", "password": "pw-member"},
+            headers={"x-agent-legion-request": "1"},
+        ).json()["id"]
+        job_db.upsert_workspace_member(_WS, member_id, "viewer")
+
+        # Minter IS a member → reads fine (unbound keeps membership-only
+        # semantics, not a blanket refusal).
+        member_token = scoped_tokens.mint_scoped_token(job_db, member_id)
+        member_scoped = client.__class__(client.app)
+        member_scoped.headers["authorization"] = f"Bearer {member_token}"
+        assert member_scoped.get(f"{_TOOLS}/{_KEY}").status_code == 200
+
+        # Minter is NOT a member of any workspace → 404 everywhere, and the
+        # write surface never fires (repo HEAD unchanged).
+        outsider_id = client.post(
+            "/api/users",
+            json={"username": "ws_outsider", "password": "pw-out"},
+            headers={"x-agent-legion-request": "1"},
+        ).json()["id"]
+        outsider_token = scoped_tokens.mint_scoped_token(job_db, outsider_id)
+        outsider = client.__class__(client.app)
+        outsider.headers["authorization"] = f"Bearer {outsider_token}"
+        assert outsider.get(f"{_TOOLS}/{_KEY}").status_code == 404
+        assert (
+            outsider.post(
+                f"{_TOOLS}/{_KEY}/versions",
+                json={
+                    "files": [{"path": "SKILL.md", "content": "# hijack\n"}],
+                    "new_tag": "v9.9.9",
+                    "message": "hijack",
+                },
+            ).status_code
+            == 404
+        )
+        assert _git(skill_home, "rev-parse", "HEAD") == _git(
+            skill_home, "rev-parse", "v1.0.0^{commit}"
+        )

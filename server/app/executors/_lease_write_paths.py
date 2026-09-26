@@ -13,12 +13,14 @@ from typing import TYPE_CHECKING, Any
 from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_claims import claim_lease
-from server.app.executors._lease_control import sync_job_status
-from server.app.executors._lease_lifecycle import (
-    expire_stale_leases,
-    finish_lease,
-    heartbeat_lease,
+from server.app.executors._lease_control import (
+    _ORPHAN_WS_LOCK_KEY,
+    lock_job_mutation_and_read_generation,
+    sync_job_status,
+    ws_lock_keys_by_job,
 )
+from server.app.executors._lease_expiry import expire_stale_leases
+from server.app.executors._lease_lifecycle import finish_lease, heartbeat_lease
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
@@ -29,15 +31,6 @@ from server.app.workflows.sharding import delete_shards
 
 if TYPE_CHECKING:
     from server.app.executors.leases import ExecutorLeaseRepository
-
-# Sort sentinel for items whose workspace lock key cannot be resolved (the
-# jobs row vanished before this batch's per-request lookup — the claim itself
-# then fails without any jobs DML). hashtext's int domain is signed 32-bit, so
-# -(2**31) is a real possible key value; the sentinel only needs a
-# deterministic position (first — finish_many's legacy fallback was the ""
-# text key, this module's was the request's own workspace_id) — these items
-# fire no counter trigger at all, so their position cannot ring.
-_ORPHAN_WS_LOCK_KEY = -(2**31)
 
 
 def try_claim(repo: ExecutorLeaseRepository, request: LeaseClaimRequest) -> ClaimedExecution | None:
@@ -55,28 +48,27 @@ def try_claim_many(
 ) -> list[ClaimedExecution | None]:
     """Claim a batch of nodes in one transaction; None entries on capacity loss.
 
-    Claims keep a stable (workspace hash, run_id, job_id) order shared with
-    ``finish_many``. v82 no longer relies on this order for counter safety —
-    trigger losers never wait — but retaining it keeps batch behavior
-    deterministic. Verdicts are reassembled in caller order.
+    Claims run in the single global job-mutation batch order shared with
+    ``finish_many`` / expire / recover / the agent sweep and the claim
+    batch's all-kinds order (EXEC-GENERATION-001, #759 phases 1c+7):
+    ``(hashtext('agent-ws:' || workspace_id)::int, job_id)`` — every claim
+    takes the ``job-mutation:<job_id>`` advisory xact lock, never released
+    before COMMIT, so one cross-batch order prevents AB-BA on that domain.
+    Since #645 review P2 the claim batch's code candidates join the same
+    order (they take no ``agent-ws:*`` lock and borrow the ws key purely as
+    a sort position), so no cross-batch pair walks the same two jobs in
+    different orders. Verdicts are reassembled in caller order.
     """
     with write_transaction(repo.path) as conn:
-        # Stable cross-batch order; not a counter-lock correctness boundary.
-        keyed: list[tuple[int, str, str, int, LeaseClaimRequest]] = []
-        for index, request in enumerate(requests):
-            job = conn.execute(
-                "select workspace_id, run_id, hashtext('ws:' || workspace_id)::int as ws_lock_key"
-                " from jobs where id = %s",
-                (request.job_id,),
-            ).fetchone()
-            ws_key = int(job["ws_lock_key"]) if job else _ORPHAN_WS_LOCK_KEY
-            run = str(job["run_id"] or "") if job else ""
-            keyed.append((ws_key, run, request.job_id, index, request))
-        keyed.sort(key=lambda entry: entry[:4])
-        by_index: dict[int, ClaimedExecution | None] = {}
-        for _ws_key, _run, _job_id, index, request in keyed:
-            by_index[index] = claim_lease(conn, request, repo.data_dir)
-        results = [by_index.get(index) for index in range(len(requests))]
+        # The ws lock key is server-side (hashtext), so resolve it for the
+        # batch's jobs in one query before sorting.
+        ws_keys = ws_lock_keys_by_job(conn, [request.job_id for request in requests])
+        results: list[ClaimedExecution | None] = [None] * len(requests)
+        for index, request in sorted(
+            enumerate(requests),
+            key=lambda e: (ws_keys.get(e[1].job_id, _ORPHAN_WS_LOCK_KEY), e[1].job_id, e[0]),
+        ):
+            results[index] = claim_lease(conn, request, repo.data_dir)
     _broadcast_committed(repo, [str(r.job_id) for r in results if r is not None])
     return results
 
@@ -104,7 +96,9 @@ def finish(
             "select job_id from executor_leases where id=%s", (lease_id,)
         ).fetchone()
         job_id = str(lease["job_id"]) if lease else None
-        result_flag = finish_lease(conn, lease_id, result, repo.data_dir)
+        verdict = finish_lease(conn, lease_id, result, repo.data_dir)
+        result_flag = verdict.applied
+        generation_stale = verdict.generation_stale
     # #521 result-stage split: the terminal-state write transaction is its
     # own segment; the events post-processing below (two full events.jsonl
     # scans today) is the next one — marked only when that work actually
@@ -118,8 +112,12 @@ def finish(
     # capture helper opens its own short write tx only for the persist.
     # The helper still expects a caller-provided connection (its own
     # migration is Task 3), so hand it a fresh one now that the commit
-    # has landed.
-    events_ran = result_flag and result.status in ("completed", "failed")
+    # has landed. A stale-generation finish (#759 review P2) settles the
+    # lease/history rows but the shared run_dir path may already belong
+    # to the NEW generation's run — token capture would misattribute and
+    # PI compression could truncate the new run's events.jsonl, so the
+    # events family is skipped on a stale verdict.
+    events_ran = result_flag and not generation_stale and result.status in ("completed", "failed")
     if events_ran:
         finish_events_post_processing(repo, lease_id, result)
         _mark_result_stage(stage_timer, "events")
@@ -176,16 +174,19 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
     now_str = database_timestamp(now)
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
-            "select j.id, j.workspace_id, hashtext('ws:' || j.workspace_id)::int as ws_lock_key"
-            " from jobs j where j.status='running' and not exists"
+            "select j.id, hashtext('agent-ws:' || j.workspace_id)::int as ws_lock_key from jobs j"
+            " where j.status='running' and not exists"
             " (select 1 from executor_leases l where l.job_id=j.id and l.status='active')"
         ).fetchall()
-        # Preserve deterministic recovery order; v82's try-fold triggers do
-        # not depend on this sort for deadlock safety.
+        # EXEC-GENERATION-001：每个恢复都会取 job-mutation advisory xact 锁
+        # （不随语句提前释放），全库批路径共用唯一序 (ws 锁键, job_id)——与
+        # agent claim 批的 agent 块（claim_batch_tx._lock_order_sorted）及
+        # finish_many/expire/sweep 相同，防批间 AB-BA。
         recovered = [
             job_id
             for job_id in (
-                str(row["id"]) for row in sorted(rows, key=lambda r: int(r["ws_lock_key"]))
+                str(row["id"])
+                for row in sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["id"])))
             )
             if _recover_orphaned_job(conn, job_id, now_str)
         ]
@@ -200,7 +201,15 @@ def _recover_orphaned_job(conn: DatabaseConnection, job_id: str, now_str: str) -
     re-evaluates it against the latest committed leases: a node claimed
     concurrently after the candidate SELECT is never reset to 'pending'
     (which would double-execute it while its lease stays active).
+
+    EXEC-GENERATION-001: under the job-mutation lock the reset is CAS-gated
+    on the node row's epoch stamp — a running row stamped by an older epoch
+    belongs to state a reset already superseded, so only the lease/run side
+    may settle, never the job_nodes flip.
     """
+    current_generation = lock_job_mutation_and_read_generation(conn, job_id)
+    if current_generation is None:
+        return False
     reset = conn.execute(
         """
         update job_nodes
@@ -211,13 +220,14 @@ def _recover_orphaned_job(conn: DatabaseConnection, job_id: str, now_str: str) -
             finished_at=null,
             created_at=current_timestamp
         where job_id=%s and status='running'
+          and execution_generation=%s
           and not exists (
               select 1 from executor_leases l
               where l.job_id = job_nodes.job_id and l.status='active'
           )
         returning node_key
         """,
-        (job_id,),
+        (job_id, current_generation),
     ).fetchall()
     if not reset:
         # A concurrently claimed lease blocks the reset; the sweeper retries

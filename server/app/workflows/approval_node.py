@@ -37,7 +37,11 @@ APPROVAL_VERDICTS = ("approved", "rework", "rejected")
 DEFAULT_FEEDBACK_ARTIFACT = "review_feedback.json"
 
 # Execution fields are meaningless on a node that never dispatches; reject
-# them at load time instead of letting them sit silently inert.
+# them at load time instead of letting them sit silently inert. ``outputs``
+# joins them (#759 自审): a gate declaring an output becomes an implicit
+# producer — after rework the gate goes stale, its consumers are blocked by
+# the implicit-producer barrier, but the gate re-parks only after they
+# complete: deadlock.
 _FORBIDDEN_APPROVAL_FIELDS = (
     "capability",
     "execution",
@@ -46,6 +50,7 @@ _FORBIDDEN_APPROVAL_FIELDS = (
     "config_schema",
     "skill",
     "tools",
+    "outputs",
 )
 
 _ALLOWED_CONFIG_KEYS = ("rework_target", "feedback_artifact")
@@ -66,6 +71,12 @@ def validate_non_start_fields(
 def validate_approval_fields(raw_node: dict[str, Any], node_key: str) -> None:
     """Enforce the approval-node field rules at definition load time."""
     for forbidden in _FORBIDDEN_APPROVAL_FIELDS:
+        if forbidden == "outputs":
+            # 只拦非空声明：序列化回环会显式带 outputs: []，空列表无生产者
+            # 语义（#759 自审的死锁场景需要真实产物名）。
+            if raw_node.get("outputs"):
+                raise WorkflowDefinitionError(f"Approval node {node_key} must not declare outputs")
+            continue
         if forbidden in raw_node:
             raise WorkflowDefinitionError(f"Approval node {node_key} must not declare {forbidden}")
     raw_config = raw_node.get("config") or {}
@@ -123,6 +134,13 @@ def strip_snapshot_placeholders(raw_node: dict[str, Any]) -> None:
     node drops the default ``accepted_item_types`` copy (start-only). For
     approval nodes the execution placeholder serializes as a dict of empty
     strings, so "empty" means every value falsy, not the container itself.
+
+    ``execution`` on an approval node is dropped even when non-empty: before
+    #680 the loader baked the workflow-level execution defaults into approval
+    nodes, so published snapshots carry provider/model values the gate never
+    reads. Stripping them here heals those revisions on read instead of
+    rejecting them (the mapping/yaml path still rejects a declared block —
+    this only runs on snapshots).
     """
     node_type = raw_node.get("type")
     if node_type == "start":
@@ -142,6 +160,8 @@ def strip_snapshot_placeholders(raw_node: dict[str, Any]) -> None:
     raw_node.pop("accepted_item_types", None)
     if node_type != APPROVAL_NODE_TYPE:
         return
+    # Baked execution defaults (pre-#680 snapshots) are dead data on a gate.
+    raw_node.pop("execution", None)
     # Same set as the forbidden declaration fields: strip the empty asdict
     # placeholders so a snapshot of an approval node reloads cleanly.
     for placeholder in _FORBIDDEN_APPROVAL_FIELDS:

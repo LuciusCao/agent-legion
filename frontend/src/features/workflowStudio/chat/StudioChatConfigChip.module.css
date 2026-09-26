@@ -1,0 +1,69 @@
+/* StudioChatConfigChip：composer 工具行的紧凑配置触发器与其下拉菜单。
+ * 芯片本体（.chip）是圆角胶囊；菜单（.menuPaper）对齐对话界面的圆角卡片语言。 */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  /* #733 R6-P2：可收缩 + 文本截断（chipText ellipsis），长模型名在窄面板
+   * 里缩 chip 而不是撑破工具行。 */
+  min-width: 0;
+  max-width: 160px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+  color: #424242;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip:disabled {
+  color: #9e9e9e;
+  cursor: default;
+}
+.chipText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 芯片下拉菜单：MUI Menu 经 portal 渲染到 body，样式由 paper class 携带；
+ * 全部覆盖规则提到 (0,3,0) 以上的优先级压过 MUI 默认（对齐 FilterControls
+ * 的 .filterMenu :global 模式）。视觉对齐对话界面：圆角纸面 + 紧凑 13px
+ * 菜单项，选中态用对话主色的浅底而非 MUI 默认灰。 */
+.menuPaper {
+  margin-top: 4px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+.menuPaper :global(.MuiList-root) {
+  padding: 4px;
+}
+.menuPaper :global(.MuiMenuItem-root) {
+  min-height: 0;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #424242;
+}
+.menuPaper :global(.MuiMenuItem-root:hover) {
+  background: #f5f5f5;
+}
+.menuPaper :global(.MuiMenuItem-root.Mui-selected) {
+  background: #e8f1fb;
+  color: #1565c0;
+  font-weight: 500;
+}
+.menuPaper :global(.MuiMenuItem-root.Mui-selected:hover) {
+  background: #dceaf8;
+}
+/* 分组标题（对应原生 select 的 optgroup）：禁用态仅作视觉降噪——覆盖
+ * Mui-disabled 的降透明度，保持小字灰显、不可点、无 hover。 */
+.menuPaper :global(.MuiMenuItem-root.Mui-disabled).menuHeader {
+  opacity: 1;
+  color: #9e9e9e;
+  font-size: 11px;
+  padding: 6px 10px 2px;
+  cursor: default;
+}

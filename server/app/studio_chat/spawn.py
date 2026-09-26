@@ -95,6 +95,14 @@ def spawn_session_runtime(
             resume_acp_session_id=resume_acp_session_id,
         )
         runtime = SessionRuntime(handle, token)
+        # #694: arm the replay-suppression window only when this spawn will
+        # actually attempt session/load — kimi replays the loaded history as
+        # fresh-looking chunks, and those messages are already on the
+        # persisted timeline. The window stays open until the first
+        # post-resume prompt (send_message closes it), not on_ready: the ACP
+        # SDK dispatches the replay notifications asynchronously, so an
+        # on_ready boundary would race them.
+        runtime.loading = resume_acp_session_id is not None
         # Pin the runtime identity on the callbacks BEFORE start: the ACP
         # thread's death-echo on_exit may only tear down this runtime, never
         # a newer one resume registered for the same session_id (ABA).

@@ -505,7 +505,7 @@ describe('JobActionBar', () => {
     await act(async () => {
       screen.getByText('升级 1 个任务').click()
     })
-    expect(onUpgradeWorkflow).toHaveBeenCalledWith(['j1'])
+    expect(onUpgradeWorkflow).toHaveBeenCalledWith(['j1'], 'clean')
   })
 })
 
@@ -566,8 +566,9 @@ describe('JobActionBar in allMatching selection mode', () => {
     await act(async () => {
       screen.getByText('确认升级').click()
     })
-    // 不带 jobIds：store 在 allMatching 模式下经 selection filter 服务端解析。
-    expect(onUpgradeWorkflow).toHaveBeenCalledWith()
+    // 不带 jobIds：store 在 allMatching 模式下经 selection filter 服务端解析；
+    // mode 由对话框的模式单选提供（默认 clean）。
+    expect(onUpgradeWorkflow).toHaveBeenCalledWith(undefined, 'clean')
   })
 
   it('opens the all-matching rerun dialog and confirms full scope', async () => {

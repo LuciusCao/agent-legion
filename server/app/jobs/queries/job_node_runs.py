@@ -27,6 +27,7 @@ class JobNodeRunQueriesMixin(JobNodeLifecycleQueriesMixin):
         session_dir: str = "",
         skill_version: str = "",
         skill: str = "",
+        agent_definition_hash: str = "",
     ) -> dict[str, Any] | None:
         command_json = json.dumps(list(command))
         with self.connect() as conn:
@@ -62,9 +63,9 @@ class JobNodeRunQueriesMixin(JobNodeLifecycleQueriesMixin):
                 """
                 insert into node_runs(
                   job_id, node_key, status, command_json, log_path, run_dir, session_dir,
-                  skill_version, skill
+                  skill_version, skill, agent_definition_hash
                 )
-                values (%s, %s, 'running', %s, %s, %s, %s, %s, %s)
+                values (%s, %s, 'running', %s, %s, %s, %s, %s, %s, %s)
                 returning *
                 """,
                 (
@@ -76,6 +77,10 @@ class JobNodeRunQueriesMixin(JobNodeLifecycleQueriesMixin):
                     session_dir,
                     skill_version,
                     skill,
+                    # Implementation identity (schema v85, #645): optional so
+                    # existing callers (test seeding, service paths) stay
+                    # unchanged; '' = unprovable to the inherit upgrade.
+                    agent_definition_hash,
                 ),
             )
             row = cursor.fetchone()

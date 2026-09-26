@@ -26,11 +26,32 @@ export type AgentDefinitionDraftView = {
   capability: string | null
   runtime: string | null
   skill: string | null
+  /** 来源 tool call 的状态（#692 R2 P2-1）：pending/failed 的保存不保证
+   * 草稿落库成功，发布入口只对 completed 开放——否则失败的工具调用
+   * 也能发布出更早的旧草稿，用户误以为新定义已生效。 */
+  status: string
+  /** 保存响应返回的草稿身份（#692 codex P1 第三轮）：实体是 workspace
+   * 级状态，本会话的「最新」可能已被其他会话覆盖——发布前必须按它
+   * 与服务端当前草稿 hash 比对，不一致拦截。解析自 rawOutput 的响应
+   * 体（definition_hash 字段）。 */
+  draftHash: string | null
+  /** 保存的 HTTP 层失败（R5 P2-1）：MCP ToolClient 对非 2xx 不抛异常、
+   * 返回 "HTTP 4xx: …" / "request failed: …" 文本（tool_client.py:67-75），
+   * 协议层 tool call 仍 completed——仅看 status 挡不住这类卡，发布会
+   * 静默发出服务端的旧草稿（saveFailed 卡也无 draftHash，双重跳过
+   * 核对与残窗警告）。 */
+  saveFailed: boolean
 }
 
 export type NodeCodeDraftView = {
   toolCallId: string
   nodeKey: string
+  /** 同 AgentDefinitionDraftView.status。 */
+  status: string
+  /** 同 AgentDefinitionDraftView.draftHash（code_hash 字段）。 */
+  draftHash: string | null
+  /** 同 AgentDefinitionDraftView.saveFailed。 */
+  saveFailed: boolean
 }
 
 export type PermissionView = {
@@ -41,13 +62,13 @@ export type PermissionView = {
   decisionText: string | null
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null
 }
 
-function asText(value: unknown): string {
+export function asText(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
@@ -215,6 +236,49 @@ function compareMetaText(outputText: string): string | null {
   return parts.length > 0 ? parts.join(' · ') : '定义级变更'
 }
 
+/** #692 codex P1（第二轮）：按实体去重——同一实体的多次保存只保留
+ * 最新一张卡。发布请求只携带实体 ID，服务端发布的是当前服务端草稿
+ * （最新那份），旧卡的发布按钮实际会无提示地发布另一份（更新的）草
+ * 稿；保留旧卡也让用户以为能按卡发布历史内容。输入 calls 按 seq 有
+ * 序（groupToolCalls 保序），同一实体后出现的保存即更新的一份；唯一
+ * 不保证的边界是同一 tool block 内并发发起同实体两次保存（后启动 ≠
+ * 后落库，服务端 last-write-wins）。被去重的旧保存仍以 tool call 通用
+ * 卡留在转录里（可展开 rawInput/output 查看）——丢的只是发布/查看
+ * 入口，不是历史记录。 */
+function keepLatestPerEntity<T>(drafts: T[], keyOf: (draft: T) => string): T[] {
+  const latest = new Map<string, T>()
+  for (const draft of drafts) {
+    latest.set(keyOf(draft), draft)
+  }
+  return [...latest.values()]
+}
+
+/** 保存响应体里的草稿身份 hash（#692 codex P1 第三轮）。save_*_draft
+ * 工具的 HTTP 响应带 definition_hash / code_hash，MCP 把响应体文本放进
+ * rawOutput 的 text block——与 extractWorkflowDraft 解析 outputText 同一
+ * 先例。解析不到返回 null（旧转录/非 JSON 响应），调用方按「无法核对
+ * 身份」处理。 */
+function draftHashFromOutput(
+  call: ToolCallView,
+  hashKey: 'definition_hash' | 'code_hash'
+): string | null {
+  const parsed = parseFirstJson(call.outputText)
+  const value = parsed?.[hashKey]
+  return typeof value === 'string' && value ? value : null
+}
+
+/** 保存的 HTTP 层失败（R5 P2-1）：ToolClient 对非 2xx/网络错误返回
+ * 固定前缀的文本（"HTTP 4xx: …" / "request failed: …"）而不抛异常，
+ * tool call 在协议层仍 completed。成功响应恒为 2xx JSON 文本，这两种
+ * 前缀只出现在失败上（前缀判断在前，失败文本里的 JSON detail 不会
+ * 被误当成功体解析）。 */
+function saveFailedFromOutput(call: ToolCallView): boolean {
+  return (
+    call.outputText.startsWith('HTTP ') ||
+    call.outputText.startsWith('request failed: ')
+  )
+}
+
 export function extractAgentDefinitionDrafts(
   calls: ToolCallView[]
 ): AgentDefinitionDraftView[] {
@@ -229,9 +293,12 @@ export function extractAgentDefinitionDrafts(
       capability: asText(call.rawInput?.capability) || null,
       runtime: asText(call.rawInput?.runtime) || null,
       skill: asText(call.rawInput?.skill) || null,
+      status: call.status,
+      draftHash: draftHashFromOutput(call, 'definition_hash'),
+      saveFailed: saveFailedFromOutput(call),
     })
   }
-  return drafts
+  return keepLatestPerEntity(drafts, (draft) => draft.agentId)
 }
 
 export function extractNodeCodeDrafts(
@@ -242,9 +309,15 @@ export function extractNodeCodeDrafts(
     if (!toolNameMatches(call, 'save_node_code_draft')) continue
     const nodeKey = asText(call.rawInput?.node_key)
     if (!nodeKey) continue
-    drafts.push({ toolCallId: call.toolCallId, nodeKey })
+    drafts.push({
+      toolCallId: call.toolCallId,
+      nodeKey,
+      status: call.status,
+      draftHash: draftHashFromOutput(call, 'code_hash'),
+      saveFailed: saveFailedFromOutput(call),
+    })
   }
-  return drafts
+  return keepLatestPerEntity(drafts, (draft) => draft.nodeKey)
 }
 
 /** 待应答的权限请求：pending 消息存在且没有同 request_id 的 resolved 消息。 */
@@ -330,10 +403,22 @@ export function textContent(message: ChatMessage): string {
 }
 
 // prettier-ignore
-export const TERMINAL = new Set(['turn_end', 'error', 'session_closed', 'session_resumed'])
+export const TERMINAL = new Set(['turn_end', 'turn_timeout', 'error', 'session_closed', 'session_resumed'])
+
+/** 最近一轮的终结事件（turn_end/turn_timeout/error/…，无则 null）：RunBar
+ * 用它区分「已完成」与「已超时终止」（#693）。 */
+export function lastTerminalEvent(messages: ChatMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i]
+    if (m.kind !== 'status') continue
+    const { event } = statusEvent(m)
+    if (TERMINAL.has(event)) return event
+  }
+  return null
+}
 
 /** 仍在流式聚合的 agent text 消息 id：从尾部扫描，先撞到 turn 终止事件
- * （turn_end/error/session_closed/session_resumed）则全部完成返回 null，先撞到 agent
+ * （TERMINAL：turn_end/turn_timeout/error/…）则全部完成返回 null，先撞到 agent
  * text 则该条仍在流式。 */
 export function streamingTextId(messages: ChatMessage[]): string | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {

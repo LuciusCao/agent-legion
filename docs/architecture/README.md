@@ -49,6 +49,7 @@ data/  (videos, logs, packages, jobs, run traces)
 | 项目结构 | [project-structure.md](project-structure.md) | 完整目录树 |
 | velites harness | [velites-harness.md](velites-harness.md) | 自研 Rust agent harness（velites 执行内核）设计 |
 | 证据矩阵 | [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md) | 架构承诺的反向审计证据矩阵（与 `config/architecture/` invariant registry 对齐） |
+| 执行代次协议 | [execution-generation.md](execution-generation.md) | EXEC-GENERATION-001 执行代次协议（#759/#645）：代次列与 bump/CAS 面、锁序与批序全序、三平面一致性与并发对抗审查 checklist |
 | 节点 SDK / Worker 执行 | [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md) | 节点 SDK（NodeContext）与 code 节点执行迁移 Worker 的合并设计（Issue #30/#82） |
 | 材料与 runs | [materials-and-runs-design.md](materials-and-runs-design.md) | runs / 材料 / bundle 文件夹条目 / 产物对象存储的输入模型与治理设计 |
 | velites 模型注册 | [velites-model-registry.md](velites-model-registry.md) | runtime-owned 模型发现与 velites provider registry（Worker 侧发现、Host 侧三元组路由） |

@@ -23,10 +23,12 @@ import {
 } from './studioChatEvents'
 import {
   deriveChatViews,
+  lastTerminalEvent,
   maxSeq,
   upsertMessage,
   type ChatMessage,
 } from './studioChatMessages'
+import { lastRunCancelled } from './studioChatCancelVisibility'
 import { mergeMessages } from './studioChatRefill'
 import { useStudioChatResume } from './useStudioChatResume'
 import {
@@ -248,6 +250,12 @@ export function useStudioChat(workspaceId: string | undefined) {
 
   const { toolCalls, workflowDraft, agentDrafts, nodeDrafts, permissions } =
     useMemo(() => deriveChatViews(messages), [messages])
+  // #675：取消轮收尾视图在姊妹文件（studioChatCancelVisibility），与
+  // deriveChatViews 的派生链分开 memo——它只被 RunBar 消费。
+  const runCancelled = useMemo(() => lastRunCancelled(messages), [messages])
+
+  // #693：最近一轮的终结类型——RunBar 据此区分「已完成」与「已超时终止」。
+  const terminalEvent = useMemo(() => lastTerminalEvent(messages), [messages])
 
   // 「继续对话」：closed/error 会话重建 runtime（转录/session load 由后端决定）。
   // 响应归属守卫（refillMessages 的 activeSessionIdRef 同款模式）：resume 在途
@@ -302,6 +310,8 @@ export function useStudioChat(workspaceId: string | undefined) {
     starting,
     actionError,
     lastRunMs: runTiming.lastMs,
+    lastTerminalEvent: terminalEvent,
+    lastRunCancelled: runCancelled,
     resume,
     resuming,
     selectSession: setActiveSessionId,

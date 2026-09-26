@@ -165,6 +165,22 @@ class TestValidateSeed:
         problems = code_violations(code)
         assert any("size limit" in problem for problem in problems)
 
+    def test_elevated_budget_admits_heavy_code(self):
+        """#628: the platform ceiling is instance-configurable
+        (AGENT_LEGION_NODE_CODE_MAX_BYTES); the seed tool must accept what a
+        raised instance already published — 64KB<code<=128KB fails the
+        default but passes the elevated budget, in code_violations and
+        validate_seed alike."""
+        code = "def run(ctx):\n    return '" + "x" * (100 * 1024) + "'\n"
+        assert any("size limit" in problem for problem in code_violations(code))
+        assert code_violations(code, max_code_bytes=128 * 1024) == []
+
+        seed = make_seed()
+        seed["node_codes"][0]["code"] = code
+        seed["node_codes"][0]["code_sha256"] = sha256_text(code)
+        assert any("size limit" in problem for problem in validate_seed(seed))
+        assert validate_seed(seed, max_code_bytes=128 * 1024) == []
+
     def test_extra_lock_keys_are_accepted(self):
         """#322: no source registry to cross-check against — lock entries are
         validated on shape (40-hex commits) only."""

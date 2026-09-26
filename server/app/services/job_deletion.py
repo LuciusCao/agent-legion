@@ -97,7 +97,7 @@ class JobDeletionService:
         if job is None:
             _fail(job_id, "not_found", "Job not found")
         if job["workspace_id"] != workspace_id:
-            _fail(job_id, "wrong_workspace", f"Job does not belong to workspace {workspace_id}")
+            _fail(job_id, "not_found", "Job not found")
         if self.lease_repo.has_active_for_job(job_id, self._now()):
             _fail(job_id, "active_lease", "Cannot delete a job with an active executor lease")
 

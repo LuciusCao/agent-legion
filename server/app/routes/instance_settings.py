@@ -30,7 +30,12 @@ def create_instance_settings_router(job_queries, settings: Settings) -> APIRoute
     def get_instance_settings(
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> InstanceSettingsResponse:
-        return InstanceSettingsResponse.model_validate(effective_instance_document(store.get()))
+        # #786: the loaded (env-applied) runtime is the default source, so a
+        # legacy document without node_code_max_bytes shows the env value the
+        # instance actually runs with (instance setting > env > 64KB).
+        return InstanceSettingsResponse.model_validate(
+            effective_instance_document(store.get(), settings.executor_runtime)
+        )
 
     @router.put(
         "/admin/instance-settings",

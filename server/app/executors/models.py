@@ -67,6 +67,28 @@ class ExecutionResult:
     # Shard executions return their per-shard output payload here; the lease
     # finish path persists it into node_shards.output_json for reduce fan-in.
     output_json: str = ""
+    # #759 review P1-1: (target, source) absolute-path file moves the finish
+    # transaction promotes into place ONLY when the lease still owns the
+    # current generation — the Worker result archive is unpacked into a
+    # staging dir first, so a stale (post-reset) completion can neither
+    # overwrite the new generation's job_dir inputs nor plant its events
+    # log. Empty for every caller outside the Worker completion path.
+    staged_file_moves: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class FinishVerdict:
+    """finish_lease 的判定结果（#759 review P2）。
+
+    ``applied``：lease 仍是 active 且收尾已提交（沿用旧 bool 返回值语义）。
+    ``generation_stale``：本次是 reset 后的迟到 finish——job_nodes 翻转与
+    staged 文件提升已被跳过，调用方（两条 finish 路径的 events 后处理）
+    必须据此跳过 token capture / PI compression：run_dir 路径跨代次复用，
+    旧代次 run 解析到的 events.jsonl 可能属于新代次的 run（错归属 + 截断）。
+    """
+
+    applied: bool
+    generation_stale: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,6 +113,19 @@ class LeaseClaimRequest:
     # Non-secret resolved node config at dispatch (CONFIG-RUNTIME-MUTABLE-001
     # audit); persisted onto the node_runs row created by the claim.
     config_snapshot_json: str = ""
+    # Implementation identity at dispatch (schema v85, #645): sha256 of the
+    # node_code text the claim will execute ('' when the code is unavailable
+    # — fail_node_config intercepts that earlier, so '' is an unprovable
+    # corner, never a silent mismatch). Same column and caliber as
+    # agent_execution_requests.agent_definition_hash, mirrored onto the
+    # node_runs row so the inherit upgrade can prove local-pool executions.
+    agent_definition_hash: str = ""
+    # Expected jobs.execution_generation at claim time (EXEC-GENERATION-001):
+    # the claim transaction CAS-checks it against the jobs row under the
+    # job-mutation advisory lock and refuses the claim on mismatch
+    # (fail-closed). Production constructors must pass the real epoch read at
+    # evaluation time; 0 only matches jobs that were never reset.
+    execution_generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -101,6 +136,11 @@ class ConfigurationFailureRequest:
     node_key: str
     capability: str
     log_path: str
+    # Expected jobs.execution_generation at evaluation time
+    # (EXEC-GENERATION-001): the record transaction CAS-checks it under the
+    # job-mutation advisory lock and skips the fail on mismatch — the node
+    # stays pending for the next pass to re-evaluate against the new epoch.
+    execution_generation: int = 0
 
 
 @dataclass(frozen=True)

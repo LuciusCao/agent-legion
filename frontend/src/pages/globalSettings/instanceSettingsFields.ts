@@ -90,6 +90,15 @@ export const FIELD_GROUPS: FieldGroup[] = [
         integer: true,
         allowZero: true,
       },
+      // #786：节点代码体积上限纳入实例设置（#628 的 env-only 决策改判）；
+      // 单位为字节（与契约一致），编辑器侧按 KB 展示同一值。min 与 PUT
+      // 契约的 ge=1024 对齐，客户端先拦截，避免落到无指向性的 422。
+      {
+        path: 'workflows.node_code_max_bytes',
+        label: '节点代码体积上限（字节）',
+        integer: true,
+        min: 1024,
+      },
       {
         path: 'code_capacity',
         label: '本地执行并发上限（0 = 纯远程模式）',

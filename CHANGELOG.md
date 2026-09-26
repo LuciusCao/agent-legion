@@ -1,1550 +1,411 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
-adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
+All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
+
+## [0.7.13] - 2026-09-26
+
+主打 workflow 升级继承模式与执行代次/产物提交统一协议（issue #759 四层 stack）；安全面收口 job-id 路由跨 workspace IDOR（issue #710）及其红队 follow-up；Studio 交互线（聊天区草稿卡重做、对话骨架统一与超时误报修复、取消轮可见性、定制预览同屏验证）与运行时防护（velites 读取硬上限、worker terminate 收尾兜底、SIGPIPE 免疫）。
+
+### Added
+- 节点代码体积上限开放为实例级配置（issue #628，#786 起 admin 实例设置可管理）：自定义节点代码的 64KB 硬编码上限改为 `executor_runtime.workflows.node_code_max_bytes`（admin 全局设置「运行与本地执行」组直接管理，解析链 实例设置 > env `AGENT_LEGION_NODE_CODE_MAX_BYTES` > 默认 64KB、`ge=1024`、启动时生效，非法值在 PUT 契约层 422 / env 在加载时 fail-fast）；Studio 与 studio-agent 两条保存/发布校验链路统一从 settings 取值，错误信息携带当前上限；节点代码读取响应新增只读字段 `max_code_bytes`，前端编辑器同步展示「代码体积上限 N KB（实例配置）」；设计文档补「体积预算与配置」一节（调大的代价：DB 文本膨胀、claim bundle 传输变大、code review 可读性下降，仍建议按节点粒度自律）。
+- workflow 升级的继承模式（issue #645）：`POST /jobs/{job_id}/upgrade-workflow` 与批量版新增 `mode` 参数（`clean` = 既有全量重跑（默认）；`inherit` = 继承未变节点的既有产物、只重跑变更子图）。per-node diff 按「节点定义归一化哈希（label 等纯展示字段排除）+ 冻结 config 段（新旧定义两侧 re-freeze 同基比较）+ 上游节点哈希链式传播 + 入边（含 when 条件）」计算；`skill: latest`（HEAD 漂移永不入锁）、分片节点、审批门节点一律不参与继承，未变节点的产物已被淘汰或对象缺失时退化重跑该子图（宁可多跑）。响应携带 `mode` / `kept_nodes` / `rerun_nodes` 统计；前端升级确认对话框提供模式单选。
+- 执行代次与产物提交统一协议（issue #759，stack #773/#774/#775/#778，继承模式的执行面底座）：`jobs.execution_generation` 代次 + job-mutation 统一锁域，enqueue/claim/finish/fail/审批/清扫全部重置入口走代次 CAS——迟到结果与重跑/重排不再互相覆盖；本地 code 输出、direct remote refs、legacy Worker 归档三种结果来源统一进同一条 commit 管线（stage → 备份权威副本 → 代次门 → promote → 清单提交 → 失败回滚），产物字节写面收口到共享 promotion primitive；产物消费关系以 `artifact_consumption_index` 为唯一事实源（node inputs ∪ `edge.condition.artifact`），条件生产者有屏障保证。复审跟进（#778）：hydration 代次读裁剪、恢复面按本轮节点状态收窄、分片有效状态、解包失败纳入 lease 临界区。
+- 外部服务按 workspace 读取任务产出物（issue #631）：三个 workspace 前缀只读端点组成「外部提交 → 轮询状态 → 取回产物」闭环的读取端——`GET /api/workspaces/{workspace_id}/jobs/{job_id}`（轻量状态 + 产物名单）、`GET .../jobs/{job_id}/artifacts`（产物清单：名字、object/local 存储形态、大小、content_hash、uploaded_at、媒体类型）、`GET .../jobs/{job_id}/artifacts/{artifact_name}/raw`（流式下载，支持对象存储权威副本、Range 与 #338 gzip 透传，复用既有 raw 端点的媒体类型白名单）。跨 workspace 的 job_id 一律 404（归属校验兼作存在性校验，防枚举）；未完成 job 的清单返回空数组 + status（稳定轮询语义）；对象存储未配置时清单降级为本地名并带 `object_storage_enabled: false` 标记。鉴权走 job_group 既有`require_workspace_access`（Bearer 免 CSRF），#626 的 workspace APItoken 合入后可直接调用；最小调用示例见docs/remote-execution-runbook.md §9。
+- Workspace API token：外部系统免登录提交通道（issue #626，schema v83 `workspace_api_tokens`）。admin 在 workspace 设置（Agent 与 Worker 区）签发绑定单一 workspace 的 machine-to-machine 凭据（`{token_id}.{secret}`，sha256 落库、明文仅返回一次，支持 `ttl_hours` 过期与软吊销），外部 CMS/表单/定时任务/其他 agent 凭 `Authorization: Bearer` 直调 `POST /api/workspaces/{id}/runs` 提交条目并只读查询 run/job 状态，免 CSRF、无需登录。爆炸半径锁死：专用 guard `require_workspace_api_intake` 只在 runs 路由放行 api scope（studio-agent scope 仍 403），admin 面与其余全部 effecting 端点对 api scope 一律拒绝；跨 workspace 访问 404；提交审计记录 token_id（结构化日志，不冒充用户）；列表展示 `last_used_at` 使用水位（分钟级节流）。使用示例见 `docs/workspace-api-tokens.md`。初版不含 per-token速率限制/配额（后续项）。
+
+### Security
+- job-id 路由的跨 workspace IDOR（issue #710，红队发现的 skill 目录读面同修）：若干以 job_id 定位资源的路由守卫只校验调用者的 workspace 成员身份、不校验 job 归属——拿到其他 workspace 的 job_id 即可越权读取与操作。守卫改为按 job 归属反查授权域，跨 workspace 一律 404（归属校验兼作存在性校验，防枚举）；同一红队轮发现的 skill 目录读面一并收窄。follow-up（#753）收口三条 P3：workspace 存在性 oracle 消形、兄弟端点空 workspace 行为对齐、错误路径回显收敛。
+
+### Changed
+- Studio 聊天区草稿卡重做（issue #692）：workflow / 运行配置 / 草稿预览三类草稿卡统一视觉语言与发布入口，MUI 线性图标区分卡片类型，发布动作收敛为同一评审对话框链路。
+- Studio 对话输入区收编（#750）：会话菜单对齐卡片风格，上下文用量圆环与状态行收进输入卡片，对话区信息层级收敛。
+
+### Fixed
+- Studio 会话超时误显示完成 + 压缩窗口防护与对话骨架统一（issue #693/#694/#695，#698 与其 0.7.13 线收尾 #733）：超时轮不再被定妆为「已完成」；压缩窗口边界防护与容量透传修复长会话压缩截断；对话骨架（空态/加载/错误）三处统一。
+- approval 节点不再烘焙顶层 execution 默认（#680）：发布时把 workflow 顶层 execution 默认值烘进 approval 节点定义，导致发布后 active 读取 500；approval 节点不参与 execution 解析链，定义保持不烘焙。
+- worker `terminate()` 的 killpg 异常炸穿执行线程（issue #640）：`os.killpg` 对已退出/换组进程组的 EPERM/ESRCH 是 POSIX 边缘语义，原实现只 suppress `ProcessLookupError`，`PermissionError` 沿 `wait_for_exit` → `run_execution` 炸穿并级联拖垮 executor（生产事故：executor 崩溃 → supervisor 换代 → relay 停拍 → 租约批量过期）。收尾路径的任何 OSError 现按「进程组已不可达」处理 + 日志，`proc.wait` 侧同补防御（ECHILD reap 竞态），「never raises」契约真正成立；正常路径时序零变化。
+- Worker result 上报的 409 收尾风暴（issue #644，满格完成波后 CPU 倒挂锁死不自愈）：`_report` 的瞬时失败重试循环只认「传输层异常」，心跳面已判死（beat 409/lost verdict）的租约仍会按退避节奏无限重发 result——叠加退避窗口期的恢复路径错误地按 execution_id 单键重新注册心跳 entry（抹掉已触发的 lost 判定并把死租约重新塞回每一拍，还会践踏重排后新attempt 的 entry），形成同一 execution 的 result/心跳 409 连打风暴，load 顶高后回压钳死 claim。修复：上传任务与心跳 entry 共享`ownership_lost` 事件，退避每轮检查，判死即终态放弃上报；退避期恢复改为 pair-matched 的 resume（不覆盖、不复活已判死 entry）；409/判死后的收尾删除 marker 并经 #564 归属标记判定目录（证不了归属的留给 stalesweeper），重启不再重投 moot 结果。204/可重试 5xx 的正常投递路径行为不变。复审补丁：上传侧初次 arm 心跳改用非覆盖式`register_upload`（原 `_deliver_bulk` 的覆盖式 register 会删掉重claim 后新 attempt 的 entry，旧 attempt 的 pair-matched prune 再删掉自己的——该 execution 从此无心跳、新租约静默过期丢结果，与退避路径同族）；两处 registry 模式用例原先未把 registry 接线进 queue（`_deliver_bulk` 用 queue 的 None 覆盖了 task 上的预置），实际测的是legacy 单拍路径，已改为经 `heartbeat_registry` 构造参数接线。
+- MCP 工具名清单与注册面脱节（issue #678）：`server/app/studio_chat/prompts.py` 的手写工具名 frozenset 与 `create_mcp_server` 注册的工具集脱节（12 个工具未收录），`looks_like_agent_legion_tool_call` 不识别这些工具调用，权限自动批准失效退回人工确认。根治：清单收敛为`server/app/mcp_server/tool_names.py` 的唯一权威常量（34 个工具按注册点分组），prompts 改 import 该常量（依赖方向 studio_chat → mcp_server 单向）；契约测试钉住 FastMCP 实际注册集合 == 权威常量 == prompts 侧引用三边全等，防止再次手工漂移。
+- 单个 velites 进程无界内存分配引爆整机内存（issue #637）：`bash` 工具的 stdout/stderr 捕获此前无上限累积进内存（展示层的 50KB 截断发生在读取之后，挡不住读取本身），失控命令可在数秒内把堆拉到远超物理内存、触发系统内存清场。现每条 pipe 的内存缓冲以 4 MiB 为硬上限（与 ACPterminal 侧输出上限同值）：保留头部、后续字节只计数不保留、读取循环持续排空到 EOF（避免管道背压挂死子进程）；`output_bytes` 统计口径不变（仍为完整 stdout+stderr 字节数），触顶时输出明确通知（尾部已丢弃、无完整输出临时文件）并指引改用输出重定向 + 分段读取。`read` /`json` 工具的整文件读入同样在读前按文件大小（4 MiB）检查，超限直接报错并提示分段读取替代方案。OpenAI 兼容 provider 的流式响应聚合缓冲增加防御上限（该路径不发送 max_tokens，客户端上限是失控流的唯一防线；Anthropic 路径已受 max_tokens 约束，维持不变）：单个字段（text/thinking/tool_call id/name/arguments）32 MiB，且单次补全的聚合总量同样封顶 32 MiB——只限单字段时，一个异常流仍可在上限内合法堆出上千个 tool call（每字段不超限、整体数十 GiB），总量上限封死该复合风暴面；SSE 行缓冲（无换行的超长行，解析前字节直存）另设 2 MiB 单行上限。
+- Studio 技能查看文件列表核心文件置顶（issue #676）：「查看技能」的文件树中 `SKILL.md`（指令本体）与 `contract.yaml`（机器可读契约）原本按 localeCompare 混排，典型布局下垫在 `references/`、`scripts/`等子目录之后、排在列表最底部。渲染层排序改为显式优先级表`SKILL_CORE_FILE_ORDER`（`skillFileTree.ts`，新增核心文件类型只需追加表项）：根目录下两文件固定置顶且 `SKILL.md` 在前、排在子目录之前；其余文件与目录保持既有 localeCompare 排序，子目录内同名文件不参与置顶（核心文件总在 skill 根）。
+- 「定制预览」对话框遮挡左栏且锁滚动，草稿预览无法人工验证（issue #615）：预览渲染目标只在对话框外的左栏，而 MUI 模态对话框锁死底层滚动并遮挡左栏——草稿渲染问题出现在面板首屏以下时，用户只能「关对话框 → 滚动查看 → 再开对话框继续对话」，编排循环被打断。修复（方案 1，同屏验证）：对话框内嵌草稿预览区（CustomizePreviewPane复用 PreviewPanelHost 的沙箱/CSP iframe 渲染，不复制安全配置），对话框加宽为「聊天 | 预览」双栏（窄屏堆叠），预览区自身可滚动；授权后左栏仍同步渲染草稿（全宽效果的第二通道，非唯一验证渠道）。安全约束不变（#347 P1 / #500）：草稿仍不自动执行、预览仍需显式点「预览此草稿」、重开对话框/草稿内容变化/切 job/workspace 均使逐次授权失效、发布/归档仍为人工动作；重挂指纹（codex P2）提取为bundleKey 供左栏与内嵌预览共用。
+- Studio 取消轮收尾可见性（issue #675）：前台子代理（Agent/AgentSwarm）被 session/cancel 中断后，kimi CLI 内部继续跑完但前台收不到结果——根因在 CLI harness 层（cancel 后无 orphaning→受管后台任务机制，协议层 SHOULD 语义不强制），Host 侧无法代为投递。仓库侧落地取消轮的真实状态呈现：RunBar 对 stopReason=cancelled 的 turn_end 显示「已取消 · 已运行 Xs，agent 未收尾的工作可继续追问结果」（不再伪装成「已完成」也不静默）；cancel_requested 状态行明确「等待 agent收尾」；新增 lastRunCancelled/stopReason 派生视图（尾部最近终止状态定夺）。三处 RunBar 消费方（Studio 面板/诊断面板/预览定制弹窗）一并接入。
+- 重跑产物清理与重跑竞态（PR #683 codex review）：rerun/run-to/rework 提交后、对象存储清理执行前 job 已可重新调度，新 attempt 的`promote_all` 可在清理的清单快照读取与对象删除之间完成——同一稳定权威键被按旧快照盲删，新清单行立即指向不存在的对象。改为逐对象删除前按当前清单重验（`rerun_artifact_cleanup`）：键已复现即新attempt 的权威副本，跳过删除；毫秒级残余窗口仍由删除后二次检查告警兜底。
+- Studio 共享材料传播确认低估影响范围（PR #683 codex review）：后端按 skill 粒度传播——`sources` 只筛选哪些 skill 运行，每个 skill 在同一次 commit + tag 里同步它映射的整个共享材料集合，确认文案却只提当前路径。确认对话框现在列出将被同步的全部文件（含映射到同批skill 的其他共享材料，数据从现有 map 视图推导，无后端改动）。
+- Studio DAG 重复点击遗留镜头定位来源标记（PR #683 codex review）：外部选中并完成定位后再次点击画布中的同一节点会写入`clickOriginRef`，但选中 key 未变、effect 提前返回，标记不被消费而残留——之后聊天 diff 对同一节点递增 `selectionNonce` 请求重新定位时被误判为画布点击，镜头不再移动。改为仅在选中确实翻转时写入来源标记（重复点击同节点不写）。
+- Studio 会话内 agent 可执行服务重启命令把生产服务停死（issue #629）：事故是 agent 在聊天 terminal 里跑 `make prod-down && make prod-up`，会话中途断线后 down 已执行而 up 未执行，生产后端停摆需人工拉起。双防线落地（原则：agent 可做一切可逆操作，凡打断后不可自恢复的操作留在人手里）：（1）terminal/create 的平台级硬防线——`server/app/studio_chat/terminal_guard.py` 对服务生命周期命令（make prod-up/prod-down/stack-*/dev-* 启停 target、native-prod-up/down.sh、kill/pkill/killall、launchctl/systemctl、shutdown/reboot、docker compose down/stop/restart、brew servicesstop/restart）在 spawn 前拒绝，与审批链分层：人类批准也绕不过（批准面即被杀的 Studio 本身）；匹配是命令级而非子串级（shell段切分 + wrapper/嵌套 shell/eval/command substitution 递归识别真命令），`echo "prod-down"` / `grep prod-down Makefile` 照常执行；拒绝经 acp SDK 变成 terminal/create 的 JSON-RPC error，agent 的Bash 工具收到明确失败与人工入口指引，会话不受影响。（2）新增`scripts/prod-restart.sh` + `make prod-restart` 原子重启入口（down+up+健康检查一个单元，up 失败清残留自动重试，仍失败打印诊断与手动恢复指引后非零退出；幂等可重跑）——本期为人工终端专用，未接入 agent 允许面。看门狗与会话恢复检查两个方向本期不做。
+- pre-push 门禁通过后 `git push` 被 SIGPIPE（exit 141）打断（issue #679）：`.githooks/pre-push` 以 `exec` 直连`scripts/run-local-gate.sh` → `scripts/check-quick.sh`，整条 gate 链就是 hook 进程，其 stdout 即 `git push` 自身的输出流。Agent harness（输出上限/截断/会话被杀）与 `git push | head` 类管道的读端都可能在 gate 仍在写时离开，而 quick gate 收尾把各 lane 完整日志（printf/vitest/cargo 输出常达数 MB）cat 进该管道——读端关闭后的下一次写入令 gate 进程死于 SIGPIPE（141），git 视 hook 失败而中止推送；此时门禁已通过、evidence 已落盘，于是形成「重推秒过（复用缓存证据）」的模式（0.7.12 期间 5 个 worktree 出现 7+ 次，多 worktree高负载下更频繁）。修复两层：(1) SIGPIPE 免疫——hook 链各脚本（`.githooks/pre-push`、`scripts/git-hooks/pre-push` 分发器、`run-local-gate.sh`、`check-quick.sh`/`check.sh`）入口 `trap '' PIPE`（`exec` 语义下 disposition 贯穿全链），所有输出走 `say()`（`printf … || true`），EPIPE 不再触发 `set -e`；(2) 输出有界——lane日志与 api-contract 集成步骤改为「日志文件 + 末尾 N 行摘要」（默认120 行，`AGENT_LEGION_GATE_OUTPUT_LINES` 可调，0 恢复全量 cat），hook 总输出从 MB 级降到 KB 级；gate 失败时保留完整 lane 日志并报告路径，通过则即弃。回归测试 `tests/scripts/test_pre_push_sigpipe.py`复现读端提前关闭场景（hook 直跑、真实 `git push` 全链、`check-quick.sh` 直跑与输出上限），修复前必红、修复后全绿。
+
+### Maintenance
+- 开发环境对齐（issue #526/#483）：`uv run` 全量 `--frozen`（镜像 index 不再污染 uv.lock），`.python-version` 钉 3.13；含 sigterm 用例竞态根治。
+- Release Notes / CHANGELOG 排版规范落版（#697）：`docs/release-notes.md` 收编排版红线与三条产品线（主仓 / worker / velites）的发布说明模板，velites release notes 改为按 conventional 前缀自动分组生成；存量 CHANGELOG（0.1.0–0.7.12 段）一次性重排为一条 bullet 一个逻辑行。
 
 ## [0.7.12] - 2026-09-16
 
-执行平面收尾与系统性还债版本；发布窗口内合入 #659 状态计数死锁
-修复与 Studio 交互线（#658/#660/#664/#666/#667/#668/#643+#673）。
+执行平面收尾与系统性还债版本；发布窗口内合入 #659 状态计数死锁修复与 Studio 交互线（#658/#660/#664/#666/#667/#668/#643+#673）。
 
 ### Fixed
-- 状态计数触发器的跨语句死锁环（issue #659，v82 迁移）：v77（#437）
-  只修了单条语句内的锁序——claim 批量在一个事务内逐条 promote
-  （psycopg executemany），事务多次触发计数触发器，每次各自按
-  (key, status) 排序取计数行锁，跨事务的锁集合序列随业务序变化，
-  claim 与 rerun 在同一 workspace 的热点计数行上闭合 AB-BA 环。
-  生产表象：claim/心跳/rerun 每夜数百次 500（PG 死锁检测 + 客户端
-  重试自愈的稳定性债务）；result 409 波是下游症状（首次 POST 已
-  提交但响应丢失在锁队列，重试撞终态，无工作丢失）。修复：两族
-  触发器入口先取逐 key 事务级 advisory lock——双层层级（ws 级
-  class 82 先于维度级 class 83，类号拆分防 hashtext 碰撞坍缩层级），
-  按实际锁键序（hashtext int，非文本序）排序；五路 sweep 与
-  claim/finish 批统一按实际 class-82 锁键升序行走；relay 分片准入
-  跨拍公平轮转（持续缺槽下 round-robin 而非饿死同一尾部到租约
-  过期）。残留窗口（跨 workspace 语句序列环、AFTER 触发器行锁×
-  advisory 边）如实记录，毫秒级 + 40P01 重试吸收。
-- Studio 会话 prompt 超时僵尸化（issue #664）：`_prompt_loop` 的
-  `wait_for` 超时只取消客户端本地协程、不向 agent 送
-  `session/cancel`——旧轮仍在跑，后续每条消息被 another-turn 拒绝，
-  会话停在 idle 令 ResumeBar（只接受 closed/error）不可达，无自救
-  通道。修复（`prompt_turn.py` 三级阶梯）：超时即送 session/cancel
-  并等待 30s 宽限——守约结束正常收尾，宽限耗尽强制置 error 会话、
-  恢复链可达；on_turn_end 回归单轮容错、自动 cancel 前先结清挂起
-  审批（#665 评审轮）。
-- Studio 发布状态显示失真三连（issue #666）：发布存库的 revision
-  YAML 是 canonical 重建（丢注释、重排 key、补 loader 默认值），
-  前端 dirty 纯文本对比 → 发布后基线 ≠ 草稿原文 → dirty 永真且刷新
-  甩不掉——发布原文 flag 覆盖根因（成功后跳过 preserve、强制 reset
-  到新基线，两道防陈旧护栏）；画布角标与顶栏「未发布」标识统一改吃
-  compare 计数（无变更不渲染）；顶层 execution 误报加豁免（节点
-  自配齐的合法场景不再提示）。
-- `test_thought_chunks_persist_as_coalesced_thought_message` 的
-  CI postgres 分片间歇失败（issue #326）：thought chunks 落库的
-  等待窗口改为 bounded wait，与 #525 同族的裸读竞态修法。
-- supervisor 心跳 relay 的迟到心跳噪音（issue #590）：执行完成提交后、
-  executor 把租约从快照摘除前的 2s 节流窗口内，relay 仍按旧快照给已
-  终结租约发心跳，Host 正确拒绝（not_owned）——0.7.7 后实测放大到
-  3.3k/小时，稀释租约丢失排查的第一信号。修法（分类在 Host 侧 beat
-  事务内完成，零额外 RTT）：批量心跳的行缺失分支加一次同事务主键
-  读——行已 `done`/`cancelled` 即完成态收尾，随响应的 `settled` 列表
-  返回（不发 execution.heartbeat_rejected 事件）；`queued`（重排队）/
-  未知 id / 他人 execution 仍是 lost 照发事件。executor 侧
-  apply_beat_result 把 settled 静默摘除（不设 ownership_lost、不触发
-  cancel），下一拍快照不再携带死租约。
-- rerun 不清对象存储清单导致旧 run 产物残留（issue #508）：rerun 的
-  产物清理只作用于本地 job_dir，`job_artifacts` 清单行无任何删除路径
-  ——重跑中断/再次失败时，job 详情继续展示旧 run 产物（本地 ∪ 清单），
-  单产物读取本地 miss 后落 S3 旧对象，内容也是旧的。修法：
-  `mark_nodes_for_rerun` 在同一事务内删除受影响闭包的清单行（staged
-  输出名集合由 `stage_outputs` 提供，RMW 产物天然排除），三入口（单
-  节点 rerun / run-to / 审批 rework）全部接线；对象本体在提交后
-  best-effort 删除——删前按当前 `job_artifacts` 清单重验：同
-  `storage_key` 已被新 attempt 复现的权威键跳过删除（清理窗口内快速
-  重跑完成的竞态防护），未复现的孤儿键照删，bucket lifecycle 兜底，
-  与 job_deletion 的顺序纪律一致。
-- 三例 CI 负载敏感 flake（issue #453/#496/#525）：#453 publish race
-  的 created_at 次序断言改顺序无关（race 的真实不变量是「谁赢了」）；
-  #496 `binary_resolution` 的值导入 re-export 使 monkeypatch 打不到
-  `code_sandbox` 侧读取点——开发机 data/bin 有 velites 时 fail-closed
-  测试静默失真，改经模块属性访问同源生效；#525 session lifecycle 在
-  text 与 tool_call 两个落库时点之间裸读，补 tool_call 可见性的
-  bounded wait。
+- 状态计数触发器的跨语句死锁环（issue #659，v82 迁移）：v77（#437）只修了单条语句内的锁序——claim 批量在一个事务内逐条 promote（psycopg executemany），事务多次触发计数触发器，每次各自按 (key, status) 排序取计数行锁，跨事务的锁集合序列随业务序变化，claim 与 rerun 在同一 workspace 的热点计数行上闭合 AB-BA 环。生产表象：claim/心跳/rerun 每夜数百次 500（PG 死锁检测 + 客户端重试自愈的稳定性债务）；result 409 波是下游症状（首次 POST 已提交但响应丢失在锁队列，重试撞终态，无工作丢失）。修复：两族触发器入口先取逐 key 事务级 advisory lock——双层层级（ws 级 class 82 先于维度级 class 83，类号拆分防 hashtext 碰撞坍缩层级），按实际锁键序（hashtext int，非文本序）排序；五路 sweep 与 claim/finish 批统一按实际 class-82 锁键升序行走；relay 分片准入跨拍公平轮转（持续缺槽下 round-robin 而非饿死同一尾部到租约过期）。残留窗口（跨 workspace 语句序列环、AFTER 触发器行锁× advisory 边）如实记录，毫秒级 + 40P01 重试吸收。
+- Studio 会话 prompt 超时僵尸化（issue #664）：`_prompt_loop` 的 `wait_for` 超时只取消客户端本地协程、不向 agent 送 `session/cancel`——旧轮仍在跑，后续每条消息被 another-turn 拒绝，会话停在 idle 令 ResumeBar（只接受 closed/error）不可达，无自救通道。修复（`prompt_turn.py` 三级阶梯）：超时即送 session/cancel 并等待 30s 宽限——守约结束正常收尾，宽限耗尽强制置 error 会话、恢复链可达；on_turn_end 回归单轮容错、自动 cancel 前先结清挂起审批（#665 评审轮）。
+- Studio 发布状态显示失真三连（issue #666）：发布存库的 revision YAML 是 canonical 重建（丢注释、重排 key、补 loader 默认值），前端 dirty 纯文本对比 → 发布后基线 ≠ 草稿原文 → dirty 永真且刷新甩不掉——发布原文 flag 覆盖根因（成功后跳过 preserve、强制 reset 到新基线，两道防陈旧护栏）；画布角标与顶栏「未发布」标识统一改吃 compare 计数（无变更不渲染）；顶层 execution 误报加豁免（节点自配齐的合法场景不再提示）。
+- `test_thought_chunks_persist_as_coalesced_thought_message` 的 CI postgres 分片间歇失败（issue #326）：thought chunks 落库的等待窗口改为 bounded wait，与 #525 同族的裸读竞态修法。
+- supervisor 心跳 relay 的迟到心跳噪音（issue #590）：执行完成提交后、executor 把租约从快照摘除前的 2s 节流窗口内，relay 仍按旧快照给已终结租约发心跳，Host 正确拒绝（not_owned）——0.7.7 后实测放大到 3.3k/小时，稀释租约丢失排查的第一信号。修法（分类在 Host 侧 beat 事务内完成，零额外 RTT）：批量心跳的行缺失分支加一次同事务主键读——行已 `done`/`cancelled` 即完成态收尾，随响应的 `settled` 列表返回（不发 execution.heartbeat_rejected 事件）；`queued`（重排队）/ 未知 id / 他人 execution 仍是 lost 照发事件。executor 侧 apply_beat_result 把 settled 静默摘除（不设 ownership_lost、不触发 cancel），下一拍快照不再携带死租约。
+- rerun 不清对象存储清单导致旧 run 产物残留（issue #508）：rerun 的产物清理只作用于本地 job_dir，`job_artifacts` 清单行无任何删除路径——重跑中断/再次失败时，job 详情继续展示旧 run 产物（本地 ∪ 清单），单产物读取本地 miss 后落 S3 旧对象，内容也是旧的。修法：`mark_nodes_for_rerun` 在同一事务内删除受影响闭包的清单行（staged 输出名集合由 `stage_outputs` 提供，RMW 产物天然排除），三入口（单节点 rerun / run-to / 审批 rework）全部接线；对象本体在提交后 best-effort 删除——删前按当前 `job_artifacts` 清单重验：同 `storage_key` 已被新 attempt 复现的权威键跳过删除（清理窗口内快速重跑完成的竞态防护），未复现的孤儿键照删，bucket lifecycle 兜底，与 job_deletion 的顺序纪律一致。
+- 三例 CI 负载敏感 flake（issue #453/#496/#525）：#453 publish race 的 created_at 次序断言改顺序无关（race 的真实不变量是「谁赢了」）；#496 `binary_resolution` 的值导入 re-export 使 monkeypatch 打不到 `code_sandbox` 侧读取点——开发机 data/bin 有 velites 时 fail-closed 测试静默失真，改经模块属性访问同源生效；#525 session lifecycle 在 text 与 tool_call 两个落库时点之间裸读，补 tool_call 可见性的 bounded wait。
 
 ### Changed
-- 单条 claim 响应路径退役（issue #547）：batch claim（#546）随 0.7.4
-  发布，pre-#546 Worker 镜像已退出支持窗口。claim 端点固定
-  `BatchAgentClaimResponse`（缺省 limit=1 应答单元素 claims 列表），
-  `ClaimRouteResponse` union 与 route_response_model 豁免随之收割；
-  worker 侧 `ClaimOperations.claim()` 单条方法删除（生产零调用者），
-  `claim_batch` 的混合舰队 shape-sniff 保留。行为收口：单条路径的
-  「提交后 500」容错形态消失——批路径逐条丢弃语义接管（全丢 = 空批
-  204），恢复路径不变（租约到期 sweeper 重排）。
-- velites `~/.velites/config.json` 迁移桥进入 deprecation（issue
-  #602，deprecation 阶段）：直调使用旧文件或 `VELITES_BASE_URL`/
-  `VELITES_API_KEY` env 时 stderr 打迁移指引（指向 models.json 与
-  迁移文档），下一版本周期移除（config.rs + lib.rs gateway 兜底分支）。
-  该文件仅供直调 CLI 兜底、结构上进不了 Worker 模型发现——新用户照旧
-  教程配置后 Worker 完全看不见，表现为「任务无人认领」类困惑。
-- velites 0.5.3 → 0.5.4 落版：0.5.3 tag 后 velites 子树积了三个未随
-  任何 velites 版本线发布的改动——#542 契约读取三档回落（根目录
-  contract.yaml 为权威位置，畸形 fail-closed，嵌入块废弃信号）、
-  #602 迁移桥 deprecation 警告（上条）、其 R1 review 修正。独立版本
-  线随源码前进——三平台二进制经 velites-v0.5.4 tag 发布；
-  scripts/install-worker.sh 默认版本同步到 0.5.4。
-- Studio 对话配置区归位（issue #658）：权限模式/模型/思考档位配置条
-  从 SessionBar 正下方移至状态栏与输入框之间（顶部 1px 分隔线 +
-  浅灰底，读作输入区上方的低权重 footer 带，与输入框同视觉组）；
-  kimi agent 经 `session_modes` 与 `category: 'mode'` config option
-  双通道重复广告权限模式、后者掉进「高级设置」兜底折叠——modes 通道
-  存在时去重该条目。
-- Studio DAG 连线三态语义改实（issue #668）：常态边的真实渲染是
-  `DagEdge` 对 `highlighted: false` 一律置灰覆盖（#d1d5db/2px/
-  opacity 0.4），`buildRfEdges` 写的常量从未生效——缺省（undefined）
-  改为常态透传原始 style，`false` 仅表示高亮模式内置灰；常态边
-  #6b7280/2.5px/全亮，ghost 边 0.5 透明度真正生效；agent 面板开关
-  从 Workspace 局部 state 提升到顶栏（跨视图保持）。
+- 单条 claim 响应路径退役（issue #547）：batch claim（#546）随 0.7.4 发布，pre-#546 Worker 镜像已退出支持窗口。claim 端点固定 `BatchAgentClaimResponse`（缺省 limit=1 应答单元素 claims 列表），`ClaimRouteResponse` union 与 route_response_model 豁免随之收割；worker 侧 `ClaimOperations.claim()` 单条方法删除（生产零调用者），`claim_batch` 的混合舰队 shape-sniff 保留。行为收口：单条路径的「提交后 500」容错形态消失——批路径逐条丢弃语义接管（全丢 = 空批 204），恢复路径不变（租约到期 sweeper 重排）。
+- velites `~/.velites/config.json` 迁移桥进入 deprecation（issue #602，deprecation 阶段）：直调使用旧文件或 `VELITES_BASE_URL`/ `VELITES_API_KEY` env 时 stderr 打迁移指引（指向 models.json 与迁移文档），下一版本周期移除（config.rs + lib.rs gateway 兜底分支）。该文件仅供直调 CLI 兜底、结构上进不了 Worker 模型发现——新用户照旧教程配置后 Worker 完全看不见，表现为「任务无人认领」类困惑。
+- velites 0.5.3 → 0.5.4 落版：0.5.3 tag 后 velites 子树积了三个未随任何 velites 版本线发布的改动——#542 契约读取三档回落（根目录 contract.yaml 为权威位置，畸形 fail-closed，嵌入块废弃信号）、#602 迁移桥 deprecation 警告（上条）、其 R1 review 修正。独立版本线随源码前进——三平台二进制经 velites-v0.5.4 tag 发布；scripts/install-worker.sh 默认版本同步到 0.5.4。
+- Studio 对话配置区归位（issue #658）：权限模式/模型/思考档位配置条从 SessionBar 正下方移至状态栏与输入框之间（顶部 1px 分隔线 + 浅灰底，读作输入区上方的低权重 footer 带，与输入框同视觉组）；kimi agent 经 `session_modes` 与 `category: 'mode'` config option 双通道重复广告权限模式、后者掉进「高级设置」兜底折叠——modes 通道存在时去重该条目。
+- Studio DAG 连线三态语义改实（issue #668）：常态边的真实渲染是 `DagEdge` 对 `highlighted: false` 一律置灰覆盖（#d1d5db/2px/ opacity 0.4），`buildRfEdges` 写的常量从未生效——缺省（undefined）改为常态透传原始 style，`false` 仅表示高亮模式内置灰；常态边 #6b7280/2.5px/全亮，ghost 边 0.5 透明度真正生效；agent 面板开关从 Workspace 局部 state 提升到顶栏（跨视图保持）。
 
 ### Added
-- agent 节点执行超时开放配置（issue #550）：保留执行键
-  `timeout_seconds` 合并进 agent 节点的有效 schema（Agent Definition
-  schema 之下，重声明禁令不变），值走常规解析链（defaults → 节点
-  config → workspace 覆盖 → intake 冻结）；dispatch 以解析后的冻结值
-  写入 manifest `execution.timeout_seconds`，缺省保持产品常量 1800s
-  （合并默认同样取 1800 而非 code 节点的 600——升级不得静默砍掉存量
-  agent 运行的超时预算）。撰写/审核类 agent 跑不完 30 分钟时，运维可
-  经 workspace 覆盖调整；Studio 检查器卡片留待前端跟进。
-- Studio agent 编辑动作闭环（issue #667）：聊天区 workflow 草稿卡
-  直接「发布新版本 / 保存运行配置」（与顶栏同一 canPublish 门控、
-  同一发布评审对话框；卡片草稿 ≠ 编辑器 YAML 时提示以编辑器为准）；
-  agent 改动节点可定位——画布选中即视口居中（`DagSelectionViewport`），
-  聊天区改动行点击经定位 nonce 定位到对应节点（同节点重复请求也能
-  切换）。
-- 共享材料 Studio 可视化与一键传播（issue #643/#673）：用户态只读
-  视图（锁一致快照 + 单文件读取；drift 四态徽标——一致/待同步/
-  仓库缺失/Skill 缺失，`git show HEAD` 裸字节比对零工作树写；viewer
-  可读、非成员 404）经顶栏 Drawer 呈现（参考材料/脚本/其他分组，
-  行内嵌映射 skill 的 drift 徽标）；一键传播把共享材料变更推回映射
-  skill（传播代次复核与锁内打 tag、workspace 目录与 symlink 逃逸
-  多重封堵、传播 MCP 调用专用超时——codex 多轮评审修复）。
+- agent 节点执行超时开放配置（issue #550）：保留执行键 `timeout_seconds` 合并进 agent 节点的有效 schema（Agent Definition schema 之下，重声明禁令不变），值走常规解析链（defaults → 节点 config → workspace 覆盖 → intake 冻结）；dispatch 以解析后的冻结值写入 manifest `execution.timeout_seconds`，缺省保持产品常量 1800s（合并默认同样取 1800 而非 code 节点的 600——升级不得静默砍掉存量 agent 运行的超时预算）。撰写/审核类 agent 跑不完 30 分钟时，运维可经 workspace 覆盖调整；Studio 检查器卡片留待前端跟进。
+- Studio agent 编辑动作闭环（issue #667）：聊天区 workflow 草稿卡直接「发布新版本 / 保存运行配置」（与顶栏同一 canPublish 门控、同一发布评审对话框；卡片草稿 ≠ 编辑器 YAML 时提示以编辑器为准）；agent 改动节点可定位——画布选中即视口居中（`DagSelectionViewport`），聊天区改动行点击经定位 nonce 定位到对应节点（同节点重复请求也能切换）。
+- 共享材料 Studio 可视化与一键传播（issue #643/#673）：用户态只读视图（锁一致快照 + 单文件读取；drift 四态徽标——一致/待同步/ 仓库缺失/Skill 缺失，`git show HEAD` 裸字节比对零工作树写；viewer 可读、非成员 404）经顶栏 Drawer 呈现（参考材料/脚本/其他分组，行内嵌映射 skill 的 drift 徽标）；一键传播把共享材料变更推回映射 skill（传播代次复核与锁内打 tag、workspace 目录与 symlink 逃逸多重封堵、传播 MCP 调用专用超时——codex 多轮评审修复）。
 
 ### Performance
-- artifact 校验回读的信任上报抽检（issue #356 方案 B）：Worker 直传
-  S3 产物的 result 提交路径，第二跳流量（Host 下载重算 sha256）改为
-  确定性抽检——自报 hash 非空且未入样本（按 name/storage_key/size
-  稳定哈希分桶，默认 3%）的信任自报值（HEAD size 核验仍全量）；自报
-  为空或入样本的照旧流式核验。覆盖面仅信任上报通道（未声明产物 +
-  cancelled 路径），声明产物始终全量核验（字节本就要落 job_dir）。
-  **`.gz` 引用永不参与信任捷径**：HEAD 只约束压缩字节，解压上限是
-  流本身的安全属性——gzip 引用永远全量流式核验（解压上限 + hash
-  比对），与抽检比例无关。旋钮
-  `agent_workers.artifact_spot_check_percent`（0 = 裸键全信任
-  kill-switch，100 = #356 前行为），instance settings 管理。
-- studio-agent MCP 常驻上下文瘦身（issue #660）：34 个工具的
-  description/schema 精简 + outputSchema 消除——chat 会话的 tools
-  常驻部分 31,978 → 16,967 字符（−47%，~10k → ~5k tokens，随会话
-  轮次放大）；authoring guide 分节，`get_authoring_guide` 从零创作
-  场景单次调用 −80%。五条 load-bearing 红线全保留（full-payload
-  RESET 警告、CAS 三要素、永不自行发布、capability 门控、调用顺序）。
+- artifact 校验回读的信任上报抽检（issue #356 方案 B）：Worker 直传 S3 产物的 result 提交路径，第二跳流量（Host 下载重算 sha256）改为确定性抽检——自报 hash 非空且未入样本（按 name/storage_key/size 稳定哈希分桶，默认 3%）的信任自报值（HEAD size 核验仍全量）；自报为空或入样本的照旧流式核验。覆盖面仅信任上报通道（未声明产物 + cancelled 路径），声明产物始终全量核验（字节本就要落 job_dir）。**`.gz` 引用永不参与信任捷径**：HEAD 只约束压缩字节，解压上限是流本身的安全属性——gzip 引用永远全量流式核验（解压上限 + hash 比对），与抽检比例无关。旋钮 `agent_workers.artifact_spot_check_percent`（0 = 裸键全信任 kill-switch，100 = #356 前行为），instance settings 管理。
+- studio-agent MCP 常驻上下文瘦身（issue #660）：34 个工具的 description/schema 精简 + outputSchema 消除——chat 会话的 tools 常驻部分 31,978 → 16,967 字符（−47%，~10k → ~5k tokens，随会话轮次放大）；authoring guide 分节，`get_authoring_guide` 从零创作场景单次调用 −80%。五条 load-bearing 红线全保留（full-payload RESET 警告、CAS 三要素、永不自行发布、capability 门控、调用顺序）。
 
 ### Observability
-- Worker 侧结构化事件分流落盘（issue #510）：#490 的单行 JSON 事件
-  （claim.attempt / execution.* / http.error）单独落
-  `data/logs/events-<state dir 名>.jsonl`（5MB×3 轮转）——此前只进
-  supervisor 的 500 行内存 deque，满载 1-2 分钟整体滚过一遍，低频异常
-  事件（http.error、claim.backoff）事后完全不可得。面板滚动日志与
-  deque 行为不变；jq/时间线工具可直接消费纯 JSON。
+- Worker 侧结构化事件分流落盘（issue #510）：#490 的单行 JSON 事件（claim.attempt / execution.* / http.error）单独落 `data/logs/events-<state dir 名>.jsonl`（5MB×3 轮转）——此前只进 supervisor 的 500 行内存 deque，满载 1-2 分钟整体滚过一遍，低频异常事件（http.error、claim.backoff）事后完全不可得。面板滚动日志与 deque 行为不变；jq/时间线工具可直接消费纯 JSON。
 
 ### Maintenance
-- 架构豁免治理收口（issue #456/#522）：刷新 issue-states 后 53 条
-  file_budget 豁免过期（锚定 issue 已关闭但代码未回落——#641/#633/
-  #542/#521 等），逐条核验均为「预算未回落」型，按 #522 纪律统一重锚
-  #456 长期锚点；26 条过松 ceiling 收紧到当前实际行数。
-  `EXEC-CODE-MANIFEST-001` 的 evidence 目标随 #547 测试拆分修正。
-- Worker 并发上限放宽至 2048，双侧收敛为单一常量（issue #657）：
-  1024 档实测健康（RSS ~14.2GB/1024 进程、零重排），护栏挡住了机器
-  吃得下的档位。新 `shared/concurrency_limits.MAX_DYNAMIC_CONCURRENCY`
-  为唯一权威——worker 本地校验（controls/config_validation/hot_reload）
-  与 Host 注册/claim 契约（五处 le= 散落字面量）全部改为引用；契约
-  测试钉住全等（worker 本地 == 每个 Host 契约字段），防单边漂移（单边
-  放宽会让 worker 撞 422）。隐性假设复核：relay 分片准入上限按
-  ceiling/分片大小重估（16→32，2048 档满载心跳分片不再饿死）；
-  load_shedding 与档位无耦合（测试钉住）。DB 层无上限不变；
-  min_protocol_version 不动（值域放宽非语义变化）。2048 是契约值域
-  而非单机目标（外推 ~28GB RSS 超 32GB 物理内存）。
-- `worker/service_bind.py` 豁免收割确认（issue #650）：判定矩阵已随
-  后续重构回落到 15 行有效行（≤30 收割线），file_budget 豁免已不在
-  册——收割条件 1/2（#489 方向二/三）未做、条件 3（docstring 瘦身）
-  被顺带完成，issue 关闭收账。
-- npm 依赖漏洞修复（#547 收尾顺带）：frontend 依赖审计 3 → 2
-  （high 清零）；draft 测试文件随 #670 拆分超 800 行的单文件。
+- 架构豁免治理收口（issue #456/#522）：刷新 issue-states 后 53 条 file_budget 豁免过期（锚定 issue 已关闭但代码未回落——#641/#633/ #542/#521 等），逐条核验均为「预算未回落」型，按 #522 纪律统一重锚 #456 长期锚点；26 条过松 ceiling 收紧到当前实际行数。`EXEC-CODE-MANIFEST-001` 的 evidence 目标随 #547 测试拆分修正。
+- Worker 并发上限放宽至 2048，双侧收敛为单一常量（issue #657）：1024 档实测健康（RSS ~14.2GB/1024 进程、零重排），护栏挡住了机器吃得下的档位。新 `shared/concurrency_limits.MAX_DYNAMIC_CONCURRENCY` 为唯一权威——worker 本地校验（controls/config_validation/hot_reload）与 Host 注册/claim 契约（五处 le= 散落字面量）全部改为引用；契约测试钉住全等（worker 本地 == 每个 Host 契约字段），防单边漂移（单边放宽会让 worker 撞 422）。隐性假设复核：relay 分片准入上限按 ceiling/分片大小重估（16→32，2048 档满载心跳分片不再饿死）；load_shedding 与档位无耦合（测试钉住）。DB 层无上限不变；min_protocol_version 不动（值域放宽非语义变化）。2048 是契约值域而非单机目标（外推 ~28GB RSS 超 32GB 物理内存）。
+- `worker/service_bind.py` 豁免收割确认（issue #650）：判定矩阵已随后续重构回落到 15 行有效行（≤30 收割线），file_budget 豁免已不在册——收割条件 1/2（#489 方向二/三）未做、条件 3（docstring 瘦身）被顺带完成，issue 关闭收账。
+- npm 依赖漏洞修复（#547 收尾顺带）：frontend 依赖审计 3 → 2（high 清零）；draft 测试文件随 #670 拆分超 800 行的单文件。
 
 ## [0.7.11] - 2026-09-14
 
 ### Changed
-- 版本线对齐（issue #497 同族收尾）：`pyproject.toml` / `uv.lock` 的
-  agent-legion 包版本 0.7.0 → 0.7.11——0.7.1 起版本号只由 git tag 承载、
-  包清单漂移了十个版次，本版随封板对齐，此后每个 0.7.x 同步落版。
+- 版本线对齐（issue #497 同族收尾）：`pyproject.toml` / `uv.lock` 的 agent-legion 包版本 0.7.0 → 0.7.11——0.7.1 起版本号只由 git tag 承载、包清单漂移了十个版次，本版随封板对齐，此后每个 0.7.x 同步落版。
 
 ### Added
-- 架构预算增长容忍带与豁免限时重签（issue #641）：文件预算检查线放宽为
-  注册表 ceiling + `growth_allowance: 15`——带内超出检查通过、不注册新
-  条目、永不被棘轮吸收（文件收缩后由 staleness 检查自动回收），吸收
-  prettier 80 列重排与小型功能增长；豁免重签在 floor + allowance 带内
-  免仪式直接合法，超出带必须带 `expires: YYYY-MM-DD` 时间盒上抬，到期
-  `check_invariants` 硬失败，续期须重新论证。
-- Workspace 主页顶栏交互收敛（issue #649）：八个平铺入口收敛为
-  运行/暂停 · 添加 · 多选 · 监控 · 更多——运行控件一键切换运行/暂停
-  （状态化显示，Worker 状态列表移入 hover popover）、监控提为一级入口、
-  低频操作（打包/用量/质量/Studio/设置）收入更多菜单的纯 CSS hover 面板。
+- 架构预算增长容忍带与豁免限时重签（issue #641）：文件预算检查线放宽为注册表 ceiling + `growth_allowance: 15`——带内超出检查通过、不注册新条目、永不被棘轮吸收（文件收缩后由 staleness 检查自动回收），吸收 prettier 80 列重排与小型功能增长；豁免重签在 floor + allowance 带内免仪式直接合法，超出带必须带 `expires: YYYY-MM-DD` 时间盒上抬，到期 `check_invariants` 硬失败，续期须重新论证。
+- Workspace 主页顶栏交互收敛（issue #649）：八个平铺入口收敛为运行/暂停 · 添加 · 多选 · 监控 · 更多——运行控件一键切换运行/暂停（状态化显示，Worker 状态列表移入 hover popover）、监控提为一级入口、低频操作（打包/用量/质量/Studio/设置）收入更多菜单的纯 CSS hover 面板。
 
 ### Performance
-- executor 生命周期监督事件化（issue #647，#578 二三期）：每个执行一根
-  线程的 `wait_for_exit` 0.5s 轮询循环（高并发档位下轮询线程数与在飞执行
-  数同阶、每执行每秒两次无效唤醒，是单机容量的主要监督税之一）改为进程级
-  单例 `worker/execution/exit_watch.py`——一根 watcher 线程经内核事件
-  （macOS kqueue `EVFILT_PROC`+`NOTE_EXIT` / Linux pidfd+selector；均不可
-  用时回落共享 0.5s tick 的单线程扫描，`AGENT_WORKER_EXIT_WATCH` 显式
-  选模式）监听全部在飞子进程退出，等待方 park 在自己的
-  `threading.Event` 上零唤醒；超时/ownership/cancel/shutdown 检查合并进
-  watcher 的共享 tick（一根线程一次检查替代 N 根线程各自轮询）。唤醒即
-  定谳：所有触发源单调（控制事件 set-once、exit/timeout sticky），被唤
-  醒方按旧优先级序重 derive 判定，无 lost-wakeup；心跳线程先行
-  poll/reap 子进程（zombie-stop）的交错由事件 sticky 性容纳。fail-closed：
-  watcher 死亡立即唤醒全部等待者并退回 `process_lifecycle.poll_wait_locally`
-  （原轮询循环唯一保留副本，仅作降级路径），后续等待落到新单例。判定
-  契约（exit code / 124 超时 / 130 取消 / 1+不上报的租约丢失）与旧版逐
-  分支等价，`run.py` / `code_runner.py` 调用面零改动换接；#564
-  per-execution 互斥锁在事件模型下的等价性有专项测试钉住。
-- executor 执行车道 idle 回收（issue #647 三期）：`ThreadPoolExecutor`
-  线程永不收缩（高并发回落后仍按历史峰值驻留大批 idle worker），换为
-  `worker/execution/execution_lane.py`——按需起线程（上限仍为声明
-  容量：执行等待期仍持线程 park，池小于容量会钳本地并发）、空闲
-  `AGENT_WORKER_LANE_IDLE_TIMEOUT`（默认 30s，env 可调）后自动退出，线程
-  数跟随在飞执行而非历史峰值；submit/shutdown/Future 契约与
-  ThreadPoolExecutor 对齐（哨兵唤醒的快速 shutdown、任务异常不杀 lane
-  线程）。slots 心跳行追加 `lane <n>`（存活线程）与 `exit <mode>`
-  （watcher 内核模式）观测面。
-- **运维提示（监督事件化灰度/回退）**：生产 Worker 升级后观察 slots 心跳
-  行的 `exit <mode>`（kqueue/pidfd/scan）与 `lane <n>` 是否符合预期；
-  异常时 `AGENT_WORKER_EXIT_WATCH=scan` / `AGENT_WORKER_LANE_IDLE_TIMEOUT`
-  为运行时回退开关（详见 docs/agent-worker-deployment.md）。
+- executor 生命周期监督事件化（issue #647，#578 二三期）：每个执行一根线程的 `wait_for_exit` 0.5s 轮询循环（高并发档位下轮询线程数与在飞执行数同阶、每执行每秒两次无效唤醒，是单机容量的主要监督税之一）改为进程级单例 `worker/execution/exit_watch.py`——一根 watcher 线程经内核事件（macOS kqueue `EVFILT_PROC`+`NOTE_EXIT` / Linux pidfd+selector；均不可用时回落共享 0.5s tick 的单线程扫描，`AGENT_WORKER_EXIT_WATCH` 显式选模式）监听全部在飞子进程退出，等待方 park 在自己的 `threading.Event` 上零唤醒；超时/ownership/cancel/shutdown 检查合并进 watcher 的共享 tick（一根线程一次检查替代 N 根线程各自轮询）。唤醒即定谳：所有触发源单调（控制事件 set-once、exit/timeout sticky），被唤醒方按旧优先级序重 derive 判定，无 lost-wakeup；心跳线程先行 poll/reap 子进程（zombie-stop）的交错由事件 sticky 性容纳。fail-closed：watcher 死亡立即唤醒全部等待者并退回 `process_lifecycle.poll_wait_locally`（原轮询循环唯一保留副本，仅作降级路径），后续等待落到新单例。判定契约（exit code / 124 超时 / 130 取消 / 1+不上报的租约丢失）与旧版逐分支等价，`run.py` / `code_runner.py` 调用面零改动换接；#564 per-execution 互斥锁在事件模型下的等价性有专项测试钉住。
+- executor 执行车道 idle 回收（issue #647 三期）：`ThreadPoolExecutor` 线程永不收缩（高并发回落后仍按历史峰值驻留大批 idle worker），换为 `worker/execution/execution_lane.py`——按需起线程（上限仍为声明容量：执行等待期仍持线程 park，池小于容量会钳本地并发）、空闲 `AGENT_WORKER_LANE_IDLE_TIMEOUT`（默认 30s，env 可调）后自动退出，线程数跟随在飞执行而非历史峰值；submit/shutdown/Future 契约与 ThreadPoolExecutor 对齐（哨兵唤醒的快速 shutdown、任务异常不杀 lane 线程）。slots 心跳行追加 `lane <n>`（存活线程）与 `exit <mode>`（watcher 内核模式）观测面。
+- **运维提示（监督事件化灰度/回退）**：生产 Worker 升级后观察 slots 心跳行的 `exit <mode>`（kqueue/pidfd/scan）与 `lane <n>` 是否符合预期；异常时 `AGENT_WORKER_EXIT_WATCH=scan` / `AGENT_WORKER_LANE_IDLE_TIMEOUT` 为运行时回退开关（详见 docs/agent-worker-deployment.md）。
 
 ### Fixed
-- skills 共享 commit 缓存被外部清理后的中毒自愈（issue #638/#639）：
-  `$TMPDIR` 下物化树的 mtime 是 commit 日期，macOS dirhelper 夜间清掉
-  「过期」内容后 `.complete` 标记存活，命中判定把空树当有效缓存返回，
-  验证批量失败且对老 commit 周期性复发。修复：命中追加契约文件三件套
-  校验（缺失按 miss 处理并重建），物化改为 touch 当前时刻（树不再携带
-  旧 commit 日期）、runs_dir 统一绝对路径（跨 cwd 物化不再把缓存写进
-  仓库目录）——默认 `$TMPDIR` 部署从「中毒数天」变为「每晚一次透明
-  重建」。
-- 原生形态 `make prod-up` 拉起 seaweedfs 时凭据与后端 `.env` 脱节（issue
-  #624）：决策脚本读根 `.env`（凭据齐备 → start），但 compose 插值只读
-  `deploy/.env`——后者缺失时凭据插值为空串，seaweedfs 以空凭据生成
-  s3.config，后端用真实凭据连接即鉴权失败，`/api/health` 静默
-  `storage.reachable=false`、prod-up 退出码 0。修复：决策为 start 时
-  `native-prod-up.sh` 把根 `.env` 的 `AGENT_LEGION_S3_*` 凭据经 `env` 前缀
-  注入 compose 子进程（不 export 进脚本环境——Worker 会把 `os.environ`
-  复制给每个 Agent 子进程，S3 管理凭据不得流入 Agent 面），消除两个 env
-  文件的双写要求。
-- `init-worktree.sh` 种子 worker 状态副本的 host_url 无条件写 dev 端口
-  （issue #625）：prod worktree 的后端在 8000（`NATIVE_BACKEND_PORT`），
-  worker 对着没人监听的 8001 静默退避重试。修复：按 worktree 名分流——
-  `prod` worktree 种子 `NATIVE_BACKEND_PORT`（默认 8000），其余保持
-  `DEV_BACKEND_PORT`（默认 8001）。
-- 三个脚本在 git 索引中丢失执行位（issue #623）：`install-deps.sh` /
-  `gate-jobs.sh` / `gate-queue.sh` 为 100644，`make install` 全新 clone
-  必现 Permission denied（core.fileMode=true 的 macOS/Linux；本地 chmod 过
-  的老 checkout 无感）。修复：补执行位（mode 100755），并新增静态门禁
-  检查 `scripts/architecture/script_permissions.py`——所有 tracked `.sh`
-  必须带执行位，防回归。
+- skills 共享 commit 缓存被外部清理后的中毒自愈（issue #638/#639）：`$TMPDIR` 下物化树的 mtime 是 commit 日期，macOS dirhelper 夜间清掉「过期」内容后 `.complete` 标记存活，命中判定把空树当有效缓存返回，验证批量失败且对老 commit 周期性复发。修复：命中追加契约文件三件套校验（缺失按 miss 处理并重建），物化改为 touch 当前时刻（树不再携带旧 commit 日期）、runs_dir 统一绝对路径（跨 cwd 物化不再把缓存写进仓库目录）——默认 `$TMPDIR` 部署从「中毒数天」变为「每晚一次透明重建」。
+- 原生形态 `make prod-up` 拉起 seaweedfs 时凭据与后端 `.env` 脱节（issue #624）：决策脚本读根 `.env`（凭据齐备 → start），但 compose 插值只读 `deploy/.env`——后者缺失时凭据插值为空串，seaweedfs 以空凭据生成 s3.config，后端用真实凭据连接即鉴权失败，`/api/health` 静默 `storage.reachable=false`、prod-up 退出码 0。修复：决策为 start 时 `native-prod-up.sh` 把根 `.env` 的 `AGENT_LEGION_S3_*` 凭据经 `env` 前缀注入 compose 子进程（不 export 进脚本环境——Worker 会把 `os.environ` 复制给每个 Agent 子进程，S3 管理凭据不得流入 Agent 面），消除两个 env 文件的双写要求。
+- `init-worktree.sh` 种子 worker 状态副本的 host_url 无条件写 dev 端口（issue #625）：prod worktree 的后端在 8000（`NATIVE_BACKEND_PORT`），worker 对着没人监听的 8001 静默退避重试。修复：按 worktree 名分流——`prod` worktree 种子 `NATIVE_BACKEND_PORT`（默认 8000），其余保持 `DEV_BACKEND_PORT`（默认 8001）。
+- 三个脚本在 git 索引中丢失执行位（issue #623）：`install-deps.sh` / `gate-jobs.sh` / `gate-queue.sh` 为 100644，`make install` 全新 clone 必现 Permission denied（core.fileMode=true 的 macOS/Linux；本地 chmod 过的老 checkout 无感）。修复：补执行位（mode 100755），并新增静态门禁检查 `scripts/architecture/script_permissions.py`——所有 tracked `.sh` 必须带执行位，防回归。
 
 ## [0.7.10] - 2026-09-11
 
 ### Fixed
-- heartbeat relay 的并行分片线程改为跨 tick 共享固定容量：一次请求超过
-  join deadline 后会持续占用槽位直到 socket 调用真正返回，后续 tick
-  对满额分片按本拍未知处理，不再在 Host 持续慢响应时无限累积 daemon
-  线程与连接。
-- result commit batcher 关闭时默认等待 writer 完整排空后才允许数据库池
-  关闭；显式有限超时不再静默成功，而是抛出错误并阻断后续池关闭，避免
-  终态事务在 teardown 中途失去连接。
+- heartbeat relay 的并行分片线程改为跨 tick 共享固定容量：一次请求超过 join deadline 后会持续占用槽位直到 socket 调用真正返回，后续 tick 对满额分片按本拍未知处理，不再在 Host 持续慢响应时无限累积 daemon 线程与连接。
+- result commit batcher 关闭时默认等待 writer 完整排空后才允许数据库池关闭；显式有限超时不再静默成功，而是抛出错误并阻断后续池关闭，避免终态事务在 teardown 中途失去连接。
 
 ### Performance
-- 调度器每 claim 重复 mkdir 消除（issue #618）：`data/logs/jobs`
-  从服务启动起就存在，但 `workflow_worker/schedule.py` 每次节点
-  claim 准备都执行 `logs_dir.resolve()`（文件系统探测）+
-  `mkdir(parents=True, exist_ok=True)`（真实 syscall + FSEvents
-  事件分发）——issue #618 的 fseventsd 写类事件分账实测中，该
-  重复 mkdir 是量级最大的单项（高频 claim 路径上的纯重复动作）。
-  新增 `storage_paths.ensure_dir_once`（进程级 lru_cache 备忘录：
-  目录首次创建后跳过后续 mkdir）与 `job_log_dir`（`<logs_dir>/jobs`
-  的 resolve+ensure 进程级一次计算），调度主路径、shard claim、
-  本地沙箱执行、code 结果 `node.log` 落盘四处统一接入。同模式
-  全仓清扫：Agent bundle 与 code bundle 打包路径、Worker 结果回传
-  的 spool/publish 路径（共享 bundle 目录、每次 dispatch/每份结果
-  一次 mkdir）同样接入 `ensure_dir_once`。稳态下该写类文件事件
-  最大单项预期清零，fseventsd 与 sys time 相应回落。
+- 调度器每 claim 重复 mkdir 消除（issue #618）：`data/logs/jobs` 从服务启动起就存在，但 `workflow_worker/schedule.py` 每次节点 claim 准备都执行 `logs_dir.resolve()`（文件系统探测）+ `mkdir(parents=True, exist_ok=True)`（真实 syscall + FSEvents 事件分发）——issue #618 的 fseventsd 写类事件分账实测中，该重复 mkdir 是量级最大的单项（高频 claim 路径上的纯重复动作）。新增 `storage_paths.ensure_dir_once`（进程级 lru_cache 备忘录：目录首次创建后跳过后续 mkdir）与 `job_log_dir`（`<logs_dir>/jobs` 的 resolve+ensure 进程级一次计算），调度主路径、shard claim、本地沙箱执行、code 结果 `node.log` 落盘四处统一接入。同模式全仓清扫：Agent bundle 与 code bundle 打包路径、Worker 结果回传的 spool/publish 路径（共享 bundle 目录、每次 dispatch/每份结果一次 mkdir）同样接入 `ensure_dir_once`。稳态下该写类文件事件最大单项预期清零，fseventsd 与 sys time 相应回落。
 
-- result 终态事务批量化（issue #591，#569 修复方向第三条的接续）：
-  #569 下沉 validate/unpack 段后，完成波慢 WARNING 的大头轮换为
-  lease_write（四表终态写事务）与 mark_done（单行 UPDATE）——两者都
-  是纯排队：同一波的 N 个事务抢同一个 jobs 行锁（sync_job_status）
-  且各付一次 commit fsync，而 PostgreSQL 本身空闲。落地 group-commit
-  队列
-  （`server/app/agent_broker/result_commit_batcher.py`）：一条 drain-only
-  写线程，完成波的终态写按类分批——finish 批在一个事务里跑 N 个
-  `finish_lease`（`server/app/executors/_lease_finish_batch.py`，jobs 行
-  锁与 fsync 每轮各一次），mark_done 批在一个事务里关 N 个请求
-  （`server/app/agent_broker/mark_done_batch.py`），per-item 判定经
-  future 原样回到各提交线程。空闲节奏首个 item 立即处理（仅一次队列
-  跳数，无延迟引入）；每轮批上限 64 项防病态事务。语义保持：两段
-  事务先 finish 后 mark_done 的顺序不变（崩溃窗口与 sweeper 兜底同
-  直连路径），per-item 409 判定不变（非 active lease / 已关请求返回
-  False/None 而非异常），events 后处理与 job 广播逐项独立容错、按
-  job 去重。批量事务意外失败时整片回滚后逐项单条重放（确定性失败
-  只击中自己的 item，邻居拿回真实判定）。实例旋钮
-  `executor_runtime.agent_workers.result_commit_batching`（默认开，重启生效，
-  管理面板可关；start_worker=False 的 app 不构造 batcher，始终直连）= kill-switch：关闭时 finish/mark_done 走 0.7.9 直连路径。
-  二轮评审修正：批量臂补齐直连路径的 completed/failed 门（cancelled
-  结果不再解析半截 events.jsonl / 落 token-usage 行 / 压缩留档文件）；
-  #521 的 lease_write/events 阶段计时在批量路径不再丢失（回调首句关
-  lease_write——诚实覆盖排队等待 + 共批，events 仅 completed/failed，
-  cancelled/409 不报 events 段）；批臂返回长度不齐时 fail-fast 落入
-  现有整片失败收容（strict zip），不再让尾部 future 悬挂。
-  三轮评审（#609 P2 跟进）：mark_done 批量臂同样绑定 40P01 重试包装
-  （`mark_done_many_with_retry`，与 finish 臂对称——跨副本部署下隔离
-  回退的单条重放也经同一绑定臂获得重试）；写线程在 lifespan 中先于
-  其生产者启动（`start_worker_threads` 之前，关闭「code-plane finish
-  停靠在未启动 writer 上」的微秒级窗口）；薄弱测试补强（max-items
-  分裂断言、stop 退出排空真实路径、集成测试改为生产序 finish→
-  mark_done、混批 409 数据判定与混合轮臂序钉子）；sweeper requeue-limit
-  臂与本批的已知锁环经核实不因 (workspace, run, job) 排序变化而变宽
-  （排序只重排 item，不重排 finish_lease 内语句），维持 40P01 双侧吸收
-  并文档化；`pending_depth()` 观测位按评审结论移除（采样器接线需要
-  尚不存在的依赖形状/持久列/契约字段，不投机扩面）。
+- result 终态事务批量化（issue #591，#569 修复方向第三条的接续）：#569 下沉 validate/unpack 段后，完成波慢 WARNING 的大头轮换为 lease_write（四表终态写事务）与 mark_done（单行 UPDATE）——两者都是纯排队：同一波的 N 个事务抢同一个 jobs 行锁（sync_job_status）且各付一次 commit fsync，而 PostgreSQL 本身空闲。落地 group-commit 队列（`server/app/agent_broker/result_commit_batcher.py`）：一条 drain-only 写线程，完成波的终态写按类分批——finish 批在一个事务里跑 N 个 `finish_lease`（`server/app/executors/_lease_finish_batch.py`，jobs 行锁与 fsync 每轮各一次），mark_done 批在一个事务里关 N 个请求（`server/app/agent_broker/mark_done_batch.py`），per-item 判定经 future 原样回到各提交线程。空闲节奏首个 item 立即处理（仅一次队列跳数，无延迟引入）；每轮批上限 64 项防病态事务。语义保持：两段事务先 finish 后 mark_done 的顺序不变（崩溃窗口与 sweeper 兜底同直连路径），per-item 409 判定不变（非 active lease / 已关请求返回 False/None 而非异常），events 后处理与 job 广播逐项独立容错、按 job 去重。批量事务意外失败时整片回滚后逐项单条重放（确定性失败只击中自己的 item，邻居拿回真实判定）。实例旋钮 `executor_runtime.agent_workers.result_commit_batching`（默认开，重启生效，管理面板可关；start_worker=False 的 app 不构造 batcher，始终直连）= kill-switch：关闭时 finish/mark_done 走 0.7.9 直连路径。二轮评审修正：批量臂补齐直连路径的 completed/failed 门（cancelled 结果不再解析半截 events.jsonl / 落 token-usage 行 / 压缩留档文件）；#521 的 lease_write/events 阶段计时在批量路径不再丢失（回调首句关 lease_write——诚实覆盖排队等待 + 共批，events 仅 completed/failed，cancelled/409 不报 events 段）；批臂返回长度不齐时 fail-fast 落入现有整片失败收容（strict zip），不再让尾部 future 悬挂。三轮评审（#609 P2 跟进）：mark_done 批量臂同样绑定 40P01 重试包装（`mark_done_many_with_retry`，与 finish 臂对称——跨副本部署下隔离回退的单条重放也经同一绑定臂获得重试）；写线程在 lifespan 中先于其生产者启动（`start_worker_threads` 之前，关闭「code-plane finish 停靠在未启动 writer 上」的微秒级窗口）；薄弱测试补强（max-items 分裂断言、stop 退出排空真实路径、集成测试改为生产序 finish→mark_done、混批 409 数据判定与混合轮臂序钉子）；sweeper requeue-limit 臂与本批的已知锁环经核实不因 (workspace, run, job) 排序变化而变宽（排序只重排 item，不重排 finish_lease 内语句），维持 40P01 双侧吸收并文档化；`pending_depth()` 观测位按评审结论移除（采样器接线需要尚不存在的依赖形状/持久列/契约字段，不投机扩面）。
 
 ### Changed
-- 质量门云端收口：多 worktree 本地内环改为 affected tests，push 保留按
-  路径裁剪的 smoke，完整 unit/PostgreSQL/coverage/E2E 以 PR CI 为合并
-  凭证；workflow 新增稳定 `quality-gate` 聚合 check，分支保护不再绑定
-  内部 shard 名称。pytest 的 retry-pass 改为 PR 当场校验 flaky registry，
-  未登记或超期条目直接阻止合并；公开仓库测试 workflow 的
-  `GITHUB_TOKEN` 显式收紧为 `contents: read`。
-- 预算计量的 docstring 口径（issue #610，#209 棘轮的计量层治理）：
-  Python 有效行计数（`scripts/architecture/effective_lines.py`）此前只
-  排除 `#` 注释与空行，docstring 作为字符串字面量逐行计费——全仓唯一
-  要为预算付费的文档形态（TS/Rust/CSS 的文档注释在 C-like 计量里全部
-  免费），预算压力因此系统性落在 docstring 高尔夫上（942 个 Python/JS/
-  SQL 治理文件中 273 个余量 ≤3 行时，agent 的理性最优解是削文档而非削
-  复杂度）。现在模块/类/函数首语句的字符串常量（与 `ast.get_docstring`
-  同一群体；f-string、孤儿字符串表达式、字符串赋值照常计费）按文档免
-  费——整行被 docstring 独占才免费，与代码混行照常计费（同尾注释纪
-  律）；tokenize 或 ast 任一解析失败的文件回落 raw 口径（更严纪律）。
-  配套一次性 re-baseline：`architecture-budgets.json` 682 个条目 ceiling
-  收紧（合计 -8,901 行，docstring 退出分母）；豁免清淤：`file_budget`
-  豁免 124 → 67 条（58 条删除、56 条 ceiling 收紧、新增 1 条——
-  `effective_lines.py` 自身，ceiling 96；`route_response_model` 豁免
-  4 → 4 条不变）。治理后贴墙文件（余量 = max(baseline, 豁免 ceiling) −
-  实际有效行，≤3 行）在同口径 942 文件群体上 29.0% → 7.6%（273 → 72）。
-  #209 的单调语义、绝对上限（raw 口径）、test 限制均不变。
+- 质量门云端收口：多 worktree 本地内环改为 affected tests，push 保留按路径裁剪的 smoke，完整 unit/PostgreSQL/coverage/E2E 以 PR CI 为合并凭证；workflow 新增稳定 `quality-gate` 聚合 check，分支保护不再绑定内部 shard 名称。pytest 的 retry-pass 改为 PR 当场校验 flaky registry，未登记或超期条目直接阻止合并；公开仓库测试 workflow 的 `GITHUB_TOKEN` 显式收紧为 `contents: read`。
+- 预算计量的 docstring 口径（issue #610，#209 棘轮的计量层治理）：Python 有效行计数（`scripts/architecture/effective_lines.py`）此前只排除 `#` 注释与空行，docstring 作为字符串字面量逐行计费——全仓唯一要为预算付费的文档形态（TS/Rust/CSS 的文档注释在 C-like 计量里全部免费），预算压力因此系统性落在 docstring 高尔夫上（942 个 Python/JS/ SQL 治理文件中 273 个余量 ≤3 行时，agent 的理性最优解是削文档而非削复杂度）。现在模块/类/函数首语句的字符串常量（与 `ast.get_docstring` 同一群体；f-string、孤儿字符串表达式、字符串赋值照常计费）按文档免费——整行被 docstring 独占才免费，与代码混行照常计费（同尾注释纪律）；tokenize 或 ast 任一解析失败的文件回落 raw 口径（更严纪律）。配套一次性 re-baseline：`architecture-budgets.json` 682 个条目 ceiling 收紧（合计 -8,901 行，docstring 退出分母）；豁免清淤：`file_budget` 豁免 124 → 67 条（58 条删除、56 条 ceiling 收紧、新增 1 条——`effective_lines.py` 自身，ceiling 96；`route_response_model` 豁免 4 → 4 条不变）。治理后贴墙文件（余量 = max(baseline, 豁免 ceiling) −实际有效行，≤3 行）在同口径 942 文件群体上 29.0% → 7.6%（273 → 72）。#209 的单调语义、绝对上限（raw 口径）、test 限制均不变。
 
 ### Fixed
-- 心跳 relay 批量拍的停摆放大面（issue #591，0.7.10 短期止血）：完成波
-  尖峰下 Host HTTP 面可长时间无响应，批量心跳拍按机器在飞量整拍发出，
-  一次停摆即整拍超时丢失，级联成批量租约过期与重跑（0.7.9 上线日实测
-  复现，形态与 #566 死亡螺旋同族）。收尾调参 + 分片语义重做：relay 批量
-  拍按 `RELAY_BEAT_SHARD=64` 分片并**并行发出**（独立常量，不动机器
-  executor 侧的 256）——失败分片只丢本片的拍、不沉没后续分片（无队头
-  饿死），失败片的租约按未知处理（非丢失），下一拍全量重试；并行分片
-  下串行累加导致的整轮超租约 TTL 不再可能。批量拍显式 10s 超时
-  （`BATCH_BEAT_TIMEOUT_SECONDS`，`heartbeat_batch` 增加 timeout 透传）
-  ——30s 客户端默认太贴 90s 租约 TTL，两拍全长等待即耗尽续租预算，
-  10s 让失败早暴露、早重试。executor 侧分片与全局限时器不变。
+- 心跳 relay 批量拍的停摆放大面（issue #591，0.7.10 短期止血）：完成波尖峰下 Host HTTP 面可长时间无响应，批量心跳拍按机器在飞量整拍发出，一次停摆即整拍超时丢失，级联成批量租约过期与重跑（0.7.9 上线日实测复现，形态与 #566 死亡螺旋同族）。收尾调参 + 分片语义重做：relay 批量拍按 `RELAY_BEAT_SHARD=64` 分片并**并行发出**（独立常量，不动机器 executor 侧的 256）——失败分片只丢本片的拍、不沉没后续分片（无队头饿死），失败片的租约按未知处理（非丢失），下一拍全量重试；并行分片下串行累加导致的整轮超租约 TTL 不再可能。批量拍显式 10s 超时（`BATCH_BEAT_TIMEOUT_SECONDS`，`heartbeat_batch` 增加 timeout 透传）——30s 客户端默认太贴 90s 租约 TTL，两拍全长等待即耗尽续租预算，10s 让失败早暴露、早重试。executor 侧分片与全局限时器不变。
 
 ## [0.7.9] - 2026-09-11
 
 ### Fixed
-- Studio 会话长回复尾部静默截断（issue #563）：流式 text 帧是原地全量
-  快照（seq 不变），断连/被驱逐丢帧后 after_seq 增量补齐永远取不回该行；
-  唯一自愈入口是"SSE 实时收到 turn_end → 全量回取"，但断连空窗恰好盖过
-  turn 结尾时 turn_end 只能经 REST 补齐静默合入，自愈永不触发——截断文本
-  被定妆成"已完成"消息。三层修法：
-  - **前端自愈推广**（useStudioChat/studioChatEvents/studioChatMessages）：
-    terminal 状态行（turn_end/error/session_*）检测统一到 isTerminalStatus
-    ——REST 补齐静默携带的 terminal 事件与 SSE 实时到达的同等触发全量
-    回取 + 画布/Agent 目录查询失效；SSE 重连时本地仍挂着未终结的流式
-    agent text 行即直接全量回取校准。refill 的 terminal 判定在 updater
-    外计算（updater 可能被 React 推迟执行，内赋值会恒 false）、
-    setMessages 改函数式更新（并发 refill 不再互相覆盖基线）。
-  - **EventBus 降触发**（server/app/events/bus.py）：快照语义通道
-    （studio-chat:*）的 QueueFull 从"立即驱逐订阅者"改为"丢最旧腾位投递
-    最新"（流式帧是全量快照，丢中间帧无损），连续溢出
-    OVERFLOW_EVICT_THRESHOLD=64（真死连接）才驱逐——驱逐引发的断流重连
-    正是截断的主要触发形态。增量语义通道（workspace job 补丁等 revision
-    水位消费方）保持立即驱逐的旧行为：断流 → SSE 重连 + loadSnapshot 是
-    既有的无损自愈路径，静默丢帧反而让客户端滞留旧 revision。
-  - **帧体积缩减**（studio_chat/store.py）：publish 的 json.dumps 补
-    `ensure_ascii=False`，CJK 文本不再 \uXXXX 转义（帧体积减半），放慢订阅
-    队列的积压速度。
-- Studio 会话闲置后 MCP 工具通道静默死亡（issue #558）：run token 固定
-  2h TTL、续期由对话活动驱动，闲置过期后 agent 的 MCP headers 无法中途
-  重指（协议限制），工具调用全 401 → client "Not connected"；而聊天主链路
-  （ACP 进程）毫发无伤，会话停在 idle——界面上一个"看起来活着"但工具
-  全废的会话，且 resume 只接受 closed/error，恢复入口不可达。修法：
-  #411 keepalive 的 dead 分支（首个 tool_call 检出 token 死亡）把会话升级
-  为 status=error 后追加 `run_token_invalidated` 通知
-  （`server/app/studio_chat/session_escalation.py`，守卫同 on_exit 的
-  final_statuses：closed/error/starting 不越权盖章，SSE session 快照同步
-  发布；升级先于通知且吞异常——DB 故障时干净重试、不产生重复通知），
-  既有的 ResumeBar /「继续对话」恢复链（新 token + 上下文保留）直接
-  生效；jobDiagnosis 排查面板补挂 ResumeBar（此前 error 会话只有禁用
-  文案，只能废弃）；通知与前端兜底文案改为指向「继续对话」。
+- Studio 会话长回复尾部静默截断（issue #563）：流式 text 帧是原地全量快照（seq 不变），断连/被驱逐丢帧后 after_seq 增量补齐永远取不回该行；唯一自愈入口是"SSE 实时收到 turn_end → 全量回取"，但断连空窗恰好盖过 turn 结尾时 turn_end 只能经 REST 补齐静默合入，自愈永不触发——截断文本被定妆成"已完成"消息。三层修法：
+  - **前端自愈推广**（useStudioChat/studioChatEvents/studioChatMessages）：terminal 状态行（turn_end/error/session_*）检测统一到 isTerminalStatus——REST 补齐静默携带的 terminal 事件与 SSE 实时到达的同等触发全量回取 + 画布/Agent 目录查询失效；SSE 重连时本地仍挂着未终结的流式 agent text 行即直接全量回取校准。refill 的 terminal 判定在 updater 外计算（updater 可能被 React 推迟执行，内赋值会恒 false）、setMessages 改函数式更新（并发 refill 不再互相覆盖基线）。
+  - **EventBus 降触发**（server/app/events/bus.py）：快照语义通道（studio-chat:*）的 QueueFull 从"立即驱逐订阅者"改为"丢最旧腾位投递最新"（流式帧是全量快照，丢中间帧无损），连续溢出 OVERFLOW_EVICT_THRESHOLD=64（真死连接）才驱逐——驱逐引发的断流重连正是截断的主要触发形态。增量语义通道（workspace job 补丁等 revision 水位消费方）保持立即驱逐的旧行为：断流 → SSE 重连 + loadSnapshot 是既有的无损自愈路径，静默丢帧反而让客户端滞留旧 revision。
+  - **帧体积缩减**（studio_chat/store.py）：publish 的 json.dumps 补 `ensure_ascii=False`，CJK 文本不再 \uXXXX 转义（帧体积减半），放慢订阅队列的积压速度。
+- Studio 会话闲置后 MCP 工具通道静默死亡（issue #558）：run token 固定 2h TTL、续期由对话活动驱动，闲置过期后 agent 的 MCP headers 无法中途重指（协议限制），工具调用全 401 → client "Not connected"；而聊天主链路（ACP 进程）毫发无伤，会话停在 idle——界面上一个"看起来活着"但工具全废的会话，且 resume 只接受 closed/error，恢复入口不可达。修法：#411 keepalive 的 dead 分支（首个 tool_call 检出 token 死亡）把会话升级为 status=error 后追加 `run_token_invalidated` 通知（`server/app/studio_chat/session_escalation.py`，守卫同 on_exit 的 final_statuses：closed/error/starting 不越权盖章，SSE session 快照同步发布；升级先于通知且吞异常——DB 故障时干净重试、不产生重复通知），既有的 ResumeBar /「继续对话」恢复链（新 token + 上下文保留）直接生效；jobDiagnosis 排查面板补挂 ResumeBar（此前 error 会话只有禁用文案，只能废弃）；通知与前端兜底文案改为指向「继续对话」。
 
 ### Performance
-- executor 事件泵 reactor 化一期（issue #578）：agent 执行的 stdout 事件泵
-  从 thread-per-execution（每个 velites 子进程一根 Python 泵线程）改为
-  进程级单例 `worker/execution/reactor.py`——一根 selector 线程多路复用
-  全部在跑子进程的 stdout fd（阻塞 select 不持 GIL），就绪 fd 批量读取、
-  分帧后交核数级（2–16）解析线程池做 JSON 解析 + delta 过滤与落盘。
-  每流单写者令牌保证 events.jsonl 与旧泵逐字节同序（回归测试压 200 行
-  突发）。生命周期语义不动：租约/心跳（#352 批量面）、超时治理、#564
-  归属标记全部原样；背压显式化——事件文件写不动时暂停读 fd，子进程
-  管道写满自然减速（agent 减速而非丢事件，设计点 3）。回退开关
-  `AGENT_WORKER_EVENT_PUMP=thread` 恢复每执行一线程；reactor 内部错误
-  fail-closed（注销全部流 + 本进程后续 spawn 回落线程泵）。灰度：先只
-  接管 agent 节点路径（事件量最大面），code 节点 stdout 本就走文件
-  重定向不经泵。
+- executor 事件泵 reactor 化一期（issue #578）：agent 执行的 stdout 事件泵从 thread-per-execution（每个 velites 子进程一根 Python 泵线程）改为进程级单例 `worker/execution/reactor.py`——一根 selector 线程多路复用全部在跑子进程的 stdout fd（阻塞 select 不持 GIL），就绪 fd 批量读取、分帧后交核数级（2–16）解析线程池做 JSON 解析 + delta 过滤与落盘。每流单写者令牌保证 events.jsonl 与旧泵逐字节同序（回归测试压 200 行突发）。生命周期语义不动：租约/心跳（#352 批量面）、超时治理、#564 归属标记全部原样；背压显式化——事件文件写不动时暂停读 fd，子进程管道写满自然减速（agent 减速而非丢事件，设计点 3）。回退开关 `AGENT_WORKER_EVENT_PUMP=thread` 恢复每执行一线程；reactor 内部错误 fail-closed（注销全部流 + 本进程后续 spawn 回落线程泵）。灰度：先只接管 agent 节点路径（事件量最大面），code 节点 stdout 本就走文件重定向不经泵。
 
 ## [0.7.8] - 2026-09-10
 
 ### Performance
-- velites 事件落盘批量化（issue #577）：events 落盘从每行事件
-  `write_all` + `flush`（每事件至少 2 次 syscall）改为进程内 8 KiB
-  `BufWriter` 攒批——缓冲满或距上次落盘超过
-  `VELITES_EVENT_FLUSH_INTERVAL_MS`（默认 200ms，`0` 恢复逐行）才写
-  一次；首个事件无条件立即落盘（开场事件不滞留在缓冲里），容量触发
-  的 drain 同步 flush 时钟。正常完成 / SIGTERM 优雅取消 / 错误退出
-  在 sink Drop 时 flush 收尾、事件零丢失；SIGKILL 丢未满缓冲的尾部
-  一批（events.jsonl 是执行轨迹、归档有重试兜底，该窗口已声明可
-  接受）。进程内所有 sink 句柄共享同一缓冲，retry 路径的第二个句柄
-  不会造成 wire 顺序交错。高并发 agent 进程场景下显著降低
-  fseventsd 与管道读写两侧的 syscall 放大。
-- velites 0.5.2 → 0.5.3 落版：本版的 BufWriter 攒批改动需要新二进制
-  才能到达 docker/裸机 worker（镜像与安装脚本外挂的 velites 来自
-  GitHub Release）。独立版本线随源码前进——三平台二进制经
-  velites-v0.5.3 tag 发布；scripts/install-worker.sh 默认版本同步
-  到 0.5.3。
+- velites 事件落盘批量化（issue #577）：events 落盘从每行事件 `write_all` + `flush`（每事件至少 2 次 syscall）改为进程内 8 KiB `BufWriter` 攒批——缓冲满或距上次落盘超过 `VELITES_EVENT_FLUSH_INTERVAL_MS`（默认 200ms，`0` 恢复逐行）才写一次；首个事件无条件立即落盘（开场事件不滞留在缓冲里），容量触发的 drain 同步 flush 时钟。正常完成 / SIGTERM 优雅取消 / 错误退出在 sink Drop 时 flush 收尾、事件零丢失；SIGKILL 丢未满缓冲的尾部一批（events.jsonl 是执行轨迹、归档有重试兜底，该窗口已声明可接受）。进程内所有 sink 句柄共享同一缓冲，retry 路径的第二个句柄不会造成 wire 顺序交错。高并发 agent 进程场景下显著降低 fseventsd 与管道读写两侧的 syscall 放大。
+- velites 0.5.2 → 0.5.3 落版：本版的 BufWriter 攒批改动需要新二进制才能到达 docker/裸机 worker（镜像与安装脚本外挂的 velites 来自 GitHub Release）。独立版本线随源码前进——三平台二进制经 velites-v0.5.3 tag 发布；scripts/install-worker.sh 默认版本同步到 0.5.3。
 
 ### Added
-- host 镜像发布管线（issue #574）：push `v<数字>*` 发版 tag 触发
-  `host-image-release` workflow，原生 runner 构建 linux/amd64 与
-  linux/arm64（拒绝 QEMU）并推 GHCR
-  `ghcr.io/luciuscao/agent-legion-host`（版本 / `sha-<短哈希>` /
-  `latest` 三 tag；`latest` 仅当本次 tag 是远端最高版本时移动，
-  重推旧 tag 或并发乱序都不会回滚 latest）。触发器刻意收窄为
-  `v[0-9]*`（minimatch 下 `v*` 会误匹配 `velites-v*`）。部署侧新增
-  `deploy/compose.host.pull.example.yaml` 拉取式 override，文档见
-  docs/agent-worker-deployment.md §3。host 部署不再必须现场构建。
+- host 镜像发布管线（issue #574）：push `v<数字>*` 发版 tag 触发 `host-image-release` workflow，原生 runner 构建 linux/amd64 与 linux/arm64（拒绝 QEMU）并推 GHCR `ghcr.io/luciuscao/agent-legion-host`（版本 / `sha-<短哈希>` / `latest` 三 tag；`latest` 仅当本次 tag 是远端最高版本时移动，重推旧 tag 或并发乱序都不会回滚 latest）。触发器刻意收窄为 `v[0-9]*`（minimatch 下 `v*` 会误匹配 `velites-v*`）。部署侧新增 `deploy/compose.host.pull.example.yaml` 拉取式 override，文档见 docs/agent-worker-deployment.md §3。host 部署不再必须现场构建。
 
 ### Changed
-- workflow studio agent 节点 tools 字段收敛（issue #575）：节点级
-  「工具声明」改为「Tools 覆盖（留空 = 跟随 Agent 默认）」主入口，
-  未声明时直接展示解析后的生效值与来源；Agent 摘要卡 Tools 行按
-  覆盖状态对称标注「（节点未覆盖，当前生效）/（节点已覆盖，以节点
-  为准）」；内嵌 AgentEditor 的 Tools 标注为「Agent 默认 / 兜底」，
-  对齐 #440 终局方向（定义层字段并入节点）。draft-only Agent 的
-  tools 未知态不再误显示为「（空）」。
-- CI：quality-gate 的 PR 触发范围补 `release/*`——发版集成分支上
-  的 issue PR 此前完全没有 CI 覆盖。
+- workflow studio agent 节点 tools 字段收敛（issue #575）：节点级「工具声明」改为「Tools 覆盖（留空 = 跟随 Agent 默认）」主入口，未声明时直接展示解析后的生效值与来源；Agent 摘要卡 Tools 行按覆盖状态对称标注「（节点未覆盖，当前生效）/（节点已覆盖，以节点为准）」；内嵌 AgentEditor 的 Tools 标注为「Agent 默认 / 兜底」，对齐 #440 终局方向（定义层字段并入节点）。draft-only Agent 的 tools 未知态不再误显示为「（空）」。
+- CI：quality-gate 的 PR 触发范围补 `release/*`——发版集成分支上的 issue PR 此前完全没有 CI 覆盖。
 
 ## [0.7.7] - 2026-09-10
 
 ### Performance
-- result commit 的 validate 段提速（issue #569）：完成波下每条 result
-  都重新 `git archive` 物化 skill 树 + spawn velites 子进程，零复用
-  （单条最差实测 60.4s）。两步修法：
-  - **物化缓存**：按 `(skill_key, skill_commit)` 缓存物化目录到
-    `runs_dir/.shared/<workflow>/<capability>/<commit40>/`（commit 不可变，
-    内容恒定）；命中判定是纯路径探测（`.complete` 完整性标记在原子
-    rename 之后落盘，半截导出目录永不命中、下次物化时回收），命中零
-    git 调用；并发物化复用 per-repo FileLock 串行；缓存树只读，每次校验
-    在同一把锁内 copytree 出 per-validation 私有副本（数 MB 级毫秒成本），
-    校验器只读写私有副本——validator 写文件不污染缓存、LRU 淘汰撞不上
-    校验窗口（淘汰与复制同锁），`cleanup_execution` 恢复为私有副本的
-    正常收尾，sweeper 既有 max_age 兜底回收。缓存按 skill 有界
-    （每 skill 保留最近 4 个 commit，按 mtime LRU 淘汰），sweep 明确
-    豁免 `.shared` 子树。
-  - **validate 下沉独立进程池**：`agent_broker/result_validate_pool.py`
-    复用 #552 unpack 池模式（spawn context、`reset_pool(broken=...)`
-    身份守卫、懒建池、BrokenProcessPool 单次重建重试），与 unpack 池
-    隔离（validate 含 30s timeout 的子进程等待，避免队头阻塞毫秒级
-    unpack）。拆分点：commit 解析（可能读写 DB skill lock 文档）留在
-    主进程，物化（走缓存）+ 两层校验器下沉池内。
-  - 池尺寸旋钮接入实例设置：`result_validate.workers`（0 = 自动
-    min(4, 核数)，上限 64，重启生效，admin UI「队列与解包容量」组），
-    env `AGENT_LEGION_RESULT_VALIDATE_WORKERS` 为覆盖通道（同 #554
-    链路）。
+- result commit 的 validate 段提速（issue #569）：完成波下每条 result 都重新 `git archive` 物化 skill 树 + spawn velites 子进程，零复用（单条最差实测 60.4s）。两步修法：
+  - **物化缓存**：按 `(skill_key, skill_commit)` 缓存物化目录到 `runs_dir/.shared/<workflow>/<capability>/<commit40>/`（commit 不可变，内容恒定）；命中判定是纯路径探测（`.complete` 完整性标记在原子 rename 之后落盘，半截导出目录永不命中、下次物化时回收），命中零 git 调用；并发物化复用 per-repo FileLock 串行；缓存树只读，每次校验在同一把锁内 copytree 出 per-validation 私有副本（数 MB 级毫秒成本），校验器只读写私有副本——validator 写文件不污染缓存、LRU 淘汰撞不上校验窗口（淘汰与复制同锁），`cleanup_execution` 恢复为私有副本的正常收尾，sweeper 既有 max_age 兜底回收。缓存按 skill 有界（每 skill 保留最近 4 个 commit，按 mtime LRU 淘汰），sweep 明确豁免 `.shared` 子树。
+  - **validate 下沉独立进程池**：`agent_broker/result_validate_pool.py` 复用 #552 unpack 池模式（spawn context、`reset_pool(broken=...)` 身份守卫、懒建池、BrokenProcessPool 单次重建重试），与 unpack 池隔离（validate 含 30s timeout 的子进程等待，避免队头阻塞毫秒级 unpack）。拆分点：commit 解析（可能读写 DB skill lock 文档）留在主进程，物化（走缓存）+ 两层校验器下沉池内。
+  - 池尺寸旋钮接入实例设置：`result_validate.workers`（0 = 自动 min(4, 核数)，上限 64，重启生效，admin UI「队列与解包容量」组），env `AGENT_LEGION_RESULT_VALIDATE_WORKERS` 为覆盖通道（同 #554 链路）。
 
 ### Fixed
-- Worker 双 attempt 竞态修复（issue #564）：worker 过载时批量心跳被饿死，
-  Host 误判租约过期重排队，同一 worker 立刻重新 claim 同一 execution_id
-  而旧 attempt 线程仍存活；旧 attempt 的丢弃收尾仅检查 pending-upload
-  marker 就 rmtree 整个 execution_dir，删掉新 attempt 刚重建、正在使用
-  的目录，新 attempt 写 prompt.md 时 FileNotFoundError。两层修法：
-  - **归属标记**：prepare 重建目录后立刻写入 `execution_owner.json`
-    （claim 的 lease_id，agent 与 code 两条路径同）；丢弃收尾只在标记
-    仍指向自己的 lease 时才 rmtree——标记易主（目录已被新 attempt 占
-    用）或缺失/损坏一律跳过删除，证明不了归属的孤儿目录归 startup
-    clean_work_root / stale sweeper 清理（与 #203 的 pending marker
-    先例同构）。
-  - **per-execution 互斥锁**：`run_execution` 全程持有按 execution_id
-    引用计数的进程内锁（`worker/execution/ownership.py`），同一
-    execution_id 在本进程内任意时刻只有一个 attempt——旧 attempt 的
-    收尾与新 attempt 的 prepare 串行化，时序窗口整体消除。等锁是有界
-    等待（`MUTEX_WAIT_BOUND_SECONDS` = 60s，按 90s 租约 TTL 基线留出
-    两个批量心跳拍，够旧 attempt 收到 409 并完成收尾）：超时说明心跳
-    面仍瘫痪、本 claim 的 lease 在 Host 侧已死或濒死，放弃本次 claim
-    （不 prepare、不上报、不启动心跳），租约过期后由 Host 在 worker
-    恢复健康时重排。
-- Host 侧心跳饿死止血（issue #566 一期）：worker 过载时进程内心跳
-  daemon 线程抢不到 GIL 被饿死，心跳静默超过租约 TTL，而控制面（claim
-  轮询）仍在正常触活 `agent_workers.last_seen_at`——旧 sweep 把「执行面
-  心跳饿死」误判为「worker 死亡」，同一 sweep 批量过期 → 重排队 → 立即
-  重 claim → 负载更高的死亡螺旋。`sweep_expired_claims` 的过期判定现在
-  参考 worker 控制面存活：对越过 TTL 的 claimed/reporting execution，
-  若其 worker 的 `last_seen_at` 仍在 online 窗口内（复用
-  `ONLINE_THRESHOLD_SECONDS` 口径，与 code_dispatch 一致），本次不删
-  租约、不重排队，打一条按 TTL 分桶降采样的 WARNING 让 execution 续命，
-  worker 心跳面恢复后下一拍心跳即续期自愈。延期有硬兜底：心跳静默超过
-  2×TTL（grace = TTL，严格小于）照常过期——worker 活着但某 attempt
-  线程真死的场景不会永远挂着；控制面不新鲜（worker 真离线）行为完全
-  不变。延期跳过的行既不计入 requeued 也不计入 done 的 runtime
-  profile 口径。已知盲区（留二期）：worker 的 claim 循环只在领取预算
-  为正时发 HTTP（`drain_budget` 按 `budget > 0` 循环），槽位占满 /
-  `claim_enabled` 关闭 / 上传背压钳零时预算为 0、零控制面流量，
-  `last_seen_at` 只剩心跳触活与结果提交触活——「全部槽位占满 + 心跳
-  饿死」的纯饱和场景下控制面 30s 后照样 stale，延期分支不生效、回落
-  旧行为（失败方向安全，不留僵尸容量）；二期方向是 worker 侧在预算
-  为 0 时发轻量 keepalive。
+- Worker 双 attempt 竞态修复（issue #564）：worker 过载时批量心跳被饿死，Host 误判租约过期重排队，同一 worker 立刻重新 claim 同一 execution_id 而旧 attempt 线程仍存活；旧 attempt 的丢弃收尾仅检查 pending-upload marker 就 rmtree 整个 execution_dir，删掉新 attempt 刚重建、正在使用的目录，新 attempt 写 prompt.md 时 FileNotFoundError。两层修法：
+  - **归属标记**：prepare 重建目录后立刻写入 `execution_owner.json`（claim 的 lease_id，agent 与 code 两条路径同）；丢弃收尾只在标记仍指向自己的 lease 时才 rmtree——标记易主（目录已被新 attempt 占用）或缺失/损坏一律跳过删除，证明不了归属的孤儿目录归 startup clean_work_root / stale sweeper 清理（与 #203 的 pending marker 先例同构）。
+  - **per-execution 互斥锁**：`run_execution` 全程持有按 execution_id 引用计数的进程内锁（`worker/execution/ownership.py`），同一 execution_id 在本进程内任意时刻只有一个 attempt——旧 attempt 的收尾与新 attempt 的 prepare 串行化，时序窗口整体消除。等锁是有界等待（`MUTEX_WAIT_BOUND_SECONDS` = 60s，按 90s 租约 TTL 基线留出两个批量心跳拍，够旧 attempt 收到 409 并完成收尾）：超时说明心跳面仍瘫痪、本 claim 的 lease 在 Host 侧已死或濒死，放弃本次 claim（不 prepare、不上报、不启动心跳），租约过期后由 Host 在 worker 恢复健康时重排。
+- Host 侧心跳饿死止血（issue #566 一期）：worker 过载时进程内心跳 daemon 线程抢不到 GIL 被饿死，心跳静默超过租约 TTL，而控制面（claim 轮询）仍在正常触活 `agent_workers.last_seen_at`——旧 sweep 把「执行面心跳饿死」误判为「worker 死亡」，同一 sweep 批量过期 → 重排队 → 立即重 claim → 负载更高的死亡螺旋。`sweep_expired_claims` 的过期判定现在参考 worker 控制面存活：对越过 TTL 的 claimed/reporting execution，若其 worker 的 `last_seen_at` 仍在 online 窗口内（复用 `ONLINE_THRESHOLD_SECONDS` 口径，与 code_dispatch 一致），本次不删租约、不重排队，打一条按 TTL 分桶降采样的 WARNING 让 execution 续命，worker 心跳面恢复后下一拍心跳即续期自愈。延期有硬兜底：心跳静默超过 2×TTL（grace = TTL，严格小于）照常过期——worker 活着但某 attempt 线程真死的场景不会永远挂着；控制面不新鲜（worker 真离线）行为完全不变。延期跳过的行既不计入 requeued 也不计入 done 的 runtime profile 口径。已知盲区（留二期）：worker 的 claim 循环只在领取预算为正时发 HTTP（`drain_budget` 按 `budget > 0` 循环），槽位占满 / `claim_enabled` 关闭 / 上传背压钳零时预算为 0、零控制面流量，`last_seen_at` 只剩心跳触活与结果提交触活——「全部槽位占满 + 心跳饿死」的纯饱和场景下控制面 30s 后照样 stale，延期分支不生效、回落旧行为（失败方向安全，不留僵尸容量）；二期方向是 worker 侧在预算为 0 时发轻量 keepalive。
 - Worker 心跳与执行负载解耦（issue #566 二期+三期）：
-  - **心跳 relay 挪到 supervisor 进程**：批量租约心跳不再跑在
-    executor 进程内的 daemon 线程（机器饱和时抢不到 GIL，一期 deferral
-    兜底的根因场景）。executor 按拍（2s 节流）把可续租约集合原子落盘
-    为 `lease_snapshot.json`（含 worker token，mode 600，与 register
-    token 同信任域）；supervisor 进程内的常驻 relay 线程
-    （`worker/heartbeat_relay.py`）按快照发批量心跳（含 404/405 降级
-    逐条、401 丢缓存 client 等 token 轮换），把 Host 的 lost/cancelled
-    裁定写回 `lease_beat_result.json`，executor 主循环按 seq 幂等应用
-    （lost 按 (execution_id, lease_id) 对匹配，重 claim 的新 attempt
-    不被旧裁定误伤）。安全栏：relay 只在快照 pid 存活且快照新鲜
-    （60s 停滞即停拍）时续租——executor 脑死时租约按 Host TTL 正常
-    过期重排，不会被冻结快照永远续命；但停拍 ≠ 失联：停滞期间 relay
-    继续用不续租的轻量已认证 ping（get_self → record_seen）维持控制
-    面新鲜（PR #572 codex P1——否则 last_seen_at 30s 后 stale，一期
-    deferral 无法区分执行面饥饿与 worker 真离线，故障只被延后约
-    60s），最终回收由 Host 侧 2×TTL 硬兜底负责。executor 换代（快照
-    pid 变化）自动重探批量端点，降级不终身化。裸跑 executor（无快照
-    env）保持原进程内心跳循环。
-  - **relay 存活看门狗**（PR #572 复审）：relay 每拍（含空裁定与瞬时
-    失败）都重写结果文件并递增 seq 作为存活证明；executor 侧
-    `worker/relay_sync.py` 的看门狗在持有租约而 seq 停跳超阈值
-    （3×relay 拍间隔、下限 60s）时打一条 WARNING——区分「relay 活着
-    无裁定」与「relay 死亡/supervisor 挂起」（后者租约静默过期会双跑）。
-    纯观测信号，不改结果语义。relay 线程生命周期锚在 service
-    lifespan（PR #572 P2：service 停时 set+join 终止 relay、重建于下次
-    启动——不再累积线程，停后 relay 也不会把已关闭的滚动日志惰性重开；
-    sink 因此获得 close/resume 语义）。
-  - **一期盲区闭合**：relay 的每拍心跳都经 Host 鉴权路径触活
-    `last_seen_at`，executor 整体饱和时控制面依然新鲜，一期 deferral
-    在纯饱和场景也能生效（实测复核：budget=0 时 executor 主循环的
-    状态同步 get_self 本就每拍触活，真正残留缺口只有 executor 进程
-    级饥饿，由 relay 覆盖）。
-  - **executor stdout 滚动持久化**：面板日志行（executor stdout +
-    supervisor 生命周期）从仅有 500 行内存 deque 变为同时写滚动文件
-    （10MB×5 轮转；state dir 在 `data/` 下时落
-    `data/logs/executor-<state dir 名>.log`——文件名带 state dir 名，
-    两个 state dir 同机共存不互踩；否则 `<state_dir>/logs/`），写失败
-    降级为仅内存并报一次错，不影响采集线程。
-  - **claim 负载回压 + 容量告警**：claim 预算按 1 分钟 load average
-    衰减（≤核数不衰减，1×→3×核线性降至 0.25 下限——永不为零，共享/
-    高负载机器上补位减速不停摆；预算应用向上取整，正预算至少保 1 槽；
-    `os.getloadavg` 5s 缓存采样，不支持的平台直通不衰减），衰减/恢复
-    跨档各打一条日志；回压只作用本地预算、不动对 Host 的声明容量。
-    `max_concurrency` 超过 核数×4 时启动打 WARNING
-    （`worker/load_shedding.py`）。
+  - **心跳 relay 挪到 supervisor 进程**：批量租约心跳不再跑在 executor 进程内的 daemon 线程（机器饱和时抢不到 GIL，一期 deferral 兜底的根因场景）。executor 按拍（2s 节流）把可续租约集合原子落盘为 `lease_snapshot.json`（含 worker token，mode 600，与 register token 同信任域）；supervisor 进程内的常驻 relay 线程（`worker/heartbeat_relay.py`）按快照发批量心跳（含 404/405 降级逐条、401 丢缓存 client 等 token 轮换），把 Host 的 lost/cancelled 裁定写回 `lease_beat_result.json`，executor 主循环按 seq 幂等应用（lost 按 (execution_id, lease_id) 对匹配，重 claim 的新 attempt 不被旧裁定误伤）。安全栏：relay 只在快照 pid 存活且快照新鲜（60s 停滞即停拍）时续租——executor 脑死时租约按 Host TTL 正常过期重排，不会被冻结快照永远续命；但停拍 ≠ 失联：停滞期间 relay 继续用不续租的轻量已认证 ping（get_self → record_seen）维持控制面新鲜（PR #572 codex P1——否则 last_seen_at 30s 后 stale，一期 deferral 无法区分执行面饥饿与 worker 真离线，故障只被延后约 60s），最终回收由 Host 侧 2×TTL 硬兜底负责。executor 换代（快照 pid 变化）自动重探批量端点，降级不终身化。裸跑 executor（无快照 env）保持原进程内心跳循环。
+  - **relay 存活看门狗**（PR #572 复审）：relay 每拍（含空裁定与瞬时失败）都重写结果文件并递增 seq 作为存活证明；executor 侧 `worker/relay_sync.py` 的看门狗在持有租约而 seq 停跳超阈值（3×relay 拍间隔、下限 60s）时打一条 WARNING——区分「relay 活着无裁定」与「relay 死亡/supervisor 挂起」（后者租约静默过期会双跑）。纯观测信号，不改结果语义。relay 线程生命周期锚在 service lifespan（PR #572 P2：service 停时 set+join 终止 relay、重建于下次启动——不再累积线程，停后 relay 也不会把已关闭的滚动日志惰性重开；sink 因此获得 close/resume 语义）。
+  - **一期盲区闭合**：relay 的每拍心跳都经 Host 鉴权路径触活 `last_seen_at`，executor 整体饱和时控制面依然新鲜，一期 deferral 在纯饱和场景也能生效（实测复核：budget=0 时 executor 主循环的状态同步 get_self 本就每拍触活，真正残留缺口只有 executor 进程级饥饿，由 relay 覆盖）。
+  - **executor stdout 滚动持久化**：面板日志行（executor stdout + supervisor 生命周期）从仅有 500 行内存 deque 变为同时写滚动文件（10MB×5 轮转；state dir 在 `data/` 下时落 `data/logs/executor-<state dir 名>.log`——文件名带 state dir 名，两个 state dir 同机共存不互踩；否则 `<state_dir>/logs/`），写失败降级为仅内存并报一次错，不影响采集线程。
+  - **claim 负载回压 + 容量告警**：claim 预算按 1 分钟 load average 衰减（≤核数不衰减，1×→3×核线性降至 0.25 下限——永不为零，共享/ 高负载机器上补位减速不停摆；预算应用向上取整，正预算至少保 1 槽；`os.getloadavg` 5s 缓存采样，不支持的平台直通不衰减），衰减/恢复跨档各打一条日志；回压只作用本地预算、不动对 Host 的声明容量。`max_concurrency` 超过 核数×4 时启动打 WARNING（`worker/load_shedding.py`）。
 
 ## [0.7.6] - 2026-09-09
 
 ### Added
-- 容量旋钮收编进 admin 实例设置（issue #509/#554）：两组 Host 侧容量调参
-  从「改 yaml/env + 重启」收编进 DB 实例设置文档（admin 全局设置 UI 可
-  编辑，重启生效，与 `code_capacity` / `workflows.max_items_per_run`
-  同形态）——
-  - `agent_enqueue.workers`（默认 48，上限 256 防误配）/
-    `max_pending`（默认 1024）：Host 入队线程池，#349 P1-1 承诺的
-    「DB 实例设置」处置路径自此真实存在；runtime-profile「入队池饱和」
-    分类指引同步指向 admin 实例设置。
-  - `result_unpack.workers`（0 = 自动 min(4, 核数)，上限 64）：
-    result 解包进程池尺寸（#552 下沉）；启动水合后 configure 惰性建池
-    自然读到配置值。env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 保留为
-    覆盖通道（过渡期）。
-  - 存量文档缺键回退代码默认，无数据迁移；`InstanceSettingsDocument`
-    新增 `agent_enqueue` / `result_unpack` 嵌套块，PUT 全文档校验
-    （workers 上限分别 256 / 64）。
-- Worker 在线标记写入间隔收编进 admin 实例设置（issue #561，照
-  #509/#554 模子）：#555 引入的
-  `executor_runtime.agent_claim.worker_touch_interval_seconds`（默认
-  30s，0 = 恢复逐次写）新增 `agent_claim` 嵌套块进实例设置文档，
-  restart-effective（水合先于 broker 组装）；admin UI「队列与解包容量」
-  组以用户视角命名「Worker 在线标记写入间隔（秒）」，说明不出现
-  touch/last_seen_at 等实现术语。存量文档缺块回退默认 30s。
+- 容量旋钮收编进 admin 实例设置（issue #509/#554）：两组 Host 侧容量调参从「改 yaml/env + 重启」收编进 DB 实例设置文档（admin 全局设置 UI 可编辑，重启生效，与 `code_capacity` / `workflows.max_items_per_run` 同形态）——
+  - `agent_enqueue.workers`（默认 48，上限 256 防误配）/ `max_pending`（默认 1024）：Host 入队线程池，#349 P1-1 承诺的「DB 实例设置」处置路径自此真实存在；runtime-profile「入队池饱和」分类指引同步指向 admin 实例设置。
+  - `result_unpack.workers`（0 = 自动 min(4, 核数)，上限 64）：result 解包进程池尺寸（#552 下沉）；启动水合后 configure 惰性建池自然读到配置值。env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 保留为覆盖通道（过渡期）。
+  - 存量文档缺键回退代码默认，无数据迁移；`InstanceSettingsDocument` 新增 `agent_enqueue` / `result_unpack` 嵌套块，PUT 全文档校验（workers 上限分别 256 / 64）。
+- Worker 在线标记写入间隔收编进 admin 实例设置（issue #561，照 #509/#554 模子）：#555 引入的 `executor_runtime.agent_claim.worker_touch_interval_seconds`（默认 30s，0 = 恢复逐次写）新增 `agent_claim` 嵌套块进实例设置文档，restart-effective（水合先于 broker 组装）；admin UI「队列与解包容量」组以用户视角命名「Worker 在线标记写入间隔（秒）」，说明不出现 touch/last_seen_at 等实现术语。存量文档缺块回退默认 30s。
 
 ### Performance
 - claim 锁面修复（issue #555，#546 回归的根治项）——三处叠加修法：
-  - **扫描移出锁窗口**：batch claim 拆成「只读选候选」
-    （`claim_batch_select.py`，read-only 连接、零锁）+「紧凑写入」
-    （`claim_batch_tx.py` 只跑重校验 + promote）两段——不再拿着
-    `agent-ws:*` / `agent-worker:*` advisory xact 锁与行锁跑
-    `fetch_candidates` 扫描，持锁窗口从 O(批×扫描) 收回 O(纯写入)。
-    选择段与写入段之间的竞态窗口由写入段逐候选重校验兜底
-    （SKIP LOCKED 行探针 / job 状态重查 / 容量门 / 条件 promote），
-    过期候选判 stale/raced 跳过，绝不半应用。锁前准入过滤单源化到
-    `claim_admission.py`（单条与批两路共用，消除双轨漂移）。
-  - **claim 不再重锁 running 的 jobs 行**：jobs promote 收窄为
-    `where status='queued'`；多节点 job 的后继节点 claim 不再对同一
-    热行做值不变的重写+重锁。rowcount=0 的两种语义（已 running
-    vs 竞态出局）经 `FOR NO KEY UPDATE` 重读区分——与在飞的并发
-    pause 串行化但不重写元组（review P1），后者仍判 ClaimRacedError
-    回滚。
-  - **touch_worker 节流**：claim promote 与 `mark_done` 的
-    `agent_workers.last_seen_at` 写入改为距上次落盘超过
-    `executor_runtime.agent_claim.worker_touch_interval_seconds`
-    （默认 30s，0 = 恢复每次写）才写，谓词在 UPDATE 里——命中节流的
-    touch 不匹配行、不取行锁；活性由 heartbeat 通道与 authenticate
-    路径的 WorkerLiveness（#88）覆盖。heartbeat 路径不节流。
+  - **扫描移出锁窗口**：batch claim 拆成「只读选候选」（`claim_batch_select.py`，read-only 连接、零锁）+「紧凑写入」（`claim_batch_tx.py` 只跑重校验 + promote）两段——不再拿着 `agent-ws:*` / `agent-worker:*` advisory xact 锁与行锁跑 `fetch_candidates` 扫描，持锁窗口从 O(批×扫描) 收回 O(纯写入)。选择段与写入段之间的竞态窗口由写入段逐候选重校验兜底（SKIP LOCKED 行探针 / job 状态重查 / 容量门 / 条件 promote），过期候选判 stale/raced 跳过，绝不半应用。锁前准入过滤单源化到 `claim_admission.py`（单条与批两路共用，消除双轨漂移）。
+  - **claim 不再重锁 running 的 jobs 行**：jobs promote 收窄为 `where status='queued'`；多节点 job 的后继节点 claim 不再对同一热行做值不变的重写+重锁。rowcount=0 的两种语义（已 running vs 竞态出局）经 `FOR NO KEY UPDATE` 重读区分——与在飞的并发 pause 串行化但不重写元组（review P1），后者仍判 ClaimRacedError 回滚。
+  - **touch_worker 节流**：claim promote 与 `mark_done` 的 `agent_workers.last_seen_at` 写入改为距上次落盘超过 `executor_runtime.agent_claim.worker_touch_interval_seconds`（默认 30s，0 = 恢复每次写）才写，谓词在 UPDATE 里——命中节流的 touch 不匹配行、不取行锁；活性由 heartbeat 通道与 authenticate 路径的 WorkerLiveness（#88）覆盖。heartbeat 路径不节流。
 
 ## [0.7.5] - 2026-09-09
 
 ### Performance
-- result 提交的解包 CPU 段下沉进程池（issue #552，#521 根治项）：0.7.4 的
-  batch claim 把执行面跑满后，完成波把 Host 单进程的 GIL 竞争推成新瓶颈
-  ——result commit 的 tar/gzip 解包 + member 校验（`unpack_agent_result`）
-  与 HTTP 面抢同一核，实测单核上限个位数 result/s、result POST 延迟恶化
-  一个数量级、worker 上传队列积压并触发 90s 租约重发。修法：
-  `unpack_agent_result` 是纯路径函数（无 DB 句柄/共享态），原样下沉
-  `ProcessPoolExecutor`（默认 min(4, 核数)，`AGENT_LEGION_RESULT_UNPACK_WORKERS`
-  可调）——调用线程停在 future.result() 的 GIL 释放等待上，N 核并行解包；
-  坏包炸子进程不炸 HTTP 主进程；`finish`/`mark_done` 的短 DB 事务留在主
-  进程。回归测试：池内真实解包 promote、坏包异常跨进程回传且池存活。
+- result 提交的解包 CPU 段下沉进程池（issue #552，#521 根治项）：0.7.4 的 batch claim 把执行面跑满后，完成波把 Host 单进程的 GIL 竞争推成新瓶颈——result commit 的 tar/gzip 解包 + member 校验（`unpack_agent_result`）与 HTTP 面抢同一核，实测单核上限个位数 result/s、result POST 延迟恶化一个数量级、worker 上传队列积压并触发 90s 租约重发。修法：`unpack_agent_result` 是纯路径函数（无 DB 句柄/共享态），原样下沉 `ProcessPoolExecutor`（默认 min(4, 核数)，`AGENT_LEGION_RESULT_UNPACK_WORKERS` 可调）——调用线程停在 future.result() 的 GIL 释放等待上，N 核并行解包；坏包炸子进程不炸 HTTP 主进程；`finish`/`mark_done` 的短 DB 事务留在主进程。回归测试：池内真实解包 promote、坏包异常跨进程回传且池存活。
 
 ### Added
 - 供给-消费全链路观测（issue #551）：
-  - Worker 新事件 `execution.reported`（每上传任务一条）：
-    queue_wait / prepare / transfer / report_wait / report 五段墙钟 +
-    outcome（delivered/rejected/aborted）+ archive_bytes——上传管线从
-    黑盒变成可分段定位；rejected（409）即租约重发的重复执行指纹。
-  - Host claim 画像族新增 `queue_wait` 段（queued_at→promote 的供给延迟，
-    per-promote 折叠，批内逐条计入；schema v81 落
-    `claim_queue_wait_seconds_total/max` 两列），与既有 claim 阶段拆分
-    （#448）、result 分段（#521）、enqueue 池深度（`enqueue_pending`）
-    合成完整链路画像。
+  - Worker 新事件 `execution.reported`（每上传任务一条）：queue_wait / prepare / transfer / report_wait / report 五段墙钟 + outcome（delivered/rejected/aborted）+ archive_bytes——上传管线从黑盒变成可分段定位；rejected（409）即租约重发的重复执行指纹。
+  - Host claim 画像族新增 `queue_wait` 段（queued_at→promote 的供给延迟，per-promote 折叠，批内逐条计入；schema v81 落 `claim_queue_wait_seconds_total/max` 两列），与既有 claim 阶段拆分（#448）、result 分段（#521）、enqueue 池深度（`enqueue_pending`）合成完整链路画像。
   - runbook §7 新增供给-消费链排障表（现象 → 指标列 → 判读）。
 
 ### 结构性拆分（预算纪律，无行为变化）
-- `claim_evaluate.py` 的 promote 写入段 → `claim_promote.py`；
-  `worker/upload/queue.py` 的 UploadTask → `worker/upload/task.py`（import
-  路径不变，re-export）；`migration_chain.py` 的 SchemaMigration →
-  `migration_entry.py`。claim_evaluate / migration_chain /
-  worker/upload/queue 三个文件的 file_budget 豁免随拆分移除。
+- `claim_evaluate.py` 的 promote 写入段 → `claim_promote.py`；`worker/upload/queue.py` 的 UploadTask → `worker/upload/task.py`（import 路径不变，re-export）；`migration_chain.py` 的 SchemaMigration →`migration_entry.py`。claim_evaluate / migration_chain / worker/upload/queue 三个文件的 file_budget 豁免随拆分移除。
 
 ## [0.7.4] - 2026-09-08
 
 ### Performance
-- batch claim（issue #546，hot-fix）：`POST /api/agent-executions/claim` 支持
-  批领取——Worker 一次往返按分池申请（`agent_limit` / `code_limit` +
-  总上限 `limit`）领至多 N 个执行，Host 在**一个写事务**内 promote
-  （复用既有扫描阶梯、fairness 轮转、per-kind 尝试预算与跳过语义），
-  补充速率上限从 ~350/分钟抬到数千/分钟。0.7.3 后实测触发条件已命中：
-  瞬时 code 节点（0 秒执行）的自我吞噬循环把 claim 循环节拍吃掉一半
-  以上，agent 容量爬不上去（供给与欲望都在，卡的是循环带宽）；批领取
-  把节拍消耗从 N 次 RTT 降为 1 次。事务语义：`ClaimRacedError`（job
-  中途离场）在批内经 SAVEPOINT 只回滚当前候选、保留前 k 个并终止本
-  批，不再整事务回滚；其余候选级冲突（capacity_raced / shard 去重 /
-  lock_raced）沿用既有跳过语义。兼容：缺省 `limit=1` 走原单条路径、
-  响应逐字节不变；旧 Host 忽略批字段返回单条，新 Worker 形状嗅探自动
-  回落逐条领取（混合舰队无协议版本 bump）。Worker 侧批大小由
-  `claim_batch_limit`（默认 32，上限 256，热更）封顶，爬坡/背压/越池
-  抑制经预算天然作用于批大小；pacing 输入改为批 RTT ÷ 批大小的等效
-  单条 RTT（#472 自适应语义保留）。Host 侧硬顶 256/批
-  （`agent_broker.claim_batch.MAX_BATCH_CLAIMS`，与批量心跳同纪律）。
-  回归测试：limit=1 响应形状、批 promote/分池钳制/workspace 容量批内
-  记账/竞态保留前 k 个/空批 204/混合舰队回落。
-- enqueue 备货池默认并发 16 → 48（`executor_runtime.agent_enqueue.workers`）：
-  batch claim 把消费侧抬到数千/分钟后供给侧（~1s/单的 staging+bundling
-  闭包）成为瓶颈，实测备货池跟不上；每个闭包以 IO 为主，吞吐随 workers
-  线性扩。
+- batch claim（issue #546，hot-fix）：`POST /api/agent-executions/claim` 支持批领取——Worker 一次往返按分池申请（`agent_limit` / `code_limit` + 总上限 `limit`）领至多 N 个执行，Host 在**一个写事务**内 promote（复用既有扫描阶梯、fairness 轮转、per-kind 尝试预算与跳过语义），补充速率上限从 ~350/分钟抬到数千/分钟。0.7.3 后实测触发条件已命中：瞬时 code 节点（0 秒执行）的自我吞噬循环把 claim 循环节拍吃掉一半以上，agent 容量爬不上去（供给与欲望都在，卡的是循环带宽）；批领取把节拍消耗从 N 次 RTT 降为 1 次。事务语义：`ClaimRacedError`（job 中途离场）在批内经 SAVEPOINT 只回滚当前候选、保留前 k 个并终止本批，不再整事务回滚；其余候选级冲突（capacity_raced / shard 去重 / lock_raced）沿用既有跳过语义。兼容：缺省 `limit=1` 走原单条路径、响应逐字节不变；旧 Host 忽略批字段返回单条，新 Worker 形状嗅探自动回落逐条领取（混合舰队无协议版本 bump）。Worker 侧批大小由 `claim_batch_limit`（默认 32，上限 256，热更）封顶，爬坡/背压/越池抑制经预算天然作用于批大小；pacing 输入改为批 RTT ÷ 批大小的等效单条 RTT（#472 自适应语义保留）。Host 侧硬顶 256/批（`agent_broker.claim_batch.MAX_BATCH_CLAIMS`，与批量心跳同纪律）。回归测试：limit=1 响应形状、批 promote/分池钳制/workspace 容量批内记账/竞态保留前 k 个/空批 204/混合舰队回落。
+- enqueue 备货池默认并发 16 → 48（`executor_runtime.agent_enqueue.workers`）：batch claim 把消费侧抬到数千/分钟后供给侧（~1s/单的 staging+bundling 闭包）成为瓶颈，实测备货池跟不上；每个闭包以 IO 为主，吞吐随 workers 线性扩。
 
 ## [0.7.3] - 2026-09-08
 
 ### Fixed
-- skill 无契约块时跳过 velites spawn（issue #538，hot-fix）：#521 落地的
-  result 提交分段观测发现 validate 段秒级延迟的真因——契约引擎
-  （`velites-sandbox validate`）每次 result 都 spawn 一轮，而当前 skills
-  普遍不含 `yaml contract` 机器可读契约块（`references/output-contract.md`
-  里只有 prose 与示例围栏），引擎空转（mode=existence 无裁决）纯耗服务
-  时间，波峰排队下 validate 段上秒。
-  修法：`server/app/workflows/output_contract_engine.py` 在 spawn 前进程
-  内探测契约块（与 velites 同语义：strip 后恰为 ```yaml contract 的
-  fence 行；无 `output-contract.md` → 无块），无块直接返回 None（None
-  通道不变，legacy `validate_output.py` 照跑，Host 行为等价于今天的
-  existence 回落），有块照常 spawn 由 velites 权威裁决（包括未闭合
-  fence 等病态输入——探测层宁可误报让引擎 fail-closed，不做降级放
-  水）。回归测试：无块/无文档不 spawn、有块照常 spawn、围栏变体
-  （```yaml 不算、```yaml contract 算、大小写敏感）、未闭合 fence 与
-  不可读文档仍 spawn。预期 validate 段分钟均值回到亚秒位。
-- Worker claim 循环的分池预算泄漏（issue #534，hot-fix）：循环条件
-  `budget["agent"] + budget["code"] > 0` 两池求和、扣减只扣实际领到的
-  池——agent 池被爬坡/容量打满/上传背压钳到 0 而 code 池有预算时，
-  agent 领取把 agent 预算扣成负值并借 code 预算继续循环（实测 -31），
-  #471 爬坡门被完全绕过（冷启动 running 远超档位、claim 不受限）；
-  Host 侧按 #501 声明的目标容量记账也不拦，本地预算是唯一的门。修
-  为按池判定（`or`）+ 领到已尽池的活照单收下一个（Host 已记账，与
-  「竞态超发照单收下」语义一致）后终止本轮。回归测试：泄漏场景
-  （旧代码复现 agent_budget -1/-2/… 负值序列）+ code 池对照组；纯
-  code / 纯 agent 场景行为不变。
-- 越池 claim 的悬挂租约（#535 codex P1 复审，#534 修复的修复）：
-  守卫原本放在 `pool.submit` 之前——Host 已记 claimed 的越池执行不被
-  提交（不跑/不心跳/不报结果，只能等租约过期），爬坡期 Host 持续发
-  活会逐轮累积悬挂租约。「照单收下」的语义必须含提交执行：break 移
-  到 submit/active 记账之后。回归测试钉住「每个 claim 必被 submit」
-  （旧形态复现：1 submitted vs 102 claims）；claim-loop 回归用例拆到
-  姊妹文件 `test_agent_worker_claim_loop.py`（原文件 942 行，codex P2）。
-- 越池抑制需跨 pass 生效且必须压 claim 声明容量（PR #539 codex 复审
-  二轮 P1 + review P2-1）：仅 break 当前 pass 不够——Host 按「active
-  < 声明容量」分池发活（#501 声明的是目标容量，不随爬坡档位走），
-  本地预算只能 break 单个 pass，不压声明的话 Host 每个 pass 都会再发
-  一个越池的活，running 一路爬到声明容量，ramp-up/背压同样被绕过。
-  修复：**真越池**（预算已尽却领到该池的活，领取使预算转负）时把该
-  池记入 `pool_deferred`，抑制期间该池 claim 声明压到
-  `min(活跃数, 目标)`（Host 分池门即关闭）、预算视为 0；正常领满
-  （预算 1 → 领取 → 0）不是越池，不抑制、不终止 pass——否则 ramp
-  满档窗口声明容量会跌到档位值并随补位振荡，违反 #501「声明不随
-  档位抖」（触发面必须用 `< 0` 而非 `<= 0` 判定）。解除面 = 该池
-  「未被抑制时的预算」转正（avail > 0：执行完成/档位推进/背压消退
-  ——比 base > 0 更严，背压钳 0 时 base 仍可 > 0，此时解除会立刻再
-  越池），解除后声明回声目标容量。预算/声明推导收口到新模块
-  `worker/claim_budget.py`（文件预算治理；`pass_budget` 对
-  `pool_deferred` 的 discard 解除是显式 mutate 契约——executor 负责
-  add、解除面与预算数学同址）。回归测试用 Host 分池记账的保真 fake
-  （按声明容量发活、报果归还能名额）钉住：真越池抑制期间声明恒为
-  (活跃数, 目标) 且不再被授权、执行完成后恢复；正常领满双池满档
-  窗口声明恒为目标容量。
+- skill 无契约块时跳过 velites spawn（issue #538，hot-fix）：#521 落地的 result 提交分段观测发现 validate 段秒级延迟的真因——契约引擎（`velites-sandbox validate`）每次 result 都 spawn 一轮，而当前 skills 普遍不含 `yaml contract` 机器可读契约块（`references/output-contract.md` 里只有 prose 与示例围栏），引擎空转（mode=existence 无裁决）纯耗服务时间，波峰排队下 validate 段上秒。修法：`server/app/workflows/output_contract_engine.py` 在 spawn 前进程内探测契约块（与 velites 同语义：strip 后恰为 ```yaml contract 的 fence 行；无 `output-contract.md` → 无块），无块直接返回 None（None 通道不变，legacy `validate_output.py` 照跑，Host 行为等价于今天的 existence 回落），有块照常 spawn 由 velites 权威裁决（包括未闭合 fence 等病态输入——探测层宁可误报让引擎 fail-closed，不做降级放水）。回归测试：无块/无文档不 spawn、有块照常 spawn、围栏变体（```yaml 不算、```yaml contract 算、大小写敏感）、未闭合 fence 与不可读文档仍 spawn。预期 validate 段分钟均值回到亚秒位。
+- Worker claim 循环的分池预算泄漏（issue #534，hot-fix）：循环条件 `budget["agent"] + budget["code"] > 0` 两池求和、扣减只扣实际领到的池——agent 池被爬坡/容量打满/上传背压钳到 0 而 code 池有预算时，agent 领取把 agent 预算扣成负值并借 code 预算继续循环（实测 -31），#471 爬坡门被完全绕过（冷启动 running 远超档位、claim 不受限）；Host 侧按 #501 声明的目标容量记账也不拦，本地预算是唯一的门。修为按池判定（`or`）+ 领到已尽池的活照单收下一个（Host 已记账，与「竞态超发照单收下」语义一致）后终止本轮。回归测试：泄漏场景（旧代码复现 agent_budget -1/-2/… 负值序列）+ code 池对照组；纯 code / 纯 agent 场景行为不变。
+- 越池 claim 的悬挂租约（#535 codex P1 复审，#534 修复的修复）：守卫原本放在 `pool.submit` 之前——Host 已记 claimed 的越池执行不被提交（不跑/不心跳/不报结果，只能等租约过期），爬坡期 Host 持续发活会逐轮累积悬挂租约。「照单收下」的语义必须含提交执行：break 移到 submit/active 记账之后。回归测试钉住「每个 claim 必被 submit」（旧形态复现：1 submitted vs 102 claims）；claim-loop 回归用例拆到姊妹文件 `test_agent_worker_claim_loop.py`（原文件 942 行，codex P2）。
+- 越池抑制需跨 pass 生效且必须压 claim 声明容量（PR #539 codex 复审二轮 P1 + review P2-1）：仅 break 当前 pass 不够——Host 按「active < 声明容量」分池发活（#501 声明的是目标容量，不随爬坡档位走），本地预算只能 break 单个 pass，不压声明的话 Host 每个 pass 都会再发一个越池的活，running 一路爬到声明容量，ramp-up/背压同样被绕过。修复：**真越池**（预算已尽却领到该池的活，领取使预算转负）时把该池记入 `pool_deferred`，抑制期间该池 claim 声明压到 `min(活跃数, 目标)`（Host 分池门即关闭）、预算视为 0；正常领满（预算 1 → 领取 → 0）不是越池，不抑制、不终止 pass——否则 ramp 满档窗口声明容量会跌到档位值并随补位振荡，违反 #501「声明不随档位抖」（触发面必须用 `< 0` 而非 `<= 0` 判定）。解除面 = 该池「未被抑制时的预算」转正（avail > 0：执行完成/档位推进/背压消退——比 base > 0 更严，背压钳 0 时 base 仍可 > 0，此时解除会立刻再越池），解除后声明回声目标容量。预算/声明推导收口到新模块 `worker/claim_budget.py`（文件预算治理；`pass_budget` 对 `pool_deferred` 的 discard 解除是显式 mutate 契约——executor 负责 add、解除面与预算数学同址）。回归测试用 Host 分池记账的保真 fake（按声明容量发活、报果归还能名额）钉住：真越池抑制期间声明恒为 (活跃数, 目标) 且不再被授权、执行完成后恢复；正常领满双池满档窗口声明恒为目标容量。
 
 ## [0.7.2] - 2026-09-08
 
 ### Added
-- Host 单进程 result 提交路径分段耗时观测（issue #521，复用 #448 claim
-  拆分模式）：`server/app/agent_broker/result_timing.py` 把一次 result
-  commit 切成 unpack（tar/gzip 解包）/ artifacts_verify（Worker 直传
-  产物 S3 校验/下载/晋升）/ validate（Host 侧输出校验）/
-  artifacts_upload（本地产物镜像）/ lease_write（lease 终态写事务）/
-  events（events.jsonl token 用量解析 + PI 压缩——两次全量扫描的现状
-  数据，0.7.3 单遍合并的立项依据）/ mark_done（请求终态写事务）七段，
-  每段一次 perf_counter + 一次 dict 写；每次 commit 输出一条阶段分解
-  日志（DEBUG 常态，超过 `AGENT_LEGION_SLOW_RESULT_MS`（默认 15s）升
-  WARNING）；分段折叠进 #359 运行画像（schema v80
-  `result_stage_profile`，`ops_runtime_profile_samples` 落 14 列
-  total+max，列只放迁移的 guarded ALTER 沿 v78 DDL 归属先例），采样/
-  查询/契约/generated types 全链路打通；profile 折叠经 lazy import +
-  best-effort 吞错，观测永不打断被观测的 commit。
-- 遗留绝对路径一次性清理（issue #521 / #37）：启动时后台线程把
-  `node_runs.log_path/run_dir/session_dir`、`jobs.storage_dir` 中
-  `<data-dir-name>/<managed-category>/` 后缀可映射的存量绝对路径行重写
-  为 data-dir 相对（复用 `resolve_data_path` 的后缀重定基规则，行访问
-  走 JobQueries 门面 `jobs/queries/path_hygiene.py`——BOUNDARY-DATA-001，
-  分块小事务、失败下次启动续跑、幂等由选取条件自带）；不可映射行保留
-  并继续由启动报告暴露。修数据而非反复警告。
+- Host 单进程 result 提交路径分段耗时观测（issue #521，复用 #448 claim 拆分模式）：`server/app/agent_broker/result_timing.py` 把一次 result commit 切成 unpack（tar/gzip 解包）/ artifacts_verify（Worker 直传产物 S3 校验/下载/晋升）/ validate（Host 侧输出校验）/ artifacts_upload（本地产物镜像）/ lease_write（lease 终态写事务）/ events（events.jsonl token 用量解析 + PI 压缩——两次全量扫描的现状数据，0.7.3 单遍合并的立项依据）/ mark_done（请求终态写事务）七段，每段一次 perf_counter + 一次 dict 写；每次 commit 输出一条阶段分解日志（DEBUG 常态，超过 `AGENT_LEGION_SLOW_RESULT_MS`（默认 15s）升 WARNING）；分段折叠进 #359 运行画像（schema v80 `result_stage_profile`，`ops_runtime_profile_samples` 落 14 列 total+max，列只放迁移的 guarded ALTER 沿 v78 DDL 归属先例），采样/ 查询/契约/generated types 全链路打通；profile 折叠经 lazy import + best-effort 吞错，观测永不打断被观测的 commit。
+- 遗留绝对路径一次性清理（issue #521 / #37）：启动时后台线程把 `node_runs.log_path/run_dir/session_dir`、`jobs.storage_dir` 中 `<data-dir-name>/<managed-category>/` 后缀可映射的存量绝对路径行重写为 data-dir 相对（复用 `resolve_data_path` 的后缀重定基规则，行访问走 JobQueries 门面 `jobs/queries/path_hygiene.py`——BOUNDARY-DATA-001，分块小事务、失败下次启动续跑、幂等由选取条件自带）；不可映射行保留并继续由启动报告暴露。修数据而非反复警告。
 
 ### Changed
-- 遗留绝对路径警告按存储路径去重（issue #521）：热路径（result
-  commit / claim / 仪表盘读）对同一存量遗留行每次读取都触发
-  `logger.warning` + `warnings.warn`——进程内 set 按存储路径去重后同
-  一路径每进程只警一次（`logger.warning` 的发射是真正的每次 CPU/IO
-  开销，Python 默认 warning filter 只去重 `warnings.warn` 的显示），
-  不同路径各自可见；测试的 per-tmp 路径语义不变。
-- result 提交削峰信号量（issue #521）：完成波（DAG 同相位节点成波报
-  告）下不受限的 GIL 绑定 commit 会打满单进程控制面饿死 claim/心跳，
-  `agent_workers.max_concurrent_result_commits`（默认 16，0 = 关闭的
-  kill-switch，instance settings 文档/契约/hydration 全链路支持、重
-  启生效）经 `server/app/agent_broker/result_gate.py` 以
-  `asyncio.Semaphore` 约束并发 commit 数；spool 不进门（慢速上传不占
-  gate 槽），排队者作为协程等待不占线程池令牌；排队期间 lease 过期走
-  既有 409 → sweeper 收尾语义。代价是波峰期 result 稍慢，换 claim/
-  心跳存活。**注意**：PUT /api/admin/instance-settings 契约新增必填
-  键（沿 max_items_per_run 的「PUT 去默认防静默重置」先例）——缓存的
-  旧设置文档直接 PUT 会 422，需先 GET 再回写；调低
-  AGENT_LEGION_DB_POOL_MAX_SIZE 时注意 gate 与连接池的配比（events
-  段持读连接嵌套开写连接，建议 gate ≤ pool/2）。
-- 运行画像内部拆分（issue #521 顺带，预算棘轮驱动）：stage 计量族
-  （#448 claim + #521 result 的元组与折叠）拆到
-  `runtime_profile/stage_gauges.py`、宽窗 rollup 拆到
-  `runtime_profile/rollup.py`——counters/sampling 回到基线内，#448/
-  #359 的两条 file_budget 豁免随之清账。
+- 遗留绝对路径警告按存储路径去重（issue #521）：热路径（result commit / claim / 仪表盘读）对同一存量遗留行每次读取都触发 `logger.warning` + `warnings.warn`——进程内 set 按存储路径去重后同一路径每进程只警一次（`logger.warning` 的发射是真正的每次 CPU/IO 开销，Python 默认 warning filter 只去重 `warnings.warn` 的显示），不同路径各自可见；测试的 per-tmp 路径语义不变。
+- result 提交削峰信号量（issue #521）：完成波（DAG 同相位节点成波报告）下不受限的 GIL 绑定 commit 会打满单进程控制面饿死 claim/心跳，`agent_workers.max_concurrent_result_commits`（默认 16，0 = 关闭的 kill-switch，instance settings 文档/契约/hydration 全链路支持、重启生效）经 `server/app/agent_broker/result_gate.py` 以 `asyncio.Semaphore` 约束并发 commit 数；spool 不进门（慢速上传不占 gate 槽），排队者作为协程等待不占线程池令牌；排队期间 lease 过期走既有 409 → sweeper 收尾语义。代价是波峰期 result 稍慢，换 claim/ 心跳存活。**注意**：PUT /api/admin/instance-settings 契约新增必填键（沿 max_items_per_run 的「PUT 去默认防静默重置」先例）——缓存的旧设置文档直接 PUT 会 422，需先 GET 再回写；调低 AGENT_LEGION_DB_POOL_MAX_SIZE 时注意 gate 与连接池的配比（events 段持读连接嵌套开写连接，建议 gate ≤ pool/2）。
+- 运行画像内部拆分（issue #521 顺带，预算棘轮驱动）：stage 计量族（#448 claim + #521 result 的元组与折叠）拆到 `runtime_profile/stage_gauges.py`、宽窗 rollup 拆到 `runtime_profile/rollup.py`——counters/sampling 回到基线内，#448/ #359 的两条 file_budget 豁免随之清账。
 
 ## [0.7.1] - 2026-09-07
 
 ### Added
-- Agent 执行侧 JSON 字段级读写原语（issue #518）：velites 新增 opt-in 工具
-  `json`——`op` 三态（`get` 按路径读字段、`set` 写任意 JSON 值、`delete` 删
-  key/数组元素）+ JSON path 语法（`steps[2].content`、`["a key"].sub`）。
-  动机：模型对自己产出的较大 JSON 改单个字段时，整文件重写费 token 且易错，
-  曾退化为 bash heredoc 手写 python 读-改-写（高并发下的不稳定因素）；
-  `get` 缺失路径报 null、`set`/`delete` 对缺失中间 key 报错不自动建，文件
-  写回走 tmp+rename 原子替换（与 write 同协议）、路径沙箱同 write，skill 里
-  各自携带的 `json_patch.py` 应退役。工具目录机制（#476）验证：velites 一处
-  新增工具，catalog 契约测试与 Studio 选项面（opt-in 档）自动跟上。
-- Studio 提示词面板重命名与布局（issue #513）：「平台信封」更名「平台提示词」
-  （说明：根据 workflow 自动生成，不可修改）并上移置顶；「节点指令」更名
-  「节点附加提示词」（说明：内容由用户自由编辑，会追加到平台提示词最后组成
-  完整运行提示词，默认留空）。仅面板命名/文案/顺序调整，prompt 拼装行为
-  不变。
-- Studio 工具选项硬编码根治：velites 工具目录自描述 + per-runtime 动态
-  发现（issue #476，收编 #464-2，合并实现 #449 的 dispatch 校验）。新增
-  `velites tools list --json` 子命令输出工具目录（name/tier/description/
-  parameters，forced 档带 activation）；Host 侧 runtime catalog adapter
-  声明 per-runtime 工具目录（velites 静态镜像与二进制输出全等，跨二进制
-  契约测试钉住；pi 外部 runtime 按实测静态登记三件套），`GET
-  /api/agent-runtimes` 按 runtime 嵌套暴露。tier 三档模型：`default`
-  （read/write/bash，预选中可取消）/ `opt-in`（uuid，显式开启）/
-  `forced`（validate——非用户选择，激活条件 `--require-output` 成立时
-  harness 自动广告，UI 渲染锁定行不提供 checkbox）。velites 侧联动：
-  `--require-output` 非空且首个 skill 目录声明可解析 contract block 时
-  自动把 validate 加入广告工具集（parse error / 无 contract 不激活——
-  模型修不了只读目录里的语法错误）；`--tools validate` 向后兼容为 no-op。
-  dispatch 期工具名校验（#449）：节点级声明优先、Agent 定义兜底，两来源
-  都在 catalog 目录上 fail-fast（未知工具拒发、forced 档静默剔除），
-  Studio 动态选项面与校验同一数据源。AgentEditor 工具选项按所选
-  runtime 动态渲染（默认值不再前端硬编码三件套，来自目录 default 档），
-  runtime 切换后失效工具显式标记并提示剔除（把 dispatch fail-fast 前移
-  到编辑体验）；agent 节点详情补节点级 `tools:` 声明编辑入口（#443 的
-  Studio 补课，空 = 跟随 Agent 定义）。`AgentDefinition.tools` 默认值与
-  API/MCP 三处硬编码统一改从 catalog 目录派生（值不变，单一来源）。
+- Agent 执行侧 JSON 字段级读写原语（issue #518）：velites 新增 opt-in 工具 `json`——`op` 三态（`get` 按路径读字段、`set` 写任意 JSON 值、`delete` 删 key/数组元素）+ JSON path 语法（`steps[2].content`、`["a key"].sub`）。动机：模型对自己产出的较大 JSON 改单个字段时，整文件重写费 token 且易错，曾退化为 bash heredoc 手写 python 读-改-写（高并发下的不稳定因素）；`get` 缺失路径报 null、`set`/`delete` 对缺失中间 key 报错不自动建，文件写回走 tmp+rename 原子替换（与 write 同协议）、路径沙箱同 write，skill 里各自携带的 `json_patch.py` 应退役。工具目录机制（#476）验证：velites 一处新增工具，catalog 契约测试与 Studio 选项面（opt-in 档）自动跟上。
+- Studio 提示词面板重命名与布局（issue #513）：「平台信封」更名「平台提示词」（说明：根据 workflow 自动生成，不可修改）并上移置顶；「节点指令」更名「节点附加提示词」（说明：内容由用户自由编辑，会追加到平台提示词最后组成完整运行提示词，默认留空）。仅面板命名/文案/顺序调整，prompt 拼装行为不变。
+- Studio 工具选项硬编码根治：velites 工具目录自描述 + per-runtime 动态发现（issue #476，收编 #464-2，合并实现 #449 的 dispatch 校验）。新增 `velites tools list --json` 子命令输出工具目录（name/tier/description/ parameters，forced 档带 activation）；Host 侧 runtime catalog adapter 声明 per-runtime 工具目录（velites 静态镜像与二进制输出全等，跨二进制契约测试钉住；pi 外部 runtime 按实测静态登记三件套），`GET /api/agent-runtimes` 按 runtime 嵌套暴露。tier 三档模型：`default`（read/write/bash，预选中可取消）/ `opt-in`（uuid，显式开启）/ `forced`（validate——非用户选择，激活条件 `--require-output` 成立时 harness 自动广告，UI 渲染锁定行不提供 checkbox）。velites 侧联动：`--require-output` 非空且首个 skill 目录声明可解析 contract block 时自动把 validate 加入广告工具集（parse error / 无 contract 不激活——模型修不了只读目录里的语法错误）；`--tools validate` 向后兼容为 no-op。dispatch 期工具名校验（#449）：节点级声明优先、Agent 定义兜底，两来源都在 catalog 目录上 fail-fast（未知工具拒发、forced 档静默剔除），Studio 动态选项面与校验同一数据源。AgentEditor 工具选项按所选 runtime 动态渲染（默认值不再前端硬编码三件套，来自目录 default 档），runtime 切换后失效工具显式标记并提示剔除（把 dispatch fail-fast 前移到编辑体验）；agent 节点详情补节点级 `tools:` 声明编辑入口（#443 的 Studio 补课，空 = 跟随 Agent 定义）。`AgentDefinition.tools` 默认值与 API/MCP 三处硬编码统一改从 catalog 目录派生（值不变，单一来源）。
 
 ## [0.7.0] - 2026-09-06
 
 ### Added
-- Agent Worker 执行链路结构化事件日志（issue #490）：Host 与 Worker 两侧
-  统一 JSON lines 事件（`event` / `ts` + 语义载荷），按 `execution_id` /
-  `worker_id` 对齐时间线。Host 侧 `worker.registered` / `worker.offline`
-  （last_seen 越过 30s 阈值的转移检测，每转移一条）/ `claim.granted` /
-  `claim.empty` / `claim.rejected`（reason 码直读归因：capacity_full /
-  runtime_mismatch / model_mismatch / workspace_not_allowed 等，判定点
-  命名与 claim 逻辑一一对应）/ `execution.finished` /
-  `execution.lease_expired` 落 `agent_legion.worker_events` logger——
-  uvicorn log-config 显式挂载 `agent_legion` logger，转折事件 INFO 默认
-  可见、正常节奏 DEBUG 排障窗口按需拉起；Worker 侧 `claim.attempt` /
-  `claim.backoff` / `execution.completed` / `http.error`（中间层 5xx 的
-  唯一观测位：状态码 + 目标 URL + 截断 body，URL 剥查询串防 token 泄漏）
-  沿 supervisor console 流。uvicorn 访问日志 formatter 补时间戳，跨
-  worker 时间线从行号近似升级为墙钟对齐。事件码表与 reason 对照见
-  remote-execution-runbook §7.1。
-- 冷启动容量爬坡节流 ramp-up（issue #471）：Worker 的 `ramp_up` 配置块
-  （`initial` / `step` / `interval_seconds`，缺省 1 / 1 / 60s；null 或缺
-  块 = 禁用回现状）控制积压释放节奏——发布重启 / claim 重启 / 批量
-  run 提交后恢复调度时，数百个 agent 不再同时发起首次 LLM 请求打满
-  provider。生效容量从 initial 起步、按 interval 阶梯放量到目标后窗口
-  永久关闭；只升不降（窗口内热更更小 initial 不回撤在途档位）；claim
-  暂停期间虚拟时钟不前进（恢复时折回暂停跨度，停领一小时的 Worker
-  恢复后不直接跳到高档）；控制台高级参数区可编辑（未勾选提交 null 即
-  时禁用），容量卡显示「容量爬坡中 e/t」进度。与 claim pacing
-  （#472）正交：pacing 管两次 claim 之间的等待，ramp-up 管本 pass 最多
-  领多少。
-- Worker 一键安装脚本 `scripts/install-worker.sh` + 独立部署编排
-  `deploy/compose.worker.standalone.yaml`：无仓库克隆的机器经
-  `curl | sh` 组装独立 Worker 部署（拉取发布 compose、sha256 校验下载
-  velites 二进制、生成引导 worker.yaml / models.json），幂等语义分层
-  （自有资产刷新到目标版本，用户资产绝不覆盖）；standalone compose
-  新增 `AGENT_WORKER_UI_BIND` / `AGENT_WORKER_UI_PORT` 端口插值。
-- Worker 镜像发布管道（worker-image-release workflow）：`worker-v*` tag push
-  时以原生 runner（amd64 / arm64，不用 QEMU）构建 worker 镜像，按 digest
-  合成 manifest list 后推送 GHCR（`ghcr.io/luciuscao/agent-legion-worker`，
-  打版本 / sha-<短哈希> / latest 三个 tag）；新增拉取式 compose override
-  示例 `deploy/compose.worker.pull.example.yaml`（`!reset` 清 build 段后
-  `make stack-worker-up` 直接用 registry 镜像），部署文档 §5 增补「拉取式
-  部署」小节。
-- 原生形态绑定地址覆盖（#480/#482）：`NATIVE_BACKEND_BIND` /
-  `NATIVE_WORKER_BIND`（默认 `127.0.0.1`，不设置行为不变）把 `make
-  prod-up` 原生形态的 uvicorn / worker.service `--host` 从硬编码 loopback
-  放开到局域网 / overlay 地址；健康检查探测地址按 bind 派生（通配归一
-  loopback、IPv6 括号化），幂等判定与停机定位按「bind 地址 + 端口」精确
-  匹配（同端口不同地址可并存不误判、不杀错进程）。对象存储
-  `AGENT_LEGION_S3_BIND` 两形态通用，绑具体 IP 时原生后端的
-  `AGENT_LEGION_S3_ENDPOINT` 需同步指向该地址（见部署文档 §2）。
+- Agent Worker 执行链路结构化事件日志（issue #490）：Host 与 Worker 两侧统一 JSON lines 事件（`event` / `ts` + 语义载荷），按 `execution_id` / `worker_id` 对齐时间线。Host 侧 `worker.registered` / `worker.offline`（last_seen 越过 30s 阈值的转移检测，每转移一条）/ `claim.granted` / `claim.empty` / `claim.rejected`（reason 码直读归因：capacity_full / runtime_mismatch / model_mismatch / workspace_not_allowed 等，判定点命名与 claim 逻辑一一对应）/ `execution.finished` / `execution.lease_expired` 落 `agent_legion.worker_events` logger——uvicorn log-config 显式挂载 `agent_legion` logger，转折事件 INFO 默认可见、正常节奏 DEBUG 排障窗口按需拉起；Worker 侧 `claim.attempt` / `claim.backoff` / `execution.completed` / `http.error`（中间层 5xx 的唯一观测位：状态码 + 目标 URL + 截断 body，URL 剥查询串防 token 泄漏）沿 supervisor console 流。uvicorn 访问日志 formatter 补时间戳，跨 worker 时间线从行号近似升级为墙钟对齐。事件码表与 reason 对照见 remote-execution-runbook §7.1。
+- 冷启动容量爬坡节流 ramp-up（issue #471）：Worker 的 `ramp_up` 配置块（`initial` / `step` / `interval_seconds`，缺省 1 / 1 / 60s；null 或缺块 = 禁用回现状）控制积压释放节奏——发布重启 / claim 重启 / 批量 run 提交后恢复调度时，数百个 agent 不再同时发起首次 LLM 请求打满 provider。生效容量从 initial 起步、按 interval 阶梯放量到目标后窗口永久关闭；只升不降（窗口内热更更小 initial 不回撤在途档位）；claim 暂停期间虚拟时钟不前进（恢复时折回暂停跨度，停领一小时的 Worker 恢复后不直接跳到高档）；控制台高级参数区可编辑（未勾选提交 null 即时禁用），容量卡显示「容量爬坡中 e/t」进度。与 claim pacing（#472）正交：pacing 管两次 claim 之间的等待，ramp-up 管本 pass 最多领多少。
+- Worker 一键安装脚本 `scripts/install-worker.sh` + 独立部署编排 `deploy/compose.worker.standalone.yaml`：无仓库克隆的机器经 `curl | sh` 组装独立 Worker 部署（拉取发布 compose、sha256 校验下载 velites 二进制、生成引导 worker.yaml / models.json），幂等语义分层（自有资产刷新到目标版本，用户资产绝不覆盖）；standalone compose 新增 `AGENT_WORKER_UI_BIND` / `AGENT_WORKER_UI_PORT` 端口插值。
+- Worker 镜像发布管道（worker-image-release workflow）：`worker-v*` tag push 时以原生 runner（amd64 / arm64，不用 QEMU）构建 worker 镜像，按 digest 合成 manifest list 后推送 GHCR（`ghcr.io/luciuscao/agent-legion-worker`，打版本 / sha-<短哈希> / latest 三个 tag）；新增拉取式 compose override 示例 `deploy/compose.worker.pull.example.yaml`（`!reset` 清 build 段后 `make stack-worker-up` 直接用 registry 镜像），部署文档 §5 增补「拉取式部署」小节。
+- 原生形态绑定地址覆盖（#480/#482）：`NATIVE_BACKEND_BIND` / `NATIVE_WORKER_BIND`（默认 `127.0.0.1`，不设置行为不变）把 `make prod-up` 原生形态的 uvicorn / worker.service `--host` 从硬编码 loopback 放开到局域网 / overlay 地址；健康检查探测地址按 bind 派生（通配归一 loopback、IPv6 括号化），幂等判定与停机定位按「bind 地址 + 端口」精确匹配（同端口不同地址可并存不误判、不杀错进程）。对象存储 `AGENT_LEGION_S3_BIND` 两形态通用，绑具体 IP 时原生后端的 `AGENT_LEGION_S3_ENDPOINT` 需同步指向该地址（见部署文档 §2）。
 
 ### Changed
-- 运行提交路径分块化 + 响应瘦身（#467 子项 A，Refs #420）：`POST /runs`
-  的逐 item DB 往返改为分块集合探测（materials/bundles/ref 连接键各一个
-  IN 查询/500 条），workspace 全量 dedup 键扫描改按本次 items 的键做索引
-  点查，`create_jobs_bulk` 从单事务改为 ≤1000 行分块事务（每块事务内
-  FOR KEY SHARE 先锁本块引用的 material/bundle 行再插入，块提交即释放
-  ——任何删除时序下都不会插入引用已删材料的 job；身份冲突在首个 chunk
-  提交前全量检测），`RunCreateResponse` 不再物化 job 行（run +
-  created_count；前端 toast 只读 created_count，job 列表/详情走读取
-  路径）。**行为变化**：分块提交下中途失败不再是全有或全无——已提交
-  chunk 的 job 保留、run 行落 `failed` 态并携带已创建进度
-  （`created_so_far`/`run_id` 进 400 detail），重提交同一批 items 经
-  dedup 自动跳过已创建部分（run 行治愈为 created、计数累计）；剔除坏
-  item 后重提会因 digest 变化产生新 run 行（dedup 保证 job 不重复）。
-  验收实测：单请求 5000 items 提交 6.9s，`/api/health` p95 29ms。
-- Agent Worker 心跳批量化（issue #352，协议 v5）：per-Worker 批量续期
-  端点 `POST /api/agent-executions/heartbeats`——Worker 侧每执行一条
-  心跳线程合并为本机单个批量循环，一次请求覆盖全部在跑执行（含排队
-  上传任务的租约），Host 侧单写事务完成整批续期；心跳的**事务数、
-  commit fsync 与 HTTP 往返**从 O(在跑执行数) 降为 O(机器数)——DB 行级
-  写次数仍 O(槽)（逐项 lease 判定要求逐行语义），但每机每拍从 N 事务
-  收敛为 1 事务，不再随槽数线性放大事务开销。逐项语义与单条
-  心跳完全一致（未知/过期/跨 worker 项逐项进 lost，不抛 5xx、不阻断
-  同批其余项）；单批上限 256 项、超限自动分片（高槽位是合法配置，不
-  再有超限拒打悬崖）；zombie（agent 进程已退出且未被上传收养）停跳，
-  Host 孤儿 sweeper 可回收。混合舰队兼容：单条端点保留且行为完全不变
-  （旧 Worker 对升级后 Host 语义零变化）；新 Worker 对批量路由缺席
-  （404/405）的 Host 自动降级逐条心跳（降级路径逐条带 5s 短超时；严格
-  的 pre-v5 Host 在注册握手处即拒绝新 Worker，该组合走不到降级路径）。
-  升级顺序 Host first, Worker second；协议 v4↔v5 双向兼容经实测验收。
-- Worker claim 成功路径自适应 pacing（issue #472）：0.2s 固定等待改为
-  「上一次单次成功 claim 往返 × 0.5，钳入 [10ms, 100ms] 带」——旧固定
-  间隔把有效 claim 速率钉在 1/(0.2s + 往返)（~5/s 量级）的数学上限，
-  带内映射后随往返实测自适应（往返变快立即回落、变慢按比例抬升；
-  往返 70ms 场景 ~3.7/s → ~12.5/s，且随往返继续改善自动跟进；验收
-  实测 pacing 落位 10ms 下沿）。三路径分工不变：空队列维持
-  `poll_interval`、错误路径维持 #437 的指数退避序列；批量 pass 喂给
-  pacing 的是最后一次成功 claim 的单次往返（非批次总墙钟，爬坡期不被
-  批次规模稀释）。10ms 下沿为 claim 写事务间的锁争用保留呼吸护栏。
-  pacing 变化经 `worker claim pacing <N>ms` 日志判变（同显示精度内不
-  重记，稳态零日志量）。
-- 远程分片并发解除串行化（issue #401，schema v79）：`agent_execution_
-  requests` 的单活跃请求索引从 `(job_id, node_key)` 宽化为纳入分片身份
-  的表达式索引（`coalesce(manifest_json->>'shard_index', -1)`；非 shard
-  行身份恒为 -1，单活跃语义逐字保留）——多分片大节点不再每个同时只有
-  1 个远程分片在飞，并发上限回到 fleet 声明容量（与本地 lease 路径
-  对齐；验收实测 2 shard 并发在飞）。配套：code_stock 门新增单 pass
-  fan-out 预算（拆串行化后单 pass 不再可灌洪峰，跨 pass 自然续消费）；
-  shard 产物契约收窄为 per-index 的 `shard_output-<index>.json`（普通
-  `node.outputs` 从 shard 的 expected_outputs 排除，兄弟分片产物不再
-  互踩；本地路径同步收窄，两侧行为一致）。
-- 预览面板安全收口（issue #347，PR #475/#477）：定制预览对话框期间的
-  agent 草稿不再自动执行——左栏默认渲染已发布版本，对话框 footer 显式
-  「预览此草稿」动作点击后才挂载草稿 iframe；授权随草稿 null 过渡
-  （发布/归档）与路由身份（jobId/workspaceId）变化复位，同会话的新
-  草稿 / 新 job 上下文不继承旧授权，重新打开对话框回到默认态。published
-  路径自动渲染行为不变。questionPanel 的 boot 竞态（慢的旧 init 结果
-  覆盖新内容且不再自愈）加 generation 守卫（#475）。
-- velites 工具执行四相位打点（issue #469）：`tool_execution_end.timing`
-  新增 `ToolTiming`（velites 扩展，全 Option 字段、缺省跳过）：
-  `totalMs`（分发开始 → 结果就绪，分解基座 total ≈ spawnMs + firstByteMs
-  + restMs + reapMs）、`spawnMs`（进程创建，含沙箱包装 exec）、
-  `firstByteMs`（spawn 返回 → 管道首字节，完整覆盖子进程前置链路：
-  bash 解析、内部 heredoc write、解释器启动）、`restMs`（首字节 → 子
-  进程退出）、`reapMs`（仅超时/取消击杀路径）、`requestedTimeoutMs`
-  （实际执行的 timeout 上限，区分「模型要了长上限」与「正常上限内挂
-  死」）。判读表：write 侧阻塞（子进程卡在产出首字节前——#469 的
-  spindump 主形态）表现为 `firstByteMs` ABSENT（整窗落入 restMs 后超时
-  击杀）、read 侧阻塞（harness 读挂起）表现为 firstByteMs ELEVATED。
-  进程内工具（read/write/uuid/validate）仅报 totalMs；测量前失败（参数
-  校验 / guard 拒绝）不携带 timing。bash 的 stdout/stderr 读取从
-  read_to_end 改增量读以观测首块边界，字节收集 / 顺序 / 截断 / 超时
-  语义全部不变。Host 消费面向后兼容（不识别新字段时忽略）。
+- 运行提交路径分块化 + 响应瘦身（#467 子项 A，Refs #420）：`POST /runs` 的逐 item DB 往返改为分块集合探测（materials/bundles/ref 连接键各一个 IN 查询/500 条），workspace 全量 dedup 键扫描改按本次 items 的键做索引点查，`create_jobs_bulk` 从单事务改为 ≤1000 行分块事务（每块事务内 FOR KEY SHARE 先锁本块引用的 material/bundle 行再插入，块提交即释放——任何删除时序下都不会插入引用已删材料的 job；身份冲突在首个 chunk 提交前全量检测），`RunCreateResponse` 不再物化 job 行（run + created_count；前端 toast 只读 created_count，job 列表/详情走读取路径）。**行为变化**：分块提交下中途失败不再是全有或全无——已提交 chunk 的 job 保留、run 行落 `failed` 态并携带已创建进度（`created_so_far`/`run_id` 进 400 detail），重提交同一批 items 经 dedup 自动跳过已创建部分（run 行治愈为 created、计数累计）；剔除坏 item 后重提会因 digest 变化产生新 run 行（dedup 保证 job 不重复）。验收实测：单请求 5000 items 提交 6.9s，`/api/health` p95 29ms。
+- Agent Worker 心跳批量化（issue #352，协议 v5）：per-Worker 批量续期端点 `POST /api/agent-executions/heartbeats`——Worker 侧每执行一条心跳线程合并为本机单个批量循环，一次请求覆盖全部在跑执行（含排队上传任务的租约），Host 侧单写事务完成整批续期；心跳的**事务数、commit fsync 与 HTTP 往返**从 O(在跑执行数) 降为 O(机器数)——DB 行级写次数仍 O(槽)（逐项 lease 判定要求逐行语义），但每机每拍从 N 事务收敛为 1 事务，不再随槽数线性放大事务开销。逐项语义与单条心跳完全一致（未知/过期/跨 worker 项逐项进 lost，不抛 5xx、不阻断同批其余项）；单批上限 256 项、超限自动分片（高槽位是合法配置，不再有超限拒打悬崖）；zombie（agent 进程已退出且未被上传收养）停跳，Host 孤儿 sweeper 可回收。混合舰队兼容：单条端点保留且行为完全不变（旧 Worker 对升级后 Host 语义零变化）；新 Worker 对批量路由缺席（404/405）的 Host 自动降级逐条心跳（降级路径逐条带 5s 短超时；严格的 pre-v5 Host 在注册握手处即拒绝新 Worker，该组合走不到降级路径）。升级顺序 Host first, Worker second；协议 v4↔v5 双向兼容经实测验收。
+- Worker claim 成功路径自适应 pacing（issue #472）：0.2s 固定等待改为「上一次单次成功 claim 往返 × 0.5，钳入 [10ms, 100ms] 带」——旧固定间隔把有效 claim 速率钉在 1/(0.2s + 往返)（~5/s 量级）的数学上限，带内映射后随往返实测自适应（往返变快立即回落、变慢按比例抬升；往返 70ms 场景 ~3.7/s → ~12.5/s，且随往返继续改善自动跟进；验收实测 pacing 落位 10ms 下沿）。三路径分工不变：空队列维持 `poll_interval`、错误路径维持 #437 的指数退避序列；批量 pass 喂给 pacing 的是最后一次成功 claim 的单次往返（非批次总墙钟，爬坡期不被批次规模稀释）。10ms 下沿为 claim 写事务间的锁争用保留呼吸护栏。pacing 变化经 `worker claim pacing <N>ms` 日志判变（同显示精度内不重记，稳态零日志量）。
+- 远程分片并发解除串行化（issue #401，schema v79）：`agent_execution_ requests` 的单活跃请求索引从 `(job_id, node_key)` 宽化为纳入分片身份的表达式索引（`coalesce(manifest_json->>'shard_index', -1)`；非 shard 行身份恒为 -1，单活跃语义逐字保留）——多分片大节点不再每个同时只有 1 个远程分片在飞，并发上限回到 fleet 声明容量（与本地 lease 路径对齐；验收实测 2 shard 并发在飞）。配套：code_stock 门新增单 pass fan-out 预算（拆串行化后单 pass 不再可灌洪峰，跨 pass 自然续消费）；shard 产物契约收窄为 per-index 的 `shard_output-<index>.json`（普通 `node.outputs` 从 shard 的 expected_outputs 排除，兄弟分片产物不再互踩；本地路径同步收窄，两侧行为一致）。
+- 预览面板安全收口（issue #347，PR #475/#477）：定制预览对话框期间的 agent 草稿不再自动执行——左栏默认渲染已发布版本，对话框 footer 显式「预览此草稿」动作点击后才挂载草稿 iframe；授权随草稿 null 过渡（发布/归档）与路由身份（jobId/workspaceId）变化复位，同会话的新草稿 / 新 job 上下文不继承旧授权，重新打开对话框回到默认态。published 路径自动渲染行为不变。questionPanel 的 boot 竞态（慢的旧 init 结果覆盖新内容且不再自愈）加 generation 守卫（#475）。
+- velites 工具执行四相位打点（issue #469）：`tool_execution_end.timing` 新增 `ToolTiming`（velites 扩展，全 Option 字段、缺省跳过）：`totalMs`（分发开始 → 结果就绪，分解基座 total ≈ spawnMs + firstByteMs + restMs + reapMs）、`spawnMs`（进程创建，含沙箱包装 exec）、`firstByteMs`（spawn 返回 → 管道首字节，完整覆盖子进程前置链路：bash 解析、内部 heredoc write、解释器启动）、`restMs`（首字节 → 子进程退出）、`reapMs`（仅超时/取消击杀路径）、`requestedTimeoutMs`（实际执行的 timeout 上限，区分「模型要了长上限」与「正常上限内挂死」）。判读表：write 侧阻塞（子进程卡在产出首字节前——#469 的 spindump 主形态）表现为 `firstByteMs` ABSENT（整窗落入 restMs 后超时击杀）、read 侧阻塞（harness 读挂起）表现为 firstByteMs ELEVATED。进程内工具（read/write/uuid/validate）仅报 totalMs；测量前失败（参数校验 / guard 拒绝）不携带 timing。bash 的 stdout/stderr 读取从 read_to_end 改增量读以观测首块边界，字节收集 / 顺序 / 截断 / 超时语义全部不变。Host 消费面向后兼容（不识别新字段时忽略）。
 
 ### Fixed
-- secret 三通道 fail-fast（issue #432）：draft YAML `node.config` 通道的
-  secret 值（明文字符串或 `{"secret_set": true}` 回显形态）在 intake /
-  dispatch 重解析 / job workflow upgrade 三链拒绝（错误只报字段名与
-  vault 通道指引，绝不回显提交值），发布门禁同步收紧（publish 即失败，
-  而非发布后该 workspace 每个新 job 的 intake 一起挂）；`config_schema`
-  与 Agent 定义声明 `secret: true` 属性带明文 `default` 即拒（声明侧
-  唯一校验点，Agent 定义 draft 保存即失败）。修复前经旧缺口发布的存量
-  active revision，升级后其新 job intake 会 422 硬失败（fail-closed 是
-  刻意立场：这类明文本身已是 VAULT-SECRET-001 违规数据）——恢复路径：
-  draft 删除 secret 字段 → 发布干净 revision → 经 settings nodeConfig
-  PATCH（唯一 vault 通道）重新写入。
-- gate 排队 TOCTOU（issue #488）：`scripts/gate-queue.sh` 的 `_slot_mtime`
-  probe-then-query 两次 `stat` 之间 slot 文件并发消失（正常排队行为的
-  yielding 设计）被 `set -e` 放大为整个 pre-push 失败——多 gate 排队时
-  排队几十分钟白排。修为单次捕获调用，文件消失读作「无 mtime」回退
-  age 0；同族的真实 kill 路径（`_reclaim_stale_gate_slots` 的 head 读取）
-  与其余「读取后假设存在」的调用点逐一防御（`gate-jobs.sh` 对称加固）。
-  排队语义零变化（slot 计数、TTL 回收、holder 打印、等待节奏不变）。
+- secret 三通道 fail-fast（issue #432）：draft YAML `node.config` 通道的 secret 值（明文字符串或 `{"secret_set": true}` 回显形态）在 intake / dispatch 重解析 / job workflow upgrade 三链拒绝（错误只报字段名与 vault 通道指引，绝不回显提交值），发布门禁同步收紧（publish 即失败，而非发布后该 workspace 每个新 job 的 intake 一起挂）；`config_schema` 与 Agent 定义声明 `secret: true` 属性带明文 `default` 即拒（声明侧唯一校验点，Agent 定义 draft 保存即失败）。修复前经旧缺口发布的存量 active revision，升级后其新 job intake 会 422 硬失败（fail-closed 是刻意立场：这类明文本身已是 VAULT-SECRET-001 违规数据）——恢复路径：draft 删除 secret 字段 → 发布干净 revision → 经 settings nodeConfig PATCH（唯一 vault 通道）重新写入。
+- gate 排队 TOCTOU（issue #488）：`scripts/gate-queue.sh` 的 `_slot_mtime` probe-then-query 两次 `stat` 之间 slot 文件并发消失（正常排队行为的 yielding 设计）被 `set -e` 放大为整个 pre-push 失败——多 gate 排队时排队几十分钟白排。修为单次捕获调用，文件消失读作「无 mtime」回退 age 0；同族的真实 kill 路径（`_reclaim_stale_gate_slots` 的 head 读取）与其余「读取后假设存在」的调用点逐一防御（`gate-jobs.sh` 对称加固）。排队语义零变化（slot 计数、TTL 回收、holder 打印、等待节奏不变）。
 
 版本线对齐：
-- pyproject 0.6.0 → 0.7.0 + uv.lock 同步；frontend 0.4.0-alpha 落版一致
-  性经 check_versions 解耦纪律验证通过。
-- velites 0.5.0 → 0.5.1 落版（0.7.0 后置提交）：velites-v0.5.0 tag 之后
-  velites/ 子树有 #469 工具相位打点的四个源码 commit（判读表内核取证
-  修正、measured 失败样本保 totalMs、边界后首字节不进 firstByteMs、
-  requestedTimeoutMs），独立版本线随源码前进——三平台二进制经
-  velites-v0.5.1 tag 发布。
-- velites 0.5.1 → 0.5.2 落版（0.7.1 补丁线后置提交）：velites-v0.5.1 tag
-  之后 velites/ 子树有 0.7.1 的两批源码改动——#476 工具目录自描述
-  （`velites tools list --json`、三档 tier、validate 的 --require-output
-  forced 联动）与 #518 json 工具（get/set/delete JSON path 读改写），
-  json 为新工具面（旧 0.5.1 二进制遇 `--tools json` 启动即报错，Host
-  catalog 已 advertise——版本号区分二进制新旧避免部署漂移误判）。
-  独立版本线随源码前进——三平台二进制经 velites-v0.5.2 tag 发布。
+- pyproject 0.6.0 → 0.7.0 + uv.lock 同步；frontend 0.4.0-alpha 落版一致性经 check_versions 解耦纪律验证通过。
+- velites 0.5.0 → 0.5.1 落版（0.7.0 后置提交）：velites-v0.5.0 tag 之后 velites/ 子树有 #469 工具相位打点的四个源码 commit（判读表内核取证修正、measured 失败样本保 totalMs、边界后首字节不进 firstByteMs、requestedTimeoutMs），独立版本线随源码前进——三平台二进制经 velites-v0.5.1 tag 发布。
+- velites 0.5.1 → 0.5.2 落版（0.7.1 补丁线后置提交）：velites-v0.5.1 tag 之后 velites/ 子树有 0.7.1 的两批源码改动——#476 工具目录自描述（`velites tools list --json`、三档 tier、validate 的 --require-output forced 联动）与 #518 json 工具（get/set/delete JSON path 读改写），json 为新工具面（旧 0.5.1 二进制遇 `--tools json` 启动即报错，Host catalog 已 advertise——版本号区分二进制新旧避免部署漂移误判）。独立版本线随源码前进——三平台二进制经 velites-v0.5.2 tag 发布。
 
 ## [0.6.0] - 2026-09-05
 
 ### Added
-- agent 发起 workflow 发布的确认回路（issue #416，schema v76）：Studio
-  chat 的 agent 经新 MCP 工具 `request_workflow_publish` 挂起发布请求
-  （pending 状态机，永不自行确认），用户在 Studio 发布确认对话框里
-  审阅 diff 后 confirmed / rejected；`get_publish_request_status` 供
-  agent 轮询结果，同 workspace 后到请求自动 supersede。
-- velites 内置工具扩充（0.6.0 后落版 velites 0.5.0）：`uuid` 工具
-  （生成与校验，校验拒绝未定义版本位，#442/#465）；`validate` 工具 +
-  require-output 契约关卡（#443）——skill 可声明节点必填输出，执行末
-  违约即失败，host 镜像同步烤入 velites-sandbox 包装器。
-- Studio code 节点配置面板重设计（#418）：schema 结构化编辑 + config
-  双通道（revision 快照 vs workspace live 覆盖）明示；workflow compare
-  补 config/config_schema 比对（#418/#422），纯配置变更不再无法发布。
-- Skill 选择链路合一（#410）：节点 skill 选择收敛为「目录 + 版本」
-  两控件，回显实际执行版本（`node_runs.skill` 记录 dispatch 时的
-  skill key，schema v75）。
-- 创建 Agent 表单隐藏 Agent ID（#407）：服务端按 capability 生成
-  agent_id，显式传值保持旧客户端契约不变（MCP copy/save 路径零改动）；
-  Agent 发布触发 workspace override prune（#430），与 revision 发布
-  链路对齐。
+- agent 发起 workflow 发布的确认回路（issue #416，schema v76）：Studio chat 的 agent 经新 MCP 工具 `request_workflow_publish` 挂起发布请求（pending 状态机，永不自行确认），用户在 Studio 发布确认对话框里审阅 diff 后 confirmed / rejected；`get_publish_request_status` 供 agent 轮询结果，同 workspace 后到请求自动 supersede。
+- velites 内置工具扩充（0.6.0 后落版 velites 0.5.0）：`uuid` 工具（生成与校验，校验拒绝未定义版本位，#442/#465）；`validate` 工具 + require-output 契约关卡（#443）——skill 可声明节点必填输出，执行末违约即失败，host 镜像同步烤入 velites-sandbox 包装器。
+- Studio code 节点配置面板重设计（#418）：schema 结构化编辑 + config 双通道（revision 快照 vs workspace live 覆盖）明示；workflow compare 补 config/config_schema 比对（#418/#422），纯配置变更不再无法发布。
+- Skill 选择链路合一（#410）：节点 skill 选择收敛为「目录 + 版本」两控件，回显实际执行版本（`node_runs.skill` 记录 dispatch 时的 skill key，schema v75）。
+- 创建 Agent 表单隐藏 Agent ID（#407）：服务端按 capability 生成 agent_id，显式传值保持旧客户端契约不变（MCP copy/save 路径零改动）；Agent 发布触发 workspace override prune（#430），与 revision 发布链路对齐。
 - 外部内容 ref 的连接 Key 改为选择控件（#419）：唯一 key 默认选中。
-- claim 吞吐第一阶段观测与批量化（#448/#461，schema v78）：claim 事务
-  切段计时（worker_setup/scan/evaluate/writes 落 ops profile 采样），
-  `create_jobs_bulk` 改 set-based INSERT（每批 1000 行）——v77 statement
-  触发器从每行一次变为每批一次。
+- claim 吞吐第一阶段观测与批量化（#448/#461，schema v78）：claim 事务切段计时（worker_setup/scan/evaluate/writes 落 ops profile 采样），`create_jobs_bulk` 改 set-based INSERT（每批 1000 行）——v77 statement 触发器从每行一次变为每批一次。
 
 ### Changed
-- Workflow Studio 按节点类型收口「配置 Schema」归属（#406）：
-  `type: agent` 节点不再渲染节点 YAML 的 `config_schema` 区块，
-  Agent schema 统一归「Agent 配置」内的 Agent Definition 编辑入口；
-  `type: code` 节点的 schema 编辑与 `runtime_mutable` 行为保持不变。
-- Studio agent 节点的 runtime 默认值改为 velites（#408）；检查器 Agent
-  区块内联展开，去掉开合按钮与重复汇总卡片（#409）。
-- Worker 代理出口产品化（#444）：worker 入口剥离继承的代理 env（LLM
-  流量不再意外经本机代理中转），需要代理时在 worker.yaml 声明显式
-  `proxy` 字段（替代 `WORKER_KEEP_PROXY_ENV` env 逃生门）。
+- Workflow Studio 按节点类型收口「配置 Schema」归属（#406）：`type: agent` 节点不再渲染节点 YAML 的 `config_schema` 区块，Agent schema 统一归「Agent 配置」内的 Agent Definition 编辑入口；`type: code` 节点的 schema 编辑与 `runtime_mutable` 行为保持不变。
+- Studio agent 节点的 runtime 默认值改为 velites（#408）；检查器 Agent 区块内联展开，去掉开合按钮与重复汇总卡片（#409）。
+- Worker 代理出口产品化（#444）：worker 入口剥离继承的代理 env（LLM 流量不再意外经本机代理中转），需要代理时在 worker.yaml 声明显式 `proxy` 字段（替代 `WORKER_KEEP_PROXY_ENV` env 逃生门）。
 
 ### Fixed
-- workflow compare 快照往返与比对完整性（#431/#454/#458）：compare 补
-  node_type / shard / reduce / after 序 / edges 序比对；reduce 快照
-  `from_node` 不翻译、definition_to_yaml 不回显 shard/reduce 两个往返
-  缺陷修复——含 shard/reduce 基线的工作区不再一打开就有幽灵变更，
-  照此发布会静默删分片的路径已堵死；纯边重排的 DAG 高亮修正。
-- 高并发档位 job 状态计数触发器热点行死锁（issue #437）：高并发、
-  单 run 大规模 items 下 claim 间歇 500（psycopg DeadlockDetected，落点
-  claim 事务内 jobs promote UPDATE），并发呈锯齿式波动。根因
-  是 v73/v36 的 run/workspace 级行级计数触发器把同一 run 全部状态迁移
-  汇聚到寥寥几行 (run_id, status) 计数行——先扣旧 status 行再加新
-  status 行的两步锁足迹，与 claim 的 queued→running、收尾的
-  running→completed 以不同顺序触碰交叠成锁环。三层修复：① 根治
-  （schema v77）：两组计数触发器改为 statement-level + transition
-  tables——单语句内按 (key, status) 聚合净增量、按固定字典序一次性
-  apply，所有并发写方锁序全局一致，锁环不再成立。收益在固定锁序与
-  死锁消除，不在触发次数：psycopg executemany 服务端仍是 N 条独立
-  INSERT（每条触发一次 statement 触发器、transition table 1 行），
-  与旧行级触发器逐行加计数同量级；多行单语句（INSERT...SELECT）才
-  会一次聚合，当前代码库无该形状；
-  ② 缓解：claim 端点对 SQLSTATE 40P01 立即整体重试一次（干净连接
-  重进事务，再失败放行 500）；③ 缓解：Worker claim 退避改「首次 1s
-  固定 → 之后指数翻倍 ±20% jitter，上限 60s 不变」——瞬时抖动不再
-  烧掉完整 poll 周期，fleet 恢复不再同步对齐（锯齿根因之一）。
-- Studio 对话 run token 连锁失效与静默死亡（issue #411）：单轮 prompt 可
-  跑满 1 小时，而 run token 续期只在轮首（30 分钟阈值）——长对话的 token
-  会在 turn 进行中过期，agent 的全部 MCP 工具调用 401（"Studio agent
-  scoped token required" → 客户端 "Not connected"），且界面无任何提示。
-  修复三处：① 每次 `tool_call` 事件触发保活（`studio_chat/token_keepalive.py`）——
-  token 活着则以「整轮时长 + 5 分钟」的专用阈值顺带续期（检查过存活的
-  token 必然活过当前轮，防泄漏语义不变：已吊销/已过期不复活），token 已死
-  （吊销/过期/用户被禁用）则向会话时间线追加一条 `run_token_invalidated`
-  状态消息，前端以警示样式提示「关闭当前会话后点『继续对话』恢复」；
-  ② `list_studio_chat_messages` 的 500 条上限从「取最早 500 条」改为
-  「取最新 500 条」（`order by seq desc` + 反转，返回值仍为升序）——
-  超长会话重进界面不再只看到远古记录而丢失进行中的对话（即 issue 报告的
-  「聊天记录消失」）；③ 保活与提示的 DB 操作全部带异常保护，失败不阻断
-  tool_call 消息落库且下次 tool_call 自动重试；续期 UPDATE 的 rowcount
-  闭合「查活→续期」间隙内 token 被吊销/过期的竞态（未命中即重验存活，
-  最后一次工具调用也不会漏报失效）。已知取舍：掉线超过 500 条的增量补齐
-  会在新旧窗口间留缝隙（API 无 before_seq），重新进入会话即全量替换自愈。
-- 事务异常后连接复位（issue #438）：`write_transaction` 在非 autocommit
-  连接上的双重 BEGIN 根治（每次 claim/heartbeat/enqueue 检出一轮就向
-  Postgres 发一次冗余 BEGIN，服务端 WARN 噪声）+ 连接池 reset 防御，
-  事务失败后连接不再带坏状态回池。
-- 单副本探针 idle in transaction（issue #433）：probe() 取锁 SELECT 在
-  池化连接上隐式开事务、fetchone 后未提交即长持——backend_xmin 钉死在
-  进程启动时刻，autovacuum 无法回收死元组；取锁后补 commit 消除。
-- Agent 创建占用检查跨版本缺口（发布 P1，#407 后续）：占用检查补已发布
-  版本行扫描——已发布 capability A v1 后保存 capability B 草稿时，缺省
-  创建 A 不再静默覆盖用户正在编辑的草稿（409 + 指引文案）。
-- DAG 视图缺边回退与无边图布局退化（#417）：dagre 对无边图按字母序竖排
-  造成「节点丢失」观感；workspace_dag 与 job 详情的 after 序同源化。
+- workflow compare 快照往返与比对完整性（#431/#454/#458）：compare 补 node_type / shard / reduce / after 序 / edges 序比对；reduce 快照 `from_node` 不翻译、definition_to_yaml 不回显 shard/reduce 两个往返缺陷修复——含 shard/reduce 基线的工作区不再一打开就有幽灵变更，照此发布会静默删分片的路径已堵死；纯边重排的 DAG 高亮修正。
+- 高并发档位 job 状态计数触发器热点行死锁（issue #437）：高并发、单 run 大规模 items 下 claim 间歇 500（psycopg DeadlockDetected，落点 claim 事务内 jobs promote UPDATE），并发呈锯齿式波动。根因是 v73/v36 的 run/workspace 级行级计数触发器把同一 run 全部状态迁移汇聚到寥寥几行 (run_id, status) 计数行——先扣旧 status 行再加新 status 行的两步锁足迹，与 claim 的 queued→running、收尾的 running→completed 以不同顺序触碰交叠成锁环。三层修复：① 根治（schema v77）：两组计数触发器改为 statement-level + transition tables——单语句内按 (key, status) 聚合净增量、按固定字典序一次性 apply，所有并发写方锁序全局一致，锁环不再成立。收益在固定锁序与死锁消除，不在触发次数：psycopg executemany 服务端仍是 N 条独立 INSERT（每条触发一次 statement 触发器、transition table 1 行），与旧行级触发器逐行加计数同量级；多行单语句（INSERT...SELECT）才会一次聚合，当前代码库无该形状；② 缓解：claim 端点对 SQLSTATE 40P01 立即整体重试一次（干净连接重进事务，再失败放行 500）；③ 缓解：Worker claim 退避改「首次 1s 固定 → 之后指数翻倍 ±20% jitter，上限 60s 不变」——瞬时抖动不再烧掉完整 poll 周期，fleet 恢复不再同步对齐（锯齿根因之一）。
+- Studio 对话 run token 连锁失效与静默死亡（issue #411）：单轮 prompt 可跑满 1 小时，而 run token 续期只在轮首（30 分钟阈值）——长对话的 token 会在 turn 进行中过期，agent 的全部 MCP 工具调用 401（"Studio agent scoped token required" → 客户端 "Not connected"），且界面无任何提示。修复三处：① 每次 `tool_call` 事件触发保活（`studio_chat/token_keepalive.py`）——token 活着则以「整轮时长 + 5 分钟」的专用阈值顺带续期（检查过存活的 token 必然活过当前轮，防泄漏语义不变：已吊销/已过期不复活），token 已死（吊销/过期/用户被禁用）则向会话时间线追加一条 `run_token_invalidated` 状态消息，前端以警示样式提示「关闭当前会话后点『继续对话』恢复」；② `list_studio_chat_messages` 的 500 条上限从「取最早 500 条」改为「取最新 500 条」（`order by seq desc` + 反转，返回值仍为升序）——超长会话重进界面不再只看到远古记录而丢失进行中的对话（即 issue 报告的「聊天记录消失」）；③ 保活与提示的 DB 操作全部带异常保护，失败不阻断 tool_call 消息落库且下次 tool_call 自动重试；续期 UPDATE 的 rowcount 闭合「查活→续期」间隙内 token 被吊销/过期的竞态（未命中即重验存活，最后一次工具调用也不会漏报失效）。已知取舍：掉线超过 500 条的增量补齐会在新旧窗口间留缝隙（API 无 before_seq），重新进入会话即全量替换自愈。
+- 事务异常后连接复位（issue #438）：`write_transaction` 在非 autocommit 连接上的双重 BEGIN 根治（每次 claim/heartbeat/enqueue 检出一轮就向 Postgres 发一次冗余 BEGIN，服务端 WARN 噪声）+ 连接池 reset 防御，事务失败后连接不再带坏状态回池。
+- 单副本探针 idle in transaction（issue #433）：probe() 取锁 SELECT 在池化连接上隐式开事务、fetchone 后未提交即长持——backend_xmin 钉死在进程启动时刻，autovacuum 无法回收死元组；取锁后补 commit 消除。
+- Agent 创建占用检查跨版本缺口（发布 P1，#407 后续）：占用检查补已发布版本行扫描——已发布 capability A v1 后保存 capability B 草稿时，缺省创建 A 不再静默覆盖用户正在编辑的草稿（409 + 指引文案）。
+- DAG 视图缺边回退与无边图布局退化（#417）：dagre 对无边图按字母序竖排造成「节点丢失」观感；workspace_dag 与 job 详情的 after 序同源化。
 
 ## [0.5.0] - 2026-09-03
 
 ### Added
-- 人工审批节点（issue #266，schema v63，EXEC-APPROVAL-001）：`type: approval`
-  节点是 DAG 内的人工决策关卡——调度器 park 至 `awaiting_approval`
-  （不派发、无租约），决定仅经审批 API 由人类会话作出（studio agent
-  scoped token 一律拒绝），`approval_decisions` 只增不改留痕：approved
-  写 verdict 产物后放行（条件边可按 `$.verdict` 分支）、rework 意见必填
-  并经 rerun 机制重置上游、rejected 节点失败并结束任务。
-- Studio 草稿显性保存与防丢（#331）：保存按钮 + 五态状态文本、
-  DraftSaveController 状态机（flushNow / 失败退避重试）、页面离开防丢
-  （visibilitychange/pagehide flush + beforeunload 拦截）、画布渲染草稿
-  （draft/revision 三态标识，YAML 非法回退 published + 警示）。
-- 运行画像 L1+L2（issue #359，schema v72）：六段管线指标
-  （`ops_runtime_profile_samples`，ops-metrics 采样循环每分钟落一行）+
-  瓶颈归因分类器 + API——批量运行期间实时回答「当前瓶颈在哪个阶段」。
-- run 计数快照与首屏 COUNT 缓存（issue #358，schema v73）：触发器维护的
-  `run_job_status_counts` 把 run 详情读取从全量 group-by 变成 PK 点查，
-  items 上限硬约束同批落地。
-- 执行面 retention 管道（issue #354）：agent manifest trim + 终态行窗口
-  删除 + sweeper 单副本收拢——核心执行面表此前只写不删，长期运行后
-  累积的终态行不再拖慢后续批次（大表场景收益显著）。
-- Studio 节点类型选择器与画布创建入口（#392）：前端对齐后端
-  `start|code|agent|approval` 类型抽象——类型切换前置校验 + 确认弹窗，
-  按类型注册 inspector section 集，approval 画布可见与节点创建入口。
-- Studio 会话面板 agent 配置区（issue #368）：权限模式 / 模型 / 思考档位
-  的可见可切控制面（ACP 会话 modes/configOptions 广告驱动，未知档位
-  保留回退，通用思考档位映射 off<minimal<low<medium<high<xhigh<max<ultra）。
-- draft-only Agent 补齐 Studio 发布入口（#387）：MCP 建的草稿在节点
-  检查器可解析（published 优先、draft 回落），聊天草稿卡片导航空转修复。
-- 预览面板安全与正确性修复（PR #345 codex 评审 P1/P2）：宿主在 srcDoc 的
-  `<head>` 注入 CSP（`default-src 'none'` + 平台资源白名单 + `connect-src` 限
-  平台 origin），堵死沙箱 bundle 的出站网络通道（`sandbox="allow-scripts"` 不
-  阻 `fetch`/`sendBeacon`/`<img>` 外传——恶意草稿可先经桥读任务数据再外发）；
-  `PreviewPanelSection` 的 remount key 加入 bundle 内容指纹，草稿轮询更新时
-  整树重挂 iframe，旧文档在途桥请求的响应不再可能错误应答新文档的同编号请求；
-  authoring context 的 `recent_jobs` 产物清单统一走本地目录 ∪ 对象存储
-  manifest（此前仅 selected job 合并，worker 执行任务的 recent 清单会报空）。
-  preview_guide.md 运行时契约同步（出站网络由宿主强制而非编写约定）。
-- 发版解耦纪律 + 版本清单一致性检查（`scripts/check_versions.py`，挂 backend
-  静态轮）：velites（`velites/Cargo.toml`）与 frontend（`frontend/package.json`）
-  持有独立版本线，禁止随仓库版本（`pyproject.toml`）锁步 bump——无谓的版本前进
-  会改变 velites 子树 tree hash（`ensure-velites.sh` 的二进制新鲜度指纹）与
-  Docker 缓存键，触发全量 `cargo build` / 镜像层重建。检查两条规则：清单 ↔
-  lock 版本一致；独立组件的版本前进必须伴随锚点以来的源码改动（仓库发版顺手
-  bump 无源码改动的组件会被拒绝）。规则详见 `scripts/check_versions.py`
-  模块 docstring 与 CONTRIBUTING「House rules」。
-- Workflow nodes declare an explicit execution type `type: code | agent`
-  (issue #284 phase 2, schema v66): the publish gate branches on it
-  (agent nodes require exactly one published Agent for the capability,
-  code nodes require published node code), revision publication
-  materializes Agent routes only for `type: agent` nodes, and the startup
-  route reconcile is retired — routes now change only at revision
-  publication. Legacy `type: node` and an omitted type normalize to
-  `code`; the v66 migration backfills stored active revisions and Studio
-  drafts from the route projection.
+- 人工审批节点（issue #266，schema v63，EXEC-APPROVAL-001）：`type: approval` 节点是 DAG 内的人工决策关卡——调度器 park 至 `awaiting_approval`（不派发、无租约），决定仅经审批 API 由人类会话作出（studio agent scoped token 一律拒绝），`approval_decisions` 只增不改留痕：approved 写 verdict 产物后放行（条件边可按 `$.verdict` 分支）、rework 意见必填并经 rerun 机制重置上游、rejected 节点失败并结束任务。
+- Studio 草稿显性保存与防丢（#331）：保存按钮 + 五态状态文本、DraftSaveController 状态机（flushNow / 失败退避重试）、页面离开防丢（visibilitychange/pagehide flush + beforeunload 拦截）、画布渲染草稿（draft/revision 三态标识，YAML 非法回退 published + 警示）。
+- 运行画像 L1+L2（issue #359，schema v72）：六段管线指标（`ops_runtime_profile_samples`，ops-metrics 采样循环每分钟落一行）+ 瓶颈归因分类器 + API——批量运行期间实时回答「当前瓶颈在哪个阶段」。
+- run 计数快照与首屏 COUNT 缓存（issue #358，schema v73）：触发器维护的 `run_job_status_counts` 把 run 详情读取从全量 group-by 变成 PK 点查，items 上限硬约束同批落地。
+- 执行面 retention 管道（issue #354）：agent manifest trim + 终态行窗口删除 + sweeper 单副本收拢——核心执行面表此前只写不删，长期运行后累积的终态行不再拖慢后续批次（大表场景收益显著）。
+- Studio 节点类型选择器与画布创建入口（#392）：前端对齐后端 `start|code|agent|approval` 类型抽象——类型切换前置校验 + 确认弹窗，按类型注册 inspector section 集，approval 画布可见与节点创建入口。
+- Studio 会话面板 agent 配置区（issue #368）：权限模式 / 模型 / 思考档位的可见可切控制面（ACP 会话 modes/configOptions 广告驱动，未知档位保留回退，通用思考档位映射 off<minimal<low<medium<high<xhigh<max<ultra）。
+- draft-only Agent 补齐 Studio 发布入口（#387）：MCP 建的草稿在节点检查器可解析（published 优先、draft 回落），聊天草稿卡片导航空转修复。
+- 预览面板安全与正确性修复（PR #345 codex 评审 P1/P2）：宿主在 srcDoc 的 `<head>` 注入 CSP（`default-src 'none'` + 平台资源白名单 + `connect-src` 限平台 origin），堵死沙箱 bundle 的出站网络通道（`sandbox="allow-scripts"` 不阻 `fetch`/`sendBeacon`/`<img>` 外传——恶意草稿可先经桥读任务数据再外发）；`PreviewPanelSection` 的 remount key 加入 bundle 内容指纹，草稿轮询更新时整树重挂 iframe，旧文档在途桥请求的响应不再可能错误应答新文档的同编号请求；authoring context 的 `recent_jobs` 产物清单统一走本地目录 ∪ 对象存储 manifest（此前仅 selected job 合并，worker 执行任务的 recent 清单会报空）。preview_guide.md 运行时契约同步（出站网络由宿主强制而非编写约定）。
+- 发版解耦纪律 + 版本清单一致性检查（`scripts/check_versions.py`，挂 backend 静态轮）：velites（`velites/Cargo.toml`）与 frontend（`frontend/package.json`）持有独立版本线，禁止随仓库版本（`pyproject.toml`）锁步 bump——无谓的版本前进会改变 velites 子树 tree hash（`ensure-velites.sh` 的二进制新鲜度指纹）与 Docker 缓存键，触发全量 `cargo build` / 镜像层重建。检查两条规则：清单 ↔ lock 版本一致；独立组件的版本前进必须伴随锚点以来的源码改动（仓库发版顺手 bump 无源码改动的组件会被拒绝）。规则详见 `scripts/check_versions.py` 模块 docstring 与 CONTRIBUTING「House rules」。
+- Workflow nodes declare an explicit execution type `type: code | agent` (issue #284 phase 2, schema v66): the publish gate branches on it (agent nodes require exactly one published Agent for the capability, code nodes require published node code), revision publication materializes Agent routes only for `type: agent` nodes, and the startup route reconcile is retired — routes now change only at revision publication. Legacy `type: node` and an omitted type normalize to `code`; the v66 migration backfills stored active revisions and Studio drafts from the route projection.
 - 架构盘点：workflow_key 退役 Phase 1 分类清单（`docs/architecture/workflow-key-retirement-inventory.md`，issue #211）——四类穷尽引用 + Phase 2-4 执行依据。
-- Host 侧 agent runtime catalog（`server/app/agent_runtime`，issue #75）：
-  runtime 全集单一事实来源（`AGENT_RUNTIMES`）+ 每 runtime 一个 adapter
-  （argv 构建 + `ExecutionContract`）；「新增 agent runtime 接入指南」见
-  `docs/architecture/velites-harness.md`。
+- Host 侧 agent runtime catalog（`server/app/agent_runtime`，issue #75）：runtime 全集单一事实来源（`AGENT_RUNTIMES`）+ 每 runtime 一个 adapter（argv 构建 + `ExecutionContract`）；「新增 agent runtime 接入指南」见 `docs/architecture/velites-harness.md`。
 
 ### Changed
-- host 纯控制面模式：workflow 执行与宿主进程解耦（#389，收编 #385/#386）。
-  `code_capacity` 合法化 0 值（契约 `gt=0→ge=0`，UI「代码池」组改述为
-  「本地执行」——本地兜底执行并发上限，0 = 纯远程模式）：宿主容量为 0 时
-  不再组装本地执行栈（CodeExecutor/ExecutionRuntime/线程池/velites 沙箱
-  依赖全部消失），code 节点 100% 由远程 code Worker 执行；shard 分片执行
-  远程化——分片身份（`shard_index`/`shard_input`）写入持久化 manifest，
-  broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（行级去重），
-  分片输出以 `shard_output-<index>.json` 作为常规 expected_output 随归档
-  回传（不走尺寸受限的 metadata 通道）；调度线程 pass 级早退修复（纯远程
-  部署不再被饿死，且保留审批门等免 dispatch 工作的处理机会）；
-  `/api/health` 在纯远程模式下实时报告在线 code Worker 数（启动为 0 打
-  WARNING），防静默停摆。
-- `workflows.enabled` 退役（#385，由 #389 第 3 步收编）：该开关已从灰度
-  开关漂移为事实上的产品总开关，单机部署无合理关闭场景。404 门禁
-  `require_workflows_enabled` 整体移除（38 个路由文件、约 150 处调用，
-  API 面永远可用）；`worker_startup.is_enabled` 分支删除（worker 总是
-  启动，部署形态改由 `code_capacity` 表达）；实例设置契约删除该键，
-  存量 DB 文档读取时键级剥离（`workflows.max_items_per_run` 活跃保留），
-  无数据迁移。升级窗口内旧前端整文档 PUT 携带该键会 422（破坏性契约
-  变更，刷新前端即恢复）。
-- worker 镜像与 agent runtime 解耦（#381/#383，PR #384）：velites/pi 移出
-  worker 镜像——镜像收敛为纯执行服务（Python worker + bwrap + 内置的
-  `velites-sandbox` code 沙箱包装器），velites agent runtime 以平台匹配的
-  外挂二进制提供（compose bind mount 到 `/app/data/bin/velites`，long
-  syntax 缺源拒启）。新增 `AGENT_WORKER_EXPECT_RUNTIMES` 期望 runtime 守卫
-  （探测不到/被停用/模型发现失败均 fail-fast，退出码 2）；注册 payload 携带
-  生效 runtime 的 `--version`（版本握手可观测，外挂后的漂移排障依据）。
-  pi 在 docker 镜像内不可用（npm 入口依赖 node），部署走裸机。新增
-  `velites-v*` tag 触发的三平台 release workflow（linux amd64/arm64、
-  macos arm64）；host 容器的 code 本地兜底禁用（避免为兜底路径给后端
-  容器加 seccomp/cap 特权）。
-- Worker agent runtime 声明改为自动探测 + 反选停用（issue #254）：Worker
-  控制台的 runtime opt-in checkbox 退役——runtime 选择在 Studio 节点
-  （Agent 定义）上，Worker 侧按本机二进制探测（自带副本 `data/bin`
-  优先、PATH 兜底）默认全部启用，`disabled_runtimes` 反选停用；生效
-  runtimes = 探测 − 停用，每次读取现算（勾了没装 → 预检拒启动；装了
-  没勾 → 任务永远 runtime_mismatch 的配错面消失）。
-- Skill 版本绑定下放到 workflow 节点（issue #76）：节点的 `skill` +
-  `ref` 是版本绑定的权威位置，`skill_lock` 多值化（v2 `{repo, refs}`），
-  `AgentDefinition.skill` 降为节点未声明时的兜底。
+- host 纯控制面模式：workflow 执行与宿主进程解耦（#389，收编 #385/#386）。`code_capacity` 合法化 0 值（契约 `gt=0→ge=0`，UI「代码池」组改述为「本地执行」——本地兜底执行并发上限，0 = 纯远程模式）：宿主容量为 0 时不再组装本地执行栈（CodeExecutor/ExecutionRuntime/线程池/velites 沙箱依赖全部消失），code 节点 100% 由远程 code Worker 执行；shard 分片执行远程化——分片身份（`shard_index`/`shard_input`）写入持久化 manifest，broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（行级去重），分片输出以 `shard_output-<index>.json` 作为常规 expected_output 随归档回传（不走尺寸受限的 metadata 通道）；调度线程 pass 级早退修复（纯远程部署不再被饿死，且保留审批门等免 dispatch 工作的处理机会）；`/api/health` 在纯远程模式下实时报告在线 code Worker 数（启动为 0 打 WARNING），防静默停摆。
+- `workflows.enabled` 退役（#385，由 #389 第 3 步收编）：该开关已从灰度开关漂移为事实上的产品总开关，单机部署无合理关闭场景。404 门禁 `require_workflows_enabled` 整体移除（38 个路由文件、约 150 处调用，API 面永远可用）；`worker_startup.is_enabled` 分支删除（worker 总是启动，部署形态改由 `code_capacity` 表达）；实例设置契约删除该键，存量 DB 文档读取时键级剥离（`workflows.max_items_per_run` 活跃保留），无数据迁移。升级窗口内旧前端整文档 PUT 携带该键会 422（破坏性契约变更，刷新前端即恢复）。
+- worker 镜像与 agent runtime 解耦（#381/#383，PR #384）：velites/pi 移出 worker 镜像——镜像收敛为纯执行服务（Python worker + bwrap + 内置的 `velites-sandbox` code 沙箱包装器），velites agent runtime 以平台匹配的外挂二进制提供（compose bind mount 到 `/app/data/bin/velites`，long syntax 缺源拒启）。新增 `AGENT_WORKER_EXPECT_RUNTIMES` 期望 runtime 守卫（探测不到/被停用/模型发现失败均 fail-fast，退出码 2）；注册 payload 携带生效 runtime 的 `--version`（版本握手可观测，外挂后的漂移排障依据）。pi 在 docker 镜像内不可用（npm 入口依赖 node），部署走裸机。新增 `velites-v*` tag 触发的三平台 release workflow（linux amd64/arm64、macos arm64）；host 容器的 code 本地兜底禁用（避免为兜底路径给后端容器加 seccomp/cap 特权）。
+- Worker agent runtime 声明改为自动探测 + 反选停用（issue #254）：Worker 控制台的 runtime opt-in checkbox 退役——runtime 选择在 Studio 节点（Agent 定义）上，Worker 侧按本机二进制探测（自带副本 `data/bin` 优先、PATH 兜底）默认全部启用，`disabled_runtimes` 反选停用；生效 runtimes = 探测 − 停用，每次读取现算（勾了没装 → 预检拒启动；装了没勾 → 任务永远 runtime_mismatch 的配错面消失）。
+- Skill 版本绑定下放到 workflow 节点（issue #76）：节点的 `skill` + `ref` 是版本绑定的权威位置，`skill_lock` 多值化（v2 `{repo, refs}`），`AgentDefinition.skill` 降为节点未声明时的兜底。
 - 节点 `skill.ref` 语义显式化（issue #322）：`latest`（空 ref 已归一为它）= 跟随 skill 仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把解析的 commit 冻结进 `skill_lock`（v2 多值 `{repo, refs}`），唯一 relock 通道为 CLI `make skills-lock`（遍历锁内已有条目重解析 pinned refs）。**行为变化**：存量 published revision 中 ref 为空的节点原先冻结在 skill source 默认 ref 的 commit 上，升级后改为跟随仓库 HEAD；需要复现的节点应在 Studio 草稿中显式 pin tag 并重新发布。
-- Agent execution 契约 runtime 化（issue #75）：Host 侧 runtime catalog
-  （`server/app/agent_runtime`）的每个 adapter 声明自己支持的 manifest
-  execution 键（provider/model/thinking）与必填性；dispatch 与 Worker claim
-  重解析统一按契约校验——配置了 runtime 不支持的键（非空值）或必填键在
-  解析链上不再有来源时 fail-fast。**行为变化**：在飞 job 跨 revision 升级
-  后若节点引入了 runtime 不支持的 execution 键（或必填键不再可解析），
-  claim 从静默下发变为可行动报错（claim 扫描跳过该候选，unclaimable
-  sweeper 将请求判失败并给出指向节点 execution 覆盖的错误信息）。
+- Agent execution 契约 runtime 化（issue #75）：Host 侧 runtime catalog（`server/app/agent_runtime`）的每个 adapter 声明自己支持的 manifest execution 键（provider/model/thinking）与必填性；dispatch 与 Worker claim 重解析统一按契约校验——配置了 runtime 不支持的键（非空值）或必填键在解析链上不再有来源时 fail-fast。**行为变化**：在飞 job 跨 revision 升级后若节点引入了 runtime 不支持的 execution 键（或必填键不再可解析），claim 从静默下发变为可行动报错（claim 扫描跳过该候选，unclaimable sweeper 将请求判失败并给出指向节点 execution 覆盖的错误信息）。
 
 ### Deprecated
 - workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
 
 ### Removed
 - 全局 skill_sources 注册表整体退役（issue #322 决策项 1）：skill 收敛为 `~/.agents/skills/<group>/<name>` 下的本地 in-place git 仓库（唯一模式），删除远程 clone 通道、repo 漂移闸门与缓存缺失 re-clone 自愈（缓存缺失改为报错并指引在 skill root 下创建）；admin `/api/admin/skill-sources*` 端点与「Skill 源管理」设置面板一并删除，`skill_lock` 的 `repo` 字段退化为仅审计。启动一次性迁移幂等删除 DB `global_settings` 里残留的 `skill_sources` 文档（保留 `skill_lock`）。
-- dev 侧 worker 配置种子 `config/agent-worker.yaml` 与模板
-  `config/agent-worker.example.yaml` 整体退役（issue #323）：worker 唯一
-  生效配置收敛为状态副本 `data/agent-worker-service/worker.yaml`（控制台/
-  API 驱动），消除「改了种子文件不生效」的双层配置漂移。`init-worktree.sh`
-  / `install-deps.sh` 的种子逻辑改为直写状态副本，`worker.service --config`
-  变为纯可选 bootstrap（仅 docker/远程 headless 部署使用，模板见
-  `deploy/worker.*.example.yaml`），`make dev-up` 的 worker 启动闸门改判
-  状态副本是否存在。
-- openclaw runtime 整体退役（issue #75）：曾短暂经 catalog adapter 接入
-  （`openclaw agent --local --json`），因其 stdout 只有一次性结果
-  envelope——无流式事件、无 token 计量——按用户决策移除；agent runtime
-  回到 pi / velites 两个。连带退役：实例设置 `openclaw` 块（存量 DB 文档
-  读取时整块剥离、写入返回 422）、`AGENT_LEGION_OPENCLAW_CWD` env、
-  `openclaw.cwd` 启动校验、Host 侧 openclaw agents 发现、Worker 侧
-  openclaw 条目与模型发现 adapter。未来需要时按 adapter 机制重新接入
-  （指南见 `docs/architecture/velites-harness.md`）。
+- dev 侧 worker 配置种子 `config/agent-worker.yaml` 与模板 `config/agent-worker.example.yaml` 整体退役（issue #323）：worker 唯一生效配置收敛为状态副本 `data/agent-worker-service/worker.yaml`（控制台/ API 驱动），消除「改了种子文件不生效」的双层配置漂移。`init-worktree.sh` / `install-deps.sh` 的种子逻辑改为直写状态副本，`worker.service --config` 变为纯可选 bootstrap（仅 docker/远程 headless 部署使用，模板见 `deploy/worker.*.example.yaml`），`make dev-up` 的 worker 启动闸门改判状态副本是否存在。
+- openclaw runtime 整体退役（issue #75）：曾短暂经 catalog adapter 接入（`openclaw agent --local --json`），因其 stdout 只有一次性结果 envelope——无流式事件、无 token 计量——按用户决策移除；agent runtime 回到 pi / velites 两个。连带退役：实例设置 `openclaw` 块（存量 DB 文档读取时整块剥离、写入返回 422）、`AGENT_LEGION_OPENCLAW_CWD` env、`openclaw.cwd` 启动校验、Host 侧 openclaw agents 发现、Worker 侧 openclaw 条目与模型发现 adapter。未来需要时按 adapter 机制重新接入（指南见 `docs/architecture/velites-harness.md`）。
 
 ## [0.4.0-alpha] - 2026-08-29
 
 ### Added
 
-- `make install`: one-command setup for fresh clones — detects and (on macOS)
-  installs missing prerequisites (uv, Python 3.11+, Node 18+, PostgreSQL 17,
-  cargo, Docker), then runs `uv sync`, creates the database, generates `.env`
-  with random local-RustFS credentials, builds the velites sandbox binary,
-  installs frontend dependencies, and seeds the worker config and vault key
-  (`scripts/install-deps.sh`, idempotent).
-- Dev object storage works out of the box: `make dev-up` now starts the local
-  RustFS container (via the existing `materials-local` compose profile, gated
-  by `local-s3-decide.sh`) and ensures the bucket + CORS exist
-  (`scripts/ensure-s3-bucket.py`, shared with `init-worktree.sh`). Switching to
-  a cloud S3 is still just an `.env` edit — the local RustFS is then skipped
-  automatically.
-- Workflow definitions accept an optional top-level `execution:` block
-  (provider/model/thinking) that the loader merges into every non-start
-  node (node values win), versioned with the revision — one place to configure
-  execution per workflow instead of per node.
-- Studio node execution editor: provider/model inputs now offer runtime-aware
-  suggestions aggregated from the workspace's online workers
-  (`GET /api/workspaces/{id}/runtime-models`), with free-text fallback.
-- Studio chat sessions can be resumed after close/error/backend restart:
-  `POST /api/workspaces/{id}/studio-chat/sessions/{sid}/resume` respawns the
-  ACP runtime with a fresh scoped token and rebuilds context via ACP
-  `session/load` when advertised, otherwise by replaying a bounded transcript
-  of the persisted history into the first prompt. The panel offers a
-  「继续对话」 action and remembers the last selected session per workspace.
-- Studio start-node contract editor rewritten in user-facing terms: each
-  accepted item type (上传文件 / 外部平台内容 / 整个文件夹) carries a label
-  plus a one-line scenario description, shared with the read-only view and the
-  AddItemsDialog banner (internal jargon like `accepted_item_types` removed).
+- `make install`: one-command setup for fresh clones — detects and (on macOS) installs missing prerequisites (uv, Python 3.11+, Node 18+, PostgreSQL 17, cargo, Docker), then runs `uv sync`, creates the database, generates `.env` with random local-RustFS credentials, builds the velites sandbox binary, installs frontend dependencies, and seeds the worker config and vault key (`scripts/install-deps.sh`, idempotent).
+- Dev object storage works out of the box: `make dev-up` now starts the local RustFS container (via the existing `materials-local` compose profile, gated by `local-s3-decide.sh`) and ensures the bucket + CORS exist (`scripts/ensure-s3-bucket.py`, shared with `init-worktree.sh`). Switching to a cloud S3 is still just an `.env` edit — the local RustFS is then skipped automatically.
+- Workflow definitions accept an optional top-level `execution:` block (provider/model/thinking) that the loader merges into every non-start node (node values win), versioned with the revision — one place to configure execution per workflow instead of per node.
+- Studio node execution editor: provider/model inputs now offer runtime-aware suggestions aggregated from the workspace's online workers (`GET /api/workspaces/{id}/runtime-models`), with free-text fallback.
+- Studio chat sessions can be resumed after close/error/backend restart: `POST /api/workspaces/{id}/studio-chat/sessions/{sid}/resume` respawns the ACP runtime with a fresh scoped token and rebuilds context via ACP `session/load` when advertised, otherwise by replaying a bounded transcript of the persisted history into the first prompt. The panel offers a「继续对话」 action and remembers the last selected session per workspace.
+- Studio start-node contract editor rewritten in user-facing terms: each accepted item type (上传文件 / 外部平台内容 / 整个文件夹) carries a label plus a one-line scenario description, shared with the read-only view and the AddItemsDialog banner (internal jargon like `accepted_item_types` removed).
 
 ### Removed (workspace settings retirement)
 
-- Workspace Settings「Agent 默认配置」(`default_agent_provider/model/thinking`):
-  the provider/model/thinking resolution chain is now node `execution.*` →
-  workflow-level `execution` default → actionable error; the three columns are
-  dropped in schema v64 (cleanup-phase drop after the v62 replay, per the
-  `cms_config_json` precedent). New manifests no longer bake
-  `execution_defaults`; claim re-resolution stays tolerant of legacy in-flight
-  manifests.
-- Workspace Settings「接入与资源」 intake-mode toggles: item types are
-  declared solely by the start node's `accepted_item_types` in Studio; the
-  legacy `/job-batches` API is no longer gated by enabled intake modes. The
-  default entity type (entityType) survives and moved into「基础信息」.
+- Workspace Settings「Agent 默认配置」(`default_agent_provider/model/thinking`): the provider/model/thinking resolution chain is now node `execution.*` →workflow-level `execution` default → actionable error; the three columns are dropped in schema v64 (cleanup-phase drop after the v62 replay, per the `cms_config_json` precedent). New manifests no longer bake `execution_defaults`; claim re-resolution stays tolerant of legacy in-flight manifests.
+- Workspace Settings「接入与资源」 intake-mode toggles: item types are declared solely by the start node's `accepted_item_types` in Studio; the legacy `/job-batches` API is no longer gated by enabled intake modes. The default entity type (entityType) survives and moved into「基础信息」.
 
 ### Removed (dead code and stale artifacts)
 
-- Removed the dead `server/app/services/vault_resources.py` module: zero
-  importers and unimportable since the resource-providers retirement (a prior
-  removal in PR #172 was reverted wholesale by `b9a35ff1`, which restored the
-  file; the CHANGELOG had kept claiming it was gone).
-- Removed the dead `server/app/services/token_usage_capture.py` wrapper (its
-  only caller, `pi_runner.py`, was deleted earlier; the lease-scoped
-  replacements in `token_usage_lease.py` remain) and the orphaned
-  `server/app/executors/agent_workspace.py`.
-- Removed retired/unused config surface: the dead `PiRuntimeConfig` block
-  and the unconsumed OpenClaw runtime knobs (`command_template`,
-  `timeout_seconds`, `isolated_workspace_root`, `skill_safety`) — the admin
-  instance-settings `openclaw` document is now `cwd`-only. Stored documents
-  from older deployments are normalized at read time (retired keys stripped
-  before response validation, no data migration needed), and
-  `openclaw.skill_safety.repos[].ref` stays rejected at startup (config
-  governance G3: refs are pinned by the DB `skill_lock` document only).
-- Worker: removed the test-only `read_current_executions` compatibility
-  helper and `strip_secret_config` (never called on the Worker — secret
-  stripping happens Host-side in `split_manifest_config` before dispatch;
-  verified no caller in repository history).
-- Frontend: removed the orphaned video-hive player cluster
-  (`VideoPlayer`, `InteractionOverlay`, `SubtitlePanel`, `NodePanel`,
-  `videoNodeStore` and friends, ~1,030 LOC) plus `CollapsiblePanel`,
-  `TimelineStrip`, `materialWeb.ts`, and the superseded
-  `getFilterCounts`/`filterCountsCore` pair — all unreferenced since the
-  react-query migration; pruned dead exports in `labels.ts`/`theme.ts`/
-  `nodeCatalog.ts`/types, dead rules in `styles.css` (634 → 118 lines) and
-  seven CSS modules; moved `@tanstack/react-query-devtools` to
-  `dependencies` (it is imported by the production entry), moved
-  `@types/dagre` to devDependencies, and dropped the redundant
-  `@types/katex` shim (katex bundles its own types). The filter-count
-  exclusion semantics (each dimension counts jobs matching the other
-  filters while excluding its own) and the worker status-reader edge
-  cases (dead writer, corrupt/missing file, started_at ordering) were
-  re-homed onto the surviving `computeFilterCounts` / `read_runtime_status`
-  implementations with ported tests.
-- Removed one-off scripts whose retirement conditions are met:
-  `backfill_workflow_revision_resources.py` (schema has moved v26 → v58 and
-  the loader hard-rejects the `resources` field), `bench_gzip_exemption.py`,
-  `velites_replay.py`, `velites_diff_events.py` (rollout archived),
-  `backfill_failure_classification.py`, `backfill_worker_output_validation.py`,
-  `migrate_job_dirs_to_shards.py` — each with its unit tests.
-- Docs/deploy hygiene: `.env.example` and the READMEs no longer instruct the
-  retired global worker-register-token setup (which now fails startup);
-  `scripts/stack-prod-up.sh` drops the `agent_worker_register_token` prereq
-  and the broken `funasr` warm-up block (the dependency left the image);
-  references to the deleted `check-skills-shared.py` and the no-op
-  `verify_specs.py` gate step are cleaned up.
+- Removed the dead `server/app/services/vault_resources.py` module: zero importers and unimportable since the resource-providers retirement (a prior removal in PR #172 was reverted wholesale by `b9a35ff1`, which restored the file; the CHANGELOG had kept claiming it was gone).
+- Removed the dead `server/app/services/token_usage_capture.py` wrapper (its only caller, `pi_runner.py`, was deleted earlier; the lease-scoped replacements in `token_usage_lease.py` remain) and the orphaned `server/app/executors/agent_workspace.py`.
+- Removed retired/unused config surface: the dead `PiRuntimeConfig` block and the unconsumed OpenClaw runtime knobs (`command_template`, `timeout_seconds`, `isolated_workspace_root`, `skill_safety`) — the admin instance-settings `openclaw` document is now `cwd`-only. Stored documents from older deployments are normalized at read time (retired keys stripped before response validation, no data migration needed), and `openclaw.skill_safety.repos[].ref` stays rejected at startup (config governance G3: refs are pinned by the DB `skill_lock` document only).
+- Worker: removed the test-only `read_current_executions` compatibility helper and `strip_secret_config` (never called on the Worker — secret stripping happens Host-side in `split_manifest_config` before dispatch; verified no caller in repository history).
+- Frontend: removed the orphaned video-hive player cluster (`VideoPlayer`, `InteractionOverlay`, `SubtitlePanel`, `NodePanel`, `videoNodeStore` and friends, ~1,030 LOC) plus `CollapsiblePanel`, `TimelineStrip`, `materialWeb.ts`, and the superseded `getFilterCounts`/`filterCountsCore` pair — all unreferenced since the react-query migration; pruned dead exports in `labels.ts`/`theme.ts`/ `nodeCatalog.ts`/types, dead rules in `styles.css` (634 → 118 lines) and seven CSS modules; moved `@tanstack/react-query-devtools` to `dependencies` (it is imported by the production entry), moved `@types/dagre` to devDependencies, and dropped the redundant `@types/katex` shim (katex bundles its own types). The filter-count exclusion semantics (each dimension counts jobs matching the other filters while excluding its own) and the worker status-reader edge cases (dead writer, corrupt/missing file, started_at ordering) were re-homed onto the surviving `computeFilterCounts` / `read_runtime_status` implementations with ported tests.
+- Removed one-off scripts whose retirement conditions are met: `backfill_workflow_revision_resources.py` (schema has moved v26 → v58 and the loader hard-rejects the `resources` field), `bench_gzip_exemption.py`, `velites_replay.py`, `velites_diff_events.py` (rollout archived), `backfill_failure_classification.py`, `backfill_worker_output_validation.py`, `migrate_job_dirs_to_shards.py` — each with its unit tests.
+- Docs/deploy hygiene: `.env.example` and the READMEs no longer instruct the retired global worker-register-token setup (which now fails startup); `scripts/stack-prod-up.sh` drops the `agent_worker_register_token` prereq and the broken `funasr` warm-up block (the dependency left the image); references to the deleted `check-skills-shared.py` and the no-op `verify_specs.py` gate step are cleaned up.
 
 
-- CSRF negative-path test: cookie-authenticated mutations without the
-  `x-agent-legion-request` header are rejected with 403 (SECURITY-AUTH-001).
+- CSRF negative-path test: cookie-authenticated mutations without the `x-agent-legion-request` header are rejected with 403 (SECURITY-AUTH-001).
 
 ### Security
 
-- Shared-database schema guard: `init_db` refuses to initialize/migrate the
-  bare shared `agent_legion` database (the code-default DSN) unless
-  `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` is set — prod launchers
-  (native-prod-up.sh, deploy/compose.host.yaml) set it, while a misdirected
-  process (worktree script without .env resolving the default DSN) fails
-  with remediation instead of pushing unreleased migrations onto prod
-  (2026-08-27: an export_openapi run applied v59-61 to the shared database
-  this way). `scripts/export_openapi.py` additionally refuses to run at all
-  against the shared database before the app is built.
-- Skills runs dir (per-execution skill snapshots + cache locks) moved from
-  `~/.agents/skills/agent-legion.runs` to a deterministic per-user OS temp
-  dir (`agent-legion-skills.runs[-<uid>]`), overridable via
-  `AGENT_LEGION_SKILLS_RUNS_DIR`: leaked snapshots no longer pollute the
-  agent skills namespace, and the OS temp TTL backstops them. The temp root
-  is created/validated with CPython tempfile trust rules (atomic `mkdir
-  0700`; on reuse it must be a non-symlink directory owned by the current
-  user, mode normalized to 0700) — closing pre-creation/symlink attacks on
-  shared `/tmp`. The leak GC (see Changed) reuses the same validation, and
-  the `.locks` dir is 0700 with symlink rejection (EXEC-SKILL-RUNS-SCRATCH-001).
+- Shared-database schema guard: `init_db` refuses to initialize/migrate the bare shared `agent_legion` database (the code-default DSN) unless `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` is set — prod launchers (native-prod-up.sh, deploy/compose.host.yaml) set it, while a misdirected process (worktree script without .env resolving the default DSN) fails with remediation instead of pushing unreleased migrations onto prod (2026-08-27: an export_openapi run applied v59-61 to the shared database this way). `scripts/export_openapi.py` additionally refuses to run at all against the shared database before the app is built.
+- Skills runs dir (per-execution skill snapshots + cache locks) moved from `~/.agents/skills/agent-legion.runs` to a deterministic per-user OS temp dir (`agent-legion-skills.runs[-<uid>]`), overridable via `AGENT_LEGION_SKILLS_RUNS_DIR`: leaked snapshots no longer pollute the agent skills namespace, and the OS temp TTL backstops them. The temp root is created/validated with CPython tempfile trust rules (atomic `mkdir 0700`; on reuse it must be a non-symlink directory owned by the current user, mode normalized to 0700) — closing pre-creation/symlink attacks on shared `/tmp`. The leak GC (see Changed) reuses the same validation, and the `.locks` dir is 0700 with symlink rejection (EXEC-SKILL-RUNS-SCRATCH-001).
 
 ### Changed
 
-- Repacked the 19 underscore-prefixed private modules under
-  `server/app/services/` into real subpackages (issue #199, completing the
-  cluster-repack pattern proven by #191 and #234): `job_rerun/`
-  (batch / by_failure_results / eligibility / preview / preview_checks /
-  single / upstream_guard, plus the batch delete / run-to loops from
-  `_job_batch_ops` as `batch_ops`), `ops_metrics/` (catchup / queue /
-  queue_alert / runs / sampling / series / summary / workspace_sampling) and
-  `failure_classification/` (markers / rules). Import sites were rewritten to
-  the full new paths (no re-export facade). Each cluster's former flat entry
-  module moved into its package: `job_rerun.py` and `failure_classification.py`
-  became the package `__init__.py` (so `from server.app.services.job_rerun
-  import JobRerunService` and the `failure_classification` attribute imports
-  keep working unchanged, mirroring the #234 `status/` precedent), while
-  `ops_metrics.py` became `ops_metrics/service.py` with `OpsMetricsService` /
-  `Granularity` re-exported from the package root — a package shadows the
-  same-named flat module, so keeping `ops_metrics.py` flat was not an option.
-  Architecture baselines carry the old ceilings to the new path keys
-  (file budgets via the #236 rename-floor rule; the service-data-boundary
-  counts move as-is, with `job_rerun/__init__.py` newly registered at its
-  observed bypass count).
+- Repacked the 19 underscore-prefixed private modules under `server/app/services/` into real subpackages (issue #199, completing the cluster-repack pattern proven by #191 and #234): `job_rerun/` (batch / by_failure_results / eligibility / preview / preview_checks / single / upstream_guard, plus the batch delete / run-to loops from `_job_batch_ops` as `batch_ops`), `ops_metrics/` (catchup / queue / queue_alert / runs / sampling / series / summary / workspace_sampling) and `failure_classification/` (markers / rules). Import sites were rewritten to the full new paths (no re-export facade). Each cluster's former flat entry module moved into its package: `job_rerun.py` and `failure_classification.py` became the package `__init__.py` (so `from server.app.services.job_rerun import JobRerunService` and the `failure_classification` attribute imports keep working unchanged, mirroring the #234 `status/` precedent), while `ops_metrics.py` became `ops_metrics/service.py` with `OpsMetricsService` / `Granularity` re-exported from the package root — a package shadows the same-named flat module, so keeping `ops_metrics.py` flat was not an option. Architecture baselines carry the old ceilings to the new path keys (file budgets via the #236 rename-floor rule; the service-data-boundary counts move as-is, with `job_rerun/__init__.py` newly registered at its observed bypass count).
 
-- Repacked 21 of the flat `worker/` prefix-cluster modules into real
-  subpackages (issue #234, mirroring #191 on the server side):
-  `execution/` (heartbeat / lifecycle / prepare / run), `runtime/`
-  (controls / models / preflight / setup), `upload/` (heartbeat / prepare /
-  queue / scheduler), `host/` (client / status_sync / transfer),
-  `artifact/` (download / upload), `registration/` (retry / token) and
-  `status/` (the former `status.py` reporter as the package root, plus
-  aggregates / reader). Import sites were rewritten to the full new paths
-  (no re-export facade); `from worker.status import …` keeps working because
-  the reporter now lives in `status/__init__.py`. Entry-point modules stay
-  at the package root — `worker.service`, `worker.executor`, `worker.cli` —
-  so the Dockerfile ENTRYPOINT, Makefile targets and
-  `scripts/native-prod-up.sh` keep working; the `service` / `cli` clusters
-  (`service_bind` / `service_models` / `cli_args`) stay flat because a
-  `worker/<name>/` package would shadow the `worker/<name>.py` entry module
-  and break `python -m worker.<name>` (Python resolves the package first).
-  The workerctl standalone COPY is unchanged, and the worker image smoke
-  import now covers `worker.upload.queue`.
+- Repacked 21 of the flat `worker/` prefix-cluster modules into real subpackages (issue #234, mirroring #191 on the server side): `execution/` (heartbeat / lifecycle / prepare / run), `runtime/` (controls / models / preflight / setup), `upload/` (heartbeat / prepare / queue / scheduler), `host/` (client / status_sync / transfer), `artifact/` (download / upload), `registration/` (retry / token) and `status/` (the former `status.py` reporter as the package root, plus aggregates / reader). Import sites were rewritten to the full new paths (no re-export facade); `from worker.status import …` keeps working because the reporter now lives in `status/__init__.py`. Entry-point modules stay at the package root — `worker.service`, `worker.executor`, `worker.cli` —so the Dockerfile ENTRYPOINT, Makefile targets and `scripts/native-prod-up.sh` keep working; the `service` / `cli` clusters (`service_bind` / `service_models` / `cli_args`) stay flat because a `worker/<name>/` package would shadow the `worker/<name>.py` entry module and break `python -m worker.<name>` (Python resolves the package first). The workerctl standalone COPY is unchanged, and the worker image smoke import now covers `worker.upload.queue`.
 
-- **Breaking (API consumers):** workspace id and workflow key are one
-  identifier (schema v62, DB-WORKSPACE-KEY-BINDING-001): `POST
-  /api/workspaces` now requires an explicit `id`
-  (`^[a-z0-9][a-z0-9_-]{0,63}$`) that is bound to `default_workflow_key` at
-  creation and immutable afterwards — `workflow_mode` and the
-  `default_workflow_key` create/update fields are removed (422 on extra
-  fields, 400 on any later key change), workspace creation no longer seeds
-  the sample template (demo workspaces are provisioned by `make import-demo`
-  / `scripts/seed_demo.py`), and the first-publish key adoption path is gone
-  (mismatched draft keys are rejected with 422). The v62 migration renames
-  existing workspaces to id == key (cascading `workspace_id` through every
-  child table plus the FK-less `auth_scoped_tokens` and
-  `ops_metric_samples`, fail-fast on id conflicts) and backfills
-  never-published workspaces with key = id; `default_workflow_key` is
-  deprecated as a separate concept pending full retirement (issue #211).
-  Legacy workspace URLs change accordingly (e.g. `/workspaces/demo` →
-  `/workspaces/education_video_problems_generation`).
+- **Breaking (API consumers):** workspace id and workflow key are one identifier (schema v62, DB-WORKSPACE-KEY-BINDING-001): `POST /api/workspaces` now requires an explicit `id` (`^[a-z0-9][a-z0-9_-]{0,63}$`) that is bound to `default_workflow_key` at creation and immutable afterwards — `workflow_mode` and the `default_workflow_key` create/update fields are removed (422 on extra fields, 400 on any later key change), workspace creation no longer seeds the sample template (demo workspaces are provisioned by `make import-demo` / `scripts/seed_demo.py`), and the first-publish key adoption path is gone (mismatched draft keys are rejected with 422). The v62 migration renames existing workspaces to id == key (cascading `workspace_id` through every child table plus the FK-less `auth_scoped_tokens` and `ops_metric_samples`, fail-fast on id conflicts) and backfills never-published workspaces with key = id; `default_workflow_key` is deprecated as a separate concept pending full retirement (issue #211). Legacy workspace URLs change accordingly (e.g. `/workspaces/demo` →`/workspaces/education_video_problems_generation`).
 
-- **Breaking (deployments):** the global worker register token is retired —
-  registration uses workspace-scoped tokens only, issued per workspace in the
-  admin UI (workspace 设置 → Agent 与 Worker, workspace is now mandatory at
-  issuance) and managed in the Worker console's new "Workspace 访问" panel;
-  leftover `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env vars or yaml
-  `agent_workers.register_token(_file)` keys now fail startup with migration
-  guidance (#35, schema v58).
-- Worker registration presents all configured scoped tokens in one call
-  (`X-Agent-Worker-Register-Tokens`); the Host resolves the union workspace
-  scope, rejects the whole registration when any token is revoked, and returns
-  per-workspace rows (id + name) so the console labels each token (#35).
-- `GET /api/agent-workers?workspace_id=...` narrows to workers registered
-  with that workspace's tokens; each workspace's settings page shows a
-  read-only worker list, while legacy `[]`-scope (global-token) workers are
-  admin-visible only until re-registered (#35).
-- Compose stacks no longer mount `agent_worker_register_token`; workers get
-  their scoped token via the console or `workerctl configure
-  --register-token-file` (#35).
-- **Breaking (deployment):** `server.app.main` no longer exports a
-  module-level `app`; launchers must use the factory form
-  (`uvicorn server.app.main:create_prod_app --factory`). Importing the
-  module is now side-effect free — the `AGENT_LEGION_SKIP_MODULE_APP` env
-  escape hatch is retired.
-- Schema upgrades record one `schema_migrations` row per version and only
-  run data migrations above `max(applied)`; legacy single-row installs are
-  a no-op (DB-SCHEMA-001).
-- Sandbox argv/env/read-roots construction and the registration protocol
-  constants live once in `shared/` (imported by both Host and Worker),
-  replacing the cross-side "keep in sync" copies; network opt-in is now
-  strictly `is True` on the Worker path too (P-0.5 semantics).
-- The workflow worker's mutable state moved from ~18 thread-private
-  attributes (reached into by sibling modules) into an explicit
-  `WorkflowWorkerState` container consumed as `worker.state.X`.
-- Studio layout components consume `useWorkflowStudio()` through
-  `StudioStateContext`/`StudioViewContext` instead of threading the whole
-  ~35-field object as props through six layers; the fabricated
-  `WorkflowDefinitionRecord` in job detail is replaced by a minimal
-  `NodeCatalog` type.
+- **Breaking (deployments):** the global worker register token is retired —registration uses workspace-scoped tokens only, issued per workspace in the admin UI (workspace 设置 → Agent 与 Worker, workspace is now mandatory at issuance) and managed in the Worker console's new "Workspace 访问" panel; leftover `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env vars or yaml `agent_workers.register_token(_file)` keys now fail startup with migration guidance (#35, schema v58).
+- Worker registration presents all configured scoped tokens in one call (`X-Agent-Worker-Register-Tokens`); the Host resolves the union workspace scope, rejects the whole registration when any token is revoked, and returns per-workspace rows (id + name) so the console labels each token (#35).
+- `GET /api/agent-workers?workspace_id=...` narrows to workers registered with that workspace's tokens; each workspace's settings page shows a read-only worker list, while legacy `[]`-scope (global-token) workers are admin-visible only until re-registered (#35).
+- Compose stacks no longer mount `agent_worker_register_token`; workers get their scoped token via the console or `workerctl configure --register-token-file` (#35).
+- **Breaking (deployment):** `server.app.main` no longer exports a module-level `app`; launchers must use the factory form (`uvicorn server.app.main:create_prod_app --factory`). Importing the module is now side-effect free — the `AGENT_LEGION_SKIP_MODULE_APP` env escape hatch is retired.
+- Schema upgrades record one `schema_migrations` row per version and only run data migrations above `max(applied)`; legacy single-row installs are a no-op (DB-SCHEMA-001).
+- Sandbox argv/env/read-roots construction and the registration protocol constants live once in `shared/` (imported by both Host and Worker), replacing the cross-side "keep in sync" copies; network opt-in is now strictly `is True` on the Worker path too (P-0.5 semantics).
+- The workflow worker's mutable state moved from ~18 thread-private attributes (reached into by sibling modules) into an explicit `WorkflowWorkerState` container consumed as `worker.state.X`.
+- Studio layout components consume `useWorkflowStudio()` through `StudioStateContext`/`StudioViewContext` instead of threading the whole ~35-field object as props through six layers; the fabricated `WorkflowDefinitionRecord` in job detail is replaced by a minimal `NodeCatalog` type.
 
-- Skills runs dir leak GC: the sweeper thread now removes execution
-  snapshot dirs older than 1h (mtime-based; `.locks`, non-directories and
-  symlinks untouched) — a hard crash between snapshot copy and the
-  finally-cleanup previously leaked the snapshot permanently. Deployments
-  with per-process temp dirs (systemd `PrivateTmp`, or a host CLI sharing
-  the skill cache with a containerized server) must pin
-  `AGENT_LEGION_SKILLS_RUNS_DIR` to keep the FileLock domain whole.
+- Skills runs dir leak GC: the sweeper thread now removes execution snapshot dirs older than 1h (mtime-based; `.locks`, non-directories and symlinks untouched) — a hard crash between snapshot copy and the finally-cleanup previously leaked the snapshot permanently. Deployments with per-process temp dirs (systemd `PrivateTmp`, or a host CLI sharing the skill cache with a containerized server) must pin `AGENT_LEGION_SKILLS_RUNS_DIR` to keep the FileLock domain whole.
 ### Added
 
-- Service data-boundary ratchet (BOUNDARY-DATA-001): new services under
-  `server/app/services/` must reach the database through the `JobQueries`
-  facade; existing raw-SQL/DB-primitive counts are frozen in
-  `config/architecture/service-data-boundary-baseline.json` and only
-  ratchet down.
+- Service data-boundary ratchet (BOUNDARY-DATA-001): new services under `server/app/services/` must reach the database through the `JobQueries` facade; existing raw-SQL/DB-primitive counts are frozen in `config/architecture/service-data-boundary-baseline.json` and only ratchet down.
 
 ## [0.3.0-alpha] - 2026-08-25
 
 ### Added
 
-- Workspace materials store: S3-compatible presigned direct upload (RustFS
-  locally), content-addressed local material cache for sandboxed nodes,
-  add-items dialog, demo workspace material seeding, and a storage readiness
-  probe in `/api/health` plus a startup self-check (#141).
-- Item-based run creation API `POST /workspaces/{id}/runs` with typed items
-  (#141).
-- Mandatory `type: start` entry node in every workflow DAG carrying the
-  `accepted_item_types` entry contract; item types `material` and `ref`
-  (#156, #161).
-- `bundle` item type: a folder as a single item (`material_bundles`,
-  manifest-referenced members, two-way delete guard, deterministic
-  hardlink-tree materialization, bundle upload panel in the UI) (#156, #164).
-- Job artifacts unified into instance object storage
-  (`jobs/{workspace_id}/{job_id}/{name}` keys + `job_artifacts` manifest
-  table, schema v54); the local job_dir is now an evictable cache (#160).
-- Worker `max_code_concurrency` hot-reload via the console /
-  `PUT /api/config` without restart (#123).
-- `scripts/resume-workspaces.sh` (on-demand workspace scheduling resume) and
-  `scripts/trim_terminal_code_manifests.py` (drain legacy code manifest
-  rows).
+- Workspace materials store: S3-compatible presigned direct upload (RustFS locally), content-addressed local material cache for sandboxed nodes, add-items dialog, demo workspace material seeding, and a storage readiness probe in `/api/health` plus a startup self-check (#141).
+- Item-based run creation API `POST /workspaces/{id}/runs` with typed items (#141).
+- Mandatory `type: start` entry node in every workflow DAG carrying the `accepted_item_types` entry contract; item types `material` and `ref` (#156, #161).
+- `bundle` item type: a folder as a single item (`material_bundles`, manifest-referenced members, two-way delete guard, deterministic hardlink-tree materialization, bundle upload panel in the UI) (#156, #164).
+- Job artifacts unified into instance object storage (`jobs/{workspace_id}/{job_id}/{name}` keys + `job_artifacts` manifest table, schema v54); the local job_dir is now an evictable cache (#160).
+- Worker `max_code_concurrency` hot-reload via the console / `PUT /api/config` without restart (#123).
+- `scripts/resume-workspaces.sh` (on-demand workspace scheduling resume) and `scripts/trim_terminal_code_manifests.py` (drain legacy code manifest rows).
 - Optional bundled RustFS in prod-up (#150).
 
 ### Changed
 
-- **Breaking (API consumers):** `job_batches` migrated to first-class `runs`
-  (schema v53) (#141).
-- Studio chat MCP loopback is served over an in-app streamable-HTTP endpoint
-  (`/api/studio-agent/mcp`) with scoped, workspace-bound tokens and sliding
-  TTL (#157, #158, #159).
-- Worker artifact return goes through claim-injected presigned S3 staging;
-  the local `/api/artifacts` CAS remains as the legacy fallback (missing
-  upload specs, direct-upload failure, or crash recovery re-enters the old
-  channel) (#160).
+- **Breaking (API consumers):** `job_batches` migrated to first-class `runs` (schema v53) (#141).
+- Studio chat MCP loopback is served over an in-app streamable-HTTP endpoint (`/api/studio-agent/mcp`) with scoped, workspace-bound tokens and sliding TTL (#157, #158, #159).
+- Worker artifact return goes through claim-injected presigned S3 staging; the local `/api/artifacts` CAS remains as the legacy fallback (missing upload specs, direct-upload failure, or crash recovery re-enters the old channel) (#160).
 
 ### Fixed
 
-- `agent_execution_requests` TOAST bloat (#142): the queued kind='code'
-  manifest persists only a lightweight `runtime_context` audit stub
-  (job/workspace ids + `batch_id`/`batch_hash`); the full DB-derived payloads
-  (job, workspace, intake batch, skill_versions) are rebuilt on the
-  claim-response path in memory, never persisted. Terminal code rows are
-  slimmed back to the stub automatically; `scripts/trim_terminal_code_manifests.py`
-  drains legacy pre-fix rows (ops-side `VACUUM FULL`/`pg_repack` still needed
-  to reclaim disk).
+- `agent_execution_requests` TOAST bloat (#142): the queued kind='code' manifest persists only a lightweight `runtime_context` audit stub (job/workspace ids + `batch_id`/`batch_hash`); the full DB-derived payloads (job, workspace, intake batch, skill_versions) are rebuilt on the claim-response path in memory, never persisted. Terminal code rows are slimmed back to the stub automatically; `scripts/trim_terminal_code_manifests.py` drains legacy pre-fix rows (ops-side `VACUUM FULL`/`pg_repack` still needed to reclaim disk).
 - Terminal-bundle reap moved off the startup-critical sweep (#139).
 - init-worktree S3 bucket step silently skipped on bare `load_dotenv` (#163).
-- Studio chat MCP loopback deadlock and message interleaving; fully async
-  httpx (#157).
+- Studio chat MCP loopback deadlock and message interleaving; fully async httpx (#157).
 - Material delete guards and endpoint precedence (#151, #153).
 - Materials & runs v1 follow-ups (#154, #155).
-- Performance: trigger-maintained workspace job node status counts (schema
-  v56, #121), forced index for expired node-run sweep page reads (#122),
-  and per-pass claim-input memos in the dispatch path (#124).
-- Artifact store durability (#168): rerun promotes now back up pre-existing
-  authority objects and roll back on mid-batch copy failure; cache eviction
-  re-validates the job state before every unlink; empty worker-reported
-  `content_hash` registers the Host-computed digest; quality artifact
-  contents read bounded streams instead of whole objects.
+- Performance: trigger-maintained workspace job node status counts (schema v56, #121), forced index for expired node-run sweep page reads (#122), and per-pass claim-input memos in the dispatch path (#124).
+- Artifact store durability (#168): rerun promotes now back up pre-existing authority objects and roll back on mid-batch copy failure; cache eviction re-validates the job state before every unlink; empty worker-reported `content_hash` registers the Host-computed digest; quality artifact contents read bounded streams instead of whole objects.
 
 ## [0.2.0] - 2026-08-20
 
 ### Changed
 
-- **Breaking:** velites provider/model configuration now uses the runtime-owned
-  `~/.velites/models.json` registry. Worker discovery fails closed when the
-  registry, requested model, or referenced credential is unavailable.
-- Worker model capabilities are runtime-scoped `(runtime, provider, model)`
-  triples under protocol v3. Rolling upgrades must update the Host before
-  Workers so an older Host cannot erase the runtime dimension.
-- The Worker discovers models through each selected agent runtime and applies
-  its local runtime-scoped allowlist instead of treating one static list as
-  shared by all harnesses.
+- **Breaking:** velites provider/model configuration now uses the runtime-owned `~/.velites/models.json` registry. Worker discovery fails closed when the registry, requested model, or referenced credential is unavailable.
+- Worker model capabilities are runtime-scoped `(runtime, provider, model)` triples under protocol v3. Rolling upgrades must update the Host before Workers so an older Host cannot erase the runtime dimension.
+- The Worker discovers models through each selected agent runtime and applies its local runtime-scoped allowlist instead of treating one static list as shared by all harnesses.
 
 ### Added
 
-- Native OpenAI-compatible Chat Completions and Anthropic Messages provider
-  drivers in velites, including tool use, streaming, usage accounting, and
-  Anthropic extended-thinking continuation state.
-- Secure Docker credential injection for environment references used by the
-  velites model registry.
+- Native OpenAI-compatible Chat Completions and Anthropic Messages provider drivers in velites, including tool use, streaming, usage accounting, and Anthropic extended-thinking continuation state.
+- Secure Docker credential injection for environment references used by the velites model registry.
 
 ## [0.1.0] - 2026-08-19
 
@@ -1552,28 +413,16 @@ Initial open-source release.
 
 ### Added
 
-- Workspace-scoped DAG workflows: nodes declare business `capability` only;
-  the authoritative definition is the workspace's active revision, published
-  from Studio drafts.
+- Workspace-scoped DAG workflows: nodes declare business `capability` only; the authoritative definition is the workspace's active revision, published from Studio drafts.
 - Batch job intake with workflow-defined intake modes.
-- Pluggable agent runtimes: Pi CLI and velites (Rust harness with a
-  pi-compatible event stream); per-agent `runtime` selection.
-- Versioned external skills: `{repo, ref}` sources and pinned commit locks in
-  the DB (`skill_sources` / `skill_lock`), managed via admin UI or
-  `make skills-lock`.
-- Local and remote execution: executor leases for local capacity; remote
-  Agent Workers register over HTTP, claim executions (agent and code nodes),
-  and upload artifacts.
-- Real-time console: React SPA with live DAG view, SSE dashboard events,
-  WebSocket agent status, run logs, artifacts, and token-usage statistics.
-- Secrets vault: Fernet-encrypted workspace secrets and instance-level
-  external service connections; configs carry `secret_ref` only.
-- Multi-user access control: cookie sessions with CSRF guard, admin user
-  management, per-workspace editor/viewer membership.
-- PostgreSQL control plane (PostgreSQL 17) coordinating multi-process and
-  multi-machine scheduling.
-- Demo workflow `education_video_problems_generation` under `examples/`,
-  runnable out of the box against a real LLM.
+- Pluggable agent runtimes: Pi CLI and velites (Rust harness with a pi-compatible event stream); per-agent `runtime` selection.
+- Versioned external skills: `{repo, ref}` sources and pinned commit locks in the DB (`skill_sources` / `skill_lock`), managed via admin UI or `make skills-lock`.
+- Local and remote execution: executor leases for local capacity; remote Agent Workers register over HTTP, claim executions (agent and code nodes), and upload artifacts.
+- Real-time console: React SPA with live DAG view, SSE dashboard events, WebSocket agent status, run logs, artifacts, and token-usage statistics.
+- Secrets vault: Fernet-encrypted workspace secrets and instance-level external service connections; configs carry `secret_ref` only.
+- Multi-user access control: cookie sessions with CSRF guard, admin user management, per-workspace editor/viewer membership.
+- PostgreSQL control plane (PostgreSQL 17) coordinating multi-process and multi-machine scheduling.
+- Demo workflow `education_video_problems_generation` under `examples/`, runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
 [Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.6...HEAD
@@ -1590,3 +439,5 @@ Initial open-source release.
 [0.3.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.2.0...v0.3.0-alpha
 [0.2.0]: https://github.com/LuciusCao/agent-legion/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LuciusCao/agent-legion/releases/tag/v0.1.0
+
+

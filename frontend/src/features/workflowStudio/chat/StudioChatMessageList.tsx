@@ -6,6 +6,7 @@ import {
   type ChatMessage,
   type ToolCallView,
 } from './studioChatMessages'
+import { supersededCancelRequestIds } from './studioChatCancelVisibility'
 import { MessageItem } from './StudioChatMessageItem'
 import styles from './StudioChatPanel.module.css'
 
@@ -45,6 +46,13 @@ export function StudioChatMessageList(props: Props) {
   // memo sees unchanged props for untouched messages (a streaming update
   // touches one message; passing the whole `chat` object would defeat memo).
   const streamingId = chat.busy ? streamingTextId(chat.messages) : null
+  // #675 codex P2：cancel_requested 行的了结集合——终止事件/新一轮到达后
+  // 「等待收尾」降级为历史措辞；派生成每消息布尔再下传，保持 MessageItem
+  // memo 的逐行命中（集合身份每次消息变化都会重建）。
+  const supersededCancelIds = useMemo(
+    () => supersededCancelRequestIds(chat.messages),
+    [chat.messages]
+  )
   const permissionById = useMemo(
     () => new Map(chat.permissions.map((view) => [view.requestId, view])),
     [chat.permissions]
@@ -78,6 +86,7 @@ export function StudioChatMessageList(props: Props) {
           key={message.id}
           message={message}
           streaming={message.id === streamingId}
+          cancelSuperseded={supersededCancelIds.has(message.id)}
           toolCall={toolCallByFirstMessage.get(message.id) ?? null}
           permission={permissionById.get(permissionRequestId(message)) ?? null}
           draftAnchorId={draftAnchorId}

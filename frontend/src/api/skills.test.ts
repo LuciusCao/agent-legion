@@ -35,11 +35,11 @@ describe('skills api', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await validateSkillPath('/abs/skill')
+    const result = await validateSkillPath('/abs/skill', 'ws_demo')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/skills/validate',
+      '/api/skills/validate?workspace_id=ws_demo',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ path: '/abs/skill' }),
@@ -52,11 +52,11 @@ describe('skills api', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await fetchSkillTags('/abs/skill a')
+    const result = await fetchSkillTags('/abs/skill a', 'ws_demo')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/skills/tags?path=%2Fabs%2Fskill%20a',
+      '/api/skills/tags?path=%2Fabs%2Fskill%20a&workspace_id=ws_demo',
       expect.anything()
     )
   })
