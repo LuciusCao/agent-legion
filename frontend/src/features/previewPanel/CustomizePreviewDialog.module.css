@@ -1,27 +1,53 @@
 /*
- * 「定制预览」对话框布局（issue #615）：聊天与内嵌草稿预览同屏分栏——
- * 模态对话框锁滚动且遮挡左栏，预览渲染目标只在对话框外时人工验证
- * 事实上不可用。宽屏左右分栏（聊天主导在左），窄屏堆叠为上下；
- * 预览区自身滚动（iframe 自适应高度上限 6000px，超大草稿在 pane 内滚）。
- * 对话框样式原居 PreviewPanelSection.module.css，随双栏改版迁出。
+ * 「定制预览」覆盖面板样式（#615 方向 A，推翻 #701 对话框内嵌预览）：
+ * 非模态覆盖层——宽屏停靠右侧盖住 job progress 列、不遮挡左栏预览区、
+ * 不锁底层滚动（定位/尺寸契约在组件 sx 里，随 MUI lg=1200 断点降级为
+ * 右下浮动卡片）；这里只管面板内部的聊天列与 footer 布局。codex P2-B 后
+ * surface 是 Portal + Paper 的自定义 modeless 容器（无 DialogContent/
+ * DialogTitle 代劳），padding/滚动/标题排版由 .content/.titleRow 承担；
+ * 折叠只 display:none 隐藏内容区（.contentHidden，P2-A：卸载会丢队列与
+ * 未发送输入），露出右下角小条（collapsedPill）。
  */
 
-/* 定高网格：聊天/预览两行独立内部滚动，footer 常驻底部。
- * DialogContent（MUI）保持默认整块滚动——.body 定高后恰好填满，
- * 不与 MUI 的 overflow 打架（jsdom 测不了滚动，布局契约由组件测试钉住）。 */
+/* 面板内容壳：承担原 DialogContent 的 padding 与整列滚动（Paper 已是
+ * flex 列容器且定高——jsdom 测不了滚动，布局契约由组件测试钉住）。 */
+.content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 8px 16px 16px;
+  overflow-y: auto;
+}
+
+/* 折叠时隐藏内容区但不卸载（P2-A：聊天子树的本地 state 保持存活）。 */
+.contentHidden {
+  display: none;
+}
+
 .body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
-  grid-template-areas:
-    'chat preview'
-    'footer footer';
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  height: min(72vh, 680px);
+  min-height: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.titleText {
+  flex: 1;
 }
 
 .chatColumn {
-  grid-area: chat;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -36,37 +62,6 @@
   min-height: 0;
 }
 
-.previewPane {
-  grid-area: preview;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 0;
-  min-width: 0;
-}
-
-.previewHead {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-secondary, #43474e);
-}
-
-/* 预览区自身滚动：iframe 按内容自适应高度，超出 pane 即滚。 */
-.previewBody {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  border: 1px solid var(--color-border, #c3c6cf);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.previewHint {
-  padding: 16px 12px;
-  font-size: 12px;
-  color: var(--color-text-secondary, #43474e);
-}
-
 .hint {
   font-size: 12px;
   color: var(--color-text-secondary, #43474e);
@@ -78,7 +73,6 @@
 }
 
 .footer {
-  grid-area: footer;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -93,15 +87,15 @@
   color: var(--color-text-secondary, #43474e);
 }
 
-/* 窄屏（对话框 95vw，视口宽 ≈ 对话框宽）：分栏堆叠为上下，聊天略高。 */
-@media (max-width: 880px) {
-  .body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr) auto;
-    grid-template-areas:
-      'chat'
-      'preview'
-      'footer';
-    height: min(80vh, 760px);
-  }
+/* 折叠态：Paper 缩成右下角小条（定位/圆角在组件 sx），内容只剩这个
+ * 展开按钮；会话保持存活（组件未卸载，chat hooks 继续运行）。 */
+.collapsedPill {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
 }

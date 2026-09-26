@@ -483,11 +483,15 @@ exemptions:
   ceiling: 189
 - check: architecture.file_budget
   path: frontend/src/features/previewPanel/CustomizePreviewDialog.tsx
-  reason: 'Re-signed after the release/0.7.13 back-merge: #615 (dialog-embedded draft
-    preview, CustomizePreviewPane) regrew the dialog above the 149 floor our composer
-    round had ratcheted to. origin/main already carries ceiling 159 for this path, so
-    the merge result tracks main; the exemption lifts only the local anchor floor gap.
-    Drop when the branch lands on a base whose registry already has 159.'
+  reason: 'Re-signed for the #615 direction-A rework (non-modal overlay panel,
+    replacing the #701 dialog-embedded preview): the overlay keeps the chat
+    column, title row with collapse/close and the action-error wiring in one
+    composition site; footer and positioning sx were already split out
+    (CustomizePreviewFooter.tsx, customizePreviewOverlaySx.ts) and further
+    splits would scatter the non-modal contract. The 167 actual (after the
+    codex P2 round: Portal+Paper modeless surface, focus handoff, collapse
+    without unmount) sits above the 149 registry floor but inside the
+    growth-allowance band; the exemption covers the floor gap.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 159

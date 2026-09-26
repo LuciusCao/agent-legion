@@ -39,4 +39,20 @@
   background: rgba(0, 0, 0, 0.04);
 }
 
+/* 「预览此草稿」后的短暂高亮（#615 方向 C 轻量版）：非模态面板不遮挡左栏，
+ * 高亮只负责把视线引到草稿渲染落点；动画结束后类名移除，无残留样式。 */
+.flash {
+  animation: previewFlash 1.6s ease-out;
+  border-radius: 8px;
+}
+
+@keyframes previewFlash {
+  0% {
+    box-shadow: 0 0 0 3px rgba(25, 103, 210, 0.65);
+  }
+  100% {
+    box-shadow: 0 0 0 3px rgba(25, 103, 210, 0);
+  }
+}
+
 /* 对话框布局样式随 #615 双栏改版迁至 CustomizePreviewDialog.module.css。 */

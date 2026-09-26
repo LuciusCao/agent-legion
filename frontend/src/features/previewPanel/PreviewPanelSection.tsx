@@ -10,13 +10,14 @@
  *   新草稿/新上下文不继承旧授权（避免一次点击永久放行）。授权的快照与
  *   render 期派生比对抽在 useDraftAuthorization（#500 P1-3/P1-5）；发布
  *   永远是人工动作。
- * - #615：授权后草稿双通道渲染——左栏（全宽）与对话框内嵌预览区
- *   （CustomizePreviewPane，对话与预览同屏）共用同一 draftPreview 判定；
- *   左栏保留，对话框不再是「关掉才能看预览」的单向门。
+ * - #615 方向 A：授权后草稿只在左栏渲染（单一通道，#701 的对话框内嵌
+ *   预览已撤）；对话框改为非模态覆盖层，停靠右侧盖住 job progress 列，
+ *   不遮挡左栏、不锁底层滚动；点「预览此草稿」后左栏滚动定位到面板并
+ *   短暂高亮（轻量版方向 C），「改草稿 → 看左栏 → 继续对话」闭环不中断。
  * 定制入口 admin-only（与 WorkspaceMoreMenu 的 Studio 项同一惯例，P4/STUDIO-AGENT-001：
  * 治理面端点本身 admin/scoped-only，非 admin 点开只会收获一串 403）。
  */
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuthStore } from '../../stores/authStore'
 import { PreviewPanelHost } from './PreviewPanelHost'
 import { previewHostKey } from './bundleKey'
@@ -57,8 +58,22 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
 
   const closeCustomizing = () => setCustomizing(false)
 
+  // #615 方向 C 轻量版：点「预览此草稿」后把左栏滚动定位到面板并短暂高亮，
+  // 让草稿渲染落点显而易见（非模态面板已不遮挡左栏，这是引导视线而非解锁）。
+  const rootRef = useRef<HTMLElement>(null)
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (!flash) return
+    const timer = setTimeout(() => setFlash(false), 1600)
+    return () => clearTimeout(timer)
+  }, [flash])
+
   return (
-    <section className={styles.root} data-testid="preview-panel-section">
+    <section
+      ref={rootRef}
+      className={flash ? `${styles.root} ${styles.flash}` : styles.root}
+      data-testid="preview-panel-section"
+    >
       {workspaceId && (
         <header className={styles.header}>
           <h2 className={styles.title}>内容预览</h2>
@@ -94,13 +109,15 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
       {customizing && isAdmin && workspaceId && (
         <CustomizePreviewDialog
           workspaceId={workspaceId}
-          jobId={jobId}
           state={stateQuery.data ?? null}
           previewDraft={auth.isAuthorized && draft !== null}
           onPreviewDraft={() => {
             // 真实按钮 disabled={!draft}（CustomizePreviewDialog）保证点击
             // 时草稿已可见；快照取当前轮询帧的 html_hash。
             if (draft) auth.authorize(draft)
+            // jsdom 无 scrollIntoView，守卫可选链（测试另桩断言）。
+            rootRef.current?.scrollIntoView?.({ behavior: 'smooth' })
+            setFlash(true)
           }}
           onClose={closeCustomizing}
         />

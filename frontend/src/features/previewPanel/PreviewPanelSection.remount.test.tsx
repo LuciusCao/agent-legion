@@ -46,19 +46,16 @@ vi.mock('./CustomizePreviewDialog', () => ({
     onClose,
     state,
     previewDraft,
-    jobId,
   }: {
     onPreviewDraft: () => void
     onClose: () => void
     state: { draft?: unknown } | null
     previewDraft: boolean
-    jobId: string
   }) => (
     <div
       data-testid="customize-dialog"
       data-hasdraft={String(Boolean(state?.draft))}
       data-previewdraft={String(previewDraft)}
-      data-jobid={jobId}
     >
       <button onClick={onPreviewDraft}>预览此草稿</button>
       <button onClick={onClose}>关闭</button>

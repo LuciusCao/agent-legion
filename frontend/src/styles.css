@@ -18,6 +18,11 @@ body {
   background: #ffffff;
 }
 :root {
+  /* AppBar 声明最小高度的单一声明点：AppBar.module.css 的 min-height 与
+   * 「定制预览」覆盖面板的首帧定位回退共用（面板运行时的真实顶边以
+   * useAppBarBottom 实测为准，见 overlayChrome.ts——版本芯片/放大字体会
+   * 把 AppBar 撑过此声明值，实测优先，本变量只是首帧兜底）。 */
+  --app-bar-height: 56px;
   --status-running-bg: #dbeafe;
   --status-running-text: #1d4ed8;
   --status-running-border: #3b82f6;
