@@ -29,6 +29,11 @@ function parseNumber(values: FormValues, path: string): number {
       `${def.label} 必须是${def.allowZero ? '非负整数' : '不小于 1 的整数'}`
     )
   }
+  // #786 codex P2：契约下界（如 node_code_max_bytes 的 ge=1024）在客户端
+  // 拦截，避免 1–1023 这类值落到后端 422 的无指向性报错。
+  if (def.min !== undefined && value < def.min) {
+    throw new Error(`${def.label} 必须不小于 ${def.min}`)
+  }
   return value
 }
 

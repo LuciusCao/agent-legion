@@ -234,6 +234,27 @@ describe('InstanceSettingsSection', () => {
     expect(updateInstanceSettings).not.toHaveBeenCalled()
   })
 
+  it('rejects node code budget below the 1024 contract floor before saving', async () => {
+    renderSection()
+    fireEvent.click(await screen.findByRole('button', { name: '展开高级参数' }))
+
+    // #786 codex P2：1–1023 由客户端按契约下界拦截（不发请求），
+    // 不再落到后端 422 的无指向性报错。
+    expect(screen.getByLabelText('节点代码体积上限（字节）')).toHaveAttribute(
+      'min',
+      '1024'
+    )
+    fireEvent.change(screen.getByLabelText('节点代码体积上限（字节）'), {
+      target: { value: '512' },
+    })
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '节点代码体积上限（字节） 必须不小于 1024'
+    )
+    expect(updateInstanceSettings).not.toHaveBeenCalled()
+  })
+
   it('shows the load error when GET fails', async () => {
     vi.mocked(getInstanceSettings).mockRejectedValue(new Error('HTTP 403'))
 
