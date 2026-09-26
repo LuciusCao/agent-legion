@@ -52,6 +52,8 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
         _bool_parser,
     ),
     # #628: byte budget for one custom node code version (default 64KB).
+    # #786: instance-settings managed (admin 全局设置); the env value remains
+    # the default source until the stored document carries the key.
     # int() raises ValueError on garbage, which surfaces at settings load
     # (fail-fast); the ge=1024 bound is enforced by ExecutorRuntimeConfig.
     "AGENT_LEGION_NODE_CODE_MAX_BYTES": (

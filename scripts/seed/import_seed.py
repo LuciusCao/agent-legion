@@ -503,15 +503,16 @@ def main() -> int:
         "default: none (only already-bound workspaces are targeted)",
     )
     parser.add_argument("--dry-run", action="store_true", help="read-only comparison + plan")
-    # #628: the platform ceiling is instance-configurable; the TARGET
-    # instance's budget decides what a seed may carry (the platform PUT
-    # re-validates on publish anyway — this only avoids a doomed round-trip).
+    # #628/#786: the platform ceiling is instance-configurable (admin instance
+    # settings, env as the default source); the TARGET instance's budget
+    # decides what a seed may carry (the platform PUT re-validates on publish
+    # anyway — this only avoids a doomed round-trip).
     parser.add_argument(
         "--node-code-max-bytes",
         type=int,
         default=DEFAULT_MAX_CODE_BYTES,
         help="byte budget for one node code version; must match the target "
-        f"instance's AGENT_LEGION_NODE_CODE_MAX_BYTES (default: {DEFAULT_MAX_CODE_BYTES})",
+        f"instance's node_code_max_bytes (default: {DEFAULT_MAX_CODE_BYTES})",
     )
     args = parser.parse_args()
 

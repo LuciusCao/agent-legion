@@ -119,7 +119,7 @@ const instanceSettings: InstanceSettingsResponse = {
   code_capacity: 16,
   materials_ttl_days: 0,
   execution_retention_days: 0,
-  workflows: { max_items_per_run: 20000 },
+  workflows: { max_items_per_run: 20000, node_code_max_bytes: 65536 },
   agent_workers: {
     max_archive_bytes: 104857600,
     min_protocol_version: 2,

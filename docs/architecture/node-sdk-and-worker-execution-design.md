@@ -315,16 +315,20 @@ manifest 拼装、取消检查点）：统一走 `ctx.service_config(...)` /
 （业务 video 节点已随业务剥离迁出仓库）。若将来出现必须 Host 本地执行的
 专用节点，再重新评估该路径是否保留。
 
-## 10. 体积预算与配置（#628，MAX_CODE_BYTES）
+## 10. 体积预算与配置（#628/#786，MAX_CODE_BYTES）
 
 自定义节点代码的体积上限历史为硬编码 64KB（`node_codes.py` 的
 `MAX_CODE_BYTES`），对「重节点」——自包含报告渲染器、内嵌数据表的合法
-场景——过于苛刻。#628 起上限开放为实例级配置，**默认保持 64KB 不变**：
+场景——过于苛刻。#628 起上限开放为实例级配置，**默认保持 64KB 不变**；
 
 - 配置项：`executor_runtime.workflows.node_code_max_bytes`
-  （`WorkflowsRuntimeConfig`，`ge=1024`），env 变量
-  `AGENT_LEGION_NODE_CODE_MAX_BYTES`，启动时生效（restart-effective，无热
-  加载）。非法值（非整数 / < 1KB）在 settings 加载时 fail-fast。
+  （`WorkflowsRuntimeConfig`，`ge=1024`）。#786 起纳入 admin 实例设置
+  （全局设置页「运行与本地执行」组，字节为单位），解析链：**实例设置 >
+  env（`AGENT_LEGION_NODE_CODE_MAX_BYTES`）> 默认 64KB**——实例设置文档
+  缺该键（存量文档）时 env 继续作为默认值来源。启动装配
+  （`apply_instance_settings`）时合并进 settings，重启生效（无热加载）。
+  非法值（非整数 / < 1KB）：env 在 settings 加载时 fail-fast，实例设置
+  PUT 在契约层 422。
 - 校验路径统一从 settings 取值：`validate_node_code(code, max_code_bytes)`
   改为可注入，Studio 路由与 studio-agent 工具面在构造 `NodeCodeService`
   时传入；`save_draft` 与 `seed_global` 两条写入链路同一来源。错误信息
