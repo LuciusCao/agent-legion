@@ -18,6 +18,10 @@ body {
   background: #ffffff;
 }
 :root {
+  /* AppBar 高度的单一事实源：AppBar.module.css 的 min-height 与「定制预览」
+   * 覆盖面板的停靠顶边（customizePreviewOverlaySx）都引用它——改一处，
+   * 覆盖面板永远不会盖住 AppBar（codex P2-B #615）。 */
+  --app-bar-height: 56px;
   --status-running-bg: #dbeafe;
   --status-running-text: #1d4ed8;
   --status-running-border: #3b82f6;

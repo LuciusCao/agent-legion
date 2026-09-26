@@ -18,6 +18,10 @@ import * as chatApi from '../workflowStudio/chat/studioChatApi'
 import type { StudioChatSessionRecord } from '../workflowStudio/chat/studioChatApi'
 import { EventSourceMock } from '../../testing/eventSourceMock'
 import { TestQueryProvider } from '../../testing/testQueryClient'
+import { expectConsoleError, expectConsoleWarning } from '../../test-setup'
+import { overlaySurfaceSx } from './customizePreviewOverlaySx'
+import { theme } from '../../theme'
+import type { Theme } from '@mui/material/styles'
 
 vi.mock('./previewPanelApi')
 vi.mock('../workflowStudio/chat/studioChatApi')
@@ -218,6 +222,47 @@ describe('CustomizePreviewDialog', () => {
     )
     expect(screen.getByText('排队消息')).toBeInTheDocument()
     expect(screen.getByLabelText('消息输入')).toHaveValue('未发送草稿')
+  })
+
+  it('codex P2-A（焦点）：折叠后焦点落到展开小条，展开后回到面板——键盘可往返', async () => {
+    // 焦点移交 effect 驱动 Tooltip/ButtonBase 的状态更新脱离 act（known
+    // noise，与 section 测试里 fake-timer 用例同款的声明方式）。
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    renderDialog(null)
+    const collapseButton = await screen.findByRole('button', {
+      name: '折叠对话',
+    })
+    // 键盘用户场景：焦点在「折叠对话」上按 Enter——内容区随即
+    // display:none，焦点必须被显式移交，否则丢失在不可见子树里。
+    collapseButton.focus()
+    expect(document.activeElement).toBe(collapseButton)
+    fireEvent.click(collapseButton)
+
+    const pill = await screen.findByRole('button', {
+      name: /已折叠，点击展开/,
+    })
+    await waitFor(() => expect(document.activeElement).toBe(pill))
+
+    fireEvent.click(pill)
+    const surface = screen.getByRole('dialog', { name: '定制预览面板' })
+    await waitFor(() => expect(document.activeElement).toBe(surface))
+  })
+
+  it('codex P2-B：surface 顶边不低于 AppBar 底边（宽屏停靠与窄屏卡片同约束）', () => {
+    // AppBar 高度单一事实源是 :root 的 --app-bar-height（styles.css，
+    // AppBar.module.css 的 min-height 也吃它）——sx 只引用变量不硬编码。
+    const sxFn = overlaySurfaceSx(false) as (
+      t: Theme
+    ) => Record<string, unknown>
+    const docked = sxFn(theme)
+    expect(docked.top).toBe('var(--app-bar-height, 56px)')
+    // 窄屏浮动卡片（bottom 锚定）同样不得上探盖住 AppBar。
+    const narrow = docked[theme.breakpoints.down('lg')] as Record<
+      string,
+      unknown
+    >
+    expect(String(narrow.maxHeight)).toContain('--app-bar-height')
   })
 
   it('无可用 agent 时提示配置', async () => {

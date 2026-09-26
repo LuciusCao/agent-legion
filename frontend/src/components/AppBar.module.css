@@ -11,7 +11,9 @@
   /* Must stack above sticky main-content controls (e.g. JobFilterBar z-index: 10)
      so that AppBar popovers such as WorkspaceRunControl are not obscured. */
   z-index: 100;
-  min-height: 56px;
+  /* 高度唯一事实源是 styles.css :root 的 --app-bar-height（覆盖面板定位
+   * 共用同一变量，见 customizePreviewOverlaySx）。 */
+  min-height: var(--app-bar-height, 56px);
 }
 
 .scrolled {

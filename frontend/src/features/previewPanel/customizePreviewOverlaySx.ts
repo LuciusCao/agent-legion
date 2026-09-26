@@ -3,12 +3,16 @@
  * 改为 Portal + Paper 的自定义 modeless 容器，不再经过 MUI Dialog/Modal，
  * Paper 自己承担 fixed 定位）：
  * - 宽屏（≥1200px，MUI lg）：右侧通栏停靠，宽度收敛在 job progress 列
- *   （30vw）内，不遮左栏预览区；
+ *   （30vw）内，不遮左栏预览区；顶边对齐 AppBar 底边（--app-bar-height，
+ *   单一事实源在 styles.css :root——codex 复审 P2-B：top:0 曾盖住 AppBar
+ *   右侧的 Token 用量与任务操作按钮）；
  * - 窄屏（<1200px）：右下浮动卡片降级——dock 宽度已不够聊天可用性，浮动
- *   卡片 + 折叠小条保证左栏仍可露出（底层全程可滚动交互）；
+ *   卡片 + 折叠小条保证左栏仍可露出（底层全程可滚动交互）；卡片高度上限
+ *   同样留出 AppBar，不上探遮挡；
  * - 折叠：Paper 缩成右下角小条（内容换成展开按钮 + display:none 隐藏的
  *   聊天子树，组件不卸载、会话保持存活，P2-A）。
- * z-index 取 modal 档：覆盖层要在页面内容（含 TokenUsage 浮动钮）之上。
+ * z-index 取 modal 档：覆盖层要在页面内容（含 TokenUsage 浮动钮）之上；
+ * 与 AppBar（z-100）不竞争——定位已保证二者不重叠。
  */
 import type { SxProps, Theme } from '@mui/material/styles'
 
@@ -25,7 +29,7 @@ export function overlaySurfaceSx(collapsed: boolean): SxProps<Theme> {
         }
       : {
           position: 'fixed',
-          top: 0,
+          top: 'var(--app-bar-height, 56px)',
           right: 0,
           bottom: 0,
           zIndex: theme.zIndex.modal,
@@ -41,7 +45,7 @@ export function overlaySurfaceSx(collapsed: boolean): SxProps<Theme> {
             width: 'min(460px, calc(100vw - 24px))',
             minWidth: 0,
             height: 'min(72vh, 680px)',
-            maxHeight: 'calc(100dvh - 24px)',
+            maxHeight: 'calc(100dvh - var(--app-bar-height, 56px) - 24px)',
             borderRadius: theme.shape.borderRadius * 2,
           },
         }
