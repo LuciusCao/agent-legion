@@ -7,8 +7,9 @@
  * - 「定制预览」对话期间草稿**不自动执行**（#347 P1）：左栏继续渲染已发布
  *   版本；显式点「预览此草稿」后才切换到草稿；关闭对话回到已发布版本，
  *   重开对话框回到默认态（不记忆执行态）。
- * - #615 wiring：对话框拿到的 previewDraft/jobId 与左栏草稿渲染吃同一
- *   授权判定（对话框内嵌预览的渲染细节在 CustomizePreviewDialog 测试）。
+ * - #615 方向 A wiring：对话框拿到的 previewDraft 与左栏草稿渲染吃同一
+ *   授权判定（面板本体在 CustomizePreviewDialog 测试）；点「预览此草稿」
+ *   后左栏滚动定位到面板并短暂高亮（方向 C 轻量版）。
  * - iframe 重挂语义（bundle 内容变化必换元素、同内容轮询不重挂）在姊妹
  *   文件 PreviewPanelSection.remount.test.tsx。
  *
@@ -38,27 +39,24 @@ vi.mock('./previewPanelApi', () => ({
 // 这里钉住的是 section 的组装与回落语义。mock 透传显式预览动作（#347 P1）
 // 与治理面 state（data-hasdraft 暴露草稿是否已送达——真实按钮
 // disabled={!draft}，mock 无门控，用例需显式等草稿落定再点击）；
-// data-previewdraft 暴露 section 下发的授权判定（#615：内嵌预览吃同一
-// 判定，mock 不重复实现 iframe——对话框内渲染细节在 dialog 测试覆盖）。
+// data-previewdraft 暴露 section 下发的授权判定（#615 方向 A：左栏渲染与
+// 面板按钮态吃同一判定，mock 不重复实现面板 UI）。
 vi.mock('./CustomizePreviewDialog', () => ({
   CustomizePreviewDialog: ({
     onPreviewDraft,
     onClose,
     state,
     previewDraft,
-    jobId,
   }: {
     onPreviewDraft: () => void
     onClose: () => void
     state: { draft?: unknown } | null
     previewDraft: boolean
-    jobId: string
   }) => (
     <div
       data-testid="customize-dialog"
       data-hasdraft={String(Boolean(state?.draft))}
       data-previewdraft={String(previewDraft)}
-      data-jobid={jobId}
     >
       <button onClick={onPreviewDraft}>预览此草稿</button>
       <button onClick={onClose}>关闭</button>
@@ -537,7 +535,7 @@ describe('PreviewPanelSection', () => {
     expect(mockFetchState).not.toHaveBeenCalled()
   })
 
-  it('#615 wiring：对话框拿到 jobId 与同一授权判定，左栏草稿渲染与授权同步存续', async () => {
+  it('#615 方向 A wiring：对话框拿到同一授权判定，点「预览此草稿」后左栏渲染草稿并滚动定位+高亮', async () => {
     // bundle 切换使 host 重挂，jsdom 的 load 事件让宿主 setLoading 脱离
     // act（known noise，同上各 fake-timer 用例的声明方式）。
     expectConsoleWarning(/not wrapped in act/)
@@ -547,30 +545,42 @@ describe('PreviewPanelSection', () => {
       published: PUBLISHED,
       draft: DRAFT,
     } satisfies PreviewPanelState)
-    renderSection()
+    // jsdom 无 scrollIntoView：桩掉以断言「预览此草稿」触发滚动定位。
+    const scrollSpy = vi.fn()
+    Element.prototype.scrollIntoView = scrollSpy
+    try {
+      renderSection()
 
-    // 打开对话框：无授权 → previewDraft=false（对话框内嵌预览此时只是
-    // 占位，不重复挂草稿 iframe 的门控在 dialog 测试覆盖）。
-    fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
-    await waitForDraftInDialog()
-    const dialog = screen.getByTestId('customize-dialog')
-    expect(dialog).toHaveAttribute('data-previewdraft', 'false')
-    // 桥上下文身份透传（内嵌预览与左栏渲染同源）。
-    expect(dialog).toHaveAttribute('data-jobid', 'job-1')
+      // 打开对话框：无授权 → previewDraft=false（面板内无预览区，#615 方向 A
+      // 撤掉内嵌预览后的渲染目标只有左栏）。
+      fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+      await waitForDraftInDialog()
+      const dialog = screen.getByTestId('customize-dialog')
+      expect(dialog).toHaveAttribute('data-previewdraft', 'false')
 
-    // 显式授权 → previewDraft=true，左栏同步渲染草稿（双通道同判定）。
-    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
-    await waitFor(() => {
-      expect(screen.getByTestId('customize-dialog')).toHaveAttribute(
-        'data-previewdraft',
-        'true'
-      )
-      const iframe = screen
-        .getByTestId('preview-panel-host')
-        .querySelector('iframe')
-      expect(iframe?.getAttribute('srcdoc')).toContain('draft panel')
-    })
-    expect(screen.getByText('草稿预览中')).toBeInTheDocument()
+      // 显式授权 → previewDraft=true，左栏渲染草稿（单一通道同判定），
+      // 且滚动定位到面板区域 + 短暂高亮（方向 C 轻量版）。
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      await waitFor(() => {
+        expect(screen.getByTestId('customize-dialog')).toHaveAttribute(
+          'data-previewdraft',
+          'true'
+        )
+        const iframe = screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+        expect(iframe?.getAttribute('srcdoc')).toContain('draft panel')
+      })
+      expect(screen.getByText('草稿预览中')).toBeInTheDocument()
+      expect(scrollSpy).toHaveBeenCalled()
+      const section = screen.getByTestId('preview-panel-section')
+      await waitFor(() => expect(section.className).toContain('flash'))
+      // 高亮是瞬时的：动画时长过后类名移除（用真实定时器等 1.6s+ 太重，
+      // 这里只钉「加上去」的半边——移除半边由 setTimeout 清理函数保证）。
+    } finally {
+      // jsdom 本无此方法，桩完删除复原，不污染其他用例。
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
   })
 
   it('预览中草稿内容变化（save_draft 覆盖，html_hash 变）回退未授权：新内容需重新显式预览（#500 P1-5）', async () => {
