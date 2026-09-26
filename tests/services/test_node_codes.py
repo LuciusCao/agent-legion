@@ -222,6 +222,38 @@ def test_rollback_rejects_old_version_over_lowered_limit(job_db, workspace_id) -
     assert lowered.get_effective_code(workspace_id, WF, NODE)["code"] == _padded_code(1024)
 
 
+def test_rollback_refuses_draft_source(job_db, workspace_id, monkeypatch) -> None:
+    """#779 列车 R2 复审 P2 跟进：draft 不是回滚源。版本不可变的前提只覆盖
+    published/archived 行——draft 会被 save_draft 原地 UPDATE，以其版本号
+    为源的 rollback 在「预读校验 → store 事务内按版本号重读」之间可被并发
+    覆盖成超限内容（滚动重启期旧高上限实例仍可写）。draft 本来就能原地
+    编辑，回滚到它没有意义——直接拒绝，超限/竞态窗口一并关闭。"""
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+    roomy.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    roomy.publish(workspace_id, WF, NODE)  # v1 published
+    roomy.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")  # v2 draft
+
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=1024)
+    with pytest.raises(InvalidOperationError, match="draft"):
+        lowered.rollback(workspace_id, WF, NODE, 2, "user:ops")
+
+    # 零副作用：v1 仍 published，v2 仍 draft，没有 v3。
+    versions = {
+        row["version"]: row["status"] for row in lowered.list_versions(workspace_id, WF, NODE)
+    }
+    assert versions == {1: "published", 2: "draft"}
+
+    # 竞态形态钉：预读看到 draft（合法内容）后、store 重读前被并发覆盖为
+    # 超限内容——拒绝在预读处已发生，覆盖与否都进不了发布。
+    def overwrite_after_read(code: str, action: str) -> None:
+        roomy.save_draft(workspace_id, WF, NODE, _padded_code(2048), "user:u2")
+
+    monkeypatch.setattr(lowered, "_check_publish_size", overwrite_after_read)
+    with pytest.raises(InvalidOperationError, match="draft"):
+        lowered.rollback(workspace_id, WF, NODE, 2, "user:ops")
+    assert lowered.get_effective_code(workspace_id, WF, NODE)["code"] == VALID_CODE
+
+
 def test_publish_and_rollback_within_limit_still_succeed(job_db, workspace_id) -> None:
     """#628 review P2: code under the CURRENT limit publishes and rolls back
     unchanged — the guard adds no false rejections. The exact-at-limit draft

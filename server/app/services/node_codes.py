@@ -116,11 +116,10 @@ class NodeCodeService:
             )
 
     def _current_draft(self, workspace_id: str, workflow_key: str, node_key: str) -> dict[str, Any]:
-        entity = self._store.get_draft(_entity_key(workflow_key, node_key), workspace_id)
+        key = _entity_key(workflow_key, node_key)
+        entity = self._store.get_draft(key, workspace_id)
         if entity is None:
-            raise NotFoundError(
-                f"no draft for {_ENTITY_TYPE} {_entity_key(workflow_key, node_key)}"
-            )
+            raise NotFoundError(f"no draft for {_ENTITY_TYPE} {key}")
         return _to_row(entity)
 
     def get_effective_code(
@@ -235,25 +234,29 @@ class NodeCodeService:
         """Re-publish an old version as a new version (versions stay immutable).
 
         #628 review P2: the source version's bytes are re-validated against
-        the current ``node_code_max_bytes`` before the rollback — versions are
-        immutable, so the pre-read is race-free; a rejection leaves the
-        currently published version untouched.
+        the current ``node_code_max_bytes`` before the rollback; a rejection
+        leaves the currently published version untouched. The pre-read is
+        race-free only for published/archived sources: a DRAFT row is
+        overwritten in place by save_draft, so its version number would
+        re-resolve to unvalidated content when the store re-reads it inside
+        the rollback transaction — drafts are refused as rollback sources
+        (#779 train R2 follow-up; a draft is editable in place, so rolling
+        back to it is meaningless anyway).
         """
         self._require_enabled()
+        key = _entity_key(workflow_key, node_key)
         source = self.get_code_by_version(workspace_id, workflow_key, node_key, version)
         if source is None:
-            raise NotFoundError(
-                f"no version {version} for {_ENTITY_TYPE} {_entity_key(workflow_key, node_key)}"
+            raise NotFoundError(f"no version {version} for {_ENTITY_TYPE} {key}")
+        if source["status"] == "draft":
+            raise InvalidOperationError(
+                "cannot rollback a draft version: drafts are editable in place;"
+                " publish the draft or pick a published/archived version"
             )
         self._check_publish_size(str(source["code"]), "rollback")
+        note = change_note if change_note is not None else f"rollback to v{version}"
         entity = self._store.rollback(
-            _entity_key(workflow_key, node_key),
-            version,
-            workspace_id,
-            created_by,
-            definition_patch={
-                "change_note": change_note if change_note is not None else f"rollback to v{version}"
-            },
+            key, version, workspace_id, created_by, definition_patch={"change_note": note}
         )
         _bump_publish_generation()
         return _to_row(entity)
