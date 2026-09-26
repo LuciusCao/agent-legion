@@ -236,3 +236,26 @@ def test_unmapped_source_files_flags_test_helpers_for_fallback(tmp_path):
 
     # helper/conftest 进 unmapped（触发回退）；yaml 与已映射源码不进。
     assert unmapped == ["tests/conftest.py", "tests/helpers/seed.py"]
+
+
+def test_unmapped_source_files_flags_deleted_test_helpers(tmp_path):
+    """codex 复审 P2（PR #792 跟进）：已删除的 helper 同样触发全量回退。
+
+    删除 tests/ 下的共享 helper/conftest 时，is_file() 为 False——若不计入
+    盲区，「删除 helper + 可映射源码改动」只跑源码映射的子集，helper 删除
+    造成的 import/fixture 回归（消费者收集即炸）会被 aff 误报通过。删除恰
+    恰是最危险形态，无论文件是否还在盘上都必须回退全量。
+    """
+    mapping = {"server/app/settings.py": ["tests/test_settings.py::test_a"]}
+    # 盘上只有可映射源码的测试文件；helper 已删除（不存在）。
+    test_file = tmp_path / "tests" / "test_settings.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_a():\n    pass\n", encoding="utf-8")
+
+    unmapped = unmapped_source_files(
+        ["tests/helpers/seed.py", "server/app/settings.py"],
+        mapping,
+        repo_root=tmp_path,
+    )
+
+    assert unmapped == ["tests/helpers/seed.py"]
