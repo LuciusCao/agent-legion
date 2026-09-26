@@ -329,6 +329,10 @@ manifest 拼装、取消检查点）：统一走 `ctx.service_config(...)` /
   改为可注入，Studio 路由与 studio-agent 工具面在构造 `NodeCodeService`
   时传入；`save_draft` 与 `seed_global` 两条写入链路同一来源。错误信息
   携带当前上限值。非 DI 构造（worker/测试/种子）回落模块默认 64KB。
+  `publish` / `rollback` 按当前上限对「即将发布的字节」复检（publish
+  预读当前草稿校验后经 `expected_hash` CAS 绑定同一内容，rollback 的
+  源版本不可变故预读即校验）——上限重启调低后，高上限时期存下的草稿/
+  历史版本无法再发布生效，拒绝时正在生效的版本保持原状。
 - 前端展示：`WorkflowNodeCodeResponse.max_code_bytes`（服务端注入的只读
   字段，两条读取端点——Studio 与 studio-agent——统一下发），节点代码
   编辑器在保存区提示「代码体积上限 N KB（实例配置）」。

@@ -98,6 +98,106 @@ def test_save_draft_custom_limit_via_service(job_db, workspace_id) -> None:
         service.seed_global(WF, "seeded", VALID_CODE + pad + "#", "seed too big")
 
 
+def _padded_code(pad_to: int) -> str:
+    return VALID_CODE + "#" * (pad_to - len(VALID_CODE.encode("utf-8")))
+
+
+def test_publish_rejects_draft_over_lowered_limit(job_db, workspace_id) -> None:
+    """#628 review P2: node_code_max_bytes is restart-effective. A draft saved
+    under a higher budget must not survive a publish after the instance
+    lowered the limit — and the rejection leaves the previous published
+    version effective and the draft intact (nothing was archived)."""
+    big = _padded_code(4096)
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+    roomy.save_draft(workspace_id, WF, NODE, big, "user:u1")
+    roomy.publish(workspace_id, WF, NODE)
+
+    roomy.save_draft(workspace_id, WF, NODE, _padded_code(2048), "user:u1", "smaller")
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=1024)
+    with pytest.raises(
+        InvalidOperationError,
+        match=r"cannot publish node code of \d+ bytes: it exceeds the current 1024-byte",
+    ) as exc_info:
+        lowered.publish(workspace_id, WF, NODE)
+    assert "lowered after this version was saved" in str(exc_info.value)
+    # The previous published version stays effective; the rejected draft survives.
+    assert lowered.get_effective_code(workspace_id, WF, NODE)["code"] == big
+    versions = {
+        row["version"]: row["status"] for row in lowered.list_versions(workspace_id, WF, NODE)
+    }
+    assert versions == {1: "published", 2: "draft"}
+
+
+def test_publish_binds_validated_bytes_via_hash_cas(job_db, workspace_id, monkeypatch) -> None:
+    """#628 review P2 + #692：校验读与发布之间草稿被并发覆盖（换成超限内
+    容）时，发布绑定的是「校验过的那份字节」——expected_hash CAS 让本次
+    发布以 Conflict 失败，超限字节绝不进 published。注入点：
+    ``_check_publish_size`` 恰在预读之后、store 发布之前。突变自检：若
+    publish 不绑定校验读到的 hash（传 None），覆盖后的内容被静默发布，
+    本测试即红。"""
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=1024)
+    lowered.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+
+    def overwrite_after_validation(code: str, action: str) -> None:
+        # 预读返回的是 VALID_CODE 草稿（对 1024 上限合法）；此刻另一会话
+        # 把草稿覆盖为超限内容——本实例校验的是覆盖前读到的字节，放行。
+        roomy.save_draft(workspace_id, WF, NODE, _padded_code(2048), "user:u2")
+
+    monkeypatch.setattr(lowered, "_check_publish_size", overwrite_after_validation)
+
+    with pytest.raises(ConflictError, match="draft hash mismatch"):
+        lowered.publish(workspace_id, WF, NODE)
+
+    # 零发布副作用：无 published 行；超限内容仍是草稿，等待人工处置。
+    assert lowered.get_effective_code(workspace_id, WF, NODE) is None
+    versions = {
+        row["version"]: row["status"] for row in lowered.list_versions(workspace_id, WF, NODE)
+    }
+    assert versions == {1: "draft"}
+
+
+def test_rollback_rejects_old_version_over_lowered_limit(job_db, workspace_id) -> None:
+    """#628 review P2: rollback re-publishes a historical version as a NEW
+    publish — the bytes must clear the CURRENT limit too, or the rejection
+    leaves the currently published version untouched."""
+    roomy = NodeCodeService(job_db.dsn_identity, max_code_bytes=4096)
+    roomy.save_draft(workspace_id, WF, NODE, _padded_code(4096), "user:u1", "big")
+    roomy.publish(workspace_id, WF, NODE)
+    roomy.save_draft(workspace_id, WF, NODE, _padded_code(1024), "user:u1", "small")
+    roomy.publish(workspace_id, WF, NODE)
+
+    lowered = NodeCodeService(job_db.dsn_identity, max_code_bytes=2048)
+    with pytest.raises(InvalidOperationError, match="cannot rollback node code"):
+        lowered.rollback(workspace_id, WF, NODE, 1, "user:ops")
+    versions = {
+        row["version"]: row["status"] for row in lowered.list_versions(workspace_id, WF, NODE)
+    }
+    # v2 stays published; no v3 was created.
+    assert versions == {1: "archived", 2: "published"}
+    assert lowered.get_effective_code(workspace_id, WF, NODE)["code"] == _padded_code(1024)
+
+
+def test_publish_and_rollback_within_limit_still_succeed(job_db, workspace_id) -> None:
+    """#628 review P2: code under the CURRENT limit publishes and rolls back
+    unchanged — the guard adds no false rejections. The exact-at-limit draft
+    (2048 bytes under a 2048 limit) exercises the boundary."""
+    service = NodeCodeService(job_db.dsn_identity, max_code_bytes=2048)
+    at_limit = _padded_code(2048)
+    service.save_draft(workspace_id, WF, NODE, at_limit, "user:u1")
+    published = service.publish(workspace_id, WF, NODE)
+    assert published["status"] == "published"
+
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1", "smaller")
+    published = service.publish(workspace_id, WF, NODE)
+    assert published["version"] == 2
+    rolled = service.rollback(workspace_id, WF, NODE, 1, "user:ops")
+    assert rolled["version"] == 3
+    assert rolled["status"] == "published"
+    assert rolled["code"] == at_limit
+    assert service.get_effective_code(workspace_id, WF, NODE)["code"] == at_limit
+
+
 def test_save_draft_overwrites_existing_draft(service, workspace_id) -> None:
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
     row = service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u2")
@@ -316,17 +416,17 @@ def test_save_draft_guard_rejects_concurrently_published_row(
     assert service.get_effective_code(workspace_id, WF, NODE)["code"] == VALID_CODE
 
 
-def test_publish_guard_rejects_concurrently_archived_draft(
-    service, workspace_id, monkeypatch
-) -> None:
-    """A stale draft view must not resurrect an archived row into published."""
-    import server.app.services.versioned_entities as versioned_entities
+def test_publish_guard_rejects_concurrently_archived_draft(service, workspace_id) -> None:
+    """A stale draft view must not resurrect an archived row into published.
 
+    #628 review P2（CAS 复检设计）后服务侧 publish 先预读当前草稿：草稿
+    已被并发归档时预读即找不到草稿，NotFound（404）先行；残余窗口（预读
+    之后才归档）由 store 的 status 谓词 CAS 兜底为 Conflict——store 层
+    语义由 tests/services/test_versioned_entities.py 的同名钉保持。
+    """
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
-    stale_draft = service.list_versions(workspace_id, WF, NODE)[0]
     service.archive_all(workspace_id, WF, NODE)
-    monkeypatch.setattr(versioned_entities, "_latest_with_status", lambda *args: dict(stale_draft))
-    with pytest.raises(ConflictError):
+    with pytest.raises(NotFoundError):
         service.publish(workspace_id, WF, NODE)
     assert service.get_effective_code(workspace_id, WF, NODE) is None
 
