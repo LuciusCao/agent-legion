@@ -504,3 +504,121 @@ def test_implicit_consumer_rerun_not_blocked_by_lost_condition_object(tmp_path: 
 
     executor.block_event.set()
     worker.stop()
+
+
+# ---------------------------------------------------------------------------
+# #779 列车 R4 复审 P1 跟进②：汇合形态——无条件兄弟边可达的节点不受条件
+# verdict 门控（裁决差集 unselected_reachable - selected_reachable）
+# ---------------------------------------------------------------------------
+
+
+def _confluence_definition() -> WorkflowDefinition:
+    """gate 产 decision.json；条件边 gate→good、无条件边 gate→j 与
+    good→j（汇合）。j 恒在 selected 侧，条件 verdict 不门控它。"""
+    from server.app.workflows.schema import WorkflowCondition, WorkflowEdge
+
+    return WorkflowDefinition(
+        key="wfconf",
+        label="Wf Conf",
+        intake=WorkflowIntake(),
+        nodes={
+            "gate": WorkflowNode(
+                key="gate", label="Gate", capability="cap_gate", outputs=["decision.json"]
+            ),
+            "good": WorkflowNode(
+                key="good", label="Good", capability="cap_good", outputs=["good_out.json"]
+            ),
+            "j": WorkflowNode(key="j", label="J", capability="cap_j", outputs=["j_out.json"]),
+        },
+        edges=[
+            WorkflowEdge(
+                source="gate",
+                target="good",
+                condition=WorkflowCondition("decision.json", "$.eligible", True),
+            ),
+            WorkflowEdge(source="gate", target="j"),
+            WorkflowEdge(source="good", target="j"),
+        ],
+    )
+
+
+def test_confluence_via_unconditional_sibling_excludes_condition_artifact() -> None:
+    """#779 R4 P1 跟进②：条件边 s→a（a 终态）+ 无条件边 s→j + a→j 汇合，
+    j 被 targeted rerun——j 经无条件边恒可达（恒在 selected 侧），条件
+    verdict 的差集（unselected_reachable - selected_reachable）不覆盖它；
+    条件产物已淘汰且对象丢失不得因此进恢复面阻塞 j。"""
+    from server.app.workflow_worker.input_hydration import live_probe_names
+
+    definition = _confluence_definition()
+    statuses = {"gate": "completed", "good": "completed", "j": "pending"}
+
+    assert "decision.json" not in live_probe_names(definition, statuses)
+    # 对照：没有无条件兄弟边时（a→j 是唯一路径），j 的可运行性受
+    # verdict 门控——decision.json 必须留在恢复面。
+    edges_without_sibling = [
+        edge for edge in definition.edges if not (edge.source == "gate" and edge.target == "j")
+    ]
+    from dataclasses import replace as _replace
+
+    gated_only = _replace(definition, edges=edges_without_sibling)
+    assert "decision.json" in live_probe_names(gated_only, statuses)
+
+
+def test_confluence_rerun_not_blocked_by_lost_condition_object(tmp_path: Path) -> None:
+    """端到端（汇合形态）：good 终态、j 经无条件边被 targeted rerun、
+    条件对象永久丢失——hydration 不恢复 decision.json，j 照常 claim。"""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "wfconf", default_workflow_key="wfconf", workspace_id="wfconf"
+    )
+    job = queries.create_job(
+        workflow_key="wfconf",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["gate", "good", "j"],
+        workspace_id=workspace["id"],
+    )
+    queries.update_job_node(job["id"], "gate", status="completed")
+    queries.update_job_node(job["id"], "good", status="completed")
+    queries.update_job_node(job["id"], "j", status="completed")
+    queries.update_job_status(job["id"], "completed")
+    # 条件产物清单行在、本地被淘汰、对象永久丢失（FakeObjectStorage 为空）。
+    payload = b'{"eligible": true}'
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'gate', 'decision.json', %s, %s, %s)
+            """,
+            (
+                job["id"],
+                f"jobs/{workspace['id']}/{job['id']}/decision.json",
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
+            ),
+        )
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        mark_nodes_for_rerun(conn, job["id"], ["j"], {"j": []})
+
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfconf", "j")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path,
+        TEST_DATABASE_URL,
+        executor,
+        [_confluence_definition()],
+        artifact_object_store=store,
+    )
+
+    worker._poll()
+
+    assert queries.get_job_node(job["id"], "j")["status"] == "running"
+    assert worker.leases.active_counts("code").get("global", 0) == 1
+    assert queries.get_job_node(job["id"], "good")["status"] == "completed"
+
+    executor.block_event.set()
+    worker.stop()
