@@ -69,17 +69,17 @@ describe('AgentChatStatusStrip', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('shows the busy state with a cancel button in one strip', () => {
-    const cancel = vi.fn()
+  it('shows the busy state without an inline cancel button (#787)', () => {
     renderStrip({
       busy: true,
       session: sessionRecord({ status: 'running' }),
-      cancel,
     })
     const runState = screen.getByLabelText('运行状态')
     expect(runState).toHaveTextContent('运行中')
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(cancel).toHaveBeenCalledTimes(1)
+    // #787：取消按钮移到 composer 工具行（发送/排队按钮旁），状态行不再内嵌。
+    expect(
+      screen.queryByRole('button', { name: '取消' })
+    ).not.toBeInTheDocument()
   })
 
   it('labels awaiting_permission and starting distinctly', () => {

@@ -13,14 +13,16 @@ function formatDuration(ms: number): string {
   return `${Math.floor(seconds / 60)}m${seconds % 60}s`
 }
 
-/** #695 R3：RunBar / ResumeBar 收敛成的状态行——左侧运行状态（运行中+取消 /
+/** #695 R3：RunBar / ResumeBar 收敛成的状态行——左侧运行状态（运行中 /
  * 已完成·用时 / 已超时终止 / 已取消 #675 / 恢复入口），右侧排队摘要；各槽位
  * 无内容不占位，全空则整行不渲染。上下文用量在 composer 工具行的圆环
- * （StudioChatContextRing，含压缩提示）。本行渲染在输入卡片外、composer 上方
- * （#787：取消是破坏性动作，不收进输入卡片）。队列摘要只放「排队中 N」：排队
- * 文本与逐条移除保留在卡外独立的 StudioChatQueueBar 行（仅队列非空时出现）
- * ——排队消息是用户待发内容，收进 popover 要多一次点击才能查看/移除，取舍为
- * 可见性优先；常态 idle 无队列时该行不出现，信息密度目标不受影响。 */
+ * （StudioChatContextRing，含压缩提示）。本行经 composer 的 statusSlot 渲染在
+ * 输入卡片内（textarea 与工具行之间）。#787：取消按钮不在本行——它移到
+ * 工具行发送/排队按钮旁（仅运行中显示），本行只保留状态文本。队列摘要只放
+ * 「排队中 N」：排队文本与逐条移除保留在卡外独立的 StudioChatQueueBar 行
+ * （仅队列非空时出现）——排队消息是用户待发内容，收进 popover 要多一次点击
+ * 才能查看/移除，取舍为可见性优先；常态 idle 无队列时该行不出现，信息密度
+ * 目标不受影响。 */
 export function AgentChatStatusStrip({ chat, queue }: Props) {
   const status = chat.session?.status ?? null
   const queued = queue.queuedMessages.length
@@ -56,13 +58,6 @@ export function AgentChatStatusStrip({ chat, queue }: Props) {
       <>
         <span className={`${styles.dot} ${styles.dotBusy}`} />
         <span className={styles.label}>{label}</span>
-        <button
-          type="button"
-          className={`${styles.button} ${styles.cancelButton}`}
-          onClick={() => void chat.cancel()}
-        >
-          取消
-        </button>
       </>
     )
   } else if (chat.lastRunCancelled) {

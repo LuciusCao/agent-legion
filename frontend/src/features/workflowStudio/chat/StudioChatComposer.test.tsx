@@ -439,3 +439,30 @@ describe('StudioChatComposer context ring', () => {
     expect(screen.queryByLabelText('上下文用量')).not.toBeInTheDocument()
   })
 })
+
+describe('StudioChatComposer cancel button (#787)', () => {
+  it('renders the cancel button next to the send button while running', () => {
+    renderComposer({ busy: true, onCancel: vi.fn() })
+    const cancelButton = screen.getByRole('button', { name: '取消' })
+    const sendButton = screen.getByRole('button', { name: '排队' })
+    // 取消在发送/排队按钮左边：发送按钮在文档序上跟随取消按钮。
+    expect(
+      cancelButton.compareDocumentPosition(sendButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('invokes onCancel on click', () => {
+    const onCancel = vi.fn()
+    renderComposer({ busy: true, onCancel })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not render the cancel button when not running', () => {
+    renderComposer()
+    expect(
+      screen.queryByRole('button', { name: '取消' })
+    ).not.toBeInTheDocument()
+  })
+})
