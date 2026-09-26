@@ -622,3 +622,205 @@ def test_confluence_rerun_not_blocked_by_lost_condition_object(tmp_path: Path) -
 
     executor.block_event.set()
     worker.stop()
+
+
+# ---------------------------------------------------------------------------
+# #779 列车 R4 复审 P1 跟进③（结构性）：条件产物的唯一入口是裁决差集筛选，
+# 不得经普通 input 入口（消费索引把条件边 target 记作消费者）先行合入
+# ---------------------------------------------------------------------------
+
+
+def test_conditional_target_with_unconditional_path_not_in_probe_surface() -> None:
+    """codex 本轮形态：s completed；条件边 s→j（decision.json）与无条件
+    路径 s→u→j 汇合于 pending 的 j（targeted rerun）。j 恒经无条件路径
+    可达（selected 侧），条件 verdict 不影响 j——但消费索引把 j 记作
+    decision.json 的消费者，普通 input 入口（消费者可运行）会先行合入、
+    差集筛选只增不减——结构性修复后 decision.json 不进恢复面。"""
+    from server.app.workflow_worker.input_hydration import live_probe_names
+    from server.app.workflows.schema import WorkflowCondition, WorkflowEdge
+
+    definition = WorkflowDefinition(
+        key="wfc3",
+        label="Wf C3",
+        intake=WorkflowIntake(),
+        nodes={
+            "s": WorkflowNode(key="s", label="S", capability="cap_s", outputs=["decision.json"]),
+            "u": WorkflowNode(key="u", label="U", capability="cap_u", outputs=["u_out.json"]),
+            "j": WorkflowNode(key="j", label="J", capability="cap_j", outputs=["j_out.json"]),
+        },
+        edges=[
+            WorkflowEdge(
+                source="s",
+                target="j",
+                condition=WorkflowCondition("decision.json", "$.eligible", True),
+            ),
+            WorkflowEdge(source="s", target="u"),
+            WorkflowEdge(source="u", target="j"),
+        ],
+    )
+    statuses = {"s": "completed", "u": "completed", "j": "pending"}
+
+    assert "decision.json" not in live_probe_names(definition, statuses)
+
+
+def test_condition_artifact_shared_with_plain_input_follows_input_channel() -> None:
+    """对抗自查形态 (a)：条件产物名同时被普通 node.inputs 声明——input
+    渠道的消费者可运行时（find_ready_nodes 真实探它），名字经 input 入口
+    照常进恢复面；该消费者也终态且裁决差集为空时才退出。"""
+    from server.app.workflow_worker.input_hydration import live_probe_names
+    from server.app.workflows.schema import WorkflowCondition, WorkflowEdge
+
+    definition = WorkflowDefinition(
+        key="wfc4",
+        label="Wf C4",
+        intake=WorkflowIntake(),
+        nodes={
+            "s": WorkflowNode(key="s", label="S", capability="cap_s", outputs=["decision.json"]),
+            "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["a_out.json"]),
+            "b": WorkflowNode(
+                key="b",
+                label="B",
+                capability="cap_b",
+                inputs=["decision.json"],
+                outputs=["b_out.json"],
+            ),
+        },
+        edges=[
+            WorkflowEdge(
+                source="s",
+                target="a",
+                condition=WorkflowCondition("decision.json", "$.eligible", True),
+            ),
+        ],
+    )
+    # b 可运行：b 真实把 decision.json 当 input 探——必须进恢复面。
+    runnable_consumer = {"s": "completed", "a": "completed", "b": "pending"}
+    assert "decision.json" in live_probe_names(definition, runnable_consumer)
+    # b 也终态、a 终态（差集为空）：退出。
+    all_terminal = {"s": "completed", "a": "completed", "b": "completed"}
+    assert "decision.json" not in live_probe_names(definition, all_terminal)
+
+
+def test_condition_artifact_multilayer_confluence() -> None:
+    """对抗自查形态 (b)：多层汇合——条件 target a 的显式下游 x 又被无条件
+    路径（s→u→x）汇合。x 恒可达（selected 侧）时条件 verdict 不门控它；
+    a 已终态则 decision.json 退出恢复面。a 的下游中还有无条件路径覆盖不
+    到的可运行节点 y 时，verdict 仍门控 y——必须留在恢复面。"""
+    from server.app.workflow_worker.input_hydration import live_probe_names
+    from server.app.workflows.schema import WorkflowCondition, WorkflowEdge
+
+    base_nodes = {
+        "s": WorkflowNode(key="s", label="S", capability="cap_s", outputs=["decision.json"]),
+        "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["a_out.json"]),
+        "u": WorkflowNode(key="u", label="U", capability="cap_u", outputs=["u_out.json"]),
+        "x": WorkflowNode(key="x", label="X", capability="cap_x", outputs=["x_out.json"]),
+    }
+    base_edges = [
+        WorkflowEdge(
+            source="s",
+            target="a",
+            condition=WorkflowCondition("decision.json", "$.eligible", True),
+        ),
+        WorkflowEdge(source="a", target="x"),
+        WorkflowEdge(source="s", target="u"),
+        WorkflowEdge(source="u", target="x"),
+    ]
+    definition = WorkflowDefinition(
+        key="wfc5", label="Wf C5", intake=WorkflowIntake(), nodes=base_nodes, edges=base_edges
+    )
+    # a 终态、x 可运行但恒经无条件路径可达 → 退出。
+    statuses = {"s": "completed", "a": "completed", "u": "completed", "x": "pending"}
+    assert "decision.json" not in live_probe_names(definition, statuses)
+
+    # a 的下游 y 不被无条件路径覆盖且可运行 → verdict 仍门控 y → 留在恢复面。
+    nodes_with_y = {
+        **base_nodes,
+        "y": WorkflowNode(key="y", label="Y", capability="cap_y", outputs=["y_out.json"]),
+    }
+    with_y = WorkflowDefinition(
+        key="wfc5",
+        label="Wf C5",
+        intake=WorkflowIntake(),
+        nodes=nodes_with_y,
+        edges=[*base_edges, WorkflowEdge(source="a", target="y")],
+    )
+    statuses_y = {**statuses, "y": "pending"}
+    assert "decision.json" in live_probe_names(with_y, statuses_y)
+
+
+def test_conditional_target_with_unconditional_path_rerun_not_blocked(tmp_path: Path) -> None:
+    """端到端（codex 本轮形态）：条件边 s→j + 无条件路径 s→u→j，j 被
+    targeted rerun，条件对象永久丢失——j 恒经无条件路径可放行
+    （find_ready_nodes 经 u→j），decision.json 的丢失不得阻止 j claim。"""
+    from server.app.workflows.schema import WorkflowCondition, WorkflowEdge
+
+    definition = WorkflowDefinition(
+        key="wfc3",
+        label="Wf C3",
+        intake=WorkflowIntake(),
+        nodes={
+            "s": WorkflowNode(key="s", label="S", capability="cap_s", outputs=["decision.json"]),
+            "u": WorkflowNode(key="u", label="U", capability="cap_u", outputs=["u_out.json"]),
+            "j": WorkflowNode(key="j", label="J", capability="cap_j", outputs=["j_out.json"]),
+        },
+        edges=[
+            WorkflowEdge(
+                source="s",
+                target="j",
+                condition=WorkflowCondition("decision.json", "$.eligible", True),
+            ),
+            WorkflowEdge(source="s", target="u"),
+            WorkflowEdge(source="u", target="j"),
+        ],
+    )
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("wfc3", default_workflow_key="wfc3", workspace_id="wfc3")
+    job = queries.create_job(
+        workflow_key="wfc3",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["s", "u", "j"],
+        workspace_id=workspace["id"],
+    )
+    for key in ("s", "u", "j"):
+        queries.update_job_node(job["id"], key, status="completed")
+    queries.update_job_status(job["id"], "completed")
+    # 条件产物清单行在、本地被淘汰、对象永久丢失（FakeObjectStorage 为空）。
+    payload = b'{"eligible": true}'
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 's', 'decision.json', %s, %s, %s)
+            """,
+            (
+                job["id"],
+                f"jobs/{workspace['id']}/{job['id']}/decision.json",
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
+            ),
+        )
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        mark_nodes_for_rerun(conn, job["id"], ["j"], {"j": []})
+
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfc3", "j")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path,
+        TEST_DATABASE_URL,
+        executor,
+        [definition],
+        artifact_object_store=store,
+    )
+
+    worker._poll()
+
+    assert queries.get_job_node(job["id"], "j")["status"] == "running"
+    assert worker.leases.active_counts("code").get("global", 0) == 1
+
+    executor.block_event.set()
+    worker.stop()

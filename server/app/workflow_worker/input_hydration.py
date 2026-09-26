@@ -75,7 +75,6 @@ from server.app.workflows.workflow_branching import (
     downstream_nodes,
     effective_node_statuses,
 )
-from server.app.workflows.workflow_consumption import artifact_consumption_index
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -93,19 +92,26 @@ def _edge_reachable(definition: WorkflowDefinition, edge: WorkflowEdge) -> set[s
 def live_probe_names(
     definition: WorkflowDefinition, node_statuses: dict[str, str]
 ) -> frozenset[str]:
-    """本轮评估真正会本地探针的产物名（#759 复审 P1）：共享消费索引
-    （``artifact_consumption_index``，唯一枚举处）按当前 node statuses
-    收窄——
+    """本轮评估真正会本地探针的产物名（#759 复审 P1）。两个包含入口，渠道
+    不交错：
 
-    - 节点 ``inputs``：至少一个消费者处于 RUNNABLE_STATUSES
-      （``find_ready_nodes`` 只为可运行节点探 inputs 与入边选择）；
-    - ``edge.condition.artifact``：target 可运行（就绪闸探入边选择）或
-      source 为 completed 且「target 或其显式下游仍有可运行节点」——
-      ``evaluate_branches`` 逐 completed source 每轮重裁，条件文件在场
-      与否决定 not_applicable 标记，verdict 必须稳定；但已裁决完毕的
-      终态分支（target 终态且可达节点全终态）的条件产物不再影响任何
-      可运行分支，本地缓存被淘汰、对象丢失时不得进恢复面（#779 列车
-      R4 复审 P1：恢复失败会把无关 targeted rerun 卡死在 defer）。
+    - 普通 input 入口（只看 ``node.inputs``）：至少一个声明节点处于
+      RUNNABLE_STATUSES（``find_ready_nodes`` 只为可运行节点探 inputs 与
+      入边选择）。**不含** ``edge.condition.artifact``——消费索引
+      （``artifact_consumption_index``）把条件边 target 也记作消费者，若
+      从这里合并，「同为条件 target 且经无条件路径恒可达」的汇合节点会
+      绕过裁决差集筛选漏入（#779 列车 R4 复审 P1 跟进③，只增不减的
+      update 无法把它再剔除）；
+    - 条件产物唯一入口（``edge.condition.artifact``）：source 为
+      completed（``evaluate_branches`` 只对 completed source 读条件文件）
+      且裁决差集（该边显式可达集 − 同 source 无条件兄弟边可达集，恒
+      selected 侧）内仍有可运行节点——与 ``evaluate_branches`` 的
+      unselected_reachable - selected_reachable 同口径，verdict 实际门控
+      谁才恢复谁。条件文件在场与否决定 not_applicable 标记，verdict 必须
+      稳定；已裁决完毕的终态分支（差集内无可运行节点）的条件产物不再
+      影响任何可运行分支，本地缓存被淘汰、对象丢失时不得进恢复面
+      （#779 列车 R4 复审 P1：恢复失败会把无关 targeted rerun 卡死在
+      defer）。
 
     终态分支的消费名由此退出恢复/defer 集：已完成并被淘汰缓存的 job 做单
     分支 targeted rerun 时，其他终态分支永久丢失/损坏的对象不再把整个
@@ -114,28 +120,27 @@ def live_probe_names(
     点重置回可运行时其消费名自动回到探针集。调用方（eval_batch）传入的
     是分片有效状态：running 但有 pending shard 的节点已按 ready gate 稍
     后的同一翻转改回 pending（#759 复审 P2），其 inputs 因此在探针集内。
+    同一名字既被 inputs 声明又是条件产物时两入口各判各的——input 渠道
+    有真实探针（可运行声明节点）即入，与 verdict 无关。
     """
     statuses = effective_node_statuses(definition, node_statuses)
     runnable = {key for key, status in statuses.items() if status in RUNNABLE_STATUSES}
-    names = {n for n, c in artifact_consumption_index(definition).items() if c & runnable}
-    # 无条件兄弟边的可达集恒在 selected 侧（evaluate_branches 的裁决差集是
-    # unselected_reachable - selected_reachable）：条件边 verdict 实际门控
-    # 的只有它可达、而无条件路径到不了的节点（#779 列车 R4 复审 P1 跟进：
-    # 汇合节点经无条件边恒可达时，条件产物丢失不得阻塞它的 rerun）。
+    names = {
+        name for node in definition.nodes.values() if node.key in runnable for name in node.inputs
+    }
     unconditional_reach: dict[str, set[str]] = {}
-    condition_edges: list[tuple[str, str, set[str]]] = []
     for edge in definition.edges:
-        if statuses.get(edge.source) != "completed":
-            continue
-        reach = _edge_reachable(definition, edge)
-        if edge.condition is None:
-            unconditional_reach.setdefault(edge.source, set()).update(reach)
-        else:
-            condition_edges.append((edge.source, edge.condition.artifact, reach))
+        if edge.condition is None and statuses.get(edge.source) == "completed":
+            unconditional_reach.setdefault(edge.source, set()).update(
+                _edge_reachable(definition, edge)
+            )
     names.update(
-        artifact
-        for source, artifact, reach in condition_edges
-        if (reach - unconditional_reach.get(source, set())) & runnable
+        edge.condition.artifact
+        for edge in definition.edges
+        if edge.condition is not None
+        and statuses.get(edge.source) == "completed"
+        and (_edge_reachable(definition, edge) - unconditional_reach.get(edge.source, set()))
+        & runnable
     )
     return frozenset(names)
 
