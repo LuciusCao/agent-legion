@@ -140,7 +140,7 @@ async fn bash_stderr_over_capture_cap_is_counted_and_flagged() {
     );
     assert!(
         text.contains(
-            "stderr hit the cap, and its first line alone exceeds the 25.0KB display share, so nothing of it is shown"
+            "stderr hit the cap, and its first line alone exceeds the 25.0KB display budget, so nothing of it is shown"
         ),
         "notice must say no stderr bytes are shown: {text}"
     );
@@ -361,8 +361,45 @@ async fn bash_capped_stderr_keeps_uncapped_stdout_tail() {
     );
     assert!(
         text.contains(
-            "stderr hit the cap, and its first line alone exceeds the 25.0KB display share"
+            "stderr hit the cap, and its first line alone exceeds the 25.0KB display budget"
         ),
         "notice must name stderr's nothing-shown state: {text}"
     );
+}
+
+// #779 列车 R4 复审 P2 跟进（提示数值准确）：stderr 只占很少预留预算时，
+// stdout 的实际展示预算是 DEFAULT_MAX_BYTES 减去 stderr 实际占用（可接近
+// 50KB）——提示里的份额数字必须报实际值，不是固定的 25.0KB 预留份额。
+#[tokio::test]
+async fn bash_capped_stdout_unshowable_first_line_reports_actual_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({
+                // stderr 仅一条短错误（完整采集、占预算极少）；stdout 单条
+                // 5 MiB 超长行：触顶且首行超剩余预算（≈50KB，非 25KB）。
+                "command": "echo 'boom' 1>&2; head -c 5242880 /dev/zero | tr '\\0' 'a'"
+            }),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error, "capping is not an error");
+    let text = match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+
+    // stdout 的提示报实际预算（50KB − stderr 占用 ≈ 50.0KB），不是固定
+    // 25.0KB 预留份额；stderr 完整展示。
+    assert!(
+        text.contains(
+            "stdout hit the cap, and its first line alone exceeds the 50.0KB display budget"
+        ),
+        "notice must report stdout's actual budget: {text}"
+    );
+    assert!(
+        !text.contains("25.0KB"),
+        "the fixed reserved share must not be reported for stdout: {text}"
+    );
+    assert!(text.contains("boom"), "short stderr fully shown: {text}");
 }

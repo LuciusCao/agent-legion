@@ -280,17 +280,22 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
                 truncate::truncate_tail_within(text, lines, bytes)
             }
         };
-        let stderr_truncation = per_stream(
-            &stderr_text,
-            stderr.hit_cap,
+        let stderr_budget = (
             truncate::DEFAULT_MAX_LINES / 2,
             truncate::DEFAULT_MAX_BYTES / 2,
         );
+        let stderr_truncation = per_stream(
+            &stderr_text,
+            stderr.hit_cap,
+            stderr_budget.0,
+            stderr_budget.1,
+        );
+        let stdout_budget_bytes = truncate::DEFAULT_MAX_BYTES - stderr_truncation.output_bytes;
         let stdout_truncation = per_stream(
             &stdout_text,
             stdout.hit_cap,
             truncate::DEFAULT_MAX_LINES - stderr_truncation.output_lines,
-            truncate::DEFAULT_MAX_BYTES - stderr_truncation.output_bytes,
+            stdout_budget_bytes,
         );
         // #779 列车 R4 复审 P2 跟进：提示按各流实际截断方向分别说明——统一
         // 声称「head above is kept」会在未触顶流保尾展示时与内容矛盾（模型
@@ -299,16 +304,18 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         // 再跟进：提示依据该流实际保留的正文生成——触顶流首行即超份额时
         // truncate_head_within 返回空内容，[stderr] 分节标记仍会让 kept
         // 非空（绕过 notice-only 分支），不得声称 head 已保留——明示什么
-        // 都没展示 + 份额上限数值（与首行超限 notice-only 分支同语义）。
-        let stream_note = |name: &str, hit_cap: bool, truncation: &truncate::Truncation| {
-            if hit_cap && truncation.first_line_exceeds_limit {
+        // 都没展示 + 实际预算数值（与首行超限 notice-only 分支同语义）；
+        // 数值取该流的真实预算（stdout = 总预算 − stderr 实际占用，stderr
+        // = 预留份额），不是固定预留份额（#779 列车 R4 P2 再跟进）。
+        let stream_note = |name: &str, hit_cap: bool, tr: &truncate::Truncation, budget: usize| {
+            if hit_cap && tr.first_line_exceeds_limit {
                 format!(
-                    "{name} hit the cap, and its first line alone exceeds the {} display share, so nothing of it is shown; the tail was dropped at capture",
-                    truncate::format_size(truncate::DEFAULT_MAX_BYTES / 2),
+                    "{name} hit the cap, and its first line alone exceeds the {} display budget, so nothing of it is shown; the tail was dropped at capture",
+                    truncate::format_size(budget),
                 )
             } else if hit_cap {
                 format!("{name} hit the cap: the head is kept, the tail was dropped")
-            } else if truncation.truncated {
+            } else if tr.truncated {
                 format!(
                     "{name} was fully captured; shown tail-first (its head is trimmed to the display share)"
                 )
@@ -320,8 +327,8 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
             "[Output capture stopped after {} at the {} per-stream cap ({}; {}). No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log`, `tail -n +2001 out.log | head -n 2000` (the read tool rejects whole files over {} even with offset/limit).]",
             truncate::format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
-            stream_note("stdout", stdout.hit_cap, &stdout_truncation),
-            stream_note("stderr", stderr.hit_cap, &stderr_truncation),
+            stream_note("stdout", stdout.hit_cap, &stdout_truncation, stdout_budget_bytes),
+            stream_note("stderr", stderr.hit_cap, &stderr_truncation, stderr_budget.1),
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
         );
         let mut kept = stdout_truncation.content;
