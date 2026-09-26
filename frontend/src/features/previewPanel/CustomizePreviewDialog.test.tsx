@@ -249,34 +249,71 @@ describe('CustomizePreviewDialog', () => {
     await waitFor(() => expect(document.activeElement).toBe(surface))
   })
 
-  it('codex P2-B：surface 顶边不低于 AppBar 底边（宽屏停靠与窄屏卡片同约束）', () => {
-    // AppBar 高度单一事实源是 :root 的 --app-bar-height（styles.css，
-    // AppBar.module.css 的 min-height 也吃它）——sx 只引用变量不硬编码。
+  it('codex P2-B：surface 顶边跟随 AppBar 实测底边（CSS 变量下发），首帧回退声明高度', () => {
+    // 实测底边（useAppBarBottom → getBoundingClientRect().bottom，含版本
+    // 芯片撑高/放大字体场景）经 CSS 变量 --overlay-top-inset 下发；未测量
+    // （首帧 0）时回退 --app-bar-height（AppBar 声明 min-height 的单一
+    // 声明点）——不再硬编码 56px。
     const sxFn = overlaySurfaceSx(false) as (
       t: Theme
     ) => Record<string, unknown>
     const docked = sxFn(theme)
-    expect(docked.top).toBe('var(--app-bar-height, 56px)')
+    expect(docked.top).toBe(
+      'var(--overlay-top-inset, var(--app-bar-height, 56px))'
+    )
     // 窄屏浮动卡片（bottom 锚定）同样不得上探盖住 AppBar。
     const narrow = docked[theme.breakpoints.down('lg')] as Record<
       string,
       unknown
     >
-    expect(String(narrow.maxHeight)).toContain('--app-bar-height')
+    expect(String(narrow.maxHeight)).toContain('--overlay-top-inset')
   })
 
-  it('codex P2（z-index）：面板让位全局对话层——低于用量面板/Modal，高于 AppBar', () => {
-    // 分层约定（仓库实际值）：页面内容 < AppBar 100 < 本面板 < 全局对话层
-    // （TokenUsageDialog backdrop 1190 / panel 1200、MUI Modal 1300）——
-    // 面板是页面级非模态 chrome，任何全局对话框打开时都应压在它之上
-    // （否则用量面板右侧会被面板盖住、关不掉，codex comment 4111446577）。
+  it('codex P2-B（实测接线）：AppBar 实测底边经 CSS 变量落到 surface', async () => {
+    // 模拟被副标题芯片撑高的 AppBar（真实高度超过 min-height 56）。
+    const appBar = document.createElement('div')
+    appBar.dataset.testid = 'app-bar'
+    appBar.getBoundingClientRect = () =>
+      ({
+        bottom: 87,
+        top: 0,
+        left: 0,
+        right: 1440,
+        width: 1440,
+        height: 87,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect
+    document.body.appendChild(appBar)
+    try {
+      renderDialog(null)
+      const surface = await screen.findByRole('dialog', {
+        name: '定制预览面板',
+      })
+      await waitFor(() =>
+        expect(surface.style.getPropertyValue('--overlay-top-inset')).toBe(
+          '87px'
+        )
+      )
+    } finally {
+      appBar.remove()
+    }
+  })
+
+  it('codex P2（z-index）：面板让位全局通知/对话层——低于 Toast/DAG 全屏/用量面板/Modal，高于 AppBar', () => {
+    // 分层约定（仓库实际值）：页面内容 < AppBar 100 < 本面板 900 <
+    // Toast 1000 = DagFullscreenDialog 1000 < TokenUsageDialog 1190/1200 <
+    // MUI Modal 1300——面板是页面级非模态 chrome，全局通知（底部 toast）
+    // 与任何全局对话框打开时都必须压在它之上（codex comments 4111446577 /
+    // 4111642734）。
     const resolve = (collapsed: boolean) => {
       const sx = overlaySurfaceSx(collapsed)
       if (typeof sx !== 'function') throw new Error('sx 应是 theme 函数')
       return sx(theme) as Record<string, unknown>
     }
     for (const collapsed of [false, true]) {
-      expect(resolve(collapsed).zIndex).toBe(1100)
+      expect(resolve(collapsed).zIndex).toBe(900)
     }
   })
 

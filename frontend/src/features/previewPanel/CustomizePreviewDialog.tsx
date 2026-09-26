@@ -22,7 +22,7 @@
  *   输入保存在 AgentChatPanel/Composer 的组件本地 state 里，卸载即静默
  *   清空。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { IconButton, Paper, Portal, Tooltip } from '@mui/material'
 import { Close, UnfoldLess } from '@mui/icons-material'
 import { useStudioChat } from '../workflowStudio/chat/useStudioChat'
@@ -31,6 +31,7 @@ import { StudioChatSessionBar } from '../workflowStudio/chat/StudioChatSessionBa
 import type { PreviewPanelState } from './previewPanelApi'
 import { CustomizePreviewFooter } from './CustomizePreviewFooter'
 import { overlaySurfaceSx } from './customizePreviewOverlaySx'
+import { useOverlayChrome } from './overlayChrome'
 import {
   useArchivePreviewPanel,
   usePublishPreviewPanel,
@@ -61,27 +62,9 @@ export function CustomizePreviewDialog({
   const publishMutation = usePublishPreviewPanel(workspaceId)
   const archiveMutation = useArchivePreviewPanel(workspaceId)
   const selectedAgentId = chosenAgentId || (chat.agents[0]?.id ?? '')
-  const surfaceRef = useRef<HTMLDivElement>(null)
-  const pillRef = useRef<HTMLButtonElement>(null)
-
-  // modeless dialog 惯例：打开时把焦点交给面板（键盘用户立即可用 Escape
-  // 关闭），卸载时还原给触发点；preventScroll 防焦点驱动的页面跳动。
-  useEffect(() => {
-    const previous = document.activeElement
-    return () => {
-      if (previous instanceof HTMLElement && previous.isConnected) {
-        previous.focus({ preventScroll: true })
-      }
-    }
-  }, [])
-
-  // codex P2-A（焦点）：折叠/展开时显式移交焦点——折叠会把含焦点的内容区
-  // 切为 display:none，不移交则焦点丢进不可见子树，键盘再也回不到面板；
-  // 打开/展开时焦点回 surface（同时覆盖挂载首帧的初始聚焦）。
-  useEffect(() => {
-    const target = collapsed ? pillRef.current : surfaceRef.current
-    target?.focus({ preventScroll: true })
-  }, [collapsed])
+  // 焦点移交/还原与 AppBar 实测底边（--overlay-top-inset）抽在
+  // overlayChrome（codex P2-A 焦点 / P2 实测定位）。
+  const { surfaceRef, pillRef, insetStyle } = useOverlayChrome(collapsed)
 
   const draft = state?.draft ?? null
   const published = state?.published ?? null
@@ -105,6 +88,7 @@ export function CustomizePreviewDialog({
         tabIndex={-1}
         elevation={8}
         sx={overlaySurfaceSx(collapsed)}
+        style={insetStyle}
         onKeyDown={(event) => {
           if (event.key === 'Escape') onClose()
         }}

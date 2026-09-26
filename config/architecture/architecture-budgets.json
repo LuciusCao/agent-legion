@@ -300,6 +300,7 @@
     "frontend/src/features/previewPanel/builtin/questionPanelBundle.ts": 12,
     "frontend/src/features/previewPanel/bundleKey.ts": 13,
     "frontend/src/features/previewPanel/customizePreviewOverlaySx.ts": 44,
+    "frontend/src/features/previewPanel/overlayChrome.ts": 42,
     "frontend/src/features/previewPanel/previewPanelApi.ts": 46,
     "frontend/src/features/previewPanel/rawAssets.d.ts": 31,
     "frontend/src/features/previewPanel/useDraftAuthorization.ts": 44,
