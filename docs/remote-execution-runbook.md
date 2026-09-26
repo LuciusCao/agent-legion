@@ -486,9 +486,11 @@ workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前�
   上传的 legacy 产物。对象存储未配置时清单降级为本地名并标
   `object_storage_enabled: false`。
 - 产物名可以是 job_dir 相对子路径（`reports/final.json`）：清单列出
-  的名字即下载 URL 里的名字（`{artifact_name:path}`）；绝对名、`..`
-  段、反斜杠、`runs/` 前缀、点前缀段与含控制字符（含 `%00`）或超长
-  段（>200 字节）的名字一律 400。
+  的名字即下载 URL 里的名字（`{artifact_name:path}`）——按路径段
+  percent-encode 后拼接（`#`/`?` 不编码会被客户端当 fragment/query
+  截断；`/` 编成 `%2F` 或保持字面均可，服务端解码后仍按多段名匹配）；
+  绝对名、`..` 段、反斜杠、`runs/` 前缀、点前缀段与含控制字符（含
+  `%00`）或超长段（>200 字节）的名字一律 400。
 - job 未完成时清单是空数组 + 当前 status（不是 404）——外部轮询以
   status 为准。
 - 重跑后清单/读取都回答「当前最新」执行：`content_hash` 与
@@ -535,7 +537,11 @@ curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
   -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
 
 # 5) 下载指定产物（JSON/HTML/PDF/视频同一入口；视频可带 Range）
-curl -sS -o report.pdf "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/report.pdf/raw" \
+#    产物名按 URL 路径段 percent-encode（safe=""）：清单名里的 # 或 ?
+#    不编码会被客户端当成 fragment/query 截断，服务端收到残缺名字
+NAME=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
+  "report.pdf")
+curl -sS -o report.pdf "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/$NAME/raw" \
   -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
 ```
 
@@ -543,6 +549,7 @@ Python 等价（`requests`）：
 
 ```python
 import time, requests
+from urllib.parse import quote
 
 s = requests.Session()
 s.headers["Authorization"] = f"Bearer {WORKSPACE_API_TOKEN}"  # #626
@@ -562,8 +569,11 @@ while (st := s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()["status"]
 
 manifest = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts").json()
 for entry in manifest["artifacts"]:
+    # safe=""：名字里的 # 或 ? 必须 percent-encode——否则 # 起被当作
+    # fragment、? 起被当作 query，服务端收到截断后的名字（子路径名的 /
+    # 被一并编成 %2F 也无妨：服务端解码后仍按多段名走 {artifact_name:path}）
     blob = s.get(
-        f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts/{entry['name']}/raw"
+        f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts/{quote(entry['name'], safe='')}/raw"
     ).content
     # entry["content_hash"] 是未压缩内容的 sha256，可校验完整性
 ```
