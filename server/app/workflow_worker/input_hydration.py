@@ -74,6 +74,7 @@ from server.app.workflows.workflow_branching import (
     RUNNABLE_STATUSES,
     downstream_nodes,
     effective_node_statuses,
+    evaluate_edge_verdict,
 )
 
 if TYPE_CHECKING:
@@ -90,7 +91,7 @@ def _edge_reachable(definition: WorkflowDefinition, edge: WorkflowEdge) -> set[s
 
 
 def live_probe_names(
-    definition: WorkflowDefinition, node_statuses: dict[str, str]
+    definition: WorkflowDefinition, node_statuses: dict[str, str], artifact_dir: Path
 ) -> frozenset[str]:
     """本轮评估真正会本地探针的产物名（#759 复审 P1）。两个包含入口，渠道
     不交错：
@@ -104,14 +105,16 @@ def live_probe_names(
       update 无法把它再剔除）；
     - 条件产物唯一入口（``edge.condition.artifact``）：source 为
       completed（``evaluate_branches`` 只对 completed source 读条件文件）
-      且裁决差集（该边显式可达集 − 同 source 无条件兄弟边可达集，恒
-      selected 侧）内仍有可运行节点——与 ``evaluate_branches`` 的
-      unselected_reachable - selected_reachable 同口径，verdict 实际门控
-      谁才恢复谁。条件文件在场与否决定 not_applicable 标记，verdict 必须
-      稳定；已裁决完毕的终态分支（差集内无可运行节点）的条件产物不再
-      影响任何可运行分支，本地缓存被淘汰、对象丢失时不得进恢复面
-      （#779 列车 R4 复审 P1：恢复失败会把无关 targeted rerun 卡死在
-      defer）。
+      且裁决差集（该边显式可达集 − 同 source 的 selected 侧可达集）内
+      仍有可运行节点。selected 侧与 ``evaluate_branches`` 同一份实现——
+      共享的 ``evaluate_edge_verdict``（同在 workflow_branching，#779
+      列车 R4
+      复审 P1 跟进④）：无条件边 ∪ 当前可判定且选中的条件兄弟边（含其
+      本地字节评估），两侧不得各自重写这套代数。条件文件在场与否决定
+      not_applicable 标记，verdict 必须稳定；已裁决完毕的终态分支（差
+      集内无可运行节点）的条件产物不再影响任何可运行分支，本地缓存被
+      淘汰、对象丢失时不得进恢复面（#779 列车 R4 复审 P1：恢复失败会把
+      无关 targeted rerun 卡死在 defer）。
 
     终态分支的消费名由此退出恢复/defer 集：已完成并被淘汰缓存的 job 做单
     分支 targeted rerun 时，其他终态分支永久丢失/损坏的对象不再把整个
@@ -125,23 +128,22 @@ def live_probe_names(
     """
     statuses = effective_node_statuses(definition, node_statuses)
     runnable = {key for key, status in statuses.items() if status in RUNNABLE_STATUSES}
-    names = {
-        name for node in definition.nodes.values() if node.key in runnable for name in node.inputs
-    }
-    unconditional_reach: dict[str, set[str]] = {}
+    names = {n for key in runnable if key in definition.nodes for n in definition.nodes[key].inputs}
+    by_source: dict[str, list[WorkflowEdge]] = {}
     for edge in definition.edges:
-        if edge.condition is None and statuses.get(edge.source) == "completed":
-            unconditional_reach.setdefault(edge.source, set()).update(
-                _edge_reachable(definition, edge)
-            )
-    names.update(
-        edge.condition.artifact
-        for edge in definition.edges
-        if edge.condition is not None
-        and statuses.get(edge.source) == "completed"
-        and (_edge_reachable(definition, edge) - unconditional_reach.get(edge.source, set()))
-        & runnable
-    )
+        if statuses.get(edge.source) == "completed":
+            by_source.setdefault(edge.source, []).append(edge)
+    for edges in by_source.values():
+        verdict = evaluate_edge_verdict(definition, edges, statuses, artifact_dir)
+        selected_reach: set[str] = {
+            k for e in edges if e.target in verdict.selected for k in _edge_reachable(definition, e)
+        }
+        names.update(
+            edge.condition.artifact
+            for edge in edges
+            if edge.condition is not None
+            and (_edge_reachable(definition, edge) - selected_reach) & runnable
+        )
     return frozenset(names)
 
 
@@ -193,7 +195,7 @@ def hydrate_job_artifacts(
     """
     if store is None or not store.enabled:
         return frozenset()
-    probe = live_probe_names(definition, node_statuses)
+    probe = live_probe_names(definition, node_statuses, job_dir)
     missing = [name for name in probe if not (job_dir / name).is_file()]
     if not missing:
         return frozenset()

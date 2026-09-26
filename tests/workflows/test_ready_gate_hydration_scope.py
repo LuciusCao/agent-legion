@@ -248,7 +248,7 @@ def _conditional_branches_definition() -> WorkflowDefinition:
     )
 
 
-def test_condition_artifact_of_fully_decided_branch_leaves_probe_surface() -> None:
+def test_condition_artifact_of_fully_decided_branch_leaves_probe_surface(tmp_path: Path) -> None:
     """#779 R4 P1：source completed 臂的过度包含——终态分支（target 已终态、
     其可达节点也全终态）的条件产物不再影响任何可运行分支，本地缓存被淘汰
     且对象丢失时不得进恢复面（否则恢复失败把整个 job 卡在 defer）。"""
@@ -257,10 +257,10 @@ def test_condition_artifact_of_fully_decided_branch_leaves_probe_surface() -> No
     definition = _conditional_branches_definition()
     statuses = {"gate": "completed", "good": "completed", "alt": "not_applicable", "b": "pending"}
 
-    assert "decision.json" not in live_probe_names(definition, statuses)
+    assert "decision.json" not in live_probe_names(definition, statuses, tmp_path)
 
 
-def test_condition_artifact_stays_while_verdict_still_drives_runnable_nodes() -> None:
+def test_condition_artifact_stays_while_verdict_still_drives_runnable_nodes(tmp_path: Path) -> None:
     """对照（当初 source-completed 臂要保的裁决稳定性）：target 已完成但
     其下游仍可运行时，条件文件在场与否仍决定 not_applicable 标记——名字
     必须留在恢复面；source completed + target pending（尚未裁决）同理。"""
@@ -269,7 +269,7 @@ def test_condition_artifact_stays_while_verdict_still_drives_runnable_nodes() ->
     definition = _conditional_branches_definition()
     # target pending（未裁决）：条件文件必须可评估。
     pending_target = {"gate": "completed", "good": "pending", "alt": "pending", "b": "completed"}
-    assert "decision.json" in live_probe_names(definition, pending_target)
+    assert "decision.json" in live_probe_names(definition, pending_target, tmp_path)
     # target 已 completed（已选中），但同分支仍有 pending 节点时 verdict 必须
     # 稳定——给 good 接一个下游节点覆盖该形态。
     from server.app.workflows.schema import WorkflowEdge as _Edge
@@ -297,7 +297,7 @@ def test_condition_artifact_stays_while_verdict_still_drives_runnable_nodes() ->
         "good_down": "pending",
         "b": "completed",
     }
-    assert "decision.json" in live_probe_names(with_downstream, downstream_pending)
+    assert "decision.json" in live_probe_names(with_downstream, downstream_pending, tmp_path)
 
 
 def test_decided_branch_lost_condition_object_does_not_block_targeted_rerun(
@@ -417,7 +417,7 @@ def _implicit_consumer_definition() -> WorkflowDefinition:
     )
 
 
-def test_condition_artifact_excluded_when_only_implicit_consumer_runnable() -> None:
+def test_condition_artifact_excluded_when_only_implicit_consumer_runnable(tmp_path: Path) -> None:
     """#779 R4 P1 跟进：条件 verdict 的传播口径是 evaluate_branches 的显式
     边可达集（_reachable_from）。target 已终态、只有隐式消费边（node.
     inputs）可达的节点可运行时，条件 verdict 根本不影响该隐式消费者——
@@ -429,7 +429,7 @@ def test_condition_artifact_excluded_when_only_implicit_consumer_runnable() -> N
     statuses = {"gate": "completed", "good": "completed", "alt": "not_applicable", "b": "pending"}
 
     # b 的隐式 input 仍在恢复面（b 可运行），但已裁决分支的条件产物退出。
-    names = live_probe_names(definition, statuses)
+    names = live_probe_names(definition, statuses, tmp_path)
     assert "good_out.json" in names
     assert "decision.json" not in names
 
@@ -542,7 +542,7 @@ def _confluence_definition() -> WorkflowDefinition:
     )
 
 
-def test_confluence_via_unconditional_sibling_excludes_condition_artifact() -> None:
+def test_confluence_via_unconditional_sibling_excludes_condition_artifact(tmp_path: Path) -> None:
     """#779 R4 P1 跟进②：条件边 s→a（a 终态）+ 无条件边 s→j + a→j 汇合，
     j 被 targeted rerun——j 经无条件边恒可达（恒在 selected 侧），条件
     verdict 的差集（unselected_reachable - selected_reachable）不覆盖它；
@@ -552,7 +552,7 @@ def test_confluence_via_unconditional_sibling_excludes_condition_artifact() -> N
     definition = _confluence_definition()
     statuses = {"gate": "completed", "good": "completed", "j": "pending"}
 
-    assert "decision.json" not in live_probe_names(definition, statuses)
+    assert "decision.json" not in live_probe_names(definition, statuses, tmp_path)
     # 对照：没有无条件兄弟边时（a→j 是唯一路径），j 的可运行性受
     # verdict 门控——decision.json 必须留在恢复面。
     edges_without_sibling = [
@@ -561,7 +561,7 @@ def test_confluence_via_unconditional_sibling_excludes_condition_artifact() -> N
     from dataclasses import replace as _replace
 
     gated_only = _replace(definition, edges=edges_without_sibling)
-    assert "decision.json" in live_probe_names(gated_only, statuses)
+    assert "decision.json" in live_probe_names(gated_only, statuses, tmp_path)
 
 
 def test_confluence_rerun_not_blocked_by_lost_condition_object(tmp_path: Path) -> None:
@@ -630,7 +630,7 @@ def test_confluence_rerun_not_blocked_by_lost_condition_object(tmp_path: Path) -
 # ---------------------------------------------------------------------------
 
 
-def test_conditional_target_with_unconditional_path_not_in_probe_surface() -> None:
+def test_conditional_target_with_unconditional_path_not_in_probe_surface(tmp_path: Path) -> None:
     """codex 本轮形态：s completed；条件边 s→j（decision.json）与无条件
     路径 s→u→j 汇合于 pending 的 j（targeted rerun）。j 恒经无条件路径
     可达（selected 侧），条件 verdict 不影响 j——但消费索引把 j 记作
@@ -660,10 +660,10 @@ def test_conditional_target_with_unconditional_path_not_in_probe_surface() -> No
     )
     statuses = {"s": "completed", "u": "completed", "j": "pending"}
 
-    assert "decision.json" not in live_probe_names(definition, statuses)
+    assert "decision.json" not in live_probe_names(definition, statuses, tmp_path)
 
 
-def test_condition_artifact_shared_with_plain_input_follows_input_channel() -> None:
+def test_condition_artifact_shared_with_plain_input_follows_input_channel(tmp_path: Path) -> None:
     """对抗自查形态 (a)：条件产物名同时被普通 node.inputs 声明——input
     渠道的消费者可运行时（find_ready_nodes 真实探它），名字经 input 入口
     照常进恢复面；该消费者也终态且裁决差集为空时才退出。"""
@@ -695,13 +695,13 @@ def test_condition_artifact_shared_with_plain_input_follows_input_channel() -> N
     )
     # b 可运行：b 真实把 decision.json 当 input 探——必须进恢复面。
     runnable_consumer = {"s": "completed", "a": "completed", "b": "pending"}
-    assert "decision.json" in live_probe_names(definition, runnable_consumer)
+    assert "decision.json" in live_probe_names(definition, runnable_consumer, tmp_path)
     # b 也终态、a 终态（差集为空）：退出。
     all_terminal = {"s": "completed", "a": "completed", "b": "completed"}
-    assert "decision.json" not in live_probe_names(definition, all_terminal)
+    assert "decision.json" not in live_probe_names(definition, all_terminal, tmp_path)
 
 
-def test_condition_artifact_multilayer_confluence() -> None:
+def test_condition_artifact_multilayer_confluence(tmp_path: Path) -> None:
     """对抗自查形态 (b)：多层汇合——条件 target a 的显式下游 x 又被无条件
     路径（s→u→x）汇合。x 恒可达（selected 侧）时条件 verdict 不门控它；
     a 已终态则 decision.json 退出恢复面。a 的下游中还有无条件路径覆盖不
@@ -730,7 +730,7 @@ def test_condition_artifact_multilayer_confluence() -> None:
     )
     # a 终态、x 可运行但恒经无条件路径可达 → 退出。
     statuses = {"s": "completed", "a": "completed", "u": "completed", "x": "pending"}
-    assert "decision.json" not in live_probe_names(definition, statuses)
+    assert "decision.json" not in live_probe_names(definition, statuses, tmp_path)
 
     # a 的下游 y 不被无条件路径覆盖且可运行 → verdict 仍门控 y → 留在恢复面。
     nodes_with_y = {
@@ -745,7 +745,7 @@ def test_condition_artifact_multilayer_confluence() -> None:
         edges=[*base_edges, WorkflowEdge(source="a", target="y")],
     )
     statuses_y = {**statuses, "y": "pending"}
-    assert "decision.json" in live_probe_names(with_y, statuses_y)
+    assert "decision.json" in live_probe_names(with_y, statuses_y, tmp_path)
 
 
 def test_conditional_target_with_unconditional_path_rerun_not_blocked(tmp_path: Path) -> None:
@@ -808,6 +808,151 @@ def test_conditional_target_with_unconditional_path_rerun_not_blocked(tmp_path: 
 
     store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
     _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfc3", "j")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path,
+        TEST_DATABASE_URL,
+        executor,
+        [definition],
+        artifact_object_store=store,
+    )
+
+    worker._poll()
+
+    assert queries.get_job_node(job["id"], "j")["status"] == "running"
+    assert worker.leases.active_counts("code").get("global", 0) == 1
+
+    executor.block_event.set()
+    worker.stop()
+
+
+# ---------------------------------------------------------------------------
+# #779 列车 R4 复审 P1 跟进④：当前选中的条件兄弟边也进裁决差集（与
+# evaluate_branches 的 selected_reachable 同口径，共享 evaluate_edge_verdict）
+# ---------------------------------------------------------------------------
+
+
+def _selected_sibling_definition() -> WorkflowDefinition:
+    """A 是条件边 s→a（a.json 由 s 产）；B 是条件兄弟边 s→b（b.json 由
+    独立节点 p 产——翻转形态要把 B 的生产者置于在途）；b→a→j。B 选中时
+    A 的可达集被 B 的 selected_reachable 覆盖。"""
+    from server.app.workflows.schema import WorkflowCondition, WorkflowEdge
+
+    return WorkflowDefinition(
+        key="wfc6",
+        label="Wf C6",
+        intake=WorkflowIntake(),
+        nodes={
+            "s": WorkflowNode(key="s", label="S", capability="cap_s", outputs=["a.json"]),
+            "p": WorkflowNode(key="p", label="P", capability="cap_p", outputs=["b.json"]),
+            "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["a_out.json"]),
+            "b": WorkflowNode(key="b", label="B", capability="cap_b", outputs=["b_out.json"]),
+            "j": WorkflowNode(key="j", label="J", capability="cap_j", outputs=["j_out.json"]),
+        },
+        edges=[
+            WorkflowEdge(
+                source="s", target="a", condition=WorkflowCondition("a.json", "$.ok", True)
+            ),
+            WorkflowEdge(
+                source="s", target="b", condition=WorkflowCondition("b.json", "$.ok", True)
+            ),
+            WorkflowEdge(source="b", target="a"),
+            WorkflowEdge(source="a", target="j"),
+        ],
+    )
+
+
+def test_selected_conditional_sibling_covers_verdict_difference(tmp_path: Path) -> None:
+    """codex 本轮形态：A（s→a，a.json 本地缺失）的显式可达集被当前选中的
+    条件兄弟边 B（s→b，b.json 在场且选中，b→a→j）覆盖——j pending
+    （targeted rerun）。evaluate_branches 把 B 的选中可达集纳入
+    selected_reachable，A 缺失不影响 j——a.json 不进恢复面。只扣无条件
+    兄弟的修复前形态会把 a.json 留在恢复面（对象丢失则每轮 defer）。"""
+    from server.app.workflow_worker.input_hydration import live_probe_names
+
+    definition = _selected_sibling_definition()
+    statuses = {
+        "s": "completed",
+        "p": "completed",
+        "b": "completed",
+        "a": "completed",
+        "j": "pending",
+    }
+    (tmp_path / "b.json").write_text('{"ok": true}', encoding="utf-8")
+
+    assert "a.json" not in live_probe_names(definition, statuses, tmp_path)
+
+
+def test_unselected_or_undecidable_sibling_puts_artifact_back(tmp_path: Path) -> None:
+    """对抗自查（翻转形态）：选中兄弟边 B 后来未选中/不可判定时 A 回到
+    恢复面——b.json 缺失（按文件语义判未选中），或 B 条件文件的生产者
+    在途（p pending → B 推迟、不进 selected 侧）。"""
+    from server.app.workflow_worker.input_hydration import live_probe_names
+
+    definition = _selected_sibling_definition()
+    statuses = {
+        "s": "completed",
+        "p": "completed",
+        "b": "completed",
+        "a": "completed",
+        "j": "pending",
+    }
+    # b.json 缺失：B 未选中 → A 的可达集无覆盖 → 回到恢复面。
+    assert "a.json" in live_probe_names(definition, statuses, tmp_path)
+
+    # B 的条件文件生产者在途（p pending）→ B 推迟（不可判定、不选中）→
+    # 同样不覆盖（b.json 在场也没用）。
+    (tmp_path / "b.json").write_text('{"ok": true}', encoding="utf-8")
+    producer_in_flight = {**statuses, "p": "pending"}
+    assert "a.json" in live_probe_names(definition, producer_in_flight, tmp_path)
+
+
+def test_selected_sibling_covering_rerun_not_blocked_by_lost_object(tmp_path: Path) -> None:
+    """端到端（codex 本轮形态）：b.json 本地在场（B 选中 s→b→a→j）、a.json
+    清单行在但对象永久丢失、j 被 targeted rerun——a.json 不进恢复面，j
+    照常 claim。"""
+    definition = _selected_sibling_definition()
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("wfc6", default_workflow_key="wfc6", workspace_id="wfc6")
+    job = queries.create_job(
+        workflow_key="wfc6",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["s", "p", "a", "b", "j"],
+        workspace_id=workspace["id"],
+    )
+    for key in ("s", "p", "a", "b", "j"):
+        queries.update_job_node(job["id"], key, status="completed")
+    queries.update_job_status(job["id"], "completed")
+    # a.json 清单行在、本地被淘汰、对象永久丢失（FakeObjectStorage 为空）；
+    # b.json 由已完成生产者产出、本地仍在（B 当前选中）。
+    payload = b'{"ok": true}'
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 's', 'a.json', %s, %s, %s)
+            """,
+            (
+                job["id"],
+                f"jobs/{workspace['id']}/{job['id']}/a.json",
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
+            ),
+        )
+    from server.app.jobs.storage_layout import job_storage_dir
+
+    job_dir = job_storage_dir(tmp_path / "jobs", workspace["id"], job["id"])
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "b.json").write_text('{"ok": true}', encoding="utf-8")
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        mark_nodes_for_rerun(conn, job["id"], ["j"], {"j": []})
+
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfc6", "j")
     executor = RecordingExecutor("code")
     worker = _make_worker(
         tmp_path,
