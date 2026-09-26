@@ -1366,7 +1366,13 @@ invariants:
         target: tests/workflows/test_not_applicable_generation_guard.py
         gate: quick
       - kind: integration
-        target: tests/db/test_generation_write_gates.py
+        target: tests/db/test_generation_write_gates_upload.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_generation_write_gates_fanout.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_generation_write_gates_finish.py
         gate: quick
       - kind: integration
         target: tests/db/test_completion_generation_gates.py

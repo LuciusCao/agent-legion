@@ -498,20 +498,29 @@ workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前�
   `jobs/{workspace}/{job_id}/` 前缀：行被污染/写歪（未来写入方失守、
   运维 SQL 误操作）时按 404 处理并记 warning，绝不读穿 workspace 边界。
 
-**最小完整示例**（curl；提交一步引用 #626 的 workspace API token 用法，
-token 发放机制落地前可先用控制台会话 cookie）：
+**最小完整示例**（curl；token 签发与提交面细节见
+[workspace-api-tokens.md](workspace-api-tokens.md)——#626 的 workspace
+API token 唯一支持的提交面是 `POST /runs`：`/job-batches` 挂载
+`reject_studio_agent_scope`，对包括 `actor_scope='api'` 在内的全部
+scoped token 一律 403）：
 
 ```bash
 HOST="https://agent-legion.example.com"
 WS="my-workspace"
-# 1) 提交（#626 workspace API token；未落地时用控制台登录的会话 cookie）
-JOB_ID=$(curl -sS -X POST "$HOST/api/workspaces/$WS/job-batches" \
+# 1) 提交（items 引用已就位的 material/bundle/ref；一项一个 job）
+RUN_ID=$(curl -sS -X POST "$HOST/api/workspaces/$WS/runs" \
   -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"source_kind": "direct_ids", "knowledge_point_ids": ["Q003"]}' \
+  -d '{"items": [{"type": "material", "material_id": "mat-1"}]}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])')
+
+# 2) 取 job id（POST /runs 响应只带 run + created_count：按 run_id 查
+#    snapshot；多页用 next_cursor 循环）
+JOB_ID=$(curl -sS "$HOST/api/workspaces/$WS/jobs/snapshot?run_id=$RUN_ID" \
+  -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["jobs"][0]["id"])')
 
-# 2) 轮询状态直到 completed / failed
+# 3) 轮询状态直到 completed / failed
 while :; do
   STATUS=$(curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
     -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
@@ -521,11 +530,11 @@ while :; do
   sleep 15
 done
 
-# 3) 取产物清单（content_hash / uploaded_at 区分执行）
+# 4) 取产物清单（content_hash / uploaded_at 区分执行）
 curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
   -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
 
-# 4) 下载指定产物（JSON/HTML/PDF/视频同一入口；视频可带 Range）
+# 5) 下载指定产物（JSON/HTML/PDF/视频同一入口；视频可带 Range）
 curl -sS -o report.pdf "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/report.pdf/raw" \
   -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
 ```
@@ -538,9 +547,12 @@ import time, requests
 s = requests.Session()
 s.headers["Authorization"] = f"Bearer {WORKSPACE_API_TOKEN}"  # #626
 
-job_id = s.post(
-    f"{HOST}/api/workspaces/{WS}/job-batches",
-    json={"source_kind": "direct_ids", "knowledge_point_ids": ["Q003"]},
+run_id = s.post(
+    f"{HOST}/api/workspaces/{WS}/runs",
+    json={"items": [{"type": "material", "material_id": "mat-1"}]},
+).json()["run"]["id"]
+job_id = s.get(
+    f"{HOST}/api/workspaces/{WS}/jobs/snapshot", params={"run_id": run_id}
 ).json()["jobs"][0]["id"]
 
 while (st := s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()["status"]) not in {

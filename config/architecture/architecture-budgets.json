@@ -986,7 +986,7 @@
     "server/app/auth/sessions.py": 22,
     "server/app/auth/studio_authoring.py": 22,
     "server/app/auth/workspace_access.py": 34,
-    "server/app/auth/workspace_api_scope.py": 39,
+    "server/app/auth/workspace_api_scope.py": 37,
     "server/app/auth/workspace_api_tokens.py": 90,
     "server/app/bootstrap/__init__.py": 13,
     "server/app/bootstrap/agent_plane.py": 80,
