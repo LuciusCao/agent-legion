@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { StudioChatSessionRecord } from './studioChatApi'
+import { StudioChatCancelButton } from './StudioChatCancelButton'
 import { StudioChatComposerConfig } from './StudioChatComposerConfig'
 import { StudioChatContextRing } from './StudioChatContextRing'
 import styles from './StudioChatComposer.module.css'
@@ -96,13 +97,7 @@ export function StudioChatComposer(props: Props) {
             </>
           )}
           {props.onCancel && (
-            <button
-              type="button"
-              className={styles.cancelButton}
-              onClick={props.onCancel}
-            >
-              取消
-            </button>
+            <StudioChatCancelButton onCancel={props.onCancel} />
           )}
           <button
             type="button"
