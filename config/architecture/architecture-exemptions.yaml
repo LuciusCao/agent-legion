@@ -1077,13 +1077,16 @@ exemptions:
     the child), and the capped-output display branch (truncate_head + the
     honest no-full-output notice) grew alongside. The capture cap, its tests,
     and the display branches are one cohesive read/display flow; splitting
-    them would fork the child-output lifecycle across modules. Ceiling
-    re-seated at actual + 10 per the dated-exemption convention (#431/#458
+    them would fork the child-output lifecycle across modules. #779 train R4
+    review P2 grew the same capped-display branch further (per-stream display
+    budgets: stderr gets a reserved half-share, each stream keeps its head
+    when capture-capped and its tail when fully collected). Ceiling re-seated
+    at actual + 10 per the dated-exemption convention (#431/#458
     precedents). Remove when the capped-display branches move into
     truncate.rs or the module gets a bash-output split.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
-  ceiling: 383
+  ceiling: 411
   expires: 2027-03-31
 - check: architecture.file_budget
   path: velites/src/tools/truncate.rs

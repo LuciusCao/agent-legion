@@ -300,3 +300,38 @@ async fn bash_capped_stdout_keeps_uncapped_stderr_tail() {
     );
     assert!(text.len() < 60 * 1024, "shown content must stay small");
 }
+
+// #779 列车 R4 复审 P2 跟进（镜像形态）：仅 stderr 触顶时，stdout 完整
+// 采集（字节仍在内存）但超剩余份额——应保尾（最终结果在末尾，与常规
+// 截断同语义），而不是无条件保头丢掉结尾。
+#[tokio::test]
+async fn bash_capped_stderr_keeps_uncapped_stdout_tail() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({
+                // stdout ~36KB（4001 行）完整采集、超剩余份额，结果在末尾；
+                // stderr 5 MiB 触顶。
+                "command": "for i in $(seq 1 4000); do echo \"step $i\"; done; echo 'RESULT: 42'; head -c 5242880 /dev/zero | tr '\\0' 'e' 1>&2"
+            }),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error, "capping is not an error");
+    let text = match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+
+    // stdout 保尾：最终结果与末尾的步骤可见（修复前保头把它们丢掉）。
+    assert!(text.contains("RESULT: 42"), "stdout tail kept: {text}");
+    assert!(text.contains("step 4000"), "stdout tail kept: {text}");
+    assert!(!text.contains("step 1\n"), "stdout head must yield: {text}");
+    // stderr 触顶保头语义与分节标记不变；cap 通知与总预算不变。
+    assert!(text.contains("[stderr]"), "stderr marker kept: {text}");
+    assert!(
+        text.contains("[Output capture stopped after 5.0MB at the 4MB per-stream cap"),
+        "missing cap notice: {text}"
+    );
+    assert!(text.len() < 60 * 1024, "shown content must stay small");
+}
