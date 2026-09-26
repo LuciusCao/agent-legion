@@ -17,6 +17,7 @@ import pytest
 from scripts.pytest_aff_selection import (
     build_index_from_coverage,
     select_affected_tests,
+    unmapped_source_files,
 )
 
 _REPO_ROOT = "/repo"
@@ -202,3 +203,36 @@ def test_select_affected_tests_skips_non_test_files_under_tests(tmp_path):
     )
 
     assert selected == []
+
+
+def test_unmapped_source_files_flags_test_helpers_for_fallback(tmp_path):
+    """codex 复审 P2（PR #792）：tests/ 下的 Python 辅助文件触发全量回退。
+
+    改动 = tests/helpers/x.py + 可映射源码时，helper 的消费面不在索引里
+    （--cov 不覆盖 tests/ 树）——静默丢弃会让选择结果只剩源码映射的子集，
+    其消费者可能完全不在其中（aff 内环误报通过）。辅助文件必须计入
+    unmapped → exit 4 → 全量 unit 档回退；test_*.py 由选择器处理、
+    YAML/JSON 等确定不影响测试执行的文件静默忽略。
+    """
+    mapping = {"server/app/settings.py": ["tests/test_settings.py::test_a"]}
+    helper = tmp_path / "tests" / "helpers" / "seed.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("def seed():\n    pass\n", encoding="utf-8")
+    conftest = tmp_path / "tests" / "conftest.py"
+    conftest.write_text("", encoding="utf-8")
+    registry = tmp_path / "tests" / "flaky_registry.yaml"
+    registry.write_text("entries: []\n", encoding="utf-8")
+
+    unmapped = unmapped_source_files(
+        [
+            "tests/helpers/seed.py",
+            "tests/conftest.py",
+            "tests/flaky_registry.yaml",
+            "server/app/settings.py",
+        ],
+        mapping,
+        repo_root=tmp_path,
+    )
+
+    # helper/conftest 进 unmapped（触发回退）；yaml 与已映射源码不进。
+    assert unmapped == ["tests/conftest.py", "tests/helpers/seed.py"]
