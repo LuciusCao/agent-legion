@@ -261,3 +261,42 @@ async fn bash_capped_output_with_unshowable_first_line_names_display_limit() {
         "capped run must not point at a full-output temp file: {text}"
     );
 }
+
+// #779 列车 R4 复审 P2 跟进：stderr 未触顶（完整采集）但超预留份额时，
+// 展示必须保留尾部——与 bash 常规截断语义一致（错误/结果在末尾）。
+// head 截断会把最后才写出的 FATAL 丢掉，尽管其字节仍在内存中。
+#[tokio::test]
+async fn bash_capped_stdout_keeps_uncapped_stderr_tail() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({
+                // stdout 5 MiB 触顶；stderr ~36KB 完整采集（远低于 4 MiB
+                // 采集上限）但超 25KB 展示份额——先 warnings 后 FATAL。
+                "command": "head -c 5242880 /dev/zero | tr '\\0' 'a'; for i in $(seq 1 4000); do echo \"warn $i\" 1>&2; done; echo 'FATAL: disk full' 1>&2"
+            }),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error, "capping is not an error");
+    let text = match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+
+    // 尾部保留：最终诊断与末尾的警告可见（修复前 head 截断把它们丢掉）。
+    assert!(text.contains("[stderr]"), "stderr marker lost: {text}");
+    assert!(
+        text.contains("FATAL: disk full"),
+        "the final diagnostic must survive: {text}"
+    );
+    assert!(text.contains("warn 4000"), "stderr tail kept: {text}");
+    // 头部让位：份额装不下全部 stderr，最早的警告被截掉。
+    assert!(!text.contains("warn 1\n"), "stderr head must yield: {text}");
+    // cap 通知与 stdout 头部保留不变，总展示预算仍有界。
+    assert!(
+        text.contains("[Output capture stopped after 5.0MB at the 4MB per-stream cap"),
+        "missing cap notice: {text}"
+    );
+    assert!(text.len() < 60 * 1024, "shown content must stay small");
+}

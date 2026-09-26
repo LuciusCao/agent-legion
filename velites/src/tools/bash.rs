@@ -268,14 +268,20 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         // #779 列车 R4 复审 P2：展示预算按流分配——stderr 先预留总预算的
         // 一半（其实际所需为限），stdout 头部用剩余。合并文本再整体保头
         // 会让 stdout 的 4 MiB 头部把完整采集到的 stderr 全部挤出展示面，
-        // 失败命令的错误原因随之丢失。stderr 在预留份额内不可展示（首行
+        // 失败命令的错误原因随之丢失。stderr 未触顶（完整采集）时保尾
+        // （R4 P2 跟进：最终诊断在末尾，与常规截断同语义）；触顶时尾部
+        // 已在采集侧丢弃，只能保头。stderr 在预留份额内不可展示（首行
         // 即超限，如无换行的超长行）时仅保留分节标记——与修复前合并文本
         // 截断后的形状一致。
-        let stderr_truncation = truncate::truncate_head_within(
-            &stderr_text,
+        let share = (
             truncate::DEFAULT_MAX_LINES / 2,
             truncate::DEFAULT_MAX_BYTES / 2,
         );
+        let stderr_truncation = if stderr.hit_cap {
+            truncate::truncate_head_within(&stderr_text, share.0, share.1)
+        } else {
+            truncate::truncate_tail_within(&stderr_text, share.0, share.1)
+        };
         let stdout_truncation = truncate::truncate_head_within(
             &stdout_text,
             truncate::DEFAULT_MAX_LINES - stderr_truncation.output_lines,
