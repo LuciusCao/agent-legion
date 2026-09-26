@@ -359,3 +359,89 @@ def test_bare_job_read_routes_scope_scoped_tokens_by_binding(two_workspaces, job
 
     # scoped 身份的 sanctioned 读面照常：绑定 ws-a 读 ws-a 前缀端点 200。
     assert scoped.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}").status_code == 200
+
+
+# --- #626/#631：workspace API token（actor_scope='api'）的外部读取面 ----------
+
+
+def _issue_api_token(c, workspace_id: str, label: str = "external") -> str:
+    created = c.post(f"/api/workspaces/{workspace_id}/api-tokens", json={"label": label})
+    assert created.status_code == 201, created.text
+    return str(created.json()["api_token"])
+
+
+def _bearer(c, token: str):
+    api = c.__class__(c.app)
+    api.headers["authorization"] = f"Bearer {token}"
+    return api
+
+
+def test_workspace_api_token_reads_status_manifest_and_raw(two_workspaces):
+    """#779 列车复审 P1-1：#626 的 workspace API token 的文档化面是
+    submit → poll → download，但 #631 的三个外部读取端点挂在 job_group
+    的 require_job_workspace_access 之下，api scope 白名单此前只列了
+    runs 与 jobs 列表——三个已公开 GET 在到达 external_artifacts router
+    前被统一 404。修复后白名单放行这三个 GET；raw 一条用子路径产物名
+    （{artifact_name:path} 的多段匹配）钉住参数化部分的正确性。"""
+    c, job_a, _ = two_workspaces
+    _register_object_artifact(c, job_a, "reports/final.json", b'{"final": true}')
+    api = _bearer(c, _issue_api_token(c, "ws-a"))
+
+    status = api.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}")
+    assert status.status_code == 200
+    assert status.json()["job_id"] == job_a["id"]
+
+    listing = api.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts")
+    assert listing.status_code == 200
+    assert [e["name"] for e in listing.json()["artifacts"]] == ["reports/final.json"]
+
+    raw = api.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/reports/final.json/raw")
+    assert raw.status_code == 200
+    assert raw.content == b'{"final": true}'
+
+    # 未知 job：service 归属/存在性校验的 404（不是守卫误拦，也不是 5xx）。
+    assert api.get("/api/workspaces/ws-a/jobs/missing").status_code == 404
+
+
+def test_workspace_api_token_cross_workspace_reads_stay_404(two_workspaces):
+    """放行不松绑定：绑定 ws-a 的 api token 读 ws-b 前缀的三个端点仍 404
+    （绑定等值检查先于白名单放行）；ws-a 前缀借 ws-b 的 job id 同样 404
+    （service 的归属校验，无枚举）。"""
+    c, _, job_b = two_workspaces
+    _register_object_artifact(c, job_b, "frame.png", b"\x89PNG-bytes")
+    api = _bearer(c, _issue_api_token(c, "ws-a"))
+
+    assert api.get(f"/api/workspaces/ws-b/jobs/{job_b['id']}").status_code == 404
+    assert api.get(f"/api/workspaces/ws-b/jobs/{job_b['id']}/artifacts").status_code == 404
+    assert (
+        api.get(f"/api/workspaces/ws-b/jobs/{job_b['id']}/artifacts/frame.png/raw").status_code
+        == 404
+    )
+    assert api.get(f"/api/workspaces/ws-a/jobs/{job_b['id']}").status_code == 404
+    assert api.get(f"/api/workspaces/ws-a/jobs/{job_b['id']}/artifacts").status_code == 404
+
+
+def test_workspace_api_token_write_methods_stay_refused(two_workspaces):
+    """白名单只放行 GET：同一批路径上的写方法依旧不是 2xx（无路由 405，
+    有守卫 403/404——写面零扩大）。"""
+    c, job_a, _ = two_workspaces
+    api = _bearer(c, _issue_api_token(c, "ws-a"))
+
+    for method in ("POST", "PUT", "DELETE", "PATCH"):
+        for suffix in ("", "/artifacts", "/artifacts/x.json/raw"):
+            response = api.request(method, f"/api/workspaces/ws-a/jobs/{job_a['id']}{suffix}")
+            assert response.status_code in (403, 404, 405), (
+                f"{method} ...{suffix} -> {response.status_code}"
+            )
+
+
+def test_workspace_api_token_allowlist_matches_route_template_not_path_text(two_workspaces):
+    """回归钉（/jobs/facets 冲突）：放行 ``/jobs/{job_id}`` 后，静态姊妹
+    路由 ``/jobs/facets`` 不得被路径文本匹配误放行（job_id='facets' 的
+    请求实际命中 facets 路由，它不在白名单）——白名单按解析出的路由模
+    板精确匹配；真实 job 的状态读取照常 200（判别力对照）。"""
+    c, job_a, _ = two_workspaces
+    api = _bearer(c, _issue_api_token(c, "ws-a"))
+
+    assert api.get("/api/workspaces/ws-a/jobs/facets").status_code == 404
+    assert api.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}").status_code == 200
