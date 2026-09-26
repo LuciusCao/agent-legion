@@ -334,4 +334,19 @@ async fn bash_capped_stderr_keeps_uncapped_stdout_tail() {
         "missing cap notice: {text}"
     );
     assert!(text.len() < 60 * 1024, "shown content must stay small");
+    // #779 列车 R4 复审 P2 跟进（提示与内容一致）：stdout 保尾展示时提示
+    // 不得声称「head above is kept」（方向相反会误导模型对日志位置的判
+    // 断）；提示按各流实际截断方向分别说明。
+    assert!(
+        !text.contains("the head above is kept"),
+        "notice must not claim a kept head for the tail-kept stream: {text}"
+    );
+    assert!(
+        text.contains("stdout was fully captured; shown tail-first"),
+        "notice must name stdout's tail-first display: {text}"
+    );
+    assert!(
+        text.contains("stderr hit the cap: the head is kept, the tail was dropped"),
+        "notice must name stderr's capped direction: {text}"
+    );
 }

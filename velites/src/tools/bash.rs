@@ -302,10 +302,27 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
             kept.push_str("[stderr]\n");
             kept.push_str(&stderr_truncation.content);
         }
+        // #779 列车 R4 复审 P2 跟进：提示按各流实际截断方向分别说明——统一
+        // 声称「head above is kept」会在未触顶流保尾展示时与内容矛盾（模型
+        // 会误判所见日志的位置）。触顶流：保头（尾部采集侧已丢）；完整采集
+        // 但超份额的流：保尾（头部按份额剪掉）；完整且未超份额：完整展示。
+        let stream_note = |name: &str, hit_cap: bool, display_trimmed: bool| {
+            if hit_cap {
+                format!("{name} hit the cap: the head is kept, the tail was dropped")
+            } else if display_trimmed {
+                format!(
+                    "{name} was fully captured; shown tail-first (its head is trimmed to the display share)"
+                )
+            } else {
+                format!("{name} was fully captured")
+            }
+        };
         let notice = format!(
-            "[Output capture stopped after {} at the {} per-stream cap: the head above is kept, the tail was dropped. No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log`, `tail -n +2001 out.log | head -n 2000` (the read tool rejects whole files over {} even with offset/limit).]",
+            "[Output capture stopped after {} at the {} per-stream cap ({}; {}). No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log`, `tail -n +2001 out.log | head -n 2000` (the read tool rejects whole files over {} even with offset/limit).]",
             truncate::format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
+            stream_note("stdout", stdout.hit_cap, stdout_truncation.truncated),
+            stream_note("stderr", stderr.hit_cap, stderr_truncation.truncated),
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
         );
         if kept.is_empty() {
