@@ -465,4 +465,21 @@ describe('StudioChatComposer cancel button (#787)', () => {
       screen.queryByRole('button', { name: '取消' })
     ).not.toBeInTheDocument()
   })
+
+  it('renders the status slot on the toolbar row, aligned with the buttons (#787)', () => {
+    renderComposer({
+      busy: true,
+      onCancel: vi.fn(),
+      statusSlot: <div aria-label="会话状态条">运行中</div>,
+    })
+    const strip = screen.getByLabelText('会话状态条')
+    const sendButton = screen.getByRole('button', { name: '排队' })
+    // 状态文本与按钮同一工具行（共同父元素，垂直居中由工具行
+    // align-items:center 承担），且为行内最左子项。
+    expect(strip.parentElement).toBe(sendButton.parentElement)
+    expect(
+      strip.compareDocumentPosition(sendButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
 })
