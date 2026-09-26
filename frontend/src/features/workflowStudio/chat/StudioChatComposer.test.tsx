@@ -400,14 +400,7 @@ describe('StudioChatComposer config chips (#695 R4)', () => {
   })
 })
 
-describe('StudioChatComposer status slot & context ring', () => {
-  it('renders the status slot between the textarea and the toolbar', () => {
-    renderComposer({
-      statusSlot: <div aria-label="会话状态条">运行中</div>,
-    })
-    expect(screen.getByLabelText('会话状态条')).toHaveTextContent('运行中')
-  })
-
+describe('StudioChatComposer context ring', () => {
   it('renders the context ring to the left of the model chip', () => {
     renderComposer({
       config: { workspaceId: 'ws1', session: record() },

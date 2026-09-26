@@ -173,6 +173,19 @@ describe('AgentChatPanel', () => {
     expect(screen.getByLabelText('消息输入')).toBeDisabled()
   })
 
+  it('keeps the run status strip (with cancel) outside the composer card (#787)', () => {
+    renderPanel({ busy: true, session: sessionRecord({ status: 'running' }) })
+    const strip = screen.getByLabelText('会话状态条')
+    const input = screen.getByLabelText('消息输入')
+    const card = input.parentElement!
+    // 取消是破坏性动作：状态行独立成行于输入卡片外，文档序在输入区之前。
+    expect(card.contains(strip)).toBe(false)
+    expect(
+      strip.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
+  })
+
   it('queues the message instead of sending directly while busy', async () => {
     const send = vi.fn().mockResolvedValue(true)
     renderPanel({
