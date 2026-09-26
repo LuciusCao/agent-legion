@@ -251,3 +251,22 @@ def test_raw_prefers_object_bytes_when_local_cache_stale(two_workspaces):
     assert response.status_code == 200
     assert response.content == current  # the object bytes, not the local copy
     assert hashlib.sha256(response.content).hexdigest() == entry["content_hash"]
+
+
+def test_raw_percent_encoded_reserved_chars_roundtrip(two_workspaces):
+    """#779 列车 R3 复审（runbook 编码修复的常驻钉）：清单名里的 URL 保留
+    字符（#/?）必须 percent-encode 后拼接（否则客户端按 fragment/query
+    截断）；服务端对编码后的多段名解码后照常匹配 {artifact_name:path}
+    并服务字节。"""
+    c, job_a, _ = two_workspaces
+    _register_object_artifact(c, job_a, "reports/summary#v2?.json", b'{"ok": 1}')
+
+    listing = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
+    assert "reports/summary#v2?.json" in [e["name"] for e in listing["artifacts"]]
+
+    response = c.get(
+        f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/reports/summary%23v2%3F.json/raw"
+    )
+
+    assert response.status_code == 200
+    assert response.content == b'{"ok": 1}'
