@@ -56,7 +56,12 @@ Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在�
   `ttl_hours` 过期时间，支持随时吊销（软吊销，行保留审计）。
 - **权限面**：`POST /runs`（提交）与 `GET /runs` / `GET /runs/{id}` /
   `GET /jobs`（legacy，最近 500 条）/ `GET /jobs/snapshot`（分页 +
-  `run_id` 过滤，只读查询）。跨 workspace 访问与其它 workspace 路由一律
+  `run_id` 过滤，只读查询），外加 #631 外部读取面的三个 GET（
+  `GET /jobs/{job_id}` 状态、`GET /jobs/{job_id}/artifacts` 清单、
+  `GET /jobs/{job_id}/artifacts/{artifact_name}/raw` 下载——提交后轮询
+  与取产物走它们，见
+  [remote-execution-runbook.md](remote-execution-runbook.md) §9）。跨
+  workspace 访问与其它 workspace 路由一律
   404（与不存在同一形态，不可枚举）；管理端点 403；token 不能签发新
   token、不能改 workflow 定义。
 - **审计**：经 API token 提交的 run 在服务端结构化日志里记录 token_id
