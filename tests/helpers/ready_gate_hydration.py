@@ -15,7 +15,13 @@ from server.app.db.connection import connect_database
 from server.app.db.transaction import write_transaction
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import mark_nodes_for_rerun
-from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
+from server.app.workflows.schema import (
+    WorkflowCondition,
+    WorkflowDefinition,
+    WorkflowEdge,
+    WorkflowIntake,
+    WorkflowNode,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 
 A_PAYLOAD = b'{"from": "a"}'
@@ -81,3 +87,139 @@ def pending_b_job(queries: JobQueries, workspace: dict) -> dict:
     )
     queries.update_job_node(job["id"], "a", status="completed")
     return job
+
+
+# ---------------------------------------------------------------------------
+# #779 列车 R4 族的恢复面收窄测试共享定义（test_ready_gate_hydration_scope.py
+# 拆出单元形态族 test_ready_gate_hydration_probe_surface.py 后，单元与
+# 端到端两侧共用）。纯定义构造，不触库不触文件系统。
+# ---------------------------------------------------------------------------
+
+
+def _conditional_branches_definition() -> WorkflowDefinition:
+    """gate 产 decision.json；gate→good / gate→alt 两条条件边；b 独立分支。"""
+    return WorkflowDefinition(
+        key="wfcond",
+        label="Wf Cond",
+        intake=WorkflowIntake(),
+        nodes={
+            "gate": WorkflowNode(
+                key="gate", label="Gate", capability="cap_gate", outputs=["decision.json"]
+            ),
+            "good": WorkflowNode(
+                key="good", label="Good", capability="cap_good", outputs=["good_out.json"]
+            ),
+            "alt": WorkflowNode(
+                key="alt", label="Alt", capability="cap_alt", outputs=["alt_out.json"]
+            ),
+            "b": WorkflowNode(key="b", label="B", capability="cap_b", outputs=["b_out.json"]),
+        },
+        edges=[
+            WorkflowEdge(
+                source="gate",
+                target="good",
+                condition=WorkflowCondition("decision.json", "$.eligible", True),
+            ),
+            WorkflowEdge(
+                source="gate",
+                target="alt",
+                condition=WorkflowCondition("decision.json", "$.eligible", False),
+            ),
+        ],
+    )
+
+
+def _implicit_consumer_definition() -> WorkflowDefinition:
+    """gate→good/alt 条件边；b 经 node.inputs 隐式消费 good 的产物（无显式
+    边）——分支裁决的显式可达集不含 b。"""
+    return WorkflowDefinition(
+        key="wfimpl",
+        label="Wf Impl",
+        intake=WorkflowIntake(),
+        nodes={
+            "gate": WorkflowNode(
+                key="gate", label="Gate", capability="cap_gate", outputs=["decision.json"]
+            ),
+            "good": WorkflowNode(
+                key="good", label="Good", capability="cap_good", outputs=["good_out.json"]
+            ),
+            "alt": WorkflowNode(
+                key="alt", label="Alt", capability="cap_alt", outputs=["alt_out.json"]
+            ),
+            "b": WorkflowNode(
+                key="b",
+                label="B",
+                capability="cap_b",
+                inputs=["good_out.json"],
+                outputs=["b_out.json"],
+            ),
+        },
+        edges=[
+            WorkflowEdge(
+                source="gate",
+                target="good",
+                condition=WorkflowCondition("decision.json", "$.eligible", True),
+            ),
+            WorkflowEdge(
+                source="gate",
+                target="alt",
+                condition=WorkflowCondition("decision.json", "$.eligible", False),
+            ),
+        ],
+    )
+
+
+def _confluence_definition() -> WorkflowDefinition:
+    """gate 产 decision.json；条件边 gate→good、无条件边 gate→j 与
+    good→j（汇合）。j 恒在 selected 侧，条件 verdict 不门控它。"""
+    return WorkflowDefinition(
+        key="wfconf",
+        label="Wf Conf",
+        intake=WorkflowIntake(),
+        nodes={
+            "gate": WorkflowNode(
+                key="gate", label="Gate", capability="cap_gate", outputs=["decision.json"]
+            ),
+            "good": WorkflowNode(
+                key="good", label="Good", capability="cap_good", outputs=["good_out.json"]
+            ),
+            "j": WorkflowNode(key="j", label="J", capability="cap_j", outputs=["j_out.json"]),
+        },
+        edges=[
+            WorkflowEdge(
+                source="gate",
+                target="good",
+                condition=WorkflowCondition("decision.json", "$.eligible", True),
+            ),
+            WorkflowEdge(source="gate", target="j"),
+            WorkflowEdge(source="good", target="j"),
+        ],
+    )
+
+
+def _selected_sibling_definition() -> WorkflowDefinition:
+    """A 是条件边 s→a（a.json 由 s 产）；B 是条件兄弟边 s→b（b.json 由
+    独立节点 p 产——翻转形态要把 B 的生产者置于在途）；b→a→j。B 选中时
+    A 的可达集被 B 的 selected_reachable 覆盖。"""
+    return WorkflowDefinition(
+        key="wfc6",
+        label="Wf C6",
+        intake=WorkflowIntake(),
+        nodes={
+            "s": WorkflowNode(key="s", label="S", capability="cap_s", outputs=["a.json"]),
+            "p": WorkflowNode(key="p", label="P", capability="cap_p", outputs=["b.json"]),
+            "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["a_out.json"]),
+            "b": WorkflowNode(key="b", label="B", capability="cap_b", outputs=["b_out.json"]),
+            "j": WorkflowNode(key="j", label="J", capability="cap_j", outputs=["j_out.json"]),
+        },
+        edges=[
+            WorkflowEdge(
+                source="s", target="a", condition=WorkflowCondition("a.json", "$.ok", True)
+            ),
+            WorkflowEdge(
+                source="s", target="b", condition=WorkflowCondition("b.json", "$.ok", True)
+            ),
+            WorkflowEdge(source="b", target="a"),
+            WorkflowEdge(source="a", target="j"),
+        ],
+    )

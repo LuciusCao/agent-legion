@@ -69,9 +69,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.app.executors.artifact_restore import restore_from_manifest_row
-from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, effective_node_statuses
-from server.app.workflows.workflow_consumption import artifact_consumption_index
+from server.app.workflows.definition import WorkflowDefinition, WorkflowEdge
+from server.app.workflows.workflow_branching import (
+    RUNNABLE_STATUSES,
+    downstream_nodes,
+    effective_node_statuses,
+    evaluate_edge_verdict,
+)
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -80,18 +84,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def live_probe_names(
-    definition: WorkflowDefinition, node_statuses: dict[str, str]
-) -> frozenset[str]:
-    """本轮评估真正会本地探针的产物名（#759 复审 P1）：共享消费索引
-    （``artifact_consumption_index``，唯一枚举处）按当前 node statuses
-    收窄——
+def _edge_reachable(definition: WorkflowDefinition, edge: WorkflowEdge) -> set[str]:
+    """边的显式边可达集（target 自身 + 显式传递下游，与 evaluate_branches
+    的 _reachable_from 裁决传播同一口径）。"""
+    return {edge.target, *downstream_nodes(definition, edge.target)}
 
-    - 节点 ``inputs``：至少一个消费者处于 RUNNABLE_STATUSES
-      （``find_ready_nodes`` 只为可运行节点探 inputs 与入边选择）；
-    - ``edge.condition.artifact``：target 可运行（就绪闸探入边选择）或
-      source 为 completed（``evaluate_branches`` 逐 completed source 裁决，
-      条件文件在场与否决定 not_applicable 标记， verdict 必须稳定）。
+
+def live_probe_names(
+    definition: WorkflowDefinition, node_statuses: dict[str, str], artifact_dir: Path
+) -> frozenset[str]:
+    """本轮评估真正会本地探针的产物名（#759 复审 P1）。两个包含入口，渠道
+    不交错：
+
+    - 普通 input 入口（只看 ``node.inputs``）：至少一个声明节点处于
+      RUNNABLE_STATUSES（``find_ready_nodes`` 只为可运行节点探 inputs 与
+      入边选择）。**不含** ``edge.condition.artifact``——消费索引
+      （``artifact_consumption_index``）把条件边 target 也记作消费者，若
+      从这里合并，「同为条件 target 且经无条件路径恒可达」的汇合节点会
+      绕过裁决差集筛选漏入（#779 列车 R4 复审 P1 跟进③，只增不减的
+      update 无法把它再剔除）；
+    - 条件产物唯一入口（``edge.condition.artifact``）：source 为
+      completed（``evaluate_branches`` 只对 completed source 读条件文件）
+      且裁决差集（该边显式可达集 − 同 source 的 selected 侧可达集）内
+      仍有可运行节点。selected 侧与 ``evaluate_branches`` 同一份实现——
+      共享的 ``evaluate_edge_verdict``（同在 workflow_branching，#779
+      列车 R4
+      复审 P1 跟进④）：无条件边 ∪ 当前可判定且选中的条件兄弟边（含其
+      本地字节评估），两侧不得各自重写这套代数。条件文件在场与否决定
+      not_applicable 标记，verdict 必须稳定；已裁决完毕的终态分支（差
+      集内无可运行节点）的条件产物不再影响任何可运行分支，本地缓存被
+      淘汰、对象丢失时不得进恢复面（#779 列车 R4 复审 P1：恢复失败会把
+      无关 targeted rerun 卡死在 defer）。
 
     终态分支的消费名由此退出恢复/defer 集：已完成并被淘汰缓存的 job 做单
     分支 targeted rerun 时，其他终态分支永久丢失/损坏的对象不再把整个
@@ -100,19 +123,27 @@ def live_probe_names(
     点重置回可运行时其消费名自动回到探针集。调用方（eval_batch）传入的
     是分片有效状态：running 但有 pending shard 的节点已按 ready gate 稍
     后的同一翻转改回 pending（#759 复审 P2），其 inputs 因此在探针集内。
+    同一名字既被 inputs 声明又是条件产物时两入口各判各的——input 渠道
+    有真实探针（可运行声明节点）即入，与 verdict 无关。
     """
     statuses = effective_node_statuses(definition, node_statuses)
     runnable = {key for key, status in statuses.items() if status in RUNNABLE_STATUSES}
-    names = {
-        name
-        for name, consumers in artifact_consumption_index(definition).items()
-        if consumers & runnable
-    }
-    names.update(
-        edge.condition.artifact
-        for edge in definition.edges
-        if edge.condition is not None and statuses.get(edge.source) == "completed"
-    )
+    names = {n for key in runnable if key in definition.nodes for n in definition.nodes[key].inputs}
+    by_source: dict[str, list[WorkflowEdge]] = {}
+    for edge in definition.edges:
+        if statuses.get(edge.source) == "completed":
+            by_source.setdefault(edge.source, []).append(edge)
+    for edges in by_source.values():
+        verdict = evaluate_edge_verdict(definition, edges, statuses, artifact_dir)
+        selected_reach: set[str] = {
+            k for e in edges if e.target in verdict.selected for k in _edge_reachable(definition, e)
+        }
+        names.update(
+            edge.condition.artifact
+            for edge in edges
+            if edge.condition is not None
+            and (_edge_reachable(definition, edge) - selected_reach) & runnable
+        )
     return frozenset(names)
 
 
@@ -164,11 +195,8 @@ def hydrate_job_artifacts(
     """
     if store is None or not store.enabled:
         return frozenset()
-    missing = [
-        name
-        for name in live_probe_names(definition, node_statuses)
-        if not (job_dir / name).is_file()
-    ]
+    probe = live_probe_names(definition, node_statuses, job_dir)
+    missing = [name for name in probe if not (job_dir / name).is_file()]
     if not missing:
         return frozenset()
     generation_before = _current_generation(queries, job_id)
@@ -187,11 +215,7 @@ def hydrate_job_artifacts(
         # discipline as an incomplete restore) so the next poll pass re-reads
         # the manifest once the outage clears; the traceback is logged so the
         # deferral stays visible.
-        logger.warning(
-            "artifact manifest read failed for job %s; deferring evaluation",
-            job_id,
-            exc_info=True,
-        )
+        logger.warning("manifest read failed for job %s; will defer", job_id, exc_info=True)
         return None
     # rows_for_job 按 (uploaded_at, node_key) 升序；dict 留尾 = 同名取决胜
     # 序的最大行，与 lookup() 的「最新」判定同源（#775 对抗复审 P2——并列

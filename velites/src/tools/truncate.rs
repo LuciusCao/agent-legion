@@ -132,13 +132,21 @@ fn split_lines(content: &str) -> Vec<&str> {
 
 /// Truncate from the head, keeping the first lines (file-read semantics).
 pub fn truncate_head(content: &str) -> Truncation {
+    truncate_head_within(content, DEFAULT_MAX_LINES, DEFAULT_MAX_BYTES)
+}
+
+/// [`truncate_head`] with an explicit budget — the bash capture-capped branch
+/// splits the display budget between the two stream heads (#779 train R4
+/// review P2: stdout's kept head must not squeeze the fully captured stderr
+/// out of the display).
+pub fn truncate_head_within(content: &str, max_lines: usize, max_bytes: usize) -> Truncation {
     let total_bytes = content.len();
     let lines = split_lines(content);
     let total_lines = lines.len();
-    if total_lines <= DEFAULT_MAX_LINES && total_bytes <= DEFAULT_MAX_BYTES {
+    if total_lines <= max_lines && total_bytes <= max_bytes {
         return Truncation::untruncated(content, total_lines);
     }
-    if lines[0].len() > DEFAULT_MAX_BYTES {
+    if max_lines == 0 || lines[0].len() > max_bytes {
         return Truncation {
             content: String::new(),
             truncated: true,
@@ -154,17 +162,17 @@ pub fn truncate_head(content: &str) -> Truncation {
     let mut kept: Vec<&str> = Vec::new();
     let mut kept_bytes = 0usize;
     let mut truncated_by = TruncatedBy::Lines;
-    for (index, line) in lines.iter().enumerate().take(DEFAULT_MAX_LINES) {
+    for (index, line) in lines.iter().enumerate().take(max_lines) {
         // +1 for the newline separator between kept lines (same as pi).
         let line_bytes = line.len() + usize::from(index > 0);
-        if kept_bytes + line_bytes > DEFAULT_MAX_BYTES {
+        if kept_bytes + line_bytes > max_bytes {
             truncated_by = TruncatedBy::Bytes;
             break;
         }
         kept.push(line);
         kept_bytes += line_bytes;
     }
-    if kept.len() >= DEFAULT_MAX_LINES && kept_bytes <= DEFAULT_MAX_BYTES {
+    if kept.len() >= max_lines && kept_bytes <= max_bytes {
         truncated_by = TruncatedBy::Lines;
     }
     let content = kept.join("\n");
@@ -184,10 +192,19 @@ pub fn truncate_head(content: &str) -> Truncation {
 /// Truncate from the tail, keeping the last lines (bash-output semantics:
 /// errors and results live at the end).
 pub fn truncate_tail(content: &str) -> Truncation {
+    truncate_tail_within(content, DEFAULT_MAX_LINES, DEFAULT_MAX_BYTES)
+}
+
+/// [`truncate_tail`] with an explicit budget — like [`truncate_head_within`],
+/// the bash capture-capped branch gives each stream head/tail its own share
+/// of the display budget (#779 train R4 review P2: stderr that was captured
+/// in FULL (no hit_cap) but exceeds its reserved share keeps its TAIL — the
+/// final diagnostic lives there, matching the regular bash truncation).
+pub fn truncate_tail_within(content: &str, max_lines: usize, max_bytes: usize) -> Truncation {
     let total_bytes = content.len();
     let lines = split_lines(content);
     let total_lines = lines.len();
-    if total_lines <= DEFAULT_MAX_LINES && total_bytes <= DEFAULT_MAX_BYTES {
+    if total_lines <= max_lines && total_bytes <= max_bytes {
         return Truncation::untruncated(content, total_lines);
     }
     let mut kept: Vec<&str> = Vec::new(); // built back-to-front
@@ -195,15 +212,15 @@ pub fn truncate_tail(content: &str) -> Truncation {
     let mut kept_bytes = 0usize;
     let mut truncated_by = TruncatedBy::Lines;
     let mut last_line_partial = false;
-    for line in lines.iter().rev().take(DEFAULT_MAX_LINES) {
+    for line in lines.iter().rev().take(max_lines) {
         // +1 for the newline separator; the last line of the output has none.
         let line_bytes = line.len() + usize::from(!kept.is_empty());
-        if kept_bytes + line_bytes > DEFAULT_MAX_BYTES {
+        if kept_bytes + line_bytes > max_bytes {
             truncated_by = TruncatedBy::Bytes;
             if kept.is_empty() {
                 // Edge case: the last line alone exceeds the byte limit —
                 // keep the tail of the line (pi's only partial-line case).
-                let tail = tail_within_bytes(line, DEFAULT_MAX_BYTES);
+                let tail = tail_within_bytes(line, max_bytes);
                 kept_bytes = tail.len();
                 partial = Some(tail.to_string());
                 last_line_partial = true;
@@ -213,7 +230,7 @@ pub fn truncate_tail(content: &str) -> Truncation {
         kept.push(line);
         kept_bytes += line_bytes;
     }
-    if kept.len() >= DEFAULT_MAX_LINES && kept_bytes <= DEFAULT_MAX_BYTES {
+    if kept.len() >= max_lines && kept_bytes <= max_bytes {
         truncated_by = TruncatedBy::Lines;
     }
     kept.reverse();

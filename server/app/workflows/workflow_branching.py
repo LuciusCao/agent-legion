@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from server.app.workflows.condition_barrier import branch_gated_keys, condition_producer_in_flight
 from server.app.workflows.conditions import selected_edges
@@ -31,18 +32,49 @@ class BranchEvaluation:
     not_applicable: set[str]
 
 
+class EdgeVerdict(NamedTuple):
+    """一组出边（同一 source）的裁决结果。"""
+
+    selected: frozenset[str]
+    unselected: frozenset[str]  # 可判定但未选中
+    deferred: frozenset[str]  # 条件文件生产者在途（本轮不可判）
+
+
+def evaluate_edge_verdict(
+    definition: WorkflowDefinition,
+    edges: list[WorkflowEdge],
+    node_statuses: dict[str, str],
+    artifact_dir: Path,
+) -> EdgeVerdict:
+    """逐边裁决代数（可判定/选中/推迟）的唯一实现（#779 列车 R4 复审 P1
+    跟进④）：生产者在途的条件边进 deferred（本轮不可判）；可判定边经
+    ``selected_edges`` 按本地字节裁决；无条件边恒 selected。
+
+    共享纪律：``evaluate_branches``（本文件下方）的 not_applicable 差集
+    与 ``live_probe_names``（workflow_worker/input_hydration）的恢复面
+    筛选都从本函数取判定结果——两侧不得各自重写这套代数；本函数的语义
+    变动必须同步检查另一侧。
+    """
+    producers = artifact_producers(definition)
+    decidable: list[WorkflowEdge] = []
+    deferred: set[str] = set()
+    for edge in edges:
+        if condition_producer_in_flight(
+            edge, producers, node_statuses, excluded=branch_gated_keys(definition, edge.target)
+        ):
+            deferred.add(edge.target)
+        else:
+            decidable.append(edge)
+    selected = {edge.target for edge in selected_edges(decidable, artifact_dir)}
+    unselected = {edge.target for edge in decidable} - selected
+    return EdgeVerdict(frozenset(selected), frozenset(unselected), frozenset(deferred))
+
+
 def _reachable_from(definition: WorkflowDefinition, start_keys: set[str]) -> set[str]:
-    children: dict[str, list[str]] = {key: [] for key in definition.nodes}
-    for edge in definition.edges:
-        children[edge.source].append(edge.target)
-    seen: set[str] = set()
-    stack = list(start_keys)
-    while stack:
-        key = stack.pop()
-        if key in seen:
-            continue
-        seen.add(key)
-        stack.extend(children.get(key, []))
+    """显式边传递可达集（含起点本身；``downstream_nodes`` 的多起点形态）。"""
+    seen = set(start_keys)
+    for key in start_keys:
+        seen.update(downstream_nodes(definition, key))
     return seen
 
 
@@ -54,7 +86,6 @@ def evaluate_branches(
     not_applicable: set[str] = set()
     deferred: set[str] = set()  # 在途条件边的 target 可达集（本轮不可标）
     node_statuses = effective_node_statuses(definition, node_statuses)
-    producers = artifact_producers(definition)
     outgoing: dict[str, list[WorkflowEdge]] = {key: [] for key in definition.nodes}
     for edge in definition.edges:
         outgoing[edge.source].append(edge)
@@ -63,29 +94,17 @@ def evaluate_branches(
             continue
         if not any(edge.condition is not None for edge in edges):
             continue
-        # 逐边推迟（#759 ③ 终审 P1）：生产者在途的边进 deferred（其 target
-        # 可达集本轮不可标），可判定的边照常裁决——整源推迟会把可判定的
-        # 兄弟边挟持住：兄弟 target 不钉死 → 其分支内的生产者永远跑不到
-        # → 在途永不解除（永久静默挂起，基线行为是可终止）。
-        decidable: list[WorkflowEdge] = []
-        for edge in edges:
-            if condition_producer_in_flight(
-                edge,
-                producers,
-                node_statuses,
-                excluded=branch_gated_keys(definition, edge.target),
-            ):
-                deferred |= {edge.target} | set(dependency_downstream(definition, edge.target))
-            else:
-                decidable.append(edge)
-        if not decidable:
-            continue
-        selected = selected_edges(decidable, artifact_dir)
-        selected_targets = {edge.target for edge in selected}
-        unselected_targets = {edge.target for edge in decidable} - selected_targets
-        selected_reachable = _reachable_from(definition, selected_targets)
-        unselected_reachable = _reachable_from(definition, unselected_targets)
+        # 逐边裁决代数（可判定/选中/推迟）走共享实现 evaluate_edge_verdict
+        # （本文件上方，#779 列车 R4 复审 P1 跟进④）——hydration 的
+        # 恢复面筛选用同一函数，两侧不各自维护集合代数。逐边推迟语义
+        # （#759 ③ 终审 P1）不变：生产者在途的边进 deferred（其 target
+        # 可达集本轮不可标），可判定的边照常裁决。
+        verdict = evaluate_edge_verdict(definition, edges, node_statuses, artifact_dir)
+        selected_reachable = _reachable_from(definition, set(verdict.selected))
+        unselected_reachable = _reachable_from(definition, set(verdict.unselected))
         not_applicable.update(unselected_reachable - selected_reachable)
+        for target in verdict.deferred:
+            deferred |= {target} | set(dependency_downstream(definition, target))
     return BranchEvaluation(not_applicable=not_applicable - deferred)
 
 
