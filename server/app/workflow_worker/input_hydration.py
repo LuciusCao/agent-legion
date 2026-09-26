@@ -70,11 +70,12 @@ from typing import TYPE_CHECKING
 
 from server.app.executors.artifact_restore import restore_from_manifest_row
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, effective_node_statuses
-from server.app.workflows.workflow_consumption import (
-    artifact_consumption_index,
-    dependency_downstream,
+from server.app.workflows.workflow_branching import (
+    RUNNABLE_STATUSES,
+    downstream_nodes,
+    effective_node_statuses,
 )
+from server.app.workflows.workflow_consumption import artifact_consumption_index
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -110,19 +111,17 @@ def live_probe_names(
     """
     statuses = effective_node_statuses(definition, node_statuses)
     runnable = {key for key, status in statuses.items() if status in RUNNABLE_STATUSES}
-    names = {
-        name
-        for name, consumers in artifact_consumption_index(definition).items()
-        if consumers & runnable
-    }
+    names = {n for n, c in artifact_consumption_index(definition).items() if c & runnable}
     names.update(
         edge.condition.artifact
         for edge in definition.edges
         if edge.condition is not None
         and statuses.get(edge.source) == "completed"
-        # 合并下游（显式 ∪ 隐式消费边，与上面消费索引同一张图）里仍有可
-        # 运行节点时，该条件文件的 verdict 仍在驱动它们。
-        and ({edge.target} | set(dependency_downstream(definition, edge.target))) & runnable
+        # 显式边可达集（与 evaluate_branches 的 _reachable_from 裁决传播同一
+        # 口径）里仍有可运行节点时，该条件文件的 verdict 仍在驱动它们；
+        # 只有隐式消费边可达的可运行节点不受条件 verdict 影响（#779 列车
+        # R4 复审 P1 跟进），不算数。
+        and ({edge.target} | set(downstream_nodes(definition, edge.target))) & runnable
     )
     return frozenset(names)
 

@@ -368,3 +368,139 @@ def test_decided_branch_lost_condition_object_does_not_block_targeted_rerun(
 
     executor.block_event.set()
     worker.stop()
+
+
+# ---------------------------------------------------------------------------
+# #779 列车 R4 复审 P1 跟进：恢复面的可达口径与分支裁决一致（显式边）
+# ---------------------------------------------------------------------------
+
+
+def _implicit_consumer_definition() -> WorkflowDefinition:
+    """gate→good/alt 条件边；b 经 node.inputs 隐式消费 good 的产物（无显式
+    边）——分支裁决的显式可达集不含 b。"""
+    from server.app.workflows.schema import WorkflowCondition, WorkflowEdge
+
+    return WorkflowDefinition(
+        key="wfimpl",
+        label="Wf Impl",
+        intake=WorkflowIntake(),
+        nodes={
+            "gate": WorkflowNode(
+                key="gate", label="Gate", capability="cap_gate", outputs=["decision.json"]
+            ),
+            "good": WorkflowNode(
+                key="good", label="Good", capability="cap_good", outputs=["good_out.json"]
+            ),
+            "alt": WorkflowNode(
+                key="alt", label="Alt", capability="cap_alt", outputs=["alt_out.json"]
+            ),
+            "b": WorkflowNode(
+                key="b",
+                label="B",
+                capability="cap_b",
+                inputs=["good_out.json"],
+                outputs=["b_out.json"],
+            ),
+        },
+        edges=[
+            WorkflowEdge(
+                source="gate",
+                target="good",
+                condition=WorkflowCondition("decision.json", "$.eligible", True),
+            ),
+            WorkflowEdge(
+                source="gate",
+                target="alt",
+                condition=WorkflowCondition("decision.json", "$.eligible", False),
+            ),
+        ],
+    )
+
+
+def test_condition_artifact_excluded_when_only_implicit_consumer_runnable() -> None:
+    """#779 R4 P1 跟进：条件 verdict 的传播口径是 evaluate_branches 的显式
+    边可达集（_reachable_from）。target 已终态、只有隐式消费边（node.
+    inputs）可达的节点可运行时，条件 verdict 根本不影响该隐式消费者——
+    合并闭包（显式 ∪ 隐式）会把它错算成「verdict 仍在驱动」，让已淘汰且
+    对象丢失的条件文件每轮恢复失败、把无关 rerun 卡死在 defer。"""
+    from server.app.workflow_worker.input_hydration import live_probe_names
+
+    definition = _implicit_consumer_definition()
+    statuses = {"gate": "completed", "good": "completed", "alt": "not_applicable", "b": "pending"}
+
+    # b 的隐式 input 仍在恢复面（b 可运行），但已裁决分支的条件产物退出。
+    names = live_probe_names(definition, statuses)
+    assert "good_out.json" in names
+    assert "decision.json" not in names
+
+
+def test_implicit_consumer_rerun_not_blocked_by_lost_condition_object(tmp_path: Path) -> None:
+    """端到端：completed 的 good 的产物被无显式边的 pending b 隐式消费，
+    b 被 targeted rerun 且条件文件对象永久丢失——hydration 不得把
+    decision.json 放进恢复面，b 照常 claim。"""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "wfimpl", default_workflow_key="wfimpl", workspace_id="wfimpl"
+    )
+    job = queries.create_job(
+        workflow_key="wfimpl",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["gate", "good", "alt", "b"],
+        workspace_id=workspace["id"],
+    )
+    queries.update_job_node(job["id"], "gate", status="completed")
+    queries.update_job_node(job["id"], "good", status="completed")
+    queries.update_job_node(job["id"], "alt", status="not_applicable")
+    queries.update_job_node(job["id"], "b", status="completed")
+    queries.update_job_status(job["id"], "completed")
+    # 条件产物清单行在、本地被淘汰、对象永久丢失（FakeObjectStorage 刻意
+    # 为空）；b 的隐式 input（good_out.json）由已完成的 good 产出、本地
+    # 仍在（生产者终态，文件未淘汰），不就绪不能赖它。
+    payload = b'{"eligible": true}'
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'gate', 'decision.json', %s, %s, %s)
+            """,
+            (
+                job["id"],
+                f"jobs/{workspace['id']}/{job['id']}/decision.json",
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
+            ),
+        )
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        mark_nodes_for_rerun(conn, job["id"], ["b"], {"b": []})
+
+    # b 的隐式 input 在本地 job_dir（已完成生产者的产出，未被淘汰）。
+    from server.app.jobs.storage_layout import job_storage_dir
+
+    job_dir = job_storage_dir(tmp_path / "jobs", workspace["id"], job["id"])
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "good_out.json").write_text('{"from": "good"}', encoding="utf-8")
+
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfimpl", "b")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path,
+        TEST_DATABASE_URL,
+        executor,
+        [_implicit_consumer_definition()],
+        artifact_object_store=store,
+    )
+
+    worker._poll()
+
+    # b 越过评估直接被 claim；已裁决分支原样。
+    assert queries.get_job_node(job["id"], "b")["status"] == "running"
+    assert worker.leases.active_counts("code").get("global", 0) == 1
+    assert queries.get_job_node(job["id"], "good")["status"] == "completed"
+
+    executor.block_event.set()
+    worker.stop()
