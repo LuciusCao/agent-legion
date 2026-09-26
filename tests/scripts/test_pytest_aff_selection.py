@@ -17,6 +17,7 @@ import pytest
 from scripts.pytest_aff_selection import (
     build_index_from_coverage,
     select_affected_tests,
+    unmapped_source_files,
 )
 
 _REPO_ROOT = "/repo"
@@ -181,3 +182,80 @@ def test_select_affected_tests_sorted_and_deduplicated(tmp_path):
     )
 
     assert selected == ["tests/test_x.py::test_1", "tests/test_x.py::test_2"]
+
+
+def test_select_affected_tests_skips_non_test_files_under_tests(tmp_path):
+    """tests/ 下的非测试文件（yaml 注册表、helper、conftest）不产出 nodeid。
+
+    直通伪 nodeid 会让 pytest 在零选择时 exit 5（no tests ran）——
+    registry-only 改动曾因此挂掉 aff 档 backend lane。
+    """
+    mapping = {"server/app/settings.py": ["tests/test_settings.py::test_a"]}
+    registry = tmp_path / "tests" / "flaky_registry.yaml"
+    registry.parent.mkdir(parents=True)
+    registry.write_text("entries: []\n", encoding="utf-8")
+    helper = tmp_path / "tests" / "helpers" / "seed.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("def seed():\n    pass\n", encoding="utf-8")
+
+    selected = select_affected_tests(
+        ["tests/flaky_registry.yaml", "tests/helpers/seed.py"], mapping, repo_root=tmp_path
+    )
+
+    assert selected == []
+
+
+def test_unmapped_source_files_flags_test_helpers_for_fallback(tmp_path):
+    """codex 复审 P2（PR #792）：tests/ 下的 Python 辅助文件触发全量回退。
+
+    改动 = tests/helpers/x.py + 可映射源码时，helper 的消费面不在索引里
+    （--cov 不覆盖 tests/ 树）——静默丢弃会让选择结果只剩源码映射的子集，
+    其消费者可能完全不在其中（aff 内环误报通过）。辅助文件必须计入
+    unmapped → exit 4 → 全量 unit 档回退；test_*.py 由选择器处理、
+    YAML/JSON 等确定不影响测试执行的文件静默忽略。
+    """
+    mapping = {"server/app/settings.py": ["tests/test_settings.py::test_a"]}
+    helper = tmp_path / "tests" / "helpers" / "seed.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("def seed():\n    pass\n", encoding="utf-8")
+    conftest = tmp_path / "tests" / "conftest.py"
+    conftest.write_text("", encoding="utf-8")
+    registry = tmp_path / "tests" / "flaky_registry.yaml"
+    registry.write_text("entries: []\n", encoding="utf-8")
+
+    unmapped = unmapped_source_files(
+        [
+            "tests/helpers/seed.py",
+            "tests/conftest.py",
+            "tests/flaky_registry.yaml",
+            "server/app/settings.py",
+        ],
+        mapping,
+        repo_root=tmp_path,
+    )
+
+    # helper/conftest 进 unmapped（触发回退）；yaml 与已映射源码不进。
+    assert unmapped == ["tests/conftest.py", "tests/helpers/seed.py"]
+
+
+def test_unmapped_source_files_flags_deleted_test_helpers(tmp_path):
+    """codex 复审 P2（PR #792 跟进）：已删除的 helper 同样触发全量回退。
+
+    删除 tests/ 下的共享 helper/conftest 时，is_file() 为 False——若不计入
+    盲区，「删除 helper + 可映射源码改动」只跑源码映射的子集，helper 删除
+    造成的 import/fixture 回归（消费者收集即炸）会被 aff 误报通过。删除恰
+    恰是最危险形态，无论文件是否还在盘上都必须回退全量。
+    """
+    mapping = {"server/app/settings.py": ["tests/test_settings.py::test_a"]}
+    # 盘上只有可映射源码的测试文件；helper 已删除（不存在）。
+    test_file = tmp_path / "tests" / "test_settings.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_a():\n    pass\n", encoding="utf-8")
+
+    unmapped = unmapped_source_files(
+        ["tests/helpers/seed.py", "server/app/settings.py"],
+        mapping,
+        repo_root=tmp_path,
+    )
+
+    assert unmapped == ["tests/helpers/seed.py"]

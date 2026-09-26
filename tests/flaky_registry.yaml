@@ -230,3 +230,33 @@ entries:
     local passes (0.85-1.06s each).
   observed: PR #702 backend-coverage lane (run 35468147331), 2026-09-19, rerun passed and the lane count was green.
   deadline: 2026-10-19
+- id: FLAKY-020
+  nodeid: tests/services/test_job_workflow_upgrade_inherit_cleanup.py::test_inherit_upgrade_rmw_name_of_covered_consumer_is_retired
+  owner: test-infra
+  reason: >-
+    Reran once in PR #790 CI (backend-postgres-a shard, run 36245071412,
+    2026-09-26) — the retry passed and the lane's only failure was the
+    rerun-governance step. The rerun report records the first attempt's
+    failure in the SETUP phase: the per-test schema isolation TRUNCATE
+    (tests/conftest.py _reset_schema_data, lock_timeout 30s) hit
+    "canceling statement due to lock timeout" in the postgres container log
+    (13:27:04 UTC) — a leaked open transaction from a PRECEDING test on the
+    same xdist worker schema held a table lock (the documented shape in
+    conftest: e.g. a TestClient anyio-threadpool request leaving `update
+    agent_workers` open on a pooled connection). The victim slot is
+    arbitrary: the same day produced a different unregistered victim
+    (tests/workers/test_pure_remote_mode.py, runs 36236296814/36235488884).
+    This test itself is timing-free and leak-free (no threads, no polling,
+    all DB access scoped in context managers; the PR diff's upgrade
+    rmw_retire plane cannot hold a lock past its own commit). Local: solo
+    pass, file-level 3/3, -n 4 pass, 110-test upgrade-family sweep pass.
+    Registered for rerun absorption; fix direction (deadline item): make the
+    first-attempt failure body (the conftest's blocking-session attribution
+    from _fail_on_leaked_locks) survive into the rerun report so the leaker
+    test is identifiable, and/or sweep tests/services for TestClient request
+    handlers that can outlive their test with an open transaction.
+  observed: >-
+    PR #790 backend-postgres-a lane (run 36245071412), 2026-09-26, rerun
+    passed and the shard was green; backend-coverage failed only on the
+    registry check.
+  deadline: 2026-10-26
