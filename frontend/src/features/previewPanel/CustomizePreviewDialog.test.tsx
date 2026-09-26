@@ -265,6 +265,21 @@ describe('CustomizePreviewDialog', () => {
     expect(String(narrow.maxHeight)).toContain('--app-bar-height')
   })
 
+  it('codex P2（z-index）：面板让位全局对话层——低于用量面板/Modal，高于 AppBar', () => {
+    // 分层约定（仓库实际值）：页面内容 < AppBar 100 < 本面板 < 全局对话层
+    // （TokenUsageDialog backdrop 1190 / panel 1200、MUI Modal 1300）——
+    // 面板是页面级非模态 chrome，任何全局对话框打开时都应压在它之上
+    // （否则用量面板右侧会被面板盖住、关不掉，codex comment 4111446577）。
+    const resolve = (collapsed: boolean) => {
+      const sx = overlaySurfaceSx(collapsed)
+      if (typeof sx !== 'function') throw new Error('sx 应是 theme 函数')
+      return sx(theme) as Record<string, unknown>
+    }
+    for (const collapsed of [false, true]) {
+      expect(resolve(collapsed).zIndex).toBe(1100)
+    }
+  })
+
   it('无可用 agent 时提示配置', async () => {
     renderDialog(null)
     expect(

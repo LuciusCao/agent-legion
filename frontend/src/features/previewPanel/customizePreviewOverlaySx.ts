@@ -11,8 +11,11 @@
  *   同样留出 AppBar，不上探遮挡；
  * - 折叠：Paper 缩成右下角小条（内容换成展开按钮 + display:none 隐藏的
  *   聊天子树，组件不卸载、会话保持存活，P2-A）。
- * z-index 取 modal 档：覆盖层要在页面内容（含 TokenUsage 浮动钮）之上；
- * 与 AppBar（z-100）不竞争——定位已保证二者不重叠。
+ * z-index 分层（仓库实际值，codex 复审 P2 comment 4111446577）：页面内容
+ * < AppBar 100 < 本面板 1100 < 全局对话层（TokenUsageDialog backdrop 1190 /
+ * panel 1200、MUI Modal 1300）——面板是页面级非模态 chrome，任何全局对话框
+ * 打开都必须压在它之上（否则用量面板右侧被盖住、关闭按钮点不到）；同时高于
+ * AppBar 与页面内容，保持「盖在 job progress 列上」的本意。
  */
 import type { SxProps, Theme } from '@mui/material/styles'
 
@@ -24,7 +27,7 @@ export function overlaySurfaceSx(collapsed: boolean): SxProps<Theme> {
           position: 'fixed',
           right: 16,
           bottom: 16,
-          zIndex: theme.zIndex.modal,
+          zIndex: 1100,
           borderRadius: 999,
         }
       : {
@@ -32,7 +35,7 @@ export function overlaySurfaceSx(collapsed: boolean): SxProps<Theme> {
           top: 'var(--app-bar-height, 56px)',
           right: 0,
           bottom: 0,
-          zIndex: theme.zIndex.modal,
+          zIndex: 1100,
           width: 'calc(30vw - 20px)',
           minWidth: 340,
           borderRadius: 0,
