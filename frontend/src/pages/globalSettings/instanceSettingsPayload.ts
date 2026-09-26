@@ -65,6 +65,7 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
     execution_retention_days: parseNumber(values, 'execution_retention_days'),
     workflows: {
       max_items_per_run: parseNumber(values, 'workflows.max_items_per_run'),
+      node_code_max_bytes: parseNumber(values, 'workflows.node_code_max_bytes'),
     },
     agent_workers: {
       result_commit_batching: Boolean(

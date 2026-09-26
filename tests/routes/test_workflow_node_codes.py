@@ -315,3 +315,30 @@ def test_configured_byte_budget_flows_to_validation_and_read(
     rejected = workspace_with_revision.put(BASE, json={"code": between})
     assert rejected.status_code == 400
     assert "65536" in rejected.json()["detail"]
+
+
+def test_instance_settings_byte_budget_reaches_node_code_api(
+    workspace_with_revision, job_db
+) -> None:
+    """#786：admin 实例设置的覆盖值经启动装配（apply_instance_settings，重启
+    生效）进入 settings 后，节点代码读路径（编辑器展示的 max_code_bytes）
+    与 PUT 校验都跟随实例设置而非代码默认。"""
+    from server.app.services.instance_settings import apply_instance_settings
+    from server.app.services.instance_settings_store import InstanceSettingsStore
+
+    InstanceSettingsStore(job_db.dsn_identity).put(
+        {"workflows": {"node_code_max_bytes": 96 * 1024}}
+    )
+    app_settings = workspace_with_revision.app.state.settings
+    original_runtime = app_settings.executor_runtime
+    try:
+        apply_instance_settings(app_settings, job_db.dsn_identity)
+        body = workspace_with_revision.get(BASE).json()
+        assert body["max_code_bytes"] == 96 * 1024
+        # 校验路径同一来源：64KB 与 96KB 之间的草稿在覆盖值下放行。
+        between = CUSTOM_V1 + "#" * (80 * 1024)
+        assert workspace_with_revision.put(BASE, json={"code": between}).status_code == 200
+    finally:
+        # The shared session app's settings must not leak the override into
+        # other tests.
+        app_settings.executor_runtime = original_runtime

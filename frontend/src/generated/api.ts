@@ -4543,6 +4543,8 @@ export interface components {
     InstanceWorkflowsSettings: {
       /** Max Items Per Run */
       max_items_per_run: number
+      /** Node Code Max Bytes */
+      node_code_max_bytes: number
     }
     /** JobBatchRequest */
     JobBatchRequest: {

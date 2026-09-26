@@ -42,10 +42,11 @@ SEED_SCHEMA_VERSION = 1
 
 # Custom node code single-file limit (EXEC-CODE-002). The seed tool mirrors
 # the platform default (imported, so the two can never drift). #628 made the
-# platform ceiling instance-configurable (AGENT_LEGION_NODE_CODE_MAX_BYTES,
-# default 64KB): an instance that raised it must pass its elevated budget
-# through (``--node-code-max-bytes`` on export/import), otherwise code the
-# platform already accepted fails seed validation here.
+# platform ceiling instance-configurable (default 64KB); #786 moved the knob
+# into the admin instance settings (env AGENT_LEGION_NODE_CODE_MAX_BYTES
+# remains the default source). An instance that raised it must pass its
+# elevated budget through (``--node-code-max-bytes`` on export/import),
+# otherwise code the platform already accepted fails seed validation here.
 
 # Import prefixes that custom node code must never use: platform internals
 # are not importable inside the sandbox (EXEC-CODE-003). Callers may extend
@@ -116,9 +117,10 @@ def code_violations(
     ``run``, forbidden imports (same contract as the platform's
     ``validate_node_code`` plus the sandbox import policy).
 
-    ``max_code_bytes`` (#628): defaults to the platform 64KB; an instance
-    that raised AGENT_LEGION_NODE_CODE_MAX_BYTES passes its elevated budget
-    through so seed validation matches what the platform accepts."""
+    ``max_code_bytes`` (#628/#786): defaults to the platform 64KB; an instance
+    that raised its budget (admin instance settings, or the
+    AGENT_LEGION_NODE_CODE_MAX_BYTES env default source) passes the elevated
+    value through so seed validation matches what the platform accepts."""
     problems: list[str] = []
     size = len(code.encode("utf-8"))
     if size > max_code_bytes:

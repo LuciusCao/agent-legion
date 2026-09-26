@@ -393,15 +393,15 @@ def main() -> int:
     )
     parser.add_argument("--change-note", default=DEFAULT_CHANGE_NOTE)
     parser.add_argument("--output", type=Path, default=Path("seed.json"))
-    # #628: the platform ceiling is instance-configurable; an instance that
-    # raised it (AGENT_LEGION_NODE_CODE_MAX_BYTES) must raise it here too or
-    # the exported seed fails its own validation.
+    # #628/#786: the platform ceiling is instance-configurable (admin instance
+    # settings, env as the default source); an instance that raised it must
+    # raise it here too or the exported seed fails its own validation.
     parser.add_argument(
         "--node-code-max-bytes",
         type=int,
         default=DEFAULT_MAX_CODE_BYTES,
         help="byte budget for one node code version; must match the source "
-        f"instance's AGENT_LEGION_NODE_CODE_MAX_BYTES (default: {DEFAULT_MAX_CODE_BYTES})",
+        f"instance's node_code_max_bytes (default: {DEFAULT_MAX_CODE_BYTES})",
     )
     args = parser.parse_args()
 

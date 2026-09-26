@@ -55,10 +55,10 @@ class WorkflowsRuntimeConfig(BaseModel):
     # 64KB hardcode rejects legitimate "heavy" nodes (self-contained report
     # renderers), so the ceiling opens up as an instance-level knob. Default
     # unchanged (64KB); values below 1KB are rejected — the SDK import plus
-    # a real ``run`` body no longer fits meaningfully. Env-configurable via
-    # AGENT_LEGION_NODE_CODE_MAX_BYTES (env-only; NOT instance-settings
-    # managed — raising it is a deliberate operator decision, not a
-    # runtime-tuning surface). Takes effect on restart.
+    # a real ``run`` body no longer fits meaningfully. #786 made it
+    # instance-settings managed (admin 全局设置); AGENT_LEGION_NODE_CODE_MAX_BYTES
+    # remains as the default source when the stored document carries no value
+    # (resolution: instance setting > env > 64KB). Takes effect on restart.
     node_code_max_bytes: int = Field(default=64 * 1024, ge=1024)
 
 

@@ -26,6 +26,7 @@ export function toFormValues(doc: InstanceSettingsResponse): FormValues {
     materials_ttl_days: String(doc.materials_ttl_days),
     execution_retention_days: String(doc.execution_retention_days),
     'workflows.max_items_per_run': String(doc.workflows.max_items_per_run),
+    'workflows.node_code_max_bytes': String(doc.workflows.node_code_max_bytes),
     'agent_workers.max_archive_bytes': String(
       doc.agent_workers.max_archive_bytes
     ),
