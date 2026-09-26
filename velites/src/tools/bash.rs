@@ -292,24 +292,23 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
             truncate::DEFAULT_MAX_LINES - stderr_truncation.output_lines,
             truncate::DEFAULT_MAX_BYTES - stderr_truncation.output_bytes,
         );
-        let mut kept = stdout_truncation.content;
-        if !stderr_text.is_empty() {
-            // 采集到 stderr 就保留 [stderr] 分节标记（份额内不可展示时
-            // 内容为空，与修复前合并文本截断后的形状一致）。
-            if !kept.is_empty() {
-                kept.push('\n');
-            }
-            kept.push_str("[stderr]\n");
-            kept.push_str(&stderr_truncation.content);
-        }
         // #779 列车 R4 复审 P2 跟进：提示按各流实际截断方向分别说明——统一
         // 声称「head above is kept」会在未触顶流保尾展示时与内容矛盾（模型
         // 会误判所见日志的位置）。触顶流：保头（尾部采集侧已丢）；完整采集
         // 但超份额的流：保尾（头部按份额剪掉）；完整且未超份额：完整展示。
-        let stream_note = |name: &str, hit_cap: bool, display_trimmed: bool| {
-            if hit_cap {
+        // 再跟进：提示依据该流实际保留的正文生成——触顶流首行即超份额时
+        // truncate_head_within 返回空内容，[stderr] 分节标记仍会让 kept
+        // 非空（绕过 notice-only 分支），不得声称 head 已保留——明示什么
+        // 都没展示 + 份额上限数值（与首行超限 notice-only 分支同语义）。
+        let stream_note = |name: &str, hit_cap: bool, truncation: &truncate::Truncation| {
+            if hit_cap && truncation.first_line_exceeds_limit {
+                format!(
+                    "{name} hit the cap, and its first line alone exceeds the {} display share, so nothing of it is shown; the tail was dropped at capture",
+                    truncate::format_size(truncate::DEFAULT_MAX_BYTES / 2),
+                )
+            } else if hit_cap {
                 format!("{name} hit the cap: the head is kept, the tail was dropped")
-            } else if display_trimmed {
+            } else if truncation.truncated {
                 format!(
                     "{name} was fully captured; shown tail-first (its head is trimmed to the display share)"
                 )
@@ -321,10 +320,20 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
             "[Output capture stopped after {} at the {} per-stream cap ({}; {}). No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log`, `tail -n +2001 out.log | head -n 2000` (the read tool rejects whole files over {} even with offset/limit).]",
             truncate::format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
-            stream_note("stdout", stdout.hit_cap, stdout_truncation.truncated),
-            stream_note("stderr", stderr.hit_cap, stderr_truncation.truncated),
+            stream_note("stdout", stdout.hit_cap, &stdout_truncation),
+            stream_note("stderr", stderr.hit_cap, &stderr_truncation),
             truncate::MAX_CAPTURE_BYTES_DISPLAY,
         );
+        let mut kept = stdout_truncation.content;
+        if !stderr_text.is_empty() {
+            // 采集到 stderr 就保留 [stderr] 分节标记（份额内不可展示时
+            // 内容为空，与修复前合并文本截断后的形状一致）。
+            if !kept.is_empty() {
+                kept.push('\n');
+            }
+            kept.push_str("[stderr]\n");
+            kept.push_str(&stderr_truncation.content);
+        }
         if kept.is_empty() {
             // 首行就超过展示上限（如单个超长行）：无内容可展示，通知
             // 独立成文，不加前导空行——且不说「head above is kept」，

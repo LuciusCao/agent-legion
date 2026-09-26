@@ -125,14 +125,28 @@ async fn bash_stderr_over_capture_cap_is_counted_and_flagged() {
         text.contains("done"),
         "small stdout survives intact: {text}"
     );
-    // The stderr head was kept (display-bounded) and the cap notice fired.
+    // The [stderr] marker survives, but the single 5 MiB line exceeds the
+    // 25KB per-stream display share: NO stderr bytes are shown — the notice
+    // must say so instead of claiming a kept head (#779 列车 R4 P2 跟进：
+    // 标记让 kept 非空，绕过 notice-only 分支，提示须按实际保留的正文
+    // 生成，与首行超限 notice-only 分支同语义）。
     assert!(
         text.contains("[stderr]"),
-        "stderr head must be kept: {text}"
+        "stderr marker must survive: {text}"
     );
     assert!(
         text.contains("[Output capture stopped after 5.0MB at the 4MB per-stream cap"),
         "missing cap notice: {text}"
+    );
+    assert!(
+        text.contains(
+            "stderr hit the cap, and its first line alone exceeds the 25.0KB display share, so nothing of it is shown"
+        ),
+        "notice must say no stderr bytes are shown: {text}"
+    );
+    assert!(
+        !text.contains("stderr hit the cap: the head is kept"),
+        "notice must not claim a kept head when nothing is shown: {text}"
     );
     // #469 semantics survive the cap: the first byte (stdout "out\n")
     // fired long before any cap, so the phase is still measured.
@@ -346,7 +360,9 @@ async fn bash_capped_stderr_keeps_uncapped_stdout_tail() {
         "notice must name stdout's tail-first display: {text}"
     );
     assert!(
-        text.contains("stderr hit the cap: the head is kept, the tail was dropped"),
-        "notice must name stderr's capped direction: {text}"
+        text.contains(
+            "stderr hit the cap, and its first line alone exceeds the 25.0KB display share"
+        ),
+        "notice must name stderr's nothing-shown state: {text}"
     );
 }
