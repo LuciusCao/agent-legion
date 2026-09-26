@@ -69,7 +69,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.app.executors.artifact_restore import restore_from_manifest_row
-from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.definition import WorkflowDefinition, WorkflowEdge
 from server.app.workflows.workflow_branching import (
     RUNNABLE_STATUSES,
     downstream_nodes,
@@ -82,6 +82,12 @@ if TYPE_CHECKING:
     from server.app.services.job_artifact_objects import JobArtifactObjectStore
 
 logger = logging.getLogger(__name__)
+
+
+def _edge_reachable(definition: WorkflowDefinition, edge: WorkflowEdge) -> set[str]:
+    """边的显式边可达集（target 自身 + 显式传递下游，与 evaluate_branches
+    的 _reachable_from 裁决传播同一口径）。"""
+    return {edge.target, *downstream_nodes(definition, edge.target)}
 
 
 def live_probe_names(
@@ -112,16 +118,24 @@ def live_probe_names(
     statuses = effective_node_statuses(definition, node_statuses)
     runnable = {key for key, status in statuses.items() if status in RUNNABLE_STATUSES}
     names = {n for n, c in artifact_consumption_index(definition).items() if c & runnable}
+    # 无条件兄弟边的可达集恒在 selected 侧（evaluate_branches 的裁决差集是
+    # unselected_reachable - selected_reachable）：条件边 verdict 实际门控
+    # 的只有它可达、而无条件路径到不了的节点（#779 列车 R4 复审 P1 跟进：
+    # 汇合节点经无条件边恒可达时，条件产物丢失不得阻塞它的 rerun）。
+    unconditional_reach: dict[str, set[str]] = {}
+    condition_edges: list[tuple[str, str, set[str]]] = []
+    for edge in definition.edges:
+        if statuses.get(edge.source) != "completed":
+            continue
+        reach = _edge_reachable(definition, edge)
+        if edge.condition is None:
+            unconditional_reach.setdefault(edge.source, set()).update(reach)
+        else:
+            condition_edges.append((edge.source, edge.condition.artifact, reach))
     names.update(
-        edge.condition.artifact
-        for edge in definition.edges
-        if edge.condition is not None
-        and statuses.get(edge.source) == "completed"
-        # 显式边可达集（与 evaluate_branches 的 _reachable_from 裁决传播同一
-        # 口径）里仍有可运行节点时，该条件文件的 verdict 仍在驱动它们；
-        # 只有隐式消费边可达的可运行节点不受条件 verdict 影响（#779 列车
-        # R4 复审 P1 跟进），不算数。
-        and ({edge.target} | set(downstream_nodes(definition, edge.target))) & runnable
+        artifact
+        for source, artifact, reach in condition_edges
+        if (reach - unconditional_reach.get(source, set())) & runnable
     )
     return frozenset(names)
 
@@ -174,11 +188,8 @@ def hydrate_job_artifacts(
     """
     if store is None or not store.enabled:
         return frozenset()
-    missing = [
-        name
-        for name in live_probe_names(definition, node_statuses)
-        if not (job_dir / name).is_file()
-    ]
+    probe = live_probe_names(definition, node_statuses)
+    missing = [name for name in probe if not (job_dir / name).is_file()]
     if not missing:
         return frozenset()
     generation_before = _current_generation(queries, job_id)
@@ -197,11 +208,7 @@ def hydrate_job_artifacts(
         # discipline as an incomplete restore) so the next poll pass re-reads
         # the manifest once the outage clears; the traceback is logged so the
         # deferral stays visible.
-        logger.warning(
-            "artifact manifest read failed for job %s; deferring evaluation",
-            job_id,
-            exc_info=True,
-        )
+        logger.warning("manifest read failed for job %s; will defer", job_id, exc_info=True)
         return None
     # rows_for_job 按 (uploaded_at, node_key) 升序；dict 留尾 = 同名取决胜
     # 序的最大行，与 lookup() 的「最新」判定同源（#775 对抗复审 P2——并列
