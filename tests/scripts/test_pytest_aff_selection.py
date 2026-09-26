@@ -181,3 +181,24 @@ def test_select_affected_tests_sorted_and_deduplicated(tmp_path):
     )
 
     assert selected == ["tests/test_x.py::test_1", "tests/test_x.py::test_2"]
+
+
+def test_select_affected_tests_skips_non_test_files_under_tests(tmp_path):
+    """tests/ 下的非测试文件（yaml 注册表、helper、conftest）不产出 nodeid。
+
+    直通伪 nodeid 会让 pytest 在零选择时 exit 5（no tests ran）——
+    registry-only 改动曾因此挂掉 aff 档 backend lane。
+    """
+    mapping = {"server/app/settings.py": ["tests/test_settings.py::test_a"]}
+    registry = tmp_path / "tests" / "flaky_registry.yaml"
+    registry.parent.mkdir(parents=True)
+    registry.write_text("entries: []\n", encoding="utf-8")
+    helper = tmp_path / "tests" / "helpers" / "seed.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("def seed():\n    pass\n", encoding="utf-8")
+
+    selected = select_affected_tests(
+        ["tests/flaky_registry.yaml", "tests/helpers/seed.py"], mapping, repo_root=tmp_path
+    )
+
+    assert selected == []

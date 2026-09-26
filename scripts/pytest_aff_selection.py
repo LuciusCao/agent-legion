@@ -174,9 +174,17 @@ def select_affected_tests(
             for nodeid in nodeids:
                 if _nodeid_file_exists(nodeid, root):
                     selected.add(nodeid)
-        elif path.startswith("tests/") and (root / path).is_file():
+        elif (
+            path.startswith("tests/")
+            and path.endswith(".py")
+            and path.rsplit("/", 1)[-1].startswith("test_")
+            and (root / path).is_file()
+        ):
             # A changed test file with no coverage record (new file, or the
             # indexer never ran it): every test in that file must run.
+            # Non-test files under tests/ (yaml registry, helpers, conftest)
+            # collect zero tests — passing them as nodeids would exit 5
+            # ("no tests ran") when nothing else is selected.
             selected.add(path)
     return sorted(selected)
 
