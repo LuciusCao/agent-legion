@@ -16,9 +16,10 @@ function formatDuration(ms: number): string {
 /** #695 R3：RunBar / ResumeBar 收敛成的状态行——左侧运行状态（运行中 /
  * 已完成·用时 / 已超时终止 / 已取消 #675 / 恢复入口），右侧排队摘要；各槽位
  * 无内容不占位，全空则整行不渲染。上下文用量在 composer 工具行的圆环
- * （StudioChatContextRing，含压缩提示）。本行经 composer 的 statusSlot 渲染在
- * 输入卡片内（textarea 与工具行之间）。#787：取消按钮不在本行——它移到
- * 工具行发送/排队按钮旁（仅运行中显示），本行只保留状态文本。队列摘要只放
+ * （StudioChatContextRing，含压缩提示）。本行经 composer 的 statusSlot 渲染为
+ * 工具行最左 flex 子项（与按钮同一行、垂直居中，#787 对齐修复）。#787：
+ * 取消按钮不在本行——它移到发送/排队按钮旁（仅运行中显示），本行只保留
+ * 状态文本。队列摘要只放
  * 「排队中 N」：排队文本与逐条移除保留在卡外独立的 StudioChatQueueBar 行
  * （仅队列非空时出现）——排队消息是用户待发内容，收进 popover 要多一次点击
  * 才能查看/移除，取舍为可见性优先；常态 idle 无队列时该行不出现，信息密度

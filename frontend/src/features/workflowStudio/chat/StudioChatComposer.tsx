@@ -18,8 +18,9 @@ type Props = {
     workspaceId: string | undefined
     session: StudioChatSessionRecord | null
   }
-  /** 会话状态行（运行/排队摘要/恢复入口，AgentChatStatusStrip），渲染为卡内
-   * textarea 与工具行之间的一行；为 null（无状态可显示）时不占行。 */
+  /** 会话状态行（运行/排队摘要/恢复入口，AgentChatStatusStrip），渲染为工具行
+   * 最左 flex 子项——与取消/发送按钮同一行、垂直居中对齐（#787 对齐修复）；
+   * 为 null（无状态可显示）时不占位。 */
   statusSlot?: ReactNode
   /** 上下文用量：工具行右侧的圆环占比，hover 显示精确值；无数据不渲染。 */
   usage?: { used: number | null; size: number | null } | null
@@ -31,9 +32,10 @@ type Props = {
 }
 
 /** 三处 agent 对话共用的 composer（#695 R4）：圆角卡片一体化——上半 textarea，
- * 卡内底部工具行（左：权限模式芯片；右：上下文圆环 + 模型/思考档位芯片 +
- * 发送按钮），状态行经 statusSlot 收进卡内（textarea 与工具行之间，#787 起
- * 只保留状态文本——取消按钮移到工具行发送/排队按钮旁，仅运行中显示）。
+ * 卡内底部工具行（左：会话状态文本 + 权限模式芯片；右：上下文圆环 +
+ * 模型/思考档位芯片 + 取消（仅运行中）+ 发送按钮；状态行经 statusSlot 收进
+ * 卡内工具行最左，与按钮同一行垂直居中——#787 起只保留状态文本，取消按钮
+ * 在发送/排队按钮旁）。
  * 配置控件与状态都是输入框容器内的行内元素，不再独立占行；快捷键提示并入
  * placeholder。compacting 禁用、disabledReason、IME 组合守卫、Enter /
  * Shift+Enter 语义与原 StudioChatInput 一致。 */
@@ -82,8 +84,8 @@ export function StudioChatComposer(props: Props) {
             }
           }}
         />
-        {props.statusSlot}
         <div className={styles.toolbar}>
+          {props.statusSlot}
           {props.config ? (
             <StudioChatComposerConfig
               workspaceId={props.config.workspaceId}
