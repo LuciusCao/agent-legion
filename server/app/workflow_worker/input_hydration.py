@@ -71,7 +71,10 @@ from typing import TYPE_CHECKING
 from server.app.executors.artifact_restore import restore_from_manifest_row
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, effective_node_statuses
-from server.app.workflows.workflow_consumption import artifact_consumption_index
+from server.app.workflows.workflow_consumption import (
+    artifact_consumption_index,
+    dependency_downstream,
+)
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -90,8 +93,12 @@ def live_probe_names(
     - 节点 ``inputs``：至少一个消费者处于 RUNNABLE_STATUSES
       （``find_ready_nodes`` 只为可运行节点探 inputs 与入边选择）；
     - ``edge.condition.artifact``：target 可运行（就绪闸探入边选择）或
-      source 为 completed（``evaluate_branches`` 逐 completed source 裁决，
-      条件文件在场与否决定 not_applicable 标记， verdict 必须稳定）。
+      source 为 completed 且「target 或其显式下游仍有可运行节点」——
+      ``evaluate_branches`` 逐 completed source 每轮重裁，条件文件在场
+      与否决定 not_applicable 标记，verdict 必须稳定；但已裁决完毕的
+      终态分支（target 终态且可达节点全终态）的条件产物不再影响任何
+      可运行分支，本地缓存被淘汰、对象丢失时不得进恢复面（#779 列车
+      R4 复审 P1：恢复失败会把无关 targeted rerun 卡死在 defer）。
 
     终态分支的消费名由此退出恢复/defer 集：已完成并被淘汰缓存的 job 做单
     分支 targeted rerun 时，其他终态分支永久丢失/损坏的对象不再把整个
@@ -111,7 +118,11 @@ def live_probe_names(
     names.update(
         edge.condition.artifact
         for edge in definition.edges
-        if edge.condition is not None and statuses.get(edge.source) == "completed"
+        if edge.condition is not None
+        and statuses.get(edge.source) == "completed"
+        # 合并下游（显式 ∪ 隐式消费边，与上面消费索引同一张图）里仍有可
+        # 运行节点时，该条件文件的 verdict 仍在驱动它们。
+        and ({edge.target} | set(dependency_downstream(definition, edge.target))) & runnable
     )
     return frozenset(names)
 

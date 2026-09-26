@@ -206,3 +206,165 @@ def test_terminal_branch_lost_object_does_not_block_targeted_rerun(tmp_path: Pat
 
     executor.block_event.set()
     worker.stop()
+
+
+# ---------------------------------------------------------------------------
+# #779 列车 R4 复审 P1：终态分支的条件产物退出恢复面
+# ---------------------------------------------------------------------------
+
+
+def _conditional_branches_definition() -> WorkflowDefinition:
+    """gate 产 decision.json；gate→good / gate→alt 两条条件边；b 独立分支。"""
+    from server.app.workflows.schema import WorkflowCondition, WorkflowEdge
+
+    return WorkflowDefinition(
+        key="wfcond",
+        label="Wf Cond",
+        intake=WorkflowIntake(),
+        nodes={
+            "gate": WorkflowNode(
+                key="gate", label="Gate", capability="cap_gate", outputs=["decision.json"]
+            ),
+            "good": WorkflowNode(
+                key="good", label="Good", capability="cap_good", outputs=["good_out.json"]
+            ),
+            "alt": WorkflowNode(
+                key="alt", label="Alt", capability="cap_alt", outputs=["alt_out.json"]
+            ),
+            "b": WorkflowNode(key="b", label="B", capability="cap_b", outputs=["b_out.json"]),
+        },
+        edges=[
+            WorkflowEdge(
+                source="gate",
+                target="good",
+                condition=WorkflowCondition("decision.json", "$.eligible", True),
+            ),
+            WorkflowEdge(
+                source="gate",
+                target="alt",
+                condition=WorkflowCondition("decision.json", "$.eligible", False),
+            ),
+        ],
+    )
+
+
+def test_condition_artifact_of_fully_decided_branch_leaves_probe_surface() -> None:
+    """#779 R4 P1：source completed 臂的过度包含——终态分支（target 已终态、
+    其可达节点也全终态）的条件产物不再影响任何可运行分支，本地缓存被淘汰
+    且对象丢失时不得进恢复面（否则恢复失败把整个 job 卡在 defer）。"""
+    from server.app.workflow_worker.input_hydration import live_probe_names
+
+    definition = _conditional_branches_definition()
+    statuses = {"gate": "completed", "good": "completed", "alt": "not_applicable", "b": "pending"}
+
+    assert "decision.json" not in live_probe_names(definition, statuses)
+
+
+def test_condition_artifact_stays_while_verdict_still_drives_runnable_nodes() -> None:
+    """对照（当初 source-completed 臂要保的裁决稳定性）：target 已完成但
+    其下游仍可运行时，条件文件在场与否仍决定 not_applicable 标记——名字
+    必须留在恢复面；source completed + target pending（尚未裁决）同理。"""
+    from server.app.workflow_worker.input_hydration import live_probe_names
+
+    definition = _conditional_branches_definition()
+    # target pending（未裁决）：条件文件必须可评估。
+    pending_target = {"gate": "completed", "good": "pending", "alt": "pending", "b": "completed"}
+    assert "decision.json" in live_probe_names(definition, pending_target)
+    # target 已 completed（已选中），但同分支仍有 pending 节点时 verdict 必须
+    # 稳定——给 good 接一个下游节点覆盖该形态。
+    from server.app.workflows.schema import WorkflowEdge as _Edge
+    from server.app.workflows.schema import WorkflowNode as _Node
+
+    with_downstream = WorkflowDefinition(
+        key="wfcond",
+        label="Wf Cond",
+        intake=WorkflowIntake(),
+        nodes={
+            **definition.nodes,
+            "good_down": _Node(
+                key="good_down",
+                label="GoodDown",
+                capability="cap_good_down",
+                outputs=["gd_out.json"],
+            ),
+        },
+        edges=[*definition.edges, _Edge(source="good", target="good_down")],
+    )
+    downstream_pending = {
+        "gate": "completed",
+        "good": "completed",
+        "alt": "not_applicable",
+        "good_down": "pending",
+        "b": "completed",
+    }
+    assert "decision.json" in live_probe_names(with_downstream, downstream_pending)
+
+
+def test_decided_branch_lost_condition_object_does_not_block_targeted_rerun(
+    tmp_path: Path,
+) -> None:
+    """#779 R4 P1 的端到端形态：已裁决分支的本地缓存被淘汰、清单行仍在但
+    对象永久丢失，无关分支 targeted rerun 时 hydration 不得把该条件产物放
+    进恢复面——恢复失败曾使整个 job 跳过评估，无关分支永远到不了 claim。"""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "wfcond", default_workflow_key="wfcond", workspace_id="wfcond"
+    )
+    job = queries.create_job(
+        workflow_key="wfcond",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["gate", "good", "alt", "b"],
+        workspace_id=workspace["id"],
+    )
+    # 分支已裁决完毕：good 选中并 completed，alt not_applicable。
+    queries.update_job_node(job["id"], "gate", status="completed")
+    queries.update_job_node(job["id"], "good", status="completed")
+    queries.update_job_node(job["id"], "alt", status="not_applicable")
+    queries.update_job_node(job["id"], "b", status="completed")
+    queries.update_job_status(job["id"], "completed")
+    # 条件产物的清单行在、本地文件被淘汰、对象永久丢失（FakeObjectStorage
+    # 刻意为空）。
+    payload = b'{"eligible": true}'
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            """
+            insert into job_artifacts(job_id, node_key, name, storage_key, size_bytes, content_hash)
+            values (%s, 'gate', 'decision.json', %s, %s, %s)
+            """,
+            (
+                job["id"],
+                f"jobs/{workspace['id']}/{job['id']}/decision.json",
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
+            ),
+        )
+
+    # targeted rerun b（真实原子 mutation：b 回 pending、bump 代次）。
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        mark_nodes_for_rerun(conn, job["id"], ["b"], {"b": []})
+
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeObjectStorage())
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "wfcond", "b")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path,
+        TEST_DATABASE_URL,
+        executor,
+        [_conditional_branches_definition()],
+        artifact_object_store=store,
+    )
+
+    worker._poll()
+
+    # 已裁决分支的丢失条件对象不进入 defer 集：b 的 rerun 越过评估直接被
+    # claim；已裁决分支原样。
+    assert queries.get_job_node(job["id"], "b")["status"] == "running"
+    assert worker.leases.active_counts("code").get("global", 0) == 1
+    assert queries.get_job_node(job["id"], "good")["status"] == "completed"
+    assert queries.get_job_node(job["id"], "alt")["status"] == "not_applicable"
+
+    executor.block_event.set()
+    worker.stop()
