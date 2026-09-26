@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { StudioChatSessionRecord } from './studioChatApi'
+import { StudioChatCancelButton } from './StudioChatCancelButton'
 import { StudioChatComposerConfig } from './StudioChatComposerConfig'
 import { StudioChatContextRing } from './StudioChatContextRing'
 import styles from './StudioChatComposer.module.css'
@@ -24,11 +25,15 @@ type Props = {
   usage?: { used: number | null; size: number | null } | null
   /** 压缩窗口内圆环脉冲提示（发送禁用仍由 disabled/disabledReason 承担）。 */
   compacting?: boolean
+  /** #787：取消当前运行。传入即在工具行发送/排队按钮左侧渲染次级描边的
+   * 取消按钮；不运行时传 undefined，完全不占位。 */
+  onCancel?: () => void
 }
 
 /** 三处 agent 对话共用的 composer（#695 R4）：圆角卡片一体化——上半 textarea，
  * 卡内底部工具行（左：权限模式芯片；右：上下文圆环 + 模型/思考档位芯片 +
- * 发送按钮），状态行经 statusSlot 收进卡内（textarea 与工具行之间）。
+ * 发送按钮），状态行经 statusSlot 收进卡内（textarea 与工具行之间，#787 起
+ * 只保留状态文本——取消按钮移到工具行发送/排队按钮旁，仅运行中显示）。
  * 配置控件与状态都是输入框容器内的行内元素，不再独立占行；快捷键提示并入
  * placeholder。compacting 禁用、disabledReason、IME 组合守卫、Enter /
  * Shift+Enter 语义与原 StudioChatInput 一致。 */
@@ -90,6 +95,9 @@ export function StudioChatComposer(props: Props) {
               <span className={styles.toolbarSpacer} />
               {contextRing}
             </>
+          )}
+          {props.onCancel && (
+            <StudioChatCancelButton onCancel={props.onCancel} />
           )}
           <button
             type="button"

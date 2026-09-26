@@ -400,14 +400,7 @@ describe('StudioChatComposer config chips (#695 R4)', () => {
   })
 })
 
-describe('StudioChatComposer status slot & context ring', () => {
-  it('renders the status slot between the textarea and the toolbar', () => {
-    renderComposer({
-      statusSlot: <div aria-label="会话状态条">运行中</div>,
-    })
-    expect(screen.getByLabelText('会话状态条')).toHaveTextContent('运行中')
-  })
-
+describe('StudioChatComposer context ring', () => {
   it('renders the context ring to the left of the model chip', () => {
     renderComposer({
       config: { workspaceId: 'ws1', session: record() },
@@ -444,5 +437,32 @@ describe('StudioChatComposer status slot & context ring', () => {
   it('hides the ring when there is no usage and no compaction', () => {
     renderComposer()
     expect(screen.queryByLabelText('上下文用量')).not.toBeInTheDocument()
+  })
+})
+
+describe('StudioChatComposer cancel button (#787)', () => {
+  it('renders the cancel button next to the send button while running', () => {
+    renderComposer({ busy: true, onCancel: vi.fn() })
+    const cancelButton = screen.getByRole('button', { name: '取消' })
+    const sendButton = screen.getByRole('button', { name: '排队' })
+    // 取消在发送/排队按钮左边：发送按钮在文档序上跟随取消按钮。
+    expect(
+      cancelButton.compareDocumentPosition(sendButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('invokes onCancel on click', () => {
+    const onCancel = vi.fn()
+    renderComposer({ busy: true, onCancel })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not render the cancel button when not running', () => {
+    renderComposer()
+    expect(
+      screen.queryByRole('button', { name: '取消' })
+    ).not.toBeInTheDocument()
   })
 })

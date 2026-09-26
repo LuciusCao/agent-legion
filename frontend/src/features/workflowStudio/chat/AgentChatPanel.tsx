@@ -35,10 +35,11 @@ type Props = {
 
 /** 三处 agent 对话界面共用的对话骨架（#695）：消息列表 + 队列详情行 +
  * composer 输入卡片（状态行经 statusSlot 收进卡内、上下文用量为工具行圆环；
- * #695 R3 由 ContextMeter/RunBar/ResumeBar 收敛，R4 composer 一体化），
- * 发送队列在此内部接线（busy 时发送入队而非直发撞后端单 turn 原子认领的
- * 409）。差异点全部经插槽/参数注入；agent 列表守卫与各载体的治理面
- * （发布/归档等）留在调用方。 */
+ * #695 R3 由 ContextMeter/RunBar/ResumeBar 收敛，R4 composer 一体化；#787
+ * 取消按钮从状态行移到工具行发送/排队按钮旁，仅运行中显示），发送队列在此
+ * 内部接线（busy 时发送入队而非直发撞后端单 turn 原子认领的 409）。差异点
+ * 全部经插槽/参数注入；agent 列表守卫与各载体的治理面（发布/归档等）留在
+ * 调用方。 */
 export function AgentChatPanel(props: Props) {
   const { chat } = props
   // busy（运行中）不再禁用输入：发送会进入前端队列（见 useStudioChatQueue）。
@@ -119,6 +120,11 @@ export function AgentChatPanel(props: Props) {
         statusSlot={<AgentChatStatusStrip chat={chat} queue={queue} />}
         usage={contextUsageFromSession(chat.session)}
         compacting={compacting}
+        onCancel={
+          chat.busy && chat.session?.status
+            ? () => void chat.cancel()
+            : undefined
+        }
       />
     </div>
   )

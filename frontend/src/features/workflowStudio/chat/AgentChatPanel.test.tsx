@@ -173,6 +173,39 @@ describe('AgentChatPanel', () => {
     expect(screen.getByLabelText('消息输入')).toBeDisabled()
   })
 
+  it('places the cancel button next to the send button inside the composer (#787)', () => {
+    const cancel = vi.fn()
+    renderPanel({
+      busy: true,
+      session: sessionRecord({ status: 'running' }),
+      cancel,
+    })
+    const strip = screen.getByLabelText('会话状态条')
+    const input = screen.getByLabelText('消息输入')
+    const card = input.parentElement!
+    // 状态行保留在卡内（#750 形态）但不再内嵌取消按钮；取消按钮在工具行
+    // 发送/排队按钮旁，点击即取消当前运行。
+    expect(card.contains(strip)).toBe(true)
+    expect(strip).toHaveTextContent('运行中')
+    expect(strip.querySelector('button[aria-label="取消"], button')).toBeNull()
+    const cancelButton = screen.getByRole('button', { name: '取消' })
+    const sendButton = screen.getByRole('button', { name: '排队' })
+    expect(card.contains(cancelButton)).toBe(true)
+    expect(
+      cancelButton.compareDocumentPosition(sendButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    fireEvent.click(cancelButton)
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not render the cancel button when idle (#787)', () => {
+    renderPanel()
+    expect(
+      screen.queryByRole('button', { name: '取消' })
+    ).not.toBeInTheDocument()
+  })
+
   it('queues the message instead of sending directly while busy', async () => {
     const send = vi.fn().mockResolvedValue(true)
     renderPanel({
