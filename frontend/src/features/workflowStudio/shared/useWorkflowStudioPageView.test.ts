@@ -6,6 +6,34 @@ function makeStudio() {
   return { validateDraft: vi.fn().mockResolvedValue(undefined) }
 }
 
+/** 窄屏判定桩（useStudioNarrowViewport 走 matchMedia，node/jsdom 环境没有）。 */
+const originalMatchMedia = globalThis.matchMedia
+
+function stubNarrowViewport(matches: boolean) {
+  Object.defineProperty(globalThis, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: (query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  })
+}
+
+function restoreViewportMatchMedia() {
+  Object.defineProperty(globalThis, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: originalMatchMedia,
+  })
+}
+
 describe('useWorkflowStudioPageView', () => {
   it('opens the changes panel after validation instead of switching modes', async () => {
     const studio = makeStudio()
@@ -56,5 +84,58 @@ describe('useWorkflowStudioPageView', () => {
     expect(result.current.agentOpen).toBe(false)
     act(() => result.current.toggleAgent())
     expect(result.current.agentOpen).toBe(true)
+  })
+
+  // #797 codex 复审轮：toggleAgent 是开合的唯一组合出口——宽屏不动页签；
+  // 窄屏打开切 Agent 页签、从 Agent 页签关闭回画布。
+  it('narrow viewport: toggleAgent syncs the mobile tab both directions', () => {
+    stubNarrowViewport(true)
+    try {
+      const { result } = renderHook(() =>
+        useWorkflowStudioPageView(
+          makeStudio() as unknown as Parameters<
+            typeof useWorkflowStudioPageView
+          >[0]
+        )
+      )
+
+      // 窄屏画布页签 + 默认开：初始 agentOpen=true 时不动页签（默认态不抢）。
+      // 先关：Agent 页签…初始 mobilePanel=graph，关闭不发生在 agent 页签→不动。
+      act(() => result.current.toggleAgent())
+      expect(result.current.agentOpen).toBe(false)
+      expect(result.current.mobilePanel).toBe('graph')
+
+      // 窄屏打开（当前画布页签）：切到 Agent 页签让 Dock 可见。
+      act(() => result.current.toggleAgent())
+      expect(result.current.agentOpen).toBe(true)
+      expect(result.current.mobilePanel).toBe('agent')
+
+      // 窄屏从 Agent 页签关闭：回画布，不留空白工作区。
+      act(() => result.current.toggleAgent())
+      expect(result.current.agentOpen).toBe(false)
+      expect(result.current.mobilePanel).toBe('graph')
+    } finally {
+      restoreViewportMatchMedia()
+    }
+  })
+
+  it('wide viewport: toggleAgent leaves the mobile tab untouched', () => {
+    stubNarrowViewport(false)
+    try {
+      const { result } = renderHook(() =>
+        useWorkflowStudioPageView(
+          makeStudio() as unknown as Parameters<
+            typeof useWorkflowStudioPageView
+          >[0]
+        )
+      )
+      act(() => result.current.setMobilePanel('agent'))
+      act(() => result.current.toggleAgent())
+      expect(result.current.agentOpen).toBe(false)
+      // 宽屏不动 mobilePanel。
+      expect(result.current.mobilePanel).toBe('agent')
+    } finally {
+      restoreViewportMatchMedia()
+    }
   })
 })

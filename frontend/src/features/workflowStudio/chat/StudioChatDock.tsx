@@ -1,6 +1,6 @@
 import { AgentPanelDock } from '../../agentPanelDock/AgentPanelDock'
 import { StudioChatPanel } from './StudioChatPanel'
-import { useStudioState } from '../shared/studioStateContext'
+import { useStudioState, useStudioView } from '../shared/studioStateContext'
 import { useAgentPublishRequest } from '../shared/useAgentPublishRequest'
 import { useSettingStore } from '../../../stores/settingStore'
 import styles from './StudioChatPanel.module.css'
@@ -17,16 +17,9 @@ import styles from './StudioChatPanel.module.css'
  * （确认/取消/被顶替）后在 Dock 内顶部显示一轮回执（zustand store 共享，
  * 对话框实例写入这里即可见），agent 下一轮工具调用同样能从
  * get_publish_request_status 拿到结果。 */
-export function StudioChatDock({
-  hidden,
-  onClose,
-}: {
-  /** 隐藏不卸载（关闭或窄屏未选中 Agent 页签）。 */
-  hidden: boolean
-  /** 关闭出口（由 WorkflowStudioWorkspace 组装：收起 + 窄屏回画布）。 */
-  onClose: () => void
-}) {
+export function StudioChatDock({ hidden }: { hidden: boolean }) {
   const studio = useStudioState()
+  const view = useStudioView()
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   // 相同 queryKey 的 useQuery 与 AgentPublishRequestDialog 自动合并；
   // resolvedNotice 来自共享 store：对话框里的确认/取消动作在此同轮可见。
@@ -36,7 +29,9 @@ export function StudioChatDock({
       surfaceKey="studio-chat"
       title="Agent 助手"
       defaultSize={{ width: 520, height: 640 }}
-      onClose={onClose}
+      // 关闭 = 收起：toggleAgent 是开合的唯一组合出口（#797 codex 复审轮，
+      // 窄屏页签同步组合在 useWorkflowStudioPageView 那层）。
+      onClose={() => view.toggleAgent()}
       hidden={hidden}
     >
       {resolvedNotice && (

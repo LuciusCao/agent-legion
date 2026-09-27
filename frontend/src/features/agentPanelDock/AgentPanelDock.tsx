@@ -34,7 +34,8 @@ import {
   effectiveMinSize,
 } from './dockPlacement'
 import { useDockGeometry } from './useDockGeometry'
-import { useDockEscape, useDockFocus } from './useDockFocus'
+import { useDockFocus } from './useDockFocus'
+import { useDockEscape } from './useDockEscape'
 import styles from './AgentPanelDock.module.css'
 
 export interface AgentPanelDockProps {
@@ -92,8 +93,9 @@ export function AgentPanelDock({
     setCollapsedPersisted,
   } = useDockGeometry(surfaceKey, topInset, defaultSize)
 
-  // 隐藏态同样不参与焦点移交与 Esc（与折叠同规则：不可见 surface 不吃焦点）。
-  const { surfaceRef, chipRef } = useDockFocus(collapsed || hidden)
+  // 折叠与 hidden 分开：折叠焦点移到小条，hidden 不渲染小条——
+  // 焦点显式还给触发控件（见 useDockFocus）。Esc 在两者下都抑制。
+  const { surfaceRef, chipRef } = useDockFocus(collapsed, hidden)
 
   // Esc 折叠挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位
   // 规则见 useDockFocus.ts 的 useDockEscape）。

@@ -3,6 +3,9 @@
  * 契约）：打开/展开时焦点进面板 surface，折叠时焦点移到右下角展开小条
  * （折叠会把含焦点的内容区切为 display:none，不移交则键盘用户丢失上下文），
  * 卸载时还原触发元素。preventScroll 防焦点驱动的页面跳动。
+ * hidden（#797 codex P2）与折叠分开处理：hidden 连小条都不渲染——若当折叠
+ * 处理去聚焦 chipRef（不存在），焦点会留在 display:none 子树或裸丢 body；
+ * 显式把焦点还给挂载前的触发控件（顶栏开关/页签），恢复显示时回 surface。
  * ref 用 callback ref + state 而非 useRef：react-rnd 挂载期 componentDidMount
  * 内 setState/forceUpdate 触发嵌套重渲染，首帧 passive effect 里 useRef 的
  * current 可能仍是 null（实测），callback ref 的 node 到位通知才可靠。
@@ -20,7 +23,7 @@ export interface DockFocus {
   chipRef: RefCallback<HTMLButtonElement>
 }
 
-export function useDockFocus(collapsed: boolean): DockFocus {
+export function useDockFocus(collapsed: boolean, hidden = false): DockFocus {
   const [surfaceNode, setSurfaceNode] = useState<HTMLDivElement | null>(null)
   const [chipNode, setChipNode] = useState<HTMLButtonElement | null>(null)
   const surfaceRef = useCallback(
@@ -31,10 +34,13 @@ export function useDockFocus(collapsed: boolean): DockFocus {
     (node: HTMLButtonElement | null) => setChipNode(node),
     []
   )
+  // 挂载前的焦点元素（触发控件）：卸载或 hidden 时还原。
+  const previousRef = useRef<Element | null>(null)
 
   useEffect(() => {
-    const previous = document.activeElement
+    previousRef.current = document.activeElement
     return () => {
+      const previous = previousRef.current
       if (previous instanceof HTMLElement && previous.isConnected) {
         previous.focus({ preventScroll: true })
       }
@@ -42,35 +48,17 @@ export function useDockFocus(collapsed: boolean): DockFocus {
   }, [])
 
   useEffect(() => {
+    if (hidden) {
+      // hidden：surface/chip 均不可见——焦点还给触发控件，不丢进不可见子树。
+      const previous = previousRef.current
+      if (previous instanceof HTMLElement && previous.isConnected) {
+        previous.focus({ preventScroll: true })
+      }
+      return
+    }
     const target = collapsed ? chipNode : surfaceNode
     target?.focus({ preventScroll: true })
-  }, [collapsed, surfaceNode, chipNode])
+  }, [collapsed, hidden, surfaceNode, chipNode])
 
   return { surfaceRef, chipRef }
-}
-
-/**
- * Esc 折叠的 document 级监听（codex P2 on #796）：非模态面板失焦（用户点
- * 回底层页面）后 Esc 仍应折叠——挂在 document 而非 Paper。折叠态不挂；
- * 不抢已消费的 Esc：defaultPrevented 跳过，有全局 Modal/Menu（MUI
- * ModalManager 体系，如 TokenUsage/菜单）开着时让给对方。
- * 回调经 ref 读最新值（codex P2 复审轮）：effect 只按 collapsed 挂/卸，
- * 若闭包冻结首渲染的 onEscape，拖拽/缩放后的 Esc 会把旧几何写回存储——
- * ref 保证每次击键读的是当帧回调。
- */
-export function useDockEscape(collapsed: boolean, onEscape: () => void): void {
-  const onEscapeRef = useRef(onEscape)
-  useEffect(() => {
-    onEscapeRef.current = onEscape
-  })
-  useEffect(() => {
-    if (collapsed) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      if (document.querySelector('.MuiModal-root')) return
-      onEscapeRef.current()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [collapsed])
 }

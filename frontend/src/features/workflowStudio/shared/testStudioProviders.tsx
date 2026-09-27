@@ -31,6 +31,9 @@ export function makeStudioView(overrides: Record<string, unknown> = {}) {
     setYamlEditorOpen: vi.fn(),
     agentOpen: true,
     toggleAgent: vi.fn(),
+    mobilePanel: 'graph',
+    setMobilePanel: vi.fn(),
+    narrow: false,
     validateAndShowResult: vi.fn(),
     ...overrides,
   }

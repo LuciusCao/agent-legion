@@ -89,13 +89,13 @@ const studioState = {
   requestNodeFocus: vi.fn(),
 }
 
-function renderDock(hidden = false, onClose: () => void = () => undefined) {
+function renderDock(hidden = false, viewOverrides?: Record<string, unknown>) {
   return render(
     <TestQueryProvider>
       {withStudioProviders(
         studioState,
-        makeStudioView(),
-        <StudioChatDock hidden={hidden} onClose={onClose} />
+        makeStudioView(viewOverrides),
+        <StudioChatDock hidden={hidden} />
       )}
     </TestQueryProvider>
   )
@@ -134,12 +134,12 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
     ).toContain('"collapsed":true')
   })
 
-  it('Dock 关闭按钮走 onClose 出口（由 Workspace 组装：收起 + 窄屏回画布）', async () => {
-    const onClose = vi.fn()
-    renderDock(false, onClose)
+  it('Dock 关闭按钮 = 收起（toggleAgent 组合出口，页签同步在 pageView 层）', async () => {
+    const toggleAgent = vi.fn()
+    renderDock(false, { toggleAgent })
     await waitFor(() => dockSurface())
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(toggleAgent).toHaveBeenCalledTimes(1)
   })
 
   it('codex P1（#797）：hidden 隐藏不卸载——子树 state（composer 文本/队列）存活，重开原样恢复', async () => {
@@ -155,7 +155,7 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
         {withStudioProviders(
           studioState,
           makeStudioView(),
-          <StudioChatDock hidden onClose={() => undefined} />
+          <StudioChatDock hidden />
         )}
       </TestQueryProvider>
     )
@@ -168,7 +168,7 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
         {withStudioProviders(
           studioState,
           makeStudioView(),
-          <StudioChatDock hidden={false} onClose={() => undefined} />
+          <StudioChatDock hidden={false} />
         )}
       </TestQueryProvider>
     )

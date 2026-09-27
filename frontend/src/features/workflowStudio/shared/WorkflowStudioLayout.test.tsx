@@ -5,6 +5,7 @@ import { useSettingStore } from '../../../stores/settingStore'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
+import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
 
 vi.mock('../chat/StudioChatPanel', () => ({
   StudioChatPanel: (props: Record<string, unknown>) => {
@@ -254,7 +255,18 @@ describe('WorkflowStudioLayout', () => {
   })
 
   it('opens contextual node editing after a graph node is selected', () => {
-    const { rerender } = renderLayout(baseProps)
+    // #797 codex 复审轮：mobilePanel 状态上收到 useWorkflowStudioPageView
+    // （页签同步与 agentOpen 同一组合出口）——静态 makeStudioView 不含真实
+    // 联动，本用例用真 hook 驱动（studio 伪造对象只覆盖 hook 消费字段）。
+    function LiveViewLayout({ studio }: { studio: LayoutStudio }) {
+      const view = useWorkflowStudioPageView(studio as never)
+      return withStudioProviders(studio, view, <WorkflowStudioLayout />)
+    }
+    const { rerender } = render(
+      <TestQueryProvider>
+        <LiveViewLayout studio={baseProps} />
+      </TestQueryProvider>
+    )
 
     const mobileNav = screen.getByRole('tablist', {
       name: 'Workflow studio panels',
@@ -263,7 +275,11 @@ describe('WorkflowStudioLayout', () => {
       within(mobileNav).getByRole('tab', { name: '画布' })
     ).toHaveAttribute('aria-selected', 'true')
 
-    rerenderLayout(rerender, { ...baseProps, selectedNodeKey: 'node-a' })
+    rerender(
+      <TestQueryProvider>
+        <LiveViewLayout studio={{ ...baseProps, selectedNodeKey: 'node-a' }} />
+      </TestQueryProvider>
+    )
 
     expect(
       within(mobileNav).getByRole('tab', { name: '编辑节点' })

@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioWorkspace } from './WorkflowStudioWorkspace'
+import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import { api } from '../../../api'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
@@ -83,6 +85,40 @@ function restoreViewportMatchMedia() {
     configurable: true,
     value: originalMatchMedia,
   })
+}
+
+/** 真 view（跑真实 useWorkflowStudioPageView 的组合逻辑）渲染：页签/开关
+ * 联动测试用——makeStudioView 是静态伪造，点击不改状态。 */
+function renderWorkspaceLive() {
+  const props = {
+    workflow,
+    executorCatalog,
+    agentCatalog: [],
+    agentCatalogSettle: {
+      catalogSettled: true,
+      catalogFailed: false,
+      definitionsSettled: true,
+      definitionsFailed: false,
+    },
+    selectedNodeKey: null,
+    setSelectedNodeKey: vi.fn(),
+    readOnly: false,
+    definitionYaml: 'key: demo_video_workflow\n',
+    setDefinitionYaml: vi.fn(),
+    backToDraft: vi.fn(),
+    setDagFullscreenOpen: vi.fn(),
+  }
+  function LiveViewHarness({ children }: { children: ReactNode }) {
+    const view = useWorkflowStudioPageView(props as never)
+    return withStudioProviders(props, view, children)
+  }
+  return render(
+    <TestQueryProvider>
+      <LiveViewHarness>
+        <WorkflowStudioWorkspace />
+      </LiveViewHarness>
+    </TestQueryProvider>
+  )
 }
 
 const workflow = {
@@ -205,7 +241,7 @@ describe('WorkflowStudioWorkspace', () => {
     try {
       // 窄屏 + 默认（agentOpen=true、mobilePanel=graph）：Dock 隐藏但子树
       // 保持挂载（chat stub 仍在 DOM，display:none）。
-      renderWorkspace()
+      renderWorkspaceLive()
       expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
       expect(screen.getByText('chat panel stub')).toBeInTheDocument()
 
@@ -222,17 +258,14 @@ describe('WorkflowStudioWorkspace', () => {
   it('codex P2（#797）：窄屏 Agent 页签关闭 Dock 回画布，不留空白工作区', () => {
     stubNarrowViewport(true)
     try {
-      const toggleAgent = vi.fn()
-      renderWorkspace({}, { toggleAgent })
+      renderWorkspaceLive()
       fireEvent.click(screen.getByRole('tab', { name: 'Agent' }))
       expect(
         screen.getByRole('dialog', { name: 'Agent 助手' })
       ).toBeInTheDocument()
 
+      // 关闭按钮走组合出口（toggleAgent）：agentOpen 翻 false + 页签回画布。
       fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-      // 关闭：走 appbar 同一状态源 + 页签回画布（mobilePanel=graph，
-      // 画布重新 active）——不留「Agent 页签下的空白页」。
-      expect(toggleAgent).toHaveBeenCalledTimes(1)
       expect(screen.getByRole('tab', { name: '画布' })).toHaveAttribute(
         'aria-selected',
         'true'
@@ -242,6 +275,8 @@ describe('WorkflowStudioWorkspace', () => {
         'false'
       )
       expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
+      // 隐藏不卸载：聊天子树仍在 DOM。
+      expect(screen.getByText('chat panel stub')).toBeInTheDocument()
     } finally {
       restoreViewportMatchMedia()
     }

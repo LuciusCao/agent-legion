@@ -182,6 +182,61 @@ describe('AgentPanelDock', () => {
     expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
   })
 
+  it('codex P2（#797 复审轮）：hidden 时焦点还给触发控件，不掉进不可见子树', async () => {
+    // 焦点移交 effect 驱动 MUI 状态更新脱离 act（known noise，同既有用例）。
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    // 触发控件（如顶栏开关）先于 Dock 挂载并持焦——hidden 时应还给它。
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const { rerender } = renderDock(
+      {},
+      <input data-testid="dock-input" defaultValue="" />
+    )
+    await screen.findByRole('dialog', { name: '测试面板' })
+    const input = screen.getByTestId('dock-input')
+    input.focus()
+    expect(document.activeElement).toBe(input)
+
+    // hidden=true：surface display:none——焦点若留在子树会随不可见丢失
+    // （或裸丢 body）；必须显式还给触发控件。
+    rerender(
+      (
+        <AgentPanelDock
+          surfaceKey="test-surface"
+          title="测试面板"
+          onClose={() => undefined}
+          hidden
+        >
+          <input data-testid="dock-input" defaultValue="" />
+        </AgentPanelDock>
+      ) as ReactElement
+    )
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+
+    // 恢复显示：焦点回 surface。
+    rerender(
+      (
+        <AgentPanelDock
+          surfaceKey="test-surface"
+          title="测试面板"
+          onClose={() => undefined}
+          hidden={false}
+        >
+          <input data-testid="dock-input" defaultValue="" />
+        </AgentPanelDock>
+      ) as ReactElement
+    )
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole('dialog', { name: '测试面板' })
+      )
+    )
+    trigger.remove()
+  })
+
   it('折叠/展开不丢面板内容状态（输入值原样保留）', async () => {
     renderDock({}, <input data-testid="dock-child" defaultValue="" />)
     await screen.findByRole('dialog', { name: '测试面板' })

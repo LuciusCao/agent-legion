@@ -10,8 +10,6 @@ import pageStyles from '../../../pages/WorkflowStudioPageResponsive.module.css'
 type Props = {
   mobilePanel: StudioMobilePanel
   agentOpen: boolean
-  /** Dock 关闭出口（WorkflowStudioWorkspace 组装：收起 + 窄屏回画布）。 */
-  onCloseAgent: () => void
 }
 
 /** 画布 + 节点详情分栏 grid；Agent 对话已迁入 AgentPanelDock 浮层
@@ -21,11 +19,7 @@ type Props = {
  * 隐藏不卸载（hidden——composer 文本/发送队列/SSE 不因显隐断开，#797
  * codex P1）；窄屏下可见性由 mobilePanel 参与决定（仅 Agent 页签选中时
  * 显示，避免手机首进被浮层抢占画布，#797 codex P2）。 */
-export function WorkflowStudioSplitLayout({
-  mobilePanel,
-  agentOpen,
-  onCloseAgent,
-}: Props) {
+export function WorkflowStudioSplitLayout({ mobilePanel, agentOpen }: Props) {
   const studio = useStudioState()
   const nodeSelected = studio.selectedNodeKey !== null
   const narrow = useStudioNarrowViewport()
@@ -51,7 +45,7 @@ export function WorkflowStudioSplitLayout({
           onBack={() => studio.setSelectedNodeKey(null)}
         />
       )}
-      <StudioChatDock hidden={dockHidden} onClose={onCloseAgent} />
+      <StudioChatDock hidden={dockHidden} />
     </div>
   )
 }
