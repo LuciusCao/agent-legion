@@ -170,6 +170,55 @@ describe('CustomizePreviewDock', () => {
     expect(screen.getByText('排队消息')).toBeInTheDocument()
   })
 
+  it('#796 R3：composer chips 在 Dock 里常驻——有会话时权限/模型/思考芯片可见可交互', async () => {
+    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi' },
+    ] as never)
+    mockChatApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({
+        capability_snapshot: {
+          sessionModes: true,
+          sessionConfigOptions: true,
+        },
+        session_modes: {
+          currentModeId: 'default',
+          availableModes: [{ id: 'default', name: 'Default' }],
+        },
+        config_options: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'k3',
+            options: [{ value: 'k3', name: 'K3' }],
+          },
+          {
+            id: 'thinking',
+            name: 'Thinking',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'high',
+            options: [{ value: 'low' }, { value: 'high' }],
+          },
+        ],
+      } as never),
+    ])
+    renderDock()
+
+    const surface = await screen.findByRole('dialog', { name: '定制预览面板' })
+    // 会话记忆自动恢复最近会话（useStudioChatSessionMemory），chips 在
+    // Dock 的 composer 工具行可见且可交互（showAgentConfig 已开启）。
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Agent 权限模式' })
+      ).toBeEnabled()
+    )
+    expect(screen.getByRole('button', { name: '模型' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '思考档位' })).toBeInTheDocument()
+    expect(surface.querySelector('iframe')).toBeNull()
+  })
+
   it('#695：closed 会话显示恢复条', async () => {
     mockChatApi.fetchStudioChatAgents.mockResolvedValue([
       { id: 'kimi', label: 'Kimi' },

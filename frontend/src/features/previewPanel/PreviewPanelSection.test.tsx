@@ -133,12 +133,25 @@ function renderSection(ui?: ReactElement) {
 }
 
 /**
- * 等治理面草稿数据落进头部治理行再继续：真实按钮 disabled={!draft}，
- * 状态行出现「草稿 v1」时按钮才可点（点击早于数据送达是无意义竞态——
+ * 等治理面草稿数据落进头部状态 Chip 再继续：菜单项 disabled={!draft}，
+ * Chip 出现「草稿 v1」时动作才可用（点击早于数据送达是无意义竞态——
  * 授权快照取自组件闭包里的 draft）。
  */
 async function waitForDraftInHeader() {
-  await screen.findByText(/草稿 v1（studio-agent:u1）/)
+  await screen.findByText(/草稿 v1 · /)
+}
+
+/** 治理动作收在 MoreVert 溢出菜单（#796 R3）：点开菜单再点菜单项。菜单在
+ * fireEvent 的 act 内同步挂载，getByRole 直取即可（兼容 fake timers）。 */
+function clickGovernanceAction(name: string | RegExp) {
+  fireEvent.click(screen.getByRole('button', { name: '预览治理操作' }))
+  fireEvent.click(screen.getByRole('menuitem', { name }))
+}
+
+/** 只读菜单项断言后收尾：点遮罩关菜单，避免 Menu 的 portal/遮罩干扰后续查询。 */
+function closeGovernanceMenu() {
+  const backdrop = document.querySelector('.MuiBackdrop-root')
+  if (backdrop) fireEvent.click(backdrop)
 }
 
 beforeEach(() => {
@@ -239,7 +252,7 @@ describe('PreviewPanelSection', () => {
     expect(screen.queryByText('草稿预览中')).toBeNull()
 
     // 显式动作后才执行草稿（仅当前用户可见）。
-    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+    clickGovernanceAction('预览此草稿')
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')
@@ -296,7 +309,7 @@ describe('PreviewPanelSection', () => {
     expect(screen.queryByText('草稿预览中')).toBeNull()
 
     // 显式动作后草稿接管左栏。
-    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+    clickGovernanceAction('预览此草稿')
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')
@@ -330,7 +343,7 @@ describe('PreviewPanelSection', () => {
         await vi.runOnlyPendingTimersAsync()
       })
       // 显式预览 v1。
-      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      clickGovernanceAction('预览此草稿')
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -378,7 +391,7 @@ describe('PreviewPanelSection', () => {
       expect(screen.queryByText('草稿预览中')).toBeNull()
 
       // 再次显式预览才执行 v2。
-      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      clickGovernanceAction('预览此草稿')
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -412,7 +425,7 @@ describe('PreviewPanelSection', () => {
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
-      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      clickGovernanceAction('预览此草稿')
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -461,7 +474,7 @@ describe('PreviewPanelSection', () => {
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
-      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      clickGovernanceAction('预览此草稿')
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -495,7 +508,7 @@ describe('PreviewPanelSection', () => {
       expect(screen.queryByText('草稿预览中')).toBeNull()
 
       // 重新显式预览才在（新 jobId 的）草稿上恢复执行。
-      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      clickGovernanceAction('预览此草稿')
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -537,13 +550,13 @@ describe('PreviewPanelSection', () => {
     mockFetchPublished.mockResolvedValue(PUBLISHED)
     renderSection()
 
-    // 面板内容对成员照常渲染，但定制入口、治理按钮与治理面查询都不出现。
+    // 面板内容对成员照常渲染，但定制入口、治理溢出菜单与治理面查询都不出现。
     await waitFor(() =>
       expect(screen.getByTestId('preview-panel-host')).toBeInTheDocument()
     )
     expect(screen.queryByRole('button', { name: '定制预览' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '发布草稿' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '预览此草稿' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '预览治理操作' })).toBeNull()
+    expect(screen.queryByText(/草稿 v1 · /)).toBeNull()
     expect(mockFetchState).not.toHaveBeenCalled()
     // #528：模式开关是查看偏好而非治理动作，成员同样可见可用（切换行为
     // 的分支覆盖在 PreviewPanelSection.mode.test.tsx）。
@@ -576,8 +589,9 @@ describe('PreviewPanelSection', () => {
     ).toContain('published panel')
 
     // 显式授权：草稿在左栏渲染（与已发布版本同一 PreviewPanelHost 挂载
-    // 点），按钮转「预览草稿中」，Dock 同步唤起（授权锚定 Dock 会话）。
-    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+    // 点），菜单项转为禁用的「草稿预览中（左栏渲染中）」，Dock 同步唤起
+    // （授权锚定 Dock 会话）。
+    clickGovernanceAction('预览此草稿')
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')
@@ -585,9 +599,11 @@ describe('PreviewPanelSection', () => {
       expect(iframe?.getAttribute('srcdoc')).toContain('draft panel')
     })
     expect(screen.getByText('草稿预览中')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '预览治理操作' }))
     expect(
-      screen.getByRole('button', { name: '预览草稿中' })
-    ).toBeInTheDocument()
+      screen.getByRole('menuitem', { name: '草稿预览中（左栏渲染中）' })
+    ).toHaveAttribute('aria-disabled', 'true')
+    closeGovernanceMenu()
     expect(screen.getByTestId('customize-dialog')).toBeInTheDocument()
   })
 
@@ -600,11 +616,11 @@ describe('PreviewPanelSection', () => {
     renderSection()
     await waitForDraftInHeader()
 
-    fireEvent.click(screen.getByRole('button', { name: '发布草稿' }))
+    clickGovernanceAction('发布草稿')
     await waitFor(() => expect(mockPublish).toHaveBeenCalledWith('ws1'))
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    fireEvent.click(screen.getByRole('button', { name: '恢复默认' }))
+    clickGovernanceAction(/恢复默认（归档）/)
     await waitFor(() => expect(mockArchive).toHaveBeenCalledWith('ws1'))
     confirmSpy.mockRestore()
   })
@@ -629,7 +645,7 @@ describe('PreviewPanelSection', () => {
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
-      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      clickGovernanceAction('预览此草稿')
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -661,7 +677,7 @@ describe('PreviewPanelSection', () => {
 
       // 重新点「预览此草稿」才执行新内容（改一版重新预览一次——工作流
       // 本来的节奏）。
-      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      clickGovernanceAction('预览此草稿')
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -698,7 +714,7 @@ describe('PreviewPanelSection', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
     await waitForDraftInHeader()
-    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+    clickGovernanceAction('预览此草稿')
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')
@@ -747,7 +763,7 @@ describe('PreviewPanelSection', () => {
     }
 
     // 重新显式预览才在（新 jobId 的）草稿上恢复执行——同一 commit 生效。
-    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+    clickGovernanceAction('预览此草稿')
     expect(
       screen
         .getByTestId('preview-panel-host')

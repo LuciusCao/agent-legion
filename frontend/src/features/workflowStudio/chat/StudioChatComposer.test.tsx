@@ -272,6 +272,37 @@ describe('StudioChatComposer config chips (#695 R4)', () => {
     await act(async () => {})
   })
 
+  it('#796 R3：无激活会话时回落历史会话只读展示（AgentChatPanel 选好回落会话 + readOnly）', () => {
+    renderComposer({
+      config: { workspaceId: 'ws1', session: record(), readOnly: true },
+    })
+    // chips 行常驻：值取自回落会话（「默认值/当前选择」的诚实来源是历史
+    // 会话的握手广告面），但只读——切换锚定真实激活会话。
+    expect(screen.getByRole('button', { name: '模型' })).toHaveTextContent('K3')
+    expect(screen.getByRole('button', { name: '模型' })).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: 'Agent 权限模式' })
+    ).toBeDisabled()
+    expect(screen.getByRole('button', { name: '思考档位' })).toBeDisabled()
+  })
+
+  it('#796 R3：无会话可回落时不渲染 chips（无配置真值不编造）', () => {
+    renderComposer({ config: { workspaceId: 'ws1', session: null } })
+    expect(
+      screen.queryByRole('button', { name: 'Agent 权限模式' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '模型' })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
+  })
+
+  it('#796 R3：有激活会话时 chips 照常可交互（回归）', () => {
+    renderWithConfig()
+    expect(screen.getByRole('button', { name: '模型' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Agent 权限模式' })).toBeEnabled()
+  })
+
   it('keeps menu keys unique for colon-containing ids (#733 R7-P2-a)', async () => {
     // id="a:b" 的组头与 id="a" + value="b" 的选项在旧编码下共享同一个
     // React key（entry:a:b）；菜单必须完整渲染两项、提交精确、无重复 key 告警。

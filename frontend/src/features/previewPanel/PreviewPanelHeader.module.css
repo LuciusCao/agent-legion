@@ -1,21 +1,15 @@
 /*
- * PreviewPanelSection 头部布局（#528 开关 + #796 返工的治理行迁入）：
- * 第一行标题/徽标/模式开关/定制入口，第二行（admin 且有草稿或已发布）
- * 治理状态行 + 紧凑按钮组。两行克制排布，不挤成一团。
+ * PreviewPanelSection 头部布局（#528 开关 + #796 返工的治理行迁入，R3 精修
+ * 为单行）：标题/徽标/状态 Chip/模式开关/定制入口/治理溢出菜单单行排列、
+ * 垂直居中，flex-wrap 兜底窄栏（actionError 落第二行的小字红条）。
  */
 
 .header {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.titleRow {
-  display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
 .title {
@@ -48,7 +42,7 @@
 .modeButton {
   border: none;
   background: transparent;
-  padding: 3px 10px;
+  padding: 2px 8px;
   font-size: 12px;
   color: var(--color-text-secondary, #43474e);
   cursor: pointer;
@@ -79,21 +73,7 @@
   background: rgba(0, 0, 0, 0.04);
 }
 
-/* 治理行（admin-only）：状态行 + 三个人工动作，紧凑按钮组。 */
-.govRow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.govStatus {
-  flex: 1;
-  min-width: 160px;
-  font-size: 12px;
-  color: var(--color-text-secondary, #43474e);
-}
-
+/* 治理动作失败的行内紧凑红字：占满一行但不撑开行高。 */
 .govError {
   flex-basis: 100%;
   color: #ba1a1a;

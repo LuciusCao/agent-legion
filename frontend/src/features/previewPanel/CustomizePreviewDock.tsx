@@ -66,6 +66,7 @@ export function CustomizePreviewDock({
             emptyState="选择 Agent，点「＋ 新对话」开始"
             noSessionReason="先选择会话或新建对话"
             closedReason="会话已关闭或中断，点「继续对话」恢复"
+            showAgentConfig
             onApplyWorkflowDraft={() => undefined}
           />
         )}

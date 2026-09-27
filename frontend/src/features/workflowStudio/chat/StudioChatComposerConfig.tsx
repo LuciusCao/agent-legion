@@ -22,10 +22,17 @@ import styles from './StudioChatComposer.module.css'
  * 左组（权限模式 + 漂移/错误提示）与右组（上下文圆环 + 模型/思考档位/高级）
  * 经 fragment 直接成为 toolbar 的 flex 子项，右推由 configRight 的
  * margin-left:auto 承担；圆环经 contextRing 注入右组最左（模型芯片左边），
- * 无配置面的 agent 也要保留圆环（spacer + 圆环）。 */
+ * 无配置面的 agent 也要保留圆环（spacer + 圆环）。
+ * #796 R3：chips 常驻——无激活会话时 AgentChatPanel 回落传入该 workspace
+ * 最近一个有配置面的历史会话并置 readOnly（chips 只读展示，开聊后才能改；
+ * 配置值是 ACP 会话握手的广告面，无会话就没有真值，历史会话的值是
+ * 「默认值/当前选择」的唯一诚实来源），避免开聊前后工具行布局跳变。 */
 export function StudioChatComposerConfig(props: {
   workspaceId: string | undefined
   session: StudioChatSessionRecord | null
+  /** #796 R3 chips 常驻：session 为回落的历史会话时只读禁用（无激活会话，
+   * 切换动作锚定真实会话；回落选择由 AgentChatPanel 完成）。 */
+  readOnly?: boolean
   contextRing: ReactNode
 }) {
   const config = useStudioChatAgentConfig(props.workspaceId, props.session)
@@ -42,10 +49,14 @@ export function StudioChatComposerConfig(props: {
         {props.contextRing}
       </>
     )
-  // 与输入框的禁用条件对齐：终态会话（closed/error）上切配置只会得到 409。
+  // 与输入框的禁用条件对齐：终态会话（closed/error）上切配置只会得到 409；
+  // 只读回落（无激活会话）一律禁用。
   const status = config.session?.status
   const busy =
-    config.pending !== null || status === 'closed' || status === 'error'
+    config.pending !== null ||
+    status === 'closed' ||
+    status === 'error' ||
+    props.readOnly === true
   const modelText = view.model
     ? (flattenOptions(view.model.options).find(
         (option) => option.value === view.model!.currentValue
