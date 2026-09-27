@@ -58,7 +58,10 @@
   background: rgba(0, 0, 0, 0.04);
 }
 
-.modeButtonActive {
+/* hover 停在激活段上时 :hover（类+伪类）会压过激活底色——白字落在浅灰
+ * 上不可读；激活态连同 hover 一并钉深色。 */
+.modeButtonActive,
+.modeButtonActive:hover {
   background: #1a1c1e;
   color: #ffffff;
 }
