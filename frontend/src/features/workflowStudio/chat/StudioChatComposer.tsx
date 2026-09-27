@@ -11,12 +11,15 @@ type Props = {
   disabled: boolean
   disabledReason: string | null
   onSend: (text: string) => void
-  /** 仅 Studio 传：权限模式/模型/思考档位的紧凑芯片（数据层复用
-   * useStudioChatAgentConfig）；diagnosis/preview 不传，工具行只有发送按钮，
+  /** 仅 Studio / 定制预览 Dock 传：权限模式/模型/思考档位的紧凑芯片（数据层
+   * 复用 useStudioChatAgentConfig）；diagnosis 不传，工具行只有发送按钮，
    * 不造空槽位。 */
   config?: {
     workspaceId: string | undefined
     session: StudioChatSessionRecord | null
+    /** #796 R3 chips 常驻：session 为回落的历史会话时只读（无激活会话，
+     * 切换动作无锚点）。 */
+    readOnly?: boolean
   }
   /** 会话状态行（运行/排队摘要/恢复入口，AgentChatStatusStrip），渲染为工具行
    * 最左 flex 子项——与取消/发送按钮同一行、垂直居中对齐（#787 对齐修复）；
@@ -90,6 +93,7 @@ export function StudioChatComposer(props: Props) {
             <StudioChatComposerConfig
               workspaceId={props.config.workspaceId}
               session={props.config.session}
+              readOnly={props.config.readOnly ?? false}
               contextRing={contextRing}
             />
           ) : (
@@ -102,7 +106,6 @@ export function StudioChatComposer(props: Props) {
             <StudioChatCancelButton onCancel={props.onCancel} />
           )}
           <button
-            type="button"
             className={styles.sendButton}
             disabled={props.disabled || !text.trim()}
             onClick={submit}

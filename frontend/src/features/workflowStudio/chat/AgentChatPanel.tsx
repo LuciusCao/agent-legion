@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { StudioChat } from './useStudioChat'
 import { useStudioChatQueue } from './useStudioChatQueue'
 import { StudioChatMessageList } from './StudioChatMessageList'
+import { agentConfigView } from './agentConfigView'
 import { AgentChatStatusStrip } from './AgentChatStatusStrip'
 import { contextUsageFromSession } from './StudioChatContextRing'
 import { StudioChatQueueBar } from './StudioChatQueueBar'
@@ -39,7 +40,9 @@ type Props = {
  * 取消按钮从状态行移到工具行发送/排队按钮旁，仅运行中显示），发送队列在此
  * 内部接线（busy 时发送入队而非直发撞后端单 turn 原子认领的 409）。差异点
  * 全部经插槽/参数注入；agent 列表守卫与各载体的治理面（发布/归档等）留在
- * 调用方。 */
+ * 调用方。
+ * #796 R3：composer chips 常驻——无激活会话时回落该 workspace 最近一个有
+ * 配置面的历史会话只读展示（readOnly；切换锚定真实会话，回落会话不可改）。 */
 export function AgentChatPanel(props: Props) {
   const { chat } = props
   // busy（运行中）不再禁用输入：发送会进入前端队列（见 useStudioChatQueue）。
@@ -60,6 +63,12 @@ export function AgentChatPanel(props: Props) {
       : compacting
         ? '正在压缩上下文，完成后即可发送'
         : null
+  // #796 R3 chips 常驻：无激活会话时回落最近一个有配置面的历史会话
+  // （agentConfigView 可见性判定），只读展示。
+  const fallbackSession =
+    chat.session === null
+      ? (chat.sessions.find((s) => agentConfigView(s).visible) ?? null)
+      : null
 
   return (
     <div
@@ -114,7 +123,11 @@ export function AgentChatPanel(props: Props) {
         onSend={queue.submit}
         config={
           props.showAgentConfig
-            ? { workspaceId: props.workspaceId, session: chat.session }
+            ? {
+                workspaceId: props.workspaceId,
+                session: chat.session ?? fallbackSession,
+                readOnly: chat.session === null && fallbackSession !== null,
+              }
             : undefined
         }
         statusSlot={<AgentChatStatusStrip chat={chat} queue={queue} />}

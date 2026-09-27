@@ -27,19 +27,20 @@ export function usePublishedPreviewPanel(workspaceId: string | undefined) {
 }
 
 /**
- * 治理面状态（published + draft）。customizing（「定制预览」对话开着）时
- * 轮询：agent 经 MCP 写草稿后左栏/对话框内预览「改一版看一版」（仅当前
- * 用户可见——草稿渲染是本页面的客户端状态，不落任何共享通道）。
+ * 治理面状态（published + draft）。enabled 时轮询：agent 经 MCP 写草稿后
+ * 左栏预览「改一版看一版」（仅当前用户可见——草稿渲染是本页面的客户端
+ * 状态，不落任何共享通道）。#796 返工后由调用方按 admin 身份常驻开启
+ * （头部治理行需要草稿状态，原来只在「定制预览」面板开着时启用）。
  */
 export function usePreviewPanelState(
   workspaceId: string | undefined,
-  customizing: boolean
+  enabled: boolean
 ) {
   return useQuery({
     queryKey: previewPanelKeys.state(workspaceId ?? ''),
     queryFn: () => fetchPreviewPanelState(workspaceId!),
-    enabled: Boolean(workspaceId) && customizing,
-    refetchInterval: customizing ? 3000 : false,
+    enabled: Boolean(workspaceId) && enabled,
+    refetchInterval: enabled ? 3000 : false,
   })
 }
 

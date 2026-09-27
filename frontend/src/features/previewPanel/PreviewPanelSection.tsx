@@ -1,30 +1,45 @@
 /**
- * 左栏内容预览分区（issue #328）：
+ * 左栏内容预览分区（issue #328 / #528 / #796 返工）：
  * - workspace 有已发布预览面板 bundle → 沙箱 iframe 渲染它（整栏接管）；
- * - 无 → 渲染 fallback（question 的内置 bundle / 通用产物预览，由调用方组装）；
- * - 「定制预览」按钮唤起 Studio 对话（agent 写草稿）；草稿**不自动执行**
- *   （#347 P1）：agent（或提示注入产物）写入的 HTML 只有在当前用户显式点
- *   「预览此草稿」后才作为 srcDoc 挂载——右栏聊天会给出草稿元信息提示，
- *   点击预览是逐次授权：重开对话框、草稿消失（发布/归档的 null 过渡）、
- *   切换 job/workspace、草稿内容变化（save_draft 覆盖）四者都使授权失效，
- *   新草稿/新上下文不继承旧授权（避免一次点击永久放行）。授权的快照与
- *   render 期派生比对抽在 useDraftAuthorization（#500 P1-3/P1-5）；发布
- *   永远是人工动作。
- * - #615：授权后草稿双通道渲染——左栏（全宽）与对话框内嵌预览区
- *   （CustomizePreviewPane，对话与预览同屏）共用同一 draftPreview 判定；
- *   左栏保留，对话框不再是「关掉才能看预览」的单向门。
- * 定制入口 admin-only（与 WorkspaceMoreMenu 的 Studio 项同一惯例，P4/STUDIO-AGENT-001：
- * 治理面端点本身 admin/scoped-only，非 admin 点开只会收获一串 403）。
+ *   无 → 渲染 fallback（question 的内置 bundle / 通用产物预览，由调用方组装）；
+ * - #528 预览开关：已发布即永久接管没有退出路径，「恢复默认」是归档治理
+ *   动作不是「暂时不看了」。头部加「定制面板 | 原始界面」开关——纯客户端
+ *   查看偏好（previewDisplayMode 按 workspace 存 localStorage，默认定制
+ *   面板），关闭后回落 fallback；非 admin 可用（查看偏好非治理动作）；
+ *   draftPreview 草稿预览态优先级高于开关，不被拦断。
+ * - 草稿**不自动执行**（#347 P1）：agent（或提示注入产物）写入的 HTML 只有
+ *   在当前用户显式点「预览此草稿」后才作为 srcDoc 挂载——点击预览是逐次
+ *   授权：关面板、草稿消失（发布/归档的 null 过渡）、切换 job/workspace、
+ *   草稿内容变化（save_draft 覆盖）四者都使授权失效，新草稿/新上下文不
+ *   继承旧授权（避免一次点击永久放行）。授权的快照与 render 期派生比对抽
+ *   在 useDraftAuthorization（#500 P1-3/P1-5）；发布永远是人工动作。
+ * - #796 返工：治理动作（预览此草稿/发布草稿/恢复默认）与草稿状态行从
+ *   Dock footer 迁到本区头部（PreviewPanelHeader）；Dock 收敛为纯对话
+ *   （AgentPanelDock + AgentChatPanel，见 CustomizePreviewDock）。草稿的
+ *   渲染目标是本区既有 PreviewPanelHost（与已发布版本同一挂载点、同一
+ *   draftPreview 判定）——「预览此草稿」在 Dock 未开时会同时唤起 Dock，
+ *   授权仍锚定 Dock 会话（#347 P1 语义不变）。
+ * 定制入口与治理行 admin-only（与 WorkspaceMoreMenu 的 Studio 项同一惯例，
+ * P4/STUDIO-AGENT-001：治理面端点本身 admin/scoped-only，非 admin 点开只会
+ * 收获一串 403）；#528 开关不受此限。
  */
 import { useState, type ReactNode } from 'react'
 import { useAuthStore } from '../../stores/authStore'
 import { PreviewPanelHost } from './PreviewPanelHost'
 import { previewHostKey } from './bundleKey'
-import { CustomizePreviewDialog } from './CustomizePreviewDialog'
+import { CustomizePreviewDock } from './CustomizePreviewDock'
+import { PreviewPanelHeader } from './PreviewPanelHeader'
+import {
+  savePreviewDisplayMode,
+  resolvePreviewDisplayMode,
+  type PreviewDisplayMode,
+  type PreviewDisplayModeOverride,
+} from './previewDisplayMode'
 import {
   usePreviewPanelState,
   usePublishedPreviewPanel,
 } from './usePreviewPanel'
+import { usePreviewGovernance } from './usePreviewGovernance'
 import { useDraftAuthorization } from './useDraftAuthorization'
 import styles from './PreviewPanelSection.module.css'
 
@@ -40,8 +55,10 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
   const [customizing, setCustomizing] = useState(false)
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const publishedQuery = usePublishedPreviewPanel(workspaceId)
-  // 治理面状态查询只在 admin 打开对话框时启用：非 admin 永远不发 403 轮询。
-  const stateQuery = usePreviewPanelState(workspaceId, customizing && isAdmin)
+  // 治理面状态对 admin 常驻轮询（头部治理行需要草稿状态；原来只在面板
+  // 打开时启用）；非 admin 永远不发 403 轮询。
+  const stateQuery = usePreviewPanelState(workspaceId, isAdmin)
+  const governance = usePreviewGovernance(workspaceId)
   const published = publishedQuery.data ?? null
   const draft = stateQuery.data?.draft ?? null
   // #347 P1 / #500：草稿执行是逐次授权——快照、render 期派生比对与收尾
@@ -55,28 +72,50 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
   // 取自同一版本——指纹是服务端 sha256，前端不自算（codex P2，见 bundleKey）。
   const bundleVersion = draftPreview ? draft : published
 
-  const closeCustomizing = () => setCustomizing(false)
+  // #528：查看偏好。override 记录「本次会话内手动切换的 workspace 与
+  // 模式」；override 与当前 workspace 不符（含未切换过）时现读该
+  // workspace 的存储偏好——react-router 复用组件实例跨 workspace 导航时
+  // 不会把 ws1 的会话内覆盖串到 ws2（解析规则抽在 previewDisplayMode）。
+  const [modeOverride, setModeOverride] =
+    useState<PreviewDisplayModeOverride | null>(null)
+  const mode = resolvePreviewDisplayMode(workspaceId, modeOverride)
+  // draftPreview 优先于开关（issue #528 验收：授权预览草稿不被开关拦断）。
+  const showCustomBundle = draftPreview || mode === 'custom'
+
+  function selectMode(next: PreviewDisplayMode) {
+    if (!workspaceId) return
+    setModeOverride({ workspaceId, mode: next })
+    savePreviewDisplayMode(workspaceId, next)
+  }
 
   return (
     <section className={styles.root} data-testid="preview-panel-section">
       {workspaceId && (
-        <header className={styles.header}>
-          <h2 className={styles.title}>内容预览</h2>
-          {draftPreview && (
-            <span className={styles.draftBadge}>草稿预览中</span>
-          )}
-          {isAdmin && (
-            <button
-              type="button"
-              className={styles.customizeButton}
-              onClick={() => setCustomizing(true)}
-            >
-              定制预览
-            </button>
-          )}
-        </header>
+        <PreviewPanelHeader
+          isAdmin={isAdmin}
+          draftPreview={draftPreview}
+          draft={draft}
+          published={published}
+          showModeToggle={Boolean(published?.html)}
+          mode={mode}
+          onSelectMode={selectMode}
+          publishing={governance.publishing}
+          actionError={governance.actionError}
+          onPreviewDraft={() => {
+            // 按钮 disabled={!draft}（PreviewPanelHeader）保证点击时草稿
+            // 已可见；快照取当前轮询帧的 html_hash。授权锚定 Dock 会话：
+            // Dock 未开时先唤起（关 Dock 授权即失效，#347 P1 语义不变）。
+            if (draft) {
+              setCustomizing(true)
+              auth.authorize(draft)
+            }
+          }}
+          onPublish={governance.publish}
+          onArchive={governance.archive}
+          onCustomize={() => setCustomizing(true)}
+        />
       )}
-      {bundleVersion?.html ? (
+      {showCustomBundle && bundleVersion?.html ? (
         // key = jobId + 服务端 html_hash（codex P2，指纹抽在 bundleKey）：
         // 草稿轮询更新 bundle 时若沿用旧 iframe，React 在同一 contentWindow
         // 上做 srcDoc 导航——旧文档仍在途的桥请求会由宿主把响应投递给同一
@@ -92,17 +131,9 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
         fallback
       )}
       {customizing && isAdmin && workspaceId && (
-        <CustomizePreviewDialog
+        <CustomizePreviewDock
           workspaceId={workspaceId}
-          jobId={jobId}
-          state={stateQuery.data ?? null}
-          previewDraft={auth.isAuthorized && draft !== null}
-          onPreviewDraft={() => {
-            // 真实按钮 disabled={!draft}（CustomizePreviewDialog）保证点击
-            // 时草稿已可见；快照取当前轮询帧的 html_hash。
-            if (draft) auth.authorize(draft)
-          }}
-          onClose={closeCustomizing}
+          onClose={() => setCustomizing(false)}
         />
       )}
     </section>

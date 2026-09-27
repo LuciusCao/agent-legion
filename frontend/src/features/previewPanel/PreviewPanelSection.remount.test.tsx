@@ -37,34 +37,40 @@ vi.mock('./previewPanelApi', () => ({
   fetchPreviewPanelState: (...args: unknown[]) => mockFetchState(...args),
 }))
 
-// 对话框本体（Studio chat 封装）在 CustomizePreviewDialog 自己的测试覆盖；
-// 这里只需要「预览此草稿」按钮与草稿送达信号（data-hasdraft），mock 形状
-// 与 PreviewPanelSection.test.tsx 保持一致。
-vi.mock('./CustomizePreviewDialog', () => ({
-  CustomizePreviewDialog: ({
-    onPreviewDraft,
-    onClose,
-    state,
-    previewDraft,
-    jobId,
-  }: {
-    onPreviewDraft: () => void
-    onClose: () => void
-    state: { draft?: unknown } | null
-    previewDraft: boolean
-    jobId: string
-  }) => (
-    <div
-      data-testid="customize-dialog"
-      data-hasdraft={String(Boolean(state?.draft))}
-      data-previewdraft={String(previewDraft)}
-      data-jobid={jobId}
-    >
-      <button onClick={onPreviewDraft}>预览此草稿</button>
+// Dock 本体（Studio chat + AgentPanelDock 容器）在 CustomizePreviewDock 自己
+// 的测试覆盖；这里只需要「关闭」出口（mock 形状与
+// PreviewPanelSection.test.tsx 保持一致）。「预览此草稿」外露出头部治理区
+// （#796 R4），直接点真按钮。
+vi.mock('./CustomizePreviewDock', () => ({
+  CustomizePreviewDock: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="customize-dialog">
       <button onClick={onClose}>关闭</button>
     </div>
   ),
 }))
+
+// 该 jsdom 环境不提供 localStorage：用内存 stub（#528 模式偏好按 workspace
+// 持久化；与 PreviewPanelSection.test.tsx 同模式）。
+function installLocalStorageStub() {
+  const store = new Map<string, string>()
+  const stub: Storage = {
+    get length() {
+      return store.size
+    },
+    clear: () => store.clear(),
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    removeItem: (key) => void store.delete(key),
+    setItem: (key, value) => void store.set(key, String(value)),
+  }
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: stub,
+  })
+  return stub
+}
+
+installLocalStorageStub()
 
 function makeVersion(
   html: string,
@@ -164,7 +170,8 @@ describe('PreviewPanelSection 重挂语义（bundleKey）', () => {
         await vi.runOnlyPendingTimersAsync()
       })
       // 打开定制对话启用草稿轮询（3s refetchInterval）。草稿不自动执行
-      // （#347 P1）：显式预览后左栏才切到草稿 v1 渲染。
+      // （#347 P1）：显式预览后左栏才切到草稿 v1 渲染。「预览此草稿」外露
+      // 出头部治理区（#796 R4），直接点真按钮。
       fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
