@@ -203,6 +203,9 @@ export function useStudioChat(workspaceId: string | undefined) {
       await queryClient.invalidateQueries({
         queryKey: queryKeys.studioChatSessions(workspaceId),
       })
+      // 第二个异步窗口（codex P2 第六轮）：invalidate 的 refetch 在途时
+      // 也可能切了 workspace——写入前复检，上面的守卫只盖住第一个 await。
+      if (workspaceIdRef.current !== workspaceId) return
       setSession(created)
       setActiveSessionId(created.id)
     } catch (error) {
@@ -294,16 +297,16 @@ export function useStudioChat(workspaceId: string | undefined) {
   )
   // 切换 workspace（React Router 复用组件实例）时清空旧选中：残留 id 会让
   // 记忆恢复效应被 !== null 跳过、写效应把旧 id 写进新 workspace 的记忆。
-  // codex P2 复审轮（#796）：一并重置 actionError/starting/session——A 的
-  // 错误与「创建中」态不得泄漏进 B 的头部/按钮；ref 快照同步换到新
-  // workspace（迟到响应守卫的比对基准）。
+  // codex P2 复审轮（#796）：一并重置 actionError/starting——A 的错误与
+  // 「创建中」态不得泄漏进 B 的头部/按钮；ref 快照同步换到新 workspace
+  // （迟到响应守卫的比对基准）。session/messages 由上方入口 effect 随
+  // activeSessionId 置空联动复位，这里不重复清。
   useEffect(() => {
     workspaceIdRef.current = workspaceId
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换时重置选中与瞬态（与上方消息重置同一模式）
     setActiveSessionId(null)
     setActionError(null)
     setStarting(false)
-    setSession(null)
   }, [workspaceId])
   // 按 workspace 记忆选中会话；未选择时恢复上次或回落最近会话。
   useStudioChatSessionMemory(

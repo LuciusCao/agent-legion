@@ -641,6 +641,45 @@ describe('useStudioChat', () => {
     expect(view.result.current.actionError).toBeNull()
   })
 
+  it('codex P2 第六轮：startSession 第二个异步窗口——invalidate 在途时切 workspace，落地不写 A 的会话', async () => {
+    // 创建已成功（第一守卫通过），invalidateQueries 的 refetch 挂起（第二
+    // 窗口敞开）→ 切 ws2 → resolve → 不写 A 的 created。
+    mockApi.fetchStudioChatSessions.mockImplementation((ws: string) =>
+      Promise.resolve(ws === 'ws1' ? [sessionRecord()] : [])
+    )
+    mockApi.createStudioChatSession.mockResolvedValue(
+      sessionRecord({ id: 's-new' })
+    )
+    let resolveInvalidate!: () => void
+    vi.spyOn(testClient, 'invalidateQueries').mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveInvalidate = resolve
+        })
+    )
+    const view = renderHook(({ ws }: { ws: string }) => useStudioChat(ws), {
+      wrapper,
+      initialProps: { ws: 'ws1' },
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalled()
+    )
+    await act(async () => {
+      void view.result.current.startSession('kimi')
+    })
+    await waitFor(() =>
+      expect(mockApi.createStudioChatSession).toHaveBeenCalled()
+    )
+
+    view.rerender({ ws: 'ws2' })
+    await act(async () => {
+      resolveInvalidate()
+    })
+    // 不写 A 的会话（无修复时这里会是 s-new——revert 即红）。
+    expect(view.result.current.activeSessionId).toBeNull()
+    expect(view.result.current.session).toBeNull()
+  })
+
   it('clears the active session when the workspace changes', async () => {
     mockApi.fetchStudioChatSessions.mockImplementation((workspaceId: string) =>
       Promise.resolve(workspaceId === 'ws1' ? [sessionRecord()] : [])
