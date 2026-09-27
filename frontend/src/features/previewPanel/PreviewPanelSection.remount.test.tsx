@@ -37,31 +37,40 @@ vi.mock('./previewPanelApi', () => ({
   fetchPreviewPanelState: (...args: unknown[]) => mockFetchState(...args),
 }))
 
-// 面板本体（Studio chat 封装 + Dock 容器）在 CustomizePreviewDock 自己的
-// 测试覆盖；这里只需要「预览此草稿」按钮与草稿送达信号（data-hasdraft），
-// mock 形状与 PreviewPanelSection.test.tsx 保持一致。
+// Dock 本体（Studio chat + AgentPanelDock 容器）在 CustomizePreviewDock 自己
+// 的测试覆盖；这里只需要「关闭」出口（mock 形状与
+// PreviewPanelSection.test.tsx 保持一致）。「预览此草稿」是预览区头部的
+// 真实按钮（#796 返工后治理动作迁出 Dock），直接点真按钮。
 vi.mock('./CustomizePreviewDock', () => ({
-  CustomizePreviewDock: ({
-    onPreviewDraft,
-    onClose,
-    state,
-    previewDraft,
-  }: {
-    onPreviewDraft: () => void
-    onClose: () => void
-    state: { draft?: unknown } | null
-    previewDraft: boolean
-  }) => (
-    <div
-      data-testid="customize-dialog"
-      data-hasdraft={String(Boolean(state?.draft))}
-      data-previewdraft={String(previewDraft)}
-    >
-      <button onClick={onPreviewDraft}>预览此草稿</button>
+  CustomizePreviewDock: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="customize-dialog">
       <button onClick={onClose}>关闭</button>
     </div>
   ),
 }))
+
+// 该 jsdom 环境不提供 localStorage：用内存 stub（#528 模式偏好按 workspace
+// 持久化；与 PreviewPanelSection.test.tsx 同模式）。
+function installLocalStorageStub() {
+  const store = new Map<string, string>()
+  const stub: Storage = {
+    get length() {
+      return store.size
+    },
+    clear: () => store.clear(),
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    removeItem: (key) => void store.delete(key),
+    setItem: (key, value) => void store.set(key, String(value)),
+  }
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: stub,
+  })
+  return stub
+}
+
+installLocalStorageStub()
 
 function makeVersion(
   html: string,

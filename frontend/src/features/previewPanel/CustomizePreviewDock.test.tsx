@@ -1,32 +1,26 @@
 /**
- * CustomizePreviewDock 的治理面测试（issue #328 / #347 P1 / #795 PR① /
- * #796 返工）：发布/恢复默认是人工按钮（走 previewPanelApi mutation），
- * 「预览此草稿」是显式动作且仅在有草稿时可点（草稿执行不自动发生——
- * section 层门控与左栏渲染测试见 PreviewPanelSection.test.tsx）；agent
- * 列表缺失时给出提示；chat 本体由 workflowStudio/chat 自己的测试覆盖，
- * 这里 mock 其 API 层。
- * #795 PR①：容器迁为 AgentPanelDock（surface "customize-preview"）——
- * 拖拽/折叠/记忆/焦点等容器行为在 agentPanelDock 自己的测试钉住，这里
- * 只补一条「非模态 surface」的集成断言（底层页面不进 aria-hidden）。
- * #796 验收返工：面板内嵌预览区已撤——面板 = AgentPanelDock +
- * AgentChatPanel + 治理 footer 的薄组合，断言面板内不再出现草稿
- * iframe（草稿渲染目标只有左栏既有通道）。
+ * CustomizePreviewDock 的测试（issue #328 / #795 PR① / #796 验收返工 R2）：
+ * Dock = AgentPanelDock + AgentChatPanel（定制预览会话）的纯对话薄组合——
+ * 面板内无治理 footer、无 agent 引导文案、无内嵌预览（治理动作与草稿状态
+ * 行已迁 PreviewPanelSection 头部，见该文件的测试）；agent 列表缺失时给出
+ * 提示；chat 本体由 workflowStudio/chat 自己的测试覆盖，这里 mock 其 API 层。
+ * 容器行为（拖拽/折叠/记忆/焦点/非模态）在 agentPanelDock 的测试钉住，
+ * 这里只补一条非模态集成断言与「无私有 UI」断言。
+ * composer 贴底是 flex 布局契约（AgentChatPanel.chatPanel 高度链 +
+ * .messages/.emptyState flex:1），jsdom 测不了布局，由截图验收钉住。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { CustomizePreviewDock } from './CustomizePreviewDock'
-import * as previewPanelApi from './previewPanelApi'
 import * as chatApi from '../workflowStudio/chat/studioChatApi'
 import type { StudioChatSessionRecord } from '../workflowStudio/chat/studioChatApi'
 import { EventSourceMock } from '../../testing/eventSourceMock'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 
-vi.mock('./previewPanelApi')
 vi.mock('../workflowStudio/chat/studioChatApi')
 vi.mock('../workflowStudio/chat/studioChatResumeApi')
 
-const mockPanelApi = vi.mocked(previewPanelApi)
 const mockChatApi = vi.mocked(chatApi)
 
 // 该 jsdom 环境不提供 localStorage：用内存 stub（Dock 容器按 surface key
@@ -76,45 +70,13 @@ function sessionRecord(
   }
 }
 
-function makeVersion(
-  status: 'draft' | 'published',
-  html = '<!doctype html><html><body>x</body></html>'
-): previewPanelApi.PreviewPanelVersion {
-  return {
-    id: `id-${status}`,
-    workspace_id: 'ws1',
-    entity_key: 'default',
-    version: 1,
-    status,
-    html,
-    html_hash: 'hash',
-    created_by: status === 'draft' ? 'studio-agent:u1' : 'user:u1',
-    change_note: null,
-    created_at: '2026-09-01T00:00:00Z',
-    published_at: status === 'published' ? '2026-09-01T00:00:00Z' : null,
-  }
-}
-
-function renderDock(
-  state: previewPanelApi.PreviewPanelState | null,
-  previewDraft = false,
-  onPreviewDraft: () => void = vi.fn()
-) {
-  return {
-    onPreviewDraft,
-    ...render(
-      (
-        <CustomizePreviewDock
-          workspaceId="ws1"
-          state={state}
-          previewDraft={previewDraft}
-          onPreviewDraft={onPreviewDraft}
-          onClose={() => undefined}
-        />
-      ) as ReactElement,
-      { wrapper: TestQueryProvider }
-    ),
-  }
+function renderDock() {
+  return render(
+    (
+      <CustomizePreviewDock workspaceId="ws1" onClose={() => undefined} />
+    ) as ReactElement,
+    { wrapper: TestQueryProvider }
+  )
 }
 
 beforeEach(() => {
@@ -126,11 +88,6 @@ beforeEach(() => {
   mockChatApi.fetchStudioChatAgents.mockResolvedValue([])
   mockChatApi.fetchStudioChatSessions.mockResolvedValue([])
   mockChatApi.fetchStudioChatMessages.mockResolvedValue([])
-  mockPanelApi.publishPreviewPanel.mockResolvedValue(makeVersion('published'))
-  mockPanelApi.archivePreviewPanel.mockResolvedValue({
-    published: null,
-    draft: null,
-  })
 })
 
 const originalEventSource = globalThis.EventSource
@@ -139,18 +96,12 @@ afterEach(() => {
 })
 
 describe('CustomizePreviewDock', () => {
-  it('#795 PR①：非模态 Dock surface——role=dialog 但 aria-modal=false，底层页面不进 aria-hidden、无 MuiModal 体系', async () => {
+  it('非模态 Dock surface——role=dialog 但 aria-modal=false，底层页面不进 aria-hidden、无 MuiModal 体系', async () => {
     render(
       (
         <div>
           <button type="button">底层左栏按钮</button>
-          <CustomizePreviewDock
-            workspaceId="ws1"
-            state={null}
-            previewDraft={false}
-            onPreviewDraft={() => undefined}
-            onClose={() => undefined}
-          />
+          <CustomizePreviewDock workspaceId="ws1" onClose={() => undefined} />
         </div>
       ) as ReactElement,
       { wrapper: TestQueryProvider }
@@ -166,118 +117,34 @@ describe('CustomizePreviewDock', () => {
     expect(underlying.closest('[aria-hidden="true"]')).toBeNull()
   })
 
-  it('#796 返工：面板 = Dock + 对话 + 治理 footer——无内嵌预览区、不挂草稿 iframe', async () => {
+  it('#796 返工 R2：纯对话面板——无治理 footer、无 agent 引导文案、无内嵌预览/iframe', async () => {
     mockChatApi.fetchStudioChatAgents.mockResolvedValue([
       { id: 'kimi', label: 'Kimi' },
     ] as never)
-    // 有草稿且已授权（previewDraft=true）也不在面板内渲染：草稿的渲染
-    // 目标只有左栏既有通道（PreviewPanelSection 的 PreviewPanelHost）。
-    renderDock({ published: null, draft: makeVersion('draft') }, true)
-    await screen.findByRole('dialog', { name: '定制预览面板' })
+    renderDock()
+    const surface = await screen.findByRole('dialog', { name: '定制预览面板' })
+    // 治理动作与状态行已迁 PreviewPanelSection 头部：面板内一律不出现。
+    expect(screen.queryByRole('button', { name: '预览此草稿' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '发布草稿' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '恢复默认' })).toBeNull()
+    expect(screen.queryByText(/草稿 v1/)).toBeNull()
+    // 给 agent 看的引导文案不展示给用户。
+    expect(screen.queryByText(/get_preview_guide/)).toBeNull()
+    // 无内嵌预览区、不挂任何 iframe（草稿渲染目标只有左栏既有通道）。
     expect(screen.queryByTestId('customize-preview-pane')).toBeNull()
-    expect(screen.queryByText(/草稿预览（仅本页可见/)).toBeNull()
-    const surface = screen.getByRole('dialog', { name: '定制预览面板' })
     expect(surface.querySelector('iframe')).toBeNull()
-    // 对话与治理操作都在：会话栏、消息输入、三个 footer 动作。
+    // 对话骨架在：会话栏 + 空态 + 消息输入（composer）。
     expect(
       await screen.findByText('选择 Agent，点「＋ 新对话」开始')
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: '预览草稿中' })
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '发布草稿' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '恢复默认' })).toBeInTheDocument()
+    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
   })
 
   it('无可用 agent 时提示配置', async () => {
-    renderDock(null)
+    renderDock()
     expect(
       await screen.findByText(/未检测到可用的 ACP agent/)
     ).toBeInTheDocument()
-  })
-
-  it('无草稿时「预览此草稿」与发布按钮均禁用，有草稿时可点击', async () => {
-    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
-      { id: 'kimi', label: 'Kimi' },
-    ] as never)
-    const { unmount } = renderDock({ published: null, draft: null })
-    const previewButton = await screen.findByRole('button', {
-      name: '预览此草稿',
-    })
-    expect(previewButton).toBeDisabled()
-    const publishButton = screen.getByRole('button', { name: '发布草稿' })
-    expect(publishButton).toBeDisabled()
-    unmount()
-
-    const onPreviewDraft = vi.fn()
-    renderDock(
-      { published: null, draft: makeVersion('draft') },
-      false,
-      onPreviewDraft
-    )
-    const enabledPreview = await screen.findByRole('button', {
-      name: '预览此草稿',
-    })
-    expect(enabledPreview).toBeEnabled()
-    expect(onPreviewDraft).not.toHaveBeenCalled()
-    fireEvent.click(enabledPreview)
-    expect(onPreviewDraft).toHaveBeenCalledTimes(1)
-  })
-
-  it('左栏预览中时按钮显示「预览草稿中」状态', async () => {
-    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
-      { id: 'kimi', label: 'Kimi' },
-    ] as never)
-    renderDock({ published: null, draft: makeVersion('draft') }, true, vi.fn())
-    expect(
-      await screen.findByRole('button', { name: '预览草稿中' })
-    ).toBeInTheDocument()
-  })
-
-  it('有草稿时发布按钮可点击并调用发布 API', async () => {
-    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
-      { id: 'kimi', label: 'Kimi' },
-    ] as never)
-    renderDock({ published: null, draft: makeVersion('draft') })
-    const enabledPublish = await screen.findByRole('button', {
-      name: '发布草稿',
-    })
-    expect(enabledPublish).toBeEnabled()
-    fireEvent.click(enabledPublish)
-    await waitFor(() =>
-      expect(mockPanelApi.publishPreviewPanel).toHaveBeenCalledWith('ws1')
-    )
-  })
-
-  it('恢复默认需确认，确认后调用归档 API', async () => {
-    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
-      { id: 'kimi', label: 'Kimi' },
-    ] as never)
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    renderDock({ published: makeVersion('published'), draft: null })
-
-    const archiveButton = await screen.findByRole('button', {
-      name: '恢复默认',
-    })
-    fireEvent.click(archiveButton)
-    await waitFor(() =>
-      expect(mockPanelApi.archivePreviewPanel).toHaveBeenCalledWith('ws1')
-    )
-    confirmSpy.mockRestore()
-  })
-
-  it('状态栏展示草稿与已发布版本归属', async () => {
-    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
-      { id: 'kimi', label: 'Kimi' },
-    ] as never)
-    renderDock({
-      published: makeVersion('published'),
-      draft: makeVersion('draft'),
-    })
-    expect(
-      await screen.findByText(/草稿 v1（studio-agent:u1）/)
-    ).toBeInTheDocument()
-    expect(screen.getByText(/已发布 v1/)).toBeInTheDocument()
   })
 
   it('#695：busy 时发送进入队列而不是直发撞 409', async () => {
@@ -288,7 +155,7 @@ describe('CustomizePreviewDock', () => {
       sessionRecord({ status: 'running' }),
     ])
     mockChatApi.sendStudioChatMessage.mockResolvedValue({} as never)
-    renderDock(null)
+    renderDock()
 
     const input = await screen.findByLabelText('消息输入')
     await waitFor(() => expect(input).toBeEnabled())
@@ -310,7 +177,7 @@ describe('CustomizePreviewDock', () => {
     mockChatApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({ status: 'closed', closed_at: '2026-09-01T01:00:00Z' }),
     ])
-    renderDock(null)
+    renderDock()
 
     expect(
       await screen.findByRole('button', { name: '继续对话' })

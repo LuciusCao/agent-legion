@@ -9,6 +9,15 @@
   min-height: 0;
 }
 .emptyState {
+  /* flex 链关键一环（#796 验收返工）：无会话/内容不足时占位区也要吃满
+   * 剩余高度，composer 才永远钉在对话面板底部而不是悬在中部；内容居中
+   * 保持原有视觉。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   padding: 24px 16px;
   text-align: center;
   font-size: 13px;

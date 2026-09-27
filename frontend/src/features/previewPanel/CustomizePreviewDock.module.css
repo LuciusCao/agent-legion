@@ -1,34 +1,20 @@
 /*
  * 「定制预览」Dock 面板布局（#795 PR① 迁入 AgentPanelDock；#796 验收返工
- * 撤掉内嵌预览后只剩对话 + 治理 footer）：对话列吃满剩余高度、内部滚动，
- * footer 常驻底部；整体尺寸由 Dock 容器承担（可拖拽/可缩放），这里只吃满
- * 内容区。样式原居 PreviewPanelSection.module.css，随 #615 双栏改版迁出，
- * 返工后双栏收回单栏。
+ * 收敛为纯对话）：对话骨架吃满内容区、消息列表内部滚动、composer 钉底
+ * （flex 链：body → AgentChatPanel.chatPanel(height:100%) →
+ * .messages(flex:1)——贴底能力由 AgentChatPanel 自身布局提供，这里只保证
+ * 高度链传递）。整体尺寸由 Dock 容器承担（可拖拽/可缩放）。
  */
 
-/* 对话列与 footer 两行：对话内部滚动，footer 常驻底部（jsdom 测不了滚动，
- * 布局契约由组件测试钉住）。 */
 .body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
   height: 100%;
   min-height: 0;
 }
 
-.chatColumn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  min-width: 0;
-}
-
 .chatArea {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   min-height: 0;
 }
 
@@ -40,19 +26,4 @@
 .error {
   color: #ba1a1a;
   font-size: 13px;
-}
-
-.footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  border-top: 1px solid var(--color-border, #c3c6cf);
-  padding-top: 8px;
-}
-
-.footerStatus {
-  flex: 1;
-  font-size: 12px;
-  color: var(--color-text-secondary, #43474e);
 }

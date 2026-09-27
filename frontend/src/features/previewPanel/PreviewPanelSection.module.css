@@ -2,42 +2,6 @@
   margin-bottom: 12px;
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 500;
-  flex: 1;
-}
-
-.draftBadge {
-  font-size: 12px;
-  color: #8a5a00;
-  border: 1px solid #8a5a00;
-  border-radius: 999px;
-  padding: 0 8px;
-}
-
-.customizeButton {
-  font-size: 13px;
-  border: 1px solid var(--color-border, #c3c6cf);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  padding: 2px 10px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.customizeButton:hover {
-  background: rgba(0, 0, 0, 0.04);
-}
-
-/* 面板布局样式在 CustomizePreviewDock.module.css（#795 PR① 起容器为
- * AgentPanelDock；#796 返工后仅对话 + 治理 footer 的单栏）。 */
+/* 头部（标题行 + #528 模式开关 + 治理行）样式在
+ * PreviewPanelHeader.module.css（#528 / #796 返工）；Dock 布局样式在
+ * CustomizePreviewDock.module.css（纯对话单栏）。 */
