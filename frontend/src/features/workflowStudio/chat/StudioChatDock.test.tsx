@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,7 +19,18 @@ const mocks = {
 }
 
 vi.mock('./StudioChatPanel', () => ({
-  StudioChatPanel: () => <div>chat panel stub</div>,
+  // 带本地 state 的 stub（#797 codex P1 的「隐藏不卸载」断言要观察到
+  // 子树 state 存活）：输入框值即 composer 未发送文本的等价物。
+  StudioChatPanel: function StatefulStub() {
+    const [text, setText] = useState('')
+    return (
+      <input
+        data-testid="chat-stub-input"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+      />
+    )
+  },
 }))
 
 vi.mock('../../../api/studioPublishRequestApi', () => ({
@@ -77,10 +89,14 @@ const studioState = {
   requestNodeFocus: vi.fn(),
 }
 
-function renderDock() {
+function renderDock(hidden = false, onClose: () => void = () => undefined) {
   return render(
     <TestQueryProvider>
-      {withStudioProviders(studioState, makeStudioView(), <StudioChatDock />)}
+      {withStudioProviders(
+        studioState,
+        makeStudioView(),
+        <StudioChatDock hidden={hidden} onClose={onClose} />
+      )}
     </TestQueryProvider>
   )
 }
@@ -109,7 +125,7 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
     expect(document.querySelector('.MuiModal-root')).toBeNull()
     // 旧侧栏形态（complementary aside）不再存在；聊天内容在 Dock 内。
     expect(screen.queryByRole('complementary')).toBeNull()
-    expect(screen.getByText('chat panel stub')).toBeInTheDocument()
+    expect(screen.getByTestId('chat-stub-input')).toBeInTheDocument()
     // surface key 记忆：折叠一次后写入 studio-chat 键。
     fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
     await screen.findByRole('button', { name: /已折叠，点击展开/ })
@@ -118,20 +134,46 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
     ).toContain('"collapsed":true')
   })
 
-  it('Dock 关闭按钮 = 收起（appbar 开关同一状态源 toggleAgent）', async () => {
-    const toggleAgent = vi.fn()
-    render(
+  it('Dock 关闭按钮走 onClose 出口（由 Workspace 组装：收起 + 窄屏回画布）', async () => {
+    const onClose = vi.fn()
+    renderDock(false, onClose)
+    await waitFor(() => dockSurface())
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('codex P1（#797）：hidden 隐藏不卸载——子树 state（composer 文本/队列）存活，重开原样恢复', async () => {
+    const { rerender } = renderDock()
+    await waitFor(() => dockSurface())
+    const input = screen.getByTestId('chat-stub-input')
+    fireEvent.change(input, { target: { value: '未发送文本' } })
+    expect(input).toHaveValue('未发送文本')
+
+    // 关闭（hidden=true）：surface 消失但子树保持挂载，state 不丢。
+    rerender(
       <TestQueryProvider>
         {withStudioProviders(
           studioState,
-          makeStudioView({ toggleAgent }),
-          <StudioChatDock />
+          makeStudioView(),
+          <StudioChatDock hidden onClose={() => undefined} />
+        )}
+      </TestQueryProvider>
+    )
+    expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
+    expect(screen.getByTestId('chat-stub-input')).toHaveValue('未发送文本')
+
+    // 重开：原文恢复（revert 修复——卸载重挂——则输入框是新实例、值为空）。
+    rerender(
+      <TestQueryProvider>
+        {withStudioProviders(
+          studioState,
+          makeStudioView(),
+          <StudioChatDock hidden={false} onClose={() => undefined} />
         )}
       </TestQueryProvider>
     )
     await waitFor(() => dockSurface())
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    expect(toggleAgent).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('chat-stub-input')).toHaveValue('未发送文本')
   })
 
   it('shows no notice without a resolved request', async () => {

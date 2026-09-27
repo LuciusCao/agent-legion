@@ -49,6 +49,12 @@ export interface AgentPanelDockProps {
   minHeight?: number
   /** 折叠小条文案（默认 `${title}（已折叠，点击展开）`）。 */
   collapsedLabel?: string
+  /** 隐藏不卸载（#797 codex P1）：true 时 surface 与小条都不渲染，子树
+   * 保留在不可见容器——内容组件的本地 state（composer 文本/发送队列）
+   * 与 hook 级连接（SSE）不因显隐断开。Portal 会逃逸 display:none 祖先，
+   * 所以隐藏必须由 Dock 自身承担；与折叠共用 display:none 抑制（同一条
+   * Rnd>Paper>内容树，切换 hidden 不会换元素类型导致子树重挂）。 */
+  hidden?: boolean
 }
 
 function readAppBarFallbackHeight(): number {
@@ -70,6 +76,7 @@ export function AgentPanelDock({
   minWidth = 320,
   minHeight = 240,
   collapsedLabel,
+  hidden = false,
 }: AgentPanelDockProps) {
   const appBarBottom = useAppBarBottom()
   const topInset = appBarBottom > 0 ? appBarBottom : readAppBarFallbackHeight()
@@ -85,11 +92,12 @@ export function AgentPanelDock({
     setCollapsedPersisted,
   } = useDockGeometry(surfaceKey, topInset, defaultSize)
 
-  const { surfaceRef, chipRef } = useDockFocus(collapsed)
+  // 隐藏态同样不参与焦点移交与 Esc（与折叠同规则：不可见 surface 不吃焦点）。
+  const { surfaceRef, chipRef } = useDockFocus(collapsed || hidden)
 
   // Esc 折叠挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位
   // 规则见 useDockFocus.ts 的 useDockEscape）。
-  useDockEscape(collapsed, () => setCollapsedPersisted(true))
+  useDockEscape(collapsed || hidden, () => setCollapsedPersisted(true))
 
   // 拖拽钳制（codex P2）：bounds="window" 允许 y=0，顶边必须不低于
   // AppBar 实测底边——拖拽中实时钳，提交时同一钳制。
@@ -152,7 +160,9 @@ export function AgentPanelDock({
         style={{
           position: 'fixed',
           zIndex: 900,
-          display: collapsed ? 'none' : undefined,
+          // 折叠与 hidden 共用 display:none 抑制（同一条 Rnd>Paper>内容树，
+          // 不卸载、不换元素类型——子树 state/连接全程不断）。
+          display: collapsed || hidden ? 'none' : undefined,
         }}
       >
         <Paper
@@ -195,7 +205,7 @@ export function AgentPanelDock({
           <div className={styles.content}>{children}</div>
         </Paper>
       </Rnd>
-      {collapsed && (
+      {collapsed && !hidden && (
         <button
           ref={chipRef}
           type="button"

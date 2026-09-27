@@ -54,7 +54,36 @@ function installLocalStorageStub() {
   return stub
 }
 
-installLocalStorageStub()
+const localStorageStub = installLocalStorageStub()
+
+/** 窄屏判定桩（useStudioNarrowViewport 走 matchMedia，jsdom 没有——
+ * 宽屏语义为缺省）：测试里按场景钉住 ≤900px 断点。 */
+const originalMatchMedia = window.matchMedia
+
+function stubNarrowViewport(matches: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: (query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  })
+}
+
+function restoreViewportMatchMedia() {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: originalMatchMedia,
+  })
+}
 
 const workflow = {
   key: 'demo_video_workflow',
@@ -129,6 +158,8 @@ function renderWorkspace(
 describe('WorkflowStudioWorkspace', () => {
   beforeEach(() => {
     mockApi.mockReset()
+    // Dock 容器按 surface key 记忆位置/折叠态：用例间不互相泄漏。
+    localStorageStub.clear()
     useSettingStore.setState({ workspaceId: 'ws1', settings: baseSettings })
     mockApi.mockResolvedValue({
       origin: 'builtin',
@@ -158,12 +189,62 @@ describe('WorkflowStudioWorkspace', () => {
   })
 
   // #668：agentOpen 提升到 StudioViewContext（appbar 开关写、布局读）；
-  // #795 PR②：关闭 = Dock 卸载（折叠保状态走 Dock 的右下角小条）。
+  // #795 PR②：关闭 = Dock 隐藏不卸载（#797 codex P1，折叠保状态走 Dock
+  // 的右下角小条；隐藏连小条也不渲染）。
   it('closes the agent dock so the DAG takes the full width', () => {
     renderWorkspace({}, { agentOpen: false })
 
     expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
+    // 隐藏不卸载：聊天子树仍在 DOM（display:none），state/连接不断。
+    expect(screen.getByText('chat panel stub')).toBeInTheDocument()
+  })
+
+  it('codex P2（#797）：窄屏首进 Dock 不抢占画布——仅 Agent 页签选中时显示', () => {
+    stubNarrowViewport(true)
+    try {
+      // 窄屏 + 默认（agentOpen=true、mobilePanel=graph）：Dock 隐藏但子树
+      // 保持挂载（chat stub 仍在 DOM，display:none）。
+      renderWorkspace()
+      expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
+      expect(screen.getByText('chat panel stub')).toBeInTheDocument()
+
+      // 切 Agent 页签：Dock 显示。
+      fireEvent.click(screen.getByRole('tab', { name: 'Agent' }))
+      expect(
+        screen.getByRole('dialog', { name: 'Agent 助手' })
+      ).toBeInTheDocument()
+    } finally {
+      restoreViewportMatchMedia()
+    }
+  })
+
+  it('codex P2（#797）：窄屏 Agent 页签关闭 Dock 回画布，不留空白工作区', () => {
+    stubNarrowViewport(true)
+    try {
+      const toggleAgent = vi.fn()
+      renderWorkspace({}, { toggleAgent })
+      fireEvent.click(screen.getByRole('tab', { name: 'Agent' }))
+      expect(
+        screen.getByRole('dialog', { name: 'Agent 助手' })
+      ).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+      // 关闭：走 appbar 同一状态源 + 页签回画布（mobilePanel=graph，
+      // 画布重新 active）——不留「Agent 页签下的空白页」。
+      expect(toggleAgent).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('tab', { name: '画布' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      )
+      expect(screen.getByRole('tab', { name: 'Agent' })).toHaveAttribute(
+        'aria-selected',
+        'false'
+      )
+      expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
+    } finally {
+      restoreViewportMatchMedia()
+    }
   })
 
   it('puts node detail on the right half next to the full DAG（Dock 浮层不占轨道）', async () => {

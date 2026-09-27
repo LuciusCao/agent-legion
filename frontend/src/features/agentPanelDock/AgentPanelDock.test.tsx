@@ -135,6 +135,53 @@ describe('AgentPanelDock', () => {
     expect(rndWrapper(surface).style.display).not.toBe('none')
   })
 
+  it('hidden 隐藏不卸载（#797 codex P1）：surface 与小条都不渲染，子树 state 存活，恢复后原样', async () => {
+    const { rerender } = renderDock(
+      {},
+      <input data-testid="dock-child" defaultValue="" />
+    )
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    fireEvent.change(screen.getByTestId('dock-child'), {
+      target: { value: '未发送草稿' },
+    })
+
+    // hidden=true：与折叠共用 display:none 抑制（同一条 Rnd>Paper>内容树，
+    // 不换元素类型不重挂），但连小条也不渲染。
+    rerender(
+      (
+        <AgentPanelDock
+          surfaceKey="test-surface"
+          title="测试面板"
+          onClose={() => undefined}
+          hidden
+        >
+          <input data-testid="dock-child" defaultValue="" />
+        </AgentPanelDock>
+      ) as ReactElement
+    )
+    expect(rndWrapper(surface).style.display).toBe('none')
+    expect(
+      screen.queryByRole('button', { name: /已折叠，点击展开/ })
+    ).toBeNull()
+    // 子树保持挂载且 state 存活（卸载即丢——revert 即红）。
+    expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
+
+    rerender(
+      (
+        <AgentPanelDock
+          surfaceKey="test-surface"
+          title="测试面板"
+          onClose={() => undefined}
+          hidden={false}
+        >
+          <input data-testid="dock-child" defaultValue="" />
+        </AgentPanelDock>
+      ) as ReactElement
+    )
+    expect(rndWrapper(surface).style.display).not.toBe('none')
+    expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
+  })
+
   it('折叠/展开不丢面板内容状态（输入值原样保留）', async () => {
     renderDock({}, <input data-testid="dock-child" defaultValue="" />)
     await screen.findByRole('dialog', { name: '测试面板' })

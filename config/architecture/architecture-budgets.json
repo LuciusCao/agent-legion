@@ -534,6 +534,7 @@
     "frontend/src/features/workflowStudio/shared/useDraftUnloadGuard.ts": 43,
     "frontend/src/features/workflowStudio/shared/useFetchWorkflowRevisionDetail.ts": 20,
     "frontend/src/features/workflowStudio/shared/useServerDraftApply.ts": 40,
+    "frontend/src/features/workflowStudio/shared/useStudioNarrowViewport.ts": 26,
     "frontend/src/features/workflowStudio/shared/useStudioNavState.ts": 40,
     "frontend/src/features/workflowStudio/shared/useStudioRightPanelWidth.ts": 75,
     "frontend/src/features/workflowStudio/shared/useWorkflowDraftCompare.ts": 72,
