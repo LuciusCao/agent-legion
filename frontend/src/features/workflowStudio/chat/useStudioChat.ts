@@ -49,6 +49,11 @@ export function useStudioChat(workspaceId: string | undefined) {
   const [starting, setStarting] = useState(false)
   const messagesRef = useRef<ChatMessage[]>([])
   const activeSessionIdRef = useRef<string | null>(null)
+  // 当前 workspace 的 ref 快照（codex P2 复审轮 #796）：startSession 等异步
+  // 回调落地前切换 workspace 时，旧 workspace 的迟到响应不得写入本 hook
+  // 的 state（本 hook 实例被 react-router 复用，不被重挂）。ref 更新合入
+  // 下方 workspaceId 重置 effect（react-hooks/refs 禁止 render 期写 ref）。
+  const workspaceIdRef = useRef(workspaceId)
   useEffect(() => {
     messagesRef.current = messages
     activeSessionIdRef.current = activeSessionId
@@ -188,15 +193,25 @@ export function useStudioChat(workspaceId: string | undefined) {
   async function startSession(agentId: string) {
     if (!workspaceId || starting) return
     setStarting(true)
-    await runAction(async () => {
+    try {
       const created = await createStudioChatSession(workspaceId, agentId)
+      // 迟到响应归属守卫（applyResumedSession 的 activeSessionIdRef 同款
+      // 模式）：落地前已切换 workspace 则丢弃——不得把 A 的会话写进 B 的
+      // 状态（随后的消息拉取会以 B 的 workspace 请求 A 的 session）。
+      // workspaceId 是调用帧闭包值，与当前 ref 比对即「发起时快照」语义。
+      if (workspaceIdRef.current !== workspaceId) return
       await queryClient.invalidateQueries({
         queryKey: queryKeys.studioChatSessions(workspaceId),
       })
       setSession(created)
       setActiveSessionId(created.id)
-    })
-    setStarting(false)
+    } catch (error) {
+      // 迟到失败同样不落：错误只对发起时的 workspace 可见。
+      if (workspaceIdRef.current === workspaceId)
+        setActionError(error instanceof Error ? error.message : '操作失败')
+    } finally {
+      if (workspaceIdRef.current === workspaceId) setStarting(false)
+    }
   }
 
   // 返回是否发送成功：busy 排队（useStudioChatQueue）flush 失败时要保留
@@ -279,8 +294,17 @@ export function useStudioChat(workspaceId: string | undefined) {
   )
   // 切换 workspace（React Router 复用组件实例）时清空旧选中：残留 id 会让
   // 记忆恢复效应被 !== null 跳过、写效应把旧 id 写进新 workspace 的记忆。
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换时重置选中（与上方消息重置同一模式）
-  useEffect(() => setActiveSessionId(null), [workspaceId])
+  // codex P2 复审轮（#796）：一并重置 actionError/starting/session——A 的
+  // 错误与「创建中」态不得泄漏进 B 的头部/按钮；ref 快照同步换到新
+  // workspace（迟到响应守卫的比对基准）。
+  useEffect(() => {
+    workspaceIdRef.current = workspaceId
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换时重置选中与瞬态（与上方消息重置同一模式）
+    setActiveSessionId(null)
+    setActionError(null)
+    setStarting(false)
+    setSession(null)
+  }, [workspaceId])
   // 按 workspace 记忆选中会话；未选择时恢复上次或回落最近会话。
   useStudioChatSessionMemory(
     workspaceId,

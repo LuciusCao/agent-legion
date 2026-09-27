@@ -95,6 +95,25 @@ export function clampResizeTopInset(
   return { x: position.x, y, height: height - (y - position.y) }
 }
 
+/**
+ * 有效最小尺寸（codex P2 复审轮）：声明下限与几何钳制同约束——小视口
+ * （如 320px 宽）装不下声明的 minWidth 时跟视口走，否则 Rnd 的 minWidth/
+ * minHeight 会把面板撑出视口（缩放把手/关闭按钮出界）。钳制上限与
+ * clampDockGeometry 的同一组视口约束。
+ */
+export function effectiveMinSize(
+  minWidth: number,
+  minHeight: number,
+  topInset: number,
+  viewportWidth: number,
+  viewportHeight: number
+): { minWidth: number; minHeight: number } {
+  return {
+    minWidth: Math.min(minWidth, viewportWidth - VIEWPORT_MARGIN * 2),
+    minHeight: Math.min(minHeight, viewportHeight - topInset - VIEWPORT_MARGIN),
+  }
+}
+
 export function loadDockPlacement(surfaceKey: string): DockPlacement | null {
   try {
     const raw = window.localStorage.getItem(dockStorageKey(surfaceKey))

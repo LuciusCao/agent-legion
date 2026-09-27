@@ -28,7 +28,11 @@ import { IconButton, Paper, Portal, Tooltip } from '@mui/material'
 import { Close, UnfoldLess } from '@mui/icons-material'
 import { Rnd } from 'react-rnd'
 import { useAppBarBottom } from '../../hooks/useAppBarBottom'
-import { APP_BAR_FALLBACK_HEIGHT, clampResizeTopInset } from './dockPlacement'
+import {
+  APP_BAR_FALLBACK_HEIGHT,
+  clampResizeTopInset,
+  effectiveMinSize,
+} from './dockPlacement'
 import { useDockGeometry } from './useDockGeometry'
 import { useDockEscape, useDockFocus } from './useDockFocus'
 import styles from './AgentPanelDock.module.css'
@@ -75,6 +79,7 @@ export function AgentPanelDock({
   const {
     geometry,
     collapsed,
+    viewport,
     setGeometryLive,
     commitGeometry,
     setCollapsedPersisted,
@@ -90,13 +95,23 @@ export function AgentPanelDock({
   // AppBar 实测底边——拖拽中实时钳，提交时同一钳制。
   const clampDragY = (y: number) => Math.max(topInset, y)
 
+  // 有效最小尺寸与几何钳制同约束（codex P2 复审轮）：小视口装不下声明
+  // 下限时跟视口走，否则 Rnd 的 minWidth 会把面板撑出小视口。
+  const effective = effectiveMinSize(
+    minWidth,
+    minHeight,
+    topInset,
+    viewport.width,
+    viewport.height
+  )
+
   return (
     <Portal>
       <Rnd
         position={{ x: geometry.x, y: geometry.y }}
         size={{ width: geometry.width, height: geometry.height }}
-        minWidth={minWidth}
-        minHeight={minHeight}
+        minWidth={effective.minWidth}
+        minHeight={effective.minHeight}
         bounds="window"
         dragHandleClassName={styles.titleBar}
         cancel="button"

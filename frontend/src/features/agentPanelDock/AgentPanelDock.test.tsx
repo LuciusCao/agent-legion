@@ -10,7 +10,7 @@
  * 回退（56）：默认几何 x=1024-520-16=488、y=64、宽 520、高 620。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { Dialog } from '@mui/material'
 import { AgentPanelDock } from './AgentPanelDock'
@@ -502,6 +502,136 @@ describe('AgentPanelDock', () => {
       if (descH) {
         Object.defineProperty(HTMLElement.prototype, 'offsetHeight', descH)
       }
+    }
+  })
+
+  it('codex P2 复审轮：AppBar 自身变高（ResizeObserver 监听元素）后 Dock 几何重钳', async () => {
+    // test-setup 的 ResizeObserverMock 在 observe 时立即回调一次；这里包装
+    // 它以捕获回调，模拟「AppBar 异步变高」（版本芯片/字体加载把 AppBar
+    // 自己撑高，window.resize 不触发）。
+    const NativeResizeObserver = globalThis.ResizeObserver
+    let captured: ResizeObserverCallback | null = null
+    class CapturingObserver extends NativeResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        super(callback)
+        captured = callback
+      }
+    }
+    globalThis.ResizeObserver = CapturingObserver
+
+    let barBottom = 100
+    const fakeBar = document.createElement('div')
+    fakeBar.setAttribute('data-testid', 'app-bar')
+    fakeBar.getBoundingClientRect = () => ({ bottom: barBottom }) as DOMRect
+    document.body.appendChild(fakeBar)
+    // 记忆位置 y=70：实测 100 下越界 → 先钳到 100。
+    window.localStorage.setItem(
+      dockStorageKey('test-surface'),
+      JSON.stringify({
+        x: 900,
+        y: 70,
+        width: 520,
+        height: 620,
+        collapsed: false,
+      })
+    )
+    try {
+      renderDock()
+      const surface = await screen.findByRole('dialog', { name: '测试面板' })
+      await waitFor(() =>
+        expect(rndWrapper(surface).style.transform).toBe(
+          jsdomTransform(900, 100, { x: 900, y: 70 })
+        )
+      )
+
+      // AppBar 变高 100 → 140（window 尺寸未变，只有元素自身变了）。
+      barBottom = 140
+      act(() => {
+        captured?.([], {} as ResizeObserver)
+      })
+      await waitFor(() =>
+        expect(rndWrapper(surface).style.transform).toBe(
+          jsdomTransform(900, 140, { x: 900, y: 70 })
+        )
+      )
+    } finally {
+      fakeBar.remove()
+      globalThis.ResizeObserver = NativeResizeObserver
+    }
+  })
+
+  it('codex P2 复审轮：小视口（320px）下有效 minWidth 跟随视口，缩放下限与几何钳制同约束', async () => {
+    const originalWidth = window.innerWidth
+    const originalHeight = window.innerHeight
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 320,
+    })
+    Object.defineProperty(window, 'innerHeight', {
+      writable: true,
+      configurable: true,
+      value: 480,
+    })
+    // re-resizable 经 ref.offsetWidth/Height 报新尺寸：jsdom 布局恒 0，
+    // 桥到内联 style（同顶部把手用例）。
+    const descW = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'offsetWidth'
+    )
+    const descH = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'offsetHeight'
+    )
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        const v = Number.parseFloat(this.style.width)
+        return Number.isFinite(v) ? v : 0
+      },
+    })
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        const v = Number.parseFloat(this.style.height)
+        return Number.isFinite(v) ? v : 0
+      },
+    })
+    try {
+      renderDock()
+      const surface = await screen.findByRole('dialog', { name: '测试面板' })
+      const wrapper = rndWrapper(surface)
+      // 默认几何宽被钳到 288（320-32）；Rnd 尺寸跟随几何。
+      expect(wrapper.style.width).toBe('288px')
+
+      // 右侧把手再向左缩 100px：有效 minWidth=288（与几何钳制同约束）——
+      // 宽度停在 288；若 Rnd 仍按声明 minWidth=320/340，宽度会被撑出视口。
+      const rightHandle = Array.from(
+        wrapper.querySelectorAll('div[style*="col-resize"]')
+      ).find((el) => (el as HTMLElement).style.right === '-5px')
+      if (!rightHandle) throw new Error('右侧缩放把手未找到')
+      fireEvent.mouseDown(rightHandle, { clientX: 304, clientY: 300 })
+      fireEvent.mouseMove(document, { clientX: 204, clientY: 300 })
+      fireEvent.mouseUp(document, { clientX: 204, clientY: 300 })
+
+      await waitFor(() =>
+        expect(loadDockPlacement('test-surface')?.width).toBe(288)
+      )
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        writable: true,
+        configurable: true,
+        value: originalWidth,
+      })
+      Object.defineProperty(window, 'innerHeight', {
+        writable: true,
+        configurable: true,
+        value: originalHeight,
+      })
+      if (descW)
+        Object.defineProperty(HTMLElement.prototype, 'offsetWidth', descW)
+      if (descH)
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', descH)
     }
   })
 })

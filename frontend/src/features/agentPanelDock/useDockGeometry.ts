@@ -22,6 +22,8 @@ import {
 export interface DockGeometryEngine {
   geometry: DockGeometry
   collapsed: boolean
+  /** 状态化的视口尺寸（resize 监听驱动；有效最小尺寸等派生用）。 */
+  viewport: { width: number; height: number }
   /** 拖拽/缩放进行中的实时更新（不写存储；提交走 commitGeometry）。 */
   setGeometryLive: (next: DockGeometry) => void
   commitGeometry: (next: DockGeometry) => void
@@ -103,6 +105,7 @@ export function useDockGeometry(
   return {
     geometry,
     collapsed,
+    viewport,
     setGeometryLive: setGeometryOverride,
     commitGeometry,
     setCollapsedPersisted,

@@ -565,6 +565,82 @@ describe('useStudioChat', () => {
     expect(result.current.session?.id).not.toBe('s1')
   })
 
+  it('codex P2 复审轮：startSession 迟到响应不写入已切换的 workspace（快照守卫）', async () => {
+    // ws1 发起 startSession（挂起）→ 切 ws2 → ws1 的迟到成功不得把
+    // session/activeSessionId 写进 B（随后消息拉取会以 B 的 workspace
+    // 请求 A 的 session）。会话列表按 workspace 分（ws2 为空，排除记忆
+    // 恢复噪音——同下方「clears the active session」用例的模式）。
+    mockApi.fetchStudioChatSessions.mockImplementation((ws: string) =>
+      Promise.resolve(ws === 'ws1' ? [sessionRecord()] : [])
+    )
+    let resolveCreate!: (record: StudioChatSessionRecord) => void
+    mockApi.createStudioChatSession.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve
+      })
+    )
+    const view = renderHook(({ ws }: { ws: string }) => useStudioChat(ws), {
+      wrapper,
+      initialProps: { ws: 'ws1' },
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalled()
+    )
+    await act(async () => {
+      void view.result.current.startSession('kimi')
+    })
+    expect(view.result.current.starting).toBe(true)
+
+    view.rerender({ ws: 'ws2' })
+    // 切换即重置瞬态：starting 不得泄漏进 B。
+    await waitFor(() => expect(view.result.current.starting).toBe(false))
+    await act(async () => {
+      resolveCreate(sessionRecord({ id: 's-new' }))
+    })
+    expect(view.result.current.activeSessionId).toBeNull()
+    expect(view.result.current.session).toBeNull()
+  })
+
+  it('codex P2 复审轮：切换 workspace 清空 actionError；startSession 迟到失败不写入新 workspace', async () => {
+    // 先在 ws1 制造一次失败：actionError 出现。会话列表置空——否则记忆
+    // 恢复效应自动选中 s1、SSE open 触发全量回取（runAction 起手清
+    //  actionError）会把失败擦掉（与本用例无关的既有噪音）。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([])
+    mockApi.createStudioChatSession.mockRejectedValueOnce(new Error('409 冲突'))
+    const view = renderHook(({ ws }: { ws: string }) => useStudioChat(ws), {
+      wrapper,
+      initialProps: { ws: 'ws1' },
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalled()
+    )
+    await act(async () => {
+      await view.result.current.startSession('kimi')
+    })
+    expect(view.result.current.actionError).toBe('409 冲突')
+
+    // 切换即清空（A 的错误不泄漏进 B）。
+    view.rerender({ ws: 'ws2' })
+    await waitFor(() => expect(view.result.current.actionError).toBeNull())
+
+    // 再补一刀迟到失败：ws1 发起（挂起）→ 已在 ws2 → reject 落地不写入。
+    let rejectCreate!: (reason: Error) => void
+    mockApi.createStudioChatSession.mockReturnValue(
+      new Promise((_, reject) => {
+        rejectCreate = reject
+      })
+    )
+    view.rerender({ ws: 'ws1' })
+    await act(async () => {
+      void view.result.current.startSession('kimi')
+    })
+    view.rerender({ ws: 'ws2' })
+    await act(async () => {
+      rejectCreate(new Error('迟到的失败'))
+    })
+    expect(view.result.current.actionError).toBeNull()
+  })
+
   it('clears the active session when the workspace changes', async () => {
     mockApi.fetchStudioChatSessions.mockImplementation((workspaceId: string) =>
       Promise.resolve(workspaceId === 'ws1' ? [sessionRecord()] : [])
