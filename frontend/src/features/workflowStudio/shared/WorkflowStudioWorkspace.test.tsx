@@ -33,6 +33,29 @@ vi.mock('../../../api/studioPublishRequestApi', () => ({
 
 const mockApi = vi.mocked(api)
 
+// 该 jsdom 环境不提供 localStorage：用内存 stub（Dock 容器按 surface key
+// 记忆位置/折叠态；同 agentPanelDock 测试的模式）。
+function installLocalStorageStub() {
+  const store = new Map<string, string>()
+  const stub: Storage = {
+    get length() {
+      return store.size
+    },
+    clear: () => store.clear(),
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    removeItem: (key) => void store.delete(key),
+    setItem: (key, value) => void store.set(key, String(value)),
+  }
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: stub,
+  })
+  return stub
+}
+
+installLocalStorageStub()
+
 const workflow = {
   key: 'demo_video_workflow',
   label: '知识视频 DAG',
@@ -116,16 +139,18 @@ describe('WorkflowStudioWorkspace', () => {
     })
   })
 
-  it('shows DAG and the agent panel side by side by default', () => {
+  it('shows the DAG full-width and the agent dock floating above it by default', () => {
     renderWorkspace()
 
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
-    const agentPanel = screen.getByRole('complementary', {
-      name: 'Agent 对话面板',
-    })
-    expect(agentPanel).not.toHaveAttribute('data-collapsed')
+    // #795 PR②：chat 迁入 AgentPanelDock 浮层（role=dialog，非模态），
+    // 不再是右侧栏 aside（complementary）。
+    const dock = screen.getByRole('dialog', { name: 'Agent 助手' })
+    expect(dock).toHaveAttribute('aria-modal', 'false')
+    expect(screen.queryByRole('complementary')).toBeNull()
     expect(screen.getByText('chat panel stub')).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '节点详情' })).toBeNull()
+    // DAG 区全屏：无分栏（withInspector 只在选中节点详情时加）。
+    expect(document.querySelector('[class*="withInspector"]')).toBeNull()
     // #668：面板开关收敛到 appbar（CommandBar），画布工具条不再有开关。
     expect(
       screen.queryByRole('button', { name: 'toggle agent panel' })
@@ -133,35 +158,37 @@ describe('WorkflowStudioWorkspace', () => {
   })
 
   // #668：agentOpen 提升到 StudioViewContext（appbar 开关写、布局读）；
-  // 收起态布局直接以 view.agentOpen=false 注入。
-  it('collapses the agent panel so the DAG takes the full width', () => {
+  // #795 PR②：关闭 = Dock 卸载（折叠保状态走 Dock 的右下角小条）。
+  it('closes the agent dock so the DAG takes the full width', () => {
     renderWorkspace({}, { agentOpen: false })
 
-    expect(
-      screen.getByRole('complementary', { name: 'Agent 对话面板' })
-    ).toHaveAttribute('data-collapsed', 'true')
+    expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
   })
 
-  it('replaces the DAG with node detail (left half) when the agent panel is open', async () => {
+  it('puts node detail on the right half next to the full DAG（Dock 浮层不占轨道）', async () => {
+    // chat 在 Dock 后不再有「详情替换画布」模式：详情固定右栏，画布保留。
     renderWorkspace({ selectedNodeKey: 'fetch_items' })
 
     const detail = screen.getByRole('region', { name: '节点详情' })
-    expect(detail).toHaveAttribute('data-placement', 'left')
+    expect(detail).toHaveAttribute('data-placement', 'right')
     expect(detail).toHaveTextContent('知识视频 DAG / 获取题目')
     expect(screen.getByText('基本设置')).toBeInTheDocument()
+    // 画布不被替换（canvasReplaced 退役），Dock 照常浮在上方。
+    expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
+    expect(
+      screen.getByRole('dialog', { name: 'Agent 助手' })
+    ).toBeInTheDocument()
     // 等节点代码异步加载落地，避免 act 警告。
     await screen.findByText(/出厂版本/)
   })
 
-  it('puts node detail on the right half next to the DAG when the agent panel is collapsed', async () => {
+  it('puts node detail on the right half when the agent dock is closed', async () => {
     renderWorkspace({ selectedNodeKey: 'fetch_items' }, { agentOpen: false })
 
     const detail = screen.getByRole('region', { name: '节点详情' })
     expect(detail).toHaveAttribute('data-placement', 'right')
-    expect(
-      screen.getByRole('complementary', { name: 'Agent 对话面板' })
-    ).toHaveAttribute('data-collapsed', 'true')
+    expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
     await screen.findByText(/出厂版本/)
   })

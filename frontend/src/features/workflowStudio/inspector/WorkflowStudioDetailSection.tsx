@@ -16,18 +16,18 @@ type Props = {
   setDefinitionYaml: (value: string) => void
   compareSummary?: ChangeSummaryViewModel | null
   readOnly: boolean
-  detailLeft: boolean
   mobileActive: boolean
   onBack: () => void
 }
 
-/** 节点详情的分栏容器：Agent 展开时放左半（grid-column: 1 替换 DAG），
- * 收起时放右半；移动端是「编辑节点」面板。 */
+/** 节点详情的分栏容器：固定放右半（grid-column: 3，DAG 保留在左——
+ * #795 PR② Agent 对话迁入 Dock 浮层后不再有「详情替换画布」模式）；
+ * 移动端是「编辑节点」面板。 */
 export function WorkflowStudioDetailSection(props: Props) {
   const className = [
     sidePanelStyles.sidePanel,
     pageStyles.sidePanel,
-    props.detailLeft ? splitStyles.colLeft : splitStyles.colRight,
+    splitStyles.colRight,
     props.mobileActive ? pageStyles.activePanel : '',
   ]
     .filter(Boolean)
@@ -35,7 +35,7 @@ export function WorkflowStudioDetailSection(props: Props) {
   return (
     <section
       data-mobile-panel="editor"
-      data-placement={props.detailLeft ? 'left' : 'right'}
+      data-placement="right"
       aria-label="节点详情"
       className={className}
     >

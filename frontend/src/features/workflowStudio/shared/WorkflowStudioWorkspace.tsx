@@ -5,10 +5,10 @@ import { WorkflowStudioSplitLayout } from './WorkflowStudioSplitLayout'
 import { useWorkflowStudioMobilePanel } from './useWorkflowStudioMobilePanel'
 import { useStudioState, useStudioView } from './studioStateContext'
 
-/** 左右分栏入口：右半 Agent 对话默认展开、可收起；点节点时详情在 Agent
- * 展开时替换左半 DAG、收起时占右半（DAG 保留）。移动端退化为
- * 画布/编辑节点/Agent 三面板切换。agentOpen 读 StudioViewContext
- * （appbar 开关的唯一状态源，#668）。 */
+/** 左右分栏入口：Agent 对话默认展开、浮层 Dock 承载（#795 PR②，不占
+ * grid 轨道，DAG 区全宽）；点节点时详情固定占右半。移动端退化为
+ * 画布/编辑节点/Agent 三面板切换——Agent 页签唤起 Dock 浮层。
+ * agentOpen 读 StudioViewContext（appbar 开关的唯一状态源，#668）。 */
 export function WorkflowStudioWorkspace() {
   const studio = useStudioState()
   const view = useStudioView()
@@ -26,7 +26,11 @@ export function WorkflowStudioWorkspace() {
       <WorkflowStudioMobileNav
         value={mobilePanel}
         editorAvailable={studio.selectedNodeKey !== null}
-        onChange={setMobilePanel}
+        onChange={(next) => {
+          setMobilePanel(next)
+          // 移动端 Agent 页签 = 唤起 Dock（chat 已在浮层，不占面板位）。
+          if (next === 'agent' && !view.agentOpen) view.toggleAgent()
+        }}
       />
       <WorkflowStudioSplitLayout
         mobilePanel={mobilePanel}

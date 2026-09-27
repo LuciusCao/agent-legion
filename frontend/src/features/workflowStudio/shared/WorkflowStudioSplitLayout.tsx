@@ -1,46 +1,31 @@
-import { StudioChatAside } from '../chat/StudioChatAside'
 import { WorkflowStudioCanvasPanel } from '../canvas/WorkflowStudioCanvasPanel'
 import { WorkflowStudioDetailSection } from '../inspector/WorkflowStudioDetailSection'
 import { WorkflowStudioResizeHandle } from './WorkflowStudioResizeHandle'
+import { StudioChatDock } from '../chat/StudioChatDock'
 import type { StudioMobilePanel } from './WorkflowStudioMobileNav'
 import { useStudioState } from './studioStateContext'
 import pageStyles from '../../../pages/WorkflowStudioPageResponsive.module.css'
-import sidePanelStyles from '../../../pages/WorkflowStudioPageSidePanel.module.css'
-import splitStyles from './WorkflowStudioSplitLayout.module.css'
 
 type Props = {
   mobilePanel: StudioMobilePanel
   agentOpen: boolean
 }
 
-/** 左右分栏 grid：左半画布（或节点详情），右半 Agent 对话（或详情）。
- * chat 收起后保持挂载（chatCollapsed hidden），会话与滚动状态不丢。
- * agentOpen 来自 StudioViewContext（appbar 开关的唯一状态源，#668）。 */
+/** 画布 + 节点详情分栏 grid；Agent 对话已迁入 AgentPanelDock 浮层
+ * （#795 PR②，盖在 DAG 上、不占 grid 轨道）——DAG 区默认占满全宽，
+ * 分栏只由节点详情驱动。agentOpen 来自 StudioViewContext（appbar 开关的
+ * 唯一状态源，#668）：开 = Dock 挂载（展开或按记忆折叠为小条），关 =
+ * 卸载。 */
 export function WorkflowStudioSplitLayout({ mobilePanel, agentOpen }: Props) {
   const studio = useStudioState()
   const nodeSelected = studio.selectedNodeKey !== null
-  const detailLeft = nodeSelected && agentOpen
-  const split = agentOpen || nodeSelected
-
-  const asideClass = [
-    sidePanelStyles.sidePanel,
-    pageStyles.sidePanel,
-    splitStyles.colRight,
-    mobilePanel === 'agent' ? pageStyles.activePanel : '',
-    agentOpen ? '' : splitStyles.chatCollapsed,
-  ]
-    .filter(Boolean)
-    .join(' ')
 
   return (
     <div
-      className={`${pageStyles.layout}${split ? ` ${pageStyles.withInspector}` : ''}`}
+      className={`${pageStyles.layout}${nodeSelected ? ` ${pageStyles.withInspector}` : ''}`}
     >
-      <WorkflowStudioCanvasPanel
-        mobileActive={mobilePanel === 'graph'}
-        replacedByDetail={detailLeft}
-      />
-      {split && <WorkflowStudioResizeHandle />}
+      <WorkflowStudioCanvasPanel mobileActive={mobilePanel === 'graph'} />
+      {nodeSelected && <WorkflowStudioResizeHandle />}
       {studio.selectedNodeKey !== null && (
         <WorkflowStudioDetailSection
           workflow={studio.workflow}
@@ -51,12 +36,11 @@ export function WorkflowStudioSplitLayout({ mobilePanel, agentOpen }: Props) {
           setDefinitionYaml={studio.setDefinitionYaml}
           compareSummary={studio.compareSummary}
           readOnly={studio.readOnly}
-          detailLeft={detailLeft}
           mobileActive={mobilePanel === 'editor'}
           onBack={() => studio.setSelectedNodeKey(null)}
         />
       )}
-      <StudioChatAside agentOpen={agentOpen} asideClass={asideClass} />
+      {agentOpen && <StudioChatDock />}
     </div>
   )
 }

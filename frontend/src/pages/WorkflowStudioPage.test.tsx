@@ -176,10 +176,13 @@ describe('WorkflowStudioPage', () => {
   })
 
   // 关闭 YAML 全屏 Dialog 并等退出过渡结束：过渡期间 modal 仍挂着，
-  // 顶栏被 aria-hidden，role 查询会失败。
+  // 顶栏被 aria-hidden，role 查询会失败。#795 PR②：Agent Dock 也是常驻的
+  // role=dialog——断言必须按名定位到「编辑 YAML」，不能用泛 dialog 查询。
   async function closeYamlEditor(user: ReturnType<typeof userEvent.setup>) {
     await user.click(screen.getByRole('button', { name: 'close YAML editor' }))
-    await waitForElementToBeRemoved(() => screen.queryByRole('dialog'))
+    await waitForElementToBeRemoved(() =>
+      screen.queryByRole('dialog', { name: '编辑 YAML' })
+    )
   }
 
   it('redirects non-admin users away from the studio (P4)', () => {
