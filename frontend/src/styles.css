@@ -18,6 +18,10 @@ body {
   background: #ffffff;
 }
 :root {
+  /* AppBar 声明 min-height 的单一声明点（AppBar.module.css 消费；
+   * AgentPanelDock 等浮层定位以 useAppBarBottom 实测为准，本变量只是
+   * 首帧兜底——版本芯片/放大字体可把 AppBar 撑过此声明值）。 */
+  --app-bar-height: 56px;
   --status-running-bg: #dbeafe;
   --status-running-text: #1d4ed8;
   --status-running-border: #3b82f6;

@@ -34,14 +34,14 @@ vi.mock('./previewPanelApi', () => ({
   fetchPreviewPanelState: (...args: unknown[]) => mockFetchState(...args),
 }))
 
-// 对话框本体（Studio chat 封装）在 CustomizePreviewDialog 自己的测试覆盖；
-// 这里钉住的是 section 的组装与回落语义。mock 透传显式预览动作（#347 P1）
-// 与治理面 state（data-hasdraft 暴露草稿是否已送达——真实按钮
+// 面板本体（Studio chat 封装 + Dock 容器）在 CustomizePreviewDock 自己的
+// 测试覆盖；这里钉住的是 section 的组装与回落语义。mock 透传显式预览动作
+// （#347 P1）与治理面 state（data-hasdraft 暴露草稿是否已送达——真实按钮
 // disabled={!draft}，mock 无门控，用例需显式等草稿落定再点击）；
 // data-previewdraft 暴露 section 下发的授权判定（#615：内嵌预览吃同一
-// 判定，mock 不重复实现 iframe——对话框内渲染细节在 dialog 测试覆盖）。
-vi.mock('./CustomizePreviewDialog', () => ({
-  CustomizePreviewDialog: ({
+// 判定，mock 不重复实现 iframe——面板内渲染细节在 dock 测试覆盖）。
+vi.mock('./CustomizePreviewDock', () => ({
+  CustomizePreviewDock: ({
     onPreviewDraft,
     onClose,
     state,

@@ -27,8 +27,8 @@ export function usePublishedPreviewPanel(workspaceId: string | undefined) {
 }
 
 /**
- * 治理面状态（published + draft）。customizing（「定制预览」对话开着）时
- * 轮询：agent 经 MCP 写草稿后左栏/对话框内预览「改一版看一版」（仅当前
+ * 治理面状态（published + draft）。customizing（「定制预览」面板开着）时
+ * 轮询：agent 经 MCP 写草稿后左栏/面板内预览「改一版看一版」（仅当前
  * 用户可见——草稿渲染是本页面的客户端状态，不落任何共享通道）。
  */
 export function usePreviewPanelState(

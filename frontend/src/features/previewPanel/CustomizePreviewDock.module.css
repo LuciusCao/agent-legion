@@ -1,14 +1,14 @@
 /*
- * 「定制预览」对话框布局（issue #615）：聊天与内嵌草稿预览同屏分栏——
- * 模态对话框锁滚动且遮挡左栏，预览渲染目标只在对话框外时人工验证
- * 事实上不可用。宽屏左右分栏（聊天主导在左），窄屏堆叠为上下；
- * 预览区自身滚动（iframe 自适应高度上限 6000px，超大草稿在 pane 内滚）。
- * 对话框样式原居 PreviewPanelSection.module.css，随双栏改版迁出。
+ * 「定制预览」Dock 面板布局（issue #615；#795 PR① 迁入 AgentPanelDock）：
+ * 聊天与内嵌草稿预览同屏分栏——宽屏左右分栏（聊天主导在左），窄屏堆叠为
+ * 上下；预览区自身滚动（iframe 自适应高度上限 6000px，超大草稿在 pane 内
+ * 滚）。整体尺寸由 Dock 容器承担（可拖拽/可缩放），这里只吃满内容区。
+ * 样式原居 PreviewPanelSection.module.css，随双栏改版迁出。
  */
 
 /* 定高网格：聊天/预览两行独立内部滚动，footer 常驻底部。
- * DialogContent（MUI）保持默认整块滚动——.body 定高后恰好填满，
- * 不与 MUI 的 overflow 打架（jsdom 测不了滚动，布局契约由组件测试钉住）。 */
+ * .body 吃满 Dock 内容区（height: 100%），不与容器 overflow 打架
+ * （jsdom 测不了滚动，布局契约由组件测试钉住）。 */
 .body {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
@@ -17,7 +17,8 @@
     'chat preview'
     'footer footer';
   gap: 10px;
-  height: min(72vh, 680px);
+  height: 100%;
+  min-height: 0;
 }
 
 .chatColumn {
@@ -93,7 +94,8 @@
   color: var(--color-text-secondary, #43474e);
 }
 
-/* 窄屏（对话框 95vw，视口宽 ≈ 对话框宽）：分栏堆叠为上下，聊天略高。 */
+/* 窄视口：分栏堆叠为上下，聊天略高（Dock 宽度由用户拖拽决定，这里只
+ * 按视口降级排布）。 */
 @media (max-width: 880px) {
   .body {
     grid-template-columns: minmax(0, 1fr);
@@ -102,6 +104,5 @@
       'chat'
       'preview'
       'footer';
-    height: min(80vh, 760px);
   }
 }

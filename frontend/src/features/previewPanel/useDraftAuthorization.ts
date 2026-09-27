@@ -45,10 +45,10 @@ export function useDraftAuthorization(
     snapshot.workspaceId === workspaceId &&
     snapshot.htmlHash === draft?.html_hash
   // render 派生覆盖不了的授权复位（#347 P1）：draft 经轮询异步 null 过渡
-  // （发布/归档）与对话框关闭这两帧之后的收尾——把已不可能再派生出
-  // 「授权中」的快照清掉，重开对话框回到默认态。
+  // （发布/归档）与面板关闭这两帧之后的收尾——把已不可能再派生出
+  // 「授权中」的快照清掉，重开面板回到默认态。
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 轮询送达的 draft null 过渡 / 对话框关闭使授权快照失效（review P1 / #500）
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 轮询送达的 draft null 过渡 / 面板关闭使授权快照失效（review P1 / #500）
     if (snapshot && (!customizing || draft === null)) setSnapshot(null)
   }, [customizing, snapshot, draft])
   return {

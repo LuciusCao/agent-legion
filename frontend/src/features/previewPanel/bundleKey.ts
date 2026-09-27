@@ -1,6 +1,6 @@
 /**
  * PreviewPanelHost 挂载 key 的 bundle 指纹（codex P2 重挂语义；#615 从
- * PreviewPanelSection 提取为公共助手——左栏与「定制预览」对话框内嵌预览
+ * PreviewPanelSection 提取为公共助手——左栏与「定制预览」面板内嵌预览
  * 两个挂载点必须共用同一实现，不允许两套指纹漂移）。
  *
  * key 含 jobId 与 bundle 内容指纹：内容变化即整树重挂 iframe——沿用同一
