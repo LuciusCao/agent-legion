@@ -15,6 +15,9 @@ const commonTestExcludes = [
 const browserTestFiles = [
   'src/api/core.test.ts',
   'src/components/useJobListLoadMore.test.ts',
+  // dockPlacement.ts 的 load/save 触碰 window.localStorage（纯几何函数本身
+  // node-safe，但守卫按「源文件引用 DOM 全局」整文件判定，注册进 jsdom）。
+  'src/features/agentPanelDock/dockPlacement.test.ts',
   'src/hooks/useDashboardEvents.test.ts',
   'src/hooks/useDebouncedCallback.test.ts',
   'src/hooks/useJobComprehensionInfo.test.ts',
