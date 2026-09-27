@@ -141,17 +141,12 @@ async function waitForDraftInHeader() {
   await screen.findByText(/草稿 v1 · /)
 }
 
-/** 治理动作收在 MoreVert 溢出菜单（#796 R3）：点开菜单再点菜单项。菜单在
- * fireEvent 的 act 内同步挂载，getByRole 直取即可（兼容 fake timers）。 */
+/** 「恢复默认」收在 MoreVert 溢出菜单（#796 R4：预览/发布已外露出头部
+ * 治理区）：点开菜单再点菜单项。菜单在 fireEvent 的 act 内同步挂载，
+ * getByRole 直取即可（兼容 fake timers）。 */
 function clickGovernanceAction(name: string | RegExp) {
   fireEvent.click(screen.getByRole('button', { name: '预览治理操作' }))
   fireEvent.click(screen.getByRole('menuitem', { name }))
-}
-
-/** 只读菜单项断言后收尾：点遮罩关菜单，避免 Menu 的 portal/遮罩干扰后续查询。 */
-function closeGovernanceMenu() {
-  const backdrop = document.querySelector('.MuiBackdrop-root')
-  if (backdrop) fireEvent.click(backdrop)
 }
 
 beforeEach(() => {
@@ -252,7 +247,7 @@ describe('PreviewPanelSection', () => {
     expect(screen.queryByText('草稿预览中')).toBeNull()
 
     // 显式动作后才执行草稿（仅当前用户可见）。
-    clickGovernanceAction('预览此草稿')
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')
@@ -309,7 +304,7 @@ describe('PreviewPanelSection', () => {
     expect(screen.queryByText('草稿预览中')).toBeNull()
 
     // 显式动作后草稿接管左栏。
-    clickGovernanceAction('预览此草稿')
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')
@@ -343,7 +338,7 @@ describe('PreviewPanelSection', () => {
         await vi.runOnlyPendingTimersAsync()
       })
       // 显式预览 v1。
-      clickGovernanceAction('预览此草稿')
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -391,7 +386,7 @@ describe('PreviewPanelSection', () => {
       expect(screen.queryByText('草稿预览中')).toBeNull()
 
       // 再次显式预览才执行 v2。
-      clickGovernanceAction('预览此草稿')
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -425,7 +420,7 @@ describe('PreviewPanelSection', () => {
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
-      clickGovernanceAction('预览此草稿')
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -474,7 +469,7 @@ describe('PreviewPanelSection', () => {
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
-      clickGovernanceAction('预览此草稿')
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -508,7 +503,7 @@ describe('PreviewPanelSection', () => {
       expect(screen.queryByText('草稿预览中')).toBeNull()
 
       // 重新显式预览才在（新 jobId 的）草稿上恢复执行。
-      clickGovernanceAction('预览此草稿')
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -589,9 +584,9 @@ describe('PreviewPanelSection', () => {
     ).toContain('published panel')
 
     // 显式授权：草稿在左栏渲染（与已发布版本同一 PreviewPanelHost 挂载
-    // 点），菜单项转为禁用的「草稿预览中（左栏渲染中）」，Dock 同步唤起
+    // 点），外露按钮转为禁用的「预览草稿中」（#796 R4），Dock 同步唤起
     // （授权锚定 Dock 会话）。
-    clickGovernanceAction('预览此草稿')
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')
@@ -599,15 +594,11 @@ describe('PreviewPanelSection', () => {
       expect(iframe?.getAttribute('srcdoc')).toContain('draft panel')
     })
     expect(screen.getByText('草稿预览中')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '预览治理操作' }))
-    expect(
-      screen.getByRole('menuitem', { name: '草稿预览中（左栏渲染中）' })
-    ).toHaveAttribute('aria-disabled', 'true')
-    closeGovernanceMenu()
+    expect(screen.getByRole('button', { name: '预览草稿中' })).toBeDisabled()
     expect(screen.getByTestId('customize-dialog')).toBeInTheDocument()
   })
 
-  it('头部治理动作：发布草稿调用发布 API，恢复默认需确认后调用归档 API', async () => {
+  it('头部治理动作：发布草稿（外露按钮）调用发布 API，恢复默认（⋮ 菜单）需确认后调用归档 API', async () => {
     mockFetchPublished.mockResolvedValue(PUBLISHED)
     mockFetchState.mockResolvedValue({
       published: PUBLISHED,
@@ -616,7 +607,8 @@ describe('PreviewPanelSection', () => {
     renderSection()
     await waitForDraftInHeader()
 
-    clickGovernanceAction('发布草稿')
+    // #796 R4：发布草稿外露出治理区（状态 Chip 旁），恢复默认留在 ⋮ 菜单。
+    fireEvent.click(screen.getByRole('button', { name: '发布草稿' }))
     await waitFor(() => expect(mockPublish).toHaveBeenCalledWith('ws1'))
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -645,7 +637,7 @@ describe('PreviewPanelSection', () => {
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
-      clickGovernanceAction('预览此草稿')
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -677,7 +669,7 @@ describe('PreviewPanelSection', () => {
 
       // 重新点「预览此草稿」才执行新内容（改一版重新预览一次——工作流
       // 本来的节奏）。
-      clickGovernanceAction('预览此草稿')
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
@@ -714,7 +706,7 @@ describe('PreviewPanelSection', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
     await waitForDraftInHeader()
-    clickGovernanceAction('预览此草稿')
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')
@@ -763,7 +755,7 @@ describe('PreviewPanelSection', () => {
     }
 
     // 重新显式预览才在（新 jobId 的）草稿上恢复执行——同一 commit 生效。
-    clickGovernanceAction('预览此草稿')
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
     expect(
       screen
         .getByTestId('preview-panel-host')

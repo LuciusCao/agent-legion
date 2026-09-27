@@ -1,16 +1,18 @@
 /**
- * PreviewPanelSection 的头部（#528 / #796 验收返工 R2→R3）：纯展示组件，
+ * PreviewPanelSection 的头部（#528 / #796 验收返工 R2→R3→R4）：纯展示组件，
  * 单行克制排布（flex-wrap 兜底窄栏）。
- * - 标题「内容预览」+ 草稿预览中徽标 + 草稿状态 Chip（小型 outlined，
- *   「草稿 v2 · 未发布」紧凑形态，admin 且有草稿/已发布时）；
+ * - 标题「内容预览」+ 草稿预览中徽标；
+ * - 治理区（admin 且有草稿/已发布）：状态 Chip（「草稿 v2 · 未发布」）+
+ *   紧跟的两个外露小按钮「预览此草稿 / 发布草稿」（状态 + 可对它做的事
+ *   一组，#796 R4——不收进溢出菜单）；
  * - #528 模式开关（定制面板 | 原始界面，bundle 存在才渲染、非 admin 可用）；
  * - 「定制预览」主操作按钮（admin-only）；
- * - 治理动作收进 MoreVert 溢出菜单（PreviewGovernanceMenu，admin-only）——
- *   不一排裸按钮平铺；
+ * - ⋮ 溢出菜单只剩「恢复默认」（归档破坏性动作收拢，danger 色 + 确认，
+ *   PreviewGovernanceMenu）；
  * - actionError 为行内紧凑红字（wrap 到下一行，不撑开行高）。
  * 动作语义与回调全部来自父级，这里不做任何授权/治理判断。
  */
-import { Chip } from '@mui/material'
+import { Button, Chip } from '@mui/material'
 import type { PreviewPanelVersion } from './previewPanelApi'
 import type { PreviewDisplayMode } from './previewDisplayMode'
 import { PreviewGovernanceMenu } from './PreviewGovernanceMenu'
@@ -85,6 +87,27 @@ export function PreviewPanelHeader({
           }`}
         />
       )}
+      {showGovernance && (
+        <Button
+          size="small"
+          variant={draftPreview ? 'contained' : 'outlined'}
+          color={draftPreview ? 'warning' : 'primary'}
+          disabled={!draft || draftPreview}
+          onClick={onPreviewDraft}
+        >
+          {draftPreview ? '预览草稿中' : '预览此草稿'}
+        </Button>
+      )}
+      {showGovernance && (
+        <Button
+          size="small"
+          variant="outlined"
+          disabled={!draft || publishing}
+          onClick={onPublish}
+        >
+          发布草稿
+        </Button>
+      )}
       <span className={styles.spacer} />
       {showModeToggle && (
         <div
@@ -115,12 +138,7 @@ export function PreviewPanelHeader({
       )}
       {showGovernance && (
         <PreviewGovernanceMenu
-          draft={draft}
-          published={published}
-          draftPreview={draftPreview}
-          publishing={publishing}
-          onPreviewDraft={onPreviewDraft}
-          onPublish={onPublish}
+          canArchive={published !== null || draft !== null}
           onArchive={onArchive}
         />
       )}

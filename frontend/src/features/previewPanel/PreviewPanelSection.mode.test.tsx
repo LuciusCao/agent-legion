@@ -110,13 +110,6 @@ function modeToggle() {
   return screen.getByRole('group', { name: '预览显示模式' })
 }
 
-/** 治理动作收在 MoreVert 溢出菜单（#796 R3）：点开菜单再点菜单项（菜单
- * 在 fireEvent 的 act 内同步挂载，getByRole 直取即可）。 */
-function clickGovernanceAction(name: string | RegExp) {
-  fireEvent.click(screen.getByRole('button', { name: '预览治理操作' }))
-  fireEvent.click(screen.getByRole('menuitem', { name }))
-}
-
 beforeEach(() => {
   mockFetchPublished.mockReset()
   mockFetchState.mockReset()
@@ -230,9 +223,10 @@ describe('PreviewPanelSection #528 预览模式开关', () => {
     await waitFor(() =>
       expect(screen.getByTestId('generic-fallback')).toBeInTheDocument()
     )
-    // admin 逐次授权「预览此草稿」：草稿预览优先级高于开关——左栏渲染草稿。
+    // admin 逐次授权「预览此草稿」（#796 R4 起外露出头部治理区）：
+    // 草稿预览优先级高于开关——左栏渲染草稿。
     await screen.findByText(/草稿 v1 · /)
-    clickGovernanceAction('预览此草稿')
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')

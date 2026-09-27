@@ -39,8 +39,8 @@ vi.mock('./previewPanelApi', () => ({
 
 // Dock 本体（Studio chat + AgentPanelDock 容器）在 CustomizePreviewDock 自己
 // 的测试覆盖；这里只需要「关闭」出口（mock 形状与
-// PreviewPanelSection.test.tsx 保持一致）。「预览此草稿」在头部治理溢出
-// 菜单里（#796 R3），点真菜单项。
+// PreviewPanelSection.test.tsx 保持一致）。「预览此草稿」外露出头部治理区
+// （#796 R4），直接点真按钮。
 vi.mock('./CustomizePreviewDock', () => ({
   CustomizePreviewDock: ({ onClose }: { onClose: () => void }) => (
     <div data-testid="customize-dialog">
@@ -170,14 +170,13 @@ describe('PreviewPanelSection 重挂语义（bundleKey）', () => {
         await vi.runOnlyPendingTimersAsync()
       })
       // 打开定制对话启用草稿轮询（3s refetchInterval）。草稿不自动执行
-      // （#347 P1）：显式预览后左栏才切到草稿 v1 渲染。治理动作在头部
-      // 溢出菜单（菜单在 fireEvent 的 act 内同步挂载，fake timers 下可点）。
+      // （#347 P1）：显式预览后左栏才切到草稿 v1 渲染。「预览此草稿」外露
+      // 出头部治理区（#796 R4），直接点真按钮。
       fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
-      fireEvent.click(screen.getByRole('button', { name: '预览治理操作' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: '预览此草稿' }))
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
