@@ -86,9 +86,10 @@ describe('useWorkflowStudioPageView', () => {
     expect(result.current.agentOpen).toBe(true)
   })
 
-  // #797 codex 复审轮：toggleAgent 是开合的唯一组合出口——宽屏不动页签；
-  // 窄屏打开切 Agent 页签、从 Agent 页签关闭回画布。
-  it('narrow viewport: toggleAgent syncs the mobile tab both directions', () => {
+  // #797 codex 复审轮 2：窄屏开关以 Dock **实际可见性**（agentOpen &&
+  // 页签=agent）为真值——agentOpen 与页签脱节时按 agentOpen 翻转要点两次
+  // 才生效；按可见性切换则一次到位。
+  it('narrow viewport: toggle keys off actual dock visibility, one click lands', () => {
     stubNarrowViewport(true)
     try {
       const { result } = renderHook(() =>
@@ -99,21 +100,30 @@ describe('useWorkflowStudioPageView', () => {
         )
       )
 
-      // 窄屏画布页签 + 默认开：初始 agentOpen=true 时不动页签（默认态不抢）。
-      // 先关：Agent 页签…初始 mobilePanel=graph，关闭不发生在 agent 页签→不动。
-      act(() => result.current.toggleAgent())
-      expect(result.current.agentOpen).toBe(false)
-      expect(result.current.mobilePanel).toBe('graph')
-
-      // 窄屏打开（当前画布页签）：切到 Agent 页签让 Dock 可见。
-      act(() => result.current.toggleAgent())
+      // 窄屏初始：agentOpen=true 但页签在画布 → 实际不可见（脱节态）。
       expect(result.current.agentOpen).toBe(true)
+      expect(result.current.dockVisible).toBe(false)
+
+      // 第一次点击即生效：打开 + 切 Agent 页签（不再要点两次）。
+      act(() => result.current.toggleAgent())
+      expect(result.current.dockVisible).toBe(true)
       expect(result.current.mobilePanel).toBe('agent')
 
-      // 窄屏从 Agent 页签关闭：回画布，不留空白工作区。
+      // 可见时点击：关闭 + 回画布页签（不留空白工作区）。
       act(() => result.current.toggleAgent())
       expect(result.current.agentOpen).toBe(false)
+      expect(result.current.dockVisible).toBe(false)
       expect(result.current.mobilePanel).toBe('graph')
+
+      // 从 Agent 页签切走画布进入同一脱节态：再点一次即打开。
+      act(() => result.current.setMobilePanel('agent'))
+      act(() => result.current.toggleAgent())
+      expect(result.current.agentOpen).toBe(true)
+      act(() => result.current.setMobilePanel('graph'))
+      expect(result.current.dockVisible).toBe(false)
+      act(() => result.current.toggleAgent())
+      expect(result.current.dockVisible).toBe(true)
+      expect(result.current.mobilePanel).toBe('agent')
     } finally {
       restoreViewportMatchMedia()
     }

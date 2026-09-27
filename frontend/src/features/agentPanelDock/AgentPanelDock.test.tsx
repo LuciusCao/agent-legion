@@ -182,26 +182,29 @@ describe('AgentPanelDock', () => {
     expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
   })
 
-  it('codex P2（#797 复审轮）：hidden 时焦点还给触发控件，不掉进不可见子树', async () => {
+  it('codex P2（#797 复审轮 2）：hidden 时焦点还给面板外最后聚焦的控件（focusin 追踪），不掉进不可见子树', async () => {
     // 焦点移交 effect 驱动 MUI 状态更新脱离 act（known noise，同既有用例）。
     expectConsoleWarning(/not wrapped in act/)
     expectConsoleError(/not wrapped in act/)
-    // 触发控件（如顶栏开关）先于 Dock 挂载并持焦——hidden 时应还给它。
+    // 真实场景：常驻 Dock 已显示，用户点面板外控件（顶栏开关）再令
+    // hidden=true——归还目标是「面板外最后聚焦的可见元素」（focusin 追踪），
+    // 不是挂载前快照（常驻 Dock 挂载时通常是 body，已过期）。
     const trigger = document.createElement('button')
     document.body.appendChild(trigger)
-    trigger.focus()
 
     const { rerender } = renderDock(
       {},
       <input data-testid="dock-input" defaultValue="" />
     )
-    await screen.findByRole('dialog', { name: '测试面板' })
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    // Dock 可见期间：焦点先在面板内，再移到面板外的触发控件（focusin
+    // 追踪记的是它），再回面板输入框。
     const input = screen.getByTestId('dock-input')
+    input.focus()
+    trigger.focus()
     input.focus()
     expect(document.activeElement).toBe(input)
 
-    // hidden=true：surface display:none——焦点若留在子树会随不可见丢失
-    // （或裸丢 body）；必须显式还给触发控件。
     rerender(
       (
         <AgentPanelDock
@@ -214,6 +217,8 @@ describe('AgentPanelDock', () => {
         </AgentPanelDock>
       ) as ReactElement
     )
+    // hidden=true：焦点还给面板外最后聚焦的 trigger（不是 body、不是
+    // display:none 子树——revert 即红）。
     await waitFor(() => expect(document.activeElement).toBe(trigger))
 
     // 恢复显示：焦点回 surface。
@@ -229,11 +234,7 @@ describe('AgentPanelDock', () => {
         </AgentPanelDock>
       ) as ReactElement
     )
-    await waitFor(() =>
-      expect(document.activeElement).toBe(
-        screen.getByRole('dialog', { name: '测试面板' })
-      )
-    )
+    await waitFor(() => expect(document.activeElement).toBe(surface))
     trigger.remove()
   })
 
