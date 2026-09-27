@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
+import { Dialog } from '@mui/material'
 import { AgentPanelDock } from './AgentPanelDock'
 import { dockStorageKey, loadDockPlacement } from './dockPlacement'
 import { expectConsoleError, expectConsoleWarning } from '../../test-setup'
@@ -263,5 +264,154 @@ describe('AgentPanelDock', () => {
     renderDock()
     const surface = await screen.findByRole('dialog', { name: '测试面板' })
     expect(rndWrapper(surface).style.transform).toBe(jsdomTransform(488, 64))
+  })
+
+  it('codex P2：AppBar 实测高度（>56 兜底）到达后重新钳制记忆位置', async () => {
+    // 记忆位置 y=70：兜底 56 下合法（≥56），实测 AppBar 底边 100 下越界。
+    window.localStorage.setItem(
+      dockStorageKey('test-surface'),
+      JSON.stringify({
+        x: 900,
+        y: 70,
+        width: 520,
+        height: 620,
+        collapsed: false,
+      })
+    )
+    // 假 AppBar：实测底边 100（版本芯片/放大字体场景）。
+    const fakeBar = document.createElement('div')
+    fakeBar.setAttribute('data-testid', 'app-bar')
+    fakeBar.getBoundingClientRect = () => ({ bottom: 100 }) as DOMRect
+    document.body.appendChild(fakeBar)
+    try {
+      renderDock()
+      const surface = await screen.findByRole('dialog', { name: '测试面板' })
+      // 实测到达后重钳：y 70 → 100。transform 读数带挂载时位置的 jsdom
+      // 偏移（挂载时 y=70）。
+      await waitFor(() =>
+        expect(rndWrapper(surface).style.transform).toBe(
+          jsdomTransform(900, 100, { x: 900, y: 70 })
+        )
+      )
+    } finally {
+      fakeBar.remove()
+    }
+  })
+
+  it('codex P2：视口缩小时重新钳制记忆几何（尺寸+坐标收进新视口）', async () => {
+    // 记忆几何宽 1200：1024 视口下钳到 992。
+    window.localStorage.setItem(
+      dockStorageKey('test-surface'),
+      JSON.stringify({
+        x: 24,
+        y: 100,
+        width: 1200,
+        height: 620,
+        collapsed: false,
+      })
+    )
+    renderDock()
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    expect(rndWrapper(surface).style.width).toBe('992px')
+
+    // 视口缩到 640×480：宽度钳到 608（把手/按钮收进视口）。
+    const originalWidth = window.innerWidth
+    const originalHeight = window.innerHeight
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(window, 'innerHeight', {
+      writable: true,
+      configurable: true,
+      value: 480,
+    })
+    try {
+      fireEvent(window, new Event('resize'))
+      await waitFor(() => expect(rndWrapper(surface).style.width).toBe('608px'))
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        writable: true,
+        configurable: true,
+        value: originalWidth,
+      })
+      Object.defineProperty(window, 'innerHeight', {
+        writable: true,
+        configurable: true,
+        value: originalHeight,
+      })
+    }
+  })
+
+  it('codex P2：Esc 折叠挂在 document 级——焦点在面板外（底层页面）也生效', async () => {
+    render(
+      (
+        <div>
+          <button type="button">底层按钮</button>
+          <AgentPanelDock
+            surfaceKey="test-surface"
+            title="测试面板"
+            onClose={() => undefined}
+          >
+            <div data-testid="dock-child">内容</div>
+          </AgentPanelDock>
+        </div>
+      ) as ReactElement
+    )
+    await screen.findByRole('dialog', { name: '测试面板' })
+    // 焦点移交到底层页面（模拟用户点回页面）。
+    screen.getByRole('button', { name: '底层按钮' }).focus()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(
+      await screen.findByRole('button', { name: /已折叠，点击展开/ })
+    ).toBeInTheDocument()
+  })
+
+  it('codex P2：有全局 MUI Modal 开着时 Esc 让给对方（不折叠 Dock）', async () => {
+    render(
+      (
+        <div>
+          <AgentPanelDock
+            surfaceKey="test-surface"
+            title="测试面板"
+            onClose={() => undefined}
+          >
+            <div>内容</div>
+          </AgentPanelDock>
+          <Dialog open onClose={() => undefined}>
+            <div>模态内容</div>
+          </Dialog>
+        </div>
+      ) as ReactElement
+    )
+    await screen.findByRole('dialog', { name: '测试面板' })
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    // Dock 不折叠（Esc 属于模态）；小条不出现。
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(
+      screen.queryByRole('button', { name: /已折叠，点击展开/ })
+    ).toBeNull()
+    expect(screen.getByRole('dialog', { name: '测试面板' })).toBeInTheDocument()
+  })
+
+  it('codex P2：拖拽实时钳制 y 不低于 AppBar 顶边（bounds=window 允许 y=0）', async () => {
+    renderDock()
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    const handle = screen.getByTestId('dock-test-surface-handle')
+
+    // 起点 y=64；向上大幅拖拽（目标 y 远低于 topInset=56 兜底）。
+    fireEvent.mouseDown(handle, { clientX: 600, clientY: 80 })
+    fireEvent.mouseMove(document, { clientX: 600, clientY: -500 })
+    fireEvent.mouseUp(document, { clientX: 600, clientY: -500 })
+
+    await waitFor(() => {
+      const stored = loadDockPlacement('test-surface')
+      // 提交钳制：y 被钳到 56（x 未动）。
+      expect(stored).toMatchObject({ x: 488, y: 56, collapsed: false })
+    })
+    expect(rndWrapper(surface).style.transform).toBe(
+      jsdomTransform(488, 56, { x: 488, y: 64 })
+    )
   })
 })

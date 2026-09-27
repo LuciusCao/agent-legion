@@ -70,10 +70,13 @@ function sessionRecord(
   }
 }
 
-function renderDock() {
+function renderDock(workspaceId = 'ws1') {
   return render(
     (
-      <CustomizePreviewDock workspaceId="ws1" onClose={() => undefined} />
+      <CustomizePreviewDock
+        workspaceId={workspaceId}
+        onClose={() => undefined}
+      />
     ) as ReactElement,
     { wrapper: TestQueryProvider }
   )
@@ -217,6 +220,31 @@ describe('CustomizePreviewDock', () => {
     expect(screen.getByRole('button', { name: '模型' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '思考档位' })).toBeInTheDocument()
     expect(surface.querySelector('iframe')).toBeNull()
+  })
+
+  it('codex P2：跨 workspace 导航（组件实例复用）时聊天子树重挂，composer 未发送文本不串', async () => {
+    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi' },
+    ] as never)
+    mockChatApi.fetchStudioChatSessions.mockResolvedValue([sessionRecord()])
+    mockChatApi.sendStudioChatMessage.mockResolvedValue({} as never)
+    const { rerender } = renderDock('ws1')
+
+    const input = await screen.findByLabelText('消息输入')
+    await waitFor(() => expect(input).toBeEnabled())
+    fireEvent.change(input, { target: { value: 'ws1 未发送文本' } })
+    expect(screen.getByLabelText('消息输入')).toHaveValue('ws1 未发送文本')
+
+    // react-router 复用组件实例（同 Dock、换 workspaceId）：AgentChatPanel
+    // 按 key={workspaceId} 重挂——composer 清空，不把 ws1 的文本带进 ws2。
+    rerender(
+      (
+        <CustomizePreviewDock workspaceId="ws2" onClose={() => undefined} />
+      ) as ReactElement
+    )
+    await waitFor(() =>
+      expect(screen.getByLabelText('消息输入')).toHaveValue('')
+    )
   })
 
   it('#695：closed 会话显示恢复条', async () => {

@@ -42,3 +42,23 @@ export function useDockFocus(collapsed: boolean): DockFocus {
 
   return { surfaceRef, chipRef }
 }
+
+/**
+ * Esc 折叠的 document 级监听（codex P2 on #796）：非模态面板失焦（用户点
+ * 回底层页面）后 Esc 仍应折叠——挂在 document 而非 Paper。折叠态不挂；
+ * 不抢已消费的 Esc：defaultPrevented 跳过，有全局 Modal/Menu（MUI
+ * ModalManager 体系，如 TokenUsage/菜单）开着时让给对方。
+ */
+export function useDockEscape(collapsed: boolean, onEscape: () => void): void {
+  useEffect(() => {
+    if (collapsed) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (document.querySelector('.MuiModal-root')) return
+      onEscape()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onEscape 每轮渲染重建但语义稳定；只在 collapsed 翻转时重挂（collapsed 是唯一行为输入）
+  }, [collapsed])
+}

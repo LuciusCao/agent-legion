@@ -43,7 +43,11 @@ export function CustomizePreviewDock({
             未检测到可用的 ACP agent，请联系管理员配置
           </div>
         ) : (
+          // key 按 workspaceId 重挂（codex P2）：react-router 复用实例跨
+          // workspace 导航时，composer 未发送文本/会话选择等组件本地 state
+          // 不得串到另一个 workspace。
           <AgentChatPanel
+            key={workspaceId}
             chat={chat}
             workspaceId={workspaceId}
             className={styles.chatArea}
