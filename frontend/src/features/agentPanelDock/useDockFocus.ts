@@ -7,7 +7,13 @@
  * 内 setState/forceUpdate 触发嵌套重渲染，首帧 passive effect 里 useRef 的
  * current 可能仍是 null（实测），callback ref 的 node 到位通知才可靠。
  */
-import { useCallback, useEffect, useState, type RefCallback } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefCallback,
+} from 'react'
 
 export interface DockFocus {
   surfaceRef: RefCallback<HTMLDivElement>
@@ -48,17 +54,23 @@ export function useDockFocus(collapsed: boolean): DockFocus {
  * 回底层页面）后 Esc 仍应折叠——挂在 document 而非 Paper。折叠态不挂；
  * 不抢已消费的 Esc：defaultPrevented 跳过，有全局 Modal/Menu（MUI
  * ModalManager 体系，如 TokenUsage/菜单）开着时让给对方。
+ * 回调经 ref 读最新值（codex P2 复审轮）：effect 只按 collapsed 挂/卸，
+ * 若闭包冻结首渲染的 onEscape，拖拽/缩放后的 Esc 会把旧几何写回存储——
+ * ref 保证每次击键读的是当帧回调。
  */
 export function useDockEscape(collapsed: boolean, onEscape: () => void): void {
+  const onEscapeRef = useRef(onEscape)
+  useEffect(() => {
+    onEscapeRef.current = onEscape
+  })
   useEffect(() => {
     if (collapsed) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       if (document.querySelector('.MuiModal-root')) return
-      onEscape()
+      onEscapeRef.current()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onEscape 每轮渲染重建但语义稳定；只在 collapsed 翻转时重挂（collapsed 是唯一行为输入）
   }, [collapsed])
 }

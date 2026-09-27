@@ -24,8 +24,20 @@ export function CustomizePreviewDock({
   onClose,
 }: CustomizePreviewDockProps) {
   const chat = useStudioChat(workspaceId)
-  const [chosenAgentId, setChosenAgentId] = useState('')
-  const selectedAgentId = chosenAgentId || (chat.agents[0]?.id ?? '')
+  // 选择按 workspaceId 键控 + 渲染期校验存在性（codex P2 复审轮）：
+  // key={workspaceId} 只重挂 AgentChatPanel 子树，父级这个 state 在
+  // react-router 复用实例跨 workspace 导航时保留——不键控则 B 的下拉框
+  // 收到不属于其选项的 id，「新对话」会把 A 的 agentId 提交给 B。
+  const [chosen, setChosen] = useState<{
+    workspaceId: string
+    agentId: string
+  } | null>(null)
+  const selectedAgentId =
+    chosen !== null &&
+    chosen.workspaceId === workspaceId &&
+    chat.agents.some((agent) => agent.id === chosen.agentId)
+      ? chosen.agentId
+      : (chat.agents[0]?.id ?? '')
 
   return (
     <AgentPanelDock
@@ -57,7 +69,7 @@ export function CustomizePreviewDock({
                 sessions={chat.sessions}
                 selectedAgentId={selectedAgentId}
                 activeSessionId={chat.activeSessionId}
-                onSelectAgent={setChosenAgentId}
+                onSelectAgent={(agentId) => setChosen({ workspaceId, agentId })}
                 onSelectSession={(sessionId) =>
                   void chat.selectSession(sessionId)
                 }

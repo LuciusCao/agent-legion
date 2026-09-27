@@ -80,6 +80,21 @@ export function clampDockGeometry(
   return { x, y, width, height }
 }
 
+/**
+ * 顶部边缘缩放的 topInset 钳制（codex P2 on #796）：上/左上/右上把手把
+ * position.y 拉到窗口顶时 react-rnd 不会拦——钳 y 到 topInset，同时把
+ * 高度减去钳位移除的量（底边 = y + height 不变，别只钳 y 让面板被拉长
+ * 盖过 AppBar 视觉区）。
+ */
+export function clampResizeTopInset(
+  position: { x: number; y: number },
+  height: number,
+  topInset: number
+): { x: number; y: number; height: number } {
+  const y = Math.max(topInset, position.y)
+  return { x: position.x, y, height: height - (y - position.y) }
+}
+
 export function loadDockPlacement(surfaceKey: string): DockPlacement | null {
   try {
     const raw = window.localStorage.getItem(dockStorageKey(surfaceKey))

@@ -23,19 +23,13 @@
  *   document 级（非模态面板失焦后 Esc 仍可用；defaultPrevented 或有全局
  *   Modal/Menu 开着时让给对方，不抢已消费的 Esc）。
  */
-import { useEffect, useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { IconButton, Paper, Portal, Tooltip } from '@mui/material'
 import { Close, UnfoldLess } from '@mui/icons-material'
 import { Rnd } from 'react-rnd'
 import { useAppBarBottom } from '../../hooks/useAppBarBottom'
-import {
-  APP_BAR_FALLBACK_HEIGHT,
-  clampDockGeometry,
-  defaultDockGeometry,
-  loadDockPlacement,
-  saveDockPlacement,
-  type DockGeometry,
-} from './dockPlacement'
+import { APP_BAR_FALLBACK_HEIGHT, clampResizeTopInset } from './dockPlacement'
+import { useDockGeometry } from './useDockGeometry'
 import { useDockEscape, useDockFocus } from './useDockFocus'
 import styles from './AgentPanelDock.module.css'
 
@@ -76,75 +70,17 @@ export function AgentPanelDock({
   const appBarBottom = useAppBarBottom()
   const topInset = appBarBottom > 0 ? appBarBottom : readAppBarFallbackHeight()
 
-  // 用户位置（拖拽/缩放/记忆恢复）为 state；null = 未动过，位置 render 期
-  // 派生自默认布局（跟随 AppBar 实测底边，首帧回退声明值）。
-  const [geometryOverride, setGeometryOverride] = useState<DockGeometry | null>(
-    () => {
-      const stored = loadDockPlacement(surfaceKey)
-      return stored
-        ? clampDockGeometry(
-            stored,
-            topInset,
-            window.innerWidth,
-            window.innerHeight
-          )
-        : null
-    }
-  )
-  const [collapsed, setCollapsed] = useState(
-    () => loadDockPlacement(surfaceKey)?.collapsed ?? false
-  )
-  // 视口尺寸状态化（codex P2：resize 必须触发重渲染，钳制才会跟进）。
-  const [viewport, setViewport] = useState(() => ({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }))
-  useEffect(() => {
-    const onResize = () =>
-      setViewport({ width: window.innerWidth, height: window.innerHeight })
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-  const geometry =
-    geometryOverride ??
-    defaultDockGeometry(topInset, viewport.width, viewport.height, defaultSize)
-
-  // 实测 topInset 到达（兜底→实测）或视口变化时，对已冻结的用户/记忆几何
-  // 重新钳制——不钳则高 AppBar 或缩小的窗口会把面板顶边/把手送出去。
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 几何钳制是与外部系统（AppBar 实测高度/视口尺寸）同步，合法 effect 用途；函数式更新只在结果变化时落盘
-    setGeometryOverride((current) => {
-      if (current === null) return null
-      const next = clampDockGeometry(
-        current,
-        topInset,
-        viewport.width,
-        viewport.height
-      )
-      return next.x === current.x &&
-        next.y === current.y &&
-        next.width === current.width &&
-        next.height === current.height
-        ? current
-        : next
-    })
-  }, [topInset, viewport])
+  // 几何引擎（记忆/默认布局、实测与视口变化重钳、持久化）抽在
+  // useDockGeometry（体积预算）；语义见该文件注释。
+  const {
+    geometry,
+    collapsed,
+    setGeometryLive,
+    commitGeometry,
+    setCollapsedPersisted,
+  } = useDockGeometry(surfaceKey, topInset, defaultSize)
 
   const { surfaceRef, chipRef } = useDockFocus(collapsed)
-
-  function persist(next: DockGeometry, nextCollapsed: boolean) {
-    saveDockPlacement(surfaceKey, { ...next, collapsed: nextCollapsed })
-  }
-
-  function commitGeometry(next: DockGeometry) {
-    setGeometryOverride(next)
-    persist(next, collapsed)
-  }
-
-  function setCollapsedPersisted(nextCollapsed: boolean) {
-    setCollapsed(nextCollapsed)
-    persist(geometry, nextCollapsed)
-  }
 
   // Esc 折叠挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位
   // 规则见 useDockFocus.ts 的 useDockEscape）。
@@ -165,25 +101,37 @@ export function AgentPanelDock({
         dragHandleClassName={styles.titleBar}
         cancel="button"
         onDrag={(_event, data) => {
-          setGeometryOverride({ ...geometry, x: data.x, y: clampDragY(data.y) })
+          setGeometryLive({ ...geometry, x: data.x, y: clampDragY(data.y) })
         }}
         onDragStop={(_event, data) => {
           commitGeometry({ ...geometry, x: data.x, y: clampDragY(data.y) })
         }}
         onResize={(_event, _direction, ref, _delta, position) => {
-          setGeometryOverride({
-            x: position.x,
-            y: position.y,
+          // 顶部把手缩放同样钳顶边（codex P2 复审轮：拖拽路径已钳，缩放
+          // 路径漏了）——高度联动由 clampResizeTopInset 承担（底边不变）。
+          const clamped = clampResizeTopInset(
+            position,
+            ref.offsetHeight,
+            topInset
+          )
+          setGeometryLive({
+            x: clamped.x,
+            y: clamped.y,
             width: ref.offsetWidth,
-            height: ref.offsetHeight,
+            height: clamped.height,
           })
         }}
         onResizeStop={(_event, _direction, ref, _delta, position) => {
+          const clamped = clampResizeTopInset(
+            position,
+            ref.offsetHeight,
+            topInset
+          )
           commitGeometry({
-            x: position.x,
-            y: position.y,
+            x: clamped.x,
+            y: clamped.y,
             width: ref.offsetWidth,
-            height: ref.offsetHeight,
+            height: clamped.height,
           })
         }}
         style={{

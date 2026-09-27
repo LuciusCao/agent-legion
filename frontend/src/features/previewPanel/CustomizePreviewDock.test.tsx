@@ -247,6 +247,47 @@ describe('CustomizePreviewDock', () => {
     )
   })
 
+  it('codex P2 复审轮：跨 workspace 切换后 agent 选择回落默认且「新对话」不提交旧 workspace 的 agentId', async () => {
+    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi' },
+      { id: 'codex', label: 'Codex' },
+    ] as never)
+    mockChatApi.fetchStudioChatSessions.mockResolvedValue([sessionRecord()])
+    mockChatApi.createStudioChatSession.mockResolvedValue(
+      sessionRecord() as never
+    )
+    const { rerender } = renderDock('ws1')
+    const picker = await screen.findByLabelText('选择 Agent')
+    // agents 加载中（agentsLoading）面板已渲染但选项未就位——等选项落地
+    // 再选，否则 change 落在空 select 上是无效操作。
+    await waitFor(() =>
+      expect((picker as HTMLSelectElement).options.length).toBeGreaterThan(1)
+    )
+    // 选非默认 agent。
+    fireEvent.change(picker, { target: { value: 'codex' } })
+    expect(screen.getByLabelText('选择 Agent')).toHaveValue('codex')
+
+    // react-router 复用组件实例切到 ws2：选择必须回落默认（ws1 的 codex
+    // 不得带入 ws2 的提交）。
+    rerender(
+      (
+        <CustomizePreviewDock workspaceId="ws2" onClose={() => undefined} />
+      ) as ReactElement
+    )
+    await waitFor(() =>
+      expect(screen.getByLabelText('选择 Agent')).toHaveValue('kimi')
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /新对话/ }))
+    await waitFor(() =>
+      // createStudioChatSession(workspaceId, agentId) 位置参数。
+      expect(mockChatApi.createStudioChatSession).toHaveBeenCalledWith(
+        'ws2',
+        'kimi'
+      )
+    )
+  })
+
   it('#695：closed 会话显示恢复条', async () => {
     mockChatApi.fetchStudioChatAgents.mockResolvedValue([
       { id: 'kimi', label: 'Kimi' },

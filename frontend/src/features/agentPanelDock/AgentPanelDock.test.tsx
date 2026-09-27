@@ -414,4 +414,94 @@ describe('AgentPanelDock', () => {
       jsdomTransform(488, 56, { x: 488, y: 64 })
     )
   })
+
+  it('codex P2 复审轮：拖拽改几何后按 Esc 折叠，写回存储的是新几何（Esc 回调不冻结首帧闭包）', async () => {
+    renderDock()
+    await screen.findByRole('dialog', { name: '测试面板' })
+    const handle = screen.getByTestId('dock-test-surface-handle')
+
+    // 拖拽到新位置（488,64 → 288,164）并提交存储。
+    fireEvent.mouseDown(handle, { clientX: 600, clientY: 80 })
+    fireEvent.mouseMove(document, { clientX: 400, clientY: 180 })
+    fireEvent.mouseUp(document, { clientX: 400, clientY: 180 })
+    await waitFor(() =>
+      expect(loadDockPlacement('test-surface')).toMatchObject({
+        x: 288,
+        y: 164,
+      })
+    )
+
+    // Esc 折叠（document 级）：折叠写入不得把首帧几何（488,64）覆盖回去。
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await screen.findByRole('button', { name: /已折叠，点击展开/ })
+    expect(loadDockPlacement('test-surface')).toMatchObject({
+      x: 288,
+      y: 164,
+      collapsed: true,
+    })
+  })
+
+  it('codex P2 复审轮：顶部把手缩放到窗口顶外时按 topInset 钳 y，且底边不变（高度联动）', async () => {
+    // re-resizable 的把手用 ref.offsetWidth/Height 报新尺寸；jsdom 布局恒 0，
+    // 这里把 offset* 桥到内联 style（缩放中 re-resizable 自己管理 style 尺寸）。
+    const descW = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'offsetWidth'
+    )
+    const descH = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'offsetHeight'
+    )
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        const v = Number.parseFloat(this.style.width)
+        return Number.isFinite(v) ? v : 0
+      },
+    })
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        const v = Number.parseFloat(this.style.height)
+        return Number.isFinite(v) ? v : 0
+      },
+    })
+    try {
+      renderDock()
+      const surface = await screen.findByRole('dialog', { name: '测试面板' })
+      const wrapper = rndWrapper(surface)
+      // 顶部把手：row-resize + top:-5px（re-resizable 无默认类名，按内联
+      // style 识别）。
+      const topHandle = Array.from(
+        wrapper.querySelectorAll('div[style*="row-resize"]')
+      ).find((el) => (el as HTMLElement).style.top === '-5px')
+      if (!topHandle) throw new Error('顶部缩放把手未找到')
+
+      // 起点（488,64，高 620，底边 684）；向上大幅拖出窗口顶。
+      fireEvent.mouseDown(topHandle, { clientX: 700, clientY: 64 })
+      fireEvent.mouseMove(document, { clientX: 700, clientY: -500 })
+      fireEvent.mouseUp(document, { clientX: 700, clientY: -500 })
+
+      await waitFor(() => {
+        const stored = loadDockPlacement('test-surface')
+        // 钳制生效：y 被钳到 56（topInset 兜底）。
+        expect(stored).toMatchObject({ y: 56 })
+      })
+      // 高度联动：height 减去钳位量，底边相对「报告的原始几何」不变。
+      // jsdom 里 re-resizable 报告的坐标受 transform 自校准产物影响归零
+      // （见 jsdomTransform 注释）：报告 (y=0, height=620) → 钳后
+      // (56, 564)，底边 0+620 = 56+564 = 620 不变。真实浏览器里报告值
+      // 是 (-500, 1184) → 钳后 (56, 628)，底边 684 不变——这层数学由
+      // dockPlacement.test.ts 的 clampResizeTopInset 纯函数测试钉住。
+      const stored = loadDockPlacement('test-surface')
+      expect(stored!.y + stored!.height).toBe(620)
+    } finally {
+      if (descW) {
+        Object.defineProperty(HTMLElement.prototype, 'offsetWidth', descW)
+      }
+      if (descH) {
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', descH)
+      }
+    }
+  })
 })

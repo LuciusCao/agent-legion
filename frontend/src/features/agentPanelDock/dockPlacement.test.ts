@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   clampDockGeometry,
+  clampResizeTopInset,
   defaultDockGeometry,
   dockStorageKey,
 } from './dockPlacement'
@@ -64,6 +65,31 @@ describe('clampDockGeometry', () => {
     )
     expect(g.x).toBeGreaterThanOrEqual(16 - 520 + 80)
     expect(g.y).toBe(56)
+  })
+})
+
+describe('clampResizeTopInset', () => {
+  it('y 低于 topInset：钳 y 且高度减去钳位量（底边不变）', () => {
+    // 顶部把手拖到窗口顶外：y=-500、height=1184（底边 684）。
+    const r = clampResizeTopInset({ x: 300, y: -500 }, 1184, 56)
+    expect(r).toEqual({ x: 300, y: 56, height: 628 })
+    expect(r.y + r.height).toBe(-500 + 1184)
+  })
+
+  it('y 合法时原样返回（高度不动）', () => {
+    expect(clampResizeTopInset({ x: 300, y: 100 }, 620, 56)).toEqual({
+      x: 300,
+      y: 100,
+      height: 620,
+    })
+  })
+
+  it('恰好等于 topInset 时不钳', () => {
+    expect(clampResizeTopInset({ x: 0, y: 56 }, 400, 56)).toEqual({
+      x: 0,
+      y: 56,
+      height: 400,
+    })
   })
 })
 
