@@ -1,15 +1,16 @@
 /**
- * CustomizePreviewDock 的治理面测试（issue #328 / #347 P1 / #615 / #795 PR①）：
- * 发布/恢复默认是人工按钮（走 previewPanelApi mutation），「预览此草稿」是
- * 显式动作且仅在有草稿时可点（草稿执行不自动发生——section 层门控测试见
- * PreviewPanelSection.test.tsx）；agent 列表缺失时给出提示；chat 本体由
- * workflowStudio/chat 自己的测试覆盖，这里 mock 其 API 层。
- * #615：面板内嵌草稿预览区（CustomizePreviewPane 复用 PreviewPanelHost）
- * ——iframe 只在「有草稿 且 previewDraft=true（父级逐次授权判定）」时挂载；
- * 未授权/无草稿时只渲染占位提示，不挂草稿 iframe。
+ * CustomizePreviewDock 的治理面测试（issue #328 / #347 P1 / #795 PR① /
+ * #796 返工）：发布/恢复默认是人工按钮（走 previewPanelApi mutation），
+ * 「预览此草稿」是显式动作且仅在有草稿时可点（草稿执行不自动发生——
+ * section 层门控与左栏渲染测试见 PreviewPanelSection.test.tsx）；agent
+ * 列表缺失时给出提示；chat 本体由 workflowStudio/chat 自己的测试覆盖，
+ * 这里 mock 其 API 层。
  * #795 PR①：容器迁为 AgentPanelDock（surface "customize-preview"）——
  * 拖拽/折叠/记忆/焦点等容器行为在 agentPanelDock 自己的测试钉住，这里
  * 只补一条「非模态 surface」的集成断言（底层页面不进 aria-hidden）。
+ * #796 验收返工：面板内嵌预览区已撤——面板 = AgentPanelDock +
+ * AgentChatPanel + 治理 footer 的薄组合，断言面板内不再出现草稿
+ * iframe（草稿渲染目标只有左栏既有通道）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -105,7 +106,6 @@ function renderDock(
       (
         <CustomizePreviewDock
           workspaceId="ws1"
-          jobId="job-1"
           state={state}
           previewDraft={previewDraft}
           onPreviewDraft={onPreviewDraft}
@@ -115,15 +115,6 @@ function renderDock(
       { wrapper: TestQueryProvider }
     ),
   }
-}
-
-/** 面板内嵌预览区里的草稿 iframe（未授权/无草稿时为 null）。 */
-function paneIframe(): HTMLIFrameElement | null {
-  return (
-    (screen
-      .getByTestId('customize-preview-pane')
-      .querySelector('iframe') as HTMLIFrameElement | null) ?? null
-  )
 }
 
 beforeEach(() => {
@@ -155,7 +146,6 @@ describe('CustomizePreviewDock', () => {
           <button type="button">底层左栏按钮</button>
           <CustomizePreviewDock
             workspaceId="ws1"
-            jobId="job-1"
             state={null}
             previewDraft={false}
             onPreviewDraft={() => undefined}
@@ -174,6 +164,29 @@ describe('CustomizePreviewDock', () => {
     expect(document.querySelector('.MuiBackdrop-root')).toBeNull()
     const underlying = screen.getByRole('button', { name: '底层左栏按钮' })
     expect(underlying.closest('[aria-hidden="true"]')).toBeNull()
+  })
+
+  it('#796 返工：面板 = Dock + 对话 + 治理 footer——无内嵌预览区、不挂草稿 iframe', async () => {
+    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi' },
+    ] as never)
+    // 有草稿且已授权（previewDraft=true）也不在面板内渲染：草稿的渲染
+    // 目标只有左栏既有通道（PreviewPanelSection 的 PreviewPanelHost）。
+    renderDock({ published: null, draft: makeVersion('draft') }, true)
+    await screen.findByRole('dialog', { name: '定制预览面板' })
+    expect(screen.queryByTestId('customize-preview-pane')).toBeNull()
+    expect(screen.queryByText(/草稿预览（仅本页可见/)).toBeNull()
+    const surface = screen.getByRole('dialog', { name: '定制预览面板' })
+    expect(surface.querySelector('iframe')).toBeNull()
+    // 对话与治理操作都在：会话栏、消息输入、三个 footer 动作。
+    expect(
+      await screen.findByText('选择 Agent，点「＋ 新对话」开始')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '预览草稿中' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发布草稿' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复默认' })).toBeInTheDocument()
   })
 
   it('无可用 agent 时提示配置', async () => {
@@ -209,49 +222,6 @@ describe('CustomizePreviewDock', () => {
     expect(onPreviewDraft).not.toHaveBeenCalled()
     fireEvent.click(enabledPreview)
     expect(onPreviewDraft).toHaveBeenCalledTimes(1)
-  })
-
-  it('内嵌预览门控（#615）：无草稿或未授权（previewDraft=false）只渲染占位，不挂草稿 iframe', async () => {
-    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
-      { id: 'kimi', label: 'Kimi' },
-    ] as never)
-    // 无草稿：占位提示「暂无草稿」。
-    const { unmount } = renderDock({ published: null, draft: null })
-    expect(
-      await screen.findByText(/暂无草稿：agent 保存草稿后即可在此预览/)
-    ).toBeInTheDocument()
-    expect(paneIframe()).toBeNull()
-    unmount()
-
-    // 有草稿但未显式授权：占位提示等待「预览此草稿」，仍不挂 iframe——
-    // 草稿执行不自动发生（#347 P1），内嵌预览吃的是父级的同一授权判定。
-    renderDock({ published: null, draft: makeVersion('draft') }, false)
-    expect(
-      await screen.findByText(/草稿 v1 已就绪——点「预览此草稿」后在此渲染/)
-    ).toBeInTheDocument()
-    expect(paneIframe()).toBeNull()
-  })
-
-  it('内嵌预览（#615）：授权后（previewDraft=true）面板内渲染草稿 srcDoc，与聊天同屏', async () => {
-    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
-      { id: 'kimi', label: 'Kimi' },
-    ] as never)
-    const draft = makeVersion(
-      'draft',
-      '<!doctype html><html><body>draft in dialog</body></html>'
-    )
-    renderDock({ published: null, draft }, true)
-
-    const frame = await waitFor(() => {
-      const iframe = paneIframe()
-      expect(iframe).not.toBeNull()
-      return iframe as HTMLIFrameElement
-    })
-    // srcDoc 含 CSP 注入（宿主红线），断言用「包含」。
-    expect(frame.getAttribute('srcdoc')).toContain('draft in dialog')
-    // 沙箱红线与左栏同源：恒为 allow-scripts，永不授 allow-same-origin。
-    expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
-    expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin')
   })
 
   it('左栏预览中时按钮显示「预览草稿中」状态', async () => {

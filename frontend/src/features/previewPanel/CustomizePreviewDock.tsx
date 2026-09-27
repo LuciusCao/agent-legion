@@ -1,19 +1,17 @@
 /**
  * 「定制预览」Dock 面板（issue #328；#795 PR① 从右侧 MUI Dialog 迁移进
  * AgentPanelDock）：复用 workflowStudio/chat 的 useStudioChat + AgentChatPanel
- * 骨架（#695）的薄封装。agent 经 MCP 预览面板工具写草稿，发布/恢复默认是
- * 这里的人工动作（reject_studio_agent_scope 在后端钉死）。草稿**不自动执行**
- * （#347 P1）：agent（或提示注入产物）写入的 HTML 未经发布即作为 srcDoc
- * 运行是风险放大器——左栏只渲染已发布版本，草稿需经「预览此草稿」显式动作
- * 逐次放行（重开面板回到默认态）。
- * #615：面板内嵌草稿预览区（CustomizePreviewPane）——预览目标只在面板外时
- * 人工验证事实上不可用；内嵌预览与左栏渲染共用父级的同一授权判定
- * （previewDraft），对话与预览同屏。
- * #795 PR①：容器换成 AgentPanelDock（surface "customize-preview"）——可拖拽/
- * 可缩放/可折叠为右下角小条、位置与折叠态按 surface 记忆、非模态（面板打开
- * 时左栏与 DAG 全程可滚动可交互）；折叠不丢聊天子树状态（Dock 只
- * display:none 不卸载）。容器行为（拖拽/记忆/焦点/Esc）由 agentPanelDock
- * 自己的测试钉住，这里只覆盖治理面与内嵌预览门控。
+ * 骨架（#695）的薄封装——本组件就是 AgentPanelDock + AgentChatPanel（定制
+ * 预览会话）+ 治理 footer 的组合，不在面板内长私有 UI。agent 经 MCP 预览
+ * 面板工具写草稿，发布/恢复默认是这里的人工动作（reject_studio_agent_scope
+ * 在后端钉死）。草稿**不自动执行**（#347 P1）：agent（或提示注入产物）写入的
+ * HTML 未经发布即作为 srcDoc 运行是风险放大器——草稿需经「预览此草稿」
+ * 显式动作逐次放行（重开面板回到默认态）。
+ * #796 验收返工：面板内不再内嵌草稿预览区（#615 的 CustomizePreviewPane
+ * 已撤）——草稿的渲染目标是 job detail 左栏既有预览通道
+ * （PreviewPanelSection 的 PreviewPanelHost，与已发布版本同一挂载点、同一
+ * 授权判定 previewDraft）：Dock 打开期间点「预览此草稿」，草稿直接在左栏
+ * 渲染，随轮询「改一版看一版」；Dock 折叠/关闭不改变左栏既有语义。
  */
 import { useState } from 'react'
 import { Button } from '@mui/material'
@@ -22,7 +20,6 @@ import { useStudioChat } from '../workflowStudio/chat/useStudioChat'
 import { AgentChatPanel } from '../workflowStudio/chat/AgentChatPanel'
 import { StudioChatSessionBar } from '../workflowStudio/chat/StudioChatSessionBar'
 import type { PreviewPanelState } from './previewPanelApi'
-import { CustomizePreviewPane } from './CustomizePreviewPane'
 import {
   useArchivePreviewPanel,
   usePublishPreviewPanel,
@@ -31,11 +28,9 @@ import styles from './CustomizePreviewDock.module.css'
 
 export interface CustomizePreviewDockProps {
   workspaceId: string
-  /** 当前 job：内嵌预览的桥上下文与重挂 key（与左栏渲染同源）。 */
-  jobId: string
   /** 当前面板治理状态（published + draft），由父级轮询刷新。 */
   state: PreviewPanelState | null
-  /** 草稿预览是否已获逐次授权（左栏与内嵌预览共用的判定，父级持有）。 */
+  /** 草稿预览是否已获逐次授权（左栏渲染共用的判定，父级持有）。 */
   previewDraft: boolean
   onPreviewDraft: () => void
   onClose: () => void
@@ -43,7 +38,6 @@ export interface CustomizePreviewDockProps {
 
 export function CustomizePreviewDock({
   workspaceId,
-  jobId,
   state,
   previewDraft,
   onPreviewDraft,
@@ -72,7 +66,8 @@ export function CustomizePreviewDock({
     <AgentPanelDock
       surfaceKey="customize-preview"
       title="定制预览面板"
-      defaultSize={{ width: 1000, height: 640 }}
+      defaultSize={{ width: 480, height: 620 }}
+      minWidth={340}
       onClose={onClose}
     >
       <div className={styles.body}>
@@ -80,7 +75,7 @@ export function CustomizePreviewDock({
           <div className={styles.hint}>
             让 agent 先读 get_preview_guide 与 get_preview_context
             了解桥协议与真实数据形状；agent 只能写草稿，点「预览此草稿」后
-            草稿在面板内与左栏同步渲染（仅本页可见），发布后才会对所有人可见。
+            草稿在左栏预览区渲染（仅本页可见），发布后才会对所有人可见。
           </div>
           {chat.agentsError ? (
             <div className={styles.error}>Agent 列表加载失败，请稍后重试</div>
@@ -121,11 +116,6 @@ export function CustomizePreviewDock({
             </div>
           )}
         </div>
-        <CustomizePreviewPane
-          jobId={jobId}
-          draft={draft}
-          previewDraft={previewDraft}
-        />
         <div className={styles.footer}>
           <span className={styles.footerStatus}>
             {draft

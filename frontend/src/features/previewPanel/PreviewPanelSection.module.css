@@ -39,5 +39,5 @@
   background: rgba(0, 0, 0, 0.04);
 }
 
-/* 面板布局样式随 #615 双栏改版迁至 CustomizePreviewDock.module.css（#795
- * PR① 起容器为 AgentPanelDock）。 */
+/* 面板布局样式在 CustomizePreviewDock.module.css（#795 PR① 起容器为
+ * AgentPanelDock；#796 返工后仅对话 + 治理 footer 的单栏）。 */

@@ -6,9 +6,10 @@
  * - 已发布 bundle → bundle host 接管，fallback 不再渲染；
  * - 「定制预览」对话期间草稿**不自动执行**（#347 P1）：左栏继续渲染已发布
  *   版本；显式点「预览此草稿」后才切换到草稿；关闭对话回到已发布版本，
- *   重开对话框回到默认态（不记忆执行态）。
- * - #615 wiring：对话框拿到的 previewDraft/jobId 与左栏草稿渲染吃同一
- *   授权判定（对话框内嵌预览的渲染细节在 CustomizePreviewDialog 测试）。
+ *   重开面板回到默认态（不记忆执行态）。
+ * - #795/#796 wiring：面板拿到的 previewDraft 与左栏草稿渲染吃同一授权
+ *   判定（#796 返工后面板内不再内嵌预览，草稿渲染目标只有左栏本区；
+ *   面板本体在 CustomizePreviewDock 测试覆盖）。
  * - iframe 重挂语义（bundle 内容变化必换元素、同内容轮询不重挂）在姊妹
  *   文件 PreviewPanelSection.remount.test.tsx。
  *
@@ -38,27 +39,23 @@ vi.mock('./previewPanelApi', () => ({
 // 测试覆盖；这里钉住的是 section 的组装与回落语义。mock 透传显式预览动作
 // （#347 P1）与治理面 state（data-hasdraft 暴露草稿是否已送达——真实按钮
 // disabled={!draft}，mock 无门控，用例需显式等草稿落定再点击）；
-// data-previewdraft 暴露 section 下发的授权判定（#615：内嵌预览吃同一
-// 判定，mock 不重复实现 iframe——面板内渲染细节在 dock 测试覆盖）。
+// data-previewdraft 暴露 section 下发的授权判定（与左栏草稿渲染同一判定）。
 vi.mock('./CustomizePreviewDock', () => ({
   CustomizePreviewDock: ({
     onPreviewDraft,
     onClose,
     state,
     previewDraft,
-    jobId,
   }: {
     onPreviewDraft: () => void
     onClose: () => void
     state: { draft?: unknown } | null
     previewDraft: boolean
-    jobId: string
   }) => (
     <div
       data-testid="customize-dialog"
       data-hasdraft={String(Boolean(state?.draft))}
       data-previewdraft={String(previewDraft)}
-      data-jobid={jobId}
     >
       <button onClick={onPreviewDraft}>预览此草稿</button>
       <button onClick={onClose}>关闭</button>
@@ -126,8 +123,8 @@ function renderSection(ui?: ReactElement) {
 }
 
 /**
- * 等治理面草稿数据落进对话框再继续：真实按钮 disabled={!draft}，用户
- * 在草稿可见前根本点不了「预览此草稿」；mock 对话框没有该门控，点击
+ * 等治理面草稿数据落进面板再继续：真实按钮 disabled={!draft}，用户
+ * 在草稿可见前根本点不了「预览此草稿」；mock 面板没有该门控，点击
  * 早于数据送达是无意义竞态（授权快照取自组件闭包里的 draft）。
  */
 async function waitForDraftInDialog() {
@@ -252,7 +249,7 @@ describe('PreviewPanelSection', () => {
       expect(iframe?.getAttribute('srcdoc')).toContain('published panel')
     })
 
-    // 重新打开对话框：回到默认态——一次点击不放行后续会话的草稿执行。
+    // 重新打开面板：回到默认态——一次点击不放行后续会话的草稿执行。
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
     await waitFor(() =>
       expect(screen.getByTestId('customize-dialog')).toBeInTheDocument()
@@ -333,7 +330,7 @@ describe('PreviewPanelSection', () => {
           ?.getAttribute('srcdoc')
       ).toContain('draft panel')
 
-      // 发布草稿（对话框不关）：draft 变 null，左栏回落已发布版本，
+      // 发布草稿（面板不关）：draft 变 null，左栏回落已发布版本，
       // 按钮回到「预览此草稿」——授权已失效，不能悬空成「预览草稿中」。
       mockFetchState.mockResolvedValue({
         published: PUBLISHED,
@@ -348,7 +345,7 @@ describe('PreviewPanelSection', () => {
           .querySelector('iframe')
           ?.getAttribute('srcdoc')
       ).toContain('published panel')
-      // 授权已失效的真实门控信号：左栏徽标消失（按钮态在 mock 对话框里
+      // 授权已失效的真实门控信号：左栏徽标消失（按钮态在 mock 面板里
       // 不可见，srcdoc + 徽标已覆盖门控本身）。
 
       // 同一 chat 会话里 agent 写入新草稿 v2（「发布后继续改一版」的核心
@@ -537,7 +534,7 @@ describe('PreviewPanelSection', () => {
     expect(mockFetchState).not.toHaveBeenCalled()
   })
 
-  it('#615 wiring：对话框拿到 jobId 与同一授权判定，左栏草稿渲染与授权同步存续', async () => {
+  it('#795/#796 wiring：面板与左栏草稿渲染吃同一授权判定，授权后草稿直接在左栏渲染', async () => {
     // bundle 切换使 host 重挂，jsdom 的 load 事件让宿主 setLoading 脱离
     // act（known noise，同上各 fake-timer 用例的声明方式）。
     expectConsoleWarning(/not wrapped in act/)
@@ -549,16 +546,15 @@ describe('PreviewPanelSection', () => {
     } satisfies PreviewPanelState)
     renderSection()
 
-    // 打开对话框：无授权 → previewDraft=false（对话框内嵌预览此时只是
-    // 占位，不重复挂草稿 iframe 的门控在 dialog 测试覆盖）。
+    // 打开面板：无授权 → previewDraft=false，左栏继续渲染已发布版本
+    // （#347 P1：草稿执行不自动发生）。
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
     await waitForDraftInDialog()
     const dialog = screen.getByTestId('customize-dialog')
     expect(dialog).toHaveAttribute('data-previewdraft', 'false')
-    // 桥上下文身份透传（内嵌预览与左栏渲染同源）。
-    expect(dialog).toHaveAttribute('data-jobid', 'job-1')
 
-    // 显式授权 → previewDraft=true，左栏同步渲染草稿（双通道同判定）。
+    // 显式授权 → previewDraft=true，左栏同步渲染草稿（同一判定、同一
+    // PreviewPanelHost 挂载点——#796 返工后草稿渲染目标只有左栏）。
     fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
     await waitFor(() => {
       expect(screen.getByTestId('customize-dialog')).toHaveAttribute(

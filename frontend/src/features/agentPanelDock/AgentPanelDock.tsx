@@ -160,6 +160,14 @@ export function AgentPanelDock({
           tabIndex={-1}
           elevation={8}
           className={styles.surface}
+          sx={{
+            // 圆角规范（#796 验收反馈）：浮动 chrome 档 8px——Toast 同款，
+            // 也是 chat/editor 等浮动表面的主取值；模态对话框档 4px
+            // （themeComponents MuiDialog paper）与近全屏档 16px
+            // （DagFullscreenDialog）都不适用于可拖拽 Dock。sx 保证压过
+            // Paper 默认的 theme.shape.borderRadius（2px），不靠层叠顺序。
+            borderRadius: '8px',
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') setCollapsedPersisted(true)
           }}

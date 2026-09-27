@@ -10,11 +10,13 @@
  *   新草稿/新上下文不继承旧授权（避免一次点击永久放行）。授权的快照与
  *   render 期派生比对抽在 useDraftAuthorization（#500 P1-3/P1-5）；发布
  *   永远是人工动作。
- * - #615：授权后草稿双通道渲染——左栏（全宽）与面板内嵌预览区
- *   （CustomizePreviewPane，对话与预览同屏）共用同一 draftPreview 判定；
- *   左栏保留，面板不再是「关掉才能看预览」的单向门。
  * - #795 PR①：定制容器从右侧 MUI Dialog 迁为 AgentPanelDock（可拖拽/
  *   可折叠/位置记忆的非模态 Dock，见 CustomizePreviewDock）。
+ * - #796 验收返工：面板内嵌预览区（#615 CustomizePreviewPane）撤除——
+ *   草稿的渲染目标收敛为左栏本区这一个通道：Dock 打开期间点「预览此
+ *   草稿」获得逐次授权后，草稿直接在本区渲染（与已发布版本同一挂载点
+ *   PreviewPanelHost、同一 draftPreview 判定），随轮询改一版看一版；
+ *   Dock 折叠/关闭不改变本区既有语义。
  * 定制入口 admin-only（与 WorkspaceMoreMenu 的 Studio 项同一惯例，P4/STUDIO-AGENT-001：
  * 治理面端点本身 admin/scoped-only，非 admin 点开只会收获一串 403）。
  */
@@ -96,7 +98,6 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
       {customizing && isAdmin && workspaceId && (
         <CustomizePreviewDock
           workspaceId={workspaceId}
-          jobId={jobId}
           state={stateQuery.data ?? null}
           previewDraft={auth.isAuthorized && draft !== null}
           onPreviewDraft={() => {

@@ -47,7 +47,8 @@
   padding: 12px;
 }
 
-/* 折叠小条：固定右下角，内容区 display:none 隐藏但保持挂载（不丢状态）。 */
+/* 折叠小条：固定右下角，内容区 display:none 隐藏但保持挂载（不丢状态）。
+ * 胶囊圆角沿用 themeComponents MuiButton 的胶囊按钮规范（borderRadius 9999）。 */
 .chip {
   position: fixed;
   right: 16px;

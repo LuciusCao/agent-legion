@@ -1,28 +1,23 @@
 /*
- * 「定制预览」Dock 面板布局（issue #615；#795 PR① 迁入 AgentPanelDock）：
- * 聊天与内嵌草稿预览同屏分栏——宽屏左右分栏（聊天主导在左），窄屏堆叠为
- * 上下；预览区自身滚动（iframe 自适应高度上限 6000px，超大草稿在 pane 内
- * 滚）。整体尺寸由 Dock 容器承担（可拖拽/可缩放），这里只吃满内容区。
- * 样式原居 PreviewPanelSection.module.css，随双栏改版迁出。
+ * 「定制预览」Dock 面板布局（#795 PR① 迁入 AgentPanelDock；#796 验收返工
+ * 撤掉内嵌预览后只剩对话 + 治理 footer）：对话列吃满剩余高度、内部滚动，
+ * footer 常驻底部；整体尺寸由 Dock 容器承担（可拖拽/可缩放），这里只吃满
+ * 内容区。样式原居 PreviewPanelSection.module.css，随 #615 双栏改版迁出，
+ * 返工后双栏收回单栏。
  */
 
-/* 定高网格：聊天/预览两行独立内部滚动，footer 常驻底部。
- * .body 吃满 Dock 内容区（height: 100%），不与容器 overflow 打架
- * （jsdom 测不了滚动，布局契约由组件测试钉住）。 */
+/* 对话列与 footer 两行：对话内部滚动，footer 常驻底部（jsdom 测不了滚动，
+ * 布局契约由组件测试钉住）。 */
 .body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
-  grid-template-areas:
-    'chat preview'
-    'footer footer';
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   height: 100%;
   min-height: 0;
 }
 
 .chatColumn {
-  grid-area: chat;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -37,37 +32,6 @@
   min-height: 0;
 }
 
-.previewPane {
-  grid-area: preview;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 0;
-  min-width: 0;
-}
-
-.previewHead {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-secondary, #43474e);
-}
-
-/* 预览区自身滚动：iframe 按内容自适应高度，超出 pane 即滚。 */
-.previewBody {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  border: 1px solid var(--color-border, #c3c6cf);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.previewHint {
-  padding: 16px 12px;
-  font-size: 12px;
-  color: var(--color-text-secondary, #43474e);
-}
-
 .hint {
   font-size: 12px;
   color: var(--color-text-secondary, #43474e);
@@ -79,7 +43,6 @@
 }
 
 .footer {
-  grid-area: footer;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -92,17 +55,4 @@
   flex: 1;
   font-size: 12px;
   color: var(--color-text-secondary, #43474e);
-}
-
-/* 窄视口：分栏堆叠为上下，聊天略高（Dock 宽度由用户拖拽决定，这里只
- * 按视口降级排布）。 */
-@media (max-width: 880px) {
-  .body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr) auto;
-    grid-template-areas:
-      'chat'
-      'preview'
-      'footer';
-  }
 }
