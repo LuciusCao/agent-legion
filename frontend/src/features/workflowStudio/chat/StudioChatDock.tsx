@@ -30,7 +30,9 @@ export function StudioChatDock({ hidden }: { hidden: boolean }) {
       title="Agent 助手"
       defaultSize={{ width: 520, height: 640 }}
       // 关闭 = 收起：toggleAgent 是开合的唯一组合出口（#797 codex 复审轮，
-      // 窄屏页签同步组合在 useWorkflowStudioPageView 那层）。
+      // 窄屏页签同步组合在 useAgentDockOpen 那层）。焦点归还指定顶栏开关
+      // （首次关闭、无面板外 focusin 时的稳定恢复目标）。
+      restoreFocusSelector='[aria-label="toggle agent panel"]'
       onClose={() => view.toggleAgent()}
       hidden={hidden}
     >

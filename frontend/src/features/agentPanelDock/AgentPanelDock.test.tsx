@@ -238,6 +238,44 @@ describe('AgentPanelDock', () => {
     trigger.remove()
   })
 
+  it('codex P2（#797 复审轮 4）：首次关闭无面板外 focusin 时，焦点还给调用方指定的选择器目标', async () => {
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    // 真实场景：桌面端 Dock 默认可见、挂载即把焦点拉进 surface；键盘用户
+    // 直接 Tab 到关闭按钮关闭——全程无面板外 focusin，归还目标只能是
+    // 调用方指定的选择器（顶栏开关/头部入口）。
+    function Scenario({ hidden }: { hidden: boolean }) {
+      return (
+        <div>
+          <button type="button" data-testid="dock-trigger">
+            顶栏开关
+          </button>
+          <AgentPanelDock
+            surfaceKey="test-surface"
+            title="测试面板"
+            onClose={() => undefined}
+            hidden={hidden}
+            restoreFocusSelector='[data-testid="dock-trigger"]'
+          >
+            <div>内容</div>
+          </AgentPanelDock>
+        </div>
+      )
+    }
+    const { rerender } = render((<Scenario hidden={false} />) as ReactElement)
+    await screen.findByRole('dialog', { name: '测试面板' })
+    const closeButton = screen.getByRole('button', { name: '关闭' })
+    closeButton.focus()
+    expect(document.activeElement).toBe(closeButton)
+
+    fireEvent.click(closeButton)
+    rerender((<Scenario hidden />) as ReactElement)
+    // 焦点落在顶栏开关（指定选择器），不是 body（revert 即红）。
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId('dock-trigger'))
+    )
+  })
+
   it('折叠/展开不丢面板内容状态（输入值原样保留）', async () => {
     renderDock({}, <input data-testid="dock-child" defaultValue="" />)
     await screen.findByRole('dialog', { name: '测试面板' })

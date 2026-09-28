@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { useWorkflowStudio } from './useWorkflowStudio'
 import { useWorkflowStudioMobilePanel } from './useWorkflowStudioMobilePanel'
 import { useStudioNarrowViewport } from './useStudioNarrowViewport'
@@ -12,7 +12,9 @@ type Studio = ReturnType<typeof useWorkflowStudio>
  * ——agentOpen 与页签可能脱节（窄屏初始 agentOpen=true 而页签=graph、或从
  * Agent 页签切走），按 agentOpen 翻转要点两次才生效；按实际可见性切换：
  * 可见→关闭并回画布页签（不留空白工作区），不可见→打开并切 Agent 页签
- * （浮层才显示）。宽屏 agentOpen 即唯一真值（不碰页签）。 */
+ * （浮层才显示）。宽屏 agentOpen 即唯一真值（不碰页签）。
+ * 复审轮 3：跨断点规范化——宽屏关 Dock 只翻 agentOpen，潜伏的 agent 页签
+ * 进入窄屏会选中空内容页；进入窄屏时把这种组合归位回画布。 */
 export function useAgentDockOpen(studio: Studio) {
   const [agentOpen, setAgentOpen] = useState(true)
   const narrow = useStudioNarrowViewport()
@@ -37,6 +39,16 @@ export function useAgentDockOpen(studio: Studio) {
       if (mobilePanel !== 'agent') setMobilePanel('agent')
     }
   }
+  // 跨断点规范化（#797 复审轮 3）：宽屏关 Dock 只翻 agentOpen，潜伏的
+  // mobilePanel=agent 页签进入窄屏会选中一个空内容页（Dock 隐藏、画布/
+  // 编辑被响应式 CSS 隐藏）——进入窄屏时把这种组合归位回画布。
+  useEffect(() => {
+    if (narrow && !agentOpen && mobilePanel === 'agent') {
+      // setMobilePanel 来自姊妹 hook 的 useState——本规则只拦本组件本地
+      // setState（见 useWorkflowStudioMobilePanel 里同款 disable 的位置）。
+      setMobilePanel('graph')
+    }
+  }, [narrow, agentOpen, mobilePanel, setMobilePanel])
   return {
     agentOpen,
     toggleAgent,

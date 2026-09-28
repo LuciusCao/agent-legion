@@ -86,6 +86,8 @@ export function CustomizePreviewDock({
       title="定制预览面板"
       defaultSize={{ width: 480, height: 620 }}
       minWidth={340}
+      // 焦点归还指定头部「定制预览」入口（关闭路径的稳定恢复目标）。
+      restoreFocusSelector='[data-testid="customize-preview-trigger"]'
       onClose={onClose}
     >
       <CustomizePreviewChat key={workspaceId} workspaceId={workspaceId} />

@@ -56,6 +56,10 @@ export interface AgentPanelDockProps {
    * 所以隐藏必须由 Dock 自身承担；与折叠共用 display:none 抑制（同一条
    * Rnd>Paper>内容树，切换 hidden 不会换元素类型导致子树重挂）。 */
   hidden?: boolean
+  /** 焦点归还的指定目标选择器（#797 复审轮 4，如顶栏开关/头部入口按钮）
+   * ——首次关闭、无面板外 focusin 时的稳定恢复目标；归还链：面板外最后
+   * 聚焦元素 → 本选择器 → 挂载前元素。 */
+  restoreFocusSelector?: string
 }
 
 function readAppBarFallbackHeight(): number {
@@ -78,6 +82,7 @@ export function AgentPanelDock({
   minHeight = 240,
   collapsedLabel,
   hidden = false,
+  restoreFocusSelector,
 }: AgentPanelDockProps) {
   const appBarBottom = useAppBarBottom()
   const topInset = appBarBottom > 0 ? appBarBottom : readAppBarFallbackHeight()
@@ -95,7 +100,11 @@ export function AgentPanelDock({
 
   // 折叠与 hidden 分开：折叠焦点移到小条，hidden 不渲染小条——
   // 焦点显式还给触发控件（见 useDockFocus）。Esc 在两者下都抑制。
-  const { surfaceRef, chipRef } = useDockFocus(collapsed, hidden)
+  const { surfaceRef, chipRef } = useDockFocus(
+    collapsed,
+    hidden,
+    restoreFocusSelector
+  )
 
   // Esc 折叠挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位
   // 规则见 useDockFocus.ts 的 useDockEscape）。
