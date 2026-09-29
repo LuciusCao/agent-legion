@@ -54,7 +54,11 @@ export function StudioChatDock({ hidden }: { hidden: boolean }) {
           </button>
         </div>
       )}
+      {/* key={workspaceId}（#797 复审批次 P3）：studio 路由参数变化复用
+          组件，重挂清空聊天子树的本地 state（已选 agent、composer 未发送
+          文本），不把旧 workspace 的残留带进新 workspace。 */}
       <StudioChatPanel
+        key={workspaceId ?? 'none'}
         selectedNodeKey={studio.selectedNodeKey}
         definitionYaml={studio.definitionYaml}
         onApplyWorkflowDraft={(yaml) => {

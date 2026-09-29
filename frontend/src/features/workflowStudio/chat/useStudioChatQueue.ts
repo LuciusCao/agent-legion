@@ -63,7 +63,10 @@ export function useStudioChatQueue(
   function submit(text: string) {
     // 首个直发在途（busy 尚未随 SSE 快照翻转）也视为忙：后续提交入队，
     // 避免两条都直发撞后端单 turn 原子认领的 409。压缩窗口（blocked）同理。
-    if (busy || blocked || inFlightRef.current) {
+    // 队列非空时一律尾插（#797 复审批次 P2）：上一次 flush 失败会保留队首
+    // （busy 已翻 false），此时直发新消息会插队到滞留队首之前（送达乱序，
+    // 连续失败时队首无限滞留）——队列非空即排队保 FIFO。
+    if (busy || blocked || inFlightRef.current || queueRef.current.length > 0) {
       const id = `q${nextIdRef.current}`
       nextIdRef.current += 1
       setQueue((current) => [...current, { id, text }])

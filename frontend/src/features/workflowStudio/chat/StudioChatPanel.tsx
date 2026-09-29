@@ -24,8 +24,15 @@ export function StudioChatPanel(props: Props) {
   useStudioContextSync(workspaceId, sessionId, props.selectedNodeKey ?? null)
   useStudioDraftSync(workspaceId, sessionId, props.definitionYaml ?? null)
   const [chosenAgentId, setChosenAgentId] = useState('')
-  // 未手动选择时跟随 agent 列表第一项（picker 只列本机可用 agent）。
-  const selectedAgentId = chosenAgentId || (chat.agents[0]?.id ?? '')
+  // 渲染期校验存在性（#797 复审批次 P3，与 CustomizePreviewDock 同款）：
+  // 跨 workspace 路由复用组件时残留的 agent id 若不在当前列表即回落默认
+  // （key={workspaceId} 重挂之外的双保险），否则「＋ 新对话」会拿旧
+  // workspace 的 agent id 请求新 workspace。
+  const selectedAgentId =
+    chosenAgentId !== '' &&
+    chat.agents.some((agent) => agent.id === chosenAgentId)
+      ? chosenAgentId
+      : (chat.agents[0]?.id ?? '')
 
   if (!workspaceId) {
     return <div className={shellStyles.emptyState}>未选择 workspace</div>

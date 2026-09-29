@@ -176,6 +176,24 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
     expect(screen.getByTestId('chat-stub-input')).toHaveValue('未发送文本')
   })
 
+  it('复审批次 P3：跨 workspace 切换经 key={workspaceId} 重挂聊天子树——composer 未发送文本不带入新 workspace', async () => {
+    // studio 路由参数变化复用组件；key 重挂清空子树本地 state（revert：
+    // 无 key，ws1 的残留文本带进 ws2，即红）。stub 的输入框值即 composer
+    // 未发送文本的等价物（同 codex P1 用例）。
+    renderDock()
+    await waitFor(() => dockSurface())
+    const input = screen.getByTestId('chat-stub-input')
+    fireEvent.change(input, { target: { value: 'ws1 未发送' } })
+    expect(input).toHaveValue('ws1 未发送')
+
+    act(() => {
+      useSettingStore.setState({ workspaceId: 'ws2' })
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId('chat-stub-input')).toHaveValue('')
+    )
+  })
+
   it('codex P2（#797 复审轮 6）：窄屏避让移动端页签导航——Dock 顶边从 nav 实测底边开始', async () => {
     // 假页签导航（高 40）：useStudioMobileNavHeight 实测（宽屏 nav
     // display:none → 实测 0 天然不加成，测试直接钉元素高度）。

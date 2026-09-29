@@ -224,6 +224,42 @@ describe('useStudioChatQueue', () => {
     ])
   })
 
+  it('flush 失败后队列非空时新提交一律尾插（#797 复审批次 P2：不直发插队，FIFO 保序）', async () => {
+    // 队首 flush 失败被保留、busy 已翻 false：此时新提交若直发会插队到
+    // 滞留队首之前（送达乱序，连续失败时队首无限滞留）。修复后队列非空
+    // 即排队（revert：m2 直发、send 第二次收到的是 m2，即红）。
+    const send = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+    const { result, rerender } = renderQueue(send, {
+      busy: true,
+      sessionKey: 's1',
+    })
+    act(() => result.current.submit('m1'))
+    rerender({ busy: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith('m1'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['m1'])
+
+    // 失败 flush 后空闲窗口的新提交：尾插，不直发。
+    act(() => result.current.submit('m2'))
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
+      'm1',
+      'm2',
+    ])
+
+    // 后续门控翻转沿按 FIFO 依次送达：m1（重试）先于 m2。
+    rerender({ busy: true, sessionKey: 's1' })
+    rerender({ busy: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenLastCalledWith('m1'))
+    rerender({ busy: true, sessionKey: 's1' })
+    rerender({ busy: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenLastCalledWith('m2'))
+    await waitFor(() => expect(result.current.queuedMessages).toEqual([]))
+    expect(send.mock.calls.map((call) => call[0])).toEqual(['m1', 'm1', 'm2'])
+  })
+
   it('does not spin after a flush failed inside the compaction window', async () => {
     // 409 保留队首但不触发重试：只有下一次门控翻转沿才会重发，不会空转。
     const send = vi.fn().mockResolvedValue(false)
