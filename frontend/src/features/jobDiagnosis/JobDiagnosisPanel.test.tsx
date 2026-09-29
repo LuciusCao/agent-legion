@@ -239,6 +239,12 @@ describe('JobDiagnosisPanel', () => {
     mockConfigApi.setStudioChatMode.mockResolvedValue(configRecord())
     renderPanel()
     await screen.findByRole('group', { name: 'Agent 配置' })
+    // 等 boot 真正发起 create 再 resolve——CI 调度慢时 boot 可能晚于本行，
+    // 过早 resolve 会打到初始 no-op（create 稍后才发起、promise 永挂）。
+    await waitFor(
+      () => expect(mockApi.createStudioChatSession).toHaveBeenCalledTimes(1),
+      { timeout: 5000 }
+    )
     expect(
       screen.getByRole('button', { name: 'Agent 权限模式' })
     ).toBeDisabled()
