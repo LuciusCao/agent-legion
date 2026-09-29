@@ -260,6 +260,58 @@ describe('useStudioChatQueue', () => {
     expect(send.mock.calls.map((call) => call[0])).toEqual(['m1', 'm1', 'm2'])
   })
 
+  it('移除失败滞留的队首后，空闲下主动发出新队首（#797 codex 轮 10 P2）', async () => {
+    // 队首 flush 失败被保留、busy 已翻 false，m2 尾插其后；用户从队列条
+    // 移除失败队首——发送 effect 只盯门控翻转沿，没有触发点，m2 会在空闲
+    // 下永久滞留（revert：remove 只改队列、不触发发送，即红）。
+    const send = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+    const { result, rerender } = renderQueue(send, {
+      busy: true,
+      sessionKey: 's1',
+    })
+    act(() => result.current.submit('m1'))
+    rerender({ busy: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith('m1'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => result.current.submit('m2'))
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
+      'm1',
+      'm2',
+    ])
+
+    const head = result.current.queuedMessages[0]
+    act(() => result.current.remove(head.id))
+    await waitFor(() => expect(send).toHaveBeenLastCalledWith('m2'))
+    await waitFor(() => expect(result.current.queuedMessages).toEqual([]))
+    expect(send.mock.calls.map((call) => call[0])).toEqual(['m1', 'm2'])
+  })
+
+  it('运行中移除队首不抢发：等门控翻转沿才发出新队首', async () => {
+    // 轮 10 的主动触发不得破坏「运行中不抢发」：busy 时移除队首不发送，
+    // 忙结束的翻转沿才发出新队首。
+    const send = vi.fn().mockResolvedValue(true)
+    const { result, rerender } = renderQueue(send, {
+      busy: true,
+      sessionKey: 's1',
+    })
+    act(() => result.current.submit('m1'))
+    act(() => result.current.submit('m2'))
+
+    const head = result.current.queuedMessages[0]
+    act(() => result.current.remove(head.id))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(send).not.toHaveBeenCalled()
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['m2'])
+
+    rerender({ busy: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith('m2'))
+    await waitFor(() => expect(result.current.queuedMessages).toEqual([]))
+  })
+
   it('does not spin after a flush failed inside the compaction window', async () => {
     // 409 保留队首但不触发重试：只有下一次门控翻转沿才会重发，不会空转。
     const send = vi.fn().mockResolvedValue(false)
