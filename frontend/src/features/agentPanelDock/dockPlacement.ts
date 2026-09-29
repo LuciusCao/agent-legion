@@ -28,7 +28,11 @@ export function dockStorageKey(surfaceKey: string): string {
   return `${STORAGE_PREFIX}${surfaceKey}`
 }
 
-/** 默认布局：贴右缘、顶边让开 AppBar（实测底边优先，未测量回退声明值）。 */
+/** 默认布局：贴右缘、顶边让开 AppBar（实测底边优先，未测量回退声明值）。
+ * 高度上限 = 视口高 - topInset - 底边距——#797 复审轮 7：先取下限
+ * （240）再取上限会导致矮视口（如 320px 高横屏手机 + 页签导航）下面板
+ * 底部出视口（composer/发送按钮不可见）；顺序改为下限后上限封顶
+ * （上限优先），且与 effectiveMinSize 同一边距约定。 */
 export function defaultDockGeometry(
   topInset: number,
   viewportWidth: number,
@@ -39,12 +43,10 @@ export function defaultDockGeometry(
     preferred?.width ?? 520,
     viewportWidth - VIEWPORT_MARGIN * 2
   )
-  const height = Math.max(
-    240,
-    Math.min(
-      preferred?.height ?? 620,
-      viewportHeight - topInset - VIEWPORT_MARGIN * 2
-    )
+  const availableHeight = viewportHeight - topInset - VIEWPORT_MARGIN * 2
+  const height = Math.min(
+    Math.max(240, preferred?.height ?? 620),
+    availableHeight
   )
   return {
     x: Math.max(VIEWPORT_MARGIN, viewportWidth - width - VIEWPORT_MARGIN),
@@ -98,8 +100,8 @@ export function clampResizeTopInset(
 /**
  * 有效最小尺寸（codex P2 复审轮）：声明下限与几何钳制同约束——小视口
  * （如 320px 宽）装不下声明的 minWidth 时跟视口走，否则 Rnd 的 minWidth/
- * minHeight 会把面板撑出视口（缩放把手/关闭按钮出界）。钳制上限与
- * clampDockGeometry 的同一组视口约束。
+ * minHeight 会把面板撑出视口（缩放把手/关闭按钮出界）。边距约定与
+ * defaultDockGeometry 一致（顶+底各留 VIEWPORT_MARGIN）。
  */
 export function effectiveMinSize(
   minWidth: number,
@@ -110,7 +112,10 @@ export function effectiveMinSize(
 ): { minWidth: number; minHeight: number } {
   return {
     minWidth: Math.min(minWidth, viewportWidth - VIEWPORT_MARGIN * 2),
-    minHeight: Math.min(minHeight, viewportHeight - topInset - VIEWPORT_MARGIN),
+    minHeight: Math.min(
+      minHeight,
+      viewportHeight - topInset - VIEWPORT_MARGIN * 2
+    ),
   }
 }
 

@@ -455,6 +455,43 @@ describe('AgentPanelDock', () => {
     })
   })
 
+  it('codex P2 复审轮 7：320px 高视口 + topInsetExtra 下默认几何高度封顶于可用空间（底部不出视口）', async () => {
+    const originalWidth = window.innerWidth
+    const originalHeight = window.innerHeight
+    // 横屏手机：640×320，AppBar 56 + 页签 48 → topInset=104，
+    // 可用高 = 320-104-32=184。旧实现 Math.max(240,…) 强制 240 → 底部
+    // 112+240=352 出视口（composer/发送按钮不可见）。
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(window, 'innerHeight', {
+      writable: true,
+      configurable: true,
+      value: 320,
+    })
+    try {
+      renderDock({ topInsetExtra: 48 })
+      const surface = await screen.findByRole('dialog', { name: '测试面板' })
+      const wrapper = rndWrapper(surface)
+      // 高度封顶 184；y=112（transform 读数 2 倍挂载位置）→ 底边 296 ≤ 320。
+      expect(wrapper.style.height).toBe('184px')
+      expect(wrapper.style.transform).toBe('translate(208px,224px)')
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        writable: true,
+        configurable: true,
+        value: originalWidth,
+      })
+      Object.defineProperty(window, 'innerHeight', {
+        writable: true,
+        configurable: true,
+        value: originalHeight,
+      })
+    }
+  })
+
   it('codex P2 复审轮：拖拽改几何后按 Esc 折叠，写回存储的是新几何（Esc 回调不冻结首帧闭包）', async () => {
     renderDock()
     await screen.findByRole('dialog', { name: '测试面板' })

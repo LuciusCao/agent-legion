@@ -29,10 +29,19 @@ describe('defaultDockGeometry', () => {
     expect(small.height).toBe(600 - 56 - 32)
   })
 
-  it('极小视口高度有下限，不出现负/零高度', () => {
+  it('矮视口高度封顶于可用空间（#797 复审轮 7：上限优先于 240 下限，底部不出视口）', () => {
+    // 200px 高视口：可用 = 200-56-32=112 → 高度 112（y+height=176 ≤ 200）。
     const g = defaultDockGeometry(56, 1024, 200)
-    expect(g.height).toBe(240)
+    expect(g.height).toBe(112)
     expect(g.y).toBe(64)
+    expect(g.y + g.height).toBeLessThanOrEqual(200)
+  })
+
+  it('codex 场景：320px 高横屏 + topInsetExtra=48（页签导航）→ y+height ≤ 视口高', () => {
+    // topInset = AppBar 56 + 页签 48 = 104；可用 = 320-104-32=184。
+    const g = defaultDockGeometry(104, 640, 320)
+    expect(g.height).toBe(184)
+    expect(g.y + g.height).toBeLessThanOrEqual(320)
   })
 })
 
