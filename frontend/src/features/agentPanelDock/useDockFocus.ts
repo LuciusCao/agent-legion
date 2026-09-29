@@ -10,7 +10,7 @@
  * 内 setState/forceUpdate 触发嵌套重渲染，首帧 passive effect 里 useRef 的
  * current 可能仍是 null（实测），callback ref 的 node 到位通知才可靠。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { RefCallback } from 'react'
 import { focusIfConnected, useDockFocusRestore } from './useDockFocusRestore'
 import { useNodeRef } from './useNodeRef'
@@ -35,11 +35,16 @@ export function useDockFocus(
     chipNode
   )
 
+  // 曾经可见标记：只有「可见→隐藏」转换才归还焦点；首次以隐藏态挂载
+  // （窄屏首进的常驻隐藏 Dock）跳过——用户从未打开过面板，无焦点可还。
+  const wasVisibleRef = useRef(false)
+
   useEffect(() => {
     if (hidden) {
-      focusIfConnected(restoreTarget())
+      if (wasVisibleRef.current) focusIfConnected(restoreTarget())
       return
     }
+    wasVisibleRef.current = true
     const node = collapsed ? chipNode : surfaceNode
     node?.focus({ preventScroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restoreTarget 读 ref/现查 DOM，不依赖其函数身份

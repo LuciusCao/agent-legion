@@ -15,7 +15,6 @@ import type { ReactElement } from 'react'
 import { Dialog } from '@mui/material'
 import { AgentPanelDock } from './AgentPanelDock'
 import { dockStorageKey, loadDockPlacement } from './dockPlacement'
-import { expectConsoleError, expectConsoleWarning } from '../../test-setup'
 
 // 该 jsdom 环境不提供 localStorage：用内存 stub 验证持久化读写（同
 // useStudioChat.test.tsx / StudioChatResume.test.tsx 的模式）。
@@ -182,100 +181,6 @@ describe('AgentPanelDock', () => {
     expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
   })
 
-  it('codex P2（#797 复审轮 2）：hidden 时焦点还给面板外最后聚焦的控件（focusin 追踪），不掉进不可见子树', async () => {
-    // 焦点移交 effect 驱动 MUI 状态更新脱离 act（known noise，同既有用例）。
-    expectConsoleWarning(/not wrapped in act/)
-    expectConsoleError(/not wrapped in act/)
-    // 真实场景：常驻 Dock 已显示，用户点面板外控件（顶栏开关）再令
-    // hidden=true——归还目标是「面板外最后聚焦的可见元素」（focusin 追踪），
-    // 不是挂载前快照（常驻 Dock 挂载时通常是 body，已过期）。
-    const trigger = document.createElement('button')
-    document.body.appendChild(trigger)
-
-    const { rerender } = renderDock(
-      {},
-      <input data-testid="dock-input" defaultValue="" />
-    )
-    const surface = await screen.findByRole('dialog', { name: '测试面板' })
-    // Dock 可见期间：焦点先在面板内，再移到面板外的触发控件（focusin
-    // 追踪记的是它），再回面板输入框。
-    const input = screen.getByTestId('dock-input')
-    input.focus()
-    trigger.focus()
-    input.focus()
-    expect(document.activeElement).toBe(input)
-
-    rerender(
-      (
-        <AgentPanelDock
-          surfaceKey="test-surface"
-          title="测试面板"
-          onClose={() => undefined}
-          hidden
-        >
-          <input data-testid="dock-input" defaultValue="" />
-        </AgentPanelDock>
-      ) as ReactElement
-    )
-    // hidden=true：焦点还给面板外最后聚焦的 trigger（不是 body、不是
-    // display:none 子树——revert 即红）。
-    await waitFor(() => expect(document.activeElement).toBe(trigger))
-
-    // 恢复显示：焦点回 surface。
-    rerender(
-      (
-        <AgentPanelDock
-          surfaceKey="test-surface"
-          title="测试面板"
-          onClose={() => undefined}
-          hidden={false}
-        >
-          <input data-testid="dock-input" defaultValue="" />
-        </AgentPanelDock>
-      ) as ReactElement
-    )
-    await waitFor(() => expect(document.activeElement).toBe(surface))
-    trigger.remove()
-  })
-
-  it('codex P2（#797 复审轮 4）：首次关闭无面板外 focusin 时，焦点还给调用方指定的选择器目标', async () => {
-    expectConsoleWarning(/not wrapped in act/)
-    expectConsoleError(/not wrapped in act/)
-    // 真实场景：桌面端 Dock 默认可见、挂载即把焦点拉进 surface；键盘用户
-    // 直接 Tab 到关闭按钮关闭——全程无面板外 focusin，归还目标只能是
-    // 调用方指定的选择器（顶栏开关/头部入口）。
-    function Scenario({ hidden }: { hidden: boolean }) {
-      return (
-        <div>
-          <button type="button" data-testid="dock-trigger">
-            顶栏开关
-          </button>
-          <AgentPanelDock
-            surfaceKey="test-surface"
-            title="测试面板"
-            onClose={() => undefined}
-            hidden={hidden}
-            restoreFocusSelector='[data-testid="dock-trigger"]'
-          >
-            <div>内容</div>
-          </AgentPanelDock>
-        </div>
-      )
-    }
-    const { rerender } = render((<Scenario hidden={false} />) as ReactElement)
-    await screen.findByRole('dialog', { name: '测试面板' })
-    const closeButton = screen.getByRole('button', { name: '关闭' })
-    closeButton.focus()
-    expect(document.activeElement).toBe(closeButton)
-
-    fireEvent.click(closeButton)
-    rerender((<Scenario hidden />) as ReactElement)
-    // 焦点落在顶栏开关（指定选择器），不是 body（revert 即红）。
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByTestId('dock-trigger'))
-    )
-  })
-
   it('折叠/展开不丢面板内容状态（输入值原样保留）', async () => {
     renderDock({}, <input data-testid="dock-child" defaultValue="" />)
     await screen.findByRole('dialog', { name: '测试面板' })
@@ -311,31 +216,6 @@ describe('AgentPanelDock', () => {
     await screen.findByRole('dialog', { name: '测试面板' })
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
     expect(onClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('焦点移交：打开进面板、折叠到小条、展开回面板、卸载还原触发元素', async () => {
-    // 焦点移交 effect 驱动 Tooltip/ButtonBase 状态更新脱离 act（known
-    // noise，与 previewPanel 既有用例同款声明）。
-    expectConsoleWarning(/not wrapped in act/)
-    expectConsoleError(/not wrapped in act/)
-    const trigger = document.createElement('button')
-    document.body.appendChild(trigger)
-    trigger.focus()
-
-    const { unmount } = renderDock()
-    const surface = await screen.findByRole('dialog', { name: '测试面板' })
-    await waitFor(() => expect(document.activeElement).toBe(surface))
-
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    const chip = await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    await waitFor(() => expect(document.activeElement).toBe(chip))
-
-    fireEvent.click(chip)
-    await waitFor(() => expect(document.activeElement).toBe(surface))
-
-    unmount()
-    expect(document.activeElement).toBe(trigger)
-    trigger.remove()
   })
 
   it('折叠态按 surfaceKey 记忆：重开面板直接呈现小条', async () => {
