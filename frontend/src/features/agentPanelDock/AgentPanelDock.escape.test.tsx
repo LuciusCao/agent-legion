@@ -203,7 +203,6 @@ describe('AgentPanelDock Esc 栈（#801 codex P1：同页多实例只关栈顶�
 
   it('交互（pointerdown/焦点进入）把 Dock 抬为栈顶', async () => {
     const { closeA, closeB } = renderTwoDocks()
-    await screen.findByRole('dialog', { name: '面板 A' })
     const surfaceA = await screen.findByRole('dialog', { name: '面板 A' })
     await screen.findByRole('dialog', { name: '面板 B' })
 
@@ -212,5 +211,28 @@ describe('AgentPanelDock Esc 栈（#801 codex P1：同页多实例只关栈顶�
     fireEvent.keyDown(document.body, { key: 'Escape' })
     expect(closeA).toHaveBeenCalledTimes(1)
     expect(closeB).not.toHaveBeenCalled()
+  })
+
+  it('交互抬栈同步到视觉层级（z-index = 900 + 栈位，#801 codex 轮 2）', async () => {
+    // revert（Rnd 固定 zIndex 900）：点击 A 后两个 Dock 层级相同，即红。
+    renderTwoDocks()
+    const surfaceA = await screen.findByRole('dialog', { name: '面板 A' })
+    const surfaceB = await screen.findByRole('dialog', { name: '面板 B' })
+    const wrapperA = surfaceA.parentElement as HTMLElement
+    const wrapperB = surfaceB.parentElement as HTMLElement
+    // 初始：B 后挂载为栈顶，层级更高。
+    expect(Number(wrapperB.style.zIndex)).toBeGreaterThan(
+      Number(wrapperA.style.zIndex)
+    )
+
+    // 点击 A 的露出区域：A 抬为栈顶，视觉层级同步反超 B。
+    fireEvent.pointerDown(surfaceA)
+    await waitFor(() =>
+      expect(Number(wrapperA.style.zIndex)).toBeGreaterThan(
+        Number(wrapperB.style.zIndex)
+      )
+    )
+    // 上限契约：栈位映射的 z-index 永远低于 Toast 1000。
+    expect(Number(wrapperA.style.zIndex)).toBeLessThan(1000)
   })
 })

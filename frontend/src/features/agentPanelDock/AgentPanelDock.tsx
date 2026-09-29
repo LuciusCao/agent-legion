@@ -25,9 +25,10 @@
  *   document 级（非模态面板失焦后 Esc 仍可用；defaultPrevented 或有全局
  *   Modal/Menu 开着时让给对方，不抢已消费的 Esc）。同页多实例时 Esc 只关
  *   栈顶：模块级 Dock 栈（dockStack.ts，#801 codex P1），mount/交互置顶、
- *   unmount/hidden 出栈。
+ *   unmount/hidden 出栈；栈位同时映射视觉层级（z-index = 900 + 栈位，钳
+ *   999 低于 Toast 1000）——被点击的 Dock 同步抬到最上层。
  */
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useState, useSyncExternalStore } from 'react'
 import { IconButton, Paper, Portal, Tooltip } from '@mui/material'
 import { Close } from '@mui/icons-material'
 import { Rnd } from 'react-rnd'
@@ -40,7 +41,11 @@ import {
 import { useDockGeometry } from './useDockGeometry'
 import { useDockFocus } from './useDockFocus'
 import { useDockEscape } from './useDockEscape'
-import { dockStackRaise } from './dockStack'
+import {
+  dockStackRaise,
+  dockStackSubscribe,
+  dockStackZIndex,
+} from './dockStack'
 import styles from './AgentPanelDock.module.css'
 
 export interface AgentPanelDockProps {
@@ -107,6 +112,11 @@ export function AgentPanelDock({
   // useState 惰性初始化拿稳定 symbol（渲染期读 ref.current 撞 lint 规则）。
   const [stackId] = useState(() => Symbol(`dock:${surfaceKey}`))
   const raiseOnInteract = () => dockStackRaise(stackId)
+  // 栈位映射视觉层级（#801 codex 轮 2）：交互抬栈后本面板同步抬到最上
+  // 层（z-index = 900 + 栈位，钳 999 低于 Toast 1000）。
+  const zIndex = useSyncExternalStore(dockStackSubscribe, () =>
+    dockStackZIndex(stackId)
+  )
 
   // Esc 关闭挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位
   // 规则见 useDockEscape.ts）。
@@ -172,7 +182,7 @@ export function AgentPanelDock({
         }}
         style={{
           position: 'fixed',
-          zIndex: 900,
+          zIndex,
           // hidden 用 display:none 抑制（不卸载、不换元素类型——子树
           // state/连接全程不断）。
           display: hidden ? 'none' : undefined,
