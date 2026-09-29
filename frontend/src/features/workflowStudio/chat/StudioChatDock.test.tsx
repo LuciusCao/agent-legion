@@ -126,12 +126,9 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
     // 旧侧栏形态（complementary aside）不再存在；聊天内容在 Dock 内。
     expect(screen.queryByRole('complementary')).toBeNull()
     expect(screen.getByTestId('chat-stub-input')).toBeInTheDocument()
-    // surface key 记忆：折叠一次后写入 studio-chat 键。
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    expect(
-      window.localStorage.getItem('agent-panel-dock:studio-chat')
-    ).toContain('"collapsed":true')
+    // 折叠态已随 #795 收尾移除：标题栏只有关闭按钮，无 chip。
+    expect(screen.queryByRole('button', { name: '折叠面板' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /已折叠/ })).toBeNull()
   })
 
   it('Dock 关闭按钮 = 收起（toggleAgent 组合出口，页签同步在 pageView 层）', async () => {

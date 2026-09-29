@@ -114,10 +114,16 @@ describe('StudioChatComposer input', () => {
     expect(onSend).toHaveBeenCalledWith('你好')
   })
 
-  it('keeps the input enabled while busy and labels the button 排队', () => {
+  it('keeps the input enabled while busy and the send button keeps its circular ↑ form (#795 收尾：运行中不换「排队」文案)', () => {
     renderComposer({ busy: true })
     expect(screen.getByLabelText('消息输入')).toBeEnabled()
-    expect(screen.getByRole('button', { name: '排队' })).toBeInTheDocument()
+    // 运行中按钮形态不变（圆形 ↑、aria-label 发送）：输入后可点（点击=
+    // 入队），队列提示由队列条承担，不在按钮上换文案。
+    fireEvent.change(screen.getByLabelText('消息输入'), {
+      target: { value: '排队消息' },
+    })
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '排队' })).toBeNull()
     // #695 R3/R4：快捷键提示并入 placeholder，不再独占一行。
     expect(screen.getByLabelText('消息输入')).toHaveAttribute(
       'placeholder',
@@ -475,8 +481,8 @@ describe('StudioChatComposer cancel button (#787)', () => {
   it('renders the cancel button next to the send button while running', () => {
     renderComposer({ busy: true, onCancel: vi.fn() })
     const cancelButton = screen.getByRole('button', { name: '取消' })
-    const sendButton = screen.getByRole('button', { name: '排队' })
-    // 取消在发送/排队按钮左边：发送按钮在文档序上跟随取消按钮。
+    const sendButton = screen.getByRole('button', { name: '发送' })
+    // 取消在发送按钮左边：发送按钮在文档序上跟随取消按钮。
     expect(
       cancelButton.compareDocumentPosition(sendButton) &
         Node.DOCUMENT_POSITION_FOLLOWING
@@ -504,7 +510,7 @@ describe('StudioChatComposer cancel button (#787)', () => {
       statusSlot: <div aria-label="会话状态条">运行中</div>,
     })
     const strip = screen.getByLabelText('会话状态条')
-    const sendButton = screen.getByRole('button', { name: '排队' })
+    const sendButton = screen.getByRole('button', { name: '发送' })
     // 状态文本与按钮同一工具行（共同父元素，垂直居中由工具行
     // align-items:center 承担），且为行内最左子项。
     expect(strip.parentElement).toBe(sendButton.parentElement)

@@ -11,8 +11,8 @@ import styles from './StudioChatPanel.module.css'
  * 挤占。开合仍走 appbar 开关（#668，StudioViewContext 为唯一状态源）：
  * 关闭按钮 = 收起。hidden（关闭/窄屏未选中 Agent 页签）= **隐藏不卸载**
  * （#797 codex P1：composer 文本与发送队列在子树本地 state、SSE 在 hook
- * 里——卸载即静默丢失，队列里已提交的消息不会再发送）；折叠为右下角小条
- * 由 Dock 承担（display:none 不卸载）。
+ * 里——卸载即静默丢失，队列里已提交的消息不会再发送）。折叠态已随 #795
+ * 收尾移除：开/关两态，Esc = 关闭（同 toggleAgent 路径）。
  * 沿用侧栏时代的两条既有逻辑：应用 agent 的 workflow 草稿前若编辑器有未
  * 发布修改需先确认（否则静默覆盖用户草稿）；#416/#429：agent 发布请求落地
  * （确认/取消/被顶替）后在 Dock 内顶部显示一轮回执（zustand store 共享，

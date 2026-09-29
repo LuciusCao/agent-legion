@@ -184,12 +184,12 @@ describe('AgentChatPanel', () => {
     const input = screen.getByLabelText('消息输入')
     const card = input.parentElement!
     // 状态行保留在卡内（#750 形态）但不再内嵌取消按钮；取消按钮在工具行
-    // 发送/排队按钮旁，点击即取消当前运行。
+    // 发送按钮旁，点击即取消当前运行。
     expect(card.contains(strip)).toBe(true)
     expect(strip).toHaveTextContent('运行中')
     expect(strip.querySelector('button[aria-label="取消"], button')).toBeNull()
     const cancelButton = screen.getByRole('button', { name: '取消' })
-    const sendButton = screen.getByRole('button', { name: '排队' })
+    const sendButton = screen.getByRole('button', { name: '发送' })
     expect(card.contains(cancelButton)).toBe(true)
     expect(
       cancelButton.compareDocumentPosition(sendButton) &

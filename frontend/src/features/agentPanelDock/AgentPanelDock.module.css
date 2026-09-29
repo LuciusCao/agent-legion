@@ -1,7 +1,8 @@
 /*
  * AgentPanelDock 布局（issue #795 PR①）：可拖拽/可缩放的非模态面板容器。
  * 面板本体的 fixed 定位与 react-rnd 拖拽位移由 Rnd 的内联 style 承担，
- * 这里只负责内部结构（标题栏拖拽把手/内容区）与折叠小条。
+ * 这里只负责内部结构（标题栏拖拽把手/内容区）。折叠小条已随 #795 收尾
+ * 移除（开/关两态）。
  * z-index 分层（仓库实际值）：页面内容（JobFilterBar 10）< AppBar 100 <
  * 本面板 900 < Toast 1000 = DagFullscreenDialog 1000 < TokenUsageDialog
  * 1190/1200 < MUI Modal 1300——面板是页面级非模态 chrome：高于 AppBar/页面
@@ -45,24 +46,4 @@
   display: flex;
   flex-direction: column;
   padding: 12px;
-}
-
-/* 折叠小条：固定右下角，内容区 display:none 隐藏但保持挂载（不丢状态）。
- * 胶囊圆角沿用 themeComponents MuiButton 的胶囊按钮规范（borderRadius 9999）。 */
-.chip {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 900;
-  border: 1px solid var(--color-border, #c3c6cf);
-  border-radius: 999px;
-  background: #ffffff;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  padding: 8px 14px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.chip:hover {
-  background: rgba(0, 0, 0, 0.04);
 }

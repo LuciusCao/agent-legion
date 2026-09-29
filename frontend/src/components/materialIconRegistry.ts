@@ -5,6 +5,7 @@ import AddTaskIcon from '@mui/icons-material/AddTask'
 import ArchiveIcon from '@mui/icons-material/Archive'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ArrowCircleUpIcon from '@mui/icons-material/ArrowCircleUp'
 import BlockIcon from '@mui/icons-material/Block'
 import BuildCircleIcon from '@mui/icons-material/BuildCircle'
@@ -47,6 +48,7 @@ import ScheduleIcon from '@mui/icons-material/Schedule'
 import SettingsIcon from '@mui/icons-material/Settings'
 import SkipNextIcon from '@mui/icons-material/SkipNext'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
+import StopIcon from '@mui/icons-material/Stop'
 import StreamIcon from '@mui/icons-material/Stream'
 import SubtitlesIcon from '@mui/icons-material/Subtitles'
 import SyncIcon from '@mui/icons-material/Sync'
@@ -64,6 +66,7 @@ export type MaterialIconName =
   | 'archive'
   | 'arrow_back'
   | 'arrow_forward'
+  | 'arrow_upward'
   | 'arrow_circle_up'
   | 'block'
   | 'build_circle'
@@ -106,6 +109,7 @@ export type MaterialIconName =
   | 'settings'
   | 'skip_next'
   | 'smart_toy'
+  | 'stop'
   | 'stream'
   | 'subtitles'
   | 'sync'
@@ -123,6 +127,7 @@ export const ICON_MAP = {
   archive: ArchiveIcon,
   arrow_back: ArrowBackIcon,
   arrow_forward: ArrowForwardIcon,
+  arrow_upward: ArrowUpwardIcon,
   arrow_circle_up: ArrowCircleUpIcon,
   block: BlockIcon,
   build_circle: BuildCircleIcon,
@@ -165,6 +170,7 @@ export const ICON_MAP = {
   settings: SettingsIcon,
   skip_next: SkipNextIcon,
   smart_toy: SmartToyIcon,
+  stop: StopIcon,
   stream: StreamIcon,
   subtitles: SubtitlesIcon,
   sync: SyncIcon,

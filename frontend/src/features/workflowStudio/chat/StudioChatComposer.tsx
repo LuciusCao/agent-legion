@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { StudioChatSessionRecord } from './studioChatApi'
 import { StudioChatCancelButton } from './StudioChatCancelButton'
+import { StudioChatSendButton } from './StudioChatSendButton'
 import { StudioChatComposerConfig } from './StudioChatComposerConfig'
 import { StudioChatContextRing } from './StudioChatContextRing'
 import styles from './StudioChatComposer.module.css'
@@ -105,13 +106,11 @@ export function StudioChatComposer(props: Props) {
           {props.onCancel && (
             <StudioChatCancelButton onCancel={props.onCancel} />
           )}
-          <button
-            className={styles.sendButton}
+          <StudioChatSendButton
+            busy={props.busy}
             disabled={props.disabled || !text.trim()}
-            onClick={submit}
-          >
-            {props.busy ? '排队' : '发送'}
-          </button>
+            onSend={submit}
+          />
         </div>
       </div>
     </div>

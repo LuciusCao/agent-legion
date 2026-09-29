@@ -390,9 +390,12 @@ describe('StudioChatPanel', () => {
     renderPanel()
 
     const cancel = await screen.findByRole('button', { name: '取消' })
-    // busy 不再禁用输入：发送会进入前端队列。
-    expect(screen.getByLabelText('消息输入')).toBeEnabled()
-    expect(screen.getByRole('button', { name: '排队' })).toBeInTheDocument()
+    // busy 不再禁用输入：发送会进入前端队列（#795 收尾：按钮不换「排队」
+    // 文案，aria-label 恒为「发送」；输入后可点）。
+    const input = screen.getByLabelText('消息输入')
+    expect(input).toBeEnabled()
+    fireEvent.change(input, { target: { value: '排队消息' } })
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
     await act(async () => {
       fireEvent.click(cancel)
     })

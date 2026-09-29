@@ -3,9 +3,10 @@
  * 文件已贴近 800 行纪律线，Esc 用例独立成文）：
  * - 非 MUI 顶层浮层消费 Esc：ArtifactPopover（capture 阶段 preventDefault）
  *   与 DagFullscreenDialog（role=dialog aria-modal=true 的通用让位）开着时
- *   Esc 不折叠 Dock；
- * - IME 组字中的 Esc 是取消候选，不折叠。
- * localStorage stub / renderDock 形状与主测试文件一致。
+ *   Esc 不关闭 Dock；
+ * - IME 组字中的 Esc 是取消候选，不关闭。
+ * #795 收尾：Esc 语义从折叠改为关闭（走 onClose），断言相应改读 onClose。
+ * localStorage stub 形状与主测试文件一致。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
@@ -48,27 +49,24 @@ beforeEach(() => {
   localStorageStub.clear()
 })
 
-function dockChipQuery() {
-  return screen.queryByRole('button', { name: /已折叠，点击展开/ })
-}
-
 describe('AgentPanelDock Esc 让位（#797 复审批次）', () => {
-  it('ArtifactPopover 打开时 Esc 只关气泡、不折叠 Dock（capture 阶段消费，无双重消费）', async () => {
+  it('ArtifactPopover 打开时 Esc 只关气泡、不关闭 Dock（capture 阶段消费，无双重消费）', async () => {
     // 真实场景：DAG 节点产物气泡与 Dock 同开；气泡的 Esc 监听同挂
     // document 且注册更晚，bubble 阶段 stopPropagation/preventDefault 拦不
-    // 住 Dock——修复前同一击键把 Dock 也折叠（revert 即红）。
-    const onClose = vi.fn()
+    // 住 Dock——修复前同一击键把 Dock 也关掉（revert 即红）。
+    const onPopoverClose = vi.fn()
+    const onDockClose = vi.fn()
     render(
       (
         <div>
           <AgentPanelDock
             surfaceKey="test-surface"
             title="测试面板"
-            onClose={() => undefined}
+            onClose={onDockClose}
           >
             <div>内容</div>
           </AgentPanelDock>
-          <ArtifactPopover items={['a.json']} onClose={onClose} />
+          <ArtifactPopover items={['a.json']} onClose={onPopoverClose} />
         </div>
       ) as ReactElement
     )
@@ -80,23 +78,24 @@ describe('AgentPanelDock Esc 让位（#797 复审批次）', () => {
       key: 'Escape',
     })
 
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
-    // Dock 不折叠：小条不出现、surface 仍在。
-    expect(dockChipQuery()).toBeNull()
+    await waitFor(() => expect(onPopoverClose).toHaveBeenCalledTimes(1))
+    // Dock 不关闭：onClose 不触发、surface 仍在。
+    expect(onDockClose).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: '测试面板' })).toBeInTheDocument()
   })
 
-  it('全屏 DAG（role=dialog aria-modal=true 的非 MUI 浮层）打开时 Esc 让给全屏层，不折叠 Dock', async () => {
+  it('全屏 DAG（role=dialog aria-modal=true 的非 MUI 浮层）打开时 Esc 让给全屏层，不关闭 Dock', async () => {
     // 真实场景：job detail 全屏 DAG（z 1000 > Dock 900）盖住 Dock 时按
     // Esc，意图作用于全屏层——让位判定不绑死 MUI 类名（revert：只认
-    // .MuiModal-root → Dock 被折叠，即红）。
+    // .MuiModal-root → Dock 被关闭，即红）。
+    const onDockClose = vi.fn()
     render(
       (
         <div>
           <AgentPanelDock
             surfaceKey="test-surface"
             title="测试面板"
-            onClose={() => undefined}
+            onClose={onDockClose}
           >
             <div>内容</div>
           </AgentPanelDock>
@@ -115,17 +114,18 @@ describe('AgentPanelDock Esc 让位（#797 复审批次）', () => {
 
     fireEvent.keyDown(document.body, { key: 'Escape' })
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(dockChipQuery()).toBeNull()
+    expect(onDockClose).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: '测试面板' })).toBeInTheDocument()
   })
 
-  it('IME 组字中的 Esc 是取消候选，不折叠 Dock（与 composer Enter 守卫同款）', async () => {
+  it('IME 组字中的 Esc 是取消候选，不关闭 Dock（与 composer Enter 守卫同款）', async () => {
+    const onDockClose = vi.fn()
     render(
       (
         <AgentPanelDock
           surfaceKey="test-surface"
           title="测试面板"
-          onClose={() => undefined}
+          onClose={onDockClose}
         >
           <div>内容</div>
         </AgentPanelDock>
@@ -135,12 +135,10 @@ describe('AgentPanelDock Esc 让位（#797 复审批次）', () => {
 
     fireEvent.keyDown(surface, { key: 'Escape', isComposing: true })
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(dockChipQuery()).toBeNull()
+    expect(onDockClose).not.toHaveBeenCalled()
 
-    // 组合结束后的 Esc 照常折叠（守卫不误伤正常路径）。
+    // 组合结束后的 Esc 照常关闭（守卫不误伤正常路径）。
     fireEvent.keyDown(surface, { key: 'Escape', isComposing: false })
-    expect(
-      await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    ).toBeInTheDocument()
+    expect(onDockClose).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,8 +1,8 @@
 /**
  * JobInspectDock（#795 PR③）契约测试：AgentPanelDock + JobDiagnosisPanel 薄
  * 组合——标题取自排查目标（节点名 > job 标题 > jobId）、target 原样注入
- * 面板、关闭按钮回调、折叠 chip 不卸载（会话/composer 等价物存活）、卸载
- * 焦点归还触发元素（AgentPanelDock 基座契约）。
+ * 面板、关闭按钮回调、Esc 关闭（#795 收尾：折叠态移除）、卸载焦点归还
+ * 触发元素（AgentPanelDock 基座契约）。
  * localStorage stub 与 stateful 面板 stub 模式同 agentPanelDock 测试。
  */
 import { useState } from 'react'
@@ -13,7 +13,7 @@ import { JobInspectDock } from './JobInspectDock'
 import type { JobDiagnosisTarget } from './jobDiagnosisContext'
 import { expectConsoleError, expectConsoleWarning } from '../../test-setup'
 
-// 面板 stub：带本地 state（折叠不卸载断言的可观察等价物）+ 记录收到的
+// 面板 stub：带本地 state（页面级重挂断言的可观察等价物）+ 记录收到的
 // target 与 inDock（上下文注入与 Dock 外壳变体断言）。
 const stubProps: { target: JobDiagnosisTarget; inDock?: boolean }[] = []
 vi.mock('./JobDiagnosisPanel', async () => {
@@ -41,7 +41,7 @@ vi.mock('./JobDiagnosisPanel', async () => {
 })
 
 // 该 jsdom 环境不提供 localStorage：用内存 stub（Dock 按 surface key 记忆
-// 位置/折叠态）。
+// 位置）。
 function installLocalStorageStub() {
   const store = new Map<string, string>()
   const stub: Storage = {
@@ -115,24 +115,19 @@ describe('JobInspectDock（#795 PR③：排查走 AgentPanelDock）', () => {
     unmount()
   })
 
-  it('折叠 chip 不卸载（会话/composer 等价物存活），展开原样恢复', async () => {
+  it('Esc 关闭走 onClose（#795 收尾：折叠态移除，Esc 与关闭按钮同路径）', async () => {
     expectConsoleWarning(/not wrapped in act/)
     expectConsoleError(/not wrapped in act/)
-    renderDock()
-    const input = await screen.findByTestId('diagnosis-stub-input')
-    fireEvent.change(input, { target: { value: '未发送' } })
-
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    const chip = await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    // 折叠只 display:none：stub state 存活；折叠态写入 surface key 记忆。
-    expect(screen.getByTestId('diagnosis-stub-input')).toHaveValue('未发送')
-    expect(
-      window.localStorage.getItem('agent-panel-dock:job-inspect')
-    ).toContain('"collapsed":true')
-
-    fireEvent.click(chip)
-    await screen.findByRole('dialog', { name: '排查：Algebra Problem' })
-    expect(screen.getByTestId('diagnosis-stub-input')).toHaveValue('未发送')
+    const onClose = vi.fn()
+    renderDock(baseTarget, onClose)
+    const surface = await screen.findByRole('dialog', {
+      name: '排查：Algebra Problem',
+    })
+    fireEvent.keyDown(surface, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+    // 标题栏只有关闭按钮，无折叠 chip。
+    expect(screen.queryByRole('button', { name: '折叠面板' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /已折叠/ })).toBeNull()
   })
 
   it('关闭按钮回调 onClose；卸载后焦点归还触发元素', async () => {

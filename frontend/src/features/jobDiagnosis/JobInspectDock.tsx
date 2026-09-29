@@ -4,7 +4,7 @@
  * 实例（所有 agent 对话界面同一个组件、同一个载体），不再走 MUI Dialog
  * 宿主。会话语义与旧弹窗等价（#329）：打开 = 全新排查会话（自动建会话 +
  * 自动发 workspace/job/node 上下文 primer），关闭即卸载销毁本地状态；
- * 折叠为右下角小条由 Dock 承担（display:none 不卸载，会话保留）。
+ * 折叠态已随 #795 收尾移除（Esc = 关闭，同 onClose 路径）。
  * 挂载 key 由调用方按 workspace+job+node 给出：跨 workspace/job 导航或换
  * 节点重开时整棵重挂（chat 状态、composer 文本、primer 目标一律不串）。
  */

@@ -76,31 +76,39 @@
   color: #c62828;
 }
 /* #787：取消按钮在发送按钮左侧，次级破坏性动作——描边小一号、弱红色，
- * 不抢主操作（发送/排队）的视觉权重；仅运行中渲染，不运行时不占位。 */
+ * 不抢主操作（发送）的视觉权重；仅运行中渲染，不运行时不占位。
+ * #795 收尾：与发送按钮同款圆形（■ stop 图标）。 */
 .cancelButton {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border: 1px solid #ffcdd2;
   background: #fff;
   color: #c62828;
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 12px;
+  border-radius: 50%;
   cursor: pointer;
-  white-space: nowrap;
 }
 .cancelButton:hover {
   background: #fff5f5;
 }
 /* 发送按钮是工具行最右端；右推由 configRight 的 margin-left:auto（有配置）
- * 或 toolbarSpacer（无配置）承担。 */
+ * 或 toolbarSpacer（无配置）承担。#795 收尾：圆形 ↑ 图标按钮。 */
 .sendButton {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   background: #1976d2;
   color: #fff;
   border: none;
-  border-radius: 8px;
-  padding: 5px 14px;
-  font-size: 13px;
+  border-radius: 50%;
   cursor: pointer;
 }
 .sendButton:disabled {
