@@ -35,11 +35,14 @@ function isVisibleFocusable(el: HTMLElement): boolean {
 }
 
 /** 焦点归还目标链的持有与追踪（hidden 期间也照记：还回目标被聚焦同样是
- * 「面板外最后聚焦」）。 */
+ * 「面板外最后聚焦」）。restoreFocusRef（#800 codex P2）是调用方在唤起
+ * 瞬间显式记录的触发元素，链上最优先：key 重挂换目标时旧实例的卸载清理
+ * 会先改写 activeElement，显式 ref 不吃这套交错。 */
 export function useDockFocusRestore(
   restoreFocusSelector: string | undefined,
   surfaceNode: HTMLElement | null,
-  chipNode: HTMLElement | null
+  chipNode: HTMLElement | null,
+  restoreFocusRef?: { readonly current: HTMLElement | null }
 ): { restoreFocus: () => void } {
   const mountPreviousRef = useRef<Element | null>(null)
   const outsideRef = useRef<Element | null>(null)
@@ -50,6 +53,7 @@ export function useDockFocusRestore(
   // 场景，没变就继续走下一级兜底。
   const restoreFocus = (): void => {
     const candidates: (Element | null)[] = [
+      restoreFocusRef?.current ?? null,
       outsideRef.current,
       restoreFocusSelector
         ? document.querySelector(restoreFocusSelector)

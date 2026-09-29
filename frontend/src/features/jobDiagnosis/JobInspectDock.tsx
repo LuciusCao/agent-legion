@@ -15,9 +15,12 @@ import { JobDiagnosisPanel } from './JobDiagnosisPanel'
 type Props = {
   target: JobDiagnosisTarget
   onClose: () => void
+  /** 唤起瞬间的触发元素（#800 codex P2）：换节点 key 重挂时，新实例的归还
+   * 目标以它为准，不吃旧实例卸载清理改写 activeElement 的交错。 */
+  restoreFocusRef?: { readonly current: HTMLElement | null }
 }
 
-export function JobInspectDock({ target, onClose }: Props) {
+export function JobInspectDock({ target, onClose, restoreFocusRef }: Props) {
   const title = target.nodeLabel
     ? `排查：${target.nodeLabel}`
     : `排查：${target.jobTitle || target.jobId}`
@@ -27,9 +30,16 @@ export function JobInspectDock({ target, onClose }: Props) {
       title={title}
       defaultSize={{ width: 520, height: 640 }}
       minWidth={340}
+      restoreFocusRef={restoreFocusRef}
       onClose={onClose}
     >
-      <JobDiagnosisPanel workspaceId={target.workspaceId} target={target} />
+      {/* inDock：Dock 宿主不用旧 Dialog 的 320px 底尺寸（#800 codex P2，
+          否则缩到最小时 composer 被 overflow 裁掉）。 */}
+      <JobDiagnosisPanel
+        workspaceId={target.workspaceId}
+        target={target}
+        inDock
+      />
     </AgentPanelDock>
   )
 }

@@ -14,18 +14,20 @@ import type { JobDiagnosisTarget } from './jobDiagnosisContext'
 import { expectConsoleError, expectConsoleWarning } from '../../test-setup'
 
 // 面板 stub：带本地 state（折叠不卸载断言的可观察等价物）+ 记录收到的
-// target（上下文注入断言）。
-const stubProps: JobDiagnosisTarget[] = []
+// target 与 inDock（上下文注入与 Dock 外壳变体断言）。
+const stubProps: { target: JobDiagnosisTarget; inDock?: boolean }[] = []
 vi.mock('./JobDiagnosisPanel', async () => {
   const { useState: useStateInner } = await import('react')
   return {
     JobDiagnosisPanel: function Stub({
       target,
+      inDock,
     }: {
       workspaceId: string
       target: JobDiagnosisTarget
+      inDock?: boolean
     }) {
-      stubProps.push(target)
+      stubProps.push({ target, inDock })
       const [text, setText] = useStateInner('')
       return (
         <input
@@ -87,13 +89,16 @@ describe('JobInspectDock（#795 PR③：排查走 AgentPanelDock）', () => {
     expect(
       await screen.findByRole('dialog', { name: '排查：生成' })
     ).toBeInTheDocument()
-    expect(stubProps[stubProps.length - 1]).toEqual({
+    const last = stubProps[stubProps.length - 1]
+    expect(last.target).toEqual({
       workspaceId: 'ws1',
       jobId: 'j1',
       jobTitle: 'Algebra Problem',
       nodeKey: 'generate',
       nodeLabel: '生成',
     })
+    // Dock 宿主变体（#800 codex P2）：不带旧 Dialog 的 320px 底尺寸。
+    expect(last.inDock).toBe(true)
   })
 
   it('job 级目标：标题用 job 标题，无 jobTitle 回退 jobId', async () => {
@@ -101,7 +106,7 @@ describe('JobInspectDock（#795 PR③：排查走 AgentPanelDock）', () => {
     expect(
       await screen.findByRole('dialog', { name: '排查：Algebra Problem' })
     ).toBeInTheDocument()
-    expect(stubProps[stubProps.length - 1]?.nodeKey).toBeUndefined()
+    expect(stubProps[stubProps.length - 1]?.target.nodeKey).toBeUndefined()
 
     const { unmount } = renderDock({ workspaceId: 'ws1', jobId: 'j2' })
     expect(

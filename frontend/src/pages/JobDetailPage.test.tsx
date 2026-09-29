@@ -12,30 +12,8 @@ import { MemoryRouter } from '../testing/TestMemoryRouter'
 import JobDetailPage from './JobDetailPage'
 import { useUiStore } from '../stores/uiStore'
 
-// 排查面板 stub（#795 PR③ 的 Dock 接线测试只关心 target 注入与 key 重挂）：
-// 带本地 state 的输入框作为「会话/composer 状态」的可观察等价物。
-vi.mock('../features/jobDiagnosis/JobDiagnosisPanel', async () => {
-  const { useState } = await import('react')
-  return {
-    JobDiagnosisPanel: function Stub({
-      target,
-    }: {
-      workspaceId: string
-      target: { jobId: string; nodeKey?: string | null }
-    }) {
-      const [text, setText] = useState('')
-      return (
-        <div data-testid="diagnosis-panel" data-node-key={target.nodeKey ?? ''}>
-          <input
-            aria-label="diagnosis-stub-input"
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-          />
-        </div>
-      )
-    },
-  }
-})
+// 排查 Dock 接线用例在姊妹文件 JobDetailPage.inspectDock.test.tsx（本文件
+// 贴近 1000 行硬上限拆分；面板 stub 也在那边）。
 
 const mockDetail = {
   job: {
@@ -151,7 +129,6 @@ function createFetchMock(
     detailStatus?: string
     packageUrl?: string | null
     pauseReason?: string | null
-    failedNodes?: string[]
   } = {}
 ) {
   return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
@@ -174,11 +151,6 @@ function createFetchMock(
                   }
                 : undefined,
           },
-          nodes: mockDetail.nodes.map((node) =>
-            overrides.failedNodes?.includes(node.node_key)
-              ? { ...node, status: 'failed', error_message: 'boom' }
-              : node
-          ),
         }),
       })
     }
@@ -886,82 +858,5 @@ describe('JobDetailPage', () => {
     expect(
       (await screen.findAllByText(/HTTP 500: server boom/)).length
     ).toBeGreaterThan(0)
-  })
-
-  it('opens the inspect dock from the header 排查助手 button with job-level context (#795 PR③)', async () => {
-    vi.stubGlobal('fetch', createFetchMock())
-    renderPage()
-    await screen.findByText('提取')
-
-    await act(async () => {
-      screen.getByLabelText('排查助手').click()
-    })
-    // Dock 打开：非模态 surface（aria-modal=false），job 级目标（无节点）。
-    expect(
-      await screen.findByRole('dialog', { name: '排查：Algebra Problem' })
-    ).toHaveAttribute('aria-modal', 'false')
-    expect(screen.getByTestId('diagnosis-panel')).toHaveAttribute(
-      'data-node-key',
-      ''
-    )
-
-    // 关闭即卸载（与旧诊断弹窗语义等价：下次打开是全新排查会话）。
-    await act(async () => {
-      screen.getByRole('button', { name: '关闭' }).click()
-    })
-    await waitFor(() =>
-      expect(
-        screen.queryByRole('dialog', { name: '排查：Algebra Problem' })
-      ).toBeNull()
-    )
-  })
-
-  it('opens the same dock from a failed node with node context (#795 PR③)', async () => {
-    vi.stubGlobal('fetch', createFetchMock({ failedNodes: ['generate'] }))
-    renderPage()
-    await screen.findByText('提取')
-
-    await act(async () => {
-      screen.getByText('排查').click()
-    })
-    expect(
-      await screen.findByRole('dialog', { name: '排查：生成' })
-    ).toBeInTheDocument()
-    // 节点上下文注入（与旧弹窗 target 语义等价）。
-    expect(screen.getByTestId('diagnosis-panel')).toHaveAttribute(
-      'data-node-key',
-      'generate'
-    )
-  })
-
-  it('remounts the diagnosis subtree when reopened for another node (key 按 workspace+job+node)', async () => {
-    // key 缺失时面板不 remount，stub 的本地 state 残留（revert 即红）。
-    vi.stubGlobal(
-      'fetch',
-      createFetchMock({ failedNodes: ['generate', 'review'] })
-    )
-    renderPage()
-    await screen.findByText('提取')
-
-    const entries = screen.getAllByText('排查')
-    await act(async () => {
-      entries[0].click()
-    })
-    await screen.findByRole('dialog', { name: '排查：生成' })
-    fireEvent.change(screen.getByLabelText('diagnosis-stub-input'), {
-      target: { value: '未发送' },
-    })
-    expect(screen.getByLabelText('diagnosis-stub-input')).toHaveValue('未发送')
-
-    await act(async () => {
-      entries[1].click()
-    })
-    await screen.findByRole('dialog', { name: '排查：审核' })
-    expect(screen.getByTestId('diagnosis-panel')).toHaveAttribute(
-      'data-node-key',
-      'review'
-    )
-    // 整棵重挂：旧节点会话的本地状态不带入。
-    expect(screen.getByLabelText('diagnosis-stub-input')).toHaveValue('')
   })
 })

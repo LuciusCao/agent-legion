@@ -4,8 +4,9 @@
  * （折叠会把含焦点的内容区切为 display:none，不移交则键盘用户丢失上下文）。
  * hidden（#797 codex P2）与折叠分开处理：hidden 连小条都不渲染——若当折叠
  * 处理去聚焦 chipRef（不存在），焦点会留在 display:none 子树或裸丢 body；
- * 显式归还到 useDockFocusRestore 的目标链（面板外最后聚焦元素 → 调用方
- * 指定选择器 → 挂载前元素）。preventScroll 防焦点驱动的页面跳动。
+ * 显式归还到 useDockFocusRestore 的目标链（restoreFocusRef 显式目标 →
+ * 面板外最后聚焦元素 → 调用方指定选择器 → 挂载前元素）。preventScroll 防
+ * 焦点驱动的页面跳动。
  * ref 用 callback ref + state 而非 useRef：react-rnd 挂载期 componentDidMount
  * 内 setState/forceUpdate 触发嵌套重渲染，首帧 passive effect 里 useRef 的
  * current 可能仍是 null（实测），callback ref 的 node 到位通知才可靠。
@@ -23,7 +24,8 @@ export interface DockFocus {
 export function useDockFocus(
   collapsed: boolean,
   hidden = false,
-  restoreFocusSelector?: string
+  restoreFocusSelector?: string,
+  restoreFocusRef?: { readonly current: HTMLElement | null }
 ): DockFocus {
   const [surfaceNode, setSurfaceNode] = useState<HTMLDivElement | null>(null)
   const [chipNode, setChipNode] = useState<HTMLButtonElement | null>(null)
@@ -32,7 +34,8 @@ export function useDockFocus(
   const { restoreFocus } = useDockFocusRestore(
     restoreFocusSelector,
     surfaceNode,
-    chipNode
+    chipNode,
+    restoreFocusRef
   )
 
   // 曾经可见标记：只有「可见→隐藏」转换才归还焦点；首次以隐藏态挂载

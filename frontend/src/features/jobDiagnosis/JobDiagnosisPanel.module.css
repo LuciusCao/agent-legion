@@ -7,6 +7,13 @@
   min-height: 320px;
 }
 
+/* Dock 宿主（#800 codex P2）：不带 320px min-height——那是 MUI Dialog 宿主
+ * 的底尺寸；Dock 高度由用户缩放决定，固定 min-height 会在缩到最小时把
+ * composer/底部操作裁进 overflow:hidden 不可达。 */
+.chatShellDock {
+  gap: 8px;
+}
+
 .dialogTitle {
   display: flex;
   align-items: center;
