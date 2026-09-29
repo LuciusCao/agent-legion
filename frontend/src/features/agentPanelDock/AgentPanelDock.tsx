@@ -60,6 +60,9 @@ export interface AgentPanelDockProps {
    * ——首次关闭、无面板外 focusin 时的稳定恢复目标；归还链：面板外最后
    * 聚焦元素 → 本选择器 → 挂载前元素。 */
   restoreFocusSelector?: string
+  /** 顶边额外避让（#797 复审轮 6，如窄屏移动端页签导航高度）——叠加进
+   * topInset：默认几何与拖拽钳制都吃它。 */
+  topInsetExtra?: number
 }
 
 function readAppBarFallbackHeight(): number {
@@ -83,9 +86,12 @@ export function AgentPanelDock({
   collapsedLabel,
   hidden = false,
   restoreFocusSelector,
+  topInsetExtra = 0,
 }: AgentPanelDockProps) {
   const appBarBottom = useAppBarBottom()
-  const topInset = appBarBottom > 0 ? appBarBottom : readAppBarFallbackHeight()
+  const topInset =
+    (appBarBottom > 0 ? appBarBottom : readAppBarFallbackHeight()) +
+    topInsetExtra
 
   // 几何引擎（记忆/默认布局、实测与视口变化重钳、持久化）抽在
   // useDockGeometry（体积预算）；语义见该文件注释。

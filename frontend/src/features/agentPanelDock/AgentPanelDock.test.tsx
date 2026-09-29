@@ -436,6 +436,25 @@ describe('AgentPanelDock', () => {
     )
   })
 
+  it('codex P2 复审轮 6：topInsetExtra（窄屏页签导航高度）叠加进默认几何与拖拽钳制', async () => {
+    // 窄屏 Dock 几乎占满视口宽：AppBar 下方的移动端页签导航也要避让——
+    // 顶边 = AppBar 底边（兜底 56）+ nav 实测高（40）+ 8。
+    renderDock({ topInsetExtra: 40 })
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    expect(rndWrapper(surface).style.transform).toBe(jsdomTransform(488, 104))
+
+    // 拖拽到 y=0：钳到 96（56+40），不是 56——只改默认几何的话拖拽还能
+    // 拖上去盖住页签（revert topInsetExtra 进钳制即红）。
+    const handle = screen.getByTestId('dock-test-surface-handle')
+    fireEvent.mouseDown(handle, { clientX: 600, clientY: 120 })
+    fireEvent.mouseMove(document, { clientX: 600, clientY: -500 })
+    fireEvent.mouseUp(document, { clientX: 600, clientY: -500 })
+    await waitFor(() => {
+      const stored = loadDockPlacement('test-surface')
+      expect(stored).toMatchObject({ y: 96 })
+    })
+  })
+
   it('codex P2 复审轮：拖拽改几何后按 Esc 折叠，写回存储的是新几何（Esc 回调不冻结首帧闭包）', async () => {
     renderDock()
     await screen.findByRole('dialog', { name: '测试面板' })

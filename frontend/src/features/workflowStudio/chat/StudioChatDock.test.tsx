@@ -176,6 +176,27 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
     expect(screen.getByTestId('chat-stub-input')).toHaveValue('未发送文本')
   })
 
+  it('codex P2（#797 复审轮 6）：窄屏避让移动端页签导航——Dock 顶边从 nav 实测底边开始', async () => {
+    // 假页签导航（高 40）：useStudioMobileNavHeight 实测（宽屏 nav
+    // display:none → 实测 0 天然不加成，测试直接钉元素高度）。
+    const fakeNav = document.createElement('div')
+    fakeNav.setAttribute('data-testid', 'studio-mobile-nav')
+    fakeNav.getBoundingClientRect = () => ({ height: 40 }) as DOMRect
+    document.body.appendChild(fakeNav)
+    try {
+      renderDock()
+      const surface = await waitFor(() => dockSurface())
+      // 顶边 = AppBar 兜底 56 + nav 40 + 8 = 104。jsdom transform 读数带
+      // 挂载偏移产物（见 agentPanelDock 测试的 jsdomTransform 注释）：nav
+      // 高度在挂载后的 effect 才测到（挂载时 extra=0、y=64），offset 冻结
+      // 在 -64——最终 transform = 104 + 64 = 168。
+      const wrapper = surface.parentElement as HTMLElement
+      expect(wrapper.style.transform).toBe('translate(976px,168px)')
+    } finally {
+      fakeNav.remove()
+    }
+  })
+
   it('shows no notice without a resolved request', async () => {
     renderDock()
 

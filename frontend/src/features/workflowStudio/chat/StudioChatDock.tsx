@@ -1,6 +1,7 @@
 import { AgentPanelDock } from '../../agentPanelDock/AgentPanelDock'
 import { StudioChatPanel } from './StudioChatPanel'
 import { useStudioState, useStudioView } from '../shared/studioStateContext'
+import { useStudioMobileNavHeight } from '../shared/useStudioMobileNavHeight'
 import { useAgentPublishRequest } from '../shared/useAgentPublishRequest'
 import { useSettingStore } from '../../../stores/settingStore'
 import styles from './StudioChatPanel.module.css'
@@ -24,6 +25,7 @@ export function StudioChatDock({ hidden }: { hidden: boolean }) {
   // 相同 queryKey 的 useQuery 与 AgentPublishRequestDialog 自动合并；
   // resolvedNotice 来自共享 store：对话框里的确认/取消动作在此同轮可见。
   const { resolvedNotice, clearNotice } = useAgentPublishRequest(workspaceId)
+  const mobileNavHeight = useStudioMobileNavHeight()
   return (
     <AgentPanelDock
       surfaceKey="studio-chat"
@@ -31,7 +33,10 @@ export function StudioChatDock({ hidden }: { hidden: boolean }) {
       defaultSize={{ width: 520, height: 640 }}
       // 关闭 = 收起：toggleAgent 是开合的唯一组合出口（#797 codex 复审轮，
       // 窄屏页签同步组合在 useAgentDockOpen 那层）。焦点归还指定顶栏开关
-      // （首次关闭、无面板外 focusin 时的稳定恢复目标）。
+      // （首次关闭、无面板外 focusin 时的稳定恢复目标）。窄屏额外避让
+      // 移动端页签导航实测高度（宽屏 nav display:none → 实测 0 天然不加成，
+      // 复审轮 6）。
+      topInsetExtra={mobileNavHeight}
       restoreFocusSelector='[aria-label="toggle agent panel"]'
       onClose={() => view.toggleAgent()}
       hidden={hidden}
