@@ -34,7 +34,8 @@ import {
   effectiveMinSize,
 } from './dockPlacement'
 import { useDockGeometry } from './useDockGeometry'
-import { useDockEscape, useDockFocus } from './useDockFocus'
+import { useDockFocus } from './useDockFocus'
+import { useDockEscape } from './useDockEscape'
 import styles from './AgentPanelDock.module.css'
 
 export interface AgentPanelDockProps {
@@ -49,6 +50,19 @@ export interface AgentPanelDockProps {
   minHeight?: number
   /** 折叠小条文案（默认 `${title}（已折叠，点击展开）`）。 */
   collapsedLabel?: string
+  /** 隐藏不卸载（#797 codex P1）：true 时 surface 与小条都不渲染，子树
+   * 保留在不可见容器——内容组件的本地 state（composer 文本/发送队列）
+   * 与 hook 级连接（SSE）不因显隐断开。Portal 会逃逸 display:none 祖先，
+   * 所以隐藏必须由 Dock 自身承担；与折叠共用 display:none 抑制（同一条
+   * Rnd>Paper>内容树，切换 hidden 不会换元素类型导致子树重挂）。 */
+  hidden?: boolean
+  /** 焦点归还的指定目标选择器（#797 复审轮 4，如顶栏开关/头部入口按钮）
+   * ——首次关闭、无面板外 focusin 时的稳定恢复目标；归还链：面板外最后
+   * 聚焦元素 → 本选择器 → 挂载前元素。 */
+  restoreFocusSelector?: string
+  /** 顶边额外避让（#797 复审轮 6，如窄屏移动端页签导航高度）——叠加进
+   * topInset：默认几何与拖拽钳制都吃它。 */
+  topInsetExtra?: number
 }
 
 function readAppBarFallbackHeight(): number {
@@ -70,9 +84,14 @@ export function AgentPanelDock({
   minWidth = 320,
   minHeight = 240,
   collapsedLabel,
+  hidden = false,
+  restoreFocusSelector,
+  topInsetExtra = 0,
 }: AgentPanelDockProps) {
   const appBarBottom = useAppBarBottom()
-  const topInset = appBarBottom > 0 ? appBarBottom : readAppBarFallbackHeight()
+  const topInset =
+    (appBarBottom > 0 ? appBarBottom : readAppBarFallbackHeight()) +
+    topInsetExtra
 
   // 几何引擎（记忆/默认布局、实测与视口变化重钳、持久化）抽在
   // useDockGeometry（体积预算）；语义见该文件注释。
@@ -85,11 +104,17 @@ export function AgentPanelDock({
     setCollapsedPersisted,
   } = useDockGeometry(surfaceKey, topInset, defaultSize)
 
-  const { surfaceRef, chipRef } = useDockFocus(collapsed)
+  // 折叠与 hidden 分开：折叠焦点移到小条，hidden 不渲染小条——
+  // 焦点显式还给触发控件（见 useDockFocus）。Esc 在两者下都抑制。
+  const { surfaceRef, chipRef } = useDockFocus(
+    collapsed,
+    hidden,
+    restoreFocusSelector
+  )
 
   // Esc 折叠挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位
   // 规则见 useDockFocus.ts 的 useDockEscape）。
-  useDockEscape(collapsed, () => setCollapsedPersisted(true))
+  useDockEscape(collapsed || hidden, () => setCollapsedPersisted(true))
 
   // 拖拽钳制（codex P2）：bounds="window" 允许 y=0，顶边必须不低于
   // AppBar 实测底边——拖拽中实时钳，提交时同一钳制。
@@ -152,7 +177,9 @@ export function AgentPanelDock({
         style={{
           position: 'fixed',
           zIndex: 900,
-          display: collapsed ? 'none' : undefined,
+          // 折叠与 hidden 共用 display:none 抑制（同一条 Rnd>Paper>内容树，
+          // 不卸载、不换元素类型——子树 state/连接全程不断）。
+          display: collapsed || hidden ? 'none' : undefined,
         }}
       >
         <Paper
@@ -195,7 +222,7 @@ export function AgentPanelDock({
           <div className={styles.content}>{children}</div>
         </Paper>
       </Rnd>
-      {collapsed && (
+      {collapsed && !hidden && (
         <button
           ref={chipRef}
           type="button"

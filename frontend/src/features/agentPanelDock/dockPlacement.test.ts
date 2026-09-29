@@ -8,8 +8,9 @@ import {
   clampDockGeometry,
   clampResizeTopInset,
   defaultDockGeometry,
-  dockStorageKey,
+  effectiveMinSize,
 } from './dockPlacement'
+import { dockStorageKey } from './dockPlacementStorage'
 
 describe('defaultDockGeometry', () => {
   it('贴右缘、顶边让开 AppBar 实测底边', () => {
@@ -29,10 +30,20 @@ describe('defaultDockGeometry', () => {
     expect(small.height).toBe(600 - 56 - 32)
   })
 
-  it('极小视口高度有下限，不出现负/零高度', () => {
+  it('矮视口高度封顶于可用空间（#797 复审轮 7：上限优先于 240 下限，底部不出视口）', () => {
+    // 200px 高视口：可用 = 200-56-32=112 → 高度 112（y+height=176 ≤ 200）。
     const g = defaultDockGeometry(56, 1024, 200)
-    expect(g.height).toBe(240)
+    expect(g.height).toBe(112)
     expect(g.y).toBe(64)
+    expect(g.y + g.height).toBeLessThanOrEqual(200)
+  })
+
+  it('复审批次 P3：退化视口（高 < topInset + 边距）高度钳到 0，不产出负值', () => {
+    // 负 height 被 CSS 丢弃后 Rnd 回落 auto，反而把面板撑出视口。
+    const g = defaultDockGeometry(400, 640, 320)
+    expect(g.height).toBe(0)
+    // 宽度同理：视口宽不足双边距时钳到 0。
+    expect(defaultDockGeometry(56, 20, 900).width).toBe(0)
   })
 })
 
@@ -66,6 +77,18 @@ describe('clampDockGeometry', () => {
     expect(g.x).toBeGreaterThanOrEqual(16 - 520 + 80)
     expect(g.y).toBe(56)
   })
+
+  it('复审批次 P3：退化视口下钳制的宽高不为负（负尺寸会被 CSS 丢弃、Rnd 回落 auto 出视口）', () => {
+    const g = clampDockGeometry(
+      { x: 100, y: 100, width: 520, height: 620 },
+      400,
+      640,
+      320
+    )
+    expect(g.width).toBeGreaterThanOrEqual(0)
+    expect(g.height).toBeGreaterThanOrEqual(0)
+    expect(g.height).toBe(0)
+  })
 })
 
 describe('clampResizeTopInset', () => {
@@ -90,6 +113,16 @@ describe('clampResizeTopInset', () => {
       y: 56,
       height: 400,
     })
+  })
+})
+
+describe('effectiveMinSize', () => {
+  it('复审批次 P3：退化视口下 minWidth/minHeight 钳到 0，不为负', () => {
+    expect(effectiveMinSize(320, 240, 400, 640, 320)).toEqual({
+      minWidth: 320,
+      minHeight: 0,
+    })
+    expect(effectiveMinSize(320, 240, 56, 20, 900).minWidth).toBe(0)
   })
 })
 

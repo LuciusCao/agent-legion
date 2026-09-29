@@ -131,6 +131,7 @@ export function PreviewPanelHeader({
         <button
           type="button"
           className={styles.customizeButton}
+          data-testid="customize-preview-trigger"
           onClick={onCustomize}
         >
           定制预览

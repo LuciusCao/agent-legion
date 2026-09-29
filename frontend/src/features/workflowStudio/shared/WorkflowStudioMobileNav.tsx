@@ -22,6 +22,7 @@ export function WorkflowStudioMobileNav({
       variant="scrollable"
       scrollButtons="auto"
       className={styles.nav}
+      data-testid="studio-mobile-nav"
     >
       <Tab value="graph" label="画布" />
       <Tab value="editor" label="编辑节点" disabled={!editorAvailable} />

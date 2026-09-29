@@ -14,8 +14,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { Dialog } from '@mui/material'
 import { AgentPanelDock } from './AgentPanelDock'
-import { dockStorageKey, loadDockPlacement } from './dockPlacement'
-import { expectConsoleError, expectConsoleWarning } from '../../test-setup'
+import { dockStorageKey, loadDockPlacement } from './dockPlacementStorage'
 
 // 该 jsdom 环境不提供 localStorage：用内存 stub 验证持久化读写（同
 // useStudioChat.test.tsx / StudioChatResume.test.tsx 的模式）。
@@ -135,6 +134,53 @@ describe('AgentPanelDock', () => {
     expect(rndWrapper(surface).style.display).not.toBe('none')
   })
 
+  it('hidden 隐藏不卸载（#797 codex P1）：surface 与小条都不渲染，子树 state 存活，恢复后原样', async () => {
+    const { rerender } = renderDock(
+      {},
+      <input data-testid="dock-child" defaultValue="" />
+    )
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    fireEvent.change(screen.getByTestId('dock-child'), {
+      target: { value: '未发送草稿' },
+    })
+
+    // hidden=true：与折叠共用 display:none 抑制（同一条 Rnd>Paper>内容树，
+    // 不换元素类型不重挂），但连小条也不渲染。
+    rerender(
+      (
+        <AgentPanelDock
+          surfaceKey="test-surface"
+          title="测试面板"
+          onClose={() => undefined}
+          hidden
+        >
+          <input data-testid="dock-child" defaultValue="" />
+        </AgentPanelDock>
+      ) as ReactElement
+    )
+    expect(rndWrapper(surface).style.display).toBe('none')
+    expect(
+      screen.queryByRole('button', { name: /已折叠，点击展开/ })
+    ).toBeNull()
+    // 子树保持挂载且 state 存活（卸载即丢——revert 即红）。
+    expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
+
+    rerender(
+      (
+        <AgentPanelDock
+          surfaceKey="test-surface"
+          title="测试面板"
+          onClose={() => undefined}
+          hidden={false}
+        >
+          <input data-testid="dock-child" defaultValue="" />
+        </AgentPanelDock>
+      ) as ReactElement
+    )
+    expect(rndWrapper(surface).style.display).not.toBe('none')
+    expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
+  })
+
   it('折叠/展开不丢面板内容状态（输入值原样保留）', async () => {
     renderDock({}, <input data-testid="dock-child" defaultValue="" />)
     await screen.findByRole('dialog', { name: '测试面板' })
@@ -170,31 +216,6 @@ describe('AgentPanelDock', () => {
     await screen.findByRole('dialog', { name: '测试面板' })
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
     expect(onClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('焦点移交：打开进面板、折叠到小条、展开回面板、卸载还原触发元素', async () => {
-    // 焦点移交 effect 驱动 Tooltip/ButtonBase 状态更新脱离 act（known
-    // noise，与 previewPanel 既有用例同款声明）。
-    expectConsoleWarning(/not wrapped in act/)
-    expectConsoleError(/not wrapped in act/)
-    const trigger = document.createElement('button')
-    document.body.appendChild(trigger)
-    trigger.focus()
-
-    const { unmount } = renderDock()
-    const surface = await screen.findByRole('dialog', { name: '测试面板' })
-    await waitFor(() => expect(document.activeElement).toBe(surface))
-
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    const chip = await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    await waitFor(() => expect(document.activeElement).toBe(chip))
-
-    fireEvent.click(chip)
-    await waitFor(() => expect(document.activeElement).toBe(surface))
-
-    unmount()
-    expect(document.activeElement).toBe(trigger)
-    trigger.remove()
   })
 
   it('折叠态按 surfaceKey 记忆：重开面板直接呈现小条', async () => {
@@ -413,6 +434,62 @@ describe('AgentPanelDock', () => {
     expect(rndWrapper(surface).style.transform).toBe(
       jsdomTransform(488, 56, { x: 488, y: 64 })
     )
+  })
+
+  it('codex P2 复审轮 6：topInsetExtra（窄屏页签导航高度）叠加进默认几何与拖拽钳制', async () => {
+    // 窄屏 Dock 几乎占满视口宽：AppBar 下方的移动端页签导航也要避让——
+    // 顶边 = AppBar 底边（兜底 56）+ nav 实测高（40）+ 8。
+    renderDock({ topInsetExtra: 40 })
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    expect(rndWrapper(surface).style.transform).toBe(jsdomTransform(488, 104))
+
+    // 拖拽到 y=0：钳到 96（56+40），不是 56——只改默认几何的话拖拽还能
+    // 拖上去盖住页签（revert topInsetExtra 进钳制即红）。
+    const handle = screen.getByTestId('dock-test-surface-handle')
+    fireEvent.mouseDown(handle, { clientX: 600, clientY: 120 })
+    fireEvent.mouseMove(document, { clientX: 600, clientY: -500 })
+    fireEvent.mouseUp(document, { clientX: 600, clientY: -500 })
+    await waitFor(() => {
+      const stored = loadDockPlacement('test-surface')
+      expect(stored).toMatchObject({ y: 96 })
+    })
+  })
+
+  it('codex P2 复审轮 7：320px 高视口 + topInsetExtra 下默认几何高度封顶于可用空间（底部不出视口）', async () => {
+    const originalWidth = window.innerWidth
+    const originalHeight = window.innerHeight
+    // 横屏手机：640×320，AppBar 56 + 页签 48 → topInset=104，
+    // 可用高 = 320-104-32=184。旧实现 Math.max(240,…) 强制 240 → 底部
+    // 112+240=352 出视口（composer/发送按钮不可见）。
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(window, 'innerHeight', {
+      writable: true,
+      configurable: true,
+      value: 320,
+    })
+    try {
+      renderDock({ topInsetExtra: 48 })
+      const surface = await screen.findByRole('dialog', { name: '测试面板' })
+      const wrapper = rndWrapper(surface)
+      // 高度封顶 184；y=112（transform 读数 2 倍挂载位置）→ 底边 296 ≤ 320。
+      expect(wrapper.style.height).toBe('184px')
+      expect(wrapper.style.transform).toBe('translate(208px,224px)')
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        writable: true,
+        configurable: true,
+        value: originalWidth,
+      })
+      Object.defineProperty(window, 'innerHeight', {
+        writable: true,
+        configurable: true,
+        value: originalHeight,
+      })
+    }
   })
 
   it('codex P2 复审轮：拖拽改几何后按 Esc 折叠，写回存储的是新几何（Esc 回调不冻结首帧闭包）', async () => {

@@ -29,7 +29,7 @@ function renderPanel(view: ReturnType<typeof makeStudioView>) {
     withStudioProviders(
       baseStudio,
       view,
-      <WorkflowStudioCanvasPanel mobileActive replacedByDetail={false} />
+      <WorkflowStudioCanvasPanel mobileActive />
     )
   )
 }
@@ -67,7 +67,7 @@ describe('WorkflowStudioCanvasPanel', () => {
       withStudioProviders(
         { ...baseStudio, workflow: null },
         makeStudioView(),
-        <WorkflowStudioCanvasPanel mobileActive replacedByDetail={false} />
+        <WorkflowStudioCanvasPanel mobileActive />
       )
     )
 

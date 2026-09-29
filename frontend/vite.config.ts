@@ -32,6 +32,9 @@ const browserTestFiles = [
   'src/hooks/useJobFilterRefetch.test.ts',
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.test.ts',
+  // useWorkflowStudioPageView 本轮起经 useStudioNarrowViewport 触碰
+  // window.matchMedia（#797 codex 复审轮的窄屏组合出口）。
+  'src/features/workflowStudio/shared/useWorkflowStudioPageView.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.draft.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.draftBaselineSync.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',

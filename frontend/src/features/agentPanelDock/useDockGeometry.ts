@@ -14,10 +14,9 @@ import { useEffect, useState } from 'react'
 import {
   clampDockGeometry,
   defaultDockGeometry,
-  loadDockPlacement,
-  saveDockPlacement,
   type DockGeometry,
 } from './dockPlacement'
+import { loadDockPlacement, saveDockPlacement } from './dockPlacementStorage'
 
 export interface DockGeometryEngine {
   geometry: DockGeometry

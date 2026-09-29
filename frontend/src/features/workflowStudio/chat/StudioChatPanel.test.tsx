@@ -106,11 +106,10 @@ describe('StudioChatPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders pickers, scope note and input for an active session', async () => {
+  it('renders pickers and input for an active session', async () => {
     renderPanel()
     expect(await screen.findByLabelText('选择 Agent')).toBeInTheDocument()
     expect(screen.getByLabelText('选择会话')).toBeInTheDocument()
-    expect(screen.getByText(/发布永远由你确认/)).toBeInTheDocument()
     await waitFor(() => expect(screen.getByLabelText('消息输入')).toBeEnabled())
     // 自动打开最近会话并建立 SSE。
     await waitFor(() =>
@@ -491,6 +490,49 @@ describe('StudioChatPanel', () => {
       expect(mockApi.createStudioChatSession).toHaveBeenCalledWith(
         'ws1',
         'kimi'
+      )
+    )
+  })
+
+  it('复审批次 P3：跨 workspace 路由复用时残留的 agent 选择回落到新 workspace 列表（存在性校验）', async () => {
+    // studio 路由参数变化复用组件（无 key 的渲染路径兜底）：ws1 手动选的
+    // agent id 不得带进 ws2——「＋ 新对话」必须用 ws2 列表里的 agent
+    // （revert：无存在性校验，用 ws1 残留的 claude 请求 ws2，即红）。
+    mockApi.fetchStudioChatAgents.mockImplementation((workspaceId: string) =>
+      Promise.resolve(
+        workspaceId === 'ws1'
+          ? [
+              { id: 'kimi', label: 'Kimi Code' },
+              { id: 'claude', label: 'Claude' },
+            ]
+          : [{ id: 'qwen', label: 'Qwen' }]
+      )
+    )
+    mockApi.createStudioChatSession.mockResolvedValue(
+      sessionRecord({ id: 's2' })
+    )
+    renderPanel()
+
+    const agentPicker = await screen.findByLabelText('选择 Agent')
+    await waitFor(() => expect(agentPicker).toHaveValue('kimi'))
+    fireEvent.change(agentPicker, { target: { value: 'claude' } })
+    expect(agentPicker).toHaveValue('claude')
+
+    // 导航到 ws2：组件复用（不 remount），agent 列表换成 qwen。
+    act(() => {
+      useSettingStore.setState({ workspaceId: 'ws2' })
+    })
+    await waitFor(() =>
+      expect(screen.getByLabelText('选择 Agent')).toHaveValue('qwen')
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '＋ 新对话' }))
+    })
+    await waitFor(() =>
+      expect(mockApi.createStudioChatSession).toHaveBeenCalledWith(
+        'ws2',
+        'qwen'
       )
     )
   })

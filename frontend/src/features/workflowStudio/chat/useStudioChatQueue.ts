@@ -12,7 +12,8 @@ export type StudioChatQueuedMessage = { id: string; text: string }
  * blocked（#694 压缩窗口）与 busy 同等参与门控：压缩开始晚于队首发出时
  * 后端 409 保留队首，压缩结束（或后端超时自清）把 blocked 翻回 false 的
  * 翻转沿自动重发队首（#694 review P2-a）——重试只发生在门控翻转沿，
- * 失败本身不触发重试，不会空转或重复发送。
+ * 失败本身不触发重试，不会空转或重复发送；失败滞留的队首被用户从队列
+ * 条移除时，remove 在空闲下主动发出新队首（#797 codex 轮 10 P2）。
  * 不做 steer（运行中注入当前 turn）：turn 原子认领模型下运行中注入需要
  * 协议层改造，超出前端排队范围。 */
 export function useStudioChatQueue(
@@ -63,7 +64,10 @@ export function useStudioChatQueue(
   function submit(text: string) {
     // 首个直发在途（busy 尚未随 SSE 快照翻转）也视为忙：后续提交入队，
     // 避免两条都直发撞后端单 turn 原子认领的 409。压缩窗口（blocked）同理。
-    if (busy || blocked || inFlightRef.current) {
+    // 队列非空时一律尾插（#797 复审批次 P2）：上一次 flush 失败会保留队首
+    // （busy 已翻 false），此时直发新消息会插队到滞留队首之前（送达乱序，
+    // 连续失败时队首无限滞留）——队列非空即排队保 FIFO。
+    if (busy || blocked || inFlightRef.current || queueRef.current.length > 0) {
       const id = `q${nextIdRef.current}`
       nextIdRef.current += 1
       setQueue((current) => [...current, { id, text }])
@@ -73,7 +77,18 @@ export function useStudioChatQueue(
   }
 
   function remove(id: string) {
+    // 移除的是队首且当前空闲、队列仍非空：主动发出新队首（#797 codex
+    // 轮 10 P2）——发送 effect 只盯门控翻转沿，失败滞留的队首被用户从
+    // 队列条移除后没有任何触发点，新队首会在空闲下永久滞留。运行中/
+    // 压缩中/有在途发送时不抢发（门控语义不变），等下一个翻转沿。
+    const wasHead = queueRef.current[0]?.id === id
+    const nextHead = queueRef.current.filter((item) => item.id !== id)[0]
     setQueue((current) => current.filter((item) => item.id !== id))
+    if (!wasHead || !nextHead || busy || blocked || inFlightRef.current) return
+    sendInFlight(nextHead.text, (sent) => {
+      if (!sent) return
+      setQueue((current) => current.filter((item) => item.id !== nextHead.id))
+    })
   }
 
   return { queuedMessages: queue, submit, remove }
