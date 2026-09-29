@@ -84,7 +84,7 @@ export function CustomizePreviewDock({
     <AgentPanelDock
       surfaceKey="customize-preview"
       title="定制预览面板"
-      defaultSize={{ width: 480, height: 620 }}
+      defaultSize={{ width: 528, height: 682 }}
       minWidth={340}
       // 焦点归还指定头部「定制预览」入口（关闭路径的稳定恢复目标）。
       restoreFocusSelector='[data-testid="customize-preview-trigger"]'

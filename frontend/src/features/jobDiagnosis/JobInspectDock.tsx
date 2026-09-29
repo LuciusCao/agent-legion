@@ -28,7 +28,7 @@ export function JobInspectDock({ target, onClose, restoreFocusRef }: Props) {
     <AgentPanelDock
       surfaceKey="job-inspect"
       title={title}
-      defaultSize={{ width: 520, height: 640 }}
+      defaultSize={{ width: 572, height: 704 }}
       minWidth={340}
       restoreFocusRef={restoreFocusRef}
       onClose={onClose}

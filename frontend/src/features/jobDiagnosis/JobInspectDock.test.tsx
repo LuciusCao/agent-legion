@@ -99,6 +99,12 @@ describe('JobInspectDock（#795 PR③：排查走 AgentPanelDock）', () => {
     })
     // Dock 宿主变体（#800 codex P2）：不带旧 Dialog 的 320px 底尺寸。
     expect(last.inDock).toBe(true)
+    // 无记忆时默认几何 = 新默认尺寸（#795 收尾：520×640 → ×1.1 = 572×704）；
+    // jsdom 视口 768 高：高度被钳到 768-56-32=680（#797 轮 7 上限封顶语义）。
+    const wrapper = screen.getByRole('dialog', { name: '排查：生成' })
+      .parentElement as HTMLElement
+    expect(wrapper.style.width).toBe('572px')
+    expect(wrapper.style.height).toBe('680px')
   })
 
   it('job 级目标：标题用 job 标题，无 jobTitle 回退 jobId', async () => {

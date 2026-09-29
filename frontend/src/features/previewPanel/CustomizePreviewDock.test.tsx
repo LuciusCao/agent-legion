@@ -118,6 +118,11 @@ describe('CustomizePreviewDock', () => {
     expect(document.querySelector('.MuiBackdrop-root')).toBeNull()
     const underlying = screen.getByRole('button', { name: '底层左栏按钮' })
     expect(underlying.closest('[aria-hidden="true"]')).toBeNull()
+    // 无记忆时默认几何 = 新默认尺寸（#795 收尾：480×620 → ×1.1 = 528×682）；
+    // jsdom 视口 768 高：高度被钳到 768-56-32=680（#797 轮 7 上限封顶语义）。
+    const wrapper = surface.parentElement as HTMLElement
+    expect(wrapper.style.width).toBe('528px')
+    expect(wrapper.style.height).toBe('680px')
   })
 
   it('#796 返工 R2：纯对话面板——无治理 footer、无 agent 引导文案、无内嵌预览/iframe', async () => {
