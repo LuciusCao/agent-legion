@@ -130,6 +130,9 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
       ) : (
         fallback
       )}
+      {/* CustomizePreviewDock 关闭即卸载（composer 文本/队列随之丢弃）是
+          有意取舍（#797 复审批次确认）：#347 P1 语义锚定「关 Dock = 授权
+          失效」，与 studio chat Dock 的「隐藏不卸载」是两种不同契约。 */}
       {customizing && isAdmin && workspaceId && (
         <CustomizePreviewDock
           workspaceId={workspaceId}
