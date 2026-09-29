@@ -223,6 +223,12 @@ describe('JobDiagnosisPanel', () => {
     // 历史会话存在 + create 挂起：chips 必须禁用——否则点模型/权限/思考会
     // 经 useStudioChatAgentConfig 提交到历史会话 ID（revert：不禁用，即红）。
     mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    // 会话详情 mock 给真实返回：默认 vi.fn() 返回 undefined，恢复/激活
+    // 链路在 CI 调度时序下会走错误路径（actionError 置位后 primer 永不发）。
+    mockApi.fetchStudioChatSession.mockImplementation(
+      (_ws: string, id: string) =>
+        Promise.resolve({ ...configRecord(), id } as StudioChatSessionRecord)
+    )
     let resolveCreate: (session: StudioChatSessionRecord) => void = () => {}
     mockApi.createStudioChatSession.mockImplementation(
       () =>
