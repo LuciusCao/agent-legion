@@ -354,7 +354,7 @@
     "frontend/src/features/workflowStudio/chat/StudioChatMessageItem.tsx": 147,
     "frontend/src/features/workflowStudio/chat/StudioChatMessageList.tsx": 106,
     "frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css": 283,
-    "frontend/src/features/workflowStudio/chat/StudioChatPanel.tsx": 83,
+    "frontend/src/features/workflowStudio/chat/StudioChatPanel.tsx": 82,
     "frontend/src/features/workflowStudio/chat/StudioChatPermission.tsx": 79,
     "frontend/src/features/workflowStudio/chat/StudioChatQueueBar.module.css": 36,
     "frontend/src/features/workflowStudio/chat/StudioChatQueueBar.tsx": 25,
