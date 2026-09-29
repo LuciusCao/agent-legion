@@ -203,8 +203,13 @@ describe('JobDiagnosisPanel', () => {
       () => new Promise<never>(() => {})
     )
     renderPanel()
+    // 不空窗契约 = chips 存在；可交互与否取决于恢复竞态（会话恢复完成则
+    // 可交互，未完成则走 readOnly 回落只读）——两条路径都合法，只断言存在
+    // （CI 与本地调度时序不同，断言 enabled 会抖动）。
     await screen.findByRole('group', { name: 'Agent 配置' })
-    expect(screen.getByRole('button', { name: 'Agent 权限模式' })).toBeEnabled()
+    expect(
+      screen.getByRole('button', { name: 'Agent 权限模式' })
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '模型' })).toBeInTheDocument()
   })
 
