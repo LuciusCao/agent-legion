@@ -5,7 +5,6 @@ import { useStudioContextSync } from './useStudioContextSync'
 import { useStudioDraftSync } from './useStudioDraftSync'
 import { AgentChatPanel } from './AgentChatPanel'
 import { StudioChatSessionBar } from './StudioChatSessionBar'
-import styles from './StudioChatPanel.module.css'
 import shellStyles from './AgentChatPanel.module.css'
 
 type Props = {
@@ -70,10 +69,6 @@ export function StudioChatPanel(props: Props) {
             }
             newChatDisabled={!selectedAgentId || chat.starting}
           />
-          <div className={styles.scopeNote}>
-            Agent 来自管理员配置并按本机安装过滤；agent 只能产出草稿与校验，
-            <b>发布永远由你确认</b>。
-          </div>
         </>
       }
       showAgentConfig

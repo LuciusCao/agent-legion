@@ -106,11 +106,10 @@ describe('StudioChatPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders pickers, scope note and input for an active session', async () => {
+  it('renders pickers and input for an active session', async () => {
     renderPanel()
     expect(await screen.findByLabelText('选择 Agent')).toBeInTheDocument()
     expect(screen.getByLabelText('选择会话')).toBeInTheDocument()
-    expect(screen.getByText(/发布永远由你确认/)).toBeInTheDocument()
     await waitFor(() => expect(screen.getByLabelText('消息输入')).toBeEnabled())
     // 自动打开最近会话并建立 SSE。
     await waitFor(() =>
