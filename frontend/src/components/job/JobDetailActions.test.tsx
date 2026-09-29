@@ -97,12 +97,27 @@ describe('JobDetailActions', () => {
   })
 
   it('renders all icon buttons', () => {
-    renderActions()
+    renderActions({ onOpenDiagnosis: vi.fn() })
     expect(screen.getByLabelText('重跑')).toBeInTheDocument()
     expect(screen.getByLabelText('运行到')).toBeInTheDocument()
     expect(screen.getByLabelText('打包')).toBeInTheDocument()
     expect(screen.getByLabelText('删除')).toBeInTheDocument()
     expect(screen.getByLabelText('产物文件')).toBeInTheDocument()
+    expect(screen.getByLabelText('排查助手')).toBeInTheDocument()
+  })
+
+  it('calls onOpenDiagnosis when the 排查助手 button is clicked (#795 PR③)', async () => {
+    const onOpenDiagnosis = vi.fn()
+    renderActions({ onOpenDiagnosis })
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('排查助手'))
+    })
+    expect(onOpenDiagnosis).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides the 排查助手 button when onOpenDiagnosis is not provided', () => {
+    renderActions()
+    expect(screen.queryByLabelText('排查助手')).not.toBeInTheDocument()
   })
 
   it('clears packed status only for a packed job', async () => {

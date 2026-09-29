@@ -17,6 +17,7 @@ type Options = {
   onDelete: () => void
   onOpenArtifacts: () => void
   onOpenApproval: () => void
+  onOpenDiagnosis?: () => void
 }
 
 /**
@@ -69,6 +70,7 @@ export function useJobDetailActions(options: Options) {
         onDelete={snapshot.onDelete}
         onOpenArtifacts={snapshot.onOpenArtifacts}
         onOpenApproval={snapshot.onOpenApproval}
+        onOpenDiagnosis={snapshot.onOpenDiagnosis}
       />
     )
     return () => setDetailPageActions(null)
