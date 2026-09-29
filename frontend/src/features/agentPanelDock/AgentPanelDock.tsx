@@ -152,6 +152,9 @@ export function AgentPanelDock({
         onDragStop={(_event, data) => {
           commitGeometry({ ...geometry, x: data.x, y: clampDragY(data.y) })
         }}
+        // 缩放把手在 Paper 外层包装里（非 Paper 后代，pointerdown/focusin
+        // capture 摸不到）——缩放也要抬栈（#801 codex 轮 4 P2）。
+        onResizeStart={raiseOnInteract}
         onResize={(_event, _direction, ref, _delta, position) => {
           // 顶部把手缩放同样钳顶边（codex P2 复审轮：拖拽路径已钳，缩放
           // 路径漏了）——高度联动由 clampResizeTopInset 承担（底边不变）。

@@ -1,16 +1,19 @@
 import { createElement, type ReactNode } from 'react'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { JobDiagnosisPanel } from './JobDiagnosisPanel'
 import * as chatApi from '../workflowStudio/chat/studioChatApi'
+import * as configApi from '../workflowStudio/chat/studioChatConfigApi'
 import '../workflowStudio/chat/studioChatResumeApi'
 import * as jobApi from '../../api/jobApi'
 import type { StudioChatSessionRecord } from '../workflowStudio/chat/studioChatApi'
 import { EventSourceMock } from '../../testing/eventSourceMock'
 import { createTestQueryClient } from '../../testing/testQueryClient'
+import { expectConsoleError } from '../../test-setup'
 
 vi.mock('../workflowStudio/chat/studioChatApi')
+vi.mock('../workflowStudio/chat/studioChatConfigApi')
 vi.mock('../workflowStudio/chat/studioChatResumeApi')
 vi.mock('../../api/jobApi', () => ({
   rerunJob: vi.fn(),
@@ -18,6 +21,7 @@ vi.mock('../../api/jobApi', () => ({
 }))
 
 const mockApi = vi.mocked(chatApi)
+const mockConfigApi = vi.mocked(configApi)
 const mockJobApi = vi.mocked(jobApi)
 
 const TARGET = {
@@ -195,9 +199,9 @@ describe('JobDiagnosisPanel', () => {
 
   it('引导期间（create 未落地）chips 已可见不空窗：回落历史会话展示（#796 R3 继承）', async () => {
     // 排查线实测语义：useStudioChat 会话记忆自动恢复最近会话，引导期
-    // chat.session 非空——chips 锚定真实历史会话（可交互），不走严格
-    // readOnly 路径；严格 readOnly（无会话可恢复）由 composer 级既有用例
-    // 钉住（StudioChatComposer.test 的 #796 R3 用例）。
+    // chat.session 非空——chips 锚定真实历史会话，不走严格 readOnly 路径；
+    // 严格 readOnly（无会话可恢复）由 composer 级既有用例钉住
+    // （StudioChatComposer.test 的 #796 R3 用例）。
     mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
     mockApi.createStudioChatSession.mockImplementation(
       () => new Promise<never>(() => {})
@@ -211,6 +215,58 @@ describe('JobDiagnosisPanel', () => {
       screen.getByRole('button', { name: 'Agent 权限模式' })
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '模型' })).toBeInTheDocument()
+  })
+
+  it('bootstrap 在途 chips 强制只读，落地后变更打到新建会话（#801 codex 轮 4 P2）', async () => {
+    // MUI Menu 开合驱动芯片组状态更新脱离 act（known noise，同既有用例）。
+    expectConsoleError(/not wrapped in act/)
+    // 历史会话存在 + create 挂起：chips 必须禁用——否则点模型/权限/思考会
+    // 经 useStudioChatAgentConfig 提交到历史会话 ID（revert：不禁用，即红）。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    let resolveCreate: (session: StudioChatSessionRecord) => void = () => {}
+    mockApi.createStudioChatSession.mockImplementation(
+      () =>
+        new Promise<StudioChatSessionRecord>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    mockConfigApi.setStudioChatMode.mockResolvedValue(configRecord())
+    renderPanel()
+    await screen.findByRole('group', { name: 'Agent 配置' })
+    expect(
+      screen.getByRole('button', { name: 'Agent 权限模式' })
+    ).toBeDisabled()
+    expect(screen.getByRole('button', { name: '模型' })).toBeDisabled()
+
+    // bootstrap 落地：新建会话激活，chips 恢复可交互。
+    const newSession = {
+      ...configRecord(),
+      id: 's-new',
+      session_modes: {
+        currentModeId: 'default',
+        availableModes: [
+          { id: 'default', name: 'Default' },
+          { id: 'plan', name: 'Plan' },
+        ],
+      },
+    } as StudioChatSessionRecord
+    await act(async () => {
+      resolveCreate(newSession)
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Agent 权限模式' })
+      ).toBeEnabled()
+    )
+
+    // 变更打到新建会话 ID，不是历史会话。
+    fireEvent.click(screen.getByRole('button', { name: 'Agent 权限模式' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Plan' }))
+    expect(mockConfigApi.setStudioChatMode).toHaveBeenCalledWith(
+      'ws1',
+      's-new',
+      'plan'
+    )
   })
 
   it('inDock 换用无底尺寸的外壳类（#800 codex P2：Dock 里 320px min-height 会裁掉 composer）', async () => {

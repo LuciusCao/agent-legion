@@ -235,4 +235,30 @@ describe('AgentPanelDock Esc 栈（#801 codex P1：同页多实例只关栈顶�
     // 上限契约：栈位映射的 z-index 永远低于 Toast 1000。
     expect(Number(wrapperA.style.zIndex)).toBeLessThan(1000)
   })
+
+  it('缩放开始也抬栈（#801 codex 轮 4 P2：resize 把手在 Paper 外，pointerdown capture 摸不到）', async () => {
+    // revert（onResizeStart 不抬栈）：对下层 Dock 的把手 mouseDown 后它的
+    // 层级不反超，即红。
+    renderTwoDocks()
+    const surfaceA = await screen.findByRole('dialog', { name: '面板 A' })
+    const surfaceB = await screen.findByRole('dialog', { name: '面板 B' })
+    const wrapperA = surfaceA.parentElement as HTMLElement
+    const wrapperB = surfaceB.parentElement as HTMLElement
+    expect(Number(wrapperB.style.zIndex)).toBeGreaterThan(
+      Number(wrapperA.style.zIndex)
+    )
+
+    // re-resizable 的把手无默认类名，按内联 style 识别（同既有缩放用例）。
+    const handleA = Array.from(
+      wrapperA.querySelectorAll('div[style*="col-resize"]')
+    )[0] as HTMLElement
+    expect(handleA).toBeTruthy()
+    fireEvent.mouseDown(handleA, { clientX: 900, clientY: 400 })
+    await waitFor(() =>
+      expect(Number(wrapperA.style.zIndex)).toBeGreaterThan(
+        Number(wrapperB.style.zIndex)
+      )
+    )
+    fireEvent.mouseUp(document, { clientX: 900, clientY: 400 })
+  })
 })

@@ -18,6 +18,10 @@ type Props = {
    * #795 收尾起 studio / 定制预览 / job 排查三条线都传——chips 常驻所有
    * agent 对话界面）。 */
   showAgentConfig?: boolean
+  /** 强制配置芯片只读（#801 codex 轮 4 P2）：排查 bootstrap 在途时，chips
+   * 展示的是会话记忆恢复的历史会话——不禁用的话变更会打到历史会话 ID，
+   * 新建会话仍用原配置。 */
+  configReadOnly?: boolean
   /** 消息列表与运行条之间的插槽（job 排查的动作确认卡区）。 */
   actionArea?: ReactNode
   /** 无激活会话时的占位内容。 */
@@ -127,7 +131,9 @@ export function AgentChatPanel(props: Props) {
             ? {
                 workspaceId: props.workspaceId,
                 session: chat.session ?? fallbackSession,
-                readOnly: chat.session === null && fallbackSession !== null,
+                readOnly:
+                  props.configReadOnly === true ||
+                  (chat.session === null && fallbackSession !== null),
               }
             : undefined
         }
