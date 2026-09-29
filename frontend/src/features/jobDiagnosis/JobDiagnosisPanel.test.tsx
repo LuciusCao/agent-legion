@@ -152,6 +152,62 @@ describe('JobDiagnosisPanel', () => {
     expect(mockApi.sendStudioChatMessage).toHaveBeenCalledTimes(1)
   })
 
+  const configRecord = () =>
+    sessionRecord({
+      capability_snapshot: { sessionModes: true, sessionConfigOptions: true },
+      session_modes: {
+        currentModeId: 'default',
+        availableModes: [{ id: 'default', name: 'Default' }],
+      },
+      config_options: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'k3',
+          options: [{ value: 'k3', name: 'K3' }],
+        },
+        {
+          id: 'thinking',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+          options: [{ value: 'low' }, { value: 'high' }],
+        },
+      ],
+    } as never)
+
+  it('chips 常驻排查 composer（#795 收尾）：权限/模型/思考芯片可见可交互', async () => {
+    // 排查会话与 studio 共用 useStudioChat（#329），kimi ACP 握手广告面
+    // 同款——showAgentConfig 接上后工具行即显示配置芯片。
+    mockApi.createStudioChatSession.mockResolvedValue(configRecord())
+    await renderReadyPanel()
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Agent 权限模式' })
+      ).toBeEnabled()
+    )
+    expect(screen.getByRole('button', { name: '模型' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '思考档位' })).toBeInTheDocument()
+  })
+
+  it('引导期间（create 未落地）chips 已可见不空窗：回落历史会话展示（#796 R3 继承）', async () => {
+    // 排查线实测语义：useStudioChat 会话记忆自动恢复最近会话，引导期
+    // chat.session 非空——chips 锚定真实历史会话（可交互），不走严格
+    // readOnly 路径；严格 readOnly（无会话可恢复）由 composer 级既有用例
+    // 钉住（StudioChatComposer.test 的 #796 R3 用例）。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    mockApi.createStudioChatSession.mockImplementation(
+      () => new Promise<never>(() => {})
+    )
+    renderPanel()
+    await screen.findByRole('group', { name: 'Agent 配置' })
+    expect(screen.getByRole('button', { name: 'Agent 权限模式' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '模型' })).toBeInTheDocument()
+  })
+
   it('inDock 换用无底尺寸的外壳类（#800 codex P2：Dock 里 320px min-height 会裁掉 composer）', async () => {
     // vitest 的 CSS modules 把类名解析为带 hash 的键名（_chatShellDock_xxx）
     // ——按子串断言变体切换（revert：inDock 也用 chatShell（带

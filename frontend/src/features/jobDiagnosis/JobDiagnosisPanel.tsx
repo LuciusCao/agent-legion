@@ -98,6 +98,9 @@ export function JobDiagnosisPanel({ workspaceId, target, inDock }: Props) {
       chat={chat}
       workspaceId={workspaceId}
       className={inDock ? styles.chatShellDock : styles.chatShell}
+      // #795 收尾：chips 常驻所有 agent 对话界面——排查线也接执行配置芯片
+      // （权限/模型/思考），无会话时的只读回落由 AgentChatPanel 继承（#796 R3）。
+      showAgentConfig
       bootstrapError={
         bootstrapError
           ? {
