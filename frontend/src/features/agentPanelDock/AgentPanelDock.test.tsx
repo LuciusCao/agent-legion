@@ -14,7 +14,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { Dialog } from '@mui/material'
 import { AgentPanelDock } from './AgentPanelDock'
-import { dockStorageKey, loadDockPlacement } from './dockPlacement'
+import { dockStorageKey, loadDockPlacement } from './dockPlacementStorage'
 
 // 该 jsdom 环境不提供 localStorage：用内存 stub 验证持久化读写（同
 // useStudioChat.test.tsx / StudioChatResume.test.tsx 的模式）。

@@ -11,6 +11,27 @@ import { useEffect, useRef } from 'react'
 
 /** 焦点归还目标链的持有与追踪（hidden 期间也照记：还回目标被聚焦同样是
  * 「面板外最后聚焦」）。 */
+/**
+ * 可见且可聚焦判定（#797 复审批次 codex 轮 8 P2）：归还目标可能被响应式
+ * CSS 隐藏（如窄屏 Agent 页签在断点切换后 display:none）——isConnected
+ * 不够，focus 静默无效、焦点落 body。checkVisibility 覆盖 display:none
+ * 祖先链与 visibility；jsdom 未实现它，退回 getComputedStyle 逐级检查
+ * （内联样式与样式表规则都判得到）。
+ */
+function isVisibleFocusable(el: HTMLElement): boolean {
+  if (!el.isConnected) return false
+  if (typeof el.checkVisibility === 'function') {
+    return el.checkVisibility({ checkVisibilityCSS: true })
+  }
+  let node: HTMLElement | null = el
+  while (node) {
+    const style = getComputedStyle(node)
+    if (style.display === 'none' || style.visibility === 'hidden') return false
+    node = node.parentElement
+  }
+  return true
+}
+
 export function useDockFocusRestore(
   restoreFocusSelector: string | undefined,
   surfaceNode: HTMLElement | null,
@@ -19,13 +40,15 @@ export function useDockFocusRestore(
   const mountPreviousRef = useRef<Element | null>(null)
   const outsideRef = useRef<Element | null>(null)
 
-  // 归还目标链：调用时现读 ref/现查 DOM，闭包不过期。
+  // 归还目标链：调用时现读 ref/现查 DOM，闭包不过期。每一级都要求可见
+  // 可聚焦，不可见（断点切换后 display:none）就继续走下一级兜底。
   const restoreTarget = (): Element | null => {
     const outside = outsideRef.current
-    if (outside instanceof HTMLElement && outside.isConnected) return outside
+    if (outside instanceof HTMLElement && isVisibleFocusable(outside))
+      return outside
     if (restoreFocusSelector) {
       const designated = document.querySelector(restoreFocusSelector)
-      if (designated instanceof HTMLElement && designated.isConnected)
+      if (designated instanceof HTMLElement && isVisibleFocusable(designated))
         return designated
     }
     return mountPreviousRef.current
@@ -35,8 +58,7 @@ export function useDockFocusRestore(
     mountPreviousRef.current = document.activeElement
     return () => {
       const target = restoreTarget()
-      if (target instanceof HTMLElement && target.isConnected)
-        target.focus({ preventScroll: true })
+      focusIfConnected(target)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restoreTarget 读 ref/现查 DOM，挂载一次即可
   }, [])
@@ -61,6 +83,6 @@ export function useDockFocusRestore(
 }
 
 export function focusIfConnected(el: Element | null) {
-  if (el instanceof HTMLElement && el.isConnected)
+  if (el instanceof HTMLElement && isVisibleFocusable(el))
     el.focus({ preventScroll: true })
 }

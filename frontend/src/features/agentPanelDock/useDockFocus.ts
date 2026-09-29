@@ -38,6 +38,11 @@ export function useDockFocus(
   // 曾经可见标记：只有「可见→隐藏」转换才归还焦点；首次以隐藏态挂载
   // （窄屏首进的常驻隐藏 Dock）跳过——用户从未打开过面板，无焦点可还。
   const wasVisibleRef = useRef(false)
+  // 首挂即折叠（localStorage 记忆 collapsed=true）同样不抢焦点（#797
+  // 复审批次 P3，与 hidden 首挂同思路）：用户从未在本会话打开面板，chip
+  // 不该夺走既有焦点。用户点 chip 展开过（collapsed 翻过 false）后守卫
+  // 解除，后续折叠/展开照常移交。
+  const initialCollapsedRef = useRef(collapsed)
 
   useEffect(() => {
     if (hidden) {
@@ -45,6 +50,8 @@ export function useDockFocus(
       return
     }
     wasVisibleRef.current = true
+    if (!collapsed) initialCollapsedRef.current = false
+    if (collapsed && initialCollapsedRef.current) return
     const node = collapsed ? chipNode : surfaceNode
     node?.focus({ preventScroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restoreTarget 读 ref/现查 DOM，不依赖其函数身份

@@ -209,4 +209,90 @@ describe('AgentPanelDock 焦点契约', () => {
     expect(document.activeElement).toBe(elsewhere)
     elsewhere.remove()
   })
+
+  it('codex 轮 8 P2（#797 复审批次）：归还目标被响应式 CSS 隐藏（display:none）时落到指定选择器兜底，不还给不可见元素', async () => {
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    // 真实场景：窄屏 Agent 页签按钮是「面板外最后聚焦」的归还目标，断点
+    // 切到宽屏后它被响应式 CSS display:none——isConnected 仍为 true，
+    // focus 静默无效、焦点落 body，且不会继续尝试指定选择器。修复后归还
+    // 链逐级校验可见性（revert：焦点还给 display:none 的页签按钮，即红）。
+    function Scenario({ hidden }: { hidden: boolean }) {
+      return (
+        <div>
+          <button type="button" data-testid="agent-tab">
+            窄屏 Agent 页签
+          </button>
+          <button type="button" data-testid="dock-trigger">
+            顶栏开关
+          </button>
+          <AgentPanelDock
+            surfaceKey="test-surface"
+            title="测试面板"
+            onClose={() => undefined}
+            hidden={hidden}
+            restoreFocusSelector='[data-testid="dock-trigger"]'
+          >
+            <input data-testid="dock-input" defaultValue="" />
+          </AgentPanelDock>
+        </div>
+      )
+    }
+    const { rerender } = render((<Scenario hidden={false} />) as ReactElement)
+    await screen.findByRole('dialog', { name: '测试面板' })
+    // Dock 可见期间 focusin 追踪记下面板外最后聚焦的页签按钮，然后焦点
+    // 回到面板内。
+    const tab = screen.getByTestId('agent-tab')
+    tab.focus()
+    screen.getByTestId('dock-input').focus()
+
+    // 断点切换：页签按钮被响应式 CSS 隐藏（jsdom 无布局，用内联样式模拟
+    // display:none——getComputedStyle 兜底链判得到）。
+    tab.style.display = 'none'
+
+    rerender((<Scenario hidden />) as ReactElement)
+    // 焦点落到指定选择器（顶栏开关），不是 display:none 的页签按钮、不是
+    // body。
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId('dock-trigger'))
+    )
+  })
+
+  it('复审批次 P3：记忆 collapsed=true 首挂不抢焦点（与 hidden 首挂守卫同思路）', async () => {
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    // 上次会话折叠退出，本次打开页面 Dock 以折叠小条首挂——用户从未在本
+    // 会话打开面板，焦点不应被抢到 chip（revert：activeElement 被挪到
+    // chip，即红）。
+    localStorageStub.setItem(
+      'agent-panel-dock:test-surface',
+      JSON.stringify({
+        x: 100,
+        y: 100,
+        width: 520,
+        height: 620,
+        collapsed: true,
+      })
+    )
+    const elsewhere = document.createElement('button')
+    document.body.appendChild(elsewhere)
+    elsewhere.focus()
+
+    renderDock()
+    // 折叠小条已渲染（首挂即折叠），焦点保持在原处。
+    await screen.findByRole('button', { name: /已折叠，点击展开/ })
+    expect(document.activeElement).toBe(elsewhere)
+
+    // 守卫解除：用户点 chip 展开再折叠，折叠后焦点正常移交 chip（展开
+    // 期间 chip 卸载，再折叠是新节点——重新查询）。
+    fireEvent.click(screen.getByRole('button', { name: /已折叠，点击展开/ }))
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    await waitFor(() => expect(document.activeElement).toBe(surface))
+    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
+    const chip2 = await screen.findByRole('button', {
+      name: /已折叠，点击展开/,
+    })
+    await waitFor(() => expect(document.activeElement).toBe(chip2))
+    elsewhere.remove()
+  })
 })
