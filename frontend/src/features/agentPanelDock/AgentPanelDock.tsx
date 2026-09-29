@@ -23,9 +23,11 @@
  * - 焦点与 a11y（useDockFocus）：可见时焦点进面板、卸载/hidden 归还触发
  *   元素；Esc 关闭面板（走 onClose，语义同标题栏关闭）——展开期间挂在
  *   document 级（非模态面板失焦后 Esc 仍可用；defaultPrevented 或有全局
- *   Modal/Menu 开着时让给对方，不抢已消费的 Esc）。
+ *   Modal/Menu 开着时让给对方，不抢已消费的 Esc）。同页多实例时 Esc 只关
+ *   栈顶：模块级 Dock 栈（dockStack.ts，#801 codex P1），mount/交互置顶、
+ *   unmount/hidden 出栈。
  */
-import { type ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { IconButton, Paper, Portal, Tooltip } from '@mui/material'
 import { Close } from '@mui/icons-material'
 import { Rnd } from 'react-rnd'
@@ -38,6 +40,7 @@ import {
 import { useDockGeometry } from './useDockGeometry'
 import { useDockFocus } from './useDockFocus'
 import { useDockEscape } from './useDockEscape'
+import { dockStackRaise } from './dockStack'
 import styles from './AgentPanelDock.module.css'
 
 export interface AgentPanelDockProps {
@@ -99,9 +102,15 @@ export function AgentPanelDock({
     restoreFocusRef
   )
 
+  // Dock 栈身份（#801 codex P1）：Esc 只关栈顶；栈成员与交互置顶在
+  // useDockEscape（入栈/出栈）与这里的 pointerdown/focusin（置顶）。
+  // useState 惰性初始化拿稳定 symbol（渲染期读 ref.current 撞 lint 规则）。
+  const [stackId] = useState(() => Symbol(`dock:${surfaceKey}`))
+  const raiseOnInteract = () => dockStackRaise(stackId)
+
   // Esc 关闭挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位
   // 规则见 useDockEscape.ts）。
-  useDockEscape(hidden, onClose)
+  useDockEscape(hidden, onClose, stackId)
 
   // 拖拽钳制（codex P2）：bounds="window" 允许 y=0，顶边必须不低于
   // AppBar 实测底边——拖拽中实时钳，提交时同一钳制。
@@ -177,6 +186,10 @@ export function AgentPanelDock({
           tabIndex={-1}
           elevation={8}
           className={styles.surface}
+          // 交互即置顶（#801 codex P1 栈序）：点击/拖拽/键盘进入都把自己
+          // 抬为栈顶，下一次 Esc 只关它。
+          onPointerDownCapture={raiseOnInteract}
+          onFocusCapture={raiseOnInteract}
           sx={{
             // 圆角规范（#796 验收反馈）：浮动 chrome 档 8px——Toast 同款，
             // 也是 chat/editor 等浮动表面的主取值；模态对话框档 4px

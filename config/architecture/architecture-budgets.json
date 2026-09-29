@@ -287,6 +287,7 @@
     "frontend/src/features/agentPanelDock/AgentPanelDock.tsx": 147,
     "frontend/src/features/agentPanelDock/dockPlacement.ts": 94,
     "frontend/src/features/agentPanelDock/dockPlacementStorage.ts": 46,
+    "frontend/src/features/agentPanelDock/dockStack.ts": 23,
     "frontend/src/features/agentPanelDock/useDockEscape.ts": 27,
     "frontend/src/features/agentPanelDock/useDockFocus.ts": 40,
     "frontend/src/features/agentPanelDock/useDockFocusRestore.ts": 56,

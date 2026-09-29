@@ -16,6 +16,7 @@ import {
   within,
   waitFor,
 } from '@testing-library/react'
+import { useState } from 'react'
 import type { ReactElement } from 'react'
 import { AgentPanelDock } from './AgentPanelDock'
 import { ArtifactPopover } from '../../components/artifact/ArtifactPopover'
@@ -140,5 +141,76 @@ describe('AgentPanelDock Esc 让位（#797 复审批次）', () => {
     // 组合结束后的 Esc 照常关闭（守卫不误伤正常路径）。
     fireEvent.keyDown(surface, { key: 'Escape', isComposing: false })
     expect(onDockClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('AgentPanelDock Esc 栈（#801 codex P1：同页多实例只关栈顶）', () => {
+  function renderTwoDocks() {
+    const closeA = vi.fn()
+    const closeB = vi.fn()
+    // onClose 走真实语义（卸载/隐藏出栈）：关闭的 Dock 不再占栈。
+    function TwoDocks() {
+      const [openA, setOpenA] = useState(true)
+      const [openB, setOpenB] = useState(true)
+      return (
+        <div>
+          {openA && (
+            <AgentPanelDock
+              surfaceKey="dock-a"
+              title="面板 A"
+              onClose={() => {
+                closeA()
+                setOpenA(false)
+              }}
+            >
+              <div>内容 A</div>
+            </AgentPanelDock>
+          )}
+          {openB && (
+            <AgentPanelDock
+              surfaceKey="dock-b"
+              title="面板 B"
+              onClose={() => {
+                closeB()
+                setOpenB(false)
+              }}
+            >
+              <div>内容 B</div>
+            </AgentPanelDock>
+          )}
+        </div>
+      )
+    }
+    render((<TwoDocks />) as ReactElement)
+    return { closeA, closeB }
+  }
+
+  it('Esc 只关栈顶（最后挂载的）；栈顶关闭后下一个成为栈顶', async () => {
+    // revert（无栈判定）：一次 Esc 两个 onClose 都触发，即红。
+    const { closeA, closeB } = renderTwoDocks()
+    await screen.findByRole('dialog', { name: '面板 A' })
+    await screen.findByRole('dialog', { name: '面板 B' })
+
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(closeB).toHaveBeenCalledTimes(1)
+    expect(closeA).not.toHaveBeenCalled()
+
+    // 栈顶（B）关闭后 A 成为栈顶，再 Esc 关它。
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(closeA).toHaveBeenCalledTimes(1)
+    expect(closeB).toHaveBeenCalledTimes(1)
+  })
+
+  it('交互（pointerdown/焦点进入）把 Dock 抬为栈顶', async () => {
+    const { closeA, closeB } = renderTwoDocks()
+    await screen.findByRole('dialog', { name: '面板 A' })
+    const surfaceA = await screen.findByRole('dialog', { name: '面板 A' })
+    await screen.findByRole('dialog', { name: '面板 B' })
+
+    // 点击 A 的内容区（B 是栈顶）→ A 置顶 → Esc 关 A 不关 B。
+    fireEvent.pointerDown(surfaceA)
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(closeA).toHaveBeenCalledTimes(1)
+    expect(closeB).not.toHaveBeenCalled()
   })
 })
