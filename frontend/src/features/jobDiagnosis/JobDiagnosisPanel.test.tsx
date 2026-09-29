@@ -289,6 +289,32 @@ describe('JobDiagnosisPanel', () => {
     )
   })
 
+  it('bootstrap 失败：chips 保持只读且创建错误如实呈现（#801 codex 轮 5 P2）', async () => {
+    // 历史会话存在 + create reject：starting 归 false 后历史会话保留——
+    // 解锁条件必须是「本次新建的会话已激活」，不能是 starting 回落
+    // （revert 回 configReadOnly={chat.starting}：chips 重新可编辑历史会话
+    // 且错误被 chat.session 非空隐藏，即红）。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    mockApi.createStudioChatSession.mockRejectedValue(new Error('gateway 503'))
+    renderPanel()
+    await screen.findByRole('group', { name: 'Agent 配置' })
+    await waitFor(
+      () => expect(mockApi.createStudioChatSession).toHaveBeenCalledTimes(1),
+      { timeout: 5000 }
+    )
+    // chips 保持禁用（历史会话不得被误改）。
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Agent 权限模式' })
+      ).toBeDisabled()
+    )
+    expect(screen.getByRole('button', { name: '模型' })).toBeDisabled()
+    // 创建失败如实呈现（带重试入口），不静默表现为「可编辑的旧会话」。
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('排查会话创建失败')
+    expect(alert).toHaveTextContent('gateway 503')
+  })
+
   it('inDock 换用无底尺寸的外壳类（#800 codex P2：Dock 里 320px min-height 会裁掉 composer）', async () => {
     // vitest 的 CSS modules 把类名解析为带 hash 的键名（_chatShellDock_xxx）
     // ——按子串断言变体切换（revert：inDock 也用 chatShell（带

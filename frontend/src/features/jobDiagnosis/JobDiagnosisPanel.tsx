@@ -30,10 +30,8 @@ type Props = {
  * → 宿主会话执行 rerunJob/runToJob）。外壳复用 AgentChatPanel 骨架（#695）。 */
 export function JobDiagnosisPanel({ workspaceId, target, inDock }: Props) {
   const queryClient = useQueryClient()
-  const { chat, bootstrapError, retryBootstrap } = useJobDiagnosis(
-    workspaceId,
-    target
-  )
+  const { chat, configLocked, bootstrapError, retryBootstrap } =
+    useJobDiagnosis(workspaceId, target)
   const [cardStates, setCardStates] = useState<Record<string, ActionCardState>>(
     {}
   )
@@ -101,9 +99,9 @@ export function JobDiagnosisPanel({ workspaceId, target, inDock }: Props) {
       // #795 收尾：chips 常驻所有 agent 对话界面——排查线也接执行配置芯片
       // （权限/模型/思考），无会话时的只读回落由 AgentChatPanel 继承（#796 R3）。
       showAgentConfig
-      // bootstrap 在途（新建排查会话未落地）：chips 展示的是会话记忆恢复的
-      // 历史会话——强制只读，否则变更打到历史会话 ID（#801 codex 轮 4 P2）。
-      configReadOnly={chat.starting}
+      // bootstrap 未绑定本次新建会话前（在途/失败），chips 展示的是会话记忆
+      // 恢复的历史会话——强制只读，否则变更打到历史会话 ID（#801 codex 轮 4/5）。
+      configReadOnly={configLocked}
       bootstrapError={
         bootstrapError
           ? {
