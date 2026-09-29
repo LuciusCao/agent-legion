@@ -29,9 +29,9 @@ import { Close, UnfoldLess } from '@mui/icons-material'
 import { Rnd } from 'react-rnd'
 import { useAppBarBottom } from '../../hooks/useAppBarBottom'
 import {
-  APP_BAR_FALLBACK_HEIGHT,
   clampResizeTopInset,
   effectiveMinSize,
+  readAppBarFallbackHeight,
 } from './dockPlacement'
 import { useDockGeometry } from './useDockGeometry'
 import { useDockFocus } from './useDockFocus'
@@ -57,22 +57,17 @@ export interface AgentPanelDockProps {
    * Rnd>Paper>内容树，切换 hidden 不会换元素类型导致子树重挂）。 */
   hidden?: boolean
   /** 焦点归还的指定目标选择器（#797 复审轮 4，如顶栏开关/头部入口按钮）
-   * ——首次关闭、无面板外 focusin 时的稳定恢复目标；归还链：面板外最后
-   * 聚焦元素 → 本选择器 → 挂载前元素。 */
+   * ——首次关闭、无面板外 focusin 时的稳定恢复目标；归还链：
+   * restoreFocusRef → 面板外最后聚焦元素 → 本选择器 → 挂载前元素。 */
   restoreFocusSelector?: string
   /** 顶边额外避让（#797 复审轮 6，如窄屏移动端页签导航高度）——叠加进
    * topInset：默认几何与拖拽钳制都吃它。 */
   topInsetExtra?: number
-}
-
-function readAppBarFallbackHeight(): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(
-    '--app-bar-height'
-  )
-  const parsed = Number.parseInt(raw, 10)
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : APP_BAR_FALLBACK_HEIGHT
+  /** 显式焦点归还目标（#800 codex P2）：调用方在唤起瞬间记录的触发元素
+   * ref，归还链最优先。key 重挂换目标时，旧实例的卸载清理会先把焦点还给
+   * 旧触发元素，若仍读挂载时的 document.activeElement 会把它错记成新归还
+   * 目标——显式 ref 让归还目标与唤起动作绑定，不吃卸载/挂载的交错顺序。 */
+  restoreFocusRef?: { readonly current: HTMLElement | null }
 }
 
 export function AgentPanelDock({
@@ -87,6 +82,7 @@ export function AgentPanelDock({
   hidden = false,
   restoreFocusSelector,
   topInsetExtra = 0,
+  restoreFocusRef,
 }: AgentPanelDockProps) {
   const appBarBottom = useAppBarBottom()
   const topInset =
@@ -109,7 +105,8 @@ export function AgentPanelDock({
   const { surfaceRef, chipRef } = useDockFocus(
     collapsed,
     hidden,
-    restoreFocusSelector
+    restoreFocusSelector,
+    restoreFocusRef
   )
 
   // Esc 折叠挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位

@@ -20,12 +20,15 @@ import styles from './JobDiagnosisPanel.module.css'
 type Props = {
   workspaceId: string
   target: JobDiagnosisTarget
+  /** Dock 宿主（#800 codex P2）：换用无固定 min-height 的外壳类——320px
+   * 是旧 MUI Dialog 宿主的底尺寸，Dock 里会顶住用户缩放、裁掉 composer。 */
+  inDock?: boolean
 }
 
 /** 排查对话面板（#329）：复用 Studio 对话的全部传输与渲染件，差别只在
  * 会话引导（自动绑定 job/node 上下文）与动作确认卡片（agent 建议 → 人确认
  * → 宿主会话执行 rerunJob/runToJob）。外壳复用 AgentChatPanel 骨架（#695）。 */
-export function JobDiagnosisPanel({ workspaceId, target }: Props) {
+export function JobDiagnosisPanel({ workspaceId, target, inDock }: Props) {
   const queryClient = useQueryClient()
   const { chat, bootstrapError, retryBootstrap } = useJobDiagnosis(
     workspaceId,
@@ -94,7 +97,7 @@ export function JobDiagnosisPanel({ workspaceId, target }: Props) {
     <AgentChatPanel
       chat={chat}
       workspaceId={workspaceId}
-      className={styles.chatShell}
+      className={inDock ? styles.chatShellDock : styles.chatShell}
       bootstrapError={
         bootstrapError
           ? {

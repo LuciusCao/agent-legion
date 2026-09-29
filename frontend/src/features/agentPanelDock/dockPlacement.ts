@@ -13,6 +13,17 @@ export interface DockGeometry {
 /** AppBar 声明 min-height 的兜底值（styles.css :root --app-bar-height 同源）。 */
 export const APP_BAR_FALLBACK_HEIGHT = 56
 
+/** 读 AppBar 声明高度（--app-bar-height），缺失/非法回退兜底值。 */
+export function readAppBarFallbackHeight(): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(
+    '--app-bar-height'
+  )
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : APP_BAR_FALLBACK_HEIGHT
+}
+
 const VIEWPORT_MARGIN = 16
 const MIN_VISIBLE = 80
 

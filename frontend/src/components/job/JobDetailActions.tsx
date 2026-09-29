@@ -25,6 +25,8 @@ export type JobDetailActionsProps = {
   onOpenArtifacts: () => void
   onUpgradeWorkflow?: (mode: UpgradeMode) => void | Promise<void>
   onOpenApproval?: () => void
+  /** 唤起排查 Dock（#795 PR③）：job detail 头部入口，job 级上下文。 */
+  onOpenDiagnosis?: () => void
 }
 
 export function JobDetailActions({
@@ -41,6 +43,7 @@ export function JobDetailActions({
   onOpenArtifacts,
   onUpgradeWorkflow,
   onOpenApproval,
+  onOpenDiagnosis,
 }: JobDetailActionsProps) {
   const [rerunOpen, setRerunOpen] = useState(false)
   const [runToOpen, setRunToOpen] = useState(false)
@@ -126,6 +129,15 @@ export function JobDetailActions({
         >
           <MaterialIcon name="folder_open" />
         </IconButton>
+        {onOpenDiagnosis && (
+          <IconButton
+            aria-label="排查助手"
+            title="排查助手（agent 对话，不限于出错节点）"
+            onClick={onOpenDiagnosis}
+          >
+            <MaterialIcon name="smart_toy" />
+          </IconButton>
+        )}
       </div>
 
       <JobRerunDialog

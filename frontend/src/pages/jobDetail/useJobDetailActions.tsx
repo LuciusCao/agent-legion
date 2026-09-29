@@ -17,6 +17,7 @@ type Options = {
   onDelete: () => void
   onOpenArtifacts: () => void
   onOpenApproval: () => void
+  onOpenDiagnosis?: () => void
 }
 
 /**
@@ -28,6 +29,9 @@ type Options = {
  * trigger is therefore `actionsSignature` — the current values (detail,
  * nodeCatalog, callbacks) are read through a ref snapshot so a fresh `detail`
  * reference with an unchanged signature never refires the effect.
+ * `job.id` 必须在 signature 里（#800 codex rebase 轮 P2）：切到其余维度
+ * 全同的另一个 job 时（同批创建、状态/节点数相同），不带 id 则操作栏不
+ * 重写，按钮回调仍是上一个 job 的闭包（排查 primer 带旧 jobId）。
  */
 export function useJobDetailActions(options: Options) {
   const { detail, actionLoading } = options
@@ -38,6 +42,7 @@ export function useJobDetailActions(options: Options) {
   })
   const actionsSignature = detail
     ? [
+        detail.job.id,
         detail.job.status,
         detail.job.updated_at,
         detail.job.completed_nodes,
@@ -69,6 +74,7 @@ export function useJobDetailActions(options: Options) {
         onDelete={snapshot.onDelete}
         onOpenArtifacts={snapshot.onOpenArtifacts}
         onOpenApproval={snapshot.onOpenApproval}
+        onOpenDiagnosis={snapshot.onOpenDiagnosis}
       />
     )
     return () => setDetailPageActions(null)

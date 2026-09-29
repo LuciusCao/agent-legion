@@ -349,4 +349,25 @@ describe('AgentPanelDock 焦点契约', () => {
     await waitFor(() => expect(document.activeElement).toBe(chip2))
     elsewhere.remove()
   })
+
+  it('restoreFocusRef 显式指定的归还目标优先于挂载时焦点（#800 codex P2）', async () => {
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    // 挂载时焦点在别处（模拟换目标重挂：旧实例清理刚把焦点还给旧触发
+    // 元素），但归还目标以调用方在唤起瞬间记录的 ref 为准（revert：焦点
+    // 落到挂载前的 other，即红）。
+    const designated = document.createElement('button')
+    const other = document.createElement('button')
+    document.body.append(designated, other)
+    const restoreFocusRef = { current: designated }
+    other.focus()
+
+    const { unmount } = renderDock({ restoreFocusRef })
+    await screen.findByRole('dialog', { name: '测试面板' })
+
+    unmount()
+    expect(document.activeElement).toBe(designated)
+    designated.remove()
+    other.remove()
+  })
 })

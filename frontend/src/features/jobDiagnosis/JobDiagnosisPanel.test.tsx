@@ -152,6 +152,33 @@ describe('JobDiagnosisPanel', () => {
     expect(mockApi.sendStudioChatMessage).toHaveBeenCalledTimes(1)
   })
 
+  it('inDock 换用无底尺寸的外壳类（#800 codex P2：Dock 里 320px min-height 会裁掉 composer）', async () => {
+    // vitest 的 CSS modules 把类名解析为带 hash 的键名（_chatShellDock_xxx）
+    // ——按子串断言变体切换（revert：inDock 也用 chatShell（带
+    // min-height:320），即红）。
+    const view = render(
+      <JobDiagnosisPanel workspaceId="ws1" target={TARGET} inDock />,
+      { wrapper }
+    )
+    await waitFor(() =>
+      expect(mockApi.createStudioChatSession).toHaveBeenCalled()
+    )
+    const shell = view.container.querySelector('[class*="chatShell"]')
+    expect(shell).not.toBeNull()
+    expect(shell!.className).toContain('chatShellDock')
+
+    // 旧 Dialog 宿主（默认 inDock=false）保持 320 底尺寸的 chatShell 不变。
+    const dialogView = renderPanel()
+    await waitFor(() =>
+      expect(mockApi.createStudioChatSession).toHaveBeenCalledTimes(2)
+    )
+    const dialogShell = dialogView.container.querySelector(
+      '[class*="chatShell"]'
+    )
+    expect(dialogShell!.className).toContain('chatShell')
+    expect(dialogShell!.className).not.toContain('chatShellDock')
+  })
+
   it('renders the suggested action as a confirm card and executes on confirm', async () => {
     await renderReadyPanel()
     const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
