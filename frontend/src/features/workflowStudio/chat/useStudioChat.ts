@@ -113,9 +113,7 @@ export function useStudioChat(workspaceId: string | undefined) {
     let stale = false
     setMessages([])
     // 新建会话后 hook 已持有 snapshot（id 相同），不要被清空闪断。
-    setSession((previous) =>
-      previous && previous.id === activeSessionId ? previous : null
-    )
+    setSession((p) => (p && p.id === activeSessionId ? p : null))
     setActionError(null)
     void fetchStudioChatMessages(workspaceId, activeSessionId).then(
       (fetched) => {
@@ -190,7 +188,10 @@ export function useStudioChat(workspaceId: string | undefined) {
     }
   }
 
-  async function startSession(agentId: string) {
+  // 返回本次创建的成败（#801 codex 轮 7 根因方案）：useJobDiagnosis 的
+  // 失败闩锁只采信本次尝试的失败——无关的历史加载错误（恢复会话的消息
+  // 拉取失败）不采。
+  async function startSession(agentId: string): Promise<boolean | undefined> {
     if (!workspaceId || starting) return
     setStarting(true)
     try {
@@ -208,10 +209,12 @@ export function useStudioChat(workspaceId: string | undefined) {
       if (workspaceIdRef.current !== workspaceId) return
       setSession(created)
       setActiveSessionId(created.id)
+      return true
     } catch (error) {
       // 迟到失败同样不落：错误只对发起时的 workspace 可见。
       if (workspaceIdRef.current === workspaceId)
         setActionError(error instanceof Error ? error.message : '操作失败')
+      return false
     } finally {
       if (workspaceIdRef.current === workspaceId) setStarting(false)
     }

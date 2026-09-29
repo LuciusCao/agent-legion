@@ -371,6 +371,48 @@ describe('JobDiagnosisPanel', () => {
     )
   })
 
+  it('历史消息加载错误不被闩锁为创建失败（#801 codex 轮 7 根因方案）', async () => {
+    // 恢复的历史会话消息拉取失败（暂存 actionError），新会话创建成功——
+    // 闩锁只采信 startSession 返回值标记的本次失败（revert 回「见
+    // actionError 即闩」：新会话永久 configLocked、primer 不发，即红）。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    mockApi.fetchStudioChatMessages.mockRejectedValue(
+      new Error('历史消息加载失败')
+    )
+    const newSession = {
+      ...configRecord(),
+      id: 's-new',
+    } as StudioChatSessionRecord
+    let resolveCreate: (session: StudioChatSessionRecord) => void = () => {}
+    mockApi.createStudioChatSession.mockImplementation(
+      () =>
+        new Promise<StudioChatSessionRecord>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    renderPanel()
+    // 无关错误先到（创建仍在途）：恢复的历史会话消息拉取失败暂存
+    // actionError——这正是评论描述的「创建期间失败」帧。
+    await screen.findByText(/消息加载失败/)
+    await act(async () => {
+      resolveCreate(newSession)
+    })
+
+    // 创建成功：primer 发出、chips 解锁、无引导失败条。
+    await waitFor(
+      () => expect(mockApi.sendStudioChatMessage).toHaveBeenCalled(),
+      { timeout: 5000 }
+    )
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole('button', { name: 'Agent 权限模式' })
+        ).toBeEnabled(),
+      { timeout: 5000 }
+    )
+    expect(screen.queryByText(/排查会话创建失败/)).toBeNull()
+  })
+
   it('inDock 换用无底尺寸的外壳类（#800 codex P2：Dock 里 320px min-height 会裁掉 composer）', async () => {
     // vitest 的 CSS modules 把类名解析为带 hash 的键名（_chatShellDock_xxx）
     // ——按子串断言变体切换（revert：inDock 也用 chatShell（带
