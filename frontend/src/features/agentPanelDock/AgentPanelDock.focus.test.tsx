@@ -258,6 +258,60 @@ describe('AgentPanelDock 焦点契约', () => {
     )
   })
 
+  it('codex 轮 9 P2（#797）：归还目标变禁用（disabled）时落到指定选择器兜底，不还给不可聚焦元素', async () => {
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    // 真实场景：「面板外最后聚焦」的按钮（如发布按钮）在 Dock 打开期间变
+    // 为禁用态——isConnected/可见性都还是 true，focus() 静默失败、焦点落
+    // body，且旧链不继续尝试指定选择器。修复后禁用目标被排除 + focus 后
+    // 验证双保险（revert：焦点还给 disabled 按钮或落 body，即红）。
+    function Scenario({ hidden }: { hidden: boolean }) {
+      return (
+        <div>
+          <button type="button" data-testid="publish-button">
+            发布
+          </button>
+          <button type="button" data-testid="dock-trigger">
+            顶栏开关
+          </button>
+          <AgentPanelDock
+            surfaceKey="test-surface"
+            title="测试面板"
+            onClose={() => undefined}
+            hidden={hidden}
+            restoreFocusSelector='[data-testid="dock-trigger"]'
+          >
+            <input data-testid="dock-input" defaultValue="" />
+          </AgentPanelDock>
+        </div>
+      )
+    }
+    const { rerender } = render((<Scenario hidden={false} />) as ReactElement)
+    await screen.findByRole('dialog', { name: '测试面板' })
+    const publish = screen.getByTestId('publish-button') as HTMLButtonElement
+    publish.focus()
+    screen.getByTestId('dock-input').focus()
+
+    // Dock 打开期间目标变禁用。
+    publish.disabled = true
+
+    rerender((<Scenario hidden />) as ReactElement)
+    // 焦点落到指定选择器（顶栏开关），不是 disabled 按钮、不是 body。
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId('dock-trigger'))
+    )
+
+    // 正路径不误判：目标恢复可用后，归还链仍优先还给它（focus 后验证
+    // 不排斥正常目标）。
+    rerender((<Scenario hidden={false} />) as ReactElement)
+    await screen.findByRole('dialog', { name: '测试面板' })
+    publish.disabled = false
+    publish.focus()
+    screen.getByTestId('dock-input').focus()
+    rerender((<Scenario hidden />) as ReactElement)
+    await waitFor(() => expect(document.activeElement).toBe(publish))
+  })
+
   it('复审批次 P3：记忆 collapsed=true 首挂不抢焦点（与 hidden 首挂守卫同思路）', async () => {
     expectConsoleWarning(/not wrapped in act/)
     expectConsoleError(/not wrapped in act/)

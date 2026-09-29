@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { RefCallback } from 'react'
-import { focusIfConnected, useDockFocusRestore } from './useDockFocusRestore'
+import { useDockFocusRestore } from './useDockFocusRestore'
 import { useNodeRef } from './useNodeRef'
 
 export interface DockFocus {
@@ -29,7 +29,7 @@ export function useDockFocus(
   const [chipNode, setChipNode] = useState<HTMLButtonElement | null>(null)
   const surfaceRef = useNodeRef(setSurfaceNode)
   const chipRef = useNodeRef(setChipNode)
-  const { restoreTarget } = useDockFocusRestore(
+  const { restoreFocus } = useDockFocusRestore(
     restoreFocusSelector,
     surfaceNode,
     chipNode
@@ -46,7 +46,7 @@ export function useDockFocus(
 
   useEffect(() => {
     if (hidden) {
-      if (wasVisibleRef.current) focusIfConnected(restoreTarget())
+      if (wasVisibleRef.current) restoreFocus()
       return
     }
     wasVisibleRef.current = true
@@ -54,7 +54,7 @@ export function useDockFocus(
     if (collapsed && initialCollapsedRef.current) return
     const node = collapsed ? chipNode : surfaceNode
     node?.focus({ preventScroll: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restoreTarget 读 ref/现查 DOM，不依赖其函数身份
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restoreFocus 读 ref/现查 DOM，不依赖其函数身份
   }, [collapsed, hidden, surfaceNode, chipNode])
 
   return { surfaceRef, chipRef }
