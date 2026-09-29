@@ -253,10 +253,18 @@ describe('JobDiagnosisPanel', () => {
     await act(async () => {
       resolveCreate(newSession)
     })
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Agent 权限模式' })
-      ).toBeEnabled()
+    // 激活信号锚定 primer（新会话落地且 idle 才发）——CI 并行调度下
+    // create 之后的链路刷新可能慢，1s 默认超时不够，放宽到 5s。
+    await waitFor(
+      () => expect(mockApi.sendStudioChatMessage).toHaveBeenCalled(),
+      { timeout: 5000 }
+    )
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole('button', { name: 'Agent 权限模式' })
+        ).toBeEnabled(),
+      { timeout: 5000 }
     )
 
     // 变更打到新建会话 ID，不是历史会话。
