@@ -317,7 +317,6 @@ export function useStudioChat(workspaceId: string | undefined) {
   )
 
   const busy = session ? isStudioChatBusy(session.status) : false
-  const closed = session?.status === 'closed' || session?.status === 'error'
 
   return {
     agents: agentsQuery.data ?? [],
@@ -333,9 +332,13 @@ export function useStudioChat(workspaceId: string | undefined) {
     nodeDrafts,
     permissions,
     busy,
-    closed,
+    closed: session?.status === 'closed' || session?.status === 'error',
     starting,
+    // clearActionError（#801 codex 轮 6 P2）：排查引导重试前清上一次创建
+    // 失败残留——否则重试成功帧上旧错误会被 useJobDiagnosis 的失败闩锁误采。
+    // 会话级清理口，不引入全局语义。
     actionError,
+    clearActionError: () => setActionError(null),
     lastRunMs: runTiming.lastMs,
     lastTerminalEvent: terminalEvent,
     lastRunCancelled: runCancelled,

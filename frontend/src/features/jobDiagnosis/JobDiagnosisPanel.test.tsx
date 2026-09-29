@@ -315,6 +315,62 @@ describe('JobDiagnosisPanel', () => {
     expect(alert).toHaveTextContent('gateway 503')
   })
 
+  it('引导失败后重试成功：解锁、primer 发送、错误清除（#801 codex 轮 6 P2）', async () => {
+    // 首次 create reject、重试 resolve：重试必须清掉上一次的 actionError
+    // 残留——否则重试成功帧上旧错误被失败闩锁误采，新会话永久锁定、primer
+    // 不发（revert 掉 clearActionError 调用即红）。
+    // 时序构造（让残留活到重试落定帧）：agents 列表挂起让恢复先选中历史
+    // 会话，失败帧无会话切换（不触发消息加载 effect 的清错），旧错误活到
+    // 重试成功帧。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    let resolveAgents: (
+      agents: { id: string; label: string }[]
+    ) => void = () => {}
+    mockApi.fetchStudioChatAgents.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAgents = resolve
+        })
+    )
+    const newSession = {
+      ...configRecord(),
+      id: 's-new',
+    } as StudioChatSessionRecord
+    mockApi.createStudioChatSession
+      .mockRejectedValueOnce(new Error('gateway 503'))
+      .mockResolvedValue(newSession)
+    renderPanel()
+    // 恢复先落地：历史会话被选中。
+    await screen.findByRole('group', { name: 'Agent 配置' })
+
+    // agents 到达 → boot 发起 → 首次 create reject。引导失败条与底层
+    // actionError 条都是 role=alert——按文案锚定引导失败条（后者会先出现）。
+    await act(async () => {
+      resolveAgents([{ id: 'kimi', label: 'Kimi Code' }])
+    })
+    await screen.findByText(/排查会话创建失败：gateway 503/)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    })
+    // 重试成功：primer 发出（新会话激活且 idle 的信号）→ chips 解锁 →
+    // 错误条消失。
+    await waitFor(
+      () => expect(mockApi.sendStudioChatMessage).toHaveBeenCalled(),
+      { timeout: 5000 }
+    )
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole('button', { name: 'Agent 权限模式' })
+        ).toBeEnabled(),
+      { timeout: 5000 }
+    )
+    await waitFor(() =>
+      expect(screen.queryByText(/排查会话创建失败|gateway 503/)).toBeNull()
+    )
+  })
+
   it('inDock 换用无底尺寸的外壳类（#800 codex P2：Dock 里 320px min-height 会裁掉 composer）', async () => {
     // vitest 的 CSS modules 把类名解析为带 hash 的键名（_chatShellDock_xxx）
     // ——按子串断言变体切换（revert：inDock 也用 chatShell（带

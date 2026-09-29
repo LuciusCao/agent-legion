@@ -54,10 +54,10 @@ export function useJobDiagnosis(
   useEffect(() => {
     if (!agentsReady || chat.agents.length === 0 || bootedRef.current) return
     bootedRef.current = true
+    // startSession 内部不 reject，.then 即落定。
     void chat
       .startSession(chat.agents[0].id)
       .then(() => setAttemptSettled(true))
-      .catch(() => setAttemptSettled(true)) // startSession 内部不 reject，防御
   }, [agentsReady, chat.agents, chat])
 
   // 引导失败闩锁（放在捕获 effect 之前，同帧先生效）：恢复回填的会话切换
@@ -117,6 +117,10 @@ export function useJobDiagnosis(
     bootstrapError:
       bootstrapFailure ?? (chat.session ? null : chat.actionError),
     retryBootstrap: () => {
+      // 先清底层 actionError（#801 codex 轮 6 P2）：上一次创建失败的残留若
+      // 不清，重试成功帧上它仍在，失败闩锁会误采——闩锁不解则新会话永久
+      // configLocked、primer 不发。
+      chat.clearActionError()
       bootedRef.current = false
       createdSessionRef.current = null
       primedSessionRef.current = null
