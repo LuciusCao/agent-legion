@@ -220,8 +220,11 @@ export function WorkflowStudioSharedMaterialsButton() {
           size="small"
           aria-label="Skill 共享材料"
           onClick={() => setOpen(true)}
+          sx={{ borderRadius: '8px', gap: '4px', padding: '4px 8px' }}
         >
           <FolderSharedOutlined fontSize="small" />
+          {/* #799 精修：右岛图标+文字并排；窄屏由岛 CSS 隐藏文字只留图标 */}
+          <span className="studio-island-text">共享素材</span>
         </IconButton>
       </Tooltip>
       {open && workspaceId && (

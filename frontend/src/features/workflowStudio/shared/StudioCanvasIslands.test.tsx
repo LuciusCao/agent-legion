@@ -75,28 +75,35 @@ describe('StudioCanvasIslands（#799：去 AppBar 画布化的双浮岛）', () 
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1')
   })
 
-  it('左岛生命周期动作：校验/发布/重置移入指挥中心岛（#799 重组）', () => {
+  it('左岛生命周期动作：校验图标按钮 + 发布主按钮 + ⋮ 溢出菜单（重置收进）', () => {
     renderIslands()
     const island = screen.getByTestId('studio-identity-island')
-    expect(island).toHaveTextContent('校验')
+    // 校验收成图标按钮（aria-label + tooltip 承载文案，不占文字位）。
+    expect(
+      within(island).getByRole('button', { name: '校验' })
+    ).toBeInTheDocument()
+    // 发布保持 contained 文字主按钮。
     expect(island).toHaveTextContent('发布新版本')
-    expect(island).toHaveTextContent('重置')
+    // 重置收进 ⋮ 溢出菜单（低频破坏性动作）。
+    expect(
+      within(island).getByRole('button', { name: '更多操作' })
+    ).toBeInTheDocument()
+    expect(within(island).queryByText('重置')).toBeNull()
     // 分隔线在位（身份/版本族与动作族之间）。
     expect(island.querySelector('[class*="divider"]')).not.toBeNull()
   })
 
-  it('右岛收成纯图标组：Agent 开关 + 共享素材，无文字按钮、无用量入口', () => {
+  it('右岛图标+文字并排：Agent 助手 + 共享素材；无文字按钮、无用量入口', () => {
     renderIslands()
     const island = screen.getByTestId('studio-action-island')
     expect(
       within(island).getByRole('button', { name: 'toggle agent panel' })
-    ).toBeInTheDocument()
+    ).toHaveTextContent('Agent 助手')
     expect(
       within(island).getByRole('button', { name: 'Skill 共享材料' })
-    ).toBeInTheDocument()
-    // 纯图标组：无文字按钮。
+    ).toHaveTextContent('共享素材')
+    // 无文字动作按钮（生命周期动作在左岛）、无用量入口。
     expect(within(island).queryByRole('button', { name: '校验' })).toBeNull()
-    // 用量入口移除（实例级遥测，与 workflow 编辑无语义关系）。
     expect(screen.queryByRole('button', { name: 'Token 使用分析' })).toBeNull()
   })
 

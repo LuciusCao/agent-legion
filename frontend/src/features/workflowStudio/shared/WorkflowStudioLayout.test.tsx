@@ -174,6 +174,23 @@ describe('WorkflowStudioLayout', () => {
     expect(within(mobileNav).getByRole('tab', { name: 'Agent' })).toBeEnabled()
   })
 
+  it('加载/失败态也有返回入口（#799 codex 复核 P2：AppBar 已移除，双岛不挂时最小返回岛常驻）', () => {
+    renderLayout({ ...baseProps, loadState: 'loading' as const })
+    expect(screen.getByText('正在加载 workflow')).toBeInTheDocument()
+    // 返回小岛在加载态可用（双岛不渲染）。
+    expect(screen.queryByTestId('studio-identity-island')).toBeNull()
+    expect(screen.getByTestId('studio-back-island')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument()
+  })
+
+  it('失败态同样挂返回小岛', () => {
+    renderLayout({ ...baseProps, loadState: 'error' as const })
+    expect(
+      screen.getByText('无法加载 active workflow revision')
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('studio-back-island')).toBeInTheDocument()
+  })
+
   it('renders the empty-state guidance and the workspace editor in empty mode', () => {
     renderLayout({
       ...baseProps,

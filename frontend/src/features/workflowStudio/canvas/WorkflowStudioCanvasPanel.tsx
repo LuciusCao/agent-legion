@@ -1,7 +1,9 @@
+import { useRef } from 'react'
 import { WorkflowStudioCanvasBody } from './WorkflowStudioCanvasBody'
 import { WorkflowStudioCanvasSourceBadge } from './WorkflowStudioCanvasSourceBadge'
 import { WorkflowStudioCanvasToolbar } from './WorkflowStudioCanvasToolbar'
 import { useStudioView } from '../shared/studioStateContext'
+import { useCanvasIslandOffset } from '../shared/useCanvasIslandOffset'
 import canvasStyles from '../../../pages/WorkflowStudioPageCanvas.module.css'
 import canvasToolbarStyles from '../../../pages/WorkflowStudioPageCanvasToolbar.module.css'
 import pageStyles from '../../../pages/WorkflowStudioPageResponsive.module.css'
@@ -13,9 +15,12 @@ type Props = {
 
 /** 画布区（DAG 常驻，工具栏含编辑 YAML / DAG 全屏；Agent 面板开关在
  * appbar，#668）。#795 PR②：Agent 对话迁入 Dock 浮层后画布不再被替换——
- * 节点详情固定占右栏，画布始终在位。 */
+ * 节点详情固定占右栏，画布始终在位。#799：顶边让位按浮动岛实测底边
+ * （useCanvasIslandOffset），不写死常量。 */
 export function WorkflowStudioCanvasPanel({ mobileActive }: Props) {
   const view = useStudioView()
+  const canvasRef = useRef<HTMLElement | null>(null)
+  const toolbarTop = useCanvasIslandOffset(canvasRef)
   const className = [
     canvasStyles.canvas,
     splitStyles.colLeft,
@@ -24,8 +29,12 @@ export function WorkflowStudioCanvasPanel({ mobileActive }: Props) {
     .filter(Boolean)
     .join(' ')
   return (
-    <main className={className} data-mobile-panel="graph">
-      <div data-canvas-toolbar className={canvasToolbarStyles.canvasToolbar}>
+    <main ref={canvasRef} className={className} data-mobile-panel="graph">
+      <div
+        data-canvas-toolbar
+        className={canvasToolbarStyles.canvasToolbar}
+        style={{ top: toolbarTop }}
+      >
         <WorkflowStudioCanvasSourceBadge />
         <WorkflowStudioCanvasToolbar
           onEditYaml={() => view.setYamlEditorOpen(true)}

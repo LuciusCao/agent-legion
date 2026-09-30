@@ -75,4 +75,40 @@ describe('WorkflowStudioCanvasPanel', () => {
       screen.getByText('尚未发布 workflow，暂无 DAG 可展示。')
     ).toBeInTheDocument()
   })
+
+  it('工具栏按浮动岛实测底边让位（#799 codex 复核 P2：不写死 top 常量）', () => {
+    // 无岛（jsdom 布局恒 0）→ 回落安全距离 64。
+    const { unmount } = render(
+      withStudioProviders(
+        baseStudio,
+        makeStudioView(),
+        <WorkflowStudioCanvasPanel mobileActive />
+      )
+    )
+    expect(
+      (document.querySelector('[data-canvas-toolbar]') as HTMLElement).style.top
+    ).toBe('64px')
+    unmount()
+
+    // 假岛（底边 120）：工具栏 top = 120 + 8。
+    const fakeIsland = document.createElement('div')
+    fakeIsland.setAttribute('data-testid', 'studio-identity-island')
+    fakeIsland.getBoundingClientRect = () => ({ bottom: 120 }) as DOMRect
+    document.body.appendChild(fakeIsland)
+    try {
+      render(
+        withStudioProviders(
+          baseStudio,
+          makeStudioView(),
+          <WorkflowStudioCanvasPanel mobileActive />
+        )
+      )
+      expect(
+        (document.querySelector('[data-canvas-toolbar]') as HTMLElement).style
+          .top
+      ).toBe('128px')
+    } finally {
+      fakeIsland.remove()
+    }
+  })
 })

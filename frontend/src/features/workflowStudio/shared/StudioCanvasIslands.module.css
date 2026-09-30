@@ -63,9 +63,16 @@
   background: var(--color-border, #e0e0e0);
 }
 
+/* 右岛图标 + 文字并排（全局类——岛子组件的 span 引用，CSS modules 不哈希） */
+.island :global(.studio-island-text) {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 /* 窄屏紧凑形态（≤900px，页签导航在场）：左岛只留返回 + 版本选择器 +
- * contained 主按钮——secondary 件（标题/模式文本/状态 chip/保存控件）与
- * outlined 次级按钮（校验/重置，只读态「返回」）隐藏降级。右岛图标组保持。 */
+ * contained 主按钮——secondary 件（标题/模式文本/状态 chip/保存控件）隐藏
+ * 降级；校验图标按钮窄屏隐藏（低频，重置仍可经 ⋮ 菜单到达；只读态的
+ * outlined「返回」同样隐藏）。右岛图标组保持、文字省略。 */
 @media (max-width: 900px) {
   .island {
     padding: 4px 6px;
@@ -76,7 +83,12 @@
     display: none;
   }
 
-  .actionsGroup :global(.MuiButton-outlined) {
+  .actionsGroup :global(.MuiButton-outlined),
+  .actionsGroup :global([aria-label='校验']) {
+    display: none;
+  }
+
+  .island :global(.studio-island-text) {
     display: none;
   }
 

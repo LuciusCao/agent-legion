@@ -54,10 +54,11 @@ export function StudioCanvasIslands() {
   return (
     <>
       {/* 左岛 = workflow 指挥中心：身份/版本/草稿状态/变更摘要 + 分隔线 +
-          生命周期动作（校验/发布新版本/重置；只读态 返回/设为草稿）。
-          发布保持 contained 主按钮外露。窄屏降级：CSS 隐藏 secondary 件
-          （标题/modeText/状态 chip/保存控件）与 outlined 按钮，只留返回 +
-          版本选择器 + contained 主按钮。 */}
+          生命周期动作（校验图标按钮/发布新版本/重置收 ⋮ 菜单；只读态
+          返回/设为草稿）。发布保持 contained 主按钮外露。窄屏降级：CSS
+          隐藏 secondary 件（标题/modeText/状态 chip/保存控件）+ 校验图标
+          与只读态 outlined 按钮，只留返回 + 版本选择器 + contained 主按钮
+          + ⋮ 菜单。 */}
       <div
         className={`${styles.island} ${styles.identity}`}
         style={{ top: islandTop }}

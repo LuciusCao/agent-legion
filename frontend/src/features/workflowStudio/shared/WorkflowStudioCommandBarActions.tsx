@@ -1,4 +1,6 @@
-import { Button } from '@mui/material'
+import { Button, IconButton, Tooltip } from '@mui/material'
+import { MaterialIcon } from '../../../components/MaterialIcon'
+import { WorkflowStudioActionsOverflowMenu } from './WorkflowStudioActionsOverflowMenu'
 
 type Props = {
   readOnly: boolean
@@ -14,38 +16,58 @@ type Props = {
   useViewedRevisionAsDraft: () => void
 }
 
-type Action = [string, 'outlined' | 'contained', boolean, () => void]
-
+/** 指挥中心岛的生命周期动作组（#799 重组精修）：校验收成图标按钮 +
+ * tooltip、发布保持 contained 文字主按钮、重置收进 ⋮ 溢出菜单（低频
+ * 破坏性动作，PreviewGovernanceMenu 同款模式）；只读态（返回/设为草稿）
+ * 保持文字按钮不动。 */
 export function WorkflowStudioCommandBarActions(props: Props) {
   const idle = props.actionState === 'idle'
-  const actions: Action[] = props.readOnly
-    ? [
-        ['返回', 'outlined', !idle, props.backToDraft],
-        ['设为草稿', 'contained', !idle, props.useViewedRevisionAsDraft],
-      ]
-    : [
-        ['校验', 'outlined', !props.canSubmit || !idle, props.onValidate],
-        [
-          props.createsRevision === false ? '保存运行配置' : '发布新版本',
-          'contained',
-          !props.canPublish || !idle,
-          props.onPublish,
-        ],
-        ['重置', 'outlined', !props.dirty || !idle, props.onReset],
-      ]
+
+  if (props.readOnly) {
+    const textBtn = (
+      label: string,
+      variant: 'outlined' | 'contained',
+      onClick: () => void
+    ) => (
+      <Button size="small" variant={variant} disabled={!idle} onClick={onClick}>
+        {label}
+      </Button>
+    )
+    return (
+      <>
+        {textBtn('返回', 'outlined', props.backToDraft)}
+        {textBtn('设为草稿', 'contained', props.useViewedRevisionAsDraft)}
+      </>
+    )
+  }
+
   return (
     <>
-      {actions.map(([label, variant, disabled, onClick]) => (
-        <Button
-          key={label}
-          size="small"
-          variant={variant}
-          disabled={disabled}
-          onClick={onClick}
-        >
-          {label}
-        </Button>
-      ))}
+      <Tooltip title="校验">
+        {/* disabled 时 Tooltip 需要 wrapper span（MUI 约定，否则告警） */}
+        <span>
+          <IconButton
+            size="small"
+            aria-label="校验"
+            disabled={!props.canSubmit || !idle}
+            onClick={props.onValidate}
+          >
+            <MaterialIcon name="checklist" fontSize="small" />
+          </IconButton>
+        </span>
+      </Tooltip>
+      <Button
+        size="small"
+        variant="contained"
+        disabled={!props.canPublish || !idle}
+        onClick={props.onPublish}
+      >
+        {props.createsRevision === false ? '保存运行配置' : '发布新版本'}
+      </Button>
+      <WorkflowStudioActionsOverflowMenu
+        disabled={!props.dirty || !idle}
+        onReset={props.onReset}
+      />
     </>
   )
 }

@@ -216,10 +216,15 @@ describe('WorkflowStudioPage', () => {
     expect(identity).toHaveTextContent('题目审题 / 编辑工作流')
     expect(identity).not.toHaveTextContent('知识视频 DAG')
     expect(identity).toHaveTextContent('v1')
-    // #799 重组：生命周期动作在左岛（指挥中心），右岛为纯图标组。
-    expect(identity).toHaveTextContent('校验')
+    // #799 重组精修：生命周期动作在左岛（校验=图标按钮、发布=contained
+    // 主按钮、重置收 ⋮ 菜单），右岛为图标+文字组。
     expect(identity).toHaveTextContent('发布')
-    expect(identity).toHaveTextContent('重置')
+    expect(
+      within(identity).getByRole('button', { name: '校验' })
+    ).toBeInTheDocument()
+    expect(
+      within(identity).getByRole('button', { name: '更多操作' })
+    ).toBeInTheDocument()
     expect(actions).not.toHaveTextContent('校验')
     // 用量入口从 studio 拿掉（实例级遥测，其他页面全局顶栏已有）。
     expect(
@@ -305,7 +310,9 @@ describe('WorkflowStudioPage', () => {
 
     expect(within(identityIsland()).getByText(/未发布变更/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '重置' }))
+    // 重置收进 ⋮ 溢出菜单（#799 精修）。
+    await user.click(screen.getByRole('button', { name: '更多操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '重置' }))
 
     expect(within(identityIsland()).getByText(/已同步/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))

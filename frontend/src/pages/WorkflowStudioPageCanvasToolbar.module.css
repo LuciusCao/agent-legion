@@ -1,6 +1,8 @@
 .canvasToolbar {
   position: absolute;
-  top: 64px; /* #799：让开右上操作岛（岛带高约 52px） */
+  /* top 由 WorkflowStudioCanvasPanel 按浮动岛实测底边下发（inline style，
+   * useCanvasIslandOffset，#799 codex 复核 P2：不写死常量，岛换行/变高
+   * 时自动让位）。 */
   right: 12px;
   z-index: 2;
 }
