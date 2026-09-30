@@ -61,7 +61,12 @@ export function WorkflowStudioCommandBarActions(props: Props) {
           size="small"
           variant="outlined"
           disabled={props.publishing}
-          onClick={props.onReset}
+          onClick={() => {
+            // 轮 6 H5：重置是破坏性操作（丢弃未发布变更），宽屏外露按钮与
+            // 窄屏菜单项同款确认。
+            if (window.confirm('丢弃当前草稿的未发布变更，重置为已发布版本？'))
+              props.onReset()
+          }}
         >
           重置
         </Button>

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useStudioState } from '../shared/studioStateContext'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
@@ -86,6 +86,23 @@ describe('WorkflowStudioCanvasSourceBadge', () => {
     expect(
       screen.getByText('草稿 YAML 未完成解析，画布暂显示已发布版本')
     ).toBeInTheDocument()
+  })
+
+  it('轮 6 H4：compare 传输失败出「草稿对比失败」警示 chip，点击重试', () => {
+    const retryCompare = vi.fn()
+    vi.mocked(useStudioState).mockReturnValue({
+      viewMode: 'draft',
+      definitionYaml: 'key: demo\nnodes:\n  a:\n    capability: cap_a\n',
+      dirty: true,
+      compareSummary: null,
+      compareState: 'error',
+      retryCompare,
+    } as unknown as ReturnType<typeof useStudioState>)
+
+    render(<WorkflowStudioCanvasSourceBadge />)
+
+    fireEvent.click(screen.getByText('草稿对比失败'))
+    expect(retryCompare).toHaveBeenCalledOnce()
   })
 
   it('renders nothing in revision mode (the 只读 vN chip already covers it)', () => {

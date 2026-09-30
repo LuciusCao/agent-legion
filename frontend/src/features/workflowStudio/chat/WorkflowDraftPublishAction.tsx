@@ -20,6 +20,11 @@ function publishDisabledReason(studio: StudioState): string | null {
   if (studio.compareState === 'loading') {
     return '正在与 active revision 对比，请稍候'
   }
+  // 轮 6 H4：compare 传输失败要给出真实原因（否则落到「没有可发布的
+  // 变更」是误导——实际上是对比没跑成）。
+  if (studio.compareState === 'error') {
+    return '草稿对比失败，请在画布上的警示处重试'
+  }
   const hasBlockingError = (studio.compareErrors ?? []).some(
     (error) => error.category === 'yaml' || error.category === 'schema'
   )
@@ -35,6 +40,8 @@ function publishDisabledReason(studio: StudioState): string | null {
       summary.riskFlags.length)
   )
   if (!hasChanges) return '与 active revision 没有可发布的变更'
+  // 轮 6 H2：冲突未解决禁发布（canPublish 已含此门控）。
+  if (studio.draftSave?.conflict) return '草稿存在冲突，请先解决冲突再发布'
   // codex 轮 3 P2：canPublish 已绑定「当前 YAML 校验通过」（自动校验驱动），
   // 未通过时给出校验侧原因而不是笼统的不可提交。
   if (studio.validationMessage?.startsWith('校验失败'))

@@ -25,6 +25,7 @@ import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
 import { WorkflowStudioDraftSaveControlContainer } from './WorkflowStudioDraftSaveControl'
 import { WorkflowStudioSharedMaterialsButton } from './WorkflowStudioSharedMaterialsDrawer'
+import { studioPublishTooltip } from './studioIslandPublishTooltip'
 import { WorkflowStudioStatusChip } from './WorkflowStudioStatusChip'
 import { useIslandExclusiveWidth } from './useIslandExclusiveWidth'
 import styles from './StudioCanvasIslands.module.css'
@@ -46,19 +47,14 @@ export function StudioCanvasIslands() {
   // panel display:none），顶边无需让位页签导航（画布本就在它下方）。
   const islandTop = 12
   const validationMessage = studio.validationMessage ?? ''
-  // codex 轮 3 P2：发布要求当前 YAML 明确校验通过（canPublish 已含此门
-  // 控）；dirty 时给禁用原因 tooltip——轮 4 P1-1 起区分结构失败（内容
-  // 问题，修复后重发）与传输失败（校验服务不可用，自动重试已耗尽时
-  // 再次编辑即重新触发）。
-  const publishTooltip = !studio.dirty
-    ? undefined
-    : validationMessage === '校验失败'
-      ? '校验失败，请修复后重新发布'
-      : validationMessage.startsWith('校验失败')
-        ? '校验服务暂不可用，稍后编辑即自动重试校验'
-        : validationMessage !== '校验通过'
-          ? '草稿校验通过后才能发布'
-          : undefined
+  // 发布禁用原因文案的规则与优先级在 studioIslandPublishTooltip.ts（轮 3
+  // P2 校验绑定 / 轮 4 P1-1 结构 vs 传输 / 轮 6 H2 冲突 / H4 compare 失败）。
+  const publishTooltip = studioPublishTooltip({
+    dirty: studio.dirty,
+    inConflict: studio.draftSave?.conflict === true,
+    compareError: studio.compareState === 'error',
+    validationMessage,
+  })
 
   return (
     <>

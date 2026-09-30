@@ -370,6 +370,61 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     expect(flushed?.state.conflict).toBe(true)
   })
 
+  it('flushNow in conflict state resolves {ok: false}（#804 轮 6 H1：冲突态 no-op 不得报 ok，否则 agent 发布确认守卫放行审 A 发 B）', async () => {
+    mocks.putWorkflowDraft.mockRejectedValue(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // 冲突态的 flushNow 是有意 no-op（不静默覆盖 Agent 草稿）——但终态
+    // 必须 ok:false（与 draftSaveQueue 的 drain 路径同语义），等待方
+    // （agent 发布确认）据此中止。
+    let flushed: { ok: boolean } | undefined
+    await act(async () => {
+      flushed = await result.current.flushNow()
+    })
+    expect(flushed?.ok).toBe(false)
+  })
+
+  it('resolveConflict(false)（仅解除警示）收敛 status 到 saved/idle，不留假 error（#804 轮 6 H6）', async () => {
+    mocks.putWorkflowDraft.mockRejectedValue(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+    expect(result.current.state.status).toBe('error')
+
+    act(() => result.current.resolveConflict(false))
+    // 冲突标记清除 + status 收敛（savedAt 已推进到服务端真值 → saved）。
+    expect(result.current.state.conflict).toBeFalsy()
+    expect(result.current.state.status).toBe('saved')
+  })
+
   // --- #633 codex review P2-1：conflict 响应推进 CAS 基线。 ---
 
   it('a conflict advances lastPersistedAt so the next save competes on the fresh base', async () => {

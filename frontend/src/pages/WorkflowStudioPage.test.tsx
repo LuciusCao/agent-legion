@@ -336,10 +336,14 @@ describe('WorkflowStudioPage', () => {
 
     expect(within(identityIsland()).getByText(/未发布变更/)).toBeInTheDocument()
 
-    // #804 定案：重置仅 dirty 时外露为 outlined 次级按钮（⋮ 菜单退役）。
+    // #804 定案：重置仅 dirty 时外露为 outlined 次级按钮（⋮ 菜单退役）；
+    // 轮 6 H5 起带 window.confirm 确认（jsdom 未实现 confirm，桩成通过）。
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     await user.click(
       within(identityIsland()).getByRole('button', { name: '重置' })
     )
+    expect(confirmSpy).toHaveBeenCalledOnce()
+    confirmSpy.mockRestore()
 
     // 干净态：状态 chip 与重置按钮一起消失。
     await waitFor(() =>

@@ -30,5 +30,12 @@ export function useValidationFeedback(definitionYaml: string) {
     setValidationMessage(message)
   }
 
-  return { validationErrors, validationMessage, report, reportSilent }
+  // 轮 6 H3：传输失败终态的显式重试——清空结果即触发自动校验重跑
+  // （useDraftAutoValidation 的 settled+未校验守卫）。
+  function clear() {
+    setValidationErrors([])
+    setValidationMessage('')
+  }
+
+  return { validationErrors, validationMessage, report, reportSilent, clear }
 }

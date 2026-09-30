@@ -50,6 +50,7 @@ const compare: UseWorkflowDraftCompareResult = {
   compareResponse: null,
   compareErrors: null,
   compareSummary: null,
+  retry: vi.fn(),
 }
 
 const compareWithChanges: UseWorkflowDraftCompareResult = {
@@ -76,6 +77,7 @@ const compareWithChanges: UseWorkflowDraftCompareResult = {
     riskFlags: [],
     changedNodeKeys: new Set(['a']),
   },
+  retry: vi.fn(),
 }
 
 const reload = vi.fn().mockResolvedValue(undefined)
@@ -84,18 +86,19 @@ type AutoProps = {
   saveStatus: DraftSaveStatus
   definitionYaml: string
   canSubmit?: boolean
+  conflict?: boolean
 }
 
 function renderActionsHook(initial: AutoProps) {
   return renderHook(
-    ({ saveStatus, definitionYaml, canSubmit }: AutoProps) =>
+    ({ saveStatus, definitionYaml, canSubmit, conflict }: AutoProps) =>
       useWorkflowStudioActions(
         'ws1',
         {
           ...draft,
           definitionYaml,
           canSubmit: canSubmit ?? true,
-          draftSave: { status: saveStatus, savedAt: null },
+          draftSave: { status: saveStatus, savedAt: null, conflict },
         },
         reload,
         compare
@@ -320,13 +323,13 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
 
   it('发布门控绑定当前 YAML：校验通过前 canPublish=false，通过后 true（codex 轮 3 P2）', async () => {
     const { result, rerender } = renderHook(
-      ({ saveStatus, definitionYaml }: AutoProps) =>
+      ({ saveStatus, definitionYaml, conflict }: AutoProps) =>
         useWorkflowStudioActions(
           'ws1',
           {
             ...draft,
             definitionYaml,
-            draftSave: { status: saveStatus, savedAt: null },
+            draftSave: { status: saveStatus, savedAt: null, conflict },
           },
           reload,
           compareWithChanges
@@ -343,15 +346,83 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     expect(result.current.canPublish).toBe(true)
   })
 
-  it('审 A 发 B：确认框打开期间 YAML 被后台换掉 → reviewStale（禁确认数据源），关闭复位（轮 4 P2-C）', async () => {
+  it('传输失败终态的显式重试：retryValidation 清空结果 → 自动校验重跑（轮 6 H3）', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      mocks.validateWorkflowDraft.mockRejectedValue(new Error('network error'))
+      const { result, rerender } = renderActionsHook({
+        saveStatus: 'idle',
+        definitionYaml: 'key: demo\n',
+      })
+      await flushSaved(rerender, {
+        saveStatus: 'idle',
+        definitionYaml: 'key: demo\n',
+      })
+      // 耗尽 3 次退避 → 终态。
+      for (const ms of [2100, 4100, 8100]) {
+        await act(async () => {
+          vi.advanceTimersByTime(ms)
+        })
+      }
+      expect(result.current.validationMessage).toBe('校验失败：network error')
+      const calls = mocks.validateWorkflowDraft.mock.calls.length
+
+      // 网络恢复后用户点「重试校验」（抽屉内按钮）：清空即重跑。
+      mocks.validateWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
+      await act(async () => {
+        result.current.retryValidation()
+      })
+      expect(mocks.validateWorkflowDraft.mock.calls.length).toBeGreaterThan(
+        calls
+      )
+      expect(result.current.validationMessage).toBe('校验通过')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('冲突态禁发布：canPublish 不含 conflict（轮 6 H2：冲突未解决不得隐式 keep-mine 发布）', async () => {
     const { result, rerender } = renderHook(
-      ({ saveStatus, definitionYaml }: AutoProps) =>
+      ({ saveStatus, definitionYaml, conflict }: AutoProps) =>
         useWorkflowStudioActions(
           'ws1',
           {
             ...draft,
             definitionYaml,
-            draftSave: { status: saveStatus, savedAt: null },
+            draftSave: { status: saveStatus, savedAt: null, conflict },
+          },
+          reload,
+          compareWithChanges
+        ),
+      { initialProps: { saveStatus: 'idle', definitionYaml: 'key: demo\n' } }
+    )
+    await act(async () => {
+      rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
+    })
+    expect(result.current.validationMessage).toBe('校验通过')
+    expect(result.current.canPublish).toBe(true)
+
+    // 校验通过后 agent 保存 D2 → 409 冲突（definitionYaml 未变、message
+    // 不清——旧实现此处 canPublish 仍 true，revert 即红）。
+    await act(async () => {
+      rerender({
+        saveStatus: 'saved',
+        definitionYaml: 'key: demo\n',
+        conflict: true,
+      })
+    })
+    expect(result.current.canPublish).toBe(false)
+  })
+
+  it('审 A 发 B：确认框打开期间 YAML 被后台换掉 → reviewStale（禁确认数据源），关闭复位（轮 4 P2-C）', async () => {
+    const { result, rerender } = renderHook(
+      ({ saveStatus, definitionYaml, conflict }: AutoProps) =>
+        useWorkflowStudioActions(
+          'ws1',
+          {
+            ...draft,
+            definitionYaml,
+            draftSave: { status: saveStatus, savedAt: null, conflict },
           },
           reload,
           compareWithChanges

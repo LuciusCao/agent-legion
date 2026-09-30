@@ -162,8 +162,12 @@ export class DraftSaveController {
      的版本）；显式路径（resolveConflict(keep-mine)）之外不发 PUT。 */
   flushNow(options?: { keepalive?: boolean }): Promise<DraftSaveFlushResult> {
     const pending = this.pendingSave
-    if (!pending || this.state.conflict)
-      return Promise.resolve(this.result(true))
+    // #804 轮 6 H1：conflict 态的 no-op 必须报 ok:false——「没发 PUT」不是
+    // 「已落盘」，等待方（agent 发布确认守卫）据此中止，与 draftSaveQueue
+    // 的 conflict drain 同语义（两边不一致曾是审 A 发 B 洞）。pagehide 的
+    // 自动 flush 不消费返回值，无影响。
+    if (this.state.conflict) return Promise.resolve(this.result(false))
+    if (!pending) return Promise.resolve(this.result(true))
     this.clearTimers()
     this.pendingSave = null
     const keepalive = !!options?.keepalive && withinKeepaliveLimit(pending.yaml)

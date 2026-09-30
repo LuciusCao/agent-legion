@@ -27,6 +27,10 @@ export type UseWorkflowStudioActionsResult = {
    * 确认键禁用，需关闭重审。 */
   reviewStale: boolean
   canPublish: boolean
+  /** 轮 6 H3：校验传输失败终态的显式重试（清空结果即触发自动校验重跑）；
+   * 结构失败（内容问题）不 retry——调用方按 message 前缀自行判定给不给
+   * 入口。 */
+  retryValidation: () => void
   publishDraft: () => Promise<void>
   requestPublish: () => void
   closeReviewDialog: () => void
@@ -42,7 +46,7 @@ export function useWorkflowStudioActions(
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
   // P2-C：确认框打开那一刻的 YAML 快照（审阅对象）。
   const [reviewYaml, setReviewYaml] = useState<string | null>(null)
-  const { validationErrors, validationMessage, report, reportSilent } =
+  const { validationErrors, validationMessage, report, reportSilent, clear } =
     useValidationFeedback(draft.definitionYaml)
   useDraftAutoValidation({
     workspaceId,
@@ -76,7 +80,10 @@ export function useWorkflowStudioActions(
     compareState !== 'loading' &&
     !hasBlockingCompareError &&
     hasCompareChanges &&
-    validationMessage === '校验通过'
+    validationMessage === '校验通过' &&
+    // 轮 6 H2：冲突未解决禁发布——否则用户在冲突横幅下点发布会隐式
+    // keep-mine（画布内容盖过 Agent 版本），且发布后横幅语义失真。
+    !draft.draftSave.conflict
   async function publishDraft() {
     if (!workspaceId) return
     setPublishing(true)
@@ -108,6 +115,7 @@ export function useWorkflowStudioActions(
     validationMessage,
     reviewDialogOpen,
     canPublish,
+    retryValidation: clear,
     reviewStale:
       reviewDialogOpen &&
       reviewYaml !== null &&

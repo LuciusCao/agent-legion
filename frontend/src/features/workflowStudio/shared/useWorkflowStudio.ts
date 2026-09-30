@@ -76,6 +76,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     adoptServerDraft: draft.adoptServerDraft, // kimi review P1-2：冲突出口
     resolveConflict: draft.resolveConflict,
     canPublish: actions.canPublish,
+    retryValidation: actions.retryValidation,
     createsRevision: compare.compareSummary?.createsRevision ?? true,
     publishDraft: actions.publishDraft,
     requestPublish: actions.requestPublish,
@@ -83,6 +84,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     nodes,
     edges,
     compareState: compare.compareState,
+    retryCompare: compare.retry,
     compareErrors: compare.compareErrors,
     compareSummary: compare.compareSummary,
     reviewDialogOpen: actions.reviewDialogOpen,

@@ -85,11 +85,27 @@ it('草稿态动作组（#804 定案）：发布主按钮 + 仅 dirty 外露的�
   // 重置外露为 outlined 次级按钮（dirty 时），不再是 ⋮ 菜单项。
   const reset = screen.getByRole('button', { name: '重置' })
   expect(reset).toHaveClass('MuiButton-outlined')
+  // 轮 6 H5：重置带确认——这里确认通过。
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
   fireEvent.click(reset)
   expect(props.onReset).toHaveBeenCalledOnce()
+  confirmSpy.mockRestore()
   // 校验按钮退役（自动校验取代）；单一项的 ⋮ 溢出菜单退役。
   expect(screen.queryByRole('button', { name: '校验' })).toBeNull()
   expect(screen.queryByRole('button', { name: '更多操作' })).toBeNull()
+})
+
+it('轮 6 H5：宽屏重置也要确认（破坏性操作；窄屏菜单路径已有同款确认）', () => {
+  const props = renderActions({ dirty: true })
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  fireEvent.click(screen.getByRole('button', { name: '重置' }))
+  expect(confirmSpy).toHaveBeenCalledOnce()
+  expect(props.onReset).not.toHaveBeenCalled()
+
+  confirmSpy.mockReturnValue(true)
+  fireEvent.click(screen.getByRole('button', { name: '重置' }))
+  expect(props.onReset).toHaveBeenCalledOnce()
+  confirmSpy.mockRestore()
 })
 
 it('干净态不渲染重置按钮（仅 dirty 时外露）', () => {
