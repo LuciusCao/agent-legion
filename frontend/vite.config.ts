@@ -40,7 +40,6 @@ const browserTestFiles = [
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioActions.test.ts',
-  'src/features/workflowStudio/shared/useWorkflowStudioMobilePanel.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioPageView.test.ts',
   'src/stores/agentsStore.test.ts',
 ]
