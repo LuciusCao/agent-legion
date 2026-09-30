@@ -35,6 +35,11 @@ function publishDisabledReason(studio: StudioState): string | null {
       summary.riskFlags.length)
   )
   if (!hasChanges) return '与 active revision 没有可发布的变更'
+  // codex 轮 3 P2：canPublish 已绑定「当前 YAML 校验通过」（自动校验驱动），
+  // 未通过时给出校验侧原因而不是笼统的不可提交。
+  if (studio.validationMessage?.startsWith('校验失败'))
+    return '校验失败，请修复后再发布'
+  if (studio.validationMessage !== '校验通过') return '草稿校验通过后才能发布'
   return '编辑器当前内容不可提交'
 }
 

@@ -67,6 +67,27 @@ describe('WorkflowStudioDraftSaveControl', () => {
     expect(onKeepMine).toHaveBeenCalledOnce()
   })
 
+  it('codex 轮 3 P1：窄屏一刀切隐藏只盖瞬态文本，冲突簇（警示 + 操作出口）不挂窄屏隐藏类', () => {
+    // jsdom 跑不了 @media——钉结构：冲突长文案挂 island 的 secondary 类
+    // （窄屏隐藏），但冲突按钮与 ⚠ 图标不带该类（窄屏恒可见可操作）。
+    // revert 即红：整组挂回 secondary/conditional 时按钮会被断言出携带。
+    render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'idle', savedAt: null, conflict: true }}
+        readOnly={false}
+        onAdoptServer={vi.fn()}
+        onKeepMine={vi.fn()}
+      />
+    )
+    const adopt = screen.getByRole('button', { name: '采用 Agent 版本' })
+    const keep = screen.getByRole('button', { name: '保留本页编辑' })
+    for (const el of [adopt, keep]) {
+      expect(el.closest('[class*="secondary"]')).toBeNull()
+    }
+    // 长文案带 secondary（窄屏让位给 ⚠ 图标）。
+    expect(screen.getByText(/自动保存已暂停/).className).toContain('secondary')
+  })
+
   it('只读态不提供冲突动作', () => {
     const { container } = render(
       <WorkflowStudioDraftSaveControl

@@ -41,9 +41,11 @@ export function useWorkflowStudioActions(
   )
   useDraftAutoValidation({
     workspaceId,
-    saveStatus: draft.draftSave.status,
+    saveState: draft.draftSave,
     canSubmit: draft.canSubmit,
     definitionYaml: draft.definitionYaml,
+    validationMessage,
+    validating: actionState === 'validating',
     reportSilent,
     setValidating,
   })
@@ -59,11 +61,17 @@ export function useWorkflowStudioActions(
       (error) => error.category === 'yaml' || error.category === 'schema'
     )
   )
+  /* codex 轮 3 P2：发布门控与当前 YAML 的校验结果绑定——只有当前内容明确
+   * 校验通过才放行（hydrate 恢复的草稿不产生 saved 边沿、debounce 窗口内
+   * 的内容，都按未校验处理；useDraftAutoValidation 会在落盘后补上校验）。
+   * validationMessage 随 definitionYaml 变化即被 useValidationFeedback
+   * 作废，「校验通过」必然属于当前内容。 */
   const canPublish =
     draft.canSubmit &&
     compareState !== 'loading' &&
     !hasBlockingCompareError &&
-    hasCompareChanges
+    hasCompareChanges &&
+    validationMessage === '校验通过'
   async function publishDraft() {
     if (!workspaceId) return
     setActionState('publishing')

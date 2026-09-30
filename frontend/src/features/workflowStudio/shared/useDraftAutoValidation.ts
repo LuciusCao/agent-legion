@@ -1,33 +1,44 @@
 /**
- * 草稿自动校验（#804 定案）：草稿保存成功（draftSave.status 进入 saved）
- * 后静默校验当前草稿——不开校验报告抽屉、不弹 toast，结果经 reportSilent
+ * 草稿自动校验（#804 定案 + codex 轮 3 P2）：当前草稿内容「已落盘且尚未
+ * 校验」时静默校验——不开校验报告抽屉、不弹 toast，结果经 reportSilent
  * 写入 validation state，驱动左岛状态 chip（未发布变更 → 校验中… →
- * ✓ 校验通过 / ✗ 校验失败）与发布按钮的禁用门控。草稿再编辑后旧结果
- * 作废（useValidationFeedback 随 definitionYaml 清空，chip 回「未发布
- * 变更」）；校验在途期间草稿变化时，迟到的结果按捕获的 yaml 比对丢弃。
- * 干净态（canSubmit=false：无未发布变更/只读/空草稿）不触发。
+ * ✓ 校验通过 / ✗ 校验失败）与发布门控（canPublish 要求当前 YAML 明确
+ * 校验通过）。
+ * 触发条件（全部满足）：canSubmit（有未发布变更且非只读）+ 保存状态机
+ * settled（saved，或 idle 且 savedAt 非空——hydrate 恢复服务端草稿不
+ * 产生 saved 边沿，这是轮 3 P2 的发布门控洞）+ 无在途校验 + 当前内容
+ * 无校验结果。debounce 窗口内（pending/saving）不触发，按未校验处理。
+ * 草稿再编辑后旧结果作废（useValidationFeedback 随 definitionYaml 清空，
+ * chip 回「未发布变更」）；校验在途期间草稿变化时，迟到结果按捕获的
+ * yaml 比对丢弃，并在落盘后被上面的规则重新触发。
  * 从 useWorkflowStudioActions 拆出保体积预算。
  */
 import { useEffect, useRef } from 'react'
 import { validateWorkflowDraft } from '../../../api'
-import type { DraftSaveStatus } from './draftSaveTypes'
+import type { DraftSaveState } from './draftSaveTypes'
 
 type Params = {
   workspaceId: string | undefined
-  /** 草稿保存状态机的当前状态（saved = 一次 PUT 成功落盘）。 */
-  saveStatus: DraftSaveStatus
+  /** 草稿保存状态机（status + savedAt：hydrate 后 idle+savedAt 非空）。 */
+  saveState: DraftSaveState
   /** 与 useWorkflowStudioActions.canSubmit 同口径：有未发布变更且可提交。 */
   canSubmit: boolean
   definitionYaml: string
+  /** 当前内容的校验结果（'' = 未校验/已作废），来自 useValidationFeedback。 */
+  validationMessage: string
+  /** 有校验在途（actionState === 'validating'）。 */
+  validating: boolean
   reportSilent: (errors: string[], message: string) => void
   setValidating: (on: boolean) => void
 }
 
 export function useDraftAutoValidation({
   workspaceId,
-  saveStatus,
+  saveState,
   canSubmit,
   definitionYaml,
+  validationMessage,
+  validating,
   reportSilent,
   setValidating,
 }: Params) {
@@ -36,17 +47,16 @@ export function useDraftAutoValidation({
   useEffect(() => {
     yamlRef.current = definitionYaml
   })
-  const prevSaveStatus = useRef(saveStatus)
-  // 在途运行序号：连续保存触发两次校验时，先到期的旧运行不得清掉新运行
-  // 的 validating（finally 只认最新一次）。
+  // 在途运行序号：连续校验时先到期的旧运行不得清掉新运行的 validating
+  // （finally 只认最新一次）。
   const runIdRef = useRef(0)
 
   useEffect(() => {
-    const prev = prevSaveStatus.current
-    prevSaveStatus.current = saveStatus
-    // 只在「进入 saved」的边沿触发：saved 常驻期间（hydrate/重复渲染）不重跑。
-    if (saveStatus !== 'saved' || prev === 'saved') return
-    if (!workspaceId || !canSubmit) return
+    const settled =
+      saveState.status === 'saved' ||
+      (saveState.status === 'idle' && saveState.savedAt !== null)
+    if (!workspaceId || !canSubmit || !settled) return
+    if (validating || validationMessage !== '') return
     const yaml = yamlRef.current
     const runId = (runIdRef.current += 1)
     setValidating(true)
@@ -65,5 +75,13 @@ export function useDraftAutoValidation({
       .finally(() => {
         if (runIdRef.current === runId) setValidating(false)
       })
-  }, [workspaceId, saveStatus, canSubmit, reportSilent, setValidating])
+  }, [
+    workspaceId,
+    saveState,
+    canSubmit,
+    validationMessage,
+    validating,
+    reportSilent,
+    setValidating,
+  ])
 }

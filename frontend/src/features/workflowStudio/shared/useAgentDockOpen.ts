@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { useWorkflowStudio } from './useWorkflowStudio'
-import { useWorkflowStudioMobilePanel } from './useWorkflowStudioMobilePanel'
+import type { StudioMobilePanel } from './WorkflowStudioMobileNav'
 import { useStudioNarrowViewport } from './useStudioNarrowViewport'
-
-type Studio = ReturnType<typeof useWorkflowStudio>
 
 /** Agent Dock 开合 + 移动端页签的单一组合出口（#797 codex 复审轮，从
  * useWorkflowStudioPageView 拆出保体积预算）：顶栏开关与 Dock 关闭按钮都
@@ -14,14 +11,13 @@ type Studio = ReturnType<typeof useWorkflowStudio>
  * 可见→关闭并回画布页签（不留空白工作区），不可见→打开并切 Agent 页签
  * （浮层才显示）。宽屏 agentOpen 即唯一真值（不碰页签）。
  * 复审轮 3：跨断点规范化——宽屏关 Dock 只翻 agentOpen，潜伏的 agent 页签
- * 进入窄屏会选中空内容页；进入窄屏时把这种组合归位回画布。 */
-export function useAgentDockOpen(studio: Studio) {
+ * 进入窄屏会选中空内容页；进入窄屏时把这种组合归位回画布。
+ * #804 抽屉化：「编辑节点」页签随分栏退役（节点编辑是全覆盖 Drawer），
+ * 页签只剩 画布/Agent，mobilePanel 退回本 hook 的本地 state。 */
+export function useAgentDockOpen() {
   const [agentOpen, setAgentOpen] = useState(true)
   const narrow = useStudioNarrowViewport()
-  const { mobilePanel, setMobilePanel } = useWorkflowStudioMobilePanel(
-    studio.selectedNodeKey,
-    studio.focusNonce
-  )
+  const [mobilePanel, setMobilePanel] = useState<StudioMobilePanel>('graph')
   // Dock 实际可见性：宽屏 = agentOpen；窄屏 = agentOpen 且页签在 agent。
   const dockVisible = narrow ? agentOpen && mobilePanel === 'agent' : agentOpen
   const toggleAgent = () => {
@@ -44,8 +40,7 @@ export function useAgentDockOpen(studio: Studio) {
   // 编辑被响应式 CSS 隐藏）——进入窄屏时把这种组合归位回画布。
   useEffect(() => {
     if (narrow && !agentOpen && mobilePanel === 'agent') {
-      // setMobilePanel 来自姊妹 hook 的 useState——本规则只拦本组件本地
-      // setState（见 useWorkflowStudioMobilePanel 里同款 disable 的位置）。
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 跨断点归位是有意的 props/环境派生重置
       setMobilePanel('graph')
     }
   }, [narrow, agentOpen, mobilePanel, setMobilePanel])

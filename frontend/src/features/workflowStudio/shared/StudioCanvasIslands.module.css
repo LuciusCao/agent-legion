@@ -80,6 +80,13 @@
   display: contents;
 }
 
+/* 恒透传包装（保存控件）：display:contents 且窄屏不隐藏——控件内部自行
+ * 分流（瞬态文本挂 secondary 窄屏隐藏；冲突警示与冲突操作出口窄屏必须
+ * 保留可见可操作，codex 轮 3 P1）。 */
+.passthrough {
+  display: contents;
+}
+
 /* 窄屏紧凑形态（≤900px，页签导航在场）：左岛只留返回 + 版本选择器 +
  * contained 主按钮——secondary 件（标题）与 conditional 件（状态 chip/
  * 保存文本）隐藏降级；动作组的 outlined 次级按钮（重置，只读态的

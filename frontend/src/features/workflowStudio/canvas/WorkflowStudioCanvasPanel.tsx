@@ -8,7 +8,6 @@ import { useCanvasIslandOffset } from '../shared/useCanvasIslandOffset'
 import canvasStyles from '../../../pages/WorkflowStudioPageCanvas.module.css'
 import canvasToolbarStyles from '../../../pages/WorkflowStudioPageCanvasToolbar.module.css'
 import pageStyles from '../../../pages/WorkflowStudioPageResponsive.module.css'
-import splitStyles from '../shared/WorkflowStudioSplitLayout.module.css'
 
 type Props = {
   mobileActive: boolean
@@ -24,7 +23,6 @@ export function WorkflowStudioCanvasPanel({ mobileActive }: Props) {
   const toolbarTop = useCanvasIslandOffset(canvasRef)
   const className = [
     canvasStyles.canvas,
-    splitStyles.colLeft,
     mobileActive ? pageStyles.activePanel : '',
   ]
     .filter(Boolean)

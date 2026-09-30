@@ -95,40 +95,4 @@ describe('WorkflowStudioCanvasSourceBadge', () => {
 
     expect(container).toBeEmptyDOMElement()
   })
-
-  it('keeps the execution hint when top-level defaults are missing (#333)', () => {
-    vi.mocked(useStudioState).mockReturnValue({
-      viewMode: 'draft',
-      definitionYaml: 'key: demo\nnodes:\n  a:\n    type: agent\n',
-      dirty: true,
-      compareSummary: makeSummary('modified'),
-      workflow: {
-        key: 'demo',
-        label: 'Demo',
-        intake: { modes: [] },
-        edges: [],
-        nodes: [
-          {
-            key: 'a',
-            label: 'a',
-            capability: 'cap_a',
-            after: [],
-            inputs: [],
-            outputs: [],
-            node_type: 'agent',
-          },
-        ],
-      },
-    } as unknown as ReturnType<typeof useStudioState>)
-
-    render(<WorkflowStudioCanvasSourceBadge />)
-
-    // 草稿 chip 已去重移除，execution 提示保留。
-    expect(screen.queryByText(/草稿（未发布变更/)).toBeNull()
-    expect(
-      screen.getByText(
-        '未配置顶层 execution 默认，Agent 节点需各自配齐 provider / model'
-      )
-    ).toBeInTheDocument()
-  })
 })

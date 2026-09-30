@@ -6,9 +6,9 @@ type Props = {
   actionState: 'idle' | 'validating' | 'publishing'
   canPublish: boolean
   createsRevision?: boolean
-  /** #804 定案：自动校验失败 → 发布禁用 + tooltip 说明（修复后保存会
-   * 自动重新校验，通过后恢复可用）。 */
-  validationFailed?: boolean
+  /** 发布禁用的说明（codex 轮 3 P2：canPublish 已绑定「当前 YAML 校验
+   * 通过」；未校验/校验失败时由调用方给原因文案，经 Tooltip 露出）。 */
+  publishTooltip?: string
   onPublish: () => void
   onReset: () => void
   backToDraft: () => void
@@ -41,12 +41,10 @@ export function WorkflowStudioCommandBarActions(props: Props) {
     )
   }
 
-  const publishDisabled = !props.canPublish || !idle || !!props.validationFailed
+  const publishDisabled = !props.canPublish || !idle
   return (
     <>
-      <Tooltip
-        title={props.validationFailed ? '校验失败，请修复后重新发布' : ''}
-      >
+      <Tooltip title={props.publishTooltip ?? ''}>
         {/* disabled 时 Tooltip 需要 wrapper span（MUI 约定，否则告警） */}
         <span>
           <Button

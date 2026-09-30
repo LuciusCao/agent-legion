@@ -1,19 +1,16 @@
 import { Tab, Tabs } from '@mui/material'
 import styles from './WorkflowStudioMobileNav.module.css'
 
-export type StudioMobilePanel = 'graph' | 'editor' | 'agent'
+/** #804 抽屉化后窄屏只剩两页签：节点编辑是全覆盖 Drawer（点节点直接开，
+ * 不再有「编辑节点」页签/分栏概念）。 */
+export type StudioMobilePanel = 'graph' | 'agent'
 
 type Props = {
   value: StudioMobilePanel
-  editorAvailable: boolean
   onChange: (value: StudioMobilePanel) => void
 }
 
-export function WorkflowStudioMobileNav({
-  value,
-  editorAvailable,
-  onChange,
-}: Props) {
+export function WorkflowStudioMobileNav({ value, onChange }: Props) {
   return (
     <Tabs
       value={value}
@@ -25,7 +22,6 @@ export function WorkflowStudioMobileNav({
       data-testid="studio-mobile-nav"
     >
       <Tab value="graph" label="画布" />
-      <Tab value="editor" label="编辑节点" disabled={!editorAvailable} />
       <Tab value="agent" label="Agent" />
     </Tabs>
   )

@@ -1,4 +1,4 @@
-import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import { Close } from '@mui/icons-material'
 import { IconButton, Tooltip } from '@mui/material'
 import type { SwitchableNodeType } from '../shared/workflowStudioYamlDraft.nodeType'
 import { HeaderNodeTypeSlot } from './NodeTypeSelect'
@@ -14,6 +14,8 @@ type Props = {
   onNodeTypeChange?: (type: SwitchableNodeType) => void
 }
 
+/** 节点详情头栏（#804 抽屉化后它就是抽屉头栏）：节点名 + 类型选择器/徽标
+ * + ✕ 关闭抽屉。 */
 export function WorkflowNodeInspectorHeader(props: Props) {
   return (
     <header className={styles.header}>
@@ -30,7 +32,7 @@ export function WorkflowNodeInspectorHeader(props: Props) {
           aria-label="关闭节点配置"
           onClick={props.onClose}
         >
-          <ChevronRightIcon />
+          <Close />
         </IconButton>
       </Tooltip>
       <div className={styles.key} title={props.nodeKey}>

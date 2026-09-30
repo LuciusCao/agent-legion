@@ -1,7 +1,9 @@
-import { Button, Typography } from '@mui/material'
+import { Button, Tooltip, Typography } from '@mui/material'
+import { MaterialIcon } from '../../../components/MaterialIcon'
 import { draftSaveText } from './useWorkflowDraftPersistence'
 import type { DraftSaveState } from './useWorkflowDraftPersistence'
 import { useStudioState } from './studioStateContext'
+import islandStyles from './StudioCanvasIslands.module.css'
 
 type Props = {
   save: DraftSaveState | undefined
@@ -15,9 +17,13 @@ type Props = {
 
 /* 草稿保存状态文本（#804 定案：手动「保存草稿」按钮退役——自动保存已
    覆盖，成功即隐；可见态只剩 保存中…/保存失败将自动重试/服务不可用警示/
-   #633 冲突警示（服务端草稿被 Agent 或其它标签页推进，本页编辑未落盘），
-   警示态用警示色常驻。kimi review P1-2/P2-4：冲突态不再是一键秒消——
-   自动保存挂起，用户显式二选一（采用服务端版本 / 保留本页编辑）。 */
+   #633 冲突警示，警示态用警示色常驻。kimi review P1-2/P2-4：冲突态不再
+   是一键秒消——自动保存挂起，用户显式二选一（采用服务端版本 / 保留本页
+   编辑）。
+   codex 轮 3 P1：窄屏降级不能一刀切——瞬态文本（保存中/失败重试）窄屏
+   隐藏无妨，但冲突警示与冲突操作出口必须窄屏可见可操作（否则窄屏冲突
+   无解、编辑会丢）：冲突簇恒在，长文案窄屏收成 ⚠ 图标（tooltip 载全文）；
+   瞬态文本挂 island 的 secondary 类（窄屏隐藏）。 */
 export function WorkflowStudioDraftSaveControl({
   save,
   readOnly,
@@ -34,33 +40,51 @@ export function WorkflowStudioDraftSaveControl({
     !readOnly && inConflict && onAdoptServer && onKeepMine
   // #804 定案：无可见内容时不渲染——岛的 flex gap 会给空壳 span 留死白。
   if (!text && !showConflictActions) return null
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-      {text ? (
+  if (inConflict) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        {/* 窄屏只剩这个 ⚠（tooltip 载全文）；宽屏长文案在 secondary 类里
+            （窄屏隐藏）。 */}
+        <Tooltip title={text ?? ''}>
+          <span style={{ display: 'inline-flex', color: '#c62828' }}>
+            <MaterialIcon name="warning" fontSize="small" />
+          </span>
+        </Tooltip>
         <Typography
           variant="caption"
-          color={isWarning ? 'error' : 'text.secondary'}
+          color="error"
           sx={{ whiteSpace: 'nowrap' }}
+          className={islandStyles.secondary}
         >
           {text}
         </Typography>
-      ) : null}
-      {showConflictActions ? (
-        <>
-          <Button
-            size="small"
-            variant="text"
-            color="primary"
-            onClick={onAdoptServer}
-          >
-            采用 Agent 版本
-          </Button>
-          <Button size="small" variant="text" onClick={onKeepMine}>
-            保留本页编辑
-          </Button>
-        </>
-      ) : null}
-    </span>
+        {showConflictActions ? (
+          <>
+            <Button
+              size="small"
+              variant="text"
+              color="primary"
+              onClick={onAdoptServer}
+            >
+              采用 Agent 版本
+            </Button>
+            <Button size="small" variant="text" onClick={onKeepMine}>
+              保留本页编辑
+            </Button>
+          </>
+        ) : null}
+      </span>
+    )
+  }
+  return (
+    <Typography
+      variant="caption"
+      color={isWarning ? 'error' : 'text.secondary'}
+      sx={{ whiteSpace: 'nowrap' }}
+      className={islandStyles.secondary}
+    >
+      {text}
+    </Typography>
   )
 }
 

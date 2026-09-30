@@ -118,15 +118,33 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
   })
 
   it('自动校验失败：发布禁用 + tooltip 说明，状态 chip 变红可点击开报告', () => {
+    // codex 轮 3 P2 后 canPublish 由 hook 绑定校验结果——岛层拿到的就是
+    // canPublish=false；岛负责 tooltip 措辞。
     const setChangesPanelOpen = vi.fn()
     renderIslands(
-      { dirty: true, validationMessage: '校验失败' },
+      { dirty: true, canPublish: false, validationMessage: '校验失败' },
       { setChangesPanelOpen }
     )
     const island = screen.getByTestId('studio-identity-island')
-    expect(within(island).getByRole('button', { name: '发布' })).toBeDisabled()
+    const publish = within(island).getByRole('button', { name: '发布' })
+    expect(publish).toBeDisabled()
+    expect(publish.parentElement).toHaveAttribute(
+      'aria-label',
+      '校验失败，请修复后重新发布'
+    )
     fireEvent.click(within(island).getByText('✗ 校验失败'))
     expect(setChangesPanelOpen).toHaveBeenCalledWith(true)
+  })
+
+  it('未校验的脏草稿（hydrate/debounce 窗口）：发布禁用 + 待定案 tooltip', () => {
+    renderIslands({ dirty: true, canPublish: false, validationMessage: '' })
+    const publish = within(
+      screen.getByTestId('studio-identity-island')
+    ).getByRole('button', { name: '发布' })
+    expect(publish.parentElement).toHaveAttribute(
+      'aria-label',
+      '草稿校验通过后才能发布'
+    )
   })
 
   it('自动校验通过：绿色 ✓ 校验通过 chip，发布可用', () => {

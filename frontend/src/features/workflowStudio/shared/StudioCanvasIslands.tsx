@@ -41,15 +41,27 @@ export function StudioCanvasIslands() {
   // panel display:none），顶边无需让位页签导航（画布本就在它下方）。
   const islandTop = 12
   const validationMessage = studio.validationMessage ?? ''
+  // codex 轮 3 P2：发布要求当前 YAML 明确校验通过（canPublish 已含此门
+  // 控）；dirty 时给禁用原因 tooltip——校验失败/尚未校验（hydrate 恢复或
+  // debounce 窗口内）分别措辞。
+  const publishTooltip = !studio.dirty
+    ? undefined
+    : validationMessage.startsWith('校验失败')
+      ? '校验失败，请修复后重新发布'
+      : validationMessage !== '校验通过'
+        ? '草稿校验通过后才能发布'
+        : undefined
 
   return (
     <>
       {/* 左岛 = workflow 指挥中心（#804 定案排序）：返回 + workspace 名 +
           版本选择器 + 状态 chip + 保存瞬态文本 + 分隔线 + 动作组。窄屏
-          降级：CSS 隐藏 secondary（标题）与 conditional（chip/保存文本）
-          及动作组的 outlined 次级按钮（重置），只留返回 + 版本选择器 +
-          contained 主按钮。间距纪律：岛级 flex gap 一套机制，conditional
-          用 display:contents——条件元素缺席时不留幻影 gap。 */}
+          降级：CSS 隐藏 secondary（标题，以及保存控件内部的瞬态文本）与
+          conditional（chip）及动作组的 outlined 次级按钮（重置），只留
+          返回 + 版本选择器 + contained 主按钮；冲突警示/冲突操作出口
+          窄屏保留（codex 轮 3 P1，DraftSaveControl 自行分流）。间距纪律：
+          岛级 flex gap 一套机制，conditional/passthrough 用
+          display:contents——条件元素缺席时不留幻影 gap。 */}
       <div
         className={`${styles.island} ${styles.identity}`}
         ref={identityRef}
@@ -104,7 +116,7 @@ export function StudioCanvasIslands() {
             onShowChanges={() => view.setChangesPanelOpen(true)}
           />
         </span>
-        <span className={styles.conditional}>
+        <span className={styles.passthrough}>
           <WorkflowStudioDraftSaveControlContainer />
         </span>
         <span className={styles.divider} aria-hidden="true" />
@@ -115,7 +127,7 @@ export function StudioCanvasIslands() {
             actionState={studio.actionState}
             canPublish={studio.canPublish}
             createsRevision={studio.compareSummary?.createsRevision}
-            validationFailed={validationMessage.startsWith('校验失败')}
+            publishTooltip={publishTooltip}
             onPublish={() => void studio.requestPublish()}
             onReset={studio.resetDefinition}
             backToDraft={studio.backToDraft}

@@ -1,8 +1,13 @@
+/* 共享素材抽屉（#804 抽屉化统一浮层体系，paper 复用 studioDrawerFloat）。 */
+.paper {
+  composes: drawerPaper from './studioDrawerFloat.module.css';
+}
+
 .panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(480px, 100vw);
+  width: 100%;
   height: 100%;
   padding: 16px;
   overflow-y: auto;

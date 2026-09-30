@@ -1,8 +1,5 @@
 import { useState } from 'react'
-import type { useWorkflowStudio } from './useWorkflowStudio'
 import { useAgentDockOpen } from './useAgentDockOpen'
-
-type Studio = ReturnType<typeof useWorkflowStudio>
 
 /** 画布区视图状态：DAG 常驻主视图；变更走右侧 Drawer，YAML 走全屏 Dialog。
  * #668：Agent 面板开合状态提升到本层——开关收敛为 appbar（CommandBar）
@@ -11,10 +8,10 @@ type Studio = ReturnType<typeof useWorkflowStudio>
  * Agent 开合的组合出口在 useAgentDockOpen（本层只做转发）。
  * #804 定案：DAG 全屏 Dialog 与手动校验入口退役（校验改保存成功后自动
  * 静默执行，状态 chip 点击开变更抽屉）。 */
-export function useWorkflowStudioPageView(studio: Studio) {
+export function useWorkflowStudioPageView() {
   const [changesPanelOpen, setChangesPanelOpen] = useState(false)
   const [yamlEditorOpen, setYamlEditorOpen] = useState(false)
-  const agentDock = useAgentDockOpen(studio)
+  const agentDock = useAgentDockOpen()
   return {
     changesPanelOpen,
     setChangesPanelOpen,

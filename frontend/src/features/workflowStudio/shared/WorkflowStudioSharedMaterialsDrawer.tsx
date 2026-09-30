@@ -66,7 +66,12 @@ function SharedMaterialsDrawer({
   const groups = groupSharedMaterialFileRows(rows)
 
   return (
-    <Drawer anchor="right" open onClose={onClose}>
+    <Drawer
+      anchor="right"
+      open
+      onClose={onClose}
+      slotProps={{ paper: { className: styles.paper } }}
+    >
       <div className={styles.panel}>
         <div className={styles.header}>
           <Typography variant="h6" component="div" className={styles.title}>

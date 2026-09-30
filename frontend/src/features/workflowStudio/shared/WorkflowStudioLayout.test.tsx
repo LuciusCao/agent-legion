@@ -5,7 +5,6 @@ import { useSettingStore } from '../../../stores/settingStore'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
 import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
-import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
 
 vi.mock('../chat/StudioChatPanel', () => ({
   StudioChatPanel: (props: Record<string, unknown>) => {
@@ -13,6 +12,26 @@ vi.mock('../chat/StudioChatPanel', () => ({
     return <div>chat panel stub</div>
   },
 }))
+
+// #804 抽屉化：节点详情抽屉在 Layout 层只验「选中节点即开」，抽屉自身行为
+// 见 WorkflowNodeDetailDrawer.test.tsx（那里带齐 api mock）。
+vi.mock('../inspector/WorkflowNodeDetailDrawer', async () => {
+  const React = await vi.importActual<typeof import('react')>('react')
+  const ctx = await vi.importActual<typeof import('./studioStateContext')>(
+    './studioStateContext'
+  )
+  return {
+    WorkflowNodeDetailDrawer: () => {
+      const studio = ctx.useStudioState()
+      return studio.selectedNodeKey
+        ? React.createElement('div', {
+            'data-testid': 'node-detail-drawer',
+            'data-node': studio.selectedNodeKey,
+          })
+        : null
+    },
+  }
+})
 
 // #416：StudioChatAside 轮询 agent 发布请求（react-query）。
 vi.mock('../../../api/studioPublishRequestApi', () => ({
@@ -162,9 +181,10 @@ describe('WorkflowStudioLayout', () => {
     expect(
       within(mobileNav).getByRole('tab', { name: '画布' })
     ).toBeInTheDocument()
+    // #804 抽屉化：「编辑节点」页签随分栏退役（节点编辑是全覆盖抽屉）。
     expect(
-      within(mobileNav).getByRole('tab', { name: '编辑节点' })
-    ).toBeDisabled()
+      within(mobileNav).queryByRole('tab', { name: '编辑节点' })
+    ).toBeNull()
     expect(within(mobileNav).getByRole('tab', { name: 'Agent' })).toBeEnabled()
   })
 
@@ -267,20 +287,12 @@ describe('WorkflowStudioLayout', () => {
     confirmSpy.mockRestore()
   })
 
-  it('opens contextual node editing after a graph node is selected', () => {
-    // #797 codex 复审轮：mobilePanel 状态上收到 useWorkflowStudioPageView
-    // （页签同步与 agentOpen 同一组合出口）——静态 makeStudioView 不含真实
-    // 联动，本用例用真 hook 驱动（studio 伪造对象只覆盖 hook 消费字段）。
-    function LiveViewLayout({ studio }: { studio: LayoutStudio }) {
-      const view = useWorkflowStudioPageView(studio as never)
-      return withStudioProviders(studio, view, <WorkflowStudioLayout />)
-    }
-    const { rerender } = render(
-      <MemoryRouter>
-        <LiveViewLayout studio={baseProps} />
-      </MemoryRouter>
-    )
+  it('点中节点后开节点详情抽屉（#804 抽屉化：不再切页签/分栏）', () => {
+    const { rerender } = renderLayout(baseProps)
 
+    // 未选中：抽屉不开。
+    expect(screen.queryByTestId('node-detail-drawer')).toBeNull()
+    // 页签停在画布（不再有「编辑节点」页签切换）。
     const mobileNav = screen.getByRole('tablist', {
       name: 'Workflow studio panels',
     })
@@ -288,14 +300,13 @@ describe('WorkflowStudioLayout', () => {
       within(mobileNav).getByRole('tab', { name: '画布' })
     ).toHaveAttribute('aria-selected', 'true')
 
-    rerender(
-      <MemoryRouter>
-        <LiveViewLayout studio={{ ...baseProps, selectedNodeKey: 'node-a' }} />
-      </MemoryRouter>
-    )
+    rerenderLayout(rerender, { ...baseProps, selectedNodeKey: 'node-a' })
 
+    const drawer = screen.getByTestId('node-detail-drawer')
+    expect(drawer).toHaveAttribute('data-node', 'node-a')
+    // 页签仍在画布——抽屉是浮层，不切换面板。
     expect(
-      within(mobileNav).getByRole('tab', { name: '编辑节点' })
+      within(mobileNav).getByRole('tab', { name: '画布' })
     ).toHaveAttribute('aria-selected', 'true')
   })
 

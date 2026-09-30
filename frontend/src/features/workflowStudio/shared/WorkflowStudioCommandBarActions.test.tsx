@@ -60,8 +60,12 @@ it('干净态不渲染重置按钮（仅 dirty 时外露）', () => {
   expect(screen.getByRole('button', { name: '发布' })).toBeInTheDocument()
 })
 
-it('校验失败时发布禁用并带 tooltip 说明（#804：可用性由自动校验结果驱动）', () => {
-  renderActions({ dirty: true, validationFailed: true })
+it('canPublish=false 时发布禁用，publishTooltip 说明原因（codex 轮 3 P2：门控含当前 YAML 校验通过）', () => {
+  renderActions({
+    dirty: true,
+    canPublish: false,
+    publishTooltip: '校验失败，请修复后重新发布',
+  })
   const publish = screen.getByRole('button', { name: '发布' })
   expect(publish).toBeDisabled()
   // MUI Tooltip 把 title 克隆为 wrapper span 的 aria-label。
@@ -71,7 +75,7 @@ it('校验失败时发布禁用并带 tooltip 说明（#804：可用性由自动
   )
 })
 
-it('校验未失败时发布不受 validationFailed 门控（canPublish 语义不变）', () => {
-  renderActions({ dirty: true, validationFailed: false })
+it('canPublish=true 时发布可用', () => {
+  renderActions({ dirty: true })
   expect(screen.getByRole('button', { name: '发布' })).toBeEnabled()
 })

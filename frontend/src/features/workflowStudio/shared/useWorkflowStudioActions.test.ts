@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import { act } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
@@ -199,14 +199,88 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     })
     expect(result.current.validationMessage).toBe('校验通过')
 
+    // 再编辑 → 进入 debounce 窗口（pending）：旧结果作废，且不触发新校验
+    // （窗口内按未校验处理，codex 轮 3 P2）。
     await act(async () => {
       rerender({
-        saveStatus: 'saved',
+        saveStatus: 'pending',
         definitionYaml: 'key: demo\nlabel: changed\n',
       })
     })
     expect(result.current.validationMessage).toBe('')
     expect(result.current.validationErrors).toEqual([])
+    expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('hydrate 恢复的服务端草稿（idle + savedAt 非空，无 saved 边沿）也自动校验（codex 轮 3 P2）', async () => {
+    renderHook(() =>
+      useWorkflowStudioActions(
+        'ws1',
+        {
+          ...draft,
+          draftSave: { status: 'idle', savedAt: '2026-08-27T09:05:00+00:00' },
+        },
+        reload,
+        compare
+      )
+    )
+
+    await waitFor(() =>
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledWith(
+        'ws1',
+        'key: demo\n'
+      )
+    )
+  })
+
+  it('发布门控绑定当前 YAML：校验通过前 canPublish=false，通过后 true（codex 轮 3 P2）', async () => {
+    const compareWithChanges: UseWorkflowDraftCompareResult = {
+      compareState: 'ready',
+      compareResponse: null,
+      compareErrors: null,
+      compareSummary: {
+        createsRevision: true,
+        riskLevel: 'info',
+        severityLabel: '提示',
+        nodeChanges: [
+          {
+            type: 'modified',
+            nodeKey: 'a',
+            label: 'A',
+            nodeType: 'code',
+            fields: [],
+            severity: 'info',
+          },
+        ],
+        edgeChanges: [],
+        intakeChanges: [],
+        metadataChanges: [],
+        riskFlags: [],
+        changedNodeKeys: new Set(['a']),
+      },
+    }
+    const { result, rerender } = renderHook(
+      ({ saveStatus, definitionYaml }: AutoProps) =>
+        useWorkflowStudioActions(
+          'ws1',
+          {
+            ...draft,
+            definitionYaml,
+            draftSave: { status: saveStatus, savedAt: null },
+          },
+          reload,
+          compareWithChanges
+        ),
+      { initialProps: { saveStatus: 'idle', definitionYaml: 'key: demo\n' } }
+    )
+    // 有变更但尚未校验：不放行（旧门控此处即 true——revert 门控即红）。
+    expect(result.current.canPublish).toBe(false)
+
+    await act(async () => {
+      rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
+    })
+    expect(result.current.validationMessage).toBe('校验通过')
+    expect(result.current.canPublish).toBe(true)
   })
 
   it('校验在途期间草稿再编辑：迟到的结果丢弃，不覆盖新编辑', async () => {

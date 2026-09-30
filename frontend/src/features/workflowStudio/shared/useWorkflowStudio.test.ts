@@ -405,6 +405,14 @@ describe('useWorkflowStudio', () => {
       })
     )
     expect(result.current.compareState).toBe('ready')
+    // codex 轮 3 P2：canPublish 还要求当前 YAML 自动校验通过——推进过保存
+    // debounce（800ms）让草稿落盘触发自动校验。
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() =>
+      expect(result.current.validationMessage).toBe('校验通过')
+    )
     expect(result.current.canPublish).toBe(true)
   })
 
