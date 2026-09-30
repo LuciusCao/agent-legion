@@ -61,6 +61,21 @@ export function defaultDockGeometry(
 }
 
 /** 把（可能来自旧会话的）几何钳制回当前视口：面板不可被拖出可视区。 */
+/** #804 轮 9 P2：右侧抽屉（节点详情/共享素材，宽 720+边距）打开时 Dock
+ * 的运行时避让——右缘越过抽屉左缘才左移（用户已拖开则不动），左移到
+ * 「抽屉左缘 - 宽度 - 12px 间距」，贴左缘钳 8。纯渲染期偏移：布局记忆
+ * （localStorage）不写入，抽屉关闭即弹回原位。 */
+export function offsetForRightInset(
+  geometry: { x: number; width: number },
+  viewportWidth: number,
+  rightInset: number
+): number {
+  if (rightInset <= 0) return geometry.x
+  const drawerLeft = viewportWidth - rightInset
+  if (geometry.x + geometry.width <= drawerLeft) return geometry.x
+  return Math.max(8, drawerLeft - geometry.width - 12)
+}
+
 export function clampDockGeometry(
   geometry: DockGeometry,
   topInset: number,

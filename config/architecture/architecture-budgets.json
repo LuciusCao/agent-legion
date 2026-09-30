@@ -531,6 +531,7 @@
     "frontend/src/features/workflowStudio/shared/sharedMaterialsGroups.ts": 38,
     "frontend/src/features/workflowStudio/shared/sharedMaterialsRows.ts": 55,
     "frontend/src/features/workflowStudio/shared/studioDrawerFloat.module.css": 20,
+    "frontend/src/features/workflowStudio/shared/studioDrawerGeometry.ts": 11,
     "frontend/src/features/workflowStudio/shared/studioIslandPublishTooltip.ts": 28,
     "frontend/src/features/workflowStudio/shared/studioStateContext.ts": 31,
     "frontend/src/features/workflowStudio/shared/testStudioProviders.tsx": 37,

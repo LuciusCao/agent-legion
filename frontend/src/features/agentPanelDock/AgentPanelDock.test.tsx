@@ -81,6 +81,23 @@ beforeEach(() => {
 })
 
 describe('AgentPanelDock', () => {
+  it('轮 9 P2：rightInset（右侧抽屉打开）时 Dock 运行时左移避让、不写布局记忆、关掉弹回原位', async () => {
+    // jsdom 视口 1024：抽屉左缘 1024-728=296；默认 Dock x=488 w=520 越界
+    // → 左移到 max(8, 296-520-12)=8（钳左缘）。布局记忆不写入（重开仍回
+    // 原位由「无存档」钉住）。revert：摘掉 offsetForRightInset 接线即红
+    // （transform 回到 488 档）。
+    const { unmount } = renderDock({ rightInset: 728 })
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    expect(rndWrapper(surface).style.transform).toBe(jsdomTransform(8, 64))
+    expect(loadDockPlacement('test-surface')).toBeNull()
+    unmount()
+
+    // 无 rightInset（抽屉关闭）→ 回默认原位。
+    renderDock()
+    const surface2 = await screen.findByRole('dialog', { name: '测试面板' })
+    expect(rndWrapper(surface2).style.transform).toBe(jsdomTransform(488, 64))
+  })
+
   it('非模态 surface：role=dialog + aria-modal=false、fixed 定位 z-index 900、无遮罩不锁滚动', async () => {
     render(
       (

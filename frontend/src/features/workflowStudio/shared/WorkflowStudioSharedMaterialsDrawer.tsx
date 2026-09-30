@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { useStudioView } from './studioStateContext'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Close, FolderSharedOutlined } from '@mui/icons-material'
 import { Drawer, IconButton, Tooltip, Typography } from '@mui/material'
@@ -224,7 +225,10 @@ function SharedMaterialsDrawer({
  */
 export function WorkflowStudioSharedMaterialsButton() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
-  const [open, setOpen] = useState(false)
+  // 轮 9 P2：开合状态提升到 StudioViewContext（Dock 避让需要感知抽屉）。
+  const view = useStudioView()
+  const open = view.materialsOpen
+  const setOpen = view.setMaterialsOpen
   return (
     <>
       <Tooltip title="Skill 共享材料">

@@ -4,6 +4,8 @@ import { useStudioState, useStudioView } from '../shared/studioStateContext'
 import { useStudioMobileNavHeight } from '../shared/useStudioMobileNavHeight'
 import { useAgentPublishRequest } from '../shared/useAgentPublishRequest'
 import { useSettingStore } from '../../../stores/settingStore'
+import { STUDIO_DRAWER_RIGHT_INSET } from '../shared/studioDrawerGeometry'
+import { useStudioNarrowViewport } from '../shared/useStudioNarrowViewport'
 import styles from './StudioChatPanel.module.css'
 
 /** Studio 的 Agent 对话 Dock（#795 PR②）：载体从右侧栏迁为 AgentPanelDock
@@ -26,6 +28,12 @@ export function StudioChatDock({ hidden }: { hidden: boolean }) {
   // resolvedNotice 来自共享 store：对话框里的确认/取消动作在此同轮可见。
   const { resolvedNotice, clearNotice } = useAgentPublishRequest(workspaceId)
   const mobileNavHeight = useStudioMobileNavHeight()
+  const narrow = useStudioNarrowViewport()
+  // 轮 9 P2：右侧抽屉（节点详情/共享素材）打开时 Dock 运行时左移避让
+  // （不写布局记忆，关抽屉弹回）。窄屏不避让：抽屉在画布列里、Dock 只在
+  // Agent 页签可见，两者互斥不共存。
+  const drawerOpen = studio.selectedNodeKey !== null || view.materialsOpen
+  const rightInset = narrow || !drawerOpen ? 0 : STUDIO_DRAWER_RIGHT_INSET
   return (
     <AgentPanelDock
       surfaceKey="studio-chat"
@@ -37,6 +45,7 @@ export function StudioChatDock({ hidden }: { hidden: boolean }) {
       // 移动端页签导航实测高度（宽屏 nav display:none → 实测 0 天然不加成，
       // 复审轮 6）。
       topInsetExtra={mobileNavHeight}
+      rightInset={rightInset}
       restoreFocusSelector='[aria-label="toggle agent panel"]'
       onClose={() => view.toggleAgent()}
       hidden={hidden}

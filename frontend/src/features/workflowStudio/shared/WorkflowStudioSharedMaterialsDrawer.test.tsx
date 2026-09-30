@@ -7,7 +7,9 @@ import {
   within,
 } from '@testing-library/react'
 import { Route, Routes } from 'react-router-dom'
+import { useState } from 'react'
 import { WorkflowStudioSharedMaterialsButton } from './WorkflowStudioSharedMaterialsDrawer'
+import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import {
   getWorkspaceSharedMaterialFile,
   getWorkspaceSharedMaterials,
@@ -84,6 +86,19 @@ const populated = {
 }
 
 function renderEntry() {
+  // 轮 9 P2：开合状态提升到 StudioViewContext（Dock 避让需要感知抽屉）
+  // ——用真 view state 的包壳，点击真实驱动开合。
+  function Harness() {
+    const [open, setOpen] = useState(false)
+    return withStudioProviders(
+      {},
+      makeStudioView({
+        materialsOpen: open,
+        setMaterialsOpen: setOpen,
+      }),
+      <WorkflowStudioSharedMaterialsButton />
+    )
+  }
   return render(
     <MemoryRouter
       initialEntries={[`/workspaces/${WORKSPACE_ID}/workflow-studio`]}
@@ -91,7 +106,7 @@ function renderEntry() {
       <Routes>
         <Route
           path="/workspaces/:workspaceId/workflow-studio"
-          element={<WorkflowStudioSharedMaterialsButton />}
+          element={<Harness />}
         />
       </Routes>
     </MemoryRouter>

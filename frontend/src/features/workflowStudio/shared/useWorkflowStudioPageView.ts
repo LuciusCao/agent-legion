@@ -11,12 +11,17 @@ import { useAgentDockOpen } from './useAgentDockOpen'
 export function useWorkflowStudioPageView() {
   const [changesPanelOpen, setChangesPanelOpen] = useState(false)
   const [yamlEditorOpen, setYamlEditorOpen] = useState(false)
+  // 轮 9 P2：共享素材抽屉开合提升到 view 层——Dock 避让（rightInset）
+  // 需要同时感知节点详情抽屉（selectedNodeKey）与它。
+  const [materialsOpen, setMaterialsOpen] = useState(false)
   const agentDock = useAgentDockOpen()
   return {
     changesPanelOpen,
     setChangesPanelOpen,
     yamlEditorOpen,
     setYamlEditorOpen,
+    materialsOpen,
+    setMaterialsOpen,
     ...agentDock,
   }
 }
