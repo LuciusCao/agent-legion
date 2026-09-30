@@ -17,6 +17,9 @@ export function WorkflowStudioLayoutDialogs() {
         contentStale={studio.reviewStale}
         {...reviewDialogProps(studio)}
         onConfirm={async () => {
+          // 轮 7 P1 兜底：确认键禁用只拦 UI 点击，提交前按当前 canPublish
+          // 重查（冲突/内容漂移在确认框打开期间都可能后到达）。
+          if (studio.reviewStale || !studio.canPublish) return
           studio.closeReviewDialog()
           await studio.publishDraft()
           view.setChangesPanelOpen(true)

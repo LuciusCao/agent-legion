@@ -381,6 +381,70 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     }
   })
 
+  it('校验结果绑定 workspace+YAML：切到 YAML 相同的 workspace B → 结果作废并对 B 重校验（轮 7 P2）', async () => {
+    const { result, rerender } = renderHook(
+      ({ ws, saveStatus, definitionYaml }: AutoProps & { ws: string }) =>
+        useWorkflowStudioActions(
+          ws,
+          {
+            ...draft,
+            definitionYaml,
+            // B 侧同样已落盘（hydrate 形态：idle + savedAt）。
+            draftSave: {
+              status: saveStatus,
+              savedAt: '2026-08-27T09:05:00+00:00',
+            },
+          },
+          reload,
+          compareWithChanges
+        ),
+      {
+        initialProps: {
+          ws: 'ws1',
+          saveStatus: 'saved',
+          definitionYaml: 'key: demo\n',
+        },
+      }
+    )
+    // A 校验通过。
+    await waitFor(() =>
+      expect(result.current.validationMessage).toBe('校验通过')
+    )
+    expect(result.current.canPublish).toBe(true)
+
+    // 切到 YAML 相同的 B：A 的结果必须作废（旧实现保留 → 即红），
+    // 并对 B 重新校验。B 的校验挂起（可控 promise）以观察中间态——
+    // 否则同一 act 内重校验即落定，观察不到作废窗口。
+    let resolveB!: (v: { valid: boolean; errors: string[] }) => void
+    mocks.validateWorkflowDraft.mockImplementation((ws: string) =>
+      ws === 'ws2'
+        ? new Promise((r) => {
+            resolveB = r
+          })
+        : Promise.resolve({ valid: true, errors: [] })
+    )
+    await act(async () => {
+      rerender({
+        ws: 'ws2',
+        saveStatus: 'saved',
+        definitionYaml: 'key: demo\n',
+      })
+    })
+    expect(result.current.validationMessage).toBe('')
+    expect(result.current.canPublish).toBe(false)
+    await waitFor(() =>
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledWith(
+        'ws2',
+        'key: demo\n'
+      )
+    )
+    await act(async () => {
+      resolveB({ valid: true, errors: [] })
+    })
+    expect(result.current.validationMessage).toBe('校验通过')
+    expect(result.current.canPublish).toBe(true)
+  })
+
   it('冲突态禁发布：canPublish 不含 conflict（轮 6 H2：冲突未解决不得隐式 keep-mine 发布）', async () => {
     const { result, rerender } = renderHook(
       ({ saveStatus, definitionYaml, conflict }: AutoProps) =>
@@ -411,6 +475,42 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
         conflict: true,
       })
     })
+    expect(result.current.canPublish).toBe(false)
+  })
+
+  it('确认框打开后进入 conflict（YAML 不变）→ 审阅失效 reviewStale（轮 7 P1：绕过冲突门控的洞）', async () => {
+    const { result, rerender } = renderHook(
+      ({ saveStatus, definitionYaml, conflict }: AutoProps) =>
+        useWorkflowStudioActions(
+          'ws1',
+          {
+            ...draft,
+            definitionYaml,
+            draftSave: { status: saveStatus, savedAt: null, conflict },
+          },
+          reload,
+          compareWithChanges
+        ),
+      { initialProps: { saveStatus: 'idle', definitionYaml: 'key: demo\n' } }
+    )
+    await act(async () => {
+      rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
+    })
+    expect(result.current.canPublish).toBe(true)
+    act(() => result.current.requestPublish())
+    expect(result.current.reviewDialogOpen).toBe(true)
+    expect(result.current.reviewStale).toBe(false)
+
+    // Agent 推进服务端草稿 → 冲突处理保留画布 YAML、只置 conflict 标记。
+    // reviewStale 只比 YAML 的旧实现此处仍 false（确认键可用=绕过冲突门控）。
+    await act(async () => {
+      rerender({
+        saveStatus: 'error',
+        definitionYaml: 'key: demo\n',
+        conflict: true,
+      })
+    })
+    expect(result.current.reviewStale).toBe(true)
     expect(result.current.canPublish).toBe(false)
   })
 

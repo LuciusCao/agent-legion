@@ -47,7 +47,7 @@ export function useWorkflowStudioActions(
   // P2-C：确认框打开那一刻的 YAML 快照（审阅对象）。
   const [reviewYaml, setReviewYaml] = useState<string | null>(null)
   const { validationErrors, validationMessage, reportSilent, clear, notify } =
-    useValidationFeedback(draft.definitionYaml)
+    useValidationFeedback(draft.definitionYaml, workspaceId)
   useDraftAutoValidation({
     workspaceId,
     saveState: draft.draftSave,
@@ -121,8 +121,10 @@ export function useWorkflowStudioActions(
     retryValidation: clear,
     reviewStale:
       reviewDialogOpen &&
-      reviewYaml !== null &&
-      reviewYaml !== draft.definitionYaml,
+      ((reviewYaml !== null && reviewYaml !== draft.definitionYaml) ||
+        // 轮 7 P1：Agent 推进服务端草稿进入冲突时画布 YAML 不变，但服务端
+        // 内容已漂——审阅对象失效与 YAML 漂移同论（禁确认 + 提示重审）。
+        draft.draftSave.conflict === true),
     publishDraft,
     requestPublish: () => {
       if (canPublish) {

@@ -48,10 +48,12 @@ export function useDraftAutoValidation({
   reportSilent,
   setValidating,
 }: Params) {
-  // 最新草稿镜像：迟到结果与之比对，不一致即作废（旧校验不得覆盖新编辑）。
-  const yamlRef = useRef(definitionYaml)
+  // 最新 草稿+workspace 镜像：迟到结果与之比对，不一致即作废（旧校验不得
+  // 覆盖新编辑/新 workspace——轮 7 P2：同 YAML 的跨 workspace 复用页面，
+  // 在途请求迟到写入必须按 workspaceId 一并作废）。
+  const contentRef = useRef({ ws: workspaceId, yaml: definitionYaml })
   useEffect(() => {
-    yamlRef.current = definitionYaml
+    contentRef.current = { ws: workspaceId, yaml: definitionYaml }
   })
   // 在途运行序号：连续校验时先到期的旧运行不得清掉新运行的 validating
   // （finally 只认最新一次）。
@@ -63,10 +65,15 @@ export function useDraftAutoValidation({
       (saveState.status === 'idle' && saveState.savedAt !== null)
     if (!workspaceId || !canSubmit || !settled) return
     if (validating || validationMessage !== '') return
-    const yaml = yamlRef.current
+    const yaml = contentRef.current.yaml
+    const ws = workspaceId
     const runId = (runIdRef.current += 1)
     setValidating(true)
-    validateDraftWithRetry(workspaceId, yaml, () => yamlRef.current !== yaml)
+    validateDraftWithRetry(
+      ws,
+      yaml,
+      () => contentRef.current.ws !== ws || contentRef.current.yaml !== yaml
+    )
       .then((result) => {
         reportSilent(result.errors, result.valid ? '校验通过' : '校验失败')
       })
