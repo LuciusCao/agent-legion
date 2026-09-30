@@ -249,6 +249,30 @@ describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it('轮 8 P2：抽屉非模态——无遮罩、不 aria-hidden 画布（Agent Dock 可并行交互）', () => {
+    // MUI temporary Drawer 默认是 Modal（遮罩 + 焦点圈禁 + 兄弟
+    // aria-hidden + 滚动锁）——把 z900 的 Agent Dock 盖住，破坏「边改节点
+    // 边对话」。非模态化后这些都不发生（revert：回 Modal 默认即红）。
+    render(
+      <TestQueryProvider>
+        {withStudioProviders(
+          { ...studioFor('generate_key_info') },
+          {},
+          <>
+            <button data-testid="canvas-sibling">画布侧按钮</button>
+            <WorkflowNodeDetailDrawer />
+          </>
+        )}
+      </TestQueryProvider>
+    )
+    expect(document.querySelector('.MuiBackdrop-root')).toBeNull()
+    expect(
+      screen.getByTestId('canvas-sibling').closest('[aria-hidden="true"]')
+    ).toBeNull()
+    // 抽屉内容正常渲染。
+    expect(screen.getByText('生成关键信息')).toBeInTheDocument()
+  })
+
   it('无选中节点时不渲染内容（Drawer 关闭）', () => {
     renderDrawer(null)
     expect(screen.queryByText('生成关键信息')).toBeNull()

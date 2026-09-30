@@ -622,6 +622,79 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
   })
 
+  it('keep-mine after conflict with canvas == lastPersisted still forces the write-back（#804 轮 8 P1：去重吞补救的洞）', async () => {
+    // 场景：本页内容 A 已保存（lastPersisted=A）→ Agent 推进服务端为 B →
+    // reapply 冲突（pendingSave 早空）→ 用户「保留本页编辑」。补救路径若走
+    // 普通 schedule(A)，去重把 A 判为已持久化 → revert 不发 PUT——警示消失
+    // 但 A 从未写回，离页即丢。断言到 PUT 真发出（请求体 A + 新 CAS 基线）
+    // 并落定 saved。
+    const conflict = {
+      yaml: 'key: demo\nlabel: Agent v2\n',
+      updatedAt: '2026-08-27T03:00:00+00:00',
+    }
+    let pending: typeof conflict | null = null
+    const consume = () => {
+      const value = pending
+      pending = null
+      return value
+    }
+    const { result, rerender } = renderHookResult(
+      {
+        workspaceId: 'ws1',
+        draftYaml: BASE,
+        originalYaml: BASE,
+        serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      },
+      consume
+    )
+    // 先编辑 A（EDITED）并落盘：lastPersisted=A。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: EDITED,
+      updated_at: '2026-08-27T02:00:00+00:00',
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    const callsBeforeConflict = mocks.putWorkflowDraft.mock.calls.length
+
+    // Agent 推进服务端草稿为 B → reapply 冲突（画布仍 = A）。
+    pending = conflict
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: conflict.yaml,
+        updated_at: conflict.updatedAt,
+      },
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // keep-mine：必须按新 CAS 基线把 A 强制写回（绕过去重）。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: EDITED,
+      updated_at: '2026-08-27T04:00:00+00:00',
+    })
+    act(() => result.current.resolveConflict(true))
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft.mock.calls.length).toBeGreaterThan(
+      callsBeforeConflict
+    )
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: conflict.updatedAt,
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+  })
+
   // --- kimi review P1-1：own-save 回显不误报幻影冲突。 ---
 
   it("does not raise a phantom conflict when the refetched draft is the user's own save", async () => {

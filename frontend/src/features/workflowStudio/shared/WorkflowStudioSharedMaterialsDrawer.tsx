@@ -72,6 +72,10 @@ function SharedMaterialsDrawer({
       open
       onClose={onClose}
       slotProps={{ paper: { className: styles.paper } }}
+      /* 轮 8 P2：非模态——persistent variant 不走 Modal（无遮罩/不圈禁
+         焦点/不锁滚动/不 aria-hidden 兄弟），Dock 与画布保持可交互；
+         ✕/Esc 关闭，浮层定位由 paper CSS 承担。 */
+      variant="persistent"
     >
       <div className={styles.panel}>
         <div className={styles.header}>

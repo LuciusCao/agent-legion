@@ -20,7 +20,7 @@ true}`；`loadError`（GET 草稿失败）由组合层（useWorkflowDraftPersist
 | PUT 成功（迟到/作废） | 状态不变，仅推进 CAS 基线（I4） |
 | PUT 409 | → `error` + `conflict=true`：清计时器与 pendingSave，基线推进到冲突响应的 updated_at，不自动重试 |
 | PUT 其它失败 | → `error`，指数退避重试 ≤2 次（2s/4s），耗尽停 `error` |
-| keep-mine（resolveConflict(true)） | 清 conflict；有 pending 补发，无 pending 按当前画布内容重新 schedule（缺了这步就卡死 error：编辑不落盘、校验/发布永锁） |
+| keep-mine（resolveConflict(true)） | 清 conflict；有 pending 补发；无 pending 按当前画布内容**强制写回**（forceSave 绕开 schedule 去重——内容等于已持久化值时去重会吞掉补救，警示消失而内容从未写回） |
 | 采用服务端（adoptServerDraft → hydrate）/ resolveConflict(false) | 清 conflict，status 收敛 saved/idle（不留假 error） |
 | pagehide / visibilitychange→hidden | flushNow（pagehide 带 keepalive）；conflict 态有意 no-op 且 resolve `ok:false`（等待方据此中止，与 draftSaveQueue 的 drain 同语义） |
 | 服务端草稿前进（turn-end 重取，serverDraftReapply.ts） | 用户未碰 → apply（写画布+推进基线）；已碰 → conflict；own-save 回显（服务端==画布）→ 静默 apply 不升冲突 |

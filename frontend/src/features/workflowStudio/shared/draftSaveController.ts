@@ -131,7 +131,19 @@ export class DraftSaveController {
       this.armSave(pending.yaml, pending.requestId)
       return
     }
-    if (keepMine && currentYaml) this.schedule(currentYaml())
+    if (keepMine && currentYaml) this.forceSave(currentYaml())
+  }
+
+  /* keep-mine 补救的强制写回（#804 轮 8 P1）：普通 schedule 的去重会把
+     「内容 == 已持久化值」判成 revert 不发 PUT——但冲突语义是以新 CAS
+     基线把画布内容写回服务端（Agent 已把服务端推进成别的内容），必须
+     绕过去重强制发，否则警示消失而内容从未写回，离页即丢。 */
+  private forceSave(yaml: string) {
+    if (!yaml.trim()) return
+    const requestId = (this.requestCounter += 1)
+    this.pendingSave = { yaml, requestId }
+    this.setState({ ...this.state, status: 'pending' })
+    this.armSave(yaml, requestId)
   }
 
   /* kimi review P1-2：采用服务端草稿（Agent 的版本）——经 hydrate 入口
