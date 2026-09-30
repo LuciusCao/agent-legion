@@ -63,7 +63,8 @@ const revision = {
 
 const baseProps = {
   loadState: 'ready' as const,
-  actionState: 'idle' as const,
+  publishing: false,
+  validating: false,
   workflow,
   revision,
   activeRevision: revision,

@@ -124,7 +124,7 @@ export function StudioCanvasIslands() {
             hasPreservedDraft={studio.hasPreservedDraft}
             summary={studio.compareSummary}
             compareState={studio.compareState}
-            validating={studio.actionState === 'validating'}
+            validating={studio.validating}
             validationMessage={validationMessage}
             onShowChanges={() => view.setChangesPanelOpen(true)}
           />
@@ -137,7 +137,8 @@ export function StudioCanvasIslands() {
           <WorkflowStudioCommandBarActions
             readOnly={studio.readOnly}
             dirty={studio.dirty}
-            actionState={studio.actionState}
+            publishing={studio.publishing}
+            validating={studio.validating}
             canPublish={studio.canPublish}
             createsRevision={studio.compareSummary?.createsRevision}
             publishTooltip={publishTooltip}

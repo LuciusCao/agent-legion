@@ -1,9 +1,11 @@
-import { Tooltip, Typography } from '@mui/material'
-import { MaterialIcon } from '../../../components/MaterialIcon'
+import { Typography } from '@mui/material'
 import { draftSaveText } from './useWorkflowDraftPersistence'
 import type { DraftSaveState } from './useWorkflowDraftPersistence'
 import { useStudioState } from './studioStateContext'
-import { WorkflowStudioDraftConflictControl } from './WorkflowStudioDraftConflictControl'
+import {
+  WorkflowStudioDraftConflictControl,
+  WorkflowStudioDraftWarningText,
+} from './WorkflowStudioDraftWarningCluster'
 import islandStyles from './StudioCanvasIslands.module.css'
 
 type Props = {
@@ -17,6 +19,10 @@ type Props = {
   /** 抽屉内警示横幅模式（轮 4 P2-F）：只渲染警示态（冲突/终态失败/服务
    * 不可用），瞬态「保存中…」不出现；长文案不挂窄屏隐藏类。 */
   warningsOnly?: boolean
+  /** codex 轮 5 P2：error 终态（PUT 重试耗尽）的显式重试出口——controller
+   * 不再自行调度，网络恢复后用户不改内容也需要恢复路径；点击重新调度
+   * 当前内容（接线层调 flushDraftSave：error 态会重新 schedule 再 flush）。 */
+  onRetrySave?: () => void
 }
 
 /* 草稿保存状态文本（#804 定案：手动「保存草稿」按钮退役——自动保存已
@@ -34,6 +40,7 @@ export function WorkflowStudioDraftSaveControl({
   onAdoptServer,
   onKeepMine,
   warningsOnly,
+  onRetrySave,
 }: Props) {
   const text = draftSaveText(save)
   const inConflict = save?.conflict === true
@@ -61,22 +68,14 @@ export function WorkflowStudioDraftSaveControl({
   }
   if (warningsOnly && !isWarning) return null
   if (isWarning) {
+    // 警示簇（⚠ + 文案 + error 态重试出口）在 WorkflowStudioDraftWarningCluster。
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        <Tooltip title={text ?? ''}>
-          <span style={{ display: 'inline-flex', color: '#c62828' }}>
-            <MaterialIcon name="warning" fontSize="small" />
-          </span>
-        </Tooltip>
-        <Typography
-          variant="caption"
-          color="error"
-          sx={{ whiteSpace: 'nowrap' }}
-          className={warningsOnly ? undefined : islandStyles.secondary}
-        >
-          {text}
-        </Typography>
-      </span>
+      <WorkflowStudioDraftWarningText
+        text={text}
+        plain={warningsOnly}
+        showRetry={save?.status === 'error'}
+        onRetrySave={onRetrySave}
+      />
     )
   }
   return (
@@ -91,7 +90,9 @@ export function WorkflowStudioDraftSaveControl({
   )
 }
 
-/* 冲突二选一的回调接线（容器与抽屉警示横幅共用，轮 4 P2-F）。 */
+/* 保存警示的回调接线（容器与抽屉警示横幅共用，轮 4 P2-F / 轮 5 P2）：
+   冲突二选一 + error 终态的显式重试（flushDraftSave 在 error 态会重新
+   schedule 当前内容再 flush——persistence 层既有语义）。 */
 export function useDraftSaveConflictActions() {
   const studio = useStudioState()
   return {
@@ -104,6 +105,7 @@ export function useDraftSaveConflictActions() {
       studio.adoptServerDraft(conflict, studio.draftSave?.savedAt ?? null)
     },
     onKeepMine: () => studio.resolveConflict(true),
+    onRetrySave: () => void studio.flushDraftSave(),
   }
 }
 

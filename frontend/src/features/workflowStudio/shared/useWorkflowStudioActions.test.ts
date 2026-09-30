@@ -139,7 +139,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
       'key: demo\n'
     )
     expect(result.current.validationMessage).toBe('校验通过')
-    expect(result.current.actionState).toBe('idle')
+    expect(result.current.publishing).toBe(false)
     // 静默：不弹 toast（手动校验时代有 toast）。
     expect(useUiStore.getState().toast).toBeNull()
   })
@@ -228,7 +228,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
       })
       expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(4)
       expect(result.current.validationMessage).toBe('校验失败：network error')
-      expect(result.current.actionState).toBe('idle')
+      expect(result.current.publishing).toBe(false)
       // 终态后不再自动重试（编辑→落盘会重新触发，见它例）。
       await act(async () => {
         vi.advanceTimersByTime(30000)
@@ -402,7 +402,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
       rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
     })
     expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
-    expect(result.current.actionState).toBe('validating')
+    expect(result.current.validating).toBe(true)
 
     // 校验未回，草稿已改（旧结果即失效）。
     await act(async () => {
@@ -418,7 +418,51 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
       resolveValidation!({ valid: true, errors: [] })
     })
     expect(result.current.validationMessage).toBe('')
-    expect(result.current.actionState).toBe('idle')
+    expect(result.current.publishing).toBe(false)
+  })
+
+  it('发布与校验的在途状态互不覆盖（codex 轮 5 P1：交错序列）', async () => {
+    let resolvePublish!: (v: { valid: boolean; errors: string[] }) => void
+    mocks.publishWorkflowDraft.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolvePublish = r
+        })
+    )
+    let resolveValidate!: (v: { valid: boolean; errors: string[] }) => void
+    mocks.validateWorkflowDraft.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolveValidate = r
+        })
+    )
+    const { result, rerender } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+    // 落盘 → 自动校验在途。
+    await act(async () => {
+      rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
+    })
+    expect(result.current.validating).toBe(true)
+    // 校验在途时发起发布（发布在途）。
+    await act(async () => {
+      void result.current.publishDraft()
+    })
+    expect(result.current.publishing).toBe(true)
+    // 校验先结束：发布在途标记不得被清（共享 actionState 的旧实现这里
+    // 会被盖回 idle → 发布入口提前解禁）。
+    await act(async () => {
+      resolveValidate({ valid: true, errors: [] })
+    })
+    expect(result.current.validating).toBe(false)
+    expect(result.current.publishing).toBe(true)
+    // 发布后结束：校验态已复位，不受发布影响。
+    await act(async () => {
+      resolvePublish({ valid: true, errors: [] })
+    })
+    expect(result.current.publishing).toBe(false)
+    expect(result.current.validating).toBe(false)
   })
 
   it('sets validation failure message and clears errors on publish rejection', async () => {
@@ -432,7 +476,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
       await result.current.publishDraft()
     })
 
-    expect(result.current.actionState).toBe('idle')
+    expect(result.current.publishing).toBe(false)
     expect(result.current.validationMessage).toBe('保存失败：network error')
     expect(result.current.validationErrors).toEqual([])
   })

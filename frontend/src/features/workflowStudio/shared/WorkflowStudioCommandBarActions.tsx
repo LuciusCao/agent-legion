@@ -4,7 +4,9 @@ import { WorkflowStudioReadOnlyActions } from './WorkflowStudioReadOnlyActions'
 type Props = {
   readOnly: boolean
   dirty: boolean
-  actionState: 'idle' | 'validating' | 'publishing'
+  /** codex 轮 5 P1：发布/校验是独立在途维度。 */
+  publishing: boolean
+  validating: boolean
   canPublish: boolean
   createsRevision?: boolean
   /** 发布禁用的说明（codex 轮 3 P2：canPublish 已绑定「当前 YAML 校验
@@ -25,12 +27,10 @@ type Props = {
  * 按钮（干净态消失，单一项的 ⋮ 溢出菜单随之退役）；只读态（返回/设为
  * 草稿）保持文字按钮不动。 */
 export function WorkflowStudioCommandBarActions(props: Props) {
-  const idle = props.actionState === 'idle'
-
   if (props.readOnly) {
     return (
       <WorkflowStudioReadOnlyActions
-        idle={idle}
+        idle={!props.publishing}
         confirmAdoptDraft={props.confirmAdoptDraft}
         backToDraft={props.backToDraft}
         useViewedRevisionAsDraft={props.useViewedRevisionAsDraft}
@@ -38,7 +38,9 @@ export function WorkflowStudioCommandBarActions(props: Props) {
     )
   }
 
-  const publishDisabled = !props.canPublish || !idle
+  // 发布在途或校验在途都禁发布（校验在途时结果未出，按未校验处理）。
+  const publishDisabled =
+    !props.canPublish || props.publishing || props.validating
   return (
     <>
       <Tooltip title={props.publishTooltip ?? ''}>
@@ -58,7 +60,7 @@ export function WorkflowStudioCommandBarActions(props: Props) {
         <Button
           size="small"
           variant="outlined"
-          disabled={!idle}
+          disabled={props.publishing}
           onClick={props.onReset}
         >
           重置

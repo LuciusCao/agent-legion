@@ -6,7 +6,8 @@ function renderActions(overrides: Record<string, unknown> = {}) {
   const props = {
     readOnly: false,
     dirty: false,
-    actionState: 'idle' as const,
+    publishing: false,
+    validating: false,
     canPublish: true,
     onPublish: vi.fn(),
     onReset: vi.fn(),

@@ -46,7 +46,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     useStudioNodeSelection(workspaceId, nodes)
   return {
     loadState,
-    actionState: actions.actionState,
+    publishing: actions.publishing,
+    validating: actions.validating,
     workflow: draft.visibleWorkflow,
     revision: draft.visibleRevision,
     activeRevision: revision,

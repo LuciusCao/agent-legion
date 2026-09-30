@@ -47,6 +47,31 @@ describe('WorkflowStudioDraftSaveControl', () => {
     ).toBeInTheDocument()
   })
 
+  it('codex 轮 5 P2：error 终态警示簇带显式「重试保存」出口（点击重新调度当前内容）', () => {
+    const onRetrySave = vi.fn()
+    render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'error', savedAt: null }}
+        readOnly={false}
+        onRetrySave={onRetrySave}
+      />
+    )
+    expect(screen.getByText('草稿保存失败，将自动重试')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试保存' }))
+    expect(onRetrySave).toHaveBeenCalledOnce()
+  })
+
+  it('codex 轮 5 P2：loadError（GET 失败）不给重试保存（重试的是读取侧）', () => {
+    render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'idle', savedAt: null, loadError: true }}
+        readOnly={false}
+        onRetrySave={vi.fn()}
+      />
+    ).unmount()
+    expect(screen.queryByRole('button', { name: '重试保存' })).toBeNull()
+  })
+
   it('codex 轮 4 P1-3：持久化失败/服务不可用警示窄屏保留——⚠ 图标恒可见（不带 secondary），长文案窄屏让位', () => {
     // jsdom 跑不了 @media——钉结构：⚠ 图标不带窄屏隐藏类（恒可见可操作），
     // 长文案带 secondary（窄屏收成 ⚠+tooltip）。瞬态「保存中…」不受此约束

@@ -42,7 +42,8 @@ const studioStub = {
   hasPreservedDraft: false,
   compareSummary: null,
   compareState: 'idle',
-  actionState: 'idle',
+  publishing: false,
+  validating: false,
   canSubmit: true,
   canPublish: true,
   validationMessage: '',
@@ -176,7 +177,7 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
   })
 
   it('校验进行中：chip 显示 校验中…', () => {
-    renderIslands({ dirty: true, actionState: 'validating' })
+    renderIslands({ dirty: true, validating: true })
     const island = screen.getByTestId('studio-identity-island')
     expect(within(island).getByText('校验中…')).toBeInTheDocument()
   })

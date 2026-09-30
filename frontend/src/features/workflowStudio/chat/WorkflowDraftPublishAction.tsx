@@ -11,11 +11,11 @@ import styles from './StudioChatPanel.module.css'
  * 编辑器后才参与发布。 */
 
 function publishDisabledReason(studio: StudioState): string | null {
-  // canPublish 不含 actionState：确认框关闭后首个 publish POST 仍在途时，
-  // 按钮必须保持禁用，否则可再开确认框发起第二个 POST（重复 revision /
-  // 版本冲突）。与命令条同口径（WorkflowStudioCommandBarActions 的
-  // `!canPublish || !idle`）。
-  if (studio.actionState !== 'idle') return '校验或保存进行中，请稍候'
+  // canPublish 不含在途态：确认框关闭后首个 publish POST 仍在途时，按钮
+  // 必须保持禁用，否则可再开确认框发起第二个 POST（重复 revision / 版本
+  // 冲突）。codex 轮 5 P1：发布/校验是独立在途维度，分别给原因。
+  if (studio.publishing) return '发布进行中，请稍候'
+  if (studio.validating) return '校验进行中，请稍候'
   if (studio.canPublish) return null
   if (studio.compareState === 'loading') {
     return '正在与 active revision 对比，请稍候'
@@ -43,7 +43,7 @@ function publishDisabledReason(studio: StudioState): string | null {
   return '编辑器当前内容不可提交'
 }
 
-/** 发布按钮：actionState 非 idle 或 canPublish 为假时禁用并在 title 里说
+/** 发布按钮：发布/校验在途或 canPublish 为假时禁用并在 title 里说
  * 明原因（禁用按钮不触发自身 hover 事件，title 挂在外层 span 上）。无
  * Studio Provider（测试直渲染卡片）时不渲染。 */
 export function WorkflowDraftPublishButton() {

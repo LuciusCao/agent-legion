@@ -1,12 +1,10 @@
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import { publishWorkflowDraft } from '../../../api'
 import { useValidationFeedback } from '../validation/useValidationFeedback'
 import { useDraftAutoValidation } from './useDraftAutoValidation'
 import type { DraftSaveState } from './draftSaveTypes'
 import type { UseWorkflowStudioDraftResult } from './useWorkflowStudioDraft'
 import type { UseWorkflowDraftCompareResult } from './useWorkflowDraftCompare'
-
-type ActionState = 'idle' | 'validating' | 'publishing'
 
 /* #804 定案：手动「校验」按钮退役——草稿保存成功后自动静默校验
  * （useDraftAutoValidation），结果驱动左岛状态 chip；actions 层需要保存
@@ -16,7 +14,11 @@ type DraftWithSave = UseWorkflowStudioDraftResult & {
 }
 
 export type UseWorkflowStudioActionsResult = {
-  actionState: ActionState
+  /** codex 轮 5 P1：发布与校验是独立的在途维度（共享 actionState 时
+   * 交错序列互相覆盖——校验落定把 publishing 盖回 idle，发布入口提前
+   * 解禁）。 */
+  publishing: boolean
+  validating: boolean
   validationErrors: string[]
   validationMessage: string
   reviewDialogOpen: boolean
@@ -35,23 +37,20 @@ export function useWorkflowStudioActions(
   reload: () => Promise<void>,
   compare: UseWorkflowDraftCompareResult
 ): UseWorkflowStudioActionsResult {
-  const [actionState, setActionState] = useState<ActionState>('idle')
+  const [publishing, setPublishing] = useState(false)
+  const [validating, setValidating] = useState(false)
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
   // P2-C：确认框打开那一刻的 YAML 快照（审阅对象）。
   const [reviewYaml, setReviewYaml] = useState<string | null>(null)
   const { validationErrors, validationMessage, report, reportSilent } =
     useValidationFeedback(draft.definitionYaml)
-  const setValidating = useCallback(
-    (on: boolean) => setActionState(on ? 'validating' : 'idle'),
-    []
-  )
   useDraftAutoValidation({
     workspaceId,
     saveState: draft.draftSave,
     canSubmit: draft.canSubmit,
     definitionYaml: draft.definitionYaml,
     validationMessage,
-    validating: actionState === 'validating',
+    validating,
     reportSilent,
     setValidating,
   })
@@ -80,7 +79,7 @@ export function useWorkflowStudioActions(
     validationMessage === '校验通过'
   async function publishDraft() {
     if (!workspaceId) return
-    setActionState('publishing')
+    setPublishing(true)
     try {
       const result = await publishWorkflowDraft(
         workspaceId,
@@ -99,11 +98,12 @@ export function useWorkflowStudioActions(
       const message = `保存失败：${(e instanceof Error && e.message) || '网络错误'}`
       report([], message, 'error')
     } finally {
-      setActionState('idle')
+      setPublishing(false)
     }
   }
   return {
-    actionState,
+    publishing,
+    validating,
     validationErrors,
     validationMessage,
     reviewDialogOpen,
