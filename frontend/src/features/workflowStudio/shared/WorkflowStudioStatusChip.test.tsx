@@ -57,6 +57,8 @@ function renderChip(overrides: Record<string, unknown> = {}) {
     hasPreservedDraft: false,
     summary: null,
     compareState: 'idle' as const,
+    validating: false,
+    validationMessage: '',
     onShowChanges: vi.fn(),
     ...overrides,
   }
@@ -65,11 +67,21 @@ function renderChip(overrides: Record<string, unknown> = {}) {
 }
 
 describe('WorkflowStudioStatusChip', () => {
-  it('renders a quiet neutral chip when synced', () => {
-    const { onShowChanges } = renderChip()
-    const chip = screen.getByText('已同步')
-    fireEvent.click(chip)
-    expect(onShowChanges).not.toHaveBeenCalled()
+  it('renders nothing in the clean state（#804 定案：「已同步」常态不显示）', () => {
+    const { container } = render(
+      <WorkflowStudioStatusChip
+        readOnly={false}
+        version={null}
+        dirty={false}
+        hasPreservedDraft={false}
+        summary={null}
+        compareState="idle"
+        validating={false}
+        validationMessage=""
+        onShowChanges={vi.fn()}
+      />
+    )
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('shows the viewed revision version when read-only', () => {
@@ -149,6 +161,8 @@ describe('WorkflowStudioStatusChip', () => {
         hasPreservedDraft={false}
         summary={null}
         compareState="loading"
+        validating={false}
+        validationMessage=""
         onShowChanges={vi.fn()}
       />
     )
@@ -170,5 +184,60 @@ describe('WorkflowStudioStatusChip', () => {
       'title',
       expect.stringContaining('已保留当前草稿')
     )
+  })
+
+  it('自动校验进行中：校验中… spinner（不可点击）', () => {
+    const { container } = render(
+      <WorkflowStudioStatusChip
+        readOnly={false}
+        version={null}
+        dirty
+        hasPreservedDraft={false}
+        summary={null}
+        compareState="idle"
+        validating
+        validationMessage=""
+        onShowChanges={vi.fn()}
+      />
+    )
+    expect(screen.getByText('校验中…')).toBeInTheDocument()
+    expect(container.querySelector('.MuiCircularProgress-root')).not.toBeNull()
+  })
+
+  it('自动校验通过：绿色 ✓ 校验通过，点击开校验报告抽屉', () => {
+    const { onShowChanges } = renderChip({
+      dirty: true,
+      validationMessage: '校验通过',
+    })
+    const chip = screen.getByText('✓ 校验通过')
+    expect(chip.closest('.MuiChip-root')).toHaveClass('MuiChip-colorSuccess')
+    fireEvent.click(chip)
+    expect(onShowChanges).toHaveBeenCalledTimes(1)
+  })
+
+  it('自动校验失败：红色 ✗ 校验失败，点击开校验报告抽屉', () => {
+    const { onShowChanges } = renderChip({
+      dirty: true,
+      validationMessage: '校验失败',
+    })
+    const chip = screen.getByText('✗ 校验失败')
+    expect(chip.closest('.MuiChip-root')).toHaveClass('MuiChip-colorError')
+    fireEvent.click(chip)
+    expect(onShowChanges).toHaveBeenCalledTimes(1)
+  })
+
+  it('网络错误也按失败态呈现（校验失败：… 前缀）', () => {
+    renderChip({ dirty: true, validationMessage: '校验失败：网络错误' })
+    expect(screen.getByText('✗ 校验失败')).toBeInTheDocument()
+  })
+
+  it('草稿再编辑后旧校验结果作废：validationMessage 清空回「未发布变更」', () => {
+    renderChip({
+      dirty: true,
+      summary: makeSummary({ nodeChanges: makeNodeChanges() }),
+      validationMessage: '',
+    })
+    expect(screen.getByText('未发布变更 3')).toBeInTheDocument()
+    expect(screen.queryByText('✓ 校验通过')).not.toBeInTheDocument()
   })
 })

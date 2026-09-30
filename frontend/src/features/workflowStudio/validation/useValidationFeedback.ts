@@ -19,10 +19,16 @@ export function useValidationFeedback(definitionYaml: string) {
     message: string,
     toastType: 'success' | 'error'
   ) {
-    setValidationErrors(errors)
-    setValidationMessage(message)
+    reportSilent(errors, message)
     useUiStore.getState().showToast(message, toastType)
   }
 
-  return { validationErrors, validationMessage, report }
+  /* #804 定案：草稿保存成功后的自动校验静默执行（不弹 toast、不开抽屉），
+     结果只写 validation state 驱动左岛状态 chip 与变更抽屉内容。 */
+  function reportSilent(errors: string[], message: string) {
+    setValidationErrors(errors)
+    setValidationMessage(message)
+  }
+
+  return { validationErrors, validationMessage, report, reportSilent }
 }

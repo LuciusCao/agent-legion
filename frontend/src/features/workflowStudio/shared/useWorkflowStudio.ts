@@ -76,7 +76,6 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     resolveConflict: draft.resolveConflict,
     canPublish: actions.canPublish,
     createsRevision: compare.compareSummary?.createsRevision ?? true,
-    validateDraft: actions.validateDraft,
     publishDraft: actions.publishDraft,
     requestPublish: actions.requestPublish,
     resetDefinition: () => draft.setDraftYaml(originalYaml),

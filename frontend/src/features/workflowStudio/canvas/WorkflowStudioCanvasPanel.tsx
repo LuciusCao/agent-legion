@@ -14,8 +14,8 @@ type Props = {
   mobileActive: boolean
 }
 
-/** 画布区（DAG 常驻，工具栏含编辑 YAML / DAG 全屏；Agent 面板开关在
- * appbar，#668）。#795 PR②：Agent 对话迁入 Dock 浮层后画布不再被替换——
+/** 画布区（DAG 常驻，工具栏含添加节点 / 编辑 YAML；Agent 面板开关在
+ * 浮动岛，#668）。#795 PR②：Agent 对话迁入 Dock 浮层后画布不再被替换——
  * 节点详情固定占右栏，画布始终在位。#799：顶边让位按浮动岛实测底边
  * （useCanvasIslandOffset），不写死常量。 */
 export function WorkflowStudioCanvasPanel({ mobileActive }: Props) {
@@ -39,7 +39,6 @@ export function WorkflowStudioCanvasPanel({ mobileActive }: Props) {
         <WorkflowStudioCanvasSourceBadge />
         <WorkflowStudioCanvasToolbar
           onEditYaml={() => view.setYamlEditorOpen(true)}
-          onDagFullscreen={() => view.setDagFullscreenOpen(true)}
         />
       </div>
       <WorkflowStudioCanvasBody />

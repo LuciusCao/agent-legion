@@ -47,8 +47,6 @@ function mockStudio(
 
 describe('WorkflowStudioCanvasSourceBadge', () => {
   it('renders no chip in draft mode when the draft has no unpublished changes (#666)', () => {
-    // 与顶栏同源：无 compare 计数且不 dirty（含刚发布完成）时保持安静，
-    // 不再常驻「草稿（未发布）」。
     mockStudio('draft', 'key: demo\nnodes:\n  a:\n    capability: cap_a\n')
 
     const { container } = render(<WorkflowStudioCanvasSourceBadge />)
@@ -56,25 +54,17 @@ describe('WorkflowStudioCanvasSourceBadge', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('shows the unpublished change count from the compare summary', () => {
+  it('#804 定案：草稿有未发布变更时也不渲染角标 chip（由左岛状态 chip 唯一承接）', () => {
     mockStudio('draft', 'key: demo\nnodes:\n  a:\n    capability: cap_a\n', {
       dirty: true,
       compareSummary: makeSummary('added', 'modified'),
     })
 
-    render(<WorkflowStudioCanvasSourceBadge />)
+    const { container } = render(<WorkflowStudioCanvasSourceBadge />)
 
-    expect(screen.getByText('草稿（未发布变更 2）')).toBeInTheDocument()
-  })
-
-  it('falls back to the dirty flag while the compare summary is unavailable', () => {
-    mockStudio('draft', 'key: demo\nnodes:\n  a:\n    capability: cap_a\n', {
-      dirty: true,
-    })
-
-    render(<WorkflowStudioCanvasSourceBadge />)
-
-    expect(screen.getByText('草稿（有未发布变更）')).toBeInTheDocument()
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText(/草稿（未发布变更/)).toBeNull()
+    expect(screen.queryByText('草稿（有未发布变更）')).toBeNull()
   })
 
   it('warns that the canvas shows the published version while the draft YAML is invalid', () => {
@@ -106,7 +96,7 @@ describe('WorkflowStudioCanvasSourceBadge', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('accompanies the draft chip with the execution hint when top-level defaults are missing (#333)', () => {
+  it('keeps the execution hint when top-level defaults are missing (#333)', () => {
     vi.mocked(useStudioState).mockReturnValue({
       viewMode: 'draft',
       definitionYaml: 'key: demo\nnodes:\n  a:\n    type: agent\n',
@@ -133,7 +123,8 @@ describe('WorkflowStudioCanvasSourceBadge', () => {
 
     render(<WorkflowStudioCanvasSourceBadge />)
 
-    expect(screen.getByText('草稿（未发布变更 1）')).toBeInTheDocument()
+    // 草稿 chip 已去重移除，execution 提示保留。
+    expect(screen.queryByText(/草稿（未发布变更/)).toBeNull()
     expect(
       screen.getByText(
         '未配置顶层 execution 默认，Agent 节点需各自配齐 provider / model'

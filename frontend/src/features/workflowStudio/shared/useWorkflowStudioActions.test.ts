@@ -3,6 +3,7 @@ import { act } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
 import { useUiStore } from '../../../stores/uiStore'
+import type { DraftSaveStatus } from './draftSaveTypes'
 import type { UseWorkflowStudioDraftResult } from './useWorkflowStudioDraft'
 import type { UseWorkflowDraftCompareResult } from './useWorkflowDraftCompare'
 
@@ -19,20 +20,25 @@ vi.mock('../../../api', () => ({
     mocks.validateWorkflowDraft(...args),
 }))
 
-const draft: UseWorkflowStudioDraftResult = {
+type DraftWithSave = UseWorkflowStudioDraftResult & {
+  draftSave: { status: DraftSaveStatus; savedAt: string | null }
+}
+
+const draft: DraftWithSave = {
   draftYaml: 'key: demo\n',
   setDraftYaml: vi.fn(),
   definitionYaml: 'key: demo\n',
   visibleWorkflow: null,
   visibleRevision: null,
   readOnly: false,
-  dirty: false,
+  dirty: true,
   canSubmit: true,
   viewMode: 'draft',
   selectedRevisionId: null,
   hasPreservedDraft: false,
   isLoadingRevision: false,
   revisionLoadError: null,
+  draftSave: { status: 'idle', savedAt: null },
   markDraftPublished: vi.fn(),
   selectRevision: vi.fn(),
   backToDraft: vi.fn(),
@@ -48,33 +54,206 @@ const compare: UseWorkflowDraftCompareResult = {
 
 const reload = vi.fn().mockResolvedValue(undefined)
 
-describe('useWorkflowStudioActions', () => {
+type AutoProps = {
+  saveStatus: DraftSaveStatus
+  definitionYaml: string
+  canSubmit?: boolean
+}
+
+function renderActionsHook(initial: AutoProps) {
+  return renderHook(
+    ({ saveStatus, definitionYaml, canSubmit }: AutoProps) =>
+      useWorkflowStudioActions(
+        'ws1',
+        {
+          ...draft,
+          definitionYaml,
+          canSubmit: canSubmit ?? true,
+          draftSave: { status: saveStatus, savedAt: null },
+        },
+        reload,
+        compare
+      ),
+    { initialProps: initial }
+  )
+}
+
+/** 驱动一次「保存成功」边沿：idle → saved。 */
+async function flushSaved(
+  rerender: (props: AutoProps) => void,
+  props: AutoProps
+) {
+  await act(async () => {
+    rerender({ ...props, saveStatus: 'saved' })
+  })
+}
+
+describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
   beforeEach(() => {
     useUiStore.setState({ toast: null })
+    vi.clearAllMocks()
     mocks.publishWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
     mocks.validateWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
   })
 
-  it('sets validation failure message and clears errors on validate rejection', async () => {
-    mocks.validateWorkflowDraft.mockRejectedValue(new Error('network error'))
-    const { result } = renderHook(() =>
-      useWorkflowStudioActions('ws1', draft, reload, compare)
-    )
+  it('草稿保存成功后自动静默校验：结果写 validation state，不弹 toast', async () => {
+    const { result, rerender } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+    expect(mocks.validateWorkflowDraft).not.toHaveBeenCalled()
 
-    await act(async () => {
-      await result.current.validateDraft()
+    await flushSaved(rerender, {
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
     })
 
+    expect(mocks.validateWorkflowDraft).toHaveBeenCalledWith(
+      'ws1',
+      'key: demo\n'
+    )
+    expect(result.current.validationMessage).toBe('校验通过')
     expect(result.current.actionState).toBe('idle')
+    // 静默：不弹 toast（手动校验时代有 toast）。
+    expect(useUiStore.getState().toast).toBeNull()
+  })
+
+  it('校验失败：写 errors + 校验失败 message（chip 变红、发布禁用的数据源）', async () => {
+    mocks.validateWorkflowDraft.mockResolvedValue({
+      valid: false,
+      errors: ['missing key'],
+    })
+    const { result, rerender } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+
+    await flushSaved(rerender, {
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+
+    expect(result.current.validationMessage).toBe('校验失败')
+    expect(result.current.validationErrors).toEqual(['missing key'])
+    expect(useUiStore.getState().toast).toBeNull()
+  })
+
+  it('校验请求网络错误：校验失败：原因', async () => {
+    mocks.validateWorkflowDraft.mockRejectedValue(new Error('network error'))
+    const { result, rerender } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+
+    await flushSaved(rerender, {
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+
     expect(result.current.validationMessage).toBe('校验失败：network error')
     expect(result.current.validationErrors).toEqual([])
   })
 
+  it('干净态保存成功不触发校验（canSubmit=false：无未发布变更）', async () => {
+    const { rerender } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+      canSubmit: false,
+    })
+
+    await flushSaved(rerender, {
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+      canSubmit: false,
+    })
+
+    expect(mocks.validateWorkflowDraft).not.toHaveBeenCalled()
+  })
+
+  it('saved 常驻期间不重复触发（只在进入 saved 的边沿跑）', async () => {
+    const { rerender } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+    await flushSaved(rerender, {
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+    expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
+
+    // saved → saved（无变化的重复渲染/刷新）：不触发。
+    await act(async () => {
+      rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
+    })
+    expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('草稿再编辑后旧校验结果作废（回「未发布变更」的数据源）', async () => {
+    const { result, rerender } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+    await flushSaved(rerender, {
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+    expect(result.current.validationMessage).toBe('校验通过')
+
+    await act(async () => {
+      rerender({
+        saveStatus: 'saved',
+        definitionYaml: 'key: demo\nlabel: changed\n',
+      })
+    })
+    expect(result.current.validationMessage).toBe('')
+    expect(result.current.validationErrors).toEqual([])
+  })
+
+  it('校验在途期间草稿再编辑：迟到的结果丢弃，不覆盖新编辑', async () => {
+    let resolveValidation!: (value: {
+      valid: boolean
+      errors: string[]
+    }) => void
+    mocks.validateWorkflowDraft.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveValidation = resolve
+        })
+    )
+    const { result, rerender } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
+    // 保存成功 → 校验在途。
+    await act(async () => {
+      rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
+    })
+    expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
+    expect(result.current.actionState).toBe('validating')
+
+    // 校验未回，草稿已改（旧结果即失效）。
+    await act(async () => {
+      rerender({
+        saveStatus: 'pending',
+        definitionYaml: 'key: demo\nlabel: newer\n',
+      })
+    })
+    expect(result.current.validationMessage).toBe('')
+
+    // 迟到结果抵达：不得写入。
+    await act(async () => {
+      resolveValidation!({ valid: true, errors: [] })
+    })
+    expect(result.current.validationMessage).toBe('')
+    expect(result.current.actionState).toBe('idle')
+  })
+
   it('sets validation failure message and clears errors on publish rejection', async () => {
     mocks.publishWorkflowDraft.mockRejectedValue(new Error('network error'))
-    const { result } = renderHook(() =>
-      useWorkflowStudioActions('ws1', draft, reload, compare)
-    )
+    const { result } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
+    })
 
     await act(async () => {
       await result.current.publishDraft()
@@ -85,34 +264,10 @@ describe('useWorkflowStudioActions', () => {
     expect(result.current.validationErrors).toEqual([])
   })
 
-  it('still shows validation errors returned by the API', async () => {
-    mocks.validateWorkflowDraft.mockResolvedValue({
-      valid: false,
-      errors: ['missing key'],
-    })
-    const { result } = renderHook(() =>
-      useWorkflowStudioActions('ws1', draft, reload, compare)
-    )
-
-    await act(async () => {
-      await result.current.validateDraft()
-    })
-
-    expect(result.current.validationMessage).toBe('校验失败')
-    expect(result.current.validationErrors).toEqual(['missing key'])
-  })
-
-  it('toasts publish/validate outcomes (feedback visible when the changes view is hidden)', async () => {
-    const { result } = renderHook(() =>
-      useWorkflowStudioActions('ws1', draft, reload, compare)
-    )
-
-    await act(async () => {
-      await result.current.validateDraft()
-    })
-    expect(useUiStore.getState().toast).toEqual({
-      message: '校验通过',
-      type: 'success',
+  it('toasts publish outcome（发布仍弹 toast，与静默校验相对）', async () => {
+    const { result } = renderActionsHook({
+      saveStatus: 'idle',
+      definitionYaml: 'key: demo\n',
     })
 
     await act(async () => {
@@ -122,29 +277,6 @@ describe('useWorkflowStudioActions', () => {
       message: '保存成功',
       type: 'success',
     })
-  })
-
-  it('clears stale validation state when the draft is edited again', async () => {
-    const { result, rerender } = renderHook(
-      ({ definitionYaml }) =>
-        useWorkflowStudioActions(
-          'ws1',
-          { ...draft, definitionYaml },
-          reload,
-          compare
-        ),
-      { initialProps: { definitionYaml: 'key: demo\n' } }
-    )
-
-    await act(async () => {
-      await result.current.validateDraft()
-    })
-    expect(result.current.validationMessage).toBe('校验通过')
-
-    rerender({ definitionYaml: 'key: demo\nlabel: changed\n' })
-
-    expect(result.current.validationMessage).toBe('')
-    expect(result.current.validationErrors).toEqual([])
   })
 
   it('marks the published draft before reload so baseline sync force-resets (#666)', async () => {

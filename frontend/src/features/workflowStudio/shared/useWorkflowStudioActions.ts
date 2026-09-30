@@ -1,10 +1,19 @@
-import { useState } from 'react'
-import { publishWorkflowDraft, validateWorkflowDraft } from '../../../api'
+import { useCallback, useState } from 'react'
+import { publishWorkflowDraft } from '../../../api'
 import { useValidationFeedback } from '../validation/useValidationFeedback'
+import { useDraftAutoValidation } from './useDraftAutoValidation'
+import type { DraftSaveState } from './draftSaveTypes'
 import type { UseWorkflowStudioDraftResult } from './useWorkflowStudioDraft'
 import type { UseWorkflowDraftCompareResult } from './useWorkflowDraftCompare'
 
 type ActionState = 'idle' | 'validating' | 'publishing'
+
+/* #804 定案：手动「校验」按钮退役——草稿保存成功后自动静默校验
+ * （useDraftAutoValidation），结果驱动左岛状态 chip；actions 层需要保存
+ * 状态机的当前状态做触发边沿。 */
+type DraftWithSave = UseWorkflowStudioDraftResult & {
+  draftSave: DraftSaveState
+}
 
 export type UseWorkflowStudioActionsResult = {
   actionState: ActionState
@@ -12,22 +21,32 @@ export type UseWorkflowStudioActionsResult = {
   validationMessage: string
   reviewDialogOpen: boolean
   canPublish: boolean
-  validateDraft: () => Promise<void>
   publishDraft: () => Promise<void>
   requestPublish: () => void
   closeReviewDialog: () => void
 }
 export function useWorkflowStudioActions(
   workspaceId: string | undefined,
-  draft: UseWorkflowStudioDraftResult,
+  draft: DraftWithSave,
   reload: () => Promise<void>,
   compare: UseWorkflowDraftCompareResult
 ): UseWorkflowStudioActionsResult {
   const [actionState, setActionState] = useState<ActionState>('idle')
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
-  const { validationErrors, validationMessage, report } = useValidationFeedback(
-    draft.definitionYaml
+  const { validationErrors, validationMessage, report, reportSilent } =
+    useValidationFeedback(draft.definitionYaml)
+  const setValidating = useCallback(
+    (on: boolean) => setActionState(on ? 'validating' : 'idle'),
+    []
   )
+  useDraftAutoValidation({
+    workspaceId,
+    saveStatus: draft.draftSave.status,
+    canSubmit: draft.canSubmit,
+    definitionYaml: draft.definitionYaml,
+    reportSilent,
+    setValidating,
+  })
   const { compareState, compareErrors, compareSummary } = compare
   const hasCompareChanges = Boolean(
     compareSummary?.nodeChanges.length ||
@@ -45,23 +64,6 @@ export function useWorkflowStudioActions(
     compareState !== 'loading' &&
     !hasBlockingCompareError &&
     hasCompareChanges
-  async function validateDraft() {
-    if (!workspaceId) return
-    setActionState('validating')
-    try {
-      const result = await validateWorkflowDraft(
-        workspaceId,
-        draft.definitionYaml
-      )
-      const message = result.valid ? '校验通过' : '校验失败'
-      report(result.errors, message, result.valid ? 'success' : 'error')
-    } catch (e) {
-      const message = `校验失败：${(e instanceof Error && e.message) || '网络错误'}`
-      report([], message, 'error')
-    } finally {
-      setActionState('idle')
-    }
-  }
   async function publishDraft() {
     if (!workspaceId) return
     setActionState('publishing')
@@ -92,7 +94,6 @@ export function useWorkflowStudioActions(
     validationMessage,
     reviewDialogOpen,
     canPublish,
-    validateDraft,
     publishDraft,
     requestPublish: () => {
       if (canPublish) setReviewDialogOpen(true)

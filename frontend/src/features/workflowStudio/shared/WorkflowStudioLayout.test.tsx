@@ -70,8 +70,6 @@ const baseProps = {
   edges: [],
   reviewDialogOpen: false,
   closeReviewDialog: vi.fn(),
-  dagFullscreenOpen: false,
-  setDagFullscreenOpen: vi.fn(),
   changesPanelOpen: false,
   setChangesPanelOpen: vi.fn(),
   yamlEditorOpen: false,
@@ -92,7 +90,7 @@ const baseProps = {
 }
 
 // Layout 不再接收整包 props：studio 经 StudioStateContext 注入，view 字段
-// （changesPanelOpen/yamlEditorOpen/dagFullscreenOpen 等）经 StudioViewContext 注入。
+// （changesPanelOpen/yamlEditorOpen 等）经 StudioViewContext 注入。
 // 伪造对象与真实 StudioState 形状存在字段级差异（null vs 具体对象），
 // 走 StudioStateContext 注入，类型上统一放宽为 object。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -101,8 +99,6 @@ function studioProvidersFor(studio: LayoutStudio) {
   // view 专属字段摘出进 StudioViewContext；on* 回调是 AppBar 层的，
   // Layout 子树不再消费。
   const {
-    dagFullscreenOpen,
-    setDagFullscreenOpen,
     changesPanelOpen,
     setChangesPanelOpen,
     yamlEditorOpen,
@@ -110,8 +106,6 @@ function studioProvidersFor(studio: LayoutStudio) {
     ...studioState
   } = studio
   const view = makeStudioView({
-    ...(dagFullscreenOpen !== undefined ? { dagFullscreenOpen } : {}),
-    ...(setDagFullscreenOpen !== undefined ? { setDagFullscreenOpen } : {}),
     ...(changesPanelOpen !== undefined ? { changesPanelOpen } : {}),
     ...(setChangesPanelOpen !== undefined ? { setChangesPanelOpen } : {}),
     ...(yamlEditorOpen !== undefined ? { yamlEditorOpen } : {}),

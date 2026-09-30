@@ -1,6 +1,7 @@
 import { Chip, CircularProgress } from '@mui/material'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import { countNodeChanges } from '../canvas/workflowStudioDagChanges'
+import { WorkflowStudioChangeCountChip } from './WorkflowStudioChangeCountChip'
 
 type Props = {
   readOnly: boolean
@@ -10,19 +11,19 @@ type Props = {
   hasPreservedDraft: boolean
   summary: ChangeSummaryViewModel | null
   compareState: 'idle' | 'loading' | 'ready' | 'error'
+  /** #804 定案：自动校验状态（草稿保存成功后静默校验的结果驱动）。 */
+  validating: boolean
+  validationMessage: string
   onShowChanges: () => void
 }
 
-const RISK_TEXT = {
-  breaking: '风险：高',
-  warning: '风险：中',
-  info: '风险：低',
-} as const
-
-/** 顶栏统一状态 chip：合并 已同步/只读/未发布变更计数/风险/计算中/已保留草稿，
- * 有变更时点击打开变更面板，颜色直接编码风险等级。只读（查看历史 revision）
- * 优先于「计算中…」：compare 因草稿未发布变更在后台运行时版本标识不闪断，
- * 且计数并入只读 chip，让「草稿有未发布更改」在查看 revision 期间持续可见。 */
+/** 左岛统一状态 chip（CI 风格）：草稿有未发布变更时经 未发布变更 →
+ * 校验中… → ✓ 校验通过（绿）/ ✗ 校验失败（红，点击开校验报告抽屉）；
+ * 无变更（干净态）不渲染——「已同步」常态不占位（#804 定案）。草稿再
+ * 编辑后旧校验结果由 useValidationFeedback 作废，chip 回「未发布变更」。
+ * 只读（查看历史 revision）优先于「计算中…」：compare 因草稿未发布变更
+ * 在后台运行时版本标识不闪断，且计数并入只读 chip，让「草稿有未发布
+ * 更改」在查看 revision 期间持续可见。 */
 export function WorkflowStudioStatusChip(props: Props) {
   const counts = countNodeChanges(props.summary)
   const preservedText = props.hasPreservedDraft
@@ -48,53 +49,69 @@ export function WorkflowStudioStatusChip(props: Props) {
       />
     )
   }
+  const hasChanges = Boolean(counts) || props.dirty
+  if (!hasChanges) {
+    // 干净态不显示 chip；保留草稿警示是例外（基线更新没覆盖本页编辑）。
+    if (props.hasPreservedDraft) {
+      return (
+        <Chip
+          size="small"
+          color="warning"
+          label="已保留当前草稿"
+          title={preservedText ?? undefined}
+        />
+      )
+    }
+    return null
+  }
+  if (props.validating) {
+    return (
+      <Chip
+        size="small"
+        icon={<CircularProgress size={12} />}
+        label="校验中…"
+        title="草稿已保存，自动校验进行中"
+      />
+    )
+  }
+  if (props.validationMessage.startsWith('校验失败')) {
+    return (
+      <Chip
+        size="small"
+        color="error"
+        label="✗ 校验失败"
+        title={`${props.validationMessage}——点击查看校验报告`}
+        onClick={props.onShowChanges}
+      />
+    )
+  }
+  if (props.validationMessage === '校验通过') {
+    return (
+      <Chip
+        size="small"
+        color="success"
+        label="✓ 校验通过"
+        title="自动校验通过——点击查看变更与校验报告"
+        onClick={props.onShowChanges}
+      />
+    )
+  }
   if (counts) {
-    const risk = props.summary?.riskLevel
-    const color =
-      risk === 'breaking' ? 'error' : risk === 'warning' ? 'warning' : 'info'
-    const riskText =
-      risk === 'breaking' || risk === 'warning' || risk === 'info'
-        ? RISK_TEXT[risk]
-        : null
-    const title = [
-      riskText,
-      `新增 ${counts.added} · 已改 ${counts.modified} · 已删 ${counts.removed}`,
-      props.summary?.createsRevision ? '将创建新版本' : null,
-      preservedText,
-    ]
-      .filter(Boolean)
-      .join(' · ')
     return (
-      <Chip
-        size="small"
-        color={color}
-        label={`未发布变更 ${counts.total}`}
-        title={title}
-        onClick={props.onShowChanges}
+      <WorkflowStudioChangeCountChip
+        summary={props.summary}
+        preservedText={preservedText}
+        onShowChanges={props.onShowChanges}
       />
     )
   }
-  if (props.dirty) {
-    return (
-      <Chip
-        size="small"
-        color="info"
-        label="有未发布变更"
-        title={preservedText ?? undefined}
-        onClick={props.onShowChanges}
-      />
-    )
-  }
-  if (props.hasPreservedDraft) {
-    return (
-      <Chip
-        size="small"
-        color="warning"
-        label="已保留当前草稿"
-        title={preservedText ?? undefined}
-      />
-    )
-  }
-  // 无变更且非只读：中性「已同步」，保持安静不可点。
-  return <Chip size="small" label="已同步" />
+  return (
+    <Chip
+      size="small"
+      color="info"
+      label="有未发布变更"
+      title={preservedText ?? undefined}
+      onClick={props.onShowChanges}
+    />
+  )
 }

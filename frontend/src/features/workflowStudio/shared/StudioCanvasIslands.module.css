@@ -48,12 +48,6 @@
   max-width: 320px;
 }
 
-.modeText {
-  font-size: 12px;
-  color: var(--color-text-secondary, #667085);
-  white-space: nowrap;
-}
-
 /* 分隔线：指挥中心的「身份/版本/草稿」与「生命周期动作」两族之间。 */
 .divider {
   flex: none;
@@ -70,9 +64,9 @@
 }
 
 /* 窄屏紧凑形态（≤900px，页签导航在场）：左岛只留返回 + 版本选择器 +
- * contained 主按钮——secondary 件（标题/模式文本/状态 chip/保存控件）隐藏
- * 降级；校验图标按钮窄屏隐藏（低频，重置仍可经 ⋮ 菜单到达；只读态的
- * outlined「返回」同样隐藏）。右岛图标组保持、文字省略。 */
+ * contained 主按钮——secondary 件（标题/状态 chip/保存文本）隐藏降级；
+ * 动作组的 outlined 次级按钮（重置，只读态的「返回」）同样隐藏。右岛
+ * 图标组保持、文字省略。 */
 @media (max-width: 900px) {
   .island {
     padding: 4px 6px;
@@ -83,8 +77,7 @@
     display: none;
   }
 
-  .actionsGroup :global(.MuiButton-outlined),
-  .actionsGroup :global([aria-label='校验']) {
+  .actionsGroup :global(.MuiButton-outlined) {
     display: none;
   }
 

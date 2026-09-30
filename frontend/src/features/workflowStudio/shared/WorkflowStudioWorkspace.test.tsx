@@ -107,7 +107,6 @@ function renderWorkspaceLive() {
     definitionYaml: 'key: demo_video_workflow\n',
     setDefinitionYaml: vi.fn(),
     backToDraft: vi.fn(),
-    setDagFullscreenOpen: vi.fn(),
     // #799 浮动岛消费的 studio 字段（岛挂在 Workspace 内）。
     revision: null,
     revisions: [],
@@ -196,7 +195,6 @@ function renderWorkspace(
     definitionYaml: 'key: demo_video_workflow\n',
     setDefinitionYaml: vi.fn(),
     backToDraft: vi.fn(),
-    setDagFullscreenOpen: vi.fn(),
     // #799 浮动岛消费的 studio 字段（岛挂在 Workspace 内）。
     revision: null,
     revisions: [],

@@ -23,8 +23,6 @@ export function withStudioProviders(
 /** view 字段的默认形状（useWorkflowStudioPageView 的返回值）。 */
 export function makeStudioView(overrides: Record<string, unknown> = {}) {
   return {
-    dagFullscreenOpen: false,
-    setDagFullscreenOpen: vi.fn(),
     changesPanelOpen: false,
     setChangesPanelOpen: vi.fn(),
     yamlEditorOpen: false,
@@ -35,7 +33,6 @@ export function makeStudioView(overrides: Record<string, unknown> = {}) {
     mobilePanel: 'graph',
     setMobilePanel: vi.fn(),
     narrow: false,
-    validateAndShowResult: vi.fn(),
     ...overrides,
   }
 }

@@ -65,9 +65,11 @@ describe('WorkflowStudioCanvasPanel', () => {
     expect(
       screen.queryByRole('group', { name: '画布模式' })
     ).not.toBeInTheDocument()
+    // #804 定案：DAG 全屏按钮退役（job detail 的全屏 DAG 弹窗不受影响，
+    // 走自己的入口）。
     expect(
-      screen.getByRole('button', { name: 'open fullscreen DAG' })
-    ).toBeInTheDocument()
+      screen.queryByRole('button', { name: 'open fullscreen DAG' })
+    ).not.toBeInTheDocument()
     // #668：Agent 面板开关收敛在顶栏体系（#799 起为画布列内的浮动岛），
     // 画布工具条不再有开关——断言限定工具条区域。
     expect(

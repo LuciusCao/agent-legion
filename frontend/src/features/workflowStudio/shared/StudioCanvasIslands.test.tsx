@@ -4,7 +4,7 @@ import { StudioCanvasIslands } from './StudioCanvasIslands'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 
 // useParams/useNavigate 的 router 环境在页面测试里才真；这里给岛打桩出
-// 固定路由上下文（返回/用量导航断言用）。
+// 固定路由上下文（返回导航断言用）。
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom')
@@ -20,15 +20,9 @@ vi.mock('./WorkflowStudioDraftSaveControl', () => ({
   WorkflowStudioDraftSaveControlContainer: () => null,
 }))
 
-// useWorkspaceDisplayName 拉 workspace 名：本套件不验名称，打桩成固定值。
+// useWorkspaceDisplayName 拉 workspace 名：本套件不验名称加载，打桩成固定值。
 vi.mock('./useWorkspaceDisplayName', () => ({
   useWorkspaceDisplayName: () => '题目审题',
-}))
-
-// 窄屏判定打桩（matchMedia stub 恒 false，无法走真实断点）：可变旗标驱动。
-const narrowState = { value: false }
-vi.mock('./useStudioNarrowViewport', () => ({
-  useStudioNarrowViewport: () => narrowState.value,
 }))
 
 /** 岛消费的 studio 字段全量空壳（withStudioProviders 的 studio 侧）。 */
@@ -45,6 +39,7 @@ const studioStub = {
   actionState: 'idle',
   canSubmit: true,
   canPublish: true,
+  validationMessage: '',
   selectedRevisionId: null,
   isLoadingRevision: false,
   revisionLoadError: null,
@@ -55,18 +50,36 @@ const studioStub = {
   useViewedRevisionAsDraft: vi.fn(),
 }
 
-function renderIslands(viewOverrides: Record<string, unknown> = {}) {
+function renderIslands(
+  studioOverrides: Record<string, unknown> = {},
+  viewOverrides: Record<string, unknown> = {}
+) {
   const view = makeStudioView(viewOverrides)
-  return render(withStudioProviders(studioStub, view, <StudioCanvasIslands />))
+  return render(
+    withStudioProviders(
+      { ...studioStub, ...studioOverrides },
+      view,
+      <StudioCanvasIslands />
+    )
+  )
 }
 
-describe('StudioCanvasIslands（#799：去 AppBar 画布化的双浮岛）', () => {
-  it('左上身份岛：返回 + 标题 + 版本状态 + 状态 chip + 版本选择器 + 草稿保存控件', () => {
+describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
+  it('左上身份岛：返回 + workspace 名（无 modeText）+ 版本选择器 + 状态 chip', () => {
     renderIslands()
     const island = screen.getByTestId('studio-identity-island')
-    expect(island).toHaveTextContent('题目审题 / 编辑工作流')
-    expect(island).toHaveTextContent('基于 v- 的草稿')
+    // #804 定案：标题只剩 workspace 名——「/ 编辑工作流」modeText 与
+    // 「基于 v- 的草稿」草稿基线文本均已移除。
+    expect(island).toHaveTextContent('题目审题')
+    expect(island).not.toHaveTextContent('/ 编辑工作流')
+    expect(island).not.toHaveTextContent('基于 v')
     expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument()
+    // 版本选择器紧跟标题右侧。
+    expect(
+      within(island).getByRole('button', { name: /v- ·/ })
+    ).toBeInTheDocument()
+    // 干净态（无未发布变更）不显示状态 chip。
+    expect(within(island).queryByText('已同步')).toBeNull()
   })
 
   it('返回按钮导航回 workspace', () => {
@@ -75,22 +88,58 @@ describe('StudioCanvasIslands（#799：去 AppBar 画布化的双浮岛）', () 
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1')
   })
 
-  it('左岛生命周期动作：校验图标按钮 + 发布主按钮 + ⋮ 溢出菜单（重置收进）', () => {
-    renderIslands()
+  it('左岛生命周期动作（#804 定案）：发布主按钮 + 仅 dirty 外露的重置；无校验按钮、无 ⋮ 菜单、无手动保存按钮', () => {
+    renderIslands({ dirty: true })
     const island = screen.getByTestId('studio-identity-island')
-    // 校验收成图标按钮（aria-label + tooltip 承载文案，不占文字位）。
+    // 发布保持 contained 文字主按钮，文案「发布」。
     expect(
-      within(island).getByRole('button', { name: '校验' })
+      within(island).getByRole('button', { name: '发布' })
     ).toBeInTheDocument()
-    // 发布保持 contained 文字主按钮。
-    expect(island).toHaveTextContent('发布新版本')
-    // 重置收进 ⋮ 溢出菜单（低频破坏性动作）。
+    // 重置 dirty 时外露为 outlined 次级按钮。
     expect(
-      within(island).getByRole('button', { name: '更多操作' })
+      within(island).getByRole('button', { name: '重置' })
     ).toBeInTheDocument()
-    expect(within(island).queryByText('重置')).toBeNull()
+    // 校验按钮（自动校验取代）、⋮ 溢出菜单、手动「保存草稿」均退役。
+    expect(within(island).queryByRole('button', { name: '校验' })).toBeNull()
+    expect(
+      within(island).queryByRole('button', { name: '更多操作' })
+    ).toBeNull()
+    expect(
+      within(island).queryByRole('button', { name: '保存草稿' })
+    ).toBeNull()
     // 分隔线在位（身份/版本族与动作族之间）。
     expect(island.querySelector('[class*="divider"]')).not.toBeNull()
+  })
+
+  it('干净态：重置按钮消失', () => {
+    renderIslands({ dirty: false })
+    const island = screen.getByTestId('studio-identity-island')
+    expect(within(island).queryByRole('button', { name: '重置' })).toBeNull()
+  })
+
+  it('自动校验失败：发布禁用 + tooltip 说明，状态 chip 变红可点击开报告', () => {
+    const setChangesPanelOpen = vi.fn()
+    renderIslands(
+      { dirty: true, validationMessage: '校验失败' },
+      { setChangesPanelOpen }
+    )
+    const island = screen.getByTestId('studio-identity-island')
+    expect(within(island).getByRole('button', { name: '发布' })).toBeDisabled()
+    fireEvent.click(within(island).getByText('✗ 校验失败'))
+    expect(setChangesPanelOpen).toHaveBeenCalledWith(true)
+  })
+
+  it('自动校验通过：绿色 ✓ 校验通过 chip，发布可用', () => {
+    renderIslands({ dirty: true, validationMessage: '校验通过' })
+    const island = screen.getByTestId('studio-identity-island')
+    expect(within(island).getByText('✓ 校验通过')).toBeInTheDocument()
+    expect(within(island).getByRole('button', { name: '发布' })).toBeEnabled()
+  })
+
+  it('校验进行中：chip 显示 校验中…', () => {
+    renderIslands({ dirty: true, actionState: 'validating' })
+    const island = screen.getByTestId('studio-identity-island')
+    expect(within(island).getByText('校验中…')).toBeInTheDocument()
   })
 
   it('右岛图标+文字并排：Agent 助手 + 共享素材；无文字按钮、无用量入口', () => {
@@ -112,25 +161,15 @@ describe('StudioCanvasIslands（#799：去 AppBar 画布化的双浮岛）', () 
     // display:none 承担（jsdom 无布局验证不了，语义钉在 CanvasPanel 用例
     // 的 mobileActive 类断言）——岛组件自身恒渲染，保证尺寸观察不失效
     // （轮 2 P3：返回 null 会让 ResizeObserver 观察失效）。
-    narrowState.value = true
-    try {
-      renderIslands({ mobilePanel: 'editor' })
-      expect(screen.getByTestId('studio-identity-island')).toBeInTheDocument()
-      expect(screen.getByTestId('studio-action-island')).toBeInTheDocument()
-    } finally {
-      narrowState.value = false
-    }
+    renderIslands({}, { mobilePanel: 'editor' })
+    expect(screen.getByTestId('studio-identity-island')).toBeInTheDocument()
+    expect(screen.getByTestId('studio-action-island')).toBeInTheDocument()
   })
 
   it('窄屏画布页签：岛仍在（紧凑形态由 CSS 承担）', () => {
-    narrowState.value = true
-    try {
-      renderIslands({ mobilePanel: 'graph' })
-      expect(screen.getByTestId('studio-identity-island')).toBeInTheDocument()
-      expect(screen.getByTestId('studio-action-island')).toBeInTheDocument()
-    } finally {
-      narrowState.value = false
-    }
+    renderIslands({}, { mobilePanel: 'graph' })
+    expect(screen.getByTestId('studio-identity-island')).toBeInTheDocument()
+    expect(screen.getByTestId('studio-action-island')).toBeInTheDocument()
   })
 
   it('宽屏双岛互斥（#804 codex 轮 2 P1）：左岛 max-width = 容器宽 - 右岛实测宽 - 间距', async () => {
