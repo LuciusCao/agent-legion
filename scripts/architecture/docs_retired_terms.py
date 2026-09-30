@@ -55,6 +55,7 @@ _CURRENT_DOCS = (
     "docs/architecture/execution-generation.md",
     "docs/architecture/node-sdk-and-worker-execution-design.md",
     "docs/architecture/materials-and-runs-design.md",
+    "docs/architecture/studio-draft-publish-contract.md",
     "docs/agent-worker-deployment.md",
     "docs/data-layout.md",
     "docs/materials-storage-deployment.md",
