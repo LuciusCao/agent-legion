@@ -85,14 +85,13 @@ export function useWorkflowDraftPersistence(
     }
   }, [workspaceId])
 
-  const { hydrated, isHydrated, adoptServerDraft, resolveConflict } =
-    useDraftServerSync(
-      workspaceId,
-      serverDraft,
-      originalYaml,
-      controllerRef,
-      consumeReapplyConflict
-    )
+  const { hydrated, isHydrated, adoptServerDraft } = useDraftServerSync(
+    workspaceId,
+    serverDraft,
+    originalYaml,
+    controllerRef,
+    consumeReapplyConflict
+  )
 
   useEffect(() => {
     if (!workspaceId || !hydrated) return
@@ -126,6 +125,15 @@ export function useWorkflowDraftPersistence(
   }, [isHydrated])
 
   useDraftUnloadGuard({ flush: flushNow, hasUnsavedChanges })
+
+  // #804 P1-A：keep-mine 把当前画布内容带给 controller——在途 409 清空
+  // pendingSave 后由它补调度（否则状态机卡 error 永不落盘）。
+  const resolveConflict = useCallback((keepMine: boolean) => {
+    controllerRef.current?.resolveConflict(
+      keepMine,
+      () => yamlRefs.current.draft
+    )
+  }, [])
 
   return {
     state: serverDraftLoadError ? { ...state, loadError: true } : state,

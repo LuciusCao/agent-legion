@@ -31,6 +31,9 @@ export function useWorkflowDraftCompare(
     useState<ChangeSummaryViewModel | null>(null)
   const requestCounter = useRef(0)
   const latestRequest = useRef(0)
+  // 轮 6 H4：compare 传输失败的显式重试——nonce 进依赖即重跑（内容未变
+  // 也可重试，不必等再次编辑）。
+  const [retryNonce, setRetryNonce] = useState(0)
 
   useEffect(() => {
     // 空基线（新 workspace 无 active revision）时即使未 dirty 也要跑一次
@@ -69,7 +72,13 @@ export function useWorkflowDraftCompare(
     }, DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [workspaceId, definitionYaml, dirty, allowMissingBaseline])
+  }, [workspaceId, definitionYaml, dirty, allowMissingBaseline, retryNonce])
 
-  return { compareState, compareResponse, compareErrors, compareSummary }
+  return {
+    compareState,
+    compareResponse,
+    compareErrors,
+    compareSummary,
+    retry: () => setRetryNonce((n) => n + 1),
+  }
 }

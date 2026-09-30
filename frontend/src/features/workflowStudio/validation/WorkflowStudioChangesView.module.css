@@ -15,3 +15,15 @@
   margin: 0;
   color: #616161;
 }
+
+/* 轮 6 H3：传输失败终态的「重试校验」入口。 */
+.retryValidation {
+  border: 1px solid var(--color-border, #e0e0e0);
+  background: none;
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--color-primary, #1976d2);
+  cursor: pointer;
+  margin-bottom: 8px;
+}

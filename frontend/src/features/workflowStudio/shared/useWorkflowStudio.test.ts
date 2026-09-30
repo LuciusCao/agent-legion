@@ -360,6 +360,52 @@ describe('useWorkflowStudio', () => {
     expect(result.current.canSubmit).toBe(false)
   })
 
+  it('compare 传输失败进 error 态，retryCompare 重新发起（轮 6 H4）', async () => {
+    mocks.compareWorkflowDraft.mockRejectedValue(new Error('network down'))
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+    await waitFor(() =>
+      expect(result.current.definitionYaml).toBe(
+        activeRevisionPayload.definition_yaml
+      )
+    )
+
+    act(() => {
+      result.current.setDefinitionYaml('key: demo\nlabel: My Draft\n')
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+    await waitFor(() => expect(result.current.compareState).toBe('error'))
+    const calls = mocks.compareWorkflowDraft.mock.calls.length
+
+    mocks.compareWorkflowDraft.mockResolvedValue({
+      valid: true,
+      base_revision: null,
+      draft_workflow: null,
+      summary: {
+        risk_level: 'info',
+        node_changes: [],
+        edge_changes: [],
+        intake_changes: [],
+        risk_flags: [],
+      },
+      errors: [],
+    })
+    act(() => result.current.retryCompare())
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+    await waitFor(() =>
+      expect(mocks.compareWorkflowDraft.mock.calls.length).toBeGreaterThan(
+        calls
+      )
+    )
+    await waitFor(() => expect(result.current.compareState).toBe('ready'))
+  })
+
   it('compares against an empty baseline only in empty mode', async () => {
     mocks.fetchActiveWorkflowRevision.mockRejectedValue(notFoundError())
     mocks.fetchWorkflowRevisions.mockResolvedValue({ revisions: [] })
@@ -405,6 +451,14 @@ describe('useWorkflowStudio', () => {
       })
     )
     expect(result.current.compareState).toBe('ready')
+    // codex 轮 3 P2：canPublish 还要求当前 YAML 自动校验通过——推进过保存
+    // debounce（800ms）让草稿落盘触发自动校验。
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() =>
+      expect(result.current.validationMessage).toBe('校验通过')
+    )
     expect(result.current.canPublish).toBe(true)
   })
 

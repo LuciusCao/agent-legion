@@ -938,11 +938,12 @@ exemptions:
     findings demanded explicit exits instead of a one-key silent override);
     splitting the conflict lifecycle out of the save controller would fork
     the CAS base bookkeeping it guards. Ceiling at actual + 10 per the
-    dated-exemption convention. Remove when the draft-save wiring gets its
+    dated-exemption convention (#804 定案删掉手动「保存草稿」按钮后文件收缩，
+    ceiling 顺势从 83 降到 82). Remove when the draft-save wiring gets its
     planned rework or a budget re-balance pass re-registers it.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 83
+  ceiling: 82
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/serverDraftReapply.ts
   reason: >-

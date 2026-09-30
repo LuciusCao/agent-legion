@@ -308,6 +308,44 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     )
   })
 
+  it('keep-mine with an empty pendingSave (conflict arrived in-flight) re-saves the current canvas content（#804 P1-A：否则卡死 error 永不落盘）', async () => {
+    // 409 在 PUT 在途时到达：enterConflict 已把 pendingSave 清空——
+    // resolveConflict(true) 拿不到 pending，旧实现到此为止：状态停 error、
+    // 调度 effect 因 draftYaml 未变不再触发、flushNow no-op，编辑静默丢失。
+    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // 不再做任何编辑，直接「保留本页编辑」：必须按当前画布内容补发保存。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: EDITED,
+      updated_at: '2026-09-12T11:00:00+00:00',
+    })
+    act(() => result.current.resolveConflict(true))
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: '2026-09-12T10:00:00+00:00',
+    })
+    expect(result.current.state.conflict).toBeUndefined()
+  })
+
   it('flushNow resolves {ok: false} on a conflict (publish guard must abort)', async () => {
     mocks.putWorkflowDraft.mockRejectedValue(conflictError())
     const { result, rerender } = renderPersistence({
@@ -330,6 +368,61 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
 
     expect(flushed?.ok).toBe(false)
     expect(flushed?.state.conflict).toBe(true)
+  })
+
+  it('flushNow in conflict state resolves {ok: false}（#804 轮 6 H1：冲突态 no-op 不得报 ok，否则 agent 发布确认守卫放行审 A 发 B）', async () => {
+    mocks.putWorkflowDraft.mockRejectedValue(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // 冲突态的 flushNow 是有意 no-op（不静默覆盖 Agent 草稿）——但终态
+    // 必须 ok:false（与 draftSaveQueue 的 drain 路径同语义），等待方
+    // （agent 发布确认）据此中止。
+    let flushed: { ok: boolean } | undefined
+    await act(async () => {
+      flushed = await result.current.flushNow()
+    })
+    expect(flushed?.ok).toBe(false)
+  })
+
+  it('resolveConflict(false)（仅解除警示）收敛 status 到 saved/idle，不留假 error（#804 轮 6 H6）', async () => {
+    mocks.putWorkflowDraft.mockRejectedValue(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+    expect(result.current.state.status).toBe('error')
+
+    act(() => result.current.resolveConflict(false))
+    // 冲突标记清除 + status 收敛（savedAt 已推进到服务端真值 → saved）。
+    expect(result.current.state.conflict).toBeFalsy()
+    expect(result.current.state.status).toBe('saved')
   })
 
   // --- #633 codex review P2-1：conflict 响应推进 CAS 基线。 ---
@@ -526,6 +619,79 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
       'key: demo\nlabel: After conflict\n',
       { expectedUpdatedAt: conflict.updatedAt }
     )
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+  })
+
+  it('keep-mine after conflict with canvas == lastPersisted still forces the write-back（#804 轮 8 P1：去重吞补救的洞）', async () => {
+    // 场景：本页内容 A 已保存（lastPersisted=A）→ Agent 推进服务端为 B →
+    // reapply 冲突（pendingSave 早空）→ 用户「保留本页编辑」。补救路径若走
+    // 普通 schedule(A)，去重把 A 判为已持久化 → revert 不发 PUT——警示消失
+    // 但 A 从未写回，离页即丢。断言到 PUT 真发出（请求体 A + 新 CAS 基线）
+    // 并落定 saved。
+    const conflict = {
+      yaml: 'key: demo\nlabel: Agent v2\n',
+      updatedAt: '2026-08-27T03:00:00+00:00',
+    }
+    let pending: typeof conflict | null = null
+    const consume = () => {
+      const value = pending
+      pending = null
+      return value
+    }
+    const { result, rerender } = renderHookResult(
+      {
+        workspaceId: 'ws1',
+        draftYaml: BASE,
+        originalYaml: BASE,
+        serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      },
+      consume
+    )
+    // 先编辑 A（EDITED）并落盘：lastPersisted=A。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: EDITED,
+      updated_at: '2026-08-27T02:00:00+00:00',
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    const callsBeforeConflict = mocks.putWorkflowDraft.mock.calls.length
+
+    // Agent 推进服务端草稿为 B → reapply 冲突（画布仍 = A）。
+    pending = conflict
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: conflict.yaml,
+        updated_at: conflict.updatedAt,
+      },
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // keep-mine：必须按新 CAS 基线把 A 强制写回（绕过去重）。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: EDITED,
+      updated_at: '2026-08-27T04:00:00+00:00',
+    })
+    act(() => result.current.resolveConflict(true))
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft.mock.calls.length).toBeGreaterThan(
+      callsBeforeConflict
+    )
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: conflict.updatedAt,
+    })
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
   })
 

@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioPage } from './WorkflowStudioPage'
 import { TestQueryProvider } from '../testing/testQueryClient'
+import { useUiStore } from '../stores/uiStore'
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ workspaceId: 'ws1' }),
@@ -173,7 +174,12 @@ vi.mock('../api', () => {
 describe('WorkflowStudioPage', () => {
   beforeEach(() => {
     authState.user = { role: 'admin' }
+    useUiStore.setState({ toast: null })
   })
+
+  // #799：原顶栏内容拆为双浮岛——身份岛（workspace 名/版本/状态 chip +
+  // 生命周期动作），操作岛（Agent 面板开关/共享素材）。
+  const identityIsland = () => screen.getByTestId('studio-identity-island')
 
   // 关闭 YAML 全屏 Dialog 并等退出过渡结束：过渡期间 modal 仍挂着，
   // 顶栏被 aria-hidden，role 查询会失败。#795 PR②：Agent Dock 也是常驻的
@@ -197,27 +203,46 @@ describe('WorkflowStudioPage', () => {
   it('renders the workflow studio shell', async () => {
     renderPage()
 
-    expect(await screen.findByText('题目审题 / 编辑工作流')).toBeInTheDocument()
+    expect(await screen.findByText('题目审题')).toBeInTheDocument()
     expect(await screen.findByText('获取题目')).toBeInTheDocument()
   })
 
-  it('renders workspace editor title and actions in the app bar without workflow label clutter', async () => {
+  it('renders workspace editor title and actions in the floating islands without workflow label clutter (#799/#804)', async () => {
     renderPage()
 
-    const appBar = await screen.findByTestId('app-bar')
-    await screen.findByText('题目审题 / 编辑工作流')
-    expect(appBar).toHaveTextContent('题目审题 / 编辑工作流')
-    expect(appBar).not.toHaveTextContent('知识视频 DAG')
-    expect(appBar).toHaveTextContent('v1')
-    expect(appBar).toHaveTextContent('校验')
-    expect(appBar).toHaveTextContent('发布')
-    expect(appBar).toHaveTextContent('重置')
+    // 无 AppBar：顶栏区不渲染。
+    expect(screen.queryByTestId('app-bar')).not.toBeInTheDocument()
+    const identity = await screen.findByTestId('studio-identity-island')
+    const actions = await screen.findByTestId('studio-action-island')
+    await screen.findByText('题目审题')
+    // #804 定案：标题只剩 workspace 名。
+    expect(identity).toHaveTextContent('题目审题')
+    expect(identity).not.toHaveTextContent('/ 编辑工作流')
+    expect(identity).not.toHaveTextContent('知识视频 DAG')
+    expect(identity).toHaveTextContent('v1')
+    // #804 定案：生命周期动作在左岛——发布 = contained 主按钮（文案「发布」）、
+    // 重置仅 dirty 时外露（干净态不在）；校验按钮（自动校验取代）与 ⋮ 菜单
+    // 退役；干净态无状态 chip。
+    expect(
+      within(identity).getByRole('button', { name: '发布' })
+    ).toBeInTheDocument()
+    expect(within(identity).queryByRole('button', { name: '校验' })).toBeNull()
+    expect(
+      within(identity).queryByRole('button', { name: '更多操作' })
+    ).toBeNull()
+    expect(within(identity).queryByRole('button', { name: '重置' })).toBeNull()
+    expect(within(identity).queryByText('已同步')).toBeNull()
+    expect(actions).not.toHaveTextContent('校验')
+    // 用量入口从 studio 拿掉（实例级遥测，其他页面全局顶栏已有）。
+    expect(
+      screen.queryByRole('button', { name: 'Token 使用分析' })
+    ).not.toBeInTheDocument()
     // P3：查看变更 / YAML 高级编辑 / Agent 管理 / Executor 管理已从顶栏移除，
     // 前两者下沉为变更 Drawer 与 YAML 全屏 Dialog，后两者随管理弹窗删除。
-    expect(appBar).not.toHaveTextContent('查看变更')
-    expect(appBar).not.toHaveTextContent('YAML 高级编辑')
-    expect(appBar).not.toHaveTextContent('Agent 管理')
-    expect(appBar).not.toHaveTextContent('Executor 管理')
+    expect(identity).not.toHaveTextContent('查看变更')
+    expect(identity).not.toHaveTextContent('YAML 高级编辑')
+    expect(identity).not.toHaveTextContent('Agent 管理')
+    expect(identity).not.toHaveTextContent('Executor 管理')
     expect(
       screen.queryByRole('region', { name: 'Workflow summary' })
     ).not.toBeInTheDocument()
@@ -227,7 +252,7 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    expect(await screen.findByText('题目审题 / 编辑工作流')).toBeInTheDocument()
+    expect(await screen.findByText('题目审题')).toBeInTheDocument()
     expect(await screen.findByText('获取题目')).toBeInTheDocument()
     expect(screen.getAllByText(/v1/)[0]).toBeInTheDocument()
     expect(screen.getByText(/abcdef12/)).toBeInTheDocument()
@@ -238,64 +263,97 @@ describe('WorkflowStudioPage', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows workflow-wide changes in the changes drawer after validation', async () => {
+  it('自动校验驱动状态 chip：保存成功后 未发布变更 → ✓ 校验通过，点击开变更抽屉（#804 定案）', async () => {
     const user = userEvent.setup()
     renderPage()
 
-    await screen.findByText('题目审题 / 编辑工作流')
+    await screen.findByText('题目审题')
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     const editor = await screen.findByLabelText('工作流 YAML')
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    // chip 查询限定命令栏：画布角标（#666 起与顶栏同源）也带「未发布变更」
+    // chip 查询限定身份岛：画布角标（#666 起同源）也带「未发布变更」
     // 文案，整屏 findByText 会多匹配。
-    const commandBar = screen.getByLabelText('Workflow command bar')
-    await within(commandBar).findByText(/未发布变更/)
-    // 校验完成打开右侧变更面板（Drawer），不再切换画布模式。
-    await user.click(screen.getByRole('button', { name: '校验' }))
+    await within(identityIsland()).findByText(/未发布变更/)
+    // #804 定案：手动校验按钮退役——自动保存（800ms debounce）落盘后自动
+    // 静默校验，chip 转「✓ 校验通过」（不自动开抽屉）。
+    const passedChip = await within(identityIsland()).findByText(
+      '✓ 校验通过',
+      undefined,
+      { timeout: 4000 }
+    )
+    expect(
+      screen.queryByRole('dialog', { name: '变更与校验' })
+    ).not.toBeInTheDocument()
+    // 点 chip 才开校验报告抽屉。
+    await user.click(passedChip)
     expect(await screen.findByText('变更与校验')).toBeInTheDocument()
     expect(screen.getByText('变更摘要')).toBeInTheDocument()
   })
 
-  it('opens the changes drawer from the status chip', async () => {
+  it('自动校验失败：chip 变红 ✗ 校验失败且发布禁用（#804 定案）', async () => {
+    const { validateWorkflowDraft } = await import('../api')
+    // 只让本例的下一次校验失败（once 队列，不污染后续用例的默认成功 mock）。
+    vi.mocked(validateWorkflowDraft).mockResolvedValueOnce({
+      valid: false,
+      errors: ['missing key'],
+    })
     const user = userEvent.setup()
     renderPage()
 
-    await screen.findByText('题目审题 / 编辑工作流')
+    await screen.findByText('题目审题')
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     const editor = await screen.findByLabelText('工作流 YAML')
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    // 等 compare 落定、chip 稳定为计数形态再点击：编辑后 chip 先显示瞬态的
-    // 「有未发布变更」，compare debounce 一到就被「计算中…」替换——点在被
-    // 替换下来的旧节点上点击会静默丢失（慢机器/CI 上必现的竞态）。查询限定
-    // 命令栏（画布角标也带「未发布变更」文案，整屏匹配会命中两个）。
-    const commandBar = screen.getByLabelText('Workflow command bar')
-    await user.click(await within(commandBar).findByText(/未发布变更 \d+/))
-
-    expect(await screen.findByText('变更与校验')).toBeInTheDocument()
-    expect(screen.getByText('变更摘要')).toBeInTheDocument()
+    await within(identityIsland()).findByText(/未发布变更/)
+    await within(identityIsland()).findByText('✗ 校验失败', undefined, {
+      timeout: 4000,
+    })
+    // 发布按钮由自动校验结果门控：失败即禁用。
+    const publish = within(identityIsland()).getByRole('button', {
+      name: '发布',
+    })
+    expect(publish).toBeDisabled()
+    expect(publish.parentElement).toHaveAttribute(
+      'aria-label',
+      '校验失败，请修复后重新发布'
+    )
   })
 
   it('marks the editor dirty and resets to active definition', async () => {
     const user = userEvent.setup()
     renderPage()
 
-    await screen.findByText('题目审题 / 编辑工作流')
+    await screen.findByText('题目审题')
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     const editor = await screen.findByLabelText('工作流 YAML')
     await user.clear(editor)
     await user.type(editor, 'key: changed')
     await closeYamlEditor(user)
 
-    const commandBar = screen.getByLabelText('Workflow command bar')
-    expect(within(commandBar).getByText(/未发布变更/)).toBeInTheDocument()
+    expect(within(identityIsland()).getByText(/未发布变更/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '重置' }))
+    // #804 定案：重置仅 dirty 时外露为 outlined 次级按钮（⋮ 菜单退役）；
+    // 轮 6 H5 起带 window.confirm 确认（jsdom 未实现 confirm，桩成通过）。
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await user.click(
+      within(identityIsland()).getByRole('button', { name: '重置' })
+    )
+    expect(confirmSpy).toHaveBeenCalledOnce()
+    confirmSpy.mockRestore()
 
-    expect(within(commandBar).getByText(/已同步/)).toBeInTheDocument()
+    // 干净态：状态 chip 与重置按钮一起消失。
+    await waitFor(() =>
+      expect(
+        within(identityIsland()).queryByText(/未发布变更/)
+      ).not.toBeInTheDocument()
+    )
+    expect(
+      within(identityIsland()).queryByRole('button', { name: '重置' })
+    ).toBeNull()
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     expect(
       await screen.findByDisplayValue(/key: demo_video_workflow/)
@@ -306,16 +364,16 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await screen.findByText('题目审题 / 编辑工作流')
+    await screen.findByText('题目审题')
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     const editor = screen.getByLabelText('工作流 YAML')
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    await within(screen.getByLabelText('Workflow command bar')).findByText(
-      /未发布变更/
-    )
-    const publishButton = screen.getByRole('button', { name: '发布新版本' })
+    await within(identityIsland()).findByText(/未发布变更/)
+    const publishButton = within(identityIsland()).getByRole('button', {
+      name: '发布',
+    })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)
 
@@ -329,22 +387,38 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await screen.findByText('题目审题 / 编辑工作流')
+    await screen.findByText('题目审题')
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     const editor = screen.getByLabelText('工作流 YAML')
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    await within(screen.getByLabelText('Workflow command bar')).findByText(
-      /未发布变更/
-    )
-    const publishButton = screen.getByRole('button', { name: '发布新版本' })
+    await within(identityIsland()).findByText(/未发布变更/)
+    const publishButton = within(identityIsland()).getByRole('button', {
+      name: '发布',
+    })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)
     await screen.findByText('发布 workflow revision')
 
-    await user.click(screen.getByRole('button', { name: '确认发布' }))
-
-    expect(await screen.findByText('保存成功')).toBeInTheDocument()
+    // CI 慢机加固：确认按钮等 enabled 再点（dialog 进场过渡期间 userEvent
+    // 的点击可能被吞）；对话框退场证明 onConfirm 已起跑；toast 直读
+    // uiStore（DOM toast 3s 自动消失，慢机上 DOM 轮询会错过窗口）。
+    const confirmButton = await screen.findByRole('button', {
+      name: '确认发布',
+    })
+    await waitFor(() => expect(confirmButton).toBeEnabled())
+    await user.click(confirmButton)
+    await waitFor(
+      () =>
+        expect(
+          screen.queryByRole('dialog', { name: /发布 workflow revision/ })
+        ).toBeNull(),
+      { timeout: 4000 }
+    )
+    const { getState } = useUiStore
+    await waitFor(() => expect(getState().toast?.message).toBe('保存成功'), {
+      timeout: 4000,
+    })
   })
 })

@@ -11,8 +11,7 @@ type Props = {
   onClose: () => void
 }
 
-/** 节点代码宽视图：全屏 dialog，等宽字体 + 行号 + 简易语法高亮。
- * 交互模式仿 WorkflowDagFullscreenDialog。 */
+/** 节点代码宽视图：全屏 dialog，等宽字体 + 行号 + 简易语法高亮。 */
 export function WorkflowNodeCodeDialog({ open, title, code, onClose }: Props) {
   const lines = useMemo(() => splitTokensByLine(tokenizePython(code)), [code])
   return (

@@ -1,30 +1,27 @@
 import { useState } from 'react'
-import type { useWorkflowStudio } from './useWorkflowStudio'
 import { useAgentDockOpen } from './useAgentDockOpen'
-
-type Studio = ReturnType<typeof useWorkflowStudio>
 
 /** 画布区视图状态：DAG 常驻主视图；变更走右侧 Drawer，YAML 走全屏 Dialog。
  * #668：Agent 面板开合状态提升到本层——开关收敛为 appbar（CommandBar）
  * 唯一入口，而面板布局在页面主体，两处经 StudioViewContext 共享本状态。
  * #795 PR②：chat 迁入 Dock 浮层；#797 codex 复审轮：移动端页签状态与
- * Agent 开合的组合出口在 useAgentDockOpen（本层只做转发）。 */
-export function useWorkflowStudioPageView(studio: Studio) {
-  const [dagFullscreenOpen, setDagFullscreenOpen] = useState(false)
+ * Agent 开合的组合出口在 useAgentDockOpen（本层只做转发）。
+ * #804 定案：DAG 全屏 Dialog 与手动校验入口退役（校验改保存成功后自动
+ * 静默执行，状态 chip 点击开变更抽屉）。 */
+export function useWorkflowStudioPageView() {
   const [changesPanelOpen, setChangesPanelOpen] = useState(false)
   const [yamlEditorOpen, setYamlEditorOpen] = useState(false)
-  const agentDock = useAgentDockOpen(studio)
-  // 校验完成后打开变更面板（原切画布「变更」模式）。
-  const validateAndShowResult = () =>
-    studio.validateDraft().then(() => setChangesPanelOpen(true))
+  // 轮 9 P2：共享素材抽屉开合提升到 view 层——Dock 避让（rightInset）
+  // 需要同时感知节点详情抽屉（selectedNodeKey）与它。
+  const [materialsOpen, setMaterialsOpen] = useState(false)
+  const agentDock = useAgentDockOpen()
   return {
-    dagFullscreenOpen,
-    setDagFullscreenOpen,
     changesPanelOpen,
     setChangesPanelOpen,
     yamlEditorOpen,
     setYamlEditorOpen,
+    materialsOpen,
+    setMaterialsOpen,
     ...agentDock,
-    validateAndShowResult,
   }
 }

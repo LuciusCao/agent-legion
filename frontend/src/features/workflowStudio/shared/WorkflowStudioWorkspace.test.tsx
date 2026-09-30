@@ -1,11 +1,12 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { expectConsoleError, expectConsoleWarning } from '../../../test-setup'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioWorkspace } from './WorkflowStudioWorkspace'
 import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import { api } from '../../../api'
-import { TestQueryProvider } from '../../../testing/testQueryClient'
+import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { useSettingStore } from '../../../stores/settingStore'
 import type { WorkspaceSettings } from '../../../types'
 
@@ -106,18 +107,36 @@ function renderWorkspaceLive() {
     definitionYaml: 'key: demo_video_workflow\n',
     setDefinitionYaml: vi.fn(),
     backToDraft: vi.fn(),
-    setDagFullscreenOpen: vi.fn(),
+    // #799 浮动岛消费的 studio 字段（岛挂在 Workspace 内）。
+    revision: null,
+    revisions: [],
+    activeRevision: null,
+    viewMode: 'draft',
+    hasPreservedDraft: false,
+    compareSummary: null,
+    compareState: 'idle',
+    publishing: false,
+    validating: false,
+    canSubmit: true,
+    canPublish: true,
+    selectedRevisionId: null,
+    isLoadingRevision: false,
+    revisionLoadError: null,
+    selectRevision: vi.fn(),
+    requestPublish: vi.fn(),
+    resetDefinition: vi.fn(),
+    useViewedRevisionAsDraft: vi.fn(),
   }
   function LiveViewHarness({ children }: { children: ReactNode }) {
-    const view = useWorkflowStudioPageView(props as never)
+    const view = useWorkflowStudioPageView()
     return withStudioProviders(props, view, children)
   }
   return render(
-    <TestQueryProvider>
+    <MemoryRouter>
       <LiveViewHarness>
         <WorkflowStudioWorkspace />
       </LiveViewHarness>
-    </TestQueryProvider>
+    </MemoryRouter>
   )
 }
 
@@ -177,16 +196,34 @@ function renderWorkspace(
     definitionYaml: 'key: demo_video_workflow\n',
     setDefinitionYaml: vi.fn(),
     backToDraft: vi.fn(),
-    setDagFullscreenOpen: vi.fn(),
+    // #799 浮动岛消费的 studio 字段（岛挂在 Workspace 内）。
+    revision: null,
+    revisions: [],
+    activeRevision: null,
+    viewMode: 'draft',
+    hasPreservedDraft: false,
+    compareSummary: null,
+    compareState: 'idle',
+    publishing: false,
+    validating: false,
+    canSubmit: true,
+    canPublish: true,
+    selectedRevisionId: null,
+    isLoadingRevision: false,
+    revisionLoadError: null,
+    selectRevision: vi.fn(),
+    requestPublish: vi.fn(),
+    resetDefinition: vi.fn(),
+    useViewedRevisionAsDraft: vi.fn(),
     ...overrides,
   } as unknown as Record<string, unknown>
   const view = makeStudioView(viewOverrides)
   return {
     setSelectedNodeKey: props.setSelectedNodeKey,
     ...render(
-      <TestQueryProvider>
+      <MemoryRouter>
         {withStudioProviders(props, view, <WorkflowStudioWorkspace />)}
-      </TestQueryProvider>
+      </MemoryRouter>
     ),
   }
 }
@@ -218,10 +255,18 @@ describe('WorkflowStudioWorkspace', () => {
     expect(screen.getByText('chat panel stub')).toBeInTheDocument()
     // DAG 区全屏：无分栏（withInspector 只在选中节点详情时加）。
     expect(document.querySelector('[class*="withInspector"]')).toBeNull()
-    // #668：面板开关收敛到 appbar（CommandBar），画布工具条不再有开关。
+    // #668：面板开关收敛在顶栏体系——#799 起是右上操作岛（画布工具条
+    // 仍无开关）。
     expect(
-      screen.queryByRole('button', { name: 'toggle agent panel' })
-    ).not.toBeInTheDocument()
+      document.querySelector(
+        '[data-canvas-toolbar] [aria-label="toggle agent panel"]'
+      )
+    ).toBeNull()
+    expect(
+      within(screen.getByTestId('studio-action-island')).getByRole('button', {
+        name: 'toggle agent panel',
+      })
+    ).toBeInTheDocument()
   })
 
   // #668：agentOpen 提升到 StudioViewContext（appbar 开关写、布局读）；
@@ -256,6 +301,9 @@ describe('WorkflowStudioWorkspace', () => {
   })
 
   it('codex P2（#797）：窄屏 Agent 页签关闭 Dock 回画布，不留空白工作区', () => {
+    // 岛上 MUI IconButton 的 ripple/tooltip 状态更新脱离 act（known noise）。
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
     stubNarrowViewport(true)
     try {
       renderWorkspaceLive()
@@ -282,15 +330,16 @@ describe('WorkflowStudioWorkspace', () => {
     }
   })
 
-  it('puts node detail on the right half next to the full DAG（Dock 浮层不占轨道）', async () => {
-    // chat 在 Dock 后不再有「详情替换画布」模式：详情固定右栏，画布保留。
+  it('点中节点开详情抽屉（#804 抽屉化：不占分栏轨道，画布永远全宽）', async () => {
     renderWorkspace({ selectedNodeKey: 'fetch_items' })
 
-    const detail = screen.getByRole('region', { name: '节点详情' })
-    expect(detail).toHaveAttribute('data-placement', 'right')
-    expect(detail).toHaveTextContent('知识视频 DAG / 获取题目')
+    // 抽屉内容：节点名 + inspector 章节；无「返回 DAG」面包屑。
+    const detail = screen.getByLabelText('节点详情')
+    expect(detail).toHaveTextContent('获取题目')
     expect(screen.getByText('基本设置')).toBeInTheDocument()
-    // 画布不被替换（canvasReplaced 退役），Dock 照常浮在上方。
+    expect(screen.queryByRole('button', { name: '返回 DAG' })).toBeNull()
+    // 不再有分栏（withInspector 退役），画布保留，Dock 照常浮在上方。
+    expect(document.querySelector('[class*="withInspector"]')).toBeNull()
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
     expect(
       screen.getByRole('dialog', { name: 'Agent 助手' })
@@ -299,22 +348,21 @@ describe('WorkflowStudioWorkspace', () => {
     await screen.findByText(/出厂版本/)
   })
 
-  it('puts node detail on the right half when the agent dock is closed', async () => {
+  it('Dock 关闭时点中节点同样开抽屉', async () => {
     renderWorkspace({ selectedNodeKey: 'fetch_items' }, { agentOpen: false })
 
-    const detail = screen.getByRole('region', { name: '节点详情' })
-    expect(detail).toHaveAttribute('data-placement', 'right')
+    expect(screen.getByLabelText('节点详情')).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
     await screen.findByText(/出厂版本/)
   })
 
-  it('returns to the DAG via the breadcrumb back button', async () => {
+  it('关闭抽屉回到纯画布（✕ 即返回语义）', async () => {
     const { setSelectedNodeKey } = renderWorkspace({
       selectedNodeKey: 'fetch_items',
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '返回 DAG' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭节点配置' }))
     expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
     await screen.findByText(/出厂版本/)
   })

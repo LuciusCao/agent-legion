@@ -38,6 +38,7 @@ import {
   effectiveMinSize,
   readAppBarFallbackHeight,
 } from './dockPlacement'
+import { offsetForRightInset } from './dockPlacement'
 import { useDockGeometry } from './useDockGeometry'
 import { useDockFocus } from './useDockFocus'
 import { useDockEscape } from './useDockEscape'
@@ -75,6 +76,9 @@ export interface AgentPanelDockProps {
    * 旧触发元素，若仍读挂载时的 document.activeElement 会把它错记成新归还
    * 目标——显式 ref 让归还目标与唤起动作绑定，不吃卸载/挂载的交错顺序。 */
   restoreFocusRef?: { readonly current: HTMLElement | null }
+  /** #804 轮 9 P2：右缘被占用的像素数（studio 右侧抽屉宽+边距）；
+   * 打开时 Dock 运行时左移避让（不写布局记忆），关闭弹回原位。 */
+  rightInset?: number
 }
 
 export function AgentPanelDock({
@@ -89,6 +93,7 @@ export function AgentPanelDock({
   restoreFocusSelector,
   topInsetExtra = 0,
   restoreFocusRef,
+  rightInset = 0,
 }: AgentPanelDockProps) {
   const appBarBottom = useAppBarBottom()
   const topInset =
@@ -139,7 +144,10 @@ export function AgentPanelDock({
   return (
     <Portal>
       <Rnd
-        position={{ x: geometry.x, y: geometry.y }}
+        position={{
+          x: offsetForRightInset(geometry, viewport.width, rightInset),
+          y: geometry.y,
+        }}
         size={{ width: geometry.width, height: geometry.height }}
         minWidth={effective.minWidth}
         minHeight={effective.minHeight}

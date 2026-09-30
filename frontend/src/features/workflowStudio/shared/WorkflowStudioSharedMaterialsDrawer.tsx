@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { useStudioView } from './studioStateContext'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Close, FolderSharedOutlined } from '@mui/icons-material'
 import { Drawer, IconButton, Tooltip, Typography } from '@mui/material'
@@ -20,6 +21,7 @@ import {
 import { SharedMaterialFileContentDialog } from './WorkflowStudioSharedMaterialsFileDialog'
 import { SharedMaterialFileRowView } from './WorkflowStudioSharedMaterialsFileRow'
 import { SharedMaterialsPropagateConfirmDialog } from './WorkflowStudioSharedMaterialsPropagateDialog'
+import { WorkflowStudioSaveWarningBanner } from './WorkflowStudioSaveWarningBanner'
 import styles from './WorkflowStudioSharedMaterialsDrawer.module.css'
 
 const PROPAGATE_STATUS_LABELS: Record<
@@ -66,7 +68,16 @@ function SharedMaterialsDrawer({
   const groups = groupSharedMaterialFileRows(rows)
 
   return (
-    <Drawer anchor="right" open onClose={onClose}>
+    <Drawer
+      anchor="right"
+      open
+      onClose={onClose}
+      slotProps={{ paper: { className: styles.paper } }}
+      /* 轮 8 P2：非模态——persistent variant 不走 Modal（无遮罩/不圈禁
+         焦点/不锁滚动/不 aria-hidden 兄弟），Dock 与画布保持可交互；
+         ✕/Esc 关闭，浮层定位由 paper CSS 承担。 */
+      variant="persistent"
+    >
       <div className={styles.panel}>
         <div className={styles.header}>
           <Typography variant="h6" component="div" className={styles.title}>
@@ -82,6 +93,8 @@ function SharedMaterialsDrawer({
             </IconButton>
           </Tooltip>
         </div>
+        {/* 轮 4 P2-F：抽屉盖住左岛期间的保存/冲突警示内嵌横幅。 */}
+        <WorkflowStudioSaveWarningBanner />
         <p className={styles.hint}>
           本 workspace 各 skill 共享的参考材料（<code>_shared</code>
           目录）。修改共享源后副本不会自动传播：点行内「同步并打
@@ -212,7 +225,10 @@ function SharedMaterialsDrawer({
  */
 export function WorkflowStudioSharedMaterialsButton() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
-  const [open, setOpen] = useState(false)
+  // 轮 9 P2：开合状态提升到 StudioViewContext（Dock 避让需要感知抽屉）。
+  const view = useStudioView()
+  const open = view.materialsOpen
+  const setOpen = view.setMaterialsOpen
   return (
     <>
       <Tooltip title="Skill 共享材料">
@@ -220,8 +236,11 @@ export function WorkflowStudioSharedMaterialsButton() {
           size="small"
           aria-label="Skill 共享材料"
           onClick={() => setOpen(true)}
+          sx={{ borderRadius: '8px', gap: '4px', padding: '4px 8px' }}
         >
           <FolderSharedOutlined fontSize="small" />
+          {/* #799 精修：右岛图标+文字并排；窄屏由岛 CSS 隐藏文字只留图标 */}
+          <span className="studio-island-text">共享素材</span>
         </IconButton>
       </Tooltip>
       {open && workspaceId && (

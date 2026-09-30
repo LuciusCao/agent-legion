@@ -1,10 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
-
-function makeStudio() {
-  return { validateDraft: vi.fn().mockResolvedValue(undefined) }
-}
 
 /** 窄屏判定桩（useStudioNarrowViewport 走 matchMedia，node/jsdom 环境没有）。
  * 可翻转：change 监听共享同一集合，setNarrowViewport 触发断点切换。 */
@@ -49,30 +45,8 @@ function restoreViewportMatchMedia() {
 }
 
 describe('useWorkflowStudioPageView', () => {
-  it('opens the changes panel after validation instead of switching modes', async () => {
-    const studio = makeStudio()
-    const { result } = renderHook(() =>
-      // 伪造对象只覆盖 hook 消费的字段。
-      useWorkflowStudioPageView(
-        studio as unknown as Parameters<typeof useWorkflowStudioPageView>[0]
-      )
-    )
-
-    expect(result.current.changesPanelOpen).toBe(false)
-    await act(() => result.current.validateAndShowResult())
-
-    expect(studio.validateDraft).toHaveBeenCalledTimes(1)
-    expect(result.current.changesPanelOpen).toBe(true)
-  })
-
   it('tracks changes panel and YAML editor open state independently', () => {
-    const { result } = renderHook(() =>
-      useWorkflowStudioPageView(
-        makeStudio() as unknown as Parameters<
-          typeof useWorkflowStudioPageView
-        >[0]
-      )
-    )
+    const { result } = renderHook(() => useWorkflowStudioPageView())
 
     act(() => result.current.setYamlEditorOpen(true))
     expect(result.current.yamlEditorOpen).toBe(true)
@@ -85,13 +59,7 @@ describe('useWorkflowStudioPageView', () => {
 
   // #668：agentOpen 提升到 page view 层，appbar 开关与分栏布局共享此状态。
   it('toggles the agent panel open state', () => {
-    const { result } = renderHook(() =>
-      useWorkflowStudioPageView(
-        makeStudio() as unknown as Parameters<
-          typeof useWorkflowStudioPageView
-        >[0]
-      )
-    )
+    const { result } = renderHook(() => useWorkflowStudioPageView())
 
     expect(result.current.agentOpen).toBe(true)
     act(() => result.current.toggleAgent())
@@ -106,13 +74,7 @@ describe('useWorkflowStudioPageView', () => {
   it('narrow viewport: toggle keys off actual dock visibility, one click lands', () => {
     stubNarrowViewport(true)
     try {
-      const { result } = renderHook(() =>
-        useWorkflowStudioPageView(
-          makeStudio() as unknown as Parameters<
-            typeof useWorkflowStudioPageView
-          >[0]
-        )
-      )
+      const { result } = renderHook(() => useWorkflowStudioPageView())
 
       // 窄屏初始：agentOpen=true 但页签在画布 → 实际不可见（脱节态）。
       expect(result.current.agentOpen).toBe(true)
@@ -146,13 +108,7 @@ describe('useWorkflowStudioPageView', () => {
   it('wide viewport: toggleAgent leaves the mobile tab untouched', () => {
     stubNarrowViewport(false)
     try {
-      const { result } = renderHook(() =>
-        useWorkflowStudioPageView(
-          makeStudio() as unknown as Parameters<
-            typeof useWorkflowStudioPageView
-          >[0]
-        )
-      )
+      const { result } = renderHook(() => useWorkflowStudioPageView())
       act(() => result.current.setMobilePanel('agent'))
       act(() => result.current.toggleAgent())
       expect(result.current.agentOpen).toBe(false)
@@ -169,13 +125,7 @@ describe('useWorkflowStudioPageView', () => {
   it('cross-breakpoint: latent agent tab normalizes to graph when entering narrow with dock closed', () => {
     stubNarrowViewport(true)
     try {
-      const { result } = renderHook(() =>
-        useWorkflowStudioPageView(
-          makeStudio() as unknown as Parameters<
-            typeof useWorkflowStudioPageView
-          >[0]
-        )
-      )
+      const { result } = renderHook(() => useWorkflowStudioPageView())
 
       // 四步复现：窄屏开 Agent 页签（初始脱节 agentOpen=true+graph →
       // 一次点击打开并切页签）。

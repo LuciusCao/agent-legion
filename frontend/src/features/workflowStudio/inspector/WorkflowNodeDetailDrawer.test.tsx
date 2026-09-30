@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../../api'
@@ -7,7 +7,9 @@ import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { useSettingStore } from '../../../stores/settingStore'
 import type { WorkflowDefinitionRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
-import { WorkflowNodeDetailView } from './WorkflowNodeDetailView'
+import { WorkflowNodeDetailDrawer } from './WorkflowNodeDetailDrawer'
+import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
+import { withStudioProviders } from '../shared/testStudioProviders'
 
 // inspector 各 section（code/config/agent 执行详情）统一走 '../../api' 的 api。
 vi.mock('../../../api', () => ({
@@ -127,36 +129,58 @@ const settledSettle = {
   definitionsFailed: false,
 }
 
-function renderView(
-  onBack: () => void = () => {},
-  nodeKey = 'generate_key_info'
+/** 抽屉消费的 studio 字段（selectedNodeKey 驱动开合）。 */
+function studioFor(
+  nodeKey: string | null,
+  setSelectedNodeKey = vi.fn(),
+  draftSave: Record<string, unknown> = { status: 'idle', savedAt: null }
 ) {
-  return render(
-    <TestQueryProvider>
-      <WorkflowNodeDetailView
-        workflow={workflow}
-        nodeKey={nodeKey}
-        agentCatalog={agentCatalog}
-        agentCatalogSettle={settledSettle}
-        definitionYaml={definitionYaml}
-        setDefinitionYaml={() => {}}
-        readOnly={false}
-        onBack={onBack}
-      />
-    </TestQueryProvider>
-  )
+  return {
+    selectedNodeKey: nodeKey,
+    setSelectedNodeKey,
+    workflow,
+    agentCatalog,
+    agentCatalogSettle: settledSettle,
+    definitionYaml,
+    setDefinitionYaml: vi.fn(),
+    compareSummary: null,
+    readOnly: false,
+    draftSave,
+    resolveConflict: vi.fn(),
+    adoptServerDraft: vi.fn(),
+  }
 }
 
-// rerender 用的纯元素工厂（默认参数与 renderView 一致；catalog 可覆盖——
-// P1 用例需要两个 capability 都未绑定 Agent 的场景）。
-function viewFor(
+function renderDrawer(
+  nodeKey: string | null = 'generate_key_info',
+  draftSave?: Record<string, unknown>
+) {
+  const setSelectedNodeKey = vi.fn()
+  render(
+    <TestQueryProvider>
+      {withStudioProviders(
+        studioFor(
+          nodeKey,
+          setSelectedNodeKey,
+          draftSave ?? { status: 'idle', savedAt: null }
+        ),
+        {},
+        <WorkflowNodeDetailDrawer />
+      )}
+    </TestQueryProvider>
+  )
+  return { setSelectedNodeKey }
+}
+
+/** inspector 级用例直渲染 Body（抽屉只加壳，不介入 inspector 行为）。 */
+function bodyFor(
   nodeKey: string,
   catalog: AgentDefinition[] = agentCatalog,
   settle = settledSettle
 ) {
   return (
     <TestQueryProvider>
-      <WorkflowNodeDetailView
+      <WorkflowNodeDetailBody
         workflow={workflow}
         nodeKey={nodeKey}
         agentCatalog={catalog}
@@ -164,13 +188,15 @@ function viewFor(
         definitionYaml={definitionYaml}
         setDefinitionYaml={() => {}}
         readOnly={false}
-        onBack={() => {}}
+        activeKind={null}
+        onShowPreview={() => {}}
+        onClose={() => {}}
       />
     </TestQueryProvider>
   )
 }
 
-describe('WorkflowNodeDetailView', () => {
+describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     editorMountCount = 0
@@ -188,61 +214,116 @@ describe('WorkflowNodeDetailView', () => {
     })
   })
 
-  it('shows the plain breadcrumb and backs out to the DAG by default', () => {
-    const onBack = vi.fn()
-    renderView(onBack)
+  it('选中节点即开抽屉：头栏 = 节点名 + 类型 + ✕ 关闭（无返回/面包屑）', () => {
+    const { setSelectedNodeKey } = renderDrawer()
 
-    expect(screen.getByText('Demo DAG / 生成关键信息')).toBeInTheDocument()
-    // #668：Agent 面板开关收敛到 appbar，面包屑不再渲染开关。
+    // 抽屉头栏（inspector 头栏承接）：节点名 + 类型选择器 + ✕ 关闭。
+    expect(screen.getByText('生成关键信息')).toBeInTheDocument()
+    // #804 定案：无「← 返回」与面包屑（返回语义 = 关抽屉）。
     expect(
-      screen.queryByRole('button', { name: 'toggle agent panel' })
+      screen.queryByRole('button', { name: '返回 DAG' })
     ).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '返回 DAG' }))
-    expect(onBack).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('Demo DAG / 生成关键信息')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭节点配置' }))
+    expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
   })
 
-  it('deepens the breadcrumb in the prompt preview and the back button steps back to the node details', () => {
-    const onBack = vi.fn()
-    renderView(onBack)
+  it('轮 4 P2-F：冲突时抽屉内嵌警示横幅（岛被 Modal 盖住期间的可见出口）', () => {
+    renderDrawer('generate_key_info', {
+      status: 'error',
+      savedAt: null,
+      conflict: true,
+      conflictDraftYaml: 'key: demo\n',
+    })
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/自动保存已暂停/)
+    // 冲突操作出口在抽屉里同样可用。
+    expect(
+      within(alert).getByRole('button', { name: '保留本页编辑' })
+    ).toBeInTheDocument()
+  })
+
+  it('轮 4 P2-F：无警示时不渲染横幅（不占头部空间）', () => {
+    renderDrawer('generate_key_info')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('轮 8 P2：抽屉非模态——无遮罩、不 aria-hidden 画布（Agent Dock 可并行交互）', () => {
+    // MUI temporary Drawer 默认是 Modal（遮罩 + 焦点圈禁 + 兄弟
+    // aria-hidden + 滚动锁）——把 z900 的 Agent Dock 盖住，破坏「边改节点
+    // 边对话」。非模态化后这些都不发生（revert：回 Modal 默认即红）。
+    render(
+      <TestQueryProvider>
+        {withStudioProviders(
+          { ...studioFor('generate_key_info') },
+          {},
+          <>
+            <button data-testid="canvas-sibling">画布侧按钮</button>
+            <WorkflowNodeDetailDrawer />
+          </>
+        )}
+      </TestQueryProvider>
+    )
+    expect(document.querySelector('.MuiBackdrop-root')).toBeNull()
+    expect(
+      screen.getByTestId('canvas-sibling').closest('[aria-hidden="true"]')
+    ).toBeNull()
+    // 抽屉内容正常渲染。
+    expect(screen.getByText('生成关键信息')).toBeInTheDocument()
+  })
+
+  it('无选中节点时不渲染内容（Drawer 关闭）', () => {
+    renderDrawer(null)
+    expect(screen.queryByText('生成关键信息')).toBeNull()
+  })
+
+  it('预览子态：精简返回条回节点详情，✕ 仍关抽屉', () => {
+    const { setSelectedNodeKey } = renderDrawer()
 
     fireEvent.click(screen.getByRole('button', { name: '查看 Prompt' }))
-
-    expect(
-      screen.getByText('Demo DAG / 生成关键信息 / Prompt')
-    ).toBeInTheDocument()
     expect(screen.getByLabelText('Prompt 预览')).toBeInTheDocument()
+    // 预览条：「← 节点详情」+ 标题后缀，不再用面包屑。
+    expect(screen.getByText('生成关键信息 / Prompt')).toBeInTheDocument()
 
+    // 返回条回 inspector，不关抽屉。
     fireEvent.click(screen.getByRole('button', { name: '返回节点详情' }))
-    expect(onBack).not.toHaveBeenCalled()
+    expect(setSelectedNodeKey).not.toHaveBeenCalled()
     expect(screen.queryByLabelText('Prompt 预览')).not.toBeInTheDocument()
-    expect(screen.getByText('Demo DAG / 生成关键信息')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '查看 Prompt' })
     ).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '返回 DAG' }))
-    expect(onBack).toHaveBeenCalledTimes(1)
+    // 预览态的 ✕ 直接关抽屉。
+    fireEvent.click(screen.getByRole('button', { name: '查看 Prompt' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
   })
 
-  it('deepens the breadcrumb in the skill preview', async () => {
-    renderView()
+  it('技能文件预览同样走返回条', async () => {
+    renderDrawer()
 
     fireEvent.click(screen.getByRole('button', { name: '浏览技能文件' }))
-
-    expect(
-      screen.getByText('Demo DAG / 生成关键信息 / 技能文件')
-    ).toBeInTheDocument()
+    expect(screen.getByText('生成关键信息 / 技能文件')).toBeInTheDocument()
     expect(await screen.findByText('# Skill')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '返回节点详情' }))
     expect(screen.queryByLabelText('技能文件预览')).not.toBeInTheDocument()
-    expect(screen.getByText('Demo DAG / 生成关键信息')).toBeInTheDocument()
+  })
+})
+
+describe('WorkflowNodeDetailBody（inspector 级，抽屉壳不介入）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    editorMountCount = 0
+    useSettingStore.setState({ workspaceId: 'ws1' })
+    mockApi.mockResolvedValue({})
   })
 
   // #409：Agent 区块结构简化——无「编辑 Agent」开合按钮，编辑面板默认
   // 内联展开；可编辑态不再渲染重复的只读汇总卡片（agent id 汇总行）。
   it('renders the agent editor inline without a toggle button or summary card', () => {
-    renderView()
+    render(bodyFor('generate_key_info'))
 
     expect(
       screen.queryByRole('button', { name: '编辑 Agent' })
@@ -254,55 +335,13 @@ describe('WorkflowNodeDetailView', () => {
     expect(screen.queryByText('agent-key-info')).not.toBeInTheDocument()
   })
 
-  it('resets the preview when the selected node changes', () => {
-    const { rerender } = renderView()
-    fireEvent.click(screen.getByRole('button', { name: '查看 Prompt' }))
-    expect(
-      screen.getByText('Demo DAG / 生成关键信息 / Prompt')
-    ).toBeInTheDocument()
-
-    const viewFor = (key: string) => (
-      <TestQueryProvider>
-        <WorkflowNodeDetailView
-          workflow={workflow}
-          nodeKey={key}
-          agentCatalog={agentCatalog}
-          agentCatalogSettle={settledSettle}
-          definitionYaml={definitionYaml}
-          setDefinitionYaml={() => {}}
-          readOnly={false}
-          onBack={() => {}}
-        />
-      </TestQueryProvider>
-    )
-
-    rerender(viewFor('review'))
-
-    // nodeKey 变化即真正清除预览：切走后落在节点详情。
-    expect(screen.queryByLabelText('Prompt 预览')).not.toBeInTheDocument()
-    expect(screen.getByText('Demo DAG / 评审')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '返回 DAG' })).toBeInTheDocument()
-
-    // 切回原节点也不恢复预览（仍是节点详情，不是挂起态）。
-    rerender(viewFor('generate_key_info'))
-    expect(screen.queryByLabelText('Prompt 预览')).not.toBeInTheDocument()
-    expect(screen.getByText('Demo DAG / 生成关键信息')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '返回 DAG' })).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: '查看 Prompt' })
-    ).toBeInTheDocument()
-  })
-
   // #426 review P1：未绑定 Agent 的节点上创建草稿后切到另一个未绑定节点
   // （agentId 仍为 null，React 复用同一面板实例）——面板必须按新节点的
   // capability 全新挂载，不能带着前一个节点面板里的 createdAgentId 继续编辑
   // 前一个 Agent（#409 去掉开合按钮后已无「收起重置」的兜底入口）。
   it('remounts the inline agent editor fresh when switching to a node with a different capability', () => {
-    // 两个节点都不绑定 Agent（空目录），对齐 review 场景：agentId 均为
-    // null，React 会复用同一面板实例——正是 P1 的暴露条件。
-    const { rerender } = render(viewFor('generate_key_info', []))
+    const { rerender } = render(bodyFor('generate_key_info', []))
 
-    // 节点 A（generate_key_info）：capability 预填的新建表单。
     expect(screen.getByTestId('agent-editor-stub')).toHaveAttribute(
       'data-mount',
       '1'
@@ -312,9 +351,7 @@ describe('WorkflowNodeDetailView', () => {
       'generate_key_info'
     )
 
-    // 切到节点 B（review，同样未绑定，agentId 仍为 null）：面板重挂（挂载
-    // 序号 +1）、capability 换成 B 的——A 里创建的草稿身份不会渗到 B。
-    rerender(viewFor('review', []))
+    rerender(bodyFor('review', []))
 
     expect(screen.getByTestId('agent-editor-stub')).toHaveAttribute(
       'data-mount',
@@ -334,7 +371,7 @@ describe('WorkflowNodeDetailView', () => {
   // published），同 capability 的节点间切换编辑目标不变——面板不重挂，
   // 在途表单状态（含创建后的草稿模式）不丢。
   it('keeps the panel mounted across nodes sharing the same capability', () => {
-    const { rerender } = renderView()
+    const { rerender } = render(bodyFor('generate_key_info'))
 
     expect(screen.getByTestId('agent-editor-stub')).toHaveAttribute(
       'data-mount',
@@ -343,7 +380,7 @@ describe('WorkflowNodeDetailView', () => {
 
     // 同 capability 的另一节点（不同 nodeKey）：若 key 误用 node.key，
     // 这里会重挂（挂载序号 +1）——用例即红。
-    rerender(viewFor('generate_key_info_v2'))
+    rerender(bodyFor('generate_key_info_v2'))
 
     expect(screen.getByTestId('agent-editor-stub')).toHaveAttribute(
       'data-mount',
@@ -356,23 +393,14 @@ describe('WorkflowNodeDetailView', () => {
   // 丢输入，甚至先提交重复草稿），只给加载占位。
   it('renders a loading placeholder instead of the create form while the binding query is pending', () => {
     render(
-      <TestQueryProvider>
-        <WorkflowNodeDetailView
-          workflow={workflow}
-          nodeKey="generate_key_info"
-          agentCatalog={[]}
-          agentCatalogSettle={{ ...settledSettle, catalogSettled: false }}
-          definitionYaml={definitionYaml}
-          setDefinitionYaml={() => {}}
-          readOnly={false}
-          onBack={() => {}}
-        />
-      </TestQueryProvider>
+      bodyFor('generate_key_info', [], {
+        ...settledSettle,
+        catalogSettled: false,
+      })
     )
 
     expect(screen.getByText('Agent 绑定解析中...')).toBeInTheDocument()
     expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
-    // 两个未绑定 capability 的节点间切换：pending 期间同样不出表单。
     expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
   })
 
@@ -380,18 +408,10 @@ describe('WorkflowNodeDetailView', () => {
   // （顶部有全局重试横幅），不退回可操作表单（否则失败场景回到 P2）。
   it('renders an error placeholder instead of the create form when the binding query failed', () => {
     render(
-      <TestQueryProvider>
-        <WorkflowNodeDetailView
-          workflow={workflow}
-          nodeKey="generate_key_info"
-          agentCatalog={[]}
-          agentCatalogSettle={{ ...settledSettle, catalogFailed: true }}
-          definitionYaml={definitionYaml}
-          setDefinitionYaml={() => {}}
-          readOnly={false}
-          onBack={() => {}}
-        />
-      </TestQueryProvider>
+      bodyFor('generate_key_info', [], {
+        ...settledSettle,
+        catalogFailed: true,
+      })
     )
 
     expect(screen.getByText('Agent 目录加载失败')).toBeInTheDocument()

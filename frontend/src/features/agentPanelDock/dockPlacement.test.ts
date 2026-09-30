@@ -4,6 +4,7 @@
  * localStorage 读写路径由 AgentPanelDock 组件测试（jsdom）覆盖。
  */
 import { describe, it, expect } from 'vitest'
+import { offsetForRightInset } from './dockPlacement'
 import {
   clampDockGeometry,
   clampResizeTopInset,
@@ -44,6 +45,27 @@ describe('defaultDockGeometry', () => {
     expect(g.height).toBe(0)
     // 宽度同理：视口宽不足双边距时钳到 0。
     expect(defaultDockGeometry(56, 20, 900).width).toBe(0)
+  })
+})
+
+describe('offsetForRightInset（#804 轮 9 P2：抽屉避让）', () => {
+  // 右侧抽屉（节点详情/共享素材，720+8）打开时 Dock 自动左移避让；
+  // 抽屉关闭弹回原位（纯运行时偏移，不写布局记忆）。
+  it('Dock 右缘越过抽屉左缘 → 左移到不重叠（含 12px 间距）', () => {
+    // 视口 1440、抽屉占右 728：抽屉左缘 712；Dock x=1000 w=572 → 右缘 1572 越界。
+    expect(offsetForRightInset({ x: 1000, width: 572 }, 1440, 728)).toBe(128)
+  })
+
+  it('Dock 已在抽屉左侧（拖开过）→ 不动', () => {
+    expect(offsetForRightInset({ x: 100, width: 572 }, 1440, 728)).toBe(100)
+  })
+
+  it('rightInset=0（无抽屉）→ 原位', () => {
+    expect(offsetForRightInset({ x: 1000, width: 572 }, 1440, 0)).toBe(1000)
+  })
+
+  it('避让后贴左缘钳到 8（小视口 + 宽 Dock 不产生负坐标）', () => {
+    expect(offsetForRightInset({ x: 800, width: 700 }, 1000, 728)).toBe(8)
   })
 })
 

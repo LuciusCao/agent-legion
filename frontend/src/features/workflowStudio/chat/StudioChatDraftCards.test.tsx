@@ -58,7 +58,8 @@ function makeStudio(overrides: Record<string, unknown> = {}) {
   return {
     canPublish: true,
     createsRevision: true,
-    actionState: 'idle',
+    publishing: false,
+    validating: false,
     compareState: 'ready',
     compareErrors: null,
     compareSummary: null,

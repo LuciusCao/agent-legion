@@ -48,6 +48,12 @@ describe('DagGraph', () => {
     expect(container.querySelector('.react-flow')).toBeInTheDocument()
   })
 
+  it('renders built-in Controls + MiniMap（#799：studio 画布化的左下缩放/右下小地图由它们承担）', () => {
+    const { container } = render(<DagGraph nodes={nodes} edges={edges} />)
+    expect(container.querySelector('.react-flow__controls')).toBeInTheDocument()
+    expect(container.querySelector('.react-flow__minimap')).toBeInTheDocument()
+  })
+
   it('shows the edgeless hint badge when nodes exist but edges do not (#417)', () => {
     // 无边图布局退化为稳定网格（dagLayout.ts），必须伴随轻量提示，
     // 说明当前视图无边、节点按网格排列，而不是被误读为节点丢失。

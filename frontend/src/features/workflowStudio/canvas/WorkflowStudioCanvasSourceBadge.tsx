@@ -2,15 +2,16 @@ import { useMemo } from 'react'
 import { Chip } from '@mui/material'
 import { useStudioState } from '../shared/studioStateContext'
 import { workflowYamlToDefinitionRecord } from './workflowYamlDraftRecord'
-import { countNodeChanges } from './workflowStudioDagChanges'
-import { WorkflowStudioExecutionHint } from './WorkflowStudioCanvasSourceBadge.executionHint'
 
-/** 画布数据源标识：与顶栏 StatusChip 同源（compare 计数 + dirty）——草稿
- * 有未发布变更时显示计数/变更 chip，无变更（含刚发布完成）不渲染，不再常驻
- * 「草稿（未发布）」（#666）。草稿 YAML 编辑中途非法时画布回退已发布版本，
- * 换警示色说明（不报错、不清空画布）。revision 模式的「只读 vN」标识已在
- * 顶栏 StatusChip，这里不重复。顶层 execution 默认缺失的整体提示由
- * WorkflowStudioExecutionHint 伴随渲染（#333）。 */
+/** 画布数据源标识：草稿 YAML 编辑中途非法时画布回退已发布版本，换警示
+ * 色说明（不报错、不清空画布）。「草稿（未发布变更 N）」chip 随 #804
+ * 定案退役——未发布变更/校验状态由左岛状态 chip 唯一承接；revision 模式
+ * 的「只读 vN」标识亦在左岛 chip。顶层 execution 缺失的画布级提示随
+ * #804 抽屉化退役（#333）：缺口由节点徽标（DagNodeHeader 的 execution
+ * 缺失标记）承载。
+ * 轮 6 H4：compare 传输失败（compareState='error'）必须有可见态 + 重试
+ * 出口——否则 hasCompareChanges=false 静默禁发布，界面零提示（隐形
+ * 死锁），恢复只能靠再编辑。 */
 export function WorkflowStudioCanvasSourceBadge() {
   const studio = useStudioState()
   const parseFailed = useMemo(
@@ -20,32 +21,24 @@ export function WorkflowStudioCanvasSourceBadge() {
       workflowYamlToDefinitionRecord(studio.definitionYaml) === null,
     [studio.viewMode, studio.definitionYaml]
   )
-  const counts = countNodeChanges(studio.compareSummary)
   return (
     <>
-      {studio.viewMode === 'draft' &&
-        (parseFailed ? (
-          <Chip
-            size="small"
-            color="warning"
-            label="草稿 YAML 未完成解析，画布暂显示已发布版本"
-          />
-        ) : counts ? (
-          <Chip
-            size="small"
-            variant="outlined"
-            color="info"
-            label={`草稿（未发布变更 ${counts.total}）`}
-          />
-        ) : studio.dirty ? (
-          <Chip
-            size="small"
-            variant="outlined"
-            color="info"
-            label="草稿（有未发布变更）"
-          />
-        ) : null)}
-      <WorkflowStudioExecutionHint />
+      {studio.viewMode === 'draft' && parseFailed ? (
+        <Chip
+          size="small"
+          color="warning"
+          label="草稿 YAML 未完成解析，画布暂显示已发布版本"
+        />
+      ) : null}
+      {studio.compareState === 'error' ? (
+        <Chip
+          size="small"
+          color="error"
+          label="草稿对比失败"
+          title="与已发布版本的对比请求失败——点击重试"
+          onClick={() => studio.retryCompare()}
+        />
+      ) : null}
     </>
   )
 }

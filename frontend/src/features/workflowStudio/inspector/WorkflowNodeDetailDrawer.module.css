@@ -1,0 +1,41 @@
+/* 节点详情抽屉（#804 定案抽屉化）：右侧浮层（paper 复用 studioDrawerFloat
+ * 的统一浮层语言）。MUI Drawer 的 paper 经 slotProps 挂本类。 */
+.paper {
+  composes: drawerPaper from '../shared/studioDrawerFloat.module.css';
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 预览子态的精简返回条（预览面板无自带头栏， inspector 头栏被替换）。 */
+.previewBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border, #e0e0e0);
+}
+
+.previewBack {
+  border: none;
+  background: none;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--color-primary, #1976d2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.previewTitle {
+  flex: 1;
+  font-size: 13px;
+  color: var(--color-text-secondary, #667085);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
