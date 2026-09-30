@@ -46,9 +46,10 @@ export function StudioCanvasIslands() {
     <>
       {/* 左岛 = workflow 指挥中心（#804 定案排序）：返回 + workspace 名 +
           版本选择器 + 状态 chip + 保存瞬态文本 + 分隔线 + 动作组。窄屏
-          降级：CSS 隐藏 secondary 件（标题/状态 chip/保存文本）与动作组
-          的 outlined 次级按钮（重置），只留返回 + 版本选择器 + contained
-          主按钮。 */}
+          降级：CSS 隐藏 secondary（标题）与 conditional（chip/保存文本）
+          及动作组的 outlined 次级按钮（重置），只留返回 + 版本选择器 +
+          contained 主按钮。间距纪律：岛级 flex gap 一套机制，conditional
+          用 display:contents——条件元素缺席时不留幻影 gap。 */}
       <div
         className={`${styles.island} ${styles.identity}`}
         ref={identityRef}
@@ -90,7 +91,7 @@ export function StudioCanvasIslands() {
           error={studio.revisionLoadError}
           onSelectRevision={studio.selectRevision}
         />
-        <span className={styles.secondary}>
+        <span className={styles.conditional}>
           <WorkflowStudioStatusChip
             readOnly={studio.readOnly}
             version={studio.revision?.version ?? null}
@@ -103,7 +104,7 @@ export function StudioCanvasIslands() {
             onShowChanges={() => view.setChangesPanelOpen(true)}
           />
         </span>
-        <span className={styles.secondary}>
+        <span className={styles.conditional}>
           <WorkflowStudioDraftSaveControlContainer />
         </span>
         <span className={styles.divider} aria-hidden="true" />

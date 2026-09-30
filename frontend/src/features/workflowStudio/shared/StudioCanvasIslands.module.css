@@ -1,7 +1,6 @@
 /* Studio 浮动功能岛（#799）：半透明 + 毛玻璃 + 8px 圆角 + 阴影，与
  * AgentPanelDock 同一浮层语言；z 900 与 Dock 同档（不撞 Toast 1000 /
- * TokenUsage 1190 / MUI Modal 1300，分层契约见 AgentPanelDock.module.css）。
- * 顶边由组件按窄屏页签导航实测高度下发（inline style.top）。 */
+ * TokenUsage 1190 / MUI Modal 1300，分层契约见 AgentPanelDock.module.css）。 */
 
 /* 岛的绝对定位锚点：撑满父级剩余高度，MobileNav/分栏在普通流、岛绝对
  * 定位浮在其上。 */
@@ -48,13 +47,24 @@
   max-width: 320px;
 }
 
-/* 分隔线：指挥中心的「身份/版本/草稿」与「生命周期动作」两族之间。 */
+/* 分隔线：指挥中心的「身份/版本/草稿」与「生命周期动作」两族之间。
+ * 间距纪律（#804 验收）：岛内相邻元素间距只由 .island 的 flex gap 一套
+ * 机制承担——分隔线自身不带左右 margin（gap 天然留位），条件出现的
+ * chip/重置/保存文本同样不引入额外 margin，任何状态下间距恒定不跳动。 */
 .divider {
   flex: none;
   align-self: stretch;
   width: 1px;
-  margin: 4px 2px;
+  margin: 4px 0;
   background: var(--color-border, #e0e0e0);
+}
+
+/* 动作组（发布/重置，只读态 返回/设为草稿）：inline span 默认没有 flex
+ * 上下文，子按钮会贴死——自成 inline-flex 并复用岛级 gap。 */
+.actionsGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* 右岛图标 + 文字并排（全局类——岛子组件的 span 引用，CSS modules 不哈希） */
@@ -63,18 +73,30 @@
   white-space: nowrap;
 }
 
+/* 条件元素（状态 chip / 保存瞬态文本）的包装：display:contents 不产生
+ * 自身盒子——内容缺席（chip 干净态 return null、保存文本成功即隐）时不留
+ * 幻影 gap，出现时与常驻元素同享岛级 gap，间距不随状态跳动（#804 验收）。 */
+.conditional {
+  display: contents;
+}
+
 /* 窄屏紧凑形态（≤900px，页签导航在场）：左岛只留返回 + 版本选择器 +
- * contained 主按钮——secondary 件（标题/状态 chip/保存文本）隐藏降级；
- * 动作组的 outlined 次级按钮（重置，只读态的「返回」）同样隐藏。右岛
- * 图标组保持、文字省略。 */
+ * contained 主按钮——secondary 件（标题）与 conditional 件（状态 chip/
+ * 保存文本）隐藏降级；动作组的 outlined 次级按钮（重置，只读态的
+ * 「返回」）同样隐藏。右岛图标组保持、文字省略。 */
 @media (max-width: 900px) {
   .island {
     padding: 4px 6px;
     gap: 4px;
   }
 
-  .secondary {
+  .secondary,
+  .conditional {
     display: none;
+  }
+
+  .actionsGroup {
+    gap: 4px;
   }
 
   .actionsGroup :global(.MuiButton-outlined) {
