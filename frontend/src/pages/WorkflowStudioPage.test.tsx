@@ -397,6 +397,10 @@ describe('WorkflowStudioPage', () => {
 
     await user.click(screen.getByRole('button', { name: '确认发布' }))
 
-    expect(await screen.findByText('保存成功')).toBeInTheDocument()
+    // CI 慢机上 click → publish → reload → toast 的链路可能超过 findByText
+    // 默认 1s（实测 CI 失败时 toast 在 DOM 里、刚好错过默认窗口）。
+    expect(
+      await screen.findByText('保存成功', undefined, { timeout: 4000 })
+    ).toBeInTheDocument()
   })
 })
