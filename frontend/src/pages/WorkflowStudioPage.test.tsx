@@ -216,9 +216,15 @@ describe('WorkflowStudioPage', () => {
     expect(identity).toHaveTextContent('题目审题 / 编辑工作流')
     expect(identity).not.toHaveTextContent('知识视频 DAG')
     expect(identity).toHaveTextContent('v1')
-    expect(actions).toHaveTextContent('校验')
-    expect(actions).toHaveTextContent('发布')
-    expect(actions).toHaveTextContent('重置')
+    // #799 重组：生命周期动作在左岛（指挥中心），右岛为纯图标组。
+    expect(identity).toHaveTextContent('校验')
+    expect(identity).toHaveTextContent('发布')
+    expect(identity).toHaveTextContent('重置')
+    expect(actions).not.toHaveTextContent('校验')
+    // 用量入口从 studio 拿掉（实例级遥测，其他页面全局顶栏已有）。
+    expect(
+      screen.queryByRole('button', { name: 'Token 使用分析' })
+    ).not.toBeInTheDocument()
     // P3：查看变更 / YAML 高级编辑 / Agent 管理 / Executor 管理已从顶栏移除，
     // 前两者下沉为变更 Drawer 与 YAML 全屏 Dialog，后两者随管理弹窗删除。
     expect(identity).not.toHaveTextContent('查看变更')

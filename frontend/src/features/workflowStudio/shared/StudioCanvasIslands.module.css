@@ -30,7 +30,6 @@
 
 .identity {
   left: 12px;
-  right: 12px;
   flex-wrap: wrap;
 }
 
@@ -55,16 +54,29 @@
   white-space: nowrap;
 }
 
-/* 窄屏紧凑形态（≤900px，页签导航在场）：省略标题/模式文本，图标与控件
- * 保留，岛不挤爆。 */
+/* 分隔线：指挥中心的「身份/版本/草稿」与「生命周期动作」两族之间。 */
+.divider {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin: 4px 2px;
+  background: var(--color-border, #e0e0e0);
+}
+
+/* 窄屏紧凑形态（≤900px，页签导航在场）：左岛只留返回 + 版本选择器 +
+ * contained 主按钮——secondary 件（标题/模式文本/状态 chip/保存控件）与
+ * outlined 次级按钮（校验/重置，只读态「返回」）隐藏降级。右岛图标组保持。 */
 @media (max-width: 900px) {
   .island {
     padding: 4px 6px;
     gap: 4px;
   }
 
-  .title,
-  .modeText {
+  .secondary {
+    display: none;
+  }
+
+  .actionsGroup :global(.MuiButton-outlined) {
     display: none;
   }
 

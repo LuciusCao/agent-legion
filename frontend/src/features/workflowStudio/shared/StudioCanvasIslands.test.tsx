@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { StudioCanvasIslands } from './StudioCanvasIslands'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
@@ -75,24 +75,29 @@ describe('StudioCanvasIslands（#799：去 AppBar 画布化的双浮岛）', () 
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1')
   })
 
-  it('右上操作岛：Agent 面板开关（沿用 toggle agent panel 语义）+ 用量入口 + 校验/发布/重置 + 共享材料', () => {
+  it('左岛生命周期动作：校验/发布/重置移入指挥中心岛（#799 重组）', () => {
     renderIslands()
-    const island = screen.getByTestId('studio-action-island')
+    const island = screen.getByTestId('studio-identity-island')
     expect(island).toHaveTextContent('校验')
     expect(island).toHaveTextContent('发布新版本')
     expect(island).toHaveTextContent('重置')
-    expect(
-      screen.getByRole('button', { name: 'toggle agent panel' })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Token 使用分析' })
-    ).toBeInTheDocument()
+    // 分隔线在位（身份/版本族与动作族之间）。
+    expect(island.querySelector('[class*="divider"]')).not.toBeNull()
   })
 
-  it('用量入口导航到 token-usage 页', () => {
+  it('右岛收成纯图标组：Agent 开关 + 共享素材，无文字按钮、无用量入口', () => {
     renderIslands()
-    fireEvent.click(screen.getByRole('button', { name: 'Token 使用分析' }))
-    expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/token-usage')
+    const island = screen.getByTestId('studio-action-island')
+    expect(
+      within(island).getByRole('button', { name: 'toggle agent panel' })
+    ).toBeInTheDocument()
+    expect(
+      within(island).getByRole('button', { name: 'Skill 共享材料' })
+    ).toBeInTheDocument()
+    // 纯图标组：无文字按钮。
+    expect(within(island).queryByRole('button', { name: '校验' })).toBeNull()
+    // 用量入口移除（实例级遥测，与 workflow 编辑无语义关系）。
+    expect(screen.queryByRole('button', { name: 'Token 使用分析' })).toBeNull()
   })
 
   it('窄屏非画布页签不渲染岛（不盖编辑器/Agent 面板）；画布页签照常渲染', () => {
