@@ -43,7 +43,7 @@ export function WorkflowRevisionSelect({
         size="small"
         variant="outlined"
         endIcon={<KeyboardArrowDownIcon fontSize="small" />}
-        disabled={disabled || revisions.length === 0}
+        disabled={disabled || (revisions.length === 0 && !onResetDraft)}
         aria-controls={open ? 'workflow-revision-menu' : undefined}
         aria-haspopup="menu"
         aria-expanded={open ? 'true' : undefined}

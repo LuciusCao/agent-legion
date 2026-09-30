@@ -414,6 +414,43 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     expect(result.current.canPublish).toBe(false)
   })
 
+  it('发布失败不污染校验通道：validationMessage 保持「校验通过」，可重发（轮 7 P1）', async () => {
+    const { result, rerender } = renderHook(
+      ({ saveStatus, definitionYaml }: AutoProps) =>
+        useWorkflowStudioActions(
+          'ws1',
+          {
+            ...draft,
+            definitionYaml,
+            draftSave: { status: saveStatus, savedAt: null },
+          },
+          reload,
+          compareWithChanges
+        ),
+      { initialProps: { saveStatus: 'idle', definitionYaml: 'key: demo\n' } }
+    )
+    await act(async () => {
+      rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
+    })
+    expect(result.current.validationMessage).toBe('校验通过')
+    expect(result.current.canPublish).toBe(true)
+
+    // 瞬时网络错误 reject：旧实现把 validationMessage 覆盖成「保存失败：…」
+    // → canPublish 永假、自动校验因消息非空跳过（发布永久封死）。
+    mocks.publishWorkflowDraft.mockRejectedValueOnce(new Error('network error'))
+    await act(async () => {
+      await result.current.publishDraft()
+    })
+    expect(result.current.publishing).toBe(false)
+    expect(result.current.validationMessage).toBe('校验通过')
+    expect(result.current.canPublish).toBe(true)
+    // toast 仍报失败（用户可见）。
+    expect(useUiStore.getState().toast).toEqual({
+      message: '保存失败：network error',
+      type: 'error',
+    })
+  })
+
   it('审 A 发 B：确认框打开期间 YAML 被后台换掉 → reviewStale（禁确认数据源），关闭复位（轮 4 P2-C）', async () => {
     const { result, rerender } = renderHook(
       ({ saveStatus, definitionYaml, conflict }: AutoProps) =>
@@ -536,7 +573,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     expect(result.current.validating).toBe(false)
   })
 
-  it('sets validation failure message and clears errors on publish rejection', async () => {
+  it('publish 网络失败只 toast 不写校验通道（轮 7 P1：校验通过不被污染）', async () => {
     mocks.publishWorkflowDraft.mockRejectedValue(new Error('network error'))
     const { result } = renderActionsHook({
       saveStatus: 'idle',
@@ -548,7 +585,12 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     })
 
     expect(result.current.publishing).toBe(false)
-    expect(result.current.validationMessage).toBe('保存失败：network error')
+    expect(useUiStore.getState().toast).toEqual({
+      message: '保存失败：network error',
+      type: 'error',
+    })
+    // 校验通道不受影响（initial '' 保持）。
+    expect(result.current.validationMessage).toBe('')
     expect(result.current.validationErrors).toEqual([])
   })
 

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useUiStore } from '../../../stores/uiStore'
 
-/** 校验/发布的结果反馈：结果写 validation state（「变更」页展示）并弹
- * toast——选中节点 + Agent 展开时「变更」视图被 display:none，仅写
- * validationMessage 用户会完全看不到结果。草稿再编辑后旧结果即失效。 */
+/** 校验/发布的结果反馈：校验结果写 validation state（「变更」页展示）+
+ * 弹 toast。草稿再编辑后旧结果即失效。
+ * 轮 7 P1：发布结果与校验通道分离——publishDraft 走 notify（纯 toast），
+ * 不再写 validationMessage（否则「保存失败：…」污染校验通道，canPublish
+ * 因值非「校验通过」永久封死发布）。 */
 export function useValidationFeedback(definitionYaml: string) {
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [validationMessage, setValidationMessage] = useState('')
@@ -30,6 +32,11 @@ export function useValidationFeedback(definitionYaml: string) {
     setValidationMessage(message)
   }
 
+  // 轮 7 P1：发布结果的纯 toast 通道（不写 validation state）。
+  function notify(message: string, toastType: 'success' | 'error') {
+    useUiStore.getState().showToast(message, toastType)
+  }
+
   // 轮 6 H3：传输失败终态的显式重试——清空结果即触发自动校验重跑
   // （useDraftAutoValidation 的 settled+未校验守卫）。
   function clear() {
@@ -37,5 +44,12 @@ export function useValidationFeedback(definitionYaml: string) {
     setValidationMessage('')
   }
 
-  return { validationErrors, validationMessage, report, reportSilent, clear }
+  return {
+    validationErrors,
+    validationMessage,
+    report,
+    reportSilent,
+    clear,
+    notify,
+  }
 }

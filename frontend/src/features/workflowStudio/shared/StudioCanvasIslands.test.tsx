@@ -241,6 +241,23 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     }
   })
 
+  it('轮 7 P2：空工作区（无 revision）窄屏 dirty 仍有重置出口——触发键不禁用', () => {
+    // revisions=[] 时选择器触发按钮原本禁用 → 菜单打不开，窄屏唯一重置
+    // 入口失效（宽屏有外露按钮）。有 onResetDraft 时必须保持可点。
+    narrowState.value = true
+    try {
+      renderIslands({ dirty: true, revisions: [] })
+      const trigger = screen.getByRole('button', { name: /v- ·/ })
+      expect(trigger).toBeEnabled()
+      fireEvent.click(trigger)
+      expect(
+        screen.getByRole('menuitem', { name: '重置为已发布版本' })
+      ).toBeInTheDocument()
+    } finally {
+      narrowState.value = false
+    }
+  })
+
   it('轮 4 P2-D：宽屏不出现菜单重置项（外露按钮承担）', () => {
     const revision = {
       id: 'rev-1',

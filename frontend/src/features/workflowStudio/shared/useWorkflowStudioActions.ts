@@ -46,7 +46,7 @@ export function useWorkflowStudioActions(
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
   // P2-C：确认框打开那一刻的 YAML 快照（审阅对象）。
   const [reviewYaml, setReviewYaml] = useState<string | null>(null)
-  const { validationErrors, validationMessage, report, reportSilent, clear } =
+  const { validationErrors, validationMessage, reportSilent, clear, notify } =
     useValidationFeedback(draft.definitionYaml)
   useDraftAutoValidation({
     workspaceId,
@@ -97,13 +97,16 @@ export function useWorkflowStudioActions(
         // canonical 基线变化时据此强制 reset，不误判为外部变更保留旧草稿。
         draft.markDraftPublished(draft.definitionYaml)
         await reload()
-        report(result.errors, '保存成功', 'success')
+        notify('保存成功', 'success')
       } else {
-        report(result.errors, '保存失败', 'error')
+        // 服务端发布期校验未过：错误列表归校验通道（chip ✗ + 抽屉详情），
+        // toast 报动作失败——发布-side 校验权威，内容确实不可发布。
+        reportSilent(result.errors, '校验失败')
+        notify('保存失败', 'error')
       }
     } catch (e) {
       const message = `保存失败：${(e instanceof Error && e.message) || '网络错误'}`
-      report([], message, 'error')
+      notify(message, 'error')
     } finally {
       setPublishing(false)
     }
