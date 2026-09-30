@@ -8,7 +8,8 @@
  *   高 AppBar 下记忆位置盖住顶部导航、窗口缩小后把手落出视口（视口尺寸
  *   状态化 + resize 监听，resize 必须触发重渲染钳制才跟进）。
  * - 拖拽/缩放的 topInset 钳制在组件回调里做（onDrag/onDragStop/onResize/
- *   onResizeStop 都钳），这里只管几何状态与存储。
+ *   onResizeStop 都钳），这里只管几何状态与存储。折叠态已随 #795 收尾
+ *   移除（有唤起按钮后开/关两态足够），持久化只写几何。
  */
 import { useEffect, useState } from 'react'
 import {
@@ -20,13 +21,11 @@ import { loadDockPlacement, saveDockPlacement } from './dockPlacementStorage'
 
 export interface DockGeometryEngine {
   geometry: DockGeometry
-  collapsed: boolean
   /** 状态化的视口尺寸（resize 监听驱动；有效最小尺寸等派生用）。 */
   viewport: { width: number; height: number }
   /** 拖拽/缩放进行中的实时更新（不写存储；提交走 commitGeometry）。 */
   setGeometryLive: (next: DockGeometry) => void
   commitGeometry: (next: DockGeometry) => void
-  setCollapsedPersisted: (collapsed: boolean) => void
 }
 
 export function useDockGeometry(
@@ -46,9 +45,6 @@ export function useDockGeometry(
           )
         : null
     }
-  )
-  const [collapsed, setCollapsed] = useState(
-    () => loadDockPlacement(surfaceKey)?.collapsed ?? false
   )
   // 视口尺寸状态化：resize 必须触发重渲染，钳制才会跟进。
   const [viewport, setViewport] = useState(() => ({
@@ -87,26 +83,15 @@ export function useDockGeometry(
     })
   }, [topInset, viewport])
 
-  function persist(next: DockGeometry, nextCollapsed: boolean) {
-    saveDockPlacement(surfaceKey, { ...next, collapsed: nextCollapsed })
-  }
-
   function commitGeometry(next: DockGeometry) {
     setGeometryOverride(next)
-    persist(next, collapsed)
-  }
-
-  function setCollapsedPersisted(nextCollapsed: boolean) {
-    setCollapsed(nextCollapsed)
-    persist(geometry, nextCollapsed)
+    saveDockPlacement(surfaceKey, next)
   }
 
   return {
     geometry,
-    collapsed,
     viewport,
     setGeometryLive: setGeometryOverride,
     commitGeometry,
-    setCollapsedPersisted,
   }
 }

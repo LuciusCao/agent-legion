@@ -63,5 +63,13 @@ terms:
   - pattern: '上游哈希链'
     retired_in: '#645/#702（inherit 传播闭包重构）'
     note: 「上游哈希链式传播」的简称变体，同 upstream chain
+  - pattern: '折叠小条'
+    retired_in: '#795 收尾（Dock 三态收敛开/关两态）'
+    note: AgentPanelDock 的右下角折叠 chip 已移除；有唤起按钮后开关经各
+      surface 入口，Esc = 关闭。锚定 Dock 语境，不误伤 DAG 节点/消息等
+      无关折叠语义
+  - pattern: '已折叠，点击展开'
+    retired_in: '#795 收尾（Dock 三态收敛开/关两态）'
+    note: 折叠 chip 的按钮文案字面量；Dock 面板开/关两态后不再存在
 
 exemptions: []

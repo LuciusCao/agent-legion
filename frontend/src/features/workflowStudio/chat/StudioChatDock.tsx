@@ -11,8 +11,8 @@ import styles from './StudioChatPanel.module.css'
  * 挤占。开合仍走 appbar 开关（#668，StudioViewContext 为唯一状态源）：
  * 关闭按钮 = 收起。hidden（关闭/窄屏未选中 Agent 页签）= **隐藏不卸载**
  * （#797 codex P1：composer 文本与发送队列在子树本地 state、SSE 在 hook
- * 里——卸载即静默丢失，队列里已提交的消息不会再发送）；折叠为右下角小条
- * 由 Dock 承担（display:none 不卸载）。
+ * 里——卸载即静默丢失，队列里已提交的消息不会再发送）。折叠态已随 #795
+ * 收尾移除：开/关两态，Esc = 关闭（同 toggleAgent 路径）。
  * 沿用侧栏时代的两条既有逻辑：应用 agent 的 workflow 草稿前若编辑器有未
  * 发布修改需先确认（否则静默覆盖用户草稿）；#416/#429：agent 发布请求落地
  * （确认/取消/被顶替）后在 Dock 内顶部显示一轮回执（zustand store 共享，
@@ -30,7 +30,7 @@ export function StudioChatDock({ hidden }: { hidden: boolean }) {
     <AgentPanelDock
       surfaceKey="studio-chat"
       title="Agent 助手"
-      defaultSize={{ width: 520, height: 640 }}
+      defaultSize={{ width: 572, height: 704 }}
       // 关闭 = 收起：toggleAgent 是开合的唯一组合出口（#797 codex 复审轮，
       // 窄屏页签同步组合在 useAgentDockOpen 那层）。焦点归还指定顶栏开关
       // （首次关闭、无面板外 focusin 时的稳定恢复目标）。窄屏额外避让

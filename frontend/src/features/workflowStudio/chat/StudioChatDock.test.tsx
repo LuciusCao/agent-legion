@@ -126,12 +126,14 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
     // 旧侧栏形态（complementary aside）不再存在；聊天内容在 Dock 内。
     expect(screen.queryByRole('complementary')).toBeNull()
     expect(screen.getByTestId('chat-stub-input')).toBeInTheDocument()
-    // surface key 记忆：折叠一次后写入 studio-chat 键。
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    expect(
-      window.localStorage.getItem('agent-panel-dock:studio-chat')
-    ).toContain('"collapsed":true')
+    // 折叠态已随 #795 收尾移除：标题栏只有关闭按钮，无 chip。
+    expect(screen.queryByRole('button', { name: '折叠面板' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /已折叠/ })).toBeNull()
+    // 无记忆时默认几何 = 新默认尺寸（#795 收尾：520×640 → ×1.1 = 572×704）；
+    // jsdom 视口 768 高：高度被钳到 768-56-32=680（#797 轮 7 上限封顶语义）。
+    const wrapper = surface.parentElement as HTMLElement
+    expect(wrapper.style.width).toBe('572px')
+    expect(wrapper.style.height).toBe('680px')
   })
 
   it('Dock 关闭按钮 = 收起（toggleAgent 组合出口，页签同步在 pageView 层）', async () => {
@@ -207,9 +209,10 @@ describe('StudioChatDock（#795 PR②：侧栏 → Dock 浮层）', () => {
       // 顶边 = AppBar 兜底 56 + nav 40 + 8 = 104。jsdom transform 读数带
       // 挂载偏移产物（见 agentPanelDock 测试的 jsdomTransform 注释）：nav
       // 高度在挂载后的 effect 才测到（挂载时 extra=0、y=64），offset 冻结
-      // 在 -64——最终 transform = 104 + 64 = 168。
+      // 在 -64——最终 transform = 104 + 64 = 168。x = 1024-572-16=436
+      //（#795 收尾默认尺寸 520→572），jsdom 首挂加倍读作 872。
       const wrapper = surface.parentElement as HTMLElement
-      expect(wrapper.style.transform).toBe('translate(976px,168px)')
+      expect(wrapper.style.transform).toBe('translate(872px,168px)')
     } finally {
       fakeNav.remove()
     }

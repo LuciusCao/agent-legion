@@ -2,10 +2,9 @@
  * AgentPanelDock 容器行为测试（issue #795 PR①）：
  * - 非模态 surface：role=dialog + aria-modal=false、z-index 900、无 MUI
  *   Modal/遮罩、底层页面不进 aria-hidden；
- * - 折叠/展开：折叠为右下角小条，内容区只 display:none 不卸载（子树状态
- *   保留），点小条展开；
- * - 记忆：位置/尺寸/折叠态按 surfaceKey 存 localStorage，重开恢复；
- * - Esc 折叠（非破坏性）；焦点移交：打开/展开进面板、折叠到小条、卸载还原。
+ * - 记忆：位置/尺寸按 surfaceKey 存 localStorage，重开恢复；存量
+ *   collapsed 字段读取时忽略（#795 收尾：折叠态移除，开/关两态）；
+ * - Esc 关闭（走 onClose）；焦点移交：打开进面板、卸载/hidden 归还。
  * jsdom 视口固定 1024×768，无 AppBar 元素 → topInset 走 --app-bar-height
  * 回退（56）：默认几何 x=1024-520-16=488、y=64、宽 520、高 620。
  */
@@ -112,29 +111,15 @@ describe('AgentPanelDock', () => {
     expect(wrapper.style.transform).toBe(jsdomTransform(488, 64))
   })
 
-  it('折叠为右下角小条后内容子树保持挂载，点小条展开恢复', async () => {
+  it('标题栏只有关闭按钮，不渲染折叠 chip（#795 收尾：折叠态移除）', async () => {
     renderDock()
-    const surface = await screen.findByRole('dialog', { name: '测试面板' })
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-
-    const chip = await screen.findByRole('button', {
-      name: '测试面板（已折叠，点击展开）',
-    })
-    // 折叠只是 display:none 隐藏容器（卸载会丢子树本地 state）——
-    // 内容仍在 DOM 里。
-    expect(screen.getByTestId('dock-child')).toBeInTheDocument()
-    expect(rndWrapper(surface).style.display).toBe('none')
-
-    fireEvent.click(chip)
-    await waitFor(() =>
-      expect(
-        screen.queryByRole('button', { name: /已折叠，点击展开/ })
-      ).toBeNull()
-    )
-    expect(rndWrapper(surface).style.display).not.toBe('none')
+    await screen.findByRole('dialog', { name: '测试面板' })
+    expect(screen.getByRole('button', { name: '关闭' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '折叠面板' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /已折叠/ })).toBeNull()
   })
 
-  it('hidden 隐藏不卸载（#797 codex P1）：surface 与小条都不渲染，子树 state 存活，恢复后原样', async () => {
+  it('hidden 隐藏不卸载（#797 codex P1）：surface 不渲染，子树 state 存活，恢复后原样', async () => {
     const { rerender } = renderDock(
       {},
       <input data-testid="dock-child" defaultValue="" />
@@ -144,8 +129,8 @@ describe('AgentPanelDock', () => {
       target: { value: '未发送草稿' },
     })
 
-    // hidden=true：与折叠共用 display:none 抑制（同一条 Rnd>Paper>内容树，
-    // 不换元素类型不重挂），但连小条也不渲染。
+    // hidden=true：display:none 抑制（同一条 Rnd>Paper>内容树，
+    // 不换元素类型不重挂）。
     rerender(
       (
         <AgentPanelDock
@@ -159,9 +144,6 @@ describe('AgentPanelDock', () => {
       ) as ReactElement
     )
     expect(rndWrapper(surface).style.display).toBe('none')
-    expect(
-      screen.queryByRole('button', { name: /已折叠，点击展开/ })
-    ).toBeNull()
     // 子树保持挂载且 state 存活（卸载即丢——revert 即红）。
     expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
 
@@ -181,33 +163,12 @@ describe('AgentPanelDock', () => {
     expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
   })
 
-  it('折叠/展开不丢面板内容状态（输入值原样保留）', async () => {
-    renderDock({}, <input data-testid="dock-child" defaultValue="" />)
-    await screen.findByRole('dialog', { name: '测试面板' })
-    const input = screen.getByTestId('dock-child')
-    fireEvent.change(input, { target: { value: '未发送草稿' } })
-
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    const chip = await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
-
-    fireEvent.click(chip)
-    await waitFor(() =>
-      expect(
-        screen.queryByRole('button', { name: /已折叠，点击展开/ })
-      ).toBeNull()
-    )
-    expect(screen.getByTestId('dock-child')).toHaveValue('未发送草稿')
-  })
-
-  it('Esc 折叠面板（非破坏性——内容保持挂载，可从小条恢复）', async () => {
-    renderDock()
+  it('Esc 关闭面板（#795 收尾：语义从折叠改为关闭，走 onClose 同标题栏关闭）', async () => {
+    const onClose = vi.fn()
+    renderDock({ onClose })
     const surface = await screen.findByRole('dialog', { name: '测试面板' })
     fireEvent.keyDown(surface, { key: 'Escape' })
-    expect(
-      await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    ).toBeInTheDocument()
-    expect(screen.getByTestId('dock-child')).toBeInTheDocument()
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('关闭按钮调用 onClose', async () => {
@@ -218,21 +179,30 @@ describe('AgentPanelDock', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('折叠态按 surfaceKey 记忆：重开面板直接呈现小条', async () => {
-    const first = renderDock()
-    await screen.findByRole('dialog', { name: '测试面板' })
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    expect(loadDockPlacement('test-surface')?.collapsed).toBe(true)
-    first.unmount()
-
+  it('存量 collapsed=true 记忆被忽略（#795 收尾）：按几何恢复、不渲染小条', async () => {
+    // 折叠态移除前写入的旧数据：collapsed 字段读取时直接忽略——面板正常
+    // 展开呈现，不复活 chip、不崩溃。
+    localStorageStub.setItem(
+      'agent-panel-dock:test-surface',
+      JSON.stringify({
+        x: 100,
+        y: 100,
+        width: 480,
+        height: 400,
+        collapsed: true,
+      })
+    )
     renderDock()
-    // 记忆折叠态：不再出现展开的 surface，直接渲染小条。
-    expect(
-      await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    ).toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: '测试面板' })).toBeNull()
-    expect(screen.getByTestId('dock-child')).toBeInTheDocument()
+    const surface = await screen.findByRole('dialog', { name: '测试面板' })
+    expect(screen.queryByRole('button', { name: /已折叠/ })).toBeNull()
+    expect(rndWrapper(surface).style.display).not.toBe('none')
+    // 读取侧只认几何字段。
+    expect(loadDockPlacement('test-surface')).toEqual({
+      x: 100,
+      y: 100,
+      width: 480,
+      height: 400,
+    })
   })
 
   it('拖拽标题栏移动面板并按 surfaceKey 记忆位置，重开恢复到记忆位置', async () => {
@@ -247,7 +217,7 @@ describe('AgentPanelDock', () => {
 
     await waitFor(() => {
       const stored = loadDockPlacement('test-surface')
-      expect(stored).toMatchObject({ x: 288, y: 164, collapsed: false })
+      expect(stored).toMatchObject({ x: 288, y: 164 })
     })
     // 挂载时位置 (488,64) 被冻结为 jsdom 偏移，新位置读作 (288+488, 164+64)。
     expect(rndWrapper(surface).style.transform).toBe(
@@ -265,11 +235,17 @@ describe('AgentPanelDock', () => {
   it('不同 surfaceKey 的记忆互相隔离', async () => {
     const first = renderDock()
     await screen.findByRole('dialog', { name: '测试面板' })
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    await screen.findByRole('button', { name: /已折叠，点击展开/ })
+    // 拖拽一次让记忆落盘（折叠写入已随 #795 收尾移除）。
+    const handle = screen.getByTestId('dock-test-surface-handle')
+    fireEvent.mouseDown(handle, { clientX: 600, clientY: 80 })
+    fireEvent.mouseMove(document, { clientX: 400, clientY: 180 })
+    fireEvent.mouseUp(document, { clientX: 400, clientY: 180 })
+    await waitFor(() =>
+      expect(loadDockPlacement('test-surface')).not.toBeNull()
+    )
     first.unmount()
 
-    // 另一个 surface：不受 test-surface 的折叠记忆影响。
+    // 另一个 surface：不受 test-surface 的记忆影响。
     renderDock({ surfaceKey: 'other-surface', title: '另一面板' })
     expect(
       await screen.findByRole('dialog', { name: '另一面板' })
@@ -296,7 +272,6 @@ describe('AgentPanelDock', () => {
         y: 70,
         width: 520,
         height: 620,
-        collapsed: false,
       })
     )
     // 假 AppBar：实测底边 100（版本芯片/放大字体场景）。
@@ -328,7 +303,6 @@ describe('AgentPanelDock', () => {
         y: 100,
         width: 1200,
         height: 620,
-        collapsed: false,
       })
     )
     renderDock()
@@ -365,7 +339,8 @@ describe('AgentPanelDock', () => {
     }
   })
 
-  it('codex P2：Esc 折叠挂在 document 级——焦点在面板外（底层页面）也生效', async () => {
+  it('codex P2：Esc 关闭挂在 document 级——焦点在面板外（底层页面）也生效', async () => {
+    const onClose = vi.fn()
     render(
       (
         <div>
@@ -373,7 +348,7 @@ describe('AgentPanelDock', () => {
           <AgentPanelDock
             surfaceKey="test-surface"
             title="测试面板"
-            onClose={() => undefined}
+            onClose={onClose}
           >
             <div data-testid="dock-child">内容</div>
           </AgentPanelDock>
@@ -384,19 +359,18 @@ describe('AgentPanelDock', () => {
     // 焦点移交到底层页面（模拟用户点回页面）。
     screen.getByRole('button', { name: '底层按钮' }).focus()
     fireEvent.keyDown(document.body, { key: 'Escape' })
-    expect(
-      await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    ).toBeInTheDocument()
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('codex P2：有全局 MUI Modal 开着时 Esc 让给对方（不折叠 Dock）', async () => {
+  it('codex P2：有全局 MUI Modal 开着时 Esc 让给对方（不关闭 Dock）', async () => {
+    const onClose = vi.fn()
     render(
       (
         <div>
           <AgentPanelDock
             surfaceKey="test-surface"
             title="测试面板"
-            onClose={() => undefined}
+            onClose={onClose}
           >
             <div>内容</div>
           </AgentPanelDock>
@@ -408,11 +382,9 @@ describe('AgentPanelDock', () => {
     )
     await screen.findByRole('dialog', { name: '测试面板' })
     fireEvent.keyDown(document.body, { key: 'Escape' })
-    // Dock 不折叠（Esc 属于模态）；小条不出现。
+    // Dock 不关闭（Esc 属于模态）。
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(
-      screen.queryByRole('button', { name: /已折叠，点击展开/ })
-    ).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: '测试面板' })).toBeInTheDocument()
   })
 
@@ -429,7 +401,7 @@ describe('AgentPanelDock', () => {
     await waitFor(() => {
       const stored = loadDockPlacement('test-surface')
       // 提交钳制：y 被钳到 56（x 未动）。
-      expect(stored).toMatchObject({ x: 488, y: 56, collapsed: false })
+      expect(stored).toMatchObject({ x: 488, y: 56 })
     })
     expect(rndWrapper(surface).style.transform).toBe(
       jsdomTransform(488, 56, { x: 488, y: 64 })
@@ -492,8 +464,9 @@ describe('AgentPanelDock', () => {
     }
   })
 
-  it('codex P2 复审轮：拖拽改几何后按 Esc 折叠，写回存储的是新几何（Esc 回调不冻结首帧闭包）', async () => {
-    renderDock()
+  it('codex P2 复审轮：拖拽改几何后按 Esc 关闭，写回存储的是新几何（Esc 回调不冻结首帧闭包）', async () => {
+    const onClose = vi.fn()
+    renderDock({ onClose })
     await screen.findByRole('dialog', { name: '测试面板' })
     const handle = screen.getByTestId('dock-test-surface-handle')
 
@@ -508,13 +481,12 @@ describe('AgentPanelDock', () => {
       })
     )
 
-    // Esc 折叠（document 级）：折叠写入不得把首帧几何（488,64）覆盖回去。
+    // Esc 关闭（document 级）：关闭路径不写存储，几何保持拖拽提交值。
     fireEvent.keyDown(document.body, { key: 'Escape' })
-    await screen.findByRole('button', { name: /已折叠，点击展开/ })
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
     expect(loadDockPlacement('test-surface')).toMatchObject({
       x: 288,
       y: 164,
-      collapsed: true,
     })
   })
 
@@ -609,7 +581,6 @@ describe('AgentPanelDock', () => {
         y: 70,
         width: 520,
         height: 620,
-        collapsed: false,
       })
     )
     try {

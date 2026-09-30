@@ -56,7 +56,7 @@ beforeEach(() => {
 })
 
 describe('AgentPanelDock 焦点契约', () => {
-  it('焦点移交：打开进面板、折叠到小条、展开回面板、卸载还原触发元素', async () => {
+  it('焦点移交：打开进面板、卸载还原触发元素（折叠态已移除，无 chip 移交）', async () => {
     // 焦点移交 effect 驱动 Tooltip/ButtonBase 状态更新脱离 act（known
     // noise，与 previewPanel 既有用例同款声明）。
     expectConsoleWarning(/not wrapped in act/)
@@ -67,13 +67,6 @@ describe('AgentPanelDock 焦点契约', () => {
 
     const { unmount } = renderDock()
     const surface = await screen.findByRole('dialog', { name: '测试面板' })
-    await waitFor(() => expect(document.activeElement).toBe(surface))
-
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    const chip = await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    await waitFor(() => expect(document.activeElement).toBe(chip))
-
-    fireEvent.click(chip)
     await waitFor(() => expect(document.activeElement).toBe(surface))
 
     unmount()
@@ -310,44 +303,6 @@ describe('AgentPanelDock 焦点契约', () => {
     screen.getByTestId('dock-input').focus()
     rerender((<Scenario hidden />) as ReactElement)
     await waitFor(() => expect(document.activeElement).toBe(publish))
-  })
-
-  it('复审批次 P3：记忆 collapsed=true 首挂不抢焦点（与 hidden 首挂守卫同思路）', async () => {
-    expectConsoleWarning(/not wrapped in act/)
-    expectConsoleError(/not wrapped in act/)
-    // 上次会话折叠退出，本次打开页面 Dock 以折叠小条首挂——用户从未在本
-    // 会话打开面板，焦点不应被抢到 chip（revert：activeElement 被挪到
-    // chip，即红）。
-    localStorageStub.setItem(
-      'agent-panel-dock:test-surface',
-      JSON.stringify({
-        x: 100,
-        y: 100,
-        width: 520,
-        height: 620,
-        collapsed: true,
-      })
-    )
-    const elsewhere = document.createElement('button')
-    document.body.appendChild(elsewhere)
-    elsewhere.focus()
-
-    renderDock()
-    // 折叠小条已渲染（首挂即折叠），焦点保持在原处。
-    await screen.findByRole('button', { name: /已折叠，点击展开/ })
-    expect(document.activeElement).toBe(elsewhere)
-
-    // 守卫解除：用户点 chip 展开再折叠，折叠后焦点正常移交 chip（展开
-    // 期间 chip 卸载，再折叠是新节点——重新查询）。
-    fireEvent.click(screen.getByRole('button', { name: /已折叠，点击展开/ }))
-    const surface = await screen.findByRole('dialog', { name: '测试面板' })
-    await waitFor(() => expect(document.activeElement).toBe(surface))
-    fireEvent.click(screen.getByRole('button', { name: '折叠面板' }))
-    const chip2 = await screen.findByRole('button', {
-      name: /已折叠，点击展开/,
-    })
-    await waitFor(() => expect(document.activeElement).toBe(chip2))
-    elsewhere.remove()
   })
 
   it('restoreFocusRef 显式指定的归还目标优先于挂载时焦点（#800 codex P2）', async () => {

@@ -1,13 +1,15 @@
 /**
  * AgentPanelDock（issue #795 PR①）：可拖拽、可缩放的非模态面板容器。
  * - 拖拽/缩放：react-rnd，拖拽把手是标题栏（cancel=button 让标题栏按钮
- *   不发起拖拽）；位置/尺寸/折叠态按 surfaceKey 存 localStorage
- *   （dockPlacement.ts），同 surface 重开恢复记忆位置。
+ *   不发起拖拽）；位置/尺寸按 surfaceKey 存 localStorage
+ *   （dockPlacementStorage.ts），同 surface 重开恢复记忆位置。
  * - 非模态：Portal + Paper 的自定义 modeless surface（role="dialog" +
  *   aria-modal="false"），不走 MUI Modal——无遮罩、不锁滚动、不圈禁焦点，
  *   面板打开时背后页面全程可滚动可交互（portal 外内容也不进 aria-hidden）。
- * - 折叠：缩成右下角小条，内容区只 display:none 不卸载——面板内容
- *   （如聊天子树的队列与未发送输入）保存在组件本地 state 里，卸载即清空。
+ * - 开/关两态（#795 收尾：折叠态移除——有唤起按钮后，开关经各 surface
+ *   自己的入口即可，不再需要右下角小条）：标题栏只有关闭按钮，Esc =
+ *   关闭（走各 surface 自己的关闭路径：studio 是 hidden、定制预览/job
+ *   排查是卸载）；存量 localStorage 里的 collapsed 字段读取时忽略。
  * - z-index 900：高于 AppBar 100/页面内容，低于 Toast 1000、
  *   TokenUsageDialog 1190/1200、MUI Modal 1300（分层契约见 css 模块注释）。
  * - 不遮顶部 AppBar：默认/钳制位置的顶边让开 AppBar **实测**底边
@@ -18,14 +20,17 @@
  *   缩小时对记忆/用户几何**重新钳制**（codex P2：兜底 56px 钳的记忆位置
  *   在更高的 AppBar 下会盖住它；窗口缩小后坐标/尺寸可能落出视口）。拖拽
  *   中与提交都按 topInset 钳 y（bounds="window" 允许 y=0，不拦 AppBar）。
- * - 焦点与 a11y（useDockFocus）：打开/展开焦点进面板、折叠焦点到小条、
- *   卸载还原触发元素；Esc 折叠面板（非破坏性，会话保持）——展开期间挂在
+ * - 焦点与 a11y（useDockFocus）：可见时焦点进面板、卸载/hidden 归还触发
+ *   元素；Esc 关闭面板（走 onClose，语义同标题栏关闭）——展开期间挂在
  *   document 级（非模态面板失焦后 Esc 仍可用；defaultPrevented 或有全局
- *   Modal/Menu 开着时让给对方，不抢已消费的 Esc）。
+ *   Modal/Menu 开着时让给对方，不抢已消费的 Esc）。同页多实例时 Esc 只关
+ *   栈顶：模块级 Dock 栈（dockStack.ts，#801 codex P1），mount/交互置顶、
+ *   unmount/hidden 出栈；栈位同时映射视觉层级（z-index = 900 + 栈位，钳
+ *   999 低于 Toast 1000）——被点击的 Dock 同步抬到最上层。
  */
-import { type ReactNode } from 'react'
+import { type ReactNode, useState, useSyncExternalStore } from 'react'
 import { IconButton, Paper, Portal, Tooltip } from '@mui/material'
-import { Close, UnfoldLess } from '@mui/icons-material'
+import { Close } from '@mui/icons-material'
 import { Rnd } from 'react-rnd'
 import { useAppBarBottom } from '../../hooks/useAppBarBottom'
 import {
@@ -36,6 +41,11 @@ import {
 import { useDockGeometry } from './useDockGeometry'
 import { useDockFocus } from './useDockFocus'
 import { useDockEscape } from './useDockEscape'
+import {
+  dockStackRaise,
+  dockStackSubscribe,
+  dockStackZIndex,
+} from './dockStack'
 import styles from './AgentPanelDock.module.css'
 
 export interface AgentPanelDockProps {
@@ -48,13 +58,10 @@ export interface AgentPanelDockProps {
   defaultSize?: { width: number; height: number }
   minWidth?: number
   minHeight?: number
-  /** 折叠小条文案（默认 `${title}（已折叠，点击展开）`）。 */
-  collapsedLabel?: string
-  /** 隐藏不卸载（#797 codex P1）：true 时 surface 与小条都不渲染，子树
-   * 保留在不可见容器——内容组件的本地 state（composer 文本/发送队列）
-   * 与 hook 级连接（SSE）不因显隐断开。Portal 会逃逸 display:none 祖先，
-   * 所以隐藏必须由 Dock 自身承担；与折叠共用 display:none 抑制（同一条
-   * Rnd>Paper>内容树，切换 hidden 不会换元素类型导致子树重挂）。 */
+  /** 隐藏不卸载（#797 codex P1）：true 时 surface 不渲染，子树保留在不可见
+   * 容器——内容组件的本地 state（composer 文本/发送队列）与 hook 级连接
+   * （SSE）不因显隐断开。Portal 会逃逸 display:none 祖先，所以隐藏必须由
+   * Dock 自身承担（display:none 抑制不换元素类型，子树不重挂）。 */
   hidden?: boolean
   /** 焦点归还的指定目标选择器（#797 复审轮 4，如顶栏开关/头部入口按钮）
    * ——首次关闭、无面板外 focusin 时的稳定恢复目标；归还链：
@@ -78,7 +85,6 @@ export function AgentPanelDock({
   defaultSize,
   minWidth = 320,
   minHeight = 240,
-  collapsedLabel,
   hidden = false,
   restoreFocusSelector,
   topInsetExtra = 0,
@@ -91,27 +97,30 @@ export function AgentPanelDock({
 
   // 几何引擎（记忆/默认布局、实测与视口变化重钳、持久化）抽在
   // useDockGeometry（体积预算）；语义见该文件注释。
-  const {
-    geometry,
-    collapsed,
-    viewport,
-    setGeometryLive,
-    commitGeometry,
-    setCollapsedPersisted,
-  } = useDockGeometry(surfaceKey, topInset, defaultSize)
+  const { geometry, viewport, setGeometryLive, commitGeometry } =
+    useDockGeometry(surfaceKey, topInset, defaultSize)
 
-  // 折叠与 hidden 分开：折叠焦点移到小条，hidden 不渲染小条——
-  // 焦点显式还给触发控件（见 useDockFocus）。Esc 在两者下都抑制。
-  const { surfaceRef, chipRef } = useDockFocus(
-    collapsed,
+  // hidden 时焦点显式还给触发控件（见 useDockFocus）。
+  const { surfaceRef } = useDockFocus(
     hidden,
     restoreFocusSelector,
     restoreFocusRef
   )
 
-  // Esc 折叠挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位
-  // 规则见 useDockFocus.ts 的 useDockEscape）。
-  useDockEscape(collapsed || hidden, () => setCollapsedPersisted(true))
+  // Dock 栈身份（#801 codex P1）：Esc 只关栈顶；栈成员与交互置顶在
+  // useDockEscape（入栈/出栈）与这里的 pointerdown/focusin（置顶）。
+  // useState 惰性初始化拿稳定 symbol（渲染期读 ref.current 撞 lint 规则）。
+  const [stackId] = useState(() => Symbol(`dock:${surfaceKey}`))
+  const raiseOnInteract = () => dockStackRaise(stackId)
+  // 栈位映射视觉层级（#801 codex 轮 2）：交互抬栈后本面板同步抬到最上
+  // 层（z-index = 900 + 栈位，钳 999 低于 Toast 1000）。
+  const zIndex = useSyncExternalStore(dockStackSubscribe, () =>
+    dockStackZIndex(stackId)
+  )
+
+  // Esc 关闭挂在 document 级（非模态面板失焦后 Esc 仍可用；实现与让位
+  // 规则见 useDockEscape.ts）。
+  useDockEscape(hidden, onClose, stackId)
 
   // 拖拽钳制（codex P2）：bounds="window" 允许 y=0，顶边必须不低于
   // AppBar 实测底边——拖拽中实时钳，提交时同一钳制。
@@ -143,6 +152,9 @@ export function AgentPanelDock({
         onDragStop={(_event, data) => {
           commitGeometry({ ...geometry, x: data.x, y: clampDragY(data.y) })
         }}
+        // 缩放把手在 Paper 外层包装里（非 Paper 后代，pointerdown/focusin
+        // capture 摸不到）——缩放也要抬栈（#801 codex 轮 4 P2）。
+        onResizeStart={raiseOnInteract}
         onResize={(_event, _direction, ref, _delta, position) => {
           // 顶部把手缩放同样钳顶边（codex P2 复审轮：拖拽路径已钳，缩放
           // 路径漏了）——高度联动由 clampResizeTopInset 承担（底边不变）。
@@ -173,10 +185,10 @@ export function AgentPanelDock({
         }}
         style={{
           position: 'fixed',
-          zIndex: 900,
-          // 折叠与 hidden 共用 display:none 抑制（同一条 Rnd>Paper>内容树，
-          // 不卸载、不换元素类型——子树 state/连接全程不断）。
-          display: collapsed || hidden ? 'none' : undefined,
+          zIndex,
+          // hidden 用 display:none 抑制（不卸载、不换元素类型——子树
+          // state/连接全程不断）。
+          display: hidden ? 'none' : undefined,
         }}
       >
         <Paper
@@ -187,6 +199,10 @@ export function AgentPanelDock({
           tabIndex={-1}
           elevation={8}
           className={styles.surface}
+          // 交互即置顶（#801 codex P1 栈序）：点击/拖拽/键盘进入都把自己
+          // 抬为栈顶，下一次 Esc 只关它。
+          onPointerDownCapture={raiseOnInteract}
+          onFocusCapture={raiseOnInteract}
           sx={{
             // 圆角规范（#796 验收反馈）：浮动 chrome 档 8px——Toast 同款，
             // 也是 chat/editor 等浮动表面的主取值；模态对话框档 4px
@@ -201,15 +217,6 @@ export function AgentPanelDock({
             data-testid={`dock-${surfaceKey}-handle`}
           >
             <span className={styles.title}>{title}</span>
-            <Tooltip title="折叠为右下角小条（内容保持）">
-              <IconButton
-                size="small"
-                aria-label="折叠面板"
-                onClick={() => setCollapsedPersisted(true)}
-              >
-                <UnfoldLess fontSize="small" />
-              </IconButton>
-            </Tooltip>
             <Tooltip title="关闭">
               <IconButton size="small" aria-label="关闭" onClick={onClose}>
                 <Close fontSize="small" />
@@ -219,16 +226,6 @@ export function AgentPanelDock({
           <div className={styles.content}>{children}</div>
         </Paper>
       </Rnd>
-      {collapsed && !hidden && (
-        <button
-          ref={chipRef}
-          type="button"
-          className={styles.chip}
-          onClick={() => setCollapsedPersisted(false)}
-        >
-          {collapsedLabel ?? `${title}（已折叠，点击展开）`}
-        </button>
-      )}
     </Portal>
   )
 }

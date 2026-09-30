@@ -498,7 +498,7 @@ describe('useStudioChat', () => {
     )
     const { result } = await renderChat()
 
-    let first: Promise<void> | undefined
+    let first: Promise<boolean | undefined> | undefined
     act(() => {
       first = result.current.startSession('kimi')
     })

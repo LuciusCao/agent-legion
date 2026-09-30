@@ -1,16 +1,19 @@
 import { createElement, type ReactNode } from 'react'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { JobDiagnosisPanel } from './JobDiagnosisPanel'
 import * as chatApi from '../workflowStudio/chat/studioChatApi'
+import * as configApi from '../workflowStudio/chat/studioChatConfigApi'
 import '../workflowStudio/chat/studioChatResumeApi'
 import * as jobApi from '../../api/jobApi'
 import type { StudioChatSessionRecord } from '../workflowStudio/chat/studioChatApi'
 import { EventSourceMock } from '../../testing/eventSourceMock'
 import { createTestQueryClient } from '../../testing/testQueryClient'
+import { expectConsoleError } from '../../test-setup'
 
 vi.mock('../workflowStudio/chat/studioChatApi')
+vi.mock('../workflowStudio/chat/studioChatConfigApi')
 vi.mock('../workflowStudio/chat/studioChatResumeApi')
 vi.mock('../../api/jobApi', () => ({
   rerunJob: vi.fn(),
@@ -18,6 +21,7 @@ vi.mock('../../api/jobApi', () => ({
 }))
 
 const mockApi = vi.mocked(chatApi)
+const mockConfigApi = vi.mocked(configApi)
 const mockJobApi = vi.mocked(jobApi)
 
 const TARGET = {
@@ -150,6 +154,263 @@ describe('JobDiagnosisPanel', () => {
     await renderReadyPanel()
     expect(mockApi.createStudioChatSession).toHaveBeenCalledTimes(1)
     expect(mockApi.sendStudioChatMessage).toHaveBeenCalledTimes(1)
+  })
+
+  const configRecord = () =>
+    sessionRecord({
+      capability_snapshot: { sessionModes: true, sessionConfigOptions: true },
+      session_modes: {
+        currentModeId: 'default',
+        availableModes: [{ id: 'default', name: 'Default' }],
+      },
+      config_options: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'k3',
+          options: [{ value: 'k3', name: 'K3' }],
+        },
+        {
+          id: 'thinking',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+          options: [{ value: 'low' }, { value: 'high' }],
+        },
+      ],
+    } as never)
+
+  it('chips 常驻排查 composer（#795 收尾）：权限/模型/思考芯片可见可交互', async () => {
+    // 排查会话与 studio 共用 useStudioChat（#329），kimi ACP 握手广告面
+    // 同款——showAgentConfig 接上后工具行即显示配置芯片。
+    mockApi.createStudioChatSession.mockResolvedValue(configRecord())
+    await renderReadyPanel()
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Agent 权限模式' })
+      ).toBeEnabled()
+    )
+    expect(screen.getByRole('button', { name: '模型' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '思考档位' })).toBeInTheDocument()
+  })
+
+  it('引导期间（create 未落地）chips 已可见不空窗：回落历史会话展示（#796 R3 继承）', async () => {
+    // 排查线实测语义：useStudioChat 会话记忆自动恢复最近会话，引导期
+    // chat.session 非空——chips 锚定真实历史会话，不走严格 readOnly 路径；
+    // 严格 readOnly（无会话可恢复）由 composer 级既有用例钉住
+    // （StudioChatComposer.test 的 #796 R3 用例）。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    mockApi.createStudioChatSession.mockImplementation(
+      () => new Promise<never>(() => {})
+    )
+    renderPanel()
+    // 不空窗契约 = chips 存在；可交互与否取决于恢复竞态（会话恢复完成则
+    // 可交互，未完成则走 readOnly 回落只读）——两条路径都合法，只断言存在
+    // （CI 与本地调度时序不同，断言 enabled 会抖动）。
+    await screen.findByRole('group', { name: 'Agent 配置' })
+    expect(
+      screen.getByRole('button', { name: 'Agent 权限模式' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '模型' })).toBeInTheDocument()
+  })
+
+  it('bootstrap 在途 chips 强制只读，落地后变更打到新建会话（#801 codex 轮 4 P2）', async () => {
+    // MUI Menu 开合驱动芯片组状态更新脱离 act（known noise，同既有用例）。
+    expectConsoleError(/not wrapped in act/)
+    // 历史会话存在 + create 挂起：chips 必须禁用——否则点模型/权限/思考会
+    // 经 useStudioChatAgentConfig 提交到历史会话 ID（revert：不禁用，即红）。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    // 会话详情 mock 给真实返回：默认 vi.fn() 返回 undefined，恢复/激活
+    // 链路在 CI 调度时序下会走错误路径（actionError 置位后 primer 永不发）。
+    mockApi.fetchStudioChatSession.mockImplementation(
+      (_ws: string, id: string) =>
+        Promise.resolve({ ...configRecord(), id } as StudioChatSessionRecord)
+    )
+    let resolveCreate: (session: StudioChatSessionRecord) => void = () => {}
+    mockApi.createStudioChatSession.mockImplementation(
+      () =>
+        new Promise<StudioChatSessionRecord>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    mockConfigApi.setStudioChatMode.mockResolvedValue(configRecord())
+    renderPanel()
+    await screen.findByRole('group', { name: 'Agent 配置' })
+    // 等 boot 真正发起 create 再 resolve——CI 调度慢时 boot 可能晚于本行，
+    // 过早 resolve 会打到初始 no-op（create 稍后才发起、promise 永挂）。
+    await waitFor(
+      () => expect(mockApi.createStudioChatSession).toHaveBeenCalledTimes(1),
+      { timeout: 5000 }
+    )
+    expect(
+      screen.getByRole('button', { name: 'Agent 权限模式' })
+    ).toBeDisabled()
+    expect(screen.getByRole('button', { name: '模型' })).toBeDisabled()
+
+    // bootstrap 落地：新建会话激活，chips 恢复可交互。
+    const newSession = {
+      ...configRecord(),
+      id: 's-new',
+      session_modes: {
+        currentModeId: 'default',
+        availableModes: [
+          { id: 'default', name: 'Default' },
+          { id: 'plan', name: 'Plan' },
+        ],
+      },
+    } as StudioChatSessionRecord
+    await act(async () => {
+      resolveCreate(newSession)
+    })
+    // 激活信号锚定 primer（新会话落地且 idle 才发）——CI 并行调度下
+    // create 之后的链路刷新可能慢，1s 默认超时不够，放宽到 5s。
+    await waitFor(
+      () => expect(mockApi.sendStudioChatMessage).toHaveBeenCalled(),
+      { timeout: 5000 }
+    )
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole('button', { name: 'Agent 权限模式' })
+        ).toBeEnabled(),
+      { timeout: 5000 }
+    )
+
+    // 变更打到新建会话 ID，不是历史会话。
+    fireEvent.click(screen.getByRole('button', { name: 'Agent 权限模式' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Plan' }))
+    expect(mockConfigApi.setStudioChatMode).toHaveBeenCalledWith(
+      'ws1',
+      's-new',
+      'plan'
+    )
+  })
+
+  it('bootstrap 失败：chips 保持只读且创建错误如实呈现（#801 codex 轮 5 P2）', async () => {
+    // 历史会话存在 + create reject：starting 归 false 后历史会话保留——
+    // 解锁条件必须是「本次新建的会话已激活」，不能是 starting 回落
+    // （revert 回 configReadOnly={chat.starting}：chips 重新可编辑历史会话
+    // 且错误被 chat.session 非空隐藏，即红）。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    mockApi.createStudioChatSession.mockRejectedValue(new Error('gateway 503'))
+    renderPanel()
+    await screen.findByRole('group', { name: 'Agent 配置' })
+    await waitFor(
+      () => expect(mockApi.createStudioChatSession).toHaveBeenCalledTimes(1),
+      { timeout: 5000 }
+    )
+    // chips 保持禁用（历史会话不得被误改）。
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Agent 权限模式' })
+      ).toBeDisabled()
+    )
+    expect(screen.getByRole('button', { name: '模型' })).toBeDisabled()
+    // 创建失败如实呈现（带重试入口），不静默表现为「可编辑的旧会话」。
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('排查会话创建失败')
+    expect(alert).toHaveTextContent('gateway 503')
+  })
+
+  it('引导失败后重试成功：解锁、primer 发送、错误清除（#801 codex 轮 6 P2）', async () => {
+    // 首次 create reject、重试 resolve：重试必须清掉上一次的 actionError
+    // 残留——否则重试成功帧上旧错误被失败闩锁误采，新会话永久锁定、primer
+    // 不发（revert 掉 clearActionError 调用即红）。
+    // 时序构造（让残留活到重试落定帧）：agents 列表挂起让恢复先选中历史
+    // 会话，失败帧无会话切换（不触发消息加载 effect 的清错），旧错误活到
+    // 重试成功帧。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    let resolveAgents: (
+      agents: { id: string; label: string }[]
+    ) => void = () => {}
+    mockApi.fetchStudioChatAgents.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAgents = resolve
+        })
+    )
+    const newSession = {
+      ...configRecord(),
+      id: 's-new',
+    } as StudioChatSessionRecord
+    mockApi.createStudioChatSession
+      .mockRejectedValueOnce(new Error('gateway 503'))
+      .mockResolvedValue(newSession)
+    renderPanel()
+    // 恢复先落地：历史会话被选中。
+    await screen.findByRole('group', { name: 'Agent 配置' })
+
+    // agents 到达 → boot 发起 → 首次 create reject。引导失败条与底层
+    // actionError 条都是 role=alert——按文案锚定引导失败条（后者会先出现）。
+    await act(async () => {
+      resolveAgents([{ id: 'kimi', label: 'Kimi Code' }])
+    })
+    await screen.findByText(/排查会话创建失败：gateway 503/)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    })
+    // 重试成功：primer 发出（新会话激活且 idle 的信号）→ chips 解锁 →
+    // 错误条消失。
+    await waitFor(
+      () => expect(mockApi.sendStudioChatMessage).toHaveBeenCalled(),
+      { timeout: 5000 }
+    )
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole('button', { name: 'Agent 权限模式' })
+        ).toBeEnabled(),
+      { timeout: 5000 }
+    )
+    await waitFor(() =>
+      expect(screen.queryByText(/排查会话创建失败|gateway 503/)).toBeNull()
+    )
+  })
+
+  it('历史消息加载错误不被闩锁为创建失败（#801 codex 轮 7 根因方案）', async () => {
+    // 恢复的历史会话消息拉取失败（暂存 actionError），新会话创建成功——
+    // 闩锁只采信 startSession 返回值标记的本次失败（revert 回「见
+    // actionError 即闩」：新会话永久 configLocked、primer 不发，即红）。
+    mockApi.fetchStudioChatSessions.mockResolvedValue([configRecord()])
+    mockApi.fetchStudioChatMessages.mockRejectedValue(
+      new Error('历史消息加载失败')
+    )
+    const newSession = {
+      ...configRecord(),
+      id: 's-new',
+    } as StudioChatSessionRecord
+    let resolveCreate: (session: StudioChatSessionRecord) => void = () => {}
+    mockApi.createStudioChatSession.mockImplementation(
+      () =>
+        new Promise<StudioChatSessionRecord>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    renderPanel()
+    // 无关错误先到（创建仍在途）：恢复的历史会话消息拉取失败暂存
+    // actionError——这正是评论描述的「创建期间失败」帧。
+    await screen.findByText(/消息加载失败/)
+    await act(async () => {
+      resolveCreate(newSession)
+    })
+
+    // 创建成功：primer 发出、chips 解锁、无引导失败条。
+    await waitFor(
+      () => expect(mockApi.sendStudioChatMessage).toHaveBeenCalled(),
+      { timeout: 5000 }
+    )
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole('button', { name: 'Agent 权限模式' })
+        ).toBeEnabled(),
+      { timeout: 5000 }
+    )
+    expect(screen.queryByText(/排查会话创建失败/)).toBeNull()
   })
 
   it('inDock 换用无底尺寸的外壳类（#800 codex P2：Dock 里 320px min-height 会裁掉 composer）', async () => {
