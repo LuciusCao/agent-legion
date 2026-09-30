@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioPage } from './WorkflowStudioPage'
 import { TestQueryProvider } from '../testing/testQueryClient'
+import { useUiStore } from '../stores/uiStore'
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ workspaceId: 'ws1' }),
@@ -173,6 +174,7 @@ vi.mock('../api', () => {
 describe('WorkflowStudioPage', () => {
   beforeEach(() => {
     authState.user = { role: 'admin' }
+    useUiStore.setState({ toast: null })
   })
 
   // #799：原顶栏内容拆为双浮岛——身份岛（workspace 名/版本/状态 chip +
@@ -395,12 +397,24 @@ describe('WorkflowStudioPage', () => {
     await user.click(publishButton)
     await screen.findByText('发布 workflow revision')
 
-    await user.click(screen.getByRole('button', { name: '确认发布' }))
-
-    // CI 慢机上 click → publish → reload → toast 的链路可能超过 findByText
-    // 默认 1s（实测 CI 失败时 toast 在 DOM 里、刚好错过默认窗口）。
-    expect(
-      await screen.findByText('保存成功', undefined, { timeout: 4000 })
-    ).toBeInTheDocument()
+    // CI 慢机加固：确认按钮等 enabled 再点（dialog 进场过渡期间 userEvent
+    // 的点击可能被吞）；对话框退场证明 onConfirm 已起跑；toast 直读
+    // uiStore（DOM toast 3s 自动消失，慢机上 DOM 轮询会错过窗口）。
+    const confirmButton = await screen.findByRole('button', {
+      name: '确认发布',
+    })
+    await waitFor(() => expect(confirmButton).toBeEnabled())
+    await user.click(confirmButton)
+    await waitFor(
+      () =>
+        expect(
+          screen.queryByRole('dialog', { name: /发布 workflow revision/ })
+        ).toBeNull(),
+      { timeout: 4000 }
+    )
+    const { getState } = useUiStore
+    await waitFor(() => expect(getState().toast?.message).toBe('保存成功'), {
+      timeout: 4000,
+    })
   })
 })
