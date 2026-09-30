@@ -1,6 +1,5 @@
 import { WorkflowCatalogLoadError } from './WorkflowCatalogLoadError'
 import { WorkflowStudioEmptyGuide } from '../canvas/WorkflowStudioEmptyGuide'
-import { StudioCanvasIslands } from './StudioCanvasIslands'
 import { WorkflowStudioMobileNav } from './WorkflowStudioMobileNav'
 import { WorkflowStudioSplitLayout } from './WorkflowStudioSplitLayout'
 import { useStudioState, useStudioView } from './studioStateContext'
@@ -34,7 +33,6 @@ export function WorkflowStudioWorkspace() {
             if (next === 'agent' && !view.agentOpen) view.toggleAgent()
           }}
         />
-        <StudioCanvasIslands />
         <WorkflowStudioSplitLayout
           mobilePanel={view.mobilePanel}
           agentOpen={view.agentOpen}

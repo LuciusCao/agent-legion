@@ -3,6 +3,7 @@ import { WorkflowStudioCanvasBody } from './WorkflowStudioCanvasBody'
 import { WorkflowStudioCanvasSourceBadge } from './WorkflowStudioCanvasSourceBadge'
 import { WorkflowStudioCanvasToolbar } from './WorkflowStudioCanvasToolbar'
 import { useStudioView } from '../shared/studioStateContext'
+import { StudioCanvasIslands } from '../shared/StudioCanvasIslands'
 import { useCanvasIslandOffset } from '../shared/useCanvasIslandOffset'
 import canvasStyles from '../../../pages/WorkflowStudioPageCanvas.module.css'
 import canvasToolbarStyles from '../../../pages/WorkflowStudioPageCanvasToolbar.module.css'
@@ -42,6 +43,10 @@ export function WorkflowStudioCanvasPanel({ mobileActive }: Props) {
         />
       </div>
       <WorkflowStudioCanvasBody />
+      {/* #799 + codex 轮 2 P2：双岛锚定在画布列内（绝对定位相对画布列），
+          详情列打开时岛自然不越界；窄屏非画布页签的隐藏由画布列 CSS
+          承担（data-mobile-panel display:none）。 */}
+      <StudioCanvasIslands />
     </main>
   )
 }

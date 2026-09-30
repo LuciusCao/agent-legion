@@ -20,14 +20,13 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { MaterialIcon } from '../../../components/MaterialIcon'
 import { StudioAgentPanelToggle } from '../inspector/StudioAgentPanelToggle'
 import { useStudioState, useStudioView } from './studioStateContext'
-import { useStudioMobileNavHeight } from './useStudioMobileNavHeight'
-import { useStudioNarrowViewport } from './useStudioNarrowViewport'
 import { useWorkflowStudioAppTitle } from './useWorkflowStudioAppTitle'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
 import { WorkflowStudioDraftSaveControlContainer } from './WorkflowStudioDraftSaveControl'
 import { WorkflowStudioSharedMaterialsButton } from './WorkflowStudioSharedMaterialsDrawer'
 import { WorkflowStudioStatusChip } from './WorkflowStudioStatusChip'
+import { useIslandExclusiveWidth } from './useIslandExclusiveWidth'
 import styles from './StudioCanvasIslands.module.css'
 
 export function StudioCanvasIslands() {
@@ -36,14 +35,13 @@ export function StudioCanvasIslands() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const title = useWorkflowStudioAppTitle(workspaceId)
-  const narrow = useStudioNarrowViewport()
-  const mobileNavHeight = useStudioMobileNavHeight()
-  // 窄屏：页签导航是顶部 chrome，岛顶边让开其实测底边（宽屏实测 0）。
-  const islandTop = (narrow ? mobileNavHeight : 0) + 12
-
-  // 窄屏的编辑器/Agent 页签是全屏面板切换——岛只在画布页签浮出，不盖
-  // 编辑器/详情。
-  if (narrow && view.mobilePanel !== 'graph') return null
+  // P1 宽屏互斥（#804 codex 轮 2）：左岛 max-width = 画布列宽 - 右岛实测宽
+  // - 间距，resize + ResizeObserver 驱动（见 useIslandExclusiveWidth）。
+  const { identityRef, actionRef, identityMaxWidth } = useIslandExclusiveWidth()
+  // 岛锚定在画布列内（#804 codex 轮 2 P2：原挂在整个分栏 scope 上会横跨
+  // 详情列）：窄屏非画布页签的隐藏由画布列的响应式 CSS 承担（data-mobile-
+  // panel display:none），顶边无需让位页签导航（画布本就在它下方）。
+  const islandTop = 12
 
   const hash = studio.revision?.definition_hash?.slice(0, 8) ?? '--------'
   const modeText =
@@ -61,7 +59,11 @@ export function StudioCanvasIslands() {
           + ⋮ 菜单。 */}
       <div
         className={`${styles.island} ${styles.identity}`}
-        style={{ top: islandTop }}
+        ref={identityRef}
+        style={{
+          top: islandTop,
+          maxWidth: identityMaxWidth ?? undefined,
+        }}
         data-testid="studio-identity-island"
         aria-label="工作流身份与导航"
       >
@@ -137,6 +139,7 @@ export function StudioCanvasIslands() {
           其余页面全局顶栏已有）。 */}
       <div
         className={`${styles.island} ${styles.actions}`}
+        ref={actionRef}
         style={{ top: islandTop }}
         data-testid="studio-action-island"
         aria-label="Workflow command bar"

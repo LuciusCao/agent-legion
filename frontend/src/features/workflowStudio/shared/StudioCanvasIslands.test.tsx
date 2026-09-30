@@ -107,18 +107,22 @@ describe('StudioCanvasIslands（#799：去 AppBar 画布化的双浮岛）', () 
     expect(screen.queryByRole('button', { name: 'Token 使用分析' })).toBeNull()
   })
 
-  it('窄屏非画布页签不渲染岛（不盖编辑器/Agent 面板）；画布页签照常渲染', () => {
+  it('窄屏隐藏语义移到画布列 CSS（codex 轮 2 P2 锚定迁移）：岛恒挂载，不盖编辑器由画布列 display:none 承担', () => {
+    // 岛锚进画布列后，窄屏非画布页签的隐藏由 [data-mobile-panel] 的
+    // display:none 承担（jsdom 无布局验证不了，语义钉在 CanvasPanel 用例
+    // 的 mobileActive 类断言）——岛组件自身恒渲染，保证尺寸观察不失效
+    // （轮 2 P3：返回 null 会让 ResizeObserver 观察失效）。
     narrowState.value = true
     try {
       renderIslands({ mobilePanel: 'editor' })
-      expect(screen.queryByTestId('studio-identity-island')).toBeNull()
-      expect(screen.queryByTestId('studio-action-island')).toBeNull()
+      expect(screen.getByTestId('studio-identity-island')).toBeInTheDocument()
+      expect(screen.getByTestId('studio-action-island')).toBeInTheDocument()
     } finally {
       narrowState.value = false
     }
   })
 
-  it('窄屏画布页签：岛仍在（紧凑形态由 CSS 承担），顶边让开页签导航', () => {
+  it('窄屏画布页签：岛仍在（紧凑形态由 CSS 承担）', () => {
     narrowState.value = true
     try {
       renderIslands({ mobilePanel: 'graph' })
@@ -127,5 +131,25 @@ describe('StudioCanvasIslands（#799：去 AppBar 画布化的双浮岛）', () 
     } finally {
       narrowState.value = false
     }
+  })
+
+  it('宽屏双岛互斥（#804 codex 轮 2 P1）：左岛 max-width = 容器宽 - 右岛实测宽 - 间距', async () => {
+    // jsdom 无布局：桩出 offsetParent（容器宽 1000）与右岛实测宽 200，
+    // resize 驱动重算 → 左岛 maxWidth = 1000-200-36=764（revert 掉封顶
+    // 逻辑：无 maxWidth 内联样式，即红）。
+    renderIslands()
+    const identity = screen.getByTestId('studio-identity-island')
+    const action = screen.getByTestId('studio-action-island')
+    const parent = document.createElement('div')
+    Object.defineProperty(parent, 'clientWidth', { value: 1000 })
+    Object.defineProperty(identity, 'offsetParent', {
+      configurable: true,
+      value: parent,
+    })
+    action.getBoundingClientRect = () => ({ width: 200 }) as DOMRect
+
+    fireEvent(window, new Event('resize'))
+    await screen.findByTestId('studio-identity-island')
+    expect(identity.style.maxWidth).toBe('764px')
   })
 })
