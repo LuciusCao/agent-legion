@@ -29,7 +29,8 @@ export function useAppShellScroll(): AppShellContextValue {
 }
 
 export interface AppShellProps {
-  appBar: (state: AppShellState) => React.ReactNode
+  /** 顶栏渲染槽；不传则不渲染 AppBar 区（#799：studio 去 AppBar 画布化）。 */
+  appBar?: (state: AppShellState) => React.ReactNode
   children: React.ReactNode
   mainClassName?: string
 }
@@ -86,7 +87,9 @@ export function AppShell({ appBar, children, mainClassName }: AppShellProps) {
   return (
     <AppShellContext.Provider value={ctxValue}>
       <div className={styles.shell}>
-        <div className={styles.appBarWrap}>{appBar({ scrolled })}</div>
+        {appBar && (
+          <div className={styles.appBarWrap}>{appBar({ scrolled })}</div>
+        )}
         <main
           ref={mainRef}
           className={`${styles.main}${mainClassName ? ` ${mainClassName}` : ''}`}

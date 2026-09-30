@@ -175,6 +175,10 @@ describe('WorkflowStudioPage', () => {
     authState.user = { role: 'admin' }
   })
 
+  // #799：原顶栏内容拆为双浮岛——身份岛（标题/版本/状态 chip）与操作岛
+  // （校验/发布/重置，aria-label 沿用 Workflow command bar）。
+  const identityIsland = () => screen.getByTestId('studio-identity-island')
+
   // 关闭 YAML 全屏 Dialog 并等退出过渡结束：过渡期间 modal 仍挂着，
   // 顶栏被 aria-hidden，role 查询会失败。#795 PR②：Agent Dock 也是常驻的
   // role=dialog——断言必须按名定位到「编辑 YAML」，不能用泛 dialog 查询。
@@ -201,23 +205,26 @@ describe('WorkflowStudioPage', () => {
     expect(await screen.findByText('获取题目')).toBeInTheDocument()
   })
 
-  it('renders workspace editor title and actions in the app bar without workflow label clutter', async () => {
+  it('renders workspace editor title and actions in the floating islands without workflow label clutter (#799)', async () => {
     renderPage()
 
-    const appBar = await screen.findByTestId('app-bar')
+    // 无 AppBar：顶栏区不渲染。
+    expect(screen.queryByTestId('app-bar')).not.toBeInTheDocument()
+    const identity = await screen.findByTestId('studio-identity-island')
+    const actions = await screen.findByTestId('studio-action-island')
     await screen.findByText('题目审题 / 编辑工作流')
-    expect(appBar).toHaveTextContent('题目审题 / 编辑工作流')
-    expect(appBar).not.toHaveTextContent('知识视频 DAG')
-    expect(appBar).toHaveTextContent('v1')
-    expect(appBar).toHaveTextContent('校验')
-    expect(appBar).toHaveTextContent('发布')
-    expect(appBar).toHaveTextContent('重置')
+    expect(identity).toHaveTextContent('题目审题 / 编辑工作流')
+    expect(identity).not.toHaveTextContent('知识视频 DAG')
+    expect(identity).toHaveTextContent('v1')
+    expect(actions).toHaveTextContent('校验')
+    expect(actions).toHaveTextContent('发布')
+    expect(actions).toHaveTextContent('重置')
     // P3：查看变更 / YAML 高级编辑 / Agent 管理 / Executor 管理已从顶栏移除，
     // 前两者下沉为变更 Drawer 与 YAML 全屏 Dialog，后两者随管理弹窗删除。
-    expect(appBar).not.toHaveTextContent('查看变更')
-    expect(appBar).not.toHaveTextContent('YAML 高级编辑')
-    expect(appBar).not.toHaveTextContent('Agent 管理')
-    expect(appBar).not.toHaveTextContent('Executor 管理')
+    expect(identity).not.toHaveTextContent('查看变更')
+    expect(identity).not.toHaveTextContent('YAML 高级编辑')
+    expect(identity).not.toHaveTextContent('Agent 管理')
+    expect(identity).not.toHaveTextContent('Executor 管理')
     expect(
       screen.queryByRole('region', { name: 'Workflow summary' })
     ).not.toBeInTheDocument()
@@ -248,10 +255,9 @@ describe('WorkflowStudioPage', () => {
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    // chip 查询限定命令栏：画布角标（#666 起与顶栏同源）也带「未发布变更」
+    // chip 查询限定身份岛：画布角标（#666 起同源）也带「未发布变更」
     // 文案，整屏 findByText 会多匹配。
-    const commandBar = screen.getByLabelText('Workflow command bar')
-    await within(commandBar).findByText(/未发布变更/)
+    await within(identityIsland()).findByText(/未发布变更/)
     // 校验完成打开右侧变更面板（Drawer），不再切换画布模式。
     await user.click(screen.getByRole('button', { name: '校验' }))
     expect(await screen.findByText('变更与校验')).toBeInTheDocument()
@@ -271,9 +277,10 @@ describe('WorkflowStudioPage', () => {
     // 等 compare 落定、chip 稳定为计数形态再点击：编辑后 chip 先显示瞬态的
     // 「有未发布变更」，compare debounce 一到就被「计算中…」替换——点在被
     // 替换下来的旧节点上点击会静默丢失（慢机器/CI 上必现的竞态）。查询限定
-    // 命令栏（画布角标也带「未发布变更」文案，整屏匹配会命中两个）。
-    const commandBar = screen.getByLabelText('Workflow command bar')
-    await user.click(await within(commandBar).findByText(/未发布变更 \d+/))
+    // 身份岛（画布角标也带「未发布变更」文案，整屏匹配会命中两个）。
+    await user.click(
+      await within(identityIsland()).findByText(/未发布变更 \d+/)
+    )
 
     expect(await screen.findByText('变更与校验')).toBeInTheDocument()
     expect(screen.getByText('变更摘要')).toBeInTheDocument()
@@ -290,12 +297,11 @@ describe('WorkflowStudioPage', () => {
     await user.type(editor, 'key: changed')
     await closeYamlEditor(user)
 
-    const commandBar = screen.getByLabelText('Workflow command bar')
-    expect(within(commandBar).getByText(/未发布变更/)).toBeInTheDocument()
+    expect(within(identityIsland()).getByText(/未发布变更/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '重置' }))
 
-    expect(within(commandBar).getByText(/已同步/)).toBeInTheDocument()
+    expect(within(identityIsland()).getByText(/已同步/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     expect(
       await screen.findByDisplayValue(/key: demo_video_workflow/)
@@ -312,9 +318,7 @@ describe('WorkflowStudioPage', () => {
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    await within(screen.getByLabelText('Workflow command bar')).findByText(
-      /未发布变更/
-    )
+    await within(identityIsland()).findByText(/未发布变更/)
     const publishButton = screen.getByRole('button', { name: '发布新版本' })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)
@@ -335,9 +339,7 @@ describe('WorkflowStudioPage', () => {
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    await within(screen.getByLabelText('Workflow command bar')).findByText(
-      /未发布变更/
-    )
+    await within(identityIsland()).findByText(/未发布变更/)
     const publishButton = screen.getByRole('button', { name: '发布新版本' })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)

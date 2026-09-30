@@ -3,7 +3,7 @@ import { act } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useSettingStore } from '../../../stores/settingStore'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
-import { TestQueryProvider } from '../../../testing/testQueryClient'
+import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
 
@@ -122,10 +122,12 @@ function studioProvidersFor(studio: LayoutStudio) {
 
 function renderLayout(studio: LayoutStudio) {
   const { studioState, view } = studioProvidersFor(studio)
+  // #799：浮动功能岛（挂在 Workspace 内）需要 router 上下文
+  // （返回/用量导航的 useNavigate）——TestMemoryRouter 自带 QueryProvider。
   return render(
-    <TestQueryProvider>
+    <MemoryRouter>
       {withStudioProviders(studioState, view, <WorkflowStudioLayout />)}
-    </TestQueryProvider>
+    </MemoryRouter>
   )
 }
 
@@ -135,9 +137,9 @@ function rerenderLayout(
 ) {
   const { studioState, view } = studioProvidersFor(studio)
   rerender(
-    <TestQueryProvider>
+    <MemoryRouter>
       {withStudioProviders(studioState, view, <WorkflowStudioLayout />)}
-    </TestQueryProvider>
+    </MemoryRouter>
   )
 }
 
@@ -263,9 +265,9 @@ describe('WorkflowStudioLayout', () => {
       return withStudioProviders(studio, view, <WorkflowStudioLayout />)
     }
     const { rerender } = render(
-      <TestQueryProvider>
+      <MemoryRouter>
         <LiveViewLayout studio={baseProps} />
-      </TestQueryProvider>
+      </MemoryRouter>
     )
 
     const mobileNav = screen.getByRole('tablist', {
@@ -276,9 +278,9 @@ describe('WorkflowStudioLayout', () => {
     ).toHaveAttribute('aria-selected', 'true')
 
     rerender(
-      <TestQueryProvider>
+      <MemoryRouter>
         <LiveViewLayout studio={{ ...baseProps, selectedNodeKey: 'node-a' }} />
-      </TestQueryProvider>
+      </MemoryRouter>
     )
 
     expect(

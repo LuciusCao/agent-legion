@@ -1,11 +1,12 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { expectConsoleError, expectConsoleWarning } from '../../../test-setup'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioWorkspace } from './WorkflowStudioWorkspace'
 import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import { api } from '../../../api'
-import { TestQueryProvider } from '../../../testing/testQueryClient'
+import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { useSettingStore } from '../../../stores/settingStore'
 import type { WorkspaceSettings } from '../../../types'
 
@@ -107,17 +108,35 @@ function renderWorkspaceLive() {
     setDefinitionYaml: vi.fn(),
     backToDraft: vi.fn(),
     setDagFullscreenOpen: vi.fn(),
+    // #799 浮动岛消费的 studio 字段（岛挂在 Workspace 内）。
+    revision: null,
+    revisions: [],
+    activeRevision: null,
+    viewMode: 'draft',
+    hasPreservedDraft: false,
+    compareSummary: null,
+    compareState: 'idle',
+    actionState: 'idle',
+    canSubmit: true,
+    canPublish: true,
+    selectedRevisionId: null,
+    isLoadingRevision: false,
+    revisionLoadError: null,
+    selectRevision: vi.fn(),
+    requestPublish: vi.fn(),
+    resetDefinition: vi.fn(),
+    useViewedRevisionAsDraft: vi.fn(),
   }
   function LiveViewHarness({ children }: { children: ReactNode }) {
     const view = useWorkflowStudioPageView(props as never)
     return withStudioProviders(props, view, children)
   }
   return render(
-    <TestQueryProvider>
+    <MemoryRouter>
       <LiveViewHarness>
         <WorkflowStudioWorkspace />
       </LiveViewHarness>
-    </TestQueryProvider>
+    </MemoryRouter>
   )
 }
 
@@ -178,15 +197,33 @@ function renderWorkspace(
     setDefinitionYaml: vi.fn(),
     backToDraft: vi.fn(),
     setDagFullscreenOpen: vi.fn(),
+    // #799 浮动岛消费的 studio 字段（岛挂在 Workspace 内）。
+    revision: null,
+    revisions: [],
+    activeRevision: null,
+    viewMode: 'draft',
+    hasPreservedDraft: false,
+    compareSummary: null,
+    compareState: 'idle',
+    actionState: 'idle',
+    canSubmit: true,
+    canPublish: true,
+    selectedRevisionId: null,
+    isLoadingRevision: false,
+    revisionLoadError: null,
+    selectRevision: vi.fn(),
+    requestPublish: vi.fn(),
+    resetDefinition: vi.fn(),
+    useViewedRevisionAsDraft: vi.fn(),
     ...overrides,
   } as unknown as Record<string, unknown>
   const view = makeStudioView(viewOverrides)
   return {
     setSelectedNodeKey: props.setSelectedNodeKey,
     ...render(
-      <TestQueryProvider>
+      <MemoryRouter>
         {withStudioProviders(props, view, <WorkflowStudioWorkspace />)}
-      </TestQueryProvider>
+      </MemoryRouter>
     ),
   }
 }
@@ -218,10 +255,18 @@ describe('WorkflowStudioWorkspace', () => {
     expect(screen.getByText('chat panel stub')).toBeInTheDocument()
     // DAG 区全屏：无分栏（withInspector 只在选中节点详情时加）。
     expect(document.querySelector('[class*="withInspector"]')).toBeNull()
-    // #668：面板开关收敛到 appbar（CommandBar），画布工具条不再有开关。
+    // #668：面板开关收敛在顶栏体系——#799 起是右上操作岛（画布工具条
+    // 仍无开关）。
     expect(
-      screen.queryByRole('button', { name: 'toggle agent panel' })
-    ).not.toBeInTheDocument()
+      document.querySelector(
+        '[data-canvas-toolbar] [aria-label="toggle agent panel"]'
+      )
+    ).toBeNull()
+    expect(
+      within(screen.getByTestId('studio-action-island')).getByRole('button', {
+        name: 'toggle agent panel',
+      })
+    ).toBeInTheDocument()
   })
 
   // #668：agentOpen 提升到 StudioViewContext（appbar 开关写、布局读）；
@@ -256,6 +301,9 @@ describe('WorkflowStudioWorkspace', () => {
   })
 
   it('codex P2（#797）：窄屏 Agent 页签关闭 Dock 回画布，不留空白工作区', () => {
+    // 岛上 MUI IconButton 的 ripple/tooltip 状态更新脱离 act（known noise）。
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
     stubNarrowViewport(true)
     try {
       renderWorkspaceLive()
