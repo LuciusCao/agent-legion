@@ -308,6 +308,44 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     )
   })
 
+  it('keep-mine with an empty pendingSave (conflict arrived in-flight) re-saves the current canvas content（#804 P1-A：否则卡死 error 永不落盘）', async () => {
+    // 409 在 PUT 在途时到达：enterConflict 已把 pendingSave 清空——
+    // resolveConflict(true) 拿不到 pending，旧实现到此为止：状态停 error、
+    // 调度 effect 因 draftYaml 未变不再触发、flushNow no-op，编辑静默丢失。
+    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // 不再做任何编辑，直接「保留本页编辑」：必须按当前画布内容补发保存。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: EDITED,
+      updated_at: '2026-09-12T11:00:00+00:00',
+    })
+    act(() => result.current.resolveConflict(true))
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', EDITED, {
+      expectedUpdatedAt: '2026-09-12T10:00:00+00:00',
+    })
+    expect(result.current.state.conflict).toBeUndefined()
+  })
+
   it('flushNow resolves {ok: false} on a conflict (publish guard must abort)', async () => {
     mocks.putWorkflowDraft.mockRejectedValue(conflictError())
     const { result, rerender } = renderPersistence({

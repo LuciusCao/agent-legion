@@ -258,7 +258,7 @@ describe('WorkflowStudioStatusChip', () => {
     ).not.toContain('secondary')
   })
 
-  it('codex 轮 4 P1-2：通过/未发布变更/只读 chip 窄屏继续隐藏（挂 secondary）', () => {
+  it('codex 轮 4 P1-2：通过/未发布变更 chip 窄屏继续隐藏（挂 secondary）', () => {
     const { unmount } = render(
       <WorkflowStudioStatusChip
         readOnly={false}
@@ -284,5 +284,12 @@ describe('WorkflowStudioStatusChip', () => {
     expect(
       screen.getByText('未发布变更 3').closest('.MuiChip-root')?.className
     ).toContain('secondary')
+  })
+
+  it('轮 4 P2-E：只读 chip 窄屏保留（不挂 secondary）——窄屏只读态必须有身份提示', () => {
+    renderChip({ readOnly: true, version: 3 })
+    expect(
+      screen.getByText('只读 v3').closest('.MuiChip-root')?.className
+    ).not.toContain('secondary')
   })
 })

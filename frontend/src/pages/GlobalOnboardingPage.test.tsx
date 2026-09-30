@@ -16,7 +16,7 @@ vi.mock('../api/studioAgents', () => ({
 const DISMISS_KEY = 'agent-legion:global-onboarding-dismissed'
 
 // 该 jsdom 环境不提供 localStorage：用内存 stub 验证持久化读写（同
-// useStudioRightPanelWidth.test.tsx 先例）。
+// 内联内存 stub 先例）。
 function installLocalStorageStub() {
   const store = new Map<string, string>()
   const stub: Storage = {

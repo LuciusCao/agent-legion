@@ -32,6 +32,43 @@ it('uses explicit Chinese labels for historical revision actions', () => {
   expect(props.useViewedRevisionAsDraft).toHaveBeenCalledOnce()
 })
 
+it('轮 4 P2-E：只读态「返回」用 text 变体（窄屏 outlined 隐藏规则误伤不到非破坏出口）', () => {
+  renderActions({ readOnly: true, canPublish: false })
+  const back = screen.getByRole('button', { name: '返回' })
+  expect(back).toHaveClass('MuiButton-text')
+})
+
+it('轮 4 P2-E：「设为草稿」在草稿有变更时需确认（confirmAdoptDraft）', () => {
+  const props = renderActions({
+    readOnly: true,
+    canPublish: false,
+    confirmAdoptDraft: true,
+  })
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  fireEvent.click(screen.getByRole('button', { name: '设为草稿' }))
+  expect(confirmSpy).toHaveBeenCalledOnce()
+  // 取消 → 不覆盖草稿。
+  expect(props.useViewedRevisionAsDraft).not.toHaveBeenCalled()
+
+  confirmSpy.mockReturnValue(true)
+  fireEvent.click(screen.getByRole('button', { name: '设为草稿' }))
+  expect(props.useViewedRevisionAsDraft).toHaveBeenCalledOnce()
+  confirmSpy.mockRestore()
+})
+
+it('轮 4 P2-E：草稿干净时「设为草稿」无需确认', () => {
+  const props = renderActions({
+    readOnly: true,
+    canPublish: false,
+    confirmAdoptDraft: false,
+  })
+  const confirmSpy = vi.spyOn(window, 'confirm')
+  fireEvent.click(screen.getByRole('button', { name: '设为草稿' }))
+  expect(confirmSpy).not.toHaveBeenCalled()
+  expect(props.useViewedRevisionAsDraft).toHaveBeenCalledOnce()
+  confirmSpy.mockRestore()
+})
+
 it('labels runtime-only changes as a save without a new version', () => {
   renderActions({ dirty: true, createsRevision: false })
   expect(

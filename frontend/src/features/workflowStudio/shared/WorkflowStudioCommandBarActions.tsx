@@ -1,4 +1,5 @@
 import { Button, Tooltip } from '@mui/material'
+import { WorkflowStudioReadOnlyActions } from './WorkflowStudioReadOnlyActions'
 
 type Props = {
   readOnly: boolean
@@ -9,6 +10,9 @@ type Props = {
   /** 发布禁用的说明（codex 轮 3 P2：canPublish 已绑定「当前 YAML 校验
    * 通过」；未校验/校验失败时由调用方给原因文案，经 Tooltip 露出）。 */
   publishTooltip?: string
+  /** 轮 4 P2-E：「设为草稿」会用历史版本覆盖当前草稿——草稿有未发布
+   * 变更时必须确认（调用方按 dirty/compare 计数判定）。 */
+  confirmAdoptDraft?: boolean
   onPublish: () => void
   onReset: () => void
   backToDraft: () => void
@@ -24,20 +28,13 @@ export function WorkflowStudioCommandBarActions(props: Props) {
   const idle = props.actionState === 'idle'
 
   if (props.readOnly) {
-    const textBtn = (
-      label: string,
-      variant: 'outlined' | 'contained',
-      onClick: () => void
-    ) => (
-      <Button size="small" variant={variant} disabled={!idle} onClick={onClick}>
-        {label}
-      </Button>
-    )
     return (
-      <>
-        {textBtn('返回', 'outlined', props.backToDraft)}
-        {textBtn('设为草稿', 'contained', props.useViewedRevisionAsDraft)}
-      </>
+      <WorkflowStudioReadOnlyActions
+        idle={idle}
+        confirmAdoptDraft={props.confirmAdoptDraft}
+        backToDraft={props.backToDraft}
+        useViewedRevisionAsDraft={props.useViewedRevisionAsDraft}
+      />
     )
   }
 

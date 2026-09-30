@@ -1,6 +1,7 @@
 import { WorkflowCatalogLoadError } from './WorkflowCatalogLoadError'
 import { WorkflowStudioEmptyGuide } from '../canvas/WorkflowStudioEmptyGuide'
 import { WorkflowStudioMobileNav } from './WorkflowStudioMobileNav'
+import { WorkflowStudioNarrowAlertBadge } from './WorkflowStudioNarrowAlertBadge'
 import { WorkflowStudioSplitLayout } from './WorkflowStudioSplitLayout'
 import { useStudioState, useStudioView } from './studioStateContext'
 import islandStyles from './StudioCanvasIslands.module.css'
@@ -32,6 +33,7 @@ export function WorkflowStudioWorkspace() {
             // 移动端 Agent 页签 = 唤起 Dock（chat 已在浮层，不占面板位）。
             if (next === 'agent' && !view.agentOpen) view.toggleAgent()
           }}
+          trailing={<WorkflowStudioNarrowAlertBadge />}
         />
         <WorkflowStudioSplitLayout
           mobilePanel={view.mobilePanel}

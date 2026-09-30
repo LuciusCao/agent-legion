@@ -36,10 +36,11 @@ export function WorkflowStudioStatusChip(props: Props) {
     : null
   if (props.readOnly) {
     const draftChanges = counts ? ` · 草稿未发布变更 ${counts.total}` : ''
+    // 轮 4 P2-E：只读标识窄屏保留（不挂 secondary）——窄屏只读态不能
+    // 没有任何身份提示。
     return (
       <Chip
         size="small"
-        className={islandStyles.secondary}
         color={props.hasPreservedDraft || counts ? 'warning' : 'default'}
         label={`只读 v${props.version ?? '-'}${draftChanges}`}
         title={preservedText ?? undefined}

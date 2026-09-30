@@ -85,6 +85,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     compareErrors: compare.compareErrors,
     compareSummary: compare.compareSummary,
     reviewDialogOpen: actions.reviewDialogOpen,
+    reviewStale: actions.reviewStale,
     closeReviewDialog: actions.closeReviewDialog,
     viewMode: draft.viewMode,
     selectedRevisionId: draft.selectedRevisionId,

@@ -18,6 +18,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { MaterialIcon } from '../../../components/MaterialIcon'
 import { StudioAgentPanelToggle } from '../inspector/StudioAgentPanelToggle'
 import { useStudioState, useStudioView } from './studioStateContext'
+import { countNodeChanges } from '../canvas/workflowStudioDagChanges'
+import { useStudioNarrowViewport } from './useStudioNarrowViewport'
 import { useWorkspaceDisplayName } from './useWorkspaceDisplayName'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
@@ -33,6 +35,9 @@ export function StudioCanvasIslands() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const title = useWorkspaceDisplayName(workspaceId)
+  // 窄屏重置出口（轮 4 P2-D）：动作组的重置按钮窄屏隐藏，收进版本选择器
+  // 菜单（带确认）；宽屏保持外露按钮，菜单不出重置项。
+  const narrow = useStudioNarrowViewport()
   // P1 宽屏互斥（#804 codex 轮 2）：左岛 max-width = 画布列宽 - 右岛实测宽
   // - 间距，resize + ResizeObserver 驱动（见 useIslandExclusiveWidth）。
   const { identityRef, actionRef, identityMaxWidth } = useIslandExclusiveWidth()
@@ -105,6 +110,11 @@ export function StudioCanvasIslands() {
           disabled={studio.isLoadingRevision}
           error={studio.revisionLoadError}
           onSelectRevision={studio.selectRevision}
+          onResetDraft={
+            narrow && studio.dirty && !studio.readOnly
+              ? studio.resetDefinition
+              : undefined
+          }
         />
         <span className={styles.passthrough}>
           <WorkflowStudioStatusChip
@@ -134,6 +144,9 @@ export function StudioCanvasIslands() {
             onPublish={() => void studio.requestPublish()}
             onReset={studio.resetDefinition}
             backToDraft={studio.backToDraft}
+            confirmAdoptDraft={
+              studio.dirty || Boolean(countNodeChanges(studio.compareSummary))
+            }
             useViewedRevisionAsDraft={studio.useViewedRevisionAsDraft}
           />
         </span>

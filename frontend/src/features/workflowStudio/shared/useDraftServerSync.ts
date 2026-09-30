@@ -36,7 +36,6 @@ export function useDraftServerSync(
     serverAt: string | null,
     onAdopt?: (serverYaml: string) => void
   ) => void
-  resolveConflict: (keepMine: boolean) => void
 } {
   const [hydrated, setHydrated] = useState(false)
   const hydratedRef = useRef(false)
@@ -83,9 +82,7 @@ export function useDraftServerSync(
     },
     [controllerRef]
   )
-  const resolveConflict = useCallback(
-    (keepMine: boolean) => controllerRef.current?.resolveConflict(keepMine),
-    [controllerRef]
-  )
-  return { hydrated, isHydrated, adoptServerDraft, resolveConflict }
+  // #804 P1-A：resolveConflict 移到 useWorkflowDraftPersistence（keep-mine
+  // 需要当前画布内容补调度，serverSync 层拿不到 draftYaml）。
+  return { hydrated, isHydrated, adoptServerDraft }
 }

@@ -14,6 +14,7 @@ export function WorkflowStudioLayoutDialogs() {
     <>
       <WorkflowPublishReviewDialog
         open={studio.reviewDialogOpen}
+        contentStale={studio.reviewStale}
         {...reviewDialogProps(studio)}
         onConfirm={async () => {
           studio.closeReviewDialog()

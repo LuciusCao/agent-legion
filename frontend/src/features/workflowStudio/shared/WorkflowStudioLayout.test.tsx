@@ -188,6 +188,30 @@ describe('WorkflowStudioLayout', () => {
     expect(within(mobileNav).getByRole('tab', { name: 'Agent' })).toBeEnabled()
   })
 
+  it('窄屏警示徽标在页签行内、不在画布列里（轮 4 P1-B：Agent 页签整列隐藏也盖不到）', () => {
+    renderLayout({
+      ...baseProps,
+      draftSave: { status: 'error', savedAt: null, conflict: true },
+    })
+    const badge = screen.getByRole('button', {
+      name: '草稿冲突待处理，点击查看',
+    })
+    expect(
+      badge.closest('[data-testid="studio-mobile-nav-row"]')
+    ).not.toBeNull()
+    // revert 即红：徽标若挂进画布列（或任何 data-mobile-panel 面板），
+    // 窄屏切 Agent 页签时被整列 display:none 藏掉。
+    expect(badge.closest('[data-mobile-panel]')).toBeNull()
+  })
+
+  it('正常保存态不出窄屏警示徽标', () => {
+    renderLayout({
+      ...baseProps,
+      draftSave: { status: 'saved', savedAt: '2026-08-27T09:05:00+00:00' },
+    })
+    expect(screen.queryByRole('button', { name: /点击查看/ })).toBeNull()
+  })
+
   it('加载/失败态也有返回入口（#799 codex 复核 P2：AppBar 已移除，双岛不挂时最小返回岛常驻）', () => {
     renderLayout({ ...baseProps, loadState: 'loading' as const })
     expect(screen.getByText('正在加载 workflow')).toBeInTheDocument()

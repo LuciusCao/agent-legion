@@ -52,6 +52,32 @@ const compare: UseWorkflowDraftCompareResult = {
   compareSummary: null,
 }
 
+const compareWithChanges: UseWorkflowDraftCompareResult = {
+  compareState: 'ready',
+  compareResponse: null,
+  compareErrors: null,
+  compareSummary: {
+    createsRevision: true,
+    riskLevel: 'info',
+    severityLabel: '提示',
+    nodeChanges: [
+      {
+        type: 'modified',
+        nodeKey: 'a',
+        label: 'A',
+        nodeType: 'code',
+        fields: [],
+        severity: 'info',
+      },
+    ],
+    edgeChanges: [],
+    intakeChanges: [],
+    metadataChanges: [],
+    riskFlags: [],
+    changedNodeKeys: new Set(['a']),
+  },
+}
+
 const reload = vi.fn().mockResolvedValue(undefined)
 
 type AutoProps = {
@@ -293,31 +319,6 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
   })
 
   it('发布门控绑定当前 YAML：校验通过前 canPublish=false，通过后 true（codex 轮 3 P2）', async () => {
-    const compareWithChanges: UseWorkflowDraftCompareResult = {
-      compareState: 'ready',
-      compareResponse: null,
-      compareErrors: null,
-      compareSummary: {
-        createsRevision: true,
-        riskLevel: 'info',
-        severityLabel: '提示',
-        nodeChanges: [
-          {
-            type: 'modified',
-            nodeKey: 'a',
-            label: 'A',
-            nodeType: 'code',
-            fields: [],
-            severity: 'info',
-          },
-        ],
-        edgeChanges: [],
-        intakeChanges: [],
-        metadataChanges: [],
-        riskFlags: [],
-        changedNodeKeys: new Set(['a']),
-      },
-    }
     const { result, rerender } = renderHook(
       ({ saveStatus, definitionYaml }: AutoProps) =>
         useWorkflowStudioActions(
@@ -340,6 +341,45 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     })
     expect(result.current.validationMessage).toBe('校验通过')
     expect(result.current.canPublish).toBe(true)
+  })
+
+  it('审 A 发 B：确认框打开期间 YAML 被后台换掉 → reviewStale（禁确认数据源），关闭复位（轮 4 P2-C）', async () => {
+    const { result, rerender } = renderHook(
+      ({ saveStatus, definitionYaml }: AutoProps) =>
+        useWorkflowStudioActions(
+          'ws1',
+          {
+            ...draft,
+            definitionYaml,
+            draftSave: { status: saveStatus, savedAt: null },
+          },
+          reload,
+          compareWithChanges
+        ),
+      { initialProps: { saveStatus: 'idle', definitionYaml: 'key: demo\n' } }
+    )
+    // 落盘 + 自动校验通过 → 可发布。
+    await act(async () => {
+      rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
+    })
+    expect(result.current.canPublish).toBe(true)
+
+    act(() => result.current.requestPublish())
+    expect(result.current.reviewDialogOpen).toBe(true)
+    expect(result.current.reviewStale).toBe(false)
+
+    // 打开期间 agent turn-end 把画布 YAML 换掉 → 审阅对象已漂移。
+    await act(async () => {
+      rerender({
+        saveStatus: 'saved',
+        definitionYaml: 'key: demo\nlabel: swapped\n',
+      })
+    })
+    expect(result.current.reviewStale).toBe(true)
+
+    act(() => result.current.closeReviewDialog())
+    expect(result.current.reviewDialogOpen).toBe(false)
+    expect(result.current.reviewStale).toBe(false)
   })
 
   it('校验在途期间草稿再编辑：迟到的结果丢弃，不覆盖新编辑', async () => {

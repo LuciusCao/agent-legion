@@ -10,6 +10,7 @@
  */
 import { Close } from '@mui/icons-material'
 import { Drawer, IconButton, Tooltip } from '@mui/material'
+import { WorkflowStudioSaveWarningBanner } from '../shared/WorkflowStudioSaveWarningBanner'
 import { useStudioState } from '../shared/studioStateContext'
 import { selectedNodeDetails } from '../shared/workflowStudioModel'
 import { useNodeDetailPreview } from './useNodeDetailPreview'
@@ -36,6 +37,9 @@ export function WorkflowNodeDetailDrawer() {
     >
       {nodeKey ? (
         <div className={styles.body} aria-label="节点详情">
+          {/* 轮 4 P2-F：抽屉盖住左岛期间，保存失败/冲突警示在抽屉内嵌横幅
+              保持可见（同源状态）。 */}
+          <WorkflowStudioSaveWarningBanner />
           {/* 预览子态的精简返回条：inspector 头栏在预览时被预览面板替换，
               预览的退出入口由这里承接（✕ 始终关抽屉）。 */}
           {preview.activeKind ? (

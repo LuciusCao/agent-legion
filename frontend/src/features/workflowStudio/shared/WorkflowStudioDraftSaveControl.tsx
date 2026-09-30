@@ -14,6 +14,9 @@ type Props = {
    * 看过警示后保留本页编辑并立即保存（以已推进的基线竞争）。 */
   onAdoptServer?: () => void
   onKeepMine?: () => void
+  /** 抽屉内警示横幅模式（轮 4 P2-F）：只渲染警示态（冲突/终态失败/服务
+   * 不可用），瞬态「保存中…」不出现；长文案不挂窄屏隐藏类。 */
+  warningsOnly?: boolean
 }
 
 /* 草稿保存状态文本（#804 定案：手动「保存草稿」按钮退役——自动保存已
@@ -30,6 +33,7 @@ export function WorkflowStudioDraftSaveControl({
   readOnly,
   onAdoptServer,
   onKeepMine,
+  warningsOnly,
 }: Props) {
   const text = draftSaveText(save)
   const inConflict = save?.conflict === true
@@ -51,9 +55,11 @@ export function WorkflowStudioDraftSaveControl({
         readOnly={readOnly}
         onAdoptServer={onAdoptServer}
         onKeepMine={onKeepMine}
+        plain={warningsOnly}
       />
     )
   }
+  if (warningsOnly && !isWarning) return null
   if (isWarning) {
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -66,7 +72,7 @@ export function WorkflowStudioDraftSaveControl({
           variant="caption"
           color="error"
           sx={{ whiteSpace: 'nowrap' }}
-          className={islandStyles.secondary}
+          className={warningsOnly ? undefined : islandStyles.secondary}
         >
           {text}
         </Typography>
@@ -85,23 +91,32 @@ export function WorkflowStudioDraftSaveControl({
   )
 }
 
+/* 冲突二选一的回调接线（容器与抽屉警示横幅共用，轮 4 P2-F）。 */
+export function useDraftSaveConflictActions() {
+  const studio = useStudioState()
+  return {
+    onAdoptServer: () => {
+      const conflict = studio.draftSave?.conflictDraftYaml
+      if (conflict == null) {
+        studio.resolveConflict(false)
+        return
+      }
+      studio.adoptServerDraft(conflict, studio.draftSave?.savedAt ?? null)
+    },
+    onKeepMine: () => studio.resolveConflict(true),
+  }
+}
+
 /* 顶栏接线：从 Studio context 取草稿保存状态与冲突动作（替代原 meta
    tooltip 的低噪暴露）。 */
 export function WorkflowStudioDraftSaveControlContainer() {
   const studio = useStudioState()
+  const actions = useDraftSaveConflictActions()
   return (
     <WorkflowStudioDraftSaveControl
       save={studio.draftSave}
       readOnly={studio.readOnly}
-      onAdoptServer={() => {
-        const conflict = studio.draftSave?.conflictDraftYaml
-        if (conflict == null) {
-          studio.resolveConflict(false)
-          return
-        }
-        studio.adoptServerDraft(conflict, studio.draftSave?.savedAt ?? null)
-      }}
-      onKeepMine={() => studio.resolveConflict(true)}
+      {...actions}
     />
   )
 }

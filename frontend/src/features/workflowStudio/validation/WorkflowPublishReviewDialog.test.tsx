@@ -41,6 +41,47 @@ const revision: WorkflowRevisionSummary = {
 }
 
 describe('WorkflowPublishReviewDialog', () => {
+  it('审 A 发 B：contentStale 时确认键禁用并提示重审（#804 轮 4 P2-C）', () => {
+    const summary = buildChangeSummary(
+      makeSummaryResponse({
+        summary: {
+          risk_level: 'info',
+          node_changes: [
+            {
+              type: 'modified',
+              node_key: 'a',
+              label: 'A',
+              node_type: 'code',
+              fields: [],
+              risk: 'info',
+            },
+          ],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [],
+          risk_flags: [],
+        },
+      })
+    )
+    const onConfirm = vi.fn()
+    render(
+      <WorkflowPublishReviewDialog
+        open
+        workflowKey="demo"
+        activeRevision={revision}
+        nextVersion={2}
+        definitionHash="abcdef1234567890"
+        summary={summary}
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+        contentStale
+      />
+    )
+
+    expect(screen.getByText(/草稿内容在你审阅期间已被更新/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认发布' })).toBeDisabled()
+  })
+
   it('renders version and workflow metadata', () => {
     render(
       <WorkflowPublishReviewDialog

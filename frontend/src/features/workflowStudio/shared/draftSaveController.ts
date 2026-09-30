@@ -118,12 +118,20 @@ export class DraftSaveController {
      本页编辑，以已推进的基线竞争）或 adopt（adoptServerDraft）。冲突未
      解除时 pendingSave 不发起 PUT（挂起 autosave），pagehide 也不自动
      flush（flushNow 对 conflict 态 no-op，防止关闭页面前 keepalive PUT
-     静默覆盖 Agent 的草稿）。 */
-  resolveConflict(keepMine: boolean): void {
+     静默覆盖 Agent 的草稿）。
+     #804 P1-A：409 于 PUT 在途时到达的冲突，pendingSave 已被清空——
+     keep-mine 拿不到 pending 时按调用方给的当前画布内容无条件补调度，
+     否则状态机卡 error：draftYaml 未变不再触发调度 effect、flushNow
+     no-op，编辑永不落盘、自动校验/发布门控随之锁死。 */
+  resolveConflict(keepMine: boolean, currentYaml?: () => string): void {
     if (!this.state.conflict) return
     const pending = pendingAfterResolve(this.pendingSave, keepMine)
     this.setState(conflictClearedState(this.state))
-    if (pending) this.armSave(pending.yaml, pending.requestId)
+    if (pending) {
+      this.armSave(pending.yaml, pending.requestId)
+      return
+    }
+    if (keepMine && currentYaml) this.schedule(currentYaml())
   }
 
   /* kimi review P1-2：采用服务端草稿（Agent 的版本）——经 hydrate 入口

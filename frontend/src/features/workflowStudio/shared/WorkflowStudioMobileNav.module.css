@@ -1,11 +1,35 @@
-.nav {
-  display: none !important;
+/* 窄屏页签行（≤900px）：Tabs + 常驻警示徽标（轮 4 P1-B）同一 flex 行——
+ * 徽标在行内而不是画布列里，Agent 页签下画布列整列隐藏时仍可见。 */
+.row {
+  display: none;
   flex: 0 0 auto;
+  align-items: center;
   border-bottom: 1px solid #e0e0e0;
   background: #ffffff;
 }
+.nav {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 @media (max-width: 900px) {
-  .nav {
-    display: flex !important;
+  .row {
+    display: flex;
   }
+}
+
+/* 常驻警示徽标：冲突/保存失败/服务不可用。 */
+.narrowAlert {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-right: 8px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: #fdecea;
+  color: #c62828;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
 }

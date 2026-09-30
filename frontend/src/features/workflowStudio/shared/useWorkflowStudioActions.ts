@@ -20,6 +20,10 @@ export type UseWorkflowStudioActionsResult = {
   validationErrors: string[]
   validationMessage: string
   reviewDialogOpen: boolean
+  /** 审 A 发 B 守卫（#804 轮 4 P2-C）：确认框打开时捕获当时 YAML；
+   * 打开期间草稿被后台换掉（agent turn-end 保存/reapply）→ true，
+   * 确认键禁用，需关闭重审。 */
+  reviewStale: boolean
   canPublish: boolean
   publishDraft: () => Promise<void>
   requestPublish: () => void
@@ -33,6 +37,8 @@ export function useWorkflowStudioActions(
 ): UseWorkflowStudioActionsResult {
   const [actionState, setActionState] = useState<ActionState>('idle')
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
+  // P2-C：确认框打开那一刻的 YAML 快照（审阅对象）。
+  const [reviewYaml, setReviewYaml] = useState<string | null>(null)
   const { validationErrors, validationMessage, report, reportSilent } =
     useValidationFeedback(draft.definitionYaml)
   const setValidating = useCallback(
@@ -102,10 +108,20 @@ export function useWorkflowStudioActions(
     validationMessage,
     reviewDialogOpen,
     canPublish,
+    reviewStale:
+      reviewDialogOpen &&
+      reviewYaml !== null &&
+      reviewYaml !== draft.definitionYaml,
     publishDraft,
     requestPublish: () => {
-      if (canPublish) setReviewDialogOpen(true)
+      if (canPublish) {
+        setReviewYaml(draft.definitionYaml)
+        setReviewDialogOpen(true)
+      }
     },
-    closeReviewDialog: () => setReviewDialogOpen(false),
+    closeReviewDialog: () => {
+      setReviewDialogOpen(false)
+      setReviewYaml(null)
+    },
   }
 }

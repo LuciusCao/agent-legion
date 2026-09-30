@@ -19,7 +19,7 @@ type Props = {
   setDefinitionYaml: (value: string) => void
   compareSummary?: ChangeSummaryViewModel | null
   readOnly: boolean
-  /** 预览态（WorkflowNodeDetailView 持有，nodeKey 变化即清除后下发）。 */
+  /** 预览态（WorkflowNodeDetailDrawer 持有，nodeKey 变化即清除后下发）。 */
   activeKind: NodeDetailPreviewKind | null
   onShowPreview: (kind: NodeDetailPreviewKind) => void
   onClose: () => void
@@ -27,7 +27,7 @@ type Props = {
 
 /** 详情 panel 内容区：默认节点 inspector；「查看 Prompt / 浏览技能文件」原位
  * 切换为预览视图（不开 dialog，右侧 Agent 对话保持可见可聊）。预览状态由
- * DetailView 持有（面包屑需要感知），本组件只做分发与 context 下发。 */
+ * 抽屉持有（面包屑需要感知），本组件只做分发与 context 下发。 */
 export function WorkflowNodeDetailBody(props: Props) {
   const details = inspectorNodeDetails(props, props.nodeKey)
   return (

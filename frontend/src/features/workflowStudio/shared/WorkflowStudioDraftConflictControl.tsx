@@ -8,6 +8,9 @@ type Props = {
   readOnly: boolean
   onAdoptServer?: () => void
   onKeepMine?: () => void
+  /** 抽屉内横幅用（轮 4 P2-F）：不挂窄屏隐藏类（抽屉在窄屏全宽覆盖，
+   * secondary 规则只该管岛面）。 */
+  plain?: boolean
 }
 
 /** 草稿 CAS 冲突簇（#633 + codex 轮 3 P1，从 WorkflowStudioDraftSaveControl
@@ -27,7 +30,7 @@ export function WorkflowStudioDraftConflictControl(props: Props) {
         variant="caption"
         color="error"
         sx={{ whiteSpace: 'nowrap' }}
-        className={islandStyles.secondary}
+        className={props.plain ? undefined : islandStyles.secondary}
       >
         {props.text}
       </Typography>

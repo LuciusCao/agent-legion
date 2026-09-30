@@ -34,6 +34,9 @@ type Props = {
    * contract.yaml 且无嵌入块）时后端在读取侧现算的提示列表。仅呈现，
    * 不阻断发布；手动发布对话框不传，行为不变。 */
   advisories?: string[]
+  /** #804 轮 4 P2-C 审 A 发 B：确认框打开期间草稿 YAML 被后台换掉 →
+   * 禁确认 + 提示重审（审阅的 diff 与将发布的内容已不一致）。 */
+  contentStale?: boolean
 }
 
 export function WorkflowPublishReviewDialog({
@@ -49,6 +52,7 @@ export function WorkflowPublishReviewDialog({
   confirming = false,
   canceling = false,
   advisories = [],
+  contentStale = false,
 }: Props) {
   const hasChanges = hasCompareSummaryChanges(summary)
   // 任一操作在途即禁止二次触发关闭与确认（#429 四轮 codex P2：cancel 在途
@@ -77,6 +81,12 @@ export function WorkflowPublishReviewDialog({
           definitionHash={definitionHash}
         />
         <WorkflowPublishReviewDialogChanges summary={summary} />
+        {contentStale && (
+          <Typography variant="body2" color="error" sx={{ mt: 2 }}>
+            草稿内容在你审阅期间已被更新（可能来自 Agent
+            自动保存）——请关闭后重新审阅再发布
+          </Typography>
+        )}
         {advisories.length > 0 && (
           <Typography
             variant="body2"
@@ -96,7 +106,7 @@ export function WorkflowPublishReviewDialog({
           onClick={onConfirm}
           variant="contained"
           color="primary"
-          disabled={!hasChanges || resolving}
+          disabled={!hasChanges || resolving || contentStale}
         >
           {createsRevision ? '确认发布' : '确认保存'}
         </Button>

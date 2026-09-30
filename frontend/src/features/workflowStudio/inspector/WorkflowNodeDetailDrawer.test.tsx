@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../../api'
@@ -130,7 +130,11 @@ const settledSettle = {
 }
 
 /** 抽屉消费的 studio 字段（selectedNodeKey 驱动开合）。 */
-function studioFor(nodeKey: string | null, setSelectedNodeKey = vi.fn()) {
+function studioFor(
+  nodeKey: string | null,
+  setSelectedNodeKey = vi.fn(),
+  draftSave: Record<string, unknown> = { status: 'idle', savedAt: null }
+) {
   return {
     selectedNodeKey: nodeKey,
     setSelectedNodeKey,
@@ -141,15 +145,25 @@ function studioFor(nodeKey: string | null, setSelectedNodeKey = vi.fn()) {
     setDefinitionYaml: vi.fn(),
     compareSummary: null,
     readOnly: false,
+    draftSave,
+    resolveConflict: vi.fn(),
+    adoptServerDraft: vi.fn(),
   }
 }
 
-function renderDrawer(nodeKey: string | null = 'generate_key_info') {
+function renderDrawer(
+  nodeKey: string | null = 'generate_key_info',
+  draftSave?: Record<string, unknown>
+) {
   const setSelectedNodeKey = vi.fn()
   render(
     <TestQueryProvider>
       {withStudioProviders(
-        studioFor(nodeKey, setSelectedNodeKey),
+        studioFor(
+          nodeKey,
+          setSelectedNodeKey,
+          draftSave ?? { status: 'idle', savedAt: null }
+        ),
         {},
         <WorkflowNodeDetailDrawer />
       )}
@@ -213,6 +227,26 @@ describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '关闭节点配置' }))
     expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
+  })
+
+  it('轮 4 P2-F：冲突时抽屉内嵌警示横幅（岛被 Modal 盖住期间的可见出口）', () => {
+    renderDrawer('generate_key_info', {
+      status: 'error',
+      savedAt: null,
+      conflict: true,
+      conflictDraftYaml: 'key: demo\n',
+    })
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/自动保存已暂停/)
+    // 冲突操作出口在抽屉里同样可用。
+    expect(
+      within(alert).getByRole('button', { name: '保留本页编辑' })
+    ).toBeInTheDocument()
+  })
+
+  it('轮 4 P2-F：无警示时不渲染横幅（不占头部空间）', () => {
+    renderDrawer('generate_key_info')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('无选中节点时不渲染内容（Drawer 关闭）', () => {

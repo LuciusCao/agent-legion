@@ -25,6 +25,12 @@ vi.mock('./useWorkspaceDisplayName', () => ({
   useWorkspaceDisplayName: () => '题目审题',
 }))
 
+// 窄屏判定桩（P2-D 窄屏重置出口用例用；matchMedia stub 恒 false 走不了真断点）。
+const narrowState = { value: false }
+vi.mock('./useStudioNarrowViewport', () => ({
+  useStudioNarrowViewport: () => narrowState.value,
+}))
+
 /** 岛消费的 studio 字段全量空壳（withStudioProviders 的 studio 侧）。 */
 const studioStub = {
   revision: null,
@@ -190,11 +196,11 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
   })
 
   it('窄屏隐藏语义移到画布列 CSS（codex 轮 2 P2 锚定迁移）：岛恒挂载，不盖编辑器由画布列 display:none 承担', () => {
-    // 岛锚进画布列后，窄屏非画布页签的隐藏由 [data-mobile-panel] 的
+    // 岛锚进画布列后，窄屏非画布页签（Agent）的隐藏由 [data-mobile-panel] 的
     // display:none 承担（jsdom 无布局验证不了，语义钉在 CanvasPanel 用例
     // 的 mobileActive 类断言）——岛组件自身恒渲染，保证尺寸观察不失效
     // （轮 2 P3：返回 null 会让 ResizeObserver 观察失效）。
-    renderIslands({}, { mobilePanel: 'editor' })
+    renderIslands({}, { mobilePanel: 'agent' })
     expect(screen.getByTestId('studio-identity-island')).toBeInTheDocument()
     expect(screen.getByTestId('studio-action-island')).toBeInTheDocument()
   })
@@ -203,6 +209,53 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     renderIslands({}, { mobilePanel: 'graph' })
     expect(screen.getByTestId('studio-identity-island')).toBeInTheDocument()
     expect(screen.getByTestId('studio-action-island')).toBeInTheDocument()
+  })
+
+  it('轮 4 P2-D：窄屏 dirty 时重置出口收进版本选择器菜单（带确认）', () => {
+    const resetDefinition = vi.fn()
+    const revision = {
+      id: 'rev-1',
+      workspace_id: 'ws1',
+      workflow_key: 'demo',
+      version: 1,
+      status: 'active',
+      definition_hash: 'abcdef1234567890',
+      created_at: '2026-07-02T00:00:00Z',
+      published_at: '2026-07-02T00:00:00Z',
+    }
+    narrowState.value = true
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    try {
+      renderIslands({ dirty: true, resetDefinition, revisions: [revision] })
+      // 菜单打开后出现「重置为已发布版本」；取消确认不触发重置。
+      fireEvent.click(screen.getByRole('button', { name: /v- ·/ }))
+      fireEvent.click(
+        screen.getByRole('menuitem', { name: '重置为已发布版本' })
+      )
+      expect(confirmSpy).toHaveBeenCalledOnce()
+      expect(resetDefinition).not.toHaveBeenCalled()
+    } finally {
+      narrowState.value = false
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it('轮 4 P2-D：宽屏不出现菜单重置项（外露按钮承担）', () => {
+    const revision = {
+      id: 'rev-1',
+      workspace_id: 'ws1',
+      workflow_key: 'demo',
+      version: 1,
+      status: 'active',
+      definition_hash: 'abcdef1234567890',
+      created_at: '2026-07-02T00:00:00Z',
+      published_at: '2026-07-02T00:00:00Z',
+    }
+    renderIslands({ dirty: true, revisions: [revision] })
+    fireEvent.click(screen.getByRole('button', { name: /v- ·/ }))
+    expect(
+      screen.queryByRole('menuitem', { name: '重置为已发布版本' })
+    ).toBeNull()
   })
 
   it('宽屏双岛互斥（#804 codex 轮 2 P1）：左岛 max-width = 容器宽 - 右岛实测宽 - 间距', async () => {

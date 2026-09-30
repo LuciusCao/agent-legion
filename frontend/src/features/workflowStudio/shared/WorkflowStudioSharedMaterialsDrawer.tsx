@@ -20,6 +20,7 @@ import {
 import { SharedMaterialFileContentDialog } from './WorkflowStudioSharedMaterialsFileDialog'
 import { SharedMaterialFileRowView } from './WorkflowStudioSharedMaterialsFileRow'
 import { SharedMaterialsPropagateConfirmDialog } from './WorkflowStudioSharedMaterialsPropagateDialog'
+import { WorkflowStudioSaveWarningBanner } from './WorkflowStudioSaveWarningBanner'
 import styles from './WorkflowStudioSharedMaterialsDrawer.module.css'
 
 const PROPAGATE_STATUS_LABELS: Record<
@@ -87,6 +88,8 @@ function SharedMaterialsDrawer({
             </IconButton>
           </Tooltip>
         </div>
+        {/* 轮 4 P2-F：抽屉盖住左岛期间的保存/冲突警示内嵌横幅。 */}
+        <WorkflowStudioSaveWarningBanner />
         <p className={styles.hint}>
           本 workspace 各 skill 共享的参考材料（<code>_shared</code>
           目录）。修改共享源后副本不会自动传播：点行内「同步并打
