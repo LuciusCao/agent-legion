@@ -2,6 +2,8 @@ import { Chip, CircularProgress } from '@mui/material'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import { countNodeChanges } from '../canvas/workflowStudioDagChanges'
 import { WorkflowStudioChangeCountChip } from './WorkflowStudioChangeCountChip'
+import { WorkflowStudioValidationChip } from './WorkflowStudioValidationChip'
+import islandStyles from './StudioCanvasIslands.module.css'
 
 type Props = {
   readOnly: boolean
@@ -23,7 +25,10 @@ type Props = {
  * 编辑后旧校验结果由 useValidationFeedback 作废，chip 回「未发布变更」。
  * 只读（查看历史 revision）优先于「计算中…」：compare 因草稿未发布变更
  * 在后台运行时版本标识不闪断，且计数并入只读 chip，让「草稿有未发布
- * 更改」在查看 revision 期间持续可见。 */
+ * 更改」在查看 revision 期间持续可见。
+ * 窄屏降级自控（codex 轮 4 P1-2）：校验失败/校验中是发布被禁时唯一的
+ * 报告入口，窄屏保留紧凑可点击；其余态挂 island secondary（窄屏隐藏）。
+ * 岛侧包装用恒透传 .passthrough（不再整组 conditional 一刀切）。 */
 export function WorkflowStudioStatusChip(props: Props) {
   const counts = countNodeChanges(props.summary)
   const preservedText = props.hasPreservedDraft
@@ -34,6 +39,7 @@ export function WorkflowStudioStatusChip(props: Props) {
     return (
       <Chip
         size="small"
+        className={islandStyles.secondary}
         color={props.hasPreservedDraft || counts ? 'warning' : 'default'}
         label={`只读 v${props.version ?? '-'}${draftChanges}`}
         title={preservedText ?? undefined}
@@ -44,6 +50,7 @@ export function WorkflowStudioStatusChip(props: Props) {
     return (
       <Chip
         size="small"
+        className={islandStyles.secondary}
         icon={<CircularProgress size={12} />}
         label="计算中…"
       />
@@ -56,6 +63,7 @@ export function WorkflowStudioStatusChip(props: Props) {
       return (
         <Chip
           size="small"
+          className={islandStyles.secondary}
           color="warning"
           label="已保留当前草稿"
           title={preservedText ?? undefined}
@@ -64,35 +72,16 @@ export function WorkflowStudioStatusChip(props: Props) {
     }
     return null
   }
-  if (props.validating) {
+  if (
+    props.validating ||
+    props.validationMessage === '校验通过' ||
+    props.validationMessage.startsWith('校验失败')
+  ) {
     return (
-      <Chip
-        size="small"
-        icon={<CircularProgress size={12} />}
-        label="校验中…"
-        title="草稿已保存，自动校验进行中"
-      />
-    )
-  }
-  if (props.validationMessage.startsWith('校验失败')) {
-    return (
-      <Chip
-        size="small"
-        color="error"
-        label="✗ 校验失败"
-        title={`${props.validationMessage}——点击查看校验报告`}
-        onClick={props.onShowChanges}
-      />
-    )
-  }
-  if (props.validationMessage === '校验通过') {
-    return (
-      <Chip
-        size="small"
-        color="success"
-        label="✓ 校验通过"
-        title="自动校验通过——点击查看变更与校验报告"
-        onClick={props.onShowChanges}
+      <WorkflowStudioValidationChip
+        validating={props.validating}
+        validationMessage={props.validationMessage}
+        onShowChanges={props.onShowChanges}
       />
     )
   }
@@ -102,12 +91,14 @@ export function WorkflowStudioStatusChip(props: Props) {
         summary={props.summary}
         preservedText={preservedText}
         onShowChanges={props.onShowChanges}
+        className={islandStyles.secondary}
       />
     )
   }
   return (
     <Chip
       size="small"
+      className={islandStyles.secondary}
       color="info"
       label="有未发布变更"
       title={preservedText ?? undefined}

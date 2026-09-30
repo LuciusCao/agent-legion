@@ -13,6 +13,8 @@ type Props = {
   /** 已保留草稿提示（并入 title）。 */
   preservedText: string | null
   onShowChanges: () => void
+  /** 窄屏降级类（island secondary：该态窄屏隐藏，轮 4 P1-2）。 */
+  className?: string
 }
 
 /** 「未发布变更 N」chip（从 WorkflowStudioStatusChip 拆出保体积预算）：
@@ -38,6 +40,7 @@ export function WorkflowStudioChangeCountChip(props: Props) {
   return (
     <Chip
       size="small"
+      className={props.className}
       color={color}
       label={`未发布变更 ${counts.total}`}
       title={title}

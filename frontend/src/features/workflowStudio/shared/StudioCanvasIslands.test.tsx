@@ -147,6 +147,21 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     )
   })
 
+  it('传输失败（校验服务不可用）与结构失败的发布 tooltip 分措辞（codex 轮 4 P1-1）', () => {
+    renderIslands({
+      dirty: true,
+      canPublish: false,
+      validationMessage: '校验失败：network error',
+    })
+    const publish = within(
+      screen.getByTestId('studio-identity-island')
+    ).getByRole('button', { name: '发布' })
+    expect(publish.parentElement).toHaveAttribute(
+      'aria-label',
+      '校验服务暂不可用，稍后编辑即自动重试校验'
+    )
+  })
+
   it('自动校验通过：绿色 ✓ 校验通过 chip，发布可用', () => {
     renderIslands({ dirty: true, validationMessage: '校验通过' })
     const island = screen.getByTestId('studio-identity-island')

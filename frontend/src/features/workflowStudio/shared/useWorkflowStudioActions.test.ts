@@ -138,20 +138,79 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     expect(useUiStore.getState().toast).toBeNull()
   })
 
-  it('校验请求网络错误：校验失败：原因', async () => {
-    mocks.validateWorkflowDraft.mockRejectedValue(new Error('network error'))
-    const { result, rerender } = renderActionsHook({
-      saveStatus: 'idle',
-      definitionYaml: 'key: demo\n',
-    })
+  it('传输失败自动退避重试，恢复后校验通过（codex 轮 4 P1-1）', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      mocks.validateWorkflowDraft
+        .mockRejectedValueOnce(new Error('network error'))
+        .mockRejectedValueOnce(new Error('network error'))
+        .mockResolvedValue({ valid: true, errors: [] })
+      const { result, rerender } = renderActionsHook({
+        saveStatus: 'idle',
+        definitionYaml: 'key: demo\n',
+      })
 
-    await flushSaved(rerender, {
-      saveStatus: 'idle',
-      definitionYaml: 'key: demo\n',
-    })
+      await flushSaved(rerender, {
+        saveStatus: 'idle',
+        definitionYaml: 'key: demo\n',
+      })
+      // 第一次传输失败：不写终态 message（不写「校验失败：…」让 effect
+      // 永远闭锁——旧实现此处已是终态，revert 即红），等退避重试。
+      expect(result.current.validationMessage).toBe('')
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
 
-    expect(result.current.validationMessage).toBe('校验失败：network error')
-    expect(result.current.validationErrors).toEqual([])
+      await act(async () => {
+        vi.advanceTimersByTime(2100)
+      })
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(2)
+      expect(result.current.validationMessage).toBe('')
+
+      await act(async () => {
+        vi.advanceTimersByTime(4100)
+      })
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(3)
+      expect(result.current.validationMessage).toBe('校验通过')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('传输失败重试耗尽才写终态 校验失败：…（结构失败不重试）', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      mocks.validateWorkflowDraft.mockRejectedValue(new Error('network error'))
+      const { result, rerender } = renderActionsHook({
+        saveStatus: 'idle',
+        definitionYaml: 'key: demo\n',
+      })
+
+      await flushSaved(rerender, {
+        saveStatus: 'idle',
+        definitionYaml: 'key: demo\n',
+      })
+      expect(result.current.validationMessage).toBe('')
+
+      // 3 次退避重试（2s/4s/8s）全部失败 → 终态。
+      await act(async () => {
+        vi.advanceTimersByTime(2100)
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(4100)
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(8100)
+      })
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(4)
+      expect(result.current.validationMessage).toBe('校验失败：network error')
+      expect(result.current.actionState).toBe('idle')
+      // 终态后不再自动重试（编辑→落盘会重新触发，见它例）。
+      await act(async () => {
+        vi.advanceTimersByTime(30000)
+      })
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(4)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('干净态保存成功不触发校验（canSubmit=false：无未发布变更）', async () => {

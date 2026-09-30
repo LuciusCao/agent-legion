@@ -42,15 +42,18 @@ export function StudioCanvasIslands() {
   const islandTop = 12
   const validationMessage = studio.validationMessage ?? ''
   // codex 轮 3 P2：发布要求当前 YAML 明确校验通过（canPublish 已含此门
-  // 控）；dirty 时给禁用原因 tooltip——校验失败/尚未校验（hydrate 恢复或
-  // debounce 窗口内）分别措辞。
+  // 控）；dirty 时给禁用原因 tooltip——轮 4 P1-1 起区分结构失败（内容
+  // 问题，修复后重发）与传输失败（校验服务不可用，自动重试已耗尽时
+  // 再次编辑即重新触发）。
   const publishTooltip = !studio.dirty
     ? undefined
-    : validationMessage.startsWith('校验失败')
+    : validationMessage === '校验失败'
       ? '校验失败，请修复后重新发布'
-      : validationMessage !== '校验通过'
-        ? '草稿校验通过后才能发布'
-        : undefined
+      : validationMessage.startsWith('校验失败')
+        ? '校验服务暂不可用，稍后编辑即自动重试校验'
+        : validationMessage !== '校验通过'
+          ? '草稿校验通过后才能发布'
+          : undefined
 
   return (
     <>
@@ -103,7 +106,7 @@ export function StudioCanvasIslands() {
           error={studio.revisionLoadError}
           onSelectRevision={studio.selectRevision}
         />
-        <span className={styles.conditional}>
+        <span className={styles.passthrough}>
           <WorkflowStudioStatusChip
             readOnly={studio.readOnly}
             version={studio.revision?.version ?? null}

@@ -1,8 +1,9 @@
-import { Button, Tooltip, Typography } from '@mui/material'
+import { Tooltip, Typography } from '@mui/material'
 import { MaterialIcon } from '../../../components/MaterialIcon'
 import { draftSaveText } from './useWorkflowDraftPersistence'
 import type { DraftSaveState } from './useWorkflowDraftPersistence'
 import { useStudioState } from './studioStateContext'
+import { WorkflowStudioDraftConflictControl } from './WorkflowStudioDraftConflictControl'
 import islandStyles from './StudioCanvasIslands.module.css'
 
 type Props = {
@@ -31,20 +32,31 @@ export function WorkflowStudioDraftSaveControl({
   onKeepMine,
 }: Props) {
   const text = draftSaveText(save)
-  const isWarning =
-    save?.loadError === true ||
-    save?.status === 'error' ||
-    save?.conflict === true
   const inConflict = save?.conflict === true
+  // codex 轮 4 P1-3：持久化不可用（loadError）与终态失败（error，重试
+  // 耗尽）属用户必须知情的警示——窄屏同样保留（⚠ 恒可见 + tooltip 载
+  // 全文，长文案窄屏让位）；瞬态「保存中…」才允许窄屏隐藏。
+  const isWarning =
+    save?.loadError === true || save?.status === 'error' || inConflict
   const showConflictActions =
     !readOnly && inConflict && onAdoptServer && onKeepMine
   // #804 定案：无可见内容时不渲染——岛的 flex gap 会给空壳 span 留死白。
   if (!text && !showConflictActions) return null
   if (inConflict) {
+    // 冲突簇拆在 WorkflowStudioDraftConflictControl（体积预算）：窄屏恒
+    // 可见可操作（⚠ + 二选一按钮），长文案窄屏收成 ⚠ tooltip。
+    return (
+      <WorkflowStudioDraftConflictControl
+        text={text}
+        readOnly={readOnly}
+        onAdoptServer={onAdoptServer}
+        onKeepMine={onKeepMine}
+      />
+    )
+  }
+  if (isWarning) {
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        {/* 窄屏只剩这个 ⚠（tooltip 载全文）；宽屏长文案在 secondary 类里
-            （窄屏隐藏）。 */}
         <Tooltip title={text ?? ''}>
           <span style={{ display: 'inline-flex', color: '#c62828' }}>
             <MaterialIcon name="warning" fontSize="small" />
@@ -58,28 +70,13 @@ export function WorkflowStudioDraftSaveControl({
         >
           {text}
         </Typography>
-        {showConflictActions ? (
-          <>
-            <Button
-              size="small"
-              variant="text"
-              color="primary"
-              onClick={onAdoptServer}
-            >
-              采用 Agent 版本
-            </Button>
-            <Button size="small" variant="text" onClick={onKeepMine}>
-              保留本页编辑
-            </Button>
-          </>
-        ) : null}
       </span>
     )
   }
   return (
     <Typography
       variant="caption"
-      color={isWarning ? 'error' : 'text.secondary'}
+      color="text.secondary"
       sx={{ whiteSpace: 'nowrap' }}
       className={islandStyles.secondary}
     >

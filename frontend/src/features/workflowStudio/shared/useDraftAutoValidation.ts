@@ -1,20 +1,26 @@
 /**
- * 草稿自动校验（#804 定案 + codex 轮 3 P2）：当前草稿内容「已落盘且尚未
- * 校验」时静默校验——不开校验报告抽屉、不弹 toast，结果经 reportSilent
- * 写入 validation state，驱动左岛状态 chip（未发布变更 → 校验中… →
- * ✓ 校验通过 / ✗ 校验失败）与发布门控（canPublish 要求当前 YAML 明确
- * 校验通过）。
+ * 草稿自动校验（#804 定案 + codex 轮 3 P2 + 轮 4 P1-1）：当前草稿内容
+ * 「已落盘且尚未校验」时静默校验——不开校验报告抽屉、不弹 toast，结果经
+ * reportSilent 写入 validation state，驱动左岛状态 chip（未发布变更 →
+ * 校验中… → ✓ 校验通过 / ✗ 校验失败）与发布门控（canPublish 要求当前
+ * YAML 明确校验通过）。
  * 触发条件（全部满足）：canSubmit（有未发布变更且非只读）+ 保存状态机
  * settled（saved，或 idle 且 savedAt 非空——hydrate 恢复服务端草稿不
  * 产生 saved 边沿，这是轮 3 P2 的发布门控洞）+ 无在途校验 + 当前内容
  * 无校验结果。debounce 窗口内（pending/saving）不触发，按未校验处理。
- * 草稿再编辑后旧结果作废（useValidationFeedback 随 definitionYaml 清空，
- * chip 回「未发布变更」）；校验在途期间草稿变化时，迟到结果按捕获的
- * yaml 比对丢弃，并在落盘后被上面的规则重新触发。
- * 从 useWorkflowStudioActions 拆出保体积预算。
+ * 轮 4 P1-1：结构失败（valid:false）直接终态「校验失败」不重试；传输
+ * 失败（reject）由 validateDraftWithRetry 退避自动重试，耗尽才写终态
+ * 「校验失败：…」。终态后的恢复路径：下一次落盘重新触发——终态
+ * message 随 definitionYaml 变化被 useValidationFeedback 作废，不闭锁。
+ * 迟到结果按捕获的 yaml 比对丢弃（DraftValidationStaleError 静默吞）。
+ * 从 useWorkflowStudioActions 拆出保体积预算；重试循环在
+ * draftAutoValidationRunner.ts。
  */
 import { useEffect, useRef } from 'react'
-import { validateWorkflowDraft } from '../../../api'
+import {
+  DraftValidationStaleError,
+  validateDraftWithRetry,
+} from './draftAutoValidationRunner'
 import type { DraftSaveState } from './draftSaveTypes'
 
 type Params = {
@@ -60,13 +66,12 @@ export function useDraftAutoValidation({
     const yaml = yamlRef.current
     const runId = (runIdRef.current += 1)
     setValidating(true)
-    validateWorkflowDraft(workspaceId, yaml)
+    validateDraftWithRetry(workspaceId, yaml, () => yamlRef.current !== yaml)
       .then((result) => {
-        if (yamlRef.current !== yaml) return
         reportSilent(result.errors, result.valid ? '校验通过' : '校验失败')
       })
       .catch((e: unknown) => {
-        if (yamlRef.current !== yaml) return
+        if (e instanceof DraftValidationStaleError) return
         reportSilent(
           [],
           `校验失败：${(e instanceof Error && e.message) || '网络错误'}`

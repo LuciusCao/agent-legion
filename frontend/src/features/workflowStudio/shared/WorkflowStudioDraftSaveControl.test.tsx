@@ -47,6 +47,17 @@ describe('WorkflowStudioDraftSaveControl', () => {
     ).toBeInTheDocument()
   })
 
+  it('codex 轮 4 P1-3：持久化失败/服务不可用警示窄屏保留——⚠ 图标恒可见（不带 secondary），长文案窄屏让位', () => {
+    // jsdom 跑不了 @media——钉结构：⚠ 图标不带窄屏隐藏类（恒可见可操作），
+    // 长文案带 secondary（窄屏收成 ⚠+tooltip）。瞬态「保存中…」不受此约束
+    // （它窄屏隐藏是安全的——出错/冲突才需要用户知情）。
+    renderControl({ status: 'error', savedAt: null })
+    const text = screen.getByText('草稿保存失败，将自动重试')
+    expect(text.className).toContain('secondary')
+    const icon = screen.getByTestId('WarningIcon')
+    expect(icon.closest('[class*="secondary"]')).toBeNull()
+  })
+
   it('冲突态：警示常驻 + 显式二选一动作（采用 Agent 版本 / 保留本页编辑）', () => {
     const onAdoptServer = vi.fn()
     const onKeepMine = vi.fn()

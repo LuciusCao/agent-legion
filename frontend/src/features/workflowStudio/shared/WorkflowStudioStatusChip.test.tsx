@@ -240,4 +240,49 @@ describe('WorkflowStudioStatusChip', () => {
     expect(screen.getByText('未发布变更 3')).toBeInTheDocument()
     expect(screen.queryByText('✓ 校验通过')).not.toBeInTheDocument()
   })
+
+  it('codex 轮 4 P1-2：校验失败/校验中在窄屏保留紧凑入口（不挂 island secondary 类），其余态继续窄屏隐藏', () => {
+    // jsdom 跑不了 @media——钉类名结构：secondary = 窄屏隐藏。失败/校验中
+    // 是发布被禁时用户唯一的报告入口，必须窄屏可达（revert：整组挂回
+    // secondary 即红）。
+    renderChip({ dirty: true, validationMessage: '校验失败' })
+    expect(
+      screen.getByText('✗ 校验失败').closest('.MuiChip-root')?.className
+    ).not.toContain('secondary')
+  })
+
+  it('codex 轮 4 P1-2：校验中 chip 同样窄屏可见', () => {
+    renderChip({ dirty: true, validating: true })
+    expect(
+      screen.getByText('校验中…').closest('.MuiChip-root')?.className
+    ).not.toContain('secondary')
+  })
+
+  it('codex 轮 4 P1-2：通过/未发布变更/只读 chip 窄屏继续隐藏（挂 secondary）', () => {
+    const { unmount } = render(
+      <WorkflowStudioStatusChip
+        readOnly={false}
+        version={null}
+        dirty
+        hasPreservedDraft={false}
+        summary={null}
+        compareState="idle"
+        validating={false}
+        validationMessage="校验通过"
+        onShowChanges={vi.fn()}
+      />
+    )
+    expect(
+      screen.getByText('✓ 校验通过').closest('.MuiChip-root')?.className
+    ).toContain('secondary')
+    unmount()
+
+    renderChip({
+      dirty: true,
+      summary: makeSummary({ nodeChanges: makeNodeChanges() }),
+    })
+    expect(
+      screen.getByText('未发布变更 3').closest('.MuiChip-root')?.className
+    ).toContain('secondary')
+  })
 })
