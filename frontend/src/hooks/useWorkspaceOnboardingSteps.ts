@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useUiStore } from '../stores/uiStore'
 import { buildOnboardingSteps } from '../lib/onboardingReadiness'
@@ -26,31 +25,18 @@ export function useWorkspaceOnboardingSteps(
     workflowDefinition.nodes.some((node) => node.node_type === 'agent')
   const readiness = useWorkerReadiness(workspaceId, true, needsWorker)
 
-  return useMemo(
-    () =>
-      withWorkerSteps(
-        buildOnboardingSteps({
-          workflowDefinition,
-          goStudio: () =>
-            navigate(`/workspaces/${workspaceId}/workflow-studio`),
-          openAddItems: () => setAddItemsDialogOpen(true),
-        }),
-        buildWorkerOnboardingSteps({
-          ...readiness,
-          needsWorker,
-          workers: readiness.workers ?? [],
-          goWorkerSettings: () =>
-            navigate(`/workspaces/${workspaceId}/settings`),
-          openConsole: (url) => window.open(url, '_blank', 'noopener'),
-        })
-      ),
-    [
-      navigate,
+  return withWorkerSteps(
+    buildOnboardingSteps({
       workflowDefinition,
-      workspaceId,
-      setAddItemsDialogOpen,
-      readiness,
+      goStudio: () => navigate(`/workspaces/${workspaceId}/workflow-studio`),
+      openAddItems: () => setAddItemsDialogOpen(true),
+    }),
+    buildWorkerOnboardingSteps({
+      ...readiness,
       needsWorker,
-    ]
+      workers: readiness.workers ?? [],
+      goWorkerSettings: () => navigate(`/workspaces/${workspaceId}/settings`),
+      openConsole: (url) => window.open(url, '_blank', 'noopener'),
+    })
   )
 }
