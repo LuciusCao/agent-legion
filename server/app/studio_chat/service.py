@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from server.app.auth.scoped_tokens import renew_scoped_token
+from server.app.auth.sessions import hash_token
 from server.app.events.bus import EventBus
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
@@ -41,6 +42,7 @@ from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import teardown_runtime
+from server.app.studio_chat.token_keepalive import TOKEN_INVALIDATED_DETAIL, keepalive_run_token
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
@@ -206,6 +208,11 @@ class StudioChatService:
         runtime = self.runtime(session_id)
         if runtime is None:
             raise ConflictError("Chat session is not running on this server")
+        # Reject before claiming a turn or persisting the user's message: an
+        # expired MCP header cannot be repaired by sending another prompt.
+        if self._db.get_scoped_token_user(hash_token(runtime.token)) is None:
+            keepalive_run_token(self, session_id)
+            raise ConflictError(TOKEN_INVALIDATED_DETAIL)
         # #694: inside kimi's background-compaction window a prompt is
         # silently queued and settled as a fake instant end_turn — refuse
         # the send instead (/compact itself is never blocked). This is the

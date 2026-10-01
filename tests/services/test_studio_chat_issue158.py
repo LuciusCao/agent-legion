@@ -195,7 +195,9 @@ def test_expired_token_is_not_revived_at_turn_start(chat, job_db) -> None:
             (hash_token(token),),
         )
     assert authenticate_scoped_token(job_db, token) is None
-    service.send_message(session["id"], workspace_id, "hi")
+    with pytest.raises(ConflictError, match="继续对话"):
+        service.send_message(session["id"], workspace_id, "hi")
+    assert job_db.count_studio_chat_user_messages(session["id"]) == 0
     with job_db.connect() as conn:
         row = conn.execute(
             "select expires_at < current_timestamp as still_expired"
@@ -204,7 +206,7 @@ def test_expired_token_is_not_revived_at_turn_start(chat, job_db) -> None:
         ).fetchone()
     assert row["still_expired"]
     assert authenticate_scoped_token(job_db, token) is None
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    assert service.get_session(session["id"])["status"] == "error"
 
 
 def test_capped_session_insert_enforces_cap_atomically(chat, job_db) -> None:

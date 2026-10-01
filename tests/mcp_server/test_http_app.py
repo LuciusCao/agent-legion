@@ -88,6 +88,9 @@ def test_mcp_endpoint_rejects_revoked_token(client, job_db) -> None:
     revoke_scoped_token(job_db, token)
     response = _post(client, token, _INITIALIZE)
     assert response.status_code == 401
+    assert response.json()["code"] == "studio_agent_auth_required"
+    assert "继续对话" in response.json()["detail"]
+    assert "external MCP" in response.json()["detail"]
 
 
 def test_initialize_and_tool_listing(client, job_db) -> None:
