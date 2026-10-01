@@ -1,4 +1,5 @@
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
+import { WorkerConsoleAccessHelp } from './WorkerConsoleAccessHelp'
 import styles from './WorkerTokensSection.module.css'
 
 /**
@@ -24,6 +25,7 @@ export function WorkerTokenNextSteps({ consoleUrl }: { consoleUrl: string }) {
           Worker」列表。
         </li>
       </ol>
+      <WorkerConsoleAccessHelp />
       <WorkerConsoleLink url={consoleUrl} variant="button" />
     </div>
   )

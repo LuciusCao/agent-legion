@@ -1,5 +1,6 @@
 import { useWorkerConsoleUrl } from '../../hooks/useWorkerConsoleUrl'
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
+import { WorkerConsoleAccessHelp } from './WorkerConsoleAccessHelp'
 import styles from './WorkerConsoleGuide.module.css'
 
 /**
@@ -45,6 +46,7 @@ export function WorkerConsoleGuide({ isAdmin }: { isAdmin: boolean }) {
           Worker 列表并显示「在线」。
         </li>
       </ol>
+      <WorkerConsoleAccessHelp />
       <p className={styles.notice}>
         两个默认关闭的开关：Worker 每次启动都不领取任务，要在 Worker
         控制台点「开始领取」；后端每次启动都把 workspace
