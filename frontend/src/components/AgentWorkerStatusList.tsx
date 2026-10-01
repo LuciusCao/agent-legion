@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { listAgentWorkers } from '../api/agentWorkers'
-import { queryKeys } from '../lib/queryKeys'
+import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useAgentsStore } from '../stores/agentsStore'
 import { buildWorkerRows } from './agentWorkerRows'
 import { useWorkerConsoleUrl } from '../hooks/useWorkerConsoleUrl'
@@ -17,8 +17,8 @@ export function AgentWorkerStatusList({
 }: AgentWorkerStatusListProps) {
   // Backend online threshold is 30s; a 15s poll keeps the status fresh.
   const { data: workers = [] } = useQuery({
-    queryKey: queryKeys.agentWorkers(),
-    queryFn: () => listAgentWorkers(),
+    queryKey: extraQueryKeys.workspaceWorkers(workspaceId),
+    queryFn: () => listAgentWorkers(workspaceId),
     refetchInterval: 15_000,
   })
   const allAgents = useAgentsStore((state) => state.agents)

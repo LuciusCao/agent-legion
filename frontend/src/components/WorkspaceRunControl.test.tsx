@@ -23,7 +23,7 @@ const showToastMock = vi.fn()
 const listAgentWorkersMock = vi.fn()
 
 vi.mock('../api/agentWorkers', () => ({
-  listAgentWorkers: () => listAgentWorkersMock(),
+  listAgentWorkers: (workspaceId: string) => listAgentWorkersMock(workspaceId),
   fetchAgentWorkers: () =>
     Promise.resolve({ workers: [], console_url: 'http://127.0.0.1:8789' }),
 }))
@@ -236,7 +236,9 @@ describe('WorkspaceRunControl', () => {
 
   it('fetches registered workers on mount', async () => {
     renderControl()
-    await waitFor(() => expect(listAgentWorkersMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(listAgentWorkersMock).toHaveBeenCalledWith('ws1')
+    )
   })
 
   it('shows online and offline chips with last-seen heartbeat', async () => {
