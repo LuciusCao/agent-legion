@@ -6,6 +6,45 @@ Studio. Nothing you do takes effect in production by itself.
 
 ## 1. Tool map (in the order you typically need them)
 
+### Large files: byte-preserving local round trip (#767/#768)
+
+`get_node_code`, `get_skill`, and `get_shared_materials` accept
+`output_path="snapshot.json"`. This exports their full JSON response to a
+NEW file under `<MCP process cwd>/data/studio-mcp-files/<workspace_id>/`
+and returns its absolute path, byte size and SHA-256 without echoing the
+payload. Existing files are never overwritten. Agent and MCP must share
+that filesystem; for remote agents, keep using inline content.
+Local-path node/shared saves also return hashes and metadata instead of
+echoing the saved code/file bodies; inline saves retain their original replies.
+
+Parse/edit that JSON with local scripts rather than regenerating its text.
+For node code, extract `draft_code` when non-null, otherwise `code`, into
+a UTF-8 file using byte-preserving I/O, edit locally, then call
+`save_node_code_draft(..., code_path="node.py")` with no `code`.
+For skill/shared files, edit the exported `files` array and call
+`save_skill_version(..., files_path="snapshot.json", new_tag=..., message=...)`
+or `save_shared_materials(..., files_path="snapshot.json")`, omitting `files`.
+The JSON may be either a file list or the complete read response. Alternatively,
+`files=[{path: "...", file_path: "local.txt"}]` reads individual local files;
+each entry must choose exactly one of `content` or `file_path`.
+Skill writes are incremental: filter the exported `files` array to the paths
+you intend to save. Exclude mapped shared copies; edit their authoritative
+sources through the shared-material tools instead. Do not blindly resubmit
+the whole skill export when it contains mapped shared files.
+
+Paths are relative to that workspace's staging directory, or absolute within
+it. Traversal, symbolic/hard links, non-regular files, invalid UTF-8 and
+truncated exports are rejected before any authoritative save. Each local
+input is capped at 16 MiB; backend file/code limits and validation still apply.
+Shared materials remain FULL state: preserve every unchanged file in the
+export (omitted files are deleted), then call `sync_shared_materials` to
+propagate. Skill saves retain their tag-conflict behavior: repeated content
+keeps identical bytes, but reusing an existing tag still returns 409.
+This channel does not add CAS to node or skill saves; coordinate concurrent
+editing and re-read before submitting.
+
+### Tool reference
+
 - `get_studio_context()` — which workspace this session is bound to, which
   node the human has selected, and the canvas' current unpublished workflow
   draft YAML (null until the human's Studio pushes it). Call first; takes no

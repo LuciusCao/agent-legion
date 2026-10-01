@@ -68,6 +68,12 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
             # "{参数名}" 占位只用于字符串参数（让记录的 path 即路由模板）；
             # 非字符串参数给类型合法的空值（不影响 method+path 比对）。
             args[name] = f"{{{name}}}" if prop.get("type") in (None, "string") else []
+        # Path-based authoring makes the inline branch optional in JSON Schema;
+        # the tool still requires one branch. Exercise inline without disk I/O.
+        if tool.name == "save_node_code_draft":
+            args["code"] = "def run(ctx): pass"
+        elif tool.name in ("save_skill_version", "save_shared_materials"):
+            args["files"] = []
         asyncio.run(server.call_tool(tool.name, args))
 
     settings = Settings(

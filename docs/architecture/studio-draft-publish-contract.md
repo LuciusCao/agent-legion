@@ -4,6 +4,23 @@
 草稿编辑的三台协作状态机与它们的组合 invariant；改这块代码前对照
 invariant 表。
 
+## MCP 大文件编辑（#767/#768）
+
+MCP 的 node code、skill、shared 读取工具可用 `output_path` 导出完整 JSON；
+返回路径、体积与 SHA-256，正文不进入模型上下文。agent 本地解析并修改暂存
+文件，再通过 `code_path`、`files_path` 或文件条目的 `file_path` 提交。
+路径仅限 MCP 进程工作目录下 `data/studio-mcp-files/<workspace_id>/`，
+工具先通过既有 workspace API 鉴权，再以目录描述符逐级拒绝符号链接。
+导出不覆盖已有文件；整个提交批次读取成功后才交给原来的后端校验与保存。
+这是同机/共享文件系统通道，远程 agent 保留 inline 参数。
+
+### Quality Impact
+
+不改 schema、发布权限或原有并发语义，不把文件路径传给后端服务。
+测试覆盖超过 225 KB 的转义源码、CRLF、三行改动重试、完整材料包单文件
+编辑，以及越界、符号链接、硬链接、特殊文件、失效权限、批次失败零写入。
+Skill 重复 tag 仍冲突，共享材料仍按完整状态保存；详见 authoring guide。
+
 ## 三台状态机
 
 ### 1. 草稿保存机（draftSaveController.ts + draftSaveConflict.ts）

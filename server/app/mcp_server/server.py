@@ -34,6 +34,7 @@ from server.app.mcp_server import (
     agent_tools,
     draft_tools,
     job_tools,
+    local_files,
     preview_tools,
     prompt_tools,
     schema_slim,
@@ -96,37 +97,48 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
     async def save_node_code_draft(
         workspace_id: str,
         node_key: str,
-        code: str,
+        code: str | None = None,
         change_note: str = "",
         expected_capability: str | None = None,
+        code_path: str | None = None,
     ) -> str:
         """Save a draft of a code node's Python source (module-level run
         function required; get_authoring_guide §4). Draft only — a human
         publishes in Studio. expected_capability declares the capability you
         believe the node binds: mismatch with an existing node is rejected; a
         node absent from any published revision is accepted only WITH it
-        (without it → 404)."""
-        body: dict[str, Any] = {"code": code, "change_note": change_note or None}
+        (without it → 404). Supply exactly one of code or code_path. code_path
+        reads UTF-8 bytes from data/studio-mcp-files/<workspace_id>/ on the
+        MCP host (relative to that directory, or absolute within it)."""
+        _, client = await _client()
+        source = await local_files.load_code(client, workspace_id, code, code_path)
+        body: dict[str, Any] = {"code": source, "change_note": change_note or None}
         if expected_capability is not None:
             body["expected_capability"] = expected_capability
-        _, client = await _client()
-        return await client.call(
+        response = await client.call(
             "PUT",
             # workflows/{workflow_key} URL segment retired (#211): the
             # workspace-scoped path keys on workspace_id alone (key == id).
             f"/workspaces/{workspace_id}/nodes/{node_key}/code/draft",
             body,
         )
+        return local_files.compact_response(response) if code_path is not None else response
 
     @mcp.tool(structured_output=False)
-    async def get_node_code(workspace_id: str, node_key: str) -> str:
+    async def get_node_code(
+        workspace_id: str, node_key: str, output_path: str | None = None
+    ) -> str:
         """Read a code node's current code state: builtin source, published
-        custom code, any pending draft."""
+        custom code, any pending draft. output_path exports the full JSON to
+        a NEW file in data/studio-mcp-files/<workspace_id>/ on the MCP host
+        and returns only path/size/SHA-256. Parse JSON locally, select
+        draft_code if present else code, edit and save with code_path."""
         _, client = await _client()
-        return await client.call(
+        response = await client.call(
             "GET",
             f"/workspaces/{workspace_id}/nodes/{node_key}/code",
         )
+        return await local_files.export_response(workspace_id, output_path, response)
 
     @mcp.tool(structured_output=False)
     async def save_agent_definition_draft(

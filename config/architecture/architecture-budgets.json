@@ -1223,6 +1223,7 @@
     "server/app/mcp_server/draft_tools.py": 31,
     "server/app/mcp_server/http_app.py": 82,
     "server/app/mcp_server/job_tools.py": 63,
+    "server/app/mcp_server/local_files.py": 161,
     "server/app/mcp_server/preview_tools.py": 37,
     "server/app/mcp_server/prompt_tools.py": 32,
     "server/app/mcp_server/schema_slim.py": 27,
