@@ -12,7 +12,7 @@ import { Close } from '@mui/icons-material'
 import { Drawer, IconButton, Tooltip } from '@mui/material'
 import { WorkflowStudioSaveWarningBanner } from '../shared/WorkflowStudioSaveWarningBanner'
 import { useDrawerEscape } from '../shared/useDrawerEscape'
-import { useStudioState } from '../shared/studioStateContext'
+import { useStudioState, useStudioView } from '../shared/studioStateContext'
 import { selectedNodeDetails } from '../shared/workflowStudioModel'
 import { useNodeDetailPreview } from './useNodeDetailPreview'
 import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
@@ -20,6 +20,7 @@ import styles from './WorkflowNodeDetailDrawer.module.css'
 
 export function WorkflowNodeDetailDrawer() {
   const studio = useStudioState()
+  const view = useStudioView()
   const nodeKey = studio.selectedNodeKey
   const close = () => studio.setSelectedNodeKey(null)
   // nodeKey 为 null 时 preview hook 也需要稳定调用（hooks 纪律）；nodeKey
@@ -30,15 +31,20 @@ export function WorkflowNodeDetailDrawer() {
     : undefined
   // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault，
   // Dock 的 Esc 处理器见 defaultPrevented 跳过）；与共享素材抽屉共存时由
-  // 抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。
-  useDrawerEscape(nodeKey !== null, close)
+  // 抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。suppressed
+  // （#812 D3：窄屏非画布页签，所在面板 display:none）时隐藏抽屉不占
+  // 栈位。返回的 zIndex 挂到 paper：栈位映射视觉层级，Esc 栈序 == 视觉序。
+  const escapeSuppressed = view.narrow && view.mobilePanel !== 'graph'
+  const paperZIndex = useDrawerEscape(nodeKey !== null, close, escapeSuppressed)
 
   return (
     <Drawer
       anchor="right"
       open={nodeKey !== null}
       onClose={close}
-      slotProps={{ paper: { className: styles.paper } }}
+      slotProps={{
+        paper: { className: styles.paper, style: { zIndex: paperZIndex } },
+      }}
       /* 轮 8 P2：非模态——persistent variant 不走 Modal（无遮罩/不圈禁
          焦点/不锁滚动/不 aria-hidden 兄弟），Dock 与画布保持可交互；
          ✕/Esc 关闭，浮层定位由 paper CSS 承担。 */

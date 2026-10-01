@@ -212,6 +212,31 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     expect(screen.getByTestId('studio-action-island')).toBeInTheDocument()
   })
 
+  it('抽屉打开时被遮岛触发器加 inert（#812 对抗轮 D4），关闭后恢复', () => {
+    // 抽屉 paper 物理遮住岛按钮（右岛恒被遮、窄屏全宽抽屉遮双岛）——inert
+    // 堵住「Tab 聚焦被遮按钮并激活」的路径。revert 即红：无 inert 时属性缺席。
+    const { unmount } = renderIslands()
+    expect(screen.getByTestId('studio-identity-island')).not.toHaveAttribute(
+      'inert'
+    )
+    expect(screen.getByTestId('studio-action-island')).not.toHaveAttribute(
+      'inert'
+    )
+    unmount()
+
+    // 共享素材抽屉打开。
+    renderIslands({}, { materialsOpen: true })
+    expect(screen.getByTestId('studio-identity-island')).toHaveAttribute(
+      'inert'
+    )
+    expect(screen.getByTestId('studio-action-island')).toHaveAttribute('inert')
+  })
+
+  it('节点详情抽屉打开同样加 inert（selectedNodeKey 非空）', () => {
+    renderIslands({ selectedNodeKey: 'node-a' })
+    expect(screen.getByTestId('studio-action-island')).toHaveAttribute('inert')
+  })
+
   it('轮 4 P2-D：窄屏 dirty 时重置出口收进版本选择器菜单（带确认）', () => {
     const resetDefinition = vi.fn()
     const revision = {

@@ -509,6 +509,7 @@
     "frontend/src/features/workflowStudio/shared/WorkflowStudioPageHost.tsx": 32,
     "frontend/src/features/workflowStudio/shared/WorkflowStudioReadOnlyActions.tsx": 46,
     "frontend/src/features/workflowStudio/shared/WorkflowStudioSaveWarningBanner.tsx": 46,
+    "frontend/src/features/workflowStudio/shared/WorkflowStudioSharedMaterialsButton.tsx": 28,
     "frontend/src/features/workflowStudio/shared/WorkflowStudioSharedMaterialsDrawer.module.css": 128,
     "frontend/src/features/workflowStudio/shared/WorkflowStudioSharedMaterialsDrawer.tsx": 226,
     "frontend/src/features/workflowStudio/shared/WorkflowStudioSharedMaterialsFileDialog.module.css": 42,
