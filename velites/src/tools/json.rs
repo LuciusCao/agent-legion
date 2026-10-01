@@ -194,8 +194,8 @@ fn set(ctx: &ToolContext, path: &str, query: &str, value: Value) -> Result<ToolO
             (
                 container,
                 format!(
-                    " — value was a string holding JSON text, parsed as {kind} \
-                     before writing; to store such text literally, use the `write` tool"
+                    " — value held JSON container text, parsed as {kind}; to store it literally, \
+                     wrap in an object (e.g. {{\"text\": ...}}); the `write` tool is a last resort"
                 ),
             )
         }

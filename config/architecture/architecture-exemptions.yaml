@@ -1190,6 +1190,7 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/747
   ceiling: 171
+  expires: 2026-12-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodeSection.tsx
   reason: '#749 review 修复（P2-2/P3-2/P3-3）把 CAS 发布的时序与门控做实：保存响应

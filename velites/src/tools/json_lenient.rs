@@ -40,7 +40,8 @@ pub(super) const MAX_LENIENT_PARSE_BYTES: usize = 256 * 1024;
 /// 只认容器——标量形态的字符串（"123"、"true"、"null"）不是候选：字符串
 /// 字段装着数字样文本是合法数据，生产观察到的失误形态只有容器二次编码。
 /// 设计上不给「字面容器文本」留带内逃生语法：候选且可无损解析的一律解析，
-/// 逃生通道是 write 工具，注记与 schema description 都明说，行为可预期。
+/// 逃生通道首选对象包装（如 {"text": ...}），write 工具整文件重写仅作兜底，
+/// 注记与 schema description 都明说，行为可预期。
 #[derive(Debug)]
 pub(super) enum LenientParse {
     /// 候选成立且无损（数字可往返、无重复键）：解析出的容器。
@@ -112,6 +113,13 @@ fn parse_detecting_duplicate_keys(text: &str) -> Result<Value, Decline> {
     let parsed = deserializer
         .deserialize_any(DuplicateKeyVisitor)
         .map_err(|err| match err.classify() {
+            // 重复键识别钉住 serde_json 的 Display 契约：错误格式为
+            // "{msg} at line {L} column {C}"，`de::Error::custom` 的自定义
+            // 消息（classify 必为 Data，即 ErrorCode::Message）原样构成
+            // 前缀，故前缀匹配按设计成立，不去解析行列号。serde_json 若改
+            // Display 格式，兜底是测试变红而非静默误判——
+            // velites/tests/json_lenient.rs 的
+            // set_duplicate_object_keys_stay_literal 会直接失败。
             serde_json::error::Category::Data if err.to_string().starts_with(DUPLICATE_KEY_MSG) => {
                 Decline::DuplicateKey
             }
@@ -245,6 +253,10 @@ impl<'de> Visitor<'de> for DuplicateKeyVisitor {
 /// 解析天然无损（`\"` / `\uXXXX` 等转义形式等价），数字才会在 f64 降级
 /// 时变形；按 token 比对使带空格与转义的常规二次编码形态（如
 /// `["1.5", "2.5"]`、json.dumps 的 ensure_ascii 输出）不被误判。
+/// 正指数科学计数（`1e2`、`2.5e30`）同样一律判 lossy：serde_json 重
+/// 序列化给正指数带显式 `+`（`e+30`）、小指数整体改写成十进制
+/// （`1e2`→`100.0`），与原文 token 永不相同——方向保守（放弃解析、
+/// 字面写入零损坏），与实际行为对齐。
 fn numbers_round_trip(text: &str) -> bool {
     let bytes = text.as_bytes();
     let mut i = 0;

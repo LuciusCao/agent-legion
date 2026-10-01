@@ -111,7 +111,9 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
             losslessly as a JSON array/object (within a size gate) is parsed as that \
             container before writing; container text with lossy numbers, duplicate \
             object keys, or over the gate stays literal, with a note saying so. To \
-            store JSON text literally, use the `write` tool."}
+            store container-shaped text literally, wrap it in an object (e.g. \
+            {\"text\": \"...\"}); rewriting the whole file with the `write` tool is \
+            only a last resort."}
                 },
                 "required": ["op", "path", "query"]
             }),
