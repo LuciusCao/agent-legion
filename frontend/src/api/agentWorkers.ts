@@ -6,6 +6,12 @@ export type AgentWorkersResponse = components['schemas']['AgentWorkersResponse']
 
 type DeleteWorkerResponse = components['schemas']['AgentWorkerDeleteResponse']
 
+export function fetchWorkerConsole() {
+  return api<components['schemas']['AgentWorkerConsoleResponse']>(
+    '/api/agent-workers/console'
+  )
+}
+
 // Full list response: workers plus the deployment-level Worker console
 // address (console_url, AGENT_LEGION_WORKER_CONSOLE_URL; "" = unset) that
 // the "打开 Worker 控制台" entries render. Any logged-in user may call it.

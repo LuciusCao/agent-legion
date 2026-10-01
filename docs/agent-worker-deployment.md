@@ -411,6 +411,10 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
    `native-prod-up.sh` / Host compose 注入 `:8787`；Worker 控制台经其它地址
    暴露时在 `.env` 显式配置，显式留空则不显示链接）。回环地址只能在 Worker
    所在机器的浏览器里打开，链接的悬停提示会说明这一点。
+   入口通过已登录用户可读的 `GET /api/agent-workers/console` 获取部署地址，
+   不下载 Worker 清单；workspace 状态列表的请求与缓存均按 workspace 隔离。
+   首次地址请求失败显示可重试错误，只有成功返回空地址才表示未配置；
+   后台刷新失败保留最近成功的配置，后续成功响应（包括清空配置）替换缓存。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
 

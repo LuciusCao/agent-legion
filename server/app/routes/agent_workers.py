@@ -21,6 +21,7 @@ from server.app.routes.agent_worker_claims import create_agent_worker_claim_rout
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_results import parse_result_metadata
 from server.app.routes.agent_workers_contracts import (
+    AgentWorkerConsoleResponse,
     AgentWorkerDeleteResponse,
     AgentWorkersResponse,
     AgentWorkerSummary,
@@ -196,6 +197,13 @@ def create_agent_workers_router(
                 detail="Agent Worker still has live register keys; delete them first",
             )
         return AgentWorkerDeleteResponse(worker_id=worker_id, deleted=True)
+
+    @router.get("/agent-workers/console", response_model=AgentWorkerConsoleResponse)
+    def worker_console(
+        _user: Annotated[dict[str, Any], Depends(require_user)],
+    ) -> AgentWorkerConsoleResponse:
+        """Read deployment metadata without enumerating Worker registrations."""
+        return AgentWorkerConsoleResponse(console_url=config.console_url)
 
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers(

@@ -119,6 +119,7 @@ server/app/
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
 | GET | `/agent-workers/self` | `get_worker_self` | routes/agent_workers.py |
 | DELETE | `/agent-workers/{worker_id}` | `delete_worker` | routes/agent_workers.py |
+| GET | `/agent-workers/console` | `worker_console` | routes/agent_workers.py |
 | GET | `/agent-workers` | `list_workers` | routes/agent_workers.py |
 | GET | `/agent-executions/{execution_id}/bundle` | `bundle` | routes/agent_workers.py |
 | POST | `/agent-executions/{execution_id}/release-slot` | `release_slot` | routes/agent_workers.py |
@@ -369,7 +370,7 @@ server/app/
 | AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokenDeleteResponse | BaseModel | token_id: str, deleted: bool, cascaded_worker_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
-| AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary], console_url: str | app/routes/agent_workers_contracts.py |
+| AgentWorkerConsoleResponse | BaseModel | console_url: str | app/routes/agent_workers_contracts.py |
 | AgentWorkerDeleteResponse | BaseModel | worker_id: str, deleted: bool | app/routes/agent_workers_contracts.py |
 | AgentHeartbeatResponse | BaseModel | cancelled_execution_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool | app/routes/agents.py |

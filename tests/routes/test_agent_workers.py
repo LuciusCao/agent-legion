@@ -474,6 +474,39 @@ def test_list_workers_carries_configured_console_url(tmp_path: Path, monkeypatch
     assert body["workers"] == []
 
 
+def test_console_metadata_requires_login_but_never_lists_workers(tmp_path: Path, monkeypatch):
+    from server.app.agent_control.registry import AgentWorkerRegistry
+
+    monkeypatch.setenv("AGENT_LEGION_WORKER_CONSOLE_URL", "http://127.0.0.1:8789")
+    app = _make_app(tmp_path)
+
+    def forbidden_list(*args, **kwargs):
+        raise AssertionError("console metadata must not enumerate Worker registrations")
+
+    monkeypatch.setattr(AgentWorkerRegistry, "list_workers", forbidden_list)
+    with TestClient(app) as client:
+        assert client.get("/api/agent-workers/console").status_code == 401
+        _authenticate_admin(client)
+        assert (
+            client.post(
+                "/api/users",
+                headers=_CSRF,
+                json={"username": "console-member", "password": "pw", "role": "member"},
+            ).status_code
+            == 201
+        )
+        client.cookies.clear()
+        assert (
+            client.post(
+                "/api/auth/login", json={"username": "console-member", "password": "pw"}
+            ).status_code
+            == 200
+        )
+        response = client.get("/api/agent-workers/console")
+        assert response.status_code == 200
+        assert response.json() == {"console_url": "http://127.0.0.1:8789"}
+
+
 def _archive_with_events(events_lines: list[str]) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   deleteAgentWorker,
   fetchAgentWorkers,
+  fetchWorkerConsole,
   listAgentWorkers,
 } from './agentWorkers'
 
@@ -23,6 +24,13 @@ function mockFetchJson(response: unknown) {
 }
 
 describe('agent workers api', () => {
+  it('reads console metadata without fetching the Worker inventory', async () => {
+    const fetchMock = mockFetchJson({ console_url: '' })
+    global.fetch = fetchMock
+    expect(await fetchWorkerConsole()).toEqual({ console_url: '' })
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/agent-workers/console')
+  })
+
   it('lists agent workers', async () => {
     const fetchMock = mockFetchJson({ workers: [{ worker_id: 'w1' }] })
     global.fetch = fetchMock
