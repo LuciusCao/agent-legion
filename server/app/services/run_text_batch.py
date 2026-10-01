@@ -14,6 +14,7 @@ from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from server.app.services.job_errors import ConflictError
 from server.app.services.material_ttl import materials_ttl_days
 from server.app.services.materials import MaterialStorageUnavailableError
 from server.app.storage import ObjectStorage
@@ -49,20 +50,23 @@ def store_text_batch(
     created_by: str,
 ) -> dict[int, str]:
     """All puts precede one row transaction; compensate failures and race losers."""
-    staged: list[dict[str, Any]] = []
+    entries: dict[str, dict[str, Any]] = {}
     keys: list[str] = []
-    identities: dict[str, str] = {}
     indices: dict[int, str] = {}
     try:
         for index, filename, payload in prepared:
             digest = hashlib.sha256(payload).hexdigest()
             indices[index] = digest
-            if digest in identities:
+            if digest in entries:
                 continue
             existing = job_db.find_material_by_hash(workspace_id, digest)
-            identities[digest] = ""
-            if existing is not None and existing["status"] == "ready":
-                identities[digest] = existing["id"]
+            if existing is not None:
+                if existing["status"] != "ready":
+                    raise ConflictError(
+                        f"Material {existing['id']} is {existing['status']}; "
+                        "finish the upload or remove the non-ready material before retrying"
+                    )
+                entries[digest] = dict(content_hash=digest, material_id=existing["id"])
                 continue
             key = f"{workspace_id}/{digest}/inline-{uuid.uuid4().hex}"
             content_type = (
@@ -73,20 +77,19 @@ def store_text_batch(
             # Register before PUT: a timeout can occur after the server stored it.
             keys.append(key)
             storage.put_object(key, payload, content_type=content_type)
-            staged.append(
-                dict(
-                    content_hash=digest,
-                    filename=filename,
-                    content_type=content_type,
-                    size_bytes=len(payload),
-                    storage_key=key,
-                )
+            entries[digest] = dict(
+                content_hash=digest,
+                filename=filename,
+                content_type=content_type,
+                size_bytes=len(payload),
+                storage_key=key,
             )
-        if staged:
-            rows = job_db.upsert_ready_materials(
-                workspace_id, staged, created_by=created_by, ttl_days=materials_ttl_days(job_db)
-            )
-            identities.update({digest: row["id"] for digest, row in rows.items()})
+        identities = job_db.publish_inline_materials(
+            workspace_id,
+            list(entries.values()),
+            created_by=created_by,
+            ttl_days=materials_ttl_days(job_db),
+        )
     except (ClientError, BotoCoreError, OSError) as exc:
         raise MaterialStorageUnavailableError(
             "Material storage is unreachable; text items could not be stored"

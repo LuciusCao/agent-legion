@@ -150,9 +150,10 @@ def test_text_item_default_filename_and_dedup(client, storage, job_db) -> None:
     assert len(_materials(client, workspace_id)) == 2
 
 
-def test_text_item_revives_stale_row_with_same_hash(client, storage, job_db) -> None:
-    """An abandoned presign of the same bytes (uploading row, no object) is
-    re-pointed at the freshly written object instead of failing 'not ready'."""
+@pytest.mark.parametrize("status", ["uploading", "failed", "expired"])
+@pytest.mark.parametrize("old", [False, True])
+def test_text_item_never_takes_over_upload_rows(client, storage, job_db, status, old) -> None:
+    """Neither age nor non-ready status proves the last presign has expired."""
     workspace_id = _create_workspace(client)
     _accept_text_items(job_db, workspace_id)
     digest = hashlib.sha256(REQUIREMENT.encode("utf-8")).hexdigest()
@@ -160,23 +161,40 @@ def test_text_item_revives_stale_row_with_same_hash(client, storage, job_db) -> 
         f"/api/workspaces/{workspace_id}/materials/presign",
         json={
             "filename": "old.txt",
-            "size_bytes": 1,
+            "size_bytes": len(REQUIREMENT.encode("utf-8")),
             "content_type": "text/plain",
             "content_hash": digest,
         },
     )
     assert presign.status_code == 200, presign.text
-    stale_id = presign.json()["material"]["id"]
+    material_id = presign.json()["material"]["id"]
+    with job_db.write() as conn:
+        conn.execute("update materials set status=%s where id=%s", (status, material_id))
+        if old:
+            conn.execute(
+                "update materials set created_at=now()-interval '7 days' where id=%s",
+                (material_id,),
+            )
+    before = _materials(client, workspace_id)
+    (key,) = _storage_keys(job_db, workspace_id)
 
     response = _create_run(client, workspace_id, [{"type": "text", "content": REQUIREMENT}])
 
-    assert response.status_code == 200, response.text
-    (material,) = _materials(client, workspace_id)
-    assert material["id"] == stale_id
-    assert material["status"] == "ready"
-    assert material["filename"] == "需求.md"
-    (key,) = _storage_keys(job_db, workspace_id)
-    assert storage.objects[key] == REQUIREMENT.encode("utf-8")
+    assert response.status_code == 409, response.text
+    assert _materials(client, workspace_id) == before
+    assert storage.put_calls == 0
+    assert _storage_keys(job_db, workspace_id) == {key}
+    if status != "expired":
+        # A delayed browser PUT still targets its original row and must be verified.
+        storage.put_object(key, b"x" * len(REQUIREMENT.encode("utf-8")))
+        complete = client.post(f"/api/workspaces/{workspace_id}/materials/{material_id}/complete")
+        assert complete.status_code == 422
+        storage.put_object(key, REQUIREMENT.encode("utf-8"))
+        complete = client.post(f"/api/workspaces/{workspace_id}/materials/{material_id}/complete")
+        assert complete.status_code == 200
+        retry = _create_run(client, workspace_id, [{"type": "text", "content": REQUIREMENT}])
+        assert retry.status_code == 200, retry.text
+        assert set(storage.objects) == {key}
 
 
 @pytest.mark.parametrize(
@@ -210,8 +228,8 @@ def test_text_batch_failure_rolls_back_every_material(
     from server.app.services.run_text_items import materialize_text_items
 
     workspace_id = _create_workspace(client)
-    # Include a stale row: rollback must restore its original metadata/status.
-    digest = hashlib.sha256(b"A").hexdigest()
+    # Unrelated upload rows must remain untouched by either failure path.
+    digest = hashlib.sha256(b"unrelated upload").hexdigest()
     presign = client.post(
         f"/api/workspaces/{workspace_id}/materials/presign",
         json={
@@ -306,13 +324,13 @@ def test_commit_acknowledgement_failure_preserves_committed_objects(
     from server.app.services.run_text_items import materialize_text_items
 
     workspace_id = _create_workspace(client)
-    original = job_db.upsert_ready_materials
+    original = job_db.publish_inline_materials
 
     def commit_then_fail(*args, **kwargs):
         original(*args, **kwargs)
         raise RuntimeError("commit acknowledgement lost")
 
-    monkeypatch.setattr(job_db, "upsert_ready_materials", commit_then_fail)
+    monkeypatch.setattr(job_db, "publish_inline_materials", commit_then_fail)
     with pytest.raises(RuntimeError, match="acknowledgement"):
         materialize_text_items(
             job_db,
@@ -329,10 +347,10 @@ def test_failed_batch_does_not_delete_concurrent_winner(client, storage, job_db,
     from server.app.services.run_text_items import materialize_text_items
 
     workspace_id = _create_workspace(client)
-    original = job_db.upsert_ready_materials
+    original = job_db.publish_inline_materials
 
     def concurrent_winner_then_fail(*args, **kwargs):
-        monkeypatch.setattr(job_db, "upsert_ready_materials", original)
+        monkeypatch.setattr(job_db, "publish_inline_materials", original)
         materialize_text_items(
             job_db,
             client.app.state.materials_service,
@@ -341,7 +359,7 @@ def test_failed_batch_does_not_delete_concurrent_winner(client, storage, job_db,
         )
         raise RuntimeError("losing request failed")
 
-    monkeypatch.setattr(job_db, "upsert_ready_materials", concurrent_winner_then_fail)
+    monkeypatch.setattr(job_db, "publish_inline_materials", concurrent_winner_then_fail)
     with pytest.raises(RuntimeError, match="losing request"):
         materialize_text_items(
             job_db,
@@ -386,7 +404,7 @@ def test_cleanup_failure_preserves_original_error_and_logs_recovery_keys(
     def fail_lookup(*args):
         raise RuntimeError("database unavailable")
 
-    monkeypatch.setattr(job_db, "upsert_ready_materials", fail_commit)
+    monkeypatch.setattr(job_db, "publish_inline_materials", fail_commit)
     if cleanup_failure == "lookup":
         monkeypatch.setattr(job_db, "referenced_inline_objects", fail_lookup)
     else:
@@ -500,3 +518,162 @@ def test_missing_material_is_reported_before_text_is_stored(client, storage, job
     assert response.status_code == 404
     assert _materials(client, workspace_id) == []
     assert storage.objects == {}
+
+
+@pytest.mark.parametrize("upload_state", ["uploading", "ready", "failed", "expired"])
+def test_presign_wins_after_text_precheck(client, storage, job_db, monkeypatch, upload_state):
+    """Real upload protocol runs while text is paused after its missing-row read."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from server.app.services.material_ttl import expire_due_materials
+    from server.app.services.materials import MaterialVerificationError
+
+    workspace_id = _create_workspace(client)
+    _accept_text_items(job_db, workspace_id)
+    service = client.app.state.materials_service
+    staged, resume = Event(), Event()
+    original_put = storage.put_object
+
+    def paused_put(key, data, content_type=""):
+        original_put(key, data, content_type)
+        if "/inline-" in key and data == b"B":
+            staged.set()
+            assert resume.wait(10), "upload did not release text publication"
+
+    monkeypatch.setattr(storage, "put_object", paused_put)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _create_run,
+            client,
+            workspace_id,
+            [{"type": "text", "content": "A"}, {"type": "text", "content": "B"}],
+        )
+        try:
+            assert staged.wait(10)
+            upload = service.presign(
+                workspace_id,
+                filename="browser.txt",
+                size_bytes=1,
+                content_hash=hashlib.sha256(b"B").hexdigest(),
+            )
+            material_id = upload["material"]["id"]
+            (key,) = _storage_keys(job_db, workspace_id)
+            storage.put_object(key, b"X" if upload_state == "failed" else b"B")
+            if upload_state == "failed":
+                with pytest.raises(MaterialVerificationError):
+                    service.complete(workspace_id, material_id)
+            elif upload_state != "uploading":
+                service.complete(workspace_id, material_id)
+                if upload_state == "expired":
+                    with job_db.write() as conn:
+                        conn.execute(
+                            "update materials set expires_at=now()-interval '1 day' where id=%s",
+                            (material_id,),
+                        )
+                    assert expire_due_materials(job_db) == 1
+            before = service.get(workspace_id, material_id)
+        finally:
+            resume.set()
+        response = future.result(timeout=15)
+    assert response.status_code == (200 if upload_state == "ready" else 409), response.text
+    assert service.get(workspace_id, material_id) == before
+    assert set(storage.objects) == _storage_keys(job_db, workspace_id)
+    if upload_state != "ready":
+        # A's hash sorts before B: publication rolls back its earlier INSERT too.
+        assert _materials(client, workspace_id) == [before]
+        assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
+    if upload_state == "uploading":
+        assert service.complete(workspace_id, material_id)["status"] == "ready"
+
+
+def test_text_wins_after_presign_precheck(client, storage, job_db, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, current_thread
+
+    from server.app.db.connection import DatabaseConnection
+
+    workspace_id = _create_workspace(client)
+    _accept_text_items(job_db, workspace_id)
+    service = client.app.state.materials_service
+    checked, resume = Event(), Event()
+    original_execute = DatabaseConnection.execute
+
+    def paused_lookup(conn, sql, params=None):
+        result = original_execute(conn, sql, params)
+        if current_thread().name.startswith("browser") and sql.startswith(
+            "select * from materials"
+        ):
+            checked.set()
+            assert resume.wait(10), "text did not release browser presign"
+        return result
+
+    monkeypatch.setattr(DatabaseConnection, "execute", paused_lookup)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="browser") as pool:
+        future = pool.submit(
+            service.presign,
+            workspace_id,
+            filename="browser.txt",
+            size_bytes=1,
+            content_hash=hashlib.sha256(b"B").hexdigest(),
+        )
+        try:
+            assert checked.wait(10)
+            response = _create_run(client, workspace_id, [{"type": "text", "content": "B"}])
+            assert response.status_code == 200, response.text
+        finally:
+            resume.set()
+        upload = future.result(timeout=15)
+    assert upload["deduplicated"] is True
+    assert upload["upload_url"] is None
+    assert upload["material"]["filename"] == "需求.md"
+    assert len(storage.objects) == 1
+    assert set(storage.objects) == _storage_keys(job_db, workspace_id)
+
+
+@pytest.mark.parametrize("change", ["expired", "deleted", "replaced", "uploading"])
+def test_ready_reuse_is_revalidated_at_publication(client, storage, job_db, monkeypatch, change):
+    from server.app.services.material_ttl import expire_due_materials
+
+    workspace_id = _create_workspace(client)
+    _accept_text_items(job_db, workspace_id)
+    service = client.app.state.materials_service
+    digest = hashlib.sha256(b"B").hexdigest()
+    upload = service.presign(workspace_id, filename="old.txt", size_bytes=1, content_hash=digest)
+    material_id = upload["material"]["id"]
+    (key,) = _storage_keys(job_db, workspace_id)
+    storage.put_object(key, b"B")
+    service.complete(workspace_id, material_id)
+    runtime_db = client.app.state.job_db
+    original_publish = runtime_db.publish_inline_materials
+
+    def mutate_then_publish(*args, **kwargs):
+        if change in {"expired", "uploading"}:
+            with job_db.write() as conn:
+                conn.execute(
+                    "update materials set expires_at=now()-interval '1 day' where id=%s",
+                    (material_id,),
+                )
+            assert expire_due_materials(job_db) == 1
+        else:
+            service.delete(workspace_id, material_id)
+        if change in {"replaced", "uploading"}:
+            new = service.presign(
+                workspace_id, filename="new.txt", size_bytes=1, content_hash=digest
+            )
+            if change == "replaced":
+                (new_key,) = _storage_keys(job_db, workspace_id)
+                storage.put_object(new_key, b"B")
+                service.complete(workspace_id, new["material"]["id"])
+        return original_publish(*args, **kwargs)
+
+    monkeypatch.setattr(runtime_db, "publish_inline_materials", mutate_then_publish)
+    response = _create_run(
+        client,
+        workspace_id,
+        [{"type": "text", "content": "A"}, {"type": "text", "content": "B"}],
+    )
+    assert response.status_code == 409, response.text
+    assert all(row["content_hash"] == digest for row in _materials(client, workspace_id))
+    assert set(storage.objects) == _storage_keys(job_db, workspace_id)
+    assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []

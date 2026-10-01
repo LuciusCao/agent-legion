@@ -42,13 +42,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
-- 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进
-  run 请求，`RunService` 在全部校验通过后把它落成一份 ready 的 Markdown
-  材料（sha256 内容寻址、对象先写行后插、`.md`/`.txt` 白名单、UTF-8
-  ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker
-  物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio
-  入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。设计
-  见 docs/architecture/materials-and-runs-design.md §4.1。
+- 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进 run 请求，`RunService` 在全部校验通过后把它落成 ready 的 Markdown 材料（sha256 内容寻址、对象先暂存、材料行整批事务提交、`.md`/`.txt` 白名单、UTF-8 ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker 物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio 入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。同 hash 仅复用 ready 材料，上传中、失败或已过期材料返回 409，避免抢占浏览器上传或改写既有对象归属。设计见 docs/architecture/materials-and-runs-design.md §4.1。
 
 ## [0.7.12] - 2026-09-16
 
@@ -449,5 +443,4 @@ Initial open-source release.
 [0.3.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.2.0...v0.3.0-alpha
 [0.2.0]: https://github.com/LuciusCao/agent-legion/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LuciusCao/agent-legion/releases/tag/v0.1.0
-
 

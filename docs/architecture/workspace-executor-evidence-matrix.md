@@ -11,6 +11,7 @@ This matrix records the reverse audit of Phase 1-5 Workspace Executor architectu
 
 | Promise | Boundary | Invariant ID | Quick evidence | Full evidence | Result | Follow-up task |
 | --- | --- | --- | --- | --- | --- | --- |
+| Inline text only inserts new ready materials or reuses ready identities revalidated under row locks; non-ready conflicts reject the whole batch with 409, existing upload/TTL rows and keys remain untouched, and compensation deletes only unreferenced request-owned keys | materials/storage | MATERIAL-INLINE-OWNERSHIP-001 | `tests/routes/test_runs_text_api.py` | N/A | Verified | N/A |
 | Generated frontend API types remain synchronized with the backend OpenAPI schema | contract | API-CONTRACT-001 | `scripts/generate-api-types.sh` | N/A | Verified | N/A |
 | Routes, services, repositories, and executor adapters preserve dependency direction | layer | BOUNDARY-LAYER-001 | `scripts/check_architecture.py` | N/A | Verified | N/A |
 | New services reach the database through the JobQueries facade; raw SQL, DB-primitive imports, and DSN path accesses under services are ratcheted down from the frozen baseline | data | BOUNDARY-DATA-001 | `scripts/architecture/service_data_boundary.py` | `tests/scripts/test_architecture_service_data_boundary.py` | Verified | N/A |
