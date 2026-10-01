@@ -79,6 +79,10 @@ def test_text_input_does_not_require_text_in_contract() -> None:
         ({"filename": "sub/需求.md"}, "bare .md or .txt"),
         ({"filename": "需求.exe"}, "bare .md or .txt"),
         ({"filename": ".hidden.md"}, "bare .md or .txt"),
+        ({"filename": "bad\x00.md"}, "bare .md or .txt"),
+        ({"filename": "bad\n.md"}, "bare .md or .txt"),
+        ({"filename": "bad\ud800.md"}, "valid UTF-8"),
+        ({"template": "bad\ud800"}, "valid UTF-8"),
     ],
 )
 def test_text_input_shape_errors(raw: Any, match: str) -> None:

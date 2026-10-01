@@ -52,6 +52,12 @@ def load_text_input(raw: Any, node_key: str) -> WorkflowTextInput | None:
             raise WorkflowDefinitionError(
                 f"Start node {node_key}.text_input.{key} must be a string of at most {limit} chars"
             )
+        try:
+            value.encode("utf-8")
+        except UnicodeError as exc:
+            raise WorkflowDefinitionError(
+                f"Start node {node_key}.text_input.{key} must be valid UTF-8"
+            ) from exc
         # label/filename are trimmed; the template keeps its inner layout but
         # a whitespace-only template is no template (the dialog could never
         # tell "untouched" from "empty").
@@ -61,6 +67,7 @@ def load_text_input(raw: Any, node_key: str) -> WorkflowTextInput | None:
         "/" in filename
         or "\\" in filename
         or filename.startswith(".")
+        or any(ord(char) < 32 or ord(char) == 127 for char in filename)
         or not filename.lower().endswith(_FILENAME_SUFFIXES)
     ):
         raise WorkflowDefinitionError(

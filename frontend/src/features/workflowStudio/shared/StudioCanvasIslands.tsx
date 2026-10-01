@@ -24,11 +24,15 @@ import { useWorkspaceDisplayName } from './useWorkspaceDisplayName'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
 import { WorkflowStudioDraftSaveControlContainer } from './WorkflowStudioDraftSaveControl'
-import { WorkflowStudioSharedMaterialsButton } from './WorkflowStudioSharedMaterialsDrawer'
+import { WorkflowStudioSharedMaterialsButton } from './WorkflowStudioSharedMaterialsButton'
 import { studioPublishTooltip } from './studioIslandPublishTooltip'
 import { WorkflowStudioStatusChip } from './WorkflowStudioStatusChip'
 import { useIslandExclusiveWidth } from './useIslandExclusiveWidth'
 import styles from './StudioCanvasIslands.module.css'
+
+// inert 透传对象（React 18 类型不识 inert，按未知属性透传；语义见组件内
+// D4/P2-1 注释）。
+const INERT = { inert: '' } as { inert?: string }
 
 export function StudioCanvasIslands() {
   const studio = useStudioState()
@@ -55,6 +59,13 @@ export function StudioCanvasIslands() {
     compareError: studio.compareState === 'error',
     validationMessage,
   })
+  // #812 对抗轮 D4 + P2-1：抽屉打开期间被 paper 物理遮住的岛触发器加
+  // inert，堵住「Tab 聚焦被遮按钮并激活」的路径（inert 一次阻断指针/键盘/
+  // 读屏；React 18 类型与运行时都不识 inert，按未知属性透传空字符串，同
+  // WorkflowNodeAgentGate 的既有写法）。分级：宽屏 720px 抽屉只遮右岛，
+  // 可见的左岛（返回/版本/发布）保持可交互——persistent 抽屉是非模态的；
+  // 窄屏抽屉全宽覆盖，双岛一起 inert。
+  const drawerOpen = Boolean(studio.selectedNodeKey) || view.materialsOpen
 
   return (
     <>
@@ -75,6 +86,7 @@ export function StudioCanvasIslands() {
         }}
         data-testid="studio-identity-island"
         aria-label="工作流身份与导航"
+        {...(drawerOpen && narrow ? INERT : {})}
       >
         <Tooltip title="返回">
           <IconButton
@@ -157,6 +169,7 @@ export function StudioCanvasIslands() {
         style={{ top: islandTop }}
         data-testid="studio-action-island"
         aria-label="Workflow command bar"
+        {...(drawerOpen ? INERT : {})}
       >
         <StudioAgentPanelToggle />
         <WorkflowStudioSharedMaterialsButton />

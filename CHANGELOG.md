@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 主打 workflow 升级继承模式与执行代次/产物提交统一协议（issue #759 四层 stack）；安全面收口 job-id 路由跨 workspace IDOR（issue #710）及其红队 follow-up；Studio 交互线（聊天区草稿卡重做、对话骨架统一与超时误报修复、取消轮可见性、定制预览同屏验证）与运行时防护（velites 读取硬上限、worker terminate 收尾兜底、SIGPIPE 免疫）。
 
 ### Added
+- start 节点可选 `text_input {label, filename, template}`：Studio 可配置输入框标题、落盘文件名与预填模板；未修改的模板不计条目，可一键恢复，显式条目文件名优先。loader 校验形状与裸 `.md`/`.txt` 文件名，echo / 快照往返对称，compare 记 info 级变更。
 - 节点代码体积上限开放为实例级配置（issue #628，#786 起 admin 实例设置可管理）：自定义节点代码的 64KB 硬编码上限改为 `executor_runtime.workflows.node_code_max_bytes`（admin 全局设置「运行与本地执行」组直接管理，解析链 实例设置 > env `AGENT_LEGION_NODE_CODE_MAX_BYTES` > 默认 64KB、`ge=1024`、启动时生效，非法值在 PUT 契约层 422 / env 在加载时 fail-fast）；Studio 与 studio-agent 两条保存/发布校验链路统一从 settings 取值，错误信息携带当前上限；节点代码读取响应新增只读字段 `max_code_bytes`，前端编辑器同步展示「代码体积上限 N KB（实例配置）」；设计文档补「体积预算与配置」一节（调大的代价：DB 文本膨胀、claim bundle 传输变大、code review 可读性下降，仍建议按节点粒度自律）。
 - workflow 升级的继承模式（issue #645）：`POST /jobs/{job_id}/upgrade-workflow` 与批量版新增 `mode` 参数（`clean` = 既有全量重跑（默认）；`inherit` = 继承未变节点的既有产物、只重跑变更子图）。per-node diff 按「节点定义归一化哈希（label 等纯展示字段排除）+ 冻结 config 段（新旧定义两侧 re-freeze 同基比较）+ 上游节点哈希链式传播 + 入边（含 when 条件）」计算；`skill: latest`（HEAD 漂移永不入锁）、分片节点、审批门节点一律不参与继承，未变节点的产物已被淘汰或对象缺失时退化重跑该子图（宁可多跑）。响应携带 `mode` / `kept_nodes` / `rerun_nodes` 统计；前端升级确认对话框提供模式单选。
 - 执行代次与产物提交统一协议（issue #759，stack #773/#774/#775/#778，继承模式的执行面底座）：`jobs.execution_generation` 代次 + job-mutation 统一锁域，enqueue/claim/finish/fail/审批/清扫全部重置入口走代次 CAS——迟到结果与重跑/重排不再互相覆盖；本地 code 输出、direct remote refs、legacy Worker 归档三种结果来源统一进同一条 commit 管线（stage → 备份权威副本 → 代次门 → promote → 清单提交 → 失败回滚），产物字节写面收口到共享 promotion primitive；产物消费关系以 `artifact_consumption_index` 为唯一事实源（node inputs ∪ `edge.condition.artifact`），条件生产者有屏障保证。复审跟进（#778）：hydration 代次读裁剪、恢复面按本轮节点状态收窄、分片有效状态、解包失败纳入 lease 临界区。
@@ -19,6 +20,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Changed
 - Studio 聊天区草稿卡重做（issue #692）：workflow / 运行配置 / 草稿预览三类草稿卡统一视觉语言与发布入口，MUI 线性图标区分卡片类型，发布动作收敛为同一评审对话框链路。
 - Studio 对话输入区收编（#750）：会话菜单对齐卡片风格，上下文用量圆环与状态行收进输入卡片，对话区信息层级收敛。
+- velites 0.5.4 → 0.5.5 落版：velites-v0.5.4 tag 后 velites 子树积了 11 个未随任何 velites 版本线发布的改动——#637 内存硬上限系列（bash/read/json 读取硬上限、流式聚合全局封顶、触顶提示修正，详见上方 Fixed 的 #637 条目）。独立版本线随源码前进——三平台二进制经 velites-v0.5.5 tag 发布；scripts/install-worker.sh 默认版本同步到 0.5.5。
 
 ### Fixed
 - Studio 会话超时误显示完成 + 压缩窗口防护与对话骨架统一（issue #693/#694/#695，#698 与其 0.7.13 线收尾 #733）：超时轮不再被定妆为「已完成」；压缩窗口边界防护与容量透传修复长会话压缩截断；对话骨架（空态/加载/错误）三处统一。
@@ -42,19 +44,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
-- 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进
-  run 请求，`RunService` 在全部校验通过后把它落成一份 ready 的 Markdown
-  材料（sha256 内容寻址、对象先写行后插、`.md`/`.txt` 白名单、UTF-8
-  ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker
-  物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio
-  入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。设计
-  见 docs/architecture/materials-and-runs-design.md §4.1。
-- start 节点可选 `text_input {label, filename, template}` 块：Studio 入口
-  节点勾选「直接输入需求」后可配置输入框标题、落盘文件名与预填模板；
-  「添加条目 · 输入需求」按它预填，模板一字未改不能提交（可一键恢复
-  模板），未带文件名的 text 条目按配置命名。呈现层配置：loader 只做形状
-  校验（字符串、长度、`.md`/`.txt` 裸文件名），不勾 `text` 时块惰性；
-  echo / 快照往返对称，compare 记 info 级变更。
+- 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进 run 请求，`RunService` 在全部校验通过后把它落成 ready 的 Markdown 材料（sha256 内容寻址、对象先暂存、材料行整批事务提交、`.md`/`.txt` 白名单、UTF-8 ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker 物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio 入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。同 hash 仅复用 ready 材料，上传中、失败或已过期材料返回 409，避免抢占浏览器上传或改写既有对象归属。设计见 docs/architecture/materials-and-runs-design.md §4.1。
 
 ## [0.7.12] - 2026-09-16
 
@@ -455,5 +445,3 @@ Initial open-source release.
 [0.3.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.2.0...v0.3.0-alpha
 [0.2.0]: https://github.com/LuciusCao/agent-legion/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LuciusCao/agent-legion/releases/tag/v0.1.0
-
-

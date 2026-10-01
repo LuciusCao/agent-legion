@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useStudioView } from './studioStateContext'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Close, FolderSharedOutlined } from '@mui/icons-material'
+import { Close } from '@mui/icons-material'
 import { Drawer, IconButton, Tooltip, Typography } from '@mui/material'
 import {
   getWorkspaceSharedMaterials,
@@ -22,6 +22,7 @@ import { SharedMaterialFileContentDialog } from './WorkflowStudioSharedMaterials
 import { SharedMaterialFileRowView } from './WorkflowStudioSharedMaterialsFileRow'
 import { SharedMaterialsPropagateConfirmDialog } from './WorkflowStudioSharedMaterialsPropagateDialog'
 import { WorkflowStudioSaveWarningBanner } from './WorkflowStudioSaveWarningBanner'
+import { useDrawerEscape } from './useDrawerEscape'
 import styles from './WorkflowStudioSharedMaterialsDrawer.module.css'
 
 const PROPAGATE_STATUS_LABELS: Record<
@@ -36,9 +37,11 @@ const PROPAGATE_STATUS_LABELS: Record<
 function SharedMaterialsDrawer({
   workspaceId,
   onClose,
+  hidden,
 }: {
   workspaceId: string
   onClose: () => void
+  hidden: boolean
 }) {
   const [openPath, setOpenPath] = useState<string | null>(null)
   const [confirmRow, setConfirmRow] = useState<SharedMaterialFileRow | null>(
@@ -47,6 +50,13 @@ function SharedMaterialsDrawer({
   const [results, setResults] = useState<
     SharedMaterialPropagateSkillResult[] | null
   >(null)
+  // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault）；
+  // 与节点详情抽屉共存时由抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。
+  // hidden（#812 P2-2：窄屏非画布页签——抽屉挂在 SplitLayout 层，不随画布列
+  // display:none，隐藏要自带）：paper display:none 不卸载（打开状态/内部
+  // 草稿保留），同时出 Esc 栈不占栈位。返回的 zIndex 挂到 paper：栈位映射
+  // 视觉层级，Esc 栈序 == 视觉序（#812 对抗轮 D2）。
+  const paperZIndex = useDrawerEscape(true, onClose, hidden)
   const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery({
     queryKey: extraQueryKeys.workspaceSharedMaterials(workspaceId),
@@ -72,11 +82,25 @@ function SharedMaterialsDrawer({
       anchor="right"
       open
       onClose={onClose}
-      slotProps={{ paper: { className: styles.paper } }}
+      slotProps={{
+        paper: {
+          className: styles.paper,
+          // hidden：display:none 而非卸载——打开状态与抽屉内草稿保留。
+          style: {
+            zIndex: paperZIndex,
+            ...(hidden ? { display: 'none' } : {}),
+          },
+        },
+      }}
       /* 轮 8 P2：非模态——persistent variant 不走 Modal（无遮罩/不圈禁
          焦点/不锁滚动/不 aria-hidden 兄弟），Dock 与画布保持可交互；
          ✕/Esc 关闭，浮层定位由 paper CSS 承担。 */
       variant="persistent"
+      // hotfix：persistent 的 docked 根节点常驻 DOM 且参与 SplitLayout 的
+      // grid——其 Slide 包装在流内有高度，grid 行被均分（画布只剩半屏）。
+      // paper 是 position:fixed 自定位，根节点零价值：display:contents
+      // 退出布局流（抽屉开关/过渡/Esc 语义不变）。
+      sx={{ display: 'contents' }}
     >
       <div className={styles.panel}>
         <div className={styles.header}>
@@ -218,37 +242,27 @@ function SharedMaterialsDrawer({
 }
 
 /**
- * Studio 顶栏「共享材料」入口（issue #643）：图标按钮 + 右侧 Drawer
- * 展示本 workspace 的 _shared 文件清单（行内 drift 徽标），行内提供
- * 「同步并打 tag」传播动作（#673）。workspaceId 取路由参数；无 Router
- * 上下文（测试直渲染 CommandBar）时退化为 {}，抽屉不打开即不触发任何查询。
+ * 共享素材抽屉本体（issue #643：展示本 workspace 的 _shared 文件清单——行内
+ * drift 徽标 + 「同步并打 tag」传播动作 #673）。
+ * 挂载点纪律（#812 对抗轮 D1）：必须挂在 SplitLayout 层（与节点详情抽屉
+ * 平级），不能挂在岛内——岛的 backdrop-filter 会让祖先成为 fixed paper 的
+ * 包含块，挂在岛内会把抽屉渲染成钉在岛角落的碎片。触发按钮留在岛内
+ * （WorkflowStudioSharedMaterialsButton.tsx），开合状态经
+ * StudioViewContext 共享；workspaceId 取路由参数，无匹配参数时抽屉不打开。
  */
-export function WorkflowStudioSharedMaterialsButton() {
+export function WorkflowStudioSharedMaterialsDrawer() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
-  // 轮 9 P2：开合状态提升到 StudioViewContext（Dock 避让需要感知抽屉）。
   const view = useStudioView()
-  const open = view.materialsOpen
-  const setOpen = view.setMaterialsOpen
+  const { materialsOpen: open, setMaterialsOpen: setOpen } = view
+  // D3/P2-2：窄屏非画布页签时抽屉隐藏（paper display:none、不占 Esc
+  // 栈位）——抽屉挂在 SplitLayout 层，不随画布列 display:none。
+  const hidden = view.narrow && view.mobilePanel !== 'graph'
+  if (!open || !workspaceId) return null
   return (
-    <>
-      <Tooltip title="Skill 共享材料">
-        <IconButton
-          size="small"
-          aria-label="Skill 共享材料"
-          onClick={() => setOpen(true)}
-          sx={{ borderRadius: '8px', gap: '4px', padding: '4px 8px' }}
-        >
-          <FolderSharedOutlined fontSize="small" />
-          {/* #799 精修：右岛图标+文字并排；窄屏由岛 CSS 隐藏文字只留图标 */}
-          <span className="studio-island-text">共享素材</span>
-        </IconButton>
-      </Tooltip>
-      {open && workspaceId && (
-        <SharedMaterialsDrawer
-          workspaceId={workspaceId}
-          onClose={() => setOpen(false)}
-        />
-      )}
-    </>
+    <SharedMaterialsDrawer
+      workspaceId={workspaceId}
+      onClose={() => setOpen(false)}
+      hidden={hidden}
+    />
   )
 }
