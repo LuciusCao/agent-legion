@@ -48,12 +48,13 @@ describe('acceptedItemTypes', () => {
 })
 
 describe('ITEM_TYPE_DISPLAY', () => {
-  it('covers every item type in canonical material/ref/bundle order', () => {
+  it('covers every item type in canonical material/ref/bundle/text order', () => {
     // key 顺序即规范写回顺序（编辑器经 Object.keys 派生）。
     expect(Object.keys(ITEM_TYPE_DISPLAY)).toEqual([
       'material',
       'ref',
       'bundle',
+      'text',
     ])
     for (const type of Object.keys(ITEM_TYPE_DISPLAY)) {
       const display = ITEM_TYPE_DISPLAY[type as AcceptedItemType]
@@ -68,6 +69,7 @@ describe('itemTypeLabel', () => {
     expect(itemTypeLabel('material')).toBe('上传文件')
     expect(itemTypeLabel('ref')).toBe('外部平台内容')
     expect(itemTypeLabel('bundle')).toBe('整个文件夹')
+    expect(itemTypeLabel('text')).toBe('直接输入需求')
   })
 
   it('falls back to the raw value for unknown types', () => {

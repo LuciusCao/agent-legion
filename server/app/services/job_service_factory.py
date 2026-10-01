@@ -35,6 +35,7 @@ class JobServices:
         job_event_buffer: Any | None,
         artifact_store: ArtifactStore | None = None,
         object_store: Any = None,
+        materials_service: Any = None,
     ) -> None:
         self.executor_leases = ExecutorLeaseRepository(
             job_db,
@@ -53,6 +54,7 @@ class JobServices:
             settings,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
+            materials_service=materials_service,
         )
         self.queries = JobQueryService(
             job_db, settings, workspace_execution_configuration, object_store=object_store

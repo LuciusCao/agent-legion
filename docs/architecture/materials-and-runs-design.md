@@ -125,6 +125,50 @@ nodes:
   source/target）去重且 condition 以派生边为准（重复显式边上的 condition
   静默丢弃）。这是快照重载对称的前提：快照携带的物化边（含注入的 start
   出边）能与派生边集正确合并。
+- **`text` 条目（直接输入需求）**：`{type:"text", content, filename?}` 把需求
+  文字直接写进 run 请求；`RunService` 在契约/节点配置/pin 全部校验通过后、
+  run 行写入前，把它落成一份 ready 材料（sha256 内容寻址，对象先写、行后插，
+  `.md`/`.txt` 文件名白名单，UTF-8 ≤ 64 KiB，`run_text_items.py` +
+  `jobs/queries/material_inline.py`），再改写成普通 `material` 条目进入解析——
+  `input_json`、manifest、Worker 物化、skill 看到的与手动上传同名文件完全
+  一样。这是 run 创建前唯一的写：材料是 workspace 资产（无引用时 TTL 回收），
+  与「先上传再被拒」留下的状态等价，fail-closed 契约不变；对象存储未配置
+  时整条请求 503。同一文本重复提交命中同一材料、同一 job dedup 键。契约
+  缺省不含 `text`（存量 fail-closed），Studio 入口节点显式勾选「直接输入
+  需求」后「添加条目」出现「输入需求」Tab。
+  多条文本先全部校验并暂存对象，再以单个事务提交材料行；中途失败回滚整批
+  新行，并补偿删除本次暂存对象。文本入口从不复活、重定向或修改既有材料行。
+  对象 key 包含请求独占随机段，hash 仍是材料去重身份；并发冲突只复用 ready
+  胜者材料、删除落败对象，不能按共享
+  hash 路径补偿删除。提交和清理核验使用同一 workspace 事务锁，避免提交
+  确认丢失时误删已提交对象。清理时数据库或存储不可达会记录待清理 key，
+  保留对象以保护数据；进程崩溃与持续清理失败仍需运维回收孤儿对象。
+  文件名拒绝控制字符，内容和文件名拒绝无效 UTF-8，避免写入后才发生编码错误。
+  混合提交含超长需求时禁用创建按钮（包括切换到其他 Tab 后），避免悄悄
+  丢掉需求、只提交其他材料。
+
+  **状态与所有权（MATERIAL-INLINE-OWNERSHIP-001）**：`created_at` 与状态
+  都不能证明最后一次 presign URL 已失效。`failed` 可能仍有在途 PUT，
+  `expired` 由 TTL 协议管理；文本入口不能凭年龄或非 ready 状态接管它们。
+
+  | 事务内当前状态 | 文本提交行为 |
+  | --- | --- |
+  | hash 不存在 | 插入本次暂存对象对应的 ready 材料 |
+  | 并发胜者为 ready | 复用其身份与元数据，清理本次落败对象 |
+  | uploading / failed / expired | 整批返回 409，保留原行与原对象 |
+  | 预检查选中的 ready 行已删除、换身份或变为非 ready | 整批返回 409，不复用旧快照 |
+
+  唯一索引裁决新 hash 的所有者，`ON CONFLICT DO NOTHING` 后以 `FOR UPDATE`
+  读取当前行；预检查命中的 ready 行也在同一事务内重验 ID 和状态。普通
+  presign/complete 无需加入文本专用 advisory lock：文本入口从不改写它们
+  的状态和 storage_key。浏览器迟到 PUT 仍指向原材料，complete 仍验证其
+  大小与 hash。用户先完成/重试原上传；确认放弃后可通过材料 API 显式删除
+  旧材料，expired 材料仍走既有 TTL 清理，然后再提交文本。
+
+  **Quality Impact**：无 DDL；批量事务和对象引用查询经 `JobQueries` 门面，
+  保持 BOUNDARY-DATA-001；回归覆盖第二次 PUT/行写入失败、同名/异名并发、
+  反序批次、提交确认丢失、补偿不误删胜者对象，以及 presign/text 双向竞争、
+  迟到 PUT/complete、旧非 ready 行、TTL/删除/换身份后的 ready 快照失效。
 - 后续切片（folder 整体式/bundle 等新条目类型）的配置也挂在 start 节点上——
   这正是 start 存在的意义。
 
@@ -441,6 +485,8 @@ Host 沙箱 allow-read 碰巧含 `examples/`（Worker 上根本不存在该目�
 | v2 | workflow 输入契约声明；question/video 导入改造为 connector 形态；场景 C 原地引用 | workflow 声明更直白 |
 | 并行 | 产物上云后的打包重设计（Issue #120） | prod 体积受控、出站回传 |
 | v1.2 | 文件夹作为单 job 输入（bundle 条目，manifest 引用式，§5.4，#156） | 「添加条目」支持文件夹整体打包 |
+| v1.3 | 直接输入需求（text 条目，服务端落成 Markdown 材料，§4.1） | 「添加条目」支持直接输入需求文字启动 |
+| v1.3 后续 | start 节点 `text_input`（输入框标题 / 落盘文件名 / 预填模板）；需求文本 + 附件合成一个 bundle 条目 | 按工作流预填需求模板 |
 | future | connector 实体化 | — |
 | future（已立项，方案待讨论） | **异步建 job 的进度与结果可见性**：万级 job 走异步队列创建时，界面只看到数量上涨，看不到创建进度与结果分布（成功 / 因重复被 dedup / 校验失败及原因）。需求：run 维度展示创建进度条与结果明细。具体方案另行讨论后补本节 | — |
 

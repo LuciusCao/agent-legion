@@ -57,6 +57,27 @@ describe('useWorkflowStudioPageView', () => {
     expect(result.current.yamlEditorOpen).toBe(true)
   })
 
+  // #812 对抗轮 D5：materialsOpen 是裸 useState，workspaceId 变化时残留
+  // 开合会带进新 workspace（一进页面就开着上一个 workspace 的素材抽屉）；
+  // 对照 useStudioNodeSelection 的 selectedNodeKey 重置。
+  it('resets materialsOpen when workspaceId changes', () => {
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) => useWorkflowStudioPageView(workspaceId),
+      { initialProps: { workspaceId: 'ws1' } }
+    )
+
+    act(() => result.current.setMaterialsOpen(true))
+    expect(result.current.materialsOpen).toBe(true)
+
+    rerender({ workspaceId: 'ws2' })
+    expect(result.current.materialsOpen).toBe(false)
+
+    // 同一 workspace 内的重渲染不重置。
+    act(() => result.current.setMaterialsOpen(true))
+    rerender({ workspaceId: 'ws2' })
+    expect(result.current.materialsOpen).toBe(true)
+  })
+
   // #668：agentOpen 提升到 page view 层，appbar 开关与分栏布局共享此状态。
   it('toggles the agent panel open state', () => {
     const { result } = renderHook(() => useWorkflowStudioPageView())

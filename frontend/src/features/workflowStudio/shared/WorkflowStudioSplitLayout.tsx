@@ -1,6 +1,7 @@
 import { WorkflowStudioCanvasPanel } from '../canvas/WorkflowStudioCanvasPanel'
 import { WorkflowNodeDetailDrawer } from '../inspector/WorkflowNodeDetailDrawer'
 import { StudioChatDock } from '../chat/StudioChatDock'
+import { WorkflowStudioSharedMaterialsDrawer } from './WorkflowStudioSharedMaterialsDrawer'
 import type { StudioMobilePanel } from './WorkflowStudioMobileNav'
 import { useStudioNarrowViewport } from './useStudioNarrowViewport'
 import pageStyles from '../../../pages/WorkflowStudioPageResponsive.module.css'
@@ -15,7 +16,8 @@ type Props = {
  * 对话在 AgentPanelDock 浮层（#795 PR②）。Dock 常驻挂载、关闭/窄屏未选中
  * Agent 页签时隐藏不卸载（hidden——composer 文本/发送队列/SSE 不因显隐
  * 断开，#797 codex P1）；窄屏下 Dock 仅 Agent 页签选中时显示（#797 codex
- * P2）。 */
+ * P2）。共享素材抽屉同样挂在本层（#812 D1：触发按钮留在右岛，但岛的
+ * backdrop-filter 会捕获 fixed paper 为包含块，抽屉本体必须在岛外）。 */
 export function WorkflowStudioSplitLayout({ mobilePanel, agentOpen }: Props) {
   const narrow = useStudioNarrowViewport()
   const dockHidden = !agentOpen || (narrow && mobilePanel !== 'agent')
@@ -24,6 +26,7 @@ export function WorkflowStudioSplitLayout({ mobilePanel, agentOpen }: Props) {
     <div className={pageStyles.layout}>
       <WorkflowStudioCanvasPanel mobileActive={mobilePanel === 'graph'} />
       <WorkflowNodeDetailDrawer />
+      <WorkflowStudioSharedMaterialsDrawer />
       <StudioChatDock hidden={dockHidden} />
     </div>
   )
