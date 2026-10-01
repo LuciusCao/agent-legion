@@ -306,8 +306,24 @@ EOF
 volume server 在 master 侧的注册信息 stale 时，自动推导会把可写槽位判成
 0，master 认为没有可分配 volume，全部 PutObject 返回 503
 （no free volumes）——表象是「磁盘远未写满却写满」。现 compose 已改为
-显式 `-volume.max=100`（惰性增长的上限闸门，非预占磁盘），但空 volume
-堆积仍会挤占这个槽位上限。
+显式上限（`AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`，默认 100；惰性增长的
+上限闸门，volume 按需创建、不预占磁盘，100 × 2GiB ≈ 200GiB 的可增长
+容量），但空 volume 堆积仍会挤占这个槽位上限。
+
+**上限可调**：上限只是槽位闸门，调大**无需迁移数据**（新 volume 惰性
+创建），在 `deploy/.env` 设 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX` 后
+`docker compose up -d seaweedfs` 生效。升级本变更或调大上限前，先用
+`weed shell` 确认当前 volume 数低于新上限：
+
+```bash
+docker exec <seaweedfs 容器> sh -c \
+  'printf "lock\nvolume.list\nunlock\n" | weed shell -master=localhost:9333'
+```
+
+若新上限低于现有 volume 数（例如升级前部署已超过 100 个非空 volume，
+或数据已增长到 100 × 2GiB ≈ 200GiB 量级），master 会停止分配新
+volume，所有新写入返回 no free volumes——上限必须始终大于当前 volume
+数。`volume.deleteEmpty` 对非空 volume 无效，不能把「超上限」状态救回。
 
 **排查**：master UI（`:9333`）看 volume 总数与已用比例；PutObject 503 且
 master 日志出现 `no free volumes` 即命中本问题。
@@ -321,5 +337,6 @@ docker exec <seaweedfs 容器> sh -c \
 ```
 
 `volume.deleteEmpty` 只删「空且静默超过 quietFor 时长」的 volume，幂等
-可重跑；删完 PutObject 即恢复。若 volume 数仍贴着 `-volume.max` 上限，
-说明数据真实增长，再考虑调大上限或清理无用 bucket/collection。
+可重跑；删完 PutObject 即恢复。若 volume 数仍贴着上限，说明数据真实
+增长，再调大 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`（见上节「上限可调」）
+或清理无用 bucket/collection。
