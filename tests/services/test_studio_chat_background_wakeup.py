@@ -108,6 +108,7 @@ def test_reader_rechecks_file_replaced_between_stat_and_open(tmp_path, monkeypat
 
 @pytest.fixture
 def chat(tmp_path, monkeypatch):
+    existing_threads = set(threading.enumerate())
     runtime = SessionRuntime(
         SimpleNamespace(cwd=str(tmp_path), send_prompt=Mock(return_value=True)), "token"
     )
@@ -123,6 +124,10 @@ def chat(tmp_path, monkeypatch):
     monkeypatch.setattr(wake, "POLL_SECONDS", 0.01)
     yield service, runtime
     runtime.background_stop.set()
+    for thread in set(threading.enumerate()) - existing_threads:
+        if thread.name == "studio-kimi-completions":
+            thread.join(timeout=5)
+            assert not thread.is_alive(), "watcher must stop before fixture patches are removed"
 
 
 def test_completion_wakes_once_without_user_prompt_and_records_receipt(chat, tmp_path):
@@ -208,16 +213,18 @@ def test_resume_does_not_replay_old_terminal_tasks(chat, tmp_path):
 
 def test_cancelled_watcher_discards_completions_until_human_rearms(chat, tmp_path):
     service, runtime = chat
-    runtime.background_wakeup_enabled = False
+    wake.cancel_wakeup(runtime)
     wake.start_watcher(service, "chat-1", runtime, "acp-1")
     write_task(tmp_path, "agent-cancelled", "completed")
-    # Wait on the reader rather than timing the worker thread.
-    original = wake.completed_tasks
-    with pytest.MonkeyPatch.context() as patch:
-        observed = Mock(wraps=original)
-        patch.setattr(wake, "completed_tasks", observed)
-        wait_for_predicate(lambda: observed.call_count >= 2)
-    runtime.background_wakeup_enabled = True
+
+    # A Mock's call count advances before its wrapped read and baseline
+    # commit finish. Observe the actual completed state under the same lock.
+    def baselined():
+        with runtime.lock:
+            return "agent-cancelled" in runtime.background_cursor.seen
+
+    wait_for_predicate(baselined)
+    wake.rearm_wakeup(runtime)
     write_task(tmp_path, "agent-new", "completed")
     wait_for_predicate(lambda: runtime.handle.send_prompt.call_count == 1)
     assert "agent-cancelled" not in runtime.handle.send_prompt.call_args.args[0]
