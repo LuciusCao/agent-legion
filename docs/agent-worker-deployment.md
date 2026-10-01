@@ -406,11 +406,12 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
    主控制台每一行 Worker 还会带该 Worker **自报**的「控制台」链接：Worker
    Service 按自己的控制面绑定地址推导（通配绑定 `0.0.0.0` 回落
    `127.0.0.1`，IPv6 `::` 回落 `[::1]`），经环境变量 `AGENT_WORKER_CONSOLE_URL` 交给 executor，注册时
-   写进 labels 的保留键 `console_url`（`worker/console_url.py`）。控制台经反向
+   补充 labels 的可选键 `console_url`（`worker/console_url.py`）。控制台经反向
    代理或映射到非回环地址时，在 Worker 侧显式设置该变量（三份 compose 文件
    已按 `AGENT_WORKER_UI_BIND` 的端口发布预填），显式空串 = 不上报；旧版
    Worker 不上报，对应行只保留部署级入口。
-   自定义标签已经占满 32 项且没有 `console_url`，或自报 URL 超过 256 字符时，
+   已配置的 `console_url` 与其他自定义标签始终原样保留（可能用于 `requires_labels` 调度），环境地址不覆盖它。
+   自定义标签已经占满 32 项，或自报 URL 超过 256 字符时，
    跳过该可选标签并保留原标签，避免控制台入口使 Worker 注册失败；不截断 URL。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
