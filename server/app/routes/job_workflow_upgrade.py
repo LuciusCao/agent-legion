@@ -3,7 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from server.app.auth.dependencies import reject_studio_agent_scope
-from server.app.routes.job_operation_contracts import JobMutationResultResponse
+from server.app.routes.job_operation_contracts import (
+    JobMutationResultResponse,
+    UpgradeWorkflowRequest,
+)
 from server.app.services.job_queries import JobQueryService
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 
@@ -19,11 +22,16 @@ def create_job_workflow_upgrade_router(
         response_model=JobMutationResultResponse,
         dependencies=[Depends(reject_studio_agent_scope)],
     )
-    def upgrade_job_workflow(job_id: str) -> JobMutationResultResponse:
+    def upgrade_job_workflow(
+        job_id: str, request: UpgradeWorkflowRequest | None = None
+    ) -> JobMutationResultResponse:
+        # Body 可选：省略或空对象 → clean（既有无 body 调用面不变）；
+        # 非法 mode 值由 Literal 校验在请求解析层直接 422。
+        mode = request.mode if request is not None else "clean"
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
-        result = job_workflow_upgrade.upgrade(job["workspace_id"], job_id)
+        result = job_workflow_upgrade.upgrade(job["workspace_id"], job_id, mode=mode)
         if result["status"] != "succeeded":
             status_code = 404 if result.get("reason_code") == "not_found" else 400
             raise HTTPException(

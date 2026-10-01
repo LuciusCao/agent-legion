@@ -12,7 +12,7 @@ import pytest
 import requests
 
 from worker.host.client import Client, WorkerAuthError
-from worker.host.transfer import HostRequestError
+from worker.host.transfer import HostRequestError, TransferStopped
 
 
 def _artifact(tmp_path: Path) -> Path:
@@ -176,6 +176,24 @@ def test_upload_artifact_opens_fresh_stream_per_attempt(
     assert seen == [b"{}", b"{}"]
 
 
+def test_upload_artifact_does_not_reopen_after_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Lease loss during an attempt aborts the internal retry before the next open."""
+    stop = threading.Event()
+    seen: list[bytes] = []
+
+    def fake_request(*args, **kwargs):
+        seen.append(kwargs["data"].read())
+        stop.set()
+        raise requests.ConnectionError("lost while uploading")
+
+    monkeypatch.setattr(Client, "request", fake_request)
+    with pytest.raises(TransferStopped):
+        Client("http://host").upload_artifact(_artifact(tmp_path), stop=stop)
+    assert seen == [b"{}"]
+
+
 def test_report_streams_archive_from_disk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     archive = tmp_path / "result.tar.gz"
     archive.write_bytes(b"archive-bytes")
@@ -186,6 +204,25 @@ def test_report_streams_archive_from_disk(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     monkeypatch.setattr(Client, "request", fake_request)
     assert Client("http://host").report("exec-1", "lease-1", {}, archive) == (204, b"")
+
+
+def test_report_does_not_reopen_archive_after_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stop = threading.Event()
+    archive = tmp_path / "result.tar.gz"
+    archive.write_bytes(b"old-attempt")
+    seen: list[bytes] = []
+
+    def fake_request(*args, **kwargs):
+        seen.append(kwargs["data"].read())
+        stop.set()
+        raise requests.ConnectionError("lost while reporting")
+
+    monkeypatch.setattr(Client, "request", fake_request)
+    with pytest.raises(TransferStopped):
+        Client("http://host").report("exec-1", "lease-1", {}, archive, stop=stop)
+    assert seen == [b"old-attempt"]
 
 
 def test_download_writes_response_to_destination(

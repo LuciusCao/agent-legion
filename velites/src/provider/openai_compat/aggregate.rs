@@ -38,6 +38,20 @@ pub(super) struct ToolCallAcc {
 /// turn it into an overflow/OOM panic.
 const MAX_TOOL_CALL_INDEX: u64 = 1024;
 
+/// 单次补全聚合文本的防御性上限（#637）：text/thinking/单个 tool_call
+/// arguments 各自不超过 32 MiB。正常路径下模型输出受请求侧 max_tokens /
+/// 服务端默认值约束，远够不到这里；该上限只拦网关/代理侧的异常流（没有
+/// max_tokens 协商的 OpenAI 兼容端点、损坏的 chunk 泛洪），避免一个流把
+/// 进程内存吃穿。32 MiB ≈ 800 万 token 的输出，误伤正常补全的概率为零。
+const MAX_STREAMED_TEXT_CHARS: usize = 32 * 1024 * 1024;
+
+/// 单次补全聚合的全局上限（#637）：per-field 上限只约束单个 String——
+/// 一个异常流可以合法地填满 1025 个 tool_call（MAX_TOOL_CALL_INDEX 允许
+/// 0..=1024）× 各 32 MiB arguments ≈ 32 GiB，per-field 检查全部通过。
+/// 这就是 #637 事故的复合风暴面：上限必须同时封住 per-field 和 whole-
+/// aggregate 两个维度。此处再高也会拦住任何字段触顶后继续堆积的流。
+const MAX_AGGREGATE_CHARS: usize = 32 * 1024 * 1024;
+
 impl Aggregated {
     pub(super) fn into_content(self) -> Vec<ContentBlock> {
         let mut content = Vec::new();
@@ -75,14 +89,14 @@ impl Aggregated {
 
     fn apply_delta(&mut self, delta: &Value) -> Result<(), ProviderError> {
         if let Some(text) = delta.get("content").and_then(Value::as_str) {
-            self.text.push_str(text);
+            Self::push_bounded(&mut self.text, text)?;
         }
         let reasoning = delta
             .get("reasoning_content")
             .or_else(|| delta.get("reasoning"))
             .and_then(Value::as_str);
         if let Some(thinking) = reasoning {
-            self.thinking.push_str(thinking);
+            Self::push_bounded(&mut self.thinking, thinking)?;
         }
         if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
             for call in calls {
@@ -103,18 +117,63 @@ impl Aggregated {
                 }
                 let acc = &mut self.tool_calls[index];
                 if let Some(id) = call.get("id").and_then(Value::as_str) {
-                    acc.id.push_str(id);
+                    Self::push_bounded(&mut acc.id, id)?;
                 }
                 if let Some(function) = call.get("function") {
                     if let Some(name) = function.get("name").and_then(Value::as_str) {
-                        acc.name.push_str(name);
+                        Self::push_bounded(&mut acc.name, name)?;
                     }
                     if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
-                        acc.arguments.push_str(arguments);
+                        Self::push_bounded(&mut acc.arguments, arguments)?;
                     }
                 }
             }
         }
+        // Whole-completion check AFTER the delta: this is the only place
+        // every growth path (text, thinking, tool_calls resize, per-call
+        // fields) is guaranteed to pass through, so the aggregate cannot
+        // creep past the cap by spreading bytes across fields that are each
+        // individually under the per-field limit.
+        self.check_total()
+    }
+
+    /// 全局（whole-completion）聚合大小：text + thinking + 每个 tool_call
+    /// 的 id/name/arguments。单次补全的总输出上限据此判定（#637）。
+    pub(super) fn total_chars(&self) -> usize {
+        let calls: usize = self
+            .tool_calls
+            .iter()
+            .map(|call| call.id.len() + call.name.len() + call.arguments.len())
+            .sum();
+        self.text.len() + self.thinking.len() + calls
+    }
+
+    /// Reject the stream once the WHOLE aggregate (not one field — see
+    /// [`MAX_AGGREGATE_CHARS`]) passes the #637 cap. Checked after every
+    /// bounded append and after every tool_calls resize, so no path grows
+    /// the aggregate past the cap.
+    fn check_total(&self) -> Result<(), ProviderError> {
+        if self.total_chars() > MAX_AGGREGATE_CHARS {
+            return Err(ProviderError::Transient(format!(
+                "streamed response aggregate exceeds the {MAX_AGGREGATE_CHARS} char cap"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Append a streamed delta to an aggregated string, rejecting the stream
+    /// once the buffer passes the #637 defensive cap (see
+    /// [`MAX_STREAMED_TEXT_CHARS`]) — without it a proxy/gateway streaming
+    /// junk forever (the OpenAI-compatible path sends no max_tokens, so
+    /// nothing else bounds the stream) would grow the aggregate unbounded.
+    fn push_bounded(target: &mut String, delta: &str) -> Result<(), ProviderError> {
+        if target.len() + delta.len() > MAX_STREAMED_TEXT_CHARS {
+            return Err(ProviderError::Transient(format!(
+                "streamed response text exceeds the {} char aggregate cap",
+                MAX_STREAMED_TEXT_CHARS
+            )));
+        }
+        target.push_str(delta);
         Ok(())
     }
 
@@ -243,6 +302,15 @@ pub(super) fn parse_non_streaming(body: &str) -> Result<Aggregated, ProviderErro
     Ok(aggregated)
 }
 
+/// One SSE data line (one JSON `data:` payload) is a few KB at most. A
+/// stream that sends a line longer than this is corruption, and — no matter
+/// its shape — the buffer must never hold it: `SseLineBuffer` accumulates
+/// unterminated bytes verbatim, and the aggregate caps only bound the
+/// PARSED payload (a non-JSON line never reaches them — but a `data:`-less
+/// junk flood also never gets parsed, and would previously grow this buffer
+/// without bound, #637's exact shape).
+const MAX_SSE_LINE_BYTES: usize = 2 * 1024 * 1024;
+
 /// Assemble SSE lines from raw byte chunks. Chunk boundaries may split a
 /// multi-byte UTF-8 sequence, so decoding happens only once a full line
 /// (newline-terminated) has arrived — a valid UTF-8 line never contains a
@@ -254,14 +322,42 @@ pub(super) struct SseLineBuffer {
 
 impl SseLineBuffer {
     /// Append one TCP chunk; returns every line completed by it.
-    pub(super) fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+    pub(super) fn push(&mut self, chunk: &[u8]) -> Result<Vec<String>, ProviderError> {
         self.buffer.extend_from_slice(chunk);
         let mut lines = Vec::new();
         while let Some(pos) = self.buffer.iter().position(|b| *b == b'\n') {
             let line: Vec<u8> = self.buffer.drain(..=pos).collect();
-            lines.push(String::from_utf8_lossy(&line[..line.len() - 1]).into_owned());
+            let line = &line[..line.len() - 1];
+            // #637: a COMPLETE line longer than any legitimate SSE data
+            // payload is stream corruption — the cap bounds one LINE, never
+            // the chunk (reqwest may deliver many legal lines in a single
+            // Bytes chunk whose total exceeds it; the response is not
+            // corrupt just because of how HTTP framed it).
+            if line.len() > MAX_SSE_LINE_BYTES {
+                self.buffer.clear();
+                return Err(ProviderError::Transient(format!(
+                    "SSE line exceeds {} bytes (stream corruption)",
+                    MAX_SSE_LINE_BYTES
+                )));
+            }
+            lines.push(String::from_utf8_lossy(line).into_owned());
         }
-        lines
+        // #637: an unterminated RESIDUAL longer than the cap is corruption
+        // too — reject instead of growing the buffer without bound (a junk
+        // flood with no newline never reaches the aggregate, so the
+        // aggregate caps cannot bound it). Only the residual is checked:
+        // every retained byte belongs to one still-open line. The buffer is
+        // cleared before returning, so a caller that ever catches the error
+        // and reuses the buffer starts from empty instead of immediately
+        // re-tripping on the retained junk.
+        if self.buffer.len() > MAX_SSE_LINE_BYTES {
+            self.buffer.clear();
+            return Err(ProviderError::Transient(format!(
+                "SSE line exceeds {} bytes (stream corruption)",
+                MAX_SSE_LINE_BYTES
+            )));
+        }
+        Ok(lines)
     }
 
     /// Flush a trailing line without a newline terminator, if any.
@@ -302,7 +398,7 @@ pub(super) async fn read_sse_stream(
         };
         let Some(chunk) = next else { break };
         let chunk = chunk.map_err(|err| classify_transport_error(&err))?;
-        for line in lines.push(&chunk) {
+        for line in lines.push(&chunk)? {
             if apply_sse_line(&mut aggregated, &line)? && first_chunk_at.is_none() {
                 first_chunk_at = Some(Instant::now());
             }

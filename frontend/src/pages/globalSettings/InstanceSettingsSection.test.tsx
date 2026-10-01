@@ -28,7 +28,7 @@ const settings: InstanceSettingsResponse = {
   code_capacity: 16,
   materials_ttl_days: 0,
   execution_retention_days: 0,
-  workflows: { max_items_per_run: 20000 },
+  workflows: { max_items_per_run: 20000, node_code_max_bytes: 65536 },
   agent_workers: {
     max_archive_bytes: 104857600,
     min_protocol_version: 2,
@@ -113,6 +113,9 @@ describe('InstanceSettingsSection', () => {
     expect(screen.getByLabelText('单次 run 条目上限（0 不限制）')).toHaveValue(
       20000
     )
+    // #786：节点代码体积上限随实例设置管理；验收反馈后表单单位改 KB
+    // （GET 字节回显换算为 KB），编辑器按同一值提示 KB。
+    expect(screen.getByLabelText('节点代码体积上限（KB）')).toHaveValue(64)
     // #509/#554 容量旋钮组：值渲染 + 契约上界（max 属性）+ 组说明。
     expect(screen.getByLabelText('Agent 入队线程数')).toHaveValue(48)
     expect(screen.getByLabelText('Agent 入队线程数')).toHaveAttribute(
@@ -177,6 +180,10 @@ describe('InstanceSettingsSection', () => {
     fireEvent.change(screen.getByLabelText('Worker 在线标记写入间隔（秒）'), {
       target: { value: '7.5' },
     })
+    // #786：节点代码体积上限以 KB 编辑，保存时换算回字节随全文档 PUT 上送。
+    fireEvent.change(screen.getByLabelText('节点代码体积上限（KB）'), {
+      target: { value: '128' },
+    })
     fireEvent.click(screen.getByText('保存实例设置'))
 
     await waitFor(() => {
@@ -184,7 +191,7 @@ describe('InstanceSettingsSection', () => {
         ...updateBase,
         cleanup: { ...settings.cleanup, log_retention_days: 46 },
         heartbeat_interval_seconds: 12.5,
-        workflows: { max_items_per_run: 20000 },
+        workflows: { max_items_per_run: 20000, node_code_max_bytes: 131072 },
         agent_enqueue: { workers: 64, max_pending: 1024 },
         agent_claim: { worker_touch_interval_seconds: 7.5 },
       })
@@ -224,6 +231,27 @@ describe('InstanceSettingsSection', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '日志保留天数 必须是大于 0 的数字'
+    )
+    expect(updateInstanceSettings).not.toHaveBeenCalled()
+  })
+
+  it('rejects node code budget below the 1 KB contract floor before saving', async () => {
+    renderSection()
+    fireEvent.click(await screen.findByRole('button', { name: '展开高级参数' }))
+
+    // #786 codex P2 + 验收反馈（KB 单位）：0 KB 由客户端拦截（不发请求），
+    // 不再落到后端 422 的无指向性报错；下界 1 KB 对应契约 ge=1024 字节。
+    expect(screen.getByLabelText('节点代码体积上限（KB）')).toHaveAttribute(
+      'min',
+      '1'
+    )
+    fireEvent.change(screen.getByLabelText('节点代码体积上限（KB）'), {
+      target: { value: '0' },
+    })
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '节点代码体积上限（KB） 必须是大于 0 的数字'
     )
     expect(updateInstanceSettings).not.toHaveBeenCalled()
   })

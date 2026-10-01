@@ -3,7 +3,7 @@ import { act } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useSettingStore } from '../../../stores/settingStore'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
-import { TestQueryProvider } from '../../../testing/testQueryClient'
+import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 
 vi.mock('../chat/StudioChatPanel', () => ({
@@ -12,6 +12,26 @@ vi.mock('../chat/StudioChatPanel', () => ({
     return <div>chat panel stub</div>
   },
 }))
+
+// #804 抽屉化：节点详情抽屉在 Layout 层只验「选中节点即开」，抽屉自身行为
+// 见 WorkflowNodeDetailDrawer.test.tsx（那里带齐 api mock）。
+vi.mock('../inspector/WorkflowNodeDetailDrawer', async () => {
+  const React = await vi.importActual<typeof import('react')>('react')
+  const ctx = await vi.importActual<typeof import('./studioStateContext')>(
+    './studioStateContext'
+  )
+  return {
+    WorkflowNodeDetailDrawer: () => {
+      const studio = ctx.useStudioState()
+      return studio.selectedNodeKey
+        ? React.createElement('div', {
+            'data-testid': 'node-detail-drawer',
+            'data-node': studio.selectedNodeKey,
+          })
+        : null
+    },
+  }
+})
 
 // #416：StudioChatAside 轮询 agent 发布请求（react-query）。
 vi.mock('../../../api/studioPublishRequestApi', () => ({
@@ -43,7 +63,8 @@ const revision = {
 
 const baseProps = {
   loadState: 'ready' as const,
-  actionState: 'idle' as const,
+  publishing: false,
+  validating: false,
   workflow,
   revision,
   activeRevision: revision,
@@ -69,8 +90,6 @@ const baseProps = {
   edges: [],
   reviewDialogOpen: false,
   closeReviewDialog: vi.fn(),
-  dagFullscreenOpen: false,
-  setDagFullscreenOpen: vi.fn(),
   changesPanelOpen: false,
   setChangesPanelOpen: vi.fn(),
   yamlEditorOpen: false,
@@ -91,7 +110,7 @@ const baseProps = {
 }
 
 // Layout 不再接收整包 props：studio 经 StudioStateContext 注入，view 字段
-// （changesPanelOpen/yamlEditorOpen/dagFullscreenOpen 等）经 StudioViewContext 注入。
+// （changesPanelOpen/yamlEditorOpen 等）经 StudioViewContext 注入。
 // 伪造对象与真实 StudioState 形状存在字段级差异（null vs 具体对象），
 // 走 StudioStateContext 注入，类型上统一放宽为 object。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -100,8 +119,6 @@ function studioProvidersFor(studio: LayoutStudio) {
   // view 专属字段摘出进 StudioViewContext；on* 回调是 AppBar 层的，
   // Layout 子树不再消费。
   const {
-    dagFullscreenOpen,
-    setDagFullscreenOpen,
     changesPanelOpen,
     setChangesPanelOpen,
     yamlEditorOpen,
@@ -109,8 +126,6 @@ function studioProvidersFor(studio: LayoutStudio) {
     ...studioState
   } = studio
   const view = makeStudioView({
-    ...(dagFullscreenOpen !== undefined ? { dagFullscreenOpen } : {}),
-    ...(setDagFullscreenOpen !== undefined ? { setDagFullscreenOpen } : {}),
     ...(changesPanelOpen !== undefined ? { changesPanelOpen } : {}),
     ...(setChangesPanelOpen !== undefined ? { setChangesPanelOpen } : {}),
     ...(yamlEditorOpen !== undefined ? { yamlEditorOpen } : {}),
@@ -121,10 +136,12 @@ function studioProvidersFor(studio: LayoutStudio) {
 
 function renderLayout(studio: LayoutStudio) {
   const { studioState, view } = studioProvidersFor(studio)
+  // #799：浮动功能岛（挂在 Workspace 内）需要 router 上下文
+  // （返回/用量导航的 useNavigate）——TestMemoryRouter 自带 QueryProvider。
   return render(
-    <TestQueryProvider>
+    <MemoryRouter>
       {withStudioProviders(studioState, view, <WorkflowStudioLayout />)}
-    </TestQueryProvider>
+    </MemoryRouter>
   )
 }
 
@@ -134,9 +151,9 @@ function rerenderLayout(
 ) {
   const { studioState, view } = studioProvidersFor(studio)
   rerender(
-    <TestQueryProvider>
+    <MemoryRouter>
       {withStudioProviders(studioState, view, <WorkflowStudioLayout />)}
-    </TestQueryProvider>
+    </MemoryRouter>
   )
 }
 
@@ -165,10 +182,52 @@ describe('WorkflowStudioLayout', () => {
     expect(
       within(mobileNav).getByRole('tab', { name: '画布' })
     ).toBeInTheDocument()
+    // #804 抽屉化：「编辑节点」页签随分栏退役（节点编辑是全覆盖抽屉）。
     expect(
-      within(mobileNav).getByRole('tab', { name: '编辑节点' })
-    ).toBeDisabled()
+      within(mobileNav).queryByRole('tab', { name: '编辑节点' })
+    ).toBeNull()
     expect(within(mobileNav).getByRole('tab', { name: 'Agent' })).toBeEnabled()
+  })
+
+  it('窄屏警示徽标在页签行内、不在画布列里（轮 4 P1-B：Agent 页签整列隐藏也盖不到）', () => {
+    renderLayout({
+      ...baseProps,
+      draftSave: { status: 'error', savedAt: null, conflict: true },
+    })
+    const badge = screen.getByRole('button', {
+      name: '草稿冲突待处理，点击查看',
+    })
+    expect(
+      badge.closest('[data-testid="studio-mobile-nav-row"]')
+    ).not.toBeNull()
+    // revert 即红：徽标若挂进画布列（或任何 data-mobile-panel 面板），
+    // 窄屏切 Agent 页签时被整列 display:none 藏掉。
+    expect(badge.closest('[data-mobile-panel]')).toBeNull()
+  })
+
+  it('正常保存态不出窄屏警示徽标', () => {
+    renderLayout({
+      ...baseProps,
+      draftSave: { status: 'saved', savedAt: '2026-08-27T09:05:00+00:00' },
+    })
+    expect(screen.queryByRole('button', { name: /点击查看/ })).toBeNull()
+  })
+
+  it('加载/失败态也有返回入口（#799 codex 复核 P2：AppBar 已移除，双岛不挂时最小返回岛常驻）', () => {
+    renderLayout({ ...baseProps, loadState: 'loading' as const })
+    expect(screen.getByText('正在加载 workflow')).toBeInTheDocument()
+    // 返回小岛在加载态可用（双岛不渲染）。
+    expect(screen.queryByTestId('studio-identity-island')).toBeNull()
+    expect(screen.getByTestId('studio-back-island')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument()
+  })
+
+  it('失败态同样挂返回小岛', () => {
+    renderLayout({ ...baseProps, loadState: 'error' as const })
+    expect(
+      screen.getByText('无法加载 active workflow revision')
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('studio-back-island')).toBeInTheDocument()
   })
 
   it('renders the empty-state guidance and the workspace editor in empty mode', () => {
@@ -253,9 +312,12 @@ describe('WorkflowStudioLayout', () => {
     confirmSpy.mockRestore()
   })
 
-  it('opens contextual node editing after a graph node is selected', () => {
+  it('点中节点后开节点详情抽屉（#804 抽屉化：不再切页签/分栏）', () => {
     const { rerender } = renderLayout(baseProps)
 
+    // 未选中：抽屉不开。
+    expect(screen.queryByTestId('node-detail-drawer')).toBeNull()
+    // 页签停在画布（不再有「编辑节点」页签切换）。
     const mobileNav = screen.getByRole('tablist', {
       name: 'Workflow studio panels',
     })
@@ -265,8 +327,11 @@ describe('WorkflowStudioLayout', () => {
 
     rerenderLayout(rerender, { ...baseProps, selectedNodeKey: 'node-a' })
 
+    const drawer = screen.getByTestId('node-detail-drawer')
+    expect(drawer).toHaveAttribute('data-node', 'node-a')
+    // 页签仍在画布——抽屉是浮层，不切换面板。
     expect(
-      within(mobileNav).getByRole('tab', { name: '编辑节点' })
+      within(mobileNav).getByRole('tab', { name: '画布' })
     ).toHaveAttribute('aria-selected', 'true')
   })
 

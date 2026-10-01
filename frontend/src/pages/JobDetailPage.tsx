@@ -12,6 +12,7 @@ import { TokenUsageDialog } from '../components/tokenUsage/TokenUsageDialog'
 import { NonUploadableNotice } from '../components/job/NonUploadableNotice'
 import { useJobDetail } from './jobDetail/useJobDetail'
 import { useJobDetailActions } from './jobDetail/useJobDetailActions'
+import { useJobInspectDock } from './jobDetail/useJobInspectDock'
 import { EntityPanel } from './jobDetail/EntityPanel'
 
 export default function JobDetailPage() {
@@ -80,6 +81,14 @@ export default function JobDetailPage() {
 
   const openArtifactList = useCallback(() => setArtifactListOpen(true), [])
 
+  // 排查 Dock（#795 PR③）：头部「排查助手」job 级、失败节点入口节点级，
+  // 同一个 Dock 实例；状态与 key 重挂语义在 useJobInspectDock。
+  const { inspectDock, openInspect, openNodeInspect } = useJobInspectDock(
+    workspaceId,
+    jobId,
+    detail?.job.title || detail?.job.source_id
+  )
+
   // prettier-ignore
   const { openApproval, approvalDialog } = useJobApprovalGate(workspaceId, jobId, detail, actionLoading, handleApproval, openArtifact)
 
@@ -96,6 +105,7 @@ export default function JobDetailPage() {
     onDelete: handleDelete,
     onOpenArtifacts: openArtifactList,
     onOpenApproval: openApproval,
+    onOpenDiagnosis: openInspect,
   })
 
   if (!jobId) {
@@ -136,6 +146,7 @@ export default function JobDetailPage() {
               nodes={detail.nodes}
               runs={detail.runs}
               onOpenDagDialog={() => setDagDialogOpen(true)}
+              onOpenDiagnosis={openNodeInspect}
             />
           )}
         </div>
@@ -166,6 +177,7 @@ export default function JobDetailPage() {
         onClose={() => setDagDialogOpen(false)}
       />
       {jobId && <TokenUsageDialog scope="job" jobId={jobId} />}
+      {inspectDock}
     </div>
   )
 }

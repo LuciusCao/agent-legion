@@ -69,6 +69,7 @@ class AgentDispatchService:
         inputs: tuple[str, ...],
         node_config: dict[str, Any] | None = None,
         pinned_agent_version: int | None = None,
+        execution_generation: int = 0,
     ) -> bool:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
@@ -105,6 +106,10 @@ class AgentDispatchService:
                 **skill.manifest_pins(),
                 "log_path": str(log_path),
                 "execution": execution,
+                # EXEC-GENERATION-001：观测镜像——权威副本是请求行的
+                # execution_generation 列；manifest 键让 Worker/日志无需
+                # 回库即可看到本次执行属于哪一代。
+                "execution_generation": execution_generation,
             }
             # Quality replay audit trail: the pinned immutable version that
             # produced this manifest (absent on the normal published path).
@@ -151,6 +156,7 @@ class AgentDispatchService:
                         manifest=manifest,
                         execution_id=execution_id,
                         pinned_agent_version=pinned_agent_version,
+                        execution_generation=execution_generation,
                     )
                 )
                 if queued is None:

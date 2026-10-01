@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from worker._atomic import atomic_write
-from worker.upload.queue import PENDING_FILENAME
+from worker.upload.constants import PENDING_FILENAME
 
 # Sibling of upload_pending.json: which lease the execution dir belongs to.
 OWNER_FILENAME = "execution_owner.json"

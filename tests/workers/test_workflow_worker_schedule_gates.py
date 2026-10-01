@@ -386,9 +386,9 @@ def test_executor_claim_counts_pass_claim(tmp_path: Path) -> None:
     worker.job_db.get_run.return_value = {"frozen_pins_json": "{}"}
 
     with (
-        patch("server.app.workflow_worker.schedule.claim_executor_node", return_value=True),
+        patch("server.app.workflow_worker.claim_submit.claim_executor_node", return_value=True),
         patch(
-            "server.app.workflow_worker.schedule.resolve_code_node_dispatch",
+            "server.app.workflow_worker.claim_submit.resolve_code_node_dispatch",
             return_value="def run(job, job_dir, runtime):\n    pass\n",
         ),
     ):

@@ -32,9 +32,7 @@ def _make_job(storage_dir: Path, data_dir: Path) -> dict[str, str]:
     return {"storage_dir": make_data_relative(storage_dir, data_dir)}
 
 
-def test_stage_outputs_moves_selected_and_descendant_outputs(
-    tmp_path, mutation_service, definition
-):
+def test_stage_outputs_moves_selected_outputs(tmp_path, mutation_service, definition):
     data_dir = tmp_path
     storage_dir = data_dir / "jobs" / "job"
     storage_dir.mkdir(parents=True)
@@ -43,7 +41,7 @@ def test_stage_outputs_moves_selected_and_descendant_outputs(
     (storage_dir / "c.json").write_text("c")
 
     job = _make_job(storage_dir, data_dir)
-    staged = mutation_service.stage_outputs(job, ["b"], definition)
+    staged = mutation_service.stage_outputs(job, ["b", "c"], definition)
 
     assert not (storage_dir / "b.json").exists()
     assert not (storage_dir / "c.json").exists()
@@ -54,6 +52,24 @@ def test_stage_outputs_moves_selected_and_descendant_outputs(
     staged.commit()
     assert not (storage_dir / ".staged" / "b.json").exists()
     assert not (storage_dir / ".staged" / "c.json").exists()
+
+
+def test_stage_outputs_stages_exactly_the_given_set(tmp_path, mutation_service, definition):
+    """#759：affected_keys 是权威集合——不做任何图遍历，下游扩展/闭包过滤
+    都不存在；重置集与暂存集一致是调用方的责任（单一枚举源）。"""
+    data_dir = tmp_path
+    storage_dir = data_dir / "jobs" / "job"
+    storage_dir.mkdir(parents=True)
+    (storage_dir / "b.json").write_text("b")
+    (storage_dir / "c.json").write_text("c")
+
+    job = _make_job(storage_dir, data_dir)
+    staged = mutation_service.stage_outputs(job, ["b"], definition)
+
+    assert not (storage_dir / "b.json").exists()
+    assert (storage_dir / "c.json").exists()
+    assert staged.artifact_names == frozenset({"b.json"})
+    staged.commit()
 
 
 def test_stage_outputs_rollback_restores_files(tmp_path, mutation_service, definition):
@@ -97,7 +113,7 @@ def test_stage_outputs_preserves_inputs_and_unrelated_files(tmp_path, mutation_s
     (storage_dir / "extra.log").write_text("log")
 
     job = _make_job(storage_dir, data_dir)
-    staged = mutation_service.stage_outputs(job, ["b"], definition)
+    staged = mutation_service.stage_outputs(job, ["b", "c"], definition)
     staged.commit()
 
     assert (storage_dir / "a.json").exists()
@@ -115,7 +131,9 @@ def test_stage_outputs_removes_affected_run_history_only(tmp_path, mutation_serv
     (storage_dir / "runs" / "b" / "run-1" / "events.jsonl").write_text("selected")
     (storage_dir / "runs" / "c" / "run-1" / "events.jsonl").write_text("downstream")
 
-    staged = mutation_service.stage_outputs(_make_job(storage_dir, tmp_path), ["b"], definition)
+    staged = mutation_service.stage_outputs(
+        _make_job(storage_dir, tmp_path), ["b", "c"], definition
+    )
 
     assert (storage_dir / "runs" / "a").exists()
     assert not (storage_dir / "runs" / "b").exists()
@@ -182,7 +200,7 @@ def test_stage_outputs_restores_partial_moves_when_later_move_fails(
 
     job = _make_job(storage_dir, data_dir)
     with pytest.raises(OSError, match="disk failure"):
-        mutation_service.stage_outputs(job, ["a"], definition)
+        mutation_service.stage_outputs(job, ["a", "b"], definition)
 
     assert (storage_dir / "a.json").read_text() == "a"
     assert (storage_dir / "b.json").read_text() == "b"

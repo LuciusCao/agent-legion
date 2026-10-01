@@ -13,41 +13,45 @@ under a ``.gz``-suffixed ``storage_key``; the suffix is the form marker and
 ``open_stream`` decodes transparently (scheme: ``job_artifact_gzip``).
 ``size_bytes`` on a ``.gz`` row is the stored (compressed) size — the only
 HEAD-verifiable number.
+
+EXEC-GENERATION-001 byte plane (#759 review P1-B): the ``lease_id`` arm of
+``upload`` never writes the authority key directly — bytes land on a
+per-invocation staging key (unique attempt namespace per call, so concurrent
+same-lease retries never share staging/rollback objects) and are promoted
+through the shared
+``executors._artifact_promotion.promote_to_authority_guarded`` primitive
+(backup → copy → in-transaction generation recheck + manifest row → rollback
+restore on rejection, the whole per-key sequence serialized by a
+per-authority-key advisory lock), the same sequence the Worker-result promote
+uses, so a reset landing after the entry gate cannot leave old manifest rows
+pointing at polluted bytes.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import time
 from pathlib import Path
 from typing import Any, BinaryIO
+from uuid import uuid4
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.executors._artifact_promotion import (
+    ARTIFACT_ROW_UPSERT_SQL,
+    hash_local_file,
+    put_stream_with_retries,
+    upload_via_staging_guarded,
+)
+from server.app.executors._lease_write_gate import lease_artifact_write_current
 from server.app.services.job_artifact_gzip import GZIP_SUFFIX, content_stream
 from server.app.services.job_artifact_rows import upsert_artifact_row_tx
 from server.app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
 
-_UPLOAD_ATTEMPTS = 3
-_UPLOAD_BACKOFF_SECONDS = 0.5
 # Public: the claim-time injector derives longer presign TTLs from the node
 # timeout on top of this floor (agent_broker.remote_artifact_support).
 DEFAULT_PRESIGN_EXPIRY_SECONDS = 3600
-
-_UPSERT_ROW_SQL = """
-insert into job_artifacts(
-  job_id, node_key, name, storage_key, size_bytes, content_hash
-) values (%s, %s, %s, %s, %s, %s)
-on conflict (job_id, node_key, name) do update
-set storage_key=excluded.storage_key,
-    size_bytes=excluded.size_bytes,
-    content_hash=excluded.content_hash,
-    uploaded_at=current_timestamp
-returning *
-"""
 
 # Bucket key prefix for job artifacts (materials keys live at the bucket
 # root); the prefix lets bucket lifecycle rules target artifacts separately.
@@ -85,6 +89,23 @@ class JobArtifactObjectStore:
     def enabled(self) -> bool:
         return self.storage is not None
 
+    @property
+    def database_dsn(self) -> ConnectSource:
+        """The connection source; the guarded promote opens its serialized
+        transaction on it (executors._artifact_promotion.promote_to_authority_guarded)."""
+        return self._dsn
+
+    def artifact_write_gate_open(self, *, job_id: str, lease_id: str) -> bool:
+        """EXEC-GENERATION-001 产物写闸的一次性复查（#645 P2）。
+
+        True = lease 仍是本 job 当前代次的 active lease，调用方可以继续做
+        字节级上传/copy。这只是锁外快路径——重置落在复查之后时，权威的拦
+        截在共享 promote primitive 的清单行登记事务里
+        （``executors._artifact_promotion.register_rows_guarded``）。
+        """
+        with write_transaction(self._dsn) as conn:
+            return lease_artifact_write_current(conn, lease_id, job_id)
+
     def upload(
         self,
         *,
@@ -93,6 +114,7 @@ class JobArtifactObjectStore:
         node_key: str,
         name: str,
         local_path: Path,
+        lease_id: str = "",
     ) -> dict[str, Any] | None:
         """Upload one produced artifact and upsert its manifest row.
 
@@ -100,44 +122,67 @@ class JobArtifactObjectStore:
         bounded retries on persistent storage errors — the completion hooks
         catch, log and continue (the local copy stays; the reconciler
         re-uploads later).
+
+        With ``lease_id`` the write goes through the EXEC-GENERATION-001
+        artifact byte plane (#759 review P1-B): bytes land on a per-invocation
+        staging key first and are promoted by the shared
+        ``promote_to_authority_guarded`` primitive — the manifest row
+        registers only if the lease still owns the current generation inside
+        the job-mutation-locked transaction, and a rejected promote restores
+        the authority object from its rollback backup, so a reset landing
+        between the upload loop's entry check and the row write can neither
+        resurrect a removed manifest row nor leave a kept row pointing at
+        polluted bytes. Returns None on such a rejection.
+
+        Without ``lease_id`` (reconciler re-uploads, approval artifact
+        promotion) the legacy direct write stays: those callers run outside
+        any lease context, so there is no execution generation to CAS against
+        — the write gate could never open for them, and their upsert semantics
+        (refresh the manifest row to match the bytes on disk) are the desired
+        reconciliation behavior.
         """
         if self.storage is None:
             return None
         if not valid_artifact_name(name):
             raise ValueError(f"invalid artifact name: {name!r}")
-        size_bytes = local_path.stat().st_size
-        with local_path.open("rb") as handle:
-            content_hash = hashlib.file_digest(handle, "sha256").hexdigest()
+        size_bytes, content_hash = hash_local_file(local_path)
         storage_key = artifact_storage_key(workspace_id, job_id, name)
-        last_error: Exception | None = None
-        for attempt in range(_UPLOAD_ATTEMPTS):
-            try:
-                with local_path.open("rb") as stream:
-                    self.storage.put_stream(storage_key, stream, size_bytes)
-                break
-            except Exception as exc:  # storage outage must not fail the node
-                # #204 broad-except audit: retry loop over the boto3 data
-                # plane. put_stream's outcome space is genuinely mixed —
-                # transport errors (ClientError/BotoCoreError), connection
-                # resets (OSError), and the injected test fakes' own exception
-                # types all take the same bounded-retry path, and the final
-                # attempt re-raises for the completion hooks to contain. A
-                # narrow family cannot enumerate the storage layer here
-                # without also changing the public seam the tests inject.
-                last_error = exc
-                logger.warning(
-                    "artifact upload attempt %d/%d failed for job %s %s: %s",
-                    attempt + 1,
-                    _UPLOAD_ATTEMPTS,
-                    job_id,
-                    name,
-                    exc,
-                )
-                if attempt + 1 < _UPLOAD_ATTEMPTS:
-                    time.sleep(_UPLOAD_BACKOFF_SECONDS * (2**attempt))
-        else:
-            assert last_error is not None
-            raise last_error
+        if lease_id:
+            # 每次调用独立 attempt 命名空间（codex #774 P1×2）：并发重试
+            # （同 lease 同名、不同字节）的 staging/rollback 对象若共享
+            # key，put_stream 在锁外会让后写者覆盖先写者的 staging 字节
+            # （先写者把后写者字节 promote 进 authority、却登记自己的
+            # size/hash），先行者的 finally 还会删掉后者的 staging/rollback
+            # 对象（后者闸拒/登记失败时恢复无备份可取）。per-invocation
+            # key 从构造上拆掉这两条跨调用通道。
+            attempt = uuid4().hex
+            return upload_via_staging_guarded(
+                self.storage,
+                self._dsn,
+                job_id=job_id,
+                lease_id=lease_id,
+                name=name,
+                local_path=local_path,
+                size_bytes=size_bytes,
+                staging_key=artifact_staging_key(
+                    workspace_id, job_id, f"{lease_id}/{attempt}", name
+                ),
+                authority_key=storage_key,
+                rollback_key=artifact_staging_key(
+                    workspace_id, job_id, lease_id, f".rollback/{attempt}/{name}"
+                ),
+                row={
+                    "job_id": job_id,
+                    "node_key": node_key,
+                    "name": name,
+                    "storage_key": storage_key,
+                    "size_bytes": size_bytes,
+                    "content_hash": content_hash,
+                },
+            )
+        put_stream_with_retries(
+            self.storage, storage_key, local_path, size_bytes, job_id=job_id, name=name
+        )
         return self._register_row(
             job_id=job_id,
             node_key=node_key,
@@ -243,7 +288,7 @@ class JobArtifactObjectStore:
             return [
                 upsert_artifact_row_tx(
                     conn,
-                    _UPSERT_ROW_SQL,
+                    ARTIFACT_ROW_UPSERT_SQL,
                     job_id=str(row["job_id"]),
                     node_key=str(row["node_key"]),
                     name=str(row["name"]),
@@ -263,12 +308,18 @@ class JobArtifactObjectStore:
         storage_key: str,
         size_bytes: int,
         content_hash: str,
-    ) -> dict[str, Any]:
-        """Single-row upsert in its own transaction (batch path inlines it)."""
+    ) -> dict[str, Any] | None:
+        """Single-row upsert in its own transaction (batch path inlines it).
+
+        Ungated by design: the only callers left are the no-lease paths
+        (``record_remote`` HEAD-verified registrations, the reconciler and
+        approval direct writes) — lease-carrying writes go through
+        ``register_rows_guarded`` inside the shared promote primitive.
+        """
         with write_transaction(self._dsn) as conn:
             return upsert_artifact_row_tx(
                 conn,
-                _UPSERT_ROW_SQL,
+                ARTIFACT_ROW_UPSERT_SQL,
                 job_id=job_id,
                 node_key=node_key,
                 name=name,
@@ -278,11 +329,16 @@ class JobArtifactObjectStore:
             )
 
     def lookup(self, job_id: str, name: str) -> dict[str, Any] | None:
-        """Latest manifest row for an artifact name (internal: has storage_key)."""
+        """Latest manifest row for an artifact name (internal: has storage_key).
+
+        同名多行（跨节点共名）的「最新」判定与 ``rows_for_job`` 共用同一个
+        确定性决胜：``uploaded_at`` 并列（同事务批量登记同事务时间戳）时按
+        ``node_key`` 决胜——两条读路径永远选中同一行（#775 对抗复审 P2）。
+        """
         with read_connection(self._dsn) as conn:
             row = conn.execute(
                 "select * from job_artifacts where job_id=%s and name=%s"
-                " order by uploaded_at desc limit 1",
+                " order by uploaded_at desc, node_key desc limit 1",
                 (job_id, name),
             ).fetchone()
         return dict(row) if row is not None else None
@@ -296,9 +352,11 @@ class JobArtifactObjectStore:
         return dict(row) if row is not None else None
 
     def rows_for_job(self, job_id: str) -> list[dict[str, Any]]:
+        """全清单行，``uploaded_at, node_key`` 升序——同名多行时与
+        ``lookup`` 共用同一决胜序（hydration 按此序留尾即「最新」行）。"""
         with read_connection(self._dsn) as conn:
             rows = conn.execute(
-                "select * from job_artifacts where job_id=%s order by uploaded_at",
+                "select * from job_artifacts where job_id=%s order by uploaded_at, node_key",
                 (job_id,),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -310,6 +368,29 @@ class JobArtifactObjectStore:
                 (job_id,),
             ).fetchall()
         return {str(row["name"]) for row in rows}
+
+    def live_keys_for(self, job_id: str, storage_keys: list[str]) -> set[str]:
+        """Targeted existence probe: which of ``storage_keys`` the job's
+        CURRENT manifest registers (#706 review P2).
+
+        The rerun cleanup's re-attempt guard needs per-key liveness, not the
+        manifest's contents — a full ``rows_for_job`` read per retired object
+        degraded multi-artifact reruns to O(retired x manifest rows) on the
+        sync request path. This probe ships only the queried keys both ways
+        (the job_id predicate rides the manifest PK prefix). Like
+        ``existing_object_storage_keys`` (#344) it is a read-then-act TOCTOU
+        guard, not an atomic conditional removal: a caller acting on the
+        answer must tolerate — and diagnose — a re-registration landing in
+        the probe-to-act gap.
+        """
+        if not storage_keys:
+            return set()
+        with read_connection(self._dsn) as conn:
+            rows = conn.execute(
+                "select storage_key from job_artifacts where job_id=%s and storage_key = ANY(%s)",
+                (job_id, storage_keys),
+            ).fetchall()
+        return {str(row["storage_key"]) for row in rows}
 
     def open_stream(self, row: dict[str, Any]) -> BinaryIO:
         """Content-byte stream: ``.gz`` objects decode transparently (#338);
@@ -326,6 +407,17 @@ class JobArtifactObjectStore:
         """Ranged read [start, end] inclusive; undefined for ``.gz`` (#338)."""
         assert self.storage is not None
         return self.storage.open_range(str(row["storage_key"]), start, end)
+
+    def delete_objects_guarded(self, rows: list[dict[str, Any]], job_id: str) -> set[str]:
+        """按 promote 同款 ``artifact-authority`` 锁复核后删除（codex #776 R7 P2-A）。
+
+        供突变提交后的退役对象清理（``rerun_artifact_cleanup`` 按 duck seam
+        探测）使用；实现体在 ``job_artifact_guarded_delete``（预算叶子）。
+        返回实际删除的 storage_key 集。
+        """
+        from server.app.services.job_artifact_guarded_delete import delete_objects_guarded
+
+        return delete_objects_guarded(self, rows, job_id)
 
     def delete_objects(self, rows: list[dict[str, Any]]) -> None:
         """Best-effort object deletion for manifest rows snapshot before a
@@ -349,5 +441,5 @@ class JobArtifactObjectStore:
                 # failing an already-committed deletion. The traceback is
                 # logged so the residue is diagnosable.
                 logger.warning(
-                    "failed to delete artifact object %s", row["storage_key"], exc_info=True
+                    "artifact object removal failed for %s", row["storage_key"], exc_info=True
                 )

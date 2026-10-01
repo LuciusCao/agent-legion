@@ -9,8 +9,11 @@ claims behind concurrent agent claims. These tests pin:
 1. a code claim never requests the `agent-ws` lock (pg_locks observed from
    inside the claim transaction, plus a statement-level patch asserting no ws
    lock statement runs at all for a code candidate);
-2. the agent claim lock order is unchanged (ws acquired strictly before the
-   worker lock);
+2. the agent claim lock order is ws → worker → job-mutation (the
+   EXEC-GENERATION-001 domain was appended after the pool locks in #759
+   phase 1c; the request-row FOR UPDATE moved after the whole advisory
+   ladder to avoid AB-BA against the mutation side's job-mutation →
+   request-row order);
 3. concurrency: a code claim completes while another connection holds the
    workspace's `agent-ws` lock.
 """
@@ -83,17 +86,24 @@ def _view(kind: str) -> WorkerView:
 def _advisory_lock_keys_held(conn: Any) -> set[int]:
     """Advisory lock keys held by a backend (its own session or another's).
 
-    ``pg_advisory_xact_lock(hashtext(key))`` appears in pg_locks as
-    (locktype='advisory', classid=0, objid=hashtext(key), objsubid=1).
-    Row access is index-based: raw psycopg cursors yield tuples while the
-    DatabaseConnection facade yields dicts."""
+    ``pg_advisory_xact_lock(hashtext(key))`` splits the (sign-extended) int8
+    into (classid, objid) in pg_locks with objsubid=1; reconstruct the
+    unsigned 64-bit key so negative hashtext values (e.g. some
+    ``job-mutation:`` domains) are observed too — a ``classid=0`` filter
+    would silently drop them. Row access is index-based: raw psycopg cursors
+    yield tuples while the DatabaseConnection facade yields dicts."""
     rows = conn.execute(
-        "select objid from pg_locks"
-        " where locktype='advisory' and classid=0 and objsubid=1"
-        " and pid = %s",
+        "select classid, objid from pg_locks where locktype='advisory' and objsubid=1 and pid = %s",
         (backend_pid(conn),),
     ).fetchall()
-    return {int(row["objid"] if isinstance(row, dict) else row[0]) for row in rows}
+    return {
+        (
+            (int(row["classid"] if isinstance(row, dict) else row[0]) << 32)
+            | (int(row["objid"] if isinstance(row, dict) else row[1]))
+        )
+        & 0xFFFFFFFFFFFFFFFF
+        for row in rows
+    }
 
 
 def backend_pid(conn: Any) -> Any:
@@ -105,7 +115,7 @@ def backend_pid(conn: Any) -> Any:
 def _lock_key(conn: Any, domain: str) -> int:
     row = conn.execute("select hashtext(%s) as k", (domain,)).fetchone()
     value = row["k"] if isinstance(row, dict) else row[0]
-    return int(value)
+    return int(value) & 0xFFFFFFFFFFFFFFFF
 
 
 def _claim_candidates(conn: Any, kind: str) -> list[Any]:
@@ -177,7 +187,7 @@ def test_code_claim_never_requests_the_agent_ws_lock(job_db) -> None:
         assert claimed is not None
         assert claimed.kind == "code"
 
-    assert advisory_domains == ["agent-worker:worker-code"]
+    assert advisory_domains == ["agent-worker:worker-code", "job-mutation:lock-job-2"]
 
 
 def test_agent_claim_lock_order_is_ws_then_worker(job_db) -> None:
@@ -207,9 +217,14 @@ def test_agent_claim_lock_order_is_ws_then_worker(job_db) -> None:
         assert claimed.kind == "agent"
         ws_key = _lock_key(conn, "agent-ws:test-workspace")
         worker_key = _lock_key(conn, "agent-worker:worker-order")
+        job_mutation_key = _lock_key(conn, "job-mutation:order-job")
 
     domains = [domain for domain, _ in snapshots]
-    assert domains == ["agent-ws:test-workspace", "agent-worker:worker-order"]
+    assert domains == [
+        "agent-ws:test-workspace",
+        "agent-worker:worker-order",
+        "job-mutation:order-job",
+    ]
     # First statement acquired the ws lock but NOT the worker lock yet.
     _, held_after_ws = snapshots[0]
     assert ws_key in held_after_ws
@@ -218,6 +233,10 @@ def test_agent_claim_lock_order_is_ws_then_worker(job_db) -> None:
     _, held_after_worker = snapshots[1]
     assert ws_key in held_after_worker
     assert worker_key in held_after_worker
+    # EXEC-GENERATION-001: the job-mutation lock is third — after every pool
+    # lock, before the request-row FOR UPDATE.
+    _, held_after_job = snapshots[2]
+    assert job_mutation_key in held_after_job
 
 
 def test_code_claim_completes_while_agent_ws_lock_held(job_db) -> None:

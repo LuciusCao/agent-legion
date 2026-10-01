@@ -171,7 +171,7 @@ def test_batch_rerun_matches_per_job_rerun_node_mode(rerun_service, job_db) -> N
     assert statuses == ["succeeded", "succeeded", "skipped", "skipped", "failed", "failed"]
     assert actual[2]["reason_code"] == "busy"  # running nodes
     assert actual[3]["reason_code"] == "busy"  # active lease
-    assert actual[4]["reason_code"] == "wrong_workspace"
+    assert actual[4]["reason_code"] == "not_found"
     assert actual[5]["reason_code"] == "not_found"
 
 

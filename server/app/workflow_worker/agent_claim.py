@@ -51,6 +51,8 @@ def fail_node_config(
     node: WorkflowNode,
     log_path: Path,
     message: str,
+    *,
+    execution_generation: int = 0,
 ) -> bool:
     """Fail a node that can never run due to configuration, without a lease."""
     worker.leases.fail_without_lease(
@@ -61,6 +63,7 @@ def fail_node_config(
             node_key=node.key,
             capability=node.capability,
             log_path=str(log_path),
+            execution_generation=execution_generation,
         ),
         message,
     )
@@ -77,12 +80,27 @@ def claim_agent_node(
     inputs: tuple[str, ...],
     agent_id: str,
     workflow_key: str,
+    *,
+    execution_generation: int = 0,
 ) -> bool:
     """Enqueue an agent-routed candidate; False when it already has a request."""
     workspace_id = workspace["id"]
     if worker.agent_dispatch is None:
         raise RuntimeError("Agent dispatch service is not configured")
     dispatch = worker.agent_dispatch
+
+    def fail_config(message: str) -> bool:
+        return fail_node_config(
+            worker,
+            workspace_id,
+            job,
+            workflow_key,
+            node,
+            log_path,
+            message,
+            execution_generation=execution_generation,
+        )
+
     # Per-pass in-memory gates (batched active filter + stock limit); the
     # enqueue re-check on the pool thread stays authoritative. Gated
     # candidates must stay cheap: no batch-payload or definition reads.
@@ -97,29 +115,17 @@ def claim_agent_node(
             worker.job_db, str(workspace_id), agent_id, pin
         )
     except ValueError as exc:
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        return fail_config(str(exc))
     if definition_config is None:  # resolve_node_route already validated this
-        return fail_node_config(
-            worker,
-            workspace_id,
-            job,
-            workflow_key,
-            node,
-            log_path,
+        return fail_config(
             f"Agent {agent_id!r} has no published definition in workspace {workspace_id!r};"
             " agent definitions are workspace-scoped (schema v46) — create one in"
-            " Studio (Agent 管理) for this workspace",
+            " Studio (Agent 管理) for this workspace"
         )
     if pin is not None and definition_config.capability != node.capability:
-        return fail_node_config(
-            worker,
-            workspace_id,
-            job,
-            workflow_key,
-            node,
-            log_path,
+        return fail_config(
             f"pinned Agent version capability {definition_config.capability!r}"
-            f" does not match node capability {node.capability!r}",
+            f" does not match node capability {node.capability!r}"
         )
     try:
         # #550：agent 节点的有效 schema 同样合并保留执行键（timeout/
@@ -144,7 +150,7 @@ def claim_agent_node(
         )
     except ValueError as exc:
         # Config drift must fail THIS node, not abort the whole poll pass.
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        return fail_config(str(exc))
 
     flight_key = (str(job["id"]), node.key)
 
@@ -162,6 +168,7 @@ def claim_agent_node(
                 inputs=inputs,
                 node_config=node_config,
                 pinned_agent_version=int(pin["version"]) if pin is not None else None,
+                execution_generation=execution_generation,
             )
         except (ValueError, SkillRepoError) as exc:
             # SkillRepoError (git clone/fetch/checkout 失败) 是 RuntimeError
@@ -169,7 +176,7 @@ def claim_agent_node(
             # 线程池。有意的折衷：瞬时 git 故障会把节点直接置失败而不是下轮
             # 重试——热路径 git 探测几乎不瞬时失败，fetch 仅在 locked commit
             # 缺失时发生，受影响的 job 可由用户重跑。
-            fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+            fail_config(str(exc))
         finally:
             worker.state.agent_pass.in_flight.discard(flight_key)
 

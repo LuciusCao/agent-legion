@@ -34,6 +34,7 @@ _SINGLE_CLAIM_KEYS = {
     "node_key",
     "agent_id",
     "kind",
+    "execution_generation",
     "manifest",
     "bundle_url",
 }
@@ -192,3 +193,19 @@ def test_batch_response_drops_only_the_broken_item() -> None:
     finally:
         response_module.build_claim_response = original
     assert all_dropped.status_code == 204, "all items dropped = the empty-batch 204"
+
+
+def test_claim_response_carries_execution_generation(tmp_path: Path) -> None:
+    """EXEC-GENERATION-001：claim 响应携带请求行的代次戳（观测字段）。"""
+    app = make_app(tmp_path)
+    seed_request(app.state.job_db, job_id="job-gen", limit=2)
+
+    with TestClient(app) as client:
+        authenticate_admin(client)
+        token = register(client)["worker_token"]
+        response = _batch_claim(client, token, {"limit": 1})
+
+    assert response.status_code == 200, response.text
+    claim = response.json()["claims"][0]
+    assert claim["execution_generation"] == 0
+    assert claim["manifest"]["job_id"] == "job-gen"

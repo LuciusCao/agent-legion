@@ -52,6 +52,9 @@ const draftView: AgentDefinitionDraftView = {
   capability: 'generate_key_info',
   runtime: 'pi',
   skill: null,
+  status: 'completed',
+  draftHash: null,
+  saveFailed: false,
 }
 
 function makeStudio(overrides: Partial<Studio> = {}): Studio {
@@ -66,7 +69,9 @@ function makeStudio(overrides: Partial<Studio> = {}): Studio {
 
 // Layout stub：把草稿卡片挂进 NavProvider 子树，模拟聊天面板的挂载位置。
 vi.mock('./WorkflowStudioLayout', () => ({
-  WorkflowStudioLayout: () => <AgentDefinitionDraftCard draft={draftView} />,
+  WorkflowStudioLayout: () => (
+    <AgentDefinitionDraftCard draft={draftView} workspaceId="ws1" />
+  ),
 }))
 
 function renderPage(studio: Studio) {

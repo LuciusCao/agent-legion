@@ -12,6 +12,8 @@ from server.app.executors.models import (
     LeaseClaimRequest,
 )
 from server.app.jobs import JobQueries
+from server.app.jobs.atomic_mutations import mark_nodes_for_rerun
+from server.app.workflows.sharding import try_start_shard
 from tests.executors.leases.helpers import (
     _claim_request,
     _set_node_limit,
@@ -383,3 +385,130 @@ def test_recover_skips_job_when_lease_claimed_concurrently(
     assert recovered == [job_id]
     node_a = queries.get_job_node(job_id, "node_a")
     assert node_a is not None and node_a["status"] == "pending"
+
+
+def test_claim_stamps_running_node_with_current_generation(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    """EXEC-GENERATION-001 审查 P2-b：claim 翻 running 必须给 job_nodes 行盖
+    当前代次戳（与 park_awaiting_approval 对称）。
+
+    兄弟节点 rerun 把代次 bump 到 1 后，旁支 pending 行（旧戳 0）上的 claim
+    必须盖新戳 1；该行随后成孤儿（lease 消失）时，recover 的代次闸门认戳
+    放行复位——旧实现不盖戳，recover 会拒绝，节点永久卡 running。
+    """
+    workspace_id, job_id = _setup_workspace(
+        queries,
+        "ws-claim-stamp",
+        "exec-claim-stamp",
+        1,
+        node_key="node_a",
+        node_keys=["node_a", "node_b"],
+    )
+    with queries.lease_guarded_mutation(
+        job_id, datetime.now(UTC), reject_running_nodes=True
+    ) as conn:
+        mark_nodes_for_rerun(conn, job_id, ["node_b"], {"node_b": []})
+    node_a = queries.get_job_node(job_id, "node_a")
+    assert node_a is not None and int(node_a["execution_generation"]) == 0  # 旁支行旧戳
+
+    claim = repo_a.try_claim(
+        _claim_request(
+            workspace_id,
+            job_id,
+            node_key="node_a",
+            executor_id="exec-claim-stamp",
+            execution_generation=1,
+        )
+    )
+    assert claim is not None
+    node_a = queries.get_job_node(job_id, "node_a")
+    assert node_a is not None
+    assert node_a["status"] == "running"
+    assert int(node_a["execution_generation"]) == 1  # 盖了 jobs 现值戳
+
+    # 孤儿化（lease 消失、行仍 running）后 recover 必须认戳复位。
+    with queries.connect() as conn:
+        conn.execute("update executor_leases set status='released' where job_id=%s", (job_id,))
+        conn.execute("commit")
+    recovered = repo_a.recover_orphaned_running_jobs(datetime.now(UTC))
+    assert recovered == [job_id]
+    node_a = queries.get_job_node(job_id, "node_a")
+    assert node_a is not None and node_a["status"] == "pending"
+
+
+def test_recover_refuses_stale_generation_running_row(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    """代次闸门的另一半：旧戳 running 孤儿行（戳 0 < jobs 现值 1）属于已被
+    重置 supersede 的状态，recover 不得复位它（该行的归宿由重置侧负责）。"""
+    workspace_id, job_id = _setup_workspace(
+        queries,
+        "ws-stale-stamp",
+        "exec-stale-stamp",
+        1,
+        node_key="node_a",
+        node_keys=["node_a", "node_b"],
+    )
+    with queries.lease_guarded_mutation(
+        job_id, datetime.now(UTC), reject_running_nodes=True
+    ) as conn:
+        mark_nodes_for_rerun(conn, job_id, ["node_b"], {"node_b": []})
+    with queries.connect() as conn:
+        # 旧戳 running 孤儿：节点在 bump 前翻的 running（不带新戳）、无 lease。
+        conn.execute(
+            "update job_nodes set status='running' where job_id=%s and node_key='node_a'",
+            (job_id,),
+        )
+        conn.execute("update jobs set status='running' where id=%s", (job_id,))
+        conn.execute("commit")
+
+    recovered = repo_a.recover_orphaned_running_jobs(datetime.now(UTC))
+
+    node_a = queries.get_job_node(job_id, "node_a")
+    assert node_a is not None
+    assert node_a["status"] == "running"  # 旧戳行被拒绝复位
+    assert int(node_a["execution_generation"]) == 0
+    # job 本身仍被 sweep 认领（无 lease 的状态重推导照常跑），行不动。
+    assert recovered == [job_id]
+    job = queries.get_job(job_id)
+    assert job is not None and job["status"] == "running"
+
+
+def test_try_start_shard_stamps_generation(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    """shard claim 路径的 job_nodes 翻转同样盖戳（try_start_shard 的
+    execution_generation 参数）——shard 节点成孤儿时走同一个 recover 闸门。"""
+    workspace_id, job_id = _setup_workspace(
+        queries,
+        "ws-shard-stamp",
+        "exec-shard-stamp",
+        1,
+        node_key="node_a",
+        node_keys=["node_a"],
+    )
+    del workspace_id
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into node_shards(job_id, node_key, shard_index, input_json)"
+            " values (%s, 'node_a', 0, '{}')",
+            (job_id,),
+        )
+        conn.execute("update jobs set execution_generation=1 where id=%s", (job_id,))
+        conn.execute("commit")
+        started = try_start_shard(
+            conn,
+            job_id,
+            "node_a",
+            0,
+            "exec-shard-1",
+            database_timestamp(datetime.now(UTC)),
+            execution_generation=1,
+        )
+        assert started is True
+        conn.execute("commit")
+    node_a = queries.get_job_node(job_id, "node_a")
+    assert node_a is not None
+    assert node_a["status"] == "running"
+    assert int(node_a["execution_generation"]) == 1

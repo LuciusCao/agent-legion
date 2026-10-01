@@ -10,84 +10,148 @@ import type { DraftSaveState } from './useWorkflowDraftPersistence'
 vi.mock('./studioStateContext', () => ({ useStudioState: vi.fn() }))
 
 function renderControl(save: DraftSaveState | undefined, readOnly = false) {
-  const onSaveDraft = vi.fn()
-  render(
-    <WorkflowStudioDraftSaveControl
-      save={save}
-      readOnly={readOnly}
-      onSaveDraft={onSaveDraft}
-    />
+  return render(
+    <WorkflowStudioDraftSaveControl save={save} readOnly={readOnly} />
   )
-  return onSaveDraft
 }
 
 describe('WorkflowStudioDraftSaveControl', () => {
-  it('shows 未保存更改 with an enabled save button while edits are pending', () => {
-    const onSaveDraft = renderControl({ status: 'pending', savedAt: null })
-
-    expect(screen.getByText('草稿有未保存更改')).toBeInTheDocument()
-    const button = screen.getByRole('button', { name: '保存草稿' })
-    expect(button).toBeEnabled()
-    fireEvent.click(button)
-    expect(onSaveDraft).toHaveBeenCalledTimes(1)
-  })
-
-  it('shows 保存中 and disables the button while saving', () => {
+  it('保存中显示瞬态文本', () => {
     renderControl({ status: 'saving', savedAt: null })
-
     expect(screen.getByText('草稿保存中…')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled()
   })
 
-  it('shows the saved-at time and disables the button once saved', () => {
-    const savedAt = '2026-08-27T09:05:00+00:00'
-    renderControl({ status: 'saved', savedAt })
-    const at = new Date(savedAt)
-    const hh = String(at.getHours()).padStart(2, '0')
-    const mm = String(at.getMinutes()).padStart(2, '0')
-
-    expect(screen.getByText(`草稿已保存 ${hh}:${mm}`)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled()
-  })
-
-  it('shows the failure warning and keeps the button enabled for manual retry', () => {
+  it('保存失败显示将自动重试的警示', () => {
     renderControl({ status: 'error', savedAt: null })
-
     expect(screen.getByText('草稿保存失败，将自动重试')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '保存草稿' })).toBeEnabled()
+  })
+
+  it('#804 定案：pending（未保存更改）不占位——debounce 窗口内静默', () => {
+    const { container } = renderControl({ status: 'pending', savedAt: null })
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('#804 定案：保存成功即隐——不再有「已保存 HH:MM」与手动保存按钮', () => {
+    const { container } = renderControl({
+      status: 'saved',
+      savedAt: '2026-08-27T09:05:00+00:00',
+    })
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByRole('button', { name: '保存草稿' })).toBeNull()
   })
 
   it('shows the service-unavailable warning when the draft query failed', () => {
     renderControl({ status: 'idle', savedAt: null, loadError: true })
-
     expect(
       screen.getByText('草稿服务不可用，编辑仅保留在本页内存')
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled()
   })
 
-  it('hides the save button in read-only mode but keeps the status text', () => {
-    renderControl({ status: 'pending', savedAt: null }, true)
+  it('codex 轮 5 P2：error 终态警示簇带显式「重试保存」出口（点击重新调度当前内容）', () => {
+    const onRetrySave = vi.fn()
+    render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'error', savedAt: null }}
+        readOnly={false}
+        onRetrySave={onRetrySave}
+      />
+    )
+    expect(screen.getByText('草稿保存失败，将自动重试')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试保存' }))
+    expect(onRetrySave).toHaveBeenCalledOnce()
+  })
 
-    expect(screen.getByText('草稿有未保存更改')).toBeInTheDocument()
+  it('codex 轮 5 P2：loadError（GET 失败）不给重试保存（重试的是读取侧）', () => {
+    render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'idle', savedAt: null, loadError: true }}
+        readOnly={false}
+        onRetrySave={vi.fn()}
+      />
+    ).unmount()
+    expect(screen.queryByRole('button', { name: '重试保存' })).toBeNull()
+  })
+
+  it('codex 轮 4 P1-3：持久化失败/服务不可用警示窄屏保留——⚠ 图标恒可见（不带 secondary），长文案窄屏让位', () => {
+    // jsdom 跑不了 @media——钉结构：⚠ 图标不带窄屏隐藏类（恒可见可操作），
+    // 长文案带 secondary（窄屏收成 ⚠+tooltip）。瞬态「保存中…」不受此约束
+    // （它窄屏隐藏是安全的——出错/冲突才需要用户知情）。
+    renderControl({ status: 'error', savedAt: null })
+    const text = screen.getByText('草稿保存失败，将自动重试')
+    expect(text.className).toContain('secondary')
+    const icon = screen.getByTestId('WarningIcon')
+    expect(icon.closest('[class*="secondary"]')).toBeNull()
+  })
+
+  it('冲突态：警示常驻 + 显式二选一动作（采用 Agent 版本 / 保留本页编辑）', () => {
+    const onAdoptServer = vi.fn()
+    const onKeepMine = vi.fn()
+    render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'idle', savedAt: null, conflict: true }}
+        readOnly={false}
+        onAdoptServer={onAdoptServer}
+        onKeepMine={onKeepMine}
+      />
+    )
     expect(
-      screen.queryByRole('button', { name: '保存草稿' })
-    ).not.toBeInTheDocument()
+      screen.getByText(/自动保存已暂停——请选择采用 Agent 版本或保留本页编辑/)
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '采用 Agent 版本' }))
+    expect(onAdoptServer).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: '保留本页编辑' }))
+    expect(onKeepMine).toHaveBeenCalledOnce()
+  })
+
+  it('codex 轮 3 P1：窄屏一刀切隐藏只盖瞬态文本，冲突簇（警示 + 操作出口）不挂窄屏隐藏类', () => {
+    // jsdom 跑不了 @media——钉结构：冲突长文案挂 island 的 secondary 类
+    // （窄屏隐藏），但冲突按钮与 ⚠ 图标不带该类（窄屏恒可见可操作）。
+    // revert 即红：整组挂回 secondary/conditional 时按钮会被断言出携带。
+    render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'idle', savedAt: null, conflict: true }}
+        readOnly={false}
+        onAdoptServer={vi.fn()}
+        onKeepMine={vi.fn()}
+      />
+    )
+    const adopt = screen.getByRole('button', { name: '采用 Agent 版本' })
+    const keep = screen.getByRole('button', { name: '保留本页编辑' })
+    for (const el of [adopt, keep]) {
+      expect(el.closest('[class*="secondary"]')).toBeNull()
+    }
+    // 长文案带 secondary（窄屏让位给 ⚠ 图标）。
+    expect(screen.getByText(/自动保存已暂停/).className).toContain('secondary')
+  })
+
+  it('只读态不提供冲突动作', () => {
+    const { container } = render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'idle', savedAt: null, conflict: true }}
+        readOnly
+        onAdoptServer={vi.fn()}
+        onKeepMine={vi.fn()}
+      />
+    )
+    expect(screen.queryByRole('button')).toBeNull()
+    // 警示文本仍可见。
+    expect(container).toHaveTextContent(/自动保存已暂停/)
   })
 })
 
 describe('WorkflowStudioDraftSaveControlContainer', () => {
-  it('wires the studio draft save state and flush action', () => {
-    const flushDraftSave = vi.fn()
+  it('wires the conflict resolution actions from studio state', () => {
+    const resolveConflict = vi.fn()
     vi.mocked(useStudioState).mockReturnValue({
-      draftSave: { status: 'pending', savedAt: null },
+      draftSave: { status: 'idle', savedAt: null, conflict: true },
       readOnly: false,
-      flushDraftSave,
+      resolveConflict,
+      adoptServerDraft: vi.fn(),
     } as unknown as ReturnType<typeof useStudioState>)
 
     render(<WorkflowStudioDraftSaveControlContainer />)
-    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    fireEvent.click(screen.getByRole('button', { name: '保留本页编辑' }))
 
-    expect(flushDraftSave).toHaveBeenCalledTimes(1)
+    expect(resolveConflict).toHaveBeenCalledWith(true)
   })
 })

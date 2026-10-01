@@ -38,6 +38,10 @@ class ReadyCandidate:
     job_dir: Path
     control_snapshot: dict[str, Any]
     allowed: frozenset[str]
+    # EXEC-GENERATION-001：评估时刻的 jobs.execution_generation，claim/enqueue
+    # 把它作为期望代次透传到 CAS；代次在 mark_key 中，bump 会强制重评，
+    # 所以该值相对 jobs 行不会静默过期。
+    execution_generation: int = 0
 
 
 def resolve_cached_definition(
@@ -135,6 +139,7 @@ def evaluate_job_ready(
             job_dir=job_dir,
             control_snapshot=control_snapshot,
             allowed=allowed,
+            execution_generation=int(job.get("execution_generation") or 0),
         )
         for node in find_ready_nodes(definition, statuses, job_dir)
         if node.key in allowed

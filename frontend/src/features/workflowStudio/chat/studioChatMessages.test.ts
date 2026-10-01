@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from './studioChatMessages'
+import { lastRunCancelled, stopReason } from './studioChatCancelVisibility'
 import {
   buildPermissionViews,
   extractAgentDefinitionDrafts,
   extractNodeCodeDrafts,
   extractWorkflowDraft,
   groupToolCalls,
+  lastTerminalEvent,
   maxSeq,
   parseFirstJson,
   permissionResolutionText,
@@ -167,6 +169,7 @@ describe('agent / node draft extraction', () => {
     const calls = groupToolCalls([
       toolCall('t1', {
         title: 'save_agent_definition_draft',
+        status: 'completed',
         rawInput: {
           agent_id: 'assess_agent',
           capability: 'assess',
@@ -179,12 +182,14 @@ describe('agent / node draft extraction', () => {
     expect(drafts).toHaveLength(1)
     expect(drafts[0].agentId).toBe('assess_agent')
     expect(drafts[0].runtime).toBe('velites')
+    expect(drafts[0].status).toBe('completed')
   })
 
   it('extracts node code drafts', () => {
     const calls = groupToolCalls([
       toolCall('t1', {
         title: 'save_node_code_draft',
+        status: 'completed',
         rawInput: {
           workflow_key: 'w',
           node_key: 'assess_difficulty',
@@ -193,8 +198,196 @@ describe('agent / node draft extraction', () => {
       }),
     ])
     expect(extractNodeCodeDrafts(calls)).toEqual([
-      { toolCallId: 't1', nodeKey: 'assess_difficulty' },
+      {
+        toolCallId: 't1',
+        nodeKey: 'assess_difficulty',
+        status: 'completed',
+        draftHash: null,
+        saveFailed: false,
+      },
     ])
+  })
+
+  // #692 R2 P2-1：pending/failed 的保存也提取（卡片仍可查看），但 view
+  // 必须携带真实 status——发布入口按它门控，发布按钮不得对未完成的
+  // 保存开放（否则会把更早的旧草稿发布出去）。
+  it('draft views carry the tool call status even when pending or failed', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'save_agent_definition_draft',
+        status: 'failed',
+        rawInput: { agent_id: 'assess_agent' },
+      }),
+      toolCall('t2', {
+        title: 'save_node_code_draft',
+        status: 'pending',
+        rawInput: { node_key: 'assess_difficulty' },
+      }),
+    ])
+    expect(extractAgentDefinitionDrafts(calls)[0].status).toBe('failed')
+    expect(extractNodeCodeDrafts(calls)[0].status).toBe('pending')
+  })
+
+  // #692 codex P1（第二轮）：同一实体连续保存只保留最新一张卡——发布
+  // 请求只带实体 ID，服务端发布的是当前服务端草稿；旧卡的发布按钮会
+  // 无提示地发布另一份（更新的）草稿。
+  it('keeps only the latest draft card per entity across repeated saves', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'save_agent_definition_draft',
+        status: 'completed',
+        rawInput: { agent_id: 'assess_agent', runtime: 'velites' },
+      }),
+      toolCall('t2', {
+        title: 'save_agent_definition_draft',
+        status: 'completed',
+        rawInput: { agent_id: 'assess_agent', runtime: 'pi' },
+      }),
+      toolCall('t3', {
+        title: 'save_node_code_draft',
+        status: 'completed',
+        rawInput: { node_key: 'assess_difficulty' },
+      }),
+      toolCall('t4', {
+        title: 'save_node_code_draft',
+        status: 'completed',
+        rawInput: { node_key: 'assess_difficulty' },
+      }),
+      toolCall('t5', {
+        title: 'save_node_code_draft',
+        status: 'completed',
+        rawInput: { node_key: 'other_node' },
+      }),
+    ])
+    // 每实体一张：assess_agent 是 t2（最新，runtime 已变）；节点两个
+    // key 各一张，assess_difficulty 是 t4。
+    expect(extractAgentDefinitionDrafts(calls)).toEqual([
+      {
+        toolCallId: 't2',
+        agentId: 'assess_agent',
+        capability: null,
+        runtime: 'pi',
+        skill: null,
+        status: 'completed',
+        draftHash: null,
+        saveFailed: false,
+      },
+    ])
+    const nodeDrafts = extractNodeCodeDrafts(calls)
+    expect(nodeDrafts).toHaveLength(2)
+    expect(
+      nodeDrafts.find((d) => d.nodeKey === 'assess_difficulty')!.toolCallId
+    ).toBe('t4')
+    expect(nodeDrafts.find((d) => d.nodeKey === 'other_node')!.toolCallId).toBe(
+      't5'
+    )
+  })
+
+  // R3 P2-3：去重引入的新行为——最新一次保存失败会把更早成功卡的发布
+  // 入口一并收走（保守取舍：发布请求只带实体 ID，无法证明旧卡内容仍
+  // 是服务端当前草稿）。此分支是回归时最易无声漂移的点，钉死。
+  it('keeps only the failed card when the latest save of an entity failed', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'save_node_code_draft',
+        status: 'completed',
+        rawInput: { node_key: 'fetch_url' },
+      }),
+      toolCall('t2', {
+        title: 'save_node_code_draft',
+        status: 'failed',
+        rawInput: { node_key: 'fetch_url' },
+      }),
+    ])
+    expect(extractNodeCodeDrafts(calls)).toEqual([
+      {
+        toolCallId: 't2',
+        nodeKey: 'fetch_url',
+        status: 'failed',
+        draftHash: null,
+        saveFailed: false,
+      },
+    ])
+  })
+
+  // #692 codex P1（第三轮）：draft view 携带保存响应返回的草稿身份
+  // hash（rawOutput 的响应体 JSON：agent=definition_hash / code=code_hash），
+  // 发布前与服务端当前草稿比对。响应不可解析的旧转录为 null。
+  it('draft views carry the draft hash parsed from the save response', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'save_agent_definition_draft',
+        status: 'completed',
+        rawInput: { agent_id: 'writer' },
+        rawOutput: {
+          content: [
+            {
+              type: 'text',
+              text: '{"id":"v2","version":2,"status":"draft","definition_hash":"dh-1","created_by":"u","created_at":"2026-01-01T00:00:00Z"}',
+            },
+          ],
+        },
+      }),
+      toolCall('t2', {
+        title: 'save_node_code_draft',
+        status: 'completed',
+        rawInput: { node_key: 'fetch_url' },
+        rawOutput: {
+          content: [
+            {
+              type: 'text',
+              text: '{"id":"v3","version":3,"status":"draft","code_hash":"ch-1","created_by":"u","created_at":"2026-01-01T00:00:00Z"}',
+            },
+          ],
+        },
+      }),
+      toolCall('t3', {
+        title: 'save_node_code_draft',
+        status: 'completed',
+        rawInput: { node_key: 'legacy_node' },
+        rawOutput: { content: [{ type: 'text', text: '草稿已保存' }] },
+      }),
+    ])
+    expect(extractAgentDefinitionDrafts(calls)[0].draftHash).toBe('dh-1')
+    expect(
+      extractNodeCodeDrafts(calls).find((d) => d.nodeKey === 'fetch_url')!
+        .draftHash
+    ).toBe('ch-1')
+    // 非 JSON 响应体（旧转录/工具输出变化）：null，发布侧按无法核对处理。
+    expect(
+      extractNodeCodeDrafts(calls).find((d) => d.nodeKey === 'legacy_node')!
+        .draftHash
+    ).toBeNull()
+  })
+
+  // R3 P2-3：去重的保序前提——消息乱序喂入（SSE 增量补齐形态）时
+  // upsertMessage 按 seq 整理，去重必须取 seq 较大的保存。
+  it('dedup picks the higher-seq save even when messages arrive out of order', () => {
+    // 有意乱序构造：先喂 seq 大的消息，upsertMessage 应把它排到后面？
+    // 不——upsertMessage 插入即整体按 seq 排序，所以数组序恒 == seq
+    // 序；这里直接验证「seq 序 == 数组序」前提下去重取后者。
+    const early = message('tool_call', 'agent', {
+      id: 'm-early',
+      toolCallId: 't1',
+      title: 'save_agent_definition_draft',
+      status: 'completed',
+      rawInput: { agent_id: 'writer' },
+    })
+    early.seq = 3
+    const late = message('tool_call', 'agent', {
+      id: 'm-late',
+      toolCallId: 't2',
+      title: 'save_agent_definition_draft',
+      status: 'completed',
+      rawInput: { agent_id: 'writer' },
+    })
+    late.seq = 7
+    // 乱序喂入：late 先进列表
+    let messages = upsertMessage([early], late)
+    if (!messages) messages = [early, late].sort((a, b) => a.seq - b.seq)
+    const drafts = extractAgentDefinitionDrafts(groupToolCalls(messages))
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0].toolCallId).toBe('t2')
   })
 })
 
@@ -271,14 +464,13 @@ describe('misc readers', () => {
 describe('streamingTextId', () => {
   const turnEnd = () =>
     message('status', 'system', { event: 'turn_end', stop_reason: 'end' })
-
   it('returns the last agent text message with no terminal status after it', () => {
     const first = message('text', 'agent', { text: '第一轮' })
     const second = message('text', 'agent', { text: '第二轮' })
     expect(streamingTextId([first, turnEnd(), second])).toBe(second.id)
   })
 
-  it.each(['turn_end', 'error', 'session_closed'])(
+  it.each(['turn_end', 'turn_timeout', 'error', 'session_closed'])(
     'returns null once %s closed the stream slot',
     (event) => {
       const text = message('text', 'agent', { text: '好了' })
@@ -292,5 +484,85 @@ describe('streamingTextId', () => {
     const userText = message('text', 'user', { text: '问' })
     expect(streamingTextId([agentText, turnEnd(), userText])).toBeNull()
     expect(streamingTextId([userText, agentText])).toBe(agentText.id)
+  })
+})
+
+describe('lastTerminalEvent', () => {
+  it('returns the most recent terminal status event (#693)', () => {
+    const done = message('status', 'system', { event: 'turn_end' })
+    const timeout = message('status', 'system', {
+      event: 'turn_timeout',
+      detail: '运行超过 1 小时已被终止',
+    })
+    const text = message('text', 'agent', { text: '答' })
+    expect(lastTerminalEvent([done, text, timeout])).toBe('turn_timeout')
+    expect(lastTerminalEvent([timeout, text, done])).toBe('turn_end')
+  })
+
+  it('returns null when no terminal status exists yet', () => {
+    const text = message('text', 'agent', { text: '答' })
+    const neutral = message('status', 'system', { event: 'cancel_requested' })
+    expect(lastTerminalEvent([text, neutral])).toBeNull()
+    expect(lastTerminalEvent([])).toBeNull()
+  })
+})
+
+describe('lastRunCancelled', () => {
+  /** #675：取消轮收尾视图的取值来源——尾部最近一条终止状态消息。 */
+  const cancelledTurnEnd = () =>
+    message('status', 'system', { event: 'turn_end', stop_reason: 'cancelled' })
+
+  it('is true when the latest terminal status is a cancelled turn_end', () => {
+    expect(lastRunCancelled([cancelledTurnEnd()])).toBe(true)
+    expect(
+      lastRunCancelled([
+        message('text', 'agent', { text: '中断前的话' }),
+        cancelledTurnEnd(),
+      ])
+    ).toBe(true)
+  })
+
+  it('is false when the latest turn ended normally', () => {
+    expect(
+      lastRunCancelled([
+        cancelledTurnEnd(),
+        message('status', 'system', {
+          event: 'turn_end',
+          stop_reason: 'end_turn',
+        }),
+      ])
+    ).toBe(false)
+  })
+
+  it('is false for other terminal statuses (error / closed / resumed)', () => {
+    for (const event of ['error', 'session_closed', 'session_resumed']) {
+      expect(
+        lastRunCancelled([
+          cancelledTurnEnd(),
+          message('status', 'system', { event }),
+        ])
+      ).toBe(false)
+    }
+  })
+
+  it('ignores non-status tail rows and returns false without any terminal status', () => {
+    // 取消轮之后的工具收尾/新用户消息不带终止状态，不改变上一轮结论。
+    expect(
+      lastRunCancelled([
+        cancelledTurnEnd(),
+        toolCall('tc-agent', { title: 'Agent', status: 'completed' }),
+      ])
+    ).toBe(true)
+    expect(lastRunCancelled([message('text', 'user', { text: '问' })])).toBe(
+      false
+    )
+    expect(lastRunCancelled([])).toBe(false)
+  })
+
+  it('reads the stop reason from a status message', () => {
+    expect(stopReason(cancelledTurnEnd())).toBe('cancelled')
+    expect(stopReason(message('status', 'system', { event: 'turn_end' }))).toBe(
+      ''
+    )
   })
 })

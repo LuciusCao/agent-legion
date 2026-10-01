@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import type { SkillDetail } from '../../../types/agentCatalogTypes'
 import styles from './WorkflowSkillPreviewPanel.module.css'
+import { useSettingStore } from '../../../stores/settingStore'
 
 /** 技能预览的版本选择：数据源为预览响应的 tags（skill repo 全部 git tag，
  * 版本倒序）；空 tags / 字段缺失时降级为纯文本版本显示。首项始终是 latest
@@ -15,6 +16,7 @@ export function WorkflowSkillVersionSelect(props: {
   onSelect: (ref: string | null) => void
 }) {
   const queryClient = useQueryClient()
+  const workspaceId = useSettingStore((s) => s.workspaceId) ?? ''
   const detail = props.detail
   const tags = detail?.tags ?? []
   if (tags.length === 0) {
@@ -23,7 +25,7 @@ export function WorkflowSkillVersionSelect(props: {
     return <span className={styles.version}>{version}</span>
   }
   const current = queryClient.getQueryData<SkillDetail>(
-    extraQueryKeys.studioSkillDetail(props.skillKey, null)
+    extraQueryKeys.studioSkillDetail(props.skillKey, workspaceId, null)
   )
   // getQueryData 非响应式：默认条目 gcTime 过期后标签退化为「跟随最新提交」
   // 纯文本（不带 ref 名），评审确认可接受——选中状态与内容不受缓存存活影响。

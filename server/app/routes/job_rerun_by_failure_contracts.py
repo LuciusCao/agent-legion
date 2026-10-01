@@ -41,6 +41,9 @@ class JobRerunByFailureRequest(BaseModel):
 
 
 class JobRerunByFailureResultResponse(JobMutationResultResponse):
+    # rerun_nodes 是本端点的「实际重跑节点 key 列表」（父类不再携带该
+    # 字段——upgrade 统计改用 kept_node_count / rerun_node_count，issue
+    # #645 review P2）。list[str] 保持 OpenAPI string[] 与 Pydantic 校验。
     rerun_nodes: list[str] = Field(default_factory=list)
 
 

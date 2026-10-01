@@ -11,9 +11,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Header
 from fastapi.responses import FileResponse, StreamingResponse
 
-from server.app.routes.job_artifact_media import raw_media_type
 from server.app.routes.job_artifact_raw_response import raw_response
 from server.app.routes.job_http import raise_job_http_error
+from server.app.services.job_artifact_media import raw_media_type
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_errors import JobServiceError
 from server.app.settings import Settings
@@ -29,17 +29,34 @@ def register_raw_artifact_route(
     # raw 必须先于 {artifact_name:path} 注册（在 job_artifacts.py 的
     # create_job_artifacts_router 里调用），否则 "foo.json/raw" 会被吞成
     # 名为 "foo.json/raw" 的 artifact 查询。
+    # 206 声明（#703 codex round 4 P2-2，与外部 raw 路由同修）：Range 时
+    # raw_response 答分段 206 + Content-Range，契约只写 200 会让生成客
+    # 户端把分段下载当异常。
     @router.get(
         "/jobs/{job_id}/artifacts/{artifact_name}/raw",
         response_class=FileResponse,
         response_model=None,
-        responses={200: {"content": {"application/octet-stream": {}}}},
+        responses={
+            200: {"content": {"application/octet-stream": {}}},
+            206: {
+                "description": "Partial Content (Range request)",
+                "content": {"application/octet-stream": {}},
+                "headers": {
+                    "Content-Range": {"schema": {"type": "string"}},
+                    "Content-Length": {"schema": {"type": "string"}},
+                },
+            },
+        },
     )
     def get_artifact_raw(
         job_id: str,
         artifact_name: str,
         range_header: str | None = Header(default=None, alias="Range"),
     ) -> FileResponse | StreamingResponse:
+        # Legacy bare route：scoped/成员/admin 语义由 job_group 的
+        # require_job_workspace_access 统一裁决（#745 按 job 行反查授权域；
+        # 见 jobs.py get_job 的注释——跨域与未知 job 同为 404，Range 行为
+        # 不变）。
         # Range 解析在 service.open_raw 内（本地分支忽略，FileResponse 原生支持）。
         try:
             return raw_response(service.open_raw(job_id, artifact_name, range_header))

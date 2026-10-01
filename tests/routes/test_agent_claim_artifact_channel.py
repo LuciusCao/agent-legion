@@ -71,6 +71,10 @@ def _claimed(manifest: dict[str, Any]) -> SimpleNamespace:
         node_key="node_a",
         agent_id="agent-1",
         kind="agent",
+        # 必须与真 AgentClaim（claim_scan.py）的字段集对齐——响应组装
+        # 直接读 execution_generation（EXEC-GENERATION-001），缺字段会被
+        # build_batch_claim_response 的 per-item 宽捕获吞成 204。
+        execution_generation=0,
         manifest=manifest,
     )
 

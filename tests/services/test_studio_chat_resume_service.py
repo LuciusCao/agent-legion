@@ -203,6 +203,42 @@ def test_resume_uses_session_load_when_advertised(chat) -> None:
     assert RESUME_TRANSCRIPT_HEADER not in prompts[-1]
 
 
+REPLAY_SCRIPT = {
+    **LOAD_SCRIPT,
+    # kimi replays the loaded history as fresh-looking chunks during
+    # session/load; they must not duplicate the persisted timeline (#694).
+    "load_replay": [
+        {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "pong"},
+        }
+    ],
+}
+
+
+def test_resume_session_load_replay_does_not_duplicate_timeline(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register(REPLAY_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "before close")
+    _wait_for(lambda: _turn_finished(service, session["id"]))
+    service.close_session(session["id"], workspace_id)
+
+    resumed = service.resume_session(session["id"], workspace_id, user_id)
+    assert resumed["status"] == "idle"
+    # FIFO：replay 通知先于下一条 prompt 的更新被 ACP 线程处理——等下一轮
+    # 结束即证明 replay 窗口已过。若 replay 漏抑制，它要么折进上一轮敞口
+    # 行（首行变 "pongpong"）、要么新增一条重复行。
+    service.send_message(session["id"], workspace_id, "after load")
+    _wait_for(lambda: _turn_finished(service, session["id"]))
+    agent_texts = [
+        m["content"]["text"]
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "text" and m["role"] == "agent"
+    ]
+    assert agent_texts == ["pong", "pong"]
+
+
 def test_resume_falls_back_to_transcript_when_load_fails(chat) -> None:
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(LOAD_FAILING_SCRIPT)

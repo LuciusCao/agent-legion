@@ -9,10 +9,16 @@ export type StudioChatQueuedMessage = { id: string; text: string }
  * 按 FIFO 发出队首；发送失败保留队列，错误经 send 内部的 actionError 呈现。
  * 首个直发在 promise 落定前 busy 仍未翻转，这段窗口由 useInFlightSend 的
  * inFlightRef 并入忙判定，连发的后续提交一律入队。
+ * blocked（#694 压缩窗口）与 busy 同等参与门控：压缩开始晚于队首发出时
+ * 后端 409 保留队首，压缩结束（或后端超时自清）把 blocked 翻回 false 的
+ * 翻转沿自动重发队首（#694 review P2-a）——重试只发生在门控翻转沿，
+ * 失败本身不触发重试，不会空转或重复发送；失败滞留的队首被用户从队列
+ * 条移除时，remove 在空闲下主动发出新队首（#797 codex 轮 10 P2）。
  * 不做 steer（运行中注入当前 turn）：turn 原子认领模型下运行中注入需要
  * 协议层改造，超出前端排队范围。 */
 export function useStudioChatQueue(
   busy: boolean,
+  blocked: boolean,
   sessionKey: string | null,
   send: (text: string) => Promise<boolean>
 ) {
@@ -29,19 +35,21 @@ export function useStudioChatQueue(
     setQueue([])
   }, [sessionKey])
 
-  // 只盯 busy 的 true→false 翻转沿 flush 队首：发送成功到 SSE 状态快照
-  // 抵达之间有窗口，若盯 queue 变化连发会撞后端单 turn 原子认领的 409。
-  const wasBusyRef = useRef(false)
+  // 只盯门控（busy || blocked）的 true→false 翻转沿 flush 队首：发送成功到
+  // SSE 状态快照抵达之间有窗口，若盯 queue 变化连发会撞后端单 turn 原子
+  // 认领的 409。
+  const wasGatedRef = useRef(false)
   const prevKeyRef = useRef(sessionKey)
   useEffect(() => {
-    const wasBusy = wasBusyRef.current
-    wasBusyRef.current = busy
+    const gated = busy || blocked
+    const wasGated = wasGatedRef.current
+    wasGatedRef.current = gated
     const switched = prevKeyRef.current !== sessionKey
     prevKeyRef.current = sessionKey
     // 同一次渲染里会话切换也可能带 busy 翻转：旧会话的队首不得发进新会话。
-    if (switched || !wasBusy || busy) return
+    if (switched || !wasGated || gated) return
     const head = queueRef.current[0]
-    // 在途发送未落定时不抢发队首（等它落定、busy 翻转沿再来）。
+    // 在途发送未落定时不抢发队首（等它落定、门控翻转沿再来）。
     if (!head || inFlightRef.current) return
     sendInFlight(head.text, (sent) => {
       // 失败保留队列（错误已由 send 置 actionError）；成功按 id 移除而不是
@@ -50,13 +58,16 @@ export function useStudioChatQueue(
       if (!sent) return
       setQueue((current) => current.filter((item) => item.id !== head.id))
     })
-  }, [busy, sessionKey, inFlightRef, sendInFlight])
+  }, [busy, blocked, sessionKey, inFlightRef, sendInFlight])
 
   const nextIdRef = useRef(1)
   function submit(text: string) {
     // 首个直发在途（busy 尚未随 SSE 快照翻转）也视为忙：后续提交入队，
-    // 避免两条都直发撞后端单 turn 原子认领的 409。
-    if (busy || inFlightRef.current) {
+    // 避免两条都直发撞后端单 turn 原子认领的 409。压缩窗口（blocked）同理。
+    // 队列非空时一律尾插（#797 复审批次 P2）：上一次 flush 失败会保留队首
+    // （busy 已翻 false），此时直发新消息会插队到滞留队首之前（送达乱序，
+    // 连续失败时队首无限滞留）——队列非空即排队保 FIFO。
+    if (busy || blocked || inFlightRef.current || queueRef.current.length > 0) {
       const id = `q${nextIdRef.current}`
       nextIdRef.current += 1
       setQueue((current) => [...current, { id, text }])
@@ -66,7 +77,18 @@ export function useStudioChatQueue(
   }
 
   function remove(id: string) {
+    // 移除的是队首且当前空闲、队列仍非空：主动发出新队首（#797 codex
+    // 轮 10 P2）——发送 effect 只盯门控翻转沿，失败滞留的队首被用户从
+    // 队列条移除后没有任何触发点，新队首会在空闲下永久滞留。运行中/
+    // 压缩中/有在途发送时不抢发（门控语义不变），等下一个翻转沿。
+    const wasHead = queueRef.current[0]?.id === id
+    const nextHead = queueRef.current.filter((item) => item.id !== id)[0]
     setQueue((current) => current.filter((item) => item.id !== id))
+    if (!wasHead || !nextHead || busy || blocked || inFlightRef.current) return
+    sendInFlight(nextHead.text, (sent) => {
+      if (!sent) return
+      setQueue((current) => current.filter((item) => item.id !== nextHead.id))
+    })
   }
 
   return { queuedMessages: queue, submit, remove }

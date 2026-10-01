@@ -353,6 +353,203 @@ def test_upload_prune_heartbeat_pair_matches_lease() -> None:
     assert legacy_stop.is_set()
 
 
+# ---------------------------------------------------------------------------
+# #644 review P1: a re-claim race at the upload arm — register_upload keeps
+# the re-claimed entry AND condemns the incoming old task, so its report
+# loop terminates instead of retrying to the backoff cap forever.
+
+
+def test_register_upload_mismatch_condemns_old_task_spares_new_entry() -> None:
+    """重 claim 竞态下的 arm：registry 已有新 lease 的 entry 时，
+    register_upload 必须在保留新 entry 的同时置位传入（旧）任务的
+    ownership_lost——旧 lease 的 quiesce/resume 永远配不上对，registry 里
+    也没有旧 lease 的 entry 能收到 lost verdict，不置位则旧任务的 report
+    循环按退避上限无限重试、钉死上传 lane。"""
+    registry = BatchHeartbeatRegistry()
+    new_lost = threading.Event()
+    registry.register("exec-1", "lease-new", new_lost)
+
+    old_lost = threading.Event()
+    returned = registry.register_upload("exec-1", "lease-old", old_lost)
+
+    assert old_lost.is_set(), "the old task's dead lease was not condemned"
+    assert returned.lease_id == "lease-new"
+    # 非覆写语义不变：新 entry 原样保留、继续进快照。
+    entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+    assert entry is returned
+    assert not new_lost.is_set(), "the old arm fired the new attempt's verdict"
+    assert [e.lease_id for e in registry.snapshot()] == ["lease-new"]
+    # 被判死任务的 pair-matched 操作仍是无害 no-op（resume 语义不受影响）。
+    registry.quiesce("exec-1", "lease-old")
+    assert entry.quiesced is False
+    registry.resume("exec-1", "lease-old")
+    assert entry.quiesced is False
+
+
+def test_register_upload_same_lease_rebinds_without_condemning() -> None:
+    """executor→upload 交接（同 lease）不受判死影响：entry 换绑到任务的共享
+    事件，任务不判死——arm 的 condemnation 只对 lease 不匹配（重 claim）生效。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    registry.register("exec-1", "lease-1", executor_lost)
+
+    task_lost = threading.Event()
+    entry = registry.register_upload("exec-1", "lease-1", task_lost)
+
+    assert not task_lost.is_set(), "the handover condemned a live lease"
+    assert entry.ownership_lost is task_lost  # rebind, not a verdict
+    assert registry._entries["exec-1"] is entry  # type: ignore[reportPrivateUsage]
+    assert not executor_lost.is_set()
+
+
+def test_register_upload_rebind_inherits_gap_verdict_and_process_state() -> None:
+    """#644 attack HIGH-1（交接 gap）：beat/relay 判死落在 executor-era entry
+    上（adopt→submit 的 gap 内，或在途拍对快照 entry 对象 set）之后，同 lease
+    换绑必须继承终态——否则 verdict 随被换下的 entry 对象消失，任务的 report
+    循环在 report 面分区时按 60s 退避上限无限重试、钉死上传 lane。换绑同时
+    继承 proc_ref/adopted（attack MEDIUM-2：adopt 语义随 entry 状态而非调用
+    方时序，换绑不得复活 zombie 停跳）。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    facade = start_lease_heartbeat(
+        None, "exec-1", "lease-1", 15.0, executor_lost, registry=registry
+    )
+    zombie = subprocess.Popen([sys.executable, "-c", "pass"])
+    zombie.wait()
+    facade.proc_ref["proc"] = zombie
+    facade.adopt()
+    # 交接 gap 内 verdict 到达（relay 的 pair-matched apply 命中 executor-era
+    # entry；进程内 batch 路径对快照 entry 对象 set 是同一形态）。
+    registry.apply_beat_result(lost=[("exec-1", "lease-1")], cancelled=[])
+    assert executor_lost.is_set()
+
+    task_lost = threading.Event()
+    entry = registry.register_upload("exec-1", "lease-1", task_lost)
+
+    assert task_lost.is_set(), "the rebind dropped the gap verdict"
+    assert entry.ownership_lost is task_lost
+    # MEDIUM-2：proc_ref/adopted 随 entry 继承——换绑后的死进程租约不因
+    # unadopted 新 entry 复活 zombie 停跳（拍面剔除逻辑继续成立）。
+    assert entry.proc_ref is facade.proc_ref
+    assert entry.adopted.is_set()
+    # 继承的是终态本身：判死租约换绑后立即离开拍面。
+    assert registry.snapshot() == []
+
+
+def test_register_upload_rebind_of_live_lease_inherits_nothing() -> None:
+    """护栏：继承只能传递已发生的终态，不得制造终态——活租约交接（无
+    verdict）换绑后依旧进拍面、两侧事件都未置位。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    start_lease_heartbeat(None, "exec-1", "lease-1", 15.0, executor_lost, registry=registry)
+
+    task_lost = threading.Event()
+    registry.register_upload("exec-1", "lease-1", task_lost)
+
+    assert not task_lost.is_set()
+    assert not executor_lost.is_set()
+    assert [item.execution_id for item in registry.snapshot()] == ["exec-1"]
+
+
+def test_register_upload_rebind_redirects_displaced_event_to_caller() -> None:
+    """#644 codex3 P2（换绑丢在途 verdict）：batch/degraded 心跳已从 registry
+    取出旧 _LeaseEntry 快照、随后 register_upload 同 lease 换绑时，旧对象的
+    事件字段必须被重定向到调用方（task）的事件——稍后返回的 409 由
+    _beat_batch_chunk/beat_single 对**快照里的旧对象** set，不重定向则 verdict
+    落在 executor-era 事件上，task 的事件收不到；若 task 随即进 _report 且
+    report 持续失败，会拿死租约退避重试到 60s 上限（lane 占用重现）。
+    entry 自身的事件仍是调用方事件（task 接线不变），只有被换下对象的字段
+    被指向它——迟到的 set 全部汇合到 delivery 面轮询的事件上。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    start_lease_heartbeat(None, "exec-1", "lease-1", 15.0, executor_lost, registry=registry)
+    displaced = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+
+    task_lost = threading.Event()
+    entry = registry.register_upload("exec-1", "lease-1", task_lost)
+
+    # task 接线不变：entry 的事件就是 task 的事件（未判死、未换对象）。
+    assert not task_lost.is_set()
+    assert entry.ownership_lost is task_lost
+    assert registry._entries["exec-1"] is entry  # type: ignore[reportPrivateUsage]
+    assert [item.execution_id for item in registry.snapshot()] == ["exec-1"]
+    # P2 核心：被换下对象（在途拍手里那份快照）的事件字段已重定向。
+    assert displaced is not entry
+    assert displaced.ownership_lost is task_lost
+
+    # 在途拍响应到达：对快照里的旧对象 set —— 落在 task 的事件上。
+    displaced.ownership_lost.set()
+    assert task_lost.is_set(), "the in-flight verdict landed on a stranded event"
+
+
+def test_register_upload_rearm_with_set_event_keeps_caller_event() -> None:
+    """codex3 P2 反向护栏：调用方传入的事件**已置位**（重 arm 竞态里 verdict
+    刚落到任务事件上）时不得丢——entry 仍挂调用方事件，重定向是 no-op（迟到
+    set 落在已置位事件上），且不把终态倒灌 executor-era 事件。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    start_lease_heartbeat(None, "exec-1", "lease-1", 15.0, executor_lost, registry=registry)
+
+    task_lost = threading.Event()
+    task_lost.set()
+    entry = registry.register_upload("exec-1", "lease-1", task_lost)
+
+    assert entry.ownership_lost is task_lost
+    assert task_lost.is_set()
+    assert not executor_lost.is_set()  # 误传终态不倒灌旧引用持有者
+
+
+def test_rebind_redirected_event_survives_displacement() -> None:
+    """codex3 P2 补充排列：换绑重定向后，本 worker 新 claim 的 register 覆盖
+    entry——被换下 entry 的事件（= 重定向后的 task 事件）必须已置位（「被
+    覆盖的租约按定义已死」，HIGH-2 语义），task 当场收到 verdict。"""
+    registry = BatchHeartbeatRegistry()
+    executor_lost = threading.Event()
+    start_lease_heartbeat(None, "exec-1", "lease-1", 15.0, executor_lost, registry=registry)
+
+    task_lost = threading.Event()
+    registry.register_upload("exec-1", "lease-1", task_lost)
+
+    new_lost = threading.Event()
+    registry.register("exec-1", "lease-new", new_lost)  # 本 worker 重新 claim
+
+    assert task_lost.is_set(), "the displaced (redirected) event never learned the death"
+    assert not new_lost.is_set()
+    assert [entry.lease_id for entry in registry.snapshot()] == ["lease-new"]
+
+
+def test_register_overwrite_condemns_displaced_entry() -> None:
+    """#644 attack HIGH-2（arm-先覆盖-后）：本 worker 新 claim 的 executor 臂
+    register 覆盖旧 entry 时，必须向被换下 entry 的事件补发判死——旧 lease
+    不再出现在任何拍里（快照只带新 lease），没有任何 beat 能再为它带回
+    verdict；不补发则还在退避重试的旧任务/旧 attempt 在 report 面分区时无限
+    钉 lane（「被 claim 覆盖的租约按定义已死」，与 register_upload 的
+    mismatch-arm 论证同构）。新 claim 的事件不受影响。"""
+    registry = BatchHeartbeatRegistry()
+
+    # 形态 1：被换下的是已 arm 的旧上传任务（bulk 车道开头 arm，report 退避中）。
+    task_lost = threading.Event()
+    registry.register_upload("exec-1", "lease-old", task_lost)
+    new_lost = threading.Event()
+    returned = registry.register("exec-1", "lease-new", new_lost)
+
+    assert task_lost.is_set(), "the overwrite left the old task's dead lease uncondemned"
+    assert not new_lost.is_set(), "the re-claim fired the NEW attempt's verdict"
+    assert returned.lease_id == "lease-new"
+    assert [entry.lease_id for entry in registry.snapshot()] == ["lease-new"]
+
+    # 形态 2：被换下的是旧 attempt 的 executor entry（#564 的注册表覆盖串话
+    # 通道——旧 attempt 此前只能等一个永远不会再来的 verdict）。
+    old_attempt_lost = threading.Event()
+    registry.register("exec-2", "lease-old", old_attempt_lost)
+    reclaimer_lost = threading.Event()
+    registry.register("exec-2", "lease-new", reclaimer_lost)
+
+    assert old_attempt_lost.is_set(), "the displaced attempt never learned its lease died"
+    assert not reclaimer_lost.is_set()
+    assert sorted(entry.lease_id for entry in registry.snapshot()) == ["lease-new", "lease-new"]
+
+
 def test_registry_prunes_zombie_entry_on_snapshot() -> None:
     """A dead, unadopted agent process must stop being batched — the Host's
     orphan sweeper has to be able to reclaim the lease."""

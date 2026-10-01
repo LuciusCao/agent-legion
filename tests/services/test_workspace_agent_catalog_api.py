@@ -62,8 +62,15 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
     # fresh=True: the skill catalog router resolves HOME at app build time, so
     # the app must be created after the fake HOME is in place.
     with client_factory(fresh=True) as client:
+        # workspace_id is the authorization scope (#745): the group-form key
+        # (hyphens, not a workspace id) reads through any workspace the admin
+        # session can access — a member workspace mirrors the demo setup.
+        workspace = client.app.state.job_db.create_workspace(
+            "Catalog Skill WS", default_workflow_key="catalog_skill_flow"
+        )
         response = client.get(
-            "/api/agent-catalog/skills/education-video-problems-generation/generate-questions"
+            "/api/agent-catalog/skills/education-video-problems-generation/generate-questions",
+            params={"workspace_id": str(workspace["id"])},
         )
 
     assert response.status_code == 200

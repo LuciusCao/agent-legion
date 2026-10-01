@@ -31,6 +31,7 @@ def create_job_workflow_upgrade_batch_router(
                 request.job_ids,
                 job_filter=request.resolved_filter(),
                 exclude_ids=request.exclude_ids,
+                mode=request.mode,
             )
         except EmptyJobSelectionError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None

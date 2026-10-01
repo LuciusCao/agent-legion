@@ -51,6 +51,7 @@ def try_claim_code_worker_node(
     workflow_key: str,
     *,
     shard_runtime: dict[str, Any] | None = None,
+    execution_generation: int = 0,
 ) -> bool:
     """Route a code-pool candidate to a remote code Worker when possible.
 
@@ -65,6 +66,19 @@ def try_claim_code_worker_node(
         return False
     workspace_id = str(workspace["id"])
     job_id = str(job["id"])
+
+    def fail_config(message: str) -> bool:
+        return fail_node_config(
+            worker,
+            workspace_id,
+            job,
+            workflow_key,
+            node,
+            log_path,
+            message,
+            execution_generation=execution_generation,
+        )
+
     # #401: shard identity keys the in-flight marker (#389) and the
     # one-active gate — the broker index dedups per (job_id, node_key,
     # shard_index), so multi-shard nodes keep many shards in flight.
@@ -104,7 +118,7 @@ def try_claim_code_worker_node(
             # the local executor reports the missing code (EXEC-CODE-002).
             return False
     except (ValueError, OSError) as exc:
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        return fail_config(str(exc))
     if not is_worker_eligible(code_text, Path(worker.settings.root_dir)):
         return False
 
@@ -124,7 +138,7 @@ def try_claim_code_worker_node(
         return False
     except ValueError as exc:
         # Config drift must fail THIS node, not abort the whole poll pass.
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        return fail_config(str(exc))
     try:
         # Validate the full secret-resolution chain now so a broken vault
         # reference or connection fails the node at dispatch, not mid-claim.
@@ -137,7 +151,7 @@ def try_claim_code_worker_node(
             resolved, schema, ConnectionTokenService(worker.job_db, worker.settings.config)
         )
     except (ValueError, VaultError, JobServiceError) as exc:
-        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        return fail_config(str(exc))
 
     # The manifest carries the resolved schema/timeout/network (keys
     # unchanged): the Worker never consults an executor definition (P-0.5).
@@ -165,11 +179,12 @@ def try_claim_code_worker_node(
                 config=config,
                 secret_config=secret_config,
                 shard_runtime=shard_runtime,
+                execution_generation=execution_generation,
             )
         except (ValueError, VaultError, JobServiceError) as exc:
             # Same trade-off as the agent enqueue pool: a configuration error
             # fails this node instead of poisoning every later poll pass.
-            fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+            fail_config(str(exc))
         except Exception:
             # #204 broad-except audit: deliberate per-node containment.
             # Expected configuration failures (ValueError / VaultError /

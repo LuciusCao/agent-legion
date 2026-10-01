@@ -58,15 +58,23 @@ def test_schema_version_pin() -> None:
     # (claim_queue_wait_profile, #551) owns
     # tests/db/test_claim_queue_wait_profile_migration.py; v82
     # (job_status_counts_advisory_locks, #659) owns
-    # tests/db/test_status_counts_deadlock.py — this copy stays as
+    # tests/db/test_status_counts_deadlock.py; v83
+    # (studio_chat_context_health, #694) owns
+    # tests/db/test_studio_chat_schema.py; v84
+    # (workspace_api_tokens, #626) owns
+    # tests/db/test_workspace_api_tokens_migration.py; v85
+    # (execution_generation, #759) owns
+    # tests/db/test_execution_generation_schema.py; v86
+    # (node_runs_impl_identity, #645) owns
+    # tests/db/test_node_runs_impl_identity_schema.py — this copy stays as
     # a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 82
+    assert SCHEMA_VERSION == 86
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "job_status_counts_advisory_locks"
+    assert row["name"] == "node_runs_impl_identity"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

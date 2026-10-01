@@ -165,6 +165,19 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
     # Skill read/validate/save-version tools (issue #217) and node prompt
     # preview/save tools, both split into sibling modules for the budget;
     # shared-material tools (#633) sit in their own sibling module too.
+    #
+    # #678: every tool registered below (inline here and in the eight
+    # register_* siblings) is mirrored BY NAME in tool_names.py — the
+    # authoritative manifest studio_chat/prompts.py imports to recognize
+    # agent-legion tool calls (permission auto-approve). Adding, renaming,
+    # or removing a tool means updating that manifest in the same change;
+    # tests/mcp_server/test_tool_names.py pins the three-way equality
+    # (registered == manifest == prompts reference). No runtime assert
+    # here on purpose: FastMCP 1.x's only public tool listing is async
+    # ``list_tools()`` (create_mcp_server runs on a live event loop for
+    # the HTTP transport, which rebuilds the instance per request), and
+    # the sync path would mean reaching into pinned-private internals —
+    # the contract test is the enforcement point instead.
     skill_tools.register_skill_tools(mcp, _client)
     shared_tools.register_shared_tools(mcp, _client)
     prompt_tools.register_prompt_tools(mcp, _client)

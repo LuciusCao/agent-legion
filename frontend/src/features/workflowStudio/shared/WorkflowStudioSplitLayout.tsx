@@ -1,62 +1,30 @@
-import { StudioChatAside } from '../chat/StudioChatAside'
 import { WorkflowStudioCanvasPanel } from '../canvas/WorkflowStudioCanvasPanel'
-import { WorkflowStudioDetailSection } from '../inspector/WorkflowStudioDetailSection'
-import { WorkflowStudioResizeHandle } from './WorkflowStudioResizeHandle'
+import { WorkflowNodeDetailDrawer } from '../inspector/WorkflowNodeDetailDrawer'
+import { StudioChatDock } from '../chat/StudioChatDock'
 import type { StudioMobilePanel } from './WorkflowStudioMobileNav'
-import { useStudioState } from './studioStateContext'
+import { useStudioNarrowViewport } from './useStudioNarrowViewport'
 import pageStyles from '../../../pages/WorkflowStudioPageResponsive.module.css'
-import sidePanelStyles from '../../../pages/WorkflowStudioPageSidePanel.module.css'
-import splitStyles from './WorkflowStudioSplitLayout.module.css'
 
 type Props = {
   mobilePanel: StudioMobilePanel
   agentOpen: boolean
 }
 
-/** 左右分栏 grid：左半画布（或节点详情），右半 Agent 对话（或详情）。
- * chat 收起后保持挂载（chatCollapsed hidden），会话与滚动状态不丢。
- * agentOpen 来自 StudioViewContext（appbar 开关的唯一状态源，#668）。 */
+/** 画布布局（#804 定案抽屉化）：画布永远全宽，节点详情改右侧 Drawer 浮层
+ * （WorkflowNodeDetailDrawer，不占 grid 轨道、无分栏/拖拽分隔条）；Agent
+ * 对话在 AgentPanelDock 浮层（#795 PR②）。Dock 常驻挂载、关闭/窄屏未选中
+ * Agent 页签时隐藏不卸载（hidden——composer 文本/发送队列/SSE 不因显隐
+ * 断开，#797 codex P1）；窄屏下 Dock 仅 Agent 页签选中时显示（#797 codex
+ * P2）。 */
 export function WorkflowStudioSplitLayout({ mobilePanel, agentOpen }: Props) {
-  const studio = useStudioState()
-  const nodeSelected = studio.selectedNodeKey !== null
-  const detailLeft = nodeSelected && agentOpen
-  const split = agentOpen || nodeSelected
-
-  const asideClass = [
-    sidePanelStyles.sidePanel,
-    pageStyles.sidePanel,
-    splitStyles.colRight,
-    mobilePanel === 'agent' ? pageStyles.activePanel : '',
-    agentOpen ? '' : splitStyles.chatCollapsed,
-  ]
-    .filter(Boolean)
-    .join(' ')
+  const narrow = useStudioNarrowViewport()
+  const dockHidden = !agentOpen || (narrow && mobilePanel !== 'agent')
 
   return (
-    <div
-      className={`${pageStyles.layout}${split ? ` ${pageStyles.withInspector}` : ''}`}
-    >
-      <WorkflowStudioCanvasPanel
-        mobileActive={mobilePanel === 'graph'}
-        replacedByDetail={detailLeft}
-      />
-      {split && <WorkflowStudioResizeHandle />}
-      {studio.selectedNodeKey !== null && (
-        <WorkflowStudioDetailSection
-          workflow={studio.workflow}
-          nodeKey={studio.selectedNodeKey}
-          agentCatalog={studio.agentCatalog}
-          agentCatalogSettle={studio.agentCatalogSettle}
-          definitionYaml={studio.definitionYaml}
-          setDefinitionYaml={studio.setDefinitionYaml}
-          compareSummary={studio.compareSummary}
-          readOnly={studio.readOnly}
-          detailLeft={detailLeft}
-          mobileActive={mobilePanel === 'editor'}
-          onBack={() => studio.setSelectedNodeKey(null)}
-        />
-      )}
-      <StudioChatAside agentOpen={agentOpen} asideClass={asideClass} />
+    <div className={pageStyles.layout}>
+      <WorkflowStudioCanvasPanel mobileActive={mobilePanel === 'graph'} />
+      <WorkflowNodeDetailDrawer />
+      <StudioChatDock hidden={dockHidden} />
     </div>
   )
 }

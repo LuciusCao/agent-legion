@@ -4,6 +4,11 @@ Split out of ``sweepers.py`` for the file-size budget; mirrors
 ``fail_stale_definition_requests`` but judges claimability (definition runtime
 and resolved model against Worker declarations) instead of definition
 staleness.
+
+EXEC-GENERATION-001 (#759): the sweep is a protocol member — per failing
+candidate it runs ``sweep_generation.lock_sweep_candidate`` (job-mutation
+advisory lock → request row lock → generation CAS) before any write, and a
+stale-generation request is cancelled instead of failed.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from server.app.agent_broker import agent_claim_compatibility
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
+from server.app.agent_broker.sweep_generation import lock_sweep_candidate
 from server.app.agent_broker.unclaimable_reasons import WorkerDeclarations, unmatched_reasons
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
@@ -53,11 +59,14 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
         # Requests whose pinned definition is disabled/changed are excluded
         # by the enabled-definition join: ``fail_stale_definition_requests``
         # owns them. The revision join mirrors the claim candidate query.
+        # Lock-free scan: the request row's FOR UPDATE moved after the
+        # per-job advisory lock (lock_sweep_candidate), mirroring
+        # claim_evaluate's reorder — see sweeper_definitions.
         rows = conn.execute(
             """
             select r.execution_id, r.job_id, r.node_key, r.manifest_json,
                    r.workspace_id,
-                   hashtext('ws:' || r.workspace_id)::int as ws_lock_key,
+                   hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key,
                    d.definition_json::jsonb->>'runtime' as runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
@@ -74,12 +83,13 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             where r.state='queued'
             order by r.queued_at, r.execution_id
             limit %s
-            for update of r skip locked
             """,
             (_SWEEP_LIMIT,),
         ).fetchall()
-        # Stable workspace-hash order; v82 counter folders never wait.
-        for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
+        # EXEC-GENERATION-001 single global batch order (ws lock key,
+        # job_id): advisory xact locks accumulate until COMMIT, so the walk
+        # order must match finish_many / the claim batch / the other sweeps.
+        for row in sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["job_id"]))):
             try:
                 manifest = agent_claim_compatibility.live_claim_manifest(row)
             except ValueError as exc:
@@ -95,6 +105,11 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
                     f"No registered Agent Worker can claim this request ({'; '.join(reasons)});"
                     " check the pinned workflow revision's node execution overrides"
                 )
+            # Evaluate lock-free, lock only rows about to be failed: the
+            # generation CAS inside still arbitrates against a mutation that
+            # landed between scan and lock.
+            if not lock_sweep_candidate(conn, row):
+                continue
             # Declared fields win over rule-based classification; like orphan
             # recovery, this sweeper knows the cause at its write path.
             failure_category, failure_detail = failure_classification.resolve_failure_fields(

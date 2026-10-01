@@ -152,3 +152,14 @@ def test_definition_to_yaml_preserves_approval_type_without_capability():
     assert reloaded.nodes["gate"].node_type == "approval"
     assert reloaded.nodes["gate"].config == {"rework_target": "write"}
     assert reloaded.nodes["write"].node_type == "code"
+
+
+def test_approval_node_rejects_declared_outputs():
+    """#759 自审：gate 声明非空 outputs 会成为隐式生产者——rework 后 gate
+    stale，其消费者被屏障阻塞，gate 却等消费者完成才能 re-park：死锁。"""
+    import pytest as _pytest
+
+    from server.app.workflows.definition import WorkflowDefinitionError
+
+    with _pytest.raises(WorkflowDefinitionError, match="outputs"):
+        workflow_definition_from_mapping(_approval_dag(outputs=["x.json"]))

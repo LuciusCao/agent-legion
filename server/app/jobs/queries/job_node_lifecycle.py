@@ -1,20 +1,53 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.workflows.definition import WorkflowDefinition
 
+logger = logging.getLogger(__name__)
+
 
 class JobNodeLifecycleQueriesMixin(ConnectionQueriesMixin):
-    def mark_nodes_not_applicable_many(self, entries: list[tuple[str, list[str], str]]) -> None:
-        """Batch mark nodes not applicable across many jobs in one connection."""
+    def mark_nodes_not_applicable_many(
+        self, entries: list[tuple[str, list[str], str, int]]
+    ) -> None:
+        """Batch mark nodes not applicable across many jobs in one connection.
+
+        EXEC-GENERATION-001: each entry carries the epoch the evaluation read
+        (the scan's fat job row). The write re-reads the epoch under the
+        ``job-mutation:<job_id>`` advisory lock — the same lock every reset
+        mutation holds while it bumps the epoch and rebuilds node rows — and
+        skips the entry on mismatch: flipping new-epoch pending rows from a
+        stale branch verdict could park them at ``not_applicable`` forever
+        (job_nodes are not part of the scan mark and this write does not bump
+        ``jobs.updated_at``, so the evaluation cache would never invalidate).
+        A skipped entry re-evaluates on the next poll pass (the epoch bump
+        changed the scan mark).
+        """
         if not entries:
             return
+        from server.app.executors._lease_control import lock_job_mutation_and_read_generation
+
         with self.connect() as conn:
-            for job_id, node_keys, reason in entries:
+            # The batch is single-workspace by construction (the scan fetches
+            # fat rows for one workspace per pass), so plain job_id order
+            # coincides with the global (ws lock key, job_id) batch order of
+            # EXEC-GENERATION-001.
+            for job_id, node_keys, reason, expected_generation in sorted(entries):
                 if not node_keys:
+                    continue
+                current_generation = lock_job_mutation_and_read_generation(conn, job_id)
+                if current_generation != expected_generation:
+                    logger.warning(
+                        "skipping stale not_applicable mark for job %s: "
+                        "generation %s evaluated, %s current",
+                        job_id,
+                        expected_generation,
+                        current_generation,
+                    )
                     continue
                 placeholders = ",".join("%s" for _ in node_keys)
                 conn.execute(

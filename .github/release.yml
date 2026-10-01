@@ -1,0 +1,22 @@
+# GitHub 原生自动 release notes（--generate-notes / 网页端 "Auto-generate"）的
+# label → 分组映射，仅作兜底：主仓正式 release 按规范手写摘要
+# （docs/release-notes.md），自动生成只在草稿/应急场景使用。
+# 分组标题用中文，与仓库 release 正文语言一致。
+changelog:
+  categories:
+    - title: 新增
+      labels:
+        - enhancement
+    - title: 修复
+      labels:
+        - bug
+    - title: 文档
+      labels:
+        - documentation
+    - title: 维护
+      labels:
+        - tech-debt
+        - ops
+    - title: 其他变更
+      labels:
+        - "*"

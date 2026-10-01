@@ -34,6 +34,12 @@ class InstanceWorkflowsSettings(BaseModel):
     # silently re-arm a disabled (0) cap. The read path merges the code
     # default for legacy documents.
     max_items_per_run: int = Field(ge=0)
+    # #786: byte budget for one custom node code version (the #628 env-only
+    # decision is reversed); ge=1024 mirrors WorkflowsRuntimeConfig.
+    # Restart-effective like the rest of the workflows block. No PUT default
+    # (same rationale as max_items_per_run); the read path falls back to the
+    # loaded runtime (env > 64KB code default) for legacy documents.
+    node_code_max_bytes: int = Field(ge=1024)
 
 
 class InstanceAgentWorkersSettings(BaseModel):

@@ -19,14 +19,13 @@ the uncompressed bytes.
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, BinaryIO
 
 import requests
 
-from worker._retry import run_with_retry
+from worker._retry import StopSignal, run_with_retry
 from worker.artifact.download import describe_transfer_error
 from worker.artifact.gzip import open_payload, prepare_upload
 from worker.artifact.inputs import sha256_file
@@ -57,7 +56,7 @@ def _put_stream(url: str, stream: BinaryIO, size_bytes: int) -> int:
 
 
 def upload_artifact_direct(
-    path: Path, spec: Mapping[str, Any], *, stop: threading.Event | None = None
+    path: Path, spec: Mapping[str, Any], *, stop: StopSignal | None = None
 ) -> dict[str, Any] | None:
     """Stream one artifact to its presigned PUT URL; returns the result ref.
 
@@ -78,10 +77,14 @@ def upload_artifact_direct(
     storage_key = str(spec.get("storage_key") or "")
     if not url or not storage_key:
         raise DirectUploadError(f"artifact upload spec is incomplete for {path.name!r}")
+    if stop is not None and stop.is_set():
+        return None
     content_hash = sha256_file(path)
     payload, size_bytes = prepare_upload(path, storage_key)
 
     def attempt() -> bool:
+        if stop is not None and stop.is_set():
+            return False
         try:
             with open_payload(path, payload) as stream:
                 status = _put_stream(url, stream, size_bytes)
@@ -108,6 +111,8 @@ def upload_artifact_direct(
     except _TransientUploadError as exc:
         raise DirectUploadError(f"artifact upload failed: {exc}") from exc
     if result is None and stop is not None and stop.is_set():
+        return None
+    if result is False and stop is not None and stop.is_set():
         return None
     return {
         "storage_key": storage_key,

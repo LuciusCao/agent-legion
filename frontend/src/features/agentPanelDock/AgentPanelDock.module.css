@@ -1,0 +1,49 @@
+/*
+ * AgentPanelDock 布局（issue #795 PR①）：可拖拽/可缩放的非模态面板容器。
+ * 面板本体的 fixed 定位与 react-rnd 拖拽位移由 Rnd 的内联 style 承担，
+ * 这里只负责内部结构（标题栏拖拽把手/内容区）。折叠小条已随 #795 收尾
+ * 移除（开/关两态）。
+ * z-index 分层（仓库实际值）：页面内容（JobFilterBar 10）< AppBar 100 <
+ * 本面板 900 < Toast 1000 = DagFullscreenDialog 1000 < TokenUsageDialog
+ * 1190/1200 < MUI Modal 1300——面板是页面级非模态 chrome：高于 AppBar/页面
+ * 内容，但必须让位全局通知与一切全局对话框。
+ */
+
+.surface {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  outline: none;
+}
+
+.titleBar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--color-border, #c3c6cf);
+  cursor: move;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}

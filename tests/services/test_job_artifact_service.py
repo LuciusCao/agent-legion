@@ -65,17 +65,25 @@ def test_job_artifact_service_reject_subpath(artifact_service, job):
 
 class _FakeObjectStore:
     """In-memory object-store double; ``error`` simulates a storage failure
-    (e.g. NoSuchKey after a bucket lifecycle deletion)."""
+    (e.g. NoSuchKey after a bucket lifecycle deletion).
+
+    #631 攻击复审 H1 后 storage_key 必须落在本 job 前缀
+    （jobs/{workspace}/{job_id}/…）内，读侧兜底才放行——double 的 key
+    从传入 job 行派生 workspace，而不是假名。"""
 
     enabled = True
 
     def __init__(self, payload: bytes = b"", error: Exception | None = None):
         self._payload = payload
         self._error = error
+        self._workspace_id = "default"
+
+    def bind_workspace(self, workspace_id: str) -> None:
+        self._workspace_id = workspace_id
 
     def lookup(self, job_id: str, name: str) -> dict:
         return {
-            "storage_key": f"jobs/ws/{job_id}/{name}",
+            "storage_key": f"jobs/{self._workspace_id}/{job_id}/{name}",
             "size_bytes": len(self._payload),
         }
 
@@ -87,7 +95,7 @@ class _FakeObjectStore:
 
 def test_job_artifact_service_reads_from_object_store(job_db, job):
     """本地缓存已淘汰时从对象存储回读成功。"""
-    service = JobArtifactService(job_db, _FakeObjectStore(payload=b'{"from": "store"}'))
+    service = JobArtifactService(job_db, _fake_store(job, payload=b'{"from": "store"}'))
 
     result = service.read(job["id"], "result.json")
 
@@ -99,7 +107,7 @@ def test_job_artifact_service_object_error_becomes_404(job_db, job):
     from botocore.exceptions import ClientError
 
     boto_outage = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
-    service = JobArtifactService(job_db, _FakeObjectStore(error=boto_outage))
+    service = JobArtifactService(job_db, _fake_store(job, error=boto_outage))
 
     with pytest.raises(NotFoundError, match="Artifact not found"):
         service.read(job["id"], "result.json")
@@ -112,7 +120,7 @@ def test_job_artifact_service_falls_back_to_object_store_on_local_read_error(
     storage = resolve_job_dir(job, job_db.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "result.json").write_text('{"ok": true}', encoding="utf-8")
-    service = JobArtifactService(job_db, _FakeObjectStore(payload=b'{"from": "store"}'))
+    service = JobArtifactService(job_db, _fake_store(job, payload=b'{"from": "store"}'))
 
     def _raise_oserror(self, *args, **kwargs):
         raise OSError("evicted between exists() and read_text()")
@@ -155,7 +163,7 @@ def test_job_artifact_service_open_raw_local_wins_over_object_store(job_db, job)
     storage = resolve_job_dir(job, job_db.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "frame.png").write_bytes(b"local-bytes")
-    service = JobArtifactService(job_db, _FakeObjectStore(payload=b"store-bytes"))
+    service = JobArtifactService(job_db, _fake_store(job, payload=b"store-bytes"))
 
     raw = service.open_raw(job["id"], "frame.png")
 
@@ -166,7 +174,7 @@ def test_job_artifact_service_open_raw_local_wins_over_object_store(job_db, job)
 
 def test_job_artifact_service_open_raw_object_stream(job_db, job):
     """本地缓存已淘汰 → 对象存储流式输出（带 manifest 的 size_bytes）。"""
-    service = JobArtifactService(job_db, _FakeObjectStore(payload=b"\x00\x01binary"))
+    service = JobArtifactService(job_db, _fake_store(job, payload=b"\x00\x01binary"))
 
     raw = service.open_raw(job["id"], "result.json")
 
@@ -188,7 +196,7 @@ def test_job_artifact_service_open_raw_object_error_is_404(job_db, job):
     from botocore.exceptions import ClientError
 
     boto_outage = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
-    service = JobArtifactService(job_db, _FakeObjectStore(error=boto_outage))
+    service = JobArtifactService(job_db, _fake_store(job, error=boto_outage))
 
     with pytest.raises(NotFoundError, match="Artifact not found"):
         service.open_raw(job["id"], "result.json")
@@ -198,7 +206,7 @@ def test_job_artifact_service_open_raw_programming_error_propagates(job_db, job)
     """#204 窄化：raw 端点只降级 boto 数据面故障族；注入的编程错误
     （TypeError）原样上抛给路由层 500，不再被吞成 404。"""
     service = JobArtifactService(
-        job_db, _FakeObjectStore(error=TypeError("store contract violation"))
+        job_db, _fake_store(job, error=TypeError("store contract violation"))
     )
 
     with pytest.raises(TypeError, match="store contract violation"):
@@ -208,7 +216,7 @@ def test_job_artifact_service_open_raw_programming_error_propagates(job_db, job)
 def test_job_artifact_service_read_object_programming_error_propagates(job_db, job):
     """#204 窄化：read() 的对象存储回退同样只降级声明的失败族
     （ClientError/BotoCoreError/OSError/UnicodeDecodeError）。"""
-    service = JobArtifactService(job_db, _FakeObjectStore(error=TypeError("bad double")))
+    service = JobArtifactService(job_db, _fake_store(job, error=TypeError("bad double")))
 
     with pytest.raises(TypeError, match="bad double"):
         service.read(job["id"], "result.json")
@@ -219,18 +227,97 @@ def test_job_artifact_service_open_raw_rejects_traversal(artifact_service, job):
         artifact_service.open_raw(job["id"], "../agent_legion.sqlite")
 
 
+# --- #631 攻击复审 M1/M2：下载侧名字白名单 ------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        # 合法形态：普通名、子路径名、200 字节段（上限内）。
+        ("result.json", True),
+        ("reports/final.json", True),
+        ("a/b/c/d.txt", True),
+        ("x" * 200, True),
+        ("é" * 100, True),  # 200 bytes UTF-8
+        # runs/ 与点前缀段：与 artifact_names_deep 的清单剪枝同一规则。
+        ("runs", False),
+        ("runs/node_a/events.jsonl", False),
+        ("reports/runs/final.json", False),
+        (".trash/leak.txt", False),
+        ("a/.hidden/b", False),
+        ("..", False),
+        (".", False),
+        ("", False),
+        # 控制字符（含 NUL）与 DEL。
+        ("a\x00b", False),
+        ("a\nb", False),
+        ("a\x1bb", False),
+        ("a\x7fb", False),
+        # 反斜杠（Windows 风格穿越）与超长段。
+        ("x\\y", False),
+        ("..\\..\\etc", False),
+        ("x" * 201, False),
+        ("é" * 101, False),  # 202 bytes
+        # 绝对名。
+        ("/abs/path", False),
+    ],
+)
+def test_is_downloadable_artifact_name_matrix(name, expected):
+    """白名单矩阵（单一事实来源 job_artifact_names）：清单剪枝规则 +
+    控制字符/超长段/反斜杠拒绝。"""
+    from server.app.services.job_artifact_names import is_downloadable_artifact_name
+
+    assert is_downloadable_artifact_name(name) is expected
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "runs/node_a/events.jsonl",
+        ".trash/leak.txt",
+        "a\x00b",
+        "x" * 300,
+        "x" * 201,
+    ],
+)
+def test_job_artifact_service_rejects_non_artifact_names(artifact_service, job, name):
+    """serve 侧（read/open_raw/open_raw_current 共用 _artifact_path）对
+    清单不会列出的名字一律 InvalidOperationError（400），不再是「文件
+    存在即可达」。"""
+    for call in (
+        lambda: artifact_service.read(job["id"], name),
+        lambda: artifact_service.open_raw(job["id"], name),
+        lambda: artifact_service.open_raw_current(job["id"], name),
+    ):
+        with pytest.raises(InvalidOperationError, match="Invalid artifact name"):
+            call()
+
+
+@pytest.mark.parametrize("job_id", ["a\x00b", "a\nb", "a\x7fb"])
+def test_job_artifact_service_rejects_control_char_job_ids(artifact_service, job_id):
+    """#631 攻击复审 M1：控制字符 job_id 在 SQL 参数化时炸 psycopg
+    DataError（500）；形状早拒为 InvalidOperationError（400）。"""
+    with pytest.raises(InvalidOperationError, match="Invalid job id"):
+        artifact_service.read(job_id, "result.json")
+
+
 class _FakeRangedObjectStore:
-    """记录 open_range_stream 调用区间的对象存储 double。"""
+    """记录 open_range_stream 调用区间的对象存储 double（key 同样落在本
+    job 前缀内——读侧兜底语义，见 _FakeObjectStore 注释）。"""
 
     enabled = True
 
     def __init__(self, payload: bytes):
         self._payload = payload
         self.range_calls: list[tuple[int, int]] = []
+        self._workspace_id = "default"
+
+    def bind_workspace(self, workspace_id: str) -> None:
+        self._workspace_id = workspace_id
 
     def lookup(self, job_id: str, name: str) -> dict:
         return {
-            "storage_key": f"jobs/ws/{job_id}/{name}",
+            "storage_key": f"jobs/{self._workspace_id}/{job_id}/{name}",
             "size_bytes": len(self._payload),
         }
 
@@ -242,9 +329,23 @@ class _FakeRangedObjectStore:
         return io.BytesIO(self._payload[start : end + 1])
 
 
+def _fake_store(job: dict, **kwargs) -> _FakeObjectStore:
+    """_FakeObjectStore bound to the job's real workspace (H1 read-side prefix
+    guard requires in-prefix keys)."""
+    store = _FakeObjectStore(**kwargs)
+    store.bind_workspace(str(job["workspace_id"]))
+    return store
+
+
+def _fake_ranged_store(job: dict, payload: bytes) -> _FakeRangedObjectStore:
+    store = _FakeRangedObjectStore(payload)
+    store.bind_workspace(str(job["workspace_id"]))
+    return store
+
+
 def test_job_artifact_service_open_raw_ranged(job_db, job):
     """Range 请求走 open_range_stream（闭区间），流分支 seek 可用。"""
-    store = _FakeRangedObjectStore(b"0123456789")
+    store = _fake_ranged_store(job, b"0123456789")
     service = JobArtifactService(job_db, store)
 
     raw = service.open_raw(job["id"], "clip.mp4", range_header="bytes=2-5")
@@ -259,7 +360,7 @@ def test_job_artifact_service_open_raw_ranged(job_db, job):
 
 def test_job_artifact_service_open_raw_no_range_uses_full_stream(job_db, job):
     """无 Range 参数仍走 open_stream 全量（不误入 ranged 分支）。"""
-    store = _FakeRangedObjectStore(b"0123456789")
+    store = _fake_ranged_store(job, b"0123456789")
     service = JobArtifactService(job_db, store)
 
     raw = service.open_raw(job["id"], "clip.mp4")
@@ -346,3 +447,55 @@ def test_object_store_open_stream_dual_form(job_db, job):
     assert bare_row is not None
     with store.open_stream(bare_row) as stream:
         assert stream.read() == _GZ_RAW
+
+
+# --- #631 攻击复审 H1：读侧 storage_key 前缀兜底 -------------------------------
+
+
+def test_open_raw_row_refuses_key_outside_job_prefix(job_db, job):
+    """H1（对象分支）：manifest 行指向其他 workspace/其他 job 的对象 key
+    时，open_raw_row 按 NotFound 处理——行是读路径唯一权威，读侧兜底让
+    写歪的行（未来写入方失守、运维 SQL 误操作）不读穿 workspace 边界。"""
+    from server.app.services.job_artifact_raw import open_raw_row
+
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage(objects={}))
+    foreign_key = f"jobs/other-ws/{job['id']}/result.json.gz"
+    store.storage.objects[foreign_key] = gzip.compress(b"FOREIGN")
+    row = {
+        "job_id": job["id"],
+        "node_key": "upstream",
+        "name": "result.json",
+        "storage_key": foreign_key,
+        "size_bytes": 42,
+        "content_hash": "",
+    }
+
+    with pytest.raises(NotFoundError, match="Artifact not found"):
+        open_raw_row(store, row, "result.json", job=job)
+
+
+def test_open_raw_row_serves_key_within_job_prefix(job_db, job):
+    """兜底不误伤：本 job 前缀内的行（.gz 与裸 key）照常打开。"""
+    from server.app.services.job_artifact_raw import open_raw_row
+
+    store = _seed_gz_row(job_db, job)
+    row = store.lookup(job["id"], "result.json")
+    assert row is not None
+
+    raw = open_raw_row(store, row, "result.json", job=job)
+    assert raw.stream is not None
+    assert gzip.decompress(raw.stream.read()) == _GZ_RAW
+
+    bare_key = f"jobs/{job['workspace_id']}/{job['id']}/bare.json"
+    store.storage.objects[bare_key] = _GZ_RAW
+    bare_row = {
+        "job_id": job["id"],
+        "node_key": "upstream",
+        "name": "bare.json",
+        "storage_key": bare_key,
+        "size_bytes": len(_GZ_RAW),
+        "content_hash": "",
+    }
+    bare = open_raw_row(store, bare_row, "bare.json", job=job)
+    assert bare.stream is not None
+    assert bare.stream.read() == _GZ_RAW

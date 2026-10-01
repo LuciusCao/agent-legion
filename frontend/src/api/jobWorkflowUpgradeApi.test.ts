@@ -10,7 +10,7 @@ afterEach(() => {
 })
 
 describe('job workflow upgrade api', () => {
-  it('posts to the upgrade endpoint with an encoded job id', async () => {
+  it('posts to the upgrade endpoint with an encoded job id and default mode', async () => {
     const result = {
       job_id: 'job/1',
       operation: 'upgrade_workflow',
@@ -32,7 +32,30 @@ describe('job workflow upgrade api', () => {
     expect(response).toEqual(result)
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/jobs/job%2F1/upgrade-workflow',
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ mode: 'clean' }),
+      })
+    )
+  })
+
+  it('passes the inherit mode through to the endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ results: [] }),
+      text: () => Promise.resolve('{}'),
+    } as Response)
+    global.fetch = fetchMock
+
+    await upgradeJobWorkflow('job-1', 'inherit')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/jobs/job-1/upgrade-workflow',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ mode: 'inherit' }),
+      })
     )
   })
 

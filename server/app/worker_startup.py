@@ -13,6 +13,7 @@ from server.app.executors.sweeper import SweeperThread
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import register_wakeup
 from server.app.services.health_status import record_pure_remote_startup
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.path_hygiene import (
     migrate_absolute_db_paths_background,
     report_absolute_db_paths_background,
@@ -35,6 +36,7 @@ def start_worker_threads(
     workspace_worker_control: WorkspaceWorkerControl,
     agent_manager: AgentStatusManager,
     agent_dispatch: AgentDispatchService,
+    job_artifact_objects: JobArtifactObjectStore | None = None,
 ) -> tuple[SweeperThread | None, WorkflowWorkerThread | None, dict[str, str]]:
     """Start the sweeper and workflow worker threads.
 
@@ -127,6 +129,10 @@ def start_worker_threads(
         workspace_worker_control=workspace_worker_control,
         agent_manager=agent_manager,
         agent_dispatch=agent_dispatch,
+        # Ready-gate input hydration (#759): the shared instance artifact
+        # object store (same composition root as the dispatch path); None /
+        # unconfigured storage makes hydration a no-op.
+        artifact_object_store=job_artifact_objects,
         # The code dispatch shares the agent dispatch's broker and artifact
         # store (same instances, same composition root).
         code_dispatch=CodeDispatchService(

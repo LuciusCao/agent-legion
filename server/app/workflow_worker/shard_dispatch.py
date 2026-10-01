@@ -39,6 +39,7 @@ def claim_shard_locally(
     control_snapshot: dict[str, Any] | None,
     allowed_node_keys: frozenset[str] | None,
     snapshot: CapacitySnapshot,
+    execution_generation: int = 0,
 ) -> bool:
     """Lease and submit one shard on the local code pool; False = no capacity."""
     workspace_id = workspace["id"]
@@ -62,6 +63,7 @@ def claim_shard_locally(
             target_node_key=control_snapshot.get("target_node_key") if control_snapshot else None,
             allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
             shard_index=shard_index,
+            execution_generation=execution_generation,
         )
     )
     if claim is None:

@@ -159,6 +159,46 @@ def test_metrics_overview_passes_workspace_id_filter(client) -> None:
     assert rows[0]["queued"] == 7
 
 
+def test_metrics_scoped_member_token_reads_own_workspace(client, job_db) -> None:
+    """codex P2-2 on #626 (PR #704), HTTP pin: a studio-agent scoped token
+    minted for a NON-admin member keeps its pre-#626 read access to the
+    minter's workspace metrics. require_workspace_access passes it (the
+    scoped identity carries user['id']), so the membership guard here must
+    resolve the member row instead of 404ing every non-empty actor_scope."""
+    from server.app.auth import scoped_tokens
+
+    member = client.post(
+        "/api/users",
+        json={"username": "metrics_member", "password": "pw-metrics"},
+        headers={"x-agent-legion-request": "1"},
+    )
+    assert member.status_code == 201, member.text
+    member_id = member.json()["id"]
+    created = client.post(
+        "/api/workspaces",
+        json={"id": "ops-metrics-ws", "name": "Metrics Scoped WS"},
+    )
+    assert created.status_code == 200, created.text
+    other = client.post(
+        "/api/workspaces",
+        json={"id": "ops-other-ws", "name": "Metrics Other WS"},
+    )
+    assert other.status_code == 200, other.text
+    job_db.upsert_workspace_member("ops-metrics-ws", member_id, "viewer")
+
+    token = scoped_tokens.mint_scoped_token(job_db, member_id)
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+    # Own workspace (member): the read passes with real buckets.
+    response = scoped.get("/api/metrics/overview?workspace_id=ops-metrics-ws")
+    assert response.status_code == 200, response.text
+    assert response.json()["granularity"] == "6h"
+    # Global scope stays admin-only for the scoped member (403), and a
+    # workspace the minter does not belong to stays 404 — both unchanged.
+    assert scoped.get("/api/metrics/overview").status_code == 403
+    assert scoped.get("/api/metrics/overview?workspace_id=ops-other-ws").status_code == 404
+
+
 def test_metrics_workspace_membership_guard() -> None:
     from types import SimpleNamespace
 
@@ -182,3 +222,39 @@ def test_metrics_workspace_membership_guard() -> None:
     with pytest.raises(HTTPException) as exc_info:
         enforce_workspace_membership(_request("viewer"), None, {"role": "member", "id": "u1"})
     assert exc_info.value.status_code == 403
+
+
+def test_metrics_guard_api_scope_only_no_wider_scopes() -> None:
+    """codex P2-2 on #626 (PR #704), unit pin: the machine-identity arm in
+    enforce_workspace_membership must fire for actor_scope='api' ONLY. A
+    studio-agent scoped token carries the initiating user's row — it goes
+    through the normal member lookup (viewer passes, non-member 404), not a
+    blanket scoped-identity 404."""
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
+    from server.app.auth.scoped_tokens import STUDIO_AGENT_SCOPE
+    from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
+    from server.app.routes.metrics_access import enforce_workspace_membership
+
+    def _request(role):
+        job_db = SimpleNamespace(get_workspace_role=lambda ws, uid: role)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(job_db=job_db)))
+
+    studio_agent = {"role": "member", "id": "u1", "actor_scope": STUDIO_AGENT_SCOPE}
+    # Member of the addressed workspace: the read passes (pre-#626 behavior).
+    enforce_workspace_membership(_request("viewer"), "ops-ws", studio_agent)
+    # Not a member: the same 404 as any non-member user session.
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_workspace_membership(_request(None), "ops-ws", studio_agent)
+    assert exc_info.value.status_code == 404
+    # The api machine identity stays refused regardless of the member rows —
+    # it never reaches the lookup (defense in depth; the allowlist guard in
+    # require_workspace_access has already 404'd it on the real route).
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_workspace_membership(
+            _request("viewer"), "ops-ws", {"actor_scope": WORKSPACE_API_SCOPE}
+        )
+    assert exc_info.value.status_code == 404

@@ -349,6 +349,13 @@ def _extract_function(name: str) -> str:
     return match.group(0)
 
 
+# collect_s3_credentials prefers ambient process env over the .env file, so
+# the extracted-function tests must scrub the two variables first: the
+# assertions below pin the file-parsing semantics, and a leaked ambient
+# value (e.g. a worktree .env loaded into the pytest worker) must not win.
+_SCRUB_AMBIENT_S3 = "unset AGENT_LEGION_S3_ACCESS_KEY AGENT_LEGION_S3_SECRET_KEY\n"
+
+
 def test_s3_credentials_bridge_root_env_to_compose(tmp_path: Path) -> None:
     """#624：决策为 start 时 collect_s3_credentials 把根 .env 的凭据收进
     COMPOSE_S3_ENV（进程环境优先于 deploy/.env 插值）——deploy/.env 缺凭据
@@ -363,7 +370,8 @@ def test_s3_credentials_bridge_root_env_to_compose(tmp_path: Path) -> None:
     )
     code = (
         "set -euo pipefail\n"
-        "cd "
+        + _SCRUB_AMBIENT_S3
+        + "cd "
         + str(tmp_path)
         + "\n"
         + _extract_function("collect_s3_credentials")
@@ -387,7 +395,8 @@ def test_s3_credentials_scoped_to_compose_invocation(tmp_path: Path) -> None:
     )
     code = (
         "set -euo pipefail\n"
-        "cd "
+        + _SCRUB_AMBIENT_S3
+        + "cd "
         + str(tmp_path)
         + "\n"
         + _extract_function("collect_s3_credentials")
@@ -409,8 +418,11 @@ def test_s3_credentials_prefers_existing_env_and_skips_empty(tmp_path: Path) -> 
     )
     code = (
         "set -euo pipefail\n"
-        "cd " + str(tmp_path) + "\n"
-        "export AGENT_LEGION_S3_ACCESS_KEY=fromenv\n"
+        + _SCRUB_AMBIENT_S3
+        + "cd "
+        + str(tmp_path)
+        + "\n"
+        + "export AGENT_LEGION_S3_ACCESS_KEY=fromenv\n"
         + _extract_function("collect_s3_credentials")
         + "\ncollect_s3_credentials\n"
         "printf '%s\\n' \"${COMPOSE_S3_ENV[@]}\"\n"
@@ -455,7 +467,8 @@ def test_s3_credentials_dotenv_parity_for_padded_and_quoted_values(tmp_path: Pat
     )
     code = (
         "set -euo pipefail\n"
-        "cd "
+        + _SCRUB_AMBIENT_S3
+        + "cd "
         + str(tmp_path)
         + "\n"
         + _extract_function("collect_s3_credentials")

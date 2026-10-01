@@ -12,6 +12,7 @@ from server.app.db.migrations import (
     migrate_agent_request_kind_window,
     migrate_agent_workspace_scope,
     migrate_code_executor_bindings,
+    migrate_execution_generation,
     migrate_executor_asr_config_schema,
     migrate_executor_entity_type,
     migrate_executor_retirement,
@@ -33,6 +34,7 @@ from server.app.db.migrations import (
     migrate_versioned_entities,
     migrate_workflow_catalog_retirement,
     migrate_workflow_node_explicit_types,
+    migrate_workspace_api_tokens,
     migrate_workspace_cms_config,
     migrate_workspace_execution_defaults,
     migrate_workspace_id_key_binding,
@@ -205,6 +207,26 @@ MIGRATIONS: list[SchemaMigration] = [
     # and reads sum base + pending. Losing writers never wait after acquiring
     # jobs-row locks, removing both counter-row and row/advisory cycles.
     SchemaMigration(82, "job_status_counts_advisory_locks", _migrate_v82_locks),
+    # v83 (#694): studio_chat_sessions usage/compacting context-health mirrors
+    # (usage_json + compacting) come from the schema-file replay, no data
+    # migration. DDL-only, same guarded-ALTER home rule.
+    SchemaMigration(83, "studio_chat_context_health"),
+    # v84 (#626): workspace-scoped API intake tokens — the machine-to-machine
+    # submission channel (POST /runs + run/job reads). Table DDL rides the
+    # apply fn (postgres_schema.sql is at its ceiling; v76 precedent).
+    SchemaMigration(84, "workspace_api_tokens", migrate_workspace_api_tokens),
+    # v85 (#759): execution_generation epoch columns on jobs (source of
+    # truth, bumped by every resetting mutation) plus job_nodes / node_runs
+    # / executor_leases / agent_execution_requests mirrors — the CAS
+    # substrate of the job-mutation lock protocol (EXEC-GENERATION-001).
+    # DDL rides the apply fn (postgres_schema.sql is at its raw-line
+    # ceiling; v76/v84 precedent); default 0 keeps legacy rows consistent.
+    SchemaMigration(85, "execution_generation", migrate_execution_generation),
+    # v86 (#645): node_runs.agent_definition_hash — claim-time implementation
+    # identity mirror (DDL rides the schema-file replay, no apply fn;
+    # retention-deleted request rows cannot be backfilled: unprovable =
+    # conservative rerun).
+    SchemaMigration(86, "node_runs_impl_identity"),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

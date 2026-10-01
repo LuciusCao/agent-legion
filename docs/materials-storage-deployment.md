@@ -203,7 +203,7 @@ EOF
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
 - 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
-  （目前 v82）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
+  （目前 v86）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
   v55（`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
   状态计数）、v57（`studio_chat_sessions.draft_yaml`）、v58（scoped worker
   token——撤销存量全局 register token，行为变更）、v61（Studio workflow
@@ -215,7 +215,11 @@ EOF
   （`ops_runtime_profile_samples` 执行管线观测列族）、v73/v77/v82
   （job 状态计数：行触发器 → 语句级聚合 → advisory-lock delta fold，
   #437/#659 死锁根治线）、v76（`studio_publish_requests` 发布握手表）、
-  v79（shard 感知的唯一活跃请求索引）。v59（`jobs(run_id)` 索引）与
+  v79（shard 感知的唯一活跃请求索引）、v83（studio_chat_sessions
+  上下文健康观测列，#694）、v84（workspace-scoped API intake token，
+  #626）、v85（`execution_generation` 执行代次列族，#759——全部重置
+  入口的 CAS 纪元）、v86（`node_runs.agent_definition_hash` 实现身份
+  镜像，#645）。v59（`jobs(run_id)` 索引）与
   v60（register token ids 列）与本部署面无直接关系。
   迁移明细以 `server/app/db/migration_chain.py` 为准。
 - bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外
@@ -240,12 +244,17 @@ EOF
   重试）。孤儿对象兜底分前缀治理（`#340`）：材料 key 在 bucket 根
   （`{workspace_id}/{content_hash}/{filename}`），产物在 `jobs/` 前缀
   下，Worker 直传的暂存对象在 `jobs-staging/` 前缀下（Host 核验后服务端
-  copy 提升到 `jobs/` 权威 key 并 best-effort 删除暂存对象），三条前缀
+  copy 提升到 `jobs/` 权威 key；暂存源只在 finish 提交后由完成方删除，
+  失败/冲突残留由 GC/lifecycle 兜底），三条前缀
   分开配规则——材料侧按你们对上传内容的数据分级策略设保留期（务必
   显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），`jobs/`
   前缀按产物保留策略另设，`jobs-staging/` 配短保留（如 1 天，孤儿
-  暂存对象只是失败残留）。手工清理可用 console（rustfs `:9001`；seaweedfs
-  为 master UI `:9333`）。
+  暂存对象只是失败残留）。注意 promote 回滚备份（key 含 `/.rollback/`
+  段）也在该前缀下：promote 恢复最终失败时被刻意保留的备份是幸存清单
+  行所指向旧字节的最后恢复源（`s3_jobs_gc` 对它们豁免回收，codex #774
+  P1 族）——bucket lifecycle 规则只能按前缀过滤、无法按子串豁免，配
+  `jobs-staging/` 短保留即接受「恢复处置死线 = 保留天数」。手工清理可用
+  console（rustfs `:9001`；seaweedfs 为 master UI `:9333`）。
   - `jobs/` 与 `jobs-staging/` 的孤儿对象（行已删但删除失败/未执行、
     promote 中途失败的结果报告丢失残留）由
     `scripts/gc-s3-jobs.py` 回收：按前缀列举对照 `job_artifacts`

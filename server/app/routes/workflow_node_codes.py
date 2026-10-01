@@ -1,7 +1,7 @@
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.jobs import JobQueries
@@ -9,6 +9,7 @@ from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workflow_node_code_contracts import (
     WorkflowNodeCodeArchiveResponse,
     WorkflowNodeCodeDraftRequest,
+    WorkflowNodeCodePublishRequest,
     WorkflowNodeCodeResponse,
     WorkflowNodeCodeRollbackRequest,
     WorkflowNodeCodeTemplateResponse,
@@ -43,7 +44,11 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     router = APIRouter()
 
     def _service() -> NodeCodeService:
-        return NodeCodeService(job_db, settings.executor_runtime.workflows.custom_nodes_enabled)
+        return NodeCodeService(
+            job_db,
+            settings.executor_runtime.workflows.custom_nodes_enabled,
+            settings.executor_runtime.workflows.node_code_max_bytes,
+        )
 
     def _resolve_key(workspace_id: str, workflow_key: str | None) -> str:
         """Codex P2 on #299: the deprecated segment (bound as a query param on
@@ -103,7 +108,12 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
 
         def _response(**kwargs: Any) -> WorkflowNodeCodeResponse:
             return WorkflowNodeCodeResponse(
-                has_draft=has_draft, draft_code=draft_code, draft_version=draft_version, **kwargs
+                has_draft=has_draft,
+                draft_code=draft_code,
+                draft_version=draft_version,
+                # #628: the editor displays the instance-level budget.
+                max_code_bytes=settings.executor_runtime.workflows.node_code_max_bytes,
+                **kwargs,
             )
 
         if published is not None:
@@ -160,12 +170,20 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         dependencies=_EDIT_GUARD,
     )
     def publish_node_code(
-        workspace_id: str, node_key: str, workflow_key: str | None = None
+        workspace_id: str,
+        node_key: str,
+        request: Annotated[WorkflowNodeCodePublishRequest | None, Body()] = None,
+        workflow_key: str | None = None,
     ) -> WorkflowNodeCodeVersionResponse:
         key = _resolve_key(workspace_id, workflow_key)
         _reject_start_node(workspace_id, key, node_key)
         try:
-            row = _service().publish(workspace_id, key, node_key)
+            row = _service().publish(
+                workspace_id,
+                key,
+                node_key,
+                request.expected_hash if request else None,
+            )
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return WorkflowNodeCodeVersionResponse(**row)

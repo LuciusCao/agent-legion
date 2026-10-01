@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button } from '@mui/material'
-import type { JobSummary } from '../../types'
+import type { JobSummary, UpgradeMode } from '../../types'
 import { BatchUpgradeDialog } from '../BatchUpgradeDialog'
 import { canUpgradeJob } from '../canUpgradeJob'
 
@@ -8,7 +8,10 @@ export type JobActionBarUpgradeProps = {
   jobs: JobSummary[]
   itemLabel?: string
   loading?: boolean
-  onUpgradeWorkflow?: (jobIds: string[]) => void | Promise<void>
+  onUpgradeWorkflow?: (
+    jobIds: string[],
+    mode?: UpgradeMode
+  ) => void | Promise<void>
 }
 
 export function JobActionBarUpgrade({
@@ -45,8 +48,8 @@ export function JobActionBarUpgrade({
           itemLabel={itemLabel}
           loading={loading}
           onClose={() => setOpen(false)}
-          onConfirm={async (jobIds) => {
-            await onUpgradeWorkflow(jobIds)
+          onConfirm={async (jobIds, mode) => {
+            await onUpgradeWorkflow(jobIds, mode)
             setOpen(false)
           }}
         />

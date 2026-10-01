@@ -26,6 +26,12 @@ export function toFormValues(doc: InstanceSettingsResponse): FormValues {
     materials_ttl_days: String(doc.materials_ttl_days),
     execution_retention_days: String(doc.execution_retention_days),
     'workflows.max_items_per_run': String(doc.workflows.max_items_per_run),
+    // 契约是字节，表单按 KB 展示（验收反馈 #786）：Math.round 对齐
+    // WorkflowNodeCodeEditor 的 KB 展示先例；非 1024 倍数只能经 env/直调
+    // API 产生，回显取整、再次保存归一为整数 KB。
+    'workflows.node_code_max_bytes': String(
+      Math.round(doc.workflows.node_code_max_bytes / 1024)
+    ),
     'agent_workers.max_archive_bytes': String(
       doc.agent_workers.max_archive_bytes
     ),

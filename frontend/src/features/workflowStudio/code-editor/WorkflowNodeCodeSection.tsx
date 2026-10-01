@@ -149,6 +149,7 @@ export function WorkflowNodeCodeSection(props: {
               // re-editing never clobbers it blindly.
               initialCode={data.draft_code ?? data.code}
               busy={busy}
+              maxCodeBytes={data.max_code_bytes}
               onSave={(code, note) => void saveDraft(code, note)}
               onCancel={() => setEditing(false)}
             />

@@ -54,7 +54,12 @@ class SkillValidator:
         base_dir: Path,
         lock_getter: Callable[[], SkillsLock | None] | None = None,
     ) -> None:
-        self._base_dir = base_dir.expanduser()
+        # Resolve once: _resolve_inside_base compares and returns
+        # physically-resolved paths, so a symlinked skills root (e.g.
+        # ~/.agents via symlink) must not keep its spelling here —
+        # relative_to() against the spelling raises ValueError and turns a
+        # valid skill read into a 500 (codex P2 on #753).
+        self._base_dir = base_dir.expanduser().resolve()
         self._lock_getter = lock_getter
 
     def validate(self, raw_path: str) -> SkillValidation:
@@ -62,19 +67,20 @@ class SkillValidator:
         if error is not None:
             return SkillValidation(valid=False, path=raw_path, error=error)
         assert path is not None
+        relative = path.relative_to(self._base_dir).as_posix()
         if not path.is_dir():
             return SkillValidation(
-                valid=False, path=str(path), error="skill path is not a directory"
+                valid=False, path=relative, error="skill path is not a directory"
             )
         if not (path / "SKILL.md").is_file():
             return SkillValidation(
-                valid=False, path=str(path), error="skill directory must contain SKILL.md"
+                valid=False, path=relative, error="skill directory must contain SKILL.md"
             )
-        skill_key = path.relative_to(self._base_dir).as_posix()
+        skill_key = relative
         tags = self._git_tags(path)
         return SkillValidation(
             valid=True,
-            path=str(path),
+            path=skill_key,
             skill_key=skill_key,
             tags=tags,
             latest_tag=tags[0] if tags else None,
@@ -87,7 +93,13 @@ class SkillValidator:
         if error is not None or path is None or not path.is_dir():
             return SkillTags(path=raw_path)
         tags = self._git_tags(path)
-        return SkillTags(path=str(path), tags=tags, latest_tag=tags[0] if tags else None)
+        return SkillTags(
+            # Relative form: the absolute path leaks the server's directory
+            # layout to any logged-in member (red-team R9 P3-3 on #745).
+            path=path.relative_to(self._base_dir).as_posix(),
+            tags=tags,
+            latest_tag=tags[0] if tags else None,
+        )
 
     def _resolve_inside_base(self, raw_path: str) -> tuple[Path | None, str | None]:
         if not raw_path or not raw_path.strip():
@@ -98,7 +110,10 @@ class SkillValidator:
         resolved = candidate.resolve()
         base = self._base_dir.resolve()
         if resolved != base and base not in resolved.parents:
-            return None, f"skill path must be inside the managed skills dir: {base}"
+            # No absolute base in the error: the response body goes to the
+            # caller, and the server's directory layout is not its business
+            # (red-team R9 P3-3 on #745).
+            return None, "skill path must be inside the managed skills dir"
         return resolved, None
 
     @staticmethod

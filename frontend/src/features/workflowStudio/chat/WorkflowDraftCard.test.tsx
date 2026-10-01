@@ -22,7 +22,8 @@ function makeStudio(overrides: Record<string, unknown> = {}) {
   return {
     canPublish: true,
     createsRevision: true,
-    actionState: 'idle',
+    publishing: false,
+    validating: false,
     compareState: 'ready',
     compareErrors: null,
     compareSummary: null,
@@ -124,17 +125,14 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
     )
   })
 
-  it('canPublish 为真但 actionState 非 idle（publish POST 在途）时禁用', () => {
-    // canPublish 不含 actionState：确认框关闭后首个 POST 在途，按钮必须
+  it('canPublish 为真但发布在途（publish POST 未回）时禁用', () => {
+    // canPublish 不含在途态：确认框关闭后首个 POST 在途，按钮必须
     // 保持禁用，防止再开确认框发起第二个 POST（命令条同口径）。
-    const studio = makeStudio({ actionState: 'publishing' })
+    const studio = makeStudio({ publishing: true })
     renderCard(studio)
     const publish = screen.getByRole('button', { name: '发布新版本' })
     expect(publish).toBeDisabled()
-    expect(publish.parentElement).toHaveAttribute(
-      'title',
-      '校验或保存进行中，请稍候'
-    )
+    expect(publish.parentElement).toHaveAttribute('title', '发布进行中，请稍候')
     fireEvent.click(publish)
     expect(studio.requestPublish).not.toHaveBeenCalled()
   })

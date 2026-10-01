@@ -7,7 +7,9 @@ import {
   within,
 } from '@testing-library/react'
 import { Route, Routes } from 'react-router-dom'
+import { useState } from 'react'
 import { WorkflowStudioSharedMaterialsButton } from './WorkflowStudioSharedMaterialsDrawer'
+import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import {
   getWorkspaceSharedMaterialFile,
   getWorkspaceSharedMaterials,
@@ -84,6 +86,19 @@ const populated = {
 }
 
 function renderEntry() {
+  // 轮 9 P2：开合状态提升到 StudioViewContext（Dock 避让需要感知抽屉）
+  // ——用真 view state 的包壳，点击真实驱动开合。
+  function Harness() {
+    const [open, setOpen] = useState(false)
+    return withStudioProviders(
+      {},
+      makeStudioView({
+        materialsOpen: open,
+        setMaterialsOpen: setOpen,
+      }),
+      <WorkflowStudioSharedMaterialsButton />
+    )
+  }
   return render(
     <MemoryRouter
       initialEntries={[`/workspaces/${WORKSPACE_ID}/workflow-studio`]}
@@ -91,7 +106,7 @@ function renderEntry() {
       <Routes>
         <Route
           path="/workspaces/:workspaceId/workflow-studio"
-          element={<WorkflowStudioSharedMaterialsButton />}
+          element={<Harness />}
         />
       </Routes>
     </MemoryRouter>
@@ -334,6 +349,31 @@ describe('WorkflowStudioSharedMaterialsDrawer', () => {
     // 清除结果。
     fireEvent.click(screen.getByRole('button', { name: '清除同步结果' }))
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('lists the full impact scope in the confirm dialog, not just the row', async () => {
+    // #683 review P2-1：后端按 skill 粒度传播——sources 只选哪些 skill
+    // 运行，每个 skill 在同一次 commit 里同步它映射的整个集合。fixture
+    // 里 write-script 同时映射 style.md 与 synced.md，所以确认框必须列
+    // 出两个文件（含非当前行的），并明确说明传播是按 skill 粒度的。
+    await openDrawer()
+    fireEvent.click(
+      await screen.findByRole('button', { name: '同步 references/style.md' })
+    )
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('2 个文件')
+    expect(dialog.textContent).toContain('含这些 skill 映射的其他共享材料')
+    const list = within(dialog).getByTestId('propagate-impact-files')
+    // 完整清单（排序后）：本次所选 + 同 skill 的其他共享材料。
+    expect(within(list).getByText('references/style.md')).toBeInTheDocument()
+    expect(within(list).getByText('references/synced.md')).toBeInTheDocument()
+    expect(list.textContent).toContain('（本次所选）')
+    expect(list.textContent).toContain('（同 skill 的其他共享材料）')
+    // 无关行的文件不出现在清单里。
+    expect(
+      within(list).queryByText('scripts/validate.sh')
+    ).not.toBeInTheDocument()
+    expect(within(list).queryByText('notes.md')).not.toBeInTheDocument()
   })
 
   it('closes the drawer from the header button', async () => {

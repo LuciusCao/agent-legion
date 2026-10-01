@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Query
 
 from server.app.jobs import JobQueries
 from server.app.routes.skill_directories_contracts import SkillDirectoriesResponse
@@ -16,10 +18,13 @@ def create_skill_directories_router(job_db: JobQueries, settings: Settings) -> A
         return SkillBrowser(manager.base_dir)
 
     @router.get("/skills/directories", response_model=SkillDirectoriesResponse)
-    def list_skill_directories(workspace_id: str) -> SkillDirectoriesResponse:
+    def list_skill_directories(
+        workspace_id: Annotated[str, Query(min_length=1)],
+    ) -> SkillDirectoriesResponse:
         # The ``workspace_id`` query-param name is load-bearing:
         # require_workspace_access reads it and rejects non-members (404)
-        # before this handler runs.
+        # before this handler runs; min_length=1 keeps an empty value from
+        # skipping that check (#745 follow-up).
         directories = _browser().list_directories(workspace_id)
         return SkillDirectoriesResponse(workspace_id=workspace_id, directories=list(directories))
 

@@ -1,10 +1,7 @@
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
 import { MaterialIcon } from '../MaterialIcon'
 import { durationSeconds, formatDuration } from '../../lib/formatters'
 import type { JobNode, NodeRun } from '../../types/jobTypes'
 import { JOB_STATUS_LABELS } from '../../labels'
-import { JobDiagnosisDialog } from '../../features/jobDiagnosis/JobDiagnosisDialog'
 import {
   computeWaitTime,
   EXECUTOR_KIND_ICONS,
@@ -49,12 +46,14 @@ interface JobProgressPanelNodeProps {
   isExpanded: boolean
   onToggleError: (nodeKey: string) => void
   onOpenLog: (target: { nodeLabel: string; runId: number }) => void
+  /** 唤起排查 Dock（#795 PR③，节点上下文）：宿主在 JobDetailPage，本组件
+   * 不再自挂诊断弹窗；未提供（无 workspace 路由上下文等）时不渲染入口。 */
+  onOpenDiagnosis?: (target: { nodeKey: string; nodeLabel: string }) => void
 }
 
 /** 时间线上的单个节点条目（从 JobProgressPanel 拆出，文件预算）。排查入口
- * （#329）挂在这里：仅失败节点展示，弹窗状态全挂本组件内部；workspaceId
- * 取自路由参数（本组件只挂在 workspace 路由下，无路由上下文时 useParams
- * 返回空对象，按钮不渲染）。 */
+ * （#329；#795 PR③ 起改走 JobDetailPage 的排查 Dock，上下文语义不变）挂在
+ * 这里：仅失败节点展示，且仅当调用方提供 onOpenDiagnosis 时渲染。 */
 export function JobProgressPanelNode({
   jobId,
   node,
@@ -64,10 +63,8 @@ export function JobProgressPanelNode({
   isExpanded,
   onToggleError,
   onOpenLog,
+  onOpenDiagnosis,
 }: JobProgressPanelNodeProps) {
-  const { workspaceId } = useParams<{ workspaceId: string }>()
-  const [diagnosisOpen, setDiagnosisOpen] = useState(false)
-
   const icon = STATUS_ICONS[node.status] || 'help'
   const statusText = JOB_STATUS_LABELS[node.status] || node.status
   const hasError = !!(run?.error_message || node.error_message)
@@ -189,10 +186,12 @@ export function JobProgressPanelNode({
           </button>
         )}
 
-        {node.status === 'failed' && workspaceId && (
+        {node.status === 'failed' && onOpenDiagnosis && (
           <button
             className={styles.logBtn}
-            onClick={() => setDiagnosisOpen(true)}
+            onClick={() =>
+              onOpenDiagnosis({ nodeKey: node.node_key, nodeLabel: node.label })
+            }
           >
             <MaterialIcon
               name="smart_toy"
@@ -215,18 +214,6 @@ export function JobProgressPanelNode({
           </div>
         )}
       </div>
-      {diagnosisOpen && workspaceId && (
-        <JobDiagnosisDialog
-          open
-          target={{
-            workspaceId,
-            jobId,
-            nodeKey: node.node_key,
-            nodeLabel: node.label,
-          }}
-          onClose={() => setDiagnosisOpen(false)}
-        />
-      )}
     </div>
   )
 }

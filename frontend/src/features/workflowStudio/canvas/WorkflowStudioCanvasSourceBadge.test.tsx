@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useStudioState } from '../shared/studioStateContext'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
@@ -47,8 +47,6 @@ function mockStudio(
 
 describe('WorkflowStudioCanvasSourceBadge', () => {
   it('renders no chip in draft mode when the draft has no unpublished changes (#666)', () => {
-    // 与顶栏同源：无 compare 计数且不 dirty（含刚发布完成）时保持安静，
-    // 不再常驻「草稿（未发布）」。
     mockStudio('draft', 'key: demo\nnodes:\n  a:\n    capability: cap_a\n')
 
     const { container } = render(<WorkflowStudioCanvasSourceBadge />)
@@ -56,25 +54,17 @@ describe('WorkflowStudioCanvasSourceBadge', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('shows the unpublished change count from the compare summary', () => {
+  it('#804 定案：草稿有未发布变更时也不渲染角标 chip（由左岛状态 chip 唯一承接）', () => {
     mockStudio('draft', 'key: demo\nnodes:\n  a:\n    capability: cap_a\n', {
       dirty: true,
       compareSummary: makeSummary('added', 'modified'),
     })
 
-    render(<WorkflowStudioCanvasSourceBadge />)
+    const { container } = render(<WorkflowStudioCanvasSourceBadge />)
 
-    expect(screen.getByText('草稿（未发布变更 2）')).toBeInTheDocument()
-  })
-
-  it('falls back to the dirty flag while the compare summary is unavailable', () => {
-    mockStudio('draft', 'key: demo\nnodes:\n  a:\n    capability: cap_a\n', {
-      dirty: true,
-    })
-
-    render(<WorkflowStudioCanvasSourceBadge />)
-
-    expect(screen.getByText('草稿（有未发布变更）')).toBeInTheDocument()
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText(/草稿（未发布变更/)).toBeNull()
+    expect(screen.queryByText('草稿（有未发布变更）')).toBeNull()
   })
 
   it('warns that the canvas shows the published version while the draft YAML is invalid', () => {
@@ -98,46 +88,28 @@ describe('WorkflowStudioCanvasSourceBadge', () => {
     ).toBeInTheDocument()
   })
 
+  it('轮 6 H4：compare 传输失败出「草稿对比失败」警示 chip，点击重试', () => {
+    const retryCompare = vi.fn()
+    vi.mocked(useStudioState).mockReturnValue({
+      viewMode: 'draft',
+      definitionYaml: 'key: demo\nnodes:\n  a:\n    capability: cap_a\n',
+      dirty: true,
+      compareSummary: null,
+      compareState: 'error',
+      retryCompare,
+    } as unknown as ReturnType<typeof useStudioState>)
+
+    render(<WorkflowStudioCanvasSourceBadge />)
+
+    fireEvent.click(screen.getByText('草稿对比失败'))
+    expect(retryCompare).toHaveBeenCalledOnce()
+  })
+
   it('renders nothing in revision mode (the 只读 vN chip already covers it)', () => {
     mockStudio('revision', 'key: wf\nlabel: Old\n')
 
     const { container } = render(<WorkflowStudioCanvasSourceBadge />)
 
     expect(container).toBeEmptyDOMElement()
-  })
-
-  it('accompanies the draft chip with the execution hint when top-level defaults are missing (#333)', () => {
-    vi.mocked(useStudioState).mockReturnValue({
-      viewMode: 'draft',
-      definitionYaml: 'key: demo\nnodes:\n  a:\n    type: agent\n',
-      dirty: true,
-      compareSummary: makeSummary('modified'),
-      workflow: {
-        key: 'demo',
-        label: 'Demo',
-        intake: { modes: [] },
-        edges: [],
-        nodes: [
-          {
-            key: 'a',
-            label: 'a',
-            capability: 'cap_a',
-            after: [],
-            inputs: [],
-            outputs: [],
-            node_type: 'agent',
-          },
-        ],
-      },
-    } as unknown as ReturnType<typeof useStudioState>)
-
-    render(<WorkflowStudioCanvasSourceBadge />)
-
-    expect(screen.getByText('草稿（未发布变更 1）')).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        '未配置顶层 execution 默认，Agent 节点需各自配齐 provider / model'
-      )
-    ).toBeInTheDocument()
   })
 })

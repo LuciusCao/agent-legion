@@ -12,6 +12,7 @@ from server.app.db.migrations.agent_workspace_scope import (
 from server.app.db.migrations.cms_config import migrate_workspace_cms_config  # noqa: F401
 from server.app.db.migrations.code_executor import migrate_code_executor_bindings  # noqa: F401
 from server.app.db.migrations.custom_node_codes import migrate_custom_node_codes  # noqa: F401
+from server.app.db.migrations.execution_generation import migrate_execution_generation  # noqa: F401
 from server.app.db.migrations.executor_asr_config_schema import (  # noqa: F401
     migrate_executor_asr_config_schema,
 )
@@ -57,6 +58,9 @@ from server.app.db.migrations.workflow_catalog_retirement import (  # noqa: F401
 )
 from server.app.db.migrations.workflow_node_explicit_types import (  # noqa: F401
     migrate_workflow_node_explicit_types,
+)
+from server.app.db.migrations.workspace_api_tokens import (  # noqa: F401
+    migrate_workspace_api_tokens,
 )
 from server.app.db.migrations.workspace_execution_defaults import (  # noqa: F401
     migrate_workspace_execution_defaults,

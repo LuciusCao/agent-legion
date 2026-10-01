@@ -118,12 +118,32 @@ export class DraftSaveController {
      本页编辑，以已推进的基线竞争）或 adopt（adoptServerDraft）。冲突未
      解除时 pendingSave 不发起 PUT（挂起 autosave），pagehide 也不自动
      flush（flushNow 对 conflict 态 no-op，防止关闭页面前 keepalive PUT
-     静默覆盖 Agent 的草稿）。 */
-  resolveConflict(keepMine: boolean): void {
+     静默覆盖 Agent 的草稿）。
+     #804 P1-A：409 于 PUT 在途时到达的冲突，pendingSave 已被清空——
+     keep-mine 拿不到 pending 时按调用方给的当前画布内容无条件补调度，
+     否则状态机卡 error：draftYaml 未变不再触发调度 effect、flushNow
+     no-op，编辑永不落盘、自动校验/发布门控随之锁死。 */
+  resolveConflict(keepMine: boolean, currentYaml?: () => string): void {
     if (!this.state.conflict) return
     const pending = pendingAfterResolve(this.pendingSave, keepMine)
     this.setState(conflictClearedState(this.state))
-    if (pending) this.armSave(pending.yaml, pending.requestId)
+    if (pending) {
+      this.armSave(pending.yaml, pending.requestId)
+      return
+    }
+    if (keepMine && currentYaml) this.forceSave(currentYaml())
+  }
+
+  /* keep-mine 补救的强制写回（#804 轮 8 P1）：普通 schedule 的去重会把
+     「内容 == 已持久化值」判成 revert 不发 PUT——但冲突语义是以新 CAS
+     基线把画布内容写回服务端（Agent 已把服务端推进成别的内容），必须
+     绕过去重强制发，否则警示消失而内容从未写回，离页即丢。 */
+  private forceSave(yaml: string) {
+    if (!yaml.trim()) return
+    const requestId = (this.requestCounter += 1)
+    this.pendingSave = { yaml, requestId }
+    this.setState({ ...this.state, status: 'pending' })
+    this.armSave(yaml, requestId)
   }
 
   /* kimi review P1-2：采用服务端草稿（Agent 的版本）——经 hydrate 入口
@@ -154,8 +174,12 @@ export class DraftSaveController {
      的版本）；显式路径（resolveConflict(keep-mine)）之外不发 PUT。 */
   flushNow(options?: { keepalive?: boolean }): Promise<DraftSaveFlushResult> {
     const pending = this.pendingSave
-    if (!pending || this.state.conflict)
-      return Promise.resolve(this.result(true))
+    // #804 轮 6 H1：conflict 态的 no-op 必须报 ok:false——「没发 PUT」不是
+    // 「已落盘」，等待方（agent 发布确认守卫）据此中止，与 draftSaveQueue
+    // 的 conflict drain 同语义（两边不一致曾是审 A 发 B 洞）。pagehide 的
+    // 自动 flush 不消费返回值，无影响。
+    if (this.state.conflict) return Promise.resolve(this.result(false))
+    if (!pending) return Promise.resolve(this.result(true))
     this.clearTimers()
     this.pendingSave = null
     const keepalive = !!options?.keepalive && withinKeepaliveLimit(pending.yaml)

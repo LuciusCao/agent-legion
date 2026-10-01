@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { getSkillDetail } from '../../../api/agentCatalogApi'
+import { useSettingStore } from '../../../stores/settingStore'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import { WorkflowSkillFileList } from './WorkflowSkillFileList'
 import { WorkflowSkillVersionSelect } from './WorkflowSkillVersionSelect'
@@ -15,6 +16,7 @@ export function WorkflowSkillPreviewPanel(props: {
   /** 节点绑定 pin 的初始查询版本（#76）；不传/空 = latest（跟随仓库 HEAD，#322）。 */
   initialRef?: string
 }) {
+  const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   // 版本选择带 skillKey 印记：切换节点/技能绑定即回落初始版本（组件通常随
   // 节点切换卸载重建，印记兜底复用场景）。用户显式选择（含「跟随最新提交」
   // 的 null）优先于 initialRef。
@@ -28,9 +30,14 @@ export function WorkflowSkillPreviewPanel(props: {
       : (props.initialRef ?? null)
   const [selectedPath, setSelectedPath] = useState('SKILL.md')
   const query = useQuery({
-    queryKey: extraQueryKeys.studioSkillDetail(props.skillKey, ref),
-    queryFn: () => getSkillDetail(props.skillKey, ref ?? undefined),
-    enabled: Boolean(props.skillKey),
+    queryKey: extraQueryKeys.studioSkillDetail(
+      props.skillKey,
+      workspaceId ?? '',
+      ref
+    ),
+    queryFn: () =>
+      getSkillDetail(props.skillKey, workspaceId ?? '', ref ?? undefined),
+    enabled: Boolean(props.skillKey) && Boolean(workspaceId),
   })
   const detail = query.data ?? null
   const files = detail?.files ?? []

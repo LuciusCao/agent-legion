@@ -152,7 +152,7 @@ ensure_local_object_store() {
         fi
         sleep 2
     done
-    if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python scripts/ensure-s3-bucket.py .env; then
+    if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run --frozen python scripts/ensure-s3-bucket.py .env; then
         :
     else
         echo "警告: 建 bucket 失败（endpoint 可能尚未就绪），材料 API 暂降级 503；" >&2

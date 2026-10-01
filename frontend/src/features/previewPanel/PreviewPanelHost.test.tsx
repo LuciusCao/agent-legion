@@ -187,6 +187,9 @@ describe('PreviewPanelHost 桥协议', () => {
     vi.spyOn(iframe.contentWindow!, 'postMessage')
     emitPanelMessage(iframe, { source: PREVIEW_PANEL_SOURCE, type: 'ready' })
     await waitFor(() => expect(mockFetchJobDetail).toHaveBeenCalled())
+    // 等 detail 真正落进宿主状态再发桥请求：called 只保证查询已发起，
+    // 慢环境下快照可能还没就位（CI shard 时序曾命中，payload 为 null）。
+    await flush()
 
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,
@@ -275,6 +278,9 @@ describe('PreviewPanelHost 桥协议', () => {
     vi.spyOn(iframe.contentWindow!, 'postMessage')
     emitPanelMessage(iframe, { source: PREVIEW_PANEL_SOURCE, type: 'ready' })
     await waitFor(() => expect(mockFetchJobDetail).toHaveBeenCalled())
+    // 同 listArtifacts 用例：等 detail 落进宿主状态，否则 getJobDetail
+    // 可能拿到 null 快照（CI shard 时序实测命中）。
+    await flush()
 
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,

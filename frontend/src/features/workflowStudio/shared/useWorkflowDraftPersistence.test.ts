@@ -470,15 +470,14 @@ describe('useWorkflowDraftPersistence', () => {
 })
 
 describe('draftSaveText', () => {
-  it('prioritizes saving, error and pending over the saved-at time', () => {
+  it('only saving and error surface text; pending/saved stay quiet (#804 定案：成功即隐)', () => {
     const savedAt = '2026-08-27T09:05:00+00:00'
     expect(draftSaveText({ status: 'saving', savedAt })).toBe('草稿保存中…')
     expect(draftSaveText({ status: 'error', savedAt })).toBe(
       '草稿保存失败，将自动重试'
     )
-    expect(draftSaveText({ status: 'pending', savedAt })).toBe(
-      '草稿有未保存更改'
-    )
+    expect(draftSaveText({ status: 'pending', savedAt })).toBeNull()
+    expect(draftSaveText({ status: 'saved', savedAt })).toBeNull()
     expect(draftSaveText({ status: 'idle', savedAt: null })).toBeNull()
     expect(draftSaveText(undefined)).toBeNull()
   })
@@ -487,16 +486,6 @@ describe('draftSaveText', () => {
     expect(
       draftSaveText({ status: 'idle', savedAt: null, loadError: true })
     ).toBe('草稿服务不可用，编辑仅保留在本页内存')
-  })
-
-  it('formats the saved-at time as HH:MM', () => {
-    const savedAt = '2026-08-27T09:05:00+00:00'
-    const at = new Date(savedAt)
-    const hh = String(at.getHours()).padStart(2, '0')
-    const mm = String(at.getMinutes()).padStart(2, '0')
-    expect(draftSaveText({ status: 'saved', savedAt })).toBe(
-      `草稿已保存 ${hh}:${mm}`
-    )
   })
 })
 

@@ -17,6 +17,11 @@ from server.app.workflows.workflow_branching import (
 )
 from tests.helpers import load_builtin_definition
 
+# 本文件保留就绪/分支裁决基础与 start 节点语义；#759 复审族的隐式屏障、
+# 条件产物生产者屏障与自门控（不死锁）用例在姊妹文件
+# test_workflow_scheduler_gating.py（#779 codex 列车复审 R3 拆分，用例零
+# 改动迁移）。
+
 
 def _definition():
     return load_builtin_definition("education_video_problems_generation")

@@ -109,15 +109,23 @@ def test_child_missing_run_reports_error(tmp_path: Path) -> None:
 
 
 def test_child_sigterm_cancels_token_and_reports(tmp_path: Path) -> None:
-    """SIGTERM cancels the runtime token first, then unwinds via SystemExit."""
+    """SIGTERM cancels the runtime token first, then unwinds via SystemExit.
+
+    The started marker is written inside the try on purpose: the marker file
+    exists as soon as write_text opens it, and the parent signals right after
+    observing it — a SIGTERM landing in that window must still unwind through
+    the except arm (writing the marker before the try let SystemExit(130)
+    bypass the token-cancelled marker: a race independent of the Python
+    version, #483).
+    """
     result_path = tmp_path / "result.json"
     payload = _payload(
         """
         import time
 
         def run(job, job_dir, runtime):
-            (job_dir / "started").write_text("1")
             try:
+                (job_dir / "started").write_text("1")
                 while True:
                     time.sleep(0.01)
             except BaseException:

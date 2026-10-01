@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from server.app.agent_broker import result_unpack_pool, result_validate_pool
 from server.app.auth.service import build_auth_service
+from server.app.auth.workspace_api_tokens import WorkspaceApiTokenStore
 from server.app.bootstrap import build_agent_plane
 from server.app.db.connection import close_database_pools
 from server.app.events import JobEventManager
@@ -189,6 +190,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 workspace_worker_control=workspace_worker_control,
                 agent_manager=agent_manager,
                 agent_dispatch=agent_plane.dispatch,
+                job_artifact_objects=job_artifact_objects,
             )
             app.state.worker_startup = worker_status
             # Routes pick the thread up here to trigger scan-list reloads
@@ -250,6 +252,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.settings = settings
     app.state.job_db = job_db
     app.state.auth_service = build_auth_service(job_db, settings.config)
+    # #626: workspace API intake token store (Bearer {token_id}.{secret});
+    # get_current_user resolves against it, the management routes list/revoke.
+    app.state.workspace_api_token_store = WorkspaceApiTokenStore(job_db)
     app.state.agent_broker = agent_plane.broker
     app.state.agent_dispatch = agent_plane.dispatch
     app.state.agent_worker_registry = agent_worker_registry
@@ -296,6 +301,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 studio_chat_service=studio_chat_service,
                 materials_service=app.state.materials_service,
                 job_artifact_objects=job_artifact_objects,
+                workspace_api_token_store=app.state.workspace_api_token_store,
             )
         )
     )

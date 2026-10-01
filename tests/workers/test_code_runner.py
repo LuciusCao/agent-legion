@@ -12,6 +12,7 @@ import io
 import json
 import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 import threading
@@ -306,6 +307,7 @@ def _execute(
     claim: dict[str, Any],
     client: FakeClient,
     shutdown: threading.Event | None = None,
+    ownership_lost: threading.Event | None = None,
 ) -> UploadTask | None:
     _fake_velites(tmp_path, monkeypatch)
     return execute_code(
@@ -316,10 +318,43 @@ def _execute(
         threading.Semaphore(2),
         shutdown or threading.Event(),
         1,
-        threading.Event(),
+        ownership_lost or threading.Event(),
         SimpleNamespace(proc_ref={}),  # type: ignore[arg-type]
         ExecutionStatusReporter(None),
     )
+
+
+def test_execute_code_lost_during_prepare_does_not_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lost = threading.Event()
+    client = FakeClient(_code_bundle(tmp_path))
+    original_download = client.download
+
+    def download_then_lose(path: str, destination: Path) -> None:
+        original_download(path, destination)
+        lost.set()
+
+    client.download = download_then_lose  # type: ignore[method-assign]
+    spawned = 0
+    real_popen = subprocess.Popen
+
+    def counting_popen(*args: object, **kwargs: object):
+        nonlocal spawned
+        spawned += 1
+        return real_popen(*args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(subprocess, "Popen", counting_popen)
+    task = _execute(
+        tmp_path,
+        monkeypatch,
+        _code_claim(),
+        client,
+        ownership_lost=lost,
+    )
+
+    assert task is None
+    assert spawned == 0
 
 
 def test_execute_code_completed_and_result_pack(

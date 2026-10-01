@@ -20,7 +20,8 @@ _SESSION_COLUMNS = (
     "id, workspace_id, user_id, agent_id, title, status, acp_session_id,"
     " capability_snapshot_json, session_modes_json, config_options_json,"
     " allow_all_permissions, mcp_status,"
-    " selected_node_key, draft_yaml, error_detail, created_at, updated_at, closed_at"
+    " selected_node_key, draft_yaml, usage_json, compacting,"
+    " error_detail, created_at, updated_at, closed_at"
 )
 
 
@@ -32,6 +33,8 @@ def _session_record(row: Any) -> dict[str, Any]:
     modes_json, options_json = record.pop("session_modes_json"), record.pop("config_options_json")
     record["session_modes"] = json.loads(modes_json) if modes_json is not None else None
     record["config_options"] = json.loads(options_json) if options_json is not None else None
+    usage_json = record.pop("usage_json")
+    record["usage"] = json.loads(usage_json) if usage_json is not None else None
     return record
 
 
@@ -45,6 +48,7 @@ def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
         "mcp_status",
         "selected_node_key",
         "draft_yaml",
+        "compacting",
         "error_detail",
         "closed_at",
     }
@@ -52,7 +56,7 @@ def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
     for key, value in fields.items():
         if key == "capability_snapshot":
             updates["capability_snapshot_json"] = json.dumps(value)
-        elif key in ("session_modes", "config_options"):
+        elif key in ("session_modes", "config_options", "usage"):
             # None stays NULL (agent does not advertise); anything else is
             # serialized JSON (#368).
             updates[f"{key}_json"] = json.dumps(value) if value is not None else None
@@ -126,6 +130,19 @@ class StudioChatQueriesMixin(StudioChatResumeQueriesMixin):
                 (workspace_id,),
             ).fetchall()
         return [_session_record(row) for row in rows]
+
+    def clear_studio_chat_compacting_if_set(self, session_id: str) -> bool:
+        """Conditional compacting clear (#694 review R3-P2): only fires when
+        the row still says the window is open, so a stale self-clear timer
+        can never clobber a newer window's flag. Returns whether it fired."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "update studio_chat_sessions set compacting=false,"
+                " updated_at=current_timestamp where id=%s and compacting=true"
+                " returning id",
+                (session_id,),
+            ).fetchone()
+        return row is not None
 
     def update_studio_chat_session(self, session_id: str, **fields: Any) -> None:
         """Update whitelisted session columns; capability_snapshot is serialized here."""

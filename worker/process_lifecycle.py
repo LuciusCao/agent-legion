@@ -9,7 +9,6 @@ watcher's fail-closed degradation path.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import signal
 import subprocess
@@ -22,15 +21,39 @@ AGENT_PGID_FILENAME = "agent_pgid"
 
 
 def terminate(proc: subprocess.Popen[bytes], grace_seconds: float) -> None:
-    """Best-effort process-group SIGTERM then SIGKILL; never raises."""
+    """Best-effort process-group SIGTERM then SIGKILL; never raises.
+
+    #640：killpg 对已退出/换组的进程组会抛 EPERM（PermissionError）或
+    ESRCH（ProcessLookupError），同为 OSError 子类。terminate 是收尾路径
+    （run_execution 的 finally / shutdown / cancel / 超时收尾都经它），
+    信号送不到一律按「进程已不可达」处理：记一行日志后继续 wait 确认，
+    绝不向上炸穿执行线程拖垮整个 executor。"""
     for sig in (signal.SIGTERM, signal.SIGKILL):
-        with contextlib.suppress(ProcessLookupError):
+        try:
             os.killpg(proc.pid, sig)
+        except OSError as exc:
+            # ESRCH=进程组已消失；EPERM=组已退出/被换（POSIX 允许对这类
+            # 进程组返回 EPERM）。两者都意味着本档信号送不到，非致命：
+            # 落到 wait 用退出码确认子进程终结（真实退出时 wait 立即返回）。
+            print(
+                f"killpg {proc.pid} {sig.name} failed ({exc!r}); treating process group as gone",
+                flush=True,
+            )
         try:
             proc.wait(timeout=grace_seconds)
             return
         except subprocess.TimeoutExpired:
             pass
+        except OSError as exc:
+            # 防御性兜底（never-raises 契约的最后一环）：Popen.wait 的现实
+            # 异常面只有 TimeoutExpired（ECHILD/EINTR 已被 subprocess 内部
+            # 消化），这里兜的是子进程被别处 reap 等边缘竞态下的 waitpid
+            # OSError——同样按已消失处理返回，不上抛。
+            print(
+                f"wait for agent process {proc.pid} failed ({exc!r}); treating it as gone",
+                flush=True,
+            )
+            return
     print(f"Agent process {proc.pid} did not exit after SIGKILL", flush=True)
 
 

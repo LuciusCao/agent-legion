@@ -80,7 +80,8 @@ describe('SkillSelector validation', () => {
     // 选中候选即触发校验回填，无需点「校验」按钮。
     await waitFor(() =>
       expect(mockValidate).toHaveBeenCalledWith(
-        '~/.agents/skills/ws-1/write-script'
+        '~/.agents/skills/ws-1/write-script',
+        'ws-1'
       )
     )
     await waitFor(() =>
@@ -138,7 +139,10 @@ describe('SkillSelector validation', () => {
     fireEvent.change(input, { target: { value: 'skill-a' } })
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
     await waitFor(() =>
-      expect(mockValidate).toHaveBeenCalledWith('~/.agents/skills/ws-1/skill-a')
+      expect(mockValidate).toHaveBeenCalledWith(
+        '~/.agents/skills/ws-1/skill-a',
+        'ws-1'
+      )
     )
     view.rerenderWith({ value: 'ws-1/skill-a', skillRef: '' })
     let versionSelect = await screen.findByLabelText('版本')
@@ -148,7 +152,7 @@ describe('SkillSelector validation', () => {
     // 切换到节点 B（不同 skill key，检查器不卸载）：A 的校验结果按 key 失效。
     view.rerenderWith({ value: 'ws-1/skill-b', skillRef: '' })
     await waitFor(() =>
-      expect(mockGetSkillDetail).toHaveBeenCalledWith('ws-1/skill-b')
+      expect(mockGetSkillDetail).toHaveBeenCalledWith('ws-1/skill-b', 'ws-1')
     )
     expect(screen.queryByText('已锁定版本：aaabbb')).not.toBeInTheDocument()
     versionSelect = screen.getByLabelText('版本')

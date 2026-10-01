@@ -6,6 +6,7 @@ import shutil
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -203,6 +204,7 @@ def _make_worker(
     db_path: Path,
     executor: RecordingExecutor,
     definitions: list[WorkflowDefinition],
+    artifact_object_store: Any | None = None,
 ) -> WorkflowWorkerThread:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     leases = ExecutorLeaseRepository(db_path, data_dir=tmp_path)
@@ -232,6 +234,7 @@ def _make_worker(
         leases=leases,
         runtime=runtime,
         settings=settings,
+        artifact_object_store=artifact_object_store,
     )
     worker.state.scan_entries = scan_entries(*definitions)
     return worker

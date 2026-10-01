@@ -1,9 +1,10 @@
 """``job_artifacts`` manifest-row upsert mechanics.
 
-Split from ``job_artifact_objects`` for the file-size budget. The SQL literal
-stays in the owning module (BOUNDARY-DATA-001: every DB-touching literal is
-registered there); this module owns only the in-transaction row shape shared
-by the single upsert and the atomic batch ``record_remote_many``.
+Split from ``job_artifact_objects`` for the file-size budget; the SQL literal
+lives next to the guarded registration in
+``server/app/executors/_artifact_promotion.py`` (the shared promote
+primitive), this module owns only the in-transaction row shape shared by the
+single upsert and the atomic batch ``record_remote_many``.
 """
 
 from __future__ import annotations

@@ -12,7 +12,7 @@ generated_file="${temporary_dir}/api.ts"
 trap 'rm -rf "${temporary_dir}"' EXIT
 
 cd "${repo_dir}"
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.export_openapi "${schema_file}"
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.export_openapi "${schema_file}"
 
 cd "${frontend_dir}"
 ./node_modules/.bin/openapi-typescript "${schema_file}" -o "${generated_file}"

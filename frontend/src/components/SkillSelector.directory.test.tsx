@@ -52,7 +52,8 @@ describe('SkillSelector directory echo', () => {
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
     await waitFor(() =>
       expect(mockValidate).toHaveBeenCalledWith(
-        '~/.agents/skills/ws-1/education-video-problems-generation/write-script'
+        '~/.agents/skills/ws-1/education-video-problems-generation/write-script',
+        'ws-1'
       )
     )
   })
@@ -80,7 +81,8 @@ describe('SkillSelector directory echo', () => {
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
     await waitFor(() =>
       expect(mockValidate).toHaveBeenCalledWith(
-        '~/.agents/skills/ws-1/write-script'
+        '~/.agents/skills/ws-1/write-script',
+        'ws-1'
       )
     )
     await waitFor(() =>
@@ -116,7 +118,7 @@ describe('SkillSelector directory echo', () => {
     expect(input).toHaveValue('skill-b')
     // 等回显查询落地，避免其解析落在 act 外告警。
     await waitFor(() =>
-      expect(mockGetSkillDetail).toHaveBeenCalledWith('ws-1/skill-b')
+      expect(mockGetSkillDetail).toHaveBeenCalledWith('ws-1/skill-b', 'ws-1')
     )
 
     // 此时点「校验」校验的是 B 的目录，不会再把 A 绑上去（输入与前缀
@@ -125,7 +127,10 @@ describe('SkillSelector directory echo', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '校验' }))
     })
-    expect(mockValidate).toHaveBeenCalledWith('~/.agents/skills/ws-1/skill-b')
+    expect(mockValidate).toHaveBeenCalledWith(
+      '~/.agents/skills/ws-1/skill-b',
+      'ws-1'
+    )
   })
 
   it('keeps user edits in the input while the binding stays unchanged', async () => {

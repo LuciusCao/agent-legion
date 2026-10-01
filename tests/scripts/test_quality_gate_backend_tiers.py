@@ -209,7 +209,7 @@ def test_backend_gate_can_skip_worker_ui_tests(tmp_path: Path) -> None:
     assert "node:" not in skipped_calls
     assert "skipped: BACKEND_SKIP_WORKER_UI_TESTS=1" in skipped_stdout
     # The tier's own pytest run is untouched.
-    assert "uv:run pytest" in skipped_calls
+    assert "uv:run --frozen pytest" in skipped_calls
 
 
 def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -> None:
@@ -496,10 +496,10 @@ def test_backend_pytest_distributes_work_with_worksteal(tmp_path: Path) -> None:
     came from. worksteal keeps idle workers stealing pending tests."""
     calls = _run_backend_gate_with_fake_uv(tmp_path, {})
 
-    # Count the uv invocation ("run pytest "), not the "pytest" substring —
-    # telemetry mode (AGENT_LEGION_TEST_RESULTS_DIR, as in CI) also passes
-    # "-p scripts.pytest_telemetry", which contains it.
-    assert calls.count("run pytest ") == 1
+    # Count the uv invocation ("run --frozen pytest ", issue #526), not the
+    # "pytest" substring — telemetry mode (AGENT_LEGION_TEST_RESULTS_DIR, as
+    # in CI) also passes "-p scripts.pytest_telemetry", which contains it.
+    assert calls.count("run --frozen pytest ") == 1
     assert "--dist worksteal" in calls
 
 

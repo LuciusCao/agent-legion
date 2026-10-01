@@ -96,7 +96,16 @@ class _FakeAgent:
                     "result": {
                         "protocolVersion": message["params"].get("protocolVersion", 1),
                         "agentCapabilities": self.script.get("capabilities", {}),
-                        "agentInfo": {"name": "fake-acp-agent", "title": "Fake ACP Agent"},
+                        "agentInfo": {
+                            # agent_name: declare the ACP identity (#694
+                            # review R2-P2 — the compaction marker gate only
+                            # trusts kimi-identity sessions). version is
+                            # required by the SDK schema; without it the
+                            # whole agentInfo is salvaged to None.
+                            "name": self.script.get("agent_name", "fake-acp-agent"),
+                            "title": "Fake ACP Agent",
+                            "version": "0.0.0-fake",
+                        },
                     },
                 }
             )
@@ -123,6 +132,22 @@ class _FakeAgent:
                     result["modes"] = self.script["load_modes"]
                 if "load_config_options" in self.script:
                     result["configOptions"] = self.script["load_config_options"]
+                # load_replay: mimic kimi replaying the loaded history as
+                # session/update notifications WHILE the client awaits the
+                # load response (before it, #694).
+                for notify in self.script.get("load_replay", []):
+                    self._send(
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": message["params"].get(
+                                    "sessionId", self.acp_session_id
+                                ),
+                                "update": notify,
+                            },
+                        }
+                    )
                 self._send({"jsonrpc": "2.0", "id": request_id, "result": result})
         elif method == "session/set_mode":
             if self.script.get("set_mode_error"):

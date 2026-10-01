@@ -15,6 +15,11 @@ const commonTestExcludes = [
 const browserTestFiles = [
   'src/api/core.test.ts',
   'src/components/useJobListLoadMore.test.ts',
+  // dockPlacement.ts 的 load/save 触碰 window.localStorage（纯几何函数本身
+  // node-safe，但守卫按「源文件引用 DOM 全局」整文件判定，注册进 jsdom）。
+  'src/features/agentPanelDock/dockPlacement.test.ts',
+  // previewDisplayMode.ts 同样触碰 window.localStorage（#528）。
+  'src/features/previewPanel/previewDisplayMode.test.ts',
   'src/hooks/useDashboardEvents.test.ts',
   'src/hooks/useDebouncedCallback.test.ts',
   'src/hooks/useJobComprehensionInfo.test.ts',
@@ -27,13 +32,14 @@ const browserTestFiles = [
   'src/hooks/useJobFilterRefetch.test.ts',
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.test.ts',
+  // useWorkflowStudioPageView 本轮起经 useStudioNarrowViewport 触碰
+  // window.matchMedia（#797 codex 复审轮的窄屏组合出口）。
+  'src/features/workflowStudio/shared/useWorkflowStudioPageView.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.draft.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.draftBaselineSync.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioActions.test.ts',
-  'src/features/workflowStudio/shared/useWorkflowStudioMobilePanel.test.ts',
-  'src/features/workflowStudio/shared/useWorkflowStudioPageView.test.ts',
   'src/stores/agentsStore.test.ts',
 ]
 

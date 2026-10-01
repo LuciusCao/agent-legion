@@ -1143,57 +1143,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/studio-agent/tools/skills/{skill_key}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Skill */
-    get: operations['get_skill_api_studio_agent_tools_skills__skill_key__get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/studio-agent/tools/skills/{skill_key}/validate': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Validate Skill */
-    post: operations['validate_skill_api_studio_agent_tools_skills__skill_key__validate_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/studio-agent/tools/skills/{skill_key}/versions': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Save Skill Version */
-    post: operations['save_skill_version_api_studio_agent_tools_skills__skill_key__versions_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions': {
     parameters: {
       query?: never
@@ -1529,6 +1478,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Skill */
+    get: operations['get_skill_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key}/validate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Validate Skill */
+    post: operations['validate_skill_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__validate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Save Skill Version */
+    post: operations['save_skill_version_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__versions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active': {
     parameters: {
       query?: never
@@ -1814,6 +1814,41 @@ export interface paths {
     put?: never
     post?: never
     delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/api-tokens': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Api Tokens */
+    get: operations['list_api_tokens_api_workspaces__workspace_id__api_tokens_get']
+    put?: never
+    /** Create Api Token */
+    post: operations['create_api_token_api_workspaces__workspace_id__api_tokens_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/api-tokens/{token_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /** Revoke Api Token */
+    delete: operations['revoke_api_token_api_workspaces__workspace_id__api_tokens__token_id__delete']
     options?: never
     head?: never
     patch?: never
@@ -2142,6 +2177,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get External Job Status */
+    get: operations['get_external_job_status_api_workspaces__workspace_id__jobs__job_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/{job_id}/approvals': {
     parameters: {
       query?: never
@@ -2151,6 +2203,40 @@ export interface paths {
     }
     /** List Approval Decisions */
     get: operations['list_approval_decisions_api_workspaces__workspace_id__jobs__job_id__approvals_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List External Artifacts */
+    get: operations['list_external_artifacts_api_workspaces__workspace_id__jobs__job_id__artifacts_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get External Artifact Raw */
+    get: operations['get_external_artifact_raw_api_workspaces__workspace_id__jobs__job_id__artifacts__artifact_name__raw_get']
     put?: never
     post?: never
     delete?: never
@@ -3426,6 +3512,11 @@ export interface components {
       agent_id: string
       /** Bundle Url */
       bundle_url: string
+      /**
+       * Execution Generation
+       * @default 0
+       */
+      execution_generation: number
       /** Execution Id */
       execution_id: string
       /** Job Id */
@@ -3586,6 +3677,16 @@ export interface components {
     AgentListResponse: {
       /** Agents */
       agents: components['schemas']['AgentListItem'][]
+    }
+    /**
+     * AgentPublishRequest
+     * @description #692 codex P1: the caller's asserted draft hash — verified atomically
+     *     inside the publish transaction; mismatch raises 409 with zero publish
+     *     side effects. Absent (legacy callers) keeps the old no-check semantics.
+     */
+    AgentPublishRequest: {
+      /** Expected Hash */
+      expected_hash?: string | null
     }
     /** AgentRegisterTokenCreatedResponse */
     AgentRegisterTokenCreatedResponse: {
@@ -3943,6 +4044,12 @@ export interface components {
       filter?: components['schemas']['JobFilterPayload'] | null
       /** Job Ids */
       job_ids?: string[] | null
+      /**
+       * Mode
+       * @default clean
+       * @enum {string}
+       */
+      mode: 'clean' | 'inherit'
     }
     /** BootstrapRequest */
     BootstrapRequest: {
@@ -4099,6 +4206,16 @@ export interface components {
       /** Workspace Id */
       workspace_id: string
     }
+    /** CreateWorkspaceApiTokenRequest */
+    CreateWorkspaceApiTokenRequest: {
+      /**
+       * Label
+       * @default
+       */
+      label: string
+      /** Ttl Hours */
+      ttl_hours?: number | null
+    }
     /**
      * DatabaseConnectionView
      * @description Display-safe database summary: password masked, query string dropped.
@@ -4149,6 +4266,97 @@ export interface components {
       paused: boolean
       /** Target Node Key */
       target_node_key?: string | null
+    }
+    /**
+     * ExternalArtifactEntry
+     * @description One manifest entry: ``storage=object`` rows come from the authoritative
+     *     job_artifacts manifest (size/content_hash/uploaded_at distinguish the
+     *     current execution after a rerun, #508); ``local`` rows are legacy
+     *     job_dir-only names with no manifest metadata.
+     */
+    ExternalArtifactEntry: {
+      /**
+       * Content Hash
+       * @default
+       */
+      content_hash: string
+      /**
+       * Media Type
+       * @description Content-Type the raw endpoint serves (whitelist-gated; JSON/text and non-whitelisted extensions download as octet-stream)
+       * @default application/octet-stream
+       */
+      media_type: string
+      /** Name */
+      name: string
+      /**
+       * Node Key
+       * @default
+       */
+      node_key: string
+      /** Size Bytes */
+      size_bytes?: number | null
+      /**
+       * Storage
+       * @description "object" (authoritative manifest row) or "local"
+       */
+      storage: string
+      /** Uploaded At */
+      uploaded_at?: string | null
+    }
+    /** ExternalArtifactListResponse */
+    ExternalArtifactListResponse: {
+      /** Artifacts */
+      artifacts?: components['schemas']['ExternalArtifactEntry'][]
+      /** Job Id */
+      job_id: string
+      /**
+       * Object Storage Enabled
+       * @description False when the instance has no bucket configured: object-backed artifacts are unreadable and only local job_dir names list
+       */
+      object_storage_enabled: boolean
+      /** Status */
+      status: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /**
+     * ExternalJobStatusResponse
+     * @description Lightweight job view for the poll-then-download loop: callers need
+     *     status and the artifact manifest, not the full JobDetail payload.
+     */
+    ExternalJobStatusResponse: {
+      /** Artifacts */
+      artifacts?: string[]
+      /**
+       * Completed Nodes
+       * @default 0
+       */
+      completed_nodes: number
+      /** Created At */
+      created_at?: string | null
+      /**
+       * Error Summary
+       * @default
+       */
+      error_summary: string
+      /** Job Id */
+      job_id: string
+      /**
+       * Outcome
+       * @default
+       */
+      outcome: string
+      /** Status */
+      status: string
+      /**
+       * Total Nodes
+       * @default 0
+       */
+      total_nodes: number
+      /** Updated At */
+      updated_at?: string | null
+      /** Workspace Id */
+      workspace_id: string
     }
     /** FailedNodeRunItem */
     FailedNodeRunItem: {
@@ -4335,6 +4543,8 @@ export interface components {
     InstanceWorkflowsSettings: {
       /** Max Items Per Run */
       max_items_per_run: number
+      /** Node Code Max Bytes */
+      node_code_max_bytes: number
     }
     /** JobBatchRequest */
     JobBatchRequest: {
@@ -4480,8 +4690,12 @@ export interface components {
     JobMutationResultResponse: {
       /** Job Id */
       job_id: string
+      /** Kept Node Count */
+      kept_node_count?: number | null
       /** Message */
       message?: string | null
+      /** Mode */
+      mode?: ('clean' | 'inherit') | null
       /** Node Key */
       node_key?: string | null
       /**
@@ -4499,6 +4713,8 @@ export interface components {
         | 'resume'
       /** Reason Code */
       reason_code?: string | null
+      /** Rerun Node Count */
+      rerun_node_count?: number | null
       /**
        * Status
        * @enum {string}
@@ -4591,8 +4807,12 @@ export interface components {
     JobRerunByFailureResultResponse: {
       /** Job Id */
       job_id: string
+      /** Kept Node Count */
+      kept_node_count?: number | null
       /** Message */
       message?: string | null
+      /** Mode */
+      mode?: ('clean' | 'inherit') | null
       /** Node Key */
       node_key?: string | null
       /**
@@ -4610,6 +4830,8 @@ export interface components {
         | 'resume'
       /** Reason Code */
       reason_code?: string | null
+      /** Rerun Node Count */
+      rerun_node_count?: number | null
       /** Rerun Nodes */
       rerun_nodes?: string[]
       /**
@@ -6798,6 +7020,11 @@ export interface components {
       }
       /** Closed At */
       closed_at: string | null
+      /**
+       * Compacting
+       * @default false
+       */
+      compacting: boolean
       /** Config Options */
       config_options?:
         | {
@@ -6844,6 +7071,10 @@ export interface components {
        * Format: date-time
        */
       updated_at: string
+      /** Usage */
+      usage?: {
+        [key: string]: unknown
+      } | null
       /** User Id */
       user_id: string
       /** Workspace Id */
@@ -7147,6 +7378,15 @@ export interface components {
       summary: components['schemas']['TokenUsageSummary']
       /** Workspace Id */
       workspace_id: string
+    }
+    /** UpgradeWorkflowRequest */
+    UpgradeWorkflowRequest: {
+      /**
+       * Mode
+       * @default clean
+       * @enum {string}
+       */
+      mode: 'clean' | 'inherit'
     }
     /** UserCreateRequest */
     UserCreateRequest: {
@@ -7461,6 +7701,17 @@ export interface components {
       /** Code */
       code: string
     }
+    /**
+     * WorkflowNodeCodePublishRequest
+     * @description #692 codex P1: the caller's asserted draft code_hash — verified
+     *     atomically inside the publish transaction; mismatch raises 409 with
+     *     zero publish side effects. Absent (legacy callers) keeps the old
+     *     no-check semantics.
+     */
+    WorkflowNodeCodePublishRequest: {
+      /** Expected Hash */
+      expected_hash?: string | null
+    }
     /** WorkflowNodeCodeResponse */
     WorkflowNodeCodeResponse: {
       /** Code */
@@ -7474,6 +7725,11 @@ export interface components {
        * @default false
        */
       has_draft: boolean
+      /**
+       * Max Code Bytes
+       * @default 65536
+       */
+      max_code_bytes: number
       /**
        * Origin
        * @enum {string}
@@ -7691,6 +7947,46 @@ export interface components {
     WorkspaceAgentRoutesResponse: {
       /** Routes */
       routes: components['schemas']['WorkspaceAgentRouteEntry'][]
+    }
+    /** WorkspaceApiTokenCreatedResponse */
+    WorkspaceApiTokenCreatedResponse: {
+      /** Api Token */
+      api_token: string
+      /** Label */
+      label: string
+      /** Token Id */
+      token_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** WorkspaceApiTokenRevokeResponse */
+    WorkspaceApiTokenRevokeResponse: {
+      /** Revoked */
+      revoked: boolean
+      /** Token Id */
+      token_id: string
+    }
+    /** WorkspaceApiTokenSummary */
+    WorkspaceApiTokenSummary: {
+      /** Created At */
+      created_at: string
+      /** Expires At */
+      expires_at?: string | null
+      /** Label */
+      label: string
+      /** Last Used At */
+      last_used_at?: string | null
+      /** Revoked */
+      revoked: boolean
+      /** Token Id */
+      token_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** WorkspaceApiTokensResponse */
+    WorkspaceApiTokensResponse: {
+      /** Tokens */
+      tokens: components['schemas']['WorkspaceApiTokenSummary'][]
     }
     /** WorkspaceConfigurationRequest */
     WorkspaceConfigurationRequest: {
@@ -8473,7 +8769,8 @@ export interface operations {
   }
   get_skill_api_agent_catalog_skills__skill_key__get: {
     parameters: {
-      query?: {
+      query: {
+        workspace_id: string
         ref?: string | null
       }
       header?: never
@@ -8721,7 +9018,11 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['AgentPublishRequest'] | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
@@ -9623,6 +9924,17 @@ export interface operations {
           'application/octet-stream': unknown
         }
       }
+      /** @description Partial Content (Range request) */
+      206: {
+        headers: {
+          'Content-Length'?: string
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -9842,7 +10154,13 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json':
+          | components['schemas']['UpgradeWorkflowRequest']
+          | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
@@ -9995,6 +10313,7 @@ export interface operations {
     parameters: {
       query: {
         path: string
+        workspace_id: string
       }
       header?: never
       path?: never
@@ -10024,7 +10343,9 @@ export interface operations {
   }
   validate_skill_api_skills_validate_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path?: never
       cookie?: never
@@ -10222,105 +10543,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StudioAgentPublishRequestStatusResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_skill_api_studio_agent_tools_skills__skill_key__get: {
-    parameters: {
-      query?: {
-        ref?: string | null
-      }
-      header?: never
-      path: {
-        skill_key: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['SkillDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  validate_skill_api_studio_agent_tools_skills__skill_key__validate_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        skill_key: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['SkillValidateToolResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  save_skill_version_api_studio_agent_tools_skills__skill_key__versions_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        skill_key: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['SkillSaveVersionRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      201: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['SkillSaveVersionResponse']
         }
       }
       /** @description Validation Error */
@@ -11043,6 +11265,108 @@ export interface operations {
       }
     }
   }
+  get_skill_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__get: {
+    parameters: {
+      query?: {
+        ref?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  validate_skill_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__validate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillValidateToolResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_skill_version_api_studio_agent_tools_workspaces__workspace_id__skills__skill_key__versions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillSaveVersionRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSaveVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_active_revision_api_studio_agent_tools_workspaces__workspace_id__workflow_active_get: {
     parameters: {
       query?: never
@@ -11693,6 +12017,104 @@ export interface operations {
       }
     }
   }
+  list_api_tokens_api_workspaces__workspace_id__api_tokens_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceApiTokensResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_api_token_api_workspaces__workspace_id__api_tokens_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateWorkspaceApiTokenRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceApiTokenCreatedResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  revoke_api_token_api_workspaces__workspace_id__api_tokens__token_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        token_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceApiTokenRevokeResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   replace_workspace_configuration_api_workspaces__workspace_id__configuration_put: {
     parameters: {
       query?: never
@@ -12224,6 +12646,7 @@ export interface operations {
         active_node_key?: string | null
         packed?: number | null
         paused?: boolean | null
+        run_id?: string | null
       }
       header?: never
       path: {
@@ -12335,6 +12758,7 @@ export interface operations {
         active_node_key?: string | null
         packed?: number | null
         paused?: boolean | null
+        run_id?: string | null
       }
       header?: never
       path: {
@@ -12351,6 +12775,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobsPageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_external_job_status_api_workspaces__workspace_id__jobs__job_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalJobStatusResponse']
         }
       }
       /** @description Validation Error */
@@ -12383,6 +12839,84 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ApprovalDecisionListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_external_artifacts_api_workspaces__workspace_id__jobs__job_id__artifacts_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalArtifactListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_external_artifact_raw_api_workspaces__workspace_id__jobs__job_id__artifacts__artifact_name__raw_get: {
+    parameters: {
+      query?: never
+      header?: {
+        Range?: string | null
+      }
+      path: {
+        workspace_id: string
+        job_id: string
+        artifact_name: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
+      /** @description Partial Content (Range request) */
+      206: {
+        headers: {
+          'Content-Length'?: string
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
         }
       }
       /** @description Validation Error */
@@ -12984,7 +13518,13 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json':
+          | components['schemas']['WorkflowNodeCodePublishRequest']
+          | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
@@ -15152,7 +15692,13 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json':
+          | components['schemas']['WorkflowNodeCodePublishRequest']
+          | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

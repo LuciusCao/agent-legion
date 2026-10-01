@@ -619,7 +619,7 @@ describe('WorkspaceMainPage batch operations', () => {
     })
 
     await waitFor(() => {
-      expect(mockUpgradeJobWorkflow).toHaveBeenCalledWith('j1')
+      expect(mockUpgradeJobWorkflow).toHaveBeenCalledWith('j1', 'clean')
     })
   })
 
@@ -726,17 +726,21 @@ describe('WorkspaceMainPage batch operations', () => {
       screen.getByText('确认升级').click()
     })
 
-    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith('ws1', {
-      filter: {
-        status: null,
-        search: null,
-        workflow_version: null,
-        workflow_version_none: false,
-        active_node_key: null,
-        paused: null,
+    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith(
+      'ws1',
+      {
+        filter: {
+          status: null,
+          search: null,
+          workflow_version: null,
+          workflow_version_none: false,
+          active_node_key: null,
+          paused: null,
+        },
+        excludeIds: [],
       },
-      excludeIds: [],
-    })
+      'clean'
+    )
     await waitFor(() => {
       expect(useJobStore.getState().selectionMode).toBe('explicit')
     })

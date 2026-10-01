@@ -29,6 +29,12 @@ function parseNumber(values: FormValues, path: string): number {
       `${def.label} 必须是${def.allowZero ? '非负整数' : '不小于 1 的整数'}`
     )
   }
+  // #786 codex P2：契约下界（如 node_code_max_bytes 的 ge=1024 字节，
+  // 字段 min 以显示单位 KB 计为 1）在客户端拦截，避免非法值落到后端
+  // 422 的无指向性报错。
+  if (def.min !== undefined && value < def.min) {
+    throw new Error(`${def.label} 必须不小于 ${def.min}`)
+  }
   return value
 }
 
@@ -65,6 +71,10 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
     execution_retention_days: parseNumber(values, 'execution_retention_days'),
     workflows: {
       max_items_per_run: parseNumber(values, 'workflows.max_items_per_run'),
+      // 表单单位 KB（验收反馈 #786），上送换算回字节（契约 ge=1024 由
+      // 字段 min=1 KB 在客户端先行拦截）。
+      node_code_max_bytes:
+        parseNumber(values, 'workflows.node_code_max_bytes') * 1024,
     },
     agent_workers: {
       result_commit_batching: Boolean(

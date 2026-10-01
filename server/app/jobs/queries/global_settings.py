@@ -36,6 +36,23 @@ _SELECT_FOR_UPDATE_SQL = "select value from global_settings where key=%s for upd
 _RMW_ENSURE_SQL = """
     insert into global_settings(key, value) values (%s, %s) on conflict(key) do nothing
 """
+_ADVISORY_LOCK_SQL = "select pg_advisory_xact_lock(hashtext(%s))"
+
+#: skill-lock 全域 advisory 锁的固定 scope（#759 P2-B）：skill_lock 是
+#: 全局单文档（非 per-workspace），写侧（dispatch 首次 pin 与
+#: ``make skills-lock`` 重锁，均经 ``SkillLockStore.put_lock``）与
+#: upgrade 安全判定的读（plan 短事务 + guard 事务内重验）共享本域。
+SKILL_LOCK_ADVISORY_SCOPE = "skill-lock"
+
+
+def acquire_skill_lock_domain_lock(conn: Any) -> None:
+    """在调用方事务内取 skill-lock 全域 advisory 锁（xact 级，提交才释放）。
+
+    锁序（EXEC-GENERATION-001，#759 P2-B）：池级锁 → job-mutation →
+    implementation-publication → skill-lock；本域持有者不得在持锁期间
+    反向取前两者（写侧 put 只持本锁，guard 侧严格按上序追加）。
+    """
+    conn.execute(_ADVISORY_LOCK_SQL, (SKILL_LOCK_ADVISORY_SCOPE,))
 
 
 class GlobalSettingsKVQueriesMixin(ConnectionQueriesMixin):
@@ -52,6 +69,40 @@ class GlobalSettingsKVQueriesMixin(ConnectionQueriesMixin):
     def put_global_settings_document(self, key: str, document: dict[str, Any]) -> None:
         """Replace the stored document (upsert; whole-document semantics)."""
         with self.write() as conn:
+            conn.execute(_UPSERT_SQL, (key, json.dumps(document)))
+
+    @staticmethod
+    def acquire_skill_lock_domain_lock(conn: Any) -> None:
+        """facade 形态（guard 事务内用，比照 upgrade_impl_identity 的静态面）。"""
+        acquire_skill_lock_domain_lock(conn)
+
+    def get_global_settings_document_under_lock(
+        self, key: str, scope: str
+    ) -> dict[str, Any] | None:
+        """短事务内「取 advisory 锁 + 读」：读到的文档 ≥ 任何已完成的写。
+
+        取锁会等完并发的未提交写（xact 锁互斥），随后的读因此看不到
+        比「本读开始前已完成的写」更旧的文档（#759 P2-B 的 plan 阶段
+        读法）。只有 upgrade 安全判定用本变体；dispatch 热路径保持
+        无锁读（``get_global_settings_document``）。
+        """
+        with self.connect() as conn:
+            conn.execute(_ADVISORY_LOCK_SQL, (scope,))
+            row = conn.execute(_SELECT_SQL, (key,)).fetchone()
+        if row is None:
+            return None
+        return cast(dict[str, Any], json.loads(str(row["value"])))
+
+    def put_global_settings_document_under_lock(
+        self, key: str, document: dict[str, Any], scope: str
+    ) -> None:
+        """写事务内「取 advisory 锁 + upsert」：锁与写同一事务、同生同死。
+
+        拆成两个事务会让 upgrade guard 的重验与其提交之间插进已落地的
+        写（#759 P2-B 的 relock 窗口）——锁必须覆盖到写提交。
+        """
+        with self.write() as conn:
+            conn.execute(_ADVISORY_LOCK_SQL, (scope,))
             conn.execute(_UPSERT_SQL, (key, json.dumps(document)))
 
     def delete_global_settings_document(self, key: str) -> bool:

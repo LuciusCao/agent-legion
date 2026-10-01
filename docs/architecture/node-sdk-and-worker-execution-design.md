@@ -26,6 +26,8 @@ skill_versions 改在 claim 响应路径从 DB 重建（内存态，随 secret �
 `ref@commit12`；锁按 (skill, ref) 多值冻结（未锁 ref 首次 dispatch 自动
 冻结，repo 漂移仍触发 relock 闸门），Worker 回传结果的 Host 侧 output 校验
 按 manifest 的 `(skill, skill_ref)` 重解析同一版本。
+**2026-09-16 更新（#628）**：节点代码体积上限（原硬编码 64KB）开放为
+实例级配置，默认不变，详见 §10。
 日期：2026-08-12
 关联：Issue #30（code 节点 Host→Worker）、Issue #82（节点 SDK）、
 EXEC-CODE-001/002/003、CONFIG-MANIFEST-001、VAULT-SECRET-001、
@@ -313,7 +315,52 @@ manifest 拼装、取消检查点）：统一走 `ctx.service_config(...)` /
 （业务 video 节点已随业务剥离迁出仓库）。若将来出现必须 Host 本地执行的
 专用节点，再重新评估该路径是否保留。
 
-## 10. Quality Impact
+## 10. 体积预算与配置（#628/#786，MAX_CODE_BYTES）
+
+自定义节点代码的体积上限历史为硬编码 64KB（`node_codes.py` 的
+`MAX_CODE_BYTES`），对「重节点」——自包含报告渲染器、内嵌数据表的合法
+场景——过于苛刻。#628 起上限开放为实例级配置，**默认保持 64KB 不变**；
+
+- 配置项：`executor_runtime.workflows.node_code_max_bytes`
+  （`WorkflowsRuntimeConfig`，`ge=1024`）。#786 起纳入 admin 实例设置
+  （全局设置页「运行与本地执行」组，字节为单位），解析链：**实例设置 >
+  env（`AGENT_LEGION_NODE_CODE_MAX_BYTES`）> 默认 64KB**——实例设置文档
+  缺该键（存量文档）时 env 继续作为默认值来源。启动装配
+  （`apply_instance_settings`）时合并进 settings，重启生效（无热加载）。
+  非法值（非整数 / < 1KB）：env 在 settings 加载时 fail-fast，实例设置
+  PUT 在契约层 422。
+- 校验路径统一从 settings 取值：`validate_node_code(code, max_code_bytes)`
+  改为可注入，Studio 路由与 studio-agent 工具面在构造 `NodeCodeService`
+  时传入；`save_draft` 与 `seed_global` 两条写入链路同一来源。错误信息
+  携带当前上限值。非 DI 构造（worker/测试/种子）回落模块默认 64KB。
+  `publish` / `rollback` 按当前上限对「即将发布的字节」复检（publish
+  经 `get_draft` 窄查询预读当前草稿行——不扫全部版本历史——校验后经
+  `expected_hash` CAS 恒绑定已校验草稿的哈希，调用方哈希不一致即拒；
+  rollback 预读源版本即校验，但 draft 会被 `save_draft` 原地覆盖、不是
+  不可变源，故 draft 一律拒作回滚源）——上限重启调低后，高上限时期
+  存下的草稿/历史版本无法再发布生效，拒绝时正在生效的版本保持原状。
+- 前端展示：`WorkflowNodeCodeResponse.max_code_bytes`（服务端注入的只读
+  字段，两条读取端点——Studio 与 studio-agent——统一下发），节点代码
+  编辑器在保存区提示「代码体积上限 N KB（实例配置）」。
+
+**调大的代价**（默认 64KB 的理由）——调大前请按节点粒度自查：
+
+1. **DB 文本膨胀**：每个 draft/publish 版本不可变且永久留存
+   （`versioned_entities`），上限 ×N 即历史表体积 ×N；版本数多的
+   workspace 尤其敏感。
+2. **claim bundle 传输变大**：代码文本随 dispatch/claim bundle 全量下发
+   Worker（§7.2，无增量协议），大代码意味着每次 claim 都重复运输同一
+   大文本，挤占与 agent 负载共享的通道。
+3. **code review 可读性下降**：自定义节点按「单文件内聚」治理（EXEC-CODE-002），
+   超大单文件几乎必然混入可拆分的常量表/工具函数，评审与回滚 diff 都
+   变难定位。
+
+**建议**：上限是逃生门而非默认——重节点应优先考虑把不变的静态资产
+（模板、数据表）拆到材料/共享文件（`_shared`、materials），代码只留
+编排逻辑，仍按节点粒度自律；确需大代码时再按实例调大并评估上述三项
+代价。
+
+## 11. Quality Impact
 
 - **测试**：新增 `tests/workflow_nodes/test_node_sdk.py`（SDK 单测）与沙箱内
   import SDK 的契约测试；executor 收敛改动覆盖 `tests/executors/

@@ -163,3 +163,101 @@ def test_top_level_edit_after_echo_round_trip_takes_effect() -> None:
     # 节点真实覆盖（provider）不受顶层改动影响；其继承来的 model 跟随顶层。
     assert reloaded.nodes["agent_node"].execution.provider == "node-provider"
     assert reloaded.nodes["agent_node"].execution.model == "new-model"
+
+
+def test_top_level_execution_does_not_bake_into_approval_node() -> None:
+    """回归（本地发布版实测踩坑）：顶层默认烘焙进 approval 节点后，
+    asdict 快照带上非空 execution，下次 from_dict 加载被
+    must-not-declare-execution 规则拒绝——发布成功、读取 500。"""
+    raw = {
+        "key": "wf",
+        "label": "WF",
+        "schema_version": 2,
+        "execution": {"provider": "top-provider", "model": "top-model"},
+        "nodes": {
+            "entry": {"type": "start", "label": "入口"},
+            "write": {"label": "写稿", "capability": "write_script", "outputs": ["script.md"]},
+            "gate": {"type": "approval", "label": "审批", "inputs": ["script.md"]},
+        },
+        "edges": [
+            {"from": "entry", "to": "write"},
+            {"from": "write", "to": "gate"},
+        ],
+    }
+    definition = workflow_definition_from_mapping(raw)
+
+    gate = definition.nodes["gate"]
+    assert gate.execution.provider == ""
+    assert gate.execution.model == ""
+    # 非 approval 节点照常吃默认。
+    assert definition.nodes["write"].execution.provider == "top-provider"
+
+    # 快照必须能原样重载——正是踩坑的读路径（发布存库 → active 读取）。
+    # 走与存库一致的序列化链路（asdict + JSON），而非裸 asdict（tuple 形态）。
+    import json
+
+    from server.app.workflows.revision_format import serialize_definition
+
+    reloaded = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
+    assert reloaded.nodes["gate"].execution.provider == ""
+
+
+def test_poisoned_approval_snapshot_heals_on_load() -> None:
+    """存量兼容：修复前发布的 revision 快照里 approval 节点带着烘焙进去的
+    非空 execution。读路径必须静默剥离（approval 永不 dispatch，这些值是死数据），
+    而不是继续 500——否则升级后 active/stats 依旧打不开，得手工改库。"""
+    poisoned = {
+        "key": "wf",
+        "label": "WF",
+        "schema_version": 2,
+        "execution": {"provider": "top-provider", "model": "top-model", "thinking": ""},
+        "nodes": {
+            "entry": {"node_type": "start", "label": "入口"},
+            "write": {
+                "node_type": "agent",
+                "label": "写稿",
+                "capability": "write_script",
+                "outputs": ["script.md"],
+                "execution": {"provider": "top-provider", "model": "top-model", "thinking": ""},
+            },
+            "gate": {
+                "node_type": "approval",
+                "label": "审批",
+                "inputs": ["script.md"],
+                # 修复前 merge_execution_defaults 烘焙进来的值。
+                "execution": {"provider": "top-provider", "model": "top-model", "thinking": ""},
+            },
+        },
+        "edges": [
+            {"source": "entry", "target": "write"},
+            {"source": "write", "target": "gate"},
+        ],
+    }
+    definition = workflow_definition_from_dict(poisoned)
+
+    assert definition.nodes["gate"].execution.provider == ""
+    assert definition.nodes["gate"].execution.model == ""
+    # 非 approval 节点的值不受影响。
+    assert definition.nodes["write"].execution.provider == "top-provider"
+
+
+def test_mapping_path_still_rejects_execution_on_approval() -> None:
+    """剥离只发生在快照读路径；手写 yaml 给 approval 声明 execution 仍然拒绝。"""
+    raw = {
+        "key": "wf",
+        "label": "WF",
+        "schema_version": 2,
+        "nodes": {
+            "entry": {"type": "start", "label": "入口"},
+            "write": {"label": "写稿", "capability": "write_script", "outputs": ["script.md"]},
+            "gate": {
+                "type": "approval",
+                "label": "审批",
+                "inputs": ["script.md"],
+                "execution": {"provider": "top-provider"},
+            },
+        },
+        "edges": [{"from": "entry", "to": "write"}, {"from": "write", "to": "gate"}],
+    }
+    with pytest.raises(WorkflowDefinitionError, match="must not declare execution"):
+        workflow_definition_from_mapping(raw)

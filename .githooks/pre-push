@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# SIGPIPE immunity (issue #679): git runs the pre-push hook on the push's own
+# stdout/stderr — under an agent harness (or `git push | tail`) those are pipes
+# whose reader can walk away mid-push (output caps, truncation, a killed
+# session). With the default disposition, any write to the dead pipe then
+# killed the hook with SIGPIPE (141): git treats the killed hook as a failed
+# one and aborts the push AFTER the gate had already passed and recorded its
+# evidence — the "push twice, second one replays the cached evidence" ritual.
+# Ignore SIGPIPE for the whole hook (it survives the exec into
+# run-local-gate.sh); every write below is guarded so EPIPE never touches
+# set -e either. The push verdict comes from the gate's exit status alone,
+# never from whether the output could be drained.
+trap '' PIPE
+say() {
+  printf '%s\n' "$*" || true
+}
+
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 # The full gate for protected branches (develop/main/release/tags) runs in
 # GitHub Actions (.github/workflows/quality-gate.yml); local pre-push keeps
@@ -18,7 +34,7 @@ case "$level" in
   quick) gate="quick"; tier="full" ;;
   full)  gate="full";  tier="full" ;;
   *)
-    echo "Unsupported AGENT_LEGION_GATE_LEVEL: $level (expected smoke|quick|full)" >&2
+    echo "Unsupported AGENT_LEGION_GATE_LEVEL: $level (expected smoke|quick|full)" >&2 || true
     exit 2
     ;;
 esac

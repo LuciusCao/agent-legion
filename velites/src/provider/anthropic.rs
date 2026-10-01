@@ -1,4 +1,19 @@
 //! Anthropic Messages API provider with streaming tool-use support.
+//!
+//! #637 read-side caps (mirroring [`super::openai_compat`], see the review
+//! of that module's compound-storm fix): `max_tokens` in the request body
+//! only constrains a WELL-BEHAVED server — an anomalous or hostile
+//! gateway/proxy stream ignores it, so the client-side caps below are the
+//! only bound on such a stream:
+//!
+//! - [`MAX_SSE_LINE_BYTES`]: an unterminated SSE line longer than any
+//!   legitimate `data:` payload is stream corruption, rejected at the line
+//!   buffer instead of growing it without bound (a junk flood with no
+//!   newline never reaches the aggregate caps).
+//! - [`MAX_STREAMED_FIELD_CHARS`]: one aggregated field (kind/text/id/name/
+//!   partial_json/signature/data) may not exceed 32 MiB; the WHOLE aggregate
+//!   ([`MAX_AGGREGATE_CHARS`]) too — 1025 blocks × per-field sizes would
+//!   otherwise be a storm the per-field cap alone cannot see.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -12,6 +27,23 @@ use crate::events::{ContentBlock, Message, RequestTiming, Role, StopReason, Usag
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 const DEFAULT_MAX_OUTPUT_TOKENS: u64 = 8192;
+
+/// 单条未完成 SSE 行（一个 `data:` 载荷）至多几 KB。超过该长度的行是
+/// 流损坏，行缓冲必须拒绝而不是无界保留（#637：无换行的 junk 流永远
+/// 到不了聚合上限，只能在这里拦）。与 openai_compat 的同名常量同值。
+const MAX_SSE_LINE_BYTES: usize = 2 * 1024 * 1024;
+
+/// 单个聚合字段（kind/text/id/name/...）的防御性上限（#637）：32 MiB
+/// ≈ 800 万 token 的输出，正常路径下远够不到；只拦网关/代理侧的异常流
+/// （delta 泛洪）。与 openai_compat 的 MAX_STREAMED_TEXT_CHARS 同值。
+const MAX_STREAMED_FIELD_CHARS: usize = 32 * 1024 * 1024;
+
+/// 整个补全聚合的全局上限（#637）：Anthropic 的 `ensure` 允许 0..=1024
+/// 共 1025 个 content block，每个 block 又有多个聚合字段——全部单独
+/// 在 per-field 上限内时，聚合总量仍可达几十 GiB（#637 的复合风暴面）。
+/// 全局检查设在 `apply` 尾部（每条事件后的单一增长咽喉点）。与
+/// openai_compat 的 MAX_AGGREGATE_CHARS 同值。
+const MAX_AGGREGATE_CHARS: usize = 32 * 1024 * 1024;
 
 pub struct AnthropicProvider {
     name: String,
@@ -276,16 +308,19 @@ impl Aggregate {
                 self.ensure(index)?;
                 let block = event.get("content_block").unwrap_or(&Value::Null);
                 let target = &mut self.blocks[index];
-                target.kind = string_field(block, "type");
-                target.text.push_str(&string_field(block, "text"));
-                target.id = string_field(block, "id");
-                target.name = string_field(block, "name");
-                target.signature = string_field(block, "signature");
-                target.data = string_field(block, "data");
+                // #637: every gateway string funnels through push_bounded;
+                // kind/id/name too (codex P1) — plain assignment left them
+                // invisible to both caps (GiB heap).
+                push_bounded(&mut target.kind, &string_field(block, "type"))?;
+                push_bounded(&mut target.text, &string_field(block, "text"))?;
+                push_bounded(&mut target.id, &string_field(block, "id"))?;
+                push_bounded(&mut target.name, &string_field(block, "name"))?;
+                push_bounded(&mut target.signature, &string_field(block, "signature"))?;
+                push_bounded(&mut target.data, &string_field(block, "data"))?;
                 if let Some(input) = block.get("input").filter(|value| {
                     !value.is_null() && value.as_object().is_none_or(|object| !object.is_empty())
                 }) {
-                    target.partial_json = input.to_string();
+                    push_bounded(&mut target.partial_json, &input.to_string())?;
                 }
             }
             "content_block_delta" => {
@@ -294,13 +329,16 @@ impl Aggregate {
                 let delta = event.get("delta").unwrap_or(&Value::Null);
                 let target = &mut self.blocks[index];
                 match delta.get("type").and_then(Value::as_str).unwrap_or("") {
-                    "text_delta" => target.text.push_str(&string_field(delta, "text")),
-                    "thinking_delta" => target.text.push_str(&string_field(delta, "thinking")),
-                    "input_json_delta" => target
-                        .partial_json
-                        .push_str(&string_field(delta, "partial_json")),
+                    "text_delta" => push_bounded(&mut target.text, &string_field(delta, "text"))?,
+                    "thinking_delta" => {
+                        push_bounded(&mut target.text, &string_field(delta, "thinking"))?
+                    }
+                    "input_json_delta" => push_bounded(
+                        &mut target.partial_json,
+                        &string_field(delta, "partial_json"),
+                    )?,
                     "signature_delta" => {
-                        target.signature.push_str(&string_field(delta, "signature"))
+                        push_bounded(&mut target.signature, &string_field(delta, "signature"))?
                     }
                     other => {
                         return Err(ProviderError::Call(format!(
@@ -338,7 +376,11 @@ impl Aggregate {
                 )))
             }
         }
-        Ok(())
+        // Whole-aggregate check AFTER every event: the single chokepoint
+        // every bounded append and resize passes through, so the aggregate
+        // cannot creep past the cap via bytes spread across 1025 blocks
+        // each under the per-field limit.
+        self.check_total()
     }
 
     fn apply_usage(&mut self, usage: &Value) {
@@ -349,6 +391,36 @@ impl Aggregate {
         self.cache_creation_tokens = self
             .cache_creation_tokens
             .max(get("cache_creation_input_tokens"));
+    }
+
+    /// 整个聚合的大小：每个 block 的每个聚合字段（#637 全局上限据此
+    /// 判定）。kind/id/name 计入总量（codex round-2 P1，对齐
+    /// openai_compat）：漏计会放过带大 id/name 的块。
+    fn total_chars(&self) -> usize {
+        self.blocks
+            .iter()
+            .map(|block| {
+                block.kind.len()
+                    + block.id.len()
+                    + block.name.len()
+                    + block.text.len()
+                    + block.partial_json.len()
+                    + block.signature.len()
+                    + block.data.len()
+            })
+            .sum()
+    }
+
+    /// Reject the stream once the WHOLE aggregate (not one field — see
+    /// [`MAX_AGGREGATE_CHARS`]) passes the #637 cap. Checked after every
+    /// event, so no path grows the aggregate past the cap.
+    fn check_total(&self) -> Result<(), ProviderError> {
+        if self.total_chars() > MAX_AGGREGATE_CHARS {
+            return Err(ProviderError::Transient(format!(
+                "streamed response aggregate exceeds the {MAX_AGGREGATE_CHARS} char cap"
+            )));
+        }
+        Ok(())
     }
 
     fn ensure(&mut self, index: usize) -> Result<(), ProviderError> {
@@ -420,13 +492,8 @@ async fn read_stream(
         let Some(chunk) = next else { break };
         let chunk =
             chunk.map_err(|err| ProviderError::Transient(format!("transport error: {err}")))?;
-        buffer.extend_from_slice(&chunk);
-        while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = buffer.drain(..=pos).collect();
-            if apply_line(
-                &mut aggregate,
-                &String::from_utf8_lossy(&line[..line.len() - 1]),
-            )? {
+        for line in push_lines_bounded(&mut buffer, &chunk)? {
+            if apply_line(&mut aggregate, &line)? {
                 first.get_or_insert_with(Instant::now);
             }
         }
@@ -435,6 +502,59 @@ async fn read_stream(
         first.get_or_insert_with(Instant::now);
     }
     Ok((aggregate, first))
+}
+
+/// #637: append one raw chunk to the SSE line buffer and return every line
+/// completed by it. The cap bounds one LINE, never the chunk: every
+/// COMPLETE line is checked individually (a newline-terminated line longer
+/// than [`MAX_SSE_LINE_BYTES`] is corruption), and only the trailing
+/// UNTERMINATED residual gets the cumulative check — rejecting instead of
+/// growing it without bound (a junk flood with no newline never reaches the
+/// aggregate caps, so only this check bounds it). reqwest may deliver many
+/// legal lines in one chunk whose total exceeds the cap; that response is
+/// not corrupt just because of how HTTP framed it. The buffer is cleared
+/// before returning the error (a caller that ever catches it and reuses the
+/// buffer starts from empty), mirroring `SseLineBuffer::push` in
+/// `openai_compat/aggregate.rs`.
+fn push_lines_bounded(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<Vec<String>, ProviderError> {
+    buffer.extend_from_slice(chunk);
+    let mut lines = Vec::new();
+    while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
+        let line: Vec<u8> = buffer.drain(..=pos).collect();
+        let line = &line[..line.len() - 1];
+        if line.len() > MAX_SSE_LINE_BYTES {
+            buffer.clear();
+            return Err(ProviderError::Transient(format!(
+                "SSE line exceeds {} bytes (stream corruption)",
+                MAX_SSE_LINE_BYTES
+            )));
+        }
+        lines.push(String::from_utf8_lossy(line).into_owned());
+    }
+    if buffer.len() > MAX_SSE_LINE_BYTES {
+        buffer.clear();
+        return Err(ProviderError::Transient(format!(
+            "SSE line exceeds {} bytes (stream corruption)",
+            MAX_SSE_LINE_BYTES
+        )));
+    }
+    Ok(lines)
+}
+
+/// Append a streamed delta to an aggregated string, rejecting the stream
+/// once the field passes the #637 defensive cap (see
+/// [`MAX_STREAMED_FIELD_CHARS`]) — without it an anomalous/hostile gateway
+/// flooding `data:` deltas would grow the field without bound. Mirrors
+/// `Aggregated::push_bounded` in `openai_compat/aggregate.rs`.
+fn push_bounded(target: &mut String, delta: &str) -> Result<(), ProviderError> {
+    if target.len() + delta.len() > MAX_STREAMED_FIELD_CHARS {
+        return Err(ProviderError::Transient(format!(
+            "streamed response text exceeds the {} char aggregate cap",
+            MAX_STREAMED_FIELD_CHARS
+        )));
+    }
+    target.push_str(delta);
+    Ok(())
 }
 
 fn apply_line(aggregate: &mut Aggregate, line: &str) -> Result<bool, ProviderError> {
@@ -484,6 +604,11 @@ fn classify_http(status: u16, body: &str) -> ProviderError {
 fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
+
+// SSE line-cap tests live in the child module `sse_line_tests` (split for
+// the file size budget, #689); everything else stays inline.
+#[cfg(test)]
+mod sse_line_tests;
 
 #[cfg(test)]
 mod tests {
@@ -583,6 +708,81 @@ mod tests {
         assert!(matches!(&content[0], ContentBlock::Text { text } if text == "Hi"));
         assert!(
             matches!(&content[1], ContentBlock::ToolCall { arguments, .. } if arguments == &json!({"path":"a"}))
+        );
+    }
+
+    #[test]
+    fn aggregate_text_delta_past_the_cap_is_transient() {
+        // #637: the per-field cap — a text_delta flood pushing one block's
+        // text past MAX_STREAMED_FIELD_CHARS is rejected as transient, not
+        // grown without bound. The max_tokens header only binds a
+        // well-behaved server; this is the client-side bound.
+        let mut aggregate = Aggregate::default();
+        aggregate
+            .apply(&json!({
+                "type":"content_block_start","index":0,
+                "content_block":{"type":"text","text":""}
+            }))
+            .unwrap();
+        let mut err = None;
+        // 33 × 1 MiB deltas push the text field past the 32 MiB cap.
+        for _ in 0..33 {
+            let event = json!({
+                "type":"content_block_delta","index":0,
+                "delta":{"type":"text_delta","text":"a".repeat(1024 * 1024)}
+            });
+            if let Err(e) = aggregate.apply(&event) {
+                err = Some(e);
+                break;
+            }
+        }
+        let err = err.expect("per-field cap must fire before 33 MiB accumulates");
+        assert!(err.is_retryable(), "over-cap stream is transient: {err}");
+        // Either cap may fire first (both 32 MiB transient rejects).
+        assert!(
+            err.to_string().contains("aggregate cap")
+                || err.to_string().contains("aggregate exceeds"),
+            "got: {err}"
+        );
+        // The rejected delta was never appended — the field stays capped.
+        assert!(aggregate.blocks[0].text.len() <= 32 * 1024 * 1024);
+    }
+
+    #[test]
+    fn aggregate_many_small_blocks_hit_the_global_cap() {
+        // #637 compound-storm regression: 33 blocks × 1 MiB text each —
+        // every single field is UNDER MAX_STREAMED_FIELD_CHARS (so the
+        // per-field cap alone passes), while the whole aggregate crosses
+        // 32 MiB. Only the WHOLE-aggregate cap rejects this shape. Mirrors
+        // the openai_compat many-small-tool-calls test.
+        let mut aggregate = Aggregate::default();
+        let mut err = None;
+        for index in 0..40u64 {
+            let event = json!({
+                "type":"content_block_start","index":index,
+                "content_block":{"type":"text","text":""}
+            });
+            if let Err(e) = aggregate.apply(&event) {
+                err = Some(e);
+                break;
+            }
+            let event = json!({
+                "type":"content_block_delta","index":index,
+                "delta":{"type":"text_delta","text":"c".repeat(1024 * 1024)}
+            });
+            if let Err(e) = aggregate.apply(&event) {
+                err = Some(e);
+                break;
+            }
+        }
+        let err = err.expect("global cap must fire on many small blocks");
+        assert!(err.is_retryable(), "over-cap aggregate is transient: {err}");
+        assert!(err.to_string().contains("aggregate exceeds"), "got: {err}");
+        // The aggregate stays at/below the global cap plus one delta head.
+        assert!(
+            aggregate.total_chars() <= 32 * 1024 * 1024 + 1024 * 1024,
+            "aggregate must stay bounded: {}",
+            aggregate.total_chars()
         );
     }
 }

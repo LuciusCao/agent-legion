@@ -41,6 +41,11 @@ class JobListFilter:
     active_node_key: str | None = None
     packed: int | None = None
     paused: bool | None = None
+    # #626 codex3 P1: scope a page/facet slice to ONE run. The intake
+    # channel's callers need "my run's job statuses" (a run may carry
+    # thousands of items); '' (the default) keeps the unscoped semantics of
+    # every existing caller — run-less rows never match a scoped query.
+    run_id: str | None = None
 
 
 def _escape_like(term: str) -> str:
@@ -79,6 +84,9 @@ def filter_clauses(f: JobListFilter) -> tuple[list[str], list[Any]]:
     if f.paused is not None:
         clauses.append("execution_paused = %s")
         params.append(1 if f.paused else 0)
+    if f.run_id is not None:
+        clauses.append("run_id = %s")
+        params.append(f.run_id)
     return clauses, params
 
 

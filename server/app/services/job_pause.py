@@ -61,8 +61,8 @@ class JobPauseService:
                 operation,
                 "failed",
                 None,
-                "wrong_workspace",
-                f"Job does not belong to workspace {workspace_id}",
+                "not_found",
+                "Job not found",
             )
         return job
 

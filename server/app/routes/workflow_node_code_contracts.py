@@ -14,6 +14,10 @@ class WorkflowNodeCodeResponse(BaseModel):
     # Current draft content, when one exists (drafts are editable user data).
     draft_code: str | None = None
     draft_version: int | None = None
+    # Instance-level byte budget for one code version (#628): the Studio
+    # editor and the studio-agent draft loop display/self-check against it.
+    # Read-only, server-injected; the default keeps old clients rendering.
+    max_code_bytes: int = 64 * 1024
 
 
 class WorkflowNodeCodeTemplateResponse(BaseModel):
@@ -23,6 +27,15 @@ class WorkflowNodeCodeTemplateResponse(BaseModel):
 class WorkflowNodeCodeDraftRequest(BaseModel):
     code: str
     change_note: str | None = None
+
+
+class WorkflowNodeCodePublishRequest(BaseModel):
+    """#692 codex P1: the caller's asserted draft code_hash — verified
+    atomically inside the publish transaction; mismatch raises 409 with
+    zero publish side effects. Absent (legacy callers) keeps the old
+    no-check semantics."""
+
+    expected_hash: str | None = None
 
 
 class WorkflowNodeCodeVersionResponse(BaseModel):

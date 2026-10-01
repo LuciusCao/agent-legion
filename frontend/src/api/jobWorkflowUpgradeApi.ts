@@ -1,11 +1,12 @@
 import { api } from './core'
-import type { JobMutationResult } from '../types/jobTypes'
+import type { JobMutationResult, UpgradeMode } from '../types/jobTypes'
 
 export async function upgradeJobWorkflow(
-  jobId: string
+  jobId: string,
+  mode: UpgradeMode = 'clean'
 ): Promise<JobMutationResult> {
   return api<JobMutationResult>(
     `/api/jobs/${encodeURIComponent(jobId)}/upgrade-workflow`,
-    { method: 'POST' }
+    { method: 'POST', body: JSON.stringify({ mode }) }
   )
 }

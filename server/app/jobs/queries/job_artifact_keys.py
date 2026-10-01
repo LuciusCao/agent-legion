@@ -1,9 +1,31 @@
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
 class JobArtifactKeyQueriesMixin(ConnectionQueriesMixin):
+    def job_artifact_manifest_names_for_nodes(
+        self, job_id: str, node_keys: Collection[str]
+    ) -> set[tuple[str, str]]:
+        """(node_key, name) 清单行集合，限定给定节点（inherit 升级预检）。
+
+        继承模式判断一个拟继承节点的产物是否仍可从对象存储回填：有清单
+        行 = 执行前 restore_missing_inputs 可达（EXEC-ARTIFACT-STORE-001）。
+        返回空集合时调用方按「全部本地缺失 → 退化重跑」处理。
+        """
+        if not node_keys:
+            return set()
+        placeholders = ",".join("%s" for _ in node_keys)
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                f"select node_key, name from job_artifacts"
+                f" where job_id=%s and node_key in ({placeholders})",
+                (job_id, *node_keys),
+            ).fetchall()
+        return {(str(row["node_key"]), str(row["name"])) for row in rows}
+
     def all_artifact_storage_keys(self) -> set[str]:
         """Return every ``storage_key`` present in ``job_artifacts``.
 

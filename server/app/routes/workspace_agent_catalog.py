@@ -27,7 +27,9 @@ def create_workspace_agent_catalog_router(
     router = APIRouter()
 
     @router.get("/agent-catalog", response_model=AgentCatalogResponse)
-    def get_agent_catalog(workspace_id: Annotated[str, Query()]) -> AgentCatalogResponse:
+    def get_agent_catalog(
+        workspace_id: Annotated[str, Query(min_length=1)],
+    ) -> AgentCatalogResponse:
         # The Agent half of the catalog is workspace-scoped (schema v46), so
         # the required workspace_id query parameter doubles as the membership
         # scope enforced by the router-level workspace-access dependency.

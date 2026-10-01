@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../../api'
 import { getSkillDetail } from '../../../api/agentCatalogApi'
+import { useSettingStore } from '../../../stores/settingStore'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import type { WorkflowDefinitionRecord } from '../../../types'
 import type {
@@ -30,6 +31,10 @@ vi.mock('./AgentEditor', () => ({
 
 const mockApi = vi.mocked(api)
 const mockGetSkillDetail = vi.mocked(getSkillDetail)
+
+beforeEach(() => {
+  useSettingStore.setState({ workspaceId: 'ws-test' })
+})
 
 // 默认响应不带 tags 字段：版本下拉降级为纯文本。带 tags 的场景各用例自行覆盖。
 // #322：不带 ref 的默认详情 ref 恒为 latest（工作区 HEAD）。
@@ -194,7 +199,11 @@ describe('WorkflowNodeDetailBody', () => {
     ).not.toBeInTheDocument()
     // 版本展示：默认详情（latest = 工作区 HEAD）的 ref · commit 短 sha。
     expect(screen.getByText('latest · abc1234')).toBeInTheDocument()
-    expect(mockGetSkillDetail).toHaveBeenCalledWith('demo/review', undefined)
+    expect(mockGetSkillDetail).toHaveBeenCalledWith(
+      'demo/review',
+      'ws-test',
+      undefined
+    )
 
     // 目录树：references/rules.md 显示为目录下的 rules.md。
     fireEvent.click(screen.getByRole('button', { name: 'rules.md' }))
@@ -216,7 +225,7 @@ describe('WorkflowNodeDetailBody', () => {
   })
 
   it('lists skill tags in the version select and refetches with ?ref=', async () => {
-    mockGetSkillDetail.mockImplementation((_key, ref) =>
+    mockGetSkillDetail.mockImplementation((_key, _ws, ref) =>
       Promise.resolve(
         ref === 'v1.3.0'
           ? skillDetail({
@@ -243,7 +252,11 @@ describe('WorkflowNodeDetailBody', () => {
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole('option', { name: 'v1.3.0' }))
 
-    expect(mockGetSkillDetail).toHaveBeenCalledWith('demo/review', 'v1.3.0')
+    expect(mockGetSkillDetail).toHaveBeenCalledWith(
+      'demo/review',
+      'ws-test',
+      'v1.3.0'
+    )
     expect(await screen.findByText('# Skill v1.3')).toBeInTheDocument()
     // 查看中的 tag 与 latest 首项标识清楚：下拉显示当前选中的 tag。
     expect(screen.getByRole('combobox')).toHaveTextContent('v1.3.0')
@@ -259,7 +272,7 @@ describe('WorkflowNodeDetailBody', () => {
   })
 
   it('resets the selected tag when the skill key changes', async () => {
-    mockGetSkillDetail.mockImplementation((key, ref) =>
+    mockGetSkillDetail.mockImplementation((key, _ws, ref) =>
       Promise.resolve(
         ref === 'v1.3.0'
           ? skillDetail({
@@ -293,6 +306,10 @@ describe('WorkflowNodeDetailBody', () => {
     )
 
     // ref 选择带 skillKey 印记：切换技能即回落默认 latest（不带 ref 拉取）。
-    expect(mockGetSkillDetail).toHaveBeenLastCalledWith('demo/other', undefined)
+    expect(mockGetSkillDetail).toHaveBeenLastCalledWith(
+      'demo/other',
+      'ws-test',
+      undefined
+    )
   })
 })

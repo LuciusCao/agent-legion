@@ -4,7 +4,9 @@ The local job_dir is an evictable cache (EXEC-ARTIFACT-STORE-001): a
 completed job's upstream artifacts may be reclaimed by the maintenance
 thread. A targeted rerun that falls back to the local code pool (no online
 code Worker) then finds its declared inputs missing. This module streams
-them back from the instance object store before the node runs.
+them back from the instance object store before the node runs. The workflow
+worker's ready gate reuses the same per-file restore semantics for
+evaluation-time hydration (``restore_from_manifest_row``, #759).
 
 Restore is strictly best-effort: per-file failures are logged and the file
 stays missing, so the node errors on the absent input itself — a storage
@@ -52,19 +54,56 @@ def restore_missing_inputs(
             # outcome space is the mixed storage/DB surface of lookup +
             # stream + manifest read, not a business family; exc_info keeps
             # the per-file root cause visible.
-            logger.warning(
-                "input restore failed for job %s artifact %s; leaving it missing",
-                job_id,
-                name,
-                exc_info=True,
-            )
+            _log_restore_failure(job_id, name)
+
+
+def restore_from_manifest_row(
+    store: JobArtifactObjectStore, *, job_id: str, job_dir: Path, name: str, row: dict | None
+) -> bool:
+    """Restore one artifact given its pre-fetched manifest row.
+
+    The ready-gate hydration variant (#759): the caller batch-fetched the
+    job's manifest rows in one query instead of paying a ``lookup`` per
+    file. Returns True when the local file exists after the attempt; any
+    failure is logged and leaves the file missing (the same best-effort
+    semantics as ``restore_missing_inputs``).
+    """
+    if not valid_artifact_name(name):
+        logger.warning("refusing to restore unsafe artifact name %r for job %s", name, job_id)
+        return False
+    try:
+        _restore_row(store, job_id=job_id, job_dir=job_dir, name=name, row=row)
+    except Exception:
+        # #204 broad-except audit: same deliberate per-file best-effort
+        # containment as restore_missing_inputs (module docstring: "a storage
+        # outage never changes node semantics"). The outcome space is the
+        # mixed storage/DB surface of stream + manifest read, not a business
+        # family; the caller decides from the return value whether the input
+        # is still missing, and exc_info keeps the per-file root cause
+        # visible.
+        _log_restore_failure(job_id, name)
+    return (job_dir / name).is_file()
+
+
+def _log_restore_failure(job_id: str, name: str) -> None:
+    logger.warning(
+        "input restore failed for job %s artifact %s; leaving it missing",
+        job_id,
+        name,
+        exc_info=True,
+    )
 
 
 def _restore_one(store: JobArtifactObjectStore, *, job_id: str, job_dir: Path, name: str) -> None:
     if not valid_artifact_name(name):
         logger.warning("refusing to restore unsafe artifact name %r for job %s", name, job_id)
         return
-    row = store.lookup(job_id, name)
+    _restore_row(store, job_id=job_id, job_dir=job_dir, name=name, row=store.lookup(job_id, name))
+
+
+def _restore_row(
+    store: JobArtifactObjectStore, *, job_id: str, job_dir: Path, name: str, row: dict | None
+) -> None:
     if row is None:
         return
     target = job_dir / name

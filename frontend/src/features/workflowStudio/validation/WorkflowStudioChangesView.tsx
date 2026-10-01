@@ -13,6 +13,7 @@ export type ChangesViewStudio = Pick<
   | 'compareErrors'
   | 'compareSummary'
   | 'compareState'
+  | 'retryValidation'
 >
 
 // 变更 Drawer 的内容：校验结果 + 草稿对比摘要。
@@ -29,6 +30,17 @@ export function WorkflowStudioChangesView(props: {
     <div className={styles.checks}>
       <section aria-label="校验结果">
         <h3>校验结果</h3>
+        {/* 轮 6 H3：传输失败终态（「校验失败：…」前缀）给显式重试——清空
+            结果即触发自动校验重跑；结构失败（内容问题）重试无意义，不给。 */}
+        {studio.validationMessage.startsWith('校验失败：') ? (
+          <button
+            type="button"
+            className={styles.retryValidation}
+            onClick={() => studio.retryValidation()}
+          >
+            重试校验
+          </button>
+        ) : null}
         {hasValidation ? (
           <WorkflowValidationPanel
             message={studio.validationMessage}

@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# SIGPIPE immunity (issue #679): .githooks/pre-push execs this script, so it
+# IS the pre-push hook process and its stdout is git push's own stdout. When
+# that stream is a pipe whose reader walks away mid-push (agent harness output
+# caps, `git push | tail`, a killed session), any write to the dead pipe
+# otherwise kills the gate with SIGPIPE (141) — git then aborts the push even
+# though the gate had already passed and its evidence was recorded, which is
+# exactly the "push twice, second one replays the cached evidence" symptom.
+# Ignored here rather than only in .githooks/pre-push so manual runs
+# (scripts/check.sh segments, terminal pipes) get the same immunity, and so
+# the gate scripts below cannot reintroduce the death by resetting traps.
+# Guards around every write still keep set -e clean after EPIPE.
+trap '' PIPE
+say() {
+  printf '%s\n' "$*" || true
+}
+
 if [[ "$#" -lt 1 || "$#" -gt 2 || ("$1" != "quick" && "$1" != "full") ]]; then
-  echo "Usage: $0 <quick|full> [lanes]" >&2
+  echo "Usage: $0 <quick|full> [lanes]" >&2 || true
   exit 2
 fi
 
@@ -17,14 +33,14 @@ else
     case "$lane" in
       backend|frontend|rust) ;;
       *)
-        echo "Unsupported lanes: $lanes" >&2
+        echo "Unsupported lanes: $lanes" >&2 || true
         exit 2
         ;;
     esac
   done
 fi
 if [[ "$gate" == "full" && "$lanes" != "backend frontend rust" ]]; then
-  echo "Lane selection is only supported for the quick gate." >&2
+  echo "Lane selection is only supported for the quick gate." >&2 || true
   exit 2
 fi
 # Test tier for the quick gate's backend lane: smoke/unit (all pure tests with
@@ -40,17 +56,17 @@ tier="${GATE_TIER:-full}"
 case "$tier" in
   smoke|unit|postgres|full) ;;
   aff)
-    echo "GATE_TIER=aff is an inner-loop tier; it produces no push evidence." >&2
-    echo "Run scripts/check-quick.sh directly for the inner loop, or use smoke/quick here." >&2
+    echo "GATE_TIER=aff is an inner-loop tier; it produces no push evidence." >&2 || true
+    echo "Run scripts/check-quick.sh directly for the inner loop, or use smoke/quick here." >&2 || true
     exit 2
     ;;
   *)
-    echo "Unsupported GATE_TIER: $tier" >&2
+    echo "Unsupported GATE_TIER: $tier" >&2 || true
     exit 2
     ;;
 esac
 if [[ "$gate" == "full" && "$tier" != "full" ]]; then
-  echo "The full gate only supports the full tier." >&2
+  echo "The full gate only supports the full tier." >&2 || true
   exit 2
 fi
 export GATE_TIER="$tier"
@@ -58,8 +74,8 @@ ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
-  echo "Local $gate gate refused: the worktree is not clean." >&2
-  echo "Commit or stash all changes so the verified SHA matches the pushed SHA." >&2
+  echo "Local $gate gate refused: the worktree is not clean." >&2 || true
+  echo "Commit or stash all changes so the verified SHA matches the pushed SHA." >&2 || true
   exit 1
 fi
 
@@ -144,7 +160,9 @@ cache_dir="$common_dir/local-gates/$head_sha"
 cache_file="$cache_dir/$gate-$fingerprint.pass"
 
 if [[ "${AGENT_LEGION_LOCAL_GATE_FORCE:-0}" != "1" && -f "$cache_file" ]]; then
-  echo "Local $gate gate already passed for ${head_sha:0:12}; reusing cached evidence."
+  # One guarded line on cached-evidence replay (the "push twice" second
+  # attempt): it must never be able to fail the push (#679).
+  say "Local $gate gate already passed for ${head_sha:0:12}; reusing cached evidence."
   exit 0
 fi
 
@@ -154,11 +172,17 @@ case "$gate" in
 esac
 
 started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-echo "Running local $gate gate for ${head_sha:0:12} (lanes: $lanes)..."
+say "Running local $gate gate for ${head_sha:0:12} (lanes: $lanes)..."
+# The gate script streams the lanes' output through this process's stdout —
+# which under pre-push is git push's own pipe. A reader that walked away
+# (issue #679) must not turn the chatter into a failed push: with SIGPIPE
+# ignored above and every write in the gate scripts guarded, the gate either
+# drains the pipe (reader alive) or drops its chatter (reader gone) and in
+# both cases reports its verdict through the exit status alone.
 GATE_LANES="$lanes" "$gate_script"
 
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
-  echo "Local $gate gate changed the worktree; refusing to record passing evidence." >&2
+  echo "Local $gate gate changed the worktree; refusing to record passing evidence." >&2 || true
   exit 1
 fi
 
@@ -175,5 +199,5 @@ temp_file="$cache_file.tmp.$$"
 } >"$temp_file"
 mv "$temp_file" "$cache_file"
 
-echo "Local $gate gate passed for ${head_sha:0:12}."
-echo "Evidence: $cache_file"
+say "Local $gate gate passed for ${head_sha:0:12}."
+say "Evidence: $cache_file"

@@ -1,8 +1,10 @@
 import type {
   BatchJobMutationResult,
   JobSummary,
+  UpgradeMode,
   WorkspacePackageResult,
 } from '../../types/jobTypes'
+export type { UpgradeMode } from '../../types/jobTypes'
 import type { ClearPackedActions } from './actions/clearPackedActions'
 import type { ContinueJobResult, RerunByFailureActions } from './stateTypes'
 import type { JobPaginationState } from './paginationTypes'
@@ -92,7 +94,8 @@ export interface JobState
   continueJob: (jobId: string) => ContinueJobResult
   batchUpgradeWorkflow: (
     workspaceId: string,
-    jobIds?: string[]
+    jobIds?: string[],
+    mode?: UpgradeMode
   ) => Promise<BatchJobMutationResult>
 }
 export type JobStoreSet = (

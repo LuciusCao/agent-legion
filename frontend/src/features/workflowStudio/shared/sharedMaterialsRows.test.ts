@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSharedMaterialFileRows,
+  collectPropagateImpact,
   isRowPropagatable,
 } from './sharedMaterialsRows'
 import type { WorkspaceSharedMaterialsResponse } from '../../../api'
@@ -83,5 +84,84 @@ describe('isRowPropagatable', () => {
         missingSource: false,
       })
     ).toBe(true)
+  })
+})
+
+describe('collectPropagateImpact', () => {
+  it('expands to every source mapped to the same skills (#683 P2-1)', () => {
+    const data: WorkspaceSharedMaterialsResponse = {
+      workspace_id: 'ws',
+      map: {
+        version: 1,
+        materials: [
+          {
+            source: 'references/style.md',
+            skills: [
+              { skill: 'write-script', status: 'pending_sync' },
+              { skill: 'review-script', status: 'synced' },
+            ],
+          },
+          {
+            // 同 skill 的其他共享材料：随同一次 commit 写入。
+            source: 'references/brand.md',
+            skills: [{ skill: 'write-script', status: 'synced' }],
+          },
+          {
+            // review-script 的其他材料：write-script 也会带上它。
+            source: 'scripts/lint.sh',
+            skills: [{ skill: 'review-script', status: 'pending_sync' }],
+          },
+          {
+            // 与所选 skill 完全无关：不在影响范围。
+            source: 'references/other.md',
+            skills: [{ skill: 'other-skill', status: 'pending_sync' }],
+          },
+        ],
+      },
+      files: [
+        {
+          path: 'references/style.md',
+          size: 1,
+          modified_at: '2026-09-01T00:00:00Z',
+        },
+        {
+          path: 'references/brand.md',
+          size: 1,
+          modified_at: '2026-09-01T00:00:00Z',
+        },
+        {
+          path: 'scripts/lint.sh',
+          size: 1,
+          modified_at: '2026-09-01T00:00:00Z',
+        },
+        {
+          path: 'references/other.md',
+          size: 1,
+          modified_at: '2026-09-01T00:00:00Z',
+        },
+        {
+          path: 'references/unmapped.md',
+          size: 1,
+          modified_at: '2026-09-01T00:00:00Z',
+        },
+      ],
+    }
+    const rows = buildSharedMaterialFileRows(data)
+    const clicked = rows.find((row) => row.path === 'references/style.md')!
+    const impact = collectPropagateImpact(clicked, rows)
+
+    expect(impact.skills).toEqual(['write-script', 'review-script'])
+    expect(impact.files).toEqual([
+      { path: 'references/brand.md', requested: false },
+      { path: 'references/style.md', requested: true },
+      { path: 'scripts/lint.sh', requested: false },
+    ])
+  })
+
+  it('reduces to the clicked file when no other row maps the same skills', () => {
+    const rows = buildSharedMaterialFileRows(base)
+    const impact = collectPropagateImpact(rows[0], rows)
+    expect(impact.files).toEqual([{ path: 'references/a.md', requested: true }])
+    expect(impact.skills).toEqual(['skill-a'])
   })
 })

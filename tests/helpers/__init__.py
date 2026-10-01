@@ -298,3 +298,33 @@ def replace_agent_catalog(workspace_ids: str | list[str], definitions: dict[str,
                     ),
                 )
     reset_published_agent_cache()
+
+
+def make_workspace_job(client: Any, workspace_id: str, item_id: str | None = None) -> str:
+    """Create one job in *workspace_id* through the HTTP intake path.
+
+    Shared scaffolding for the guard suites (#710): seeds the workspace's
+    agent definitions and active revision once per call (idempotent at the
+    service layer), then posts a single direct-ids batch. ``item_id`` makes
+    the source id (and thus the job id) unique per call — mutating endpoint
+    tests consume their job, so callers that need a survivor mint fresh ids.
+    """
+    import time
+
+    seed_workspace_agent_definitions(workspace_id)
+    publish_legacy_intake_revision(_job_db_of(client), workspace_id)
+    source = item_id or f"item_{int(time.time() * 1000) % 10**9}"
+    created = client.post(
+        f"/api/workspaces/{workspace_id}/job-batches",
+        json={
+            "workflow_key": workspace_id,
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": [source],
+        },
+    )
+    assert created.status_code == 200, created.text
+    return created.json()["jobs"][0]["id"]
+
+
+def _job_db_of(client: Any) -> Any:
+    return client.app.state.job_db

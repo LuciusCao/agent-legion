@@ -62,8 +62,10 @@ class BatchClaimSelection:
 
     Agent ``candidates`` are monotone by the actual ``agent-ws:`` capacity
     lock key, fairness-rotated within that constraint. Code candidates do
-    not enter that lock domain and remain unconstrained. ``timer`` carries
-    the scan/evaluate timings across both phases (#448).
+    not enter that lock domain and stay floor-unconstrained AT SELECTION —
+    the write phase still re-sorts every candidate (code included) into the
+    global ``(ws_lock_key, job_id)`` order (EXEC-GENERATION-001, #645 P2).
+    ``timer`` carries the scan/evaluate timings across both phases (#448).
     """
 
     candidates: tuple[Mapping[str, Any], ...]

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 import shutil
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from server.app.services.job_artifact_staging_scope import staging_output_names
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.workflow_branching import downstream_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +19,15 @@ class StagedOutputs:
     `commit()` permanently removes staged files; `rollback()` restores them to
     their original locations. ``artifact_names`` are the output names staged
     for the affected closure (#508: the same set whose ``job_artifacts``
-    manifest rows the rerun transaction deletes).
+    manifest rows the rerun transaction deletes); names shared with nodes
+    outside the closure are never staged (see ``stage_outputs``).
     """
 
     def __init__(
-        self, staged_dir: Path, moves: list[tuple[Path, Path]], artifact_names: set[str]
+        self,
+        staged_dir: Path,
+        moves: list[tuple[Path, Path]],
+        artifact_names: set[str],
     ) -> None:
         self._staged_dir = staged_dir
         self._moves = list(moves)
@@ -77,21 +81,38 @@ class JobArtifactMutationService:
     def stage_outputs(
         self,
         job: dict[str, Any],
-        node_keys: Sequence[str],
+        affected_keys: Sequence[str],
         definition: WorkflowDefinition,
         *,
-        closure: set[str] | frozenset[str] | None = None,
+        extra_names: Iterable[str] = (),
+        extra_run_keys: Iterable[str] = (),
     ) -> StagedOutputs:
-        """Move rerun outputs and run histories to reversible staging.
+        """Move the given nodes' outputs and run histories to reversible staging.
 
-        When ``closure`` is provided, only outputs declared by nodes inside the
-        closure are staged. This supports targeted rerun-to operations where
-        descendants outside the target closure must keep their artifacts.
+        ``affected_keys`` is authoritative: exactly these nodes' outputs are
+        staged. Callers MUST pass the same set they reset in the database
+        (#759) — the reset set and the staged set being equal is the invariant
+        that keeps file-driven consumers from reading stale outputs. The set
+        is computed by the caller via the merged downstream closure
+        (``dependency_downstream``) or an operation-specific filter; this
+        service deliberately performs no graph traversal of its own, so no
+        second enumeration can diverge from the reset logic.
+
+        Staging is also name-scoped (adversarial review A3): an output name
+        declared by any node outside the affected set is never staged — the
+        local file may be that outside node's artifact, and deleting it would
+        strand a completed node whose ``job_artifacts`` row then points at
+        nothing (see ``job_artifact_staging_scope.staging_output_names``).
 
         Read-modify-write artifacts (declared as both an input and an output of
         the same node) are never staged: removing them would leave the node
         waiting forever on an input no rerun producer rewrites (#114). On a
         successful rerun the node rewrites them, so run semantics are unchanged.
+
+        ``extra_names``/``extra_run_keys``（#645 codex 四轮 P1-2，upgrade
+        专用）：新 definition 声明面之外、需要一并暂存的旧产物名与被删
+        节点的运行历史目录（调用方从旧快照算好并按 A3 口径过滤）。它们
+        进入 ``artifact_names``（清单行删除同集合）与文件移动面。
 
         Returns a :class:`StagedOutputs` handle. Callers should invoke
         ``commit()`` after a successful database transaction, or ``rollback()``
@@ -103,22 +124,16 @@ class JobArtifactMutationService:
         if not storage_dir.exists():
             storage_dir.mkdir(parents=True, exist_ok=True)
 
-        affected_keys: set[str] = set(node_keys)
-        for node_key in node_keys:
+        affected: set[str] = set()
+        for node_key in affected_keys:
             if node_key not in definition.nodes:
                 raise ValueError(f"Unknown node: {node_key}")
-            affected_keys.update(downstream_nodes(definition, node_key))
+            affected.add(node_key)
 
-        if closure is not None:
-            affected_keys &= set(closure)
-
-        outputs: set[str] = set()
-        for key in affected_keys:
-            node = definition.nodes[key]
-            outputs.update(set(node.outputs) - set(node.inputs))
+        outputs = staging_output_names(definition, affected) | set(extra_names)
 
         paths = set(outputs)
-        paths.update(f"runs/{key}" for key in affected_keys)
+        paths.update(f"runs/{key}" for key in affected | set(extra_run_keys))
 
         staged_dir = storage_dir / ".staged"
         staged_dir.mkdir(parents=True, exist_ok=True)

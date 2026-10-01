@@ -17,7 +17,16 @@ remove what an earlier restore added.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any
+
+_SCHEMA_FILE = Path(__file__).resolve().parents[2] / "server/app/db/postgres_schema.sql"
+_V70_FUNCTION_NAMES = (
+    "bump_job_node_status_counts",
+    "sync_job_node_status_counts",
+    "deduct_job_node_status_counts",
+)
 
 _REVISIONS_UNIQUE_OLD = "workflow_revisions_workspace_id_workflow_key_version_key"
 _REVISIONS_UNIQUE_V70 = "workflow_revisions_workspace_id_version_key"
@@ -180,6 +189,21 @@ def narrow_back_to_v70(conn: Any) -> None:
     first — it depends on the column — and the per-test ``init_db`` replay
     recreates the terminal trigger chain."""
     conn.execute("drop trigger if exists jobs_node_status_counts_rekey on jobs")
+    # The v69 create-or-replace above left the five-parameter trigger
+    # functions in place; dropping the workflow_key column alone would leave
+    # them broken for every later test on the shared database (the terminal
+    # init_db replay is a no-op once the version high-water mark is reached).
+    # Replay the v70 function bodies from the schema file so the trigger
+    # chain works again without a full schema rebuild.
+    schema_text = _SCHEMA_FILE.read_text(encoding="utf-8")
+    for _fn in _V70_FUNCTION_NAMES:
+        _m = re.search(
+            rf"create or replace function {_fn}\(.*?\n\$\$ language plpgsql;",
+            schema_text,
+            re.DOTALL,
+        )
+        assert _m is not None, _fn
+        conn.execute(_m.group(0))
     conn.execute(
         f"alter table workflow_revisions drop constraint if exists {_REVISIONS_UNIQUE_OLD}"
     )

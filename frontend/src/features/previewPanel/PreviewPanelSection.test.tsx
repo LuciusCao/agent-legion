@@ -1,10 +1,18 @@
 /**
- * PreviewPanelSection 回落路径与草稿显式预览的组件测试（issue #328 / #347 P1）：
+ * PreviewPanelSection 回落路径与草稿显式预览的组件测试（issue #328 / #347 P1 /
+ * #528 / #796 返工）：fixture 的 html_hash 一律为内容的 sha256（jsdom 24 无
+ * crypto.subtle，用 node:crypto 同步复算，与服务端 bundle_hash 同构）。
  * - 未定制 workspace（published=null）→ 渲染 fallback（现有通用预览）；
  * - 已发布 bundle → bundle host 接管，fallback 不再渲染；
  * - 「定制预览」对话期间草稿**不自动执行**（#347 P1）：左栏继续渲染已发布
- *   版本；显式点「预览此草稿」后才切换到草稿；关闭对话回到已发布版本，
- *   重开对话框回到默认态（不记忆执行态）。
+ *   版本；显式点「预览此草稿」后才切换到草稿；关闭面板回到已发布版本，
+ *   重开面板回到默认态（不记忆执行态）。
+ * - #796 返工 wiring：治理动作（预览此草稿/发布草稿/恢复默认）与草稿状态
+ *   行在预览区头部（PreviewPanelHeader，真实组件参与渲染）；Dock 收敛为
+ *   纯对话（mock 掉）；授权仍锚定 Dock 会话——头部点「预览此草稿」会同时
+ *   唤起 Dock。
+ * - #528 模式开关的分支在姊妹文件 PreviewPanelSection.mode.test.tsx；
+ *   iframe 重挂语义在 PreviewPanelSection.remount.test.tsx。
  *
  * srcdoc 断言一律用「包含」：宿主会在 bundle 头部注入 CSP meta
  * （PreviewPanelHost 的出站网络红线），完整字符串不再等于 bundle 原文。
@@ -12,6 +20,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
+import { createHash } from 'node:crypto'
 import { PreviewPanelSection } from './PreviewPanelSection'
 import type { PreviewPanelState, PreviewPanelVersion } from './previewPanelApi'
 import { TestQueryProvider } from '../../testing/testQueryClient'
@@ -20,32 +29,45 @@ import { expectConsoleError, expectConsoleWarning } from '../../test-setup'
 
 const mockFetchPublished = vi.fn()
 const mockFetchState = vi.fn()
+const mockPublish = vi.fn()
+const mockArchive = vi.fn()
 
 vi.mock('./previewPanelApi', () => ({
   fetchPublishedPreviewPanel: (...args: unknown[]) =>
     mockFetchPublished(...args),
   fetchPreviewPanelState: (...args: unknown[]) => mockFetchState(...args),
+  publishPreviewPanel: (...args: unknown[]) => mockPublish(...args),
+  archivePreviewPanel: (...args: unknown[]) => mockArchive(...args),
 }))
 
-// 对话框本体（Studio chat 封装）在 CustomizePreviewDialog 自己的测试覆盖；
-// 这里钉住的是 section 的组装与回落语义。mock 透传显式预览动作（#347 P1）
-// 与治理面 state（data-hasdraft 暴露草稿是否已送达——真实按钮
-// disabled={!draft}，mock 无门控，用例需显式等草稿落定再点击）。
-vi.mock('./CustomizePreviewDialog', () => ({
-  CustomizePreviewDialog: ({
-    onPreviewDraft,
-    onClose,
-    state,
-  }: {
-    onPreviewDraft: () => void
-    onClose: () => void
-    state: { draft?: unknown } | null
-  }) => (
-    <div
-      data-testid="customize-dialog"
-      data-hasdraft={String(Boolean(state?.draft))}
-    >
-      <button onClick={onPreviewDraft}>预览此草稿</button>
+// 该 jsdom 环境不提供 localStorage：用内存 stub（#528 模式偏好按 workspace
+// 持久化；同 useStudioChat.test.tsx 的模式）。
+function installLocalStorageStub() {
+  const store = new Map<string, string>()
+  const stub: Storage = {
+    get length() {
+      return store.size
+    },
+    clear: () => store.clear(),
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    removeItem: (key) => void store.delete(key),
+    setItem: (key, value) => void store.set(key, String(value)),
+  }
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: stub,
+  })
+  return stub
+}
+
+const localStorageStub = installLocalStorageStub()
+
+// Dock 本体（Studio chat + AgentPanelDock 容器）在 CustomizePreviewDock 自己
+// 的测试覆盖；这里只需要「关闭」出口来钉住 Dock 会话与授权的锚定关系。
+vi.mock('./CustomizePreviewDock', () => ({
+  CustomizePreviewDock: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="customize-dialog">
       <button onClick={onClose}>关闭</button>
     </div>
   ),
@@ -54,7 +76,7 @@ vi.mock('./CustomizePreviewDialog', () => ({
 function makeVersion(
   html: string,
   status: 'draft' | 'published',
-  htmlHash = 'hash-v1'
+  htmlHash: string
 ): PreviewPanelVersion {
   return {
     id: `id-${status}`,
@@ -71,10 +93,31 @@ function makeVersion(
   }
 }
 
+/**
+ * 服务端契约：html_hash = sha256(html)（preview_panels.bundle_hash）。
+ * fixture 的指纹不再手写——统一经 makeBundleSync 生成，hash 始终跟随
+ * 内容，避免「内容变化但 hash 未变」这种后端不可伪造的组合污染重挂/
+ * 授权用例（key 指纹吃的就是 html_hash，codex P2 修复）。
+ */
+function makeBundleSync(html: string, status: 'draft' | 'published') {
+  return makeVersion(html, status, sha256Hex(html))
+}
+
+/** 与服务端 bundle_hash 同算法（hashlib.sha256 → hex），node:crypto 同步实现。 */
+function sha256Hex(html: string): string {
+  return createHash('sha256').update(html, 'utf8').digest('hex')
+}
+
 const PUBLISHED_HTML =
   '<!doctype html><html><body>published panel</body></html>'
 const DRAFT_HTML = '<!doctype html><html><body>draft panel</body></html>'
 const DRAFT_V2_HTML = '<!doctype html><html><body>draft v2 panel</body></html>'
+
+// 服务端契约：published v1 与草稿 v1/v2 是互不相同的版本，html_hash 均为
+// 内容的 sha256（见 makeBundleSync）。
+const PUBLISHED = makeBundleSync(PUBLISHED_HTML, 'published')
+const DRAFT = makeBundleSync(DRAFT_HTML, 'draft')
+const DRAFT_V2 = makeBundleSync(DRAFT_V2_HTML, 'draft')
 
 function renderSection(ui?: ReactElement) {
   return render(
@@ -90,26 +133,35 @@ function renderSection(ui?: ReactElement) {
 }
 
 /**
- * 等治理面草稿数据落进对话框再继续：真实按钮 disabled={!draft}，用户
- * 在草稿可见前根本点不了「预览此草稿」；mock 对话框没有该门控，点击
- * 早于数据送达是无意义竞态（授权快照取自组件闭包里的 draft）。
+ * 等治理面草稿数据落进头部状态 Chip 再继续：菜单项 disabled={!draft}，
+ * Chip 出现「草稿 v1」时动作才可用（点击早于数据送达是无意义竞态——
+ * 授权快照取自组件闭包里的 draft）。
  */
-async function waitForDraftInDialog() {
-  await waitFor(() =>
-    expect(screen.getByTestId('customize-dialog')).toHaveAttribute(
-      'data-hasdraft',
-      'true'
-    )
-  )
+async function waitForDraftInHeader() {
+  await screen.findByText(/草稿 v1 · /)
+}
+
+/** 「恢复默认」收在 MoreVert 溢出菜单（#796 R4：预览/发布已外露出头部
+ * 治理区）：点开菜单再点菜单项。菜单在 fireEvent 的 act 内同步挂载，
+ * getByRole 直取即可（兼容 fake timers）。 */
+function clickGovernanceAction(name: string | RegExp) {
+  fireEvent.click(screen.getByRole('button', { name: '预览治理操作' }))
+  fireEvent.click(screen.getByRole('menuitem', { name }))
 }
 
 beforeEach(() => {
   mockFetchPublished.mockReset()
   mockFetchState.mockReset()
+  mockPublish.mockReset()
+  mockArchive.mockReset()
   mockFetchState.mockResolvedValue({
     published: null,
     draft: null,
   } satisfies PreviewPanelState)
+  mockPublish.mockResolvedValue(PUBLISHED)
+  mockArchive.mockResolvedValue({ published: null, draft: null })
+  // #528 模式偏好按 workspace 持久化：用例间不互相泄漏。
+  localStorageStub.clear()
   // 定制入口 admin-only（P4 惯例）：默认以 admin 身份渲染。
   act(() => {
     useAuthStore.setState({ user: { role: 'admin' } as never })
@@ -136,9 +188,7 @@ describe('PreviewPanelSection', () => {
   })
 
   it('已发布 bundle 接管左栏，fallback 不再渲染', async () => {
-    mockFetchPublished.mockResolvedValue(
-      makeVersion(PUBLISHED_HTML, 'published')
-    )
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
     renderSection()
 
     await waitFor(() =>
@@ -167,12 +217,10 @@ describe('PreviewPanelSection', () => {
   })
 
   it('定制对话期间草稿不自动执行：显式「预览此草稿」后执行，重开对话回到默认态（#347 P1）', async () => {
-    mockFetchPublished.mockResolvedValue(
-      makeVersion(PUBLISHED_HTML, 'published')
-    )
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
     mockFetchState.mockResolvedValue({
-      published: makeVersion(PUBLISHED_HTML, 'published'),
-      draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
+      published: PUBLISHED,
+      draft: DRAFT,
     })
     renderSection()
 
@@ -189,7 +237,7 @@ describe('PreviewPanelSection', () => {
     // 打开定制对话：草稿已在治理面上可见，但左栏**不**自动切换到草稿——
     // 未审核 HTML 不得未经显式动作就作为 srcDoc 执行。
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
-    await waitForDraftInDialog()
+    await waitForDraftInHeader()
     expect(
       screen
         .getByTestId('preview-panel-host')
@@ -220,7 +268,7 @@ describe('PreviewPanelSection', () => {
       expect(iframe?.getAttribute('srcdoc')).toContain('published panel')
     })
 
-    // 重新打开对话框：回到默认态——一次点击不放行后续会话的草稿执行。
+    // 重新打开面板：回到默认态——一次点击不放行后续会话的草稿执行。
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
     await waitFor(() =>
       expect(screen.getByTestId('customize-dialog')).toBeInTheDocument()
@@ -238,7 +286,7 @@ describe('PreviewPanelSection', () => {
     mockFetchPublished.mockResolvedValue(null)
     mockFetchState.mockResolvedValue({
       published: null,
-      draft: makeVersion(DRAFT_HTML, 'draft'),
+      draft: DRAFT,
     })
     renderSection()
 
@@ -274,13 +322,11 @@ describe('PreviewPanelSection', () => {
     expectConsoleError(/not wrapped in act/)
     vi.useFakeTimers()
     try {
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(PUBLISHED_HTML, 'published')
-      )
+      mockFetchPublished.mockResolvedValue(PUBLISHED)
       // 首轮：草稿 v1 就位。
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft'),
+        published: PUBLISHED,
+        draft: DRAFT,
       } satisfies PreviewPanelState)
       renderSection()
       await act(async () => {
@@ -303,10 +349,10 @@ describe('PreviewPanelSection', () => {
           ?.getAttribute('srcdoc')
       ).toContain('draft panel')
 
-      // 发布草稿（对话框不关）：draft 变 null，左栏回落已发布版本，
+      // 发布草稿（面板不关）：draft 变 null，左栏回落已发布版本，
       // 按钮回到「预览此草稿」——授权已失效，不能悬空成「预览草稿中」。
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
+        published: PUBLISHED,
         draft: null,
       } satisfies PreviewPanelState)
       await act(async () => {
@@ -318,15 +364,15 @@ describe('PreviewPanelSection', () => {
           .querySelector('iframe')
           ?.getAttribute('srcdoc')
       ).toContain('published panel')
-      // 授权已失效的真实门控信号：左栏徽标消失（按钮态在 mock 对话框里
+      // 授权已失效的真实门控信号：左栏徽标消失（按钮态在 mock 面板里
       // 不可见，srcdoc + 徽标已覆盖门控本身）。
 
       // 同一 chat 会话里 agent 写入新草稿 v2（「发布后继续改一版」的核心
       // 工作流）：v2 必须重新显式预览，不得继承 v1 的授权自动执行
       // （html_hash 变化即回退未授权，#500 P1-5）。
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_V2_HTML, 'draft', 'hash-v2'),
+        published: PUBLISHED,
+        draft: DRAFT_V2,
       } satisfies PreviewPanelState)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3100)
@@ -363,7 +409,7 @@ describe('PreviewPanelSection', () => {
       mockFetchPublished.mockResolvedValue(null)
       mockFetchState.mockResolvedValue({
         published: null,
-        draft: makeVersion(DRAFT_HTML, 'draft'),
+        draft: DRAFT,
       } satisfies PreviewPanelState)
       renderSection()
       await act(async () => {
@@ -409,12 +455,10 @@ describe('PreviewPanelSection', () => {
     expectConsoleError(/not wrapped in act/)
     vi.useFakeTimers()
     try {
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(PUBLISHED_HTML, 'published')
-      )
+      mockFetchPublished.mockResolvedValue(PUBLISHED)
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft'),
+        published: PUBLISHED,
+        draft: DRAFT,
       } satisfies PreviewPanelState)
       const { rerender } = renderSection()
       await act(async () => {
@@ -494,21 +538,83 @@ describe('PreviewPanelSection', () => {
     }
   })
 
-  it('非 admin 成员不渲染「定制预览」入口（P4 惯例，治理面端点对其 403）', async () => {
+  it('非 admin 成员不渲染「定制预览」入口与治理行（P4 惯例，治理面端点对其 403）', async () => {
     act(() => {
       useAuthStore.setState({ user: { role: 'member' } as never })
     })
-    mockFetchPublished.mockResolvedValue(
-      makeVersion(PUBLISHED_HTML, 'published')
-    )
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
     renderSection()
 
-    // 面板内容对成员照常渲染，但定制入口与治理面查询都不出现。
+    // 面板内容对成员照常渲染，但定制入口、治理溢出菜单与治理面查询都不出现。
     await waitFor(() =>
       expect(screen.getByTestId('preview-panel-host')).toBeInTheDocument()
     )
     expect(screen.queryByRole('button', { name: '定制预览' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '预览治理操作' })).toBeNull()
+    expect(screen.queryByText(/草稿 v1 · /)).toBeNull()
     expect(mockFetchState).not.toHaveBeenCalled()
+    // #528：模式开关是查看偏好而非治理动作，成员同样可见可用（切换行为
+    // 的分支覆盖在 PreviewPanelSection.mode.test.tsx）。
+    expect(
+      screen.getByRole('group', { name: '预览显示模式' })
+    ).toBeInTheDocument()
+  })
+
+  it('#796 wiring：头部「预览此草稿」逐次授权并唤起 Dock，授权后草稿直接在左栏渲染', async () => {
+    // bundle 切换使 host 重挂，jsdom 的 load 事件让宿主 setLoading 脱离
+    // act（known noise，同上各 fake-timer 用例的声明方式）。
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
+    mockFetchState.mockResolvedValue({
+      published: PUBLISHED,
+      draft: DRAFT,
+    } satisfies PreviewPanelState)
+    renderSection()
+
+    // 治理行常驻头部（admin）：状态行 + 未授权时按钮为「预览此草稿」，
+    // 左栏继续渲染已发布版本（#347 P1：草稿执行不自动发生）。
+    await waitForDraftInHeader()
+    expect(screen.queryByTestId('customize-dialog')).toBeNull()
+    expect(
+      screen
+        .getByTestId('preview-panel-host')
+        .querySelector('iframe')
+        ?.getAttribute('srcdoc')
+    ).toContain('published panel')
+
+    // 显式授权：草稿在左栏渲染（与已发布版本同一 PreviewPanelHost 挂载
+    // 点），外露按钮转为禁用的「预览草稿中」（#796 R4），Dock 同步唤起
+    // （授权锚定 Dock 会话）。
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+    await waitFor(() => {
+      const iframe = screen
+        .getByTestId('preview-panel-host')
+        .querySelector('iframe')
+      expect(iframe?.getAttribute('srcdoc')).toContain('draft panel')
+    })
+    expect(screen.getByText('草稿预览中')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '预览草稿中' })).toBeDisabled()
+    expect(screen.getByTestId('customize-dialog')).toBeInTheDocument()
+  })
+
+  it('头部治理动作：发布草稿（外露按钮）调用发布 API，恢复默认（⋮ 菜单）需确认后调用归档 API', async () => {
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
+    mockFetchState.mockResolvedValue({
+      published: PUBLISHED,
+      draft: DRAFT,
+    } satisfies PreviewPanelState)
+    renderSection()
+    await waitForDraftInHeader()
+
+    // #796 R4：发布草稿外露出治理区（状态 Chip 旁），恢复默认留在 ⋮ 菜单。
+    fireEvent.click(screen.getByRole('button', { name: '发布草稿' }))
+    await waitFor(() => expect(mockPublish).toHaveBeenCalledWith('ws1'))
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    clickGovernanceAction(/恢复默认（归档）/)
+    await waitFor(() => expect(mockArchive).toHaveBeenCalledWith('ws1'))
+    confirmSpy.mockRestore()
   })
 
   it('预览中草稿内容变化（save_draft 覆盖，html_hash 变）回退未授权：新内容需重新显式预览（#500 P1-5）', async () => {
@@ -517,12 +623,10 @@ describe('PreviewPanelSection', () => {
     expectConsoleError(/not wrapped in act/)
     vi.useFakeTimers()
     try {
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(PUBLISHED_HTML, 'published')
-      )
+      mockFetchPublished.mockResolvedValue(PUBLISHED)
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
+        published: PUBLISHED,
+        draft: DRAFT,
       } satisfies PreviewPanelState)
       renderSection()
       await act(async () => {
@@ -549,8 +653,8 @@ describe('PreviewPanelSection', () => {
       // html_hash 变化、无 null 间隙）：授权不迁移到新内容——回到已发布
       // 版本，堵住「授权后无人值守期间被推送任意新 HTML 自动执行」。
       mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_V2_HTML, 'draft', 'hash-v2'),
+        published: PUBLISHED,
+        draft: DRAFT_V2,
       } satisfies PreviewPanelState)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3100)
@@ -591,19 +695,17 @@ describe('PreviewPanelSection', () => {
     // （jsdom 下 React 逐 commit 同步落 DOM）：若授权复位依赖被动
     // effect，jobId 变化的首帧会先以「新 jobId + 旧授权」渲染——观察者
     // 会捕获到 draft 内容的 srcdoc；render 期派生则首帧即 published。
-    mockFetchPublished.mockResolvedValue(
-      makeVersion(PUBLISHED_HTML, 'published')
-    )
+    mockFetchPublished.mockResolvedValue(PUBLISHED)
     mockFetchState.mockResolvedValue({
-      published: makeVersion(PUBLISHED_HTML, 'published'),
-      draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
+      published: PUBLISHED,
+      draft: DRAFT,
     } satisfies PreviewPanelState)
     const { rerender } = renderSection()
     await waitFor(() =>
       expect(screen.getByTestId('preview-panel-host')).toBeInTheDocument()
     )
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
-    await waitForDraftInDialog()
+    await waitForDraftInHeader()
     fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
     await waitFor(() => {
       const iframe = screen
@@ -661,72 +763,5 @@ describe('PreviewPanelSection', () => {
         ?.getAttribute('srcdoc')
     ).toContain('draft panel')
     expect(screen.getByText('草稿预览中')).toBeInTheDocument()
-  })
-
-  it('bundle 内容变化时重挂 iframe（旧文档在途桥请求的响应无处可投，codex P2）', async () => {
-    // react-query 的 refetch 落在 fake-timer 区间外时，查询解析会脱离
-    // act 包裹（known noise），声明预期以聚焦本用例的断言。
-    expectConsoleWarning(/not wrapped in act/)
-    expectConsoleError(/not wrapped in act/)
-    vi.useFakeTimers()
-    try {
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(PUBLISHED_HTML, 'published')
-      )
-      // 首轮 state：草稿 v1（bundle-v1）就位。
-      mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft'),
-      } satisfies PreviewPanelState)
-      renderSection()
-      await act(async () => {
-        await vi.runOnlyPendingTimersAsync()
-      })
-      // 打开定制对话启用草稿轮询（3s refetchInterval）。草稿不自动执行
-      // （#347 P1）：显式预览后左栏才切到草稿 v1 渲染。
-      fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
-      await act(async () => {
-        await vi.runOnlyPendingTimersAsync()
-      })
-      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
-      await act(async () => {
-        await vi.runOnlyPendingTimersAsync()
-      })
-      const firstFrame = screen
-        .getByTestId('preview-panel-host')
-        .querySelector('iframe')
-      expect(firstFrame?.getAttribute('srcdoc')).toContain('draft panel')
-
-      // 轮询推进：同一草稿内容的轮询刷新（html_hash 不变、bundle 文本
-      // 因响应对象重建而内容一致——save_draft 未发生）。该场景 key 不变、
-      // iframe 不重挂（同内容重挂是无谓抖动）；真正需要重挂的是**内容
-      // 变化**，但其授权语义已由 #500 P1-5 用例覆盖（hash 变 → 回退未
-      // 授权，重挂的是 published）。key 含 bundle 内容 → 内容一旦变化
-      // iframe 元素必须被替换——沿用同一 contentWindow 做 srcDoc 导航
-      // 会让旧文档在途请求的响应错误应答新文档的同编号请求。这里用
-      // 「内容变化但绕开授权」的 published 更新来钉重挂语义。
-      mockFetchState.mockResolvedValue({
-        published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft', 'hash-v1'),
-      } satisfies PreviewPanelState)
-      mockFetchPublished.mockResolvedValue(
-        makeVersion(
-          '<!doctype html><html><body>published panel v2</body></html>',
-          'published'
-        )
-      )
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(3100)
-      })
-
-      const secondFrame = screen
-        .getByTestId('preview-panel-host')
-        .querySelector('iframe')
-      // 草稿授权仍有效（hash 未变）：内容保持草稿。
-      expect(secondFrame?.getAttribute('srcdoc')).toContain('draft panel')
-      expect(secondFrame).toBe(firstFrame)
-    } finally {
-      vi.useRealTimers()
-    }
   })
 })

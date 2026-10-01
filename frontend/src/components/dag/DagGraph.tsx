@@ -166,10 +166,16 @@ export function DagGraph({
     (_event: React.MouseEvent, node: Node<DagNodeData>) => {
       // #667：画布内点击的选中不触发镜头定位（节点本来就在光标下），
       // 标记来源供 DagSelectionViewport 跳过。
-      clickOriginRef.current = node.id
+      // #683 review P2-2：重复点击已选中的同一节点不能写标记——key 未
+      // 变，focusedRef 去重会让 DagSelectionViewport 提前返回、标记不被
+      // 消费而残留；之后 nonce 驱动的外部重定位请求会被误判为画布点击
+      // 而吞掉镜头。只在选中确实会翻转时标记。
+      if (node.id !== selectedNode) {
+        clickOriginRef.current = node.id
+      }
       setSelectedNode(node.id)
     },
-    [setSelectedNode]
+    [setSelectedNode, selectedNode]
   )
 
   const onPaneClick = useCallback(() => {

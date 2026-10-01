@@ -115,16 +115,19 @@ class AgentService:
         _invalidate_published_cache(self._store.dsn, self._workspace_id)
         return entity
 
-    def publish(self, agent_id: str) -> VersionedEntity:
+    def publish(self, agent_id: str, expected_hash: str | None = None) -> VersionedEntity:
         """Publish the current draft; the previously published version archives.
         One published Agent per capability per workspace (routes derive from
-        the capability alone, mirroring the YAML catalog constraint)."""
+        the capability alone, mirroring the YAML catalog constraint).
+        ``expected_hash`` (#692): verified atomically inside the store's
+        publish transaction — mismatch raises Conflict with zero side
+        effects."""
         versions = self._store.list_versions(agent_id, self._workspace_id)
         draft = next((v for v in versions if v.status == "draft"), None)
         if draft is not None:
             self._require_free_capability(agent_id, str(draft.definition.get("capability") or ""))
         # draft None → the store raises the canonical NotFoundError.
-        entity = self._store.publish(agent_id, self._workspace_id)
+        entity = self._store.publish(agent_id, self._workspace_id, expected_hash)
         _invalidate_published_cache(self._store.dsn, self._workspace_id)
         # #430: prune overrides by the JUST-published definition (never the
         # ~5s cache), post-commit, failure-swallowed — agent_publish_prune.

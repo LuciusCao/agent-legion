@@ -7,7 +7,9 @@ again left the job listing — and serving — the PREVIOUS run's artifacts
 (``names_for_job`` unions the manifest; single-artifact reads fall back to
 S3). Three entry points share the semantics: single rerun, run-to, and
 approval rework. RMW artifacts (input ∩ output of the same node) are
-excluded, mirroring stage_outputs (#114).
+excluded, mirroring stage_outputs (#114). 暂存闭包口径（隐式消费者 /
+同名生产者收敛）的用例见姊妹文件
+``test_job_rerun_manifest_gc_closure.py``。
 """
 
 from __future__ import annotations
@@ -63,44 +65,40 @@ def _seed_job_with_manifest(
     *,
     workspace: Any,
     storage: FakeObjectStorage,
+    source_id: str = "Q1",
+    node_outputs: tuple[tuple[str, str], ...] = (("up", "up.json"), ("down", "down.json")),
 ) -> dict[str, Any]:
+    node_keys = [key for key, _ in node_outputs]
     batch = job_db.create_run(
-        "chain_workflow",
+        definition.key,
         "batch_by_ids",
-        {"question_ids": ["Q1"]},
+        {"question_ids": [source_id]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="chain_workflow",
+        workflow_key=definition.key,
         source_type="question",
-        source_id="Q1",
+        source_id=source_id,
         run_id=batch["id"],
         title="Question 1",
-        node_keys=["up", "down"],
+        node_keys=node_keys,
         workspace_id=workspace["id"],
         workflow_definition_snapshot_json=serialize_definition(definition),
     )
-    job_db.update_job_node(job["id"], "up", status="completed")
-    job_db.update_job_node(job["id"], "down", status="completed")
+    for key in node_keys:
+        job_db.update_job_node(job["id"], key, status="completed")
     storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("up.json", "down.json"):
-        (storage_dir / name).write_text(f"{name} content")
     store = JobArtifactObjectStore(job_db, storage)
-    store.upload(
-        workspace_id=str(workspace["id"]),
-        job_id=job["id"],
-        node_key="up",
-        name="up.json",
-        local_path=storage_dir / "up.json",
-    )
-    store.upload(
-        workspace_id=str(workspace["id"]),
-        job_id=job["id"],
-        node_key="down",
-        name="down.json",
-        local_path=storage_dir / "down.json",
-    )
+    for node_key, name in node_outputs:
+        (storage_dir / name).write_text(f"{name} content")
+        store.upload(
+            workspace_id=str(workspace["id"]),
+            job_id=job["id"],
+            node_key=node_key,
+            name=name,
+            local_path=storage_dir / name,
+        )
     return job
 
 
@@ -369,3 +367,200 @@ def test_rerun_object_cleanup_spares_re_registered_authority_keys(
     assert down_key in deleted_by_stale_call, "unre-registered orphan keys still delete"
     assert up_key in storage.objects
     assert store.lookup(job["id"], "up.json") is not None
+
+
+def test_rerun_object_cleanup_revalidates_per_object_mid_delete(
+    job_db, settings, chain_definition, monkeypatch
+):
+    """#683 review P1：批量探测与删除之间，新 attempt 的 promote_all 完成
+    （权威键对象先拷、清单行 record_remote_many 后提交）——入口批量重验看
+    不到它（读到的是旧状态），逐对象删除前的当前清单重验必须放过该键，
+    否则新清单行指向被删对象。用真实 store + FakeObjectStorage 走完整删除
+    路径，时序经 live_keys_for 靶向探针注入（#706 review P2：重验不传输
+    整份清单）。"""
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    store = JobArtifactObjectStore(job_db, storage)
+    up_key = f"jobs/{workspace['id']}/{job['id']}/up.json"
+    down_key = f"jobs/{workspace['id']}/{job['id']}/down.json"
+    # 模拟已提交的 rerun 事务：受影响闭包的清单行已删，快照即 deleted_rows。
+    with job_db.connect() as conn:
+        conn.execute("delete from job_artifacts where job_id=%s", (job["id"],))
+
+    real_live_keys_for = store.live_keys_for
+    probes = {"count": 0}
+
+    def live_keys_for_with_mid_cleanup_promote(job_id: str, storage_keys: list[str]) -> set[str]:
+        probes["count"] += 1
+        if probes["count"] == 2:
+            # 批量探测（第 1 次）之后、up 的逐对象重验（第 2 次）之前：
+            # 新 attempt 完成 promote_all——对象 copy 到同一权威键 +
+            # record_remote_many 一个事务提交新清单行。
+            storage.objects[up_key] = b"fresh attempt bytes!"
+            store.record_remote(
+                workspace_id=str(workspace["id"]),
+                job_id=job["id"],
+                node_key="up",
+                name="up.json",
+                storage_key=up_key,
+                size_bytes=20,
+                content_hash="hash-fresh",
+            )
+        return real_live_keys_for(job_id, storage_keys)
+
+    monkeypatch.setattr(store, "live_keys_for", live_keys_for_with_mid_cleanup_promote)
+
+    from server.app.services.job_staged_cleanup import delete_rerun_artifact_objects
+
+    delete_rerun_artifact_objects(
+        store,
+        [
+            {"node_key": "up", "name": "up.json", "storage_key": up_key},
+            {"node_key": "down", "name": "down.json", "storage_key": down_key},
+        ],
+        job["id"],
+        "rerun",
+    )
+
+    # 新 attempt 的对象与清单行都完好；未复现的孤儿键照删。
+    assert up_key in storage.objects, "fresh authority object must survive"
+    assert store.lookup(job["id"], "up.json") is not None
+    assert up_key not in storage.deleted
+    assert down_key in storage.deleted
+
+
+def _boom_live_keys(job_id: str, storage_keys: list[str]) -> set[str]:
+    raise RuntimeError("manifest probe boom")
+
+
+def test_rerun_post_commit_cleanup_failure_still_succeeds(
+    job_db, settings, chain_definition, monkeypatch
+):
+    """#759 P1：rerun 的 post-commit 对象清理抛错不得反转已提交的重置——
+    结果仍 succeeded，清单行（事务内删除）保持已删。突变自检锚点：无兜底
+    的实现会让 RuntimeError 冒出 rerun()，本用例变红。"""
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    service = _make_rerun_service(job_db, settings, storage)
+    monkeypatch.setattr(service.object_store, "live_keys_for", _boom_live_keys)
+
+    result = service.rerun(workspace["id"], job["id"], "up")
+
+    assert result["status"] == "succeeded"
+    assert JobArtifactObjectStore(job_db, storage).names_for_job(job["id"]) == set()
+    nodes = {n["node_key"]: n["status"] for n in job_db.list_job_nodes(job["id"])}
+    assert nodes["up"] == "pending"
+
+
+def test_run_to_post_commit_cleanup_failure_still_succeeds(
+    job_db, settings, chain_definition, monkeypatch
+):
+    """#759 P1：run-to 共享同一 post-commit 清理，抛错同样不反转结果。"""
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    store = JobArtifactObjectStore(job_db, storage)
+    monkeypatch.setattr(store, "live_keys_for", _boom_live_keys)
+    service = JobExecutionService(
+        job_db,
+        JobArtifactMutationService(settings.jobs_dir),
+        ExecutorLeaseRepository(job_db, data_dir=settings.data_dir),
+        object_store=store,
+    )
+
+    result = service.run_to(workspace["id"], job["id"], "down", start_node_key="up")
+
+    assert result["status"] == "succeeded"
+    assert JobArtifactObjectStore(job_db, storage).names_for_job(job["id"]) == set()
+
+
+def test_batch_rerun_continues_when_post_commit_cleanup_fails(
+    job_db, settings, chain_definition, monkeypatch
+):
+    """#759 P1：批量 rerun 的每个 job 共享同一清理兜底——清理抛错不进入
+    per-job 结果，也不中断整批（两个 job 都 succeeded）。"""
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job_a = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    job_b = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage, source_id="Q2"
+    )
+    service = _make_rerun_service(job_db, settings, storage)
+    monkeypatch.setattr(service.object_store, "live_keys_for", _boom_live_keys)
+
+    results = service.batch_rerun(workspace["id"], [job_a["id"], job_b["id"]], "up")
+
+    assert [r["job_id"] for r in results] == [job_a["id"], job_b["id"]]
+    assert [r["status"] for r in results] == ["succeeded", "succeeded"]
+
+
+def test_object_cleanup_skips_key_while_promote_holds_authority_lock(
+    job_db, settings, chain_definition
+):
+    """codex #776 R7 P2-A：cleanup 与在途 promote 共享 artifact-authority 锁。
+
+    在途 promote 已把新字节 copy 到稳定 authority key、但尚未登记清单行
+    （同一事务的锁内后段）时，cleanup 的清单探针看不到行——无锁的清理会
+    把刚写入的新对象删掉，随后 promote 登记留下悬挂行。修复后 cleanup
+    的删除在该 key 的锁被持有时跳过（保守方向：旧对象成孤儿由 bucket
+    lifecycle 兜底，绝不误删新字节）；锁释放后（promote 已提交，行可见）
+    复核命中存活行同样跳过。本用例用另一连接真实持有 advisory 锁模拟
+    在途 promote。
+    """
+    from server.app.db.transaction import write_transaction
+    from server.app.services.job_staged_cleanup import delete_rerun_artifact_objects
+
+    storage = FakeObjectStorage()
+    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    job = _seed_job_with_manifest(
+        job_db, settings, chain_definition, workspace=workspace, storage=storage
+    )
+    store = JobArtifactObjectStore(job_db, storage)
+    up_key = f"jobs/{workspace['id']}/{job['id']}/up.json"
+
+    # 升级/rerun 已在事务内删除清单行（模拟 post-commit 清理的输入态）；
+    # 在途 promote 已把新字节 copy 到 authority key（行尚未登记）。
+    from contextlib import closing
+
+    from server.app.db.connection import connect_database
+
+    with closing(connect_database(job_db.dsn_identity)) as conn, conn:
+        conn.execute("delete from job_artifacts where job_id=%s", (job["id"],))
+    storage.objects[up_key] = b"new generation bytes"
+    storage.deleted.clear()
+    stale_rows = [{"node_key": "up", "name": "up.json", "storage_key": up_key}]
+
+    with write_transaction(job_db.dsn_identity) as promote_conn:
+        # 在途 promote：持 artifact-authority 锁（copy 与登记之间的中段）。
+        promote_conn.execute(
+            "select pg_advisory_xact_lock(hashtext(%s))", (f"artifact-authority:{up_key}",)
+        )
+        delete_rerun_artifact_objects(store, stale_rows, job["id"], "rerun")
+        # 锁被持有 → cleanup 跳过删除，新字节存活。
+        assert up_key not in storage.deleted
+        assert storage.objects[up_key] == b"new generation bytes"
+        # promote 后段：登记清单行并提交（锁随提交释放）。
+        store.record_remote(
+            workspace_id=str(workspace["id"]),
+            job_id=job["id"],
+            node_key="up",
+            name="up.json",
+            storage_key=up_key,
+            size_bytes=20,
+            content_hash="hash-new",
+        )
+
+    # 锁释放后再清理：锁可得，但清单行已登记 → 复核命中，同样不删。
+    delete_rerun_artifact_objects(store, stale_rows, job["id"], "rerun")
+    assert up_key not in storage.deleted
+    assert storage.objects[up_key] == b"new generation bytes"

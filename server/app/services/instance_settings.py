@@ -42,7 +42,12 @@ _EXECUTOR_SCALAR_KEYS = (
 # their managed keys. Drives both the default document and the apply merge,
 # so a new knob block lands in both by extending this one table.
 _NESTED_BLOCK_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("workflows", ("max_items_per_run",)),
+    # #786: node_code_max_bytes joined the managed set (the #628 env-only
+    # decision is reversed); it is the one managed key that also has an env
+    # channel, so the default document must be sourced from the *loaded*
+    # runtime — a legacy stored document without the key falls back to the
+    # env value, not the code default (instance setting > env > default).
+    ("workflows", ("max_items_per_run", "node_code_max_bytes")),
     (
         "agent_workers",
         (
@@ -60,9 +65,18 @@ _NESTED_BLOCK_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def default_instance_document() -> dict[str, Any]:
-    """Return the code-default instance settings document."""
-    runtime = ExecutorRuntimeConfig()
+def default_instance_document(
+    runtime: ExecutorRuntimeConfig | None = None,
+) -> dict[str, Any]:
+    """Return the code-default instance settings document.
+
+    ``runtime`` (#786): pass the loaded (env-applied) runtime so keys with an
+    env channel — currently only ``workflows.node_code_max_bytes`` — fall back
+    to the env value instead of the code default when the stored document
+    carries no value. Defaults to a fresh ``ExecutorRuntimeConfig``.
+    """
+    if runtime is None:
+        runtime = ExecutorRuntimeConfig()
     document: dict[str, Any] = {
         "cleanup": dict(DEFAULT_CLEANUP_CONFIG),
         "monitoring": dict(DEFAULT_MONITORING_CONFIG),
@@ -98,11 +112,18 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
 # without a data migration.
 
 
-def effective_instance_document(stored: dict[str, Any] | None) -> dict[str, Any]:
-    """Return the effective document: stored values over code defaults."""
+def effective_instance_document(
+    stored: dict[str, Any] | None,
+    runtime: ExecutorRuntimeConfig | None = None,
+) -> dict[str, Any]:
+    """Return the effective document: stored values over defaults.
+
+    ``runtime`` is the loaded (env-applied) runtime used as the default
+    source — see ``default_instance_document``.
+    """
     if stored is None:
-        return default_instance_document()
-    return _merge(default_instance_document(), strip_retired(stored))
+        return default_instance_document(runtime)
+    return _merge(default_instance_document(runtime), strip_retired(stored))
 
 
 def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> None:
@@ -114,7 +135,7 @@ def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> 
     stored = InstanceSettingsStore(database_dsn).get()
     if stored is None:
         return
-    effective = effective_instance_document(stored)
+    effective = effective_instance_document(stored, settings.executor_runtime)
     base = settings.executor_runtime.model_dump()
     for key in _EXECUTOR_SCALAR_KEYS:
         base[key] = effective[key]

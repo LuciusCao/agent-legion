@@ -1,0 +1,13 @@
+/* Studio 右侧抽屉的统一浮层语言（#804 抽屉化：节点详情 + 共享素材同档
+ * 720px、圆角/毛玻璃/阴影；≤900px 全宽）。MUI Drawer 的 paper 经
+ * slotProps 挂；两个抽屉 css 用 composes 复用本类，不各自复制。 */
+.drawerPaper {
+  width: min(720px, 100vw);
+  margin: 8px;
+  height: calc(100% - 16px);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+}

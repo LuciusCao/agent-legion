@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import random
-import threading
 import time
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 T = TypeVar("T")
+
+
+class StopSignal(Protocol):
+    """Minimal Event surface accepted by retry loops.
+
+    ``threading.Event`` implements it; upload delivery also supplies a
+    composite signal that combines process shutdown with lease loss.
+    """
+
+    def is_set(self) -> bool: ...
+
+    def wait(self, timeout: float | None = None) -> bool: ...
 
 
 def run_with_retry(
@@ -18,7 +29,7 @@ def run_with_retry(
     base_seconds: float,
     cap_seconds: float | None = None,
     terminal: tuple[type[BaseException], ...] = (),
-    stop: threading.Event | None = None,
+    stop: StopSignal | None = None,
     max_attempts: int | None = None,
     on_retry: Callable[[BaseException, float], None] | None = None,
 ) -> T | None:

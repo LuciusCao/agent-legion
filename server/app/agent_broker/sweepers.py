@@ -45,10 +45,9 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
     released: list[tuple[str, str]] = []
     with write_transaction(broker.database_dsn) as conn:
         rows = conn.execute(
-            "select *, hashtext('ws:' || workspace_id)::int as ws_lock_key"
+            "select *, hashtext('agent-ws:' || workspace_id)::int as ws_lock_key"
             " from agent_execution_requests"
-            " where state in ('claimed', 'reporting') and heartbeat_at<%s"
-            " for update skip locked",
+            " where state in ('claimed', 'reporting') and heartbeat_at<%s for update skip locked",
             (cutoff,),
         ).fetchall()
         # #566: expired claims on a Worker whose control plane is still
@@ -56,10 +55,32 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         # is not Worker death.
         deferral = HeartbeatDeferral(conn, broker.lease_ttl_seconds, rows)
         deferred = 0
-        # Stable workspace-hash order; v82 counter folders never wait.
-        for row in sorted(rows, key=lambda r: int(r["ws_lock_key"])):
+        # EXEC-GENERATION-001 batch order: every row takes the job-mutation
+        # advisory xact lock (never released early), so the sweep walks jobs
+        # in the single global (ws lock key, job_id) order shared with
+        # finish_many / try_claim_many / expire / recover and the agent
+        # claim batch's agent block (claim_batch_tx._lock_order_sorted —
+        # same hashtext('agent-ws:' || workspace_id)::int key). The FOR
+        # UPDATE row locks this sweep already holds are on
+        # claimed/reporting rows — the mutation side's cancel only matches
+        # 'queued' rows and never locks these, so row-lock → job-mutation
+        # cannot close a cycle.
+        for row in sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["job_id"]))):
             lease_id = row["lease_id"]
             node_run_id = row["node_run_id"]
+            conn.execute(
+                "select pg_advisory_xact_lock(hashtext(%s))",
+                (f"job-mutation:{row['job_id']}",),
+            )
+            job_row = conn.execute(
+                "select execution_generation from jobs where id=%s", (row["job_id"],)
+            ).fetchone()
+            # 代次 CAS：请求落戳代次 != jobs 现值 = 该 claim 属于 reset 前的
+            # 旧代次。lease 删除与 node_run 落库照常；job_nodes/jobs 回写跳过
+            # （重置后的新代次行由新代次的调度负责）。
+            generation_stale = (
+                int(job_row["execution_generation"]) if job_row is not None else None
+            ) != int(row["execution_generation"])
             lease = conn.execute(
                 "select status from executor_leases where id=%s", (lease_id,)
             ).fetchone()
@@ -97,6 +118,20 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 (node_run_id,),
             )
             released.append((str(row["worker_id"]), str(row["workspace_id"])))
+            if generation_stale:
+                # 旧代次迟到清扫：lease/node_run 已在上面对账；job_nodes 是
+                # 新代次重置后的行，绝不动。请求按 mutation 侧同语义取消——
+                # 新代次的调度会重新入队，requeue 旧请求会双跑。
+                logger.info(
+                    "sweep cancelled stale-generation request: exec=%s job=%s node=%s"
+                    " request_generation=%s",
+                    row["execution_id"],
+                    row["job_id"],
+                    row["node_key"],
+                    row["execution_generation"],
+                )
+                cancel_request(conn, row["execution_id"])
+                continue
             if int(row["attempt"]) <= broker.requeue_limit:
                 reset = conn.execute(
                     "update job_nodes set status='pending', started_at=null,"

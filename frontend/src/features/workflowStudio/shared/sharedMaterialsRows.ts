@@ -58,3 +58,40 @@ export function isRowPropagatable(row: SharedMaterialFileRow): boolean {
     )
   )
 }
+
+/** One file that rides in the same per-skill commit as the clicked row. */
+export interface PropagateImpactFile {
+  path: string
+  /** true for the row the user clicked (the requested source). */
+  requested: boolean
+}
+
+/**
+ * Full impact scope of propagating one row (#683 review P2-1): the backend
+ * treats ``sources`` as a SKILL selector — every selected skill syncs its
+ * WHOLE mapped set in one commit + tag, so files mapped to those skills but
+ * NOT to the clicked row ride along. Derivable entirely from the map data
+ * already in the view (no extra API): the union of every source mapped to
+ * at least one skill the clicked row maps to.
+ */
+export function collectPropagateImpact(
+  row: SharedMaterialFileRow,
+  rows: SharedMaterialFileRow[]
+): { skills: string[]; files: PropagateImpactFile[] } {
+  const skills = row.skills.map((entry) => entry.skill)
+  const selected = new Set(skills)
+  const paths = new Set<string>([row.path])
+  for (const other of rows) {
+    if (other.path === row.path) continue
+    if (other.skills.some((entry) => selected.has(entry.skill))) {
+      paths.add(other.path)
+    }
+  }
+  return {
+    skills,
+    files: [...paths].sort().map((path) => ({
+      path,
+      requested: path === row.path,
+    })),
+  }
+}

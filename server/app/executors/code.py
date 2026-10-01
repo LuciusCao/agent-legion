@@ -144,7 +144,9 @@ class CodeExecutor:
     def _upload_artifacts(self, context: ExecutionContext, produced: tuple[str, ...]) -> None:
         """Best-effort upload of produced artifacts (D12): a storage outage
         never fails the node — the local copy stays and the maintenance
-        reconciler re-uploads later (EXEC-ARTIFACT-STORE-001)."""
+        reconciler re-uploads later (EXEC-ARTIFACT-STORE-001). ``lease_id``
+        arms the generation write gate so an orphaned execution (lease lost
+        mid-run) registers nothing (#645 P2-b)."""
         upload_produced_artifacts(
             self._artifact_object_store(),
             workspace_id=str(context.workspace_id),
@@ -152,6 +154,7 @@ class CodeExecutor:
             node_key=str(context.node_key),
             job_dir=context.job_dir,
             produced=produced,
+            lease_id=str(context.lease_id),
         )
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:

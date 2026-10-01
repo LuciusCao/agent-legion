@@ -13,20 +13,6 @@ vi.mock('../../api/jobApi', () => ({
   fetchRunTokenUsage: vi.fn(),
 }))
 
-// 排查入口（#329）会挂载诊断面板；无可用 agent 时面板停在空态，无需真实后端。
-vi.mock('../../features/workflowStudio/chat/studioChatApi', () => ({
-  fetchStudioChatAgents: vi.fn().mockResolvedValue([]),
-  fetchStudioChatSessions: vi.fn().mockResolvedValue([]),
-  fetchStudioChatMessages: vi.fn().mockResolvedValue([]),
-  fetchStudioChatSession: vi.fn(),
-  createStudioChatSession: vi.fn(),
-  sendStudioChatMessage: vi.fn(),
-  cancelStudioChatTurn: vi.fn(),
-  setStudioChatAllowAll: vi.fn(),
-  answerStudioChatPermission: vi.fn(),
-  updateStudioChatContext: vi.fn(),
-}))
-
 const mockFetchJobLog = vi.mocked(jobApi.fetchJobLog)
 const mockFetchRunTokenUsage = vi.mocked(jobApi.fetchRunTokenUsage)
 
@@ -459,7 +445,7 @@ describe('JobProgressPanel', () => {
     })
   })
 
-  it('renders 排查 on failed nodes only when the route carries a workspace', () => {
+  it('renders 排查 on failed nodes only when onOpenDiagnosis is provided (#795 PR③)', () => {
     const failedNodes: JobNode[] = [
       { ...mockNodes[0], status: 'completed' },
       { ...mockNodes[1], status: 'failed', error_message: 'boom' },
@@ -467,11 +453,12 @@ describe('JobProgressPanel', () => {
     renderWithClient(
       <JobProgressPanel jobId="j1" nodes={failedNodes} runs={mockRuns} />
     )
-    // 无路由上下文（无 workspaceId）→ 不渲染排查入口。
+    // 未提供 onOpenDiagnosis（无 Dock 宿主）→ 不渲染排查入口。
     expect(screen.queryByText('排查')).not.toBeInTheDocument()
   })
 
-  it('opens the diagnosis dialog from a failed node', async () => {
+  it('forwards the failed node context to onOpenDiagnosis (#795 PR③：Dock 宿主在 JobDetailPage)', () => {
+    const onOpenDiagnosis = vi.fn()
     const failedNodes: JobNode[] = [
       { ...mockNodes[1], status: 'failed', error_message: 'boom' },
     ]
@@ -481,7 +468,12 @@ describe('JobProgressPanel', () => {
           <Route
             path="/workspaces/:workspaceId/jobs/:jobId"
             element={
-              <JobProgressPanel jobId="j1" nodes={failedNodes} runs={[]} />
+              <JobProgressPanel
+                jobId="j1"
+                nodes={failedNodes}
+                runs={[]}
+                onOpenDiagnosis={onOpenDiagnosis}
+              />
             }
           />
         </Routes>
@@ -490,9 +482,10 @@ describe('JobProgressPanel', () => {
 
     fireEvent.click(screen.getByText('排查'))
 
-    // 面板挂载（无可用 agent → 空态），绑定入口带的节点名。
-    const dialog = await screen.findByRole('dialog', { name: '排查：生成' })
-    expect(dialog).toBeInTheDocument()
-    await screen.findByText(/未检测到可用的 ACP agent/)
+    // 上下文注入语义与旧弹窗等价：nodeKey + nodeLabel 上行给 Dock 宿主。
+    expect(onOpenDiagnosis).toHaveBeenCalledWith({
+      nodeKey: 'generate',
+      nodeLabel: '生成',
+    })
   })
 })

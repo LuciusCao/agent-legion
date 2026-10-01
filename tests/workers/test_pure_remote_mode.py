@@ -86,7 +86,7 @@ def test_code_capacity_zero_is_accepted_by_both_contracts() -> None:
             "code_capacity": 0,
             "materials_ttl_days": 0,
             "execution_retention_days": 0,
-            "workflows": {"max_items_per_run": 20_000},
+            "workflows": {"max_items_per_run": 20_000, "node_code_max_bytes": 64 * 1024},
             "agent_workers": {
                 "max_archive_bytes": 1024,
                 "min_protocol_version": 1,

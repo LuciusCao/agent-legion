@@ -35,6 +35,7 @@ function sessionRecord(
     acp_session_id: null,
     capability_snapshot: {},
     allow_all_permissions: false,
+    compacting: false,
     mcp_status: 'unknown',
     selected_node_key: null,
     error_detail: '',
@@ -105,11 +106,10 @@ describe('StudioChatPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders pickers, scope note and input for an active session', async () => {
+  it('renders pickers and input for an active session', async () => {
     renderPanel()
     expect(await screen.findByLabelText('选择 Agent')).toBeInTheDocument()
     expect(screen.getByLabelText('选择会话')).toBeInTheDocument()
-    expect(screen.getByText(/发布永远由你确认/)).toBeInTheDocument()
     await waitFor(() => expect(screen.getByLabelText('消息输入')).toBeEnabled())
     // 自动打开最近会话并建立 SSE。
     await waitFor(() =>
@@ -118,8 +118,8 @@ describe('StudioChatPanel', () => {
     await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
   })
 
-  it('places the agent config between the message list and the input (#658)', async () => {
-    // 广告配置面的会话：配置区作为对话上下文呈现。
+  it('places the agent config chips inside the composer card (#658 / #695 R4)', async () => {
+    // 广告配置面的会话：配置芯片作为 composer 工具行呈现。
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({
         capability_snapshot: { sessionModes: true },
@@ -131,15 +131,19 @@ describe('StudioChatPanel', () => {
     ])
     renderPanel()
 
-    const configBar = await screen.findByRole('group', { name: 'Agent 配置' })
+    const configGroup = await screen.findByRole('group', { name: 'Agent 配置' })
     const following = Node.DOCUMENT_POSITION_FOLLOWING
-    // 会话管理（顶部）在配置区之前，配置区紧贴输入框之上。
+    // 会话管理（顶部）仍在配置芯片之前。
     const sessionPicker = screen.getByLabelText('选择会话')
     expect(
-      sessionPicker.compareDocumentPosition(configBar) & following
+      sessionPicker.compareDocumentPosition(configGroup) & following
     ).toBeTruthy()
+    // composer 一体化：配置芯片与输入框同一卡片，位于 textarea 之下的工具行。
     const input = screen.getByLabelText('消息输入')
-    expect(configBar.compareDocumentPosition(input) & following).toBeTruthy()
+    expect(input.compareDocumentPosition(configGroup) & following).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Agent 权限模式' })
+    ).toBeInTheDocument()
   })
 
   it('renders every message kind', async () => {
@@ -323,6 +327,61 @@ describe('StudioChatPanel', () => {
     )
   })
 
+  it('keeps the cancel line awaiting while no terminal event follows', async () => {
+    // #675 codex P2 场景 c：cancel_requested 之后只有收尾窗口内的行时，
+    // 「等待 agent 收尾」仍是当前态（原行为保留）。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'text', 'user', { text: '跑个分析' }),
+      chatMessage('m2', 2, 'status', 'system', { event: 'cancel_requested' }),
+      chatMessage('m3', 3, 'tool_call', 'agent', {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-1',
+        title: 'Agent',
+        status: 'in_progress',
+      }),
+    ])
+    renderPanel()
+
+    expect(
+      await screen.findByText('已请求取消当前运行，等待 agent 收尾')
+    ).toBeInTheDocument()
+  })
+
+  it('downgrades the cancel line once the cancelled turn_end arrives', async () => {
+    // #675 codex P2 场景 a：cancelled turn_end 被时间线隐藏后，状态行不得
+    // 再表达「等待收尾」，与 RunBar 的「已取消」并存不冲突。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'text', 'user', { text: '跑个分析' }),
+      chatMessage('m2', 2, 'status', 'system', { event: 'cancel_requested' }),
+      chatMessage('m3', 3, 'text', 'agent', { text: '已跑的部分如下' }),
+      chatMessage('m4', 4, 'status', 'system', {
+        event: 'turn_end',
+        stop_reason: 'cancelled',
+      }),
+    ])
+    renderPanel()
+
+    expect(await screen.findByText('已请求取消')).toBeInTheDocument()
+    expect(screen.queryByText(/等待 agent 收尾/)).not.toBeInTheDocument()
+    // RunBar 的取消轮结论同屏可见（#675 主行为不受影响）。
+    expect(screen.getByLabelText('运行状态')).toHaveTextContent('已取消')
+  })
+
+  it('downgrades the old cancel line once a newer turn starts', async () => {
+    // #675 codex P2 场景 b：后端重启丢失 turn_end 时靠新一轮用户消息
+    // 兜底——旧状态行不再停留在「等待收尾」。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'text', 'user', { text: '跑个分析' }),
+      chatMessage('m2', 2, 'status', 'system', { event: 'cancel_requested' }),
+      chatMessage('m3', 3, 'text', 'user', { text: '把刚才的结果说完' }),
+      chatMessage('m4', 4, 'text', 'agent', { text: '接上文' }),
+    ])
+    renderPanel()
+
+    expect(await screen.findByText('已请求取消')).toBeInTheDocument()
+    expect(screen.queryByText(/等待 agent 收尾/)).not.toBeInTheDocument()
+  })
+
   it('shows cancel while running and keeps the input enabled', async () => {
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({ status: 'running' }),
@@ -331,9 +390,12 @@ describe('StudioChatPanel', () => {
     renderPanel()
 
     const cancel = await screen.findByRole('button', { name: '取消' })
-    // busy 不再禁用输入：发送会进入前端队列。
-    expect(screen.getByLabelText('消息输入')).toBeEnabled()
-    expect(screen.getByRole('button', { name: '排队' })).toBeInTheDocument()
+    // busy 不再禁用输入：发送会进入前端队列（#795 收尾：按钮不换「排队」
+    // 文案，aria-label 恒为「发送」；输入后可点）。
+    const input = screen.getByLabelText('消息输入')
+    expect(input).toBeEnabled()
+    fireEvent.change(input, { target: { value: '排队消息' } })
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
     await act(async () => {
       fireEvent.click(cancel)
     })
@@ -358,7 +420,7 @@ describe('StudioChatPanel', () => {
     })
     // busy：不直接发送，进入队列并显示队列条。
     expect(mockApi.sendStudioChatMessage).not.toHaveBeenCalled()
-    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getAllByText('排队中 1')[0]).toBeInTheDocument()
     expect(screen.getByText('排队消息')).toBeInTheDocument()
 
     // agent 一轮结束（会话快照翻转为 idle）→ 自动按 FIFO 发出队首。
@@ -376,7 +438,7 @@ describe('StudioChatPanel', () => {
       )
     )
     await waitFor(() =>
-      expect(screen.queryByText('排队中 1')).not.toBeInTheDocument()
+      expect(screen.queryAllByText('排队中 1')).toHaveLength(0)
     )
   })
 
@@ -392,12 +454,12 @@ describe('StudioChatPanel', () => {
     await act(async () => {
       fireEvent.keyDown(input, { key: 'Enter' })
     })
-    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getAllByText('排队中 1')[0]).toBeInTheDocument()
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '移除' }))
     })
-    expect(screen.queryByText('排队中 1')).not.toBeInTheDocument()
+    expect(screen.queryAllByText('排队中 1')).toHaveLength(0)
     expect(mockApi.sendStudioChatMessage).not.toHaveBeenCalled()
   })
 
@@ -431,6 +493,49 @@ describe('StudioChatPanel', () => {
       expect(mockApi.createStudioChatSession).toHaveBeenCalledWith(
         'ws1',
         'kimi'
+      )
+    )
+  })
+
+  it('复审批次 P3：跨 workspace 路由复用时残留的 agent 选择回落到新 workspace 列表（存在性校验）', async () => {
+    // studio 路由参数变化复用组件（无 key 的渲染路径兜底）：ws1 手动选的
+    // agent id 不得带进 ws2——「＋ 新对话」必须用 ws2 列表里的 agent
+    // （revert：无存在性校验，用 ws1 残留的 claude 请求 ws2，即红）。
+    mockApi.fetchStudioChatAgents.mockImplementation((workspaceId: string) =>
+      Promise.resolve(
+        workspaceId === 'ws1'
+          ? [
+              { id: 'kimi', label: 'Kimi Code' },
+              { id: 'claude', label: 'Claude' },
+            ]
+          : [{ id: 'qwen', label: 'Qwen' }]
+      )
+    )
+    mockApi.createStudioChatSession.mockResolvedValue(
+      sessionRecord({ id: 's2' })
+    )
+    renderPanel()
+
+    const agentPicker = await screen.findByLabelText('选择 Agent')
+    await waitFor(() => expect(agentPicker).toHaveValue('kimi'))
+    fireEvent.change(agentPicker, { target: { value: 'claude' } })
+    expect(agentPicker).toHaveValue('claude')
+
+    // 导航到 ws2：组件复用（不 remount），agent 列表换成 qwen。
+    act(() => {
+      useSettingStore.setState({ workspaceId: 'ws2' })
+    })
+    await waitFor(() =>
+      expect(screen.getByLabelText('选择 Agent')).toHaveValue('qwen')
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '＋ 新对话' }))
+    })
+    await waitFor(() =>
+      expect(mockApi.createStudioChatSession).toHaveBeenCalledWith(
+        'ws2',
+        'qwen'
       )
     )
   })

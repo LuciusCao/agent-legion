@@ -107,14 +107,18 @@ def test_rerun_self_marks_node_pending_and_downstream_stale(rerun_service, job_d
 
 
 def test_business_auto_reruns_direct_upstream(rerun_service, job_db, workspace):
+    """rerun_upstream 走合并上游（#759）：显式边上游 ∪ 输入产物的隐式
+    生产者——review_script 的直接生产者是 write_script（script.md）与
+    intake_knowledge_points（knowledge_point.json）。"""
     job = _create_job(job_db, workspace, "Q-upstream")
     _fail_node(job_db, job, "review_script", "business", "review_rejected")
 
     results = rerun_service.rerun_by_failure_category(workspace["id"], "business")
 
     assert results[0]["status"] == "succeeded"
-    assert results[0]["rerun_nodes"] == ["write_script"]
+    assert results[0]["rerun_nodes"] == ["intake_knowledge_points", "write_script"]
     nodes = _node_statuses(job_db, job["id"])
+    assert nodes["intake_knowledge_points"] == "pending"
     assert nodes["write_script"] == "pending"
     assert nodes["review_script"] == "stale"
 

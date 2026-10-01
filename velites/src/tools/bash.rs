@@ -5,10 +5,21 @@
 //! semantics, design §8). The model-supplied `timeout` is clamped to
 //! [1s, 1h] (default 120s) so one call cannot outrun the run's wall-clock
 //! budget by orders of magnitude. stdout+stderr volume is reported as
-//! `output_bytes` (pre-truncation measurement). Output is truncated from the
-//! tail to 2000 lines or 50KB, whichever is hit first (pi-aligned, design
-//! §8); when truncated, the full output is written to a temp file and the
-//! notice points at it.
+//! `output_bytes` (full stream measurement — kept head PLUS dropped tail).
+//! Output is truncated from the tail to 2000 lines or 50KB, whichever is
+//! hit first (pi-aligned, design §8); when truncated, the full output is
+//! written to a temp file and the notice points at it.
+//!
+//! #637 capture cap: each pipe's in-memory buffer is bounded at
+//! [`truncate::MAX_CAPTURE_BYTES`] (4 MiB, per stream). Past the cap the
+//! head is kept, every further byte is COUNTED but dropped, and the reader
+//! keeps draining to EOF (stopping the reads would backpressure-block the
+//! child's writes) — a runaway `cat hugefile` can no longer grow the
+//! buffer without bound. `output_bytes` still reports the FULL volume
+//! (kept + dropped), and the capped run's notice says the tail was dropped
+//! and NO full-output file exists (there is nothing complete to write),
+//! pointing the model at file redirection + chunked bash reads instead
+//! (the `read` tool rejects over-cap whole files even with offset/limit).
 //!
 //! #469 phase instrumentation: the tool result carries `timing` with the
 //! phase decomposition `totalMs ≈ spawnMs + firstByteMs + restMs + reapMs`
@@ -162,13 +173,20 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     // does not retroactively own the prelude).
     let output_started = Instant::now();
     let boundary_fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // #637: 每条 pipe 各自带上限读取（上限按流计，stdout/stderr 互不
+    // 占用对方的额度）。
+    let capture_cap = usize::try_from(truncate::MAX_CAPTURE_BYTES).unwrap_or(usize::MAX);
     let stdout_task = tokio::spawn({
         let boundary = boundary_fired.clone();
-        async move { read_with_first_byte(&mut stdout_pipe, output_started, boundary).await }
+        async move {
+            read_with_first_byte(&mut stdout_pipe, output_started, boundary, capture_cap).await
+        }
     });
     let stderr_task = tokio::spawn({
         let boundary = boundary_fired.clone();
-        async move { read_with_first_byte(&mut stderr_pipe, output_started, boundary).await }
+        async move {
+            read_with_first_byte(&mut stderr_pipe, output_started, boundary, capture_cap).await
+        }
     });
 
     let timeout = Duration::from_secs(timeout_secs);
@@ -214,11 +232,15 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         .await
         .map_err(|err| ToolError::Io(std::io::Error::other(err)))??;
 
-    let output_bytes = (stdout.0.len() + stderr.0.len()) as u64;
-    let stdout_text = String::from_utf8_lossy(&stdout.0);
-    let stderr_text = String::from_utf8_lossy(&stderr.0);
+    // #637: output_bytes 统计口径不变——完整 stdout+stderr 字节数
+    // （保留的头部 + 触顶后丢弃的尾部）。
+    let output_bytes = stdout.total_bytes + stderr.total_bytes;
+    let stdout_text = String::from_utf8_lossy(&stdout.head);
+    let stderr_text = String::from_utf8_lossy(&stderr.head);
 
-    let mut text = stdout_text.into_owned();
+    // 触顶分支另行按流分配展示预算（下方），这里的合并文本服务 tail 截断
+    // 分支——clone 而非 move，两个分支各自可读流文本。
+    let mut text = stdout_text.clone().into_owned();
     if !stderr_text.is_empty() {
         if !text.is_empty() {
             text.push('\n');
@@ -227,39 +249,153 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         text.push_str(&stderr_text);
     }
 
-    // Tail truncation keeps the end of the output (errors/results live
-    // there); the full output goes to a temp file the notice points at.
-    let truncation = truncate::truncate_tail(&text);
-    if truncation.truncated {
-        // Size of the original last line (a trailing newline is not a line).
-        let trimmed = text.strip_suffix('\n').unwrap_or(&text);
-        let last_line_size = trimmed.rsplit('\n').next().unwrap_or("").len();
-        let full_output = write_full_output(&text);
-        let path_note = match &full_output {
-            Some(path) => format!(" Full output: {}", path.display()),
-            None => String::new(),
+    let capture_capped = stdout.hit_cap || stderr.hit_cap;
+    if capture_capped {
+        // #637 触顶分支：保留的是流头部、尾部已被丢弃——完整输出在内存
+        // 中已不存在，绝不能走 write_full_output（那会假装有完整输出可
+        // 指认）。展示层保留头部的前 2000 行 / 50KB，通知说清「尾部已
+        // 丢弃、无完整输出文件」，并指路：重定向到文件再用 bash 流式
+        // 分段命令读取。与 tail 截断方向相反（那边错误/结果在末尾、保
+        // 尾；触顶后尾部已丢，只能保头）。
+        //
+        // #689 review P2：恢复提示必须与 read 工具的自洽——read 对超过
+        // 4 MiB 的整文件在读前直接报错（上限检查先于 offset/limit 行
+        // 选取），「用 read 的 offset/limit 分段读」这个流程走不通，模型
+        // 会陷入「重定向 → read 报错 → 重定向」死循环。bash 分段命令
+        // （sed 按行窗、tail+head 翻页）与 read 超限时自己的提示同构，
+        // 是唯一可走通的出口。
+        //
+        // #779 列车 R4 复审 P2：展示预算按流分配——stderr 先预留总预算的
+        // 一半（其实际所需为限），stdout 头部用剩余。合并文本再整体保头
+        // 会让 stdout 的 4 MiB 头部把完整采集到的 stderr 全部挤出展示面，
+        // 失败命令的错误原因随之丢失。两流各自的截断方向对称（R4 P2 跟进
+        // 及其镜像）：未触顶（完整采集）一侧保尾——最终诊断/结果在末尾，
+        // 与常规截断同语义；触顶一侧保头——尾部已在采集侧丢弃。
+        // stderr 在预留份额内不可展示（首行即超限，如无换行的超长行）时
+        // 仅保留分节标记——与修复前合并文本截断后的形状一致。
+        let per_stream = |text: &str, hit_cap: bool, lines: usize, bytes: usize| {
+            if hit_cap {
+                truncate::truncate_head_within(text, lines, bytes)
+            } else {
+                truncate::truncate_tail_within(text, lines, bytes)
+            }
         };
-        text = truncation.content;
-        if truncation.last_line_partial {
-            text.push_str(&format!(
-                "\n\n[Showing last {} of line {} (line is {}).{}]",
-                truncate::format_size(truncation.output_bytes),
-                truncation.total_lines,
-                truncate::format_size(last_line_size),
-                path_note,
-            ));
+        let stderr_budget = (
+            truncate::DEFAULT_MAX_LINES / 2,
+            truncate::DEFAULT_MAX_BYTES / 2,
+        );
+        let stderr_truncation = per_stream(
+            &stderr_text,
+            stderr.hit_cap,
+            stderr_budget.0,
+            stderr_budget.1,
+        );
+        let stdout_budget_bytes = truncate::DEFAULT_MAX_BYTES - stderr_truncation.output_bytes;
+        let stdout_truncation = per_stream(
+            &stdout_text,
+            stdout.hit_cap,
+            truncate::DEFAULT_MAX_LINES - stderr_truncation.output_lines,
+            stdout_budget_bytes,
+        );
+        // #779 列车 R4 复审 P2 跟进：提示按各流实际截断方向分别说明——统一
+        // 声称「head above is kept」会在未触顶流保尾展示时与内容矛盾（模型
+        // 会误判所见日志的位置）。触顶流：保头（尾部采集侧已丢）；完整采集
+        // 但超份额的流：保尾（头部按份额剪掉）；完整且未超份额：完整展示。
+        // 再跟进：提示依据该流实际保留的正文生成——触顶流首行即超份额时
+        // truncate_head_within 返回空内容，[stderr] 分节标记仍会让 kept
+        // 非空（绕过 notice-only 分支），不得声称 head 已保留——明示什么
+        // 都没展示 + 实际预算数值（与首行超限 notice-only 分支同语义）；
+        // 数值取该流的真实预算（stdout = 总预算 − stderr 实际占用，stderr
+        // = 预留份额），不是固定预留份额（#779 列车 R4 P2 再跟进）。
+        let stream_note = |name: &str, hit_cap: bool, tr: &truncate::Truncation, budget: usize| {
+            if hit_cap && tr.first_line_exceeds_limit {
+                format!(
+                    "{name} hit the cap, and its first line alone exceeds the {} display budget, so nothing of it is shown; the tail was dropped at capture",
+                    truncate::format_size(budget),
+                )
+            } else if hit_cap {
+                format!("{name} hit the cap: the head is kept, the tail was dropped")
+            } else if tr.truncated {
+                format!(
+                    "{name} was fully captured; shown tail-first (its head is trimmed to the display share)"
+                )
+            } else {
+                format!("{name} was fully captured")
+            }
+        };
+        let notice = format!(
+            "[Output capture stopped after {} at the {} per-stream cap ({}; {}). No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log`, `tail -n +2001 out.log | head -n 2000` (the read tool rejects whole files over {} even with offset/limit).]",
+            truncate::format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
+            truncate::MAX_CAPTURE_BYTES_DISPLAY,
+            stream_note("stdout", stdout.hit_cap, &stdout_truncation, stdout_budget_bytes),
+            stream_note("stderr", stderr.hit_cap, &stderr_truncation, stderr_budget.1),
+            truncate::MAX_CAPTURE_BYTES_DISPLAY,
+        );
+        let mut kept = stdout_truncation.content;
+        if !stderr_text.is_empty() {
+            // 采集到 stderr 就保留 [stderr] 分节标记（份额内不可展示时
+            // 内容为空，与修复前合并文本截断后的形状一致）。
+            if !kept.is_empty() {
+                kept.push('\n');
+            }
+            kept.push_str("[stderr]\n");
+            kept.push_str(&stderr_truncation.content);
+        }
+        if kept.is_empty() {
+            // 首行就超过展示上限（如单个超长行）：无内容可展示，通知
+            // 独立成文，不加前导空行——且不说「head above is kept」，
+            // 上面没有任何内容。
+            text = format!(
+                "[Output capture stopped after {} at the {} per-stream cap (the first line alone exceeds the {} display limit, so no content is shown; the tail was dropped). No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log` (the read tool rejects whole files over {} even with offset/limit).]",
+                truncate::format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
+                truncate::MAX_CAPTURE_BYTES_DISPLAY,
+                truncate::MAX_BYTES_DISPLAY,
+                truncate::MAX_CAPTURE_BYTES_DISPLAY,
+            );
         } else {
-            let start_line = truncation.total_lines - truncation.output_lines + 1;
-            let limit_note = match truncation.truncated_by {
-                Some(TruncatedBy::Bytes) => {
-                    format!(" ({} limit)", truncate::MAX_BYTES_DISPLAY)
-                }
-                _ => String::new(),
+            text = kept;
+            text.push_str("\n\n");
+            text.push_str(&notice);
+        }
+    } else {
+        // Tail truncation keeps the end of the output (errors/results live
+        // there); the full output goes to a temp file the notice points at.
+        let truncation = truncate::truncate_tail(&text);
+        if truncation.truncated {
+            // Size of the original last line (a trailing newline is not a line).
+            let trimmed = text.strip_suffix('\n').unwrap_or(&text);
+            let last_line_size = trimmed.rsplit('\n').next().unwrap_or("").len();
+            let full_output = write_full_output(&text);
+            let path_note = match &full_output {
+                Some(path) => format!(" Full output: {}", path.display()),
+                None => String::new(),
             };
-            text.push_str(&format!(
-                "\n\n[Showing lines {}-{} of {}{}.{}]",
-                start_line, truncation.total_lines, truncation.total_lines, limit_note, path_note,
-            ));
+            text = truncation.content;
+            if truncation.last_line_partial {
+                text.push_str(&format!(
+                    "\n\n[Showing last {} of line {} (line is {}).{}]",
+                    truncate::format_size(truncation.output_bytes),
+                    truncation.total_lines,
+                    truncate::format_size(last_line_size),
+                    path_note,
+                ));
+            } else {
+                let start_line = truncation.total_lines - truncation.output_lines + 1;
+                let limit_note = match truncation.truncated_by {
+                    Some(TruncatedBy::Bytes) => {
+                        format!(" ({} limit)", truncate::MAX_BYTES_DISPLAY)
+                    }
+                    _ => String::new(),
+                };
+                text.push_str(&format!(
+                    "\n\n[Showing lines {}-{} of {}{}.{}]",
+                    start_line,
+                    truncation.total_lines,
+                    truncation.total_lines,
+                    limit_note,
+                    path_note,
+                ));
+            }
         }
     }
 
@@ -302,7 +438,7 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     // pre-boundary output reports only restMs (the whole output window).
     // totalMs is NOT set here — the ToolKind::execute dispatch boundary owns
     // it, keeping one source for the decomposition base.
-    let first_byte_ms = match (stdout.1, stderr.1) {
+    let first_byte_ms = match (stdout.first_byte_ms, stderr.first_byte_ms) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     };
@@ -331,19 +467,39 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     })
 }
 
-/// Read one output pipe to EOF, recording the elapsed offset of the first
-/// non-empty PRE-BOUNDARY read (#469). `None` when the stream never produced
-/// a byte before the `boundary` flag fired (bytes after it are still
-/// collected into the buffer — output semantics are unchanged — but they
-/// cannot claim firstByteMs). Bytes and error semantics are otherwise
-/// identical to `read_to_end` — the first error aborts the read and
-/// propagates.
+/// 一条输出 pipe 的采集结果（#637 带上限读取）。
+struct PipeCapture {
+    /// 流头部，至多 `max_bytes` 字节；触顶后的字节只计数、不保留。
+    head: Vec<u8>,
+    /// 完整流字节数（保留的头部 + 丢弃的尾部）——`output_bytes` 的统计
+    /// 口径，触顶前后一致。
+    total_bytes: u64,
+    /// 是否触顶（`total_bytes > max_bytes`，即确有字节被丢弃）。
+    hit_cap: bool,
+    /// 首个非空 PRE-BOUNDARY 读的毫秒偏移（#469），语义与上限无关。
+    first_byte_ms: Option<u64>,
+}
+
+/// Read one output pipe to EOF, keeping at most `max_bytes` HEAD bytes in
+/// memory (#637) and recording the elapsed offset of the first non-empty
+/// PRE-BOUNDARY read (#469). `None` when the stream never produced a byte
+/// before the `boundary` flag fired (bytes after it are still collected
+/// into the head — output semantics are unchanged — but they cannot claim
+/// firstByteMs).
+///
+/// #637: past the cap the bytes are counted into `total_bytes` but dropped —
+/// the loop NEVER stops reading, because a pipe that is not drained to EOF
+/// backpressure-blocks the child's write side (a `cat hugefile` would hang
+/// instead of finishing). Error semantics are unchanged: the first error
+/// aborts the read and propagates.
 async fn read_with_first_byte<R: tokio::io::AsyncRead + Unpin>(
     pipe: &mut R,
     started: Instant,
     boundary: std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> std::io::Result<(Vec<u8>, Option<u64>)> {
-    let mut buf = Vec::new();
+    max_bytes: usize,
+) -> std::io::Result<PipeCapture> {
+    let mut head = Vec::new();
+    let mut total_bytes: u64 = 0;
     let mut first_byte_ms = None;
     let mut chunk = [0u8; 8192];
     loop {
@@ -357,9 +513,20 @@ async fn read_with_first_byte<R: tokio::io::AsyncRead + Unpin>(
         if first_byte_ms.is_none() && !boundary.load(std::sync::atomic::Ordering::Acquire) {
             first_byte_ms = Some(elapsed_ms(started));
         }
-        buf.extend_from_slice(&chunk[..n]);
+        // #637: 完整计数；头部保留到上限为止，之后的字节丢弃。读取
+        // 循环本身不受上限影响（见函数文档）。
+        total_bytes += n as u64;
+        if head.len() < max_bytes {
+            let keep = (max_bytes - head.len()).min(n);
+            head.extend_from_slice(&chunk[..keep]);
+        }
     }
-    Ok((buf, first_byte_ms))
+    Ok(PipeCapture {
+        hit_cap: total_bytes > max_bytes as u64,
+        head,
+        total_bytes,
+        first_byte_ms,
+    })
 }
 
 /// The model-supplied `timeout` argument, clamped into
@@ -416,5 +583,78 @@ mod tests {
             requested_timeout_secs(&serde_json::json!({"timeout": u64::MAX})),
             MAX_TIMEOUT_SECS
         );
+    }
+
+    fn fresh_boundary() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    #[tokio::test]
+    async fn read_with_first_byte_keeps_head_and_counts_past_the_cap() {
+        // #637: 100 字节的流、上限 30——头部保留 30 字节，完整计数仍是
+        // 100（丢弃的字节只计数不保留）。
+        let data = vec![b'a'; 100];
+        let mut pipe: &[u8] = &data;
+        let capture = read_with_first_byte(&mut pipe, Instant::now(), fresh_boundary(), 30)
+            .await
+            .unwrap();
+        assert_eq!(capture.head, vec![b'a'; 30]);
+        assert_eq!(capture.total_bytes, 100);
+        assert!(capture.hit_cap);
+        assert!(capture.first_byte_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn read_with_first_byte_exact_cap_is_not_capped() {
+        // 恰好等于上限：一个字节都没有丢，不算触顶。
+        let data = vec![b'b'; 30];
+        let mut pipe: &[u8] = &data;
+        let capture = read_with_first_byte(&mut pipe, Instant::now(), fresh_boundary(), 30)
+            .await
+            .unwrap();
+        assert_eq!(capture.head, data);
+        assert_eq!(capture.total_bytes, 30);
+        assert!(!capture.hit_cap);
+    }
+
+    #[tokio::test]
+    async fn read_with_first_byte_under_cap_collects_everything() {
+        let data = b"hello".to_vec();
+        let mut pipe: &[u8] = &data;
+        let capture = read_with_first_byte(&mut pipe, Instant::now(), fresh_boundary(), 50)
+            .await
+            .unwrap();
+        assert_eq!(capture.head, data);
+        assert_eq!(capture.total_bytes, 5);
+        assert!(!capture.hit_cap);
+    }
+
+    #[tokio::test]
+    async fn read_with_first_byte_cap_across_chunk_boundary() {
+        // 跨 chunk 触顶：最后一 chunk 只保留到上限的前缀，计数完整。
+        let data = vec![b'c'; 8192 + 10];
+        let mut pipe: &[u8] = &data;
+        let capture = read_with_first_byte(&mut pipe, Instant::now(), fresh_boundary(), 8192)
+            .await
+            .unwrap();
+        assert_eq!(capture.head, vec![b'c'; 8192]);
+        assert_eq!(capture.total_bytes, 8192 + 10);
+        assert!(capture.hit_cap);
+    }
+
+    #[tokio::test]
+    async fn read_with_first_byte_boundary_flag_clips_first_byte() {
+        // #469 语义不因上限改变：boundary 已触发后到达的首字节不认领
+        // firstByteMs（但仍被计数/保留）。
+        let data = b"late".to_vec();
+        let mut pipe: &[u8] = &data;
+        let boundary = fresh_boundary();
+        boundary.store(true, std::sync::atomic::Ordering::Release);
+        let capture = read_with_first_byte(&mut pipe, Instant::now(), boundary, 50)
+            .await
+            .unwrap();
+        assert_eq!(capture.head, data);
+        assert_eq!(capture.total_bytes, 4);
+        assert!(capture.first_byte_ms.is_none());
     }
 }

@@ -70,7 +70,10 @@ export function useSkillValidation(
       const stale = () =>
         seq !== seqRef.current || !sameContext(boundKeyRef.current, origin)
       try {
-        const next = await validateSkillPath(fullPath)
+        const next = await validateSkillPath(
+          fullPath,
+          boundKeyRef.current.workspaceId
+        )
         if (stale()) return
         setKeyedResult({
           skillKey: next.valid ? (next.skill_key ?? '') : originKey,

@@ -428,9 +428,9 @@ def test_get_agent_runtimes(recorded) -> None:
 
 def test_get_skill_without_ref(recorded) -> None:
     server, calls = recorded
-    _run_tool(server, "get_skill", {"skill_key": "wf/review"})
+    _run_tool(server, "get_skill", {"workspace_id": "wf", "skill_key": "wf/review"})
     assert calls[0]["method"] == "GET"
-    assert calls[0]["url"].endswith("/skills/wf/review")
+    assert calls[0]["url"].endswith("/workspaces/wf/skills/wf/review")
 
 
 def test_get_node_prompt_posts_node_key(recorded) -> None:
@@ -465,35 +465,40 @@ def test_save_node_prompt_puts_prompt(recorded) -> None:
 
 def test_get_skill_with_ref_appends_query(recorded) -> None:
     server, calls = recorded
-    _run_tool(server, "get_skill", {"skill_key": "wf/review", "ref": "v1.2.0+exp"})
+    _run_tool(
+        server,
+        "get_skill",
+        {"workspace_id": "wf", "skill_key": "wf/review", "ref": "v1.2.0+exp"},
+    )
     assert calls[0]["method"] == "GET"
-    assert calls[0]["url"].endswith("/skills/wf/review?ref=v1.2.0%2Bexp")
+    assert calls[0]["url"].endswith("/workspaces/wf/skills/wf/review?ref=v1.2.0%2Bexp")
 
 
 def test_skill_tools_url_encode_skill_key_segments(recorded) -> None:
     server, calls = recorded
-    _run_tool(server, "get_skill", {"skill_key": "wf/re view"})
-    assert "/skills/wf/re%20view" in calls[0]["url"]
-    _run_tool(server, "validate_skill", {"skill_key": "wf/re view"})
-    assert "/skills/wf/re%20view/validate" in calls[1]["url"]
+    _run_tool(server, "get_skill", {"workspace_id": "wf", "skill_key": "wf/re view"})
+    assert "/workspaces/wf/skills/wf/re%20view" in calls[0]["url"]
+    _run_tool(server, "validate_skill", {"workspace_id": "wf", "skill_key": "wf/re view"})
+    assert "/workspaces/wf/skills/wf/re%20view/validate" in calls[1]["url"]
     _run_tool(
         server,
         "save_skill_version",
         {
+            "workspace_id": "wf",
             "skill_key": "wf/re view",
             "files": [{"path": "SKILL.md", "content": "x"}],
             "new_tag": "v2",
             "message": "m",
         },
     )
-    assert "/skills/wf/re%20view/versions" in calls[2]["url"]
+    assert "/workspaces/wf/skills/wf/re%20view/versions" in calls[2]["url"]
 
 
 def test_validate_skill_posts(recorded) -> None:
     server, calls = recorded
-    _run_tool(server, "validate_skill", {"skill_key": "wf/review"})
+    _run_tool(server, "validate_skill", {"workspace_id": "wf", "skill_key": "wf/review"})
     assert calls[0]["method"] == "POST"
-    assert calls[0]["url"].endswith("/skills/wf/review/validate")
+    assert calls[0]["url"].endswith("/workspaces/wf/skills/wf/review/validate")
 
 
 def test_save_skill_version_posts_body(recorded) -> None:
@@ -502,10 +507,16 @@ def test_save_skill_version_posts_body(recorded) -> None:
     _run_tool(
         server,
         "save_skill_version",
-        {"skill_key": "wf/review", "files": files, "new_tag": "v2.0.0", "message": "revise"},
+        {
+            "workspace_id": "wf",
+            "skill_key": "wf/review",
+            "files": files,
+            "new_tag": "v2.0.0",
+            "message": "revise",
+        },
     )
     assert calls[0]["method"] == "POST"
-    assert calls[0]["url"].endswith("/skills/wf/review/versions")
+    assert calls[0]["url"].endswith("/workspaces/wf/skills/wf/review/versions")
     assert calls[0]["json"] == {"files": files, "new_tag": "v2.0.0", "message": "revise"}
 
 

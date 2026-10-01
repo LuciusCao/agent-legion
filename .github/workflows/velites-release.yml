@@ -155,9 +155,13 @@ jobs:
       # 这里改为按 velites/ 子树过滤：compare 出的每个 commit 单查其变更
       # 文件（compare 响应自带的 per-commit files 在 diff 大时会被截断，
       # 逐 commit 的 commits/{sha} 接口才完整），含 velites/ 文件的进清单。
-      # merge commit 的 files 是合并结果全量——宽进（碰过即列）比漏报好，
-      # 语义上它也确实把这个 PR 的 velites 改动带进了本版本线。
+      # merge commit 的 files 是合并结果全量——但它与 chore(release) 落版
+      # commit 都不进清单（前者无信息量，后者的主题进标题），「碰过即列」
+      # 的宽进原则不变。条目按 docs/release-notes.md 排版规范生成：
+      # conventional 前缀分组（feat→Added、fix→Fixed、perf→Performance、
+      # 其余→Maintenance），主题去掉 type(scope) 前缀，挂短 SHA 链接。
       - name: Generate velites-scoped release notes
+        id: notes
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -183,32 +187,76 @@ jobs:
           RANGE="${PREV:+${PREV}...}${TAG}"
           echo "compare range: ${RANGE:-${TAG}}"
 
+          # 标题（docs/release-notes.md 规范）：velites v<版本>；tag 所指
+          # commit 是落版 commit 且主题带「——<一句话主题>」后缀时拼为
+          # 标题后缀。提取用 python3 单行正则——sed 的多字节字符类在
+          # runner 的 locale 下不可靠；tag 不在落版 commit 上时回落纯
+          # 版本号标题。
+          ver="${TAG#velites-v}"
+          tag_subject="$(gh api "repos/${REPO}/commits/${TAG}" --jq '.commit.message | split("\n")[0]')"
+          theme="$(printf '%s' "$tag_subject" | python3 -c 'import re,sys; m=re.match(r"^chore\(release\)[：:]\s*velites\s+落版\s+\S+?——\s*(.+)$", sys.stdin.read()); print(m.group(1).strip() if m else "", end="")')"
+          if [ -n "$theme" ]; then
+            title="velites v${ver} — ${theme}"
+          else
+            title="velites v${ver}"
+          fi
+          echo "title=${title}" >> "$GITHUB_OUTPUT"
+
           commits="$(gh api "repos/${REPO}/compare/${RANGE:-${TAG}}" --paginate --jq '.commits[] | .sha')"
+          : > entries.tsv
+          for sha in $commits; do
+            subject="$(gh api "repos/${REPO}/commits/${sha}" --jq '.commit.message | split("\n")[0]')"
+            # merge commit（GitHub/本地合并，主题以 Merge 开头）与
+            # chore(release) 落版 commit 剔除；先取主题再决定是否查 files，
+            # 被剔除的 commit 免掉逐页 files 拉取。
+            case "$subject" in
+              "Merge "*) continue ;;
+              chore\(release\)*) continue ;;
+            esac
+            # codex P2 + subagent review：commits/{sha} 的 files 每页 100 条，
+            # 大 PR（如 #503 有 182 个文件）必须聚合一页以上的全量再判断
+            # ——--paginate 时 jq 按页独立执行，先收集每页计数再整体求和。
+            # awk 求和而非 bc：runner 镜像不预装 bc（macOS 本地有，正是本地
+            # 验证漏掉它的原因）。失败不吞（fail-loud）：notes 缺条目比发布
+            # 失败更难察觉。
+            velites_hits="$(gh api "repos/${REPO}/commits/${sha}" --paginate \
+              --jq '[.files[].filename] | map(select(startswith("velites/"))) | length' \
+              | awk '{s+=$1} END {print s+0}')"
+            if [ "${velites_hits:-0}" -gt 0 ]; then
+              case "$subject" in
+                feat*) group="Added" ;;
+                fix*)  group="Fixed" ;;
+                perf*) group="Performance" ;;
+                *)     group="Maintenance" ;;
+              esac
+              # 主题去掉 type(scope) 前缀；全角/半角冒号后至多一个空格。
+              display="$(printf '%s' "$subject" | sed -E 's/^[a-z]+(\([^)]*\))?[：:] ?//')"
+              printf '%s\t%s\t%s\t%s\n' "$group" "$display" \
+                "https://github.com/${REPO}/commit/${sha}" "${sha:0:7}" >> entries.tsv
+            fi
+          done
+
           {
-            echo "## What's Changed (velites/ only)"
-            echo
-            for sha in $commits; do
-              # codex P2 + subagent review：commits/{sha} 的 files 每页 100 条，
-              # 大 merge commit（如 #503 有 182 个文件）必须聚合一页以上的
-              # 全量再判断——--paginate 时 jq 按页独立执行，先收集每页计数
-              # 再整体求和。awk 求和而非 bc：runner 镜像不预装 bc（macOS 本
-              # 地有，正是本地验证漏掉它的原因）。失败不吞（fail-loud）：
-              # notes 缺条目比发布失败更难察觉。
-              velites_hits="$(gh api "repos/${REPO}/commits/${sha}" --paginate \
-                --jq '[.files[].filename] | map(select(startswith("velites/"))) | length' \
-                | awk '{s+=$1} END {print s+0}')"
-              if [ "${velites_hits:-0}" -gt 0 ]; then
-                gh api "repos/${REPO}/commits/${sha}" \
-                  --jq '"* \(.commit.message | split("\n")[0]) — \(.html_url)"'
-              fi
-            done
-            echo
+            awk -F'\t' '
+              { lines[$1] = lines[$1] sprintf("* %s — [%s](%s)\n", $2, $4, $3) }
+              END {
+                n = split("Added Fixed Performance Maintenance", order, " ")
+                for (i = 1; i <= n; i++)
+                  if (lines[order[i]] != "")
+                    printf "### %s\n\n%s\n", order[i], lines[order[i]]
+              }' entries.tsv
+            if [ ! -s entries.tsv ]; then
+              echo "（本区间 velites/ 子树无可列条目。）"
+              echo
+            fi
             echo "**Full Changelog**: https://github.com/${REPO}/compare/${RANGE:-${TAG}}"
           } > release-notes.md
           cat release-notes.md
+          echo "--- title: ${title}"
 
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ steps.notes.outputs.title }}
           files: |
             dist/*.tar.gz
             dist/sha256.txt

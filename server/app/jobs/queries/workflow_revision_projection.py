@@ -18,6 +18,9 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
+from server.app.jobs.queries.upgrade_impl_identity import (
+    acquire_implementation_publication_lock,
+)
 
 
 def _upsert_agent_route(
@@ -130,6 +133,13 @@ def create_workflow_revision_with_projection(
     turns into an error).
     """
     if status == "active":
+        # #759 P2-A：发布进入 implementation-publication 锁域（与
+        # versioned_entities 的 Agent/node_code publish/rollback/archive、
+        # upgrade guard 的重读/重验三成员同域，锁序见
+        # job_workflow_upgrade_apply）——guard 重读到其提交之间的发布被
+        # 挡住，upgrade 不会 pin 到刚被取代的旧 revision。发布不碰 job
+        # 行、不取 job-mutation 锁，无反向依赖（锁序无环）。
+        acquire_implementation_publication_lock(conn, workspace_id)
         # #211 Phase 3 (read-layer binding): the archive predicate keys on
         # workspace_id — one active revision per workspace (v62 binding).
         conn.execute(

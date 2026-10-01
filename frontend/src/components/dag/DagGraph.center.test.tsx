@@ -286,4 +286,47 @@ describe('DagGraph 选中节点镜头定位（#667 B2）', () => {
     )
     expect(mocks.setCenter).toHaveBeenCalledTimes(2)
   })
+
+  it('外部选中定位后重复点击同一节点，nonce 递增的外部重定位仍移动镜头', () => {
+    // #683 review P2-2 回归：外部选中并完成定位 → 用户再次点击画布中的
+    // 同一节点（key 不变）→ 旧代码无条件写 clickOriginRef，focusedRef
+    // 去重使 effect 提前返回、标记不被消费而残留 → 之后聊天 diff 对同一
+    // 节点递增 selectionNonce 请求重新定位，进 effect 时被残留标记误判为
+    // 画布点击而跳过 setCenter。重复点击（选中不翻转）不得写标记。
+    const onSelectedNodeChange = vi.fn()
+    const { rerender } = render(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="a"
+        selectionNonce={0}
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+
+    // 画布内重复点击同一节点：选中不变（onSelectedNodeChange 仍会上报，
+    // 但受控 key 未翻转），不写来源标记。
+    fireEvent.click(
+      screen.getByTestId('dag-flow-wrapper').querySelector('[data-id="a"]')!
+    )
+    expect(onSelectedNodeChange).toHaveBeenCalledWith('a')
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+
+    // nonce 驱动的外部重定位请求：必须真的移动镜头。
+    rerender(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="a"
+        selectionNonce={1}
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(2)
+    expect(mocks.setCenter).toHaveBeenLastCalledWith(240, 90, {
+      zoom: 1,
+      duration: 350,
+    })
+  })
 })

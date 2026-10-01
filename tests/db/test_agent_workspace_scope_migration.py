@@ -244,5 +244,5 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    # The registry tail at the CURRENT schema version (v82, #659).
-    assert migration["name"] == "job_status_counts_advisory_locks"
+    # The registry tail at the CURRENT schema version (v86, #645).
+    assert migration["name"] == "node_runs_impl_identity"

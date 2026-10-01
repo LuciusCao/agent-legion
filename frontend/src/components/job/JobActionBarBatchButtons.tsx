@@ -1,5 +1,5 @@
 import { Button } from '@mui/material'
-import type { JobSummary } from '../../types'
+import type { JobSummary, UpgradeMode } from '../../types'
 import { JobActionBarUpgrade } from './JobActionBarUpgrade'
 
 export interface JobActionBarBatchButtonsProps {
@@ -9,7 +9,10 @@ export interface JobActionBarBatchButtonsProps {
   itemLabel: string
   loading: boolean
   onOpenUpgrade: () => void
-  onUpgradeWorkflow?: (jobIds?: string[]) => void | Promise<void>
+  onUpgradeWorkflow?: (
+    jobIds?: string[],
+    mode?: UpgradeMode
+  ) => void | Promise<void>
   onPause?: () => void | Promise<void>
   onResume?: () => void | Promise<void>
 }

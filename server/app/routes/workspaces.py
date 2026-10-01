@@ -5,6 +5,8 @@ from fastapi.responses import StreamingResponse
 
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.auth.dependencies import reject_studio_agent_scope, require_admin
+from server.app.auth.workspace_access import require_workspace_access
+from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 from server.app.events import JobEventManager
 from server.app.events.bus import workspace_channel
 from server.app.routes.dashboard_events import create_dashboard_events_router
@@ -36,12 +38,22 @@ def create_workspaces_router(
     guarded = APIRouter(dependencies=[Depends(reject_studio_agent_scope)])
 
     @router.get("/workspaces", response_model=WorkspacesResponse)
-    def list_workspaces() -> WorkspacesResponse:
+    def list_workspaces(
+        request: Request,
+        user: Annotated[dict[str, Any], Depends(require_workspace_access)],
+    ) -> WorkspacesResponse:
         try:
             workspaces = [WorkspaceRecord.model_validate(w) for w in service.list_workspaces()]
-            return WorkspacesResponse(workspaces=workspaces)
         except JobServiceError as exc:
             raise_job_http_error(exc)
+        # #626 review: a workspace API token is a machine identity bound to
+        # ONE workspace — the unscoped listing would enumerate every
+        # workspace's existence to it (the hardened membership guard above
+        # 404s it first; the filter is defense in depth for future mounts).
+        if user.get("actor_scope") == WORKSPACE_API_SCOPE:
+            bound = str(user.get("scoped_workspace_id") or "")
+            workspaces = [workspace for workspace in workspaces if workspace.id == bound]
+        return WorkspacesResponse(workspaces=workspaces)
 
     @guarded.post("/workspaces", response_model=WorkspaceResponse)
     def create_workspace(

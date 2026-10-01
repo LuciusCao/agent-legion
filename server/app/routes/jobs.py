@@ -61,6 +61,12 @@ def create_jobs_router(
 
     @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
     def get_job(job_id: str) -> JobDetailResponse:
+        # Legacy bare route（#631 攻击审查 H2 曾以路由级 scoped-404 收口；
+        # rebase #745 后该守卫的前提过时——job_group 的
+        # require_job_workspace_access 现在按 job 行反查授权域，裸路由与
+        # /workspaces/{ws}/jobs/{job_id} 前缀家族同一语义：scoped 绑定
+        # token 只读绑定 workspace（跨域/未知 job 一律 404），成员按
+        # membership，全会话 admin 走 fast path）。
         try:
             return JobDetailResponse(**job_queries.detail(job_id))
         except JobServiceError as exc:

@@ -1,0 +1,49 @@
+/* StudioChatContextRing：composer 工具行内嵌的上下文用量圆环。
+ * 环 18px、弧 2.5px，与 12px 工具行字号体系对齐；配色分档见组件注释。 */
+.ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  cursor: default;
+}
+.track {
+  fill: none;
+  stroke: #e5e5e5;
+  stroke-width: 2.5;
+}
+.arc {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.3s ease;
+}
+.low .arc {
+  stroke: #1976d2;
+}
+.mid .arc {
+  stroke: #ed6c02;
+}
+.high .arc {
+  stroke: #d32f2f;
+}
+.idle .track {
+  stroke: #cfcfcf;
+}
+.compacting svg {
+  animation: ringPulse 1.2s ease-in-out infinite;
+}
+@keyframes ringPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .compacting svg {
+    animation: none;
+  }
+}

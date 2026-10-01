@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# 所有 uv run 一律 --frozen（issue #526）：依赖从冻结 lock 解析安装，保证
+# 绝不写 lock——开发者 shell 会话带 UV_DEFAULT_INDEX/UV_INDEX_URL 镜像变量
+# 时，不带 --frozen 的 uv run 会触发 re-lock 把镜像 URL 写进 uv.lock（镜像
+# index 环境不再污染）。注意 --frozen 不校验 pyproject/lock 漂移（断言 lock
+# 不变是 --locked 的语义）：漂移场景静默按旧 lock 跑门禁，而非 fail-fast。
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -6,31 +11,31 @@ cd "$ROOT_DIR"
 
 run_static_checks() {
   echo "=== Ruff Lint ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run ruff check .
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen ruff check .
 
   echo "=== Ruff Format ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run ruff format --check .
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen ruff format --check .
 
   echo "=== Architecture Invariant Registry ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_invariants
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_invariants
 
   echo "=== Version Manifests ==="
   # 清单 ↔ lock 一致 + 发版解耦纪律（velites/frontend 版本线独立于仓库版本，
   # 禁止锁步 bump——无谓的版本前进会击穿 velites 二进制指纹与 Docker 缓存层）。
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_versions
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_versions
 
   # The business skill shared-assets check (scripts/check-skills-shared.py)
   # retired with the business skill sources; the script itself leaves with the
   # business runtime code in P4.
 
   echo "=== MyPy Type Check ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app worker shared workspace_libs scripts/architecture scripts/quality workflow_nodes
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen mypy server/app worker shared workspace_libs scripts/architecture scripts/quality workflow_nodes
 
   echo "=== Architecture Contracts ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_architecture
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_architecture
 
   echo "=== Architecture Docs Freshness ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.generate_architecture --check
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.generate_architecture --check
 
   # The spec health check (scripts/verify_specs.py) retired with the
   # unpublished docs/superpowers specs (f4e7e46f): the directory is
@@ -121,7 +126,7 @@ run_tests() {
   case "${GATE_TIER:-full}" in
     smoke)
       echo "=== Python Smoke Tests (curated, no coverage) ==="
-      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "smoke" \
@@ -132,7 +137,7 @@ run_tests() {
     unit)
       echo "=== Python Unit Tests (PostgreSQL offline) ==="
       AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
-        UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+        UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "not postgres and not repository_gate" \
@@ -155,7 +160,7 @@ run_tests() {
         base_ref="$(git merge-base HEAD develop 2>/dev/null || git merge-base HEAD origin/develop 2>/dev/null || true)"
         selected=""
         selection_status=0
-        selected="$(UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.pytest_aff_selection select \
+        selected="$(UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.pytest_aff_selection select \
           ${base_ref:+--base "$base_ref"} 2>/dev/null)" || selection_status=$?
         # Exit 4 = a changed source file is missing from the index (stale
         # index or a --cov blind spot): the affected tests are unknown, so
@@ -175,7 +180,7 @@ run_tests() {
       fi
       if [[ ${#aff_args[@]} -gt 0 ]]; then
         AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
-          UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+          UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
           --ignore=tests/full \
           --ignore=tests/ci \
           -m "not postgres and not repository_gate" \
@@ -185,7 +190,7 @@ run_tests() {
           "${aff_args[@]}"
       else
         AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
-          UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+          UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
           --ignore=tests/full \
           --ignore=tests/ci \
           -m "not postgres and not repository_gate" \
@@ -208,9 +213,15 @@ run_tests() {
       # merges its xdist worker shards into that path itself, so a separate
       # `coverage combine` step is unnecessary (and would fail with "No data
       # to combine" once the shards are already merged).
+      # KEEP_COVERAGE follows the check.sh full-gate pattern: tests in the
+      # suite spawn nested gates (git hook simulations) that inherit
+      # COVERAGE_FILE; without this their exit trap deletes the live worker
+      # shards mid-run, and the next per-test context flush crashes on the
+      # schema-less replacement file ("no such table: context").
       export COVERAGE_FILE="$aff_index_cov_file"
+      export KEEP_COVERAGE=1
       AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
-        UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+        UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "not postgres and not repository_gate" \
@@ -222,7 +233,7 @@ run_tests() {
         --cov-fail-under=0 \
         --cov-report= \
         "$@"
-      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.pytest_aff_selection build "$aff_index_cov_file"
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.pytest_aff_selection build "$aff_index_cov_file"
       rm -f "$aff_index_cov_file" "$aff_index_cov_file".*.*.*
       unset COVERAGE_FILE
       ;;
@@ -235,7 +246,7 @@ run_tests() {
         echo "=== GATE_SHARD=${GATE_SHARD} (deterministic hash shard) ==="
         shard_args=(-p scripts.pytest_gate_shard)
       fi
-      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "postgres and not repository_gate" \
@@ -264,7 +275,7 @@ run_tests() {
         echo "=== Python Tests (unit tier, coverage off; set AGENT_LEGION_COV=1 to enable) ==="
       fi
       AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
-        UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+        UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "not postgres and not repository_gate" \

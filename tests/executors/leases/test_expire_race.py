@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from server.app.db.transaction import read_connection, write_transaction
-from server.app.executors._lease_lifecycle import _expire_lease_row
+from server.app.executors._lease_expiry import _expire_lease_row
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult
@@ -22,7 +22,7 @@ from tests.executors.leases.helpers import _claim_request, _setup_workspace
 from tests.postgres_support import TEST_DATABASE_URL
 
 _STALE_SELECT = """
-    select id, job_id, node_key, node_run_id, execution_id
+    select id, job_id, node_key, node_run_id, execution_id, execution_generation
     from executor_leases
     where status='active' and expires_at<=%s
 """

@@ -1,0 +1,232 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { WorkspaceApiTokensSection } from './WorkspaceApiTokensSection'
+import {
+  createWorkspaceApiToken,
+  listWorkspaceApiTokens,
+  revokeWorkspaceApiToken,
+} from '../../api'
+import { TestQueryProvider } from '../../testing/testQueryClient'
+
+vi.mock('../../api', () => ({
+  createWorkspaceApiToken: vi.fn(),
+  listWorkspaceApiTokens: vi.fn(),
+  revokeWorkspaceApiToken: vi.fn(),
+}))
+
+const mockList = vi.mocked(listWorkspaceApiTokens)
+const mockCreate = vi.mocked(createWorkspaceApiToken)
+const mockRevoke = vi.mocked(revokeWorkspaceApiToken)
+
+const WORKSPACE_ID = 'demo_video_workflow'
+
+const sampleToken = {
+  token_id: 'tok-1',
+  label: 'cms-cron',
+  workspace_id: WORKSPACE_ID,
+  created_at: '2026-09-01T00:00:00Z',
+  expires_at: null,
+  revoked: false,
+  last_used_at: null,
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockList.mockResolvedValue([sampleToken])
+})
+
+function renderSection(workspaceId: string = WORKSPACE_ID) {
+  return render(
+    <TestQueryProvider>
+      <WorkspaceApiTokensSection workspaceId={workspaceId} />
+    </TestQueryProvider>
+  )
+}
+
+describe('WorkspaceApiTokensSection', () => {
+  it('lists the workspace tokens without any credential material', async () => {
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('cms-cron')).toBeTruthy()
+    })
+    expect(mockList).toHaveBeenCalledWith(WORKSPACE_ID)
+    const row = screen.getByTestId('api-token-tok-1')
+    expect(row.textContent).toContain('tok-1')
+    expect(row.textContent).not.toContain('secret')
+    expect(screen.getByText('未使用')).toBeTruthy()
+  })
+
+  it('issues a token with label and TTL, showing the plaintext once', async () => {
+    mockCreate.mockResolvedValue({
+      token_id: 'tok-2',
+      api_token: 'tok-2.secret-value',
+      workspace_id: WORKSPACE_ID,
+      label: 'form-agent',
+    })
+    renderSection()
+
+    fireEvent.change(screen.getByLabelText('API Token 名称'), {
+      target: { value: 'form-agent' },
+    })
+    fireEvent.change(screen.getByLabelText('API Token 有效期（小时）'), {
+      target: { value: '48' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '签发' }))
+
+    await waitFor(() => {
+      expect(mockCreate).toHaveBeenCalledWith(WORKSPACE_ID, {
+        label: 'form-agent',
+        ttl_hours: 48,
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('created-api-token')).toBeTruthy()
+    })
+    expect(screen.getByText('tok-2.secret-value')).toBeTruthy()
+  })
+
+  it('issues without TTL when the field is left empty', async () => {
+    mockCreate.mockResolvedValue({
+      token_id: 'tok-3',
+      api_token: 'tok-3.s',
+      workspace_id: WORKSPACE_ID,
+      label: 'no-ttl',
+    })
+    renderSection()
+
+    fireEvent.change(screen.getByLabelText('API Token 名称'), {
+      target: { value: 'no-ttl' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '签发' }))
+
+    await waitFor(() => {
+      expect(mockCreate).toHaveBeenCalledWith(WORKSPACE_ID, {
+        label: 'no-ttl',
+        ttl_hours: undefined,
+      })
+    })
+  })
+
+  it('refuses a non-integer TTL locally without calling the API', async () => {
+    renderSection()
+
+    fireEvent.change(screen.getByLabelText('API Token 名称'), {
+      target: { value: 'bad' },
+    })
+    fireEvent.change(screen.getByLabelText('API Token 有效期（小时）'), {
+      target: { value: 'x' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '签发' }))
+
+    expect(mockCreate).not.toHaveBeenCalled()
+    expect(
+      screen.getByText('有效期必须是正整数小时，或留空表示永不过期')
+    ).toBeTruthy()
+  })
+
+  it('revokes via the confirm dialog and refreshes', async () => {
+    mockRevoke.mockResolvedValue({ token_id: 'tok-1', revoked: true })
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('cms-cron')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('button', { name: '吊销' }))
+    // The list row's 吊销 opens the dialog; the dialog's confirm button
+    // (label 吊销, in the dialog) submits — pick the last match.
+    const revokeButtons = screen.getAllByRole('button', { name: '吊销' })
+    fireEvent.click(revokeButtons[revokeButtons.length - 1])
+
+    await waitFor(() => {
+      expect(mockRevoke).toHaveBeenCalledWith(WORKSPACE_ID, 'tok-1')
+    })
+  })
+
+  it('surfaces list errors', async () => {
+    mockList.mockRejectedValueOnce(new Error('boom'))
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('boom')
+    })
+  })
+
+  it('clears the created plaintext when the workspace switches', async () => {
+    // React Router 复用组件实例：A→B 切换时 A 的明文 token 不能继续
+    // 显示在 B 的面板上（面板文案声称凭据绑定当前 workspace）。
+    mockCreate.mockResolvedValue({
+      token_id: 'tok-4',
+      api_token: 'tok-4.secret-value',
+      workspace_id: WORKSPACE_ID,
+      label: 'form-agent',
+    })
+    const { rerender } = renderSection(WORKSPACE_ID)
+
+    fireEvent.change(screen.getByLabelText('API Token 名称'), {
+      target: { value: 'form-agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '签发' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('created-api-token')).toBeTruthy()
+    })
+    expect(screen.getByText('tok-4.secret-value')).toBeTruthy()
+
+    // 切到 workspace B：同一个组件实例重新渲染。
+    rerender(
+      <TestQueryProvider>
+        <WorkspaceApiTokensSection workspaceId="ws-other" />
+      </TestQueryProvider>
+    )
+
+    expect(screen.queryByTestId('created-api-token')).toBeNull()
+    expect(screen.queryByText('tok-4.secret-value')).toBeNull()
+  })
+
+  it('discards the late issuance response when the workspace switches mid-flight', async () => {
+    // 签发竞态：A 的 Promise 在切换到 B 之后 resolve，A 的一次性明文
+    // 不能出现在 B 面板（面板文案声称凭据绑定当前 workspace）。
+    let resolveCreate: (value: {
+      token_id: string
+      api_token: string
+      workspace_id: string
+      label: string
+    }) => void
+    mockCreate.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve
+      })
+    )
+    const { rerender } = renderSection(WORKSPACE_ID)
+
+    fireEvent.change(screen.getByLabelText('API Token 名称'), {
+      target: { value: 'form-agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '签发' }))
+    await waitFor(() => {
+      expect(mockCreate).toHaveBeenCalledWith(WORKSPACE_ID, {
+        label: 'form-agent',
+        ttl_hours: undefined,
+      })
+    })
+
+    // 切到 workspace B，A 的响应才返回：过期响应必须被丢弃。
+    rerender(
+      <TestQueryProvider>
+        <WorkspaceApiTokensSection workspaceId="ws-other" />
+      </TestQueryProvider>
+    )
+    resolveCreate!({
+      token_id: 'tok-5',
+      api_token: 'tok-5.secret-value',
+      workspace_id: WORKSPACE_ID,
+      label: 'form-agent',
+    })
+
+    await waitFor(() => {
+      expect(mockList).toHaveBeenCalledWith('ws-other')
+    })
+    expect(screen.queryByTestId('created-api-token')).toBeNull()
+    expect(screen.queryByText('tok-5.secret-value')).toBeNull()
+  })
+})

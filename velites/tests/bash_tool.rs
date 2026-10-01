@@ -1,7 +1,8 @@
 //! Bash tool tests: timeout terminates the whole process group (no leftover
 //! grandchildren), normal/exit-code paths behave, and the #469 phase timing
 //! (spawn / first output byte / steady run / reap) is measured on every
-//! path.
+//! path. The #637 per-stream capture-cap cases live in the sibling
+//! `bash_tool_capture_cap.rs` (split at 800 lines, #689 codex round 3).
 
 use std::time::Duration;
 

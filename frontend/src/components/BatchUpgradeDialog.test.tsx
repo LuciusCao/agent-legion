@@ -93,7 +93,31 @@ describe('BatchUpgradeDialog', () => {
     await act(async () => {
       fireEvent.click(screen.getByText('升级 1 个任务'))
     })
-    expect(onConfirm).toHaveBeenCalledWith(['j1'])
+    expect(onConfirm).toHaveBeenCalledWith(['j1'], 'clean')
+  })
+
+  it('calls onConfirm with the inherit mode when selected', async () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BatchUpgradeDialog
+        open
+        jobs={[
+          {
+            id: 'j1',
+            name: 'Job 1',
+            status: 'completed',
+            isWorkflowOutdated: true,
+          },
+        ]}
+        onClose={vi.fn()}
+        onConfirm={onConfirm}
+      />
+    )
+    fireEvent.click(screen.getByText(/继承未变节点产物/))
+    await act(async () => {
+      fireEvent.click(screen.getByText('升级 1 个任务'))
+    })
+    expect(onConfirm).toHaveBeenCalledWith(['j1'], 'inherit')
   })
 
   it('shows skip reasons for non-upgradeable jobs', () => {
@@ -132,6 +156,34 @@ describe('BatchUpgradeDialog', () => {
       />
     )
     expect(container.firstChild).toBeNull()
+  })
+
+  it('keeps the dialog open and preserves the selected mode when confirm fails', async () => {
+    const onConfirm = vi.fn().mockRejectedValue(new Error('upgrade failed'))
+    render(
+      <BatchUpgradeDialog
+        open
+        jobs={[
+          {
+            id: 'j1',
+            name: 'Job 1',
+            status: 'completed',
+            isWorkflowOutdated: true,
+          },
+        ]}
+        onClose={vi.fn()}
+        onConfirm={onConfirm}
+      />
+    )
+    fireEvent.click(screen.getByText(/继承未变节点产物/))
+    await act(async () => {
+      fireEvent.click(screen.getByText('升级 1 个任务'))
+    })
+    expect(onConfirm).toHaveBeenCalledWith(['j1'], 'inherit')
+    expect(screen.getByText('确认升级 workflow')).toBeInTheDocument()
+    expect(
+      screen.getByRole('radio', { name: /继承未变节点产物/ })
+    ).toBeChecked()
   })
 
   it('shows loading state on confirm and disables buttons', () => {

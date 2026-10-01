@@ -17,7 +17,7 @@ const mockResume = vi.mocked(resumeApi)
 const MEMORY_KEY = 'studio-chat.active-session.ws1'
 
 // 该 jsdom 环境不提供 localStorage：用内存 stub 验证持久化读写（同
-// useStudioRightPanelWidth.test.tsx 的模式）。
+// Drawer 系测试的模式）。
 function installLocalStorageStub() {
   const store = new Map<string, string>()
   const stub: Storage = {
@@ -50,6 +50,7 @@ function sessionRecord(
     acp_session_id: null,
     capability_snapshot: {},
     allow_all_permissions: false,
+    compacting: false,
     mcp_status: 'unknown',
     selected_node_key: null,
     error_detail: '',

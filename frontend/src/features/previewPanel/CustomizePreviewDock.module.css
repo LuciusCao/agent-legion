@@ -1,0 +1,29 @@
+/*
+ * 「定制预览」Dock 面板布局（#795 PR① 迁入 AgentPanelDock；#796 验收返工
+ * 收敛为纯对话）：对话骨架吃满内容区、消息列表内部滚动、composer 钉底
+ * （flex 链：body → AgentChatPanel.chatPanel(height:100%) →
+ * .messages(flex:1)——贴底能力由 AgentChatPanel 自身布局提供，这里只保证
+ * 高度链传递）。整体尺寸由 Dock 容器承担（可拖拽/可缩放）。
+ */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.chatArea {
+  flex: 1;
+  min-height: 0;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--color-text-secondary, #43474e);
+}
+
+.error {
+  color: #ba1a1a;
+  font-size: 13px;
+}

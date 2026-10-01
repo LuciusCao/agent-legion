@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# SIGPIPE immunity (issue #679): this dispatcher execs the worktree's
+# .githooks/pre-push, so whatever disposition is set here survives into the
+# real hook (and from there into run-local-gate.sh). git runs the pre-push
+# hook on the push's own stdout/stderr; when that stream is a pipe whose
+# reader walks away (agent harness output caps, `git push | tail`, a killed
+# session), a write to the dead pipe must not kill the hook with SIGPIPE
+# (141) — git would abort the push even though the gate had already passed
+# and recorded its evidence. The exec'd chain re-asserts the trap itself, so
+# an older common-dir dispatcher with a newer worktree hook stays fixed too.
+trap '' PIPE
+
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 HOOK="$ROOT_DIR/.githooks/pre-push"
 

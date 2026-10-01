@@ -1,8 +1,7 @@
+/* 移动端面板切换（≤900px）：非激活面板隐藏。#804 抽屉化后节点详情是
+ * Drawer 浮层不参与面板切换，只剩画布/Agent 两页签。 */
 .layout {
   composes: layout from './WorkflowStudioPage.module.css';
-}
-.withInspector {
-  composes: withInspector from './WorkflowStudioPage.module.css';
 }
 @media (max-width: 900px) {
   .layout {
@@ -14,9 +13,5 @@
   }
   .activePanel {
     display: flex;
-  }
-  .sidePanel {
-    width: 100%;
-    border-inline: none;
   }
 }

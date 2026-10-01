@@ -8,6 +8,9 @@ export interface NumberFieldDef {
   integer: boolean
   // 允许 0（语义为「关闭」的字段，如材料 TTL）；缺省要求 > 0。
   allowZero?: boolean
+  // input 的 min 属性 + 客户端下界校验（与后端契约一致，如 #786 的
+  // ge=1024）；缺省为 0。
+  min?: number
   // input 的 max 属性（与后端契约上界一致）；缺省不设。
   max?: number
   // 字段级提示，覆盖卡片顶部的统一文案（如热读字段无需重启）。

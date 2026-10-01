@@ -13,6 +13,9 @@ interface JobProgressPanelProps {
   nodes: JobNode[]
   runs: NodeRun[]
   onOpenDagDialog?: () => void
+  /** 唤起排查 Dock（#795 PR③）：失败节点的「排查」入口经它上行到
+   * JobDetailPage 的 Dock 宿主（带节点上下文）。 */
+  onOpenDiagnosis?: (target: { nodeKey: string; nodeLabel: string }) => void
 }
 
 export function JobProgressPanel({
@@ -20,6 +23,7 @@ export function JobProgressPanel({
   nodes,
   runs,
   onOpenDagDialog,
+  onOpenDiagnosis,
 }: JobProgressPanelProps) {
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
   const [logDialog, setLogDialog] = useState<{
@@ -84,6 +88,7 @@ export function JobProgressPanel({
               isExpanded={expandedErrors.has(node.node_key)}
               onToggleError={toggleError}
               onOpenLog={setLogDialog}
+              onOpenDiagnosis={onOpenDiagnosis}
             />
           ))}
         </div>

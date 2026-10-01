@@ -114,6 +114,23 @@ class BatchHeartbeatRegistry:
         ownership_lost: threading.Event,
         on_cancelled: Callable[[list[str]], Any] | None = None,
     ) -> _LeaseEntry:
+        """The executor arm's claim-time register: OVERWRITES any entry under
+        this execution_id (claim time owns the slot — a Host requeue + this
+        Worker's re-claim replaces the old attempt's entry wholesale).
+
+        #644 attack review: an entry being displaced here belongs to a lease
+        the Host has already reassigned, and that lease may still have a
+        live consumer on the upload side (an armed queued task whose
+        pair-matched quiesce/resume can never match again, and whose lease
+        will never appear in another beat — the new snapshot carries only
+        the NEW lease). By definition that old lease is dead: fire the
+        displaced entry's ownership_lost so the old task's report loop
+        takes its terminal abandon instead of retrying to the 60s cap
+        forever under a report-plane partition (pinning upload lanes).
+        Same lease never lands here — the rebind path is register_upload's
+        own branch — and the incoming claim's event is never touched, so a
+        healthy re-claim cannot be mis-condemned (isomorphic to the
+        mismatch-arm argument in ``register_upload``)."""
         entry = _LeaseEntry(
             execution_id=execution_id,
             lease_id=lease_id,
@@ -121,8 +138,103 @@ class BatchHeartbeatRegistry:
             on_cancelled=on_cancelled,
         )
         with self._lock:
+            current = self._entries.get(execution_id)
+            if current is not None and current is not entry:
+                current.ownership_lost.set()
             self._entries[execution_id] = entry
         return entry
+
+    def register_upload(
+        self,
+        execution_id: str,
+        lease_id: str,
+        ownership_lost: threading.Event,
+    ) -> _LeaseEntry:
+        """#644: the upload arm's register — NEVER displaces a re-claimed
+        attempt's entry, and CONDEMNS an old task arming against one.
+
+        The executor arm's ``register`` must overwrite a requeued execution's
+        OLD entry with the new lease (claim time owns the slot). This arm arms
+        a queued upload task, which may be the OLD attempt's task racing the
+        re-claim: its displacing register deleted the new attempt's entry and
+        the old attempt's pair-matched prune then removed its own — the
+        execution ended up with NO entry, its new lease silently expired
+        unrenewed (result loss + requeue spiral). Same-lease replacement (the
+        executor→upload handover) stays: it rebinds the entry to the task's
+        shared ownership_lost event (#644).
+
+        A lease MISMATCH here means the registry already holds the re-claimed
+        attempt's entry — the incoming task's lease is by definition gone
+        (the Host reassigned it). The old task is condemned on the spot
+        (#644 review): its pair-matched quiesce/resume can never find an
+        entry, and no beat will ever return a lost verdict for the dead
+        lease, so without this its report loop would retry to the 60s cap
+        forever, pinning upload lanes (the storm engine this PR fixes). The
+        registry itself stays untouched — the new entry is returned as-is.
+
+        Same-lease rebind (the executor→upload handover) inherits the
+        displaced entry's terminal state (#644 attack review): a lost
+        verdict that landed on the executor-era entry — during the
+        adopt→submit gap or in flight against a snapshotted entry while the
+        rebound entry was being installed — must not vanish with the old
+        entry object, or the task's report loop would retry to the cap
+        forever under a report-plane partition. quiesce is deliberately NOT
+        inherited: the report lane owns that flag from here on (the rebind
+        happens before the first quiesce). proc_ref/adopted are inherited
+        (the adopt semantics ride the entry, not the caller's timing — a
+        rebind before adopt must not resurrect the zombie stop).
+        #644 codex3 P2: the rebind additionally REDIRECTS the displaced
+        entry's event field to the caller's (task's) event object before
+        the displaced object leaves the registry. A beat already in flight
+        against the displaced object (batch chunk, degraded single-beat
+        thread, relay round racing the snapshot) sets
+        ``entry.ownership_lost`` when its response ARRIVES — after this
+        rebind already read ``is_set()`` — and without the redirect that
+        late set lands on the executor-era event object, which the task's
+        ``_report`` never polls (the state inheritance above cannot see a
+        verdict that has not landed yet). The entry's own event stays the
+        caller's (the task wiring is unchanged); only the displaced
+        object's field is pointed at it, so every late set converges on the
+        event the delivery plane polls. Events are never cleared, so the
+        redirect is safe in every branch: on an already-set caller event
+        the late set is a no-op, and a torn read (setter grabbed the old
+        object just before the swap) is covered by the next beat round —
+        the Host's per-item predicate is idempotent and re-judges the same
+        dead lease, and a lease that left the beat plane entirely is
+        condemned at displacement by ``register``."""
+        entry = _LeaseEntry(
+            execution_id=execution_id,
+            lease_id=lease_id,
+            ownership_lost=ownership_lost,
+        )
+        with self._lock:
+            current = self._entries.get(execution_id)
+            if current is not None and current.lease_id != lease_id:
+                # A re-claimed attempt owns the slot: keep its entry, but the
+                # incoming (old) task must not outlive its dead lease — fire
+                # its terminal event so _report's next ownership check
+                # abandons the moot delivery instead of retrying.
+                ownership_lost.set()
+                return current
+            if current is not None:
+                # #644 attack review: the handover rebind — inherit the
+                # executor-era entry's terminal verdict (a beat 409 that
+                # landed on it during the adopt→submit gap or in flight
+                # against the snapshotted old entry object; without the
+                # inheritance the verdict dies with the old entry and the
+                # task retries forever). Events are idempotent — set() on a
+                # fresh event for a live lease is a no-op that cannot fire.
+                if current.ownership_lost.is_set():
+                    ownership_lost.set()
+                # codex3 P2: redirect the displaced object's event field to
+                # the caller's event so the in-flight verdict lands on the
+                # event _report polls (see method docstring).
+                current.ownership_lost = ownership_lost
+                entry.proc_ref = current.proc_ref
+                if current.adopted.is_set():
+                    entry.adopted.set()
+            self._entries[execution_id] = entry
+            return entry
 
     def prune(self, execution_id: str, lease_id: str) -> None:
         """Stop beating one lease (result delivered, ownership lost, discard).

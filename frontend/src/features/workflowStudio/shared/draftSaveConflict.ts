@@ -36,10 +36,17 @@ export function conflictEnteredState(
   }
 }
 
-/* 冲突解除（resolveConflict(keep-mine)/画布回退到已持久化值）：仅清
-   冲突标记，状态与 savedAt 保持不变（keep-mine 的保存会推进它们）。 */
+/* 冲突解除（resolveConflict(keep-mine)/画布回退到已持久化值）：清冲突
+   标记；#804 轮 6 H6：status 从 error（冲突态的占位，横幅语义靠
+   conflict 标记而非 error 本身）收敛到 saved/idle——采用 Agent 版本成功
+   后不该留假 error 态。keep-mine 随后的保存会推进 savedAt/status。 */
 export function conflictClearedState(current: DraftSaveState): DraftSaveState {
-  return { ...current, conflict: false, conflictDraftYaml: undefined }
+  return {
+    ...current,
+    status: current.savedAt ? 'saved' : 'idle',
+    conflict: false,
+    conflictDraftYaml: undefined,
+  }
 }
 
 /* 冲突解除后挂起的 keep-mine 保存是否应发起：有 pending 内容才补发。 */

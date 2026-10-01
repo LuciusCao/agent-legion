@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Button,
   Dialog,
@@ -5,6 +6,8 @@ import {
   DialogContent,
   DialogTitle,
 } from '@mui/material'
+import type { UpgradeMode } from '../types/jobTypes'
+import { UpgradeModeSelector } from './job/UpgradeModeSelector'
 import styles from './BatchUpgradeDialog.module.css'
 
 export type BatchUpgradeJobItem = {
@@ -19,7 +22,10 @@ export type BatchUpgradeDialogProps = {
   jobs: BatchUpgradeJobItem[]
   itemLabel?: string
   loading?: boolean
-  onConfirm: (upgradableJobIds: string[]) => void | Promise<void>
+  onConfirm: (
+    upgradableJobIds: string[],
+    mode: UpgradeMode
+  ) => void | Promise<void>
   onClose: () => void
 }
 
@@ -41,6 +47,7 @@ export function BatchUpgradeDialog({
   onConfirm,
   onClose,
 }: BatchUpgradeDialogProps) {
+  const [mode, setMode] = useState<UpgradeMode>('clean')
   if (!open) return null
 
   const selectedCount = jobs.length
@@ -50,7 +57,12 @@ export function BatchUpgradeDialog({
   const completedCount = jobs.filter((j) => j.status === 'completed').length
 
   const handleConfirm = async () => {
-    await onConfirm(upgradableJobIds)
+    try {
+      await onConfirm(upgradableJobIds, mode)
+    } catch {
+      // The action owns error presentation. Keep the dialog (and selected
+      // mode) open so the user can retry after a failed request.
+    }
   }
 
   return (
@@ -69,6 +81,7 @@ export function BatchUpgradeDialog({
       <DialogTitle>确认升级 workflow</DialogTitle>
       <DialogContent>
         <div className={styles.content}>
+          <UpgradeModeSelector value={mode} onChange={setMode} />
           <div className={styles.jobList}>
             {jobs.map((job) => {
               const upgradable = isUpgradeable(job)
@@ -86,7 +99,10 @@ export function BatchUpgradeDialog({
           </div>
           <div className={styles.summary}>
             已选择 {selectedCount} 个{itemLabel}，可升级 {upgradableCount}{' '}
-            个；其中 {completedCount} 个已完成，升级后将清空产物。
+            个；其中 {completedCount} 个已完成
+            {mode === 'clean'
+              ? '，升级后将清空产物。'
+              : '，未变节点将继承既有产物。'}
           </div>
         </div>
       </DialogContent>

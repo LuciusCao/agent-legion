@@ -28,7 +28,11 @@ class SessionRuntime:
         self.handle = handle
         # Raw scoped token, held only to revoke on close; never leaves memory.
         self.token = token
-        self.lock = threading.Lock()
+        # RLock, not Lock: send_message's turn-start critical section (#694
+        # review R2-P1) calls helpers that take the same lock on the same
+        # thread (prepare_resume_prompt / rearm_resume_transcript in
+        # resume_context.py). Cross-thread exclusion semantics are unchanged.
+        self.lock = threading.RLock()
         self.pending_permissions: dict[str, PendingPermission] = {}
         # Set under lock by teardown before the pending-permission settle
         # sweep: a permission request that parks afterwards (it takes the same
@@ -63,3 +67,29 @@ class SessionRuntime:
         # write-back.
         self.config_lock = threading.Lock()
         self.config_version = 0
+        # #694 context-health signals (compaction.py): loading suppresses
+        # session/load replay chunks — armed by spawn_session_runtime only
+        # when a session/load is actually attempted (resume with a prior ACP
+        # session id), closed by the first post-resume prompt in
+        # send_message; compacting mirrors the kimi background-compaction
+        # window (send guard + UI), self-clearing after
+        # compaction.COMPACTING_TIMEOUT_SECONDS via compacting_since.
+        self.loading = False
+        self.compacting = False
+        self.compacting_since: float | None = None
+        # Active self-clear timer for the current compaction window
+        # (compaction.py #694 review P1); cancelled on completion/teardown.
+        self.compact_timer: threading.Timer | None = None
+        # #694 review R2-P2 marker gate: kimi_agent is stamped at on_ready
+        # from the registry agent id / ACP agentInfo name; turn_open spans a
+        # prompt turn (send_message → turn close), and turn_may_compact marks
+        # a /compact turn (manual compaction emits its markers in-turn).
+        self.kimi_agent = False
+        self.turn_open = False
+        self.turn_may_compact = False
+        # Per-turn bookkeeping for the degenerate-turn detector: send_message
+        # stamps turn_started_at / zeroes turn_update_count / records whether
+        # the prompt was a slash command; on_update counts content updates.
+        self.turn_started_at: float | None = None
+        self.turn_update_count = 0
+        self.turn_slash_command = False

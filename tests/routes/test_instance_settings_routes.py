@@ -36,7 +36,7 @@ def _payload() -> dict:
         "code_capacity": 16,
         "materials_ttl_days": 0,
         "execution_retention_days": 0,
-        "workflows": {"max_items_per_run": 20_000},
+        "workflows": {"max_items_per_run": 20_000, "node_code_max_bytes": 64 * 1024},
         "agent_workers": {
             "max_archive_bytes": 64 * 1024 * 1024,
             "min_protocol_version": 1,
@@ -267,6 +267,39 @@ def test_put_rejects_retired_openclaw_block(client) -> None:
     payload = _payload()
     payload["openclaw"] = {"cwd": "/tmp/openclaw"}
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+
+
+def test_put_validates_node_code_max_bytes(client) -> None:
+    """#786: node_code_max_bytes rides the workflows block (ge=1024, mirroring
+    WorkflowsRuntimeConfig); it is a required full-document key like
+    max_items_per_run — an omitting PUT must not silently reset the budget."""
+    payload = _payload()
+    payload["workflows"]["node_code_max_bytes"] = 512
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["workflows"]["node_code_max_bytes"] = 1024
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+    payload = _payload()
+    del payload["workflows"]["node_code_max_bytes"]
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+
+
+def test_get_legacy_document_missing_node_code_max_bytes_falls_back(client) -> None:
+    """#786: a stored document written before node_code_max_bytes became
+    instance-settings managed carries no such key; GET must fall back to the
+    loaded runtime value (env > 64KB code default) instead of failing
+    response validation."""
+    from server.app.services.instance_settings_store import InstanceSettingsStore
+
+    store = InstanceSettingsStore(client.app.state.job_db.dsn_identity)
+    document = _payload()
+    del document["workflows"]["node_code_max_bytes"]
+    store.put(document)
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["workflows"]["node_code_max_bytes"] == 64 * 1024
 
 
 def test_get_legacy_document_missing_capacity_blocks_falls_back(client) -> None:

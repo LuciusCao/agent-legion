@@ -121,7 +121,7 @@ fi
 # 4. 派生 S3 bucket：与 init-worktree.sh 同一派生规则与 env 加载。
 export CLEAN_WORKTREE_WT="$WT"
 export CLEAN_WORKTREE_YES="$ASSUME_YES"
-if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
+if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run --frozen python - <<'PY'
 import os
 import re
 import sys

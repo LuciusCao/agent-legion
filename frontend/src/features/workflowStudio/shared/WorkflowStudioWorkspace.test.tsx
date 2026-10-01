@@ -1,9 +1,12 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { expectConsoleError, expectConsoleWarning } from '../../../test-setup'
+import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioWorkspace } from './WorkflowStudioWorkspace'
+import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import { api } from '../../../api'
-import { TestQueryProvider } from '../../../testing/testQueryClient'
+import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { useSettingStore } from '../../../stores/settingStore'
 import type { WorkspaceSettings } from '../../../types'
 
@@ -32,6 +35,110 @@ vi.mock('../../../api/studioPublishRequestApi', () => ({
 }))
 
 const mockApi = vi.mocked(api)
+
+// 该 jsdom 环境不提供 localStorage：用内存 stub（Dock 容器按 surface key
+// 记忆位置/折叠态；同 agentPanelDock 测试的模式）。
+function installLocalStorageStub() {
+  const store = new Map<string, string>()
+  const stub: Storage = {
+    get length() {
+      return store.size
+    },
+    clear: () => store.clear(),
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    removeItem: (key) => void store.delete(key),
+    setItem: (key, value) => void store.set(key, String(value)),
+  }
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: stub,
+  })
+  return stub
+}
+
+const localStorageStub = installLocalStorageStub()
+
+/** 窄屏判定桩（useStudioNarrowViewport 走 matchMedia，jsdom 没有——
+ * 宽屏语义为缺省）：测试里按场景钉住 ≤900px 断点。 */
+const originalMatchMedia = window.matchMedia
+
+function stubNarrowViewport(matches: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: (query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  })
+}
+
+function restoreViewportMatchMedia() {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: originalMatchMedia,
+  })
+}
+
+/** 真 view（跑真实 useWorkflowStudioPageView 的组合逻辑）渲染：页签/开关
+ * 联动测试用——makeStudioView 是静态伪造，点击不改状态。 */
+function renderWorkspaceLive() {
+  const props = {
+    workflow,
+    executorCatalog,
+    agentCatalog: [],
+    agentCatalogSettle: {
+      catalogSettled: true,
+      catalogFailed: false,
+      definitionsSettled: true,
+      definitionsFailed: false,
+    },
+    selectedNodeKey: null,
+    setSelectedNodeKey: vi.fn(),
+    readOnly: false,
+    definitionYaml: 'key: demo_video_workflow\n',
+    setDefinitionYaml: vi.fn(),
+    backToDraft: vi.fn(),
+    // #799 浮动岛消费的 studio 字段（岛挂在 Workspace 内）。
+    revision: null,
+    revisions: [],
+    activeRevision: null,
+    viewMode: 'draft',
+    hasPreservedDraft: false,
+    compareSummary: null,
+    compareState: 'idle',
+    publishing: false,
+    validating: false,
+    canSubmit: true,
+    canPublish: true,
+    selectedRevisionId: null,
+    isLoadingRevision: false,
+    revisionLoadError: null,
+    selectRevision: vi.fn(),
+    requestPublish: vi.fn(),
+    resetDefinition: vi.fn(),
+    useViewedRevisionAsDraft: vi.fn(),
+  }
+  function LiveViewHarness({ children }: { children: ReactNode }) {
+    const view = useWorkflowStudioPageView()
+    return withStudioProviders(props, view, children)
+  }
+  return render(
+    <MemoryRouter>
+      <LiveViewHarness>
+        <WorkflowStudioWorkspace />
+      </LiveViewHarness>
+    </MemoryRouter>
+  )
+}
 
 const workflow = {
   key: 'demo_video_workflow',
@@ -89,16 +196,34 @@ function renderWorkspace(
     definitionYaml: 'key: demo_video_workflow\n',
     setDefinitionYaml: vi.fn(),
     backToDraft: vi.fn(),
-    setDagFullscreenOpen: vi.fn(),
+    // #799 浮动岛消费的 studio 字段（岛挂在 Workspace 内）。
+    revision: null,
+    revisions: [],
+    activeRevision: null,
+    viewMode: 'draft',
+    hasPreservedDraft: false,
+    compareSummary: null,
+    compareState: 'idle',
+    publishing: false,
+    validating: false,
+    canSubmit: true,
+    canPublish: true,
+    selectedRevisionId: null,
+    isLoadingRevision: false,
+    revisionLoadError: null,
+    selectRevision: vi.fn(),
+    requestPublish: vi.fn(),
+    resetDefinition: vi.fn(),
+    useViewedRevisionAsDraft: vi.fn(),
     ...overrides,
   } as unknown as Record<string, unknown>
   const view = makeStudioView(viewOverrides)
   return {
     setSelectedNodeKey: props.setSelectedNodeKey,
     ...render(
-      <TestQueryProvider>
+      <MemoryRouter>
         {withStudioProviders(props, view, <WorkflowStudioWorkspace />)}
-      </TestQueryProvider>
+      </MemoryRouter>
     ),
   }
 }
@@ -106,6 +231,8 @@ function renderWorkspace(
 describe('WorkflowStudioWorkspace', () => {
   beforeEach(() => {
     mockApi.mockReset()
+    // Dock 容器按 surface key 记忆位置/折叠态：用例间不互相泄漏。
+    localStorageStub.clear()
     useSettingStore.setState({ workspaceId: 'ws1', settings: baseSettings })
     mockApi.mockResolvedValue({
       origin: 'builtin',
@@ -116,62 +243,126 @@ describe('WorkflowStudioWorkspace', () => {
     })
   })
 
-  it('shows DAG and the agent panel side by side by default', () => {
+  it('shows the DAG full-width and the agent dock floating above it by default', () => {
     renderWorkspace()
 
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
-    const agentPanel = screen.getByRole('complementary', {
-      name: 'Agent 对话面板',
-    })
-    expect(agentPanel).not.toHaveAttribute('data-collapsed')
+    // #795 PR②：chat 迁入 AgentPanelDock 浮层（role=dialog，非模态），
+    // 不再是右侧栏 aside（complementary）。
+    const dock = screen.getByRole('dialog', { name: 'Agent 助手' })
+    expect(dock).toHaveAttribute('aria-modal', 'false')
+    expect(screen.queryByRole('complementary')).toBeNull()
     expect(screen.getByText('chat panel stub')).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '节点详情' })).toBeNull()
-    // #668：面板开关收敛到 appbar（CommandBar），画布工具条不再有开关。
+    // DAG 区全屏：无分栏（withInspector 只在选中节点详情时加）。
+    expect(document.querySelector('[class*="withInspector"]')).toBeNull()
+    // #668：面板开关收敛在顶栏体系——#799 起是右上操作岛（画布工具条
+    // 仍无开关）。
     expect(
-      screen.queryByRole('button', { name: 'toggle agent panel' })
-    ).not.toBeInTheDocument()
+      document.querySelector(
+        '[data-canvas-toolbar] [aria-label="toggle agent panel"]'
+      )
+    ).toBeNull()
+    expect(
+      within(screen.getByTestId('studio-action-island')).getByRole('button', {
+        name: 'toggle agent panel',
+      })
+    ).toBeInTheDocument()
   })
 
   // #668：agentOpen 提升到 StudioViewContext（appbar 开关写、布局读）；
-  // 收起态布局直接以 view.agentOpen=false 注入。
-  it('collapses the agent panel so the DAG takes the full width', () => {
+  // #795 PR②：关闭 = Dock 隐藏不卸载（#797 codex P1，折叠保状态走 Dock
+  // 的右下角小条；隐藏连小条也不渲染）。
+  it('closes the agent dock so the DAG takes the full width', () => {
     renderWorkspace({}, { agentOpen: false })
 
-    expect(
-      screen.getByRole('complementary', { name: 'Agent 对话面板' })
-    ).toHaveAttribute('data-collapsed', 'true')
+    expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
+    // 隐藏不卸载：聊天子树仍在 DOM（display:none），state/连接不断。
+    expect(screen.getByText('chat panel stub')).toBeInTheDocument()
   })
 
-  it('replaces the DAG with node detail (left half) when the agent panel is open', async () => {
+  it('codex P2（#797）：窄屏首进 Dock 不抢占画布——仅 Agent 页签选中时显示', () => {
+    stubNarrowViewport(true)
+    try {
+      // 窄屏 + 默认（agentOpen=true、mobilePanel=graph）：Dock 隐藏但子树
+      // 保持挂载（chat stub 仍在 DOM，display:none）。
+      renderWorkspaceLive()
+      expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
+      expect(screen.getByText('chat panel stub')).toBeInTheDocument()
+
+      // 切 Agent 页签：Dock 显示。
+      fireEvent.click(screen.getByRole('tab', { name: 'Agent' }))
+      expect(
+        screen.getByRole('dialog', { name: 'Agent 助手' })
+      ).toBeInTheDocument()
+    } finally {
+      restoreViewportMatchMedia()
+    }
+  })
+
+  it('codex P2（#797）：窄屏 Agent 页签关闭 Dock 回画布，不留空白工作区', () => {
+    // 岛上 MUI IconButton 的 ripple/tooltip 状态更新脱离 act（known noise）。
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    stubNarrowViewport(true)
+    try {
+      renderWorkspaceLive()
+      fireEvent.click(screen.getByRole('tab', { name: 'Agent' }))
+      expect(
+        screen.getByRole('dialog', { name: 'Agent 助手' })
+      ).toBeInTheDocument()
+
+      // 关闭按钮走组合出口（toggleAgent）：agentOpen 翻 false + 页签回画布。
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+      expect(screen.getByRole('tab', { name: '画布' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      )
+      expect(screen.getByRole('tab', { name: 'Agent' })).toHaveAttribute(
+        'aria-selected',
+        'false'
+      )
+      expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
+      // 隐藏不卸载：聊天子树仍在 DOM。
+      expect(screen.getByText('chat panel stub')).toBeInTheDocument()
+    } finally {
+      restoreViewportMatchMedia()
+    }
+  })
+
+  it('点中节点开详情抽屉（#804 抽屉化：不占分栏轨道，画布永远全宽）', async () => {
     renderWorkspace({ selectedNodeKey: 'fetch_items' })
 
-    const detail = screen.getByRole('region', { name: '节点详情' })
-    expect(detail).toHaveAttribute('data-placement', 'left')
-    expect(detail).toHaveTextContent('知识视频 DAG / 获取题目')
+    // 抽屉内容：节点名 + inspector 章节；无「返回 DAG」面包屑。
+    const detail = screen.getByLabelText('节点详情')
+    expect(detail).toHaveTextContent('获取题目')
     expect(screen.getByText('基本设置')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '返回 DAG' })).toBeNull()
+    // 不再有分栏（withInspector 退役），画布保留，Dock 照常浮在上方。
+    expect(document.querySelector('[class*="withInspector"]')).toBeNull()
+    expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
+    expect(
+      screen.getByRole('dialog', { name: 'Agent 助手' })
+    ).toBeInTheDocument()
     // 等节点代码异步加载落地，避免 act 警告。
     await screen.findByText(/出厂版本/)
   })
 
-  it('puts node detail on the right half next to the DAG when the agent panel is collapsed', async () => {
+  it('Dock 关闭时点中节点同样开抽屉', async () => {
     renderWorkspace({ selectedNodeKey: 'fetch_items' }, { agentOpen: false })
 
-    const detail = screen.getByRole('region', { name: '节点详情' })
-    expect(detail).toHaveAttribute('data-placement', 'right')
-    expect(
-      screen.getByRole('complementary', { name: 'Agent 对话面板' })
-    ).toHaveAttribute('data-collapsed', 'true')
+    expect(screen.getByLabelText('节点详情')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Agent 助手' })).toBeNull()
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
     await screen.findByText(/出厂版本/)
   })
 
-  it('returns to the DAG via the breadcrumb back button', async () => {
+  it('关闭抽屉回到纯画布（✕ 即返回语义）', async () => {
     const { setSelectedNodeKey } = renderWorkspace({
       selectedNodeKey: 'fetch_items',
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '返回 DAG' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭节点配置' }))
     expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
     await screen.findByText(/出厂版本/)
   })

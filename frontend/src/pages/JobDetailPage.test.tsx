@@ -12,6 +12,9 @@ import { MemoryRouter } from '../testing/TestMemoryRouter'
 import JobDetailPage from './JobDetailPage'
 import { useUiStore } from '../stores/uiStore'
 
+// 排查 Dock 接线用例在姊妹文件 JobDetailPage.inspectDock.test.tsx（本文件
+// 贴近 1000 行硬上限拆分；面板 stub 也在那边）。
+
 const mockDetail = {
   job: {
     id: 'j1',

@@ -77,6 +77,7 @@ def _run_pass(worker, monkeypatch, *, succeed_remote: bool = True) -> int:
         inputs,
         workflow_key,
         shard_runtime=None,
+        execution_generation=0,
     ):
         if succeed_remote:
             submitted["n"] += 1

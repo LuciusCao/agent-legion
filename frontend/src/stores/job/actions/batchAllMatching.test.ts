@@ -204,12 +204,33 @@ describe('batch actions in allMatching selection mode', () => {
 
     await useJobStore.getState().batchUpgradeWorkflow('ws1')
 
-    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith('ws1', {
-      filter: SELECTION_FILTER,
-      excludeIds: ['j9'],
-    })
+    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith(
+      'ws1',
+      {
+        filter: SELECTION_FILTER,
+        excludeIds: ['j9'],
+      },
+      'clean'
+    )
     expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
     expect(useJobStore.getState().selectionMode).toBe('explicit')
+  })
+
+  it('batchUpgradeWorkflow passes the inherit mode through', async () => {
+    enterAllMatching()
+
+    await useJobStore
+      .getState()
+      .batchUpgradeWorkflow('ws1', undefined, 'inherit')
+
+    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith(
+      'ws1',
+      {
+        filter: SELECTION_FILTER,
+        excludeIds: ['j9'],
+      },
+      'inherit'
+    )
   })
 
   it('batchUpgradeWorkflow keeps per-job calls for explicit ids', async () => {
@@ -218,7 +239,7 @@ describe('batch actions in allMatching selection mode', () => {
     await useJobStore.getState().batchUpgradeWorkflow('ws1', ['j1'])
 
     expect(mockBatchUpgradeJobsWorkflow).not.toHaveBeenCalled()
-    expect(mockUpgradeJobWorkflow).toHaveBeenCalledWith('j1')
+    expect(mockUpgradeJobWorkflow).toHaveBeenCalledWith('j1', 'clean')
   })
 
   it('rerunByFailureCategory sends the filter payload with exclusions', async () => {
@@ -258,6 +279,43 @@ describe('batch actions in allMatching selection mode', () => {
 
     expect(mockRefreshFirstPage).not.toHaveBeenCalled()
     expect(useJobStore.getState().selectionMode).toBe('allMatching')
+  })
+
+  it('batchUpgradeWorkflow refreshes the list even when the request fails', async () => {
+    // #759 P1: a failed batch upgrade may still have partially committed
+    // server-side — the list must be refreshed to reflect the authoritative
+    // state instead of staying stale.
+    enterAllMatching()
+    const showToast = vi.fn()
+    vi.mocked(useUiStore.getState).mockReturnValue(
+      createMockUiState({ showToast })
+    )
+    mockBatchUpgradeJobsWorkflow.mockRejectedValueOnce(new Error('boom'))
+
+    await expect(
+      useJobStore.getState().batchUpgradeWorkflow('ws1')
+    ).rejects.toThrow('boom')
+
+    expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
+    expect(showToast).toHaveBeenCalledWith('boom', 'error')
+    expect(useJobStore.getState().error).toBe('boom')
+    expect(useJobStore.getState().batchUpgradeWorkflowLoading).toBe(false)
+  })
+
+  it('batchUpgradeWorkflow surfaces the original error when the failure-branch refresh fails', async () => {
+    enterAllMatching()
+    vi.mocked(useUiStore.getState).mockReturnValue(
+      createMockUiState({ showToast: vi.fn() })
+    )
+    mockBatchUpgradeJobsWorkflow.mockRejectedValueOnce(new Error('boom'))
+    mockRefreshFirstPage.mockRejectedValueOnce(new Error('refresh boom'))
+
+    await expect(
+      useJobStore.getState().batchUpgradeWorkflow('ws1')
+    ).rejects.toThrow('boom')
+
+    expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
+    expect(useJobStore.getState().error).toBe('boom')
   })
 
   it('explicit mode still sends job id lists', async () => {

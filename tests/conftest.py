@@ -710,6 +710,30 @@ def _reset_client_state(client: TestClient, default_headers: dict[str, str]) -> 
     # skipping it (#91).
     rate_limiter = client.app.state.auth_service._rate_limiter
     rate_limiter._entries.clear()
+    # Same in-process class of state for the job-list aggregates: TtlCache
+    # (#358) serves snapshot totals/facets with a 7s TTL — longer than a
+    # test — and its key does not observe the per-test TRUNCATE. Without
+    # this clear, a facets/snapshot read in test N keeps serving test N's
+    # counts to test N+1 on the same shared app (observed as total=0-after-
+    # truncate poisoning when two #626 token test files run in one session).
+    # A fresh app starts with an empty cache, so this restores exactly the
+    # fresh-app condition. The service is not on app.state (it is built
+    # inside create_job_snapshot_router); reach it through the route
+    # closures, and fail soft only if the wiring changes shape — the routes
+    # are the thing being served, so a missing closure means the endpoints
+    # themselves moved.
+    from starlette.routing import Route as _Route
+
+    for route in client.app.routes:
+        if not isinstance(route, _Route):
+            continue
+        if getattr(route.endpoint, "__name__", "") != "snapshot_workspace_jobs":
+            continue
+        for cell in route.endpoint.__closure__ or ():
+            service = cell.cell_contents
+            if service.__class__.__name__ == "JobListQueryService":
+                service._aggregate_cache.clear()
+                break
 
 
 def _check_shared_app_invariants(app) -> list[str]:
