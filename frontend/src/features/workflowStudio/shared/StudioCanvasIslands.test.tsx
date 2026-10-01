@@ -212,6 +212,50 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     expect(screen.getByTestId('studio-action-island')).toBeInTheDocument()
   })
 
+  it('抽屉打开时被遮岛加 inert（#812 D4）：宽屏只 inert 被遮的右岛，可见左岛保持可交互（P2-1）', () => {
+    // 宽屏 720px 抽屉只遮右岛——persistent 抽屉非模态，左岛（返回/版本/
+    // 发布）完全可见，inert 它会误伤可见控件。revert 即红：不分级时左岛
+    // 也带 inert。
+    const { unmount } = renderIslands()
+    expect(screen.getByTestId('studio-identity-island')).not.toHaveAttribute(
+      'inert'
+    )
+    expect(screen.getByTestId('studio-action-island')).not.toHaveAttribute(
+      'inert'
+    )
+    unmount()
+
+    // 宽屏 + 共享素材抽屉打开：只右岛 inert。
+    renderIslands({}, { materialsOpen: true })
+    expect(screen.getByTestId('studio-identity-island')).not.toHaveAttribute(
+      'inert'
+    )
+    expect(screen.getByTestId('studio-action-island')).toHaveAttribute('inert')
+  })
+
+  it('节点详情抽屉打开同样只 inert 右岛（selectedNodeKey 非空，宽屏）', () => {
+    renderIslands({ selectedNodeKey: 'node-a' })
+    expect(screen.getByTestId('studio-action-island')).toHaveAttribute('inert')
+    expect(screen.getByTestId('studio-identity-island')).not.toHaveAttribute(
+      'inert'
+    )
+  })
+
+  it('窄屏抽屉全宽覆盖：双岛一起 inert（P2-1 分级）', () => {
+    narrowState.value = true
+    try {
+      renderIslands({}, { materialsOpen: true })
+      expect(screen.getByTestId('studio-identity-island')).toHaveAttribute(
+        'inert'
+      )
+      expect(screen.getByTestId('studio-action-island')).toHaveAttribute(
+        'inert'
+      )
+    } finally {
+      narrowState.value = false
+    }
+  })
+
   it('轮 4 P2-D：窄屏 dirty 时重置出口收进版本选择器菜单（带确认）', () => {
     const resetDefinition = vi.fn()
     const revision = {

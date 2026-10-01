@@ -24,6 +24,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Changed
 - Studio 聊天区草稿卡重做（issue #692）：workflow / 运行配置 / 草稿预览三类草稿卡统一视觉语言与发布入口，MUI 线性图标区分卡片类型，发布动作收敛为同一评审对话框链路。
 - Studio 对话输入区收编（#750）：会话菜单对齐卡片风格，上下文用量圆环与状态行收进输入卡片，对话区信息层级收敛。
+- velites 0.5.4 → 0.5.5 落版：velites-v0.5.4 tag 后 velites 子树积了 11 个未随任何 velites 版本线发布的改动——#637 内存硬上限系列（bash/read/json 读取硬上限、流式聚合全局封顶、触顶提示修正，详见上方 Fixed 的 #637 条目）。独立版本线随源码前进——三平台二进制经 velites-v0.5.5 tag 发布；scripts/install-worker.sh 默认版本同步到 0.5.5。
 
 ### Fixed
 - Studio 会话超时误显示完成 + 压缩窗口防护与对话骨架统一（issue #693/#694/#695，#698 与其 0.7.13 线收尾 #733）：超时轮不再被定妆为「已完成」；压缩窗口边界防护与容量透传修复长会话压缩截断；对话骨架（空态/加载/错误）三处统一。
@@ -43,6 +44,11 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Maintenance
 - 开发环境对齐（issue #526/#483）：`uv run` 全量 `--frozen`（镜像 index 不再污染 uv.lock），`.python-version` 钉 3.13；含 sigterm 用例竞态根治。
 - Release Notes / CHANGELOG 排版规范落版（#697）：`docs/release-notes.md` 收编排版红线与三条产品线（主仓 / worker / velites）的发布说明模板，velites release notes 改为按 conventional 前缀自动分组生成；存量 CHANGELOG（0.1.0–0.7.12 段）一次性重排为一条 bullet 一个逻辑行。
+
+## [Unreleased]
+
+### Added
+- 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进 run 请求，`RunService` 在全部校验通过后把它落成 ready 的 Markdown 材料（sha256 内容寻址、对象先暂存、材料行整批事务提交、`.md`/`.txt` 白名单、UTF-8 ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker 物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio 入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。同 hash 仅复用 ready 材料，上传中、失败或已过期材料返回 409，避免抢占浏览器上传或改写既有对象归属。设计见 docs/architecture/materials-and-runs-design.md §4.1。
 
 ## [0.7.12] - 2026-09-16
 
@@ -443,5 +449,4 @@ Initial open-source release.
 [0.3.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.2.0...v0.3.0-alpha
 [0.2.0]: https://github.com/LuciusCao/agent-legion/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LuciusCao/agent-legion/releases/tag/v0.1.0
-
 

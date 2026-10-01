@@ -68,7 +68,7 @@ export function buildOnboardingSteps(input: OnboardingStepsInput) {
       icon: 'add_task',
       title: '添加第一个任务',
       description:
-        '按条目类型（material / ref / bundle）添加条目，启动你的第一个任务。',
+        '按条目类型（material / ref / bundle / text）添加条目，启动你的第一个任务。',
       unlocked: published,
       actionLabel: '添加条目',
       onAction: input.openAddItems,
