@@ -93,6 +93,12 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
                 return "get_studio_context is unavailable: no chat session bound"
             return await client.call("GET", f"/chat-sessions/{config.session_id}/context")
 
+    # #749（开发者契约，不入工具 docstring——docstring 会进 LLM 上下文）：
+    # save_node_code_draft / save_agent_definition_draft 的响应携带刚写入
+    # 草稿的 code_hash / definition_hash。本工具面永不发布
+    # （STUDIO-AGENT-001），但人的发布流（检查器面板 / 聊天草稿卡）已用
+    # expected_hash 做事务内 CAS 核对——将来任何工具侧发布必须带保存响应
+    # 的 hash 作为 expected_hash（不匹配 409），绝不 hash-less 发布。
     @mcp.tool(structured_output=False)
     async def save_node_code_draft(
         workspace_id: str,
@@ -109,7 +115,8 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         node absent from any published revision is accepted only WITH it
         (without it → 404). Supply exactly one of code or code_path. code_path
         reads UTF-8 bytes from data/studio-mcp-files/<workspace_id>/ on the
-        MCP host (relative to that directory, or absolute within it)."""
+        MCP host (relative to that directory, or absolute within it).
+        The response carries the saved draft's code_hash."""
         _, client = await _client()
         source = await local_files.load_code(client, workspace_id, code, code_path)
         body: dict[str, Any] = {"code": source, "change_note": change_note or None}
@@ -140,6 +147,8 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         )
         return await local_files.export_response(workspace_id, output_path, response)
 
+    # 同 save_node_code_draft 上方的 #749 开发者契约（响应 hash 是未来
+    # 任何工具侧发布的必带 CAS 令牌）。
     @mcp.tool(structured_output=False)
     async def save_agent_definition_draft(
         workspace_id: str,
@@ -157,7 +166,8 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         → catalog default tier, requires_labels → {}, config_schema → {}). To
         change just one field on an existing Agent, first call
         get_agent_definitions and echo back every current value you want
-        kept. Draft only — a human publishes it in Studio."""
+        kept. Draft only — a human publishes it in Studio. The response
+        carries the saved draft's definition_hash."""
         body: dict[str, Any] = {
             "capability": capability,
             "runtime": runtime,
