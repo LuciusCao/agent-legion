@@ -37,11 +37,11 @@ const PROPAGATE_STATUS_LABELS: Record<
 function SharedMaterialsDrawer({
   workspaceId,
   onClose,
-  escapeSuppressed,
+  hidden,
 }: {
   workspaceId: string
   onClose: () => void
-  escapeSuppressed: boolean
+  hidden: boolean
 }) {
   const [openPath, setOpenPath] = useState<string | null>(null)
   const [confirmRow, setConfirmRow] = useState<SharedMaterialFileRow | null>(
@@ -51,10 +51,12 @@ function SharedMaterialsDrawer({
     SharedMaterialPropagateSkillResult[] | null
   >(null)
   // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault）；
-  // 与节点详情抽屉共存时由抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）；
-  // suppressed（窄屏非画布页签）时隐藏抽屉不占栈位。返回的 zIndex 挂到
-  // paper：栈位映射视觉层级，Esc 栈序 == 视觉序（#812 对抗轮 D2）。
-  const paperZIndex = useDrawerEscape(true, onClose, escapeSuppressed)
+  // 与节点详情抽屉共存时由抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。
+  // hidden（#812 P2-2：窄屏非画布页签——抽屉挂在 SplitLayout 层，不随画布列
+  // display:none，隐藏要自带）：paper display:none 不卸载（打开状态/内部
+  // 草稿保留），同时出 Esc 栈不占栈位。返回的 zIndex 挂到 paper：栈位映射
+  // 视觉层级，Esc 栈序 == 视觉序（#812 对抗轮 D2）。
+  const paperZIndex = useDrawerEscape(true, onClose, hidden)
   const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery({
     queryKey: extraQueryKeys.workspaceSharedMaterials(workspaceId),
@@ -81,7 +83,14 @@ function SharedMaterialsDrawer({
       open
       onClose={onClose}
       slotProps={{
-        paper: { className: styles.paper, style: { zIndex: paperZIndex } },
+        paper: {
+          className: styles.paper,
+          // hidden：display:none 而非卸载——打开状态与抽屉内草稿保留。
+          style: {
+            zIndex: paperZIndex,
+            ...(hidden ? { display: 'none' } : {}),
+          },
+        },
       }}
       /* 轮 8 P2：非模态——persistent variant 不走 Modal（无遮罩/不圈禁
          焦点/不锁滚动/不 aria-hidden 兄弟），Dock 与画布保持可交互；
@@ -245,15 +254,15 @@ export function WorkflowStudioSharedMaterialsDrawer() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const view = useStudioView()
   const { materialsOpen: open, setMaterialsOpen: setOpen } = view
-  // D3：窄屏非画布页签（所在面板被 data-mobile-panel display:none）时隐藏
-  // 抽屉不占 Esc 栈位。
-  const escapeSuppressed = view.narrow && view.mobilePanel !== 'graph'
+  // D3/P2-2：窄屏非画布页签时抽屉隐藏（paper display:none、不占 Esc
+  // 栈位）——抽屉挂在 SplitLayout 层，不随画布列 display:none。
+  const hidden = view.narrow && view.mobilePanel !== 'graph'
   if (!open || !workspaceId) return null
   return (
     <SharedMaterialsDrawer
       workspaceId={workspaceId}
       onClose={() => setOpen(false)}
-      escapeSuppressed={escapeSuppressed}
+      hidden={hidden}
     />
   )
 }

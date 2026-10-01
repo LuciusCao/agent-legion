@@ -31,11 +31,13 @@ export function WorkflowNodeDetailDrawer() {
     : undefined
   // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault，
   // Dock 的 Esc 处理器见 defaultPrevented 跳过）；与共享素材抽屉共存时由
-  // 抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。suppressed
-  // （#812 D3：窄屏非画布页签，所在面板 display:none）时隐藏抽屉不占
-  // 栈位。返回的 zIndex 挂到 paper：栈位映射视觉层级，Esc 栈序 == 视觉序。
-  const escapeSuppressed = view.narrow && view.mobilePanel !== 'graph'
-  const paperZIndex = useDrawerEscape(nodeKey !== null, close, escapeSuppressed)
+  // 抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。hidden（#812 D3 +
+  // P2-2：窄屏非画布页签——抽屉挂在 SplitLayout 层，不随画布列
+  // display:none，隐藏要自带）：paper display:none 不卸载（选中节点与预览
+  // 子态保留，切回画布页签原样复现），同时出 Esc 栈不占栈位。返回的
+  // zIndex 挂到 paper：栈位映射视觉层级，Esc 栈序 == 视觉序。
+  const hidden = view.narrow && view.mobilePanel !== 'graph'
+  const paperZIndex = useDrawerEscape(nodeKey !== null, close, hidden)
 
   return (
     <Drawer
@@ -43,7 +45,13 @@ export function WorkflowNodeDetailDrawer() {
       open={nodeKey !== null}
       onClose={close}
       slotProps={{
-        paper: { className: styles.paper, style: { zIndex: paperZIndex } },
+        paper: {
+          className: styles.paper,
+          style: {
+            zIndex: paperZIndex,
+            ...(hidden ? { display: 'none' } : {}),
+          },
+        },
       }}
       /* 轮 8 P2：非模态——persistent variant 不走 Modal（无遮罩/不圈禁
          焦点/不锁滚动/不 aria-hidden 兄弟），Dock 与画布保持可交互；

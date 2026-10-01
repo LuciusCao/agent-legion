@@ -9,7 +9,10 @@ import type { WorkflowDefinitionRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import { WorkflowNodeDetailDrawer } from './WorkflowNodeDetailDrawer'
 import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
-import { withStudioProviders } from '../shared/testStudioProviders'
+import {
+  withStudioProviders,
+  makeStudioView,
+} from '../shared/testStudioProviders'
 
 // inspector 各 section（code/config/agent 执行详情）统一走 '../../api' 的 api。
 vi.mock('../../../api', () => ({
@@ -281,6 +284,31 @@ describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
     const { setSelectedNodeKey } = renderDrawer()
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
+  })
+
+  it('P2-2：窄屏 Agent 页签抽屉不可见（display:none）但选中态保留，切回画布页签复现', () => {
+    // D1 后抽屉挂在 SplitLayout 层，不随画布列 display:none——hidden 必须
+    // 自带：paper display:none 且不卸载（selectedNodeKey 与预览子态保留）。
+    // revert 即红：只出 Esc 栈不藏 paper 时 display 为空串。
+    const studio = studioFor('generate_key_info')
+    const ui = (panel: 'graph' | 'agent') => (
+      <TestQueryProvider>
+        {withStudioProviders(
+          studio,
+          makeStudioView({ narrow: true, mobilePanel: panel }),
+          <WorkflowNodeDetailDrawer />
+        )}
+      </TestQueryProvider>
+    )
+    const { rerender } = render(ui('agent'))
+    const paper = () =>
+      document.querySelector('.MuiDrawer-paper') as HTMLElement
+    expect(paper().style.display).toBe('none')
+    // 不卸载：内容仍在 DOM（打开状态保留）。
+    expect(screen.getByText('生成关键信息')).toBeInTheDocument()
+    rerender(ui('graph'))
+    expect(paper().style.display).toBe('')
+    expect(screen.getByText('生成关键信息')).toBeInTheDocument()
   })
 
   it('轮 8 P2：抽屉非模态——无遮罩、不 aria-hidden 画布（Agent Dock 可并行交互）', () => {

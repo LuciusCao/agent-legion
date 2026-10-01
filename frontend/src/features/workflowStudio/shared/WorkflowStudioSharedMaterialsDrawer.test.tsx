@@ -431,6 +431,44 @@ describe('WorkflowStudioSharedMaterialsDrawer', () => {
     expect(screen.getByTestId('fake-island').contains(paper)).toBe(false)
   })
 
+  it('P2-2：窄屏非画布页签抽屉不可见（display:none）但开态保留，切回画布页签复现', async () => {
+    // D1 把抽屉本体移到 SplitLayout 层后不再随画布列 display:none——hidden
+    // 必须自带：paper display:none 且不卸载（打开状态与查询数据保留）。
+    // revert 即红：只出 Esc 栈不藏 paper 时 display 为空串。
+    // 直接以 materialsOpen=true 渲染（开合状态在 view 层）。
+    const withView = (panel: 'graph' | 'agent') => (
+      <MemoryRouter
+        initialEntries={[`/workspaces/${WORKSPACE_ID}/workflow-studio`]}
+      >
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/workflow-studio"
+            element={withStudioProviders(
+              {},
+              makeStudioView({
+                narrow: true,
+                mobilePanel: panel,
+                materialsOpen: true,
+                setMaterialsOpen: vi.fn(),
+              }),
+              <WorkflowStudioSharedMaterialsDrawer />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    const { rerender } = render(withView('agent'))
+    await screen.findByText('style.md')
+    const paper = () =>
+      document.querySelector('.MuiDrawer-paper') as HTMLElement
+    expect(paper().style.display).toBe('none')
+    // 不卸载：内容仍在 DOM（打开状态与数据保留）。
+    expect(screen.getByText('style.md')).toBeInTheDocument()
+    rerender(withView('graph'))
+    expect(paper().style.display).toBe('')
+    expect(screen.getByText('style.md')).toBeInTheDocument()
+  })
+
   it('surfaces query errors', async () => {
     mockGetShared.mockRejectedValue(new Error('boom'))
     await openDrawer()
