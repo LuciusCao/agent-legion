@@ -186,6 +186,10 @@ describe('WorkerTokensSection', () => {
     const steps = screen.getByTestId('created-token-next-steps')
     expect(steps.textContent).toContain('Workspace 访问')
     expect(steps.textContent).toContain('开始领取')
+    expect(steps.textContent).toContain('Worker 控制台要求控制令牌？')
+    expect(steps.textContent).toContain(
+      '/var/lib/agent-legion-worker-control/control_token'
+    )
     expect(
       within(steps).getByTestId('worker-console-link').getAttribute('href')
     ).toBe('http://127.0.0.1:8789')

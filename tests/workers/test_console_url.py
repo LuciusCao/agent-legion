@@ -77,13 +77,16 @@ def test_optional_console_label_never_breaks_valid_registration(
 
     labels = {f"tag_{i}": "custom" for i in range(count - int(existing_console))}
     if existing_console:
-        labels[CONSOLE_URL_LABEL] = "http://operator.example"
+        labels[CONSOLE_URL_LABEL] = "existing-scheduler-label"
     original = dict(labels)
     url = "https://worker.example/".ljust(url_length, "x")
     result = registration_config({"labels": labels}, {CONSOLE_URL_ENV: url})["labels"]
     assert host_labels(result) == worker_labels(result) == result
     assert labels == original
-    if url_length <= 256 and (existing_console or count < 32):
+    from server.app.agent_broker.claim_scan import labels_satisfy
+
+    assert labels_satisfy(result, original), "console metadata must preserve scheduling eligibility"
+    if url_length <= 256 and not existing_console and count < 32:
         assert result == {**original, CONSOLE_URL_LABEL: url}
     else:
         assert result == original

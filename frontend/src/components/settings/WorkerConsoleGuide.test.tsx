@@ -38,7 +38,12 @@ describe('WorkerConsoleGuide', () => {
     )
     // 接入三步：签发 → 控制台「Workspace 访问」粘贴 → 「开始领取」。
     expect(screen.getByText(/签发新 Key/)).toBeTruthy()
-    expect(screen.getByText(/Workspace 访问/)).toBeTruthy()
+    expect(screen.getAllByText(/Workspace 访问/).length).toBeGreaterThan(0)
+    expect(screen.getByText('Worker 控制台要求控制令牌？')).toBeTruthy()
+    expect(
+      screen.getByText(/docker compose -f deploy\/compose.host.yaml/)
+        .textContent
+    ).toContain('/var/lib/agent-legion-worker-control/control_token')
     expect(screen.getAllByText(/开始领取/).length).toBeGreaterThan(0)
     // 两个默认关闭的开关是「一直等待中」的首要排查点。
     expect(screen.getByText(/两个默认关闭的开关/)).toBeTruthy()

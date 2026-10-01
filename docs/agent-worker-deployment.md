@@ -174,7 +174,7 @@ make stack-worker-up
 make stack-logs STACK=worker
 ```
 
-打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，填写部署机可通过 Tailscale 访问的 Host 地址并保存。控制台页面由 Worker Service 动态返回并自动注入 control token；直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
+打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，先完成控制台登录，再填写部署机可通过 Tailscale 访问的 Host 地址并保存。只有 Worker Service 绑定回环地址时页面才自动注入 control token；Compose 容器内部绑定 `0.0.0.0`，即使宿主机只向本机发布端口也需要手动输入控制令牌。直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
 
 - Worker 执行进程是否运行；
 - 当前配置的 Host 地址以及 Host 是否可达；
@@ -323,6 +323,14 @@ v68 及以上的 Host 仍下发 `workflow_key`（兼容窗口内），Worker 可
 
 ### 控制面鉴权
 
+控制令牌（登录 Worker 控制台）与 workspace 注册 Key（授权 Worker 接入 Host）用途不同。默认 Host Compose 在项目根目录运行以下命令取得控制令牌，粘贴到 Worker 登录框后，再到「配置 → Workspace 访问」添加注册 Key：
+
+```bash
+docker compose -f deploy/compose.host.yaml exec worker cat /var/lib/agent-legion-worker-control/control_token
+```
+
+独立 Worker 部署将 Compose 文件换成启动时使用的 `deploy/compose.worker.standalone.yaml` 或 `deploy/compose.worker.yaml`，保留相同项目名及其他 Compose 参数。原生部署从 Worker 的 `--state-dir` 目录读取 `control_token`；没有该机器访问权限时由 Worker 维护者完成登录。控制令牌不要放进控制台 URL、Host 配置或注册标签。
+
 Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > 状态目录下的 `control_token` 文件（容器内执行时自动命中）。
 
 如果需要从终端查询或自动化，可使用容器内 CLI：
@@ -406,11 +414,12 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
    主控制台每一行 Worker 还会带该 Worker **自报**的「控制台」链接：Worker
    Service 按自己的控制面绑定地址推导（通配绑定 `0.0.0.0` 回落
    `127.0.0.1`，IPv6 `::` 回落 `[::1]`），经环境变量 `AGENT_WORKER_CONSOLE_URL` 交给 executor，注册时
-   写进 labels 的保留键 `console_url`（`worker/console_url.py`）。控制台经反向
+   补充 labels 的可选键 `console_url`（`worker/console_url.py`）。控制台经反向
    代理或映射到非回环地址时，在 Worker 侧显式设置该变量（三份 compose 文件
    已按 `AGENT_WORKER_UI_BIND` 的端口发布预填），显式空串 = 不上报；旧版
    Worker 不上报，对应行只保留部署级入口。
-   自定义标签已经占满 32 项且没有 `console_url`，或自报 URL 超过 256 字符时，
+   已配置的 `console_url` 与其他自定义标签始终原样保留（可能用于 `requires_labels` 调度），环境地址不覆盖它。
+   自定义标签已经占满 32 项，或自报 URL 超过 256 字符时，
    跳过该可选标签并保留原标签，避免控制台入口使 Worker 注册失败；不截断 URL。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
