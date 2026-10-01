@@ -272,3 +272,15 @@ def test_start_survives_yaml_export_round_trip() -> None:
     assert reloaded == definition
     assert "type: start" in definition_to_yaml(definition)
     assert "capability" not in definition_to_yaml(definition).split("intake:")[0]
+
+
+def test_start_accepts_text_item_type() -> None:
+    """``text`` (inline requirement text) is a first-class contract entry."""
+    definition = _definition(
+        {
+            "_start": _start_node(accepted_item_types=["material", "text"]),
+            "intake": {"capability": "intake", "after": ["_start"]},
+        }
+    )
+    assert definition.start_node is not None
+    assert definition.start_node.accepted_item_types == ("material", "text")
