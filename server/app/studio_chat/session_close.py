@@ -21,11 +21,14 @@ def close_session(service: StudioChatService, session_id: str, workspace_id: str
     committed = False
     try:
         with runtime.lock if runtime is not None else nullcontext():
-            if runtime is not None and service.runtime(session_id) is not runtime:
-                return service.get_session(session_id)
-            service.db.update_studio_chat_session(
-                session_id, status="closed", closed_at=datetime.now(UTC)
-            )
+            with service._runtimes_lock:
+                # Pin absence too: resumed runtimes registered after the
+                # snapshot must not inherit this stale close's DB write.
+                if service._runtimes.get(session_id) is not runtime:
+                    return service.get_session(session_id)
+                service.db.update_studio_chat_session(
+                    session_id, status="closed", closed_at=datetime.now(UTC)
+                )
             committed = True
             try:
                 service.store.append_message(
