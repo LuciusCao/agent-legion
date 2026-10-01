@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+**Breaking (deployments):** 自托管 SeaweedFS 的 volume 上限从「按磁盘余量自动推导」（`-volume.max=0`）改为显式上限 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`（默认 100，≈100 × 2GiB 可增长容量，volume 惰性创建不预占磁盘）。磁盘余量大的存量部署自动推导值可能远超 100——升级前请用 `weed shell` 的 `volume.list` 确认现有 volume 数低于新上限（不足时在 `deploy/.env` 调大，无需迁移数据），否则 master 停止分配新 volume、新写入返回 503。详见 docs/materials-storage-deployment.md「可写槽位耗尽」。
+
+### Fixed
+- SeaweedFS「假写满」（PutObject 全量 503 / master 日志 no free volumes，磁盘远未写满）：`-volume.max=0` 的自动推导在 volume server 注册信息 stale 时把可写槽位判成 0。上限改为显式可配（见上方部署警示），运维文档补充「可写槽位耗尽」机制说明与恢复步骤（重启重注册 + `volume.deleteEmpty` 回收空 volume）。
+
 ## [0.7.13] - 2026-09-26
 
 主打 workflow 升级继承模式与执行代次/产物提交统一协议（issue #759 四层 stack）；安全面收口 job-id 路由跨 workspace IDOR（issue #710）及其红队 follow-up；Studio 交互线（聊天区草稿卡重做、对话骨架统一与超时误报修复、取消轮可见性、定制预览同屏验证）与运行时防护（velites 读取硬上限、worker terminate 收尾兜底、SIGPIPE 免疫）。
