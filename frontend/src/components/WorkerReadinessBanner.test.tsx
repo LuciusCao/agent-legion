@@ -163,4 +163,21 @@ describe('WorkerReadinessBanner', () => {
     expect(mockListAgentWorkers).not.toHaveBeenCalled()
     expect(screen.queryByTestId('worker-readiness-banner')).toBeNull()
   })
+
+  it('does not route claim recovery to an offline or revoked worker', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      worker({ online: false, labels: { console_url: 'http://offline/' } }),
+      worker({ revoked: true, labels: { console_url: 'http://revoked/' } }),
+      worker({
+        claim_enabled: false,
+        labels: { console_url: 'http://active/' },
+      }),
+    ])
+    renderBanner()
+    await screen.findByText(/未开始领取/)
+    expect(screen.getByTestId('worker-console-link')).toHaveAttribute(
+      'href',
+      'http://active/'
+    )
+  })
 })

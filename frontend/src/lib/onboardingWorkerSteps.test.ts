@@ -134,6 +134,24 @@ describe('buildWorkerOnboardingSteps', () => {
     expect(idle.completed).toBe(false)
   })
 
+  it('targets the online eligible worker regardless of old worker ordering', () => {
+    const open = vi.fn()
+    const [, switches] = build({
+      workers: [
+        worker({ online: false, labels: { console_url: 'http://offline/' } }),
+        worker({ revoked: true, labels: { console_url: 'http://revoked/' } }),
+        worker({
+          claim_enabled: false,
+          labels: { console_url: 'http://active/' },
+        }),
+      ],
+      paused: false,
+      openConsole: open,
+    })
+    switches.onAction()
+    expect(open).toHaveBeenCalledWith('http://active/')
+  })
+
   it('slots the worker steps between publish and add-items', () => {
     const core = [
       { title: 'publish' },

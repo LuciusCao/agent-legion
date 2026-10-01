@@ -5,9 +5,10 @@ import type { AgentWorkerSummary } from '../api'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useAgentsStore } from '../stores/agentsStore'
 import { useWorkerConsoleUrl } from './useWorkerConsoleUrl'
+import { useWorkerScheduling } from './useWorkerScheduling'
 
 export interface WorkerReadiness {
-  /** 本 workspace 视角的 Worker 列表；undefined = 首次加载中。 */
+  /** 本 workspace 视角的 Worker 列表；undefined = 尚无成功数据或刷新失败。 */
   workers: AgentWorkerSummary[] | undefined
   /** workspace 调度是否暂停（顶栏「已暂停／运行中」）。 */
   paused: boolean | undefined
@@ -39,20 +40,22 @@ export function useWorkerReadiness(
     enabled: !!workspaceId && enabled,
     staleTime: 0,
   })
-  const setWorkerPaused = useAgentsStore((s) => s.setWorkerPaused)
-  const consoleUrl = useWorkerConsoleUrl() ?? ''
-  const { data: workers } = useQuery({
+  const setWorkerPaused = useWorkerScheduling(workspaceId)
+  const consoleUrl =
+    useWorkerConsoleUrl(enabled && !!workspaceId && needsWorker) ?? ''
+  const workers = useQuery({
     queryKey: extraQueryKeys.workspaceWorkers(workspaceId ?? ''),
     queryFn: () => listAgentWorkers(workspaceId),
     enabled: !!workspaceId && enabled && needsWorker,
     refetchInterval: 5000,
   })
   const resumeScheduling = useCallback(() => {
-    void setWorkerPaused(false, workspaceId ?? '')
-  }, [setWorkerPaused, workspaceId])
+    void setWorkerPaused(false)
+  }, [setWorkerPaused])
+  // 后台刷新期间保留已成功快照；明确失败后停止用旧数据推导就绪/阻塞。
   return {
-    workers: needsWorker ? workers : [],
-    paused: status.isSuccess && !status.isFetching ? paused : undefined,
+    workers: needsWorker ? (workers.isSuccess ? workers.data : undefined) : [],
+    paused: enabled && status.isSuccess ? paused : undefined,
     consoleUrl,
     resumeScheduling,
   }

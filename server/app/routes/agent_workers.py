@@ -76,7 +76,9 @@ def create_agent_workers_router(
             raise HTTPException(status_code=401, detail="invalid Agent Worker registration token")
         return scope
 
-    def authorize_worker(request: Request, worker_id: str | None = None) -> dict[str, Any]:
+    def authorize_worker(
+        request: Request, worker_id: str | None = None, *, claim_enabled: bool | None = None
+    ) -> dict[str, Any]:
         token = request.headers.get("x-agent-worker-token", "")
         if not token:
             authorization = request.headers.get("authorization", "")
@@ -94,6 +96,10 @@ def create_agent_workers_router(
                     " upgrade and re-register the Worker"
                 ),
             )
+        if claim_enabled is not None:
+            worker = registry.authenticate(token, claim_enabled=claim_enabled)
+            if worker is None:
+                raise HTTPException(status_code=401, detail="invalid Agent Worker token")
         return worker
 
     def require_lease_id(request: Request) -> str:
@@ -110,8 +116,8 @@ def create_agent_workers_router(
         )
     )
 
-    # v83 presence sync: the self read plus the reported claim switch.
-    register_presence_route(router, registry.database_dsn, authorize_worker)
+    # v87 presence sync authenticates and records the switch atomically.
+    register_presence_route(router, authorize_worker)
 
     @router.post(
         "/agent-workers/register", status_code=201, response_model=RegisterAgentWorkerResponse

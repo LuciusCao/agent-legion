@@ -1,5 +1,5 @@
 import type { AgentWorkerSummary } from '../api/agentWorkers'
-import { workerConsoleUrl } from './workerConsoleUrl'
+import { readyWorkerConsoleUrl } from './workerConsoleUrl'
 import { hasClaimingWorker, hasOnlineWorker } from './workerPresence'
 
 export interface WorkerOnboardingInput {
@@ -26,12 +26,6 @@ export interface OnboardingStep {
   onAction: () => void
 }
 
-/** 首选 Worker 自报地址（第二层），其次部署级兜底。 */
-function pickConsoleUrl(input: WorkerOnboardingInput): string {
-  const reported = input.workers.map(workerConsoleUrl).find(Boolean)
-  return reported ?? input.consoleUrl
-}
-
 /**
  * PRD「接入 Worker」「打开执行开关」两步（#333 后引导只剩发布与添加任务，
  * 而「提交了但一直没动」的两个默认关闭开关正是新用户最常卡住的地方）。
@@ -47,7 +41,7 @@ export function buildWorkerOnboardingSteps(
     online &&
     (!needsWorker || hasClaimingWorker(input.workers)) &&
     input.paused === false
-  const consoleUrl = pickConsoleUrl(input)
+  const consoleUrl = readyWorkerConsoleUrl(input.workers, input.consoleUrl)
   const steps = [
     {
       icon: 'smart_toy',

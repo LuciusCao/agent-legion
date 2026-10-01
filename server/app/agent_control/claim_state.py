@@ -1,30 +1,42 @@
-"""Persist the Worker-reported claim switch (``agent_workers.claim_enabled``, v87).
+"""Authenticate a registration generation before recording its claim switch.
 
-The report rides on the presence sync (``POST /agent-workers/self/presence``)
-and every claim request implies ``true``. Both paths already authenticated
-the Worker and hold its current row, so the write happens only when the
-reported value differs from the stored one — an idle Worker syncing every
-few seconds costs no write transactions once the state is settled.
+Reports lock the current row and validate the presented token in the same
+transaction, including unchanged reports. Registration rotation and key
+deletion therefore cannot hand an in-flight write to a replacement Worker.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import hashlib
+import hmac
 from typing import Any
 
 from server.app.db.dialect import ConnectSource
-from server.app.db.transaction import write_transaction
+from server.app.db.transaction import read_connection, write_transaction
 
 
-def record_claim_state(
-    database_dsn: ConnectSource, worker: Mapping[str, Any], claim_enabled: bool
-) -> bool:
-    """Store ``claim_enabled`` for ``worker`` when it changed; returns whether it wrote."""
-    if worker.get("claim_enabled") is claim_enabled:
-        return False
-    with write_transaction(database_dsn) as conn:
-        conn.execute(
-            "update agent_workers set claim_enabled=%s where worker_id=%s",
-            (claim_enabled, worker["worker_id"]),
-        )
-    return True
+def authenticated_worker_row(
+    database_dsn: ConnectSource, token: str, claim_enabled: bool | None = None
+) -> dict[str, Any] | None:
+    """Return the authenticated row; a supplied switch is applied atomically."""
+    worker_id, separator, secret = token.partition(".")
+    if not separator or not worker_id or not secret:
+        return None
+    context = read_connection if claim_enabled is None else write_transaction
+    with context(database_dsn) as conn:
+        row = conn.execute(
+            "select * from agent_workers where worker_id=%s"
+            + (" for update" if claim_enabled is not None else ""),
+            (worker_id,),
+        ).fetchone()
+        if row is None or row["revoked_at"] is not None:
+            return None
+        if not hmac.compare_digest(hashlib.sha256(secret.encode()).hexdigest(), row["token_hash"]):
+            return None
+        if claim_enabled is not None and row["claim_enabled"] is not claim_enabled:
+            conn.execute(
+                "update agent_workers set claim_enabled=%s where worker_id=%s",
+                (claim_enabled, worker_id),
+            )
+            row = {**row, "claim_enabled": claim_enabled}
+        return dict(row)

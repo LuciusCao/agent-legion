@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useWorkerReadiness } from '../hooks/useWorkerReadiness'
-import { workerConsoleUrl } from '../lib/workerConsoleUrl'
+import { readyWorkerConsoleUrl } from '../lib/workerConsoleUrl'
 import { hasClaimingWorker, hasOnlineWorker } from '../lib/workerPresence'
 import { MaterialIcon } from './MaterialIcon'
 import { WorkerConsoleLink } from './WorkerConsoleLink'
@@ -37,7 +37,7 @@ export function WorkerReadinessBanner({
   const noWorker = needsWorker && !online
   const idleWorker = needsWorker && online && !hasClaimingWorker(workers)
   if (!paused && !noWorker && !idleWorker) return null
-  const entryUrl = workers.map(workerConsoleUrl).find(Boolean) ?? consoleUrl
+  const entryUrl = readyWorkerConsoleUrl(workers, consoleUrl)
 
   return (
     <section

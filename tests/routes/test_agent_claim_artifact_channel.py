@@ -102,7 +102,7 @@ def _client(
         create_agent_worker_claim_router(
             broker,
             MagicMock(),
-            lambda request, worker_id=None: {"worker_id": "w1", "protocol_version": 3},
+            lambda request, worker_id=None, **kwargs: {"worker_id": "w1", "protocol_version": 3},
             lambda request: "lease-1",
             object_store,
         )
@@ -196,7 +196,7 @@ def test_agent_claim_v4_worker_gets_gzip_specs(monkeypatch: pytest.MonkeyPatch) 
         create_agent_worker_claim_router(
             broker,
             MagicMock(),
-            lambda request, worker_id=None: {"worker_id": "w1", "protocol_version": 4},
+            lambda request, worker_id=None, **kwargs: {"worker_id": "w1", "protocol_version": 4},
             lambda request: "lease-1",
             store,
         )
@@ -277,7 +277,7 @@ def test_agent_claim_presign_expiry_follows_execution_timeout(
         create_agent_worker_claim_router(
             MagicMock(database_dsn=TEST_DATABASE_URL),
             MagicMock(),
-            lambda request, worker_id=None: {"worker_id": "w1", "protocol_version": 3},
+            lambda request, worker_id=None, **kwargs: {"worker_id": "w1", "protocol_version": 3},
             lambda request: "lease-1",
             store,
         )

@@ -10,11 +10,12 @@ import { extraQueryKeys } from '../lib/queryKeysExtra'
  * 也不闪「未配置」提示）。地址是部署拓扑、几乎不变：长 staleTime，
  * 设置页 / Worker 列表空态 / 顶栏弹层多个入口共享一次请求。
  */
-export function useWorkerConsoleUrl(): string | undefined {
+export function useWorkerConsoleUrl(enabled = true): string | undefined {
   const { data, isError } = useQuery({
     queryKey: extraQueryKeys.workerConsole(),
     queryFn: () => fetchAgentWorkers(),
     staleTime: 5 * 60_000,
+    enabled,
   })
   if (isError) return ''
   if (data === undefined) return undefined

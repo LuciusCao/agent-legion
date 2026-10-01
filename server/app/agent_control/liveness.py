@@ -24,22 +24,26 @@ class WorkerLiveness:
         self._interval_seconds = interval_seconds
         self._writes: dict[str, float] = {}
 
-    def record_seen(self, database_dsn: ConnectSource, worker_id: str) -> None:
+    def record_seen(self, database_dsn: ConnectSource, worker_id: str, token_hash: str) -> None:
         """Write last_seen_at at most once per worker per interval.
 
         The registry is shared across threadpool workers, so two threads may
         both pass the throttle check and write twice — the update is
-        idempotent, so no lock is taken."""
+        idempotent, so no lock is taken. The authenticated token hash fences
+        the write against registration rotation between the read and update;
+        a rejected stale write must not consume the replacement's throttle."""
         now = monotonic()
         last_write = self._writes.get(worker_id)
         if last_write is not None and now - last_write < self._interval_seconds:
             return
         with write_transaction(database_dsn) as conn:
-            conn.execute(
-                "update agent_workers set last_seen_at=current_timestamp where worker_id=%s",
-                (worker_id,),
+            result = conn.execute(
+                "update agent_workers set last_seen_at=current_timestamp"
+                " where worker_id=%s and token_hash=%s and revoked_at is null",
+                (worker_id, token_hash),
             )
-        self._writes[worker_id] = now
+        if result.rowcount:
+            self._writes[worker_id] = now
 
     def discard(self, worker_id: str) -> None:
         """Drop the memo entry for a revoked worker so the dict stays bounded."""

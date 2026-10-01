@@ -15,3 +15,16 @@ export function workerConsoleUrl(
     ? value.trim()
     : ''
 }
+
+/** 修复领取阻塞时只选有效在线 Worker，避免被旧机器的地址抢占入口。 */
+export function readyWorkerConsoleUrl(
+  workers: AgentWorkerSummary[],
+  fallback: string
+): string {
+  return (
+    workers
+      .filter((worker) => worker.online && !worker.revoked)
+      .map(workerConsoleUrl)
+      .find(Boolean) ?? fallback
+  )
+}

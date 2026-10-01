@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import { api } from '../api'
 import { createRealtimeChannel, type RealtimeChannel } from '../lib/realtime'
 import { parseAgentsWsMessage, upsertAgent } from '../lib/agentsWsMessages'
 import { useConnectionStatusStore } from './connectionStatusStore'
-import type { AgentStatus, WorkerStatusResponse } from '../types'
+import type { AgentStatus } from '../types'
+import { createWorkerStatusActions } from './workerSchedulingState'
 
 export interface AgentsState {
   agents: AgentStatus[]
@@ -59,28 +59,12 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     }
   },
 
-  fetchWorkerStatus: async (workspaceId) => {
-    const query = `?workspace_id=${encodeURIComponent(workspaceId)}`
-    const data = await api<WorkerStatusResponse>(`/api/worker/status${query}`)
+  ...createWorkerStatusActions((workspaceId, paused) => {
     set((state) => ({
       workerPausedByWorkspace: {
         ...state.workerPausedByWorkspace,
-        [workspaceId]: data.paused,
+        [workspaceId]: paused,
       },
     }))
-  },
-
-  setWorkerPaused: async (paused, workspaceId) => {
-    const query = `?workspace_id=${encodeURIComponent(workspaceId)}`
-    const data = await api<WorkerStatusResponse>(
-      `${paused ? '/api/worker/pause' : '/api/worker/resume'}${query}`,
-      { method: 'POST' }
-    )
-    set((state) => ({
-      workerPausedByWorkspace: {
-        ...state.workerPausedByWorkspace,
-        [workspaceId]: data.paused,
-      },
-    }))
-  },
+  }),
 }))

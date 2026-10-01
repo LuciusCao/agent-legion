@@ -16,14 +16,15 @@ import type { WorkflowDefinitionRecord } from '../types'
  */
 export function useWorkspaceOnboardingSteps(
   workspaceId: string | undefined,
-  workflowDefinition: WorkflowDefinitionRecord | null
+  workflowDefinition: WorkflowDefinitionRecord | null,
+  enabled = true
 ) {
   const navigate = useNavigate()
   const setAddItemsDialogOpen = useUiStore((s) => s.setAddItemsDialogOpen)
   const needsWorker =
     !workflowDefinition ||
     workflowDefinition.nodes.some((node) => node.node_type === 'agent')
-  const readiness = useWorkerReadiness(workspaceId, true, needsWorker)
+  const readiness = useWorkerReadiness(workspaceId, enabled, needsWorker)
 
   return withWorkerSteps(
     buildOnboardingSteps({

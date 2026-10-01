@@ -6,6 +6,7 @@ import tarfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from server.app.db.transaction import write_transaction
@@ -504,6 +505,92 @@ def test_presence_sync_records_claim_switch_and_claim_implies_enabled(tmp_path: 
             ).status_code
             == 401
         )
+
+
+@pytest.mark.parametrize("initial", [False, True])
+@pytest.mark.parametrize("endpoint", ["presence", "claim"])
+@pytest.mark.parametrize("change", ["rotate", "delete_key", "recreate"])
+@pytest.mark.parametrize("bearer", [False, True])
+def test_claim_reports_revalidate_registration_before_write(
+    tmp_path: Path, monkeypatch, initial: bool, endpoint: str, change: str, bearer: bool
+) -> None:
+    """Identity changes after route authorization cannot write or skip revalidation."""
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        token = _register(client)["worker_token"]
+        registry = app.state.agent_worker_registry
+        original = registry.authenticate
+        worker = original(token, claim_enabled=initial)
+        assert worker is not None
+
+        def authenticate_then_replace(presented, **kwargs):
+            result = original(presented, **kwargs)
+            if not kwargs and result is not None:
+                if change != "rotate":
+                    registry.delete_register_token(worker["register_token_ids"][0])
+                if change != "delete_key":
+                    registry.issue_token(
+                        worker_id="home-mini",
+                        name="replacement",
+                        runtimes=["pi"],
+                        max_concurrency=1,
+                    )
+            return result
+
+        monkeypatch.setattr(registry, "authenticate", authenticate_then_replace)
+        path = (
+            "/api/agent-workers/self/presence"
+            if endpoint == "presence"
+            else "/api/agent-executions/claim"
+        )
+        payload = {"claim_enabled": True} if endpoint == "presence" else {"worker_id": "home-mini"}
+        # Bearer and the dedicated token header share the same identity guard.
+        headers = (
+            {"Authorization": f"Bearer {token}"} if bearer else {"X-Agent-Worker-Token": token}
+        )
+        response = client.post(path, headers=headers, json=payload)
+        assert response.status_code == 401, response.text
+        workers = registry.list_workers()
+        if change == "delete_key":
+            assert workers == []
+        else:
+            assert workers[0]["name"] == "replacement"
+            assert workers[0]["claim_enabled"] is None
+
+
+@pytest.mark.parametrize("initial", [False, True])
+def test_reregistration_resets_claim_report_to_unknown(tmp_path: Path, initial: bool) -> None:
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        token = _register(client)["worker_token"]
+        registry = app.state.agent_worker_registry
+        assert registry.authenticate(token, claim_enabled=initial)["claim_enabled"] is initial
+        replacement = _register(client)["worker_token"]
+        # A legacy Worker only GETs self; the prior generation's report cannot persist.
+        response = client.get(
+            "/api/agent-workers/self", headers={"X-Agent-Worker-Token": replacement}
+        )
+        assert response.status_code == 200
+        assert response.json()["claim_enabled"] is None
+        assert registry.authenticate(token, claim_enabled=True) is None
+
+
+def test_rejected_claim_identity_does_not_report_enabled(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        token = _register(client)["worker_token"]
+        registry = app.state.agent_worker_registry
+        registry.authenticate(token, claim_enabled=False)
+        response = client.post(
+            "/api/agent-executions/claim",
+            headers={"X-Agent-Worker-Token": token},
+            json={"worker_id": "another-worker"},
+        )
+        assert response.status_code == 401
+        assert registry.list_workers()[0]["claim_enabled"] is False
 
 
 def _archive_with_events(events_lines: list[str]) -> bytes:

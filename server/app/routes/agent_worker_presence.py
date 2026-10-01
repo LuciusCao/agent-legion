@@ -15,18 +15,15 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from server.app.agent_control.claim_state import record_claim_state
 from server.app.routes.agent_workers_contracts import AgentWorkerSummary, WorkerPresenceRequest
 
 
 def register_presence_route(
     router: APIRouter,
-    database_dsn: Any,
     authorize_worker: Callable[..., dict[str, Any]],
 ) -> None:
     @router.post("/agent-workers/self/presence", response_model=AgentWorkerSummary)
     def report_presence(payload: WorkerPresenceRequest, request: Request) -> AgentWorkerSummary:
         """Refresh liveness and record the Worker's claim switch; answers the self record."""
-        worker = authorize_worker(request)
-        record_claim_state(database_dsn, worker, payload.claim_enabled)
-        return AgentWorkerSummary.model_validate({**worker, "claim_enabled": payload.claim_enabled})
+        worker = authorize_worker(request, claim_enabled=payload.claim_enabled)
+        return AgentWorkerSummary.model_validate(worker)

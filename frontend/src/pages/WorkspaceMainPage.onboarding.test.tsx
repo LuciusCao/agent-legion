@@ -135,6 +135,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
     mockFetchWorkspaceStats.mockReset()
     mockFetchWorkspacePackages.mockReset()
     mockFetchWorkflowDefinition.mockReset()
+    mockListAgentWorkers.mockReset()
     mockListAgentWorkers.mockResolvedValue([])
     mockGetWorkspaceExecutionConfiguration.mockReset()
     mockGetWorkspaceExecutionConfiguration.mockResolvedValue({
@@ -345,7 +346,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
     expect(mockGetWorkspaceExecutionConfiguration).not.toHaveBeenCalled()
   })
 
-  it('hides the guide when jobs exist', async () => {
+  it('hides the guide and makes no readiness requests when existing jobs are not waiting', async () => {
     mockFetchJobsSnapshot.mockImplementation(() =>
       Promise.resolve({
         workspace_id: 'ws1',
@@ -357,7 +358,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
             workspace_id: 'ws1',
             source_id: 'Q1',
             title: 'Job',
-            status: 'pending',
+            status: 'completed',
           },
         ],
         total: 1,
@@ -371,5 +372,11 @@ describe('WorkspaceMainPage onboarding guide', () => {
     expect(
       screen.queryByRole('heading', { name: '开始使用 Workspace' })
     ).not.toBeInTheDocument()
+    expect(mockListAgentWorkers).not.toHaveBeenCalled()
+    expect(
+      mockApi.mock.calls.some(([path]) =>
+        String(path).startsWith('/api/worker/status')
+      )
+    ).toBe(false)
   })
 })
