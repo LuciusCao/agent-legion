@@ -36,8 +36,6 @@ def _open(path: Path, root: Path):
 
 
 def read_state(path: Path, root: Path) -> dict[str, Any]:
-    if path.resolve() != path or not path.is_relative_to(root):
-        return {}
     if not stat.S_ISREG(path.lstat().st_mode):
         return {}
     with _open(path, root) as source:
@@ -47,7 +45,10 @@ def read_state(path: Path, root: Path) -> dict[str, Any]:
         data = source.read(65537)
     if len(data) > 65536:
         return {}
-    value = json.loads(data)
+    try:
+        value = json.loads(data)
+    except RecursionError:
+        return {}  # Corrupt task metadata must not suppress other tasks.
     return value if isinstance(value, dict) else {}
 
 
@@ -74,10 +75,13 @@ def timestamp(value: Any) -> float | None:
     return None
 
 
+def display_text(value: str, limit: int) -> str:
+    """JSON may contain lone surrogates that cannot be persisted as UTF-8."""
+    return value[:limit].encode("utf-8", errors="replace").decode("utf-8")
+
+
 def output_tail(path: Path, root: Path, *, terminal: bool) -> tuple[float | None, str]:
     """Stat running output; only terminal receipts read a bounded tail."""
-    if path.resolve() != path or not path.is_relative_to(root):
-        return None, ""
     try:
         if not stat.S_ISREG(path.lstat().st_mode):
             return None, ""
@@ -88,6 +92,7 @@ def output_tail(path: Path, root: Path, *, terminal: bool) -> tuple[float | None
             if not terminal:
                 return info.st_mtime, ""
             source.seek(max(0, info.st_size - 2048))
-            return info.st_mtime, source.read(2048).decode("utf-8", errors="replace")[-600:]
+            tail = source.read(2048).decode("utf-8", errors="replace")[-600:]
+            return info.st_mtime, display_text(tail, 600)
     except OSError:
         return None, ""

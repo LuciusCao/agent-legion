@@ -19,6 +19,7 @@ from server.app.studio_chat.kimi_task_snapshot import (
     ACTIVE,
     TERMINAL,
     BackgroundTask,
+    display_text,
     output_tail,
     read_state,
     timestamp,
@@ -70,13 +71,13 @@ def task_snapshots(
                 output_at, summary = output_tail(path / "output.log", root, terminal=terminal)
                 reason = state.get("failure_reason")
                 if isinstance(reason, str) and reason:
-                    summary = reason[:600]
+                    summary = display_text(reason, 600)
                 description = spec.get("description")
                 result[path.name] = BackgroundTask(
                     path.name,
                     str(spec["kind"]),
                     "timed_out" if terminal and state.get("timed_out") is True else status,
-                    description[:240] if isinstance(description, str) else path.name,
+                    display_text(description, 240) if isinstance(description, str) else path.name,
                     timestamp(state.get("started_at")) or timestamp(spec.get("created_at")),
                     timestamp(state.get("finished_at")),
                     timestamp(state.get("heartbeat_at")),

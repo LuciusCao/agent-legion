@@ -97,7 +97,8 @@ def chat(tmp_path, monkeypatch):
     service = Mock()
     service.runtime.return_value = runtime
     service.db.claim_studio_chat_turn.return_value = True
-    monkeypatch.setattr(wake, "keepalive_run_token", Mock())
+    service.db.list_studio_chat_messages_tail.return_value = []
+    monkeypatch.setattr(wake, "keepalive_run_token", Mock(return_value=True))
     monkeypatch.setattr(wake, "task_root", lambda *_: tmp_path)
     monkeypatch.setattr(wake, "POLL_SECONDS", 0.01)
     yield service, runtime
@@ -156,6 +157,34 @@ def test_dead_token_does_not_start_a_followup(chat, monkeypatch):
     )
     assert not wake.wake_session(service, "chat-1", runtime, ["agent-1"])
     service.db.claim_studio_chat_turn.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["check", "escalation", "notice"])
+def test_unconfirmed_token_blocks_claim_and_retries_after_recovery(chat, monkeypatch, failure):
+    from server.app.studio_chat import token_keepalive
+
+    service, runtime = chat
+    monkeypatch.setattr(wake, "keepalive_run_token", token_keepalive.keepalive_run_token)
+    monkeypatch.setattr(token_keepalive, "renew_scoped_token", Mock(return_value=True))
+    if failure == "check":
+        service.db.get_scoped_token_user.side_effect = [RuntimeError("database unavailable"), {}]
+    else:
+        service.db.get_scoped_token_user.side_effect = [None, {}]
+        if failure == "escalation":
+            service.db.update_studio_chat_session_if.side_effect = RuntimeError(
+                "database unavailable"
+            )
+        else:
+            service.store.append_message.side_effect = RuntimeError("database unavailable")
+
+    assert not wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+    service.db.claim_studio_chat_turn.assert_not_called()
+    runtime.handle.send_prompt.assert_not_called()
+    assert not runtime.token_keepalive_done
+    assert not runtime.turn_open
+    assert wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+    service.db.claim_studio_chat_turn.assert_called_once_with("chat-1")
+    runtime.handle.send_prompt.assert_called_once()
 
 
 def test_dead_handle_exposes_recovery_instead_of_a_stuck_running_turn(chat):

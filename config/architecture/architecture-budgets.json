@@ -1661,6 +1661,7 @@
     "server/app/studio_chat/agent_catalog.py": 172,
     "server/app/studio_chat/availability.py": 43,
     "server/app/studio_chat/background_activity.py": 88,
+    "server/app/studio_chat/background_recovery.py": 33,
     "server/app/studio_chat/background_wakeup.py": 101,
     "server/app/studio_chat/callbacks.py": 37,
     "server/app/studio_chat/capabilities.py": 42,

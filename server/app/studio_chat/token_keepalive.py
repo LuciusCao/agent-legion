@@ -52,20 +52,22 @@ def _token_alive(backend: ServiceBackend, token: str) -> bool:
     )
 
 
-def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
+def keepalive_run_token(backend: ServiceBackend, session_id: str) -> bool:
     """Renew the session's run token on a `tool_call` update; notice once dead.
 
     Runs on EVERY tool_call — token death is only ever detected after it
     happens. The done-flag deduplicates the DEAD path (a resume mints a fresh
     runtime, token, and flag); every step is guarded so a transient DB
     failure retries on the next tool_call. Callers run this AFTER the
-    tool_call row append."""
+    tool_call row append. True means this invocation confirmed a live token;
+    dead, missing and indeterminate tokens return False. Automatic work must
+    require True; notification callers may ignore the result."""
     runtime: SessionRuntime | None = backend.runtime(session_id)
     if runtime is None:
-        return
+        return False
     with runtime.lock:
         if runtime.token_keepalive_done:
-            return
+            return False
     try:
         alive = _token_alive(backend, runtime.token)
     except Exception:
@@ -74,9 +76,9 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
         # a transient DB failure must not propagate into it; the TTL is the
         # backstop and the next tool_call retries (flag stays unset).
         logger.warning("studio chat token keepalive check failed for %s", session_id, exc_info=True)
-        return
+        return False
     if alive:
-        return
+        return True
     # #558：先升级后通知——escalate 抛异常（DB 故障）时 flag 未置、直接
     # 重试且不产生重复通知；escalate 成功后 append 失败时状态已是 error
     # （escalate 的守卫对 error 幂等），重试只补通知。两步都在各自的
@@ -88,7 +90,7 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
         # path — a transient DB failure must not propagate into it; the next
         # tool_call retries (flag stays unset, no notice appended yet).
         logger.warning("studio chat session escalation failed for %s", session_id, exc_info=True)
-        return
+        return False
     try:
         backend.store.append_message(
             session_id,
@@ -103,7 +105,7 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
         logger.warning(
             "studio chat run_token_invalidated notice failed for %s", session_id, exc_info=True
         )
-        return
+        return False
     with runtime.lock:
         runtime.token_keepalive_done = True
     # #558（review P1）：健康的 ACP 进程不能悬挂到 backend 重启——error 行
@@ -111,3 +113,4 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
     # request_stop 在当前 turn 结束后经既有 on_exit 路径自清理（不 join——
     # keepalive 跑在 ACP 线程上，join 即自死锁）。
     runtime.handle.request_stop()
+    return False

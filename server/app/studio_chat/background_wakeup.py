@@ -15,6 +15,7 @@ import time
 from typing import TYPE_CHECKING
 
 from server.app.studio_chat.background_activity import BackgroundActivity
+from server.app.studio_chat.background_recovery import recovery_sets
 from server.app.studio_chat.kimi_task_store import task_root, task_snapshots
 from server.app.studio_chat.token_keepalive import keepalive_run_token
 
@@ -39,8 +40,9 @@ def wake_session(
             or runtime.turn_open
         ):
             return False
-        keepalive_run_token(service, session_id)
-        if runtime.token_keepalive_done or not service.db.claim_studio_chat_turn(session_id):
+        if not keepalive_run_token(service, session_id):
+            return False
+        if not service.db.claim_studio_chat_turn(session_id):
             return False
         runtime.stream.reset()
         runtime.loading = False
@@ -85,19 +87,27 @@ def start_watcher(
     root = task_root(runtime.handle.cwd, acp_session_id)
     if root is None:
         return
-    # Existing terminal history on resume is not a new completion.
-    seen = {key for key, task in task_snapshots(root, acp_session_id).items() if task.terminal}
+    initial_terminal = {
+        key for key, task in task_snapshots(root, acp_session_id).items() if task.terminal
+    }
     activity = BackgroundActivity()
 
     def watch() -> None:
         pending: set[str] = set()
+        recovered: set[str] = set()
+        seen: set[str] | None = None
         while not runtime.background_stop.wait(POLL_SECONDS):
             try:
+                if seen is None:
+                    seen, recovered = recovery_sets(
+                        service.db, session_id, acp_session_id, initial_terminal
+                    )
                 tasks = task_snapshots(root, acp_session_id, ignored=seen)
                 with runtime.lock:
                     if runtime.closed or service.runtime(session_id) is not runtime:
                         return
                     for event in activity.updates(tasks, time.time()):
+                        event["acp_session_id"] = acp_session_id
                         service.store.append_message(
                             session_id,
                             "status",
@@ -107,7 +117,11 @@ def start_watcher(
                         activity.recorded(event)
                         if event["event"] == "background_task_finished":
                             seen.add(event["task_id"])
-                            if event["kind"] == "agent" and runtime.background_wakeup_enabled:
+                            if (
+                                event["kind"] == "agent"
+                                and runtime.background_wakeup_enabled
+                                and event["task_id"] not in recovered
+                            ):
                                 pending.add(event["task_id"])
                     if not runtime.background_wakeup_enabled:
                         pending.clear()

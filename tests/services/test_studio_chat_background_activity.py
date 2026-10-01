@@ -168,3 +168,21 @@ def test_huge_timestamp_and_foreign_output_link_do_not_block_other_tasks(tmp_pat
     assert snapshots["agent-1"].started_at is None
     assert snapshots["agent-1"].summary == ""
     assert snapshots["agent-2"].status == "running"
+
+
+@pytest.mark.parametrize("filename", ["spec.json", "runtime.json"])
+def test_deep_metadata_is_isolated_from_other_tasks(tmp_path, filename):
+    broken = write_task(tmp_path, "agent-broken", status="running")
+    (broken / filename).write_text("[" * 30000 + "0" + "]" * 30000)
+    write_task(tmp_path, "agent-valid", status="completed")
+    assert set(task_snapshots(tmp_path, "acp-1")) == {"agent-valid"}
+
+
+def test_json_surrogates_do_not_poison_durable_receipts(tmp_path):
+    path = write_task(tmp_path, status="failed", description="bad\ud800 description")
+    (path / "runtime.json").write_text(
+        json.dumps({"status": "failed", "failure_reason": "bad\udfff reason"})
+    )
+    receipt = emit(BackgroundActivity(), task_snapshots(tmp_path, "acp-1"), 1000)[0]
+    json.dumps(receipt, ensure_ascii=False).encode("utf-8")
+    assert "bad" in receipt["detail"]
