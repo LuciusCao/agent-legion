@@ -231,6 +231,8 @@ describe('WorkflowNodeAgentEditor', () => {
     mocks.fetchAgentDefinition.mockResolvedValue({
       latest: {
         status: 'draft',
+        // #749：发布按钮的 CAS 令牌来自详情读取的草稿行（契约必填字段）。
+        definition_hash: 'hash-new',
         definition: {
           capability: 'generate_key_info',
           runtime: 'pi',
@@ -277,6 +279,8 @@ describe('WorkflowNodeAgentEditor', () => {
     mocks.fetchAgentDefinition.mockResolvedValue({
       latest: {
         status: 'draft',
+        // #749：发布按钮的 CAS 令牌来自详情读取的草稿行（契约必填字段）。
+        definition_hash: 'hash-new',
         definition: {
           capability: 'generate_key_info',
           runtime: 'pi',
