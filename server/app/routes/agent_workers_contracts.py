@@ -126,13 +126,16 @@ class WorkerPresenceRequest(BaseModel):
     claim_enabled: bool
 
 
-class AgentWorkersResponse(BaseModel):
-    workers: list[AgentWorkerSummary]
+class AgentWorkerConsoleResponse(BaseModel):
     # Instance-configured Worker console address (AGENT_LEGION_WORKER_CONSOLE_URL,
     # usually the deployment machine's local Worker): the "open the Worker
     # console" entry the Host UI shows next to worker lists and after key
     # issuance. "" = not configured (the UI falls back to plain guidance).
     console_url: str = ""
+
+
+class AgentWorkersResponse(AgentWorkerConsoleResponse):
+    workers: list[AgentWorkerSummary]
 
 
 class AgentWorkerDeleteResponse(BaseModel):

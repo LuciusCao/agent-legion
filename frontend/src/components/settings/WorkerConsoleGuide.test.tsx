@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { WorkerConsoleGuide } from './WorkerConsoleGuide'
-import { fetchAgentWorkers } from '../../api/agentWorkers'
+import { fetchWorkerConsole } from '../../api/agentWorkers'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 
 vi.mock('../../api/agentWorkers', () => ({
-  fetchAgentWorkers: vi.fn(),
+  fetchWorkerConsole: vi.fn(),
 }))
 
-const mockFetchAgentWorkers = vi.mocked(fetchAgentWorkers)
+const mockFetchWorkerConsole = vi.mocked(fetchWorkerConsole)
 
 function renderGuide(isAdmin = true) {
   return render(
@@ -23,9 +23,24 @@ beforeEach(() => {
 })
 
 describe('WorkerConsoleGuide', () => {
+  it('reports initial failure as unknown and lets the user retry', async () => {
+    mockFetchWorkerConsole.mockRejectedValueOnce(new Error('offline'))
+    renderGuide()
+    expect(await screen.findByRole('alert')).toHaveTextContent('暂时无法获取')
+    expect(screen.queryByTestId('worker-console-unset')).toBeNull()
+    mockFetchWorkerConsole.mockResolvedValue({
+      console_url: 'http://localhost:8787',
+    })
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByTestId('worker-console-link')).toHaveAttribute(
+      'href',
+      'http://localhost:8787'
+    )
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('links to the configured Worker console and lists the onboarding steps', async () => {
-    mockFetchAgentWorkers.mockResolvedValue({
-      workers: [],
+    mockFetchWorkerConsole.mockResolvedValue({
       console_url: 'http://127.0.0.1:8789',
     })
     renderGuide()
@@ -51,7 +66,7 @@ describe('WorkerConsoleGuide', () => {
   })
 
   it('falls back to plain guidance when no console url is configured', async () => {
-    mockFetchAgentWorkers.mockResolvedValue({ workers: [], console_url: '' })
+    mockFetchWorkerConsole.mockResolvedValue({ console_url: '' })
     renderGuide()
 
     await waitFor(() => {
@@ -64,7 +79,7 @@ describe('WorkerConsoleGuide', () => {
   })
 
   it('does not flash the unset hint while the address is still loading', () => {
-    mockFetchAgentWorkers.mockReturnValue(new Promise(() => {}))
+    mockFetchWorkerConsole.mockReturnValue(new Promise(() => {}))
     renderGuide()
 
     expect(screen.queryByTestId('worker-console-unset')).toBeNull()
@@ -72,13 +87,13 @@ describe('WorkerConsoleGuide', () => {
   })
 
   it('tells non-admin members to ask an admin for the key', async () => {
-    mockFetchAgentWorkers.mockResolvedValue({ workers: [], console_url: '' })
+    mockFetchWorkerConsole.mockResolvedValue({ console_url: '' })
     renderGuide(false)
 
     expect(screen.getByText(/请管理员/)).toBeTruthy()
     expect(screen.queryByText(/签发新 Key/)).toBeNull()
     await waitFor(() => {
-      expect(mockFetchAgentWorkers).toHaveBeenCalled()
+      expect(mockFetchWorkerConsole).toHaveBeenCalled()
     })
   })
 })

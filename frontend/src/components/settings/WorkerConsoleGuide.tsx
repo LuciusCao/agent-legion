@@ -1,4 +1,4 @@
-import { useWorkerConsoleUrl } from '../../hooks/useWorkerConsoleUrl'
+import { useWorkerConsoleConfig } from '../../hooks/useWorkerConsoleUrl'
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
 import { WorkerConsoleAccessHelp } from './WorkerConsoleAccessHelp'
 import styles from './WorkerConsoleGuide.module.css'
@@ -9,7 +9,8 @@ import styles from './WorkerConsoleGuide.module.css'
  * 控制台」而没有入口，这里连同地址一起给出（useWorkerConsoleUrl）。
  */
 export function WorkerConsoleGuide({ isAdmin }: { isAdmin: boolean }) {
-  const consoleUrl = useWorkerConsoleUrl()
+  const console = useWorkerConsoleConfig()
+  const consoleUrl = console.data?.console_url
   return (
     <div className={styles.card} data-testid="worker-console-guide">
       <div className={styles.header}>
@@ -58,6 +59,14 @@ export function WorkerConsoleGuide({ isAdmin }: { isAdmin: boolean }) {
           所在机器直接打开其控制台（本机开发默认
           http://127.0.0.1:8789），或由维护人员设置{' '}
           <code>AGENT_LEGION_WORKER_CONSOLE_URL</code>。
+        </p>
+      )}
+      {console.isError && console.data === undefined && (
+        <p className={styles.hint} role="alert">
+          暂时无法获取 Worker 控制台地址。
+          <button type="button" onClick={() => void console.refetch()}>
+            重试
+          </button>
         </p>
       )}
     </div>

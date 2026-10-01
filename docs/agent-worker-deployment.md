@@ -421,6 +421,10 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
    已配置的 `console_url` 与其他自定义标签始终原样保留（可能用于 `requires_labels` 调度），环境地址不覆盖它。
    自定义标签已经占满 32 项，或自报 URL 超过 256 字符时，
    跳过该可选标签并保留原标签，避免控制台入口使 Worker 注册失败；不截断 URL。
+   入口通过已登录用户可读的 `GET /api/agent-workers/console` 获取部署地址，
+   不下载 Worker 清单；workspace 状态列表的请求与缓存均按 workspace 隔离。
+   首次地址请求失败显示可重试错误，只有成功返回空地址才表示未配置；
+   后台刷新失败保留最近成功的配置，后续成功响应（包括清空配置）替换缓存。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
 
