@@ -21,7 +21,10 @@ export function useWorkspaceOnboardingSteps(
 ) {
   const navigate = useNavigate()
   const setAddItemsDialogOpen = useUiStore((s) => s.setAddItemsDialogOpen)
-  const readiness = useWorkerReadiness(workspaceId)
+  const needsWorker =
+    !workflowDefinition ||
+    workflowDefinition.nodes.some((node) => node.node_type === 'agent')
+  const readiness = useWorkerReadiness(workspaceId, true, needsWorker)
 
   return useMemo(
     () =>
@@ -34,6 +37,7 @@ export function useWorkspaceOnboardingSteps(
         }),
         buildWorkerOnboardingSteps({
           ...readiness,
+          needsWorker,
           workers: readiness.workers ?? [],
           goWorkerSettings: () =>
             navigate(`/workspaces/${workspaceId}/settings`),
@@ -46,6 +50,7 @@ export function useWorkspaceOnboardingSteps(
       workspaceId,
       setAddItemsDialogOpen,
       readiness,
+      needsWorker,
     ]
   )
 }

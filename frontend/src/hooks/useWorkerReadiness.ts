@@ -10,7 +10,7 @@ export interface WorkerReadiness {
   /** 本 workspace 视角的 Worker 列表；undefined = 首次加载中。 */
   workers: AgentWorkerSummary[] | undefined
   /** workspace 调度是否暂停（顶栏「已暂停／运行中」）。 */
-  paused: boolean
+  paused: boolean | undefined
   /** 部署级 Worker 控制台地址（空串 = 未配置）。 */
   consoleUrl: string
   resumeScheduling: () => void
@@ -23,19 +23,37 @@ export interface WorkerReadiness {
  */
 export function useWorkerReadiness(
   workspaceId: string | undefined,
-  enabled = true
+  enabled = true,
+  needsWorker = true
 ): WorkerReadiness {
-  const paused = useAgentsStore((s) => s.getWorkerPaused(workspaceId ?? ''))
+  const paused = useAgentsStore(
+    (s) => s.workerPausedByWorkspace[workspaceId ?? '']
+  )
+  const fetchWorkerStatus = useAgentsStore((s) => s.fetchWorkerStatus)
+  const status = useQuery({
+    queryKey: ['workerReadinessStatus', workspaceId],
+    queryFn: async () => {
+      await fetchWorkerStatus(workspaceId!)
+      return true
+    },
+    enabled: !!workspaceId && enabled,
+    staleTime: 0,
+  })
   const setWorkerPaused = useAgentsStore((s) => s.setWorkerPaused)
   const consoleUrl = useWorkerConsoleUrl() ?? ''
   const { data: workers } = useQuery({
     queryKey: extraQueryKeys.workspaceWorkers(workspaceId ?? ''),
     queryFn: () => listAgentWorkers(workspaceId),
-    enabled: !!workspaceId && enabled,
+    enabled: !!workspaceId && enabled && needsWorker,
     refetchInterval: 5000,
   })
   const resumeScheduling = useCallback(() => {
     void setWorkerPaused(false, workspaceId ?? '')
   }, [setWorkerPaused, workspaceId])
-  return { workers, paused, consoleUrl, resumeScheduling }
+  return {
+    workers: needsWorker ? workers : [],
+    paused: status.isSuccess && !status.isFetching ? paused : undefined,
+    consoleUrl,
+    resumeScheduling,
+  }
 }

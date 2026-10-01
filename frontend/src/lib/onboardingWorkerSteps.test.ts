@@ -44,6 +44,42 @@ function build(
 }
 
 describe('buildWorkerOnboardingSteps', () => {
+  it.each([
+    { workers: [], paused: false, expected: false },
+    {
+      workers: [worker({ claim_enabled: false })],
+      paused: false,
+      expected: false,
+    },
+    { workers: [worker()], paused: true, expected: false },
+    { workers: [worker()], paused: undefined, expected: false },
+    { workers: [worker()], paused: false, expected: true },
+  ])(
+    'gates add-items on confirmed execution readiness: %j',
+    ({ expected, ...state }) => {
+      const core = [
+        { title: 'publish', unlocked: true },
+        { title: 'add', unlocked: true },
+      ] as ReturnType<typeof build>
+      expect(withWorkerSteps(core, build(state)).slice(-1)[0]?.unlocked).toBe(
+        expected
+      )
+      expect(core[1].unlocked).toBe(true)
+      expect(
+        withWorkerSteps(
+          [{ ...core[0] }, { ...core[1], unlocked: false }],
+          build(state)
+        ).slice(-1)[0]?.unlocked
+      ).toBe(false)
+    }
+  )
+
+  it('does not require a Worker for a published pure code workflow', () => {
+    const steps = build({ needsWorker: false, workers: [], paused: false })
+    expect(steps).toHaveLength(1)
+    expect(steps[0].completed).toBe(true)
+  })
+
   it('locks the switch step until a worker is online', () => {
     const [connect, switches] = build()
     expect(connect.completed).toBe(false)

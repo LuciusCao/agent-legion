@@ -6,7 +6,8 @@ export interface WorkerOnboardingInput {
   /** 本 workspace 视角的 Worker 列表（按 scoped token 注册过滤）。 */
   workers: AgentWorkerSummary[]
   /** workspace 调度是否暂停（顶栏「已暂停／运行中」）。 */
-  paused: boolean
+  paused: boolean | undefined
+  needsWorker?: boolean
   /** 部署级 Worker 控制台地址（空串 = 未配置）。 */
   consoleUrl: string
   goWorkerSettings: () => void
@@ -40,10 +41,14 @@ function pickConsoleUrl(input: WorkerOnboardingInput): string {
 export function buildWorkerOnboardingSteps(
   input: WorkerOnboardingInput
 ): OnboardingStep[] {
-  const online = hasOnlineWorker(input.workers)
-  const ready = online && hasClaimingWorker(input.workers) && !input.paused
+  const needsWorker = input.needsWorker !== false
+  const online = !needsWorker || hasOnlineWorker(input.workers)
+  const ready =
+    online &&
+    (!needsWorker || hasClaimingWorker(input.workers)) &&
+    input.paused === false
   const consoleUrl = pickConsoleUrl(input)
-  return [
+  const steps = [
     {
       icon: 'smart_toy',
       title: '接入 Worker',
@@ -59,7 +64,7 @@ export function buildWorkerOnboardingSteps(
       title: '打开执行开关',
       description:
         '两个默认关闭的开关：在 Worker 控制台点「开始领取」，并把顶栏的「已暂停」切成「运行中」。',
-      unlocked: online,
+      unlocked: online && input.paused !== undefined,
       completed: ready,
       actionLabel: input.paused
         ? '恢复调度'
@@ -73,6 +78,13 @@ export function buildWorkerOnboardingSteps(
           : input.goWorkerSettings,
     },
   ]
+  return needsWorker
+    ? steps
+    : steps.slice(1).map((step) => ({
+        ...step,
+        description:
+          '把顶栏的「已暂停」切成「运行中」，允许本 workspace 调度任务。',
+      }))
 }
 
 /** 发布 workflow → 接入 Worker → 打开执行开关 → 添加任务。 */
@@ -80,5 +92,13 @@ export function withWorkerSteps(
   core: OnboardingStep[],
   workerSteps: OnboardingStep[]
 ): OnboardingStep[] {
-  return [...core.slice(0, 1), ...workerSteps, ...core.slice(1)]
+  const ready = workerSteps.every((step) => step.completed)
+  return [
+    ...core.slice(0, 1),
+    ...workerSteps,
+    ...core.slice(1).map((step) => ({
+      ...step,
+      unlocked: step.unlocked && ready,
+    })),
+  ]
 }

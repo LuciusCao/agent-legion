@@ -28,9 +28,11 @@ export function WorkerReadinessBanner({
   const navigate = useNavigate()
   const { workers, paused, consoleUrl, resumeScheduling } = useWorkerReadiness(
     workspaceId,
-    waitingCount > 0
+    waitingCount > 0,
+    needsWorker
   )
-  if (waitingCount <= 0 || workers === undefined) return null
+  if (waitingCount <= 0 || workers === undefined || paused === undefined)
+    return null
   const online = hasOnlineWorker(workers)
   const noWorker = needsWorker && !online
   const idleWorker = needsWorker && online && !hasClaimingWorker(workers)

@@ -15,6 +15,7 @@ vi.mock('../hooks/useWorkerConsoleUrl', () => ({
 }))
 
 const setWorkerPausedMock = vi.fn()
+const fetchWorkerStatusMock = vi.fn()
 let mockPaused = false
 
 vi.mock('../stores/agentsStore', () => ({
@@ -23,6 +24,8 @@ vi.mock('../stores/agentsStore', () => ({
   ) => {
     const state = createMockAgentsState({
       getWorkerPaused: () => mockPaused,
+      workerPausedByWorkspace: { ws1: mockPaused },
+      fetchWorkerStatus: fetchWorkerStatusMock,
       setWorkerPaused: setWorkerPausedMock,
     })
     return selector ? selector(state) : state
@@ -73,10 +76,37 @@ function renderBanner(
 beforeEach(() => {
   vi.clearAllMocks()
   mockPaused = false
+  fetchWorkerStatusMock.mockResolvedValue(undefined)
   mockListAgentWorkers.mockResolvedValue([worker()])
 })
 
 describe('WorkerReadinessBanner', () => {
+  it('waits for pause status even when workers load first', async () => {
+    let resolve!: () => void
+    fetchWorkerStatusMock.mockImplementation(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done
+        })
+    )
+    mockPaused = true
+    renderBanner()
+    await waitFor(() => expect(mockListAgentWorkers).toHaveBeenCalled())
+    expect(screen.queryByRole('alert')).toBeNull()
+    resolve()
+    expect(await screen.findByRole('alert')).toHaveTextContent('调度已暂停')
+  })
+
+  it('does not warn from stale cached pause state after status fails', async () => {
+    mockPaused = true
+    fetchWorkerStatusMock.mockRejectedValue(new Error('offline'))
+    renderBanner()
+    await waitFor(() =>
+      expect(fetchWorkerStatusMock).toHaveBeenCalledWith('ws1')
+    )
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('stays hidden without waiting jobs or when everything is ready', async () => {
     renderBanner({ waitingCount: 0 })
     expect(screen.queryByTestId('worker-readiness-banner')).toBeNull()
@@ -127,6 +157,10 @@ describe('WorkerReadinessBanner', () => {
   it('skips worker checks for pure code workflows', async () => {
     mockListAgentWorkers.mockResolvedValue([])
     renderBanner({ needsWorker: false })
+    await waitFor(() =>
+      expect(fetchWorkerStatusMock).toHaveBeenCalledWith('ws1')
+    )
+    expect(mockListAgentWorkers).not.toHaveBeenCalled()
     expect(screen.queryByTestId('worker-readiness-banner')).toBeNull()
   })
 })
