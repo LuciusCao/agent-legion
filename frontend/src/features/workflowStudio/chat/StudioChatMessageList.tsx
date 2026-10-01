@@ -2,12 +2,15 @@ import { useMemo } from 'react'
 import type { StudioChat } from './useStudioChat'
 import { useChatAutoScroll } from './useChatAutoScroll'
 import {
+  asText,
+  statusEvent,
   streamingTextId,
   type ChatMessage,
   type ToolCallView,
 } from './studioChatMessages'
 import { supersededCancelRequestIds } from './studioChatCancelVisibility'
 import { MessageItem } from './StudioChatMessageItem'
+import { StudioChatWindow } from './StudioChatWindow'
 import styles from './StudioChatPanel.module.css'
 
 type Props = {
@@ -19,7 +22,8 @@ type Props = {
 
 export function StudioChatMessageList(props: Props) {
   const { chat } = props
-  const { bottomRef, listRef, handleScroll } = useChatAutoScroll(chat.messages)
+  const { bottomRef, listRef, handleScroll, pinnedToBottomRef } =
+    useChatAutoScroll(chat.messages)
   // Memoized: during streaming every SSE message event re-renders this list;
   // the toolCall lookup is O(messages × toolCalls) if rebuilt naively, and a
   // Map keyed by toolCallId makes it O(messages + toolCalls).
@@ -32,7 +36,7 @@ export function StudioChatMessageList(props: Props) {
     const seen = new Set<string>()
     for (const message of chat.messages) {
       if (message.kind !== 'tool_call') continue
-      const id = toolCallIdOf(message)
+      const id = asText(message.content?.toolCallId)
       const call = id ? toolCallById.get(id) : undefined
       if (id && call && !seen.has(id)) {
         seen.add(id)
@@ -74,6 +78,13 @@ export function StudioChatMessageList(props: Props) {
     [chat.toolCalls, chat.workflowDraft]
   )
 
+  // Updates of an existing tool card have no separate visual row.
+  const visibleMessages = chat.messages.filter(
+    (message) =>
+      (message.kind !== 'tool_call' ||
+        toolCallByFirstMessage.has(message.id)) &&
+      !(message.kind === 'status' && statusEvent(message).event === 'turn_end')
+  )
   return (
     <div
       ref={listRef}
@@ -81,35 +92,42 @@ export function StudioChatMessageList(props: Props) {
       aria-label="对话消息"
       onScroll={handleScroll}
     >
-      {chat.messages.map((message) => (
-        <MessageItem
-          key={message.id}
-          message={message}
-          streaming={message.id === streamingId}
-          cancelSuperseded={supersededCancelIds.has(message.id)}
-          toolCall={toolCallByFirstMessage.get(message.id) ?? null}
-          permission={permissionById.get(permissionRequestId(message)) ?? null}
-          draftAnchorId={draftAnchorId}
-          workflowDraft={chat.workflowDraft}
-          agentDrafts={chat.agentDrafts}
-          nodeDrafts={chat.nodeDrafts}
-          allowAllPermissions={chat.session?.allow_all_permissions ?? false}
-          permissionDisabled={chat.session?.status !== 'awaiting_permission'}
-          workspaceId={props.workspaceId}
-          onApplyWorkflowDraft={props.onApplyWorkflowDraft}
-          onSelectNode={props.onSelectNode}
-          onAnswerPermission={chat.answerPermission}
-          onToggleAllowAll={chat.setAllowAll}
-        />
-      ))}
+      <StudioChatWindow
+        ids={visibleMessages.map((message) => message.id)}
+        scrollRef={listRef}
+        pinnedRef={pinnedToBottomRef}
+        renderRow={(index) => {
+          const message = visibleMessages[index]
+          return (
+            <MessageItem
+              key={message.id}
+              message={message}
+              streaming={message.id === streamingId}
+              cancelSuperseded={supersededCancelIds.has(message.id)}
+              toolCall={toolCallByFirstMessage.get(message.id) ?? null}
+              permission={
+                permissionById.get(permissionRequestId(message)) ?? null
+              }
+              draftAnchorId={draftAnchorId}
+              workflowDraft={chat.workflowDraft}
+              agentDrafts={chat.agentDrafts}
+              nodeDrafts={chat.nodeDrafts}
+              allowAllPermissions={chat.session?.allow_all_permissions ?? false}
+              permissionDisabled={
+                chat.session?.status !== 'awaiting_permission'
+              }
+              workspaceId={props.workspaceId}
+              onApplyWorkflowDraft={props.onApplyWorkflowDraft}
+              onSelectNode={props.onSelectNode}
+              onAnswerPermission={chat.answerPermission}
+              onToggleAllowAll={chat.setAllowAll}
+            />
+          )
+        }}
+      />
       <div ref={bottomRef} />
     </div>
   )
-}
-
-function toolCallIdOf(message: ChatMessage): string {
-  const content = message.content as Record<string, unknown>
-  return typeof content?.toolCallId === 'string' ? content.toolCallId : ''
 }
 
 function permissionRequestId(message: ChatMessage): string {
