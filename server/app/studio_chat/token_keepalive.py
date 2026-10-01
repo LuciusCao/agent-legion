@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.auth.sessions import hash_token
+from server.app.services.job_errors import ConflictError
 from server.app.studio_chat.prompt_turn import PROMPT_TIMEOUT_SECONDS
 from server.app.studio_chat.session_escalation import escalate_dead_token_session
 
@@ -35,6 +36,21 @@ TOKEN_INVALIDATED_DETAIL = (
 # A checked-live token must outlive the current turn: the threshold is the
 # turn-duration ceiling plus grace, NOT the turn-start 30min one (#411 review).
 _KEEPALIVE_RENEW_THRESHOLD = timedelta(seconds=PROMPT_TIMEOUT_SECONDS + 300)
+
+
+def require_live_run_token(
+    backend: ServiceBackend, session_id: str, runtime: SessionRuntime
+) -> None:
+    """Fail closed at prompt handoff, including a token lost during renewal."""
+    if backend.db.get_scoped_token_user(hash_token(runtime.token)) is not None:
+        return
+    with runtime.lock:
+        runtime.turn_open = False
+        # Unlike notification keepalive, a send must propagate DB failures.
+        # Escalation releases any running claim without reopening a closed row.
+        escalate_dead_token_session(backend, session_id)
+        keepalive_run_token(backend, session_id)
+    raise ConflictError(TOKEN_INVALIDATED_DETAIL)
 
 
 def _token_alive(backend: ServiceBackend, token: str) -> bool:

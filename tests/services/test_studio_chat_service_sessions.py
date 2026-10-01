@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.auth.scoped_tokens import authenticate_scoped_token
+from server.app.auth.scoped_tokens import authenticate_scoped_token, mint_scoped_token
 from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 from server.app.studio_chat.registry import StudioAgentRegistryStore
@@ -392,7 +392,9 @@ def _direct_session(job_db, settings):
     user_id = str(job_db.create_user("chat-user", password_hash=None)["id"])
     session_id = job_db.create_studio_chat_session(workspace_id, user_id, "direct-agent")
     job_db.update_studio_chat_session(session_id, status="idle")
-    runtime = SessionRuntime(_StubHandle(), token="direct-token")
+    runtime = SessionRuntime(
+        _StubHandle(), token=mint_scoped_token(job_db, user_id, workspace_id=workspace_id)
+    )
     with service._runtimes_lock:
         service._runtimes[session_id] = runtime
     return service, session_id, runtime, workspace_id

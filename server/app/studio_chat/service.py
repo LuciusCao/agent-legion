@@ -27,7 +27,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from server.app.auth.scoped_tokens import renew_scoped_token
-from server.app.auth.sessions import hash_token
 from server.app.events.bus import EventBus
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
@@ -42,7 +41,7 @@ from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import teardown_runtime
-from server.app.studio_chat.token_keepalive import TOKEN_INVALIDATED_DETAIL, keepalive_run_token
+from server.app.studio_chat.token_keepalive import require_live_run_token
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
@@ -210,9 +209,7 @@ class StudioChatService:
             raise ConflictError("Chat session is not running on this server")
         # Reject before claiming a turn or persisting the user's message: an
         # expired MCP header cannot be repaired by sending another prompt.
-        if self._db.get_scoped_token_user(hash_token(runtime.token)) is None:
-            keepalive_run_token(self, session_id)
-            raise ConflictError(TOKEN_INVALIDATED_DETAIL)
+        require_live_run_token(self, session_id, runtime)
         # #694: inside kimi's background-compaction window a prompt is
         # silently queued and settled as a fake instant end_turn — refuse
         # the send instead (/compact itself is never blocked). This is the
@@ -246,6 +243,7 @@ class StudioChatService:
         with runtime.lock:
             if compaction.late_gate_blocked(self._db, session_id, runtime, text):
                 raise ConflictError(compaction.SEND_BLOCKED_DETAIL)
+            require_live_run_token(self, session_id, runtime)
             # New turn, new stream rows: reset the coalescing slots at turn
             # START (not at turn end) so trailing chunks of the finished
             # turn — the ACP SDK can deliver them after turn_end — keep
@@ -273,6 +271,7 @@ class StudioChatService:
             prompt_text, resume_pending = prepare_resume_prompt(
                 runtime, self._db, session_id, first_prompt, prompt_text, message["seq"]
             )
+            require_live_run_token(self, session_id, runtime)
             if not runtime.handle.send_prompt(prompt_text):
                 # The prompt never reached the agent: re-arm the one-shot
                 # marker so the next turn retries the injection instead of
