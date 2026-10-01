@@ -1211,25 +1211,28 @@ exemptions:
     scan_and_compress_pi_events 增加 stderr_sink 参数（重写前把脱敏后的
     tail 原子写盘，非 JSON 行在 replace 后永久消失，直传回落/重启恢复的
     二趟 prepare 从锚点文件读回而非二扫），外加 sink 写失败的调用点
-    best-effort 捕获（压缩永不因 sink 不可写失败）。防御性正确性代码使
-    有效行 77→102（超 growth_allowance 带）。时间盒：stderr 留痕管线
-    稳定后若下沉为独立 sink 模块（shared 侧 stdlib-only 约束内的拆分），
-    重登预算。'
+    best-effort 捕获（压缩永不因 sink 不可写失败）。#755 对抗复审收口：
+    保尾切片按行对齐（骑跨切割点的密钥残段结构性消除）+ sink 脱敏扩窗
+    （先脱敏后切）+ sink 捕获放宽为 Exception（redact 回调逃逸不改判
+    run）。防御性正确性代码使有效行 77→112（超 growth_allowance 带）。
+    时间盒：stderr 留痕管线稳定后若下沉为独立 sink 模块（shared 侧
+    stdlib-only 约束内的拆分），重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
   ceiling: 102
   expires: 2026-12-31
 - check: architecture.file_budget
   path: worker/host/transfer.py
-  reason: '#748 R2 复审 P2-1：X-Agent-Result 头预算的第三级降级——output_artifacts
+  reason: '#748 R2 复审 P2-1：X-Agent-Result 头预算的产物清单降级——output_artifacts
     直传 ref 形态（128 条 ~25KB）把头推破 h11 16KB，成功运行同样中招（成功上报
-    也带产物清单）。收缩循环扩展为多级降级（tail → error_message → 产物前缀
-    截断 + output_artifacts_truncated/total 标记，清单整体可降级为空列表保投递）。
-    防御性正确性代码使有效行 126→142；rebase 到 0.7.13 基线叠加 report()
-    的 stop 取消通道形参（基线新增，与 #748 的 **_extra 兼容形参并存）
-    进一步到 161（均超 growth_allowance 带）。时间盒：若
-    结果头改走 body 或产物清单下沉独立通道（协议 v6 候选），收缩循环随之
-    退役并重登预算。'
+    也带产物清单）。收缩循环为多级降级（tail → error_message → command（#755
+    对抗复审 P2-1b：纯观测面，先于清单降级）→ 产物清单按 ref 形态分流：直传
+    dict ref 抛 ResultHeaderOverflow 整体换轨归档内嵌，CAS 形态才走最后手段
+    截断 + output_artifacts_truncated/total 标记）。防御性正确性代码使有效行
+    126→142；rebase 到 0.7.13 基线叠加 report() 的 stop 取消通道形参（基线新
+    增，与 #748 的 **_extra 兼容形参并存）进一步到 161，#755 command 降级段
+    到 165（均超 growth_allowance 带）。时间盒：若结果头改走 body 或产物清单
+    下沉独立通道（协议 v6 候选），收缩循环随之退役并重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
   ceiling: 171
@@ -1239,10 +1242,12 @@ exemptions:
   reason: '#748 R2 复审 P2-2/P2-3/P3-3b/P3-4：脱敏先于截断（跨 200 边界密钥
     残段不再漏出）、register_secrets 注册 worker 配置 environment 块的值
     （secret 注入 agent 子进程的官方通道此前零覆盖，含线程安全锁）、值长
-    降序替换 + 字节阈值 + ghp_/gho_/xox[bap]- 形态族、锚点重写失败降级为
-    截断为空（宁丢证据不外发密钥）。防御性正确性代码使有效行 47→67（超
-    growth_allowance 带）。时间盒：脱敏面若与 worker 配置加载统一收口
-    （敏感值集中注册），此处重登预算。'
+    降序替换 + 字节阈值 + ghp_/gho_/xox[bap]- 形态族；R3 起锚点在扫描时刻
+    脱敏落盘（不再有就地重写窗口）。#755 对抗复审收口：sink 读回臂并入统一
+    脱敏（旧版明文锚点防御）、redact_secrets_bytes 改保尾切片（扩窗语义
+    配套）。防御性正确性代码使有效行 47→60（超 growth_allowance 带）。
+    时间盒：脱敏面若与 worker 配置加载统一收口（敏感值集中注册），此处
+    重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
   ceiling: 67
@@ -1256,7 +1261,8 @@ exemptions:
     化侧按 ref 形态判信号（CAS 形态不抛、走最后手段截断）+ 一次性
     回退闸。rebase 到 0.7.13 基线后换轨逻辑随 report 车道迁入本模块
     （基线把 queue._report 拆为 report_task），防御性正确性代码使有效行
-    83→112（超 growth_allowance 带）。时间盒：回退链若与
+    83→112；#755 对抗复审 P3-1（换轨中途判死走 lost 终态当场清理而
+    非滞留）到 115（超 growth_allowance 带）。时间盒：回退链若与
     DirectUploadError 回退路径统一收口为单一换轨助手（report 车道与
     bulk 车道共享），此处重登预算。'
   owner: workspace-executor

@@ -19,11 +19,17 @@ _MAX_CONNECTION_KEY_CHARS = MAX_CONNECTION_KEY_CHARS
 # metadata; capped at the error_message budget (the Worker truncates to the
 # same bound, the reader re-truncates defensively for older/other writers).
 _MAX_AGENT_STDERR_TAIL_CHARS = 4000
-# #748 R2 P2-1: the Worker's X-Agent-Result byte budget (h11 caps one HTTP
-# event at 16 KiB) can force a 128-entry direct-upload artifact manifest to
-# degrade to a kept PREFIX (or, at the extreme, an empty list). The Worker
-# stamps these markers so the reader can tell "truncated by the writer"
-# apart from "reported none"; both keys are optional and tolerated-absent
+# #748 R2 P2-1 + #755 对抗复审 P2-1: the Worker's X-Agent-Result byte
+# budget (h11 caps one HTTP event at 16 KiB) can force a 128-entry
+# artifact manifest past the limit. The degrade dispatches on the ref
+# FORM: direct-upload dict refs raise ResultHeaderOverflow on the Worker
+# (whole-lane fallback to the archive-embed channel — a kept prefix would
+# flip the run to "Missing outputs"); CAS string refs (bytes already IN
+# the archive) take the last-resort truncation to an empty list and stamp
+# these markers. The markers are part of the completion contract: with
+# ``output_artifacts_truncated`` set, the completion handler skips the
+# empty-manifest completed→failed flip and judges produced/missing from
+# the staged archive view. Both keys are optional and tolerated-absent
 # like agent_stderr_tail above (older Workers / non-truncating shapes).
 ARTIFACTS_TRUNCATED_KEY = "output_artifacts_truncated"
 ARTIFACTS_TOTAL_KEY = "output_artifacts_total"

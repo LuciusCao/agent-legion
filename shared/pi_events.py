@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 # stream.
 STDERR_TAIL_BYTES = 8 * 1024
 
+# #755 对抗复审 P3-2：sink 落盘的脱敏窗口比最终保尾界宽出这一段——切割
+# 先于脱敏时，骑跨切割点的密钥只剩尾段（整值匹配不上，明文外泄）；扩窗
+# 让跨点密钥在脱敏时保持完整，脱敏后再切回 8KB（与 stderr_error_message
+# 200 字符面「先脱敏后截」同纪律）。窗口外沿仍可能骑跨更长密钥——扩窗
+# 压低概率而非根除，这是 best-effort 边界。
+_SINK_REDACT_MARGIN_BYTES = 512
+
 
 # Event types that the job log renderer consumes.  All message_update deltas
 # (thinking_delta, text_delta, toolcall_delta, ...) are discarded because the
@@ -90,7 +97,12 @@ def scan_and_compress_pi_events(
     (shared/ is stdlib-only and must not import worker modules); ``None``
     writes the raw bytes (tests / non-secret callers). The RETURN value
     stays RAW — the caller-facing faces (error_message etc.) redact with
-    their own, richer context (worker/upload/stderr_evidence.py).
+    their own, richer context (worker/upload/stderr_evidence.py). #755
+    对抗复审 P3-2: the byte cut is line-aligned (a real cut drops the
+    leading partial line) and the sink redacts a window widened by
+    ``_SINK_REDACT_MARGIN_BYTES`` before the final slice, so a secret
+    straddling the cut point is matched whole instead of leaking its
+    tail fragment.
 
     Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``.
     ``stderr_tail`` is the bounded keep-the-tail capture of the non-JSON
@@ -148,7 +160,8 @@ def scan_and_compress_pi_events(
             compressed_path.unlink(missing_ok=True)
         return None, 0, 0, b""
 
-    tail = "\n".join(stderr_tail).encode("utf-8", "replace")[-STDERR_TAIL_BYTES:]
+    encoded_tail = "\n".join(stderr_tail).encode("utf-8", "replace")
+    tail = _keep_tail_slice(encoded_tail)
     if stderr_sink is not None and tail:
         # Best-effort AT THE CALL SITE: an unwritable sink must never fail
         # the compression (the in-memory tail still rides the return value).
@@ -158,9 +171,20 @@ def scan_and_compress_pi_events(
         # #748 R3 (codex review P1): redaction happens BEFORE the durable
         # write — the sink file must never hold the raw tail (the return
         # value stays raw; the caller redacts its own faces separately).
+        # #755 对抗复审 P3-2: redact a window wider than the final cut
+        # (_SINK_REDACT_MARGIN_BYTES) so a secret straddling the 8KB cut
+        # point is still matched whole, then slice AFTER redaction.
         try:
-            _persist_stderr_tail(stderr_sink, redact(tail) if redact is not None else tail)
-        except OSError:
+            window = encoded_tail[-(STDERR_TAIL_BYTES + _SINK_REDACT_MARGIN_BYTES) :]
+            persisted = redact(window) if redact is not None else window
+            _persist_stderr_tail(stderr_sink, _keep_tail_slice(persisted))
+        except Exception:
+            # #204 broad-except audit: sink 落盘是纯观测面，压缩/返回值才是
+            # 关键路径——失败语义是「本次不留锚点」（重入路径归因降级为空，
+            # 内存 tail 仍随返回值走），任何失败族（OSError 写失败、redact
+            # 回调的非 OSError 逃逸——#755 对抗复审 P3-4）都必须降级而非把
+            # run 改判 failed。结果空间：锚点缺失是唯一后果，恢复路径对此
+            # 有定义（tail 读回为空）。日志保全：logger.exception 带堆栈。
             logger.exception("Failed to persist the stderr tail: %s", stderr_sink)
     try:
         compressed_path.replace(events_path)
@@ -170,6 +194,26 @@ def scan_and_compress_pi_events(
 
     compressed_size = events_path.stat().st_size
     return model_error, original_size, compressed_size, tail
+
+
+def _keep_tail_slice(data: bytes) -> bytes:
+    """Slice to the last STDERR_TAIL_BYTES, dropping the leading partial line
+    when a real cut happened.
+
+    #755 对抗复审 P3-2: a mid-line cut can leave the TAIL FRAGMENT of a
+    secret that straddles the boundary — the redaction passes match whole
+    values only, so the fragment would survive onto every downstream face
+    (return value → error_message/metadata, sink). Line-aligning the cut
+    removes the straddling fragment structurally; a single line longer
+    than the whole budget keeps the raw cut (the sink path's widened
+    redact window is the backstop there)."""
+    if len(data) <= STDERR_TAIL_BYTES:
+        return data
+    cut = data[-STDERR_TAIL_BYTES:]
+    if data[-STDERR_TAIL_BYTES - 1 :][:1] == b"\n":
+        return cut  # 切点恰好落在行首，无残行
+    newline = cut.find(b"\n")
+    return cut[newline + 1 :] if newline != -1 else cut
 
 
 def _persist_stderr_tail(sink: Path, tail: bytes) -> None:

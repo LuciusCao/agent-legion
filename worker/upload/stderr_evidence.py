@@ -134,8 +134,13 @@ def redact_secrets_bytes(tail: bytes) -> bytes:
     redacts, and re-slices to the same byte bound shared/ enforces (the
     redaction only ever SHRINKS — replacements are shorter — so the slice
     is a no-op safety net). shared/ stays stdlib-only: the callback is
-    injected here, never imported there."""
-    return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[:STDERR_TAIL_BYTES]
+    injected here, never imported there.
+
+    #755 对抗复审 P3-2: the slice keeps the TAIL end. shared/ now hands the
+    callback a window slightly wider than the bound (so a secret straddling
+    the final cut is matched whole); a head slice would silently drop the
+    newest bytes — the crash header the tail exists to keep."""
+    return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[-STDERR_TAIL_BYTES:]
 
 
 def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
@@ -153,14 +158,18 @@ def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
     against older/pre-redaction anchors) and redact the FRESH scan capture
     for its in-memory faces. The old in-place rewrite step is gone: the
     anchor never holds plaintext, so there is nothing to sanitize on read
-    and no truncate-to-empty degradation path left to carry."""
+    and no truncate-to-empty degradation path left to carry.
+
+    #755 对抗复审 P3-3: the read-back arm no longer returns early — it
+    flows through the SAME final redact pass as the fresh capture. The
+    anchor is redacted at write time, but re-redacting on read is the
+    defense-in-depth that covers pre-redaction anchors written by older
+    Workers and any secret registered after the anchor was written."""
     tail = scanned_tail
     if not tail:
         sink = run_dir / AGENT_STDERR_FILENAME
         if sink.is_file():
             tail = sink.read_bytes()[:STDERR_TAIL_BYTES]
-            if tail:
-                return tail
     if not tail:
         return b""
     return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[:STDERR_TAIL_BYTES]

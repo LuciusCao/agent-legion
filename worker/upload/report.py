@@ -101,6 +101,13 @@ def report_task(
                     for name in outputs:
                         ref = upload_cas_artifact(task.execution_dir / "job" / PurePosixPath(name))
                         if ref is None:
+                            # #755 对抗复审 P3-1：换轨中途判死与 bulk 车道同
+                            # 纪律（queue._bulk_transfer：lost if ownership
+                            # lost else aborted）——走 lost 终态由下方统一出
+                            # 口 drop_marker + 按归属清目录，不滞留到重启。
+                            if task.ownership_lost.is_set():
+                                lost = True
+                                break
                             return "aborted"  # shutting down; marker stays
                         fallback_metadata.setdefault("output_artifacts", {})[name] = ref
                 except HostRequestError as upload_exc:

@@ -187,18 +187,20 @@ def test_artifact_truncation_roundtrip_worker_header_to_host_parse() -> None:
 
 @_parse_only
 def test_artifact_truncation_markers_parse_for_last_resort_shape() -> None:
-    """最后手段形态（R3 不可缩面，如巨型 command + CAS 引用）经真实传输形态
-    被 Host 读进 outcome/record：清单为空 + truncated/total 标记如实记录——
-    标记是记账面，Host 不用它恢复引用（codex review P1 的语义如实化）。"""
+    """最后手段形态（#755 后仅剩的清单不可缩形态：超长产物名的 CAS 清单——
+    R3 时代的巨型 command 残差面已随 #755 command 降级阶段消失）经真实传输
+    形态被 Host 读进 outcome/record：清单为空 + truncated/total 标记如实
+    记录。标记是完成契约的一部分：Host 见 truncated 跳过空清单改判、从归档
+    暂存视图判定产物（#755 P2-1a），但仍不用它恢复直传 ref。"""
     from server.app.routes.agent_worker_results import _recover_result_header
     from worker.host.transfer import _result_header_value
 
-    artifacts = {f"out-{i:03d}.json": f"sha256:{_HASH}" for i in range(128)}
+    artifacts = {f"outputs/{i:03d}/" + "n" * 80 + ".json": f"sha256:{_HASH}" for i in range(128)}
     metadata = {
         "status": "completed",
         "exit_code": 0,
         "error_message": "任务完成",
-        "command": ["pi", "x" * 20_000],  # 不可缩面
+        "command": ["pi"],
         "output_artifacts": artifacts,
         "run_dir": "runs/node_a/worker",
     }

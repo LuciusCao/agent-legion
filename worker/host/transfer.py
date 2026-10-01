@@ -36,24 +36,28 @@ DEFAULT_TRANSFER_TIMEOUT = 120
 # the request line, the lease header, and proxy hop headers.
 _RESULT_HEADER_BUDGET = 14 * 1024
 
-# #748 R2 P2-1: output_artifacts are the THIRD budget face. Direct-upload
-# refs (~200 bytes each, dict form) ride the SAME header on SUCCESS runs,
-# and the Host-side cap is 128 (_MAX_OUTPUT_ARTIFACTS) — a full 128-ref
-# manifest serializes to ~25 KB, blowing the budget exactly like the CJK
-# tail did (report retry exhaustion -> lease expiry = the UNDELIVERABLE
-# form this PR exists to kill). #748 R3 (codex review P1): a kept PREFIX
-# is NOT an acceptable degrade — in direct-upload mode prepare_result
-# deliberately does NOT embed the artifact bytes in the archive, and the
-# Host's completion handler does not reconstruct the dropped refs from
-# the truncation markers, so every ref missing from the header is a
-# missing file in job_dir and the run flips to "Missing outputs". When
-# the budget forces the artifact list itself to shrink we therefore
-# raise ResultHeaderOverflow instead: the upload queue catches it and
-# falls back to the archive-embed channel (same as the direct-upload
-# failure path), where the refs are CAS strings (~78 B each, 128 entries
-# ~= 10 KB, inside the budget naturally). Only a payload that STILL
-# overflows after that fallback reaches the truncation break below — the
-# last resort, see the comment there.
+# #748 R2 P2-1: output_artifacts are a budget face of their own.
+# Direct-upload refs (~200 bytes each, dict form) ride the SAME header on
+# SUCCESS runs, and the Host-side cap is 128 (_MAX_OUTPUT_ARTIFACTS) — a
+# full 128-ref manifest serializes to ~25 KB, blowing the budget exactly
+# like the CJK tail did (report retry exhaustion -> lease expiry = the
+# UNDELIVERABLE form this PR exists to kill). #748 R3 (codex review P1): a
+# kept PREFIX is NOT an acceptable degrade — in direct-upload mode
+# prepare_result deliberately does NOT embed the artifact bytes in the
+# archive, and the Host's completion handler does not reconstruct the
+# dropped refs from the truncation markers, so every ref missing from the
+# header is a missing file in job_dir and the run flips to "Missing
+# outputs". When the budget forces the artifact list itself to shrink we
+# therefore raise ResultHeaderOverflow instead: the upload queue catches
+# it and falls back to the archive-embed channel (same as the
+# direct-upload failure path), where the refs are CAS strings (~78 B
+# each, 128 entries ~= 10 KB, inside the budget naturally). #755 对抗复审
+# P2-1b: the command face (pure observability — with 128 outputs the argv
+# repeats --require-output for ~7.7 KB) is dropped BEFORE the artifact
+# list is touched, so the archive-embed fallback's CAS manifest fits
+# without reaching truncation. Only a payload that STILL overflows after
+# all that reaches the truncation break below — the last resort, see the
+# comment there.
 
 
 class ResultHeaderOverflow(RuntimeError):
@@ -89,19 +93,23 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
     latin-1, and the Host reader reverses exactly that (see
     ``_recover_result_header`` in agent_worker_results.py).
 
-    #748 R2 P2-1: the byte budget is enforced by a THREE-STAGE degrade —
+    #748 R2 P2-1: the byte budget is enforced by a FOUR-STAGE degrade —
     (1) shrink ``agent_stderr_tail`` (10% steps), (2) shrink
     ``error_message`` (the classification surface, so only after the tail),
-    (3) the artifact list. Stage 3 #748 R3 (codex review P1) now dispatches
-    on the REF FORM: direct-upload dict refs raise ``ResultHeaderOverflow``
-    (fallback signal — the archive carries no artifact bytes, so a prefix
-    loses refs for good; the queue re-prepares via the archive-embed
-    channel, whose CAS refs are ~78 B each and fit the budget naturally);
-    CAS string refs already have the bytes IN the archive, so they take the
-    last-resort truncation directly (see that comment). This is the
-    dead-loop guard for free: the fallback's rebuilt manifest is CAS-form,
-    so a second overflow can never re-signal — at most one fallback per
-    result, and the queue's fallback path is additionally once-only."""
+    (3) drop ``command`` (#755 对抗复审 P2-1b: pure observability — the
+    Host records it but never judges on it; with 128 outputs the argv
+    alone repeats --require-output for ~7.7 KB, so clearing it lets the
+    CAS manifest fit whole), (4) the artifact list. Stage 4 #748 R3
+    (codex review P1) now dispatches on the REF FORM: direct-upload dict
+    refs raise ``ResultHeaderOverflow`` (fallback signal — the archive
+    carries no artifact bytes, so a prefix loses refs for good; the queue
+    re-prepares via the archive-embed channel, whose CAS refs are ~78 B
+    each and fit the budget naturally); CAS string refs already have the
+    bytes IN the archive, so they take the last-resort truncation directly
+    (see that comment). This is the dead-loop guard for free: the
+    fallback's rebuilt manifest is CAS-form, so a second overflow can
+    never re-signal — at most one fallback per result, and the queue's
+    fallback path is additionally once-only."""
     payload = dict(metadata)
 
     def _serialized() -> bytes:
@@ -115,6 +123,13 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
         error = payload.get("error_message")
         if isinstance(error, str) and len(error) > 200:
             payload["error_message"] = error[: int(len(error) * 0.9)]
+            continue
+        command = payload.get("command")
+        if isinstance(command, list) and command:
+            # #755 对抗复审 P2-1b：command 是纯观测面（Host 只记录、不参与
+            # 完成判定），动产物清单之前先砍它——128 产物时 argv 里重复的
+            # --require-output 约占 7.7KB，清空后 CAS 清单整体落预算。
+            payload["command"] = []
             continue
         artifacts = payload.get("output_artifacts")
         if isinstance(artifacts, dict) and artifacts and _has_direct_refs(artifacts):
@@ -133,20 +148,22 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
             # LAST RESORT truncation, reached in exactly two shapes:
             # (a) CAS string refs — the artifact bytes are already IN the
             # archive this header ships with, so the Host unpacks them into
-            # job_dir regardless of the header manifest; the loss is the
-            # ref registration only.
+            # the staging view regardless of the header manifest; the
+            # dropped entries are the header manifest only.
             # (b) direct refs AFTER the queue's archive-embed fallback —
             # only reachable if the fallback could not rebuild (prepare
             # failure degrade path), an already-degenerate shape.
-            # Either way the payload still overflows through faces nobody
-            # can rebuild (e.g. a giant command near the budget alone —
-            # R3's known unshrinkable residue), and delivery with partial
-            # data beats the UNDELIVERABLE alternative (report retry
-            # exhaustion -> lease expiry -> full re-run).
-            # HONEST MARKER SEMANTICS (codex review P1): the Host records
-            # output_artifacts_truncated/total but does NOT use them to
-            # recover the dropped refs — the markers are bookkeeping, not a
-            # recovery contract.
+            # Delivery with partial data beats the UNDELIVERABLE
+            # alternative (report retry exhaustion -> lease expiry -> full
+            # re-run).
+            # MARKER SEMANTICS (#755 对抗复审 P2-1a): the markers ARE part
+            # of the Host completion contract — with
+            # output_artifacts_truncated set, the Host skips the
+            # empty-manifest completed→failed flip and judges
+            # produced/missing from the staged archive view (the bytes ride
+            # the archive in shape (a)); what the markers still do NOT do
+            # is reconstruct dropped DIRECT refs (shape (b) stays
+            # degenerate and fails honestly via the missing check).
             payload["output_artifacts_total"] = len(artifacts)
             payload["output_artifacts_truncated"] = True
             payload["output_artifacts"] = {}

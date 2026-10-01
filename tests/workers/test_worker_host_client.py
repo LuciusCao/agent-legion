@@ -364,9 +364,9 @@ def test_result_header_value_shrinks_oversized_tail_under_budget() -> None:
 
 
 def test_result_header_value_stage_order_tail_error_then_artifact_signal() -> None:
-    """多级顺序：tail 先缩、error_message 次之、直传清单最后——三面同时
-    超预算时前两级先收敛（分类面优先于产物清单之前保住），收敛后清单仍
-    放不下时才抛回退信号（不是截断）。"""
+    """多级顺序：tail 先缩、error_message 次之、command（纯观测面）再次、
+    产物清单最后——各面同时超预算时前三级先收敛（分类面与产物清单都在
+    观测面之前保住），收敛后清单仍放不下时才抛回退信号（不是截断）。"""
     from worker.host.transfer import ResultHeaderOverflow, _result_header_value
 
     artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(128)}
@@ -387,6 +387,31 @@ def test_result_header_value_stage_order_tail_error_then_artifact_signal() -> No
     decoded = json.loads(_result_header_value(shrunk).decode("utf-8"))
     assert decoded["error_message"] == "Agent process exited 1: ValueError: boom"
     assert len(decoded["agent_stderr_tail"]) > 0
+
+
+def test_result_header_value_drops_command_before_artifact_list() -> None:
+    """#755 对抗复审 P2-1b：command 是纯观测面（Host 只记录不判定）——动产
+    物清单之前先清空它。128 条 CAS 引用 + --require-output 重复的巨型 argv
+    （~7.7KB）：清空 command 后清单整体落预算，产物引用一条不丢、无截断
+    标记。"""
+    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
+
+    artifacts = {f"output-{i:03d}.json": f"sha256:{'a' * 64}" for i in range(128)}
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "error_message": "",
+        "command": ["pi"] + [f"--require-output=output-{i:03d}.json" for i in range(128)],
+        "output_artifacts": artifacts,
+        "run_dir": "runs/node_a/worker",
+    }
+    header = _result_header_value(metadata)
+    assert len(header) <= _RESULT_HEADER_BUDGET
+    decoded = json.loads(header.decode("utf-8"))
+    assert decoded["command"] == []  # 观测面已降级
+    assert decoded["output_artifacts"] == artifacts  # 产物清单一字不丢
+    assert "output_artifacts_truncated" not in decoded
+    assert "output_artifacts_total" not in decoded
 
 
 def test_result_header_value_giant_direct_ref_still_signals_fallback() -> None:
@@ -478,34 +503,32 @@ def test_result_header_value_cas_refs_fit_budget_without_truncation() -> None:
 
 
 def test_result_header_value_last_resort_truncates_cas_refs_to_empty() -> None:
-    """最后手段兜底（R3 已知的不可缩面，如巨型 command）：CAS 形态的清单在
-    仍超预算时降级为空 + 截断标记——CAS 引用意味着产物字节已在归档里，Host
-    解包仍能拿到文件，丢的只是头部清单。标记语义如实：Host 只做记录，不用它
-    恢复引用。total 只 stamp 一次（128，不是逐趟漂移后的残值）。头部字节数
-    不再回落预算内：command 是谁也缩不掉的面，delivery-with-overflow 优于
-    UNDELIVERABLE（租约过期 → 整执行重跑）。"""
+    """最后手段兜底（#755 后仅剩的清单不可缩形态：超长产物名的 CAS 清单）：
+    command 面已先清空（纯观测面），清单仍超预算时降级为空 + 截断标记。
+    标记语义（#755 对抗复审 P2-1a）：Host 见 truncated 跳过「空清单改判
+    failed」，从归档暂存视图判定 produced/missing（CAS 形态产物字节本来
+    就在归档里）；标记仍不用于恢复直传 ref。total 只 stamp 一次（128，
+    不是逐趟漂移后的残值）。截断后载荷回落预算内——R3 时代的巨型
+    command 残差面已随 command 降级阶段消失。"""
     from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
 
-    artifacts = {f"output-{i:03d}.json": f"sha256:{'a' * 64}" for i in range(128)}
+    artifacts = {f"outputs/{i:03d}/" + "n" * 80 + ".json": f"sha256:{'a' * 64}" for i in range(128)}
     metadata = {
         "status": "completed",
         "exit_code": 0,
         "error_message": "",
-        "command": ["pi", "x" * 20_000],  # 不可缩面：单条 command 逼近预算
+        "command": ["pi"],
         "output_artifacts": artifacts,
         "run_dir": "runs/node_a/worker",
     }
     header = _result_header_value(metadata)
+    assert len(header) <= _RESULT_HEADER_BUDGET  # 截断后回落预算内
     decoded = json.loads(header.decode("utf-8"))
-    # 清单被整体降级为空（最后手段），标记 + 一次性 total。
+    # 清单被整体降级为空（最后手段），标记 + 一次性 total；command 面已先降级。
+    assert decoded["command"] == []
     assert decoded["output_artifacts"] == {}
     assert decoded["output_artifacts_truncated"] is True
     assert decoded["output_artifacts_total"] == 128
-    # 去掉清单后残差 = 纯 command 面（不可缩），证明产物面已退出预算竞争。
-    residue = dict(metadata, output_artifacts={}, command=["pi"])
-    assert len(header) - (_RESULT_HEADER_BUDGET - len(_result_header_value(residue))) > 0
-    assert len(header) > _RESULT_HEADER_BUDGET  # 不可缩面原样投递
-    assert "x" * 100 in decoded["command"][1]  # command 内容一字不丢
 
 
 def test_cjk_result_header_roundtrips_through_real_h11_uvicorn_starlette() -> None:

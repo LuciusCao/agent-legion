@@ -288,3 +288,54 @@ def test_persist_stderr_tail_cleans_staging_on_replace_failure(tmp_path, monkeyp
         monkeypatch.setattr(pi_events.os, "replace", os.replace)
     assert list(tmp_path.glob(".agent-stderr.*")) == []  # staging 已清理
     assert not (tmp_path / "agent-stderr.log").exists()  # sink 未落盘
+
+
+def test_scan_and_compress_redacts_secret_straddling_tail_cut(tmp_path):
+    """#755 对抗复审 P3-2：密钥骑跨 8KB 保尾切割点时，「先切后脱敏」会让
+    残段（整值匹配不上的尾部碎片）明文落进 sink。修复后双保险：脱敏窗口
+    比切割界宽（_SINK_REDACT_MARGIN_BYTES，跨点密钥整值命中），且最终切片
+    按行对齐（切割行保守丢弃）——sink 与返回值都不留残段。"""
+    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+
+    secret = "sk-live-" + "s" * 92  # 100 字节
+    # CJK 噪音（3 字节/字）把密钥行推上 8KB 字节切割界：密钥行 116 字节 +
+    # "\n" + 2714 字噪音 = 8259 字节，切割点落在密钥第 51 字节处。
+    noise = "噪" * 2714
+    events = tmp_path / "events.jsonl"
+    events.write_text(f'{{"type":"session"}}\nauth failed for {secret}\n{noise}\n')
+    sink = tmp_path / "agent-stderr.log"
+    _, _, _, tail = scan_and_compress_pi_events(
+        events,
+        stderr_sink=sink,
+        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+    )
+    # 返回值 RAW 但按行对齐：骑跨切割点的密钥行被保守丢弃，残段不外泄。
+    assert len(tail) <= STDERR_TAIL_BYTES
+    assert b"sk-live" not in tail
+    assert b"ssss" not in tail
+    # sink：扩窗脱敏整值命中——连密钥行前缀都不留（行虽被切，整值已先替换）。
+    persisted = sink.read_bytes()
+    assert len(persisted) <= STDERR_TAIL_BYTES
+    assert b"sk-live" not in persisted
+    assert b"ssss" not in persisted
+    assert b"***" in persisted
+
+
+def test_scan_and_compress_redact_callback_error_never_fails_scan(tmp_path):
+    """#755 对抗复审 P3-4：redact 回调的非 OSError 逃逸（脱敏器自身炸掉）
+    不得把 run 改判 failed——sink 落盘是 best-effort 观测面：压缩照常完成、
+    返回值照常携带 raw tail，只是本次不留锚点。"""
+    from shared.pi_events import scan_and_compress_pi_events
+
+    def exploding_redact(_raw: bytes) -> bytes:
+        raise ValueError("redactor exploded")
+
+    events = tmp_path / "events.jsonl"
+    events.write_text('{"type":"session"}\npanic: real cause\n')
+    sink = tmp_path / "agent-stderr.log"
+    _, original, compressed, tail = scan_and_compress_pi_events(
+        events, stderr_sink=sink, redact=exploding_redact
+    )
+    assert original > 0 and compressed > 0  # 压缩未因回调逃逸中断
+    assert tail == b"panic: real cause"
+    assert not sink.exists()

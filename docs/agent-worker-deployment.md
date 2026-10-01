@@ -312,9 +312,17 @@ Host 孤儿 sweeper 回收。升级必须遵循 **Host first, Worker second**：
 runtime-scoped 模型降成二元 provider/model 后误投到另一个 runtime。确认 Host 健康
 后再逐台重启 Worker。**结果上报头（#748）**：`X-Agent-Result` 携带原始 UTF-8
 字节（CJK 错误摘要是非 ASCII 头值），Worker → Host 链路上的反向代理 / LB / 网关
-必须容忍非 ASCII 头值透传（改写或拒收会导致结果不可投递、租约过期重投）；同头
-受 14 KiB 字节预算约束，超预算时 Worker 会按 stderr 尾部 → error_message →
-产物清单前缀的顺序降级并在 metadata 里打 `output_artifacts_truncated` 标记。
+必须容忍非 ASCII 头值透传（改写或拒收会导致结果不可投递、租约过期重投）。该线
+格式变更（ensure_ascii 字符串 → 原始 UTF-8 字节）不升协议版本，因此升级纪律上
+**Host 必须先于 Worker 升级**：反向混编（新 Worker + 旧 Host）时 `error_message`
+/ `agent_stderr_tail` 的 CJK 载荷在旧 Host 上按 latin-1 视图显示为乱码（结构与成
+败判定不受影响）。同头受 14 KiB 字节预算约束，超预算时 Worker 按 stderr 尾部 →
+error_message → command（纯观测面，清空）→ 产物清单的顺序降级；产物清单面按引用
+形态分流——直传 dict 引用抛溢出信号整体换轨到归档内嵌模式重报（CAS 字符串引用
+~78B/条，天然落预算），CAS 引用才走最后手段截断（清单降级为空并打
+`output_artifacts_truncated` / `output_artifacts_total` 标记）；CAS 截断形态下产物
+字节本来就在归档里，Host 见 truncated 标记跳过「空清单改判 failed」，改从归档暂
+存视图判定产物齐全与否。
 
 **workflow_key 兼容窗口期（issue #211，截止 2026-10-31）**：claim 响应中的
 `workflow_key` 字段已 deprecated（与 `workspace_id` 恒等，schema v62 绑定）。字段
