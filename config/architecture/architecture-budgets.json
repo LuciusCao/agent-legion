@@ -1545,6 +1545,7 @@
     "server/app/services/run_partial_failure.py": 35,
     "server/app/services/run_payload.py": 38,
     "server/app/services/run_service.py": 178,
+    "server/app/services/run_text_batch.py": 86,
     "server/app/services/run_text_items.py": 78,
     "server/app/services/runtime_profile/__init__.py": 28,
     "server/app/services/runtime_profile/classifier.py": 130,

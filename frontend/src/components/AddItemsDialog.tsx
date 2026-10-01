@@ -133,6 +133,7 @@ export function AddItemsDialog({
   const refIds = useMemo(() => parseRefIds(refText), [refText])
   // 一段需求文本 = 1 个条目；空白或超长不计数。
   const textItems = textAccepted && textItemReady(text) ? 1 : 0
+  const invalidText = textAccepted && text.trim().length > 0 && !textItems
   // 契约解析后收窄的窗口期：隐藏面板里残留的条目不计数、不提交。
   const totalItems =
     (materialAccepted ? doneEntries.length + selectedMaterialIds.length : 0) +
@@ -146,7 +147,7 @@ export function AddItemsDialog({
   }, [resetState, onClose])
 
   const handleSubmit = useCallback(async () => {
-    if (!workspaceId || !workflowKey || totalItems === 0) return
+    if (!workspaceId || !workflowKey || totalItems === 0 || invalidText) return
     const items: RunItem[] = [
       ...(materialAccepted ? doneEntries : []).map((entry) => ({
         type: 'material' as const,
@@ -195,6 +196,7 @@ export function AddItemsDialog({
     refIds,
     connectionKey,
     textItems,
+    invalidText,
     text,
     textFilename,
     showToast,
@@ -206,6 +208,7 @@ export function AddItemsDialog({
 
   const submitDisabled =
     totalItems === 0 ||
+    invalidText ||
     isSubmitting ||
     hasActiveUploads ||
     hasActiveBundles ||

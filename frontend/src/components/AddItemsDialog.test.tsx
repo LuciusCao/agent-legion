@@ -688,4 +688,34 @@ describe('AddItemsDialog', () => {
       items: [{ type: 'text', content: '短需求', filename: '需求.md' }],
     })
   })
+
+  it('blocks mixed submissions instead of silently dropping oversized text', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'text'])
+    mockMaterials([
+      { id: 'm1', filename: 'a.md', size_bytes: 10, status: 'ready' },
+    ])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    const textTab = screen.getByRole('tab', { name: '输入需求' })
+    await waitFor(() => expect(textTab).toBeEnabled())
+    fireEvent.click(screen.getByRole('tab', { name: '已有材料' }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'a.md' }))
+    fireEvent.click(textTab)
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '需'.repeat(30000) },
+    })
+    const submit = screen.getByRole('button', { name: '创建运行' })
+    expect(submit).toBeDisabled()
+    fireEvent.click(screen.getByRole('tab', { name: '已有材料' }))
+    expect(submit).toBeDisabled()
+    fireEvent.click(submit)
+    expect(mockCreateRun).not.toHaveBeenCalled()
+    fireEvent.click(textTab)
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '短需求' },
+    })
+    expect(submit).toBeEnabled()
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 2 个条目')
+  })
 })

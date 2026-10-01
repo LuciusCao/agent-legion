@@ -75,6 +75,14 @@ def _materials(client, workspace_id: str) -> list[dict]:
     return client.get(f"/api/workspaces/{workspace_id}/materials").json()["materials"]
 
 
+def _storage_keys(job_db, workspace_id: str) -> set[str]:
+    with job_db.read() as conn:
+        rows = conn.execute(
+            "select storage_key from materials where workspace_id=%s", (workspace_id,)
+        ).fetchall()
+    return {row["storage_key"] for row in rows}
+
+
 def test_text_item_rejected_by_default_contract(client, storage, job_db) -> None:
     """Seeded demo revision accepts materials only: text is opt-in, and the
     rejection happens before the material is written (no row, no object)."""
@@ -103,8 +111,9 @@ def test_text_item_becomes_ready_material_and_job(client, storage, job_db) -> No
     assert response.json()["created_count"] == 1
     digest = hashlib.sha256(REQUIREMENT.encode("utf-8")).hexdigest()
     # Object first, row second: the ready row points at the stored bytes.
-    assert storage.objects[f"{workspace_id}/{digest}/创作需求.md"] == REQUIREMENT.encode("utf-8")
     (material,) = _materials(client, workspace_id)
+    (key,) = _storage_keys(job_db, workspace_id)
+    assert storage.objects[key] == REQUIREMENT.encode("utf-8")
     assert material["status"] == "ready"
     assert material["filename"] == "创作需求.md"
     assert material["content_hash"] == digest
@@ -166,7 +175,8 @@ def test_text_item_revives_stale_row_with_same_hash(client, storage, job_db) -> 
     assert material["id"] == stale_id
     assert material["status"] == "ready"
     assert material["filename"] == "需求.md"
-    assert storage.objects[f"{workspace_id}/{digest}/需求.md"] == REQUIREMENT.encode("utf-8")
+    (key,) = _storage_keys(job_db, workspace_id)
+    assert storage.objects[key] == REQUIREMENT.encode("utf-8")
 
 
 @pytest.mark.parametrize(
@@ -177,6 +187,7 @@ def test_text_item_revives_stale_row_with_same_hash(client, storage, job_db) -> 
         ({"type": "text", "content": "x", "filename": "需求.exe"}, ".md or .txt"),
         # 30k CJK chars pass the contract's character cap but exceed 64 KiB of UTF-8.
         ({"type": "text", "content": "需" * 30000}, "exceeds"),
+        ({"type": "text", "content": "x", "filename": "bad\x00.md"}, "invalid"),
     ],
 )
 def test_text_item_shape_errors_write_nothing(client, storage, job_db, item, detail) -> None:
@@ -189,6 +200,207 @@ def test_text_item_shape_errors_write_nothing(client, storage, job_db, item, det
     assert detail in response.json()["detail"]
     assert _materials(client, workspace_id) == []
     assert storage.objects == {}
+
+
+@pytest.mark.parametrize("failure", ["put", "database"])
+def test_text_batch_failure_rolls_back_every_material(
+    client, storage, job_db, monkeypatch, failure
+) -> None:
+    from server.app.db.connection import DatabaseConnection
+    from server.app.services.run_text_items import materialize_text_items
+
+    workspace_id = _create_workspace(client)
+    # Include a stale row: rollback must restore its original metadata/status.
+    digest = hashlib.sha256(b"A").hexdigest()
+    presign = client.post(
+        f"/api/workspaces/{workspace_id}/materials/presign",
+        json={
+            "filename": "old.txt",
+            "size_bytes": 1,
+            "content_type": "text/plain",
+            "content_hash": digest,
+        },
+    )
+    assert presign.status_code == 200
+    before = _materials(client, workspace_id)
+    original_put = storage.put_object
+    original_execute = DatabaseConnection.execute
+    calls = 0
+
+    def put(key, data, content_type=""):
+        nonlocal calls
+        original_put(key, data, content_type)
+        if failure == "put":
+            calls += 1
+            if calls == 2:
+                raise OSError("PUT acknowledged late")
+
+    def execute(conn, sql, params=None):
+        nonlocal calls
+        result = original_execute(conn, sql, params)
+        if failure == "database" and sql.startswith("insert into materials"):
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("second row failed")
+        return result
+
+    monkeypatch.setattr(storage, "put_object", put)
+    monkeypatch.setattr(DatabaseConnection, "execute", execute)
+    from server.app.services.materials import MaterialStorageUnavailableError
+
+    expected = MaterialStorageUnavailableError if failure == "put" else RuntimeError
+    with pytest.raises(expected):
+        materialize_text_items(
+            job_db,
+            client.app.state.materials_service,
+            workspace_id,
+            [{"type": "text", "content": "A"}, {"type": "text", "content": "B"}],
+        )
+    assert calls == 2
+    assert _materials(client, workspace_id) == before
+    assert storage.objects == {}
+    assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
+
+
+@pytest.mark.parametrize("same_filename", [True, False])
+def test_concurrent_text_batches_keep_only_winner_objects(
+    client, storage, job_db, monkeypatch, same_filename
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from server.app.services.run_text_items import materialize_text_items
+
+    workspace_id = _create_workspace(client)
+    barrier = Barrier(2)
+    original_put = storage.put_object
+
+    def put(key, data, content_type=""):
+        original_put(key, data, content_type)
+        barrier.wait(timeout=10)
+
+    monkeypatch.setattr(storage, "put_object", put)
+
+    def submit(filename, contents):
+        return materialize_text_items(
+            job_db,
+            client.app.state.materials_service,
+            workspace_id,
+            [{"type": "text", "content": content, "filename": filename} for content in contents],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(submit, "a.md", ["A", "B"])
+        second = pool.submit(submit, "a.md" if same_filename else "b.txt", ["B", "A"])
+        one, two = first.result(timeout=20), second.result(timeout=20)
+    assert one == list(reversed(two))
+    rows = _materials(client, workspace_id)
+    assert len(rows) == 2
+    assert set(storage.objects) == _storage_keys(job_db, workspace_id)
+    assert set(storage.objects.values()) == {b"A", b"B"}
+
+
+def test_commit_acknowledgement_failure_preserves_committed_objects(
+    client, storage, job_db, monkeypatch
+) -> None:
+    from server.app.services.run_text_items import materialize_text_items
+
+    workspace_id = _create_workspace(client)
+    original = job_db.upsert_ready_materials
+
+    def commit_then_fail(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("commit acknowledgement lost")
+
+    monkeypatch.setattr(job_db, "upsert_ready_materials", commit_then_fail)
+    with pytest.raises(RuntimeError, match="acknowledgement"):
+        materialize_text_items(
+            job_db,
+            client.app.state.materials_service,
+            workspace_id,
+            [{"type": "text", "content": "A"}, {"type": "text", "content": "B"}],
+        )
+    rows = _materials(client, workspace_id)
+    assert len(rows) == 2
+    assert set(storage.objects) == _storage_keys(job_db, workspace_id)
+
+
+def test_failed_batch_does_not_delete_concurrent_winner(client, storage, job_db, monkeypatch):
+    from server.app.services.run_text_items import materialize_text_items
+
+    workspace_id = _create_workspace(client)
+    original = job_db.upsert_ready_materials
+
+    def concurrent_winner_then_fail(*args, **kwargs):
+        monkeypatch.setattr(job_db, "upsert_ready_materials", original)
+        materialize_text_items(
+            job_db,
+            client.app.state.materials_service,
+            workspace_id,
+            [{"type": "text", "content": "A"}],
+        )
+        raise RuntimeError("losing request failed")
+
+    monkeypatch.setattr(job_db, "upsert_ready_materials", concurrent_winner_then_fail)
+    with pytest.raises(RuntimeError, match="losing request"):
+        materialize_text_items(
+            job_db,
+            client.app.state.materials_service,
+            workspace_id,
+            [{"type": "text", "content": "A"}, {"type": "text", "content": "B"}],
+        )
+    (key,) = _storage_keys(job_db, workspace_id)
+    assert storage.objects == {key: b"A"}
+
+
+@pytest.mark.parametrize("field", ["content", "filename"])
+def test_invalid_unicode_in_later_item_writes_nothing(client, storage, job_db, field):
+    from server.app.services.job_errors import InvalidOperationError
+    from server.app.services.run_text_items import materialize_text_items
+
+    workspace_id = _create_workspace(client)
+    invalid = {"type": "text", "content": "B", "filename": "b.md"}
+    invalid[field] = "\ud800.md"
+    with pytest.raises(InvalidOperationError, match="UTF-8"):
+        materialize_text_items(
+            job_db,
+            client.app.state.materials_service,
+            workspace_id,
+            [{"type": "text", "content": "A"}, invalid],
+        )
+    assert storage.put_calls == 0
+    assert _materials(client, workspace_id) == []
+
+
+@pytest.mark.parametrize("cleanup_failure", ["lookup", "delete"])
+def test_cleanup_failure_preserves_original_error_and_logs_recovery_keys(
+    client, storage, job_db, monkeypatch, caplog, cleanup_failure
+):
+    from server.app.services.run_text_items import materialize_text_items
+
+    workspace_id = _create_workspace(client)
+
+    def fail_commit(*args, **kwargs):
+        raise RuntimeError("original failure")
+
+    def fail_lookup(*args):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(job_db, "upsert_ready_materials", fail_commit)
+    if cleanup_failure == "lookup":
+        monkeypatch.setattr(job_db, "referenced_inline_objects", fail_lookup)
+    else:
+        storage.fail_deletes = True
+    with pytest.raises(RuntimeError, match="original failure"):
+        materialize_text_items(
+            job_db,
+            client.app.state.materials_service,
+            workspace_id,
+            [{"type": "text", "content": "A"}],
+        )
+    assert _materials(client, workspace_id) == []
+    (key,) = storage.objects
+    assert key in caplog.text
 
 
 def test_text_item_without_storage_returns_503(client, job_db, monkeypatch) -> None:
@@ -252,7 +464,9 @@ def test_text_item_reuses_ready_row_without_writing_a_second_object(
     assert second.status_code == 400
     assert "No tasks were resolved" in second.json()["detail"]
     assert storage.put_calls == puts_before
-    assert [k.rsplit("/", 1)[1] for k in storage.objects] == ["a.md"]
+    assert set(storage.objects) == _storage_keys(job_db, workspace_id)
+    assert len(storage.objects) == 1
+    assert _materials(client, workspace_id)[0]["filename"] == "a.md"
 
 
 def test_text_item_storage_failure_returns_503_without_a_run(client, storage, job_db) -> None:
