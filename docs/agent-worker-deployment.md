@@ -174,7 +174,7 @@ make stack-worker-up
 make stack-logs STACK=worker
 ```
 
-打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，填写部署机可通过 Tailscale 访问的 Host 地址并保存。控制台页面由 Worker Service 动态返回并自动注入 control token；直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
+打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，先完成控制台登录，再填写部署机可通过 Tailscale 访问的 Host 地址并保存。只有 Worker Service 绑定回环地址时页面才自动注入 control token；Compose 容器内部绑定 `0.0.0.0`，即使宿主机只向本机发布端口也需要手动输入控制令牌。直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
 
 - Worker 执行进程是否运行；
 - 当前配置的 Host 地址以及 Host 是否可达；
@@ -322,6 +322,14 @@ v68 及以上的 Host 仍下发 `workflow_key`（兼容窗口内），Worker 可
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 
 ### 控制面鉴权
+
+控制令牌（登录 Worker 控制台）与 workspace 注册 Key（授权 Worker 接入 Host）用途不同。默认 Host Compose 在项目根目录运行以下命令取得控制令牌，粘贴到 Worker 登录框后，再到「配置 → Workspace 访问」添加注册 Key：
+
+```bash
+docker compose -f deploy/compose.host.yaml exec worker cat /var/lib/agent-legion-worker-control/control_token
+```
+
+独立 Worker 部署将 Compose 文件换成启动时使用的 `deploy/compose.worker.standalone.yaml` 或 `deploy/compose.worker.yaml`，保留相同项目名及其他 Compose 参数。原生部署从 Worker 的 `--state-dir` 目录读取 `control_token`；没有该机器访问权限时由 Worker 维护者完成登录。控制令牌不要放进控制台 URL、Host 配置或注册标签。
 
 Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > 状态目录下的 `control_token` 文件（容器内执行时自动命中）。
 

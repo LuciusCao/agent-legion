@@ -259,6 +259,7 @@
     "frontend/src/components/settings/RuntimeMutableBadges.tsx": 47,
     "frontend/src/components/settings/SchemaConfigForm.tsx": 145,
     "frontend/src/components/settings/SecretConfigField.tsx": 78,
+    "frontend/src/components/settings/WorkerConsoleAccessHelp.tsx": 37,
     "frontend/src/components/settings/WorkerConsoleGuide.module.css": 76,
     "frontend/src/components/settings/WorkerConsoleGuide.tsx": 67,
     "frontend/src/components/settings/WorkerTokenNextSteps.tsx": 34,
