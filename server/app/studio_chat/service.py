@@ -178,11 +178,14 @@ class StudioChatService:
             return session
         runtime = self.runtime(session_id)
         with runtime.lock if runtime is not None else nullcontext():
-            if runtime is not None and self.runtime(session_id) is not runtime:
-                return self.get_session(session_id)
-            self._db.update_studio_chat_session(
-                session_id, status="closed", closed_at=datetime.now(UTC)
-            )
+            with self._runtimes_lock:
+                # Also pin absence: a resumed runtime may have appeared
+                # after the snapshot but before this durable close.
+                if self._runtimes.get(session_id) is not runtime:
+                    return self.get_session(session_id)
+                self._db.update_studio_chat_session(
+                    session_id, status="closed", closed_at=datetime.now(UTC)
+                )
             try:
                 self.store.append_message(
                     session_id, "status", "system", {"event": "session_closed"}

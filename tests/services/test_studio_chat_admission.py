@@ -209,3 +209,22 @@ def test_close_notification_failure_still_tears_down(admission, monkeypatch):
     assert service.close_session(sid, workspace)["status"] == "closed"
     assert service.runtime(sid) is None
     assert runtime.closed
+
+
+def test_close_absent_snapshot_cannot_close_runtime_registered_before_write(admission, monkeypatch):
+    service, db, sid, workspace, runtime = admission
+    service._runtimes.pop(sid)
+    snapshot = service.runtime
+
+    def register_after_snapshot(session_id):
+        old = snapshot(session_id)
+        service._runtimes[sid] = runtime
+        return old
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "runtime", register_after_snapshot)
+        assert service.close_session(sid, workspace)["status"] == "idle"
+    assert service.runtime(sid) is runtime
+    assert not runtime.closed
+    assert db.get_studio_chat_session(sid)["status"] == "idle"
+    assert db.list_studio_chat_messages(sid) == []
