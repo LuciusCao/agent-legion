@@ -9,7 +9,10 @@ import type { WorkflowDefinitionRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import { WorkflowNodeDetailDrawer } from './WorkflowNodeDetailDrawer'
 import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
-import { withStudioProviders } from '../shared/testStudioProviders'
+import {
+  withStudioProviders,
+  makeStudioView,
+} from '../shared/testStudioProviders'
 
 // inspector 各 section（code/config/agent 执行详情）统一走 '../../api' 的 api。
 vi.mock('../../../api', () => ({
@@ -247,6 +250,65 @@ describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
   it('轮 4 P2-F：无警示时不渲染横幅（不占头部空间）', () => {
     renderDrawer('generate_key_info')
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('hotfix：docked 根节点退出布局流（display:contents）——不参与 SplitLayout 的 grid 行分配', () => {
+    // 根因：persistent 的 docked 根常驻 DOM 且其 Slide 内容在流内有高度，
+    // grid 行被均分（画布只剩半屏）。paper 是 position:fixed 自定位，根
+    // 零价值。revert：摘掉 sx display:contents 即红。
+    renderDrawer()
+    const docked = document.querySelector('.MuiDrawer-docked')
+    expect(docked).not.toBeNull()
+    expect(getComputedStyle(docked as Element).display).toBe('contents')
+  })
+
+  it('hotfix 轮 2 codex P2：抽屉内有更上层模态（.MuiModal-root/.MuiPopover）时 Esc 让位——只关最上层不关抽屉', () => {
+    const { setSelectedNodeKey } = renderDrawer()
+    // 结构桩：抽屉内开了内容 dialog/菜单（jsdom 无真 Modal，插标记元素）。
+    const modalStub = document.createElement('div')
+    modalStub.className = 'MuiModal-root'
+    document.body.appendChild(modalStub)
+    try {
+      fireEvent.keyDown(document, { key: 'Escape' })
+      // 让位：抽屉不关（摘掉让位探测即红——抽屉会被直接关掉）。
+      expect(setSelectedNodeKey).not.toHaveBeenCalled()
+    } finally {
+      modalStub.remove()
+    }
+    // 模态关掉后 Esc 恢复关抽屉。
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
+  })
+
+  it('hotfix：Esc 关闭（persistent 不走 Modal，Esc 语义自行承接；Dock 的 Esc 处理器见 defaultPrevented 跳过）', () => {
+    const { setSelectedNodeKey } = renderDrawer()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
+  })
+
+  it('P2-2：窄屏 Agent 页签抽屉不可见（display:none）但选中态保留，切回画布页签复现', () => {
+    // D1 后抽屉挂在 SplitLayout 层，不随画布列 display:none——hidden 必须
+    // 自带：paper display:none 且不卸载（selectedNodeKey 与预览子态保留）。
+    // revert 即红：只出 Esc 栈不藏 paper 时 display 为空串。
+    const studio = studioFor('generate_key_info')
+    const ui = (panel: 'graph' | 'agent') => (
+      <TestQueryProvider>
+        {withStudioProviders(
+          studio,
+          makeStudioView({ narrow: true, mobilePanel: panel }),
+          <WorkflowNodeDetailDrawer />
+        )}
+      </TestQueryProvider>
+    )
+    const { rerender } = render(ui('agent'))
+    const paper = () =>
+      document.querySelector('.MuiDrawer-paper') as HTMLElement
+    expect(paper().style.display).toBe('none')
+    // 不卸载：内容仍在 DOM（打开状态保留）。
+    expect(screen.getByText('生成关键信息')).toBeInTheDocument()
+    rerender(ui('graph'))
+    expect(paper().style.display).toBe('')
+    expect(screen.getByText('生成关键信息')).toBeInTheDocument()
   })
 
   it('轮 8 P2：抽屉非模态——无遮罩、不 aria-hidden 画布（Agent Dock 可并行交互）', () => {

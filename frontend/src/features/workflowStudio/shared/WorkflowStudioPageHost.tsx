@@ -10,7 +10,7 @@ export function WorkflowStudioPageHost({
   workspaceId?: string
 }) {
   const studio = useWorkflowStudio(workspaceId)
-  const view = useWorkflowStudioPageView()
+  const view = useWorkflowStudioPageView(workspaceId)
 
   // Provider 挂在 AppShell 外层：浮动功能岛（#799，原 AppBar 区域）与页面
   // 主体都消费同一份 studio/view 状态（如状态 chip 点击打开变更面板）。

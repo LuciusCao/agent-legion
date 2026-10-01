@@ -8,7 +8,8 @@ import {
 } from '@testing-library/react'
 import { Route, Routes } from 'react-router-dom'
 import { useState } from 'react'
-import { WorkflowStudioSharedMaterialsButton } from './WorkflowStudioSharedMaterialsDrawer'
+import { WorkflowStudioSharedMaterialsDrawer } from './WorkflowStudioSharedMaterialsDrawer'
+import { WorkflowStudioSharedMaterialsButton } from './WorkflowStudioSharedMaterialsButton'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import {
   getWorkspaceSharedMaterialFile,
@@ -87,7 +88,8 @@ const populated = {
 
 function renderEntry() {
   // 轮 9 P2：开合状态提升到 StudioViewContext（Dock 避让需要感知抽屉）
-  // ——用真 view state 的包壳，点击真实驱动开合。
+  // ——用真 view state 的包壳，点击真实驱动开合。#812 D1：抽屉本体与触发
+  // 按钮分离挂载（本体在 SplitLayout 层、按钮在岛内），Harness 复刻该拓扑。
   function Harness() {
     const [open, setOpen] = useState(false)
     return withStudioProviders(
@@ -96,7 +98,10 @@ function renderEntry() {
         materialsOpen: open,
         setMaterialsOpen: setOpen,
       }),
-      <WorkflowStudioSharedMaterialsButton />
+      <>
+        <WorkflowStudioSharedMaterialsButton />
+        <WorkflowStudioSharedMaterialsDrawer />
+      </>
     )
   }
   return render(
@@ -385,6 +390,83 @@ describe('WorkflowStudioSharedMaterialsDrawer', () => {
     await waitFor(() => {
       expect(screen.queryByText('style.md')).not.toBeInTheDocument()
     })
+  })
+
+  it('D1 回归钉：抽屉 paper 不在岛内（岛的 backdrop-filter 会捕获 fixed 后代）', async () => {
+    // #812 对抗轮 D1：岛的 backdrop-filter: blur 使祖先成为 fixed paper 的
+    // 包含块——抽屉挂在岛内会被渲染成钉在岛角落的碎片。本体必须与触发按钮
+    // 分离挂载（按钮在岛内、本体在 SplitLayout 层）。revert 即红：把抽屉
+    // 挂回按钮组件（岛内）时 paper 会成为岛的后代。
+    function StructureHarness() {
+      const [open, setOpen] = useState(false)
+      return withStudioProviders(
+        {},
+        makeStudioView({ materialsOpen: open, setMaterialsOpen: setOpen }),
+        <>
+          <div data-testid="fake-island">
+            <WorkflowStudioSharedMaterialsButton />
+          </div>
+          <WorkflowStudioSharedMaterialsDrawer />
+        </>
+      )
+    }
+    render(
+      <MemoryRouter
+        initialEntries={[`/workspaces/${WORKSPACE_ID}/workflow-studio`]}
+      >
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/workflow-studio"
+            element={<StructureHarness />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Skill 共享材料' }))
+    await waitFor(() =>
+      expect(document.querySelector('.MuiDrawer-paper')).not.toBeNull()
+    )
+    const paper = document.querySelector('.MuiDrawer-paper')
+    expect(paper).not.toBeNull()
+    expect(screen.getByTestId('fake-island').contains(paper)).toBe(false)
+  })
+
+  it('P2-2：窄屏非画布页签抽屉不可见（display:none）但开态保留，切回画布页签复现', async () => {
+    // D1 把抽屉本体移到 SplitLayout 层后不再随画布列 display:none——hidden
+    // 必须自带：paper display:none 且不卸载（打开状态与查询数据保留）。
+    // revert 即红：只出 Esc 栈不藏 paper 时 display 为空串。
+    // 直接以 materialsOpen=true 渲染（开合状态在 view 层）。
+    const withView = (panel: 'graph' | 'agent') => (
+      <MemoryRouter
+        initialEntries={[`/workspaces/${WORKSPACE_ID}/workflow-studio`]}
+      >
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/workflow-studio"
+            element={withStudioProviders(
+              {},
+              makeStudioView({
+                narrow: true,
+                mobilePanel: panel,
+                materialsOpen: true,
+                setMaterialsOpen: vi.fn(),
+              }),
+              <WorkflowStudioSharedMaterialsDrawer />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    const { rerender } = render(withView('agent'))
+    await screen.findByText('style.md')
+    const paper = () =>
+      document.querySelector('.MuiDrawer-paper') as HTMLElement
+    expect(paper().style.display).toBe('none')
+    // 不卸载：内容仍在 DOM（打开状态与数据保留）。
+    expect(screen.getByText('style.md')).toBeInTheDocument()
+    rerender(withView('graph'))
+    expect(paper().style.display).toBe('')
+    expect(screen.getByText('style.md')).toBeInTheDocument()
   })
 
   it('surfaces query errors', async () => {

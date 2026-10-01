@@ -11,7 +11,8 @@
 import { Close } from '@mui/icons-material'
 import { Drawer, IconButton, Tooltip } from '@mui/material'
 import { WorkflowStudioSaveWarningBanner } from '../shared/WorkflowStudioSaveWarningBanner'
-import { useStudioState } from '../shared/studioStateContext'
+import { useDrawerEscape } from '../shared/useDrawerEscape'
+import { useStudioState, useStudioView } from '../shared/studioStateContext'
 import { selectedNodeDetails } from '../shared/workflowStudioModel'
 import { useNodeDetailPreview } from './useNodeDetailPreview'
 import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
@@ -19,6 +20,7 @@ import styles from './WorkflowNodeDetailDrawer.module.css'
 
 export function WorkflowNodeDetailDrawer() {
   const studio = useStudioState()
+  const view = useStudioView()
   const nodeKey = studio.selectedNodeKey
   const close = () => studio.setSelectedNodeKey(null)
   // nodeKey 为 null 时 preview hook 也需要稳定调用（hooks 纪律）；nodeKey
@@ -27,17 +29,39 @@ export function WorkflowNodeDetailDrawer() {
   const node = nodeKey
     ? selectedNodeDetails(studio.workflow, nodeKey)?.node
     : undefined
+  // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault，
+  // Dock 的 Esc 处理器见 defaultPrevented 跳过）；与共享素材抽屉共存时由
+  // 抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。hidden（#812 D3 +
+  // P2-2：窄屏非画布页签——抽屉挂在 SplitLayout 层，不随画布列
+  // display:none，隐藏要自带）：paper display:none 不卸载（选中节点与预览
+  // 子态保留，切回画布页签原样复现），同时出 Esc 栈不占栈位。返回的
+  // zIndex 挂到 paper：栈位映射视觉层级，Esc 栈序 == 视觉序。
+  const hidden = view.narrow && view.mobilePanel !== 'graph'
+  const paperZIndex = useDrawerEscape(nodeKey !== null, close, hidden)
 
   return (
     <Drawer
       anchor="right"
       open={nodeKey !== null}
       onClose={close}
-      slotProps={{ paper: { className: styles.paper } }}
+      slotProps={{
+        paper: {
+          className: styles.paper,
+          style: {
+            zIndex: paperZIndex,
+            ...(hidden ? { display: 'none' } : {}),
+          },
+        },
+      }}
       /* 轮 8 P2：非模态——persistent variant 不走 Modal（无遮罩/不圈禁
          焦点/不锁滚动/不 aria-hidden 兄弟），Dock 与画布保持可交互；
          ✕/Esc 关闭，浮层定位由 paper CSS 承担。 */
       variant="persistent"
+      // hotfix：persistent 的 docked 根节点常驻 DOM 且参与 SplitLayout 的
+      // grid——其 Slide 包装在流内有高度，grid 行被均分（画布只剩半屏）。
+      // paper 是 position:fixed 自定位，根节点零价值：display:contents
+      // 退出布局流（抽屉开关/过渡/Esc 语义不变）。
+      sx={{ display: 'contents' }}
     >
       {nodeKey ? (
         <div className={styles.body} aria-label="节点详情">

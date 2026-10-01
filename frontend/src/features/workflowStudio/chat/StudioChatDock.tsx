@@ -30,8 +30,10 @@ export function StudioChatDock({ hidden }: { hidden: boolean }) {
   const mobileNavHeight = useStudioMobileNavHeight()
   const narrow = useStudioNarrowViewport()
   // 轮 9 P2：右侧抽屉（节点详情/共享素材）打开时 Dock 运行时左移避让
-  // （不写布局记忆，关抽屉弹回）。窄屏不避让：抽屉在画布列里、Dock 只在
-  // Agent 页签可见，两者互斥不共存。
+  // （不写布局记忆，关抽屉弹回）。窄屏不避让：抽屉窄屏全宽覆盖视口
+  // （min(720px, 100vw)），左移只会把 Dock 推出屏外；且窄屏从 Dock 定位
+  // 节点会先切回画布页签再开抽屉（下方 onSelectNode，#812 D6），Dock 与
+  // 全宽抽屉不同时可见。
   const drawerOpen = studio.selectedNodeKey !== null || view.materialsOpen
   const rightInset = narrow || !drawerOpen ? 0 : STUDIO_DRAWER_RIGHT_INSET
   return (
@@ -81,7 +83,14 @@ export function StudioChatDock({ hidden }: { hidden: boolean }) {
           studio.backToDraft()
           studio.setDefinitionYaml(yaml)
         }}
-        onSelectNode={studio.requestNodeFocus}
+        onSelectNode={(nodeKey) => {
+          // #812 对抗轮 D6：窄屏 Agent 页签内定位节点——抽屉挂在 SplitLayout
+          // 层、窄屏全宽覆盖，不切回画布页签会盖住 Dock 与页签导航；先切
+          // 页签再发定位请求。
+          if (narrow && view.mobilePanel !== 'graph')
+            view.setMobilePanel('graph')
+          studio.requestNodeFocus(nodeKey)
+        }}
       />
     </AgentPanelDock>
   )
