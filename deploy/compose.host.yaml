@@ -55,7 +55,13 @@ services:
         # s3.json 必须让降权后的运行用户可读：umask 077 产出的 0600 若留在
         # root 名下，su-exec 后 weed 读不到会 Fatalf 退出（重启循环）。
         chown seaweed:seaweed /tmp/s3.json
-        exec su-exec seaweed weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=2048 -volume.max=0
+        # -volume.max=100：显式上限而非 0（0 = 按磁盘余量自动推导）。0 在
+        # volume server 注册信息 stale 时会把可写槽判定为 0，master 认为
+        # 没有可分配 volume，PutObject 全量 503（no free volumes）——表现为
+        # 磁盘远未写满却"写满"。100 个 × volumeSizeLimitMB=2048 只是惰性
+        # 增长的上限闸门（volume 按需创建），不是预占磁盘。空 volume 回收见
+        # docs/materials-storage-deployment.md「可写槽位耗尽」。
+        exec su-exec seaweed weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=2048 -volume.max=100
     environment:
       AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
       AGENT_LEGION_S3_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}

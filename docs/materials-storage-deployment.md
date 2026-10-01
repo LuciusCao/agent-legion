@@ -295,3 +295,31 @@ EOF
 | complete 422 | 实际上传字节与声明 size/hash 不符，重新上传 |
 | 节点报 "material storage is not configured" | Host/Worker 侧 env 缺失；Worker 路径靠 Host 签发的 presigned GET（1h 有效），失败会由 sweeper 重排队换新 URL |
 | 缓存目录膨胀 | 调低 `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES` 或手动清空 |
+| PutObject 全量 503（master 日志 no free volumes），磁盘未写满 | SeaweedFS 可写槽位耗尽，见下节「可写槽位耗尽」 |
+
+## 6. 可写槽位耗尽（SeaweedFS，PutObject 503 / no free volumes）
+
+**机制**：SeaweedFS 的 volume 按 collection 成批预分配（每个 collection
+一次创建一批 volume，默认 7 个）；删除 bucket/collection 只删逻辑映射，
+**空 volume 不会自动回收**，长期增删 bucket 会攒下一批全空的 volume。
+另外 compose 曾以 `-volume.max=0`（按磁盘余量自动推导上限）运行：当
+volume server 在 master 侧的注册信息 stale 时，自动推导会把可写槽位判成
+0，master 认为没有可分配 volume，全部 PutObject 返回 503
+（no free volumes）——表象是「磁盘远未写满却写满」。现 compose 已改为
+显式 `-volume.max=100`（惰性增长的上限闸门，非预占磁盘），但空 volume
+堆积仍会挤占这个槽位上限。
+
+**排查**：master UI（`:9333`）看 volume 总数与已用比例；PutObject 503 且
+master 日志出现 `no free volumes` 即命中本问题。
+
+**恢复**（先重启让 volume server 重新注册，再回收空 volume）：
+
+```bash
+docker restart <seaweedfs 容器>
+docker exec <seaweedfs 容器> sh -c \
+  'printf "lock\nvolume.deleteEmpty -quietFor=1h -apply\nunlock\n" | weed shell -master=localhost:9333'
+```
+
+`volume.deleteEmpty` 只删「空且静默超过 quietFor 时长」的 volume，幂等
+可重跑；删完 PutObject 即恢复。若 volume 数仍贴着 `-volume.max` 上限，
+说明数据真实增长，再考虑调大上限或清理无用 bucket/collection。
