@@ -64,8 +64,17 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
     if runtime is None:
         return
     with runtime.lock:
-        if runtime.token_keepalive_done:
+        if (
+            runtime.closed
+            or backend.runtime(session_id) is not runtime
+            or runtime.token_keepalive_done
+        ):
             return
+        _keepalive_locked(backend, session_id, runtime)
+
+
+def _keepalive_locked(backend: ServiceBackend, session_id: str, runtime: SessionRuntime) -> None:
+    """Keep authentication, escalation and stop on the same runtime generation."""
     try:
         alive = _token_alive(backend, runtime.token)
     except Exception:
@@ -75,7 +84,7 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
         # backstop and the next tool_call retries (flag stays unset).
         logger.warning("studio chat token keepalive check failed for %s", session_id, exc_info=True)
         return
-    if alive:
+    if alive or runtime.closed or backend.runtime(session_id) is not runtime:
         return
     # #558：先升级后通知——escalate 抛异常（DB 故障）时 flag 未置、直接
     # 重试且不产生重复通知；escalate 成功后 append 失败时状态已是 error

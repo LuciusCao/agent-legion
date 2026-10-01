@@ -1,6 +1,6 @@
 invariants:
   - id: STUDIO-BACKGROUND-001
-    statement: "Kimi V1 background completions are read only from the owning ACP session's root agent tasks; automatic followups claim an idle turn, revalidate runtime identity, respect cancel/close/compaction, and never revive invalid tokens. See docs/architecture/studio-kimi-background-wakeup.md."
+    statement: "Kimi V1 completions use descriptor-anchored root-task metadata reads; automatic followups validate runtime, cancellation epoch, compaction and live credentials at admission and ACP consumption, releasing only owned claims on rejection. See docs/architecture/studio-kimi-background-wakeup.md."
     owner: studio
     risk: high
     evidence:

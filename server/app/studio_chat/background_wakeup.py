@@ -1,23 +1,18 @@
-"""Kimi completion bridge: poll small task-state files, never poll the model.
-
-The watcher belongs to one runtime generation. Completed tasks get one
-timeline receipt, then one idle→running claim delivers their ids to Kimi;
-its next prompt drains the native completion notifications and summarizes
-the results. Cancellation suppresses automatic followups until a human
-sends again. Teardown stops the watcher and stale generations cannot send.
-"""
+"""Kimi task completion cursor, cancellation epochs and idle followups."""
 
 from __future__ import annotations
 
 import logging
 import threading
-import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from server.app.studio_chat.background_delivery import wake_session
 from server.app.studio_chat.kimi_task_store import completed_tasks, task_root
-from server.app.studio_chat.token_keepalive import keepalive_run_token
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
 
@@ -25,55 +20,80 @@ logger = logging.getLogger(__name__)
 POLL_SECONDS = 2
 
 
-def wake_session(
-    service: StudioChatService, session_id: str, runtime: SessionRuntime, task_ids: list[str]
-) -> bool:
-    """False retains pending completions while a human turn/compaction owns it."""
+class CompletionCursor:
+    def __init__(self, root: Path, acp_session_id: str) -> None:
+        self.root, self.acp_session_id = root, acp_session_id
+        self.seen = set(completed_tasks(root, acp_session_id))
+        self.pending: set[str] = set()
+
+    def baseline(self) -> None:
+        self.seen.update(completed_tasks(self.root, self.acp_session_id))
+        self.pending.clear()
+
+    def step(self, service: StudioChatService, session_id: str, runtime: SessionRuntime) -> None:
+        # Scan and cancellation baseline share the lock: stale scan results
+        # cannot cross a rapid cancel/rearm boundary.
+        with runtime.lock:
+            if runtime.closed or service.runtime(session_id) is not runtime:
+                return
+            if runtime.background_cleanup is not None:
+                if not runtime.background_cleanup():
+                    return
+                runtime.background_cleanup = None
+            if not runtime.background_wakeup_enabled:
+                self.baseline()
+                return
+            for task_id, status in completed_tasks(
+                self.root, self.acp_session_id, ignored=self.seen
+            ).items():
+                service.store.append_message(
+                    session_id,
+                    "status",
+                    "system",
+                    {
+                        "event": "background_task_finished",
+                        "task_id": task_id,
+                        "status": status,
+                        "detail": f"后台子代理 {task_id}：{status}",
+                    },
+                )
+                self.seen.add(task_id)
+                self.pending.add(task_id)
+            if self.pending and wake_session(service, session_id, runtime, sorted(self.pending)):
+                self.pending.clear()
+
+
+def cancel_wakeup(runtime: SessionRuntime) -> None:
     with runtime.lock:
-        if (
-            service.runtime(session_id) is not runtime
-            or runtime.closed
-            or not runtime.background_wakeup_enabled
-            or runtime.compacting
-            or runtime.turn_open
-        ):
-            return False
-        keepalive_run_token(service, session_id)
-        if runtime.token_keepalive_done or not service.db.claim_studio_chat_turn(session_id):
-            return False
-        runtime.stream.reset()
-        runtime.loading = False
-        runtime.turn_open = True
-        runtime.turn_started_at = time.monotonic()
-        runtime.turn_update_count = 0
-        runtime.turn_slash_command = False
-        runtime.turn_may_compact = False
-        prompt = (
-            "[Studio 系统通知] 你先前派发的后台子代理任务已到终态："
-            + ", ".join(task_ids)
-            + "。请处理原生 completion notification，必要时用 TaskOutput 核对结果，"
-            "完成验收并向用户汇报；不要重复派发这些任务。"
+        runtime.background_epoch += 1
+        runtime.background_wakeup_enabled = False
+        if runtime.background_cursor is not None:
+            runtime.background_cursor.pending.clear()
+
+
+def rearm_wakeup(runtime: SessionRuntime) -> None:
+    prepare_rearm(runtime)()
+
+
+def prepare_rearm(runtime: SessionRuntime) -> Callable[[], None]:
+    """Prepare the cancellation baseline; commit only after a human send is accepted."""
+    with runtime.lock:
+        cursor, epoch = runtime.background_cursor, runtime.background_epoch
+        finished = (
+            completed_tasks(cursor.root, cursor.acp_session_id)
+            if cursor is not None and not runtime.background_wakeup_enabled
+            else {}
         )
-        # Teardown can remove the registry entry before taking runtime.lock.
-        # The claim checked durable state; close/shutdown share this lock.
-        if service.runtime(session_id) is not runtime:
-            runtime.turn_open = False
-            return False
-        if not runtime.handle.send_prompt(prompt):
-            runtime.turn_open = False
-            service.db.update_studio_chat_session_if(
-                session_id, status_in=("running",), status="error"
-            )
-            service.store.publish_session(session_id)
-            return False
-        try:
-            service.store.publish_session(session_id)
-        except Exception:
-            # #204 broad-except audit: the prompt is already queued, so a bus
-            # failure must not replay it. The durable running row lets REST
-            # refill recover the snapshot; keep the traceback for diagnosis.
-            logger.warning("Kimi wakeup snapshot failed for %s", session_id, exc_info=True)
-        return True
+
+    def commit() -> None:
+        with runtime.lock:
+            if runtime.background_epoch == epoch and not runtime.background_wakeup_enabled:
+                if cursor is not None:
+                    cursor.seen.update(finished)
+                    cursor.pending.clear()
+                runtime.background_wakeup_enabled = True
+
+    return commit
 
 
 def start_watcher(
@@ -84,44 +104,16 @@ def start_watcher(
     root = task_root(runtime.handle.cwd, acp_session_id)
     if root is None:
         return
-    # Existing terminal history on resume is not a new completion.
-    seen = set(completed_tasks(root, acp_session_id))
+    with runtime.lock:
+        cursor = runtime.background_cursor = CompletionCursor(root, acp_session_id)
 
     def watch() -> None:
-        pending: set[str] = set()
         while not runtime.background_stop.wait(POLL_SECONDS):
             try:
-                finished = completed_tasks(root, acp_session_id, ignored=seen)
-                with runtime.lock:
-                    if runtime.closed or service.runtime(session_id) is not runtime:
-                        return
-                    if not runtime.background_wakeup_enabled:
-                        seen.update(finished)
-                        pending.clear()
-                        continue
-                    for task_id, status in finished.items():
-                        if task_id in seen:
-                            continue
-                        service.store.append_message(
-                            session_id,
-                            "status",
-                            "system",
-                            {
-                                "event": "background_task_finished",
-                                "task_id": task_id,
-                                "status": status,
-                                "detail": f"后台子代理 {task_id}：{status}",
-                            },
-                        )
-                        seen.add(task_id)
-                        pending.add(task_id)
-                    if pending and wake_session(service, session_id, runtime, sorted(pending)):
-                        pending.clear()
+                cursor.step(service, session_id, runtime)
             except Exception:
-                # #204 broad-except audit: watcher retries read/DB/bus failures;
-                # a receipt is marked seen only after append succeeds, pending
-                # completions remain until delivery. Never kill the chat for a
-                # compatibility watcher failure; retain traceback for diagnosis.
+                # #204 broad-except audit: retry metadata/DB failures without
+                # dropping pending completions or killing chat; retain traceback.
                 logger.warning("Kimi completion watcher failed for %s", session_id, exc_info=True)
 
     threading.Thread(target=watch, name="studio-kimi-completions", daemon=True).start()

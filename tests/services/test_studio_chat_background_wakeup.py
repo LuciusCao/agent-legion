@@ -2,11 +2,13 @@
 
 import json
 import os
+import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from server.app.studio_chat import background_delivery as delivery
 from server.app.studio_chat import background_wakeup as wake
 from server.app.studio_chat.kimi_task_store import completed_tasks, task_root
 from server.app.studio_chat.runtime import SessionRuntime
@@ -76,7 +78,7 @@ def test_reader_rejects_special_files_before_open(tmp_path, monkeypatch, filenam
     original = os.open
 
     def guarded_open(target, *args, **kwargs):
-        assert target != path, "special file must be rejected before open"
+        assert target != filename, "special file must be rejected before open"
         return original(target, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", guarded_open)
@@ -89,7 +91,7 @@ def test_reader_rechecks_file_replaced_between_stat_and_open(tmp_path, monkeypat
     descriptors = []
 
     def replace_with_fifo(target, flags, *args, **kwargs):
-        if target == path:
+        if target == "runtime.json":
             path.unlink()
             os.mkfifo(path)
             assert flags & os.O_NONBLOCK
@@ -112,8 +114,11 @@ def chat(tmp_path, monkeypatch):
     runtime.kimi_agent = True
     service = Mock()
     service.runtime.return_value = runtime
+    service._runtimes_lock = threading.Lock()
+    service._runtimes = {"chat-1": runtime}
     service.db.claim_studio_chat_turn.return_value = True
-    monkeypatch.setattr(wake, "keepalive_run_token", Mock())
+    monkeypatch.setattr(delivery, "keepalive_run_token", Mock())
+    monkeypatch.setattr(delivery, "_token_alive", Mock(return_value=True))
     monkeypatch.setattr(wake, "task_root", lambda *_: tmp_path)
     monkeypatch.setattr(wake, "POLL_SECONDS", 0.01)
     yield service, runtime
@@ -159,9 +164,7 @@ def test_wakeup_respects_runtime_and_turn_ownership(chat, guard):
 
 def test_dead_token_does_not_start_a_followup(chat, monkeypatch):
     service, runtime = chat
-    monkeypatch.setattr(
-        wake, "keepalive_run_token", lambda *_: setattr(runtime, "token_keepalive_done", True)
-    )
+    monkeypatch.setattr(delivery, "_token_alive", lambda *_: False)
     assert not wake.wake_session(service, "chat-1", runtime, ["agent-1"])
     service.db.claim_studio_chat_turn.assert_not_called()
 
@@ -218,3 +221,268 @@ def test_cancelled_watcher_discards_completions_until_human_rearms(chat, tmp_pat
     write_task(tmp_path, "agent-new", "completed")
     wait_for_predicate(lambda: runtime.handle.send_prompt.call_count == 1)
     assert "agent-cancelled" not in runtime.handle.send_prompt.call_args.args[0]
+
+
+def test_cancel_rearm_without_watcher_lap_discards_old_pending_and_completions(chat, tmp_path):
+    service, runtime = chat
+    cursor = runtime.background_cursor = wake.CompletionCursor(tmp_path, "acp-1")
+    runtime.turn_open = True
+    write_task(tmp_path, "pending", "completed")
+    cursor.step(service, "chat-1", runtime)
+    assert cursor.pending == {"pending"}
+    wake.cancel_wakeup(runtime)
+    write_task(tmp_path, "cancelled", "completed")
+    wake.rearm_wakeup(runtime)
+    runtime.turn_open = False
+    write_task(tmp_path, "new", "completed")
+    cursor.step(service, "chat-1", runtime)
+    prompt = runtime.handle.send_prompt.call_args.args[0]
+    assert "new" in prompt and "pending" not in prompt and "cancelled" not in prompt
+
+
+def test_rearm_preparation_does_not_enable_failed_send_or_swallow_new_tasks(chat, tmp_path):
+    service, runtime = chat
+    cursor = runtime.background_cursor = wake.CompletionCursor(tmp_path, "acp-1")
+    wake.cancel_wakeup(runtime)
+    write_task(tmp_path, "cancelled", "completed")
+    commit = wake.prepare_rearm(runtime)
+    assert not runtime.background_wakeup_enabled
+    write_task(tmp_path, "new", "completed")
+    commit()
+    cursor.step(service, "chat-1", runtime)
+    assert "cancelled" not in runtime.handle.send_prompt.call_args.args[0]
+    assert "new" in runtime.handle.send_prompt.call_args.args[0]
+
+
+def test_rearm_commit_cannot_undo_a_newer_cancel(chat):
+    _, runtime = chat
+    wake.cancel_wakeup(runtime)
+    commit = wake.prepare_rearm(runtime)
+    wake.cancel_wakeup(runtime)
+    commit()
+    assert not runtime.background_wakeup_enabled
+
+
+@pytest.mark.parametrize("failure", ["token", "enqueue"])
+def test_admission_failures_never_leave_claim_or_lose_pending(chat, tmp_path, monkeypatch, failure):
+    service, runtime = chat
+    cursor = runtime.background_cursor = wake.CompletionCursor(tmp_path, "acp-1")
+    write_task(tmp_path, status="completed")
+    if failure == "token":
+        delivery._token_alive.side_effect = RuntimeError("database unavailable")
+    else:
+        runtime.handle.send_prompt.side_effect = RuntimeError("queue unavailable")
+    with pytest.raises(RuntimeError):
+        cursor.step(service, "chat-1", runtime)
+    assert not runtime.turn_open
+    assert cursor.pending == {"agent-1"}
+    if failure == "token":
+        service.db.claim_studio_chat_turn.assert_not_called()
+    else:
+        service.db.update_studio_chat_session_if.assert_called_once_with(
+            "chat-1", status_in=("running",), status="idle"
+        )
+
+
+@pytest.mark.parametrize("cause", ["cancel", "compacting", "token_error", "token_dead", "replaced"])
+def test_queued_followup_rechecks_cancellation_credentials_and_identity(chat, tmp_path, cause):
+    service, runtime = chat
+    cursor = runtime.background_cursor = wake.CompletionCursor(tmp_path, "acp-1")
+    assert wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+    guard = runtime.handle.send_prompt.call_args.kwargs["before_start"]
+    if cause == "cancel":
+        wake.cancel_wakeup(runtime)
+        wake.rearm_wakeup(runtime)
+    elif cause == "compacting":
+        runtime.compacting = True
+    elif cause == "token_error":
+        delivery._token_alive.side_effect = RuntimeError("database unavailable")
+    elif cause == "token_dead":
+        delivery._token_alive.return_value = False
+    else:
+        replacement = SessionRuntime(runtime.handle, "replacement")
+        service.runtime.return_value = replacement
+        service._runtimes["chat-1"] = replacement
+    assert not guard()
+    if cause == "replaced":
+        service.db.update_studio_chat_session_if.assert_not_called()
+    else:
+        assert not runtime.turn_open
+        assert cursor.pending == (set() if cause == "cancel" else {"agent-1"})
+
+
+def test_acp_queue_cancel_before_consumption_never_calls_agent(chat):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from server.app.studio_chat.acp_session import _CLOSE, AcpSessionHandle
+
+    service, runtime = chat
+    handle = AcpSessionHandle(
+        command="kimi", args=[], cwd="/tmp", mcp_server=Mock(), env=None, callbacks=Mock()
+    )
+    runtime.handle = handle
+    assert wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+    wake.cancel_wakeup(runtime)
+    wake.rearm_wakeup(runtime)
+    handle._queue.put(_CLOSE)
+    conn = SimpleNamespace(prompt=AsyncMock())
+    asyncio.run(handle._prompt_loop(conn, "acp-1"))
+    conn.prompt.assert_not_awaited()
+    handle.callbacks.on_turn_end.assert_not_called()
+    assert not runtime.turn_open
+
+
+def test_stale_queued_followup_cannot_release_new_human_turn(chat):
+    from server.app.studio_chat.turn_state import open_turn
+
+    service, runtime = chat
+    assert wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+    guard = runtime.handle.send_prompt.call_args.kwargs["before_start"]
+    wake.cancel_wakeup(runtime)
+    # Prior on_turn_end settles the old claim, then a human claims a new turn.
+    open_turn(runtime, "new human prompt")
+    owner = runtime.turn_owner
+    wake.rearm_wakeup(runtime)
+    assert not guard()
+    assert runtime.turn_open and runtime.turn_owner is owner
+    service.db.update_studio_chat_session_if.assert_not_called()
+
+
+@pytest.mark.parametrize("new_human_turn", [False, True])
+def test_failed_queue_cleanup_retries_only_its_owned_claim(chat, tmp_path, new_human_turn):
+    from server.app.studio_chat.turn_state import open_turn
+
+    service, runtime = chat
+    cursor = runtime.background_cursor = wake.CompletionCursor(tmp_path, "acp-1")
+    assert wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+    guard = runtime.handle.send_prompt.call_args.kwargs["before_start"]
+    wake.cancel_wakeup(runtime)
+    service.db.update_studio_chat_session_if.side_effect = RuntimeError(
+        "temporary database failure"
+    )
+    assert not guard()  # Must not leak into the unowned generic on_turn_error callback.
+    assert runtime.background_cleanup is not None
+    service.db.update_studio_chat_session_if.side_effect = None
+    service.db.update_studio_chat_session_if.reset_mock()
+    if new_human_turn:
+        open_turn(runtime, "new human prompt")
+    cursor.step(service, "chat-1", runtime)
+    assert runtime.background_cleanup is None
+    assert runtime.turn_open == new_human_turn
+    assert service.db.update_studio_chat_session_if.call_count == (0 if new_human_turn else 1)
+
+
+def test_stop_requested_handle_rejects_automatic_prompt(chat):
+    from server.app.studio_chat.acp_session import AcpSessionHandle
+
+    service, runtime = chat
+    handle = AcpSessionHandle(
+        command="kimi", args=[], cwd="/tmp", mcp_server=Mock(), env=None, callbacks=Mock()
+    )
+    runtime.handle = handle
+    handle.request_stop()
+    assert not wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+    assert not runtime.turn_open
+    assert handle._queue.qsize() == 1  # Only the stop sentinel; no unreachable prompt.
+
+
+def test_close_without_captured_runtime_does_not_remove_concurrent_resume():
+    from server.app.studio_chat.service import StudioChatService
+
+    service = object.__new__(StudioChatService)
+    service._runtimes_lock = threading.Lock()
+    service._runtimes = {}
+    service.get_session = Mock(return_value={"status": "idle"})
+    service.store = Mock()
+    replacement = SessionRuntime(Mock(), "replacement")
+
+    def resume_after_close_write(*_args, **_kwargs):
+        service._runtimes["chat-1"] = replacement
+
+    service._db = Mock()
+    service._db.update_studio_chat_session.side_effect = resume_after_close_write
+    service.close_session("chat-1", "workspace")
+    assert service.runtime("chat-1") is replacement
+    assert not replacement.closed
+    replacement.handle.close.assert_not_called()
+
+
+def test_close_notification_failure_still_tears_down_owned_runtime():
+    from server.app.studio_chat.service import StudioChatService
+
+    service = object.__new__(StudioChatService)
+    runtime = SessionRuntime(Mock(), "token")
+    service._runtimes_lock = threading.Lock()
+    service._runtimes = {"chat-1": runtime}
+    service._db = Mock()
+    service.get_session = Mock(return_value={"status": "idle"})
+    service.store = Mock()
+    service.store.append_message.side_effect = RuntimeError("notification persistence failure")
+    with pytest.raises(RuntimeError):
+        service.close_session("chat-1", "workspace")
+    assert runtime.closed
+    assert service.runtime("chat-1") is None
+    runtime.handle.close.assert_called_once()
+
+
+@pytest.mark.parametrize("cancel_before_task_start", [False, True])
+def test_dispatch_guard_runs_in_prompt_task_after_dequeue(chat, cancel_before_task_start):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from server.app.studio_chat.prompt_turn import run_prompt_turn
+
+    service, runtime = chat
+    assert wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+    guard = runtime.handle.send_prompt.call_args.kwargs["before_start"]
+    conn = SimpleNamespace(prompt=AsyncMock(return_value=SimpleNamespace(stop_reason="end_turn")))
+
+    async def dispatch():
+        if cancel_before_task_start:
+            asyncio.get_running_loop().call_soon(wake.cancel_wakeup, runtime)
+        return await run_prompt_turn(
+            conn, "acp-1", "completion", on_timeout=Mock(), before_start=guard
+        )
+
+    result = asyncio.run(dispatch())
+    assert conn.prompt.await_count == (0 if cancel_before_task_start else 1)
+    assert (result.response is None) == cancel_before_task_start
+
+
+def test_reader_pins_ancestor_descriptor_during_replacement(tmp_path, monkeypatch):
+    root = tmp_path / "tasks"
+    write_task(root, status="running")
+    foreign = tmp_path / "foreign"
+    write_task(foreign, status="completed")
+    original = os.open
+    swapped = False
+
+    def swap_ancestor(name, flags, *args, **kwargs):
+        nonlocal swapped
+        if name == "agent-1" and not swapped:
+            swapped = True
+            root.rename(tmp_path / "original")
+            root.symlink_to(foreign, target_is_directory=True)
+        return original(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swap_ancestor)
+    assert completed_tasks(root, "acp-1") == {}
+    assert swapped
+
+
+def test_reader_rejects_task_directory_swapped_to_foreign_symlink(tmp_path, monkeypatch):
+    root = tmp_path / "tasks"
+    write_task(root, status="running")
+    foreign = tmp_path / "foreign"
+    task = write_task(foreign, status="completed")
+    original = os.open
+
+    def swap_task(name, flags, *args, **kwargs):
+        if name == "agent-1":
+            (root / name).rename(root / "old")
+            (root / name).symlink_to(task, target_is_directory=True)
+        return original(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swap_task)
+    assert completed_tasks(root, "acp-1") == {}
