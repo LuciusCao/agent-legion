@@ -1,8 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
-import { TestQueryProvider } from '../testing/testQueryClient'
+import {
+  createTestQueryClient,
+  TestQueryProvider,
+} from '../testing/testQueryClient'
+import { queryKeys } from '../lib/queryKeys'
 import { MonitoringPanel } from './MonitoringPanel'
 
 // react-query 需要 QueryClientProvider；每个用例独立 client（retry 关闭）。
@@ -325,6 +330,7 @@ describe('MonitoringPanel', () => {
   })
 
   it('scopes the panel to the workspace when workspaceId is given', async () => {
+    mockListAgentWorkers.mockClear()
     render(
       <MemoryRouter>
         <MonitoringPanel workspaceId="ops-ws" />
@@ -348,8 +354,34 @@ describe('MonitoringPanel', () => {
     ).not.toBeInTheDocument()
     // 副标题标注 workspace；全局监控入口不在 ws 视图（挪到首页 admin 菜单）
     expect(screen.getByText(/workspace「ops-ws」/)).toBeInTheDocument()
+    expect(mockListAgentWorkers).not.toHaveBeenCalled()
     expect(
       screen.queryByRole('link', { name: '查看全局监控' })
     ).not.toBeInTheDocument()
+  })
+
+  it('stops inventory refreshes after switching from global to workspace monitoring', async () => {
+    const client = createTestQueryClient()
+    const view = (workspaceId?: string) => (
+      <QueryClientProvider client={client}>
+        <MonitoringPanel workspaceId={workspaceId} />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view())
+    await waitFor(() =>
+      expect(client.getQueryData(queryKeys.agentWorkers())).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: 'gpu-box-1' })])
+      )
+    )
+    rerender(view('ops-ws'))
+    mockListAgentWorkers.mockClear()
+    await act(() =>
+      client.invalidateQueries({ queryKey: queryKeys.agentWorkers() })
+    )
+    expect(mockListAgentWorkers).not.toHaveBeenCalled()
+    expect(
+      screen.queryByRole('combobox', { name: '选择 Worker' })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/gpu-box-1/)).not.toBeInTheDocument()
   })
 })
