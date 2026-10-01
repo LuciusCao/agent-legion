@@ -43,6 +43,7 @@ def include_job_routes(
     job_event_buffer: Any | None = None,
     artifact_store: ArtifactStore | None = None,
     object_store: Any = None,
+    materials_service: Any = None,
 ) -> None:
     services = JobServices(
         job_db,
@@ -52,6 +53,7 @@ def include_job_routes(
         job_event_buffer,
         artifact_store=artifact_store,
         object_store=object_store,
+        materials_service=materials_service,
     )
 
     router.include_router(create_job_batches_router(services.intake))

@@ -1,6 +1,7 @@
 """Kimi V1 completion files wake an idle chat without a human prompt (#806)."""
 
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -64,6 +65,43 @@ def test_task_root_matches_kimi_layout_and_rejects_traversal(tmp_path, monkeypat
     digest = hashlib.md5(str(cwd).encode(), usedforsecurity=False).hexdigest()
     assert task_root(str(cwd), "acp-1") == tmp_path / "sessions" / digest / "acp-1" / "tasks"
     assert task_root(str(cwd), "../foreign") is None
+
+
+@pytest.mark.parametrize("filename", ["spec.json", "runtime.json"])
+@pytest.mark.parametrize("kind", ["fifo", "directory"])
+def test_reader_rejects_special_files_before_open(tmp_path, monkeypatch, filename, kind):
+    path = write_task(tmp_path, status="completed") / filename
+    path.unlink()
+    os.mkfifo(path) if kind == "fifo" else path.mkdir()
+    original = os.open
+
+    def guarded_open(target, *args, **kwargs):
+        assert target != path, "special file must be rejected before open"
+        return original(target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", guarded_open)
+    assert completed_tasks(tmp_path, "acp-1") == {}
+
+
+def test_reader_rechecks_file_replaced_between_stat_and_open(tmp_path, monkeypatch):
+    path = write_task(tmp_path, status="completed") / "runtime.json"
+    original = os.open
+    descriptors = []
+
+    def replace_with_fifo(target, flags, *args, **kwargs):
+        if target == path:
+            path.unlink()
+            os.mkfifo(path)
+            assert flags & os.O_NONBLOCK
+        descriptor = original(target, flags, *args, **kwargs)
+        descriptors.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(os, "open", replace_with_fifo)
+    assert completed_tasks(tmp_path, "acp-1") == {}
+    for descriptor in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
 
 
 @pytest.fixture

@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from collections.abc import Collection
 from pathlib import Path
 from typing import Any
@@ -33,8 +34,17 @@ def task_root(cwd: str, session_id: str) -> Path | None:
 def _read(path: Path, root: Path) -> dict[str, Any]:
     if path.resolve() != path or not path.is_relative_to(root):
         return {}
-    with path.open("rb") as source:
-        data = source.read(65537)
+    if not stat.S_ISREG(path.lstat().st_mode):
+        return {}
+    # NONBLOCK also protects against a FIFO swapped in after lstat; fstat
+    # validates the opened object, and NOFOLLOW rejects a swapped symlink.
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return {}
+        data = os.read(descriptor, 65537)
+    finally:
+        os.close(descriptor)
     if len(data) > 65536:
         return {}
     value = json.loads(data)

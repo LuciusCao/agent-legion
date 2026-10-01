@@ -34,7 +34,19 @@ class RunItemBundle(BaseModel):
     bundle_id: str = Field(min_length=1)
 
 
-RunItem = Annotated[RunItemMaterial | RunItemRef | RunItemBundle, Field(discriminator="type")]
+class RunItemText(BaseModel):
+    """Requirement text typed inline; persisted as a material before resolution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["text"]
+    content: str = Field(min_length=1, max_length=65536)
+    filename: str | None = Field(default=None, max_length=255)
+
+
+RunItem = Annotated[
+    RunItemMaterial | RunItemRef | RunItemBundle | RunItemText, Field(discriminator="type")
+]
 
 
 class RunCreateRequest(BaseModel):
