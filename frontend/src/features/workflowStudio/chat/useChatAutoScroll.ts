@@ -20,5 +20,5 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
         el.scrollHeight - el.scrollTop - el.clientHeight < 80
   }
 
-  return { bottomRef, listRef, handleScroll }
+  return { bottomRef, listRef, handleScroll, pinnedToBottomRef }
 }
