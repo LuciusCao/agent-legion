@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAgentDockOpen } from './useAgentDockOpen'
 
 /** 画布区视图状态：DAG 常驻主视图；变更走右侧 Drawer，YAML 走全屏 Dialog。
@@ -8,12 +8,19 @@ import { useAgentDockOpen } from './useAgentDockOpen'
  * Agent 开合的组合出口在 useAgentDockOpen（本层只做转发）。
  * #804 定案：DAG 全屏 Dialog 与手动校验入口退役（校验改保存成功后自动
  * 静默执行，状态 chip 点击开变更抽屉）。 */
-export function useWorkflowStudioPageView() {
+export function useWorkflowStudioPageView(workspaceId?: string) {
   const [changesPanelOpen, setChangesPanelOpen] = useState(false)
   const [yamlEditorOpen, setYamlEditorOpen] = useState(false)
   // 轮 9 P2：共享素材抽屉开合提升到 view 层——Dock 避让（rightInset）
   // 需要同时感知节点详情抽屉（selectedNodeKey）与它。
   const [materialsOpen, setMaterialsOpen] = useState(false)
+  // #812 对抗轮 D5：workspace 切换重置抽屉开合（对照 useStudioNodeSelection
+  // 的 selectedNodeKey 重置）——旧 workspace 的开合残留会带进新 workspace，
+  // 一进页面就开着上一个 workspace 的素材抽屉。
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- workspace 切换是有意的开合重置点
+    setMaterialsOpen(false)
+  }, [workspaceId])
   const agentDock = useAgentDockOpen()
   return {
     changesPanelOpen,
