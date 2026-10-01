@@ -48,16 +48,18 @@ export const saveAgentDraft = (
     body: JSON.stringify(payload),
   })
 
-// #692 codex P1：expectedHash 是调用方认定的草稿 definition_hash，服务端
-// 在发布事务内原子核对——不匹配 409 零副作用（TOCTOU 窗口的根治）。
+// #692 codex P1 / #749：expectedHash 是调用方认定的草稿 definition_hash，
+// 服务端在发布事务内原子核对——不匹配 409 零副作用（TOCTOU 窗口的根治）。
+// #749 起必填：所有调用方（聊天草稿卡、AgentEditor 检查器面板）都从各自
+// 的保存响应/详情读取里带 hash，无 None 分支调用方。
 export const publishAgent = (
   workspaceId: string,
   agentId: string,
-  expectedHash?: string
+  expectedHash: string
 ) =>
   api<AgentVersion>(scoped(`${item(agentId)}/publish`, workspaceId), {
     method: 'POST',
-    body: JSON.stringify({ expected_hash: expectedHash ?? null }),
+    body: JSON.stringify({ expected_hash: expectedHash }),
   })
 
 export const rollbackAgent = (
