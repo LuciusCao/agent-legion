@@ -191,8 +191,7 @@ else
     # 给出（含显式留空 = 不显示链接）时不动。
     if [[ -z "${AGENT_LEGION_WORKER_CONSOLE_URL+x}" ]] \
         && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?AGENT_LEGION_WORKER_CONSOLE_URL=' .env 2>/dev/null; then
-        console_host="$WORKER_BIND"
-        [[ "$console_host" == "0.0.0.0" ]] && console_host="127.0.0.1"
+        console_host="$(health_host "$WORKER_BIND")"
         export AGENT_LEGION_WORKER_CONSOLE_URL="http://${console_host}:${WORKER_PORT}"
     fi
     # 共享库 schema 门（server/app/db/schema.py）：prod 是有意迁移裸
