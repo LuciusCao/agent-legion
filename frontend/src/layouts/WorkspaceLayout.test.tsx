@@ -102,6 +102,9 @@ describe('WorkspaceLayout', () => {
     renderLayout()
     expect(await screen.findByText('测试空间')).toBeInTheDocument()
     expect(screen.queryByText('question_content')).not.toBeInTheDocument()
+    expect(screen.getByTestId('app-bar')).not.toHaveClass(
+      appBarStyles.singleRow
+    )
   })
 
   it('keeps low-frequency entries inside the more menu', () => {
@@ -195,6 +198,7 @@ describe('WorkspaceLayout', () => {
   it('renders token analysis button on the job detail page', () => {
     renderLayout('/workspaces/ws1/jobs/j1')
     expect(screen.getByLabelText('Token 使用分析')).toBeInTheDocument()
+    expect(screen.getByTestId('app-bar')).toHaveClass(appBarStyles.singleRow)
     fireEvent.click(screen.getByLabelText('Token 使用分析'))
     expect(setTokenUsageDialogOpenMock).toHaveBeenCalledWith(true)
     expect(mockNavigate).not.toHaveBeenCalled()

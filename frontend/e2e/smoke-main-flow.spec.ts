@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { ensureAdminSession } from './helpers'
 
@@ -7,6 +7,36 @@ import { ensureAdminSession } from './helpers'
 // gateway) → publish(code)) with dispatch resumed, plus a standalone Worker
 // process claiming the Agent node. The demo workspace stays paused.
 const WORKSPACE_ID = 'e2e_main_flow'
+
+// 真实布局回归：详情的单行动作不能让共享顶栏的列表页按钮溢出。
+async function expectAppBarFits(page: Page) {
+  const viewport = page.viewportSize()!
+  const header = page.getByTestId('app-bar')
+  await expect(header).toBeVisible()
+  for (const width of [320, 375, 1000, 1440]) {
+    await page.setViewportSize({ width, height: viewport.height })
+    await expect
+      .poll(() =>
+        header.evaluate((element) => {
+          const outside = [...element.querySelectorAll('button')]
+            .filter((button) => button.offsetParent !== null)
+            .filter((button) => {
+              const rect = button.getBoundingClientRect()
+              return rect.left < 0 || rect.right > window.innerWidth
+            })
+            .map((button) => button.getAttribute('aria-label'))
+          if (
+            (element.querySelector('h1')?.getBoundingClientRect().width ?? 0) <=
+            0
+          )
+            outside.push('title hidden')
+          return outside
+        })
+      )
+      .toEqual([])
+  }
+  await page.setViewportSize(viewport)
+}
 
 // JobDetail.job.status / nodes[].status come from GET /api/jobs/{jobId}.
 interface JobDetailPayload {
@@ -31,6 +61,7 @@ test('主流程：添加条目 → 节点真实执行 → job 完成 → 产物�
 
   await page.goto(`/workspaces/${WORKSPACE_ID}`)
   await expect(page).toHaveURL(new RegExp(`/workspaces/${WORKSPACE_ID}$`))
+  await expectAppBarFits(page)
 
   // 添加条目（粘贴 ID）：ref item + seeded cms-internal connection，创建运行
   // 同步建 job（与既有 smoke spec 同一条路径）。
@@ -61,7 +92,9 @@ test('主流程：添加条目 → 节点真实执行 → job 完成 → 产物�
   // 断言信息，省一次 trace 复现。
   let detail: JobDetailPayload | undefined
   await expect(async () => {
-    const response = await page.request.get(`/api/jobs/${encodeURIComponent(jobId)}`)
+    const response = await page.request.get(
+      `/api/jobs/${encodeURIComponent(jobId)}`
+    )
     expect(response.ok()).toBeTruthy()
     detail = (await response.json()) as JobDetailPayload
     expect(detail.job.status).toBe('completed')
@@ -79,6 +112,7 @@ test('主流程：添加条目 → 节点真实执行 → job 完成 → 产物�
   await expect(progressPanel.getByText('读取条目')).toBeVisible()
   await expect(progressPanel.getByText('生成草稿')).toBeVisible()
   await expect(progressPanel.getByText('汇总')).toBeVisible()
+  await expectAppBarFits(page)
 
   // 产物：intake/publish 两个 code 节点 + stub Agent 写出的 draft.json。
   await page.getByRole('button', { name: '更多任务操作' }).click()
@@ -92,12 +126,17 @@ test('主流程：添加条目 → 节点真实执行 → job 完成 → 产物�
 
   // 打包下载：详情页「更多 → 打包」→ jobs/package 返回 download_url → zip 可读。
   await page.getByRole('button', { name: '更多任务操作' }).click()
-  const packageButton = page.getByRole('menuitem', { name: '打包', exact: true })
+  const packageButton = page.getByRole('menuitem', {
+    name: '打包',
+    exact: true,
+  })
   await expect(packageButton).toBeEnabled()
   const [packageResponse] = await Promise.all([
     page.waitForResponse(
       (response) =>
-        response.url().includes(`/api/workspaces/${WORKSPACE_ID}/jobs/package`) &&
+        response
+          .url()
+          .includes(`/api/workspaces/${WORKSPACE_ID}/jobs/package`) &&
         response.request().method() === 'POST'
     ),
     packageButton.click(),
