@@ -1,14 +1,13 @@
+import type { WorkflowNodeRecord } from '../../../types'
 import {
   dumpWorkflowYaml,
   parseWorkflowYaml,
   type WorkflowYamlNode,
 } from './workflowStudioYamlDraft.parse'
 
-export type WorkflowTextInputDraft = {
-  label: string
-  filename: string
-  template: string
-}
+export type WorkflowTextInputDraft = NonNullable<
+  WorkflowNodeRecord['text_input']
+>
 
 export const EMPTY_TEXT_INPUT: WorkflowTextInputDraft = {
   label: '',

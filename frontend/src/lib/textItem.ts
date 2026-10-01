@@ -1,4 +1,4 @@
-import type { WorkflowDefinitionRecord } from '../types'
+import type { WorkflowDefinitionRecord, WorkflowNodeRecord } from '../types'
 
 /** 与后端 run_text_items.TEXT_ITEM_MAX_BYTES 一致（UTF-8 字节数）。 */
 export const TEXT_ITEM_MAX_BYTES = 64 * 1024
@@ -11,11 +11,7 @@ const encoder = new TextEncoder()
 export const textItemBytes = (text: string): number =>
   encoder.encode(text).length
 
-export type StartTextInput = {
-  label: string
-  filename: string
-  template: string
-}
+export type StartTextInput = NonNullable<WorkflowNodeRecord['text_input']>
 
 /** start 节点的 text_input 呈现配置；未声明 / 取不到定义时三项全空。 */
 export function startTextInput(
@@ -57,7 +53,8 @@ export function resolveTextItem(
     content.trim() === config.template.trim()
   return {
     content,
-    filename: (filename ?? config.filename).trim() || DEFAULT_TEXT_FILENAME,
+    filename:
+      filename?.trim() || config.filename.trim() || DEFAULT_TEXT_FILENAME,
     bytes,
     tooLong,
     untouchedTemplate,
