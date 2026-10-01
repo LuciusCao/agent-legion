@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -517,4 +518,112 @@ def test_overflow_fallback_lost_mid_reupload_cleans_up(
     assert client.reports == []  # 从未投递成功
     # lost 终态：marker 删除、归属匹配的目录当场清理（对比 aborted：marker
     # 保留、重启 restore 重投）。
+    assert not (work_root / "exec-1").exists()
+
+
+def _overflow_on_direct_refs(client: QueueFakeClient, captured: dict[str, Any]) -> None:
+    """模拟真实 Client 的头序列化：直传 dict ref 形态抛溢出信号；换轨后的
+    CAS 形态或判败后的空清单不再抛（与 worker.host.transfer 的信号纪律一致）。
+    顺带捕获第二趟 report 的归档成员清单（判败路径的小归档断言面）。"""
+    import tarfile
+
+    from worker.host.transfer import ResultHeaderOverflow
+
+    original_report = client.report
+
+    def report_with_overflow(execution_id, lease_id, metadata, archive):
+        if any(isinstance(ref, dict) for ref in metadata.get("output_artifacts", {}).values()):
+            raise ResultHeaderOverflow("result header over budget with direct-upload refs")
+        with tarfile.open(archive) as tar:
+            captured["members"] = tar.getnames()
+        return original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_with_overflow  # type: ignore[method-assign]
+
+
+def test_result_header_overflow_oversize_artifacts_fail_honestly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#748 R4（#755 换轨预检，简化方案）：产物总量超归档内嵌上限（Host 413
+    的判定值）时**不换轨**——重内嵌会把大产出人群送进 413 → 丢结果 → 租约
+    过期全量重跑（每轮同样 413）。本地诚实判败：failed_metadata 上报，
+    小归档照常携带 events/日志，无 CAS 重传，直传规格保持不动。"""
+    from worker.upload import report as report_module
+
+    # 用小常量代替 64 MiB，避免 tmp 盘写大文件（总量口径与上限同源断言）。
+    monkeypatch.setattr(report_module, "_ARCHIVE_EMBED_CEILING_BYTES", 1024)
+    outputs = tuple(f"output-{i:03d}.json" for i in range(3))
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    job_dir = work_root / "exec-1" / "job"
+    for name in outputs:
+        (job_dir / name).write_bytes(b"\0" * 1024)  # 3 KiB > 1 KiB 预检上限
+
+    def direct_upload_ok(path: Path, spec: object, **_kw: object) -> dict:
+        return {
+            "storage_key": str(dict(spec)["storage_key"]),
+            "size_bytes": 1024,
+            "content_hash": "a" * 64,
+        }
+
+    monkeypatch.setattr(upload_queue, "upload_artifact_direct", direct_upload_ok)
+    client = QueueFakeClient()
+    task = _task(work_root, expected_outputs=outputs)
+    task.artifact_uploads = {
+        name: {"storage_key": f"jobs-staging/x/{name}", "url": "http://x"} for name in outputs
+    }
+    captured: dict[str, Any] = {}
+    _overflow_on_direct_refs(client, captured)
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "archive-embed ceiling" in report["error_message"]
+    assert "3072" in report["error_message"]  # 未压缩口径的总量如实上报
+    assert report["output_artifacts"] == {}
+    # 未换轨：直传规格保留、CAS 通道零重传、归档不内嵌产物字节。
+    assert task.artifact_uploads  # 规格 intact
+    assert client.uploads == {}
+    assert not any(name in captured["members"] for name in outputs)
+    # 小归档照常携带 events/日志（run_dir 成员在 tar 里）。
+    assert any(member.startswith("runs/node_a/worker") for member in captured["members"])
+    # 判败上报成功（204）：marker 与执行目录照常收尾。
+    assert not (work_root / "exec-1").exists()
+
+
+def test_result_header_overflow_unstattable_output_fails_honestly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#748 R4 换轨预检的 stat 失败臂：expected_outputs 里有缺文件（大小未知）
+    同样拒绝换轨、本地诚实判败——未知即不可证安全，不送进必死 413。"""
+    outputs = ("output.json", "gone.json")
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)  # 只造 output.json；gone.json 缺失 → stat 失败
+
+    def direct_upload_ok(path: Path, spec: object, **_kw: object) -> dict:
+        return {
+            "storage_key": str(dict(spec)["storage_key"]),
+            "size_bytes": 2,
+            "content_hash": "a" * 64,
+        }
+
+    monkeypatch.setattr(upload_queue, "upload_artifact_direct", direct_upload_ok)
+    client = QueueFakeClient()
+    task = _task(work_root, expected_outputs=outputs)
+    task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
+    captured: dict[str, Any] = {}
+    _overflow_on_direct_refs(client, captured)
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "could not be stat'ed" in report["error_message"]
+    assert "archive-embed ceiling" in report["error_message"]
+    assert client.uploads == {}  # 无 CAS 重传
     assert not (work_root / "exec-1").exists()

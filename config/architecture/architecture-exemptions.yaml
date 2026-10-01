@@ -1262,10 +1262,12 @@ exemptions:
     回退闸。rebase 到 0.7.13 基线后换轨逻辑随 report 车道迁入本模块
     （基线把 queue._report 拆为 report_task），防御性正确性代码使有效行
     83→112；#755 对抗复审 P3-1（换轨中途判死走 lost 终态当场清理而
-    非滞留）到 115（超 growth_allowance 带）。时间盒：回退链若与
-    DirectUploadError 回退路径统一收口为单一换轨助手（report 车道与
-    bulk 车道共享），此处重登预算。'
+    非滞留）到 115；#755 R4 换轨预检（产物总量超归档内嵌上限时拒绝换轨、
+    本地诚实判败，避免送进 Host 413 丢结果全量重跑；_embedded_artifacts_bytes
+    预检助手 + 判败分支）到 146（超 growth_allowance 带，重签带 expires）。
+    时间盒：回退链若与 DirectUploadError 回退路径统一收口为单一换轨助手
+    （report 车道与 bulk 车道共享），此处重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
-  ceiling: 122
+  ceiling: 153
   expires: 2026-12-31

@@ -20,6 +20,29 @@ from worker.upload.control import CombinedStop
 from worker.upload.prepare import failed_metadata, prepare_or_failed
 from worker.upload.task import UploadTask
 
+# #748 R4：换轨预检的体积上限。Host 对超 max_archive_bytes 的 report body
+# 直接 413（server/app/routes/agent_workers.py）；该值是 Host 实例设置，
+# 无任何下发通道（register/claim/config 面均无此字段），worker 只能取对齐
+# server 默认（server/app/executor_runtime.py 的 64 MiB）的保守常量——
+# Host 调大上限时此处需同步。保守方向：宁可拒绝换轨本地判败，也绝不把
+# 大产出人群重内嵌送进必死 413（丢结果 → 租约过期 → 全量重跑）。
+_ARCHIVE_EMBED_CEILING_BYTES = 64 * 1024 * 1024
+
+
+def _embedded_artifacts_bytes(task: UploadTask) -> float:
+    """换轨预检：归档内嵌会打包进 tar 的产物字节总量（未压缩口径——gzip
+    对二进制不可假设，run_dir 的 events/日志有运行时限额，产物载荷占主导）。
+    与 prepare_result 同源地遍历 expected_outputs；stat 失败按 +inf——大小
+    未知即拒绝换轨。"""
+    job_dir = task.execution_dir / "job"
+    total = 0.0
+    for name in task.expected_outputs:
+        try:
+            total += (job_dir / PurePosixPath(name)).stat().st_size
+        except OSError:
+            return float("inf")
+    return total
+
 
 def report_task(
     client: Any,
@@ -82,6 +105,32 @@ def report_task(
             # 手段截断——本闸 + 形态判定双保险，不会死循环。
             if overflow_fallback:
                 raise
+            embedded_bytes = _embedded_artifacts_bytes(task)
+            if embedded_bytes > _ARCHIVE_EMBED_CEILING_BYTES:
+                # #748 R4（#755 换轨预检）：产物总量超归档内嵌上限时**不换轨**
+                # ——重内嵌只会把大产出人群送进 Host 413 → 丢结果 → 租约过期
+                # 全量重跑（每轮同样 413）。本地诚实判败：复用 CAS 4xx 判败
+                # 先例的 failed_metadata；归档保持直传形态（产物字节本就不在
+                # tar 里，events/日志照常携带），错误信息如实说明拒绝原因。
+                detail = (
+                    "an expected output could not be stat'ed"
+                    if embedded_bytes == float("inf")
+                    else f"output artifacts total {int(embedded_bytes)} bytes"
+                )
+                print(
+                    f"result header overflow for {task.execution_id}: {detail};"
+                    f" archive-embed fallback rejected by the size pre-check: {exc}",
+                    flush=True,
+                )
+                overflow_fallback = True
+                metadata = failed_metadata(
+                    task,
+                    f"{detail}: output artifacts exceed the archive-embed ceiling"
+                    f" ({_ARCHIVE_EMBED_CEILING_BYTES} bytes); cannot switch to"
+                    f" the archive-embedded channel",
+                )
+                task.prepared_metadata = metadata
+                continue
             print(
                 f"result header overflow for {task.execution_id}:"
                 f" falling back to archive-embedded artifacts: {exc}",
