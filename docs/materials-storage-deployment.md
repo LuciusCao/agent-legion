@@ -300,9 +300,11 @@ EOF
 ## 6. 可写槽位耗尽（SeaweedFS，PutObject 503 / no free volumes）
 
 **机制**：SeaweedFS 的 volume 按 collection 成批预分配（每个 collection
-一次创建一批 volume，默认 7 个）；删除 bucket/collection 只删逻辑映射，
-**空 volume 不会自动回收**，长期增删 bucket 会攒下一批全空的 volume。
-另外 compose 曾以 `-volume.max=0`（按磁盘余量自动推导上限）运行：当
+一次创建一批 volume，默认 7 个）；删除 bucket 会尽力连带删其
+collection 的 volume（失败/超时才留孤儿），但**从未被写入过的空
+volume 不在 `volume.deleteEmpty` 的回收范围**（回收条件要求 volume 有
+过写入），长期增删 bucket 与空 collection 的预分配仍会攒下一批全空的
+volume。另外 compose 曾以 `-volume.max=0`（按磁盘余量自动推导上限）运行：当
 volume server 在 master 侧的注册信息 stale 时，自动推导会把可写槽位判成
 0，master 认为没有可分配 volume，全部 PutObject 返回 503
 （no free volumes）——表象是「磁盘远未写满却写满」。现 compose 已改为
@@ -312,7 +314,9 @@ volume server 在 master 侧的注册信息 stale 时，自动推导会把可写
 
 **上限可调**：上限只是槽位闸门，调大**无需迁移数据**（新 volume 惰性
 创建），在 `deploy/.env` 设 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX` 后
-`docker compose up -d seaweedfs` 生效。升级本变更或调大上限前，先用
+`docker compose -f deploy/compose.host.yaml up -d seaweedfs` 生效
+（compose 文件非默认文件名，`-f` 不可省；或走 `make prod-up` 入口）。
+升级本变更或调大上限前，先用
 `weed shell` 确认当前 volume 数低于新上限：
 
 ```bash
@@ -336,7 +340,8 @@ docker exec <seaweedfs 容器> sh -c \
   'printf "lock\nvolume.deleteEmpty -quietFor=1h -apply\nunlock\n" | weed shell -master=localhost:9333'
 ```
 
-`volume.deleteEmpty` 只删「空且静默超过 quietFor 时长」的 volume，幂等
-可重跑；删完 PutObject 即恢复。若 volume 数仍贴着上限，说明数据真实
-增长，再调大 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`（见上节「上限可调」）
+`volume.deleteEmpty` 只删「空、有过写入、且静默超过 quietFor 时长」的
+volume，幂等可重跑；删完 PutObject 即恢复。从未被写入过的空 volume 不在
+其回收范围——若 volume 数仍贴着上限，再调大
+`AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`（见上节「上限可调」）
 或清理无用 bucket/collection。
