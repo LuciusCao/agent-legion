@@ -45,20 +45,16 @@ def teardown_runtime(
     the session row either.
     """
     with runtimes_lock:
-        if expected is None:
-            current = runtimes.pop(session_id, None)
-            runtime = current if current is not None else runtime
-            owned = current is not None
-        else:
-            owned = runtimes.get(session_id) is expected
+        runtime = expected or runtimes.get(session_id) or runtime
+    if runtime is None:
+        return False
+    with runtime.lock:
+        # Never hold the registry lock while waiting for a runtime lock.
+        # Pin/remove the same generation only after admission has finished.
+        with runtimes_lock:
+            owned = runtimes.get(session_id) is runtime
             if owned:
                 runtimes.pop(session_id)
-            # The registry already holds a different (newer) runtime: tear
-            # down only the caller's own, leave the registry untouched.
-            runtime = expected
-    if runtime is None:
-        return owned
-    with runtime.lock:
         runtime.closed = True
         runtime.background_stop.set()
         # A pending compaction self-clear must not fire into a torn-down

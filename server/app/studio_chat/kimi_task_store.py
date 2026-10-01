@@ -1,11 +1,4 @@
-"""Read-only Kimi background-task V1 compatibility boundary (#806).
-
-Kimi ACP drains notifications only inside prompt(). Its task store is the
-out-of-turn completion signal: metadata.WorkDirMeta.sessions_dir and
-background/{models,store}.py in MoonshotAI/kimi-cli define this layout.
-Only bounded terminal output tails are read; never mutate consumer state
-or traverse other sessions.
-"""
+"""Read-only, descriptor-anchored Kimi V1 task compatibility boundary."""
 
 from __future__ import annotations
 
@@ -15,15 +8,8 @@ import re
 from collections.abc import Collection
 from pathlib import Path
 
-from server.app.studio_chat.kimi_task_snapshot import (
-    ACTIVE,
-    TERMINAL,
-    BackgroundTask,
-    display_text,
-    output_tail,
-    read_state,
-    timestamp,
-)
+from server.app.studio_chat.kimi_task_snapshot import BackgroundTask, read_task
+from server.app.studio_chat.task_metadata_files import DIRECTORY_FLAGS, directory
 
 _ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}\Z")
 
@@ -41,52 +27,24 @@ def task_root(cwd: str, session_id: str) -> Path | None:
 def task_snapshots(
     root: Path, session_id: str, *, ignored: Collection[str] = ()
 ) -> dict[str, BackgroundTask]:
-    """Read only root-owned agent/bash tasks in this ACP session.
-
-    Missing/partial/unsupported files are not proof of completion. The
-    bounded read excludes large tool output and corrupt runtime payloads.
-    """
+    """Keep spec, runtime and output on one pinned task directory."""
     result: dict[str, BackgroundTask] = {}
     try:
-        if root.resolve() != root or not root.is_dir():
-            return result
-        for path in root.iterdir():
-            if path.name in ignored or not _ID.fullmatch(path.name) or not path.is_dir():
-                continue
-            try:
-                spec = read_state(path / "spec.json", root)
-                if (
-                    spec.get("version") != 1
-                    or spec.get("id") != path.name
-                    or spec.get("session_id") != session_id
-                    or spec.get("kind") not in ("agent", "bash")
-                    or spec.get("owner_role", "root") != "root"
-                ):
+        with directory(root) as root_fd:
+            for name in os.listdir(root_fd):
+                if name in ignored or not _ID.fullmatch(name):
                     continue
-                state = read_state(path / "runtime.json", root)
-                status = state.get("status")
-                if not isinstance(status, str) or status not in ACTIVE | TERMINAL:
+                try:
+                    task_fd = os.open(name, DIRECTORY_FLAGS, dir_fd=root_fd)
+                    try:
+                        task = read_task(task_fd, name, session_id)
+                    finally:
+                        os.close(task_fd)
+                    if task is not None:
+                        result[name] = task
+                except (OSError, ValueError):
                     continue
-                terminal = status in TERMINAL
-                output_at, summary = output_tail(path / "output.log", root, terminal=terminal)
-                reason = state.get("failure_reason")
-                if isinstance(reason, str) and reason:
-                    summary = display_text(reason, 600)
-                description = spec.get("description")
-                result[path.name] = BackgroundTask(
-                    path.name,
-                    str(spec["kind"]),
-                    "timed_out" if terminal and state.get("timed_out") is True else status,
-                    display_text(description, 240) if isinstance(description, str) else path.name,
-                    timestamp(state.get("started_at")) or timestamp(spec.get("created_at")),
-                    timestamp(state.get("finished_at")),
-                    timestamp(state.get("heartbeat_at")),
-                    output_at,
-                    summary,
-                )
-            except (OSError, ValueError):
-                continue
-    except OSError:
+    except (OSError, ValueError):
         return result
     return result
 
@@ -94,7 +52,7 @@ def task_snapshots(
 def completed_tasks(
     root: Path, session_id: str, *, ignored: Collection[str] = ()
 ) -> dict[str, str]:
-    """Compatibility API: only agent completions qualify for auto-wakeup."""
+    """Only root agent completions qualify for automatic followups."""
     return {
         key: task.status
         for key, task in task_snapshots(root, session_id, ignored=ignored).items()

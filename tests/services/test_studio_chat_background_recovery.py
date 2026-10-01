@@ -93,3 +93,27 @@ def test_failed_history_read_retries_without_losing_recovery(recovered_chat):
     service.db.list_studio_chat_messages_tail.side_effect = [RuntimeError("offline"), rows.copy()]
     run()
     assert rows[-1]["content"]["event"] == "background_task_finished"
+
+
+def test_one_receipt_failure_does_not_block_other_tasks_or_replay_success(tmp_path):
+    from server.app.studio_chat.background_receipts import ReceiptCursor
+
+    cursor = ReceiptCursor(tmp_path, "acp-1", set())
+    service = Mock()
+    service.db.list_studio_chat_messages_tail.return_value = []
+    write_task(tmp_path, "broken", status="completed")
+    write_task(tmp_path, "healthy", status="completed")
+    recorded = []
+
+    def append(session_id, kind, role, content):
+        if content["task_id"] == "broken":
+            raise RuntimeError("one receipt rejected")
+        recorded.append(content["task_id"])
+
+    service.store.append_message.side_effect = append
+    assert cursor.step(service, "chat-1") == {"healthy"}
+    assert recorded == ["healthy"]
+    assert cursor.step(service, "chat-1") == set()
+    service.store.append_message.side_effect = lambda *args: recorded.append(args[3]["task_id"])
+    assert cursor.step(service, "chat-1") == {"broken"}
+    assert recorded == ["healthy", "broken"]

@@ -30,8 +30,8 @@ class SessionRuntime:
         self.token = token
         # RLock, not Lock: send_message's turn-start critical section (#694
         # review R2-P1) calls helpers that take the same lock on the same
-        # thread (prepare_resume_prompt / rearm_resume_transcript in
-        # resume_context.py). Cross-thread exclusion semantics are unchanged.
+        # thread (prompt preparation and credential checks).
+        # Cross-thread exclusion semantics are unchanged.
         self.lock = threading.RLock()
         self.pending_permissions: dict[str, PendingPermission] = {}
         # Set under lock by teardown before the pending-permission settle
@@ -40,6 +40,9 @@ class SessionRuntime:
         self.closed = False
         self.background_stop = threading.Event()
         self.background_wakeup_enabled = True
+        self.background_epoch = 0
+        self.background_cursor: Any = None
+        self.background_cleanup: Any = None
         # Streaming chunk coalescing (agent text + thought): each kind folds
         # into one message row per turn; the slots are reset at turn START
         # (send_message), so trailing chunks of a finished turn still fold
@@ -88,6 +91,7 @@ class SessionRuntime:
         # a /compact turn (manual compaction emits its markers in-turn).
         self.kimi_agent = False
         self.turn_open = False
+        self.turn_owner: object | None = None
         self.turn_may_compact = False
         # Per-turn bookkeeping for the degenerate-turn detector: send_message
         # stamps turn_started_at / zeroes turn_update_count / records whether

@@ -1,55 +1,17 @@
-"""Bounded, read-only Kimi V1 metadata and terminal output parsing."""
+"""Bounded Kimi V1 task snapshots and terminal output."""
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import stat
-from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
+
+from server.app.studio_chat.task_metadata_files import read_json
 
 TERMINAL = frozenset({"completed", "failed", "killed", "lost"})
 ACTIVE = frozenset({"created", "starting", "running", "awaiting_approval"})
-
-
-@contextmanager
-def _open(path: Path, root: Path):
-    relative = path.relative_to(root)
-    if len(relative.parts) != 2 or ".." in relative.parts:
-        raise ValueError("Invalid task file path")
-    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        task_fd = os.open(
-            relative.parts[0], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd
-        )
-        try:
-            fd = os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=task_fd)
-            with os.fdopen(fd, "rb") as source:
-                yield source
-        finally:
-            os.close(task_fd)
-    finally:
-        os.close(root_fd)
-
-
-def read_state(path: Path, root: Path) -> dict[str, Any]:
-    if not stat.S_ISREG(path.lstat().st_mode):
-        return {}
-    with _open(path, root) as source:
-        info = os.fstat(source.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            return {}
-        data = source.read(65537)
-    if len(data) > 65536:
-        return {}
-    try:
-        value = json.loads(data)
-    except RecursionError:
-        return {}  # Corrupt task metadata must not suppress other tasks.
-    return value if isinstance(value, dict) else {}
 
 
 @dataclass(frozen=True)
@@ -76,23 +38,55 @@ def timestamp(value: Any) -> float | None:
 
 
 def display_text(value: str, limit: int) -> str:
-    """JSON may contain lone surrogates that cannot be persisted as UTF-8."""
+    """JSON permits lone surrogates that cannot be emitted as UTF-8."""
     return value[:limit].encode("utf-8", errors="replace").decode("utf-8")
 
 
-def output_tail(path: Path, root: Path, *, terminal: bool) -> tuple[float | None, str]:
-    """Stat running output; only terminal receipts read a bounded tail."""
+def output_tail(parent: int, *, terminal: bool) -> tuple[float | None, str]:
+    """Use the same pinned task directory as metadata; read at most 2048 bytes."""
     try:
-        if not stat.S_ISREG(path.lstat().st_mode):
+        if not stat.S_ISREG(os.stat("output.log", dir_fd=parent, follow_symlinks=False).st_mode):
             return None, ""
-        with _open(path, root) as source:
+        fd = os.open("output.log", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(fd, "rb") as source:
             info = os.fstat(source.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 return None, ""
             if not terminal:
                 return info.st_mtime, ""
             source.seek(max(0, info.st_size - 2048))
-            tail = source.read(2048).decode("utf-8", errors="replace")[-600:]
-            return info.st_mtime, display_text(tail, 600)
+            return info.st_mtime, source.read(2048).decode("utf-8", errors="replace")[-600:]
     except OSError:
         return None, ""
+
+
+def read_task(parent: int, task_id: str, session_id: str) -> BackgroundTask | None:
+    spec, state = read_json(parent, "spec.json"), read_json(parent, "runtime.json")
+    if (
+        spec.get("version") != 1
+        or spec.get("id") != task_id
+        or spec.get("session_id") != session_id
+        or spec.get("kind") not in ("agent", "bash")
+        or spec.get("owner_role", "root") != "root"
+    ):
+        return None
+    status = state.get("status")
+    if not isinstance(status, str) or status not in ACTIVE | TERMINAL:
+        return None
+    terminal = status in TERMINAL
+    output_at, summary = output_tail(parent, terminal=terminal)
+    reason = state.get("failure_reason")
+    if isinstance(reason, str) and reason:
+        summary = display_text(reason, 600)
+    description = spec.get("description")
+    return BackgroundTask(
+        task_id,
+        str(spec["kind"]),
+        "timed_out" if terminal and state.get("timed_out") is True else status,
+        display_text(description, 240) if isinstance(description, str) else task_id,
+        timestamp(state.get("started_at")) or timestamp(spec.get("created_at")),
+        timestamp(state.get("finished_at")),
+        timestamp(state.get("heartbeat_at")),
+        output_at,
+        summary,
+    )

@@ -24,7 +24,7 @@ import contextlib
 import logging
 import queue
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from acp import PROTOCOL_VERSION, spawn_agent_process
@@ -180,12 +180,25 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         )
         self._thread.start()
 
-    def send_prompt(self, text: str) -> bool:
-        """Queue a prompt turn; False when the handle is already closed."""
+    def send_prompt(
+        self,
+        text: str,
+        *,
+        before_start: Callable[[], bool] | None = None,
+        accept: Callable[[], None] | None = None,
+    ) -> bool:
+        """Accept durable input only while the queue can still receive it.
+
+        The callback commits the turn and message together, or raises with
+        neither committed. Close/stop cannot interleave before queue.put;
+        the unbounded queue is the final non-blocking handoff.
+        """
         with self._state_lock:
-            if self._closed:
+            if self._closed or self._stop_requested:
                 return False
-            self._queue.put(text)
+            if accept is not None:
+                accept()
+            self._queue.put((text, before_start) if before_start is not None else text)
             return True
 
     def cancel(self) -> None:
@@ -368,12 +381,16 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             if item is _CLOSE:
                 return
             try:
+                text, before_start = item if isinstance(item, tuple) else (str(item), None)
                 result = await run_prompt_turn(
                     conn,
                     acp_session_id,
-                    str(item),
+                    text,
                     on_timeout=self.callbacks.on_turn_timeout,
+                    **({"before_start": before_start} if before_start is not None else {}),
                 )
+                if result.response is None:
+                    continue
                 self.callbacks.on_turn_end(
                     str(result.response.stop_reason), timed_out=result.timed_out
                 )

@@ -22,23 +22,21 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.events.bus import EventBus
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.settings import Settings
-from server.app.studio_chat import compaction
+from server.app.studio_chat.admission import send_message
 from server.app.studio_chat.availability import AgentAvailabilityProbe
+from server.app.studio_chat.background_wakeup import cancel_wakeup
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
-from server.app.studio_chat.resume_context import prepare_resume_prompt, rearm_resume_transcript
 from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.session_close import close_session
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import teardown_runtime
@@ -176,18 +174,7 @@ class StudioChatService:
         return self.get_session(session_id)
 
     def close_session(self, session_id: str, workspace_id: str) -> dict[str, Any]:
-        session = self.get_session(session_id, workspace_id)
-        if session["status"] == "closed":
-            return session
-        runtime = self.runtime(session_id)
-        with runtime.lock if runtime is not None else nullcontext():
-            self._db.update_studio_chat_session(
-                session_id, status="closed", closed_at=datetime.now(UTC)
-            )
-        self.teardown_runtime(session_id, runtime)
-        self.store.append_message(session_id, "status", "system", {"event": "session_closed"})
-        self.store.publish_session(session_id)
-        return self.get_session(session_id)
+        return close_session(self, session_id, workspace_id)
 
     def resume_session(self, session_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
         """Rebuild the runtime of a closed/error session; history is kept.
@@ -202,85 +189,7 @@ class StudioChatService:
     # -- messaging ---------------------------------------------------------
 
     def send_message(self, session_id: str, workspace_id: str, text: str) -> dict[str, Any]:
-        session = self.get_session(session_id, workspace_id)
-        if session["status"] == "closed":
-            raise ConflictError("Chat session is closed")
-        runtime = self.runtime(session_id)
-        if runtime is None:
-            raise ConflictError("Chat session is not running on this server")
-        # #694: inside kimi's background-compaction window a prompt is
-        # silently queued and settled as a fake instant end_turn — refuse
-        # the send instead (/compact itself is never blocked). This is the
-        # cheap early gate; the authoritative re-check rides the turn-start
-        # critical section below (#694 review R2-P1 TOCTOU).
-        if compaction.send_blocked(self._db, session_id, runtime, text):
-            raise ConflictError(compaction.SEND_BLOCKED_DETAIL)
-        first_prompt = self._db.count_studio_chat_user_messages(session_id) == 0
-        # Atomic idle -> running claim: two concurrent senders (double click,
-        # two clients) cannot both observe idle and start duplicate turns.
-        if not self._db.claim_studio_chat_turn(session_id):
-            current = self._db.get_studio_chat_session(session_id) or {}
-            status = str(current.get("status", "unknown"))
-            if status == "closed":
-                raise ConflictError("Chat session is closed")
-            raise ConflictError(f"Chat session is busy ({status})")
-        # Token renewal at turn start (#158): chat sessions outlive the fixed
-        # scoped-token TTL and the agent's MCP headers cannot be re-pointed
-        # mid-session, so a still-live token near expiry is slid forward.
-        renew_scoped_token(self._db, runtime.token)
-        from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
-
-        # #694 review R2-P1: the compacting re-check, the turn-start
-        # bookkeeping, and the prompt hand-off share ONE runtime.lock
-        # critical section — the compaction marker takes the same lock
-        # (compact_markers.apply_marker_gated), so a marker landing after the
-        # early gate cannot slip this prompt into the quiescence window:
-        # the late check rolls the claim back and 409s instead. Lock
-        # discipline (same as store.append_stream_chunk): non-blocking
-        # calls only in here (local DB writes, bus publish, queue put).
-        with runtime.lock:
-            if compaction.late_gate_blocked(self._db, session_id, runtime, text):
-                raise ConflictError(compaction.SEND_BLOCKED_DETAIL)
-            # New turn, new stream rows: reset the coalescing slots at turn
-            # START (not at turn end) so trailing chunks of the finished
-            # turn — the ACP SDK can deliver them after turn_end — keep
-            # folding into that turn's rows (#98). The #694 degenerate-turn
-            # bookkeeping and the replay-window close ride this section
-            # (chunks before the first prompt can only be replay — the
-            # agent never speaks without a prompt).
-            runtime.stream.reset()
-            runtime.loading = False
-            runtime.turn_open = True
-            runtime.background_wakeup_enabled = True
-            runtime.turn_started_at = time.monotonic()
-            runtime.turn_update_count = 0
-            runtime.turn_slash_command = text.lstrip().startswith("/")
-            runtime.turn_may_compact = text.lstrip().startswith("/compact")
-            message = self.store.append_message(session_id, "text", "user", {"text": text})
-            self.store.publish_session(session_id)
-            prompt_text = (STUDIO_AUTHORING_BOOTSTRAP + text) if first_prompt else text
-            # Resume fallback context (one-shot): the fresh agent could not
-            # reload the prior ACP session, so prepend the persisted
-            # transcript. prepare_resume_prompt consumes the marker
-            # unconditionally (a first-prompt turn takes the bootstrap
-            # instead) and builds the transcript from messages before the
-            # one just appended, so the current message never appears both
-            # in the transcript and as the prompt tail.
-            prompt_text, resume_pending = prepare_resume_prompt(
-                runtime, self._db, session_id, first_prompt, prompt_text, message["seq"]
-            )
-            if not runtime.handle.send_prompt(prompt_text):
-                # The prompt never reached the agent: re-arm the one-shot
-                # marker so the next turn retries the injection instead of
-                # silently losing the resume context (nothing was injected —
-                # no double injection risk).
-                rearm_resume_transcript(runtime, resume_pending)
-                # Guarded (#158): a close racing this turn owns the final state.
-                self._db.update_studio_chat_session_if(
-                    session_id, status_not_in=("closed",), status="error"
-                )
-                raise ConflictError("Chat session agent is not running")
-        return message
+        return send_message(self, session_id, workspace_id, text)
 
     def list_messages(
         self, session_id: str, workspace_id: str, *, after_seq: int = 0
@@ -292,8 +201,7 @@ class StudioChatService:
         session = self.get_session(session_id, workspace_id)
         runtime = self.runtime(session_id)
         if runtime is not None:
-            with runtime.lock:
-                runtime.background_wakeup_enabled = False
+            cancel_wakeup(runtime)
             self._settle_pending_permissions(runtime)
             runtime.handle.cancel()
         if session["status"] in ("running", "awaiting_permission"):
@@ -426,9 +334,10 @@ class StudioChatService:
         for session_id, runtime in items:
             try:
                 with runtime.lock:
-                    self._db.update_studio_chat_session(
-                        session_id, status="closed", closed_at=datetime.now(UTC)
-                    )
+                    if self.runtime(session_id) is runtime:
+                        self._db.update_studio_chat_session(
+                            session_id, status="closed", closed_at=datetime.now(UTC)
+                        )
             except Exception:
                 # #204 broad-except audit: shutdown safety net. The shutdown
                 # loop must reach every live session — one failing status
@@ -439,4 +348,4 @@ class StudioChatService:
                 logger.warning(
                     "failed to mark studio chat session %s closed", session_id, exc_info=True
                 )
-            self.teardown_runtime(session_id, runtime)
+            self.teardown_runtime(session_id, runtime, expected=runtime)

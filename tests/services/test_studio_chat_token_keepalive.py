@@ -52,8 +52,10 @@ class _StubHandle:
     def __init__(self) -> None:
         self.request_stop_calls = 0
 
-    def send_prompt(self, text: str) -> bool:
+    def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
+        if accept is not None:
+            accept()
         return True
 
     def cancel(self) -> None: ...
