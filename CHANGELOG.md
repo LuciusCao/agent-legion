@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 - 主控制台的 Worker 控制台入口与接入说明：此前界面三处文案提到「Worker 控制台」却没有任何链接，新用户不知道去哪里粘贴 token、打开领取。workspace「设置 → Agent 与 Worker」顶部新增「Worker 与 Worker 控制台」卡片（控制台是什么、在哪台机器、接入三步、两个默认关闭的开关）；签发 Key 成功后追加「下一步」三步指引；设置页 Worker 列表与顶栏「运行中」弹层的空态都带「打开 Worker 控制台」链接（新标签页打开，不内嵌、不代理）。地址来自新增 env-only 配置 `AGENT_LEGION_WORKER_CONSOLE_URL`（`agent_workers.console_url`，随 `GET /api/agent-workers` 的 `console_url` 下发）：`make dev-up` 按 Worker 端口自动注入、`native-prod-up.sh` 与 Host compose 注入 `:8787`，显式留空则退化为纯文字说明；回环地址的链接悬停提示说明只能在 Worker 所在机器打开。
 - Worker 自报控制台地址，主控制台按 Worker 逐行显示「控制台」入口：Worker Service 按控制面绑定地址推导（通配绑定回落 127.0.0.1），经环境变量 `AGENT_WORKER_CONSOLE_URL` 交给 executor，注册时注入 labels 保留键 `console_url`（`worker/console_url.py`，零协议/schema 变更；旧版 Worker 缺键即不显示）。三份 worker compose 按 `AGENT_WORKER_UI_BIND` 的端口发布预填该变量，显式留空 = 不上报。设置页「已注册 Worker」、成员视角 Worker 列表与顶栏弹层的每一行都用自报地址渲染入口，空态仍用部署级兜底地址。
+**Breaking (deployments):** 自托管 SeaweedFS 的 volume 上限从「按磁盘余量自动推导」（`-volume.max=0`）改为显式上限 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`（默认 100，≈100 × 2GiB 可增长容量，volume 惰性创建不预占磁盘）。磁盘余量大的存量部署自动推导值可能远超 100——升级前请用 `weed shell` 的 `volume.list` 确认现有 volume 数低于新上限（不足时在 `deploy/.env` 调大，无需迁移数据），否则 master 停止分配新 volume、新写入返回 503。详见 docs/materials-storage-deployment.md「可写槽位耗尽」。
+
+### Fixed
+- SeaweedFS「假写满」（PutObject 全量 503 / master 日志 no free volumes，磁盘远未写满）：`-volume.max=0` 的自动推导在 volume server 注册信息 stale 时把可写槽位判成 0。上限改为显式可配（见上方部署警示），运维文档补充「可写槽位耗尽」机制说明与恢复步骤（重启重注册 + `volume.deleteEmpty` 回收空 volume）。
 
 ## [0.7.13] - 2026-09-26
 
@@ -50,6 +54,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 - 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进 run 请求，`RunService` 在全部校验通过后把它落成 ready 的 Markdown 材料（sha256 内容寻址、对象先暂存、材料行整批事务提交、`.md`/`.txt` 白名单、UTF-8 ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker 物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio 入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。同 hash 仅复用 ready 材料，上传中、失败或已过期材料返回 409，避免抢占浏览器上传或改写既有对象归属。设计见 docs/architecture/materials-and-runs-design.md §4.1。
+
+### Changed
+- velites `json` 工具 `set` 对「容器形态字符串 value」的宽容解析是行为变更（issue #747，对抗式 review 签收）：value 文本恰好是合法 JSON 数组/对象且可无损解析（数字可往返、无重复键、闸内）时将按容器写入，旧版则一律按字面字符串写入——对存量 workflow 是 breaking change，刻意设计、不留带内逃生语法；如需字面存储，用对象包装（如 `{"text": ...}`），或用 write 工具整文件重写兜底。
 
 ## [0.7.12] - 2026-09-16
 
@@ -450,4 +457,3 @@ Initial open-source release.
 [0.3.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.2.0...v0.3.0-alpha
 [0.2.0]: https://github.com/LuciusCao/agent-legion/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LuciusCao/agent-legion/releases/tag/v0.1.0
-

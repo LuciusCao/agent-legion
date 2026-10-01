@@ -11,7 +11,8 @@ const STATUS_ICON: Record<string, string> = {
 
 function outputSummary(call: ToolCallView): string | null {
   if (!call.outputText) return null
-  const firstLine = call.outputText.trim().split('\n')[0]
+  // A collapsed card only needs its preview, not an array of every output line.
+  const firstLine = call.outputText.trim().slice(0, 81).split('\n', 1)[0]
   return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine
 }
 
