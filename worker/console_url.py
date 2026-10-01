@@ -23,14 +23,13 @@ CONSOLE_URL_LABEL = "console_url"
 def derive_console_url(host: str, port: int) -> str:
     """从控制面绑定地址推导浏览器可用的控制台地址。
 
-    通配绑定（0.0.0.0 / ::）对浏览器无意义，回落 127.0.0.1（与 docker 默认
-    端口发布 127.0.0.1:8787 一致）；IPv6 字面量补方括号；主机名原样保留。"""
+    通配绑定回落同地址族的 loopback；IPv6 字面量补方括号。"""
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
         return f"http://{host}:{port}"
     if address.is_unspecified:
-        return f"http://127.0.0.1:{port}"
+        return f"http://{'[::1]' if address.version == 6 else '127.0.0.1'}:{port}"
     if address.version == 6:
         return f"http://[{host}]:{port}"
     return f"http://{host}:{port}"
@@ -48,9 +47,14 @@ def with_console_label(labels: Mapping[str, Any] | None, console_url: str) -> di
     """注册 labels 里注入保留键 ``console_url``。
 
     用户在 worker.yaml 自定义的 labels 原样保留；地址为空（显式禁用）时不
-    注入也不删除用户自己写的同名键。"""
+    注入也不删除用户自己写的同名键。满额或过长时跳过可选链接，保证
+    旧 Host 的 32 项 / 256 字符限制下，合法配置仍能注册。"""
     merged = dict(labels or {})
-    if console_url:
+    if (
+        console_url
+        and len(console_url) <= 256
+        and (CONSOLE_URL_LABEL in merged or len(merged) < 32)
+    ):
         merged[CONSOLE_URL_LABEL] = console_url
     return merged
 

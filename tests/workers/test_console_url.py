@@ -22,7 +22,7 @@ def test_derive_console_url_from_bind_address() -> None:
     assert derive_console_url("localhost", 8787) == "http://localhost:8787"
     # 通配绑定对浏览器无意义：回落 loopback（与 docker 默认端口发布一致）。
     assert derive_console_url("0.0.0.0", 8787) == "http://127.0.0.1:8787"
-    assert derive_console_url("::", 8787) == "http://127.0.0.1:8787"
+    assert derive_console_url("::", 8787) == "http://[::1]:8787"
     assert derive_console_url("::1", 8787) == "http://[::1]:8787"
 
 
@@ -64,3 +64,26 @@ def test_registration_config_injects_label_from_env_without_touching_runtime_con
     # env 缺失 / 空串：labels 原样（旧部署行为不变）。
     assert registration_config(config, {})["labels"] == {"site": "office"}
     assert registration_config({"worker_id": "w1"}, {})["labels"] == {}
+
+
+@pytest.mark.parametrize("count", [31, 32])
+@pytest.mark.parametrize("existing_console", [False, True])
+@pytest.mark.parametrize("url_length", [256, 257])
+def test_optional_console_label_never_breaks_valid_registration(
+    count, existing_console, url_length
+):
+    from server.app.agent_control.declarations import normalize_labels as host_labels
+    from worker.worker_declarations import normalize_labels as worker_labels
+
+    labels = {f"tag_{i}": "custom" for i in range(count - int(existing_console))}
+    if existing_console:
+        labels[CONSOLE_URL_LABEL] = "http://operator.example"
+    original = dict(labels)
+    url = "https://worker.example/".ljust(url_length, "x")
+    result = registration_config({"labels": labels}, {CONSOLE_URL_ENV: url})["labels"]
+    assert host_labels(result) == worker_labels(result) == result
+    assert labels == original
+    if url_length <= 256 and (existing_console or count < 32):
+        assert result == {**original, CONSOLE_URL_LABEL: url}
+    else:
+        assert result == original
