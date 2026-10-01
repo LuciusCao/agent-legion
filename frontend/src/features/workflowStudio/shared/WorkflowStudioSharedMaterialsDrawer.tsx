@@ -48,7 +48,8 @@ function SharedMaterialsDrawer({
   const [results, setResults] = useState<
     SharedMaterialPropagateSkillResult[] | null
   >(null)
-  // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault）。
+  // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault）；
+  // 与节点详情抽屉共存时由抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。
   useDrawerEscape(true, onClose)
   const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery({

@@ -29,7 +29,8 @@ export function WorkflowNodeDetailDrawer() {
     ? selectedNodeDetails(studio.workflow, nodeKey)?.node
     : undefined
   // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault，
-  // Dock 的 Esc 处理器见 defaultPrevented 跳过）。
+  // Dock 的 Esc 处理器见 defaultPrevented 跳过）；与共享素材抽屉共存时由
+  // 抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。
   useDrawerEscape(nodeKey !== null, close)
 
   return (
