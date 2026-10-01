@@ -23,10 +23,10 @@ from shared.pi_model_error import fold_model_error
 logger = logging.getLogger(__name__)
 
 # #748: the stderr-tail budget retained by the compression pass. The bound is
-# enforced as two character budgets (per-line pre-trim + running-total deque
-# pop, both against this value in chars) with a final byte-slice backstop
-# after the UTF-8 encode — chars↔bytes can diverge up to 4x, so the slice is
-# the hard byte guarantee and the char budgets are the working bound.
+# enforced as a per-line pre-trim (via _redact_then_tail_text) + a running-total
+# deque pop (chars) with a final byte-slice backstop after the UTF-8 encode —
+# chars↔bytes can diverge up to 4x, so the slice is the hard byte guarantee
+# and the working budgets keep the buffered text near it.
 # Non-JSON lines are the agent's stderr text (the spawn merges stderr into
 # the stdout pipe, so both pumps write them into events.jsonl raw), and the
 # compression rewrite below discards them — this tail is the only survivor,
@@ -35,12 +35,14 @@ logger = logging.getLogger(__name__)
 # stream.
 STDERR_TAIL_BYTES = 8 * 1024
 
-# #755 对抗复审 P3-2：sink 落盘的脱敏窗口比最终保尾界宽出这一段——切割
-# 先于脱敏时，骑跨切割点的密钥只剩尾段（整值匹配不上，明文外泄）；扩窗
-# 让跨点密钥在脱敏时保持完整，脱敏后再切回 8KB（与 stderr_error_message
-# 200 字符面「先脱敏后截」同纪律）。窗口外沿仍可能骑跨更长密钥——扩窗
-# 压低概率而非根除，这是 best-effort 边界。
-_SINK_REDACT_MARGIN_BYTES = 512
+# #755 对抗复审 P3-2 + codex review P1：脱敏窗口比最终保尾界宽出这一段——
+# 切割先于脱敏时，骑跨切割点的密钥只剩尾段（整值匹配不上，明文外泄）；
+# 扩窗让跨点密钥在脱敏时保持完整，脱敏后再切回 8KB（与
+# stderr_error_message 200 字符面「先脱敏后截」同纪律）。字符面（单行
+# 预截）由 _redact_then_tail_text 收口，字节面（sink 扩窗）在下方调用点
+# 保持同序——先后顺序不再散落各出口。窗口外沿仍可能骑跨更长密钥——
+# 扩窗压低概率而非根除，这是 best-effort 边界。
+_REDACT_WINDOW_MARGIN = 512
 
 
 # Event types that the job log renderer consumes.  All message_update deltas
@@ -95,14 +97,18 @@ def scan_and_compress_pi_events(
     between this pass and a later rewrite cannot leave plaintext secrets
     in ``agent-stderr.log``. The callback is injected by the caller
     (shared/ is stdlib-only and must not import worker modules); ``None``
-    writes the raw bytes (tests / non-secret callers). The RETURN value
-    stays RAW — the caller-facing faces (error_message etc.) redact with
-    their own, richer context (worker/upload/stderr_evidence.py). #755
-    对抗复审 P3-2: the byte cut is line-aligned (a real cut drops the
-    leading partial line) and the sink redacts a window widened by
-    ``_SINK_REDACT_MARGIN_BYTES`` before the final slice, so a secret
-    straddling the cut point is matched whole instead of leaking its
-    tail fragment.
+    keeps everything raw (tests / non-secret callers). #755 codex review
+    P1: the per-line pre-trim of stderr text funnels through
+    ``_redact_then_tail_text`` (widen past the budget → redact → cut), so a
+    secret straddling a cut point is matched whole instead of leaking its
+    tail fragment. One consequence: the RETURN value stays RAW for lines
+    inside the budget — the caller-facing faces (error_message etc.)
+    redact with their own, richer context
+    (worker/upload/stderr_evidence.py) — but a single line that had to be
+    pre-truncated returns REDACTED: the safer direction, since the
+    fragment surviving a raw cut is unmatchable downstream. #755 对抗复审
+    P3-2: the return face's final byte cut is line-aligned (a real cut
+    drops the leading partial line).
 
     Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``.
     ``stderr_tail`` is the bounded keep-the-tail capture of the non-JSON
@@ -112,18 +118,14 @@ def scan_and_compress_pi_events(
     ``(None, 0, 0, b"")`` is returned, matching the individual failure
     modes of the two-function equivalent.
     """
-    if not events_path.is_file():
-        return None, 0, 0, b""
-
-    original_size = events_path.stat().st_size
-    if original_size == 0:
+    if not events_path.is_file() or (original_size := events_path.stat().st_size) == 0:
         return None, 0, 0, b""
 
     compressed_path = events_path.with_suffix(".jsonl.compressing")
     model_error: str | None = None
-    # 两重字符预算（单行预截 STDERR_TAIL_BYTES 字符 + deque 运行总量 pop 到
-    # STDERR_TAIL_BYTES 字符以内），最终 encode 后再按 STDERR_TAIL_BYTES 字节
-    # 切片兜底——bytes 与 chars 的比例上限是 4（UTF-8），兜底切片只在
+    # 单行预截走 _redact_then_tail_text 漏斗（扩窗 → 脱敏 → 再截），deque 运行
+    # 总量按字符 pop 整行（无骑跨），最终 encode 后再按 STDERR_TAIL_BYTES
+    # 字节切片兜底——bytes 与 chars 的比例上限是 4（UTF-8），兜底切片只在
     # 多字节字符把字符预算换算放大时收紧，不会放松上限。
     stderr_tail: deque[str] = deque()
     stderr_chars = 0
@@ -139,8 +141,7 @@ def scan_and_compress_pi_events(
                 try:
                     event: Any = json.loads(line)
                 except json.JSONDecodeError:
-                    if len(line) > STDERR_TAIL_BYTES:
-                        line = line[-STDERR_TAIL_BYTES:]
+                    line = _redact_then_tail_text(line, redact)
                     stderr_tail.append(line)
                     stderr_chars += len(line)
                     while stderr_chars > STDERR_TAIL_BYTES and len(stderr_tail) > 1:
@@ -172,10 +173,10 @@ def scan_and_compress_pi_events(
         # write — the sink file must never hold the raw tail (the return
         # value stays raw; the caller redacts its own faces separately).
         # #755 对抗复审 P3-2: redact a window wider than the final cut
-        # (_SINK_REDACT_MARGIN_BYTES) so a secret straddling the 8KB cut
+        # (_REDACT_WINDOW_MARGIN) so a secret straddling the 8KB cut
         # point is still matched whole, then slice AFTER redaction.
         try:
-            window = encoded_tail[-(STDERR_TAIL_BYTES + _SINK_REDACT_MARGIN_BYTES) :]
+            window = encoded_tail[-(STDERR_TAIL_BYTES + _REDACT_WINDOW_MARGIN) :]
             persisted = redact(window) if redact is not None else window
             _persist_stderr_tail(stderr_sink, _keep_tail_slice(persisted))
         except Exception:
@@ -196,17 +197,51 @@ def scan_and_compress_pi_events(
     return model_error, original_size, compressed_size, tail
 
 
+def _redact_then_tail_text(text: str, redact: Callable[[bytes], bytes] | None) -> str:
+    """The ONE redact-then-truncate funnel for CHARACTER-face cuts of the
+    stderr tail (#755 codex review P1): when ``text`` exceeds the budget,
+    widen the window by ``_REDACT_WINDOW_MARGIN``, redact, THEN cut to
+    ``STDERR_TAIL_BYTES``.
+
+    Cut-before-redact leaks: a secret straddling the cut point loses its
+    head with the dropped part, and whole-value matchers cannot match the
+    surviving tail fragment — plaintext rides every downstream face
+    (return value → error_message/metadata, sink anchor → archive). The
+    widened window lets a straddling secret match whole; cutting AFTER
+    redaction keeps the budget meaningful (redaction only ever shrinks).
+    This is the same discipline as the sink's widened byte window below
+    and stderr_error_message's redact-then-200-chars; the deque
+    running-total pop drops whole lines (no straddle possible) and the
+    RAW return face's final cut is line-aligned (``_keep_tail_slice``) —
+    neither needs this funnel.
+
+    In-budget text is returned untouched (the return face stays RAW by
+    contract; the caller redacts with richer context). ``redact=None``
+    degrades to pure truncation (legacy behavior for non-secret callers).
+    A redact callback failure degrades to the raw cut — redaction is
+    best-effort by contract (worker/upload/stderr_evidence.py re-redacts
+    the return face) and must not kill the compression pass (the same
+    discipline as the sink call site's broad catch)."""
+    window = text[-(STDERR_TAIL_BYTES + _REDACT_WINDOW_MARGIN) :]
+    if redact is not None and len(text) > STDERR_TAIL_BYTES:
+        try:
+            window = redact(window.encode("utf-8", "replace")).decode("utf-8", "replace")
+        except Exception:
+            logger.exception("Redact callback failed; keeping the raw tail cut")
+    return window[-STDERR_TAIL_BYTES:]
+
+
 def _keep_tail_slice(data: bytes) -> bytes:
     """Slice to the last STDERR_TAIL_BYTES, dropping the leading partial line
     when a real cut happened.
 
     #755 对抗复审 P3-2: a mid-line cut can leave the TAIL FRAGMENT of a
     secret that straddles the boundary — the redaction passes match whole
-    values only, so the fragment would survive onto every downstream face
-    (return value → error_message/metadata, sink). Line-aligning the cut
-    removes the straddling fragment structurally; a single line longer
-    than the whole budget keeps the raw cut (the sink path's widened
-    redact window is the backstop there)."""
+    values only, so the fragment would survive onto the RAW return face
+    (→ error_message/metadata). Line-aligning the cut removes the
+    straddling fragment structurally; a single line longer than the whole
+    budget keeps the raw cut (the widened redact window in
+    ``_redact_then_tail`` is the backstop there)."""
     if len(data) <= STDERR_TAIL_BYTES:
         return data
     cut = data[-STDERR_TAIL_BYTES:]

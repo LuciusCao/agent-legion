@@ -293,7 +293,7 @@ def test_persist_stderr_tail_cleans_staging_on_replace_failure(tmp_path, monkeyp
 def test_scan_and_compress_redacts_secret_straddling_tail_cut(tmp_path):
     """#755 对抗复审 P3-2：密钥骑跨 8KB 保尾切割点时，「先切后脱敏」会让
     残段（整值匹配不上的尾部碎片）明文落进 sink。修复后双保险：脱敏窗口
-    比切割界宽（_SINK_REDACT_MARGIN_BYTES，跨点密钥整值命中），且最终切片
+    比切割界宽（_REDACT_WINDOW_MARGIN，跨点密钥整值命中），且最终切片
     按行对齐（切割行保守丢弃）——sink 与返回值都不留残段。"""
     from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
 
@@ -314,6 +314,38 @@ def test_scan_and_compress_redacts_secret_straddling_tail_cut(tmp_path):
     assert b"sk-live" not in tail
     assert b"ssss" not in tail
     # sink：扩窗脱敏整值命中——连密钥行前缀都不留（行虽被切，整值已先替换）。
+    persisted = sink.read_bytes()
+    assert len(persisted) <= STDERR_TAIL_BYTES
+    assert b"sk-live" not in persisted
+    assert b"ssss" not in persisted
+    assert b"***" in persisted
+
+
+def test_scan_and_compress_redacts_secret_straddling_single_line_cut(tmp_path):
+    """#755 codex review P1：单行 100KB 非 JSON stderr 在入 deque 前先被
+    预截到 8KB——「先截后脱敏」时骑跨切割点的密钥只剩尾段（整值匹配不上），
+    明文残段进 sink / 返回值 / 归档。收口后单行预截走统一漏斗
+    _redact_then_tail（扩窗 → 脱敏 → 再截）：跨点密钥整值命中替换，
+    残段不外泄。"""
+    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+
+    secret = "sk-live-" + "s" * 92  # 100 字符
+    # 密钥骑跨 8KB 单行预截切割点：切割点落在密钥第 50 字符处。
+    line = "a" * (100_000 - STDERR_TAIL_BYTES - 50) + secret + "b" * (STDERR_TAIL_BYTES - 50)
+    events = tmp_path / "events.jsonl"
+    events.write_text(f'{{"type":"session"}}\n{line}\n')
+    sink = tmp_path / "agent-stderr.log"
+    _, _, _, tail = scan_and_compress_pi_events(
+        events,
+        stderr_sink=sink,
+        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+    )
+    # 返回值：单行预截已脱敏——完整密钥与残段（"s" 碎片）都不留。
+    assert len(tail) <= STDERR_TAIL_BYTES
+    assert b"sk-live" not in tail
+    assert b"ssss" not in tail
+    assert b"***" in tail
+    # sink：同源漏斗，同样整值命中。
     persisted = sink.read_bytes()
     assert len(persisted) <= STDERR_TAIL_BYTES
     assert b"sk-live" not in persisted

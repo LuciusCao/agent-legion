@@ -1214,7 +1214,12 @@ exemptions:
     best-effort 捕获（压缩永不因 sink 不可写失败）。#755 对抗复审收口：
     保尾切片按行对齐（骑跨切割点的密钥残段结构性消除）+ sink 脱敏扩窗
     （先脱敏后切）+ sink 捕获放宽为 Exception（redact 回调逃逸不改判
-    run）。防御性正确性代码使有效行 77→112（超 growth_allowance 带）。
+    run）。#755 codex review P1：字符面截断收口进唯一漏斗
+    _redact_then_tail_text（扩窗 → 脱敏 → 再截），单行预截不再「先截后
+    脱敏」，骑跨切割点的密钥整值命中替换；字节面（sink 扩窗、最终行
+    对齐切片）经审计本已同序，与漏斗共用 _REDACT_WINDOW_MARGIN。
+    防御性正确性代码使有效行 77→116（仍压 ceiling+growth_allowance
+    带内，ceiling 不动）。
     时间盒：stderr 留痕管线稳定后若下沉为独立 sink 模块（shared 侧
     stdlib-only 约束内的拆分），重登预算。'
   owner: workspace-executor
