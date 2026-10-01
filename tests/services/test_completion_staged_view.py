@@ -1,11 +1,12 @@
-"""completion_staged 读视图的链接语义（#759 对抗复审 P1、P2 族）。
+"""completion_staged 读视图的链接语义（#759 对抗复审 P2 族、#779 终审 P1）。
 
-第一遍链接（expected 全集）不覆盖归档已暂存的字节；第二遍链接（remote
-名）必须覆盖——gated promote 可能已把 job_dir 里同代次重跑的残留文件
-os.replace 成新 inode，读视图若冻结在旧 inode，校验/分片读就会消费
-「上一次尝试」的字节。P2 族：归档成员不可信，视图是私有 scratch——
-链接对垃圾形状（同名目录、文件祖先、symlink）全域，overwrite 遍清挡
-位垃圾，第一遍遇挡位跳过（按未产出判 missing），都不再炸异常。
+链接一律覆盖：同名归档暂存字节让位 ref 字节（#759 对抗复审 N2——gated
+promote 的 os.replace 可能已把 job_dir 文件换成新 inode，视图必须跟踪
+本次尝试的字节）；「job_dir 残留不进视图」由调用方保证（只传本次 ref
+校验提升的名），端到端回归在 tests/db/test_completion_generation_gates.py
+的 test_completion_view_never_backfills_unreported_outputs_from_job_dir。
+P2 族：归档成员不可信，视图是私有 scratch——链接对垃圾形状（同名目录、
+文件祖先、symlink）全域清挡位，源消失的 TOCTOU 按未产出跳过，不炸异常。
 """
 
 from __future__ import annotations
@@ -19,7 +20,10 @@ from server.app.agent_control.completion_view import link_into_view as _link_int
 pytestmark = pytest.mark.no_db
 
 
-def test_second_pass_overwrites_previous_attempt_bytes(tmp_path: Path) -> None:
+def test_link_overwrites_previous_attempt_bytes(tmp_path: Path) -> None:
+    """覆盖语义（#759 对抗复审 N2）：gated promote 把 job_dir 文件
+    os.replace 成新 inode 后，重链必须让视图跟上本次尝试的字节，而不是
+    冻结在旧 inode。"""
     job_dir = tmp_path / "job"
     view_dir = tmp_path / "view"
     job_dir.mkdir()
@@ -31,24 +35,24 @@ def test_second_pass_overwrites_previous_attempt_bytes(tmp_path: Path) -> None:
     (job_dir / "out.json").unlink()
     (job_dir / "out.json").write_bytes(b"attempt-2")
 
-    _link_into_view(("out.json",), job_dir, view_dir, overwrite=True)
+    _link_into_view(("out.json",), job_dir, view_dir)
 
     assert (view_dir / "out.json").read_bytes() == b"attempt-2"
 
 
-def test_first_pass_never_overwrites_staged_archive_bytes(tmp_path: Path) -> None:
-    """对照：不带 overwrite 的第一遍保留归档暂存字节（本次尝试的归档产物
-    优先于 job_dir 里的同名残留）。"""
+def test_link_overwrites_staged_archive_bytes(tmp_path: Path) -> None:
+    """同名双通道（#759 对抗复审 N2）：ref 字节覆盖归档在同名位置暂存的
+    字节。"""
     job_dir = tmp_path / "job"
     view_dir = tmp_path / "view"
     job_dir.mkdir()
     view_dir.mkdir()
-    (job_dir / "out.json").write_bytes(b"job-dir-leftover")
+    (job_dir / "out.json").write_bytes(b"ref-bytes")
     (view_dir / "out.json").write_bytes(b"archive-staged")
 
     _link_into_view(("out.json",), job_dir, view_dir)
 
-    assert (view_dir / "out.json").read_bytes() == b"archive-staged"
+    assert (view_dir / "out.json").read_bytes() == b"ref-bytes"
 
 
 def test_link_falls_back_to_copy_when_hardlink_unsupported(
@@ -70,10 +74,10 @@ def test_link_falls_back_to_copy_when_hardlink_unsupported(
     assert (view_dir / "out.json").read_bytes() == b"payload"
 
 
-def test_overwrite_pass_clears_junk_directory_at_spot(tmp_path: Path) -> None:
-    """codex #774 P2 回归：归档在同名位置解出了目录——overwrite 遍整棵清
-    掉垃圾目录再链接 ref 字节（预检的前缀互斥已保证目录内无暂存源），不
-    再 unlink 目录炸出 IsADirectoryError。"""
+def test_link_clears_junk_directory_at_spot(tmp_path: Path) -> None:
+    """codex #774 P2 回归：归档在同名位置解出了目录——链接整棵清掉垃圾
+    目录再落 ref 字节（预检的前缀互斥已保证目录内无暂存源），不再
+    unlink 目录炸出 IsADirectoryError。"""
     job_dir = tmp_path / "job"
     view_dir = tmp_path / "view"
     job_dir.mkdir()
@@ -81,13 +85,13 @@ def test_overwrite_pass_clears_junk_directory_at_spot(tmp_path: Path) -> None:
     (view_dir / "out.json" / "junk.txt").write_bytes(b"junk")
     (job_dir / "out.json").write_bytes(b"ref-bytes")
 
-    _link_into_view(("out.json",), job_dir, view_dir, overwrite=True)
+    _link_into_view(("out.json",), job_dir, view_dir)
 
     assert (view_dir / "out.json").is_file()
     assert (view_dir / "out.json").read_bytes() == b"ref-bytes"
 
 
-def test_overwrite_pass_clears_junk_file_ancestor(tmp_path: Path) -> None:
+def test_link_clears_junk_file_ancestor(tmp_path: Path) -> None:
     """祖先链上的垃圾文件（reports 是文件，remote 落点是 reports/out.json）
     直接 unlink 再 mkdir——文件祖先之下不可能存在暂存源（同一 staging 目
     录里两种形状物理互斥）。"""
@@ -98,12 +102,12 @@ def test_overwrite_pass_clears_junk_file_ancestor(tmp_path: Path) -> None:
     view_dir.mkdir()
     (view_dir / "reports").write_bytes(b"junk-file")
 
-    _link_into_view(("reports/out.json",), job_dir, view_dir, overwrite=True)
+    _link_into_view(("reports/out.json",), job_dir, view_dir)
 
     assert (view_dir / "reports" / "out.json").read_bytes() == b"ref-bytes"
 
 
-def test_overwrite_pass_unlinks_symlink_spot(tmp_path: Path) -> None:
+def test_link_unlinks_symlink_spot(tmp_path: Path) -> None:
     """symlink 走 unlink 而不是 rmtree（防御面；解包实际禁止链接成员）。"""
     job_dir = tmp_path / "job"
     view_dir = tmp_path / "view"
@@ -112,38 +116,10 @@ def test_overwrite_pass_unlinks_symlink_spot(tmp_path: Path) -> None:
     (job_dir / "out.json").write_bytes(b"ref-bytes")
     (view_dir / "out.json").symlink_to(tmp_path / "nowhere")
 
-    _link_into_view(("out.json",), job_dir, view_dir, overwrite=True)
+    _link_into_view(("out.json",), job_dir, view_dir)
 
     assert not (view_dir / "out.json").is_symlink()
     assert (view_dir / "out.json").read_bytes() == b"ref-bytes"
-
-
-def test_first_pass_skips_when_junk_file_blocks_ancestor(tmp_path: Path) -> None:
-    """不带 overwrite 的第一遍：垃圾文件遮住祖先 → 跳过（该名按未产出判
-    missing），不炸 mkdir。"""
-    job_dir = tmp_path / "job"
-    view_dir = tmp_path / "view"
-    (job_dir / "reports").mkdir(parents=True)
-    (job_dir / "reports" / "out.json").write_bytes(b"leftover")
-    view_dir.mkdir()
-    (view_dir / "reports").write_bytes(b"junk-file")
-
-    _link_into_view(("reports/out.json",), job_dir, view_dir)
-
-    assert (view_dir / "reports").read_bytes() == b"junk-file"  # 视图原样
-
-
-def test_first_pass_keeps_directory_at_spot(tmp_path: Path) -> None:
-    """第一遍遇同名目录同样跳过保留——produced 判定视图为非文件即 missing。"""
-    job_dir = tmp_path / "job"
-    view_dir = tmp_path / "view"
-    job_dir.mkdir()
-    (job_dir / "out.json").write_bytes(b"leftover")
-    (view_dir / "out.json").mkdir(parents=True)
-
-    _link_into_view(("out.json",), job_dir, view_dir)
-
-    assert (view_dir / "out.json").is_dir()
 
 
 def test_link_skips_when_source_vanishes_mid_link(
@@ -163,6 +139,6 @@ def test_link_skips_when_source_vanishes_mid_link(
 
     monkeypatch.setattr("server.app.agent_control.completion_view.os.link", _gone)
     monkeypatch.setattr("server.app.agent_control.completion_view.shutil.copy2", _gone)
-    _link_into_view(("out.json",), job_dir, view_dir, overwrite=True)
+    _link_into_view(("out.json",), job_dir, view_dir)
 
     assert not (view_dir / "out.json").exists()

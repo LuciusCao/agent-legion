@@ -698,3 +698,55 @@ def test_completion_remote_failure_drops_blocked_moves_and_keeps_log(
     assert (job_dir / "ok.json").read_bytes() == b"ok"  # 闸安全的归档输出照常落盘
     assert not (job_dir / "reports" / "out.json").exists()  # 被挡 move 摘除
     assert (tmp_path / "logs" / "jobs" / "gate26-job" / "node_a.log").read_bytes() == b"log bytes"
+
+
+def test_completion_view_never_backfills_unreported_outputs_from_job_dir(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """codex #779 终审 P1：Worker 只上报部分 expected 的 ref，job_dir 里恰
+    好留着旧 attempt 的同名残留——读视图不得用本地残留补齐本次结果：未
+    上报的 b.json 判 missing 翻 failed，残留字节不进视图、不被镜像、不
+    登记清单行（修复前第一遍按 expected 全集预链接，produced 被残留凑
+    齐，节点误判 completed 且残留被镜像成权威副本）。"""
+    _seed_completion_job(job_db, workspace_id="gate27-ws", job_id="gate27-job")
+    storage = FakeObjectStorage()
+    staging_key = "jobs-staging/gate27-ws/gate27-job/exec-1/a.json"
+    storage.objects[staging_key] = b"fresh-a"
+    handler, store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "gate27-ws" / "gate27-job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "b.json").write_bytes(b"stale-leftover")  # 旧 attempt 同名残留
+    _result_archive(tmp_path / "bundles" / "result.tar.gz", {})
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="gate27-job",
+        node_key="node_a",
+        manifest={
+            "expected_outputs": ["a.json", "b.json"],
+            "execution_id": "exec-1",
+        },
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            output_artifacts={
+                "a.json": {
+                    "storage_key": staging_key,
+                    "size_bytes": 7,
+                    "content_hash": "",
+                }
+            },
+        ),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("gate27-job", "node_a")["status"] == "failed"
+    assert "Missing outputs: b.json" in _node_error("gate27-job", "node_a")
+    # 本次 ref 提升的 a.json 照常落盘/登记；残留 b.json 原样保留、零镜像零清单。
+    assert (job_dir / "a.json").read_bytes() == b"fresh-a"
+    assert store.row_for_node("gate27-job", "node_a", "a.json") is not None
+    assert (job_dir / "b.json").read_bytes() == b"stale-leftover"
+    assert store.row_for_node("gate27-job", "node_a", "b.json") is None
+    assert "jobs/gate27-ws/gate27-job/b.json" not in storage.objects

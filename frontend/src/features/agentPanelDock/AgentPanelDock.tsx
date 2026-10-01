@@ -34,12 +34,12 @@ import { Close } from '@mui/icons-material'
 import { Rnd } from 'react-rnd'
 import { useAppBarBottom } from '../../hooks/useAppBarBottom'
 import {
-  clampResizeTopInset,
   effectiveMinSize,
+  offsetForRightInset,
   readAppBarFallbackHeight,
 } from './dockPlacement'
-import { offsetForRightInset } from './dockPlacement'
 import { useDockGeometry } from './useDockGeometry'
+import { useDockInteractionHandlers } from './useDockInteractionHandlers'
 import { useDockFocus } from './useDockFocus'
 import { useDockEscape } from './useDockEscape'
 import {
@@ -77,7 +77,9 @@ export interface AgentPanelDockProps {
    * 目标——显式 ref 让归还目标与唤起动作绑定，不吃卸载/挂载的交错顺序。 */
   restoreFocusRef?: { readonly current: HTMLElement | null }
   /** #804 轮 9 P2：右缘被占用的像素数（studio 右侧抽屉宽+边距）；
-   * 打开时 Dock 运行时左移避让（不写布局记忆），关闭弹回原位。 */
+   * 打开时 Dock 运行时左移避让（渲染期纯偏移），关闭弹回原位。拖拽/
+   * 缩放提交前会减去交互起点捕获的偏移量（#779 终审 P2）——屏幕坐标
+   * 还原为基础坐标后才写入状态与布局记忆。 */
   rightInset?: number
 }
 
@@ -127,9 +129,24 @@ export function AgentPanelDock({
   // 规则见 useDockEscape.ts）。
   useDockEscape(hidden, onClose, stackId)
 
-  // 拖拽钳制（codex P2）：bounds="window" 允许 y=0，顶边必须不低于
-  // AppBar 实测底边——拖拽中实时钳，提交时同一钳制。
-  const clampDragY = (y: number) => Math.max(topInset, y)
+  // 拖拽/缩放回调（rightInset 偏移还原、topInset 钳制、提交持久化）抽在
+  // useDockInteractionHandlers（#779 终审 P2，体积预算）；语义见该文件注释。
+  const {
+    onDragStart,
+    onDrag,
+    onDragStop,
+    onResizeStart,
+    onResize,
+    onResizeStop,
+  } = useDockInteractionHandlers({
+    geometry,
+    viewport,
+    rightInset,
+    topInset,
+    setGeometryLive,
+    commitGeometry,
+    raiseOnInteract,
+  })
 
   // 有效最小尺寸与几何钳制同约束（codex P2 复审轮）：小视口装不下声明
   // 下限时跟视口走，否则 Rnd 的 minWidth 会把面板撑出小视口。
@@ -154,43 +171,12 @@ export function AgentPanelDock({
         bounds="window"
         dragHandleClassName={styles.titleBar}
         cancel="button"
-        onDrag={(_event, data) => {
-          setGeometryLive({ ...geometry, x: data.x, y: clampDragY(data.y) })
-        }}
-        onDragStop={(_event, data) => {
-          commitGeometry({ ...geometry, x: data.x, y: clampDragY(data.y) })
-        }}
-        // 缩放把手在 Paper 外层包装里（非 Paper 后代，pointerdown/focusin
-        // capture 摸不到）——缩放也要抬栈（#801 codex 轮 4 P2）。
-        onResizeStart={raiseOnInteract}
-        onResize={(_event, _direction, ref, _delta, position) => {
-          // 顶部把手缩放同样钳顶边（codex P2 复审轮：拖拽路径已钳，缩放
-          // 路径漏了）——高度联动由 clampResizeTopInset 承担（底边不变）。
-          const clamped = clampResizeTopInset(
-            position,
-            ref.offsetHeight,
-            topInset
-          )
-          setGeometryLive({
-            x: clamped.x,
-            y: clamped.y,
-            width: ref.offsetWidth,
-            height: clamped.height,
-          })
-        }}
-        onResizeStop={(_event, _direction, ref, _delta, position) => {
-          const clamped = clampResizeTopInset(
-            position,
-            ref.offsetHeight,
-            topInset
-          )
-          commitGeometry({
-            x: clamped.x,
-            y: clamped.y,
-            width: ref.offsetWidth,
-            height: clamped.height,
-          })
-        }}
+        onDragStart={onDragStart}
+        onDrag={onDrag}
+        onDragStop={onDragStop}
+        onResizeStart={onResizeStart}
+        onResize={onResize}
+        onResizeStop={onResizeStop}
         style={{
           position: 'fixed',
           zIndex,

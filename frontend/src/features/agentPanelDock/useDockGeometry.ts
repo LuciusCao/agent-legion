@@ -7,9 +7,10 @@
  * - 实测 topInset 到达（兜底→实测）或视口缩小时对已冻结几何重钳——不钳则
  *   高 AppBar 下记忆位置盖住顶部导航、窗口缩小后把手落出视口（视口尺寸
  *   状态化 + resize 监听，resize 必须触发重渲染钳制才跟进）。
- * - 拖拽/缩放的 topInset 钳制在组件回调里做（onDrag/onDragStop/onResize/
- *   onResizeStop 都钳），这里只管几何状态与存储。折叠态已随 #795 收尾
- *   移除（有唤起按钮后开/关两态足够），持久化只写几何。
+ * - 拖拽/缩放的 topInset 钳制与 rightInset 偏移还原在交互回调里做
+ *   （useDockInteractionHandlers 的六个回调都钳/还原），这里只管几何状
+ *   态与存储。折叠态已随 #795 收尾移除（有唤起按钮后开/关两态足够），
+ *   持久化只写几何。
  */
 import { useEffect, useState } from 'react'
 import {

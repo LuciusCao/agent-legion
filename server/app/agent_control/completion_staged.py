@@ -92,11 +92,9 @@ def finish_staged(
             stage_timer=stage_timer,
         )
     # The read view must cover both channels: archive outputs live in the
-    # staging dir, Worker-direct downloads already landed in job_dir via the
-    # gated promote — hardlink the latter into the view (same FS, zero-copy)
-    # so validation/shard-read/mirror see one unified dir.
-    if view_dir is not job_dir:
-        link_into_view(expected, job_dir, view_dir)
+    # staging dir, Worker-direct downloads land in job_dir via the gated
+    # promote below — only the latter are linked into the view (after
+    # apply), so validation/shard-read/mirror see one unified dir.
     # #160 D12: dict-form refs mean the Worker uploaded straight to S3
     # (per-execution staging keys); verify ALL refs, then promote +
     # download + register (no half-applied state). Any failure flips the
@@ -132,13 +130,14 @@ def finish_staged(
             ),
         )
         return handler.leases.finish(lease_id, remote_failure, stage_timer=stage_timer)
-    # Refs applied after the view was built must be linked in too — with
-    # OVERWRITE: the gated promote may have os.replaced a job_dir file the
-    # first pass already linked (a same-generation re-execution leftover),
-    # and the view must track THIS attempt's bytes, not the previous
-    # inode's (#759 review P1).
+    # 读视图只收本次产物（codex #779 终审 P1）：归档暂存字节 + 本次 ref
+    # 校验提升的名——job_dir 里旧 attempt/他节点的同名残留一律不链进视
+    # 图补齐 produced，否则缺失输出会误判完成、残留字节被镜像成权威副
+    # 本。同名双通道时 ref 字节获胜（覆盖链接，#759 对抗复审 N2）：gated
+    # promote 的 os.replace 可能刚把 job_dir 文件换成新 inode，视图必须
+    # 跟踪本次尝试的字节。
     if view_dir is not job_dir:
-        link_into_view(tuple(remote_names), job_dir, view_dir, overwrite=True)
+        link_into_view(tuple(remote_names), job_dir, view_dir)
     if remote_names and staged_moves:
         # A redundant Worker reporting the same name in BOTH the archive and
         # a dict-ref: the ref channel must win on every plane (#759 review
