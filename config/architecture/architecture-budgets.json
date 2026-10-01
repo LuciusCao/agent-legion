@@ -1563,6 +1563,7 @@
     "server/app/services/skill_catalog.py": 64,
     "server/app/services/skill_creation.py": 199,
     "server/app/services/skill_detail.py": 75,
+    "server/app/services/skill_edit_snapshot.py": 89,
     "server/app/services/skill_edit_checks.py": 61,
     "server/app/services/skill_editing.py": 170,
     "server/app/services/skill_lock_store.py": 37,

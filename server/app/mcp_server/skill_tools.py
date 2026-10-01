@@ -55,6 +55,8 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         path = _skill_path(workspace_id, skill_key)
         if ref is not None:
             path += f"?ref={quote(ref, safe='')}"
+        if output_path is not None:
+            path += ("&" if ref is not None else "?") + "for_edit=true"
         response = await client.call("GET", path)
         return await local_files.export_response(workspace_id, output_path, response)
 

@@ -11,7 +11,7 @@ This matrix records the reverse audit of Phase 1-5 Workspace Executor architectu
 
 | Promise | Boundary | Invariant ID | Quick evidence | Full evidence | Result | Follow-up task |
 | --- | --- | --- | --- | --- | --- | --- |
-| MCP byte-preserving local authoring reads only workspace staging after backend authorization, rejects links/traversal/nonregular inputs, loads whole batches before existing validated saves, and exports without overwriting | security/filesystem | STUDIO-MCP-FILES-001 | `tests/mcp_server/test_local_files.py` | N/A | Verified | N/A |
+| MCP byte-preserving local authoring reads only workspace staging after authorization; editing exports are complete, strict UTF-8 snapshots, with raw shared map and every writable member; rejects unsafe inputs and loads whole batches before validated saves | security/filesystem | STUDIO-MCP-FILES-001 | `tests/mcp_server/test_local_files.py`, `tests/mcp_server/test_edit_snapshot_integration.py`, `tests/services/test_skill_edit_snapshot.py` | N/A | Verified | N/A |
 | Inline text only inserts new ready materials or reuses ready identities revalidated under row locks; non-ready conflicts reject the whole batch with 409, existing upload/TTL rows and keys remain untouched, and compensation deletes only unreferenced request-owned keys | materials/storage | MATERIAL-INLINE-OWNERSHIP-001 | `tests/routes/test_runs_text_api.py` | N/A | Verified | N/A |
 | Generated frontend API types remain synchronized with the backend OpenAPI schema | contract | API-CONTRACT-001 | `scripts/generate-api-types.sh` | N/A | Verified | N/A |
 | Routes, services, repositories, and executor adapters preserve dependency direction | layer | BOUNDARY-LAYER-001 | `scripts/check_architecture.py` | N/A | Verified | N/A |

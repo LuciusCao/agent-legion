@@ -35,7 +35,9 @@ def register_shared_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         on the MCP host; returns path/size/SHA-256 instead of the payload."""
         _, client = await client_factory()
         response = await client.call(
-            "GET", f"/workspaces/{quote(workspace_id, safe='')}/skills-shared"
+            "GET",
+            f"/workspaces/{quote(workspace_id, safe='')}/skills-shared"
+            + ("?for_edit=true" if output_path is not None else ""),
         )
         return await local_files.export_response(workspace_id, output_path, response)
 

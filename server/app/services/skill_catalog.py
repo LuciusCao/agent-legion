@@ -6,7 +6,9 @@ from typing import Any
 from server.app.db.dialect import ConnectSource
 from server.app.services import skill_detail, skill_repo
 from server.app.services.job_errors import NotFoundError
+from server.app.services.skill_edit_snapshot import edit_tree, text_file
 from server.app.services.skill_lock_store import SkillLockStore
+from server.app.services.skill_repo_edit import edit_lock_for
 from server.app.skills.config import SkillsLock
 from server.app.skills.skill_roots import default_skill_base_dir
 
@@ -32,11 +34,27 @@ class SkillCatalogService:
             "skill_commit": commit,
         }
 
-    def detail(self, skill_key: str, ref: str | None = None) -> dict[str, Any]:
+    def detail(
+        self,
+        skill_key: str,
+        ref: str | None = None,
+        *,
+        for_edit: bool = False,
+        runs_dir: Path | None = None,
+    ) -> dict[str, Any]:
         # The skill's repo is the in-place directory at <base_dir>/<key>
         # (#322); _skill_dir always runs first: it doubles as the skill-key
         # format/escape guard.
         repo_dir = self._skill_dir(skill_key)
+        if for_edit:
+            with edit_lock_for(repo_dir, self.base_dir, runs_dir):
+                return skill_detail.skill_detail(
+                    skill_key,
+                    repo_dir,
+                    ref,
+                    lambda path: edit_tree(path, skill=True),
+                    for_edit=True,
+                )
         return skill_detail.skill_detail(skill_key, repo_dir, ref, self._files)
 
     def has_dir(self, skill_key: str) -> bool:
@@ -80,16 +98,7 @@ class SkillCatalogService:
                 or path.suffix.lower() not in _TEXT_EXTENSIONS
             ):
                 continue
-            size = path.stat().st_size
-            raw = path.read_bytes()[:_MAX_FILE_BYTES]
-            files.append(
-                {
-                    "path": path.relative_to(skill_dir).as_posix(),
-                    "size": size,
-                    "content": raw.decode("utf-8", errors="replace"),
-                    "truncated": size > _MAX_FILE_BYTES,
-                }
-            )
+            files.append(text_file(path.relative_to(skill_dir).as_posix(), path.read_bytes()))
         return files
 
     def _lock(self) -> SkillsLock:
