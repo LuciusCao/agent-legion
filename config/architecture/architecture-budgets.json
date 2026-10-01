@@ -543,6 +543,7 @@
     "frontend/src/features/workflowStudio/shared/useDraftBaselineSync.ts": 62,
     "frontend/src/features/workflowStudio/shared/useDraftServerSync.ts": 55,
     "frontend/src/features/workflowStudio/shared/useDraftUnloadGuard.ts": 43,
+    "frontend/src/features/workflowStudio/shared/useDrawerEscape.ts": 24,
     "frontend/src/features/workflowStudio/shared/useFetchWorkflowRevisionDetail.ts": 20,
     "frontend/src/features/workflowStudio/shared/useIslandExclusiveWidth.ts": 41,
     "frontend/src/features/workflowStudio/shared/useServerDraftApply.ts": 40,

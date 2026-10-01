@@ -249,6 +249,22 @@ describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it('hotfix：docked 根节点退出布局流（display:contents）——不参与 SplitLayout 的 grid 行分配', () => {
+    // 根因：persistent 的 docked 根常驻 DOM 且其 Slide 内容在流内有高度，
+    // grid 行被均分（画布只剩半屏）。paper 是 position:fixed 自定位，根
+    // 零价值。revert：摘掉 sx display:contents 即红。
+    renderDrawer()
+    const docked = document.querySelector('.MuiDrawer-docked')
+    expect(docked).not.toBeNull()
+    expect(getComputedStyle(docked as Element).display).toBe('contents')
+  })
+
+  it('hotfix：Esc 关闭（persistent 不走 Modal，Esc 语义自行承接；Dock 的 Esc 处理器见 defaultPrevented 跳过）', () => {
+    const { setSelectedNodeKey } = renderDrawer()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
+  })
+
   it('轮 8 P2：抽屉非模态——无遮罩、不 aria-hidden 画布（Agent Dock 可并行交互）', () => {
     // MUI temporary Drawer 默认是 Modal（遮罩 + 焦点圈禁 + 兄弟
     // aria-hidden + 滚动锁）——把 z900 的 Agent Dock 盖住，破坏「边改节点

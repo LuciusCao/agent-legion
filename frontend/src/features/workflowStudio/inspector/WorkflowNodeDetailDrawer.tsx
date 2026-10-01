@@ -11,6 +11,7 @@
 import { Close } from '@mui/icons-material'
 import { Drawer, IconButton, Tooltip } from '@mui/material'
 import { WorkflowStudioSaveWarningBanner } from '../shared/WorkflowStudioSaveWarningBanner'
+import { useDrawerEscape } from '../shared/useDrawerEscape'
 import { useStudioState } from '../shared/studioStateContext'
 import { selectedNodeDetails } from '../shared/workflowStudioModel'
 import { useNodeDetailPreview } from './useNodeDetailPreview'
@@ -27,6 +28,9 @@ export function WorkflowNodeDetailDrawer() {
   const node = nodeKey
     ? selectedNodeDetails(studio.workflow, nodeKey)?.node
     : undefined
+  // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault，
+  // Dock 的 Esc 处理器见 defaultPrevented 跳过）。
+  useDrawerEscape(nodeKey !== null, close)
 
   return (
     <Drawer
@@ -38,6 +42,11 @@ export function WorkflowNodeDetailDrawer() {
          焦点/不锁滚动/不 aria-hidden 兄弟），Dock 与画布保持可交互；
          ✕/Esc 关闭，浮层定位由 paper CSS 承担。 */
       variant="persistent"
+      // hotfix：persistent 的 docked 根节点常驻 DOM 且参与 SplitLayout 的
+      // grid——其 Slide 包装在流内有高度，grid 行被均分（画布只剩半屏）。
+      // paper 是 position:fixed 自定位，根节点零价值：display:contents
+      // 退出布局流（抽屉开关/过渡/Esc 语义不变）。
+      sx={{ display: 'contents' }}
     >
       {nodeKey ? (
         <div className={styles.body} aria-label="节点详情">

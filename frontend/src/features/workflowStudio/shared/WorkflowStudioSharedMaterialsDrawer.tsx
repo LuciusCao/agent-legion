@@ -22,6 +22,7 @@ import { SharedMaterialFileContentDialog } from './WorkflowStudioSharedMaterials
 import { SharedMaterialFileRowView } from './WorkflowStudioSharedMaterialsFileRow'
 import { SharedMaterialsPropagateConfirmDialog } from './WorkflowStudioSharedMaterialsPropagateDialog'
 import { WorkflowStudioSaveWarningBanner } from './WorkflowStudioSaveWarningBanner'
+import { useDrawerEscape } from './useDrawerEscape'
 import styles from './WorkflowStudioSharedMaterialsDrawer.module.css'
 
 const PROPAGATE_STATUS_LABELS: Record<
@@ -47,6 +48,8 @@ function SharedMaterialsDrawer({
   const [results, setResults] = useState<
     SharedMaterialPropagateSkillResult[] | null
   >(null)
+  // persistent 不走 Modal——Esc 关闭自行承接（capture + preventDefault）。
+  useDrawerEscape(true, onClose)
   const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery({
     queryKey: extraQueryKeys.workspaceSharedMaterials(workspaceId),
@@ -77,6 +80,11 @@ function SharedMaterialsDrawer({
          焦点/不锁滚动/不 aria-hidden 兄弟），Dock 与画布保持可交互；
          ✕/Esc 关闭，浮层定位由 paper CSS 承担。 */
       variant="persistent"
+      // hotfix：persistent 的 docked 根节点常驻 DOM 且参与 SplitLayout 的
+      // grid——其 Slide 包装在流内有高度，grid 行被均分（画布只剩半屏）。
+      // paper 是 position:fixed 自定位，根节点零价值：display:contents
+      // 退出布局流（抽屉开关/过渡/Esc 语义不变）。
+      sx={{ display: 'contents' }}
     >
       <div className={styles.panel}>
         <div className={styles.header}>
@@ -227,8 +235,7 @@ export function WorkflowStudioSharedMaterialsButton() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   // 轮 9 P2：开合状态提升到 StudioViewContext（Dock 避让需要感知抽屉）。
   const view = useStudioView()
-  const open = view.materialsOpen
-  const setOpen = view.setMaterialsOpen
+  const { materialsOpen: open, setMaterialsOpen: setOpen } = view
   return (
     <>
       <Tooltip title="Skill 共享材料">
