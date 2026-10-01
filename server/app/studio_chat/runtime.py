@@ -30,8 +30,8 @@ class SessionRuntime:
         self.token = token
         # RLock, not Lock: send_message's turn-start critical section (#694
         # review R2-P1) calls helpers that take the same lock on the same
-        # thread (prepare_resume_prompt / rearm_resume_transcript in
-        # resume_context.py). Cross-thread exclusion semantics are unchanged.
+        # thread (prompt preparation and credential checks).
+        # Cross-thread exclusion semantics are unchanged.
         self.lock = threading.RLock()
         self.pending_permissions: dict[str, PendingPermission] = {}
         # Set under lock by teardown before the pending-permission settle

@@ -180,11 +180,24 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         )
         self._thread.start()
 
-    def send_prompt(self, text: str, *, before_start: Callable[[], bool] | None = None) -> bool:
-        """Queue a prompt turn; False when the handle is already closed."""
+    def send_prompt(
+        self,
+        text: str,
+        *,
+        before_start: Callable[[], bool] | None = None,
+        accept: Callable[[], None] | None = None,
+    ) -> bool:
+        """Accept durable input only while the queue can still receive it.
+
+        The callback commits the turn and message together, or raises with
+        neither committed. Close/stop cannot interleave before queue.put;
+        the unbounded queue is the final non-blocking handoff.
+        """
         with self._state_lock:
             if self._closed or self._stop_requested:
                 return False
+            if accept is not None:
+                accept()
             self._queue.put((text, before_start) if before_start is not None else text)
             return True
 

@@ -419,8 +419,7 @@ def test_close_notification_failure_still_tears_down_owned_runtime():
     service.get_session = Mock(return_value={"status": "idle"})
     service.store = Mock()
     service.store.append_message.side_effect = RuntimeError("notification persistence failure")
-    with pytest.raises(RuntimeError):
-        service.close_session("chat-1", "workspace")
+    service.close_session("chat-1", "workspace")
     assert runtime.closed
     assert service.runtime("chat-1") is None
     runtime.handle.close.assert_called_once()

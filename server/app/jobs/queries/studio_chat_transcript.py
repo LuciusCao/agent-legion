@@ -19,19 +19,21 @@ class StudioChatTranscriptQueriesMixin(StudioChatMessageQueriesMixin):
     """Most-recent window read for transcript rebuilds (resume context)."""
 
     def list_studio_chat_messages_tail(
-        self, session_id: str, *, before_seq: int, limit: int = 500
+        self, session_id: str, *, before_seq: int | None = None, limit: int = 500
     ) -> list[dict[str, Any]]:
         """Up to ``limit`` messages with seq < ``before_seq``, oldest first.
 
         ``before_seq`` excludes the message that triggered the rebuild (the
         current user prompt rides along as prompt text) and anything newer.
         """
+        watermark = " and seq<%s" if before_seq is not None else ""
+        params = (session_id, before_seq, limit) if before_seq is not None else (session_id, limit)
         with self._connect_read() as conn:
             rows = conn.execute(
                 "select id, session_id, kind, role, content_json, seq, created_at"
-                " from studio_chat_messages where session_id=%s and seq<%s"
+                f" from studio_chat_messages where session_id=%s{watermark}"
                 " order by seq desc limit %s",
-                (session_id, before_seq, limit),
+                params,
             ).fetchall()
         messages = []
         for row in reversed(rows):
