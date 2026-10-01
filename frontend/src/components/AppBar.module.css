@@ -28,6 +28,8 @@
   align-items: center;
   gap: 16px;
   min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .right {
@@ -36,5 +38,5 @@
   justify-content: flex-end;
   gap: 12px;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
 }

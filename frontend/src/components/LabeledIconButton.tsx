@@ -15,6 +15,7 @@ export function LabeledIconButton({
   tooltip,
   disabled = false,
   color,
+  iconOnly = false,
 }: {
   icon: string
   label: string
@@ -28,6 +29,7 @@ export function LabeledIconButton({
   disabled?: boolean
   /** 不传则继承顶栏前景色 */
   color?: ButtonProps['color']
+  iconOnly?: boolean
 }) {
   const button = (
     <Button
@@ -45,17 +47,22 @@ export function LabeledIconButton({
         px: 1,
         whiteSpace: 'nowrap',
         fontSize: 13,
-        '& .MuiButton-startIcon': { marginRight: '4px' },
+        '& .MuiButton-startIcon': {
+          marginRight: iconOnly ? 0 : '4px',
+          marginLeft: iconOnly ? 0 : undefined,
+        },
         '&.Mui-disabled': { color: 'action.disabled' },
       }}
     >
-      {label}
+      {!iconOnly && label}
     </Button>
   )
-  if (!tooltip) return button
   // 禁用的 button 不触发鼠标事件，外包一层 span 让 Tooltip 仍可悬停
   return (
-    <Tooltip title={tooltip} arrow enterDelay={300}>
+    <Tooltip
+      title={tooltip ?? (iconOnly ? (ariaLabel ?? label) : '')}
+      describeChild
+    >
       <span style={{ display: 'inline-flex' }}>{button}</span>
     </Tooltip>
   )
