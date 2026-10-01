@@ -83,7 +83,7 @@ def _client(
     object_store: JobArtifactObjectStore | None,
     monkeypatch: pytest.MonkeyPatch | None = None,
 ) -> tuple[TestClient, MagicMock]:
-    broker = MagicMock()
+    broker = MagicMock(database_dsn=TEST_DATABASE_URL)
     # #547: the route always calls the module-level claim_batch now; stub it
     # at the route module seam (a MagicMock broker cannot serve the real
     # transaction path's database_dsn reads). monkeypatch auto-restores; the
@@ -187,7 +187,7 @@ def test_agent_claim_v4_worker_gets_gzip_specs(monkeypatch: pytest.MonkeyPatch) 
         size_bytes=len(compressed),
         content_hash=HASH,
     )
-    broker = MagicMock()
+    broker = MagicMock(database_dsn=TEST_DATABASE_URL)
     from server.app.routes import agent_worker_claims as claims_module
 
     monkeypatch.setattr(claims_module, "claim_batch", lambda *a, **k: [_claimed(_manifest())])
@@ -275,7 +275,7 @@ def test_agent_claim_presign_expiry_follows_execution_timeout(
     app = FastAPI()
     app.include_router(
         create_agent_worker_claim_router(
-            MagicMock(),
+            MagicMock(database_dsn=TEST_DATABASE_URL),
             MagicMock(),
             lambda request, worker_id=None: {"worker_id": "w1", "protocol_version": 3},
             lambda request: "lease-1",
