@@ -54,7 +54,14 @@ entries:
     considering a deeper fix.
   observed: Local pre-push quick gate for 9f479768 (pull request 175),
     2026-08-26; retry run passed in 47s.
-  deadline: 2026-09-30
+  deadline: 2026-10-31
+  extension: >-
+    Extended 2026-10-01 (PR #808 CI unblock): zero recurrence since the
+    2026-08-26 observation — no rerun hits in any CI lane or local gate in
+    five weeks (backend-coverage rerun-nodeid count 0 on the expiry-triggering
+    run itself). Per the entry's own reviewed guidance, retry remains the
+    correct response; next extension requires an actual recurrence and poll
+    timeout widening first.
 - id: FLAKY-009
   nodeid: tests/routes/test_studio_publish_request_races.py::test_concurrent_creates_leave_exactly_one_pending
   owner: test-infra

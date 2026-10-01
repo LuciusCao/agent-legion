@@ -1,11 +1,12 @@
 """Worker 结果读视图的链接机制（#759 review P1-1、对抗复审 P2 族）。
 
 自 ``completion_staged`` 拆出的文件预算姊妹模块：staging 目录即读视图，
-归档成员不可信，而视图只是 finish 前的私有 scratch——链接对垃圾形状
-（同名目录、文件祖先、symlink）全域，overwrite 遍清挡位垃圾，第一遍
-遇挡位跳过（按未产出判 missing），源消失的 TOCTOU 同样按未产出跳过，
-任何形状/竞态组合都不炸异常（炸穿结果提交在 overwrite 遍命中时就是
-codex #774 P2 的同型现场：remote promote 已提交、staging key 已删）。
+归档成员不可信，而视图只是 finish 前的私有 scratch。只有「本次 ref 校
+验提升」的名字会被链接（#779 终审 P1：job_dir 残留永不进视图），且一
+律覆盖——同名归档暂存字节让位 ref 字节（#759 对抗复审 N2），挡位垃
+圾（同名目录、文件祖先、symlink）全域清理，源消失的 TOCTOU 按未产出
+跳过，任何形状/竞态组合都不炸异常（炸穿结果提交在覆盖链接命中时就
+是 codex #774 P2 的同型现场：remote promote 已提交、staging key 已删）。
 """
 
 from __future__ import annotations
@@ -16,18 +17,17 @@ from pathlib import Path
 from typing import Any
 
 
-def link_into_view(
-    names: tuple[str, ...] | Any, job_dir: Path, view_dir: Path, *, overwrite: bool = False
-) -> None:
-    """把 job_dir 文件链进读视图。
+def link_into_view(names: tuple[str, ...] | Any, job_dir: Path, view_dir: Path) -> None:
+    """把 job_dir 文件链进读视图（一律覆盖）。
 
-    overwrite 遍清掉挡位的垃圾——spot 上的目录整棵删（预检的前缀互斥已
-    保证目录内没有任何暂存源：有则那个 expected 名与 remote 落点撞前缀，
-    结果在进此函数之前已被判 failed）、祖先链上的垃圾文件直接 unlink
-    （文件祖先之下不可能存在暂存源——同一 staging 目录里「reports 是文
-    件」与「reports/x 是文件」物理互斥）。不带 overwrite 的第一遍遇挡位
-    一律跳过：该名按未产出判 missing（归档形状与 expected 声明自相矛盾，
-    继承 job_dir 残留没有依据）。
+    覆盖语义保证 ref 字节胜过归档在同名位置暂存的字节。挡位垃圾全域清
+    理：同名目录整棵删（预检的前缀互斥已保证目录内没有任何暂存源：有
+    则那个 expected 名与 remote 落点撞前缀，结果在进此函数之前已被判
+    failed）、祖先链上的垃圾文件直接 unlink（文件祖先之下不可能存在暂
+    存源——同一 staging 目录里「reports 是文件」与「reports/x 是文件」
+    物理互斥）、symlink 走 unlink（防御：解包禁止链接成员）。源在
+    is_file→link 窗口内消失（并发 promote 的备份步 rename）按「该名未
+    产出」跳过，produced 判 missing 兜底。
     """
     for name in names:
         landed = job_dir / name
@@ -35,22 +35,14 @@ def link_into_view(
         if not landed.is_file():
             continue
         if view_spot.is_symlink() or view_spot.is_file():
-            if not overwrite:
-                continue
             view_spot.unlink()
         elif view_spot.is_dir():
-            if not overwrite:
-                continue
             shutil.rmtree(view_spot)
         elif os.path.lexists(view_spot):
             # 其他特殊条目（防御：解包实际只产文件/目录）。
-            if not overwrite:
-                continue
             view_spot.unlink()
         blocker = _view_blocker(view_dir, view_spot)
         if blocker is not None:
-            if not overwrite:
-                continue
             blocker.unlink()
         view_spot.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -65,8 +57,7 @@ def link_into_view(
                 # 源侧 TOCTOU（#759 对抗复审 P2-A）：landed 在 is_file→link
                 # 窗口内被并发 promote 的备份步 rename 走（同 job 跨节点同
                 # 路径输出的病态声明），或盘满/权限等操作性故障——按「该名
-                # 未产出」跳过，produced 判定兜底成 missing，与第一遍遇挡
-                # 位跳过同一语义。
+                # 未产出」跳过，produced 判定兜底成 missing。
                 continue
 
 
