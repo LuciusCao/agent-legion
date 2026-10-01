@@ -1,9 +1,12 @@
 import type { WorkflowNodeRecord } from '../../../types'
 import {
   EMPTY_TEXT_INPUT,
+  normalizeTextInput,
   patchWorkflowNodeTextInput,
   type WorkflowTextInputDraft,
 } from '../shared/workflowStudioYamlDraft.textInput'
+import { canEditStartNode } from '../shared/workflowStudioTextInputEditable'
+import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft.parse'
 import styles from './WorkflowStructuredEditor.module.css'
 
 type Props = {
@@ -15,10 +18,19 @@ type Props = {
 /** 「直接输入需求」的呈现配置编辑器（start 节点勾选 text 后出现）：输入框
  * 标题、落盘文件名、预填模板，patch 回 draft YAML 的 text_input 块。 */
 export function WorkflowNodeStartTextInputEditor(props: Props) {
-  const current: WorkflowTextInputDraft = {
-    ...EMPTY_TEXT_INPUT,
-    ...(props.node.text_input ?? {}),
-  }
+  const record = normalizeTextInput(
+    parseWorkflowNode(props.definitionYaml, props.node.key)?.text_input
+  )
+  if (
+    record === undefined ||
+    !canEditStartNode(props.definitionYaml, props.node.key)
+  )
+    return (
+      <p role="alert">
+        草稿或 text_input 格式无效，请先在 YAML 中修复入口节点及其文本配置。
+      </p>
+    )
+  const current = record ?? EMPTY_TEXT_INPUT
   const patch = (field: keyof WorkflowTextInputDraft, value: string) =>
     props.setDefinitionYaml(
       patchWorkflowNodeTextInput(props.definitionYaml, props.node.key, {

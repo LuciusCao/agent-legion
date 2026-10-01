@@ -24,7 +24,7 @@ function LocationProbe() {
   )
 }
 
-function renderEditor(types: string[]) {
+function renderEditor(types: string[], raw?: string) {
   const setDefinitionYaml = vi.fn()
   const node = {
     key: '_start',
@@ -35,7 +35,9 @@ function renderEditor(types: string[]) {
     <MemoryRouter>
       <WorkflowNodeStartContractEditor
         node={node}
-        definitionYaml={draftYaml}
+        definitionYaml={
+          raw ?? draftYaml.replace('[material, ref]', JSON.stringify(types))
+        }
         setDefinitionYaml={setDefinitionYaml}
       />
       <LocationProbe />
@@ -45,6 +47,44 @@ function renderEditor(types: string[]) {
 }
 
 describe('WorkflowNodeStartContractEditor', () => {
+  it.each([
+    'nodes: [',
+    'nodes: []',
+    'nodes: {_start: {type: start}}\nedges: [null]',
+  ])('disables mutations on unsafe published fallback %s', (raw) => {
+    const save = renderEditor(['material', 'text'], raw)
+    const option = screen.getByRole('checkbox', { name: /直接输入需求/ })
+    expect(option).toBeDisabled()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    fireEvent.click(option)
+    expect(save).not.toHaveBeenCalled()
+  })
+  it('explicitly removes malformed text_input without rebuilding it from published fields', () => {
+    const save = renderEditor(
+      ['material', 'text'],
+      draftYaml.replace('[material, ref]', '[ref, text]') +
+        '    text_input: {template: 123}\n'
+    )
+    fireEvent.click(screen.getByRole('checkbox', { name: /直接输入需求/ }))
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(save.mock.calls[0][0]).not.toContain('text_input')
+    expect(save.mock.calls[0][0]).toContain('- ref')
+    expect(save.mock.calls[0][0]).not.toContain('- material')
+  })
+  it.each(['123', '[]', '[invalid]', '[material, 123]', '{bad: value}'])(
+    'rejects malformed accepted_item_types %s before calling includes',
+    (types) => {
+      const save = renderEditor(
+        ['material', 'text'],
+        draftYaml.replace('[material, ref]', types)
+      )
+      expect(screen.getByRole('alert')).toBeInTheDocument()
+      expect(
+        screen.getByRole('checkbox', { name: /直接输入需求/ })
+      ).toBeDisabled()
+      expect(save).not.toHaveBeenCalled()
+    }
+  )
   it('renders user-facing labels and descriptions for every item type', () => {
     renderEditor(['material', 'ref'])
 

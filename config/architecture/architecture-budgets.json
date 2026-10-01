@@ -573,6 +573,7 @@
     "frontend/src/features/workflowStudio/shared/workflowStudioModel.ts": 58,
     "frontend/src/features/workflowStudio/shared/workflowStudioNav.ts": 21,
     "frontend/src/features/workflowStudio/shared/workflowStudioRouting.ts": 44,
+    "frontend/src/features/workflowStudio/shared/workflowStudioTextInputEditable.ts": 75,
     "frontend/src/features/workflowStudio/shared/workflowStudioTopology.ts": 147,
     "frontend/src/features/workflowStudio/shared/workflowStudioTopologyBadges.ts": 32,
     "frontend/src/features/workflowStudio/shared/workflowStudioViewState.ts": 38,

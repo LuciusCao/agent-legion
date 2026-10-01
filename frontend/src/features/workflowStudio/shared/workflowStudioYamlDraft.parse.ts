@@ -1,5 +1,4 @@
 import yaml from 'js-yaml'
-import type { WorkflowNodeRecord } from '../../../types'
 
 export type WorkflowYamlObject = {
   key?: string
@@ -17,7 +16,7 @@ export type WorkflowYamlNode = {
   type?: 'start' | 'node' | 'approval' | 'code' | 'agent'
   accepted_item_types?: string[]
   // start 节点 text 条目的呈现配置（写路径 patchWorkflowNodeTextInput）。
-  text_input?: Partial<NonNullable<WorkflowNodeRecord['text_input']>>
+  text_input?: unknown
   label?: string
   capability?: string
   // #76：节点级 skill 内容绑定。字符串形态（`skill: <key>`）与 mapping 形态

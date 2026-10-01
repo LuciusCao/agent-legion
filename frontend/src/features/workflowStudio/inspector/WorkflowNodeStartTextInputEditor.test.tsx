@@ -38,12 +38,92 @@ const loadStart = (raw: string) =>
     ._start
 
 describe('WorkflowNodeStartTextInputEditor', () => {
-  it('shows the current block and patches a single field back to YAML', () => {
+  it.each([
+    'nodes: [',
+    'nodes: []',
+    'nodes: invalid',
+    'nodes: {_start: {type: start}, broken: null}',
+    'nodes: {_start: {type: start}}\nedges: invalid',
+    'nodes: {_start: {type: start}}\nedges: [null]',
+    'nodes: {_start: {type: code}}',
+    'nodes: {custom_start: {type: start}}',
+  ])('does not offer published fields for an unsafe draft %s', (raw) => {
+    const save = vi.fn()
+    render(
+      <WorkflowNodeStartTextInputEditor
+        node={startNode(['text'])}
+        definitionYaml={raw}
+        setDefinitionYaml={save}
+      />
+    )
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.queryByLabelText('预填模板')).not.toBeInTheDocument()
+    expect(save).not.toHaveBeenCalled()
+  })
+  it('does not recreate a removed custom start node from published fallback', () => {
+    const node = { ...startNode(['text']), key: 'removed-start' }
+    render(
+      <WorkflowNodeStartTextInputEditor
+        node={node}
+        definitionYaml={draftYaml}
+        setDefinitionYaml={vi.fn()}
+      />
+    )
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+  })
+  it('keeps the loader synthetic _start editable when it is absent from YAML', () => {
+    const save = vi.fn()
+    render(
+      <WorkflowNodeStartTextInputEditor
+        node={startNode(['text'])}
+        definitionYaml="nodes: {gen: {type: code}}"
+        setDefinitionYaml={save}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('输入框标题'), {
+      target: { value: '需求' },
+    })
+    expect(loadStart(save.mock.calls[0][0]).text_input).toEqual({
+      label: '需求',
+    })
+  })
+  it('keeps invalid YAML intact when falling back to a published record, then recovers after correction', () => {
+    const setDefinitionYaml = vi.fn()
+    const node = startNode(['text'], { template: '# Published\n' })
+    const invalid = draftYaml + '    text_input: {template: 123}\n'
+    const { rerender } = render(
+      <WorkflowNodeStartTextInputEditor
+        node={node}
+        definitionYaml={invalid}
+        setDefinitionYaml={setDefinitionYaml}
+      />
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('text_input 格式无效')
+    expect(screen.queryByLabelText('输入框标题')).not.toBeInTheDocument()
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+    rerender(
+      <WorkflowNodeStartTextInputEditor
+        node={node}
+        definitionYaml={draftYaml}
+        setDefinitionYaml={setDefinitionYaml}
+      />
+    )
+    expect(screen.getByLabelText('预填模板')).toHaveValue('')
+  })
+  it('edits raw draft fields without copying stale published fields back into YAML', () => {
     const setDefinitionYaml = vi.fn()
     render(
       <WorkflowNodeStartTextInputEditor
-        node={startNode(['text'], { label: '创作需求', template: '# 需求\n' })}
-        definitionYaml={draftYaml}
+        node={startNode(['text'], {
+          label: 'Published',
+          template: '# Published\n',
+        })}
+        definitionYaml={
+          draftYaml +
+          '    text_input: ' +
+          JSON.stringify({ label: '创作需求', template: '# 需求\n' }) +
+          '\n'
+        }
         setDefinitionYaml={setDefinitionYaml}
       />
     )

@@ -13,6 +13,7 @@ import {
 } from '../shared/workflowStudioYamlDraft.executionDefaults'
 import { normalizeNodeSkill } from '../shared/workflowStudioYamlDraft.skill'
 import { normalizeTextInput } from '../shared/workflowStudioYamlDraft.textInput'
+import { readDraftStartTypes } from '../shared/workflowStudioTextInputEditable'
 import { mergeNodeExecution } from './workflowStudioExecutionWarnings'
 
 /** 草稿 YAML → WorkflowDefinitionRecord：让画布/inspector 直接以草稿为数据
@@ -39,6 +40,15 @@ export function workflowYamlToDefinitionRecord(
   if (!Array.isArray(parsed.edges ?? [])) return null
   const rawNodes = Object.entries(parsed.nodes ?? {})
   if (rawNodes.some(([, node]) => !isPlainObject(node))) return null
+  if (
+    rawNodes.some(
+      ([key, node]) =>
+        node.type === 'start' &&
+        (normalizeTextInput(node.text_input) === undefined ||
+          readDraftStartTypes(rawYaml, key) === null)
+    )
+  )
+    return null
   const rawEdges = parsed.edges ?? []
   if (rawEdges.some((edge) => !isPlainObject(edge))) return null
   const defaults = parseWorkflowExecutionDefaults(rawYaml)
@@ -90,7 +100,7 @@ function mapNode(
       ? {
           node_type: 'start',
           accepted_item_types: node.accepted_item_types ?? [],
-          text_input: normalizeTextInput(node.text_input),
+          text_input: normalizeTextInput(node.text_input) ?? null,
         }
       : {
           node_type:
