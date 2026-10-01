@@ -12,6 +12,16 @@ export function useDrawerEscape(open: boolean, onClose: () => void) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented)
         return
+      // hotfix 轮 2 codex P2：有更上层浮层在场即让位（capture 早于 MUI
+      // Modal 的按键处理，不探测会把抽屉连同模态一起关掉）。与
+      // useDockEscape 同款判定；Drawer persistent 不是 Modal，不会误伤
+      // 自己。
+      if (
+        document.querySelector(
+          '.MuiModal-root, .MuiPopover-root, [role="dialog"][aria-modal="true"]'
+        )
+      )
+        return
       event.preventDefault()
       onClose()
     }

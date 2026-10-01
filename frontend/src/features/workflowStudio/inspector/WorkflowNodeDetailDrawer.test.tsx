@@ -259,6 +259,24 @@ describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
     expect(getComputedStyle(docked as Element).display).toBe('contents')
   })
 
+  it('hotfix 轮 2 codex P2：抽屉内有更上层模态（.MuiModal-root/.MuiPopover）时 Esc 让位——只关最上层不关抽屉', () => {
+    const { setSelectedNodeKey } = renderDrawer()
+    // 结构桩：抽屉内开了内容 dialog/菜单（jsdom 无真 Modal，插标记元素）。
+    const modalStub = document.createElement('div')
+    modalStub.className = 'MuiModal-root'
+    document.body.appendChild(modalStub)
+    try {
+      fireEvent.keyDown(document, { key: 'Escape' })
+      // 让位：抽屉不关（摘掉让位探测即红——抽屉会被直接关掉）。
+      expect(setSelectedNodeKey).not.toHaveBeenCalled()
+    } finally {
+      modalStub.remove()
+    }
+    // 模态关掉后 Esc 恢复关抽屉。
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
+  })
+
   it('hotfix：Esc 关闭（persistent 不走 Modal，Esc 语义自行承接；Dock 的 Esc 处理器见 defaultPrevented 跳过）', () => {
     const { setSelectedNodeKey } = renderDrawer()
     fireEvent.keyDown(document, { key: 'Escape' })
