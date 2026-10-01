@@ -38,6 +38,8 @@ class SessionRuntime:
         # sweep: a permission request that parks afterwards (it takes the same
         # lock) denies immediately instead of hanging to the timeout (#158).
         self.closed = False
+        self.background_stop = threading.Event()
+        self.background_wakeup_enabled = True
         # Streaming chunk coalescing (agent text + thought): each kind folds
         # into one message row per turn; the slots are reset at turn START
         # (send_message), so trailing chunks of a finished turn still fold

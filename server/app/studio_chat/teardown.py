@@ -60,6 +60,7 @@ def teardown_runtime(
         return owned
     with runtime.lock:
         runtime.closed = True
+        runtime.background_stop.set()
         # A pending compaction self-clear must not fire into a torn-down
         # runtime (its generation check would no-op anyway; cancel to be
         # exact, #694 review P1).

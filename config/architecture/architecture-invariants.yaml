@@ -1,4 +1,12 @@
 invariants:
+  - id: STUDIO-BACKGROUND-001
+    statement: "Kimi V1 background completions are read only from the owning ACP session's root agent tasks; automatic followups claim an idle turn, revalidate runtime identity, respect cancel/close/compaction, and never revive invalid tokens. See docs/architecture/studio-kimi-background-wakeup.md."
+    owner: studio
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_studio_chat_background_wakeup.py
+        gate: quick
   - id: API-CONTRACT-001
     statement: Generated frontend API types remain in sync with the backend OpenAPI schema.
     owner: architecture

@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -179,9 +180,10 @@ class StudioChatService:
         if session["status"] == "closed":
             return session
         runtime = self.runtime(session_id)
-        self._db.update_studio_chat_session(
-            session_id, status="closed", closed_at=datetime.now(UTC)
-        )
+        with runtime.lock if runtime is not None else nullcontext():
+            self._db.update_studio_chat_session(
+                session_id, status="closed", closed_at=datetime.now(UTC)
+            )
         self.teardown_runtime(session_id, runtime)
         self.store.append_message(session_id, "status", "system", {"event": "session_closed"})
         self.store.publish_session(session_id)
@@ -249,6 +251,7 @@ class StudioChatService:
             runtime.stream.reset()
             runtime.loading = False
             runtime.turn_open = True
+            runtime.background_wakeup_enabled = True
             runtime.turn_started_at = time.monotonic()
             runtime.turn_update_count = 0
             runtime.turn_slash_command = text.lstrip().startswith("/")
@@ -289,6 +292,8 @@ class StudioChatService:
         session = self.get_session(session_id, workspace_id)
         runtime = self.runtime(session_id)
         if runtime is not None:
+            with runtime.lock:
+                runtime.background_wakeup_enabled = False
             self._settle_pending_permissions(runtime)
             runtime.handle.cancel()
         if session["status"] in ("running", "awaiting_permission"):
@@ -420,9 +425,10 @@ class StudioChatService:
             items = list(self._runtimes.items())
         for session_id, runtime in items:
             try:
-                self._db.update_studio_chat_session(
-                    session_id, status="closed", closed_at=datetime.now(UTC)
-                )
+                with runtime.lock:
+                    self._db.update_studio_chat_session(
+                        session_id, status="closed", closed_at=datetime.now(UTC)
+                    )
             except Exception:
                 # #204 broad-except audit: shutdown safety net. The shutdown
                 # loop must reach every live session — one failing status
