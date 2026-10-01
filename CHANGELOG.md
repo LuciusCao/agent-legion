@@ -19,6 +19,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Changed
 - Studio 聊天区草稿卡重做（issue #692）：workflow / 运行配置 / 草稿预览三类草稿卡统一视觉语言与发布入口，MUI 线性图标区分卡片类型，发布动作收敛为同一评审对话框链路。
 - Studio 对话输入区收编（#750）：会话菜单对齐卡片风格，上下文用量圆环与状态行收进输入卡片，对话区信息层级收敛。
+- velites 0.5.4 → 0.5.5 落版：velites-v0.5.4 tag 后 velites 子树积了 11 个未随任何 velites 版本线发布的改动——#637 内存硬上限系列（bash/read/json 读取硬上限、流式聚合全局封顶、触顶提示修正，详见上方 Fixed 的 #637 条目）。独立版本线随源码前进——三平台二进制经 velites-v0.5.5 tag 发布；scripts/install-worker.sh 默认版本同步到 0.5.5。
 
 ### Fixed
 - Studio 会话超时误显示完成 + 压缩窗口防护与对话骨架统一（issue #693/#694/#695，#698 与其 0.7.13 线收尾 #733）：超时轮不再被定妆为「已完成」；压缩窗口边界防护与容量透传修复长会话压缩截断；对话骨架（空态/加载/错误）三处统一。
