@@ -678,3 +678,52 @@ def test_result_header_overflow_unstattable_output_fails_honestly(
     assert "archive-embed ceiling" in report["error_message"]
     assert client.uploads == {}  # 无 CAS 重传
     assert not (work_root / "exec-1").exists()
+
+
+def test_result_header_overflow_code_lane_node_log_counted_in_precheck(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#755 终审修复轮 P2：code 车道的 node.log 写在 execution_dir 根（不在
+    run_dir），是沙箱 stdout/stderr 的无上限捕获，可以是内嵌 tar 的最大成员。
+    预检不计入它，「大且不可压缩的 node.log + 小产物」会被放进换轨，重备
+    tar 超 Host 上限 → 413 → 丢结果 → 全量重跑死循环。"""
+    from worker.upload import report as report_module
+
+    monkeypatch.setattr(report_module, "_ARCHIVE_EMBED_CEILING_BYTES", 1024)
+    monkeypatch.setattr(report_module, "_EMBED_SAFETY_MARGIN_BYTES", 0)
+    work_root = tmp_path / "work"
+    execution_dir = _execution_dir(work_root)
+    # 产物只有 2 字节（output.json "{}"）；node.log 一个就超预检上限。
+    (execution_dir / "node.log").write_bytes(b"\0" * 2048)
+    run_dir_bytes = sum(
+        p.stat().st_size
+        for p in (execution_dir / "job" / "runs" / "node_a" / "worker").rglob("*")
+        if p.is_file()
+    )
+
+    def direct_upload_ok(path: Path, spec: object, **_kw: object) -> dict:
+        return {
+            "storage_key": str(dict(spec)["storage_key"]),
+            "size_bytes": 2,
+            "content_hash": "a" * 64,
+        }
+
+    monkeypatch.setattr(upload_queue, "upload_artifact_direct", direct_upload_ok)
+    client = QueueFakeClient()
+    task = _task(work_root)
+    task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
+    captured: dict[str, Any] = {}
+    _overflow_on_direct_refs(client, captured)
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "archive-embed ceiling" in report["error_message"]
+    # 总量口径含 node.log：产物 2B + run_dir 实测 + node.log 2048B。
+    assert f"totals {2 + run_dir_bytes + 2048} bytes" in report["error_message"]
+    assert task.artifact_uploads  # 未换轨
+    assert client.uploads == {}
+    assert not (work_root / "exec-1").exists()

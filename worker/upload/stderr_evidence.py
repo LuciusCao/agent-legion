@@ -169,10 +169,10 @@ def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
     if not tail:
         sink = run_dir / AGENT_STDERR_FILENAME
         if sink.is_file():
-            tail = sink.read_bytes()[:STDERR_TAIL_BYTES]
+            tail = sink.read_bytes()[-STDERR_TAIL_BYTES:]
     if not tail:
         return b""
-    return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[:STDERR_TAIL_BYTES]
+    return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[-STDERR_TAIL_BYTES:]
 
 
 def stderr_error_message(exit_code: int, stderr_tail: bytes) -> str:

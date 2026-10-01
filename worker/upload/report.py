@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from shared.code_contract import CODE_RESULT_LOG_MEMBER
 from worker.host.transfer import (
     HostRequestError,
     ResultHeaderOverflow,
@@ -38,8 +39,10 @@ def _embedded_artifacts_bytes(task: UploadTask) -> float:
     """换轨预检：归档内嵌会打包进 tar 的字节总量——expected_outputs 产物
     （未压缩口径——gzip 对二进制不可假设，产物载荷占主导）+ run_dir 实测
     （换轨判定发生在 prepare 之后，events 已压缩，stat 即可；events/stderr
-    锚点/node.log 一并入 tar，MB 级，不计则余量被静默吃光）。
-    stat 失败按 +inf——大小未知即拒绝换轨。"""
+    锚点一并入 tar，MB 级，不计则余量被静默吃光）+ code 车道的 node.log
+    （写在 execution_dir 根而非 run_dir，是沙箱 stdout/stderr 的无上限
+    捕获，可以是 tar 的最大成员；agent 车道该文件不存在，与归档侧的
+    is_file 判定同型跳过）。stat 失败按 +inf——大小未知即拒绝换轨。"""
     job_dir = task.execution_dir / "job"
     total = 0.0
     for name in task.expected_outputs:
@@ -50,6 +53,12 @@ def _embedded_artifacts_bytes(task: UploadTask) -> float:
     run_dir = job_dir / "runs" / task.node_key / "worker"
     try:
         total += sum(entry.stat().st_size for entry in run_dir.rglob("*") if entry.is_file())
+    except OSError:
+        return float("inf")
+    node_log = task.execution_dir / CODE_RESULT_LOG_MEMBER
+    try:
+        if node_log.is_file():
+            total += node_log.stat().st_size
     except OSError:
         return float("inf")
     return total
