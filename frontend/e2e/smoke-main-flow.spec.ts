@@ -81,7 +81,8 @@ test('主流程：添加条目 → 节点真实执行 → job 完成 → 产物�
   await expect(progressPanel.getByText('汇总')).toBeVisible()
 
   // 产物：intake/publish 两个 code 节点 + stub Agent 写出的 draft.json。
-  await page.getByRole('button', { name: '产物文件' }).click()
+  await page.getByRole('button', { name: '更多任务操作' }).click()
+  await page.getByRole('menuitem', { name: '产物文件' }).click()
   const artifactDialog = page.getByRole('dialog')
   await expect(artifactDialog.getByText('intake_result.json')).toBeVisible()
   await expect(artifactDialog.getByText('draft.json')).toBeVisible()
@@ -89,8 +90,9 @@ test('主流程：添加条目 → 节点真实执行 → job 完成 → 产物�
   await page.keyboard.press('Escape')
   await expect(artifactDialog).toBeHidden()
 
-  // 打包下载：详情页「打包」→ jobs/package 返回 download_url → zip 可读。
-  const packageButton = page.getByRole('button', { name: '打包', exact: true })
+  // 打包下载：详情页「更多 → 打包」→ jobs/package 返回 download_url → zip 可读。
+  await page.getByRole('button', { name: '更多任务操作' }).click()
+  const packageButton = page.getByRole('menuitem', { name: '打包', exact: true })
   await expect(packageButton).toBeEnabled()
   const [packageResponse] = await Promise.all([
     page.waitForResponse(
