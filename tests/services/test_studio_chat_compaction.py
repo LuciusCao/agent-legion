@@ -43,8 +43,10 @@ class RecordingBus:
 
 
 class _StubHandle:
-    def send_prompt(self, text: str) -> bool:
+    def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
+        if accept is not None:
+            accept()
         return True
 
     def cancel(self) -> None: ...

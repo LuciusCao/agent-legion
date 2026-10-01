@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 
 from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.auth.sessions import hash_token
-from server.app.services.job_errors import ConflictError
 from server.app.studio_chat.prompt_turn import PROMPT_TIMEOUT_SECONDS
 from server.app.studio_chat.session_escalation import escalate_dead_token_session
 
@@ -36,21 +35,6 @@ TOKEN_INVALIDATED_DETAIL = (
 # A checked-live token must outlive the current turn: the threshold is the
 # turn-duration ceiling plus grace, NOT the turn-start 30min one (#411 review).
 _KEEPALIVE_RENEW_THRESHOLD = timedelta(seconds=PROMPT_TIMEOUT_SECONDS + 300)
-
-
-def require_live_run_token(
-    backend: ServiceBackend, session_id: str, runtime: SessionRuntime
-) -> None:
-    """Fail closed at prompt handoff, including a token lost during renewal."""
-    if backend.db.get_scoped_token_user(hash_token(runtime.token)) is not None:
-        return
-    with runtime.lock:
-        runtime.turn_open = False
-        # Unlike notification keepalive, a send must propagate DB failures.
-        # Escalation releases any running claim without reopening a closed row.
-        escalate_dead_token_session(backend, session_id)
-        keepalive_run_token(backend, session_id)
-    raise ConflictError(TOKEN_INVALIDATED_DETAIL)
 
 
 def _token_alive(backend: ServiceBackend, token: str) -> bool:
@@ -80,8 +64,17 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
     if runtime is None:
         return
     with runtime.lock:
-        if runtime.token_keepalive_done:
+        if (
+            runtime.closed
+            or backend.runtime(session_id) is not runtime
+            or runtime.token_keepalive_done
+        ):
             return
+        _keepalive_locked(backend, session_id, runtime)
+
+
+def _keepalive_locked(backend: ServiceBackend, session_id: str, runtime: SessionRuntime) -> None:
+    """Keep authentication, escalation and stop on the same runtime generation."""
     try:
         alive = _token_alive(backend, runtime.token)
     except Exception:
@@ -91,7 +84,7 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
         # backstop and the next tool_call retries (flag stays unset).
         logger.warning("studio chat token keepalive check failed for %s", session_id, exc_info=True)
         return
-    if alive:
+    if alive or runtime.closed or backend.runtime(session_id) is not runtime:
         return
     # #558：先升级后通知——escalate 抛异常（DB 故障）时 flag 未置、直接
     # 重试且不产生重复通知；escalate 成功后 append 失败时状态已是 error

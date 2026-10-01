@@ -373,8 +373,10 @@ class _StubHandle:
     """Minimal ACP handle stand-in for tests that drive the service callbacks
     directly (no subprocess) to control interleaving precisely (#98)."""
 
-    def send_prompt(self, text: str) -> bool:
+    def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
+        if accept is not None:
+            accept()
         return True
 
     def cancel(self) -> None: ...

@@ -549,8 +549,10 @@ def test_resume_skips_session_resumed_row_when_close_races(chat, monkeypatch) ->
 class _StubHandle:
     """ACP handle stand-in: registered runtimes without a subprocess."""
 
-    def send_prompt(self, text: str) -> bool:
+    def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
+        if accept is not None:
+            accept()
         return True
 
     def cancel(self) -> None: ...

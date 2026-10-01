@@ -216,13 +216,15 @@ def test_token_lost_before_handoff_releases_claim(
 ) -> None:
     from unittest.mock import Mock
 
+    from server.app.studio_chat import admission as admission_module
+
     service, _bus, register, workspace_id, user_id = chat
     register(TEXT_SCRIPT)
     session = service.create_session(workspace_id, user_id, "fake-agent")
     runtime = service.runtime(session["id"])
     send = Mock(wraps=runtime.handle.send_prompt)
     monkeypatch.setattr(runtime.handle, "send_prompt", send)
-    original = getattr(service_module, phase)
+    original = getattr(admission_module, phase)
 
     def invalidate(*args, **kwargs):
         with job_db.connect() as conn:
@@ -239,15 +241,14 @@ def test_token_lost_before_handoff_releases_claim(
                 )
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(service_module, phase, invalidate)
+    monkeypatch.setattr(admission_module, phase, invalidate)
     with pytest.raises(ConflictError, match="继续对话"):
         service.send_message(session["id"], workspace_id, "must not reach agent")
     send.assert_not_called()
     assert not runtime.turn_open
     assert service.get_session(session["id"])["status"] == "error"
     assert authenticate_scoped_token(job_db, runtime.token) is None
-    if phase == "renew_scoped_token":
-        assert job_db.count_studio_chat_user_messages(session["id"]) == 0
+    assert job_db.count_studio_chat_user_messages(session["id"]) == 0
 
 
 def test_capped_session_insert_enforces_cap_atomically(chat, job_db) -> None:
