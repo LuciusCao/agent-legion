@@ -1,4 +1,4 @@
-# Kimi 后台子代理完成接续（#806）
+# Kimi 后台任务活动与完成接续（#772/#806）
 
 Kimi 的 ACP `ACPSession.prompt()` 只在 prompt 请求内迭代通知流。Studio
 在 idle 时保持 ACP 连接，并不能使 Kimi 开始消费已经生成的后台完成通知。
@@ -19,9 +19,11 @@ session 的任务状态文件。没有后台完成任务时不请求模型。新
 
 路径遵循 Kimi 的 `KIMI_SHARE_DIR`（默认 `~/.kimi`）、工作目录规范路径的
 MD5 目录名和 ACP session id：`sessions/<cwd-md5>/<session-id>/tasks/`。
-只读 `spec.json` / `runtime.json`，只接受 version 1、session id 与任务 id
-完全匹配、root 所属的 agent 任务。不会扫描其他会话，不读任务输出，不修改
-Kimi 的通知消费状态。symlink、过大文件、不完整 JSON 与未知版本被忽略。
+只接受 version 1、session id 与任务 id 完全匹配、root 所属的 agent/bash
+任务。只读 `spec.json` / `runtime.json`；运行中只取输出文件更新时间，
+终态最多读 `output.log` 末尾 2048 字节、展示末尾 600 字符作为摘要，
+有 `failure_reason` 时优先展示它。不会扫描其他会话，也不修改 Kimi
+通知消费状态。symlink、非普通文件、过大/不完整 JSON 与未知版本被忽略。
 恢复会话时已有终态作为历史基线，不重复唤醒；恢复期间仍在运行的任务继续观察。
 
 本桥接依赖 Kimi 的本地 V1 存储格式；远程 Kimi 或自定义外部存储不在支持范围。
@@ -30,8 +32,24 @@ Kimi 的通知消费状态。symlink、过大文件、不完整 JSON 与未知�
 [background models](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/background/models.py)、
 [ACP session](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/acp/session.py)。
 
+## 活动可见性（#772）
+
+同一个 watcher 将创建、启动、运行、等待审批、完成、失败、终止、丢失和
+超时状态写入既有 `status` 会话流；现有 StatusLine 直接展示 detail。
+每条含任务 id、描述、开始时间与耗时，终态附截断结果摘要。状态不变时
+不反复刷消息。超过 120 秒无输出、心跳过期或已有任务状态无法读取时，
+写入一次对应提示；恢复活动后再写运行状态。提示只是观察，不会把任务
+擅自标记失败或完成。会话恢复后历史终态不重放，仍在运行的任务重新展示。
+
+取消只停止自动接续，仍展示已派发任务的状态；Bash 任务展示状态但不会
+触发 #806 的子代理自动接续。此适配仅支持本机 Kimi V1，不推断其它 harness
+的后台生命周期。不同 harness 需要各自提供有身份边界的真实状态来源。
+
 ## Quality Impact
 
 回归覆盖无人追问的完成接续、终态去重、运行中延迟、取消/关闭/旧 runtime
 守卫、token 失效、句柄拒绝、跨会话/子代理归属过滤、坏文件与符号链接拒绝。
 通过临时目录模拟 Kimi V1 文件及真实 watcher 线程，不需要模型调用。
+活动测试另外覆盖运行/等待审批、无输出/心跳过期/状态不可读与恢复、
+agent/bash 终态、摘要截断、FIFO 不阻塞读取、错误元数据和写消息失败重试。
+无 schema 与前端 transport 类型变更，不增加模型轮询或平台执行写面。

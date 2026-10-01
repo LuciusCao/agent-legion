@@ -1,6 +1,5 @@
 """Kimi V1 completion files wake an idle chat without a human prompt (#806)."""
 
-import json
 import os
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -11,24 +10,9 @@ from server.app.studio_chat import background_wakeup as wake
 from server.app.studio_chat.kimi_task_store import completed_tasks, task_root
 from server.app.studio_chat.runtime import SessionRuntime
 from tests.helpers import wait_for_predicate
+from tests.services.studio_background_testlib import write_task
 
 pytestmark = pytest.mark.no_db
-
-
-def write_task(root, task_id="agent-1", status="running", **spec_overrides):
-    path = root / task_id
-    path.mkdir(parents=True, exist_ok=True)
-    spec = {
-        "version": 1,
-        "id": task_id,
-        "session_id": "acp-1",
-        "kind": "agent",
-        "owner_role": "root",
-        **spec_overrides,
-    }
-    (path / "spec.json").write_text(json.dumps(spec))
-    (path / "runtime.json").write_text(json.dumps({"status": status}))
-    return path
 
 
 def test_reader_filters_foreign_nested_unknown_and_nonterminal_tasks(tmp_path):
@@ -76,7 +60,7 @@ def test_reader_rejects_special_files_before_open(tmp_path, monkeypatch, filenam
     original = os.open
 
     def guarded_open(target, *args, **kwargs):
-        assert target != path, "special file must be rejected before open"
+        assert target not in (path, path.name), "special file must be rejected before open"
         return original(target, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", guarded_open)
@@ -89,7 +73,7 @@ def test_reader_rechecks_file_replaced_between_stat_and_open(tmp_path, monkeypat
     descriptors = []
 
     def replace_with_fifo(target, flags, *args, **kwargs):
-        if target == path:
+        if target in (path, path.name):
             path.unlink()
             os.mkfifo(path)
             assert flags & os.O_NONBLOCK
@@ -134,7 +118,15 @@ def test_completion_wakes_once_without_user_prompt_and_records_receipt(chat, tmp
     # A new completion proves the watcher took another lap, without replaying
     # the first receipt; the ongoing assistant turn defers the next wake.
     write_task(tmp_path, "agent-2", "failed")
-    wait_for_predicate(lambda: service.store.append_message.call_count == 2)
+    wait_for_predicate(
+        lambda: (
+            sum(
+                c.args[3]["event"] == "background_task_finished"
+                for c in service.store.append_message.call_args_list
+            )
+            == 2
+        )
+    )
     assert runtime.handle.send_prompt.call_count == 1
     runtime.turn_open = False
     wait_for_predicate(lambda: runtime.handle.send_prompt.call_count == 2)
@@ -209,12 +201,35 @@ def test_cancelled_watcher_discards_completions_until_human_rearms(chat, tmp_pat
     wake.start_watcher(service, "chat-1", runtime, "acp-1")
     write_task(tmp_path, "agent-cancelled", "completed")
     # Wait on the reader rather than timing the worker thread.
-    original = wake.completed_tasks
+    original = wake.task_snapshots
     with pytest.MonkeyPatch.context() as patch:
         observed = Mock(wraps=original)
-        patch.setattr(wake, "completed_tasks", observed)
+        patch.setattr(wake, "task_snapshots", observed)
         wait_for_predicate(lambda: observed.call_count >= 2)
     runtime.background_wakeup_enabled = True
     write_task(tmp_path, "agent-new", "completed")
     wait_for_predicate(lambda: runtime.handle.send_prompt.call_count == 1)
     assert "agent-cancelled" not in runtime.handle.send_prompt.call_args.args[0]
+
+
+def test_running_and_bash_completion_are_visible_without_waking_model(chat, tmp_path):
+    service, runtime = chat
+    write_task(tmp_path, "shell-1", "running", kind="bash", description="Check documents")
+    wake.start_watcher(service, "chat-1", runtime, "acp-1")
+    wait_for_predicate(lambda: service.store.append_message.call_count == 1)
+    assert service.store.append_message.call_args.args[3]["status"] == "running"
+    runtime.handle.send_prompt.assert_not_called()
+    write_task(tmp_path, "shell-1", "completed", kind="bash", description="Check documents")
+    wait_for_predicate(lambda: service.store.append_message.call_count == 2)
+    assert service.store.append_message.call_args.args[3]["event"] == "background_task_finished"
+    runtime.handle.send_prompt.assert_not_called()
+
+
+def test_cancel_does_not_hide_task_receipts(chat, tmp_path):
+    service, runtime = chat
+    runtime.background_wakeup_enabled = False
+    wake.start_watcher(service, "chat-1", runtime, "acp-1")
+    write_task(tmp_path, "agent-1", "failed")
+    wait_for_predicate(lambda: service.store.append_message.call_count == 1)
+    assert service.store.append_message.call_args.args[3]["status"] == "failed"
+    runtime.handle.send_prompt.assert_not_called()

@@ -11,7 +11,7 @@ This matrix records the reverse audit of Phase 1-5 Workspace Executor architectu
 
 | Promise | Boundary | Invariant ID | Quick evidence | Full evidence | Result | Follow-up task |
 | --- | --- | --- | --- | --- | --- | --- |
-| Kimi V1 root-agent completions belong to one ACP session and runtime generation; automatic followups claim idle turns, respect cancellation/close/compaction, and never revive dead tokens | studio/runtime | STUDIO-BACKGROUND-001 | `tests/services/test_studio_chat_background_wakeup.py` | N/A | Verified | N/A |
+| Kimi V1 root agent/bash activity belongs to one ACP session and runtime generation; running/waiting/quiet/stale states and bounded terminal receipts appear in the timeline; only agent completions auto-follow up under idle-turn, cancellation, close, compaction and token guards | studio/runtime | STUDIO-BACKGROUND-001 | `tests/services/test_studio_chat_background_wakeup.py`, `tests/services/test_studio_chat_background_activity.py` | N/A | Verified | N/A |
 | Inline text only inserts new ready materials or reuses ready identities revalidated under row locks; non-ready conflicts reject the whole batch with 409, existing upload/TTL rows and keys remain untouched, and compensation deletes only unreferenced request-owned keys | materials/storage | MATERIAL-INLINE-OWNERSHIP-001 | `tests/routes/test_runs_text_api.py` | N/A | Verified | N/A |
 | Generated frontend API types remain synchronized with the backend OpenAPI schema | contract | API-CONTRACT-001 | `scripts/generate-api-types.sh` | N/A | Verified | N/A |
 | Routes, services, repositories, and executor adapters preserve dependency direction | layer | BOUNDARY-LAYER-001 | `scripts/check_architecture.py` | N/A | Verified | N/A |

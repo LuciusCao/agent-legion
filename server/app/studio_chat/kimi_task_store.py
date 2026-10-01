@@ -3,21 +3,27 @@
 Kimi ACP drains notifications only inside prompt(). Its task store is the
 out-of-turn completion signal: metadata.WorkDirMeta.sessions_dir and
 background/{models,store}.py in MoonshotAI/kimi-cli define this layout.
-Never inspect outputs, mutate consumer state, or traverse other sessions.
+Only bounded terminal output tails are read; never mutate consumer state
+or traverse other sessions.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
-import stat
 from collections.abc import Collection
 from pathlib import Path
-from typing import Any
 
-TERMINAL = frozenset({"completed", "failed", "killed", "lost"})
+from server.app.studio_chat.kimi_task_snapshot import (
+    ACTIVE,
+    TERMINAL,
+    BackgroundTask,
+    output_tail,
+    read_state,
+    timestamp,
+)
+
 _ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}\Z")
 
 
@@ -31,35 +37,15 @@ def task_root(cwd: str, session_id: str) -> Path | None:
     return share.resolve() / "sessions" / digest / session_id / "tasks"
 
 
-def _read(path: Path, root: Path) -> dict[str, Any]:
-    if path.resolve() != path or not path.is_relative_to(root):
-        return {}
-    if not stat.S_ISREG(path.lstat().st_mode):
-        return {}
-    # NONBLOCK also protects against a FIFO swapped in after lstat; fstat
-    # validates the opened object, and NOFOLLOW rejects a swapped symlink.
-    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
-    try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            return {}
-        data = os.read(descriptor, 65537)
-    finally:
-        os.close(descriptor)
-    if len(data) > 65536:
-        return {}
-    value = json.loads(data)
-    return value if isinstance(value, dict) else {}
-
-
-def completed_tasks(
+def task_snapshots(
     root: Path, session_id: str, *, ignored: Collection[str] = ()
-) -> dict[str, str]:
-    """Only root-owned agent tasks in this ACP session can trigger a wakeup.
+) -> dict[str, BackgroundTask]:
+    """Read only root-owned agent/bash tasks in this ACP session.
 
     Missing/partial/unsupported files are not proof of completion. The
     bounded read excludes large tool output and corrupt runtime payloads.
     """
-    result: dict[str, str] = {}
+    result: dict[str, BackgroundTask] = {}
     try:
         if root.resolve() != root or not root.is_dir():
             return result
@@ -67,21 +53,49 @@ def completed_tasks(
             if path.name in ignored or not _ID.fullmatch(path.name) or not path.is_dir():
                 continue
             try:
-                spec = _read(path / "spec.json", root)
+                spec = read_state(path / "spec.json", root)
                 if (
                     spec.get("version") != 1
                     or spec.get("id") != path.name
                     or spec.get("session_id") != session_id
-                    or spec.get("kind") != "agent"
+                    or spec.get("kind") not in ("agent", "bash")
                     or spec.get("owner_role", "root") != "root"
                 ):
                     continue
-                state = _read(path / "runtime.json", root)
+                state = read_state(path / "runtime.json", root)
                 status = state.get("status")
-                if isinstance(status, str) and status in TERMINAL:
-                    result[path.name] = "timed_out" if state.get("timed_out") else status
+                if not isinstance(status, str) or status not in ACTIVE | TERMINAL:
+                    continue
+                terminal = status in TERMINAL
+                output_at, summary = output_tail(path / "output.log", root, terminal=terminal)
+                reason = state.get("failure_reason")
+                if isinstance(reason, str) and reason:
+                    summary = reason[:600]
+                description = spec.get("description")
+                result[path.name] = BackgroundTask(
+                    path.name,
+                    str(spec["kind"]),
+                    "timed_out" if terminal and state.get("timed_out") is True else status,
+                    description[:240] if isinstance(description, str) else path.name,
+                    timestamp(state.get("started_at")) or timestamp(spec.get("created_at")),
+                    timestamp(state.get("finished_at")),
+                    timestamp(state.get("heartbeat_at")),
+                    output_at,
+                    summary,
+                )
             except (OSError, ValueError):
                 continue
     except OSError:
         return result
     return result
+
+
+def completed_tasks(
+    root: Path, session_id: str, *, ignored: Collection[str] = ()
+) -> dict[str, str]:
+    """Compatibility API: only agent completions qualify for auto-wakeup."""
+    return {
+        key: task.status
+        for key, task in task_snapshots(root, session_id, ignored=ignored).items()
+        if task.kind == "agent" and task.terminal
+    }

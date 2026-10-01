@@ -14,7 +14,8 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from server.app.studio_chat.kimi_task_store import completed_tasks, task_root
+from server.app.studio_chat.background_activity import BackgroundActivity
+from server.app.studio_chat.kimi_task_store import task_root, task_snapshots
 from server.app.studio_chat.token_keepalive import keepalive_run_token
 
 if TYPE_CHECKING:
@@ -85,36 +86,31 @@ def start_watcher(
     if root is None:
         return
     # Existing terminal history on resume is not a new completion.
-    seen = set(completed_tasks(root, acp_session_id))
+    seen = {key for key, task in task_snapshots(root, acp_session_id).items() if task.terminal}
+    activity = BackgroundActivity()
 
     def watch() -> None:
         pending: set[str] = set()
         while not runtime.background_stop.wait(POLL_SECONDS):
             try:
-                finished = completed_tasks(root, acp_session_id, ignored=seen)
+                tasks = task_snapshots(root, acp_session_id, ignored=seen)
                 with runtime.lock:
                     if runtime.closed or service.runtime(session_id) is not runtime:
                         return
-                    if not runtime.background_wakeup_enabled:
-                        seen.update(finished)
-                        pending.clear()
-                        continue
-                    for task_id, status in finished.items():
-                        if task_id in seen:
-                            continue
+                    for event in activity.updates(tasks, time.time()):
                         service.store.append_message(
                             session_id,
                             "status",
                             "system",
-                            {
-                                "event": "background_task_finished",
-                                "task_id": task_id,
-                                "status": status,
-                                "detail": f"后台子代理 {task_id}：{status}",
-                            },
+                            event,
                         )
-                        seen.add(task_id)
-                        pending.add(task_id)
+                        activity.recorded(event)
+                        if event["event"] == "background_task_finished":
+                            seen.add(event["task_id"])
+                            if event["kind"] == "agent" and runtime.background_wakeup_enabled:
+                                pending.add(event["task_id"])
+                    if not runtime.background_wakeup_enabled:
+                        pending.clear()
                     if pending and wake_session(service, session_id, runtime, sorted(pending)):
                         pending.clear()
             except Exception:
