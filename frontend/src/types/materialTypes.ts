@@ -16,6 +16,7 @@ export type RunItem =
   | ApiSchemas['RunItemMaterial']
   | ApiSchemas['RunItemRef']
   | ApiSchemas['RunItemBundle']
+  | ApiSchemas['RunItemText']
 export type RunCreateRequest = ApiSchemas['RunCreateRequest']
 export type RunCreateResponse = ApiSchemas['RunCreateResponse']
 export type RunRecord = ApiSchemas['RunRecord']

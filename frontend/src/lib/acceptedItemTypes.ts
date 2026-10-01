@@ -1,6 +1,6 @@
 import type { WorkflowDefinitionRecord } from '../types'
 
-export type AcceptedItemType = 'material' | 'ref' | 'bundle'
+export type AcceptedItemType = 'material' | 'ref' | 'bundle' | 'text'
 
 /**
  * 入口契约：active revision 的 start 节点声明的 accepted_item_types。
@@ -24,12 +24,16 @@ type ItemTypeDisplay = { label: string; description: string }
  * Studio 入口契约编辑器（WorkflowNodeStartContractEditor）、readOnly 入口
  * 契约视图（WorkflowNodeStartSection）、「添加条目」提示条（AddItemsDialog）。
  * 新增条目类型在这里补一条，三处文案自动一致；key 顺序即规范顺序
- * （material/ref/bundle）。
+ * （material/ref/bundle/text）。
  */
 export const ITEM_TYPE_DISPLAY: Record<AcceptedItemType, ItemTypeDisplay> = {
   material: { label: '上传文件', description: '单个材料文件，浏览器直接上传' },
   ref: { label: '外部平台内容', description: '粘贴 ID 或链接引用外部平台内容' },
   bundle: { label: '整个文件夹', description: '保持目录结构，整体算一个条目' },
+  text: {
+    label: '直接输入需求',
+    description: '在对话框里直接填写需求文字，存成一份 Markdown 材料',
+  },
 }
 
 /** 条目类型的用户视角 label；未知类型回退原始值（前向兼容）。 */
