@@ -99,9 +99,11 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         else:
             result_status, error = "completed", ""
     elif task.exit_code == 124:
-        # Timeout kill (synthetic 124 from wait_for_exit): stderr at this
-        # point is partial-run noise, not a crash cause — keep the
-        # established timeout attribution (#609) untouched.
+        # Timeout kill (synthetic 124 from wait_for_exit): the attribution
+        # face (error_message) keeps the established timeout wording (#609)
+        # untouched — but the EVIDENCE face (agent_stderr_tail below) still
+        # rides along (#755 终审 P3-1): attribution and evidence are
+        # decoupled, the partial-run stderr stays available for diagnosis.
         result_status, error = "failed", "Agent process timed out"
     else:
         result_status, error = "failed", stderr_error_message(task.exit_code, stderr_tail)
@@ -115,10 +117,15 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     }
     # #748: agent_stderr_tail rides the report metadata (not just the
     # archive) so the DB row + external error_summary surface the crash
-    # reason without unpacking the archive.
-    if task.exit_code not in (0, 130, 124) and stderr_tail:
+    # reason without unpacking the archive. Keep the END of the tail
+    # (#755 终审 P2-2): the tail exists because the crash stack sits at the
+    # end of the stream — a head cut would drop the crash header wholesale
+    # whenever the tail is full. #755 终审 P3-1: 124 (timeout) carries the
+    # tail too — the attribution face keeps "Agent process timed out", the
+    # evidence face is decoupled from it.
+    if task.exit_code not in (0, 130) and stderr_tail:
         metadata["agent_stderr_tail"] = stderr_tail.decode("utf-8", "replace")[
-            :MAX_ERROR_MESSAGE_CHARS
+            -MAX_ERROR_MESSAGE_CHARS:
         ]
     # #160 D12：与 upload_queue._bulk_transfer 同一直传判定（#201 收敛进
     # UploadTask.is_direct_upload）；直传时产物不再内嵌归档（字节走 presigned PUT）。

@@ -94,7 +94,8 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
     ``_recover_result_header`` in agent_worker_results.py).
 
     #748 R2 P2-1: the byte budget is enforced by a FOUR-STAGE degrade —
-    (1) shrink ``agent_stderr_tail`` (10% steps), (2) shrink
+    (1) shrink ``agent_stderr_tail`` (10% steps, keeping the END — the
+    crash stack sits at the end of the stream, #755 终审 P2-2), (2) shrink
     ``error_message`` (the classification surface, so only after the tail),
     (3) drop ``command`` (#755 对抗复审 P2-1b: pure observability — the
     Host records it but never judges on it; with 128 outputs the argv
@@ -118,7 +119,9 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
     while len(_serialized()) > _RESULT_HEADER_BUDGET:
         tail = payload.get("agent_stderr_tail")
         if isinstance(tail, str) and len(tail) > 200:
-            payload["agent_stderr_tail"] = tail[: int(len(tail) * 0.9)]
+            # #755 终审 P2-2：保尾不保头——tail 的存在理由是崩溃栈在流
+            # 末尾，头截会在满 tail 时把崩溃头整体丢掉。
+            payload["agent_stderr_tail"] = tail[-int(len(tail) * 0.9) :]
             continue
         error = payload.get("error_message")
         if isinstance(error, str) and len(error) > 200:

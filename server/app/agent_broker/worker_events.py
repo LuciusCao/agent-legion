@@ -243,14 +243,15 @@ def note_execution_finished(
             "job_id": str(payload["job_id"]),
             "outcome": str(outcome.status),
             "exit_code": int(outcome.exit_code),
-            # #748: crash-attribution head of the stderr tail rides the
-            # terminal event — the first 200 chars of the retained tail
-            # (a Traceback opens with its header line there), so the jq
-            # timeline shows the crash cause without a DB round-trip;
-            # absent for non-crash outcomes. The crash HEADER for
-            # error_message is the tail's last line (see stderr_evidence).
+            # #748: crash-attribution excerpt of the stderr tail rides the
+            # terminal event — the LAST 200 chars of the retained tail (the
+            # tail is keep-the-tail because a crash stack ends the stream;
+            # its head is arbitrary mid-stream noise once full, so the old
+            # head cut showed nothing useful exactly when it mattered,
+            # #755 终审 P2-2). The crash HEADER for error_message is the
+            # tail's last line (see stderr_evidence).
             **(
-                {"stderr_head": outcome.agent_stderr_tail[:200]}
+                {"stderr_tail_excerpt": outcome.agent_stderr_tail[-200:]}
                 if getattr(outcome, "agent_stderr_tail", "")
                 else {}
             ),

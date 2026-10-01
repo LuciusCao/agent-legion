@@ -26,14 +26,20 @@ from worker.upload.task import UploadTask
 # server 默认（server/app/executor_runtime.py 的 64 MiB）的保守常量——
 # Host 调大上限时此处需同步。保守方向：宁可拒绝换轨本地判败，也绝不把
 # 大产出人群重内嵌送进必死 413（丢结果 → 租约过期 → 全量重跑）。
+# #755 终审 P2-3：预检按 ceiling − margin 判定并计入 run_dir 实测——上限
+# 是运行时可在实例设置里调小的值（调小即破防），且 tar 头/gzip 开销不在
+# 产物口径内；长期解法是把 max_archive_bytes 加进 claim 下发面，worker
+# 按下发值判定而非本地常量。
 _ARCHIVE_EMBED_CEILING_BYTES = 64 * 1024 * 1024
+_EMBED_SAFETY_MARGIN_BYTES = 1024 * 1024
 
 
 def _embedded_artifacts_bytes(task: UploadTask) -> float:
-    """换轨预检：归档内嵌会打包进 tar 的产物字节总量（未压缩口径——gzip
-    对二进制不可假设，run_dir 的 events/日志有运行时限额，产物载荷占主导）。
-    与 prepare_result 同源地遍历 expected_outputs；stat 失败按 +inf——大小
-    未知即拒绝换轨。"""
+    """换轨预检：归档内嵌会打包进 tar 的字节总量——expected_outputs 产物
+    （未压缩口径——gzip 对二进制不可假设，产物载荷占主导）+ run_dir 实测
+    （换轨判定发生在 prepare 之后，events 已压缩，stat 即可；events/stderr
+    锚点/node.log 一并入 tar，MB 级，不计则余量被静默吃光）。
+    stat 失败按 +inf——大小未知即拒绝换轨。"""
     job_dir = task.execution_dir / "job"
     total = 0.0
     for name in task.expected_outputs:
@@ -41,6 +47,11 @@ def _embedded_artifacts_bytes(task: UploadTask) -> float:
             total += (job_dir / PurePosixPath(name)).stat().st_size
         except OSError:
             return float("inf")
+    run_dir = job_dir / "runs" / task.node_key / "worker"
+    try:
+        total += sum(entry.stat().st_size for entry in run_dir.rglob("*") if entry.is_file())
+    except OSError:
+        return float("inf")
     return total
 
 
@@ -106,16 +117,18 @@ def report_task(
             if overflow_fallback:
                 raise
             embedded_bytes = _embedded_artifacts_bytes(task)
-            if embedded_bytes > _ARCHIVE_EMBED_CEILING_BYTES:
-                # #748 R4（#755 换轨预检）：产物总量超归档内嵌上限时**不换轨**
-                # ——重内嵌只会把大产出人群送进 Host 413 → 丢结果 → 租约过期
-                # 全量重跑（每轮同样 413）。本地诚实判败：复用 CAS 4xx 判败
-                # 先例的 failed_metadata；归档保持直传形态（产物字节本就不在
-                # tar 里，events/日志照常携带），错误信息如实说明拒绝原因。
+            if embedded_bytes > _ARCHIVE_EMBED_CEILING_BYTES - _EMBED_SAFETY_MARGIN_BYTES:
+                # #748 R4（#755 换轨预检）：内嵌载荷总量（产物 + run_dir
+                # 实测）超「归档内嵌上限 − 安全余量」时**不换轨**——重内嵌
+                # 只会把大产出人群送进 Host 413 → 丢结果 → 租约过期全量重跑
+                # （每轮同样 413）；余量吸收 Host 调小上限与 tar/gzip 开销
+                # （#755 终审 P2-3）。本地诚实判败：复用 CAS 4xx 判败先例的
+                # failed_metadata；归档保持直传形态（产物字节本就不在 tar
+                # 里，events/日志照常携带），错误信息如实说明拒绝原因。
                 detail = (
-                    "an expected output could not be stat'ed"
+                    "an expected output or run-dir file could not be stat'ed"
                     if embedded_bytes == float("inf")
-                    else f"output artifacts total {int(embedded_bytes)} bytes"
+                    else f"embedded payload totals {int(embedded_bytes)} bytes"
                 )
                 print(
                     f"result header overflow for {task.execution_id}: {detail};"
@@ -125,9 +138,10 @@ def report_task(
                 overflow_fallback = True
                 metadata = failed_metadata(
                     task,
-                    f"{detail}: output artifacts exceed the archive-embed ceiling"
-                    f" ({_ARCHIVE_EMBED_CEILING_BYTES} bytes); cannot switch to"
-                    f" the archive-embedded channel",
+                    f"{detail}: embedded payload exceeds the archive-embed ceiling"
+                    f" budget ({_ARCHIVE_EMBED_CEILING_BYTES} bytes Host ceiling less"
+                    f" {_EMBED_SAFETY_MARGIN_BYTES} bytes safety margin); cannot switch"
+                    f" to the archive-embedded channel",
                 )
                 task.prepared_metadata = metadata
                 continue

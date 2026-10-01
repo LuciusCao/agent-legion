@@ -346,7 +346,8 @@ def test_result_header_value_escapes_cjk_as_raw_utf8_bytes() -> None:
 def test_result_header_value_shrinks_oversized_tail_under_budget() -> None:
     """超预算时按 tail 优先收缩（error_message 是分类面，最后动）：收缩后
     必须落在预算内，且 error_message 一字不动。产物清单为空（成功直传前
-    的元数据骨架），不触发第三级。"""
+    的元数据骨架），不触发第三级。#755 终审 P2-2：收缩保尾不保头——崩溃
+    栈在流末尾，头截会在满 tail 时把崩溃头整体丢掉。"""
     from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
 
     metadata = {
@@ -361,6 +362,8 @@ def test_result_header_value_shrinks_oversized_tail_under_budget() -> None:
     decoded = json.loads(header.decode("utf-8"))
     assert decoded["error_message"] == "Agent process exited 1: ValueError: boom"
     assert len(decoded["agent_stderr_tail"]) > 0
+    # 保尾：末段（崩溃头所在的尾部）完整保留，丢的是头部噪音。
+    assert decoded["agent_stderr_tail"].endswith("x" * 2000)
 
 
 def test_result_header_value_stage_order_tail_error_then_artifact_signal() -> None:

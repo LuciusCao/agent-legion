@@ -95,7 +95,9 @@ def test_cancel_exit_130_unchanged_by_stderr(tmp_path: Path) -> None:
 
 def test_timeout_exit_124_reports_timeout_not_crash(tmp_path: Path) -> None:
     """124 超时语义独立：error_message 归因到超时（可被 failure_classification
-    的 timeout 规则接住），不把半程 stderr 噪音当成崩溃原因。"""
+    的 timeout 规则接住），不把半程 stderr 噪音当成崩溃原因。#755 终审 P3-1：
+    归因面与证据面解耦——error_message 不变，agent_stderr_tail 照常携带
+    （半程 stderr 仍是排障证据）。"""
     work_root = tmp_path / "work"
     _execution_dir(work_root)
     _events_with_stderr(work_root, ["still working on it..."])
@@ -106,7 +108,7 @@ def test_timeout_exit_124_reports_timeout_not_crash(tmp_path: Path) -> None:
     report = client.reports[0]
     assert report["status"] == "failed"
     assert report["error_message"] == "Agent process timed out"
-    assert "agent_stderr_tail" not in report
+    assert report["agent_stderr_tail"] == "still working on it..."
 
 
 def test_completed_exit_zero_writes_stderr_trace_without_failing(tmp_path: Path) -> None:
@@ -277,6 +279,52 @@ def test_read_back_anchor_flows_through_unified_redact(
 
     assert secret.encode() not in tail
     assert b"auth failed for ***" in tail
+
+
+def test_cjk_single_line_straddling_secret_leaks_nowhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#755 终审 P2-1 端到端：4100 字 CJK 单行（12300 字节，字符口径 ≤ 8192
+    但字节口径超预算——修复前恰好绕过字符闸门不进脱敏漏斗）+ 自定义形态密钥
+    （非内建形态，只有 env 字面量通道接得住）骑跨 8KB 字节切割点。修复后
+    error_message / metadata.agent_stderr_tail / 归档锚点三面均无密钥与残段。"""
+    from tests.executors.test_pi_event_compression import _cjk_line_with_straddling_secret
+
+    secret = "zz-e2e-gateway-token-" + "t" * 84  # 105 字节自定义形态密钥
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _events_with_stderr(work_root, [_cjk_line_with_straddling_secret(secret)])
+    client = QueueFakeClient()
+    archived: dict[str, bytes] = {}
+    original_report = client.report
+
+    def report_and_capture(
+        execution_id: str, lease_id: str, metadata: dict, archive: Path
+    ) -> tuple[int, bytes]:
+        with tarfile.open(archive, "r:gz") as tar:
+            member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
+            extracted = tar.extractfile(member)
+            assert extracted is not None
+            archived[member.name] = extracted.read()
+        return original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_and_capture  # type: ignore[method-assign]
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=5))
+    queue.shutdown()
+    report = client.reports[0]
+    # 面 1+2：error_message + metadata.agent_stderr_tail——修复前 metadata 面
+    # 携带密钥尾段残片（连续 t 串，整值匹配不上、下游重脱敏接不住）。
+    combined = report["error_message"] + report["agent_stderr_tail"]
+    assert secret not in combined
+    assert "zz-e2e" not in combined
+    assert "t" * 20 not in combined
+    # 面 3：归档锚点。
+    [archived_tail] = archived.values()
+    assert secret.encode() not in archived_tail
+    assert b"t" * 20 not in archived_tail
+    assert archived_tail.count(b"***") >= 1
 
 
 # -- #748 R2 P2-2/P2-3/P3-4：脱敏顺序、配置 environment 通道、规则边界 --

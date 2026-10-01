@@ -108,7 +108,12 @@ def scan_and_compress_pi_events(
     pre-truncated returns REDACTED: the safer direction, since the
     fragment surviving a raw cut is unmatchable downstream. #755 对抗复审
     P3-2: the return face's final byte cut is line-aligned (a real cut
-    drops the leading partial line).
+    drops the leading partial line). #755 终审 P2-1: the funnel gate is
+    byte-measured (a CJK single line can be ≤ the budget in chars yet far
+    over it in bytes — the char gate used to let it slip through unredacted
+    into the raw byte cut), and the final cut's no-newline arm (one line
+    spanning the whole window, no line boundary to align to) redacts the
+    whole buffer before slicing instead of raw-cutting an unredacted face.
 
     Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``.
     ``stderr_tail`` is the bounded keep-the-tail capture of the non-JSON
@@ -123,10 +128,12 @@ def scan_and_compress_pi_events(
 
     compressed_path = events_path.with_suffix(".jsonl.compressing")
     model_error: str | None = None
-    # 单行预截走 _redact_then_tail_text 漏斗（扩窗 → 脱敏 → 再截），deque 运行
-    # 总量按字符 pop 整行（无骑跨），最终 encode 后再按 STDERR_TAIL_BYTES
-    # 字节切片兜底——bytes 与 chars 的比例上限是 4（UTF-8），兜底切片只在
-    # 多字节字符把字符预算换算放大时收紧，不会放松上限。
+    # 单行预截走 _redact_then_tail_text 漏斗（字节口径闸门 → 扩窗 → 脱敏 →
+    # 再截），deque 运行总量按字符 pop 整行（无骑跨），最终 encode 后再按
+    # STDERR_TAIL_BYTES 字节切片兜底——bytes 与 chars 的比例上限是 4
+    # （UTF-8），兜底切片只在多字节字符把字符预算换算放大时收紧，不会放松
+    # 上限。#755 终审 P2-1：兜底切片经 redact 回调过一道（无换行的单行
+    # 超预算形态无行界可对齐，先对整体脱敏再保尾）。
     stderr_tail: deque[str] = deque()
     stderr_chars = 0
     try:
@@ -162,7 +169,7 @@ def scan_and_compress_pi_events(
         return None, 0, 0, b""
 
     encoded_tail = "\n".join(stderr_tail).encode("utf-8", "replace")
-    tail = _keep_tail_slice(encoded_tail)
+    tail = _keep_tail_slice(encoded_tail, redact)
     if stderr_sink is not None and tail:
         # Best-effort AT THE CALL SITE: an unwritable sink must never fail
         # the compression (the in-memory tail still rides the return value).
@@ -212,8 +219,16 @@ def _redact_then_tail_text(text: str, redact: Callable[[bytes], bytes] | None) -
     This is the same discipline as the sink's widened byte window below
     and stderr_error_message's redact-then-200-chars; the deque
     running-total pop drops whole lines (no straddle possible) and the
-    RAW return face's final cut is line-aligned (``_keep_tail_slice``) —
-    neither needs this funnel.
+    RAW return face's final cut is line-aligned (``_keep_tail_slice``).
+
+    #755 终审 P2-1: the gate is measured in BYTES, not chars — the budget
+    is a byte budget, and a single CJK line (chars ≤ 8192 but bytes up to
+    3x over) used to slip past the char gate unredacted into the final
+    byte cut, whose no-newline arm then raw-sliced the straddling secret's
+    tail fragment onto the return face. The char window itself needs no
+    byte conversion: ``STDERR_TAIL_BYTES + margin`` chars are always ≥ the
+    same number of bytes, so the redacted window still covers the final
+    byte cut with the whole margin.
 
     In-budget text is returned untouched (the return face stays RAW by
     contract; the caller redacts with richer context). ``redact=None``
@@ -223,7 +238,7 @@ def _redact_then_tail_text(text: str, redact: Callable[[bytes], bytes] | None) -
     the return face) and must not kill the compression pass (the same
     discipline as the sink call site's broad catch)."""
     window = text[-(STDERR_TAIL_BYTES + _REDACT_WINDOW_MARGIN) :]
-    if redact is not None and len(text) > STDERR_TAIL_BYTES:
+    if redact is not None and len(text.encode("utf-8", "replace")) > STDERR_TAIL_BYTES:
         try:
             window = redact(window.encode("utf-8", "replace")).decode("utf-8", "replace")
         except Exception:
@@ -231,7 +246,7 @@ def _redact_then_tail_text(text: str, redact: Callable[[bytes], bytes] | None) -
     return window[-STDERR_TAIL_BYTES:]
 
 
-def _keep_tail_slice(data: bytes) -> bytes:
+def _keep_tail_slice(data: bytes, redact: Callable[[bytes], bytes] | None = None) -> bytes:
     """Slice to the last STDERR_TAIL_BYTES, dropping the leading partial line
     when a real cut happened.
 
@@ -239,16 +254,37 @@ def _keep_tail_slice(data: bytes) -> bytes:
     secret that straddles the boundary — the redaction passes match whole
     values only, so the fragment would survive onto the RAW return face
     (→ error_message/metadata). Line-aligning the cut removes the
-    straddling fragment structurally; a single line longer than the whole
-    budget keeps the raw cut (the widened redact window in
-    ``_redact_then_tail`` is the backstop there)."""
+    straddling fragment structurally.
+
+    #755 终审 P2-1: the no-newline arm (a single line covering the whole
+    cut window) has no line boundary to align to, so it must NOT raw-slice
+    an unredacted face — the line may have slipped the per-line funnel
+    only via the pre-fix char gate, and belt-and-suspenders costs one
+    bounded pass. Redact the WHOLE buffer first (the straddling secret is
+    complete inside it — its head lies before the cut point), then take
+    the tail; on the happy path the line was already redacted by the
+    byte-gated funnel and this pass is a no-op. ``redact=None`` (legacy /
+    non-secret callers) keeps the raw cut; a callback failure degrades to
+    the raw cut, same best-effort discipline as the funnel."""
     if len(data) <= STDERR_TAIL_BYTES:
         return data
     cut = data[-STDERR_TAIL_BYTES:]
     if data[-STDERR_TAIL_BYTES - 1 :][:1] == b"\n":
         return cut  # 切点恰好落在行首，无残行
     newline = cut.find(b"\n")
-    return cut[newline + 1 :] if newline != -1 else cut
+    if newline != -1:
+        return cut[newline + 1 :]
+    if redact is not None:
+        try:
+            return redact(data)[-STDERR_TAIL_BYTES:]
+        except Exception:
+            # #204 broad-except audit: 二次防御脱敏（主脱敏在单行漏斗已完成）
+            # 的回调逃逸不得击穿压缩通道——退化方向是保持行内 raw 切（修复前
+            # 行为），调用方出口面（stderr_evidence）仍会统一重脱敏。结果
+            # 空间：残段可能进 return face，与 funnel 内同款捕获同纪律。
+            # 日志保全：logger.exception 带堆栈。
+            logger.exception("Redact callback failed; keeping the raw tail cut")
+    return cut
 
 
 def _persist_stderr_tail(sink: Path, tail: bytes) -> None:

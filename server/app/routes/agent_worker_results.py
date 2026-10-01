@@ -89,8 +89,10 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
     if not isinstance(auth_failure_raw, str) or len(auth_failure_raw) > _MAX_CONNECTION_KEY_CHARS:
         raise ValueError("invalid auth_failure_connection")
     # #748: bounded, optional stderr tail for agent-crash attribution
-    # (absent for completed/cancelled/timeout runs and older Workers).
-    agent_stderr_tail = str(metadata.get("agent_stderr_tail", ""))[:_MAX_AGENT_STDERR_TAIL_CHARS]
+    # (absent for completed/cancelled runs and older Workers). Keep the END
+    # on the defensive cap too (#755 终审 P2-2): the tail exists because the
+    # crash stack sits at the end of the stream.
+    agent_stderr_tail = str(metadata.get("agent_stderr_tail", ""))[-_MAX_AGENT_STDERR_TAIL_CHARS:]
     # #748 R2 P2-1: writer-side artifact-list truncation markers. The Worker
     # only emits them when the byte budget forced a degrade, and then
     # ALWAYS as a pair; tolerate a lone/missing half the same way (absent =

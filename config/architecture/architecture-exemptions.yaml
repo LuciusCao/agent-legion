@@ -1218,13 +1218,14 @@ exemptions:
     _redact_then_tail_text（扩窗 → 脱敏 → 再截），单行预截不再「先截后
     脱敏」，骑跨切割点的密钥整值命中替换；字节面（sink 扩窗、最终行
     对齐切片）经审计本已同序，与漏斗共用 _REDACT_WINDOW_MARGIN。
-    防御性正确性代码使有效行 77→116（仍压 ceiling+growth_allowance
-    带内，ceiling 不动）。
+    #755 终审 P2-1：漏斗闸门改字节口径（CJK 单行字符 ≤ 预算但字节超
+    预算的旧盲区）+ 最终切片无换行臂先整体脱敏再保尾（不再对未脱敏面
+    裸切），有效行 116→125（超 growth_allowance 带，重签带 expires）。
     时间盒：stderr 留痕管线稳定后若下沉为独立 sink 模块（shared 侧
     stdlib-only 约束内的拆分），重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
-  ceiling: 102
+  ceiling: 125
   expires: 2026-12-31
 - check: architecture.file_budget
   path: worker/host/transfer.py
@@ -1269,8 +1270,9 @@ exemptions:
     83→112；#755 对抗复审 P3-1（换轨中途判死走 lost 终态当场清理而
     非滞留）到 115；#755 R4 换轨预检（产物总量超归档内嵌上限时拒绝换轨、
     本地诚实判败，避免送进 Host 413 丢结果全量重跑；_embedded_artifacts_bytes
-    预检助手 + 判败分支）到 146（超 growth_allowance 带，重签带 expires）。
-    时间盒：回退链若与 DirectUploadError 回退路径统一收口为单一换轨助手
+    预检助手 + 判败分支）到 146；#755 终审 P2-3（预检计入 run_dir 实测 +
+    ceiling 减固定安全余量，吸收 Host 运行时调小上限与 tar/gzip 开销）
+    仍在带内。时间盒：回退链若与 DirectUploadError 回退路径统一收口为单一换轨助手
     （report 车道与 bulk 车道共享），此处重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748

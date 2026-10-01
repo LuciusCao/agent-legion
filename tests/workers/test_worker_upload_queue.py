@@ -544,20 +544,26 @@ def _overflow_on_direct_refs(client: QueueFakeClient, captured: dict[str, Any]) 
 def test_result_header_overflow_oversize_artifacts_fail_honestly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#748 R4（#755 换轨预检，简化方案）：产物总量超归档内嵌上限（Host 413
-    的判定值）时**不换轨**——重内嵌会把大产出人群送进 413 → 丢结果 → 租约
-    过期全量重跑（每轮同样 413）。本地诚实判败：failed_metadata 上报，
-    小归档照常携带 events/日志，无 CAS 重传，直传规格保持不动。"""
+    """#748 R4（#755 换轨预检，简化方案）：内嵌载荷总量（产物 + run_dir 实测，
+    #755 终审 P2-3）超「归档内嵌上限 − 安全余量」（Host 413 的判定口径）时
+    **不换轨**——重内嵌会把大产出人群送进 413 → 丢结果 → 租约过期全量重跑
+    （每轮同样 413）。本地诚实判败：failed_metadata 上报，小归档照常携带
+    events/日志，无 CAS 重传，直传规格保持不动。"""
     from worker.upload import report as report_module
 
-    # 用小常量代替 64 MiB，避免 tmp 盘写大文件（总量口径与上限同源断言）。
+    # 用小常量代替 64 MiB / 1 MiB，避免 tmp 盘写大文件（总量口径与上限同源断言）。
     monkeypatch.setattr(report_module, "_ARCHIVE_EMBED_CEILING_BYTES", 1024)
+    monkeypatch.setattr(report_module, "_EMBED_SAFETY_MARGIN_BYTES", 0)
     outputs = tuple(f"output-{i:03d}.json" for i in range(3))
     work_root = tmp_path / "work"
     _execution_dir(work_root)
     job_dir = work_root / "exec-1" / "job"
     for name in outputs:
         (job_dir / name).write_bytes(b"\0" * 1024)  # 3 KiB > 1 KiB 预检上限
+    # run_dir 实测计入预检（P2-3）：提交前量出（prepare 压缩后内容不变）。
+    run_dir_bytes = sum(
+        p.stat().st_size for p in (job_dir / "runs" / "node_a" / "worker").rglob("*") if p.is_file()
+    )
 
     def direct_upload_ok(path: Path, spec: object, **_kw: object) -> dict:
         return {
@@ -582,7 +588,8 @@ def test_result_header_overflow_oversize_artifacts_fail_honestly(
     report = client.reports[0]
     assert report["status"] == "failed"
     assert "archive-embed ceiling" in report["error_message"]
-    assert "3072" in report["error_message"]  # 未压缩口径的总量如实上报
+    # 未压缩口径的总量如实上报：产物 + run_dir 实测（P2-3 前只报产物）。
+    assert f"totals {3072 + run_dir_bytes} bytes" in report["error_message"]
     assert report["output_artifacts"] == {}
     # 未换轨：直传规格保留、CAS 通道零重传、归档不内嵌产物字节。
     assert task.artifact_uploads  # 规格 intact
@@ -592,6 +599,50 @@ def test_result_header_overflow_oversize_artifacts_fail_honestly(
     assert any(member.startswith("runs/node_a/worker") for member in captured["members"])
     # 判败上报成功（204）：marker 与执行目录照常收尾。
     assert not (work_root / "exec-1").exists()
+
+
+def test_result_header_overflow_safety_margin_rejects_near_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#755 终审 P2-3 余量臂：总量落在 (ceiling − margin, ceiling) 带内同样
+    拒绝换轨——余量吸收「Host 运行时调小上限」与 tar/gzip 开销，贴线换轨
+    就是赌 Host 侧一字节不差。"""
+    from worker.upload import report as report_module
+
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    job_dir = work_root / "exec-1" / "job"
+    (job_dir / "output.json").write_bytes(b"\0" * 512)
+    run_dir_bytes = sum(
+        p.stat().st_size for p in (job_dir / "runs" / "node_a" / "worker").rglob("*") if p.is_file()
+    )
+    total = 512 + run_dir_bytes
+    # 总量在带内：total > ceiling − margin（拒绝）但 total < ceiling（旧判定放行）。
+    monkeypatch.setattr(report_module, "_ARCHIVE_EMBED_CEILING_BYTES", total + 128)
+    monkeypatch.setattr(report_module, "_EMBED_SAFETY_MARGIN_BYTES", 256)
+
+    def direct_upload_ok(path: Path, spec: object, **_kw: object) -> dict:
+        return {
+            "storage_key": str(dict(spec)["storage_key"]),
+            "size_bytes": 512,
+            "content_hash": "a" * 64,
+        }
+
+    monkeypatch.setattr(upload_queue, "upload_artifact_direct", direct_upload_ok)
+    client = QueueFakeClient()
+    task = _task(work_root)
+    task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
+    captured: dict[str, Any] = {}
+    _overflow_on_direct_refs(client, captured)
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "archive-embed ceiling" in report["error_message"]
+    assert client.uploads == {}  # 无 CAS 重传（未换轨）
 
 
 def test_result_header_overflow_unstattable_output_fails_honestly(

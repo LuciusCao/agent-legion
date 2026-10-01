@@ -371,3 +371,50 @@ def test_scan_and_compress_redact_callback_error_never_fails_scan(tmp_path):
     assert original > 0 and compressed > 0  # 压缩未因回调逃逸中断
     assert tail == b"panic: real cause"
     assert not sink.exists()
+
+
+def _cjk_line_with_straddling_secret(secret: str) -> str:
+    """#755 终审 P2-1 复现形态：4100 个字符的 CJK 单行（12300 字节——字符数
+    ≤ 8192 但字节数 > 8192，恰好绕过旧的字符口径闸门），自定义形态密钥
+    （非内建 sk-/ghp_ 形态，只能整值字面匹配）的中点骑跨 8KB 字节切割点。"""
+    from shared.pi_events import STDERR_TAIL_BYTES
+
+    total_bytes = 4100 * 3
+    cut_at = total_bytes - STDERR_TAIL_BYTES  # 4108
+    pre_bytes = cut_at - len(secret.encode()) // 2  # 密钥中点对齐切割点
+    # CJK 主体 + ASCII 微调，把密钥起点精确放到 pre_bytes。
+    line = "噪" * (pre_bytes // 3) + "a" * (pre_bytes % 3) + secret
+    remaining = total_bytes - len(line.encode())
+    line += "噪" * (remaining // 3) + "a" * (remaining % 3)
+    assert len(line.encode()) == total_bytes
+    assert len(line) <= STDERR_TAIL_BYTES  # 字符口径在预算内——旧闸门的盲区
+    return line
+
+
+def test_scan_and_compress_cjk_single_line_byte_gate_redacts_straddling_secret(tmp_path):
+    """#755 终审 P2-1（字符/字节口径混淆）：4100 字 CJK 单行（12300 字节）
+    在旧的字符闸门（len(text) > 8192）下不进脱敏漏斗，最终字节兜底裸切，
+    骑跨切割点的密钥尾段明文经 return tail → error_message/metadata 外泄
+    （sink 面本就安全：扩窗脱敏先于切割）。修复后闸门按字节判定、单行先过
+    漏斗脱敏，且无换行臂先对整体脱敏再保尾——return tail 与 sink 均无
+    密钥与残段。"""
+    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+
+    secret = "zz-custom-gateway-token-" + "t" * 80  # 104 字节自定义形态密钥
+    line = _cjk_line_with_straddling_secret(secret)
+    events = tmp_path / "events.jsonl"
+    events.write_text(f'{{"type":"session"}}\n{line}\n')
+    sink = tmp_path / "agent-stderr.log"
+    _, _, _, tail = scan_and_compress_pi_events(
+        events,
+        stderr_sink=sink,
+        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+    )
+    # 修复前的泄漏形态：return tail 含密钥尾段残片（"ttt..."）——整值匹配
+    # 不上，下游 stderr_evidence 的重脱敏也接不住。
+    for face in (tail, sink.read_bytes()):
+        assert len(face) <= STDERR_TAIL_BYTES
+        assert secret.encode() not in face
+        assert b"zz-custom" not in face  # 密钥前缀残段
+        assert b"tttt" not in face  # 密钥尾段残片（切割点之后的半边）
+        assert b"***" in face  # 密钥在切割前已整值脱敏

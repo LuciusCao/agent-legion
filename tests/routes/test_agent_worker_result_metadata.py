@@ -120,11 +120,13 @@ def test_agent_stderr_tail_accepted_and_bounded() -> None:
             "error_message": "x",
             "command": [],
             "output_artifacts": {},
-            "agent_stderr_tail": "y" * 5000,
+            "agent_stderr_tail": "h" * 1000 + "y" * 4000,
         }
     )
     outcome_over, _ = parse_result_metadata(oversized)
-    assert len(outcome_over.agent_stderr_tail) == 4000
+    # #755 终审 P2-2：Host 兜底截断同样保尾（崩溃栈在流末尾）——满 tail
+    # 时头截会把崩溃头整体丢掉。
+    assert outcome_over.agent_stderr_tail == "y" * 4000
 
 
 @_parse_only
