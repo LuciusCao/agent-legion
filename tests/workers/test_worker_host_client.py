@@ -607,3 +607,57 @@ def test_recover_result_header_keeps_legacy_ascii_and_mojibake_as_is() -> None:
     # 之列时保持原样——不抛错、不改写。
     raw = "caf\xe9"
     assert _recover_result_header(raw) == raw
+
+
+def _require_output_argv(count: int) -> list[str]:
+    # agent argv 形态：每个 expected output 以 --require-output <name> 重复。
+    argv = ["/usr/bin/velites", "run", "--provider", "p", "--model", "m"]
+    for i in range(count):
+        argv += ["--require-output", f"output-{i:03d}.json"]
+    return argv
+
+
+def test_result_header_value_caps_command_parts_without_budget_overflow() -> None:
+    """#822：45 个产物的 argv 超过 64 段但字节远未撞头预算（#755 的 command
+    降级不会触发）——序列化侧无条件把 command 收缩到 Host 段数上限（保前缀），
+    直传清单一条不丢、不抛回退信号，Host 解析不再 400。"""
+    from server.app.routes.agent_worker_results import (
+        _recover_result_header,
+        parse_result_metadata,
+    )
+    from shared.code_contract import MAX_RESULT_COMMAND_PARTS
+    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
+
+    argv = _require_output_argv(45)
+    assert len(argv) > MAX_RESULT_COMMAND_PARTS
+    artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(45)}
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "error_message": "",
+        "command": argv,
+        "output_artifacts": artifacts,
+        "run_dir": "runs/node_a/worker",
+    }
+    header = _result_header_value(metadata)
+    assert len(header) <= _RESULT_HEADER_BUDGET
+    decoded = json.loads(header.decode("utf-8"))
+    assert decoded["command"] == argv[:MAX_RESULT_COMMAND_PARTS]
+    assert decoded["output_artifacts"] == artifacts
+    assert "output_artifacts_truncated" not in decoded
+    # 入参不被原地改写（调用方可能重试复用同一 metadata）。
+    assert metadata["command"] == argv
+    outcome, _ = parse_result_metadata(_recover_result_header(header.decode("latin-1")))
+    assert outcome.command == tuple(argv[:MAX_RESULT_COMMAND_PARTS])
+    assert outcome.output_artifacts == artifacts
+
+
+def test_result_header_value_keeps_command_within_part_cap_untouched() -> None:
+    """#822 stage 0 只在超限时生效：段数恰为上限的 argv 原样保留。"""
+    from shared.code_contract import MAX_RESULT_COMMAND_PARTS
+    from worker.host.transfer import _result_header_value
+
+    argv = [f"arg-{i}" for i in range(MAX_RESULT_COMMAND_PARTS)]
+    metadata = {"status": "failed", "exit_code": 1, "command": argv, "output_artifacts": {}}
+    decoded = json.loads(_result_header_value(metadata).decode("utf-8"))
+    assert decoded["command"] == argv
