@@ -3,10 +3,11 @@
  * 面板本体的 fixed 定位与 react-rnd 拖拽位移由 Rnd 的内联 style 承担，
  * 这里只负责内部结构（标题栏拖拽把手/内容区）。折叠小条已随 #795 收尾
  * 移除（开/关两态）。
- * z-index 分层（仓库实际值）：页面内容（JobFilterBar 10）< AppBar 100 <
- * 本面板 900 < Toast 1000 = DagFullscreenDialog 1000 < TokenUsageDialog
- * 1190/1200 < MUI Modal 1300——面板是页面级非模态 chrome：高于 AppBar/页面
- * 内容，但必须让位全局通知与一切全局对话框。
+ * z-index 分层（全局刻度单一声明点 lib/zLayers.ts）：页面内容 < AppBar
+ * 100 < 本面板 900–999 < DagFullscreenDialog 1000 < TokenUsageDialog
+ * 1190/1200 < Studio 抽屉 1200–1289 < Toast 1290 < MUI Modal 1300——面板是
+ * 页面级非模态 chrome：高于 AppBar/页面内容，但必须让位全局通知与一切全局
+ * 对话框。
  */
 
 .surface {

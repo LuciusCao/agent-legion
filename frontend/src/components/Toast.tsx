@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Z_LAYERS } from '../lib/zLayers'
 import { useUiStore } from '../stores/uiStore'
 import styles from './Toast.module.css'
 
@@ -18,6 +19,8 @@ export default function Toast() {
   return (
     <div
       className={`${styles.toast} ${styles[toast.type]}`}
+      // 层级取全局刻度（#818）：压过 Studio 右侧抽屉，低于 MUI Modal。
+      style={{ zIndex: Z_LAYERS.toast }}
       role="status"
       aria-live="polite"
     >

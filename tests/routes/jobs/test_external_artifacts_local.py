@@ -205,3 +205,24 @@ def test_symlink_files_are_not_advertised(client_factory, monkeypatch, tmp_path)
         raw = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts/link.json/raw")
         assert raw.status_code in (400, 404)
         assert b"outside-secret" not in raw.content
+
+
+def test_artifact_list_no_url_without_object_storage(client_factory, monkeypatch):
+    """#739: instance without a bucket — every entry (only local ones can
+    exist) has null download_url/expires_at; object_storage_enabled still
+    False. ``script.md`` is one of the job snapshot's declared outputs —
+    the local listing is narrowed to declared names (#703 round 4)."""
+    with client_factory(fresh=True) as c:
+        monkeypatch.setattr(c.app.state.job_artifact_objects, "storage", None)
+        _seed_workspace(c, "ws-a")
+        job = _create_job(c, "ws-a")
+        storage = Path(job["storage_dir"])
+        storage.mkdir(parents=True, exist_ok=True)
+        (storage / "script.md").write_text("{}", encoding="utf-8")
+
+        body = c.get(f"/api/workspaces/ws-a/jobs/{job['id']}/artifacts").json()
+
+    assert body["object_storage_enabled"] is False
+    entry = next(e for e in body["artifacts"] if e["name"] == "script.md")
+    assert entry["download_url"] is None
+    assert entry["expires_at"] is None

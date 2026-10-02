@@ -11,7 +11,6 @@ agent spawn（worker/execution/prepare.py）统一走 ``resolve_binary``，
 
 from __future__ import annotations
 
-import os
 import shutil
 
 # Worker 自带二进制目录：仓库根（worker/ 包的父目录）下的 data/bin。
@@ -30,8 +29,9 @@ __all__ = ["BUNDLED_BINARY_DIR", "resolve_binary"]
 def resolve_binary(binary: str) -> str | None:
     """解析二进制绝对路径：自带副本（data/bin/）优先，PATH 兜底。
 
-    自带副本必须存在且可执行；找不到时返回 None。"""
+    自带副本必须存在且可执行（接受谓词 is_consumable_binary，与部署
+    判鲜/解析 walk 同一事实源，#835）；找不到时返回 None。"""
     bundled = code_sandbox.BUNDLED_SANDBOX_DIR / binary
-    if bundled.is_file() and os.access(bundled, os.X_OK):
+    if code_sandbox.is_consumable_binary(bundled):
         return str(bundled)
     return shutil.which(binary)

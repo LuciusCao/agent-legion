@@ -6,14 +6,38 @@ another workspace is a 404, not a 403, so ids cannot be probed across
 workspaces). All data access stays behind the JobQueries facade
 (BOUNDARY-DATA-001); the listing merges the object-storage manifest (the
 authoritative copy, EXEC-ARTIFACT-STORE-001) with legacy local job_dir names.
+
+#739 appends presigned GET download URLs to the object-backed entries: the
+signature covers ONLY the manifest row's storage_key (a server-generated key
+under jobs/{workspace_id}/{job_id}/ — record_remote/verify_remote reject any
+key outside that layout, so no request input reaches the signed string), and
+the URL carries just SigV4 query parameters — no credentials. The URL is a
+channel to the SAME representation the raw endpoint serves: the raw
+endpoint's response headers (whitelisted Content-Type, attachment
+Content-Disposition, ``Content-Encoding: gzip`` for #338 ``.gz`` objects) are
+signed in as S3 response overrides, so every object row — including the
+``.gz`` outputs of v4+ Workers — gets a URL (see _presigned_headers). What
+the URL does NOT inherit from the Host (per-request auth, version pinning)
+is contracted in remote-execution-runbook §9.
+
+Signing stays OFF the status read path: ``status`` derives names from the
+unsigned listing parts (manifest rows + local names), so a broken signing
+client/credential can never turn the lightweight DB-only poll into a 500,
+and polling never mints URLs that would be discarded (#739 codex P2).
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from server.app.jobs import JobQueries
-from server.app.services.job_artifact_media import raw_media_type
+from server.app.services.job_artifact_gzip import is_gzip_key
+from server.app.services.job_artifact_media import (
+    attachment_disposition,
+    raw_disposition_type,
+    raw_media_type,
+)
 from server.app.services.job_artifact_names import (
     is_downloadable_artifact_name,
     is_plausible_job_id,
@@ -46,6 +70,20 @@ def _listing_rows(store: Any, job: dict[str, Any]) -> tuple[set[str], dict[str, 
         for name, row in latest.items()
         if is_downloadable_artifact_name(name) and not refuse_row_outside_job_prefix(row, job)
     }
+
+
+def _presigned_headers(name: str, gzipped: bool) -> dict[str, str]:
+    """S3 response overrides that make a presigned GET answer with the raw
+    endpoint's header policy (job_artifact_raw_response.raw_response) —
+    one policy source (job_artifact_media), two channels. Objects are
+    uploaded without metadata (octet-stream), so without these the direct
+    channel would drift from raw on type, disposition and gzip framing."""
+    headers = {"ResponseContentType": raw_media_type(name)}
+    if raw_disposition_type(name) == "attachment":
+        headers["ResponseContentDisposition"] = attachment_disposition(name)
+    if gzipped:
+        headers["ResponseContentEncoding"] = "gzip"
+    return headers
 
 
 class ExternalArtifactAccessService:
@@ -115,28 +153,38 @@ class ExternalArtifactAccessService:
 
     def _artifact_names(self, job: dict[str, Any]) -> list[str]:
         # 递归扫描（#631 review P2-1）：local-only 子路径产物（reports/
-        # final.json）也在名单里，名单成员与可下载名一一对应。list 与
-        # status 两个列举面同门（同一份条目管线，见 _artifact_entries）。
-        return sorted(str(entry["name"]) for entry in self._artifact_entries(job))
+        # final.json）也在名单里，名单成员与可下载名一一对应。status 走免
+        # 签名的名称管线（#739 codex P2）：名字直接来自清单行 + 本地名，
+        # 不构造条目、不触发 presign——签名是有副作用的富化（凭据依赖、
+        # 成本），只读状态面丢弃 URL，签名客户端异常不应传染成 500。
+        object_backed, local_names = self._listing_parts(job)
+        return sorted(set(object_backed) | set(local_names))
 
-    def _artifact_entries(self, job: dict[str, Any]) -> list[dict[str, Any]]:
-        # 对象 manifest 行 + 本地 job_dir 名的合并清单（list 与 status 共
-        # 用）。enabled 门控：实例摘掉存储配置后清单里的名字读不到，不再
-        # 列出。行过滤：名字过下载侧白名单（raw 必拒的名字不列，#631
-        # codex3）；最新行的 storage_key 越界（H1 兜底 404）不列，有行名字
-        # 一律以行为准、本地副本不回填（manifest-first 读到行就短路本地
-        # 分支，被拒行是 404，#703 复审 M2）。本地扫描过声明门（#703
-        # codex4 P2-1）：快照解析一次，walk 与下载门共用。
+    def _listing_parts(self, job: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+        """(servable object rows, merged local names) — the unsigned half of
+        the listing, shared by the name pipeline (status) and the entry
+        pipeline (list). enabled 门控：实例摘掉存储配置后清单里的名字读不
+        到，不再列出。行过滤：名字过下载侧白名单（raw 必拒的名字不列，
+        #631 codex3）；最新行的 storage_key 越界（H1 兜底 404）不列，有行
+        名字一律以行为准、本地副本不回填（manifest-first 读到行就短路本
+        地分支，被拒行是 404，#703 复审 M2）。本地扫描过声明门（#703
+        codex4 P2-1）：快照解析一次，walk 与下载门共用。"""
         store = self._enabled_store()
         row_names: set[str] = set()
         object_backed: dict[str, dict[str, Any]] = {}
         if store is not None:
             row_names, object_backed = _listing_rows(store, job)
-        entries = [self._entry_from_row(row) for row in object_backed.values()]
         local_names = set(artifact_names_deep(job, self.settings, _declared_output_names(job)))
         if store is not None:
             local_names -= row_names
-        entries.extend(self._local_entry(name) for name in sorted(local_names))
+        return object_backed, sorted(local_names)
+
+    def _artifact_entries(self, job: dict[str, Any]) -> list[dict[str, Any]]:
+        # 对象 manifest 行 + 本地 job_dir 名的合并清单（仅 list 面使用）；
+        # 签名富化只发生在这一层（_entry_from_row），名称管线不可达。
+        object_backed, local_names = self._listing_parts(job)
+        entries = [self._entry_from_row(row) for row in object_backed.values()]
+        entries.extend(self._local_entry(name) for name in local_names)
         return entries
 
     def open_raw_current(
@@ -170,7 +218,12 @@ class ExternalArtifactAccessService:
         """Manifest listing for the job's CURRENT artifacts (rerun semantics
         #508): one entry per name — the manifest row's content_hash/uploaded_at
         identify which execution produced the bytes being served. Jobs that
-        are still running list what exists so far (stable: callers poll)."""
+        are still running list what exists so far (stable: callers poll).
+
+        #739: object-backed entries carry a fresh presigned
+        download_url (signed per request against the row's storage_key —
+        URLs are minted here, never persisted); expires_at tells the caller
+        when to re-fetch the manifest."""
         job = self._job_in_workspace_or_404(workspace_id, job_id)
         return {
             "job_id": job_id,
@@ -181,8 +234,22 @@ class ExternalArtifactAccessService:
         }
 
     def _entry_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        # Caller contract: only reached with an enabled store (list_artifacts
+        # iterates store.rows_for_job) — assert keeps mypy seeing the guard.
+        store = self._enabled_store()
+        assert store is not None
         name = str(row["name"])
         size = row.get("size_bytes")
+        storage_key = str(row["storage_key"])
+        gzipped = is_gzip_key(storage_key)
+        workers = self.settings.executor_runtime.agent_workers
+        ttl = int(workers.artifact_download_presign_ttl_seconds)
+        download_url = store.storage.presign_get(
+            storage_key, expires_seconds=ttl, response_headers=_presigned_headers(name, gzipped)
+        )
+        # 上界而非保证：签名凭据先于 TTL 失效时 URL 提前 403，调用方按
+        # 403 重取清单（runbook §9）。
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         return {
             "name": name,
             "storage": "object",
@@ -191,12 +258,18 @@ class ExternalArtifactAccessService:
             "content_hash": str(row.get("content_hash") or ""),
             "uploaded_at": row.get("uploaded_at"),
             "media_type": raw_media_type(name),
+            "download_url": download_url,
+            "expires_at": expires_at,
+            "content_encoding": "gzip" if gzipped else "",
         }
 
     def _local_entry(self, name: str) -> dict[str, Any]:
         # Legacy job_dir-only artifact (never uploaded): no manifest row, so
         # size/hash are unknown at listing time; the raw endpoint still
-        # serves it from the local copy.
+        # serves it from the local copy. #739: never presigned — there is no
+        # object to sign for; download_url/expires_at stay null and
+        # content_encoding is empty (the raw endpoint serves local files
+        # uncompressed).
         return {
             "name": name,
             "storage": "local",
@@ -205,4 +278,7 @@ class ExternalArtifactAccessService:
             "content_hash": "",
             "uploaded_at": None,
             "media_type": raw_media_type(name),
+            "download_url": None,
+            "expires_at": None,
+            "content_encoding": "",
         }

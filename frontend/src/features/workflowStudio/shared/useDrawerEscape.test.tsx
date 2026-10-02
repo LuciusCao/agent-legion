@@ -2,7 +2,7 @@
  * useDrawerEscape 抽屉栈语义测试（#812 codex P2 + 对抗轮 D2/D3，jsdom）：
  * 两个 persistent 抽屉（共享素材 + 节点详情）同时打开时，Esc 只关栈顶
  * （最近打开、视觉最上层）；栈顶关闭后下一击落到新栈顶；有更上层 MUI 模态
- * 在场时两个抽屉都让位。D2：栈位映射 z-index（1200 + 栈位，钳 <1300），
+ * 在场时两个抽屉都让位。D2：栈位映射 z-index（1200 + 栈位，钳 1289 低于 Toast），
  * Esc 栈序 == 视觉序。D3：suppressed（窄屏非激活面板的隐藏抽屉）不占栈位、
  * 不消费 Esc。模块级栈（drawerStack.ts）跨实例共享——两个 renderHook 实例
  * 复刻生产拓扑。

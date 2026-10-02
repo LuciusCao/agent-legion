@@ -46,7 +46,8 @@ _SUBSCRIPTS = r"(?:\[(?:\"\w+\"|'\w+'|\d+)\])+"
 _SUBSCRIPT_STEP = re.compile(r"\[(?:\"(\w+)\"|'(\w+)'|(\d+))\]")
 _STDIN_CHAIN = re.compile(r"json\.load\(sys\.stdin\)(" + _SUBSCRIPTS + ")")
 _INLINE_PY = re.compile(r"python3 -c '([^']*)'")
-_INLINE_BIND = re.compile(r"\b(\w+)=json\.load\(sys\.stdin\)(" + _SUBSCRIPTS + ")?")
+_INLINE_BIND = re.compile(r"\b(\w+)\s*=\s*json\.load\(sys\.stdin\)(" + _SUBSCRIPTS + ")?")
+_INLINE_FIRST = re.compile(r"\b(\w+)\s*=\s*(\w+)\[0\] if \2 else\b")
 _PY_VAR_ACCESS = re.compile(r"\b(\w+)(" + _SUBSCRIPTS + ")")
 _PY_FOR = re.compile(r"\bfor (\w+) in (\w+)(" + _SUBSCRIPTS + ")")
 _PY_JSON_ASSIGN = re.compile(r"\b(\w+) = (\w+)\.json\(\)\s*$", re.MULTILINE)
@@ -322,6 +323,10 @@ def _bash_accesses(
             var: _walk(source, chain or "", schemas, where)
             for var, chain in _INLINE_BIND.findall(snippet)
         }
+        # 判空取首元素的绑定：`e = a[0] if a else None` → e 是 a 的元素类型
+        for var, source_var in _INLINE_FIRST.findall(snippet):
+            if source_var in bound:
+                bound[var] = _element(bound[source_var], where)
         for var, chain in _PY_VAR_ACCESS.findall(snippet):
             if var in bound:
                 accesses.append((f"{where} {var}{chain}", bound[var], chain))
@@ -386,6 +391,8 @@ def test_doc_examples_response_fields_match_contracts() -> None:
     keys = {key for _, _, chain in accesses for key in re.findall(r"\w+", chain)}
     assert {"api_token", "run", "id", "job_ids", "status", "jobs", "next_cursor"} <= keys, keys
     assert {"source_type", "source_id", "artifacts", "name"} <= keys, keys
+    # #739 直连下载：download_url / expires_at 须从 api.ts 的条目 schema 解析到
+    assert {"download_url", "expires_at", "content_hash"} <= keys, keys
 
 
 def test_doc_idempotency_and_terminal_status_facts_match_code() -> None:

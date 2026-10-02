@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
@@ -23,14 +24,13 @@ def _columns(conn, table: str) -> set[str]:
 def test_schema_v57_recorded() -> None:
     """Latest-migration record pin (moved from
     tests/db/test_job_node_status_counts_migration.py, v56)."""
-    # The pin narrative now lives in tests/db/test_workspace_id_key_binding.py;
-    # v86 (node_runs_impl_identity, #645) is the current chain tail.
+    # Check that a fresh schema records the current registry tail.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "node_runs_impl_identity"
+    assert row["name"] == MIGRATIONS[-1].name
 
 
 def test_studio_chat_tables_exist() -> None:
@@ -81,7 +81,7 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "node_runs_impl_identity"
+        assert migration["name"] == MIGRATIONS[-1].name
 
 
 @pytest.mark.fresh_schema
@@ -114,7 +114,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "node_runs_impl_identity"
+        assert migration["name"] == MIGRATIONS[-1].name
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

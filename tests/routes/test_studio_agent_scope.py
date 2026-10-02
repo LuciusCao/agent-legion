@@ -215,6 +215,7 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     # Worker credential channel (x-agent-worker-token / register token, not a
     # user session; scoped Bearer tokens never authenticate here).
     ("POST", "/api/agent-workers/register"): "worker register-token channel",
+    ("POST", "/api/agent-workers/self/presence"): "worker credential channel",
     ("POST", "/api/agent-executions/claim"): "worker credential channel",
     # #352 批量心跳：与单条心跳同一 worker 凭据通道（x-agent-worker-token）。
     ("POST", "/api/agent-executions/heartbeats"): "worker credential channel",

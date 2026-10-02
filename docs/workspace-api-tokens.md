@@ -85,16 +85,24 @@ machine-to-machine 凭据：绑定且仅绑定一个 workspace，权限是 edito
    读回，仍为空再按去重键对账）：
 
    ```bash
-   # 产物清单：含 storage/content_hash/size_bytes/uploaded_at/media_type；
+   # 产物清单：含 storage/content_hash/size_bytes/uploaded_at/media_type/
+   # content_encoding，object 条目另带 download_url + expires_at（#739）；
    # job 未完成或没有产出时 artifacts 是空数组（不是 404）
    curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts" \
      -H "Authorization: Bearer $API_TOKEN"
-   # raw 字节下载（产物名按 URL 路径段 percent-encode；Range 请求答 206）。
+   # 优先直连：download_url 是 presigned 对象存储地址，不带 Authorization 头
+   # （token 不要发给对象存储主机）；--compressed 解码 gzip 产物
+   curl -fsS --compressed -o "$OUT" "$DOWNLOAD_URL"
+   # download_url 为 null（local 条目 / 未配置对象存储）、已过 expires_at
+   # 或直连失败时，回落 raw 字节下载（产物名按 URL 路径段 percent-encode）。仅成功解析并执行的
+   # 单区间 Range 请求返回 206，其余情况（gzip 对象、后缀/多区间/起点越界等）
+   # 可能以 200 返回全量，客户端两种都要接受。
    # 对象被 bucket lifecycle 回收时答 404：用 --fail，别把错误体存成产物
-   curl --fail "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts/$ARTIFACT_NAME/raw" \
+   curl -fsS --compressed -o "$OUT" "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts/$ARTIFACT_NAME/raw" \
      -H "Authorization: Bearer $API_TOKEN"
    ```
 
+   直连与 raw 两条通道的语义对照（响应头、gzip、重跑、吊销、有效期）与
    照抄可跑、带上述边界处理的完整脚本见
    [remote-execution-runbook.md](remote-execution-runbook.md) §9。
 

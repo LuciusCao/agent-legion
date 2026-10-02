@@ -29,17 +29,11 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from acp import PROTOCOL_VERSION, spawn_agent_process
 from acp.schema import (
-    AllowedOutcome as AcpAllowedOutcome,
-)
-from acp.schema import (
-    DeniedOutcome as AcpDeniedOutcome,
-)
-from acp.schema import (
     HttpMcpServer,
     Implementation,
-    RequestPermissionResponse,
 )
 
+from server.app.studio_chat.acp_client import AcpClient
 from server.app.studio_chat.acp_session_config import (
     SessionConfigHandleMixin,
     studio_client_capabilities,
@@ -47,7 +41,7 @@ from server.app.studio_chat.acp_session_config import (
 from server.app.studio_chat.capabilities import capability_snapshot
 from server.app.studio_chat.prompt_turn import PromptWedgedError, run_prompt_turn
 from server.app.studio_chat.session_load import open_acp_session
-from server.app.studio_chat.terminals import AcpTerminalStore, TerminalClientMixin
+from server.app.studio_chat.terminals import AcpTerminalStore
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
@@ -105,32 +99,6 @@ class AcpSessionCallbacks(Protocol):
     def on_exit(self, *, close_initiated: bool) -> None: ...
 
 
-class _ClientImpl(TerminalClientMixin):
-    """ACP client surface the agent calls back into (duck-typed protocol);
-    ``_handle``/``terminals`` are bound by the factory in ``_run``."""
-
-    async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
-        payload = update.model_dump(by_alias=True, exclude_none=True, mode="json")
-        self._handle.callbacks.on_update(payload)
-
-    async def request_permission(
-        self, session_id: str, tool_call: Any, options: list[Any], **kwargs: Any
-    ) -> RequestPermissionResponse:
-        tool_call_payload = tool_call.model_dump(by_alias=True, exclude_none=True, mode="json")
-        option_payloads = [
-            option.model_dump(by_alias=True, exclude_none=True, mode="json") for option in options
-        ]
-        decision = await asyncio.to_thread(
-            self._handle.callbacks.on_permission_request, tool_call_payload, option_payloads
-        )
-        option_id = decision.get("option_id")
-        if option_id:
-            return RequestPermissionResponse(
-                outcome=AcpAllowedOutcome(outcome="selected", option_id=option_id)
-            )
-        return RequestPermissionResponse(outcome=AcpDeniedOutcome(outcome="cancelled"))
-
-
 class AcpSessionHandle(SessionConfigHandleMixin):
     """Owns one ACP agent subprocess plus its asyncio loop thread."""
 
@@ -180,7 +148,13 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         )
         self._thread.start()
 
-    def send_prompt(self, text: str, *, accept: Callable[[], None] | None = None) -> bool:
+    def send_prompt(
+        self,
+        text: str,
+        *,
+        before_start: Callable[[], bool] | None = None,
+        accept: Callable[[], None] | None = None,
+    ) -> bool:
         """Accept durable input only while the queue can still receive it.
 
         The callback commits the turn and message together, or raises with
@@ -192,7 +166,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
                 return False
             if accept is not None:
                 accept()
-            self._queue.put(text)
+            self._queue.put((text, before_start) if before_start is not None else text)
             return True
 
     def cancel(self) -> None:
@@ -309,7 +283,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             self.callbacks.on_exit(close_initiated=self._closed)
 
     async def _run(self) -> None:
-        client = _ClientImpl()
+        client = AcpClient()
         client._handle, client.terminals = self, AcpTerminalStore()
         try:
             async with spawn_agent_process(
@@ -384,12 +358,16 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             if item is _CLOSE:
                 return
             try:
+                text, before_start = item if isinstance(item, tuple) else (str(item), None)
                 result = await run_prompt_turn(
                     conn,
                     acp_session_id,
-                    str(item),
+                    text,
                     on_timeout=self.callbacks.on_turn_timeout,
+                    **({"before_start": before_start} if before_start is not None else {}),
                 )
+                if result.response is None:
+                    continue
                 self.callbacks.on_turn_end(
                     str(result.response.stop_reason), timed_out=result.timed_out
                 )

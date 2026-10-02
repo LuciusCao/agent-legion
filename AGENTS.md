@@ -24,7 +24,7 @@
 - 测试并行度默认克制：后端 pytest-xdist min(4, 核数)（`AGENT_LEGION_TEST_WORKERS` 覆盖）、前端 vitest 经 gate `--maxWorkers=4`（`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖）、rust `-j` min(4, 核数)（`AGENT_LEGION_RUST_WORKERS` 覆盖）。多 worktree 并行开发抢 CPU 时调低（建议 ≈ 核数 ÷ 并行 worktree 数）。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist schema 固定，两个进程并发会互相 TRUNCATE（症状：单跑必过的随机 setup 错误）。
 - 不要污染主工作区或他人 worktree 的运行时数据。
-- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 与 `make prod-up` / `make prod-down`（prod-up 经 `scripts/ensure-velites.sh` 自动重建过期 velites 二进制）。所有修复与调试必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
+- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 与 `make prod-up` / `make prod-down`（prod-up 经 `scripts/ensure-velites.sh` 自动重建过期 velites 二进制——PATH 与 `data/bin` 自带副本**两处安置点都刷新**，#831：Worker 解析自带副本优先，只刷 PATH 对它不生效。安置目标与判鲜由 `scripts/velites_deploy_plan.py` 从真实 resolver 推导，bash 不持有平行查找模型（#835）。重建需要 cargo：新 prod worktree 的 `data/` 为空，首次 prod-up 必经 `--dest` 构建路径，无 cargo 即 fail-fast——恢复路径见 ensure-velites.sh 错误提示或 agent-worker-deployment.md §5）。所有修复与调试必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
 
 ## 2. Agent Tool Discipline
 
@@ -53,6 +53,7 @@
 - 禁止在适用的本地反馈检查失败时交接，或在 PR `quality-gate` 未通过时声明可合并/可发布。
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema` 走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由 CI 与 `./scripts/check.sh` 强制）。pytest worker 数默认 worktree 感知（`scripts/gate-jobs.sh`），用 `AGENT_LEGION_TEST_WORKERS` 覆盖。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增 `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线 `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加 `@pytest.mark.no_db` 跳过 TRUNCATE 隔离。
+- 自动评审（codex）finding 按 [docs/architecture/review-convergence.md](docs/architecture/review-convergence.md) 分诊：P1、受支持形态下的目标缺陷残留/启动失败/数据或安全问题、回归才阻塞合并；只在人为异常环境状态下触发的转 follow-up issue。修 finding 只收窄或复用，不扩范围；某轮只剩非阻塞项时分诊后即合并，不再追加 `@codex review`。
 - 测试文件超过 800 行就应主动按被测主题拆分（同目录姊妹文件、用例零改动迁移）；gate 的 1000 行上限是硬底线。存量超 800 行的文件随下次触碰时顺手拆。
 
 ## 5. Architecture Governance

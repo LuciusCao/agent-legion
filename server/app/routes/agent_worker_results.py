@@ -11,10 +11,13 @@ from server.app.agent_broker.result_output_manifest import (
     parse_artifact_ref,
 )
 from server.app.agent_control.completion import AgentOutcome
-from shared.code_contract import RESULT_OUTPUT_ARTIFACTS_FLAG
+from shared.code_contract import MAX_RESULT_COMMAND_PARTS, RESULT_OUTPUT_ARTIFACTS_FLAG
 from shared.code_sandbox import MAX_CONNECTION_KEY_CHARS
 
-_MAX_COMMAND_PARTS = 64
+# #822: command 是观测面，超限截断（保前缀）而非 400——拒收会让 Worker 按 4xx
+# 终态丢弃结果，租约过期后整轮 agent 执行重跑且永不收敛。单一事实来源见
+# shared/code_contract.py（Worker 序列化侧同用）。
+_MAX_COMMAND_PARTS = MAX_RESULT_COMMAND_PARTS
 _MAX_OUTPUT_ARTIFACTS = MAX_OUTPUT_ARTIFACTS
 _MAX_ERROR_MESSAGE_CHARS = 4000
 _MAX_RUN_DIR_CHARS = 256
@@ -80,8 +83,10 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         exit_code = int(metadata.get("exit_code", 0))
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid exit_code") from exc
+    # #822: 形态错误仍拒收；段数超限只截断（保前缀）——旧 Worker（无序列化侧
+    # 收缩）的 40+ 产物 argv 也能落地，不再进 400 → 丢结果 → 重排队死循环。
     command_raw = metadata.get("command", [])
-    if not isinstance(command_raw, (list, tuple)) or len(command_raw) > _MAX_COMMAND_PARTS:
+    if not isinstance(command_raw, (list, tuple)):
         raise ValueError("invalid command")
     artifacts_raw = metadata.get("output_artifacts", {})
     if not isinstance(artifacts_raw, dict) or len(artifacts_raw) > _MAX_OUTPUT_ARTIFACTS:
@@ -121,7 +126,7 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         status=status,  # type: ignore[arg-type]
         exit_code=exit_code,
         error_message=error_message,
-        command=tuple(str(part) for part in command_raw),
+        command=tuple(str(part) for part in command_raw[:_MAX_COMMAND_PARTS]),
         output_artifacts=output_artifacts,
         run_dir=run_dir,
         auth_failure_connection=auth_failure_raw.strip(),

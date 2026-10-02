@@ -126,6 +126,7 @@ const instanceSettings: InstanceSettingsResponse = {
     max_concurrent_result_commits: 16,
     result_commit_batching: true,
     artifact_spot_check_percent: 3,
+    artifact_download_presign_ttl_seconds: 3600,
   },
   agent_enqueue: { workers: 48, max_pending: 1024 },
   result_unpack: { workers: 0 },

@@ -6,7 +6,11 @@ import styles from './ArtifactRenderedPreview.module.css'
 
 export type ArtifactPreviewMode = 'rendered' | 'source'
 
-/** 预览/源码 toggle shown for renderable (markdown/html) artifacts. */
+/**
+ * 预览/源码 toggle shown for artifacts with a rendered view (markdown/html,
+ * plus json whose tree view drops commas/key quotes — the source view lets
+ * users verify the raw bytes, #777).
+ */
 export function ArtifactPreviewModeToggle({
   name,
   mode,
@@ -17,7 +21,7 @@ export function ArtifactPreviewModeToggle({
   onMode: (mode: ArtifactPreviewMode) => void
 }) {
   const kind = artifactPreviewKind(name)
-  if (kind !== 'markdown' && kind !== 'html') return null
+  if (kind === 'text') return null
   return (
     <ToggleButtonGroup
       size="small"
@@ -43,7 +47,10 @@ export function artifactPreviewKind(name: string): ArtifactPreviewKind {
   return 'text'
 }
 
-/** Dialog body: JSON tree, rendered markdown/html, or the raw source. */
+/**
+ * Dialog body: JSON tree, rendered markdown/html, or the raw source. In
+ * source mode every kind falls through to the raw `<pre>`.
+ */
 export function ArtifactPreviewBody({
   name,
   content,
@@ -56,7 +63,8 @@ export function ArtifactPreviewBody({
   preClassName: string
 }) {
   const kind = artifactPreviewKind(name)
-  const parsedJson = kind === 'json' ? tryParseJson(content) : null
+  const parsedJson =
+    mode === 'rendered' && kind === 'json' ? tryParseJson(content) : null
   if (parsedJson !== null) return <JsonTree data={parsedJson} />
   if (mode === 'rendered' && (kind === 'markdown' || kind === 'html')) {
     return <ArtifactRenderedPreview kind={kind} name={name} content={content} />

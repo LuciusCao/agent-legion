@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
@@ -49,12 +50,10 @@ def test_v82_database_upgrades_via_init_db() -> None:
     """A v82 database (table absent) upgrades in place; rows survive."""
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("drop table workspace_api_tokens")
-        # v85 (execution_generation, #759) and v86 (node_runs_impl_identity,
-        # #645) trail this table's own v84, so rewinding to a pre-v84 shape
-        # must drop all three rows — deleting only SCHEMA_VERSION (86) would
-        # leave max(applied)=85 and the high-water skip would never re-run
+        # Rewinding to a pre-v84 shape must drop v84 and every later row;
+        # deleting only SCHEMA_VERSION leaves a high-water mark that skips
         # v84's table-creating apply fn.
-        conn.execute("delete from schema_migrations where version in (84, 85, 86)")
+        conn.execute("delete from schema_migrations where version >= 84")
         conn.execute(
             "insert into workspaces(id, default_workflow_key, name)"
             " values ('ws-v83-upgrade', 'ws-v83-upgrade', 'upgrade witness')"
@@ -89,8 +88,6 @@ def test_v82_database_upgrades_via_init_db() -> None:
     assert row is not None and row["label"] == "pre-upgrade row"
     assert migration is not None
     assert migration["name"] == "workspace_api_tokens"
-    # v84 is no longer the registry tail — the #645 v86 entry
-    # (node_runs_impl_identity) is. The rows must exist after the upgrade
-    # replay (one per registry entry).
+    # Replaying the upgrade also records the current registry tail.
     assert tail is not None
-    assert tail["name"] == "node_runs_impl_identity"
+    assert tail["name"] == MIGRATIONS[-1].name

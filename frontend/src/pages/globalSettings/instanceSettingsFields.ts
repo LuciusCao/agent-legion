@@ -135,6 +135,16 @@ export const FIELD_GROUPS: FieldGroup[] = [
         label: '产物校验抽检比例 %（0 全信任，100 全核验）',
         integer: true,
         allowZero: true,
+        max: 100,
+      },
+      {
+        // #739 codex P2：契约 ge=60 / le=604800（S3 SigV4 7 天上限）在客户端
+        // 拦截，越界值不再裸奔到后端 422。
+        path: 'agent_workers.artifact_download_presign_ttl_seconds',
+        label: '外部产物下载直连 URL 有效期（秒）',
+        integer: true,
+        min: 60,
+        max: 604800,
       },
     ],
     toggles: [],

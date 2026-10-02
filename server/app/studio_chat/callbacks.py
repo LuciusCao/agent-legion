@@ -28,6 +28,10 @@ class ServiceCallbacks:
     @owned_callback
     def on_ready(self, capabilities: dict[str, Any], opened: OpenedAcpSession) -> None:
         self._service._on_ready(self._session_id, capabilities, opened)
+        from server.app.studio_chat.background_wakeup import start_watcher
+
+        if self.runtime is not None:
+            start_watcher(self._service, self._session_id, self.runtime, opened.acp_session_id)
 
     @owned_callback
     def on_update(self, update: dict[str, Any]) -> None:

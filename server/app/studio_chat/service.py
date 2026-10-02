@@ -31,11 +31,13 @@ from server.app.services.job_errors import ConflictError, InvalidOperationError,
 from server.app.settings import Settings
 from server.app.studio_chat.admission import send_message
 from server.app.studio_chat.availability import AgentAvailabilityProbe
+from server.app.studio_chat.background_wakeup import cancel_wakeup
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.lifecycle import ServiceLifecycle, starting_operation
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
 from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.session_close import close_session
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import teardown_runtime
@@ -172,8 +174,6 @@ class StudioChatService:
         return self.get_session(session_id)
 
     def close_session(self, session_id: str, workspace_id: str) -> dict[str, Any]:
-        from server.app.studio_chat.session_close import close_session
-
         return close_session(self, session_id, workspace_id)
 
     @starting_operation
@@ -200,6 +200,7 @@ class StudioChatService:
         session = self.get_session(session_id, workspace_id)
         runtime = self.runtime(session_id)
         if runtime is not None:
+            cancel_wakeup(runtime)
             self._settle_pending_permissions(runtime)
             runtime.handle.cancel()
         if session["status"] in ("running", "awaiting_permission"):
