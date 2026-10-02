@@ -515,6 +515,7 @@ workspace API token 唯一支持的提交面是 `POST /runs`：`/job-batches` �
 scoped token 一律 403。
 
 ```bash
+set -euo pipefail  # 任何一步失败立即停下，不带着空变量往下跑
 HOST="https://agent-legion.example.com"
 WS="my-workspace"
 # 0) 签发 token（管理员会话；或控制台 workspace 设置 → Agent 与 Worker）。
@@ -528,39 +529,66 @@ WORKSPACE_API_TOKEN=$(curl -sS -X POST "$HOST/api/workspaces/$WS/api-tokens" \
 # 1) 提交（items 引用已就位的 material/bundle/ref；一项一个 job）。
 #    响应带 run.id 与本次新建的 job_ids（#735）；重复提交的 400 语义见
 #    workspace-api-tokens.md「幂等与重试」
-SUBMIT=$(curl -sS -X POST "$HOST/api/workspaces/$WS/runs" \
+HTTP=$(curl -sS -o submit.json -w '%{http_code}' -X POST "$HOST/api/workspaces/$WS/runs" \
   -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"items": [{"type": "material", "material_id": "mat-1"}]}')
-RUN_ID=$(printf '%s' "$SUBMIT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])')
-JOB_ID=$(printf '%s' "$SUBMIT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_ids"][0])')
+if [ "$HTTP" != 200 ]; then
+  # 400「No tasks were resolved from input」= 全部条目已有 job（不是失败），
+  # 按去重键反查已有 job 见下方 Python 示例的 find_existing_job；其它状态码
+  # 的处理见 workspace-api-tokens.md 错误码表
+  echo "submit HTTP $HTTP: $(cat submit.json)" >&2
+  exit 1
+fi
+RUN_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])' < submit.json)
+# job_ids 可能为空：#501 失败 run 治愈（created_count=0），或并发重叠提交时
+# 条目归了别的 run——判空后按 run_id 读回
+JOB_ID=$(python3 -c 'import json,sys; ids=json.load(sys.stdin)["job_ids"]; print(ids[0] if ids else "")' < submit.json)
 
-# 2) 按 run 列 job（job_ids 丢失时的读回路径；大 run 改用
+# 2) 按 run 列 job（job_ids 为空或丢失时的读回路径；大 run 改用
 #    /jobs/snapshot?run_id=…&limit=500 按 next_cursor 分页）
-curl -sS "$HOST/api/workspaces/$WS/jobs?run_id=$RUN_ID" \
-  -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
+if [ -z "$JOB_ID" ]; then
+  JOB_ID=$(curl -sS --fail "$HOST/api/workspaces/$WS/jobs?run_id=$RUN_ID" \
+    -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
+    | python3 -c 'import json,sys; jobs=json.load(sys.stdin)["jobs"]; print(jobs[0]["id"] if jobs else "")')
+fi
+if [ -z "$JOB_ID" ]; then
+  # 该 run 下也没有 job：条目全被别的 run 抢走，按去重键反查（Python 示例）
+  echo "run $RUN_ID has no jobs; reconcile by (source_type, source_id)" >&2
+  exit 1
+fi
 
 # 3) 轮询状态直到终态 completed / failed（paused、awaiting_approval
 #    是等待态，继续轮询）
 while :; do
-  STATUS=$(curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
+  STATUS=$(curl -sS --fail "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
     -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
   echo "status: $STATUS"
   case "$STATUS" in completed|failed) break;; esac
   sleep 15
 done
+if [ "$STATUS" = failed ]; then
+  # 失败 job 可能没有产物；error_summary 是失败原因摘要
+  curl -sS --fail "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
+    -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["error_summary"])' >&2
+  exit 1
+fi
 
-# 4) 取产物清单（content_hash / uploaded_at 区分执行）
-curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
-  -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
+# 4) 取产物清单（content_hash / uploaded_at 区分执行）；这里取第一个产物名
+ARTIFACT=$(curl -sS --fail "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
+  -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
+  | python3 -c 'import json,sys; a=json.load(sys.stdin)["artifacts"]; print(a[0]["name"] if a else "")')
+[ -n "$ARTIFACT" ] || { echo "job $JOB_ID has no artifacts" >&2; exit 1; }
 
 # 5) 下载指定产物（JSON/HTML/PDF/视频同一入口；视频可带 Range）
 #    产物名按 URL 路径段 percent-encode（safe=""）：清单名里的 # 或 ?
-#    不编码会被客户端当成 fragment/query 截断，服务端收到残缺名字
+#    不编码会被客户端当成 fragment/query 截断，服务端收到残缺名字。
+#    --fail：对象被 bucket lifecycle 回收时 raw 是 404，不要把错误体存成产物
 NAME=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
-  "report.pdf")
-curl -sS -o report.pdf "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/$NAME/raw" \
+  "$ARTIFACT")
+curl -sS --fail -o "$(basename "$ARTIFACT")" "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/$NAME/raw" \
   -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
 ```
 
@@ -620,18 +648,27 @@ if not job_ids:
 job_id = job_ids[0]
 
 # 终态只有 completed / failed；paused、awaiting_approval 是等待态
-while (st := s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()["status"]) not in {
-    "completed", "failed"
-}:
+while True:
+    job = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()
+    if job["status"] in {"completed", "failed"}:
+        break
     time.sleep(15)
+if job["status"] == "failed":
+    # 失败 job 可能没有产物；error_summary 是失败原因摘要
+    raise RuntimeError(f"job {job_id} failed: {job['error_summary']}")
 
 manifest = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts").json()
-for entry in manifest["artifacts"]:
+for entry in manifest["artifacts"]:  # 可能为空数组：job 没有产出产物
     # safe=""：名字里的 # 或 ? 必须 percent-encode——否则 # 起被当作
     # fragment、? 起被当作 query，服务端收到截断后的名字（子路径名的 /
     # 被一并编成 %2F 也无妨：服务端解码后仍按多段名走 {artifact_name:path}）
-    blob = s.get(
+    raw = s.get(
         f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts/{quote(entry['name'], safe='')}/raw"
-    ).content
+    )
+    if raw.status_code == 404:
+        # 对象已被 bucket lifecycle 回收：记录后跳过，不要把错误体当产物存下
+        continue
+    raw.raise_for_status()
+    blob = raw.content
     # entry["content_hash"] 是未压缩内容的 sha256，可校验完整性
 ```

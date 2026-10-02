@@ -12,8 +12,9 @@ curl / requests 示例调用的每个 (method, URL 形态) 钉住：
 - 用 api token 调的端点必须在 api-scope 准入面（auth/api_scope_surface.py
   的路由名清单）内——否则照抄示例会撞 404；签发 token 的管理端点反之；
 - 示例里用到的 query 参数必须是该 operation 声明的参数；
-- 示例解析的响应字段、「已存在」400 的 detail 文本、job 终态集合与代码
-  一致。
+- 示例解析的响应字段（从代码块提取实际下标访问）、「已存在」400 的
+  detail 文本、job 终态集合、limit 越界语义与代码一致；
+- 示例里每一处 `[0]` 都先判空（空 job_ids / 空列表是文档承认的响应）。
 """
 
 from __future__ import annotations
@@ -44,9 +45,8 @@ _PY_PARAM_KEY = re.compile(r"\"(\w+)\"\s*:")
 _SUBSCRIPTS = r"(?:\[(?:\"\w+\"|'\w+'|\d+)\])+"
 _SUBSCRIPT_STEP = re.compile(r"\[(?:\"(\w+)\"|'(\w+)'|(\d+))\]")
 _STDIN_CHAIN = re.compile(r"json\.load\(sys\.stdin\)(" + _SUBSCRIPTS + ")")
-_SHELL_VAR_PIPE = re.compile(
-    r"\"\$(\w+)\"\s*\|\s*python3 -c '[^']*?json\.load\(sys\.stdin\)(" + _SUBSCRIPTS + ")"
-)
+_INLINE_PY = re.compile(r"python3 -c '([^']*)'")
+_INLINE_BIND = re.compile(r"\b(\w+)=json\.load\(sys\.stdin\)(" + _SUBSCRIPTS + ")?")
 _PY_VAR_ACCESS = re.compile(r"\b(\w+)(" + _SUBSCRIPTS + ")")
 _PY_FOR = re.compile(r"\bfor (\w+) in (\w+)(" + _SUBSCRIPTS + ")")
 _PY_JSON_ASSIGN = re.compile(r"\b(\w+) = (\w+)\.json\(\)\s*$", re.MULTILINE)
@@ -70,20 +70,22 @@ def _code_blocks(text: str) -> list[tuple[str, str]]:
     return blocks
 
 
-def _curl_commands(block: str) -> list[tuple[str, str]]:
-    """(curl 前的同行前缀, 整条 curl 命令含 \\ 续行)。"""
+def _curl_commands(block: str) -> list[tuple[str, str, int, int]]:
+    """(curl 前的同行前缀, 整条 curl 命令含 \\ 续行, 起止字符偏移)。"""
     commands = []
-    lines = block.splitlines()
+    lines = block.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
     for index, line in enumerate(lines):
         position = line.find("curl ")
         if position < 0:
             continue
-        command = [line[position:]]
         cursor = index
         while lines[cursor].rstrip().endswith("\\") and cursor + 1 < len(lines):
             cursor += 1
-            command.append(lines[cursor])
-        commands.append((line[:position], "\n".join(command)))
+        start, end = offsets[index] + position, offsets[cursor + 1]
+        commands.append((line[:position], block[start:end], start, end))
     return commands
 
 
@@ -106,7 +108,7 @@ def _doc_calls() -> list[tuple[str, str, str, frozenset[str]]]:
     for doc in DOCS:
         text = (ROOT / doc).read_text(encoding="utf-8")
         for _, block in _code_blocks(text):
-            for _, call in _curl_commands(block):
+            for _, call, _, _ in _curl_commands(block):
                 url = _CURL_URL.search(call)
                 if url is None:
                     continue
@@ -275,6 +277,57 @@ def _route_type(path: str, method: str, paths: dict[str, dict[str, str]]) -> _Ty
     return ("schema", schema) if schema else ("leaf", "non-JSON response")
 
 
+def _bash_accesses(
+    doc: str, block: str, paths: dict[str, dict[str, str]], schemas: dict[str, dict[str, str]]
+) -> list[tuple[str, _Type, str]]:
+    """bash 块：每段 `python3 -c '…'` 读的 stdin 来自哪次 curl——管道在同一条
+    curl 命令里、`< FILE`（FILE 是某次 curl 的 -o 目标）、或 `"$VAR" |`
+    （VAR=$(curl …)）——据此确定起点类型，再提取段内的下标访问。"""
+    spans: list[tuple[int, int, _Type]] = []
+    files: dict[str, _Type] = {}
+    shell_vars: dict[str, _Type] = {}
+    for prefix, command, start, end in _curl_commands(block):
+        url = _CURL_URL.search(command)
+        if url is None:
+            continue
+        method = _CURL_METHOD.search(command)
+        route = _route_type(
+            url.group(1).partition("?")[0], method.group(1) if method else "GET", paths
+        )
+        spans.append((start, end, route))
+        output = re.search(r"-o ([^\s)]+)", command)
+        if output:
+            files[output.group(1)] = route
+        assigned = re.search(r"(\w+)=\$\(\s*$", prefix)
+        if assigned and "python3 -c" not in command:
+            shell_vars[assigned.group(1)] = route
+    accesses: list[tuple[str, _Type, str]] = []
+    for match in _INLINE_PY.finditer(block):
+        snippet = match.group(1)
+        if "json.load(sys.stdin)" not in snippet:
+            continue
+        where = f"{doc}: python3 -c '{snippet[:60]}…'"
+        source = next((t for a, b, t in spans if a <= match.start() < b), None)
+        redirect = re.match(r"\s*<\s*([^\s)]+)", block[match.end() :])
+        piped = re.search(r"\"\$(\w+)\"\s*\|\s*$", block[: match.start()])
+        if source is None and redirect:
+            assert redirect.group(1) in files, f"{where}: {redirect.group(1)} 不是某次 curl 的 -o"
+            source = files[redirect.group(1)]
+        if source is None and piped:
+            assert piped.group(1) in shell_vars, f"{where}: ${piped.group(1)} 不是 curl 响应"
+            source = shell_vars[piped.group(1)]
+        assert source is not None, f"{where}: 找不到 stdin 来自哪次 curl"
+        accesses += [(where, source, chain) for chain in _STDIN_CHAIN.findall(snippet)]
+        bound = {
+            var: _walk(source, chain or "", schemas, where)
+            for var, chain in _INLINE_BIND.findall(snippet)
+        }
+        for var, chain in _PY_VAR_ACCESS.findall(snippet):
+            if var in bound:
+                accesses.append((f"{where} {var}{chain}", bound[var], chain))
+    return accesses
+
+
 def _doc_response_accesses() -> list[tuple[str, _Type, str]]:
     """(定位, 起点类型, 下标链) 全集——起点是某次调用的响应或其派生变量。"""
     paths, _ = _contract()
@@ -283,23 +336,7 @@ def _doc_response_accesses() -> list[tuple[str, _Type, str]]:
     for doc in DOCS:
         for lang, block in _code_blocks((ROOT / doc).read_text(encoding="utf-8")):
             if lang == "bash":
-                shell_vars: dict[str, _Type] = {}
-                for prefix, command in _curl_commands(block):
-                    url = _CURL_URL.search(command)
-                    if url is None:
-                        continue
-                    method = _CURL_METHOD.search(command)
-                    route = _route_type(
-                        url.group(1).partition("?")[0], method.group(1) if method else "GET", paths
-                    )
-                    chains = _STDIN_CHAIN.findall(command)
-                    accesses += [(f"{doc}: curl {url.group(1)}", route, c) for c in chains]
-                    assigned = re.search(r"(\w+)=\$\(\s*$", prefix)
-                    if assigned and not chains:
-                        shell_vars[assigned.group(1)] = route
-                for var, chain in _SHELL_VAR_PIPE.findall(block):
-                    assert var in shell_vars, f"{doc}: ${var} 不是某次 curl 的响应"
-                    accesses.append((f"{doc}: ${var}", shell_vars[var], chain))
+                accesses += _bash_accesses(doc, block, paths, schemas)
                 continue
             # python：先收绑定（var → 类型 / 未 .json() 的响应对象），再解析访问。
             bound: dict[str, _Type] = {}
@@ -405,3 +442,30 @@ def test_doc_limit_validation_semantics_match_routes() -> None:
     assert "`GET /runs` 的 `limit` 不在 1–500" in row_422
     assert "`GET /jobs` 的 `limit` 不在 1–2000" in row_422
     assert "`GET /jobs/snapshot` 的 `limit` 越界**不是** 422" in row_422
+
+
+def test_doc_examples_guard_first_element_access() -> None:
+    """示例里每一处 `[0]` 都必须先判空（#736 复审 P2）：job_ids 在 #501 治愈与
+    并发重叠提交时是空数组、jobs/artifacts 列表也可以为空，直接下标照抄即
+    IndexError。合法形态只有两种：`X[0] if X else …`（同一行），或此前已有
+    `if not X` 分支；链式响应访问直接接 `[0]`（如 `…["job_ids"][0]`）一律拒绝。"""
+    found = 0
+    for doc in DOCS:
+        for _, block in _code_blocks((ROOT / doc).read_text(encoding="utf-8")):
+            for match in re.finditer(r"\[0\]", block):
+                found += 1
+                line = (
+                    block[: match.end()].rsplit("\n", 1)[-1]
+                    + block[match.end() :].split("\n", 1)[0]
+                )
+                owner = re.search(r"(\w+)$", block[: match.start()])
+                where = f"{doc}: {line.strip()}"
+                assert (
+                    owner is not None
+                    and block[match.start() - len(owner.group(1)) - 1] not in "])."
+                ), f"{where}: 对响应链直接取 [0]，须先绑定变量并判空"
+                name = owner.group(1)
+                inline = re.search(rf"\b{name}\[0\].*\bif {name} else\b", line)
+                earlier = re.search(rf"\bif not {name}\b", block[: match.start()])
+                assert inline or earlier, f"{where}: 取 {name}[0] 前没有判空"
+    assert found, "未解析到任何 [0] 访问——守卫失效"

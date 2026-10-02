@@ -80,16 +80,23 @@ machine-to-machine 凭据：绑定且仅绑定一个 workspace，权限是 edito
    404（404 语义属于 `GET /runs/{run_id}`）。
 
 4. **下载产物**（#631 的三端点；job id 取自第 2 步的 `job_ids`，或第 3 步
-   按 `run_id` 过滤的 jobs 列表）：
+   按 `run_id` 过滤的 jobs 列表。`job_ids` 可能是空数组——#501 治愈或并发
+   重叠提交，见「幂等与重试」——取第一个元素前先判空，为空时按 `run_id`
+   读回，仍为空再按去重键对账）：
 
    ```bash
-   # 产物清单：含 storage/content_hash/size_bytes/uploaded_at/media_type
+   # 产物清单：含 storage/content_hash/size_bytes/uploaded_at/media_type；
+   # job 未完成或没有产出时 artifacts 是空数组（不是 404）
    curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts" \
      -H "Authorization: Bearer $API_TOKEN"
-   # raw 字节下载（产物名按 URL 路径段 percent-encode；Range 请求答 206）
-   curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts/$ARTIFACT_NAME/raw" \
+   # raw 字节下载（产物名按 URL 路径段 percent-encode；Range 请求答 206）。
+   # 对象被 bucket lifecycle 回收时答 404：用 --fail，别把错误体存成产物
+   curl --fail "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts/$ARTIFACT_NAME/raw" \
      -H "Authorization: Bearer $API_TOKEN"
    ```
+
+   照抄可跑、带上述边界处理的完整脚本见
+   [remote-execution-runbook.md](remote-execution-runbook.md) §9。
 
 Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在设置面板
 吊销，使用中的调用立即 401。
