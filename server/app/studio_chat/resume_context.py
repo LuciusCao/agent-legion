@@ -5,8 +5,8 @@ advertised, or the load failed), the service prepends this transcript to the
 first post-resume user prompt so the fresh agent regains the conversation
 context. Source of truth is the persisted studio_chat_messages timeline —
 only user/agent text participates; tool calls, plans and status rows are
-noise for context rebuild. Replaces transcript.py (file budget): the marker
-consume/re-arm helpers moved in next to the transcript builder they feed.
+noise for context rebuild. Preparation is read-only; prompt admission consumes
+the one-shot marker only after the input has been durably accepted.
 """
 
 from __future__ import annotations
@@ -63,22 +63,16 @@ def prepare_resume_prompt(
     session_id: str,
     first_prompt: bool,
     prompt_text: str,
-    before_seq: int,
+    before_seq: int | None = None,
 ) -> tuple[str, bool]:
-    """Consume the one-shot resume marker; prepend the transcript when due.
+    """Prepare a prompt without consuming the one-shot resume marker.
 
-    The marker is consumed unconditionally — a first-prompt turn takes the
-    authoring bootstrap instead and must not leak the marker into the next
-    turn (it would inject the session's own fresh conversation as "resumed"
-    context). The transcript is built only when the session actually has
-    history, and only from messages before ``before_seq``: the just-appended
-    user message is the prompt tail, not context, and must not appear twice.
-    Returns the (possibly rewritten) prompt plus whether the marker had been
-    set, so the caller can re-arm it when the prompt never reaches the agent.
+    Acceptance consumes the marker, including for a first prompt that uses
+    the authoring bootstrap. Preparation failures leave it untouched.
+    With no watermark, read existing history before the new message exists.
     """
     with runtime.lock:
         pending = runtime.resume_transcript_pending
-        runtime.resume_transcript_pending = False
     if not pending or first_prompt:
         return prompt_text, pending
     transcript = build_resume_transcript(
@@ -87,12 +81,3 @@ def prepare_resume_prompt(
     if not transcript:
         return prompt_text, pending
     return transcript + prompt_text, pending
-
-
-def rearm_resume_transcript(runtime: SessionRuntime, was_pending: bool) -> None:
-    """Restore the one-shot marker after a send_prompt failure (nothing was
-    injected, so re-arming carries no double-injection risk)."""
-    if not was_pending:
-        return
-    with runtime.lock:
-        runtime.resume_transcript_pending = True
