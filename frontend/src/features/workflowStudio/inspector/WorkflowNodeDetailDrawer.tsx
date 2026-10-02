@@ -11,7 +11,7 @@
 import { Close } from '@mui/icons-material'
 import { Drawer, IconButton, Tooltip } from '@mui/material'
 import { WorkflowStudioSaveWarningBanner } from '../shared/WorkflowStudioSaveWarningBanner'
-import { useDrawerEscape } from '../shared/useDrawerEscape'
+import { useStudioDrawerPaperStyle } from '../shared/useStudioDrawerPaperStyle'
 import { useStudioState, useStudioView } from '../shared/studioStateContext'
 import { selectedNodeDetails } from '../shared/workflowStudioModel'
 import { useNodeDetailPreview } from './useNodeDetailPreview'
@@ -34,10 +34,11 @@ export function WorkflowNodeDetailDrawer() {
   // 抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。hidden（#812 D3 +
   // P2-2：窄屏非画布页签——抽屉挂在 SplitLayout 层，不随画布列
   // display:none，隐藏要自带）：paper display:none 不卸载（选中节点与预览
-  // 子态保留，切回画布页签原样复现），同时出 Esc 栈不占栈位。返回的
-  // zIndex 挂到 paper：栈位映射视觉层级，Esc 栈序 == 视觉序。
+  // 子态保留，切回画布页签原样复现），同时出 Esc 栈不占栈位。paper 样式
+  // 里的 zIndex 是栈位映射的视觉层级，Esc 栈序 == 视觉序。
   const hidden = view.narrow && view.mobilePanel !== 'graph'
-  const paperZIndex = useDrawerEscape(nodeKey !== null, close, hidden)
+  // #817：paper 样式同时带窄屏顶边让位（页签行之下，Agent 页签可点）。
+  const paperStyle = useStudioDrawerPaperStyle(nodeKey !== null, close, hidden)
 
   return (
     <Drawer
@@ -47,10 +48,7 @@ export function WorkflowNodeDetailDrawer() {
       slotProps={{
         paper: {
           className: styles.paper,
-          style: {
-            zIndex: paperZIndex,
-            ...(hidden ? { display: 'none' } : {}),
-          },
+          style: paperStyle,
         },
       }}
       /* 轮 8 P2：非模态——persistent variant 不走 Modal（无遮罩/不圈禁

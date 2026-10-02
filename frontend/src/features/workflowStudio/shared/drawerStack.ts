@@ -5,10 +5,13 @@
  * （先开的共享素材在下层却先吃掉 Esc）。实例打开入栈、关闭出栈，
  * `useDrawerEscape` 只在自己是栈顶（最近打开、视觉最上层）时消费 Esc。
  * 与 Dock 栈（features/agentPanelDock/dockStack.ts）同款结构：栈位同时映射
- * 视觉层级（#812 对抗轮 D2——z-index = 1200 + 栈位，钳 1299 给 MUI Modal
- * 1300 留位；Esc 栈序 == 视觉序）。suppressed（隐藏态）的实例不入栈：隐藏
+ * 视觉层级（#812 对抗轮 D2——z-index = 1200 + 栈位，钳 1289：上方依次是
+ * Toast 1290 与 MUI Modal 1300，刻度见 lib/zLayers.ts（#818）；Esc 栈序 ==
+ * 视觉序）。suppressed（隐藏态）的实例不入栈：隐藏
  * 抽屉占着栈顶会挡住可见抽屉的 Esc（同 Dock hidden 语义）。
  */
+
+import { Z_LAYERS } from '../../../lib/zLayers'
 
 // symbol 做实例身份：跨模块唯一、不可伪造。
 const stack: symbol[] = []
@@ -46,10 +49,12 @@ export function drawerStackIsTop(id: symbol): boolean {
   return stack[stack.length - 1] === id
 }
 
-/** 栈位映射 z-index：1200 + 栈位，钳到 1299——必须低于 MUI Modal 1300
- * （模态浮层永远压抽屉），栈深超过 100 层时不再继续抬。 */
+/** 栈位映射 z-index：1200 + 栈位，钳到 1289——必须低于 Toast（#818：瞬时
+ * 反馈压过抽屉）与 MUI Modal（模态浮层永远压抽屉），栈深超过上限时不再
+ * 继续抬。 */
 export function drawerStackZIndex(id: symbol): number {
+  const { studioDrawerBase: base, studioDrawerMax: max } = Z_LAYERS
   const index = stack.indexOf(id)
-  if (index === -1) return 1200
-  return Math.min(1200 + index, 1299)
+  if (index === -1) return base
+  return Math.min(base + index, max)
 }
