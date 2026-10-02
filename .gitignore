@@ -7,9 +7,9 @@ __pycache__/
 *.pyc
 data/
 node_modules/
-# 依赖重装的失败保护备份位与安装锁（scripts/ensure-frontend-deps.sh，#810）
+# 依赖重装的失败保护备份位与 flock 锁文件（scripts/ensure-frontend-deps.sh，#810）
 frontend/.node_modules.bak/
-frontend/.deps-install.lock/
+frontend/.deps-install.lock*
 frontend/dist/
 *.log
 .worktrees/

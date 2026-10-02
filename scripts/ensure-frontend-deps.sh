@@ -14,31 +14,38 @@
 # 任何失败路径（含 Ctrl-C/SIGTERM/errexit 经 EXIT trap）恢复旧目录——升级
 # 失败不等于丢失可运行的开发环境；备份窗口内瞬时占用约一倍磁盘。
 #
-# SIGKILL 自愈（PR #832 codex P2）：强杀后备份位与 node_modules 可能并存，
-# 可否弃备份以「新树 stamp 与当前指纹匹配」为唯一判据——stamp 只在本脚本
-# 完整安装成功后写入，匹配即新树完整；不匹配（含 stamp 缺失，npm ci 中途
-# 被杀）视为半安装残树，删残树、恢复备份。按「目录存在」弃备份会把唯一
-# 完整的旧树删掉，随后安装再失败时失败保护已失效。
+# SIGKILL 残留裁决（PR #832 codex P2）：强杀后备份位与 node_modules 可能
+# 并存，可否弃备份以「新树 stamp 与当前指纹匹配」为唯一判据——stamp 只在
+# 本脚本完整安装成功后写入，匹配即新树完整；不匹配（含 stamp 缺失，npm ci
+# 中途被杀）视为半安装残树，删残树、恢复备份。按「目录存在」弃备份会把
+# 唯一完整的旧树删掉，随后安装再失败时失败保护已失效。
 #
-# 并发互斥（PR #832 codex P2）：备份位与恢复逻辑是同 worktree 内的共享
-# 可变状态，dev-up / install / prod-up 或手工并发调用会互相移走备份、删除
-# 对方刚完成的安装（EXIT trap 恢复的正是对方的成果）。整个事务（残留
-# 收编 → 指纹判定 → 安装 → stamp → 清备份）经 mkdir 原子锁串行化，语义
-# 同 scripts/gate-queue.sh 的 slot：等待者打印持有者 pid；持有者死亡
-# （kill -0）即回收；锁不防跨 worktree——各 worktree 的 frontend/ 互不
-# 相干，无需机器级锁。mkdir 与写 pid 之间的窗口只剩相邻两条语句，空 pid
-# 残锁经短暂宽限后由等待者回收。
+# 并发互斥（PR #832 codex P2，第三轮）：备份位与恢复逻辑是同 worktree 内
+# 的共享可变状态，并发调用会互相移走备份、删除对方刚完成的安装。前两轮
+# 的自管 mkdir 目录锁接连暴露观察者侧缺陷——mkdir 与写 pid 之间有空窗
+# （需要宽限计时），宽限计数跨持有者累计会误删新持有者刚建的锁，共享
+# 路径上 check-then-act 的回收还有不可闭合的 TOCTOU。第三轮改用内核托管
+# flock：锁的生命周期归内核——持有者死亡（含 SIGKILL）自动释放，无残锁、
+# 无宽限计时、无观察者状态；等待者阻塞在 flock 上而非轮询共享路径，不存
+# 在误删他人锁的代码路径。锁 fd 经 exec 传入重入的 bash（flock 属 open
+# file description，跨 exec 存活，进程退出即释放）；
+# ENSURE_FRONTEND_DEPS_LOCK_HELD 标记防无限重入（同 gate-queue 的
+# SLOT_HELD 信任模型）。python3 是三个调用路径（install-deps /
+# native-prod-up / dev_stack）的既有前置依赖，缺失即 fail-fast。
 #
 # 用法（在仓库根执行，native-prod-up / install-deps / dev_stack 统一委托）：
 #   ./scripts/ensure-frontend-deps.sh
 set -euo pipefail
 
+# 本脚本的绝对路径：必须在下方 cd "$ROOT" 之前、cwd 仍是调用目录时解析
+# ——python3 持锁段 exec 重入要用它，cd 之后 $0 的相对形态（frontend/
+# 下的 ../scripts/…）按新 cwd 解析会指错位置（真实链路验证抓到过）。
+SCRIPT_ABS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 STAMP="frontend/node_modules/.deps-stamp"
 BACKUP="frontend/.node_modules.bak"
-LOCK_DIR="frontend/.deps-install.lock"
 
 for manifest in frontend/package.json frontend/package-lock.json; do
     # ${manifest} 必须带花括号：后随全角逗号时，bash 3.2 在部分 locale 下
@@ -64,6 +71,11 @@ if ! command -v npm >/dev/null 2>&1; then
     echo "缺少 npm，无法安装前端依赖" >&2
     exit 1
 fi
+# flock 持锁需要 python3（install-deps 已把它列为前置依赖，三个调用路径同源）。
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "缺少 python3，无法持有安装锁（并发保护必需）" >&2
+    exit 1
+fi
 # 两清单各自摘要按行拼接：同时覆盖 package.json 与 lockfile，且避免
 # cat 拼接的边界歧义（前文件末尾无换行时内容漂移会产生相同串）。
 FINGERPRINT="$("${HASH[@]}" frontend/package.json frontend/package-lock.json | awk '{print $1}')"
@@ -74,55 +86,52 @@ modules_fresh() {
     [[ -d frontend/node_modules && -f "$STAMP" && "$(cat "$STAMP")" == "$FINGERPRINT" ]]
 }
 
-# ---- 并发互斥：mkdir 原子锁 + pid 存活检测 + 死锁回收（语义同 gate-queue）----
-acquire_deps_lock() {
-    local waited=0 holder
-    while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-        holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-        if [[ -z "$holder" ]]; then
-            # 持有者可能恰在 mkdir 与写 pid 之间（相邻语句）；宽限后仍无
-            # pid 视为该窗口内被强杀的残锁，回收。
-            if (( waited >= 2 )); then
-                echo "检测到无持有者进程的安装锁，回收重试…" >&2
-                rm -rf "$LOCK_DIR"
-                waited=0
-                continue
-            fi
-        elif ! kill -0 "$holder" 2>/dev/null; then
-            echo "检测到陈旧安装锁（pid ${holder} 已退出），回收重试…" >&2
-            rm -rf "$LOCK_DIR"
-            continue
-        fi
-        if (( waited % 30 == 0 )); then
-            echo "另一进程（pid ${holder:-unknown}）正在安装前端依赖，等待…" >&2
-        fi
-        sleep 1
-        waited=$(( waited + 1 ))
-    done
-    printf '%s\n' "$$" > "$LOCK_DIR/pid"
-}
+# ---- 并发互斥：flock（python3 持锁后 exec 重入，锁归内核托管）----
+# 锁覆盖整个事务（残留收编 → 指纹判定 → 安装 → stamp → 清备份）；上方
+# 只读的 fail-fast 检查在锁外执行（不触碰共享状态）。等待者先以非阻塞
+# 探测：失败即有持有者，打印提示后阻塞等待（内核唤醒，无轮询）。
+# 脚本绝对路径与锁路径都由 bash 在 cd "$ROOT" 之前解析传入：python3 段
+# 运行时 cwd 已是仓库根，自行 abspath($0) 会把相对调用路径（frontend/
+# 下的 ../scripts/…）按错误基准解析到仓库外（真实链路验证抓到过）。
+if [[ "${ENSURE_FRONTEND_DEPS_LOCK_HELD:-}" != "1" ]]; then
+    exec python3 - "$SCRIPT_ABS" "$BASH" "$ROOT" <<'PY'
+import fcntl
+import os
+import sys
 
-release_deps_lock() {
-    # 仅当锁内 pid 仍是本进程时删除：等待者绝不误删持有者的锁。
-    if [[ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" == "$$" ]]; then
-        rm -rf "$LOCK_DIR"
-    fi
-}
+script, bash, root = sys.argv[1], sys.argv[2], sys.argv[3]
+lock_path = os.path.join(root, "frontend", ".deps-install.lock")
+try:
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("另一进程正在安装前端依赖，等待…", file=sys.stderr, flush=True)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+except OSError as exc:
+    print(f"无法持有安装锁 {lock_path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+# execv 继承当前进程环境（os.environ 的修改已同步到 C environ）与已打开
+# 的锁 fd（flock 属 open file description，跨 exec 存活直到进程退出）。
+# set_inheritable 必不可少：PEP 446 起 os.open 的 fd 默认 close-on-exec，
+# 不显式放开则锁 fd 在 execv 瞬间被关闭——锁立即失效（并发窗口重开，
+# 行为级并发用例实测抓到过）。
+os.set_inheritable(fd, True)
+os.environ["ENSURE_FRONTEND_DEPS_LOCK_HELD"] = "1"
+os.execv(bash, [bash, script])
+PY
+fi
 
-# EXIT trap：备份位存在（安装路径被中断）则恢复旧目录；随后释放锁。
-# trap 内命令失败不改写脚本退出码（除非显式 exit），恢复失败时备份仍在，
-# 下次运行的残留收编逻辑自愈。
-restore_and_release() {
+# EXIT trap：备份位存在（安装路径被中断）则恢复旧目录。锁无需显式释放：
+# flock 归内核托管，本进程以任何方式退出（含 SIGKILL）即自动释放，锁文件
+# 残留不阻塞后续运行。
+restore_backup_on_exit() {
     if [[ -d "$BACKUP" ]]; then
         rm -rf frontend/node_modules
         mv -f "$BACKUP" frontend/node_modules
     fi
-    release_deps_lock
 }
-
-# 锁须先于任何共享状态变更（含残留备份收编与跳过路径里的 rm）。
-acquire_deps_lock
-trap 'restore_and_release' EXIT
+trap 'restore_backup_on_exit' EXIT
 
 # ---- SIGKILL 残留收编：备份与新树并存时以 stamp 有效性裁决 ----
 # 新树 stamp 命中当前指纹 = 上次安装已完整完成（stamp 后、清备份前被杀），
