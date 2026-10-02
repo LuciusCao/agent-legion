@@ -404,20 +404,41 @@ def test_parse_expect_runtimes_dedupes() -> None:
 
 # ---- #831 指纹对账：解析到的 velites 副本 vs 仓库源码（软告警） ----
 
+# 有效指纹 fixture：40 位 hex tree hash（staleness 的 _FINGERPRINT_RE 口径）。
+_HEX_OLD = "a" * 40  # data/bin/PATH 副本的（旧）指纹
+_HEX_NEW = "b" * 40  # 仓库当前（新）指纹
 
-def _fake_git_stub(monkeypatch: pytest.MonkeyPatch, stdout: str, returncode: int = 0) -> None:
-    """把 _expected_velites_fingerprint 的 git 调用替换为固定输出。"""
+
+def _fake_git_stub(
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str = "",
+    returncode: int = 0,
+    raises: Exception | None = None,
+) -> None:
+    """把 staleness 的 git tree-hash 探测替换为固定输出。
+
+    只拦截 argv[0] == "git" 的调用，其余 subprocess 消费者（如
+    probe_runtime_versions 的 --version 探测）转发真实实现——patch 打在
+    全局 subprocess 模块上，无条件截获会静默伪造同进程内一切子进程行为
+    （对抗式 review on #835：版本探测曾被本 stub 截获而不自知）。"""
+
+    real_run = staleness.subprocess.run
 
     class _Result:
         def __init__(self) -> None:
             self.returncode = returncode
             self.stdout = stdout
+            self.stderr = ""
 
-    monkeypatch.setattr(
-        staleness.subprocess,
-        "run",
-        lambda *args, **kwargs: _Result(),
-    )
+    def _run(*args: object, **kwargs: object) -> object:
+        argv = args[0] if args else kwargs.get("args")
+        if isinstance(argv, list) and argv and argv[0] == "git":
+            if raises is not None:
+                raise raises
+            return _Result()
+        return real_run(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(staleness.subprocess, "run", _run)
 
 
 @pytest.mark.no_db
@@ -428,18 +449,21 @@ def test_staleness_warning_fires_when_bundled_stamp_lags_repo(
     落在旧副本上，stamp 与仓库指纹不一致 → 返回告警文案（漂移可见）。"""
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    (bundled_dir / "velites.src-stamp").write_text("old-hash\n", encoding="utf-8")
+    (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_OLD}\n", encoding="utf-8")
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)  # #496 真实读取点
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
-    _fake_git_stub(monkeypatch, "new-hash\n")
+    _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
 
     warning = staleness.velites_staleness_warning()
 
     assert warning is not None
     assert str(bundled_dir / "velites") in warning
-    assert "old-hash"[:12] in warning
-    assert "new-hash"[:12] in warning
+    assert _HEX_OLD[:12] in warning
+    assert _HEX_NEW[:12] in warning
     assert "ensure-velites.sh" in warning
+    # 方向中性（PATH 副本跨 worktree 共享，副本可能新于本仓库版本线）。
+    assert "落后" in warning
+    assert "领先" in warning
 
 
 @pytest.mark.no_db
@@ -449,10 +473,10 @@ def test_staleness_warning_silent_when_stamp_matches_repo(
     """指纹一致（prod-up 双通道刷新后的健康状态）→ 无告警。"""
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    (bundled_dir / "velites.src-stamp").write_text("same-hash\n", encoding="utf-8")
+    (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_NEW}\n", encoding="utf-8")
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
-    _fake_git_stub(monkeypatch, "same-hash\n")
+    _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
 
     assert staleness.velites_staleness_warning() is None
 
@@ -465,9 +489,9 @@ def test_staleness_warning_reconciles_resolved_path_copy(
     对账（ensure-velites.sh 默认模式安置 PATH 副本时同样留 stamp）。"""
     path_velites = tmp_path / "path-velites"
     _write_executable(path_velites)
-    (tmp_path / "path-velites.src-stamp").write_text("path-old\n", encoding="utf-8")
+    (tmp_path / "path-velites.src-stamp").write_text(f"{_HEX_OLD}\n", encoding="utf-8")
     monkeypatch.setattr(shutil, "which", lambda _binary: str(path_velites))
-    _fake_git_stub(monkeypatch, "repo-new\n")
+    _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
 
     warning = staleness.velites_staleness_warning()
 
@@ -492,11 +516,12 @@ def test_staleness_warning_silent_without_stamp(
 def test_staleness_warning_silent_when_fingerprint_unavailable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """仓库指纹不可得（docker 镜像无 repo/git 失败/无 velites 子树）→ 跳过，
-    对账只在「有指纹可比」时进行（docker 形态 velites 版本独立管理，非漂移）。"""
+    """仓库指纹不可得（git 失败/无 velites 子树）→ 跳过，对账只在「有指纹
+    可比」时进行（docker 形态 velites 版本独立管理，非漂移）。stamp 必须是
+    有效 hex——否则在调 git 前就因垃圾内容静默，测不到本路径。"""
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    (bundled_dir / "velites.src-stamp").write_text("some-hash\n", encoding="utf-8")
+    (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_OLD}\n", encoding="utf-8")
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
     _fake_git_stub(monkeypatch, "", returncode=128)
@@ -514,6 +539,170 @@ def test_staleness_warning_silent_when_velites_unresolvable(
     assert staleness.velites_staleness_warning() is None
 
 
+# ---- 软告警不变量：任何失败形态都不得抛出/阻断启动（codex P2 on #835） ----
+
+
+@pytest.mark.no_db
+def test_staleness_warning_never_raises_on_corrupt_stamp_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """codex P2 本体：stamp 含非 UTF-8 字节（手工部署/写入中断/损坏）时
+    read_text 抛 UnicodeDecodeError——对账必须吞掉返回 None，不得穿透到
+    prepare_runtime_models 使 Worker crash-loop（supervisor 对退出码 1 走
+    自动重启并每轮重置 claim_enabled）。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    (bundled_dir / "velites.src-stamp").write_bytes(b"\xff\xfe broken \x80\n")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
+
+    assert staleness.velites_staleness_warning() is None
+
+
+@pytest.mark.no_db
+def test_staleness_warning_never_raises_on_git_subprocess_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """git 探测的异常族（timeout / git 缺失 / 输出解码失败）逐一吞掉返回
+    None——subprocess.run(text=True) 的解码异常与 stamp 读取同族（都曾被
+    点状 except 白名单漏掉）。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_OLD}\n", encoding="utf-8")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    import subprocess as _sp
+
+    for failure in (
+        _sp.TimeoutExpired(cmd=["git"], timeout=10),
+        FileNotFoundError("git"),
+    ):
+        _fake_git_stub(monkeypatch, raises=failure)
+        assert staleness.velites_staleness_warning() is None
+
+
+@pytest.mark.no_db
+def test_staleness_backstop_swallows_unexpected_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """总兜底不变量：_reconcile 抛出未枚举异常（未来代码增长引入的新读取
+    点）时 velites_staleness_warning 仍返回 None——「漂移可见」绝不演变为
+    「阻断启动」。"""
+
+    def _boom() -> str | None:
+        raise RuntimeError("unforeseen failure mode")
+
+    monkeypatch.setattr(staleness, "_reconcile", _boom)
+    assert staleness.velites_staleness_warning() is None
+
+
+@pytest.mark.no_db
+def test_prepare_runtime_models_survives_staleness_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """接线级不变量：对账内部炸掉时 prepare_runtime_models 照常完成（返回
+    None、注入发现结果），只是没有告警行——启动路径零依赖软告警。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+
+    def _boom() -> str | None:
+        raise RuntimeError("unforeseen failure mode")
+
+    monkeypatch.setattr(staleness, "_reconcile", _boom)
+    monkeypatch.setattr(
+        runtime_setup,
+        "discover_effective_models",
+        lambda _config: ([{"runtime": "velites", "provider": "sqai", "model": "kimi"}], {}),
+    )
+
+    config = {"disabled_runtimes": [], "models": []}
+    assert runtime_setup.prepare_runtime_models(config) is None
+    assert config["models"] == [{"runtime": "velites", "provider": "sqai", "model": "kimi"}]
+    assert "源码指纹" not in capsys.readouterr().out
+
+
+# ---- 对账输入的形态校验（假告警/挂起防线，对抗式 review 簇 A） ----
+
+
+@pytest.mark.no_db
+def test_staleness_silent_on_garbage_stamp_content(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """stamp 内容非纯 hex（跨版本格式变化/手工随意写入）→ 按不可对账跳过：
+    垃圾内容与仓库指纹必然不等，放行会变成每次启动的假告警 + 多行内容
+    注入启动日志。git 输出同校验（rc=0 但非纯 hash 的包装器输出）。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+
+    for content in ("not-a-hash\n", "HEAD detached at abc123\nextra line\n", "short\n"):
+        (bundled_dir / "velites.src-stamp").write_text(content, encoding="utf-8")
+        _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
+        assert staleness.velites_staleness_warning() is None, content
+
+    # git 侧：rc=0 但输出非纯 hex（PATH 上的 git 包装器多打了一行）。
+    (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_OLD}\n", encoding="utf-8")
+    _fake_git_stub(monkeypatch, "hint: using detached HEAD\nabc123\n")
+    assert staleness.velites_staleness_warning() is None
+
+
+@pytest.mark.no_db
+def test_staleness_silent_on_odd_stamp_file_forms(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """stamp 为 FIFO（open 挂死——比崩溃更难诊断的启动挂起）、目录、超限
+    巨文件（全量读入的 OOM 防线）→ 一律按不可对账跳过。"""
+    import os
+
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
+
+    fifo = bundled_dir / "velites.src-stamp"
+    os.mkfifo(fifo)
+    assert staleness.velites_staleness_warning() is None  # is_file() 排除 FIFO
+    fifo.unlink()
+
+    (bundled_dir / "velites.src-stamp").mkdir()
+    assert staleness.velites_staleness_warning() is None
+    (bundled_dir / "velites.src-stamp").rmdir()
+
+    (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_OLD * 4}\n", encoding="utf-8")
+    assert staleness.velites_staleness_warning() is None  # 超 128 字节上限
+
+
+@pytest.mark.no_db
+def test_staleness_skips_git_when_repo_root_lacks_git_or_velites(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """前置形态检查：仓库根无 .git（worker/+shared/ 被拷到非 repo 目录）或
+    无 velites/ 子树时不调 git——git -C 会向上发现无关的祖先仓库，若它恰有
+    velites/ 子树会拿到它的 tree hash 制造假告警。stub 返回有效 hash 仍得
+    None，证明前置检查先于 git 短路。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_OLD}\n", encoding="utf-8")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
+
+    for layout in ("empty", "git-only", "velites-without-git"):
+        root = tmp_path / f"root-{layout}"
+        root.mkdir()
+        if layout == "git-only":
+            (root / ".git").mkdir()
+        if layout == "velites-without-git":
+            (root / "velites").mkdir()
+        monkeypatch.setattr(staleness, "_REPO_ROOT", root)
+        assert staleness.velites_staleness_warning() is None, layout
+
+
 @pytest.mark.no_db
 def test_prepare_runtime_models_prints_staleness_warning(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -522,10 +711,10 @@ def test_prepare_runtime_models_prints_staleness_warning(
     （漂移可见但不 fail-closed——velites 版本线独立，允许刻意落后）。"""
     bundled_dir = tmp_path / "bundle"
     _write_executable(bundled_dir / "velites")
-    (bundled_dir / "velites.src-stamp").write_text("lagging\n", encoding="utf-8")
+    (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_OLD}\n", encoding="utf-8")
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)  # #496 真实读取点
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
-    _fake_git_stub(monkeypatch, "current\n")
+    _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
     monkeypatch.setattr(
         runtime_setup,
         "discover_effective_models",

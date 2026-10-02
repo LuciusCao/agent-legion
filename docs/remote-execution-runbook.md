@@ -244,7 +244,12 @@ same OS/arch as the Worker) for both roles. `make prod-up` (native) refreshes
 **both** placements — PATH and the bundled `data/bin` copy — because
 resolution prefers the bundled copy, a PATH-only refresh never reaches the
 Worker (#831); worker startup also logs a WARNING when the resolved velites
-copy's source stamp lags the repo's velites/ fingerprint.
+copy's source stamp differs from the repo's velites/ fingerprint (direction-
+neutral: the copy may lag the repo, or come from a PATH-shared build of a
+newer line). Reconciliation needs a stamp next to the binary and a git tree
+in the deployment — hand-placed Release binaries without a stamp, and forms
+without a checkout (e.g. the docker image), have nothing to compare and the
+check stays silent.
 
 When no online code-capable Worker exists, dispatch falls back to the local
 Host executor — code tasks never rot in a queue waiting for a Worker.

@@ -54,8 +54,15 @@ if [[ -z "$DIRTY" && -x "$VELITES_BIN" && -f "$STAMP" && "$(cat "$STAMP")" == "$
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
-    echo "velites 需要重建（源码指纹 ${SRC_ID:0:12}）但 cargo 不可用" >&2
+    echo "velites 需要重建（源码指纹 ${SRC_ID:0:12}）但 cargo 不可用——安装 Rust 工具链（https://rustup.rs）后重跑；或以 GitHub Release 产物安置到 $VELITES_BIN 并写入同指纹 stamp: git rev-parse HEAD:velites > \"${VELITES_BIN}.src-stamp\"（见 docs/agent-worker-deployment.md §5）" >&2
     exit 1
+fi
+
+# #831 可见性：既有二进制但无 stamp（Release 产物/手工安置）走的是重建
+# 分支——不是过期，是「无法判鲜」。替换经过校验的 Release 二进制前先提示，
+# 无对账依据的静默覆盖是运维盲区。
+if [[ -e "$VELITES_BIN" && ! -f "$STAMP" ]]; then
+    echo "提示: $VELITES_BIN 存在但无 src-stamp 指纹（Release 产物/手工安置？），将按源码指纹重建并覆盖" >&2
 fi
 
 if [[ -n "$DIRTY" ]]; then

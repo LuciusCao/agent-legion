@@ -57,9 +57,17 @@ def prepare_runtime_models(config: dict[str, Any], *, code_concurrency: int = 0)
         return error
     # #831 指纹对账（软告警，不 fail-closed）：实际解析到的 velites 副本
     # 与仓库源码漂移时启动日志必须可见——「PATH 刷新对自带副本优先的解析
-    # 不生效」这一部署形态从此不再静默。
-    if warning := velites_staleness_warning():
-        print(warning, flush=True)
+    # 不生效」这一部署形态从此不再静默。对账本体已有总兜底（staleness.py），
+    # 这里再罩住 print 自身（非 UTF-8 stdout 的编码异常）：软告警的任何
+    # 失败形态都不得阻断启动。
+    try:
+        if warning := velites_staleness_warning():
+            print(warning, flush=True)
+    except Exception:  # noqa: BLE001
+        # #204 broad-except audit: 告警打印失败的降级语义——丢失这一条
+        # 日志换启动继续（与下方发现失败软告警的既有容忍一致），无重试
+        # 价值；对账下一轮启动自然再试。
+        pass
     effective, discovery_errors = discover_effective_models(config)
     if expect_runtimes and (failed := sorted(set(expect_runtimes) & set(discovery_errors))):
         details = "；".join(f"{runtime}: {discovery_errors[runtime]}" for runtime in failed)
