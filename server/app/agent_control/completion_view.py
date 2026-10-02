@@ -1,19 +1,21 @@
 """Worker 结果读视图的链接机制（#759 review P1-1、对抗复审 P2 族）。
 
 自 ``completion_staged`` 拆出的文件预算姊妹模块：staging 目录即读视图，
-归档成员不可信，而视图只是 finish 前的私有 scratch。只有「本次 ref 校
-验提升」的名字会被链接（#779 终审 P1：job_dir 残留永不进视图），且一
-律覆盖——同名归档暂存字节让位 ref 字节（#759 对抗复审 N2），挡位垃
-圾（同名目录、文件祖先、symlink）全域清理，源消失的 TOCTOU 按未产出
-跳过，任何形状/竞态组合都不炸异常（炸穿结果提交在覆盖链接命中时就
-是 codex #774 P2 的同型现场：remote promote 已提交、staging key 已删）。
+归档成员不可信，而视图只是 finish 前的私有 scratch。链入视图的只有两
+类名：「本次 ref 校验提升」的产物（#779 终审 P1：job_dir 残留永不进视
+图）与节点声明 inputs（#828/#830：Host 校验的跨文件对账数据面，见
+``link_declared_inputs_into_view``）。链接一律覆盖——同名归档暂存字
+节让位可信字节（#759 对抗复审 N2），挡位垃圾（同名目录、文件祖先、
+symlink）全域清理，源消失的 TOCTOU 按未产出跳过，任何形状/竞态组合都
+不炸异常（炸穿结果提交在覆盖链接命中时就是 codex #774 P2 的同型现场：
+remote promote 已提交、staging key 已删）。
 """
 
 from __future__ import annotations
 
 import os
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -59,6 +61,33 @@ def link_into_view(names: tuple[str, ...] | Any, job_dir: Path, view_dir: Path) 
                 # 路径输出的病态声明），或盘满/权限等操作性故障——按「该名
                 # 未产出」跳过，produced 判定兜底成 missing。
                 continue
+
+
+def link_declared_inputs_into_view(
+    manifest: dict[str, Any], expected: tuple[str, ...], job_dir: Path, view_dir: Path
+) -> None:
+    """把节点声明 inputs 从 job_dir 链入校验视图（#828/#830）。
+
+    Host 侧校验的 validator 会做跨文件事实回引对账（读上游产物/intake
+    物化文件），staging 化（#759）把校验对象从 job_dir 换成读视图后
+    inputs 不在视图内，这类 validator 全量失败。inputs 是上游节点经各
+    自校验产出的可信字节，链入不放宽 #779 终审 P1 的安全属性：与
+    expected 同名的 input 一律不链（produced 判定仍只认本次上报产物，
+    残留永不补齐 expected），不安全名（绝对路径/``..``）跳过。覆盖语义
+    让可信 input 字节胜过归档在同名位置暂存的不可信成员——与 staging
+    化前「非 expected 归档成员永不可达 validator」同一姿态。job_dir 本
+    地缺失（可淘汰缓存）时按缺席跳过，与 staging 化前校验直读 job_dir
+    的暴露面一致。
+    """
+    expected_names = frozenset(expected)
+    names = []
+    for raw in manifest.get("inputs") or ():
+        name = str(raw)
+        relative = PurePosixPath(name)
+        if name in expected_names or relative.is_absolute() or ".." in relative.parts:
+            continue
+        names.append(name)
+    link_into_view(tuple(names), job_dir, view_dir)
 
 
 def _view_blocker(view_dir: Path, view_spot: Path) -> Path | None:

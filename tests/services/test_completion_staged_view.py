@@ -15,6 +15,9 @@ from pathlib import Path
 
 import pytest
 
+from server.app.agent_control.completion_view import (
+    link_declared_inputs_into_view as _link_inputs,
+)
 from server.app.agent_control.completion_view import link_into_view as _link_into_view
 
 pytestmark = pytest.mark.no_db
@@ -142,3 +145,85 @@ def test_link_skips_when_source_vanishes_mid_link(
     _link_into_view(("out.json",), job_dir, view_dir)
 
     assert not (view_dir / "out.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# #828/#830：节点声明 inputs 链入校验视图
+# ---------------------------------------------------------------------------
+
+
+def test_declared_inputs_linked_into_view(tmp_path: Path) -> None:
+    """声明 inputs 从 job_dir 链入视图，validator 的跨文件对账可读。"""
+    job_dir = tmp_path / "job"
+    view_dir = tmp_path / "view"
+    job_dir.mkdir()
+    view_dir.mkdir()
+    (job_dir / "in-a.json").write_bytes(b"upstream-a")
+    (job_dir / "sub").mkdir()
+    (job_dir / "sub" / "in-b.json").write_bytes(b"upstream-b")
+
+    _link_inputs({"inputs": ["in-a.json", "sub/in-b.json"]}, ("out.json",), job_dir, view_dir)
+
+    assert (view_dir / "in-a.json").read_bytes() == b"upstream-a"
+    assert (view_dir / "sub" / "in-b.json").read_bytes() == b"upstream-b"
+
+
+def test_declared_inputs_never_backfill_expected_names(tmp_path: Path) -> None:
+    """#779 终审 P1 保持关闭：与 expected 同名的 input 一律不链——残留永不
+    经 input 通道补齐 produced（pass-through 声明形态也只认本次上报产物）。"""
+    job_dir = tmp_path / "job"
+    view_dir = tmp_path / "view"
+    job_dir.mkdir()
+    view_dir.mkdir()
+    (job_dir / "out.json").write_bytes(b"stale-leftover")
+    (job_dir / "in.json").write_bytes(b"upstream")
+
+    _link_inputs({"inputs": ["out.json", "in.json"]}, ("out.json",), job_dir, view_dir)
+
+    assert not (view_dir / "out.json").exists()
+    assert (view_dir / "in.json").read_bytes() == b"upstream"
+
+
+def test_declared_inputs_skip_unsafe_names(tmp_path: Path) -> None:
+    """危险名（绝对路径 / ..）跳过，不逃逸出视图。"""
+    job_dir = tmp_path / "job"
+    view_dir = tmp_path / "view"
+    job_dir.mkdir()
+    view_dir.mkdir()
+    (job_dir / "in.json").write_bytes(b"upstream")
+    outside = tmp_path / "escape.json"
+    outside.write_bytes(b"escape")
+
+    _link_inputs({"inputs": ["../escape.json", "/abs/x.json", "in.json"]}, (), job_dir, view_dir)
+
+    assert (view_dir / "in.json").read_bytes() == b"upstream"
+    assert sorted(p.relative_to(view_dir).as_posix() for p in view_dir.rglob("*")) == ["in.json"]
+    assert outside.read_bytes() == b"escape"  # 视图外零副作用
+
+
+def test_declared_inputs_overwrite_archive_junk(tmp_path: Path) -> None:
+    """归档在 input 同名位置暂存的不可信成员让位可信 input 字节——与
+    staging 化前「非 expected 归档成员永不可达 validator」同一姿态。"""
+    job_dir = tmp_path / "job"
+    view_dir = tmp_path / "view"
+    job_dir.mkdir()
+    view_dir.mkdir()
+    (job_dir / "in.json").write_bytes(b"trusted-input")
+    (view_dir / "in.json").write_bytes(b"archive-junk")
+
+    _link_inputs({"inputs": ["in.json"]}, (), job_dir, view_dir)
+
+    assert (view_dir / "in.json").read_bytes() == b"trusted-input"
+
+
+def test_declared_inputs_missing_local_file_skipped(tmp_path: Path) -> None:
+    """job_dir 本地缺失（可淘汰缓存）按缺席跳过，不炸异常——与 staging 化
+    前校验直读 job_dir 的暴露面一致。"""
+    job_dir = tmp_path / "job"
+    view_dir = tmp_path / "view"
+    job_dir.mkdir()
+    view_dir.mkdir()
+
+    _link_inputs({"inputs": ["gone.json"]}, (), job_dir, view_dir)
+
+    assert not (view_dir / "gone.json").exists()

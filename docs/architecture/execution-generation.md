@@ -288,9 +288,12 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    随之能真正落盘而不是被误当事务重放跳过（codex #774 P2；只带第一对会让兄弟
    落点/第二对冲突漏摘，#774 对抗复审 P2）；
 2. **全域读视图**（`agent_control/completion_view.py`）：staging 视图是私有
-   scratch，链接对归档垃圾形状（同名目录、文件祖先、symlink）与源消失 TOCTOU
-   全域——overwrite 遍清挡位垃圾（预检保证删不到暂存源），第一遍遇挡位跳过按
-   未产出判 missing，永不炸异常；
+   scratch，链接一律覆盖并对归档垃圾形状（同名目录、文件祖先、symlink）与
+   源消失 TOCTOU 全域——清挡位垃圾（预检保证删不到暂存源），永不炸异常。
+   视图成员只有两类：本次 ref 校验提升的产物名（#779 终审 P1：job_dir 残留
+   永不进视图补齐 produced）与校验前链入的节点声明 inputs（#828/#830：
+   Host 校验的跨文件对账数据面；与 expected 同名的 input 不链，残留排除
+   语义不动）；
 3. **闸内兜底**（`executors/_lease_finish_promotion.py`）：预检无锁，盖不住跨
    节点 finish 之间现场变坏的残余竞态——`staged_file_moves` 提升失败经 guard
    整体回滚后 completed 转 failed 照常提交，lease 不再被异常回滚毒化成重试循环。

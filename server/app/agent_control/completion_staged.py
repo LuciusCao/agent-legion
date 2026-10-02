@@ -21,7 +21,7 @@ from server.app.agent_broker.result_timing import mark as mark_result_stage
 from server.app.agent_broker.result_unpack import safe_relative_dir
 from server.app.agent_control.completion_moves import gate_safe_staged_moves
 from server.app.agent_control.completion_preflight import find_landing_conflict
-from server.app.agent_control.completion_view import link_into_view
+from server.app.agent_control.completion_view import link_declared_inputs_into_view, link_into_view
 from server.app.executors._shard_contract import read_shard_output
 from server.app.executors.artifact_mirror import upload_produced_artifacts
 from server.app.executors.models import ExecutionResult
@@ -162,6 +162,12 @@ def finish_staged(
         status, exit_code, error = "failed", 1, f"Missing outputs: {', '.join(missing)}"
     # Worker results are untrusted: validate Host-side like the Pi runner.
     if status == "completed" and handler.skill_manager is not None:
+        if view_dir is not job_dir:
+            # #828/#830：validator 的跨文件事实回引对账要读节点声明
+            # inputs——staging 化后视图只收本次产物，inputs 必须在校验前
+            # 从 job_dir 链回（与 expected 同名的名不链，#779 终审 P1 的
+            # 残留排除语义不动）。
+            link_declared_inputs_into_view(manifest, expected, job_dir, view_dir)
         validation_error = validate_worker_outputs(handler.skill_manager, manifest, view_dir)
         if validation_error:
             status, exit_code, error = "failed", 1, validation_error
