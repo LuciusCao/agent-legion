@@ -21,8 +21,8 @@ import pytest
 from shared import code_sandbox
 from worker import executor as agent_worker
 from worker.binary_resolution import resolve_binary
-from worker.runtime import preflight
 from worker.runtime import setup as runtime_setup
+from worker.runtime import staleness
 from worker.runtime.preflight import parse_expect_runtimes, preflight_error
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -414,7 +414,7 @@ def _fake_git_stub(monkeypatch: pytest.MonkeyPatch, stdout: str, returncode: int
             self.stdout = stdout
 
     monkeypatch.setattr(
-        preflight.subprocess,
+        staleness.subprocess,
         "run",
         lambda *args, **kwargs: _Result(),
     )
@@ -433,7 +433,7 @@ def test_staleness_warning_fires_when_bundled_stamp_lags_repo(
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
     _fake_git_stub(monkeypatch, "new-hash\n")
 
-    warning = preflight.velites_staleness_warning()
+    warning = staleness.velites_staleness_warning()
 
     assert warning is not None
     assert str(bundled_dir / "velites") in warning
@@ -454,7 +454,7 @@ def test_staleness_warning_silent_when_stamp_matches_repo(
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
     _fake_git_stub(monkeypatch, "same-hash\n")
 
-    assert preflight.velites_staleness_warning() is None
+    assert staleness.velites_staleness_warning() is None
 
 
 @pytest.mark.no_db
@@ -469,7 +469,7 @@ def test_staleness_warning_reconciles_resolved_path_copy(
     monkeypatch.setattr(shutil, "which", lambda _binary: str(path_velites))
     _fake_git_stub(monkeypatch, "repo-new\n")
 
-    warning = preflight.velites_staleness_warning()
+    warning = staleness.velites_staleness_warning()
 
     assert warning is not None
     assert str(path_velites) in warning
@@ -485,7 +485,7 @@ def test_staleness_warning_silent_without_stamp(
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
 
-    assert preflight.velites_staleness_warning() is None
+    assert staleness.velites_staleness_warning() is None
 
 
 @pytest.mark.no_db
@@ -501,7 +501,7 @@ def test_staleness_warning_silent_when_fingerprint_unavailable(
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
     _fake_git_stub(monkeypatch, "", returncode=128)
 
-    assert preflight.velites_staleness_warning() is None
+    assert staleness.velites_staleness_warning() is None
 
 
 @pytest.mark.no_db
@@ -511,7 +511,7 @@ def test_staleness_warning_silent_when_velites_unresolvable(
     """velites 不可解析（零 runtime 形态）→ 无对账对象，不告警。"""
     monkeypatch.setattr(shutil, "which", _all_missing)
 
-    assert preflight.velites_staleness_warning() is None
+    assert staleness.velites_staleness_warning() is None
 
 
 @pytest.mark.no_db
@@ -538,6 +538,17 @@ def test_prepare_runtime_models_prints_staleness_warning(
     assert "源码指纹" in out
     assert "ensure-velites.sh" in out
     assert config.get("models") == []
+
+
+@pytest.mark.no_db
+def test_preflight_reexports_staleness_warning() -> None:
+    """preflight.velites_staleness_warning 是 staleness 模块的名字
+    re-export——setup.py 等调用方依赖该导入路径，别名漂移会在启动接线处
+    静默断链。"""
+    import worker.runtime.preflight as pf
+    import worker.runtime.staleness as st
+
+    assert pf.velites_staleness_warning is st.velites_staleness_warning
 
 
 @pytest.mark.no_db

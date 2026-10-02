@@ -1895,6 +1895,7 @@
     "worker/runtime/models.py": 104,
     "worker/runtime/preflight.py": 36,
     "worker/runtime/setup.py": 28,
+    "worker/runtime/staleness.py": 52,
     "worker/runtime/status.py": 43,
     "worker/service.py": 125,
     "worker/service_bind.py": 25,
