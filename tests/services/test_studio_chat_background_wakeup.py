@@ -17,6 +17,29 @@ from tests.helpers.studio_chat_fixtures import write_task
 pytestmark = pytest.mark.no_db
 
 
+def test_running_and_bash_completion_are_visible_without_waking_model(chat, tmp_path):
+    service, runtime = chat
+    write_task(tmp_path, "shell-1", "running", kind="bash", description="Check documents")
+    wake.start_watcher(service, "chat-1", runtime, "acp-1")
+    wait_for_predicate(lambda: service.store.append_message.call_count == 1)
+    assert service.store.append_message.call_args.args[3]["status"] == "running"
+    runtime.handle.send_prompt.assert_not_called()
+    write_task(tmp_path, "shell-1", "completed", kind="bash", description="Check documents")
+    wait_for_predicate(lambda: service.store.append_message.call_count == 2)
+    assert service.store.append_message.call_args.args[3]["event"] == "background_task_finished"
+    runtime.handle.send_prompt.assert_not_called()
+
+
+def test_cancel_does_not_hide_task_receipts(chat, tmp_path):
+    service, runtime = chat
+    runtime.background_wakeup_enabled = False
+    wake.start_watcher(service, "chat-1", runtime, "acp-1")
+    write_task(tmp_path, "agent-1", "failed")
+    wait_for_predicate(lambda: service.store.append_message.call_count == 1)
+    assert service.store.append_message.call_args.args[3]["status"] == "failed"
+    runtime.handle.send_prompt.assert_not_called()
+
+
 def test_reader_filters_foreign_nested_unknown_and_nonterminal_tasks(tmp_path):
     write_task(tmp_path, "agent-1", "completed")
     write_task(tmp_path, "agent-2", "failed", session_id="foreign")
@@ -102,6 +125,7 @@ def chat(tmp_path, monkeypatch):
     service._runtimes_lock = threading.Lock()
     service._runtimes = {"chat-1": runtime}
     service.db.claim_studio_chat_turn.return_value = True
+    service.db.list_studio_chat_messages_tail.return_value = []
     monkeypatch.setattr(delivery, "invalidate_run_token", Mock())
     monkeypatch.setattr(delivery, "_token_alive", Mock(return_value=True))
     monkeypatch.setattr(wake, "task_root", lambda *_: tmp_path)
@@ -128,7 +152,15 @@ def test_completion_wakes_once_without_user_prompt_and_records_receipt(chat, tmp
     # A new completion proves the watcher took another lap, without replaying
     # the first receipt; the ongoing assistant turn defers the next wake.
     write_task(tmp_path, "agent-2", "failed")
-    wait_for_predicate(lambda: service.store.append_message.call_count == 2)
+    wait_for_predicate(
+        lambda: (
+            sum(
+                c.args[3]["event"] == "background_task_finished"
+                for c in service.store.append_message.call_args_list
+            )
+            == 2
+        )
+    )
     assert runtime.handle.send_prompt.call_count == 1
     runtime.turn_open = False
     wait_for_predicate(lambda: runtime.handle.send_prompt.call_count == 2)
@@ -266,6 +298,11 @@ def test_cancelled_watcher_discards_completions_until_human_rearms(chat, tmp_pat
     write_task(tmp_path, "agent-new", "completed")
     wait_for_predicate(lambda: runtime.handle.send_prompt.call_count == 1)
     assert "agent-cancelled" not in runtime.handle.send_prompt.call_args.args[0]
+    assert any(
+        c.args[3]["task_id"] == "agent-cancelled"
+        and c.args[3]["event"] == "background_task_finished"
+        for c in service.store.append_message.call_args_list
+    )
 
 
 def test_cancel_rearm_without_watcher_lap_discards_old_pending_and_completions(chat, tmp_path):
@@ -283,6 +320,11 @@ def test_cancel_rearm_without_watcher_lap_discards_old_pending_and_completions(c
     cursor.step(service, "chat-1", runtime)
     prompt = runtime.handle.send_prompt.call_args.args[0]
     assert "new" in prompt and "pending" not in prompt and "cancelled" not in prompt
+    assert {
+        c.args[3]["task_id"]
+        for c in service.store.append_message.call_args_list
+        if c.args[3]["event"] == "background_task_finished"
+    } == {"pending", "cancelled", "new"}
 
 
 def test_rearm_observes_completions_at_commit_not_preparation(chat, tmp_path):
@@ -299,6 +341,24 @@ def test_rearm_observes_completions_at_commit_not_preparation(chat, tmp_path):
     assert "cancelled" not in runtime.handle.send_prompt.call_args.args[0]
     assert "during-admission" not in runtime.handle.send_prompt.call_args.args[0]
     assert "new" in runtime.handle.send_prompt.call_args.args[0]
+
+
+def test_cleanup_failure_blocks_delivery_but_not_activity_receipts(chat, tmp_path):
+    service, runtime = chat
+    cursor = runtime.background_cursor = wake.CompletionCursor(tmp_path, "acp-1")
+    runtime.background_cleanup = Mock(return_value=False)
+    write_task(tmp_path, "new", "running")
+    cursor.step(service, "chat-1", runtime)
+    assert service.store.append_message.call_args.args[3]["status"] == "running"
+    write_task(tmp_path, "new", "completed")
+    cursor.step(service, "chat-1", runtime)
+    assert service.store.append_message.call_args.args[3]["event"] == "background_task_finished"
+    assert cursor.pending == {"new"}
+    runtime.handle.send_prompt.assert_not_called()
+    runtime.background_cleanup.return_value = True
+    cursor.step(service, "chat-1", runtime)
+    runtime.handle.send_prompt.assert_called_once()
+    assert service.store.append_message.call_count == 2
 
 
 def test_rearm_commit_cannot_undo_a_newer_cancel(chat):

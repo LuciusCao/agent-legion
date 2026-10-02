@@ -8,7 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from server.app.studio_chat.background_baseline import capture_resume_baseline
-from server.app.studio_chat.background_wakeup import CompletionCursor
+from server.app.studio_chat.background_wakeup import CompletionCursor, cancel_wakeup, rearm_wakeup
 from server.app.studio_chat.kimi_task_store import completed_tasks, task_root
 from server.app.studio_chat.runtime import SessionRuntime
 from tests.helpers.studio_chat_fixtures import write_task
@@ -36,6 +36,7 @@ def test_unavailable_initial_baseline_retries_without_replaying_history(tmp_path
     runtime.background_cursor = cursor
     runtime.turn_open = True
     service = Mock()
+    service.db.list_studio_chat_messages_tail.return_value = []
     service.runtime.return_value = runtime
     service._runtimes_lock = threading.Lock()
     service._runtimes = {"chat": runtime}
@@ -106,3 +107,27 @@ def test_strict_baseline_excludes_foreign_tasks_before_reading_runtime(tmp_path)
     path = write_task(tmp_path, session_id="foreign")
     (path / "runtime.json").unlink()
     assert completed_tasks(tmp_path, "acp-1", strict=True) == {}
+
+
+@pytest.mark.parametrize("rearm_first", [False, True])
+def test_delayed_initial_baseline_does_not_replay_agent_or_bash_receipts(tmp_path, rearm_first):
+    root = tmp_path / "tasks"
+    cursor = CompletionCursor(root, "acp-1")
+    runtime = SessionRuntime(SimpleNamespace(), "token")
+    runtime.background_cursor = cursor
+    runtime.turn_open = True
+    service = Mock()
+    service.runtime.return_value = runtime
+    service.db.list_studio_chat_messages_tail.return_value = []
+    write_task(root, "historical-agent", "completed")
+    write_task(root, "historical-bash", "completed", kind="bash")
+    if rearm_first:
+        cancel_wakeup(runtime)
+        rearm_wakeup(runtime)
+    cursor.step(service, "chat", runtime)
+    service.store.append_message.assert_not_called()
+    assert not cursor.pending
+    write_task(root, "new-bash", "running", kind="bash")
+    cursor.step(service, "chat", runtime)
+    assert service.store.append_message.call_args.args[3]["task_id"] == "new-bash"
+    assert not cursor.pending

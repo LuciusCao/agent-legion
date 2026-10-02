@@ -30,6 +30,12 @@ invariants:
       - kind: integration
         target: tests/services/test_studio_chat_background_boundaries.py
         gate: quick
+      - kind: contract
+        target: tests/services/test_studio_chat_background_activity.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_background_recovery.py
+        gate: quick
   - id: API-CONTRACT-001
     statement: Generated frontend API types remain in sync with the backend OpenAPI schema.
     owner: architecture
