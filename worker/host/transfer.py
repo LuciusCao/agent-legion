@@ -14,6 +14,7 @@ from typing import Any, BinaryIO, cast
 
 import requests
 
+from shared.code_contract import MAX_RESULT_COMMAND_PARTS
 from worker._retry import StopSignal, run_with_retry
 
 # Transient network errors (timeout/reset/refused) and Host 5xx get
@@ -117,8 +118,22 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
     truncation directly (see that comment). This is the dead-loop guard
     for free: the fallback's re-report carries an empty header manifest, so
     a second overflow can never re-signal — at most one fallback per
-    result, and the queue's fallback path is additionally once-only."""
+    result, and the queue's fallback path is additionally once-only.
+
+    #822: ahead of the byte-budget loop, ``command`` is unconditionally
+    capped to ``MAX_RESULT_COMMAND_PARTS`` parts (prefix kept) — the Host's
+    part-count check is a separate face from the byte budget, and an argv
+    over the part cap must never turn a finished execution into a 4xx."""
     payload = dict(metadata)
+    # #822 stage 0（与字节预算无关、无条件执行）：command 段数收缩到 Host 的
+    # 校验上限。agent argv 每个 expected output 重复一次 --require-output，
+    # 40+ 产物时段数超限而字节未必超预算——旧 Host 对此 400，Worker 4xx 终态
+    # 丢结果 → 租约过期重排队 → 每轮烧一次完整执行。command 是纯观测面，
+    # 截断保前缀（二进制 + 前导参数最有诊断价值）；新 Host 同样截断，本段让
+    # 新 Worker 对旧 Host 也收敛。
+    command = payload.get("command")
+    if isinstance(command, list) and len(command) > MAX_RESULT_COMMAND_PARTS:
+        payload["command"] = command[:MAX_RESULT_COMMAND_PARTS]
 
     def _serialized() -> bytes:
         return json.dumps(payload, ensure_ascii=False).encode("utf-8")
