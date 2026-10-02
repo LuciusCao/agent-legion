@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from server.app.studio_chat.callback_guard import owned_callback
+from server.app.studio_chat.permissions import handle_permission_request
+
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
@@ -22,26 +25,36 @@ class ServiceCallbacks:
         # thread cannot tear down a newer runtime registered by resume (ABA).
         self.runtime: SessionRuntime | None = None
 
+    @owned_callback
     def on_ready(self, capabilities: dict[str, Any], opened: OpenedAcpSession) -> None:
         self._service._on_ready(self._session_id, capabilities, opened)
 
+    @owned_callback
     def on_update(self, update: dict[str, Any]) -> None:
         self._service._on_update(self._session_id, update)
 
     def on_permission_request(
         self, tool_call: dict[str, Any], options: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        return self._service._on_permission_request(self._session_id, tool_call, options)
+        if self.runtime is None:
+            return {"deny": True}
+        return handle_permission_request(
+            self._service, self._session_id, tool_call, options, expected=self.runtime
+        )
 
+    @owned_callback
     def on_turn_end(self, stop_reason: str, *, timed_out: bool = False) -> None:
         self._service._on_turn_end(self._session_id, stop_reason, timed_out=timed_out)
 
+    @owned_callback
     def on_turn_timeout(self) -> None:
         self._service._on_turn_timeout(self._session_id)
 
+    @owned_callback
     def on_turn_error(self, detail: str) -> None:
         self._service._on_error(self._session_id, detail, fatal=False)
 
+    @owned_callback
     def on_error(self, detail: str) -> None:
         self._service._on_error(self._session_id, detail, fatal=True)
 

@@ -195,7 +195,9 @@ def test_expired_token_is_not_revived_at_turn_start(chat, job_db) -> None:
             (hash_token(token),),
         )
     assert authenticate_scoped_token(job_db, token) is None
-    service.send_message(session["id"], workspace_id, "hi")
+    with pytest.raises(ConflictError, match="继续对话"):
+        service.send_message(session["id"], workspace_id, "hi")
+    assert job_db.count_studio_chat_user_messages(session["id"]) == 0
     with job_db.connect() as conn:
         row = conn.execute(
             "select expires_at < current_timestamp as still_expired"
@@ -204,7 +206,49 @@ def test_expired_token_is_not_revived_at_turn_start(chat, job_db) -> None:
         ).fetchone()
     assert row["still_expired"]
     assert authenticate_scoped_token(job_db, token) is None
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    assert service.get_session(session["id"])["status"] == "error"
+
+
+@pytest.mark.parametrize("phase", ["renew_scoped_token", "prepare_resume_prompt"])
+@pytest.mark.parametrize("invalidation", ["expired", "revoked"])
+def test_token_lost_before_handoff_releases_claim(
+    chat, job_db, monkeypatch, phase, invalidation
+) -> None:
+    from unittest.mock import Mock
+
+    from server.app.studio_chat import admission as admission_module
+
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    runtime = service.runtime(session["id"])
+    send = Mock(wraps=runtime.handle.send_prompt)
+    monkeypatch.setattr(runtime.handle, "send_prompt", send)
+    original = getattr(admission_module, phase)
+
+    def invalidate(*args, **kwargs):
+        with job_db.connect() as conn:
+            if invalidation == "expired":
+                conn.execute(
+                    "update auth_scoped_tokens set expires_at = current_timestamp"
+                    " - interval '1 minute' where token_hash=%s",
+                    (hash_token(runtime.token),),
+                )
+            else:
+                conn.execute(
+                    "delete from auth_scoped_tokens where token_hash=%s",
+                    (hash_token(runtime.token),),
+                )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(admission_module, phase, invalidate)
+    with pytest.raises(ConflictError, match="继续对话"):
+        service.send_message(session["id"], workspace_id, "must not reach agent")
+    send.assert_not_called()
+    assert not runtime.turn_open
+    assert service.get_session(session["id"])["status"] == "error"
+    assert authenticate_scoped_token(job_db, runtime.token) is None
+    assert job_db.count_studio_chat_user_messages(session["id"]) == 0
 
 
 def test_capped_session_insert_enforces_cap_atomically(chat, job_db) -> None:
@@ -260,8 +304,8 @@ def test_close_during_permission_park_leaves_session_closed(chat) -> None:
     service.send_message(session["id"], workspace_id, "run ls")
     _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
     service.close_session(session["id"], workspace_id)
-    # The resolved message is appended after the parked thread's finally
-    # block, so observing it proves the status write already happened.
+    # Close records denied permissions before its terminal marker; the
+    # retired waiter's finally must neither append nor resurrect this row.
     _wait_for(
         lambda: any(
             m["kind"] == "permission" and m["content"].get("status") == "resolved"
@@ -270,6 +314,10 @@ def test_close_during_permission_park_leaves_session_closed(chat) -> None:
     )
     time.sleep(0.2)
     assert service.get_session(session["id"])["status"] == "closed"
+    assert (
+        service.list_messages(session["id"], workspace_id)[-1]["content"]["event"]
+        == "session_closed"
+    )
 
 
 def test_respond_permission_after_settle_is_not_found(chat) -> None:

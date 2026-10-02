@@ -174,7 +174,7 @@ make stack-worker-up
 make stack-logs STACK=worker
 ```
 
-打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，填写部署机可通过 Tailscale 访问的 Host 地址并保存。控制台页面由 Worker Service 动态返回并自动注入 control token；直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
+打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，先完成控制台登录，再填写部署机可通过 Tailscale 访问的 Host 地址并保存。只有 Worker Service 绑定回环地址时页面才自动注入 control token；Compose 容器内部绑定 `0.0.0.0`，即使宿主机只向本机发布端口也需要手动输入控制令牌。直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
 
 - Worker 执行进程是否运行；
 - 当前配置的 Host 地址以及 Host 是否可达；
@@ -345,6 +345,14 @@ v68 及以上的 Host 仍下发 `workflow_key`（兼容窗口内），Worker 可
 
 ### 控制面鉴权
 
+控制令牌（登录 Worker 控制台）与 workspace 注册 Key（授权 Worker 接入 Host）用途不同。默认 Host Compose 在项目根目录运行以下命令取得控制令牌，粘贴到 Worker 登录框后，再到「配置 → Workspace 访问」添加注册 Key：
+
+```bash
+docker compose -f deploy/compose.host.yaml exec worker cat /var/lib/agent-legion-worker-control/control_token
+```
+
+独立 Worker 部署将 Compose 文件换成启动时使用的 `deploy/compose.worker.standalone.yaml` 或 `deploy/compose.worker.yaml`，保留相同项目名及其他 Compose 参数。原生部署从 Worker 的 `--state-dir` 目录读取 `control_token`；没有该机器访问权限时由 Worker 维护者完成登录。控制令牌不要放进控制台 URL、Host 配置或注册标签。
+
 Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > 状态目录下的 `control_token` 文件（容器内执行时自动命中）。
 
 如果需要从终端查询或自动化，可使用容器内 CLI：
@@ -418,7 +426,34 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
 2. 起后端并登录 Host Web UI，在 workspace「设置 → Agent 与 Worker」为目标
    workspace 签发 scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
    「Workspace 访问（Scoped Token）」区块粘贴添加。Worker 侧 token 随时可以
-   补——注册失败只影响 Worker 自身，不需要重启后端。
+   补——注册失败只影响 Worker 自身，不需要重启后端。该设置页顶部的
+   「Worker 与 Worker 控制台」卡片、签发成功后的「下一步」以及各处 Worker
+   列表空态都带「打开 Worker 控制台」入口：地址来自后端 env
+   `AGENT_LEGION_WORKER_CONSOLE_URL`（`make dev-up` 按 Worker 端口自动注入，
+   `native-prod-up.sh` / Host compose 注入 `:8787`；Worker 控制台经其它地址
+   暴露时在 `.env` 显式配置，显式留空则不显示链接）。回环地址只能在 Worker
+   所在机器的浏览器里打开，链接的悬停提示会说明这一点。Worker 注册成功后，
+   主控制台每一行 Worker 还会带该 Worker **自报**的「控制台」链接：Worker
+   原生 Service 按自己的控制面绑定地址推导（通配绑定 `0.0.0.0` 回落
+   `127.0.0.1`，IPv6 `::` 回落 `[::1]`），经环境变量 `AGENT_WORKER_CONSOLE_URL` 交给 executor，注册时
+   补充 labels 的可选键 `console_url`（`worker/console_url.py`）。控制台经反向
+   代理或映射到非回环地址时，在 Worker 侧显式设置该变量。三份 Compose 均要求
+   在部署环境中显式配置浏览器可达 URL（例如 `https://worker.example/console`），
+   不从 `AGENT_WORKER_UI_BIND` 猜测；缺省或显式空串均不自报。旧版
+   Worker 不上报，对应行只保留部署级入口。
+   已配置的 `console_url` 与其他自定义标签始终原样保留（可能用于 `requires_labels` 调度），环境地址不覆盖它。
+   自定义标签已经占满 32 项，或自报 URL 超过 256 字符时，
+   跳过该可选标签并保留原标签，避免控制台入口使 Worker 注册失败；不截断 URL。
+   入口通过已登录用户可读的 `GET /api/agent-workers/console` 获取部署地址，
+   不下载 Worker 清单；workspace 状态列表的请求与缓存均按 workspace 隔离。
+   首次地址请求失败显示可重试错误，只有成功返回空地址才表示未配置；
+   后台刷新失败保留最近成功的配置，后续成功响应（包括清空配置）替换缓存。
+   非空配置必须是绝对 HTTP(S) 地址，支持 IPv6、反向代理路径与 query；
+   空白、反斜杠、非法端口或 URL 用户名/密码会在创建服务前报错，诊断不回显原值。
+   地址是公开导航信息，控制令牌应在 Worker 控制台中输入，不放进该地址。
+   dev/native 脚本只设置内部 `AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL`；
+   后端使用同一 dotenv 解析器完成加载后，按进程环境 → 根 `.env` → 脚本默认值
+   选择 `AGENT_LEGION_WORKER_CONSOLE_URL`，显式空值始终有效，shell 不另行解析 `.env`。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
 

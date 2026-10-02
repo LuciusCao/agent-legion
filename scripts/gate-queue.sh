@@ -221,5 +221,6 @@ _describe_gate_slot_holders() {
     names+=("$(basename "${line2:-unknown}" 2>/dev/null || echo unknown)(pid ${pid})")
   done
   local IFS=','
-  echo "${names[*]}"
+  # Bash 3.2 treats even an initialized empty array as unset under set -u.
+  echo "${names[*]:-}"
 }

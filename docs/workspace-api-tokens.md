@@ -3,9 +3,9 @@
 外部系统（CMS、表单后端、定时任务、其他 agent）可以凭 workspace 级
 API token 免登录提交条目创建 job，无需人工登录控制台。token 是
 machine-to-machine 凭据：绑定且仅绑定一个 workspace，权限是 editor 的
-「提交条目 + 读运行状态」最小集——除了 runs 提交面与只读查询外的一切
-端点（管理面、workflow 定义、studio-agent 工具面、其它 effecting 操作）
-对它一律拒绝（workspace 路由 404，管理端点 403）。
+「提交条目 + 轮询状态 + 下载产物」最小集——除了 runs 提交面、只读查询
+与产物读取外的一切端点（管理面、workflow 定义、studio-agent 工具面、
+其它 effecting 操作）对它一律拒绝（workspace 路由 404，管理端点 403）。
 
 ## 最小示例
 
@@ -30,7 +30,7 @@ machine-to-machine 凭据：绑定且仅绑定一个 workspace，权限是 edito
    # → {"run": {"id": "…", "status": "created", …}, "created_count": 1}
    ```
 
-3. **查状态**（只读；workspace 调度暂停时提交照常排队，job 状态表达等待）：
+3. **轮询状态**（只读；workspace 调度暂停时提交照常排队，job 状态表达等待）：
 
    ```bash
    curl "$HOST/api/workspaces/$WORKSPACE_ID/runs" \
@@ -46,6 +46,21 @@ machine-to-machine 凭据：绑定且仅绑定一个 workspace，权限是 edito
      -H "Authorization: Bearer $API_TOKEN"
    ```
 
+4. **下载产物**（#631 的三端点；run 载荷不带 job id，job id 从第 3 步的
+   jobs 列表取）：
+
+   ```bash
+   # job 单查：轻量状态视图，artifacts 字段列出已产出的产物名
+   curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID" \
+     -H "Authorization: Bearer $API_TOKEN"
+   # 产物清单：含 storage/content_hash/size_bytes 等元数据
+   curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts" \
+     -H "Authorization: Bearer $API_TOKEN"
+   # raw 字节下载（子目录产物名保留 /；Range 请求可用于大文件）
+   curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts/$ARTIFACT_NAME/raw" \
+     -H "Authorization: Bearer $API_TOKEN"
+   ```
+
 Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在设置面板
 吊销，使用中的调用立即 401。
 
@@ -54,7 +69,8 @@ Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在�
 - **格式**：`{token_id}.{secret}`，与 worker register token 相同的存储
   约定——库内只存 sha256，明文只在签发响应出现一次。支持签发时指定
   `ttl_hours` 过期时间，支持随时吊销（软吊销，行保留审计）。
-- **权限面**：`POST /runs`（提交）与 `GET /runs` / `GET /runs/{id}` /
+- **权限面**（权威常量在 `auth/api_scope_surface.py`，#734 起 tag 派生、
+  含产物三端点）：`POST /runs`（提交）与 `GET /runs` / `GET /runs/{id}` /
   `GET /jobs`（legacy，最近 500 条）/ `GET /jobs/snapshot`（分页 +
   `run_id` 过滤，只读查询），外加 #631 外部读取面的三个 GET（
   `GET /jobs/{job_id}` 状态、`GET /jobs/{job_id}/artifacts` 清单、

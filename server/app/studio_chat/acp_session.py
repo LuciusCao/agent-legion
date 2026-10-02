@@ -24,7 +24,7 @@ import contextlib
 import logging
 import queue
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from acp import PROTOCOL_VERSION, spawn_agent_process
@@ -180,11 +180,18 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         )
         self._thread.start()
 
-    def send_prompt(self, text: str) -> bool:
-        """Queue a prompt turn; False when the handle is already closed."""
+    def send_prompt(self, text: str, *, accept: Callable[[], None] | None = None) -> bool:
+        """Accept durable input only while the queue can still receive it.
+
+        The callback commits the turn and message together, or raises with
+        neither committed. Close/stop cannot interleave before queue.put;
+        the unbounded queue is the final non-blocking handoff.
+        """
         with self._state_lock:
-            if self._closed:
+            if self._closed or self._stop_requested:
                 return False
+            if accept is not None:
+                accept()
             self._queue.put(text)
             return True
 
@@ -290,9 +297,11 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             # out the full 60s timeout) and no on_error reaches the service —
             # so the crash is logged with the traceback and reported to the
             # session as an error instead.
+            self.request_stop()
             logger.exception("studio chat ACP session loop crashed")
             self.callbacks.on_error("ACP session loop crashed")
         finally:
+            self.request_stop()
             self.ready_event.set()
             # _closed was set before _CLOSE was queued, so by the time the
             # thread drains it and lands here the flag is reliably visible:
@@ -334,7 +343,13 @@ class AcpSessionHandle(SessionConfigHandleMixin):
                 self.callbacks.on_ready(capabilities, opened)
                 # Startup handshake complete: release the create_session waiter.
                 self.ready_event.set()
-                await self._prompt_loop(conn, acp_session_id)
+                try:
+                    await self._prompt_loop(conn, acp_session_id)
+                finally:
+                    # Fence admission before transport teardown or callbacks can
+                    # block behind a sender's runtime lock. Keep _closed for
+                    # explicit close(), which must still join/kill this handle.
+                    self.request_stop()
         except Exception as exc:
             # exc_info: this is the primary failure signal for the whole ACP
             # session lifecycle — losing the traceback makes spawn/transport
@@ -349,6 +364,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             # session is marked error and the user sees a dead session
             # instead of a hung one. Nothing is masked (the traceback is
             # logged) and no exception type is converted on the way out.
+            self.request_stop()
             logger.warning("studio chat ACP session failed: %s", exc, exc_info=True)
             self.callbacks.on_error(str(exc))
         finally:

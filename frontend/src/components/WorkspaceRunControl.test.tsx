@@ -23,7 +23,13 @@ const showToastMock = vi.fn()
 const listAgentWorkersMock = vi.fn()
 
 vi.mock('../api/agentWorkers', () => ({
-  listAgentWorkers: () => listAgentWorkersMock(),
+  listAgentWorkers: (workspaceId: string) => listAgentWorkersMock(workspaceId),
+  fetchAgentWorkers: () =>
+    Promise.resolve({ workers: [], console_url: 'http://127.0.0.1:8789' }),
+}))
+
+vi.mock('../hooks/useWorkerConsoleUrl', () => ({
+  useWorkerConsoleUrl: () => 'http://127.0.0.1:8789',
 }))
 
 function makeWorker(overrides: Partial<WorkerSummary> = {}): WorkerSummary {
@@ -189,10 +195,15 @@ describe('WorkspaceRunControl', () => {
     expect(screen.getByText('忙碌 3/16')).toBeInTheDocument()
   })
 
-  it('shows empty state when no worker is available', () => {
+  it('shows empty state with a Worker console entry when no worker is available', () => {
     mockAgents = []
     renderControl()
-    expect(screen.getByText('暂无可用 Worker')).toBeInTheDocument()
+    expect(screen.getByText(/暂无可用 Worker/)).toBeInTheDocument()
+    // 空态直接把人送到 Worker 控制台（添加 Key、开始领取都在那边）。
+    expect(screen.getByTestId('worker-console-link')).toHaveAttribute(
+      'href',
+      'http://127.0.0.1:8789'
+    )
   })
 
   it('shows a disconnected status dot when the agents channel is closed', () => {
@@ -225,7 +236,9 @@ describe('WorkspaceRunControl', () => {
 
   it('fetches registered workers on mount', async () => {
     renderControl()
-    await waitFor(() => expect(listAgentWorkersMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(listAgentWorkersMock).toHaveBeenCalledWith('ws1')
+    )
   })
 
   it('shows online and offline chips with last-seen heartbeat', async () => {
@@ -268,6 +281,24 @@ describe('WorkspaceRunControl', () => {
     await screen.findByText('Global Mac')
     expect(screen.getByText('Scoped Mac')).toBeInTheDocument()
     expect(screen.queryByText('Other Mac')).not.toBeInTheDocument()
+  })
+
+  it('links each registered worker row to its self-reported console', async () => {
+    listAgentWorkersMock.mockResolvedValue([
+      makeWorker({
+        worker_id: 'w-a',
+        name: 'Mac A',
+        labels: { console_url: 'http://10.0.0.8:8787' },
+      }),
+      makeWorker({ worker_id: 'w-b', name: 'Mac B' }),
+    ])
+    renderControl()
+    await screen.findByText('Mac A')
+    // 只有自报了地址（labels.console_url）的 Worker 行才有入口；旧版 Worker 没有。
+    const links = screen.getAllByTestId('worker-console-link')
+    expect(links).toHaveLength(1)
+    expect(links[0]).toHaveAttribute('href', 'http://10.0.0.8:8787')
+    expect(links[0]).toHaveTextContent('控制台')
   })
 
   it('does not show revoked workers', async () => {

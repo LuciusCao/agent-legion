@@ -21,6 +21,7 @@ from server.app.routes.agent_worker_claims import create_agent_worker_claim_rout
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_results import _recover_result_header, parse_result_metadata
 from server.app.routes.agent_workers_contracts import (
+    AgentWorkerConsoleResponse,
     AgentWorkerDeleteResponse,
     AgentWorkersResponse,
     AgentWorkerSummary,
@@ -197,6 +198,13 @@ def create_agent_workers_router(
             )
         return AgentWorkerDeleteResponse(worker_id=worker_id, deleted=True)
 
+    @router.get("/agent-workers/console", response_model=AgentWorkerConsoleResponse)
+    def worker_console(
+        _user: Annotated[dict[str, Any], Depends(require_user)],
+    ) -> AgentWorkerConsoleResponse:
+        """Read deployment metadata without enumerating Worker registrations."""
+        return AgentWorkerConsoleResponse(console_url=config.console_url)
+
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers(
         _user: Annotated[dict[str, Any], Depends(require_user)], workspace_id: str | None = None
@@ -208,7 +216,14 @@ def create_agent_workers_router(
         parameter every logged-in user still sees the full list — the UI is
         responsible for passing the current workspace, and the admin settings
         page intentionally keeps the unfiltered view."""
-        return AgentWorkersResponse.model_validate({"workers": registry.list_workers(workspace_id)})
+        return AgentWorkersResponse.model_validate(
+            {
+                "workers": registry.list_workers(workspace_id),
+                # Deployment-level fallback entry to the Worker console (a
+                # Worker-reported per-machine address is the follow-up).
+                "console_url": config.console_url,
+            }
+        )
 
     @router.get("/agent-executions/{execution_id}/bundle")
     def bundle(execution_id: str, request: Request) -> FileResponse:

@@ -43,13 +43,6 @@ export function JobDetailToolbar({
             iconOnly={compact}
           />
         ))}
-      <LabeledIconButton
-        icon="more_vert"
-        label="更多"
-        ariaLabel="更多任务操作"
-        iconOnly={compact}
-        onClick={(event) => setAnchor(event.currentTarget)}
-      />
       {onOpenDiagnosis && (
         <LabeledIconButton
           icon="smart_toy"
@@ -59,6 +52,13 @@ export function JobDetailToolbar({
           iconOnly={compact}
         />
       )}
+      <LabeledIconButton
+        icon="more_vert"
+        label="更多"
+        ariaLabel="更多任务操作"
+        iconOnly={compact}
+        onClick={(event) => setAnchor(event.currentTarget)}
+      />
       <Menu
         anchorEl={anchor}
         open={!!anchor}

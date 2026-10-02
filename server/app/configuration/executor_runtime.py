@@ -26,6 +26,7 @@ from server.app.configuration.executor_knobs import (
     ResultUnpackConfig,
     ResultValidateConfig,
 )
+from server.app.configuration.worker_console import WorkerConsoleUrl
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class WorkflowsRuntimeConfig(BaseModel):
 
 
 class AgentWorkersRuntimeConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     # The global register token (register_token / register_token_file) was
     # retired with issue #35: registration is scoped-token-only, so this
@@ -91,10 +92,18 @@ class AgentWorkersRuntimeConfig(BaseModel):
     # (kill-switch), 100 = always verify (pre-#356 behavior). Restart-
     # effective, instance-settings managed.
     artifact_spot_check_percent: int = Field(default=3, ge=0, le=100)
+    # Worker 控制台入口：Host 主控制台「打开 Worker 控制台」链接指向的地址，
+    # 通常是部署机本地 Worker 的控制台（dev 栈 http://127.0.0.1:8789、原生
+    # prod :8787，由各启动脚本按 Worker 端口注入）。env-only
+    # （AGENT_LEGION_WORKER_CONSOLE_URL）、不进实例设置文档——它描述部署
+    # 拓扑而非运行时调优；空串 = 未配置，前端退化为纯文字说明。Worker 注册
+    # 时自报的控制台地址（后续按 Worker 逐个显示）落地后，此值只作尚无
+    # Worker 注册时的兜底入口。
+    console_url: WorkerConsoleUrl = ""
 
 
 class ExecutorRuntimeConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
 
     heartbeat_interval_seconds: float = Field(default=10, gt=0)
     lease_ttl_seconds: int = Field(default=90, ge=1)

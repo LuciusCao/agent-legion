@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,6 +15,7 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 from worker.config_response import public_config_response
+from worker.console_url import CONSOLE_URL_ENV, resolve_console_url
 from worker.heartbeat_relay import start_heartbeat_relay, stop_heartbeat_relay
 from worker.metrics_proxy import create_metrics_proxy_router
 from worker.service_bind import embed_control_token
@@ -155,6 +157,10 @@ def main() -> int:
     # 代理 env 一旦漏进来，全部出网流量（LLM + backend 上传）会绕经本机
     # 代理进程；确需代理出口的部署在 worker.yaml 配置 proxy 字段显式声明。
     strip_proxy_env()
+    # Worker 自报控制台地址（主控制台按 Worker 显示「控制台」入口）：只有本
+    # 进程知道绑定地址，经 env 交给 executor 子进程在注册 labels 里上报；
+    # 部署侧显式设置的 AGENT_WORKER_CONSOLE_URL 优先（见 worker/console_url.py）。
+    os.environ[CONSOLE_URL_ENV] = resolve_console_url(args.host, args.port, os.environ)
     worker_dir = Path(__file__).resolve().parent  # worker/ 包根（executor.py 与 ui/ 同级）
     store = WorkerConfigStore(
         args.state_dir.resolve(), args.config.resolve() if args.config is not None else None
