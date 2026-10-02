@@ -19,8 +19,8 @@ from worker.upload.result_metadata import (
 )
 from worker.upload.stderr_evidence import (
     AGENT_STDERR_FILENAME,
-    max_secret_bytes,
-    redact_secrets_bytes,
+    max_secret_chars,
+    secret_spans,
     stderr_error_message,
     stderr_tail_for_run,
 )
@@ -73,19 +73,15 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # file at scan time; stderr_tail_for_run reads it back when a re-entry
     # (direct-upload fallback / worker-restart restore) finds the events
     # file already compressed — a second scan would yield nothing.
-    # #748 R3 (codex review P1): the sink write is REDACTED at scan time
-    # (redact_secrets_bytes injected as the shared-sink callback) — the
-    # anchor file must never hold plaintext secrets, even if the Worker
-    # exits between this scan and any later prepare pass.
-    # #755 codex P1：脱敏扩窗按已注册最长密钥对齐（固定 512 装不下 PEM/
-    # 长 JWT 这类 >512 字节的密钥，骑跨保尾界时仍会被先切后脱敏）。
+    # The scan redacts before any cut or durable write (secret_spans +
+    # the longest literal's length as lookback, see shared/pi_events.py).
     # 崩溃/超时（非 0 退出）下 model_error 归因让位给退出码归因——扫描
     # 结论只在 exit 0 时采纳。
     scanned_model_error, _, _, scanned_tail = scan_and_compress_pi_events(
         events,
         stderr_sink=run_dir / AGENT_STDERR_FILENAME,
-        redact=redact_secrets_bytes,
-        redact_secret_max_bytes=max_secret_bytes(),
+        secret_spans=secret_spans,
+        secret_max_chars=max_secret_chars(),
     )
     model_error = scanned_model_error if task.exit_code == 0 else None
     stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.secret_spans import literal_spans
 from tests.workers.upload_queue_testlib import (
     QueueFakeClient,
     _events_with_stderr,
@@ -242,7 +243,7 @@ def test_anchor_file_on_disk_never_holds_plaintext_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """#748 R3（codex review P1）直接证据：脱敏后的字节先落锚点文件——在
-    prepare 完成前（模拟 Worker 在 _persist_stderr_tail 返回后、任何后续
+    prepare 完成前（模拟 Worker 在 persist_stderr_tail 返回后、任何后续
     重写前退出）直接读磁盘上的 agent-stderr.log，内容必须已不含密钥。"""
     from worker.upload.prepare import prepare_or_failed
 
@@ -268,7 +269,7 @@ def test_crash_stderr_redacts_multiline_pem_with_trailing_newline(
 ) -> None:
     """#755 codex R8 P1 端到端（codex 复现形态）：环境变量值是带尾换行的
     多行 PEM 私钥，stderr 恰好以该值收尾。旧管线 strip 每行再用换行重组，
-    末行尾换行永久丢失，redact_secrets_bytes 的整值替换必然失配——PEM
+    末行尾换行永久丢失，整值匹配必然失配——PEM
     完整写进 agent-stderr.log、metadata 与结构化事件。deque 保留原始行
     分隔形态后三面（error_message、agent_stderr_tail、归档锚点）只剩 ***。"""
     pem = (
@@ -544,7 +545,7 @@ def test_sink_persist_failure_cleans_staging_and_never_fails_scan(
     _, original, compressed, tail = pi_events.scan_and_compress_pi_events(
         events,
         stderr_sink=run_dir / AGENT_STDERR_FILENAME,
-        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+        secret_spans=literal_spans(secret),
     )
     assert original > 0 and compressed > 0  # 压缩未因 sink 失败中断
     # #755 对抗复审 P1-1 起返回值同走脱敏后缓冲（调用方重脱敏退化为防御网）。
@@ -568,15 +569,14 @@ def test_sink_replace_success_leaves_no_staging(tmp_path: Path) -> None:
     assert list(run_dir.glob(".agent-stderr.*")) == []
 
 
-def test_max_secret_bytes_reports_longest_registered_value(
+def test_max_secret_chars_reports_longest_registered_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#755 codex P1：已注册最长密钥的 UTF-8 字节数——脱敏扩窗的对齐口径
-    （shared/ 侧按 max(512, 本值) 取有效 margin）。无注册密钥时 0；字节
-    口径（CJK 值按 UTF-8 计，非字符数）；短于阈值（≤8 字节）的值不参与
-    脱敏、也不扩窗。"""
+    """#755 codex P1：已注册最长密钥的字符数——shared/ 侧 lookback 的对齐
+    口径（max(512, 本值)，与匹配域同为解码后字符）。无注册密钥时 0；短于
+    阈值（≤8 字节，阈值仍按字节）的值不参与脱敏、也不扩窗。"""
     from worker.upload import stderr_evidence
-    from worker.upload.stderr_evidence import max_secret_bytes
+    from worker.upload.stderr_evidence import max_secret_chars
 
     monkeypatch.setattr(stderr_evidence, "_extra_secret_values", frozenset())
     # 只留受控 env：清掉可能含 TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL 命名的项。
@@ -586,16 +586,16 @@ def test_max_secret_bytes_reports_longest_registered_value(
             for marker in ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL")
         ):
             monkeypatch.delenv(name)
-    assert max_secret_bytes() == 0
+    assert max_secret_chars() == 0
 
     monkeypatch.setenv("CI_TOKEN", "t" * 8)  # ≤ 阈值，不参与
     monkeypatch.setenv("CI_KEY", "k" * 100)
-    assert max_secret_bytes() == 100
+    assert max_secret_chars() == 100
 
     monkeypatch.setattr(
-        stderr_evidence, "_extra_secret_values", frozenset({"密" * 100})
-    )  # 300 字节
-    assert max_secret_bytes() == 300
+        stderr_evidence, "_extra_secret_values", frozenset({"密" * 150})
+    )  # 150 字符 / 450 字节
+    assert max_secret_chars() == 150
 
 
 # -- #755 codex P2-2：surrogateescape 形态的 env 密钥不炸不脱队 --
@@ -607,20 +607,20 @@ def test_surrogateescape_env_secret_neither_crashes_nor_leaks(
     """#755 codex P2-2 复现：Linux 启动环境的非 UTF-8 字节经 surrogateescape
     暴露为代理字符（\\udcff 一族），变量名带 TOKEN 标记。修复前
     _secret_values 的严格 .encode("utf-8") 抛 UnicodeEncodeError——
-    prepare_result 对每次 agent 结果无条件经 max_secret_bytes 走到这里，
+    prepare_result 对每次 agent 结果无条件经密钥长度计算走到这里，
     成功执行也被 prepare_or_failed 改判 failed 并丢弃归档。修复后字节口径
     走 surrogateescape 对称编码（忠实往返、不炸），且密钥在匹配域
     （errors="replace" 解码渲染）仍被脱敏覆盖——不静默丢弃（丢弃 = 泄漏
     通道）。"""
-    from worker.upload.stderr_evidence import max_secret_bytes, redact_secrets
+    from worker.upload.stderr_evidence import max_secret_chars, redact_secrets
 
     secret_bytes = b"gw-\xff-secret-material-" + bytes(range(0x80, 0x90))
     monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret_bytes.decode("utf-8", "surrogateescape"))
 
-    # 不炸，且字节口径是忠实往返（surrogateescape），不是替换后的近似值。
-    assert max_secret_bytes() >= len(secret_bytes)
-    # 匹配域形态（流侧 UTF-8 errors="replace" 解码后的 U+FFFD 渲染）整值命中。
+    # 不炸；lookback 覆盖匹配域形态（流侧 UTF-8 errors="replace" 解码渲染）。
     echoed = secret_bytes.decode("utf-8", "replace")
+    assert max_secret_chars() >= len(echoed)
+    # 匹配域形态整值命中。
     redacted = redact_secrets(f"auth failed for {echoed}")
     assert redacted == "auth failed for ***"
     assert "secret-material" not in redacted
@@ -630,7 +630,7 @@ def test_completed_run_with_surrogateescape_env_secret_not_flipped_to_failed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """端到端不改判：含 surrogateescape 密钥的 env 下，exit 0 的成功执行照常
-    completed——修复前 UnicodeEncodeError 从 max_secret_bytes 逃逸进
+    completed——修复前 UnicodeEncodeError 从密钥长度计算逃逸进
     prepare，成功结果被改判 failed。"""
     secret_bytes = b"gw-\xff-secret-material-abcdef123"
     monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret_bytes.decode("utf-8", "surrogateescape"))

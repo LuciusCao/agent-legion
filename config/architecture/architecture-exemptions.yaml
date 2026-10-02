@@ -1206,32 +1206,6 @@ exemptions:
   ceiling: 213
   expires: 2026-12-31
 - check: architecture.file_budget
-  path: shared/pi_events.py
-  reason: '#748 攻击性 review P1/P2：stderr 抢救的幂等锚点落进扫描本趟——
-    scan_and_compress_pi_events 增加 stderr_sink 参数（重写前把脱敏后的
-    tail 原子写盘，非 JSON 行在 replace 后永久消失，直传回落/重启恢复的
-    二趟 prepare 从锚点文件读回而非二扫），外加 sink 写失败的调用点
-    best-effort 捕获（压缩永不因 sink 不可写失败）。#755 对抗复审收口：
-    保尾切片按行对齐（骑跨切割点的密钥残段结构性消除）+ sink 脱敏扩窗
-    （先脱敏后切）+ sink 捕获放宽为 Exception（redact 回调逃逸不改判
-    run）。#755 codex review P1：字符面截断收口进唯一漏斗
-    _redact_then_tail_text（扩窗 → 脱敏 → 再截），单行预截不再「先截后
-    脱敏」，骑跨切割点的密钥整值命中替换；字节面（sink 扩窗、最终行
-    对齐切片）经审计本已同序，与漏斗共用 _REDACT_WINDOW_MARGIN。
-    #755 终审 P2-1：漏斗闸门改字节口径（CJK 单行字符 ≤ 预算但字节超
-    预算的旧盲区）+ 最终切片无换行臂先整体脱敏再保尾（不再对未脱敏面
-    裸切），有效行 116→125（超 growth_allowance 带，重签带 expires）。
-    #755 codex R10 P1（顺序域）：淘汰切口也是切割——deque 逐行淘汰
-    （popleft）运行在整段脱敏之前时可把多行密钥切成残段，新增
-    _redact_before_evict（淘汰前先对完整缓冲整段脱敏，此后任何切口只
-    落在已脱敏文本上，淘汰安全不再依赖 margin ≥ 最长可匹配密钥），
-    有效行 125→151。时间盒：stderr 留痕管线稳定后若下沉为独立 sink
-    模块（shared 侧 stdlib-only 约束内的拆分），重登预算。'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
-  ceiling: 151
-  expires: 2026-12-31
-- check: architecture.file_budget
   path: worker/host/transfer.py
   reason: '#748 R2 复审 P2-1：X-Agent-Result 头预算的产物清单降级——output_artifacts
     直传 ref 形态（128 条 ~25KB）把头推破 h11 16KB，成功运行同样中招（成功上报
@@ -1249,15 +1223,14 @@ exemptions:
   expires: 2026-12-31
 - check: architecture.file_budget
   path: worker/upload/stderr_evidence.py
-  reason: '#748 R2 复审 P2-2/P2-3/P3-3b/P3-4：脱敏先于截断（跨 200 边界密钥
-    残段不再漏出）、register_secrets 注册 worker 配置 environment 块的值
-    （secret 注入 agent 子进程的官方通道此前零覆盖，含线程安全锁）、值长
-    降序替换 + 字节阈值 + ghp_/gho_/xox[bap]- 形态族；R3 起锚点在扫描时刻
-    脱敏落盘（不再有就地重写窗口）。#755 对抗复审收口：sink 读回臂并入统一
-    脱敏（旧版明文锚点防御）、redact_secrets_bytes 改保尾切片（扩窗语义
-    配套）。防御性正确性代码使有效行 47→60（超 growth_allowance 带）。
-    时间盒：脱敏面若与 worker 配置加载统一收口（敏感值集中注册），此处
-    重登预算。'
+  reason: '#748 Worker 侧密钥注册表：os.environ 秘密命名值 + register_secrets
+    注册的 worker 配置 environment 块（secret 注入 agent 子进程的官方通道，
+    含线程安全锁）+ 匹配域变体（CRLF 归一、尾空白、surrogateescape 忠实字节）
+    + sk-/ghp_/gho_/xox[bap]-/JWT/Bearer 形态族。#755 起以区间报告
+    （secret_spans）供 shared/stderr_tail 的一次脱敏单切点使用，
+    max_secret_chars 给出 lookback 长度。防御性正确性代码使有效行 47→78
+    （带内）。时间盒：脱敏面若与 worker 配置加载统一收口（敏感值集中注册），
+    此处重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
   ceiling: 67

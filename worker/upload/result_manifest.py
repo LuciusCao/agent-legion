@@ -96,7 +96,7 @@ def embed_output_artifacts_manifest(
         # #204 broad-except audit (BaseException)：staging 清理守卫而非吞
         # 异常——bare raise 原样上抛，调用方（report.py 的溢出臂）把
         # OSError/tarfile.TarError/ValueError 转诚实判败。同
-        # _persist_stderr_tail 的纪律：staging 与归档同目录，替换失败也不
+        # persist_stderr_tail 的纪律：staging 与归档同目录，替换失败也不
         # 能把半成品留在执行目录里（会随归档外发）。
         staging_path.unlink(missing_ok=True)
         raise

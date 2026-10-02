@@ -3,8 +3,10 @@ import json
 import pytest
 
 from server.app.services.job_log_renderer import _parse_pi_events
-from shared.pi_events import STDERR_TAIL_BYTES, compress_pi_events
+from shared.pi_events import compress_pi_events
+from shared.stderr_tail import STDERR_TAIL_BYTES
 from tests.helpers.cjk_straddle import cjk_line_with_straddling_secret
+from tests.helpers.secret_spans import literal_spans
 
 
 def test_compress_pi_events_keeps_renderable_events(tmp_path):
@@ -172,7 +174,8 @@ def test_scan_and_compress_captures_stderr_tail(tmp_path):
 def test_scan_and_compress_stderr_tail_bounded_keep_tail(tmp_path):
     """#748 有界性（#637 教训）：超限的 stderr 只保尾部、且上限是硬字节
     上限——单行巨型乱码与海量小行两种形态都不允许无界缓冲。"""
-    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+    from shared.pi_events import scan_and_compress_pi_events
+    from shared.stderr_tail import STDERR_TAIL_BYTES
 
     events = tmp_path / "events.jsonl"
     events.write_text("x" * (STDERR_TAIL_BYTES * 4) + "\ncrash: the real cause\n")
@@ -236,7 +239,7 @@ def test_scan_and_compress_sink_write_failure_never_fails(tmp_path, monkeypatch)
     def broken_persist(_sink, _tail):
         raise OSError("disk full")
 
-    monkeypatch.setattr(pi_events, "_persist_stderr_tail", broken_persist)
+    monkeypatch.setattr(pi_events, "persist_stderr_tail", broken_persist)
     events = tmp_path / "events.jsonl"
     events.write_text('{"type":"session"}\npanic: real cause\n')
     _, original, compressed, stderr_tail = scan_and_compress_pi_events(
@@ -260,7 +263,7 @@ def test_scan_and_compress_redacts_sink_before_durable_write(tmp_path):
     _, _, _, stderr_tail = scan_and_compress_pi_events(
         events,
         stderr_sink=sink,
-        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+        secret_spans=literal_spans(secret),
     )
     assert stderr_tail == b"auth failed for ***"  # 返回值同走脱敏后缓冲
     assert sink.read_bytes() == b"auth failed for ***"  # 落盘脱敏
@@ -272,20 +275,20 @@ def test_scan_and_compress_redacts_sink_before_durable_write(tmp_path):
     assert sink2.read_bytes() == f"auth failed for {secret}".encode()
 
 
-def test_persist_stderr_tail_cleans_staging_on_replace_failure(tmp_path, monkeypatch):
+def testpersist_stderr_tail_cleans_staging_on_replace_failure(tmp_path, monkeypatch):
     """#748 R3（codex review P1）：os.replace 失败时 delete=False 的 staging
     文件必须被清理——不清理则永久残留（内容虽已脱敏，但会随 run 目录进归档）。"""
     import os
 
     from shared import pi_events
-    from shared.pi_events import _persist_stderr_tail
+    from shared.stderr_tail import persist_stderr_tail
 
     def failing_replace(src, dst):
         raise OSError("cross-device link")
 
     monkeypatch.setattr(pi_events.os, "replace", failing_replace)
     try:
-        _persist_stderr_tail(tmp_path / "agent-stderr.log", b"redacted tail")
+        persist_stderr_tail(tmp_path / "agent-stderr.log", b"redacted tail")
     except OSError:
         pass  # 预期：replace 失败原样上抛（调用点 best-effort 捕获）
     finally:
@@ -297,9 +300,10 @@ def test_persist_stderr_tail_cleans_staging_on_replace_failure(tmp_path, monkeyp
 def test_scan_and_compress_redacts_secret_straddling_tail_cut(tmp_path):
     """#755 对抗复审 P3-2：密钥骑跨 8KB 保尾切割点时，「先切后脱敏」会让
     残段（整值匹配不上的尾部碎片）明文落进 sink。修复后双保险：脱敏窗口
-    比切割界宽（_REDACT_WINDOW_MARGIN，跨点密钥整值命中），且最终切片
+    比切割界宽（REDACT_WINDOW_MARGIN，跨点密钥整值命中），且最终切片
     按行对齐（切割行保守丢弃）——sink 与返回值都不留残段。"""
-    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+    from shared.pi_events import scan_and_compress_pi_events
+    from shared.stderr_tail import STDERR_TAIL_BYTES
 
     secret = "sk-live-" + "s" * 92  # 100 字节
     # CJK 噪音（3 字节/字）把密钥行推上 8KB 字节切割界：密钥行 116 字节 +
@@ -311,7 +315,7 @@ def test_scan_and_compress_redacts_secret_straddling_tail_cut(tmp_path):
     _, _, _, tail = scan_and_compress_pi_events(
         events,
         stderr_sink=sink,
-        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+        secret_spans=literal_spans(secret),
     )
     # 返回值 RAW 但按行对齐：骑跨切割点的密钥行被保守丢弃，残段不外泄。
     assert len(tail) <= STDERR_TAIL_BYTES
@@ -331,7 +335,8 @@ def test_scan_and_compress_redacts_secret_straddling_single_line_cut(tmp_path):
     明文残段进 sink / 返回值 / 归档。收口后单行预截走统一漏斗
     _redact_then_tail（扩窗 → 脱敏 → 再截）：跨点密钥整值命中替换，
     残段不外泄。"""
-    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+    from shared.pi_events import scan_and_compress_pi_events
+    from shared.stderr_tail import STDERR_TAIL_BYTES
 
     secret = "sk-live-" + "s" * 92  # 100 字符
     # 密钥骑跨 8KB 单行预截切割点：切割点落在密钥第 50 字符处。
@@ -342,7 +347,7 @@ def test_scan_and_compress_redacts_secret_straddling_single_line_cut(tmp_path):
     _, _, _, tail = scan_and_compress_pi_events(
         events,
         stderr_sink=sink,
-        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+        secret_spans=literal_spans(secret),
     )
     # 返回值：单行预截已脱敏——完整密钥与残段（"s" 碎片）都不留。
     assert len(tail) <= STDERR_TAIL_BYTES
@@ -358,22 +363,21 @@ def test_scan_and_compress_redacts_secret_straddling_single_line_cut(tmp_path):
 
 
 def test_scan_and_compress_redact_callback_error_never_fails_scan(tmp_path):
-    """#755 对抗复审 P3-4：redact 回调的非 OSError 逃逸（脱敏器自身炸掉）
-    不得把 run 改判 failed——sink 落盘是 best-effort 观测面：压缩照常完成、
-    返回值照常携带 raw tail，只是本次不留锚点。"""
+    """#755 对抗复审 P3-4：脱敏回调逃逸不得把 run 改判 failed——压缩照常
+    完成；fail-closed：tail 丢弃为空、不留锚点（raw stderr 绝不外流）。"""
     from shared.pi_events import scan_and_compress_pi_events
 
-    def exploding_redact(_raw: bytes) -> bytes:
+    def exploding_redact(_text: str) -> list[tuple[int, int]]:
         raise ValueError("redactor exploded")
 
     events = tmp_path / "events.jsonl"
     events.write_text('{"type":"session"}\npanic: real cause\n')
     sink = tmp_path / "agent-stderr.log"
     _, original, compressed, tail = scan_and_compress_pi_events(
-        events, stderr_sink=sink, redact=exploding_redact
+        events, stderr_sink=sink, secret_spans=exploding_redact
     )
     assert original > 0 and compressed > 0  # 压缩未因回调逃逸中断
-    assert tail == b"panic: real cause"
+    assert tail == b""
     assert not sink.exists()
 
 
@@ -384,7 +388,8 @@ def test_scan_and_compress_cjk_single_line_byte_gate_redacts_straddling_secret(t
     （sink 面本就安全：扩窗脱敏先于切割）。修复后闸门按字节判定、单行先过
     漏斗脱敏，且无换行臂先对整体脱敏再保尾——return tail 与 sink 均无
     密钥与残段。"""
-    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+    from shared.pi_events import scan_and_compress_pi_events
+    from shared.stderr_tail import STDERR_TAIL_BYTES
 
     secret = "zz-custom-gateway-token-" + "t" * 80  # 104 字节自定义形态密钥
     line = cjk_line_with_straddling_secret(secret)
@@ -394,7 +399,7 @@ def test_scan_and_compress_cjk_single_line_byte_gate_redacts_straddling_secret(t
     _, _, _, tail = scan_and_compress_pi_events(
         events,
         stderr_sink=sink,
-        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+        secret_spans=literal_spans(secret),
     )
     # 修复前的泄漏形态：return tail 含密钥尾段残片（"ttt..."）——整值匹配
     # 不上，下游 stderr_evidence 的重脱敏也接不住。
@@ -409,9 +414,10 @@ def test_scan_and_compress_cjk_single_line_byte_gate_redacts_straddling_secret(t
 def test_scan_and_compress_long_secret_straddling_cut_with_widened_margin(tmp_path):
     """#755 codex P1：>512 字节的已注册密钥（PEM/长 JWT 形态）骑跨 8KB
     保尾界时，固定 512 的扩窗装不下整值，仍被「先切后脱敏」。修复后调用方
-    按已注册最长密钥传 redact_secret_max_bytes，有效 margin 扩到 2000——
+    按已注册最长密钥传 secret_max_chars，有效 margin 扩到 2000——
     sink 与 return 两面都不留密钥残段。"""
-    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+    from shared.pi_events import scan_and_compress_pi_events
+    from shared.stderr_tail import STDERR_TAIL_BYTES
 
     secret = "pem-" + "k" * 1996  # 2000 字节，远超固定 512 窗口
     # 密钥中点骑跨 8KB 字节切割点：单行 16KB，切割点落在密钥中部。
@@ -422,8 +428,8 @@ def test_scan_and_compress_long_secret_straddling_cut_with_widened_margin(tmp_pa
     _, _, _, tail = scan_and_compress_pi_events(
         events,
         stderr_sink=sink,
-        redact=lambda raw: raw.replace(secret.encode(), b"***"),
-        redact_secret_max_bytes=len(secret.encode()),
+        secret_spans=literal_spans(secret),
+        secret_max_chars=len(secret),
     )
     for face in (tail, sink.read_bytes()):
         assert len(face) <= STDERR_TAIL_BYTES
@@ -440,7 +446,8 @@ def test_scan_and_compress_multiline_pem_survives_no_fragment(tmp_path):
     body 行残段明文落锚点。修复后 deque 保留界按 redact_margin 放宽，
     且脱敏跑在 join 后的完整保留缓冲上（多行整值必然完整可见）、先于
     最终保尾切割——sink 与 return 两面不留任何 PEM body 行。"""
-    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+    from shared.pi_events import scan_and_compress_pi_events
+    from shared.stderr_tail import STDERR_TAIL_BYTES
 
     body_line = "ABCDEFGHIJKLMNOP" * 4  # 64 字符 base64 形态行
     pem_lines = ["-----BEGIN PRIVATE KEY-----"] + [body_line] * 20 + ["-----END PRIVATE KEY-----"]
@@ -454,8 +461,8 @@ def test_scan_and_compress_multiline_pem_survives_no_fragment(tmp_path):
     _, _, _, tail = scan_and_compress_pi_events(
         events,
         stderr_sink=sink,
-        redact=lambda raw: raw.replace(secret.encode(), b"***"),
-        redact_secret_max_bytes=len(secret.encode()),
+        secret_spans=literal_spans(secret),
+        secret_max_chars=len(secret),
     )
     for face in (tail, sink.read_bytes()):
         assert len(face) <= STDERR_TAIL_BYTES
@@ -606,8 +613,8 @@ def test_scan_and_compress_secret_form_matrix(tmp_path, stderr_text, secret, fra
     _, _, _, tail = scan_and_compress_pi_events(
         events,
         stderr_sink=sink,
-        redact=lambda raw: raw.replace(secret.encode(), b"***"),
-        redact_secret_max_bytes=len(secret.encode()),
+        secret_spans=literal_spans(secret),
+        secret_max_chars=len(secret),
     )
     for face in (tail, sink.read_bytes()):
         assert len(face) <= STDERR_TAIL_BYTES
@@ -629,11 +636,9 @@ _EVICT_PEM = "\n".join(
 )  # 1353 字符多行 PEM（22 行）
 
 # (stderr 文本, 已注册密钥, margin 提示, 不得出现在任何出口面的碎片)。
-# margin 提示刻意小于密钥的几何镜像生产真实形态：Worker 回调
-# （redact_secrets_bytes）的可匹配集合含形态兜底 pass（_SECRET_SHAPES /
-# Bearer），本就不计入 max_secret_bytes——淘汰安全性不得依赖「margin ≥
-# 最长可匹配密钥」这一调用方契约（顺序域与值域的边界：值域扩窗照管
-# 最终切割，淘汰切口必须由「先脱敏后切割」的顺序不变量兜住）。
+# margin 提示遵守调用方契约（≥ 最长可匹配字面量，生产由
+# stderr_evidence.max_secret_chars 从同一注册表给出）：缓冲裁剪落在密钥
+# 中间时，残段必须整体落在 lookback 里、永不进入输出窗口。
 _EVICT_MATRIX = [
     pytest.param(
         # codex 原文几何：两行密钥，前置噪音使次行恰好顶破预算（首轮淘汰
@@ -641,28 +646,28 @@ _EVICT_MATRIX = [
         # popleft 首行后缓冲 ≤8192（无最终切割兜底），尾行整行明文落两面。
         _noise(7400) + _EVICT_TWO_LINE + "\n" + _noise(7400),
         _EVICT_TWO_LINE,
-        0,
+        len(_EVICT_TWO_LINE),
         (b"zz-evict-head", b"zz-evict-tail"),
         id="two-line-trigger-at-second-line",
     ),
     pytest.param(
         _EVICT_PEM + "\n" + _noise(7800),
         _EVICT_PEM,
-        0,
+        len(_EVICT_PEM),
         _PEM_FRAGMENTS,
         id="pem-boundary-near-head",
     ),
     pytest.param(
         _EVICT_PEM + "\n" + _noise(8100),
         _EVICT_PEM,
-        0,
+        len(_EVICT_PEM),
         _PEM_FRAGMENTS,
         id="pem-boundary-at-middle",
     ),
     pytest.param(
         _EVICT_PEM + "\n" + _noise(8160),
         _EVICT_PEM,
-        0,
+        len(_EVICT_PEM),
         _PEM_FRAGMENTS,
         id="pem-boundary-near-tail",
     ),
@@ -707,8 +712,8 @@ def test_scan_and_compress_eviction_never_splits_secret(
     _, _, _, tail = scan_and_compress_pi_events(
         events,
         stderr_sink=sink,
-        redact=lambda raw: raw.replace(secret.encode(), b"***"),
-        redact_secret_max_bytes=margin_hint,
+        secret_spans=literal_spans(secret),
+        secret_max_chars=margin_hint,
     )
     for face in (tail, sink.read_bytes()):
         assert len(face) <= STDERR_TAIL_BYTES

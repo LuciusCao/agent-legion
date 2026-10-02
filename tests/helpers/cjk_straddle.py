@@ -7,7 +7,7 @@ def cjk_line_with_straddling_secret(secret: str) -> str:
     """4100 个字符的 CJK 单行（12300 字节——字符数 ≤ 8192 但字节数 > 8192，
     恰好绕过旧的字符口径闸门），自定义形态密钥（非内建 sk-/ghp_ 形态，
     只能整值字面匹配）的中点骑跨 8KB 字节切割点。"""
-    from shared.pi_events import STDERR_TAIL_BYTES
+    from shared.stderr_tail import STDERR_TAIL_BYTES
 
     total_bytes = 4100 * 3
     cut_at = total_bytes - STDERR_TAIL_BYTES  # 4108

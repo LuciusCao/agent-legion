@@ -18,9 +18,9 @@ tokens (``xox[bap]/``) plus JWTs and Bearer credentials. NOT covered: env
 values shorter than the byte threshold, secret-named values from OTHER
 machines not echoed through this process, and custom gateway tokens with
 no recognizable shape — a custom-token echo in stderr survives redaction
-(known best-effort boundary; the durable anchor is written ALREADY
-REDACTED via the shared-sink redact callback, #748 R3 codex review P1 —
-no plaintext secret ever touches disk on the anchor path).
+(known best-effort boundary). The durable anchor is written ALREADY
+REDACTED: prepare hands ``secret_spans`` to the scan (#748 R3 codex review
+P1), so no plaintext secret touches disk on the anchor path.
 """
 
 from __future__ import annotations
@@ -30,12 +30,8 @@ import re
 import threading
 from pathlib import Path
 
-from shared.pi_events import STDERR_TAIL_BYTES
-
-# Run-dir member carrying the retained agent-stderr tail. The whole run dir
-# ships in the result archive, so the Host-side job dir keeps the evidence
-# beside the promoted events.jsonl.
-AGENT_STDERR_FILENAME = "agent-stderr.log"
+from shared.redaction import Span, apply_spans
+from shared.stderr_tail import AGENT_STDERR_FILENAME, STDERR_TAIL_BYTES
 
 # Secret-shaped literals redacted on top of the env-value pass: provider API
 # key prefixes (OpenAI/Anthropic/GitHub) and Slack bot/user/app tokens plus
@@ -50,7 +46,7 @@ _SECRET_SHAPES = re.compile(
 )
 # Bearer credentials: keep the scheme word (the crash summary stays readable
 # — "Bearer ***" over a bare "***") and redact the credential itself.
-_BEARER_SHAPE = re.compile(r"\b(Bearer\s+)[A-Za-z0-9._~+/-]{16,}")
+_BEARER_SHAPE = re.compile(r"\b(Bearer\s+)([A-Za-z0-9._~+/-]{16,})")
 
 # Env-var name markers whose VALUES are secrets worth a literal replacement.
 _SECRET_NAME_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL")
@@ -60,8 +56,6 @@ _SECRET_NAME_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL")
 # byte form (_secret_bytes: UTF-8 + surrogateescape, symmetric with how
 # os.environ decodes), the same metric the outbound faces serialize to.
 _MIN_SECRET_BYTES = 8
-
-_REDACTED = "***"
 
 # #748 R2 P2-3: the worker config's ``environment:`` block is the OFFICIAL
 # channel that injects secrets into the agent subprocess (executor.py), but
@@ -94,7 +88,7 @@ def _secret_bytes(value: str) -> bytes:
     解码（Linux 启动环境的非 UTF-8 字节经 surrogateescape 暴露为代理字符，
     如 \\udcff），对称的 surrogateescape 编码让字节忠实往返。严格 UTF-8
     在代理字符上抛 UnicodeEncodeError——prepare_result 对每次 agent 结果
-    无条件经 max_secret_bytes 走到这里，一次逃逸即把成功执行改判 failed
+    无条件经 max_secret_chars 走到这里，一次逃逸即把成功执行改判 failed
     并丢弃归档。"""
     return value.encode("utf-8", "surrogateescape")
 
@@ -140,52 +134,43 @@ def _secret_values() -> list[str]:
     )
 
 
-def max_secret_bytes() -> int:
-    """已注册密钥中最长值的忠实字节数（无注册密钥时 0）。
+def max_secret_chars() -> int:
+    """Length in characters of the longest registered literal (0 when none).
 
-    #755 codex P1：shared/ 的脱敏扩窗按本值对齐已注册最长密钥——固定
-    512 的窗口装不下 >512 字节的密钥（PEM、长 JWT），骑跨保尾界时仍被
-    先切后脱敏。调用点：prepare.py 的两处 scan_and_compress_pi_events。
-    #755 codex P2-2：字节口径走 _secret_bytes（surrogateescape 对称编
-    码），非 UTF-8 字节的 env 密钥不会再让本函数抛 UnicodeEncodeError。"""
+    shared/pi_events.py keeps this much lookback ahead of the emitted
+    stderr window, so any literal reaching the window is complete in its
+    buffer (#755 codex P1: a fixed 512 could not hold a PEM or a long JWT).
+    The variants of _secret_values are already in the matching domain."""
     values = _secret_values()
-    return len(_secret_bytes(values[0])) if values else 0
+    return max((len(value) for value in values), default=0)
+
+
+def secret_spans(text: str) -> list[Span]:
+    """Where secret material sits in ``text`` (best-effort, never raises).
+
+    Three rule families, all reported as spans and merged by the caller:
+    (1) literal occurrences of this process's secret env values plus the
+    registered worker-config environment values (every occurrence, so a
+    short key that prefixes or nests inside a longer one is covered by the
+    merge instead of leaving residue); (2) Bearer credentials (the scheme
+    word stays readable); (3) secret-shaped literals for secrets that did
+    not come from this process (e.g. provider keys echoed from a child's
+    own config). Values too short to be secrets (<= 8 BYTES) are skipped:
+    replacing short literals mangles ordinary text for zero secrecy gain."""
+    spans: list[Span] = []
+    for value in _secret_values():
+        index = text.find(value)
+        while index != -1:
+            spans.append((index, index + len(value)))
+            index = text.find(value, index + 1)
+    spans.extend(match.span(2) for match in _BEARER_SHAPE.finditer(text))
+    spans.extend(match.span() for match in _SECRET_SHAPES.finditer(text))
+    return spans
 
 
 def redact_secrets(text: str) -> str:
-    """Redact secret material from outbound text (best-effort, never raises).
-
-    Three passes: (1) literal replacement of this process's secret env
-    values plus the registered worker-config environment values (the exact
-    strings the agent env actually carried), longest first so key-prefix
-    pairs cannot leave residue; (2) Bearer credentials; (3) secret-shaped
-    literals for secrets that did not come from this process (e.g.
-    provider keys echoed from a child's own config). Values too short to
-    be secrets (<= 8 BYTES) are skipped: replacing short literals mangles
-    ordinary text for zero secrecy gain."""
-    for value in _secret_values():
-        text = text.replace(value, _REDACTED)
-    text = _BEARER_SHAPE.sub(r"\g<1>" + _REDACTED, text)
-    return _SECRET_SHAPES.sub(_REDACTED, text)
-
-
-def redact_secrets_bytes(tail: bytes) -> bytes:
-    """Bytes face of redact_secrets for the shared-sink callback (#748 R3,
-    codex review P1): ``scan_and_compress_pi_events`` persists the stderr
-    anchor BEFORE the compression rewrite, and that durable write must carry
-    redacted bytes — the Worker may exit between the scan and any later
-    rewrite, so the anchor on disk can never hold plaintext secrets. The
-    callback decodes with replacement (the tail is bounded raw stderr),
-    redacts, and re-slices to the same byte bound shared/ enforces (the
-    redaction only ever SHRINKS — replacements are shorter — so the slice
-    is a no-op safety net). shared/ stays stdlib-only: the callback is
-    injected here, never imported there.
-
-    #755 对抗复审 P3-2: the slice keeps the TAIL end. shared/ now hands the
-    callback a window slightly wider than the bound (so a secret straddling
-    the final cut is matched whole); a head slice would silently drop the
-    newest bytes — the crash header the tail exists to keep."""
-    return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[-STDERR_TAIL_BYTES:]
+    """``text`` with every ``secret_spans`` region replaced by ``***``."""
+    return apply_spans(text, secret_spans(text))
 
 
 def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
@@ -197,24 +182,16 @@ def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
     the file IS the tail: the compression rewrite destroyed the raw lines,
     so nothing else can recover them.
 
-    #748 R3 (codex review P1): the sink is written ALREADY REDACTED (the
-    scan's ``redact`` callback — worker side injects redact_secrets_bytes),
-    so this reader only needs to slice it back to the byte bound (defensive
-    against older/pre-redaction anchors) and redact the FRESH scan capture
-    for its in-memory faces. The old in-place rewrite step is gone: the
-    anchor never holds plaintext, so there is nothing to sanitize on read
-    and no truncate-to-empty degradation path left to carry.
-
-    #755 对抗复审 P3-3: the read-back arm no longer returns early — it
-    flows through the SAME final redact pass as the fresh capture. The
-    anchor is redacted at write time, but re-redacting on read is the
-    defense-in-depth that covers pre-redaction anchors written by older
-    Workers and any secret registered after the anchor was written."""
+    The sink is written already redacted (#748 R3), but both arms go
+    through the same final redaction (#755 对抗复审 P3-3: covers anchors from
+    older Workers and secrets registered after the anchor was written), and
+    every cut happens after it. An anchor larger than any tail this Worker
+    writes is not ours to trust and is ignored."""
     tail = scanned_tail
     if not tail:
         sink = run_dir / AGENT_STDERR_FILENAME
-        if sink.is_file():
-            tail = sink.read_bytes()[-STDERR_TAIL_BYTES:]
+        if sink.is_file() and sink.stat().st_size <= STDERR_TAIL_BYTES:
+            tail = sink.read_bytes()
     if not tail:
         return b""
     return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[-STDERR_TAIL_BYTES:]
@@ -234,8 +211,8 @@ def stderr_error_message(exit_code: int, stderr_tail: bytes) -> str:
     external error_message face. Redaction replaces values with ``***``
     (shorter), so the 200-char cap keeps its meaning on the redacted text.
     """
-    summary = stderr_tail.decode("utf-8", "replace").strip()
+    summary = redact_secrets(stderr_tail.decode("utf-8", "replace")).strip()
     if not summary:
         return f"Agent process exited {exit_code}"
     last_line = " ".join(summary.splitlines()[-1].split())
-    return f"Agent process exited {exit_code}: {redact_secrets(last_line)[:200]}"
+    return f"Agent process exited {exit_code}: {last_line[:200]}"
