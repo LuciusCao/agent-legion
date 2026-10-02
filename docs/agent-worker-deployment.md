@@ -412,11 +412,12 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
    暴露时在 `.env` 显式配置，显式留空则不显示链接）。回环地址只能在 Worker
    所在机器的浏览器里打开，链接的悬停提示会说明这一点。Worker 注册成功后，
    主控制台每一行 Worker 还会带该 Worker **自报**的「控制台」链接：Worker
-   Service 按自己的控制面绑定地址推导（通配绑定 `0.0.0.0` 回落
+   原生 Service 按自己的控制面绑定地址推导（通配绑定 `0.0.0.0` 回落
    `127.0.0.1`，IPv6 `::` 回落 `[::1]`），经环境变量 `AGENT_WORKER_CONSOLE_URL` 交给 executor，注册时
    补充 labels 的可选键 `console_url`（`worker/console_url.py`）。控制台经反向
-   代理或映射到非回环地址时，在 Worker 侧显式设置该变量（三份 compose 文件
-   已按 `AGENT_WORKER_UI_BIND` 的端口发布预填），显式空串 = 不上报；旧版
+   代理或映射到非回环地址时，在 Worker 侧显式设置该变量。三份 Compose 均要求
+   在部署环境中显式配置浏览器可达 URL（例如 `https://worker.example/console`），
+   不从 `AGENT_WORKER_UI_BIND` 猜测；缺省或显式空串均不自报。旧版
    Worker 不上报，对应行只保留部署级入口。
    已配置的 `console_url` 与其他自定义标签始终原样保留（可能用于 `requires_labels` 调度），环境地址不覆盖它。
    自定义标签已经占满 32 项，或自报 URL 超过 256 字符时，

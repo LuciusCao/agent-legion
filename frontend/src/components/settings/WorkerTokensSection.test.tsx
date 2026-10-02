@@ -217,7 +217,6 @@ describe('WorkerTokensSection', () => {
       )
     ).toBeNull()
   })
-
   it('links the empty registered-worker list to the Worker console', async () => {
     mockListAgentWorkers.mockResolvedValue([])
     renderSection()

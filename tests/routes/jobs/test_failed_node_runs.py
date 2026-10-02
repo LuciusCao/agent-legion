@@ -285,3 +285,18 @@ def test_rerun_by_failure_rejects_empty_workflow_key(tmp_path):
             json={"category": "technical", "job_ids": [job], "workflow_key": ""},
         )
     assert response.status_code == 422
+
+
+def test_list_failed_node_runs_rejects_empty_string_filters(tmp_path):
+    """#735 review P2 簇面清扫：failed-node-runs 与 jobs 列表同一约定——
+    category/detail 的空串形态是调用错误 → 422，不被查询层的
+    `if category` / `if detail` 吞成「不过滤」；参数缺席才是不筛选。"""
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        for param in ("category", "detail"):
+            response = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?{param}=")
+            assert response.status_code == 422, (param, response.text)
+        assert c.get(f"/api/workspaces/{ws_id}/failed-node-runs").status_code == 200
