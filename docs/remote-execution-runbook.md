@@ -456,6 +456,11 @@ with three read-only endpoints, all scoped by the workspace in the URL path:
 | `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts` | 产物清单（名字、形态、大小、content_hash、uploaded_at、媒体类型） |
 | `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw` | 产物字节流（支持 `Range`，媒体类型按白名单） |
 
+前半程（签发 token、`POST /runs` 提交、按 `run_id` 列 job）与整条链路的
+幂等/重试语义、错误码表见
+[workspace-api-tokens.md](workspace-api-tokens.md)；本节只展开读取面，
+文末给出照抄可跑的全链路示例。
+
 **鉴权.** 与其它 workspace 端点同一守卫（`require_workspace_access`）：
 会话 cookie 或 #626 的 workspace API token（`Authorization: Bearer <token>`
 ——Bearer 通道免 CSRF）。跨 workspace 的 job_id 一律 404（归属校验兼作
@@ -500,35 +505,49 @@ workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前�
   `jobs/{workspace}/{job_id}/` 前缀：行被污染/写歪（未来写入方失守、
   运维 SQL 误操作）时按 404 处理并记 warning，绝不读穿 workspace 边界。
 
-**最小完整示例**（curl；token 签发与提交面细节见
-[workspace-api-tokens.md](workspace-api-tokens.md)——#626 的 workspace
-API token 唯一支持的提交面是 `POST /runs`：`/job-batches` 挂载
+**最小完整示例**（签发 token → 提交 → 轮询 → 下载）。端点全集、请求/
+响应形态、幂等与重试、错误码表见
+[workspace-api-tokens.md](workspace-api-tokens.md)，以下两段示例与之
+一一对应（`tests/routes/test_external_integration_docs_contract.py` 把
+示例里的每个端点钉在 OpenAPI 契约与 api token 权限面上）。#626 的
+workspace API token 唯一支持的提交面是 `POST /runs`：`/job-batches` 挂载
 `reject_studio_agent_scope`，对包括 `actor_scope='api'` 在内的全部
-scoped token 一律 403）：
+scoped token 一律 403。
 
 ```bash
 HOST="https://agent-legion.example.com"
 WS="my-workspace"
-# 1) 提交（items 引用已就位的 material/bundle/ref；一项一个 job）
-RUN_ID=$(curl -sS -X POST "$HOST/api/workspaces/$WS/runs" \
+# 0) 签发 token（管理员会话；或控制台 workspace 设置 → Agent 与 Worker）。
+#    明文只在这次响应里出现一次，落到调用方的密钥存储
+WORKSPACE_API_TOKEN=$(curl -sS -X POST "$HOST/api/workspaces/$WS/api-tokens" \
+  -H "Authorization: Bearer $ADMIN_SESSION" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "cms-cron", "ttl_hours": 720}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["api_token"])')
+
+# 1) 提交（items 引用已就位的 material/bundle/ref；一项一个 job）。
+#    响应带 run.id 与本次新建的 job_ids（#735）；重复提交的 400 语义见
+#    workspace-api-tokens.md「幂等与重试」
+SUBMIT=$(curl -sS -X POST "$HOST/api/workspaces/$WS/runs" \
   -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"items": [{"type": "material", "material_id": "mat-1"}]}' \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])')
+  -d '{"items": [{"type": "material", "material_id": "mat-1"}]}')
+RUN_ID=$(printf '%s' "$SUBMIT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])')
+JOB_ID=$(printf '%s' "$SUBMIT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_ids"][0])')
 
-# 2) 取 job id（POST /runs 响应只带 run + created_count：按 run_id 查
-#    snapshot；多页用 next_cursor 循环）
-JOB_ID=$(curl -sS "$HOST/api/workspaces/$WS/jobs/snapshot?run_id=$RUN_ID" \
-  -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["jobs"][0]["id"])')
+# 2) 按 run 列 job（job_ids 丢失时的读回路径；大 run 改用
+#    /jobs/snapshot?run_id=…&limit=500 按 next_cursor 分页）
+curl -sS "$HOST/api/workspaces/$WS/jobs?run_id=$RUN_ID" \
+  -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
 
-# 3) 轮询状态直到 completed / failed
+# 3) 轮询状态直到终态 completed / failed（paused、awaiting_approval
+#    是等待态，继续轮询）
 while :; do
   STATUS=$(curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
     -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
   echo "status: $STATUS"
-  case "$STATUS" in completed|failed|cancelled) break;; esac
+  case "$STATUS" in completed|failed) break;; esac
   sleep 15
 done
 
@@ -551,19 +570,39 @@ Python 等价（`requests`）：
 import time, requests
 from urllib.parse import quote
 
+ALREADY_EXISTS = "No tasks were resolved from input"  # 全部条目已有 job 的 400
+
 s = requests.Session()
 s.headers["Authorization"] = f"Bearer {WORKSPACE_API_TOKEN}"  # #626
 
-run_id = s.post(
-    f"{HOST}/api/workspaces/{WS}/runs",
-    json={"items": [{"type": "material", "material_id": "mat-1"}]},
-).json()["run"]["id"]
-job_id = s.get(
-    f"{HOST}/api/workspaces/{WS}/jobs/snapshot", params={"run_id": run_id}
-).json()["jobs"][0]["id"]
+items = [{"type": "material", "material_id": "mat-1"}]
+resp = s.post(f"{HOST}/api/workspaces/{WS}/runs", json={"items": items}, timeout=60)
+if resp.status_code == 400 and resp.json().get("detail") == ALREADY_EXISTS:
+    # 「已存在」不是失败（超时重试撞上了上次已成功的提交）：按去重键
+    # (source_type, source_id) 反查已有 job，search 是子串匹配，须精确比对
+    page = s.get(
+        f"{HOST}/api/workspaces/{WS}/jobs/snapshot", params={"search": "mat-1"}
+    ).json()
+    job_ids = [
+        j["id"] for j in page["jobs"]
+        if j["source_type"] == "material" and j["source_id"] == "mat-1"
+    ]
+else:
+    resp.raise_for_status()
+    body = resp.json()
+    run_id, job_ids = body["run"]["id"], body["job_ids"]  # #735
+    if not job_ids:
+        # #501 治愈路径（created_count=0）：按 run_id 读回该 run 的 job
+        job_ids = [
+            j["id"] for j in s.get(
+                f"{HOST}/api/workspaces/{WS}/jobs", params={"run_id": run_id}
+            ).json()["jobs"]
+        ]
+job_id = job_ids[0]
 
+# 终态只有 completed / failed；paused、awaiting_approval 是等待态
 while (st := s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()["status"]) not in {
-    "completed", "failed", "cancelled"
+    "completed", "failed"
 }:
     time.sleep(15)
 
