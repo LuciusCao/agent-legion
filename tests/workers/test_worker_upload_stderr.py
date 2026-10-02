@@ -288,13 +288,13 @@ def test_cjk_single_line_straddling_secret_leaks_nowhere(
     但字节口径超预算——修复前恰好绕过字符闸门不进脱敏漏斗）+ 自定义形态密钥
     （非内建形态，只有 env 字面量通道接得住）骑跨 8KB 字节切割点。修复后
     error_message / metadata.agent_stderr_tail / 归档锚点三面均无密钥与残段。"""
-    from tests.executors.test_pi_event_compression import _cjk_line_with_straddling_secret
+    from tests.helpers.cjk_straddle import cjk_line_with_straddling_secret
 
     secret = "zz-e2e-gateway-token-" + "t" * 84  # 105 字节自定义形态密钥
     monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret)
     work_root = tmp_path / "work"
     _execution_dir(work_root)
-    _events_with_stderr(work_root, [_cjk_line_with_straddling_secret(secret)])
+    _events_with_stderr(work_root, [cjk_line_with_straddling_secret(secret)])
     client = QueueFakeClient()
     archived: dict[str, bytes] = {}
     original_report = client.report
