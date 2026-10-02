@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# velites 二进制新鲜度检测：PATH 上的 velites 是跨 worktree 共享的安装物，
-# 「代码已 pull 但二进制还是旧构建」不会触发任何报错。本脚本用 velites/
-# 源码树的 git tree hash 做指纹，与二进制旁的 stamp 文件对比，不一致（或
-# 二进制缺失）时重新 cargo build --release 并原子替换安装；已有
-# velites-sandbox（沙箱包装器，#383 起的独立 bin，解析序优先于 velites）
-# 的目录会一并刷新并共享同一 stamp（#835 codex P2）。make prod-up
-# （原生形态）每次启动前调用本脚本**两次**——PATH 模式与 --dest data/bin
-# （#831：Worker 解析自带副本优先，两处安置点都要刷新才算升级生效）。
+# velites 二进制新鲜度检测与安置。
+#
+# 「安置在哪、什么算新鲜」不再由本脚本自行判断（#835 四轮 codex 评审的
+# 根源：bash 里手写的查找逻辑与 Python resolver 各持一份模型，每个维度
+# 失同步就是一轮静默滞留——#831 漏 data/bin 通道、fast-path 短路、PATH
+# 目录分叉、漏刷 velites-sandbox）。决策面统一在 scripts/velites_deploy_plan.py：
+# 它 import 真实 resolver（worker/binary_resolution、shared/code_sandbox、
+# worker/runtime/catalog），从解析序推导安置目标，家族（velites +
+# 已存在的 velites-sandbox）共享同一 src-stamp 指纹。本脚本退化为
+# 「git 指纹 → planner 判鲜 → cargo build → 按 planner 目标原子安置」。
 #
 # 用法：
-#   scripts/ensure-velites.sh              安装/刷新 PATH 上的 velites（默认）
-#   scripts/ensure-velites.sh --dest DIR   安装/刷新 DIR/velites（跳过 PATH 探测）
+#   scripts/ensure-velites.sh              刷新 PATH 通道（velites 现有位置，
+#                                         无 PATH 副本时落 VELITES_INSTALL_DIR
+#                                         或 ~/.local/bin；PATH 上独立发现的
+#                                         家族成员位置一并刷新）
+#   scripts/ensure-velites.sh --dest DIR   刷新 DIR（自带副本通道：DIR 内的
+#                                         velites 与已有存在痕迹的家族成员）
 #
-# --dest 用于 Worker 自带沙箱副本：--dest data/bin 把二进制安置到
-# data/bin/velites（Worker 解析顺序：自带副本优先于 PATH，见
-# worker/binary_resolution.py resolve_binary；该副本同时是裸机形态的沙箱
-# 包装器，Host 侧 shared/code_sandbox.py 解析同一目录）。二进制按平台
-# 构建——给哪台 Worker 用就在同 OS/架构的机器上执行本脚本。
+# 两通道各管一段；make prod-up（原生形态）先后都跑（#831）。velites/ 有未
+# 提交改动时指纹不可靠，强制重建。二进制按平台构建——给哪台 Worker 用就在
+# 同 OS/架构的机器上执行本脚本。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,23 +40,55 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# planner 的 python：显式覆盖（测试）> 仓库 venv（install-deps/prod-up 都先
+# 跑 uv sync，.venv 必在）> 裸 python3（无 tomllib 时 planner 会给出明确
+# 报错与指引）。python 选择不影响安置语义——planner 只做决策。
+# 退出码检查：planner 崩溃（删失/损坏/解释器缺 tomllib）时**必须中止脚本**——
+# 判鲜输出为空与「全部新鲜」在 $() 里无法区分，吞掉失败码会让脚本静默
+# 跳过刷新（把决策面退化回「脚本自己猜」的旧模型，正是 #835 要消灭的）。
+_plan_python() {
+    if [[ -n "${VELITES_PLAN_PYTHON:-}" ]]; then
+        printf '%s\n' "${VELITES_PLAN_PYTHON}"
+    elif [[ -x "$ROOT/.venv/bin/python" ]]; then
+        printf '%s\n' "$ROOT/.venv/bin/python"
+    else
+        printf '%s\n' "python3"
+    fi
+}
+
+# 退出码经全局 PLAN_RC/PLAN_OUTPUT 返回——调用点必须**在 $() 之外**直接
+# 调用本函数：命令替换的子 shell 里 exit 退不出主脚本，判鲜失败会被
+# `[[ -z ]]` 当成「全部新鲜」吞掉（静默跳过刷新，#835 要消灭的形态）。
+_run_plan() {
+    local python
+    python="$(_plan_python)"
+    PLAN_OUTPUT="$("$python" scripts/velites_deploy_plan.py "$@" 2>&1)"
+    PLAN_RC=$?
+    if [[ "$PLAN_RC" -ne 0 ]]; then
+        echo "velites_deploy_plan.py 执行失败（rc=$PLAN_RC）：$PLAN_OUTPUT" >&2
+        exit 1
+    fi
+}
+
+if [[ -n "$DEST_DIR" ]]; then
+    mkdir -p "$DEST_DIR"
+    DEST_ARGS=(--dest "$DEST_DIR")
+else
+    DEST_ARGS=()
+fi
+
 SRC_ID="$(git rev-parse HEAD:velites)"
 DIRTY="$(git status --porcelain -- velites)"
 
-if [[ -n "$DEST_DIR" ]]; then
-    VELITES_BIN="${DEST_DIR%/}/velites"
-else
-    # 测试可用 VELITES_INSTALL_DIR 覆盖默认安装目录（PATH 上无 velites 时生效）。
-    VELITES_BIN="$(command -v velites || true)"
-    if [[ -z "$VELITES_BIN" ]]; then
-        VELITES_BIN="${VELITES_INSTALL_DIR:-$HOME/.local/bin}/velites"
+# 家族级判鲜：任一目标位置的 bin 缺失或 stamp 不符（含无 stamp 的 Release
+# 产物/手工安置）即整族重建——按单工件判鲜会让 fast-path 跳过同目录里
+# 候选序更优先的旧 velites-sandbox（#835 codex P2）。
+if [[ -z "$DIRTY" ]]; then
+    _run_plan check --src-id "$SRC_ID" ${DEST_ARGS[@]+"${DEST_ARGS[@]}"}
+    if [[ -z "$PLAN_OUTPUT" ]]; then
+        echo "velites 二进制已是最新（${SRC_ID:0:12}），跳过构建"
+        exit 0
     fi
-fi
-STAMP="${VELITES_BIN}.src-stamp"
-
-if [[ -z "$DIRTY" && -x "$VELITES_BIN" && -f "$STAMP" && "$(cat "$STAMP")" == "$SRC_ID" ]]; then
-    echo "velites 二进制已是最新（${SRC_ID:0:12}），跳过构建"
-    exit 0
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
@@ -66,9 +102,13 @@ fi
 # #831 可见性：既有二进制但无 stamp（Release 产物/手工安置）走的是重建
 # 分支——不是过期，是「无法判鲜」。替换经过校验的 Release 二进制前先提示，
 # 无对账依据的静默覆盖是运维盲区。
-if [[ -e "$VELITES_BIN" && ! -f "$STAMP" ]]; then
-    echo "提示: $VELITES_BIN 存在但无 src-stamp 指纹（Release 产物/手工安置？），将按源码指纹重建并覆盖" >&2
-fi
+_run_plan plan ${DEST_ARGS[@]+"${DEST_ARGS[@]}"}
+while IFS='|' read -r bin target; do
+    [[ -z "$bin" ]] && continue
+    if [[ -e "$target" && ! -f "${target}.src-stamp" ]]; then
+        echo "提示: $target 存在但无 src-stamp 指纹（Release 产物/手工安置？），将按源码指纹重建并覆盖" >&2
+    fi
+done <<<"$PLAN_OUTPUT"
 
 if [[ -n "$DIRTY" ]]; then
     echo "velites/ 有未提交改动，强制重新构建…"
@@ -77,43 +117,24 @@ else
 fi
 (cd velites && cargo build --release --locked)
 
-# 原子替换：运行中的 worker 继续用旧 inode，新派生的 agent 进程立即拿到新
-# 二进制；直接覆盖写入可能让并发生成的进程读到截断的二进制。
-mkdir -p "$(dirname "$VELITES_BIN")"
-tmp="${VELITES_BIN}.tmp.$$"
-trap 'rm -f "$tmp"' EXIT
-cp velites/target/release/velites "$tmp"
-chmod +x "$tmp"
-mv -f "$tmp" "$VELITES_BIN"
-
-# #835（codex P2）：沙箱包装器 velites-sandbox 与 velites 同源同指纹。
-# cargo build --release 已产出两个 bin（velites/Cargo.toml 的 [[bin]]），
-# 这里一并安置并共享同一 src-stamp——shared/code_sandbox.py 的
-# resolve_sandbox_binary 候选序是 velites-sandbox 优先：裸机 PATH 或
-# data/bin 若存在旧 velites-sandbox，只刷 velites 会让 code 沙箱
-# （Host 与 Worker 的 code 节点）继续用旧包装器，沙箱修复静默失效——
-# 与 #831 同构的漂移。两 bin 一个指纹：freshness/对账把整个 velites
-# 构建产物视为一个单元（重构建时 velites-sandbox 必然同批产出）。
-# 部署面矩阵（消费 ⊆ 安置 ⊆ 构建）由 tests/scripts/test_ensure_velites.py
-# 的 deploy-matrix 契约测试钉死：新增 bin 或解析侧开始消费新名字而脚本
-# 未同步安置时直接红。
-SANDBOX_BIN="$(dirname "$VELITES_BIN")/velites-sandbox"
-SANDBOX_SRC="velites/target/release/velites-sandbox"
-SANDBOX_STAMP="${SANDBOX_BIN}.src-stamp"
-if [[ -e "$SANDBOX_BIN" || -e "$SANDBOX_STAMP" ]]; then
-    # 候选序 velites-sandbox 优先意味着：目录里存在它就会盖住刚刷新的
-    # velites——存在即必须刷新，否则本脚本制造的正是 #831 修复的静默
-    # 滞留。不存在则不主动创造（裸机默认走 velites 兜底；docker 镜像的
-    # velites-sandbox 在 /usr/local/bin，不经本脚本）。
-    if [[ ! -x "$SANDBOX_BIN" || "$(cat "$SANDBOX_STAMP" 2>/dev/null)" != "$SRC_ID" ]]; then
-        sandbox_tmp="${SANDBOX_BIN}.tmp.$$"
-        cp "$SANDBOX_SRC" "$sandbox_tmp"
-        chmod +x "$sandbox_tmp"
-        mv -f "$sandbox_tmp" "$SANDBOX_BIN"
-        echo "$SRC_ID" > "$SANDBOX_STAMP"
-        echo "velites-sandbox（沙箱包装器）已同步安装到 $SANDBOX_BIN"
+# 安置：planner 给出的每个目标位置原子替换 + 同批 stamp。候选序
+# velites-sandbox 优先于 velites——按名字序安置保证同目录内 velites
+# 先落位、家族成员后落位，解析永远落在刷新后的副本上。
+while IFS='|' read -r bin target; do
+    [[ -z "$bin" ]] && continue
+    src="velites/target/release/$bin"
+    if [[ ! -f "$src" ]]; then
+        echo "错误：构建产物缺失 $src（velites/Cargo.toml 的 [[bin]] 与安置面不一致？）" >&2
+        exit 1
     fi
-fi
-
-echo "$SRC_ID" > "$STAMP"
-echo "velites 已安装到 $VELITES_BIN"
+    # 原子替换：运行中的 worker 继续用旧 inode，新派生的 agent 进程立即拿到
+    # 新二进制；直接覆盖写入可能让并发生成的进程读到截断的二进制。
+    mkdir -p "$(dirname "$target")"
+    tmp="${target}.tmp.$$"
+    trap 'rm -f "$tmp"' EXIT
+    cp "$src" "$tmp"
+    chmod +x "$tmp"
+    mv -f "$tmp" "$target"
+    echo "$SRC_ID" > "${target}.src-stamp"
+    echo "velites 家族成员 $bin 已安装到 $target"
+done <<<"$PLAN_OUTPUT"

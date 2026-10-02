@@ -1,17 +1,18 @@
 """Contract tests for scripts/ensure-velites.sh staleness detection.
 
-The script resolves ROOT from its own location, so tests copy it into a
-synthetic repo layout and run it with stubbed ``git``/``cargo`` on a
-restricted PATH: no real repo, cargo build, or PATH velites is touched.
+The script resolves ROOT from its own location, so tests copy it (plus the
+planner and its python import surface) into a synthetic repo layout and run
+it with stubbed ``git``/``cargo`` on a restricted PATH: no real repo, cargo
+build, or PATH velites is touched. ``VELITES_PLAN_PYTHON`` points the script
+at the repo venv interpreter — the synthetic repo carries no venv of its own.
 """
 
 from __future__ import annotations
 
-import re
 import shutil
 import stat
 import subprocess
-import tomllib
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,42 @@ pytestmark = pytest.mark.no_db
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "ensure-velites.sh"
+PLANNER = ROOT / "scripts" / "velites_deploy_plan.py"
+
+#: planner 的 import 面（真实 resolver 链）：合成 repo 里复刻这份布局，
+#: planner 以真实代码推导安置目标——这正是被测语义（脚本不再持有自己的
+#: 查找模型，#835 的根源修复）。
+_PLANNER_PY_IMPORTS = (
+    "shared/__init__.py",
+    "shared/code_sandbox.py",
+    "shared/code_contract.py",
+    "shared/velites_staleness.py",
+    "worker/__init__.py",
+    "worker/binary_resolution.py",
+    "worker/runtime/__init__.py",
+    "worker/runtime/catalog.py",
+)
+
+#: 合成 repo 的 velites/Cargo.toml：与真实清单同构（velites /
+#: velites-sandbox / velites-schema），第三个验证「无消费者的 bin 不被
+#: 强制安置」。
+_CARGO_TOML = """\
+[package]
+name = "velites"
+version = "0.5.5"
+
+[[bin]]
+name = "velites"
+path = "src/main.rs"
+
+[[bin]]
+name = "velites-sandbox"
+path = "src/bin/velites_sandbox.rs"
+
+[[bin]]
+name = "velites-schema"
+path = "src/bin/velites_schema.rs"
+"""
 
 _GIT_STUB = """#!/usr/bin/env bash
 if [[ "$1" == "rev-parse" && "$2" == "HEAD:velites" ]]; then
@@ -35,7 +72,7 @@ exit 1
 """
 
 # cargo runs with cwd=<root>/velites (the script cd's there before building);
-# 同批产出沙箱包装器（ensure-velites.sh 的 velites-sandbox 同步安置依赖它）。
+# 同批产出家族 bin（planner 的安置目标依赖它们存在）。
 _CARGO_STUB = """#!/usr/bin/env bash
 echo "cargo $*" >> "${STUB_LOG}"
 mkdir -p target/release
@@ -50,12 +87,18 @@ def _write_stub(path: Path, content: str) -> None:
 
 
 def _setup(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
-    """Synthetic repo: main/scripts/ensure-velites.sh + main/velites/, stub bin."""
+    """Synthetic repo: script + planner + resolver import surface + stubs."""
     main = tmp_path / "main"
     script_path = main / "scripts" / "ensure-velites.sh"
     script_path.parent.mkdir(parents=True)
     shutil.copy(SCRIPT, script_path)
+    shutil.copy(PLANNER, main / "scripts" / "velites_deploy_plan.py")
+    for relative in _PLANNER_PY_IMPORTS:
+        target = main / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / relative, target)
     (main / "velites").mkdir()
+    (main / "velites" / "Cargo.toml").write_text(_CARGO_TOML)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     hash_file = tmp_path / "src-hash"
@@ -72,6 +115,9 @@ def _setup(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
         "STUB_STATUS_FILE": str(status_file),
         "STUB_LOG": str(log),
         "VELITES_INSTALL_DIR": str(tmp_path / "install"),
+        # 仓库 venv 的解释器跑 planner（合成 repo 无 venv；系统 python3
+        # 可能 < 3.11 无 tomllib）。
+        "VELITES_PLAN_PYTHON": sys.executable,
     }
     return main, env, log
 
@@ -211,7 +257,39 @@ def test_existing_velites_sandbox_is_refreshed_in_lockstep(
     # 幂等：stamp 一致时不重复安置（无输出即未走替换分支）。
     result = _run(main, env, "--dest", "data/bin")
     assert result.returncode == 0, result.stderr
-    assert "沙箱包装器" not in result.stdout
+    assert "已安装到" not in result.stdout
+
+
+def test_fresh_velites_but_stale_wrapper_still_triggers_refresh(
+    tmp_path: Path,
+) -> None:
+    """#835 codex R4 P2（fast-path 短路）：velites 本体与 stamp 全新鲜、
+    SRC_ID 也不变——本 PR 的实际首发形态——目录里却有旧 velites-sandbox。
+
+    旧逻辑的快速路径只看 velites 本体，`exit 0` 在包装器刷新之前执行，
+    刷新块一次都不会跑（首发即死代码）。planner 的判鲜是家族级的：任何
+    应安置成员不新鲜即整族重建，velites 本体随之重装（幂等无害）。"""
+    main, env, log = _setup(tmp_path)
+    bundled_dir = main / "data" / "bin"
+
+    # 初装（无包装器痕迹），SRC_ID 保持 hash-v1 不变——PR 不碰 velites/。
+    assert _run(main, env, "--dest", "data/bin").returncode == 0
+    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v1\n"
+    log.write_text("")
+
+    # 存量机器手工放入旧包装器（或历史遗留），velites 本体全新鲜。
+    _write_stub(
+        bundled_dir / "velites-sandbox",
+        "#!/usr/bin/env bash\n# stale wrapper\n",
+    )
+    (bundled_dir / "velites-sandbox.src-stamp").write_text("hash-v0\n")
+
+    result = _run(main, env, "--dest", "data/bin")
+    assert result.returncode == 0, result.stderr
+    assert (bundled_dir / "velites-sandbox").read_text() == "sandbox-for-hash-v1\n"
+    assert (bundled_dir / "velites-sandbox.src-stamp").read_text() == "hash-v1\n"
+    # velites 本体被家族判鲜连带重装（同批），不是跳过。
+    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v1\n"
 
 
 def test_stale_velites_sandbox_stamp_alone_triggers_refresh(tmp_path: Path) -> None:
@@ -228,6 +306,40 @@ def test_stale_velites_sandbox_stamp_alone_triggers_refresh(tmp_path: Path) -> N
     assert result.returncode == 0, result.stderr
     assert (bundled_dir / "velites-sandbox").read_text() == "sandbox-for-hash-v2\n"
     assert (bundled_dir / "velites-sandbox.src-stamp").read_text() == "hash-v2\n"
+
+
+def test_path_wrapper_in_different_dir_is_refreshed(
+    tmp_path: Path,
+) -> None:
+    """#835 codex R4 P2（PATH 目录分叉）：PATH 上 velites 与 velites-sandbox
+    来自不同目录时，两个位置都必须刷新。
+
+    沙箱解析对每个候选名**独立** which（shared/code_sandbox.py 的
+    resolve_sandbox_binary）——按 velites 的兄弟路径推导包装器位置会刷
+    错地方：/usr/local/bin/velites-sandbox 配合 ~/.local/bin/velites 时，
+    code 沙箱解析到前者，只刷后者对它不生效。planner 从真实 resolver 的
+    查找结果推导安置目标，两个位置各得一个目标。"""
+    main, env, log = _setup(tmp_path)
+    stub_dir = Path(env["PATH"].split(":")[0])
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+
+    # PATH：velites 在 stub_dir（hash-v0 旧副本），wrapper 在 other_dir。
+    _write_stub(stub_dir / "velites", "#!/usr/bin/env bash\n# old velites\n")
+    (stub_dir / "velites.src-stamp").write_text("hash-v0\n")
+    _write_stub(other_dir / "velites-sandbox", "#!/usr/bin/env bash\n# stale wrapper\n")
+    (other_dir / "velites-sandbox.src-stamp").write_text("hash-v0\n")
+    env["PATH"] = f"{other_dir}:{env['PATH']}"
+
+    result = _run(main, env)
+    assert result.returncode == 0, result.stderr
+    # 两个 PATH 位置都刷新到当前指纹（wrapper 的独立 which 位置不再漏）。
+    assert (stub_dir / "velites").read_text() == "binary-for-hash-v1\n"
+    assert (stub_dir / "velites.src-stamp").read_text() == "hash-v1\n"
+    assert (other_dir / "velites-sandbox").read_text() == "sandbox-for-hash-v1\n"
+    assert (other_dir / "velites-sandbox.src-stamp").read_text() == "hash-v1\n"
+    # stub_dir 不因 velites 存在而被连带安置 wrapper（不主动创造）。
+    assert (stub_dir / "velites-sandbox").exists() is False
 
 
 def test_prod_up_sequence_refreshes_stale_bundled_copy(
@@ -248,7 +360,7 @@ def test_prod_up_sequence_refreshes_stale_bundled_copy(
     bundled_dir = main / "data" / "bin"
     install = tmp_path / "install"
 
-    # 首次安装（install-deps.sh 通道）：data/bin 副本 = hash-v1
+    # 首次安装（install-deps 通道）：data/bin 副本 = hash-v1
     assert _run(main, env, "--dest", "data/bin").returncode == 0
     assert (bundled_dir / "velites").read_text() == "binary-for-hash-v1\n"
 
@@ -273,65 +385,27 @@ def test_prod_up_sequence_refreshes_stale_bundled_copy(
     assert Path(resolved).read_text() == "binary-for-hash-v3\n"
 
 
-# ---- 部署面矩阵契约（#835 codex P2 的系统性收口） ----
+# ---- 部署面矩阵契约（#835 codex P2 的系统性收口，planner 化收编） ----
 #
-# velites 家族的部署面没有单一事实源：2 个解析器（worker/binary_resolution
-# 的 runtime 面、shared/code_sandbox 的沙箱面）× 2 个安置位置（PATH /
-# data/bin）× N 个 bin 组合，每个部署脚本各自想全——漏一个就是一轮静默
-# 滞留（#831 的 velites 本体、#835 的 velites-sandbox 同构）。契约把三方
-# 集合成等式钉死：
+# velites 家族的部署面单一事实源是 scripts/velites_deploy_plan.py：它从
+# 真实 resolver（shared/code_sandbox、worker/runtime/catalog）与
+# velites/Cargo.toml 推导安置目标，ensure-velites.sh 逐行消费。契约把三
+# 方集合钉成等式：
 #
-#   解析侧消费的 velites 家族 bin（沙箱候选 ∪ runtime catalog，与
-#   velites/Cargo.toml [[bin]] 清单的交集）== ensure-velites.sh 实际
-#   安置的 bin（脚本文本中的 velites/target/release/<name> 引用）
+#   解析侧消费的 velites 家族 bin（沙箱候选 ∪ runtime catalog，∩
+#   cargo [[bin]]）== planner 认识的家族 == 脚本安置协议覆盖的集合
 #
-# 新增 [[bin]] 且有运行时消费者（或反向：解析侧开始消费一个新名字）而
-# 脚本未同步安置时，等式破裂直接红。pi 等外部 runtime 不在 cargo 清单，
-# 天然排除；velites-schema 无运行时消费者，不在等式要求内（不强求安置，
-# 但被安置也合法——等式只约束「消费 ⊆ 安置」+「安置 ⊆ 构建」）。
+# 单测见 tests/scripts/test_velites_deploy_plan.py；这里钉脚本侧的协议
+# 接线（planner 缺席时脚本必须显式失败，不得静默退化为「只装 velites」
+# 的旧模型——那正是四轮 finding 的根源形态）。
 
 
-def _velites_deploy_matrix() -> tuple[set[str], set[str], set[str]]:
-    """返回 (cargo 声明的 bin, 解析侧消费的 velites 家族 bin, 脚本安置的 bin)。"""
-
-    cargo_bins = {
-        entry["name"]
-        for entry in tomllib.loads((ROOT / "velites" / "Cargo.toml").read_text(encoding="utf-8"))[
-            "bin"
-        ]
-    }
-    from shared.code_sandbox import SANDBOX_BINARY_CANDIDATES
-    from worker.runtime.catalog import RUNTIME_CATALOG
-
-    consumers = set(SANDBOX_BINARY_CANDIDATES) | {
-        binary for meta in RUNTIME_CATALOG.values() for binary in meta["binaries"]
-    }
-    consumed_velites_bins = consumers & cargo_bins
-    script = SCRIPT.read_text(encoding="utf-8")
-    installed = set(re.findall(r"velites/target/release/([A-Za-z0-9_-]+)", script))
-    return cargo_bins, consumed_velites_bins, installed
-
-
-def test_deploy_matrix_covers_every_consumed_cargo_bin() -> None:
-    """消费 ⊆ 安置：解析侧消费的每个 velites 家族 bin 都必须被
-    ensure-velites.sh 安置——漏掉的 bin 在解析候选序上盖住刷新的新版本，
-    是 #831/#835 同构的静默滞留。"""
-    _, consumed, installed = _velites_deploy_matrix()
-    missing = consumed - installed
-    assert not missing, (
-        f"ensure-velites.sh 未安置被解析侧消费的 velites 家族 bin: {sorted(missing)}"
-        "——worker/binary_resolution.py 与 shared/code_sandbox.py 会解析到旧副本，"
-        "升级静默失效（在脚本中为其补「产物安置 + src-stamp」通道）"
-    )
-
-
-def test_deploy_matrix_only_installs_cargo_declared_bins() -> None:
-    """安置 ⊆ 构建：脚本安置的每个 bin 必须真实存在于 velites/Cargo.toml
-    的 [[bin]] 清单——拼错名字或安置已删除的 bin 会让安置分支静默失败
-    （cp 源不存在），stamp 却照写，制造「已刷新」假象。"""
-    cargo_bins, _, installed = _velites_deploy_matrix()
-    ghost = installed - cargo_bins
-    assert not ghost, (
-        f"ensure-velites.sh 安置了 velites/Cargo.toml 未声明的 bin: {sorted(ghost)}"
-        "——cargo 构建不产出该文件，安置分支必然失败（核对手误或过时的 bin 名）"
-    )
+def test_script_fails_loudly_when_planner_is_broken(tmp_path: Path) -> None:
+    """planner 不可用（损坏/删失/解释器缺失）时脚本必须非零退出并点名，
+    而不是回退到任何内置安置逻辑——部署面的决策面只有 planner 一个。"""
+    main, env, log = _setup(tmp_path)
+    (main / "scripts" / "velites_deploy_plan.py").unlink()
+    result = _run(main, env, "--dest", "data/bin")
+    assert result.returncode != 0
+    # bash 的报错会带解释器/脚本路径；关键是不再产出「已安装」假象。
+    assert "已安装到" not in result.stdout

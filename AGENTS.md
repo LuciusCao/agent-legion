@@ -24,7 +24,7 @@
 - 测试并行度默认克制：后端 pytest-xdist min(4, 核数)（`AGENT_LEGION_TEST_WORKERS` 覆盖）、前端 vitest 经 gate `--maxWorkers=4`（`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖）、rust `-j` min(4, 核数)（`AGENT_LEGION_RUST_WORKERS` 覆盖）。多 worktree 并行开发抢 CPU 时调低（建议 ≈ 核数 ÷ 并行 worktree 数）。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist schema 固定，两个进程并发会互相 TRUNCATE（症状：单跑必过的随机 setup 错误）。
 - 不要污染主工作区或他人 worktree 的运行时数据。
-- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 与 `make prod-up` / `make prod-down`（prod-up 经 `scripts/ensure-velites.sh` 自动重建过期 velites 二进制——PATH 与 `data/bin` 自带副本**两处安置点都刷新**，#831：Worker 解析自带副本优先，只刷 PATH 对它不生效。重建需要 cargo：新 prod worktree 的 `data/` 为空，首次 prod-up 必经 `--dest` 构建路径，无 cargo 即 fail-fast——恢复路径见 ensure-velites.sh 错误提示或 agent-worker-deployment.md §5）。所有修复与调试必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
+- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 与 `make prod-up` / `make prod-down`（prod-up 经 `scripts/ensure-velites.sh` 自动重建过期 velites 二进制——PATH 与 `data/bin` 自带副本**两处安置点都刷新**，#831：Worker 解析自带副本优先，只刷 PATH 对它不生效。安置目标与判鲜由 `scripts/velites_deploy_plan.py` 从真实 resolver 推导，bash 不持有平行查找模型（#835）。重建需要 cargo：新 prod worktree 的 `data/` 为空，首次 prod-up 必经 `--dest` 构建路径，无 cargo 即 fail-fast——恢复路径见 ensure-velites.sh 错误提示或 agent-worker-deployment.md §5）。所有修复与调试必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
 
 ## 2. Agent Tool Discipline
 
