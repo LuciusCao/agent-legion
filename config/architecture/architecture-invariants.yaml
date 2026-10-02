@@ -1,4 +1,35 @@
 invariants:
+  - id: STUDIO-RUNTIME-001
+    statement: "ACP callbacks and permission decisions belong to their originating runtime. Retirement fences producers before the close marker; permission waits release the runtime lock and revalidate ownership after waking. Consumer exit fences prompt admission before transport teardown or fatal callbacks, without claiming explicit-close ownership. Service shutdown seals create/resume admission and drains admitted operations before snapshotting runtimes; concurrent shutdown calls wait through cleanup. Known-dead credentials always request stop of their own generation, independently of escalation or notification I/O. Close continues when its snapshotted runtime has exited, but never closes a registered successor."
+    owner: studio
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_studio_chat_generation_boundary.py
+        gate: quick
+      - kind: contract
+        target: tests/services/test_studio_chat_fatal_admission.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_admission.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_shutdown_races.py
+        gate: quick
+  - id: STUDIO-BACKGROUND-001
+    statement: "Kimi V1 completions use descriptor-anchored root-task metadata reads; automatic followups validate runtime, cancellation epoch, compaction and live credentials at admission and ACP consumption, releasing only owned claims on rejection. Rearm observes completions after durable human admission; unavailable roots and incomplete task reads cannot establish empty or partial baselines. Observation failures preserve the human handoff and keep followups disabled until same-epoch retry. Initial observation failures defer baseline establishment. Resume captures history before claim and uses it only for the matching successfully loaded ACP session. See docs/architecture/studio-kimi-background-wakeup.md."
+    owner: studio
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_studio_chat_background_wakeup.py
+        gate: quick
+      - kind: contract
+        target: tests/services/test_studio_chat_baseline_observation.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_background_boundaries.py
+        gate: quick
   - id: API-CONTRACT-001
     statement: Generated frontend API types remain in sync with the backend OpenAPI schema.
     owner: architecture
@@ -643,7 +674,7 @@ invariants:
         gate: full
 
   - id: STUDIO-MCP-FILES-001
-    statement: "MCP local authoring files are confined to data/studio-mcp-files/<workspace_id> below the MCP process cwd. A successful workspace-scoped backend read authorizes every local read/export; descriptor-relative opens reject traversal, symbolic/hard links and nonregular inputs. Full skill edit snapshots require the same workspace ownership as saving, for both working trees and tags; shared group skills retain their restricted display projection. UTF-8 decoding preserves original newlines and escapes; file batches are fully loaded before forwarding to existing validation/save endpoints. Exports never overwrite files. No direct authoritative write or publish bypass."
+    statement: "MCP local authoring files are confined to data/studio-mcp-files/<workspace_id> below the MCP process cwd. A successful workspace-scoped backend read authorizes every local read/export; descriptor-relative opens reject traversal, symbolic/hard links and nonregular inputs. Full skill edit snapshots require the same workspace ownership as saving, for both working trees and tags; shared group skills retain their restricted display projection. UTF-8 decoding preserves original newlines and escapes; file batches are fully loaded before forwarding to existing validation/save endpoints. JSON export/import share an encoded-byte budget covering worst-case escaping of legal batches; raw-source and decoded-batch budgets remain independently enforced. Exports never overwrite files. No direct authoritative write or publish bypass."
     owner: security
     risk: high
     evidence:
@@ -652,6 +683,15 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/mcp_server/test_edit_snapshot_integration.py
+        gate: quick
+
+  - id: STUDIO-ADMISSION-001
+    statement: "Human Studio prompt preparation is side-effect-free for conversation state. The handle rejects closed/stopping queues before admission; credential validation, idle claim and user-message insertion commit in one transaction. Only accepted input consumes resume context and resets turn/replay state, before queue visibility. Snapshot failures after acceptance do not invite retries. Runtime locks pin admission and token escalation to the same generation through teardown; old requests cannot mutate a successor."
+    owner: studio
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_studio_chat_admission.py
         gate: quick
 
   - id: STUDIO-AGENT-001

@@ -155,7 +155,12 @@ def finish_staged(
     status = outcome.status
     exit_code = outcome.exit_code
     error = outcome.error_message
-    if status == "completed" and expected and not outcome.output_artifacts:
+    # #755 对抗复审 P2-1：truncated 标记意味着头部清单被字节预算整体降级
+    # （CAS 最后手段截断），而非 Worker 未报告——产物字节随归档已在暂存视
+    # 图里，跳过此改判，交给下方 produced/missing 检查从视图判定。该标记
+    # 由此从「只记录无消费」升级为 Host 完成契约的一部分。
+    empty_manifest = not outcome.output_artifacts and not outcome.output_artifacts_truncated
+    if status == "completed" and expected and empty_manifest:
         status, exit_code, error = "failed", 1, "Agent Worker did not report output artifacts"
     missing = [name for name in expected if name not in produced]
     if status == "completed" and missing:

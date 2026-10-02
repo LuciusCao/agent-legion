@@ -56,6 +56,8 @@ _CURRENT_DOCS = (
     "docs/architecture/node-sdk-and-worker-execution-design.md",
     "docs/architecture/materials-and-runs-design.md",
     "docs/architecture/studio-draft-publish-contract.md",
+    "docs/architecture/studio-service-lifecycle.md",
+    "docs/architecture/studio-kimi-background-wakeup.md",
     "docs/agent-worker-deployment.md",
     "docs/data-layout.md",
     "docs/materials-storage-deployment.md",

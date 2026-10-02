@@ -146,11 +146,15 @@ class JobQueryService:
         workspace_id: str,
         workflow_key: str | None = None,
         status: str | None = None,
+        run_id: str | None = None,
+        limit: int = 500,
     ) -> list[dict[str, Any]]:
         jobs = self.job_db.list_jobs(
             workspace_id=workspace_id,
             workflow_key=workflow_key,
             status=status,
+            run_id=run_id,
+            limit=limit,
         )
         return summarize_paginated_jobs(self, self.job_db, jobs)
 

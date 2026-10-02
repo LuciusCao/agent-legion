@@ -1,7 +1,7 @@
 """Closed/error session resume path (split from service.py for file budget).
 
 The service keeps a thin ``resume_session`` delegate; everything after the
-shutdown check lives here so the claim/teardown/spawn ordering stays in one
+startup admission lives here so the claim/teardown/spawn ordering stays in one
 auditable place, mirroring how spawn.py owns the shared start path. Access to
 the service's private collaborators matches the package idiom (callbacks.py
 forwards into ``service._on_*``; tests monkeypatch ``service._registry``).
@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.studio_chat.background_baseline import capture_resume_baseline
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.spawn import spawn_session_runtime
 
@@ -62,6 +63,7 @@ def resume_session(
     # cap constant is read through the service module at call time so
     # tests monkeypatching it keep working.
     max_active = service_module.MAX_ACTIVE_STUDIO_CHAT_SESSIONS
+    baseline = capture_resume_baseline(str(service._settings.root_dir), session["acp_session_id"])
     if not service.db.claim_studio_chat_resume(session_id, max_active=max_active):
         current = service.db.get_studio_chat_session(session_id) or {}
         if current.get("status") not in ("closed", "error"):
@@ -91,6 +93,7 @@ def resume_session(
         user_id,
         workspace_id,
         resume_acp_session_id=claimed["acp_session_id"],
+        background_baseline=baseline,
     )
     runtime = service.runtime(session_id)
     if runtime is not None and not handle.loaded_existing:

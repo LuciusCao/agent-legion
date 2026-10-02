@@ -47,6 +47,11 @@ class UploadTask:
     # 空 = 旧通道（CAS POST + tar 内嵌）。不持久化：presigned URL 会过期，
     # 崩溃恢复的任务从 bulk 车道重进时走旧通道（Host 两种形态都收）。
     artifact_uploads: dict[str, Any] = field(default_factory=dict)
+    # #755 codex P1：Host 经 claim 下发的 agent_workers.max_archive_bytes
+    # 实际值（换轨预检的判定口径）；0 = 旧 Host 未下发 → 预检回落 64 MiB
+    # 默认。不持久化：与 artifact_uploads 同纪律（claim 响应内存态注入），
+    # 崩溃恢复的任务从 bulk 车道重进时按默认口径判定。
+    max_archive_bytes: int = 0
     heartbeat_stop: threading.Event = field(default_factory=threading.Event)
     heartbeat_thread: threading.Thread | None = None
     # #352: 本任务租约归属的批量心跳 registry（_deliver_bulk 接管/恢复时

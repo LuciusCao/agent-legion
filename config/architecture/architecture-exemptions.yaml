@@ -1160,6 +1160,38 @@ exemptions:
   ceiling: 210
   expires: 2027-03-31
 - check: architecture.file_budget
+  path: velites/src/tools/json.rs
+  reason: '#747 json set 的 value 二次编码兜底（含对抗 review 修复轮）。行数构成按仓库 counter
+    实测（有效行，实现段 = #[cfg(test)] 之前）：初版 515→618（实现 +27、测试 +76，3 个新单测）；
+    review 修复轮 618→774（实现 +74：LenientParse 三态 + numbers_round_trip 数字无损往返校验 +
+    MAX_LENIENT_PARSE_BYTES 256KB 解析闸 + set 三分支注记；测试 +82：边界矩阵与超闸两个新单测）。
+    774 原始行超出 velites/src 绝对上限 800 在即，按本豁免的时间盒拆出：宽容解析机制迁
+    json_lenient.rs（新条目 66 有效行），#747 全部单测迁 velites/tests/json_lenient.rs 集成测试
+    （tests/ 不纳入预算）。拆出后 json.rs 为 552 有效行，超 baseline 524 + growth_allowance
+    的带内上限（539）13 行，由本豁免 ceiling 562 覆盖。豁免移除前提：json.rs 再减 ≥13
+    有效行，或预算再平衡。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/747
+  ceiling: 562
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: velites/src/tools/json_lenient.rs
+  reason: '#747 codex review（P2）重复对象键拒绝：宽容解析新增 serde 自定义 Visitor 检测重复键
+    （deserialize_any + 显式 DeserializeSeed 递归，next_key 先查本层 HashSet 再 next_value，在
+    serde 默认路径只保留最后一个键值、静默改坏输入之前报错；键相等以解析后字符串为准，"a" 与
+    "\u0061" 同键）。行数按仓库 counter 实测（有效行）：66→171（+105）。构成：Decline 失败
+    分类 + parse_detecting_duplicate_keys（含 deserializer.end() 补齐 from_str 的尾随内容
+    整串拒绝语义，行为与拆出前一致）+ DuplicateKeyVisitor（visit_unit/bool/u64/i64/f64/
+    str/seq/map 全形状，seq/map 经 Seed 递归防嵌套层漏检）+ 文档与注记措辞更新。本修复的
+    全部测试按 #747 惯例放 velites/tests/json_lenient.rs 集成测试（tests/ 不纳入预算），
+    文件无内联 #[cfg(test)]。超 baseline 76 + growth_allowance 带内上限（91）80 行，由本
+    豁免 ceiling 171 覆盖。豁免移除前提：宽容解析机制迁出（如并入通用 JSON 工具库）或预算
+    再平衡。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/747
+  ceiling: 171
+  expires: 2026-12-31
+- check: architecture.file_budget
   path: frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodeSection.tsx
   reason: '#749 review 修复（P2-2/P3-2/P3-3）把 CAS 发布的时序与门控做实：保存响应
     的 code_hash 同步回填（runSavingDraft 包装 run，消灭保存→立即发布的假 409 窗口）、
@@ -1172,4 +1204,70 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 213
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: worker/host/transfer.py
+  reason: '#748 R2 复审 P2-1：X-Agent-Result 头预算的产物清单降级——output_artifacts
+    直传 ref 形态（128 条 ~25KB）把头推破 h11 16KB，成功运行同样中招（成功上报
+    也带产物清单）。收缩循环为多级降级（tail → error_message → command（#755
+    对抗复审 P2-1b：纯观测面，先于清单降级）→ 产物清单按 ref 形态分流：直传
+    dict ref 抛 ResultHeaderOverflow 整体换轨归档内嵌，CAS 形态才走最后手段
+    截断 + output_artifacts_truncated/total 标记）。防御性正确性代码使有效行
+    126→142；rebase 到 0.7.13 基线叠加 report() 的 stop 取消通道形参（基线新
+    增，与 #748 的 **_extra 兼容形参并存）进一步到 161，#755 command 降级段
+    到 165（均超 growth_allowance 带）。时间盒：若结果头改走 body 或产物清单
+    下沉独立通道（协议 v6 候选），收缩循环随之退役并重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 171
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: worker/upload/stderr_evidence.py
+  reason: '#748 Worker 侧密钥注册表：os.environ 秘密命名值 + register_secrets
+    注册的 worker 配置 environment 块（secret 注入 agent 子进程的官方通道，
+    含线程安全锁）+ 匹配域变体（CRLF 归一、尾空白、surrogateescape 忠实字节）
+    + sk-/ghp_/gho_/xox[bap]-/JWT/Bearer 形态族。#755 起以区间报告
+    （secret_spans）供 shared/stderr_tail 的一次脱敏单切点使用，
+    max_secret_chars 给出 lookback 长度。防御性正确性代码使有效行 47→78
+    （带内）。时间盒：脱敏面若与 worker 配置加载统一收口（敏感值集中注册），
+    此处重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 67
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: worker/upload/report.py
+  reason: '#748 R3（codex review P1）起的结果头溢出处置模块。#755 codex P1
+    协议换代：回退从「清规格重跑 prepare + /api/artifacts CAS 通道重传产物」改为
+    「直传 ref 清单写进归档首成员 result-output-artifacts.json + 头里只带
+    output_artifacts_in_archive 标记」（产物字节已在 S3，不再双传；旧链的
+    _embedded_artifacts_bytes 预检与 CAS 重传块随之删除，预检挪进
+    worker/upload/embed_precheck.py 供 bulk 车道的 DirectUploadError 臂复用）。
+    余量构成：report 车道的租约退避循环 + 一次性溢出闸 + embed 失败的
+    诚实判败臂。#755 codex R8 P2：embed 后归档上限重校——claim 下发
+    max_archive_bytes 经 max_bytes 传进 embed（替换前按 staging 实际大小
+    拒写）、替换后 re-stat 兜底臂（回收空归档诚实判败）、判败通道的
+    可提交性守卫 _ensure_submittable_archive（原归档本身超限的先回收，
+    否则重报必撞 413 被当终态删 marker），有效行 107→144。时间盒：
+    结果上报循环与 bulk 车道的判败/重试形态统一收口时，此处重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 144
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: server/app/routes/runs.py
+  reason: '#734 tags the three runs routes with API_SCOPE_INTAKE_TAG so the
+    api-scope admission surface derives from the matched route object
+    (auth/api_scope_surface.py) instead of a second hand-copied path list in
+    the guard: the import and the per-route decorator expansions add 10
+    effective lines (77→87, 10 past the 62+15 band). The tags stay per-route
+    on purpose — the fail-closed interlock requires both a route-level tag
+    edit and a manifest edit to admit a new endpoint, and router-level tags
+    would hand the tag to any future route added here for free. Ceiling at
+    actual + 10 per the dated-exemption convention (#431/#458 precedents).
+    Remove when the module is re-balanced under the baseline or the intake
+    tagging moves into a registration helper.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/734
+  ceiling: 97
   expires: 2026-12-31

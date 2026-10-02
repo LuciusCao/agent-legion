@@ -126,6 +126,39 @@ def test_health_host_normalization_behavior() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("bind", "expected"),
+    [
+        ("0.0.0.0", "127.0.0.1"),
+        ("::", "[::1]"),
+        ("2001:db8::1", "[2001:db8::1]"),
+        ("[::1]", "[::1]"),
+        ("192.0.2.1", "192.0.2.1"),
+    ],
+)
+def test_console_url_uses_browser_reachable_host(tmp_path, bind, expected) -> None:
+    normalize = re.search(r"^health_host\(\) \{.*?^\}", NATIVE_PROD_UP, re.M | re.S)
+    injection = re.findall(
+        r"^    (?:console_host=|export AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL=).*$",
+        NATIVE_PROD_UP,
+        re.M,
+    )
+    assert normalize and injection
+    code = (
+        normalize.group(0)
+        + '\nunset AGENT_LEGION_WORKER_CONSOLE_URL\nWORKER_BIND="$1"\nWORKER_PORT=8799\n'
+    )
+    code += "\n".join(injection) + '\nprintf "%s" "$AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL"\n'
+    result = subprocess.run(
+        ["bash", "-eu", "-c", code, "console", bind],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == f"http://{expected}:8799"
+
+
 def test_idempotency_matches_bind_address() -> None:
     """幂等判定按「bind 地址 + 端口 + 地址族」匹配：port_listening 消费
     两个参数，族别经 lsof -i4/-i6 过滤器带入（-F n 不输出族别）——

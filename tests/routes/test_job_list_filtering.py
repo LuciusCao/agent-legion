@@ -247,3 +247,20 @@ def test_filtered_endpoints_reject_conflicting_version_params(client_factory, en
             f"/api/workspaces/any/jobs/{endpoint}?workflow_version=1&workflow_version_none=true"
         )
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize("endpoint", ["snapshot", "facets"])
+@pytest.mark.parametrize("param", ["status", "active_node_key", "run_id"])
+def test_filtered_endpoints_reject_empty_string_filters(client_factory, endpoint, param):
+    """#735 review P2 簇面清扫：snapshot/facets 与 jobs 列表同一约定——可选
+    过滤参数的空串形态（`?status=` 等）是调用错误 → 422，绝不被查询层的
+    `if val` 吞成「不过滤」。search/cursor 豁免：空串对它们是恒等 no-op
+    （匹配一切 / 第一页），不是静默放宽的过滤。"""
+    with client_factory() as client:
+        rejected = client.get(f"/api/workspaces/any/jobs/{endpoint}?{param}=")
+        assert rejected.status_code == 422, (endpoint, param, rejected.text)
+        # 豁免面对照：空 search / 空 cursor 仍是恒等 no-op（400 家族之外的
+        # 非 422——workspace 不存在时由业务层决定 404/200，这里只钉「不 422」）。
+        for exempt in ("search", "cursor") if endpoint == "snapshot" else ("search",):
+            allowed = client.get(f"/api/workspaces/any/jobs/{endpoint}?{exempt}=")
+            assert allowed.status_code != 422, (endpoint, exempt, allowed.text)

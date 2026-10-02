@@ -23,6 +23,11 @@ import anyio
 from server.app.mcp_server.tool_client import ToolClient
 
 MAX_BYTES = 16 * 1024 * 1024
+# JSON can encode one UTF-8 control byte as six bytes (\\u0000).
+# The backend allows 100 * 128 KiB of file content (12.5 MiB), so
+# this also leaves over 20 MiB for paths and the response envelope.
+# Keep the decoded-content budget separate and unchanged.
+MAX_JSON_BYTES = 6 * MAX_BYTES
 
 
 def compact_response(response: str) -> str:
@@ -75,16 +80,17 @@ def _parent(workspace_id: str, path: str, *, create: bool = False):
         os.close(fd)
 
 
-def read_text(workspace_id: str, path: str) -> str:
+def read_text(workspace_id: str, path: str, *, max_bytes: int | None = None) -> str:
+    limit = MAX_BYTES if max_bytes is None else max_bytes
     with _parent(workspace_id, path) as (parent, name, _):
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         with os.fdopen(fd, "rb") as source:
             info = os.fstat(source.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError("Local source must be a regular file without hard links")
-            data = source.read(MAX_BYTES + 1)
-    if len(data) > MAX_BYTES:
-        raise ValueError("Local source exceeds 16 MiB")
+            data = source.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError(f"Local source exceeds {limit} bytes")
     return data.decode("utf-8")  # bytes decode preserves CRLF and all escapes
 
 
@@ -103,8 +109,8 @@ async def authorize(client: ToolClient, workspace_id: str) -> None:
 def _export(workspace_id: str, output_path: str, response: str) -> str:
     json.loads(response)  # Never export an HTTP/network error as source data.
     data = response.encode("utf-8")
-    if len(data) > MAX_BYTES:
-        raise ValueError("Export exceeds 16 MiB")
+    if len(data) > MAX_JSON_BYTES:
+        raise ValueError(f"Export exceeds {MAX_JSON_BYTES} bytes")
     with _parent(workspace_id, output_path, create=True) as (parent, name, path):
         # Export never overwrites edits or follows an existing symlink.
         fd = os.open(
@@ -134,7 +140,7 @@ def _load_files(
         raise ValueError("Supply exactly one of files or files_path")
     value: Any = files
     if files_path is not None:
-        value = json.loads(read_text(workspace_id, files_path))
+        value = json.loads(read_text(workspace_id, files_path, max_bytes=MAX_JSON_BYTES))
         if isinstance(value, dict):
             value = value.get("files")  # accepts an unmodified get_* export
     if not isinstance(value, list) or not 1 <= len(value) <= 100:

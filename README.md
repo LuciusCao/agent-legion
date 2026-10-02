@@ -83,7 +83,9 @@ make dev-down       # 全部停止
 
 打开 http://127.0.0.1:5174——首次访问会跳转到 `/setup` 创建 admin 用户。
 worker 按设计默认关闭任务领取，到 worker 控制台 http://127.0.0.1:8789
-打开。
+打开。主控制台里 workspace「设置 → Agent 与 Worker」顶部有「打开 Worker
+控制台」入口与接入三步说明（地址由 `make dev-up` 按 Worker 端口注入，见
+`.env.example` 的 `AGENT_LEGION_WORKER_CONSOLE_URL`）。
 
 worker 注册不再使用全局 token：启动后在 Host Web UI 的
 workspace「设置 → Agent 与 Worker」为 workspace 签发 scoped token，到 Worker

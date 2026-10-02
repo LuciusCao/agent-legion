@@ -92,6 +92,30 @@ def test_shared_full_snapshot_preserves_map_and_every_writable_file(snapshot_cha
             )
 
 
+def test_maximum_shared_snapshot_round_trip_with_worst_case_json_escaping(snapshot_channel):
+    from server.app.services.skill_repo import MAX_FILE_BYTES
+
+    run, root = snapshot_channel
+    # One control byte becomes six JSON bytes: 99 legal full-size files
+    # plus map.json need over 74 MiB on the wire, despite <13 MiB on disk.
+    content = "\x00" * MAX_FILE_BYTES
+    files = [{"path": "map.json", "content": '{"version":1,"materials":[]}'}]
+    files.extend({"path": f"references/{i}.txt", "content": content} for i in range(99))
+    initial = json.loads(run("save_shared_materials", files=files))
+    assert initial["workspace_id"] == "edit-snapshot"
+    exported = json.loads(run("get_shared_materials", output_path="maximum.json"))
+    assert exported["size"] > 74 * 1024 * 1024
+    snapshot = Path(exported["output_path"])
+    assert exported["sha256"] == hashlib.sha256(snapshot.read_bytes()).hexdigest()
+    receipt = json.loads(run("save_shared_materials", files_path=str(snapshot)))
+    assert receipt["workspace_id"] == "edit-snapshot"
+    expected = hashlib.sha256(content.encode()).hexdigest()
+    assert len(receipt["files"]) == 99  # map is returned separately by the display response
+    assert all(item["content_sha256"] == expected for item in receipt["files"])
+    for item in files:
+        assert (root / "_shared" / item["path"]).read_bytes() == item["content"].encode()
+
+
 @pytest.mark.parametrize("kind", ["skill", "shared"])
 @pytest.mark.parametrize(
     "bad", [b"bad\xff", b"x" * (128 * 1024 + 1)], ids=["invalid-utf8", "oversized"]

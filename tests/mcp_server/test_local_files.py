@@ -212,3 +212,64 @@ def test_export_http_failure_does_not_create_file(tmp_path, monkeypatch):
     response = asyncio.run(local_files.export_response("ws", "error.json", "HTTP 404: missing"))
     assert response == "HTTP 404: missing"
     assert not local_files.staging_root("ws").exists()
+
+
+@pytest.mark.parametrize("kind", ["skill", "shared"])
+def test_json_budget_is_used_for_both_export_and_reimport(authoring, monkeypatch, kind):
+    run, state, calls = authoring
+    # Small limits exercise the wire/raw distinction without allocating a
+    # full-size response in every unit worker. The real cap has an HTTP test.
+    monkeypatch.setattr(local_files, "MAX_BYTES", 32)
+    monkeypatch.setattr(local_files, "MAX_JSON_BYTES", 1024)
+    content = "\x00" * 32
+    state["read"] = {"files": [{"path": "references/a.txt", "content": content}]}
+    extra = {"skill_key": "ws/skill"} if kind == "skill" else {}
+    exported = run(
+        "get_skill" if kind == "skill" else "get_shared_materials",
+        output_path="escaped.json",
+        **extra,
+    )
+    assert exported["size"] > local_files.MAX_BYTES
+    if kind == "skill":
+        extra.update(new_tag="v2", message="round trip")
+    run(
+        "save_skill_version" if kind == "skill" else "save_shared_materials",
+        files_path=exported["output_path"],
+        **extra,
+    )
+    assert calls[-1][2]["files"][0]["content"] == content
+
+
+def test_json_allowance_does_not_expand_raw_sources_or_decoded_batches(authoring, monkeypatch):
+    run, _, calls = authoring
+    monkeypatch.setattr(local_files, "MAX_BYTES", 3)
+    monkeypatch.setattr(local_files, "MAX_JSON_BYTES", 1024)
+    root = local_files.staging_root("ws")
+    root.mkdir(parents=True)
+    (root / "raw.py").write_text("abcd")
+    (root / "batch.json").write_text(
+        json.dumps([{"path": "a", "content": "ab"}, {"path": "b", "content": "cd"}])
+    )
+    for name, args in (
+        ("save_node_code_draft", {"node_key": "n", "code_path": "raw.py"}),
+        ("save_shared_materials", {"files_path": "batch.json"}),
+        ("save_shared_materials", {"files": [{"path": "a", "file_path": "raw.py"}]}),
+    ):
+        with pytest.raises(ToolError, match="exceeds"):
+            run(name, **args)
+    assert not any(method != "GET" for method, _, _ in calls)
+
+
+def test_json_wire_limit_rejects_oversized_exports_and_imports(authoring, monkeypatch):
+    run, state, calls = authoring
+    monkeypatch.setattr(local_files, "MAX_JSON_BYTES", 16)
+    state["read"] = {"files": [{"path": "a", "content": "b"}]}
+    with pytest.raises(ToolError, match="exceeds"):
+        run("get_shared_materials", output_path="too-big.json")
+    root = local_files.staging_root("ws")
+    assert not root.exists()
+    root.mkdir(parents=True)
+    (root / "too-big.json").write_text(json.dumps(state["read"]))
+    with pytest.raises(ToolError, match="exceeds"):
+        run("save_shared_materials", files_path="too-big.json")
+    assert not any(method != "GET" for method, _, _ in calls)

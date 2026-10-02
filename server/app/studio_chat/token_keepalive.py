@@ -57,15 +57,24 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
 
     Runs on EVERY tool_call — token death is only ever detected after it
     happens. The done-flag deduplicates the DEAD path (a resume mints a fresh
-    runtime, token, and flag); every step is guarded so a transient DB
-    failure retries on the next tool_call. Callers run this AFTER the
-    tool_call row append."""
+    runtime, token, and flag). An inconclusive check may retry on the next
+    tool_call; confirmed invalidation always requests stop even if its
+    durable projection fails. Callers run this AFTER the tool_call row append."""
     runtime: SessionRuntime | None = backend.runtime(session_id)
     if runtime is None:
         return
     with runtime.lock:
-        if runtime.token_keepalive_done:
+        if (
+            runtime.closed
+            or backend.runtime(session_id) is not runtime
+            or runtime.token_keepalive_done
+        ):
             return
+        _keepalive_locked(backend, session_id, runtime)
+
+
+def _keepalive_locked(backend: ServiceBackend, session_id: str, runtime: SessionRuntime) -> None:
+    """Keep authentication, escalation and stop on the same runtime generation."""
     try:
         alive = _token_alive(backend, runtime.token)
     except Exception:
@@ -75,39 +84,37 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
         # backstop and the next tool_call retries (flag stays unset).
         logger.warning("studio chat token keepalive check failed for %s", session_id, exc_info=True)
         return
-    if alive:
+    if alive or runtime.closed or backend.runtime(session_id) is not runtime:
         return
-    # #558：先升级后通知——escalate 抛异常（DB 故障）时 flag 未置、直接
-    # 重试且不产生重复通知；escalate 成功后 append 失败时状态已是 error
-    # （escalate 的守卫对 error 幂等），重试只补通知。两步都在各自的
-    # 吞异常边界内，模块的 never-raises 不变量保持成立。
-    try:
-        escalate_dead_token_session(backend, session_id)
-    except Exception:
-        # #204 broad-except audit: best-effort escalation on the notification
-        # path — a transient DB failure must not propagate into it; the next
-        # tool_call retries (flag stays unset, no notice appended yet).
-        logger.warning("studio chat session escalation failed for %s", session_id, exc_info=True)
-        return
-    try:
-        backend.store.append_message(
-            session_id,
-            "status",
-            "system",
-            {"event": "run_token_invalidated", "detail": TOKEN_INVALIDATED_DETAIL},
-        )
-    except Exception:
-        # #204 broad-except audit: same swallow semantics as the escalation
-        # above — a failed append must retry on the next tool_call (flag set
-        # only on success below) rather than be permanently lost.
-        logger.warning(
-            "studio chat run_token_invalidated notice failed for %s", session_id, exc_info=True
-        )
-        return
+    invalidate_run_token(backend, session_id, runtime)
+
+
+def invalidate_run_token(backend: ServiceBackend, session_id: str, runtime: SessionRuntime) -> None:
+    """Consume known-dead evidence once; stopping never depends on notification I/O.
+
+    Admission, keepalive and automatic delivery share this terminal path. A
+    second liveness query cannot undo an already observed invalidation. The
+    nonblocking stop lets on_exit reclaim the process even if escalation fails.
+    """
     with runtime.lock:
-        runtime.token_keepalive_done = True
-    # #558（review P1）：健康的 ACP 进程不能悬挂到 backend 重启——error 行
-    # 不占会话 cap、前端又无关闭入口，弃置的升级会话会无界累积子进程。
-    # request_stop 在当前 turn 结束后经既有 on_exit 路径自清理（不 join——
-    # keepalive 跑在 ACP 线程上，join 即自死锁）。
-    runtime.handle.request_stop()
+        if runtime.closed or backend.runtime(session_id) is not runtime:
+            return
+        try:
+            if not runtime.token_keepalive_done:
+                escalate_dead_token_session(backend, session_id)
+                backend.store.append_message(
+                    session_id,
+                    "status",
+                    "system",
+                    {"event": "run_token_invalidated", "detail": TOKEN_INVALIDATED_DETAIL},
+                )
+                runtime.token_keepalive_done = True
+        except Exception:
+            # #204 broad-except audit: known-dead credentials must stop even
+            # when DB/notification I/O fails. on_exit reconciles the row; no
+            # notice is marked delivered on failure. Preserve the cause.
+            logger.warning(
+                "studio chat token invalidation failed for %s", session_id, exc_info=True
+            )
+        finally:
+            runtime.handle.request_stop()

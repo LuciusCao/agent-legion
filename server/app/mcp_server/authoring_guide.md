@@ -34,8 +34,10 @@ the whole skill export when it contains mapped shared files.
 
 Paths are relative to that workspace's staging directory, or absolute within
 it. Traversal, symbolic/hard links, non-regular files, invalid UTF-8 and
-truncated exports are rejected before any authoritative save. Each local
-input is capped at 16 MiB; backend file/code limits and validation still apply.
+truncated exports are rejected before any authoritative save. Raw local sources
+and decoded file batches are capped at 16 MiB. JSON exports and `files_path`
+imports allow 96 MiB to accommodate JSON escaping of a complete legal batch
+(up to 100 files of 128 KiB each); backend file/code limits still apply.
 Shared materials remain FULL state: preserve every unchanged file in the
 export (omitted files are deleted), then call `sync_shared_materials` to
 propagate. Skill saves retain their tag-conflict behavior: repeated content

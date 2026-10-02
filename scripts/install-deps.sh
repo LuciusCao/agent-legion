@@ -15,7 +15,7 @@
 #      用）；.env 已存在但凭据为空时幂等补填（非空值不覆盖）
 #   5. deploy/secrets/vault_master_key 缺失时生成（同 init-worktree.sh）
 #   6. scripts/ensure-velites.sh --dest data/bin（指纹一致自动跳过）
-#   7. frontend/node_modules 缺失时 npm ci
+#   7. 前端依赖：清单指纹一致跳过、变化时重装 npm ci（ensure-frontend-deps.sh，#810）
 #   8. worker 状态副本 data/agent-worker-service/worker.yaml 缺失时写入最小
 #      本机 dev 配置（host_url/work_root 为本机 dev 值）
 set -euo pipefail
@@ -195,13 +195,8 @@ chmod 600 deploy/secrets/vault_master_key
 # 6. velites 二进制（指纹一致自动跳过）
 ./scripts/ensure-velites.sh --dest data/bin
 
-# 7. 前端依赖
-if [[ ! -d frontend/node_modules ]]; then
-    echo "安装前端依赖（npm ci）…"
-    (cd frontend && npm ci)
-else
-    echo "frontend/node_modules 已存在，跳过 npm ci"
-fi
+# 7. 前端依赖（清单指纹一致自动跳过；变化时重装，#810）
+./scripts/ensure-frontend-deps.sh
 
 # 8. Worker 状态副本（worker 唯一生效配置，issue #323；缺失时写入最小本机
 #    dev 配置，其余字段与后续修改一律走 worker 控制台/API）
