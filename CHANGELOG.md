@@ -51,6 +51,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
+- 任务详情工具栏采用图标与中文短文字，执行操作按状态外露，打包、清空打包、产物和删除收进「更多」；小于 1100px 隐藏外露文字并保留提示，小于 760px 执行操作也进入菜单。标题可收缩并省略，删除仍需确认，保留用量与排查助手入口。
 - 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进 run 请求，`RunService` 在全部校验通过后把它落成 ready 的 Markdown 材料（sha256 内容寻址、对象先暂存、材料行整批事务提交、`.md`/`.txt` 白名单、UTF-8 ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker 物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio 入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。同 hash 仅复用 ready 材料，上传中、失败或已过期材料返回 409，避免抢占浏览器上传或改写既有对象归属。设计见 docs/architecture/materials-and-runs-design.md §4.1。
 
 ### Changed
