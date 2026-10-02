@@ -15,7 +15,13 @@ keys, job insertion commits in bounded chunks, and the create response no
 longer materializes job rows (run id + created_count; the detail endpoint and
 #358's counter tables carry the rest). #735 restores the bare ``job_ids``
 string list on the response — ids only, the row-slimming contract of #467 A4
-stays in force (regression-pinned by tests).
+stays in force (regression-pinned by tests). #735 review P1: the response's
+job_ids/created_count derive from the bulk INSERT's ownership RETURNING (the
+post-write truth), never from the pre-insert candidate list — two concurrent
+submissions racing the same item past the dedup probe are arbitrated by the
+ON CONFLICT ownership clause (first writer wins, ownership is never
+re-bound), so a response can never claim a job another run owns, and the
+GET /jobs run_id filter stays consistent with every returned id.
 """
 
 from __future__ import annotations
@@ -162,7 +168,11 @@ class RunService:
         # set so intra-request duplicates filter exactly like pre-existing jobs.
         # #467 A2: point lookups over this request's keys (indexed IN probes)
         # instead of loading the whole workspace's keys — same workspace-
-        # scoped semantics, cost tracks the submission size.
+        # scoped semantics, cost tracks the submission size. #735 review P1:
+        # this probe is a check-then-act read — a concurrent submission can
+        # claim the same item after it; that race is closed on the write side
+        # (create_jobs_bulk's ownership clause + RETURNING), not by locking
+        # here, so the loser simply drops the raced item from its response.
         existing_keys = self.job_db.filter_existing_dedup_keys(
             workspace_id,
             (
@@ -291,6 +301,16 @@ class RunService:
         # per-job endpoints right after submit — ids, never job rows); a
         # 万级-items run still does not serialize a proportional JSON payload
         # inside the request thread.
+        # #735 review P1: ``job_ids`` here is the bulk INSERT's ownership
+        # truth — candidates a concurrent run claimed first (between the
+        # dedup probe above and the insert) were skipped by the ON CONFLICT
+        # ownership clause and are absent, so created_count == len(job_ids)
+        # is this run's real acquisition and every returned id resolves
+        # under GET /jobs?run_id=<this run>. When EVERY candidate loses the
+        # race the run keeps created_count=0 with an empty id list — the
+        # truthful shape of "a concurrent run won all of these items" (the
+        # serialized equivalent, the dedup probe's 400/heal branch, never
+        # applies to an in-flight race).
         return {"run": _run_record(run), "created_count": len(job_ids), "job_ids": job_ids}
 
     def list_runs(self, workspace_id: str, *, limit: int = 100) -> list[dict[str, Any]]:

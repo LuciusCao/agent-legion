@@ -215,3 +215,21 @@ def test_list_jobs_limit_contract_bounds(client, job_db):
     assert set(body) == {"jobs", "truncated"}
     assert {job["id"] for job in body["jobs"]} == set(run["job_ids"])
     assert body["truncated"] is False
+
+
+def test_list_jobs_rejects_empty_string_filters(client, job_db):
+    """#735 review P2（簇根因：可选过滤参数的空串形态被查询层 `if val` 静默吞掉，
+    过滤语义改变但调用方无感知）：`?run_id=` / `?status=` 是调用错误 → 422；
+    None（参数缺席）才是唯一的「不过滤」拼写。"""
+    workspace_id = _create_runs_workspace(client)
+    _insert_material(job_db, workspace_id, "mat-empty")
+    _create_run(client, workspace_id, ["mat-empty"])
+
+    for params in ({"run_id": ""}, {"status": ""}):
+        response = client.get(f"/api/workspaces/{workspace_id}/jobs", params=params)
+        assert response.status_code == 422, (params, response.text)
+
+    # 缺席不过滤（对照组：200 且返回该 workspace 的 job）。
+    unfiltered = client.get(f"/api/workspaces/{workspace_id}/jobs")
+    assert unfiltered.status_code == 200
+    assert len(unfiltered.json()["jobs"]) == 1

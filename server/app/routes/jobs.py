@@ -43,6 +43,11 @@ def create_jobs_router(
     # each id on #703's per-job endpoints). Filter semantics, not resource
     # addressing: a run_id from another workspace (or a missing run) yields
     # an empty list, not a 404.
+    # #735 review P2 (cluster): an optional filter's EMPTY-STRING form is a
+    # caller error, never "filter off" — `?run_id=` / `?status=` would
+    # otherwise be swallowed by the query layer's `if val` and silently
+    # return the unfiltered list. min_length=1 turns that shape into a 422;
+    # None (param absent) remains the only "no filter" spelling.
     @router.get(
         "/workspaces/{workspace_id}/jobs",
         response_model=JobsResponse,
@@ -54,8 +59,8 @@ def create_jobs_router(
             str | None,
             Query(deprecated=True, description=_DEPRECATED_QUERY),
         ] = None,
-        status: str | None = None,
-        run_id: str | None = None,
+        status: Annotated[str | None, Query(min_length=1)] = None,
+        run_id: Annotated[str | None, Query(min_length=1)] = None,
         limit: Annotated[int, Query(ge=1, le=2000)] = 500,
     ) -> JobsResponse:
         # Subagent review P3-1 on #307: guard parity with failed-node-runs —

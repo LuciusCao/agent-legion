@@ -467,3 +467,78 @@ def test_run_create_response_contract_pins_job_ids_without_rows() -> None:
     assert job_ids_schema["type"] == "array"
     assert "新建" in job_ids_schema["description"]
     assert "#501" in job_ids_schema["description"]
+
+
+def test_raced_runs_share_item_responses_follow_write_truth(client, job_db, monkeypatch) -> None:
+    """#735 review P1（簇根因：check-then-act 预计算失真）：两个并发 POST /runs
+    携带同一 item、都在对方 INSERT 前完成 dedup 探测时，修复前的 ON CONFLICT
+    会把共享 job 重绑到后写入的 run，而两个响应仍各自声称拥有它。结构性修法
+    后由 INSERT 的归属子句原子裁决（先写者赢，归属永不被夺走），两边响应的
+    job_ids/created_count 都是写后真相，GET /jobs 的 run_id 过滤与之一一对应。
+    """
+    workspace_id = _create_workspace(client)
+    _insert_material(job_db, workspace_id, "mat-shared")
+    _insert_material(job_db, workspace_id, "mat-a")
+    _insert_material(job_db, workspace_id, "mat-b")
+
+    # 确定性复现竞态窗口（不必真线程）：桩掉 dedup 探测的读结果，等价于
+    # 两个请求的探测都发生在任一 INSERT 提交之前——两边都判定共享 item 是
+    # 新建，归属裁决完全交给写路径。
+    app_job_db = client.app.state.job_db
+    monkeypatch.setattr(app_job_db, "filter_existing_dedup_keys", lambda *args, **kwargs: set())
+
+    first = _create_run(
+        client,
+        workspace_id,
+        [
+            {"type": "material", "material_id": "mat-shared"},
+            {"type": "material", "material_id": "mat-a"},
+        ],
+    )
+    second = _create_run(
+        client,
+        workspace_id,
+        [
+            {"type": "material", "material_id": "mat-shared"},
+            {"type": "material", "material_id": "mat-b"},
+        ],
+    )
+    monkeypatch.undo()
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    first_body = first.json()
+    second_body = second.json()
+    first_run_id = first_body["run"]["id"]
+    second_run_id = second_body["run"]["id"]
+
+    # 写后 DB 归属（3 个 job、每个恰好一个 owner）：共享 item 归先写者。
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            "select id, source_id, run_id from jobs where workspace_id=%s", (workspace_id,)
+        ).fetchall()
+    assert len(rows) == 3
+    ownership = {str(row["source_id"]): str(row["run_id"]) for row in rows}
+    job_of = {str(row["source_id"]): str(row["id"]) for row in rows}
+    assert ownership == {
+        "mat-shared": first_run_id,
+        "mat-a": first_run_id,
+        "mat-b": second_run_id,
+    }
+
+    # 两个响应都与写后归属一致：先写者 2 个，后写者只剩自己真正获得的 1 个
+    # （共享 item 从响应中掉落，绝不声称别人的 job），created_count 恒等长。
+    assert first_body["job_ids"] == [job_of["mat-shared"], job_of["mat-a"]]
+    assert first_body["created_count"] == 2
+    assert first_body["run"]["created_count"] == 2
+    assert second_body["job_ids"] == [job_of["mat-b"]]
+    assert second_body["created_count"] == 1
+    assert second_body["run"]["created_count"] == 1
+
+    # GET /jobs?run_id= 对两边都恰好查得到各自真正拥有的 job。
+    for run_id, expected_ids in (
+        (first_run_id, set(first_body["job_ids"])),
+        (second_run_id, set(second_body["job_ids"])),
+    ):
+        response = client.get(f"/api/workspaces/{workspace_id}/jobs", params={"run_id": run_id})
+        assert response.status_code == 200, response.text
+        assert {job["id"] for job in response.json()["jobs"]} == expected_ids

@@ -41,15 +41,15 @@ def verify_chunk_identities(conn: Any, chunk: list[tuple[Any, ...]]) -> None:
 
     Runs inside the chunk's own transaction, AFTER ``insert_jobs_batched``
     has settled (own inserts visible; a concurrent same-id INSERT has been
-    arbitrated by the unique index — this side either waited and rebinded, or
-    won and the other side's rebind waits on this transaction). The ON
-    CONFLICT arm rebinds run/title/input but deliberately does NOT touch
-    source_type/source_id, so a row whose identity differs from this
-    submission's proves another identity won the id — raise (the chunk rolls
-    back whole) instead of silently leaving the foreign row re-bound to this
-    run. Closes the precheck's read-then-insert window: a concurrent submit
-    can slip an insert past the precheck (its row was in flight at read
-    time), but it cannot slip one past this check.
+    arbitrated by the unique index — this side either won, or waited and its
+    row was then either updated under the #735 ownership clause or skipped).
+    The ON CONFLICT arm rebinds run/title/input (same-run rows only, #735)
+    but deliberately does NOT touch source_type/source_id, so a row whose
+    identity differs from this submission's proves another identity won the
+    id — raise (the chunk rolls back whole) instead of silently leaving the
+    foreign row bound to this run. Closes the precheck's read-then-insert
+    window: a concurrent submit can slip an insert past the precheck (its
+    row was in flight at read time), but it cannot slip one past this check.
     """
     by_id = fetch_identity_map(conn, [str(row[0]) for row in chunk])
     for row in chunk:
