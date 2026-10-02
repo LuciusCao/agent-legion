@@ -13,6 +13,8 @@ import os
 from collections.abc import Callable
 from typing import Any
 
+from server.app.configuration.worker_console import CONSOLE_URL_ENV, console_url_env
+
 
 def _str_parser(value: str) -> str:
     return value
@@ -95,7 +97,7 @@ def apply_database_url_env(config: dict[str, Any]) -> None:
 def apply_env_overrides(config: dict[str, Any]) -> None:
     """Apply known environment variable overrides before typed validation."""
     for env_var, (path, parser) in _ENV_OVERRIDES.items():
-        raw = os.environ.get(env_var)
+        raw = console_url_env() if env_var == CONSOLE_URL_ENV else os.environ.get(env_var)
         if raw is None:
             continue
         node = config

@@ -29,26 +29,33 @@ KEY = "AGENT_LEGION_WORKER_CONSOLE_URL"
         (f'{KEY} = ""\n', ""),
         (f"export {KEY} =\n", ""),
         (f"{KEY} = https://old.example\n{KEY} =\n", ""),
+        (f"'{KEY}' = ''\n", ""),
+        (f"'{KEY}' = 'https://worker.example'\n", "https://worker.example"),
+        (f'OTHER="first line\n{KEY}=https://not-config.example\nlast line"\n', None),
+        (f"{KEY}\n", None),
     ],
 )
 def test_launchers_preserve_dotenv_precedence(tmp_path, script, inherited, content, configured):
     source = (ROOT / "scripts" / script).read_text()
-    injection = re.search(
-        r'    if \[\[ -z "\$\{AGENT_LEGION_WORKER_CONSOLE_URL\+x\}".*?^    fi',
+    injection = re.findall(
+        r"^    (?:console_host=|export AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL=).*$",
         source,
-        re.M | re.S,
+        re.M,
     )
     assert injection
     normalize = re.search(r"^health_host\(\) \{.*?^\}", source, re.M | re.S)
     code = (normalize.group(0) if normalize else "") + "\nWORKER_BIND=127.0.0.1\nWORKER_PORT=8799\n"
-    code += injection.group(0)
-    # Run the real backend loader after shell default injection, in the same environment.
-    code += '\nexec "$1" -c \'import os; from dotenv import load_dotenv; load_dotenv(".env", override=False); print(os.environ["AGENT_LEGION_WORKER_CONSOLE_URL"], end="")\'\n'
+    code += "\n".join(injection)
+    # Exercise the actual settings boundary after shell default injection.
+    code += '\nexec "$1" -c \'from pathlib import Path; import server.app.settings as s; s.PROJECT_ROOT=Path.cwd(); print(s.load_settings(config_path=Path("settings.yaml")).executor_runtime.agent_workers.console_url, end="")\'\n'
+    (tmp_path / "settings.yaml").write_text("{}\n")
     if content is not None:
         (tmp_path / ".env").write_text(content)
     env = os.environ.copy()
     env.pop(KEY, None)
     env.pop("PYTHON_DOTENV_DISABLED", None)
+    env.pop("AGENT_LEGION_SKIP_DOTENV", None)
+    env["PYTHONPATH"] = str(ROOT)
     if inherited is not None:
         env[KEY] = inherited
     result = subprocess.run(

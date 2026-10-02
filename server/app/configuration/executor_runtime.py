@@ -26,6 +26,7 @@ from server.app.configuration.executor_knobs import (
     ResultUnpackConfig,
     ResultValidateConfig,
 )
+from server.app.configuration.worker_console import WorkerConsoleUrl
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class WorkflowsRuntimeConfig(BaseModel):
 
 
 class AgentWorkersRuntimeConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     # The global register token (register_token / register_token_file) was
     # retired with issue #35: registration is scoped-token-only, so this
@@ -98,11 +99,11 @@ class AgentWorkersRuntimeConfig(BaseModel):
     # 拓扑而非运行时调优；空串 = 未配置，前端退化为纯文字说明。Worker 注册
     # 时自报的控制台地址（后续按 Worker 逐个显示）落地后，此值只作尚无
     # Worker 注册时的兜底入口。
-    console_url: str = ""
+    console_url: WorkerConsoleUrl = ""
 
 
 class ExecutorRuntimeConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
 
     heartbeat_interval_seconds: float = Field(default=10, gt=0)
     lease_ttl_seconds: int = Field(default=90, ge=1)

@@ -1,4 +1,5 @@
 import type { AgentWorkerSummary } from '../api/agentWorkers'
+import { safeWorkerConsoleAddress } from './workerConsoleAddress'
 
 /**
  * Worker 注册时自报或由操作者配置的控制台地址：labels 的可选键 console_url
@@ -11,7 +12,5 @@ export function workerConsoleUrl(
   worker: Pick<AgentWorkerSummary, 'labels'>
 ): string {
   const value = worker.labels?.[WORKER_CONSOLE_LABEL]
-  return typeof value === 'string' && /^https?:\/\//i.test(value.trim())
-    ? value.trim()
-    : ''
+  return typeof value === 'string' ? safeWorkerConsoleAddress(value.trim()) : ''
 }
