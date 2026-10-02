@@ -33,5 +33,18 @@ describe('WorkerConsoleLink', () => {
     expect(isLoopbackUrl('http://localhost:8789/')).toBe(true)
     expect(isLoopbackUrl('http://10.0.0.8:8787')).toBe(false)
     expect(isLoopbackUrl('not a url')).toBe(false)
+    expect(isLoopbackUrl('http://127.0.0.2:8787')).toBe(true)
+    expect(isLoopbackUrl('http://[::1]:8787')).toBe(true)
+    expect(isLoopbackUrl('http://127.example.com')).toBe(false)
+  })
+
+  it.each([
+    'javascript:alert(1)',
+    'worker.example:8787',
+    ' ',
+    'http://user:secret@host',
+  ])('does not create an unsafe anchor for %j', (url) => {
+    const { container } = render(<WorkerConsoleLink url={url} />)
+    expect(container.querySelector('a')).toBeNull()
   })
 })

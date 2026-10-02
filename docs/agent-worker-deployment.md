@@ -425,6 +425,12 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
    不下载 Worker 清单；workspace 状态列表的请求与缓存均按 workspace 隔离。
    首次地址请求失败显示可重试错误，只有成功返回空地址才表示未配置；
    后台刷新失败保留最近成功的配置，后续成功响应（包括清空配置）替换缓存。
+   非空配置必须是绝对 HTTP(S) 地址，支持 IPv6、反向代理路径与 query；
+   空白、反斜杠、非法端口或 URL 用户名/密码会在创建服务前报错，诊断不回显原值。
+   地址是公开导航信息，控制令牌应在 Worker 控制台中输入，不放进该地址。
+   dev/native 脚本只设置内部 `AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL`；
+   后端使用同一 dotenv 解析器完成加载后，按进程环境 → 根 `.env` → 脚本默认值
+   选择 `AGENT_LEGION_WORKER_CONSOLE_URL`，显式空值始终有效，shell 不另行解析 `.env`。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
 

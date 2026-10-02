@@ -44,6 +44,33 @@ function build(
 }
 
 describe('buildWorkerOnboardingSteps', () => {
+  it.each([true, false])(
+    'does not let malformed online labels hide valid navigation (%j)',
+    (hasValidWorker) => {
+      const open = vi.fn()
+      const [, switches] = build({
+        workers: [
+          worker({ claim_enabled: false, labels: { console_url: 'http://' } }),
+          ...(hasValidWorker
+            ? [
+                worker({
+                  claim_enabled: false,
+                  labels: { console_url: 'https://valid/' },
+                }),
+              ]
+            : []),
+        ],
+        paused: false,
+        consoleUrl: 'https://fallback/',
+        openConsole: open,
+      })
+      switches.onAction()
+      expect(open).toHaveBeenCalledWith(
+        hasValidWorker ? 'https://valid/' : 'https://fallback/'
+      )
+    }
+  )
+
   it.each([
     { workers: [], paused: false, expected: false },
     {

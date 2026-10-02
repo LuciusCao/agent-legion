@@ -1,4 +1,5 @@
 import { MaterialIcon } from './MaterialIcon'
+import { safeWorkerConsoleAddress } from '../lib/workerConsoleAddress'
 import styles from './WorkerConsoleLink.module.css'
 
 export interface WorkerConsoleLinkProps {
@@ -12,7 +13,11 @@ export interface WorkerConsoleLinkProps {
 export function isLoopbackUrl(url: string): boolean {
   try {
     const host = new URL(url).hostname
-    return host === '127.0.0.1' || host === 'localhost' || host === '[::1]'
+    return (
+      /^127(?:\.\d{1,3}){3}$/.test(host) ||
+      host === 'localhost' ||
+      host === '[::1]'
+    )
   } catch {
     return false
   }
@@ -28,7 +33,7 @@ export function WorkerConsoleLink({
   label = '打开 Worker 控制台',
   variant = 'inline',
 }: WorkerConsoleLinkProps) {
-  if (!url) return null
+  if (!safeWorkerConsoleAddress(url)) return null
   const title = isLoopbackUrl(url)
     ? `${url}（本机地址：需在 Worker 所在机器的浏览器中打开）`
     : url

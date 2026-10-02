@@ -180,4 +180,31 @@ describe('WorkerReadinessBanner', () => {
       'http://active/'
     )
   })
+
+  it.each([true, false])(
+    'skips malformed online addresses and selects a valid worker or deployment fallback (%j)',
+    async (hasValidWorker) => {
+      mockListAgentWorkers.mockResolvedValue([
+        worker({ claim_enabled: false, labels: { console_url: 'http://' } }),
+        worker({
+          claim_enabled: false,
+          labels: { console_url: 'https://user:secret@worker.example/' },
+        }),
+        ...(hasValidWorker
+          ? [
+              worker({
+                claim_enabled: false,
+                labels: { console_url: 'https://valid/' },
+              }),
+            ]
+          : []),
+      ])
+      renderBanner()
+      await screen.findByText(/未开始领取/)
+      expect(screen.getByTestId('worker-console-link')).toHaveAttribute(
+        'href',
+        hasValidWorker ? 'https://valid/' : 'http://127.0.0.1:8789'
+      )
+    }
+  )
 })
