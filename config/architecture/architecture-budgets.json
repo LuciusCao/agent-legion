@@ -233,6 +233,7 @@
     "frontend/src/components/preview/ArtifactPreviewConfigMenu.tsx": 60,
     "frontend/src/components/preview/ArtifactPreviewPanel.module.css": 39,
     "frontend/src/components/preview/ArtifactPreviewPanel.tsx": 44,
+    "frontend/src/components/preview/ParsedJsonBody.tsx": 40,
     "frontend/src/components/preview/previewMediaRenderers.tsx": 115,
     "frontend/src/components/preview/previewRegistry.ts": 38,
     "frontend/src/components/preview/previewRenderers.module.css": 132,

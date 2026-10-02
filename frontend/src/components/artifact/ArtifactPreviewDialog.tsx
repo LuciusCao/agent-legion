@@ -20,15 +20,20 @@ export interface ArtifactPreviewDialogProps {
   onClose: () => void
 }
 
-export function ArtifactPreviewDialog({
+export function ArtifactPreviewDialog(props: ArtifactPreviewDialogProps) {
+  if (!props.open) return null
+  // 预览/源码模式存在内层：关闭即卸载、按 name 重挂载，重开或换产物一律
+  // 回到默认的 rendered 态，状态不在产物之间泄漏（#777 review）。
+  return <OpenArtifactPreviewDialog key={props.name} {...props} />
+}
+
+function OpenArtifactPreviewDialog({
   open,
   name,
   content,
   onClose,
 }: ArtifactPreviewDialogProps) {
   const [mode, setMode] = useState<ArtifactPreviewMode>('rendered')
-
-  if (!open) return null
 
   return (
     <Dialog

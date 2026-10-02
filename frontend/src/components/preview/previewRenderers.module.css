@@ -26,6 +26,12 @@
   overflow: auto;
 }
 
+.modeBar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
 .markdownBody {
   color: #1a1c1e;
   font-size: 14px;
