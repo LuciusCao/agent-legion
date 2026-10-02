@@ -985,6 +985,7 @@
     "server/app/agent_control/completion_preflight.py": 70,
     "server/app/agent_control/completion_staged.py": 149,
     "server/app/agent_control/completion_view.py": 45,
+    "server/app/agent_control/completion_view_inputs.py": 65,
     "server/app/agent_control/declarations.py": 79,
     "server/app/agent_control/liveness.py": 32,
     "server/app/agent_control/register_key_guard.py": 46,
