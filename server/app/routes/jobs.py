@@ -4,6 +4,7 @@ from typing import Annotated, cast
 
 from fastapi import APIRouter, Query
 
+from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
 from server.app.routes.job_http import (
     raise_job_http_error,
     reject_mismatched_workflow_key,
@@ -36,7 +37,11 @@ def create_jobs_router(
     # callers inherit it without signature changes. A fixed constant (not a
     # query parameter) keeps the OpenAPI contract and generated frontend
     # types unchanged.
-    @router.get("/workspaces/{workspace_id}/jobs", response_model=JobsResponse)
+    @router.get(
+        "/workspaces/{workspace_id}/jobs",
+        response_model=JobsResponse,
+        tags=[API_SCOPE_INTAKE_TAG],
+    )
     def list_workspace_jobs(
         workspace_id: str,
         workflow_key: Annotated[

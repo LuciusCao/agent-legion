@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
 from server.app.jobs.queries.job_filtering import JobListFilter
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.job_list_contracts import JobFacetsResponse, JobsPageResponse
@@ -41,7 +42,14 @@ def create_job_list_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    @router.get("/workspaces/{workspace_id}/jobs/snapshot", response_model=JobsPageResponse)
+    # codex3 P1：snapshot 在 api-scope 准入面内（机器调用方越过 legacy
+    # 列表上限读全量 job 状态面），挂 intake tag 由 api_scope_surface
+    # 派生；同模块的 facets 是前端聚合端点，刻意不挂。
+    @router.get(
+        "/workspaces/{workspace_id}/jobs/snapshot",
+        response_model=JobsPageResponse,
+        tags=[API_SCOPE_INTAKE_TAG],
+    )
     def snapshot_workspace_jobs(
         workspace_id: str,
         limit: int = 200,

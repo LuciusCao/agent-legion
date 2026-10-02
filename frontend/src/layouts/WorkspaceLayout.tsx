@@ -47,6 +47,7 @@ export default function WorkspaceLayout() {
           home={!isDetailPage}
           backTo={isDetailPage ? `/workspaces/${workspaceId}` : undefined}
           scrolled={scrolled}
+          actionsLayout={isDetailPage ? 'single-row' : 'wrap'}
           rightActions={
             !isDetailPage ? (
               <>

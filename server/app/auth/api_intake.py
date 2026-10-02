@@ -1,9 +1,10 @@
 """Workspace API intake guard (#626): the runs router's scoped-identity gate.
 
 The ONE effecting surface a workspace API token may take. Split from
-workspace_access.py so the membership guard keeps its file budget; the two
-modules stay coherent — the machine identity may ONLY submit runs here and
-read run/job status (the read allowlist lives in workspace_access).
+workspace_access.py so the membership guard keeps its file budget; the three
+auth modules stay coherent — the machine identity may ONLY submit runs here
+and read the loop surface (run/job status + artifacts; tag-derived in
+auth/api_scope_surface.py, #734).
 """
 
 from __future__ import annotations
@@ -27,7 +28,8 @@ def require_workspace_api_intake(
     """Runs-router POST guard: full sessions take the standard membership
     check; an api-scope machine identity passes only on its OWN workspace
     (this is the ONE effecting surface the intake channel may take — the
-    read side is allowlisted in workspace_access); every other scoped
+    read side is the tagged manifest in auth/api_scope_surface.py); every
+    other scoped
     identity (studio-agent runs included) keeps the 403 that
     ``reject_studio_agent_scope`` used to give this route — the intake
     channel must not become a side door for the studio-agent tool surface.
