@@ -1,0 +1,28 @@
+.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #1a73e8;
+  text-decoration: none;
+  font-size: inherit;
+  white-space: nowrap;
+}
+.inline:hover {
+  text-decoration: underline;
+}
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #1a73e8;
+  color: #fff;
+  font-size: 14px;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.button:hover {
+  background: #1765cc;
+}

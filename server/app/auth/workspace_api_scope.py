@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import Request
 from fastapi.exceptions import HTTPException
 
+from server.app.auth.api_scope_surface import api_scope_route_allowed
 from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 
 # #626 review: the surface allowlist for api-scope machine identities. The
@@ -19,45 +20,23 @@ from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 # preview-panel/metrics/etc. reads, and every scopeless or off-allowlist
 # mount — must refuse the machine identity (404, the no-enumeration
 # refusal) instead of inheriting a member-style pass.
-# (method, route template) pairs, matched against the RESOLVED route's
-# template (request.scope["route"].path), never the concrete URL: path-text
-# matching cannot tell /jobs/facets (a real static sibling) apart from
-# /jobs/{job_id} with job_id="facets", and a prefix/substring/regex match
-# here would widen the surface — the train review's regression pin covers
-# exactly that collision. POST /runs appears here because the
-# job_route_group mounts a membership guard on the whole runs router; the
-# route-level require_workspace_api_intake does the admission. GET /jobs is
-# the legacy 500-cap listing; codex3 P1 adds the paginated /jobs/snapshot
-# (cursor + run_id filter) so a machine caller can actually reach the WHOLE
-# job status surface — a run with more items than the legacy cap, or a
-# workspace with newer jobs, is otherwise unreadable. The final three GETs
-# are the #631 external read surface the intake loop polls after submit
-# (status → manifest → raw bytes, routes/external_artifacts.py); they are
-# GET-only, the workspace binding check above still runs first, and the
-# service keeps the per-job ownership 404 — the train review (#779 P1-1)
-# found them missing here, which 404'd the machine identity before the
-# router.
-_API_SCOPE_ALLOWLIST: tuple[tuple[str, str], ...] = (
-    ("POST", "/api/workspaces/{workspace_id}/runs"),
-    ("GET", "/api/workspaces/{workspace_id}/runs"),
-    ("GET", "/api/workspaces/{workspace_id}/runs/{run_id}"),
-    ("GET", "/api/workspaces/{workspace_id}/jobs"),
-    ("GET", "/api/workspaces/{workspace_id}/jobs/snapshot"),
-    ("GET", "/api/workspaces/{workspace_id}/jobs/{job_id}"),
-    ("GET", "/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts"),
-    ("GET", "/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name:path}/raw"),
-)
-
-
-def _api_scope_route_allowed(request: Request) -> bool:
-    """Exact (method, matched route template) membership in the allowlist.
-
-    ``request.scope["route"]`` is set by the matched APIRoute before any
-    dependency runs (fastapi.routing puts it into the child scope); a
-    missing route means the request was never routed, which fails closed.
-    """
-    route = request.scope.get("route")
-    return (request.method, getattr(route, "path", None)) in _API_SCOPE_ALLOWLIST
+# #734 turns the hand-copied (method, path) list into a tag-derived check
+# (auth/api_scope_surface.py, #678 tool_names.py 同款形态): the closed-loop
+# route modules register their routes with API_SCOPE_INTAKE_TAG, the
+# authoritative route-name constant lists them, and admission is decided
+# from the request's own matched route object — the guard keeps no second
+# path copy, so the #631-style drift (a new endpoint shipping while nobody
+# syncs the allowlist) is a red contract test instead of a production 404.
+# Route-object matching (never path-text) also keeps the {job_id} template
+# from shadowing static siblings like /jobs/facets. The surface today:
+# submit (POST /runs, dual-checked by the route-level
+# require_workspace_api_intake), run status reads, the jobs listing, the
+# paginated /jobs/snapshot (codex3 P1: a machine caller must reach the
+# WHOLE job status surface past the legacy listing cap), and the three
+# #631 external artifact endpoints the intake loop polls after submit
+# (status → manifest → raw bytes, routes/external_artifacts.py) — the train
+# review (#779 P1-1) found them missing here, which 404'd the machine
+# identity before the router.
 
 
 def api_scope_route_scope(request: Request) -> str | None:
@@ -76,15 +55,15 @@ def refuse_off_allowlist_api_scope(request: Request, user: dict) -> bool:
     model is ONE workspace and the documented intake surface):
     1. hard equality with the route's workspace scope (a mismatched or
        missing scope gets the same 404 as a non-member, no enumeration);
-    2. (method, matched route template) must be on the intake allowlist —
-       every other route, including OTHER GETs (secrets, materials, chat
-       sessions, preview panels, metrics) and scopeless mounts, 404s the
-       machine identity.
+    2. the request's matched route must be on the intake surface
+       (tag-derived, see api_scope_surface) — every other route, including
+       OTHER GETs (secrets, materials, chat sessions, preview panels,
+       metrics) and scopeless mounts, 404s the machine identity.
     """
     if user.get("actor_scope") != WORKSPACE_API_SCOPE:
         return False
     scope = api_scope_route_scope(request)
     bound = user.get("scoped_workspace_id")
-    if not scope or bound != scope or not _api_scope_route_allowed(request):
+    if not scope or bound != scope or not api_scope_route_allowed(request.scope.get("route")):
         raise HTTPException(status_code=404, detail="Workspace not found")
     return True

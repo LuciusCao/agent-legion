@@ -27,6 +27,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import FileResponse, StreamingResponse
 
+from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
 from server.app.auth.workspace_access import require_scoped_workspace_match
 from server.app.routes.external_artifact_contracts import (
     ExternalArtifactListResponse,
@@ -43,12 +44,15 @@ def create_external_artifact_router(
 ) -> APIRouter:
     # 整组同守卫（#631 review P1）：三端点都拿 workspace_id 路径参数，scoped
     # token 的绑定检查属于整组而非单端点；job_group 的 require_workspace_
-    # access 仍然先行（成员 404 / 角色检查）。
+    # access 仍然先行（成员 404 / 角色检查）。#734：tag 挂在路由注册上，
+    # api-scope 准入面由 auth/api_scope_surface.py 从 tag 派生（契约测试
+    # 对账注册面与权威常量，防止 #631 式的新端点漏同步）。
     router = APIRouter(dependencies=[Depends(require_scoped_workspace_match)])
 
     @router.get(
         "/workspaces/{workspace_id}/jobs/{job_id}",
         response_model=ExternalJobStatusResponse,
+        tags=[API_SCOPE_INTAKE_TAG],
     )
     def get_external_job_status(workspace_id: str, job_id: str) -> ExternalJobStatusResponse:
         try:
@@ -59,6 +63,7 @@ def create_external_artifact_router(
     @router.get(
         "/workspaces/{workspace_id}/jobs/{job_id}/artifacts",
         response_model=ExternalArtifactListResponse,
+        tags=[API_SCOPE_INTAKE_TAG],
     )
     def list_external_artifacts(workspace_id: str, job_id: str) -> ExternalArtifactListResponse:
         try:
@@ -94,6 +99,7 @@ def create_external_artifact_router(
                 },
             },
         },
+        tags=[API_SCOPE_INTAKE_TAG],
     )
     def get_external_artifact_raw(
         workspace_id: str,

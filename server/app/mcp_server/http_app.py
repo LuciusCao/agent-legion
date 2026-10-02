@@ -58,7 +58,16 @@ class _ScopedTokenAuthApp:
             else None
         )
         if user is None or user.get("actor_scope") != STUDIO_AGENT_SCOPE:
-            body = json.dumps({"detail": "Studio agent scoped token required"}).encode()
+            body = json.dumps(
+                {
+                    "detail": "Studio agent scoped token required. The credential may have "
+                    "expired or been revoked. In Studio, close this session and choose "
+                    "继续对话 to reconnect with preserved context. For an external MCP "
+                    "client, create a new Studio agent token and reconnect the client.",
+                    "code": "studio_agent_auth_required",
+                },
+                ensure_ascii=False,
+            ).encode()
             await send(
                 {
                     "type": "http.response.start",

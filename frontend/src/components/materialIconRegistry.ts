@@ -38,6 +38,7 @@ import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import PauseIcon from '@mui/icons-material/Pause'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import PlayCircleIcon from '@mui/icons-material/PlayCircle'
 import QueryStatsIcon from '@mui/icons-material/QueryStats'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
@@ -98,6 +99,7 @@ export type MaterialIconName =
   | 'more_horiz'
   | 'more_vert'
   | 'pause'
+  | 'open_in_new'
   | 'play_arrow'
   | 'play_circle'
   | 'query_stats'
@@ -159,6 +161,7 @@ export const ICON_MAP = {
   more_horiz: MoreHorizIcon,
   more_vert: MoreVertIcon,
   pause: PauseIcon,
+  open_in_new: OpenInNewIcon,
   play_arrow: PlayArrowIcon,
   play_circle: PlayCircleIcon,
   query_stats: QueryStatsIcon,

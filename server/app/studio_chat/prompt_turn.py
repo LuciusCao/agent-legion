@@ -65,7 +65,12 @@ def _orphan(task: asyncio.Task[Any]) -> None:
 
 
 async def run_prompt_turn(
-    conn: Any, acp_session_id: str, text: str, *, on_timeout: Callable[[], None]
+    conn: Any,
+    acp_session_id: str,
+    text: str,
+    *,
+    on_timeout: Callable[[], None],
+    before_start: Callable[[], bool] | None = None,
 ) -> PromptTurnResult:
     """One prompt turn: prompt → on timeout settle+cancel → grace → wedged.
 
@@ -79,9 +84,13 @@ async def run_prompt_turn(
     cannot be sent or the grace expires; any task exception (agent refusal
     etc.) propagates as-is for the caller's per-turn containment.
     """
-    prompt_task = asyncio.create_task(
-        conn.prompt(acp_session_id, [TextContentBlock(type="text", text=text)])
-    )
+
+    async def start() -> Any:
+        if before_start is not None and not before_start():
+            return None
+        return await conn.prompt(acp_session_id, [TextContentBlock(type="text", text=text)])
+
+    prompt_task = asyncio.create_task(start())
     done, _pending = await asyncio.wait({prompt_task}, timeout=PROMPT_TIMEOUT_SECONDS)
     timed_out = not done
     if timed_out:

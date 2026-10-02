@@ -1,10 +1,17 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Query
 
 from server.app.routes.job_contracts import WorkspaceDagResponse, WorkspaceRunsResponse
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.job_view_contracts import NodeRunResponse
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_queries import JobQueryService
+
+# #735 review P2 (cluster): same empty-string convention as the jobs list
+# read surface — an optional filter's ``?param=`` form is a caller error
+# (422); the query layer's `if val` must never turn it into "filter off".
+_NonEmptyFilter = Annotated[str | None, Query(min_length=1)]
 
 
 def create_workspace_runs_router(service: JobQueryService) -> APIRouter:
@@ -13,10 +20,10 @@ def create_workspace_runs_router(service: JobQueryService) -> APIRouter:
     @router.get("/workspaces/{workspace_id}/node-runs", response_model=WorkspaceRunsResponse)
     def list_workspace_runs(
         workspace_id: str,
-        status: str | None = None,
-        node_key: str | None = None,
-        job_id: str | None = None,
-        skill: str | None = None,
+        status: _NonEmptyFilter = None,
+        node_key: _NonEmptyFilter = None,
+        job_id: _NonEmptyFilter = None,
+        skill: _NonEmptyFilter = None,
         limit: int = 100,
     ) -> WorkspaceRunsResponse:
         try:

@@ -22,6 +22,7 @@ from server.app.mcp_server.http_app import MCP_URL_PATH
 from server.app.services.job_errors import InvalidOperationError
 from server.app.settings import Settings
 from server.app.studio_chat.acp_session import AcpSessionCallbacks, AcpSessionHandle
+from server.app.studio_chat.background_baseline import CompletionBaseline
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.teardown import revoke_minted_token_quietly, teardown_runtime
@@ -66,6 +67,7 @@ def spawn_session_runtime(
     workspace_id: str,
     *,
     resume_acp_session_id: str | None = None,
+    background_baseline: CompletionBaseline | None = None,
 ) -> AcpSessionHandle:
     """Mint the run token, spawn the agent subprocess, wait for readiness.
 
@@ -95,6 +97,7 @@ def spawn_session_runtime(
             resume_acp_session_id=resume_acp_session_id,
         )
         runtime = SessionRuntime(handle, token)
+        runtime.background_baseline = background_baseline
         # #694: arm the replay-suppression window only when this spawn will
         # actually attempt session/load — kimi replays the loaded history as
         # fresh-looking chunks, and those messages are already on the

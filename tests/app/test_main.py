@@ -8,6 +8,35 @@ from server.app.workflow_worker.thread import WorkflowWorkerThread
 from tests.helpers import setup_spa_app
 
 
+@pytest.mark.no_db
+def test_invalid_console_url_fails_before_database_access(tmp_path, monkeypatch):
+    from pydantic import ValidationError
+
+    from server.app import main
+    from server.app.settings import load_settings
+
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    monkeypatch.setenv(
+        "AGENT_LEGION_WORKER_CONSOLE_URL", "https://user:DO_NOT_LOG@host/?secret=PRIVATE"
+    )
+    config = tmp_path / "config.yaml"
+    config.write_text("{}")
+    monkeypatch.setattr(
+        main,
+        "load_settings",
+        lambda **kwargs: load_settings(data_dir=tmp_path / "data", config_path=config),
+    )
+
+    def unexpected_database(*args, **kwargs):
+        pytest.fail("invalid configuration reached database initialization")
+
+    monkeypatch.setattr(main, "JobQueries", unexpected_database)
+    with pytest.raises(ValidationError) as error:
+        main.create_app(data_dir=tmp_path / "data")
+    assert "DO_NOT_LOG" not in str(error.value)
+    assert "PRIVATE" not in repr(error.value)
+
+
 def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, monkeypatch):
     from server.app import main
 
