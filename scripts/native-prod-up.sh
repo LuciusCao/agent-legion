@@ -190,7 +190,7 @@ else
     # （0.0.0.0 绑定对浏览器无意义，回落 127.0.0.1）。进程环境或 .env 已显式
     # 给出（含显式留空 = 不显示链接）时不动。
     if [[ -z "${AGENT_LEGION_WORKER_CONSOLE_URL+x}" ]] \
-        && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?AGENT_LEGION_WORKER_CONSOLE_URL=' .env 2>/dev/null; then
+        && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?AGENT_LEGION_WORKER_CONSOLE_URL[[:space:]]*=' .env 2>/dev/null; then
         console_host="$(health_host "$WORKER_BIND")"
         export AGENT_LEGION_WORKER_CONSOLE_URL="http://${console_host}:${WORKER_PORT}"
     fi
