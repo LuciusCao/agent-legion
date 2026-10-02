@@ -163,10 +163,9 @@ ensure_local_object_store() {
 cmd_up() {
     mkdir -p "$LOG_DIR"
     ensure_local_object_store
-    if [[ ! -d frontend/node_modules ]]; then
-        echo "安装前端依赖…"
-        (cd frontend && npm ci)
-    fi
+    # 清单指纹一致跳过、变化（升级 pull 进新 lockfile）时重装——防止用旧
+    # node_modules 跑新代码（scripts/ensure-frontend-deps.sh，#810）。
+    ./scripts/ensure-frontend-deps.sh
 
     start_component "后端" "$BACKEND_PORT" dev-backend "$LOG_DIR/dev-backend.log"
     start_component "前端" "$FRONTEND_PORT" dev-frontend "$LOG_DIR/dev-frontend.log"
