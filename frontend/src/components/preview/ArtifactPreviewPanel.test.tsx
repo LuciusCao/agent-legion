@@ -138,6 +138,27 @@ describe('ArtifactPreviewPanel', () => {
     })
   })
 
+  it('合法 json 可切到源码态查看原文（#777）', async () => {
+    const raw = '{\n  "question_id": "q1",\n  "grade": 5\n}'
+    mockFetchJobArtifactText.mockResolvedValue(textOf(raw))
+    renderPanel(
+      <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['review.json'])} />
+    )
+
+    // 默认树视图：键名不带引号渲染，无原文 <pre>。
+    expect(await screen.findByText('question_id')).toBeInTheDocument()
+    expect(document.querySelector('pre')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '源码' }))
+    const pre = document.querySelector('pre')
+    expect(pre?.textContent).toBe(raw)
+    expect(screen.queryByText('全部展开')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '预览' }))
+    expect(document.querySelector('pre')).not.toBeInTheDocument()
+    expect(screen.getByText('question_id')).toBeInTheDocument()
+  })
+
   it('图片加载失败展示错误占位并可重试', async () => {
     renderPanel(
       <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['frame.png'])} />
