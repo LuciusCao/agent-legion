@@ -84,7 +84,7 @@ def test_validates_against_the_manifests_frozen_ref(tmp_path: Path) -> None:
     job_dir.mkdir()
     manifest = {"skill": _KEY, "skill_ref": _REF}
 
-    assert validate_worker_outputs(manager, manifest, job_dir) is None
+    assert validate_worker_outputs(manager, manifest, job_dir, job_dir) is None
 
     # The validation ran against the shared cache materialization, not a
     # per-validation execution dir (#569).
@@ -96,7 +96,9 @@ def test_validates_against_the_manifests_frozen_ref(tmp_path: Path) -> None:
 def test_failing_validator_fails_the_node(tmp_path: Path) -> None:
     manager = _manager(tmp_path, "import sys; sys.stderr.write('bad output\\n'); sys.exit(1)\n")
 
-    error = validate_worker_outputs(manager, {"skill": _KEY, "skill_ref": _REF}, tmp_path / "job")
+    error = validate_worker_outputs(
+        manager, {"skill": _KEY, "skill_ref": _REF}, tmp_path / "job", tmp_path / "job"
+    )
 
     assert error is not None
     assert "Output validation failed" in error
@@ -112,7 +114,7 @@ def test_manifest_with_skill_commit_materializes_the_exact_commit(tmp_path: Path
     commit = _head_commit(tmp_path / "skills" / _KEY)
     manifest = {"skill": _KEY, "skill_ref": "latest", "skill_commit": commit}
 
-    assert validate_worker_outputs(manager, manifest, job_dir) is None
+    assert validate_worker_outputs(manager, manifest, job_dir, job_dir) is None
 
     cached = shared_cache_root(manager.runs_dir) / "group" / "name" / commit
     assert (cached / _KEY / "SKILL.md").is_file()
@@ -124,7 +126,7 @@ def test_malformed_skill_commit_is_a_validator_error(tmp_path: Path) -> None:
     manager = _manager(tmp_path, "import sys; sys.exit(0)\n")
 
     error = validate_worker_outputs(
-        manager, {"skill": _KEY, "skill_commit": "latest"}, tmp_path / "job"
+        manager, {"skill": _KEY, "skill_commit": "latest"}, tmp_path / "job", tmp_path / "job"
     )
 
     assert error is not None
@@ -136,7 +138,7 @@ def test_exact_commit_missing_from_repo_is_a_validator_error(tmp_path: Path) -> 
     manager = _manager(tmp_path, "import sys; sys.exit(0)\n")
 
     error = validate_worker_outputs(
-        manager, {"skill": _KEY, "skill_commit": "0" * 40}, tmp_path / "job"
+        manager, {"skill": _KEY, "skill_commit": "0" * 40}, tmp_path / "job", tmp_path / "job"
     )
 
     assert error is not None
@@ -162,10 +164,10 @@ def test_exact_commit_validation_is_immune_to_head_moves(tmp_path: Path) -> None
     job_dir.mkdir()
 
     exact = {"skill": "wf/review", "skill_ref": "latest", "skill_commit": old_commit}
-    assert validate_worker_outputs(manager, exact, job_dir) is None
+    assert validate_worker_outputs(manager, exact, job_dir, job_dir) is None
 
     legacy = {"skill": "wf/review", "skill_ref": "latest"}
-    legacy_error = validate_worker_outputs(manager, legacy, job_dir)
+    legacy_error = validate_worker_outputs(manager, legacy, job_dir, job_dir)
     assert legacy_error is not None
     assert "new rejection" in legacy_error
 
@@ -173,7 +175,10 @@ def test_exact_commit_validation_is_immune_to_head_moves(tmp_path: Path) -> None
 def test_legacy_manifest_without_skill_ref_resolves_latest(tmp_path: Path) -> None:
     manager = _manager(tmp_path, "import sys; sys.exit(0)\n")
 
-    assert validate_worker_outputs(manager, {"skill": _KEY}, tmp_path / "job") is None
+    assert (
+        validate_worker_outputs(manager, {"skill": _KEY}, tmp_path / "job", tmp_path / "job")
+        is None
+    )
 
     # latest = the repo's live HEAD (#322), materialized into the shared cache.
     head = _head_commit(tmp_path / "skills" / _KEY)
@@ -183,7 +188,7 @@ def test_legacy_manifest_without_skill_ref_resolves_latest(tmp_path: Path) -> No
 def test_manifest_without_skill_skips_validation(tmp_path: Path) -> None:
     manager = _manager(tmp_path, "import sys; sys.exit(0)\n")
 
-    assert validate_worker_outputs(manager, {}, tmp_path / "job") is None
+    assert validate_worker_outputs(manager, {}, tmp_path / "job", tmp_path / "job") is None
 
     assert not (tmp_path / "runs").exists()
 
@@ -205,8 +210,8 @@ def test_validator_writes_do_not_pollute_the_shared_cache(tmp_path: Path) -> Non
     job_dir = tmp_path / "job"
     job_dir.mkdir()
 
-    assert validate_worker_outputs(manager, manifest, job_dir) is None
-    assert validate_worker_outputs(manager, manifest, job_dir) is None
+    assert validate_worker_outputs(manager, manifest, job_dir, job_dir) is None
+    assert validate_worker_outputs(manager, manifest, job_dir, job_dir) is None
 
     cached_tree = shared_cache_root(manager.runs_dir) / "group" / "name" / commit / _KEY
     assert not (cached_tree / "validator-was-here.txt").exists()
@@ -237,7 +242,7 @@ def test_eviction_during_validation_does_not_affect_the_result(tmp_path: Path) -
     outcome: dict[str, str | None] = {}
     thread = threading.Thread(
         target=lambda: outcome.setdefault(
-            "verdict", validate_worker_outputs(manager, manifest, job_dir)
+            "verdict", validate_worker_outputs(manager, manifest, job_dir, job_dir)
         )
     )
     thread.start()

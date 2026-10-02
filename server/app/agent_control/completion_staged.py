@@ -166,8 +166,16 @@ def finish_staged(
     if status == "completed" and missing:
         status, exit_code, error = "failed", 1, f"Missing outputs: {', '.join(missing)}"
     # Worker results are untrusted: validate Host-side like the Pi runner.
+    # #757: never against the raw job_dir — it accumulates every node's
+    # outputs across all attempts, and a glob-based legacy validator would
+    # see a sibling's (stale or current) files and misattribute their
+    # verdict to this node. Validation runs against the declared view: this
+    # node's inputs from job_dir + this attempt's outputs from the read
+    # view (construction lives in worker_output_validation).
     if status == "completed" and handler.skill_manager is not None:
-        validation_error = validate_worker_outputs(handler.skill_manager, manifest, view_dir)
+        validation_error = validate_worker_outputs(
+            handler.skill_manager, manifest, job_dir, view_dir
+        )
         if validation_error:
             status, exit_code, error = "failed", 1, validation_error
     mark_result_stage(stage_timer, "validate")

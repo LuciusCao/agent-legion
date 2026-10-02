@@ -1799,6 +1799,7 @@
     "server/app/workflows/snapshot_shape.py": 36,
     "server/app/workflows/start_node.py": 87,
     "server/app/workflows/start_text_input.py": 59,
+    "server/app/workflows/validation_view.py": 65,
     "server/app/workflows/validator.py": 30,
     "server/app/workflows/velites_command.py": 60,
     "server/app/workflows/worker_output_validation.py": 47,

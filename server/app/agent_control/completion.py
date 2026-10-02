@@ -147,7 +147,8 @@ class AgentCompletionHandler:
         # lease-finish generation gate (ExecutionResult.staged_file_moves),
         # so a stale (post-reset) completion can never overwrite the new
         # generation's local inputs. view_dir is the read view every
-        # pre-finish consumer (validation, shard read, mirror upload) uses.
+        # pre-finish consumer (shard read, mirror upload) uses; validation
+        # derives its declared inputs+outputs view from it (#757).
         staging_cm: tempfile.TemporaryDirectory[str] | None = None
         staged_moves: list[tuple[Path, Path]] = []
         view_dir = job_dir
