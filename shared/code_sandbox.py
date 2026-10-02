@@ -54,6 +54,18 @@ SANDBOX_BINARY_CANDIDATES: tuple[str, ...] = ("velites-sandbox", "velites")
 BUNDLED_SANDBOX_DIR = Path(__file__).resolve().parents[1] / "data" / "bin"
 
 
+def is_consumable_binary(path: Path) -> bool:
+    """Resolver 的接受谓词：常规文件且可执行（X_OK）。
+
+    单一事实源（#835 codex R5 P2）：解析 walk 的自带副本步、
+    ``worker/binary_resolution.resolve_binary`` 与部署 planner 的判鲜
+    （scripts/velites_deploy_plan.py 的 check）共用——判鲜谓词弱于接受
+    谓词时，执行位丢失（无 -p 拷贝/权限变更）的副本会被判「新鲜」，
+    脚本跳过刷新而 resolver 实际跳过该副本，Worker 回落旧副本或启动
+    失败。PATH 步（shutil.which）天然要求 X_OK，同一口径。"""
+    return path.is_file() and os.access(path, os.X_OK)
+
+
 def sandbox_resolution_walk() -> list[tuple[str, str]]:
     """All filesystem locations the sandbox resolver may hit, in order.
 
@@ -67,14 +79,13 @@ def sandbox_resolution_walk() -> list[tuple[str, str]]:
     （scripts/ensure-velites.sh 经 scripts/velites_deploy_plan.py）与
     对账侧（worker/runtime/staleness.py）一律从本 walk 推导目标与对账
     对象，不再平行手写查找逻辑——脚本与 resolver 各持一份解析模型正是
-    #831/#835 四轮 codex 同构 finding 的根源（fast-path 短路、PATH 目录
+    #831/#835 多轮 codex 同构 finding 的根源（fast-path 短路、PATH 目录
     分叉、漏刷家族成员全都是两份模型失同步的实例）。
     """
     walk: list[tuple[str, str]] = []
     for name in SANDBOX_BINARY_CANDIDATES:
         bundled = BUNDLED_SANDBOX_DIR / name
-        hit = str(bundled) if bundled.is_file() and os.access(bundled, os.X_OK) else ""
-        walk.append((name, hit))
+        walk.append((name, str(bundled) if is_consumable_binary(bundled) else ""))
         walk.append((name, shutil.which(name) or ""))
     return walk
 

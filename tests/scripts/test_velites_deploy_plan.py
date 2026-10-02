@@ -173,6 +173,72 @@ def test_check_reports_every_stale_member(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert planner._check("hash-v1", str(dest)) == ["velites-sandbox"]
 
 
+def test_check_flags_non_executable_copy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """codex R5 P2：判鲜谓词必须与 resolver 的接受谓词同口径（is_file +
+    X_OK）——执行位丢失（无 -p 拷贝/权限变更）+ stamp 匹配的副本会被
+    resolver 跳过，按「存在」判鲜会让脚本宣称最新而 Worker 回落旧副本
+    或启动失败。谓词单一事实源：shared.code_sandbox.is_consumable_binary。"""
+    dest = tmp_path / "data" / "bin"
+    dest.mkdir(parents=True)
+    binary = dest / "velites"
+    _write_executable(binary)
+    _write_stamp(dest / "velites.src-stamp", "hash-v1")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled")
+
+    assert planner._check("hash-v1", str(dest)) == []
+
+    binary.chmod(binary.stat().st_mode & ~stat.S_IXUSR & ~stat.S_IXGRP & ~stat.S_IXOTH)
+    assert planner._check("hash-v1", str(dest)) == ["velites"]
+
+
+def test_is_consumable_binary_is_the_shared_acceptance_predicate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """接受谓词单一事实源钉子：resolve_binary 与解析 walk 都经由
+    is_consumable_binary 判定自带副本——绕开它私有实现 is_file/X_OK 会
+    重新引入「两份模型」（判鲜侧改谓词、解析侧不动，#835 的病根）。"""
+    import shutil as shutil_module
+
+    from shared.code_sandbox import BUNDLED_SANDBOX_DIR, is_consumable_binary
+    from worker import binary_resolution
+
+    bundled_dir = tmp_path / "bundle"
+    bundled_dir.mkdir()
+    binary = bundled_dir / "velites"
+    _write_executable(binary)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(
+        shutil_module,
+        "which",
+        lambda _name: "/nonexistent/velites",  # PATH 兜底不命中
+    )
+
+    calls: list[Path] = []
+    real = code_sandbox.is_consumable_binary
+
+    def counting(path: Path) -> bool:
+        calls.append(path)
+        return real(path)
+
+    monkeypatch.setattr(code_sandbox, "is_consumable_binary", counting)
+
+    # PATH 兜底不命中时，bundled 副本经谓词接受。
+    assert binary_resolution.resolve_binary("velites") == str(binary)
+    from shared.code_sandbox import resolve_sandbox_binary, sandbox_resolution_walk
+
+    resolve_sandbox_binary()
+    walk = sandbox_resolution_walk()
+    assert calls, "resolve_binary/walk 必须经由 is_consumable_binary"
+    # bundled 步的判定来自同一谓词。
+    assert (str(binary) in [hit for _, hit in walk]) == is_consumable_binary(binary)
+    # 执行位丢失 → bundled 步不再命中，resolver 回落 PATH（期望行为：
+    # 谓词是「接受」的单一事实源，不是解析的短路开关）。
+    binary.chmod(binary.stat().st_mode & ~stat.S_IXUSR & ~stat.S_IXGRP & ~stat.S_IXOTH)
+    assert binary_resolution.resolve_binary("velites") == "/nonexistent/velites"
+    assert str(binary) not in [hit for _, hit in sandbox_resolution_walk()]
+    assert bundled_dir != BUNDLED_SANDBOX_DIR  # 值导入 re-export 不随 patch 走（#496 已钉）
+
+
 def test_plan_contract_main_bin_always_present(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

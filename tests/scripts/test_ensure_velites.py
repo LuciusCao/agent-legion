@@ -401,11 +401,42 @@ def test_prod_up_sequence_refreshes_stale_bundled_copy(
 
 
 def test_script_fails_loudly_when_planner_is_broken(tmp_path: Path) -> None:
-    """planner 不可用（损坏/删失/解释器缺失）时脚本必须非零退出并点名，
-    而不是回退到任何内置安置逻辑——部署面的决策面只有 planner 一个。"""
+    """planner 不可用（损坏/删失/解释器缺失）时脚本必须非零退出**并打印
+    捕获的诊断**，而不是回退内置安置逻辑或无提示死亡——部署面的决策面
+    只有 planner 一个（codex R5 P2：set -e 下赋值继承命令替换退出码，
+    曾在赋值处直接终止 shell，诊断 echo 永远执行不到，失败无提示）。"""
     main, env, log = _setup(tmp_path)
     (main / "scripts" / "velites_deploy_plan.py").unlink()
     result = _run(main, env, "--dest", "data/bin")
     assert result.returncode != 0
-    # bash 的报错会带解释器/脚本路径；关键是不再产出「已安装」假象。
+    # 诊断可见：捕获的 planner 报错（含其 stderr）必须到达脚本的 stderr。
+    assert "velites_deploy_plan.py 执行失败" in result.stderr
+    assert "No such file" in result.stderr or "can't open file" in result.stderr
+    # 关键是不再产出「已安装」假象，也不静默宣称最新。
     assert "已安装到" not in result.stdout
+    assert "已是最新" not in result.stdout
+
+
+def test_script_refreshes_copy_that_lost_exec_bit(
+    tmp_path: Path,
+) -> None:
+    """codex R5 P2 行为级回归：stamp 匹配但执行位丢失（无 -p 拷贝/权限
+    变更）→ 判鲜必须按 resolver 的接受谓词（is_file + X_OK）判需重建，
+    脚本重装后副本恢复可执行——否则脚本宣称最新而 Worker 实际跳过该
+    副本、回落 PATH 旧版本或启动失败。"""
+    main, env, log = _setup(tmp_path)
+    bundled_dir = main / "data" / "bin"
+
+    assert _run(main, env, "--dest", "data/bin").returncode == 0
+    log.write_text("")
+
+    # 执行位丢失，stamp 与 SRC_ID 均不变。
+    binary = bundled_dir / "velites"
+    binary.chmod(binary.stat().st_mode & ~stat.S_IXUSR & ~stat.S_IXGRP & ~stat.S_IXOTH)
+
+    result = _run(main, env, "--dest", "data/bin")
+    assert result.returncode == 0, result.stderr
+    assert "跳过构建" not in result.stdout
+    assert "已安装到" in result.stdout
+    assert binary.read_text() == "binary-for-hash-v1\n"
+    assert binary.stat().st_mode & stat.S_IXUSR

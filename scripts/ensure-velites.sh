@@ -62,8 +62,14 @@ _plan_python() {
 _run_plan() {
     local python
     python="$(_plan_python)"
+    # set -e 陷阱（#835 codex R5 P2）：赋值语句继承命令替换的退出码，
+    # planner 非零退出会在赋值处直接终止 shell——下面的诊断 echo 永远
+    # 执行不到，而 stderr 已被 2>&1 捕进 PLAN_OUTPUT，失败变成无提示
+    # 退出。显式关 -e 捕获退出码，先打印诊断再退出。
+    set +e
     PLAN_OUTPUT="$("$python" scripts/velites_deploy_plan.py "$@" 2>&1)"
     PLAN_RC=$?
+    set -e
     if [[ "$PLAN_RC" -ne 0 ]]; then
         echo "velites_deploy_plan.py 执行失败（rc=$PLAN_RC）：$PLAN_OUTPUT" >&2
         exit 1

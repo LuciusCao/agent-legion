@@ -21,7 +21,10 @@ resolver：脚本的查找逻辑从此**问** resolver，而不是猜。
   路径推导 wrapper 位置是错的，必须按名独立 which）。
 - freshness 单元：整个 velites 构建产物是**一个指纹单元**（家族成员共享
   同一 src-stamp）——resolver 消费的是候选集合整体，按单工件判鲜就是
-  #835 fast-path 短路的形状。
+  #835 fast-path 短路的形状。判鲜**谓词**同样来自 resolver：接受谓词
+  ``shared.code_sandbox.is_consumable_binary``（is_file + X_OK），
+  执行位丢失的副本按需重建——谓词弱于 resolver 会让脚本宣称最新而
+  Worker 实际跳过该副本（#835 codex R5 P2）。
 
 通道语义（两通道各管一段，prod-up 先后都跑）：
 
@@ -153,13 +156,19 @@ def _plan(dest_dir: str | None) -> list[tuple[str, str]]:
 
 
 def _check(src_id: str, dest_dir: str | None) -> list[str]:
-    """家族级判鲜：任一目标位置的 bin 缺失或 stamp 不符即整族重建。"""
+    """家族级判鲜：任一目标位置的 bin 缺失、不可执行或 stamp 不符即整族重建。
+
+    判鲜谓词与 resolver 的接受谓词同口径（is_consumable_binary：
+    is_file + X_OK）——执行位丢失（无 -p 拷贝/权限变更）的副本
+    resolver 会跳过，按「存在」判鲜会让脚本宣称最新而 Worker 回落旧
+    副本或启动失败（#835 codex R5 P2）。stamp 缺失/损坏/不匹配统一按
+    「不可判鲜 → 重建」处理（与主脚本对 Release 产物的既有语义一致）。"""
+    from shared.code_sandbox import is_consumable_binary
+
     stale: set[str] = set()
     for member, path in _resolve_deployment_targets(dest_dir):
         binary_path = Path(path)
-        # stamp 缺失/损坏/不匹配统一按「不可判鲜 → 重建」处理（与主脚本对
-        # Release 产物的既有语义一致）；二进制缺失同理。
-        if not binary_path.exists() or _read_stamp(binary_path) != src_id:
+        if not is_consumable_binary(binary_path) or _read_stamp(binary_path) != src_id:
             stale.add(member)
     return sorted(stale)
 
