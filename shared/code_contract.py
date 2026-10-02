@@ -24,6 +24,17 @@ CODE_BUNDLE_LIBS_DIR = "workspace_libs"
 # kind='code' results (batch 2 decision 10); the Host promotes it to the
 # run's canonical log path.
 CODE_RESULT_LOG_MEMBER = "node.log"
+# 结果归档里携带直传产物清单的保留成员名（#755 codex P1）：结果头字节预算
+# 装不下直传 dict ref 清单时，Worker 把完整 {"name": ref} 映射写成该成员
+# （首成员），头里只留 output_artifacts_in_archive 标记；产物字节已在 S3
+# （presigned 通道），不重复传输。Worker 写入（worker/upload/report.py 经
+# result_manifest.py），Host 读取（server/app/agent_broker/
+# result_output_manifest.py）；该成员永不进 expected outputs 提升面。
+RESULT_OUTPUT_ARTIFACTS_MEMBER = "result-output-artifacts.json"
+# 与清单成员配套的头部布尔标记键（同 #755 codex P1 协议）：Worker 写
+# （worker/upload/report.py 溢出臂），Host 读（agent_worker_results.py 的
+# parse_result_metadata）；单一事实来源在此，两侧字面量漂移即断。
+RESULT_OUTPUT_ARTIFACTS_FLAG = "output_artifacts_in_archive"
 # Mirrors workspace_libs/node_sdk.py NODE_RUNTIME_DIR / AUTH_FAILURE_MARKER.
 # node_sdk must stay import-self-contained (the code bundle ships only the
 # workspace_libs snapshot), so that mirror keeps a comment pointer instead of

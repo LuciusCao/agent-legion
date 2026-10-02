@@ -8,7 +8,6 @@ a one-shot persisted-transcript injection into the first post-resume prompt.
 from __future__ import annotations
 
 import json
-import sys
 import threading
 from pathlib import Path
 
@@ -27,85 +26,17 @@ from server.app.studio_chat.resume_context import (
     build_resume_transcript,
 )
 from server.app.studio_chat.runtime import SessionRuntime
-from server.app.studio_chat.service import StudioChatService
-from tests.helpers import wait_for_predicate
+from tests.helpers import studio_chat_fixtures, wait_for_predicate
 from tests.postgres_support import TEST_DATABASE_URL
 
-FAKE_AGENT = Path(__file__).resolve().parents[1] / "helpers" / "fake_acp_agent.py"
-
-TEXT_SCRIPT = {
-    "capabilities": {"loadSession": False, "mcpCapabilities": {"http": False, "sse": False}},
-    "on_prompt": [
-        {
-            "notify": {
-                "sessionUpdate": "agent_message_chunk",
-                "content": {"type": "text", "text": "pong"},
-            }
-        }
-    ],
-}
-
-LOAD_SCRIPT = {
-    **TEXT_SCRIPT,
-    "capabilities": {"loadSession": True, "mcpCapabilities": {"http": False, "sse": False}},
-}
-
-LOAD_FAILING_SCRIPT = {**LOAD_SCRIPT, "load_error": True}
-
-
-class RecordingBus:
-    """EventBus stand-in capturing published (channel, payload) pairs."""
-
-    def __init__(self) -> None:
-        self.events: list[tuple[str, dict]] = []
-
-    def attach_loop(self, loop) -> None:
-        del loop
-
-    def publish(self, channel: str, payload: str, *, replaceable: bool = False) -> None:
-        self.events.append((channel, json.loads(payload)))
-
-    def subscribe(self, channel: str):
-        raise NotImplementedError
-
-    def unsubscribe(self, channel: str, queue) -> None:
-        del channel, queue
+TEXT_SCRIPT = studio_chat_fixtures.TEXT_SCRIPT
+LOAD_SCRIPT = studio_chat_fixtures.LOAD_SCRIPT
+LOAD_FAILING_SCRIPT = studio_chat_fixtures.LOAD_FAILING_SCRIPT
+chat = studio_chat_fixtures.chat
 
 
 def _wait_for(condition, timeout: float = 20.0, interval: float = 0.05) -> None:
     wait_for_predicate(condition, timeout=timeout, interval=interval)
-
-
-@pytest.fixture
-def chat(job_db, settings, tmp_path):
-    bus = RecordingBus()
-    service = StudioChatService(job_db, settings, bus)
-    store = StudioAgentRegistryStore(TEST_DATABASE_URL)
-
-    def register(script: dict, agent_id: str = "fake-agent") -> Path:
-        script_path = tmp_path / f"{agent_id}-script.json"
-        script_path.write_text(json.dumps(script), encoding="utf-8")
-        store.put(
-            {
-                "api_base": "http://127.0.0.1:8000",
-                "agents": [
-                    {
-                        "id": agent_id,
-                        "label": "Fake Agent",
-                        "command": sys.executable,
-                        "args": [str(FAKE_AGENT), str(script_path)],
-                    }
-                ],
-            }
-        )
-        return script_path
-
-    workspace_id = job_db.create_workspace(default_workflow_key="demo_workflow", name="Chat WS")[
-        "id"
-    ]
-    user_id = str(job_db.create_user("chat-user", password_hash=None)["id"])
-    yield service, bus, register, workspace_id, user_id
-    service.shutdown()
 
 
 def _read_sink(script_path: Path) -> list[dict]:

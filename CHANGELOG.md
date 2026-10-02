@@ -12,6 +12,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 - SeaweedFS「假写满」（PutObject 全量 503 / master 日志 no free volumes，磁盘远未写满）：`-volume.max=0` 的自动推导在 volume server 注册信息 stale 时把可写槽位判成 0。上限改为显式可配（见上方部署警示），运维文档补充「可写槽位耗尽」机制说明与恢复步骤（重启重注册 + `volume.deleteEmpty` 回收空 volume）。
+- agent 进程非零退出后无法归因（issue #748）：批量运行节点偶发失败时 error_message 只剩 `Agent process exited 1`——agent 子进程的 stderr 虽在 spawn 侧合并进 stdout 管道并随 pump 落进 events.jsonl，但上传前的压缩 rewrite 只保留渲染相关 JSON 事件，非 JSON 的 stderr 文本（崩溃栈、panic 头）被静默丢弃，事后只剩退出码。现上传准备阶段在同一趟扫描里把这部分保尾抢救下来（硬上限 8KB，#637 教训：留痕必须有界）写入 run 目录 `agent-stderr.log`（随归档交付 Host）；非零退出（非 130 取消、非 124 超时——两者保持既有归因语义）时 error_message 追加尾部末行摘要（`Agent process exited 3: ValueError: corrupt tool output payload` 形态，外部 error_summary 240 字符截断面信息密度最优）、result metadata 新增可选 `agent_stderr_tail` 字段（4000 字符上限、各面统一保尾截断——tail 保尾是因崩溃栈在流末尾，Host 侧 `parse_result_metadata` 防御性截断后随 outcome_json 落库，`execution.finished` 结构化事件带 `stderr_tail_excerpt`）；124 超时路径的 error_message 顺带从裸退出码改为明确的 `Agent process timed out`（failure_classification 的 timeout 规则按 exit_code 124 判定，行为不变），`agent_stderr_tail` 证据面照常携带（归因面与证据面解耦）。崩溃源定位（含工具输出乱码线索的 #747 同簇复核）是后续 issue 的事。
 
 ## [0.7.13] - 2026-09-26
 

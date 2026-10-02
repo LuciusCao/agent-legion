@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING, Any
 
 from server.app.auth.scoped_tokens import renew_scoped_token
@@ -11,9 +10,11 @@ from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import compaction
+from server.app.studio_chat.background_wakeup import prepare_rearm
 from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.resume_context import prepare_resume_prompt
 from server.app.studio_chat.token_admission import require_live_run_token
+from server.app.studio_chat.turn_state import open_turn
 
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
@@ -50,6 +51,7 @@ def send_message(
             runtime, service._db, session_id, first_prompt, prompt_text
         )
         require_live_run_token(service, session_id, runtime)
+        commit_wakeup = prepare_rearm(runtime)
         message = None
 
         def accept() -> None:
@@ -60,13 +62,8 @@ def send_message(
             # Finish local state before the queue becomes visible: replay
             # filtering can inspect loading before acquiring runtime.lock.
             runtime.resume_transcript_pending = False
-            runtime.stream.reset()
-            runtime.loading = False
-            runtime.turn_open = True
-            runtime.turn_started_at = time.monotonic()
-            runtime.turn_update_count = 0
-            runtime.turn_slash_command = text.lstrip().startswith("/")
-            runtime.turn_may_compact = text.lstrip().startswith("/compact")
+            open_turn(runtime, text)
+            commit_wakeup()
 
         try:
             queued = runtime.handle.send_prompt(prompt_text, accept=accept)

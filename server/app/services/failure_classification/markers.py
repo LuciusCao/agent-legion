@@ -56,7 +56,11 @@ _DB_POOL_MARKERS = (
     "connection pool exhausted",
     "couldn't get a connection after",
 )
-_PROCESS_EXITED_RE = re.compile(r"^Agent process exited (\d+)$")
+# #748: the crash-message form may carry a stderr summary after a colon
+# ("Agent process exited 3: ValueError: boom"); the group stays the exit
+# code, the summary is matched separately by the rules table (see
+# classify_failure — the summary never feeds the substring rules).
+_PROCESS_EXITED_RE = re.compile(r"^Agent process exited (\d+)(:|$)")
 _TERMINATED_WORD_RE = re.compile(r"\bterminated\b")
 _EXECUTOR_NOT_REGISTERED_RE = re.compile(r"^Executor '.+' is not registered$")
 _INTERACTION_CONTRACT_RE = re.compile(r"^Interaction \d+.*(is missing|has unknown type)")

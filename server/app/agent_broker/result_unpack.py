@@ -24,6 +24,7 @@ from server.app.agent_broker.agent_bundle import (
 )
 from server.app.agent_broker.claim_paths import claim_log_path
 from server.app.storage_paths import ensure_dir_once
+from shared.stderr_tail import AGENT_STDERR_FILENAME, STDERR_TAIL_BYTES
 
 
 def safe_relative_dir(value: str) -> PurePosixPath | None:
@@ -63,11 +64,15 @@ def plan_agent_result_moves(
     names; nothing is moved here — the caller decides where the promotion
     happens (``unpack_agent_result`` moves immediately; the completion path
     defers it into the lease-finish generation gate, #759 review P1-1).
-    Worker archives are untrusted: nothing outside ``expected``, that single
-    log file, and — for kind='code' results — the fixed ``node.log`` member
-    may land on disk, so a Worker cannot clobber other nodes' inputs/outputs
+    Worker archives are untrusted: nothing outside ``expected``, the run
+    dir's ``events.jsonl`` and size-capped ``agent-stderr.log`` (#748), and
+    — for kind='code' results — the fixed ``node.log`` member may land on
+    disk, so a Worker cannot clobber other nodes' inputs/outputs
     or plant files to spoof server-side decisions (log display and token
-    parsing are read-only consumers).
+    parsing are read-only consumers). The reserved
+    ``result-output-artifacts.json`` member (#755 codex P1, the overflow
+    fallback's direct-ref manifest) is therefore never promoted here — its
+    only reader is the commit layer (result_output_manifest.py).
     """
     moves: list[tuple[Path, Path]] = []
     produced: list[str] = []
@@ -84,6 +89,12 @@ def plan_agent_result_moves(
         events_source = staging_dir / run_dir_relative / "events.jsonl"
         if events_source.is_file():
             moves.append((job_dir / run_dir_relative / "events.jsonl", events_source))
+        # #748: the redacted crash-evidence tail lands beside events.jsonl
+        # (the job dir's retained run dir); a member larger than any tail a
+        # Worker writes is not evidence and is left in staging.
+        stderr_source = staging_dir / run_dir_relative / AGENT_STDERR_FILENAME
+        if stderr_source.is_file() and stderr_source.stat().st_size <= STDERR_TAIL_BYTES:
+            moves.append((job_dir / run_dir_relative / AGENT_STDERR_FILENAME, stderr_source))
     if log_target is not None:
         log_source = staging_dir / CODE_RESULT_LOG_MEMBER
         if log_source.is_file():
@@ -101,7 +112,7 @@ def unpack_agent_result(
     log_target: Path | None = None,
 ) -> None:
     """Extract into a staging dir, then promote declared expected outputs plus
-    the Worker run dir's ``events.jsonl``.
+    the Worker run dir's ``events.jsonl`` and ``agent-stderr.log``.
 
     Immediate-promotion variant for tests and other non-gated callers; the
     completion path instead extracts with ``extract_agent_result`` and

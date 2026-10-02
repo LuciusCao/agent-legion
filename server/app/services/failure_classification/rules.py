@@ -54,6 +54,18 @@ TRANSIENT_RETRY_DETAILS = frozenset({DETAIL_DB_POOL_TIMEOUT, DETAIL_CMS_REQUEST}
 def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, str]:
     """Map one failed run's exit code and message to (category, detail)."""
     message = error_message or ""
+    # #748 review P2: a crash message carries a stderr summary after the
+    # exit-code line ("Agent process exited 3: ValueError: boom"). The
+    # summary is agent-emitted free text — it must not feed ANY rule below
+    # ("timed out" in a stack line would fake a timeout, "terminated" a
+    # provider_stream): ``message`` is reduced to the bare exit-code line,
+    # so only the code itself (124 → timeout) and the exited-form fallback
+    # (unknown/execution_error) can classify a crash message. True
+    # crash-cause attribution rides agent_stderr_tail (archive + metadata),
+    # which the classification surface deliberately never reads.
+    exited = _PROCESS_EXITED_RE.match(message)
+    if exited is not None and exited.group(2) == ":":
+        message = message[: exited.end() - 1]
 
     if message.startswith(_REVIEW_REJECTED_MARKERS):
         return CATEGORY_BUSINESS, "review_rejected"
@@ -86,7 +98,6 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     if any(marker in message for marker in _SOURCE_MISSING_MARKERS):
         return CATEGORY_BUSINESS, "source_missing"
 
-    exited = _PROCESS_EXITED_RE.match(message)
     if (
         exit_code == TIMEOUT_EXIT_CODE
         or (exited is not None and exited.group(1) == "124")

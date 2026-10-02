@@ -1206,6 +1206,55 @@ exemptions:
   ceiling: 213
   expires: 2026-12-31
 - check: architecture.file_budget
+  path: worker/host/transfer.py
+  reason: '#748 R2 复审 P2-1：X-Agent-Result 头预算的产物清单降级——output_artifacts
+    直传 ref 形态（128 条 ~25KB）把头推破 h11 16KB，成功运行同样中招（成功上报
+    也带产物清单）。收缩循环为多级降级（tail → error_message → command（#755
+    对抗复审 P2-1b：纯观测面，先于清单降级）→ 产物清单按 ref 形态分流：直传
+    dict ref 抛 ResultHeaderOverflow 整体换轨归档内嵌，CAS 形态才走最后手段
+    截断 + output_artifacts_truncated/total 标记）。防御性正确性代码使有效行
+    126→142；rebase 到 0.7.13 基线叠加 report() 的 stop 取消通道形参（基线新
+    增，与 #748 的 **_extra 兼容形参并存）进一步到 161，#755 command 降级段
+    到 165（均超 growth_allowance 带）。时间盒：若结果头改走 body 或产物清单
+    下沉独立通道（协议 v6 候选），收缩循环随之退役并重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 171
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: worker/upload/stderr_evidence.py
+  reason: '#748 Worker 侧密钥注册表：os.environ 秘密命名值 + register_secrets
+    注册的 worker 配置 environment 块（secret 注入 agent 子进程的官方通道，
+    含线程安全锁）+ 匹配域变体（CRLF 归一、尾空白、surrogateescape 忠实字节）
+    + sk-/ghp_/gho_/xox[bap]-/JWT/Bearer 形态族。#755 起以区间报告
+    （secret_spans）供 shared/stderr_tail 的一次脱敏单切点使用，
+    max_secret_chars 给出 lookback 长度。防御性正确性代码使有效行 47→78
+    （带内）。时间盒：脱敏面若与 worker 配置加载统一收口（敏感值集中注册），
+    此处重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 67
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: worker/upload/report.py
+  reason: '#748 R3（codex review P1）起的结果头溢出处置模块。#755 codex P1
+    协议换代：回退从「清规格重跑 prepare + /api/artifacts CAS 通道重传产物」改为
+    「直传 ref 清单写进归档首成员 result-output-artifacts.json + 头里只带
+    output_artifacts_in_archive 标记」（产物字节已在 S3，不再双传；旧链的
+    _embedded_artifacts_bytes 预检与 CAS 重传块随之删除，预检挪进
+    worker/upload/embed_precheck.py 供 bulk 车道的 DirectUploadError 臂复用）。
+    余量构成：report 车道的租约退避循环 + 一次性溢出闸 + embed 失败的
+    诚实判败臂。#755 codex R8 P2：embed 后归档上限重校——claim 下发
+    max_archive_bytes 经 max_bytes 传进 embed（替换前按 staging 实际大小
+    拒写）、替换后 re-stat 兜底臂（回收空归档诚实判败）、判败通道的
+    可提交性守卫 _ensure_submittable_archive（原归档本身超限的先回收，
+    否则重报必撞 413 被当终态删 marker），有效行 107→144。时间盒：
+    结果上报循环与 bulk 车道的判败/重试形态统一收口时，此处重登预算。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
+  ceiling: 144
+  expires: 2026-12-31
+- check: architecture.file_budget
   path: server/app/routes/runs.py
   reason: '#734 tags the three runs routes with API_SCOPE_INTAKE_TAG so the
     api-scope admission surface derives from the matched route object

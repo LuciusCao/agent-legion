@@ -8,8 +8,8 @@ import pytest
 from server.app.auth.sessions import hash_token
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import spawn as spawn_module
+from tests.helpers import studio_chat_fixtures as resume_tests
 from tests.helpers import wait_for_predicate
-from tests.services import test_studio_chat_resume_service as resume_tests
 
 chat = resume_tests.chat
 

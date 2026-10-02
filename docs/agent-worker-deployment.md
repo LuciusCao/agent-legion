@@ -310,7 +310,29 @@ Host 孤儿 sweeper 回收。升级必须遵循 **Host first, Worker second**：
 携带 `host_protocol_version`，新 Worker 若发现 Host 低于自身协议版本（旧响应缺少
 该字段也视为旧 Host）会以退出码 2 fail-closed，不进入 claim，避免旧 Host 把
 runtime-scoped 模型降成二元 provider/model 后误投到另一个 runtime。确认 Host 健康
-后再逐台重启 Worker。
+后再逐台重启 Worker。**结果上报头（#748）**：`X-Agent-Result` 携带原始 UTF-8
+字节（CJK 错误摘要是非 ASCII 头值），Worker → Host 链路上的反向代理 / LB / 网关
+必须容忍非 ASCII 头值透传（改写或拒收会导致结果不可投递、租约过期重投）。该线
+格式变更（ensure_ascii 字符串 → 原始 UTF-8 字节）不升协议版本，因此升级纪律上
+**Host 必须先于 Worker 升级**：反向混编（新 Worker + 旧 Host）时 `error_message`
+/ `agent_stderr_tail` 的 CJK 载荷在旧 Host 上按 latin-1 视图显示为乱码（结构与成
+败判定不受影响）；回滚同理须 Host/Worker 同退——只退 Host 即构成同一反向混编窗
+口，CJK 头值 mojibake（仅可读性受损）。同头受 14 KiB 字节预算约束，超预算时 Worker 按 stderr 尾部 →
+error_message → command（纯观测面，清空）→ 产物清单的顺序降级；产物清单面按引用
+形态分流——直传 dict 引用抛溢出信号后走「清单进归档」协议（#755）：Worker 把完整
+direct-ref 清单写成结果归档首成员 `result-output-artifacts.json`（产物字节已在 S3，
+不重复传输），头里只带 `output_artifacts_in_archive` 布尔标记，Host 在结果 commit 时
+从归档读回清单（读不回则诚实判败 failed；cancelled 不翻转）；嵌入重写按 claim 下发的
+`max_archive_bytes` 在原子替换前重校归档实际大小（清单成员可能把低于但接近上限的原
+归档推过 Host 413 大小门禁），超限不重报大归档，走同一诚实判败通道（原归档可提交则
+原样保留证据、本身也超限则回收空归档）；CAS 字符串引用
+（~78B/条，天然落预算）才走最后手段截断（清单降级为空并打
+`output_artifacts_truncated` / `output_artifacts_total` 标记）；CAS 截断形态下产物
+字节本来就在归档里，Host 见 truncated 标记跳过「空清单改判 failed」，改从归档暂
+存视图判定产物齐全与否。另一直传保护面：直传失败换轨（tar 内嵌产物 + CAS 通道）
+前 Worker 按 claim 下发的 `max_archive_bytes`（Host 实例设置实际值，旧 Host 未下发
+时回落 64 MiB 默认）做体积预检，超「上限 − 1 MiB 余量」不换轨、本地诚实判败，
+避免重内嵌必撞 Host 413 丢结果后的全量重跑循环。
 
 **workflow_key 兼容窗口期（issue #211，截止 2026-10-31）**：claim 响应中的
 `workflow_key` 字段已 deprecated（与 `workspace_id` 恒等，schema v62 绑定）。字段
