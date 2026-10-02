@@ -257,6 +257,53 @@ describe('InstanceSettingsSection', () => {
     expect(updateInstanceSettings).not.toHaveBeenCalled()
   })
 
+  it('rejects presign TTL outside the contract range before saving', async () => {
+    renderSection()
+    fireEvent.click(await screen.findByRole('button', { name: '展开高级参数' }))
+
+    // #739 codex P2：契约 ge=60 / le=604800 在客户端拦截（上下界同权）。
+    const ttl = screen.getByLabelText('外部产物下载直连 URL 有效期（秒）')
+    expect(ttl).toHaveAttribute('min', '60')
+    expect(ttl).toHaveAttribute('max', '604800')
+
+    fireEvent.change(ttl, { target: { value: '59' } })
+    fireEvent.click(screen.getByText('保存实例设置'))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '外部产物下载直连 URL 有效期（秒） 必须不小于 60'
+    )
+    expect(updateInstanceSettings).not.toHaveBeenCalled()
+
+    fireEvent.change(ttl, { target: { value: '604801' } })
+    fireEvent.click(screen.getByText('保存实例设置'))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '外部产物下载直连 URL 有效期（秒） 必须不大于 604800'
+    )
+    expect(updateInstanceSettings).not.toHaveBeenCalled()
+
+    // 边界接受侧：60 秒与 7 天均为合法值，照常提交。
+    fireEvent.change(ttl, { target: { value: '60' } })
+    fireEvent.click(screen.getByText('保存实例设置'))
+    await waitFor(() => expect(updateInstanceSettings).toHaveBeenCalled())
+  })
+
+  it('rejects spot-check percent above 100 before saving', async () => {
+    renderSection()
+    fireEvent.click(await screen.findByRole('button', { name: '展开高级参数' }))
+
+    fireEvent.change(
+      screen.getByLabelText('产物校验抽检比例 %（0 全信任，100 全核验）'),
+      {
+        target: { value: '101' },
+      }
+    )
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '产物校验抽检比例 %（0 全信任，100 全核验） 必须不大于 100'
+    )
+    expect(updateInstanceSettings).not.toHaveBeenCalled()
+  })
+
   it('shows the load error when GET fails', async () => {
     vi.mocked(getInstanceSettings).mockRejectedValue(new Error('HTTP 403'))
 
