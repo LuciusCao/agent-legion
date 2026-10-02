@@ -1,6 +1,6 @@
 /**
  * dockStack 纯逻辑测试（#801 codex P1/轮 2，node 环境）：入栈/置顶/出栈、
- * Esc 栈顶判定、栈位→z-index 映射与 999 上限（低于 Toast 1000）。
+ * Esc 栈顶判定、栈位→z-index 映射与 999 上限（低于 Toast）。
  */
 import { describe, it, expect, vi } from 'vitest'
 import {
@@ -43,7 +43,7 @@ describe('dockStack', () => {
     expect(dockStackZIndex(Symbol('never'))).toBe(900)
   })
 
-  it('栈深超过上限时 z-index 钳在 999（低于 Toast 1000）', () => {
+  it('栈深超过上限时 z-index 钳在 999（低于 Toast）', () => {
     const ids: symbol[] = []
     for (let i = 0; i < 105; i += 1) {
       const id = Symbol(`d${i}`)

@@ -1,6 +1,6 @@
 /* Studio 浮动功能岛（#799）：半透明 + 毛玻璃 + 8px 圆角 + 阴影，与
- * AgentPanelDock 同一浮层语言；z 900 与 Dock 同档（不撞 Toast 1000 /
- * TokenUsage 1190 / MUI Modal 1300，分层契约见 AgentPanelDock.module.css）。 */
+ * AgentPanelDock 同一浮层语言；z 900 与 Dock 同档（低于抽屉 / Toast /
+ * MUI Modal，全局刻度见 lib/zLayers.ts）。 */
 
 /* 岛的绝对定位锚点：撑满父级剩余高度，MobileNav/分栏在普通流、岛绝对
  * 定位浮在其上。 */

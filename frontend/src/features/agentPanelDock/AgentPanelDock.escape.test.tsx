@@ -21,6 +21,7 @@ import type { ReactElement } from 'react'
 import { AgentPanelDock } from './AgentPanelDock'
 import { ArtifactPopover } from '../../components/artifact/ArtifactPopover'
 import { DagFullscreenDialog } from '../../components/dag/DagFullscreenDialog'
+import { Z_LAYERS } from '../../lib/zLayers'
 
 vi.mock('../../api/jobApi')
 
@@ -232,8 +233,8 @@ describe('AgentPanelDock Esc 栈（#801 codex P1：同页多实例只关栈顶�
         Number(wrapperB.style.zIndex)
       )
     )
-    // 上限契约：栈位映射的 z-index 永远低于 Toast 1000。
-    expect(Number(wrapperA.style.zIndex)).toBeLessThan(1000)
+    // 上限契约：栈位映射的 z-index 永远低于 Toast（全局刻度）。
+    expect(Number(wrapperA.style.zIndex)).toBeLessThan(Z_LAYERS.toast)
   })
 
   it('缩放开始也抬栈（#801 codex 轮 4 P2：resize 把手在 Paper 外，pointerdown capture 摸不到）', async () => {
