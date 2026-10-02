@@ -44,6 +44,8 @@ export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
   const { data: workerList } = useQuery({
     queryKey: queryKeys.agentWorkers(),
     queryFn: () => listAgentWorkers(),
+    // workspace 视图没有 fleet 过滤器，不读取或刷新实例级清单。
+    enabled: !workspaceId,
   })
   const workers = workerList ?? []
 

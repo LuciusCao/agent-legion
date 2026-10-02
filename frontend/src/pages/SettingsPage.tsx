@@ -17,6 +17,7 @@ import { PreviewConfigSection } from '../components/settings/PreviewConfigSectio
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
 import { WorkspaceApiTokensSection } from '../components/settings/WorkspaceApiTokensSection'
 import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
+import { WorkerConsoleGuide } from '../components/settings/WorkerConsoleGuide'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
 import styles from './SettingsPage.module.css'
 
@@ -154,6 +155,7 @@ export function SettingsPage() {
             <h2 className={styles.sectionTitle}>Agent 与 Worker</h2>
             <hr className={styles.sectionDivider} />
             <AgentRoutingSection />
+            <WorkerConsoleGuide isAdmin={isAdmin} />
             {isAdmin ? (
               <WorkerTokensSection workspaceId={workspaceId ?? ''} />
             ) : (

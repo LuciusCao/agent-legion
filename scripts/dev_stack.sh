@@ -167,6 +167,10 @@ cmd_up() {
     # node_modules 跑新代码（scripts/ensure-frontend-deps.sh，#810）。
     ./scripts/ensure-frontend-deps.sh
 
+    # 主控制台「打开 Worker 控制台」入口地址（AgentWorkersRuntimeConfig.console_url，
+    # env-only）：脚本只提供部署默认值；后端完成 dotenv 解析后再应用兜底，
+    # 不在 shell 中复制 dotenv 语法，也不覆盖操作者的地址或显式空值。
+    export AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL="http://127.0.0.1:${WORKER_PORT}"
     start_component "后端" "$BACKEND_PORT" dev-backend "$LOG_DIR/dev-backend.log"
     start_component "前端" "$FRONTEND_PORT" dev-frontend "$LOG_DIR/dev-frontend.log"
     # worker 唯一生效配置是状态副本（issue #323）；无状态副本的 worktree 跳过 Worker
