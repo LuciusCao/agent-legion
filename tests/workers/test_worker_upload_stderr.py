@@ -596,3 +596,93 @@ def test_max_secret_bytes_reports_longest_registered_value(
         stderr_evidence, "_extra_secret_values", frozenset({"密" * 100})
     )  # 300 字节
     assert max_secret_bytes() == 300
+
+
+# -- #755 codex P2-2：surrogateescape 形态的 env 密钥不炸不脱队 --
+
+
+def test_surrogateescape_env_secret_neither_crashes_nor_leaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#755 codex P2-2 复现：Linux 启动环境的非 UTF-8 字节经 surrogateescape
+    暴露为代理字符（\\udcff 一族），变量名带 TOKEN 标记。修复前
+    _secret_values 的严格 .encode("utf-8") 抛 UnicodeEncodeError——
+    prepare_result 对每次 agent 结果无条件经 max_secret_bytes 走到这里，
+    成功执行也被 prepare_or_failed 改判 failed 并丢弃归档。修复后字节口径
+    走 surrogateescape 对称编码（忠实往返、不炸），且密钥在匹配域
+    （errors="replace" 解码渲染）仍被脱敏覆盖——不静默丢弃（丢弃 = 泄漏
+    通道）。"""
+    from worker.upload.stderr_evidence import max_secret_bytes, redact_secrets
+
+    secret_bytes = b"gw-\xff-secret-material-" + bytes(range(0x80, 0x90))
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret_bytes.decode("utf-8", "surrogateescape"))
+
+    # 不炸，且字节口径是忠实往返（surrogateescape），不是替换后的近似值。
+    assert max_secret_bytes() >= len(secret_bytes)
+    # 匹配域形态（流侧 UTF-8 errors="replace" 解码后的 U+FFFD 渲染）整值命中。
+    echoed = secret_bytes.decode("utf-8", "replace")
+    redacted = redact_secrets(f"auth failed for {echoed}")
+    assert redacted == "auth failed for ***"
+    assert "secret-material" not in redacted
+
+
+def test_completed_run_with_surrogateescape_env_secret_not_flipped_to_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """端到端不改判：含 surrogateescape 密钥的 env 下，exit 0 的成功执行照常
+    completed——修复前 UnicodeEncodeError 从 max_secret_bytes 逃逸进
+    prepare，成功结果被改判 failed。"""
+    secret_bytes = b"gw-\xff-secret-material-abcdef123"
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret_bytes.decode("utf-8", "surrogateescape"))
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+    report = client.reports[0]
+    assert report["status"] == "completed"
+
+
+def test_crash_stderr_redacts_surrogateescape_env_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """端到端脱敏面：非 UTF-8 字节密钥被 agent 按原始字节回显进 stderr，流
+    侧 replace 解码后呈 U+FFFD 渲染——注册值含匹配域变体，三面
+    （error_message / metadata.agent_stderr_tail / 归档锚点）均无密钥残段。"""
+    secret_bytes = b"gw-\xff-secret-material-abcdef123"
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret_bytes.decode("utf-8", "surrogateescape"))
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    # _events_with_stderr 只能写合法 UTF-8 文本；非 UTF-8 回显直接写字节。
+    events = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker" / "events.jsonl"
+    events.write_bytes(b"auth failed for " + secret_bytes + b'\n{"type":"agent_end"}\n')
+    client = QueueFakeClient()
+    archived: dict[str, bytes] = {}
+    original_report = client.report
+
+    def report_and_capture(
+        execution_id: str, lease_id: str, metadata: dict, archive: Path
+    ) -> tuple[int, bytes]:
+        with tarfile.open(archive, "r:gz") as tar:
+            member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
+            extracted = tar.extractfile(member)
+            assert extracted is not None
+            archived[member.name] = extracted.read()
+        return original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_and_capture  # type: ignore[method-assign]
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=5))
+    queue.shutdown()
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    # 面 1+2：error_message + metadata.agent_stderr_tail（U+FFFD 渲染形态也
+    # 不外发——整值被替换为 ***）。
+    combined = report["error_message"] + report["agent_stderr_tail"]
+    assert "secret-material" not in combined
+    assert "***" in combined
+    # 面 3：归档锚点（落盘即脱敏）。
+    [archived_tail] = archived.values()
+    assert b"secret-material" not in archived_tail
+    assert archived_tail.count(b"***") >= 1

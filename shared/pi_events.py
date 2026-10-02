@@ -128,9 +128,13 @@ def scan_and_compress_pi_events(
     (``_display_form``: one trailing newline dropped) happens only AFTER
     redaction. Matching domain caveat: the file is decoded as UTF-8 with
     ``errors="replace"`` and universal newlines, so secrets are matchable
-    only as their UTF-8 text form with ``\n`` line endings — arbitrary
-    non-UTF-8 byte secrets can never whole-match (the ``\r\n``/``\r``
-    forms in the stream reach the matcher already translated to ``\n``).
+    only as their UTF-8 text form with ``\n`` line endings (the
+    ``\r\n``/``\r`` forms in the stream reach the matcher already
+    translated to ``\n``). Non-UTF-8 byte secrets match as their
+    replacement-char rendering: the Worker-side registry
+    (worker/upload/stderr_evidence.py, #755 codex P2-2) registers each
+    surrogateescape env value's faithful-bytes errors="replace" variant,
+    which is exactly the form such bytes take in this decoded domain.
 
     ``redact_secret_max_bytes`` (#755 codex P1) widens the redaction window
     past ``_REDACT_WINDOW_MARGIN`` to the caller's longest registered

@@ -56,8 +56,9 @@ _BEARER_SHAPE = re.compile(r"\b(Bearer\s+)[A-Za-z0-9._~+/-]{16,}")
 _SECRET_NAME_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL")
 
 # #748 R2 P3-4: the "too short to be a secret" skip uses BYTES, not chars —
-# 8 CJK chars are 24 bytes of real key material. Measured on the UTF-8
-# encoding, the same metric the outbound faces serialize to.
+# 8 CJK chars are 24 bytes of real key material. Measured on the faithful
+# byte form (_secret_bytes: UTF-8 + surrogateescape, symmetric with how
+# os.environ decodes), the same metric the outbound faces serialize to.
 _MIN_SECRET_BYTES = 8
 
 _REDACTED = "***"
@@ -88,6 +89,16 @@ def register_secrets(values) -> None:
         _extra_secret_values = _extra_secret_values | frozenset(str(value) for value in values)
 
 
+def _secret_bytes(value: str) -> bytes:
+    """密钥值的忠实字节形态（#755 codex P2-2）：os.environ 用文件系统策略
+    解码（Linux 启动环境的非 UTF-8 字节经 surrogateescape 暴露为代理字符，
+    如 \\udcff），对称的 surrogateescape 编码让字节忠实往返。严格 UTF-8
+    在代理字符上抛 UnicodeEncodeError——prepare_result 对每次 agent 结果
+    无条件经 max_secret_bytes 走到这里，一次逃逸即把成功执行改判 failed
+    并丢弃归档。"""
+    return value.encode("utf-8", "surrogateescape")
+
+
 def _secret_values() -> list[str]:
     """The secret literals to replace: this process's secret-named env values
     plus the registered config-environment values, LONGEST FIRST — a short
@@ -99,7 +110,13 @@ def _secret_values() -> list[str]:
     同一域——CRLF/CR 形态的值补「\\n 归一」变体（CRLF PEM 经解码翻译后
     整值命中），尾空白（典型 PEM 的尾换行）补 rstrip 变体（流恰好以
     「值 − 尾换行」收尾时整值仍命中）。变体更短，最长优先排序保证完整
-    值先于变体替换，不产生新残段。"""
+    值先于变体替换，不产生新残段。
+
+    #755 codex P2-2：surrogateescape 形态的值（非 UTF-8 字节密钥）在匹配
+    域呈现为其忠实字节的 errors="replace" 解码形态（U+FFFD 渲染）——只
+    注册原值永不命中，等于静默丢弃该密钥（丢弃 = 泄漏通道）。每个候选
+    补一条匹配域变体（忠实字节 → replace 解码；合法 UTF-8 值该变体与原
+    值相同，set 去重零成本），脱敏照常覆盖该密钥。"""
     values = {
         value
         for name, value in os.environ.items()
@@ -107,27 +124,32 @@ def _secret_values() -> list[str]:
     }
     with _secrets_lock:
         values.update(_extra_secret_values)
-    variants: set[str] = set()
+    candidates: set[str] = set()
     for value in values:
         normalized = value.replace("\r\n", "\n").replace("\r", "\n")
         for candidate in (value, normalized, value.rstrip(), normalized.rstrip()):
-            if len(candidate.encode("utf-8")) > _MIN_SECRET_BYTES:
-                variants.add(candidate)
+            candidates.add(candidate)
+            candidates.add(_secret_bytes(candidate).decode("utf-8", "replace"))
+    variants = {
+        candidate for candidate in candidates if len(_secret_bytes(candidate)) > _MIN_SECRET_BYTES
+    }
     return sorted(
         variants,
-        key=lambda value: len(value.encode("utf-8")),
+        key=lambda value: len(_secret_bytes(value)),
         reverse=True,
     )
 
 
 def max_secret_bytes() -> int:
-    """已注册密钥中最长值的 UTF-8 字节数（无注册密钥时 0）。
+    """已注册密钥中最长值的忠实字节数（无注册密钥时 0）。
 
     #755 codex P1：shared/ 的脱敏扩窗按本值对齐已注册最长密钥——固定
     512 的窗口装不下 >512 字节的密钥（PEM、长 JWT），骑跨保尾界时仍被
-    先切后脱敏。调用点：prepare.py 的两处 scan_and_compress_pi_events。"""
+    先切后脱敏。调用点：prepare.py 的两处 scan_and_compress_pi_events。
+    #755 codex P2-2：字节口径走 _secret_bytes（surrogateescape 对称编
+    码），非 UTF-8 字节的 env 密钥不会再让本函数抛 UnicodeEncodeError。"""
     values = _secret_values()
-    return len(values[0].encode("utf-8")) if values else 0
+    return len(_secret_bytes(values[0])) if values else 0
 
 
 def redact_secrets(text: str) -> str:

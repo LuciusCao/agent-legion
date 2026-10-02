@@ -606,3 +606,97 @@ def test_overflow_ceiling_rejection_empties_oversized_original(
     with tarfile.open(fileobj=io.BytesIO(captured["archive_bytes"])) as tar:
         assert tar.getnames() == []
     assert not (work_root / "exec-1").exists()
+
+
+# -- #755 codex P2-1：余量是上限的函数（小上限合法配置下预检不可误杀） --
+
+
+def test_embed_safety_margin_scales_with_ceiling() -> None:
+    """余量按 min(固定余量, 上限/4) 收缩：默认 64 MiB 上限行为不变；任何
+    合法上限（实例设置 gt=0 即合法，含上限 < 固定余量的小配置）下预算
+    恒为正——修复前 ceiling - 1 MiB 在小上限下为负，几十字节的产物也
+    必被预检拒绝。"""
+    from worker.upload.embed_precheck import EMBED_SAFETY_MARGIN_BYTES, embed_safety_margin
+
+    assert embed_safety_margin(64 * 1024 * 1024) == EMBED_SAFETY_MARGIN_BYTES
+    assert embed_safety_margin(1024) == 256
+    for ceiling in (1, 2, 100, 1024, EMBED_SAFETY_MARGIN_BYTES):
+        assert ceiling - embed_safety_margin(ceiling) > 0
+
+
+def test_direct_upload_fallback_sub_margin_ceiling_still_switches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """上限 < 固定余量（合法小配置）+ 微小产物 + presigned 暂时失败 → 预检
+    放行、归档/CAS 回退成功。修复前 ceiling - EMBED_SAFETY_MARGIN_BYTES 为
+    负，完全装得进 Host 上限的结果被直接上报 failed 而不是回退换轨。"""
+    _direct_upload_fails(monkeypatch)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    task = _task(work_root, max_archive_bytes=8 * 1024)  # 8 KiB << 1 MiB 固定余量
+    task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "completed"
+    assert report["output_artifacts"]["output.json"].startswith("sha256:")
+    assert len(client.uploads) == 1  # CAS 回退通道确实重传
+    assert not task.artifact_uploads
+    assert not (work_root / "exec-1").exists()
+
+
+def test_embed_switch_rejection_ceiling_equal_to_margin(tmp_path: Path) -> None:
+    """上限 == 固定余量边界：有效余量收缩为上限/4，预算 = 3/4 上限 > 0，
+    微小产物放行（修复前预算恰好为 0，任何非零产物都被拒绝换轨）。"""
+    from worker.upload.embed_precheck import EMBED_SAFETY_MARGIN_BYTES, embed_switch_rejection
+
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    task = _task(work_root, max_archive_bytes=EMBED_SAFETY_MARGIN_BYTES)
+    assert embed_switch_rejection(task) is None
+
+
+def test_direct_upload_fallback_restast_backstop_fails_honestly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """换轨后的 re-stat 兜底：余量按上限比例收缩后，预检（未压缩口径）可能
+    放行「实际归档仍超 Host 上限」的形态（小上限下 tar/gzip 开销占比不可
+    忽略）——重报大归档只会吃 413 被 report 循环当终态删 marker。与
+    report.py 的 embed 超限臂同形：回收成空归档诚实判败。"""
+    # 强制预检放行（预检的放行/判败面由上一条族覆盖），专测换轨后兜底。
+    monkeypatch.setattr(upload_queue, "embed_switch_rejection", lambda task: None)
+    _direct_upload_fails(monkeypatch)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    ceiling = 64  # 任何合法 tar.gz 归档都超此上限
+    task = _task(work_root, max_archive_bytes=ceiling)
+    task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
+    captured: dict[str, Any] = {}
+    original_report = client.report
+
+    def report_and_capture(execution_id, lease_id, metadata, archive):
+        captured["archive_size"] = archive.stat().st_size
+        captured["archive_bytes"] = archive.read_bytes()
+        return original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_and_capture  # type: ignore[method-assign]
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "archive-embedded fallback" in report["error_message"]
+    assert report["output_artifacts"] == {}
+    # 回收后的空归档：可提交体积、合法 tar；CAS 通道零上传。
+    assert captured["archive_size"] <= ceiling
+    with tarfile.open(fileobj=io.BytesIO(captured["archive_bytes"])) as tar:
+        assert tar.getnames() == []
+    assert client.uploads == {}
+    assert not (work_root / "exec-1").exists()
