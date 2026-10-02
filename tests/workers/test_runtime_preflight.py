@@ -644,6 +644,18 @@ def test_staleness_silent_on_garbage_stamp_content(
         _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
         assert staleness.velites_staleness_warning() is None, content
 
+    # 非法长度（41/63 位）：git 对象 ID 只有 40（SHA-1）与 64（SHA-256）
+    # 两种，中间长度是截断/损坏的征兆——按不可对账跳过，不做必然不等的
+    # 假告警（codex P3 on #835）。
+    for bad_len in (39, 41, 63, 65):
+        (bundled_dir / "velites.src-stamp").write_text(f"{'a' * bad_len}\n", encoding="utf-8")
+        _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
+        assert staleness.velites_staleness_warning() is None, bad_len
+    # 合法长度（40/64）照常对账：漂移告警在长度合法时仍触发。
+    (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_OLD}\n", encoding="utf-8")
+    _fake_git_stub(monkeypatch, f"{_HEX_NEW}\n")
+    assert staleness.velites_staleness_warning() is not None
+
     # git 侧：rc=0 但输出非纯 hex（PATH 上的 git 包装器多打了一行）。
     (bundled_dir / "velites.src-stamp").write_text(f"{_HEX_OLD}\n", encoding="utf-8")
     _fake_git_stub(monkeypatch, "hint: using detached HEAD\nabc123\n")

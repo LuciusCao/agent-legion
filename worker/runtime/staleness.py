@@ -39,11 +39,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: ``STAMP="${VELITES_BIN}.src-stamp"`` 同约定。
 _SRC_STAMP_SUFFIX = ".src-stamp"
 
-#: 指纹形态：git tree hash（SHA-1 仓库 40 位 hex / SHA-256 仓库 64 位）。
-#: stamp 与 git 输出都须整体匹配——垃圾内容（跨版本格式变化、手工随意
-#: 写入、PATH 上 git 包装器的额外输出行）按「不可对账」处理，防止必然
-#: 不等的假告警与多行内容注入启动日志。
-_FINGERPRINT_RE = re.compile(r"[0-9a-f]{40,64}")
+#: 指纹形态：git tree hash——SHA-1 仓库 40 位、SHA-256 仓库 64 位 hex，
+#: 两个明确长度（41–63 位的中间长度不存在于任何 git 对象 ID，是截断/
+#: 损坏的征兆）。stamp 与 git 输出都须整体匹配——垃圾内容（跨版本格式
+#: 变化、手工随意写入、PATH 上 git 包装器的额外输出行）按「不可对账」
+#: 处理，防止必然不等的假告警与多行内容注入启动日志。
+_FINGERPRINT_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 #: stamp 体积上限：正常 tree hash ≤ 64 字节 + 换行；超限视为损坏，不做
 #: 全量读入（巨文件 OOM 防线）。

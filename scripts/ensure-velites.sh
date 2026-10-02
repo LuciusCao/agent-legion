@@ -2,7 +2,9 @@
 # velites 二进制新鲜度检测：PATH 上的 velites 是跨 worktree 共享的安装物，
 # 「代码已 pull 但二进制还是旧构建」不会触发任何报错。本脚本用 velites/
 # 源码树的 git tree hash 做指纹，与二进制旁的 stamp 文件对比，不一致（或
-# 二进制缺失）时重新 cargo build --release 并原子替换安装。make prod-up
+# 二进制缺失）时重新 cargo build --release 并原子替换安装；已有
+# velites-sandbox（沙箱包装器，#383 起的独立 bin，解析序优先于 velites）
+# 的目录会一并刷新并共享同一 stamp（#835 codex P2）。make prod-up
 # （原生形态）每次启动前调用本脚本**两次**——PATH 模式与 --dest data/bin
 # （#831：Worker 解析自带副本优先，两处安置点都要刷新才算升级生效）。
 #
@@ -83,5 +85,35 @@ trap 'rm -f "$tmp"' EXIT
 cp velites/target/release/velites "$tmp"
 chmod +x "$tmp"
 mv -f "$tmp" "$VELITES_BIN"
+
+# #835（codex P2）：沙箱包装器 velites-sandbox 与 velites 同源同指纹。
+# cargo build --release 已产出两个 bin（velites/Cargo.toml 的 [[bin]]），
+# 这里一并安置并共享同一 src-stamp——shared/code_sandbox.py 的
+# resolve_sandbox_binary 候选序是 velites-sandbox 优先：裸机 PATH 或
+# data/bin 若存在旧 velites-sandbox，只刷 velites 会让 code 沙箱
+# （Host 与 Worker 的 code 节点）继续用旧包装器，沙箱修复静默失效——
+# 与 #831 同构的漂移。两 bin 一个指纹：freshness/对账把整个 velites
+# 构建产物视为一个单元（重构建时 velites-sandbox 必然同批产出）。
+# 部署面矩阵（消费 ⊆ 安置 ⊆ 构建）由 tests/scripts/test_ensure_velites.py
+# 的 deploy-matrix 契约测试钉死：新增 bin 或解析侧开始消费新名字而脚本
+# 未同步安置时直接红。
+SANDBOX_BIN="$(dirname "$VELITES_BIN")/velites-sandbox"
+SANDBOX_SRC="velites/target/release/velites-sandbox"
+SANDBOX_STAMP="${SANDBOX_BIN}.src-stamp"
+if [[ -e "$SANDBOX_BIN" || -e "$SANDBOX_STAMP" ]]; then
+    # 候选序 velites-sandbox 优先意味着：目录里存在它就会盖住刚刷新的
+    # velites——存在即必须刷新，否则本脚本制造的正是 #831 修复的静默
+    # 滞留。不存在则不主动创造（裸机默认走 velites 兜底；docker 镜像的
+    # velites-sandbox 在 /usr/local/bin，不经本脚本）。
+    if [[ ! -x "$SANDBOX_BIN" || "$(cat "$SANDBOX_STAMP" 2>/dev/null)" != "$SRC_ID" ]]; then
+        sandbox_tmp="${SANDBOX_BIN}.tmp.$$"
+        cp "$SANDBOX_SRC" "$sandbox_tmp"
+        chmod +x "$sandbox_tmp"
+        mv -f "$sandbox_tmp" "$SANDBOX_BIN"
+        echo "$SRC_ID" > "$SANDBOX_STAMP"
+        echo "velites-sandbox（沙箱包装器）已同步安装到 $SANDBOX_BIN"
+    fi
+fi
+
 echo "$SRC_ID" > "$STAMP"
 echo "velites 已安装到 $VELITES_BIN"
