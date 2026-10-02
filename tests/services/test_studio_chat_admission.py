@@ -5,37 +5,16 @@ from unittest.mock import Mock
 import pytest
 from psycopg import OperationalError
 
-from server.app.auth.scoped_tokens import mint_scoped_token
 from server.app.auth.sessions import hash_token
 from server.app.db.connection import DatabaseConnection
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import admission as service_module
-from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.runtime import SessionRuntime
-from server.app.studio_chat.service import StudioChatService
 from server.app.studio_chat.token_admission import require_live_run_token
 from server.app.studio_chat.token_keepalive import keepalive_run_token
+from tests.helpers import studio_chat_fixtures
 
-
-@pytest.fixture
-def admission(job_db, settings):
-    service = StudioChatService(job_db, settings, None)
-    workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="Admission")[
-        "id"
-    ]
-    user = job_db.create_user("admission-user", password_hash=None)["id"]
-    sid = job_db.create_studio_chat_session(workspace, user, "test-agent")
-    job_db.update_studio_chat_session(sid, status="idle")
-    handle = AcpSessionHandle(
-        command="unused", args=[], cwd="/tmp", mcp_server=None, env=None, callbacks=Mock()
-    )
-    runtime = SessionRuntime(handle, mint_scoped_token(job_db, user, workspace_id=workspace))
-    runtime.loading = True
-    runtime.resume_transcript_pending = True
-    runtime.stream.append("text", "previous")
-    service._runtimes[sid] = runtime
-    yield service, job_db, sid, workspace, runtime
-    service.shutdown()
+admission = studio_chat_fixtures.admission
 
 
 def assert_unaccepted(context):
@@ -47,6 +26,46 @@ def assert_unaccepted(context):
     assert not runtime.turn_open
     assert runtime.stream.texts == {"text": "previous"}
     assert runtime.handle._queue.empty()
+
+
+def test_failed_human_admission_preserves_cancel_epoch_and_owner(admission, monkeypatch):
+    from server.app.studio_chat.background_wakeup import cancel_wakeup
+
+    service, db, sid, workspace, runtime = admission
+    old_owner = runtime.turn_owner = object()
+    cancel_wakeup(runtime)
+    epoch = runtime.background_epoch
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "accept_studio_chat_message", Mock(side_effect=OperationalError("fail")))
+        with pytest.raises(OperationalError):
+            service.send_message(sid, workspace, "failed")
+    assert_unaccepted(admission)
+    assert runtime.turn_owner is old_owner
+    assert runtime.background_epoch == epoch
+    assert not runtime.background_wakeup_enabled
+    service.send_message(sid, workspace, "accepted")
+    assert runtime.turn_owner is not old_owner
+    assert runtime.background_wakeup_enabled
+    assert runtime.background_epoch == epoch
+
+
+def test_stale_automatic_queue_entry_cannot_release_accepted_human_turn(admission):
+    from server.app.studio_chat.background_wakeup import cancel_wakeup, wake_session
+
+    service, db, sid, workspace, runtime = admission
+    assert wake_session(service, sid, runtime, ["finished-task"])
+    _, guard = runtime.handle._queue.get_nowait()
+    cancel_wakeup(runtime)
+    # The prior cancellation settled before the queued automatic task runs.
+    db.update_studio_chat_session(sid, status="idle")
+    runtime.turn_open = False
+    service.send_message(sid, workspace, "new human turn")
+    owner = runtime.turn_owner
+    assert not guard()
+    assert runtime.turn_owner is owner
+    assert runtime.turn_open
+    assert db.get_studio_chat_session(sid)["status"] == "running"
+    assert db.count_studio_chat_user_messages(sid) == 1
 
 
 @pytest.mark.parametrize("phase", ["count", "renew", "transcript", "token", "insert", "commit"])
@@ -228,6 +247,18 @@ def test_close_absent_snapshot_cannot_close_runtime_registered_before_write(admi
     assert not runtime.closed
     assert db.get_studio_chat_session(sid)["status"] == "idle"
     assert db.list_studio_chat_messages(sid) == []
+
+
+def test_failed_close_write_keeps_runtime_available_for_retry(admission, monkeypatch):
+    service, db, sid, workspace, runtime = admission
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "update_studio_chat_session", Mock(side_effect=OperationalError("write")))
+        with pytest.raises(OperationalError):
+            service.close_session(sid, workspace)
+    assert service.runtime(sid) is runtime
+    assert not runtime.closed
+    assert db.get_studio_chat_session(sid)["status"] == "idle"
+    assert service.close_session(sid, workspace)["status"] == "closed"
 
 
 def test_close_completes_when_snapshotted_runtime_exits(admission, monkeypatch):
