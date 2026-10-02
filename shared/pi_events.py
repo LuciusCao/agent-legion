@@ -105,12 +105,12 @@ def scan_and_compress_pi_events(
     P1: the per-line pre-trim of stderr text funnels through
     ``_redact_then_tail_text`` (widen past the budget → redact → cut), so a
     secret straddling a cut point is matched whole instead of leaking its
-    tail fragment. One consequence: the RETURN value stays RAW for lines
-    inside the budget — the caller-facing faces (error_message etc.)
-    redact with their own, richer context
-    (worker/upload/stderr_evidence.py) — but a single line that had to be
-    pre-truncated returns REDACTED: the safer direction, since the
-    fragment surviving a raw cut is unmatchable downstream. #755 对抗复审
+    tail fragment. #755 对抗复审 P1-1: the retained buffer is redacted WHOLE
+    before the final cut (``_redact_tail_buffer``), so multi-line secrets
+    (PEM) are matched across line boundaries and BOTH faces (return value
+    and sink anchor) derive from the same redacted buffer — the caller's
+    re-redaction (worker/upload/stderr_evidence.py) degrades to a pure
+    defense net. #755 对抗复审
     P3-2: the return face's final byte cut is line-aligned (a real cut
     drops the leading partial line). #755 终审 P2-1: the funnel gate is
     byte-measured (a CJK single line can be ≤ the budget in chars yet far
@@ -124,8 +124,10 @@ def scan_and_compress_pi_events(
     secret — a >512-byte key (PEM, long JWT) straddling the cut otherwise
     still loses its head before the whole-value matcher can run. The
     effective margin is ``max(_REDACT_WINDOW_MARGIN,
-    redact_secret_max_bytes)`` and feeds both the per-line funnel and the
-    sink window below.
+    redact_secret_max_bytes)`` and feeds the per-line funnel AND the deque
+    retention budget alike (#755 对抗复审 P1-1: a narrow retention budget
+    would popleft a multi-line secret's head lines before the whole-buffer
+    redaction could ever see them).
 
     Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``.
     ``stderr_tail`` is the bounded keep-the-tail capture of the non-JSON
@@ -147,6 +149,12 @@ def scan_and_compress_pi_events(
     # 上限。#755 终审 P2-1：兜底切片经 redact 回调过一道（无换行的单行
     # 超预算形态无行界可对齐，先对整体脱敏再保尾）。
     # #755 codex P1：有效扩窗 margin 对齐调用方已注册的最长密钥。
+    # #755 对抗复审 P1-1：deque 保留预算必须同步放宽 margin——多行密钥
+    # （PEM）的每行是 deque 的独立条目，若保留界仍是裸 8192 字符，密钥的
+    # 头部整行会在任何扩窗脱敏运行之前被 popleft 丢弃，整值匹配永远失配
+    # （残段直落锚点）。放宽后：保留界（8192+margin 字符）≥（8192+margin）
+    # 字节 ≥ 最终切割点 + 最长密钥字节数，任何骑跨切割点的已注册密钥都
+    # 完整落在保留缓冲内，下方对整段缓冲的一次脱敏必然整值命中。
     redact_margin = max(_REDACT_WINDOW_MARGIN, redact_secret_max_bytes)
     stderr_tail: deque[str] = deque()
     stderr_chars = 0
@@ -165,7 +173,7 @@ def scan_and_compress_pi_events(
                     line = _redact_then_tail_text(line, redact, redact_margin)
                     stderr_tail.append(line)
                     stderr_chars += len(line)
-                    while stderr_chars > STDERR_TAIL_BYTES and len(stderr_tail) > 1:
+                    while stderr_chars > STDERR_TAIL_BYTES + redact_margin and len(stderr_tail) > 1:
                         stderr_chars -= len(stderr_tail.popleft())
                     continue
                 if not isinstance(event, dict):
@@ -183,25 +191,30 @@ def scan_and_compress_pi_events(
         return None, 0, 0, b""
 
     encoded_tail = "\n".join(stderr_tail).encode("utf-8", "replace")
-    tail = _keep_tail_slice(encoded_tail, redact)
-    if stderr_sink is not None and tail:
+    # #755 对抗复审 P1-1：脱敏跑在「完整保留缓冲」上、任何最终切割之前——
+    # 多行密钥（PEM）只有 join 后的整体形态能被整值替换命中（逐行脱敏
+    # 结构性接不住换行密钥）。deque 保留界已按 redact_margin 放宽（见上），
+    # 任何骑跨最终 8KB 切割点的已注册密钥都完整落在这段缓冲里。sink 与
+    # return 两面从同一份脱敏后缓冲派生，不再各自开窗口。
+    redacted_tail = _redact_tail_buffer(encoded_tail, redact)
+    if redacted_tail is None:
+        # 脱敏器逃逸：raw 缓冲绝不落盘（锚点直接放弃），return 面退回
+        # raw 契约（调用方出口面经 stderr_evidence 重脱敏）。
+        tail = _keep_tail_slice(encoded_tail)
+    else:
+        tail = _keep_tail_slice(redacted_tail, redact)
+    if stderr_sink is not None and tail and redacted_tail is not None:
         # Best-effort AT THE CALL SITE: an unwritable sink must never fail
         # the compression (the in-memory tail still rides the return value).
         # The catch lives here, not inside _persist_stderr_tail, so a
         # sink-failure in ANY form (patched, unwritable dir, os.replace
         # across devices) degrades instead of escaping into the scan.
         # #748 R3 (codex review P1): redaction happens BEFORE the durable
-        # write — the sink file must never hold the raw tail (the return
-        # value stays raw; the caller redacts its own faces separately).
-        # #755 对抗复审 P3-2: redact a window wider than the final cut so a
-        # secret straddling the 8KB cut point is still matched whole, then
-        # slice AFTER redaction; #755 codex P1: the margin follows the
-        # caller's longest registered secret (redact_margin), not just the
-        # fixed _REDACT_WINDOW_MARGIN.
+        # write — the sink file never holds the raw tail.
+        # #755 对抗复审 P1-1 起 return 面也走同一份脱敏后缓冲（不再保留
+        # raw 面），调用方的二次重脱敏（stderr_evidence）随之退化为纯防御网。
         try:
-            window = encoded_tail[-(STDERR_TAIL_BYTES + redact_margin) :]
-            persisted = redact(window) if redact is not None else window
-            _persist_stderr_tail(stderr_sink, _keep_tail_slice(persisted))
+            _persist_stderr_tail(stderr_sink, tail)
         except Exception:
             # #204 broad-except audit: sink 落盘是纯观测面，压缩/返回值才是
             # 关键路径——失败语义是「本次不留锚点」（重入路径归因降级为空，
@@ -218,6 +231,25 @@ def scan_and_compress_pi_events(
 
     compressed_size = events_path.stat().st_size
     return model_error, original_size, compressed_size, tail
+
+
+def _redact_tail_buffer(data: bytes, redact: Callable[[bytes], bytes] | None) -> bytes | None:
+    """#755 对抗复审 P1-1：在任何最终切割之前对「完整保留缓冲」整体脱敏。
+
+    逐行脱敏结构性接不住换行密钥（PEM 的值跨行，任何单行 replace 都
+    匹配不到整值）；deque 保留界已按 redact_margin 放宽（骑跨最终切割
+    点的已注册密钥完整落在缓冲内），所以这里的一次整段脱敏必然整值
+    命中。``redact=None``（旧式/无密钥调用方）原样返回；回调逃逸返回
+    ``None``——调用方据此放弃锚点落盘（脱敏器都炸了，raw 缓冲绝不能
+    写 durable 面），return 面退回 raw（调用方出口面经
+    stderr_evidence 重脱敏，与旧契约同）。"""
+    if redact is None or not data:
+        return data
+    try:
+        return redact(data)
+    except Exception:
+        logger.exception("Redact callback failed on the retained tail buffer; sink write skipped")
+        return None
 
 
 def _redact_then_tail_text(
@@ -248,8 +280,9 @@ def _redact_then_tail_text(
     same number of bytes, so the redacted window still covers the final
     byte cut with the whole margin.
 
-    In-budget text is returned untouched (the return face stays RAW by
-    contract; the caller redacts with richer context). ``redact=None``
+    In-budget text is returned untouched HERE (the buffer-level whole
+    redaction in ``_redact_tail_buffer`` owns the outbound faces now —
+    #755 对抗复审 P1-1); ``redact=None``
     degrades to pure truncation (legacy behavior for non-secret callers).
     A redact callback failure degrades to the raw cut — redaction is
     best-effort by contract (worker/upload/stderr_evidence.py re-redacts

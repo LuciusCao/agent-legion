@@ -11,6 +11,7 @@ from server.app.agent_broker.result_output_manifest import (
     parse_artifact_ref,
 )
 from server.app.agent_control.completion import AgentOutcome
+from shared.code_contract import RESULT_OUTPUT_ARTIFACTS_FLAG
 from shared.code_sandbox import MAX_CONNECTION_KEY_CHARS
 
 _MAX_COMMAND_PARTS = 64
@@ -40,12 +41,12 @@ ARTIFACTS_TRUNCATED_KEY = "output_artifacts_truncated"
 ARTIFACTS_TOTAL_KEY = "output_artifacts_total"
 # #755 codex P1：结果头溢出（直传 dict ref 清单撞破头预算）的新协议标记
 # ——Worker 把完整 direct-ref 清单写进结果归档成员
-# ``result-output-artifacts.json``（shared/code_contract.py 的
-# RESULT_OUTPUT_ARTIFACTS_MEMBER），头里只带本布尔；commit 层从归档读回
+# ``result-output-artifacts.json``，头里只带本布尔；commit 层从归档读回
 # 清单并 enrich outcome（agent_broker/result_output_manifest.py +
 # agent_result_commit.py），产物字节不重复传输（已在 S3）。可选、容忍缺席，
-# 与上方截断标记同纪律。
-ARTIFACTS_IN_ARCHIVE_KEY = "output_artifacts_in_archive"
+# 与上方截断标记同纪律。键名的单一事实来源在 shared/code_contract.py
+# （Worker 写入侧同用），此处仅作本地别名。
+ARTIFACTS_IN_ARCHIVE_KEY = RESULT_OUTPUT_ARTIFACTS_FLAG
 
 
 def _recover_result_header(raw: str) -> str:

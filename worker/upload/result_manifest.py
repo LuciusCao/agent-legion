@@ -53,8 +53,15 @@ def embed_output_artifacts_manifest(
             info.size = len(payload)
             dst.addfile(info, io.BytesIO(payload))
             for member in src:
+                # 只对常规文件成员取数据面：流模式下对 symlink/hardlink 成员
+                # 调 extractfile 抛 StreamError（#755 对抗复审 P2-1——run_dir
+                # 在 agent 工作目录树内，链接成员不可排除；extractfile 对目录
+                # 成员返回 None）。链接成员按引用原样复制，保真度不丢。
+                if not member.isfile():
+                    dst.addfile(member)
+                    continue
                 contents = src.extractfile(member)
-                if contents is None:  # 目录/链接成员：无数据面
+                if contents is None:  # 防御：isfile 成员在此必然有数据面
                     dst.addfile(member)
                 else:
                     with contents:

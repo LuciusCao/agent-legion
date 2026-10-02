@@ -31,6 +31,10 @@ CODE_RESULT_LOG_MEMBER = "node.log"
 # result_manifest.py），Host 读取（server/app/agent_broker/
 # result_output_manifest.py）；该成员永不进 expected outputs 提升面。
 RESULT_OUTPUT_ARTIFACTS_MEMBER = "result-output-artifacts.json"
+# 与清单成员配套的头部布尔标记键（同 #755 codex P1 协议）：Worker 写
+# （worker/upload/report.py 溢出臂），Host 读（agent_worker_results.py 的
+# parse_result_metadata）；单一事实来源在此，两侧字面量漂移即断。
+RESULT_OUTPUT_ARTIFACTS_FLAG = "output_artifacts_in_archive"
 # Mirrors workspace_libs/node_sdk.py NODE_RUNTIME_DIR / AUTH_FAILURE_MARKER.
 # node_sdk must stay import-self-contained (the code bundle ships only the
 # workspace_libs snapshot), so that mirror keeps a comment pointer instead of

@@ -27,7 +27,7 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from shared.code_contract import RESULT_OUTPUT_ARTIFACTS_MEMBER
+from shared.code_contract import RESULT_OUTPUT_ARTIFACTS_FLAG, RESULT_OUTPUT_ARTIFACTS_MEMBER
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +115,12 @@ def enrich_outcome_from_archived_manifest(
     agent_broker → agent_control 的单向依赖，dataclasses.replace 按鸭子类型
     工作）。读回成功：outcome.output_artifacts 换成全集，record 同步——
     finish 侧零改动（空清单翻转、HEAD 校验、staged promote 全走既有路径）。
-    读回失败：产物引用不可用，非取消的 run 改判 failed（沿用空清单翻转的
-    语义钉子）；cancelled 臂例外——取消语义不翻转，丢标记记日志即可。
+    读回失败：产物引用不可用，completed 的 run 改判 failed（沿用空清单翻转
+    的语义钉子）；already-failed 臂保留原始失败签名（exit code + 诊断），
+    只把读回失败追加进 error_message；cancelled 臂不翻转状态，同样在
+    record 留一行痕迹（partial ref 全集随归档回收丢失，审计面不能零痕迹）。
+    三条臂都把 record 的标记键归一为 False：commit 完成后归档即被回收，
+    「清单在归档里」在持久化面上永不再真（#755 对抗复审 F2/F3）。
     版本偏斜说明：新 Worker + 不认识标记的旧 Host 走空清单翻转诚实判败，
     不会静默错。
     """
@@ -126,16 +130,28 @@ def enrich_outcome_from_archived_manifest(
         # #204 broad-except audit: Worker 归档是不可信输入，读回面的逃逸族
         # 混族——OSError（spool 文件不可读）、tarfile.TarError（坏 gzip/tar）、
         # ValueError（清单契约违反：缺成员/超限/坏 ref）。失败语义：读不回
-        # 清单 = 产物引用不可用，把 run 诚实改判 failed（沿用空清单翻转的
+        # 清单 = 产物引用不可用，completed 改判 failed（沿用空清单翻转的
         # 语义钉子），而非带着空 output_artifacts 判 completed。结果空间：
         # 仅本次 commit 的 outcome/record 被改写，finish 走既有失败路径；
         # cancelled 不翻转。日志保全：logger.exception 带堆栈。
         logger.exception("archived output artifacts manifest unreadable: %s", archive.name)
+        note = f"archived output artifacts manifest is unreadable: {exc}"
+        record[RESULT_OUTPUT_ARTIFACTS_FLAG] = False
         if outcome.status == "cancelled":
+            record["error_message"] = f"{record.get('error_message', '')}\n{note}".strip()[
+                :_MAX_ERROR_MESSAGE_CHARS
+            ]
             return outcome
-        message = f"archived output artifacts manifest is unreadable: {exc}"[
-            :_MAX_ERROR_MESSAGE_CHARS
-        ]
+        if outcome.status == "failed":
+            # #755 对抗复审 F1：保留原始失败签名（exit code + 诊断面），
+            # 清单读回失败只追加说明——整体覆盖会让真实崩溃原因从结果面
+            # 与 outcome_json 审计面同时消失。
+            record["output_artifacts"] = {}
+            record["error_message"] = f"{record.get('error_message', '')}\n{note}".strip()[
+                :_MAX_ERROR_MESSAGE_CHARS
+            ]
+            return replace(outcome, error_message=record["error_message"], output_artifacts={})
+        message = note[:_MAX_ERROR_MESSAGE_CHARS]
         record["status"] = "failed"
         record["exit_code"] = 1
         record["error_message"] = message
@@ -143,6 +159,7 @@ def enrich_outcome_from_archived_manifest(
         return replace(
             outcome, status="failed", exit_code=1, error_message=message, output_artifacts={}
         )
+    record[RESULT_OUTPUT_ARTIFACTS_FLAG] = False
     record["output_artifacts"] = parsed
     return replace(outcome, output_artifacts=parsed)
 

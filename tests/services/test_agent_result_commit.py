@@ -81,19 +81,26 @@ def _archive(tmp_path: Path, manifest: dict[str, Any] | None) -> Path:
 
 
 def _commit(
-    tmp_path: Path, archive: Path, *, status: str = "completed"
+    tmp_path: Path,
+    archive: Path,
+    *,
+    status: str = "completed",
+    error_message: str = "",
+    exit_code: int | None = None,
 ) -> tuple[_StubBroker, _StubCompletion, dict[str, Any]]:
     broker = _StubBroker(tmp_path / "bundles")
     broker.bundle_dir.mkdir()
     completion = _StubCompletion()
     record: dict[str, Any] = {
         "status": status,
-        "exit_code": 0 if status == "completed" else 1,
-        "error_message": "",
+        "exit_code": (0 if status == "completed" else 1) if exit_code is None else exit_code,
+        "error_message": error_message,
         "output_artifacts": {},
         "output_artifacts_in_archive": True,
     }
-    outcome = AgentOutcome(status=status, exit_code=record["exit_code"])  # type: ignore[arg-type]
+    outcome = AgentOutcome(  # type: ignore[arg-type]
+        status=status, exit_code=record["exit_code"], error_message=error_message
+    )
     commit_agent_result(
         broker,  # type: ignore[arg-type]
         completion,  # type: ignore[arg-type]
@@ -117,6 +124,9 @@ def test_commit_enriches_outcome_from_archived_manifest(tmp_path: Path) -> None:
     assert finished.output_artifacts == manifest
     assert broker.done_records[0]["output_artifacts"] == manifest
     assert record["output_artifacts"] == manifest
+    # #755 对抗复审 F2：commit 后归档即回收，「清单在归档里」在持久化面上
+    # 永不再真——标记键归一为 False，record 自洽。
+    assert record["output_artifacts_in_archive"] is False
 
 
 def test_commit_missing_manifest_member_fails_honestly(tmp_path: Path) -> None:
@@ -132,7 +142,32 @@ def test_commit_missing_manifest_member_fails_honestly(tmp_path: Path) -> None:
     assert record["status"] == "failed"
     assert record["exit_code"] == 1
     assert record["output_artifacts"] == {}
+    assert record["output_artifacts_in_archive"] is False
     assert "manifest is unreadable" in broker.done_records[0]["error_message"]
+
+
+def test_commit_failed_run_keeps_original_diagnosis_on_bad_manifest(tmp_path: Path) -> None:
+    """#755 对抗复审 F1：already-failed 的 run 遇上坏清单——原始失败签名
+    （exit code + 诊断）保留，读回失败只追加说明，不得整体覆盖。"""
+    broker, completion, record = _commit(
+        tmp_path,
+        _archive(tmp_path, None),
+        status="failed",
+        error_message="Agent process exited 137: OOM killed",
+        exit_code=137,
+    )
+
+    finished = completion.finished[0]["outcome"]
+    assert finished.status == "failed"
+    assert finished.exit_code == 137
+    assert "OOM killed" in finished.error_message
+    assert "manifest is unreadable" in finished.error_message
+    assert record["status"] == "failed"
+    assert record["exit_code"] == 137
+    assert record["error_message"] == finished.error_message
+    assert record["output_artifacts"] == {}
+    assert record["output_artifacts_in_archive"] is False
+    assert broker.done_records[0]["error_message"] == finished.error_message
 
 
 def test_commit_oversized_manifest_fails_honestly(tmp_path: Path) -> None:
@@ -155,16 +190,23 @@ def test_commit_bad_ref_in_manifest_fails_honestly(tmp_path: Path) -> None:
 
 
 def test_commit_cancelled_with_bad_manifest_keeps_cancelled(tmp_path: Path) -> None:
-    """cancelled + 坏清单 → 状态不翻转（取消语义优先），清单面丢弃。"""
+    """cancelled + 坏清单 → 状态不翻转（取消语义优先），清单面丢弃；
+    #755 对抗复审 F3：partial ref 全集随归档回收丢失，record 必须留痕。"""
     _, completion, record = _commit(
-        tmp_path, _archive(tmp_path, {"out.json": "md5:deadbeef"}), status="cancelled"
+        tmp_path,
+        _archive(tmp_path, {"out.json": "md5:deadbeef"}),
+        status="cancelled",
+        error_message="Agent Worker is shutting down",
     )
 
     finished = completion.finished[0]["outcome"]
     assert finished.status == "cancelled"
     assert finished.exit_code == 1
+    assert "shutting down" in finished.error_message
     assert record["status"] == "cancelled"
     assert record["output_artifacts"] == {}
+    assert "manifest is unreadable" in record["error_message"]
+    assert record["output_artifacts_in_archive"] is False
 
 
 def test_load_archived_output_artifacts_rejects_unsafe_name(tmp_path: Path) -> None:

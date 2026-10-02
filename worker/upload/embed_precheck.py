@@ -28,12 +28,17 @@ def embedded_artifacts_bytes(task: UploadTask) -> float:
     tar，MB 级，不计则余量被静默吃光）+ code 车道的 node.log（写在
     execution_dir 根而非 run_dir，是沙箱 stdout/stderr 的无上限捕获，可以
     是 tar 的最大成员；agent 车道该文件不存在，与归档侧的 is_file 判定同型
-    跳过）。stat 失败按 +inf——大小未知即拒绝换轨。"""
+    跳过）。FileNotFoundError 的 expected output 按 0 字节计——缺席的产物
+    不内嵌任何字节（该 run 反正会被 Host 判 Missing outputs），把它当
+    +inf 会把「直传失败 + 产物缺失」误导成体积超限（#755 对抗复审 P3）；
+    其他 stat 失败按 +inf——大小未知即拒绝换轨。"""
     job_dir = task.execution_dir / "job"
     total = 0.0
     for name in task.expected_outputs:
         try:
             total += (job_dir / PurePosixPath(name)).stat().st_size
+        except FileNotFoundError:
+            continue
         except OSError:
             return float("inf")
     run_dir = job_dir / "runs" / task.node_key / "worker"

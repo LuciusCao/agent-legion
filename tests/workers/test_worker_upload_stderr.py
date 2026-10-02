@@ -469,8 +469,8 @@ def test_sink_persist_failure_cleans_staging_and_never_fails_scan(
         redact=lambda raw: raw.replace(secret.encode(), b"***"),
     )
     assert original > 0 and compressed > 0  # 压缩未因 sink 失败中断
-    # 返回值保持 RAW（调用方自行脱敏自己的出口面——shared 只管落盘脱敏）。
-    assert tail == f"auth failed for {secret}".encode()
+    # #755 对抗复审 P1-1 起返回值同走脱敏后缓冲（调用方重脱敏退化为防御网）。
+    assert tail == b"auth failed for ***"
     # staging 已清理；sink 未落盘（replace 失败，无半截文件）。
     assert list(run_dir.glob(".agent-stderr.*")) == []
     assert not (run_dir / AGENT_STDERR_FILENAME).exists()

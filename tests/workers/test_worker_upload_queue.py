@@ -628,18 +628,66 @@ def test_direct_upload_fallback_default_ceiling_without_claim_value(
     assert len(client.uploads) == 1
 
 
-def test_direct_upload_fallback_unstattable_output_fails_honestly(
+def test_direct_upload_fallback_missing_output_does_not_block_switch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """预检的 stat 失败臂：expected_outputs 里有缺文件（大小未知）同样拒绝
-    换轨、本地诚实判败——未知即不可证安全，不送进必死 413。"""
+    """#755 对抗复审 P3：缺席的 expected output 按 0 字节计（不内嵌任何字节，
+    Host 侧 Missing outputs 判定不受影响），预检不得把它当「大小未知」拒绝
+    换轨——否则会拿体积措辞误导排障。"""
     outputs = ("output.json", "gone.json")
     work_root = tmp_path / "work"
-    _execution_dir(work_root)  # 只造 output.json；gone.json 缺失 → stat 失败
+    _execution_dir(work_root)  # 只造 output.json；gone.json 缺席按 0 字节计
 
     _direct_upload_fails(monkeypatch)
     client = QueueFakeClient()
     task = _task(work_root, expected_outputs=outputs)
+    task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "completed"
+    assert report["output_artifacts"]["output.json"].startswith("sha256:")
+    assert "could not be stat'ed" not in report["error_message"]
+
+
+def test_direct_upload_fallback_unstattable_output_fails_honestly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """预检的 stat 失败臂：文件存在但 stat 抛 OSError（权限/IO 错误）→ 大小
+    未知即不可证安全，拒绝换轨、本地诚实判败。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+
+    # 投弹窗口必须收窄到预检内部：全局 patch Path.stat 会波及 prepare 的
+    # is_file()（裸 OSError 无 errno，不在 pathlib 可忽略族而重抛），初次
+    # prepare 就降级成 "result preparation failed"，永远走不到换轨判定。
+    # 用 threading.local 武装窗口（队列跑在调度池线程），炸弹只落在
+    # embed_precheck 对 expected output 的 stat 上。
+    bomb = threading.local()
+    real_stat = Path.stat
+
+    def flaky_stat(self: Path, *args: object, **kwargs: object) -> Any:
+        if getattr(bomb, "armed", False) and self.name == "output.json":
+            raise OSError("permission denied")
+        return real_stat(self, *args, **kwargs)
+
+    real_rejection = upload_queue.embed_switch_rejection
+
+    def armed_rejection(task: UploadTask) -> str | None:
+        bomb.armed = True
+        try:
+            return real_rejection(task)
+        finally:
+            bomb.armed = False
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+    monkeypatch.setattr(upload_queue, "embed_switch_rejection", armed_rejection)
+    _direct_upload_fails(monkeypatch)
+    client = QueueFakeClient()
+    task = _task(work_root)
     task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
     queue = _queue(client)
     queue.submit(task)

@@ -7,6 +7,7 @@ import tarfile
 import threading
 from typing import Any
 
+from shared.code_contract import RESULT_OUTPUT_ARTIFACTS_FLAG
 from worker.host.transfer import (
     ResultHeaderOverflow,
     TransferOperations,
@@ -96,9 +97,14 @@ def report_task(
                 f" output artifacts manifest embedded in the archive: {exc}",
                 flush=True,
             )
+            # #755 对抗复审 P3：embed 重写了归档，计时器的 archive_bytes
+            # 过期——按 embed 后的真实大小刷新（纯观测面，但别让操作者
+            # 看着 embed 前的尺寸排障）。
+            if task.report_timer is not None and archive.is_file():
+                task.report_timer.archive_bytes = archive.stat().st_size
             metadata = dict(metadata)
             metadata["output_artifacts"] = {}
-            metadata["output_artifacts_in_archive"] = True
+            metadata[RESULT_OUTPUT_ARTIFACTS_FLAG] = True
             task.prepared_metadata = metadata
             task.prepared_archive = archive
             continue

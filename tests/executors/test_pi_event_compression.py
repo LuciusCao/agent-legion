@@ -246,8 +246,9 @@ def test_scan_and_compress_sink_write_failure_never_fails(tmp_path, monkeypatch)
 
 def test_scan_and_compress_redacts_sink_before_durable_write(tmp_path):
     """#748 R3（codex review P1）：redact 回调在 durable write 前生效——落盘的
-    anchor 文件是脱敏后字节，返回值保持 RAW（shared 只管落盘面，调用方的出口
-    面各自脱敏）。回调 None 时行为不变（raw 落盘，兼容直接调 shared 的场景）。"""
+    anchor 文件是脱敏后字节。#755 对抗复审 P1-1 起返回值也走同一份脱敏后缓冲
+    （调用方的重脱敏退化为纯防御网）。回调 None 时行为不变（raw 落盘，兼容
+    直接调 shared 的场景）。"""
     from shared.pi_events import scan_and_compress_pi_events
 
     secret = "sk-live-supersecretgatewaytoken123"
@@ -259,7 +260,7 @@ def test_scan_and_compress_redacts_sink_before_durable_write(tmp_path):
         stderr_sink=sink,
         redact=lambda raw: raw.replace(secret.encode(), b"***"),
     )
-    assert stderr_tail == f"auth failed for {secret}".encode()  # 返回值 raw
+    assert stderr_tail == b"auth failed for ***"  # 返回值同走脱敏后缓冲
     assert sink.read_bytes() == b"auth failed for ***"  # 落盘脱敏
     # 回调 None：raw 落盘（旧行为）。
     events2 = tmp_path / "events2.jsonl"
@@ -427,4 +428,35 @@ def test_scan_and_compress_long_secret_straddling_cut_with_widened_margin(tmp_pa
         assert secret.encode() not in face
         assert b"pem-" not in face  # 密钥前缀残段（切割点之前的半边）
         assert b"kkkk" not in face  # 密钥尾段残片
+        assert b"***" in face  # 整值在切割前已脱敏
+
+
+def test_scan_and_compress_multiline_pem_survives_no_fragment(tmp_path):
+    """#755 对抗复审 P1-1：多行密钥（PEM）骑跨 deque 保留界——旧实现的
+    保留预算只有裸 8192 字符，PEM 头部整行在任何扩窗脱敏运行之前就被
+    popleft 丢弃（单行漏斗接不住换行密钥，sink 扩窗读不到已丢的行），
+    body 行残段明文落锚点。修复后 deque 保留界按 redact_margin 放宽，
+    且脱敏跑在 join 后的完整保留缓冲上（多行整值必然完整可见）、先于
+    最终保尾切割——sink 与 return 两面不留任何 PEM body 行。"""
+    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+
+    body_line = "ABCDEFGHIJKLMNOP" * 4  # 64 字符 base64 形态行
+    pem_lines = ["-----BEGIN PRIVATE KEY-----"] + [body_line] * 20 + ["-----END PRIVATE KEY-----"]
+    secret = "\n".join(pem_lines)  # ~1330 字符的多行密钥
+    # 几何：PEM 尾端距全文末尾 7800 字符（< 8192，尾段在最终切割内），
+    # PEM 头部在切割点之前 ~930 字符（旧 8192 字符保留界会丢头 → 泄漏）。
+    post = ["post-" + "y" * 60] * 120  # ~7800 字符
+    events = tmp_path / "events.jsonl"
+    events.write_text('{"type":"session"}\n' + secret + "\n" + "\n".join(post) + "\n")
+    sink = tmp_path / "agent-stderr.log"
+    _, _, _, tail = scan_and_compress_pi_events(
+        events,
+        stderr_sink=sink,
+        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+        redact_secret_max_bytes=len(secret.encode()),
+    )
+    for face in (tail, sink.read_bytes()):
+        assert len(face) <= STDERR_TAIL_BYTES
+        assert body_line.encode() not in face  # 任何 body 行残段
+        assert b"PRIVATE KEY" not in face  # PEM 头尾标记残段
         assert b"***" in face  # 整值在切割前已脱敏
