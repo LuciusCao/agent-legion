@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from server.app.studio_chat.token_keepalive import _token_alive, keepalive_run_token
+from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
 
 if TYPE_CHECKING:
@@ -38,7 +38,7 @@ def wake_session(
         ):
             return False
         if not _token_alive(service, runtime.token):
-            keepalive_run_token(service, session_id)
+            invalidate_run_token(service, session_id, runtime)
             return False
         if not service.db.claim_studio_chat_turn(session_id):
             return False
@@ -86,7 +86,7 @@ def wake_session(
                         return True
                     release()
                     if valid:
-                        keepalive_run_token(service, session_id)
+                        invalidate_run_token(service, session_id, runtime)
                     return False
                 except Exception:
                     # #204 broad-except audit: no ACP prompt has started; release

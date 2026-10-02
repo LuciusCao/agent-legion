@@ -23,6 +23,7 @@ from server.app.studio_chat.runtime import PendingPermission
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
+    from server.app.studio_chat.runtime import SessionRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -44,60 +45,61 @@ def handle_permission_request(
     session_id: str,
     tool_call: dict[str, Any],
     options: list[dict[str, Any]],
+    *,
+    expected: SessionRuntime | None = None,
 ) -> dict[str, Any]:
     """Apply the permission policy; blocks on the human answer when parked."""
     from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call
 
-    if is_agent_legion_tool_call(tool_call):
-        runtime = backend.runtime(session_id)
-        if runtime is not None:
-            with runtime.lock:
-                runtime.mcp_observed = True
-        backend.store.mark_mcp_verified(session_id)
-        return auto_approve(backend, session_id, tool_call, options, decision="auto_approved")
-    if is_read_only_tool_call(tool_call):
-        return auto_approve(backend, session_id, tool_call, options, decision="auto_read_only")
-    session = backend.db.get_studio_chat_session(session_id) or {}
-    if session.get("allow_all_permissions"):
-        return auto_approve(backend, session_id, tool_call, options, decision="allow_all")
-    request_id = uuid4().hex
-    pending = PendingPermission(request_id)
-    runtime = backend.runtime(session_id)
+    runtime = expected or backend.runtime(session_id)
     if runtime is None:
         return {"deny": True}
+    request_id = uuid4().hex
+    pending = PendingPermission(request_id)
     with runtime.lock:
         # Teardown flips `closed` under this same lock before its settle
         # sweep; parking after that point would hang until the timeout (#158).
-        if runtime.closed:
+        if runtime.closed or backend.runtime(session_id) is not runtime:
             return {"deny": True}
+        runtime.stream.reset()
+        if is_agent_legion_tool_call(tool_call):
+            runtime.mcp_observed = True
+            backend.store.mark_mcp_verified(session_id)
+            return auto_approve(backend, session_id, tool_call, options, decision="auto_approved")
+        if is_read_only_tool_call(tool_call):
+            return auto_approve(backend, session_id, tool_call, options, decision="auto_read_only")
+        session = backend.db.get_studio_chat_session(session_id) or {}
+        if session.get("allow_all_permissions"):
+            return auto_approve(backend, session_id, tool_call, options, decision="allow_all")
         runtime.pending_permissions[request_id] = pending
-    backend.store.append_message(
-        session_id,
-        "permission",
-        "agent",
-        {
-            "request_id": request_id,
-            "status": "pending",
-            "tool_call": tool_call,
-            "options": options,
-        },
-    )
-    # Atomic check-and-set (#158): an unconditional write could overwrite a
-    # concurrent close/error back to a live state. 'awaiting_permission' is an
-    # allowed current state because concurrent prompts of the same turn
-    # re-park. When the guard fails the session is closing or dead: deny at
-    # once instead of parking against a torn-down runtime.
-    parked = backend.db.update_studio_chat_session_if(
-        session_id,
-        status_in=("running", "awaiting_permission"),
-        status="awaiting_permission",
-    )
-    if not parked:
-        with runtime.lock:
+        try:
+            backend.store.append_message(
+                session_id,
+                "permission",
+                "agent",
+                {
+                    "request_id": request_id,
+                    "status": "pending",
+                    "tool_call": tool_call,
+                    "options": options,
+                },
+            )
+            parked = backend.db.update_studio_chat_session_if(
+                session_id,
+                status_in=("running", "awaiting_permission"),
+                status="awaiting_permission",
+            )
+        except BaseException:
+            # #204 broad-except audit: remove only this request's local waiter
+            # on failed admission, then re-raise unchanged; no failure is swallowed.
             runtime.pending_permissions.pop(request_id, None)
-        pending.decision = {"deny": True, "via": "session_closed"}
-    else:
-        backend.store.publish_session(session_id)
+            raise
+        if not parked:
+            runtime.pending_permissions.pop(request_id, None)
+            pending.decision = {"deny": True, "via": "session_closed"}
+        else:
+            backend.store.publish_session(session_id)
+    if parked:
         try:
             settled = pending.event.wait(timeout=PERMISSION_TIMEOUT_SECONDS)
             if not settled:
@@ -113,22 +115,25 @@ def handle_permission_request(
             with runtime.lock:
                 runtime.pending_permissions.pop(request_id, None)
                 still_parked = bool(runtime.pending_permissions)
-            # Only the awaiting_permission → running transition is ours, and
-            # only once no prompt of this turn is still parked: a close (or
-            # fatal error) that settled this waiter must not be overwritten
-            # back to running (ghost live session, #158).
-            if not still_parked and backend.db.update_studio_chat_session_if(
-                session_id, status_in=("awaiting_permission",), status="running"
-            ):
-                backend.store.publish_session(session_id)
-    decision = pending.decision
-    backend.store.append_message(
-        session_id,
-        "permission",
-        "user",
-        {"request_id": request_id, "status": "resolved", "decision": decision},
-    )
-    return decision
+                if (
+                    not runtime.closed
+                    and backend.runtime(session_id) is runtime
+                    and not still_parked
+                    and backend.db.update_studio_chat_session_if(
+                        session_id, status_in=("awaiting_permission",), status="running"
+                    )
+                ):
+                    backend.store.publish_session(session_id)
+    with runtime.lock:
+        if runtime.closed or backend.runtime(session_id) is not runtime:
+            return {"deny": True, "via": "session_closed"}
+        backend.store.append_message(
+            session_id,
+            "permission",
+            "user",
+            {"request_id": request_id, "status": "resolved", "decision": pending.decision},
+        )
+        return pending.decision
 
 
 def auto_approve(

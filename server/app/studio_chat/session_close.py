@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from server.app.studio_chat.close_notification import notify_closed
+
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
-
-logger = logging.getLogger(__name__)
 
 
 def close_session(service: StudioChatService, session_id: str, workspace_id: str) -> dict[str, Any]:
@@ -24,22 +23,22 @@ def close_session(service: StudioChatService, session_id: str, workspace_id: str
             with service._runtimes_lock:
                 # Pin absence too: resumed runtimes registered after the
                 # snapshot must not inherit this stale close's DB write.
-                if service._runtimes.get(session_id) is not runtime:
+                current = service._runtimes.get(session_id)
+                if current is not None and current is not runtime:
                     return service.get_session(session_id)
                 service.db.update_studio_chat_session(
                     session_id, status="closed", closed_at=datetime.now(UTC)
                 )
             committed = True
-            try:
-                service.store.append_message(
-                    session_id, "status", "system", {"event": "session_closed"}
-                )
-                service.store.publish_session(session_id)
-            except Exception:
-                # #204 broad-except audit: closure already committed; failed
-                # notification cannot imply retry or skip owned teardown.
-                # REST recovers the closed state; preserve the cause.
-                logger.warning("closed chat notification failed for %s", session_id, exc_info=True)
+            # Fence producers before the terminal marker. Teardown performs
+            # blocking handle cleanup outside this lock, but callbacks and
+            # the watcher already see this generation as retired.
+            if runtime is not None:
+                runtime.closed = True
+            pending = list(runtime.pending_permissions) if runtime is not None else []
+            if runtime is not None:
+                service._settle_pending_permissions(runtime)
+            notify_closed(service, session_id, pending)
     finally:
         if committed and runtime is not None:
             service.teardown_runtime(session_id, runtime, expected=runtime)
