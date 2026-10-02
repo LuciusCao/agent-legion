@@ -46,6 +46,7 @@ data/  (videos, logs, packages, jobs, run traces)
 | 前端 | [frontend.md](frontend.md) | React SPA、状态管理、UI 组件 |
 | 部署 | [deployment.md](deployment.md) | 本地运行、配置、质量门 |
 | 质量门 | [local-quality-gates.md](local-quality-gates.md) | 本地 hooks + GitHub Actions CI 的门禁层级、凭证与分支保护策略 |
+| 评审收敛 | [review-convergence.md](review-convergence.md) | 自动评审 finding 的阻塞/非阻塞分诊、回应方式与停止条件（#835） |
 | 项目结构 | [project-structure.md](project-structure.md) | 完整目录树 |
 | velites harness | [velites-harness.md](velites-harness.md) | 自研 Rust agent harness（velites 执行内核）设计 |
 | 证据矩阵 | [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md) | 架构承诺的反向审计证据矩阵（与 `config/architecture/` invariant registry 对齐） |
