@@ -12,6 +12,7 @@ from server.app.services import skill_repo
 from server.app.services.skill_edit_checks import target_path_errors
 from server.app.services.skill_edit_snapshot import edit_file
 from server.app.services.skill_repo_edit import SkillEditValidationError
+from server.app.skill_authoring_limits import SKILL_CONTENT_MAX_CHARS, SKILL_CONTENT_MAX_UTF8_BYTES
 
 MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024
 ENTRY_OVERHEAD_BYTES = 128
@@ -35,7 +36,7 @@ def commit_snapshot(repo: Path, commit: str) -> list[dict[str, Any]]:
             if len(path) > 512 or target_path_errors([path]):
                 raise ValueError("snapshot contains an unwritable path")
             size = int(raw_size)
-            if not 0 <= size <= skill_repo.MAX_FILE_BYTES:
+            if not 0 <= size <= SKILL_CONTENT_MAX_UTF8_BYTES:
                 raise ValueError("file exceeds the editable byte limit")
             total += size + len(raw_path) + ENTRY_OVERHEAD_BYTES
             if total > MAX_SNAPSHOT_BYTES:
@@ -46,10 +47,19 @@ def commit_snapshot(repo: Path, commit: str) -> list[dict[str, Any]]:
             "Cannot export a complete Git editing snapshot",
             [{"path": ".", "error": str(exc)}],
         ) from exc
-    files = [
-        edit_file(path, skill_repo.run_git(repo, ["cat-file", "blob", oid]).stdout)
-        for path, oid in entries
-    ]
+    files = []
+    for path, blob_id in entries:
+        item = edit_file(
+            path,
+            skill_repo.run_git(repo, ["cat-file", "blob", blob_id]).stdout,
+            max_bytes=SKILL_CONTENT_MAX_UTF8_BYTES,
+        )
+        if len(item["content"]) > SKILL_CONTENT_MAX_CHARS:
+            raise SkillEditValidationError(
+                "Cannot export a writable Git editing snapshot",
+                [{"path": path, "error": "file exceeds the editable character limit"}],
+            )
+        files.append(item)
     return sorted(
         files, key=lambda item: (item["path"] not in ("SKILL.md", "contract.yaml"), item["path"])
     )

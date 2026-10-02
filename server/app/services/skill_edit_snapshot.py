@@ -35,10 +35,10 @@ def text_file(path: str, raw: bytes, *, for_edit: bool = False) -> dict[str, Any
     }
 
 
-def edit_file(path: str, raw: bytes) -> dict[str, Any]:
+def edit_file(path: str, raw: bytes, *, max_bytes: int = MAX_FILE_BYTES) -> dict[str, Any]:
     """Reject lossy decoding and truncation before producing an editable file."""
     try:
-        if len(raw) > MAX_FILE_BYTES:
+        if len(raw) > max_bytes:
             raise ValueError("file exceeds the editable byte limit")
         content = raw.decode("utf-8")
     except (UnicodeError, ValueError) as exc:

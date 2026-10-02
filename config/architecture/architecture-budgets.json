@@ -1654,6 +1654,7 @@
     "server/app/services/workspace_stats.py": 42,
     "server/app/settings.py": 91,
     "server/app/single_replica_probe.py": 85,
+    "server/app/skill_authoring_limits.py": 12,
     "server/app/skills/checkout.py": 42,
     "server/app/skills/commit_cache.py": 95,
     "server/app/skills/config.py": 21,

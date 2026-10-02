@@ -220,3 +220,21 @@ def test_git_snapshot_path_matches_save_path_limit(repository, ref, length):
             snapshot(repo, ref)
     else:
         assert relative in {f["path"] for f in snapshot(repo, ref)["files"]}
+
+
+@pytest.mark.parametrize("ref", [None, "v2"])
+@pytest.mark.parametrize("character", ["é", "中", "😀"])
+@pytest.mark.parametrize("length", [128 * 1024 - 1, 128 * 1024, 128 * 1024 + 1])
+def test_skill_character_limit_is_not_a_utf8_byte_limit(repository, ref, character, length):
+    repo = repository
+    content = character * length
+    (repo / "unicode.txt").write_bytes(content.encode())
+    commit(repo)
+    git(repo, "tag", "v2")
+    if length > 128 * 1024:
+        with pytest.raises(SkillEditValidationError):
+            snapshot(repo, ref)
+    else:
+        files = {f["path"]: f for f in snapshot(repo, ref)["files"]}
+        assert files["unicode.txt"]["content"] == content
+        assert files["unicode.txt"]["size"] == len(content.encode())

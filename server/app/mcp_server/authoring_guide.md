@@ -46,6 +46,8 @@ and decoded file batches are capped at 16 MiB. JSON exports and `files_path`
 imports allow 96 MiB to accommodate JSON escaping of a complete legal batch
 or committed skill snapshot; backend file/code limits still apply. The 100-file
 limit is a save-batch limit for skills and a full-state limit for shared material.
+Skill versions allow 128 × 1024 characters per file (up to 512 KiB UTF-8);
+shared materials and skill creation additionally enforce 128 KiB per file.
 Shared materials remain FULL state: preserve every unchanged file in the
 export (omitted files are deleted), then call `sync_shared_materials` to
 propagate. Skill saves retain their tag-conflict behavior: repeated content

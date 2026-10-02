@@ -22,7 +22,7 @@ shared 全量读取遇到软硬链接、特殊文件、非法路径、无效 map
 
 ## 预算与提交边界
 
-skill HEAD/tag 共用预检：单文件最多 128 KiB；总和为内容字节 + UTF-8 路径字节 + 每文件 128 字节元数据额度，最多 16 MiB。读取 blob 前先校验整棵树的模式、路径和尺寸。树目录元数据也受 16 MiB 限制。
+skill HEAD/tag 与版本保存 API 共用每文件 128 × 1024 **字符**上限（UTF-8 最多 512 KiB）；创建服务和 shared materials 另有更严格的 128 KiB **字节**上限，不能将该上限误用于 skill 版本快照。skill 快照总和为内容字节 + UTF-8 路径字节 + 每文件 128 字节元数据额度，最多 16 MiB。读取 blob 前先校验整棵树的模式、路径和字节尺寸，解码后校验字符数。树目录元数据也受 16 MiB 限制。
 MCP JSON 导出/导入最多 96 MiB，容纳控制字符六倍转义；原始文件和解码后的提交批次仍分别限制在 16 MiB。限制独立，不能互相代替。
 一个 101 文件 skill 可以完整导出；本地选择不超过 100 个修改项再保存。不能直接将整个大快照当作提交，也不自动拆成多个有部分成功风险的 commit。
 shared 必须保留全部未修改项，skill 必须排除 mapped shared copies，修改共享权威源后走既有同步流程。
@@ -40,6 +40,7 @@ shared 必须保留全部未修改项，skill 必须排除 mapped shared copies�
 | 仓库规模 | HEAD/tag × 99/100/101 文件；全部读取，无截断 | 同文件 `test_repository_size_is_not_a_save_batch_limit` |
 | 不支持成员 | HEAD/tag × 非 UTF-8/超大 blob/symlink/gitlink；整体拒绝 | 同文件 `test_unsupported_committed_members_reject_entire_snapshot` |
 | 字节与路径 | HEAD/tag × 单文件上限前/上限；Unicode/tab/newline 路径、可执行文件、NUL 字节 | 同文件 `test_file_byte_boundary_and_unusual_paths_round_trip` |
+| 字符与字节 | HEAD/tag × 2/3/4 字节字符 × 字符上限前/恰好上限/超限；真实保存 → 导出 → 再保存字节一致 | 同文件 `test_skill_character_limit_is_not_a_utf8_byte_limit`、`tests/mcp_server/test_edit_snapshot_integration.py::test_accepted_unicode_skill_save_can_be_exported_and_saved_again` |
 | 路径上限 | HEAD/tag × 512/513 字符，读取遵循写入路径上限 | 同文件 `test_git_snapshot_path_matches_save_path_limit` |
 | 总预算 | HEAD/tag × 预算前/恰好预算/超预算；读取任何 blob 前完成总量预检 | 同文件 `test_snapshot_total_budget_boundary`、`test_total_budget_rejects_before_reading_any_blob` |
 | 权限 | group HEAD/tag 编辑拒绝、展示不泄露；foreign/binding/missing × HEAD/tag × HTTP/MCP，鉴权在 Git 和暂存之前；既有 membership 拒绝 | `tests/mcp_server/test_edit_snapshot_integration.py::test_group_skill_display_does_not_authorize_edit_export`、`test_edit_export_authorization_precedes_git_and_staging`、`tests/routes/test_studio_agent_skill_tools.py` |

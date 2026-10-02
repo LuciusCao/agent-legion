@@ -351,3 +351,51 @@ def test_edit_export_authorization_precedes_git_and_staging(
     )
     assert response.status_code == expected
     assert not (Path.cwd() / "data/studio-mcp-files").exists()
+
+
+@pytest.mark.parametrize("ref", [None, "v1"])
+@pytest.mark.parametrize("character", ["é", "中", "😀"])
+def test_accepted_unicode_skill_save_can_be_exported_and_saved_again(
+    snapshot_channel, ref, character
+):
+    run, root = snapshot_channel
+    repo = root / "example"
+    (repo / "references").mkdir(parents=True)
+    (repo / "scripts").mkdir()
+    (repo / "SKILL.md").write_text("# Skill")
+    (repo / "references/output-contract.md").write_text("# Output")
+    (repo / "scripts/validate_output.py").write_text("raise SystemExit(0)")
+    git(repo, "init", "-q")
+    commit(repo)
+    content = character * (128 * 1024)
+    saved = json.loads(
+        run(
+            "save_skill_version",
+            skill_key="edit-snapshot/example",
+            new_tag="v1",
+            message="unicode",
+            files=[{"path": "references/unicode.txt", "content": content}],
+        )
+    )
+    assert saved["tag"] == "v1"
+    exported = json.loads(
+        run("get_skill", skill_key="edit-snapshot/example", ref=ref, output_path="unicode.json")
+    )
+    path = Path(exported["output_path"])
+    files = json.loads(path.read_bytes())["files"]
+    selected = next(f for f in files if f["path"] == "references/unicode.txt")
+    assert selected["content"] == content
+    content = "x" + content[1:]
+    selected["content"] = content
+    path.write_bytes(json.dumps([selected], ensure_ascii=False).encode())
+    saved = json.loads(
+        run(
+            "save_skill_version",
+            skill_key="edit-snapshot/example",
+            new_tag="v2",
+            message="round trip",
+            files_path=str(path),
+        )
+    )
+    assert saved["tag"] == "v2"
+    assert (repo / "references/unicode.txt").read_bytes() == content.encode()
