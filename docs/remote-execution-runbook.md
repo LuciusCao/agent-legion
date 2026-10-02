@@ -240,7 +240,11 @@ its expected runtimes. The code-node sandbox wrapper is separate (#383): the
 image bakes `velites-sandbox` in at `/usr/local/bin`, so code capacity never
 depends on the mounted velites. Bare-metal deployments keep
 `./scripts/ensure-velites.sh --dest data/bin` (fingerprint-gated rebuild;
-same OS/arch as the Worker) for both roles.
+same OS/arch as the Worker) for both roles. `make prod-up` (native) refreshes
+**both** placements — PATH and the bundled `data/bin` copy — because
+resolution prefers the bundled copy, a PATH-only refresh never reaches the
+Worker (#831); worker startup also logs a WARNING when the resolved velites
+copy's source stamp lags the repo's velites/ fingerprint.
 
 When no online code-capable Worker exists, dispatch falls back to the local
 Host executor — code tasks never rot in a queue waiting for a Worker.

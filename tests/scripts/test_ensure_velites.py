@@ -169,3 +169,46 @@ def test_dest_skips_rebuild_when_stamp_matches(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "跳过构建" in result.stdout
     assert log.read_text() == ""
+
+
+def test_prod_up_sequence_refreshes_stale_bundled_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#831 回归：PATH 副本新、data/bin 副本旧 → prod-up 的双通道刷新后，
+    Worker（自带副本优先解析）拿到的必须是刷新后的 data/bin 版本。
+
+    布局复现原生生产现场：install-deps 首次安置 data/bin 副本（hash-v1），
+    仓库跨版本线后旧 prod-up 只刷 PATH 副本（hash-v3）——自带副本优先的
+    解析语义让 Worker 静默滞留在 v1。新 prod-up 按 native-prod-up.sh 的
+    调用序列（PATH 模式 + --dest data/bin）执行后，两处副本都必须是 v3。"""
+
+    from shared import code_sandbox
+    from worker.binary_resolution import resolve_binary
+
+    main, env, log = _setup(tmp_path)
+    bundled_dir = main / "data" / "bin"
+    install = tmp_path / "install"
+
+    # 首次安装（install-deps.sh 通道）：data/bin 副本 = hash-v1
+    assert _run(main, env, "--dest", "data/bin").returncode == 0
+    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v1\n"
+
+    # 仓库前进到 hash-v3；旧 prod-up（仅 PATH 模式）只刷新了 PATH 副本
+    Path(env["STUB_HASH_FILE"]).write_text("hash-v3\n")
+    assert _run(main, env).returncode == 0
+    assert (install / "velites").read_text() == "binary-for-hash-v3\n"
+    # 自带副本仍滞留 v1：PATH 刷新对「自带副本优先」的解析不生效（#831 现象）
+    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v1\n"
+
+    # 新 prod-up 的调用序列：两通道都跑 → data/bin 副本刷新到 v3
+    assert _run(main, env).returncode == 0
+    assert _run(main, env, "--dest", "data/bin").returncode == 0
+    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v3\n"
+    assert (bundled_dir / "velites.src-stamp").read_text() == "hash-v3\n"
+
+    # Worker 解析（自带副本优先、PATH 兜底）落在刷新后的 v3 副本上
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda _binary: str(install / "velites"))
+    resolved = resolve_binary("velites")
+    assert resolved == str(bundled_dir / "velites")
+    assert Path(resolved).read_text() == "binary-for-hash-v3\n"

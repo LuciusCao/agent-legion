@@ -11,6 +11,7 @@ from worker.runtime.preflight import (
     EXPECT_RUNTIMES_ENV,
     parse_expect_runtimes,
     preflight_error,
+    velites_staleness_warning,
 )
 
 
@@ -54,6 +55,11 @@ def prepare_runtime_models(config: dict[str, Any], *, code_concurrency: int = 0)
     error = preflight_error(code_concurrency=code_concurrency, expect_runtimes=expect_runtimes)
     if error is not None:
         return error
+    # #831 指纹对账（软告警，不 fail-closed）：实际解析到的 velites 副本
+    # 与仓库源码漂移时启动日志必须可见——「PATH 刷新对自带副本优先的解析
+    # 不生效」这一部署形态从此不再静默。
+    if warning := velites_staleness_warning():
+        print(warning, flush=True)
     effective, discovery_errors = discover_effective_models(config)
     if expect_runtimes and (failed := sorted(set(expect_runtimes) & set(discovery_errors))):
         details = "；".join(f"{runtime}: {discovery_errors[runtime]}" for runtime in failed)

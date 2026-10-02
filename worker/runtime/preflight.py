@@ -20,12 +20,20 @@ issue #254 起，agent runtime 的注册声明不再是手工勾选，而是读�
 ``worker/binary_resolution.py::resolve_binary``。期望值必须是
 ``worker/runtime/catalog.py`` 的 SUPPORTED_RUNTIMES 子集，未知值同样
 fail-fast（拼写错误按部署错误处理，不静默忽略）。
+
+#831 补一道软对账（``velites_staleness_warning``）：把实际解析到的
+velites 副本的源码 stamp 与仓库当前 velites/ 指纹比对，漂移只告警不
+fail-closed——修复「PATH 刷了、自带副本没刷」这一静默滞留形态的可见性。
 """
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 from shared import code_sandbox
 from shared.code_sandbox import resolve_sandbox_binary
+from worker.binary_resolution import resolve_binary
 from worker.runtime.catalog import (
     RUNTIME_CATALOG,
     SUPPORTED_RUNTIMES,
@@ -35,6 +43,70 @@ from worker.runtime.catalog import (
 #: 期望 runtime 环境变量：docker 部署在 compose 里声明，裸机部署可写进
 #: 服务管理器单元。值为空/未设时不启用该守卫（保持零 runtime 合法的现状）。
 EXPECT_RUNTIMES_ENV = "AGENT_WORKER_EXPECT_RUNTIMES"
+
+#: 仓库根（.git 与 velites/ 源码树所在）：裸机形态 Worker 自仓库根启动，
+#: #831 指纹对账用它算期望指纹；docker 镜像只带 worker/ + shared/（无
+#: repo），git 探测失败即静默跳过对账。
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: 源码指纹 stamp 后缀，与 scripts/ensure-velites.sh 的
+#: ``STAMP="${VELITES_BIN}.src-stamp"`` 同约定。
+_SRC_STAMP_SUFFIX = ".src-stamp"
+
+
+def _expected_velites_fingerprint(repo_root: Path) -> str | None:
+    """仓库当前 velites/ 源码指纹（git tree hash）。
+
+    git 不可用、非 git 仓库或仓库无 velites/ 子树时返回 None（对账无从
+    进行——调用方按「不可对账」跳过，不是异常）。"""
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD:velites"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def velites_staleness_warning() -> str | None:
+    """#831 指纹对账（软告警）：解析到的 velites 二进制 vs 仓库源码。
+
+    Worker/Host 的二进制解析是「自带副本 data/bin 优先、PATH 兜底」——
+    两处安置点都由 ensure-velites.sh 按源码指纹刷新并留 stamp；本函数把
+    **实际解析到**的二进制 stamp 与仓库当前 velites/ 指纹比对，不一致即
+    返回告警文案（漂移可见）。刻意不 fail-closed：velites 版本线独立于
+    仓库，允许刻意落后，但静默漂移（PATH 刷了、自带副本没刷）必须可见。
+    无 stamp（Release 产物/手工安置）或指纹不可得（无 git/无源码树）时
+    返回 None——无从对账不是告警对象。"""
+
+    binary = resolve_binary("velites")
+    if binary is None:
+        return None
+    stamp = Path(f"{binary}{_SRC_STAMP_SUFFIX}")
+    try:
+        stamped = stamp.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None  # stamp 不可读与缺失同级：无从对账，不告警
+    if not stamped:
+        return None
+    expected = _expected_velites_fingerprint(_REPO_ROOT)
+    if expected is None or stamped == expected:
+        return None
+    return (
+        f"警告: Worker 解析到的 velites 二进制 {binary} 的源码指纹"
+        f"（{stamped[:12]}）与仓库 velites/ 源码指纹（{expected[:12]}）不一致——"
+        "该副本将持续被 agent runtime 与 code 沙箱使用（解析顺序：自带副本优先、"
+        "PATH 兜底），velites 的修复（内存上限、输出截断等）可能未生效。"
+        "对齐方式: make prod-up（自动刷新 PATH 与 data/bin 两处副本）或"
+        " ./scripts/ensure-velites.sh --dest data/bin；刻意维持该版本可忽略本告警"
+    )
 
 
 def parse_expect_runtimes(raw: str | None) -> list[str] | None:

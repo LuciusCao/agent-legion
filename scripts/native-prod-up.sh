@@ -31,6 +31,11 @@ echo "同步 Python 依赖…"
 UV_CACHE_DIR=.uv-cache uv sync --frozen
 echo "检测 velites 二进制新鲜度…"
 ./scripts/ensure-velites.sh
+# #831：Worker/Host 解析二进制是「自带副本 data/bin 优先、PATH 兜底」
+# （worker/binary_resolution.py / shared/code_sandbox.py）——只刷 PATH 时，
+# install-deps 首次安置的 data/bin 旧副本永远优先命中，velites 升级静默
+# 失效。自带副本必须单独刷新（--dest 模式指纹一致自动跳过，幂等）。
+./scripts/ensure-velites.sh --dest data/bin
 
 # 幂等判断按「绑定地址 + 端口」匹配已有监听：同端口不同地址是两个
 # 独立监听（127.0.0.1:8000 与 192.0.2.1:8000 可并存），只看端口会把

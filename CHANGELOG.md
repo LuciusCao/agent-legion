@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 - SeaweedFS「假写满」（PutObject 全量 503 / master 日志 no free volumes，磁盘远未写满）：`-volume.max=0` 的自动推导在 volume server 注册信息 stale 时把可写槽位判成 0。上限改为显式可配（见上方部署警示），运维文档补充「可写槽位耗尽」机制说明与恢复步骤（重启重注册 + `volume.deleteEmpty` 回收空 volume）。
+- 原生形态 `make prod-up` 不刷新 Worker 自带二进制副本 `data/bin`（issue #831）：prod-up 只以 PATH 模式调 `ensure-velites.sh`，而 Worker/Host 的二进制解析是「自带副本优先、PATH 兜底」——首次 `install-deps.sh` 安置的 `data/bin/velites` 此后永久优先命中，velites 升级（含 0.5.5 的内存硬上限等安全修复）在原生生产环境静默失效，仅 stamp 日期停在首次安装当天。修复：`native-prod-up.sh` 对两个安置点都做指纹刷新（PATH 模式 + `--dest data/bin`，各自幂等跳过）；Worker 启动预检新增指纹对账软告警——实际解析到的 velites 副本的 `.src-stamp` 与仓库当前 velites/ 指纹不一致时启动日志打 WARNING（不 fail-closed：velites 版本线独立允许刻意落后；无 stamp / 无 git 源码树的形态无从对账，静默跳过）。回归测试复现「PATH 副本新、data/bin 副本旧」布局，断言 prod-up 序列后 Worker 解析到刷新后的版本。
 
 ## [0.7.13] - 2026-09-26
 

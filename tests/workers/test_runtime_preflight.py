@@ -21,6 +21,7 @@ import pytest
 from shared import code_sandbox
 from worker import executor as agent_worker
 from worker.binary_resolution import resolve_binary
+from worker.runtime import preflight
 from worker.runtime import setup as runtime_setup
 from worker.runtime.preflight import parse_expect_runtimes, preflight_error
 
@@ -399,6 +400,144 @@ def test_prepare_runtime_models_expect_unaffected_by_unrelated_disabled(
 def test_parse_expect_runtimes_dedupes() -> None:
     # 重复值去重：错误文案逐项点名，重复会在文案里复读。
     assert parse_expect_runtimes("velites,velites, pi ") == ["velites", "pi"]
+
+
+# ---- #831 指纹对账：解析到的 velites 副本 vs 仓库源码（软告警） ----
+
+
+def _fake_git_stub(monkeypatch: pytest.MonkeyPatch, stdout: str, returncode: int = 0) -> None:
+    """把 _expected_velites_fingerprint 的 git 调用替换为固定输出。"""
+
+    class _Result:
+        def __init__(self) -> None:
+            self.returncode = returncode
+            self.stdout = stdout
+
+    monkeypatch.setattr(
+        preflight.subprocess,
+        "run",
+        lambda *args, **kwargs: _Result(),
+    )
+
+
+@pytest.mark.no_db
+def test_staleness_warning_fires_when_bundled_stamp_lags_repo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#831 核心场景：PATH 副本新、data/bin 副本旧——解析（自带副本优先）
+    落在旧副本上，stamp 与仓库指纹不一致 → 返回告警文案（漂移可见）。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    (bundled_dir / "velites.src-stamp").write_text("old-hash\n", encoding="utf-8")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)  # #496 真实读取点
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    _fake_git_stub(monkeypatch, "new-hash\n")
+
+    warning = preflight.velites_staleness_warning()
+
+    assert warning is not None
+    assert str(bundled_dir / "velites") in warning
+    assert "old-hash"[:12] in warning
+    assert "new-hash"[:12] in warning
+    assert "ensure-velites.sh" in warning
+
+
+@pytest.mark.no_db
+def test_staleness_warning_silent_when_stamp_matches_repo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """指纹一致（prod-up 双通道刷新后的健康状态）→ 无告警。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    (bundled_dir / "velites.src-stamp").write_text("same-hash\n", encoding="utf-8")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    _fake_git_stub(monkeypatch, "same-hash\n")
+
+    assert preflight.velites_staleness_warning() is None
+
+
+@pytest.mark.no_db
+def test_staleness_warning_reconciles_resolved_path_copy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """对账对象是**实际解析到**的二进制：无自带副本时对 PATH 副本的 stamp
+    对账（ensure-velites.sh 默认模式安置 PATH 副本时同样留 stamp）。"""
+    path_velites = tmp_path / "path-velites"
+    _write_executable(path_velites)
+    (tmp_path / "path-velites.src-stamp").write_text("path-old\n", encoding="utf-8")
+    monkeypatch.setattr(shutil, "which", lambda _binary: str(path_velites))
+    _fake_git_stub(monkeypatch, "repo-new\n")
+
+    warning = preflight.velites_staleness_warning()
+
+    assert warning is not None
+    assert str(path_velites) in warning
+
+
+@pytest.mark.no_db
+def test_staleness_warning_silent_without_stamp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """无 stamp（GitHub Release 产物/手工安置）→ 无从对账，不告警。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+
+    assert preflight.velites_staleness_warning() is None
+
+
+@pytest.mark.no_db
+def test_staleness_warning_silent_when_fingerprint_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """仓库指纹不可得（docker 镜像无 repo/git 失败/无 velites 子树）→ 跳过，
+    对账只在「有指纹可比」时进行（docker 形态 velites 版本独立管理，非漂移）。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    (bundled_dir / "velites.src-stamp").write_text("some-hash\n", encoding="utf-8")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    _fake_git_stub(monkeypatch, "", returncode=128)
+
+    assert preflight.velites_staleness_warning() is None
+
+
+@pytest.mark.no_db
+def test_staleness_warning_silent_when_velites_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """velites 不可解析（零 runtime 形态）→ 无对账对象，不告警。"""
+    monkeypatch.setattr(shutil, "which", _all_missing)
+
+    assert preflight.velites_staleness_warning() is None
+
+
+@pytest.mark.no_db
+def test_prepare_runtime_models_prints_staleness_warning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """启动预检接线：prepare_runtime_models 把 #831 对账告警打进启动日志
+    （漂移可见但不 fail-closed——velites 版本线独立，允许刻意落后）。"""
+    bundled_dir = tmp_path / "bundle"
+    _write_executable(bundled_dir / "velites")
+    (bundled_dir / "velites.src-stamp").write_text("lagging\n", encoding="utf-8")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)  # #496 真实读取点
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    _fake_git_stub(monkeypatch, "current\n")
+    monkeypatch.setattr(
+        runtime_setup,
+        "discover_effective_models",
+        lambda _config: ([], {}),
+    )
+
+    config = {"disabled_runtimes": [], "models": []}
+    assert runtime_setup.prepare_runtime_models(config) is None
+    out = capsys.readouterr().out
+    assert "源码指纹" in out
+    assert "ensure-velites.sh" in out
+    assert config.get("models") == []
 
 
 @pytest.mark.no_db

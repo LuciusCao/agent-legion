@@ -2,8 +2,9 @@
 # velites 二进制新鲜度检测：PATH 上的 velites 是跨 worktree 共享的安装物，
 # 「代码已 pull 但二进制还是旧构建」不会触发任何报错。本脚本用 velites/
 # 源码树的 git tree hash 做指纹，与二进制旁的 stamp 文件对比，不一致（或
-# 二进制缺失）时重新 cargo build --release 并原子替换安装。velites/ 有未
-# 提交改动时指纹不可靠，强制重建。make prod-up（原生形态）每次启动前调用本脚本。
+# 二进制缺失）时重新 cargo build --release 并原子替换安装。make prod-up
+# （原生形态）每次启动前调用本脚本**两次**——PATH 模式与 --dest data/bin
+# （#831：Worker 解析自带副本优先，两处安置点都要刷新才算升级生效）。
 #
 # 用法：
 #   scripts/ensure-velites.sh              安装/刷新 PATH 上的 velites（默认）
@@ -11,8 +12,9 @@
 #
 # --dest 用于 Worker 自带沙箱副本：--dest data/bin 把二进制安置到
 # data/bin/velites（Worker 解析顺序：自带副本优先于 PATH，见
-# worker/binary_resolution.py resolve_binary）。二进制按平台构建——给哪台
-# Worker 用就在同 OS/架构的机器上执行本脚本。
+# worker/binary_resolution.py resolve_binary；该副本同时是裸机形态的沙箱
+# 包装器，Host 侧 shared/code_sandbox.py 解析同一目录）。二进制按平台
+# 构建——给哪台 Worker 用就在同 OS/架构的机器上执行本脚本。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
