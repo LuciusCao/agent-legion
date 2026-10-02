@@ -9,15 +9,11 @@
  * - markdown 走 renderMarkdownHtml（marked + DOMPurify）；
  * - svg 一律按 text 渲染源码，不经渲染引擎。
  */
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Chip } from '@mui/material'
 import { RichText } from '../RichText'
-import { JsonTree } from '../JsonTree'
-import {
-  ArtifactPreviewModeToggle,
-  type ArtifactPreviewMode,
-} from '../artifact/ArtifactRenderedPreview'
+import { ParsedJsonBody } from './ParsedJsonBody'
 import { fetchJobArtifactText } from '../../api/jobArtifactText'
 import { queryKeys } from '../../lib/queryKeys'
 import { artifactVersion } from '../../lib/jobArtifactVersions'
@@ -112,35 +108,8 @@ export function JsonPreview({ jobId, name, detail }: PreviewRendererProps) {
     // .json 但解析失败：按原文展示而不是空白。
     return <TextBody content={content} truncated={truncated} total={total} />
   }
+  // 合法 JSON：树视图 + 「预览/源码」切换（#777）。
   return <ParsedJsonBody name={name} content={content} parsed={parsed} />
-}
-
-/**
- * 合法 JSON：默认树视图，「源码」态展示原文——树视图不画逗号与键名引号，
- * 原文通道让用户能自证产物字节合法（#777）。
- */
-function ParsedJsonBody({
-  name,
-  content,
-  parsed,
-}: {
-  name: string
-  content: string
-  parsed: unknown
-}) {
-  const [mode, setMode] = useState<ArtifactPreviewMode>('rendered')
-  return (
-    <div>
-      <div className={styles.modeBar}>
-        <ArtifactPreviewModeToggle name={name} mode={mode} onMode={setMode} />
-      </div>
-      {mode === 'source' ? (
-        <TextBody content={content} truncated={false} total={content.length} />
-      ) : (
-        <JsonTree data={parsed} />
-      )}
-    </div>
-  )
 }
 
 export function MarkdownPreview({ jobId, name, detail }: PreviewRendererProps) {
