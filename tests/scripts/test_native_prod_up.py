@@ -138,17 +138,17 @@ def test_health_host_normalization_behavior() -> None:
 )
 def test_console_url_uses_browser_reachable_host(tmp_path, bind, expected) -> None:
     normalize = re.search(r"^health_host\(\) \{.*?^\}", NATIVE_PROD_UP, re.M | re.S)
-    injection = re.search(
-        r'    if \[\[ -z "\$\{AGENT_LEGION_WORKER_CONSOLE_URL\+x\}".*?^    fi',
+    injection = re.findall(
+        r"^    (?:console_host=|export AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL=).*$",
         NATIVE_PROD_UP,
-        re.M | re.S,
+        re.M,
     )
     assert normalize and injection
     code = (
         normalize.group(0)
         + '\nunset AGENT_LEGION_WORKER_CONSOLE_URL\nWORKER_BIND="$1"\nWORKER_PORT=8799\n'
     )
-    code += injection.group(0) + '\nprintf "%s" "$AGENT_LEGION_WORKER_CONSOLE_URL"\n'
+    code += "\n".join(injection) + '\nprintf "%s" "$AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL"\n'
     result = subprocess.run(
         ["bash", "-eu", "-c", code, "console", bind],
         cwd=tmp_path,
