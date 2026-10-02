@@ -3,7 +3,7 @@ import { Button } from '@mui/material'
 import { MaterialIcon } from './MaterialIcon'
 import { AgentConnectionDot } from './AgentConnectionDot'
 import { useAgentsStore } from '../stores/agentsStore'
-import { useUiStore } from '../stores/uiStore'
+import { useWorkerScheduling } from '../hooks/useWorkerScheduling'
 import { AgentWorkerStatusList } from './AgentWorkerStatusList'
 import styles from './WorkspaceRunControl.module.css'
 
@@ -16,8 +16,7 @@ export function WorkspaceRunControl({ workspaceId }: WorkspaceRunControlProps) {
     state.getWorkerPaused(workspaceId)
   )
   const fetchWorkerStatus = useAgentsStore((state) => state.fetchWorkerStatus)
-  const setWorkerPaused = useAgentsStore((state) => state.setWorkerPaused)
-  const showToast = useUiStore((state) => state.showToast)
+  const setWorkerPaused = useWorkerScheduling(workspaceId)
 
   useEffect(() => {
     // Intentionally silent: a paused-status refresh failure degrades to the
@@ -27,22 +26,12 @@ export function WorkspaceRunControl({ workspaceId }: WorkspaceRunControlProps) {
     fetchWorkerStatus(workspaceId).catch(() => {})
   }, [fetchWorkerStatus, workspaceId])
 
-  const togglePause = async () => {
-    const next = !workerPaused
-    try {
-      await setWorkerPaused(next, workspaceId)
-      showToast(next ? '已暂停运行' : '已恢复运行', 'success')
-    } catch {
-      showToast('更新失败', 'error')
-    }
-  }
-
   return (
     <div className={styles.root}>
       <Button
         size="small"
         aria-label={workerPaused ? '恢复运行' : '暂停运行'}
-        onClick={() => void togglePause()}
+        onClick={() => void setWorkerPaused(!workerPaused)}
         startIcon={
           <span className={styles.iconWrap}>
             <MaterialIcon

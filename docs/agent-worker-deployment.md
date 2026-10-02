@@ -459,11 +459,17 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
 
 ### 开发 worktree 的本地 Worker 检查单
 
+新 workspace 引导只有在 workflow 已发布、所需 Worker 已就绪且调度确认运行后才解锁添加任务。暂停状态未加载或请求失败时不推断为暂停，也不显示确定性的阻塞警告；纯 code workflow 不要求接入 Worker，只检查调度开关。
+
 在开发 worktree 里起本地栈（`make dev-up`，或分开 `make dev-backend` + `make dev-worker`）时，job 一直停在 `queued` 或秒败，按顺序查这三处——`scripts/init-worktree.sh` 已尽量自动化，但各自有时机前提：
 
 1. **Workspace 调度默认暂停**：后端每次启动都把全部 workspace 重置为暂停（刻意设计，防止重启后任务不受控自跑），unknown workspace 也默认暂停。恢复调度是按需操作：后端首次启动建表 seed 之后执行 `scripts/resume-workspaces.sh`（未建表时以退出码 1 失败并提示），或在 workspace 控制台手动恢复。症状：workflow worker 日志每 3 秒一轮但 `jobs=0`。
 2. **Worker 的 models allowlist 不含任务所需模型**：agent 任务的 claim 准入按「runtime + provider/model」逐 Worker 匹配（capability 已不参与匹配，issue #284），全部 Worker 都不满足即判「无 Worker 可认领」，job 秒败并带 `not declared by any Worker` 错误。注意生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 config 文件不生效，要走控制台或 `PUT /api/config`。
-3. **`claim_enabled` 默认 false**：Worker 每次启动/重启都先关闭 claim（只注册心跳、不领任务），症状是后端日志没有任何 `POST /api/agent-executions/claim`。经 worker 控制台或 `PUT /api/config`（`{"claim_enabled": true}`，热字段立即生效）打开。
+3. **`claim_enabled` 默认 false**：Worker 每次启动/重启都先关闭 claim（只注册心跳、不领任务），症状是后端日志没有任何 `POST /api/agent-executions/claim`。经 worker 控制台或 `PUT /api/config`（`{"claim_enabled": true}`，热字段立即生效）打开。schema v87 起 Worker 随每次状态同步（`POST /api/agent-workers/self/presence`）上报该开关，主控制台的 Worker 行会直接标成「在线·未领取」并带「控制台」入口；任务列表有「等待中」任务而无 Worker 领取时顶部还会出排查横幅。旧版 Worker 不上报（`claim_enabled: null`），仍显示为普通「在线」。
+
+领取状态属于当前注册凭据：重注册生成新 token 时清回 `null`，旧 token 的在途 presence/claim 请求不能改变新注册的状态或在线时间。presence 与 claim 在写事务中锁定当前 Worker 行并复核凭据，状态未变化时也必须完成这一步。
+
+引导只在空态可见时请求准备状态；等待任务的排查横幅按需请求。首次未返回或刷新失败都视为未知，不据此宣称已暂停、无 Worker 或可执行；正常后台刷新保留上次成功快照。排查入口优先使用当前在线且未撤销的 Worker 地址，暂停／恢复失败会明确提示并允许重试。
 
 ## 6. 验证两个 Worker
 

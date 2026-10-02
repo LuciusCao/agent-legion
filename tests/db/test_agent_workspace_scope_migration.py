@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.migrations import migrate_agent_workspace_scope
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
@@ -244,5 +245,4 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    # The registry tail at the CURRENT schema version (v86, #645).
-    assert migration["name"] == "node_runs_impl_identity"
+    assert migration["name"] == MIGRATIONS[-1].name
