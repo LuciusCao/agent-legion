@@ -8,7 +8,7 @@
 # 它 import 真实 resolver（worker/binary_resolution、shared/code_sandbox、
 # worker/runtime/catalog），从解析序推导安置目标，家族（velites +
 # 已存在的 velites-sandbox）共享同一 src-stamp 指纹。本脚本退化为
-# 「git 指纹 → planner 判鲜 → cargo build → 按 planner 目标原子安置」。
+# 「git 指纹 → planner 判鲜 → cargo build → 全部目标备妥后统一原子安置」。
 #
 # 用法：
 #   scripts/ensure-velites.sh              刷新 PATH 通道（velites 现有位置，
@@ -123,23 +123,61 @@ else
 fi
 (cd velites && cargo build --release --locked)
 
-# 安置：planner 给出的每个目标位置原子替换 + 同批 stamp。候选序
-# velites-sandbox 优先于 velites——按名字序安置保证同目录内 velites
-# 先落位、家族成员后落位，解析永远落在刷新后的副本上。
+# 安置分两阶段（AGENTS.md §6 多步变更纪律，#835 codex R6 P2）：先为全部
+# 目标校验产物并暂存副本，任一目标备妥失败即整体退出、清理暂存——禁止
+# 边校验边替换：PATH 分叉到用户目录与 root-owned /usr/local/bin 时，前一
+# 目标已盖章、后一目标才失败会留下半应用状态，运行中的 Host/Worker 继续
+# 解析旧家族成员。全部备妥后才统一执行原子替换 + 同批 stamp。
+STAGED_TMPS=()
+cleanup_staged() {
+    local staged
+    for staged in ${STAGED_TMPS[@]+"${STAGED_TMPS[@]}"}; do
+        rm -f "$staged"
+    done
+}
+trap cleanup_staged EXIT
+
+PREPARE_FAILED=0
 while IFS='|' read -r bin target; do
     [[ -z "$bin" ]] && continue
     src="velites/target/release/$bin"
     if [[ ! -f "$src" ]]; then
         echo "错误：构建产物缺失 $src（velites/Cargo.toml 的 [[bin]] 与安置面不一致？）" >&2
-        exit 1
+        PREPARE_FAILED=1
+        break
     fi
+    if ! mkdir -p "$(dirname "$target")"; then
+        echo "错误：无法创建目标目录 $(dirname "$target")（权限不足？）——未改动任何已安装副本" >&2
+        PREPARE_FAILED=1
+        break
+    fi
+    # 暂存到目标同目录：备妥阶段的 cp 同时验证目标目录可写，应用阶段的
+    # mv 因此是同目录 rename，几乎不可能再失败。
+    tmp="${target}.tmp.$$"
+    if ! cp "$src" "$tmp" || ! chmod +x "$tmp"; then
+        echo "错误：无法写入 $target（权限不足？）——未改动任何已安装副本" >&2
+        rm -f "$tmp"
+        PREPARE_FAILED=1
+        break
+    fi
+    STAGED_TMPS+=("$tmp")
+done <<<"$PLAN_OUTPUT"
+
+if [[ "$PREPARE_FAILED" -ne 0 ]]; then
+    echo "velites 安置中止：备妥阶段失败，所有已安装副本保持原样" >&2
+    exit 1
+fi
+
+# 统一应用：逐目标原子替换（rename）+ 同批 stamp。候选序 velites-sandbox
+# 优先于 velites——按名字序安置保证同目录内 velites 先落位、家族成员后
+# 落位，解析永远落在刷新后的副本上。
+IDX=0
+while IFS='|' read -r bin target; do
+    [[ -z "$bin" ]] && continue
+    tmp="${STAGED_TMPS[$IDX]}"
+    IDX=$((IDX + 1))
     # 原子替换：运行中的 worker 继续用旧 inode，新派生的 agent 进程立即拿到
     # 新二进制；直接覆盖写入可能让并发生成的进程读到截断的二进制。
-    mkdir -p "$(dirname "$target")"
-    tmp="${target}.tmp.$$"
-    trap 'rm -f "$tmp"' EXIT
-    cp "$src" "$tmp"
-    chmod +x "$tmp"
     mv -f "$tmp" "$target"
     echo "$SRC_ID" > "${target}.src-stamp"
     echo "velites 家族成员 $bin 已安装到 $target"

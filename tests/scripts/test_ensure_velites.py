@@ -440,3 +440,38 @@ def test_script_refreshes_copy_that_lost_exec_bit(
     assert "已安装到" in result.stdout
     assert binary.read_text() == "binary-for-hash-v1\n"
     assert binary.stat().st_mode & stat.S_IXUSR
+
+
+def test_multi_target_apply_is_all_or_nothing(tmp_path: Path) -> None:
+    """#835 codex R6 P2：多目标安置必须先全部备妥、再统一替换。
+
+    PATH 分叉（velites 在可写目录、velites-sandbox 在不可写目录）时，
+    旧的边校验边替换循环会先替换并盖章 velites、随后才在 wrapper 上
+    失败——半应用状态让运行中的 Host/Worker 继续解析旧包装器（违反
+    AGENTS.md §6 多步变更纪律）。备妥阶段失败必须整体退出，所有已
+    安装副本保持原样、暂存副本清理干净。"""
+    main, env, log = _setup(tmp_path)
+    stub_dir = Path(env["PATH"].split(":")[0])
+    unwritable_dir = tmp_path / "unwritable"
+    unwritable_dir.mkdir()
+
+    # planner 目标序按 bin 名：velites（可写）在前、velites-sandbox
+    # （不可写）在后——正是旧循环留下半应用状态的顺序。
+    _write_stub(stub_dir / "velites", "#!/usr/bin/env bash\n# old velites\n")
+    (stub_dir / "velites.src-stamp").write_text("hash-v0\n")
+    _write_stub(unwritable_dir / "velites-sandbox", "#!/usr/bin/env bash\n# stale wrapper\n")
+    (unwritable_dir / "velites-sandbox.src-stamp").write_text("hash-v0\n")
+    env["PATH"] = f"{unwritable_dir}:{env['PATH']}"
+    unwritable_dir.chmod(stat.S_IRUSR | stat.S_IXUSR)
+
+    try:
+        result = _run(main, env)
+        assert result.returncode != 0
+        assert "无法写入" in result.stderr
+        # 半应用防线：velites 旧副本未被替换、未被重新盖章、暂存副本已清理。
+        assert (stub_dir / "velites").read_text() == "#!/usr/bin/env bash\n# old velites\n"
+        assert (stub_dir / "velites.src-stamp").read_text() == "hash-v0\n"
+        assert list(stub_dir.glob("*.tmp.*")) == []
+        assert "已安装到" not in result.stdout
+    finally:
+        unwritable_dir.chmod(stat.S_IRWXU)

@@ -179,9 +179,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         # （shared/velites_staleness.py），漂移检查绝不阻断启动；docker
         # 形态（无 repo）自然静默。放 start_worker 分支：只有会真正消费
         # 二进制的生产形态才对账，test/export app 不付这笔 git 探测成本。
-        for warning in host_staleness_warnings():
-            logger.warning("%s", warning.strip())
         if start_worker:
+            for warning in host_staleness_warnings():
+                logger.warning("%s", warning.strip())
             validate_settings(settings)
             agent_manager.discover()
             # #591 (#609 P2-D): start the result-commit group-commit writer

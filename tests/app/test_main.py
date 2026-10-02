@@ -219,3 +219,23 @@ def test_lifespan_logs_velites_staleness_warnings(tmp_path, monkeypatch, caplog)
         pass  # lifespan startup runs here
 
     assert any("漂移（测试注入）" in record.message for record in caplog.records)
+
+
+def test_lifespan_skips_velites_staleness_when_worker_disabled(tmp_path, monkeypatch):
+    """#835 codex R6 P2：start_worker=False 的 test/export app 不跑 velites
+    对账——该形态不消费这些二进制，不应让每个 TestClient 重复付 git 探测
+    （最长 10s 子进程）成本。钩子必须与注释声明一致地留在 start_worker
+    分支内。"""
+    from server.app import main
+
+    calls = []
+    monkeypatch.setattr(main, "host_staleness_warnings", lambda: calls.append(1) or [])
+
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    app = main.create_app(data_dir=tmp_path, start_worker=False)
+    with TestClient(app):
+        pass  # lifespan startup runs here
+
+    assert calls == []
