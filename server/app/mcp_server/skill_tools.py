@@ -47,10 +47,14 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         references/ + scripts/). workspace_id must match the skill key's own
         workspace segment (skills are workspace-isolated). No ref → working
         tree at HEAD (the latest semantics); ref previews one tag without
-        moving the lock (unknown tag → 404). output_path exports full JSON
+        moving the lock (unknown tag → 404). output_path exports committed
+        Git content (HEAD or the requested tag), excluding all local changes
+        and untracked/ignored files, as full JSON
         to a NEW staging file on the MCP host under
         data/studio-mcp-files/<workspace_id>/ and returns path/size/SHA-256.
-        Edit locally and pass files_path to save_skill_version."""
+        Select only edited, non-shared paths (at most 100 per save) and pass
+        files_path to save_skill_version. Repository reads have a byte budget,
+        not the 100-file save limit; unsupported trees fail without truncation."""
         _, client = await client_factory()
         path = _skill_path(workspace_id, skill_key)
         if ref is not None:

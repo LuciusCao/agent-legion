@@ -12,6 +12,7 @@ from server.app.auth.scoped_tokens import mint_scoped_token
 from server.app.mcp_server.config import McpServerConfig
 from server.app.mcp_server.server import create_mcp_server
 from server.app.mcp_server.tool_client import ToolClient
+from tests.helpers.skill_snapshot import commit, git
 
 
 @pytest.fixture
@@ -36,6 +37,15 @@ def snapshot_channel(client, job_db, tmp_path, monkeypatch):
         return original(catalog, key)
 
     monkeypatch.setattr(SkillCatalogService, "_skill_dir", skill_dir)
+    from server.app.services.skill_editing import SkillEditingService
+
+    original_repo_dir = SkillEditingService._skill_dir
+
+    def editing_repo_dir(service, key):
+        service.base_dir = root.parent
+        return original_repo_dir(service, key)
+
+    monkeypatch.setattr(SkillEditingService, "_skill_dir", editing_repo_dir)
     headers = {"Authorization": f"Bearer {token}"}
 
     async def call(self, method, path, body=None, **kwargs):
@@ -126,6 +136,9 @@ def test_lossy_or_truncated_exports_fail_before_creating_staging_file(snapshot_c
     (folder / "references").mkdir(parents=True)
     (folder / "references" / "bad.md").write_bytes(bad)
     (folder / "map.json").write_text('{"version": 1, "materials": []}')
+    if kind == "skill":
+        git(folder, "init", "-q")
+        commit(folder)
     kwargs = {"skill_key": "edit-snapshot/example"} if kind == "skill" else {}
     response = run(
         "get_skill" if kind == "skill" else "get_shared_materials", output_path="bad.json", **kwargs
@@ -221,3 +234,120 @@ def test_group_skill_display_does_not_authorize_edit_export(snapshot_channel, re
         },
     )
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize("ref", [None, "v1"])
+def test_large_skill_snapshot_selected_save_preserves_other_files(snapshot_channel, ref):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    run, root = snapshot_channel
+    repo = root / "example"
+    (repo / "references").mkdir(parents=True)
+    (repo / "scripts").mkdir()
+    contents = {
+        "SKILL.md": "# Skill\r\n",
+        "references/output-contract.md": "# Output\r\n",
+        "scripts/validate_output.py": "raise SystemExit(0)\r\n",
+        ".gitignore": ".env\n",
+        **{f"references/{i}.txt": f"unchanged {i}\r\n" for i in range(97)},
+    }
+    for path, content in contents.items():
+        (repo / path).write_bytes(content.encode())
+    git(repo, "init", "-q")
+    commit(repo)
+    git(repo, "tag", "v1")
+    (repo / ".env").write_text("host-secret")
+    exported = json.loads(
+        run("get_skill", skill_key="edit-snapshot/example", ref=ref, output_path="large.json")
+    )
+    path = Path(exported["output_path"])
+    document = json.loads(path.read_bytes())
+    assert {f["path"]: f["content"] for f in document["files"]} == contents
+    head = git(repo, "rev-parse", "HEAD")
+    with pytest.raises(ToolError, match="1–100"):
+        run(
+            "save_skill_version",
+            skill_key="edit-snapshot/example",
+            files_path=str(path),
+            new_tag="v2",
+            message="too many",
+        )
+    assert git(repo, "rev-parse", "HEAD") == head
+    assert git(repo, "tag", "--list", "v2") == b""
+    document["files"] = [{"path": "SKILL.md", "content": "# Changed\r\n"}]
+    path.write_bytes(json.dumps(document).encode())
+    saved = json.loads(
+        run(
+            "save_skill_version",
+            skill_key="edit-snapshot/example",
+            files_path=str(path),
+            new_tag="v2",
+            message="one change",
+        )
+    )
+    assert saved["tag"] == "v2"
+    contents["SKILL.md"] = "# Changed\r\n"
+    for relative, content in contents.items():
+        assert (repo / relative).read_bytes() == content.encode()
+    assert (repo / ".env").read_text() == "host-secret"
+    assert b".env" not in git(repo, "ls-tree", "--name-only", "HEAD")
+
+
+@pytest.mark.parametrize("kind", ["symlink", "gitlink", "invalid-utf8"])
+@pytest.mark.parametrize("ref", [None, "v1"])
+def test_invalid_git_snapshot_never_creates_export(snapshot_channel, kind, ref):
+    run, root = snapshot_channel
+    repo = root / "example"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / "SKILL.md").write_text("valid")
+    commit(repo)
+    if kind == "gitlink":
+        head = git(repo, "rev-parse", "HEAD").decode().strip()
+        git(repo, "update-index", "--add", "--cacheinfo", f"160000,{head},submodule")
+        git(repo, "commit", "-qm", "gitlink", "--no-gpg-sign")
+    else:
+        if kind == "symlink":
+            (repo / "bad").symlink_to("SKILL.md")
+        else:
+            (repo / "bad").write_bytes(b"\xff")
+        commit(repo)
+    git(repo, "tag", "v1")
+    response = run("get_skill", skill_key="edit-snapshot/example", ref=ref, output_path="bad.json")
+    assert response.startswith("HTTP 422:"), response
+    assert not (Path.cwd() / "data/studio-mcp-files/edit-snapshot/bad.json").exists()
+
+
+@pytest.mark.parametrize("ref", [None, "v1"])
+@pytest.mark.parametrize("kind", ["foreign", "binding", "missing"])
+def test_edit_export_authorization_precedes_git_and_staging(
+    snapshot_channel, client, job_db, monkeypatch, ref, kind
+):
+    from server.app.services.skill_catalog import SkillCatalogService
+
+    run, root = snapshot_channel
+    job_db.create_workspace("Other", default_workflow_key="other", workspace_id="other")
+    key = "other/example" if kind == "foreign" else "edit-snapshot/example"
+    workspace = "other" if kind == "binding" else "edit-snapshot"
+    if kind == "missing":
+        key = "unknown/example"
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Git content lookup must follow edit authorization")
+
+    monkeypatch.setattr(SkillCatalogService, "detail", forbidden)
+    expected = 403 if kind == "binding" else 404
+    result = run(
+        "get_skill", workspace_id=workspace, skill_key=key, ref=ref, output_path="denied.json"
+    )
+    assert result.startswith(f"HTTP {expected}:"), result
+    token = mint_scoped_token(
+        job_db, str(job_db.get_user_credentials("admin")["id"]), workspace_id="edit-snapshot"
+    )
+    response = client.get(
+        f"/api/studio-agent/tools/workspaces/{workspace}/skills/{key}",
+        params={"for_edit": "true", **({"ref": ref} if ref else {})},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == expected
+    assert not (Path.cwd() / "data/studio-mcp-files").exists()

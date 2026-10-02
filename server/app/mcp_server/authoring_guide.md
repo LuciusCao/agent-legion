@@ -28,7 +28,14 @@ The JSON may be either a file list or the complete read response. Alternatively,
 `files=[{path: "...", file_path: "local.txt"}]` reads individual local files;
 each entry must choose exactly one of `content` or `file_path`.
 Skill writes are incremental: filter the exported `files` array to the paths
-you intend to save. Exclude mapped shared copies; edit their authoritative
+you intend to save (at most 100 per save, regardless of repository size).
+Skill editing exports read one immutable commit: HEAD when `ref` is absent,
+or the requested tag's commit. Local modifications, staged changes and
+untracked/ignored files are excluded; the returned commit identifies the bytes.
+The whole committed tree is exported within a 16 MiB budget including UTF-8
+content, path bytes and 128 bytes of metadata allowance per file. Unsupported
+members or an exceeded budget reject the whole export, never truncate it.
+Exclude mapped shared copies; edit their authoritative
 sources through the shared-material tools instead. Do not blindly resubmit
 the whole skill export when it contains mapped shared files.
 
@@ -37,7 +44,8 @@ it. Traversal, symbolic/hard links, non-regular files, invalid UTF-8 and
 truncated exports are rejected before any authoritative save. Raw local sources
 and decoded file batches are capped at 16 MiB. JSON exports and `files_path`
 imports allow 96 MiB to accommodate JSON escaping of a complete legal batch
-(up to 100 files of 128 KiB each); backend file/code limits still apply.
+or committed skill snapshot; backend file/code limits still apply. The 100-file
+limit is a save-batch limit for skills and a full-state limit for shared material.
 Shared materials remain FULL state: preserve every unchanged file in the
 export (omitted files are deleted), then call `sync_shared_materials` to
 propagate. Skill saves retain their tag-conflict behavior: repeated content

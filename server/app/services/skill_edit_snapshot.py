@@ -54,7 +54,7 @@ def shared_edit_snapshot(root: Path) -> list[dict[str, Any]]:
     return files
 
 
-def edit_tree(root: Path, *, skill: bool = False) -> list[dict[str, Any]]:
+def edit_tree(root: Path) -> list[dict[str, Any]]:
     """Read every file, including raw map.json, under the caller's shared lock.
 
     Refuse unreadable/unsupported trees as a whole: omission from a FULL-state
@@ -64,8 +64,6 @@ def edit_tree(root: Path, *, skill: bool = False) -> list[dict[str, Any]]:
 
     def walk(directory: int, prefix: str = "") -> None:
         for name in sorted(os.listdir(directory)):
-            if skill and not prefix and name == ".git":
-                continue
             relative = prefix + name
             info = os.stat(name, dir_fd=directory, follow_symlinks=False)
             if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
