@@ -7,6 +7,8 @@ __pycache__/
 *.pyc
 data/
 node_modules/
+# 依赖重装的失败保护备份位（scripts/ensure-frontend-deps.sh，#810）
+frontend/.node_modules.bak/
 frontend/dist/
 *.log
 .worktrees/
