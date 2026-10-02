@@ -41,8 +41,11 @@ def create_failed_node_runs_router(
     )
     def list_failed_node_runs(
         workspace_id: str,
-        category: str | None = None,
-        detail: str | None = None,
+        # #735 review P2 (cluster): empty-string filter forms 422 — the query
+        # layer's `if category` / `if detail` would otherwise silently drop
+        # the clause and return the unfiltered list.
+        category: Annotated[str | None, Query(min_length=1)] = None,
+        detail: Annotated[str | None, Query(min_length=1)] = None,
         workflow_key: Annotated[
             str | None,
             Query(deprecated=True, description=_DEPRECATED_QUERY),

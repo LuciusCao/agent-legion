@@ -76,7 +76,6 @@ describe('WorkspaceWorkersSection', () => {
     expect(link.getAttribute('href')).toBe('http://10.0.0.8:8787')
     expect(link.textContent).toContain('控制台')
   })
-
   it('lists the workspace workers with their online state', async () => {
     mockListAgentWorkers.mockResolvedValue([sampleWorker])
     renderSection()

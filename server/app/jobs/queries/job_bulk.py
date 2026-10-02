@@ -64,7 +64,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         """Insert one job per candidate of a run, in chunked transactions.
 
         Each job carries the run's frozen config + its own input doc
-        (RUN-FREEZE-001); a re-submitted job takes the new freeze.
+        (RUN-FREEZE-001); a same-run re-submitted job takes the new freeze.
 
         #467 A3 — chunked-commit protocol: ≤CHUNK_ROWS-row chunks, one
         transaction each. Every chunk FOR KEY SHARE-locks exactly its own
@@ -77,7 +77,13 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         chunk-error contract. Normalize collisions (``a/b`` vs ``a_w``) and
         identity mismatches are detected over the WHOLE candidate set before
         the first chunk commits (chunked identity precheck, review P2-2), so
-        a collision inserts nothing. Returns job ids (first-seen order); row
+        a collision inserts nothing. Returns the job ids this call actually
+        OWNS after the writes (first-seen order), derived from the INSERT's
+        RETURNING (#735 review P1): a candidate whose job a concurrent run
+        claimed between the caller's dedup probe and this insert is skipped
+        by the ON CONFLICT ownership clause (first writer wins — see
+        job_bulk_sql.JOBS_BULK_INSERT_SQL) and drops out of the result, so
+        callers never report another run's job as their own. Row
         materialization moved to read paths (#467 A4).
         """
         if not candidates:
@@ -119,6 +125,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 frozen_config_json,
             )
         row_list = list(rows.values())
+        owned_ids: list[str] = []
 
         with self.connect() as conn:
             # Existence precheck over the WHOLE call, in chunked statements:
@@ -157,17 +164,28 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                         job_storage_dir(self.jobs_dir, workspace_id, str(row[0])).mkdir(
                             parents=True, exist_ok=True
                         )
-                insert_jobs_batched(conn, chunk)
+                owned_chunk = insert_jobs_batched(conn, chunk)
+                # Node rows only for jobs this chunk owns: a skipped row
+                # (lost to a concurrent run, #735) belongs to another run —
+                # possibly created from another revision — and must not gain
+                # this run's node keys.
                 insert_job_nodes_batched(
                     conn,
-                    [(str(row[0]), node_key) for row in chunk for node_key in node_keys],
+                    [
+                        (str(row[0]), node_key)
+                        for row in chunk
+                        if str(row[0]) in owned_chunk
+                        for node_key in node_keys
+                    ],
                 )
                 # #501: post-INSERT identity verification inside this chunk's
                 # transaction — the ON CONFLICT arm rebinds run/title/input
-                # but never touches source identity, so a foreign-identity
-                # row that slipped past the precheck (concurrent in-flight
-                # insert) shows up here and rolls the whole chunk back
-                # instead of being silently re-bound to this run.
+                # (same-run rows only, #735) but never touches source
+                # identity, so a foreign-identity row that slipped past the
+                # precheck (concurrent in-flight insert) shows up here and
+                # rolls the whole chunk back instead of being silently
+                # re-bound to this run.
                 verify_chunk_identities(conn, chunk)
                 conn.commit()
-        return job_ids
+                owned_ids.extend(str(row[0]) for row in chunk if str(row[0]) in owned_chunk)
+        return owned_ids
