@@ -62,7 +62,10 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
         workspace_id: str, skill_key: str, ref: str | None = None, for_edit: bool = False
     ) -> SkillDetailResponse:
         try:
-            _require_skill_in_workspace(job_db, skill_key, workspace_id)
+            if for_edit:
+                _require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
+            else:
+                _require_skill_in_workspace(job_db, skill_key, workspace_id)
             return SkillDetailResponse(
                 **catalog.detail(
                     skill_key, ref=ref, for_edit=for_edit, runs_dir=settings.skills_runs_dir

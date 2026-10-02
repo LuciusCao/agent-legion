@@ -14,6 +14,9 @@
 完整导出响应）提交；单个文件条目也支持 `file_path` 替代 `content`。
 原来的 inline 参数保持兼容。不要同时提交路径参数和对应正文参数。
 
+完整 skill 编辑导出仅限当前 workspace 自有的 skill；group skill 只能通过
+不带 `output_path` 的 `get_skill` 读取原有公开内容，不能导出完整编辑快照。
+
 skill/shared 的路径导出使用后端 `for_edit=true` 编辑快照，不能用展示
 接口的投影代替。共享快照包含 `map.json` 原文及全部可写文件（不按扩展名
 筛选）；损坏 UTF-8、超过可写上限或不安全的共享目录会整体拒绝导出，

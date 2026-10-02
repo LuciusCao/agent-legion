@@ -148,3 +148,52 @@ def test_skill_edit_export_includes_all_writable_paths_and_preserves_bytes(snaps
     )
     files = json.loads(Path(exported["output_path"]).read_bytes())["files"]
     assert {f["path"]: f["content"] for f in files} == contents
+
+
+@pytest.mark.parametrize("ref", [None, "v1"])
+def test_group_skill_display_does_not_authorize_edit_export(snapshot_channel, ref, client, job_db):
+    run, root = snapshot_channel
+    repo = root.parent / "shared-group" / "example"
+    repo.mkdir(parents=True)
+    (repo / "SKILL.md").write_text("public skill")
+    (repo / ".env").write_text("private sentinel")
+    (repo / "internal.md").write_text("internal sentinel")
+    for args in (
+        ["init", "-q"],
+        ["add", "."],
+        [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-qm",
+            "fixture",
+            "--no-gpg-sign",
+        ],
+        ["tag", "v1"],
+    ):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    key = "shared-group/example"
+    display = json.loads(run("get_skill", skill_key=key, ref=ref))
+    assert [item["path"] for item in display["files"]] == ["SKILL.md"]
+    rejected = run("get_skill", skill_key=key, ref=ref, output_path="group.json")
+    assert rejected.startswith("HTTP 404:"), rejected
+    assert "private sentinel" not in rejected
+    assert "internal sentinel" not in rejected
+    assert not (Path.cwd() / "data/studio-mcp-files/edit-snapshot/group.json").exists()
+    response = client.get(
+        f"/api/studio-agent/tools/workspaces/edit-snapshot/skills/{key}",
+        params={"for_edit": "true", **({"ref": ref} if ref else {})},
+        headers={
+            "Authorization": "Bearer "
+            + mint_scoped_token(
+                job_db,
+                str(job_db.get_user_credentials("admin")["id"]),
+                workspace_id="edit-snapshot",
+            )
+        },
+    )
+    assert response.status_code == 404

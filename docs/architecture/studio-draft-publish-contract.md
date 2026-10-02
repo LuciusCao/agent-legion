@@ -15,6 +15,9 @@ MCP 的 node code、skill、shared 读取工具可用 `output_path` 导出完整
 这是同机/共享文件系统通道，远程 agent 保留 inline 参数。
 
 编辑快照与展示投影分离：skill/shared 导出请求 `for_edit=true`，
+skill 编辑投影必须通过与保存相同的 workspace 写权限检查；group skill
+只开放原有受限展示，不因 `output_path` 或显式 HTTP 参数扩展可读文件集合。
+工作树与 tag 两条读取路径都在权限检查之后解析，拒绝时不创建暂存文件。
 禁止截断和有损 UTF-8 解码。共享快照在同一目录锁内读取原始 map.json 与
 全部文件，并用同一个 FULL-state PUT 校验器验证可重存性；任何不可表示、
 越界或超限文件使整个快照失败，不能靠省略文件让重存变成意外删除。
