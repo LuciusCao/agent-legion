@@ -9,8 +9,13 @@
   失败时原本可用的旧依赖一并丢失——已有 node_modules 时必须经备份位
   .node_modules.bak 恢复旧目录，不留半安装态（AGENTS.md「禁止半应用
   状态」）；npm 桩按破坏性优先语义建模（删除发生在失败之前）；
-- SIGKILL 强杀自愈：残留备份位（node_modules 已被清）先恢复再判定；
-  备份与新目录并存（成功后清理前被杀）则弃备份、凭 stamp 跳过。
+- SIGKILL 残留裁决（PR #832 codex P2）：备份与新树并存时，只有新树
+  stamp 命中当前指纹才弃备份（成功后、清备份前被杀）；否则视为半安装
+  残树（npm ci 中途被杀）——删残树、恢复备份，「目录存在即弃备份」会
+  删掉唯一完整的旧树；备份在、模块不在则先恢复再判定；
+- 并发互斥（PR #832 codex P2）：同 worktree 并发调用共享备份位与恢复
+  逻辑，整个事务经 mkdir 原子锁串行化（语义同 gate-queue 的 slot）：
+  持有者死亡即回收、等待者绝不误删他人的锁、结束必释放。
 另钉三处调用点（native-prod-up / install-deps / dev_stack）统一委托本
 脚本，旧的「node_modules 存在即跳过」判定不得残留——那是 #810 的直接
 根因（升级 pull 进新 lockfile 后旧依赖构建新代码，tsc 报 TS2307）。
@@ -21,9 +26,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -95,22 +102,31 @@ def _setup(tmp_path: Path) -> tuple[Path, Path]:
 _BASH = shutil.which("bash") or "/bin/bash"
 
 
+def _script_env(
+    main: Path,
+    bin_dir: Path,
+    stub_log: Path,
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    # 真实 PATH 保留在后：摘要工具（sha256sum / shasum）不在桩内。
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["STUB_LOG"] = str(stub_log)
+    env.update(extra_env or {})
+    return env
+
+
 def _run(
     main: Path,
     bin_dir: Path,
     stub_log: Path,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    # 真实 PATH 保留在后：摘要工具（sha256sum / shasum）不在桩内。
-    env = dict(os.environ)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
-    env["STUB_LOG"] = str(stub_log)
-    env.update(extra_env or {})
     return subprocess.run(
         [_BASH, str(main / "scripts" / SCRIPT.name)],
         capture_output=True,
         text=True,
-        env=env,
+        env=_script_env(main, bin_dir, stub_log, extra_env),
         timeout=60,
     )
 
@@ -120,7 +136,8 @@ def _npm_ci_count(stub_log: Path) -> int:
 
 
 def test_fresh_install_runs_npm_ci_and_writes_stamp(tmp_path: Path) -> None:
-    """无 node_modules：npm ci 执行一次，成功后写入指纹 stamp，无备份残迹。"""
+    """无 node_modules：npm ci 执行一次，成功后写入指纹 stamp，无备份残迹、
+    锁已释放。"""
     main, bin_dir = _setup(tmp_path)
     stub_log = tmp_path / "stub.log"
 
@@ -132,6 +149,7 @@ def test_fresh_install_runs_npm_ci_and_writes_stamp(tmp_path: Path) -> None:
     assert stamp.is_file()
     assert stamp.read_text() == f"{_fingerprint(main)}\n"
     assert not (main / "frontend" / ".node_modules.bak").exists()
+    assert not (main / "frontend" / ".deps-install.lock").exists()
 
 
 def test_unchanged_manifests_skip_reinstall(tmp_path: Path) -> None:
@@ -260,6 +278,7 @@ def test_stale_backup_from_killed_install_is_recovered(tmp_path: Path) -> None:
     assert not bak.exists()
     assert not (main / "frontend" / "node_modules" / "marker").exists()
     assert (main / "frontend" / "node_modules" / ".deps-stamp").is_file()
+    assert not (main / "frontend" / ".deps-install.lock").exists()
 
 
 def test_stale_backup_with_fresh_modules_is_discarded(tmp_path: Path) -> None:
@@ -281,6 +300,190 @@ def test_stale_backup_with_fresh_modules_is_discarded(tmp_path: Path) -> None:
     assert not (main / "frontend" / ".node_modules.bak").exists()
     assert (modules / "marker").read_text() == "fresh-deps"
     assert not stub_log.exists()  # 未触碰 npm
+
+
+def test_stale_backup_with_partial_modules_restores_backup(tmp_path: Path) -> None:
+    """PR #832 codex P2：npm ci 中途被 SIGKILL，备份位与「半安装残树」
+    并存（残树无 stamp，或 stamp 是旧清单的）——「目录存在即弃备份」会删
+    掉唯一完整的旧树，之后安装再失败时 EXIT trap 恢复的只是残树，失败
+    保护失效。必须删残树、恢复备份，再走带备份的完整安装。"""
+    main, bin_dir = _setup(tmp_path)
+    modules = main / "frontend" / "node_modules"
+    bak = main / "frontend" / ".node_modules.bak"
+    bak.mkdir()
+    (bak / "marker").write_text("old-deps")
+    # 半安装残树：部分包 + 无 stamp（npm ci 写 stamp 之前被杀）。
+    modules.mkdir()
+    (modules / "partial-package").write_text("half-installed")
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(main, bin_dir, stub_log)
+
+    assert result.returncode == 0, result.stderr
+    # 残树被删、备份恢复为安装源；最终新树完整、备份清理、锁释放。
+    assert not (modules / "partial-package").exists()
+    assert not (modules / "marker").exists()  # 恢复出的旧树随后被新安装替换
+    assert (modules / ".deps-stamp").read_text() == f"{_fingerprint(main)}\n"
+    assert not bak.exists()
+    assert not (main / "frontend" / ".deps-install.lock").exists()
+
+
+def test_stale_backup_with_stale_stamp_modules_restores_backup(tmp_path: Path) -> None:
+    """P2 变体：残树带着旧清单的 stamp（清单已变化，stamp 不命中当前
+    指纹）——同样按残树处理：恢复备份重装。stamp 命中当前指纹是弃备份的
+    唯一判据，目录存在与旧 stamp 都不是。"""
+    main, bin_dir = _setup(tmp_path)
+    modules = main / "frontend" / "node_modules"
+    bak = main / "frontend" / ".node_modules.bak"
+    bak.mkdir()
+    (bak / "marker").write_text("old-deps")
+    modules.mkdir()
+    (modules / "partial-package").write_text("half-installed")
+    (modules / ".deps-stamp").write_text("fingerprint-of-older-manifests\n")
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(main, bin_dir, stub_log)
+
+    assert result.returncode == 0, result.stderr
+    assert not (modules / "partial-package").exists()
+    assert (modules / ".deps-stamp").read_text() == f"{_fingerprint(main)}\n"
+    assert not bak.exists()
+
+
+# 慢速 npm 桩：ci 时先声明「安装中」（写 marker 文件）再 sleep——供并发
+# 锁用例构造「持有锁的进程正处于安装中」的真实窗口。
+_NPM_SLOW_STUB = """#!/usr/bin/env bash
+echo "npm $*" >> "${STUB_LOG}"
+if [[ "$1" == "ci" ]]; then
+  rm -rf node_modules
+  touch "${STUB_INSTALLING_MARKER}"
+  sleep "${STUB_NPM_SLEEP:-30}"
+  mkdir -p node_modules
+fi
+exit 0
+"""
+
+
+def test_concurrent_install_serializes_on_lock(tmp_path: Path) -> None:
+    """PR #832 codex P2：同 worktree 并发调用（dev-up + install + 手工）共享
+    备份位与恢复逻辑——后启动者不得移走/删除前一进程的备份或其刚完成的
+    安装（EXIT trap 恢复的正是对方的成果）。整个事务经 mkdir 原子锁
+    串行化：A 持锁安装期间 B 必须等待；A 完成释放后 B 凭 stamp 跳过。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "npm", _NPM_SLOW_STUB)
+    installing = tmp_path / "installing.marker"
+    stub_log = tmp_path / "stub.log"
+    env = _script_env(main, bin_dir, stub_log, {"STUB_INSTALLING_MARKER": str(installing)})
+
+    first = subprocess.Popen(
+        [_BASH, str(main / "scripts" / SCRIPT.name)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    try:
+        # 等 A 真正进入安装段（marker 出现 = 已持锁、已 mv 备份、npm 在跑）。
+        for _ in range(100):
+            if installing.exists():
+                break
+            time.sleep(0.1)
+        assert installing.exists(), "首个进程未进入安装段"
+        # 此时备份位/新装目录处于中间态：B 并发启动必须被锁挡住。
+        second = subprocess.run(
+            [_BASH, str(main / "scripts" / SCRIPT.name)],
+            capture_output=True,
+            text=True,
+            env=_script_env(main, bin_dir, stub_log, {"STUB_NPM_SLEEP": "0"}),
+            timeout=90,
+        )
+        assert second.returncode == 0, second.stderr
+        assert "等待" in second.stderr  # B 打印过持有者等待提示
+    finally:
+        # 唤醒 A 的慢速 npm，让它正常收尾。
+        if first.poll() is None:
+            slow_dir = installing.parent
+            _write_stub(bin_dir / "npm", _NPM_STUB)
+            del slow_dir
+            first.wait(timeout=60)
+    out, err = first.communicate()
+    assert first.returncode == 0, err or out
+    # A 完成、B 随后：A 安装一次，B 凭 stamp 跳过——npm ci 恰好一次，
+    # 两个进程都不留备份/锁残迹。
+    assert _npm_ci_count(stub_log) == 1
+    assert (main / "frontend" / "node_modules" / ".deps-stamp").read_text() == (
+        f"{_fingerprint(main)}\n"
+    )
+    assert not (main / "frontend" / ".node_modules.bak").exists()
+    assert not (main / "frontend" / ".deps-install.lock").exists()
+
+
+def test_dead_lock_holder_is_reclaimed(tmp_path: Path) -> None:
+    """锁持有者死亡（SIGKILL，无 EXIT trap）后残锁回收：下次运行凭
+    kill -0 探测 pid 已死，回收重试而不是死等。备份/残树按正常收编逻辑
+    处理（本用例聚焦锁回收本身）。"""
+    main, bin_dir = _setup(tmp_path)
+    lock = main / "frontend" / ".deps-install.lock"
+    lock.mkdir()
+    (lock / "pid").write_text("999999999\n")  # 几乎不可能存活的 pid
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(main, bin_dir, stub_log)
+
+    assert result.returncode == 0, result.stderr
+    assert "陈旧安装锁" in result.stderr
+    assert not lock.exists()  # 成功收尾后锁已释放
+    assert (main / "frontend" / "node_modules" / ".deps-stamp").is_file()
+
+
+def test_waiter_never_deletes_live_lock(tmp_path: Path) -> None:
+    """等待者绝不误删持有者的锁：锁内 pid 存活时，等待中的进程只能打印
+    提示并继续等，不得回收。持有者退出后等待者才拿锁进入。"""
+    main, bin_dir = _setup(tmp_path)
+    lock = main / "frontend" / ".deps-install.lock"
+    lock.mkdir()
+    (lock / "pid").write_text(f"{os.getpid()}\n")  # 本测试进程 = 存活的持有者
+    stub_log = tmp_path / "stub.log"
+
+    # 等待者起在后台：持锁期间它只能等待（不产出陈旧锁回收/完成痕迹）。
+    waiter = subprocess.Popen(
+        [_BASH, str(main / "scripts" / SCRIPT.name)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=_script_env(main, bin_dir, stub_log),
+    )
+    try:
+        time.sleep(3)
+        assert waiter.poll() is None, "等待者在持有者存活期间提前退出了"
+        assert lock.exists(), "等待者误删了存活持有者的锁"
+        assert "陈旧安装锁" not in (waiter.stderr and "" or "")  # 尚未输出
+    finally:
+        # 释放锁，等待者应随即完成（无需 npm——跳过或安装由残留态决定）。
+        shutil.rmtree(lock)
+        waiter.wait(timeout=60)
+    out, err = waiter.communicate()
+    assert waiter.returncode == 0, err
+    assert _npm_ci_count(stub_log) <= 1
+    assert not lock.exists()
+
+
+def test_lock_pid_file_missing_is_reclaimed_after_grace(tmp_path: Path) -> None:
+    """空 pid 残锁（持有者在 mkdir 与写 pid 的窗口内被强杀）：等待者先
+    宽限，仍无 pid 则回收——不至于永久死锁。"""
+    main, bin_dir = _setup(tmp_path)
+    lock = main / "frontend" / ".deps-install.lock"
+    lock.mkdir()  # 无 pid 文件
+    stub_log = tmp_path / "stub.log"
+
+    start = time.monotonic()
+    result = _run(main, bin_dir, stub_log)
+    elapsed = time.monotonic() - start
+
+    assert result.returncode == 0, result.stderr
+    assert "回收重试" in result.stderr
+    assert elapsed < 30  # 宽限是秒级，不是永久等待
+    assert not lock.exists()
 
 
 def test_missing_manifest_fails_fast(tmp_path: Path) -> None:
@@ -371,9 +574,31 @@ def test_stamp_lives_inside_node_modules() -> None:
 
 
 def test_backup_dir_is_gitignored() -> None:
-    """备份位必须被 gitignore：强杀残留的备份目录不得污染 git status。"""
+    """备份位与安装锁必须被 gitignore：强杀残留的目录不得污染 git status。"""
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "frontend/.node_modules.bak/" in gitignore
+    assert "frontend/.deps-install.lock/" in gitignore
+
+
+def test_lock_covers_whole_transaction() -> None:
+    """锁必须先于任何共享状态变更（含残留备份收编与跳过路径的 rm）：
+    acquire 在 trap 设置之后、收编逻辑之前；release 在 EXIT trap 内。
+    收编/弃备份/恢复若发生在锁外，并发窗口会重新打开（codex P2）。"""
+    acquire_pos = SCRIPT_TEXT.index("acquire_deps_lock\n")
+    trap_pos = SCRIPT_TEXT.index("trap 'restore_and_release' EXIT")
+    # 主流程收编段（restore_and_release 函数体内也有同形判定，须锚定
+    # 「---- SIGKILL 残留收编」标题后的那一份）。
+    collect_pos = SCRIPT_TEXT.index("# ---- SIGKILL 残留收编")
+    assert trap_pos < collect_pos, "EXIT trap（含恢复）必须先于残留收编执行"
+    assert acquire_pos < collect_pos, "锁必须覆盖残留收编段"
+    # skip 判定也在锁内：位于 acquire 与脚本末尾之间（release 只发生在
+    # EXIT trap，skip 前无显式 release）。
+    skip_pos = SCRIPT_TEXT.index("跳过 npm ci")
+    assert acquire_pos < skip_pos, "skip 路径须持锁执行（读 stamp 与 rm 备份）"
+    # release 只删自己的锁：等待者不得误删持有者的锁。
+    assert re.search(r'release_deps_lock\(\) \{.*?"\$\$".*?\}', SCRIPT_TEXT, re.DOTALL), (
+        "release 必须比对锁内 pid 与 $$"
+    )
 
 
 def test_call_sites_delegate_and_old_guard_is_gone() -> None:

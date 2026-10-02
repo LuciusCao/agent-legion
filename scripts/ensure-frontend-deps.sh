@@ -10,11 +10,24 @@
 #
 # 失败保护（PR #832 codex P1）：npm ci 自身会先整目录删除 node_modules，
 # 网络/registry/lifecycle script 失败时留下空缺或半安装树，原本可用的旧
-# 依赖一并丢失（改动前的判定从不触碰已存在的 node_modules，这是本脚本
-# 引入的新失败面）。已有 node_modules 时先挪到同卷备份位 .node_modules.bak，
+# 依赖一并丢失。已有 node_modules 时先挪到同卷备份位 .node_modules.bak，
 # 任何失败路径（含 Ctrl-C/SIGTERM/errexit 经 EXIT trap）恢复旧目录——升级
-# 失败不等于丢失可运行的开发环境；备份窗口内瞬时占用约一倍磁盘。被
-# SIGKILL 强杀（trap 无从执行）残留的备份由下次运行开头的清理逻辑收编。
+# 失败不等于丢失可运行的开发环境；备份窗口内瞬时占用约一倍磁盘。
+#
+# SIGKILL 自愈（PR #832 codex P2）：强杀后备份位与 node_modules 可能并存，
+# 可否弃备份以「新树 stamp 与当前指纹匹配」为唯一判据——stamp 只在本脚本
+# 完整安装成功后写入，匹配即新树完整；不匹配（含 stamp 缺失，npm ci 中途
+# 被杀）视为半安装残树，删残树、恢复备份。按「目录存在」弃备份会把唯一
+# 完整的旧树删掉，随后安装再失败时失败保护已失效。
+#
+# 并发互斥（PR #832 codex P2）：备份位与恢复逻辑是同 worktree 内的共享
+# 可变状态，dev-up / install / prod-up 或手工并发调用会互相移走备份、删除
+# 对方刚完成的安装（EXIT trap 恢复的正是对方的成果）。整个事务（残留
+# 收编 → 指纹判定 → 安装 → stamp → 清备份）经 mkdir 原子锁串行化，语义
+# 同 scripts/gate-queue.sh 的 slot：等待者打印持有者 pid；持有者死亡
+# （kill -0）即回收；锁不防跨 worktree——各 worktree 的 frontend/ 互不
+# 相干，无需机器级锁。mkdir 与写 pid 之间的窗口只剩相邻两条语句，空 pid
+# 残锁经短暂宽限后由等待者回收。
 #
 # 用法（在仓库根执行，native-prod-up / install-deps / dev_stack 统一委托）：
 #   ./scripts/ensure-frontend-deps.sh
@@ -25,6 +38,7 @@ cd "$ROOT"
 
 STAMP="frontend/node_modules/.deps-stamp"
 BACKUP="frontend/.node_modules.bak"
+LOCK_DIR="frontend/.deps-install.lock"
 
 for manifest in frontend/package.json frontend/package-lock.json; do
     # ${manifest} 必须带花括号：后随全角逗号时，bash 3.2 在部分 locale 下
@@ -54,21 +68,76 @@ fi
 # cat 拼接的边界歧义（前文件末尾无换行时内容漂移会产生相同串）。
 FINGERPRINT="$("${HASH[@]}" frontend/package.json frontend/package-lock.json | awk '{print $1}')"
 
-# 上次运行被 SIGKILL 等强杀（EXIT trap 无从执行）时可能残留备份位：
-# - 备份在、node_modules 不在（npm ci 已清原目录、新装未完成）：先恢复
-#   备份，下方按指纹决定是否重装（恢复出的旧 stamp 与当前清单不匹配时
-#   会再走一次带备份的安装，语义完整）。
-# - 备份与 node_modules 并存（安装成功后、备份清理前被杀）：备份已陈旧，
-#   直接删除，随后指纹命中即跳过。
+# 新树是否完整可信：stamp 与当前指纹匹配。stamp 只在完整安装成功后由
+# 本脚本写入——半安装残树（npm ci 中途被杀）没有 stamp，不可能伪造命中。
+modules_fresh() {
+    [[ -d frontend/node_modules && -f "$STAMP" && "$(cat "$STAMP")" == "$FINGERPRINT" ]]
+}
+
+# ---- 并发互斥：mkdir 原子锁 + pid 存活检测 + 死锁回收（语义同 gate-queue）----
+acquire_deps_lock() {
+    local waited=0 holder
+    while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+        holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+        if [[ -z "$holder" ]]; then
+            # 持有者可能恰在 mkdir 与写 pid 之间（相邻语句）；宽限后仍无
+            # pid 视为该窗口内被强杀的残锁，回收。
+            if (( waited >= 2 )); then
+                echo "检测到无持有者进程的安装锁，回收重试…" >&2
+                rm -rf "$LOCK_DIR"
+                waited=0
+                continue
+            fi
+        elif ! kill -0 "$holder" 2>/dev/null; then
+            echo "检测到陈旧安装锁（pid ${holder} 已退出），回收重试…" >&2
+            rm -rf "$LOCK_DIR"
+            continue
+        fi
+        if (( waited % 30 == 0 )); then
+            echo "另一进程（pid ${holder:-unknown}）正在安装前端依赖，等待…" >&2
+        fi
+        sleep 1
+        waited=$(( waited + 1 ))
+    done
+    printf '%s\n' "$$" > "$LOCK_DIR/pid"
+}
+
+release_deps_lock() {
+    # 仅当锁内 pid 仍是本进程时删除：等待者绝不误删持有者的锁。
+    if [[ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" == "$$" ]]; then
+        rm -rf "$LOCK_DIR"
+    fi
+}
+
+# EXIT trap：备份位存在（安装路径被中断）则恢复旧目录；随后释放锁。
+# trap 内命令失败不改写脚本退出码（除非显式 exit），恢复失败时备份仍在，
+# 下次运行的残留收编逻辑自愈。
+restore_and_release() {
+    if [[ -d "$BACKUP" ]]; then
+        rm -rf frontend/node_modules
+        mv -f "$BACKUP" frontend/node_modules
+    fi
+    release_deps_lock
+}
+
+# 锁须先于任何共享状态变更（含残留备份收编与跳过路径里的 rm）。
+acquire_deps_lock
+trap 'restore_and_release' EXIT
+
+# ---- SIGKILL 残留收编：备份与新树并存时以 stamp 有效性裁决 ----
+# 新树 stamp 命中当前指纹 = 上次安装已完整完成（stamp 后、清备份前被杀），
+# 弃备份；否则新树是半安装残树，删残树、恢复备份——按「目录存在」弃备份
+# 会删掉唯一完整的旧树，之后安装再失败时 EXIT trap 恢复的是残树。
 if [[ -d "$BACKUP" ]]; then
-    if [[ -d frontend/node_modules ]]; then
+    if modules_fresh; then
         rm -rf "$BACKUP"
     else
+        rm -rf frontend/node_modules
         mv "$BACKUP" frontend/node_modules
     fi
 fi
 
-if [[ -d frontend/node_modules && -f "$STAMP" && "$(cat "$STAMP")" == "$FINGERPRINT" ]]; then
+if modules_fresh; then
     echo "前端依赖已是最新（${FINGERPRINT:0:12}），跳过 npm ci"
     exit 0
 fi
@@ -80,9 +149,6 @@ else
 fi
 
 if [[ -d frontend/node_modules ]]; then
-    # 恢复 trap 先于 mv 设置：mv 被打断时备份位可能尚未成形，trap 以备份
-    # 位存在性自守（不存在即无事可恢复，原目录仍完整）。
-    trap 'if [[ -d frontend/.node_modules.bak ]]; then rm -rf frontend/node_modules; mv -f frontend/.node_modules.bak frontend/node_modules; fi' EXIT
     mv frontend/node_modules "$BACKUP"
     if ! (cd frontend && npm ci); then
         echo "npm ci 失败，已恢复升级前的 node_modules（旧依赖仍可用，稍后重试）" >&2
@@ -92,10 +158,10 @@ else
     # 无旧目录可保护：保持裸 npm ci 语义（失败即失败，不留备份残迹）。
     (cd frontend && npm ci)
 fi
-# stamp 先于备份清理写入：两步之间被强杀时，下次运行凭 stamp 命中跳过，
-# 残留备份由开头的陈旧备份清理收走。npm ci 对零依赖清单成功时不创建
-# node_modules，mkdir -p 兜底，否则 stamp 写入失败且下轮永远进不了跳过态。
+# stamp 先于备份清理写入：两步之间被强杀时，下次运行凭 stamp 命中弃备份
+# （上方收编逻辑）；stamp 写入前被杀则恢复备份重装。npm ci 对零依赖清单
+# 成功时不创建 node_modules，mkdir -p 兜底，否则 stamp 写入失败且下轮
+# 永远进不了跳过态。
 mkdir -p frontend/node_modules
 printf '%s\n' "$FINGERPRINT" > "$STAMP"
-trap - EXIT
 rm -rf "$BACKUP"
