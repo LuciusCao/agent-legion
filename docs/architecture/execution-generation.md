@@ -292,8 +292,10 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    源消失 TOCTOU 全域——清挡位垃圾（预检保证删不到暂存源），永不炸异常。
    视图成员只有两类：本次 ref 校验提升的产物名（#779 终审 P1：job_dir 残留
    永不进视图补齐 produced）与校验前链入的节点声明 inputs（#828/#830：
-   Host 校验的跨文件对账数据面；与 expected 同名的 input 不链，残留排除
-   语义不动）；
+   Host 校验的跨文件对账数据面，名单/字节裁决在
+   `agent_control/completion_view_inputs.py`——名归一化后与 expected 或
+   staged 提升源同名不链，字节优先 dispatch 冻结的 CAS 副本、缺失回落
+   job_dir）；
 3. **闸内兜底**（`executors/_lease_finish_promotion.py`）：预检无锁，盖不住跨
    节点 finish 之间现场变坏的残余竞态——`staged_file_moves` 提升失败经 guard
    整体回滚后 completed 转 failed 照常提交，lease 不再被异常回滚毒化成重试循环。

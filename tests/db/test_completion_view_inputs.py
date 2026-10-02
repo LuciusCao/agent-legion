@@ -17,6 +17,7 @@ import pytest
 
 from server.app.agent_control.completion import AgentOutcome
 from server.app.jobs import JobQueries
+from server.app.services.artifact_store import ArtifactStore
 from server.app.skills.commit_cache import NullSkillStore
 from server.app.skills.manager import SkillManager
 from tests.db.completion_helpers import (
@@ -27,6 +28,7 @@ from tests.db.completion_helpers import (
     _seed_completion_job,
 )
 from tests.fakes.storage import FakeObjectStorage
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _skill_manager(tmp_path: Path) -> SkillManager:
@@ -145,3 +147,75 @@ def test_declared_input_never_backfills_expected_output(
     assert (job_dir / "b.json").read_bytes() == b"stale-leftover"
     assert store.row_for_node("inp2-job", "node_a", "b.json") is None
     assert "jobs/inp2-ws/inp2-job/b.json" not in storage.objects
+
+
+def test_validation_uses_dispatch_frozen_input_bytes(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 对抗复审 P1：dispatch 时 stage_agent_inputs 把 Worker 实际消费
+    的 input 字节冻结进 CAS（manifest input_artifacts 持 sha256 ref）；之后
+    并行生产者覆盖 job_dir 同名文件（job_dir 按 job 共享、多节点同名输出
+    受支持）——校验必须对冻结字节做，而不是覆盖后的现场。"""
+    _seed_completion_job(job_db, workspace_id="inp3-ws", job_id="inp3-job")
+    storage = FakeObjectStorage()
+    artifact_store = ArtifactStore(tmp_path / "cas", TEST_DATABASE_URL)
+    handler, _store, jobs_dir = _completion_handler(
+        job_db, tmp_path, storage, skill_manager=_skill_manager(tmp_path)
+    )
+    handler.artifact_store = artifact_store  # 真 CAS 替换 stub
+    job_dir = jobs_dir / "inp3-ws" / "inp3-job"
+    job_dir.mkdir(parents=True)
+    # dispatch 时刻：input 在场，字节冻结进 CAS（stage_agent_inputs 同款）。
+    (job_dir / "in.json").write_bytes(b"dispatch-frozen")
+    digest = artifact_store.put(b"dispatch-frozen")
+    # dispatch→completion 之间：并行节点覆盖了 job_dir 同名文件。
+    (job_dir / "in.json").write_bytes(b"overwritten-by-parallel-producer")
+    _result_archive(tmp_path / "bundles" / "result.tar.gz", {"out.json": b'{"fresh": true}'})
+    staging_key = "jobs-staging/inp3-ws/inp3-job/exec-1/out.json"
+    storage.objects[staging_key] = b'{"fresh": true}'
+    captured: dict[str, bytes] = {}
+
+    def _fake_validate(_sm: Any, _manifest: dict[str, Any], view_dir: Path) -> str | None:
+        captured.update(
+            {
+                p.relative_to(view_dir).as_posix(): p.read_bytes()
+                for p in view_dir.rglob("*")
+                if p.is_file()
+            }
+        )
+        return None
+
+    monkeypatch.setattr(
+        "server.app.agent_control.completion_staged.validate_worker_outputs", _fake_validate
+    )
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="inp3-job",
+        node_key="node_a",
+        manifest={
+            "expected_outputs": ["out.json"],
+            "inputs": ["in.json"],
+            "input_artifacts": {"in.json": f"sha256:{digest}"},
+            "execution_id": "exec-1",
+        },
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            # dict-ref 上报：产物校验走 object_store，真 ArtifactStore 全程
+            # 无 add_ref 写入（legacy sha256 字符串 ref 会撞 artifact_refs
+            # 的外键）。
+            output_artifacts={
+                "out.json": {"storage_key": staging_key, "size_bytes": 15, "content_hash": ""}
+            },
+        ),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("inp3-job", "node_a")["status"] == "completed"
+    # 校验看到的是 dispatch 冻结字节，不是被覆盖后的 job_dir 现场。
+    assert captured["in.json"] == b"dispatch-frozen"
+    assert captured["out.json"] == b'{"fresh": true}'
+    assert (job_dir / "in.json").read_bytes() == b"overwritten-by-parallel-producer"  # 现场不动
