@@ -149,18 +149,38 @@ def test_artifact_truncation_markers_accepted_absent_defaults() -> None:
 
 
 @_parse_only
+def test_artifacts_in_archive_marker_normalized_into_record() -> None:
+    """#755 codex P1：清单走归档成员的标记——is True 归一进 record 审计面；
+    AgentOutcome 不加字段（commit 层从 record 读标记、从归档读清单）。
+    缺席与非 True 值（旧 Worker / 畸形载荷）一律 False。"""
+    marked = json.loads(_payload({}))
+    marked["output_artifacts_in_archive"] = True
+    _, record = parse_result_metadata(json.dumps(marked))
+    assert record["output_artifacts_in_archive"] is True
+
+    _, record = parse_result_metadata(_payload({}))
+    assert record["output_artifacts_in_archive"] is False
+
+    truthy_but_not_bool = json.loads(_payload({}))
+    truthy_but_not_bool["output_artifacts_in_archive"] = 1
+    _, record = parse_result_metadata(json.dumps(truthy_but_not_bool))
+    assert record["output_artifacts_in_archive"] is False
+
+
+@_parse_only
 def test_artifact_truncation_roundtrip_worker_header_to_host_parse() -> None:
     """#748 R3（codex review P1）roundtrip：128 条产物清单超头预算时，Worker
     侧不再截断直传 ref 前缀（Host 不用截断标记恢复引用，产物会 Missing），
-    而是抛 ResultHeaderOverflow 回退归档内嵌模式——CAS 字符串 ref（~78B/条）
-    全量 128 条 ~12KB 天然落预算。经真实传输形态（UTF-8 字节 → latin-1 视图
+    直传形态抛 ResultHeaderOverflow（#755 codex P1 起清单走归档成员）；
+    本用例钉住 CAS 字符串 ref（~78B/条）全量 128 条 ~12KB 天然落预算的
+    形态：经真实传输形态（UTF-8 字节 → latin-1 视图
     → _recover_result_header 反解）被 Host 读进 outcome/record：全量引用逐项
     还原、无截断标记。"""
     from server.app.routes.agent_worker_results import _recover_result_header
     from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
 
-    # 回退终点形态：归档内嵌模式下的 CAS 字符串引用（直传规格清空后
-    # prepare_result 重备的 output_artifacts 形态）。
+    # CAS 形态：直传失败换轨后 prepare 重备、或旧通道任务的
+    # output_artifacts 形态。
     artifacts = {f"out-{i:03d}.json": f"sha256:{_HASH}" for i in range(128)}
     metadata = {
         "status": "completed",

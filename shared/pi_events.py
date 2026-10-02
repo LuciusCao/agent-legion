@@ -40,8 +40,11 @@ STDERR_TAIL_BYTES = 8 * 1024
 # 扩窗让跨点密钥在脱敏时保持完整，脱敏后再切回 8KB（与
 # stderr_error_message 200 字符面「先脱敏后截」同纪律）。字符面（单行
 # 预截）由 _redact_then_tail_text 收口，字节面（sink 扩窗）在下方调用点
-# 保持同序——先后顺序不再散落各出口。窗口外沿仍可能骑跨更长密钥——
-# 扩窗压低概率而非根除，这是 best-effort 边界。
+# 保持同序——先后顺序不再散落各出口。#755 codex P1：固定窗口装不下
+# >512 字节的已注册密钥（PEM、长 JWT），有效窗口由调用方按已注册最长
+# 密钥的字节数扩窗（max(本常量, redact_secret_max_bytes)，Worker 侧来源
+# 是 worker/upload/stderr_evidence.max_secret_bytes）；残留边界收窄为
+# 「未注册的他机密钥」——形态规则兜底的已知 best-effort 面。
 _REDACT_WINDOW_MARGIN = 512
 
 
@@ -74,6 +77,7 @@ def scan_and_compress_pi_events(
     events_path: Path,
     stderr_sink: Path | None = None,
     redact: Callable[[bytes], bytes] | None = None,
+    redact_secret_max_bytes: int = 0,
 ) -> tuple[str | None, int, int, bytes]:
     """One pass: fold the model-error state, capture the stderr tail, and
     rewrite the file compressed.
@@ -115,6 +119,14 @@ def scan_and_compress_pi_events(
     spanning the whole window, no line boundary to align to) redacts the
     whole buffer before slicing instead of raw-cutting an unredacted face.
 
+    ``redact_secret_max_bytes`` (#755 codex P1) widens the redaction window
+    past ``_REDACT_WINDOW_MARGIN`` to the caller's longest registered
+    secret — a >512-byte key (PEM, long JWT) straddling the cut otherwise
+    still loses its head before the whole-value matcher can run. The
+    effective margin is ``max(_REDACT_WINDOW_MARGIN,
+    redact_secret_max_bytes)`` and feeds both the per-line funnel and the
+    sink window below.
+
     Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``.
     ``stderr_tail`` is the bounded keep-the-tail capture of the non-JSON
     lines (the agent's merged stderr — crash traces, panic headers) that the
@@ -134,6 +146,8 @@ def scan_and_compress_pi_events(
     # （UTF-8），兜底切片只在多字节字符把字符预算换算放大时收紧，不会放松
     # 上限。#755 终审 P2-1：兜底切片经 redact 回调过一道（无换行的单行
     # 超预算形态无行界可对齐，先对整体脱敏再保尾）。
+    # #755 codex P1：有效扩窗 margin 对齐调用方已注册的最长密钥。
+    redact_margin = max(_REDACT_WINDOW_MARGIN, redact_secret_max_bytes)
     stderr_tail: deque[str] = deque()
     stderr_chars = 0
     try:
@@ -148,7 +162,7 @@ def scan_and_compress_pi_events(
                 try:
                     event: Any = json.loads(line)
                 except json.JSONDecodeError:
-                    line = _redact_then_tail_text(line, redact)
+                    line = _redact_then_tail_text(line, redact, redact_margin)
                     stderr_tail.append(line)
                     stderr_chars += len(line)
                     while stderr_chars > STDERR_TAIL_BYTES and len(stderr_tail) > 1:
@@ -179,11 +193,13 @@ def scan_and_compress_pi_events(
         # #748 R3 (codex review P1): redaction happens BEFORE the durable
         # write — the sink file must never hold the raw tail (the return
         # value stays raw; the caller redacts its own faces separately).
-        # #755 对抗复审 P3-2: redact a window wider than the final cut
-        # (_REDACT_WINDOW_MARGIN) so a secret straddling the 8KB cut
-        # point is still matched whole, then slice AFTER redaction.
+        # #755 对抗复审 P3-2: redact a window wider than the final cut so a
+        # secret straddling the 8KB cut point is still matched whole, then
+        # slice AFTER redaction; #755 codex P1: the margin follows the
+        # caller's longest registered secret (redact_margin), not just the
+        # fixed _REDACT_WINDOW_MARGIN.
         try:
-            window = encoded_tail[-(STDERR_TAIL_BYTES + _REDACT_WINDOW_MARGIN) :]
+            window = encoded_tail[-(STDERR_TAIL_BYTES + redact_margin) :]
             persisted = redact(window) if redact is not None else window
             _persist_stderr_tail(stderr_sink, _keep_tail_slice(persisted))
         except Exception:
@@ -204,10 +220,12 @@ def scan_and_compress_pi_events(
     return model_error, original_size, compressed_size, tail
 
 
-def _redact_then_tail_text(text: str, redact: Callable[[bytes], bytes] | None) -> str:
+def _redact_then_tail_text(
+    text: str, redact: Callable[[bytes], bytes] | None, margin: int = _REDACT_WINDOW_MARGIN
+) -> str:
     """The ONE redact-then-truncate funnel for CHARACTER-face cuts of the
     stderr tail (#755 codex review P1): when ``text`` exceeds the budget,
-    widen the window by ``_REDACT_WINDOW_MARGIN``, redact, THEN cut to
+    widen the window by ``margin``, redact, THEN cut to
     ``STDERR_TAIL_BYTES``.
 
     Cut-before-redact leaks: a secret straddling the cut point loses its
@@ -237,7 +255,7 @@ def _redact_then_tail_text(text: str, redact: Callable[[bytes], bytes] | None) -
     best-effort by contract (worker/upload/stderr_evidence.py re-redacts
     the return face) and must not kill the compression pass (the same
     discipline as the sink call site's broad catch)."""
-    window = text[-(STDERR_TAIL_BYTES + _REDACT_WINDOW_MARGIN) :]
+    window = text[-(STDERR_TAIL_BYTES + margin) :]
     if redact is not None and len(text.encode("utf-8", "replace")) > STDERR_TAIL_BYTES:
         try:
             window = redact(window.encode("utf-8", "replace")).decode("utf-8", "replace")

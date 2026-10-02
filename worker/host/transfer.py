@@ -48,14 +48,19 @@ _RESULT_HEADER_BUDGET = 14 * 1024
 # dropped refs from the truncation markers, so every ref missing from the
 # header is a missing file in job_dir and the run flips to "Missing
 # outputs". When the budget forces the artifact list itself to shrink we
-# therefore raise ResultHeaderOverflow instead: the upload queue catches
-# it and falls back to the archive-embed channel (same as the
-# direct-upload failure path), where the refs are CAS strings (~78 B
-# each, 128 entries ~= 10 KB, inside the budget naturally). #755 对抗复审
+# therefore raise ResultHeaderOverflow instead. #755 codex P1 (协议换代):
+# the queue's answer is no longer the archive-embed channel (re-embedding
+# bytes + re-uploading through the legacy CAS channel violated
+# EXEC-ARTIFACT-WORKER-001's presigned-only constraint and double-sent the
+# bytes) — the full direct-ref manifest is written into the result archive
+# as the reserved member ``result-output-artifacts.json`` (the bytes stay
+# in S3, never re-transferred) and the header carries only the
+# ``output_artifacts_in_archive`` boolean; the Host commit layer reads the
+# manifest back from the archive. #755 对抗复审
 # P2-1b: the command face (pure observability — with 128 outputs the argv
 # repeats --require-output for ~7.7 KB) is dropped BEFORE the artifact
-# list is touched, so the archive-embed fallback's CAS manifest fits
-# without reaching truncation. Only a payload that STILL overflows after
+# list is touched, so the manifest alone (dict refs) decides the signal.
+# Only a payload that STILL overflows after
 # all that reaches the truncation break below — the last resort, see the
 # comment there.
 
@@ -65,10 +70,11 @@ class ResultHeaderOverflow(RuntimeError):
     direct-upload artifact manifest within the byte budget.
 
     Raised by ``_result_header_value`` when a non-empty ``output_artifacts``
-    carrying DIRECT-UPLOAD dict refs still overflows the budget. The upload
-    queue catches it, clears the direct-upload spec, and re-runs prepare with
-    the artifact bytes embedded in the tar (CAS string refs are ~78 B each,
-    128 entries ~= 12 KB, inside the budget naturally)."""
+    carrying DIRECT-UPLOAD dict refs still overflows the budget. #755 codex
+    P1: the upload queue's fallback writes the full manifest into the result
+    archive as the reserved member ``result-output-artifacts.json`` (the
+    artifact bytes stay in S3 — no legacy CAS re-upload) and re-reports with
+    ``output_artifacts_in_archive: true`` as the only header trace."""
 
 
 def _has_direct_refs(artifacts: dict[str, Any]) -> bool:
@@ -100,17 +106,18 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
     (3) drop ``command`` (#755 对抗复审 P2-1b: pure observability — the
     Host records it but never judges on it; with 128 outputs the argv
     alone repeats --require-output for ~7.7 KB, so clearing it lets the
-    CAS manifest fit whole), (4) the artifact list. Stage 4 #748 R3
+    manifest ride alone), (4) the artifact list. Stage 4 #748 R3
     (codex review P1) now dispatches on the REF FORM: direct-upload dict
     refs raise ``ResultHeaderOverflow`` (fallback signal — the archive
-    carries no artifact bytes, so a prefix loses refs for good; the queue
-    re-prepares via the archive-embed channel, whose CAS refs are ~78 B
-    each and fit the budget naturally); CAS string refs already have the
-    bytes IN the archive, so they take the last-resort truncation directly
-    (see that comment). This is the dead-loop guard for free: the
-    fallback's rebuilt manifest is CAS-form, so a second overflow can
-    never re-signal — at most one fallback per result, and the queue's
-    fallback path is additionally once-only."""
+    carries no artifact bytes, so a prefix loses refs for good; #755 codex
+    P1: the queue answers by embedding the full manifest as the archive
+    member ``result-output-artifacts.json`` and re-reporting with only the
+    ``output_artifacts_in_archive`` marker in the header); CAS string refs
+    already have the bytes IN the archive, so they take the last-resort
+    truncation directly (see that comment). This is the dead-loop guard
+    for free: the fallback's re-report carries an empty header manifest, so
+    a second overflow can never re-signal — at most one fallback per
+    result, and the queue's fallback path is additionally once-only."""
     payload = dict(metadata)
 
     def _serialized() -> bytes:
@@ -142,10 +149,12 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
             # not reconstruct the dropped refs from the truncation markers,
             # so every ref missing from the header is a file missing from
             # job_dir and the run flips to "Missing outputs". Signal the
-            # caller to switch to the archive-embed channel instead.
+            # caller to move the manifest into the archive instead (#755
+            # codex P1: member ``result-output-artifacts.json`` + the
+            # ``output_artifacts_in_archive`` header marker).
             raise ResultHeaderOverflow(
                 "result header over budget with direct-upload output_artifacts"
-                f" ({len(artifacts)} refs); archive-embed fallback required"
+                f" ({len(artifacts)} refs); archive-manifest fallback required"
             )
         if isinstance(artifacts, dict) and artifacts:
             # LAST RESORT truncation, reached in exactly two shapes:
@@ -153,9 +162,10 @@ def _result_header_value(metadata: dict[str, Any]) -> bytes:
             # archive this header ships with, so the Host unpacks them into
             # the staging view regardless of the header manifest; the
             # dropped entries are the header manifest only.
-            # (b) direct refs AFTER the queue's archive-embed fallback —
-            # only reachable if the fallback could not rebuild (prepare
-            # failure degrade path), an already-degenerate shape.
+            # (b) direct refs AFTER the queue's archive-manifest fallback —
+            # only reachable if the fallback could not embed (embed failure
+            # already converts to an honest failed report), an
+            # already-degenerate shape.
             # Delivery with partial data beats the UNDELIVERABLE
             # alternative (report retry exhaustion -> lease expiry -> full
             # re-run).

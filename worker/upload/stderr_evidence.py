@@ -107,6 +107,16 @@ def _secret_values() -> list[str]:
     )
 
 
+def max_secret_bytes() -> int:
+    """已注册密钥中最长值的 UTF-8 字节数（无注册密钥时 0）。
+
+    #755 codex P1：shared/ 的脱敏扩窗按本值对齐已注册最长密钥——固定
+    512 的窗口装不下 >512 字节的密钥（PEM、长 JWT），骑跨保尾界时仍被
+    先切后脱敏。调用点：prepare.py 的两处 scan_and_compress_pi_events。"""
+    values = _secret_values()
+    return len(values[0].encode("utf-8")) if values else 0
+
+
 def redact_secrets(text: str) -> str:
     """Redact secret material from outbound text (best-effort, never raises).
 

@@ -65,6 +65,7 @@ if TYPE_CHECKING:
 # 上限）；execution_run 沿本模块导入，`as` 惯用法重导出而非再定义一份
 # 副本（#200/#201 同族的 sync-by-comment 反模式）。failed_metadata 经
 # prepare 重导出（prepare_or_failed 同车）。
+from worker.upload.embed_precheck import embed_switch_rejection
 from worker.upload.prepare import failed_metadata, prepare_or_failed
 from worker.upload.result_metadata import (
     MAX_ERROR_MESSAGE_CHARS as MAX_ERROR_MESSAGE_CHARS,
@@ -255,7 +256,6 @@ class UploadQueue:
                 retry_base_seconds=_RETRY_BASE_SECONDS,
                 retry_cap_seconds=_RETRY_CAP_SECONDS,
                 heartbeat_join_seconds=_HEARTBEAT_JOIN_SECONDS,
-                upload_cas_artifact=lambda path: self._upload_with_retry(path, task),
             )
         except Exception as exc:
             # #204 broad-except audit: report 车道任务的存活安全网（同
@@ -335,6 +335,20 @@ class UploadQueue:
                     print(f"direct upload failed for {task.execution_id}: {exc}", flush=True)
                     if self._condemned_before_bulk(task):
                         return "lost"
+                    # #755 codex P1：换轨预检（embed_precheck）——内嵌总量超
+                    # 「Host 实际上限 − 安全余量」时不换轨（必撞 Host 413 →
+                    # 丢结果 → 租约过期重跑循环），直接诚实判败上报；归档保持
+                    # 直传形态（产物字节本就不在 tar，events/日志照常携带）。
+                    rejection = embed_switch_rejection(task)
+                    if rejection is not None:
+                        print(
+                            f"direct upload fallback rejected for {task.execution_id}:"
+                            f" {rejection} (switch trigger: {exc})",
+                            flush=True,
+                        )
+                        metadata = failed_metadata(task, rejection)
+                        uploaded = {}
+                        break
                     task.artifact_uploads = {}
                     metadata, archive, outputs = prepare_or_failed(task)
                     if self._condemned_before_bulk(task):

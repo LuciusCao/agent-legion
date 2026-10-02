@@ -11,13 +11,15 @@ def apply_live_manifest(bundled: dict[str, Any], claimed: dict[str, Any]) -> dic
         return bundled
     # artifact_uploads / input_artifacts：#160 D12 起 Host 在 claim 时内存态
     # 注入对象存储通道（enqueue 持久化的 bundle 里只有 CAS 形态）；旧 Host
-    # 不带这些键时保留 bundled 原值（旧 CAS 通道）。
+    # 不带这些键时保留 bundled 原值（旧 CAS 通道）。max_archive_bytes：#755
+    # codex P1 起下发的换轨预检上限（Host 实例设置实际值），同纪律不持久化。
     for key in (
         "execution",
         "additional_prompt",
         "command_spec",
         "input_artifacts",
         "artifact_uploads",
+        "max_archive_bytes",
     ):
         if key in live:
             bundled[key] = live[key]

@@ -67,7 +67,10 @@ def plan_agent_result_moves(
     log file, and — for kind='code' results — the fixed ``node.log`` member
     may land on disk, so a Worker cannot clobber other nodes' inputs/outputs
     or plant files to spoof server-side decisions (log display and token
-    parsing are read-only consumers).
+    parsing are read-only consumers). The reserved
+    ``result-output-artifacts.json`` member (#755 codex P1, the overflow
+    fallback's direct-ref manifest) is therefore never promoted here — its
+    only reader is the commit layer (result_output_manifest.py).
     """
     moves: list[tuple[Path, Path]] = []
     produced: list[str] = []

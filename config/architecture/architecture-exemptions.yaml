@@ -1260,21 +1260,16 @@ exemptions:
   expires: 2026-12-31
 - check: architecture.file_budget
   path: worker/upload/report.py
-  reason: '#748 R3（codex review P1）：头预算咬到直传产物清单时的整体换轨——
-    report_task 接住 ResultHeaderOverflow，清空直传规格重跑 prepare（归档内嵌
-    模式，CAS 引用 ~78B/条天然落预算）、CAS 通道重传全部产物后重报；含
-    换轨期间心跳重新武装/quiesce 与 CAS 4xx 终态降级。防死循环双闸：序列
-    化侧按 ref 形态判信号（CAS 形态不抛、走最后手段截断）+ 一次性
-    回退闸。rebase 到 0.7.13 基线后换轨逻辑随 report 车道迁入本模块
-    （基线把 queue._report 拆为 report_task），防御性正确性代码使有效行
-    83→112；#755 对抗复审 P3-1（换轨中途判死走 lost 终态当场清理而
-    非滞留）到 115；#755 R4 换轨预检（产物总量超归档内嵌上限时拒绝换轨、
-    本地诚实判败，避免送进 Host 413 丢结果全量重跑；_embedded_artifacts_bytes
-    预检助手 + 判败分支）到 146；#755 终审 P2-3（预检计入 run_dir 实测 +
-    ceiling 减固定安全余量，吸收 Host 运行时调小上限与 tar/gzip 开销）
-    仍在带内。时间盒：回退链若与 DirectUploadError 回退路径统一收口为单一换轨助手
-    （report 车道与 bulk 车道共享），此处重登预算。'
+  reason: '#748 R3（codex review P1）起的结果头溢出处置模块。#755 codex P1
+    协议换代：回退从「清规格重跑 prepare + /api/artifacts CAS 通道重传产物」改为
+    「直传 ref 清单写进归档首成员 result-output-artifacts.json + 头里只带
+    output_artifacts_in_archive 标记」（产物字节已在 S3，不再双传；旧链的
+    _embedded_artifacts_bytes 预检与 CAS 重传块随之删除，预检挪进
+    worker/upload/embed_precheck.py 供 bulk 车道的 DirectUploadError 臂复用）。
+    余量构成：report 车道的租约退避循环 + 一次性溢出闸 + embed 失败的
+    诚实判败臂。有效行 83→107。时间盒：若结果上报循环与 bulk 车道的
+    判败/重试形态统一收口，此处重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
-  ceiling: 153
+  ceiling: 116
   expires: 2026-12-31

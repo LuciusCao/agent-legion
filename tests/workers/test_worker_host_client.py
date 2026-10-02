@@ -419,8 +419,8 @@ def test_result_header_value_drops_command_before_artifact_list() -> None:
 
 def test_result_header_value_giant_direct_ref_still_signals_fallback() -> None:
     """单条 ref 自身就超预算（超长 storage_key）的直传形态：同样抛回退信号
-    而非降级为空清单——回退后 CAS 形态（或 prepare 降级失败形态）才是
-    最后手段截断的入口，头永不因直传形态而直接不可投递。"""
+    而非降级为空清单——回退后头里只剩 in_archive 标记（清单进归档成员），
+    CAS 形态才走最后手段截断，头永不因直传形态而直接不可投递。"""
     from worker.host.transfer import ResultHeaderOverflow, _result_header_value
 
     giant = {
@@ -463,8 +463,9 @@ def test_result_header_value_signals_fallback_for_128_direct_refs() -> None:
     上限）全 ref 形态 ~25KB，撞破 14KB 预算——成功运行同样中招（成功上报也带
     产物清单）。修复前第三级截断为前缀 + 标记，但直传模式的归档不带产物字节、
     Host 也不用截断标记恢复引用——前缀之外的产物进不了 job_dir，成功的执行被
-    改判 Missing outputs。修复后该形态抛 ResultHeaderOverflow 回退信号：上传
-    队列清空直传规格重跑 prepare（归档内嵌模式），引用回到 CAS 形态。"""
+    改判 Missing outputs。修复后该形态抛 ResultHeaderOverflow 回退信号；#755
+    codex P1 起回退动作是「清单写进归档成员 + 头里只带 in_archive 标记」
+    （产物字节已在 S3，不再 CAS 重传）。"""
     from worker.host.transfer import ResultHeaderOverflow, _result_header_value
 
     artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(128)}
@@ -476,16 +477,16 @@ def test_result_header_value_signals_fallback_for_128_direct_refs() -> None:
         "output_artifacts": artifacts,
         "run_dir": "runs/node_a/worker",
     }
-    with pytest.raises(ResultHeaderOverflow, match="archive-embed fallback"):
+    with pytest.raises(ResultHeaderOverflow, match="archive-manifest fallback"):
         _result_header_value(metadata)
-    # 输入 dict 不被信号破坏（回退重备用的是原始 metadata）。
+    # 输入 dict 不被信号破坏（回退写归档成员用的是原始 metadata）。
     assert metadata["output_artifacts"] == artifacts
 
 
 def test_result_header_value_cas_refs_fit_budget_without_truncation() -> None:
-    """#748 R3（codex review P1）回退终点：归档内嵌模式下引用是 CAS 字符串
-    （~78B/条），128 条全量 ~12KB 天然落预算——无需任何截断/标记，全部产物
-    引用完整上报（codex 指出的问题形态在回退后彻底消失）。"""
+    """#748 R3（codex review P1）：CAS 字符串引用（~78B/条，直传失败换轨
+    或旧通道的形态）128 条全量 ~12KB 天然落预算——无需任何截断/标记，
+    全部产物引用完整上报。"""
     from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
 
     artifacts = {f"output-{i:03d}.json": f"sha256:{'a' * 64}" for i in range(128)}

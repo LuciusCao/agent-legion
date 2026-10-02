@@ -401,3 +401,30 @@ def test_scan_and_compress_cjk_single_line_byte_gate_redacts_straddling_secret(t
         assert b"zz-custom" not in face  # 密钥前缀残段
         assert b"tttt" not in face  # 密钥尾段残片（切割点之后的半边）
         assert b"***" in face  # 密钥在切割前已整值脱敏
+
+
+def test_scan_and_compress_long_secret_straddling_cut_with_widened_margin(tmp_path):
+    """#755 codex P1：>512 字节的已注册密钥（PEM/长 JWT 形态）骑跨 8KB
+    保尾界时，固定 512 的扩窗装不下整值，仍被「先切后脱敏」。修复后调用方
+    按已注册最长密钥传 redact_secret_max_bytes，有效 margin 扩到 2000——
+    sink 与 return 两面都不留密钥残段。"""
+    from shared.pi_events import STDERR_TAIL_BYTES, scan_and_compress_pi_events
+
+    secret = "pem-" + "k" * 1996  # 2000 字节，远超固定 512 窗口
+    # 密钥中点骑跨 8KB 字节切割点：单行 16KB，切割点落在密钥中部。
+    line = "a" * (STDERR_TAIL_BYTES - 1000) + secret + "b" * (STDERR_TAIL_BYTES - 1000)
+    events = tmp_path / "events.jsonl"
+    events.write_text(f'{{"type":"session"}}\n{line}\n')
+    sink = tmp_path / "agent-stderr.log"
+    _, _, _, tail = scan_and_compress_pi_events(
+        events,
+        stderr_sink=sink,
+        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+        redact_secret_max_bytes=len(secret.encode()),
+    )
+    for face in (tail, sink.read_bytes()):
+        assert len(face) <= STDERR_TAIL_BYTES
+        assert secret.encode() not in face
+        assert b"pem-" not in face  # 密钥前缀残段（切割点之前的半边）
+        assert b"kkkk" not in face  # 密钥尾段残片
+        assert b"***" in face  # 整值在切割前已脱敏

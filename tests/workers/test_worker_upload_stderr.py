@@ -8,6 +8,7 @@ agent_stderr_tail metadata）与出口脱敏（env 值 + 形态规则）的语�
 from __future__ import annotations
 
 import json
+import os
 import tarfile
 from pathlib import Path
 
@@ -487,3 +488,33 @@ def test_sink_replace_success_leaves_no_staging(tmp_path: Path) -> None:
     pi_events.scan_and_compress_pi_events(events, stderr_sink=sink)
     assert sink.read_bytes() == b"panic: real cause"
     assert list(run_dir.glob(".agent-stderr.*")) == []
+
+
+def test_max_secret_bytes_reports_longest_registered_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#755 codex P1：已注册最长密钥的 UTF-8 字节数——脱敏扩窗的对齐口径
+    （shared/ 侧按 max(512, 本值) 取有效 margin）。无注册密钥时 0；字节
+    口径（CJK 值按 UTF-8 计，非字符数）；短于阈值（≤8 字节）的值不参与
+    脱敏、也不扩窗。"""
+    from worker.upload import stderr_evidence
+    from worker.upload.stderr_evidence import max_secret_bytes
+
+    monkeypatch.setattr(stderr_evidence, "_extra_secret_values", frozenset())
+    # 只留受控 env：清掉可能含 TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL 命名的项。
+    for name in list(os.environ):
+        if any(
+            marker in name.upper()
+            for marker in ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL")
+        ):
+            monkeypatch.delenv(name)
+    assert max_secret_bytes() == 0
+
+    monkeypatch.setenv("CI_TOKEN", "t" * 8)  # ≤ 阈值，不参与
+    monkeypatch.setenv("CI_KEY", "k" * 100)
+    assert max_secret_bytes() == 100
+
+    monkeypatch.setattr(
+        stderr_evidence, "_extra_secret_values", frozenset({"密" * 100})
+    )  # 300 字节
+    assert max_secret_bytes() == 300
