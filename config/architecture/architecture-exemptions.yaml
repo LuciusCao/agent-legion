@@ -498,10 +498,12 @@ exemptions:
     actionable error text covering the bundled dir and PATH) doubles the file past its first ceiling.
     The module stays a single cohesive concern (startup preconditions for the executor); splitting the
     guard into its own module was rejected because preflight_error would reduce to a shell over two helpers.
-    Revisit the split if preflight grows a third guard.'
+    Revisit the split if preflight grows a third guard. The staleness reconciliation (the third guard)
+    lives in staleness.py since #835; the residual overage is the expect-runtimes error text and the
+    name re-export that keeps the historical import path alive.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 56
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/835
+  ceiling: 57
 - check: architecture.file_budget
   path: worker/runtime/setup.py
   reason: '#381 wired AGENT_WORKER_EXPECT_RUNTIMES through prepare_runtime_models (env read + ValueError

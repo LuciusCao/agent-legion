@@ -25,7 +25,7 @@ RUNTIME_CATALOG: dict[str, dict[str, Any]] = {
         "name": "Velites",
         "description": "内置 harness；code 节点的沙箱执行也依赖它。",
         "binaries": ("velites",),
-        "install_hint": "安装 velites（仓库内部署可执行 scripts/ensure-velites.sh --dest data/bin 构建自带副本，或放入 PATH）",
+        "install_hint": "安装 velites（仓库内部署可执行 scripts/ensure-velites.sh --dest data/bin 构建自带副本，或放入 PATH；升级时两处都要刷新——自带副本解析优先，见 #831）",
     },
     "pi": {
         "name": "Pi",

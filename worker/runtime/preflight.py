@@ -20,6 +20,10 @@ issue #254 起，agent runtime 的注册声明不再是手工勾选，而是读�
 ``worker/binary_resolution.py::resolve_binary``。期望值必须是
 ``worker/runtime/catalog.py`` 的 SUPPORTED_RUNTIMES 子集，未知值同样
 fail-fast（拼写错误按部署错误处理，不静默忽略）。
+
+#831 的指纹对账（软告警）在 ``worker/runtime/staleness.py``——按本模块
+file_budget 豁免条款「第三个守卫出现时拆分」独立成模块，经
+``velites_staleness_warning`` 名字 re-export 维持导入路径。
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ from worker.runtime.catalog import (
     SUPPORTED_RUNTIMES,
     detect_installed_runtimes,
 )
+from worker.runtime.staleness import velites_staleness_warning as velites_staleness_warning
 
 #: 期望 runtime 环境变量：docker 部署在 compose 里声明，裸机部署可写进
 #: 服务管理器单元。值为空/未设时不启用该守卫（保持零 runtime 合法的现状）。

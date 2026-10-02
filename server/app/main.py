@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -61,6 +62,9 @@ from server.app.sweeper_owned_startup import start_sweeper_owned_threads
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
 from server.app.workflow_worker.thread import WorkflowWorkerThread
+from shared.velites_staleness import host_staleness_warnings
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(data_dir: Path | None = None, start_worker: bool = False) -> FastAPI:
@@ -167,7 +171,17 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         replica_probe.probe()
+        # #831/#835 velites 副本指纹对账（软告警）：Host 消费的两个面
+        # （code 沙箱经 shared 解析、本地 agent runtime 按裸名走 PATH）与
+        # 仓库 velites/ 指纹漂移时启动日志必须说话——此前 Host 侧完全没有
+        # 对账（runbook 自认），Worker 侧对账又只覆盖 agent runtime 面，
+        # 四轮 codex 评审的主战场（code 沙箱面）两侧皆盲。核心带总兜底
+        # （shared/velites_staleness.py），漂移检查绝不阻断启动；docker
+        # 形态（无 repo）自然静默。放 start_worker 分支：只有会真正消费
+        # 二进制的生产形态才对账，test/export app 不付这笔 git 探测成本。
         if start_worker:
+            for warning in host_staleness_warnings():
+                logger.warning("%s", warning.strip())
             validate_settings(settings)
             agent_manager.discover()
             # #591 (#609 P2-D): start the result-commit group-commit writer
