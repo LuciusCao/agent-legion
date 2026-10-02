@@ -497,3 +497,20 @@ def test_job_detail_includes_node_inputs_outputs(tmp_path):
         assert "outputs" in node
         assert isinstance(node["inputs"], list)
         assert isinstance(node["outputs"], list)
+
+
+def test_list_workspace_runs_rejects_empty_string_filters(tmp_path):
+    """#735 review P2 簇面清扫：node-runs 与 jobs 列表同一约定——可选过滤
+    参数（status/node_key/job_id/skill）的空串形态是调用错误 → 422，不被
+    查询层的 `if val` 吞成「不过滤」；参数缺席才是不筛选。"""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        for param in ("status", "node_key", "job_id", "skill"):
+            response = c.get(f"/api/workspaces/{ws_id}/node-runs?{param}=")
+            assert response.status_code == 422, (param, response.text)
+        assert c.get(f"/api/workspaces/{ws_id}/node-runs").status_code == 200

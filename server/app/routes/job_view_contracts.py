@@ -51,6 +51,10 @@ class JobSummaryResponse(BaseModel):
 
 class JobsResponse(BaseModel):
     jobs: list[JobSummaryResponse]
+    # #735 review P2-1：截断永不静默——limit 上限（默认 500、最大 2000）
+    # 砍掉匹配集时必为 true；调用方拿 run 的 job_ids 或更高的显式 limit
+    # 对账余量。
+    truncated: bool
 
 
 class JobsSnapshotResponse(BaseModel):
