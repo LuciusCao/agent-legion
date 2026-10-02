@@ -1267,9 +1267,13 @@ exemptions:
     _embedded_artifacts_bytes 预检与 CAS 重传块随之删除，预检挪进
     worker/upload/embed_precheck.py 供 bulk 车道的 DirectUploadError 臂复用）。
     余量构成：report 车道的租约退避循环 + 一次性溢出闸 + embed 失败的
-    诚实判败臂。有效行 83→107。时间盒：若结果上报循环与 bulk 车道的
-    判败/重试形态统一收口，此处重登预算。'
+    诚实判败臂。#755 codex R8 P2：embed 后归档上限重校——claim 下发
+    max_archive_bytes 经 max_bytes 传进 embed（替换前按 staging 实际大小
+    拒写）、替换后 re-stat 兜底臂（回收空归档诚实判败）、判败通道的
+    可提交性守卫 _ensure_submittable_archive（原归档本身超限的先回收，
+    否则重报必撞 413 被当终态删 marker），有效行 107→144。时间盒：
+    结果上报循环与 bulk 车道的判败/重试形态统一收口时，此处重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
-  ceiling: 116
+  ceiling: 144
   expires: 2026-12-31

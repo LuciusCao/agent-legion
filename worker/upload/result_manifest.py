@@ -22,8 +22,21 @@ from typing import Any
 from shared.code_contract import RESULT_OUTPUT_ARTIFACTS_MEMBER
 
 
+class ManifestEmbedExceedsArchiveCeiling(ValueError):
+    """重写后的归档超 Host 归档上限（claim 下发的 max_archive_bytes）。
+
+    #755 codex R8 P2：embed 新增清单成员会把「低于但接近上限」的原直传
+    归档推过 Host 大小门禁；staging 流式写完后、原子替换前先按实际大小
+    拒写，原归档字节未动（证据保全、仍是可提交体积），调用方走诚实判败
+    通道，而不是重报大归档吃 413 后被当终态删 marker。继承 ValueError，
+    与既有契约违例同族（report.py 的 embed 失败臂统一转诚实判败）。"""
+
+
 def embed_output_artifacts_manifest(
-    archive: Path, artifacts: dict[str, Any], expected_outputs: tuple[str, ...] | list[str]
+    archive: Path,
+    artifacts: dict[str, Any],
+    expected_outputs: tuple[str, ...] | list[str],
+    max_bytes: int = 0,
 ) -> None:
     """把直传产物清单作为首成员写进结果归档（同目录临时文件 + os.replace 原子替换）。
 
@@ -33,6 +46,10 @@ def embed_output_artifacts_manifest(
     转诚实判败）。除清单成员外原归档字节原样复制（流式 ``r|gz`` → ``w|gz``；
     产物字节不在归档内，体量即 run_dir 日志级）。成员固定写在最前：Host 侧
     流式扫描几 KB 即命中，不必解完整归档。
+
+    ``max_bytes``（#755 codex R8 P2）非 0 时是 Host 归档上限：staging
+    写完后、替换前按实际大小校验，超限抛
+    ``ManifestEmbedExceedsArchiveCeiling``，原归档保持未动。
     """
     if not artifacts or not all(isinstance(ref, dict) for ref in artifacts.values()):
         raise ValueError("output artifacts manifest requires direct-upload dict refs")
@@ -66,6 +83,14 @@ def embed_output_artifacts_manifest(
                 else:
                     with contents:
                         dst.addfile(member, contents)
+        if max_bytes:
+            embedded_size = staging_path.stat().st_size
+            if embedded_size > max_bytes:
+                raise ManifestEmbedExceedsArchiveCeiling(
+                    f"archive with the embedded output artifacts manifest is"
+                    f" {embedded_size} bytes, over the {max_bytes}-byte Host"
+                    f" archive ceiling; original archive left untouched"
+                )
         os.replace(staging_path, archive)
     except BaseException:
         # #204 broad-except audit (BaseException)：staging 清理守卫而非吞

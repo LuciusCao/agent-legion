@@ -92,7 +92,14 @@ def _secret_values() -> list[str]:
     """The secret literals to replace: this process's secret-named env values
     plus the registered config-environment values, LONGEST FIRST — a short
     key that is a PREFIX of a longer key must not be replaced first and
-    leave an unrecoverable tail fragment behind (#748 R2 P3-4)."""
+    leave an unrecoverable tail fragment behind (#748 R2 P3-4).
+
+    #755 codex R8 P1 对抗复审：匹配发生在解码域（流侧经 UTF-8
+    errors="replace" + 通用换行翻译，尾换行属行分隔符），注册值必须落在
+    同一域——CRLF/CR 形态的值补「\\n 归一」变体（CRLF PEM 经解码翻译后
+    整值命中），尾空白（典型 PEM 的尾换行）补 rstrip 变体（流恰好以
+    「值 − 尾换行」收尾时整值仍命中）。变体更短，最长优先排序保证完整
+    值先于变体替换，不产生新残段。"""
     values = {
         value
         for name, value in os.environ.items()
@@ -100,8 +107,14 @@ def _secret_values() -> list[str]:
     }
     with _secrets_lock:
         values.update(_extra_secret_values)
+    variants: set[str] = set()
+    for value in values:
+        normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+        for candidate in (value, normalized, value.rstrip(), normalized.rstrip()):
+            if len(candidate.encode("utf-8")) > _MIN_SECRET_BYTES:
+                variants.add(candidate)
     return sorted(
-        (value for value in values if len(value.encode("utf-8")) > _MIN_SECRET_BYTES),
+        variants,
         key=lambda value: len(value.encode("utf-8")),
         reverse=True,
     )

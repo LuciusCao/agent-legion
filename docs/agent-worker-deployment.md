@@ -322,7 +322,10 @@ error_message → command（纯观测面，清空）→ 产物清单的顺序降
 形态分流——直传 dict 引用抛溢出信号后走「清单进归档」协议（#755）：Worker 把完整
 direct-ref 清单写成结果归档首成员 `result-output-artifacts.json`（产物字节已在 S3，
 不重复传输），头里只带 `output_artifacts_in_archive` 布尔标记，Host 在结果 commit 时
-从归档读回清单（读不回则诚实判败 failed；cancelled 不翻转）；CAS 字符串引用
+从归档读回清单（读不回则诚实判败 failed；cancelled 不翻转）；嵌入重写按 claim 下发的
+`max_archive_bytes` 在原子替换前重校归档实际大小（清单成员可能把低于但接近上限的原
+归档推过 Host 413 大小门禁），超限不重报大归档，走同一诚实判败通道（原归档可提交则
+原样保留证据、本身也超限则回收空归档）；CAS 字符串引用
 （~78B/条，天然落预算）才走最后手段截断（清单降级为空并打
 `output_artifacts_truncated` / `output_artifacts_total` 标记）；CAS 截断形态下产物
 字节本来就在归档里，Host 见 truncated 标记跳过「空清单改判 failed」，改从归档暂

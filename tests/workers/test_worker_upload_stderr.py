@@ -263,6 +263,57 @@ def test_anchor_file_on_disk_never_holds_plaintext_secrets(
     assert list(sink.parent.glob(".agent-stderr.*")) == []
 
 
+def test_crash_stderr_redacts_multiline_pem_with_trailing_newline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#755 codex R8 P1 端到端（codex 复现形态）：环境变量值是带尾换行的
+    多行 PEM 私钥，stderr 恰好以该值收尾。旧管线 strip 每行再用换行重组，
+    末行尾换行永久丢失，redact_secrets_bytes 的整值替换必然失配——PEM
+    完整写进 agent-stderr.log、metadata 与结构化事件。deque 保留原始行
+    分隔形态后三面（error_message、agent_stderr_tail、归档锚点）只剩 ***。"""
+    pem = (
+        "-----BEGIN PRIVATE KEY-----\n"
+        + ("ABCDEFGHIJKLMNOP" * 4 + "\n") * 8
+        + "-----END PRIVATE KEY-----\n"
+    )
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", pem)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    # _events_with_stderr 收尾补的 "\n" 恰好复原密钥值的尾换行。
+    _events_with_stderr(work_root, ["boot noise", pem.rstrip("\n")])
+    client = QueueFakeClient()
+    archived: dict[str, bytes] = {}
+    original_report = client.report
+
+    def report_and_capture(
+        execution_id: str, lease_id: str, metadata: dict, archive: Path
+    ) -> tuple[int, bytes]:
+        with tarfile.open(archive, "r:gz") as tar:
+            member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
+            extracted = tar.extractfile(member)
+            assert extracted is not None
+            archived[member.name] = extracted.read()
+        return original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_and_capture  # type: ignore[method-assign]
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=5))
+    queue.shutdown()
+    report = client.reports[0]
+    # 面 1+2：error_message + metadata.agent_stderr_tail。
+    combined = report["error_message"] + report["agent_stderr_tail"]
+    assert "PRIVATE KEY" not in combined
+    assert "ABCDEFGHIJKLMNOP" not in combined
+    assert "***" in combined
+    # 面 3：归档锚点（落盘即脱敏）。
+    [archived_tail] = archived.values()
+    assert b"PRIVATE KEY" not in archived_tail
+    assert b"ABCDEFGHIJKLMNOP" not in archived_tail
+    assert archived_tail.count(b"***") == 1  # 整值一次替换，非逐行碎片
+    # 结构化事件面：压缩后的 events.jsonl 只剩 JSON 行。
+    assert client.reports[0]["status"] == "failed"
+
+
 def test_read_back_anchor_flows_through_unified_redact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -419,6 +470,33 @@ def test_redact_secrets_byte_threshold_covers_cjk_short_keys(
     monkeypatch.setenv("GATEWAY_KEY", cjk_secret)
     redacted = redact_secrets(f"gateway={cjk_secret}")
     assert cjk_secret not in redacted
+
+
+def test_redact_secrets_matches_decoded_domain_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#755 codex R8 P1 对抗复审：匹配域对齐——流侧经 UTF-8 errors=replace
+    + 通用换行解码，注册值必须在同一域匹配。CRLF 形态的注册值在翻译后的
+    流上以 \n 变体整值命中；带尾换行的值在「流恰好以值 − 尾换行收尾」时
+    以 rstrip 变体命中。最长优先保证完整值先于变体替换。"""
+    from worker.upload.stderr_evidence import redact_secrets
+
+    crlf_pem = (
+        "-----BEGIN PRIVATE KEY-----\r\n"
+        + "ABCDEFGHIJKLMNOP" * 4
+        + "\r\n-----END PRIVATE KEY-----\r\n"
+    )
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", crlf_pem)
+    # 流侧（文件解码后）只剩 \n 形态——CRLF 原值永远匹配不上。
+    redacted = redact_secrets("dump:\n" + crlf_pem.replace("\r\n", "\n"))
+    assert "PRIVATE KEY" not in redacted
+    assert "ABCDEFGHIJKLMNOP" not in redacted
+    assert "***" in redacted
+
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", "zz-trailing-newline-token\n")
+    redacted = redact_secrets("echoed stripped: zz-trailing-newline-token")
+    assert "zz-trailing-newline-token" not in redacted
+    assert redacted.endswith("***")
 
 
 def test_redact_secrets_covers_github_and_slack_shapes() -> None:

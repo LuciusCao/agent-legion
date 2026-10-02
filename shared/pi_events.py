@@ -118,6 +118,19 @@ def scan_and_compress_pi_events(
     into the raw byte cut), and the final cut's no-newline arm (one line
     spanning the whole window, no line boundary to align to) redacts the
     whole buffer before slicing instead of raw-cutting an unredacted face.
+    #755 codex R8 P1: the deque retains each non-JSON line in RAW form
+    (line separators and leading/trailing whitespace untouched, blank
+    lines kept) and the whole-buffer redaction runs on the ``""``-joined
+    verbatim text — a registered multi-line secret ending in a newline
+    (typical PEM) that terminates the stream now matches whole, where the
+    old strip + ``"\n".join`` normalization had already eaten the trailing
+    newline before any redaction could run. Display normalization
+    (``_display_form``: one trailing newline dropped) happens only AFTER
+    redaction. Matching domain caveat: the file is decoded as UTF-8 with
+    ``errors="replace"`` and universal newlines, so secrets are matchable
+    only as their UTF-8 text form with ``\n`` line endings — arbitrary
+    non-UTF-8 byte secrets can never whole-match (the ``\r\n``/``\r``
+    forms in the stream reach the matcher already translated to ``\n``).
 
     ``redact_secret_max_bytes`` (#755 codex P1) widens the redaction window
     past ``_REDACT_WINDOW_MARGIN`` to the caller's longest registered
@@ -165,14 +178,18 @@ def scan_and_compress_pi_events(
         ):
             for raw_line in src:
                 line = raw_line.strip()
-                if not line:
-                    continue
                 try:
                     event: Any = json.loads(line)
                 except json.JSONDecodeError:
-                    line = _redact_then_tail_text(line, redact, redact_margin)
-                    stderr_tail.append(line)
-                    stderr_chars += len(line)
+                    # #755 codex R8 P1：进保留缓冲的必须是该行的原始形态
+                    # （行尾换行与前导/尾随空白原样保留，白行也不丢）——
+                    # strip + 换行重组的展示归一化发生在脱敏之前时，末行
+                    # 尾换行被吃掉，带尾换行的已注册多行密钥（典型 PEM）
+                    # 整值匹配必然失配、明文落全部出口面；归一化只允许
+                    # 在脱敏之后的展示面发生（_display_form）。
+                    kept = _redact_then_tail_text(raw_line, redact, redact_margin)
+                    stderr_tail.append(kept)
+                    stderr_chars += len(kept)
                     while stderr_chars > STDERR_TAIL_BYTES + redact_margin and len(stderr_tail) > 1:
                         stderr_chars -= len(stderr_tail.popleft())
                     continue
@@ -190,7 +207,10 @@ def scan_and_compress_pi_events(
             compressed_path.unlink(missing_ok=True)
         return None, 0, 0, b""
 
-    encoded_tail = "\n".join(stderr_tail).encode("utf-8", "replace")
+    # 原始形态缓冲：每行保留自身分隔符，空串 join 逐字复原（带尾换行的
+    # 密钥整值因此可被命中）；展示归一化（去末尾一个换行，保持既有出口
+    # 契约）在脱敏之后、最终切割之前由 _display_form 完成。
+    encoded_tail = "".join(stderr_tail).encode("utf-8", "replace")
     # #755 对抗复审 P1-1：脱敏跑在「完整保留缓冲」上、任何最终切割之前——
     # 多行密钥（PEM）只有 join 后的整体形态能被整值替换命中（逐行脱敏
     # 结构性接不住换行密钥）。deque 保留界已按 redact_margin 放宽（见上），
@@ -200,9 +220,9 @@ def scan_and_compress_pi_events(
     if redacted_tail is None:
         # 脱敏器逃逸：raw 缓冲绝不落盘（锚点直接放弃），return 面退回
         # raw 契约（调用方出口面经 stderr_evidence 重脱敏）。
-        tail = _keep_tail_slice(encoded_tail)
+        tail = _keep_tail_slice(_display_form(encoded_tail))
     else:
-        tail = _keep_tail_slice(redacted_tail, redact)
+        tail = _keep_tail_slice(_display_form(redacted_tail), redact)
     if stderr_sink is not None and tail and redacted_tail is not None:
         # Best-effort AT THE CALL SITE: an unwritable sink must never fail
         # the compression (the in-memory tail still rides the return value).
@@ -295,6 +315,16 @@ def _redact_then_tail_text(
         except Exception:
             logger.exception("Redact callback failed; keeping the raw tail cut")
     return window[-STDERR_TAIL_BYTES:]
+
+
+def _display_form(data: bytes) -> bytes:
+    """展示面归一化（#755 codex R8 P1）：去掉末尾一个换行，保持「tail 不以
+    换行收尾」的既有出口契约（sink 锚点与 return 面同形）。
+
+    只允许在脱敏之后调用：脱敏需要原始形态缓冲（带尾换行的已注册密钥靠
+    末尾换行整值命中，先归一化即 P1 的失配根因），而移除末尾换行字节
+    永远不可能让密钥字节显形——方向安全。"""
+    return data[:-1] if data.endswith(b"\n") else data
 
 
 def _keep_tail_slice(data: bytes, redact: Callable[[bytes], bytes] | None = None) -> bytes:

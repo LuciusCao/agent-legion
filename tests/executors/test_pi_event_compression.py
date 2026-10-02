@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from server.app.services.job_log_renderer import _parse_pi_events
-from shared.pi_events import compress_pi_events
+from shared.pi_events import STDERR_TAIL_BYTES, compress_pi_events
 from tests.helpers.cjk_straddle import cjk_line_with_straddling_secret
 
 
@@ -460,3 +462,158 @@ def test_scan_and_compress_multiline_pem_survives_no_fragment(tmp_path):
         assert body_line.encode() not in face  # 任何 body 行残段
         assert b"PRIVATE KEY" not in face  # PEM 头尾标记残段
         assert b"***" in face  # 整值在切割前已脱敏
+
+
+# -- #755 codex R8 P1：密钥形态矩阵（脱敏面归一化的结构性收口） --
+
+_PEM_BODY_LINE = "ABCDEFGHIJKLMNOP" * 4  # 64 字符 base64 形态行
+
+
+def _pem(trailing_newline: bool) -> str:
+    """真实多行 PEM 形态（禁止单行假 PEM）；trailing_newline=True 即本轮
+    真实案例——已注册的环境变量值以换行收尾。"""
+    lines = ["-----BEGIN PRIVATE KEY-----"] + [_PEM_BODY_LINE] * 8 + ["-----END PRIVATE KEY-----"]
+    pem = "\n".join(lines)
+    return pem + "\n" if trailing_newline else pem
+
+
+def _noise(n: int) -> str:
+    """恰好 n 字节的 ASCII 噪音文本（99 字符一行，行间与收尾形态按 n 截齐）。"""
+    unit = "p" * 99 + "\n"  # 100 字节
+    return (unit * (n // 100 + 1))[:n]
+
+
+def _straddle_text(secret: str, cut_offset: int) -> str:
+    """stderr 文本：密钥居首，最终 8KB 字节切割点落在密钥第 cut_offset 字节
+    （密钥头被切割丢弃、尾段残留——修复前残段明文落所有出口面）。"""
+    filler = STDERR_TAIL_BYTES + cut_offset - len(secret.encode()) - 1
+    return secret + "\n" + _noise(filler)
+
+
+_SECRET_SINGLE = "zz-matrix-token-" + "x" * 60  # 单行自定义形态密钥
+_SECRET_STRADDLE = "zz-straddle-" + "s" * 188  # 200 字节单行密钥
+_SECRET_LEADING_WS = "  zz-lead-token-" + "w" * 40  # 前导空白是密钥的一部分
+_SECRET_TRAILING_WS = "zz-trail-token-" + "y" * 30 + " \t"  # strip 可剥字符收尾
+_SECRET_BLANK_LINE = (  # 含白行的多行密钥（证书链形态）
+    "-----BEGIN CHAIN-----\nBODYLINE1\n\nBODYLINE2\n-----END CHAIN-----"
+)
+_PEM_FRAGMENTS = (b"PRIVATE KEY", _PEM_BODY_LINE.encode())
+
+# (stderr 文本, 已注册密钥, 不得出现在任何出口面的碎片)——每条断言三面：
+# stderr_sink 锚点文件 / 返回值 / 压缩后的结构化 events 文件。
+_MATRIX = [
+    pytest.param(
+        "noise before\nauth failed for " + _SECRET_SINGLE + "\nnoise after\n",
+        _SECRET_SINGLE,
+        (b"zz-matrix", b"x" * 16),
+        id="single-line-middle",
+    ),
+    pytest.param(
+        "boot noise\n" + _pem(False),  # 文件不以换行收尾，末尾即密钥值
+        _pem(False),
+        _PEM_FRAGMENTS,
+        id="pem-no-trailing-newline-at-eof",
+    ),
+    pytest.param(
+        "boot noise\n" + _pem(True),  # R8 真实案例：stderr 恰好以带尾换行的密钥值收尾
+        _pem(True),
+        _PEM_FRAGMENTS,
+        id="pem-trailing-newline-at-eof",
+    ),
+    pytest.param(
+        _pem(True) + "post-noise-1\npost-noise-2\n",
+        _pem(True),
+        _PEM_FRAGMENTS,
+        id="pem-trailing-newline-followed-by-noise",
+    ),
+    pytest.param(
+        _SECRET_SINGLE + "\n" + _noise(500) + "\n",
+        _SECRET_SINGLE,
+        (b"zz-matrix", b"x" * 16),
+        id="secret-followed-by-noise-lines",
+    ),
+    pytest.param(
+        # 密钥（8191 字节）+ 行尾换行恰好填满 8KB 保留窗口。
+        ("zz-fill-" + "f" * (STDERR_TAIL_BYTES - 9)) + "\n",
+        "zz-fill-" + "f" * (STDERR_TAIL_BYTES - 9),
+        (b"zz-fill", b"f" * 16),
+        id="secret-exactly-fills-window",
+    ),
+    pytest.param(
+        _straddle_text(_SECRET_STRADDLE, 8),
+        _SECRET_STRADDLE,
+        (b"zz-straddle", b"s" * 16),
+        id="straddle-cut-at-secret-head",
+    ),
+    pytest.param(
+        _straddle_text(_SECRET_STRADDLE, 100),
+        _SECRET_STRADDLE,
+        (b"zz-straddle", b"s" * 16),
+        id="straddle-cut-at-secret-middle",
+    ),
+    pytest.param(
+        _straddle_text(_SECRET_STRADDLE, 192),
+        _SECRET_STRADDLE,
+        (b"zz-straddle", b"s" * 16),
+        id="straddle-cut-at-secret-tail",
+    ),
+    pytest.param(
+        _straddle_text(_pem(True), 300),
+        _pem(True),
+        _PEM_FRAGMENTS,
+        id="pem-trailing-newline-straddling-cut",
+    ),
+    pytest.param(
+        _pem(False).replace("\n", "\r\n") + "\r\n",  # CRLF 行尾（通用换行翻译后命中）
+        _pem(False),
+        _PEM_FRAGMENTS,
+        id="crlf-pem",
+    ),
+    pytest.param(
+        _SECRET_LEADING_WS + "\nnoise\n",
+        _SECRET_LEADING_WS,
+        (b"zz-lead", b"w" * 16),
+        id="leading-whitespace-secret",
+    ),
+    pytest.param(
+        _SECRET_TRAILING_WS + "\nnoise\n",
+        _SECRET_TRAILING_WS,
+        (b"zz-trail", b"y" * 16),
+        id="strippable-trailing-chars-secret",
+    ),
+    pytest.param(
+        "pre\n" + _SECRET_BLANK_LINE + "\npost\n",
+        _SECRET_BLANK_LINE,
+        (b"BODYLINE", b"CHAIN"),
+        id="blank-line-inside-secret",
+    ),
+]
+
+
+@pytest.mark.parametrize(("stderr_text", "secret", "fragments"), _MATRIX)
+def test_scan_and_compress_secret_form_matrix(tmp_path, stderr_text, secret, fragments):
+    """#755 codex R8 P1 形态矩阵：deque 保留原始行分隔形态（strip + 重组的
+    归一化只在脱敏之后的展示面发生）后，任何形态的已注册密钥——单行 / 多行
+    PEM 无尾换行 / 多行 PEM 带尾换行（stderr 以其收尾，本轮真实案例）/ 恰好
+    填满保留窗口 / 骑跨 8KB 最终切割点（头中尾偏移）/ 密钥后随噪声行 /
+    CRLF 行尾 / 前导空白 / strip 可剥字符收尾 / 内含白行——在所有出口面
+    （sink 锚点、返回值、压缩后的结构化 events）都被整值替换，连碎片都不留。"""
+    from shared.pi_events import scan_and_compress_pi_events
+
+    events = tmp_path / "events.jsonl"
+    events.write_text('{"type":"session"}\n' + stderr_text, encoding="utf-8")
+    sink = tmp_path / "agent-stderr.log"
+    _, _, _, tail = scan_and_compress_pi_events(
+        events,
+        stderr_sink=sink,
+        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+        redact_secret_max_bytes=len(secret.encode()),
+    )
+    for face in (tail, sink.read_bytes()):
+        assert len(face) <= STDERR_TAIL_BYTES
+        assert secret.encode() not in face
+        for fragment in fragments:
+            assert fragment not in face
+        assert b"***" in face  # 脱敏标记在（密钥在切割前已整值命中）
+    # 结构化事件面：压缩后的 events.jsonl 只剩 JSON 行，同样无密钥字节。
+    assert secret.encode() not in events.read_bytes()
