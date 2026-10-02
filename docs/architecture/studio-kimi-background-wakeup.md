@@ -15,8 +15,10 @@ session 的任务状态文件。没有后台完成任务时不请求模型。新
 和 runtime 替换停止旧 watcher。发送前复核 runtime 身份、关闭状态和 token；
 失效 token 使用既有错误/恢复入口，不复活过期或撤销的凭证。
 
-取消会递增 runtime 内持久保留的取消代次并清空 pending；重新启用前在同一锁内
-重新扫描终态基线，即使两次轮询之间发生取消和重发，也不会接续取消期间的完成项。
+取消会递增 runtime 内保留的取消代次并清空 pending；人工消息持久化成功后，
+在同一 runtime 锁内重新读取终态基线并启用接续。准备阶段只捕获代次，不缓存文件状态，
+因此数据库提交期间新出现的终态也被纳入丢弃基线。扫描异常时保持关闭并登记重试，
+不能中断已接受人工消息的队列交接；后续 watcher 先完成基线再恢复观察。新的取消会撤销重试。
 排队的系统提示携带原代次，实际 ACP prompt 协程开始前再次校验代次、runtime、
 compaction 和凭证。取消掉的队列项不调用模型；暂时无法校验凭证或正在 compacting
 时释放本代 turn claim 并保留 pending。替换后的 runtime 不受旧队列清理影响。
@@ -36,7 +38,36 @@ Kimi 的通知消费状态。symlink、过大文件、不完整 JSON 与未知�
 从绝对路径根目录开始逐级以 `dir_fd` / `O_NOFOLLOW` 打开目录，后续枚举与文件读取
 始终相对已持有的描述符；祖先或任务目录被换成 symlink 不会改道读取其他目录。
 元数据只读普通文件，`O_NONBLOCK` 与打开后的 `fstat` 同时防护 stat/open 间的 FIFO 替换。
-恢复会话时已有终态作为历史基线，不重复唤醒；恢复期间仍在运行的任务继续观察。
+恢复会话在 resume claim 之前捕获已有终态，作为绑定路径和 ACP session id 的历史基线。
+该快照穿过旧 runtime 清理、spawn 和 session/load，到 on_ready 初始化 watcher；
+期间完成的任务不在历史基线中，继续产生回执与接续。空快照也是有效快照，不能在 ready 时重采样。
+只有实际 session/load 成功且路径、session id 匹配才沿用基线；回落 session/new 使用新会话的就绪基线。
+
+## 组合状态模型
+
+| 维度 | 状态/身份 | 负责的边界 |
+|---|---|---|
+| 服务 | 接受启动 → 封闭入口 → 排空在途启动 → 清理 | shutdown 快照之后不能再注册后继；详见 [服务生命周期](studio-service-lifecycle.md) |
+| runtime | 注册对象身份，closed，ACP handle 停止状态 | 旧回调、旧 watcher、退出回收不得写入后继 |
+| 接续 | enabled；disabled；disabled + rearm epoch | 取消立即生效，已接受的人工消息请求重新建立基线 |
+| turn | owner 对象与入队时的取消 epoch | 队列消费前复核，旧队列清理不得释放新人工 turn |
+
+| 事件 | 状态转换及观察顺序 |
+|---|---|
+| cancel | epoch + 1，disabled，清空 pending 与 rearm 请求；旧排队项在消费守卫中失效 |
+| 人工准入失败 | 不改变接续状态、基线或 owner |
+| 人工准入成功 | 提交消息 → 新 owner → 同代次 rearm → 新基线 → enabled → 队列交接 |
+| rearm 扫描抛错 | 保留人工交接；disabled + rearm epoch；watcher 重试，新的 cancel 可撤销 |
+| 新终态 | 回执成功后记入 seen/pending；忙碌或压缩时保留 pending，空闲后合并入队 |
+| 自动队列拒绝 | 只释放同 runtime/owner 的 claim；同 epoch 且仍启用才恢复 pending |
+| resume | claim 前历史快照 → 替换 runtime → load → 仅在同一已加载 session 上沿用快照 |
+| close/退出/shutdown | 先隔离生产者/准入，再通知或清理，不能在终止标记之后继续生产消息 |
+
+文件由外部 Kimi 进程写入，`runtime.lock` 不锁住外部写者。取消边界按新基线扫描中
+实际观察到的有效终态定义，而不是声称获得整个目录的原子文件系统快照；逐文件观察后
+才完成的任务属于后续观察。没有有效元数据的任务保持未知，不能据此推断它已完成。
+扫描与启用之间不再插入数据库提交或其他异步等待。此桥接是进程内去重，不承诺跨进程崩溃的
+exactly-once 模型调用，也不拥有 Kimi 的原生通知消费状态。
 
 本桥接依赖 Kimi 的本地 V1 存储格式；远程 Kimi 或自定义外部存储不在支持范围。
 若上游变更该格式，需要更新兼容读取器，不能把“读不到”当作任务已完成。
@@ -51,3 +82,6 @@ Kimi 的通知消费状态。symlink、过大文件、不完整 JSON 与未知�
 通过临时目录模拟 Kimi V1 文件及真实 watcher 线程，不需要模型调用。
 确定性测试直接驱动 cursor 和真实 ACP 队列：覆盖无轮询间隔的 cancel/rearm、
 入队后取消、消费前 DB 故障/凭证失效、enqueue 异常、runtime 替换以及祖先目录替换。
+`test_studio_chat_background_boundaries.py` 在真实消息提交和 ACP load 边界完成任务，
+覆盖取消期终态、扫描失败后的人工交接/重试、再次取消、空/非空恢复基线和 load 回落。
+服务启动排空与 fatal consumer fencing 复用 #814 的真实 ACP/数据库回归。

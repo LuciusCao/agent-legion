@@ -41,6 +41,8 @@ class SessionRuntime:
         self.background_stop = threading.Event()
         self.background_wakeup_enabled = True
         self.background_epoch = 0
+        self.background_rearm_epoch: int | None = None
+        self.background_baseline: Any = None
         self.background_cursor: Any = None
         self.background_cleanup: Any = None
         # Streaming chunk coalescing (agent text + thought): each kind folds
