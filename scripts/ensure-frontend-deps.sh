@@ -122,11 +122,16 @@ os.execv(bash, [bash, script])
 PY
 fi
 
-# EXIT trap：备份位存在（安装路径被中断）则恢复旧目录。锁无需显式释放：
-# flock 归内核托管，本进程以任何方式退出（含 SIGKILL）即自动释放，锁文件
-# 残留不阻塞后续运行。
+# EXIT trap：备份位存在且新树未提交（modules_fresh 不命中）时恢复旧目录。
+# 裁决必不可少（PR #832 codex P2 第四轮）：成功路径末尾清备份的 rm -rf
+# 对上万文件的目录耗时数秒，期间 Ctrl-C 或 rm 因 I/O/权限失败都会经
+# set -e 触发本 trap——无条件恢复会拿「半删除的备份」覆盖「已写 stamp
+# 的完整新树」，把成功状态降级为半应用状态。新树已提交则绝不恢复，
+# 残留备份交由下次运行的收编逻辑清理（fresh → 弃备份）。锁无需显式
+# 释放：flock 归内核托管，本进程以任何方式退出（含 SIGKILL）即自动
+# 释放，锁文件残留不阻塞后续运行。
 restore_backup_on_exit() {
-    if [[ -d "$BACKUP" ]]; then
+    if [[ -d "$BACKUP" ]] && ! modules_fresh; then
         rm -rf frontend/node_modules
         mv -f "$BACKUP" frontend/node_modules
     fi

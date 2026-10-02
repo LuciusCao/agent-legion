@@ -10,6 +10,10 @@
   失败时原本可用的旧依赖一并丢失——已有 node_modules 时必须经备份位
   .node_modules.bak 恢复旧目录，不留半安装态（AGENTS.md「禁止半应用
   状态」）；npm 桩按破坏性优先语义建模（删除发生在失败之前）；
+- 提交点后的恢复裁决（PR #832 codex P2 第四轮）：清备份的 rm -rf
+  进行中被中断（Ctrl-C / rm 失败同路径）时，EXIT trap 不得拿「半删除
+  的备份」覆盖「已写 stamp 的完整新树」——恢复以 modules_fresh 裁决，
+  已提交则不恢复，残留备份由下次运行收编（fresh → 弃）；
 - SIGKILL 残留裁决（PR #832 codex P2）：备份与新树并存时，只有新树
   stamp 命中当前指纹才弃备份（成功后、清备份前被杀）；否则视为半安装
   残树（npm ci 中途被杀）——删残树、恢复备份，「目录存在即弃备份」会
@@ -64,6 +68,20 @@ if [[ "$1" == "ci" ]]; then
   fi
 fi
 exit 0
+"""
+
+# 定向慢速 rm 桩（codex P2 第四轮场景）：只有目标是备份位时才写 pid 并
+# 挂起（供测试 SIGKILL 精确中断「清备份的 rm -rf 进行中」），其余调用
+# 直接透传真实 /bin/rm——脚本与 npm 桩的其它 rm 不受影响。
+_RM_SLOW_ON_BAK_STUB = """#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "$arg" == *".node_modules.bak" ]]; then
+    printf '%s\\n' "$$" > "${STUB_RM_PID_FILE}"
+    sleep "${STUB_RM_SLEEP:-15}"
+    break
+  fi
+done
+exec /bin/rm "$@"
 """
 
 
@@ -353,6 +371,62 @@ def test_stale_backup_with_stale_stamp_modules_restores_backup(tmp_path: Path) -
     assert not bak.exists()
 
 
+def test_interrupted_backup_cleanup_keeps_committed_tree(tmp_path: Path) -> None:
+    """PR #832 codex P2 第四轮：清备份的 rm -rf 进行中被中断（Ctrl-C 同
+    路径）——安装已成功、stamp 已写（事务已提交），无条件恢复的 EXIT trap
+    会拿「半删除的备份」覆盖完整新树，把成功状态降级为半应用状态。trap
+    必须以 modules_fresh 裁决：已提交则不恢复，残留备份由下次运行收编
+    （fresh → 弃备份）。定向慢速 rm 桩精确构造「rm 进行中」窗口后 SIGKILL。"""
+    main, bin_dir = _setup(tmp_path)
+    modules = main / "frontend" / "node_modules"
+    # 预置旧依赖树（触发备份路径）：旧 marker + 旧 stamp。
+    modules.mkdir()
+    (modules / "old-marker").write_text("old-deps")
+    (modules / ".deps-stamp").write_text("stale-fingerprint\n")
+    rm_pid_file = tmp_path / "rm.pid"
+    _write_stub(bin_dir / "rm", _RM_SLOW_ON_BAK_STUB)
+    stub_log = tmp_path / "stub.log"
+
+    proc = subprocess.Popen(
+        [_BASH, str(main / "scripts" / SCRIPT.name)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=_script_env(main, bin_dir, stub_log, {"STUB_RM_PID_FILE": str(rm_pid_file)}),
+    )
+    try:
+        # rm 桩挂起 = npm ci 已成功、stamp 已写、正在清备份（提交点已过）。
+        for _ in range(200):
+            if rm_pid_file.exists():
+                break
+            time.sleep(0.1)
+        assert rm_pid_file.exists(), "未进入清备份段"
+        # 确认提交点已过：新树带着当前指纹的 stamp（rm 在 stamp 之后执行）。
+        assert (modules / ".deps-stamp").read_text() == f"{_fingerprint(main)}\n"
+        rm_pid = int(rm_pid_file.read_text().strip())
+        os.kill(rm_pid, signal.SIGKILL)  # rm 失败 → set -e → EXIT trap
+    finally:
+        proc.wait(timeout=60)
+        if proc.poll() is None:
+            proc.kill()
+    out, err = proc.communicate()
+
+    # trap 未降级成功状态：非零退出（rm 被杀）但已提交的新树完整存活，
+    # 旧 marker 不在（恢复回去的会是它），备份残留（无害锚点）。
+    assert proc.returncode != 0
+    assert (modules / ".deps-stamp").read_text() == f"{_fingerprint(main)}\n"
+    assert not (modules / "old-marker").exists(), "trap 把已提交的新树降级成了旧备份"
+    assert (main / "frontend" / ".node_modules.bak").exists()
+
+    # 下次运行收编：fresh → 弃残留备份，幂等跳过（换回真实 rm）。
+    (bin_dir / "rm").unlink()
+    second = _run(main, bin_dir, stub_log)
+    assert second.returncode == 0, second.stderr
+    assert "跳过 npm ci" in second.stdout
+    assert _npm_ci_count(stub_log) == 1  # 全程只安装过一次
+    assert not (main / "frontend" / ".node_modules.bak").exists()
+
+
 # 慢速 npm 桩：ci 时先声明「安装中」（写 marker 文件）再 sleep——供并发
 # 锁用例构造「持有锁的进程正处于安装中」的真实窗口。
 _NPM_SLOW_STUB = """#!/usr/bin/env bash
@@ -613,6 +687,13 @@ def test_stamp_lives_inside_node_modules() -> None:
     """stamp 必须放在 node_modules 内：手动删目录时 stamp 随之消失、
     天然失效，不存在「目录已删但 stamp 还说已装」的漂移。"""
     assert 'STAMP="frontend/node_modules/.deps-stamp"' in SCRIPT_TEXT
+
+
+def test_exit_trap_adjudicates_before_restore() -> None:
+    """接线钉（codex P2 第四轮）：EXIT trap 的恢复必须带 modules_fresh
+    裁决——无条件恢复会把清备份期间中断的已提交新树降级为半删除备份
+    （行为级覆盖见 test_interrupted_backup_cleanup_keeps_committed_tree）。"""
+    assert 'if [[ -d "$BACKUP" ]] && ! modules_fresh; then' in SCRIPT_TEXT
 
 
 def test_backup_dir_is_gitignored() -> None:
