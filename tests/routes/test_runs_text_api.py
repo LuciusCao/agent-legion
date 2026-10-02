@@ -677,3 +677,30 @@ def test_ready_reuse_is_revalidated_at_publication(client, storage, job_db, monk
     assert all(row["content_hash"] == digest for row in _materials(client, workspace_id))
     assert set(storage.objects) == _storage_keys(job_db, workspace_id)
     assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
+
+
+def test_text_item_filename_falls_back_to_start_node_text_input(client, storage, job_db) -> None:
+    """Start node ``text_input.filename`` names materials for items without one."""
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    workspace_id = _create_workspace(client)
+    raw = copy.deepcopy(DEMO_WORKFLOW_DEFINITION)
+    raw["nodes"]["_start"]["accepted_item_types"] = ["material", "text"]
+    raw["nodes"]["_start"]["text_input"] = {"filename": "创作需求.md", "template": "# 需求\n"}
+    WorkflowRevisionService(job_db).publish_workspace_revision(
+        workspace_id, workflow_definition_from_dict(raw)
+    )
+
+    response = _create_run(client, workspace_id, [{"type": "text", "content": REQUIREMENT}])
+
+    assert response.status_code == 200, response.text
+    (material,) = _materials(client, workspace_id)
+    assert material["filename"] == "创作需求.md"
+    # An explicit filename still wins over the configured default.
+    explicit = _create_run(
+        client, workspace_id, [{"type": "text", "content": REQUIREMENT + "!", "filename": "x.txt"}]
+    )
+    assert explicit.status_code == 200, explicit.text
+    assert {m["filename"] for m in _materials(client, workspace_id)} == {"创作需求.md", "x.txt"}

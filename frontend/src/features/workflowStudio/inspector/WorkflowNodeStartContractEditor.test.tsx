@@ -24,7 +24,7 @@ function LocationProbe() {
   )
 }
 
-function renderEditor(types: string[]) {
+function renderEditor(types: string[], raw?: string) {
   const setDefinitionYaml = vi.fn()
   const node = {
     key: '_start',
@@ -35,7 +35,9 @@ function renderEditor(types: string[]) {
     <MemoryRouter>
       <WorkflowNodeStartContractEditor
         node={node}
-        definitionYaml={draftYaml}
+        definitionYaml={
+          raw ?? draftYaml.replace('[material, ref]', JSON.stringify(types))
+        }
         setDefinitionYaml={setDefinitionYaml}
       />
       <LocationProbe />
@@ -45,6 +47,44 @@ function renderEditor(types: string[]) {
 }
 
 describe('WorkflowNodeStartContractEditor', () => {
+  it.each([
+    'nodes: [',
+    'nodes: []',
+    'nodes: {_start: {type: start}}\nedges: [null]',
+  ])('disables mutations on unsafe published fallback %s', (raw) => {
+    const save = renderEditor(['material', 'text'], raw)
+    const option = screen.getByRole('checkbox', { name: /直接输入需求/ })
+    expect(option).toBeDisabled()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    fireEvent.click(option)
+    expect(save).not.toHaveBeenCalled()
+  })
+  it('explicitly removes malformed text_input without rebuilding it from published fields', () => {
+    const save = renderEditor(
+      ['material', 'text'],
+      draftYaml.replace('[material, ref]', '[ref, text]') +
+        '    text_input: {template: 123}\n'
+    )
+    fireEvent.click(screen.getByRole('checkbox', { name: /直接输入需求/ }))
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(save.mock.calls[0][0]).not.toContain('text_input')
+    expect(save.mock.calls[0][0]).toContain('- ref')
+    expect(save.mock.calls[0][0]).not.toContain('- material')
+  })
+  it.each(['123', '[]', '[invalid]', '[material, 123]', '{bad: value}'])(
+    'rejects malformed accepted_item_types %s before calling includes',
+    (types) => {
+      const save = renderEditor(
+        ['material', 'text'],
+        draftYaml.replace('[material, ref]', types)
+      )
+      expect(screen.getByRole('alert')).toBeInTheDocument()
+      expect(
+        screen.getByRole('checkbox', { name: /直接输入需求/ })
+      ).toBeDisabled()
+      expect(save).not.toHaveBeenCalled()
+    }
+  )
   it('renders user-facing labels and descriptions for every item type', () => {
     renderEditor(['material', 'ref'])
 
@@ -127,5 +167,42 @@ describe('WorkflowNodeStartContractEditor', () => {
     expect(screen.getByRole('checkbox', { name: /整个文件夹/ })).toBeEnabled()
     fireEvent.click(screen.getByRole('checkbox', { name: /外部平台内容/ }))
     expect(setDefinitionYaml).not.toHaveBeenCalled()
+  })
+
+  it('clears the text_input block when 直接输入需求 is unticked', () => {
+    const setDefinitionYaml = vi.fn()
+    const node = {
+      key: '_start',
+      node_type: 'start',
+      accepted_item_types: ['material', 'text'],
+      text_input: { label: '创作需求', filename: '', template: '# 需求\n' },
+    } as unknown as WorkflowNodeRecord
+    const yamlWithBlock = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '    accepted_item_types: [material, text]',
+      '    text_input:',
+      '      label: 创作需求',
+      '      template: "# 需求\\n"',
+      '',
+    ].join('\n')
+    render(
+      <MemoryRouter>
+        <WorkflowNodeStartContractEditor
+          node={node}
+          definitionYaml={yamlWithBlock}
+          setDefinitionYaml={setDefinitionYaml}
+        />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /直接输入需求/ }))
+
+    const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
+    expect(nextYaml).not.toContain('- text')
+    expect(nextYaml).not.toContain('text_input')
+    expect(nextYaml).toContain('- material')
   })
 })

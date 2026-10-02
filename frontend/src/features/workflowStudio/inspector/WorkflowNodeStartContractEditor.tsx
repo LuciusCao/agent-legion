@@ -6,6 +6,10 @@ import {
 } from '../../../lib/acceptedItemTypes'
 import { patchWorkflowNodeAcceptedItemTypes } from '../shared/workflowStudioYamlDraft'
 import styles from './WorkflowStructuredEditor.module.css'
+import {
+  clearDraftTextInput,
+  readDraftStartTypes,
+} from '../shared/workflowStudioTextInputEditable'
 
 // 规范写回顺序 = ITEM_TYPE_DISPLAY 的 key 顺序（material/ref/bundle）。
 const ITEM_TYPE_ORDER = Object.keys(ITEM_TYPE_DISPLAY) as AcceptedItemType[]
@@ -21,26 +25,36 @@ type Props = {
  * checkbox 置灰防空集。选项文案统一走 ITEM_TYPE_DISPLAY（与「添加条目」
  * 对话框、readOnly 视图同源）。外部连接指引链接见 #593。 */
 export function WorkflowNodeStartContractEditor(props: Props) {
-  const selected = props.node.accepted_item_types ?? []
+  const draftTypes = readDraftStartTypes(props.definitionYaml, props.node.key)
+  const editable = draftTypes !== null
+  const selected = draftTypes ?? []
   const toggle = (value: string, checked: boolean) => {
+    if (!editable) return
     // 固定按规范顺序写回，与勾选顺序无关。
     const next = ITEM_TYPE_ORDER.filter((v) =>
       v === value ? checked : selected.includes(v)
     )
     if (next.length === 0) return
-    props.setDefinitionYaml(
-      patchWorkflowNodeAcceptedItemTypes(
-        props.definitionYaml,
-        props.node.key,
-        next
-      )
+    let yaml = patchWorkflowNodeAcceptedItemTypes(
+      props.definitionYaml,
+      props.node.key,
+      next
     )
+    // 取消「直接输入需求」时一并清掉 text_input：编辑器随之隐藏，不留
+    // 看不见却会在重新勾选时复活的旧模板。
+    if (value === 'text' && !checked) {
+      yaml = clearDraftTextInput(yaml, props.node.key)
+    }
+    props.setDefinitionYaml(yaml)
   }
   return (
     <div className={styles.fieldGroup}>
       <div className={styles.fieldHint}>
         这个工作流接受哪些内容作为输入。这里的选择决定「添加条目」对话框里提供哪些提交方式。
       </div>
+      {!editable && (
+        <p role="alert">草稿结构无效，请先在 YAML 中修复入口节点。</p>
+      )}
       <div className={styles.fieldHint}>
         勾选「外部平台内容」前，需要管理员先在
         <Link to="/admin/settings#connections">全局设置 · 外部服务连接</Link>
@@ -53,7 +67,9 @@ export function WorkflowNodeStartContractEditor(props: Props) {
             <input
               type="checkbox"
               checked={selected.includes(value)}
-              disabled={selected.length === 1 && selected[0] === value}
+              disabled={
+                !editable || (selected.length === 1 && selected[0] === value)
+              }
               onChange={(event) => toggle(value, event.target.checked)}
             />
             <span>{display.label}</span>
