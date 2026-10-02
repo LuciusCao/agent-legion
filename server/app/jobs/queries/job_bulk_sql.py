@@ -25,6 +25,20 @@ BUNDLE_LOCK_IN_SQL = (
 # Set-based bulk INSERT (#448): one unnest statement per batch (executemany's
 # N statements fired the v77 trigger per row); each column list is ONE array
 # parameter, so the extended-protocol parameter limit is never in play.
+# #735 review P1 (run-ownership race): the ON CONFLICT update arm carries an
+# ownership clause — it fires for rows THIS run already owns (same-run
+# resubmit/resume: the new freeze applies, RUN-FREEZE-001) and for legacy
+# run-less rows (run_id='', pre-run-binding era: adoption keeps the stored
+# storage_dir, pinned by test_job_storage_layout; such rows are committed and
+# visible to the dedup probe, so they never sit in a race window). A
+# conflicting row owned by a DIFFERENT concrete run (two concurrent
+# submissions racing the same item past the dedup probe) is skipped
+# atomically by the speculative-insert arbitration instead of being stolen
+# from its run: first writer wins, and ownership once acquired can never be
+# re-bound away, so a create response's job_ids can never go stale against
+# GET /jobs?run_id=. RETURNING drops skipped ids — the caller derives its
+# owned-id list from what the write actually acquired, never from the
+# pre-insert candidate list.
 JOBS_BULK_INSERT_SQL = """
 insert into jobs(
   id, workspace_id, source_type, source_id, run_id, title, storage_dir, stem,
@@ -38,6 +52,8 @@ select * from unnest(
 on conflict(id) do update set
   title=excluded.title, stem=excluded.stem, run_id=excluded.run_id,
   input_json=excluded.input_json, frozen_config_json=excluded.frozen_config_json, updated_at=current_timestamp
+  where jobs.run_id = excluded.run_id or jobs.run_id = ''
+returning id
 """
 
 JOB_NODES_BULK_INSERT_SQL = """
@@ -47,13 +63,24 @@ on conflict(job_id, node_key) do nothing
 """
 
 
-def insert_jobs_batched(conn: Any, rows: list[tuple[Any, ...]]) -> None:
+def insert_jobs_batched(conn: Any, rows: list[tuple[Any, ...]]) -> set[str]:
+    """Insert one batch; return the ids this statement actually OWNS now.
+
+    The RETURNING projection is the ownership truth (#735): freshly inserted
+    ids plus same-run resubmit updates — a row the ownership clause skipped
+    (claimed by a concurrent run) is absent.
+    """
     # list per column (not tuple): psycopg adapts a tuple as one record value
     # and a list as a 1-D array — unnest needs the arrays (same arity rows,
     # so the strict zip cannot fail).
+    owned: set[str] = set()
     for start in range(0, len(rows), CHUNK_ROWS):
         chunk = rows[start : start + CHUNK_ROWS]
-        conn.execute(JOBS_BULK_INSERT_SQL, [list(column) for column in zip(*chunk, strict=True)])
+        returned = conn.execute(
+            JOBS_BULK_INSERT_SQL, [list(column) for column in zip(*chunk, strict=True)]
+        ).fetchall()
+        owned.update(str(row["id"]) for row in returned)
+    return owned
 
 
 def insert_job_nodes_batched(conn: Any, pairs: list[tuple[str, str]]) -> None:

@@ -1,0 +1,17 @@
+{
+  "valid": [
+    "", "http://localhost:8787", "http://127.0.0.2:8787/", "http://[::1]:8787",
+    "https://worker.example/console/path?view=overview#status", "HTTPS://worker.example/",
+    "https://worker.example/a%20b", "http://worker:8787", "https://例子.测试/控制台"
+  ],
+  "invalid": [
+    "worker.example:8787", "/console", "//worker.example", " ", "\t\n",
+    " https://worker.example", "https://worker.example ", "javascript:alert(1)",
+    "file:///console", "ftp://worker.example", "http:", "http:worker.example",
+    "http:///worker.example", "http://", "https://?view=overview", "http://[::1",
+    "http://worker.example:65536", "http://worker.example:bad", "http://bad host/",
+    "http://worker.example/line\nbreak", "http://worker.example/\u0000", "http://worker.example/\u007f",
+    "http://worker.example\\other", "http://user:secret@worker.example/",
+    "http://user@worker.example/", "https://worker.example/a b"
+  ]
+}

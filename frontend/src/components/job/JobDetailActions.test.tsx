@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act, fireEvent } from '@testing-library/react'
+import { render, screen, act, within, fireEvent } from '@testing-library/react'
 import { useState, type ReactElement } from 'react'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import { JobDetailActions } from './JobDetailActions'
@@ -100,6 +100,7 @@ describe('JobDetailActions', () => {
     renderActions({ onOpenDiagnosis: vi.fn() })
     expect(screen.getByLabelText('重跑')).toBeInTheDocument()
     expect(screen.getByLabelText('运行到')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '更多任务操作' }))
     expect(screen.getByLabelText('打包')).toBeInTheDocument()
     expect(screen.getByLabelText('删除')).toBeInTheDocument()
     expect(screen.getByLabelText('产物文件')).toBeInTheDocument()
@@ -127,6 +128,7 @@ describe('JobDetailActions', () => {
       onClearPacked,
     })
 
+    fireEvent.click(screen.getByRole('button', { name: '更多任务操作' }))
     await act(async () => {
       screen.getByLabelText('清空打包状态').click()
     })
@@ -140,7 +142,11 @@ describe('JobDetailActions', () => {
       onClearPacked: vi.fn(),
     })
 
-    expect(screen.getByLabelText('清空打包状态')).toHaveAttribute('disabled')
+    fireEvent.click(screen.getByRole('button', { name: '更多任务操作' }))
+    expect(screen.getByLabelText('清空打包状态')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
   })
 
   it('opens the upgrade dialog and forwards the selected mode', async () => {
@@ -208,24 +214,48 @@ describe('JobDetailActions', () => {
   it('disables rerun and package for a running job', () => {
     renderActions({ jobs: [makeJob({ id: 'j1', status: 'running' })] })
     expect(screen.getByLabelText('重跑')).toHaveAttribute('disabled')
-    expect(screen.getByLabelText('打包')).toHaveAttribute('disabled')
-    expect(screen.getByLabelText('删除')).not.toHaveAttribute('disabled')
+    fireEvent.click(screen.getByRole('button', { name: '更多任务操作' }))
+    expect(screen.getByLabelText('打包')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
+    expect(screen.getByLabelText('删除')).not.toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
   })
 
   it('enables rerun, package and delete for a completed job', () => {
     renderActions({ jobs: [makeJob({ id: 'j1', status: 'completed' })] })
     expect(screen.getByLabelText('重跑')).not.toHaveAttribute('disabled')
-    expect(screen.getByLabelText('打包')).not.toHaveAttribute('disabled')
-    expect(screen.getByLabelText('删除')).not.toHaveAttribute('disabled')
+    fireEvent.click(screen.getByRole('button', { name: '更多任务操作' }))
+    expect(screen.getByLabelText('打包')).not.toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
+    expect(screen.getByLabelText('删除')).not.toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
   })
 
   it('disables all actions when loading', () => {
     renderActions({ loading: true })
     expect(screen.getByLabelText('重跑')).toHaveAttribute('disabled')
     expect(screen.getByLabelText('运行到')).toHaveAttribute('disabled')
-    expect(screen.getByLabelText('打包')).toHaveAttribute('disabled')
-    expect(screen.getByLabelText('删除')).toHaveAttribute('disabled')
-    expect(screen.getByLabelText('产物文件')).toHaveAttribute('disabled')
+    fireEvent.click(screen.getByRole('button', { name: '更多任务操作' }))
+    expect(screen.getByLabelText('打包')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
+    expect(screen.getByLabelText('删除')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
+    expect(screen.getByLabelText('产物文件')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
   })
 
   it('calls onPackage when package button is clicked', async () => {
@@ -234,6 +264,7 @@ describe('JobDetailActions', () => {
       jobs: [makeJob({ id: 'j1', status: 'completed' })],
       onPackage,
     })
+    fireEvent.click(screen.getByRole('button', { name: '更多任务操作' }))
     await act(async () => {
       screen.getByLabelText('打包').click()
     })
@@ -243,13 +274,14 @@ describe('JobDetailActions', () => {
   it('calls onDelete only after confirm in delete dialog', async () => {
     const onDelete = vi.fn()
     renderActions({ onDelete })
+    fireEvent.click(screen.getByRole('button', { name: '更多任务操作' }))
     await act(async () => {
       screen.getByLabelText('删除').click()
     })
     expect(screen.getByText(/确定删除任务/)).toBeInTheDocument()
     expect(onDelete).not.toHaveBeenCalled()
     await act(async () => {
-      screen.getByText('删除').click()
+      within(screen.getByRole('dialog')).getByText('删除').click()
     })
     expect(onDelete).toHaveBeenCalledTimes(1)
   })
@@ -257,6 +289,7 @@ describe('JobDetailActions', () => {
   it('calls onOpenArtifacts when artifact button is clicked', async () => {
     const onOpenArtifacts = vi.fn()
     renderActions({ onOpenArtifacts })
+    fireEvent.click(screen.getByRole('button', { name: '更多任务操作' }))
     await act(async () => {
       screen.getByLabelText('产物文件').click()
     })

@@ -16,9 +16,11 @@ trap '' PIPE
 # Every stdout/stderr write goes through say() — one guarded place, so a
 # reader that walked away (output caps, `| head`, a killed session) costs the
 # write, never the gate. Builtin echo is shadowed so no call site is missed.
-say() {
+say() (
+  # Bash 3.2 can retain failed printf output in its stdio buffer and leak it
+  # into later command substitutions. Discard that buffer with this subshell.
   printf '%s\n' "$*" || true
-}
+)
 echo() {
   say "$*"
 }

@@ -14,5 +14,6 @@ export function invalidateAgentWorkers(queryClient: QueryClient): void {
   timer = setTimeout(() => {
     timer = null
     void queryClient.invalidateQueries({ queryKey: queryKeys.agentWorkers() })
+    void queryClient.invalidateQueries({ queryKey: ['workspaceWorkers'] })
   }, INVALIDATE_DEBOUNCE_MS)
 }

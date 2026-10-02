@@ -376,14 +376,33 @@ describe('WorkflowNodeInspector compare fallback for a synthetic start ghost', (
   })
 
   it('keeps the draft YAML resolution ahead of the compare fallback', async () => {
-    // draftYaml 里有 _start（无 accepted_item_types）：YAML 路径优先，
-    // compare 兜底不得覆盖它（否则三个 checkbox 会按默认契约被勾上）。
+    // 显式 bundle 契约与合成 start 的 material/ref 缺省不同，必须采用草稿。
     renderInspector('_start', {
-      definitionYaml: draftYaml,
+      definitionYaml: draftYaml.replace(
+        '    type: start',
+        '    type: start\n    accepted_item_types: [bundle]'
+      ),
       compareSummary: makeCompareSummary('start'),
     })
 
     expect(await screen.findByLabelText('入口节点')).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: /上传文件/ })).not.toBeChecked()
+    expect(
+      screen.getByRole('checkbox', { name: /外部平台内容/ })
+    ).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /整个文件夹/ })).toBeChecked()
+  })
+
+  it('uses backend defaults when an explicit draft start omits its contract', async () => {
+    renderInspector('_start', {
+      definitionYaml: draftYaml,
+      compareSummary: makeCompareSummary('start'),
+    })
+    expect(await screen.findByLabelText('入口节点')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /上传文件/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /外部平台内容/ })).toBeChecked()
+    expect(
+      screen.getByRole('checkbox', { name: /整个文件夹/ })
+    ).not.toBeChecked()
   })
 })

@@ -43,8 +43,10 @@ class JobListFilter:
     paused: bool | None = None
     # #626 codex3 P1: scope a page/facet slice to ONE run. The intake
     # channel's callers need "my run's job statuses" (a run may carry
-    # thousands of items); '' (the default) keeps the unscoped semantics of
-    # every existing caller — run-less rows never match a scoped query.
+    # thousands of items); None (the default) keeps the unscoped semantics of
+    # every existing caller. #735 review P2: the routes reject the '' form
+    # with 422 (it would scope to legacy run-less rows, never what a caller
+    # means); an internal caller passing '' still filters literally.
     run_id: str | None = None
 
 
