@@ -159,6 +159,24 @@ describe('ArtifactPreviewPanel', () => {
     expect(screen.getByText('question_id')).toBeInTheDocument()
   })
 
+  // 守卫：卡片按 name 复用，但换 job 后文本查询进入加载态会卸载正文，
+  // 源码态不应跨 job 残留。
+  it('同名 json 换 job 后源码态重置回树视图', async () => {
+    mockFetchJobArtifactText.mockResolvedValue(textOf('{"question_id":"q1"}'))
+    const { rerender } = renderPanel(
+      <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['review.json'])} />
+    )
+    expect(await screen.findByText('question_id')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '源码' }))
+    expect(document.querySelector('pre')).toBeInTheDocument()
+
+    rerender(
+      <ArtifactPreviewPanel jobId="j2" detail={makeDetail(['review.json'])} />
+    )
+    expect(await screen.findByText('question_id')).toBeInTheDocument()
+    expect(document.querySelector('pre')).not.toBeInTheDocument()
+  })
+
   it('图片加载失败展示错误占位并可重试', async () => {
     renderPanel(
       <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['frame.png'])} />
