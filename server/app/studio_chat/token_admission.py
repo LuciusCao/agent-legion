@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING
 
 from server.app.auth.sessions import hash_token
 from server.app.services.job_errors import ConflictError
-from server.app.studio_chat.session_escalation import escalate_dead_token_session
-from server.app.studio_chat.token_keepalive import TOKEN_INVALIDATED_DETAIL, keepalive_run_token
+from server.app.studio_chat.token_keepalive import TOKEN_INVALIDATED_DETAIL, invalidate_run_token
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
@@ -26,6 +25,5 @@ def require_live_run_token(
             raise ConflictError("Chat session is not running on this server")
         if alive:
             return
-        escalate_dead_token_session(backend, session_id)
-        keepalive_run_token(backend, session_id)
+        invalidate_run_token(backend, session_id, runtime)
     raise ConflictError(TOKEN_INVALIDATED_DETAIL)

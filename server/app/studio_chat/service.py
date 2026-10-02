@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -173,32 +172,9 @@ class StudioChatService:
         return self.get_session(session_id)
 
     def close_session(self, session_id: str, workspace_id: str) -> dict[str, Any]:
-        session = self.get_session(session_id, workspace_id)
-        if session["status"] == "closed":
-            return session
-        runtime = self.runtime(session_id)
-        with runtime.lock if runtime is not None else nullcontext():
-            with self._runtimes_lock:
-                # Also pin absence: a resumed runtime may have appeared
-                # after the snapshot but before this durable close.
-                if self._runtimes.get(session_id) is not runtime:
-                    return self.get_session(session_id)
-                self._db.update_studio_chat_session(
-                    session_id, status="closed", closed_at=datetime.now(UTC)
-                )
-            try:
-                self.store.append_message(
-                    session_id, "status", "system", {"event": "session_closed"}
-                )
-                self.store.publish_session(session_id)
-            except Exception:
-                # #204 broad-except audit: closure already committed; failed
-                # notification must not skip process teardown or imply retry.
-                # REST recovers the closed state; preserve the failure cause.
-                logger.warning("closed chat notification failed for %s", session_id, exc_info=True)
-        if runtime is not None:
-            self.teardown_runtime(session_id, runtime, expected=runtime)
-        return self.get_session(session_id)
+        from server.app.studio_chat.session_close import close_session
+
+        return close_session(self, session_id, workspace_id)
 
     def resume_session(self, session_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
         """Rebuild the runtime of a closed/error session; history is kept.

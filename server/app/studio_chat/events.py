@@ -16,14 +16,13 @@ from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call, maybe_emi
 from server.app.studio_chat.permissions import handle_permission_request
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.session_config_state import apply_config_update, session_config_fields
+from server.app.studio_chat.session_exit import finish_session_exit
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.token_keepalive import keepalive_run_token
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
     from server.app.studio_chat.session_config_state import OpenedAcpSession
-
-_EXIT_DETAIL = "agent process exited"
 
 
 class ServiceBackend(Protocol):
@@ -184,38 +183,6 @@ class AcpEventHandlers:
     def on_exit(
         self, session_id: str, *, close_initiated: bool, expected: SessionRuntime | None
     ) -> None:
-        # Agent death teardown (#158): runs on the ACP thread itself, so the
-        # handle close must be skipped (self-join); the subprocess is already
-        # gone. Still pops the registry entry, settles parked permissions, and
-        # revokes the scoped token instead of leaving them to the TTL/timeout
-        # backstops. Idempotent: a close-initiated teardown already popped the
-        # runtime, making this a no-op. expected pins this thread's own
-        # runtime: resume can register a NEW runtime for the same session
-        # while the old thread's exit echo is still in flight — a stale echo
-        # tears down only its own runtime, never the registry's current one.
-        owned = self._backend.teardown_runtime(
-            session_id, self._backend.runtime(session_id), close_handle=False, expected=expected
+        finish_session_exit(
+            self._backend, session_id, close_initiated=close_initiated, expected=expected
         )
-        # close_initiated: the exit came from handle.close() (close/shutdown/
-        # resume's winner-side teardown), not from an agent death — stamping
-        # the row error here would clobber the resume claim's 'starting' row
-        # and add a bogus error row to the timeline.
-        if close_initiated:
-            return
-        if expected is not None and not owned:
-            # Stale echo: a newer runtime generation owns the registry (and
-            # the row's status transitions) — never stamp the row from here.
-            return
-        # 'starting' is the resume claim's row: a stale death echo from the
-        # old thread does not own it either (same ABA window as the runtime).
-        final_statuses = ("closed", "error", "starting")
-        current = self._backend.db.get_studio_chat_session(session_id) or {}
-        if current.get("status") in final_statuses:
-            return
-        self._backend.db.update_studio_chat_session_if(
-            session_id, status_not_in=final_statuses, status="error", error_detail=_EXIT_DETAIL
-        )
-        self._backend.store.append_message(
-            session_id, "status", "system", {"event": "error", "detail": _EXIT_DETAIL}
-        )
-        self._backend.store.publish_session(session_id)

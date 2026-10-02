@@ -228,3 +228,42 @@ def test_close_absent_snapshot_cannot_close_runtime_registered_before_write(admi
     assert not runtime.closed
     assert db.get_studio_chat_session(sid)["status"] == "idle"
     assert db.list_studio_chat_messages(sid) == []
+
+
+def test_close_completes_when_snapshotted_runtime_exits(admission, monkeypatch):
+    service, db, sid, workspace, runtime = admission
+    lookup = service.runtime
+
+    def exit_after_snapshot(session_id):
+        old = lookup(session_id)
+        service._runtimes.pop(session_id, None)
+        runtime.closed = True
+        return old
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "runtime", exit_after_snapshot)
+        assert service.close_session(sid, workspace)["status"] == "closed"
+    assert db.list_studio_chat_messages(sid)[-1]["content"]["event"] == "session_closed"
+
+
+def test_terminal_marker_is_published_after_callback_fence(admission, monkeypatch):
+    from server.app.studio_chat.callbacks import ServiceCallbacks
+
+    service, db, sid, workspace, runtime = admission
+    callbacks = ServiceCallbacks(service, sid)
+    callbacks.runtime = runtime
+    append = service.store.append_message
+
+    def append_with_late_callbacks(session_id, kind, role, content):
+        result = append(session_id, kind, role, content)
+        if content.get("event") == "session_closed":
+            assert runtime.closed
+            callbacks.on_update({"sessionUpdate": "plan", "entries": []})
+            callbacks.on_turn_end("end_turn")
+            callbacks.on_error("late transport error")
+        return result
+
+    monkeypatch.setattr(service.store, "append_message", append_with_late_callbacks)
+    assert service.close_session(sid, workspace)["status"] == "closed"
+    messages = db.list_studio_chat_messages(sid)
+    assert [message["content"]["event"] for message in messages] == ["session_closed"]

@@ -321,17 +321,17 @@ def test_failed_escalation_retries_without_duplicate_notice(job_db, settings, mo
         service._on_update(session_id, _tool_call("tc-a"))
         assert not runtime.token_keepalive_done
         assert not _invalidation_messages(service, session_id)  # no duplicate on retry
-        # The ACP process stop is only requested once the whole path succeeds.
-        assert runtime.handle.request_stop_calls == 0
+        # Known-dead credentials always stop, even when escalation I/O fails.
+        assert runtime.handle.request_stop_calls == 1
         monkeypatch.setattr(service.db, "update_studio_chat_session_if", real_escalate)
         service._on_update(session_id, _tool_call("tc-b"))
         assert runtime.token_keepalive_done
         assert len(_invalidation_messages(service, session_id)) == 1
         assert job_db.get_studio_chat_session(session_id)["status"] == "error"
-        # Exactly one stop request for the dead session (dedup via the flag).
-        assert runtime.handle.request_stop_calls == 1
+        # Retrying the notice may repeat the handle's idempotent stop request.
+        assert runtime.handle.request_stop_calls == 2
         service._on_update(session_id, _tool_call("tc-c"))
-        assert runtime.handle.request_stop_calls == 1
+        assert runtime.handle.request_stop_calls == 2
     finally:
         service.shutdown()
 
