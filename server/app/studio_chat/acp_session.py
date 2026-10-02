@@ -297,9 +297,11 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             # out the full 60s timeout) and no on_error reaches the service —
             # so the crash is logged with the traceback and reported to the
             # session as an error instead.
+            self.request_stop()
             logger.exception("studio chat ACP session loop crashed")
             self.callbacks.on_error("ACP session loop crashed")
         finally:
+            self.request_stop()
             self.ready_event.set()
             # _closed was set before _CLOSE was queued, so by the time the
             # thread drains it and lands here the flag is reliably visible:
@@ -341,7 +343,13 @@ class AcpSessionHandle(SessionConfigHandleMixin):
                 self.callbacks.on_ready(capabilities, opened)
                 # Startup handshake complete: release the create_session waiter.
                 self.ready_event.set()
-                await self._prompt_loop(conn, acp_session_id)
+                try:
+                    await self._prompt_loop(conn, acp_session_id)
+                finally:
+                    # Fence admission before transport teardown or callbacks can
+                    # block behind a sender's runtime lock. Keep _closed for
+                    # explicit close(), which must still join/kill this handle.
+                    self.request_stop()
         except Exception as exc:
             # exc_info: this is the primary failure signal for the whole ACP
             # session lifecycle — losing the traceback makes spawn/transport
@@ -356,6 +364,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             # session is marked error and the user sees a dead session
             # instead of a hung one. Nothing is masked (the traceback is
             # logged) and no exception type is converted on the way out.
+            self.request_stop()
             logger.warning("studio chat ACP session failed: %s", exc, exc_info=True)
             self.callbacks.on_error(str(exc))
         finally:
