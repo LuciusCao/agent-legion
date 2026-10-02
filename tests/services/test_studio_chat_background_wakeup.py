@@ -118,7 +118,7 @@ def chat(tmp_path, monkeypatch):
     service._runtimes_lock = threading.Lock()
     service._runtimes = {"chat-1": runtime}
     service.db.claim_studio_chat_turn.return_value = True
-    monkeypatch.setattr(delivery, "keepalive_run_token", Mock())
+    monkeypatch.setattr(delivery, "invalidate_run_token", Mock())
     monkeypatch.setattr(delivery, "_token_alive", Mock(return_value=True))
     monkeypatch.setattr(wake, "task_root", lambda *_: tmp_path)
     monkeypatch.setattr(wake, "POLL_SECONDS", 0.01)
@@ -172,6 +172,34 @@ def test_dead_token_does_not_start_a_followup(chat, monkeypatch):
     monkeypatch.setattr(delivery, "_token_alive", lambda *_: False)
     assert not wake.wake_session(service, "chat-1", runtime, ["agent-1"])
     service.db.claim_studio_chat_turn.assert_not_called()
+
+
+@pytest.mark.parametrize("queued", [False, True])
+@pytest.mark.parametrize("fault", ["write", "snapshot", "notice"])
+def test_automatic_dead_token_stops_despite_projection_failure(chat, monkeypatch, queued, fault):
+    from server.app.studio_chat.token_keepalive import invalidate_run_token
+
+    service, runtime = chat
+    runtime.handle.request_stop = Mock()
+    monkeypatch.setattr(delivery, "invalidate_run_token", invalidate_run_token)
+    monkeypatch.setattr(
+        delivery, "_token_alive", Mock(side_effect=[True, False] if queued else [False])
+    )
+    service.db.get_scoped_token_user.side_effect = AssertionError("must not re-query known death")
+    target = {
+        "write": service.db.update_studio_chat_session_if,
+        "snapshot": service.store.publish_session,
+        "notice": service.store.append_message,
+    }[fault]
+    target.side_effect = RuntimeError("projection failed")
+    if queued:
+        assert wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+        assert not runtime.handle.send_prompt.call_args.kwargs["before_start"]()
+    else:
+        assert not wake.wake_session(service, "chat-1", runtime, ["agent-1"])
+        service.db.claim_studio_chat_turn.assert_not_called()
+    runtime.handle.request_stop.assert_called_once()
+    service.db.get_scoped_token_user.assert_not_called()
 
 
 def test_dead_handle_exposes_recovery_instead_of_a_stuck_running_turn(chat):

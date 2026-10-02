@@ -304,8 +304,8 @@ def test_close_during_permission_park_leaves_session_closed(chat) -> None:
     service.send_message(session["id"], workspace_id, "run ls")
     _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
     service.close_session(session["id"], workspace_id)
-    # The resolved message is appended after the parked thread's finally
-    # block, so observing it proves the status write already happened.
+    # Close records denied permissions before its terminal marker; the
+    # retired waiter's finally must neither append nor resurrect this row.
     _wait_for(
         lambda: any(
             m["kind"] == "permission" and m["content"].get("status") == "resolved"
@@ -314,6 +314,10 @@ def test_close_during_permission_park_leaves_session_closed(chat) -> None:
     )
     time.sleep(0.2)
     assert service.get_session(session["id"])["status"] == "closed"
+    assert (
+        service.list_messages(session["id"], workspace_id)[-1]["content"]["event"]
+        == "session_closed"
+    )
 
 
 def test_respond_permission_after_settle_is_not_found(chat) -> None:

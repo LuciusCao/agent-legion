@@ -1,4 +1,15 @@
 invariants:
+  - id: STUDIO-RUNTIME-001
+    statement: "ACP callbacks and permission decisions belong to their originating runtime. Retirement fences producers before the close marker; permission waits release the runtime lock and revalidate ownership after waking. Known-dead credentials always request stop of their own generation, independently of escalation or notification I/O. Close continues when its snapshotted runtime has exited, but never closes a registered successor."
+    owner: studio
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_studio_chat_generation_boundary.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_admission.py
+        gate: quick
   - id: STUDIO-BACKGROUND-001
     statement: "Kimi V1 completions use descriptor-anchored root-task metadata reads; automatic followups validate runtime, cancellation epoch, compaction and live credentials at admission and ACP consumption, releasing only owned claims on rejection. See docs/architecture/studio-kimi-background-wakeup.md."
     owner: studio
