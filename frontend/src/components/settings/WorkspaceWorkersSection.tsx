@@ -3,6 +3,7 @@ import { listAgentWorkers } from '../../api'
 import type { AgentWorkerSummary } from '../../api'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { useWorkerConsoleUrl } from '../../hooks/useWorkerConsoleUrl'
+import { workerConsoleUrl } from '../../lib/workerConsoleUrl'
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
 import styles from './WorkspaceWorkersSection.module.css'
 
@@ -79,6 +80,10 @@ export function WorkspaceWorkersSection({
               <span className={styles.chip}>
                 并发上限 {worker.max_concurrency}
               </span>
+              <WorkerConsoleLink
+                url={workerConsoleUrl(worker)}
+                label="控制台"
+              />
             </li>
           ))}
         </ul>

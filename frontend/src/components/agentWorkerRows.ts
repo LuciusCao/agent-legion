@@ -1,5 +1,6 @@
 import type { AgentWorkerSummary as WorkerSummary } from '../api/agentWorkers'
 import { formatDateTime } from '../lib/formatters'
+import { workerConsoleUrl } from '../lib/workerConsoleUrl'
 import type { AgentStatus } from '../types'
 
 export interface WorkerRow {
@@ -9,6 +10,8 @@ export interface WorkerRow {
   /** null for in-process agents without a registered Worker row. */
   online: boolean | null
   heartbeatTitle: string
+  /** Worker 自报的控制台地址（labels.console_url）；'' = 无入口。 */
+  consoleUrl: string
 }
 
 export function buildWorkerRows(
@@ -36,6 +39,7 @@ export function buildWorkerRows(
       workload: `${status ? `${status} ` : ''}${taskCount}/${maxTasks}`,
       online: worker.online,
       heartbeatTitle: `最近心跳 ${formatDateTime(worker.last_seen_at)}`,
+      consoleUrl: workerConsoleUrl(worker),
     }
   })
 
@@ -50,6 +54,7 @@ export function buildWorkerRows(
       workload: `${agent.busy ? '忙碌' : '空闲'} ${agent.task_count}/${agent.max_tasks}`,
       online: null,
       heartbeatTitle: '',
+      consoleUrl: '',
     }))
   return [...rows, ...localRows]
 }
