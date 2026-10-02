@@ -172,6 +172,10 @@ def scan_and_compress_pi_events(
     # （残段直落锚点）。放宽后：保留界（8192+margin 字符）≥（8192+margin）
     # 字节 ≥ 最终切割点 + 最长密钥字节数，任何骑跨切割点的已注册密钥都
     # 完整落在保留缓冲内，下方对整段缓冲的一次脱敏必然整值命中。
+    # #755 codex R10 P1（顺序域）：扩窗只照管「最终切割点」的骑跨密钥，
+    # 且以「margin ≥ 最长可匹配密钥」为前提；淘汰切口本身也是切割——
+    # 下方 popleft 前先用 _redact_before_evict 整段脱敏，淘汰安全不再
+    # 依赖该前提（切割永不拆密钥由顺序保证）。
     redact_margin = max(_REDACT_WINDOW_MARGIN, redact_secret_max_bytes)
     stderr_tail: deque[str] = deque()
     stderr_chars = 0
@@ -194,6 +198,15 @@ def scan_and_compress_pi_events(
                     kept = _redact_then_tail_text(raw_line, redact, redact_margin)
                     stderr_tail.append(kept)
                     stderr_chars += len(kept)
+                    if stderr_chars > STDERR_TAIL_BYTES + redact_margin and len(stderr_tail) > 1:
+                        # #755 codex R10 P1（顺序域）：淘汰切口也是切割——
+                        # popleft 之前先对完整缓冲整段脱敏，此后任何淘汰切口
+                        # 都只落在已脱敏文本上（不变量与成本论证见
+                        # _redact_before_evict）。
+                        redacted_entries = _redact_before_evict(stderr_tail, redact)
+                        if redacted_entries is not None:
+                            stderr_tail = redacted_entries
+                            stderr_chars = sum(len(entry) for entry in stderr_tail)
                     while stderr_chars > STDERR_TAIL_BYTES + redact_margin and len(stderr_tail) > 1:
                         stderr_chars -= len(stderr_tail.popleft())
                     continue
@@ -264,16 +277,52 @@ def _redact_tail_buffer(data: bytes, redact: Callable[[bytes], bytes] | None) ->
     匹配不到整值）；deque 保留界已按 redact_margin 放宽（骑跨最终切割
     点的已注册密钥完整落在缓冲内），所以这里的一次整段脱敏必然整值
     命中。``redact=None``（旧式/无密钥调用方）原样返回；回调逃逸返回
-    ``None``——调用方据此放弃锚点落盘（脱敏器都炸了，raw 缓冲绝不能
-    写 durable 面），return 面退回 raw（调用方出口面经
-    stderr_evidence 重脱敏，与旧契约同）。"""
+    ``None``——最终面调用方据此放弃锚点落盘（脱敏器都炸了，raw 缓冲
+    绝不能写 durable 面），return 面退回 raw（调用方出口面经
+    stderr_evidence 重脱敏，与旧契约同）；淘汰前调用方
+    （_redact_before_evict，#755 codex R10 P1）据此退化为裸淘汰——
+    同一回调在最终面仍会逃逸，锚点同样不会落盘，降级方向一致。"""
     if redact is None or not data:
         return data
     try:
         return redact(data)
     except Exception:
-        logger.exception("Redact callback failed on the retained tail buffer; sink write skipped")
+        logger.exception("Redact callback failed on the retained tail buffer")
         return None
+
+
+def _redact_before_evict(
+    lines: deque[str], redact: Callable[[bytes], bytes] | None
+) -> deque[str] | None:
+    """#755 codex R10 P1（顺序域）：淘汰前先对「完整保留缓冲」整段脱敏。
+
+    逐行淘汰（popleft）运行在最终 ``_redact_tail_buffer`` 之前，淘汰切口
+    可以落在已注册多行密钥中间：头行被弃、尾段留存，整值匹配永远失配，
+    残段明文落 sink 锚点 / 返回值 / metadata（实测复现：可匹配密钥超出
+    ``redact_margin`` 窗口覆盖、密钥后跟进 ~7.4K–8.2K 字符时；矩阵见
+    tests/executors/test_pi_event_compression.py 的 eviction 一族）。
+    不变量：缓冲内容在任何切割点（淘汰 popleft、回调内部保尾切、最终
+    ``_keep_tail_slice``）之前都已整体脱敏——切到 ``***`` 无害，淘汰
+    安全性从此不依赖「margin ≥ 最长可匹配密钥」这一调用方契约（Worker
+    回调的形态兜底 pass 不计入 max_secret_bytes，契约无法保证全覆盖）。
+    与值域的边界：值域扩窗照管「最终切割点骑跨密钥」；本函数照管
+    「淘汰切口骑跨密钥」——切割永不拆密钥由顺序保证，不再靠宽度凑巧。
+    成本：稳态（缓冲已满）下每个触发行一次整段脱敏，~8.7K 字符缓冲实测
+    ~150µs，与单行漏斗同量级；脱敏只缩不增，重算字符预算后淘汰量通常
+    同步缩小。``redact=None``（无密钥调用方）返回 None——无匹配面，
+    调用方按原样淘汰；回调逃逸同样返回 None（与 ``_redact_tail_buffer``
+    的降级同族：durable 面由最终整段脱敏把关，逃逸时锚点放弃落盘）。
+
+    重分行用 splitlines(keepends=True)：join 逐字复原缓冲内容（分行
+    粒度只影响后续淘汰的整行弹出，不产生行内切口）；回调若内部保尾
+    （Worker 回调切到 STDERR_TAIL_BYTES）同样安全——那是发生在脱敏
+    之后的切割，正是本不变量允许的形态。"""
+    if redact is None:
+        return None
+    redacted = _redact_tail_buffer("".join(lines).encode("utf-8", "replace"), redact)
+    if redacted is None:
+        return None
+    return deque(redacted.decode("utf-8", "replace").splitlines(keepends=True))
 
 
 def _redact_then_tail_text(
@@ -292,8 +341,11 @@ def _redact_then_tail_text(
     redaction keeps the budget meaningful (redaction only ever shrinks).
     This is the same discipline as the sink's widened byte window below
     and stderr_error_message's redact-then-200-chars; the deque
-    running-total pop drops whole lines (no straddle possible) and the
-    RAW return face's final cut is line-aligned (``_keep_tail_slice``).
+    running-total pop drops whole lines — whole-line pops still split a
+    MULTI-LINE secret (head line evicted, tail lines survive), so eviction
+    redacts the whole buffer first (#755 codex R10 P1,
+    ``_redact_before_evict``) — and the RAW return face's final cut is
+    line-aligned (``_keep_tail_slice``).
 
     #755 终审 P2-1: the gate is measured in BYTES, not chars — the budget
     is a byte budget, and a single CJK line (chars ≤ 8192 but bytes up to

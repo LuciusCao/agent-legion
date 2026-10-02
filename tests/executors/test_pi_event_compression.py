@@ -617,3 +617,103 @@ def test_scan_and_compress_secret_form_matrix(tmp_path, stderr_text, secret, fra
         assert b"***" in face  # 脱敏标记在（密钥在切割前已整值命中）
     # 结构化事件面：压缩后的 events.jsonl 只剩 JSON 行，同样无密钥字节。
     assert secret.encode() not in events.read_bytes()
+
+
+# -- #755 codex R10 P1（顺序域）：淘汰切口也是切割——popleft 前必须先脱敏 --
+
+_EVICT_HEAD_LINE = "zz-evict-head-" + "h" * 686  # 700 字符（两行密钥的首行）
+_EVICT_TAIL_LINE = "zz-evict-tail-" + "t" * 638  # 652 字符（两行密钥的尾行）
+_EVICT_TWO_LINE = _EVICT_HEAD_LINE + "\n" + _EVICT_TAIL_LINE  # 1353 字节
+_EVICT_PEM = "\n".join(
+    ["-----BEGIN PRIVATE KEY-----"] + [_PEM_BODY_LINE] * 20 + ["-----END PRIVATE KEY-----"]
+)  # 1353 字符多行 PEM（22 行）
+
+# (stderr 文本, 已注册密钥, margin 提示, 不得出现在任何出口面的碎片)。
+# margin 提示刻意小于密钥的几何镜像生产真实形态：Worker 回调
+# （redact_secrets_bytes）的可匹配集合含形态兜底 pass（_SECRET_SHAPES /
+# Bearer），本就不计入 max_secret_bytes——淘汰安全性不得依赖「margin ≥
+# 最长可匹配密钥」这一调用方契约（顺序域与值域的边界：值域扩窗照管
+# 最终切割，淘汰切口必须由「先脱敏后切割」的顺序不变量兜住）。
+_EVICT_MATRIX = [
+    pytest.param(
+        # codex 原文几何：两行密钥，前置噪音使次行恰好顶破预算（首轮淘汰
+        # 在次行入缓冲时触发），跟进内容再把淘汰边界推过密钥首行——旧代码
+        # popleft 首行后缓冲 ≤8192（无最终切割兜底），尾行整行明文落两面。
+        _noise(7400) + _EVICT_TWO_LINE + "\n" + _noise(7400),
+        _EVICT_TWO_LINE,
+        0,
+        (b"zz-evict-head", b"zz-evict-tail"),
+        id="two-line-trigger-at-second-line",
+    ),
+    pytest.param(
+        _EVICT_PEM + "\n" + _noise(7800),
+        _EVICT_PEM,
+        0,
+        _PEM_FRAGMENTS,
+        id="pem-boundary-near-head",
+    ),
+    pytest.param(
+        _EVICT_PEM + "\n" + _noise(8100),
+        _EVICT_PEM,
+        0,
+        _PEM_FRAGMENTS,
+        id="pem-boundary-at-middle",
+    ),
+    pytest.param(
+        _EVICT_PEM + "\n" + _noise(8160),
+        _EVICT_PEM,
+        0,
+        _PEM_FRAGMENTS,
+        id="pem-boundary-near-tail",
+    ),
+    pytest.param(
+        # 密钥长度恰等于 margin：淘汰确实吃进密钥（跟进内容 >8192），旧代码
+        # 靠「最终行对齐切割恰好吞掉残段」幸存——回归锁，防止几何微调反弹。
+        _EVICT_PEM + "\n" + _noise(8300),
+        _EVICT_PEM,
+        len(_EVICT_PEM.encode()),
+        _PEM_FRAGMENTS,
+        id="pem-margin-exact",
+    ),
+    pytest.param(
+        # 连续多轮淘汰后密钥跨淘汰边界（跟进内容远超一轮预算），margin 恰好
+        # 覆盖——回归锁。
+        _EVICT_PEM + "\n" + _noise(12000),
+        _EVICT_PEM,
+        len(_EVICT_PEM.encode()),
+        _PEM_FRAGMENTS,
+        id="pem-margin-exact-multi-round",
+    ),
+]
+
+
+@pytest.mark.parametrize(("stderr_text", "secret", "margin_hint", "fragments"), _EVICT_MATRIX)
+def test_scan_and_compress_eviction_never_splits_secret(
+    tmp_path, stderr_text, secret, margin_hint, fragments
+):
+    """#755 codex R10 P1（顺序域）：流式 deque 的逐行淘汰（popleft）发生在
+    整段脱敏（_redact_tail_buffer）之前，淘汰切口可以落在已注册多行密钥
+    中间——头行被弃、尾段留存，整值匹配永远失配，残段明文落 sink 锚点 /
+    返回值 / metadata（实测复现：可匹配密钥超出 margin 窗口覆盖、密钥后
+    跟进 ~7.4K–8.2K 字符时）。修复后淘汰前先对完整缓冲整段脱敏——任何
+    切割点（淘汰 popleft / 回调内部保尾切 / 最终保尾切）都只落在已脱敏
+    文本上，切到 *** 无害。三面断言：sink / return / 结构化 events 都无
+    密钥任何字节子串。"""
+    from shared.pi_events import scan_and_compress_pi_events
+
+    events = tmp_path / "events.jsonl"
+    events.write_text('{"type":"session"}\n' + stderr_text, encoding="utf-8")
+    sink = tmp_path / "agent-stderr.log"
+    _, _, _, tail = scan_and_compress_pi_events(
+        events,
+        stderr_sink=sink,
+        redact=lambda raw: raw.replace(secret.encode(), b"***"),
+        redact_secret_max_bytes=margin_hint,
+    )
+    for face in (tail, sink.read_bytes()):
+        assert len(face) <= STDERR_TAIL_BYTES
+        assert secret.encode() not in face
+        for fragment in fragments:
+            assert fragment not in face
+    # 结构化事件面：压缩后的 events.jsonl 只剩 JSON 行，同样无密钥字节。
+    assert secret.encode() not in events.read_bytes()

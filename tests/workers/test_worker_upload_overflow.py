@@ -700,3 +700,48 @@ def test_direct_upload_fallback_restast_backstop_fails_honestly(
         assert tar.getnames() == []
     assert client.uploads == {}
     assert not (work_root / "exec-1").exists()
+
+
+# -- #755 codex R10 P2：embed 重写窗口（心跳已暂停、最终请求未发出）的心跳保持 --
+
+
+def test_result_header_overflow_embed_window_keeps_heartbeat_beating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#755 codex R10 P2：embed 重写（完整解压 + 重新 gzip）在大归档/慢
+    存储上可超过 Host 租约 TTL，而 report_task 进场即 quiesce 心跳、最终
+    请求尚未发出——真空窗口内租约被过期清扫，重写结束后的重报吃 409、
+    删 marker、整次执行重跑。修复后 embed 窗口内心跳重新武装（计数断言
+    重写期间确实在跳），重写完成 quiesce 后重报 204 交付。"""
+    import time
+
+    from worker.upload import report as report_module
+    from worker.upload.result_manifest import embed_output_artifacts_manifest as real_embed
+
+    client = QueueFakeClient()
+    beats_in_embed: list[int] = []
+
+    def slow_embed(archive, artifacts, expected_outputs, max_bytes=0):
+        before = client.heartbeats
+        time.sleep(0.3)  # 模拟慢存储重写窗口；测试队列 heartbeat_interval=0.05
+        beats_in_embed.append(client.heartbeats - before)
+        real_embed(archive, artifacts, expected_outputs, max_bytes=max_bytes)
+
+    monkeypatch.setattr(report_module, "embed_output_artifacts_manifest", slow_embed)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    task = _direct_upload_task(work_root, monkeypatch, 64 * 1024 * 1024)
+    captured: dict[str, Any] = {}
+    _overflow_then_capture(client, captured)
+    queue = _queue(client)  # legacy 单拍模式：心跳线程真实跳动（0.05s 一拍）
+    queue.submit(task)
+    queue.shutdown()
+
+    assert captured["attempts"] == 2  # 溢出 → embed → 重报，恰两趟
+    # 重写窗口（0.3s ≫ 0.05s 一拍）内心跳确实在跳——修复前该窗口心跳停摆
+    # （计数恒为 0），租约对 Host 无任何存活证明，超 TTL 即被过期清扫。
+    assert beats_in_embed and beats_in_embed[0] >= 2
+    # 重写后重报 204 交付（不拿 409、不判败）：completed + in_archive 标记臂。
+    assert client.reports[0]["status"] == "completed"
+    assert client.reports[0]["output_artifacts_in_archive"] is True
+    assert not (work_root / "exec-1").exists()

@@ -1221,11 +1221,15 @@ exemptions:
     #755 终审 P2-1：漏斗闸门改字节口径（CJK 单行字符 ≤ 预算但字节超
     预算的旧盲区）+ 最终切片无换行臂先整体脱敏再保尾（不再对未脱敏面
     裸切），有效行 116→125（超 growth_allowance 带，重签带 expires）。
-    时间盒：stderr 留痕管线稳定后若下沉为独立 sink 模块（shared 侧
-    stdlib-only 约束内的拆分），重登预算。'
+    #755 codex R10 P1（顺序域）：淘汰切口也是切割——deque 逐行淘汰
+    （popleft）运行在整段脱敏之前时可把多行密钥切成残段，新增
+    _redact_before_evict（淘汰前先对完整缓冲整段脱敏，此后任何切口只
+    落在已脱敏文本上，淘汰安全不再依赖 margin ≥ 最长可匹配密钥），
+    有效行 125→151。时间盒：stderr 留痕管线稳定后若下沉为独立 sink
+    模块（shared 侧 stdlib-only 约束内的拆分），重登预算。'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/748
-  ceiling: 125
+  ceiling: 151
   expires: 2026-12-31
 - check: architecture.file_budget
   path: worker/host/transfer.py

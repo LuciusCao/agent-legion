@@ -95,69 +95,83 @@ def report_task(
             if overflow_fallback:
                 raise
             overflow_fallback = True
-            # #755 codex R8 P2：embed 上限重校——原直传归档低于但接近
-            # max_archive_bytes 时，新增清单成员会把它推过 Host 大小门禁
-            # （重报必撞 413，而本循环把非 204 当终态删 marker，结果与
-            # staging 登记全丢）。上限与换轨预检同源（claim 下发，未下发
-            # 回落 64 MiB 默认）；embed 在原子替换前按 staging 实际大小
-            # 拒写（原归档未动、证据保全），替换后的 re-stat 是兜底。
-            ceiling = task.max_archive_bytes or ARCHIVE_EMBED_DEFAULT_CEILING_BYTES
+            # #755 codex R10 P2：embed（完整解压 + 重新 gzip）与判败臂的
+            # 归档回收都是「心跳已暂停（进场 quiesce）、最终请求未发出」
+            # 真空窗口里的重活——大归档/慢存储上可超过 Host 租约 TTL，
+            # 租约被过期清扫后重报吃 409、删 marker、整次执行重跑。处置
+            # 期间重新武装心跳，重写完成后再 quiesce 并发送最终请求——与
+            # 下方 RuntimeError 退避臂的 resume/quiesce 同形。
+            task.heartbeat_thread = upload_heartbeat.resume_upload_heartbeat(
+                client, task, heartbeat_interval
+            )
             try:
-                embed_output_artifacts_manifest(
-                    archive,
-                    metadata.get("output_artifacts", {}),
-                    task.expected_outputs,
-                    max_bytes=ceiling,
-                )
-            except ManifestEmbedExceedsArchiveCeiling as too_large:
-                # 原归档未动（embed 替换前拒写）：带着完整证据走诚实判败
-                # （同 embed_switch_rejection 预检判败通道的形态）。
+                # #755 codex R8 P2：embed 上限重校——原直传归档低于但接近
+                # max_archive_bytes 时，新增清单成员会把它推过 Host 大小门禁
+                # （重报必撞 413，而本循环把非 204 当终态删 marker，结果与
+                # staging 登记全丢）。上限与换轨预检同源（claim 下发，未下发
+                # 回落 64 MiB 默认）；embed 在原子替换前按 staging 实际大小
+                # 拒写（原归档未动、证据保全），替换后的 re-stat 是兜底。
+                ceiling = task.max_archive_bytes or ARCHIVE_EMBED_DEFAULT_CEILING_BYTES
+                try:
+                    embed_output_artifacts_manifest(
+                        archive,
+                        metadata.get("output_artifacts", {}),
+                        task.expected_outputs,
+                        max_bytes=ceiling,
+                    )
+                except ManifestEmbedExceedsArchiveCeiling as too_large:
+                    # 原归档未动（embed 替换前拒写）：带着完整证据走诚实判败
+                    # （同 embed_switch_rejection 预检判败通道的形态）。
+                    print(
+                        f"result header overflow for {task.execution_id}: {too_large};"
+                        f" reporting the run failed instead",
+                        flush=True,
+                    )
+                    _ensure_submittable_archive(archive, ceiling)
+                    metadata = failed_metadata(task, str(too_large))
+                    task.prepared_metadata = metadata
+                    continue
+                except (OSError, tarfile.TarError, ValueError) as embed_exc:
+                    # embed 失败 = 清单无法随归档交付：诚实判败（同 prepare 预检
+                    # 判败臂的形态）。embed 是原子替换，失败时原归档未动。
+                    _ensure_submittable_archive(archive, ceiling)
+                    metadata = failed_metadata(
+                        task, f"output artifacts manifest embed failed: {embed_exc}"
+                    )
+                    task.prepared_metadata = metadata
+                    continue
+                if archive.stat().st_size > ceiling:
+                    # re-stat 兜底（embed 未带上限的调用形态）：大归档不可提交
+                    # ——回收成空归档诚实判败，而不是重报吃 413 后删 marker。
+                    write_empty_archive(archive)
+                    metadata = failed_metadata(
+                        task,
+                        f"output artifacts manifest embed grew the result archive past"
+                        f" the {ceiling}-byte Host archive ceiling; cannot deliver the"
+                        f" direct-upload manifest",
+                    )
+                    task.prepared_metadata = metadata
+                    task.prepared_archive = archive
+                    continue
                 print(
-                    f"result header overflow for {task.execution_id}: {too_large};"
-                    f" reporting the run failed instead",
+                    f"result header overflow for {task.execution_id}:"
+                    f" output artifacts manifest embedded in the archive: {exc}",
                     flush=True,
                 )
-                _ensure_submittable_archive(archive, ceiling)
-                metadata = failed_metadata(task, str(too_large))
-                task.prepared_metadata = metadata
-                continue
-            except (OSError, tarfile.TarError, ValueError) as embed_exc:
-                # embed 失败 = 清单无法随归档交付：诚实判败（同 prepare 预检
-                # 判败臂的形态）。embed 是原子替换，失败时原归档未动。
-                _ensure_submittable_archive(archive, ceiling)
-                metadata = failed_metadata(
-                    task, f"output artifacts manifest embed failed: {embed_exc}"
-                )
-                task.prepared_metadata = metadata
-                continue
-            if archive.stat().st_size > ceiling:
-                # re-stat 兜底（embed 未带上限的调用形态）：大归档不可提交
-                # ——回收成空归档诚实判败，而不是重报吃 413 后删 marker。
-                write_empty_archive(archive)
-                metadata = failed_metadata(
-                    task,
-                    f"output artifacts manifest embed grew the result archive past"
-                    f" the {ceiling}-byte Host archive ceiling; cannot deliver the"
-                    f" direct-upload manifest",
-                )
+                # #755 对抗复审 P3：embed 重写了归档，计时器的 archive_bytes
+                # 过期——按 embed 后的真实大小刷新（纯观测面，但别让操作者
+                # 看着 embed 前的尺寸排障）。
+                if task.report_timer is not None and archive.is_file():
+                    task.report_timer.archive_bytes = archive.stat().st_size
+                metadata = dict(metadata)
+                metadata["output_artifacts"] = {}
+                metadata[RESULT_OUTPUT_ARTIFACTS_FLAG] = True
                 task.prepared_metadata = metadata
                 task.prepared_archive = archive
-                continue
-            print(
-                f"result header overflow for {task.execution_id}:"
-                f" output artifacts manifest embedded in the archive: {exc}",
-                flush=True,
-            )
-            # #755 对抗复审 P3：embed 重写了归档，计时器的 archive_bytes
-            # 过期——按 embed 后的真实大小刷新（纯观测面，但别让操作者
-            # 看着 embed 前的尺寸排障）。
-            if task.report_timer is not None and archive.is_file():
-                task.report_timer.archive_bytes = archive.stat().st_size
-            metadata = dict(metadata)
-            metadata["output_artifacts"] = {}
-            metadata[RESULT_OUTPUT_ARTIFACTS_FLAG] = True
-            task.prepared_metadata = metadata
-            task.prepared_archive = archive
+            finally:
+                # 重写窗口结束：恢复「report 在飞即最后存活证明」纪律，
+                # 重报在 quiesce 状态下发出（避免心跳与 commit 竞出伪 409）。
+                upload_heartbeat.quiesce_task_heartbeat(task, heartbeat_join_seconds)
             continue
         except RuntimeError as exc:
             print(f"result report retry for {task.execution_id}: {exc}", flush=True)
