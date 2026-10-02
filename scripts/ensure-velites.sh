@@ -54,7 +54,10 @@ if [[ -z "$DIRTY" && -x "$VELITES_BIN" && -f "$STAMP" && "$(cat "$STAMP")" == "$
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
-    echo "velites 需要重建（源码指纹 ${SRC_ID:0:12}）但 cargo 不可用——安装 Rust 工具链（https://rustup.rs）后重跑；或以 GitHub Release 产物安置到 $VELITES_BIN 并写入同指纹 stamp: git rev-parse HEAD:velites > \"${VELITES_BIN}.src-stamp\"（见 docs/agent-worker-deployment.md §5）" >&2
+    # 不建议「下载 Release 产物 + 手写当前 HEAD 指纹 stamp」：velites 与
+    # 仓库版本线解耦，产物源码往往旧于本 checkout——伪造 stamp 会让新鲜
+    # 检查与启动对账（staleness）双双放行，静默运行旧二进制（codex P2 on #835）。
+    echo "velites 需要重建（源码指纹 ${SRC_ID:0:12}）但 cargo 不可用——安装 Rust 工具链（https://rustup.rs）后重跑；或在与本机同 OS/架构、同一仓库状态的机器上执行 scripts/ensure-velites.sh 后，把二进制与 .src-stamp 一起拷贝过来（stamp 必须与产物同源，不得手写本仓库指纹；见 docs/agent-worker-deployment.md §5）" >&2
     exit 1
 fi
 
