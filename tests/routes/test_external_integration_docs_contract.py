@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -364,3 +365,43 @@ def test_doc_idempotency_and_terminal_status_facts_match_code() -> None:
     loop = re.search(r'case "\$STATUS" in ([\w|]+)\)', runbook)
     assert loop is not None
     assert set(loop.group(1).split("|")) == set(TERMINAL_JOB_STATUSES)
+
+
+def _limit_bounds(router: Any, route_name: str) -> tuple[int | None, int | None]:
+    """路由 limit 参数的 Query(ge/le) 约束（无约束 = 不做 422 校验）。"""
+    for route in router.routes:
+        if route.name != route_name:
+            continue
+        for param in route.dependant.query_params:
+            if param.name == "limit":
+                metadata = param.field_info.metadata
+                ge = next((m.ge for m in metadata if hasattr(m, "ge")), None)
+                le = next((m.le for m in metadata if hasattr(m, "le")), None)
+                return ge, le
+    raise AssertionError(f"{route_name}: 没有 limit 参数")
+
+
+def test_doc_limit_validation_semantics_match_routes() -> None:
+    """文档对 limit 越界的说法（422 还是静默钳制）与路由实际约束一致。
+
+    契约约束（ge/le）不进 api.ts，这里直接构造路由（服务对象传 None：只读
+    参数声明，不调用）读 FastAPI 的 Query 元数据；带 ge/le 的越界是 422，
+    snapshot 没有约束、在函数体内 max(1, min(limit, 500)) 钳制后照常 200。"""
+    from server.app.routes.job_list import create_job_list_router
+    from server.app.routes.jobs import create_jobs_router
+    from server.app.routes.runs import create_runs_router
+
+    assert _limit_bounds(create_runs_router(None), "list_runs") == (1, 500)  # type: ignore[arg-type]
+    assert _limit_bounds(create_jobs_router(None), "list_workspace_jobs") == (1, 2000)  # type: ignore[arg-type]
+    assert _limit_bounds(create_job_list_router(None), "snapshot_workspace_jobs") == (None, None)  # type: ignore[arg-type]
+    source = (ROOT / "server/app/routes/job_list.py").read_text(encoding="utf-8")
+    assert "max(1, min(limit, 500))" in source
+
+    tokens_doc = (ROOT / "docs/workspace-api-tokens.md").read_text(encoding="utf-8")
+    assert "`limit` 默认 100、取值 1–500，越界 422" in tokens_doc
+    assert "limit 默认 500、取值 1–2000" in tokens_doc
+    assert "静默钳到 1–500" in tokens_doc
+    row_422 = next(line for line in tokens_doc.splitlines() if line.startswith("| 422 |"))
+    assert "`GET /runs` 的 `limit` 不在 1–500" in row_422
+    assert "`GET /jobs` 的 `limit` 不在 1–2000" in row_422
+    assert "`GET /jobs/snapshot` 的 `limit` 越界**不是** 422" in row_422

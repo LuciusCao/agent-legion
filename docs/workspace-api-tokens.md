@@ -61,18 +61,20 @@ machine-to-machine 凭据：绑定且仅绑定一个 workspace，权限是 edito
    # 整个 run：run 记录 + job_stats（total / by_status 聚合）
    curl "$HOST/api/workspaces/$WORKSPACE_ID/runs/$RUN_ID" \
      -H "Authorization: Bearer $API_TOKEN"
-   # 按 run 列 job：run_id 过滤（#735）；limit 默认 500、最大 2000，
-   # truncated=true 表示结果被 limit 截断
+   # 按 run 列 job：run_id 过滤（#735）；limit 默认 500、取值 1–2000
+   # （越界 422），truncated=true 表示结果被 limit 截断
    curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs?run_id=$RUN_ID" \
      -H "Authorization: Bearer $API_TOKEN"
-   # 大 run 分页：limit ≤ 500，按 next_cursor 循环到 null
+   # 大 run 分页：limit 默认 200，按 next_cursor 循环到 null。越界的 limit
+   # 不报错，而是被静默钳到 1–500 并照常 200——以实际返回条数和
+   # next_cursor 为准，不要假设拿到了请求的条数
    curl "$HOST/api/workspaces/$WORKSPACE_ID/jobs/snapshot?run_id=$RUN_ID&limit=500" \
      -H "Authorization: Bearer $API_TOKEN"
    ```
 
    job 的终态是 `completed` / `failed`；`queued` / `running` / `paused` /
    `awaiting_approval`（工作流里的人工审批门，等控制台审批）都是非终态，
-   继续轮询。`GET /runs`（`limit` 默认 100、最大 500，按创建时间倒序）列
+   继续轮询。`GET /runs`（`limit` 默认 100、取值 1–500，越界 422；按创建时间倒序）列
    本 workspace 最近的 run。`/jobs` 与 `/jobs/snapshot` 的 `run_id` 是过滤
    参数而非资源寻址：不存在或属于别的 workspace 的 run_id 返回空列表，不是
    404（404 语义属于 `GET /runs/{run_id}`）。
@@ -105,7 +107,7 @@ Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在�
   | `POST /runs` | 提交（唯一 effecting 面） |
   | `GET /runs` · `GET /runs/{run_id}` | run 列表 / 单 run + job_stats |
   | `GET /jobs` | job 列表（`run_id` / `status` 过滤，`limit` ≤ 2000 + `truncated`） |
-  | `GET /jobs/snapshot` | 分页 job 列表（`run_id` 等过滤，`limit` ≤ 500 + `next_cursor`） |
+  | `GET /jobs/snapshot` | 分页 job 列表（`run_id` 等过滤，`limit` 钳到 1–500 + `next_cursor`） |
   | `GET /jobs/{job_id}` | 单 job 轻量状态 |
   | `GET /jobs/{job_id}/artifacts` | 产物清单 |
   | `GET /jobs/{job_id}/artifacts/{artifact_name}/raw` | 产物字节流 |
@@ -200,7 +202,7 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
 | 404 | `Job not found` / `Run not found`：不存在或属于别的 workspace（同样防枚举）；`Artifact not found`：产物不存在或对象已被 bucket lifecycle 回收 | 不重试 |
 | 404 | `Material not found: …` / `Material bundle not found: …`：`POST /runs` 引用了本 workspace 没有的素材 | 不重试；修正 items |
 | 409 | text 项内容与一个未就绪（上传未完成）的 material 同 hash | 完成或删除那个 material 后重试 |
-| 422 | 请求体 / 参数校验失败：items 为空、未知字段、`type` 不在四种之内、`limit` 越界 | 不重试；修正请求 |
+| 422 | 请求体 / 参数校验失败：items 为空、未知字段、`type` 不在四种之内；`GET /runs` 的 `limit` 不在 1–500、`GET /jobs` 的 `limit` 不在 1–2000；`run_id` / `status` 过滤传空串；参数类型不对（如 `limit=abc`）。注意 `GET /jobs/snapshot` 的 `limit` 越界**不是** 422，而是静默钳到 1–500 | 不重试；修正请求 |
 | 429 | 这些端点**尚未限流**（per-token 限流 #738 未落地），目前不会返回 | 建议客户端预先按 `Retry-After` 退避处理 429，限流落地后无需改动 |
 | 503 | text 项需要对象存储，实例未配置时返回 | 稍后重试或联系管理员 |
 | 5xx | 服务端异常 | 指数退避重试；`POST /runs` 重试安全（见上节） |
