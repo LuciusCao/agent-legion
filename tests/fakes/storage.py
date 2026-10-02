@@ -9,6 +9,7 @@
 * ``presigned``          — presign_put 的 (key, expires) 记录。
 * ``put_expiries`` / ``get_expiries`` — presign TTL 断言（claim 注入测试）。
 * ``presigned_gets``     — presign_get 的 key 记录（claim block 断言）。
+* ``get_response_headers`` — presign_get 签入的响应头覆盖（#739 直连头语义断言）。
 * ``opened``             — open_stream 调用计数（缓存命中断言）。
 * ``put_calls``          — put_object/put_stream 计数（“不做镜像重传”断言）。
 * ``fail_deletes``       — delete_object 抛 botocore ClientError（#204 故障族）。
@@ -18,6 +19,7 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Mapping
 from typing import BinaryIO
 
 from server.app.storage import ObjectHead
@@ -48,6 +50,7 @@ class FakeObjectStorage:
         self.put_expiries: list[int] = []
         self.get_expiries: list[int] = []
         self.presigned_gets: list[str] = []
+        self.get_response_headers: list[dict[str, str]] = []
         self.opened = 0
         self.put_calls = 0
 
@@ -67,9 +70,11 @@ class FakeObjectStorage:
         self,
         storage_key: str,
         expires_seconds: int = DEFAULT_PRESIGN_EXPIRY_SECONDS,
+        response_headers: Mapping[str, str] | None = None,
     ) -> str:
         self.presigned_gets.append(storage_key)
         self.get_expiries.append(expires_seconds)
+        self.get_response_headers.append(dict(response_headers or {}))
         return f"https://s3.test/download/{storage_key}"
 
     # ---- 元数据与读 -------------------------------------------------------

@@ -68,7 +68,7 @@ def test_status_poll_is_unsigned_and_survives_signing_failure(two_workspaces, mo
     store: JobArtifactObjectStore = c.app.state.job_artifact_objects
     calls: list[str] = []
 
-    def _boom(storage_key, expires_seconds=3600):  # noqa: ANN001, ANN202
+    def _boom(storage_key, expires_seconds=3600, response_headers=None):  # noqa: ANN001, ANN202
         calls.append(storage_key)
         raise ConnectionError("signing credentials broken")
 
@@ -168,21 +168,23 @@ def test_artifact_list_presigns_bare_key_rows(two_workspaces):
     assert entry["expires_at"] is not None
 
 
-def test_artifact_list_gzip_rows_carry_no_url(two_workspaces):
-    """#338/#739: gzip-stored objects get NO download_url — a presigned GET
-    would serve the compressed bytes without the Content-Encoding: gzip header
-    the raw endpoint adds, so callers could not tell the stored form apart.
-    content_encoding marks the form; the raw endpoint is the only channel."""
+def test_artifact_list_gzip_rows_are_presigned(two_workspaces):
+    """#338/#739: gzip-stored objects (every v4+ Worker output) get a
+    download_url whose signature carries ``Content-Encoding: gzip`` — the
+    same representation the raw endpoint passes through, so excluding them
+    would leave the direct channel dead for real remote-worker artifacts."""
     c, job_a, _ = two_workspaces
     _register_object_artifact(c, job_a, "report.json", b'{"r": 1}')  # gzipped=True
     store: JobArtifactObjectStore = c.app.state.job_artifact_objects
 
     body = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts").json()
 
-    assert store.storage.presigned_gets == []
     entry = next(e for e in body["artifacts"] if e["name"] == "report.json")
-    assert entry["download_url"] is None
-    assert entry["expires_at"] is None
+    assert len(store.storage.presigned_gets) == 1
+    assert store.storage.presigned_gets[0].endswith(".gz")
+    assert store.storage.get_response_headers[0]["ResponseContentEncoding"] == "gzip"
+    assert entry["download_url"] is not None
+    assert entry["expires_at"] is not None
     assert entry["content_encoding"] == "gzip"
     # The raw endpoint still serves it (Content-Encoding: gzip passthrough —
     # httpx transparently decodes, so the visible content is the JSON itself).

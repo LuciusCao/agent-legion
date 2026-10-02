@@ -15,6 +15,7 @@ import hashlib
 import pytest
 
 from server.app.services.external_artifact_access import ExternalArtifactAccessService
+from server.app.services.job_artifact_media import attachment_disposition
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import NotFoundError
 from server.app.storage_paths import resolve_job_dir
@@ -436,10 +437,11 @@ def test_list_artifacts_respects_instance_presign_ttl(job_db, settings):
     assert entry["expires_at"] is not None
 
 
-def test_list_artifacts_gzip_rows_get_no_url(job_db, settings):
-    """#338/#739：.gz 对象不签发——S3 直接响应 presigned GET 无法附
-    Content-Encoding: gzip 头，客户端会拿到压缩字节却无从分辨存储态；
-    content_encoding 字段标 gzip，raw 端点保留为唯一通道。"""
+def test_list_artifacts_gzip_rows_are_presigned_with_gzip_encoding(job_db, settings):
+    """#338/#739 codex P2：v4+ Worker 的产物全是 .gz——排除它们等于直连
+    对真实远程产物整体失效。.gz 行照常签发，Content-Encoding: gzip 作为
+    S3 响应覆盖签进 URL（与 raw 端点透传同一表示），content_encoding 标
+    存储态。"""
     job = _seed_job(job_db)
     store = JobArtifactObjectStore(job_db, FakeObjectStorage())
     service = ExternalArtifactAccessService(job_db, settings, object_store=store)
@@ -447,11 +449,50 @@ def test_list_artifacts_gzip_rows_get_no_url(job_db, settings):
 
     listing = service.list_artifacts(job["workspace_id"], job["id"])
 
-    assert store.storage.presigned_gets == []  # 从不签发
+    key = str(next(iter(store.rows_for_job(job["id"])))["storage_key"])
+    assert key.endswith(".gz")
+    assert store.storage.presigned_gets == [key]
     entry = next(e for e in listing["artifacts"] if e["name"] == "report.json")
-    assert entry["download_url"] is None
-    assert entry["expires_at"] is None
+    assert entry["download_url"] == f"https://s3.test/download/{key}"
+    assert entry["expires_at"] is not None
     assert entry["content_encoding"] == "gzip"
+    assert store.storage.get_response_headers == [
+        {
+            "ResponseContentType": "application/octet-stream",
+            "ResponseContentDisposition": attachment_disposition("report.json"),
+            "ResponseContentEncoding": "gzip",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "gzipped"),
+    [("clip.mp4", False), ("clip.mp4", True), ("report.pdf", False), ('a "b".json', False)],
+)
+def test_presigned_headers_match_raw_endpoint_policy(name, gzipped):
+    """#739 codex P2（媒体类型）：直连的响应头与 raw_response 同源——
+    Content-Type 走同一白名单、非白名单同样 attachment（含 RFC 6266 转义）、
+    gzip 同样附 Content-Encoding。逐头对照 raw 端点实际构造的响应。"""
+    import io
+
+    from server.app.routes.job_artifact_raw_response import raw_response
+    from server.app.services.external_artifact_access import _presigned_headers
+    from server.app.services.job_artifact_raw_types import RawArtifact
+
+    raw = raw_response(
+        RawArtifact(
+            name=name,
+            stream=io.BytesIO(b"x"),
+            size_bytes=1,
+            content_encoding="gzip" if gzipped else None,
+        )
+    )
+    expected = {"ResponseContentType": raw.media_type}
+    if "content-disposition" in raw.headers:
+        expected["ResponseContentDisposition"] = raw.headers["content-disposition"]
+    if gzipped:
+        expected["ResponseContentEncoding"] = raw.headers["content-encoding"]
+    assert _presigned_headers(name, gzipped) == expected
 
 
 def test_list_artifacts_local_and_disabled_entries_have_no_url(job_db, settings):
@@ -496,7 +537,7 @@ def test_status_poll_is_unsigned_and_survives_signing_failure(job_db, settings, 
     _seed_manifest_row(store, job, "report.json", b'{"r": 1}')
     calls: list[str] = []
 
-    def _boom(storage_key, expires_seconds=3600):  # noqa: ANN001, ANN202
+    def _boom(storage_key, expires_seconds=3600, response_headers=None):  # noqa: ANN001, ANN202
         calls.append(storage_key)
         raise ConnectionError("signing credentials broken")
 
@@ -518,8 +559,8 @@ def test_presign_targets_exactly_the_manifest_row_key(job_db, settings):
     """安全面（签名目标）：presign_get 收到的必须逐位等于权威 manifest 行
     的 storage_key——行由服务端布局生成（record_remote/verify_remote 拒绝
     布局外 key），这是「请求输入无法影响签名目标」的落点。测试从 DB 读回
-    行断言（不自己拼 key），并混入一条 gzip 行钉住签发名单精确性：签错
-    对象（拼名、漏 workspace 段、签成 .gz 孪生键、跨条目乱签）都会红。"""
+    行断言（不自己拼 key），并混入一条 gzip 行钉住逐行对应：签错对象
+    （拼名、漏 workspace 段、签成别行的 key、跨条目乱签）都会红。"""
     job = _seed_job(job_db)
     store = JobArtifactObjectStore(job_db, FakeObjectStorage())
     service = ExternalArtifactAccessService(job_db, settings, object_store=store)
@@ -533,10 +574,12 @@ def test_presign_targets_exactly_the_manifest_row_key(job_db, settings):
     listing = service.list_artifacts(job["workspace_id"], job["id"])
 
     entry = next(e for e in listing["artifacts"] if e["name"] == "clip.mp4")
-    # 签发名单：恰好一次、恰好 bare 行的 key（gzip 行不得混入）。
-    assert store.storage.presigned_gets == [str(rows["clip.mp4"]["storage_key"])]
+    # 签发名单：每行恰好一次、恰好该行的 key。
+    assert sorted(store.storage.presigned_gets) == sorted(
+        str(row["storage_key"]) for row in rows.values()
+    )
     # TTL 参数逐位等于实例配置值（防回落硬编码默认）。
-    assert store.storage.get_expiries == [7200]
+    assert store.storage.get_expiries == [7200, 7200]
     # 响应字段就是那次调用的返回值（Fake 按 key 派生 URL——签错对象时两者
     # 同时偏离，双保险）。
     assert entry["download_url"] == f"https://s3.test/download/{bare_key}"

@@ -11,10 +11,14 @@ authoritative copy, EXEC-ARTIFACT-STORE-001) with legacy local job_dir names.
 signature covers ONLY the manifest row's storage_key (a server-generated key
 under jobs/{workspace_id}/{job_id}/ — record_remote/verify_remote reject any
 key outside that layout, so no request input reaches the signed string), and
-the URL carries just SigV4 query parameters — no credentials. gzip-stored
-rows (#338) get no URL: S3 answers a presigned GET with the compressed bytes
-and no Content-Encoding header, so the raw endpoint's transparent-gzip
-passthrough has no presigned equivalent (see _entry_from_row).
+the URL carries just SigV4 query parameters — no credentials. The URL is a
+channel to the SAME representation the raw endpoint serves: the raw
+endpoint's response headers (whitelisted Content-Type, attachment
+Content-Disposition, ``Content-Encoding: gzip`` for #338 ``.gz`` objects) are
+signed in as S3 response overrides, so every object row — including the
+``.gz`` outputs of v4+ Workers — gets a URL (see _presigned_headers). What
+the URL does NOT inherit from the Host (per-request auth, version pinning)
+is contracted in remote-execution-runbook §9.
 
 Signing stays OFF the status read path: ``status`` derives names from the
 unsigned listing parts (manifest rows + local names), so a broken signing
@@ -29,7 +33,11 @@ from typing import Any, cast
 
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_gzip import is_gzip_key
-from server.app.services.job_artifact_media import raw_media_type
+from server.app.services.job_artifact_media import (
+    attachment_disposition,
+    raw_disposition_type,
+    raw_media_type,
+)
 from server.app.services.job_artifact_names import (
     is_downloadable_artifact_name,
     is_plausible_job_id,
@@ -62,6 +70,20 @@ def _listing_rows(store: Any, job: dict[str, Any]) -> tuple[set[str], dict[str, 
         for name, row in latest.items()
         if is_downloadable_artifact_name(name) and not refuse_row_outside_job_prefix(row, job)
     }
+
+
+def _presigned_headers(name: str, gzipped: bool) -> dict[str, str]:
+    """S3 response overrides that make a presigned GET answer with the raw
+    endpoint's header policy (job_artifact_raw_response.raw_response) —
+    one policy source (job_artifact_media), two channels. Objects are
+    uploaded without metadata (octet-stream), so without these the direct
+    channel would drift from raw on type, disposition and gzip framing."""
+    headers = {"ResponseContentType": raw_media_type(name)}
+    if raw_disposition_type(name) == "attachment":
+        headers["ResponseContentDisposition"] = attachment_disposition(name)
+    if gzipped:
+        headers["ResponseContentEncoding"] = "gzip"
+    return headers
 
 
 class ExternalArtifactAccessService:
@@ -198,7 +220,7 @@ class ExternalArtifactAccessService:
         identify which execution produced the bytes being served. Jobs that
         are still running list what exists so far (stable: callers poll).
 
-        #739: object-backed bare-key entries carry a fresh presigned
+        #739: object-backed entries carry a fresh presigned
         download_url (signed per request against the row's storage_key —
         URLs are minted here, never persisted); expires_at tells the caller
         when to re-fetch the manifest."""
@@ -220,16 +242,14 @@ class ExternalArtifactAccessService:
         size = row.get("size_bytes")
         storage_key = str(row["storage_key"])
         gzipped = is_gzip_key(storage_key)
-        download_url: str | None = None
-        expires_at: datetime | None = None
-        # 只对非 .gz 对象签发（#338/#739）：S3 直接响应 presigned GET，无法附
-        # Content-Encoding: gzip 头，客户端会拿到压缩字节却无从分辨存储形
-        # 态——gzip 产物保留 raw 端点作为唯一通道（透传 + 响应头语义）。
-        if not gzipped:
-            workers = self.settings.executor_runtime.agent_workers
-            ttl = int(workers.artifact_download_presign_ttl_seconds)
-            download_url = store.storage.presign_get(storage_key, expires_seconds=ttl)
-            expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
+        workers = self.settings.executor_runtime.agent_workers
+        ttl = int(workers.artifact_download_presign_ttl_seconds)
+        download_url = store.storage.presign_get(
+            storage_key, expires_seconds=ttl, response_headers=_presigned_headers(name, gzipped)
+        )
+        # 上界而非保证：签名凭据先于 TTL 失效时 URL 提前 403，调用方按
+        # 403 重取清单（runbook §9）。
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         return {
             "name": name,
             "storage": "object",

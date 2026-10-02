@@ -4307,19 +4307,20 @@ export interface components {
      *     current execution after a rerun, #508); ``local`` rows are legacy
      *     job_dir-only names with no manifest metadata.
      *
-     *     #739: object-backed bare-key rows additionally carry a presigned GET
+     *     #739: object-backed rows additionally carry a presigned GET
      *     ``download_url`` (S3 answers it directly — big media downloads leave the
-     *     Host process alone) plus the ``expires_at`` moment the URL stops working
-     *     (re-fetch the manifest after it). ``.gz`` rows (#338) get NO url: S3 would
-     *     serve the compressed stored bytes without the ``Content-Encoding: gzip``
-     *     header the raw endpoint adds, so callers could not tell the two forms
-     *     apart — the raw endpoint stays the only channel for them. ``local`` rows
-     *     and instances without object storage keep both fields null.
+     *     Host process alone). The URL serves the raw endpoint's representation:
+     *     its response headers (Content-Type, attachment disposition and, for
+     *     ``.gz`` rows (#338), ``Content-Encoding: gzip``) are signed in, so the
+     *     two channels answer alike. It addresses the CURRENT bytes under the name
+     *     (rerun semantics #508, same as raw — verify against ``content_hash``) and
+     *     ``expires_at`` is an upper bound (re-fetch the manifest on 403).
+     *     ``local`` rows and instances without object storage keep both fields null.
      */
     ExternalArtifactEntry: {
       /**
        * Content Encoding
-       * @description Stored-form marker: "gzip" when the object holds gzip-compressed bytes (#338) and download_url is null — the raw endpoint serves those with Content-Encoding: gzip passthrough; empty otherwise
+       * @description Stored-form marker: "gzip" when the object holds gzip-compressed bytes (#338) — both download_url and the raw endpoint answer with Content-Encoding: gzip (HTTP clients decode transparently); empty otherwise
        * @default
        */
       content_encoding: string
@@ -4330,12 +4331,12 @@ export interface components {
       content_hash: string
       /**
        * Download Url
-       * @description Presigned object-storage GET URL (storage=object and bare-key rows only); null for local entries, gzip-stored objects and instances without object storage — use the raw endpoint then
+       * @description Presigned object-storage GET URL answering with the raw endpoint's headers (storage=object rows); null for local entries and instances without object storage — use the raw endpoint then
        */
       download_url?: string | null
       /**
        * Expires At
-       * @description When download_url stops working (re-fetch the manifest after); null whenever download_url is null
+       * @description Latest moment download_url can work (upper bound: it may 403 earlier, e.g. short-lived signing credentials — re-fetch the manifest then); null whenever download_url is null
        */
       expires_at?: string | null
       /**
