@@ -56,6 +56,7 @@ _NESTED_BLOCK_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "max_concurrent_result_commits",
             "result_commit_batching",
             "artifact_spot_check_percent",
+            "artifact_download_presign_ttl_seconds",
         ),
     ),
     ("agent_enqueue", ("workers", "max_pending")),

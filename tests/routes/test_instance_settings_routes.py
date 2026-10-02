@@ -43,6 +43,7 @@ def _payload() -> dict:
             "max_concurrent_result_commits": 16,
             "result_commit_batching": True,
             "artifact_spot_check_percent": 3,
+            "artifact_download_presign_ttl_seconds": 3600,
         },
         "agent_enqueue": {"workers": 48, "max_pending": 1024},
         "result_unpack": {"workers": 0},
@@ -212,6 +213,53 @@ def test_put_capacity_knobs_roundtrip(client) -> None:
     assert response.json()["result_unpack"] == {"workers": 8}
     assert response.json()["result_validate"] == {"workers": 6}
     assert response.json()["agent_claim"] == {"worker_touch_interval_seconds": 7.5}
+
+
+def test_put_artifact_download_presign_ttl_roundtrip(client) -> None:
+    """#739: the presigned-download TTL rides the agent_workers block."""
+    payload = _payload()
+    payload["agent_workers"]["artifact_download_presign_ttl_seconds"] = 900
+    response = client.put(INSTANCE_SETTINGS_URL, json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["agent_workers"]["artifact_download_presign_ttl_seconds"] == 900
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+    assert response.json()["agent_workers"]["artifact_download_presign_ttl_seconds"] == 900
+
+
+def test_put_rejects_out_of_range_presign_ttl(client) -> None:
+    """#739 bounds: below 60s the URL can expire between manifest read and
+    first download; above 7 days S3 refuses to sign SigV4 URLs at all."""
+    payload = _payload()
+    payload["agent_workers"]["artifact_download_presign_ttl_seconds"] = 59
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["agent_workers"]["artifact_download_presign_ttl_seconds"] = 604_801
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    # 边界接受侧：60 秒与 7 天均为合法值。
+    payload = _payload()
+    payload["agent_workers"]["artifact_download_presign_ttl_seconds"] = 60
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+    payload = _payload()
+    payload["agent_workers"]["artifact_download_presign_ttl_seconds"] = 604_800
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+
+
+def test_get_legacy_document_missing_presign_ttl_falls_back(client) -> None:
+    """#739: a stored document written before the knob existed carries no
+    artifact_download_presign_ttl_seconds; GET merges the code default (3600)
+    instead of failing response validation."""
+    from server.app.services.instance_settings_store import InstanceSettingsStore
+
+    store = InstanceSettingsStore(client.app.state.job_db.dsn_identity)
+    document = _payload()
+    del document["agent_workers"]["artifact_download_presign_ttl_seconds"]
+    store.put(document)
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["agent_workers"]["artifact_download_presign_ttl_seconds"] == 3600
 
 
 def test_put_rejects_out_of_range_capacity_knobs(client) -> None:

@@ -1303,7 +1303,7 @@
     "server/app/routes/job_approval_contracts.py": 30,
     "server/app/routes/job_approvals.py": 68,
     "server/app/routes/job_artifact_raw.py": 40,
-    "server/app/routes/job_artifact_raw_response.py": 60,
+    "server/app/routes/job_artifact_raw_response.py": 53,
     "server/app/routes/job_artifacts.py": 44,
     "server/app/routes/job_batch_filter_contracts.py": 43,
     "server/app/routes/job_batches.py": 28,
