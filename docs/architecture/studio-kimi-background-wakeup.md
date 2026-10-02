@@ -34,7 +34,9 @@ compaction 和凭证。取消掉的队列项不调用模型；暂时无法校验
 MD5 目录名和 ACP session id：`sessions/<cwd-md5>/<session-id>/tasks/`。
 只读 `spec.json` / `runtime.json`，只接受 version 1、session id 与任务 id
 完全匹配、root 所属的 agent 任务。不会扫描其他会话，不读任务输出，不修改
-Kimi 的通知消费状态。symlink、过大文件、不完整 JSON 与未知版本被忽略。
+Kimi 的通知消费状态。普通轮询忽略 symlink、过大文件、不完整 JSON 与未知版本。
+基线扫描使用严格读取：根目录缺失、不可读、目录身份替换及任务元数据不完整均为
+观察失败，不能作为空历史或部分历史提交；明确属于其他会话、其他类型或版本的任务仍排除。
 从绝对路径根目录开始逐级以 `dir_fd` / `O_NOFOLLOW` 打开目录，后续枚举与文件读取
 始终相对已持有的描述符；祖先或任务目录被换成 symlink 不会改道读取其他目录。
 元数据只读普通文件，`O_NONBLOCK` 与打开后的 `fstat` 同时防护 stat/open 间的 FIFO 替换。
@@ -42,6 +44,9 @@ Kimi 的通知消费状态。symlink、过大文件、不完整 JSON 与未知�
 该快照穿过旧 runtime 清理、spawn 和 session/load，到 on_ready 初始化 watcher；
 期间完成的任务不在历史基线中，继续产生回执与接续。空快照也是有效快照，不能在 ready 时重采样。
 只有实际 session/load 成功且路径、session id 匹配才沿用基线；回落 session/new 使用新会话的就绪基线。
+初始化或恢复时读取失败不影响人工聊天，watcher 保留未初始化状态并重试。首次完整扫描
+成功后才允许接续；此前的完成项一并归入历史。因此历史不可读时可能不自动报告恢复期间
+完成的任务，这是避免旧任务重放的保守降级。尚未创建 tasks 目录也属于未知，而非有效空目录。
 
 ## 组合状态模型
 
@@ -84,4 +89,6 @@ exactly-once 模型调用，也不拥有 Kimi 的原生通知消费状态。
 入队后取消、消费前 DB 故障/凭证失效、enqueue 异常、runtime 替换以及祖先目录替换。
 `test_studio_chat_background_boundaries.py` 在真实消息提交和 ACP load 边界完成任务，
 覆盖取消期终态、扫描失败后的人工交接/重试、再次取消、空/非空恢复基线和 load 回落。
+`test_studio_chat_baseline_observation.py` 覆盖真实目录缺失、目录替换、部分元数据、
+初始扫描重试以及失败时游标不发生部分提交；人工交接回归直接注入读取器的文件系统故障。
 服务启动排空与 fatal consumer fencing 复用 #814 的真实 ACP/数据库回归。

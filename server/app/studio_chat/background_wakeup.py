@@ -27,12 +27,21 @@ class CompletionCursor:
         self, root: Path, acp_session_id: str, *, seen: frozenset[str] | None = None
     ) -> None:
         self.root, self.acp_session_id = root, acp_session_id
-        self.seen = set(completed_tasks(root, acp_session_id) if seen is None else seen)
+        self.seen = set(seen or ())
         self.pending: set[str] = set()
+        self.initialized = seen is not None
+        if not self.initialized:
+            try:
+                self.baseline()
+            except (OSError, ValueError):
+                logger.warning(
+                    "Kimi initial baseline unavailable; watcher will retry", exc_info=True
+                )
 
     def baseline(self) -> None:
-        self.seen.update(completed_tasks(self.root, self.acp_session_id))
+        self.seen.update(completed_tasks(self.root, self.acp_session_id, strict=True))
         self.pending.clear()
+        self.initialized = True
 
     def step(self, service: StudioChatService, session_id: str, runtime: SessionRuntime) -> None:
         # Scan and cancellation baseline share the lock: stale scan results
@@ -44,6 +53,8 @@ class CompletionCursor:
                 if not runtime.background_cleanup():
                     return
                 runtime.background_cleanup = None
+            if not self.initialized:
+                self.baseline()
             if not runtime.background_wakeup_enabled:
                 if runtime.background_rearm_epoch is None:
                     self.baseline()

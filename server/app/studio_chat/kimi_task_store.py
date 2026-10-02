@@ -31,12 +31,14 @@ def task_root(cwd: str, session_id: str) -> Path | None:
 
 
 def completed_tasks(
-    root: Path, session_id: str, *, ignored: Collection[str] = ()
+    root: Path, session_id: str, *, ignored: Collection[str] = (), strict: bool = False
 ) -> dict[str, str]:
     """Only root-owned agent tasks in this ACP session can trigger a wakeup.
 
     Missing/partial/unsupported files are not proof of completion. The
     bounded read excludes large tool output and corrupt runtime payloads.
+    Baselines require strict reads: unavailable or partial observations must
+    never become a successful empty history. Unsupported specs remain excluded.
     """
     result: dict[str, str] = {}
     try:
@@ -47,23 +49,39 @@ def completed_tasks(
                 try:
                     task_fd = os.open(name, DIRECTORY_FLAGS, dir_fd=root_fd)
                     try:
-                        spec = read_json(task_fd, "spec.json")
-                        state = read_json(task_fd, "runtime.json")
+                        spec = read_json(task_fd, "spec.json", strict=strict)
+                        if strict and not {"version", "id", "session_id", "kind"} <= spec.keys():
+                            raise ValueError("task specification is incomplete")
+                        if (
+                            spec.get("version") != 1
+                            or spec.get("id") != name
+                            or spec.get("session_id") != session_id
+                            or spec.get("kind") != "agent"
+                            or spec.get("owner_role", "root") != "root"
+                        ):
+                            continue
+                        state = read_json(task_fd, "runtime.json", strict=strict)
+                        if strict and not os.path.samestat(
+                            os.fstat(task_fd), os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                        ):
+                            raise OSError("task directory changed during baseline scan")
                     finally:
                         os.close(task_fd)
                 except (OSError, ValueError):
-                    continue
-                if (
-                    spec.get("version") != 1
-                    or spec.get("id") != name
-                    or spec.get("session_id") != session_id
-                    or spec.get("kind") != "agent"
-                    or spec.get("owner_role", "root") != "root"
-                ):
+                    if strict:
+                        raise
                     continue
                 status = state.get("status")
+                if strict and not isinstance(status, str):
+                    raise ValueError("task runtime has no status")
                 if isinstance(status, str) and status in TERMINAL:
                     result[name] = "timed_out" if state.get("timed_out") else status
+            if strict:
+                with directory(root) as current_fd:
+                    if not os.path.samestat(os.fstat(root_fd), os.fstat(current_fd)):
+                        raise OSError("task root changed during baseline scan")
     except (OSError, ValueError):
+        if strict:
+            raise
         return result
     return result

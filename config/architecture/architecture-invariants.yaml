@@ -17,12 +17,15 @@ invariants:
         target: tests/services/test_studio_chat_shutdown_races.py
         gate: quick
   - id: STUDIO-BACKGROUND-001
-    statement: "Kimi V1 completions use descriptor-anchored root-task metadata reads; automatic followups validate runtime, cancellation epoch, compaction and live credentials at admission and ACP consumption, releasing only owned claims on rejection. Rearm observes completions after durable human admission; observation failures preserve the human handoff and keep followups disabled until same-epoch retry. Resume captures history before claim and uses it only for the matching successfully loaded ACP session. See docs/architecture/studio-kimi-background-wakeup.md."
+    statement: "Kimi V1 completions use descriptor-anchored root-task metadata reads; automatic followups validate runtime, cancellation epoch, compaction and live credentials at admission and ACP consumption, releasing only owned claims on rejection. Rearm observes completions after durable human admission; unavailable roots and incomplete task reads cannot establish empty or partial baselines. Observation failures preserve the human handoff and keep followups disabled until same-epoch retry. Initial observation failures defer baseline establishment. Resume captures history before claim and uses it only for the matching successfully loaded ACP session. See docs/architecture/studio-kimi-background-wakeup.md."
     owner: studio
     risk: high
     evidence:
       - kind: contract
         target: tests/services/test_studio_chat_background_wakeup.py
+        gate: quick
+      - kind: contract
+        target: tests/services/test_studio_chat_baseline_observation.py
         gate: quick
       - kind: integration
         target: tests/services/test_studio_chat_background_boundaries.py

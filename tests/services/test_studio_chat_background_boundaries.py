@@ -1,7 +1,5 @@
 """Durable human admission and restored ACP sessions define completion epochs."""
 
-from unittest.mock import Mock
-
 import pytest
 
 from server.app.studio_chat import acp_session
@@ -16,13 +14,15 @@ chat = resume_tests.chat
 
 def test_completion_during_durable_acceptance_is_cancelled(admission, tmp_path, monkeypatch):
     service, db, sid, workspace, runtime = admission
-    cursor = runtime.background_cursor = wake.CompletionCursor(tmp_path, "acp-1")
+    root = tmp_path / "tasks"
+    root.mkdir()
+    cursor = runtime.background_cursor = wake.CompletionCursor(root, "acp-1")
     wake.cancel_wakeup(runtime)
     accept = db.accept_studio_chat_message
 
     def finish_during_commit(*args):
         message = accept(*args)
-        write_task(tmp_path, "during-commit", "completed")
+        write_task(root, "during-commit", "completed")
         return message
 
     monkeypatch.setattr(db, "accept_studio_chat_message", finish_during_commit)
@@ -31,7 +31,7 @@ def test_completion_during_durable_acceptance_is_cancelled(admission, tmp_path, 
     assert "during-commit" in cursor.seen
     cursor.step(service, sid, runtime)
     assert not cursor.pending
-    write_task(tmp_path, "after-rearm", "completed")
+    write_task(root, "after-rearm", "completed")
     cursor.step(service, sid, runtime)
     assert cursor.pending == {"after-rearm"}
     assert db.count_studio_chat_user_messages(sid) == 1
@@ -39,14 +39,29 @@ def test_completion_during_durable_acceptance_is_cancelled(admission, tmp_path, 
 
 
 @pytest.mark.parametrize("cancel_again", [False, True])
+@pytest.mark.parametrize("failure", ["missing_root", "partial_task", "unreadable_root"])
 def test_failed_baseline_preserves_human_handoff_and_retries_safely(
-    admission, tmp_path, monkeypatch, cancel_again
+    admission, tmp_path, monkeypatch, cancel_again, failure
 ):
+    import os
+
     service, db, sid, workspace, runtime = admission
-    cursor = runtime.background_cursor = wake.CompletionCursor(tmp_path, "acp-1")
+    root = tmp_path / "tasks"
+    root.mkdir()
+    cursor = runtime.background_cursor = wake.CompletionCursor(root, "acp-1")
     wake.cancel_wakeup(runtime)
+    write_task(root, "cancelled", "completed")
     with monkeypatch.context() as patch:
-        patch.setattr(cursor, "baseline", Mock(side_effect=OSError("temporary metadata failure")))
+        if failure == "missing_root":
+            root.rename(tmp_path / "unavailable")
+        elif failure == "partial_task":
+            (root / "cancelled" / "runtime.json").write_text("{")
+        else:
+
+            def denied(_fd):
+                raise PermissionError("temporary metadata failure")
+
+            patch.setattr(os, "listdir", denied)
         service.send_message(sid, workspace, "must still be delivered")
     assert db.count_studio_chat_user_messages(sid) == 1
     assert runtime.handle._queue.qsize() == 1
@@ -54,11 +69,15 @@ def test_failed_baseline_preserves_human_handoff_and_retries_safely(
     assert runtime.background_rearm_epoch == runtime.background_epoch
     if cancel_again:
         wake.cancel_wakeup(runtime)
-    write_task(tmp_path, "before-retry", "completed")
+    if failure == "missing_root":
+        (tmp_path / "unavailable").rename(root)
+    write_task(root, "cancelled", "completed")
+    write_task(root, "before-retry", "completed")
     cursor.step(service, sid, runtime)
     assert runtime.background_wakeup_enabled is not cancel_again
     assert runtime.background_rearm_epoch is None
     assert not cursor.pending
+    assert {"cancelled", "before-retry"} <= cursor.seen
 
 
 @pytest.mark.parametrize("load_existing", [False, True])
