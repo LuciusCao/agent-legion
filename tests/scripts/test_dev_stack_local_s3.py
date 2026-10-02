@@ -130,9 +130,13 @@ def _setup(tmp_path: Path, *, with_docker: bool = True) -> tuple[Path, Path]:
     main = tmp_path / "main"
     (main / "scripts").mkdir(parents=True)
     (main / "deploy").mkdir()
-    (main / "frontend" / "node_modules").mkdir(parents=True)
+    # dev_stack.sh 的依赖新鲜度检测委托 scripts/ensure-frontend-deps.sh
+    # （#810；行为级验证在 test_ensure_frontend_deps.py），这里桩成 no-op，
+    # 测试焦点保持在 local-s3 决策。
+    (main / "frontend").mkdir(parents=True)
     shutil.copy(DEV_STACK_SCRIPT, main / "scripts" / DEV_STACK_SCRIPT.name)
     _write_stub(main / "scripts" / "local-s3-decide.sh", _DECIDE_STUB)
+    _write_stub(main / "scripts" / "ensure-frontend-deps.sh", _EXIT_OK_STUB)
     (main / "deploy" / "compose.host.yaml").write_text("name: agent-legion\n")
     (main / ".env").write_text("AGENT_LEGION_S3_ACCESS_KEY=ak\nAGENT_LEGION_S3_SECRET_KEY=sk\n")
     bin_dir = tmp_path / "bin"

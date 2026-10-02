@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { IconButton } from '@mui/material'
 import type { JobSummary, UpgradeMode } from '../../types'
-import { MaterialIcon } from '../MaterialIcon'
+import { LabeledIconButton } from '../LabeledIconButton'
 import { JobWorkflowUpgradeDialog } from './JobWorkflowUpgradeDialog'
 
 export function JobWorkflowUpgradeButton({
@@ -22,14 +21,13 @@ export function JobWorkflowUpgradeButton({
 
   return (
     <>
-      <IconButton
-        aria-label="升级 workflow"
-        title="升级 workflow"
+      <LabeledIconButton
+        icon="arrow_circle_up"
+        label="升级"
+        ariaLabel="升级 workflow"
         disabled={disabled}
         onClick={() => setOpen(true)}
-      >
-        <MaterialIcon name="arrow_circle_up" />
-      </IconButton>
+      />
       {/* Always mounted: `disabled` flips to true the moment the upgrade
           request starts (loading), and unmounting here would destroy the
           dialog's selected mode before a failed request can be retried. */}

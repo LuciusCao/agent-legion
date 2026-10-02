@@ -1205,3 +1205,20 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 213
   expires: 2026-12-31
+- check: architecture.file_budget
+  path: server/app/routes/runs.py
+  reason: '#734 tags the three runs routes with API_SCOPE_INTAKE_TAG so the
+    api-scope admission surface derives from the matched route object
+    (auth/api_scope_surface.py) instead of a second hand-copied path list in
+    the guard: the import and the per-route decorator expansions add 10
+    effective lines (77→87, 10 past the 62+15 band). The tags stay per-route
+    on purpose — the fail-closed interlock requires both a route-level tag
+    edit and a manifest edit to admit a new endpoint, and router-level tags
+    would hand the tag to any future route added here for free. Ceiling at
+    actual + 10 per the dated-exemption convention (#431/#458 precedents).
+    Remove when the module is re-balanced under the baseline or the intake
+    tagging moves into a registration helper.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/734
+  ceiling: 97
+  expires: 2026-12-31

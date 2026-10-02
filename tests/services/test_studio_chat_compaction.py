@@ -14,6 +14,7 @@ import time
 
 import pytest
 
+from server.app.auth.scoped_tokens import mint_scoped_token
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import compact_timer, compaction
 from server.app.studio_chat.runtime import SessionRuntime
@@ -42,8 +43,10 @@ class RecordingBus:
 
 
 class _StubHandle:
-    def send_prompt(self, text: str) -> bool:
+    def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
+        if accept is not None:
+            accept()
         return True
 
     def cancel(self) -> None: ...
@@ -62,7 +65,9 @@ def direct(job_db, settings):
     user_id = str(job_db.create_user("chat-user", password_hash=None)["id"])
     session_id = job_db.create_studio_chat_session(workspace_id, user_id, "direct-agent")
     job_db.update_studio_chat_session(session_id, status="idle")
-    runtime = SessionRuntime(_StubHandle(), token="direct-token")
+    runtime = SessionRuntime(
+        _StubHandle(), token=mint_scoped_token(job_db, user_id, workspace_id=workspace_id)
+    )
     # The direct-session pattern never goes through on_ready, which is where
     # the marker gate's kimi identity gets stamped (#694 review R2-P2) —
     # default the fixture to a kimi session; tests for the non-kimi gate

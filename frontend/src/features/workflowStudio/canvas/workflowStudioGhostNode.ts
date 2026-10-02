@@ -5,6 +5,8 @@ import {
   parseWorkflowEdgeConditions,
   parseWorkflowNode,
 } from '../shared/workflowStudioYamlDraft.parse'
+import { normalizeTextInput } from '../shared/workflowStudioYamlDraft.textInput'
+import { readDraftStartTypes } from '../shared/workflowStudioTextInputEditable'
 
 type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
 
@@ -22,6 +24,13 @@ export function ghostDraftNodeDetails(
   if (!selectedNodeKey) return null
   const parsed = parseWorkflowNode(definitionYaml, selectedNodeKey)
   if (!parsed) return null
+  const textInput = normalizeTextInput(parsed.text_input)
+  if (
+    parsed.type === 'start' &&
+    (textInput === undefined ||
+      readDraftStartTypes(definitionYaml, selectedNodeKey) === null)
+  )
+    return null
   const edges: WorkflowEdgeResponse[] = parseWorkflowEdgeConditions(
     definitionYaml
   )
@@ -51,6 +60,7 @@ export function ghostDraftNodeDetails(
       ? {
           node_type: 'start',
           accepted_item_types: parsed.accepted_item_types ?? [],
+          text_input: textInput ?? null,
         }
       : {
           node_type:

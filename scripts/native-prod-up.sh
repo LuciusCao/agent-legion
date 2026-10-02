@@ -21,10 +21,9 @@ CAFFEINATE="$(command -v caffeinate || true)"
 mkdir -p data/logs
 
 # 1. 依赖与前端构建
-if [[ ! -d frontend/node_modules ]]; then
-    echo "安装前端依赖…"
-    (cd frontend && npm ci)
-fi
+# 前端依赖新鲜度：清单指纹一致跳过、变化（升级 pull 进新 lockfile）时
+# 重装 npm ci——旧判定只看 node_modules 存在，曾导致 #810 的 TS2307。
+./scripts/ensure-frontend-deps.sh
 echo "构建前端…"
 (cd frontend && npm run build)
 echo "同步 Python 依赖…"
