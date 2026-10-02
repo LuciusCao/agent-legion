@@ -18,6 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 class ReceiptCursor:
+    @classmethod
+    def from_baseline(cls, root: Path, acp_session_id: str, seen: set[str]) -> ReceiptCursor:
+        historical = seen | {
+            key
+            for key, task in task_snapshots(root, acp_session_id).items()
+            if task.kind == "bash" and task.terminal
+        }
+        return cls(root, acp_session_id, historical)
+
     def __init__(self, root: Path, acp_session_id: str, initial_terminal: set[str]) -> None:
         self.root, self.acp_session_id = root, acp_session_id
         self.initial_terminal = initial_terminal

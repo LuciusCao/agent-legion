@@ -51,12 +51,18 @@ def register_preview_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         _, client = await client_factory()
         return await client.call("GET", f"/workspaces/{workspace_id}/preview/panel")
 
+    # #749（开发者契约，不入工具 docstring——docstring 会进 LLM 上下文）：
+    # save_preview_panel_draft 的响应携带刚写入草稿的 html_hash。面板发布
+    # 路由还没有 expected_hash 管道（versioned_entities.publish None 分支
+    # 的最后遗留）；将来它接入 CAS 时，hash 消费方必须断言保存响应的
+    # hash，绝不 hash-less 发布。
     @mcp.tool(structured_output=False)
     async def save_preview_panel_draft(workspace_id: str, html: str, change_note: str = "") -> str:
         """Save a preview panel draft: one self-contained HTML document
         (inline <style>/<script>, no external origins) rendering the job
         detail left column via the read-only bridge (get_preview_guide).
-        Draft only — a human publishes from the job detail page."""
+        Draft only — a human publishes from the job detail page. The
+        response carries the saved draft's html_hash."""
         _, client = await client_factory()
         body: dict[str, Any] = {"html": html, "change_note": change_note or None}
         return await client.call("PUT", f"/workspaces/{workspace_id}/preview/panel/draft", body)

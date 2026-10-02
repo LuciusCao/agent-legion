@@ -1,6 +1,5 @@
 """Kimi V1 completion files wake an idle chat without a human prompt (#806)."""
 
-import json
 import os
 import threading
 from types import SimpleNamespace
@@ -13,6 +12,7 @@ from server.app.studio_chat import background_wakeup as wake
 from server.app.studio_chat.kimi_task_store import completed_tasks, task_root
 from server.app.studio_chat.runtime import SessionRuntime
 from tests.helpers import wait_for_predicate
+from tests.helpers.studio_chat_fixtures import write_task
 
 pytestmark = pytest.mark.no_db
 
@@ -38,22 +38,6 @@ def test_cancel_does_not_hide_task_receipts(chat, tmp_path):
     wait_for_predicate(lambda: service.store.append_message.call_count == 1)
     assert service.store.append_message.call_args.args[3]["status"] == "failed"
     runtime.handle.send_prompt.assert_not_called()
-
-
-def write_task(root, task_id="agent-1", status="running", **spec_overrides):
-    path = root / task_id
-    path.mkdir(parents=True, exist_ok=True)
-    spec = {
-        "version": 1,
-        "id": task_id,
-        "session_id": "acp-1",
-        "kind": "agent",
-        "owner_role": "root",
-        **spec_overrides,
-    }
-    (path / "spec.json").write_text(json.dumps(spec))
-    (path / "runtime.json").write_text(json.dumps({"status": status}))
-    return path
 
 
 def test_reader_filters_foreign_nested_unknown_and_nonterminal_tasks(tmp_path):
@@ -131,6 +115,7 @@ def test_reader_rechecks_file_replaced_between_stat_and_open(tmp_path, monkeypat
 
 @pytest.fixture
 def chat(tmp_path, monkeypatch):
+    existing_threads = set(threading.enumerate())
     runtime = SessionRuntime(
         SimpleNamespace(cwd=str(tmp_path), send_prompt=Mock(return_value=True)), "token"
     )
@@ -147,6 +132,10 @@ def chat(tmp_path, monkeypatch):
     monkeypatch.setattr(wake, "POLL_SECONDS", 0.01)
     yield service, runtime
     runtime.background_stop.set()
+    for thread in set(threading.enumerate()) - existing_threads:
+        if thread.name == "studio-kimi-completions":
+            thread.join(timeout=5)
+            assert not thread.is_alive(), "watcher must stop before fixture patches are removed"
 
 
 def test_completion_wakes_once_without_user_prompt_and_records_receipt(chat, tmp_path):
@@ -266,18 +255,46 @@ def test_resume_does_not_replay_old_terminal_tasks(chat, tmp_path):
     assert service.store.append_message.call_count == 1
 
 
+@pytest.mark.parametrize("mismatch", [None, "session", "root", "new_session"])
+def test_start_watcher_uses_only_matching_restored_baseline(chat, tmp_path, monkeypatch, mismatch):
+    from dataclasses import replace
+
+    from server.app.studio_chat import background_baseline as baseline_module
+
+    service, runtime = chat
+    monkeypatch.setattr(wake, "POLL_SECONDS", 60)
+    monkeypatch.setattr(baseline_module, "task_root", lambda *_: tmp_path)
+    write_task(tmp_path, "history", "completed")
+    baseline = baseline_module.capture_resume_baseline(str(tmp_path), "acp-1")
+    assert baseline.finished == frozenset({"history"})
+    if mismatch == "session":
+        baseline = replace(baseline, acp_session_id="another")
+    elif mismatch == "root":
+        baseline = replace(baseline, root=tmp_path / "another")
+    runtime.background_baseline = baseline
+    runtime.handle.loaded_existing = mismatch != "new_session"
+    write_task(tmp_path, "during-load", "completed")
+    wake.start_watcher(service, "chat-1", runtime, "acp-1")
+    cursor = runtime.background_cursor
+    assert ("during-load" in cursor.seen) is (mismatch is not None)
+    wake.start_watcher(service, "chat-1", runtime, "acp-1")
+    assert runtime.background_cursor is cursor
+
+
 def test_cancelled_watcher_discards_completions_until_human_rearms(chat, tmp_path):
     service, runtime = chat
-    runtime.background_wakeup_enabled = False
+    wake.cancel_wakeup(runtime)
     wake.start_watcher(service, "chat-1", runtime, "acp-1")
     write_task(tmp_path, "agent-cancelled", "completed")
-    # Wait on the reader rather than timing the worker thread.
-    original = wake.completed_tasks
-    with pytest.MonkeyPatch.context() as patch:
-        observed = Mock(wraps=original)
-        patch.setattr(wake, "completed_tasks", observed)
-        wait_for_predicate(lambda: observed.call_count >= 2)
-    runtime.background_wakeup_enabled = True
+
+    # A Mock's call count advances before its wrapped read and baseline
+    # commit finish. Observe the actual completed state under the same lock.
+    def baselined():
+        with runtime.lock:
+            return "agent-cancelled" in runtime.background_cursor.seen
+
+    wait_for_predicate(baselined)
+    wake.rearm_wakeup(runtime)
     write_task(tmp_path, "agent-new", "completed")
     wait_for_predicate(lambda: runtime.handle.send_prompt.call_count == 1)
     assert "agent-cancelled" not in runtime.handle.send_prompt.call_args.args[0]
@@ -310,17 +327,19 @@ def test_cancel_rearm_without_watcher_lap_discards_old_pending_and_completions(c
     } == {"pending", "cancelled", "new"}
 
 
-def test_rearm_preparation_does_not_enable_failed_send_or_swallow_new_tasks(chat, tmp_path):
+def test_rearm_observes_completions_at_commit_not_preparation(chat, tmp_path):
     service, runtime = chat
     cursor = runtime.background_cursor = wake.CompletionCursor(tmp_path, "acp-1")
     wake.cancel_wakeup(runtime)
     write_task(tmp_path, "cancelled", "completed")
     commit = wake.prepare_rearm(runtime)
     assert not runtime.background_wakeup_enabled
-    write_task(tmp_path, "new", "completed")
+    write_task(tmp_path, "during-admission", "completed")
     commit()
+    write_task(tmp_path, "new", "completed")
     cursor.step(service, "chat-1", runtime)
     assert "cancelled" not in runtime.handle.send_prompt.call_args.args[0]
+    assert "during-admission" not in runtime.handle.send_prompt.call_args.args[0]
     assert "new" in runtime.handle.send_prompt.call_args.args[0]
 
 

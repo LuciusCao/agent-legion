@@ -33,6 +33,7 @@ from server.app.studio_chat.admission import send_message
 from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.background_wakeup import cancel_wakeup
 from server.app.studio_chat.callbacks import ServiceCallbacks
+from server.app.studio_chat.lifecycle import ServiceLifecycle, starting_operation
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
 from server.app.studio_chat.runtime import SessionRuntime
@@ -69,7 +70,7 @@ class StudioChatService:
         self._probe = probe if probe is not None else AgentAvailabilityProbe()
         self._runtimes: dict[str, SessionRuntime] = {}
         self._runtimes_lock = threading.Lock()
-        self._shutdown = False
+        self._lifecycle = ServiceLifecycle()
         self.store = StudioChatStore(job_db, bus)
 
     # ServiceBackend protocol surface (events.py / permissions.py consumers).
@@ -119,9 +120,8 @@ class StudioChatService:
 
     # -- session lifecycle ------------------------------------------------
 
+    @starting_operation
     def create_session(self, workspace_id: str, user_id: str, agent_id: str) -> dict[str, Any]:
-        if self._shutdown:
-            raise ConflictError("Studio chat service is shutting down")
         agent = self._registry.find_agent(agent_id)
         if agent is None:
             raise InvalidOperationError(f"Unknown studio agent: {agent_id}")
@@ -176,14 +176,13 @@ class StudioChatService:
     def close_session(self, session_id: str, workspace_id: str) -> dict[str, Any]:
         return close_session(self, session_id, workspace_id)
 
+    @starting_operation
     def resume_session(self, session_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
         """Rebuild the runtime of a closed/error session; history is kept.
 
         Thin delegate — the claim/teardown/spawn state machine lives in
         studio_chat.resume (file budget).
         """
-        if self._shutdown:
-            raise ConflictError("Studio chat service is shutting down")
         return resume_session(self, session_id, workspace_id, user_id)
 
     # -- messaging ---------------------------------------------------------
@@ -328,24 +327,21 @@ class StudioChatService:
 
     def shutdown(self) -> None:
         """Close every live session (backend shutdown hook)."""
-        self._shutdown = True
-        with self._runtimes_lock:
-            items = list(self._runtimes.items())
-        for session_id, runtime in items:
-            try:
-                with runtime.lock:
-                    if self.runtime(session_id) is runtime:
-                        self._db.update_studio_chat_session(
-                            session_id, status="closed", closed_at=datetime.now(UTC)
-                        )
-            except Exception:
-                # #204 broad-except audit: shutdown safety net. The shutdown
-                # loop must reach every live session — one failing status
-                # write (e.g. DB already closing) must not skip the teardown
-                # of the remaining subprocesses and tokens. The row stays
-                # non-closed but is marked by the next startup's
-                # reap_zombie_sessions, so the state self-heals.
-                logger.warning(
-                    "failed to mark studio chat session %s closed", session_id, exc_info=True
-                )
-            self.teardown_runtime(session_id, runtime, expected=runtime)
+        with self._lifecycle.shutdown():
+            with self._runtimes_lock:
+                items = list(self._runtimes.items())
+            for session_id, runtime in items:
+                try:
+                    with runtime.lock:
+                        if self.runtime(session_id) is runtime:
+                            self._db.update_studio_chat_session(
+                                session_id, status="closed", closed_at=datetime.now(UTC)
+                            )
+                except Exception:
+                    # #204 broad-except audit: shutdown safety net. A failed
+                    # status write must not skip subprocess/token cleanup;
+                    # startup reconciliation repairs the row, traceback stays.
+                    logger.warning(
+                        "failed to mark studio chat session %s closed", session_id, exc_info=True
+                    )
+                self.teardown_runtime(session_id, runtime, expected=runtime)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import re
 import secrets
@@ -9,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from server.app.agent_control.claim_state import authenticated_worker_row
 from server.app.agent_control.declarations import (
     normalize_labels,
     normalize_worker_declarations,
@@ -144,6 +144,7 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
                   allowed_workspaces_json=excluded.allowed_workspaces_json,
                   register_token_ids_json=excluded.register_token_ids_json,
                   last_seen_at=excluded.last_seen_at,
+                  claim_enabled=null,
                   revoked_at=null
                 """,
                 (
@@ -165,24 +166,17 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
             )
         return f"{worker_id}.{secret}"
 
-    def authenticate(self, token: str) -> dict[str, Any] | None:
-        worker_id, separator, secret = token.partition(".")
-        if not separator or not worker_id or not secret:
-            return None
-        with read_connection(self.database_dsn) as conn:
-            row = conn.execute(
-                "select * from agent_workers where worker_id=%s", (worker_id,)
-            ).fetchone()
-        if row is None or row["revoked_at"] is not None:
-            return None
-        digest = hashlib.sha256(secret.encode()).hexdigest()
-        if not hmac.compare_digest(digest, row["token_hash"]):
+    def authenticate(
+        self, token: str, *, claim_enabled: bool | None = None
+    ) -> dict[str, Any] | None:
+        row = authenticated_worker_row(self.database_dsn, token, claim_enabled)
+        if row is None:
             return None
         # Every Worker API call authenticates, and an idle Worker polls claim
         # every few seconds, so this is the liveness signal behind `online`.
         # The write is throttled (WorkerLiveness): at agent scale a write
         # transaction per call is the hottest write path on the Host.
-        self._liveness.record_seen(self.database_dsn, worker_id)
+        self._liveness.record_seen(self.database_dsn, row["worker_id"], row["token_hash"])
         # Reflect a fresh timestamp so this call already reads online, even
         # when the throttled write was skipped.
         return _worker_payload({**row, "last_seen_at": datetime.now(UTC)})
@@ -289,4 +283,6 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "online": online,
         "revoked": row["revoked_at"] is not None,
+        # v87 Worker-reported claim switch; None for rows never reported.
+        "claim_enabled": row.get("claim_enabled"),
     }

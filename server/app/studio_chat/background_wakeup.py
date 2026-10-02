@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from server.app.studio_chat.background_delivery import wake_session
+from server.app.studio_chat.background_rearm import prepare_rearm as prepare_rearm
+from server.app.studio_chat.background_rearm import rearm_wakeup as rearm_wakeup
+from server.app.studio_chat.background_rearm import try_rearm
 from server.app.studio_chat.background_receipts import ReceiptCursor
-from server.app.studio_chat.kimi_task_store import completed_tasks, task_root, task_snapshots
+from server.app.studio_chat.kimi_task_store import task_root, task_snapshots
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,18 +24,33 @@ POLL_SECONDS = 2
 
 
 class CompletionCursor:
-    def __init__(self, root: Path, acp_session_id: str) -> None:
+    def __init__(
+        self, root: Path, acp_session_id: str, *, seen: frozenset[str] | None = None
+    ) -> None:
         self.root, self.acp_session_id = root, acp_session_id
-        initial = {
-            key for key, task in task_snapshots(root, acp_session_id).items() if task.terminal
-        }
-        self.seen = set(initial)
-        self.receipts = ReceiptCursor(root, acp_session_id, initial)
+        self.seen = set(seen or ())
         self.pending: set[str] = set()
+        self.initialized = seen is not None
+        self.receipts = ReceiptCursor.from_baseline(root, acp_session_id, self.seen)
+        if not self.initialized:
+            try:
+                self.baseline()
+            except (OSError, ValueError):
+                logger.warning(
+                    "Kimi initial baseline unavailable; watcher will retry", exc_info=True
+                )
 
     def baseline(self) -> None:
-        self.seen.update(completed_tasks(self.root, self.acp_session_id))
+        tasks = task_snapshots(self.root, self.acp_session_id, strict=True)
+        if not self.initialized:
+            self.receipts.initial_terminal.update(
+                key for key, task in tasks.items() if task.terminal
+            )
+        self.seen.update(
+            key for key, task in tasks.items() if task.kind == "agent" and task.terminal
+        )
         self.pending.clear()
+        self.initialized = True
 
     def step(self, service: StudioChatService, session_id: str, runtime: SessionRuntime) -> None:
         # Scan and cancellation baseline share the lock: stale scan results
@@ -41,16 +58,22 @@ class CompletionCursor:
         with runtime.lock:
             if runtime.closed or service.runtime(session_id) is not runtime:
                 return
+            if not self.initialized:
+                self.baseline()
             completed = self.receipts.step(service, session_id)
             if runtime.background_wakeup_enabled:
                 self.pending.update(completed - self.seen)
-            else:
-                self.baseline()
             self.seen.update(completed)
             if runtime.background_cleanup is not None:
                 if not runtime.background_cleanup():
                     return
                 runtime.background_cleanup = None
+            if not runtime.background_wakeup_enabled:
+                if runtime.background_rearm_epoch is None:
+                    self.baseline()
+                    return
+                if not try_rearm(runtime):
+                    return
             if self.pending and wake_session(service, session_id, runtime, sorted(self.pending)):
                 self.pending.clear()
 
@@ -58,34 +81,10 @@ class CompletionCursor:
 def cancel_wakeup(runtime: SessionRuntime) -> None:
     with runtime.lock:
         runtime.background_epoch += 1
+        runtime.background_rearm_epoch = None
         runtime.background_wakeup_enabled = False
         if runtime.background_cursor is not None:
             runtime.background_cursor.pending.clear()
-
-
-def rearm_wakeup(runtime: SessionRuntime) -> None:
-    prepare_rearm(runtime)()
-
-
-def prepare_rearm(runtime: SessionRuntime) -> Callable[[], None]:
-    """Prepare the cancellation baseline; commit only after a human send is accepted."""
-    with runtime.lock:
-        cursor, epoch = runtime.background_cursor, runtime.background_epoch
-        finished = (
-            completed_tasks(cursor.root, cursor.acp_session_id)
-            if cursor is not None and not runtime.background_wakeup_enabled
-            else {}
-        )
-
-    def commit() -> None:
-        with runtime.lock:
-            if runtime.background_epoch == epoch and not runtime.background_wakeup_enabled:
-                if cursor is not None:
-                    cursor.seen.update(finished)
-                    cursor.pending.clear()
-                runtime.background_wakeup_enabled = True
-
-    return commit
 
 
 def start_watcher(
@@ -97,7 +96,20 @@ def start_watcher(
     if root is None:
         return
     with runtime.lock:
-        cursor = runtime.background_cursor = CompletionCursor(root, acp_session_id)
+        if runtime.closed or service.runtime(session_id) is not runtime:
+            return
+        if runtime.background_cursor is not None:
+            return
+        baseline = runtime.background_baseline
+        seen = (
+            baseline.finished
+            if baseline is not None
+            and runtime.handle.loaded_existing
+            and baseline.root == root
+            and baseline.acp_session_id == acp_session_id
+            else None
+        )
+        cursor = runtime.background_cursor = CompletionCursor(root, acp_session_id, seen=seen)
 
     def watch() -> None:
         while not runtime.background_stop.wait(POLL_SECONDS):

@@ -22,6 +22,9 @@ class RegisterAgentWorkerRequest(BaseModel):
     max_concurrency: int = Field(gt=0, le=MAX_DYNAMIC_CONCURRENCY)
     # Code-execution capacity pool (batch 2); 0/absent = agent-only Worker.
     max_code_concurrency: int = Field(default=0, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
+    # Free-form operator labels, stored verbatim. Reserved key ``console_url``:
+    # the Worker's self-reported console address (worker/console_url.py); the
+    # Host UI renders it as that Worker's 「控制台」 entry. Older Workers omit it.
     labels: dict[str, Any] = Field(default_factory=dict)
     protocol_version: int = Field(default=1, ge=1)
     # Informational only: no agent_workers column stores it yet.
@@ -113,9 +116,25 @@ class AgentWorkerSummary(BaseModel):
     # threshold; registered-but-silent Workers show as offline.
     online: bool
     revoked: bool
+    # Worker-reported claim switch (v83): False = online but not picking up
+    # work (the「一直等待中」first suspect); None = never reported (older
+    # Worker), rendered as plain online.
+    claim_enabled: bool | None = None
 
 
-class AgentWorkersResponse(BaseModel):
+class WorkerPresenceRequest(BaseModel):
+    claim_enabled: bool
+
+
+class AgentWorkerConsoleResponse(BaseModel):
+    # Instance-configured Worker console address (AGENT_LEGION_WORKER_CONSOLE_URL,
+    # usually the deployment machine's local Worker): the "open the Worker
+    # console" entry the Host UI shows next to worker lists and after key
+    # issuance. "" = not configured (the UI falls back to plain guidance).
+    console_url: str = ""
+
+
+class AgentWorkersResponse(AgentWorkerConsoleResponse):
     workers: list[AgentWorkerSummary]
 
 

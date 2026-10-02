@@ -186,7 +186,7 @@ def _load_nodes(
         if not isinstance(node_label, str) or not node_label:
             raise WorkflowDefinitionError(f"Node {node_key} label must be a non-empty string")
 
-        node_type, accepted_item_types = load_start_fields(raw_node, node_key)
+        node_type, accepted_item_types, text_input = load_start_fields(raw_node, node_key)
         capability = raw_node.get("capability", "")
         # start and approval nodes never dispatch, so they carry no capability.
         if not isinstance(capability, str) or (
@@ -232,6 +232,7 @@ def _load_nodes(
             reduce=_load_reduce(raw_node, node_key),
             node_type=node_type,
             accepted_item_types=accepted_item_types,
+            text_input=text_input,
         )
 
     for node in nodes.values():

@@ -498,3 +498,36 @@ def test_node_code_max_bytes_rejects_invalid_env(tmp_path, monkeypatch, env_valu
 
     with pytest.raises(ValueError, match=match):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+
+# --- Worker 控制台入口地址（AGENT_LEGION_WORKER_CONSOLE_URL） ---
+
+
+def test_worker_console_url_env_override(tmp_path, monkeypatch):
+    # 部署拓扑 env-only：AGENT_LEGION_WORKER_CONSOLE_URL 落到
+    # executor_runtime.agent_workers.console_url，供主控制台渲染入口链接。
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    monkeypatch.setenv("AGENT_LEGION_WORKER_CONSOLE_URL", "http://127.0.0.1:8789")
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.executor_runtime.agent_workers.console_url == "http://127.0.0.1:8789"
+
+
+def test_worker_console_url_defaults_to_unset(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    monkeypatch.delenv("AGENT_LEGION_WORKER_CONSOLE_URL", raising=False)
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.executor_runtime.agent_workers.console_url == ""
+
+
+def test_env_example_documents_worker_console_url():
+    example_path = Path(__file__).resolve().parents[2] / ".env.example"
+    example = example_path.read_text(encoding="utf-8")
+    assert "AGENT_LEGION_WORKER_CONSOLE_URL=" in example

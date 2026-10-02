@@ -60,8 +60,12 @@ def output_tail(parent: int, *, terminal: bool) -> tuple[float | None, str]:
         return None, ""
 
 
-def read_task(parent: int, task_id: str, session_id: str) -> BackgroundTask | None:
-    spec, state = read_json(parent, "spec.json"), read_json(parent, "runtime.json")
+def read_task(
+    parent: int, task_id: str, session_id: str, *, strict: bool = False
+) -> BackgroundTask | None:
+    spec = read_json(parent, "spec.json", strict=strict)
+    if strict and not {"version", "id", "session_id", "kind"} <= spec.keys():
+        raise ValueError("task specification is incomplete")
     if (
         spec.get("version") != 1
         or spec.get("id") != task_id
@@ -70,8 +74,11 @@ def read_task(parent: int, task_id: str, session_id: str) -> BackgroundTask | No
         or spec.get("owner_role", "root") != "root"
     ):
         return None
+    state = read_json(parent, "runtime.json", strict=strict)
     status = state.get("status")
     if not isinstance(status, str) or status not in ACTIVE | TERMINAL:
+        if strict:
+            raise ValueError("task runtime has no supported status")
         return None
     terminal = status in TERMINAL
     output_at, summary = output_tail(parent, terminal=terminal)

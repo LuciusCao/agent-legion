@@ -19,8 +19,10 @@ from server.app.auth.dependencies import require_admin, require_user
 from server.app.routes.agent_register_tokens import create_agent_register_tokens_router
 from server.app.routes.agent_worker_claims import create_agent_worker_claim_router
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
-from server.app.routes.agent_worker_results import parse_result_metadata
+from server.app.routes.agent_worker_presence import register_presence_route
+from server.app.routes.agent_worker_results import _recover_result_header, parse_result_metadata
 from server.app.routes.agent_workers_contracts import (
+    AgentWorkerConsoleResponse,
     AgentWorkerDeleteResponse,
     AgentWorkersResponse,
     AgentWorkerSummary,
@@ -75,7 +77,9 @@ def create_agent_workers_router(
             raise HTTPException(status_code=401, detail="invalid Agent Worker registration token")
         return scope
 
-    def authorize_worker(request: Request, worker_id: str | None = None) -> dict[str, Any]:
+    def authorize_worker(
+        request: Request, worker_id: str | None = None, *, claim_enabled: bool | None = None
+    ) -> dict[str, Any]:
         token = request.headers.get("x-agent-worker-token", "")
         if not token:
             authorization = request.headers.get("authorization", "")
@@ -93,6 +97,10 @@ def create_agent_workers_router(
                     " upgrade and re-register the Worker"
                 ),
             )
+        if claim_enabled is not None:
+            worker = registry.authenticate(token, claim_enabled=claim_enabled)
+            if worker is None:
+                raise HTTPException(status_code=401, detail="invalid Agent Worker token")
         return worker
 
     def require_lease_id(request: Request) -> str:
@@ -108,6 +116,9 @@ def create_agent_workers_router(
             broker, settings, authorize_worker, require_lease_id, job_artifact_objects
         )
     )
+
+    # v87 presence sync authenticates and records the switch atomically.
+    register_presence_route(router, authorize_worker)
 
     @router.post(
         "/agent-workers/register", status_code=201, response_model=RegisterAgentWorkerResponse
@@ -197,6 +208,13 @@ def create_agent_workers_router(
             )
         return AgentWorkerDeleteResponse(worker_id=worker_id, deleted=True)
 
+    @router.get("/agent-workers/console", response_model=AgentWorkerConsoleResponse)
+    def worker_console(
+        _user: Annotated[dict[str, Any], Depends(require_user)],
+    ) -> AgentWorkerConsoleResponse:
+        """Read deployment metadata without enumerating Worker registrations."""
+        return AgentWorkerConsoleResponse(console_url=config.console_url)
+
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers(
         _user: Annotated[dict[str, Any], Depends(require_user)], workspace_id: str | None = None
@@ -208,7 +226,14 @@ def create_agent_workers_router(
         parameter every logged-in user still sees the full list — the UI is
         responsible for passing the current workspace, and the admin settings
         page intentionally keeps the unfiltered view."""
-        return AgentWorkersResponse.model_validate({"workers": registry.list_workers(workspace_id)})
+        return AgentWorkersResponse.model_validate(
+            {
+                "workers": registry.list_workers(workspace_id),
+                # Deployment-level fallback entry to the Worker console (a
+                # Worker-reported per-machine address is the follow-up).
+                "console_url": config.console_url,
+            }
+        )
 
     @router.get("/agent-executions/{execution_id}/bundle")
     def bundle(execution_id: str, request: Request) -> FileResponse:
@@ -242,7 +267,12 @@ def create_agent_workers_router(
         # Validate metadata fully BEFORE writing the archive: malformed input
         # must produce a 400, never a 500 with an orphan file on disk.
         try:
-            outcome, record = parse_result_metadata(request.headers.get("x-agent-result", "{}"))
+            # #748 P2: the Worker ships the metadata as raw UTF-8 header
+            # bytes; Starlette hands it over latin-1-decoded, so reverse the
+            # transport decoding before parsing (no-op for legacy ASCII).
+            outcome, record = parse_result_metadata(
+                _recover_result_header(request.headers.get("x-agent-result", "{}"))
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="invalid Agent result metadata") from exc
         # Size gate: reject on the declared length before spooling the body.

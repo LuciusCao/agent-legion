@@ -67,6 +67,21 @@ describe('AppBar', () => {
       </MemoryRouter>
     )
     expect(screen.getByTestId('action')).toBeInTheDocument()
+    expect(screen.getByTestId('app-bar')).not.toHaveClass(styles.singleRow)
+  })
+
+  it('allows a responsive action group to explicitly request a single row', () => {
+    render(
+      <MemoryRouter>
+        <AppBar
+          title="任务"
+          actionsLayout="single-row"
+          rightActions={<button>更多</button>}
+        />
+      </MemoryRouter>
+    )
+    expect(screen.getByTestId('app-bar')).toHaveClass(styles.singleRow)
+    expect(screen.getByRole('button', { name: '更多' })).toBeEnabled()
   })
 
   it('navigates home when home button clicked', () => {

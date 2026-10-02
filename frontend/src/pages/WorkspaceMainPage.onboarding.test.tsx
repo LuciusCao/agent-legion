@@ -18,7 +18,7 @@ import {
 import { EventSourceMock } from '../testing/eventSourceMock'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 
-// 新 workspace 空态分步引导（EmptyStateGuide）的集成测试：2 步形态（#333）
+// 新 workspace 空态分步引导（EmptyStateGuide）的集成测试：发布与执行就绪
 // 与引导导航。就绪判定与展示判定的分支细节在 lib/onboardingReadiness.test.ts。
 
 const mockApi = vi.fn()
@@ -27,6 +27,7 @@ const mockFetchJobFacets = vi.fn()
 const mockFetchWorkspaceStats = vi.fn()
 const mockFetchWorkspacePackages = vi.fn()
 const mockFetchWorkflowDefinition = vi.fn()
+const mockListAgentWorkers = vi.fn()
 
 vi.mock('../api', () => ({
   api: (...args: Parameters<typeof api>) => mockApi(...args),
@@ -42,6 +43,12 @@ vi.mock('../api', () => ({
   fetchActiveWorkflowRevision: (
     ...args: Parameters<typeof fetchActiveWorkflowRevision>
   ) => mockFetchWorkflowDefinition(...args),
+  // 引导「接入 Worker / 打开执行开关」两步的数据源：默认无 Worker。
+  listAgentWorkers: () => mockListAgentWorkers(),
+}))
+
+vi.mock('../hooks/useWorkerConsoleUrl', () => ({
+  useWorkerConsoleUrl: () => '',
 }))
 
 const mockGetWorkspaceExecutionConfiguration = vi.fn()
@@ -90,6 +97,7 @@ const workflowDefinition = {
   nodes: [
     {
       key: 'review',
+      node_type: 'code',
       label: '审核',
       after: [],
       capability: 'review',
@@ -98,6 +106,7 @@ const workflowDefinition = {
     },
     {
       key: 'agent_review',
+      node_type: 'agent',
       label: 'Agent 审核',
       after: ['review'],
       capability: 'agent_review',
@@ -126,6 +135,8 @@ describe('WorkspaceMainPage onboarding guide', () => {
     mockFetchWorkspaceStats.mockReset()
     mockFetchWorkspacePackages.mockReset()
     mockFetchWorkflowDefinition.mockReset()
+    mockListAgentWorkers.mockReset()
+    mockListAgentWorkers.mockResolvedValue([])
     mockGetWorkspaceExecutionConfiguration.mockReset()
     mockGetWorkspaceExecutionConfiguration.mockResolvedValue({
       node_limits: [],
@@ -158,6 +169,8 @@ describe('WorkspaceMainPage onboarding guide', () => {
       if (path === '/api/workspaces/ws1/stats') {
         return Promise.resolve(baseStats)
       }
+      if (path === '/api/worker/status?workspace_id=ws1')
+        return Promise.resolve({ paused: false })
       return Promise.resolve({})
     })
 
@@ -271,14 +284,17 @@ describe('WorkspaceMainPage onboarding guide', () => {
     expect(
       await screen.findByRole('button', { name: '进入 Studio' })
     ).toBeInTheDocument()
-    // 2 步形态（#333）：仅步骤 1 有完成态；发布后「添加条目」直接解锁。
+    // 发布完成，但 Worker 未就绪，不能越过执行准备直接添加条目。
     expect(screen.getAllByText('已完成')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: '添加条目' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '添加条目' })).toBeDisabled()
   })
 
   it('unlocks the add-item step even when an agent node lacks provider/model', async () => {
     // #333：agent 节点 execution 缺口不再阻塞引导（原步骤 2 已移除），
     // 真实缺口由 Studio 画布实时警报承载；agent 路由快照也不再被请求。
+    mockListAgentWorkers.mockResolvedValue([
+      { online: true, revoked: false, claim_enabled: true, labels: {} },
+    ])
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: {
         ...workflowDefinition,
@@ -292,9 +308,9 @@ describe('WorkspaceMainPage onboarding guide', () => {
     renderPage()
     await loadJobsViaSSE()
 
-    expect(
-      await screen.findByRole('button', { name: '添加条目' })
-    ).toBeEnabled()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '添加条目' })).toBeEnabled()
+    )
     expect(
       screen.queryByRole('button', { name: '去配置' })
     ).not.toBeInTheDocument()
@@ -330,7 +346,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
     expect(mockGetWorkspaceExecutionConfiguration).not.toHaveBeenCalled()
   })
 
-  it('hides the guide when jobs exist', async () => {
+  it('hides the guide and makes no readiness requests when existing jobs are not waiting', async () => {
     mockFetchJobsSnapshot.mockImplementation(() =>
       Promise.resolve({
         workspace_id: 'ws1',
@@ -342,7 +358,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
             workspace_id: 'ws1',
             source_id: 'Q1',
             title: 'Job',
-            status: 'pending',
+            status: 'completed',
           },
         ],
         total: 1,
@@ -356,5 +372,11 @@ describe('WorkspaceMainPage onboarding guide', () => {
     expect(
       screen.queryByRole('heading', { name: '开始使用 Workspace' })
     ).not.toBeInTheDocument()
+    expect(mockListAgentWorkers).not.toHaveBeenCalled()
+    expect(
+      mockApi.mock.calls.some(([path]) =>
+        String(path).startsWith('/api/worker/status')
+      )
+    ).toBe(false)
   })
 })

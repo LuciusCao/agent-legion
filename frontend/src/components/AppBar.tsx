@@ -11,6 +11,8 @@ export interface AppBarProps {
   backTo?: string
   scrolled?: boolean
   rightActions?: React.ReactNode
+  /** 默认换行兜底；仅已自行收纳/响应式降级的动作组可选 single-row。 */
+  actionsLayout?: 'wrap' | 'single-row'
 }
 
 export function AppBar({
@@ -20,6 +22,7 @@ export function AppBar({
   backTo,
   scrolled,
   rightActions,
+  actionsLayout = 'wrap',
 }: AppBarProps) {
   const navigate = useNavigate()
 
@@ -37,7 +40,7 @@ export function AppBar({
 
   return (
     <header
-      className={`${styles.appBar} ${scrolled ? styles.scrolled : ''}`}
+      className={`${styles.appBar} ${scrolled ? styles.scrolled : ''} ${actionsLayout === 'single-row' ? styles.singleRow : ''}`}
       data-testid="app-bar"
     >
       <div className={styles.left}>

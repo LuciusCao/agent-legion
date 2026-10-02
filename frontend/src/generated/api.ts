@@ -528,6 +528,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-workers/console': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Worker Console
+     * @description Read deployment metadata without enumerating Worker registrations.
+     */
+    get: operations['worker_console_api_agent_workers_console_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-workers/register': {
     parameters: {
       query?: never
@@ -576,6 +596,26 @@ export interface paths {
     get: operations['get_worker_metrics_api_agent_workers_self_metrics_get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-workers/self/presence': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Report Presence
+     * @description Refresh liveness and record the Worker's claim switch; answers the self record.
+     */
+    post: operations['report_presence_api_agent_workers_self_presence_post']
     delete?: never
     options?: never
     head?: never
@@ -3812,6 +3852,14 @@ export interface components {
       /** Versions */
       versions: components['schemas']['AgentVersionSummary'][]
     }
+    /** AgentWorkerConsoleResponse */
+    AgentWorkerConsoleResponse: {
+      /**
+       * Console Url
+       * @default
+       */
+      console_url: string
+    }
     /** AgentWorkerDeleteResponse */
     AgentWorkerDeleteResponse: {
       /** Deleted */
@@ -3825,6 +3873,8 @@ export interface components {
       allowed_workspaces: string[]
       /** Capabilities */
       capabilities: string[]
+      /** Claim Enabled */
+      claim_enabled?: boolean | null
       /** Labels */
       labels: {
         [key: string]: string
@@ -3867,6 +3917,11 @@ export interface components {
     }
     /** AgentWorkersResponse */
     AgentWorkersResponse: {
+      /**
+       * Console Url
+       * @default
+       */
+      console_url: string
       /** Workers */
       workers: components['schemas']['AgentWorkerSummary'][]
     }
@@ -4946,6 +5001,8 @@ export interface components {
     JobsResponse: {
       /** Jobs */
       jobs: components['schemas']['JobSummaryResponse'][]
+      /** Truncated */
+      truncated: boolean
     }
     /** LogEventResponse */
     LogEventResponse: {
@@ -5956,11 +6013,19 @@ export interface components {
     }
     /**
      * RunCreateResponse
-     * @description #467 A4：run + created_count only；job 行移到读取路径（#420）。
+     * @description #467 A4 响应瘦身保持：run + created_count only，永不物化 job 行
+     *     （万级 items 的响应体积回归由测试钉住）；#735 加回 job_ids——服务层
+     *     本就返回的字符串 id 列表（体积与 job rows 差一个数量级），外部系统
+     *     提交后即可拿到 job_id 去 #703 的单 job 端点轮询。
      */
     RunCreateResponse: {
       /** Created Count */
       created_count: number
+      /**
+       * Job Ids
+       * @description 本次提交新建的 job id 列表（非 run 全量）；全部 item 已存在时为空数组（重复提交治愈语义，见 #501）。
+       */
+      job_ids: string[]
       run: components['schemas']['RunRecord']
     }
     /** RunDetailResponse */
@@ -7472,6 +7537,11 @@ export interface components {
       /** Error Type */
       type: string
     }
+    /** WorkerPresenceRequest */
+    WorkerPresenceRequest: {
+      /** Claim Enabled */
+      claim_enabled: boolean
+    }
     /** WorkerStatusResponse */
     WorkerStatusResponse: {
       /** Paused */
@@ -7734,6 +7804,8 @@ export interface components {
       code: string
       /** Draft Code */
       draft_code?: string | null
+      /** Draft Code Hash */
+      draft_code_hash?: string | null
       /** Draft Version */
       draft_version?: number | null
       /**
@@ -7858,6 +7930,7 @@ export interface components {
       outputs: string[]
       skill?: components['schemas']['WorkflowNodeSkillResponse'] | null
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
+      text_input?: components['schemas']['WorkflowTextInputResponse'] | null
       /** Tools */
       tools?: string[]
     }
@@ -7939,6 +8012,24 @@ export interface components {
     WorkflowTerminalResponse: {
       /** Outcome */
       outcome: string
+    }
+    /** WorkflowTextInputResponse */
+    WorkflowTextInputResponse: {
+      /**
+       * Filename
+       * @default
+       */
+      filename: string
+      /**
+       * Label
+       * @default
+       */
+      label: string
+      /**
+       * Template
+       * @default
+       */
+      template: string
     }
     /** WorkspaceAgentRouteEntry */
     WorkspaceAgentRouteEntry: {
@@ -9451,6 +9542,26 @@ export interface operations {
       }
     }
   }
+  worker_console_api_agent_workers_console_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentWorkerConsoleResponse']
+        }
+      }
+    }
+  }
   register_api_agent_workers_register_post: {
     parameters: {
       query?: never
@@ -9522,6 +9633,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['OpsMetricsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  report_presence_api_agent_workers_self_presence_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkerPresenceRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentWorkerSummary']
         }
       }
       /** @description Validation Error */
@@ -12343,6 +12487,8 @@ export interface operations {
          */
         workflow_key?: string | null
         status?: string | null
+        run_id?: string | null
+        limit?: number
       }
       header?: never
       path: {

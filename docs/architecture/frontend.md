@@ -102,6 +102,7 @@ frontend/src/
 - 使用 MUI v6 组件库 + CSS Modules 管理局部样式。
 - 路由定义集中在 `AppRoutes.tsx`；`App.tsx` 只负责渲染 `AppRoutes`、全局 Toast 与 agents WebSocket 连接，应用级 Provider（如 ThemeProvider）在 `main.tsx`。
 - 前端传输类型必须从 `frontend/src/generated/api.ts` 派生，禁止手写重复类型。
+- AppBar 默认以动作区域换行处理窄屏，保留导航和动作可达性；只有自行实现响应式收纳的消费者可显式选择 `actionsLayout="single-row"`。任务详情由 `JobDetailToolbar` 负责图标化与菜单分级，不能把其保宽要求施加给 Workspace 列表、设置等其它 AppBar 消费者。顶栏允许增高，浮层继续通过 `useAppBarBottom` 实测定位。
 
 ## API Surface / Interface
 

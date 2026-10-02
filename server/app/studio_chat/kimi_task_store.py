@@ -25,7 +25,7 @@ def task_root(cwd: str, session_id: str) -> Path | None:
 
 
 def task_snapshots(
-    root: Path, session_id: str, *, ignored: Collection[str] = ()
+    root: Path, session_id: str, *, ignored: Collection[str] = (), strict: bool = False
 ) -> dict[str, BackgroundTask]:
     """Keep spec, runtime and output on one pinned task directory."""
     result: dict[str, BackgroundTask] = {}
@@ -37,24 +37,36 @@ def task_snapshots(
                 try:
                     task_fd = os.open(name, DIRECTORY_FLAGS, dir_fd=root_fd)
                     try:
-                        task = read_task(task_fd, name, session_id)
+                        task = read_task(task_fd, name, session_id, strict=strict)
+                        if strict and not os.path.samestat(
+                            os.fstat(task_fd), os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                        ):
+                            raise OSError("task directory changed during baseline scan")
                     finally:
                         os.close(task_fd)
                     if task is not None:
                         result[name] = task
                 except (OSError, ValueError):
+                    if strict:
+                        raise
                     continue
+            if strict:
+                with directory(root) as current_fd:
+                    if not os.path.samestat(os.fstat(root_fd), os.fstat(current_fd)):
+                        raise OSError("task root changed during baseline scan")
     except (OSError, ValueError):
+        if strict:
+            raise
         return result
     return result
 
 
 def completed_tasks(
-    root: Path, session_id: str, *, ignored: Collection[str] = ()
+    root: Path, session_id: str, *, ignored: Collection[str] = (), strict: bool = False
 ) -> dict[str, str]:
     """Only root agent completions qualify for automatic followups."""
     return {
         key: task.status
-        for key, task in task_snapshots(root, session_id, ignored=ignored).items()
+        for key, task in task_snapshots(root, session_id, ignored=ignored, strict=strict).items()
         if task.kind == "agent" and task.terminal
     }

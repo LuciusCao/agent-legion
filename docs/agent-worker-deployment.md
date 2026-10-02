@@ -174,7 +174,7 @@ make stack-worker-up
 make stack-logs STACK=worker
 ```
 
-打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，填写部署机可通过 Tailscale 访问的 Host 地址并保存。控制台页面由 Worker Service 动态返回并自动注入 control token；直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
+打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，先完成控制台登录，再填写部署机可通过 Tailscale 访问的 Host 地址并保存。只有 Worker Service 绑定回环地址时页面才自动注入 control token；Compose 容器内部绑定 `0.0.0.0`，即使宿主机只向本机发布端口也需要手动输入控制令牌。直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
 
 - Worker 执行进程是否运行；
 - 当前配置的 Host 地址以及 Host 是否可达；
@@ -310,7 +310,29 @@ Host 孤儿 sweeper 回收。升级必须遵循 **Host first, Worker second**：
 携带 `host_protocol_version`，新 Worker 若发现 Host 低于自身协议版本（旧响应缺少
 该字段也视为旧 Host）会以退出码 2 fail-closed，不进入 claim，避免旧 Host 把
 runtime-scoped 模型降成二元 provider/model 后误投到另一个 runtime。确认 Host 健康
-后再逐台重启 Worker。
+后再逐台重启 Worker。**结果上报头（#748）**：`X-Agent-Result` 携带原始 UTF-8
+字节（CJK 错误摘要是非 ASCII 头值），Worker → Host 链路上的反向代理 / LB / 网关
+必须容忍非 ASCII 头值透传（改写或拒收会导致结果不可投递、租约过期重投）。该线
+格式变更（ensure_ascii 字符串 → 原始 UTF-8 字节）不升协议版本，因此升级纪律上
+**Host 必须先于 Worker 升级**：反向混编（新 Worker + 旧 Host）时 `error_message`
+/ `agent_stderr_tail` 的 CJK 载荷在旧 Host 上按 latin-1 视图显示为乱码（结构与成
+败判定不受影响）；回滚同理须 Host/Worker 同退——只退 Host 即构成同一反向混编窗
+口，CJK 头值 mojibake（仅可读性受损）。同头受 14 KiB 字节预算约束，超预算时 Worker 按 stderr 尾部 →
+error_message → command（纯观测面，清空）→ 产物清单的顺序降级；产物清单面按引用
+形态分流——直传 dict 引用抛溢出信号后走「清单进归档」协议（#755）：Worker 把完整
+direct-ref 清单写成结果归档首成员 `result-output-artifacts.json`（产物字节已在 S3，
+不重复传输），头里只带 `output_artifacts_in_archive` 布尔标记，Host 在结果 commit 时
+从归档读回清单（读不回则诚实判败 failed；cancelled 不翻转）；嵌入重写按 claim 下发的
+`max_archive_bytes` 在原子替换前重校归档实际大小（清单成员可能把低于但接近上限的原
+归档推过 Host 413 大小门禁），超限不重报大归档，走同一诚实判败通道（原归档可提交则
+原样保留证据、本身也超限则回收空归档）；CAS 字符串引用
+（~78B/条，天然落预算）才走最后手段截断（清单降级为空并打
+`output_artifacts_truncated` / `output_artifacts_total` 标记）；CAS 截断形态下产物
+字节本来就在归档里，Host 见 truncated 标记跳过「空清单改判 failed」，改从归档暂
+存视图判定产物齐全与否。另一直传保护面：直传失败换轨（tar 内嵌产物 + CAS 通道）
+前 Worker 按 claim 下发的 `max_archive_bytes`（Host 实例设置实际值，旧 Host 未下发
+时回落 64 MiB 默认）做体积预检，超「上限 − 1 MiB 余量」不换轨、本地诚实判败，
+避免重内嵌必撞 Host 413 丢结果后的全量重跑循环。
 
 **workflow_key 兼容窗口期（issue #211，截止 2026-10-31）**：claim 响应中的
 `workflow_key` 字段已 deprecated（与 `workspace_id` 恒等，schema v62 绑定）。字段
@@ -322,6 +344,14 @@ v68 及以上的 Host 仍下发 `workflow_key`（兼容窗口内），Worker 可
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 
 ### 控制面鉴权
+
+控制令牌（登录 Worker 控制台）与 workspace 注册 Key（授权 Worker 接入 Host）用途不同。默认 Host Compose 在项目根目录运行以下命令取得控制令牌，粘贴到 Worker 登录框后，再到「配置 → Workspace 访问」添加注册 Key：
+
+```bash
+docker compose -f deploy/compose.host.yaml exec worker cat /var/lib/agent-legion-worker-control/control_token
+```
+
+独立 Worker 部署将 Compose 文件换成启动时使用的 `deploy/compose.worker.standalone.yaml` 或 `deploy/compose.worker.yaml`，保留相同项目名及其他 Compose 参数。原生部署从 Worker 的 `--state-dir` 目录读取 `control_token`；没有该机器访问权限时由 Worker 维护者完成登录。控制令牌不要放进控制台 URL、Host 配置或注册标签。
 
 Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > 状态目录下的 `control_token` 文件（容器内执行时自动命中）。
 
@@ -396,17 +426,50 @@ Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
 2. 起后端并登录 Host Web UI，在 workspace「设置 → Agent 与 Worker」为目标
    workspace 签发 scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
    「Workspace 访问（Scoped Token）」区块粘贴添加。Worker 侧 token 随时可以
-   补——注册失败只影响 Worker 自身，不需要重启后端。
+   补——注册失败只影响 Worker 自身，不需要重启后端。该设置页顶部的
+   「Worker 与 Worker 控制台」卡片、签发成功后的「下一步」以及各处 Worker
+   列表空态都带「打开 Worker 控制台」入口：地址来自后端 env
+   `AGENT_LEGION_WORKER_CONSOLE_URL`（`make dev-up` 按 Worker 端口自动注入，
+   `native-prod-up.sh` / Host compose 注入 `:8787`；Worker 控制台经其它地址
+   暴露时在 `.env` 显式配置，显式留空则不显示链接）。回环地址只能在 Worker
+   所在机器的浏览器里打开，链接的悬停提示会说明这一点。Worker 注册成功后，
+   主控制台每一行 Worker 还会带该 Worker **自报**的「控制台」链接：Worker
+   原生 Service 按自己的控制面绑定地址推导（通配绑定 `0.0.0.0` 回落
+   `127.0.0.1`，IPv6 `::` 回落 `[::1]`），经环境变量 `AGENT_WORKER_CONSOLE_URL` 交给 executor，注册时
+   补充 labels 的可选键 `console_url`（`worker/console_url.py`）。控制台经反向
+   代理或映射到非回环地址时，在 Worker 侧显式设置该变量。三份 Compose 均要求
+   在部署环境中显式配置浏览器可达 URL（例如 `https://worker.example/console`），
+   不从 `AGENT_WORKER_UI_BIND` 猜测；缺省或显式空串均不自报。旧版
+   Worker 不上报，对应行只保留部署级入口。
+   已配置的 `console_url` 与其他自定义标签始终原样保留（可能用于 `requires_labels` 调度），环境地址不覆盖它。
+   自定义标签已经占满 32 项，或自报 URL 超过 256 字符时，
+   跳过该可选标签并保留原标签，避免控制台入口使 Worker 注册失败；不截断 URL。
+   入口通过已登录用户可读的 `GET /api/agent-workers/console` 获取部署地址，
+   不下载 Worker 清单；workspace 状态列表的请求与缓存均按 workspace 隔离。
+   首次地址请求失败显示可重试错误，只有成功返回空地址才表示未配置；
+   后台刷新失败保留最近成功的配置，后续成功响应（包括清空配置）替换缓存。
+   非空配置必须是绝对 HTTP(S) 地址，支持 IPv6、反向代理路径与 query；
+   空白、反斜杠、非法端口或 URL 用户名/密码会在创建服务前报错，诊断不回显原值。
+   地址是公开导航信息，控制令牌应在 Worker 控制台中输入，不放进该地址。
+   dev/native 脚本只设置内部 `AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL`；
+   后端使用同一 dotenv 解析器完成加载后，按进程环境 → 根 `.env` → 脚本默认值
+   选择 `AGENT_LEGION_WORKER_CONSOLE_URL`，显式空值始终有效，shell 不另行解析 `.env`。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
 
 ### 开发 worktree 的本地 Worker 检查单
 
+新 workspace 引导只有在 workflow 已发布、所需 Worker 已就绪且调度确认运行后才解锁添加任务。暂停状态未加载或请求失败时不推断为暂停，也不显示确定性的阻塞警告；纯 code workflow 不要求接入 Worker，只检查调度开关。
+
 在开发 worktree 里起本地栈（`make dev-up`，或分开 `make dev-backend` + `make dev-worker`）时，job 一直停在 `queued` 或秒败，按顺序查这三处——`scripts/init-worktree.sh` 已尽量自动化，但各自有时机前提：
 
 1. **Workspace 调度默认暂停**：后端每次启动都把全部 workspace 重置为暂停（刻意设计，防止重启后任务不受控自跑），unknown workspace 也默认暂停。恢复调度是按需操作：后端首次启动建表 seed 之后执行 `scripts/resume-workspaces.sh`（未建表时以退出码 1 失败并提示），或在 workspace 控制台手动恢复。症状：workflow worker 日志每 3 秒一轮但 `jobs=0`。
 2. **Worker 的 models allowlist 不含任务所需模型**：agent 任务的 claim 准入按「runtime + provider/model」逐 Worker 匹配（capability 已不参与匹配，issue #284），全部 Worker 都不满足即判「无 Worker 可认领」，job 秒败并带 `not declared by any Worker` 错误。注意生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 config 文件不生效，要走控制台或 `PUT /api/config`。
-3. **`claim_enabled` 默认 false**：Worker 每次启动/重启都先关闭 claim（只注册心跳、不领任务），症状是后端日志没有任何 `POST /api/agent-executions/claim`。经 worker 控制台或 `PUT /api/config`（`{"claim_enabled": true}`，热字段立即生效）打开。
+3. **`claim_enabled` 默认 false**：Worker 每次启动/重启都先关闭 claim（只注册心跳、不领任务），症状是后端日志没有任何 `POST /api/agent-executions/claim`。经 worker 控制台或 `PUT /api/config`（`{"claim_enabled": true}`，热字段立即生效）打开。schema v87 起 Worker 随每次状态同步（`POST /api/agent-workers/self/presence`）上报该开关，主控制台的 Worker 行会直接标成「在线·未领取」并带「控制台」入口；任务列表有「等待中」任务而无 Worker 领取时顶部还会出排查横幅。旧版 Worker 不上报（`claim_enabled: null`），仍显示为普通「在线」。
+
+领取状态属于当前注册凭据：重注册生成新 token 时清回 `null`，旧 token 的在途 presence/claim 请求不能改变新注册的状态或在线时间。presence 与 claim 在写事务中锁定当前 Worker 行并复核凭据，状态未变化时也必须完成这一步。
+
+引导只在空态可见时请求准备状态；等待任务的排查横幅按需请求。首次未返回或刷新失败都视为未知，不据此宣称已暂停、无 Worker 或可执行；正常后台刷新保留上次成功快照。排查入口优先使用当前在线且未撤销的 Worker 地址，暂停／恢复失败会明确提示并允许重试。
 
 ## 6. 验证两个 Worker
 

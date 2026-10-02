@@ -67,6 +67,13 @@ echo "ensure-velites $*" >> "${STUB_LOG}"
 exit 0
 """
 
+# 依赖新鲜度检测桩：install-deps.sh 第 7 步委托 scripts/ensure-frontend-deps.sh
+# （#810），行为级验证见 test_ensure_frontend_deps.py，这里只记录委托发生。
+_ENSURE_FRONTEND_DEPS_STUB = """#!/usr/bin/env bash
+echo "ensure-frontend-deps $*" >> "${STUB_LOG}"
+exit 0
+"""
+
 # 版本预检桩：python3 -c / node -e 退出 0 即视为版本达标。
 _EXIT_OK_STUB = """#!/usr/bin/env bash
 exit 0
@@ -85,6 +92,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Path]:
     (main / "frontend").mkdir()
     shutil.copy(SCRIPT, main / "scripts" / SCRIPT.name)
     _write_stub(main / "scripts" / "ensure-velites.sh", _ENSURE_VELITES_STUB)
+    _write_stub(main / "scripts" / "ensure-frontend-deps.sh", _ENSURE_FRONTEND_DEPS_STUB)
     (main / ".env.example").write_text(_ENV_EXAMPLE)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -147,6 +155,8 @@ def test_macos_all_tools_present_initializes(tmp_path: Path) -> None:
     # 派生名约定（裸名是 #227 要避开的共享/prod 库）。
     assert "createdb agent_legion_dev" in log.splitlines()
     assert "ensure-velites --dest data/bin" in log
+    # #810：第 7 步委托依赖新鲜度检测，而非只看 node_modules 是否存在。
+    assert "ensure-frontend-deps" in log
     env_text = (main / ".env").read_text()
     assert "AGENT_LEGION_S3_ACCESS_KEY=stub-access-key" in env_text
     assert "AGENT_LEGION_S3_SECRET_KEY=stub-secret-key" in env_text

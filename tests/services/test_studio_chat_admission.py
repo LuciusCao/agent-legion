@@ -5,37 +5,16 @@ from unittest.mock import Mock
 import pytest
 from psycopg import OperationalError
 
-from server.app.auth.scoped_tokens import mint_scoped_token
 from server.app.auth.sessions import hash_token
 from server.app.db.connection import DatabaseConnection
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import admission as service_module
-from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.runtime import SessionRuntime
-from server.app.studio_chat.service import StudioChatService
 from server.app.studio_chat.token_admission import require_live_run_token
 from server.app.studio_chat.token_keepalive import keepalive_run_token
+from tests.helpers import studio_chat_fixtures
 
-
-@pytest.fixture
-def admission(job_db, settings):
-    service = StudioChatService(job_db, settings, None)
-    workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="Admission")[
-        "id"
-    ]
-    user = job_db.create_user("admission-user", password_hash=None)["id"]
-    sid = job_db.create_studio_chat_session(workspace, user, "test-agent")
-    job_db.update_studio_chat_session(sid, status="idle")
-    handle = AcpSessionHandle(
-        command="unused", args=[], cwd="/tmp", mcp_server=None, env=None, callbacks=Mock()
-    )
-    runtime = SessionRuntime(handle, mint_scoped_token(job_db, user, workspace_id=workspace))
-    runtime.loading = True
-    runtime.resume_transcript_pending = True
-    runtime.stream.append("text", "previous")
-    service._runtimes[sid] = runtime
-    yield service, job_db, sid, workspace, runtime
-    service.shutdown()
+admission = studio_chat_fixtures.admission
 
 
 def assert_unaccepted(context):

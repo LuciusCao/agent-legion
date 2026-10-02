@@ -92,6 +92,11 @@
   background: #e6f4ea;
   color: #1e7e34;
 }
+/* 在线·未领取（v87 领取开关关闭）：警示色 */
+.chipIdle {
+  background: #fff4e0;
+  color: #7a4f00;
+}
 /* workspace 绑定 chip（token 归属 / worker 注册 scope） */
 .chipScope {
   background: #e8f0fe;

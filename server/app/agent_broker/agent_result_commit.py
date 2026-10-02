@@ -13,6 +13,9 @@ from typing import Any
 from fastapi import HTTPException
 
 from server.app.agent_broker import AgentExecutionBroker, worker_events
+from server.app.agent_broker.result_output_manifest import (
+    enrich_outcome_from_archived_manifest,
+)
 from server.app.agent_broker.result_spool import publish_staged_result
 from server.app.agent_broker.result_timing import ResultStageTimer, report_result_stages
 from server.app.agent_control.completion import (
@@ -51,6 +54,17 @@ def commit_agent_result(
     stage_timer = ResultStageTimer()
     try:
         publish_staged_result(staged_body, broker.bundle_dir / archive_name)
+        # #755 codex P1：清单走归档成员的新协议——Worker 头溢出时把头里
+        # 放不下的直传 ref 清单写成归档首成员，头里只带
+        # output_artifacts_in_archive 标记。这里在 finish 之前读回清单并
+        # enrich outcome：空清单翻转、HEAD 校验、staged promote 全部走
+        # 既有路径，finish 侧零改动。版本偏斜说明：新 worker + 不认识该
+        # 标记的旧 Host 会走空清单翻转诚实判败（completed + 空清单 →
+        # failed），不会静默错。
+        if record.get("output_artifacts_in_archive") is True:
+            outcome = enrich_outcome_from_archived_manifest(
+                outcome, record, broker.bundle_dir / archive_name
+            )
         # finish() commits the lease/node terminal state first; mark_done()
         # then closes the request (bound to lease_id in SQL). A crash
         # between the two leaves a claimed request whose lease is no

@@ -65,6 +65,7 @@ if TYPE_CHECKING:
 # 上限）；execution_run 沿本模块导入，`as` 惯用法重导出而非再定义一份
 # 副本（#200/#201 同族的 sync-by-comment 反模式）。failed_metadata 经
 # prepare 重导出（prepare_or_failed 同车）。
+from worker.upload.embed_precheck import embed_restast_rejection, embed_switch_rejection
 from worker.upload.prepare import failed_metadata, prepare_or_failed
 from worker.upload.result_metadata import (
     MAX_ERROR_MESSAGE_CHARS as MAX_ERROR_MESSAGE_CHARS,
@@ -334,10 +335,33 @@ class UploadQueue:
                     print(f"direct upload failed for {task.execution_id}: {exc}", flush=True)
                     if self._condemned_before_bulk(task):
                         return "lost"
+                    # #755 codex P1：换轨预检（embed_precheck）——内嵌总量超
+                    # 「Host 实际上限 − 安全余量」时不换轨（必撞 Host 413 →
+                    # 丢结果 → 租约过期重跑循环），直接诚实判败上报；归档保持
+                    # 直传形态（产物字节本就不在 tar，events/日志照常携带）。
+                    rejection = embed_switch_rejection(task)
+                    if rejection is not None:
+                        print(
+                            f"direct upload fallback rejected for {task.execution_id}:"
+                            f" {rejection} (switch trigger: {exc})",
+                            flush=True,
+                        )
+                        metadata = failed_metadata(task, rejection)
+                        uploaded = {}
+                        break
                     task.artifact_uploads = {}
                     metadata, archive, outputs = prepare_or_failed(task)
                     if self._condemned_before_bulk(task):
                         return "lost"
+                    # #755 codex P2-1：换轨后的 re-stat 兜底（embed_precheck
+                    # 下沉实现）——预检是未压缩口径的优化放行（小上限下余量按
+                    # 上限比例收缩，tar/gzip 开销占比不可忽略），换轨重备的
+                    # 归档仍可能超 Host 上限；超限即回收空归档诚实判败，不重报
+                    # 大归档吃 413 后被 report 循环当终态删 marker。
+                    rejection = embed_restast_rejection(task, archive)
+                    if rejection is not None:
+                        metadata, uploaded = failed_metadata(task, rejection), {}
+                        break
                     direct, restart = False, True
                     break
                 except HostRequestError as exc:

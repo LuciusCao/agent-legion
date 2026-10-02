@@ -58,6 +58,9 @@ services:
       # 无冒号的 ${VAR-默认值} 形式：deploy/.env 显式写空值时生效为「禁用
       # 守卫」（零 runtime 注册合法，如纯 code 池形态），不会被默认值盖掉。
       AGENT_WORKER_EXPECT_RUNTIMES: ${AGENT_WORKER_EXPECT_RUNTIMES-velites}
+      # 监听地址不能推导浏览器可达地址；显式配置后才自报 labels.console_url。
+      # 未配置或留空均不自报，避免把通配绑定或容器地址作为浏览器入口。
+      AGENT_WORKER_CONSOLE_URL: ${AGENT_WORKER_CONSOLE_URL-}
     stop_grace_period: 30s
     healthcheck:
       # Healthy = 服务可达，且控制面未进入 failed，且（Worker 进程在跑或尚未配置）。

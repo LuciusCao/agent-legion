@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import { IconButton } from '@mui/material'
 import type { JobSummary, UpgradeMode } from '../../types'
 import type { NodeCatalog } from '../../lib/nodeCatalog'
 import { JobRerunDialog, type WorkflowNodesByKey } from '../JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobDeleteDialog } from './JobDeleteDialog'
-import { MaterialIcon } from '../MaterialIcon'
-import { canContinueJob, computeActionDisabled } from '../jobActionEligibility'
-import { JobApprovalActionButton } from './JobApprovalActionButton'
-import { JobWorkflowUpgradeButton } from './JobWorkflowUpgradeButton'
-import styles from './JobDetailActions.module.css'
+import {
+  canContinueJob,
+  canApproveJob,
+  computeActionDisabled,
+} from '../jobActionEligibility'
+import { JobDetailToolbar, type JobToolbarAction } from './JobDetailToolbar'
+import { JobWorkflowUpgradeDialog } from './JobWorkflowUpgradeDialog'
 
 export type JobDetailActionsProps = {
   jobs: JobSummary[]
@@ -48,97 +49,97 @@ export function JobDetailActions({
   const [rerunOpen, setRerunOpen] = useState(false)
   const [runToOpen, setRunToOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
 
   const disabled = computeActionDisabled(jobs, loading)
 
   const showContinue = jobs.some((job) => canContinueJob(job))
 
+  const execution: JobToolbarAction[] = [
+    {
+      icon: 'restart_alt',
+      label: '重跑',
+      tooltip: '从选定的节点开始，一路重新执行到流程结束',
+      disabled: disabled.rerun,
+      onClick: () => setRerunOpen(true),
+    },
+    {
+      icon: 'play_circle',
+      label: '运行到节点',
+      ariaLabel: '运行到',
+      tooltip: '只执行到选定节点就暂停，之后点「继续」跑完剩余流程',
+      disabled: disabled.runTo,
+      onClick: () => setRunToOpen(true),
+    },
+  ]
+  if (onOpenApproval && jobs.some(canApproveJob))
+    execution.unshift({
+      icon: 'pending_actions',
+      label: '审批',
+      color: 'secondary',
+      disabled: loading,
+      onClick: onOpenApproval,
+    })
+  if (onUpgradeWorkflow && jobs.length === 1 && jobs[0].is_workflow_outdated)
+    execution.splice(1, 0, {
+      icon: 'arrow_circle_up',
+      label: '升级',
+      ariaLabel: '升级 workflow',
+      disabled: loading || jobs[0].status === 'running',
+      onClick: () => setUpgradeOpen(true),
+    })
+  if (showContinue && onContinue)
+    execution.push({
+      icon: 'skip_next',
+      label: '继续',
+      ariaLabel: '继续完整流程',
+      tooltip: '把剩余节点全部跑完',
+      disabled: disabled.continue,
+      onClick: onContinue,
+    })
+  const secondary: JobToolbarAction[] = [
+    {
+      icon: 'inventory_2',
+      label: '打包',
+      disabled: disabled.package,
+      onClick: onPackage,
+    },
+    {
+      icon: 'folder_open',
+      label: '产物',
+      ariaLabel: '产物文件',
+      disabled: loading,
+      onClick: onOpenArtifacts,
+    },
+    {
+      icon: 'delete',
+      label: '删除',
+      color: 'error',
+      disabled: disabled.delete,
+      onClick: () => setDeleteOpen(true),
+    },
+  ]
+  if (onClearPacked)
+    secondary.splice(1, 0, {
+      icon: 'unarchive',
+      label: '清空打包',
+      ariaLabel: '清空打包状态',
+      disabled: loading || !jobs.some((job) => job.packed),
+      onClick: onClearPacked,
+    })
+
   return (
     <>
-      <div className={styles.actions} data-testid="job-detail-actions">
-        <JobApprovalActionButton
-          jobs={jobs}
-          loading={loading}
-          onOpenApproval={onOpenApproval}
-        />
-        <IconButton
-          aria-label="重跑"
-          title="重跑"
-          disabled={disabled.rerun}
-          onClick={() => setRerunOpen(true)}
-        >
-          <MaterialIcon name="restart_alt" />
-        </IconButton>
-        {onUpgradeWorkflow && (
-          <JobWorkflowUpgradeButton
-            jobs={jobs}
-            loading={loading}
-            onUpgradeWorkflow={onUpgradeWorkflow}
-          />
-        )}
-        <IconButton
-          aria-label="运行到"
-          title="运行到"
-          disabled={disabled.runTo}
-          onClick={() => setRunToOpen(true)}
-        >
-          <MaterialIcon name="play_circle" />
-        </IconButton>
-        {showContinue && onContinue && (
-          <IconButton
-            aria-label="继续完整流程"
-            title="继续完整流程"
-            disabled={disabled.continue}
-            onClick={onContinue}
-          >
-            <MaterialIcon name="skip_next" />
-          </IconButton>
-        )}
-        <IconButton
-          aria-label="打包"
-          title="打包"
-          disabled={disabled.package}
-          onClick={onPackage}
-        >
-          <MaterialIcon name="inventory_2" />
-        </IconButton>
-        {onClearPacked && (
-          <IconButton
-            aria-label="清空打包状态"
-            title="清空打包状态"
-            disabled={loading || !jobs.some((job) => job.packed)}
-            onClick={onClearPacked}
-          >
-            <MaterialIcon name="unarchive" />
-          </IconButton>
-        )}
-        <IconButton
-          aria-label="删除"
-          title="删除"
-          color="error"
-          disabled={disabled.delete}
-          onClick={() => setDeleteOpen(true)}
-        >
-          <MaterialIcon name="delete" />
-        </IconButton>
-        <IconButton
-          aria-label="产物文件"
-          title="产物文件"
-          disabled={loading}
-          onClick={onOpenArtifacts}
-        >
-          <MaterialIcon name="folder_open" />
-        </IconButton>
-        {onOpenDiagnosis && (
-          <IconButton
-            aria-label="排查助手"
-            title="排查助手（agent 对话，不限于出错节点）"
-            onClick={onOpenDiagnosis}
-          >
-            <MaterialIcon name="smart_toy" />
-          </IconButton>
-        )}
-      </div>
+      <JobDetailToolbar
+        execution={execution}
+        secondary={secondary}
+        onOpenDiagnosis={onOpenDiagnosis}
+      />
+      <JobWorkflowUpgradeDialog
+        open={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+        onConfirm={onUpgradeWorkflow ?? (() => {})}
+      />
 
       <JobRerunDialog
         open={rerunOpen}

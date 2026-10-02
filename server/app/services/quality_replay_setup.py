@@ -99,17 +99,26 @@ class QualityReplaySetup:
         try:
             # create_jobs_bulk returns job ids (#467 A3); the copy job's row
             # is read back through the facade for the id only.
-            copy_job_id = str(
-                self.job_db.create_jobs_bulk(
-                    candidates=[candidate],
-                    workflow_key=workflow_key,
-                    run_id=str(batch["id"]),
-                    node_keys=list(definition.executable_nodes),
-                    workspace_id=workspace_id,
-                    revision=revision,
-                    frozen_config={node.key: frozen} if frozen is not None else {},
-                )[0]
+            owned_ids = self.job_db.create_jobs_bulk(
+                candidates=[candidate],
+                workflow_key=workflow_key,
+                run_id=str(batch["id"]),
+                node_keys=list(definition.executable_nodes),
+                workspace_id=workspace_id,
+                revision=revision,
+                frozen_config={node.key: frozen} if frozen is not None else {},
             )
+            # #735: an empty ownership result is unreachable for a replay —
+            # the copy job id derives from the replay id, and the
+            # deterministic run id from a payload frozen on the ORIGINAL job,
+            # so a retry rebuild takes the same-run update arm. Guard anyway:
+            # a bare [0] IndexError would masquerade as a programming crash
+            # instead of naming the ownership loss.
+            if not owned_ids:
+                raise RuntimeError(
+                    f"quality replay copy job lost to another run (replay {replay_id})"
+                )
+            copy_job_id = str(owned_ids[0])
         except Exception:
             # #204 broad-except audit: both business rejections (ValueError → 400 in the run
             # service) and programming errors land here; either way the
