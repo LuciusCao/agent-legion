@@ -485,6 +485,35 @@ def test_list_artifacts_local_and_disabled_entries_have_no_url(job_db, settings)
         assert entry["expires_at"] is None
 
 
+def test_status_poll_is_unsigned_and_survives_signing_failure(job_db, settings, monkeypatch):
+    """#739 codex P2：status 走免签名名称管线——轮询 N 次零 presign 调用
+    （计数桩断言 0），签名客户端/凭据异常不传染状态面（仍返回完整名单，
+    状态面只依赖 DB）；对照组证明桩是活的、清单面确实签名。"""
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+    _seed_manifest_row(store, job, "report.json", b'{"r": 1}')
+    calls: list[str] = []
+
+    def _boom(storage_key, expires_seconds=3600):  # noqa: ANN001, ANN202
+        calls.append(storage_key)
+        raise ConnectionError("signing credentials broken")
+
+    monkeypatch.setattr(store.storage, "presign_get", _boom)
+
+    for _ in range(3):
+        payload = service.status(job["workspace_id"], job["id"])
+        assert payload["artifacts"] == ["clip.mp4", "report.json"]
+
+    assert calls == []
+
+    # 对照：同一必炸桩下清单接口仍走到 presign（桩活、签名面未退化）。
+    with pytest.raises(ConnectionError, match="signing credentials broken"):
+        service.list_artifacts(job["workspace_id"], job["id"])
+    assert calls
+
+
 def test_presign_targets_exactly_the_manifest_row_key(job_db, settings):
     """安全面（签名目标）：presign_get 收到的必须逐位等于权威 manifest 行
     的 storage_key——行由服务端布局生成（record_remote/verify_remote 拒绝

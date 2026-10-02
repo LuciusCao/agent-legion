@@ -14,6 +14,8 @@ import gzip
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from tests.routes.jobs.external_artifact_testlib import _register_object_artifact
 
@@ -53,6 +55,37 @@ def test_status_lists_artifact_names_once_produced(two_workspaces):
     body = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}").json()
 
     assert body["artifacts"] == ["report.json"]
+
+
+def test_status_poll_is_unsigned_and_survives_signing_failure(two_workspaces, monkeypatch):
+    """#739 codex P2: the status poll is an unsigned name pipeline — N polls
+    mint zero presigned URLs (counting stub asserts 0), and a broken signing
+    client/credential can no longer 500 the lightweight DB-only status read.
+    The control case proves the stub is live and the manifest route signs."""
+    c, job_a, _ = two_workspaces
+    _register_object_artifact(c, job_a, "clip.mp4", b"0123456789", gzipped=False)
+    _register_object_artifact(c, job_a, "report.json", b'{"r": 1}')
+    store: JobArtifactObjectStore = c.app.state.job_artifact_objects
+    calls: list[str] = []
+
+    def _boom(storage_key, expires_seconds=3600):  # noqa: ANN001, ANN202
+        calls.append(storage_key)
+        raise ConnectionError("signing credentials broken")
+
+    monkeypatch.setattr(store.storage, "presign_get", _boom)
+
+    for _ in range(3):
+        response = c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}")
+        assert response.status_code == 200
+        assert response.json()["artifacts"] == ["clip.mp4", "report.json"]
+
+    assert calls == []
+
+    # Control: the manifest route still reaches presign under the same stub
+    # (TestClient re-raises server exceptions, so the boom surfaces here).
+    with pytest.raises(ConnectionError, match="signing credentials broken"):
+        c.get(f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts")
+    assert calls
 
 
 # --- 清单端点 ----------------------------------------------------------------
