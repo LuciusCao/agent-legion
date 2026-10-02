@@ -218,8 +218,8 @@ def test_api_token_rejected_on_other_effecting_endpoints(client) -> None:
         ),
         ("DELETE", f"/api/workspaces/{WORKSPACE}/materials/mat-x", None),
     ]
-    # #626 review: the intake allowlist (POST/GET runs + jobs listing) 404s
-    # the api identity on every other workspace-scoped route before the
+    # #626 review: the intake surface (tag-derived, auth/api_scope_surface)
+    # 404s the api identity on every other workspace-scoped route before the
     # route-level guards' 403 — and on scopeless mounts too. Exception after
     # the #745 rebase: the job_group's require_job_workspace_access lets a
     # scoped identity's effecting request short-circuit past the job lookup,

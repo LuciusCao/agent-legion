@@ -38,9 +38,9 @@ def is_text_item(item: Any) -> bool:
     return isinstance(item, dict) and item.get("type") == "text"
 
 
-def text_item_filename(raw: Any) -> str:
+def text_item_filename(raw: Any, default: str = "") -> str:
     """The material filename for a text item: a bare ``.md`` / ``.txt`` name."""
-    name = str(raw or "").strip() or DEFAULT_TEXT_FILENAME
+    name = str(raw or "").strip() or default.strip() or DEFAULT_TEXT_FILENAME
     if "/" in name or "\\" in name or name.startswith("."):
         raise InvalidOperationError(f"text item filename is invalid: {name!r}")
     if any(ord(char) < 32 or ord(char) == 127 for char in name):
@@ -55,7 +55,7 @@ def text_item_filename(raw: Any) -> str:
     return name
 
 
-def _prepare(items: list[dict[str, Any]]) -> list[tuple[int, str, bytes]]:
+def _prepare(items: list[dict[str, Any]], default_filename: str) -> list[tuple[int, str, bytes]]:
     """Shape-check every text item before anything is written."""
     prepared: list[tuple[int, str, bytes]] = []
     for index, item in enumerate(items):
@@ -72,7 +72,9 @@ def _prepare(items: list[dict[str, Any]]) -> list[tuple[int, str, bytes]]:
             raise InvalidOperationError(
                 f"text item exceeds {TEXT_ITEM_MAX_BYTES} bytes ({len(payload)} bytes)"
             )
-        prepared.append((index, text_item_filename(item.get("filename")), payload))
+        prepared.append(
+            (index, text_item_filename(item.get("filename"), default_filename), payload)
+        )
     return prepared
 
 
@@ -83,6 +85,7 @@ def materialize_text_items(
     items: list[dict[str, Any]],
     *,
     created_by: str = "",
+    default_filename: str = "",
 ) -> list[dict[str, Any]]:
     """Return ``items`` with every text item replaced by a material item.
 
@@ -98,7 +101,7 @@ def materialize_text_items(
             "Material storage is not configured on this instance "
             "(AGENT_LEGION_S3_BUCKET is unset); text items cannot be stored"
         )
-    prepared = _prepare(items)
+    prepared = _prepare(items, default_filename)
     resolved = list(items)
     for index, material_id in store_text_batch(
         job_db, storage, workspace_id, prepared, created_by

@@ -17,6 +17,7 @@ All notable changes to this project are documented here. The format follows [Kee
 主打 workflow 升级继承模式与执行代次/产物提交统一协议（issue #759 四层 stack）；安全面收口 job-id 路由跨 workspace IDOR（issue #710）及其红队 follow-up；Studio 交互线（聊天区草稿卡重做、对话骨架统一与超时误报修复、取消轮可见性、定制预览同屏验证）与运行时防护（velites 读取硬上限、worker terminate 收尾兜底、SIGPIPE 免疫）。
 
 ### Added
+- start 节点可选 `text_input {label, filename, template}`：Studio 可配置输入框标题、落盘文件名与预填模板；未修改的模板不计条目，可一键恢复，显式条目文件名优先。loader 校验形状与裸 `.md`/`.txt` 文件名，echo / 快照往返对称，compare 记 info 级变更。
 - 节点代码体积上限开放为实例级配置（issue #628，#786 起 admin 实例设置可管理）：自定义节点代码的 64KB 硬编码上限改为 `executor_runtime.workflows.node_code_max_bytes`（admin 全局设置「运行与本地执行」组直接管理，解析链 实例设置 > env `AGENT_LEGION_NODE_CODE_MAX_BYTES` > 默认 64KB、`ge=1024`、启动时生效，非法值在 PUT 契约层 422 / env 在加载时 fail-fast）；Studio 与 studio-agent 两条保存/发布校验链路统一从 settings 取值，错误信息携带当前上限；节点代码读取响应新增只读字段 `max_code_bytes`，前端编辑器同步展示「代码体积上限 N KB（实例配置）」；设计文档补「体积预算与配置」一节（调大的代价：DB 文本膨胀、claim bundle 传输变大、code review 可读性下降，仍建议按节点粒度自律）。
 - workflow 升级的继承模式（issue #645）：`POST /jobs/{job_id}/upgrade-workflow` 与批量版新增 `mode` 参数（`clean` = 既有全量重跑（默认）；`inherit` = 继承未变节点的既有产物、只重跑变更子图）。per-node diff 按「节点定义归一化哈希（label 等纯展示字段排除）+ 冻结 config 段（新旧定义两侧 re-freeze 同基比较）+ 上游节点哈希链式传播 + 入边（含 when 条件）」计算；`skill: latest`（HEAD 漂移永不入锁）、分片节点、审批门节点一律不参与继承，未变节点的产物已被淘汰或对象缺失时退化重跑该子图（宁可多跑）。响应携带 `mode` / `kept_nodes` / `rerun_nodes` 统计；前端升级确认对话框提供模式单选。
 - 执行代次与产物提交统一协议（issue #759，stack #773/#774/#775/#778，继承模式的执行面底座）：`jobs.execution_generation` 代次 + job-mutation 统一锁域，enqueue/claim/finish/fail/审批/清扫全部重置入口走代次 CAS——迟到结果与重跑/重排不再互相覆盖；本地 code 输出、direct remote refs、legacy Worker 归档三种结果来源统一进同一条 commit 管线（stage → 备份权威副本 → 代次门 → promote → 清单提交 → 失败回滚），产物字节写面收口到共享 promotion primitive；产物消费关系以 `artifact_consumption_index` 为唯一事实源（node inputs ∪ `edge.condition.artifact`），条件生产者有屏障保证。复审跟进（#778）：hydration 代次读裁剪、恢复面按本轮节点状态收窄、分片有效状态、解包失败纳入 lease 临界区。
@@ -53,6 +54,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
+- 任务详情工具栏采用图标与中文短文字，执行操作按状态外露，打包、清空打包、产物和删除收进「更多」；小于 1100px 隐藏外露文字并保留提示，小于 760px 执行操作也进入菜单。标题可收缩并省略，删除仍需确认，保留用量与排查助手入口。
 - 「添加条目」新增「输入需求」提交方式（`text` 条目）：需求文字直接写进 run 请求，`RunService` 在全部校验通过后把它落成 ready 的 Markdown 材料（sha256 内容寻址、对象先暂存、材料行整批事务提交、`.md`/`.txt` 白名单、UTF-8 ≤ 64 KiB），再按普通 `material` 条目解析——job 输入、manifest、Worker 物化与 skill 零改动。契约缺省不含 `text`（存量 fail-closed），Studio 入口节点勾选「直接输入需求」后 Tab 出现；对象存储未配置时 503。同 hash 仅复用 ready 材料，上传中、失败或已过期材料返回 409，避免抢占浏览器上传或改写既有对象归属。设计见 docs/architecture/materials-and-runs-design.md §4.1。
 
 ### Changed

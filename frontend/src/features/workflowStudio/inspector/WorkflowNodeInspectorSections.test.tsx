@@ -116,8 +116,10 @@ describe('WorkflowNodeInspectorSections for a start node', () => {
     expect(removed).not.toContain('- ref')
   })
 
-  it('disables the only checked type so the contract stays non-empty', () => {
-    renderSections({ ...startNode, accepted_item_types: ['material'] })
+  it('disables the only checked draft type even when the published contract has more types', () => {
+    renderSections(startNode, {
+      definitionYaml: startYaml.replace('      - ref\n', ''),
+    })
 
     expect(screen.getByRole('checkbox', { name: /上传文件/ })).toBeDisabled()
     expect(screen.getByRole('checkbox', { name: /外部平台内容/ })).toBeEnabled()

@@ -1,7 +1,7 @@
 """Closed/error session resume path (split from service.py for file budget).
 
 The service keeps a thin ``resume_session`` delegate; everything after the
-shutdown check lives here so the claim/teardown/spawn ordering stays in one
+startup admission lives here so the claim/teardown/spawn ordering stays in one
 auditable place, mirroring how spawn.py owns the shared start path. Access to
 the service's private collaborators matches the package idiom (callbacks.py
 forwards into ``service._on_*``; tests monkeypatch ``service._registry``).
