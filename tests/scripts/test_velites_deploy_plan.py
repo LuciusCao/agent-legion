@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import os
 import stat
 import tomllib
 from pathlib import Path
@@ -95,9 +96,9 @@ def test_planner_targets_follow_resolver_not_sibling_paths(
     dir_a.mkdir()
     dir_b.mkdir()
     _write_executable(dir_a / "velites")
-    _write_stamp(dir_a / "velites.src-stamp", "hash-v0")
+    _write_stamp(dir_a / "velites.src-stamp", "0000000000000000000000000000000000000000")
     _write_executable(dir_b / "velites-sandbox")
-    _write_stamp(dir_b / "velites-sandbox.src-stamp", "hash-v0")
+    _write_stamp(dir_b / "velites-sandbox.src-stamp", "0000000000000000000000000000000000000000")
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled")
 
     def fake_which(binary: str) -> str | None:
@@ -146,7 +147,7 @@ def test_dest_mode_includes_family_member_only_when_trace_exists(
     assert set(targets) == {"velites"}
 
     # 孤儿 stamp（二进制被删、stamp 残留）同样触发。
-    _write_stamp(dest / "velites-sandbox.src-stamp", "hash-v0")
+    _write_stamp(dest / "velites-sandbox.src-stamp", "0000000000000000000000000000000000000000")
     targets = dict(planner._resolve_deployment_targets(str(dest)))
     assert set(targets) == {"velites", "velites-sandbox"}
 
@@ -157,20 +158,24 @@ def test_check_reports_every_stale_member(monkeypatch: pytest.MonkeyPatch, tmp_p
     dest = tmp_path / "data" / "bin"
     dest.mkdir(parents=True)
     _write_executable(dest / "velites")
-    _write_stamp(dest / "velites.src-stamp", "hash-v1")
+    _write_stamp(dest / "velites.src-stamp", "1111111111111111111111111111111111111111")
     _write_executable(dest / "velites-sandbox")
-    _write_stamp(dest / "velites-sandbox.src-stamp", "hash-v0")
+    _write_stamp(dest / "velites-sandbox.src-stamp", "0000000000000000000000000000000000000000")
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled")
 
-    assert planner._check("hash-v1", str(dest)) == ["velites-sandbox"]
+    assert planner._check("1111111111111111111111111111111111111111", str(dest)) == [
+        "velites-sandbox"
+    ]
 
     # 全新鲜 → 空。
-    _write_stamp(dest / "velites-sandbox.src-stamp", "hash-v1")
-    assert planner._check("hash-v1", str(dest)) == []
+    _write_stamp(dest / "velites-sandbox.src-stamp", "1111111111111111111111111111111111111111")
+    assert planner._check("1111111111111111111111111111111111111111", str(dest)) == []
 
     # 无 stamp（Release 产物）→ 不可判鲜 → 重建。
     (dest / "velites-sandbox.src-stamp").unlink()
-    assert planner._check("hash-v1", str(dest)) == ["velites-sandbox"]
+    assert planner._check("1111111111111111111111111111111111111111", str(dest)) == [
+        "velites-sandbox"
+    ]
 
 
 def test_check_flags_non_executable_copy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -182,13 +187,28 @@ def test_check_flags_non_executable_copy(monkeypatch: pytest.MonkeyPatch, tmp_pa
     dest.mkdir(parents=True)
     binary = dest / "velites"
     _write_executable(binary)
-    _write_stamp(dest / "velites.src-stamp", "hash-v1")
+    _write_stamp(dest / "velites.src-stamp", "1111111111111111111111111111111111111111")
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled")
 
-    assert planner._check("hash-v1", str(dest)) == []
+    assert planner._check("1111111111111111111111111111111111111111", str(dest)) == []
 
     binary.chmod(binary.stat().st_mode & ~stat.S_IXUSR & ~stat.S_IXGRP & ~stat.S_IXOTH)
-    assert planner._check("hash-v1", str(dest)) == ["velites"]
+    assert planner._check("1111111111111111111111111111111111111111", str(dest)) == ["velites"]
+
+
+def test_check_does_not_block_on_fifo_stamp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """codex R7 P2：stamp 是 FIFO 时裸 read_text() 会永久阻塞，prod-up 卡在
+    判鲜。planner 复用对账核心的有界读取（read_src_stamp：常规文件 + 体积
+    上限 + 指纹形态），FIFO 按「不可判鲜 → 重建」处理。"""
+    dest = tmp_path / "data" / "bin"
+    dest.mkdir(parents=True)
+    _write_executable(dest / "velites")
+    os.mkfifo(dest / "velites.src-stamp")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled")
+
+    assert planner._check("1" * 40, str(dest)) == ["velites"]
 
 
 def test_is_consumable_binary_is_the_shared_acceptance_predicate(

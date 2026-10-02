@@ -73,7 +73,10 @@ if str(_REPO_ROOT) not in sys.path:
 #: 与 scripts/ensure-velites.sh 的 ``STAMP="${VELITES_BIN}.src-stamp"`` 同
 #: 约定——跨进程协议常量，bash 侧的一致性由
 #: tests/scripts/test_velites_deploy_plan.py 钉住。
-from shared.velites_staleness import SRC_STAMP_SUFFIX  # noqa: E402  # sys.path 先行（见上）
+from shared.velites_staleness import (  # noqa: E402  # sys.path 先行（见上）
+    SRC_STAMP_SUFFIX,
+    read_src_stamp,
+)
 
 
 def _resolve_deployment_targets(dest_dir: str | None) -> list[tuple[str, str]]:
@@ -144,13 +147,6 @@ def _default_install_dir() -> str:
     return os.environ.get("VELITES_INSTALL_DIR") or os.path.expanduser("~/.local/bin")
 
 
-def _read_stamp(binary_path: Path) -> str:
-    try:
-        return Path(f"{binary_path}{SRC_STAMP_SUFFIX}").read_text(encoding="utf-8").strip()
-    except (OSError, ValueError):
-        return ""
-
-
 def _plan(dest_dir: str | None) -> list[tuple[str, str]]:
     return _resolve_deployment_targets(dest_dir)
 
@@ -162,13 +158,15 @@ def _check(src_id: str, dest_dir: str | None) -> list[str]:
     is_file + X_OK）——执行位丢失（无 -p 拷贝/权限变更）的副本
     resolver 会跳过，按「存在」判鲜会让脚本宣称最新而 Worker 回落旧
     副本或启动失败（#835 codex R5 P2）。stamp 缺失/损坏/不匹配统一按
-    「不可判鲜 → 重建」处理（与主脚本对 Release 产物的既有语义一致）。"""
+    「不可判鲜 → 重建」处理（与主脚本对 Release 产物的既有语义一致）。
+    stamp 读取复用对账核心的有界读取 read_src_stamp（常规文件 + 体积上限 +
+    指纹形态校验）——FIFO/设备文件 stamp 不会挂死判鲜（#835 codex R7 P2）。"""
     from shared.code_sandbox import is_consumable_binary
 
     stale: set[str] = set()
     for member, path in _resolve_deployment_targets(dest_dir):
         binary_path = Path(path)
-        if not is_consumable_binary(binary_path) or _read_stamp(binary_path) != src_id:
+        if not is_consumable_binary(binary_path) or read_src_stamp(binary_path) != src_id:
             stale.add(member)
     return sorted(stale)
 

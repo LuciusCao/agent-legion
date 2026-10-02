@@ -102,7 +102,7 @@ def _setup(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     hash_file = tmp_path / "src-hash"
-    hash_file.write_text("hash-v1\n")
+    hash_file.write_text("1111111111111111111111111111111111111111\n")
     status_file = tmp_path / "src-status"
     status_file.write_text("")
     log = tmp_path / "stub.log"
@@ -142,8 +142,8 @@ def test_builds_and_installs_when_binary_missing(tmp_path: Path) -> None:
     result = _run(main, env)
     assert result.returncode == 0, result.stderr
     binary, stamp = _installed(tmp_path)
-    assert binary.read_text() == "binary-for-hash-v1\n"
-    assert stamp.read_text() == "hash-v1\n"
+    assert binary.read_text() == "binary-for-1111111111111111111111111111111111111111\n"
+    assert stamp.read_text() == "1111111111111111111111111111111111111111\n"
     assert "cargo build --release --locked" in log.read_text()
 
 
@@ -160,12 +160,12 @@ def test_skips_when_stamp_matches_source(tmp_path: Path) -> None:
 def test_rebuilds_when_source_hash_changes(tmp_path: Path) -> None:
     main, env, log = _setup(tmp_path)
     assert _run(main, env).returncode == 0
-    Path(env["STUB_HASH_FILE"]).write_text("hash-v2\n")
+    Path(env["STUB_HASH_FILE"]).write_text("2222222222222222222222222222222222222222\n")
     result = _run(main, env)
     assert result.returncode == 0, result.stderr
     binary, stamp = _installed(tmp_path)
-    assert binary.read_text() == "binary-for-hash-v2\n"
-    assert stamp.read_text() == "hash-v2\n"
+    assert binary.read_text() == "binary-for-2222222222222222222222222222222222222222\n"
+    assert stamp.read_text() == "2222222222222222222222222222222222222222\n"
 
 
 def test_rebuilds_when_stamp_matches_but_binary_deleted(tmp_path: Path) -> None:
@@ -206,8 +206,10 @@ def test_dest_installs_into_target_dir_regardless_of_path(tmp_path: Path) -> Non
     result = _run(main, env, "--dest", "data/bin")
     assert result.returncode == 0, result.stderr
     bundled = main / "data" / "bin" / "velites"
-    assert bundled.read_text() == "binary-for-hash-v1\n"
-    assert (main / "data" / "bin" / "velites.src-stamp").read_text() == "hash-v1\n"
+    assert bundled.read_text() == "binary-for-1111111111111111111111111111111111111111\n"
+    assert (
+        main / "data" / "bin" / "velites.src-stamp"
+    ).read_text() == "1111111111111111111111111111111111111111\n"
     assert "cargo build --release --locked" in log.read_text()
 
 
@@ -238,21 +240,31 @@ def test_existing_velites_sandbox_is_refreshed_in_lockstep(
     assert (bundled_dir / "velites-sandbox").exists() is False
 
     # 仓库前进，运维手工放入旧 velites-sandbox（或上轮遗留）。
-    Path(env["STUB_HASH_FILE"]).write_text("hash-v3\n")
+    Path(env["STUB_HASH_FILE"]).write_text("3333333333333333333333333333333333333333\n")
     _write_stub(
         bundled_dir / "velites-sandbox",
         "#!/usr/bin/env bash\n# stale wrapper\n",
     )
-    (bundled_dir / "velites-sandbox.src-stamp").write_text("hash-v1\n")
+    (bundled_dir / "velites-sandbox.src-stamp").write_text(
+        "1111111111111111111111111111111111111111\n"
+    )
 
     result = _run(main, env, "--dest", "data/bin")
     assert result.returncode == 0, result.stderr
     # 旧包装器被同指纹重建替换；与 velites 共享同一 SRC_ID stamp。
-    assert (bundled_dir / "velites-sandbox").read_text() == "sandbox-for-hash-v3\n"
-    assert (bundled_dir / "velites-sandbox.src-stamp").read_text() == "hash-v3\n"
-    assert (bundled_dir / "velites.src-stamp").read_text() == "hash-v3\n"
+    assert (
+        bundled_dir / "velites-sandbox"
+    ).read_text() == "sandbox-for-3333333333333333333333333333333333333333\n"
+    assert (
+        bundled_dir / "velites-sandbox.src-stamp"
+    ).read_text() == "3333333333333333333333333333333333333333\n"
+    assert (
+        bundled_dir / "velites.src-stamp"
+    ).read_text() == "3333333333333333333333333333333333333333\n"
     # velites 本体同样刷新——两 bin 一个单元。
-    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v3\n"
+    assert (
+        bundled_dir / "velites"
+    ).read_text() == "binary-for-3333333333333333333333333333333333333333\n"
 
     # 幂等：stamp 一致时不重复安置（无输出即未走替换分支）。
     result = _run(main, env, "--dest", "data/bin")
@@ -272,9 +284,11 @@ def test_fresh_velites_but_stale_wrapper_still_triggers_refresh(
     main, env, log = _setup(tmp_path)
     bundled_dir = main / "data" / "bin"
 
-    # 初装（无包装器痕迹），SRC_ID 保持 hash-v1 不变——PR 不碰 velites/。
+    # 初装（无包装器痕迹），SRC_ID 保持 v1 指纹 不变——PR 不碰 velites/。
     assert _run(main, env, "--dest", "data/bin").returncode == 0
-    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v1\n"
+    assert (
+        bundled_dir / "velites"
+    ).read_text() == "binary-for-1111111111111111111111111111111111111111\n"
     log.write_text("")
 
     # 存量机器手工放入旧包装器（或历史遗留），velites 本体全新鲜。
@@ -282,14 +296,22 @@ def test_fresh_velites_but_stale_wrapper_still_triggers_refresh(
         bundled_dir / "velites-sandbox",
         "#!/usr/bin/env bash\n# stale wrapper\n",
     )
-    (bundled_dir / "velites-sandbox.src-stamp").write_text("hash-v0\n")
+    (bundled_dir / "velites-sandbox.src-stamp").write_text(
+        "0000000000000000000000000000000000000000\n"
+    )
 
     result = _run(main, env, "--dest", "data/bin")
     assert result.returncode == 0, result.stderr
-    assert (bundled_dir / "velites-sandbox").read_text() == "sandbox-for-hash-v1\n"
-    assert (bundled_dir / "velites-sandbox.src-stamp").read_text() == "hash-v1\n"
+    assert (
+        bundled_dir / "velites-sandbox"
+    ).read_text() == "sandbox-for-1111111111111111111111111111111111111111\n"
+    assert (
+        bundled_dir / "velites-sandbox.src-stamp"
+    ).read_text() == "1111111111111111111111111111111111111111\n"
     # velites 本体被家族判鲜连带重装（同批），不是跳过。
-    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v1\n"
+    assert (
+        bundled_dir / "velites"
+    ).read_text() == "binary-for-1111111111111111111111111111111111111111\n"
 
 
 def test_stale_velites_sandbox_stamp_alone_triggers_refresh(tmp_path: Path) -> None:
@@ -298,14 +320,20 @@ def test_stale_velites_sandbox_stamp_alone_triggers_refresh(tmp_path: Path) -> N
     main, env, log = _setup(tmp_path)
     bundled_dir = main / "data" / "bin"
     assert _run(main, env, "--dest", "data/bin").returncode == 0
-    Path(env["STUB_HASH_FILE"]).write_text("hash-v2\n")
+    Path(env["STUB_HASH_FILE"]).write_text("2222222222222222222222222222222222222222\n")
     # 初装不创造 velites-sandbox（上面断言过），这里只放一个孤儿 stamp。
-    (bundled_dir / "velites-sandbox.src-stamp").write_text("hash-v1\n")
+    (bundled_dir / "velites-sandbox.src-stamp").write_text(
+        "1111111111111111111111111111111111111111\n"
+    )
 
     result = _run(main, env, "--dest", "data/bin")
     assert result.returncode == 0, result.stderr
-    assert (bundled_dir / "velites-sandbox").read_text() == "sandbox-for-hash-v2\n"
-    assert (bundled_dir / "velites-sandbox.src-stamp").read_text() == "hash-v2\n"
+    assert (
+        bundled_dir / "velites-sandbox"
+    ).read_text() == "sandbox-for-2222222222222222222222222222222222222222\n"
+    assert (
+        bundled_dir / "velites-sandbox.src-stamp"
+    ).read_text() == "2222222222222222222222222222222222222222\n"
 
 
 def test_path_wrapper_in_different_dir_is_refreshed(
@@ -324,20 +352,30 @@ def test_path_wrapper_in_different_dir_is_refreshed(
     other_dir = tmp_path / "other"
     other_dir.mkdir()
 
-    # PATH：velites 在 stub_dir（hash-v0 旧副本），wrapper 在 other_dir。
+    # PATH：velites 在 stub_dir（v0 指纹 旧副本），wrapper 在 other_dir。
     _write_stub(stub_dir / "velites", "#!/usr/bin/env bash\n# old velites\n")
-    (stub_dir / "velites.src-stamp").write_text("hash-v0\n")
+    (stub_dir / "velites.src-stamp").write_text("0000000000000000000000000000000000000000\n")
     _write_stub(other_dir / "velites-sandbox", "#!/usr/bin/env bash\n# stale wrapper\n")
-    (other_dir / "velites-sandbox.src-stamp").write_text("hash-v0\n")
+    (other_dir / "velites-sandbox.src-stamp").write_text(
+        "0000000000000000000000000000000000000000\n"
+    )
     env["PATH"] = f"{other_dir}:{env['PATH']}"
 
     result = _run(main, env)
     assert result.returncode == 0, result.stderr
     # 两个 PATH 位置都刷新到当前指纹（wrapper 的独立 which 位置不再漏）。
-    assert (stub_dir / "velites").read_text() == "binary-for-hash-v1\n"
-    assert (stub_dir / "velites.src-stamp").read_text() == "hash-v1\n"
-    assert (other_dir / "velites-sandbox").read_text() == "sandbox-for-hash-v1\n"
-    assert (other_dir / "velites-sandbox.src-stamp").read_text() == "hash-v1\n"
+    assert (
+        stub_dir / "velites"
+    ).read_text() == "binary-for-1111111111111111111111111111111111111111\n"
+    assert (
+        stub_dir / "velites.src-stamp"
+    ).read_text() == "1111111111111111111111111111111111111111\n"
+    assert (
+        other_dir / "velites-sandbox"
+    ).read_text() == "sandbox-for-1111111111111111111111111111111111111111\n"
+    assert (
+        other_dir / "velites-sandbox.src-stamp"
+    ).read_text() == "1111111111111111111111111111111111111111\n"
     # stub_dir 不因 velites 存在而被连带安置 wrapper（不主动创造）。
     assert (stub_dir / "velites-sandbox").exists() is False
 
@@ -348,8 +386,8 @@ def test_prod_up_sequence_refreshes_stale_bundled_copy(
     """#831 回归：PATH 副本新、data/bin 副本旧 → prod-up 的双通道刷新后，
     Worker（自带副本优先解析）拿到的必须是刷新后的 data/bin 版本。
 
-    布局复现原生生产现场：install-deps 首次安置 data/bin 副本（hash-v1），
-    仓库跨版本线后旧 prod-up 只刷 PATH 副本（hash-v3）——自带副本优先的
+    布局复现原生生产现场：install-deps 首次安置 data/bin 副本（v1 指纹），
+    仓库跨版本线后旧 prod-up 只刷 PATH 副本（v3 指纹）——自带副本优先的
     解析语义让 Worker 静默滞留在 v1。新 prod-up 按 native-prod-up.sh 的
     调用序列（PATH 模式 + --dest data/bin）执行后，两处副本都必须是 v3。"""
 
@@ -360,29 +398,39 @@ def test_prod_up_sequence_refreshes_stale_bundled_copy(
     bundled_dir = main / "data" / "bin"
     install = tmp_path / "install"
 
-    # 首次安装（install-deps 通道）：data/bin 副本 = hash-v1
+    # 首次安装（install-deps 通道）：data/bin 副本 = v1 指纹
     assert _run(main, env, "--dest", "data/bin").returncode == 0
-    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v1\n"
+    assert (
+        bundled_dir / "velites"
+    ).read_text() == "binary-for-1111111111111111111111111111111111111111\n"
 
-    # 仓库前进到 hash-v3；旧 prod-up（仅 PATH 模式）只刷新了 PATH 副本
-    Path(env["STUB_HASH_FILE"]).write_text("hash-v3\n")
+    # 仓库前进到 v3 指纹；旧 prod-up（仅 PATH 模式）只刷新了 PATH 副本
+    Path(env["STUB_HASH_FILE"]).write_text("3333333333333333333333333333333333333333\n")
     assert _run(main, env).returncode == 0
-    assert (install / "velites").read_text() == "binary-for-hash-v3\n"
+    assert (
+        install / "velites"
+    ).read_text() == "binary-for-3333333333333333333333333333333333333333\n"
     # 自带副本仍滞留 v1：PATH 刷新对「自带副本优先」的解析不生效（#831 现象）
-    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v1\n"
+    assert (
+        bundled_dir / "velites"
+    ).read_text() == "binary-for-1111111111111111111111111111111111111111\n"
 
     # 新 prod-up 的调用序列：两通道都跑 → data/bin 副本刷新到 v3
     assert _run(main, env).returncode == 0
     assert _run(main, env, "--dest", "data/bin").returncode == 0
-    assert (bundled_dir / "velites").read_text() == "binary-for-hash-v3\n"
-    assert (bundled_dir / "velites.src-stamp").read_text() == "hash-v3\n"
+    assert (
+        bundled_dir / "velites"
+    ).read_text() == "binary-for-3333333333333333333333333333333333333333\n"
+    assert (
+        bundled_dir / "velites.src-stamp"
+    ).read_text() == "3333333333333333333333333333333333333333\n"
 
     # Worker 解析（自带副本优先、PATH 兜底）落在刷新后的 v3 副本上
     monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", lambda _binary: str(install / "velites"))
     resolved = resolve_binary("velites")
     assert resolved == str(bundled_dir / "velites")
-    assert Path(resolved).read_text() == "binary-for-hash-v3\n"
+    assert Path(resolved).read_text() == "binary-for-3333333333333333333333333333333333333333\n"
 
 
 # ---- 部署面矩阵契约（#835 codex P2 的系统性收口，planner 化收编） ----
@@ -438,7 +486,7 @@ def test_script_refreshes_copy_that_lost_exec_bit(
     assert result.returncode == 0, result.stderr
     assert "跳过构建" not in result.stdout
     assert "已安装到" in result.stdout
-    assert binary.read_text() == "binary-for-hash-v1\n"
+    assert binary.read_text() == "binary-for-1111111111111111111111111111111111111111\n"
     assert binary.stat().st_mode & stat.S_IXUSR
 
 
@@ -458,9 +506,11 @@ def test_multi_target_apply_is_all_or_nothing(tmp_path: Path) -> None:
     # planner 目标序按 bin 名：velites（可写）在前、velites-sandbox
     # （不可写）在后——正是旧循环留下半应用状态的顺序。
     _write_stub(stub_dir / "velites", "#!/usr/bin/env bash\n# old velites\n")
-    (stub_dir / "velites.src-stamp").write_text("hash-v0\n")
+    (stub_dir / "velites.src-stamp").write_text("0000000000000000000000000000000000000000\n")
     _write_stub(unwritable_dir / "velites-sandbox", "#!/usr/bin/env bash\n# stale wrapper\n")
-    (unwritable_dir / "velites-sandbox.src-stamp").write_text("hash-v0\n")
+    (unwritable_dir / "velites-sandbox.src-stamp").write_text(
+        "0000000000000000000000000000000000000000\n"
+    )
     env["PATH"] = f"{unwritable_dir}:{env['PATH']}"
     unwritable_dir.chmod(stat.S_IRUSR | stat.S_IXUSR)
 
@@ -470,8 +520,34 @@ def test_multi_target_apply_is_all_or_nothing(tmp_path: Path) -> None:
         assert "无法写入" in result.stderr
         # 半应用防线：velites 旧副本未被替换、未被重新盖章、暂存副本已清理。
         assert (stub_dir / "velites").read_text() == "#!/usr/bin/env bash\n# old velites\n"
-        assert (stub_dir / "velites.src-stamp").read_text() == "hash-v0\n"
+        assert (
+            stub_dir / "velites.src-stamp"
+        ).read_text() == "0000000000000000000000000000000000000000\n"
         assert list(stub_dir.glob("*.tmp.*")) == []
         assert "已安装到" not in result.stdout
     finally:
         unwritable_dir.chmod(stat.S_IRWXU)
+
+
+def test_unreplaceable_stamp_slot_aborts_before_any_replace(tmp_path: Path) -> None:
+    """codex R7 P2：stamp 落点不可替换（这里是目录）时，旧两阶段只暂存了
+    二进制、stamp 到应用阶段才写——velites 已被替换后才在 wrapper 的
+    stamp 上失败，再次留下半应用状态。stamp 现与二进制同在备妥阶段校验并
+    暂存，任一落点不合法即整体退出、不改动任何已安装副本。"""
+    main, env, log = _setup(tmp_path)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    old = "#!/usr/bin/env bash\n# old velites\n"
+    _write_stub(dest / "velites", old)
+    (dest / "velites.src-stamp").write_text("0" * 40 + "\n")
+    _write_stub(dest / "velites-sandbox", "#!/usr/bin/env bash\n# stale wrapper\n")
+    (dest / "velites-sandbox.src-stamp").mkdir()
+
+    result = _run(main, env, "--dest", str(dest))
+
+    assert result.returncode != 0
+    assert "非常规文件占用" in result.stderr
+    assert (dest / "velites").read_text() == old
+    assert (dest / "velites.src-stamp").read_text() == "0" * 40 + "\n"
+    assert list(dest.glob("*.tmp.*")) == []
+    assert "已安装到" not in result.stdout

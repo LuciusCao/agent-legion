@@ -127,7 +127,8 @@ fi
 # 目标校验产物并暂存副本，任一目标备妥失败即整体退出、清理暂存——禁止
 # 边校验边替换：PATH 分叉到用户目录与 root-owned /usr/local/bin 时，前一
 # 目标已盖章、后一目标才失败会留下半应用状态，运行中的 Host/Worker 继续
-# 解析旧家族成员。全部备妥后才统一执行原子替换 + 同批 stamp。
+# 解析旧家族成员。二进制与 stamp 都在备妥阶段暂存（stamp 不可写不能
+# 拖到替换之后才暴露，#835 codex R7 P2），全部备妥后才统一 rename。
 STAGED_TMPS=()
 cleanup_staged() {
     local staged
@@ -151,16 +152,26 @@ while IFS='|' read -r bin target; do
         PREPARE_FAILED=1
         break
     fi
-    # 暂存到目标同目录：备妥阶段的 cp 同时验证目标目录可写，应用阶段的
-    # mv 因此是同目录 rename，几乎不可能再失败。
+    # 二进制与 stamp 两个落点都必须可被 rename 覆盖：目录（或指向目录的
+    # symlink）会让 mv 把暂存件搬进去而非替换，FIFO/设备文件同样不是合法
+    # 落点——备妥阶段就拒绝，不留到应用阶段半途失败（#835 codex R7 P2）。
+    for slot in "$target" "${target}.src-stamp"; do
+        if [[ -d "$slot" ]] || { [[ -e "$slot" ]] && [[ ! -f "$slot" ]]; }; then
+            echo "错误：$slot 被非常规文件占用（目录/FIFO/设备？）——未改动任何已安装副本" >&2
+            PREPARE_FAILED=1
+            break 2
+        fi
+    done
+    # 暂存到目标同目录：二进制与 stamp 都在备妥阶段写好，cp/写入同时验证
+    # 目标目录可写；应用阶段只剩同目录 rename，几乎不可能再失败。
     tmp="${target}.tmp.$$"
-    if ! cp "$src" "$tmp" || ! chmod +x "$tmp"; then
+    stamp_tmp="${target}.src-stamp.tmp.$$"
+    STAGED_TMPS+=("$tmp" "$stamp_tmp")
+    if ! cp "$src" "$tmp" || ! chmod +x "$tmp" || ! echo "$SRC_ID" >"$stamp_tmp"; then
         echo "错误：无法写入 $target（权限不足？）——未改动任何已安装副本" >&2
-        rm -f "$tmp"
         PREPARE_FAILED=1
         break
     fi
-    STAGED_TMPS+=("$tmp")
 done <<<"$PLAN_OUTPUT"
 
 if [[ "$PREPARE_FAILED" -ne 0 ]]; then
@@ -175,10 +186,11 @@ IDX=0
 while IFS='|' read -r bin target; do
     [[ -z "$bin" ]] && continue
     tmp="${STAGED_TMPS[$IDX]}"
-    IDX=$((IDX + 1))
+    stamp_tmp="${STAGED_TMPS[$((IDX + 1))]}"
+    IDX=$((IDX + 2))
     # 原子替换：运行中的 worker 继续用旧 inode，新派生的 agent 进程立即拿到
     # 新二进制；直接覆盖写入可能让并发生成的进程读到截断的二进制。
     mv -f "$tmp" "$target"
-    echo "$SRC_ID" > "${target}.src-stamp"
+    mv -f "$stamp_tmp" "${target}.src-stamp"
     echo "velites 家族成员 $bin 已安装到 $target"
 done <<<"$PLAN_OUTPUT"
