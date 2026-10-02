@@ -157,6 +157,8 @@ def test_pool_limits_alone_cap_per_pool(tmp_path: Path) -> None:
 def test_batch_response_drops_only_the_broken_item() -> None:
     """批内单条注入失败（如 code manifest 解析异常）只剔该条——其余兄弟
     照常交付；全丢才回落 204。纯单元：无需 app/DB。"""
+    from types import SimpleNamespace
+
     from server.app.agent_broker.claim_scan import AgentClaim
     from server.app.routes import agent_worker_claim_response as response_module
 
@@ -172,6 +174,13 @@ def test_batch_response_drops_only_the_broken_item() -> None:
             manifest={},
         )
 
+    # #755 codex P1：claim 下发 max_archive_bytes 从 settings 读——纯单元
+    # 路径给最小 settings 桩（生产为真实 Settings）。
+    settings = SimpleNamespace(
+        executor_runtime=SimpleNamespace(
+            agent_workers=SimpleNamespace(max_archive_bytes=64 * 1024 * 1024)
+        )
+    )
     original = response_module.build_claim_response
 
     def flaky(broker, settings, job_artifact_objects, worker, claimed):  # type: ignore[no-untyped-def]
@@ -182,17 +191,43 @@ def test_batch_response_drops_only_the_broken_item() -> None:
     response_module.build_claim_response = flaky
     try:
         result = response_module.build_batch_claim_response(
-            None, None, None, {"protocol_version": 5}, [_claim("good"), _claim("bad")]
+            None, settings, None, {"protocol_version": 5}, [_claim("good"), _claim("bad")]
         )
         assert hasattr(result, "claims"), "partial batch must stay a 200 payload"
         assert [item.execution_id for item in result.claims] == ["good"]
 
         all_dropped = response_module.build_batch_claim_response(
-            None, None, None, {"protocol_version": 5}, [_claim("bad")]
+            None, settings, None, {"protocol_version": 5}, [_claim("bad")]
         )
     finally:
         response_module.build_claim_response = original
     assert all_dropped.status_code == 204, "all items dropped = the empty-batch 204"
+
+
+def test_claim_response_injects_max_archive_bytes(tmp_path: Path) -> None:
+    """#755 codex P1：两种 kind 的 claim manifest 都注入 Host 实例设置的
+    max_archive_bytes 实际值（Worker 换轨预检的判定口径；claim 响应路径
+    内存态注入，不持久化）。"""
+    app = make_app(tmp_path)
+    seed_request(app.state.job_db, job_id="job-agent", limit=10)
+    insert_code_job_rows(app.state.job_db, job_id="job-code")
+    enqueue_code(app.state.agent_broker, job_id="job-code")
+    expected = app.state.settings.executor_runtime.agent_workers.max_archive_bytes
+
+    with TestClient(app) as client:
+        authenticate_admin(client)
+        token = register(
+            client,
+            protocol_version=PROTOCOL_VERSION,
+            max_code_concurrency=4,
+            models=[{"provider": "gateway", "model": "test-model", "runtime": "pi"}],
+        )["worker_token"]
+        response = _batch_claim(client, token, {"limit": 8})
+
+    assert response.status_code == 200, response.text
+    claims = response.json()["claims"]
+    assert sorted(claim["kind"] for claim in claims) == ["agent", "code"]
+    assert all(claim["manifest"]["max_archive_bytes"] == expected for claim in claims)
 
 
 def test_claim_response_carries_execution_generation(tmp_path: Path) -> None:

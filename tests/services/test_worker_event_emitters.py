@@ -328,6 +328,37 @@ def test_note_execution_finished_reports_wall_seconds(events, monkeypatch) -> No
     assert finished["wall_seconds"] >= 90
 
 
+def test_note_execution_finished_stderr_excerpt_keeps_tail_end(events, monkeypatch) -> None:
+    """#755 终审 P2-2：stderr_tail_excerpt 取保留 tail 的末 200 字符（tail
+    保尾是因崩溃栈在流末尾——满 tail 时头部是任意中流噪音，头截什么也
+    不说明）；无 tail 的结果不带该键。"""
+    from server.app.agent_broker import worker_events
+
+    monkeypatch.setattr(worker_events, "claimed_at", lambda dsn, execution_id: None)
+
+    class _Outcome:
+        status = "failed"
+        exit_code = 1
+        agent_stderr_tail = "启动噪音 " * 100 + "ValueError: boom"
+
+    worker_events.note_execution_finished(
+        "exec-3", "w", {"job_id": "job-3"}, _Outcome(), "dsn://irrelevant"
+    )
+    finished = _json_records(events)[-1]
+    assert finished["stderr_tail_excerpt"].endswith("ValueError: boom")
+    assert len(finished["stderr_tail_excerpt"]) == 200
+    assert "stderr_head" not in finished
+
+    class _QuietOutcome:
+        status = "completed"
+        exit_code = 0
+
+    worker_events.note_execution_finished(
+        "exec-4", "w", {"job_id": "job-4"}, _QuietOutcome(), "dsn://irrelevant"
+    )
+    assert "stderr_tail_excerpt" not in _json_records(events)[-1]
+
+
 class _RegisterPayload:
     """RegisterAgentWorkerRequest stand-in (only the fields the emitters read)."""
 

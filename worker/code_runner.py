@@ -400,6 +400,8 @@ def execute_code(
             code_result=outcome,
             # #160 D12：直传 S3 的上传规格（空 = 旧 CAS 通道）。
             artifact_uploads=dict(manifest.get("artifact_uploads") or {}),
+            # #755 codex P1：换轨预检的 Host 实际上限（0 = 未下发）。
+            max_archive_bytes=int(manifest.get("max_archive_bytes") or 0),
         )
     finally:
         if proc is not None and proc.poll() is None:
