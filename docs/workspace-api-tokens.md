@@ -45,10 +45,12 @@ machine-to-machine 凭据：绑定且仅绑定一个 workspace，权限是 edito
    material/bundle 必须已上传就绪——items 只引用已有素材，本通道不收文件。
 
    响应三个字段：`run`（run 记录，`run.id` 即 run_id；`run.created_count`
-   是该 run 累计的 job 数）、`created_count`（本次调用新建的 job 数，
-   等于 `len(job_ids)`）、`job_ids`（**本次调用新建**的 job id 列表，#735；
-   不是 run 全量，见下文「幂等与重试」）。响应刻意不带 job 行详情
-   （#467 A4），状态一律轮询读取。
+   是该 run 累计的 job 数）、`created_count`（等于 `len(job_ids)`）、
+   `job_ids`（本次调用写入该 run 的 job id 列表，#735；不是 run 全量）。
+   串行提交时它就是本次新建的 job；完全相同的请求并发时两次响应可能
+   返回同一批 id（见下文「幂等与重试」），所以**按 job id 去重合并，
+   不要把各次响应的 `created_count` 相加当新建总数**。响应刻意不带 job 行
+   详情（#467 A4），状态一律轮询读取。
 
 3. **轮询状态**（只读；workspace 调度暂停时提交照常排队，job 状态表达等待）：
 
@@ -148,7 +150,10 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
 
 - material / bundle / ref 项：`GET /jobs/snapshot?search=<source_id>`，在
   结果里按 `source_type` + `source_id` **精确**匹配（`search` 是对 id /
-  source_id / run_id / title 的子串匹配，可能多命中）。
+  source_id / run_id / title 的子串匹配，可能多命中）。结果按创建时间倒序
+  分页，旧提交可能不在第一页：沿 `next_cursor` 翻页，直到精确命中或
+  `next_cursor` 为 null。翻完仍没命中说明该条目在本 workspace 没有 job
+  （例如 job 已被删除），按「未提交」处理，不要当作已存在。
 - text 项：material id 由服务端按内容派生，调用方不知道——用
   `GET /runs`（最近的 run 在前）按提交时间定位 run，再
   `GET /jobs?run_id=<run.id>` 取 job。需要可靠对账的调用方建议先把文本作为
@@ -160,10 +165,18 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
   同一组 items：结果只会是 200（上次没落库，或补齐了剩余部分）或上表的
   「已存在」400，不会重复建 job。重试用指数退避（如 1s、2s、4s…，封顶
   数分钟）。
-- 同一组 items 不要并发重提（上一个请求未返回就发下一个）：服务端在写侧
-  保证不重复建 job，但并发的两次调用各自只拿到自己抢到的那部分
-  `job_ids`（全部被另一次抢走时是 200 + `created_count: 0` + 空
-  `job_ids`），调用方得自己合并——串行重试最省事。
+- 不要并发重提（上一个请求未返回就发下一个）。服务端在写侧保证同一条目
+  只有一个 job，但两次并发调用都越过去重探测时，响应形态取决于两次的
+  items 是否完全相同：
+  - **完全相同的 items**：两次落到同一个确定性 run id（按 items 摘要派生），
+    写入冲突按「同 run 重提」处理，两次响应都可能返回同一批 `job_ids` 和
+    非零 `created_count`。
+  - **不同的 items 但有重叠条目**：两次属于不同的 run，重叠条目只归先写入
+    的 run，另一次的 `job_ids` 里没有它们（全部被抢走时是 200 +
+    `created_count: 0` + 空 `job_ids`），缺的条目按上文对账取回。
+
+  两种情形下调用方都应把所有响应的 `job_ids` 按 id 去重合并，不要累加
+  `created_count`。串行重试最省事。
 - 分块提交中途失败（大 run）返回 400，`detail` 是对象
   `{"message", "run_id", "created_so_far"}`：已建的 job 保留、run 标为
   failed；原样重提同一组 items 即从断点续建（已建的被去重跳过，run 治愈回

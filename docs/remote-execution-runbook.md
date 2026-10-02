@@ -575,18 +575,29 @@ ALREADY_EXISTS = "No tasks were resolved from input"  # 全部条目已有 job �
 s = requests.Session()
 s.headers["Authorization"] = f"Bearer {WORKSPACE_API_TOKEN}"  # #626
 
+def find_existing_job(source_type: str, source_id: str) -> str | None:
+    """按去重键 (source_type, source_id) 反查已有 job。search 是子串匹配，
+    须精确比对；结果按创建时间倒序分页，旧提交可能在后面的页，沿
+    next_cursor 翻到精确命中或翻完为止。"""
+    cursor = None
+    while True:
+        page = s.get(
+            f"{HOST}/api/workspaces/{WS}/jobs/snapshot",
+            params={"search": source_id, "limit": 500, "cursor": cursor},
+        ).json()
+        for j in page["jobs"]:
+            if j["source_type"] == source_type and j["source_id"] == source_id:
+                return j["id"]
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return None
+
+
 items = [{"type": "material", "material_id": "mat-1"}]
 resp = s.post(f"{HOST}/api/workspaces/{WS}/runs", json={"items": items}, timeout=60)
 if resp.status_code == 400 and resp.json().get("detail") == ALREADY_EXISTS:
-    # 「已存在」不是失败（超时重试撞上了上次已成功的提交）：按去重键
-    # (source_type, source_id) 反查已有 job，search 是子串匹配，须精确比对
-    page = s.get(
-        f"{HOST}/api/workspaces/{WS}/jobs/snapshot", params={"search": "mat-1"}
-    ).json()
-    job_ids = [
-        j["id"] for j in page["jobs"]
-        if j["source_type"] == "material" and j["source_id"] == "mat-1"
-    ]
+    # 「已存在」不是失败（超时重试撞上了上次已成功的提交）：反查已有 job
+    job_ids = []
 else:
     resp.raise_for_status()
     body = resp.json()
@@ -598,6 +609,14 @@ else:
                 f"{HOST}/api/workspaces/{WS}/jobs", params={"run_id": run_id}
             ).json()["jobs"]
         ]
+if not job_ids:
+    # 400「已存在」，或并发重叠提交时条目归了别的 run：按去重键反查
+    found = find_existing_job("material", "mat-1")
+    if found is None:
+        # 翻完也没有：该条目在本 workspace 没有 job（期间被删除等），
+        # 当作未提交处理——交给上层决定重提，不要当成已存在
+        raise RuntimeError("mat-1: no existing job found; resubmit")
+    job_ids = [found]
 job_id = job_ids[0]
 
 # 终态只有 completed / failed；paused、awaiting_approval 是等待态

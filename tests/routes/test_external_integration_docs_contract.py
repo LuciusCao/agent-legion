@@ -29,17 +29,62 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCS = ("docs/remote-execution-runbook.md", "docs/workspace-api-tokens.md")
 API_TS = ROOT / "frontend/src/generated/api.ts"
 
-_CODE_BLOCK = re.compile(r"```(?:bash|python)\n(.*?)```", re.DOTALL)
-# curl 调用：从 `curl` 到下一处 `curl` 之前为一次调用（含续行与 -X/-d）。
-_CURL_CALL = re.compile(r"curl\b(.*?)(?=\bcurl\b|\Z)", re.DOTALL)
+_CODE_BLOCK = re.compile(r"```(bash|python)\n(.*?)```", re.DOTALL)
 _CURL_URL = re.compile(r'"\$HOST(/api/[^"]*)"')
 _CURL_METHOD = re.compile(r"-X\s+([A-Z]+)")
 # requests 调用：s.get(f"{HOST}/api/...", params={...}) / s.post(...)
 _PY_CALL = re.compile(
-    r"\bs\.(get|post)\(\s*f\"\{HOST\}(/api/[^\"]*)\"(.*?)\)(?:\.|\s|$)", re.DOTALL
+    r"\bs\.(get|post)\(\s*f\"\{HOST\}(/api/[^\"]*)\"(.*?)\)(?=\.|\s|$)", re.DOTALL
 )
 _PY_PARAMS = re.compile(r"params=\{([^}]*)\}")
 _PY_PARAM_KEY = re.compile(r"\"(\w+)\"\s*:")
+
+# 响应字段访问：连续的 ["key"] / ['key'] / [0] 下标链。
+_SUBSCRIPTS = r"(?:\[(?:\"\w+\"|'\w+'|\d+)\])+"
+_SUBSCRIPT_STEP = re.compile(r"\[(?:\"(\w+)\"|'(\w+)'|(\d+))\]")
+_STDIN_CHAIN = re.compile(r"json\.load\(sys\.stdin\)(" + _SUBSCRIPTS + ")")
+_SHELL_VAR_PIPE = re.compile(
+    r"\"\$(\w+)\"\s*\|\s*python3 -c '[^']*?json\.load\(sys\.stdin\)(" + _SUBSCRIPTS + ")"
+)
+_PY_VAR_ACCESS = re.compile(r"\b(\w+)(" + _SUBSCRIPTS + ")")
+_PY_FOR = re.compile(r"\bfor (\w+) in (\w+)(" + _SUBSCRIPTS + ")")
+_PY_JSON_ASSIGN = re.compile(r"\b(\w+) = (\w+)\.json\(\)\s*$", re.MULTILINE)
+
+_TS_SCHEMA = re.compile(r"^    (\w+): \{\n(.*?)^    \}", re.DOTALL | re.MULTILINE)
+_TS_FIELD = re.compile(r"^      (\w+)\??: (.*)$", re.MULTILINE)
+_TS_REF = re.compile(r"^components\['schemas'\]\['(\w+)'\](\[\])?")
+_TS_RESPONSE = re.compile(
+    r"\b2\d\d: \{\s*headers: \{[^}]*\}\s*content: \{\s*"
+    r"'application/json': components\['schemas'\]\['(\w+)'\]"
+)
+
+
+def _code_blocks(text: str) -> list[tuple[str, str]]:
+    """(语言, 代码) 列表；python 块剥掉 # 注释（注释里的字段名不算访问）。"""
+    blocks = []
+    for lang, code in _CODE_BLOCK.findall(text):
+        if lang == "python":
+            code = "\n".join(re.sub(r"(^|\s)#.*$", "", line) for line in code.splitlines())
+        blocks.append((lang, code))
+    return blocks
+
+
+def _curl_commands(block: str) -> list[tuple[str, str]]:
+    """(curl 前的同行前缀, 整条 curl 命令含 \\ 续行)。"""
+    commands = []
+    lines = block.splitlines()
+    for index, line in enumerate(lines):
+        position = line.find("curl ")
+        if position < 0:
+            continue
+        command = [line[position:]]
+        cursor = index
+        while lines[cursor].rstrip().endswith("\\") and cursor + 1 < len(lines):
+            cursor += 1
+            command.append(lines[cursor])
+        commands.append((line[:position], "\n".join(command)))
+    return commands
+
 
 _TS_PATH = re.compile(r"^  '(/api/[^']+)': \{\n(.*?)^  \}", re.DOTALL | re.MULTILINE)
 _TS_METHOD = re.compile(r"^    (get|post|put|delete|patch): operations\['(\w+)'\]", re.MULTILINE)
@@ -59,8 +104,8 @@ def _doc_calls() -> list[tuple[str, str, str, frozenset[str]]]:
     calls: list[tuple[str, str, str, frozenset[str]]] = []
     for doc in DOCS:
         text = (ROOT / doc).read_text(encoding="utf-8")
-        for block in _CODE_BLOCK.findall(text):
-            for call in _CURL_CALL.findall(block):
+        for _, block in _code_blocks(text):
+            for _, call in _curl_commands(block):
                 url = _CURL_URL.search(call)
                 if url is None:
                     continue
@@ -165,33 +210,144 @@ def test_doc_examples_exist_in_openapi_and_token_surface() -> None:
     assert all("job-batches" not in c[2] for c in calls)
 
 
-def test_doc_examples_response_fields_match_contracts() -> None:
-    from server.app.routes.external_artifact_contracts import (
-        ExternalArtifactEntry,
-        ExternalArtifactListResponse,
-        ExternalJobStatusResponse,
-    )
-    from server.app.routes.job_list_contracts import JobsPageResponse
-    from server.app.routes.job_view_contracts import JobsResponse, JobSummaryResponse
-    from server.app.routes.run_contracts import RunCreateResponse, RunRecord
-    from server.app.routes.workspace_api_token_contracts import (
-        WorkspaceApiTokenCreatedResponse,
-    )
+# --- 响应字段访问对账 ---------------------------------------------------------
+# 示例里每一处对响应 JSON 的下标访问（curl 管道里的 json.load(sys.stdin)[…]、
+# requests 的 .json()[…] 及其绑定变量 / for 循环变量上的 […]）都从文档代码
+# 块里提取出来，沿 api.ts 的响应 schema 逐级解析：字段不存在即红。类型记号：
+# ("schema", 名) / ("array", 元素) / ("leaf", 原文)。
 
-    expected = {
-        WorkspaceApiTokenCreatedResponse: {"api_token", "token_id"},
-        RunCreateResponse: {"run", "created_count", "job_ids"},
-        RunRecord: {"id", "status", "created_count"},
-        JobsResponse: {"jobs", "truncated"},
-        JobsPageResponse: {"jobs", "next_cursor"},
-        JobSummaryResponse: {"id", "source_type", "source_id", "status"},
-        ExternalJobStatusResponse: {"status", "error_summary", "artifacts"},
-        ExternalArtifactListResponse: {"artifacts"},
-        ExternalArtifactEntry: {"name", "content_hash", "uploaded_at"},
-    }
-    for model, fields in expected.items():
-        missing = fields - set(model.model_fields)
-        assert not missing, f"{model.__name__} 缺文档引用的字段 {sorted(missing)}"
+_Type = tuple[str, object]
+
+
+def _schemas() -> dict[str, dict[str, str]]:
+    text = API_TS.read_text(encoding="utf-8")
+    components = text.split("export interface components {", 1)[1]
+    components = components.split("export interface operations {", 1)[0]
+    return {name: dict(_TS_FIELD.findall(body)) for name, body in _TS_SCHEMA.findall(components)}
+
+
+def _parse_type(raw: str) -> _Type:
+    ref = _TS_REF.match(raw.strip())
+    if ref is not None:
+        element: _Type = ("schema", ref.group(1))
+        return ("array", element) if ref.group(2) else element
+    if raw.strip().split(" | ")[0].endswith("[]"):
+        return ("array", ("leaf", raw))
+    return ("leaf", raw)
+
+
+def _response_schema(operation_id: str) -> str | None:
+    text = API_TS.read_text(encoding="utf-8")
+    operations = text.split("export interface operations {", 1)[1]
+    start = re.search(rf"^  {operation_id}: \{{$", operations, re.MULTILINE)
+    assert start is not None, operation_id
+    body = operations[start.end() :]
+    end = re.search(r"^  \}$", body, re.MULTILINE)
+    match = _TS_RESPONSE.search(body[: end.start() if end else None])
+    return match.group(1) if match else None  # raw 下载等非 JSON 响应
+
+
+def _walk(start: _Type, chain: str, schemas: dict[str, dict[str, str]], where: str) -> _Type:
+    current = start
+    for name_dq, name_sq, index in _SUBSCRIPT_STEP.findall(chain):
+        key = name_dq or name_sq
+        if index:
+            assert current[0] == "array", f"{where}: [{index}] 用在了非数组 {current}"
+            current = current[1]  # type: ignore[assignment]
+            continue
+        assert current[0] == "schema", f"{where}: [{key!r}] 用在了非对象 {current}"
+        fields = schemas[str(current[1])]
+        assert key in fields, f"{where}: 响应 schema {current[1]} 没有字段 {key!r}"
+        current = _parse_type(fields[key])
+    return current
+
+
+def _element(current: _Type, where: str) -> _Type:
+    assert current[0] == "array", f"{where}: for 循环遍历的不是数组 {current}"
+    return current[1]  # type: ignore[return-value]
+
+
+def _route_type(path: str, method: str, paths: dict[str, dict[str, str]]) -> _Type:
+    template = _match_template(path, list(paths))
+    assert template is not None, path
+    schema = _response_schema(paths[template][method])
+    return ("schema", schema) if schema else ("leaf", "non-JSON response")
+
+
+def _doc_response_accesses() -> list[tuple[str, _Type, str]]:
+    """(定位, 起点类型, 下标链) 全集——起点是某次调用的响应或其派生变量。"""
+    paths, _ = _contract()
+    schemas = _schemas()
+    accesses: list[tuple[str, _Type, str]] = []
+    for doc in DOCS:
+        for lang, block in _code_blocks((ROOT / doc).read_text(encoding="utf-8")):
+            if lang == "bash":
+                shell_vars: dict[str, _Type] = {}
+                for prefix, command in _curl_commands(block):
+                    url = _CURL_URL.search(command)
+                    if url is None:
+                        continue
+                    method = _CURL_METHOD.search(command)
+                    route = _route_type(
+                        url.group(1).partition("?")[0], method.group(1) if method else "GET", paths
+                    )
+                    chains = _STDIN_CHAIN.findall(command)
+                    accesses += [(f"{doc}: curl {url.group(1)}", route, c) for c in chains]
+                    assigned = re.search(r"(\w+)=\$\(\s*$", prefix)
+                    if assigned and not chains:
+                        shell_vars[assigned.group(1)] = route
+                for var, chain in _SHELL_VAR_PIPE.findall(block):
+                    assert var in shell_vars, f"{doc}: ${var} 不是某次 curl 的响应"
+                    accesses.append((f"{doc}: ${var}", shell_vars[var], chain))
+                continue
+            # python：先收绑定（var → 类型 / 未 .json() 的响应对象），再解析访问。
+            bound: dict[str, _Type] = {}
+            responses: dict[str, _Type] = {}
+            direct: list[tuple[str, _Type, str]] = []
+            for match in _PY_CALL.finditer(block):
+                route = _route_type(match.group(2), match.group(1).upper(), paths)
+                after = block[match.end() :]
+                line_prefix = block[: match.start()].rsplit("\n", 1)[-1]
+                json_chain = re.match(r"\.json\(\)(" + _SUBSCRIPTS + ")?", after)
+                where = f"{doc}: s.{match.group(1)}({match.group(2)})"
+                assign = re.search(r"\b(\w+) = $", line_prefix)
+                loop = re.search(r"\bfor (\w+) in\s*$", line_prefix)
+                if json_chain is None:
+                    if assign:
+                        responses[assign.group(1)] = route
+                    continue
+                chain = json_chain.group(1) or ""
+                result = _walk(route, chain, schemas, where)
+                if loop:
+                    bound[loop.group(1)] = _element(result, where)
+                elif assign:
+                    bound[assign.group(1)] = result
+                if chain:
+                    direct.append((where, route, chain))
+            for var, source in _PY_JSON_ASSIGN.findall(block):
+                if source in responses:
+                    bound[var] = responses[source]
+            for _ in range(3):  # for 循环绑定可能依赖其它绑定：迭代到不动点
+                for var, source, chain in _PY_FOR.findall(block):
+                    if source in bound:
+                        where = f"{doc}: for {var} in {source}{chain}"
+                        bound[var] = _element(_walk(bound[source], chain, schemas, where), where)
+            accesses += direct
+            for var, chain in _PY_VAR_ACCESS.findall(block):
+                if var in bound:
+                    accesses.append((f"{doc}: {var}{chain}", bound[var], chain))
+    return accesses
+
+
+def test_doc_examples_response_fields_match_contracts() -> None:
+    schemas = _schemas()
+    accesses = _doc_response_accesses()
+    for where, start, chain in accesses:
+        _walk(start, chain, schemas, where)
+    # 防「解析器失配 → 零访问 → 恒绿」：链路关键字段必须真被提取到并校验。
+    keys = {key for _, _, chain in accesses for key in re.findall(r"\w+", chain)}
+    assert {"api_token", "run", "id", "job_ids", "status", "jobs", "next_cursor"} <= keys, keys
+    assert {"source_type", "source_id", "artifacts", "name"} <= keys, keys
 
 
 def test_doc_idempotency_and_terminal_status_facts_match_code() -> None:
