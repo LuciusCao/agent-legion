@@ -28,6 +28,7 @@ from worker.restart_policy import (
     _RESTART_BACKOFF_MAX,
     _STABLE_AFTER,
     _STOP_GRACE_MAX,
+    claim_resume_verdict,
     restart_delay,
 )
 from worker.service_env import proxy_env_overrides
@@ -67,6 +68,8 @@ class WorkerSupervisor:
         self._next_restart_delay: float | None = None
         self._failed_reason: str | None = None
         self._warned_divergence = False
+        # #681：崩溃自动重启保留认领的时间戳（monotonic），供滚动窗口限次。
+        self._claim_resumes: list[float] = []
         # #566 三期 + #510：面板行与结构化事件分别落滚动文件（PanelLogSinks
         # 收口两个 sink 的分流与生命周期），内存 500 行 deque 不再是唯一留存。
         self._sinks = PanelLogSinks(store.state_dir)
@@ -86,13 +89,24 @@ class WorkerSupervisor:
             self._sinks.resume()  # 与 stop() 的 sinks.close() 配对（#572 P2）
             self._start()
 
-    def _start(self) -> None:
+    def _start(self, *, crash_restart: bool = False) -> None:
         with self._lock:
             if self.running() or not self.store.configured():
                 return
-            self.store.update_public({"claim_enabled": False})
-            # 刻意设计（含崩溃自动重启路径）：重启后默认暂停认领，需人工重新打开。
-            self._log("启动时已将 claim_enabled 重置为 false，需在控制台重新打开认领")
+            # 刻意设计：冷启动/手动 start/restart 默认暂停认领，需人工重新打开。
+            # #681：崩溃自动重启保留操作员已开的认领（崩溃循环与限次兜底见
+            # restart_policy.claim_resume_verdict），否则一次 OOM 即无人值守空转。
+            keep, message = claim_resume_verdict(
+                crash_restart and self.store.read(require_identity=False)["claim_enabled"],
+                self._restart_count,
+                self._claim_resumes,
+                time.monotonic(),
+            )
+            if keep:
+                self._claim_resumes = [*self._claim_resumes, time.monotonic()][-8:]
+            else:
+                self.store.update_public({"claim_enabled": False})
+            self._log(message)
             config = self.store.read()
             tokens = registration_tokens(config, self.store.state_dir)
             if not tokens:
@@ -222,7 +236,7 @@ class WorkerSupervisor:
             with self._lock:
                 if self._shutdown or generation != self._generation:
                     return
-            self._start()
+            self._start(crash_restart=True)
 
     def logs(self, limit: int = 200) -> list[str]:
         with self._lock:  # 锁内复制，避免迭代时被 collector append

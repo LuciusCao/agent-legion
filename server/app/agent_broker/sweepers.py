@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 
 from server.app.agent_broker.claim import cancel_request
 from server.app.agent_broker.heartbeat_deferral import HeartbeatDeferral
+from server.app.agent_broker.lease_reclaim_audit import ReclaimTally
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
-from server.app.agent_broker.worker_events import note_lease_expired
 from server.app.db.transaction import write_transaction
 from server.app.workflows.sharding_requeue import (
     fail_shard_for_dead_execution,
@@ -54,7 +54,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         # fresh are deferred (bounded), not expired — heartbeat starvation
         # is not Worker death.
         deferral = HeartbeatDeferral(conn, broker.lease_ttl_seconds, rows)
-        deferred = 0
+        deferred, reclaims = 0, ReclaimTally(broker.requeue_limit)
         # EXEC-GENERATION-001 batch order: every row takes the job-mutation
         # advisory xact lock (never released early), so the sweep walks jobs
         # in the single global (ws lock key, job_id) order shared with
@@ -110,7 +110,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 f"deleting expired agent lease {lease_id} exec={row['execution_id']}"
                 f" job={row['job_id']} worker={row['worker_id']} attempt={row['attempt']}"
             )
-            note_lease_expired(row, broker.requeue_limit)
+            reclaims.note_expired(row)  # #681: + worker-level burst tally
             conn.execute("delete from executor_leases where id=%s", (lease_id,))
             conn.execute(
                 "update node_runs set status='failed', finished_at=current_timestamp,"
@@ -181,13 +181,14 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                     (outcome["error_message"], row["job_id"]),
                 )
         deferral.prune_log_buckets()
+    reclaims.report(deferral)  # post-commit: a rolled-back sweep reports nothing
     for worker_id, workspace_id in released:
         broker._notify_worker_released(worker_id, workspace_id)
+    from server.app.services.runtime_profile import profile
+
     if requeued:
         # Runtime profile (#359): requeue-rate gauge (lease/worker-loss
         # signal the classifier pairs with heartbeat latency).
-        from server.app.services.runtime_profile import profile
-
         profile.note_execution_requeued(len(requeued))
     # Force-closed rows (requeue limit exceeded) are terminal executions too:
     # the done-rate gauge must not undercount exactly when workers are lost
@@ -195,7 +196,5 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
     # neither requeued nor done — the execution still lives.
     done = len(rows) - len(requeued) - deferred
     if done > 0:
-        from server.app.services.runtime_profile import profile
-
         profile.note_execution_done(done)
     return requeued

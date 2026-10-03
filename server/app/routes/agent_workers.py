@@ -10,6 +10,7 @@ from starlette import concurrency
 
 from server.app.agent_broker import AgentExecutionBroker, worker_events
 from server.app.agent_broker.agent_result_commit import commit_agent_result
+from server.app.agent_broker.lease_reclaim_audit import reject_result
 from server.app.agent_broker.result_gate import build_result_commit_gate, run_gated_result_commit
 from server.app.agent_broker.result_spool import discard_staged_result, spool_result_body
 from server.app.agent_control.completion import AgentCompletionHandler
@@ -291,7 +292,11 @@ def create_agent_workers_router(
             broker.claimed_payload, execution_id, worker_id
         )
         if payload is None or str(payload["lease_id"]) != lease_id:
-            raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
+            # #681: audit the refused (possibly finished, artifact-carrying) report.
+            raise await concurrency.run_in_threadpool(
+                reject_result, broker.database_dsn, execution_id, worker_id, lease_id, record,
+                stage="precheck", detail="execution is not owned by this Worker", archive_bytes=declared,
+            )  # fmt: skip
         # Runtime profile (#359): result-submit latency spans spool + commit
         # (the artifact verify cost the issue calls out lives inside commit).
         from server.app.services.runtime_profile import profile
