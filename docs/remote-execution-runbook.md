@@ -575,7 +575,7 @@ scoped token 一律 403。
 set -euo pipefail  # 任何一步失败立即停下，不带着空变量往下跑
 HOST="https://agent-legion.example.com"
 WS="my-workspace"
-# 0) 签发 token（管理员会话；或控制台 workspace 设置 → Agent 与 Worker）。
+# 0) 签发 token（管理员会话；或控制台 workspace 设置 → 外部对接）。
 #    明文只在这次响应里出现一次，落到调用方的密钥存储
 WORKSPACE_API_TOKEN=$(curl -sS -X POST "$HOST/api/workspaces/$WS/api-tokens" \
   -H "Authorization: Bearer $ADMIN_SESSION" \

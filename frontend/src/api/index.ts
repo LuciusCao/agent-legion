@@ -50,7 +50,7 @@ export { deleteAgentWorker, fetchAgentWorkers, listAgentWorkers } from './agentW
 // prettier-ignore
 export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary } from './workerTokens'
 // prettier-ignore
-export type { WorkspaceApiTokenCreatedResponse, WorkspaceApiTokenSummary } from './workspaceApiTokens'
+export type { ApiTokenRateLimit, WorkspaceApiTokenCreatedResponse, WorkspaceApiTokensOverview, WorkspaceApiTokenSummary } from './workspaceApiTokens'
 // prettier-ignore
 export type { AgentWorkerSummary, AgentWorkersResponse } from './agentWorkers'
 // prettier-ignore

@@ -1,0 +1,45 @@
+{
+  "prefix": "/api/workspaces/{workspace_id}",
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/runs",
+      "purpose": "提交条目，一项一个 job（唯一的写操作）"
+    },
+    {
+      "method": "GET",
+      "path": "/runs",
+      "purpose": "最近的 run 列表"
+    },
+    {
+      "method": "GET",
+      "path": "/runs/{run_id}",
+      "purpose": "单个 run 与 job_stats 进度聚合"
+    },
+    {
+      "method": "GET",
+      "path": "/jobs",
+      "purpose": "job 列表（按 run_id / status 过滤）"
+    },
+    {
+      "method": "GET",
+      "path": "/jobs/snapshot",
+      "purpose": "分页 job 列表（按 next_cursor 翻页）"
+    },
+    {
+      "method": "GET",
+      "path": "/jobs/{job_id}",
+      "purpose": "单个 job 的轻量状态"
+    },
+    {
+      "method": "GET",
+      "path": "/jobs/{job_id}/artifacts",
+      "purpose": "产物清单（object 条目带直连 download_url）"
+    },
+    {
+      "method": "GET",
+      "path": "/jobs/{job_id}/artifacts/{artifact_name}/raw",
+      "purpose": "产物字节流（直连不可用时的兜底）"
+    }
+  ]
+}

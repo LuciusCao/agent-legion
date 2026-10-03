@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   render,
   screen,
@@ -66,15 +66,18 @@ vi.mock('../api', () => ({
   deleteAgentWorker: vi.fn(),
   fetchAgentDefinitions: vi.fn().mockResolvedValue({ agents: [] }),
   archiveAgent: vi.fn(),
+  listWorkspaceApiTokens: vi.fn().mockResolvedValue({
+    tokens: [],
+    rate_limit: { requests_per_minute: 60, burst: 20 },
+  }),
+  createWorkspaceApiToken: vi.fn(),
+  revokeWorkspaceApiToken: vi.fn(),
 }))
 
-// admin-only 区块里与本文件无关的两块（各自有组件测试）替身化，避免其
-// 未 mock 的端点在 jsdom 里发真实请求。
-vi.mock('../components/settings/WorkspaceApiTokensSection', () => ({
-  WorkspaceApiTokensSection: () => null,
-}))
-vi.mock('../components/settings/WorkspaceMembersSection', () => ({
-  WorkspaceMembersSection: () => null,
+vi.mock('../api/authApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/authApi')>()),
+  listMembers: vi.fn().mockResolvedValue([]),
+  listUsers: vi.fn().mockResolvedValue([]),
 }))
 
 const mockApi = vi.mocked(api)
@@ -551,5 +554,47 @@ describe('SettingsPage', () => {
     await act(async () => {})
 
     expect(screen.queryByText('本地并发限制')).not.toBeInTheDocument()
+  })
+
+  describe('as admin', () => {
+    beforeEach(() => {
+      useAuthStore.setState({ user: { role: 'admin' } as never })
+    })
+    afterEach(() => {
+      act(() => {
+        useAuthStore.setState({ user: null })
+      })
+    })
+
+    it('hosts API tokens in the 外部对接 section, not under Agent 与 Worker', async () => {
+      renderPage()
+      await act(async () => {})
+
+      const nav = screen.getByRole('navigation')
+      expect(
+        within(nav)
+          .getAllByRole('button')
+          .map((b) => b.textContent)
+      ).toEqual([
+        '基础信息',
+        'Agent 与 Worker',
+        'Agent 定义',
+        '外部对接',
+        '成员管理',
+        '危险操作',
+      ])
+
+      const agentWorkers = document.getElementById('agent-workers')!
+      expect(within(agentWorkers).queryByLabelText('API Token 名称')).toBeNull()
+      expect(within(agentWorkers).queryByText('API Token')).toBeNull()
+
+      const apiAccess = document.getElementById('api-access')!
+      expect(
+        within(apiAccess).getByRole('heading', { level: 2 }).textContent
+      ).toBe('外部对接')
+      expect(within(apiAccess).getByLabelText('API Token 名称')).toBeTruthy()
+      expect(within(apiAccess).getByText('接入参数')).toBeTruthy()
+      expect(within(apiAccess).getByText('可调用端点')).toBeTruthy()
+    })
   })
 })

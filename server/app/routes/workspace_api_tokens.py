@@ -20,6 +20,7 @@ from server.app.auth.dependencies import reject_studio_agent_scope, require_admi
 from server.app.auth.workspace_api_tokens import WorkspaceApiTokenStore
 from server.app.db.rowmap import iso_optional
 from server.app.routes.workspace_api_token_contracts import (
+    ApiTokenRateLimit,
     CreateWorkspaceApiTokenRequest,
     WorkspaceApiTokenCreatedResponse,
     WorkspaceApiTokenRevokeResponse,
@@ -77,8 +78,14 @@ def create_workspace_api_tokens_router(store: WorkspaceApiTokenStore) -> APIRout
         workspace_id: str,
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> WorkspaceApiTokensResponse:
+        # #870: the effective per-token bucket travels with the list (read at
+        # request time — the limiter is the live one the identity path uses).
+        limits = store.limiter.limits
         return WorkspaceApiTokensResponse(
-            tokens=[_summary(entry) for entry in store.list_api_tokens(workspace_id)]
+            tokens=[_summary(entry) for entry in store.list_api_tokens(workspace_id)],
+            rate_limit=ApiTokenRateLimit(
+                requests_per_minute=limits.requests_per_minute, burst=limits.burst
+            ),
         )
 
     @router.delete(

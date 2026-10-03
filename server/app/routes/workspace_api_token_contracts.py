@@ -32,8 +32,16 @@ class WorkspaceApiTokenSummary(BaseModel):
     last_used_at: str | None = None
 
 
+class ApiTokenRateLimit(BaseModel):
+    # #738 per-token bucket parameters (instance-wide, env-only auth
+    # section); read-only here — #870 shows them on the 外部对接 page.
+    requests_per_minute: int
+    burst: int
+
+
 class WorkspaceApiTokensResponse(BaseModel):
     tokens: list[WorkspaceApiTokenSummary]
+    rate_limit: ApiTokenRateLimit
 
 
 class WorkspaceApiTokenRevokeResponse(BaseModel):

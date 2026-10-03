@@ -74,6 +74,10 @@ ALLOWED = LimitDecision(allowed=True)
 class ApiTokenLimiter(Protocol):
     """Replaceable counter store (in-memory today, shared store later)."""
 
+    # The effective bucket parameters, read-only exposed to the console
+    # (#870: the 外部对接 section shows what a 429-ing caller is up against).
+    limits: ApiTokenLimits
+
     def acquire_request(self, token_id: str) -> LimitDecision: ...
 
 
