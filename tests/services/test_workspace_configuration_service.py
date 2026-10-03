@@ -207,3 +207,21 @@ def test_update_workflow_accepts_unchanged_key(workspace_service, job_db):
     stored = job_db.get_workspace(workspace["id"])
     assert stored is not None
     assert stored["default_workflow_key"] == "education_video_problems_generation"
+
+
+def test_list_visible_workspaces_narrows_by_membership_and_binding(workspace_service, job_db):
+    """#711: membership restricts to the user's member workspaces, a binding
+    restricts to one workspace on top of it, None means unrestricted."""
+    joined = workspace_service.create({"id": "visible_joined", "name": "Joined"})["id"]
+    other = workspace_service.create({"id": "visible_other", "name": "Other"})["id"]
+    user = job_db.create_user("visible-member", password_hash="x", role="member")
+    job_db.upsert_workspace_member(joined, user["id"], "viewer")
+
+    def ids(**kwargs):
+        return {w["id"] for w in workspace_service.list_visible_workspaces(**kwargs)}
+
+    assert ids(member_user_id=None, bound_workspace_id=None) >= {joined, other}
+    assert ids(member_user_id=str(user["id"]), bound_workspace_id=None) == {joined}
+    assert ids(member_user_id=None, bound_workspace_id=other) == {other}
+    assert ids(member_user_id=str(user["id"]), bound_workspace_id=other) == set()
+    assert ids(member_user_id=None, bound_workspace_id="") == set()

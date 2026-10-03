@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button } from '@mui/material'
+import { Button, Typography } from '@mui/material'
 import { useWorkspaces } from '../hooks/useWorkspaces'
 import { useWorkspaceStats } from '../hooks/useWorkspaceStats'
 import { useDashboardEvents } from '../hooks/useDashboardEvents'
@@ -29,7 +29,7 @@ function DashboardWorkspaceCard({ workspace }: { workspace: WorkspaceRecord }) {
 }
 
 export function DashboardPage() {
-  const { data: workspaces = [] } = useWorkspaces()
+  const { data: workspaces = [], isSuccess } = useWorkspaces()
   const [dialogOpen, setDialogOpen] = useState(false)
   // POST /api/workspaces 已 require_admin（P4）：非 admin 隐藏创建入口。
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
@@ -56,6 +56,13 @@ export function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* #711：列表按成员关系过滤，未加入任何 workspace 的非 admin 拿到空列表。 */}
+      {isSuccess && workspaces.length === 0 && !isAdmin && (
+        <Typography color="text.secondary">
+          你还没有加入任何 Workspace，请联系管理员添加。
+        </Typography>
+      )}
 
       <div
         style={{

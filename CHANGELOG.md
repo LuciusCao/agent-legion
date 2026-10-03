@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Security
+- `GET /api/workspaces` 按成员关系过滤（issue #711）：此前该列表对任意登录用户全量返回，未加入任何 workspace 的成员也能枚举全部 workspace id（叠加 job_id 内嵌 workspace id 的格式，job id 猜测变为确定性枚举）。现在非 admin 只返回自己是成员（viewer/editor 任一角色）的 workspace，admin 保留全量；studio-agent scope token 继承签发人的可见范围，绑定 workspace 的 run token 只列出所绑定的那一个；workspace API token 在该端点仍为 404（不变）。前端随之适配：未加入任何 workspace 的非 admin 在首页看到「请联系管理员添加」的空态提示；登录与登出时清空前端查询缓存，同一浏览器换号登录不再沿用上一身份缓存的列表。
+
 ## [0.7.14] - 2026-10-03
 
 主打外部对接闭环与执行/校验正确性：run → job ID 链路打通（#735）、外部产物 presigned 直连下载（#739）、API token 每 token 限流（#738）与 api-scope 白名单机制化（#734）；job 节点计数触发器死锁修复（#690，schema 推进至 v88）、Host 输出校验声明视图（#757）、timeout_seconds 运行时可调（#691）。Worker 控制台接入闭环（#762/#763/#765，schema v87）；Studio 线收后台任务可见性与会话生命周期防护（#772/#806/#802）、长会话虚拟滚动（#803）与抽屉层级/布局三连修；infra 面 velites 双通道刷新（#831）、前端依赖指纹（#810）、pre-push 传输诊断（#679）。

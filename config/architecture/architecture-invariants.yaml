@@ -640,7 +640,7 @@ invariants:
         gate: full
 
   - id: SECURITY-AUTH-001
-    statement: "User sessions are revocable bearer tokens persisted only as sha256 digests with sliding expiry; management endpoints require the admin role; business routes require an authenticated user (anonymous gets 401); workspace membership gates reads (viewer) and writes (editor); repeated login failures lock the account temporarily."
+    statement: "User sessions are revocable bearer tokens persisted only as sha256 digests with sliding expiry; management endpoints require the admin role; business routes require an authenticated user (anonymous gets 401); workspace membership gates reads (viewer) and writes (editor), and the workspace listing (GET /api/workspaces) returns only the caller's member workspaces to non-admins while admins see all (#711); repeated login failures lock the account temporarily."
     owner: security
     risk: critical
     evidence:
