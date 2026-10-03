@@ -325,6 +325,35 @@ def test_inject_v4_worker_keeps_cas_form_for_rewritten_gz_row() -> None:
     assert storage.presigned_gets == []
 
 
+def test_inject_dict_ref_with_rewritten_row_downgrades_to_cas(tmp_path: Path) -> None:
+    """F1（#876 B 员 P2-latent）：同对象二次注入的 dict ref 同样走身份守卫
+    ——dict 的 sha256 在签发时等于 dispatch 冻结 digest，行被重写后与行
+    hash 失配：不拿当下行改写身份，降级为 CAS 串形态（stage_agent_inputs
+    的 ref 方案）下发，digest 不变。行一致的幂等重签由
+    test_inject_is_idempotent_for_dict_form_inputs 钉住（零适配）。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    source = tmp_path / "q.json"
+    source.write_bytes(REWROTE)  # 行是重写后的新字节
+    store.upload(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        local_path=source,
+    )
+    manifest = _manifest()
+    manifest["input_artifacts"] = {
+        "q.json": {"url": "https://s3.test/download/stale?sig=old", "sha256": HASH}
+    }
+
+    inject_artifact_object_block(store, manifest)
+
+    assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
+    assert storage.presigned_gets == []
+
+
 def test_inject_decides_upgrade_per_input_identity(tmp_path: Path) -> None:
     """形态混杂：fresh.json 行未动（升级 presigned）、stale.json 行被重
     写（保留 CAS）——按名各自判定，互不牵连。"""

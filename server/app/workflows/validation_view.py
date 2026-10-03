@@ -175,5 +175,7 @@ def materialize_validation_view(
         placed = place(rel, output_source / rel, target, private=False)
         if placed is not None:
             st, linked = placed
-            output_placements.append(OutputPlacement(rel, st.st_ino, st.st_dev, linked))
+            output_placements.append(
+                OutputPlacement(rel, st.st_ino, st.st_dev, st.st_mtime_ns, st.st_size, linked)
+            )
     return ViewPlacements(tuple(input_snaps), tuple(output_placements))

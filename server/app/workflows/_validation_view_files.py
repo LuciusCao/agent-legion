@@ -4,7 +4,9 @@ Split from ``validation_view`` for the file-size budget — that module owns
 the view contract and the construction/exit orchestration; this one owns
 the filesystem mechanics: safe-relative filtering, hardlink-or-copy
 placement with its failure grading, the placement records the exit arms
-work against, the output reconcile back into the run view, and the inputs
+work against, the output reconcile back into the run view (skipped for
+copied entries the validator never touched — (mtime, size) identity check,
+#876 B 员 P3), and the inputs
 read-only enforcement. The input byte-source decision (dispatch-frozen CAS
 first, job-dir fallback, #828/#830/#833) lives in the sibling
 ``_validation_view_inputs``. See ``validation_view``'s docstring for the
@@ -37,11 +39,13 @@ class InputSnapshot:
 
 @dataclass(frozen=True)
 class OutputPlacement:
-    """An output's view entry at placement: inode identity + channel."""
+    """An output's view entry at placement: inode identity + channel + stat."""
 
     rel: str
     ino: int
     dev: int
+    mtime_ns: int
+    size: int
     linked: bool  # hardlinked (in-place writes propagate) vs copied
 
 
@@ -95,7 +99,11 @@ def place(
         spot.unlink()
     if private:
         try:
-            copy_private(source, spot)
+            # 探测点挪到视图外（视图父级，同一文件系统——视图经
+            # TemporaryDirectory(dir=job_dir) 建在其中，st_dev 相同，探测
+            # 结论不失真）：被 suppress 的 unlink 失败不会把
+            # ``.reflink-probe-*`` 残留进 validator 的 rglob 范围。
+            copy_private(source, spot, probe_dir=target.parent)
         except FileNotFoundError:
             return None
         return os.stat(spot), False
@@ -123,6 +131,10 @@ def reconcile_outputs(
     fallback entry whose mutations cannot propagate) is synced with a
     temp-write + atomic os.replace into ``output_source`` — a sync failure
     raises so the run fails closed rather than promoting uncleaned bytes.
+    A copied entry whose (mtime, size) still matches its placement stat is
+    skipped outright — the validator never touched it, and an unconditional
+    temp+copy+replace would tax every clean completion with 2x I/O per
+    untouched output on hardlink-unsupported mounts (#876 B 员 P3).
     A validator-deleted (or non-file-replaced) output propagates the
     deletion: the finish gate's missing-source containment then fails the
     run, exactly as when validators ran inside the staging view.
@@ -133,6 +145,13 @@ def reconcile_outputs(
         if spot.is_file():
             st = spot.stat()
             if placed.linked and (st.st_ino, st.st_dev) == (placed.ino, placed.dev):
+                continue
+            if (st.st_mtime_ns, st.st_size) == (placed.mtime_ns, placed.size):
+                # 拷贝回落条目 validator 没碰（mtime+size 双条件同源一致）
+                # ——跳过 temp+copy+replace，否则每个未修改输出在 ext4 上
+                # 每次完成白付 2× I/O。不用 content hash 判未修改：逐字
+                # 重读每个输出的成本正是要省的那笔 I/O 本身；mtime+size
+                # 与 inputs 只读快照检查同一证伪级别。
                 continue
             _sync_back(spot, source)
         elif not source.is_file() and not source.is_symlink():

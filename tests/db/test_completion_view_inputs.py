@@ -237,3 +237,75 @@ def test_validation_uses_dispatch_frozen_input_bytes(
     assert captured["in.json"] == b"dispatch-frozen"
     assert captured["out.json"] == b'{"fresh": true}'
     assert (job_dir / "in.json").read_bytes() == b"overwritten-by-parallel-producer"  # 现场不动
+
+
+def test_output_ref_writes_never_precede_validation(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#876 A1：Worker 上报与 declared input 撞名的未声明产物时，其
+    add_ref（upsert 同一 (job,node,name) 槽位）必须发生在校验之后——
+    校验时刻槽位仍是 dispatch 冻结 digest（否则冻结 ref 被顶成孤儿，
+    池排队跨过 GC tick 后校验静默回落 job_dir 读非冻结字节）。"""
+    _seed_completion_job(job_db, workspace_id="inp4-ws", job_id="inp4-job")
+    storage = FakeObjectStorage()
+    artifact_store = ArtifactStore(tmp_path / "cas", TEST_DATABASE_URL)
+    handler, _store, jobs_dir = _completion_handler(
+        job_db, tmp_path, storage, skill_manager=_skill_manager(tmp_path)
+    )
+    handler.artifact_store = artifact_store
+    job_dir = jobs_dir / "inp4-ws" / "inp4-job"
+    job_dir.mkdir(parents=True)
+    # dispatch 冻结的 input 身份（stage_agent_inputs 同款：put + 冻结 ref）。
+    frozen_digest = artifact_store.put(b"dispatch-frozen")
+    artifact_store.add_ref("inp4-job", "node_a", "in.json", frozen_digest)
+    # Worker 上报撞名的未声明产物——其 digest 是另一份字节（blob 在场满
+    # 足外键）。
+    reported_digest = artifact_store.put(b"reported-undeclared")
+    _result_archive(tmp_path / "bundles" / "result.tar.gz", {"out.json": b'{"fresh": true}'})
+    staging_key = "jobs-staging/inp4-ws/inp4-job/exec-1/out.json"
+    storage.objects[staging_key] = b'{"fresh": true}'
+    captured: dict[str, bytes] = {}
+    slots_at_validation: dict[str, str] = {}
+
+    def _fake_validate(
+        _sm: Any, manifest: dict[str, Any], jd: Path, rvd: Path, store: Any = None
+    ) -> None:
+        slots_at_validation.update(
+            {str(r["name"]): str(r["hash"]) for r in artifact_store.refs_for_job("inp4-job")}
+        )
+        _capture_view(captured, manifest, jd, rvd, store)
+
+    monkeypatch.setattr(
+        "server.app.agent_control.completion_staged.validate_worker_outputs", _fake_validate
+    )
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="inp4-job",
+        node_key="node_a",
+        manifest={
+            "expected_outputs": ["out.json"],
+            "inputs": ["in.json"],
+            "input_artifacts": {"in.json": f"sha256:{frozen_digest}"},
+            "execution_id": "exec-1",
+        },
+        outcome=AgentOutcome(
+            status="completed",
+            exit_code=0,
+            output_artifacts={
+                "out.json": {"storage_key": staging_key, "size_bytes": 15, "content_hash": ""},
+                "in.json": f"sha256:{reported_digest}",  # 撞名未声明产物
+            },
+        ),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("inp4-job", "node_a")["status"] == "completed"
+    # 校验时刻：撞名产物的 add_ref 尚未发生，槽位仍是 dispatch 冻结 digest。
+    assert slots_at_validation["in.json"] == frozen_digest
+    assert captured["in.json"] == b"dispatch-frozen"
+    # 校验之后槽位才被改写（产物登记语义不变）。
+    slots_after = {str(r["name"]): str(r["hash"]) for r in artifact_store.refs_for_job("inp4-job")}
+    assert slots_after["in.json"] == reported_digest

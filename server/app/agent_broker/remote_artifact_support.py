@@ -118,7 +118,13 @@ def upgrade_input_artifacts(
     the same digest is the same input. The hashes are directly comparable:
     a row's ``content_hash`` is always the UNCOMPRESSED-content sha256
     (gzip rows included, #338), the same basis as ``stage_agent_inputs``'
-    CAS digest.
+    CAS digest. The guard covers BOTH ref forms: a dict ref (the
+    idempotent re-injection shape) carries the frozen digest in its
+    ``sha256`` field, and a mismatch downgrades it to the CAS string form
+    (``sha256:<digest>``, exactly ``stage_agent_inputs``' scheme) instead
+    of rewriting its identity from the present row — the injection is
+    memory-only (never persisted), and the Worker reads the ref FORM, not
+    its provenance.
     """
     assert store.storage is not None
     expires = presign_expiry_seconds(manifest)
@@ -127,13 +133,13 @@ def upgrade_input_artifacts(
     for name, ref in dict(manifest.get("input_artifacts") or {}).items():
         row = store.lookup(job_id, str(name))
         if row is not None:
-            # 非 str ref（重复注入的 dict 形态）拿不出冻结 digest——不在本
-            # 不变量保护范围，维持现状升级（URL 重签）。
-            digest = str(ref).split(":", 1)[-1] if isinstance(ref, str) else None
+            digest = _frozen_digest(ref)
             if digest is not None and str(row.get("content_hash") or "") != digest:
                 # 行在 dispatch 后被重写（或行 hash 缺失无法自证身份）：
-                # 不升级，Worker 经 CAS 通道拿 dispatch 冻结字节。
-                inputs[str(name)] = ref
+                # 不升级，Worker 经 CAS 通道拿 dispatch 冻结字节。str ref
+                # 本来就是 CAS 形态；dict ref 拼回 sha256:<digest> 串——
+                # 注入 memory-only 不落库，Worker 只认形态不识来源。
+                inputs[str(name)] = ref if isinstance(ref, str) else f"sha256:{digest}"
                 continue
             storage_key = str(row["storage_key"])
             if is_gzip_key(storage_key) and not gzip_capable:
@@ -151,6 +157,24 @@ def upgrade_input_artifacts(
         else:
             inputs[str(name)] = ref
     return inputs
+
+
+def _frozen_digest(ref: Any) -> str | None:
+    """The dispatch-frozen digest a ref carries (claim guard's comparison key).
+
+    str ref (CAS form): the part after the first colon. dict ref (the
+    idempotent re-injection shape, pinned by
+    ``test_inject_is_idempotent_for_dict_form_inputs``): its ``sha256``
+    field — written equal to the frozen digest at issue time, so it IS the
+    identity; an empty one compares as a mismatch (an identity that cannot
+    be stated must never be silently replaced from the present row). Any
+    other shape returns None and keeps the legacy upgrade behavior.
+    """
+    if isinstance(ref, str):
+        return ref.split(":", 1)[-1]
+    if isinstance(ref, dict):
+        return str(ref.get("sha256") or "")
+    return None
 
 
 def download_remote_artifact(

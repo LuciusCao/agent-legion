@@ -554,6 +554,80 @@ def test_download_input_artifacts_fallback_cas_bytes_are_digest_verified(
     assert "artifact digest mismatch" in message
 
 
+def _fake_open_download_raising(monkeypatch: pytest.MonkeyPatch, error: str) -> None:
+    def _open(url: str) -> io.BytesIO:
+        raise RuntimeError(error)
+
+    monkeypatch.setattr(artifact_download, "_open_download", _open)
+
+
+def test_download_input_artifacts_presigned_http_failure_falls_back_to_cas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F2（#876 B 员 P2-）：presigned HTTP 失败（403/404/5xx，重试耗尽）
+    同样回落 CAS——ref.sha256 即冻结身份，传输失败不等于身份未知。"""
+    monkeypatch.setattr(artifact_inputs, "_RETRY_BACKOFF_BASE_SECONDS", 0.01)
+    _fake_open_download_raising(monkeypatch, "artifact download failed with HTTP 403")
+    client = _DownloadFakeClient({f"/api/artifacts/{HASH}": PAYLOAD})
+    manifest = {
+        "input_artifacts": {
+            "inputs/q.json": {"url": "https://s3.test/get/x?sig=1", "sha256": HASH},
+        }
+    }
+
+    download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
+
+    assert client.requests == [f"/api/artifacts/{HASH}"]
+    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD
+
+
+def test_download_input_artifacts_truncated_gzip_falls_back_to_cas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F2：解码失败（截断 gzip 流 → EOFError，非 OSError 族）不得绕过两
+    段式——同样归拢进 CAS 回落。"""
+    monkeypatch.setattr(artifact_inputs, "_RETRY_BACKOFF_BASE_SECONDS", 0.01)
+    _fake_open_download(monkeypatch, gzip.compress(PAYLOAD)[:5])  # 截断的 gzip 流
+    client = _DownloadFakeClient({f"/api/artifacts/{HASH}": PAYLOAD})
+    manifest = {
+        "input_artifacts": {
+            "inputs/q.json": {
+                "url": "https://s3.test/get/x?sig=1",
+                "sha256": HASH,
+                "content_encoding": "gzip",
+            },
+        }
+    }
+
+    download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
+
+    assert client.requests == [f"/api/artifacts/{HASH}"]
+    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD
+
+
+def test_download_input_artifacts_presigned_failure_and_cas_missing_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F2：两段皆败的报错归因——presigned 段的失败原因（HTTP 403）与
+    CAS 段的失败原因（HTTP 404）都要在消息里。"""
+    monkeypatch.setattr(artifact_inputs, "_RETRY_BACKOFF_BASE_SECONDS", 0.01)
+    _fake_open_download_raising(monkeypatch, "artifact download failed with HTTP 403")
+    client = _DownloadFakeClient({})
+    manifest = {
+        "input_artifacts": {
+            "inputs/q.json": {"url": "https://s3.test/get/x?sig=1", "sha256": HASH},
+        }
+    }
+
+    with pytest.raises(RuntimeError) as excinfo:
+        download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
+    message = str(excinfo.value)
+    assert "presigned GET failed" in message
+    assert "HTTP 403" in message
+    assert "CAS fallback failed" in message
+    assert "HTTP 404" in message
+
+
 def test_download_input_artifacts_string_form_keeps_cas_channel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -162,6 +162,18 @@ def validate_skill_commit_outputs(
     through ``input_refs`` + ``artifact_root`` (#833): the dispatch-frozen
     CAS copy wins, the job dir is the fallback — the blob open is
     filesystem-only, so the pool worker needs no DB handle for it.
+
+    Known window (#876 B 员 P3, documented not fixed): ``validate_in_pool``
+    retries the WHOLE task once on ``BrokenProcessPool`` — if the pool
+    worker died mid-validation, the retry runs the validator again against
+    a run view that may already hold partially reconciled bytes from the
+    crashed attempt (reconcile happens only on CLEAN body exit, so the
+    crash must have occurred inside the reconcile/sync itself to leave
+    partial state — a sub-second window). The double-apply surface for a
+    non-idempotent validator is bounded by construction: the view holds
+    only declared names, so re-validation can only re-apply the validator's
+    own rules to its own declared outputs (clean-in-place validators are
+    idempotent by design); nothing undeclared can accumulate.
     """
     # Local imports: keeps the spawn child's import graph minimal and lets
     # the pool module itself stay cheap to import in the main process.
