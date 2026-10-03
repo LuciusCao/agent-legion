@@ -11,7 +11,13 @@ tests/db/test_completion_view_inputs.py:
   job-dir file between dispatch and completion — codex P1);
 - no ref, a non-CAS ref shape (claim-time presigned dict), no store root, or
   a missing blob (GC race / stale ref) all fall back to the job dir — the
-  pre-#833 exposure, with the validator's own rules judging absence;
+  pre-#833 exposure, with the validator's own rules judging absence. The
+  fallback is NOT a normal channel (EXEC-INPUT-IDENTITY-001,
+  docs/architecture/execution-generation.md §2.11): the no-ref arm is a
+  legacy exemption serving only pre-#833 manifests without a frozen ref and
+  drains to zero as old jobs exhaust — every new manifest carries frozen
+  refs; the blob-missing arm is the fail-open GC-race degradation, rare by
+  construction ((job,node) refs shield the blob for the job's lifetime);
 - the refs map keys on the RAW declared name (``stage_agent_inputs`` records
   the declared spelling), while the view placement uses the normalized
   ``safe_relative`` name.
@@ -42,7 +48,13 @@ class InputAuthority:
 def resolve_input_source(
     raw: str, rel: str, authority: InputAuthority | None, input_source: Path
 ) -> Path:
-    """The bytes a declared input validates against (rules see module docstring)."""
+    """The bytes a declared input validates against (rules see module docstring).
+
+    The job-dir return at the end is the legacy/degradation fallback, never
+    the normal channel: reached only by pre-#833 manifests (no frozen ref,
+    draining to zero), non-CAS ref shapes, a missing store, or a missing
+    blob (EXEC-INPUT-IDENTITY-001).
+    """
     if authority is not None and authority.artifact_root is not None:
         digest = _cas_digest(authority.refs.get(raw))
         if digest is not None:

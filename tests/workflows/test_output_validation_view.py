@@ -599,7 +599,10 @@ def test_cas_sourced_input_is_still_a_private_copy(tmp_path: Path) -> None:
 
 def test_cas_blob_missing_falls_back_to_the_job_dir(tmp_path: Path) -> None:
     """A stale ref whose blob is gone (GC race) takes the job-dir fallback —
-    the pre-#833 exposure, judged by the validator's own rules."""
+    the pre-#833 exposure, judged by the validator's own rules. This arm is
+    the fail-open degradation of EXEC-INPUT-IDENTITY-001, not a normal
+    channel: (job,node) refs shield the blob for the job's lifetime, so the
+    race stays rare by construction."""
     rules = "if (job / 'cleaned_question.json').read_text() != 'local-bytes':\n    sys.exit(1)\n"
     manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
     job_dir, run_view = _layout(tmp_path)
@@ -650,7 +653,10 @@ def test_noncanonical_input_spelling_resolves_to_the_output_bytes(tmp_path: Path
 
 def test_input_refs_without_a_store_take_the_job_dir(tmp_path: Path) -> None:
     """Refs in the manifest but no store on the caller (artifact_store=None)
-    — every input falls back to the job dir."""
+    — every input falls back to the job dir. Same fallback family as the
+    no-ref legacy exemption (EXEC-INPUT-IDENTITY-001): pre-#833 manifests
+    without frozen refs drain to zero as old jobs exhaust; new manifests
+    always carry frozen refs and a store."""
     rules = "if (job / 'cleaned_question.json').read_text() != 'local-bytes':\n    sys.exit(1)\n"
     manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
     job_dir, run_view = _layout(tmp_path)

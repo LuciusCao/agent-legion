@@ -1496,3 +1496,23 @@ invariants:
       - kind: contract
         target: tests/scripts/test_execution_write_surfaces.py
         gate: quick
+  - id: EXEC-INPUT-IDENTITY-001
+    statement: "A node execution's input identity (which digest's bytes) has exactly one resolution point — dispatch: stage_agent_inputs puts the bytes the Worker will consume into the CAS, holds a (job,node) ref against GC, and freezes sha256:<digest> into the DB manifest's input_artifacts. Every later stage may only perform equivalent transport transforms (same digest, different transfer form), never re-resolve identity from mutable present state (the current job_artifacts row, the job_dir's current bytes): the claim presigned upgrade is gated by comparing the row's content_hash against the frozen digest — a rewritten row keeps the legacy CAS form so the Worker downloads exactly what dispatch froze (#876 codex P1, the re-resolution defect class) — the Worker verifies the digest after download in both ref forms, and Host-side validation reads the dispatch-frozen CAS blob (private-copy isolated). The job_dir fallback in validation input resolution is a legacy exemption serving only pre-#833 manifests without a frozen ref (drains to zero as old jobs exhaust) plus the fail-open GC-race/blob-missing degradation; hydration only refills the evictable job_dir cache and never decides execution identity; the artifact read endpoints/UI read the latest row under documented #508 semantics and are not execution inputs. Hash bases are directly comparable: a row's content_hash is always the uncompressed-content sha256 (gzip rows included, #338), the same basis as the dispatch CAS digest. Design: docs/architecture/execution-generation.md section 2.11."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_keeps_cas_form_when_row_was_rewritten_after_dispatch
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_v4_worker_keeps_cas_form_for_rewritten_gz_row
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_decides_upgrade_per_input_identity
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_view_inputs.py::test_validation_uses_dispatch_frozen_input_bytes
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py::test_input_bytes_come_from_the_dispatch_frozen_cas_copy
+        gate: quick

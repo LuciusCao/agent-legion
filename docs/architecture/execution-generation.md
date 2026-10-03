@@ -376,6 +376,50 @@ job-mutation 锁内复核（`sweep_delete_guard`：清单行已重登记或生�
 running/completed 的名跳过），不误删新代次写回的新字节（codex #776
 复审 P2-A）。
 
+### 2.11 输入身份唯一解析点（EXEC-INPUT-IDENTITY-001）
+
+一个节点执行的**输入身份**（哪个 digest 的字节）有且只有一个解析点：
+**dispatch**。`stage_agent_inputs`（`agent_broker/agent_artifacts.py`，
+agent 与 code 两条 dispatch 都调）把 Worker 将消费的 input 字节 put 进
+CAS、按 (job,node) 持 ref 防 GC（job 存活期间 blob 不可回收），并把
+`sha256:<digest>` 冻结进 DB manifest 的 `input_artifacts`。此后所有环
+节只允许**等价 transport 变换**（同一 digest 换传输形态），不允许
+**重解析**（按当下可变状态——`job_artifacts` 当下行、job_dir 现状字
+节——重新决定身份）。生命周期上三处读到的字节 digest 同一：
+
+```
+dispatch            claim                Worker              Host 校验
+解析：现状字节       transport 变换：      按 ref 形态下载      transport 消费：
+→ digest，冻结 ref   CAS ref → presigned   + digest 校验        按冻结 ref 开
+（DB manifest）     GET（digest 不变）    （两形态同口径）     CAS blob（私有副本）
+```
+
+transport 变换与重解析的区别即**机检判定准则**：transport 变换必须携
+带原 digest 可机验（presigned ref 的 `sha256` 字段 == 冻结 digest，
+worker 端 `sha256_file` 下载后校验；claim 升级前行 `content_hash` 与
+冻结 digest 比对）；任何把可变状态当执行输入身份来源、且字节流向执
+行或校验的路径即缺陷。反面案例一句话：PR #876 codex P1——claim 按
+当下 `job_artifacts` 行升级 presigned（行被并行生产者重写后 digest
+漂移），Worker 跑新字节、Host 校冻结字节，双向判错；修复（升级前比
+对 digest、不一致保留 CAS 形态）即本不变量在 claim 点的落地。
+
+解析点全清单（合法性判定）：
+
+| 路径 | 性质 | 判定 | 理由 |
+|---|---|---|---|
+| dispatch `stage_agent_inputs` | 解析 | 合法（唯一解析点） | 身份在此冻结，(job,node) ref 防 GC |
+| claim presigned 升级（`remote_artifact_support.upgrade_input_artifacts`） | transport 变换 | 合法（带 digest 比对守卫） | 行 hash == 冻结 digest 才升级；不一致/无行保留 CAS 形态 |
+| Host 校验 CAS-first（`_validation_view_inputs.resolve_input_source`） | transport 消费 | 合法 | 按冻结 ref 开 blob，ref 来自 DB manifest（claim 注入 memory-only 不落库） |
+| 校验 job_dir 回落（无 ref） | 重解析 | 仅 legacy 豁免：服务 #833 前无冻结 ref 的 manifest，随旧 job 耗尽归零 | 新 manifest 必有冻结 ref；暴露面与 #833 前校验直读 job_dir 一致 |
+| 校验 job_dir 回落（有 ref 但 blob 缺失） | 重解析 | 合法（fail-open 降级） | GC 竞态/陈旧 ref 的残余面，与 legacy 同一暴露面，validator 自判缺失 |
+| hydration（job_dir 缓存回填） | 重解析 | 合法（不决定执行身份） | 只服务可淘汰的 job_dir 本地缓存（EXEC-ARTIFACT-STORE-001），执行身份仍由 manifest ref 决定 |
+| 产物读端点 / UI 读 | 当下行读 | 合法（#508 文档化语义） | 读最新是展示语义，不参与执行与校验 |
+
+新增任何读 input 字节的路径先过判定准则：digest 来自 dispatch 冻结
+ref ⇒ transport，来自当下可变状态且流向执行/校验 ⇒ 缺陷。digest 比
+对口径：行 `content_hash` 恒为未压缩内容 sha256（gzip 行同，#338），
+与 dispatch CAS digest 同基准，直接可比。
+
 ## 3. 对抗审查 checklist
 
 本协议经多轮对抗审查收敛；把发现过真实问题的三个切面固化为 checklist。审查
