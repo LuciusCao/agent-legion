@@ -35,6 +35,12 @@ function parseNumber(values: FormValues, path: string): number {
   if (def.min !== undefined && value < def.min) {
     throw new Error(`${def.label} 必须不小于 ${def.min}`)
   }
+  // #739 codex P2（簇）：上界与下界同权——capacity/retention 字段早已登记
+  // max 但此处从未校验，契约上限（TTL le=604800、抽检 le=100、workers
+  // le=256/64 等）全部裸奔到后端 422。
+  if (def.max !== undefined && value > def.max) {
+    throw new Error(`${def.label} 必须不大于 ${def.max}`)
+  }
   return value
 }
 
@@ -92,6 +98,10 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
       max_concurrent_result_commits: parseNumber(
         values,
         'agent_workers.max_concurrent_result_commits'
+      ),
+      artifact_download_presign_ttl_seconds: parseNumber(
+        values,
+        'agent_workers.artifact_download_presign_ttl_seconds'
       ),
     },
     agent_enqueue: {

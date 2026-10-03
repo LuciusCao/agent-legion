@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
@@ -77,8 +78,7 @@ def test_v41_database_upgrades_via_init_db() -> None:
     assert row["workspace_id"] is None
     assert "idx_auth_scoped_tokens_id" in indexes
     assert migration is not None
-    # The registry tail at the CURRENT schema version (v86, #645).
-    assert migration["name"] == "node_runs_impl_identity"
+    assert migration["name"] == MIGRATIONS[-1].name
 
     # Idempotent on replay (init_db runs at every backend startup).
     init_db(TEST_DATABASE_URL)

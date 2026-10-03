@@ -1,6 +1,6 @@
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
 import { WorkerConsoleAccessHelp } from './WorkerConsoleAccessHelp'
-import styles from './WorkerTokensSection.module.css'
+import styles from './WorkerTokenNextSteps.module.css'
 
 /**
  * 签发 Key 成功后的「下一步」三步指引：复制 token → Worker 控制台

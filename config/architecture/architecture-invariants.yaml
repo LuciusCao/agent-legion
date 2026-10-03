@@ -30,6 +30,12 @@ invariants:
       - kind: integration
         target: tests/services/test_studio_chat_background_boundaries.py
         gate: quick
+      - kind: contract
+        target: tests/services/test_studio_chat_background_activity.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_background_recovery.py
+        gate: quick
   - id: API-CONTRACT-001
     statement: Generated frontend API types remain in sync with the backend OpenAPI schema.
     owner: architecture
@@ -487,7 +493,7 @@ invariants:
   # Rust-side wrap policy (seatbelt/bwrap argv) is covered by
   # velites/tests/sandbox_wrap.rs; registry targets allow only tests//scripts/.
   - id: EXEC-CODE-003
-    statement: "All (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend node code never runs unsandboxed. This holds on the Host (the bare multiprocessing child retired with the path mechanism in #96) and on a Worker alike (worker/code_runner.py): the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a resolvable velites binary (fail-closed). Worker-side binary resolution is shared between preflight, code_runner and execution_prepare (worker/binary_resolution.py resolve_binary): the bundled copy `data/bin/velites` (installed per-platform via `scripts/ensure-velites.sh --dest data/bin`) takes precedence over PATH, so a Worker machine needs no preinstalled velites."
+    statement: "All (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend node code never runs unsandboxed. This holds on the Host (the bare multiprocessing child retired with the path mechanism in #96) and on a Worker alike (worker/code_runner.py): the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a resolvable velites binary (fail-closed). Worker-side binary resolution is shared between preflight, code_runner and execution_prepare (worker/binary_resolution.py resolve_binary): the bundled copy `data/bin/velites` (installed per-platform via `scripts/ensure-velites.sh --dest data/bin`) takes precedence over PATH, so a Worker machine needs no preinstalled velites. Deploy-surface placement and freshness decisions live in scripts/velites_deploy_plan.py, which derives install targets from these real resolvers — deployment scripts must not carry a parallel lookup model (#835)."
     owner: workspace-executor
     risk: high
     evidence:
@@ -692,6 +698,20 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/services/test_skill_edit_snapshot.py
+        gate: quick
+
+  # #738: the intake channel's entry guardrail, registered next to the
+  # identity boundary it rides on.
+  - id: SECURITY-AUTH-003
+    statement: "Every workspace API intake token has its own request token bucket keyed by token_id (instance-wide refill rate and burst from the env-only auth section, defaults 60/min and 20): charged once per authenticated api-token request (off-surface 404 probes included), only after the secret verified (a bare token_id cannot drain another token's budget). Over-limit answers 429 with Retry-After (ceil from the refill rate) and a per-token coalesced structured warning keyed by token_id. Counters are process-local behind the replaceable ApiTokenLimiter protocol (reset on restart, per-replica best-effort); user sessions and studio-agent scoped tokens are never limited, and one token's exhaustion never affects another token."
+    owner: security
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_api_token_limits.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_workspace_api_token_rate_limits.py
         gate: quick
 
   - id: STUDIO-ADMISSION-001

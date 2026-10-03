@@ -112,7 +112,8 @@ make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed
    LLM 端点提供的 provider/model（一处即覆盖全部 agent 节点，也可逐节点
    `execution.*` 覆盖；输入框会按节点 Agent 的 runtime 给出在线 Worker
    上报的可用 provider/model 选项，也可手输）。
-3. 打开 workspace 的自动调度，并在 Worker 控制台打开 claim。
+3. 打开 workspace 的自动调度，并在 Worker 控制台打开 claim（主控制台会把
+   未开领取的 Worker 标为「在线·未领取」，新 workspace 的引导也有这两步）。
 4. 提交一批任务：在 workspace 里「添加条目」对话框上传知识点 markdown，
    或在面板中勾选已播种的示例材料，确认后创建运行——每个材料一个
    job。（「粘贴 ID」面板是 **ref 条目**：需先在 admin 配置外部服务连接，

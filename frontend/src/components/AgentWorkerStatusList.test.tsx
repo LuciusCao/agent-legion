@@ -52,6 +52,7 @@ it('isolates requests and caches when switching workspace before a response arri
         last_seen_at: '',
         online: true,
         revoked: false,
+        claim_enabled: null,
       },
     ])
   )

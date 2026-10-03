@@ -43,22 +43,22 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v86, node_runs_impl_identity, #645) must
-# leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v86 is DDL-only via the schema-file replay: node_runs
-# gains agent_definition_hash. The undo drops the column; v85's five
-# execution_generation columns stay in the (SCHEMA_VERSION-1) shape.
+# Effects the newest migration (v87, agent_worker_claim_state) must leave
+# behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v87 is DDL-only via its apply fn: agent_workers gains
+# claim_enabled. The undo drops the column; v86's agent_definition_hash
+# column stays in the (SCHEMA_VERSION-1) shape.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("node_runs", "agent_definition_hash", "text"),
+    ("agent_workers", "claim_enabled", "boolean"),
 )
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "node_runs_impl_identity"
+_NEWEST_MIGRATION_NAME = "agent_worker_claim_state"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v85 (empty: v85's execution_generation columns are untouched by
-# the undo and stay in the (SCHEMA_VERSION-1) shape).
+# faithful v86 (empty: v86's agent_definition_hash column is untouched by
+# the undo and stays in the (SCHEMA_VERSION-1) shape).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

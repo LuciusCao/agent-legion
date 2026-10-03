@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.migrations.runs import migrate_runs
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
@@ -269,8 +270,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    # The registry tail at the CURRENT schema version (v86, #645).
-    assert migration["name"] == "node_runs_impl_identity"
+    assert migration["name"] == MIGRATIONS[-1].name
 
 
 @pytest.mark.fresh_schema

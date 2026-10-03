@@ -50,6 +50,7 @@ _CURRENT_DOCS = (
     "docs/architecture/deployment.md",
     "docs/architecture/project-structure.md",
     "docs/architecture/local-quality-gates.md",
+    "docs/architecture/review-convergence.md",
     "docs/architecture/velites-harness.md",
     "docs/architecture/velites-model-registry.md",
     "docs/architecture/workspace-executor-evidence-matrix.md",

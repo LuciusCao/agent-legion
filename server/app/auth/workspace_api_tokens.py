@@ -40,6 +40,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from server.app.auth.api_token_limits import ApiTokenLimiter, InMemoryApiTokenLimiter
 from server.app.jobs.queries import JobQueries
 
 # Scope marker the auth chain keys on (see dependencies.workspace_access /
@@ -92,8 +93,11 @@ class WorkspaceApiTokenStore:
     and comparison, expiry interpretation, and the usage-watermark throttle.
     """
 
-    def __init__(self, queries: JobQueries) -> None:
+    def __init__(self, queries: JobQueries, limiter: ApiTokenLimiter | None = None) -> None:
         self._queries = queries
+        # #738 per-token request buckets (process memory by default; the
+        # protocol is the seam for a shared store — auth/api_token_limits.py).
+        self.limiter: ApiTokenLimiter = limiter or InMemoryApiTokenLimiter()
         self._last_used_at_refreshed: dict[str, float] = {}
         self._throttle_lock = threading.Lock()
 

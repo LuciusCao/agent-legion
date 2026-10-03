@@ -63,6 +63,8 @@ def test_default_document_matches_retired_yaml_values() -> None:
         "max_concurrent_result_commits": 16,
         "result_commit_batching": True,
         "artifact_spot_check_percent": 3,
+        # #739: presigned-download TTL rides the agent_workers block.
+        "artifact_download_presign_ttl_seconds": 3600,
     }
     # #509/#554/#569/#561 capacity knobs: defaults ride the code config.
     assert document["agent_enqueue"] == {"workers": 48, "max_pending": 1024}

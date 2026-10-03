@@ -1,4 +1,4 @@
-# Kimi 后台子代理完成接续（#806）
+# Kimi 后台任务活动与完成接续（#772/#806）
 
 Kimi 的 ACP `ACPSession.prompt()` 只在 prompt 请求内迭代通知流。Studio
 在 idle 时保持 ACP 连接，并不能使 Kimi 开始消费已经生成的后台完成通知。
@@ -33,8 +33,10 @@ compaction 和凭证。取消掉的队列项不调用模型；暂时无法校验
 路径遵循 Kimi 的 `KIMI_SHARE_DIR`（默认 `~/.kimi`）、工作目录规范路径的
 MD5 目录名和 ACP session id：`sessions/<cwd-md5>/<session-id>/tasks/`。
 只读 `spec.json` / `runtime.json`，只接受 version 1、session id 与任务 id
-完全匹配、root 所属的 agent 任务。不会扫描其他会话，不读任务输出，不修改
-Kimi 的通知消费状态。普通轮询忽略 symlink、过大文件、不完整 JSON 与未知版本。
+完全匹配、root 所属的 agent/bash 任务；只有 agent 终态参与自动接续。
+运行中只取输出文件更新时间，终态最多读 `output.log` 末尾 2048 字节，展示
+末尾 600 字符；有 `failure_reason` 时优先展示它。不扫描其他会话，不修改
+Kimi 的通知消费状态。普通轮询忽略链接、过大文件、不完整 JSON 与未知版本。
 基线扫描使用严格读取：根目录缺失、不可读、目录身份替换及任务元数据不完整均为
 观察失败，不能作为空历史或部分历史提交；明确属于其他会话、其他类型或版本的任务仍排除。
 从绝对路径根目录开始逐级以 `dir_fd` / `O_NOFOLLOW` 打开目录，后续枚举与文件读取
@@ -80,11 +82,46 @@ exactly-once 模型调用，也不拥有 Kimi 的原生通知消费状态。
 [background models](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/background/models.py)、
 [ACP session](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/acp/session.py)。
 
+## 活动可见性（#772）
+
+同一个 watcher 将创建、启动、运行、等待审批、完成、失败、终止、丢失和
+超时状态写入既有 `status` 会话流；现有 StatusLine 直接展示 detail。
+每条含任务 id、描述、开始时间与耗时，终态附截断结果摘要。状态不变时
+不反复刷消息。超过 120 秒无输出、心跳过期或已有任务状态无法读取时，
+写入一次对应提示；恢复活动后再写运行状态。提示只是观察，不会把任务
+擅自标记失败或完成。会话恢复后历史终态不重放，仍在运行的任务重新展示。
+
+回执游标与自动投递游标独立：取消和重启用只推进投递基线，不吞掉活动回执。
+单个回执写入失败只重试该任务；旧 turn 清理失败只阻断自动投递，活动仍持续记录。
+取消只停止自动接续，仍展示已派发任务的状态；Bash 任务展示状态但不会
+触发 #806 的子代理自动接续。此适配仅支持本机 Kimi V1，不推断其它 harness
+的后台生命周期。不同 harness 需要各自提供有身份边界的真实状态来源。
+
 ## Quality Impact
+
+生命周期修复遵循 `STUDIO-RUNTIME-001`：确认 token 失效后直接进入统一停止
+路径，不再进行第二次存活探测，升级或通知写入失败也不能跳过本代 handle 的
+非阻塞停止。关闭先在 runtime 锁内隔离生产者、拒绝已挂起权限，再写终止标记；
+阻塞进程回收在锁外执行。普通 ACP 回调固定到创建它们的 runtime，权限等待
+前后分别验证代次，等待期间不持锁，避免旧进程回声污染恢复后的会话。
+回归覆盖升级/快照/通知故障、runtime 退出与关闭交错、终止标记顺序及迟到回调。
 
 回归覆盖无人追问的完成接续、终态去重、运行中延迟、取消/关闭/旧 runtime
 守卫、token 失效、句柄拒绝、跨会话/子代理归属过滤、坏文件与符号链接拒绝。
 通过临时目录模拟 Kimi V1 文件及真实 watcher 线程，不需要模型调用。
+活动测试另外覆盖运行/等待审批、无输出/心跳过期/状态不可读与恢复、
+agent/bash 终态、摘要截断、FIFO 不阻塞读取、错误元数据和写消息失败重试。
+无 schema 与前端 transport 类型变更，不增加模型轮询或平台执行写面。
+
+## 恢复时补齐终态回执
+
+生命周期消息携带 `acp_session_id`；恢复时按 chat session 与 ACP session
+读取持久回执，并向前分页覆盖超过 500 条消息的会话。已报告运行状态、
+尚无终态回执的任务若已结束，补写一次终态；已报告终态与未观察过的历史
+任务继续忽略。旧消息缺少 ACP 身份时无法安全归属，不作为恢复证据。
+读取历史或写入回执失败会重试，只有持久写成功才更新进程内去重状态。
+恢复补报不自动唤醒模型，避免重启后丢失取消意图而恢复自主执行。
+回归覆盖掉线期间完成、再次恢复去重、写入失败后恢复、跨 ACP 身份隔离。
 确定性测试直接驱动 cursor 和真实 ACP 队列：覆盖无轮询间隔的 cancel/rearm、
 入队后取消、消费前 DB 故障/凭证失效、enqueue 异常、runtime 替换以及祖先目录替换。
 `test_studio_chat_background_boundaries.py` 在真实消息提交和 ACP load 边界完成任务，

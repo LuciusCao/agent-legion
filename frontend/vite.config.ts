@@ -39,6 +39,9 @@ const browserTestFiles = [
   'src/features/workflowStudio/shared/useWorkflowStudio.draftBaselineSync.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.test.ts',
+  // #809：cas 测试文件超 800 行纪律线拆出的姊妹文件，同走 jsdom 项目。
+  'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.conflict.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.resolve.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioActions.test.ts',
   'src/stores/agentsStore.test.ts',
 ]

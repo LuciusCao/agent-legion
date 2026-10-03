@@ -22,7 +22,7 @@ import { SharedMaterialFileContentDialog } from './WorkflowStudioSharedMaterials
 import { SharedMaterialFileRowView } from './WorkflowStudioSharedMaterialsFileRow'
 import { SharedMaterialsPropagateConfirmDialog } from './WorkflowStudioSharedMaterialsPropagateDialog'
 import { WorkflowStudioSaveWarningBanner } from './WorkflowStudioSaveWarningBanner'
-import { useDrawerEscape } from './useDrawerEscape'
+import { useStudioDrawerPaperStyle } from './useStudioDrawerPaperStyle'
 import styles from './WorkflowStudioSharedMaterialsDrawer.module.css'
 
 const PROPAGATE_STATUS_LABELS: Record<
@@ -54,9 +54,10 @@ function SharedMaterialsDrawer({
   // 与节点详情抽屉共存时由抽屉栈仲裁，只关栈顶（useDrawerEscape/drawerStack）。
   // hidden（#812 P2-2：窄屏非画布页签——抽屉挂在 SplitLayout 层，不随画布列
   // display:none，隐藏要自带）：paper display:none 不卸载（打开状态/内部
-  // 草稿保留），同时出 Esc 栈不占栈位。返回的 zIndex 挂到 paper：栈位映射
+  // 草稿保留），同时出 Esc 栈不占栈位。paper 样式里的 zIndex 是栈位映射的
   // 视觉层级，Esc 栈序 == 视觉序（#812 对抗轮 D2）。
-  const paperZIndex = useDrawerEscape(true, onClose, hidden)
+  // #817：paper 样式同时带窄屏顶边让位（页签行之下，Agent 页签可点）。
+  const paperStyle = useStudioDrawerPaperStyle(true, onClose, hidden)
   const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery({
     queryKey: extraQueryKeys.workspaceSharedMaterials(workspaceId),
@@ -86,10 +87,7 @@ function SharedMaterialsDrawer({
         paper: {
           className: styles.paper,
           // hidden：display:none 而非卸载——打开状态与抽屉内草稿保留。
-          style: {
-            zIndex: paperZIndex,
-            ...(hidden ? { display: 'none' } : {}),
-          },
+          style: paperStyle,
         },
       }}
       /* 轮 8 P2：非模态——persistent variant 不走 Modal（无遮罩/不圈禁

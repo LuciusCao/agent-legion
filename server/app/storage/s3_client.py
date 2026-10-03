@@ -8,6 +8,7 @@ materials service depends on; tests inject a fake instead of the network.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, BinaryIO, Protocol, cast
 
@@ -44,8 +45,15 @@ class ObjectStorage(Protocol):
         self,
         storage_key: str,
         expires_seconds: int = _DEFAULT_PRESIGN_EXPIRY_SECONDS,
+        response_headers: Mapping[str, str] | None = None,
     ) -> str:
-        """Return a presigned GET URL (Worker-side material downloads)."""
+        """Return a presigned GET URL (Worker-side material downloads).
+
+        ``response_headers`` are S3 GetObject response overrides
+        (``ResponseContentType`` / ``ResponseContentDisposition`` /
+        ``ResponseContentEncoding``) baked into the signature — the URL
+        answers with exactly those headers and the holder cannot alter them.
+        """
         ...
 
     def open_stream(self, storage_key: str) -> BinaryIO:
@@ -98,11 +106,18 @@ class S3StorageClient:
             self._presign_client = _build_boto3_client(self._settings, endpoint_override=public)
         return self._presign_client if public else self._client
 
-    def _presign(self, operation: str, storage_key: str, expires_seconds: int, **extra: Any) -> str:
+    def _presign(
+        self,
+        operation: str,
+        storage_key: str,
+        expires_seconds: int,
+        params: Mapping[str, str] | None = None,
+        **extra: Any,
+    ) -> str:
         return str(
             self._signing_client().generate_presigned_url(
                 operation,
-                Params={"Bucket": self._settings.bucket, "Key": storage_key},
+                Params={"Bucket": self._settings.bucket, "Key": storage_key, **(params or {})},
                 ExpiresIn=expires_seconds,
                 **extra,
             )
@@ -123,11 +138,12 @@ class S3StorageClient:
         self,
         storage_key: str,
         expires_seconds: int = _DEFAULT_PRESIGN_EXPIRY_SECONDS,
+        response_headers: Mapping[str, str] | None = None,
     ) -> str:
-        # Issued on the claim-response path only (memory, never persisted):
-        # the Worker downloads the material bytes over this URL and needs no
-        # storage credentials of its own.
-        return self._presign("get_object", storage_key, expires_seconds)
+        # Issued in memory, never persisted: claim responses (Worker material
+        # downloads) and the external artifact listing (#739, which signs the
+        # raw endpoint's response headers in as overrides).
+        return self._presign("get_object", storage_key, expires_seconds, params=response_headers)
 
     def head_object(self, storage_key: str) -> ObjectHead | None:
         from botocore.exceptions import ClientError

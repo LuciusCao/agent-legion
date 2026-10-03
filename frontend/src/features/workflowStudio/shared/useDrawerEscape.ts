@@ -8,7 +8,7 @@
  * 下层）会抢先 preventDefault 并关掉自己，留下上层的节点详情抽屉。
  * suppressed（#812 对抗轮 D3，对照 Dock 的 hidden 态）：窄屏非激活面板里
  * 的隐藏抽屉不入栈、不消费 Esc——否则看不见的抽屉占着栈顶挡住可见抽屉。
- * 返回栈位映射的 z-index（1200 + 栈位，钳 <1300）：调用方挂到 paper，
+ * 返回栈位映射的 z-index（1200 + 栈位，钳 1289 低于 Toast/Modal）：调用方挂到 paper，
  * 使视觉层级与 Esc 栈序一致。
  * 回调经 ref 读最新值（同 useDockEscape）：effect 只按开关状态挂/卸，
  * ref 保证每次击键读的是当帧回调。

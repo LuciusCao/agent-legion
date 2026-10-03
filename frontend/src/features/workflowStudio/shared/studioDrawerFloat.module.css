@@ -11,3 +11,18 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
   overflow: hidden;
 }
+
+/* 窄屏（≤900px，与 WorkflowStudioPageResponsive 同断点）：抽屉全宽右锚定，
+ * 顶边让出页签行（#817 方向 a）——否则抽屉物理盖住「Agent」页签，切页签
+ * 只剩画布页签的窄缝可点。--studio-drawer-top-inset 是页签行实测底边，由
+ * paper 内联样式写入（useStudioDrawerPaperStyle.ts）；首帧未测量时回落 0 =
+ * 旧几何。宽屏不进本断点，几何不变。
+ * 选择器带 MUI 的 .MuiDrawer-paper 抬到双类特异度：MUI Drawer paper 的
+ * emotion 样式（top:0 / height:100%）注入在 CSS 模块之后，同特异度下会
+ * 覆盖单类规则（实测窄屏 top 仍为 0）。 */
+@media (max-width: 900px) {
+  :global(.MuiDrawer-paper).drawerPaper {
+    top: var(--studio-drawer-top-inset, 0px);
+    height: calc(100% - var(--studio-drawer-top-inset, 0px) - 16px);
+  }
+}

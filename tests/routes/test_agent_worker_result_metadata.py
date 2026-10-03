@@ -235,6 +235,101 @@ def test_artifact_truncation_markers_parse_for_last_resort_shape() -> None:
     assert record["output_artifacts_total"] == 128
 
 
+def _require_output_argv(count: int) -> list[str]:
+    # agent argv 形态：每个 expected output 以 --require-output <name> 重复。
+    argv = ["/usr/bin/velites", "run", "--provider", "p", "--model", "m"]
+    for i in range(count):
+        argv += ["--require-output", f"output-{i:03d}.json"]
+    return argv
+
+
+@_parse_only
+def test_command_over_part_cap_is_truncated_not_rejected() -> None:
+    """#822：旧 Worker（无序列化侧收缩）把 40+ 产物的 argv 原样送来——Host
+    截断保前缀而非 ValueError（路由层即 400 → Worker 丢结果 → 重排队死循环）。"""
+    from shared.code_contract import MAX_RESULT_COMMAND_PARTS
+
+    argv = _require_output_argv(45)
+    assert len(argv) > MAX_RESULT_COMMAND_PARTS
+    outcome, record = parse_result_metadata(
+        json.dumps(
+            {
+                "status": "completed",
+                "exit_code": 0,
+                "command": argv,
+                "output_artifacts": {"out.json": dict(_REMOTE_REF)},
+            }
+        )
+    )
+    assert outcome.command == tuple(argv[:MAX_RESULT_COMMAND_PARTS])
+    assert outcome.output_artifacts == {"out.json": _REMOTE_REF}
+    assert record["status"] == "completed"
+
+
+@_parse_only
+@pytest.mark.parametrize("command", ["pi --x", {"0": "pi"}, 7])
+def test_command_wrong_shape_still_rejected(command) -> None:
+    """#822 只放宽段数：形态错误（非 list/tuple）照旧拒收。"""
+    with pytest.raises(ValueError, match="invalid command"):
+        parse_result_metadata(
+            json.dumps(
+                {"status": "failed", "exit_code": 1, "command": command, "output_artifacts": {}}
+            )
+        )
+
+
+@pytest.mark.postgres
+def test_legacy_worker_oversized_argv_result_is_committed(tmp_path) -> None:
+    """#822 路由级：旧 Worker 形态（未收缩的 40+ 产物 argv，未撞头预算）直接
+    投递——Host 204 落库、请求不再停留在 claimed（不进租约过期重排队）。"""
+    from fastapi.testclient import TestClient
+
+    from shared.code_contract import MAX_RESULT_COMMAND_PARTS
+    from tests.helpers.agent_worker_api import claim as _claim
+    from tests.helpers.agent_worker_api import empty_archive as _empty_archive
+    from tests.helpers.agent_worker_api import make_app as _make_app
+    from tests.helpers.agent_worker_api import register as _register
+    from tests.helpers.agent_worker_api import seed_request as _seed_request
+
+    argv = _require_output_argv(45)
+    assert len(argv) > MAX_RESULT_COMMAND_PARTS
+    metadata = {
+        "status": "failed",
+        "exit_code": 1,
+        "error_message": "Agent process exited 1",
+        "command": argv,
+        "output_artifacts": {},
+        "run_dir": "runs/node_a/worker",
+    }
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-argv", limit=2)
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        claimed = _claim(client, token)
+        response = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/result",
+            headers={
+                "X-Agent-Worker-Token": token,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+                # 旧 Worker 不经 _result_header_value：原样 JSON。
+                "X-Agent-Result": json.dumps(metadata),
+            },
+            content=_empty_archive(),
+        )
+        assert response.status_code == 204, response.text
+
+        with app.state.job_db.connect() as conn:
+            row = conn.execute(
+                "select state, outcome_json from agent_execution_requests where execution_id=%s",
+                (claimed["execution_id"],),
+            ).fetchone()
+        assert row is not None
+        assert row["state"] == "done"  # 已提交终态，不留 claimed 等租约过期
+        stored = json.loads(row["outcome_json"])
+        assert stored["status"] == "failed"
+        assert stored["error_message"] == "Agent process exited 1"
+
+
 @pytest.mark.postgres
 def test_cjk_result_header_lands_in_database_intact(tmp_path) -> None:
     """#748 review P2 路由级验证：Worker 按「UTF-8 字节头」投递 CJK metadata

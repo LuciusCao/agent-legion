@@ -10,7 +10,8 @@ from server.app.studio_chat.background_delivery import wake_session
 from server.app.studio_chat.background_rearm import prepare_rearm as prepare_rearm
 from server.app.studio_chat.background_rearm import rearm_wakeup as rearm_wakeup
 from server.app.studio_chat.background_rearm import try_rearm
-from server.app.studio_chat.kimi_task_store import completed_tasks, task_root
+from server.app.studio_chat.background_receipts import ReceiptCursor
+from server.app.studio_chat.kimi_task_store import task_root, task_snapshots
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,6 +31,7 @@ class CompletionCursor:
         self.seen = set(seen or ())
         self.pending: set[str] = set()
         self.initialized = seen is not None
+        self.receipts = ReceiptCursor.from_baseline(root, acp_session_id, self.seen)
         if not self.initialized:
             try:
                 self.baseline()
@@ -39,7 +41,14 @@ class CompletionCursor:
                 )
 
     def baseline(self) -> None:
-        self.seen.update(completed_tasks(self.root, self.acp_session_id, strict=True))
+        tasks = task_snapshots(self.root, self.acp_session_id, strict=True)
+        if not self.initialized:
+            self.receipts.initial_terminal.update(
+                key for key, task in tasks.items() if task.terminal
+            )
+        self.seen.update(
+            key for key, task in tasks.items() if task.kind == "agent" and task.terminal
+        )
         self.pending.clear()
         self.initialized = True
 
@@ -49,34 +58,22 @@ class CompletionCursor:
         with runtime.lock:
             if runtime.closed or service.runtime(session_id) is not runtime:
                 return
+            if not self.initialized:
+                self.baseline()
+            completed = self.receipts.step(service, session_id)
+            if runtime.background_wakeup_enabled:
+                self.pending.update(completed - self.seen)
+            self.seen.update(completed)
             if runtime.background_cleanup is not None:
                 if not runtime.background_cleanup():
                     return
                 runtime.background_cleanup = None
-            if not self.initialized:
-                self.baseline()
             if not runtime.background_wakeup_enabled:
                 if runtime.background_rearm_epoch is None:
                     self.baseline()
                     return
                 if not try_rearm(runtime):
                     return
-            for task_id, status in completed_tasks(
-                self.root, self.acp_session_id, ignored=self.seen
-            ).items():
-                service.store.append_message(
-                    session_id,
-                    "status",
-                    "system",
-                    {
-                        "event": "background_task_finished",
-                        "task_id": task_id,
-                        "status": status,
-                        "detail": f"后台子代理 {task_id}：{status}",
-                    },
-                )
-                self.seen.add(task_id)
-                self.pending.add(task_id)
             if self.pending and wake_session(service, session_id, runtime, sorted(self.pending)):
                 self.pending.clear()
 

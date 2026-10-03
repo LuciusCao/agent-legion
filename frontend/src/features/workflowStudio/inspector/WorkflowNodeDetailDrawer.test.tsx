@@ -311,6 +311,33 @@ describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
     expect(screen.getByText('生成关键信息')).toBeInTheDocument()
   })
 
+  it('#817：paper 带页签行实测底边作顶边让位变量（窄屏 CSS 断点消费，Agent 页签不被盖住）', () => {
+    // revert（paper 不写 --studio-drawer-top-inset）即红：窄屏抽屉回到
+    // top:0，物理盖住「Agent」页签。
+    const row = document.createElement('div')
+    row.setAttribute('data-testid', 'studio-mobile-nav-row')
+    row.getBoundingClientRect = () => ({ bottom: 105 }) as DOMRect
+    document.body.appendChild(row)
+    try {
+      render(
+        <TestQueryProvider>
+          {withStudioProviders(
+            studioFor('generate_key_info'),
+            makeStudioView({ narrow: true, mobilePanel: 'graph' }),
+            <WorkflowNodeDetailDrawer />
+          )}
+        </TestQueryProvider>
+      )
+      const paper = document.querySelector('.MuiDrawer-paper') as HTMLElement
+      expect(paper.style.getPropertyValue('--studio-drawer-top-inset')).toBe(
+        '105px'
+      )
+      expect(paper.style.display).toBe('')
+    } finally {
+      row.remove()
+    }
+  })
+
   it('轮 8 P2：抽屉非模态——无遮罩、不 aria-hidden 画布（Agent Dock 可并行交互）', () => {
     // MUI temporary Drawer 默认是 Modal（遮罩 + 焦点圈禁 + 兄弟
     // aria-hidden + 滚动锁）——把 z900 的 Agent Dock 盖住，破坏「边改节点

@@ -100,6 +100,12 @@ class AgentWorkersRuntimeConfig(BaseModel):
     # 时自报的控制台地址（后续按 Worker 逐个显示）落地后，此值只作尚无
     # Worker 注册时的兜底入口。
     console_url: WorkerConsoleUrl = ""
+    # #739: TTL of the presigned GET URLs the external artifact manifest
+    # issues per object-backed entry (download_url/expires_at). S3 caps
+    # SigV4 presigning at 7 days — le mirrors that ceiling so an
+    # over-configured value fails validation instead of breaking at
+    # signing time. Restart-effective, instance-settings managed.
+    artifact_download_presign_ttl_seconds: int = Field(default=3600, ge=60, le=604_800)
 
 
 class ExecutorRuntimeConfig(BaseModel):

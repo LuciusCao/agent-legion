@@ -41,6 +41,7 @@ from server.app.db.migrations import (
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
+from server.app.db.migrations.agent_worker_claim_state import migrate_agent_worker_claim_state
 from server.app.db.migrations.claim_queue_wait_profile import migrate_claim_queue_wait_profile
 from server.app.db.migrations.claim_stage_profile import migrate_claim_stage_profile
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
@@ -227,6 +228,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # retention-deleted request rows cannot be backfilled: unprovable =
     # conservative rerun).
     SchemaMigration(86, "node_runs_impl_identity"),
+    # v87: Worker-reported claim switch column (agent_workers.claim_enabled,
+    # nullable) — the Host UI's「在线·未领取」signal. Born as this branch's
+    # v83, bumped to 87 after the base advanced to v86 (#434 collision
+    # protocol: the later merge renumbers). DDL-only, guarded rule.
+    SchemaMigration(87, "agent_worker_claim_state", migrate_agent_worker_claim_state),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

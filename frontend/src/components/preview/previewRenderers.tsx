@@ -13,7 +13,7 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Chip } from '@mui/material'
 import { RichText } from '../RichText'
-import { JsonTree } from '../JsonTree'
+import { ParsedJsonBody } from './ParsedJsonBody'
 import { fetchJobArtifactText } from '../../api/jobArtifactText'
 import { queryKeys } from '../../lib/queryKeys'
 import { artifactVersion } from '../../lib/jobArtifactVersions'
@@ -108,7 +108,8 @@ export function JsonPreview({ jobId, name, detail }: PreviewRendererProps) {
     // .json 但解析失败：按原文展示而不是空白。
     return <TextBody content={content} truncated={truncated} total={total} />
   }
-  return <JsonTree data={parsed} />
+  // 合法 JSON：树视图 + 「预览/源码」切换（#777）。
+  return <ParsedJsonBody name={name} content={content} parsed={parsed} />
 }
 
 export function MarkdownPreview({ jobId, name, detail }: PreviewRendererProps) {

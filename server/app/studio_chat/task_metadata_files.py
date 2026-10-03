@@ -34,9 +34,10 @@ def read_json(parent: int, name: str, *, strict: bool = False) -> dict[str, Any]
         return {}
     descriptor = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=parent)
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             if strict:
-                raise ValueError("task metadata changed file type")
+                raise ValueError("task metadata changed file type or has hard links")
             return {}
         data = os.read(descriptor, 65537)
     finally:
@@ -45,7 +46,12 @@ def read_json(parent: int, name: str, *, strict: bool = False) -> dict[str, Any]
         if strict:
             raise ValueError("task metadata exceeds read limit")
         return {}
-    value = json.loads(data)
+    try:
+        value = json.loads(data)
+    except RecursionError as exc:
+        if strict:
+            raise ValueError("task metadata is too deeply nested") from exc
+        return {}  # One corrupt file must not suppress other tasks or startup.
     if strict and not isinstance(value, dict):
         raise ValueError("task metadata is not an object")
     return value if isinstance(value, dict) else {}

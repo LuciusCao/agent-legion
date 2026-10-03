@@ -208,10 +208,15 @@ exemptions:
 - check: architecture.file_budget
   path: frontend/src/pages/globalSettings/instanceSettingsFields.ts
   reason: 'Issue #521 adds the result-commit gate knob to the Worker-limits field group: one field entry
-    (path, label, integer, allowZero) in the same table shape. The list IS the form surface.'
+    (path, label, integer, allowZero) in the same table shape. The list IS the form surface.
+    Re-signed at actual + 10: #786 (#628) moved the node-code size cap knob into this group and
+    #739 added the artifact-download presign TTL field entry — 139 effective lines vs the 116
+    baseline (8 past the growth band). Remove when the instance-settings form gets its planned
+    structural split or a knob retirement frees headroom.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 122
+  ceiling: 149
+  expires: 2026-12-31
 - check: architecture.file_budget
   path: server/app/agent_broker/broker.py
   reason: 'Issue #591 threads the optional result_batcher seam through mark_done (submit branch + the
@@ -498,10 +503,12 @@ exemptions:
     actionable error text covering the bundled dir and PATH) doubles the file past its first ceiling.
     The module stays a single cohesive concern (startup preconditions for the executor); splitting the
     guard into its own module was rejected because preflight_error would reduce to a shell over two helpers.
-    Revisit the split if preflight grows a third guard.'
+    Revisit the split if preflight grows a third guard. The staleness reconciliation (the third guard)
+    lives in staleness.py since #835; the residual overage is the expect-runtimes error text and the
+    name re-export that keeps the historical import path alive.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 56
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/835
+  ceiling: 57
 - check: architecture.file_budget
   path: worker/runtime/setup.py
   reason: '#381 wired AGENT_WORKER_EXPECT_RUNTIMES through prepare_runtime_models (env read + ValueError
@@ -1270,4 +1277,38 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/734
   ceiling: 97
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: server/app/services/external_artifact_access.py
+  reason: >-
+    Issue #739 adds presigned-download issuance to the external artifact
+    listing: the gzip-form gate (S3 cannot attach Content-Encoding to a
+    presigned GET, so .gz rows keep the raw endpoint as their only channel),
+    the per-request presign + expires_at arithmetic, and the three new entry
+    fields on both entry builders — 147 effective lines vs the 116 baseline
+    (16 past the growth band; the release-line #703 review rounds also grew
+    the listing-row guard). The listing is one cohesive read model
+    (status/name union/manifest merge); splitting the entry builders into a
+    sister module would fork the merge logic they serve. Ceiling at actual
+    + 10 per the dated-exemption convention. Remove when the external
+    artifact surface gets its planned split (presign policy vs listing) or a
+    budget re-balance re-registers it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/739
+  ceiling: 157
+  expires: 2026-12-31
+- check: architecture.file_budget
+  path: server/app/routes/external_artifact_contracts.py
+  reason: >-
+    Issue #739 adds the presigned-download fields to ExternalArtifactEntry
+    (download_url / expires_at / content_encoding with their wire-contract
+    descriptions, incl. the gzip no-url semantics) — 63 effective lines vs
+    the 40 baseline. The model IS the wire shape; the three fields must sit
+    beside their entry siblings or the response contract forks from the file
+    that owns it. Ceiling at actual + 10 per the dated-exemption convention.
+    Remove when the external artifact contracts get a per-model split or a
+    budget re-balance re-registers it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/739
+  ceiling: 73
   expires: 2026-12-31

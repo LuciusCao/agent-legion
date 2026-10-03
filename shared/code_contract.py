@@ -35,6 +35,14 @@ RESULT_OUTPUT_ARTIFACTS_MEMBER = "result-output-artifacts.json"
 # （worker/upload/report.py 溢出臂），Host 读（agent_worker_results.py 的
 # parse_result_metadata）；单一事实来源在此，两侧字面量漂移即断。
 RESULT_OUTPUT_ARTIFACTS_FLAG = "output_artifacts_in_archive"
+# 结果元数据 ``command`` 面的段数上限（#822）。command 是纯观测面（Host 只
+# 记录、不参与完成判定），但 agent argv 会把每个 expected output 以
+# ``--require-output <name>`` 重复进去，产物一多段数即线性膨胀。两侧同一
+# 语义——超限截断保前缀、不拒收：Worker 序列化（worker/host/transfer.py 的
+# ``_result_header_value``）主动收缩，Host 解析（agent_worker_results.py 的
+# ``parse_result_metadata``）防御性截断。旧版 Host 对超限直接 400，Worker 4xx
+# 终态丢弃 marker → 租约过期重排队 → 同样产物再跑一遍的死循环即由此而来。
+MAX_RESULT_COMMAND_PARTS = 64
 # Mirrors workspace_libs/node_sdk.py NODE_RUNTIME_DIR / AUTH_FAILURE_MARKER.
 # node_sdk must stay import-self-contained (the code bundle ships only the
 # workspace_libs snapshot), so that mirror keeps a comment pointer instead of

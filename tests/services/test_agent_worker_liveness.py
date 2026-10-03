@@ -78,3 +78,23 @@ def test_throttle_boundary_writes_at_exactly_the_interval(job_db, monkeypatch) -
     # Deleting the record evicts the memo entry so the dict stays bounded.
     assert registry.delete_worker("boundary-worker") == "deleted"
     assert "boundary-worker" not in registry._liveness._writes
+
+
+def test_stale_authentication_cannot_refresh_replacement_liveness(job_db, monkeypatch) -> None:
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    args = dict(worker_id="rotating-worker", name="Worker", runtimes=["pi"], max_concurrency=1)
+    token = registry.issue_token(**args)
+    record_seen = registry._liveness.record_seen
+
+    def rotate_before_liveness(database_dsn, worker_id, token_hash):
+        registry.issue_token(**args)
+        with job_db.connect() as conn:
+            conn.execute(
+                "update agent_workers set last_seen_at=current_timestamp - interval '1 hour'"
+            )
+        record_seen(database_dsn, worker_id, token_hash)
+
+    monkeypatch.setattr(registry._liveness, "record_seen", rotate_before_liveness)
+    registry.authenticate(token)
+    assert registry.list_workers()[0]["online"] is False
+    assert registry._liveness._writes == {}

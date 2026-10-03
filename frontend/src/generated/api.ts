@@ -602,6 +602,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-workers/self/presence': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Report Presence
+     * @description Refresh liveness and record the Worker's claim switch; answers the self record.
+     */
+    post: operations['report_presence_api_agent_workers_self_presence_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-workers/{worker_id}': {
     parameters: {
       query?: never
@@ -3853,6 +3873,8 @@ export interface components {
       allowed_workspaces: string[]
       /** Capabilities */
       capabilities: string[]
+      /** Claim Enabled */
+      claim_enabled?: boolean | null
       /** Labels */
       labels: {
         [key: string]: string
@@ -4306,13 +4328,39 @@ export interface components {
      *     job_artifacts manifest (size/content_hash/uploaded_at distinguish the
      *     current execution after a rerun, #508); ``local`` rows are legacy
      *     job_dir-only names with no manifest metadata.
+     *
+     *     #739: object-backed rows additionally carry a presigned GET
+     *     ``download_url`` (S3 answers it directly — big media downloads leave the
+     *     Host process alone). The URL serves the raw endpoint's representation:
+     *     its response headers (Content-Type, attachment disposition and, for
+     *     ``.gz`` rows (#338), ``Content-Encoding: gzip``) are signed in, so the
+     *     two channels answer alike. It addresses the CURRENT bytes under the name
+     *     (rerun semantics #508, same as raw — verify against ``content_hash``) and
+     *     ``expires_at`` is an upper bound (re-fetch the manifest on 403).
+     *     ``local`` rows and instances without object storage keep both fields null.
      */
     ExternalArtifactEntry: {
+      /**
+       * Content Encoding
+       * @description Stored-form marker: "gzip" when the object holds gzip-compressed bytes (#338) — both download_url and the raw endpoint answer with Content-Encoding: gzip (HTTP clients decode transparently); empty otherwise
+       * @default
+       */
+      content_encoding: string
       /**
        * Content Hash
        * @default
        */
       content_hash: string
+      /**
+       * Download Url
+       * @description Presigned object-storage GET URL answering with the raw endpoint's headers (storage=object rows); null for local entries and instances without object storage — use the raw endpoint then
+       */
+      download_url?: string | null
+      /**
+       * Expires At
+       * @description Latest moment download_url can work (upper bound: it may 403 earlier, e.g. short-lived signing credentials — re-fetch the manifest then); null whenever download_url is null
+       */
+      expires_at?: string | null
       /**
        * Media Type
        * @description Content-Type the raw endpoint serves (whitelist-gated; JSON/text and non-whitelisted extensions download as octet-stream)
@@ -4476,6 +4524,8 @@ export interface components {
     }
     /** InstanceAgentWorkersSettings */
     InstanceAgentWorkersSettings: {
+      /** Artifact Download Presign Ttl Seconds */
+      artifact_download_presign_ttl_seconds: number
       /** Artifact Spot Check Percent */
       artifact_spot_check_percent: number
       /** Max Archive Bytes */
@@ -7515,6 +7565,11 @@ export interface components {
       /** Error Type */
       type: string
     }
+    /** WorkerPresenceRequest */
+    WorkerPresenceRequest: {
+      /** Claim Enabled */
+      claim_enabled: boolean
+    }
     /** WorkerStatusResponse */
     WorkerStatusResponse: {
       /** Paused */
@@ -9606,6 +9661,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['OpsMetricsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  report_presence_api_agent_workers_self_presence_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkerPresenceRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentWorkerSummary']
         }
       }
       /** @description Validation Error */
