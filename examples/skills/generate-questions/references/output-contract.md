@@ -34,12 +34,12 @@
 运行时优先按机器可读契约（本 skill 根目录的 `contract.yaml`）经
 harness 内置引擎校验（存在性、JSON Schema）。
 
-引擎不表达的部分由 `scripts/validate_output.py` legacy 脚本兜底
+引擎不表达的部分由业务规则层 `scripts/validate_output.py` 校验
 （`python validate_output.py <job_dir>`，退出码 0 为通过）：
 
 - `knowledge_point_id` 与输入 `knowledge_point.json` 的 id 一致性——
-  跨文件业务规则，引擎不表达，仅 legacy 脚本检查；
-- 空白-only 字符串的严格判定（引擎 `minLength: 1` 只挡空串，legacy
+  跨文件业务规则，引擎不表达，仅业务规则脚本检查；
+- 空白-only 字符串的严格判定（引擎 `minLength: 1` 只挡空串，业务规则
   脚本按 `strip()` 后非空判定）。
 
 任一不满足则以非零退出码退出并在 stderr 打印原因，节点判失败。
