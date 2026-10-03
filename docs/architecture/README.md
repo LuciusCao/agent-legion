@@ -52,6 +52,7 @@ data/  (videos, logs, packages, jobs, run traces)
 | 证据矩阵 | [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md) | 架构承诺的反向审计证据矩阵（与 `config/architecture/` invariant registry 对齐） |
 | 执行代次协议 | [execution-generation.md](execution-generation.md) | EXEC-GENERATION-001 执行代次协议（#759/#645）：代次列与 bump/CAS 面、锁序与批序全序、三平面一致性与并发对抗审查 checklist |
 | Studio 草稿-校验-发布契约 | [studio-draft-publish-contract.md](studio-draft-publish-contract.md) | studio 草稿编辑的三台协作状态机（保存/自动校验/发布）迁移表 + 组合 invariant 表与变更纪律（#633/#804） |
+| Studio 本地文件编辑 | [studio-local-authoring-contract.md](studio-local-authoring-contract.md) | Git 内容归属、shared 全量状态、传输预算与测试矩阵（#820） |
 | Kimi 后台任务接续 | [studio-kimi-background-wakeup.md](studio-kimi-background-wakeup.md) | 后台终态回执、空闲接续及 Kimi V1 存储兼容边界（#806） |
 | Studio 服务生命周期 | [studio-service-lifecycle.md](studio-service-lifecycle.md) | create/resume 准入、在途启动排空与 shutdown 清理顺序（STUDIO-RUNTIME-001） |
 | 节点 SDK / Worker 执行 | [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md) | 节点 SDK（NodeContext）与 code 节点执行迁移 Worker 的合并设计（Issue #30/#82） |

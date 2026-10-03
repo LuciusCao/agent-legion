@@ -16,14 +16,15 @@ from typing import Any
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import NotFoundError
+from server.app.services.skill_edit_snapshot import text_file
 
 
 def read_files_at_commit(repo_dir: Path, commit: str) -> list[dict[str, Any]]:
     """Skill text files (SKILL.md + root contract.yaml + references/ +
     scripts/) at ``commit``.
 
-    Same selection and shaping as the working-tree catalog read: text
-    extensions only, symlinks skipped, content capped at MAX_FILE_BYTES.
+    Display reads filter text extensions and cap content. Editing uses the
+    separate skill_edit_detail entry point with one resource budget.
     """
     listing = skill_repo.run_git(repo_dir, ["ls-tree", "-r", "-z", commit])
     entries = listing.stdout.decode("utf-8", errors="replace").split("\0")
@@ -42,14 +43,7 @@ def read_files_at_commit(repo_dir: Path, commit: str) -> list[dict[str, Any]]:
         if Path(path).suffix.lower() not in skill_repo.TEXT_EXTENSIONS:
             continue
         raw = skill_repo.run_git(repo_dir, ["show", f"{commit}:{path}"]).stdout
-        files.append(
-            {
-                "path": path,
-                "size": len(raw),
-                "content": raw[: skill_repo.MAX_FILE_BYTES].decode("utf-8", errors="replace"),
-                "truncated": len(raw) > skill_repo.MAX_FILE_BYTES,
-            }
-        )
+        files.append(text_file(path, raw))
     files.sort(key=lambda item: (item["path"] not in ("SKILL.md", "contract.yaml"), item["path"]))
     return files
 
@@ -79,10 +73,8 @@ def skill_detail(
 ) -> dict[str, Any]:
     """Default (no-ref) skill detail plus the ``ref`` preview dispatch.
 
-    The default detail reads the working tree at HEAD — the ``latest``
-    semantics (#322): an unpinned node ref follows the repo's current HEAD,
-    so the working tree IS the content a default dispatch would run. The
-    reported commit is HEAD's (empty when the repo is missing/has none).
+    Display detail previews the working tree. Editing is served exclusively
+    by skill_edit_detail, keeping its resource and completeness rules separate.
     """
     if ref is not None:
         return detail_at_ref(skill_key, ref, repo_dir)

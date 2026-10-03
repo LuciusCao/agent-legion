@@ -11354,7 +11354,9 @@ export interface operations {
   }
   get_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_get: {
     parameters: {
-      query?: never
+      query?: {
+        for_edit?: boolean
+      }
       header?: never
       path: {
         workspace_id: string
@@ -11457,6 +11459,7 @@ export interface operations {
     parameters: {
       query?: {
         ref?: string | null
+        for_edit?: boolean
       }
       header?: never
       path: {

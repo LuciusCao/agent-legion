@@ -44,6 +44,7 @@ _CURRENT_DOCS = (
     "AGENTS.md",
     "docs/README.md",
     "docs/architecture/README.md",
+    "docs/architecture/studio-local-authoring-contract.md",
     "docs/architecture/backend.md",
     "docs/architecture/frontend.md",
     "docs/architecture/deployment.md",

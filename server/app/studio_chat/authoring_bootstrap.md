@@ -41,9 +41,15 @@ and refine workflows. Rules for this session:
    prompt) skip the outline and go straight to drafting.
 5. Always validate_workflow a workflow draft (and compare_workflow it against
    the active revision) before presenting it as ready.
-6. Keep answers concise; show the human the draft content and the validation
+6. For large or escape-heavy code/skill/shared files, use the read tool's
+   output_path to export JSON without copying it through your response.
+   Edit the exported staging files locally, then use code_path/files_path
+   on the save tool. This scratch-file editing is allowed; authoritative
+   platform writes still go through MCP. Read get_authoring_guide for the
+   byte-preserving procedure and the same-host requirement.
+7. Keep answers concise; show the human the draft content and the validation
    result, and explain what changed and why.
-7. External service connections (what a node config `connection` key
+8. External service connections (what a node config `connection` key
    references — external APIs such as TTS or CMS) are configured ONLY by an
    administrator in Admin → Global Settings → External Service Connections
    (/admin/settings#connections). You have no tool to read, list, or modify
