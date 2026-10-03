@@ -305,8 +305,10 @@ EOF
 collection `<b>`（每个派生 worktree bucket 首次写入就占一批槽位）；删除
 bucket 会连带删其 collection 的 volume，只有 master 侧删除失败/超时才留
 孤儿——`scripts/clean-worktree.sh` 在 bucket 删除后（或 bucket 已不存在
-的重跑路径上）经 master `/vol/status` 核对同名 collection，残留即调
-`/col/delete` 回收并复查（#824；master 地址默认由 `:8333` endpoint 推导
+的重跑路径上）经 master `/vol/status` 只读核对同名 collection，残留即告警
+并打印手动回收命令（`/col/delete`），确认没有同名 worktree 正在复用该
+bucket 后由人执行；脚本刻意不自动删除，避免删到被重建复用的同名
+collection（#824；master 地址默认由 `:8333` endpoint 推导
 为同主机 `:9333`，可用 `AGENT_LEGION_SEAWEEDFS_MASTER_URL` 覆盖，非
 seaweedfs 后端自动跳过）。**无 collection 标记（`""`）的 volume 不是孤儿**：
 filer 的元数据变更日志（`/topics/.system/log`）落在这里，持续有小量写入，
@@ -361,6 +363,7 @@ volume，幂等可重跑；删完 PutObject 即恢复。从未被写入过的空
 其回收范围——若 volume 数仍贴着上限，再调大
 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`（见上节「上限可调」）
 或清理无用 bucket/collection：已不需要的 worktree 走
-`scripts/clean-worktree.sh <worktree名>`（bucket 与同名 collection 卷一并
-回收；bucket 已删但卷残留时重跑同一命令即可，`report-orphan-s3-buckets.py`
+`scripts/clean-worktree.sh <worktree名>`（bucket 删除通常连带回收同名
+collection 卷；bucket 已删但卷残留时重跑同一命令会列出残留并给出手动回收
+命令，`report-orphan-s3-buckets.py`
 列出待收尾的孤儿派生 bucket）。

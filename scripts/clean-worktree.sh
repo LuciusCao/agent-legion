@@ -7,7 +7,7 @@
 #   3. 派生 Postgres 库（转调 scripts/drop-worktree-db.sh，继承其护栏）
 #   4. 派生 S3 bucket（agent-legion-<worktree名>，与 init-worktree.sh 同一
 #      派生规则与 env 加载）；bucket 删除后（或已不存在时）经 SeaweedFS
-#      master 核对同名 collection，残留卷走 /col/delete 回收并复查
+#      master 只读核对同名 collection，残留卷只告警并给出手动回收命令
 #      （scripts/seaweedfs_collection.py，#824；非 seaweedfs 后端自动跳过）
 #
 # 每步 skip-if-absent，幂等可重复执行。防误删护栏：
@@ -140,7 +140,8 @@ from botocore.exceptions import ClientError, EndpointConnectionError
 
 from scripts.seaweedfs_collection import (
     CollectionGuardError,
-    reclaim_collection,
+    leftover_volume_ids,
+    manual_reclaim_command,
     resolve_master_url,
 )
 from server.app.storage import load_s3_settings
@@ -171,31 +172,36 @@ if settings.access_key:
 client = boto3.client("s3", **kwargs)
 
 
-def reclaim_seaweedfs_volumes() -> None:
-    """bucket 已确认不存在后回收同名 collection 的残留卷（#824）。
+def report_seaweedfs_leftovers() -> None:
+    """bucket 已确认不存在后只读核对同名 collection 的残留卷（#824）。
 
-    DeleteBucket 正常会连带删 collection；master 侧失败/超时则卷仍占槽位，
-    且重跑时 bucket 已不存在——这一步在两条路径上都兜底。master 不可达只
-    提示不失败（S3 已清理完成）；回收后仍有残留则 exit 1 走调用侧 warning。
+    DeleteBucket 正常会连带删 collection；master 侧失败/超时则卷仍占槽位。
+    这里只告警并给出手动回收命令、从不自动删除：bucket 不存在由 S3 判定，
+    删除却打在 master 上，两步之间同名 worktree 可能被重建复用，目标身份
+    无法在本脚本内钉死。master 不可达只提示，均不影响退出码。
     """
     master = resolve_master_url(settings.endpoint_url, os.environ)
     if master is None:
         return
     try:
-        result = reclaim_collection(master, bucket)
+        leftover = leftover_volume_ids(master, bucket)
     except CollectionGuardError as exc:
-        print(f"提示: {exc}，跳过 collection 卷回收")
+        print(f"提示: {exc}，跳过 collection 残留卷核查")
         return
     except OSError as exc:  # URLError/超时/连接拒绝都是 OSError 子类
-        print(f"提示: SeaweedFS master {master} 不可达（{exc}），跳过 collection 卷回收")
+        print(f"提示: SeaweedFS master {master} 不可达（{exc}），跳过 collection 残留卷核查")
         return
-    if result.leftover:
-        print(f"错误: collection {bucket} 回收后仍有卷残留: {list(result.leftover)}", file=sys.stderr)
-        raise SystemExit(1)
-    if result.reclaimed:
-        print(f"已回收 SeaweedFS collection {bucket} 的残留卷: {list(result.reclaimed)}")
-    else:
+    if not leftover:
         print(f"SeaweedFS collection {bucket} 无残留卷")
+        return
+    print(
+        f"警告: bucket {bucket} 已删除，但 SeaweedFS collection 仍有卷残留: {list(leftover)}",
+        file=sys.stderr,
+    )
+    print(
+        f"      确认没有同名 worktree 正在复用该 bucket 后手动回收: {manual_reclaim_command(master, bucket)}",
+        file=sys.stderr,
+    )
 
 
 try:
@@ -204,7 +210,7 @@ except ClientError as exc:
     code = str(exc.response.get("Error", {}).get("Code", ""))
     if code in ("404", "NoSuchBucket", "NotFound"):
         print(f"S3 bucket 不存在（跳过）: {bucket}")
-        reclaim_seaweedfs_volumes()
+        report_seaweedfs_leftovers()
         raise SystemExit(0)
     raise
 
@@ -231,7 +237,7 @@ for start in range(0, len(objects), 1000):
     )
 client.delete_bucket(Bucket=bucket)
 print(f"已删除 S3 bucket: {bucket}（含 {len(objects)} 个对象）")
-reclaim_seaweedfs_volumes()
+report_seaweedfs_leftovers()
 PY
 then
     :

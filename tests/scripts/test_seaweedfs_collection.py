@@ -1,7 +1,7 @@
-"""Contract tests for SeaweedFS collection reclaim in worktree teardown (#824).
+"""Contract tests for the read-only SeaweedFS leftover-volume check in worktree teardown (#824).
 
-``scripts/seaweedfs_collection.py`` is exercised directly with stubbed
-fetch/delete callables and against an in-process fake master HTTP server;
+``scripts/seaweedfs_collection.py`` is exercised directly with a stubbed
+fetch callable and against an in-process fake master HTTP server;
 the ``clean-worktree.sh`` wiring is exercised end to end by copying the
 script into a synthetic repo layout, stubbing git/psql/uv on PATH and
 boto3/dotenv/storage via probe modules — no real worktree, database,
@@ -20,14 +20,15 @@ import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 import pytest
 
 from scripts.seaweedfs_collection import (
     CollectionGuardError,
     collection_volume_ids,
-    reclaim_collection,
+    leftover_volume_ids,
+    manual_reclaim_command,
     resolve_master_url,
 )
 
@@ -37,25 +38,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeMaster:
-    """In-memory SeaweedFS master: ``/vol/status`` + ``/col/delete``."""
+    """In-memory SeaweedFS master: ``/vol/status``; any POST is recorded."""
 
-    def __init__(self, volumes: dict[int, str], *, delete_status: int = 204) -> None:
+    def __init__(self, volumes: dict[int, str]) -> None:
         self.volumes = dict(volumes)  # volume id -> collection
-        self.delete_status = delete_status
-        self.deleted: list[str] = []
+        self.posts: list[str] = []
 
     def vol_status(self) -> dict:
         vols = [{"Id": vid, "Collection": col} for vid, col in sorted(self.volumes.items())]
         return {"Volumes": {"DataCenters": {"dc1": {"rack1": {"node:8080": vols}}}}}
-
-    def delete(self, collection: str) -> tuple[int, str]:
-        self.deleted.append(collection)
-        if self.delete_status != 204:
-            return self.delete_status, '{"error":"boom"}'
-        if collection not in self.volumes.values():
-            return 400, f'{{"error":"collection {collection} does not exist"}}'
-        self.volumes = {v: c for v, c in self.volumes.items() if c != collection}
-        return 204, ""
 
 
 @pytest.fixture
@@ -78,12 +69,8 @@ def master_server() -> Iterator[tuple[FakeMaster, str]]:
                 self._reply(404, "")
 
         def do_POST(self) -> None:  # noqa: N802 - http.server API
-            parts = urlsplit(self.path)
-            if parts.path != "/col/delete":
-                self._reply(404, "")
-                return
-            code, body = master.delete(parse_qs(parts.query)["collection"][0])
-            self._reply(code, body)
+            master.posts.append(self.path)
+            self._reply(204, "")
 
         def log_message(self, *args: object) -> None:
             return
@@ -137,67 +124,38 @@ def test_resolve_master_url(
 def test_guard_rejects_shared_and_non_derived_collections(collection: str) -> None:
     calls: list[str] = []
     with pytest.raises(CollectionGuardError):
-        reclaim_collection(
-            "http://m", collection, fetch=lambda url: calls.append(url), delete=calls.append
-        )
+        leftover_volume_ids("http://m", collection, fetch=calls.append)
+    with pytest.raises(CollectionGuardError):
+        manual_reclaim_command("http://m", collection)
     assert calls == []  # guard fires before any master call
 
 
-def test_reclaim_deletes_leftover_volumes_and_verifies() -> None:
+def test_leftover_volume_ids_lists_only_the_derived_collection() -> None:
     master = FakeMaster({1: "", 8: "agent-legion-wt-a", 9: "agent-legion-wt-a", 26: "agent-legion"})
-
-    def delete(url: str) -> None:
-        master.delete(parse_qs(urlsplit(url).query)["collection"][0])
-
-    result = reclaim_collection(
-        "http://m", "agent-legion-wt-a", fetch=lambda url: master.vol_status(), delete=delete
-    )
-
-    assert result.reclaimed == (8, 9) and result.leftover == () and result.ok
-    assert master.deleted == ["agent-legion-wt-a"]
-    # Untagged (filer meta log) and prod volumes are untouched.
-    assert master.volumes == {1: "", 26: "agent-legion"}
+    assert leftover_volume_ids(
+        "http://m", "agent-legion-wt-a", fetch=lambda url: master.vol_status()
+    ) == (8, 9)
 
 
-def test_reclaim_is_noop_when_collection_already_gone() -> None:
-    deletes: list[str] = []
-    result = reclaim_collection(
-        "http://m",
-        "agent-legion-wt-a",
-        fetch=lambda url: FakeMaster({1: ""}).vol_status(),
-        delete=deletes.append,
-    )
-    assert result.ok and result.reclaimed == ()
-    assert deletes == []
-
-
-def test_reclaim_reports_leftover_when_delete_does_not_take() -> None:
-    master = FakeMaster({8: "agent-legion-wt-a"})
-    result = reclaim_collection(
-        "http://m",
-        "agent-legion-wt-a",
-        fetch=lambda url: master.vol_status(),
-        delete=lambda url: None,
-    )
-    assert not result.ok and result.leftover == (8,)
+def test_leftover_volume_ids_empty_when_collection_gone() -> None:
+    fetch = lambda url: FakeMaster({1: ""}).vol_status()  # noqa: E731
+    assert leftover_volume_ids("http://m", "agent-legion-wt-a", fetch=fetch) == ()
 
 
 def test_collection_volume_ids_tolerates_empty_topology() -> None:
     assert collection_volume_ids("http://m", "agent-legion-wt-a", lambda url: {"Volumes": {}}) == ()
 
 
-def test_reclaim_over_http(master_server: tuple[FakeMaster, str]) -> None:
-    master, url = master_server
-    result = reclaim_collection(url, "agent-legion-wt-a")
-    assert result.reclaimed == (8, 9) and result.ok
-    assert master.volumes == {1: "", 2: "", 26: "agent-legion"}
+def test_manual_reclaim_command_targets_only_the_collection() -> None:
+    assert manual_reclaim_command("http://m:9333", "agent-legion-wt-a") == (
+        "curl -fsS -X POST 'http://m:9333/col/delete" + "?" + "collection=agent-legion-wt-a'"
+    )
 
 
-def test_reclaim_over_http_surfaces_master_errors(master_server: tuple[FakeMaster, str]) -> None:
+def test_leftover_check_over_http_never_writes(master_server: tuple[FakeMaster, str]) -> None:
     master, url = master_server
-    master.delete_status = 500
-    with pytest.raises(OSError):  # urllib HTTPError is an OSError subclass
-        reclaim_collection(url, "agent-legion-wt-a")
+    assert leftover_volume_ids(url, "agent-legion-wt-a") == (8, 9)
+    assert master.posts == []
 
 
 # --- clean-worktree.sh wiring ----------------------------------------------
@@ -324,7 +282,7 @@ def _run_clean(tmp_path: Path, extra_env: dict[str, str]) -> subprocess.Complete
 
 
 @pytest.mark.parametrize("bucket_exists", ["1", "0"])
-def test_clean_worktree_reclaims_leftover_collection(
+def test_clean_worktree_reports_leftover_collection_without_deleting(
     tmp_path: Path, master_server: tuple[FakeMaster, str], bucket_exists: str
 ) -> None:
     master, url = master_server
@@ -334,23 +292,41 @@ def test_clean_worktree_reclaims_leftover_collection(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "已回收 SeaweedFS collection agent-legion-wt-a 的残留卷: [8, 9]" in result.stdout
-    assert master.deleted == ["agent-legion-wt-a"]
-    assert master.volumes == {1: "", 2: "", 26: "agent-legion"}
-    if bucket_exists == "1":
-        # Collection reclaim runs only after the bucket itself is gone.
-        assert result.stdout.index("stub delete_bucket") < result.stdout.index("已回收")
+    assert "SeaweedFS collection 仍有卷残留: [8, 9]" in result.stderr
+    assert "/col/delete" + "?" + "collection=agent-legion-wt-a" in result.stderr
+    assert "收尾清理结束" in result.stdout
+    # Read-only: the script never deletes on the master (#859 TOCTOU review).
+    assert master.posts == []
+    assert master.volumes == {
+        1: "",
+        2: "",
+        8: "agent-legion-wt-a",
+        9: "agent-legion-wt-a",
+        26: "agent-legion",
+    }
 
 
-def test_clean_worktree_skips_reclaim_when_master_unreachable(tmp_path: Path) -> None:
+def test_clean_worktree_reports_no_leftover(
+    tmp_path: Path, master_server: tuple[FakeMaster, str]
+) -> None:
+    master, url = master_server
+    master.volumes = {1: "", 26: "agent-legion"}
+    result = _run_clean(tmp_path, {"AGENT_LEGION_SEAWEEDFS_MASTER_URL": url})
+
+    assert result.returncode == 0, result.stderr
+    assert "SeaweedFS collection agent-legion-wt-a 无残留卷" in result.stdout
+    assert master.posts == []
+
+
+def test_clean_worktree_skips_check_when_master_unreachable(tmp_path: Path) -> None:
     result = _run_clean(tmp_path, {"AGENT_LEGION_SEAWEEDFS_MASTER_URL": "http://127.0.0.1:1"})
 
     assert result.returncode == 0, result.stderr
-    assert "不可达" in result.stdout and "跳过 collection 卷回收" in result.stdout
+    assert "不可达" in result.stdout and "跳过 collection 残留卷核查" in result.stdout
     assert "收尾清理结束" in result.stdout
 
 
-def test_clean_worktree_skips_reclaim_for_non_seaweedfs_endpoint(tmp_path: Path) -> None:
+def test_clean_worktree_skips_check_for_non_seaweedfs_endpoint(tmp_path: Path) -> None:
     result = _run_clean(tmp_path, {"STUB_S3_ENDPOINT": "http://127.0.0.1:9000"})
 
     assert result.returncode == 0, result.stderr
