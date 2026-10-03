@@ -43,6 +43,7 @@ import { useDockGeometry } from './useDockGeometry'
 import { useDockInteractionHandlers } from './useDockInteractionHandlers'
 import { useDockFocus } from './useDockFocus'
 import { useDockEscape } from './useDockEscape'
+import { DockTitleSlotContext } from './dockTitleSlot'
 import {
   dockStackRaise,
   dockStackSubscribe,
@@ -119,6 +120,9 @@ export function AgentPanelDock({
   // useDockEscape（入栈/出栈）与这里的 pointerdown/focusin（置顶）。
   // useState 惰性初始化拿稳定 symbol（渲染期读 ref.current 撞 lint 规则）。
   const [stackId] = useState(() => Symbol(`dock:${surfaceKey}`))
+  // 标题行插槽节点（#825，见 dockTitleSlot.ts）：callback ref 落 state，
+  // 节点挂上后经 context 下发，内容子树 portal 进来。
+  const [titleSlot, setTitleSlot] = useState<HTMLDivElement | null>(null)
   const raiseOnInteract = () => dockStackRaise(stackId)
   // 栈位映射视觉层级（#801 codex 轮 2）：交互抬栈后本面板同步抬到最上
   // 层（z-index = 900 + 栈位，钳 999 低于 Toast，刻度见 lib/zLayers.ts）。
@@ -171,7 +175,8 @@ export function AgentPanelDock({
         minHeight={effective.minHeight}
         bounds="window"
         dragHandleClassName={styles.titleBar}
-        cancel="button"
+        // 标题行插槽里的控件（下拉/按钮）不发起拖拽（#825）。
+        cancel="button, [data-dock-title-slot]"
         onDragStart={onDragStart}
         onDrag={onDrag}
         onDragStop={onDragStop}
@@ -212,13 +217,22 @@ export function AgentPanelDock({
             data-testid={`dock-${surfaceKey}-handle`}
           >
             <span className={styles.title}>{title}</span>
+            <div
+              ref={setTitleSlot}
+              className={styles.titleSlot}
+              data-dock-title-slot=""
+            />
             <Tooltip title="关闭">
               <IconButton size="small" aria-label="关闭" onClick={onClose}>
                 <Close fontSize="small" />
               </IconButton>
             </Tooltip>
           </div>
-          <div className={styles.content}>{children}</div>
+          <div className={styles.content}>
+            <DockTitleSlotContext.Provider value={titleSlot}>
+              {children}
+            </DockTitleSlotContext.Provider>
+          </div>
         </Paper>
       </Rnd>
     </Portal>

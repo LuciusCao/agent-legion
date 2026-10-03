@@ -21,7 +21,7 @@ _SESSION_COLUMNS = (
     " capability_snapshot_json, session_modes_json, config_options_json,"
     " allow_all_permissions, mcp_status,"
     " selected_node_key, draft_yaml, usage_json, compacting,"
-    " error_detail, created_at, updated_at, closed_at"
+    " error_detail, created_at, updated_at, closed_at, deleted_at"
 )
 
 
@@ -126,10 +126,24 @@ class StudioChatQueriesMixin(StudioChatResumeQueriesMixin):
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"select {_SESSION_COLUMNS} from studio_chat_sessions"
-                " where workspace_id=%s order by created_at desc, id desc",
+                " where workspace_id=%s and deleted_at is null"
+                " order by created_at desc, id desc",
                 (workspace_id,),
             ).fetchall()
         return [_session_record(row) for row in rows]
+
+    def mark_studio_chat_session_deleted(self, session_id: str) -> bool:
+        """Soft-delete stamp (#872, v89): conditional on the row not being
+        stamped yet, so two concurrent deletes have exactly one winner.
+        Returns whether this call stamped it."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "update studio_chat_sessions set deleted_at=current_timestamp,"
+                " updated_at=current_timestamp where id=%s and deleted_at is null"
+                " returning id",
+                (session_id,),
+            ).fetchone()
+        return row is not None
 
     def clear_studio_chat_compacting_if_set(self, session_id: str) -> bool:
         """Conditional compacting clear (#694 review R3-P2): only fires when

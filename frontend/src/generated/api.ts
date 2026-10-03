@@ -3044,7 +3044,8 @@ export interface paths {
     delete: operations['close_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete']
     options?: never
     head?: never
-    patch?: never
+    /** Rename Session */
+    patch: operations['rename_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__patch']
     trace?: never
   }
   '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel': {
@@ -3092,6 +3093,23 @@ export interface paths {
     /** Update Context */
     put: operations['update_context_api_workspaces__workspace_id__studio_chat_sessions__session_id__context_put']
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Delete Session */
+    post: operations['delete_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete_post']
     delete?: never
     options?: never
     head?: never
@@ -7144,6 +7162,11 @@ export interface components {
        */
       title: string
     }
+    /** StudioChatSessionDeleteResponse */
+    StudioChatSessionDeleteResponse: {
+      /** Deleted */
+      deleted: string
+    }
     /** StudioChatSessionRecord */
     StudioChatSessionRecord: {
       /** Acp Session Id */
@@ -7221,6 +7244,15 @@ export interface components {
     /** StudioChatSessionResponse */
     StudioChatSessionResponse: {
       session: components['schemas']['StudioChatSessionRecord']
+    }
+    /**
+     * StudioChatSessionUpdateRequest
+     * @description Session rename (#872). Surrounding whitespace is stripped; an empty
+     *     title falls back to the client's default label.
+     */
+    StudioChatSessionUpdateRequest: {
+      /** Title */
+      title: string
     }
     /** StudioChatSessionsResponse */
     StudioChatSessionsResponse: {
@@ -15023,6 +15055,42 @@ export interface operations {
       }
     }
   }
+  rename_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatSessionUpdateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   cancel_turn_api_workspaces__workspace_id__studio_chat_sessions__session_id__cancel_post: {
     parameters: {
       query?: never
@@ -15114,6 +15182,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delete_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionDeleteResponse']
         }
       }
       /** @description Validation Error */

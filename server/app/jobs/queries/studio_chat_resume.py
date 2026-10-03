@@ -32,7 +32,7 @@ class StudioChatResumeQueriesMixin(StudioChatTranscriptQueriesMixin):
             row = conn.execute(
                 "update studio_chat_sessions set status='starting', error_detail='',"
                 " closed_at=null, updated_at=current_timestamp"
-                " where id=%s and status in ('closed', 'error')"
+                " where id=%s and status in ('closed', 'error') and deleted_at is null"
                 " and (select count(*) from studio_chat_sessions"
                 " where status in ('starting', 'idle', 'running', 'awaiting_permission'))"
                 " < %s returning id",

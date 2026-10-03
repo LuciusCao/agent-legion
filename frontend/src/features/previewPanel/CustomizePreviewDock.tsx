@@ -17,6 +17,7 @@ import { AgentPanelDock } from '../agentPanelDock/AgentPanelDock'
 import { useStudioChat } from '../workflowStudio/chat/useStudioChat'
 import { AgentChatPanel } from '../workflowStudio/chat/AgentChatPanel'
 import { StudioChatSessionBar } from '../workflowStudio/chat/StudioChatSessionBar'
+import { useStudioChatSessionManage } from '../workflowStudio/chat/useStudioChatSessionManage'
 import styles from './CustomizePreviewDock.module.css'
 
 export interface CustomizePreviewDockProps {
@@ -27,6 +28,11 @@ export interface CustomizePreviewDockProps {
 /** Dock 的对话内容（按 workspaceId 重挂的单元，见文件头注释）。 */
 function CustomizePreviewChat({ workspaceId }: { workspaceId: string }) {
   const chat = useStudioChat(workspaceId)
+  const manage = useStudioChatSessionManage(
+    workspaceId,
+    chat.activeSessionId,
+    () => chat.selectSession(null)
+  )
   // 渲染期校验存在性：agent 列表异步到达/跨 workspace 变化时，残留的选择
   // id 若不在当前列表里即回落默认（重挂之外的双保险）。
   const [chosenAgentId, setChosenAgentId] = useState('')
@@ -63,6 +69,8 @@ function CustomizePreviewChat({ workspaceId }: { workspaceId: string }) {
                 selectedAgentId && void chat.startSession(selectedAgentId)
               }
               newChatDisabled={!selectedAgentId || chat.starting}
+              onRenameSession={manage.rename}
+              onDeleteSession={manage.remove}
             />
           }
           emptyState="选择 Agent，点「＋ 新对话」开始"

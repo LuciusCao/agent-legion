@@ -5,6 +5,7 @@ import { useStudioContextSync } from './useStudioContextSync'
 import { useStudioDraftSync } from './useStudioDraftSync'
 import { AgentChatPanel } from './AgentChatPanel'
 import { StudioChatSessionBar } from './StudioChatSessionBar'
+import { useStudioChatSessionManage } from './useStudioChatSessionManage'
 import shellStyles from './AgentChatPanel.module.css'
 
 type Props = {
@@ -19,6 +20,11 @@ type Props = {
 export function StudioChatPanel(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   const chat = useStudioChat(workspaceId)
+  const manage = useStudioChatSessionManage(
+    workspaceId,
+    chat.activeSessionId,
+    () => chat.selectSession(null)
+  )
   const sessionId = chat.activeSessionId
   useStudioContextSync(workspaceId, sessionId, props.selectedNodeKey ?? null)
   useStudioDraftSync(workspaceId, sessionId, props.definitionYaml ?? null)
@@ -68,6 +74,8 @@ export function StudioChatPanel(props: Props) {
               selectedAgentId && void chat.startSession(selectedAgentId)
             }
             newChatDisabled={!selectedAgentId || chat.starting}
+            onRenameSession={manage.rename}
+            onDeleteSession={manage.remove}
           />
         </>
       }

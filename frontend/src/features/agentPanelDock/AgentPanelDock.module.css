@@ -31,13 +31,26 @@
 }
 
 .title {
-  flex: 1;
+  flex: 1 0 auto;
   font-size: 14px;
   font-weight: 600;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 标题行插槽（#825）：内容子树 portal 进来的紧凑工具条（如会话管理）；
+ * 空时不占位。插槽内不发起拖拽（Rnd cancel），光标复原。 */
+.titleSlot {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  cursor: default;
+}
+.titleSlot:empty {
+  display: none;
 }
 
 .content {
