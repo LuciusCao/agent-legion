@@ -48,8 +48,11 @@ def test_dev_stack_dispatches_backend_service_and_port() -> None:
     assert "http_ok 8333 /healthz" in DEV_STACK
     assert "http_ok 9000 /minio/health/live" in DEV_STACK
     assert "deploy/compose.host.yaml" in DEV_STACK
-    assert "read_env_value AGENT_LEGION_S3_ACCESS_KEY" in DEV_STACK
-    assert "read_env_value AGENT_LEGION_S3_SECRET_KEY" in DEV_STACK
+    assert "dotenv_lookup AGENT_LEGION_S3_ACCESS_KEY .env" in DEV_STACK
+    assert "dotenv_lookup AGENT_LEGION_S3_SECRET_KEY .env" in DEV_STACK
+    # #486：dotenv 解析只有 scripts/dotenv-lib.sh 一份实现，不得内嵌回来。
+    assert "source scripts/dotenv-lib.sh" in DEV_STACK
+    assert "read_env_value()" not in DEV_STACK
 
 
 def test_dev_stack_ensures_bucket_after_start() -> None:
@@ -135,6 +138,7 @@ def _setup(tmp_path: Path, *, with_docker: bool = True) -> tuple[Path, Path]:
     # 测试焦点保持在 local-s3 决策。
     (main / "frontend").mkdir(parents=True)
     shutil.copy(DEV_STACK_SCRIPT, main / "scripts" / DEV_STACK_SCRIPT.name)
+    shutil.copy(ROOT / "scripts" / "dotenv-lib.sh", main / "scripts" / "dotenv-lib.sh")
     _write_stub(main / "scripts" / "local-s3-decide.sh", _DECIDE_STUB)
     _write_stub(main / "scripts" / "ensure-frontend-deps.sh", _EXIT_OK_STUB)
     (main / "deploy" / "compose.host.yaml").write_text("name: agent-legion\n")
