@@ -1,11 +1,7 @@
 import type { AgentWorkerSummary } from '../api/agentWorkers'
-import { readyWorkerConsoleUrl } from './workerConsoleUrl'
 import { hasClaimingWorker, hasOnlineWorker } from './workerPresence'
-import {
-  needsAnyWorker,
-  workersMeetingNeeds,
-  type WorkerNeeds,
-} from './workerDependency'
+import { needsAnyWorker, type WorkerNeeds } from './workerDependency'
+import { needsConsoleUrl, workersMeetingNeeds } from './workerNeedsFleet'
 
 export interface WorkerOnboardingInput {
   /** 本 workspace 视角的 Worker 列表（按 scoped token 注册过滤）。 */
@@ -51,7 +47,7 @@ export function buildWorkerOnboardingSteps(
     online &&
     (!needsWorker || hasClaimingWorker(capable)) &&
     input.paused === false
-  const consoleUrl = readyWorkerConsoleUrl(capable, input.consoleUrl)
+  const consoleUrl = needsConsoleUrl(input.workers, needs, input.consoleUrl)
   const steps = [
     {
       icon: 'smart_toy',

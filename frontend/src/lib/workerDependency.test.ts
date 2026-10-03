@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  needsAnyWorker,
-  workersMeetingNeeds,
-  workflowWorkerNeeds,
-} from './workerDependency'
+import { needsAnyWorker, workflowWorkerNeeds } from './workerDependency'
 
 function workflow(...nodeTypes: string[]) {
   return {
@@ -43,28 +39,5 @@ describe('workflowWorkerNeeds', () => {
     expect(
       needsAnyWorker(workflowWorkerNeeds(workflow('start', 'approval'), true))
     ).toBe(false)
-  })
-})
-
-describe('workersMeetingNeeds', () => {
-  const agentOnly = { worker_id: 'a', max_code_concurrency: 0 }
-  const codeCapable = { worker_id: 'c', max_code_concurrency: 2 }
-
-  it('keeps every Worker for agent-only needs', () => {
-    expect(
-      workersMeetingNeeds([agentOnly, codeCapable], {
-        agent: true,
-        code: false,
-      })
-    ).toEqual([agentOnly, codeCapable])
-  })
-
-  it('keeps only code-capable Workers when code nodes need a Worker', () => {
-    expect(
-      workersMeetingNeeds([agentOnly, codeCapable], {
-        agent: true,
-        code: true,
-      })
-    ).toEqual([codeCapable])
   })
 })

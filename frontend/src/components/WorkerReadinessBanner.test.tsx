@@ -232,4 +232,20 @@ describe('WorkerReadinessBanner', () => {
     )
     expect(screen.queryByTestId('worker-readiness-banner')).toBeNull()
   })
+
+  it('links the agent-only Worker console that needs code concurrency (#875)', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      worker({
+        claim_enabled: true,
+        max_code_concurrency: 0,
+        labels: { console_url: 'http://10.0.0.9:8787' },
+      }),
+    ])
+    renderBanner({ needs: { agent: false, code: true } })
+    await screen.findByText(/没有可执行 code 节点的在线 Worker/)
+    expect(screen.getByTestId('worker-console-link')).toHaveAttribute(
+      'href',
+      'http://10.0.0.9:8787'
+    )
+  })
 })

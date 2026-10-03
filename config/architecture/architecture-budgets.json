@@ -719,6 +719,7 @@
     "frontend/src/lib/workerConsoleAddress.ts": 27,
     "frontend/src/lib/workerConsoleUrl.ts": 19,
     "frontend/src/lib/workerDependency.ts": 21,
+    "frontend/src/lib/workerNeedsFleet.ts": 34,
     "frontend/src/lib/workerPresence.ts": 56,
     "frontend/src/lib/workflowNodes.ts": 72,
     "frontend/src/lib/workspacePreviewMutation.ts": 47,
