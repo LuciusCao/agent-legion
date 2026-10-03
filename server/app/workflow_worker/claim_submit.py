@@ -15,18 +15,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.scheduling.capacity import CapacitySnapshot
-from server.app.services.job_errors import JobServiceError
-from server.app.services.vault import VaultError
 from server.app.storage_paths import job_log_dir
-from server.app.workflow_worker.agent_claim import (
-    cached_run_payload,
-    claim_agent_node,
-    fail_node_config,
-)
+from server.app.workflow_worker.agent_claim import claim_agent_node, fail_node_config
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
-from server.app.workflow_worker.code_dispatch import resolve_code_node_dispatch
-from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_config
 from server.app.workflow_worker.executor_claim import claim_executor_node
+from server.app.workflow_worker.local_dispatch import decide_local_code_dispatch
 from server.app.workflow_worker.routing import resolve_node_route
 from server.app.workflow_worker.shards import assemble_reduce_inputs, claim_shard_node
 from server.app.workflows.approval_node import APPROVAL_NODE_TYPE
@@ -146,31 +139,19 @@ def try_claim_and_submit(
     if not snapshot.has_capacity(workspace_id, node_key):
         return False
 
-    try:
-        run_payload = cached_run_payload(worker, job)
-        # Frozen snapshot (runtime-mutable keys re-resolved live) → vault
-        # secret_refs → connection config + token; all in-memory only
-        # (VAULT-SECRET-001, CONFIG-MANIFEST-001). The non-secret snapshot is
-        # persisted onto the node_runs row as the dispatch-time audit
-        # (CONFIG-RUNTIME-MUTABLE-001).
-        node_config, config_snapshot_json = resolve_dispatch_node_config(
-            worker, node, workflow_key, workspace_id, workspace, run_payload
-        )
-    except (ValueError, VaultError, JobServiceError) as exc:
-        return fail_config(str(exc))
-
-    # Node code (EXEC-CODE-002): since #115 ordinary jobs dispatch the
-    # currently published workspace code; the frozen pins (job snapshot's
-    # node_code_pins, then the
-    # intake batch's node_code_versions) are honored only for quality-replay
-    # batches, where a hash mismatch fails the node (fail closed,
-    # EXEC-CODE-003).
-    try:
-        node_code = resolve_code_node_dispatch(
-            worker, workspace_id, workflow_key, node, run_payload, job.get("node_code_pins")
-        )
-    except ValueError as exc:
-        return fail_config(str(exc))
+    # The local code pool's single decision entry (#869, shared with local
+    # shards): config + timeout decision/audit + published node code.
+    decided = decide_local_code_dispatch(
+        worker,
+        workspace,
+        job,
+        node,
+        workflow_key,
+        log_path,
+        execution_generation=execution_generation,
+    )
+    if decided is None:
+        return True  # failed as a configuration error (counts as work)
 
     claimed = claim_executor_node(
         worker,
@@ -186,9 +167,9 @@ def try_claim_and_submit(
         control_snapshot,
         allowed_node_keys,
         snapshot,
-        node_config,
-        node_code,
-        config_snapshot_json,
+        decided.node_config,
+        decided.node_code,
+        decided.config_snapshot_json,
         execution_generation=execution_generation,
     )
     if claimed:

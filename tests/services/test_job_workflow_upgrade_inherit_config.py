@@ -201,3 +201,56 @@ def test_inherit_upgrade_null_frozen_without_intake_evidence_degrades(
     # NULL + 当前配置面为空也不许继承：全量重跑。
     assert result["kept_node_count"] == 0
     assert set(statuses.values()) == {"pending"}
+
+
+def _timeout_chain_definition(**a_config) -> WorkflowDefinition:
+    """a 节点 ``config:`` 带保留执行键的三级链（#858 用例的公共构造）。"""
+    import dataclasses
+
+    base = inherit_chain_definition()
+    nodes = dict(base.nodes)
+    nodes["a"] = dataclasses.replace(base.nodes["a"], config=dict(a_config))
+    return dataclasses.replace(base, nodes=nodes)
+
+
+def _upgrade_from_timeout_revision(tmp_path: Path, new_definition: WorkflowDefinition):
+    """旧 revision a.timeout_seconds=600 产出、intake 完整冻结，升级到 *new_definition*。"""
+    from server.app.services.job_workflow_upgrade_config import intake_frozen_config_json
+
+    queries, workspace, revisions, _, service = setup_inherit_env(tmp_path)
+    old_definition = _timeout_chain_definition(timeout_seconds=600)
+    original = revisions.publish_workspace_revision(workspace["id"], old_definition)
+    revisions.publish_workspace_revision(workspace["id"], new_definition)
+    job = seed_inherit_job(queries, workspace, original, ["a", "b", "c"])
+    seed_impl_identity(queries, workspace, job["id"], ["a", "b", "c"])
+    intake_frozen = intake_frozen_config_json(queries, workspace["id"], old_definition)
+    assert json.loads(intake_frozen)["a"]["timeout_seconds"] == 600
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
+        conn.execute(
+            "update jobs set frozen_config_json=%s where id=%s", (intake_frozen, job["id"])
+        )
+    result = service.upgrade(workspace["id"], job["id"], mode="inherit")
+    statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job["id"])}
+    return result, statuses
+
+
+def test_inherit_upgrade_timeout_only_revision_inherits_all(tmp_path: Path) -> None:
+    """#858：只改运行时可调键 timeout_seconds 的 revision——定义哈希与冻结
+    config 段两侧都剔除该键，节点全部继承（超时不影响产物）。"""
+    result, statuses = _upgrade_from_timeout_revision(
+        tmp_path, _timeout_chain_definition(timeout_seconds=900)
+    )
+
+    assert result["kept_node_count"] == 3
+    assert statuses == {"a": "completed", "b": "completed", "c": "completed"}
+
+
+def test_inherit_upgrade_timeout_with_frozen_key_change_reruns(tmp_path: Path) -> None:
+    """#858 配对：timeout 与随版本冻结的 sandbox_network 同时改 → 照常重跑
+    （a 及其下游），剔除只针对运行时可调分类。"""
+    result, statuses = _upgrade_from_timeout_revision(
+        tmp_path, _timeout_chain_definition(timeout_seconds=900, sandbox_network=True)
+    )
+
+    assert result["kept_node_count"] == 0
+    assert set(statuses.values()) == {"pending"}

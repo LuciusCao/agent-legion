@@ -8,11 +8,18 @@ command spec ``--timeout-seconds``, the code manifest top-level timeout (+
 its ``config`` copy) and the audit (value + source); ``sandbox_network``
 must always equal the intake-frozen value.
 
+Paths: ``local`` (Host dispatch to the local code pool), ``single`` /
+``batch`` (remote Worker claim), ``legacy`` (pre-#691 queued request) and
+the shard executions of a ``shard:`` node (#869): ``local_shard`` (local
+code pool fallback) and ``remote_shard`` (remote Worker claim). Every local
+path must also hand the executor the node's business config.
+
 Pruned combinations (explicit, see ``_cases``):
 
-- agent × local dispatch: agent nodes only run on remote Workers.
-- local dispatch × ``after_enqueue``: the local code pool never enqueues;
-  its dispatch is the decision point.
+- agent × local / shard paths: agent nodes only run on remote Workers, and
+  shard nodes join the code pool.
+- local / local_shard × ``after_enqueue``: the local code pool never
+  enqueues; its dispatch is the decision point.
 - legacy × ``before_intake`` / ``after_intake``: a legacy request is one a
   pre-#691 Host already put in the queue (no ``timeout_base``); only changes
   after that enqueue can still be observed.
@@ -60,8 +67,13 @@ from server.app.services.node_execution_config import (
 from server.app.settings import Settings
 from server.app.skills.checkout import SkillCheckout
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
-from server.app.workflows.schema import WorkflowNodeExecution
+from server.app.workflows.schema import WorkflowNodeExecution, WorkflowShardSpec
 from tests.helpers import replace_agent_catalog
+from tests.helpers.runtime_timeout_matrix import (
+    LAYERS,
+    LOCAL_PATHS,
+    matrix_cases,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import RecordingExecutor, _make_worker
 
@@ -70,16 +82,6 @@ WS = "test"  # workspace id == workflow key (DB-WORKSPACE-KEY-BINDING-001)
 NODE = {"agent": "generate", "code": "package"}
 DEFAULT = {"agent": 1800, "code": 600}
 LEGACY_ENQUEUED = 1111  # what a pre-#691 Host baked into the queued manifest
-
-# layer state -> (L1 node config timeout, L2 workspace override timeout)
-LAYERS: dict[str, tuple[Any, Any]] = {
-    "L0": (None, None),
-    "L1": (900, None),
-    "L2": (None, 2400),
-    "L1+L2": (900, 2400),
-    "invalid_L2": (900, "soon"),
-}
-TIMINGS = ("before_intake", "after_intake", "after_enqueue", "after_decision")
 
 
 # --- the oracle: the model restated -----------------------------------------
@@ -103,28 +105,10 @@ def oracle(kind: str, l1: Any, l2: Any, *, legacy: bool = False) -> dict[str, An
     return {"value": base["value"], "source": "workspace_override_invalid"}
 
 
-def _cases() -> list[tuple[str, str, str, str]]:
-    cases = []
-    for kind in ("agent", "code"):
-        for path in ("local", "single", "batch", "legacy"):
-            if kind == "agent" and path == "local":
-                continue  # agent nodes never run in the local code pool
-            for layer in LAYERS:
-                if path == "legacy" and layer in ("L1", "L1+L2"):
-                    continue  # legacy base already folds L1 in
-                for timing in TIMINGS:
-                    if path == "local" and timing == "after_enqueue":
-                        continue  # no enqueue on the local path
-                    if path == "legacy" and timing in ("before_intake", "after_intake"):
-                        continue  # legacy requests predate the change
-                    cases.append((kind, path, layer, timing))
-    return cases
-
-
 # --- fixtures through the real paths -----------------------------------------
 
 
-def _node(kind: str, l1: Any) -> WorkflowNode:
+def _node(kind: str, l1: Any, *, shard: bool = False) -> WorkflowNode:
     config = {} if l1 is None else {"timeout_seconds": l1}
     if kind == "agent":
         return WorkflowNode(
@@ -143,6 +127,7 @@ def _node(kind: str, l1: Any) -> WorkflowNode:
         config=config,
         config_schema={"properties": {"mode": {"type": "string", "default": "fast"}}},
         outputs=["out.json"],
+        shard=WorkflowShardSpec(count=1) if shard else None,
     )
 
 
@@ -203,7 +188,15 @@ def _broker(tmp_path: Path) -> AgentExecutionBroker:
     )
 
 
-def _enqueue(job_db, tmp_path, monkeypatch, kind: str, node: WorkflowNode, job: dict) -> None:
+def _enqueue(
+    job_db,
+    tmp_path,
+    monkeypatch,
+    kind: str,
+    node: WorkflowNode,
+    job: dict,
+    shard_runtime: dict[str, Any] | None = None,
+) -> None:
     """The Host enqueue: the same calls code_claim / agent_claim make."""
     workspace = job_db.get_workspace(WS)
     payload = run_frozen_payload(job_db, job)
@@ -239,6 +232,7 @@ def _enqueue(job_db, tmp_path, monkeypatch, kind: str, node: WorkflowNode, job: 
             custom_code=True,
             config=config,
             secret_config=secret_config,
+            shard_runtime=shard_runtime,
             timeout_base=base,
         )
         return
@@ -335,16 +329,28 @@ def _claim(tmp_path: Path, path: str):
     return broker.claim("worker-1")
 
 
+def _materialize_shard(job_db: JobQueries, job_id: str, node_key: str) -> dict[str, Any]:
+    """The fan-out's one pending shard row (what claim_shard_node materializes)."""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into node_shards(job_id, node_key, shard_index, status, input_json)"
+            " values (%s, %s, 0, 'pending', '{}')",
+            (job_id, node_key),
+        )
+    return {"shard_index": 0, "shard_input": {}}
+
+
 def _run_remote(job_db, tmp_path, monkeypatch, kind, path, layer, timing) -> dict[str, Any]:
     l1, l2 = LAYERS[layer]
-    node = _node(kind, l1)
+    node = _node(kind, l1, shard=path == "remote_shard")
     _seed_workspace(job_db, kind)
     if timing == "before_intake":
         _set_override(job_db, kind, l2)
     job = _intake(job_db, kind, node, "job-1")
     if timing == "after_intake":
         _set_override(job_db, kind, l2)
-    _enqueue(job_db, tmp_path, monkeypatch, kind, node, job)
+    shard_runtime = _materialize_shard(job_db, job["id"], node.key) if node.shard else None
+    _enqueue(job_db, tmp_path, monkeypatch, kind, node, job, shard_runtime)
     if path == "legacy":
         _make_legacy(job_db, kind)
     if timing == "after_enqueue":
@@ -355,6 +361,7 @@ def _run_remote(job_db, tmp_path, monkeypatch, kind, path, layer, timing) -> dic
     if kind == "code":
         effective = manifest["timeout_seconds"]
         assert manifest["config"]["timeout_seconds"] == effective
+        assert manifest["config"]["mode"] == "fast"  # business config rides along
         sandbox = manifest["sandbox_network"]
     else:
         effective = manifest["execution"]["timeout_seconds"]
@@ -373,9 +380,9 @@ def _run_remote(job_db, tmp_path, monkeypatch, kind, path, layer, timing) -> dic
     }
 
 
-def _run_local(job_db, tmp_path, layer, timing) -> dict[str, Any]:
+def _run_local(job_db, tmp_path, path, layer, timing) -> dict[str, Any]:
     l1, l2 = LAYERS[layer]
-    node = _node("code", l1)
+    node = _node("code", l1, shard=path == "local_shard")
     _seed_workspace(job_db, "code")
     codes = NodeCodeService(TEST_DATABASE_URL)
     codes.save_draft(WS, WS, node.key, "def run(job, job_dir, runtime):\n    pass\n", "seed")
@@ -401,7 +408,12 @@ def _run_local(job_db, tmp_path, layer, timing) -> dict[str, Any]:
     finally:
         worker.stop()
     assert len(executor.contexts) == 1, "a running execution is never re-decided"
-    config = executor.contexts[0].node_config
+    context = executor.contexts[0]
+    if node.shard:
+        assert context.runtime["shard_index"] == 0  # really the shard execution
+    assert context.node_code is not None  # the published code, not a builtin
+    config = context.node_config
+    assert config["mode"] == "fast"  # business config parity with remote
     audit = _audit(job_db, job["id"])
     return {
         "effective": config["timeout_seconds"],
@@ -412,15 +424,15 @@ def _run_local(job_db, tmp_path, layer, timing) -> dict[str, Any]:
 
 
 def _drive(job_db, tmp_path, monkeypatch, kind, path, layer, timing) -> dict[str, Any]:
-    if path == "local":
-        return _run_local(job_db, tmp_path, layer, timing)
+    if path in LOCAL_PATHS:
+        return _run_local(job_db, tmp_path, path, layer, timing)
     return _run_remote(job_db, tmp_path, monkeypatch, kind, path, layer, timing)
 
 
 # --- the matrix ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("kind", "path", "layer", "timing"), _cases())
+@pytest.mark.parametrize(("kind", "path", "layer", "timing"), matrix_cases())
 def test_timeout_matrix(job_db, tmp_path, monkeypatch, kind, path, layer, timing) -> None:
     l1, l2 = LAYERS[layer]
     l2_at_decision = None if timing == "after_decision" else l2
@@ -439,18 +451,18 @@ def test_timeout_matrix(job_db, tmp_path, monkeypatch, kind, path, layer, timing
 
 @pytest.mark.parametrize("layer", list(LAYERS))
 def test_paths_agree_for_identical_inputs(job_db, tmp_path, monkeypatch, layer) -> None:
-    """Local dispatch, single claim and batch claim decide identically."""
+    """Every code path (shard executions included) decides identically."""
     results = []
-    for path in ("local", "single", "batch"):
+    for path in ("local", "single", "batch", "local_shard", "remote_shard"):
         # Fresh workspace per path (cascades its jobs/requests/node code).
         with job_db.connect() as conn:
             conn.execute("delete from workspaces where id=%s", (WS,))
             conn.execute("delete from agent_workers")
-        timing = "after_intake" if path == "local" else "after_enqueue"
+        timing = "after_intake" if path in LOCAL_PATHS else "after_enqueue"
         results.append(
             _drive(job_db, tmp_path, monkeypatch, "code", path, layer, timing)["decided"]
         )
-    assert results[0] == results[1] == results[2] == oracle("code", *LAYERS[layer])
+    assert all(result == oracle("code", *LAYERS[layer]) for result in results)
 
 
 def test_claim_scan_projects_a_scalar_override_not_the_document(

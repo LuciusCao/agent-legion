@@ -840,7 +840,8 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 - L2 非法（合法 = 非 bool 的整数且 >= 1，与保留 schema 一致）时，**所有路径**都回落到 base，审计来源记为 `workspace_override_invalid`，并打一条结构化 warning（node key、workspace、原始值；同一组合只打一次）。任何路径都不再因非法超时覆盖让节点失败（#691 之前 dispatch 会让节点失败），intake 冻结同样忽略非法超时覆盖。
 - 旧 Host 入队、manifest 里没有 `timeout_base` 的请求：以入队时的值为 base，来源 `enqueue_snapshot`。
 - 审计：每次执行在 `node_runs.config_snapshot_json` 的 `_config_resolution` 元键下记录判定结果，远程请求在 claim 下发的 manifest 里另带同形的 `config_resolution` 键，形如 `{"timeout_seconds": {"value", "source"}}`，来源取 `platform_default` / `node_config` / `workspace_override` / `workspace_override_invalid` / `enqueue_snapshot`。
-- 保留键 `timeout_seconds` / `sandbox_network` 仍不得在 `config_schema` 中重声明（loader 拒绝），也不能挂 `runtime_mutable` 标记；它们不进 `runtime_mutable_keys`，因此也不影响 inherit 升级的继承判定。intake 冻结快照仍记录 intake 时刻的超时（inherit 升级 diff 照旧比较），但执行不使用它。
+- 保留键 `timeout_seconds` / `sandbox_network` 仍不得在 `config_schema` 中重声明（loader 拒绝），也不能挂 `runtime_mutable` 标记；它们不进 `runtime_mutable_keys`（该集合会把节点整体排除出 inherit 继承）。intake 冻结快照仍记录 intake 时刻的超时，但执行不使用它；inherit 升级 diff 在比较节点定义 `config` 与冻结 config 段时剔除运行时可调分类的保留键（单一事实源 `runtime_reserved_config.RESERVED_KEY_MUTABILITY`，目前只有 `timeout_seconds`，#858），只改超时的 revision 升级不触发重跑，`sandbox_network` 照常参与比较。
+- 执行路径全集（#869）：本地 code 池（普通节点与本地分片）统一经 `local_dispatch.decide_local_code_dispatch` 判定（超时 + 审计、业务 config、published 代码），远程 agent/code（含远程分片）入队带 `timeout_base`、claim 判定。构造 `ExecutionContext` / `AgentExecutionRequest` 的位置由 `tests/services/test_runtime_timeout_paths_guard.py` AST 扫描钉住：新路径须接判定函数并登记到矩阵路径表，否则测试失败。
 - 生效时点（快照语义）：运行时可调键是**配置输入**，不是判定状态。每次求值在一个声明好的时点读取一次——Host dispatch 时，或 Worker 批量 claim 的候选选取阶段（只读连接）——写事务沿用该快照，不在锁下重读，也不对 `workspaces` 行加锁；在此之后提交的修改从下一次 dispatch / claim 起生效。与「先选候选、后在写事务内修改并提交」之间提交的修改效果上等同于晚于本次 claim 提交，不产生错误执行；在 claim 热路径上加锁消除这个窗口的代价（#690 锁序族）远大于收益。跨事务携带的身份、状态、执行代次、租约、容量等**判定状态**仍须在写事务内重新校验（AGENTS.md「多步变更」条）。
 
 ## Database
