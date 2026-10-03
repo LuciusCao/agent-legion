@@ -31,7 +31,8 @@ from typing import Any
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.materials import MaterialsService, MaterialStorageUnavailableError
 from server.app.services.run_item_client_token import item_client_token
-from server.app.services.run_text_batch import TEXT_CONTENT_TYPES, store_text_batch
+from server.app.services.run_text_batch import store_text_batch
+from server.app.services.text_item_content_types import TEXT_CONTENT_TYPES
 
 TEXT_ITEM_MAX_BYTES = 64 * 1024
 DEFAULT_TEXT_FILENAME = "需求.md"

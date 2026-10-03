@@ -62,6 +62,13 @@ def test_text_input_absent_none_or_all_empty_is_none() -> None:
     assert _definition({"text_input": {"label": " ", "filename": ""}}).start_node.text_input is None
 
 
+@pytest.mark.parametrize("filename", ["payload.json", "PAYLOAD.JSON", "需求.txt"])
+def test_text_input_filename_shares_runtime_allowlist(filename: str) -> None:
+    """#813: the loader accepts every run-time text suffix (single source)."""
+    definition = _definition({"text_input": _text_input(filename=filename)})
+    assert definition.start_node.text_input.filename == filename
+
+
 def test_text_input_does_not_require_text_in_contract() -> None:
     """Presentation only: the block is inert without ``text`` accepted, not an error."""
     definition = _definition({"accepted_item_types": ["material"], "text_input": _text_input()})
@@ -76,11 +83,11 @@ def test_text_input_does_not_require_text_in_contract() -> None:
         ({"label": 42}, "text_input.label"),
         ({"label": "x" * 81}, "text_input.label"),
         ({"template": "x" * (16 * 1024 + 1)}, "text_input.template"),
-        ({"filename": "sub/需求.md"}, "bare .md or .txt"),
-        ({"filename": "需求.exe"}, "bare .md or .txt"),
-        ({"filename": ".hidden.md"}, "bare .md or .txt"),
-        ({"filename": "bad\x00.md"}, "bare .md or .txt"),
-        ({"filename": "bad\n.md"}, "bare .md or .txt"),
+        ({"filename": "sub/需求.md"}, "bare .md, .txt or .json"),
+        ({"filename": "需求.exe"}, "bare .md, .txt or .json"),
+        ({"filename": ".hidden.md"}, "bare .md, .txt or .json"),
+        ({"filename": "bad\x00.md"}, "bare .md, .txt or .json"),
+        ({"filename": "bad\n.md"}, "bare .md, .txt or .json"),
         ({"filename": "bad\ud800.md"}, "valid UTF-8"),
         ({"template": "bad\ud800"}, "valid UTF-8"),
     ],

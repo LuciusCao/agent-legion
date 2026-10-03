@@ -54,7 +54,7 @@ export function WorkflowNodeStartTextInputEditor(props: Props) {
         />
       </label>
       <label className={styles.field}>
-        <span className={styles.fieldLabel}>落盘文件名（.md 或 .txt）</span>
+        <span className={styles.fieldLabel}>落盘文件名（.md、.txt 或 .json）</span>
         <input
           aria-label="落盘文件名"
           className={styles.fieldInput}

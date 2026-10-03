@@ -75,3 +75,19 @@ def scoped_entity_id(entity_id: str, item: dict[str, Any]) -> str:
     """``entity_id`` scoped by the item's token (unchanged without one)."""
     token = item_client_token(item)
     return f"{entity_id}{CLIENT_TOKEN_SEPARATOR}{token}" if token else entity_id
+
+
+def drop_null_client_tokens(items: list[Any]) -> list[Any]:
+    """Items with an explicit ``"client_token": null`` stripped to the omitted form.
+
+    The route dumps ``exclude_unset``, so a generated client sending ``null``
+    would otherwise keep the key in the verbatim-hashed run digest: same job
+    identity as the omitted field but a different run id, which breaks the
+    #501 duplicate-heal path across null/omitted retries (PR #902 review).
+    """
+    return [
+        {key: value for key, value in item.items() if key != "client_token"}
+        if isinstance(item, dict) and "client_token" in item and item["client_token"] is None
+        else item
+        for item in items
+    ]

@@ -131,6 +131,30 @@ def test_max_length_token_keeps_job_id_a_valid_dir_name() -> None:
     assert len(longest.encode("utf-8")) <= 255
 
 
+@pytest.mark.parametrize("item_type", ["material", "text"])
+def test_null_client_token_equals_omitted(client, storage, job_db, item_type) -> None:
+    """显式 ``"client_token": null`` 与省略同一 job 身份、同一 run id（digest 前剥离）。"""
+    workspace_id = _create_workspace(client, ["material", "text"])
+    _insert_ready_material(job_db, workspace_id, "mat-a")
+    item = (
+        {"type": "material", "material_id": "mat-a"}
+        if item_type == "material"
+        else {"type": "text", "content": "# 需求\n"}
+    )
+    first = _create_run(client, workspace_id, [{**item, "client_token": None}])
+    assert first.status_code == 200, first.text
+    run_id = first.json()["run"]["id"]
+    # Simulate the #501 partial-failure state, then retry with the field omitted:
+    # the heal path only finds the row when both spellings share one digest.
+    with job_db.write() as conn:
+        conn.execute("update runs set status='failed' where id=%s", (run_id,))
+    retry = _create_run(client, workspace_id, [item])
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["run"]["id"] == run_id
+    assert retry.json()["created_count"] == 0
+    assert retry.json()["run"]["status"] == "created"
+
+
 # --- material ---------------------------------------------------------------
 
 
@@ -358,6 +382,28 @@ def test_text_item_json_filename_stores_json_content_type(client, storage, job_d
     assert response.status_code == 200, response.text
     (material,) = client.get(f"/api/workspaces/{workspace_id}/materials").json()["materials"]
     assert material["filename"] == "payload.JSON"
+    assert material["content_type"] == "application/json; charset=utf-8"
+
+
+def test_start_node_json_default_filename_publishes_and_applies(client, storage, job_db) -> None:
+    """start 节点 text_input.filename 可配 ``.json``，作为无 filename 条目的默认落盘名。"""
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    workspace_id = _create_workspace(client)
+    raw = copy.deepcopy(DEMO_WORKFLOW_DEFINITION)
+    raw["nodes"]["_start"]["accepted_item_types"] = ["material", "text"]
+    raw["nodes"]["_start"]["text_input"] = {"filename": "payload.json"}
+    WorkflowRevisionService(client.app.state.job_db).publish_workspace_revision(
+        workspace_id, workflow_definition_from_dict(raw)
+    )
+
+    response = _create_run(client, workspace_id, [{"type": "text", "content": "{}"}])
+
+    assert response.status_code == 200, response.text
+    (material,) = client.get(f"/api/workspaces/{workspace_id}/materials").json()["materials"]
+    assert material["filename"] == "payload.json"
     assert material["content_type"] == "application/json; charset=utf-8"
 
 

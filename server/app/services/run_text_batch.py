@@ -17,17 +17,10 @@ from botocore.exceptions import BotoCoreError, ClientError
 from server.app.services.job_errors import ConflictError
 from server.app.services.material_ttl import materials_ttl_days
 from server.app.services.materials import MaterialStorageUnavailableError
+from server.app.services.text_item_content_types import TEXT_CONTENT_TYPES
 from server.app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
-
-# Suffix → stored content type for text items; the keys are also the
-# filename allowlist run_text_items enforces (single source, #813).
-TEXT_CONTENT_TYPES = {
-    ".md": "text/markdown; charset=utf-8",
-    ".txt": "text/plain; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-}
 
 
 def text_content_type(filename: str) -> str:
