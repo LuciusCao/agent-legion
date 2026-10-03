@@ -288,9 +288,18 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    随之能真正落盘而不是被误当事务重放跳过（codex #774 P2；只带第一对会让兄弟
    落点/第二对冲突漏摘，#774 对抗复审 P2）；
 2. **全域读视图**（`agent_control/completion_view.py`）：staging 视图是私有
-   scratch，链接对归档垃圾形状（同名目录、文件祖先、symlink）与源消失 TOCTOU
-   全域——overwrite 遍清挡位垃圾（预检保证删不到暂存源），第一遍遇挡位跳过按
-   未产出判 missing，永不炸异常；
+   scratch，链接一律覆盖并对归档垃圾形状（同名目录、文件祖先、symlink）与
+   源消失 TOCTOU 全域——清挡位垃圾（预检保证删不到暂存源），永不炸异常。
+   视图成员只有本次 ref 校验提升的产物名（#779 终审 P1：job_dir 残留永不
+   进视图补齐 produced）；节点声明 inputs 不进 staging 视图——Host 校验的
+   跨文件对账数据面由声明校验视图族（`workflows/validation_view.py` +
+   `_validation_view_files.py`，#757 骨架）在 result-validate 池任务里单独
+   构造：名归一化（折叠 `./`/`//`）后与本次产物同名即取产物字节（#833
+   codex P2，#779 终审 P1 残留排除在视图语义下的重述），其余 input 字节
+   优先 dispatch 冻结的 CAS 副本（`stage_agent_inputs` 按 (job,node) 持
+   ref，Worker 实际消费的字节；无 ref/blob 缺失回落 job_dir），且一律以
+   reflink/拷贝私有 inode 落视图——CAS 解决读对字节、私有副本解决写隔离，
+   两个威胁模型叠加（#828/#830/#833）；
 3. **闸内兜底**（`executors/_lease_finish_promotion.py`）：预检无锁，盖不住跨
    节点 finish 之间现场变坏的残余竞态——`staged_file_moves` 提升失败经 guard
    整体回滚后 completed 转 failed 照常提交，lease 不再被异常回滚毒化成重试循环。
@@ -366,6 +375,68 @@ RMW 名加 rmw_retire 强制删除面覆盖的 RMW 名）在提交后再扫一�
 job-mutation 锁内复核（`sweep_delete_guard`：清单行已重登记或生产者
 running/completed 的名跳过），不误删新代次写回的新字节（codex #776
 复审 P2-A）。
+
+### 2.11 输入身份唯一解析点（EXEC-INPUT-IDENTITY-001）
+
+一个节点执行的**输入身份**（哪个 digest 的字节）有且只有一个解析点：
+**dispatch**。`stage_agent_inputs`（`agent_broker/agent_artifacts.py`，
+agent 与 code 两条 dispatch 都调）把 Worker 将消费的 input 字节 put 进
+CAS、按 (job,node) 持 ref 防 GC（job 存活期间 blob 不可回收），并把
+`sha256:<digest>` 冻结进 DB manifest 的 `input_artifacts`。此后所有环
+节只允许**等价 transport 变换**（同一 digest 换传输形态），不允许
+**重解析**（按当下可变状态——`job_artifacts` 当下行、job_dir 现状字
+节——重新决定身份）。生命周期上三处读到的字节 digest 同一：
+
+```
+dispatch            claim                Worker                Host 校验
+解析：现状字节       transport 变换：      双 transport 按        transport 消费：
+→ digest，冻结 ref   CAS ref → presigned   digest 自验：           按冻结 ref 开
+（DB manifest）     GET（digest 不变）    presigned 失配          CAS blob（私有副本）
+                                          回落 CAS
+```
+
+不变量在三点闭环：**签发点**（claim 升级前行 `content_hash` 与冻结
+digest 比对，不一致保留 CAS 形态）、**下发点**（presigned ref 的
+`sha256` 字段 == 冻结 digest）、**消费点**（Worker 端 `sha256_file`
+对下载字节自验）。前两点只是快路径过滤——presigned URL 仍指向可变
+authority key，签发后、Worker GET 前对象可被并行生产者覆盖；结构性
+保证在消费点：dict ref 的 `sha256` 本身就是冻结身份，下载字节失配
+时按它回落 CAS 通道（blob 内容寻址不可变），任何 transport 满足同一
+digest 即同一输入，两段皆败才报错（报错携带两段信息）。
+
+transport 变换与重解析的区别即**机检判定准则**：transport 变换必须携
+带原 digest 可机验（presigned ref 的 `sha256` 字段 == 冻结 digest，
+worker 端 `sha256_file` 下载后校验；claim 升级前行 `content_hash` 与
+冻结 digest 比对）；任何把可变状态当执行输入身份来源、且字节流向执
+行或校验的路径即缺陷；消费点按 digest 自验后，任何 transport 可满足
+同一身份。反面案例一句话：PR #876 codex P1——claim 按
+当下 `job_artifacts` 行升级 presigned（行被并行生产者重写后 digest
+漂移），Worker 跑新字节、Host 校冻结字节，双向判错；修复（claim 签
+发比对 + Worker 消费点 digest 自验回落 CAS）即本不变量在签点与消费
+点的落地。
+
+解析点全清单（合法性判定）：
+
+| 路径 | 性质 | 判定 | 理由 |
+|---|---|---|---|
+| dispatch `stage_agent_inputs` | 解析 | 合法（唯一解析点） | 身份在此冻结，(job,node) ref 防 GC |
+| claim presigned 升级（`remote_artifact_support.upgrade_input_artifacts`） | transport 变换 | 合法（带 digest 比对守卫） | 行 hash == 冻结 digest 才升级；不一致/无行保留 CAS 形态；守卫覆盖 str 与 dict 两 ref 形态（dict 的 sha256 即冻结身份，失配降级拼回 `sha256:<digest>` 串）；签发比对只是快路径过滤，结构性保证在消费点 |
+| Worker 下载（`worker/artifact/inputs`，presigned/CAS 双 transport） | transport 消费 | 合法（digest 自验闭环） | 两形态下载后按冻结 digest 自验；presigned 任何失败（digest 失配/HTTP 重试耗尽/解码失败）都回落 CAS，两段式报错归因；重复规范化名按声明顺序物化、last wins（消费身份唯一定义点） |
+| completion 产物 ref 登记（`completion_staged` 的 `add_ref` 循环） | 写槽位 | 合法（时序守卫） | 校验消费完冻结 refs 之前不写任何 (job,node,name) 槽位——撞名 upsert 会把冻结 input digest 顶成孤儿，校验排队跨过 GC tick 后静默回落 job_dir |
+| Host 校验 CAS-first（`_validation_view_inputs.resolve_input_source`） | transport 消费 | 合法 | 按冻结 ref 开 blob，ref 来自 DB manifest（claim 注入 memory-only 不落库） |
+| 校验 job_dir 回落（无 ref） | 重解析 | 仅 legacy 豁免：服务 #833 前无冻结 ref 的 manifest，随旧 job 耗尽归零 | 新 manifest 必有冻结 ref；暴露面与 #833 前校验直读 job_dir 一致 |
+| 校验 job_dir 回落（有 ref 但 blob 缺失） | 重解析 | 合法（fail-open 降级） | GC 竞态/陈旧 ref 的残余面，与 legacy 同一暴露面，validator 自判缺失 |
+| hydration（job_dir 缓存回填） | 重解析 | 合法（不决定执行身份） | 只服务可淘汰的 job_dir 本地缓存（EXEC-ARTIFACT-STORE-001），执行身份仍由 manifest ref 决定 |
+| 产物读端点 / UI 读 | 当下行读 | 合法（#508 文档化语义） | 读最新是展示语义，不参与执行与校验 |
+
+新增任何读 input 字节的路径先过判定准则：digest 来自 dispatch 冻结
+ref ⇒ transport，来自当下可变状态且流向执行/校验 ⇒ 缺陷。重复规范
+化名（`a.json` 与 `./a.json`）的消费身份由 Worker 物化顺序唯一定义
+——顺序下载、同路径后者覆盖前者，last wins；校验视图的去重必须同
+向（keep-last），dispatch 侧刻意不去重（consumer 侧规则是唯一事实
+源）。digest 比
+对口径：行 `content_hash` 恒为未压缩内容 sha256（gzip 行同，#338），
+与 dispatch CAS digest 同基准，直接可比。
 
 ## 3. 对抗审查 checklist
 

@@ -7,6 +7,12 @@ promote 的 os.replace 可能已把 job_dir 文件换成新 inode，视图必须
 的 test_completion_view_never_backfills_unreported_outputs_from_job_dir。
 P2 族：归档成员不可信，视图是私有 scratch——链接对垃圾形状（同名目录、
 文件祖先、symlink）全域清挡位，源消失的 TOCTOU 按未产出跳过，不炸异常。
+
+节点声明 inputs 不链入本视图：#828/#830/#833 的名单裁决（名归一化 +
+产物同名排除）与字节来源（dispatch 冻结 CAS 优先、job_dir 回落）已下
+沉进声明校验视图族，单测钉在
+tests/workflows/test_output_validation_view.py，端到端钉在
+tests/db/test_completion_view_inputs.py。
 """
 
 from __future__ import annotations

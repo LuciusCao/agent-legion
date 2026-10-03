@@ -4,8 +4,12 @@ Split from ``validation_view`` for the file-size budget — that module owns
 the view contract and the construction/exit orchestration; this one owns
 the filesystem mechanics: safe-relative filtering, hardlink-or-copy
 placement with its failure grading, the placement records the exit arms
-work against, the output reconcile back into the run view, and the inputs
-read-only enforcement. See ``validation_view``'s docstring for the
+work against, the output reconcile back into the run view (skipped for
+copied entries the validator never touched — (mtime, size) identity check,
+#876 B 员 P3), and the inputs
+read-only enforcement. The input byte-source decision (dispatch-frozen CAS
+first, job-dir fallback, #828/#830/#833) lives in the sibling
+``_validation_view_inputs``. See ``validation_view``'s docstring for the
 semantics; tests/workflows/test_output_validation_view.py pins them.
 """
 
@@ -35,11 +39,13 @@ class InputSnapshot:
 
 @dataclass(frozen=True)
 class OutputPlacement:
-    """An output's view entry at placement: inode identity + channel."""
+    """An output's view entry at placement: inode identity + channel + stat."""
 
     rel: str
     ino: int
     dev: int
+    mtime_ns: int
+    size: int
     linked: bool  # hardlinked (in-place writes propagate) vs copied
 
 
@@ -52,7 +58,12 @@ class ViewPlacements:
 
 
 def safe_relative(name: str) -> str | None:
-    """The declared name as a view-relative path; None = unsafe (abs/``..``)."""
+    """The declared name as a view-relative path; None = unsafe (abs/``..``).
+
+    ``PurePosixPath`` collapses ``./`` and ``//``, so a non-canonical
+    spelling (``./out.json``) compares equal to the canonical name in the
+    input/output overlap exclusion (#833 codex P2).
+    """
     rel = PurePosixPath(name)
     if rel.is_absolute() or ".." in rel.parts:
         return None
@@ -60,13 +71,14 @@ def safe_relative(name: str) -> str | None:
 
 
 def place(
-    rel: str, source_dir: Path, target: Path, *, private: bool
+    rel: str, source: Path, target: Path, *, private: bool
 ) -> tuple[os.stat_result, bool] | None:
-    """Place ``source_dir/rel`` into the view; returns (view stat, linked).
+    """Place ``source`` into the view at ``rel``; returns (view stat, linked).
 
     ``private=True`` (declared inputs): a reflink-or-copy private inode
-    (#757 P1 — a hardlink shares the inode with the job dir's upstream
-    artifact, so a validator's in-place write or chmod would cross over).
+    (#757 P1 — a hardlink shares the inode with the source, so a validator's
+    in-place write or chmod would cross over into the job dir's upstream
+    artifact or the shared CAS blob, #833).
     ``private=False`` (declared outputs): a hardlink, so the validator's
     in-place cleaning propagates to the bytes the finish gate promotes (the
     replace family is covered by the reconcile arm).
@@ -76,7 +88,6 @@ def place(
     Placement failures (mkdir prefix collisions, disk/permission errors on
     the copy fallback) raise — an unbuildable view fails closed.
     """
-    source = source_dir / rel
     try:
         if not stat.S_ISREG(source.stat().st_mode):
             return None
@@ -88,7 +99,11 @@ def place(
         spot.unlink()
     if private:
         try:
-            copy_private(source, spot)
+            # 探测点挪到视图外（视图父级，同一文件系统——视图经
+            # TemporaryDirectory(dir=job_dir) 建在其中，st_dev 相同，探测
+            # 结论不失真）：被 suppress 的 unlink 失败不会把
+            # ``.reflink-probe-*`` 残留进 validator 的 rglob 范围。
+            copy_private(source, spot, probe_dir=target.parent)
         except FileNotFoundError:
             return None
         return os.stat(spot), False
@@ -116,6 +131,10 @@ def reconcile_outputs(
     fallback entry whose mutations cannot propagate) is synced with a
     temp-write + atomic os.replace into ``output_source`` — a sync failure
     raises so the run fails closed rather than promoting uncleaned bytes.
+    A copied entry whose (mtime, size) still matches its placement stat is
+    skipped outright — the validator never touched it, and an unconditional
+    temp+copy+replace would tax every clean completion with 2x I/O per
+    untouched output on hardlink-unsupported mounts (#876 B 员 P3).
     A validator-deleted (or non-file-replaced) output propagates the
     deletion: the finish gate's missing-source containment then fails the
     run, exactly as when validators ran inside the staging view.
@@ -126,6 +145,13 @@ def reconcile_outputs(
         if spot.is_file():
             st = spot.stat()
             if placed.linked and (st.st_ino, st.st_dev) == (placed.ino, placed.dev):
+                continue
+            if (st.st_mtime_ns, st.st_size) == (placed.mtime_ns, placed.size):
+                # 拷贝回落条目 validator 没碰（mtime+size 双条件同源一致）
+                # ——跳过 temp+copy+replace，否则每个未修改输出在 ext4 上
+                # 每次完成白付 2× I/O。不用 content hash 判未修改：逐字
+                # 重读每个输出的成本正是要省的那笔 I/O 本身；mtime+size
+                # 与 inputs 只读快照检查同一证伪级别。
                 continue
             _sync_back(spot, source)
         elif not source.is_file() and not source.is_symlink():

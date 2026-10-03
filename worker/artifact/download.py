@@ -8,6 +8,7 @@ URL comes from the authenticated claim channel, so no SSRF guard applies
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import BinaryIO, cast
 
@@ -18,6 +19,15 @@ from worker.artifact.gzip import copy_stream
 # Single socket timeout for presigned GET downloads; aligned with the
 # transfer-timeout default of the bundle/artifact channel.
 _DOWNLOAD_TIMEOUT_SECONDS = 120
+
+
+def sha256_file(path: Path) -> str:
+    """Streamed digest: artifacts can be multi-GB, never buffer them whole."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def describe_transfer_error(exc: BaseException) -> str:

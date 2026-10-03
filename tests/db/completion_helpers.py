@@ -91,7 +91,10 @@ def _result_archive(archive: Path, members: dict[str, bytes]) -> None:
 
 
 def _completion_handler(
-    job_db: JobQueries, tmp_path: Path, storage: FakeObjectStorage
+    job_db: JobQueries,
+    tmp_path: Path,
+    storage: FakeObjectStorage,
+    skill_manager: Any = None,
 ) -> tuple[AgentCompletionHandler, JobArtifactObjectStore, Path]:
     jobs_dir = tmp_path / "jobs"
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
@@ -100,7 +103,7 @@ def _completion_handler(
         _StubArtifactStore(),  # type: ignore[arg-type]
         jobs_dir,
         tmp_path / "bundles",
-        skill_manager=None,
+        skill_manager=skill_manager,
         object_store=store,
     )
     return handler, store, jobs_dir

@@ -25,6 +25,21 @@ tests/workflows/test_output_validation_view.py:
   upstream artifact through a shared inode, and CoW filesystems keep the
   zero-copy cost discipline (full input copies on every completion would
   scale the completion path's time and scratch usage with the input size);
+- an input's BYTES come from the dispatch-frozen CAS copy when the manifest
+  carries an ``input_artifacts`` ref for it (#828/#830/#833:
+  ``stage_agent_inputs`` freezes what the Worker actually consumed at
+  dispatch; a parallel producer may overwrite the job-dir file before
+  completion) — no ref / non-CAS ref shape / missing blob falls back to the
+  job dir. The isolation above still applies to CAS-sourced bytes: the
+  private copy keeps a validator's writes out of the shared blob, so the
+  two defenses stack (CAS reads the right bytes, the private inode keeps
+  them write-isolated);
+- a name declared as both input and output resolves to the output bytes
+  and is exempt from the input read-only check — compared on the
+  normalized spelling (``safe_relative`` collapses ``./``/``//``), so a
+  non-canonical input declaration cannot smuggle stale job-dir bytes over
+  this attempt's fresh output (#833 codex P2, the #779 final-review P1
+  residue exclusion restated for the view);
 - outputs stay hardlinked (copy fallback on hardlink-unsupported mounts) so
   the validator's in-place cleaning keeps propagating to the bytes the
   finish gate promotes; the replace family is covered by the reconcile arm;
@@ -47,8 +62,6 @@ tests/workflows/test_output_validation_view.py:
 - validator-created undeclared files never propagate — the promotion plan
   is frozen at unpack time (#759), so the view is not a backdoor around
   the declared artifact surface;
-- a name declared as both input and output resolves to the output bytes
-  and is exempt from the input read-only check;
 - remote-channel (Worker-direct S3) outputs are the pre-existing exception:
   their authority object is the Worker's own upload and the mirror skips
   them, so validator mutations reach only the local copies on every design.
@@ -74,6 +87,10 @@ from server.app.workflows._validation_view_files import (
     safe_relative,
     verify_inputs_untouched,
 )
+from server.app.workflows._validation_view_inputs import (
+    InputAuthority,
+    resolve_input_source,
+)
 
 
 @contextmanager
@@ -83,6 +100,7 @@ def validation_view(
     inputs: Iterable[str],
     outputs: Iterable[str],
     output_source: Path,
+    input_authority: InputAuthority | None = None,
 ) -> Iterator[Path]:
     """Yield a scratch dir holding exactly the declared inputs + outputs.
 
@@ -97,7 +115,9 @@ def validation_view(
         prefix=".validation-view-", dir=job_dir if job_dir.is_dir() else None
     ) as view:
         view_path = Path(view)
-        placements = materialize_validation_view(view_path, inputs, outputs, job_dir, output_source)
+        placements = materialize_validation_view(
+            view_path, inputs, outputs, job_dir, output_source, input_authority
+        )
         yield view_path
         reconcile_outputs(view_path, placements.outputs, output_source)
         verify_inputs_untouched(view_path, placements.inputs)
@@ -109,30 +129,53 @@ def materialize_validation_view(
     outputs: Iterable[str],
     input_source: Path,
     output_source: Path,
+    input_authority: InputAuthority | None = None,
 ) -> ViewPlacements:
     """Place the declared names into ``target`` — inputs first, outputs win.
 
     Returns the placement record the exit arms (reconcile / read-only
     enforcement) work against. Names declared as both input and output are
-    placed from ``output_source`` and exempt from the input snapshot.
+    placed from ``output_source`` and exempt from the input snapshot. Other
+    inputs resolve their bytes through ``input_authority`` (dispatch-frozen
+    CAS first, job-dir fallback — see ``resolve_input_source``). Duplicate
+    declarations are deduped on the normalized name (#868); inputs dedup
+    LAST-wins (#876 codex P2): the Worker downloads aliases in declaration
+    order onto the same normalized path and actually consumes the last one
+    (two aliases can freeze different digests when the file is overwritten
+    between ``stage_agent_inputs``' two reads), so the consumption identity
+    is defined by the Worker's materialization order and the view must
+    resolve to the same identity — a keep-first dedup would validate
+    different bytes than the Worker ran with. Outputs dedup direction is
+    identity-neutral: aliases normalize to ONE on-disk file, so every alias
+    names the same bytes regardless of which is kept.
     """
     output_rels = {rel for name in outputs if (rel := safe_relative(name)) is not None}
-    input_snaps: list[InputSnapshot] = []
+    # rel → 最后别名的原拼写（last wins = Worker 物化顺序定义消费身份）；
+    # refs 按原拼写取，恰好落到最后别名冻结的 digest。
+    input_names: dict[str, str] = {}
     for name in inputs:
         rel = safe_relative(name)
         if rel is None or rel in output_rels:
             continue
-        placed = place(rel, input_source, target, private=True)
+        input_names[rel] = name
+    input_snaps: list[InputSnapshot] = []
+    for rel, raw in input_names.items():
+        source = resolve_input_source(raw, rel, input_authority, input_source)
+        placed = place(rel, source, target, private=True)
         if placed is not None:
             st = placed[0]
             input_snaps.append(InputSnapshot(rel, st.st_ino, st.st_dev, st.st_mtime_ns, st.st_size))
     output_placements: list[OutputPlacement] = []
+    seen: set[str] = set()
     for name in outputs:
         rel = safe_relative(name)
-        if rel is None:
+        if rel is None or rel in seen:
             continue
-        placed = place(rel, output_source, target, private=False)
+        seen.add(rel)
+        placed = place(rel, output_source / rel, target, private=False)
         if placed is not None:
             st, linked = placed
-            output_placements.append(OutputPlacement(rel, st.st_ino, st.st_dev, linked))
+            output_placements.append(
+                OutputPlacement(rel, st.st_ino, st.st_dev, st.st_mtime_ns, st.st_size, linked)
+            )
     return ViewPlacements(tuple(input_snaps), tuple(output_placements))

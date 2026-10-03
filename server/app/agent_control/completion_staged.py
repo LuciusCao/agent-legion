@@ -147,9 +147,6 @@ def finish_staged(
         # pre-staging "last writer wins" order).
         remote_targets = {job_dir / name for name in remote_names}
         staged_moves = [move for move in staged_moves if move[0] not in remote_targets]
-    for name, ref in outcome.output_artifacts.items():
-        if name not in remote_names:
-            handler.artifact_store.add_ref(job_id, node_key, name, str(ref).split(":", 1)[-1])
     mark_result_stage(stage_timer, "artifacts_verify")
     produced = tuple(name for name in expected if (view_dir / name).is_file())
     status = outcome.status
@@ -174,11 +171,23 @@ def finish_staged(
     # view) and reconciles the validator's output mutations back into
     # view_dir, so what the finish gate promotes is what passed validation.
     if status == "completed" and handler.skill_manager is not None:
+        # #828/#830/#833：input 名单裁决与字节来源（dispatch 冻结 CAS 优先、
+        # 缺失回落 job_dir）已下沉进池化视图构造（workflows/validation_view
+        # 族），artifact_store 只为取 CAS root 传入，主进程不碰字节。
         validation_error = validate_worker_outputs(
-            handler.skill_manager, manifest, job_dir, view_dir
+            handler.skill_manager, manifest, job_dir, view_dir, handler.artifact_store
         )
         if validation_error:
             status, exit_code, error = "failed", 1, validation_error
+    for name, ref in outcome.output_artifacts.items():
+        if name not in remote_names:
+            # #876 A1：校验消费完 dispatch 冻结 refs 之前，completion 不得
+            # 写任何 (job,node,name) 槽位——add_ref 是 upsert，Worker 上报
+            # 与 declared input 撞名的（未声明）产物会把该槽位的冻结
+            # input digest 顶成孤儿，校验排队跨过 GC tick 后静默回落
+            # job_dir 读到非冻结字节。区间内无任何逻辑消费这些 output
+            # refs（mirror/finish 均不读 refs），后置零行为差。
+            handler.artifact_store.add_ref(job_id, node_key, name, str(ref).split(":", 1)[-1])
     mark_result_stage(stage_timer, "validate")
     # D12: mirror produced artifacts into object storage (best-effort —
     # a storage outage never flips the node; the reconciler retries).
