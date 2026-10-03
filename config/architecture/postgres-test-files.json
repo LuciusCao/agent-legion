@@ -209,6 +209,7 @@
     "tests/services/test_studio_chat_service_lifecycle.py",
     "tests/services/test_studio_chat_service_permissions.py",
     "tests/services/test_studio_chat_service_sessions.py",
+    "tests/services/test_studio_chat_session_delete.py",
     "tests/services/test_studio_chat_token_keepalive.py",
     "tests/services/test_token_usage.py",
     "tests/services/test_worker_claim_events.py",

@@ -20,11 +20,7 @@ type Props = {
 export function StudioChatPanel(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   const chat = useStudioChat(workspaceId)
-  const manage = useStudioChatSessionManage(
-    workspaceId,
-    chat.activeSessionId,
-    () => chat.selectSession(null)
-  )
+  const manage = useStudioChatSessionManage(workspaceId, chat.selectSession)
   const sessionId = chat.activeSessionId
   useStudioContextSync(workspaceId, sessionId, props.selectedNodeKey ?? null)
   useStudioDraftSync(workspaceId, sessionId, props.definitionYaml ?? null)
