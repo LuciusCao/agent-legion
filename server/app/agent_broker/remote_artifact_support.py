@@ -97,6 +97,19 @@ def upgrade_input_artifacts(
     (value ``{"url", "sha256"}``; no row keeps the legacy CAS form). #338: a
     ``.gz`` row adds ``content_encoding: "gzip"`` for v4+ Workers; for older
     Workers it stays CAS, so a mixed fleet never mismatches the stored form.
+
+    Identity guard (#876 codex P1): the row reflects the PRESENT
+    ``job_artifacts`` state — a parallel producer may have rewritten it
+    after dispatch froze the input's identity (the CAS ref digest), and
+    Host-side validation reads the dispatch-frozen CAS copy (#833).
+    Upgrading a rewritten row would feed the Worker different bytes than
+    the Host validates against, failing both ways. Claim must never
+    silently change the dispatch-frozen input identity: upgrade only when
+    the row's ``content_hash`` still equals the frozen digest; a rewritten
+    row keeps the legacy CAS form so the Worker downloads exactly what
+    dispatch staged. The hashes are directly comparable: a row's
+    ``content_hash`` is always the UNCOMPRESSED-content sha256 (gzip rows
+    included, #338), the same basis as ``stage_agent_inputs``' CAS digest.
     """
     assert store.storage is not None
     expires = presign_expiry_seconds(manifest)
@@ -105,6 +118,14 @@ def upgrade_input_artifacts(
     for name, ref in dict(manifest.get("input_artifacts") or {}).items():
         row = store.lookup(job_id, str(name))
         if row is not None:
+            # 非 str ref（重复注入的 dict 形态）拿不出冻结 digest——不在本
+            # 不变量保护范围，维持现状升级（URL 重签）。
+            digest = str(ref).split(":", 1)[-1] if isinstance(ref, str) else None
+            if digest is not None and str(row.get("content_hash") or "") != digest:
+                # 行在 dispatch 后被重写（或行 hash 缺失无法自证身份）：
+                # 不升级，Worker 经 CAS 通道拿 dispatch 冻结字节。
+                inputs[str(name)] = ref
+                continue
             storage_key = str(row["storage_key"])
             if is_gzip_key(storage_key) and not gzip_capable:
                 # 旧协议 worker：.gz 对象不升级为 presigned GET，保留 CAS
