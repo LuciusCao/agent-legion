@@ -234,6 +234,6 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
 | 404 | `Material not found: …` / `Material bundle not found: …`：`POST /runs` 引用了本 workspace 没有的素材 | 不重试；修正 items |
 | 409 | text 项内容与一个未就绪（上传未完成）的 material 同 hash | 完成或删除那个 material 后重试 |
 | 422 | 请求体 / 参数校验失败：items 为空、未知字段、`type` 不在四种之内；`GET /runs` 的 `limit` 不在 1–500、`GET /jobs` 的 `limit` 不在 1–2000；`run_id` / `status` 过滤传空串；参数类型不对（如 `limit=abc`）。注意 `GET /jobs/snapshot` 的 `limit` 越界**不是** 422，而是静默钳到 1–500 | 不重试；修正请求 |
-| 429 | 这些端点**尚未限流**（per-token 限流 #738 未落地），目前不会返回 | 建议客户端预先按 `Retry-After` 退避处理 429，限流落地后无需改动 |
+| 429 | per-token 限流命中（#738）：超出该 token 的令牌桶，响应带 `Retry-After`（秒，按补充速率向上取整） | 按 `Retry-After` 退避后重试；批量轮询改用 `/jobs/snapshot` 一次取整批，降低请求频率 |
 | 503 | text 项需要对象存储，实例未配置时返回 | 稍后重试或联系管理员 |
 | 5xx | 服务端异常 | 指数退避重试；`POST /runs` 重试安全（见上节） |
