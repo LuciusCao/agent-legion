@@ -1,4 +1,5 @@
 import { api } from './core'
+import { BULK_REQUEST_TIMEOUT } from './requestTimeout'
 import { targetBody, type BatchJobTarget } from './batchTarget'
 import type { components } from '../generated/api'
 import type { BatchJobMutationResult } from '../types/jobTypes'
@@ -15,7 +16,11 @@ export async function batchPauseJobs(
   if (reason != null && reason.trim() !== '') body.reason = reason.trim()
   return api<BatchJobMutationResult>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-pause`,
-    { method: 'POST', body: JSON.stringify(body) }
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: BULK_REQUEST_TIMEOUT,
+    }
   )
 }
 
@@ -26,6 +31,10 @@ export async function batchResumeJobs(
   const body: BatchResumeJobsRequest = { ...targetBody(target) }
   return api<BatchJobMutationResult>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-resume`,
-    { method: 'POST', body: JSON.stringify(body) }
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: BULK_REQUEST_TIMEOUT,
+    }
   )
 }

@@ -12,10 +12,12 @@ type ResolveResponse =
  * 没有（Studio 前端轮询此端点弹发布确认对话框）。独立成模块：
  * workflows.ts 预算顶格（同 studioChatConfigApi 的先例）。 */
 export async function fetchPendingPublishRequest(
-  workspaceId: string
+  workspaceId: string,
+  signal?: AbortSignal
 ): Promise<StudioPublishRequestRecord | null> {
   const response = await api<PendingResponse>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/workflow-drafts/publish-request`
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/workflow-drafts/publish-request`,
+    { signal }
   )
   return response.request
 }

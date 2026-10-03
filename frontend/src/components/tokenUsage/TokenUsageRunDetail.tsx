@@ -19,7 +19,7 @@ export function TokenUsageRunDetail({ jobId, run }: TokenUsageRunDetailProps) {
   // run.status 进 key：状态翻转自动重取；重取期间保留旧数据（同原 useAsync）。
   const { data: response, isLoading: loading } = useQuery({
     queryKey: extraQueryKeys.runTokenUsage(jobId, run.id, run.status),
-    queryFn: () => fetchRunTokenUsage(jobId, run.id),
+    queryFn: ({ signal }) => fetchRunTokenUsage(jobId, run.id, signal),
     placeholderData: keepPreviousData,
   })
   const [expanded, setExpanded] = useState(false)

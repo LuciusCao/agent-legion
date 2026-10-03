@@ -1,4 +1,5 @@
 import { api } from './core'
+import { BULK_REQUEST_TIMEOUT } from './requestTimeout'
 import { targetBody, type BatchJobTarget } from './batchTarget'
 import type {
   BatchJobMutationResult,
@@ -25,6 +26,7 @@ export async function batchRunToJobs(
     {
       method: 'POST',
       body: JSON.stringify(body),
+      timeoutMs: BULK_REQUEST_TIMEOUT,
     }
   )
 }
@@ -42,7 +44,11 @@ export async function batchRerunJobs(
   if (nodeKey != null) body.node_key = nodeKey
   return api<BatchJobMutationResult>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-rerun`,
-    { method: 'POST', body: JSON.stringify(body) }
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: BULK_REQUEST_TIMEOUT,
+    }
   )
 }
 
@@ -55,6 +61,7 @@ export async function packageJobs(
     {
       method: 'POST',
       body: JSON.stringify(targetBody(target)),
+      timeoutMs: BULK_REQUEST_TIMEOUT,
     }
   )
 }
@@ -68,6 +75,7 @@ export async function batchDeleteJobs(
     {
       method: 'DELETE',
       body: JSON.stringify(targetBody(target)),
+      timeoutMs: BULK_REQUEST_TIMEOUT,
     }
   )
 }

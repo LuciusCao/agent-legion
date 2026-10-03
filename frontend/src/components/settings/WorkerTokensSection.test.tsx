@@ -104,7 +104,10 @@ describe('WorkerTokensSection', () => {
       expect(screen.getByText('home-mac-mini')).toBeTruthy()
     })
     expect(mockListRegisterTokens).toHaveBeenCalledWith()
-    expect(mockListAgentWorkers).toHaveBeenCalledWith()
+    expect(mockListAgentWorkers).toHaveBeenCalledWith(
+      undefined,
+      expect.any(AbortSignal)
+    )
     expect(screen.getByText('mac-mini')).toBeTruthy()
     // key 行展示短 Key ID，便于与 Worker 侧 token 前缀对应。
     expect(screen.getByTestId('register-token-t1').textContent).toContain('t1')

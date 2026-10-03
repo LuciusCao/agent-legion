@@ -48,13 +48,14 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
 
   const { data: lists, error: listQueryError } = useQuery({
     queryKey: extraQueryKeys.workerTokens(),
-    queryFn: () => Promise.all([listRegisterTokens(), listAgentWorkers()]),
+    queryFn: ({ signal }) =>
+      Promise.all([listRegisterTokens(), listAgentWorkers(undefined, signal)]),
     // Worker 侧添加 token 并重注册后，这里应在几秒内自动反映出来。
     refetchInterval: 5000,
   })
   const { data: workspaces } = useQuery({
     queryKey: queryKeys.workspaces(),
-    queryFn: async () => (await fetchWorkspaces()).workspaces,
+    queryFn: async ({ signal }) => (await fetchWorkspaces(signal)).workspaces,
   })
   const listError = toErrorMessage(listQueryError)
   const allTokens = lists?.[0] ?? []

@@ -14,10 +14,13 @@ export interface OpsMetricsParams {
 }
 
 export async function fetchOpsMetrics(
-  params: OpsMetricsParams
+  params: OpsMetricsParams,
+  signal?: AbortSignal
 ): Promise<OpsMetricsResponse> {
   const query = new URLSearchParams({ granularity: params.granularity })
   if (params.worker_id) query.set('worker_id', params.worker_id)
   if (params.workspace_id) query.set('workspace_id', params.workspace_id)
-  return api<OpsMetricsResponse>(`/api/metrics/overview?${query.toString()}`)
+  return api<OpsMetricsResponse>(`/api/metrics/overview?${query.toString()}`, {
+    signal,
+  })
 }

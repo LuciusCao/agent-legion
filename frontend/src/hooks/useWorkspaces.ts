@@ -12,7 +12,7 @@ import type { WorkspaceRecord } from '../types'
 export function useWorkspaces() {
   return useQuery({
     queryKey: queryKeys.workspaces(),
-    queryFn: async () => (await fetchWorkspaces()).workspaces,
+    queryFn: async ({ signal }) => (await fetchWorkspaces(signal)).workspaces,
   })
 }
 
