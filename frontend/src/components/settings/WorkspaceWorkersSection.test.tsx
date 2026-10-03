@@ -55,7 +55,10 @@ describe('WorkspaceWorkersSection', () => {
     await waitFor(() => {
       expect(screen.getByText(/本 workspace 尚无可用 Worker/)).toBeTruthy()
     })
-    expect(mockListAgentWorkers).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(mockListAgentWorkers).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      expect.any(AbortSignal)
+    )
     // 空态不再只说「在 Worker 控制台添加」：给路径，给入口。
     expect(screen.getByText(/Workspace 访问/)).toBeTruthy()
     expect(screen.getByTestId('worker-console-link').getAttribute('href')).toBe(

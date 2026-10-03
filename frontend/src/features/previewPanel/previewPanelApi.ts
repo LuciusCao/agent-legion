@@ -31,9 +31,10 @@ export async function fetchPublishedPreviewPanel(
 
 /** Studio 治理面读取：发布 + 草稿全态（admin / scoped token）。 */
 export async function fetchPreviewPanelState(
-  workspaceId: string
+  workspaceId: string,
+  signal?: AbortSignal
 ): Promise<PreviewPanelState> {
-  return api<PreviewPanelState>(panelUrl(workspaceId, ''))
+  return api<PreviewPanelState>(panelUrl(workspaceId, ''), { signal })
 }
 
 export async function publishPreviewPanel(

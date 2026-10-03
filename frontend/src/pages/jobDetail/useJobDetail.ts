@@ -26,7 +26,7 @@ export function useJobDetail(
 
   const detailQuery = useQuery({
     queryKey: queryKeys.jobDetail(jobId ?? ''),
-    queryFn: () => fetchJobDetail(jobId as string),
+    queryFn: ({ signal }) => fetchJobDetail(jobId as string, signal),
     enabled: Boolean(jobId),
     refetchInterval: (query) =>
       POLLING_STATUSES.has(query.state.data?.job.status ?? '') ? 5000 : false,

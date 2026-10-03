@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+- 前端 `api()` 请求默认超时并透传 AbortSignal（issue #719）：此前后端僵死时 fetch 无限挂起，同 key 在途请求还会跳过 `refetchInterval`，job 详情/监控轮询冻结在加载态且不可取消。读请求默认 30 秒、写请求默认 120 秒超时，可按调用覆写（`timeoutMs`）；批量操作（batch-rerun/run-to/删除/打包/清空打包/升级/暂停恢复）与材料 complete（服务端重算整对象 sha256）豁免超时。超时抛带 `code: request_timeout` 的结构化错误，经错误映射层统一显示「请求超时」文案并走既有重试；job 详情、workspace 统计、运维指标、Worker 列表、预览面板、发布请求、质量回放、token 用量、workspace 列表等轮询/热点查询把 react-query 的 signal 透传到 fetch，页面卸载或查询失效时取消在途请求。
+- workspace 实时流断线对用户可见（issue #720）：SSE 的 `onStatus` 此前不接 UI，断线时任务列表进度冻结且无任何提示，易被误判为任务卡死而错误重跑。现在连接态进入独立 store（沿用 `AgentConnectionDot` 的 onStatus → store → 订阅组件模式），任务列表上方在断线重连期间显示「实时连接中断，正在重连…」与进度停留时刻（可能已过时）、首连持续失败时显示「实时连接未建立」；重连成功后自动重拉快照、提示消失，无需手动刷新。
+
 ### Security
 - `GET /api/workspaces` 按成员关系过滤（issue #711）：此前该列表对任意登录用户全量返回，未加入任何 workspace 的成员也能枚举全部 workspace id（叠加 job_id 内嵌 workspace id 的格式，job id 猜测变为确定性枚举）。现在非 admin 只返回自己是成员（viewer/editor 任一角色）的 workspace，admin 保留全量；studio-agent scope token 继承签发人的可见范围，绑定 workspace 的 run token 只列出所绑定的那一个；workspace API token 在该端点仍为 404（不变）。前端随之适配：未加入任何 workspace 的非 admin 在首页看到「请联系管理员添加」的空态提示；登录与登出时清空前端查询缓存，同一浏览器换号登录不再沿用上一身份缓存的列表。
 

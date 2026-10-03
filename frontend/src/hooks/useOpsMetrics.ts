@@ -13,7 +13,7 @@ export function useOpsMetrics(
 ) {
   return useQuery({
     queryKey: queryKeys.opsMetrics(params),
-    queryFn: () => fetchOpsMetrics(params),
+    queryFn: ({ signal }) => fetchOpsMetrics(params, signal),
     refetchInterval,
     placeholderData: keepPreviousData,
   })

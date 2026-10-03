@@ -25,7 +25,8 @@ export async function completeMaterial(
 ): Promise<MaterialResponse> {
   return api<MaterialResponse>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/materials/${encodeURIComponent(materialId)}/complete`,
-    { method: 'POST' }
+    // #719：complete 服务端对整个对象重算 sha256，大文件耗时不可预估。
+    { method: 'POST', timeoutMs: null }
   )
 }
 
