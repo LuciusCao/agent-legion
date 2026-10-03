@@ -358,7 +358,11 @@ describe('JobProgressPanel', () => {
       />
     )
     await waitFor(() => {
-      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        1,
+        expect.any(AbortSignal)
+      )
     })
 
     expect(await screen.findByText(/Token: 1,250/)).toBeInTheDocument()
@@ -403,7 +407,11 @@ describe('JobProgressPanel', () => {
       />
     )
     await waitFor(() => {
-      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        1,
+        expect.any(AbortSignal)
+      )
     })
 
     fireEvent.click(screen.getByLabelText('Token 用量'))
@@ -436,7 +444,11 @@ describe('JobProgressPanel', () => {
       />
     )
     await waitFor(() => {
-      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        1,
+        expect.any(AbortSignal)
+      )
     })
 
     fireEvent.click(screen.getByText('查看日志'))

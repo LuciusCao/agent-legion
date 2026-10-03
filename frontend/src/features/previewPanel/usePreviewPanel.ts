@@ -38,7 +38,7 @@ export function usePreviewPanelState(
 ) {
   return useQuery({
     queryKey: previewPanelKeys.state(workspaceId ?? ''),
-    queryFn: () => fetchPreviewPanelState(workspaceId!),
+    queryFn: ({ signal }) => fetchPreviewPanelState(workspaceId!, signal),
     enabled: Boolean(workspaceId) && enabled,
     refetchInterval: enabled ? 3000 : false,
   })

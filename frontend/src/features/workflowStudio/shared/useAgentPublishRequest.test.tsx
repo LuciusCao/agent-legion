@@ -82,7 +82,10 @@ describe('useAgentPublishRequest', () => {
     const { result } = renderHookWithProviders()
 
     await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
-    expect(mocks.fetchPendingPublishRequest).toHaveBeenCalledWith('ws1')
+    expect(mocks.fetchPendingPublishRequest).toHaveBeenCalledWith(
+      'ws1',
+      expect.any(AbortSignal)
+    )
   })
 
   it('keeps pendingRequest null when the workspace has no request', async () => {

@@ -72,7 +72,10 @@ describe('TokenUsageJobPanel', () => {
   it('fetches and renders total summary', async () => {
     renderWithClient(<TokenUsageJobPanel jobId="j1" />)
     await waitFor(() => {
-      expect(mockFetchJobTokenUsage).toHaveBeenCalledWith('j1')
+      expect(mockFetchJobTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        expect.any(AbortSignal)
+      )
     })
     expect(await screen.findAllByText('160')).toHaveLength(2)
     expect(screen.getAllByText('¥ 0.3100')).toHaveLength(2)

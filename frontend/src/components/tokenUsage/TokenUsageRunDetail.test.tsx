@@ -74,7 +74,11 @@ describe('TokenUsageRunDetail', () => {
       <TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />
     )
     await waitFor(() => {
-      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        1,
+        expect.any(AbortSignal)
+      )
     })
 
     expect(await screen.findByText(/Token: 1,250/)).toBeInTheDocument()
@@ -88,7 +92,11 @@ describe('TokenUsageRunDetail', () => {
       <TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />
     )
     await waitFor(() => {
-      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        1,
+        expect.any(AbortSignal)
+      )
     })
 
     fireEvent.click(screen.getByLabelText('Token 用量'))
@@ -117,7 +125,11 @@ describe('TokenUsageRunDetail', () => {
       <TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />
     )
     await waitFor(() => {
-      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        1,
+        expect.any(AbortSignal)
+      )
     })
 
     fireEvent.click(screen.getByLabelText('Token 用量'))
@@ -137,7 +149,11 @@ describe('TokenUsageRunDetail', () => {
       <TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />
     )
     await waitFor(() => {
-      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        1,
+        expect.any(AbortSignal)
+      )
     })
 
     fireEvent.click(screen.getByLabelText('Token 用量'))
@@ -154,7 +170,11 @@ describe('TokenUsageRunDetail', () => {
       <TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />
     )
     await waitFor(() => {
-      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        1,
+        expect.any(AbortSignal)
+      )
     })
 
     expect(await screen.findByText('无 token 数据')).toBeInTheDocument()
@@ -176,7 +196,11 @@ describe('TokenUsageRunDetail', () => {
       <TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />
     )
     await waitFor(() => {
-      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith(
+        'j1',
+        1,
+        expect.any(AbortSignal)
+      )
     })
 
     fireEvent.click(screen.getByLabelText('Token 用量'))
@@ -223,6 +247,10 @@ describe('TokenUsageRunDetail', () => {
       expect(screen.getByText(/Token: 1,250/)).toBeInTheDocument()
     })
     expect(mockFetchRunTokenUsage).toHaveBeenCalledTimes(2)
-    expect(mockFetchRunTokenUsage).toHaveBeenLastCalledWith('j1', 1)
+    expect(mockFetchRunTokenUsage).toHaveBeenLastCalledWith(
+      'j1',
+      1,
+      expect.any(AbortSignal)
+    )
   })
 })

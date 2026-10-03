@@ -1,0 +1,22 @@
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: #fff4e0;
+  color: #7a4f00;
+  border: 1px solid #f3d9a4;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d97706;
+}
+.dotClosed {
+  background: #b91c1c;
+}

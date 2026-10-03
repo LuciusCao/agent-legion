@@ -108,10 +108,12 @@ export async function addSampleItemLabel(
 
 export async function fetchReplays(
   workspaceId: string,
-  itemId: string
+  itemId: string,
+  signal?: AbortSignal
 ): Promise<QualityReplayListResponse> {
   return api<QualityReplayListResponse>(
-    `${base(workspaceId)}/sample-items/${encodeURIComponent(itemId)}/replays`
+    `${base(workspaceId)}/sample-items/${encodeURIComponent(itemId)}/replays`,
+    { signal }
   )
 }
 
@@ -128,9 +130,11 @@ export async function createReplay(
 
 export async function fetchReplayDetail(
   workspaceId: string,
-  replayId: string
+  replayId: string,
+  signal?: AbortSignal
 ): Promise<QualityReplayDetailResponse> {
   return api<QualityReplayDetailResponse>(
-    `${base(workspaceId)}/replays/${encodeURIComponent(replayId)}`
+    `${base(workspaceId)}/replays/${encodeURIComponent(replayId)}`,
+    { signal }
   )
 }

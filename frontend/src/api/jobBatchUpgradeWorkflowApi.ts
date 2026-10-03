@@ -1,4 +1,5 @@
 import { api } from './core'
+import { BULK_REQUEST_TIMEOUT } from './requestTimeout'
 import { targetBody, type BatchJobTarget } from './batchTarget'
 import type { BatchJobMutationResult, UpgradeMode } from '../types/jobTypes'
 
@@ -12,6 +13,7 @@ export async function batchUpgradeJobsWorkflow(
     {
       method: 'POST',
       body: JSON.stringify({ ...targetBody(target), mode }),
+      timeoutMs: BULK_REQUEST_TIMEOUT,
     }
   )
 }

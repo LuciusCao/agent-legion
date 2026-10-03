@@ -37,7 +37,10 @@ describe('useWorkspaceStats', () => {
     await waitFor(() => {
       expect(result.current.data).toEqual(stats)
     })
-    expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
+    expect(mockFetchWorkspaceStats).toHaveBeenCalledWith(
+      'ws1',
+      expect.any(AbortSignal)
+    )
   })
 
   it('stays disabled when workspaceId is undefined', async () => {
