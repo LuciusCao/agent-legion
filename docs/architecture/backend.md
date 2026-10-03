@@ -823,6 +823,19 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 
 接入新内容类型只需两步：在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并在其 `config_schema` 声明 `connection` 键（实例级外部服务连接 key）与业务参数。Intake 快照只冻结 `node_config` 与 `secret_ref`；声明 `runtime_mutable: true` 的运行开关键不受冻结约束，每次 dispatch 按同一解析链重取 workspace 覆盖并落 `node_runs.config_snapshot_json` 审计（CONFIG-RUNTIME-MUTABLE-001）。
 
+### 节点配置可变性分类（#691）
+
+节点配置值分两类，解析链都是「schema 默认 → 节点 `config` → workspace 覆盖」（workspace 覆盖优先级最高），区别只在**何时**求值：
+
+| 类别 | 键 | 求值时机 | 改动生效范围 | 理由 |
+| --- | --- | --- | --- | --- |
+| 随 workflow 版本化（默认） | 普通 `config_schema` 业务键、`sandbox_network` | job intake 时冻结 | 只影响之后 intake 的新 job；节点 `config` 层的改动需发布新 revision | 影响产物正确性/可复现性；`sandbox_network` 是网络出站安全边界，放开必须走 revision 发布评审，不能用运行时开关给在飞 job 开网 |
+| 运行时可调 | 声明 `runtime_mutable: true` 的业务键（运行开关）、保留执行键 `timeout_seconds` | 每次 dispatch 现场重解析（`timeout_seconds` 另在远程 Worker claim 仍排队的请求时再刷新一次） | 尚未 dispatch 的节点即用新值（`timeout_seconds` 覆盖到尚未被 Worker 领取的排队请求）；已开始的执行不变 | 纯运行开关或资源/弹性参数，不改变节点产出什么 |
+
+- 保留执行键 `timeout_seconds` / `sandbox_network` 仍不得在 `config_schema` 中重声明（loader 拒绝），也不能挂 `runtime_mutable` 标记；它们的可变性由平台固定分类（`server/app/services/runtime_reserved_config.py`）。平台默认 agent 节点 1800s、code 节点 600s。
+- 这是对 `timeout_seconds` 冻结语义的有意改变：intake 冻结快照里仍记录 intake 时刻的值（inherit 升级 diff 照旧比较），但执行不再使用它。
+- 审计：每次执行的 `node_runs.config_snapshot_json` 在 `_config_resolution` 元键下记录实际生效的 `timeout_seconds` 与来源（`platform_default` / `node_config` / `workspace_override`）；排队中的 Worker 请求 manifest 带同形的 `config_resolution` 键（claim 时刷新）。
+
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：

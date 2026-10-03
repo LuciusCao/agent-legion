@@ -27,6 +27,7 @@ from server.app.agent_runtime.tools_validation import manifest_tools
 from server.app.config_schema import manifest_safe_config
 from server.app.executors.models import ExecutionContext
 from server.app.services.artifact_store import ArtifactStore
+from server.app.services.runtime_reserved_config import CONFIG_RESOLUTION_MANIFEST_KEY
 from server.app.settings import Settings
 from server.app.skills.checkout import checkout_node_skill
 from server.app.skills.runtime import build_skill_manager
@@ -70,12 +71,14 @@ class AgentDispatchService:
         node_config: dict[str, Any] | None = None,
         pinned_agent_version: int | None = None,
         execution_generation: int = 0,
+        config_resolution: dict[str, Any] | None = None,
     ) -> bool:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
         # #550：超时从 dispatch 解析后的节点 config 取（agent 节点的有效
-        # schema 已合并保留键，值走 defaults → 节点 config → workspace 覆盖
-        # → intake 冻结的常规链）；缺省/畸形回落产品常量。
+        # schema 已合并保留键，值走 defaults → 节点 config → workspace 覆盖；
+        # #691 起 dispatch 现场重解析、不取 intake 冻结值，Worker claim 时
+        # 再按同链刷新一次）；缺省/畸形回落产品常量。
         timeout_raw = (node_config or {}).get("timeout_seconds")
         timeout = timeout_raw if isinstance(timeout_raw, int) and timeout_raw >= 1 else None
         execution = resolve_execution_block(node, definition.runtime, timeout_seconds=timeout)
@@ -115,6 +118,9 @@ class AgentDispatchService:
             # produced this manifest (absent on the normal published path).
             if pinned_agent_version is not None:
                 manifest["agent_version"] = pinned_agent_version
+            if config_resolution:
+                # #691 audit: effective timeout + source (claim refreshes it).
+                manifest[CONFIG_RESOLUTION_MANIFEST_KEY] = config_resolution
             context = ExecutionContext(
                 execution_id=execution_id,
                 lease_id="",

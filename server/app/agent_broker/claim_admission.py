@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import agent_claim_compatibility
 from server.app.agent_broker.claim_scan import ScanState, WorkerView, labels_satisfy
+from server.app.agent_broker.claim_timeout import refresh_claim_timeout
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
@@ -51,11 +52,12 @@ def admit_candidate(
         state.skip_reasons["workspace_paused"] += 1
         return None
     kind = str(selected["kind"])
-    # Code manifests are fully frozen at enqueue: no revision-time execution
-    # re-resolution (the payload carries no provider/model).
+    # Code manifests are frozen at enqueue (the payload carries no
+    # provider/model) except the runtime-adjustable timeout (#691).
     manifest: dict[str, Any]
     if kind == "code":
         manifest = json.loads(str(selected["manifest_json"]))
+        refresh_claim_timeout(manifest, selected, "code")
     else:
         try:
             manifest = agent_claim_compatibility.live_claim_manifest(selected)

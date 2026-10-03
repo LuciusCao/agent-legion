@@ -3,7 +3,9 @@
 The platform auto-merges ``timeout_seconds`` (integer, default 600, >= 1)
 and ``sandbox_network`` (boolean, default false) into every code-routed
 node's effective config schema, so the values travel the regular node
-config chain (defaults → node config → workspace override → intake freeze).
+config chain (defaults → node config → workspace override). ``sandbox_network``
+is intake-frozen; ``timeout_seconds`` is runtime-adjustable and re-resolved
+at dispatch/claim (#691, ``runtime_reserved_config``).
 The executor-capability fallback retired with the executor concept (schema
 v47): the v47 harvest moved executor declarations onto the revision nodes,
 so the node layer is the only declaration source left.

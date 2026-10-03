@@ -9,7 +9,9 @@ code-routed nodes also get the platform-reserved execution keys merged in
 batch payload; dispatch reads the frozen value and only forwards
 schema-whitelisted, non-secret keys (CONFIG-MANIFEST-001). Keys declared
 ``runtime_mutable: true`` are overlaid with a live re-resolution at dispatch
-(CONFIG-RUNTIME-MUTABLE-001, ``node_config_runtime``).
+(CONFIG-RUNTIME-MUTABLE-001, ``node_config_runtime``); so is the
+runtime-adjustable reserved key ``timeout_seconds`` (#691,
+``runtime_reserved_config``), while ``sandbox_network`` stays frozen.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from server.app.services.node_execution_config import (
     merge_reserved_execution_schema,
 )
 from server.app.services.node_secrets import strip_secret_fields
+from server.app.services.runtime_reserved_config import resolve_runtime_reserved
 from server.app.workflows.schema import WorkflowDefinition, WorkflowNode
 
 
@@ -172,6 +175,43 @@ def resolve_workflow_node_configs(
     return resolved
 
 
+def dispatch_config_resolution(
+    config_schema: dict[str, Any],
+    node: Any,
+    workflow_key: str,
+    workspace: Mapping[str, Any] | None,
+    run_payload: Mapping[str, Any] | None,
+    fallback_defaults: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Effective config at dispatch time plus the reserved-key resolution audit.
+
+    The job's frozen config wins. Pre-mechanism jobs (or replays without a
+    frozen config) fall back to live resolution from the node and workspace
+    layers. Frozen snapshots predating the reserved execution keys get
+    *fallback_defaults* underneath (frozen values always win), so in-flight
+    old jobs keep their node-declared network behavior (P-0.5). Frozen
+    snapshots are overlaid with a live re-resolution of the keys declared
+    ``runtime_mutable: true`` (CONFIG-RUNTIME-MUTABLE-001) and of the
+    runtime-adjustable reserved key ``timeout_seconds`` (#691,
+    ``runtime_reserved_config``); ``sandbox_network`` and everything else
+    stay frozen. The second element is ``{key: {"value", "source"}}`` for
+    the re-resolved reserved keys, recorded into the per-run audit.
+    """
+    frozen = frozen_node_config(run_payload, node.key)
+    override = workspace_node_overrides(workspace, workflow_key).get(node.key, {})
+    if frozen is None:
+        effective = resolve_node_config(config_schema, node.config, override)
+    else:
+        effective = {**fallback_defaults, **frozen} if fallback_defaults else dict(frozen)
+        mutable = runtime_mutable_keys(config_schema)
+        if mutable:
+            live = resolve_node_config(config_schema, node.config, override)
+            effective.update({key: live[key] for key in mutable if key in live})
+    resolution = resolve_runtime_reserved(config_schema, node.config, override)
+    effective.update({key: entry["value"] for key, entry in resolution.items()})
+    return effective, resolution
+
+
 def dispatch_effective_config(
     config_schema: dict[str, Any],
     node: Any,
@@ -180,25 +220,7 @@ def dispatch_effective_config(
     run_payload: Mapping[str, Any] | None,
     fallback_defaults: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Effective config at dispatch time: the job's frozen config wins.
-
-    Pre-mechanism jobs (or replays without a frozen config) fall back to
-    live resolution from the node and workspace layers. Frozen snapshots
-    predating the reserved execution keys get *fallback_defaults*
-    underneath (frozen values always win), so in-flight old jobs keep their
-    node-declared timeout/network behavior (P-0.5). Frozen snapshots are
-    overlaid with a live re-resolution of the keys declared
-    ``runtime_mutable: true`` (CONFIG-RUNTIME-MUTABLE-001); everything
-    else — including the platform-reserved execution keys — stays frozen.
-    """
-    frozen = frozen_node_config(run_payload, node.key)
-    if frozen is None:
-        overrides = workspace_node_overrides(workspace, workflow_key)
-        return resolve_node_config(config_schema, node.config, overrides.get(node.key, {}))
-    effective = {**fallback_defaults, **frozen} if fallback_defaults else dict(frozen)
-    mutable = runtime_mutable_keys(config_schema)
-    if not mutable:
-        return effective
-    overrides = workspace_node_overrides(workspace, workflow_key)
-    live = resolve_node_config(config_schema, node.config, overrides.get(node.key, {}))
-    return {**effective, **{key: live[key] for key in mutable if key in live}}
+    """``dispatch_config_resolution`` without the audit half."""
+    return dispatch_config_resolution(
+        config_schema, node, workflow_key, workspace, run_payload, fallback_defaults
+    )[0]

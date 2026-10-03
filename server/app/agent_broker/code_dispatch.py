@@ -43,6 +43,7 @@ from server.app.executors.models import ExecutionContext
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.run_payload import sdk_batch_row
+from server.app.services.runtime_reserved_config import CONFIG_RESOLUTION_MANIFEST_KEY
 from server.app.settings import Settings
 from server.app.storage_paths import ensure_dir_once
 from server.app.workflows.definition import WorkflowNode
@@ -173,6 +174,7 @@ class CodeDispatchService:
         secret_config: dict[str, Any],
         shard_runtime: dict[str, Any] | None = None,
         execution_generation: int = 0,
+        config_resolution: dict[str, Any] | None = None,
     ) -> bool:
         """Stage inputs, build the bundle, and enqueue a kind='code' request.
 
@@ -228,6 +230,9 @@ class CodeDispatchService:
             # the Worker injects the payload into the child runtime dict.
             **(shard_runtime or {}),
         }
+        if config_resolution:
+            # #691 audit: effective timeout + source (the claim re-resolves it).
+            manifest[CONFIG_RESOLUTION_MANIFEST_KEY] = config_resolution
         if shard_runtime is not None:
             # The shard's output rides the ARCHIVE as a regular expected
             # output (same filename contract as the local executor,

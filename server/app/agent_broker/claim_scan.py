@@ -130,7 +130,7 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
     rows: list[Any] = conn.execute(
         """
         with eligible_workspaces as (
-          select ws.id as workspace_id
+          select ws.id as workspace_id, ws.node_config_json as workspace_node_config_json
           from workspaces ws
           left join workspace_agent_capacities w on w.workspace_id=ws.id
           where exists (select 1 from agent_execution_requests q
@@ -142,6 +142,9 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
                     ) < coalesce(w.max_concurrency, 2147483647))
         )
         select r.*, wr.definition_json as revision_definition_json,
+               -- #691: live workspace overrides for the claim-time timeout
+               -- refresh (claim_timeout.refresh_claim_timeout).
+               ws.workspace_node_config_json,
                -- Batch agent claims retain several agent-ws capacity locks
                -- in one transaction. Carry the ACTUAL lock key so the write
                -- phase never substitutes unrelated workspace-text order.

@@ -192,6 +192,7 @@ def test_enqueue_builds_secret_free_manifest_and_bundle(job_db, tmp_path) -> Non
         custom_code=False,
         config={"mode": "fast"},
         secret_config={"token": {"secret_ref": "api-token"}},
+        config_resolution={"timeout_seconds": {"value": 42, "source": "node_config"}},
     )
 
     assert queued is True
@@ -206,6 +207,10 @@ def test_enqueue_builds_secret_free_manifest_and_bundle(job_db, tmp_path) -> Non
     assert manifest["expected_outputs"] == ["out.json"]
     assert manifest["timeout_seconds"] == 42
     assert manifest["sandbox_network"] is True
+    # #691 audit: dispatch-time timeout resolution rides the queued manifest.
+    assert manifest["config_resolution"] == {
+        "timeout_seconds": {"value": 42, "source": "node_config"}
+    }
     assert manifest["bundle_mode"] == "refs"
     assert manifest["custom_code"] is False
     # The persisted document must not contain any plaintext secret value.

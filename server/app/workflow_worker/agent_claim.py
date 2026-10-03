@@ -15,7 +15,7 @@ from server.app.services.agent_version_pins import (
     agent_version_pin,
     resolve_dispatch_agent_definition,
 )
-from server.app.services.node_config import dispatch_effective_config
+from server.app.services.node_config import dispatch_config_resolution
 from server.app.services.node_config_batch import run_frozen_payload
 from server.app.services.node_execution_config import (
     AGENT_DEFAULT_TIMEOUT_SECONDS,
@@ -129,10 +129,12 @@ def claim_agent_node(
         )
     try:
         # #550：agent 节点的有效 schema 同样合并保留执行键（timeout/
-        # network 走常规 config 链）；冻结快照早于保留键时从节点自身声明
-        # 的 config 值垫底（与 code 路径同款 P-0.5 语义），垫底超时保持
-        # agent 产品常量 1800s（非 code 节点的 600）。
-        node_config = dispatch_effective_config(
+        # network 走常规 config 链），默认超时保持 agent 产品常量 1800s
+        # （非 code 节点的 600）；冻结快照早于保留键时 network 从节点自身
+        # 声明的 config 值垫底（P-0.5）。#691：timeout_seconds 不取 intake
+        # 冻结值，此处按 默认 → 节点 config → workspace 覆盖 现场重解析，
+        # 解析值与来源随 manifest 落审计。
+        node_config, config_resolution = dispatch_config_resolution(
             merge_reserved_execution_schema(
                 definition_config.config_schema,
                 {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS},
@@ -141,12 +143,7 @@ def claim_agent_node(
             workflow_key,
             workspace,
             run_payload,
-            fallback_defaults={
-                **node_config_reserved_defaults(node.config),
-                "timeout_seconds": node_config_reserved_defaults(node.config)["timeout_seconds"]
-                if "timeout_seconds" in node.config
-                else AGENT_DEFAULT_TIMEOUT_SECONDS,
-            },
+            fallback_defaults=node_config_reserved_defaults(node.config),
         )
     except ValueError as exc:
         # Config drift must fail THIS node, not abort the whole poll pass.
@@ -167,6 +164,7 @@ def claim_agent_node(
                 log_path=log_path,
                 inputs=inputs,
                 node_config=node_config,
+                config_resolution=config_resolution,
                 pinned_agent_version=int(pin["version"]) if pin is not None else None,
                 execution_generation=execution_generation,
             )

@@ -19,6 +19,10 @@ from typing import TYPE_CHECKING, Any
 from server.app.agent_broker.claim_paths import claim_log_path
 from server.app.agent_broker.claim_scan import ClaimRacedError
 from server.app.services.runtime_profile import profile
+from server.app.services.runtime_reserved_config import (
+    CONFIG_RESOLUTION_MANIFEST_KEY,
+    audit_snapshot,
+)
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -55,8 +59,14 @@ def promote_claim(
     # config is the non-secret resolved config built at enqueue on the Host —
     # frozen keys repeat the intake snapshot, runtime_mutable keys carry the
     # enqueue-time re-resolution. Secret values never enter the manifest
-    # (CONFIG-MANIFEST-001), so this is safe to persist.
-    config_snapshot_json = json.dumps(manifest.get("config") or {}, sort_keys=True, default=str)
+    # (CONFIG-MANIFEST-001), so this is safe to persist. #691: the manifest
+    # handed in is the claim-time one, so the recorded timeout resolution
+    # (value + source) is what this run actually executes with.
+    config_snapshot_json = json.dumps(
+        audit_snapshot(manifest.get("config") or {}, manifest.get(CONFIG_RESOLUTION_MANIFEST_KEY)),
+        sort_keys=True,
+        default=str,
+    )
     # Implementation identity mirror (schema v85, #645): the scan's
     # ``select r.*`` carries the request row's agent_definition_hash
     # (enqueue-time resolution); persisting it here gives node_runs the same

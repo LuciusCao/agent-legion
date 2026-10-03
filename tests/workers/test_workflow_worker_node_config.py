@@ -297,3 +297,80 @@ def test_dispatch_fails_node_on_unresolvable_secret_ref(tmp_path: Path) -> None:
     assert "not found" in failed["error_message"]
     assert not executor.contexts
     worker.stop()
+
+
+def _frozen_job(job_db: JobQueries, node: WorkflowNode, frozen: dict) -> tuple[dict, dict]:
+    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    run = job_db.create_run("test", "batch_by_ids", {"node_config": {node.key: frozen}}, ws["id"])
+    ws, job = _prepare_job(job_db, node, workspace=ws, run_id=str(run["id"]))
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set frozen_config_json=%s where id=%s",
+            (json.dumps({node.key: frozen}), job["id"]),
+        )
+    return ws, job
+
+
+def _run_snapshot(job_db: JobQueries, job_id: str) -> dict:
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select config_snapshot_json from node_runs where job_id=%s", (job_id,)
+        ).fetchone()
+    assert row is not None
+    return json.loads(row["config_snapshot_json"])
+
+
+def test_dispatch_queued_job_uses_timeout_override_changed_after_intake(tmp_path: Path) -> None:
+    """#691: the intake froze 600s; the workspace override raised after intake
+    reaches the not-yet-dispatched node. sandbox_network stays frozen."""
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    executor = RecordingExecutor("code")
+    node = _local_node("fetch")
+    ws, job = _frozen_job(job_db, node, {"timeout_seconds": 600, "sandbox_network": False})
+    job_db.update_workspace(
+        ws["id"],
+        node_config={"test": {"fetch": {"timeout_seconds": 1500, "sandbox_network": True}}},
+    )
+    worker = _make_worker(tmp_path, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    assert worker._poll() is True
+    for future in worker.state.futures.values():
+        future.result(timeout=5)
+
+    assert executor.contexts[0].node_config["timeout_seconds"] == 1500
+    assert executor.contexts[0].node_config["sandbox_network"] is False
+    snapshot = _run_snapshot(job_db, job["id"])
+    assert snapshot["timeout_seconds"] == 1500
+    assert snapshot["_config_resolution"] == {
+        "timeout_seconds": {"value": 1500, "source": "workspace_override"}
+    }
+    worker.stop()
+
+
+def test_running_local_execution_keeps_its_dispatch_timeout(tmp_path: Path) -> None:
+    """#691: a change made while the node runs never touches that execution."""
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    executor = RecordingExecutor("code")
+    node = WorkflowNode(
+        key="fetch",
+        label="fetch",
+        capability="fetch",
+        config={"timeout_seconds": 900},
+        outputs=["output.json"],
+    )
+    ws, job = _frozen_job(job_db, node, {"timeout_seconds": 900, "sandbox_network": False})
+    worker = _make_worker(tmp_path, executor, [_make_definition([node])])
+
+    assert worker._poll() is True  # executor blocks: the node is running
+    job_db.update_workspace(ws["id"], node_config={"test": {"fetch": {"timeout_seconds": 60}}})
+    executor.block_event.set()
+    for future in worker.state.futures.values():
+        future.result(timeout=5)
+
+    assert len(executor.contexts) == 1
+    assert executor.contexts[0].node_config["timeout_seconds"] == 900
+    assert _run_snapshot(job_db, job["id"])["_config_resolution"] == {
+        "timeout_seconds": {"value": 900, "source": "node_config"}
+    }
+    worker.stop()

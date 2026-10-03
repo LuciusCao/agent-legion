@@ -20,9 +20,14 @@ def runtime_mutable_keys(config_schema: Mapping[str, Any]) -> frozenset[str]:
     """Property names declared ``runtime_mutable: true`` in *config_schema*.
 
     The platform-reserved execution keys (``timeout_seconds`` /
-    ``sandbox_network``) always stay intake-frozen: node config_schemas cannot
-    redeclare them (the workflow loader rejects that) and the marker is ignored
-    here even if a hand-built schema carries it.
+    ``sandbox_network``) are never selected by the marker: node config_schemas
+    cannot redeclare them (the workflow loader rejects that) and the marker is
+    ignored here even if a hand-built schema carries it. Their mutability is
+    platform-classified instead (#691, ``runtime_reserved_config``):
+    ``timeout_seconds`` is re-resolved at dispatch by ``dispatch_config_resolution``
+    directly, ``sandbox_network`` stays intake-frozen. Keeping the reserved
+    keys out of this set also keeps them out of the inherit-upgrade exclusion
+    (a timeout does not change what a node produces).
     """
     properties = config_schema.get("properties") if isinstance(config_schema, Mapping) else None
     if not isinstance(properties, Mapping):
