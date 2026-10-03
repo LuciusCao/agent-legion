@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -18,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests.helpers import pid_is_running
-from worker import procfs
+from worker import orphan_reaper, procfs
 from worker.orphan_reaper import reap_orphaned_agents
 from worker.process_lifecycle import AGENT_PGID_FILENAME
 
@@ -175,10 +177,12 @@ def test_reap_tolerates_empty_work_root(tmp_path: Path) -> None:
 # --- #682：/proc 标记校验（精简镜像无 ps）+ 杀完收割 -------------------------
 
 
-def _fake_proc_entry(root: Path, pid: int, pgid: int, argv: list[str], state: str = "S") -> None:
+def _fake_proc_entry(
+    root: Path, pid: int, pgid: int, argv: list[str], state: str = "S", start: int = 0
+) -> None:
     entry = root / str(pid)
-    entry.mkdir(parents=True)
-    fields = " ".join(["0"] * 17)
+    entry.mkdir(parents=True, exist_ok=True)
+    fields = " ".join(["0"] * 15 + [str(start), "0"])
     entry.joinpath("stat").write_text(
         f"{pid} (velites x) {state} 1 {pgid} {pgid} {fields}\n", encoding="utf-8"
     )
@@ -247,7 +251,8 @@ def test_reap_collects_killed_group_members_that_are_our_children(tmp_path: Path
 
     with pytest.raises(ChildProcessError):
         os.waitpid(proc.pid, os.WNOHANG)  # already wait()ed by the reaper — no zombie left
-    assert messages == [f"reaped orphaned agent process group {proc.pid} (collected 1)"]
+    # TERM 已杀死整组时，KILL 前的身份现证可能因组已空（ps 回退）而跳过 KILL
+    assert messages[-1] == f"reaped orphaned agent process group {proc.pid} (collected 1)"
 
 
 def test_reap_skips_record_naming_our_own_process_group(tmp_path: Path) -> None:
@@ -286,3 +291,87 @@ def test_reap_many_groups_waits_once_not_per_record(tmp_path: Path) -> None:
     for proc in procs:
         with pytest.raises(ChildProcessError):
             os.waitpid(proc.pid, os.WNOHANG)
+
+
+# --- codex P1 on #895：每次 killpg 前现证身份，pgid 复用时不发信号 ----------------
+
+
+def test_identity_pins_members_and_detects_pgid_reuse(tmp_path: Path) -> None:
+    _fake_proc_entry(tmp_path, 500, 500, ["velites", "--name", "agent-legion-exec-1"], start=111)
+    _fake_proc_entry(tmp_path, 501, 500, ["bwrap"], start=112)
+    identity = procfs.group_identity(500, "agent-legion-exec-1", tmp_path)
+    assert identity is not None
+    assert identity.members == frozenset({(500, 111), (501, 112)})
+    assert procfs.still_owned(identity, tmp_path)
+
+    shutil.rmtree(tmp_path / "500")  # leader died of SIGTERM; pinned child remains
+    assert procfs.still_owned(identity, tmp_path)  # SIGKILL must still reach the child
+
+    shutil.rmtree(tmp_path / "501")
+    _fake_proc_entry(tmp_path, 500, 500, ["unrelated"], start=999)  # pid/pgid recycled
+    assert not procfs.still_owned(identity, tmp_path)
+
+
+def _patch_reaper_proc(
+    monkeypatch: pytest.MonkeyPatch, root: Path, signals: list[tuple[int, int]]
+) -> None:
+    real_identity, real_owned = procfs.group_identity, procfs.still_owned
+    monkeypatch.setattr(procfs, "pgid_members", lambda: None)
+    monkeypatch.setattr(
+        procfs,
+        "group_identity",
+        lambda pgid, marker, members=None: real_identity(pgid, marker, root),
+    )
+    monkeypatch.setattr(procfs, "still_owned", lambda identity: real_owned(identity, root))
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+
+
+def test_reap_skips_kill_when_pgid_recycled_during_term_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proc_root = tmp_path / "proc"
+    _fake_proc_entry(proc_root, 500, 500, ["velites", "--name", "agent-legion-exec-1"], start=111)
+    _write_record(tmp_path / "work", "exec-1", 500)
+    signals: list[tuple[int, int]] = []
+    _patch_reaper_proc(monkeypatch, proc_root, signals)
+
+    def _recycle_during_wait(_seconds: float) -> None:
+        # 原组在 TERM 等待期间整组退出，pid/pgid 500 被一个无关的新进程组复用
+        shutil.rmtree(proc_root / "500")
+        _fake_proc_entry(proc_root, 500, 500, ["innocent", "service"], start=555)
+
+    monkeypatch.setattr(orphan_reaper.time, "sleep", _recycle_during_wait)
+    messages: list[str] = []
+
+    orphan_reaper.reap_orphaned_agents(tmp_path / "work", messages.append)
+
+    assert signals == [(500, signal.SIGTERM)]  # SIGKILL never sent to the recycled group
+    assert "skipped SIGKILL to process group 500: identity changed" in messages
+
+
+def test_reap_sends_nothing_when_group_vanished_before_term(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proc_root = tmp_path / "proc"
+    _fake_proc_entry(proc_root, 500, 500, ["velites", "--name", "agent-legion-exec-1"], start=111)
+    _fake_proc_entry(proc_root, 600, 600, ["velites", "--name", "agent-legion-exec-2"], start=222)
+    _write_record(tmp_path / "work", "exec-1", 500)
+    _write_record(tmp_path / "work", "exec-2", 600)
+    signals: list[tuple[int, int]] = []
+    _patch_reaper_proc(monkeypatch, proc_root, signals)
+    real_identity = procfs.group_identity
+
+    def _identity_then_vanish(pgid: int, marker: str, members: object = None):
+        identity = real_identity(pgid, marker, proc_root)
+        if pgid == 500:  # 校验通过后、批量发信号前，该组退出且 pgid 被复用
+            shutil.rmtree(proc_root / "500")
+            _fake_proc_entry(proc_root, 500, 500, ["innocent"], start=777)
+        return identity
+
+    monkeypatch.setattr(procfs, "group_identity", _identity_then_vanish)
+    monkeypatch.setattr(orphan_reaper.time, "sleep", lambda _s: None)
+
+    orphan_reaper.reap_orphaned_agents(tmp_path / "work", lambda _m: None)
+
+    assert (500, signal.SIGTERM) not in signals and (500, signal.SIGKILL) not in signals
+    assert signals == [(600, signal.SIGTERM), (600, signal.SIGKILL)]

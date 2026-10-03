@@ -27,19 +27,12 @@ from worker.process_lifecycle import AGENT_PGID_FILENAME
 from worker.zombie_reaper import COLLECT_TIMEOUT_SECONDS, collect_group
 
 
-def _group_has_agent_marker(
-    pgid: int, marker: str, members: dict[int, list[int]] | None = None
-) -> bool:
-    """True when a live process in `pgid` carries the expected agent argv marker."""
-    return procfs.group_has_marker(pgid, marker, members=members)
-
-
 def reap_orphaned_agents(work_root: Path, log=print) -> None:
     # SIGTERM→短等待→SIGKILL 清理记录残留的 agent 进程组（ESRCH/EPERM 忽略）。
     # #682 两阶段：先逐条校验身份，再整批 TERM → 一次等待 → 整批 KILL → 收割；
     # 逐条 sleep(1) 在一次 executor 被杀遗留数百条记录时会把 supervisor 卡住数分钟。
     members = procfs.pgid_members()  # 一次 /proc 全表快照（无 /proc 时 None，走 ps）
-    targets: list[tuple[Path, int]] = []
+    targets: list[tuple[Path, procfs.GroupIdentity]] = []
     for record in work_root.glob(f"*/{AGENT_PGID_FILENAME}"):
         with contextlib.suppress(OSError, ValueError):
             pgid = int(record.read_text(encoding="utf-8"))
@@ -53,24 +46,32 @@ def reap_orphaned_agents(work_root: Path, log=print) -> None:
             # 进程时才发信号；无法确认身份的陈旧记录只清理记录本身。
             # 快照只给出候选成员，标记按成员当前的 stat/cmdline 现读校验。
             marker = f"agent-legion-{record.parent.name}"
-            if not _group_has_agent_marker(pgid, marker, members):
+            identity = procfs.group_identity(pgid, marker, members=members)
+            if identity is None:
                 record.unlink(missing_ok=True)
                 log(f"discarded unverifiable agent pgid record {pgid} ({record.parent.name})")
                 continue
-            targets.append((record, pgid))
+            targets.append((record, identity))
     if not targets:
         return
-    _signal_groups(targets, signal.SIGTERM)
+    _signal_groups(targets, signal.SIGTERM, log)
     time.sleep(1)
-    _signal_groups(targets, signal.SIGKILL)
+    _signal_groups(targets, signal.SIGKILL, log)
     deadline = time.monotonic() + COLLECT_TIMEOUT_SECONDS
-    for record, pgid in targets:
+    for record, identity in targets:
         record.unlink(missing_ok=True)
-        collected = collect_group(pgid, max(0.0, deadline - time.monotonic()))
-        log(f"reaped orphaned agent process group {pgid} (collected {collected})")
+        collected = collect_group(identity.pgid, max(0.0, deadline - time.monotonic()))
+        log(f"reaped orphaned agent process group {identity.pgid} (collected {collected})")
 
 
-def _signal_groups(targets: list[tuple[Path, int]], signum: signal.Signals) -> None:
-    for _record, pgid in targets:
+def _signal_groups(
+    targets: list[tuple[Path, procfs.GroupIdentity]], signum: signal.Signals, log
+) -> None:
+    # 每次 killpg 前现证身份（codex P1 on #895）：校验时钉住的 (pid, starttime)
+    # 仍在原 pgid 内才发信号——组已消失、pgid 被复用时跳过，绝不凭旧校验发 KILL。
+    for _record, identity in targets:
+        if not procfs.still_owned(identity):
+            log(f"skipped {signum.name} to process group {identity.pgid}: identity changed")
+            continue
         with contextlib.suppress(OSError):
-            os.killpg(pgid, signum)
+            os.killpg(identity.pgid, signum)
