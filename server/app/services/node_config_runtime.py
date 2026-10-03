@@ -24,8 +24,8 @@ def runtime_mutable_keys(config_schema: Mapping[str, Any]) -> frozenset[str]:
     cannot redeclare them (the workflow loader rejects that) and the marker is
     ignored here even if a hand-built schema carries it. Their mutability is
     platform-classified instead (#691, ``runtime_reserved_config``):
-    ``timeout_seconds`` is re-resolved at dispatch by ``dispatch_config_resolution``
-    directly, ``sandbox_network`` stays intake-frozen. Keeping the reserved
+    ``timeout_seconds`` follows CONFIG-RUNTIME-TIMEOUT-001 (one decision per
+    execution), ``sandbox_network`` stays intake-frozen. Keeping the reserved
     keys out of this set also keeps them out of the inherit-upgrade exclusion
     (a timeout does not change what a node produces).
     """

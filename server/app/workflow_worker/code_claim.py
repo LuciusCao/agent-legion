@@ -128,8 +128,9 @@ def try_claim_code_worker_node(
     schema = merge_reserved_execution_schema(node.config_schema)
     reserved_defaults = node_config_reserved_defaults(node.config)
     try:
-        unresolved, config_resolution = dispatch_config_resolution(
-            schema, node, workflow_key, workspace, run_payload, reserved_defaults
+        # #691: enqueue only fixes the timeout base; the claim decides.
+        unresolved, timeout_base = dispatch_config_resolution(
+            schema, node, workflow_key, workspace, run_payload, reserved_defaults, decide=False
         )
         config, secret_config = split_manifest_config(schema, unresolved)
     except PlaintextSecretError:
@@ -180,7 +181,7 @@ def try_claim_code_worker_node(
                 secret_config=secret_config,
                 shard_runtime=shard_runtime,
                 execution_generation=execution_generation,
-                config_resolution=config_resolution,
+                timeout_base=timeout_base,
             )
         except (ValueError, VaultError, JobServiceError) as exc:
             # Same trade-off as the agent enqueue pool: a configuration error

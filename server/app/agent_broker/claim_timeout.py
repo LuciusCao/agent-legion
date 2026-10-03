@@ -1,26 +1,20 @@
-"""Claim-time ``timeout_seconds`` refresh for queued Worker requests (#691).
+"""The claim-time ``timeout_seconds`` decision for remote requests (#691).
 
-``timeout_seconds`` is the runtime-adjustable reserved execution key
-(``services.runtime_reserved_config``): the Host resolves it at dispatch,
-but an agent/code request can then sit in the Agent request queue until a
-Worker claims it. The claim admission re-resolves the same chain once more —
-platform default → the job revision's node ``config`` → the live workspace
-override — so a request still queued when an operator raises the timeout
-picks the new value up. Once claimed, the value is fixed for that execution
-(running executions are never changed).
-
-The scan row carries the inputs (``revision_definition_json`` and
-``workspace_node_config_json``, ``claim_scan.fetch_candidates``). Rows from
-other queries (the unclaimable sweeper) lack the workspace column and keep
-the enqueue-time value, as do legacy jobs without a pinned revision (no
-node layer to re-read). Pure with respect to the database.
+CONFIG-RUNTIME-TIMEOUT-001 (model: ``services.runtime_reserved_config``):
+for a remote agent/code request the Worker claim is the single decision
+point. ``effective = resolve_timeout(base, L2)`` where the base (L0 platform
+default + L1 revision node config) was frozen into the queued manifest at
+enqueue, and L2 is the workspace override as a SCALAR projected by the claim
+scan (``claim_scan.WORKSPACE_TIMEOUT_COLUMN``) — no revision or workspace
+document is parsed here. The batch claim's write transaction re-runs
+admission on the same selection row, so it reuses the selection-time
+snapshot (no re-read, no lock). Rows without the projected column (the
+unclaimable sweeper's query) make no decision.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
-from functools import lru_cache
 from typing import Any
 
 from server.app.services.node_execution_config import (
@@ -29,72 +23,60 @@ from server.app.services.node_execution_config import (
 )
 from server.app.services.runtime_reserved_config import (
     CONFIG_RESOLUTION_MANIFEST_KEY,
-    claim_time_timeout,
+    SOURCE_ENQUEUE_SNAPSHOT,
+    SOURCE_PLATFORM_DEFAULT,
+    TIMEOUT_BASE_MANIFEST_KEY,
+    TIMEOUT_KEY,
+    resolve_timeout,
+    valid_timeout,
 )
 
-WORKSPACE_NODE_CONFIG_COLUMN = "workspace_node_config_json"
+WORKSPACE_TIMEOUT_COLUMN = "workspace_timeout_override"
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
-@lru_cache(maxsize=32)
-def _revision_node_config(revision_json: str, node_key: str) -> tuple[bool, Any]:
-    """(node found, its ``config.timeout_seconds``) — scalar result, safe to cache."""
-    try:
-        definition = json.loads(revision_json)
-    except ValueError:
-        return False, None
-    node = _mapping(_mapping(_mapping(definition).get("nodes")).get(node_key))
-    return bool(node), _mapping(node.get("config")).get("timeout_seconds")
-
-
-@lru_cache(maxsize=32)
-def _workspace_override(node_config_json: str, workflow_key: str, node_key: str) -> Any:
-    try:
-        node_config = json.loads(node_config_json or "{}")
-    except ValueError:
-        return None
-    return _mapping(_mapping(_mapping(node_config).get(workflow_key)).get(node_key)).get(
-        "timeout_seconds"
+def _queued_base(manifest: Mapping[str, Any], kind: str) -> dict[str, Any]:
+    base = _mapping(manifest.get(TIMEOUT_BASE_MANIFEST_KEY))
+    if valid_timeout(base.get("value")) and base.get("source"):
+        return {"value": base["value"], "source": base["source"]}
+    # Queued by a pre-#691 Host: the enqueue-time value is the base.
+    enqueued = (
+        manifest.get(TIMEOUT_KEY)
+        if kind == "code"
+        else _mapping(manifest.get("execution")).get(TIMEOUT_KEY)
     )
+    if valid_timeout(enqueued):
+        return {"value": enqueued, "source": SOURCE_ENQUEUE_SNAPSHOT}
+    default = DEFAULT_TIMEOUT_SECONDS if kind == "code" else AGENT_DEFAULT_TIMEOUT_SECONDS
+    return {"value": default, "source": SOURCE_PLATFORM_DEFAULT}
 
 
-def refresh_claim_timeout(manifest: dict[str, Any], row: Mapping[str, Any], kind: str) -> None:
-    """Re-resolve ``timeout_seconds`` into *manifest* in place (see module doc).
+def decide_claim_timeout(manifest: dict[str, Any], row: Mapping[str, Any], kind: str) -> None:
+    """Decide and write the timeout into *manifest* in place (see module doc).
 
     Agent manifests carry it in ``execution`` (the caller re-renders the
-    command spec afterwards); code manifests at the top level (plus the
-    plain ``config`` copy the node code sees).
+    command spec afterwards); code manifests at the top level plus the plain
+    ``config`` copy the node code sees.
     """
-    revision_json = row.get("revision_definition_json")
-    if WORKSPACE_NODE_CONFIG_COLUMN not in row or not revision_json:
+    if WORKSPACE_TIMEOUT_COLUMN not in row:
         return
-    node_key = str(row["node_key"])
-    found, node_value = _revision_node_config(str(revision_json), node_key)
-    if not found:
-        return
-    workflow_key = str(manifest.get("workflow_key") or row.get("workspace_id") or "")
-    override_value = _workspace_override(
-        str(row.get(WORKSPACE_NODE_CONFIG_COLUMN) or ""), workflow_key, node_key
-    )
-    default = DEFAULT_TIMEOUT_SECONDS if kind == "code" else AGENT_DEFAULT_TIMEOUT_SECONDS
-    entry = claim_time_timeout(
-        default,
-        {} if node_value is None else {"timeout_seconds": node_value},
-        {} if override_value is None else {"timeout_seconds": override_value},
+    decided = resolve_timeout(
+        _queued_base(manifest, kind),
+        row[WORKSPACE_TIMEOUT_COLUMN],
+        workspace_id=str(row.get("workspace_id") or ""),
+        node_key=str(row.get("node_key") or ""),
     )
     if kind == "code":
-        manifest["timeout_seconds"] = entry["value"]
+        manifest[TIMEOUT_KEY] = decided["value"]
         config = manifest.get("config")
-        if isinstance(config, dict) and "timeout_seconds" in config:
-            config["timeout_seconds"] = entry["value"]
+        if isinstance(config, dict) and TIMEOUT_KEY in config:
+            config[TIMEOUT_KEY] = decided["value"]
     else:
         manifest["execution"] = {
             **_mapping(manifest.get("execution")),
-            "timeout_seconds": entry["value"],
+            TIMEOUT_KEY: decided["value"],
         }
-    resolution = dict(_mapping(manifest.get(CONFIG_RESOLUTION_MANIFEST_KEY)))
-    resolution["timeout_seconds"] = entry
-    manifest[CONFIG_RESOLUTION_MANIFEST_KEY] = resolution
+    manifest[CONFIG_RESOLUTION_MANIFEST_KEY] = {TIMEOUT_KEY: decided}

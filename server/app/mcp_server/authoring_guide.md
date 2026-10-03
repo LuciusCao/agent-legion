@@ -281,8 +281,9 @@ to an implementation:
   switches like `dry_run`) opts out of the freeze and is re-resolved
   against the live workspace override at every dispatch
   (CONFIG-RUNTIME-MUTABLE-001). Of the reserved keys, `timeout_seconds`
-  is runtime-adjustable the same way (a workspace override reaches queued,
-  not-yet-started nodes; defaults: agent 1800s, code 600s), while
+  is runtime-adjustable (a workspace override reaches queued,
+  not-yet-started nodes; an invalid one falls back to the node/platform
+  value; defaults: agent 1800s, code 600s, CONFIG-RUNTIME-TIMEOUT-001), while
   `sandbox_network` stays frozen at intake — opening network egress ships
   with a workflow revision.
 - Node config `connection` keys reference instance-level external service

@@ -1,119 +1,131 @@
-"""Runtime-adjustable reserved execution keys (#691, CONFIG-RUNTIME-MUTABLE-001).
+"""The runtime-adjustable ``timeout_seconds`` model (#691, CONFIG-RUNTIME-TIMEOUT-001).
 
-The platform-reserved execution keys split into two mutability classes:
+Of the platform-reserved execution keys, ``sandbox_network`` stays
+intake-frozen (network egress is a security boundary: loosening it ships with
+a workflow revision), while ``timeout_seconds`` follows ONE model:
 
-- **runtime-adjustable** (``RUNTIME_MUTABLE_RESERVED_KEYS`` =
-  ``timeout_seconds``): a pure resource/elasticity knob that does not change
-  what a node produces. It is NOT taken from the intake freeze; every
-  dispatch re-resolves it along the usual chain — schema default (platform
-  default: agent 1800s / code 600s) → node ``config`` (versioned with the
-  job's revision) → workspace override (the live knob) — and a remote Worker
-  claim re-resolves it once more for requests still queued in the Agent
-  request queue. Jobs created/queued before an override change therefore run
-  with the new value; an execution that already started keeps its value.
-- **versioned-with-workflow** (``sandbox_network``): network egress is a
-  security boundary, so it stays intake-frozen — loosening it must go through
-  a workflow revision release (or a new job), never a live toggle that
-  silently opens the network for in-flight jobs.
-
-Every resolution reports its source so the per-run audit
-(``node_runs.config_snapshot_json`` under ``CONFIG_RESOLUTION_AUDIT_KEY``;
-the queued manifest under ``CONFIG_RESOLUTION_MANIFEST_KEY``) can reconstruct
-which timeout a job actually ran with and why.
+- Layers: L0 platform default by kind (agent 1800s / code 600s, the reserved
+  schema default); L1 the job's pinned revision node ``config.timeout_seconds``
+  (immutable per job); L2 the workspace override — the only mutable layer.
+- ``base = timeout_base(L0, L1)`` is computed where the node definition is at
+  hand (dispatch/enqueue on the Host). The queued manifest of a remote
+  request carries it (``TIMEOUT_BASE_MANIFEST_KEY``) — an intermediate, not a
+  decision: the claim never needs the revision document for the timeout.
+- Exactly one decision point per execution — local code: dispatch; remote
+  agent/code: the Worker claim (candidate-selection snapshot, reused by the
+  write transaction). ``effective = resolve_timeout(base, L2)`` is the single
+  pure function every path uses; after the decision the value is fixed and the
+  audit records exactly the decided value + source.
+- An invalid L2 (valid = integer, not bool, >= 1 — the reserved schema) never
+  fails anything: every path falls back to the base, audits source
+  ``workspace_override_invalid`` and logs one structured warning.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Mapping
+from functools import lru_cache
 from typing import Any
 
-from server.app.config_schema import validate_config_values
+logger = logging.getLogger(__name__)
 
-RUNTIME_MUTABLE_RESERVED_KEYS = frozenset({"timeout_seconds"})
+TIMEOUT_KEY = "timeout_seconds"
 
 SOURCE_PLATFORM_DEFAULT = "platform_default"
 SOURCE_NODE_CONFIG = "node_config"
 SOURCE_WORKSPACE_OVERRIDE = "workspace_override"
+SOURCE_WORKSPACE_OVERRIDE_INVALID = "workspace_override_invalid"
+# Requests queued by a pre-#691 Host carry no base: their enqueue-time value
+# is the base (it may already contain the then-current override).
+SOURCE_ENQUEUE_SNAPSHOT = "enqueue_snapshot"
 
-# Top-level manifest key (agent + code requests) carrying the dispatch-time
-# resolution; promote_claim copies it into the node_runs audit snapshot.
+# Queued manifest: the enqueue-time base (L0+L1) and the claim-time decision.
+TIMEOUT_BASE_MANIFEST_KEY = "timeout_base"
 CONFIG_RESOLUTION_MANIFEST_KEY = "config_resolution"
-# Meta key inside node_runs.config_snapshot_json (the rest of the snapshot
-# is the plain non-secret config map, unchanged).
+# Meta key inside node_runs.config_snapshot_json (the rest is the plain
+# non-secret config map, unchanged).
 CONFIG_RESOLUTION_AUDIT_KEY = "_config_resolution"
 
 
-def _properties(config_schema: Mapping[str, Any]) -> Mapping[str, Any]:
-    properties = config_schema.get("properties") if isinstance(config_schema, Mapping) else None
-    return properties if isinstance(properties, Mapping) else {}
-
-
-def resolve_runtime_reserved(
-    config_schema: Mapping[str, Any],
-    node_config: Mapping[str, Any],
-    workspace_override: Mapping[str, Any],
-) -> dict[str, dict[str, Any]]:
-    """Dispatch-time resolution of the runtime-adjustable reserved keys.
-
-    Returns ``{key: {"value": ..., "source": ...}}`` for each such key the
-    effective schema carries (the reserved merge always adds it). Both layers
-    are validated against the key's schema property like the full chain
-    does, so an invalid live override fails the node with the usual message
-    (``ConfigSchemaError``) instead of shipping a bogus timeout.
-    """
-    resolved: dict[str, dict[str, Any]] = {}
-    properties = _properties(config_schema)
-    for key in sorted(RUNTIME_MUTABLE_RESERVED_KEYS):
-        prop = properties.get(key)
-        if not isinstance(prop, Mapping):
-            continue
-        sub_schema = {"type": "object", "properties": {key: dict(prop)}}
-        layers = (
-            (workspace_override, SOURCE_WORKSPACE_OVERRIDE, "workspace node config"),
-            (node_config, SOURCE_NODE_CONFIG, "node config"),
-        )
-        for layer, _source, path in layers:
-            if key in layer:
-                validate_config_values(sub_schema, {key: layer[key]}, partial=True, path=path)
-        picked = next(((layer[key], source) for layer, source, _ in layers if key in layer), None)
-        if picked is None and "default" in prop:
-            picked = (prop["default"], SOURCE_PLATFORM_DEFAULT)
-        if picked is not None:
-            resolved[key] = {"value": picked[0], "source": picked[1]}
-    return resolved
-
-
-def _valid_timeout(value: Any) -> bool:
+def valid_timeout(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
-def claim_time_timeout(
-    default: int,
-    node_config: Mapping[str, Any],
-    workspace_override: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Remote-claim re-resolution of ``timeout_seconds`` (same chain, lenient).
-
-    Runs inside the lock-free claim admission, which must never raise for a
-    single row: a malformed layer is skipped (the dispatch-time strict check
-    already validated what was enqueued; workspace override writes are
-    schema-validated too), falling through to the next layer.
-    """
-    for layer, source in (
-        (workspace_override, SOURCE_WORKSPACE_OVERRIDE),
-        (node_config, SOURCE_NODE_CONFIG),
-    ):
-        value = layer.get("timeout_seconds") if isinstance(layer, Mapping) else None
-        if _valid_timeout(value):
-            return {"value": value, "source": source}
+def timeout_base(default: int, node_config: Mapping[str, Any]) -> dict[str, Any]:
+    """``resolve(L0, L1)``; L1 is publish-validated, a malformed one reads as unset."""
+    value = node_config.get(TIMEOUT_KEY)
+    if valid_timeout(value):
+        return {"value": value, "source": SOURCE_NODE_CONFIG}
     return {"value": default, "source": SOURCE_PLATFORM_DEFAULT}
 
 
-def audit_snapshot(
-    config: Mapping[str, Any], resolution: Mapping[str, Any] | None
+@lru_cache(maxsize=256)
+def _warn_invalid_override(workspace_id: str, node_key: str, raw: str) -> None:
+    # Cached: claim admission re-evaluates queued candidates every poll, so
+    # one warning per distinct (workspace, node, raw value) is enough.
+    extra = {"workspace_id": workspace_id, "node_key": node_key, "raw_value": raw}
+    logger.warning("invalid workspace timeout_seconds override ignored (base kept)", extra=extra)
+
+
+def resolve_timeout(
+    base: Mapping[str, Any], override: Any, *, workspace_id: str, node_key: str
 ) -> dict[str, Any]:
-    """The node_runs audit document: plain config plus the resolution meta key."""
+    """``effective = resolve(base, L2)`` — the single decision function.
+
+    ``override`` is the raw L2 scalar; ``None`` (absent / JSON null) means unset.
+    """
+    if override is None:
+        return {"value": base["value"], "source": base["source"]}
+    if valid_timeout(override):
+        return {"value": override, "source": SOURCE_WORKSPACE_OVERRIDE}
+    _warn_invalid_override(workspace_id, node_key, json.dumps(override, default=str))
+    return {"value": base["value"], "source": SOURCE_WORKSPACE_OVERRIDE_INVALID}
+
+
+def dispatch_timeout(
+    config_schema: Mapping[str, Any],
+    node: Any,
+    override: Mapping[str, Any],
+    workspace: Mapping[str, Any] | None,
+    *,
+    decide: bool,
+) -> dict[str, Any] | None:
+    """Host-side entry: the base (remote enqueue, ``decide=False``) or the local
+    code pool's decision (``decide=True``); None when the schema carries no
+    reserved timeout."""
+    # L0 as the effective schema carries it (the reserved merge seeds it).
+    prop = (config_schema.get("properties") or {}).get(TIMEOUT_KEY)
+    if not isinstance(prop, Mapping) or not valid_timeout(prop.get("default")):
+        return None
+    base = timeout_base(prop["default"], node.config)
+    if not decide:
+        return base
+    workspace_id = str((workspace or {}).get("id") or "")
+    return resolve_timeout(
+        base, override.get(TIMEOUT_KEY), workspace_id=workspace_id, node_key=node.key
+    )
+
+
+def chain_override(override: Mapping[str, Any]) -> dict[str, Any]:
+    """L2 as fed to the generic config chain: an invalid timeout is dropped so
+    the generic validation (intake freeze, runtime_mutable re-resolution) can
+    never fail on it — ``resolve_timeout`` owns that decision."""
+    if TIMEOUT_KEY in override and not valid_timeout(override[TIMEOUT_KEY]):
+        return {k: v for k, v in override.items() if k != TIMEOUT_KEY}
+    return dict(override)
+
+
+def run_audit_json(config: Mapping[str, Any], decided: Mapping[str, Any] | None) -> str:
+    """The node_runs audit document: plain config plus the decided timeout."""
     snapshot = dict(config)
-    if resolution:
-        snapshot[CONFIG_RESOLUTION_AUDIT_KEY] = dict(resolution)
-    return snapshot
+    if decided:
+        snapshot[CONFIG_RESOLUTION_AUDIT_KEY] = {TIMEOUT_KEY: dict(decided)}
+    return json.dumps(snapshot, sort_keys=True, default=str)
+
+
+def manifest_run_audit_json(manifest: Mapping[str, Any]) -> str:
+    """``run_audit_json`` for a claimed remote manifest (config + claim decision)."""
+    decided = (manifest.get(CONFIG_RESOLUTION_MANIFEST_KEY) or {}).get(TIMEOUT_KEY)
+    return run_audit_json(manifest.get("config") or {}, decided)
