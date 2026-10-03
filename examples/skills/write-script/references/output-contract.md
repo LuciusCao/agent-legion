@@ -29,7 +29,7 @@
 运行时优先按机器可读契约（本 skill 根目录的 `contract.yaml`）经
 harness 内置引擎校验（存在性、文本长度、必备标题）。
 
-`scripts/validate_output.py` 为 legacy 回落通道
+`scripts/validate_output.py` 为业务规则层
 （`python validate_output.py <job_dir>`，退出码 0 为通过），检查项与
 契约一致：
 
@@ -37,6 +37,6 @@ harness 内置引擎校验（存在性、文本长度、必备标题）。
 - 五个必备小节标题全部出现；
 - 去空白后正文长度不少于 200 字符。
 
-计数口径差异：引擎 `min_chars` 按去首尾空白后的字符数计，legacy 脚本
+计数口径差异：引擎 `min_chars` 按去首尾空白后的字符数计，业务规则脚本
 按去除全部空白后的字符数计（更严格）。校验失败以非零退出码退出并在
 stderr 打印缺失项，节点判失败。

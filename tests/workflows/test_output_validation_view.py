@@ -1,4 +1,4 @@
-"""#757: the Host-side legacy validator runs against the declared validation view.
+"""#757: the Host-side business-rule validator runs against the declared validation view.
 
 A job dir accumulates every node's outputs across all attempts; a glob-based
 review validator (``review_<pair>*.json`` checks both A/B files) then sees a
@@ -37,7 +37,7 @@ _KEY = "group/review"
 
 @pytest.fixture(autouse=True)
 def _no_real_engine_binary(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hermetic default: the legacy script path alone decides."""
+    """Hermetic default: the business-rule script alone decides."""
     monkeypatch.setattr(output_contract_engine, "resolve_sandbox_binary", lambda: None)
 
 
@@ -243,7 +243,7 @@ def test_unsafe_declared_names_never_escape_the_view(tmp_path: Path) -> None:
     assert _seen(seen_file) == ["ok.json"]
 
 
-def test_skill_missing_legacy_script_fails_closed(tmp_path: Path) -> None:
+def test_skill_missing_business_rule_script_fails_closed(tmp_path: Path) -> None:
     """Why there is no "nothing to validate" skip: the dispatch contract
     trio makes scripts/validate_output.py mandatory, and a tree missing it
     (the #638 poisoned-cache shape) must keep failing closed — never skip."""
