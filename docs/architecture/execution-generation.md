@@ -388,27 +388,40 @@ CAS、按 (job,node) 持 ref 防 GC（job 存活期间 blob 不可回收），�
 节——重新决定身份）。生命周期上三处读到的字节 digest 同一：
 
 ```
-dispatch            claim                Worker              Host 校验
-解析：现状字节       transport 变换：      按 ref 形态下载      transport 消费：
-→ digest，冻结 ref   CAS ref → presigned   + digest 校验        按冻结 ref 开
-（DB manifest）     GET（digest 不变）    （两形态同口径）     CAS blob（私有副本）
+dispatch            claim                Worker                Host 校验
+解析：现状字节       transport 变换：      双 transport 按        transport 消费：
+→ digest，冻结 ref   CAS ref → presigned   digest 自验：           按冻结 ref 开
+（DB manifest）     GET（digest 不变）    presigned 失配          CAS blob（私有副本）
+                                          回落 CAS
 ```
+
+不变量在三点闭环：**签发点**（claim 升级前行 `content_hash` 与冻结
+digest 比对，不一致保留 CAS 形态）、**下发点**（presigned ref 的
+`sha256` 字段 == 冻结 digest）、**消费点**（Worker 端 `sha256_file`
+对下载字节自验）。前两点只是快路径过滤——presigned URL 仍指向可变
+authority key，签发后、Worker GET 前对象可被并行生产者覆盖；结构性
+保证在消费点：dict ref 的 `sha256` 本身就是冻结身份，下载字节失配
+时按它回落 CAS 通道（blob 内容寻址不可变），任何 transport 满足同一
+digest 即同一输入，两段皆败才报错（报错携带两段信息）。
 
 transport 变换与重解析的区别即**机检判定准则**：transport 变换必须携
 带原 digest 可机验（presigned ref 的 `sha256` 字段 == 冻结 digest，
 worker 端 `sha256_file` 下载后校验；claim 升级前行 `content_hash` 与
 冻结 digest 比对）；任何把可变状态当执行输入身份来源、且字节流向执
-行或校验的路径即缺陷。反面案例一句话：PR #876 codex P1——claim 按
+行或校验的路径即缺陷；消费点按 digest 自验后，任何 transport 可满足
+同一身份。反面案例一句话：PR #876 codex P1——claim 按
 当下 `job_artifacts` 行升级 presigned（行被并行生产者重写后 digest
-漂移），Worker 跑新字节、Host 校冻结字节，双向判错；修复（升级前比
-对 digest、不一致保留 CAS 形态）即本不变量在 claim 点的落地。
+漂移），Worker 跑新字节、Host 校冻结字节，双向判错；修复（claim 签
+发比对 + Worker 消费点 digest 自验回落 CAS）即本不变量在签点与消费
+点的落地。
 
 解析点全清单（合法性判定）：
 
 | 路径 | 性质 | 判定 | 理由 |
 |---|---|---|---|
 | dispatch `stage_agent_inputs` | 解析 | 合法（唯一解析点） | 身份在此冻结，(job,node) ref 防 GC |
-| claim presigned 升级（`remote_artifact_support.upgrade_input_artifacts`） | transport 变换 | 合法（带 digest 比对守卫） | 行 hash == 冻结 digest 才升级；不一致/无行保留 CAS 形态 |
+| claim presigned 升级（`remote_artifact_support.upgrade_input_artifacts`） | transport 变换 | 合法（带 digest 比对守卫） | 行 hash == 冻结 digest 才升级；不一致/无行保留 CAS 形态；签发比对只是快路径过滤，结构性保证在消费点 |
+| Worker 下载（`worker/artifact/inputs`，presigned/CAS 双 transport） | transport 消费 | 合法（digest 自验闭环） | 两形态下载后按冻结 digest 自验；presigned 失配（对象签发后被覆盖）回落 CAS，两段式报错归因 |
 | Host 校验 CAS-first（`_validation_view_inputs.resolve_input_source`） | transport 消费 | 合法 | 按冻结 ref 开 blob，ref 来自 DB manifest（claim 注入 memory-only 不落库） |
 | 校验 job_dir 回落（无 ref） | 重解析 | 仅 legacy 豁免：服务 #833 前无冻结 ref 的 manifest，随旧 job 耗尽归零 | 新 manifest 必有冻结 ref；暴露面与 #833 前校验直读 job_dir 一致 |
 | 校验 job_dir 回落（有 ref 但 blob 缺失） | 重解析 | 合法（fail-open 降级） | GC 竞态/陈旧 ref 的残余面，与 legacy 同一暴露面，validator 自判缺失 |

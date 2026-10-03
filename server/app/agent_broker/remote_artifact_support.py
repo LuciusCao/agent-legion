@@ -107,9 +107,18 @@ def upgrade_input_artifacts(
     silently change the dispatch-frozen input identity: upgrade only when
     the row's ``content_hash`` still equals the frozen digest; a rewritten
     row keeps the legacy CAS form so the Worker downloads exactly what
-    dispatch staged. The hashes are directly comparable: a row's
-    ``content_hash`` is always the UNCOMPRESSED-content sha256 (gzip rows
-    included, #338), the same basis as ``stage_agent_inputs``' CAS digest.
+    dispatch staged. This comparison is only the fast-path filter, though
+    — the presigned URL still points at the MUTABLE authority key, which
+    can be overwritten between this check and the Worker's GET. The
+    structural guarantee closes at the consumption point
+    (EXEC-INPUT-IDENTITY-001): the issued ref's ``sha256`` equals the
+    frozen digest, and the Worker self-verifies downloaded bytes against
+    it, falling back to the CAS channel on mismatch
+    (``worker/artifact/inputs._download_cas``) — any transport delivering
+    the same digest is the same input. The hashes are directly comparable:
+    a row's ``content_hash`` is always the UNCOMPRESSED-content sha256
+    (gzip rows included, #338), the same basis as ``stage_agent_inputs``'
+    CAS digest.
     """
     assert store.storage is not None
     expires = presign_expiry_seconds(manifest)
