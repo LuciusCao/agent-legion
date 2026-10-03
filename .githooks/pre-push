@@ -127,4 +127,9 @@ while IFS= read -r name; do
   fi
 done < <(git rev-parse --local-env-vars)
 
+# git push's pid (the exec chain keeps it as our parent): run-local-gate.sh
+# snapshots git's transport children before the gate and refuses the push
+# with a diagnostic if one died meanwhile, instead of letting git itself die
+# with SIGPIPE (141) on the dead pipe after the gate passed (issue #679).
+export AGENT_LEGION_PRE_PUSH_GIT_PID="$PPID"
 exec "$ROOT_DIR/scripts/run-local-gate.sh" "$gate" "$lanes"
