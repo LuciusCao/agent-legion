@@ -679,6 +679,20 @@ invariants:
         target: tests/full/test_auth_control_plane.py
         gate: full
 
+  # #738: the intake channel's entry guardrail, registered next to the
+  # identity boundary it rides on.
+  - id: SECURITY-AUTH-003
+    statement: "Every workspace API intake token has its own request token bucket keyed by token_id (instance-wide refill rate and burst from the env-only auth section, defaults 60/min and 20): charged once per authenticated api-token request (off-surface 404 probes included), only after the secret verified (a bare token_id cannot drain another token's budget). Over-limit answers 429 with Retry-After (ceil from the refill rate) and a per-token coalesced structured warning keyed by token_id. Counters are process-local behind the replaceable ApiTokenLimiter protocol (reset on restart, per-replica best-effort); user sessions and studio-agent scoped tokens are never limited, and one token's exhaustion never affects another token."
+    owner: security
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_api_token_limits.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_workspace_api_token_rate_limits.py
+        gate: quick
+
   - id: STUDIO-ADMISSION-001
     statement: "Human Studio prompt preparation is side-effect-free for conversation state. The handle rejects closed/stopping queues before admission; credential validation, idle claim and user-message insertion commit in one transaction. Only accepted input consumes resume context and resets turn/replay state, before queue visibility. Snapshot failures after acceptance do not invite retries. Runtime locks pin admission and token escalation to the same generation through teardown; old requests cannot mutate a successor."
     owner: studio

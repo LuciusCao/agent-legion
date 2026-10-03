@@ -138,8 +138,24 @@ Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在�
   （不冒充任何用户身份）；列表展示 `last_used_at` 最近使用水位（每分钟
   至多刷新一次；吊销后的重试也刷新水位，但仅当调用方持有正确 secret——
   只知道 token_id 的错误凭据刷不动它）。
-- **不做的事（初版）**：per-token 速率限制/配额（#738，尚未落地）；管理员
-  面按标签检索。
+- **请求限流（#738）**：每个 token 一个独立令牌桶（按 token_id 计数，
+  互不影响）；控制台 cookie 会话与 studio-agent scoped token 不受限。桶参数
+  为实例级、env-only（`auth` 段）：`AGENT_LEGION_API_TOKEN_RATE_LIMIT_PER_MINUTE`
+  （补充速率，默认 60）与 `AGENT_LEGION_API_TOKEN_RATE_LIMIT_BURST`（桶容量，
+  默认 20）；非整数或小于 1 启动即失败。限流覆盖该 token 的**每个**已鉴权
+  请求（含状态轮询与被 404 拒绝的越界探测），一个 HTTP 请求只扣一次；只有
+  secret 校验通过后才扣——只知道 token_id 的错误凭据扣不动别人的额度。
+  超限返回 `429` + `Retry-After`（秒，按补充速率向上取整），客户端应按
+  `Retry-After` 退避后重试；轮询优先用 `/jobs/snapshot?run_id=…` 一次取整批
+  状态，而不是逐 job 轮询。拒绝在服务端结构化日志记录 `token_id` /
+  `workspace_id` / `retry_after`（每 token 每分钟至多一条，附带被合并的次数）。
+- **计数存储与副本语义**：计数在进程内存，进程重启清零（分钟级窗口，
+  可接受）。多副本 http 平面下每个副本各自计数（per-replica best-effort，
+  与 `last_used_at` 同哲学），总吞吐上限约为单副本限额 × 副本数；该边界
+  记入 #740 部署拓扑文档。计数器在 `auth/api_token_limits.py` 的
+  `ApiTokenLimiter` 协议后面，需要精确全局限流时替换为共享存储实现即可。
+- **不做的事**：per-token 单独配置限额、日配额（#856）；管理员面
+  按标签检索。
 
 ## 幂等与重试
 

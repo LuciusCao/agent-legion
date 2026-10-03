@@ -122,6 +122,7 @@
     "tests/routes/test_workflow_draft_validate.py",
     "tests/routes/test_workspace_agent_routes.py",
     "tests/routes/test_workspace_api_token_boundaries.py",
+    "tests/routes/test_workspace_api_token_rate_limits.py",
     "tests/routes/test_workspace_api_tokens.py",
     "tests/routes/test_workspace_runtime_models.py",
     "tests/routes/test_workspace_secrets.py",

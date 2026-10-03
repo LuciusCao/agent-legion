@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from server.app.agent_broker import result_unpack_pool, result_validate_pool
+from server.app.auth.api_token_limits import InMemoryApiTokenLimiter, limits_from_config
 from server.app.auth.service import build_auth_service
 from server.app.auth.workspace_api_tokens import WorkspaceApiTokenStore
 from server.app.bootstrap import build_agent_plane
@@ -268,7 +269,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.auth_service = build_auth_service(job_db, settings.config)
     # #626: workspace API intake token store (Bearer {token_id}.{secret});
     # get_current_user resolves against it, the management routes list/revoke.
-    app.state.workspace_api_token_store = WorkspaceApiTokenStore(job_db)
+    # #738: per-token request buckets sized by the env-only auth section.
+    app.state.workspace_api_token_store = WorkspaceApiTokenStore(
+        job_db, InMemoryApiTokenLimiter(limits_from_config(settings.config))
+    )
     app.state.agent_broker = agent_plane.broker
     app.state.agent_dispatch = agent_plane.dispatch
     app.state.agent_worker_registry = agent_worker_registry
