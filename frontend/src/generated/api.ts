@@ -6113,6 +6113,11 @@ export interface components {
       /** Bundle Id */
       bundle_id: string
       /**
+       * Client Token
+       * @description 可选的条目级幂等键（#813）：参与 job 身份与 run digest 派生。同内容不同 token 各成独立 job；同 token 重复提交幂等命中同一 job；不传保持纯内容寻址。1-64 字符，[A-Za-z0-9._-]，首字符为字母或数字。
+       */
+      client_token?: string | null
+      /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
@@ -6120,6 +6125,11 @@ export interface components {
     }
     /** RunItemMaterial */
     RunItemMaterial: {
+      /**
+       * Client Token
+       * @description 可选的条目级幂等键（#813）：参与 job 身份与 run digest 派生。同内容不同 token 各成独立 job；同 token 重复提交幂等命中同一 job；不传保持纯内容寻址。1-64 字符，[A-Za-z0-9._-]，首字符为字母或数字。
+       */
+      client_token?: string | null
       /** Material Id */
       material_id: string
       /**
@@ -6149,6 +6159,11 @@ export interface components {
      * @description Requirement text typed inline; persisted as a material before resolution.
      */
     RunItemText: {
+      /**
+       * Client Token
+       * @description 可选的条目级幂等键（#813）：参与 job 身份与 run digest 派生。同内容不同 token 各成独立 job；同 token 重复提交幂等命中同一 job；不传保持纯内容寻址。1-64 字符，[A-Za-z0-9._-]，首字符为字母或数字。
+       */
+      client_token?: string | null
       /** Content */
       content: string
       /** Filename */

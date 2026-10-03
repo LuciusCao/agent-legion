@@ -46,8 +46,27 @@ api-scope 准入面对账，改权限面表须同步 UI 端点清单。
    `{"type": "material", "material_id"}`、`{"type": "bundle", "bundle_id"}`、
    `{"type": "ref", "connection_key", "external_id", "params"?}`、
    `{"type": "text", "content", "filename"?}`（文本内联，服务端按内容
-   sha256 落成 material；`filename` 须以 `.md` / `.txt` 结尾）。
+   sha256 落成 material；`filename` 须以 `.md` / `.txt` / `.json` 结尾，
+   `.json` 落盘为 `application/json; charset=utf-8`）。
    material/bundle 必须已上传就绪——items 只引用已有素材，本通道不收文件。
+
+   material / bundle / text 项可选带 `client_token`（#813，条目级幂等键，
+   1–64 字符 `[A-Za-z0-9._-]`、首字符为字母或数字，非法 422）：同一份内容
+   要作为多个独立 job 存在时，给每份一个不同的 token（如外部系统自己的
+   记录 id）；同 token 重提幂等命中同一 job。不传即现行为（纯内容寻址）。
+   ref 项不收 `client_token`（422）——`external_id` 本身就是调用方控制的
+   命名空间，要多份 job 用不同的 `external_id` 即可：
+
+   ```bash
+   curl -X POST "$HOST/api/workspaces/$WORKSPACE_ID/runs" \
+     -H "Authorization: Bearer $API_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"items": [
+           {"type": "text", "content": "{\"order\": 1}", "filename": "order.json", "client_token": "order-1001"},
+           {"type": "text", "content": "{\"order\": 1}", "filename": "order.json", "client_token": "order-1002"}
+         ]}'
+   # → 同一份文本、同一个 material，两个独立 job；job id 以 "~order-1001" / "~order-1002" 结尾
+   ```
 
    响应三个字段：`run`（run 记录，`run.id` 即 run_id；`run.created_count`
    是该 run 累计的 job 数）、`created_count`（等于 `len(job_ids)`）、
@@ -170,6 +189,14 @@ bundle 项为 `("bundle", bundle_id)`、ref 项为
 material，等同 material 项。去重跨 run 生效：之前任何 run 已为该条目建过
 job，再次提交就不会新建（要重新执行同一条目走控制台的重跑，不是重提交）。
 
+带 `client_token` 的 material / bundle / text 项，`source_id` 变为
+`<material_id 或 bundle_id>~<client_token>`（job id 随之为
+`<workspace>_<workflow>_<source_id>`），所以同内容不同 token 各成一个
+job、同 token 重提命中同一 job；token 也随 items 进入 run 摘要，不同 token
+的提交是不同的 run。job 的 `input`（material_id / bundle_id）不变，下游
+执行与同内容无 token 的 job 完全一致。不带 token 的条目身份与此前逐字节
+相同，已有 job id / run id 不漂移。
+
 **重复提交的三种响应.**
 
 | 情形 | 响应 | 调用方处理 |
@@ -191,10 +218,12 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
   分页，旧提交可能不在第一页：沿 `next_cursor` 翻页，直到精确命中或
   `next_cursor` 为 null。翻完仍没命中说明该条目在本 workspace 没有 job
   （例如 job 已被删除），按「未提交」处理，不要当作已存在。
-- text 项：material id 由服务端按内容派生，调用方不知道——用
-  `GET /runs`（最近的 run 在前）按提交时间定位 run，再
-  `GET /jobs?run_id=<run.id>` 取 job。需要可靠对账的调用方建议先把文本作为
-  material 上传，再以 material 项提交。
+- text 项：material id 由服务端按内容派生，调用方不知道——带了
+  `client_token` 时用 `GET /jobs/snapshot?search=~<client_token>` 按
+  `source_id` 后缀 `~<client_token>` 精确匹配（token 由调用方生成，天然
+  可对账）；没带 token 时用 `GET /runs`（最近的 run 在前）按提交时间定位
+  run，再 `GET /jobs?run_id=<run.id>` 取 job。需要可靠对账的调用方建议给
+  text 项带 token，或先把文本作为 material 上传、再以 material 项提交。
 
 **重试建议.**
 
@@ -237,7 +266,7 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
 | 404 | `Job not found` / `Run not found`：不存在或属于别的 workspace（同样防枚举）；`Artifact not found`：产物不存在或对象已被 bucket lifecycle 回收 | 不重试 |
 | 404 | `Material not found: …` / `Material bundle not found: …`：`POST /runs` 引用了本 workspace 没有的素材 | 不重试；修正 items |
 | 409 | text 项内容与一个未就绪（上传未完成）的 material 同 hash | 完成或删除那个 material 后重试 |
-| 422 | 请求体 / 参数校验失败：items 为空、未知字段、`type` 不在四种之内；`GET /runs` 与 `GET /jobs/snapshot` 的 `limit` 不在 1–500、`GET /jobs` 的 `limit` 不在 1–2000；`run_id` / `status` 过滤传空串；参数类型不对（如 `limit=abc`） | 不重试；修正请求 |
+| 422 | 请求体 / 参数校验失败：items 为空、未知字段（含 ref 项带 `client_token`）、`type` 不在四种之内、`client_token` 超长 / 含非法字符；`GET /runs` 与 `GET /jobs/snapshot` 的 `limit` 不在 1–500、`GET /jobs` 的 `limit` 不在 1–2000；`run_id` / `status` 过滤传空串；参数类型不对（如 `limit=abc`） | 不重试；修正请求 |
 | 429 | per-token 限流命中（#738）：超出该 token 的令牌桶，响应带 `Retry-After`（秒，按补充速率向上取整） | 按 `Retry-After` 退避后重试；批量轮询改用 `/jobs/snapshot` 一次取整批，降低请求频率 |
 | 503 | text 项需要对象存储，实例未配置时返回 | 稍后重试或联系管理员 |
 | 5xx | 服务端异常 | 指数退避重试；`POST /runs` 重试安全（见上节） |
