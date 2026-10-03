@@ -5,8 +5,8 @@ the view contract and the construction/exit orchestration; this one owns
 the filesystem mechanics: safe-relative filtering, hardlink-or-copy
 placement with its failure grading, the placement records the exit arms
 work against, the output reconcile back into the run view (skipped for
-copied entries the validator never touched — (mtime, size) identity check,
-#876 B 员 P3), and the inputs
+entries whose bytes still equal the source's — content-sha256 identity
+check, #876 B 员 P3 + codex P2), and the inputs
 read-only enforcement. The input byte-source decision (dispatch-frozen CAS
 first, job-dir fallback, #828/#830/#833) lives in the sibling
 ``_validation_view_inputs``. See ``validation_view``'s docstring for the
@@ -23,6 +23,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from server.app.services.job_artifact_gzip import file_sha256
 from server.app.workflows._reflink_copy import copy_private
 
 
@@ -39,13 +40,11 @@ class InputSnapshot:
 
 @dataclass(frozen=True)
 class OutputPlacement:
-    """An output's view entry at placement: inode identity + channel + stat."""
+    """An output's view entry at placement: inode identity + channel."""
 
     rel: str
     ino: int
     dev: int
-    mtime_ns: int
-    size: int
     linked: bool  # hardlinked (in-place writes propagate) vs copied
 
 
@@ -131,10 +130,13 @@ def reconcile_outputs(
     fallback entry whose mutations cannot propagate) is synced with a
     temp-write + atomic os.replace into ``output_source`` — a sync failure
     raises so the run fails closed rather than promoting uncleaned bytes.
-    A copied entry whose (mtime, size) still matches its placement stat is
-    skipped outright — the validator never touched it, and an unconditional
-    temp+copy+replace would tax every clean completion with 2x I/O per
-    untouched output on hardlink-unsupported mounts (#876 B 员 P3).
+    An entry whose bytes still equal the source's is skipped outright (the
+    validator never touched it, or wrote back identical content); the
+    identity check is a content sha256, never (mtime, size) — this is an
+    identity path and mtime/size are forgeable (utime rollback plus a
+    same-size rewrite, #876 codex P2). The hash read is cheaper than the
+    skipped temp+copy+replace write amplification, and the dominant
+    hardlink path never pays it (inode fast-path above).
     A validator-deleted (or non-file-replaced) output propagates the
     deletion: the finish gate's missing-source containment then fails the
     run, exactly as when validators ran inside the staging view.
@@ -146,12 +148,7 @@ def reconcile_outputs(
             st = spot.stat()
             if placed.linked and (st.st_ino, st.st_dev) == (placed.ino, placed.dev):
                 continue
-            if (st.st_mtime_ns, st.st_size) == (placed.mtime_ns, placed.size):
-                # 拷贝回落条目 validator 没碰（mtime+size 双条件同源一致）
-                # ——跳过 temp+copy+replace，否则每个未修改输出在 ext4 上
-                # 每次完成白付 2× I/O。不用 content hash 判未修改：逐字
-                # 重读每个输出的成本正是要省的那笔 I/O 本身；mtime+size
-                # 与 inputs 只读快照检查同一证伪级别。
+            if source.is_file() and file_sha256(spot) == file_sha256(source):
                 continue
             _sync_back(spot, source)
         elif not source.is_file() and not source.is_symlink():

@@ -21,6 +21,7 @@ from server.app.agent_broker.result_timing import mark as mark_result_stage
 from server.app.agent_broker.result_unpack import safe_relative_dir
 from server.app.agent_control.completion_moves import gate_safe_staged_moves
 from server.app.agent_control.completion_preflight import find_landing_conflict
+from server.app.agent_control.completion_ref_registration import register_reported_output_refs
 from server.app.agent_control.completion_view import link_into_view
 from server.app.executors._shard_contract import read_shard_output
 from server.app.executors.artifact_mirror import upload_produced_artifacts
@@ -147,6 +148,12 @@ def finish_staged(
         # pre-staging "last writer wins" order).
         remote_targets = {job_dir / name for name in remote_names}
         staged_moves = [move for move in staged_moves if move[0] not in remote_targets]
+    # #876 P2-1：校验前登记（legacy 通道 blob 的 GC 防护）+ 撞名守卫
+    # （共享 (job,node,name) 槽位，撞名时冻结 input 优先）——裁决与登记
+    # 在 completion_ref_registration。
+    register_reported_output_refs(
+        handler.artifact_store, job_id, node_key, outcome, remote_names, manifest, expected
+    )
     mark_result_stage(stage_timer, "artifacts_verify")
     produced = tuple(name for name in expected if (view_dir / name).is_file())
     status = outcome.status
@@ -179,15 +186,6 @@ def finish_staged(
         )
         if validation_error:
             status, exit_code, error = "failed", 1, validation_error
-    for name, ref in outcome.output_artifacts.items():
-        if name not in remote_names:
-            # #876 A1：校验消费完 dispatch 冻结 refs 之前，completion 不得
-            # 写任何 (job,node,name) 槽位——add_ref 是 upsert，Worker 上报
-            # 与 declared input 撞名的（未声明）产物会把该槽位的冻结
-            # input digest 顶成孤儿，校验排队跨过 GC tick 后静默回落
-            # job_dir 读到非冻结字节。区间内无任何逻辑消费这些 output
-            # refs（mirror/finish 均不读 refs），后置零行为差。
-            handler.artifact_store.add_ref(job_id, node_key, name, str(ref).split(":", 1)[-1])
     mark_result_stage(stage_timer, "validate")
     # D12: mirror produced artifacts into object storage (best-effort —
     # a storage outage never flips the node; the reconciler retries).

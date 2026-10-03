@@ -17,7 +17,9 @@ normalized spelling (``./``/``//`` collapsed) for the input/output overlap
 exclusion, and input bytes resolve to the dispatch-frozen CAS copy
 (``input_artifacts`` refs + store root) with the job dir as fallback —
 still placed as private copies, so the write isolation covers CAS-sourced
-bytes too.
+bytes too. The per-file mechanics regressions (reflink probe residue,
+reconcile I/O discipline) live in the sibling
+``test_output_validation_view_files.py``.
 """
 
 from __future__ import annotations
@@ -713,86 +715,3 @@ def test_duplicate_input_aliases_resolve_last_wins(tmp_path: Path) -> None:
     assert (
         validate_worker_outputs(manager, manifest, job_dir, run_view, _cas_store(cas_root)) is None
     )
-
-
-# --- #876 B 员 P3: reflink probe residue + reconcile I/O discipline ---
-
-
-def test_reflink_probe_residue_stays_out_of_the_view(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """F3: the per-filesystem probe writes its temp file OUTSIDE the view
-    (the view's parent — same st_dev, verdict unchanged), so even when the
-    suppressed cleanup unlink fails, ``.reflink-probe-*`` residue lands in
-    the job dir (reclaimed with it) and never in the validator's rglob."""
-    import server.app.workflows._reflink_copy as reflink_copy
-
-    monkeypatch.setattr(reflink_copy, "_support", {})  # 强制重新探测
-    real_unlink = os.unlink
-
-    def _failing_unlink(path: object, *args: object, **kwargs: object) -> None:
-        if ".reflink-probe-" in str(path):
-            raise OSError(13, "Permission denied")
-        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(reflink_copy.os, "unlink", _failing_unlink)
-    seen_file = tmp_path / "seen.txt"
-    manager = _manager(tmp_path, _validator(seen_file, ""))
-    job_dir, run_view = _layout(tmp_path)
-    (job_dir / "cleaned_question.json").write_text("{}")
-
-    manifest = _manifest(["cleaned_question.json"], [])
-    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
-    # 探测确实发生过（残留落在视图外的 job_dir，随 job_dir GC 回收）……
-    assert any(p.name.startswith(".reflink-probe-") for p in job_dir.iterdir())
-    # ……但 validator 的视图清单里绝没有探测残留。
-    assert not any(name.startswith(".reflink-probe-") for name in _seen(seen_file))
-
-
-def test_unmodified_copied_outputs_skip_sync_back(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """F5: a copy-fallback (hardlink-unsupported) output the validator never
-    touched must not pay the temp+copy+replace — reconcile skips it on the
-    (mtime, size) identity check."""
-    import server.app.workflows._validation_view_files as view_files
-
-    syncs: list[str] = []
-    monkeypatch.setattr(view_files, "_sync_back", lambda spot, source: syncs.append(spot.name))
-
-    def _no_hardlink(source: Path, target: Path) -> None:
-        raise OSError(1, "Operation not permitted")
-
-    monkeypatch.setattr(view_files.os, "link", _no_hardlink)
-    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", ""))
-    job_dir, run_view = _layout(tmp_path)
-    (run_view / "review_a.json").write_text("raw")
-
-    manifest = _manifest([], ["review_a.json"])
-    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
-    assert syncs == []
-    assert (run_view / "review_a.json").read_text() == "raw"  # 字节原位未动
-
-
-def test_modified_copied_output_still_syncs_back(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """F5 对照：拷贝回落条目被 validator 改过（此处尺寸变化）仍照常
-    sync_back——跳过逻辑只放未修改的。"""
-    import server.app.workflows._validation_view_files as view_files
-
-    syncs: list[str] = []
-    monkeypatch.setattr(view_files, "_sync_back", lambda spot, source: syncs.append(spot.name))
-
-    def _no_hardlink(source: Path, target: Path) -> None:
-        raise OSError(1, "Operation not permitted")
-
-    monkeypatch.setattr(view_files.os, "link", _no_hardlink)
-    rules = "(job / 'review_a.json').write_text('cleaned-and-longer')\n"
-    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
-    job_dir, run_view = _layout(tmp_path)
-    (run_view / "review_a.json").write_text("raw")
-
-    manifest = _manifest([], ["review_a.json"])
-    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
-    assert syncs == ["review_a.json"]

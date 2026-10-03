@@ -1017,6 +1017,7 @@
     "server/app/agent_control/completion.py": 143,
     "server/app/agent_control/completion_moves.py": 39,
     "server/app/agent_control/completion_preflight.py": 70,
+    "server/app/agent_control/completion_ref_registration.py": 40,
     "server/app/agent_control/completion_staged.py": 149,
     "server/app/agent_control/completion_view.py": 45,
     "server/app/agent_control/declarations.py": 79,

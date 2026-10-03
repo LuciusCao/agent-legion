@@ -422,7 +422,7 @@ worker 端 `sha256_file` 下载后校验；claim 升级前行 `content_hash` 与
 | dispatch `stage_agent_inputs` | 解析 | 合法（唯一解析点） | 身份在此冻结，(job,node) ref 防 GC |
 | claim presigned 升级（`remote_artifact_support.upgrade_input_artifacts`） | transport 变换 | 合法（带 digest 比对守卫） | 行 hash == 冻结 digest 才升级；不一致/无行保留 CAS 形态；守卫覆盖 str 与 dict 两 ref 形态（dict 的 sha256 即冻结身份，失配降级拼回 `sha256:<digest>` 串）；签发比对只是快路径过滤，结构性保证在消费点 |
 | Worker 下载（`worker/artifact/inputs`，presigned/CAS 双 transport） | transport 消费 | 合法（digest 自验闭环） | 两形态下载后按冻结 digest 自验；presigned 任何失败（digest 失配/HTTP 重试耗尽/解码失败）都回落 CAS，两段式报错归因；重复规范化名按声明顺序物化、last wins（消费身份唯一定义点） |
-| completion 产物 ref 登记（`completion_staged` 的 `add_ref` 循环） | 写槽位 | 合法（时序守卫） | 校验消费完冻结 refs 之前不写任何 (job,node,name) 槽位——撞名 upsert 会把冻结 input digest 顶成孤儿，校验排队跨过 GC tick 后静默回落 job_dir |
+| completion 产物 ref 登记（`completion_staged` 的 `add_ref` 循环） | 写槽位 | 合法（校验前登记 + 撞名守卫） | 校验前登记是 legacy 通道 blob 的 GC 防护（零引用窗口跨过 grace + GC tick 即 500 不可恢复）；归一化后「不在声明 outputs 且与声明 inputs 撞名」的上报条目跳过 add_ref——共享槽位撞名时冻结 input 优先，RMW 名（同名 input+output）照常登记 |
 | Host 校验 CAS-first（`_validation_view_inputs.resolve_input_source`） | transport 消费 | 合法 | 按冻结 ref 开 blob，ref 来自 DB manifest（claim 注入 memory-only 不落库） |
 | 校验 job_dir 回落（无 ref） | 重解析 | 仅 legacy 豁免：服务 #833 前无冻结 ref 的 manifest，随旧 job 耗尽归零 | 新 manifest 必有冻结 ref；暴露面与 #833 前校验直读 job_dir 一致 |
 | 校验 job_dir 回落（有 ref 但 blob 缺失） | 重解析 | 合法（fail-open 降级） | GC 竞态/陈旧 ref 的残余面，与 legacy 同一暴露面，validator 自判缺失 |
