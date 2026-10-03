@@ -63,6 +63,19 @@ describe('WorkflowNodeRuntimeSaveBar（#769 execution 面板内保存）', () =>
     expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled()
   })
 
+  it('codex P2：无 savedAt 的 idle（服务端草稿查询未完成等）不宣称已保存', () => {
+    renderBar({ draftSave: { status: 'idle', savedAt: null } })
+    expect(screen.getByRole('status')).toHaveTextContent('草稿尚未保存')
+    expect(screen.getByRole('status')).not.toHaveTextContent('已保存')
+  })
+
+  it('hydrate 后的 idle（带服务端 savedAt、无待存编辑）显示已保存', () => {
+    renderBar({
+      draftSave: { status: 'idle', savedAt: '2026-10-04T01:30:00Z' },
+    })
+    expect(screen.getByRole('status')).toHaveTextContent('已保存到草稿 ·')
+  })
+
   it('保存失败（重试耗尽）可在面板内重试', () => {
     const studio = renderBar({ draftSave: { status: 'error', savedAt: null } })
     expect(screen.getByRole('status')).toHaveTextContent('保存失败')

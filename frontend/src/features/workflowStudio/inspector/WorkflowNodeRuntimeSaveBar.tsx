@@ -11,6 +11,11 @@ function saveStatusText(save: DraftSaveState): string {
   if (save.status === 'pending') return '有未保存的修改'
   if (save.status === 'saving') return '保存中…'
   if (save.status === 'error') return '保存失败'
+  // codex P2（#897）：成功文案只给能证明「已落盘」的状态——saved（本页
+  // PUT 成功），或带 savedAt 的 idle（hydrate 记下了服务端草稿基线且其后
+  // 无待存编辑）。无 savedAt 的 idle 可能是服务端草稿查询未完成（此期间
+  // 编辑不调度 PUT），也可能是尚无服务端草稿——一律不宣称已保存。
+  if (save.status === 'idle' && !save.savedAt) return '草稿尚未保存（同步中）'
   if (!save.savedAt) return '已保存到草稿'
   const at = new Date(save.savedAt)
   return Number.isNaN(at.getTime())
