@@ -264,3 +264,13 @@ def test_filtered_endpoints_reject_empty_string_filters(client_factory, endpoint
         for exempt in ("search", "cursor") if endpoint == "snapshot" else ("search",):
             allowed = client.get(f"/api/workspaces/any/jobs/{endpoint}?{exempt}=")
             assert allowed.status_code != 422, (endpoint, exempt, allowed.text)
+
+
+@pytest.mark.parametrize(("limit", "expected"), [(0, 422), (501, 422), (1, 200), (500, 200)])
+def test_snapshot_limit_out_of_range_is_422(client_factory, limit, expected):
+    """#852：snapshot 的 limit 与 /runs、/jobs 同一约定——越界 422，不在函数
+    体内静默钳制后照常 200（调用方会误以为拿到了请求的页大小）。"""
+    with client_factory() as client:
+        workspace = _make_workspace(client.app.state.job_db, f"snapshot-limit-{limit}-ws")
+        response = client.get(f"/api/workspaces/{workspace['id']}/jobs/snapshot?limit={limit}")
+    assert response.status_code == expected, response.text

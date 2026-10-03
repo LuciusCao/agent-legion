@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Changed
+- `GET /api/workspaces/{workspace_id}/jobs/snapshot` 的 `limit` 越界改为 422（issue #852，对外行为变更）：此前 `limit` 无取值约束，越界值（如 `0`、`501`）在函数体内被静默钳到 1–500 后照常 200，调用方拿不到「页大小被改写」的信号；现声明为 `Query(ge=1, le=500)`（默认仍为 200），越界返回 422，与 `GET /runs`（1–500）、`GET /jobs`（1–2000）同一约定。此前传 `limit` > 500 或 < 1 的外部调用方需改为 1–500 内的值；控制台前端一律传 500，不受影响。docs/workspace-api-tokens.md 的示例注释、端点表与错误码表同步更新。
+
 ## [0.7.14] - 2026-10-03
 
 主打外部对接闭环与执行/校验正确性：run → job ID 链路打通（#735）、外部产物 presigned 直连下载（#739）、API token 每 token 限流（#738）与 api-scope 白名单机制化（#734）；job 节点计数触发器死锁修复（#690，schema 推进至 v88）、Host 输出校验声明视图（#757）、timeout_seconds 运行时可调（#691）。Worker 控制台接入闭环（#762/#763/#765，schema v87）；Studio 线收后台任务可见性与会话生命周期防护（#772/#806/#802）、长会话虚拟滚动（#803）与抽屉层级/布局三连修；infra 面 velites 双通道刷新（#831）、前端依赖指纹（#810）、pre-push 传输诊断（#679）。
