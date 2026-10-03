@@ -13,5 +13,6 @@ def open_turn(runtime: SessionRuntime, text: str, *, owner: object | None = None
     runtime.turn_open = True
     runtime.turn_started_at = time.monotonic()
     runtime.turn_update_count = 0
-    runtime.turn_slash_command = text.lstrip().startswith("/")
+    # #863: background wakeups open with empty text — no user message to lose.
+    runtime.turn_skip_empty_check = not text.strip() or text.lstrip().startswith("/")
     runtime.turn_may_compact = text.lstrip().startswith("/compact")

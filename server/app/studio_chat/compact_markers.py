@@ -9,6 +9,7 @@ timer). Split from compaction.py (file budget).
 
 from __future__ import annotations
 
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,10 @@ from server.app.studio_chat import compact_timer
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
     from server.app.studio_chat.runtime import SessionRuntime
+
+# kimi's completion notice: "Compaction completed.\n- Messages compacted: N\n
+# - Tokens before: N\n- Tokens after: N" (en-US grouped digits).
+_TOKENS_AFTER = re.compile(r"Tokens after:\s*([\d,]+)")
 
 
 def apply_marker_gated(
@@ -63,6 +68,7 @@ def apply_marker_gated(
         already = runtime.compacting and marker == "start"
         runtime.compacting = marker == "start"
         runtime.compacting_since = time.monotonic() if marker == "start" else None
+        runtime.compaction_seen = runtime.compaction_seen or marker == "start"
         since = runtime.compacting_since
     if marker == "start":
         compact_timer.arm_self_clear(backend, session_id, runtime, since, timeout=timeout)
@@ -81,6 +87,26 @@ def apply_marker_gated(
         else:
             # kimi's completion chunk carries the token stats lines — keep them.
             content = {"event": "compact_done", "detail": text.strip()}
+            refresh_usage_after_compaction(backend, session_id, text)
         backend.store.append_message(session_id, "status", "system", content)
     backend.store.publish_session(session_id)
     return True
+
+
+def refresh_usage_after_compaction(backend: ServiceBackend, session_id: str, text: str) -> None:
+    """#826: kimi pushes usage_update only when a prompt turn settles, and
+    compaction finishes out-of-turn — so the context ring kept showing the
+    pre-compaction reading until the next turn. The completion notice
+    carries the post-compaction context size ("Tokens after: N"): fold it
+    into the usage mirror (window size unchanged) so the publish_session
+    that follows the marker refreshes the ring immediately. No parsable
+    count or no prior window size → leave the mirror alone; the next turn's
+    usage_update corrects it."""
+    match = _TOKENS_AFTER.search(text)
+    if match is None:
+        return
+    usage = (backend.db.get_studio_chat_session(session_id) or {}).get("usage")
+    if not isinstance(usage, dict) or not isinstance(usage.get("size"), int):
+        return
+    used = int(match.group(1).replace(",", ""))
+    backend.db.update_studio_chat_session(session_id, usage={**usage, "used": used})

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Fixed
+- Studio Chat 不再误报「agent 未实际处理这条消息（可能在等待后台压缩完成）」（#863）：判定此前在 prompt 响应返回的瞬间读内容计数，而 ACP SDK 会先返回响应、后跑末尾的内容通知，短回复因此被误判为空轮——同一轮里警告与正常回复并存。现在对「2 秒内零内容结束」的轮次延后 1.5 秒复核，宽限内补到内容即不写警告；只有本会话进程出现过上下文压缩的 kimi 会话才提示「可能仍在后台压缩」，其余情况（含所有非 kimi agent）改为不归因的中性提示「agent 未返回任何内容就结束了这一轮，这条消息可能没有被处理；请重发」，并去掉了 idle 状态下不可达的「点继续对话」指引；后台任务唤醒轮（无用户消息）不再参与判定。
+- Studio Chat 上下文压缩完成后，输入框旁的上下文容量圆环立即刷新（#826）：kimi 只在一轮结束时推送用量，而压缩在轮外完成，圆环此前要等下一轮才更新、一直显示压缩前的数值。现在从压缩完成通知中的「Tokens after」读取压缩后的上下文用量，随压缩完成的会话状态推送立即更新圆环；通知不含该数值或尚无窗口大小时保持原值，由下一轮用量推送校正。
+
 ## [0.7.14] - 2026-10-03
 
 主打外部对接闭环与执行/校验正确性：run → job ID 链路打通（#735）、外部产物 presigned 直连下载（#739）、API token 每 token 限流（#738）与 api-scope 白名单机制化（#734）；job 节点计数触发器死锁修复（#690，schema 推进至 v88）、Host 输出校验声明视图（#757）、timeout_seconds 运行时可调（#691）。Worker 控制台接入闭环（#762/#763/#765，schema v87）；Studio 线收后台任务可见性与会话生命周期防护（#772/#806/#802）、长会话虚拟滚动（#803）与抽屉层级/布局三连修；infra 面 velites 双通道刷新（#831）、前端依赖指纹（#810）、pre-push 传输诊断（#679）。
