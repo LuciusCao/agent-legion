@@ -623,7 +623,22 @@ def test_console_metadata_requires_login_but_never_lists_workers(tmp_path: Path,
         )
         response = client.get("/api/agent-workers/console")
         assert response.status_code == 200
-        assert response.json() == {"console_url": "http://127.0.0.1:8789"}
+        # Default instance (code_capacity > 0): code nodes run on the Host.
+        assert response.json() == {
+            "console_url": "http://127.0.0.1:8789",
+            "code_requires_worker": False,
+        }
+
+
+def test_console_metadata_flags_pure_remote_code_dependency(tmp_path: Path) -> None:
+    """#875: code_capacity == 0 (pure-remote) makes code nodes Worker-dependent."""
+    app = _make_app(tmp_path)
+    app.state.settings.executor_runtime.code_capacity = 0
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        response = client.get("/api/agent-workers/console")
+    assert response.status_code == 200
+    assert response.json()["code_requires_worker"] is True
 
 
 def _archive_with_events(events_lines: list[str]) -> bytes:

@@ -26,7 +26,10 @@ describe('deployment console metadata', () => {
   it.each(['http://localhost:8787', ''])(
     'preserves the successful snapshot %j on refresh failure',
     async (url) => {
-      fetchConsole.mockResolvedValueOnce({ console_url: url })
+      fetchConsole.mockResolvedValueOnce({
+        console_url: url,
+        code_requires_worker: false,
+      })
       const { result, client } = setup()
       await waitFor(() => expect(result.current).toBe(url))
       fetchConsole.mockRejectedValueOnce(new Error('offline'))
@@ -38,7 +41,10 @@ describe('deployment console metadata', () => {
       )
       expect(result.current).toBe(url)
       const replacement = url ? '' : 'http://replacement:8787'
-      fetchConsole.mockResolvedValueOnce({ console_url: replacement })
+      fetchConsole.mockResolvedValueOnce({
+        console_url: replacement,
+        code_requires_worker: false,
+      })
       await act(() =>
         client.invalidateQueries({ queryKey: extraQueryKeys.workerConsole() })
       )
