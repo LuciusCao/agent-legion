@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.artifact_restore import (
+    CORRUPT,
     FAILED,
     HASH_MISMATCH,
     RESTORED,
@@ -48,9 +49,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: 清单行悬挂（重试不会自愈）的两种恢复结果；其余失败按瞬时处理。
+#: 清单行悬挂（重试不会自愈）的恢复结果：对象缺失 / 字节不符 / .gz 损坏或截断；
+#: 其余失败（含网络错误）按瞬时处理。
 OBJECT_MISSING = "object_missing"
-DANGLING_OUTCOMES = frozenset({OBJECT_MISSING, HASH_MISMATCH})
+DANGLING_OUTCOMES = frozenset({OBJECT_MISSING, HASH_MISMATCH, CORRUPT})
 
 #: 同一清单行连续悬挂多少轮后升级（轮间隔 0.2–3s，量级为十秒）。瞬时形态
 #: （promote 的 copy 已落、行未登记的毫秒窗口）远小于此。

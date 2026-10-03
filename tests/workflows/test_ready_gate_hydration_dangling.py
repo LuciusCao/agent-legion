@@ -10,6 +10,7 @@ WARNING；pass log 区分「调度暂停」与「hydration 恢复不全」。
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import logging
 from contextlib import closing
@@ -148,6 +149,51 @@ def test_dangling_row_without_rewriter_stays_deferred_with_suggested_action(
     assert len(escalations) == 1
     assert "hash_mismatch" in escalations[0]
     assert "suggested action: rerun producer node(s) ['a']" in escalations[0]
+    worker.stop()
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pytest.param(b"definitely not gzip", id="bad-header"),
+        pytest.param(gzip.compress(A_PAYLOAD)[:-12], id="truncated"),
+    ],
+)
+def test_corrupt_gzip_object_counts_as_dangling(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, stored: bytes
+) -> None:
+    """codex #884 P2：.gz 对象在但解码失败/被截断——HEAD 显示存在，旧分类
+    落到瞬时 failed，计数每轮清零、永久 defer 且反复下载。现归为 corrupt
+    参与连续计数，第 N 轮按同一路径释放（在途生产者会重写）。"""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    job = _job(queries, workspace, "pending", "stale")
+    storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json.gz"
+    seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)
+    store = JobArtifactObjectStore(
+        TEST_DATABASE_URL, FakeObjectStorage(objects={storage_key: stored})
+    )
+    _seed_trivial_node_code(TEST_DATABASE_URL, workspace["id"], "test", "a")
+    executor = RecordingExecutor("code")
+    worker = _make_worker(
+        tmp_path, TEST_DATABASE_URL, executor, [_definition()], artifact_object_store=store
+    )
+
+    with caplog.at_level(logging.WARNING):
+        for passes in range(1, DANGLING_ESCALATION_PASSES):
+            worker._poll()
+            assert queries.get_job_node(job["id"], "a")["status"] == "pending"
+            assert worker.state.hydration_dangling.describe(job["id"]) == {
+                "a_out.json": f"corrupt {passes}/{DANGLING_ESCALATION_PASSES}"
+            }
+        worker._poll()
+
+    assert queries.get_job_node(job["id"], "a")["status"] == "running"
+    escalations = [r.getMessage() for r in caplog.records if "consecutive passes" in r.getMessage()]
+    assert len(escalations) == 1
+    assert "corrupt" in escalations[0]
+    executor.block_event.set()
     worker.stop()
 
 
