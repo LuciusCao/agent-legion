@@ -15,9 +15,11 @@ outage never changes node semantics.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import logging
 import os
+import zlib
 from pathlib import Path
 
 from server.app.services.job_artifact_objects import (
@@ -57,32 +59,46 @@ def restore_missing_inputs(
             _log_restore_failure(job_id, name)
 
 
-def restore_from_manifest_row(
-    store: JobArtifactObjectStore, *, job_id: str, job_dir: Path, name: str, row: dict | None
-) -> bool:
-    """Restore one artifact given its pre-fetched manifest row.
+#: ``restore_outcome_from_manifest_row`` 的结果空间（#827）：``hash_mismatch``
+#: = 字节与清单行不符（重试不会自愈）；``failed`` = 其余失败，调用方可再
+#: 探测对象是否存在来区分悬挂行与瞬时故障（``hydration_dangling``）。
+#: ``corrupt`` = 对象在但 ``.gz`` 解码失败或被截断（同样不会自愈，codex
+#: #884 P2）。
+RESTORED = "restored"
+HASH_MISMATCH = "hash_mismatch"
+CORRUPT = "corrupt"
+FAILED = "failed"
+_DECODE_ERRORS = (gzip.BadGzipFile, EOFError, zlib.error)
+
+
+def restore_outcome_from_manifest_row(
+    store: JobArtifactObjectStore, *, job_id: str, job_dir: Path, name: str, row: dict
+) -> str:
+    """Restore one artifact given its pre-fetched manifest row; return the outcome.
 
     The ready-gate hydration variant (#759): the caller batch-fetched the
     job's manifest rows in one query instead of paying a ``lookup`` per
-    file. Returns True when the local file exists after the attempt; any
-    failure is logged and leaves the file missing (the same best-effort
-    semantics as ``restore_missing_inputs``).
+    file. Any failure is logged and leaves the file missing (the same
+    best-effort semantics as ``restore_missing_inputs``); the outcome tells
+    the caller why (#827).
     """
     if not valid_artifact_name(name):
         logger.warning("refusing to restore unsafe artifact name %r for job %s", name, job_id)
-        return False
+        return FAILED
     try:
-        _restore_row(store, job_id=job_id, job_dir=job_dir, name=name, row=row)
-    except Exception:
+        outcome = _restore_row(store, job_id=job_id, job_dir=job_dir, name=name, row=row)
+    except Exception as exc:
         # #204 broad-except audit: same deliberate per-file best-effort
         # containment as restore_missing_inputs (module docstring: "a storage
         # outage never changes node semantics"). The outcome space is the
         # mixed storage/DB surface of stream + manifest read, not a business
-        # family; the caller decides from the return value whether the input
-        # is still missing, and exc_info keeps the per-file root cause
-        # visible.
+        # family; the caller decides from the outcome whether the input is
+        # still missing (and classifies FAILED further), and exc_info keeps
+        # the per-file root cause visible. gzip decode/truncation errors are
+        # the object's own bytes being bad — CORRUPT, not transient.
         _log_restore_failure(job_id, name)
-    return (job_dir / name).is_file()
+        return CORRUPT if isinstance(exc, _DECODE_ERRORS) else FAILED
+    return outcome or FAILED
 
 
 def _log_restore_failure(job_id: str, name: str) -> None:
@@ -103,9 +119,9 @@ def _restore_one(store: JobArtifactObjectStore, *, job_id: str, job_dir: Path, n
 
 def _restore_row(
     store: JobArtifactObjectStore, *, job_id: str, job_dir: Path, name: str, row: dict | None
-) -> None:
+) -> str | None:
     if row is None:
-        return
+        return None
     target = job_dir / name
     tmp = target.with_name(target.name + ".part")
     digest = hashlib.sha256()
@@ -131,5 +147,6 @@ def _restore_row(
             name,
             job_id,
         )
-        return
+        return HASH_MISMATCH
     os.replace(tmp, target)
+    return RESTORED
