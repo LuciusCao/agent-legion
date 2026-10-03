@@ -22,7 +22,12 @@ from typing import TYPE_CHECKING, Any
 from server.app.db.dialect import ConnectSource
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_artifacts import JobArtifactService
-from server.app.services.job_errors import InvalidOperationError, JobServiceError, NotFoundError
+from server.app.services.job_errors import (
+    ConflictError,
+    InvalidOperationError,
+    JobServiceError,
+    NotFoundError,
+)
 from server.app.services.job_query_presenters import artifact_names
 from server.app.services.versioned_entities import EntityType, VersionedEntity, VersionedEntityStore
 from server.app.storage.s3_client import build_s3_storage
@@ -127,9 +132,27 @@ class PreviewPanelService:
         )
         return _to_row(entity)
 
-    def publish(self, workspace_id: str) -> dict[str, Any]:
-        """Publish the current draft; the previously published version archives."""
-        return _to_row(self._store.publish(PANEL_ENTITY_KEY, workspace_id))
+    def publish(self, workspace_id: str, expected_hash: str | None = None) -> dict[str, Any]:
+        """Publish the current draft; the previously published version archives.
+
+        #841 (#749 leftover): CAS-bound like the agent / node-code publish
+        flows. ``expected_hash`` is the publisher's asserted draft
+        ``html_hash`` — the draft the human saw in the job detail header
+        (and possibly previewed); the publish route requires it. The store
+        CAS binds to the draft pre-read here, so an agent ``save_draft``
+        overwrite between the human's look and the publish fails as
+        Conflict with zero side effects instead of shipping unseen HTML.
+        """
+        draft = self._store.get_draft(PANEL_ENTITY_KEY, workspace_id)
+        if draft is None:
+            raise NotFoundError(f"no draft for {_ENTITY_TYPE} {PANEL_ENTITY_KEY}")
+        draft_hash = draft.definition_hash
+        if expected_hash is not None and expected_hash != draft_hash:
+            raise ConflictError(
+                f"draft hash mismatch for {_ENTITY_TYPE} {PANEL_ENTITY_KEY}:"
+                " the draft was overwritten by another session; reload and retry"
+            )
+        return _to_row(self._store.publish(PANEL_ENTITY_KEY, workspace_id, draft_hash))
 
     def archive_all(self, workspace_id: str) -> int:
         """Archive every version (human "reset to the built-in fallback")."""

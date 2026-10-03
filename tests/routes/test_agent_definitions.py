@@ -29,6 +29,13 @@ def ws(workspace_id) -> dict[str, str]:
     return {"workspace_id": workspace_id}
 
 
+def _publish(client, agent_id: str, ws: dict[str, str]):
+    """#841: publish requires expected_hash — assert the current draft's hash
+    (read back from the detail endpoint, as the inspector panel does)."""
+    draft_hash = client.get(f"{BASE}/{agent_id}", params=ws).json()["latest"]["definition_hash"]
+    return client.post(f"{BASE}/{agent_id}/publish", params=ws, json={"expected_hash": draft_hash})
+
+
 def test_create_draft_publish_flow(client, ws) -> None:
     created = client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
     assert created.status_code == 200
@@ -44,7 +51,7 @@ def test_create_draft_publish_flow(client, ws) -> None:
     assert detail.json()["latest"]["status"] == "draft"
     assert detail.json()["published"] is None
 
-    published = client.post(f"{BASE}/agent-a/publish", params=ws)
+    published = _publish(client, "agent-a", ws)
     assert published.status_code == 200
     assert published.json()["status"] == "published"
     assert published.json()["published_at"] is not None
@@ -97,7 +104,7 @@ def test_create_without_agent_id_conflicts_on_published_row_hidden_by_draft(clie
     缺省创建 A 仍 409——修复前放行，静默覆盖 v2 草稿（旧实体 id 恰为 A）或
     建出无法发布的新实体（legacy id）。"""
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
-    client.post(f"{BASE}/agent-a/publish", params=ws)
+    _publish(client, "agent-a", ws)
     renamed = {**PAYLOAD_V1, "capability": "renamed_cap"}
     client.put(f"{BASE}/agent-a/draft", params=ws, json=renamed)  # v2 草稿：capability 变更
 
@@ -131,7 +138,7 @@ def test_workspace_id_required(client) -> None:
 
 def test_catalogs_are_workspace_isolated(client, job_db, ws, workspace_id) -> None:
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
-    client.post(f"{BASE}/agent-a/publish", params=ws)
+    _publish(client, "agent-a", ws)
 
     other = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")["id"]
     listed = client.get(BASE, params={"workspace_id": other})
@@ -174,7 +181,7 @@ def test_catalog_is_admin_only_for_non_admin(client, job_db, ws, workspace_id) -
 
 def test_list_shows_latest_per_agent(client, ws) -> None:
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
-    client.post(f"{BASE}/agent-a/publish", params=ws)
+    _publish(client, "agent-a", ws)
     client.put(f"{BASE}/agent-a/draft", params=ws, json=PAYLOAD_V2)
 
     listed = client.get(BASE, params=ws)
@@ -188,9 +195,9 @@ def test_list_shows_latest_per_agent(client, ws) -> None:
 
 def test_versions_and_rollback(client, ws) -> None:
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
-    client.post(f"{BASE}/agent-a/publish", params=ws)
+    _publish(client, "agent-a", ws)
     client.put(f"{BASE}/agent-a/draft", params=ws, json=PAYLOAD_V2)
-    client.post(f"{BASE}/agent-a/publish", params=ws)
+    _publish(client, "agent-a", ws)
 
     versions = client.get(f"{BASE}/agent-a/versions", params=ws).json()["versions"]
     assert [row["version"] for row in versions] == [2, 1]
@@ -208,18 +215,31 @@ def test_versions_and_rollback(client, ws) -> None:
     assert rolled.json()["definition"]["tools"] == ["read", "write", "bash"]
 
 
+def test_publish_requires_expected_hash_and_rejects_stale(client, ws) -> None:
+    """#841：hash-less 发布退役——缺 body/字段 422；旧 hash 409 零副作用。"""
+    client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
+    assert client.post(f"{BASE}/agent-a/publish", params=ws).status_code == 422
+    assert client.post(f"{BASE}/agent-a/publish", params=ws, json={}).status_code == 422
+    stale = client.post(f"{BASE}/agent-a/publish", params=ws, json={"expected_hash": "stale"})
+    assert stale.status_code == 409
+    assert "draft hash mismatch" in stale.json()["detail"]
+    detail = client.get(f"{BASE}/agent-a", params=ws).json()
+    assert detail["published"] is None
+    assert detail["latest"]["status"] == "draft"
+
+
 def test_publish_rejects_duplicate_capability(client, ws) -> None:
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
-    client.post(f"{BASE}/agent-a/publish", params=ws)
+    _publish(client, "agent-a", ws)
     client.post(BASE, params=ws, json={"agent_id": "agent-b", **PAYLOAD_V1})
 
-    conflict = client.post(f"{BASE}/agent-b/publish", params=ws)
+    conflict = _publish(client, "agent-b", ws)
     assert conflict.status_code == 409
 
 
 def test_copy_creates_draft(client, ws) -> None:
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
-    client.post(f"{BASE}/agent-a/publish", params=ws)
+    _publish(client, "agent-a", ws)
 
     copied = client.post(f"{BASE}/agent-a/copy", params=ws, json={"new_agent_id": "agent-b"})
     assert copied.status_code == 200
@@ -234,7 +254,7 @@ def test_copy_creates_draft(client, ws) -> None:
 
 def test_archive_all(client, ws) -> None:
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
-    client.post(f"{BASE}/agent-a/publish", params=ws)
+    _publish(client, "agent-a", ws)
 
     archived = client.delete(f"{BASE}/agent-a", params=ws)
     assert archived.status_code == 200
@@ -248,7 +268,8 @@ def test_archive_all(client, ws) -> None:
 def test_unknown_agent_404(client, ws) -> None:
     assert client.get(f"{BASE}/agent-missing", params=ws).status_code == 404
     assert client.get(f"{BASE}/agent-missing/versions", params=ws).status_code == 404
-    assert client.post(f"{BASE}/agent-missing/publish", params=ws).status_code == 404
+    missing = client.post(f"{BASE}/agent-missing/publish", params=ws, json={"expected_hash": "x"})
+    assert missing.status_code == 404
 
 
 def test_invalid_definition_rejected(client, ws) -> None:

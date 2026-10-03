@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Changed
+- **Breaking (API):** 发布端点的 `expected_hash` 改为必填，无 hash 的兼容发布正式退役（issue #841，#749 收尾）：`POST /api/agent-definitions/{agent_id}/publish`、`POST /api/workspaces/{workspace_id}/nodes/{node_key}/code/publish`（含已弃用的 `workflows/{workflow_key}` 别名路径）与 `POST /api/workspaces/{workspace_id}/preview-panel/publish` 的请求体 `{"expected_hash": "<草稿 hash>"}` 必须携带，缺 body 或缺字段返回 422（此前省略即按「不核对」发布当前草稿）。自写脚本/外部集成升级前改为先取草稿 hash 再发布：Agent 取保存响应或详情 `latest` 的 `definition_hash`，节点代码取保存响应的 `code_hash` 或读取响应的 `draft_code_hash`，预览面板取 `GET .../preview-panel` 的 `draft.html_hash`；hash 与当前草稿不符返回 409、零发布副作用。仓库自带的 `scripts/seed/import_seed.py` 已同步携带保存响应的 hash。
+- 预览面板「发布草稿」接入 CAS 条件发布（issue #841）：job 详情头部的发布按钮携带头部所示草稿的 `html_hash`，agent 在人看过草稿之后、点击发布之前改写草稿时，服务端 409 拒绝，不再把人没看过的 HTML 发上线；409 提示「草稿已被 agent 或其他会话更新，请先预览最新草稿再发布」，无草稿可发（404）提示「没有待发布的草稿（可能刚已发布过）」，与 #749 两个检查器入口同一口径。服务内部的发布一律绑定预读草稿的 hash（Agent 服务绑定 capability 检查所用的那份草稿，同进程种子绑定刚保存内容的 hash），存储层不再有无核对的发布分支。
+
 ## [0.7.14] - 2026-10-03
 
 主打外部对接闭环与执行/校验正确性：run → job ID 链路打通（#735）、外部产物 presigned 直连下载（#739）、API token 每 token 限流（#738）与 api-scope 白名单机制化（#734）；job 节点计数触发器死锁修复（#690，schema 推进至 v88）、Host 输出校验声明视图（#757）、timeout_seconds 运行时可调（#691）。Worker 控制台接入闭环（#762/#763/#765，schema v87）；Studio 线收后台任务可见性与会话生命周期防护（#772/#806/#802）、长会话虚拟滚动（#803）与抽屉层级/布局三连修；infra 面 velites 双通道刷新（#831）、前端依赖指纹（#810）、pre-push 传输诊断（#679）。

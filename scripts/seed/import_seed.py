@@ -262,7 +262,7 @@ def step2_agents(
             detail = client.get(f"/api/agent-definitions/{agent_id}", allow_404=True, params=params)
             desired = agent["definition"]
             if detail is None:
-                client.mutate(
+                created = client.mutate(
                     "POST",
                     "/api/agent-definitions",
                     {"agent_id": agent_id, **desired},
@@ -272,6 +272,7 @@ def step2_agents(
                 result = client.mutate(
                     "POST",
                     f"/api/agent-definitions/{agent_id}/publish",
+                    _cas_body(created, "definition_hash"),
                     params=params,
                     dry_note=f"publish agent {label}",
                 )
@@ -281,7 +282,7 @@ def step2_agents(
             if published is not None and content_equal(published.get("definition"), desired):
                 print(f"  {label}: skip (published v{published.get('version')} identical)")
                 continue
-            client.mutate(
+            saved = client.mutate(
                 "PUT",
                 f"/api/agent-definitions/{agent_id}/draft",
                 desired,
@@ -291,10 +292,18 @@ def step2_agents(
             result = client.mutate(
                 "POST",
                 f"/api/agent-definitions/{agent_id}/publish",
+                _cas_body(saved, "definition_hash"),
                 params=params,
                 dry_note=f"publish {label}",
             )
             print(f"  {label}: definition drift -> published v{(result or {}).get('version')}")
+
+
+def _cas_body(saved: Any, hash_field: str) -> dict[str, Any] | None:
+    """#841: publish asserts the draft this import just saved (expected_hash
+    is required — the platform has no hash-less publish). Dry-run saves
+    return None and the publish is only recorded, so no body is needed."""
+    return {"expected_hash": saved[hash_field]} if saved else None
 
 
 def step3_first_revisions(
@@ -376,13 +385,18 @@ def step4_node_codes(
                 )
                 continue
             origin = current.get("origin")
-            client.mutate(
+            saved = client.mutate(
                 "PUT",
                 base,
                 {"code": entry["code"], "change_note": entry.get("change_note")},
                 dry_note=f"save draft (was origin={origin})",
             )
-            result = client.mutate("POST", f"{base}/publish", dry_note="publish node code")
+            result = client.mutate(
+                "POST",
+                f"{base}/publish",
+                _cas_body(saved, "code_hash"),
+                dry_note="publish node code",
+            )
             print(
                 f"  {workspace_id}/{workflow_key}/{node_key}: origin={origin} -> "
                 f"published v{(result or {}).get('version')}"

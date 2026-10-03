@@ -2644,7 +2644,10 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Publish */
+    /**
+     * Publish
+     * @description #841: CAS publish — 409 when the draft is no longer the asserted one.
+     */
     post: operations['publish_api_workspaces__workspace_id__preview_panel_publish_post']
     delete?: never
     options?: never
@@ -3722,11 +3725,13 @@ export interface components {
      * AgentPublishRequest
      * @description #692 codex P1: the caller's asserted draft hash — verified atomically
      *     inside the publish transaction; mismatch raises 409 with zero publish
-     *     side effects. Absent (legacy callers) keeps the old no-check semantics.
+     *     side effects. #841: required — a missing body or field is 422 (the
+     *     hash-less legacy semantics are retired; read the draft's
+     *     ``definition_hash`` from the save/detail response first).
      */
     AgentPublishRequest: {
       /** Expected Hash */
-      expected_hash?: string | null
+      expected_hash: string
     }
     /** AgentRegisterTokenCreatedResponse */
     AgentRegisterTokenCreatedResponse: {
@@ -5442,6 +5447,18 @@ export interface components {
       change_note?: string | null
       /** Html */
       html: string
+    }
+    /**
+     * PreviewPanelPublishRequest
+     * @description #841 (#749 leftover): the publisher's asserted draft ``html_hash`` —
+     *     the draft the human saw in the job detail header. Verified atomically
+     *     inside the publish transaction; mismatch (an agent overwrote the draft
+     *     meanwhile) raises 409 with zero publish side effects. Required: a
+     *     missing body or field is 422.
+     */
+    PreviewPanelPublishRequest: {
+      /** Expected Hash */
+      expected_hash: string
     }
     /**
      * PreviewPanelPublishedResponse
@@ -7819,12 +7836,13 @@ export interface components {
      * WorkflowNodeCodePublishRequest
      * @description #692 codex P1: the caller's asserted draft code_hash — verified
      *     atomically inside the publish transaction; mismatch raises 409 with
-     *     zero publish side effects. Absent (legacy callers) keeps the old
-     *     no-check semantics.
+     *     zero publish side effects. #841: required — a missing body or field is
+     *     422 (the hash-less legacy semantics are retired; read ``code_hash`` /
+     *     ``draft_code_hash`` from the save/detail response first).
      */
     WorkflowNodeCodePublishRequest: {
       /** Expected Hash */
-      expected_hash?: string | null
+      expected_hash: string
     }
     /** WorkflowNodeCodeResponse */
     WorkflowNodeCodeResponse: {
@@ -9153,9 +9171,9 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: {
+    requestBody: {
       content: {
-        'application/json': components['schemas']['AgentPublishRequest'] | null
+        'application/json': components['schemas']['AgentPublishRequest']
       }
     }
     responses: {
@@ -13711,11 +13729,9 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: {
+    requestBody: {
       content: {
-        'application/json':
-          | components['schemas']['WorkflowNodeCodePublishRequest']
-          | null
+        'application/json': components['schemas']['WorkflowNodeCodePublishRequest']
       }
     }
     responses: {
@@ -14048,7 +14064,11 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PreviewPanelPublishRequest']
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
@@ -15885,11 +15905,9 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: {
+    requestBody: {
       content: {
-        'application/json':
-          | components['schemas']['WorkflowNodeCodePublishRequest']
-          | null
+        'application/json': components['schemas']['WorkflowNodeCodePublishRequest']
       }
     }
     responses: {
