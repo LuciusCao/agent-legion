@@ -55,7 +55,7 @@ pub fn remediation_message(missing: &[String], violations: &[String]) -> String 
 
 /// `velites validate` / `velites-sandbox validate` implementation. Exit
 /// codes: 0 = contract holds (`mode=contract` on stdout) or nothing to check
-/// (`mode=existence`, the Host falls back to its legacy check); 1 = contract
+/// (`mode=existence`, the Host's business-rule layer decides alone); 1 = contract
 /// violations (one per stderr line); 2 = contract parse error or I/O failure
 /// (the latter propagates as `Err` for the caller to report).
 ///

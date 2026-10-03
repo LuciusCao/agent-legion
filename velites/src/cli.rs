@@ -166,8 +166,8 @@ pub struct SandboxWrapCli {
 
 /// `velites validate` / `velites-sandbox validate` (issue #443): run the
 /// output-contract engine standalone. Exit 0 prints `mode=contract` (all
-/// rules hold) or `mode=existence` (no contract declared — the Host falls
-/// back to its legacy check); exit 1 lists violations on stderr; exit 2 is a
+/// rules hold) or `mode=existence` (no contract declared — the Host's
+/// business-rule layer decides alone); exit 1 lists violations on stderr; exit 2 is a
 /// parse/argument/I/O error. Since #542 the contract is read three-tier:
 /// the skill-root `contract.yaml` first (present-but-malformed fails
 /// closed, an embedded block is never consulted), then the deprecated

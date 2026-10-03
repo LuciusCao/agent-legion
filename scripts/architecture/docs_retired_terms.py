@@ -213,9 +213,23 @@ def find_retired_term_hits(
     for lineno in range(1, len(lines) + 1):
         window = "\n".join(lines[max(0, lineno - 1 - _CONTEXT_RADIUS) : lineno + _CONTEXT_RADIUS])
         for term in terms:
-            if term.regex.search(lines[lineno - 1]) and not _RETIREMENT_PHRASE.search(window):
+            if term.regex.search(lines[lineno - 1]) and not _RETIREMENT_PHRASE.search(
+                _mask_term_matches(window, term)
+            ):
                 hits.append((lineno, term))
     return hits
+
+
+def _mask_term_matches(window: str, term: RetiredTerm) -> str:
+    """Blank the term's own matches before the retirement-phrase test (#834).
+
+    A retired phrasing may itself contain a retirement word (``legacy
+    validator``); without masking, the term would exempt itself and never
+    fire. Only the matched spans are blanked — a retirement phrase elsewhere
+    in the window still exempts, so terms whose matches carry no retirement
+    word behave exactly as before.
+    """
+    return term.regex.sub(lambda match: " " * len(match.group(0)), window)
 
 
 def check_docs_retired_terms(root: Path) -> list[str]:

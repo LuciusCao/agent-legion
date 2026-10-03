@@ -532,8 +532,9 @@ files:
 At run time the harness's built-in contract engine checks it first
 (existence, then the per-format checks); cross-file rules and business
 semantics stay in prose in `references/output-contract.md` — the engine
-does not express them — and `scripts/validate_output.py` remains the
-legacy fallback channel for everything the engine cannot say.
+does not express them — and `scripts/validate_output.py` is the
+business-rule layer that enforces everything the engine cannot say (a
+permanent second validation layer, not a fallback awaiting retirement).
 
 Migration promise: the pre-#542 location — a fenced ```yaml contract
 block embedded in `references/output-contract.md` — still works but is

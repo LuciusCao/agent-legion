@@ -427,7 +427,7 @@ fail-closed 报错，内置节点不受影响。
   消费方语义。
   Host 侧复核与离线检查走同形子命令：`velites validate --job-dir <dir> [--skill <dir>]...`
   （`velites-sandbox validate` 相同入口）——全过打 `mode=contract` exit 0；无契约打
-  `mode=existence` exit 0（Host 据此回落 legacy 校验）；违约逐行 stderr + exit 1；契约
+  `mode=existence` exit 0（Host 据此只由业务规则层 `validate_output.py` 裁决）；违约逐行 stderr + exit 1；契约
   解析错误/参数错误/IO 错误 stderr + exit 2。多个 `--skill` 时取第一个含契约的；
 - **输出截断（pi 对齐）**：工具输出按双阈值截断——2000 行 或 50KB
   （50×1024 字节），任一先到即截，语义与 pi `truncate.js` 完全一致

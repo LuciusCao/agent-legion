@@ -5,7 +5,7 @@ used; legacy manifests without ``skill_ref`` resolve to ``latest`` (the
 repo's live HEAD), matching the #322 dispatch semantics.
 
 Since #443 the contract engine (``velites-sandbox validate``) runs first and
-fails fast on generic contract violations; the legacy ``validate_output.py``
+fails fast on generic contract violations; the business-rule ``validate_output.py``
 still runs afterwards for business rules the engine does not express.
 
 Since #569 the wrapper resolves the manifest pin to a commit in-process and
@@ -56,7 +56,7 @@ _REF = "v1.2.3"
 
 @pytest.fixture(autouse=True)
 def _no_real_engine_binary(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hermetic default: no velites binary — the legacy script path alone
+    """Hermetic default: no velites binary — the business-rule script alone
     decides, whatever happens to be on this machine's PATH. Engine-layer
     tests override this via ``_use_engine``."""
     monkeypatch.setattr(output_contract_engine, "resolve_sandbox_binary", lambda: None)
@@ -273,13 +273,13 @@ _CONTRACT_BLOCK_DOC = (
 )
 
 
-def _skill_dir(tmp_path: Path, legacy_body: str | None, doc: str = _CONTRACT_BLOCK_DOC) -> Path:
+def _skill_dir(tmp_path: Path, rule_body: str | None, doc: str = _CONTRACT_BLOCK_DOC) -> Path:
     skill_dir = tmp_path / "skill"
     (skill_dir / "references").mkdir(parents=True)
     (skill_dir / "references" / "output-contract.md").write_text(doc)
-    if legacy_body is not None:
+    if rule_body is not None:
         (skill_dir / "scripts").mkdir()
-        (skill_dir / "scripts" / "validate_output.py").write_text(legacy_body)
+        (skill_dir / "scripts" / "validate_output.py").write_text(rule_body)
     return skill_dir
 
 
@@ -297,7 +297,7 @@ def _use_engine(monkeypatch: pytest.MonkeyPatch, binary: str | None) -> None:
 
 
 def _record_engine_spawns(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Intercept the engine's subprocess.run; the legacy script stays real."""
+    """Intercept the engine's subprocess.run; the business-rule script stays real."""
     calls: list[list[str]] = []
 
     def _fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -308,12 +308,12 @@ def _record_engine_spawns(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     return calls
 
 
-def test_engine_violation_fails_fast_without_running_legacy(
+def test_engine_violation_fails_fast_without_running_business_rules(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    marker = tmp_path / "legacy-ran"
-    legacy = f"import pathlib; pathlib.Path({str(marker)!r}).write_text('x')\n"
-    skill_dir = _skill_dir(tmp_path, legacy)
+    marker = tmp_path / "rules-ran"
+    rules = f"import pathlib; pathlib.Path({str(marker)!r}).write_text('x')\n"
+    skill_dir = _skill_dir(tmp_path, rules)
     _use_engine(
         monkeypatch,
         _fake_engine(tmp_path, stderr="script.md: missing required file", rc=1),
@@ -324,13 +324,13 @@ def test_engine_violation_fails_fast_without_running_legacy(
     assert error is not None
     assert error.startswith("Output validation failed:")
     assert "missing required file" in error
-    assert not marker.exists(), "engine failure must short-circuit the legacy script"
+    assert not marker.exists(), "engine failure must short-circuit the business-rule script"
 
 
-def test_engine_pass_still_runs_legacy_business_rules(
+def test_engine_pass_still_runs_business_rules(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """mode=contract means the generic checks passed; the legacy script then
+    """mode=contract means the generic checks passed; the business-rule script then
     enforces the business rules the engine deliberately does not express."""
     skill_dir = _skill_dir(
         tmp_path, "import sys; sys.stderr.write('id mismatch\\n'); sys.exit(1)\n"
@@ -344,18 +344,18 @@ def test_engine_pass_still_runs_legacy_business_rules(
     assert "id mismatch" in error
 
 
-def test_engine_existence_mode_falls_back_to_legacy(
+def test_engine_existence_mode_leaves_verdict_to_business_rules(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     skill_dir = _skill_dir(
-        tmp_path, "import sys; sys.stderr.write('legacy says no\\n'); sys.exit(1)\n"
+        tmp_path, "import sys; sys.stderr.write('rules say no\\n'); sys.exit(1)\n"
     )
     _use_engine(monkeypatch, _fake_engine(tmp_path, stdout="mode=existence", rc=0))
 
     error = run_output_validator(skill_dir, tmp_path / "job")
 
     assert error is not None
-    assert "legacy says no" in error
+    assert "rules say no" in error
 
 
 def test_engine_broken_is_a_validator_error(
@@ -383,30 +383,28 @@ def test_engine_spawn_failure_is_a_validator_error(
     assert error.startswith("Validator error:")
 
 
-def test_missing_engine_binary_keeps_legacy_only_behavior(
+def test_missing_engine_binary_keeps_business_rule_only_behavior(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    skill_dir = _skill_dir(
-        tmp_path, "import sys; sys.stderr.write('legacy only\\n'); sys.exit(1)\n"
-    )
+    skill_dir = _skill_dir(tmp_path, "import sys; sys.stderr.write('rules only\\n'); sys.exit(1)\n")
     _use_engine(monkeypatch, None)
 
     error = run_output_validator(skill_dir, tmp_path / "job")
 
     assert error is not None
-    assert "legacy only" in error
+    assert "rules only" in error
 
 
-def test_pre_443_binary_without_validate_subcommand_falls_back_to_legacy(
+def test_pre_443_binary_without_validate_subcommand_falls_back_to_business_rules(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Rollout shim: an old binary's clap front parser rejects the call —
     every clap usage error carries a "Usage:" line, which the current
     engine's own error output never prints. Both pre-#443 shapes fall back
-    to legacy: old `velites` (unexpected argument) and old `velites-sandbox`
+    to the business-rule layer alone: old `velites` (unexpected argument) and old `velites-sandbox`
     (its trailing-arg parser swallows our flags, leaving --cwd missing)."""
     skill_dir = _skill_dir(
-        tmp_path, "import sys; sys.stderr.write('legacy verdict\\n'); sys.exit(1)\n"
+        tmp_path, "import sys; sys.stderr.write('rules verdict\\n'); sys.exit(1)\n"
     )
     old_shapes = [
         "error: unexpected argument '--job-dir' found\n\nUsage: velites --provider <PROVIDER> <INSTRUCTION>...\n",
@@ -418,7 +416,7 @@ def test_pre_443_binary_without_validate_subcommand_falls_back_to_legacy(
         error = run_output_validator(skill_dir, tmp_path / "job")
 
         assert error is not None
-        assert "legacy verdict" in error, shape
+        assert "rules verdict" in error, shape
 
 
 def test_current_broken_engine_stays_fail_closed(
@@ -468,14 +466,14 @@ def test_missing_contract_document_never_spawns_the_engine(
     assert spawns == []
 
 
-def test_skill_without_contract_block_lets_the_legacy_script_decide(
+def test_skill_without_contract_block_lets_the_business_rule_script_decide(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The skip must be verdict-neutral end to end: the legacy script keeps
+    """The skip must be verdict-neutral end to end: the business-rule script keeps
     the deciding vote exactly as when the engine answered existence mode."""
     skill_dir = _skill_dir(
         tmp_path,
-        "import sys; sys.stderr.write('legacy only\\n'); sys.exit(1)\n",
+        "import sys; sys.stderr.write('rules only\\n'); sys.exit(1)\n",
         doc="prose only, no fences\n",
     )
     _use_engine(monkeypatch, "/nonexistent/velites")
@@ -484,7 +482,7 @@ def test_skill_without_contract_block_lets_the_legacy_script_decide(
     error = run_output_validator(skill_dir, tmp_path / "job")
 
     assert error is not None
-    assert "legacy only" in error
+    assert "rules only" in error
     assert spawns == []
 
 

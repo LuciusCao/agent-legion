@@ -37,14 +37,15 @@ def run_contract_engine(
     The engine is authoritative only when it reports contract violations
     (exit 1) or is itself broken (exit 2); exit 0 means either the contract
     passed (``mode=contract``) or the skill has no machine-readable
-    contract (``mode=existence``) — either way the legacy script in
-    ``output_validation`` still runs. Hosts without a velites binary keep
-    the legacy-only behavior. A skill that declares no contract at all
+    contract (``mode=existence``) — either way the skill's business-rule
+    layer (``scripts/validate_output.py``, run by ``output_validation``)
+    still runs. Hosts without a velites binary keep the business-rule-only
+    behavior. A skill that declares no contract at all
     never spawns the engine (#538): its answer is the existence-mode
     no-verdict this function returns anyway.
     """
     # #538/#542: no declared contract — the spawn would only produce the
-    # existence no-verdict; skip it and let the legacy script decide alone.
+    # existence no-verdict; skip it and let the business-rule script decide alone.
     if not has_machine_contract(skill_dir):
         return None
     binary = resolve_sandbox_binary()
@@ -76,7 +77,7 @@ def run_contract_engine(
         # were not provided: --cwd". Both shapes carry clap's "Usage:" line,
         # which the current engine's own error output never prints; that
         # signature means "engine unavailable", not "engine broken", so the
-        # legacy script takes over. A current binary's exit-2 failures are
+        # business-rule script decides alone. A current binary's exit-2 failures are
         # real (bad contract block, unreadable job dir) and stay fail-closed.
         if "Usage:" in proc.stderr:
             return None

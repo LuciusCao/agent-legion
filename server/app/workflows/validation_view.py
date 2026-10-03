@@ -1,7 +1,7 @@
-"""Declared validation view for the Host-side legacy validator (#757).
+"""Declared validation view for the Host-side business-rule validator (#757).
 
 A job dir accumulates every node's outputs across all attempts, so running a
-skill's legacy ``validate_output.py`` against it lets glob-based validators
+skill's business-rule ``validate_output.py`` against it lets glob-based validators
 see sibling nodes' files — a sibling's stale fail verdict then flips this
 node's clean run (the review A/B cross-attribution bug). The bare staging
 read view overcorrects the other way: it hides the declared inputs that
