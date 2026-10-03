@@ -684,3 +684,32 @@ def test_duplicate_declarations_place_once(tmp_path: Path) -> None:
     )
     assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
     assert _seen(seen_file) == ["cleaned_question.json", "review_a.json"]
+
+
+def test_duplicate_input_aliases_resolve_last_wins(tmp_path: Path) -> None:
+    """#876 codex P2: two aliases of one normalized name freeze DIFFERENT
+    digests when the file is overwritten between ``stage_agent_inputs``' two
+    reads. The Worker downloads aliases in declaration order onto the same
+    path and actually consumes the LAST one — the view must resolve to the
+    same identity (last wins), or validation would check bytes the Worker
+    never ran with."""
+    rules = (
+        "if (job / 'cleaned_question.json').read_text() != 'last-alias-bytes':\n"
+        "    sys.stderr.write('validated the first alias, not the consumed one\\n')\n"
+        "    sys.exit(1)\n"
+    )
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    cas_root = tmp_path / "cas"
+    first_digest = _cas_blob(cas_root, b"first-alias-bytes")
+    last_digest = _cas_blob(cas_root, b"last-alias-bytes")
+    (job_dir / "cleaned_question.json").write_text("overwritten-later")
+
+    manifest = _manifest(["cleaned_question.json", "./cleaned_question.json"], [])
+    manifest["input_artifacts"] = {
+        "cleaned_question.json": f"sha256:{first_digest}",
+        "./cleaned_question.json": f"sha256:{last_digest}",
+    }
+    assert (
+        validate_worker_outputs(manager, manifest, job_dir, run_view, _cas_store(cas_root)) is None
+    )

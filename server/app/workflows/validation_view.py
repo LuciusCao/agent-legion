@@ -138,24 +138,35 @@ def materialize_validation_view(
     placed from ``output_source`` and exempt from the input snapshot. Other
     inputs resolve their bytes through ``input_authority`` (dispatch-frozen
     CAS first, job-dir fallback — see ``resolve_input_source``). Duplicate
-    declarations are deduped on the normalized name (#868): a second
-    placement would delete the first private copy and leave its snapshot
-    pointing at a dead inode, misfiring the read-only check.
+    declarations are deduped on the normalized name (#868); inputs dedup
+    LAST-wins (#876 codex P2): the Worker downloads aliases in declaration
+    order onto the same normalized path and actually consumes the last one
+    (two aliases can freeze different digests when the file is overwritten
+    between ``stage_agent_inputs``' two reads), so the consumption identity
+    is defined by the Worker's materialization order and the view must
+    resolve to the same identity — a keep-first dedup would validate
+    different bytes than the Worker ran with. Outputs dedup direction is
+    identity-neutral: aliases normalize to ONE on-disk file, so every alias
+    names the same bytes regardless of which is kept.
     """
     output_rels = {rel for name in outputs if (rel := safe_relative(name)) is not None}
-    input_snaps: list[InputSnapshot] = []
-    seen: set[str] = set()
+    # rel → 最后别名的原拼写（last wins = Worker 物化顺序定义消费身份）；
+    # refs 按原拼写取，恰好落到最后别名冻结的 digest。
+    input_names: dict[str, str] = {}
     for name in inputs:
         rel = safe_relative(name)
-        if rel is None or rel in output_rels or rel in seen:
+        if rel is None or rel in output_rels:
             continue
-        seen.add(rel)
-        source = resolve_input_source(name, rel, input_authority, input_source)
+        input_names[rel] = name
+    input_snaps: list[InputSnapshot] = []
+    for rel, raw in input_names.items():
+        source = resolve_input_source(raw, rel, input_authority, input_source)
         placed = place(rel, source, target, private=True)
         if placed is not None:
             st = placed[0]
             input_snaps.append(InputSnapshot(rel, st.st_ino, st.st_dev, st.st_mtime_ns, st.st_size))
     output_placements: list[OutputPlacement] = []
+    seen: set[str] = set()
     for name in outputs:
         rel = safe_relative(name)
         if rel is None or rel in seen:

@@ -421,7 +421,7 @@ worker 端 `sha256_file` 下载后校验；claim 升级前行 `content_hash` 与
 |---|---|---|---|
 | dispatch `stage_agent_inputs` | 解析 | 合法（唯一解析点） | 身份在此冻结，(job,node) ref 防 GC |
 | claim presigned 升级（`remote_artifact_support.upgrade_input_artifacts`） | transport 变换 | 合法（带 digest 比对守卫） | 行 hash == 冻结 digest 才升级；不一致/无行保留 CAS 形态；签发比对只是快路径过滤，结构性保证在消费点 |
-| Worker 下载（`worker/artifact/inputs`，presigned/CAS 双 transport） | transport 消费 | 合法（digest 自验闭环） | 两形态下载后按冻结 digest 自验；presigned 失配（对象签发后被覆盖）回落 CAS，两段式报错归因 |
+| Worker 下载（`worker/artifact/inputs`，presigned/CAS 双 transport） | transport 消费 | 合法（digest 自验闭环） | 两形态下载后按冻结 digest 自验；presigned 失配（对象签发后被覆盖）回落 CAS，两段式报错归因；重复规范化名按声明顺序物化、last wins（消费身份唯一定义点） |
 | Host 校验 CAS-first（`_validation_view_inputs.resolve_input_source`） | transport 消费 | 合法 | 按冻结 ref 开 blob，ref 来自 DB manifest（claim 注入 memory-only 不落库） |
 | 校验 job_dir 回落（无 ref） | 重解析 | 仅 legacy 豁免：服务 #833 前无冻结 ref 的 manifest，随旧 job 耗尽归零 | 新 manifest 必有冻结 ref；暴露面与 #833 前校验直读 job_dir 一致 |
 | 校验 job_dir 回落（有 ref 但 blob 缺失） | 重解析 | 合法（fail-open 降级） | GC 竞态/陈旧 ref 的残余面，与 legacy 同一暴露面，validator 自判缺失 |
@@ -429,7 +429,11 @@ worker 端 `sha256_file` 下载后校验；claim 升级前行 `content_hash` 与
 | 产物读端点 / UI 读 | 当下行读 | 合法（#508 文档化语义） | 读最新是展示语义，不参与执行与校验 |
 
 新增任何读 input 字节的路径先过判定准则：digest 来自 dispatch 冻结
-ref ⇒ transport，来自当下可变状态且流向执行/校验 ⇒ 缺陷。digest 比
+ref ⇒ transport，来自当下可变状态且流向执行/校验 ⇒ 缺陷。重复规范
+化名（`a.json` 与 `./a.json`）的消费身份由 Worker 物化顺序唯一定义
+——顺序下载、同路径后者覆盖前者，last wins；校验视图的去重必须同
+向（keep-last），dispatch 侧刻意不去重（consumer 侧规则是唯一事实
+源）。digest 比
 对口径：行 `content_hash` 恒为未压缩内容 sha256（gzip 行同，#338），
 与 dispatch CAS digest 同基准，直接可比。
 
