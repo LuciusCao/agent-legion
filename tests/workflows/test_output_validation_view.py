@@ -4,22 +4,26 @@ A job dir accumulates every node's outputs across all attempts; a glob-based
 review validator (``review_<pair>*.json`` checks both A/B files) then sees a
 sibling node's stale fail file and flips this node's clean run — the
 cross-attributed "verdict is 'fail'" errors of #757. The validator must see
-exactly this node's declared inputs (copied from the job dir, cross-file
-checks keep working) plus this attempt's declared outputs (linked from the
-run's read view) — sibling outputs and stale residues never enter.
+exactly this node's declared inputs plus this attempt's declared outputs —
+sibling outputs and stale residues never enter.
 
-These tests pin the view semantics through ``validate_worker_outputs`` with
-the result-validate pool inlined (same seam as
-tests/workflows/test_output_validation.py).
+The view is zero-copy (hardlinks); its exit arms reconcile the validator's
+output mutations back into the run view (the replace family included) and
+enforce the inputs read-only contract. These tests pin all of it through
+``validate_worker_outputs`` with the result-validate pool inlined (same seam
+as tests/workflows/test_output_validation.py).
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 
 import pytest
 
 import server.app.workflows.output_contract_engine as output_contract_engine
+import server.app.workflows.validation_view as validation_view_module
 import server.app.workflows.worker_output_validation as worker_output_validation
 from server.app.skills.manager import SkillManager
 from server.app.workflows.worker_output_validation import validate_worker_outputs
@@ -44,7 +48,7 @@ def _inline_validate_pool(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _manager(tmp_path: Path, validator_body: str) -> SkillManager:
+def _manager(tmp_path: Path, validator_body: str | None) -> SkillManager:
     _make_skill_repo(tmp_path / "skills", _KEY, validate_script=validator_body)
     return _make_real_manager(tmp_path)
 
@@ -121,7 +125,8 @@ def test_own_verdict_still_decides_the_run(tmp_path: Path) -> None:
 
 def test_inputs_drive_cross_file_consistency_checks(tmp_path: Path) -> None:
     """Inputs passthrough: a validator cross-checking an output against a
-    declared input keeps working in both directions."""
+    declared input keeps working in both directions (and read-only input
+    access passes the read-only enforcement)."""
     rules = (
         "question = json.loads((job / 'cleaned_question.json').read_text())\n"
         "review = json.loads((job / 'review_a.json').read_text())\n"
@@ -209,7 +214,8 @@ def test_double_review_outcomes_reflect_own_verdicts_only(tmp_path: Path) -> Non
 
 def test_output_bytes_win_when_a_name_is_both_input_and_output(tmp_path: Path) -> None:
     """Read-modify-write nodes declare the same name twice; the validator
-    must see this attempt's bytes, not the input copy."""
+    must see this attempt's bytes — and the read-only input enforcement must
+    not fire on the shared name (it resolves to the output semantics)."""
     rules = (
         "if (job / 'shared.json').read_text() != 'new':\n"
         "    sys.stderr.write('stale bytes\\n')\n"
@@ -237,6 +243,20 @@ def test_unsafe_declared_names_never_escape_the_view(tmp_path: Path) -> None:
     assert _seen(seen_file) == ["ok.json"]
 
 
+def test_skill_missing_legacy_script_fails_closed(tmp_path: Path) -> None:
+    """Why there is no "nothing to validate" skip: the dispatch contract
+    trio makes scripts/validate_output.py mandatory, and a tree missing it
+    (the #638 poisoned-cache shape) must keep failing closed — never skip."""
+    manager = _manager(tmp_path, None)
+    job_dir, run_view = _layout(tmp_path)
+
+    error = validate_worker_outputs(manager, _manifest([], []), job_dir, run_view)
+
+    assert error is not None
+    assert error.startswith("Validator error:")
+    assert "scripts/validate_output.py" in error
+
+
 def test_view_construction_failure_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -248,7 +268,7 @@ def test_view_construction_failure_fails_closed(
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise OSError("view boom")
 
-    monkeypatch.setattr(worker_output_validation, "validation_view", _boom)
+    monkeypatch.setattr(validation_view_module, "materialize_validation_view", _boom)
     error = validate_worker_outputs(manager, _manifest([], []), job_dir, run_view)
 
     assert error is not None
@@ -256,23 +276,75 @@ def test_view_construction_failure_fails_closed(
     assert "view boom" in error
 
 
-def test_validator_input_writes_stay_out_of_the_job_dir(tmp_path: Path) -> None:
-    """Inputs are copied, not linked: a validator rewriting an input file
-    must not mutate an upstream node's artifact in the job dir."""
+def test_placement_failure_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Failure grading: a missing SOURCE is fail-open (absent from the view),
+    but a placement FAILURE (disk full on the link and the copy fallback) is
+    an infra error — the validator must never judge a silently incomplete
+    view, so the run fails closed as a Validator error."""
+    manager = _manager(tmp_path, "import sys; sys.exit(0)\n")
+    job_dir, run_view = _layout(tmp_path)
+    (job_dir / "cleaned_question.json").write_text("{}")
+
+    def _enospc(*_args: object, **_kwargs: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "link", _enospc)
+    monkeypatch.setattr(shutil, "copy2", _enospc)
+    error = validate_worker_outputs(
+        manager, _manifest(["cleaned_question.json"], []), job_dir, run_view
+    )
+
+    assert error is not None
+    assert error.startswith("Validator error:")
+    assert "No space left on device" in error
+
+
+def test_validator_mutating_an_input_in_place_fails_closed(tmp_path: Path) -> None:
+    """Inputs are read-only by contract: an in-place write through the
+    hardlink is detected by the exit check (inode/mtime/size snapshot) and
+    fails the run closed instead of silently accepting a polluted view."""
     rules = "(job / 'cleaned_question.json').write_text('rewritten by validator')\n"
     manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
     job_dir, run_view = _layout(tmp_path)
     (job_dir / "cleaned_question.json").write_text("original")
 
-    manifest = _manifest(["cleaned_question.json"], [])
-    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
+    error = validate_worker_outputs(
+        manager, _manifest(["cleaned_question.json"], []), job_dir, run_view
+    )
+
+    assert error is not None
+    assert error.startswith("Validator error:")
+    assert "validator mutated declared input 'cleaned_question.json'" in error
+
+
+def test_validator_replacing_an_input_fails_closed_without_polluting_the_job_dir(
+    tmp_path: Path,
+) -> None:
+    """The replace family against an input: os.replace swaps only the VIEW's
+    dir entry (the hardlink to the job dir breaks), so the upstream
+    artifact's bytes survive — and the exit check still fails the run."""
+    rules = (
+        "import os\n"
+        "(job / 'cleaned_question.json.tmp').write_text('rewritten')\n"
+        "os.replace(job / 'cleaned_question.json.tmp', job / 'cleaned_question.json')\n"
+    )
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (job_dir / "cleaned_question.json").write_text("original")
+
+    error = validate_worker_outputs(
+        manager, _manifest(["cleaned_question.json"], []), job_dir, run_view
+    )
+
+    assert error is not None
+    assert "validator mutated declared input" in error
     assert (job_dir / "cleaned_question.json").read_text() == "original"
 
 
 def test_validator_output_writes_reach_the_run_view_bytes(tmp_path: Path) -> None:
-    """Outputs are hardlinked: a validator cleaning an output in place (the
-    review skills' clean-in-place helpers) keeps reaching the bytes that the
-    finish gate will promote — the pre-#757 staging-view semantics."""
+    """In-place output writes propagate through the hardlink — the review
+    skills' clean-in-place helpers (write_text) keep reaching the bytes the
+    finish gate will promote."""
     rules = "(job / 'review_a.json').write_text('cleaned')\n"
     manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
     job_dir, run_view = _layout(tmp_path)
@@ -281,3 +353,81 @@ def test_validator_output_writes_reach_the_run_view_bytes(tmp_path: Path) -> Non
     manifest = _manifest([], ["review_a.json"])
     assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
     assert (run_view / "review_a.json").read_text() == "cleaned"
+
+
+def test_validator_output_replace_family_reconciles_into_the_run_view(tmp_path: Path) -> None:
+    """P2-1 regression: the replace family breaks hardlink sharing — a
+    validator cleaning via temp+os.replace or delete-and-rewrite must still
+    have its bytes reconciled back into the run view, or the finish gate
+    would promote the uncleaned pre-validation bytes."""
+    rules = (
+        "import os\n"
+        "tmp = job / 'review_a.json.tmp'\n"
+        "tmp.write_text('cleaned-a')\n"
+        "os.replace(tmp, job / 'review_a.json')\n"
+        "(job / 'review_b.json').unlink()\n"
+        "(job / 'review_b.json').write_text('cleaned-b')\n"
+    )
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (run_view / "review_a.json").write_text("raw-a")
+    (run_view / "review_b.json").write_text("raw-b")
+
+    manifest = _manifest([], ["review_a.json", "review_b.json"])
+    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
+    assert (run_view / "review_a.json").read_text() == "cleaned-a"
+    assert (run_view / "review_b.json").read_text() == "cleaned-b"
+
+
+def test_validator_output_mutations_reconcile_even_when_the_verdict_fails(
+    tmp_path: Path,
+) -> None:
+    """Reconcile runs on every clean exit, verdict or not — the same
+    always-propagate semantics in-place writes have (a failed run's staged
+    bytes still land for observability, so they must be the real ones)."""
+    rules = (
+        "(job / 'review_a.json').write_text('cleaned-then-failed')\n"
+        "sys.stderr.write('still bad\\n')\n"
+        "sys.exit(1)\n"
+    )
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (run_view / "review_a.json").write_text("raw")
+
+    manifest = _manifest([], ["review_a.json"])
+    error = validate_worker_outputs(manager, manifest, job_dir, run_view)
+
+    assert error is not None
+    assert "still bad" in error
+    assert (run_view / "review_a.json").read_text() == "cleaned-then-failed"
+
+
+def test_validator_created_undeclared_files_never_propagate(tmp_path: Path) -> None:
+    """The promotion plan is frozen at unpack time (#759): a file the
+    validator creates in the view is scratch, never an artifact — the view
+    is not a backdoor around the declared output surface."""
+    rules = "(job / 'extra.json').write_text('{}')\n"
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (run_view / "review_a.json").write_text("raw")
+
+    manifest = _manifest([], ["review_a.json"])
+    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
+    assert not (run_view / "extra.json").exists()
+
+
+def test_validator_deleted_output_propagates_the_deletion(tmp_path: Path) -> None:
+    """A validator deleting a declared output and passing: the deletion
+    propagates to the run view — the pre-view semantics, where the finish
+    gate's missing-source containment then fails the run honestly (tested
+    at the view layer only; the promotion arm is #759 machinery)."""
+    rules = "(job / 'review_b.json').unlink()\n"
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (run_view / "review_a.json").write_text("{}")
+    (run_view / "review_b.json").write_text("{}")
+
+    manifest = _manifest([], ["review_a.json", "review_b.json"])
+    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
+    assert (run_view / "review_a.json").is_file()
+    assert not (run_view / "review_b.json").exists()

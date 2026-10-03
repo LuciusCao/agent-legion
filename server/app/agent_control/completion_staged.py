@@ -169,9 +169,10 @@ def finish_staged(
     # #757: never against the raw job_dir — it accumulates every node's
     # outputs across all attempts, and a glob-based legacy validator would
     # see a sibling's (stale or current) files and misattribute their
-    # verdict to this node. Validation runs against the declared view: this
+    # verdict to this node. The pool task builds the declared view (this
     # node's inputs from job_dir + this attempt's outputs from the read
-    # view (construction lives in worker_output_validation).
+    # view) and reconciles the validator's output mutations back into
+    # view_dir, so what the finish gate promotes is what passed validation.
     if status == "completed" and handler.skill_manager is not None:
         validation_error = validate_worker_outputs(
             handler.skill_manager, manifest, job_dir, view_dir
