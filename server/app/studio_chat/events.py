@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
-from server.app.studio_chat import compaction, prompt_turn
+from server.app.studio_chat import compaction, empty_turn, prompt_turn
 from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call, maybe_emit_mcp_hint
 from server.app.studio_chat.permissions import handle_permission_request
 from server.app.studio_chat.runtime import SessionRuntime
@@ -134,11 +134,10 @@ class AcpEventHandlers:
         # never on timeout-terminated turns (#693), which are cancels too.
         if not timed_out:
             maybe_emit_mcp_hint(self._backend, session_id, stop_reason)
-        # #694: an instant zero-content end_turn means the prompt never
-        # reached the agent (quiescence window) — warn before the turn_end.
-        compaction.maybe_note_empty_turn(
-            self._backend, session_id, stop_reason, timed_out=timed_out
-        )
+        # #694/#863: an instant zero-content end_turn may mean the prompt
+        # never reached the agent; the verdict is deferred past a grace so
+        # trailing content (SDK response-before-updates ordering) clears it.
+        empty_turn.schedule_check(self._backend, session_id, stop_reason, timed_out=timed_out)
         compaction.note_turn_closed(self._backend.runtime(session_id))
         if timed_out:
             # #693: the turn was ended by the prompt-timeout ladder, not by

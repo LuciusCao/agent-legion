@@ -13,9 +13,9 @@ LOCAL text chunks (``emitLocalChunk``), so the markers below are a kimi-0.42
 heuristic: start = "Compacting conversation context" (optionally "with
 instruction: ..."), end = "Compaction completed." / "Compaction cancelled.".
 This module owns the compacting flag (runtime + session row mirror + the
-self-clear timer), the usage_update mirror, the send guard, and the
-degenerate-turn fallback that flags an instant zero-content end_turn as
-"agent never processed this".
+self-clear timer), the usage_update mirror, the send guard, and the per-turn
+content counter; the degenerate-turn verdict that reads that counter lives
+in empty_turn.py (#863).
 """
 
 from __future__ import annotations
@@ -36,14 +36,8 @@ if TYPE_CHECKING:
 # send_blocked alone could never fire (#694 review P1); the lazy check
 # stays as the backstop for runtimes spawned before the timer existed.
 COMPACTING_TIMEOUT_SECONDS = 600
-# A turn settled as end_turn with zero session updates faster than this is
-# treated as "never reached the agent" (the quiescence-window signature).
-EMPTY_TURN_SECONDS = 2.0
 
 SEND_BLOCKED_DETAIL = "正在压缩上下文，请稍后发送（长时间未完成可点「继续对话」重建会话）"
-EMPTY_TURN_DETAIL = (
-    "agent 未实际处理这条消息（可能在等待后台压缩完成）；请稍后重发，或点「继续对话」重建会话"
-)
 
 _COMPACT_START_PREFIX = "Compacting conversation context"
 _COMPACT_DONE_PREFIXES = ("Compaction completed.", "Compaction cancelled.")
@@ -196,30 +190,7 @@ def note_ready(
         runtime.kimi_agent = name.lower().startswith("kimi") or agent_id.lower().startswith("kimi")
         runtime.compacting = False
         runtime.compacting_since = None
-
-
-def maybe_note_empty_turn(
-    backend: ServiceBackend, session_id: str, stop_reason: str, *, timed_out: bool
-) -> None:
-    """Degenerate-turn fallback (#694): an end_turn with zero session updates
-    that settles almost instantly means the prompt never reached the agent
-    (the quiescence-window signature). Slash-command turns (/compact etc.)
-    are local by design and legitimately produce no agent content."""
-    if timed_out or stop_reason != "end_turn":
-        return
-    runtime = backend.runtime(session_id)
-    if runtime is None:
-        return
-    with runtime.lock:
-        started_at, updates = runtime.turn_started_at, runtime.turn_update_count
-        slash = runtime.turn_slash_command
-    if slash or updates > 0 or started_at is None:
-        return
-    if time.monotonic() - started_at >= EMPTY_TURN_SECONDS:
-        return
-    backend.store.append_message(
-        session_id, "status", "system", {"event": "empty_turn", "detail": EMPTY_TURN_DETAIL}
-    )
+        runtime.compaction_seen = False
 
 
 def send_blocked(db: Any, session_id: str, runtime: SessionRuntime, text: str) -> bool:
