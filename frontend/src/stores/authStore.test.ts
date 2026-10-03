@@ -10,6 +10,8 @@ import {
   logout as apiLogout,
 } from '../api/authApi'
 import type { UserResponse } from '../api/authApi'
+import { queryClient } from '../lib/queryClient'
+import { queryKeys } from '../lib/queryKeys'
 
 vi.mock('../api/authApi', () => ({
   fetchBootstrapStatus: vi.fn(),
@@ -110,6 +112,15 @@ describe('login', () => {
     })
   })
 
+  it('drops query data cached under a previous identity (#711)', async () => {
+    vi.mocked(apiLogin).mockResolvedValue(adminUser)
+    queryClient.setQueryData(queryKeys.workspaces(), [{ id: 'stale' }])
+
+    await useAuthStore.getState().login('admin', 'secret')
+
+    expect(queryClient.getQueryData(queryKeys.workspaces())).toBeUndefined()
+  })
+
   it('propagates failures and stays anonymous', async () => {
     useAuthStore.setState({ status: 'anonymous' })
     vi.mocked(apiLogin).mockRejectedValue(
@@ -141,6 +152,15 @@ describe('logout', () => {
       user: null,
       status: 'anonymous',
     })
+  })
+
+  it('drops the previous identity query cache (#711)', async () => {
+    vi.mocked(apiLogout).mockResolvedValue(undefined)
+    queryClient.setQueryData(queryKeys.workspaces(), [{ id: 'admin-only' }])
+
+    await useAuthStore.getState().logout()
+
+    expect(queryClient.getQueryData(queryKeys.workspaces())).toBeUndefined()
   })
 
   it('still clears the local session when the server request fails', async () => {

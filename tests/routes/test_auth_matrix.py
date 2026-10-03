@@ -85,10 +85,71 @@ def test_admin_passes_without_membership(client, workspace_id) -> None:
     assert patched.status_code == 200
 
 
-def test_member_listing_hides_unauthorized_workspaces(client, workspace_id) -> None:
-    _create_member(client)
+def _listed_ids(http_client) -> set[str]:
+    response = http_client.get("/api/workspaces")
+    assert response.status_code == 200, response.text
+    return {workspace["id"] for workspace in response.json()["workspaces"]}
+
+
+def _scoped_bearer_client(client, job_db, user_id: str, **mint_kwargs):
+    from server.app.auth import scoped_tokens
+
+    token = scoped_tokens.mint_scoped_token(job_db, user_id, **mint_kwargs)
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+    return scoped
+
+
+@pytest.fixture
+def two_workspaces(client, job_db) -> tuple[str, str]:
+    del client
+    joined = job_db.create_workspace(default_workflow_key="matrix_joined", name="Joined")["id"]
+    other = job_db.create_workspace(default_workflow_key="matrix_other", name="Other")["id"]
+    return str(joined), str(other)
+
+
+def test_member_listing_hides_unauthorized_workspaces(client, two_workspaces, job_db) -> None:
+    """#711: a non-admin only lists the workspaces it is a member of — no
+    member row means an empty list, never the instance-wide enumeration."""
+    joined, other = two_workspaces
+    member_id = _create_member(client)
     member = _member_client(client)
-    assert member.get("/api/workspaces").status_code == 200
+    assert _listed_ids(member) == set()
+
+    job_db.upsert_workspace_member(joined, member_id, "viewer")
+    assert _listed_ids(member) == {joined}
+    # Any member role counts; the role only gates reads vs writes per workspace.
+    job_db.upsert_workspace_member(other, member_id, "editor")
+    assert _listed_ids(member) == {joined, other}
+
+
+def test_admin_listing_keeps_every_workspace(client, two_workspaces) -> None:
+    """#711: admins keep the full listing without any member row (the admin
+    pages — token issuance, member management — depend on it)."""
+    assert _listed_ids(client) >= set(two_workspaces)
+
+
+def test_studio_scoped_token_listing_follows_minter_and_binding(
+    client, two_workspaces, job_db
+) -> None:
+    """#711: a studio-agent scoped token inherits its minter's visibility
+    (unbound: membership for a member, everything for an admin), and a
+    workspace-bound run token only ever lists its binding."""
+    joined, other = two_workspaces
+    member_id = _create_member(client)
+    job_db.upsert_workspace_member(joined, member_id, "viewer")
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+
+    unbound_member = _scoped_bearer_client(client, job_db, member_id, origin="user")
+    assert _listed_ids(unbound_member) == {joined}
+    unbound_admin = _scoped_bearer_client(client, job_db, admin_id, origin="user")
+    assert _listed_ids(unbound_admin) >= {joined, other}
+
+    bound_admin = _scoped_bearer_client(client, job_db, admin_id, workspace_id=other)
+    assert _listed_ids(bound_admin) == {other}
+    # A bound token never widens its minter's visibility either.
+    bound_member_elsewhere = _scoped_bearer_client(client, job_db, member_id, workspace_id=other)
+    assert _listed_ids(bound_member_elsewhere) == set()
 
 
 def test_workspace_create_is_admin_only(client) -> None:
