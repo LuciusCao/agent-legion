@@ -472,6 +472,11 @@ with three read-only endpoints, all scoped by the workspace in the URL path:
 | `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts` | 产物清单（名字、形态、大小、content_hash、uploaded_at、媒体类型、#739 直连下载 URL 及其有效期） |
 | `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw` | 产物字节流（支持 `Range`，媒体类型按白名单；直连 URL 的兜底通道） |
 
+前半程（签发 token、`POST /runs` 提交、按 `run_id` 列 job）与整条链路的
+幂等/重试语义、错误码表见
+[workspace-api-tokens.md](workspace-api-tokens.md)；本节只展开读取面，
+文末给出照抄可跑的全链路示例。
+
 **鉴权.** 与其它 workspace 端点同一守卫（`require_workspace_access`）：
 会话 cookie 或 #626 的 workspace API token（`Authorization: Bearer <token>`
 ——Bearer 通道免 CSRF）。跨 workspace 的 job_id 一律 404（归属校验兼作
@@ -555,61 +560,108 @@ workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前�
   仍可下载。因此真正的访问上限是「已签发 URL 的 TTL」，确认对象已删除
   才算切断（可在对象存储侧按 `jobs/{workspace_id}/{job_id}/` 前缀核对）。
 
-**最小完整示例**（curl；token 签发与提交面细节见
-[workspace-api-tokens.md](workspace-api-tokens.md)——#626 的 workspace
-API token 唯一支持的提交面是 `POST /runs`：`/job-batches` 挂载
+**最小完整示例**（签发 token → 提交 → 轮询 → 下载）。端点全集、请求/
+响应形态、幂等与重试、错误码表见
+[workspace-api-tokens.md](workspace-api-tokens.md)，以下两段示例与之
+一一对应（`tests/routes/test_external_integration_docs_contract.py` 把
+示例里的每个端点钉在 OpenAPI 契约与 api token 权限面上）。下载一步按上表
+直连优先：`download_url` 为 null、已过 `expires_at` 或直连失败时回落 raw
+端点。#626 的
+workspace API token 唯一支持的提交面是 `POST /runs`：`/job-batches` 挂载
 `reject_studio_agent_scope`，对包括 `actor_scope='api'` 在内的全部
-scoped token 一律 403）：
+scoped token 一律 403。
 
 ```bash
+set -euo pipefail  # 任何一步失败立即停下，不带着空变量往下跑
 HOST="https://agent-legion.example.com"
 WS="my-workspace"
-# 1) 提交（items 引用已就位的 material/bundle/ref；一项一个 job）
-RUN_ID=$(curl -sS -X POST "$HOST/api/workspaces/$WS/runs" \
+# 0) 签发 token（管理员会话；或控制台 workspace 设置 → Agent 与 Worker）。
+#    明文只在这次响应里出现一次，落到调用方的密钥存储
+WORKSPACE_API_TOKEN=$(curl -sS -X POST "$HOST/api/workspaces/$WS/api-tokens" \
+  -H "Authorization: Bearer $ADMIN_SESSION" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "cms-cron", "ttl_hours": 720}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["api_token"])')
+
+# 1) 提交（items 引用已就位的 material/bundle/ref；一项一个 job）。
+#    响应带 run.id 与本次新建的 job_ids（#735）；重复提交的 400 语义见
+#    workspace-api-tokens.md「幂等与重试」
+HTTP=$(curl -sS -o submit.json -w '%{http_code}' -X POST "$HOST/api/workspaces/$WS/runs" \
   -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"items": [{"type": "material", "material_id": "mat-1"}]}' \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])')
+  -d '{"items": [{"type": "material", "material_id": "mat-1"}]}')
+if [ "$HTTP" != 200 ]; then
+  # 400「No tasks were resolved from input」= 全部条目已有 job（不是失败），
+  # 按去重键反查已有 job 见下方 Python 示例的 find_existing_job；其它状态码
+  # 的处理见 workspace-api-tokens.md 错误码表
+  echo "submit HTTP $HTTP: $(cat submit.json)" >&2
+  exit 1
+fi
+RUN_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])' < submit.json)
+# job_ids 可能为空：#501 失败 run 治愈（created_count=0），或并发重叠提交时
+# 条目归了别的 run——判空后按 run_id 读回
+JOB_ID=$(python3 -c 'import json,sys; ids=json.load(sys.stdin)["job_ids"]; print(ids[0] if ids else "")' < submit.json)
 
-# 2) 取 job id（POST /runs 响应只带 run + created_count：按 run_id 查
-#    snapshot；多页用 next_cursor 循环）
-JOB_ID=$(curl -sS "$HOST/api/workspaces/$WS/jobs/snapshot?run_id=$RUN_ID" \
-  -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["jobs"][0]["id"])')
+# 2) 按 run 列 job（job_ids 为空或丢失时的读回路径；大 run 改用
+#    /jobs/snapshot?run_id=…&limit=500 按 next_cursor 分页）
+if [ -z "$JOB_ID" ]; then
+  JOB_ID=$(curl -sS --fail "$HOST/api/workspaces/$WS/jobs?run_id=$RUN_ID" \
+    -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
+    | python3 -c 'import json,sys; jobs=json.load(sys.stdin)["jobs"]; print(jobs[0]["id"] if jobs else "")')
+fi
+if [ -z "$JOB_ID" ]; then
+  # 该 run 下也没有 job：条目全被别的 run 抢走，按去重键反查（Python 示例）
+  echo "run $RUN_ID has no jobs; reconcile by (source_type, source_id)" >&2
+  exit 1
+fi
 
-# 3) 轮询状态直到 completed / failed
+# 3) 轮询状态直到终态 completed / failed（paused、awaiting_approval
+#    是等待态，继续轮询）
 while :; do
-  STATUS=$(curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
+  STATUS=$(curl -sS --fail "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
     -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
   echo "status: $STATUS"
-  case "$STATUS" in completed|failed|cancelled) break;; esac
+  case "$STATUS" in completed|failed) break;; esac
   sleep 15
 done
+if [ "$STATUS" = failed ]; then
+  # 失败 job 可能没有产物；error_summary 是失败原因摘要
+  curl -sS --fail "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
+    -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["error_summary"])' >&2
+  exit 1
+fi
 
 # 4) 取产物清单（content_hash / uploaded_at 区分执行；#739：object 条目
-#    另带 download_url 直连地址 + expires_at 有效期）
-MANIFEST=$(curl -sS "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
-  -H "Authorization: Bearer $WORKSPACE_API_TOKEN")
+#    另带 download_url 直连地址 + expires_at 有效期）；这里取第一个产物
+curl -sS --fail -o manifest.json "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
+  -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
+ARTIFACT=$(python3 -c 'import json,sys; a=json.load(sys.stdin)["artifacts"]; print(a[0]["name"] if a else "")' < manifest.json)
+[ -n "$ARTIFACT" ] || { echo "job $JOB_ID has no artifacts" >&2; exit 1; }
+# 直连地址：null（local 条目 / 未配置对象存储）或已过 expires_at 时输出空串
+URL=$(python3 -c '
+import json, sys
+from datetime import datetime, timezone
+a = json.load(sys.stdin)["artifacts"]
+e = a[0] if a else None
+live = e and e["download_url"] and datetime.fromisoformat(
+    e["expires_at"].replace("Z", "+00:00")) > datetime.now(timezone.utc)
+print(e["download_url"] if live else "")' < manifest.json)
 
-# 5) 下载指定产物——直连优先（S3 直接应答，不穿 Host 代理），null 则回落
-#    raw 端点（local 条目 / 未配置对象存储时的唯一通道）。--compressed：
-#    gzip 产物两条通道都带 Content-Encoding: gzip，curl 默认不解码。
+# 5) 下载——直连优先（S3 直接应答，不穿 Host 代理），无直连地址或直连失败
+#    （403：过期或签名凭据提前失效；public endpoint 未配置时网络外不可达）
+#    回落 raw 端点。--compressed：gzip 产物两条通道都带 Content-Encoding:
+#    gzip，curl 默认不解码。-f：失败以非零退出，不把错误体（S3 错误 XML、
+#    lifecycle 回收后的 404）写成产物文件。
 #    产物名按 URL 路径段 percent-encode（safe=""）：清单名里的 # 或 ?
-#    不编码会被客户端当成 fragment/query 截断，服务端收到残缺名字
+#    不编码会被客户端当成 fragment/query 截断，服务端收到残缺名字。
 NAME=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
-  "report.pdf")
-URL=$(printf '%s' "$MANIFEST" | python3 -c '
-import json,sys
-e = next(a for a in json.load(sys.stdin)["artifacts"] if a["name"] == "report.pdf")
-print(e["download_url"] or "")')
-if [ -n "$URL" ]; then
-  # 直连对象存储：不带 Authorization 头（S3 只按 URL 签名参数应答）。
-  # -f：403（过期或凭据提前失效）以非零退出，不把 S3 错误 XML 写进文件；
-  # 失败时回到第 4 步重取清单再试
-  curl -fsS --compressed -o report.pdf "$URL" || echo "direct download failed: re-fetch manifest" >&2
-else
-  curl -fsS --compressed -o report.pdf \
+  "$ARTIFACT")
+OUT=$(basename -- "$ARTIFACT")
+# 直连对象存储：不带 Authorization 头（S3 只按 URL 签名参数应答）
+if [ -z "$URL" ] || ! curl -fsSL --compressed -o "$OUT" "$URL"; then
+  curl -fsS --compressed -o "$OUT" \
     "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/$NAME/raw" \
     -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
 fi
@@ -619,54 +671,115 @@ Python 等价（`requests`）：
 
 ```python
 import hashlib, time, requests
+from datetime import datetime, timezone
 from urllib.parse import quote
+
+ALREADY_EXISTS = "No tasks were resolved from input"  # 全部条目已有 job 的 400
 
 s = requests.Session()
 s.headers["Authorization"] = f"Bearer {WORKSPACE_API_TOKEN}"  # #626
 
-run_id = s.post(
-    f"{HOST}/api/workspaces/{WS}/runs",
-    json={"items": [{"type": "material", "material_id": "mat-1"}]},
-).json()["run"]["id"]
-job_id = s.get(
-    f"{HOST}/api/workspaces/{WS}/jobs/snapshot", params={"run_id": run_id}
-).json()["jobs"][0]["id"]
+def find_existing_job(source_type: str, source_id: str) -> str | None:
+    """按去重键 (source_type, source_id) 反查已有 job。search 是子串匹配，
+    须精确比对；结果按创建时间倒序分页，旧提交可能在后面的页，沿
+    next_cursor 翻到精确命中或翻完为止。"""
+    cursor = None
+    while True:
+        page = s.get(
+            f"{HOST}/api/workspaces/{WS}/jobs/snapshot",
+            params={"search": source_id, "limit": 500, "cursor": cursor},
+        ).json()
+        for j in page["jobs"]:
+            if j["source_type"] == source_type and j["source_id"] == source_id:
+                return j["id"]
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return None
 
-while (st := s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()["status"]) not in {
-    "completed", "failed", "cancelled"
-}:
+
+items = [{"type": "material", "material_id": "mat-1"}]
+resp = s.post(f"{HOST}/api/workspaces/{WS}/runs", json={"items": items}, timeout=60)
+if resp.status_code == 400 and resp.json().get("detail") == ALREADY_EXISTS:
+    # 「已存在」不是失败（超时重试撞上了上次已成功的提交）：反查已有 job
+    job_ids = []
+else:
+    resp.raise_for_status()
+    body = resp.json()
+    run_id, job_ids = body["run"]["id"], body["job_ids"]  # #735
+    if not job_ids:
+        # #501 治愈路径（created_count=0）：按 run_id 读回该 run 的 job
+        job_ids = [
+            j["id"] for j in s.get(
+                f"{HOST}/api/workspaces/{WS}/jobs", params={"run_id": run_id}
+            ).json()["jobs"]
+        ]
+if not job_ids:
+    # 400「已存在」，或并发重叠提交时条目归了别的 run：按去重键反查
+    found = find_existing_job("material", "mat-1")
+    if found is None:
+        # 翻完也没有：该条目在本 workspace 没有 job（期间被删除等），
+        # 当作未提交处理——交给上层决定重提，不要当成已存在
+        raise RuntimeError("mat-1: no existing job found; resubmit")
+    job_ids = [found]
+job_id = job_ids[0]
+
+# 终态只有 completed / failed；paused、awaiting_approval 是等待态
+while True:
+    job = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()
+    if job["status"] in {"completed", "failed"}:
+        break
     time.sleep(15)
+if job["status"] == "failed":
+    # 失败 job 可能没有产物；error_summary 是失败原因摘要
+    raise RuntimeError(f"job {job_id} failed: {job['error_summary']}")
 
-def fetch_manifest():
-    r = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts")
-    r.raise_for_status()
-    return {e["name"]: e for e in r.json()["artifacts"]}
+def live_url(entry) -> str | None:
+    """直连地址：null（local 条目 / 未配置对象存储）或已过 expires_at 时为 None。"""
+    if not entry["download_url"]:
+        return None
+    expires = datetime.fromisoformat(entry["expires_at"].replace("Z", "+00:00"))
+    return entry["download_url"] if expires > datetime.now(timezone.utc) else None
 
 
-manifest = fetch_manifest()
-for name in list(manifest):
-    entry = manifest[name]
+listing = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts")
+listing.raise_for_status()
+manifest = listing.json()
+for entry in manifest["artifacts"]:  # 可能为空数组：job 没有产出产物
     # 两条通道分开走：Host API 用带 Bearer 的 session；presigned 直连下载
     # 必须用不带任何会话头的独立请求——requests.Session 的会话级头会合并进
     # 每个请求（不区分目标主机），直接 s.get(download_url) 会把 workspace
     # API token 原样发给对象存储主机。S3 只按 URL 里的 SigV4 签名参数应答。
-    if entry.get("download_url"):
-        r = requests.get(entry["download_url"])  # 无鉴权头；gzip 产物自动解码
-        if r.status_code == 403:  # 过期或签名凭据提前失效：重取清单再试一次
-            entry = fetch_manifest()[name]
-            r = requests.get(entry["download_url"])
-        r.raise_for_status()
-        blob = r.content
-    else:
+    blob = None
+    url = live_url(entry)
+    if url is not None:
+        try:
+            direct = requests.get(url, timeout=60)  # 无鉴权头；gzip 产物自动解码
+            if direct.status_code == 403:  # 过期或签名凭据提前失效：重取清单再试一次
+                fresh = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts").json()
+                for e in fresh["artifacts"]:
+                    if e["name"] == entry["name"]:
+                        entry = e
+                url = live_url(entry)
+                direct = requests.get(url, timeout=60) if url else None
+            if direct is not None and direct.ok:
+                blob = direct.content
+        except requests.RequestException:
+            pass  # public endpoint 未配置时直连网络外不可达：回落 raw
+    if blob is None:
         # safe=""：名字里的 # 或 ? 必须 percent-encode——否则 # 起被当作
         # fragment、? 起被当作 query，服务端收到截断后的名字（子路径名的 /
         # 被一并编成 %2F 也无妨：服务端解码后仍按多段名走 {artifact_name:path}）
-        r = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts/{quote(name, safe='')}/raw")
-        r.raise_for_status()
-        blob = r.content
+        raw = s.get(
+            f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts/{quote(entry['name'], safe='')}/raw"
+        )
+        if raw.status_code == 404:
+            # 对象已被 bucket lifecycle 回收：记录后跳过，不要把错误体当产物存下
+            continue
+        raw.raise_for_status()
+        blob = raw.content
     # content_hash 是未压缩内容的 sha256：两条通道都返回名字下的当前字节，
     # 期间若发生重跑就会不一致，此时重取清单
     # （local 条目没有 content_hash，跳过校验）
     if entry["content_hash"] and hashlib.sha256(blob).hexdigest() != entry["content_hash"]:
-        raise RuntimeError(f"{name}: bytes changed since manifest (rerun?) — re-fetch")
+        raise RuntimeError(f"{entry['name']}: bytes changed since manifest (rerun?) — re-fetch")
 ```
