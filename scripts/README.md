@@ -62,6 +62,8 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
 | `init-worktree.sh` | 一键初始化新 worktree（复制 .env、派生并创建专属 Postgres 库、生成 deploy/secrets、种子 worker 配置；幂等，macOS）。 |
+| `clean-worktree.sh` | worktree 收尾一键清理（worktree / 本地分支 / 派生库 / 派生 bucket；bucket 删除后经 SeaweedFS master 只读核对同名 collection 残留卷并给出手动回收命令，#824；幂等可重跑，自带护栏）。 |
+| `seaweedfs_collection.py` | `clean-worktree.sh` 调用的 SeaweedFS collection 残留卷只读核查模块（只核查派生命名、非 develop/prod 的 collection，从不自动删除；master 地址见 `AGENT_LEGION_SEAWEEDFS_MASTER_URL`）。 |
 | `resume-workspaces.sh` | 按需恢复本 worktree 全部 workspace 调度（后端每次启动重置为暂停；须在后端首次启动建表后执行，未建表时退出码 1 并提示）。 |
 | `dev_stack.sh` | 开发环境一键启停（`make dev-up` / `dev-down` / `dev-status`）：后台编排 backend + frontend + worker（复用 Makefile `dev-*` target），幂等，日志在 `data/logs/dev-*.log`，up 完成后打印各服务 URL。 |
 | `native-prod-up.sh` / `native-prod-down.sh` | 启停原生（非 Docker）生产环境（后端 8000 + worker 8787，前端由后端直接服务 `frontend/dist`；幂等，仅 prod worktree 使用）。由 `make prod-up` / `make prod-down` 调用。 |

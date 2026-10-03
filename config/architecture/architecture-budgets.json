@@ -928,6 +928,7 @@
     "scripts/remote/llm_gateway_sse.py": 25,
     "scripts/remote/llm_gateway_stream.py": 35,
     "scripts/report-orphan-s3-buckets.py": 81,
+    "scripts/seaweedfs_collection.py": 67,
     "scripts/seed/__init__.py": 10,
     "scripts/seed/export_seed.py": 365,
     "scripts/seed/import_seed.py": 445,
