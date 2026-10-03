@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Fixed
+- upgrade-workflow（inherit）+ 节点 rerun 组合后 job 永久卡 queued（issue #827）：根因是清单行与权威对象的寻址粒度不一致——对象键 `jobs/<ws>/<job>/<name>` 只按名字寻址，`job_artifacts` 却一节点一行，rerun / run-to / upgrade inherit 退役产物时只删「重置面 node_key」的行。同名但 node_key 在重置面之外的行（例如 inherit 升级删除节点时被保留节点声明面挡下的旧生产者行）存活下来，提交后的对象清理把它们当作「仍被引用」跳过（日志 `skipped N re-registered object(s)`）；被删的恰是最新写者时，幸存旧行成为 hydration 的「最新」行，对象里却是被删写者的字节，content-hash 不符或对象缺失，恢复永远不全、job 永久 defer。三条退役路径改为按名删除该 job 的全部同名行（`server/app/jobs/artifact_row_retire.py`），行与对象同生共死；退役名集合本就排除了保留节点的声明面，继承节点的有效产物不受影响。
+- ready-gate hydration 遇到悬挂清单行不再无声永久 defer（issue #827）：恢复结果区分「对象不存在 / 字节不符」（重试不会自愈）与其余瞬时失败；同一清单行连续悬挂 5 轮后，若该名字的全部可运行消费者都被在途的其他生产者挡住（会被重写、且不是分支条件产物），就退出 defer 集，job 继续调度；否则维持 defer，但打一次带 suggested action（重跑哪个生产节点）的 WARNING。defer 日志带 `reason=hydration_incomplete` 与悬挂行的连续轮次，workflow worker pass log 新增 `paused_jobs` / `hydration_deferred` 计数，「调度暂停」与「hydration 恢复不全」可以直接区分。
+
 ## [0.7.14] - 2026-10-03
 
 主打外部对接闭环与执行/校验正确性：run → job ID 链路打通（#735）、外部产物 presigned 直连下载（#739）、API token 每 token 限流（#738）与 api-scope 白名单机制化（#734）；job 节点计数触发器死锁修复（#690，schema 推进至 v88）、Host 输出校验声明视图（#757）、timeout_seconds 运行时可调（#691）。Worker 控制台接入闭环（#762/#763/#765，schema v87）；Studio 线收后台任务可见性与会话生命周期防护（#772/#806/#802）、长会话虚拟滚动（#803）与抽屉层级/布局三连修；infra 面 velites 双通道刷新（#831）、前端依赖指纹（#810）、pre-push 传输诊断（#679）。

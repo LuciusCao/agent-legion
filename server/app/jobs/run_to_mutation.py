@@ -15,6 +15,7 @@ from typing import Any
 
 from server.app.agent_broker.manifest_trim import cancel_queued_sql
 from server.app.db.connection import DatabaseConnection
+from server.app.jobs.artifact_row_retire import retire_artifact_rows_by_name
 from server.app.jobs.job_state_mutations import JobMutationConflict
 from server.app.workflows.sharding import delete_shards
 
@@ -62,21 +63,10 @@ def apply_run_to(
     if staged_artifact_names and reset_nodes:
         # #759：与 mark_nodes_for_rerun 同 invariant——被暂存产物（本地文件
         # 已移走）的清单行必须在同事务删除，否则 run-to 永不完成时作业仍在
-        # 从对象存储提供上一轮产物。node 过滤用调用方算出的权威重置集
-        # （closure ∩ 非 completed），与 stage_outputs 的暂存集同源。
-        reset_marks = ",".join("%s" for _ in reset_nodes)
-        name_marks = ",".join("%s" for _ in staged_artifact_names)
-        deleted_rows = [
-            dict(row)
-            for row in conn.execute(
-                f"""
-                delete from job_artifacts
-                where job_id=%s and node_key in ({reset_marks}) and name in ({name_marks})
-                returning node_key, name, storage_key
-                """,
-                (job_id, *sorted(reset_nodes), *sorted(staged_artifact_names)),
-            ).fetchall()
-        ]
+        # 从对象存储提供上一轮产物。名字集是调用方按权威重置集（closure ∩
+        # 非 completed）暂存算出的（A3：重置集外有人声明的名不在其中）；
+        # #827 起按名退役（对象槽按名字寻址），重置集外的同名遗留行一并删除。
+        deleted_rows = retire_artifact_rows_by_name(conn, job_id, staged_artifact_names)
     # EXEC-GENERATION-001：run-to（无起始节点）路径的唯一 bump 点，fold 进
     # set_run_to_control 的 jobs UPDATE（run-to-with-start 在同事务里改走
     # mark_nodes_for_rerun 的 jobs UPDATE bump，这里不再 bump，整事务恰好一次）。

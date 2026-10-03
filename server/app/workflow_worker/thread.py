@@ -198,6 +198,7 @@ class WorkflowWorkerThread:
             claim_counts=self.state.pass_claim_counts,
             stock_gated=self.state.agent_pass.stock_gated,
             scan_phases=self.state.scan_phases,
+            skips=self.state.pass_skips,
         )
         if scan_seconds > 15:
             logger.warning("slow workflow worker pass: " + pass_stats[0], *pass_stats[1:])

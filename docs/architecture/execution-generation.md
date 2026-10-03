@@ -422,6 +422,11 @@ running/completed 的名跳过），不误删新代次写回的新字节（codex
       （codex #776 复审 P1）——面外生产者留着的共享名既不暂存也不删行，
       重置节点本次没写该文件时 `_check_outputs` 只查存在性，会把面外
       旧字节当本次输出。
+- [ ] 清单行退役是否按名？对象槽按名寻址，`job_artifacts` 一节点一行：
+      退役名一律经 `artifact_row_retire.retire_artifact_rows_by_name`
+      删除该 job 的**全部同名行**（#827），不得再按 `node_key ∈ 重置面`
+      过滤——面外同名遗留行会被对象清理当作「仍被引用」保住对象，被删
+      的又是最新写者时它成为 hydration 的「最新」行而字节不符，永久 defer。
 - [ ] 旧产物名的存亡是否由按名闭包唯一判定？跨 revision 比较（upgrade）
       里「旧 output − 新 output − 新消费名」（`removed_artifact_face`，
       消费名含分支条件产物，取自 `artifact_consumption_index` 键集）是唯一
@@ -544,7 +549,11 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
     缺失/hash 不符时，job 每个 poll 周期全量重试下载（不缓存即重试是
     刻意纪律——防 parked-forever）；方向 fail-closed 正确，代价是
     warning 与 S3 GET 的固定频率噪音。后续方向：只存 next-retry 时刻的
-    负缓存（不存评估结论）。另：`.part` 固定暂存名在 hydration 与 claim
+    负缓存（不存评估结论）。#827 起悬挂行有兜底：同一行连续
+    `DANGLING_ESCALATION_PASSES` 轮 object_missing / hash_mismatch 后，
+    会被在途生产者重写的名字退出 defer 集，否则维持 defer 并打一次带
+    suggested action 的 WARNING（`workflow_worker/hydration_dangling.py`）。
+    另：`.part` 固定暂存名在 hydration 与 claim
     侧 `restore_missing_inputs` 并发恢复同名时互相截断、双方 digest 失
     败后各自重试——自愈，仅浪费一次下载，不修。
 
