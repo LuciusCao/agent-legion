@@ -67,6 +67,18 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     # variable must fail loudly at load time instead of silently ignoring a
     # credential the operator still believes is active.
     "AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD": (("auth", "bootstrap_admin_password"), _str_parser),
+    # #738: per-token request bucket for workspace API tokens (instance-wide
+    # refill rate per minute + burst capacity; defaults 60 / 20 in
+    # auth/api_token_limits.py). env-only like the rest of ``auth``; a
+    # non-integer or < 1 value fails the startup.
+    "AGENT_LEGION_API_TOKEN_RATE_LIMIT_PER_MINUTE": (
+        ("auth", "api_token_rate_limit_per_minute"),
+        _int_parser,
+    ),
+    "AGENT_LEGION_API_TOKEN_RATE_LIMIT_BURST": (
+        ("auth", "api_token_rate_limit_burst"),
+        _int_parser,
+    ),
     "AGENT_LEGION_CORS_ALLOW_ORIGINS": (("server", "cors", "allow_origins"), _csv_parser),
     "AGENT_LEGION_CORS_ALLOW_CREDENTIALS": (("server", "cors", "allow_credentials"), _bool_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),

@@ -23,11 +23,9 @@ from typing import Annotated, Any
 from fastapi import Depends, Request
 from fastapi.exceptions import HTTPException
 
+from server.app.auth.api_token_identity import resolve_api_token_identity
 from server.app.auth.scoped_tokens import STUDIO_AGENT_SCOPE
-from server.app.auth.workspace_api_tokens import (
-    WORKSPACE_API_SCOPE,
-    split_api_token,
-)
+from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 
 SESSION_COOKIE = "agent_legion_session"
 CSRF_HEADER = "x-agent-legion-request"
@@ -65,17 +63,12 @@ def get_current_user(request: Request) -> dict[str, Any]:
     if user is None and channel == "bearer":
         # Scoped tokens (studio agent runs) authenticate via Bearer only.
         user = request.app.state.auth_service.authenticate_scoped(token)
-    if user is None and channel == "bearer" and split_api_token(token) is not None:
+    if user is None and channel == "bearer":
         # Workspace API intake tokens (#626): same Bearer-only, CSRF-exempt
         # rule as scoped tokens. Only the {token_id}.{secret} shape reaches
-        # the store — a session/scoped token can never collide with it.
-        resolved = request.app.state.workspace_api_token_store.resolve_api_token(token)
-        if resolved is not None:
-            user = {
-                "actor_scope": WORKSPACE_API_SCOPE,
-                "scoped_workspace_id": resolved["workspace_id"],
-                "api_token_id": resolved["token_id"],
-            }
+        # the store — a session/scoped token can never collide with it. The
+        # #738 per-token request bucket is charged there (429 + Retry-After).
+        user = resolve_api_token_identity(request, token)
     if user is None:
         raise HTTPException(status_code=401, detail="Session expired or revoked")
     if (
