@@ -132,6 +132,46 @@ def test_path_mode_without_path_velites_falls_back_to_install_dir(
     assert "velites-sandbox" not in targets  # 无存在痕迹，不主动创造
 
 
+def test_path_mode_relative_path_entry_yields_single_absolute_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#850：PATH 含相对条目时，主目标（``bin/velites``）与独立 which 命中
+    （``./bin/velites``）是同一文件的两种拼写——字符串去重放过后同一暂存件
+    被备妥两次，应用阶段第二次 mv 找不到暂存件报错退出。目标须统一
+    abspath 后去重，且一律输出绝对路径（行协议约定）。"""
+    _write_executable(tmp_path / "bin" / "velites")
+    _write_executable(tmp_path / "bin" / "velites-sandbox")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", f".{os.sep}bin{os.pathsep}/usr/bin{os.pathsep}/bin")
+
+    targets = planner._resolve_deployment_targets(None)
+
+    assert targets == [
+        ("velites", str(tmp_path / "bin" / "velites")),
+        ("velites-sandbox", str(tmp_path / "bin" / "velites-sandbox")),
+    ]
+
+
+def test_path_mode_keeps_symlink_target_unresolved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#850 约束：归一只做 abspath、不做 realpath——PATH 上的 velites 是
+    symlink 时安置目标仍是链接本身（解析 symlink 会把替换目标改成链接指向
+    的文件，改变既有安置语义）。"""
+    real = tmp_path / "opt" / "velites"
+    _write_executable(real)
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "velites").symlink_to(real)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bundled")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", f"bin{os.pathsep}/usr/bin{os.pathsep}/bin")
+
+    targets = planner._resolve_deployment_targets(None)
+
+    assert targets == [("velites", str(tmp_path / "bin" / "velites"))]
+
+
 def test_dest_mode_includes_family_member_only_when_trace_exists(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

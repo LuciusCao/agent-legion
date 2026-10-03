@@ -6,16 +6,20 @@
 # 端口与绑定地址可分别用 NATIVE_BACKEND_PORT / NATIVE_WORKER_PORT 与
 # NATIVE_BACKEND_BIND / NATIVE_WORKER_BIND 覆盖（默认 8000/8787 与 127.0.0.1；
 # 暴露给局域网/overlay 网络时把 bind 设为对应网卡地址，S3 联动配置见
-# docs/agent-worker-deployment.md）。
+# docs/agent-worker-deployment.md）。取值两级来源：进程环境 > 根 .env
+# （#486：写进 .env 才能跨 shell 会话/重启/launchd 持久，export 仍是临时
+# 覆盖的逃生门；空值按未配置回落默认）。native-prod-down.sh 读同一组来源。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=dotenv-lib.sh
+source scripts/dotenv-lib.sh
 
-BACKEND_PORT="${NATIVE_BACKEND_PORT:-8000}"
-WORKER_PORT="${NATIVE_WORKER_PORT:-8787}"
-BACKEND_BIND="${NATIVE_BACKEND_BIND:-127.0.0.1}"
-WORKER_BIND="${NATIVE_WORKER_BIND:-127.0.0.1}"
+BACKEND_PORT="$(dotenv_lookup_or NATIVE_BACKEND_PORT 8000 .env)"
+WORKER_PORT="$(dotenv_lookup_or NATIVE_WORKER_PORT 8787 .env)"
+BACKEND_BIND="$(dotenv_lookup_or NATIVE_BACKEND_BIND 127.0.0.1 .env)"
+WORKER_BIND="$(dotenv_lookup_or NATIVE_WORKER_BIND 127.0.0.1 .env)"
 CAFFEINATE="$(command -v caffeinate || true)"
 
 mkdir -p data/logs
@@ -68,6 +72,38 @@ port_listening() {
     family="$(listener_family "$1")"
     lsof -nP -a -iTCP:"$port" -i"$family" -sTCP:LISTEN -F n 2>/dev/null \
         | sed -n 's/^n//p' | grep -Fxq -e "${display}:${port}" -e "*:${port}" -e "[::]:${port}"
+}
+
+# 通配 bind 的疑似双实例检测（#486）：0.0.0.0 / :: 与同端口的具体地址监听
+# 可以并存（SO_REUSEADDR），port_listening 只认通配监听，于是「127.0.0.1
+# 旧实例在跑、改 bind=0.0.0.0 再 prod-up」会起出连同一个库的第二个实例
+# （单副本约束被破坏，症状见 docs/architecture/deployment.md）。通配监听
+# 本已覆盖全部接口，同端口再有任何监听（不分地址族）几乎必然是本服务的
+# 旧实例——输出这些监听地址，由调用方拒绝启动；非通配 bind 不输出。
+wildcard_bind_conflicts() {
+    local bind="$1" port="$2"
+    case "$bind" in
+        0.0.0.0 | :: | "[::]") ;;
+        *) return 0 ;;
+    esac
+    lsof -nP -a -iTCP:"$port" -sTCP:LISTEN -F n 2>/dev/null | sed -n 's/^n//p' | sort -u
+}
+
+# 通配 bind 而端口上已有非通配监听时拒绝启动（不自动视为已运行跳过：
+# 那样旧实例继续只听 loopback，远程设备仍失连，且就绪提示会误报新 bind
+# 已生效）。须先按旧 bind 停掉旧实例，或改回旧 bind。
+refuse_wildcard_double_instance() {
+    local name="$1" bind="$2" port="$3" var="$4" listeners
+    port_listening "$bind" "$port" && return 0  # 通配监听已在，正常幂等跳过
+    listeners="$(wildcard_bind_conflicts "$bind" "$port")"
+    [[ -n "$listeners" ]] || return 0
+    {
+        echo "错误: ${name} 要以通配地址 ${bind}:${port} 启动，但该端口已有其他监听："
+        printf '%s\n' "$listeners" | sed 's/^/  /'
+        echo "通配监听会与它们并存，形成连同一个库的双实例（违反单副本约束）。"
+        echo "若是旧 bind 的实例，请先停止：${var}=<旧地址> make prod-down（或 .env 里改回旧值后 make prod-down），再重新 make prod-up。"
+    } >&2
+    return 1
 }
 
 # 健康检查与就绪提示用的探测地址：0.0.0.0 是 IPv4 全接口监听，必然含
@@ -139,27 +175,18 @@ LOCAL_S3_SERVICE="$(scripts/local-s3-decide.sh --service-name .env deploy/.env)"
 # codex P1（PR #648）：凭据只随 compose 子进程走，绝不能 export 进本脚本
 # 环境——下方启动的 Worker 会复制全部 os.environ 给每个 Agent 子进程
 # （worker/supervisor.py），S3 管理凭据不得流入 Agent 面。
-# 值解析与 scripts/local-s3-decide.sh 的 _dotenv_value 同语义（去 = 前缀、
-# 首尾空白、一层配对引号）——padded/带引号的 .env 值若在这里解析漂移，
-# compose 与后端会拿到不同凭据，正是 #624 要消灭的静默 reachable=false。
+# 值解析走 scripts/dotenv-lib.sh 的 dotenv_lookup（进程环境优先、去首尾
+# 空白与一层配对引号，与 local-s3-decide.sh 同一实现）——padded/带引号的
+# .env 值若在这里解析漂移，compose 与后端会拿到不同凭据，正是 #624 要
+# 消灭的静默 reachable=false。
 collect_s3_credentials() {
-    local key line value
+    local key value
     COMPOSE_S3_ENV=()
     for key in AGENT_LEGION_S3_ACCESS_KEY AGENT_LEGION_S3_SECRET_KEY; do
-        if [[ -n "${!key:-}" ]]; then
-            COMPOSE_S3_ENV+=("$key=${!key}")  # 已有进程环境值，原样透传
-            continue
+        value="$(dotenv_lookup "$key" .env)"
+        if [[ -n "$value" ]]; then
+            COMPOSE_S3_ENV+=("$key=$value")
         fi
-        line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" .env 2>/dev/null | head -n 1 || true)"
-        [[ -n "$line" ]] || continue
-        value="${line#*=}"
-        value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-        if [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-        [[ -n "$value" ]] && COMPOSE_S3_ENV+=("$key=$value")
     done
 }
 if [[ "$LOCAL_S3_DECISION" == "start" ]]; then
@@ -183,7 +210,13 @@ elif [[ "$local_s3_rc" -ne 0 ]]; then
     echo "警告: 跳过本地 ${LOCAL_S3_SERVICE} 启动（原因见上方），材料相关功能将不可用" >&2
 fi
 
-# 2. 后端
+# 2. 后端（启动任何进程前先做通配双实例检查，避免只起了一半）
+wildcard_rc=0
+refuse_wildcard_double_instance "后端" "$BACKEND_BIND" "$BACKEND_PORT" NATIVE_BACKEND_BIND || wildcard_rc=1
+refuse_wildcard_double_instance "Worker" "$WORKER_BIND" "$WORKER_PORT" NATIVE_WORKER_BIND || wildcard_rc=1
+if [[ "$wildcard_rc" -ne 0 ]]; then
+    exit 1
+fi
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
 else
