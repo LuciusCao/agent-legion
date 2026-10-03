@@ -127,6 +127,40 @@ def test_repo_config_keeps_the_prose_aliases() -> None:
     assert "外部 skill" in patterns
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_term_containing_a_retirement_word_does_not_exempt_itself() -> None:
+    # #834 / codex on #889: "legacy" is both a retirement phrase and part of
+    # the retired phrasing — the term's own match must not self-exempt.
+    terms = (RetiredTerm(pattern=r"\blegacy validators?\b", retired_in="#834"),)
+    assert find_retired_term_hits(["runs the legacy validator"], terms) == [(1, terms[0])]
+    # A retirement phrase OUTSIDE the match still exempts (historical mention).
+    assert find_retired_term_hits(["the legacy validator name was retired"], terms) == []
+
+
+def test_real_config_flags_business_rule_layer_old_phrasings(tmp_path: Path) -> None:
+    # Runs the REAL config (not a fixture) so a pattern that can never fire
+    # — e.g. one swallowed by its own retirement word — fails here.
+    make_repo(
+        tmp_path,
+        config=(REPO_ROOT / "config/architecture/docs-retired-terms.yaml").read_text(
+            encoding="utf-8"
+        ),
+    )
+    write(
+        tmp_path / "docs/data-layout.md",
+        "# layout\n\n"
+        "the Host-side legacy validator checks cross-file rules\n\n"
+        "with `validate_output.py` as legacy fallback for business rules\n\n"
+        "校验器本身慢（velites/legacy 脚本 30s timeout）\n",
+    )
+    errors = [e for e in check_docs_retired_terms(tmp_path) if "docs/data-layout.md" in e]
+    assert any(":3:" in e and "legacy validators" in e for e in errors), errors
+    assert any(":5:" in e and "validate_output" in e for e in errors), errors
+    assert any(":7:" in e and "脚本|回落通道" in e for e in errors), errors
+
+
 def test_exempts_retirement_phrase_in_same_line() -> None:
     terms = (RetiredTerm(pattern=r"\bopenclaw\b", retired_in="#75"),)
     hits = find_retired_term_hits(["the openclaw runtime was retired in #75"], terms)
