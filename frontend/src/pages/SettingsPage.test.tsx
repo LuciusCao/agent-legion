@@ -14,6 +14,7 @@ import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'
 import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../types'
 import { useUiStore } from '../stores/uiStore'
+import { useAuthStore } from '../stores/authStore'
 import { api, deleteWorkspace } from '../api'
 import { expectConsoleWarning } from '../test-setup'
 import { useSettingStoreHydration } from '../hooks/useWorkspaceSettingsQuery'
@@ -63,6 +64,17 @@ vi.mock('../api', () => ({
   createRegisterToken: vi.fn(),
   deleteRegisterToken: vi.fn(),
   deleteAgentWorker: vi.fn(),
+  fetchAgentDefinitions: vi.fn().mockResolvedValue({ agents: [] }),
+  archiveAgent: vi.fn(),
+}))
+
+// admin-only 区块里与本文件无关的两块（各自有组件测试）替身化，避免其
+// 未 mock 的端点在 jsdom 里发真实请求。
+vi.mock('../components/settings/WorkspaceApiTokensSection', () => ({
+  WorkspaceApiTokensSection: () => null,
+}))
+vi.mock('../components/settings/WorkspaceMembersSection', () => ({
+  WorkspaceMembersSection: () => null,
 }))
 
 const mockApi = vi.mocked(api)
@@ -219,6 +231,27 @@ describe('SettingsPage', () => {
     ])
     expect(navButtons[0]).toHaveAttribute('aria-current', 'true')
     expect(navButtons[1]).not.toHaveAttribute('aria-current')
+  })
+
+  it('shows the Agent definitions section to admins only (#677)', async () => {
+    useAuthStore.setState({
+      user: { id: 'u1', username: 'admin', role: 'admin' },
+    } as unknown as Parameters<typeof useAuthStore.setState>[0])
+    try {
+      renderPage()
+      expect(await screen.findByText('暂无 Agent 定义。')).toBeInTheDocument()
+      const nav = screen.getByRole('navigation')
+      expect(
+        within(nav)
+          .getAllByRole('button')
+          .map((b) => b.textContent)
+      ).toContain('Agent 定义')
+      expect(
+        screen.getByRole('heading', { level: 2, name: 'Agent 定义' })
+      ).toBeInTheDocument()
+    } finally {
+      act(() => useAuthStore.setState({ user: null }))
+    }
   })
 
   it('renders workspace name in header', async () => {

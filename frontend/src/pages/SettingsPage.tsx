@@ -19,6 +19,7 @@ import { WorkspaceApiTokensSection } from '../components/settings/WorkspaceApiTo
 import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
 import { WorkerConsoleGuide } from '../components/settings/WorkerConsoleGuide'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
+import { WorkspaceAgentsSection } from '../components/settings/WorkspaceAgentsSection'
 import styles from './SettingsPage.module.css'
 
 export function SettingsPage() {
@@ -68,6 +69,8 @@ export function SettingsPage() {
     () => [
       { id: 'basic-info', label: '基础信息' },
       { id: 'agent-workers', label: 'Agent 与 Worker' },
+      // Agent 定义端点 admin-only（studio_secured），非 admin 不给入口（#677）。
+      ...(isAdmin ? [{ id: 'workspace-agents', label: 'Agent 定义' }] : []),
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
       ...(hasCodeNodes
         ? [{ id: 'code-node-concurrency', label: '代码节点并发' }]
@@ -165,6 +168,7 @@ export function SettingsPage() {
               <WorkspaceApiTokensSection workspaceId={workspaceId ?? ''} />
             )}
           </section>
+          {isAdmin && <WorkspaceAgentsSection workspaceId={workspaceId} />}
           {isAdmin && <WorkspaceMembersSection workspaceId={workspaceId} />}
           {hasCodeNodes && (
             <section id="code-node-concurrency" className={styles.section}>
