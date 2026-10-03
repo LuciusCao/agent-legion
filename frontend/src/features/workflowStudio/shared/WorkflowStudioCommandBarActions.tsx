@@ -3,7 +3,6 @@ import { WorkflowStudioReadOnlyActions } from './WorkflowStudioReadOnlyActions'
 
 type Props = {
   readOnly: boolean
-  dirty: boolean
   /** codex 轮 5 P1：发布/校验是独立在途维度。 */
   publishing: boolean
   validating: boolean
@@ -16,16 +15,15 @@ type Props = {
    * 变更时必须确认（调用方按 dirty/compare 计数判定）。 */
   confirmAdoptDraft?: boolean
   onPublish: () => void
-  onReset: () => void
   backToDraft: () => void
   useViewedRevisionAsDraft: () => void
 }
 
 /** 指挥中心岛的生命周期动作组（#804 定案）：校验按钮退役（改保存成功后
  * 自动静默校验，结果驱动状态 chip 与本组的发布门控）；发布保持
- * contained 文字主按钮；重置回到岛面——仅 dirty 时外露的 outlined 次级
- * 按钮（干净态消失，单一项的 ⋮ 溢出菜单随之退役）；只读态（返回/设为
- * 草稿）保持文字按钮不动。 */
+ * contained 文字主按钮；#770 顶栏减法：低频破坏性的「重置」不再外露，
+ * 收进版本选择器菜单（宽窄屏同一出口，带确认）；只读态（返回/设为草稿）
+ * 保持文字按钮不动。 */
 export function WorkflowStudioCommandBarActions(props: Props) {
   if (props.readOnly) {
     return (
@@ -42,35 +40,18 @@ export function WorkflowStudioCommandBarActions(props: Props) {
   const publishDisabled =
     !props.canPublish || props.publishing || props.validating
   return (
-    <>
-      <Tooltip title={props.publishTooltip ?? ''}>
-        {/* disabled 时 Tooltip 需要 wrapper span（MUI 约定，否则告警） */}
-        <span>
-          <Button
-            size="small"
-            variant="contained"
-            disabled={publishDisabled}
-            onClick={props.onPublish}
-          >
-            {props.createsRevision === false ? '保存运行配置' : '发布'}
-          </Button>
-        </span>
-      </Tooltip>
-      {props.dirty ? (
+    <Tooltip title={props.publishTooltip ?? ''}>
+      {/* disabled 时 Tooltip 需要 wrapper span（MUI 约定，否则告警） */}
+      <span>
         <Button
           size="small"
-          variant="outlined"
-          disabled={props.publishing}
-          onClick={() => {
-            // 轮 6 H5：重置是破坏性操作（丢弃未发布变更），宽屏外露按钮与
-            // 窄屏菜单项同款确认。
-            if (window.confirm('丢弃当前草稿的未发布变更，重置为已发布版本？'))
-              props.onReset()
-          }}
+          variant="contained"
+          disabled={publishDisabled}
+          onClick={props.onPublish}
         >
-          重置
+          {props.createsRevision === false ? '保存运行配置' : '发布'}
         </Button>
-      ) : null}
-    </>
+      </span>
+    </Tooltip>
   )
 }

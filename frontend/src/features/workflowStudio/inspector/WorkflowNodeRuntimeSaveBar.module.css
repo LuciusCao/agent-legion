@@ -1,0 +1,38 @@
+/* #769 面板级保存条：状态一句话 + 保存草稿 / 应用到运行。 */
+.saveBar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, #e0e0e0);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.saveRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.saveStatus {
+  font-size: 12px;
+  color: #43474e;
+}
+
+.saveWarning {
+  font-size: 12px;
+  color: #b26a00;
+}
+
+.saveActions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.saveHint {
+  font-size: 12px;
+  color: #667085;
+}

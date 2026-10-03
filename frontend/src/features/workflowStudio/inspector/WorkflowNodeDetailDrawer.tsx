@@ -6,7 +6,10 @@
  *   无「← 返回 + 面包屑」——返回语义即关抽屉，workflow 身份在左岛）；
  * - 预览子态（运行 Prompt / 技能文件）无面包屑，给一条精简返回条
  *   「← 节点详情」回 inspector，✕ 始终关抽屉；
- * - ✕ / Esc / 点遮罩都是关闭（清空选中节点）。
+ * - #770 双退出定案（区分位置与图标 + 分级 Esc）：左侧「←」只做一级
+ *   返回（预览 → 节点详情），右侧 ✕ 恒为「关闭节点配置」（两态同一
+ *   文案/图标/位置）；Esc 走分级——预览子态先回节点详情，详情态才关抽屉，
+ *   键盘路径不会一键丢掉导航上下文。
  */
 import { Close } from '@mui/icons-material'
 import { Drawer, IconButton, Tooltip } from '@mui/material'
@@ -38,7 +41,9 @@ export function WorkflowNodeDetailDrawer() {
   // 里的 zIndex 是栈位映射的视觉层级，Esc 栈序 == 视觉序。
   const hidden = view.narrow && view.mobilePanel !== 'graph'
   // #817：paper 样式同时带窄屏顶边让位（页签行之下，Agent 页签可点）。
-  const paperStyle = useStudioDrawerPaperStyle(nodeKey !== null, close, hidden)
+  // #770 分级 Esc：预览子态先回节点详情（同「← 节点详情」），详情态才关。
+  const escape = preview.activeKind ? preview.closePreview : close
+  const paperStyle = useStudioDrawerPaperStyle(nodeKey !== null, escape, hidden)
 
   return (
     <Drawer
@@ -70,20 +75,26 @@ export function WorkflowNodeDetailDrawer() {
               预览的退出入口由这里承接（✕ 始终关抽屉）。 */}
           {preview.activeKind ? (
             <div className={styles.previewBar}>
-              <button
-                type="button"
-                className={styles.previewBack}
-                aria-label="返回节点详情"
-                onClick={preview.closePreview}
-              >
-                ← 节点详情
-              </button>
+              <Tooltip title="返回节点详情（Esc）">
+                <button
+                  type="button"
+                  className={styles.previewBack}
+                  aria-label="返回节点详情"
+                  onClick={preview.closePreview}
+                >
+                  ← 节点详情
+                </button>
+              </Tooltip>
               <span className={styles.previewTitle}>
                 {node?.label ?? nodeKey}
                 {preview.crumbs}
               </span>
-              <Tooltip title="关闭">
-                <IconButton size="small" aria-label="关闭" onClick={close}>
+              <Tooltip title="关闭节点配置">
+                <IconButton
+                  size="small"
+                  aria-label="关闭节点配置"
+                  onClick={close}
+                >
                   <Close fontSize="small" />
                 </IconButton>
               </Tooltip>

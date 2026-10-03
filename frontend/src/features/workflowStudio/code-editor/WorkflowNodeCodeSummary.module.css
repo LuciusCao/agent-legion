@@ -1,0 +1,54 @@
+/* 节点代码窄栏摘要（#770）：行数 + 顶层签名 + 「查看代码」宽视图入口。 */
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fafafa;
+  font-size: 12px;
+  color: #43474e;
+}
+.summaryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lineCount {
+  font-weight: 500;
+  color: #1a1c1e;
+}
+.signatures {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.signature {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.signature code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1a1c1e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.entryBadge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #e3f2fd;
+  color: #1565c0;
+  font-size: 11px;
+}
+.more {
+  color: #667085;
+}
