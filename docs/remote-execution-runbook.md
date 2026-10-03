@@ -536,8 +536,8 @@ workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前�
 | --- | --- | --- |
 | 响应头 | 白名单 Content-Type；非白名单 `attachment`；`.gz` 对象附 `Content-Encoding: gzip` | **相同**：这三个头作为 S3 响应覆盖参数签进 URL，持有者改不了 |
 | gzip 产物（#338，v4+ Worker 的产物都是这种） | 透传压缩字节 + `Content-Encoding: gzip` | **相同**；HTTP 客户端透明解码（`requests` 自动，curl 加 `--compressed`）。清单 `content_encoding: "gzip"` 标出存储形态 |
-| 字节对应关系 | 名字下的**当前**产物（#508 重跑语义） | **相同**：URL 绑定名字而非版本。TTL 内 job 重跑会覆盖同名对象，URL 随之返回新字节。用清单的 `content_hash`（未压缩内容的 sha256）校验，不一致就重取清单 |
-| 鉴权 | 每次请求校验 workspace API token | **不继承**：URL 是独立签名的持有者凭证。吊销 token 后 TTL 内仍可下载（含 TTL 内重跑产生的同名新字节） |
+| 字节对应关系 | 名字下的**当前**产物（#508 重跑语义） | **不继承**（#853）：URL 固定到签发时的那个产物版本。TTL 内 job 重跑产出同名新字节后，旧 URL 返回旧字节或 404，绝不返回新字节；新字节要重取清单拿新 URL。清单的 `content_hash`（未压缩内容的 sha256）仍可用于校验 |
+| 鉴权 | 每次请求校验 workspace API token | **不继承**：URL 是独立签名的持有者凭证。吊销 token 后 TTL 内仍可下载签发时的那个版本（不含之后重跑产生的同名新字节） |
 | 有效期 | 不适用 | `expires_at` 是**上界**：签名凭据先失效（如 STS 临时凭据）时会提前 403。收到 403 或到达 `expires_at` 都重取清单，每次清单请求重新签发，URL 不落库 |
 | Range | 支持（`.gz` 对象忽略 Range，返回全量） | 由 S3 处理；`.gz` 对象的 Range 落在压缩字节上（HTTP 语义如此），需要 seek 的媒体请走非 gzip 形态或 raw |
 
@@ -549,10 +549,14 @@ workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前�
   内部端点签名，部署网络外不可达（连接超时或拒绝）。外部调用方对该形态
   应以 raw 端点兜底（直连请求失败即回落 raw），或由运维侧给实例配置
   public endpoint 后重启。
-- **签名目标**：URL 的签名对象是服务端生成的 `storage_key`
-  （`jobs/{workspace_id}/{job_id}/{name}` 布局，`record_remote`/
-  `verify_remote` 拒绝布局之外的 key，请求输入除 job_id 与产物名外无法
-  影响签名目标）；URL 只含 SigV4 签名参数，不含任何凭据。
+- **签名目标**：URL 的签名对象是服务端生成的 `storage_key`——#853 起每次
+  写入落一次性版本 key `jobs/{workspace_id}/{job_id}/.v/{version}/{name}`
+  （此前登记的存量产物保持 `jobs/{workspace_id}/{job_id}/{name}`，不迁移，
+  也不再被任何写入覆盖）；key 一律由服务端生成，请求输入除 job_id 与产物
+  名外无法影响签名目标；URL 只含 SigV4 签名参数，不含任何凭据。同名产物
+  重新登记后被取代的旧版本对象随即删除，旧 URL 答 404（`NoSuchKey`）——
+  与 403 一样按「重取清单」处理。设计与对象存储实测见
+  [artifact-direct-url-pinning.md](architecture/artifact-direct-url-pinning.md)。
 - **吊销 SOP**：吊销 token 不会让已签发 URL 失效。需要立即切断访问时，
   先把实例 TTL 调到最小（60 秒，重启生效，只约束之后签发的 URL），再删除
   相关 job。job 删除对对象存储是 **best-effort**：单个对象删除失败时 job
@@ -754,7 +758,8 @@ for entry in manifest["artifacts"]:  # 可能为空数组：job 没有产出产�
     if url is not None:
         try:
             direct = requests.get(url, timeout=60)  # 无鉴权头；gzip 产物自动解码
-            if direct.status_code == 403:  # 过期或签名凭据提前失效：重取清单再试一次
+            # 403 = 过期或签名凭据提前失效；404 = 签发后该版本已被重跑取代（#853）
+            if direct.status_code in (403, 404):  # 重取清单再试一次
                 fresh = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts").json()
                 for e in fresh["artifacts"]:
                     if e["name"] == entry["name"]:
@@ -777,8 +782,8 @@ for entry in manifest["artifacts"]:  # 可能为空数组：job 没有产出产�
             continue
         raw.raise_for_status()
         blob = raw.content
-    # content_hash 是未压缩内容的 sha256：两条通道都返回名字下的当前字节，
-    # 期间若发生重跑就会不一致，此时重取清单
+    # content_hash 是未压缩内容的 sha256：raw 返回名字下的当前字节、直连
+    # 返回签发时的版本，期间若发生重跑 raw 就会与清单不一致，此时重取清单
     # （local 条目没有 content_hash，跳过校验）
     if entry["content_hash"] and hashlib.sha256(blob).hexdigest() != entry["content_hash"]:
         raise RuntimeError(f"{entry['name']}: bytes changed since manifest (rerun?) — re-fetch")

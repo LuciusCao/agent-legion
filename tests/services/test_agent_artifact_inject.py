@@ -20,6 +20,7 @@ from server.app.agent_broker.code_manifest import resolve_code_runtime_context
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from tests.fakes.artifact_keys import manifest_key
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -88,7 +89,7 @@ def test_inject_adds_uploads_and_upgrades_staged_inputs(tmp_path: Path) -> None:
     )
     ref = manifest["input_artifacts"]["q.json"]
     assert ref["sha256"] == HASH
-    assert ref["url"].endswith("jobs/ws-1/job-1/q.json")
+    assert ref["url"] == f"https://s3.test/download/{manifest_key(store, 'job-1', 'q.json')}"
     assert ref["url"].startswith("https://s3.test/download/")
     assert "storage_key" not in ref  # storage_key 不下发
 
@@ -239,7 +240,7 @@ def test_inject_v4_worker_bare_input_upgrades_without_marker(tmp_path: Path) -> 
     inject_artifact_object_block(store, manifest, worker_protocol_version=4)
 
     ref = manifest["input_artifacts"]["q.json"]
-    assert ref["url"].endswith("jobs/ws-1/job-1/q.json")
+    assert ref["url"] == f"https://s3.test/download/{manifest_key(store, 'job-1', 'q.json')}"
     assert ref["sha256"] == HASH
     assert "content_encoding" not in ref
 
