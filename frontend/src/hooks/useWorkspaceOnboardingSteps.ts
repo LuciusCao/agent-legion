@@ -6,6 +6,7 @@ import {
   withWorkerSteps,
 } from '../lib/onboardingWorkerSteps'
 import { useWorkerReadiness } from './useWorkerReadiness'
+import { useWorkflowNeedsWorker } from './useWorkflowNeedsWorker'
 import type { WorkflowDefinitionRecord } from '../types'
 
 /**
@@ -21,9 +22,10 @@ export function useWorkspaceOnboardingSteps(
 ) {
   const navigate = useNavigate()
   const setAddItemsDialogOpen = useUiStore((s) => s.setAddItemsDialogOpen)
-  const needsWorker =
-    !workflowDefinition ||
-    workflowDefinition.nodes.some((node) => node.node_type === 'agent')
+  const needsWorker = useWorkflowNeedsWorker(workflowDefinition, {
+    enabled,
+    whenNoWorkflow: true,
+  })
   const readiness = useWorkerReadiness(workspaceId, enabled, needsWorker)
 
   return withWorkerSteps(

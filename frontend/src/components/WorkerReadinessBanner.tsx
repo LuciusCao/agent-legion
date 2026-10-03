@@ -10,7 +10,7 @@ export interface WorkerReadinessBannerProps {
   workspaceId: string
   /** 「等待中」任务数（queued + pending）。 */
   waitingCount: number
-  /** workflow 是否含 Agent 节点（纯 code workflow 由 Host 本地执行，不查 Worker）。 */
+  /** workflow 的任务是否依赖 Worker（判定见 lib/workerDependency：Agent 节点，或纯远程实例的 code 节点）。 */
   needsWorker: boolean
 }
 

@@ -3855,6 +3855,11 @@ export interface components {
     /** AgentWorkerConsoleResponse */
     AgentWorkerConsoleResponse: {
       /**
+       * Code Requires Worker
+       * @default false
+       */
+      code_requires_worker: boolean
+      /**
        * Console Url
        * @default
        */

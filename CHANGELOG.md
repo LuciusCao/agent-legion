@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Fixed
+- 纯远程 code 模式下 code-only workflow 拿不到 Worker 就绪指引（issue #875）：实例 `executor_runtime.code_capacity=0` 时 Host 不在本地执行 code 节点、需要在线的 code-capable Worker，但任务列表的「等待中」排查横幅与新 workspace 引导只按 Agent 节点判定「是否需要 Worker」，纯 code workflow 在这种实例上一直排队，横幅不出现、引导还删掉「接入 Worker」一步。`GET /api/agent-workers/console` 新增 `code_requires_worker`（按 Host 启动时的 `code_capacity` 推导），横幅与引导改为共用同一判定：Agent 节点总是依赖 Worker，code 节点仅在纯远程实例上依赖；默认实例（`code_capacity>0`）的 code-only workflow 行为不变。
+
 ## [0.7.14] - 2026-10-03
 
 主打外部对接闭环与执行/校验正确性：run → job ID 链路打通（#735）、外部产物 presigned 直连下载（#739）、API token 每 token 限流（#738）与 api-scope 白名单机制化（#734）；job 节点计数触发器死锁修复（#690，schema 推进至 v88）、Host 输出校验声明视图（#757）、timeout_seconds 运行时可调（#691）。Worker 控制台接入闭环（#762/#763/#765，schema v87）；Studio 线收后台任务可见性与会话生命周期防护（#772/#806/#802）、长会话虚拟滚动（#803）与抽屉层级/布局三连修；infra 面 velites 双通道刷新（#831）、前端依赖指纹（#810）、pre-push 传输诊断（#679）。

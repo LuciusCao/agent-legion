@@ -13,6 +13,7 @@ import { useWorkspacePauseActions } from '../hooks/useWorkspacePauseActions'
 import { useWorkspaceRerunActions } from '../hooks/useWorkspaceRerunActions'
 import { useWorkspaceSelection } from '../hooks/useWorkspaceSelection'
 import { useWorkspaceOnboardingSteps } from '../hooks/useWorkspaceOnboardingSteps'
+import { useWorkflowNeedsWorker } from '../hooks/useWorkflowNeedsWorker'
 import { shouldShowEmptyGuide } from '../lib/onboardingReadiness'
 import { JobFilterBar } from '../components/job/JobFilterBar'
 import { JobList } from '../components/job/JobList'
@@ -66,14 +67,11 @@ export default function WorkspaceMainPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
   const filterCounts = useJobStore(selectFilterCounts)
-  // 「等待中」排查横幅的输入：等待任务数与「是否需要 Worker」（纯 code
-  // workflow 由 Host 本地执行，不查 Worker 在线/领取）。
+  // 「等待中」排查横幅的输入：等待任务数（「是否需要 Worker」见下方
+  // useWorkflowNeedsWorker）。
   const waitingCount =
     (workspaceStats?.job_stats?.queued ?? 0) +
     (workspaceStats?.job_stats?.pending ?? 0)
-  const needsWorker =
-    workflowDefinition?.nodes.some((node) => node.node_type === 'agent') ??
-    false
   const totalJobs = useJobStore((state) => state.totalJobs) ?? jobIds.length
   const filtersActive =
     filterConfig.status !== null ||
@@ -130,6 +128,12 @@ export default function WorkspaceMainPage() {
     workflowDefinition,
     showEmptyGuide
   )
+  // 横幅与引导共用同一判定（#875）：纯 code workflow 默认由 Host 本地执行，
+  // 实例纯远程（code_capacity=0）时 code 节点同样要 Worker。
+  const needsWorker = useWorkflowNeedsWorker(workflowDefinition, {
+    enabled: !showEmptyGuide && waitingCount > 0,
+    whenNoWorkflow: false,
+  })
 
   return (
     <div
