@@ -658,9 +658,9 @@ print(e["download_url"] if live else "")' < manifest.json)
 #    不编码会被客户端当成 fragment/query 截断，服务端收到残缺名字。
 NAME=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
   "$ARTIFACT")
-OUT=$(basename "$ARTIFACT")
+OUT=$(basename -- "$ARTIFACT")
 # 直连对象存储：不带 Authorization 头（S3 只按 URL 签名参数应答）
-if [ -z "$URL" ] || ! curl -fsS --compressed -o "$OUT" "$URL"; then
+if [ -z "$URL" ] || ! curl -fsSL --compressed -o "$OUT" "$URL"; then
   curl -fsS --compressed -o "$OUT" \
     "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/$NAME/raw" \
     -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
