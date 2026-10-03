@@ -28,6 +28,16 @@ MCP JSON 导出/导入最多 96 MiB，容纳控制字符六倍转义；原始文
 shared 必须保留全部未修改项，skill 必须排除 mapped shared copies，修改共享权威源后走既有同步流程。
 不引入隐含删除、自动增量比较、CAS 或发布行为；既有 tag 冲突、dirty 检查和失败回滚继续生效。
 
+## 执行资源模型
+
+输出预算不能代替执行预算。对抗式审查需要同时考虑大量空文件、少量大文件、空目录、锁竞争以及中断的子进程。
+
+skill 编辑详情共用一个 20 秒 Git 截止时间，包含等待编辑锁。解析 commit、列标签、列树、批量读取 blob 各启动一次 Git，进程数与文件数无关。标签输出最多 1 MiB，树清单最多 16 MiB，batch 输出上限由预检的 blob 尺寸和协议头计算；读取时越界即终止，不等完整输出进入内存后再拒绝。stdin/stdout 同时排空，避免大批请求与大响应互相堵塞。
+
+batch 按长度解析内容，逐项核对 OID、类型、尺寸、分隔符及输出结尾；不能按内容中的换行分割文件。超时、超量、非零退出或协议不一致均整体失败，不返回部分文件。IO 中断时终止尚未回收的 Git 所属进程组；所有路径均回收 Git，已回收的 PID 不再发送信号。锁竞争返回 409；不可导出的快照返回 422。20 秒约束覆盖锁及 Git IO，不是对文件系统内核阻塞、Python 编码和 HTTP 发送耗时的硬实时保证。
+
+shared 编辑锁最多等待 20 秒；目录扫描按流计数，空目录也占用条目预算（最多 10,000 个），路径最多 512 字符，以限制宽树与深树。保留 100 文件的全量写入限制，任何超限均整体拒绝，不能丢弃成员后继续导出。
+
 ## 测试矩阵
 
 矩阵按语义轴做参数组合，不依赖评审评论数量。新增内容源或保存入口必须补对应组合。
@@ -38,6 +48,10 @@ shared 必须保留全部未修改项，skill 必须排除 mapped shared copies�
 | 版本一致性 | HEAD/tag 指向不同提交；读取中 HEAD 移动仍返回原提交全部字节 | 同文件 `test_tag_and_head_read_distinct_commits`、`test_snapshot_stays_on_resolved_commit_if_head_moves` |
 | 缺失来源 | HEAD/tag × 缺目录/无 commit/嵌套非仓库目录；404，绝不回落父仓库 | 同文件 `test_unavailable_commit_never_falls_back_to_parent_repository` |
 | 仓库规模 | HEAD/tag × 99/100/101 文件；全部读取，无截断 | 同文件 `test_repository_size_is_not_a_save_batch_limit` |
+| 资源放大 | 1/101/1001 文件固定两次快照 Git 调用；大双向管道无死锁；读取限额前/等于/超过 | `tests/services/test_skill_snapshot_resources.py` |
+| 生命周期 | 共享截止时间、锁竞争在启动 Git 前失败；超时/超量/非零退出后进程已回收 | 同文件 |
+| 批量协议 | OID/类型/尺寸不符、缺失/截断/多余输出整体拒绝；NUL/换行原样返回 | 同文件 |
+| 目录规模 | 空目录计入遍历预算，深目录在递归上限前拒绝 | 同文件 |
 | 不支持成员 | HEAD/tag × 非 UTF-8/超大 blob/symlink/gitlink；整体拒绝 | 同文件 `test_unsupported_committed_members_reject_entire_snapshot` |
 | 字节与路径 | HEAD/tag × 单文件上限前/上限；Unicode/tab/newline 路径、可执行文件、NUL 字节 | 同文件 `test_file_byte_boundary_and_unusual_paths_round_trip` |
 | 字符与字节 | HEAD/tag × 2/3/4 字节字符 × 字符上限前/恰好上限/超限；真实保存 → 导出 → 再保存字节一致 | 同文件 `test_skill_character_limit_is_not_a_utf8_byte_limit`、`tests/mcp_server/test_edit_snapshot_integration.py::test_accepted_unicode_skill_save_can_be_exported_and_saved_again` |

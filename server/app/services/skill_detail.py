@@ -16,21 +16,16 @@ from typing import Any
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import NotFoundError
-from server.app.services.skill_commit_snapshot import commit_snapshot
 from server.app.services.skill_edit_snapshot import text_file
 
 
-def read_files_at_commit(
-    repo_dir: Path, commit: str, *, for_edit: bool = False
-) -> list[dict[str, Any]]:
+def read_files_at_commit(repo_dir: Path, commit: str) -> list[dict[str, Any]]:
     """Skill text files (SKILL.md + root contract.yaml + references/ +
     scripts/) at ``commit``.
 
-    Display reads filter text extensions and cap content. Editing reads
-    instead use the complete, bounded Git snapshot contract.
+    Display reads filter text extensions and cap content. Editing uses the
+    separate skill_edit_detail entry point with one resource budget.
     """
-    if for_edit:
-        return commit_snapshot(repo_dir, commit)
     listing = skill_repo.run_git(repo_dir, ["ls-tree", "-r", "-z", commit])
     entries = listing.stdout.decode("utf-8", errors="replace").split("\0")
     files: list[dict[str, Any]] = []
@@ -53,9 +48,7 @@ def read_files_at_commit(
     return files
 
 
-def detail_at_ref(
-    skill_key: str, ref: str, repo_dir: Path, *, for_edit: bool = False
-) -> dict[str, Any]:
+def detail_at_ref(skill_key: str, ref: str, repo_dir: Path) -> dict[str, Any]:
     """Skill detail pinned to tag ``ref``; the lock and checkout stay untouched."""
     if not skill_repo.is_git_repo(repo_dir):
         raise NotFoundError(f"Skill {skill_key!r} has no local git repository")
@@ -68,7 +61,7 @@ def detail_at_ref(
         "commit": commit,
         "available": True,
         "tags": list(skill_repo.list_tags(repo_dir)),
-        "files": read_files_at_commit(repo_dir, commit, for_edit=for_edit),
+        "files": read_files_at_commit(repo_dir, commit),
     }
 
 
@@ -77,23 +70,16 @@ def skill_detail(
     repo_dir: Path,
     ref: str | None,
     working_tree_reader: Callable[[Path], list[dict[str, Any]]],
-    *,
-    for_edit: bool = False,
 ) -> dict[str, Any]:
     """Default (no-ref) skill detail plus the ``ref`` preview dispatch.
 
-    Display detail previews the working tree. Editing detail reads the
-    resolved HEAD commit, matching dispatch's committed content rather than
-    exposing host-local changes. The reported commit identifies that snapshot.
+    Display detail previews the working tree. Editing is served exclusively
+    by skill_edit_detail, keeping its resource and completeness rules separate.
     """
-    if for_edit and not skill_repo.is_git_repo(repo_dir):
-        raise NotFoundError(f"Skill {skill_key!r} has no local git repository")
     if ref is not None:
-        return detail_at_ref(skill_key, ref, repo_dir, for_edit=for_edit)
+        return detail_at_ref(skill_key, ref, repo_dir)
     tags = list(skill_repo.list_tags(repo_dir)) if skill_repo.is_git_repo(repo_dir) else []
     commit = skill_repo.head_commit(repo_dir) or ""
-    if for_edit and not commit:
-        raise NotFoundError(f"Skill {skill_key!r} has no committed editing snapshot")
     available = repo_dir.is_dir()
     return {
         "key": skill_key,
@@ -101,9 +87,5 @@ def skill_detail(
         "commit": commit,
         "available": available,
         "tags": tags,
-        "files": read_files_at_commit(repo_dir, commit, for_edit=True)
-        if for_edit
-        else working_tree_reader(repo_dir)
-        if available
-        else [],
+        "files": working_tree_reader(repo_dir) if available else [],
     }

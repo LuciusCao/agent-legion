@@ -30,6 +30,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
+from filelock import Timeout
 
 from server.app.auth.dependencies import (
     require_studio_agent_scope,
@@ -47,7 +48,7 @@ from server.app.routes.workspace_shared_materials_propagate_contracts import (
     SharedMaterialsPropagateRequest,
     SharedMaterialsPropagateResponse,
 )
-from server.app.services.job_errors import JobServiceError, NotFoundError
+from server.app.services.job_errors import ConflictError, JobServiceError, NotFoundError
 from server.app.services.skill_edit_snapshot import load_map_json, shared_edit_snapshot
 from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_propagate import propagate_shared_materials
@@ -91,7 +92,9 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
         # kimi review P2-6：损坏的 map.json（load_shared_map 校验失败）与
         # 读取失败都是结构化 422，不冒泡成零信息 500。
         try:
-            with shared_edit_lock(shared_dir, shared_dir.parent.parent):
+            with shared_edit_lock(shared_dir, shared_dir.parent.parent).acquire(
+                timeout=20 if for_edit else -1
+            ):
                 if for_edit and shared_dir.exists():
                     files = shared_edit_snapshot(shared_dir)
                     return SharedMaterialsResponse(
@@ -109,6 +112,8 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
                         for item in read_shared_files(shared_dir, _MATERIAL_DIRS)
                     ],
                 )
+        except Timeout:
+            raise_job_http_error(ConflictError("Shared editing snapshot is busy; retry"))
         except SkillEditValidationError as exc:
             raise_job_http_error(exc)
 

@@ -12,6 +12,8 @@ from server.app.services.skill_repo import MAX_FILE_BYTES
 from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_put import validate_shared_put_payload
 
+MAX_TREE_ENTRIES = 10000
+
 
 def load_map_json(shared_dir: Path) -> dict:
     try:
@@ -61,10 +63,24 @@ def edit_tree(root: Path) -> list[dict[str, Any]]:
     payload means deletion. Walk directory descriptors without following links.
     """
     files: list[dict[str, Any]] = []
+    visited = 0
+
+    def names(directory: int) -> list[str]:
+        nonlocal visited
+        result = []
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                visited += 1
+                if visited > MAX_TREE_ENTRIES:
+                    raise ValueError("snapshot exceeds traversal budget")
+                result.append(entry.name)
+        return sorted(result)
 
     def walk(directory: int, prefix: str = "") -> None:
-        for name in sorted(os.listdir(directory)):
+        for name in names(directory):
             relative = prefix + name
+            if len(relative) > 512:
+                raise ValueError("snapshot path exceeds editable limit")
             info = os.stat(name, dir_fd=directory, follow_symlinks=False)
             if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
                 raise ValueError("snapshot contains a link or special file")

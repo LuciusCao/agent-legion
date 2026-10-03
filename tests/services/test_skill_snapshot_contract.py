@@ -117,7 +117,8 @@ def test_file_byte_boundary_and_unusual_paths_round_trip(repository, ref, size):
 
 @pytest.mark.parametrize("ref", [None, "v2"])
 def test_total_budget_rejects_before_reading_any_blob(repository, ref, monkeypatch):
-    from server.app.services import skill_commit_snapshot, skill_repo
+    from server.app.services import skill_commit_snapshot
+    from server.app.services.skill_snapshot_git import SnapshotGit
 
     repo = repository
     (repo / "a").write_bytes(b"x" * 2048)
@@ -125,35 +126,35 @@ def test_total_budget_rejects_before_reading_any_blob(repository, ref, monkeypat
     commit(repo)
     git(repo, "tag", "v2")
     monkeypatch.setattr(skill_commit_snapshot, "MAX_SNAPSHOT_BYTES", 4096)
-    original = skill_repo.run_git
+    original = SnapshotGit.run
 
-    def checked(repo, args, **kwargs):
+    def checked(self, args, *pos, **kwargs):
         assert args[0] != "cat-file", "must preflight whole tree before loading blobs"
-        return original(repo, args, **kwargs)
+        return original(self, args, *pos, **kwargs)
 
-    monkeypatch.setattr(skill_repo, "run_git", checked)
+    monkeypatch.setattr(SnapshotGit, "run", checked)
     with pytest.raises(SkillEditValidationError):
         snapshot(repo, ref)
 
 
 @pytest.mark.parametrize("ref", [None, "v1"])
 def test_snapshot_stays_on_resolved_commit_if_head_moves(repository, ref, monkeypatch):
-    from server.app.services import skill_repo
+    from server.app.services.skill_snapshot_git import SnapshotGit
 
     repo = repository
-    original = skill_repo.run_git
+    original = SnapshotGit.run
     moved = False
 
-    def move_head(repo, args, **kwargs):
+    def move_head(self, args, *pos, **kwargs):
         nonlocal moved
-        result = original(repo, args, **kwargs)
+        result = original(self, args, *pos, **kwargs)
         if args[0] == "ls-tree" and not moved:
             moved = True
             (repo / "SKILL.md").write_text("new head")
             commit(repo)
         return result
 
-    monkeypatch.setattr(skill_repo, "run_git", move_head)
+    monkeypatch.setattr(SnapshotGit, "run", move_head)
     result = snapshot(repo, ref)
     assert next(f for f in result["files"] if f["path"] == "SKILL.md")["content"] == "committed\r\n"
     assert result["commit"] != git(repo, "rev-parse", "HEAD").decode().strip()

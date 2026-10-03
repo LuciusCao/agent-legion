@@ -68,6 +68,35 @@ def snapshot_channel(client, job_db, tmp_path, monkeypatch):
     return run, root
 
 
+@pytest.mark.parametrize("failure", ["deadline", "tree-budget", "batch-protocol"])
+@pytest.mark.parametrize("ref", [None, "v1"])
+def test_git_resource_failures_never_create_export(snapshot_channel, monkeypatch, failure, ref):
+    from server.app.services import skill_commit_snapshot, skill_snapshot_git
+
+    run, root = snapshot_channel
+    repo = root / "example"
+    repo.mkdir()
+    (repo / "SKILL.md").write_text("committed")
+    git(repo, "init", "-q")
+    commit(repo)
+    git(repo, "tag", "v1")
+    if failure == "deadline":
+        monkeypatch.setattr(skill_snapshot_git, "SNAPSHOT_SECONDS", 0)
+    elif failure == "tree-budget":
+        monkeypatch.setattr(skill_commit_snapshot, "MAX_SNAPSHOT_BYTES", 1)
+    else:
+        original = skill_snapshot_git.SnapshotGit.run
+
+        def broken_batch(self, args, *pos, **kwargs):
+            return b"missing\n" if args[0] == "cat-file" else original(self, args, *pos, **kwargs)
+
+        monkeypatch.setattr(skill_snapshot_git.SnapshotGit, "run", broken_batch)
+    result = run("get_skill", skill_key="edit-snapshot/example", ref=ref, output_path="failed.json")
+    assert "422" in result
+    assert not (Path.cwd() / "data/studio-mcp-files/edit-snapshot/failed.json").exists()
+    assert (repo / "SKILL.md").read_text() == "committed"
+
+
 def test_shared_full_snapshot_preserves_map_and_every_writable_file(snapshot_channel):
     run, root = snapshot_channel
     raw_map = '{\r\n  "version": 1, "materials": []\r\n}\r\n'

@@ -6,9 +6,9 @@ from typing import Any
 from server.app.db.dialect import ConnectSource
 from server.app.services import skill_detail, skill_repo
 from server.app.services.job_errors import NotFoundError
+from server.app.services.skill_edit_detail import editing_detail
 from server.app.services.skill_edit_snapshot import text_file
 from server.app.services.skill_lock_store import SkillLockStore
-from server.app.services.skill_repo_edit import edit_lock_for
 from server.app.skills.config import SkillsLock
 from server.app.skills.skill_roots import default_skill_base_dir
 
@@ -47,14 +47,7 @@ class SkillCatalogService:
         # format/escape guard.
         repo_dir = self._skill_dir(skill_key)
         if for_edit:
-            with edit_lock_for(repo_dir, self.base_dir, runs_dir):
-                return skill_detail.skill_detail(
-                    skill_key,
-                    repo_dir,
-                    ref,
-                    self._files,
-                    for_edit=True,
-                )
+            return editing_detail(skill_key, repo_dir, ref, self.base_dir, runs_dir)
         return skill_detail.skill_detail(skill_key, repo_dir, ref, self._files)
 
     def has_dir(self, skill_key: str) -> bool:

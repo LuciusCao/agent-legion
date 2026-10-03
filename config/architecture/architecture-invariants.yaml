@@ -688,6 +688,9 @@ invariants:
         target: tests/services/test_skill_snapshot_contract.py
         gate: quick
       - kind: integration
+        target: tests/services/test_skill_snapshot_resources.py
+        gate: quick
+      - kind: integration
         target: tests/services/test_skill_edit_snapshot.py
         gate: quick
 

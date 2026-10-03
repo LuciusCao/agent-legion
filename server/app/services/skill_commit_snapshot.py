@@ -8,19 +8,22 @@ Preflight modes, paths and declared blob sizes before loading any content.
 from pathlib import Path
 from typing import Any
 
-from server.app.services import skill_repo
 from server.app.services.skill_edit_checks import target_path_errors
 from server.app.services.skill_edit_snapshot import edit_file
 from server.app.services.skill_repo_edit import SkillEditValidationError
+from server.app.services.skill_snapshot_git import SnapshotGit, batch_blobs
 from server.app.skill_authoring_limits import SKILL_CONTENT_MAX_CHARS, SKILL_CONTENT_MAX_UTF8_BYTES
 
 MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024
 ENTRY_OVERHEAD_BYTES = 128
 
 
-def commit_snapshot(repo: Path, commit: str) -> list[dict[str, Any]]:
-    listing = skill_repo.run_git(repo, ["ls-tree", "-r", "-l", "-z", commit]).stdout
-    entries: list[tuple[str, str]] = []
+def commit_snapshot(
+    repo: Path, commit: str, reader: SnapshotGit | None = None
+) -> list[dict[str, Any]]:
+    reader = reader or SnapshotGit(repo)
+    listing = reader.run(["ls-tree", "-r", "-l", "-z", commit], MAX_SNAPSHOT_BYTES)
+    entries: list[tuple[str, str, int]] = []
     total = 0
     try:
         if len(listing) > MAX_SNAPSHOT_BYTES:
@@ -41,17 +44,18 @@ def commit_snapshot(repo: Path, commit: str) -> list[dict[str, Any]]:
             total += size + len(raw_path) + ENTRY_OVERHEAD_BYTES
             if total > MAX_SNAPSHOT_BYTES:
                 raise ValueError("Git tree exceeds snapshot byte budget")
-            entries.append((path, oid.decode("ascii")))
+            entries.append((path, oid.decode("ascii"), size))
+        blobs = batch_blobs(reader, entries)
     except (UnicodeError, ValueError) as exc:
         raise SkillEditValidationError(
             "Cannot export a complete Git editing snapshot",
             [{"path": ".", "error": str(exc)}],
         ) from exc
     files = []
-    for path, blob_id in entries:
+    for (path, _, _), raw in zip(entries, blobs, strict=True):
         item = edit_file(
             path,
-            skill_repo.run_git(repo, ["cat-file", "blob", blob_id]).stdout,
+            raw,
             max_bytes=SKILL_CONTENT_MAX_UTF8_BYTES,
         )
         if len(item["content"]) > SKILL_CONTENT_MAX_CHARS:
