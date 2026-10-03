@@ -19,18 +19,24 @@ cost discipline is zero-copy placement, not skipping.
 The semantics below are pinned by
 tests/workflows/test_output_validation_view.py:
 
-- both sides are hardlinked (zero-copy; copy fallback on hardlink-
-  unsupported mounts) — full input copies on every completion would scale
-  the completion path's time and scratch usage with the input size;
+- inputs are private copies (reflink/CoW first via ``_reflink_copy``, full
+  copy as the fallback) — construction-time write isolation: a validator's
+  in-place write or chmod on an input can never cross into the job dir's
+  upstream artifact through a shared inode, and CoW filesystems keep the
+  zero-copy cost discipline (full input copies on every completion would
+  scale the completion path's time and scratch usage with the input size);
+- outputs stay hardlinked (copy fallback on hardlink-unsupported mounts) so
+  the validator's in-place cleaning keeps propagating to the bytes the
+  finish gate promotes; the replace family is covered by the reconcile arm;
 - a missing declared source is simply absent from the view (fail-open) —
   the validator's own rules judge absence; a placement FAILURE (disk full,
   permissions, unrepresentable prefix collision) raises, so an unbuildable
   view fails closed through the Validator error channel instead of showing
   the validator a silently incomplete view;
-- inputs are read-only by contract: placement snapshots each input's
-  (inode, mtime, size) and the exit check fails closed on any change
-  (in-place write, replace, delete) — hardlink sharing must never let a
-  validator silently mutate an upstream node's artifact in the job dir;
+- inputs are read-only by contract: the exit check still snapshots each
+  input's (inode, mtime, size) and fails closed on any change (in-place
+  write, replace, delete) — now defense in depth behind the construction-
+  time isolation, never the only barrier;
 - outputs reconcile back to the run view on clean exit: in-place writes
   already propagate through the hardlink, and the replace family (temp +
   ``os.replace``, delete-and-rewrite — the clean-in-place helpers beyond
@@ -116,7 +122,7 @@ def materialize_validation_view(
         rel = safe_relative(name)
         if rel is None or rel in output_rels:
             continue
-        placed = place(rel, input_source, target)
+        placed = place(rel, input_source, target, private=True)
         if placed is not None:
             st = placed[0]
             input_snaps.append(InputSnapshot(rel, st.st_ino, st.st_dev, st.st_mtime_ns, st.st_size))
@@ -125,7 +131,7 @@ def materialize_validation_view(
         rel = safe_relative(name)
         if rel is None:
             continue
-        placed = place(rel, output_source, target)
+        placed = place(rel, output_source, target, private=False)
         if placed is not None:
             st, linked = placed
             output_placements.append(OutputPlacement(rel, st.st_ino, st.st_dev, linked))

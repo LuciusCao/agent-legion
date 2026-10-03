@@ -278,9 +278,11 @@ def test_view_construction_failure_fails_closed(
 
 def test_placement_failure_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Failure grading: a missing SOURCE is fail-open (absent from the view),
-    but a placement FAILURE (disk full on the link and the copy fallback) is
-    an infra error — the validator must never judge a silently incomplete
+    but a placement FAILURE (disk full on the reflink AND the copy fallback)
+    is an infra error — the validator must never judge a silently incomplete
     view, so the run fails closed as a Validator error."""
+    import server.app.workflows._reflink_copy as reflink_copy
+
     manager = _manager(tmp_path, "import sys; sys.exit(0)\n")
     job_dir, run_view = _layout(tmp_path)
     (job_dir / "cleaned_question.json").write_text("{}")
@@ -288,7 +290,7 @@ def test_placement_failure_fails_closed(tmp_path: Path, monkeypatch: pytest.Monk
     def _enospc(*_args: object, **_kwargs: object) -> None:
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(os, "link", _enospc)
+    monkeypatch.setattr(reflink_copy, "_clone", _enospc)
     monkeypatch.setattr(shutil, "copy2", _enospc)
     error = validate_worker_outputs(
         manager, _manifest(["cleaned_question.json"], []), job_dir, run_view
@@ -299,10 +301,12 @@ def test_placement_failure_fails_closed(tmp_path: Path, monkeypatch: pytest.Monk
     assert "No space left on device" in error
 
 
-def test_validator_mutating_an_input_in_place_fails_closed(tmp_path: Path) -> None:
-    """Inputs are read-only by contract: an in-place write through the
-    hardlink is detected by the exit check (inode/mtime/size snapshot) and
-    fails the run closed instead of silently accepting a polluted view."""
+def test_validator_input_writes_cannot_reach_the_job_dir(tmp_path: Path) -> None:
+    """P1 regression: the view's input is a private copy (reflink or full
+    copy), so an in-place write physically cannot reach the job dir's
+    upstream artifact — closing the stale-completion pollution path (a late
+    completion's validator corrupting the new generation's local inputs).
+    The snapshot check stays as defense in depth and fails the run closed."""
     rules = "(job / 'cleaned_question.json').write_text('rewritten by validator')\n"
     manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
     job_dir, run_view = _layout(tmp_path)
@@ -315,13 +319,34 @@ def test_validator_mutating_an_input_in_place_fails_closed(tmp_path: Path) -> No
     assert error is not None
     assert error.startswith("Validator error:")
     assert "validator mutated declared input 'cleaned_question.json'" in error
+    assert (job_dir / "cleaned_question.json").read_text() == "original"
+
+
+def test_validator_chmod_on_an_input_cannot_reach_the_job_dir(tmp_path: Path) -> None:
+    """The chmod family is why hardlinks were never enough: chmod crosses a
+    shared inode without touching mtime/size. With a private copy the
+    validator's chmod is scratch-local — no contract violation fires and the
+    job dir's mode is untouched."""
+    rules = "import os\nos.chmod(job / 'cleaned_question.json', 0o000)\n"
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (job_dir / "cleaned_question.json").write_text("original")
+    original_mode = (job_dir / "cleaned_question.json").stat().st_mode
+
+    assert (
+        validate_worker_outputs(
+            manager, _manifest(["cleaned_question.json"], []), job_dir, run_view
+        )
+        is None
+    )
+    assert (job_dir / "cleaned_question.json").stat().st_mode == original_mode
 
 
 def test_validator_replacing_an_input_fails_closed_without_polluting_the_job_dir(
     tmp_path: Path,
 ) -> None:
     """The replace family against an input: os.replace swaps only the VIEW's
-    dir entry (the hardlink to the job dir breaks), so the upstream
+    dir entry (the private copy's inode is left behind), so the upstream
     artifact's bytes survive — and the exit check still fails the run."""
     rules = (
         "import os\n"
@@ -431,3 +456,71 @@ def test_validator_deleted_output_propagates_the_deletion(tmp_path: Path) -> Non
     assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
     assert (run_view / "review_a.json").is_file()
     assert not (run_view / "review_b.json").exists()
+
+
+# --- #757 P1: reflink-or-copy private input copies ---
+
+
+def test_private_input_copy_has_its_own_inode(tmp_path: Path) -> None:
+    """copy_private must never alias the source's inode — on CoW filesystems
+    via reflink, elsewhere via full copy; content and metadata ride along."""
+    from server.app.workflows._reflink_copy import copy_private
+
+    source = tmp_path / "source.json"
+    source.write_text('{"id": 1}')
+    spot = tmp_path / "view" / "source.json"
+    spot.parent.mkdir()
+
+    copy_private(source, spot)
+
+    assert spot.read_text() == '{"id": 1}'
+    assert os.stat(spot).st_ino != os.stat(source).st_ino
+
+
+def test_reflink_probe_is_cached_per_filesystem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The support probe runs once per filesystem (st_dev), not per file:
+    two validations against the same job dir probe exactly once."""
+    import server.app.workflows._reflink_copy as reflink_copy
+
+    monkeypatch.setattr(reflink_copy, "_support", {})
+    probes: list[int] = []
+    original_probe = reflink_copy._probe
+
+    def _spying_probe(probe_dir: Path) -> bool:
+        probes.append(probe_dir.stat().st_dev)
+        return original_probe(probe_dir)
+
+    monkeypatch.setattr(reflink_copy, "_probe", _spying_probe)
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", ""))
+    job_dir, run_view = _layout(tmp_path)
+    (job_dir / "cleaned_question.json").write_text("{}")
+
+    manifest = _manifest(["cleaned_question.json"], [])
+    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
+    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
+    assert len(probes) == 1
+
+
+def test_reflink_unsupported_falls_back_to_full_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A filesystem without CoW (or a failed probe) takes the full-copy
+    fallback silently — same isolation, same fail-closed detection."""
+    import server.app.workflows._reflink_copy as reflink_copy
+
+    monkeypatch.setattr(reflink_copy, "_support", {})
+    monkeypatch.setattr(reflink_copy, "_supported", lambda *_args: False)
+    rules = "(job / 'cleaned_question.json').write_text('rewritten by validator')\n"
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (job_dir / "cleaned_question.json").write_text("original")
+
+    error = validate_worker_outputs(
+        manager, _manifest(["cleaned_question.json"], []), job_dir, run_view
+    )
+
+    assert error is not None
+    assert "validator mutated declared input" in error
+    assert (job_dir / "cleaned_question.json").read_text() == "original"

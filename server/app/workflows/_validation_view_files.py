@@ -19,6 +19,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from server.app.workflows._reflink_copy import copy_private
+
 
 @dataclass(frozen=True)
 class InputSnapshot:
@@ -57,8 +59,17 @@ def safe_relative(name: str) -> str | None:
     return rel.as_posix()
 
 
-def place(rel: str, source_dir: Path, target: Path) -> tuple[os.stat_result, bool] | None:
-    """Hardlink ``source_dir/rel`` into the view; returns (view stat, linked).
+def place(
+    rel: str, source_dir: Path, target: Path, *, private: bool
+) -> tuple[os.stat_result, bool] | None:
+    """Place ``source_dir/rel`` into the view; returns (view stat, linked).
+
+    ``private=True`` (declared inputs): a reflink-or-copy private inode
+    (#757 P1 — a hardlink shares the inode with the job dir's upstream
+    artifact, so a validator's in-place write or chmod would cross over).
+    ``private=False`` (declared outputs): a hardlink, so the validator's
+    in-place cleaning propagates to the bytes the finish gate promotes (the
+    replace family is covered by the reconcile arm).
 
     ``None`` = the source is absent (or vanished mid-placement): the
     missing-source family stays fail-open and the validator judges absence.
@@ -75,6 +86,12 @@ def place(rel: str, source_dir: Path, target: Path) -> tuple[os.stat_result, boo
     spot.parent.mkdir(parents=True, exist_ok=True)
     if spot.is_symlink() or spot.is_file():
         spot.unlink()
+    if private:
+        try:
+            copy_private(source, spot)
+        except FileNotFoundError:
+            return None
+        return os.stat(spot), False
     try:
         os.link(source, spot)
         return os.stat(spot), True
