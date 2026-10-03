@@ -242,7 +242,16 @@ def test_local_shard_context_expected_outputs_exclude_ordinary_outputs(job_db) -
     worker.leases.try_claim = fake_try_claim
     snapshot = MagicMock()
     snapshot.has_capacity.return_value = True
-    with patch("server.app.workflow_worker.shard_dispatch.submit_claim", fake_submit):
+    from server.app.workflow_worker.local_dispatch import LocalCodeDispatch
+
+    decided = LocalCodeDispatch({"mode": "fast"}, "def run(ctx):\n    pass\n", "{}")
+    with (
+        patch("server.app.workflow_worker.shard_dispatch.submit_claim", fake_submit),
+        patch(
+            "server.app.workflow_worker.shard_dispatch.decide_local_code_dispatch",
+            lambda *_a, **_k: decided,
+        ),
+    ):
         claimed = claim_shard_locally(
             worker,
             {"id": "ws-budget"},

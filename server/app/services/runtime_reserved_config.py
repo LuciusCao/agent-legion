@@ -33,6 +33,20 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_KEY = "timeout_seconds"
 
+# Mutability classification of the platform-reserved execution keys — the
+# single source of truth (#691/#858): ``versioned`` keys ship with a workflow
+# revision and stay intake-frozen; ``runtime`` keys are decided per execution
+# and never change what a node produces, so consumers that judge "did the
+# execution inputs change" (the inherit upgrade diff) ignore them. Pinned
+# equal to ``RESERVED_EXECUTION_KEYS`` by the tests.
+RESERVED_KEY_MUTABILITY: Mapping[str, str] = {
+    TIMEOUT_KEY: "runtime",
+    "sandbox_network": "versioned",
+}
+RUNTIME_ADJUSTABLE_RESERVED_KEYS = frozenset(
+    key for key, kind in RESERVED_KEY_MUTABILITY.items() if kind == "runtime"
+)
+
 SOURCE_PLATFORM_DEFAULT = "platform_default"
 SOURCE_NODE_CONFIG = "node_config"
 SOURCE_WORKSPACE_OVERRIDE = "workspace_override"
@@ -115,6 +129,11 @@ def chain_override(override: Mapping[str, Any]) -> dict[str, Any]:
     if TIMEOUT_KEY in override and not valid_timeout(override[TIMEOUT_KEY]):
         return {k: v for k, v in override.items() if k != TIMEOUT_KEY}
     return dict(override)
+
+
+def without_runtime_adjustable(config: Mapping[str, Any]) -> dict[str, Any]:
+    """``config`` minus the runtime-adjustable reserved keys (#858)."""
+    return {k: v for k, v in config.items() if k not in RUNTIME_ADJUSTABLE_RESERVED_KEYS}
 
 
 def run_audit_json(config: Mapping[str, Any], decided: Mapping[str, Any] | None) -> str:
