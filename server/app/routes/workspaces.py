@@ -53,6 +53,19 @@ def create_workspaces_router(
         if user.get("actor_scope") == WORKSPACE_API_SCOPE:
             bound = str(user.get("scoped_workspace_id") or "")
             workspaces = [workspace for workspace in workspaces if workspace.id == bound]
+            return WorkspacesResponse(workspaces=workspaces)
+        # #711: the listing is membership-scoped — a non-admin only sees the
+        # workspaces it is a member of (any role), so workspace ids cannot be
+        # enumerated by outsiders; admins keep the full list. A studio-agent
+        # scoped token inherits its minter's identity, and a workspace-bound
+        # one is further narrowed to its binding (enforce_scoped_workspace_
+        # binding's read-side rule applied to the listing).
+        if user.get("role") != "admin":
+            member_of = set(request.app.state.job_db.list_user_workspace_ids(str(user["id"])))
+            workspaces = [workspace for workspace in workspaces if workspace.id in member_of]
+        bound_scope = user.get("scoped_workspace_id")
+        if bound_scope:
+            workspaces = [workspace for workspace in workspaces if workspace.id == bound_scope]
         return WorkspacesResponse(workspaces=workspaces)
 
     @guarded.post("/workspaces", response_model=WorkspaceResponse)
