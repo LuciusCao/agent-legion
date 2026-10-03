@@ -301,17 +301,32 @@ EOF
 ## 6. 可写槽位耗尽（SeaweedFS，PutObject 503 / no free volumes）
 
 **机制**：SeaweedFS 的 volume 按 collection 成批预分配（每个 collection
-一次创建一批 volume，默认 7 个）；删除 bucket 会尽力连带删其
-collection 的 volume（失败/超时才留孤儿），但**从未被写入过的空
+一次创建一批 volume，默认 7 个）。S3 bucket `<b>` 的对象一律写进同名
+collection `<b>`（每个派生 worktree bucket 首次写入就占一批槽位）；删除
+bucket 会连带删其 collection 的 volume，只有 master 侧删除失败/超时才留
+孤儿——`scripts/clean-worktree.sh` 在 bucket 删除后（或 bucket 已不存在
+的重跑路径上）经 master `/vol/status` 核对同名 collection，残留即调
+`/col/delete` 回收并复查（#824；master 地址默认由 `:8333` endpoint 推导
+为同主机 `:9333`，可用 `AGENT_LEGION_SEAWEEDFS_MASTER_URL` 覆盖，非
+seaweedfs 后端自动跳过）。**无 collection 标记（`""`）的 volume 不是孤儿**：
+filer 的元数据变更日志（`/topics/.system/log`）落在这里，持续有小量写入，
+遍历 `/buckets` 找不到引用属正常，不要 `volume.delete` 它们（会丢失元数据
+变更历史）。另外**从未被写入过的空
 volume 不在 `volume.deleteEmpty` 的回收范围**（回收条件要求 volume 有
 过写入），长期增删 bucket 与空 collection 的预分配仍会攒下一批全空的
 volume。另外 compose 曾以 `-volume.max=0`（按磁盘余量自动推导上限）运行：当
 volume server 在 master 侧的注册信息 stale 时，自动推导会把可写槽位判成
 0，master 认为没有可分配 volume，全部 PutObject 返回 503
-（no free volumes）——表象是「磁盘远未写满却写满」。现 compose 已改为
+（no free volumes）——表象是「磁盘远未写满却写满」。即便注册信息正常，
+自动推导的上限 ≈ 磁盘余量 ÷ 2GiB，在余量几十 GB 的开发机上只有十几个
+槽位：元数据日志的 `""`、prod 主 bucket、develop bucket 各占一批 7 个，
+再有一两个活跃 worktree bucket 写入就会撞到 `only 0 volumes left`
+（#824 实测）。现 compose 已改为
 显式上限（`AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`，默认 100；惰性增长的
 上限闸门，volume 按需创建、不预占磁盘，100 × 2GiB ≈ 200GiB 的可增长
-容量），但空 volume 堆积仍会挤占这个槽位上限。
+容量），但空 volume 堆积与未收尾 worktree 的 bucket 仍会挤占这个槽位
+上限。注意上限只在容器**重建**时生效：仓库改了 compose 而容器沿用旧
+命令行（`docker inspect` 看 `-volume.max`）即仍是旧行为。
 
 **上限可调**：上限只是槽位闸门，调大**无需迁移数据**（新 volume 惰性
 创建），在 `deploy/.env` 设 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX` 后
@@ -345,4 +360,7 @@ docker exec <seaweedfs 容器> sh -c \
 volume，幂等可重跑；删完 PutObject 即恢复。从未被写入过的空 volume 不在
 其回收范围——若 volume 数仍贴着上限，再调大
 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`（见上节「上限可调」）
-或清理无用 bucket/collection。
+或清理无用 bucket/collection：已不需要的 worktree 走
+`scripts/clean-worktree.sh <worktree名>`（bucket 与同名 collection 卷一并
+回收；bucket 已删但卷残留时重跑同一命令即可，`report-orphan-s3-buckets.py`
+列出待收尾的孤儿派生 bucket）。
