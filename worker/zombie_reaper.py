@@ -40,6 +40,13 @@ from worker import procfs
 REAP_INTERVAL_SECONDS = 5.0
 COLLECT_TIMEOUT_SECONDS = 1.0
 
+# Every wait() this module issues — the periodic scan and the orphan reaper's
+# ``collect_group`` — runs under this lock (codex P1 on #895): otherwise one
+# path can reap a zombie the other already decided on, the pid gets recycled
+# (e.g. by a runtime probe ``subprocess.run`` in an HTTP handler) and the late
+# ``waitpid(pid)`` steals that probe's exit status.
+REAP_LOCK = threading.Lock()
+
 
 def collect_group(pgid: int, timeout: float = COLLECT_TIMEOUT_SECONDS) -> int:
     """wait() exited members of process group ``pgid`` that are our children.
@@ -56,7 +63,8 @@ def collect_group(pgid: int, timeout: float = COLLECT_TIMEOUT_SECONDS) -> int:
     deadline = time.monotonic() + timeout
     while True:
         try:
-            pid, _status = os.waitpid(-pgid, os.WNOHANG)
+            with REAP_LOCK:
+                pid, _status = os.waitpid(-pgid, os.WNOHANG)
         except (ChildProcessError, PermissionError):
             return reaped
         if pid:
@@ -120,9 +128,10 @@ class ZombieReaper:
             return 0
         reaped = 0
         lingering: set[tuple[int, int]] = set()
-        # The lock spans the scan and the waits: the supervisor registers the
-        # executor Popen under it, so no Popen can be born unregistered mid-scan.
-        with self.managed.lock:
+        # The managed lock spans the scan and the waits: the supervisor registers
+        # the executor Popen under it, so no Popen can be born unregistered
+        # mid-scan. REAP_LOCK serialises against ``collect_group``.
+        with self.managed.lock, REAP_LOCK:
             shielded = self.managed.pids_locked()
             for pid in procfs.child_pids(self._self_pid, self._proc_root):
                 if pid in shielded:
@@ -134,6 +143,8 @@ class ZombieReaper:
                 if stat.sid == own.sid and key not in self._lingering:
                     lingering.add(key)  # same-session: give its owner one interval
                     continue
+                if not self._same_zombie(stat):
+                    continue  # reaped and recycled since the read: not ours to wait
                 try:
                     done, _status = self._waitpid(pid, os.WNOHANG)
                 except (ChildProcessError, PermissionError):
@@ -142,6 +153,16 @@ class ZombieReaper:
                     reaped += 1
         self._lingering = lingering
         return reaped
+
+    def _same_zombie(self, seen: procfs.ProcStat) -> bool:
+        """Re-read right before ``waitpid``: still the very zombie child we judged."""
+        now = procfs.read_stat(seen.pid, self._proc_root)
+        return (
+            now is not None
+            and now.state == "Z"
+            and now.ppid == self._self_pid
+            and now.starttime == seen.starttime
+        )
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():

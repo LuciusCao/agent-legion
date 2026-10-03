@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,13 @@ import worker.supervisor as supervisor_module
 from worker import procfs
 from worker.config_store import validate_config
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor
-from worker.zombie_reaper import ManagedChildren, ZombieReaper, reaping_enabled
+from worker.zombie_reaper import (
+    REAP_LOCK,
+    ManagedChildren,
+    ZombieReaper,
+    collect_group,
+    reaping_enabled,
+)
 
 pytestmark = pytest.mark.no_db
 
@@ -227,3 +234,70 @@ def test_supervisor_registers_executor_and_runs_reaper_only_as_pid1(
     with supervisor.managed_children.lock:
         assert supervisor.managed_children.pids_locked() == {4321}
     assert supervisor._zombie_reaper is not None
+
+
+# --- codex P1 R2 on #895：收割路径互斥 + waitpid 紧前现证身份 -----------------
+
+
+@pytest.mark.parametrize(
+    ("state", "start"),
+    [("S", 100), ("Z", 999)],  # recycled into a live probe / into another zombie
+)
+def test_scan_skips_wait_when_pid_recycled_after_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, start: int
+) -> None:
+    """扫描读完 stat 后该僵尸被另一路收走、pid 被复用：不得对新进程 waitpid。"""
+    _fake_proc(tmp_path, 1, ppid=0, pgid=1, sid=1, comm="python3")
+    _fake_proc(tmp_path, 10, state="Z", sid=50, start=100)
+    _children_file(tmp_path, 1, [10])
+    real_read = procfs.read_stat
+    reads = {"n": 0}
+
+    def _read_then_recycle(pid: int, root: Path = procfs.PROC_ROOT) -> procfs.ProcStat | None:
+        if pid == 10:
+            reads["n"] += 1
+            if reads["n"] == 2:  # between the judging read and the pre-wait re-read
+                (root / "10" / "stat").write_text(
+                    _stat_line(10, "velites", state, 1, 1, 1, start), encoding="utf-8"
+                )
+        return real_read(pid, root)
+
+    monkeypatch.setattr(procfs, "read_stat", _read_then_recycle)
+    wait = _FakeWait()
+    reaper = ZombieReaper(ManagedChildren(), proc_root=tmp_path, self_pid=1, waitpid=wait)
+
+    assert reaper.scan_once() == 0
+    assert wait.calls == []
+
+
+def test_scan_skips_wait_when_pid_recycled_into_managed_popen(tmp_path: Path) -> None:
+    _fake_proc(tmp_path, 1, ppid=0, pgid=1, sid=1, comm="python3")
+    _fake_proc(tmp_path, 10, state="Z", sid=50)
+    _children_file(tmp_path, 1, [10])
+    managed = ManagedChildren()
+    managed.spawn(lambda: _ManagedPopen(10))  # type: ignore[arg-type,return-value]
+    wait = _FakeWait()
+
+    ZombieReaper(managed, proc_root=tmp_path, self_pid=1, waitpid=wait).scan_once()
+
+    assert wait.calls == []
+
+
+def test_collect_group_and_scan_are_mutually_exclusive(tmp_path: Path) -> None:
+    """两条收割路径共用 REAP_LOCK：任一持锁时另一路不 wait。"""
+    _fake_proc(tmp_path, 1, ppid=0, pgid=1, sid=1, comm="python3")
+    _children_file(tmp_path, 1, [])
+    reaper = ZombieReaper(ManagedChildren(), proc_root=tmp_path, self_pid=1, waitpid=_FakeWait())
+    with REAP_LOCK:
+        threads = [
+            threading.Thread(target=collect_group, args=(999_999_999, 0.0)),
+            threading.Thread(target=reaper.scan_once),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(0.2)
+            assert thread.is_alive()  # blocked on the shared lock
+    for thread in threads:
+        thread.join(5)
+        assert not thread.is_alive()
