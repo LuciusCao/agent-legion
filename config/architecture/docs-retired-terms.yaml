@@ -76,7 +76,7 @@ terms:
     note: scripts/validate_output.py 是 Host 两层输出校验的业务规则层（#443），
       承载契约引擎刻意不表达的跨文件/事实回引规则，不是待淘汰旧物；现行说法
       是 business-rule validator / 业务规则层
-  - pattern: 'validate_output\.py`*,? (stays |is |as |remains )?(the )?(Host-side )?legacy'
+  - pattern: 'validate_output\.py`*,? (stays |is |as |remains )?(?:(?:the|an?)\s+)?(Host-side )?legacy'
     retired_in: '#834（术语收敛）'
     note: 同上，「validate_output.py 为 legacy fallback」类表述；锚定脚本名，
       不误伤 legacy manifest / AgentDefinition.skill legacy fallback 等无关概念

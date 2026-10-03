@@ -153,12 +153,17 @@ def test_real_config_flags_business_rule_layer_old_phrasings(tmp_path: Path) -> 
         "# layout\n\n"
         "the Host-side legacy validator checks cross-file rules\n\n"
         "with `validate_output.py` as legacy fallback for business rules\n\n"
-        "校验器本身慢（velites/legacy 脚本 30s timeout）\n",
+        "校验器本身慢（velites/legacy 脚本 30s timeout）\n\n"
+        "with `validate_output.py` as a legacy fallback\n\n"
+        "scripts/validate_output.py remains a legacy script\n",
     )
     errors = [e for e in check_docs_retired_terms(tmp_path) if "docs/data-layout.md" in e]
     assert any(":3:" in e and "legacy validators" in e for e in errors), errors
     assert any(":5:" in e and "validate_output" in e for e in errors), errors
     assert any(":7:" in e and "脚本|回落通道" in e for e in errors), errors
+    # Indefinite articles (codex R3 on #889).
+    assert any(":9:" in e and "validate_output" in e for e in errors), errors
+    assert any(":11:" in e and "validate_output" in e for e in errors), errors
 
 
 def test_exempts_retirement_phrase_in_same_line() -> None:
