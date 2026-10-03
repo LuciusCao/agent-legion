@@ -167,7 +167,7 @@ def finish_staged(
         status, exit_code, error = "failed", 1, f"Missing outputs: {', '.join(missing)}"
     # Worker results are untrusted: validate Host-side like the Pi runner.
     # #757: never against the raw job_dir — it accumulates every node's
-    # outputs across all attempts, and a glob-based legacy validator would
+    # outputs across all attempts, and a glob-based business-rule validator would
     # see a sibling's (stale or current) files and misattribute their
     # verdict to this node. The pool task builds the declared view (this
     # node's inputs from job_dir + this attempt's outputs from the read

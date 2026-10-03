@@ -3,10 +3,13 @@
 Agent output is untrusted regardless of where the agent ran. Validation is
 two-layered (#443): the harness contract engine (``velites-sandbox validate``,
 reading the skill's machine-readable contract block) runs first and fails
-fast on generic contract violations; the skill's legacy
+fast on generic contract violations; the skill's business-rule validator
 ``scripts/validate_output.py`` then runs for the business rules the engine
-deliberately does not express (cross-file consistency etc.). The Worker
-completion path lives in ``worker_output_validation``.
+deliberately does not express (cross-file consistency, fact back-reference
+reconciliation etc.). That second layer is a permanent design layer, not a
+legacy remnant awaiting replacement by the contract engine: the contract
+language has no cross-file expressiveness (#834). The Worker completion
+path lives in ``worker_output_validation``.
 """
 
 from __future__ import annotations
@@ -34,16 +37,16 @@ def run_output_validator(
     engine_error = run_contract_engine(skill_dir, job_dir, timeout_seconds=timeout_seconds)
     if engine_error is not None:
         return engine_error
-    return _run_legacy_validator(skill_dir, job_dir, timeout_seconds=timeout_seconds)
+    return _run_business_rule_validator(skill_dir, job_dir, timeout_seconds=timeout_seconds)
 
 
-def _run_legacy_validator(
+def _run_business_rule_validator(
     skill_dir: Path,
     job_dir: Path,
     *,
     timeout_seconds: int,
 ) -> str | None:
-    """Run the skill's legacy ``validate_output.py`` against ``job_dir``."""
+    """Run the skill's business-rule layer (``validate_output.py``) on ``job_dir``."""
     validator = skill_dir / "scripts" / "validate_output.py"
     if not validator.is_file():
         return None
