@@ -47,7 +47,9 @@ describe('useWorkflowNeedsWorker', () => {
     const { result } = mount(workflow('start', 'code'), {
       whenNoWorkflow: false,
     })
-    await waitFor(() => expect(result.current).toBe(true))
+    await waitFor(() =>
+      expect(result.current).toEqual({ agent: false, code: true })
+    )
   })
 
   it('keeps code-only workflows Host-local on a default instance', async () => {
@@ -59,20 +61,26 @@ describe('useWorkflowNeedsWorker', () => {
       whenNoWorkflow: false,
     })
     await waitFor(() => expect(mocks.fetchConsole).toHaveBeenCalled())
-    expect(result.current).toBe(false)
+    expect(result.current).toEqual({ agent: false, code: false })
   })
 
   it('needs a Worker for agent workflows without asking the deployment', () => {
     const { result } = mount(workflow('start', 'agent'), {
       whenNoWorkflow: false,
     })
-    expect(result.current).toBe(true)
+    expect(result.current).toEqual({ agent: true, code: false })
     expect(mocks.fetchConsole).not.toHaveBeenCalled()
   })
 
   it('falls back to whenNoWorkflow without a workflow', () => {
-    expect(mount(null, { whenNoWorkflow: true }).result.current).toBe(true)
-    expect(mount(null, { whenNoWorkflow: false }).result.current).toBe(false)
+    expect(mount(null, { whenNoWorkflow: true }).result.current).toEqual({
+      agent: true,
+      code: false,
+    })
+    expect(mount(null, { whenNoWorkflow: false }).result.current).toEqual({
+      agent: false,
+      code: false,
+    })
     expect(mocks.fetchConsole).not.toHaveBeenCalled()
   })
 

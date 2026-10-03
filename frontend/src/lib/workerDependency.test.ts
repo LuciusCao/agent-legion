@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { workflowNeedsWorker } from './workerDependency'
+import {
+  needsAnyWorker,
+  workersMeetingNeeds,
+  workflowWorkerNeeds,
+} from './workerDependency'
 
 function workflow(...nodeTypes: string[]) {
   return {
@@ -7,31 +11,60 @@ function workflow(...nodeTypes: string[]) {
       key: `n${index}`,
       node_type,
     })),
-  } as Parameters<typeof workflowNeedsWorker>[0]
+  } as Parameters<typeof workflowWorkerNeeds>[0]
 }
 
-describe('workflowNeedsWorker', () => {
-  it('always needs a Worker for agent nodes', () => {
+describe('workflowWorkerNeeds', () => {
+  it('always needs an agent Worker for agent nodes', () => {
     for (const codeRequiresWorker of [true, false, undefined]) {
       expect(
-        workflowNeedsWorker(workflow('start', 'agent'), codeRequiresWorker)
-      ).toBe(true)
+        workflowWorkerNeeds(workflow('start', 'agent'), codeRequiresWorker)
+      ).toEqual({ agent: true, code: false })
     }
   })
 
   it('runs code-only workflows on the Host by default', () => {
-    expect(workflowNeedsWorker(workflow('start', 'code'), false)).toBe(false)
+    const needs = workflowWorkerNeeds(workflow('start', 'code'), false)
+    expect(needs).toEqual({ agent: false, code: false })
+    expect(needsAnyWorker(needs)).toBe(false)
   })
 
-  it('counts code nodes when the instance is pure-remote (#875)', () => {
-    expect(workflowNeedsWorker(workflow('start', 'code'), true)).toBe(true)
+  it('needs a code Worker on a pure-remote instance (#875)', () => {
+    const needs = workflowWorkerNeeds(workflow('start', 'code', 'agent'), true)
+    expect(needs).toEqual({ agent: true, code: true })
+    expect(needsAnyWorker(needs)).toBe(true)
   })
 
   it('keeps the Host-local behavior while the deployment fact is unknown', () => {
-    expect(workflowNeedsWorker(workflow('code'), undefined)).toBe(false)
+    expect(workflowWorkerNeeds(workflow('code'), undefined).code).toBe(false)
   })
 
   it('never counts start or approval nodes', () => {
-    expect(workflowNeedsWorker(workflow('start', 'approval'), true)).toBe(false)
+    expect(
+      needsAnyWorker(workflowWorkerNeeds(workflow('start', 'approval'), true))
+    ).toBe(false)
+  })
+})
+
+describe('workersMeetingNeeds', () => {
+  const agentOnly = { worker_id: 'a', max_code_concurrency: 0 }
+  const codeCapable = { worker_id: 'c', max_code_concurrency: 2 }
+
+  it('keeps every Worker for agent-only needs', () => {
+    expect(
+      workersMeetingNeeds([agentOnly, codeCapable], {
+        agent: true,
+        code: false,
+      })
+    ).toEqual([agentOnly, codeCapable])
+  })
+
+  it('keeps only code-capable Workers when code nodes need a Worker', () => {
+    expect(
+      workersMeetingNeeds([agentOnly, codeCapable], {
+        agent: true,
+        code: true,
+      })
+    ).toEqual([codeCapable])
   })
 })

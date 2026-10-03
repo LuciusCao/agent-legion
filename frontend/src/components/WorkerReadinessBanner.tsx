@@ -2,6 +2,11 @@ import { useNavigate } from 'react-router-dom'
 import { useWorkerReadiness } from '../hooks/useWorkerReadiness'
 import { readyWorkerConsoleUrl } from '../lib/workerConsoleUrl'
 import { hasClaimingWorker, hasOnlineWorker } from '../lib/workerPresence'
+import {
+  needsAnyWorker,
+  workersMeetingNeeds,
+  type WorkerNeeds,
+} from '../lib/workerDependency'
 import { MaterialIcon } from './MaterialIcon'
 import { WorkerConsoleLink } from './WorkerConsoleLink'
 import styles from './WorkerReadinessBanner.module.css'
@@ -10,8 +15,8 @@ export interface WorkerReadinessBannerProps {
   workspaceId: string
   /** 「等待中」任务数（queued + pending）。 */
   waitingCount: number
-  /** workflow 的任务是否依赖 Worker（判定见 lib/workerDependency：Agent 节点，或纯远程实例的 code 节点）。 */
-  needsWorker: boolean
+  /** workflow 的任务需要 Worker 承接哪类执行（判定见 lib/workerDependency：Agent 节点，或纯远程实例的 code 节点）。 */
+  needs: WorkerNeeds
 }
 
 /**
@@ -23,8 +28,9 @@ export interface WorkerReadinessBannerProps {
 export function WorkerReadinessBanner({
   workspaceId,
   waitingCount,
-  needsWorker,
+  needs,
 }: WorkerReadinessBannerProps) {
+  const needsWorker = needsAnyWorker(needs)
   const navigate = useNavigate()
   const { workers, paused, consoleUrl, resumeScheduling } = useWorkerReadiness(
     workspaceId,
@@ -33,11 +39,14 @@ export function WorkerReadinessBanner({
   )
   if (waitingCount <= 0 || workers === undefined || paused === undefined)
     return null
-  const online = hasOnlineWorker(workers)
+  // 只认能承接所需执行类型的 Worker（#875：纯远程实例的 code 节点不认
+  // agent-only Worker）。
+  const capable = workersMeetingNeeds(workers, needs)
+  const online = hasOnlineWorker(capable)
   const noWorker = needsWorker && !online
-  const idleWorker = needsWorker && online && !hasClaimingWorker(workers)
+  const idleWorker = needsWorker && online && !hasClaimingWorker(capable)
   if (!paused && !noWorker && !idleWorker) return null
-  const entryUrl = readyWorkerConsoleUrl(workers, consoleUrl)
+  const entryUrl = readyWorkerConsoleUrl(capable, consoleUrl)
 
   return (
     <section
@@ -65,7 +74,9 @@ export function WorkerReadinessBanner({
           )}
           {noWorker && (
             <li>
-              没有在线的 Worker。请按「设置 → Agent 与 Worker」的说明接入。
+              {needs.code
+                ? '没有可执行 code 节点的在线 Worker（本实例的 code 节点只在 Worker 上执行，需要开启了 code 并发的 Worker）。请按「设置 → Agent 与 Worker」的说明接入。'
+                : '没有在线的 Worker。请按「设置 → Agent 与 Worker」的说明接入。'}
               <button
                 type="button"
                 className={styles.action}

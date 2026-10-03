@@ -411,6 +411,30 @@ describe('WorkspaceMainPage onboarding guide', () => {
       await waitFor(() => expect(mockListAgentWorkers).toHaveBeenCalled())
     })
 
+    it('does not complete the Worker steps with only an agent-only Worker online', async () => {
+      mockConsoleConfig.mockReturnValue({
+        data: { console_url: '', code_requires_worker: true },
+      })
+      mockListAgentWorkers.mockResolvedValue([
+        {
+          online: true,
+          revoked: false,
+          claim_enabled: true,
+          max_code_concurrency: 0,
+          labels: {},
+        },
+      ])
+      renderPage()
+      await loadJobsViaSSE()
+
+      expect(await screen.findByText('接入 Worker')).toBeInTheDocument()
+      await waitFor(() => expect(mockListAgentWorkers).toHaveBeenCalled())
+      expect(
+        await screen.findByRole('button', { name: '去接入 Worker' })
+      ).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '添加条目' })).toBeDisabled()
+    })
+
     it('drops the Worker connection step on a default instance', async () => {
       renderPage()
       await loadJobsViaSSE()
@@ -420,10 +444,20 @@ describe('WorkspaceMainPage onboarding guide', () => {
       expect(mockListAgentWorkers).not.toHaveBeenCalled()
     })
 
-    it('diagnoses a missing Worker for waiting jobs on a pure-remote instance', async () => {
+    it('diagnoses a missing code Worker for waiting jobs on a pure-remote instance', async () => {
       mockConsoleConfig.mockReturnValue({
         data: { console_url: '', code_requires_worker: true },
       })
+      // 只有 agent-only Worker 在线且在领取：code 节点仍领不到。
+      mockListAgentWorkers.mockResolvedValue([
+        {
+          online: true,
+          revoked: false,
+          claim_enabled: true,
+          max_code_concurrency: 0,
+          labels: {},
+        },
+      ])
       const waitingStats = {
         ...baseStats,
         job_stats: { ...baseStats.job_stats, pending: 1 },
@@ -459,7 +493,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
       await loadJobsViaSSE()
 
       const banner = await screen.findByTestId('worker-readiness-banner')
-      expect(banner).toHaveTextContent('没有在线的 Worker')
+      expect(banner).toHaveTextContent('没有可执行 code 节点的在线 Worker')
     })
   })
 })

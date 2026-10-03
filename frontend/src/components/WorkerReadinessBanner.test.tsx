@@ -66,7 +66,7 @@ function renderBanner(
       <WorkerReadinessBanner
         workspaceId="ws1"
         waitingCount={3}
-        needsWorker
+        needs={{ agent: true, code: false }}
         {...props}
       />
     </MemoryRouter>
@@ -159,7 +159,7 @@ describe('WorkerReadinessBanner', () => {
 
   it('skips worker checks for pure code workflows', async () => {
     mockListAgentWorkers.mockResolvedValue([])
-    renderBanner({ needsWorker: false })
+    renderBanner({ needs: { agent: false, code: false } })
     await waitFor(() =>
       expect(fetchWorkerStatusMock).toHaveBeenCalledWith('ws1')
     )
@@ -210,4 +210,26 @@ describe('WorkerReadinessBanner', () => {
       )
     }
   )
+
+  it('ignores agent-only Workers when code nodes need a Worker (#875)', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      worker({ claim_enabled: true, max_code_concurrency: 0 }),
+    ])
+    renderBanner({ needs: { agent: false, code: true } })
+    expect(
+      await screen.findByText(/没有可执行 code 节点的在线 Worker/)
+    ).toBeInTheDocument()
+  })
+
+  it('accepts a claiming code-capable Worker for code nodes', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      worker({ claim_enabled: true, max_code_concurrency: 2 }),
+    ])
+    renderBanner({ needs: { agent: false, code: true } })
+    await waitFor(() => expect(mockListAgentWorkers).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(fetchWorkerStatusMock).toHaveBeenCalledWith('ws1')
+    )
+    expect(screen.queryByTestId('worker-readiness-banner')).toBeNull()
+  })
 })

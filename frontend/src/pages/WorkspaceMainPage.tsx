@@ -131,7 +131,7 @@ export default function WorkspaceMainPage() {
   )
   // 横幅与引导共用同一判定（#875）：纯 code workflow 默认由 Host 本地执行，
   // 实例纯远程（code_capacity=0）时 code 节点同样要 Worker。
-  const needsWorker = useWorkflowNeedsWorker(workflowDefinition, {
+  const workerNeeds = useWorkflowNeedsWorker(workflowDefinition, {
     enabled: !showEmptyGuide && waitingCount > 0,
     whenNoWorkflow: false,
   })
@@ -204,7 +204,7 @@ export default function WorkspaceMainPage() {
             <WorkerReadinessBanner
               workspaceId={workspaceId}
               waitingCount={waitingCount}
-              needsWorker={needsWorker}
+              needs={workerNeeds}
             />
           )}
           <section>
