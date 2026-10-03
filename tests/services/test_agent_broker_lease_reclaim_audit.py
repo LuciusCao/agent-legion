@@ -145,6 +145,45 @@ def test_burst_counts_deferred_and_limit_exceeded(job_db, caplog) -> None:
     assert burst["reclaimed"] == len(hard)
     assert burst["deferred"] == len(soft)
     assert burst["requeue_limit_exceeded"] == 1
+    assert burst["requeued"] == len(hard) - 1
+    assert burst["cancelled"] == 0
+
+
+def test_burst_counts_stale_generation_over_limit_as_cancelled(job_db, caplog) -> None:
+    """#896 review P2：旧代次 + attempt 超限的请求被 sweep 按代次取消、不走
+    超限判败分支——burst 计入 cancelled，不得误报为 requeue_limit_exceeded。"""
+    count = RECLAIM_BURST_THRESHOLD + 2
+    instance, claims = _claim_all(job_db, count)
+    ids = [claim.execution_id for claim in claims]
+    stale = claims[0]
+    _silence(job_db, ids, _TTL + 10)
+    _last_seen(job_db, "worker-1", 300)
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set attempt=%s where execution_id=%s",
+            (instance.requeue_limit + 1, stale.execution_id),
+        )
+        conn.execute(
+            "update jobs set execution_generation=execution_generation+1 where id=%s",
+            (stale.job_id,),
+        )
+
+    with caplog.at_level(logging.WARNING, logger=_AUDIT_LOGGER):
+        requeued = instance.sweep_expired_claims()
+
+    assert stale.execution_id not in requeued
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select state, outcome_json from agent_execution_requests where execution_id=%s",
+            (stale.execution_id,),
+        ).fetchone()
+    assert row["state"] != "queued"
+    assert "requeue limit exceeded" not in str(row["outcome_json"] or "")
+    burst = _audit_events(caplog, "worker.lease_reclaim_burst")[0]
+    assert burst["reclaimed"] == count
+    assert burst["requeue_limit_exceeded"] == 0
+    assert burst["cancelled"] == 1
+    assert burst["requeued"] == count - 1
 
 
 def test_reclaim_below_threshold_emits_no_burst(job_db, caplog) -> None:

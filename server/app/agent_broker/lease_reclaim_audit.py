@@ -56,27 +56,39 @@ class ReclaimTally:
         self._expired: dict[str, list[str]] = {}
         self._limit_exceeded: Counter[str] = Counter()
 
-    def note_expired(self, row: Any) -> None:
-        """Record one lease the sweep is deleting (+ the #490 per-row event)."""
+    def note_expired(self, row: Any, generation_stale: bool) -> None:
+        """Record one lease the sweep is deleting (+ the #490 per-row event).
+
+        Outcome accounting follows the sweep's actual branch order (#896
+        review P2): a stale-generation row is CANCELLED before the requeue
+        limit is consulted, so only a current-generation row with attempt >
+        limit takes the force-fail branch; requeued ids come from the sweep's
+        own result in ``report``; every other expired row was cancelled
+        (stale generation, or a node that already went terminal)."""
         worker_events.note_lease_expired(row, self._requeue_limit)
         worker_id = str(row["worker_id"])
         self._expired.setdefault(worker_id, []).append(str(row["execution_id"]))
-        if int(row["attempt"]) > self._requeue_limit:
+        if not generation_stale and int(row["attempt"]) > self._requeue_limit:
             self._limit_exceeded[worker_id] += 1
 
-    def report(self, deferral: Any) -> None:
+    def report(self, deferral: Any, requeued: list[str]) -> None:
         """Emit one burst line per Worker at/over the threshold. Called after
         the sweep transaction commits, so a rolled-back sweep reports nothing."""
+        requeued_ids = set(requeued)
         for worker_id, executions in sorted(self._expired.items()):
             if len(executions) < RECLAIM_BURST_THRESHOLD:
                 continue
             last_seen = deferral.last_seen(worker_id)
+            rerun = sum(1 for execution_id in executions if execution_id in requeued_ids)
+            failed = self._limit_exceeded[worker_id]
             _emit(
                 "worker.lease_reclaim_burst",
                 {
                     "worker_id": worker_id,
                     "reclaimed": len(executions),
-                    "requeue_limit_exceeded": self._limit_exceeded[worker_id],
+                    "requeued": rerun,
+                    "requeue_limit_exceeded": failed,
+                    "cancelled": len(executions) - rerun - failed,
                     "deferred": deferral.deferred_count(worker_id),
                     "worker_last_seen_at": last_seen.isoformat() if last_seen else None,
                     "sample_execution_ids": executions[:_SAMPLE_SIZE],

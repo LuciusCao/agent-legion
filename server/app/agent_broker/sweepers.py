@@ -110,7 +110,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 f"deleting expired agent lease {lease_id} exec={row['execution_id']}"
                 f" job={row['job_id']} worker={row['worker_id']} attempt={row['attempt']}"
             )
-            reclaims.note_expired(row)  # #681: + worker-level burst tally
+            reclaims.note_expired(row, generation_stale)  # #681: worker-level burst tally
             conn.execute("delete from executor_leases where id=%s", (lease_id,))
             conn.execute(
                 "update node_runs set status='failed', finished_at=current_timestamp,"
@@ -181,7 +181,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                     (outcome["error_message"], row["job_id"]),
                 )
         deferral.prune_log_buckets()
-    reclaims.report(deferral)  # post-commit: a rolled-back sweep reports nothing
+    reclaims.report(deferral, requeued)  # post-commit: a rolled-back sweep reports nothing
     for worker_id, workspace_id in released:
         broker._notify_worker_released(worker_id, workspace_id)
     from server.app.services.runtime_profile import profile
