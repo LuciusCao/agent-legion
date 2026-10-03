@@ -13,8 +13,11 @@ set -euo pipefail
 # the gate scripts below cannot reintroduce the death by resetting traps.
 # Guards around every write still keep set -e clean after EPIPE.
 trap '' PIPE
+# A failed write means the push's output reader is gone (EPIPE, SIGPIPE being
+# ignored); remembered for the post-gate push diagnostics below.
+output_reader_gone=0
 say() {
-  printf '%s\n' "$*" || true
+  printf '%s\n' "$*" 2>/dev/null || output_reader_gone=1
 }
 
 if [[ "$#" -lt 1 || "$#" -gt 2 || ("$1" != "quick" && "$1" != "full") ]]; then
@@ -171,7 +174,45 @@ case "$gate" in
   full) gate_script="$ROOT_DIR/scripts/check.sh" ;;
 esac
 
+# Push-path diagnostics (issue #679). A SIGPIPE anywhere in this hook chain
+# can only fail the hook, which git reports as "failed to push" with exit 1 —
+# never as exit 141. A `git push` that itself exits 141 after a passing gate
+# is git dying on one of ITS OWN pipes (git resets SIGPIPE to the default at
+# startup, so no trap here can reach it): the remote transport child it
+# spawned before running this hook (remote helper / ssh / receive-pack) died
+# while the gate held the push open — git then writes the ref updates into the
+# dead pipe and the remote ref never moves — or the push's output reader went
+# away. Both windows are as long as the gate (queue wait included), hence the
+# load dependence and why the cached-evidence retry always passes.
+# .githooks/pre-push exports git's pid; snapshot its transport children now
+# and re-check them after the gate.
+push_git_pid="${AGENT_LEGION_PRE_PUSH_GIT_PID:-}"
+diag_file="$common_dir/local-gates/push-diagnostics.log"
+push_diag() {
+  {
+    mkdir -p "${diag_file%/*}" &&
+      printf '%s pid=%s git=%s head=%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        "$$" "${push_git_pid:-none}" "${head_sha:0:12}" "$*" >>"$diag_file"
+  } 2>/dev/null || true
+}
+git_children() {
+  ps -A -o pid= -o ppid= 2>/dev/null |
+    awk -v parent="$1" -v self="$$" '$2 == parent && $1 != self { print $1 }' || true
+}
+# Gone or a zombie: git cannot reap its dead transport while it blocks on
+# this hook, so kill -0 alone would still report it alive.
+process_dead() {
+  local state
+  state="$(ps -o stat= -p "$1" 2>/dev/null || true)"
+  [[ -z "$state" || "$state" == Z* ]]
+}
+transport_pids=""
+if [[ -n "$push_git_pid" ]]; then
+  transport_pids="$(git_children "$push_git_pid" | tr '\n' ' ')"
+fi
+
 started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+gate_started_seconds=$SECONDS
 say "Running local $gate gate for ${head_sha:0:12} (lanes: $lanes)..."
 # The gate script streams the lanes' output through this process's stdout —
 # which under pre-push is git push's own pipe. A reader that walked away
@@ -179,7 +220,18 @@ say "Running local $gate gate for ${head_sha:0:12} (lanes: $lanes)..."
 # ignored above and every write in the gate scripts guarded, the gate either
 # drains the pipe (reader alive) or drops its chatter (reader gone) and in
 # both cases reports its verdict through the exit status alone.
-GATE_LANES="$lanes" "$gate_script"
+gate_status=0
+GATE_LANES="$lanes" "$gate_script" || gate_status=$?
+if [[ "$gate_status" -ne 0 ]]; then
+  if [[ "$gate_status" -gt 128 ]]; then
+    # A signal death (141 = SIGPIPE) inside the gate: name the stage instead
+    # of leaving a bare exit code behind.
+    push_diag "gate script $gate_script died with status $gate_status (signal $((gate_status - 128)))"
+    say "Local $gate gate died with status $gate_status (signal $((gate_status - 128))); see $diag_file" >&2
+  fi
+  exit "$gate_status"
+fi
+gate_elapsed=$((SECONDS - gate_started_seconds))
 
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
   echo "Local $gate gate changed the worktree; refusing to record passing evidence." >&2 || true
@@ -201,3 +253,26 @@ mv "$temp_file" "$cache_file"
 
 say "Local $gate gate passed for ${head_sha:0:12}."
 say "Evidence: $cache_file"
+
+# Post-gate transport check (issue #679): a dead transport means git would
+# die with SIGPIPE (141) the moment this hook returns 0, the ref never moving.
+# Fail explicitly instead — git reports a plain "failed to push" — with the
+# evidence already cached so the re-run is instant.
+dead_transport=""
+for pid in $transport_pids; do
+  if process_dead "$pid"; then
+    dead_transport="${dead_transport:+$dead_transport }$pid"
+  fi
+done
+if [[ -n "$dead_transport" ]]; then
+  push_diag "transport pid(s) $dead_transport of git push exited during the $gate gate (${gate_elapsed}s); push refused instead of a SIGPIPE (141) death"
+  say "The push connection (git transport pid(s) $dead_transport) closed while the ${gate_elapsed}s gate ran;" >&2
+  say "git would die with SIGPIPE (141) without updating the remote. The gate passed and its evidence" >&2
+  say "is cached: re-run git push (it replays the evidence in seconds). Diagnostics: $diag_file" >&2
+  exit 1
+fi
+if [[ "$output_reader_gone" -eq 1 && -n "$push_git_pid" ]]; then
+  # Nothing here can save git's own status writes; the record attributes the
+  # 141 that may follow (the ref update itself still goes through).
+  push_diag "push output reader went away during the $gate gate (${gate_elapsed}s); git push may exit 141 printing its status after updating the ref — verify with git ls-remote"
+fi
