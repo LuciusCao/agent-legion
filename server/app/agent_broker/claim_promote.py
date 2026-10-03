@@ -10,7 +10,6 @@ scan row's ``queued_at`` is only visible on this path.
 
 from __future__ import annotations
 
-import json
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -19,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.agent_broker.claim_paths import claim_log_path
 from server.app.agent_broker.claim_scan import ClaimRacedError
 from server.app.services.runtime_profile import profile
+from server.app.services.runtime_reserved_config import manifest_run_audit_json
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -55,8 +55,9 @@ def promote_claim(
     # config is the non-secret resolved config built at enqueue on the Host —
     # frozen keys repeat the intake snapshot, runtime_mutable keys carry the
     # enqueue-time re-resolution. Secret values never enter the manifest
-    # (CONFIG-MANIFEST-001), so this is safe to persist.
-    config_snapshot_json = json.dumps(manifest.get("config") or {}, sort_keys=True, default=str)
+    # (CONFIG-MANIFEST-001), so this is safe to persist. #691: the manifest
+    # handed in carries the claim's timeout decision (value + source).
+    config_snapshot_json = manifest_run_audit_json(manifest)
     # Implementation identity mirror (schema v85, #645): the scan's
     # ``select r.*`` carries the request row's agent_definition_hash
     # (enqueue-time resolution); persisting it here gives node_runs the same

@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from server.app.agent_broker.claim_timeout import decide_claim_timeout
 from server.app.agent_runtime.catalog import get_adapter
 from server.app.agent_runtime.execution import resolve_execution_chain, validate_execution_contract
 from server.app.workflows.pi_protocol import render_command_spec
@@ -67,6 +68,8 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
     manifest["additional_prompt"] = str(node_execution.get("prompt") or "")
     # #513：claim 侧重解析链与 dispatch 同源携带拼接模式。
     manifest["prompt_mode"] = str(node_execution.get("prompt_mode") or "")
+    # #691: runtime-adjustable timeout re-resolved before the re-render.
+    decide_claim_timeout(manifest, row, "agent")
     if all(key in manifest for key in ("tools", "inputs", "expected_outputs")):
         manifest["command_spec"] = render_command_spec(manifest)
     return manifest

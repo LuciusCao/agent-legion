@@ -331,7 +331,12 @@ to an implementation:
   frozen at job intake; a property marked `runtime_mutable: true` (run
   switches like `dry_run`) opts out of the freeze and is re-resolved
   against the live workspace override at every dispatch
-  (CONFIG-RUNTIME-MUTABLE-001).
+  (CONFIG-RUNTIME-MUTABLE-001). Of the reserved keys, `timeout_seconds`
+  is runtime-adjustable (a workspace override reaches queued,
+  not-yet-started nodes; an invalid one falls back to the node/platform
+  value; defaults: agent 1800s, code 600s, CONFIG-RUNTIME-TIMEOUT-001), while
+  `sandbox_network` stays frozen at intake — opening network egress ships
+  with a workflow revision.
 - Node config `connection` keys reference instance-level external service
   connections (external APIs such as TTS or CMS; the boundary is
   SECURITY-EXTERNAL-CONNECTION-001). Those are admin-only and live in

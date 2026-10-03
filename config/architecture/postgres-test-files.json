@@ -196,6 +196,7 @@
     "tests/services/test_run_dir_cleanup.py",
     "tests/services/test_run_service_chunking.py",
     "tests/services/test_runtime_profile.py",
+    "tests/services/test_runtime_timeout_matrix.py",
     "tests/services/test_scoped_tokens.py",
     "tests/services/test_studio_chat_agent_config.py",
     "tests/services/test_studio_chat_availability.py",

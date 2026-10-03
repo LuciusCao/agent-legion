@@ -3,7 +3,9 @@
 The platform auto-merges ``timeout_seconds`` (integer, default 600, >= 1)
 and ``sandbox_network`` (boolean, default false) into every code-routed
 node's effective config schema, so the values travel the regular node
-config chain (defaults → node config → workspace override → intake freeze).
+config chain (defaults → node config → workspace override). ``sandbox_network``
+is intake-frozen; ``timeout_seconds`` follows CONFIG-RUNTIME-TIMEOUT-001
+(#691, ``runtime_reserved_config``).
 The executor-capability fallback retired with the executor concept (schema
 v47): the v47 harvest moved executor declarations onto the revision nodes,
 so the node layer is the only declaration source left.
@@ -78,6 +80,14 @@ def merge_reserved_execution_schema(
         **(dict(existing) if isinstance(existing, Mapping) else {}),
     }
     return merged
+
+
+def agent_effective_schema(schema: Mapping[str, Any] | None) -> dict[str, Any]:
+    """An agent node's effective schema: reserved keys merged with the agent
+    product default timeout (1800s, #550) — never the code-node 600."""
+    return merge_reserved_execution_schema(
+        schema, {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS}
+    )
 
 
 def resolved_code_capability(

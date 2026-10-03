@@ -31,7 +31,8 @@ export function WorkflowNodeRuntimeOverrideCard({
       <p className={styles.fieldHint}>
         运行时覆盖：立即保存到 workspace 设置，不产生新版本。非运行
         开关键影响之后 intake 的新 job；运行开关键（runtime_mutable） 对运行中的
-        job 下一次执行即生效。
+        job 下一次执行即生效；执行超时 timeout_seconds
+        对已排队、尚未开始执行的节点即生效（已开始的执行不受影响）。
       </p>
       <NodeConfigCard
         key={node.key}

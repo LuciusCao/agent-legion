@@ -823,6 +823,26 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 
 接入新内容类型只需两步：在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并在其 `config_schema` 声明 `connection` 键（实例级外部服务连接 key）与业务参数。Intake 快照只冻结 `node_config` 与 `secret_ref`；声明 `runtime_mutable: true` 的运行开关键不受冻结约束，每次 dispatch 按同一解析链重取 workspace 覆盖并落 `node_runs.config_snapshot_json` 审计（CONFIG-RUNTIME-MUTABLE-001）。
 
+### 节点配置可变性分类（#691）
+
+节点配置值分两类，解析链都是「schema 默认 → 节点 `config` → workspace 覆盖」（workspace 覆盖优先级最高），区别只在**何时**求值：
+
+| 类别 | 键 | 求值时机 | 改动生效范围 | 理由 |
+| --- | --- | --- | --- | --- |
+| 随 workflow 版本化（默认） | 普通 `config_schema` 业务键、`sandbox_network` | job intake 时冻结 | 只影响之后 intake 的新 job；节点 `config` 层的改动需发布新 revision | 影响产物正确性/可复现性；`sandbox_network` 是网络出站安全边界，放开必须走 revision 发布评审，不能用运行时开关给在飞 job 开网 |
+| 运行时可调 | 声明 `runtime_mutable: true` 的业务键（运行开关）、保留执行键 `timeout_seconds` | 运行开关：每次 dispatch 现场重解析；`timeout_seconds`：见下方模型 | 尚未判定的执行即用新值；已开始的执行不变 | 纯运行开关或资源/弹性参数，不改变节点产出什么 |
+
+`timeout_seconds` 模型（CONFIG-RUNTIME-TIMEOUT-001，实现 `server/app/services/runtime_reserved_config.py`，测试矩阵 `tests/services/test_runtime_timeout_matrix.py`）：
+
+- 三层：L0 平台默认（agent 1800s / code 600s）；L1 job 所钉 revision 的节点 `config.timeout_seconds`（对该 job 不可变）；L2 workspace 覆盖——唯一可变层。
+- 不可变部分在入队时冻结：远程请求的 manifest 携带 `timeout_base = {value, source} = resolve(L0, L1)`，claim 计算超时不需要读 revision 文档。base 只是中间值，不是判定。
+- 每次执行只有**一个判定点**：本地 code 池 = Host dispatch；远程 agent/code = Worker claim（候选选取时的快照，写事务沿用、不重读、不加锁）。所有路径共用同一个纯函数 `effective = resolve_timeout(base, L2)`；判定后值固定，审计记录的恰好是判定的值与来源。claim 扫描在 SQL 里把 L2 投影成标量（`workspaces.node_config_json` 按 workspace 解析一次，键为 `default_workflow_key`，即 manifest 的 `workflow_key`），整份文档不进候选行。
+- L2 非法（合法 = 非 bool 的整数且 >= 1，与保留 schema 一致）时，**所有路径**都回落到 base，审计来源记为 `workspace_override_invalid`，并打一条结构化 warning（node key、workspace、原始值；同一组合只打一次）。任何路径都不再因非法超时覆盖让节点失败（#691 之前 dispatch 会让节点失败），intake 冻结同样忽略非法超时覆盖。
+- 旧 Host 入队、manifest 里没有 `timeout_base` 的请求：以入队时的值为 base，来源 `enqueue_snapshot`。
+- 审计：每次执行在 `node_runs.config_snapshot_json` 的 `_config_resolution` 元键下记录判定结果，远程请求在 claim 下发的 manifest 里另带同形的 `config_resolution` 键，形如 `{"timeout_seconds": {"value", "source"}}`，来源取 `platform_default` / `node_config` / `workspace_override` / `workspace_override_invalid` / `enqueue_snapshot`。
+- 保留键 `timeout_seconds` / `sandbox_network` 仍不得在 `config_schema` 中重声明（loader 拒绝），也不能挂 `runtime_mutable` 标记；它们不进 `runtime_mutable_keys`，因此也不影响 inherit 升级的继承判定。intake 冻结快照仍记录 intake 时刻的超时（inherit 升级 diff 照旧比较），但执行不使用它。
+- 生效时点（快照语义）：运行时可调键是**配置输入**，不是判定状态。每次求值在一个声明好的时点读取一次——Host dispatch 时，或 Worker 批量 claim 的候选选取阶段（只读连接）——写事务沿用该快照，不在锁下重读，也不对 `workspaces` 行加锁；在此之后提交的修改从下一次 dispatch / claim 起生效。与「先选候选、后在写事务内修改并提交」之间提交的修改效果上等同于晚于本次 claim 提交，不产生错误执行；在 claim 热路径上加锁消除这个窗口的代价（#690 锁序族）远大于收益。跨事务携带的身份、状态、执行代次、租约、容量等**判定状态**仍须在写事务内重新校验（AGENTS.md「多步变更」条）。
+
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
