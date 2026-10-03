@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Changed
+- 原生形态网络变量支持写进根 `.env`（issue #486）：`native-prod-up.sh` / `native-prod-down.sh` 对 `NATIVE_BACKEND_BIND` / `NATIVE_WORKER_BIND` / `NATIVE_BACKEND_PORT` / `NATIVE_WORKER_PORT` 按「进程环境 > 根 `.env` > 默认值」取值（空值按未配置）。此前四个变量只认进程环境，换 shell 会话、重启或经 launchd/cron 调起时静默退回 loopback——服务照常起、远程设备全部失连；现在常驻配置写 `.env` 即可持久，`export` 仍是优先级最高的临时覆盖。仓库里散落的三份 shell dotenv 解析（`local-s3-decide.sh`、`dev_stack.sh`、`native-prod-up.sh` 的 S3 凭据桥接）收敛为共用的 `scripts/dotenv-lib.sh`，解析语义不变。
+- 原生形态通配 bind 的疑似双实例拒绝启动（issue #486）：以 `0.0.0.0` / `::` 启动而同端口已有其他监听（典型是旧 bind `127.0.0.1` 的实例）时，`native-prod-up.sh` 列出冲突监听并以非零码退出，提示先按旧 bind `make prod-down`；此前通配监听与具体地址监听可并存，会起出连同一个库的双实例（违反单副本约束）。同 bind 重跑仍是幂等跳过。
+
+### Fixed
+- velites 部署 planner 在 PATH 含相对条目时对同一文件产出两个安置目标（issue #850）：`velites_deploy_plan.py` 的 PATH 模式按字符串去重，`bin/velites` 与 `./bin/velites` 被当成两个目标，`ensure-velites.sh` 应用阶段第二次替换找不到暂存件报错退出。安置目标现统一 `os.path.abspath` 后去重、一律输出绝对路径；只做词法归一不解析 symlink，PATH 上的链接仍按链接本身安置。
+
 ## [0.7.14] - 2026-10-03
 
 主打外部对接闭环与执行/校验正确性：run → job ID 链路打通（#735）、外部产物 presigned 直连下载（#739）、API token 每 token 限流（#738）与 api-scope 白名单机制化（#734）；job 节点计数触发器死锁修复（#690，schema 推进至 v88）、Host 输出校验声明视图（#757）、timeout_seconds 运行时可调（#691）。Worker 控制台接入闭环（#762/#763/#765，schema v87）；Studio 线收后台任务可见性与会话生命周期防护（#772/#806/#802）、长会话虚拟滚动（#803）与抽屉层级/布局三连修；infra 面 velites 双通道刷新（#831）、前端依赖指纹（#810）、pre-push 传输诊断（#679）。

@@ -7,12 +7,18 @@
 # 默认 127.0.0.1，与 native-prod-up.sh 同一组变量）：同端口不同地址可并存
 # 监听，按端口 head -1 会杀错进程；up 用什么 bind 起的，down 就用同一个
 # bind 停。同族通配监听（*:port / [::]:port）占满所属族，同样匹配。
+# 端口/bind 与 up 同一两级来源：进程环境 > 根 .env（#486，写进 .env 的
+# bind 不必每次 down 时再 export 一遍）。
 set -euo pipefail
 
-BACKEND_PORT="${NATIVE_BACKEND_PORT:-8000}"
-WORKER_PORT="${NATIVE_WORKER_PORT:-8787}"
-BACKEND_BIND="${NATIVE_BACKEND_BIND:-127.0.0.1}"
-WORKER_BIND="${NATIVE_WORKER_BIND:-127.0.0.1}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=dotenv-lib.sh
+source "$ROOT/scripts/dotenv-lib.sh"
+
+BACKEND_PORT="$(dotenv_lookup_or NATIVE_BACKEND_PORT 8000 "$ROOT/.env")"
+WORKER_PORT="$(dotenv_lookup_or NATIVE_WORKER_PORT 8787 "$ROOT/.env")"
+BACKEND_BIND="$(dotenv_lookup_or NATIVE_BACKEND_BIND 127.0.0.1 "$ROOT/.env")"
+WORKER_BIND="$(dotenv_lookup_or NATIVE_WORKER_BIND 127.0.0.1 "$ROOT/.env")"
 
 listener_display() {
     local host="$1"
