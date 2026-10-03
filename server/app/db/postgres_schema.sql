@@ -510,12 +510,12 @@ create table if not exists workspace_job_status_counts (
 create table if not exists run_job_status_counts (run_id text not null, status text not null,
   cnt bigint not null, primary key(run_id, status));
 -- Workspace job NODE status counters (schema v56, DB-JOB-NODE-STATUS-COUNTS-001):
--- count_workspace_job_nodes_by_status serves the workspace DAG endpoint; as a
--- join+group-by over job_nodes ⋈ jobs it is O(workspace job_nodes) per call
--- (48s measured at 260k jobs / 2.9M job_nodes, hash join spilling ~1GB to
--- temp). Triggers keep this table transactionally in sync; job_nodes rows
--- derive (workspace_id, workflow_key) from their parent jobs row.
--- Backfill lives in migrate_workspace_job_node_status_counts.
+-- the workspace DAG endpoint's O(1)-per-key read instead of an
+-- O(workspace job_nodes) join+group-by. Backfill: migrate_workspace_job_node_status_counts.
+-- Since v88 (#690) every trigger below writes through
+-- bump_job_node_status_counts, which (with its delta table and try-lock
+-- folder) lives ONLY in the v88 migration's SQL: a replay of this file must
+-- never restore the pre-v88 blocking upsert body on an upgraded database.
 create table if not exists workspace_job_node_status_counts (
   workspace_id text not null references workspaces(id) on delete cascade,
   node_key text not null,
@@ -523,22 +523,6 @@ create table if not exists workspace_job_node_status_counts (
   cnt bigint not null,
   primary key(workspace_id, node_key, status)
 );
-create or replace function bump_job_node_status_counts(
-  p_workspace_id text, p_node_key text, p_status text, p_delta bigint
-) returns void as $$
-begin
-  if p_delta > 0 then
-    insert into workspace_job_node_status_counts(workspace_id, node_key, status, cnt)
-    values (p_workspace_id, p_node_key, p_status, p_delta)
-    on conflict (workspace_id, node_key, status)
-    do update set cnt = workspace_job_node_status_counts.cnt + p_delta;
-  else
-    update workspace_job_node_status_counts set cnt = cnt + p_delta
-    where workspace_id = p_workspace_id
-      and node_key = p_node_key and status = p_status;
-  end if;
-end;
-$$ language plpgsql;
 create or replace function sync_job_node_status_counts() returns trigger as $$
 declare
   parent_ws text;
@@ -575,40 +559,47 @@ begin
   end if;
 end;
 $$ language plpgsql;
--- Job deletion: deduct every node count set-based BEFORE the row goes away;
--- the cascaded job_nodes deletes afterwards find no parent and skip.
+-- Job deletion: deduct every node count BEFORE the row goes away; the
+-- cascaded job_nodes deletes afterwards find no parent and skip. A workspace
+-- cascade has already removed the parent workspace (its counters and deltas
+-- cascade with it), so a delta row for it would only fail the FK.
 create or replace function deduct_job_node_status_counts() returns trigger as $$
+declare
+  nk text;
+  st text;
+  n bigint;
 begin
-  update workspace_job_node_status_counts c set cnt = c.cnt - s.cnt
-  from (
-    select node_key, status, count(*) as cnt from job_nodes
-    where job_id = OLD.id group by 1, 2
-  ) s
-  where c.workspace_id = OLD.workspace_id
-    and c.node_key = s.node_key and c.status = s.status;
+  if not exists (select 1 from workspaces where id = OLD.workspace_id) then
+    return OLD;
+  end if;
+  for nk, st, n in
+    select node_key, status, count(*) from job_nodes
+    where job_id = OLD.id group by 1, 2 order by 1, 2
+  loop
+    perform bump_job_node_status_counts(OLD.workspace_id, nk, st, -n);
+  end loop;
   return OLD;
 end;
 $$ language plpgsql;
 -- Job workspace move: move every node count (the workflow_key dimension is
 -- gone with the column — #211 M2).
 create or replace function rekey_job_node_status_counts() returns trigger as $$
+declare
+  nk text;
+  st text;
+  n bigint;
 begin
   -- Same workspace: nothing to move.
   if NEW.workspace_id is not distinct from OLD.workspace_id then
     return NEW;
   end if;
-  update workspace_job_node_status_counts c set cnt = c.cnt - s.cnt
-  from (
-    select node_key, status, count(*) as cnt from job_nodes
-    where job_id = OLD.id group by 1, 2
-  ) s
-  where c.workspace_id = OLD.workspace_id
-    and c.node_key = s.node_key and c.status = s.status;
-  insert into workspace_job_node_status_counts(workspace_id, node_key, status, cnt)
-  select NEW.workspace_id, node_key, status, count(*)
-  from job_nodes where job_id = NEW.id group by 2, 3
-  on conflict (workspace_id, node_key, status)
-  do update set cnt = workspace_job_node_status_counts.cnt + excluded.cnt;
+  for nk, st, n in
+    select node_key, status, count(*) from job_nodes
+    where job_id = OLD.id group by 1, 2 order by 1, 2
+  loop
+    perform bump_job_node_status_counts(OLD.workspace_id, nk, st, -n);
+    perform bump_job_node_status_counts(NEW.workspace_id, nk, st, n);
+  end loop;
   return NEW;
 end;
 $$ language plpgsql;

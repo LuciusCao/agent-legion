@@ -41,25 +41,29 @@ from psycopg import sql
 
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
+from tests.helpers.pre_v88_node_counts import PRE_V88_BUMP_SQL
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v87, agent_worker_claim_state) must leave
-# behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v87 is DDL-only via its apply fn: agent_workers gains
-# claim_enabled. The undo drops the column; v86's agent_definition_hash
-# column stays in the (SCHEMA_VERSION-1) shape.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("agent_workers", "claim_enabled", "boolean"),
-)
+# Effects the newest migration (v88, job_node_status_count_deltas) must
+# leave behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v88 creates the node-counter delta table (its index goes
+# with it) and installs the try-lock folder functions plus the terminal
+# bump_job_node_status_counts body; the undo drops the table and folder
+# functions and restores the v87 blocking-upsert bump body, which the v87
+# schema file used to carry (v87's claim_enabled column stays).
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("workspace_job_node_status_count_deltas",)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "agent_worker_claim_state"
+_NEWEST_MIGRATION_NAME = "job_node_status_count_deltas"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v86 (empty: v86's agent_definition_hash column is untouched by
-# the undo and stays in the (SCHEMA_VERSION-1) shape).
-_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
+# faithful v87: the folder functions disappear and bump regains its v87 body.
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
+    "drop function if exists try_fold_job_node_status_counts(text)",
+    "drop function if exists apply_job_node_status_count(text, text, text, bigint)",
+    PRE_V88_BUMP_SQL,
+)
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]
@@ -139,6 +143,22 @@ def _catalog_constraints(schema_name: str) -> _CatalogConstraints:
         }
 
 
+def _catalog_functions(schema_name: str) -> set[tuple[str, str, str]]:
+    """(name, identity args, body) of every plpgsql/sql function: trigger
+    bodies are schema too, and a migration-owned body (v88's bump) that a
+    schema-file replay could overwrite would diverge only here."""
+    with read_connection(TEST_DATABASE_URL) as conn:
+        return {
+            (str(row["proname"]), str(row["args"]), str(row["prosrc"]).strip())
+            for row in conn.execute(
+                "select p.proname, pg_get_function_identity_arguments(p.oid) as args, p.prosrc"
+                " from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+                " where n.nspname=%s",
+                (schema_name,),
+            ).fetchall()
+        }
+
+
 def test_newest_migration_undo_inventory_is_current() -> None:
     """The undo step must cover the actual newest registry entry; a version
     bump without extending _undo_newest_migration fails here first."""
@@ -182,6 +202,8 @@ def test_upgraded_database_matches_fresh_catalog() -> None:
         upgraded_columns = _catalog_columns(parity_schema)
         upgraded_indexes = _catalog_indexes(parity_schema)
         upgraded_constraints = _catalog_constraints(parity_schema)
+        fresh_functions = _catalog_functions(TEST_SCHEMA)
+        upgraded_functions = _catalog_functions(parity_schema)
     finally:
         # Leave no scratch schema behind for later tests on this worker.
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as admin:
@@ -203,4 +225,9 @@ def test_upgraded_database_matches_fresh_catalog() -> None:
         "constraints diverge between fresh and upgraded databases:\n"
         f"only fresh: {sorted(fresh_constraints - upgraded_constraints)}\n"
         f"only upgraded: {sorted(upgraded_constraints - fresh_constraints)}"
+    )
+    assert upgraded_functions == fresh_functions, (
+        "function bodies diverge between fresh and upgraded databases:\n"
+        f"only fresh: {sorted(f[:2] for f in fresh_functions - upgraded_functions)}\n"
+        f"only upgraded: {sorted(f[:2] for f in upgraded_functions - fresh_functions)}"
     )
