@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Fixed
+- 本地池 code 分片绕过节点配置解析（#869）：分片节点因无可用远程 Worker 或 payload 不可远程执行而落入本地池时，执行上下文此前不经 dispatch 判定入口——不带节点业务 config（与远程分片不一致）、超时恒为平台默认 600s（节点 config 与 workspace 运行时覆盖都被忽略）、`node_runs.config_snapshot_json` 无 `_config_resolution` 审计，且缺少已发布节点代码。现与普通本地 code dispatch 共用同一判定入口；超时测试矩阵补「本地分片」「远程分片」两条路径，并新增结构守卫：构造执行上下文或入队执行请求的位置须登记在矩阵路径表并经过判定函数。
+
+### Changed
+- workflow 升级 inherit 模式不再因只改 `timeout_seconds` 而重跑节点（#858）：per-node diff 比较节点定义 `config` 与冻结 config 段时剔除运行时可调的保留键（以 `runtime_reserved_config` 的分类表为单一事实源，目前只有 `timeout_seconds`）；`sandbox_network` 等随版本冻结的键照常参与比较，与超时一起改动时照常重跑。
+
 ## [0.7.14] - 2026-10-03
 
 主打外部对接闭环与执行/校验正确性：run → job ID 链路打通（#735）、外部产物 presigned 直连下载（#739）、API token 每 token 限流（#738）与 api-scope 白名单机制化（#734）；job 节点计数触发器死锁修复（#690，schema 推进至 v88）、Host 输出校验声明视图（#757）、timeout_seconds 运行时可调（#691）。Worker 控制台接入闭环（#762/#763/#765，schema v87）；Studio 线收后台任务可见性与会话生命周期防护（#772/#806/#802）、长会话虚拟滚动（#803）与抽屉层级/布局三连修；infra 面 velites 双通道刷新（#831）、前端依赖指纹（#810）、pre-push 传输诊断（#679）。
