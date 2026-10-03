@@ -113,7 +113,10 @@ describe('WorkerReadinessBanner', () => {
 
     renderBanner()
     await waitFor(() =>
-      expect(mockListAgentWorkers).toHaveBeenCalledWith('ws1')
+      expect(mockListAgentWorkers).toHaveBeenCalledWith(
+        'ws1',
+        expect.any(AbortSignal)
+      )
     )
     expect(screen.queryByTestId('worker-readiness-banner')).toBeNull()
   })

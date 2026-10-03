@@ -31,7 +31,7 @@ export function AgentWorkerStatusList({
   // Backend online threshold is 30s; a 15s poll keeps the status fresh.
   const { data: workers = [] } = useQuery({
     queryKey: extraQueryKeys.workspaceWorkers(workspaceId),
-    queryFn: () => listAgentWorkers(workspaceId),
+    queryFn: ({ signal }) => listAgentWorkers(workspaceId, signal),
     refetchInterval: 15_000,
   })
   const allAgents = useAgentsStore((state) => state.agents)

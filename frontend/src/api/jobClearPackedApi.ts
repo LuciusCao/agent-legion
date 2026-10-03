@@ -1,4 +1,5 @@
 import { api } from './core'
+import { BULK_REQUEST_TIMEOUT } from './requestTimeout'
 import { targetBody, type BatchJobTarget } from './batchTarget'
 import type { WorkspacePackageStatusResetResult } from '../types/jobTypes'
 
@@ -11,6 +12,7 @@ export async function clearJobsPackedStatus(
     {
       method: 'POST',
       body: JSON.stringify(targetBody(target)),
+      timeoutMs: BULK_REQUEST_TIMEOUT,
     }
   )
 }

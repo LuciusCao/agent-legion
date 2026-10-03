@@ -118,7 +118,10 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByText('Test Workspace')).toBeInTheDocument()
     await waitFor(() => {
-      expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws-1')
+      expect(mockFetchWorkspaceStats).toHaveBeenCalledWith(
+        'ws-1',
+        expect.any(AbortSignal)
+      )
     })
   })
 

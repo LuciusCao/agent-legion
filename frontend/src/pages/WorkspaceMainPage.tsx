@@ -18,6 +18,7 @@ import { JobFilterBar } from '../components/job/JobFilterBar'
 import { JobList } from '../components/job/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
 import { WorkerReadinessBanner } from '../components/WorkerReadinessBanner'
+import { WorkspaceStreamStatus } from '../components/WorkspaceStreamStatus'
 import {
   JobActionBar,
   type JobActionBarFilter,
@@ -184,6 +185,8 @@ export default function WorkspaceMainPage() {
       {workflowError && (
         <p className={styles.error}>工作流定义加载失败：{workflowError}</p>
       )}
+
+      {workspaceId && <WorkspaceStreamStatus workspaceId={workspaceId} />}
 
       {showEmptyGuide && (
         <section className={styles.section}>

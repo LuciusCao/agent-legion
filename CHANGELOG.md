@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
+## [Unreleased]
+
+### Fixed
+- 前端 `api()` 请求默认超时并透传 AbortSignal（issue #719）：此前后端僵死时 fetch 无限挂起，同 key 在途请求还会跳过 `refetchInterval`，job 详情/监控轮询冻结在加载态且不可取消。读请求默认 30 秒、写请求默认 120 秒超时，可按调用覆写（`timeoutMs`）；批量操作（batch-rerun/run-to/删除/打包/清空打包/升级/暂停恢复）与材料 complete（服务端重算整对象 sha256）豁免超时。超时抛带 `code: request_timeout` 的结构化错误，经错误映射层统一显示「请求超时」文案并走既有重试；job 详情、workspace 统计、运维指标、Worker 列表、预览面板、发布请求、质量回放、token 用量、workspace 列表等轮询/热点查询把 react-query 的 signal 透传到 fetch，页面卸载或查询失效时取消在途请求。
+- workspace 实时流断线对用户可见（issue #720）：SSE 的 `onStatus` 此前不接 UI，断线时任务列表进度冻结且无任何提示，易被误判为任务卡死而错误重跑。现在连接态进入独立 store（沿用 `AgentConnectionDot` 的 onStatus → store → 订阅组件模式），任务列表上方在断线重连期间显示「实时连接中断，正在重连…」与进度停留时刻（可能已过时）、首连持续失败时显示「实时连接未建立」；重连成功后自动重拉快照、提示消失，无需手动刷新。
+
 ## [0.7.14] - 2026-10-03
 
 主打外部对接闭环与执行/校验正确性：run → job ID 链路打通（#735）、外部产物 presigned 直连下载（#739）、API token 每 token 限流（#738）与 api-scope 白名单机制化（#734）；job 节点计数触发器死锁修复（#690，schema 推进至 v88）、Host 输出校验声明视图（#757）、timeout_seconds 运行时可调（#691）。Worker 控制台接入闭环（#762/#763/#765，schema v87）；Studio 线收后台任务可见性与会话生命周期防护（#772/#806/#802）、长会话虚拟滚动（#803）与抽屉层级/布局三连修；infra 面 velites 双通道刷新（#831）、前端依赖指纹（#810）、pre-push 传输诊断（#679）。
