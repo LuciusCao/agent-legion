@@ -834,6 +834,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 
 - 保留执行键 `timeout_seconds` / `sandbox_network` 仍不得在 `config_schema` 中重声明（loader 拒绝），也不能挂 `runtime_mutable` 标记；它们的可变性由平台固定分类（`server/app/services/runtime_reserved_config.py`）。平台默认 agent 节点 1800s、code 节点 600s。
 - 这是对 `timeout_seconds` 冻结语义的有意改变：intake 冻结快照里仍记录 intake 时刻的值（inherit 升级 diff 照旧比较），但执行不再使用它。
+- 生效时点（快照语义）：运行时可调键是**配置输入**，不是判定状态。每次求值在一个声明好的时点读取一次——Host dispatch 时，或 Worker 批量 claim 的候选选取阶段（只读连接）——写事务沿用该快照，不在锁下重读，也不对 `workspaces` 行加锁；在此之后提交的修改从下一次 dispatch / claim 起生效。与「先选候选、后在写事务内修改并提交」之间提交的修改效果上等同于晚于本次 claim 提交，不产生错误执行；在 claim 热路径上加锁消除这个窗口的代价（#690 锁序族）远大于收益。跨事务携带的身份、状态、执行代次、租约、容量等**判定状态**仍须在写事务内重新校验（AGENTS.md「多步变更」条）。
 - 审计：每次执行的 `node_runs.config_snapshot_json` 在 `_config_resolution` 元键下记录实际生效的 `timeout_seconds` 与来源（`platform_default` / `node_config` / `workspace_override`）；排队中的 Worker 请求 manifest 带同形的 `config_resolution` 键（claim 时刷新）。
 
 ## Database
