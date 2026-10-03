@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.preview_panels import (
     MAX_BUNDLE_BYTES,
     PreviewPanelService,
@@ -85,6 +85,41 @@ def test_publish_promotes_draft_and_archives_previous(service, workspace_id) -> 
 def test_publish_without_draft_raises_not_found(service, workspace_id) -> None:
     with pytest.raises(NotFoundError):
         service.publish(workspace_id)
+
+
+def test_publish_rejects_mismatched_expected_hash(service, workspace_id) -> None:
+    """#841: the publisher's asserted html_hash must be the current draft's."""
+    seen = service.save_draft(workspace_id, VALID_HTML, "studio-agent:u1")
+    service.save_draft(workspace_id, UPDATED_HTML, "studio-agent:u1")
+
+    with pytest.raises(ConflictError):
+        service.publish(workspace_id, seen["html_hash"])
+    assert service.get_published(workspace_id) is None
+
+    current = service.get_draft(workspace_id)
+    assert service.publish(workspace_id, current["html_hash"])["html"] == UPDATED_HTML
+
+
+def test_publish_cas_binds_to_the_pre_read_draft(service, workspace_id, monkeypatch) -> None:
+    """#841: the store CAS binds to the draft the service pre-read — an
+    overwrite landing between that read and the publish write is a Conflict
+    with zero side effects, never a silent publish of the newer content."""
+    service.save_draft(workspace_id, VALID_HTML, "user:u1")
+    store = service._store
+    original_get_draft = store.get_draft
+
+    def get_draft_then_overwrite(entity_key, ws):
+        draft = original_get_draft(entity_key, ws)
+        service.save_draft(workspace_id, UPDATED_HTML, "studio-agent:u2")
+        return draft
+
+    monkeypatch.setattr(store, "get_draft", get_draft_then_overwrite)
+    with pytest.raises(ConflictError):
+        service.publish(workspace_id)
+    monkeypatch.undo()
+
+    assert service.get_published(workspace_id) is None
+    assert service.get_draft(workspace_id)["html"] == UPDATED_HTML
 
 
 def test_archive_all_resets_to_fallback(service, workspace_id) -> None:

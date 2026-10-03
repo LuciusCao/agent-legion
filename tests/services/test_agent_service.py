@@ -50,6 +50,32 @@ def test_save_draft_then_publish_round_trip(service, workspace_id) -> None:
     assert service.get_published_definition("agent-a") == DEFINITION_V1
 
 
+def test_publish_cas_binds_to_the_capability_checked_draft(service, monkeypatch) -> None:
+    """#841: the store CAS binds to the draft the capability check ran on —
+    an overwrite landing between check and publish is a Conflict with zero
+    side effects (before #841 a hash-less publish shipped the unchecked
+    newer draft)."""
+    service.save_draft("agent-a", DEFINITION_V1, "user:u1")
+    original_check = service._require_free_capability
+
+    def check_then_overwrite(agent_id: str, capability: str) -> None:
+        original_check(agent_id, capability)
+        service.save_draft("agent-a", DEFINITION_V2, "user:u2")
+
+    monkeypatch.setattr(service, "_require_free_capability", check_then_overwrite)
+    with pytest.raises(ConflictError):
+        service.publish("agent-a")
+    assert service.get_published_definition("agent-a") is None
+
+
+def test_publish_rejects_mismatched_expected_hash(service) -> None:
+    service.save_draft("agent-a", DEFINITION_V1, "user:u1")
+    with pytest.raises(ConflictError, match="draft hash mismatch"):
+        service.publish("agent-a", DEFINITION_V2.definition_hash())
+    assert service.get_published_definition("agent-a") is None
+    assert service.publish("agent-a", DEFINITION_V1.definition_hash()).status == "published"
+
+
 def test_get_published_definition_enforces_hash(service) -> None:
     service.save_draft("agent-a", DEFINITION_V1, "user:u1")
     service.publish("agent-a")

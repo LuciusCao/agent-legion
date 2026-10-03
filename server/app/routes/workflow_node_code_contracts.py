@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class WorkflowNodeCodeResponse(BaseModel):
@@ -37,10 +37,11 @@ class WorkflowNodeCodeDraftRequest(BaseModel):
 class WorkflowNodeCodePublishRequest(BaseModel):
     """#692 codex P1: the caller's asserted draft code_hash — verified
     atomically inside the publish transaction; mismatch raises 409 with
-    zero publish side effects. Absent (legacy callers) keeps the old
-    no-check semantics."""
+    zero publish side effects. #841: required — a missing body or field is
+    422 (the hash-less legacy semantics are retired; read ``code_hash`` /
+    ``draft_code_hash`` from the save/detail response first)."""
 
-    expected_hash: str | None = None
+    expected_hash: str = Field(min_length=1)
 
 
 class WorkflowNodeCodeVersionResponse(BaseModel):

@@ -52,10 +52,10 @@ def register_preview_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         return await client.call("GET", f"/workspaces/{workspace_id}/preview/panel")
 
     # #749（开发者契约，不入工具 docstring——docstring 会进 LLM 上下文）：
-    # save_preview_panel_draft 的响应携带刚写入草稿的 html_hash。面板发布
-    # 路由还没有 expected_hash 管道（versioned_entities.publish None 分支
-    # 的最后遗留）；将来它接入 CAS 时，hash 消费方必须断言保存响应的
-    # hash，绝不 hash-less 发布。
+    # save_preview_panel_draft 的响应携带刚写入草稿的 html_hash。本工具面
+    # 永不发布（STUDIO-AGENT-001）；人的发布路由自 #841 起必填
+    # expected_hash（事务内 CAS，不匹配 409）——将来任何工具侧发布必须
+    # 带保存响应的 hash，store 层已无 hash-less 发布分支。
     @mcp.tool(structured_output=False)
     async def save_preview_panel_draft(workspace_id: str, html: str, change_note: str = "") -> str:
         """Save a preview panel draft: one self-contained HTML document

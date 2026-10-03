@@ -154,13 +154,11 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
     def publish_agent_definition(
         agent_id: str,
         workspace_id: WorkspaceId,
-        request: Annotated[AgentPublishRequest | None, Body()] = None,
+        request: Annotated[AgentPublishRequest, Body()],
         _guard: ScopeGuard = None,
     ) -> AgentVersionResponse:
         try:
-            entity = _service(workspace_id).publish(
-                agent_id, request.expected_hash if request else None
-            )
+            entity = _service(workspace_id).publish(agent_id, request.expected_hash)
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return _version_response(entity)

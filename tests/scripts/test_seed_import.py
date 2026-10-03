@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -233,17 +234,19 @@ class FakeClient:
             workspace_id = (params or {})["workspace_id"]
             definition = {k: v for k, v in body.items() if k != "agent_id"}
             self.agents[(workspace_id, body["agent_id"])] = {"draft": definition, "published": None}
-            return {"version": 1, "status": "draft"}
+            return {"version": 1, "status": "draft", "definition_hash": _fake_hash(definition)}
         if method == "PUT" and path.endswith("/draft") and "/agent-definitions/" in path:
             agent_id = path.split("/")[3]
             workspace_id = (params or {})["workspace_id"]
             self.agents.setdefault((workspace_id, agent_id), {"published": None})
             self.agents[(workspace_id, agent_id)]["draft"] = body
-            return {"status": "draft"}
+            return {"status": "draft", "definition_hash": _fake_hash(body)}
         if method == "POST" and path.endswith("/publish") and "/agent-definitions/" in path:
             agent_id = path.split("/")[3]
             workspace_id = (params or {})["workspace_id"]
             state = self.agents[(workspace_id, agent_id)]
+            # #841: publish must assert the hash of the draft just saved.
+            assert body == {"expected_hash": _fake_hash(state["draft"])}
             version = ((state.get("published") or {}).get("version") or 0) + 1
             state["published"] = {"version": version, "definition": state["draft"]}
             return {"version": version}
@@ -251,14 +254,19 @@ class FakeClient:
             key = (path.split("/")[3], path.split("/")[5], path.split("/")[7])
             state = self.node_codes.setdefault(key, {"published": None})
             state["draft"] = body["code"]
-            return {"status": "draft"}
+            return {"status": "draft", "code_hash": _fake_hash(body["code"])}
         if method == "POST" and path.endswith("/code/publish"):
             key = (path.split("/")[3], path.split("/")[5], path.split("/")[7])
             state = self.node_codes[key]
+            assert body == {"expected_hash": _fake_hash(state["draft"])}
             version = ((state.get("published") or {}).get("version") or 0) + 1
             state["published"] = {"version": version, "code": state["draft"]}
             return {"version": version}
         raise AssertionError(f"unexpected {method} {path}")
+
+
+def _fake_hash(content: object) -> str:
+    return f"h:{json.dumps(content, sort_keys=True)}"
 
 
 def _definition_from_yaml(text: str) -> dict:

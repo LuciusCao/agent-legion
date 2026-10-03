@@ -177,7 +177,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     def publish_node_code(
         workspace_id: str,
         node_key: str,
-        request: Annotated[WorkflowNodeCodePublishRequest | None, Body()] = None,
+        request: Annotated[WorkflowNodeCodePublishRequest, Body()],
         workflow_key: str | None = None,
     ) -> WorkflowNodeCodeVersionResponse:
         key = _resolve_key(workspace_id, workflow_key)
@@ -187,7 +187,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
                 workspace_id,
                 key,
                 node_key,
-                request.expected_hash if request else None,
+                request.expected_hash,
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)
