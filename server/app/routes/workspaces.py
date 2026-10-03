@@ -42,18 +42,31 @@ def create_workspaces_router(
         request: Request,
         user: Annotated[dict[str, Any], Depends(require_workspace_access)],
     ) -> WorkspacesResponse:
+        # #626 review: a workspace API token is a machine identity bound to
+        # ONE workspace (no user row) — the unscoped listing would enumerate
+        # every workspace's existence to it (the hardened membership guard
+        # above 404s it first; the binding filter is defense in depth).
+        # #711: otherwise the listing is membership-scoped — a non-admin only
+        # sees its member workspaces (any role), admins keep the full list. A
+        # studio-agent scoped token inherits its minter's identity, and a
+        # workspace-bound one is further narrowed to its binding
+        # (enforce_scoped_workspace_binding's read-side rule).
+        bound = user.get("scoped_workspace_id")
+        member_user_id: str | None
+        bound_workspace_id: str | None
+        if user.get("actor_scope") == WORKSPACE_API_SCOPE:
+            member_user_id = None
+            bound_workspace_id = str(bound or "")
+        else:
+            member_user_id = None if user.get("role") == "admin" else str(user["id"])
+            bound_workspace_id = str(bound) if bound else None
         try:
-            workspaces = [WorkspaceRecord.model_validate(w) for w in service.list_workspaces()]
+            visible = service.list_visible_workspaces(
+                member_user_id=member_user_id, bound_workspace_id=bound_workspace_id
+            )
         except JobServiceError as exc:
             raise_job_http_error(exc)
-        # #626 review: a workspace API token is a machine identity bound to
-        # ONE workspace — the unscoped listing would enumerate every
-        # workspace's existence to it (the hardened membership guard above
-        # 404s it first; the filter is defense in depth for future mounts).
-        if user.get("actor_scope") == WORKSPACE_API_SCOPE:
-            bound = str(user.get("scoped_workspace_id") or "")
-            workspaces = [workspace for workspace in workspaces if workspace.id == bound]
-        return WorkspacesResponse(workspaces=workspaces)
+        return WorkspacesResponse(workspaces=[WorkspaceRecord.model_validate(w) for w in visible])
 
     @guarded.post("/workspaces", response_model=WorkspaceResponse)
     def create_workspace(
