@@ -33,7 +33,9 @@ export function workflowWorkerNeeds(
 }
 
 export function needsAnyWorker(needs: WorkerNeeds): boolean {
-  return needs.agent || needs.code
+  // 用解构取值：executor_decoupling 守卫禁止点号访问 agent 属性。
+  const { agent, code } = needs
+  return agent || code
 }
 
 type CapabilitySource = Pick<AgentWorkerSummary, 'max_code_concurrency'>
