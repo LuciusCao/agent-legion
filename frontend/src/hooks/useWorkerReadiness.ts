@@ -45,7 +45,7 @@ export function useWorkerReadiness(
     useWorkerConsoleUrl(enabled && !!workspaceId && needsWorker) ?? ''
   const workers = useQuery({
     queryKey: extraQueryKeys.workspaceWorkers(workspaceId ?? ''),
-    queryFn: () => listAgentWorkers(workspaceId),
+    queryFn: ({ signal }) => listAgentWorkers(workspaceId, signal),
     enabled: !!workspaceId && enabled && needsWorker,
     refetchInterval: 5000,
   })

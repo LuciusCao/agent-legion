@@ -67,7 +67,7 @@ export function useAgentPublishRequest(
 
   const { data: pendingRequest, refetch: refetchPending } = useQuery({
     queryKey: extraQueryKeys.studioPublishRequest(workspaceId ?? ''),
-    queryFn: () => fetchPendingPublishRequest(workspaceId!),
+    queryFn: ({ signal }) => fetchPendingPublishRequest(workspaceId!, signal),
     enabled: Boolean(workspaceId),
     refetchInterval: POLL_INTERVAL_MS,
   })

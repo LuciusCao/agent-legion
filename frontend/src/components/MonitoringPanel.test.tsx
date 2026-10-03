@@ -139,9 +139,12 @@ describe('MonitoringPanel', () => {
       screen.getByRole('img', { name: 'Agent 执行队列深度趋势' })
     ).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-      granularity: '6h',
-    })
+    expect(mockFetchOpsMetrics).toHaveBeenCalledWith(
+      {
+        granularity: '6h',
+      },
+      expect.any(AbortSignal)
+    )
   })
 
   it('renders the blocked queue alert with the skip-reason histogram', async () => {
@@ -197,15 +200,21 @@ describe('MonitoringPanel', () => {
     await user.click(screen.getByRole('button', { name: '近 30 天' }))
 
     await waitFor(() => {
-      expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-        granularity: '30d',
-      })
+      expect(mockFetchOpsMetrics).toHaveBeenCalledWith(
+        {
+          granularity: '30d',
+        },
+        expect.any(AbortSignal)
+      )
     })
     await user.click(screen.getByRole('button', { name: '近 24 小时' }))
     await waitFor(() => {
-      expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-        granularity: '24h',
-      })
+      expect(mockFetchOpsMetrics).toHaveBeenCalledWith(
+        {
+          granularity: '24h',
+        },
+        expect.any(AbortSignal)
+      )
     })
   })
 
@@ -233,10 +242,13 @@ describe('MonitoringPanel', () => {
     })
 
     await waitFor(() => {
-      expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-        granularity: '6h',
-        worker_id: 'worker-1',
-      })
+      expect(mockFetchOpsMetrics).toHaveBeenCalledWith(
+        {
+          granularity: '6h',
+          worker_id: 'worker-1',
+        },
+        expect.any(AbortSignal)
+      )
     })
   })
 
@@ -262,9 +274,12 @@ describe('MonitoringPanel', () => {
     await user.click(screen.getByRole('button', { name: '近 30 天' }))
 
     await waitFor(() => {
-      expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-        granularity: '30d',
-      })
+      expect(mockFetchOpsMetrics).toHaveBeenCalledWith(
+        {
+          granularity: '30d',
+        },
+        expect.any(AbortSignal)
+      )
     })
     // 摘要卡读取后端 summary，与窗口粒度无关，切换后数值不变。
     expect(screen.getByTestId('online-workers-summary')).toHaveTextContent('3')
@@ -341,10 +356,13 @@ describe('MonitoringPanel', () => {
       expect(screen.getByTestId('queue-depth-summary')).toHaveTextContent('12')
     )
     // 主数据请求带 workspace 过滤
-    expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-      granularity: '6h',
-      workspace_id: 'ops-ws',
-    })
+    expect(mockFetchOpsMetrics).toHaveBeenCalledWith(
+      {
+        granularity: '6h',
+        workspace_id: 'ops-ws',
+      },
+      expect.any(AbortSignal)
+    )
     // fleet-only 内容隐藏：在线 Worker 卡片与 Worker 过滤器
     expect(
       screen.queryByTestId('online-workers-summary')

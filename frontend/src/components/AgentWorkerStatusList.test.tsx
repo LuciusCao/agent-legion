@@ -28,7 +28,9 @@ it('isolates requests and caches when switching workspace before a response arri
     </QueryClientProvider>
   )
   const { rerender } = render(view('a'))
-  await waitFor(() => expect(listAgentWorkers).toHaveBeenCalledWith('a'))
+  await waitFor(() =>
+    expect(listAgentWorkers).toHaveBeenCalledWith('a', expect.any(AbortSignal))
+  )
   rerender(view('b'))
   await waitFor(() =>
     expect(client.getQueryData(extraQueryKeys.workspaceWorkers('b'))).toEqual(

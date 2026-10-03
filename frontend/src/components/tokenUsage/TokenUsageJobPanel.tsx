@@ -22,7 +22,7 @@ export function TokenUsageJobPanel({ jobId }: Props) {
   // key 含 jobId：切换 job 自动回到 pending 态（同原 resetOnRun）。
   const query = useQuery({
     queryKey: extraQueryKeys.jobTokenUsage(jobId),
-    queryFn: () => fetchJobTokenUsage(jobId),
+    queryFn: ({ signal }) => fetchJobTokenUsage(jobId, signal),
   })
   const data = query.data ?? null
   const loading = query.isLoading
