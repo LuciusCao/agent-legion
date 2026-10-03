@@ -30,6 +30,7 @@ describe('WorkerConsoleGuide', () => {
     expect(screen.queryByTestId('worker-console-unset')).toBeNull()
     mockFetchWorkerConsole.mockResolvedValue({
       console_url: 'http://localhost:8787',
+      code_requires_worker: false,
     })
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     expect(await screen.findByTestId('worker-console-link')).toHaveAttribute(
@@ -42,6 +43,7 @@ describe('WorkerConsoleGuide', () => {
   it('links to the configured Worker console and lists the onboarding steps', async () => {
     mockFetchWorkerConsole.mockResolvedValue({
       console_url: 'http://127.0.0.1:8789',
+      code_requires_worker: false,
     })
     renderGuide()
 
@@ -66,7 +68,10 @@ describe('WorkerConsoleGuide', () => {
   })
 
   it('falls back to plain guidance when no console url is configured', async () => {
-    mockFetchWorkerConsole.mockResolvedValue({ console_url: '' })
+    mockFetchWorkerConsole.mockResolvedValue({
+      console_url: '',
+      code_requires_worker: false,
+    })
     renderGuide()
 
     await waitFor(() => {
@@ -87,7 +92,10 @@ describe('WorkerConsoleGuide', () => {
   })
 
   it('tells non-admin members to ask an admin for the key', async () => {
-    mockFetchWorkerConsole.mockResolvedValue({ console_url: '' })
+    mockFetchWorkerConsole.mockResolvedValue({
+      console_url: '',
+      code_requires_worker: false,
+    })
     renderGuide(false)
 
     expect(screen.getByText(/请管理员/)).toBeTruthy()

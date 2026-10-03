@@ -47,6 +47,7 @@ vi.mock('../api', () => ({
 
 vi.mock('../hooks/useWorkerConsoleUrl', () => ({
   useWorkerConsoleUrl: () => '',
+  useWorkerConsoleConfig: () => ({ data: undefined }),
 }))
 
 const mockGetWorkspaceExecutionConfiguration = vi.fn()
