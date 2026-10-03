@@ -53,4 +53,5 @@ def build_ready_queues(
     for cached_id in list(worker.state.job_evals):
         if cached_id not in runnable_ids:
             del worker.state.job_evals[cached_id]
+    worker.state.hydration_dangling.retain(runnable_ids)
     return workspaces, queues

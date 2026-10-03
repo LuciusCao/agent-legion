@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
+from server.app.jobs.artifact_row_retire import retire_artifact_rows_by_name
 
 
 def delete_reset_artifact_rows(
@@ -27,24 +28,18 @@ def delete_reset_artifact_rows(
     后旧 key 的行匹配不到按新 key 构建的 reset 集）：新节点同名 outputs 的
     暂存即证明该名字将被重跑覆盖，旧 key 的同名行一并删除；没有 outputs
     声明的节点无从按名字暂存，行留给对象存储生命周期兜底（A4 保守子集）。
+    #827 起删除按名（不再按 node_key 过滤）：两个节点集只决定「本次有无
+    退役面」，同名的全部行与对象同生共死。
     返回删除行（含 ``storage_key``）供提交后对象存储清理。
     """
-    node_set = sorted(set(reset_nodes) | set(renamed_from_nodes))
-    if not node_set or not staged_artifact_names:
+    if not (set(reset_nodes) | set(renamed_from_nodes)) or not staged_artifact_names:
         return []
-    node_marks = ",".join("%s" for _ in node_set)
-    name_marks = ",".join("%s" for _ in staged_artifact_names)
-    return [
-        dict(row)
-        for row in conn.execute(
-            f"""
-            delete from job_artifacts
-            where job_id=%s and node_key in ({node_marks}) and name in ({name_marks})
-            returning node_key, name, storage_key
-            """,
-            (job_id, *node_set, *sorted(staged_artifact_names)),
-        ).fetchall()
-    ]
+    # #827：按名退役——对象槽按名字寻址，只删重置面 node_key 的行会让
+    # 同名遗留行（被删节点、保留声明面挡下的旧生产者）存活并指向被删
+    # 写者的字节（hash 不符 / 换形后 NoSuchKey，hydration 永久 defer）。
+    # 暂存名集合已排除保留节点声明面（A3 / keep_io / rmw_retire），按名
+    # 删除不会触碰继承节点的有效产物。
+    return retire_artifact_rows_by_name(conn, job_id, staged_artifact_names)
 
 
 def delete_all_artifact_rows(
