@@ -289,7 +289,9 @@ class NodeCodeService:
                 None,
                 "system",
             )
-            self._store.publish(entity_key, None)
+            # #841: same-process seed binds the publish to the hash of the
+            # content it just saved (the store has no hash-less publish).
+            self._store.publish(entity_key, None, code_hash(code))
         except (ConflictError, NotFoundError):
             # Startup race: a second Host process passed the emptiness check
             # concurrently and won the write. The entity is seeded either

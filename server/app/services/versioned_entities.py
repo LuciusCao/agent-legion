@@ -239,7 +239,7 @@ class VersionedEntityStore:
         self,
         entity_key: str,
         workspace_id: str | None,
-        expected_hash: str | None = None,
+        expected_hash: str,
     ) -> VersionedEntity:
         """Publish the current draft; the previously published version archives.
 
@@ -254,13 +254,14 @@ class VersionedEntityStore:
         affected-row count the authoritative verdict: a mismatch (or a
         concurrent publish) touches zero rows → Conflict, and the enclosing
         transaction rolls back the archive statement with it — zero publish
-        side effects. None keeps the old no-check semantics for callers
-        outside the CAS rollout: same-process system seeding (save → publish
-        with the content known locally) and the preview-panel publish route,
-        whose plumbing has no request contract yet (#749 leftover). Every
-        HTTP publish entry that can assert a draft identity — the #692 chat
-        draft cards and, since #749, the Studio inspector panels — carries
-        the caller's hash.
+        side effects.
+
+        #841: the hash is REQUIRED — the hash-less (None) branch is gone.
+        Every caller binds the publish to a draft identity it actually
+        holds: the entity services bind to the draft they pre-read (and
+        validated), HTTP publish routes require the caller's asserted hash
+        (422 when absent), and same-process seeding passes the hash of the
+        content it just saved.
         """
         with write_transaction(self._dsn) as conn:
             if self._entity_type in {"agent", "node_code"}:
@@ -268,7 +269,7 @@ class VersionedEntityStore:
             draft = _latest_status_row(conn, self._entity_type, workspace_id, entity_key, "draft")
             if draft is None:
                 raise NotFoundError(f"no draft for {self._entity_type} {entity_key}")
-            if expected_hash is not None and draft["definition_hash"] != expected_hash:
+            if draft["definition_hash"] != expected_hash:
                 # Early friendly error: the mismatch is already visible on the
                 # snapshot. The UPDATE's CAS below stays the authority for the
                 # residual window between SELECT and UPDATE.
@@ -282,31 +283,26 @@ class VersionedEntityStore:
                 (self._entity_type, workspace_id, entity_key),
             )
             # Guard: a concurrent archive_all between select and update must
-            # not resurrect an archived row into published. With
-            # expected_hash, the hash rides the WHERE as a CAS (R6 P1-1):
-            # a concurrent save_draft overwrite between our SELECT and this
-            # UPDATE leaves rowcount=0 → Conflict, transaction rolled back.
-            # One statement covers both forms (NULL = no hash guard) to keep
-            # the SQL-literal count at the boundary baseline.
+            # not resurrect an archived row into published, and the hash
+            # rides the WHERE as a CAS (R6 P1-1): a concurrent save_draft
+            # overwrite between our SELECT and this UPDATE leaves
+            # rowcount=0 → Conflict, transaction rolled back.
             try:
                 cursor = conn.execute(
                     "update versioned_entities set status='published',"
                     " published_at=current_timestamp"
-                    " where id=%s and status='draft'"
-                    " and (%s::text is null or definition_hash=%s)",
-                    (draft["id"], expected_hash, expected_hash),
+                    " where id=%s and status='draft' and definition_hash=%s",
+                    (draft["id"], expected_hash),
                 )
             except IntegrityError as exc:
                 raise _integrity_conflict(exc, self._entity_type) from exc
             if cursor.rowcount == 0:
-                if expected_hash is not None:
-                    # 中性表述（R7 P3-2）：该分支同时覆盖「被覆盖」与
-                    # 「并发 publish 已把它发掉」两种形态，不能只说前者。
-                    raise ConflictError(
-                        f"draft hash mismatch for {self._entity_type} {entity_key}:"
-                        " the draft changed or was published concurrently; reload and retry"
-                    )
-                raise ConflictError("entity draft changed concurrently; reload and retry")
+                # 中性表述（R7 P3-2）：该分支同时覆盖「被覆盖」与
+                # 「并发 publish 已把它发掉」两种形态，不能只说前者。
+                raise ConflictError(
+                    f"draft hash mismatch for {self._entity_type} {entity_key}:"
+                    " the draft changed or was published concurrently; reload and retry"
+                )
             return _get_entity_by_id(conn, draft["id"])
 
     def rollback(

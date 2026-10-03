@@ -40,6 +40,16 @@ class PreviewPanelPublishedResponse(BaseModel):
     published: PreviewPanelVersionResponse | None = None
 
 
+class PreviewPanelPublishRequest(BaseModel):
+    """#841 (#749 leftover): the publisher's asserted draft ``html_hash`` —
+    the draft the human saw in the job detail header. Verified atomically
+    inside the publish transaction; mismatch (an agent overwrote the draft
+    meanwhile) raises 409 with zero publish side effects. Required: a
+    missing body or field is 422."""
+
+    expected_hash: str = Field(min_length=1)
+
+
 class PreviewPanelDraftRequest(BaseModel):
     html: str = Field(min_length=1)
     change_note: str | None = None

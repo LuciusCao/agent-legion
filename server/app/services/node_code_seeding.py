@@ -18,7 +18,7 @@ def seed_workspace_node_code(
     if service.list_versions(workspace_id, workflow_key, node_key):
         return False
     try:
-        service.save_draft(
+        saved = service.save_draft(
             workspace_id,
             workflow_key,
             node_key,
@@ -26,7 +26,8 @@ def seed_workspace_node_code(
             "system",
             change_note,
         )
-        service.publish(workspace_id, workflow_key, node_key)
+        # #841: assert the draft this seed just saved (no hash-less publish).
+        service.publish(workspace_id, workflow_key, node_key, str(saved["code_hash"]))
     except (ConflictError, NotFoundError):
         # Concurrent seed: another process won the immutable-version race.
         return False

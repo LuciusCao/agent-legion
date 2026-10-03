@@ -110,7 +110,13 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
               auth.authorize(draft)
             }
           }}
-          onPublish={governance.publish}
+          onPublish={() => {
+            // #841：CAS 令牌取头部展示的同一草稿帧（按钮 disabled={!draft}
+            // 保证可见）；授权预览中时它即被预览的那份（授权按 html_hash
+            // 派生比对，见 useDraftAuthorization）。草稿在点击前被覆盖 →
+            // 服务端 409，不会发出人没看过的内容。
+            if (draft) governance.publish(draft.html_hash)
+          }}
           onArchive={governance.archive}
           onCustomize={() => setCustomizing(true)}
         />
