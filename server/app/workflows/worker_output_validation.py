@@ -12,10 +12,13 @@ so ``cleanup_execution`` remains the per-validation cleanup of this path.
 
 The validator never sees the raw job dir (#757): the pool task builds the
 declared validation view (``validation_view``) — this node's declared inputs
-from the job dir plus this attempt's declared outputs from the run's read
-view. Sibling outputs and stale residues cannot enter the view, and the
-view's exit arms reconcile output mutations back and enforce the inputs
-read-only contract.
+plus this attempt's declared outputs from the run's read view. Sibling
+outputs and stale residues cannot enter the view, and the view's exit arms
+reconcile output mutations back and enforce the inputs read-only contract.
+Input bytes resolve to the dispatch-frozen CAS copy when the manifest
+carries ``input_artifacts`` refs (#828/#830/#833), falling back to the job
+dir; only the picklable CAS root and refs map cross the pool boundary, the
+blob open itself happens in the pool worker.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from server.app.agent_broker.result_validate_pool import (
 from server.app.skills.commit_cache import resolve_skill_commit
 
 if TYPE_CHECKING:
+    from server.app.services.artifact_store import ArtifactStore
     from server.app.skills.manager import SkillManager
 
 
@@ -38,20 +42,28 @@ def validate_worker_outputs(
     manifest: dict[str, Any],
     job_dir: Path,
     run_view_dir: Path,
+    artifact_store: ArtifactStore | None = None,
 ) -> str | None:
     """Validate this attempt's outputs against the manifest's pinned skill.
 
     ``job_dir`` supplies the declared inputs (and parents the view scratch
     dir); ``run_view_dir`` is this attempt's read view supplying the
     declared outputs — the pool task builds the declared validation view
-    from the two. Worker-reported success is untrusted; same bar as the
-    local path.
+    from the two. ``artifact_store`` contributes only its CAS root (the
+    dispatch-frozen input bytes channel, #833); None (or a legacy manifest
+    without ``input_artifacts``) means the job-dir fallback on every input.
+    Worker-reported success is untrusted; same bar as the local path.
     """
     skill = str(manifest.get("skill", ""))
     if not skill:
         return None
     try:
         commit = _manifest_commit(skill_manager, manifest, skill)
+        refs = manifest.get("input_artifacts")
+        if not isinstance(refs, dict):
+            # Legacy manifest (or a claim-time non-dict shape): no CAS channel
+            # at all — never touch the store, every input reads the job dir.
+            refs, artifact_store = None, None
         verdict: str | None = validate_in_pool(
             validate_skill_commit_outputs,
             str(skill_manager.base_dir),
@@ -63,6 +75,8 @@ def validate_worker_outputs(
             str(run_view_dir),
             tuple(str(name) for name in manifest.get("inputs") or ()),
             tuple(str(name) for name in manifest.get("expected_outputs") or ()),
+            refs,
+            str(artifact_store.root) if artifact_store is not None else None,
         )
         return verdict
     except Exception as exc:

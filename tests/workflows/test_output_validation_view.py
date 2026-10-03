@@ -11,11 +11,18 @@ The view is zero-copy (hardlinks); its exit arms reconcile the validator's
 output mutations back into the run view (the replace family included) and
 enforce the inputs read-only contract. These tests pin all of it through
 ``validate_worker_outputs`` with the result-validate pool inlined (same seam
-as tests/workflows/test_output_validation.py).
+as tests/workflows/test_output_validation.py). The trailing family pins the
+#828/#830/#833 input semantics in the same view: names are compared on the
+normalized spelling (``./``/``//`` collapsed) for the input/output overlap
+exclusion, and input bytes resolve to the dispatch-frozen CAS copy
+(``input_artifacts`` refs + store root) with the job dir as fallback —
+still placed as private copies, so the write isolation covers CAS-sourced
+bytes too.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 from pathlib import Path
@@ -25,6 +32,7 @@ import pytest
 import server.app.workflows.output_contract_engine as output_contract_engine
 import server.app.workflows.validation_view as validation_view_module
 import server.app.workflows.worker_output_validation as worker_output_validation
+from server.app.services.artifact_store import ArtifactStore
 from server.app.skills.manager import SkillManager
 from server.app.workflows.worker_output_validation import validate_worker_outputs
 from tests.helpers.skill_git import _make_manager as _make_real_manager
@@ -85,6 +93,21 @@ def _layout(tmp_path: Path) -> tuple[Path, Path]:
 
 def _manifest(inputs: list[str], outputs: list[str]) -> dict:
     return {"skill": _KEY, "skill_ref": "latest", "inputs": inputs, "expected_outputs": outputs}
+
+
+def _cas_blob(root: Path, data: bytes) -> str:
+    """Write ``data`` as a CAS blob under ``root``; return its digest."""
+    digest = hashlib.sha256(data).hexdigest()
+    blob = root / digest[:2] / digest
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(data)
+    return digest
+
+
+def _cas_store(root: Path) -> ArtifactStore:
+    """A store over ``root`` for its read side only (``open_blob`` never
+    touches the connect source, and these tests stay off the DB)."""
+    return ArtifactStore(root, "")
 
 
 def _seen(seen_file: Path) -> list[str]:
@@ -524,3 +547,134 @@ def test_reflink_unsupported_falls_back_to_full_copy(
     assert error is not None
     assert "validator mutated declared input" in error
     assert (job_dir / "cleaned_question.json").read_text() == "original"
+
+
+# --- #828/#830/#833: input name decision + dispatch-frozen CAS bytes ---
+
+
+def test_input_bytes_come_from_the_dispatch_frozen_cas_copy(tmp_path: Path) -> None:
+    """#833 codex P1: dispatch froze the bytes the Worker actually consumed
+    (``stage_agent_inputs`` → manifest ``input_artifacts``); a parallel
+    producer then overwrote the same-name job-dir file. Validation must run
+    against the frozen bytes, not the overwritten present."""
+    rules = (
+        "if (job / 'cleaned_question.json').read_text() != 'dispatch-frozen':\n"
+        "    sys.stderr.write('validated against overwritten job-dir bytes\\n')\n"
+        "    sys.exit(1)\n"
+    )
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    cas_root = tmp_path / "cas"
+    digest = _cas_blob(cas_root, b"dispatch-frozen")
+    (job_dir / "cleaned_question.json").write_text("overwritten-by-parallel-producer")
+
+    manifest = _manifest(["cleaned_question.json"], [])
+    manifest["input_artifacts"] = {"cleaned_question.json": f"sha256:{digest}"}
+    assert (
+        validate_worker_outputs(manager, manifest, job_dir, run_view, _cas_store(cas_root)) is None
+    )
+    assert (job_dir / "cleaned_question.json").read_text() == "overwritten-by-parallel-producer"
+
+
+def test_cas_sourced_input_is_still_a_private_copy(tmp_path: Path) -> None:
+    """Threat-model stacking: CAS reads the right bytes, the private inode
+    keeps them write-isolated — a validator's in-place write on a CAS-sourced
+    input must neither reach the shared blob nor escape the read-only
+    enforcement."""
+    rules = "(job / 'cleaned_question.json').write_text('rewritten by validator')\n"
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    cas_root = tmp_path / "cas"
+    digest = _cas_blob(cas_root, b"dispatch-frozen")
+    blob = cas_root / digest[:2] / digest
+
+    manifest = _manifest(["cleaned_question.json"], [])
+    manifest["input_artifacts"] = {"cleaned_question.json": f"sha256:{digest}"}
+    error = validate_worker_outputs(manager, manifest, job_dir, run_view, _cas_store(cas_root))
+
+    assert error is not None
+    assert "validator mutated declared input" in error
+    assert blob.read_bytes() == b"dispatch-frozen"
+
+
+def test_cas_blob_missing_falls_back_to_the_job_dir(tmp_path: Path) -> None:
+    """A stale ref whose blob is gone (GC race) takes the job-dir fallback —
+    the pre-#833 exposure, judged by the validator's own rules."""
+    rules = "if (job / 'cleaned_question.json').read_text() != 'local-bytes':\n    sys.exit(1)\n"
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    cas_root = tmp_path / "cas"
+    cas_root.mkdir()
+    (job_dir / "cleaned_question.json").write_text("local-bytes")
+
+    manifest = _manifest(["cleaned_question.json"], [])
+    manifest["input_artifacts"] = {"cleaned_question.json": f"sha256:{'0' * 64}"}
+    assert (
+        validate_worker_outputs(manager, manifest, job_dir, run_view, _cas_store(cas_root)) is None
+    )
+
+
+def test_non_cas_ref_shape_falls_back_to_the_job_dir(tmp_path: Path) -> None:
+    """A claim-time presigned dict is not a CAS ref — job-dir fallback."""
+    rules = "if (job / 'cleaned_question.json').read_text() != 'local-bytes':\n    sys.exit(1)\n"
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (job_dir / "cleaned_question.json").write_text("local-bytes")
+
+    manifest = _manifest(["cleaned_question.json"], [])
+    manifest["input_artifacts"] = {"cleaned_question.json": {"url": "https://x", "sha256": "z"}}
+    assert (
+        validate_worker_outputs(manager, manifest, job_dir, run_view, _cas_store(tmp_path / "cas"))
+        is None
+    )
+
+
+def test_noncanonical_input_spelling_resolves_to_the_output_bytes(tmp_path: Path) -> None:
+    """#833 codex P2: an input declared as ``./shared.json`` is the same view
+    name as the ``shared.json`` output — the overlap exclusion compares
+    normalized spellings, so the stale job-dir input bytes can never smuggle
+    over this attempt's fresh output (and the read-only check stays exempt)."""
+    rules = (
+        "if (job / 'shared.json').read_text() != 'new':\n"
+        "    sys.stderr.write('stale bytes\\n')\n"
+        "    sys.exit(1)\n"
+    )
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (job_dir / "shared.json").write_text("old")
+    (run_view / "shared.json").write_text("new")
+
+    manifest = _manifest(["./shared.json"], ["shared.json"])
+    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
+
+
+def test_input_refs_without_a_store_take_the_job_dir(tmp_path: Path) -> None:
+    """Refs in the manifest but no store on the caller (artifact_store=None)
+    — every input falls back to the job dir."""
+    rules = "if (job / 'cleaned_question.json').read_text() != 'local-bytes':\n    sys.exit(1)\n"
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    (job_dir / "cleaned_question.json").write_text("local-bytes")
+
+    manifest = _manifest(["cleaned_question.json"], [])
+    manifest["input_artifacts"] = {"cleaned_question.json": f"sha256:{'0' * 64}"}
+    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
+
+
+def test_duplicate_declarations_place_once(tmp_path: Path) -> None:
+    """#868: duplicate declarations — including normalized-equivalent
+    spellings (``in.json`` vs ``./in.json``) — place exactly once. A second
+    placement would delete the first private copy and leave its snapshot
+    pointing at a dead inode, misfiring the read-only check on a clean run."""
+    seen_file = tmp_path / "seen.txt"
+    manager = _manager(tmp_path, _validator(seen_file, ""))
+    job_dir, run_view = _layout(tmp_path)
+    (job_dir / "cleaned_question.json").write_text("{}")
+    (run_view / "review_a.json").write_text("{}")
+
+    manifest = _manifest(
+        ["cleaned_question.json", "./cleaned_question.json"],
+        ["review_a.json", "review_a.json"],
+    )
+    assert validate_worker_outputs(manager, manifest, job_dir, run_view) is None
+    assert _seen(seen_file) == ["cleaned_question.json", "review_a.json"]

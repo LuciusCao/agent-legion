@@ -288,9 +288,18 @@ ref 两个通道各自宣称的路径形状若单文件系统不可能同时成�
    随之能真正落盘而不是被误当事务重放跳过（codex #774 P2；只带第一对会让兄弟
    落点/第二对冲突漏摘，#774 对抗复审 P2）；
 2. **全域读视图**（`agent_control/completion_view.py`）：staging 视图是私有
-   scratch，链接对归档垃圾形状（同名目录、文件祖先、symlink）与源消失 TOCTOU
-   全域——overwrite 遍清挡位垃圾（预检保证删不到暂存源），第一遍遇挡位跳过按
-   未产出判 missing，永不炸异常；
+   scratch，链接一律覆盖并对归档垃圾形状（同名目录、文件祖先、symlink）与
+   源消失 TOCTOU 全域——清挡位垃圾（预检保证删不到暂存源），永不炸异常。
+   视图成员只有本次 ref 校验提升的产物名（#779 终审 P1：job_dir 残留永不
+   进视图补齐 produced）；节点声明 inputs 不进 staging 视图——Host 校验的
+   跨文件对账数据面由声明校验视图族（`workflows/validation_view.py` +
+   `_validation_view_files.py`，#757 骨架）在 result-validate 池任务里单独
+   构造：名归一化（折叠 `./`/`//`）后与本次产物同名即取产物字节（#833
+   codex P2，#779 终审 P1 残留排除在视图语义下的重述），其余 input 字节
+   优先 dispatch 冻结的 CAS 副本（`stage_agent_inputs` 按 (job,node) 持
+   ref，Worker 实际消费的字节；无 ref/blob 缺失回落 job_dir），且一律以
+   reflink/拷贝私有 inode 落视图——CAS 解决读对字节、私有副本解决写隔离，
+   两个威胁模型叠加（#828/#830/#833）；
 3. **闸内兜底**（`executors/_lease_finish_promotion.py`）：预检无锁，盖不住跨
    节点 finish 之间现场变坏的残余竞态——`staged_file_moves` 提升失败经 guard
    整体回滚后 completed 转 failed 照常提交，lease 不再被异常回滚毒化成重试循环。

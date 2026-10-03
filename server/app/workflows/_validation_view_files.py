@@ -5,7 +5,9 @@ the view contract and the construction/exit orchestration; this one owns
 the filesystem mechanics: safe-relative filtering, hardlink-or-copy
 placement with its failure grading, the placement records the exit arms
 work against, the output reconcile back into the run view, and the inputs
-read-only enforcement. See ``validation_view``'s docstring for the
+read-only enforcement. The input byte-source decision (dispatch-frozen CAS
+first, job-dir fallback, #828/#830/#833) lives in the sibling
+``_validation_view_inputs``. See ``validation_view``'s docstring for the
 semantics; tests/workflows/test_output_validation_view.py pins them.
 """
 
@@ -52,7 +54,12 @@ class ViewPlacements:
 
 
 def safe_relative(name: str) -> str | None:
-    """The declared name as a view-relative path; None = unsafe (abs/``..``)."""
+    """The declared name as a view-relative path; None = unsafe (abs/``..``).
+
+    ``PurePosixPath`` collapses ``./`` and ``//``, so a non-canonical
+    spelling (``./out.json``) compares equal to the canonical name in the
+    input/output overlap exclusion (#833 codex P2).
+    """
     rel = PurePosixPath(name)
     if rel.is_absolute() or ".." in rel.parts:
         return None
@@ -60,13 +67,14 @@ def safe_relative(name: str) -> str | None:
 
 
 def place(
-    rel: str, source_dir: Path, target: Path, *, private: bool
+    rel: str, source: Path, target: Path, *, private: bool
 ) -> tuple[os.stat_result, bool] | None:
-    """Place ``source_dir/rel`` into the view; returns (view stat, linked).
+    """Place ``source`` into the view at ``rel``; returns (view stat, linked).
 
     ``private=True`` (declared inputs): a reflink-or-copy private inode
-    (#757 P1 — a hardlink shares the inode with the job dir's upstream
-    artifact, so a validator's in-place write or chmod would cross over).
+    (#757 P1 — a hardlink shares the inode with the source, so a validator's
+    in-place write or chmod would cross over into the job dir's upstream
+    artifact or the shared CAS blob, #833).
     ``private=False`` (declared outputs): a hardlink, so the validator's
     in-place cleaning propagates to the bytes the finish gate promotes (the
     replace family is covered by the reconcile arm).
@@ -76,7 +84,6 @@ def place(
     Placement failures (mkdir prefix collisions, disk/permission errors on
     the copy fallback) raise — an unbuildable view fails closed.
     """
-    source = source_dir / rel
     try:
         if not stat.S_ISREG(source.stat().st_mode):
             return None
