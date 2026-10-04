@@ -1,5 +1,8 @@
-"""Worker 产物对象存储通道（#160 D12）：presigned PUT 直传、tar 不内嵌、
-input_artifacts dict 形态下载。
+"""Worker 产物对象存储通道（#160 D12）：presigned PUT 直传、tar 不内嵌。
+
+input_artifacts dict 形态下载族（digest 自验 + presigned 失配/失败的
+CAS 回落，#876）在 tests/workers/test_artifact_input_downloads.py
+（文件体积纪律拆分）。
 
 与 Host 侧 tests/services/test_agent_completion_remote.py、
 tests/services/test_agent_artifact_inject.py 互为两端。
@@ -9,7 +12,6 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import io
 import json
 import tarfile
 import threading
@@ -19,11 +21,8 @@ from typing import Any, BinaryIO
 import pytest
 import requests
 
-from worker.artifact import download as artifact_download
-from worker.artifact import inputs as artifact_inputs
 from worker.artifact import upload as artifact_upload
 from worker.artifact.upload import DirectUploadError, upload_artifact_direct
-from worker.bundle_io import download_input_artifacts
 from worker.result_archive import prepare_code_result
 from worker.status import ExecutionStatusReporter
 from worker.upload.queue import UploadQueue, UploadTask
@@ -367,167 +366,3 @@ def test_prepare_code_result_skips_outputs_on_direct_channel(tmp_path: Path) -> 
     with tarfile.open(archive, "r:gz") as tar:
         members = {member.name for member in tar.getmembers()}
     assert members == {"node.log", "output.json"}
-
-
-class _DownloadFakeClient:
-    def __init__(self, blobs: dict[str, bytes]) -> None:
-        self._blobs = blobs
-        self.requests: list[str] = []
-
-    def download(self, path: str, destination: Path) -> None:
-        self.requests.append(path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(self._blobs[path])
-
-
-def _fake_open_download(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> list[str]:
-    urls: list[str] = []
-
-    def _open(url: str) -> io.BytesIO:
-        urls.append(url)
-        return io.BytesIO(payload)
-
-    monkeypatch.setattr(artifact_download, "_open_download", _open)
-    return urls
-
-
-def test_download_input_artifacts_dict_form_uses_presigned_url(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    urls = _fake_open_download(monkeypatch, PAYLOAD)
-    client = _DownloadFakeClient({})
-    manifest = {
-        "input_artifacts": {
-            "inputs/q.json": {"url": "https://s3.test/get/x?sig=1", "sha256": HASH},
-        }
-    }
-
-    download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
-
-    assert urls == ["https://s3.test/get/x?sig=1"]
-    assert client.requests == []  # 旧 CAS 通道未被调用
-    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD
-
-
-def test_download_input_artifacts_dict_form_verifies_sha256(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _fake_open_download(monkeypatch, b"tampered")
-    client = _DownloadFakeClient({})
-    manifest = {
-        "input_artifacts": {
-            "inputs/q.json": {"url": "https://s3.test/get/x?sig=1", "sha256": HASH},
-        }
-    }
-
-    with pytest.raises(RuntimeError, match="digest mismatch"):
-        download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
-
-
-def test_download_input_artifacts_gzip_form_gunzips_and_verifies(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """#338：ref 带 content_encoding=gzip → 边下边解压落盘，sha256 按未压缩
-    字节校验（与 content_hash 语义一致）。"""
-    _fake_open_download(monkeypatch, gzip.compress(PAYLOAD))
-    client = _DownloadFakeClient({})
-    manifest = {
-        "input_artifacts": {
-            "inputs/q.json": {
-                "url": "https://s3.test/get/x?sig=1",
-                "sha256": HASH,
-                "content_encoding": "gzip",
-            },
-        }
-    }
-
-    download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
-
-    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD
-
-
-def test_download_input_artifacts_gzip_form_detects_tamper(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """gzip 形态下被篡改的对象解压后 sha256 不匹配，照样拒绝。"""
-    _fake_open_download(monkeypatch, gzip.compress(b"tampered"))
-    client = _DownloadFakeClient({})
-    manifest = {
-        "input_artifacts": {
-            "inputs/q.json": {
-                "url": "https://s3.test/get/x?sig=1",
-                "sha256": HASH,
-                "content_encoding": "gzip",
-            },
-        }
-    }
-
-    with pytest.raises(RuntimeError, match="digest mismatch"):
-        download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
-
-
-def test_download_input_artifacts_string_form_keeps_cas_channel(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    urls = _fake_open_download(monkeypatch, b"unused")
-    client = _DownloadFakeClient({f"/api/artifacts/{HASH}": PAYLOAD})
-    manifest = {"input_artifacts": {"inputs/q.json": f"sha256:{HASH}"}}
-
-    download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
-
-    assert client.requests == [f"/api/artifacts/{HASH}"]
-    assert urls == []
-    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD
-
-
-def test_open_download_error_hides_presigned_url(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """下载侧同样：requests 异常的 str(exc) 含签名 URL，包装后只留类型名。"""
-
-    def _get(url: str, **kwargs: Any) -> Any:
-        raise requests.ConnectionError(
-            "HTTPSConnectionPool(host='s3.test', port=443): Max retries exceeded"
-            " with url: /get/x?X-Amz-Credential=AKID&X-Amz-Signature=abc123"
-        )
-
-    monkeypatch.setattr(artifact_download.requests, "get", _get)
-    with pytest.raises(RuntimeError) as excinfo:
-        artifact_download.download_object_artifact(
-            "https://s3.test/get/x?X-Amz-Signature=abc123", tmp_path / "job" / "q.json"
-        )
-    message = str(excinfo.value)
-    assert "ConnectionError" in message
-    assert "X-Amz-Signature" not in message
-    assert "X-Amz-Credential" not in message
-    assert "s3.test" not in message
-
-
-def test_download_input_artifacts_dict_form_retries_with_semaphore(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """dict 分支与 CAS 分支对齐：download_slots 限流 + transient 退避重试。"""
-    monkeypatch.setattr(artifact_inputs, "_RETRY_BACKOFF_BASE_SECONDS", 0.01)
-    slots = threading.Semaphore(1)
-    calls: list[str] = []
-
-    def _open(url: str) -> io.BytesIO:
-        assert not slots.acquire(blocking=False)  # 信号量必须已持有
-        calls.append(url)
-        if len(calls) < 3:
-            raise RuntimeError("artifact download failed: ConnectionError")
-        return io.BytesIO(PAYLOAD)
-
-    monkeypatch.setattr(artifact_download, "_open_download", _open)
-    client = _DownloadFakeClient({})
-    manifest = {
-        "input_artifacts": {
-            "inputs/q.json": {"url": "https://s3.test/get/x?sig=1", "sha256": HASH},
-        }
-    }
-
-    download_input_artifacts(client, manifest, tmp_path / "job", slots)  # type: ignore[arg-type]
-
-    assert len(calls) == 3  # 每次重试重新打开下载流
-    assert client.requests == []
-    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD

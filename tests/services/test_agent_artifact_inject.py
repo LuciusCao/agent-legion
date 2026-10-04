@@ -7,6 +7,12 @@ dict 形态；S3 异常时整体降级、不注入（Worker 走旧 CAS 通道）
 #338：注入按 claiming worker 的协议版本分流——v4+ 拿 .gz 上传 spec 与
 content_encoding=gzip 输入 ref；旧 worker 上传 spec 保持裸 key，.gz 输入
 行不升级（保留 dispatch 时 staging 的 CAS 形态），混合舰队不错配。
+
+#876 codex P1：行是「当下」job_artifacts 状态，dispatch 冻结的 input 身
+份是 CAS ref 的 digest——行 content_hash 与冻结 digest 不一致（并行生
+产者重写）时不升级、保留 CAS 形态，Worker 与 Host 校验读同一份冻结字
+节。比对口径：行 content_hash 恒为未压缩内容 sha256（gzip 行同，#338），
+与 stage_agent_inputs 的 CAS digest 同基准。
 """
 
 from __future__ import annotations
@@ -262,6 +268,127 @@ def test_inject_legacy_worker_keeps_cas_form_for_gz_input() -> None:
         "jobs-staging/ws-1/job-1/exec-1/out.json"
     )
     assert storage.presigned_gets == []  # 未为 .gz 行签发 GET
+
+
+REWROTE = b"rewritten-by-parallel-producer"
+REWROTE_HASH = hashlib.sha256(REWROTE).hexdigest()
+
+
+def test_inject_keeps_cas_form_when_row_was_rewritten_after_dispatch(tmp_path: Path) -> None:
+    """#876 codex P1 主回归：行被并行生产者重写（content_hash 不再等于
+    dispatch 冻结 digest）后升级会让 Worker 跑新字节、Host 校旧字节——
+    不升级，保留 CAS 形态，Worker 经 /api/artifacts 拿 dispatch 冻结字节。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    source = tmp_path / "q.json"
+    source.write_bytes(REWROTE)  # 行是重写后的新字节
+    store.upload(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        local_path=source,
+    )
+    manifest = _manifest()  # ref 仍是 dispatch 冻结的 sha256:{HASH}
+
+    inject_artifact_object_block(store, manifest)
+
+    assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
+    assert storage.presigned_gets == []
+
+
+def test_inject_v4_worker_keeps_cas_form_for_rewritten_gz_row() -> None:
+    """#876 P1 的 gzip 面：.gz 行 content_hash 与冻结 digest 同为未压缩
+    口径（直接可比），行被重写后 v4 worker 同样不升级；匹配升级的另
+    一态由 test_inject_v4_worker_gz_input_upgrades_with_encoding_marker
+    钉住。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    compressed = gzip.compress(REWROTE)
+    storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
+    store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        storage_key="jobs/ws-1/job-1/q.json.gz",
+        size_bytes=len(compressed),
+        content_hash=REWROTE_HASH,  # 未压缩口径，但不等于冻结 digest
+    )
+    manifest = _manifest()
+
+    inject_artifact_object_block(store, manifest, worker_protocol_version=4)
+
+    assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
+    assert storage.presigned_gets == []
+
+
+def test_inject_dict_ref_with_rewritten_row_downgrades_to_cas(tmp_path: Path) -> None:
+    """F1（#876 B 员 P2-latent）：同对象二次注入的 dict ref 同样走身份守卫
+    ——dict 的 sha256 在签发时等于 dispatch 冻结 digest，行被重写后与行
+    hash 失配：不拿当下行改写身份，降级为 CAS 串形态（stage_agent_inputs
+    的 ref 方案）下发，digest 不变。行一致的幂等重签由
+    test_inject_is_idempotent_for_dict_form_inputs 钉住（零适配）。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    source = tmp_path / "q.json"
+    source.write_bytes(REWROTE)  # 行是重写后的新字节
+    store.upload(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        local_path=source,
+    )
+    manifest = _manifest()
+    manifest["input_artifacts"] = {
+        "q.json": {"url": "https://s3.test/download/stale?sig=old", "sha256": HASH}
+    }
+
+    inject_artifact_object_block(store, manifest)
+
+    assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
+    assert storage.presigned_gets == []
+
+
+def test_inject_decides_upgrade_per_input_identity(tmp_path: Path) -> None:
+    """形态混杂：fresh.json 行未动（升级 presigned）、stale.json 行被重
+    写（保留 CAS）——按名各自判定，互不牵连。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    fresh = tmp_path / "fresh.json"
+    fresh.write_bytes(PAYLOAD)
+    store.upload(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="up",
+        name="fresh.json",
+        local_path=fresh,
+    )
+    stale = tmp_path / "stale.json"
+    stale.write_bytes(REWROTE)
+    store.upload(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="up",
+        name="stale.json",
+        local_path=stale,
+    )
+    manifest = _manifest()
+    # 两个 input dispatch 时冻结的都是 HASH；stale.json 的行此后被重写。
+    manifest["input_artifacts"] = {
+        "fresh.json": f"sha256:{HASH}",
+        "stale.json": f"sha256:{HASH}",
+    }
+
+    inject_artifact_object_block(store, manifest)
+
+    assert manifest["input_artifacts"]["fresh.json"]["sha256"] == HASH
+    assert manifest["input_artifacts"]["stale.json"] == f"sha256:{HASH}"
 
 
 def test_code_claim_rebuild_forwards_worker_protocol_version() -> None:

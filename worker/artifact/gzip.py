@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import gzip
 import io
+import zlib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO
@@ -50,11 +51,32 @@ def copy_stream(source: BinaryIO, handle: BinaryIO, *, gunzip: bool = False) -> 
 
     ``gzip.GzipFile.close()`` leaves a caller-supplied fileobj open, and the
     caller owns the raw stream's close, so only the decoder is closed here.
+
+    The gunzip arm normalizes the decode layer's WHOLE error surface into
+    RuntimeError: ``BadGzipFile`` (header/container, the OSError family),
+    ``EOFError`` (truncated stream), and ``zlib.error`` (corrupt deflate
+    body — inherits Exception directly, neither OSError nor EOFError). The
+    taxonomy lives ONLY here in the download layer (#876 codex P2): callers'
+    fallback/retry catch sets never need to know zlib. Normalizing into
+    RuntimeError puts deterministic decode failures inside
+    ``run_with_retry``'s retriable set (bounded waste: 3 attempts), in
+    exchange for a zero-taxonomy caller side. This error surface is
+    worker-channel-local — the Host-side ``GunzipStream``
+    (server/app/services/job_artifact_gzip.py) rides the result-commit
+    path's own failure grading and is deliberately not aligned here.
     """
     decoded = gzip.GzipFile(fileobj=source) if gunzip else None
     try:
         reader = decoded if decoded is not None else source
-        while chunk := reader.read(1 << 20):
+        while True:
+            try:
+                chunk = reader.read(1 << 20)
+            except (OSError, EOFError, zlib.error) as exc:
+                if decoded is None:
+                    raise
+                raise RuntimeError(f"gzip decode failed: {type(exc).__name__}") from exc
+            if not chunk:
+                break
             handle.write(chunk)
     finally:
         if decoded is not None:

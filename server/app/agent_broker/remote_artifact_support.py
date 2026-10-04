@@ -97,6 +97,34 @@ def upgrade_input_artifacts(
     (value ``{"url", "sha256"}``; no row keeps the legacy CAS form). #338: a
     ``.gz`` row adds ``content_encoding: "gzip"`` for v4+ Workers; for older
     Workers it stays CAS, so a mixed fleet never mismatches the stored form.
+
+    Identity guard (#876 codex P1): the row reflects the PRESENT
+    ``job_artifacts`` state — a parallel producer may have rewritten it
+    after dispatch froze the input's identity (the CAS ref digest), and
+    Host-side validation reads the dispatch-frozen CAS copy (#833).
+    Upgrading a rewritten row would feed the Worker different bytes than
+    the Host validates against, failing both ways. Claim must never
+    silently change the dispatch-frozen input identity: upgrade only when
+    the row's ``content_hash`` still equals the frozen digest; a rewritten
+    row keeps the legacy CAS form so the Worker downloads exactly what
+    dispatch staged. This comparison is only the fast-path filter, though
+    — the presigned URL still points at the MUTABLE authority key, which
+    can be overwritten between this check and the Worker's GET. The
+    structural guarantee closes at the consumption point
+    (EXEC-INPUT-IDENTITY-001): the issued ref's ``sha256`` equals the
+    frozen digest, and the Worker self-verifies downloaded bytes against
+    it, falling back to the CAS channel on mismatch
+    (``worker/artifact/inputs._download_cas``) — any transport delivering
+    the same digest is the same input. The hashes are directly comparable:
+    a row's ``content_hash`` is always the UNCOMPRESSED-content sha256
+    (gzip rows included, #338), the same basis as ``stage_agent_inputs``'
+    CAS digest. The guard covers BOTH ref forms: a dict ref (the
+    idempotent re-injection shape) carries the frozen digest in its
+    ``sha256`` field, and a mismatch downgrades it to the CAS string form
+    (``sha256:<digest>``, exactly ``stage_agent_inputs``' scheme) instead
+    of rewriting its identity from the present row — the injection is
+    memory-only (never persisted), and the Worker reads the ref FORM, not
+    its provenance.
     """
     assert store.storage is not None
     expires = presign_expiry_seconds(manifest)
@@ -105,6 +133,14 @@ def upgrade_input_artifacts(
     for name, ref in dict(manifest.get("input_artifacts") or {}).items():
         row = store.lookup(job_id, str(name))
         if row is not None:
+            digest = _frozen_digest(ref)
+            if digest is not None and str(row.get("content_hash") or "") != digest:
+                # 行在 dispatch 后被重写（或行 hash 缺失无法自证身份）：
+                # 不升级，Worker 经 CAS 通道拿 dispatch 冻结字节。str ref
+                # 本来就是 CAS 形态；dict ref 拼回 sha256:<digest> 串——
+                # 注入 memory-only 不落库，Worker 只认形态不识来源。
+                inputs[str(name)] = ref if isinstance(ref, str) else f"sha256:{digest}"
+                continue
             storage_key = str(row["storage_key"])
             if is_gzip_key(storage_key) and not gzip_capable:
                 # 旧协议 worker：.gz 对象不升级为 presigned GET，保留 CAS
@@ -121,6 +157,24 @@ def upgrade_input_artifacts(
         else:
             inputs[str(name)] = ref
     return inputs
+
+
+def _frozen_digest(ref: Any) -> str | None:
+    """The dispatch-frozen digest a ref carries (claim guard's comparison key).
+
+    str ref (CAS form): the part after the first colon. dict ref (the
+    idempotent re-injection shape, pinned by
+    ``test_inject_is_idempotent_for_dict_form_inputs``): its ``sha256``
+    field — written equal to the frozen digest at issue time, so it IS the
+    identity; an empty one compares as a mismatch (an identity that cannot
+    be stated must never be silently replaced from the present row). Any
+    other shape returns None and keeps the legacy upgrade behavior.
+    """
+    if isinstance(ref, str):
+        return ref.split(":", 1)[-1]
+    if isinstance(ref, dict):
+        return str(ref.get("sha256") or "")
+    return None
 
 
 def download_remote_artifact(

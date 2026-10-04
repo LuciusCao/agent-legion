@@ -135,6 +135,8 @@ def validate_skill_commit_outputs(
     run_view_dir: str,
     inputs: tuple[str, ...],
     outputs: tuple[str, ...],
+    input_refs: dict[str, Any] | None = None,
+    artifact_root: str | None = None,
 ) -> str | None:
     """Pool task: validate this attempt's declared view against (skill, commit).
 
@@ -156,7 +158,22 @@ def validate_skill_commit_outputs(
     script-less tree must keep failing closed, #638). The view's exit arms
     reconcile output mutations back into the run view and enforce the
     inputs read-only contract (a violation raises and crosses the boundary
-    into the caller's Validator-error conversion).
+    into the caller's Validator-error conversion). Input bytes resolve
+    through ``input_refs`` + ``artifact_root`` (#833): the dispatch-frozen
+    CAS copy wins, the job dir is the fallback — the blob open is
+    filesystem-only, so the pool worker needs no DB handle for it.
+
+    Known window (#876 B 员 P3, documented not fixed): ``validate_in_pool``
+    retries the WHOLE task once on ``BrokenProcessPool`` — if the pool
+    worker died mid-validation, the retry runs the validator again against
+    a run view that may already hold partially reconciled bytes from the
+    crashed attempt (reconcile happens only on CLEAN body exit, so the
+    crash must have occurred inside the reconcile/sync itself to leave
+    partial state — a sub-second window). The double-apply surface for a
+    non-idempotent validator is bounded by construction: the view holds
+    only declared names, so re-validation can only re-apply the validator's
+    own rules to its own declared outputs (clean-in-place validators are
+    idempotent by design); nothing undeclared can accumulate.
     """
     # Local imports: keeps the spawn child's import graph minimal and lets
     # the pool module itself stay cheap to import in the main process.
@@ -169,7 +186,7 @@ def validate_skill_commit_outputs(
     from server.app.skills.manager import SkillManager
     from server.app.workflows.output_validation import run_output_validator
     from server.app.workflows.skills import resolve_workflow_skill
-    from server.app.workflows.validation_view import validation_view
+    from server.app.workflows.validation_view import InputAuthority, validation_view
 
     manager = SkillManager(
         store=NullSkillStore(),
@@ -184,8 +201,19 @@ def validate_skill_commit_outputs(
         # <runs_dir>/<validation_id>/<workflow>/<capability>, so parents[1]
         # is the root the key joins under.
         resolve_workflow_skill(run_dir.parents[1], skill_key)
+        # #833: dispatch-frozen input bytes channel — the CAS blob open
+        # happens here in the pool worker (read-only, no DB handle needed).
+        authority = (
+            InputAuthority(refs=input_refs, artifact_root=Path(artifact_root))
+            if input_refs is not None and artifact_root is not None
+            else None
+        )
         with validation_view(
-            Path(job_dir), inputs=inputs, outputs=outputs, output_source=Path(run_view_dir)
+            Path(job_dir),
+            inputs=inputs,
+            outputs=outputs,
+            output_source=Path(run_view_dir),
+            input_authority=authority,
         ) as view_dir:
             return run_output_validator(run_dir, view_dir)
     finally:

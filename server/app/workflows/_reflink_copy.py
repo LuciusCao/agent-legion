@@ -9,7 +9,11 @@ zero-copy cost discipline; elsewhere it degrades to a full copy. Support is
 probed once per filesystem (keyed by the target dir's ``st_dev``) and cached
 per process; a failed probe or a single failed clone silently falls back to
 the full copy — reflink is a cost optimization and must never introduce a
-new failure mode into the completion path.
+new failure mode into the completion path. Callers placing into a read view
+pass an explicit ``probe_dir`` OUTSIDE the view (its parent — same
+filesystem, verdict unchanged): the probe's cleanup unlink is deliberately
+suppressed, and a failed one must never leave ``.reflink-probe-*`` residue
+where the validator's rglob can see it (#876 B 员 P3).
 """
 
 from __future__ import annotations
@@ -29,21 +33,29 @@ _support: dict[int, bool] = {}
 _support_lock = threading.Lock()
 
 
-def copy_private(source: Path, spot: Path) -> None:
+def copy_private(source: Path, spot: Path, *, probe_dir: Path | None = None) -> None:
     """Copy ``source`` to ``spot`` as a private inode (reflink when possible).
 
     Raises whatever the full copy raises (FileNotFoundError when the source
     vanished mid-placement, other OSError on disk/permission failures) — the
     caller's failure grading decides; the reflink half never raises.
+
+    ``probe_dir``: the directory the one-per-filesystem reflink probe writes
+    its temp file in. Callers placing INTO a read view (the validation view)
+    pass a directory OUTSIDE the view (its parent — same filesystem by
+    construction, so the probe verdict stays valid) because the probe's
+    cleanup unlink is deliberately suppressed: a failed one would otherwise
+    leave ``.reflink-probe-*`` residue INSIDE the view, visible to the
+    validator's rglob (#876 B 员 P3). None keeps the legacy spot.parent
+    probe (direct callers/tests).
     """
-    if not _try_reflink(source, spot):
+    if not _try_reflink(source, spot, probe_dir if probe_dir is not None else spot.parent):
         shutil.copy2(source, spot)
 
 
-def _try_reflink(source: Path, spot: Path) -> bool:
+def _try_reflink(source: Path, spot: Path, probe_dir: Path) -> bool:
     """Best-effort CoW clone; False = caller falls back to a full copy."""
     try:
-        probe_dir = spot.parent
         if not _supported(probe_dir.stat().st_dev, probe_dir):
             return False
         return _clone(source, spot)

@@ -44,6 +44,28 @@ class ArtifactNotFoundError(ArtifactStoreError):
     """Raised when an artifact hash is malformed or unknown."""
 
 
+def open_blob(root: Path, hash: str) -> Path:
+    """Resolve ``hash`` to its blob path under ``root`` (read-only).
+
+    Module-level so read-only consumers without a DB handle (the
+    result-validate pool worker opening dispatch-frozen input bytes, #833)
+    can share the exact layout/validation rules; ``ArtifactStore.open``
+    delegates here.
+    """
+    if not _HASH_RE.match(hash):
+        raise ArtifactNotFoundError(f"malformed artifact hash: {hash!r}")
+    path = resolve_managed_path(
+        root,
+        f"{hash[:2]}/{hash}",
+        allow_missing=True,
+        record_id=hash,
+        root_kind="artifacts",
+    )
+    if not path.is_file():
+        raise ArtifactNotFoundError(hash)
+    return path
+
+
 class ArtifactStore:
     """Content-addressed blob store; the connect source accepts the JobQueries
     facade or a bare DSN string (BOUNDARY-DATA-001, #187)."""
@@ -87,18 +109,7 @@ class ArtifactStore:
         return digest
 
     def open(self, hash: str) -> Path:
-        if not _HASH_RE.match(hash):
-            raise ArtifactNotFoundError(f"malformed artifact hash: {hash!r}")
-        path = resolve_managed_path(
-            self.root,
-            f"{hash[:2]}/{hash}",
-            allow_missing=True,
-            record_id=hash,
-            root_kind="artifacts",
-        )
-        if not path.is_file():
-            raise ArtifactNotFoundError(hash)
-        return path
+        return open_blob(self.root, hash)
 
     def add_ref(self, job_id: str, node_key: str, name: str, hash: str) -> None:
         with write_transaction(self._connect_source) as conn:

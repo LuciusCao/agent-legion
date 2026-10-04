@@ -21,6 +21,7 @@ from server.app.agent_broker.result_timing import mark as mark_result_stage
 from server.app.agent_broker.result_unpack import safe_relative_dir
 from server.app.agent_control.completion_moves import gate_safe_staged_moves
 from server.app.agent_control.completion_preflight import find_landing_conflict
+from server.app.agent_control.completion_ref_registration import register_reported_output_refs
 from server.app.agent_control.completion_view import link_into_view
 from server.app.executors._shard_contract import read_shard_output
 from server.app.executors.artifact_mirror import upload_produced_artifacts
@@ -147,9 +148,12 @@ def finish_staged(
         # pre-staging "last writer wins" order).
         remote_targets = {job_dir / name for name in remote_names}
         staged_moves = [move for move in staged_moves if move[0] not in remote_targets]
-    for name, ref in outcome.output_artifacts.items():
-        if name not in remote_names:
-            handler.artifact_store.add_ref(job_id, node_key, name, str(ref).split(":", 1)[-1])
+    # #876 P2-1：校验前登记（legacy 通道 blob 的 GC 防护）+ 撞名守卫
+    # （共享 (job,node,name) 槽位，撞名时冻结 input 优先）——裁决与登记
+    # 在 completion_ref_registration。
+    register_reported_output_refs(
+        handler.artifact_store, job_id, node_key, outcome, remote_names, manifest, expected
+    )
     mark_result_stage(stage_timer, "artifacts_verify")
     produced = tuple(name for name in expected if (view_dir / name).is_file())
     status = outcome.status
@@ -174,8 +178,11 @@ def finish_staged(
     # view) and reconciles the validator's output mutations back into
     # view_dir, so what the finish gate promotes is what passed validation.
     if status == "completed" and handler.skill_manager is not None:
+        # #828/#830/#833：input 名单裁决与字节来源（dispatch 冻结 CAS 优先、
+        # 缺失回落 job_dir）已下沉进池化视图构造（workflows/validation_view
+        # 族），artifact_store 只为取 CAS root 传入，主进程不碰字节。
         validation_error = validate_worker_outputs(
-            handler.skill_manager, manifest, job_dir, view_dir
+            handler.skill_manager, manifest, job_dir, view_dir, handler.artifact_store
         )
         if validation_error:
             status, exit_code, error = "failed", 1, validation_error

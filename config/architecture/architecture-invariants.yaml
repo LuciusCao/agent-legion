@@ -1496,3 +1496,107 @@ invariants:
       - kind: contract
         target: tests/scripts/test_execution_write_surfaces.py
         gate: quick
+  - id: EXEC-INPUT-IDENTITY-001
+    statement: "A node execution's input identity (which digest's bytes) has exactly one resolution point — dispatch: stage_agent_inputs puts the bytes the Worker will consume into the CAS, holds a (job,node) ref against GC, and freezes sha256:<digest> into the DB manifest's input_artifacts. Every later stage may only perform equivalent transport transforms (same digest, different transfer form), never re-resolve identity from mutable present state (the current job_artifacts row, the job_dir's current bytes): the claim presigned upgrade is gated by comparing the row's content_hash against the frozen digest — a rewritten row keeps the legacy CAS form (#876 codex P1, the re-resolution defect class) — but that comparison is only the fast-path filter, since the presigned URL still points at the mutable authority key which can be overwritten between the check and the Worker's GET; the structural guarantee closes at the consumption point — the Worker self-verifies downloaded bytes against the ref's sha256 (equal to the frozen digest at issue time) and falls back to the CAS channel on mismatch, failing only with a two-segment error when CAS also cannot deliver (worker/artifact/inputs._download_cas) — and Host validation reads the dispatch-frozen CAS blob (private-copy isolated); dispatch dedupes aliases of one normalized name at the freeze point (single read/put/ref keyed by the normalized name — ordering semantics never enter the dict, #876 P2-a / EXEC-ORDER-SEMANTICS-001), and pre-dedup legacy manifests resolve the alias whose raw spelling sorts last in the serialized key order (what the Worker actually consumed); the claim guard covers dict-shaped refs too (their sha256 field is the frozen identity; a mismatch downgrades to the CAS string form), the Worker falls back to CAS on ANY presigned-segment failure (digest mismatch, exhausted HTTP retries, decode errors), and completion registers output refs BEFORE validation for GC protection (a zero-ref legacy blob reaped during a >grace queue wait would make the later add_ref fail closed) with a collision guard: a reported artifact whose normalized name is not a declared output and collides with a declared input never touches the shared (job,node,name) slot — the frozen input ref wins; RMW names (declared as both) register normally. The job_dir fallback in validation input resolution is a legacy exemption serving only pre-#833 manifests without a frozen ref (drains to zero as old jobs exhaust) plus the fail-open GC-race/blob-missing degradation; hydration only refills the evictable job_dir cache and never decides execution identity; the artifact read endpoints/UI read the latest row under documented #508 semantics and are not execution inputs. Hash bases are directly comparable: a row's content_hash is always the uncompressed-content sha256 (gzip rows included, #338), the same basis as the dispatch CAS digest. Design: docs/architecture/execution-generation.md section 2.11; the full state-space grid (lifecycle stages × variation axes × invariants, per-cell evidence) lives in docs/architecture/artifact-identity-state-space.md."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/scripts/test_artifact_identity_grid.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_keeps_cas_form_when_row_was_rewritten_after_dispatch
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_v4_worker_keeps_cas_form_for_rewritten_gz_row
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_decides_upgrade_per_input_identity
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_dict_ref_with_rewritten_row_downgrades_to_cas
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_dict_form_falls_back_to_cas_on_digest_mismatch
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_presigned_http_failure_falls_back_to_cas
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_fallback_failure_carries_both_segments
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_corrupt_deflate_body_falls_back_to_cas
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_artifact_input_downloads.py::test_gzip_decode_surface_normalizes_to_runtime_error
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_artifact_input_downloads.py::test_download_read_errors_normalize_to_runtime_error
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_mid_stream_protocol_error_falls_back_to_cas
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_view_inputs.py::test_validation_uses_dispatch_frozen_input_bytes
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_view_inputs.py::test_legacy_channel_output_ref_registered_before_validation
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_view_inputs.py::test_colliding_undeclared_report_skips_the_frozen_input_slot
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_view_inputs.py::test_rmw_colliding_name_registers_normally
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view_files.py::test_same_size_rewrite_with_restored_mtime_still_syncs_back
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py::test_input_bytes_come_from_the_dispatch_frozen_cas_copy
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_follow_serialized_key_order
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py::test_duplicate_aliases_on_deduped_manifest_hit_the_normalized_key
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifacts.py::test_stage_agent_inputs_dedupes_normalized_aliases
+        gate: quick
+
+  - id: EXEC-ORDER-SEMANTICS-001
+    statement: "Ordering semantics are carried only by arrays: a dict's key order is undefined across any serialization boundary (json.dumps sort_keys, JSON round-trips, DB persistence) and must never carry meaning for a consumer that iterates it (#876 P2-a, grid INV-9). The artifact-identity prototype — manifest input_artifacts consumed by key-iteration order — is closed by deduping aliases at the dispatch freeze point (one read, one CAS put, one normalized ref key: no ordering left to diverge) plus a legacy consumption rule for pre-dedup in-flight manifests (the alias whose raw spelling sorts last, matching the Worker's serialized-key materialization). A repo-wide family scan (the 'dict key order carries semantics + serialization boundary + consumer iteration-order reading' pattern, 30 production callsites) found this prototype the only member — the appendix table in docs/architecture/artifact-identity-state-space.md records the per-callsite exclusions; adding a persisted-dict + iterated-consumption path must pass the INV-9 checklist (grid usage rules §5.6)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_agent_artifacts.py::test_stage_agent_inputs_dedupes_normalized_aliases
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifacts.py::test_stage_agent_inputs_skips_unsafe_names
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_follow_serialized_key_order
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_artifact_identity_grid.py
+        gate: quick
+
+  - id: EXEC-VALIDATION-VIEW-001
+    statement: "The Host-side legacy validator runs against the declared validation view (workflows/validation_view.py + _validation_view_files.py, single construction site in the result-validate pool task) — the state-space grid's INV-2/3/4/6 (docs/architecture/artifact-identity-state-space.md): it sees exactly this node's declared inputs plus this attempt's declared outputs — sibling outputs, stale residues, undeclared files and untrusted archive members never enter (INV-2, #757); declared inputs are reflink-or-copy private inodes (CAS-sourced bytes included), so a validator's in-place write/chmod/replace can never cross a shared inode into the job dir or a CAS blob, with the snapshot check as defense in depth (INV-3); the validator's output mutations reconcile back into the run view across every write family (in-place via hardlink, temp+replace/delete+rewrite/delete via the reconcile arm, failure verdicts included), so the finish gate promotes exactly the bytes that passed validation (INV-4); the reconcile skips entries whose content sha256 still equals the source's — the unmodified check is hash-level because mtime/size are forgeable on an identity path (INV-6, #876 codex P2)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view_files.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_generation_gates.py::test_completion_stale_finish_never_lands_bytes_or_rows
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_artifact_identity_grid.py
+        gate: quick
