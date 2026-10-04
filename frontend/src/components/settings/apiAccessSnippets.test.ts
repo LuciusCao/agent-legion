@@ -62,4 +62,24 @@ describe('buildPythonExample duplicate submission (#907)', () => {
     expect(python).toContain('job["source_id"].endswith(f"~{CLIENT_TOKEN}")')
     expect(python).toContain('cursor = page["next_cursor"]')
   })
+
+  it('backs off on 429 during reconciliation before reading the page', () => {
+    const loop = python.slice(
+      python.indexOf('while not job_ids:'),
+      python.indexOf('cursor = page["next_cursor"]')
+    )
+    const steps = [
+      '/jobs/snapshot',
+      'if r.status_code == 429:',
+      'time.sleep(int(r.headers.get("Retry-After"',
+      'continue',
+      'r.raise_for_status()',
+      'page = r.json()',
+      'page["jobs"]',
+    ].map((step) => loop.indexOf(step))
+    expect(steps.every((position) => position > -1)).toBe(true)
+    expect(steps).toEqual([...steps].sort((a, b) => a - b))
+    // run_id 读回失败（含 429）不解析错误体，落到去重键对账。
+    expect(python).toContain('if readback.ok else []')
+  })
 })

@@ -34,8 +34,7 @@ curl -sS -X POST "$API_BASE/api/workspaces/$WORKSPACE_ID/runs" \\
   -H "Content-Type: application/json" \\
   -d '{"items": [{"type": "text", "content": "hello", "filename": "input.md"}]}'
 # → {"run": {"id": "…"}, "created_count": 1, "job_ids": ["…"]}
-# 重复提交同一条目返回 400 "No tasks were resolved from input"：表示已存在、
-# 不是失败，对账见 docs/workspace-api-tokens.md「幂等与重试」
+# 重复提交返回 400 "No tasks were resolved from input" = 已存在（非失败），对账见文档「幂等与重试」
 
 # 2) 轮询 job 状态，直到 completed / failed（建议间隔 10 秒以上）
 JOB_ID="<上一步响应里的 job_ids 元素>"
@@ -90,28 +89,30 @@ else:
     resp.raise_for_status()
     submitted = resp.json()
     job_ids = submitted["job_ids"]
-    if not job_ids:  # 可能为空（#501 治愈 / 并发重叠提交）：按 run 读回
-        jobs = s.get(
-            f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/jobs",
-            params={"run_id": submitted["run"]["id"]},
-        ).json()["jobs"]
-        job_ids = [job["id"] for job in jobs]
+    if not job_ids:  # 可能为空（#501 治愈 / 并发重叠提交）：按 run 读回，读不到再按去重键对账
+        run_id = submitted["run"]["id"]
+        readback = s.get(f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/jobs", params={"run_id": run_id})
+        job_ids = [job["id"] for job in readback.json()["jobs"]] if readback.ok else []
 cursor = None
 while not job_ids:
     # 按去重键对账：带 client_token 的 text 项，job 的 source_id 以 "~<token>"
     # 结尾。search 是子串匹配、按创建时间倒序分页：精确比对，沿 next_cursor 翻页
-    page = s.get(
+    r = s.get(
         f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/jobs/snapshot",
         params={"search": f"~{CLIENT_TOKEN}", "limit": 500, "cursor": cursor},
-    ).json()
+    )
+    if r.status_code == 429:  # 重提已耗掉限流额度：按 Retry-After 退避后重取同一页
+        time.sleep(int(r.headers.get("Retry-After", "10")))
+        continue
+    r.raise_for_status()
+    page = r.json()
     job_ids = [job["id"] for job in page["jobs"] if job["source_type"] == "material"
                and job["source_id"].endswith(f"~{CLIENT_TOKEN}")]
     cursor = page["next_cursor"]
     if cursor is None:
         break
 if not job_ids:
-    # 翻完也没有：该条目在本 workspace 没有 job（期间被删除等），按未提交处理
-    raise SystemExit(f"{CLIENT_TOKEN}: 没有已有 job，按未提交处理后重提")
+    raise SystemExit(f"{CLIENT_TOKEN}: 翻完也没有已有 job（期间被删除等），按未提交处理后重提")
 job_id = job_ids[0]
 
 # 2) 轮询到终态；429 时按 Retry-After 退避

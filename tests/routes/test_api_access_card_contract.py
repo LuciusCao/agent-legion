@@ -297,6 +297,22 @@ def test_python_snippet_reconciles_duplicate_submission() -> None:
     assert '/jobs/snapshot",' in body and '"search": f"~{CLIENT_TOKEN}"' in body
     assert 'job["source_type"] == "material"' in body
     assert 'job["source_id"].endswith(f"~{CLIENT_TOKEN}")' in body
+    # #909 review：重提刚耗掉限流额度时 snapshot 可能 429——对账分页须像轮询
+    # 一样按 Retry-After 退避重取，并在读响应字段前 raise_for_status。
+    loop = body[body.index("while not job_ids:") : body.index('cursor = page["next_cursor"]')]
+    steps = [
+        "/jobs/snapshot",
+        "if r.status_code == 429:",
+        'time.sleep(int(r.headers.get("Retry-After"',
+        "continue",
+        "r.raise_for_status()",
+        "page = r.json()",
+        'page["jobs"]',
+    ]
+    positions = [loop.index(step) for step in steps]
+    assert positions == sorted(positions), list(zip(steps, positions, strict=True))
+    # run_id 读回失败（含 429）不解析错误体，落到上面的去重键对账。
+    assert 'readback.json()["jobs"]] if readback.ok else []' in body
     doc = DOC.read_text(encoding="utf-8")
     assert "`GET /jobs/snapshot?search=~<client_token>`" in doc
 
