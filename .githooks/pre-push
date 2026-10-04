@@ -69,6 +69,7 @@ fi
 # Pick the quick-gate lanes from the pushed paths. CI runs every lane for each
 # PR/push, so this only trims the local feedback loop; anything ambiguous
 # (new refs, failed diff, shared files) falls back to all lanes.
+source "$ROOT_DIR/scripts/lane-paths.sh"
 compute_lanes() {
   local saw_frontend=0
   local saw_backend=0
@@ -79,6 +80,10 @@ compute_lanes() {
   while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     saw_any=1
+    # docs/**, root *.md, LICENSE: shared rule with CI and check-quick (#941).
+    if lane_path_is_docs "$path"; then
+      continue
+    fi
     case "$path" in
       # Shared/global files: all lanes, no trimming.
       pyproject.toml|uv.lock|Makefile|scripts/*|.githooks/*|.github/*|config/*|frontend/package.json|frontend/package-lock.json)
@@ -88,12 +93,13 @@ compute_lanes() {
       velites/*)
         saw_rust=1
         saw_non_docs=1
+        if lane_path_feeds_backend "$path"; then
+          saw_backend=1
+        fi
         ;;
       frontend/*)
         saw_frontend=1
         saw_non_docs=1
-        ;;
-      docs/*|*.md|LICENSE)
         ;;
       *)
         saw_backend=1

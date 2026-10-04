@@ -25,7 +25,14 @@ only the affected quick-gate lanes locally: frontend-only changes skip the
 backend pytest lane, docs-only changes run static checks only, and
 backend-only changes skip Vitest. New branches/tags, shared files
 (`pyproject.toml`, `uv.lock`, `scripts/`, `.github/`, `config/`, …), mixed
-diffs, and any diff failure fall back to all lanes. CI always runs every lane
+diffs, and any diff failure fall back to all lanes. Only `docs/**`,
+repository-root `*.md` and `LICENSE` count as docs: nested markdown such as
+the Studio bootstrap prompt, MCP guides or example `SKILL.md` files is a
+runtime input and runs its directory's lane, and `velites/schema/**` also runs
+the backend lane (Python contract tests read it). The rule lives in
+`scripts/lane-paths.sh`, sourced by the CI `changes` job, `check-quick.sh` and
+the pre-push hook, and `tests/scripts/test_lane_paths.py` pins all three to
+one path table (#941). CI always runs every lane
 of the full quick suite, so trimming never weakens the server-side boundary.
 The lane set and the test tier are part of the local evidence fingerprint, so
 evidence from a trimmed run is never reused for a different lane set or tier.
@@ -160,7 +167,7 @@ unaffected. Passing evidence is shared through the same Git common directory.
 `develop` / `main` / `master` / `release/*`, merge-queue synthetic commits,
 pushes to `main` / `master` (a `develop` merge is already covered by its PR
 gate, so push runs there were dropped to save Actions minutes), plus manual dispatch. Docs-only changes (`docs/**`,
-`**/*.md`, `LICENSE`) still trigger the workflow but every backend/frontend
+repository-root `*.md`, `LICENSE`) still trigger the workflow but every backend/frontend
 lane evaluates to false in the `changes` job and skips without acquiring a
 runner, including the complete `backend-postgres` matrix. The `docs-terms`
 guard is the one check that still runs on
@@ -219,7 +226,9 @@ release-train `HEAD`-only exception.
   `check.sh` keeps partitions report-only — its coverage file may hold a
   partial tier, and floors on partial data produce false reds. It also runs
   `check_reruns.py` against every shard report: a retry-pass is merge-blocking
-  unless its exact nodeid has a live registry entry.
+  unless its exact nodeid has a registry entry. An expired deadline is only
+  listed here, never fails the PR (#941: a calendar date must not red
+  unrelated PRs); the nightly `exemption-expiry` job enforces it.
 - **frontend-logic / frontend-component-a/b / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
   the slower component project is split again with Vitest's deterministic
@@ -253,9 +262,12 @@ In `nightly-gate.yml`:
 - **exemption-expiry** — refreshes the issue-state manifest and detects
   expired architecture exemptions; since #295 it also detects expired
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
-  evidence without needing the extended rerun report). PR backend-coverage
-  already enforces observed reruns and deadlines synchronously; this weekly
-  lane catches deadline drift even during a quiet week with no backend PR.
+  evidence without needing the extended rerun report). It is the only lane
+  that fails on an expired deadline (#941) and annotates entries due within
+  7 days as warnings; PR backend-coverage enforces observed reruns only. The
+  registry's clock-free rules (one entry per nodeid, deadline at most 45
+  days after the entry's `registered_on` / `extended_on`) are enforced on
+  every load, including the unit-tier `tests/scripts/test_flaky_registry_entries.py`.
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
   re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
   PR/push stays Chromium-only) plus a workspace stress run

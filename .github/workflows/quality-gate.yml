@@ -90,14 +90,25 @@ jobs:
           # No usable base (dispatch, brand-new branch): full gate.
           if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
             backend=false; frontend=false; rust=false; docker=false
+            # Docs / velites-contract rules are shared with check-quick.sh
+            # and .githooks/pre-push (#941): only docs/**, root *.md and
+            # LICENSE skip lanes; nested *.md (prompts, MCP guides, skills)
+            # are runtime inputs and run their directory's lanes.
+            source scripts/lane-paths.sh
             while IFS= read -r f; do
+              if lane_path_is_docs "$f"; then
+                continue
+              fi
               case "$f" in
-                docs/*|*.md|LICENSE) ;;
                 # A workflow/composite-action edit can change any lane. Test
                 # every lane rather than letting the edited lane skip itself.
                 .github/workflows/*|.github/actions/*) backend=true; frontend=true; rust=true; docker=true ;;
                 frontend/*) frontend=true ;;
-                velites/*) rust=true ;;
+                velites/*)
+                  rust=true
+                  # velites/schema/** is read by Python contract tests.
+                  if lane_path_feeds_backend "$f"; then backend=true; fi
+                  ;;
                 # 镜像内容/打包相关：Dockerfile 年久失修只有真构建才能发现
                 #（2026-08 host 缺 g++、worker 缺 requests 两次实例）。
                 Dockerfile|.dockerignore|pyproject.toml|uv.lock|worker/*|shared/*|deploy/*) backend=true; frontend=true; docker=true ;;
@@ -413,7 +424,8 @@ jobs:
           retention-days: 1
 
   # Docs retired-terms guard for docs-only PRs (codex review on #375): the
-  # changes filter maps docs/*|*.md|LICENSE to backend=false, so backend-unit
+  # changes filter maps docs/**, root *.md and LICENSE to backend=false
+  # (scripts/lane-paths.sh), so backend-unit
   # (which runs the static round including check_architecture) is skipped
   # exactly when a docs-only PR is most likely to reintroduce retired
   # terminology. With only the aggregate context required, backend changes
@@ -581,9 +593,10 @@ jobs:
           cat test-results/backend-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       # A retry-pass is still a loss of test determinism. Known nodeids may
-      # carry a short-lived registry entry, but a new rerun or an expired
-      # exemption turns the PR red immediately instead of waiting for the
-      # weekly governance job.
+      # carry a short-lived registry entry, but a new rerun turns the PR red
+      # immediately. Deadline expiry is a wall-clock judgement and is only
+      # enforced by nightly-gate.yml exemption-expiry (#941): enforcing it
+      # here turned every deadline day red for unrelated PRs.
       - name: Enforce flaky rerun registry
         if: always()
         run: >-

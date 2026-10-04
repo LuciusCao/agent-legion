@@ -76,6 +76,10 @@ derive_lanes_from_worktree() {
     path="${line:3}"
     path="${path##* -> }"
     saw_any=1
+    # docs/**, root *.md, LICENSE: shared rule with CI and pre-push (#941).
+    if lane_path_is_docs "$path"; then
+      continue
+    fi
     case "$path" in
       # Shared/global files: all lanes, no trimming.
       pyproject.toml|uv.lock|Makefile|scripts/*|.githooks/*|.github/*|config/*|frontend/package.json|frontend/package-lock.json)
@@ -85,12 +89,13 @@ derive_lanes_from_worktree() {
       velites/*)
         saw_rust=1
         saw_non_docs=1
+        if lane_path_feeds_backend "$path"; then
+          saw_backend=1
+        fi
         ;;
       frontend/*)
         saw_frontend=1
         saw_non_docs=1
-        ;;
-      docs/*|*.md|LICENSE)
         ;;
       *)
         saw_backend=1
@@ -113,6 +118,8 @@ derive_lanes_from_worktree() {
 }
 
 if [[ -z "${GATE_LANES:-}" ]]; then
+  # Shared docs / velites-contract path rules (CI changes job + pre-push).
+  source "$ROOT_DIR/scripts/lane-paths.sh"
   GATE_LANES="$(derive_lanes_from_worktree)"
   echo "Derived lanes from worktree changes: $GATE_LANES"
 fi

@@ -10,8 +10,10 @@ import pytest
 import yaml
 
 from scripts.check_reruns import (
+    MAX_DEADLINE_WINDOW_DAYS,
     RegistryError,
     evaluate,
+    expiring_soon,
     load_registry,
     load_rerun_nodeids,
     main,
@@ -34,6 +36,7 @@ def _entry(**overrides: object) -> dict:
         "owner": "test-infra",
         "reason": "known flake",
         "observed": "local run 2026-08-01",
+        "registered_on": "2026-08-02",
         "deadline": "2026-09-01",
     }
     base.update(overrides)
@@ -83,6 +86,12 @@ def test_load_registry_accepts_valid_entries(tmp_path: Path) -> None:
         {"scope": "frontend:x"},  # both nodeid and scope
         {"nodeid": None, "scope": None},  # neither nodeid nor scope
         {"owner": ""},
+        {"registered_on": None},  # non-recurring without a window anchor
+        {"registered_on": "not-a-date"},
+        {"deadline": "2026-09-17"},  # 46 days after registered_on
+        {"deadline": "2026-08-02"},  # not after the anchor
+        {"extended_on": "2026-08-01"},  # extension precedes registration
+        {"deadline": None, "recurring": True, "extended_on": "2026-08-10"},
     ],
 )
 def test_load_registry_rejects_invalid_entries(tmp_path: Path, overrides: dict) -> None:
@@ -97,6 +106,37 @@ def test_load_registry_rejects_duplicate_ids(tmp_path: Path) -> None:
 
     with pytest.raises(RegistryError, match="duplicate"):
         load_registry(registry)
+
+
+def test_load_registry_rejects_duplicate_nodeids(tmp_path: Path) -> None:
+    # #941: evaluate() keys entries by nodeid, so a second entry for the same
+    # nodeid silently shadowed the first.
+    registry = _write_registry(tmp_path / "registry.yaml", [_entry(), _entry(id="FLAKY-101")])
+
+    with pytest.raises(RegistryError, match="duplicate nodeid"):
+        load_registry(registry)
+
+
+def test_deadline_window_is_anchored_on_entry_dates(tmp_path: Path) -> None:
+    # The window rule is clock-free: the 45-day bound counts from the entry's
+    # own registered_on / extended_on, so the verdict never depends on today.
+    assert MAX_DEADLINE_WINDOW_DAYS == 45
+    at_limit = _entry(deadline="2026-09-16")  # registered_on + 45
+    extended = _entry(
+        id="FLAKY-101",
+        nodeid="tests/x/test_b.py::test_b",
+        extended_on="2026-10-01",
+        deadline="2026-11-15",  # extended_on + 45
+    )
+
+    entries = load_registry(_write_registry(tmp_path / "registry.yaml", [at_limit, extended]))
+
+    assert [entry.deadline for entry in entries] == [date(2026, 9, 16), date(2026, 11, 15)]
+    assert entries[1].extended_on == date(2026, 10, 1)
+
+    too_late = _entry(extended_on="2026-10-01", deadline="2026-11-16")
+    with pytest.raises(RegistryError, match="45-day window"):
+        load_registry(_write_registry(tmp_path / "late.yaml", [too_late]))
 
 
 def test_load_rerun_nodeids_skips_missing_reports(tmp_path: Path) -> None:
@@ -124,12 +164,46 @@ def test_evaluate_flags_unregistered_reruns(tmp_path: Path) -> None:
 
 def test_evaluate_flags_expired_deadlines(tmp_path: Path) -> None:
     entries = load_registry(
-        _write_registry(tmp_path / "registry.yaml", [_entry(deadline="2026-08-01")])
+        _write_registry(
+            tmp_path / "registry.yaml", [_entry(deadline="2026-08-01", registered_on="2026-07-20")]
+        )
     )
 
-    _lines, violations = evaluate(entries, set(), TODAY)
+    _lines, violations = evaluate(entries, set(), TODAY, enforce_deadlines=True)
 
     assert any("FLAKY-100" in v and "expired" in v for v in violations)
+
+
+def test_rerun_mode_reports_expired_deadlines_without_failing(tmp_path: Path) -> None:
+    # #941: PR CI must not turn red because a calendar date passed; only the
+    # nightly deadline-only mode enforces expiry.
+    entries = load_registry(
+        _write_registry(
+            tmp_path / "registry.yaml", [_entry(deadline="2026-08-01", registered_on="2026-07-20")]
+        )
+    )
+
+    lines, violations = evaluate(entries, {"tests/x/test_a.py::test_a"}, TODAY)
+
+    assert violations == []
+    assert any("FLAKY-100" in line and "expired" in line for line in lines)
+
+
+def test_expiring_soon_lists_entries_within_seven_days(tmp_path: Path) -> None:
+    entries = load_registry(
+        _write_registry(
+            tmp_path / "registry.yaml",
+            [
+                _entry(deadline="2026-08-10"),
+                _entry(id="FLAKY-101", nodeid="tests/x/test_b.py::test_b", deadline="2026-08-11"),
+                _entry(id="FLAKY-102", nodeid="tests/x/test_c.py::test_c", deadline="2026-08-03"),
+            ],
+        )
+    )
+
+    soon = expiring_soon(entries, TODAY)
+
+    assert [entry.entry_id for entry in soon] == ["FLAKY-100", "FLAKY-102"]
 
 
 def test_evaluate_recurring_entries_never_expire(tmp_path: Path) -> None:
@@ -212,6 +286,34 @@ def test_deadline_only_mode_requires_no_report(tmp_path: Path) -> None:
 
     expired = main(["--registry", str(registry), "--check-deadlines", "--today", "2026-09-02"])
     assert expired == 1
+
+
+def test_rerun_report_mode_passes_after_deadline(tmp_path: Path) -> None:
+    registry = _write_registry(tmp_path / "registry.yaml", [_entry()])
+    clean = _write_report(tmp_path / "clean.json", ["tests/x/test_a.py::test_a"])
+
+    exit_code = main(
+        ["--registry", str(registry), "--rerun-report", str(clean), "--today", "2026-09-02"]
+    )
+
+    assert exit_code == 0
+
+
+def test_deadline_only_mode_warns_seven_days_ahead(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = _write_registry(tmp_path / "registry.yaml", [_entry()])
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    quiet = main(["--registry", str(registry), "--check-deadlines", "--today", "2026-08-24"])
+    assert quiet == 0
+    assert "WARN" not in capsys.readouterr().out
+
+    warned = main(["--registry", str(registry), "--check-deadlines", "--today", "2026-08-25"])
+    out = capsys.readouterr().out
+    assert warned == 0
+    assert "WARN: FLAKY-100" in out
+    assert "::warning title=flaky registry deadline::FLAKY-100" in out
 
 
 def test_no_report_without_deadline_flag_errors(
