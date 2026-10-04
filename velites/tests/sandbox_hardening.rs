@@ -170,7 +170,10 @@ async fn bash_kills_leftovers_that_ignore_term_and_closed_the_pipes() {
         .trim()
         .parse()
         .unwrap();
-    assert!(process_gone(pid).await, "TERM-ignoring leftover {pid} survived");
+    assert!(
+        process_gone(pid).await,
+        "TERM-ignoring leftover {pid} survived"
+    );
 }
 
 #[cfg(target_os = "linux")]
