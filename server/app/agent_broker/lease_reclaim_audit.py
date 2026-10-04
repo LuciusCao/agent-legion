@@ -157,3 +157,30 @@ def reject_result(
         },
     )
     return HTTPException(status_code=409, detail=detail)
+
+
+def precheck_result_owner(
+    broker: Any,
+    execution_id: str,
+    worker_id: str,
+    lease_id: str,
+    record: dict[str, Any],
+    declared_bytes: str | None,
+) -> None:
+    """The result route's cheap ownership pre-check BEFORE spooling the body
+    (a stale lease would otherwise write up to max_archive_bytes for
+    nothing); ``commit_agent_result`` re-checks under the commit to stay
+    TOCTOU-safe. Blocking (DB reads) — the route runs it in the threadpool.
+    Raises the audited 409 when the attempt no longer owns its lease."""
+    payload = broker.claimed_payload(execution_id, worker_id)
+    if payload is None or str(payload["lease_id"]) != lease_id:
+        raise reject_result(
+            broker.database_dsn,
+            execution_id,
+            worker_id,
+            lease_id,
+            record,
+            stage="precheck",
+            detail="execution is not owned by this Worker",
+            archive_bytes=declared_bytes,
+        )
