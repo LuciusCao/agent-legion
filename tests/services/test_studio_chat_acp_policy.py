@@ -169,6 +169,37 @@ def test_terminal_env_drops_overrides_that_steer_program_resolution(tmp_path) ->
     assert env["TERM"] == "dumb"
 
 
+SELECTOR_KEYS = (
+    "PAGER",
+    "GIT_PAGER",
+    "MANPAGER",
+    "LESSOPEN",
+    "LESSCLOSE",
+    "LESS",
+    "EDITOR",
+    "VISUAL",
+    "GIT_EDITOR",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "BROWSER",
+    "SHELL",
+    "TERMINAL",
+    "ENV",
+)
+
+
+def test_terminal_env_drops_program_selector_overrides() -> None:
+    """Pager/editor/ssh/askpass-class overrides name a program to run; none
+    may reach the child (only the base value, if any, survives)."""
+    env = terminal_policy.terminal_env([_Env(key, "sh -c injected") for key in SELECTOR_KEYS])
+    assert "injected" not in "".join(env.values())
+    safe = [_Env("NO_COLOR", "1"), _Env("COLUMNS", "80"), _Env("TZ", "UTC"), _Env("LC_ALL", "C")]
+    env = terminal_policy.terminal_env(safe)
+    assert (env["NO_COLOR"], env["COLUMNS"], env["TZ"], env["LC_ALL"]) == ("1", "80", "UTC", "C")
+
+
 # -- terminal working-directory confinement ---------------------------------
 
 

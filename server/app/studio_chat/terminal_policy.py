@@ -25,21 +25,14 @@ from acp import RequestError
 # subprocess) plus TMPDIR; LANG/LC_* are added by prefix below.
 BASE_ENV_KEYS = ("HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER", "TMPDIR")
 
-# Agent-supplied env overrides that only shape output/interactivity. Keys
-# that steer program resolution or inject code before the approved command
-# runs (PATH, LD_*/DYLD_*, BASH_ENV, PYTHONPATH, NODE_OPTIONS, ...) are
-# dropped; LANG/LC_* are accepted by prefix.
+# Agent-supplied env overrides: only plain formatting/locale values that can
+# never name a program or code to run. Everything else is dropped — keys
+# that steer program resolution or inject code (PATH, LD_*/DYLD_*, BASH_ENV,
+# PYTHONPATH, NODE_OPTIONS, ...) and program selectors (PAGER/GIT_PAGER/
+# LESS*, EDITOR/VISUAL, GIT_SSH*, *ASKPASS, BROWSER, SHELL, ...). LANG/LC_*
+# are accepted by prefix; GIT_TERMINAL_PROMPT is a plain on/off switch.
 OVERRIDE_ENV_KEYS = frozenset(
-    {
-        "NO_COLOR",
-        "FORCE_COLOR",
-        "TERM",
-        "COLUMNS",
-        "LINES",
-        "GIT_TERMINAL_PROMPT",
-        "PAGER",
-        "GIT_PAGER",
-    }
+    {"NO_COLOR", "FORCE_COLOR", "TERM", "COLUMNS", "LINES", "TZ", "GIT_TERMINAL_PROMPT"}
 )
 
 
