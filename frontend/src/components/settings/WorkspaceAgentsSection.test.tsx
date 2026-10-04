@@ -35,7 +35,11 @@ const WORKSPACE_ID = 'polaris'
 function agent(
   agentId: string,
   capability: string,
-  status: AgentListItem['status'] = 'published'
+  status: AgentListItem['status'] = 'published',
+  published: { capability: string; version: number } | null = status ===
+  'published'
+    ? { capability, version: 2 }
+    : null
 ): AgentListItem {
   return {
     agent_id: agentId,
@@ -46,6 +50,8 @@ function agent(
     status,
     has_draft: status === 'draft',
     published_at: null,
+    published_capability: published?.capability ?? null,
+    published_version: published?.version ?? null,
   }
 }
 
@@ -183,7 +189,9 @@ describe('WorkspaceAgentsSection', () => {
     await screen.findByRole('list', { name: 'Agent 定义列表' })
     fireEvent.click(screen.getByRole('button', { name: '归档 write_opening' }))
     const alert = within(screen.getByRole('dialog')).getByRole('alert')
-    expect(alert).toHaveTextContent('仍被当前 workflow 的 1 个节点引用')
+    expect(alert).toHaveTextContent(
+      '已发布版本仍被当前 workflow 的 1 个节点引用'
+    )
     expect(alert).toHaveTextContent('opening')
   })
 
@@ -218,5 +226,77 @@ describe('WorkspaceAgentsSection', () => {
     expect(
       within(screen.getByRole('dialog')).getByRole('alert')
     ).toHaveTextContent('引用关系尚未确认')
+  })
+  it('judges references by the published capability behind a draft (#906)', async () => {
+    // 已发布 capability write_opening、草稿改成 renamed_opening：节点仍按
+    // 已发布的 write_opening 路由到它，不能被当成孤儿。
+    mockFetch.mockResolvedValue({
+      agents: [
+        agent('write_opening', 'renamed_opening', 'draft', {
+          capability: 'write_opening',
+          version: 1,
+        }),
+        agent('analyze_bazi', 'analyze_bazi'),
+      ],
+    })
+    renderSection()
+    await screen.findByRole('list', { name: 'Agent 定义列表' })
+    const row = screen.getByRole('listitem', { name: 'write_opening' })
+    expect(within(row).getByText('被 1 个节点引用')).toBeInTheDocument()
+    expect(within(row).getByText('已发布 v1 · 有草稿')).toBeInTheDocument()
+    expect(
+      within(row).getByText(
+        /capability：write_opening（草稿改为 renamed_opening/
+      )
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '未被引用（1）' }))
+    const orphans = within(
+      screen.getByRole('list', { name: 'Agent 定义列表' })
+    ).getAllByRole('listitem')
+    expect(orphans.map((li) => li.getAttribute('aria-label'))).toEqual([
+      'analyze_bazi',
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: '全部（2）' }))
+    fireEvent.click(screen.getByRole('button', { name: '归档 write_opening' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('capability：write_opening')
+    expect(dialog).toHaveTextContent('含已发布版本')
+    expect(dialog).toHaveTextContent('草稿已把 capability 改为 renamed_opening')
+    const alert = within(dialog).getByRole('alert')
+    expect(alert).toHaveTextContent(
+      '已发布版本仍被当前 workflow 的 1 个节点引用'
+    )
+    expect(alert).toHaveTextContent('opening')
+  })
+
+  it('labels draft-only agents and archives them normally', async () => {
+    renderSection()
+    await screen.findByRole('list', { name: 'Agent 定义列表' })
+    const row = screen.getByRole('listitem', { name: 'write_synthesis' })
+    expect(within(row).getByText('仅草稿（从未发布）')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: '归档 write_synthesis' })
+    )
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).queryByRole('alert')).toBeNull()
+    expect(dialog).not.toHaveTextContent('含已发布版本')
+    fireEvent.click(within(dialog).getByRole('button', { name: '归档' }))
+    await waitFor(() =>
+      expect(mockArchive).toHaveBeenCalledWith(WORKSPACE_ID, 'write_synthesis')
+    )
+  })
+
+  it('judges draft-only agents by their draft capability', async () => {
+    mockFetch.mockResolvedValue({
+      agents: [agent('write_opening', 'write_opening', 'draft')],
+    })
+    renderSection()
+    await screen.findByRole('list', { name: 'Agent 定义列表' })
+    fireEvent.click(screen.getByRole('button', { name: '归档 write_opening' }))
+    const alert = within(screen.getByRole('dialog')).getByRole('alert')
+    expect(alert).toHaveTextContent('从未发布')
+    expect(alert).toHaveTextContent('opening')
   })
 })
