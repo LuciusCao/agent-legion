@@ -378,6 +378,10 @@ running/completed 的名跳过），不误删新代次写回的新字节（codex
 
 ### 2.11 输入身份唯一解析点（EXEC-INPUT-IDENTITY-001）
 
+> 状态空间全景（生命周期六阶段 × 八变异轴 × 八不变量 × 逐格证据/论证）
+> 见 [artifact-identity-state-space.md](artifact-identity-state-space.md)；
+> 本节是协议正文，网格是覆盖面账簿。
+
 一个节点执行的**输入身份**（哪个 digest 的字节）有且只有一个解析点：
 **dispatch**。`stage_agent_inputs`（`agent_broker/agent_artifacts.py`，
 agent 与 code 两条 dispatch 都调）把 Worker 将消费的 input 字节 put 进
