@@ -25,6 +25,7 @@ from server.app.config_schema import (
     config_schema_defaults,
     validate_config_values,
 )
+from server.app.services.agent_node_profile import resolve_agent_node_profile
 from server.app.services.node_config_batch import frozen_node_config
 from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.services.node_config_secret_guard import reject_secret_violations
@@ -66,11 +67,12 @@ def capability_config_schemas(
 
 def _node_config_schema(
     node: WorkflowNode,
-    agent_schemas: Mapping[str, dict[str, Any]],
+    agent_definitions: Mapping[str, AgentDefinition],
 ) -> dict[str, Any]:
-    """One node's effective schema: Agent Definition → node-declared.
+    """One node's effective schema: agent node profile → node-declared.
 
-    ``type: agent`` nodes keep their Agent Definition schema — with the
+    ``type: agent`` nodes keep their execution profile's schema (#932: the
+    profile projects the one published Agent Definition) — with the
     platform-reserved execution keys merged UNDER it since #550 (an agent
     node's timeout is configurable like a code node's; ``sandbox_network``
     rides along inertly — the agent runtime ignores it). The merged default
@@ -81,7 +83,8 @@ def _node_config_schema(
     capability with a published Agent without inheriting the Agent's schema.
     """
     if node.node_type == "agent":
-        return agent_effective_schema(agent_schemas.get(node.capability, {}))
+        profile = resolve_agent_node_profile(node, agent_definitions)
+        return agent_effective_schema(profile.config_schema if profile is not None else {})
     return merge_reserved_execution_schema(node.config_schema)
 
 
@@ -90,10 +93,9 @@ def workflow_node_config_schemas(
     agent_definitions: Mapping[str, AgentDefinition],
 ) -> dict[str, dict[str, Any]]:
     """Map node key → effective config_schema (reserved keys merged for code nodes)."""
-    agent_schemas = _agent_schemas(agent_definitions)
     schemas: dict[str, dict[str, Any]] = {}
     for node in definition.executable_nodes.values():
-        schema = _node_config_schema(node, agent_schemas)
+        schema = _node_config_schema(node, agent_definitions)
         # Approval gates never dispatch (EXEC-APPROVAL-001): no config surface.
         if schema and node.node_type != "approval":
             schemas[node.key] = schema
@@ -156,11 +158,10 @@ def resolve_workflow_node_configs(
     workspace: Mapping[str, Any] | None,
 ) -> dict[str, dict[str, Any]]:
     """Resolve the effective config of every node for an intake freeze."""
-    agent_schemas = _agent_schemas(agent_definitions)
     overrides = workspace_node_overrides(workspace, definition.key)
     resolved: dict[str, dict[str, Any]] = {}
     for node in definition.executable_nodes.values():
-        node_schema = _node_config_schema(node, agent_schemas)
+        node_schema = _node_config_schema(node, agent_definitions)
         workspace_override = chain_override(overrides.get(node.key, {}))
         # Approval gates never dispatch (EXEC-APPROVAL-001): their config
         # (rework_target/feedback_artifact) is platform semantics consumed by

@@ -23,6 +23,9 @@ type AgentFilter = 'all' | 'unreferenced'
 const SECTION_HINT =
   '本 workspace 的全部 Agent 定义（不含已归档）。「未被引用」指当前生效的 workflow 中没有 Agent 节点使用其已发布版本的 capability（从未发布的按草稿 capability 判定），通常是重构后遗留的孤儿，可在此归档。'
 
+const RETIREMENT_PLAN_URL =
+  'https://github.com/LuciusCao/agent-legion/issues/440'
+
 function statusLabel(agent: AgentListItem): string {
   if (isDraftOnly(agent)) return '仅草稿（从未发布）'
   if (agent.status === 'draft')
@@ -99,6 +102,16 @@ export function WorkspaceAgentsSection({
     <section id="workspace-agents" className={settingsStyles.section}>
       <h2 className={settingsStyles.sectionTitle}>Agent 定义</h2>
       <hr className={settingsStyles.sectionDivider} />
+      {/* #932（#440 P1）：退役公告。双读阶段目录与归档原样保留（D1）。 */}
+      <p className={styles.retirementNotice} role="note">
+        <strong>Agent 定义即将退役：</strong>
+        执行配置（runtime、工具、Worker 标签、可调参数与 skill）将改由 workflow
+        节点自身声明，随 workflow
+        版本发布。过渡期内本目录、引用判定与归档照常可用，后续版本将改为只读历史。
+        <a href={RETIREMENT_PLAN_URL} target="_blank" rel="noreferrer">
+          查看退役计划
+        </a>
+      </p>
       <p className={styles.hint}>{SECTION_HINT}</p>
       {(error || listError) && (
         <p className={styles.error} role="alert">

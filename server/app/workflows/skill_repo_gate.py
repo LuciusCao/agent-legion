@@ -20,7 +20,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile import resolve_agent_node_profile
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.skill_repo import contract_declared_at_ref
 from server.app.skills.config import LATEST_REF
 from server.app.skills.contract_probe import probe_contract
@@ -37,9 +38,7 @@ def _agent_node_skills(
     the legacy Agent-definition fallback runs ``latest``. Unbound nodes
     are skipped — the base publish gate reports the missing binding.
     """
-    by_capability: dict[str, list] = {}
-    for agent in published_agent_definitions(job_db, workspace_id).values():
-        by_capability.setdefault(agent.capability, []).append(agent)
+    catalog = legacy_agent_catalog(job_db, workspace_id)
     triples: list[tuple[str, str, str]] = []
     for node in definition.executable_nodes.values():
         if node.node_type != "agent":
@@ -48,8 +47,8 @@ def _agent_node_skills(
             skill_key = node.skill.key
             ref = node.skill.ref
         else:
-            candidates = by_capability.get(node.capability, [])
-            skill_key = candidates[0].skill if len(candidates) == 1 else ""
+            profile = resolve_agent_node_profile(node, catalog)
+            skill_key = profile.skill if profile is not None else ""
             ref = LATEST_REF
         if skill_key:
             triples.append((node.key, skill_key, ref))

@@ -20,7 +20,7 @@ from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, 
 
 _BATCH = "server.app.workflow_worker.agent_gate.batch.active_request_keys"
 _STOCK = "server.app.workflow_worker.agent_gate.load_stock_snapshot"
-_CATALOG = "server.app.workflow_worker.agent_gate.has_published_agent_definitions"
+_CATALOG = "server.app.workflow_worker.agent_gate.agent_profiles_may_exist"
 
 
 def _node(key: str = "fetch") -> WorkflowNode:
