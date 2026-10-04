@@ -174,6 +174,36 @@ def test_read_only_validator_on_remote_output_completes(tmp_path: Path) -> None:
     assert row is not None and row["content_hash"] == HASH
 
 
+def test_remote_output_snapshot_reuses_promote_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex #913 P2：校验前快照取提升阶段已流式算出的摘要，不再整读产物；
+    只在校验通过后复算一次。"""
+    import server.app.workflows.remote_output_guard as guard
+    import server.app.workflows.worker_output_validation as wov
+
+    hashed: list[str] = []
+    real_sha256 = guard.file_sha256
+    monkeypatch.setattr(
+        guard, "file_sha256", lambda path: hashed.append(path.name) or real_sha256(path)
+    )
+    snapshots: list[dict[str, str]] = []
+    real_find = wov.find_remote_output_rewrites
+    monkeypatch.setattr(
+        wov,
+        "find_remote_output_rewrites",
+        lambda view, snapshot: snapshots.append(dict(snapshot)) or real_find(view, snapshot),
+    )
+    storage = _storage()
+    handler, leases, _, _ = _make_handler(tmp_path, storage, _VALIDATE_READ_ONLY)
+
+    _finish(handler, {"out.json": _remote_ref()})
+
+    assert leases.results[0].status == "completed"
+    assert snapshots == [{"out.json": HASH}]
+    assert hashed == ["out.json"]  # 只有校验后的一次复算
+
+
 @pytest.mark.parametrize(
     ("script", "change"),
     [
