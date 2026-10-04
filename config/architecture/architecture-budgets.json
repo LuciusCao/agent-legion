@@ -274,6 +274,8 @@
     "frontend/src/components/settings/WorkerTokenNextSteps.tsx": 34,
     "frontend/src/components/settings/WorkerTokensSection.module.css": 128,
     "frontend/src/components/settings/WorkerTokensSection.tsx": 237,
+    "frontend/src/components/settings/WorkspaceAgentsSection.module.css": 118,
+    "frontend/src/components/settings/WorkspaceAgentsSection.tsx": 198,
     "frontend/src/components/settings/WorkspaceApiTokensSection.tsx": 221,
     "frontend/src/components/settings/WorkspaceMembersSection.module.css": 101,
     "frontend/src/components/settings/WorkspaceMembersSection.tsx": 155,
