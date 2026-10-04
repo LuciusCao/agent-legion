@@ -201,14 +201,59 @@ def test_filter_selection_over_limit_rejected_before_any_write(client, monkeypat
 def test_rerun_by_failure_unrestricted_match_over_limit_rejected(client, monkeypatch):
     monkeypatch.setattr(job_selection_resolver, "MAX_BATCH_JOBS", 1)
     ws_id = _create_workspace(client, "bounds-by-failure-ws")
-    job_ids = _create_jobs(client, ws_id, ["R1", "R2"])
+    job_ids = _create_jobs(client, ws_id, ["R1", "R2", "R3"])
     for job_id in job_ids:
         _fail_job_node(client, job_id, "review_script")
+    job_db = client.app.state.job_db
+    id_queries: list[tuple[int, int]] = []
+    row_queries: list[object] = []
+    real_ids = job_db.list_failed_job_ids
+    real_rows = job_db.list_failed_node_runs
+
+    def spy_ids(workspace_id, *, category, limit):
+        found = real_ids(workspace_id, category=category, limit=limit)
+        id_queries.append((limit, len(found)))
+        return found
+
+    def spy_rows(*args, **kwargs):
+        row_queries.append(kwargs.get("job_ids"))
+        return real_rows(*args, **kwargs)
+
+    monkeypatch.setattr(job_db, "list_failed_job_ids", spy_ids)
+    monkeypatch.setattr(job_db, "list_failed_node_runs", spy_rows)
 
     response = client.post(
         f"/api/workspaces/{ws_id}/jobs/rerun-by-failure", json={"category": "business"}
     )
 
     _assert_too_large(response)
+    # The DB query is LIMITed to cap + 1 distinct jobs (3 match, 2 returned)
+    # and no failed-run rows are materialized once the cap is exceeded.
+    assert id_queries == [(2, 2)]
+    assert row_queries == []
+    assert [job_db.get_job(job_id)["status"] for job_id in job_ids] == ["failed"] * 3
+
+
+def test_rerun_by_failure_unrestricted_within_limit_scopes_rows_to_capped_ids(client, monkeypatch):
+    monkeypatch.setattr(job_selection_resolver, "MAX_BATCH_JOBS", 2)
+    ws_id = _create_workspace(client, "bounds-by-failure-ok-ws")
+    job_ids = _create_jobs(client, ws_id, ["S1", "S2"])
+    for job_id in job_ids:
+        _fail_job_node(client, job_id, "review_script")
     job_db = client.app.state.job_db
-    assert [job_db.get_job(job_id)["status"] for job_id in job_ids] == ["failed", "failed"]
+    row_scopes: list[object] = []
+    real_rows = job_db.list_failed_node_runs
+
+    def spy_rows(*args, **kwargs):
+        row_scopes.append(sorted(kwargs.get("job_ids") or []))
+        return real_rows(*args, **kwargs)
+
+    monkeypatch.setattr(job_db, "list_failed_node_runs", spy_rows)
+
+    response = client.post(
+        f"/api/workspaces/{ws_id}/jobs/rerun-by-failure", json={"category": "business"}
+    )
+
+    assert response.status_code == 200
+    assert sorted(r["job_id"] for r in response.json()["results"]) == sorted(job_ids)
+    assert row_scopes == [sorted(job_ids)]
