@@ -451,7 +451,7 @@
           return serializeBlockChildren(doc.body)
         }
 
-        // ---- 题干高亮（对齐宿主 lib/questionHighlight 的匹配语义） ----
+        // ---- 题干高亮（唯一实现；宿主侧 lib/questionHighlight 已随 #729 删除） ----
         function findLatexRanges(text) {
           var ranges = []
           var pattern =
@@ -1223,7 +1223,7 @@
                 keyInfo: gateVisible(detail, GATES.keyInfo),
                 possibleErrors: gateVisible(detail, GATES.possibleErrors),
               }
-              // 评审报告只在评审节点到达终态后拉取（镜像 useJobReviewReports 的 gating）。
+              // 评审报告只在评审节点到达终态后拉取（gating 唯一实现，原宿主 hook 已随 #729 删除）。
               var keyInfoReviewPromise =
                 nodeState(detail, REVIEW_GATES.keyInfo) &&
                 TERMINAL[nodeState(detail, REVIEW_GATES.keyInfo)]
