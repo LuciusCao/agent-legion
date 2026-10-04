@@ -405,6 +405,24 @@ if [ -n "$worker_version_cmp" ]; then
     token_embedded=yes
   fi
 fi
+# 版本够但暴露面非回环（.env 的发布地址或控制台地址带非回环主机）时
+# service 不内嵌 token（#923），提示改走手动取 token 文案。
+console_url_final="$(sed -n 's/^AGENT_WORKER_CONSOLE_URL=//p' ./.env 2>/dev/null | tail -1)"
+console_host_final="${console_url_final#*://}"
+console_host_final="${console_host_final%%/*}"
+case "$console_host_final" in
+  \[*) console_host_final="${console_host_final%%]*}]" ;;
+  *) console_host_final="${console_host_final%%:*}" ;;
+esac
+is_loopback_host() {
+  case "$1" in
+    ''|localhost|127.*|'[::1]'|::1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+if [ "$token_embedded" = "yes" ] && { ! is_loopback_host "$ui_host_final" || ! is_loopback_host "$console_host_final"; }; then
+  token_embedded=exposed
+fi
 
 print_token_help() {
   # $1 = embedded|manual：token 获取指引的两种文案（命令相同，说明随版本）
@@ -412,6 +430,9 @@ print_token_help() {
     echo "     默认 loopback 发布（${ui_host_final}）下控制 token 已内嵌页面（worker 0.7.16 起），"
     echo "     打开即用，无需手动输入；若 .env 把 AGENT_WORKER_UI_BIND 改为非回环"
     echo "     地址（页面不再内嵌 token），手动取一次："
+  elif [ "$1" = "exposed" ]; then
+    echo "     .env 中的发布地址（${ui_host_final}）或控制台地址非回环：页面不内嵌"
+    echo "     控制 token，手动取一次："
   else
     echo "     worker 0.7.16 起默认 loopback 发布会自动内嵌控制 token；当前安装的"
     echo "     ${WORKER_VERSION} 页面仍需手动输入 token，取一次："
@@ -422,6 +443,8 @@ print_token_help() {
 
 if [ "$token_embedded" = "yes" ]; then
   token_mode="embedded"
+elif [ "$token_embedded" = "exposed" ]; then
+  token_mode="exposed"
 else
   token_mode="manual"
 fi

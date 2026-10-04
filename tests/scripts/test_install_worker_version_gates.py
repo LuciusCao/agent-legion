@@ -65,3 +65,6 @@ def test_success_hint_carries_both_branches() -> None:
     assert "已内嵌页面" in source, "install-worker.sh 缺 0.7.16+ 的「token 已内嵌」文案分支"
     assert "仍需手动输入 token" in source, "install-worker.sh 缺旧版本的「仍需手动输入」文案分支"
     assert "0.7.16" in source, "install-worker.sh 缺内嵌能力的版本说明（用户无法得知门槛）"
+    # 版本够但发布地址 / 控制台地址非回环时 service 不内嵌（#923），提示走手动文案
+    assert "token_embedded=exposed" in source, "install-worker.sh 缺非回环暴露面的手动文案分支"
+    assert "AGENT_WORKER_CONSOLE_URL" in source, "install-worker.sh 未按控制台地址判定内嵌"

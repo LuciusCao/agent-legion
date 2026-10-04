@@ -42,7 +42,14 @@ def normalize_host(value: str) -> str:
     try:
         return ipaddress.ip_address(host).compressed
     except ValueError:
-        return host
+        pass
+    if not host.isascii():
+        # 浏览器发送的 Host 是 IDNA ASCII 形态，Unicode 主机名按同一形态入白名单
+        try:
+            return host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return host
+    return host
 
 
 def _is_wildcard(host: str) -> bool:

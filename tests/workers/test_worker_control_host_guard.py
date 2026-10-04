@@ -186,3 +186,9 @@ def test_token_not_embedded_when_allowlist_has_non_loopback_host(tmp_path: Path)
         proxied_body = client.get("/", headers={"host": "worker.example"}).text
     assert store.control_token() not in loopback_body
     assert store.control_token() not in proxied_body
+
+
+def test_unicode_console_host_matches_idna_host_header() -> None:
+    hosts = control_plane_allowed_hosts("127.0.0.1", None, "http://例子.测试:8787")
+    assert hosts is not None
+    assert host_header_name("xn--fsqu00a.xn--0zwm56d:8787") in hosts
