@@ -8,7 +8,21 @@ from fastapi.responses import StreamingResponse
 
 from server.app.events.bus import _EVICTED, EventBus, workspace_channel
 
-HEARTBEAT_SECONDS = 30.0
+HEARTBEAT_SECONDS = 15.0
+
+
+def heartbeat_frame() -> str:
+    """#914/#885: the keep-alive is a named ``heartbeat`` event carrying data,
+    not an SSE comment — EventSource never hands comment lines to JS, so the
+    browser could not tell a live-but-quiet stream from a silently hung one.
+    The payload advertises the interval, so the frontend watchdog derives its
+    stall timeout from this single constant instead of a parallel literal.
+
+    Backward compatible: EventSource only dispatches named events to listeners
+    registered for that type (``onmessage`` sees unnamed ``message`` events
+    only), and line-based clients see a ``data:`` object without ``type``."""
+    interval_ms = int(HEARTBEAT_SECONDS * 1000)
+    return f"event: heartbeat\ndata: {json.dumps({'interval_ms': interval_ms})}\n\n"
 
 
 class JobEventManager:
@@ -33,9 +47,15 @@ class JobEventManager:
             # the SSE connection and browsers fire onopen without waiting for the
             # first real event or heartbeat timeout.
             yield ":ok\n\n"
+            # #914: one heartbeat up front arms the client watchdog at once,
+            # so a stream that hangs before the first periodic beat is caught.
+            yield heartbeat_frame()
             loop = asyncio.get_running_loop()
             # Heartbeat clock runs from the last frame actually sent, so a
-            # stream of filtered-out events cannot starve the keep-alive.
+            # stream of filtered-out events cannot starve the keep-alive. The
+            # heartbeat is yielded here, never routed through the bus queue,
+            # so ``payload_filter`` (#881, drops unknown payloads fail-closed)
+            # cannot swallow it on restricted connections.
             last_sent = loop.time()
             try:
                 while True:
@@ -43,7 +63,7 @@ class JobEventManager:
                     try:
                         data = await asyncio.wait_for(queue.get(), timeout=remaining)
                     except TimeoutError:
-                        yield ":heartbeat\n\n"
+                        yield heartbeat_frame()
                         last_sent = loop.time()
                         continue
                     if data is _EVICTED:
