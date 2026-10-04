@@ -12,9 +12,14 @@ machine-to-machine 凭据：绑定且仅绑定一个 workspace，权限是 edito
 端到端脚本（curl 与 Python，签发 → 提交 → 轮询 → 下载）与产物读取语义见
 [remote-execution-runbook.md](remote-execution-runbook.md) §9。
 
+控制台的「外部对接」section（#870）是本文的镜像：接入参数（workspace_id、
+API base、当前生效的限流）、下文「权限面」表的端点清单与最小 curl / Python
+示例。镜像由 `tests/routes/test_api_access_card_contract.py` 与本文、后端
+api-scope 准入面对账，改权限面表须同步 UI 端点清单。
+
 ## 最小示例
 
-1. **签发**（管理员在控制台：workspace 设置 → Agent 与 Worker → 签发
+1. **签发**（管理员在控制台：workspace 设置 → 外部对接 → 签发
    API Token；或直接调管理 API，201）。明文 token 只显示一次，立即保存：
 
    ```bash

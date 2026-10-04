@@ -3940,6 +3940,13 @@ export interface components {
       /** Agents */
       agents: components['schemas']['AgentStatusResponse'][]
     }
+    /** ApiTokenRateLimit */
+    ApiTokenRateLimit: {
+      /** Burst */
+      burst: number
+      /** Requests Per Minute */
+      requests_per_minute: number
+    }
     /** ApprovalDecisionCreateRequest */
     ApprovalDecisionCreateRequest: {
       /**
@@ -8143,6 +8150,7 @@ export interface components {
     }
     /** WorkspaceApiTokensResponse */
     WorkspaceApiTokensResponse: {
+      rate_limit: components['schemas']['ApiTokenRateLimit']
       /** Tokens */
       tokens: components['schemas']['WorkspaceApiTokenSummary'][]
     }

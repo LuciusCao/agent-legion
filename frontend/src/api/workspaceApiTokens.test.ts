@@ -24,12 +24,13 @@ function mockFetchJson(response: unknown) {
 
 describe('workspace api tokens api', () => {
   it('lists the workspace api tokens on the workspace-scoped path', async () => {
-    const fetchMock = mockFetchJson({ tokens: [] })
+    const rateLimit = { requests_per_minute: 60, burst: 20 }
+    const fetchMock = mockFetchJson({ tokens: [], rate_limit: rateLimit })
     global.fetch = fetchMock
 
-    const tokens = await listWorkspaceApiTokens('demo_video_workflow')
+    const overview = await listWorkspaceApiTokens('demo_video_workflow')
 
-    expect(tokens).toEqual([])
+    expect(overview).toEqual({ tokens: [], rate_limit: rateLimit })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces/demo_video_workflow/api-tokens',
       expect.objectContaining({ cache: 'no-store' })
