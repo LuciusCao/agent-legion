@@ -91,8 +91,18 @@ jobs:
           # The classifier itself is control plane: a diff touching it keeps
           # every lane on and never sources the (possibly broken) new rules,
           # so a classifier regression cannot skip the tests that pin it.
-          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null \
-            && ! git diff --name-only "$base" HEAD | grep -qx 'scripts/lane-paths.sh'; then
+          # The diff is read in full first (no early-closing `grep -q` pipe,
+          # whose SIGPIPE under pipefail would read as "not changed").
+          changed=""
+          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+            changed="$(git diff --name-only "$base" HEAD)"
+            case $'\n'"$changed"$'\n' in
+              *$'\n'scripts/lane-paths.sh$'\n'*) base="" ;;
+            esac
+          else
+            base=""
+          fi
+          if [ -n "$base" ]; then
             backend=false; frontend=false; rust=false; docker=false
             # Docs / velites-contract rules are shared with check-quick.sh
             # and .githooks/pre-push (#941): only docs/**, root *.md and
@@ -100,6 +110,9 @@ jobs:
             # are runtime inputs and run their directory's lanes.
             source scripts/lane-paths.sh
             while IFS= read -r f; do
+              if [ -z "$f" ]; then
+                continue
+              fi
               if lane_path_is_docs "$f"; then
                 continue
               fi
@@ -118,7 +131,7 @@ jobs:
                 Dockerfile|.dockerignore|pyproject.toml|uv.lock|worker/*|shared/*|deploy/*) backend=true; frontend=true; docker=true ;;
                 *) backend=true; frontend=true ;;
               esac
-            done < <(git diff --name-only "$base" HEAD)
+            done <<<"$changed"
           fi
           echo "backend=$backend" >> "$GITHUB_OUTPUT"
           echo "frontend=$frontend" >> "$GITHUB_OUTPUT"

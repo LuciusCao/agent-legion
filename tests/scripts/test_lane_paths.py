@@ -223,6 +223,59 @@ def test_ci_changes_job_runs_every_lane_when_classifier_changes(tmp_path: Path) 
     assert flags == {"backend": "true", "frontend": "true", "rust": "true", "docker": "true"}
 
 
+def test_ci_classifier_guard_survives_large_diffs(tmp_path: Path) -> None:
+    # Many paths after the classifier in diff order must not let an
+    # early-exiting matcher SIGPIPE the producer and read as "unchanged".
+    repo = tmp_path / "ci"
+    (repo / "scripts").mkdir(parents=True)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
+    base = _init_repo(repo)
+    (repo / "scripts" / "lane-paths.sh").write_text(BROKEN_CLASSIFIER, encoding="utf-8")
+    bulk = repo / "zz"
+    bulk.mkdir()
+    for i in range(20000):
+        (bulk / f"f{i:05d}.md").write_text("x\n", encoding="utf-8")
+    _git(["add", "-A"], cwd=repo)
+    _git(["commit", "-qm", "break classifier + bulk"], cwd=repo)
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(EVENT_NAME="pull_request", PR_BASE=base, GITHUB_OUTPUT=str(output))
+    subprocess.run(
+        ["bash", "-e", "-c", _ci_filter_script()],
+        cwd=repo,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    flags = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
+    assert set(flags.values()) == {"true"}
+
+
+def test_ci_changes_job_keeps_lanes_off_for_empty_diff(tmp_path: Path) -> None:
+    repo = tmp_path / "ci"
+    (repo / "scripts").mkdir(parents=True)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
+    base = _init_repo(repo)
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(EVENT_NAME="pull_request", PR_BASE=base, GITHUB_OUTPUT=str(output))
+    subprocess.run(
+        ["bash", "-e", "-c", _ci_filter_script()],
+        cwd=repo,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    flags = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
+    assert set(flags.values()) == {"false"}
+
+
 BROKEN_CLASSIFIER = "lane_path_is_docs() { return 0; }\nlane_path_feeds_backend() { return 1; }\n"
 
 
