@@ -175,3 +175,14 @@ def test_cross_site_mutation_rejected_with_valid_token(tmp_path: Path) -> None:
     assert same.status_code == 200
     assert cli.status_code == 200
     assert supervisor.restarts == 2
+
+
+def test_token_not_embedded_when_allowlist_has_non_loopback_host(tmp_path: Path) -> None:
+    """白名单含非回环主机名（如控制台地址）时页面不内嵌 token。"""
+    allowed = control_plane_allowed_hosts("127.0.0.1", None, "https://worker.example")
+    store, _sup, app = _app(tmp_path, embed_token=True, allowed_hosts=allowed)
+    with TestClient(app, base_url="http://127.0.0.1") as client:  # type: ignore[arg-type]
+        loopback_body = client.get("/").text
+        proxied_body = client.get("/", headers={"host": "worker.example"}).text
+    assert store.control_token() not in loopback_body
+    assert store.control_token() not in proxied_body

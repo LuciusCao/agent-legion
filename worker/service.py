@@ -71,8 +71,10 @@ def create_app(
     allowed_hosts: frozenset[str] | None = LOOPBACK_HOSTS,
 ) -> FastAPI:
     token = supervisor.store.control_token()
-    # #923：token 内嵌以 Host 头校验启用为前提（None = 通配暴露面，不校验）。
-    embed_token = embed_token and allowed_hosts is not None
+    # #923：token 内嵌以 Host 头校验启用（None = 通配暴露面，不校验）且白名单
+    # 只含回环为前提——白名单里任一非回环主机名（暴露面或控制台地址）都意味着
+    # 页面可经非本机入口打开，此时不内嵌。
+    embed_token = embed_token and allowed_hosts is not None and allowed_hosts <= LOOPBACK_HOSTS
 
     async def require_token(request: Request) -> None:
         header = request.headers.get("authorization", "")
