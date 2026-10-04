@@ -13,12 +13,21 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# Dot-prefixed subdirectory of the job dir: same filesystem as ``target`` (so
+# the swap stays atomic), yet never enumerated as an artifact — the root
+# listing takes files only, the deep scan prunes dot-prefixed subtrees and the
+# download whitelist rejects dot segments (job_artifact_names).
+STAGING_DIR_NAME = ".json-staging"
+
 
 def stage_json(target: Path, payload: dict[str, Any]) -> Path:
-    """Write ``payload`` to an fsynced temp file beside ``target`` (same
-    directory, so ``os.replace`` onto ``target`` is atomic); a failed write
-    leaves no temp file behind. The caller swaps or unlinks the result."""
-    descriptor, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+    """Write ``payload`` to an fsynced temp file in ``target``'s staging
+    subdirectory (same filesystem, so ``os.replace`` onto ``target`` is
+    atomic); a failed write leaves no temp file behind. The caller swaps or
+    unlinks the result."""
+    staging_dir = target.parent / STAGING_DIR_NAME
+    staging_dir.mkdir(exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=staging_dir, prefix=f"{target.name}.")
     staged = Path(temporary)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
