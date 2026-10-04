@@ -17,6 +17,7 @@ import pytest
 from server.app.auth.scoped_tokens import authenticate_scoped_token
 from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.studio_chat import resume as resume_module
+from server.app.studio_chat import session_settle as settle_module
 from server.app.studio_chat import spawn as spawn_module
 from tests.helpers import studio_chat_fixtures
 
@@ -110,3 +111,64 @@ def test_archive_between_resume_claim_and_registration_leaves_no_runtime(
     assert len(minted) == 1
     assert authenticate_scoped_token(job_db, minted[0]) is None
     assert _session_new_count(script_path) == spawned_before
+
+
+def test_unarchive_between_stamp_and_close_keeps_the_restored_session_live(
+    chat, job_db, monkeypatch
+) -> None:
+    """#924 review P1: an unarchive landing after the archive stamp but before
+    the close must win — the archive request abandons its close instead of
+    shutting down the session the unarchive just restored, and both answers
+    reflect the real (live, unarchived) state."""
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    minted = _capture_mints(monkeypatch)
+    session_id = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    runtime = service.runtime(session_id)
+    assert runtime is not None
+    original_close = settle_module.close_session
+    restored: list[dict] = []
+
+    def unarchive_then_close(*args, **kwargs):
+        if not restored:
+            restored.append(service.unarchive_session(session_id, workspace_id))
+        return original_close(*args, **kwargs)
+
+    monkeypatch.setattr(settle_module, "close_session", unarchive_then_close)
+    archived = service.archive_session(session_id, workspace_id)
+
+    assert restored and restored[0]["archived_at"] is None
+    assert restored[0]["status"] == "idle"
+    assert archived["archived_at"] is None
+    assert archived["status"] == "idle"
+    assert service.runtime(session_id) is runtime
+    assert authenticate_scoped_token(job_db, minted[0]) is not None
+    service.close_session(session_id, workspace_id)
+
+
+def test_archive_close_under_lock_rechecks_the_stamp(chat, job_db, monkeypatch) -> None:
+    """The stamp is re-validated inside close_session's critical section too:
+    an unarchive landing after the settle loop's pre-check (but before the
+    closed write) still prevents the close."""
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    session_id = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    original_close = settle_module.close_session
+
+    def close_with_late_unarchive(*args, still_wanted=None, **kwargs):
+        def late_unarchive_then_check(row):
+            # The unarchive commits just before the in-lock re-validation
+            # (in production it holds _runtimes_lock, so this is the latest
+            # point it can land); the check must re-read and see it.
+            job_db.set_studio_chat_session_archived(session_id, False)
+            return still_wanted(job_db.get_studio_chat_session(session_id))
+
+        return original_close(*args, still_wanted=late_unarchive_then_check, **kwargs)
+
+    monkeypatch.setattr(settle_module, "close_session", close_with_late_unarchive)
+    archived = service.archive_session(session_id, workspace_id)
+
+    assert archived["archived_at"] is None
+    assert archived["status"] == "idle"
+    assert service.runtime(session_id) is not None
+    service.close_session(session_id, workspace_id)

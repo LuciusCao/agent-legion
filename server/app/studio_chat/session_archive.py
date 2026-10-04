@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from server.app.studio_chat.session_close import close_until_settled
+from server.app.studio_chat.session_settle import close_until_settled
 
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
@@ -36,8 +36,24 @@ def archive_session(
     # The stamp is conditional; a concurrent archive that won it already
     # owns the close, but closing again is an idempotent no-op either way.
     service.db.set_studio_chat_session_archived(session_id, True)
-    close_until_settled(service, session_id, workspace_id, include_deleted=False)
+    stamped = service.db.get_studio_chat_session(session_id) or {}
+    stamp = stamped.get("archived_at")
+    if stamp is not None:
+        # #924 review P1: the close only proceeds while the row still carries
+        # this archive stamp. A concurrent unarchive clears it under the same
+        # _runtimes_lock the close writes under, so either the close lands
+        # first (unarchive then restores a closed row) or the close is
+        # abandoned — never a restored, live session closed afterwards.
+        close_until_settled(
+            service,
+            session_id,
+            workspace_id,
+            include_deleted=False,
+            still_wanted=lambda row: row is not None and row.get("archived_at") == stamp,
+        )
     service.store.publish_session(session_id)
+    # The real current state: closed + archived, or (an unarchive won) the
+    # restored row as it stands.
     return service.get_session(session_id, workspace_id)
 
 
@@ -45,6 +61,10 @@ def unarchive_session(
     service: StudioChatService, session_id: str, workspace_id: str
 ) -> dict[str, Any]:
     service.get_session(session_id, workspace_id)
-    if service.db.set_studio_chat_session_archived(session_id, False):
+    # Same lock as the archive close's re-validation (session_close): an
+    # archive mid-close either already wrote closed or sees the cleared stamp.
+    with service._runtimes_lock:
+        cleared = service.db.set_studio_chat_session_archived(session_id, False)
+    if cleared:
         service.store.publish_session(session_id)
     return service.get_session(session_id, workspace_id)

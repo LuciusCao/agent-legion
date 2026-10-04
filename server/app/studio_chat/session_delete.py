@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from server.app.services.job_errors import NotFoundError
-from server.app.studio_chat.session_close import close_until_settled
+from server.app.studio_chat.session_settle import close_until_settled
 
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
