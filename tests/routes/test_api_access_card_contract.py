@@ -322,14 +322,14 @@ def test_python_snippet_rejects_ambiguous_token_reconciliation() -> None:
     须翻完全部页收齐命中，多于一个即报错，绝不取第一个（第一个可能是另一份
     内容的 job）。文档同步写明 token 按内容版本唯一。"""
     body = SNIPPETS.read_text(encoding="utf-8").split("export function buildPythonExample", 1)[1]
-    loop = body[body.index("while not job_ids:") : body.index("if len(matches) > 1:")]
+    loop = body[body.index("while not job_ids:") : body.index("job_ids = job_ids or matches")]
     # 循环里只累积命中、不提前收敛：唯一出口是翻完（next_cursor 为 null）。
     assert "matches += [" in loop
     assert "job_ids =" not in loop
     assert "if cursor is None:\n        break" in loop
-    verdict = body[body.index("if len(matches) > 1:") :]
-    assert verdict.index("raise SystemExit(") < verdict.index("job_ids = job_ids or matches")
-    assert verdict.index("job_ids = job_ids or matches") < verdict.index("job_id = job_ids[0]")
+    verdict = body[body.index("job_ids = job_ids or matches") :]
+    assert verdict.index("if len(job_ids) != 1:") < verdict.index("raise SystemExit(")
+    assert verdict.index("raise SystemExit(") < verdict.index("job_id = job_ids[0]")
     assert "按内容版本唯一" in body
     doc = DOC.read_text(encoding="utf-8")
     assert "token 在 workspace 内须按内容版本唯一" in doc

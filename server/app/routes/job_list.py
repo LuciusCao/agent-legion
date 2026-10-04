@@ -3,13 +3,11 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import AfterValidator
 
 from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.jobs.queries.job_pagination import parse_job_cursor
 from server.app.routes.job_http import raise_job_http_error
-from server.app.routes.job_list_contracts import JobFacetsResponse, JobsPageResponse
+from server.app.routes.job_list_contracts import JobCursor, JobFacetsResponse, JobsPageResponse
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_list_queries import JobListQueryService
 
@@ -18,20 +16,9 @@ from server.app.services.job_list_queries import JobListQueryService
 # the clause and return an unfiltered page — None (absent) is the only "no
 # filter" spelling. search/cursor stay unconstrained: an empty search term or
 # cursor is an identity no-op (matches everything / first page), never a
-# silently-widened filter.
+# silently-widened filter (a non-empty cursor's format is validated by
+# JobCursor, #891).
 _NonEmptyFilter = Annotated[str | None, Query(min_length=1)]
-
-
-def _check_cursor(cursor: str | None) -> str | None:
-    if cursor:
-        parse_job_cursor(cursor)
-    return cursor
-
-
-# #891：cursor 解析失败（缺分隔符、时间戳非法等）在参数校验层 422（与 limit
-# 越界同一约定），带可读 detail——不再落到 SQL 抛未处理异常成 5xx，让按
-# 错误码表「5xx 退避重试」的调用方对永远失败的参数无限重试。空串仍是第一页。
-_JobCursor = Annotated[str | None, AfterValidator(_check_cursor)]
 
 
 def _job_list_filter(
@@ -79,7 +66,7 @@ def create_job_list_router(
         # #852：越界 422（与 /runs、/jobs 同一约定），不在函数体内静默钳制——
         # 调用方据返回条数判断是否翻完时，被改写的页大小会让它少读结果。
         limit: Annotated[int, Query(ge=1, le=500)] = 200,
-        cursor: _JobCursor = None,
+        cursor: JobCursor = None,
         status: _NonEmptyFilter = None,
         search: str | None = None,
         workflow_version: int | None = None,
