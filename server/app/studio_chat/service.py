@@ -154,6 +154,7 @@ class StudioChatService:
             agent,
             user_id,
             workspace_id,
+            store=self.store,
         )
         self.store.publish_session(session_id)
         return self.get_session(session_id)

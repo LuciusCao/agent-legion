@@ -4513,6 +4513,8 @@ export interface components {
     }
     /** HealthResponse */
     HealthResponse: {
+      /** Instance Proof */
+      instance_proof?: string | null
       /** Ok */
       ok: boolean
       storage?: components['schemas']['StorageStatus'] | null
@@ -10069,7 +10071,9 @@ export interface operations {
   }
   health_api_health_get: {
     parameters: {
-      query?: never
+      query?: {
+        instance_probe?: string | null
+      }
       header?: never
       path?: never
       cookie?: never
@@ -10083,6 +10087,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HealthResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
