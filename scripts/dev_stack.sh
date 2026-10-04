@@ -47,32 +47,13 @@ start_component() {
     fi
 }
 
-# 从根 .env 读一个键的值（进程环境优先；去 export 前缀、首尾空白与一层
-# 配对引号，与 dotenv 语义对齐）。compose 插值只读 deploy/.env，dev 形态
-# 只有根 .env 一份，起本地对象存储容器前靠它显式 export 凭据，避免容器
-# root 凭据与后端读取的 .env 不一致。
-# 注意：这是仓库里第二份 shell dotenv 解析（另一份在
-# scripts/local-s3-decide.sh 的 lookup/_dotenv_value，语义更完整）；本函数
-# 语义刻意更窄——只取第一个匹配键、空值返回 1，仅够读扁平 KEY=VALUE
-# （S3 十六进制凭据/绑定地址）。需要更完整语义时不要各自扩展，应合并实现。
-read_env_value() {
-    local key="$1" line value
-    value="$(printenv "$key" 2>/dev/null || true)"
-    if [[ -n "$value" ]]; then
-        printf '%s' "$value"
-        return 0
-    fi
-    line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" .env 2>/dev/null | head -n 1 || true)"
-    [[ -n "$line" ]] || return 1
-    value="${line#*=}"
-    value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-    if [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
-        value="${value:1:${#value}-2}"
-    elif [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
-        value="${value:1:${#value}-2}"
-    fi
-    printf '%s' "$value"
-}
+# 从根 .env 读一个键的值（进程环境优先，空值按未配置）。compose 插值只读
+# deploy/.env，dev 形态只有根 .env 一份，起本地对象存储容器前靠它显式
+# export 凭据，避免容器 root 凭据与后端读取的 .env 不一致。解析语义的单一
+# 实现在 scripts/dotenv-lib.sh（#486 收敛，与 local-s3-decide / native-prod-*
+# 共用），不要在这里再展开一份。
+# shellcheck source=dotenv-lib.sh
+source scripts/dotenv-lib.sh
 
 # 本地对象存储（材料存储后端）：决策逻辑与 prod 入口共用
 # scripts/local-s3-decide.sh（AGENT_LEGION_LOCAL_S3=auto|always|never，
@@ -121,8 +102,8 @@ ensure_local_object_store() {
         echo "${service} 容器已在运行（可能与 prod/其他 worktree 共享），跳过 recreate，直接确认 bucket"
     else
         local access_key secret_key
-        access_key="$(read_env_value AGENT_LEGION_S3_ACCESS_KEY || true)"
-        secret_key="$(read_env_value AGENT_LEGION_S3_SECRET_KEY || true)"
+        access_key="$(dotenv_lookup AGENT_LEGION_S3_ACCESS_KEY .env)"
+        secret_key="$(dotenv_lookup AGENT_LEGION_S3_SECRET_KEY .env)"
         if [[ -z "$access_key" || -z "$secret_key" ]]; then
             # 走到这里说明是「完全未配置 S3 → start」的零配置路径（已表达本地
             # 存储意图的缺凭据场景已被 local-s3-decide.sh rc 3 拦在上方）。
@@ -258,7 +239,7 @@ cmd_status() {
         local compose_files=(-f deploy/compose.host.yaml)
         [[ -f deploy/compose.local.yaml ]] && compose_files+=(-f deploy/compose.local.yaml)
         local bind configured running label url state
-        bind="$(read_env_value AGENT_LEGION_S3_BIND || true)"
+        bind="$(dotenv_lookup AGENT_LEGION_S3_BIND .env)"
         bind="${bind:-127.0.0.1}"
         configured="$(scripts/local-s3-decide.sh --service-name .env 2>/dev/null || echo seaweedfs)"
         case "$configured" in

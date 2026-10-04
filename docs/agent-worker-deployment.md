@@ -69,7 +69,15 @@ export VELITES_PROVIDER_ENV_FILE="$PWD/deploy/velites-provider.env"
 export AGENT_LEGION_HOST_BIND=192.0.2.1
 ```
 
-原生形态（`make prod-up` 不带 `docker` 参数）没有 compose 端口发布层，对应开关是 `NATIVE_BACKEND_BIND` / `NATIVE_WORKER_BIND`（默认 `127.0.0.1`），设为部署机局域网/overlay 网络 IP 即对其他设备暴露 Host API 与 Worker 控制台。对象存储的端口发布仍由 compose 托管，`AGENT_LEGION_S3_BIND` 对两种形态同样生效：绑定为具体 IP 时 `127.0.0.1` 映射消失，原生后端进程访问 S3 的 `AGENT_LEGION_S3_ENDPOINT`（根 `.env`，默认 `http://127.0.0.1:8333`）需同步指向该地址，或把 `AGENT_LEGION_S3_BIND` 设为 `0.0.0.0` 保住 loopback；远程客户端的 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 一并指向可达地址（完整说明见 [materials-storage-deployment.md](materials-storage-deployment.md)）。
+原生形态（`make prod-up` 不带 `docker` 参数）没有 compose 端口发布层，对应开关是 `NATIVE_BACKEND_BIND` / `NATIVE_WORKER_BIND`（默认 `127.0.0.1`），设为部署机局域网/overlay 网络 IP 即对其他设备暴露 Host API 与 Worker 控制台；端口对应 `NATIVE_BACKEND_PORT` / `NATIVE_WORKER_PORT`（默认 `8000` / `8787`）。这四个变量由 `native-prod-up.sh` / `native-prod-down.sh` 按「进程环境 > 根 `.env`」两级取值（空值按未配置回落默认）：**常驻配置写进根 `.env`**，换 shell 会话、重启或经 launchd/cron 调起都不会丢失、静默退回 loopback；`export` 只作临时覆盖，始终优先于 `.env`。
+
+```bash
+# 根 .env（prod worktree）
+NATIVE_BACKEND_BIND=192.0.2.1
+NATIVE_WORKER_BIND=192.0.2.1
+```
+
+把 bind 从具体地址切到通配（如 `127.0.0.1` → `0.0.0.0`）时，先用旧值 `make prod-down` 停掉旧实例再 `make prod-up`：通配监听能与同端口的具体地址监听并存，`native-prod-up.sh` 检测到通配 bind 的端口上已有其他监听即拒绝启动并列出冲突监听，避免起出连同一个库的双实例（违反单副本约束，症状见 [architecture/deployment.md](architecture/deployment.md) 单副本约束节）。对象存储的端口发布仍由 compose 托管，`AGENT_LEGION_S3_BIND` 对两种形态同样生效：绑定为具体 IP 时 `127.0.0.1` 映射消失，原生后端进程访问 S3 的 `AGENT_LEGION_S3_ENDPOINT`（根 `.env`，默认 `http://127.0.0.1:8333`）需同步指向该地址，或把 `AGENT_LEGION_S3_BIND` 设为 `0.0.0.0` 保住 loopback；远程客户端的 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 一并指向可达地址（完整说明见 [materials-storage-deployment.md](materials-storage-deployment.md)）。
 
 绑定具体地址后还有两处本地接入要跟着调整（`native-prod-up.sh` 检测到失配会打警告，但不代改——Worker 配置一律走控制台/API，见 §5）：部署机本地 Worker 状态副本的 `host_url` 默认指向 loopback，需在 Worker 控制台改为 `http://<绑定地址>:8000`，否则本地 Worker 会静默退避重试注册、永不成功；本机浏览器访问 Worker 控制台的 `http://127.0.0.1:8787` 同样失效，改用绑定地址。远程 Worker 侧没有额外的网络配置项：register/claim/heartbeat/result 全部走 `host_url` 一个地址，材料、bundle 拉取与产物回传走 Host 按 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 签发的 presigned URL——Worker 控制台只有 Host 地址一项是协议完备的，S3 可达性由 Host 侧配置决定。
 
