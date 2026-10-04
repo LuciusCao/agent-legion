@@ -10,6 +10,7 @@
 
 mod atomic_write;
 pub mod bash;
+mod bash_proc;
 pub mod catalog;
 pub mod command_guard;
 pub(super) mod command_paths;

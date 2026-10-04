@@ -1,9 +1,12 @@
-//! `bash` tool: run a command in the working directory with inherited env.
+//! `bash` tool: run a command in the working directory with an allowlisted
+//! environment (#922 R-4; lifecycle helpers live in `bash_proc`).
 //!
 //! The child is put in its own process group; on timeout OR cancellation the
 //! whole group receives SIGTERM, then SIGKILL after a grace period (Pi
-//! semantics, design §8). The model-supplied `timeout` is clamped to
-//! [1s, 1h] (default 120s) so one call cannot outrun the run's wall-clock
+//! semantics, design §8). After the child exits, leftovers in its process
+//! group are signalled and the output drain is bounded (#942, see
+//! `bash_proc::start_drain_watchdog`). The model-supplied `timeout` is
+//! clamped to [1s, 1h] (default 120s) so one call cannot outrun the run's wall-clock
 //! budget by orders of magnitude. stdout+stderr volume is reported as
 //! `output_bytes` (full stream measurement — kept head PLUS dropped tail).
 //! Output is truncated from the tail to 2000 lines or 50KB, whichever is
@@ -62,8 +65,9 @@
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use tokio::io::AsyncReadExt;
+use tokio_util::sync::CancellationToken;
 
+use super::bash_proc::{self, read_with_first_byte};
 use super::command_guard;
 use super::truncate::{self, TruncatedBy};
 use super::{elapsed_ms, ToolContext, ToolError, ToolOutput};
@@ -77,44 +81,12 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 /// purpose: the tool layer does not see the agent loop's deadline, and one
 /// hour already dwarfs any sane command lifetime.
 const MAX_TIMEOUT_SECS: u64 = 3600;
-const TERM_GRACE: Duration = Duration::from_secs(3);
 
 pub async fn run(args: &Value, ctx: &ToolContext) -> ToolOutput {
     match run_inner(args, ctx).await {
         Ok(output) => output,
         Err(err) => ToolOutput::error(err.to_string()),
     }
-}
-
-#[cfg(unix)]
-fn kill_process_group(pid: u32, signal: libc::c_int) {
-    // The child was spawned with process_group(0), so pgid == pid.
-    unsafe {
-        libc::killpg(pid as libc::pid_t, signal);
-    }
-}
-
-/// TERM → grace → KILL the child's process group, then reap it.
-async fn terminate(child: &mut tokio::process::Child, pid: Option<u32>) {
-    #[cfg(unix)]
-    {
-        if let Some(pid) = pid {
-            kill_process_group(pid, libc::SIGTERM);
-        }
-        if tokio::time::timeout(TERM_GRACE, child.wait())
-            .await
-            .is_err()
-        {
-            if let Some(pid) = pid {
-                kill_process_group(pid, libc::SIGKILL);
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = child.start_kill();
-    }
-    let _ = child.wait().await;
 }
 
 async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
@@ -146,9 +118,12 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     cmd.current_dir(&ctx.cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        // Env is inherited by default; kill_on_drop is a safety net for
-        // harness shutdown, the terminate path below handles timeout and
+        // #922 R-4: only the allowlisted variables reach the model-driven
+        // shell (no provider credentials). kill_on_drop is a safety net for
+        // harness shutdown; the terminate path below handles timeout and
         // cancellation.
+        .env_clear()
+        .envs(bash_proc::inherited_env())
         .kill_on_drop(true);
     #[cfg(unix)]
     cmd.process_group(0);
@@ -175,17 +150,19 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     let boundary_fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     // #637: 每条 pipe 各自带上限读取（上限按流计，stdout/stderr 互不
     // 占用对方的额度）。
-    let capture_cap = usize::try_from(truncate::MAX_CAPTURE_BYTES).unwrap_or(usize::MAX);
+    let cap = usize::try_from(truncate::MAX_CAPTURE_BYTES).unwrap_or(usize::MAX);
+    // #942: fired by the drain watchdog when leftovers keep the pipes open.
+    let stop_reading = CancellationToken::new();
     let stdout_task = tokio::spawn({
-        let boundary = boundary_fired.clone();
+        let (boundary, stop) = (boundary_fired.clone(), stop_reading.clone());
         async move {
-            read_with_first_byte(&mut stdout_pipe, output_started, boundary, capture_cap).await
+            read_with_first_byte(&mut stdout_pipe, output_started, boundary, cap, stop).await
         }
     });
     let stderr_task = tokio::spawn({
-        let boundary = boundary_fired.clone();
+        let (boundary, stop) = (boundary_fired.clone(), stop_reading.clone());
         async move {
-            read_with_first_byte(&mut stderr_pipe, output_started, boundary, capture_cap).await
+            read_with_first_byte(&mut stderr_pipe, output_started, boundary, cap, stop).await
         }
     });
 
@@ -221,16 +198,19 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         boundary_fired.store(true, std::sync::atomic::Ordering::Release);
         // Phase 4 (#469): termination — TERM → grace → KILL → reaped.
         let reap_started = Instant::now();
-        terminate(&mut child, pid).await;
+        bash_proc::terminate(&mut child, pid).await;
         reap_ms = Some(elapsed_ms(reap_started));
     }
 
-    let stdout = stdout_task
-        .await
-        .map_err(|err| ToolError::Io(std::io::Error::other(err)))??;
-    let stderr = stderr_task
-        .await
-        .map_err(|err| ToolError::Io(std::io::Error::other(err)))??;
+    // #942: the command is gone; bound the drain of whatever still holds
+    // the pipes (background leftovers) instead of waiting for EOF forever.
+    let watchdog = bash_proc::start_drain_watchdog(pid, stop_reading.clone());
+    let (stdout, stderr) = (stdout_task.await, stderr_task.await);
+    watchdog.abort();
+    let join_error = |err: tokio::task::JoinError| ToolError::Io(std::io::Error::other(err));
+    let stdout = stdout.map_err(join_error)??;
+    let stderr = stderr.map_err(join_error)??;
+    let drain_cut = stop_reading.is_cancelled();
 
     // #637: output_bytes 统计口径不变——完整 stdout+stderr 字节数
     // （保留的头部 + 触顶后丢弃的尾部）。
@@ -399,6 +379,13 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         }
     }
 
+    if drain_cut {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str("[Background processes kept the output open after exit; they were killed.]");
+    }
+
     let mut is_error = false;
     if timed_out {
         is_error = true;
@@ -467,68 +454,6 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     })
 }
 
-/// 一条输出 pipe 的采集结果（#637 带上限读取）。
-struct PipeCapture {
-    /// 流头部，至多 `max_bytes` 字节；触顶后的字节只计数、不保留。
-    head: Vec<u8>,
-    /// 完整流字节数（保留的头部 + 丢弃的尾部）——`output_bytes` 的统计
-    /// 口径，触顶前后一致。
-    total_bytes: u64,
-    /// 是否触顶（`total_bytes > max_bytes`，即确有字节被丢弃）。
-    hit_cap: bool,
-    /// 首个非空 PRE-BOUNDARY 读的毫秒偏移（#469），语义与上限无关。
-    first_byte_ms: Option<u64>,
-}
-
-/// Read one output pipe to EOF, keeping at most `max_bytes` HEAD bytes in
-/// memory (#637) and recording the elapsed offset of the first non-empty
-/// PRE-BOUNDARY read (#469). `None` when the stream never produced a byte
-/// before the `boundary` flag fired (bytes after it are still collected
-/// into the head — output semantics are unchanged — but they cannot claim
-/// firstByteMs).
-///
-/// #637: past the cap the bytes are counted into `total_bytes` but dropped —
-/// the loop NEVER stops reading, because a pipe that is not drained to EOF
-/// backpressure-blocks the child's write side (a `cat hugefile` would hang
-/// instead of finishing). Error semantics are unchanged: the first error
-/// aborts the read and propagates.
-async fn read_with_first_byte<R: tokio::io::AsyncRead + Unpin>(
-    pipe: &mut R,
-    started: Instant,
-    boundary: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    max_bytes: usize,
-) -> std::io::Result<PipeCapture> {
-    let mut head = Vec::new();
-    let mut total_bytes: u64 = 0;
-    let mut first_byte_ms = None;
-    let mut chunk = [0u8; 8192];
-    loop {
-        let n = pipe.read(&mut chunk).await?;
-        if n == 0 {
-            break;
-        }
-        // A byte that lands after the exit/timeout boundary fired is
-        // output-only (the child is already gone; e.g. a TERM handler's
-        // parting print) — it must not retroactively own the prelude.
-        if first_byte_ms.is_none() && !boundary.load(std::sync::atomic::Ordering::Acquire) {
-            first_byte_ms = Some(elapsed_ms(started));
-        }
-        // #637: 完整计数；头部保留到上限为止，之后的字节丢弃。读取
-        // 循环本身不受上限影响（见函数文档）。
-        total_bytes += n as u64;
-        if head.len() < max_bytes {
-            let keep = (max_bytes - head.len()).min(n);
-            head.extend_from_slice(&chunk[..keep]);
-        }
-    }
-    Ok(PipeCapture {
-        hit_cap: total_bytes > max_bytes as u64,
-        head,
-        total_bytes,
-        first_byte_ms,
-    })
-}
-
 /// The model-supplied `timeout` argument, clamped into
 /// [1, MAX_TIMEOUT_SECS] (default [`DEFAULT_TIMEOUT_SECS`]).
 fn requested_timeout_secs(args: &Value) -> u64 {
@@ -583,78 +508,5 @@ mod tests {
             requested_timeout_secs(&serde_json::json!({"timeout": u64::MAX})),
             MAX_TIMEOUT_SECS
         );
-    }
-
-    fn fresh_boundary() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))
-    }
-
-    #[tokio::test]
-    async fn read_with_first_byte_keeps_head_and_counts_past_the_cap() {
-        // #637: 100 字节的流、上限 30——头部保留 30 字节，完整计数仍是
-        // 100（丢弃的字节只计数不保留）。
-        let data = vec![b'a'; 100];
-        let mut pipe: &[u8] = &data;
-        let capture = read_with_first_byte(&mut pipe, Instant::now(), fresh_boundary(), 30)
-            .await
-            .unwrap();
-        assert_eq!(capture.head, vec![b'a'; 30]);
-        assert_eq!(capture.total_bytes, 100);
-        assert!(capture.hit_cap);
-        assert!(capture.first_byte_ms.is_some());
-    }
-
-    #[tokio::test]
-    async fn read_with_first_byte_exact_cap_is_not_capped() {
-        // 恰好等于上限：一个字节都没有丢，不算触顶。
-        let data = vec![b'b'; 30];
-        let mut pipe: &[u8] = &data;
-        let capture = read_with_first_byte(&mut pipe, Instant::now(), fresh_boundary(), 30)
-            .await
-            .unwrap();
-        assert_eq!(capture.head, data);
-        assert_eq!(capture.total_bytes, 30);
-        assert!(!capture.hit_cap);
-    }
-
-    #[tokio::test]
-    async fn read_with_first_byte_under_cap_collects_everything() {
-        let data = b"hello".to_vec();
-        let mut pipe: &[u8] = &data;
-        let capture = read_with_first_byte(&mut pipe, Instant::now(), fresh_boundary(), 50)
-            .await
-            .unwrap();
-        assert_eq!(capture.head, data);
-        assert_eq!(capture.total_bytes, 5);
-        assert!(!capture.hit_cap);
-    }
-
-    #[tokio::test]
-    async fn read_with_first_byte_cap_across_chunk_boundary() {
-        // 跨 chunk 触顶：最后一 chunk 只保留到上限的前缀，计数完整。
-        let data = vec![b'c'; 8192 + 10];
-        let mut pipe: &[u8] = &data;
-        let capture = read_with_first_byte(&mut pipe, Instant::now(), fresh_boundary(), 8192)
-            .await
-            .unwrap();
-        assert_eq!(capture.head, vec![b'c'; 8192]);
-        assert_eq!(capture.total_bytes, 8192 + 10);
-        assert!(capture.hit_cap);
-    }
-
-    #[tokio::test]
-    async fn read_with_first_byte_boundary_flag_clips_first_byte() {
-        // #469 语义不因上限改变：boundary 已触发后到达的首字节不认领
-        // firstByteMs（但仍被计数/保留）。
-        let data = b"late".to_vec();
-        let mut pipe: &[u8] = &data;
-        let boundary = fresh_boundary();
-        boundary.store(true, std::sync::atomic::Ordering::Release);
-        let capture = read_with_first_byte(&mut pipe, Instant::now(), boundary, 50)
-            .await
-            .unwrap();
-        assert_eq!(capture.head, data);
-        assert_eq!(capture.total_bytes, 4);
-        assert!(capture.first_byte_ms.is_none());
     }
 }
