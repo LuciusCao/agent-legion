@@ -31,7 +31,7 @@ from server.app.services.job_rerun.preview_checks import (
     resolve_rerun_node_from_nodes,
 )
 from server.app.services.job_rerun.single import commit_rerun_result
-from server.app.services.job_selection_resolver import resolve_batch_selection
+from server.app.services.job_selection_resolver import ensure_batch_size, resolve_batch_selection
 from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
@@ -173,6 +173,9 @@ def rerun_by_failure_category(
     ids = resolve_batch_selection(service.job_db, workspace_id, job_ids, job_filter, exclude_ids)
     requested = [value.strip() for value in ids if value.strip()]
     grouped = failed_nodes_by_job(service, workspace_id, category, requested, workflow_key)
+    # An empty selection means "every job with a matching failure": cap the
+    # matched set the same way as filter selections (#712 / #917 B-2).
+    ensure_batch_size(len(grouped))
 
     pre = prefetch_rerun_state(service, list(grouped))
     # Per target: either a ready error result or the target key (to commit).

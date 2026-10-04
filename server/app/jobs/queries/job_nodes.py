@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from server.app.jobs.queries.job_bulk_sql import id_chunks
 from server.app.jobs.queries.job_node_runs import JobNodeRunQueriesMixin
 from server.app.jobs.storage_layout import job_storage_dir
 from server.app.storage_paths import make_data_relative
@@ -146,12 +147,14 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
         return str(row["workspace_id"]) if row else None
 
     def list_jobs_by_ids(self, workspace_id: str, job_ids: Sequence[str]) -> list[dict[str, Any]]:
-        if not job_ids:
-            return []
-        params = [workspace_id, *(str(job_id) for job_id in job_ids)]
-        sql = f"select * from jobs where workspace_id=%s and id in ({','.join('%s' for _ in job_ids)})"
-        with self._connect_read() as conn:
-            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+        rows: list[dict[str, Any]] = []
+        # #712: chunked like fetch_jobs_by_ids — batch commit phases pass
+        # whole selections here.
+        for chunk in id_chunks(job_ids):
+            sql = f"select * from jobs where workspace_id=%s and id in ({','.join('%s' for _ in chunk)})"
+            with self._connect_read() as conn:
+                rows.extend(dict(row) for row in conn.execute(sql, [workspace_id, *chunk]))
+        return rows
 
     def update_job_status(self, job_id: str, status: str, error_message: str = "") -> None:
         with self.connect() as conn:
