@@ -39,8 +39,8 @@ from scripts.architecture.import_cycles import check_import_cycles
 from scripts.architecture.route_contracts import has_protocol_response_annotation
 from scripts.architecture.script_permissions import check_script_permissions
 from scripts.architecture.service_boundaries import check_service_import_boundaries
-from scripts.architecture.shell_var_boundary import check_shell_var_boundary
 from scripts.architecture.service_data_boundary import check_service_data_boundary
+from scripts.architecture.shell_var_boundary import check_shell_var_boundary
 from scripts.architecture.sql_placeholders import check_sql_placeholders
 from scripts.architecture.test_placement import check_test_placement
 from scripts.architecture.video_legacy import check_video_legacy
