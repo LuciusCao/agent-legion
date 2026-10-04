@@ -19,6 +19,7 @@ from server.app.executors.models import (
 )
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.workflow_worker.execution import submit_claim
+from server.app.workflow_worker.local_dispatch import decide_local_code_dispatch
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
@@ -41,9 +42,29 @@ def claim_shard_locally(
     snapshot: CapacitySnapshot,
     execution_generation: int = 0,
 ) -> bool:
-    """Lease and submit one shard on the local code pool; False = no capacity."""
+    """Lease and submit one shard on the local code pool.
+
+    False = not submitted: no capacity, or (#869) the node failed its
+    dispatch-time config / code resolution — the node is already failed then,
+    so the caller's loop stopping is the right outcome either way.
+    """
     workspace_id = workspace["id"]
     if not snapshot.has_capacity(workspace_id, node.key):
+        return False
+    workflow_key = str(job["workspace_id"])
+    # #869: the same decision entry as an ordinary local code dispatch —
+    # timeout decision + ``_config_resolution`` audit, the node's business
+    # config (parity with the remote shard manifest) and the published code.
+    decided = decide_local_code_dispatch(
+        worker,
+        workspace,
+        job,
+        node,
+        workflow_key,
+        log_path,
+        execution_generation=execution_generation,
+    )
+    if decided is None:
         return False
     claim = worker.leases.try_claim(
         LeaseClaimRequest(
@@ -51,7 +72,7 @@ def claim_shard_locally(
             global_capacity=worker.settings.executor_runtime.code_capacity,
             workspace_id=workspace_id,
             job_id=job["id"],
-            workflow_key=str(job["workspace_id"]),
+            workflow_key=workflow_key,
             node_key=node.key,
             capability=node.capability,
             local_node_limit=local_node_limit,
@@ -63,6 +84,8 @@ def claim_shard_locally(
             target_node_key=control_snapshot.get("target_node_key") if control_snapshot else None,
             allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
             shard_index=shard_index,
+            config_snapshot_json=decided.config_snapshot_json,
+            agent_definition_hash=decided.implementation_hash,
             execution_generation=execution_generation,
         )
     )
@@ -101,6 +124,8 @@ def claim_shard_locally(
             "shard_index": shard_index,
             "shard_input": shard_input,
         },
+        node_config=decided.node_config,
+        node_code=decided.node_code,
     )
     submit_claim(worker, CODE_EXECUTOR_ID, claim, context)
     return True

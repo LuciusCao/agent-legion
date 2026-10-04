@@ -278,3 +278,47 @@ def test_matching_old_frozen_value_keeps_nodes_inheritable():
     frozen = '{"a": {"k": "v1"}}'
 
     assert compute_inherit_reset_nodes(definition, frozen, definition, frozen) == set()
+
+
+def test_runtime_adjustable_classification_covers_reserved_keys():
+    """#858：保留执行键的可变性分类表是单一事实源——与 loader 的保留键全集
+    全等，目前只有 timeout_seconds 属运行时可调。"""
+    from server.app.services.runtime_reserved_config import (
+        RESERVED_KEY_MUTABILITY,
+        RUNTIME_ADJUSTABLE_RESERVED_KEYS,
+    )
+    from server.app.workflows.node_config_schema import RESERVED_EXECUTION_KEYS
+
+    assert set(RESERVED_KEY_MUTABILITY) == RESERVED_EXECUTION_KEYS
+    assert {"timeout_seconds"} == RUNTIME_ADJUSTABLE_RESERVED_KEYS
+
+
+def test_timeout_only_changes_do_not_seed_rerun():
+    """#858：节点 config 与冻结段（含 workspace 覆盖演进）只改 timeout → 全继承。"""
+    old = _definition({"a": _node("a", config={"timeout_seconds": 600})})
+    new = _definition({"a": _node("a", config={"timeout_seconds": 900})})
+
+    assert node_definition_hash(old.nodes["a"]) == node_definition_hash(new.nodes["a"])
+    reset = compute_inherit_reset_nodes(
+        old,
+        '{"a": {"timeout_seconds": 600, "sandbox_network": false, "k": "v"}}',
+        new,
+        '{"a": {"timeout_seconds": 2400, "sandbox_network": false, "k": "v"}}',
+    )
+    assert reset == set()
+
+
+def test_versioned_reserved_key_change_still_seeds_rerun():
+    """#858 配对：sandbox_network 随版本冻结，与 timeout 一起改照常重跑。"""
+    old = _definition({"a": _node("a", config={"timeout_seconds": 600})})
+    new = _definition({"a": _node("a", config={"timeout_seconds": 900, "sandbox_network": True})})
+
+    assert compute_inherit_reset_nodes(old, None, new, None) == {"a"}
+    same = _definition({"a": _node("a")})
+    reset = compute_inherit_reset_nodes(
+        same,
+        '{"a": {"timeout_seconds": 600, "sandbox_network": false}}',
+        same,
+        '{"a": {"timeout_seconds": 900, "sandbox_network": true}}',
+    )
+    assert reset == {"a"}

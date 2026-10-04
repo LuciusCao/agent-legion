@@ -21,6 +21,11 @@ wrapper。
    存量冻结值（intake 冻结，产物按它产出）；任何一侧的执行输入变化都
    触发重跑。workspace 层配置变化体现在新侧 freeze 里，与 job 存量冻结
    值的差异即「配置演进」，受影响节点重跑。
+3. 运行时可调保留键（``runtime_reserved_config.RUNTIME_ADJUSTABLE_RESERVED_KEYS``，
+   目前只有 ``timeout_seconds``，#858）在节点 ``config`` 与冻结 config 段
+   两侧比较前一律剔除：它每次执行现场判定（CONFIG-RUNTIME-TIMEOUT-001），
+   不影响产物，只改它不应触发重跑；``sandbox_network`` 等随版本冻结的
+   保留键照常参与比较。
 
 排除规则（issue 边界 + codex 四轮，一律不继承、永远重跑）：
 
@@ -66,6 +71,7 @@ from dataclasses import asdict
 from typing import Any
 
 from server.app.services.node_config_runtime import runtime_mutable_keys
+from server.app.services.runtime_reserved_config import without_runtime_adjustable
 from server.app.skills.config import LATEST_REF
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.schema import WorkflowEdge, WorkflowNode
@@ -87,6 +93,8 @@ def node_signature(node: WorkflowNode) -> dict[str, Any]:
     payload = asdict(node)
     for field in _DISPLAY_ONLY_FIELDS:
         payload.pop(field, None)
+    # #858：运行时可调保留键（timeout_seconds）不影响产物，不进定义哈希。
+    payload["config"] = without_runtime_adjustable(payload.get("config") or {})
     return payload
 
 
@@ -96,7 +104,7 @@ def node_definition_hash(node: WorkflowNode) -> str:
 
 
 def _frozen_config_section(frozen_config_json: str | None, node_key: str) -> dict[str, Any]:
-    """该节点的冻结 config 段；无冻结或段缺失即空（与 dispatch 的空段一致）。
+    """该节点的冻结 config 段（剔除运行时可调保留键）；无冻结或段缺失即空。
 
     损坏/非对象的冻结值按空段参与比较：dispatch 侧 ``parse_object``
     对同样内容也是同一降级（RUN-FREEZE-001），两侧语义对齐。
@@ -108,7 +116,8 @@ def _frozen_config_section(frozen_config_json: str | None, node_key: str) -> dic
     except (TypeError, ValueError):
         return {}
     section = payload.get(node_key) if isinstance(payload, dict) else None
-    return section if isinstance(section, dict) else {}
+    # #858：运行时可调保留键剔除，与 ``node_signature`` 同一口径。
+    return without_runtime_adjustable(section) if isinstance(section, dict) else {}
 
 
 def _has_runtime_mutable_keys(node: WorkflowNode) -> bool:
