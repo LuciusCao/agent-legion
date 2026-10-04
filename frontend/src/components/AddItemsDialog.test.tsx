@@ -660,6 +660,42 @@ describe('AddItemsDialog', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
+  it('blocks submit with an invalid filename before the backend rejects it', async () => {
+    mockRevisionWithAcceptedTypes(['text'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    const textTab = screen.getByRole('tab', { name: '输入需求' })
+    await waitFor(() => expect(textTab).toBeEnabled())
+    fireEvent.click(textTab)
+
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '实际需求' },
+    })
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: '../notes.md' },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
+    expect(screen.getByRole('button', { name: '创建运行' })).toBeDisabled()
+    expect(screen.getByTestId('text-summary')).toHaveTextContent(
+      '文件名不能含路径分隔符'
+    )
+
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: 'notes.pdf' },
+    })
+    expect(screen.getByTestId('text-summary')).toHaveTextContent(
+      '文件名须以 .md 或 .txt 结尾'
+    )
+    expect(screen.getByRole('button', { name: '创建运行' })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: 'notes.md' },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+    expect(screen.getByRole('button', { name: '创建运行' })).toBeEnabled()
+  })
+
   it('falls back to the default filename and rejects oversized text', async () => {
     mockRevisionWithAcceptedTypes(['text'])
     mockCreateRun.mockResolvedValue({
