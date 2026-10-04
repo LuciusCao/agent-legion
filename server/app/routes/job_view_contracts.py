@@ -13,7 +13,7 @@ class JobNodeSummaryResponse(BaseModel):
     error_message: str
 
 
-class JobSummaryResponse(JobClientTokenFields):
+class JobSummaryResponse(JobClientTokenFields, BaseModel):
     id: str
     workspace_id: str
     workflow_key: str = Field(

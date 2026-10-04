@@ -427,6 +427,7 @@ server/app/
 | ApprovalDecisionListResponse | BaseModel | decisions: list[ApprovalDecisionResponse] | app/routes/job_approval_contracts.py |
 | JobFilterPayload | BaseModel | status: str | None, search: str | None, workflow_version: int | None, workflo... | app/routes/job_batch_filter_contracts.py |
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
+| JobClientTokenFields | BaseModel | client_token: str | None, source_base_id: str | None | app/routes/job_client_token_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str | None, entity: str | None, source_kind: str, question_ids:... | app/routes/job_contracts.py |
 | JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |
 | WorkspaceCreateRequest | BaseModel | id: str, name: str, default_entity: str, resource_config: dict[str, Any] | app/routes/job_contracts.py |
