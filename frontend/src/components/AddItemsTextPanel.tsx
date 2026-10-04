@@ -44,7 +44,9 @@ export function AddItemsTextPanel({
         value={item.filename}
         onChange={(event) => onFilenameChange(event.target.value)}
         placeholder={DEFAULT_TEXT_FILENAME}
-        helperText={item.filenameError ?? '存成材料时使用的文件名，.md 或 .txt'}
+        helperText={
+          item.filenameError ?? '存成材料时使用的文件名，.md、.txt 或 .json'
+        }
         error={!!item.filenameError}
         size="small"
         fullWidth

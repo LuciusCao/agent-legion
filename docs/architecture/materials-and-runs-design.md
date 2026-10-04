@@ -128,7 +128,7 @@ nodes:
 - **`text` 条目（直接输入需求）**：`{type:"text", content, filename?}` 把需求
   文字直接写进 run 请求；`RunService` 在契约/节点配置/pin 全部校验通过后、
   run 行写入前，把它落成一份 ready 材料（sha256 内容寻址，对象先写、行后插，
-  `.md`/`.txt` 文件名白名单，UTF-8 ≤ 64 KiB，`run_text_items.py` +
+  `.md`/`.txt`/`.json` 文件名白名单（`.json` 落盘 `application/json`，#813），UTF-8 ≤ 64 KiB，`run_text_items.py` +
   `jobs/queries/material_inline.py`），再改写成普通 `material` 条目进入解析——
   `input_json`、manifest、Worker 物化、skill 看到的与手动上传同名文件完全
   一样。这是 run 创建前唯一的写：材料是 workspace 资产（无引用时 TTL 回收），
@@ -173,7 +173,7 @@ nodes:
   `{label, filename, template}` 分别配置输入框标题、默认文件名和预填模板。
   显式条目文件名优先，未提供时依次回落配置与 `需求.md`；仍使用上述批次
   事务、状态重验和请求独占对象补偿，不改变上传所有权。
-  loader 校验字符串、长度与裸 `.md`/`.txt` 文件名，全空块归一为未声明；
+  loader 校验字符串、长度与裸 `.md`/`.txt`/`.json` 文件名（后缀与运行时白名单同源 `text_item_content_types.py`），全空块归一为未声明；
   不勾选 `text` 时配置惰性，echo / 快照对称，compare 记 info 级变更。
   前端未修改的模板不计条目，可一键恢复；超长文本阻止整次混合提交。
   草稿 YAML 是不可信运行时数据：`text_input` 在整图与 ghost 节点进入
@@ -233,6 +233,20 @@ run_id            由 batch_id 改名，值不变
 `jobs.source_type/source_id` 保留作展示与兼容（material → filename /
 ref → `connection_key:external_id`，身份按连接限定：同一 external_id 跨
 连接是不同条目，去重键与 job id 同样按此派生），不再承担输入寻址职责。
+
+**条目级 `client_token`（#813）.** 条目身份默认纯内容寻址（material /
+bundle id、ref 的 `connection_key:external_id`；text 规范化为内容寻址
+material），同一内容永远命中同一 job。material / bundle / text 条目可选带
+`client_token`（1–64 字符 `[A-Za-z0-9._-]`，首字符为字母或数字），候选
+身份变为 `source_id = <id>~<client_token>`：去重键与 job id 随之派生，
+同内容不同 token 各成独立 job、同 token 重提幂等命中同一 job；run digest
+对提交的 items 逐字哈希，token 自然入摘要（不同 token 的 run 不互相治愈）。
+text 条目的 token 在规范化前捕获并带到改写后的 material 条目上（同一材料、
+不同 job）。`input_json` 不携带 token，下游与无 token 的同内容 job 完全
+一致。不带 token 的条目 `source_id`、job id、run id 与此前逐字节相同（存量
+不漂移，`tests/routes/test_runs_client_token_api.py` 钉住）。ref 条目不收
+token（契约 422）：`external_id` 已是调用方控制的命名空间，且其自由文本会与
+`~` 分隔符产生歧义。实现：`services/run_item_client_token.py`。
 
 ### 5.4 `material_bundles` 表（bundle 条目，#156）
 

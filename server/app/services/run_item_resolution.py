@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.run_item_client_token import item_client_token, scoped_entity_id
 
 
 def resolve_run_items(job_db: Any, workspace_id: str, items: list[dict[str, Any]]) -> list[dict]:
@@ -20,25 +21,29 @@ def resolve_run_items(job_db: Any, workspace_id: str, items: list[dict[str, Any]
     Error mapping per item type is the pre-chunking contract verbatim
     (material not found → 404; not ready → 400; bundle not fully ready →
     400; unknown/disabled connection key → 400). Shape errors (non-object
-    items, missing ids, unsupported types) raise before any probe runs.
+    items, missing ids, unsupported types, invalid ``client_token``) raise
+    before any probe runs. #813: a ``client_token`` scopes the candidate's
+    ``entity_id`` (run_item_client_token) — dedup key and job id follow it;
+    the job ``input`` document stays the plain material/bundle shape.
     """
-    material_specs: list[tuple[int, str]] = []
-    bundle_specs: list[tuple[int, str]] = []
+    material_specs: list[tuple[int, dict[str, Any]]] = []
+    bundle_specs: list[tuple[int, dict[str, Any]]] = []
     ref_specs: list[tuple[int, dict[str, Any]]] = []
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             raise InvalidOperationError("Each item must be an object")
         item_type = item.get("type")
+        item_client_token(item)
         if item_type == "material":
             material_id = str(item.get("material_id") or "").strip()
             if not material_id:
                 raise InvalidOperationError("material item requires material_id")
-            material_specs.append((index, material_id))
+            material_specs.append((index, item))
         elif item_type == "bundle":
             bundle_id = str(item.get("bundle_id") or "").strip()
             if not bundle_id:
                 raise InvalidOperationError("bundle item requires bundle_id")
-            bundle_specs.append((index, bundle_id))
+            bundle_specs.append((index, item))
         elif item_type == "ref":
             connection_key = str(item.get("connection_key") or "").strip()
             external_id = str(item.get("external_id") or "").strip()
@@ -56,10 +61,11 @@ def resolve_run_items(job_db: Any, workspace_id: str, items: list[dict[str, Any]
 
 
 def _resolve_materials(
-    job_db: Any, workspace_id: str, specs: list[tuple[int, str]], resolved: dict[int, dict]
+    job_db: Any, workspace_id: str, specs: list[tuple[int, dict]], resolved: dict[int, dict]
 ) -> None:
-    by_id = job_db.fetch_materials_by_ids(workspace_id, [m_id for _, m_id in specs])
-    for index, material_id in specs:
+    ids = [str(item["material_id"]).strip() for _, item in specs]
+    by_id = job_db.fetch_materials_by_ids(workspace_id, ids)
+    for (index, item), material_id in zip(specs, ids, strict=True):
         row = by_id.get(material_id)
         if row is None:
             raise NotFoundError(f"Material not found: {material_id}")
@@ -69,7 +75,7 @@ def _resolve_materials(
             )
         resolved[index] = {
             "entity_type": "material",
-            "entity_id": material_id,
+            "entity_id": scoped_entity_id(material_id, item),
             "title": str(row["filename"]),
             "stem": "",
             "input": {"type": "material", "material_id": material_id},
@@ -77,10 +83,11 @@ def _resolve_materials(
 
 
 def _resolve_bundles(
-    job_db: Any, workspace_id: str, specs: list[tuple[int, str]], resolved: dict[int, dict]
+    job_db: Any, workspace_id: str, specs: list[tuple[int, dict]], resolved: dict[int, dict]
 ) -> None:
-    by_id = job_db.fetch_bundles_by_ids(workspace_id, [b_id for _, b_id in specs])
-    for index, bundle_id in specs:
+    ids = [str(item["bundle_id"]).strip() for _, item in specs]
+    by_id = job_db.fetch_bundles_by_ids(workspace_id, ids)
+    for (index, item), bundle_id in zip(specs, ids, strict=True):
         row = by_id.get(bundle_id)
         if row is None:
             raise NotFoundError(f"Material bundle not found: {bundle_id}")
@@ -92,7 +99,7 @@ def _resolve_bundles(
             )
         resolved[index] = {
             "entity_type": "bundle",
-            "entity_id": bundle_id,
+            "entity_id": scoped_entity_id(bundle_id, item),
             "title": str(row["name"]),
             "stem": "",
             "input": {"type": "bundle", "bundle_id": bundle_id},

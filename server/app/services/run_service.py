@@ -38,6 +38,7 @@ from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake_workspace import get_workspace
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
+from server.app.services.run_item_client_token import drop_null_client_tokens
 from server.app.services.run_item_resolution import resolve_run_items
 from server.app.services.run_item_types import validate_run_item_types
 from server.app.services.run_partial_failure import compensate_partial_creation
@@ -109,6 +110,9 @@ class RunService:
         definition = workflow_definition_from_dict(json.loads(active_revision["definition_json"]))
         if not items:
             raise InvalidOperationError("At least one item is required")
+        # #813: a null client_token means "no token" — normalize before the
+        # digest so null and omitted resolve to the same run id.
+        items = drop_null_client_tokens(items)
         max_items = self.settings.executor_runtime.workflows.max_items_per_run
         if max_items and len(items) > max_items:
             raise InvalidOperationError(

@@ -116,7 +116,7 @@ describe('AddItemsDialog text filename validation', () => {
       target: { value: 'notes.pdf' },
     })
     expect(screen.getByTestId('text-summary')).toHaveTextContent(
-      '文件名须以 .md 或 .txt 结尾'
+      '文件名须以 .md、.txt 或 .json 结尾'
     )
     expect(screen.getByRole('button', { name: '创建运行' })).toBeDisabled()
 
