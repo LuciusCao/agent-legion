@@ -27,6 +27,7 @@ pure-saturation scenario.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -48,21 +49,35 @@ class HeartbeatDeferral:
     def __init__(self, conn: Any, ttl_seconds: int, rows: Iterable[dict[str, Any]]) -> None:
         self._ttl = ttl_seconds
         self._hard_cutoff = datetime.now(UTC) - timedelta(seconds=2 * ttl_seconds)
-        self._fresh_workers = self._query_fresh_workers(conn, rows)
+        self._last_seen, self._fresh_workers = self._query_workers(conn, rows)
         self._deferred: set[str] = set()
+        self._deferred_by_worker: Counter[str] = Counter()
 
     @staticmethod
-    def _query_fresh_workers(conn: Any, rows: Iterable[dict[str, Any]]) -> set[str]:
+    def _query_workers(
+        conn: Any, rows: Iterable[dict[str, Any]]
+    ) -> tuple[dict[str, datetime], set[str]]:
+        """(last_seen_at per Worker, fresh Workers). ``last_seen_at`` is the
+        worker-level liveness every authenticated Worker call refreshes —
+        claim poll, presence sync, any execution's heartbeat (#681 reuses
+        it as the burst line's context, no new column)."""
         worker_ids = sorted({str(row["worker_id"]) for row in rows})
         if not worker_ids:
-            return set()
+            return {}, set()
         found = conn.execute(
-            "select worker_id from agent_workers where worker_id = any(%s)"
-            " and revoked_at is null"
-            " and last_seen_at > now() - make_interval(secs => %s)",
-            (worker_ids, ONLINE_THRESHOLD_SECONDS),
+            "select worker_id, last_seen_at,"
+            " last_seen_at > now() - make_interval(secs => %s) as fresh"
+            " from agent_workers where worker_id = any(%s) and revoked_at is null",
+            (ONLINE_THRESHOLD_SECONDS, worker_ids),
         ).fetchall()
-        return {str(row["worker_id"]) for row in found}
+        last_seen = {str(row["worker_id"]): _as_utc(row["last_seen_at"]) for row in found}
+        return last_seen, {str(row["worker_id"]) for row in found if row["fresh"]}
+
+    def last_seen(self, worker_id: str) -> datetime | None:
+        return self._last_seen.get(worker_id)
+
+    def deferred_count(self, worker_id: str) -> int:
+        return self._deferred_by_worker[worker_id]
 
     def should_defer(self, row: dict[str, Any]) -> bool:
         """True while the claim's Worker still polls claims and the heartbeat
@@ -74,6 +89,7 @@ class HeartbeatDeferral:
             return False
         execution_id = str(row["execution_id"])
         self._deferred.add(execution_id)
+        self._deferred_by_worker[str(row["worker_id"])] += 1
         silence = (datetime.now(UTC) - heartbeat_at).total_seconds()
         bucket = int(silence // self._ttl)
         if _log_buckets.get(execution_id) != bucket:
