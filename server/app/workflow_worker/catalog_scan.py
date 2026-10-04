@@ -108,6 +108,9 @@ def collect_runnable_workspace_jobs(
             if workspace_id not in paused:
                 paused[workspace_id] = worker._is_paused(workspace_id)
             if paused[workspace_id]:
+                # #827：计入 pass log，与 hydration defer 区分「调度暂停」。
+                skips = worker.state.pass_skips
+                skips["paused_jobs"] = skips.get("paused_jobs", 0) + 1
                 continue
             if workspace_id not in jobs_by_workspace:
                 workspace_ids.append(workspace_id)

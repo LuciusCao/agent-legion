@@ -77,14 +77,22 @@ def hydrate_eval_contexts(
             job_dir=ctx["job_dir"],
             definition=ctx["definition"],
             node_statuses=hydration_statuses,
+            dangling=worker.state.hydration_dangling,
         )
         if unrestored is None or unrestored:
             worker.state.job_evals.pop(str(job["id"]), None)
+            skips = worker.state.pass_skips
+            skips["hydration_deferred"] = skips.get("hydration_deferred", 0) + 1
+            # #827：defer 原因与「调度暂停」（pass log 的 paused_jobs）区分；
+            # 悬挂清单行附连续轮次，升级时另有带 suggested action 的 WARNING。
             logger.warning(
-                "job %s hydration incomplete (read failure, or unrestored inputs %s); "
-                "evaluation deferred to the next poll pass",
+                "job %s evaluation deferred (reason=hydration_incomplete): %s; "
+                "dangling manifest rows %s; retrying next poll pass",
                 job["id"],
-                sorted(unrestored) if unrestored else "-",
+                "manifest/generation read failure"
+                if unrestored is None
+                else f"unrestored inputs {sorted(unrestored)}",
+                worker.state.hydration_dangling.describe(str(job["id"])) or "-",
             )
             continue
         branch_evaluation = evaluate_branches(ctx["definition"], statuses, ctx["job_dir"])

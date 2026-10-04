@@ -64,6 +64,7 @@ def log_pass_end(
     claim_counts: dict[str, int],
     stock_gated: int = 0,
     scan_phases: dict[str, float] | None = None,
+    skips: dict[str, int] | None = None,
 ) -> None:
     # Phase attribution for the scan segment; "py" is the unaccounted
     # remainder (pure-Python mark filtering / candidate assembly / pruning).
@@ -73,7 +74,8 @@ def log_pass_end(
     logger.info(
         "pass end: scan=%.2fs (marks=%.2f ws=%.2f fetch=%.2f eval=%.2f py=%.2f)"
         " jobs=%d ready_cache hit=%d miss=%d running_jobs=%d"
-        " claims=%d candidates=%d claim_loop=%.2fs stock_gated=%d by_target=%s",
+        " claims=%d candidates=%d claim_loop=%.2fs stock_gated=%d by_target=%s"
+        " paused_jobs=%d hydration_deferred=%d",
         scan_seconds,
         phases.get("marks", 0.0),
         phases.get("ws_query", 0.0),
@@ -89,4 +91,6 @@ def log_pass_end(
         claim_seconds,
         stock_gated,
         dict(sorted(claim_counts.items())),
+        (skips or {}).get("paused_jobs", 0),
+        (skips or {}).get("hydration_deferred", 0),
     )
