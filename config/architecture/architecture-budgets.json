@@ -1664,6 +1664,7 @@
     "server/app/services/skill_shared_view.py": 146,
     "server/app/services/skill_snapshot_git.py": 106,
     "server/app/services/skill_validator.py": 105,
+    "server/app/services/staged_json_artifact.py": 34,
     "server/app/services/studio_agent_catalog_reads.py": 36,
     "server/app/services/studio_agent_job_tools.py": 287,
     "server/app/services/studio_agent_node_codes.py": 92,
