@@ -697,10 +697,15 @@ def find_existing_job(
     说明同一 token 复用于不同内容，无法判定对应哪份——报错，不取第一个。"""
     hits, cursor = [], None
     while True:
-        page = s.get(
+        r = s.get(
             f"{HOST}/api/workspaces/{WS}/jobs/snapshot",
             params={"search": source_id or f"~{client_token}", "limit": 500, "cursor": cursor},
-        ).json()
+        )
+        if r.status_code == 429:  # 翻全量会耗限流额度：按 Retry-After 退避后重取同一页
+            time.sleep(int(r.headers.get("Retry-After", "10")))
+            continue
+        r.raise_for_status()
+        page = r.json()
         hits += [
             j["id"] for j in page["jobs"]
             if j["source_type"] == source_type

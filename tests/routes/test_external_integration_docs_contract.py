@@ -681,5 +681,9 @@ def test_runbook_reconciliation_rejects_ambiguous_matches() -> None:
     # 循环内只累积、不提前 return；唯一出口是翻完。
     loop = body[body.index("while True:") : body.index("if len(hits) > 1:")]
     assert "hits += [" in loop and "return" not in loop
+    # 翻全量会耗限流额度（#974 R2）：读响应字段前先按 Retry-After 退避 429。
+    steps = ["if r.status_code == 429:", "time.sleep(", "continue", "r.raise_for_status()"]
+    positions = [loop.index(step) for step in steps + ["page = r.json()"]]
+    assert positions == sorted(positions), positions
     verdict = body[body.index("if len(hits) > 1:") :]
     assert verdict.index("raise ") < verdict.index("return hits[0] if hits else None")
