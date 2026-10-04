@@ -31,18 +31,22 @@ DB_SCRIPT = ROOT / "scripts" / "drop-worktree-db.sh"
 # other subcommand is recorded to the stub log so the tests can assert the
 # guard fires before any mutating git call. {main} is substituted via
 # replace() (not str.format) because the stub itself uses ${VAR:-...}.
+# The listing is emitted with ONE printf (a single pipe write, like real git's
+# buffered stdout): the script reads it via `... | awk '{...; exit}'` under
+# pipefail, and per-line echoes would race awk's early exit into SIGPIPE.
 _GIT_STUB = """#!/usr/bin/env bash
 if [[ "$1" == "worktree" && "$2" == "list" ]]; then
-  echo "worktree __MAIN__"
-  echo "bare"
-  echo
-  echo "worktree __MAIN__/.worktrees/${STUB_WT:-victim}"
-  echo "HEAD 0000000000000000000000000000000000000000"
-  echo "branch refs/heads/${STUB_BRANCH:-feat/victim}"
-  echo
-  echo "worktree __MAIN__/.worktrees/other"
-  echo "HEAD 0000000000000000000000000000000000000000"
-  echo "branch refs/heads/feat/other"
+  printf '%s\\n' \\
+    "worktree __MAIN__" \\
+    "bare" \\
+    "" \\
+    "worktree __MAIN__/.worktrees/${STUB_WT:-victim}" \\
+    "HEAD 0000000000000000000000000000000000000000" \\
+    "branch refs/heads/${STUB_BRANCH:-feat/victim}" \\
+    "" \\
+    "worktree __MAIN__/.worktrees/other" \\
+    "HEAD 0000000000000000000000000000000000000000" \\
+    "branch refs/heads/feat/other"
   exit 0
 fi
 printf 'git %s\\n' "$*" >>"${STUB_LOG:-/dev/null}"
