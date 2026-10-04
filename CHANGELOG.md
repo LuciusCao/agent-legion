@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 - workflow 升级 inherit 模式不再因只改 `timeout_seconds` 而重跑节点（#858）：per-node diff 比较节点定义 `config` 与冻结 config 段时剔除运行时可调的保留键（以 `runtime_reserved_config` 的分类表为单一事实源，目前只有 `timeout_seconds`）；`sandbox_network` 等随版本冻结的键照常参与比较，与超时一起改动时照常重跑。
+- `GET /api/workspaces/{workspace_id}/jobs/snapshot` 的 `limit` 越界改为 422（issue #852，对外行为变更）：此前 `limit` 无取值约束，越界值（如 `0`、`501`）在函数体内被静默钳到 1–500 后照常 200，调用方拿不到「页大小被改写」的信号；现声明为 `Query(ge=1, le=500)`（默认仍为 200），越界返回 422，与 `GET /runs`（1–500）、`GET /jobs`（1–2000）同一约定。此前传 `limit` > 500 或 < 1 的外部调用方需改为 1–500 内的值；控制台前端一律传 500，不受影响。docs/workspace-api-tokens.md 的示例注释、端点表与错误码表同步更新。
 
 ### Fixed
 - 前端 `api()` 请求默认超时并透传 AbortSignal（issue #719）：此前后端僵死时 fetch 无限挂起，同 key 在途请求还会跳过 `refetchInterval`，job 详情/监控轮询冻结在加载态且不可取消。读请求默认 30 秒、写请求默认 120 秒超时，可按调用覆写（`timeoutMs`）；批量操作（batch-rerun/run-to/删除/打包/清空打包/升级/暂停恢复）与材料 complete（服务端重算整对象 sha256）豁免超时。超时抛带 `code: request_timeout` 的结构化错误，经错误映射层统一显示「请求超时」文案并走既有重试；job 详情、workspace 统计、运维指标、Worker 列表、预览面板、发布请求、质量回放、token 用量、workspace 列表等轮询/热点查询把 react-query 的 signal 透传到 fetch，页面卸载或查询失效时取消在途请求。

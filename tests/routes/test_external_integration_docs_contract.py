@@ -14,7 +14,9 @@ curl / requests 示例调用的每个 (method, URL 形态) 钉住：
 - 示例里用到的 query 参数必须是该 operation 声明的参数；
 - 示例解析的响应字段（从代码块提取实际下标访问）、「已存在」400 的
   detail 文本、job 终态集合、limit 越界语义与代码一致；
-- 示例里每一处 `[0]` 都先判空（空 job_ids / 空列表是文档承认的响应）。
+- 示例里每一处 `[0]` 都先判空（空 job_ids / 空列表是文档承认的响应）；
+- 示例按代码块钉住（#857）：fence 配平，每份文档期望的代码块逐块解析到、
+  各自有调用，全链路各环按块校验——单个块丢失或截断即红。
 """
 
 from __future__ import annotations
@@ -31,7 +33,17 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCS = ("docs/remote-execution-runbook.md", "docs/workspace-api-tokens.md")
 API_TS = ROOT / "frontend/src/generated/api.ts"
 
-_CODE_BLOCK = re.compile(r"```(bash|python)\n(.*?)```", re.DOTALL)
+# fence 只认行首（允许缩进：列表项里的代码块）：开 fence 必须带语言标记，
+# 闭 fence 必须是裸 ```。按行配对而不是跨行正则——#857：正则
+# ```(bash|python)\n(.*?)``` 在丢了结尾 fence 时会跨块吞并，被吞的块
+# 不再独立解析，后续校验对它零访问恒绿。
+_FENCE = re.compile(r"^[ \t]*```(.*)$")
+# 示例解析范围：runbook 只看 §9（其余章节是运维命令，不是对接示例）；
+# workspace-api-tokens.md 全文就是对接契约。
+_DOC_SCOPE = {
+    "docs/remote-execution-runbook.md": "## 9. ",
+    "docs/workspace-api-tokens.md": None,
+}
 _CURL_URL = re.compile(r'"\$HOST(/api/[^"]*)"')
 _CURL_METHOD = re.compile(r"-X\s+([A-Z]+)")
 # requests 调用：s.get(f"{HOST}/api/...", params={...}) / s.post(...)
@@ -61,14 +73,61 @@ _TS_RESPONSE = re.compile(
 )
 
 
-def _code_blocks(text: str) -> list[tuple[str, str]]:
-    """(语言, 代码) 列表；python 块剥掉 # 注释（注释里的字段名不算访问）。"""
-    blocks = []
-    for lang, code in _CODE_BLOCK.findall(text):
-        if lang == "python":
-            code = "\n".join(re.sub(r"(^|\s)#.*$", "", line) for line in code.splitlines())
-        blocks.append((lang, code))
+def _fenced_blocks(doc: str, text: str) -> list[tuple[int, str, str]]:
+    """全文按行配对 fence → (开 fence 行号, 语言, 代码)。配不平即红：开 fence
+    缺语言标记、闭 fence 带语言标记（= 上一块丢了结尾 fence）、文末未闭合。"""
+    blocks: list[tuple[int, str, str]] = []
+    opened: tuple[int, str] | None = None
+    body: list[str] = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        fence = _FENCE.match(line)
+        if fence is None:
+            if opened is not None:
+                body.append(line)
+            continue
+        marker = fence.group(1).strip()
+        if opened is None:
+            assert marker, f"{doc}:{number}: 开 fence 缺语言标记"
+            opened, body = (number, marker), []
+            continue
+        assert not marker, (
+            f"{doc}:{number}: 第 {opened[0]} 行的 ```{opened[1]} 未闭合就遇到 ```{marker}"
+        )
+        blocks.append((opened[0], opened[1], "\n".join(body) + "\n"))
+        opened = None
+    assert opened is None, f"{doc}:{opened[0]}: ```{opened[1]} 到文末未闭合"
     return blocks
+
+
+def _scope_lines(doc: str, text: str) -> range:
+    """示例范围的行号区间：指定章节标题起、到下一个二级标题止；None = 全文。"""
+    lines = text.splitlines()
+    heading = _DOC_SCOPE[doc]
+    if heading is None:
+        return range(1, len(lines) + 1)
+    starts = [n for n, line in enumerate(lines, 1) if line.startswith(heading)]
+    assert len(starts) == 1, f"{doc}: 找不到唯一的 {heading!r} 章节"
+    ends = [n for n, line in enumerate(lines, 1) if n > starts[0] and line.startswith("## ")]
+    return range(starts[0], ends[0] if ends else len(lines) + 1)
+
+
+def _doc_blocks(doc: str) -> list[tuple[int, str, str]]:
+    """文档示例范围内的 bash/python 块 → (行号, 语言, 代码)；python 块剥掉
+    # 注释（注释里的字段名不算访问）。"""
+    text = (ROOT / doc).read_text(encoding="utf-8")
+    scope = _scope_lines(doc, text)
+    blocks = []
+    for line, lang, code in _fenced_blocks(doc, text):
+        if line not in scope or lang not in ("bash", "python"):
+            continue
+        if lang == "python":
+            code = "\n".join(re.sub(r"(^|\s)#.*$", "", row) for row in code.splitlines())
+        blocks.append((line, lang, code))
+    return blocks
+
+
+def _code_blocks(doc: str) -> list[tuple[str, str]]:
+    return [(lang, code) for _, lang, code in _doc_blocks(doc)]
 
 
 def _curl_commands(block: str) -> list[tuple[str, str, int, int]]:
@@ -103,25 +162,32 @@ def _is_variable(segment: str) -> bool:
     return segment.startswith("$") or ("{" in segment and "}" in segment)
 
 
-def _doc_calls() -> list[tuple[str, str, str, frozenset[str]]]:
-    """(文档, METHOD, 路径, query 参数名) 全集。"""
-    calls: list[tuple[str, str, str, frozenset[str]]] = []
-    for doc in DOCS:
-        text = (ROOT / doc).read_text(encoding="utf-8")
-        for _, block in _code_blocks(text):
-            for _, call, _, _ in _curl_commands(block):
-                url = _CURL_URL.search(call)
-                if url is None:
-                    continue
-                method = _CURL_METHOD.search(call)
-                path, _, query = url.group(1).partition("?")
-                keys = frozenset(p.split("=", 1)[0] for p in query.split("&") if p)
-                calls.append((doc, method.group(1) if method else "GET", path, keys))
-            for method, path, rest in _PY_CALL.findall(block):
-                params = _PY_PARAMS.search(rest)
-                keys = frozenset(_PY_PARAM_KEY.findall(params.group(1))) if params else frozenset()
-                calls.append((doc, method.upper(), path, keys))
+def _block_calls(block: str) -> list[tuple[str, str, frozenset[str]]]:
+    """单个代码块里的 (METHOD, 路径, query 参数名)。"""
+    calls: list[tuple[str, str, frozenset[str]]] = []
+    for _, call, _, _ in _curl_commands(block):
+        url = _CURL_URL.search(call)
+        if url is None:
+            continue
+        method = _CURL_METHOD.search(call)
+        path, _, query = url.group(1).partition("?")
+        keys = frozenset(p.split("=", 1)[0] for p in query.split("&") if p)
+        calls.append((method.group(1) if method else "GET", path, keys))
+    for method, path, rest in _PY_CALL.findall(block):
+        params = _PY_PARAMS.search(rest)
+        keys = frozenset(_PY_PARAM_KEY.findall(params.group(1))) if params else frozenset()
+        calls.append((method.upper(), path, keys))
     return calls
+
+
+def _doc_calls() -> list[tuple[str, str, str, frozenset[str]]]:
+    """(文档:块行号, METHOD, 路径, query 参数名) 全集。"""
+    return [
+        (f"{doc}:{line}", method, path, keys)
+        for doc in DOCS
+        for line, _, block in _doc_blocks(doc)
+        for method, path, keys in _block_calls(block)
+    ]
 
 
 def _contract() -> tuple[dict[str, dict[str, str]], dict[str, frozenset[str]]]:
@@ -180,38 +246,108 @@ def test_doc_examples_exist_in_openapi_and_token_surface() -> None:
 
     paths, queries = _contract()
     calls = _doc_calls()
-    # 两份文档都必须真有示例被解析到（正则失配 = 守卫失效，宁红勿绿）。
-    for doc in DOCS:
-        assert any(c[0] == doc for c in calls), f"{doc}: 未解析到任何示例调用"
-
-    seen_routes: set[str] = set()
-    for doc, method, path, query_keys in calls:
+    # 「示例存在」由 test_doc_example_blocks_match_manifest 按块钉住；这里
+    # 逐个调用对 OpenAPI 契约与 api token 准入面。
+    for where, method, path, query_keys in calls:
         template = _match_template(path, list(paths))
-        assert template is not None, f"{doc}: {method} {path} 不在 OpenAPI 契约里"
+        assert template is not None, f"{where}: {method} {path} 不在 OpenAPI 契约里"
         operation = paths[template].get(method)
-        assert operation is not None, f"{doc}: {template} 没有 {method}"
+        assert operation is not None, f"{where}: {template} 没有 {method}"
         unknown = query_keys - queries.get(operation, frozenset())
-        assert not unknown, f"{doc}: {method} {template} 不认识 query 参数 {sorted(unknown)}"
+        assert not unknown, f"{where}: {method} {template} 不认识 query 参数 {sorted(unknown)}"
         route = _route_name(operation, template, method)
-        seen_routes.add(route)
         if route == "create_api_token":
             # 签发是管理员动作：api token 不能签发 sibling 凭据。
             assert route not in API_SCOPE_INTAKE_ROUTE_NAMES
         else:
             assert route in API_SCOPE_INTAKE_ROUTE_NAMES, (
-                f"{doc}: {method} {template}（{route}）不在 api token 准入面，照抄会被拒"
+                f"{where}: {method} {template}（{route}）不在 api token 准入面，照抄会被拒"
             )
-
-    # 全链路：签发 → 提交 → 轮询 → 下载，每一环都要有示例。
-    assert {
-        "create_api_token",
-        "create_run",
-        "get_external_job_status",
-        "list_external_artifacts",
-        "get_external_artifact_raw",
-    } <= seen_routes
     # #736 的原始漂移：提交面不得回到 job-batches。
     assert all("job-batches" not in c[2] for c in calls)
+
+
+# --- 代码块清单（#857）--------------------------------------------------------
+# 「示例存在」按块钉住而不是按文档统计：#846 解冲突时 runbook §9 Python 段
+# 的结尾 fence 一度丢失，Python 段被吞进相邻文本不再独立解析，但同文档的
+# bash 段仍有调用，按文档统计的守卫全绿。这里声明每份文档示例范围内应有的
+# 代码块（按出现顺序：语言、说明、该块自身必须覆盖的路由），逐块断言
+# 解析到且各自有调用；全链路五环按块分别校验，不跨块/跨文档取并集。
+
+_FULL_CHAIN = frozenset(
+    {
+        "create_api_token",  # 签发
+        "create_run",  # 提交
+        "get_external_job_status",  # 轮询
+        "list_external_artifacts",  # 清单
+        "get_external_artifact_raw",  # 下载
+    }
+)
+_EXPECTED_BLOCKS: dict[str, tuple[tuple[str, str, frozenset[str]], ...]] = {
+    "docs/remote-execution-runbook.md": (
+        ("bash", "§9 全链路 curl 示例", _FULL_CHAIN),
+        # Python 段是 bash 段的「等价」续写：从已签发的 WORKSPACE_API_TOKEN
+        # 起步（签发是管理员一次性动作，不在调用方的 requests 会话里），
+        # 其余四环必须自带。
+        ("python", "§9 全链路 requests 示例", _FULL_CHAIN - {"create_api_token"}),
+    ),
+    "docs/workspace-api-tokens.md": (
+        ("bash", "最小示例 1. 签发", frozenset({"create_api_token"})),
+        ("bash", "最小示例 2. 提交", frozenset({"create_run"})),
+        (
+            "bash",
+            "最小示例 3. 轮询",
+            frozenset(
+                {
+                    "get_external_job_status",
+                    "get_run",
+                    "list_workspace_jobs",
+                    "snapshot_workspace_jobs",
+                }
+            ),
+        ),
+        (
+            "bash",
+            "最小示例 4. 下载",
+            frozenset({"list_external_artifacts", "get_external_artifact_raw"}),
+        ),
+    ),
+}
+
+
+def _block_routes(block: str, paths: dict[str, dict[str, str]]) -> list[str]:
+    routes = []
+    for method, path, _ in _block_calls(block):
+        template = _match_template(path, list(paths))
+        assert template is not None, f"{method} {path} 不在 OpenAPI 契约里"
+        routes.append(_route_name(paths[template][method], template, method))
+    return routes
+
+
+def test_doc_fences_are_balanced() -> None:
+    """fence 配平：``` 总数为偶数、每个开 fence 带语言标记、闭 fence 是裸
+    ```——丢一个结尾 fence 会让后续块整体错位，必须当场红。"""
+    for doc in DOCS:
+        text = (ROOT / doc).read_text(encoding="utf-8")
+        assert text.count("```") % 2 == 0, f"{doc}: ``` 数量为奇数，有 fence 丢失"
+        _fenced_blocks(doc, text)  # 行级配对，配不平即 AssertionError
+
+
+def test_doc_example_blocks_match_manifest() -> None:
+    assert set(_EXPECTED_BLOCKS) == set(DOCS) == set(_DOC_SCOPE)
+    paths, _ = _contract()
+    for doc, expected in _EXPECTED_BLOCKS.items():
+        blocks = _doc_blocks(doc)
+        assert [lang for _, lang, _ in blocks] == [lang for lang, _, _ in expected], (
+            f"{doc}: 示例代码块与清单不符——解析到 "
+            f"{[(line, lang) for line, lang, _ in blocks]}，期望 "
+            f"{[(lang, label) for lang, label, _ in expected]}"
+        )
+        for (line, _, block), (_, label, required) in zip(blocks, expected, strict=True):
+            routes = _block_routes(block, paths)
+            assert routes, f"{doc}:{line}（{label}）: 未解析到任何调用"
+            missing = required - set(routes)
+            assert not missing, f"{doc}:{line}（{label}）: 缺少 {sorted(missing)} 的调用"
 
 
 # --- 响应字段访问对账 ---------------------------------------------------------
@@ -339,7 +475,7 @@ def _doc_response_accesses() -> list[tuple[str, _Type, str]]:
     schemas = _schemas()
     accesses: list[tuple[str, _Type, str]] = []
     for doc in DOCS:
-        for lang, block in _code_blocks((ROOT / doc).read_text(encoding="utf-8")):
+        for lang, block in _code_blocks(doc):
             if lang == "bash":
                 accesses += _bash_accesses(doc, block, paths, schemas)
                 continue
@@ -426,29 +562,27 @@ def _limit_bounds(router: Any, route_name: str) -> tuple[int | None, int | None]
 
 
 def test_doc_limit_validation_semantics_match_routes() -> None:
-    """文档对 limit 越界的说法（422 还是静默钳制）与路由实际约束一致。
+    """文档对 limit 越界 422 的说法与路由实际约束一致。
 
     契约约束（ge/le）不进 api.ts，这里直接构造路由（服务对象传 None：只读
-    参数声明，不调用）读 FastAPI 的 Query 元数据；带 ge/le 的越界是 422，
-    snapshot 没有约束、在函数体内 max(1, min(limit, 500)) 钳制后照常 200。"""
+    参数声明，不调用）读 FastAPI 的 Query 元数据；带 ge/le 的越界是 422。
+    #852 起 snapshot 与 /runs、/jobs 同一约定（此前无约束、函数体内静默钳制）。"""
     from server.app.routes.job_list import create_job_list_router
     from server.app.routes.jobs import create_jobs_router
     from server.app.routes.runs import create_runs_router
 
     assert _limit_bounds(create_runs_router(None), "list_runs") == (1, 500)  # type: ignore[arg-type]
     assert _limit_bounds(create_jobs_router(None), "list_workspace_jobs") == (1, 2000)  # type: ignore[arg-type]
-    assert _limit_bounds(create_job_list_router(None), "snapshot_workspace_jobs") == (None, None)  # type: ignore[arg-type]
-    source = (ROOT / "server/app/routes/job_list.py").read_text(encoding="utf-8")
-    assert "max(1, min(limit, 500))" in source
+    assert _limit_bounds(create_job_list_router(None), "snapshot_workspace_jobs") == (1, 500)  # type: ignore[arg-type]
 
     tokens_doc = (ROOT / "docs/workspace-api-tokens.md").read_text(encoding="utf-8")
     assert "`limit` 默认 100、取值 1–500，越界 422" in tokens_doc
     assert "limit 默认 500、取值 1–2000" in tokens_doc
-    assert "静默钳到 1–500" in tokens_doc
+    assert "limit 默认 200、取值 1–500（越界 422）" in tokens_doc
+    assert "钳" not in tokens_doc, "snapshot 已不钳制，文档不得残留钳制说法"
     row_422 = next(line for line in tokens_doc.splitlines() if line.startswith("| 422 |"))
-    assert "`GET /runs` 的 `limit` 不在 1–500" in row_422
+    assert "`GET /runs` 与 `GET /jobs/snapshot` 的 `limit` 不在 1–500" in row_422
     assert "`GET /jobs` 的 `limit` 不在 1–2000" in row_422
-    assert "`GET /jobs/snapshot` 的 `limit` 越界**不是** 422" in row_422
 
 
 def test_doc_examples_guard_first_element_access() -> None:
@@ -458,7 +592,7 @@ def test_doc_examples_guard_first_element_access() -> None:
     `if not X` 分支；链式响应访问直接接 `[0]`（如 `…["job_ids"][0]`）一律拒绝。"""
     found = 0
     for doc in DOCS:
-        for _, block in _code_blocks((ROOT / doc).read_text(encoding="utf-8")):
+        for _, block in _code_blocks(doc):
             for match in re.finditer(r"\[0\]", block):
                 found += 1
                 line = (
