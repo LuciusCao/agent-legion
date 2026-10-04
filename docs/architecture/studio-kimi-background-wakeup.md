@@ -143,10 +143,15 @@ SSE 与前端也始终订阅，问题在于这些更新从未到达。上文的 
 日志 `<home>/sessions/<workspace>/<acp-session>/agents/main/wire.jsonl`（`kimi_wire.py`）。
 home 依次探测后端进程的 `KIMI_CODE_HOME` 与 `~/.kimi-code`：ACP SDK 以精简环境拉起子进程，
 普通 `kimi acp` 只能用默认 home，包装命令另设 home 时需在后端进程设置同名变量。
-已存在的日志在 `on_ready` 内、会话放行 ready 之前同步建基线（只 stat 取身份与末尾
-偏移，不读内容），不回放历史，也不会把 ready 之后、线程首次轮询之前写完的回合误当历史；
-ready 时尚不存在、之后才出现的日志整份属于本 runtime，从头读取。文件被替换或截断时在
-新末尾重新建基线，宁可漏报也不重复。逐级 `dir_fd` / `O_NOFOLLOW` 打开，单次最多读 1 MiB，只消费完整行。
+从哪里开始读由「日志是谁写的」决定，而不是由某个时刻决定（任何时刻之前都还有时间，
+那里写完的回合会被误当历史）：本 runtime 自己的 kimi 进程在 session/new 时创建的日志
+（含恢复时 session/load 失败回落 session/new 的情形）整份属于本 runtime，从头读取，
+Studio 发起的回合按 origin 跳过，不会重复；session/load 加载来的日志在 `resume.py`
+里于旧进程被回收之后、新进程拉起之前取基线（`capture_wire_baseline`，只 stat 取身份与
+末尾偏移，不读内容），此刻没有任何写者，新进程在 load 期间、on_ready 之前、首次轮询之前
+写完的回合都落在基线之后；加载来的日志若没有可用基线（找不到、stat 失败、acp session
+或路径不一致），则首次定位时取末尾，宁可漏报也绝不重放。文件被替换或截断时在新末尾
+重新建基线，宁可漏报也不重复。逐级 `dir_fd` / `O_NOFOLLOW` 打开，单次最多读 1 MiB，只消费完整行。
 
 `turn.prompt` 的 origin 为 `user` / `skill_activation` 的回合由 Studio 发起（含 #816
 系统提示），已经走 ACP，跳过；其余回合按到达顺序写入 `status`（`unprompted_turn` 回执）、

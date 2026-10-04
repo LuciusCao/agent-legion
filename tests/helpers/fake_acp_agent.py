@@ -41,6 +41,9 @@ once, ``delay`` seconds after the first prompt response, with NO prompt in
 flight: ``wire`` records are appended to the journal (what Kimi Code 0.43
 does — its ACP adapter drops the turn's events) and ``notify`` updates are
 pushed as out-of-turn session/update notifications.
+``"wire_before_load_reply": [records]`` appends records to the journal while
+the client still awaits the session/load response — a turn the engine runs
+during load, before Studio's on_ready (#938 review R2).
 """
 
 from __future__ import annotations
@@ -85,13 +88,16 @@ class _FakeAgent:
             with open(path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps({"type": "metadata", "protocol_version": "1.5"}) + "\n")
 
+    def _append_wire(self, session_id: str, records: list[dict[str, Any]]) -> None:
+        path = self._wire_path(session_id)
+        if path is not None and records:
+            with open(path, "a", encoding="utf-8") as handle:
+                for record in records:
+                    handle.write(json.dumps(record) + "\n")
+
     def _fire_unprompted(self, session_id: str) -> None:
         plan = self.script["unprompted"]
-        path = self._wire_path(session_id)
-        if path is not None and plan.get("wire"):
-            with open(path, "a", encoding="utf-8") as handle:
-                for record in plan["wire"]:
-                    handle.write(json.dumps(record) + "\n")
+        self._append_wire(session_id, plan.get("wire", []))
         for update in plan.get("notify", []):
             self._send(
                 {
@@ -194,7 +200,9 @@ class _FakeAgent:
                             },
                         }
                     )
-                self._open_wire(message["params"].get("sessionId", self.acp_session_id))
+                loaded_id = message["params"].get("sessionId", self.acp_session_id)
+                self._open_wire(loaded_id)
+                self._append_wire(loaded_id, self.script.get("wire_before_load_reply", []))
                 self._send({"jsonrpc": "2.0", "id": request_id, "result": result})
         elif method == "session/set_mode":
             if self.script.get("set_mode_error"):

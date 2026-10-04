@@ -9,13 +9,24 @@ record of such a turn. Layout (Kimi Code 0.43):
 ``sessions/<workspace-id>/<acp-session-id>/agents/main/wire.jsonl`` — one JSON
 record per line, append-only.
 
-Reads are bounded and descriptor-anchored (no symlink traversal). The watcher
-baselines a journal that already exists synchronously in ``on_ready`` — before
-the session is released as ready — so history is never replayed and a turn
-written right after readiness is never mistaken for history (#938 review). A
-journal that first appears later belongs wholly to this runtime and is read
-from its start. A replaced or truncated journal re-baselines at its new end —
-a possible miss, never a duplicate.
+Reads are bounded and descriptor-anchored (no symlink traversal).
+
+Where reading starts is never "the end at some instant" — every instant has a
+before, and a turn written there would be mistaken for history (#938 review
+R1/R2). Instead:
+
+* A journal this runtime's own agent process created (session/new, i.e. not
+  ``loaded_existing``) belongs wholly to this runtime: read from its start.
+  Studio-driven turns are skipped by origin, so nothing duplicates.
+* A loaded journal (resume via session/load) is baselined by
+  ``wire_baseline.capture_wire_baseline`` while nobody can write it: after the
+  previous agent process was reaped and before the new one is spawned
+  (resume.py).
+  Everything the new process writes — during session/load, before on_ready,
+  before the first poll — lands after that baseline.
+* A loaded journal without a usable baseline is baselined at first sight
+  (stat only): a possible miss, never a replay. A replaced or truncated
+  journal re-baselines at its new end — a possible miss, never a duplicate.
 """
 
 from __future__ import annotations
@@ -25,9 +36,12 @@ import os
 import re
 import stat
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from server.app.studio_chat.task_metadata_files import directory
+
+if TYPE_CHECKING:
+    from server.app.studio_chat.wire_baseline import WireBaseline
 
 MAX_READ_BYTES = 1 << 20
 _SESSION_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}\Z")
@@ -76,6 +90,12 @@ class WireTail:
         self.offset = 0
         self.identity: tuple[int, int] | None = None
 
+    @classmethod
+    def from_baseline(cls, baseline: WireBaseline) -> WireTail:
+        tail = cls(baseline.path)
+        tail.identity, tail.offset = baseline.identity, baseline.offset
+        return tail
+
     def _open(self) -> tuple[int, os.stat_result]:
         with directory(self.path.parent) as parent:
             descriptor = os.open(
@@ -98,8 +118,8 @@ class WireTail:
         try:
             identity = (info.st_dev, info.st_ino)
             if self.identity is None:
-                # Never baselined: the journal appeared after readiness, so
-                # everything in it is this runtime's — read from the start.
+                # Never baselined: this runtime's own process created the
+                # journal, so everything in it is ours — read from the start.
                 self.identity, self.offset = identity, 0
             elif identity != self.identity or info.st_size < self.offset:
                 # Replacement or truncation: re-baseline at the new end.

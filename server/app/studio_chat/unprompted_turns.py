@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.studio_chat.kimi_wire import WireTail, kimi_code_homes, locate_wire
 from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call
+from server.app.studio_chat.wire_baseline import usable_baseline
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -160,7 +161,9 @@ class UnpromptedTurnWatcher:
         self.service, self.session_id, self.runtime = service, session_id, runtime
         self.locate = locate
         self.tail: WireTail | None = None
-        # Set when a journal existed at readiness but could not be baselined.
+        # Loaded journal without a usable pre-spawn baseline: baseline at
+        # first sight (never replay); a journal this runtime created is read
+        # from its start (WireTail.read, identity None).
         self.baseline_on_locate = False
         self.projector = UnpromptedTurnProjector()
         # Projected but not yet durably appended (retried on the next step).
@@ -210,20 +213,15 @@ def start_unprompted_watcher(
     watcher = UnpromptedTurnWatcher(
         service, session_id, runtime, lambda: locate_wire(homes, acp_session_id)
     )
-    # Baseline synchronously, before on_ready releases the session as ready:
-    # a turn written between readiness and the thread's first poll must not
-    # be taken for history (#938 review). stat-only, no content read.
-    path = watcher.locate()
-    if path is not None:
-        tail = WireTail(path)
-        try:
-            tail.baseline()
-        except (OSError, ValueError):
-            # Existing history must never replay: baseline when found again.
-            watcher.baseline_on_locate = True
-            logger.warning("Kimi wire journal baseline failed for %s", session_id, exc_info=True)
+    # Where to start is decided by who wrote the journal, never by the clock
+    # (#938 review R1/R2): a journal this runtime's process created is read
+    # from its start; a loaded one continues from the baseline resume.py took
+    # while no agent process existed, or is baselined at first sight.
+    if runtime.handle.loaded_existing:
+        if usable_baseline(runtime.wire_baseline, acp_session_id, watcher.locate()):
+            watcher.tail = WireTail.from_baseline(runtime.wire_baseline)
         else:
-            watcher.tail = tail
+            watcher.baseline_on_locate = True
 
     def watch() -> None:
         while True:

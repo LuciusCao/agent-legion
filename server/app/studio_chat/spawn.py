@@ -28,6 +28,7 @@ from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import revoke_minted_token_quietly, teardown_runtime
+from server.app.studio_chat.wire_baseline import WireBaseline
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ def spawn_session_runtime(
     *,
     resume_acp_session_id: str | None = None,
     background_baseline: CompletionBaseline | None = None,
+    wire_baseline: WireBaseline | None = None,
     store: StudioChatStore | None = None,
 ) -> AcpSessionHandle:
     """Mint the run token, spawn the agent subprocess, wait for readiness.
@@ -105,7 +107,7 @@ def spawn_session_runtime(
             resume_acp_session_id=resume_acp_session_id,
         )
         runtime = SessionRuntime(handle, token)
-        runtime.background_baseline = background_baseline
+        runtime.background_baseline, runtime.wire_baseline = background_baseline, wire_baseline
         # #694: arm the replay-suppression window only when this spawn will
         # actually attempt session/load — kimi replays the loaded history as
         # fresh-looking chunks, and those messages are already on the

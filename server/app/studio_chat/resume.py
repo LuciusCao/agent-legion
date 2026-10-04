@@ -15,6 +15,7 @@ from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.studio_chat.background_baseline import capture_resume_baseline
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.spawn import spawn_session_runtime
+from server.app.studio_chat.wire_baseline import capture_wire_baseline
 
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
@@ -89,6 +90,13 @@ def resume_session(
     # Re-read after the claim (cross-process discipline): the row we
     # spawn for is the one we just transitioned, never a stale snapshot.
     claimed = service.get_session(session_id, workspace_id)
+    # #938: the wire-journal baseline is taken while nobody can write it —
+    # the old agent process is reaped (teardown above), the new one is not
+    # spawned yet. Whatever the new process writes during session/load, before
+    # on_ready or before the watcher's first poll lands after it.
+    wire_baseline = capture_wire_baseline(
+        str(service._settings.root_dir), claimed["acp_session_id"]
+    )
     handle = spawn_session_runtime(
         service.db,
         service._settings,
@@ -102,6 +110,7 @@ def resume_session(
         workspace_id,
         resume_acp_session_id=claimed["acp_session_id"],
         background_baseline=baseline,
+        wire_baseline=wire_baseline,
         store=service.store,
     )
     runtime = service.runtime(session_id)

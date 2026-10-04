@@ -1815,6 +1815,7 @@
     "server/app/studio_chat/token_keepalive.py": 61,
     "server/app/studio_chat/turn_state.py": 21,
     "server/app/studio_chat/unprompted_turns.py": 174,
+    "server/app/studio_chat/wire_baseline.py": 43,
     "server/app/sweeper_owned_startup.py": 48,
     "server/app/worker_control.py": 31,
     "server/app/worker_control_db.py": 45,
