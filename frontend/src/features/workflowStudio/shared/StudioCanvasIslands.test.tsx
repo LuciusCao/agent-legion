@@ -57,6 +57,17 @@ const studioStub = {
   useViewedRevisionAsDraft: vi.fn(),
 }
 
+const REVISION = {
+  id: 'rev-1',
+  workspace_id: 'ws1',
+  workflow_key: 'demo',
+  version: 1,
+  status: 'active',
+  definition_hash: 'abcdef1234567890',
+  created_at: '2026-07-02T00:00:00Z',
+  published_at: '2026-07-02T00:00:00Z',
+}
+
 function renderIslands(
   studioOverrides: Record<string, unknown> = {},
   viewOverrides: Record<string, unknown> = {}
@@ -81,10 +92,11 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     expect(island).not.toHaveTextContent('/ 编辑工作流')
     expect(island).not.toHaveTextContent('基于 v')
     expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument()
-    // 版本选择器紧跟标题右侧。
-    expect(
-      within(island).getByRole('button', { name: /v- ·/ })
-    ).toBeInTheDocument()
+    // 版本选择器紧跟标题右侧；#770：触发键只显示版本号，hash 降级到
+    // tooltip / aria-label（只读信息不占岛面）。
+    const trigger = within(island).getByRole('button', { name: /版本 v- ·/ })
+    expect(trigger).toHaveTextContent(/^v-$/)
+    expect(island).not.toHaveTextContent('--------')
     // 干净态（无未发布变更）不显示状态 chip。
     expect(within(island).queryByText('已同步')).toBeNull()
   })
@@ -95,17 +107,14 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1')
   })
 
-  it('左岛生命周期动作（#804 定案）：发布主按钮 + 仅 dirty 外露的重置；无校验按钮、无 ⋮ 菜单、无手动保存按钮', () => {
+  it('左岛生命周期动作（#770 顶栏减法）：只外露发布主按钮；重置收进版本菜单；无校验按钮、无 ⋮ 菜单、无手动保存按钮', () => {
     renderIslands({ dirty: true })
     const island = screen.getByTestId('studio-identity-island')
-    // 发布保持 contained 文字主按钮，文案「发布」。
     expect(
       within(island).getByRole('button', { name: '发布' })
     ).toBeInTheDocument()
-    // 重置 dirty 时外露为 outlined 次级按钮。
-    expect(
-      within(island).getByRole('button', { name: '重置' })
-    ).toBeInTheDocument()
+    // dirty 时重置也不再外露（低频破坏性动作收进版本菜单）。
+    expect(within(island).queryByRole('button', { name: '重置' })).toBeNull()
     // 校验按钮（自动校验取代）、⋮ 溢出菜单、手动「保存草稿」均退役。
     expect(within(island).queryByRole('button', { name: '校验' })).toBeNull()
     expect(
@@ -118,10 +127,28 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     expect(island.querySelector('[class*="divider"]')).not.toBeNull()
   })
 
-  it('干净态：重置按钮消失', () => {
-    renderIslands({ dirty: false })
-    const island = screen.getByTestId('studio-identity-island')
-    expect(within(island).queryByRole('button', { name: '重置' })).toBeNull()
+  it('#770：宽屏 dirty 时重置出口在版本菜单（带确认），确认后才重置', () => {
+    const resetDefinition = vi.fn()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      renderIslands({ dirty: true, resetDefinition, revisions: [REVISION] })
+      fireEvent.click(screen.getByRole('button', { name: /版本 v- ·/ }))
+      fireEvent.click(
+        screen.getByRole('menuitem', { name: '重置为已发布版本' })
+      )
+      expect(confirmSpy).toHaveBeenCalledOnce()
+      expect(resetDefinition).toHaveBeenCalledOnce()
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it('干净态：版本菜单不出重置项', () => {
+    renderIslands({ dirty: false, revisions: [REVISION] })
+    fireEvent.click(screen.getByRole('button', { name: /版本 v- ·/ }))
+    expect(
+      screen.queryByRole('menuitem', { name: '重置为已发布版本' })
+    ).toBeNull()
   })
 
   it('自动校验失败：发布禁用 + tooltip 说明，状态 chip 变红可点击开报告', () => {
@@ -273,7 +300,7 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     try {
       renderIslands({ dirty: true, resetDefinition, revisions: [revision] })
       // 菜单打开后出现「重置为已发布版本」；取消确认不触发重置。
-      fireEvent.click(screen.getByRole('button', { name: /v- ·/ }))
+      fireEvent.click(screen.getByRole('button', { name: /版本 v- ·/ }))
       fireEvent.click(
         screen.getByRole('menuitem', { name: '重置为已发布版本' })
       )
@@ -291,7 +318,7 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     narrowState.value = true
     try {
       renderIslands({ dirty: true, revisions: [] })
-      const trigger = screen.getByRole('button', { name: /v- ·/ })
+      const trigger = screen.getByRole('button', { name: /版本 v- ·/ })
       expect(trigger).toBeEnabled()
       fireEvent.click(trigger)
       expect(
@@ -300,24 +327,6 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     } finally {
       narrowState.value = false
     }
-  })
-
-  it('轮 4 P2-D：宽屏不出现菜单重置项（外露按钮承担）', () => {
-    const revision = {
-      id: 'rev-1',
-      workspace_id: 'ws1',
-      workflow_key: 'demo',
-      version: 1,
-      status: 'active',
-      definition_hash: 'abcdef1234567890',
-      created_at: '2026-07-02T00:00:00Z',
-      published_at: '2026-07-02T00:00:00Z',
-    }
-    renderIslands({ dirty: true, revisions: [revision] })
-    fireEvent.click(screen.getByRole('button', { name: /v- ·/ }))
-    expect(
-      screen.queryByRole('menuitem', { name: '重置为已发布版本' })
-    ).toBeNull()
   })
 
   it('宽屏双岛互斥（#804 codex 轮 2 P1）：左岛 max-width = 容器宽 - 右岛实测宽 - 间距', async () => {
