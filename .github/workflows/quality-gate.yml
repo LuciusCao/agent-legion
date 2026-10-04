@@ -88,7 +88,11 @@ jobs:
             base="$PUSH_BEFORE"
           fi
           # No usable base (dispatch, brand-new branch): full gate.
-          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+          # The classifier itself is control plane: a diff touching it keeps
+          # every lane on and never sources the (possibly broken) new rules,
+          # so a classifier regression cannot skip the tests that pin it.
+          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null \
+            && ! git diff --name-only "$base" HEAD | grep -qx 'scripts/lane-paths.sh'; then
             backend=false; frontend=false; rust=false; docker=false
             # Docs / velites-contract rules are shared with check-quick.sh
             # and .githooks/pre-push (#941): only docs/**, root *.md and

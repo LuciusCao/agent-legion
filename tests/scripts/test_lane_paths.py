@@ -194,6 +194,35 @@ def test_pre_push_classifies_paths(
     assert _pre_push_lanes(tmp_path, rel) == local_expected
 
 
+def test_ci_changes_job_runs_every_lane_when_classifier_changes(tmp_path: Path) -> None:
+    # A broken classifier must not be able to skip the lanes that test it:
+    # the CI filter refuses to source rules the diff itself modified.
+    repo = tmp_path / "ci"
+    (repo / "scripts").mkdir(parents=True)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
+    base = _init_repo(repo)
+    (repo / "scripts" / "lane-paths.sh").write_text(
+        "lane_path_is_docs() { return 0; }\nlane_path_feeds_backend() { return 1; }\n",
+        encoding="utf-8",
+    )
+    _git(["commit", "-qam", "break classifier"], cwd=repo)
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(EVENT_NAME="pull_request", PR_BASE=base, GITHUB_OUTPUT=str(output))
+    subprocess.run(
+        ["bash", "-e", "-c", _ci_filter_script()],
+        cwd=repo,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    flags = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
+    assert flags == {"backend": "true", "frontend": "true", "rust": "true", "docker": "true"}
+
+
 def test_case_table_agrees_on_docs_between_ci_and_local() -> None:
     # The table itself encodes the cross-entry-point contract: a path is docs
     # for CI (no lane) exactly when it is docs locally (static phase), and a
