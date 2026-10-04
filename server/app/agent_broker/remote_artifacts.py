@@ -75,6 +75,7 @@ def apply_remote_artifact_refs(
     lease_id: str,
     max_size_bytes: int | None = None,
     spot_check_percent: int | None = None,
+    landed_hashes: dict[str, str] | None = None,
 ) -> tuple[set[str], str | None]:
     """Verify + apply the dict-form (staging-key) refs in output_artifacts.
 
@@ -87,7 +88,11 @@ def apply_remote_artifact_refs(
     the instance artifact size ceiling (``agent_workers.max_archive_bytes``).
     ``lease_id`` feeds the EXEC-GENERATION-001 promote write gate (#645
     P2-a): a gate rejection surfaces as the same "lease is no longer active"
-    failure the finish CAS would have produced.
+    failure the finish CAS would have produced. ``landed_hashes`` (optional
+    out-param) receives name -> verified digest of every output that landed
+    in the job dir, once the apply succeeds — the completion tail's
+    pre-validation snapshot for the #867 read-only check, so it never
+    re-reads the bytes this phase already streamed (codex #913 P2).
     """
     remote = {name: ref for name, ref in output_artifacts.items() if isinstance(ref, dict)}
     if not remote:
@@ -162,6 +167,8 @@ def apply_remote_artifact_refs(
                     lease_id,
                 ):
                     return set(remote), "execution lease is no longer active"
+                if landed_hashes is not None:
+                    landed_hashes.update({name: content_hashes[name] for name in staged})
                 return set(remote), None
         # Cancelled path: no download; a reported hash is trusted outside
         # the #356 spot-check sample, an empty one still streams to compute

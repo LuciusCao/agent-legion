@@ -14,131 +14,26 @@ Contract pinned here:
 
 from __future__ import annotations
 
-import contextlib
-import json
-import sys
-from pathlib import Path
-
 import pytest
 
 from tests.helpers import wait_for_predicate
-
-FAKE_AGENT = Path(__file__).resolve().parents[1] / "helpers" / "fake_acp_agent.py"
-
-ECHO_SCRIPT = {
-    "on_prompt": [
-        {
-            "notify": {
-                "sessionUpdate": "agent_message_chunk",
-                "content": {"type": "text", "text": "pong"},
-            }
-        }
-    ],
-}
-
-PERMISSION_SCRIPT = {
-    "on_prompt": [
-        {
-            "permission": {
-                "toolCall": {"toolCallId": "tc-bash", "title": "Bash: ls"},
-                "options": [
-                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
-                ],
-            }
-        }
-    ],
-}
-
-_CREATED: list[tuple[str, str]] = []
+from tests.helpers.studio_chat_session_routes import (
+    PERMISSION_SCRIPT,
+    close_created_sessions,
+)
+from tests.helpers.studio_chat_session_routes import create_session as _create_session
+from tests.helpers.studio_chat_session_routes import create_workspace as _create_workspace
+from tests.helpers.studio_chat_session_routes import list_ids as _list_ids
+from tests.helpers.studio_chat_session_routes import member_client as _member_client
+from tests.helpers.studio_chat_session_routes import register_fake_agent as _register_fake_agent
+from tests.helpers.studio_chat_session_routes import scoped_headers as _scoped_headers
+from tests.helpers.studio_chat_session_routes import url as _url
 
 
 @pytest.fixture(autouse=True)
 def _close_created_sessions(client):
-    """Backstop: a mid-test failure must not orphan fake ACP subprocesses."""
-    _CREATED.clear()
     yield
-    for workspace_id, session_id in _CREATED:
-        with contextlib.suppress(Exception):
-            client.delete(_url(workspace_id, session_id))
-    _CREATED.clear()
-
-
-def _register_fake_agent(client, tmp_path, script: dict | None = None) -> Path:
-    script_path = tmp_path / "fake-agent-script.json"
-    script_path.write_text(json.dumps(script if script is not None else ECHO_SCRIPT))
-    response = client.put(
-        "/api/admin/studio-agents",
-        json={
-            "api_base": "http://127.0.0.1:8000",
-            "agents": [
-                {
-                    "id": "fake-agent",
-                    "label": "Fake Agent",
-                    "command": sys.executable,
-                    "args": [str(FAKE_AGENT), str(script_path)],
-                }
-            ],
-        },
-    )
-    assert response.status_code == 200, response.text
-    return script_path
-
-
-def _create_workspace(client, suffix: str = "") -> str:
-    response = client.post(
-        "/api/workspaces",
-        json={"id": f"chat_manage_ws{suffix}", "name": f"Chat Manage{suffix}"},
-    )
-    assert response.status_code == 200, response.text
-    return response.json()["workspace"]["id"]
-
-
-def _create_session(client, workspace_id: str, title: str = "t") -> str:
-    response = client.post(
-        f"/api/workspaces/{workspace_id}/studio-chat/sessions",
-        json={"agent_id": "fake-agent", "title": title},
-    )
-    assert response.status_code == 200, response.text
-    session_id = response.json()["session"]["id"]
-    _CREATED.append((workspace_id, session_id))
-    return session_id
-
-
-def _url(workspace_id: str, session_id: str) -> str:
-    return f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}"
-
-
-def _list_ids(client, workspace_id: str) -> list[str]:
-    response = client.get(f"/api/workspaces/{workspace_id}/studio-chat/sessions")
-    assert response.status_code == 200, response.text
-    return [row["id"] for row in response.json()["sessions"]]
-
-
-def _scoped_headers(script_path: Path) -> dict[str, str]:
-    sink = [
-        json.loads(line) for line in Path(str(script_path) + ".sink.jsonl").read_text().splitlines()
-    ]
-    # Latest session/new = the most recently created session's token (the
-    # fake agent script, hence the sink, is shared by every session).
-    new_session = [
-        e["received"] for e in sink if e.get("received", {}).get("method") == "session/new"
-    ][-1]
-    headers = {
-        item["name"]: item["value"] for item in new_session["params"]["mcpServers"][0]["headers"]
-    }
-    return {"Authorization": headers["Authorization"]}
-
-
-def _member_client(client, username: str):
-    response = client.post("/api/users", json={"username": username, "password": "pw1"})
-    assert response.status_code == 201, response.text
-    member_id = response.json()["id"]
-    member = client.__class__(client.app)
-    response = member.post("/api/auth/login", json={"username": username, "password": "pw1"})
-    assert response.status_code == 200, response.text
-    member.headers["x-agent-legion-request"] = "1"
-    return member, member_id
+    close_created_sessions(client)
 
 
 def test_rename_updates_title_list_and_detail(client, tmp_path) -> None:

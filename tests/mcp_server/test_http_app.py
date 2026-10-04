@@ -206,3 +206,14 @@ def test_loopback_api_base_follows_registry_edits(client, job_db, monkeypatch) -
     )
     assert response.status_code == 200, response.text
     assert captured["api_base"] == "http://10.0.0.9:9000"
+
+
+def test_mcp_mount_has_no_anonymous_path(anon_client) -> None:
+    """#915 R2: the self-check rides the public /api/health; nothing under the
+    MCP mount answers before the scoped-token guard (AGENTS.md §6)."""
+    nonce = "0123456789abcdef" * 2
+    probe = anon_client.get(f"/api/studio-agent/instance-probe?nonce={nonce}")
+    assert probe.status_code == 401
+    assert probe.json()["code"] == "studio_agent_auth_required"
+    response = anon_client.post(MCP_URL, json=_INITIALIZE, headers={**_ACCEPT, **_HOST})
+    assert response.status_code == 401

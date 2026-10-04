@@ -65,7 +65,7 @@ def test_delete_between_resume_claim_and_registration_leaves_no_runtime(
 
     monkeypatch.setattr(resume_module, "spawn_session_runtime", delete_then_spawn)
 
-    with pytest.raises(InvalidOperationError, match="closed or deleted"):
+    with pytest.raises(InvalidOperationError, match="closed, deleted or archived"):
         service.resume_session(session_id, workspace_id, user_id)
 
     assert service.runtime(session_id) is None
