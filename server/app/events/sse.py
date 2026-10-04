@@ -1,11 +1,14 @@
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from server.app.events.bus import _EVICTED, EventBus, workspace_channel
+
+HEARTBEAT_SECONDS = 30.0
 
 
 class JobEventManager:
@@ -14,7 +17,14 @@ class JobEventManager:
     def __init__(self, bus: EventBus) -> None:
         self.bus = bus
 
-    async def connect(self, request: Request, channel: str) -> StreamingResponse:
+    async def connect(
+        self,
+        request: Request,
+        channel: str,
+        payload_filter: Callable[[str], Awaitable[str | None]] | None = None,
+    ) -> StreamingResponse:
+        """``payload_filter`` (#881) rewrites or drops (None) each payload for
+        this connection — per-subscriber visibility on a broadcast channel."""
         bus = self.bus
         queue = bus.subscribe(channel)
 
@@ -23,16 +33,27 @@ class JobEventManager:
             # the SSE connection and browsers fire onopen without waiting for the
             # first real event or heartbeat timeout.
             yield ":ok\n\n"
+            loop = asyncio.get_running_loop()
+            # Heartbeat clock runs from the last frame actually sent, so a
+            # stream of filtered-out events cannot starve the keep-alive.
+            last_sent = loop.time()
             try:
                 while True:
+                    remaining = max(HEARTBEAT_SECONDS - (loop.time() - last_sent), 0.0)
                     try:
-                        data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                        data = await asyncio.wait_for(queue.get(), timeout=remaining)
                     except TimeoutError:
                         yield ":heartbeat\n\n"
+                        last_sent = loop.time()
                         continue
                     if data is _EVICTED:
                         return
+                    if payload_filter is not None:
+                        data = await payload_filter(data)
+                        if data is None:
+                            continue
                     yield f"data: {data}\n\n"
+                    last_sent = loop.time()
             except asyncio.CancelledError:
                 raise
             finally:
