@@ -7,6 +7,8 @@ from typing import Any
 
 from acp.schema import AllowedOutcome, DeniedOutcome, RequestPermissionResponse
 
+from server.app.studio_chat.permission_scope import is_allow_option, normalize_selected_option
+from server.app.studio_chat.terminal_grants import AUTO_DECISIONS
 from server.app.studio_chat.terminals import TerminalClientMixin
 
 
@@ -28,8 +30,14 @@ class AcpClient(TerminalClientMixin):
         decision = await asyncio.to_thread(
             self._handle.callbacks.on_permission_request, tool_call_payload, option_payloads
         )
-        option_id = decision.get("option_id")
+        # Only offered ids count; allow_always narrows to allow_once so each
+        # later call asks again (permission_scope.py, #921).
+        option_id = normalize_selected_option(option_payloads, decision.get("option_id"))
         if option_id:
+            if is_allow_option(option_payloads, option_id) and (
+                decision.get("via") not in AUTO_DECISIONS
+            ):
+                self.terminals.grants.grant(tool_call_payload)
             return RequestPermissionResponse(
                 outcome=AllowedOutcome(outcome="selected", option_id=option_id)
             )
