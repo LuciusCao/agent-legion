@@ -26,6 +26,7 @@ from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.workflow_worker.agent_gate import AgentPassState
 from server.app.workflow_worker.catalog_scan import ScanEntry
 from server.app.workflow_worker.claim_flush import PreparedClaim
+from server.app.workflow_worker.hydration_dangling import DanglingManifestStreaks
 from server.app.workflow_worker.mark_scan import MarkStore
 from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflows.definition import WorkflowDefinition
@@ -40,11 +41,13 @@ class WorkflowWorkerState:
         "definition_cache",
         "future_claims",
         "futures",
+        "hydration_dangling",
         "job_evals",
         "last_ready_stats",
         "mark_store",
         "node_code_cache",
         "pass_claim_counts",
+        "pass_skips",
         "pending_claims",
         "pools",
         "route_cache",
@@ -75,6 +78,9 @@ class WorkflowWorkerState:
         self.job_evals: dict[str, tuple[tuple[Any, ...], list[Any]]] = {}
         self.mark_store = MarkStore()
         self.last_ready_stats: dict[str, int] = {"hit": 0, "miss": 0}
+        # #827: per-(job, input) dangling manifest-row streaks for ready-gate
+        # hydration (cross-pass; pruned with job_evals in build_ready_queues).
+        self.hydration_dangling = DanglingManifestStreaks()
         # Per-pass scan-phase wall times (seconds), reset in _poll and rendered
         # into the pass log: marks (mark store refresh + pause probes),
         # ws_query (per-workspace row fetch), miss_fetch (batched fat-row/node
@@ -85,6 +91,10 @@ class WorkflowWorkerState:
         # Per-pass state (cleared in _poll).
         self.batch_payload_cache: dict[str, dict[str, Any] | None] = {}
         self.pass_claim_counts: dict[str, int] = {}
+        # #827: why jobs produced no candidates this pass, for the pass log —
+        # "paused_jobs" (workspace scheduling paused) vs "hydration_deferred"
+        # (manifest-backed inputs could not be restored).
+        self.pass_skips: dict[str, int] = {"paused_jobs": 0, "hydration_deferred": 0}
         self.pending_claims: list[PreparedClaim] = []
         # Per-pass claim-input memos (issue #124): every claimed node used to
         # re-read its published code text and re-resolve each vault secret_ref
@@ -102,6 +112,7 @@ class WorkflowWorkerState:
         """Clear per-pass buffers; cross-pass caches survive."""
         self.batch_payload_cache = {}
         self.pass_claim_counts = {}
+        self.pass_skips = {"paused_jobs": 0, "hydration_deferred": 0}
         self.pending_claims = []
         self.node_code_cache = {}
         self.secret_memo = {}

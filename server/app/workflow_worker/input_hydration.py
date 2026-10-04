@@ -68,7 +68,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from server.app.executors.artifact_restore import restore_from_manifest_row
+from server.app.workflow_worker.hydration_dangling import restore_rows, settle_unrestored
 from server.app.workflows.definition import WorkflowDefinition, WorkflowEdge
 from server.app.workflows.workflow_branching import (
     RUNNABLE_STATUSES,
@@ -80,6 +80,7 @@ from server.app.workflows.workflow_branching import (
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
     from server.app.services.job_artifact_objects import JobArtifactObjectStore
+    from server.app.workflow_worker.hydration_dangling import DanglingManifestStreaks
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,7 @@ def hydrate_job_artifacts(
     job_dir: Path,
     definition: WorkflowDefinition,
     node_statuses: dict[str, str],
+    dangling: DanglingManifestStreaks | None = None,
 ) -> frozenset[str] | None:
     """Re-materialize manifest-backed inputs missing from the job_dir.
 
@@ -192,13 +194,23 @@ def hydrate_job_artifacts(
     bytes to invalidate, and skipping it halves the per-job query cost of
     re-evaluating running jobs every poll pass. See the module docstring
     for the residual-window argument.
+
+    Dangling rows (#827): with ``dangling`` (the worker's cross-pass streak
+    ledger) every restore failure is reported with its outcome; a row that
+    stays ``object_missing`` / ``hash_mismatch`` for
+    ``DANGLING_ESCALATION_PASSES`` consecutive passes is escalated by
+    ``hydration_dangling`` — released from the defer set when in-flight
+    producers will rewrite the name (its consumers are barriered anyway),
+    otherwise kept deferred with a suggested-action WARNING. Rounds whose
+    generation recheck fails do not count (the manifest just changed).
     """
     if store is None or not store.enabled:
         return frozenset()
     probe = live_probe_names(definition, node_statuses, job_dir)
     missing = [name for name in probe if not (job_dir / name).is_file()]
     if not missing:
-        return frozenset()
+        # 无缺失 ⇒ 连续悬挂被打断：清掉该 job 的旧计数（纯内存）。
+        return settle_unrestored(dangling, job_id, {}, definition, node_statuses)
     generation_before = _current_generation(queries, job_id)
     if generation_before is None:
         # Job row gone mid-pass, or the read failed: the manifest state is
@@ -221,12 +233,8 @@ def hydrate_job_artifacts(
     # 序的最大行，与 lookup() 的「最新」判定同源（#775 对抗复审 P2——并列
     # 时间戳下两条读路径曾可能选中不同行，把 hydration 卡进永久 defer）。
     rows_by_name = {str(row["name"]): row for row in rows}
-    unrestored: set[str] = set()
-    for name in missing:
-        if name in rows_by_name and not restore_from_manifest_row(
-            store, job_id=job_id, job_dir=job_dir, name=name, row=rows_by_name[name]
-        ):
-            unrestored.add(name)
+    failures = restore_rows(store, job_id, job_dir, missing, rows_by_name)
+    unrestored = set(failures)
     restored = {name for name in missing if name in rows_by_name} - unrestored
     if not restored:
         # 本轮零恢复写：代次复核没有保护对象，跳过第二次代次读（#759 复审
@@ -234,10 +242,10 @@ def hydrate_job_artifacts(
         # 双读会把扫描拖成持续的 O(运行中 job 数) N+1 查询）。代次中途变化
         # 无需检测：候选/mark 失效由代次进 mark_key 与 claim CAS 兜底，
         # unrestored 非空时本就不缓存。
-        return frozenset(unrestored)
+        return settle_unrestored(dangling, job_id, failures, definition, node_statuses)
     generation_after = _current_generation(queries, job_id)
     if generation_after == generation_before:
-        return frozenset(unrestored)
+        return settle_unrestored(dangling, job_id, failures, definition, node_statuses)
     # A reset mutation committed between the two reads (or the job row
     # vanished / the recheck failed): the restored bytes may come from a
     # manifest row the mutation has since invalidated. Delete exactly the
