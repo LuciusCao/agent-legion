@@ -220,7 +220,11 @@ def test_python_snippet_reads_only_documented_response_fields() -> None:
     keys = set(re.findall(r"\[\"(\w+)\"\]", code)) | set(re.findall(r"\['(\w+)'\]", code))
     keys |= set(re.findall(r"\.get\(\"(\w+)\"\)", code))
     assert {"job_ids", "run", "id", "jobs", "status", "artifacts", "name", "download_url"} <= keys
-    unknown = keys - _reachable_fields()
+    # #907 按去重键对账：snapshot 分页的精确比对字段。
+    assert {"source_type", "source_id", "next_cursor"} <= keys
+    # `detail` 是 FastAPI 错误体（「已存在」400），不在 2xx 响应 schema 里；
+    # 它的取值由 test_snippet_and_card_facts_match_code 对账到 run_service。
+    unknown = keys - _reachable_fields() - {"detail"}
     assert not unknown, f"Python 示例解析了响应 schema 里不存在的字段 {sorted(unknown)}"
 
 
@@ -247,6 +251,54 @@ def test_snippet_and_card_facts_match_code() -> None:
     }
     for name in env_names:
         assert _ENV_OVERRIDES[name][0][0] == "auth", name
+
+
+def test_curl_snippet_download_is_an_encoded_fallback() -> None:
+    """#907：raw 只在直连缺失 / 失败的 then 分支里请求（直连成功不再白耗一次
+    Host 与限流额度）；产物名段是 quote(..., safe="") 编码后的变量（# / ? 不
+    编码会被截断成残缺名字 404）。与文档 §4 下载块同一写法。"""
+    source = SNIPPETS.read_text(encoding="utf-8")
+    curl = source.split("export function buildCurlExample", 1)[1].split(
+        "export function buildPythonExample", 1
+    )[0]
+    lines = curl.splitlines()
+    encoded = re.search(
+        r"^(\w+)=\$\(python3 -c '[^']*urllib\.parse\.quote\(sys\.argv\[1\], safe=\"\"\)"
+        r"[^']*' \"\$ARTIFACT_NAME\"\)$",
+        curl,
+        re.MULTILINE,
+    )
+    assert encoded is not None, "curl 示例缺产物名 percent-encode 变量"
+    raw = [
+        i for i, line in enumerate(lines) if line.lstrip().startswith("curl ") and "/raw" in line
+    ]
+    assert len(raw) == 1, raw
+    assert f'/artifacts/${encoded.group(1)}/raw"' in lines[raw[0]]
+    branch = re.compile(r'^if \[ -z "\$DOWNLOAD_URL" \] \|\| ! curl [^\n]*"\$DOWNLOAD_URL"; then$')
+    opener = [i for i, line in enumerate(lines) if branch.match(line)]
+    assert len(opener) == 1 and opener[0] < raw[0], "raw 回落不在「直连失败才回落」分支里"
+    assert "fi" in (line.strip() for line in lines[raw[0] + 1 :])
+    assert all(line.strip() != "fi" for line in lines[opener[0] + 1 : raw[0]])
+    unconditional = [line for line in lines if line.startswith("curl ") and "$DOWNLOAD_URL" in line]
+    assert not unconditional, unconditional
+
+
+def test_python_snippet_reconciles_duplicate_submission() -> None:
+    """#907：「已存在」400 在 raise_for_status 之前识别，并按条目的
+    client_token 去重键（source_id 后缀 ~<token>，见文档「对账」）翻 snapshot
+    取已有 job——注释承诺的对账真的会执行。"""
+    body = SNIPPETS.read_text(encoding="utf-8").split("export function buildPythonExample", 1)[1]
+    check = body.index(
+        'if resp.status_code == 400 and resp.json().get("detail") == ALREADY_EXISTS:'
+    )
+    assert check < body.index("resp.raise_for_status()")
+    assert 'ALREADY_EXISTS = "No tasks were resolved from input"' in body
+    assert '"client_token": CLIENT_TOKEN' in body
+    assert '/jobs/snapshot",' in body and '"search": f"~{CLIENT_TOKEN}"' in body
+    assert 'job["source_type"] == "material"' in body
+    assert 'job["source_id"].endswith(f"~{CLIENT_TOKEN}")' in body
+    doc = DOC.read_text(encoding="utf-8")
+    assert "`GET /jobs/snapshot?search=~<client_token>`" in doc
 
 
 def test_doc_console_pointer_names_the_settings_section() -> None:

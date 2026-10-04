@@ -611,3 +611,39 @@ def test_doc_examples_guard_first_element_access() -> None:
                 earlier = re.search(rf"\bif not {name}\b", block[: match.start()])
                 assert inline or earlier, f"{where}: 取 {name}[0] 前没有判空"
     assert found, "未解析到任何 [0] 访问——守卫失效"
+
+
+_RAW_ENCODED_NAME = re.compile(
+    r"^\s*(\w+)=\$\(python3 -c '[^']*urllib\.parse\.quote\(sys\.argv\[1\], safe=\"\"\)[^']*'",
+    re.MULTILINE,
+)
+_DIRECT_BRANCH = re.compile(r"^\s*if \[ -z \"\$\w+\" \] \|\| ! curl [^\n]*; then\s*$")
+
+
+def test_doc_raw_downloads_are_encoded_fallbacks() -> None:
+    """#907：raw 下载必须 (1) 只在直连失败的 then 分支里执行——直连成功不再
+    请求 raw，不白耗 Host 与 token 限流额度；(2) 产物名段用 quote(..., safe="")
+    预先编码的变量——清单名里的 # / ? 不编码会被截断成残缺名字 404。"""
+    found = 0
+    for doc in DOCS:
+        for _, block in _code_blocks(doc):
+            encoded = set(_RAW_ENCODED_NAME.findall(block))
+            lines = block.splitlines()
+            for _, command, start, _ in _curl_commands(block):
+                url = _CURL_URL.search(command)
+                if url is None or not url.group(1).endswith("/raw"):
+                    continue
+                found += 1
+                where = f"{doc}: {command.strip()[:80]}"
+                segment = url.group(1).split("/artifacts/", 1)[1].rsplit("/raw", 1)[0]
+                assert segment.startswith("$") and segment[1:] in encoded, (
+                    f'{where}: 产物名段 {segment} 不是 quote(..., safe="") 编码后的变量'
+                )
+                row = block[:start].count("\n")
+                opener = next(
+                    (i for i in range(row - 1, -1, -1) if _DIRECT_BRANCH.match(lines[i])), None
+                )
+                assert opener is not None, f"{where}: raw 回落不在「直连失败才回落」分支里"
+                assert all(lines[i].strip() != "fi" for i in range(opener + 1, row)), where
+                assert any(line.strip() == "fi" for line in lines[row + 1 :]), where
+    assert found >= 2, "未解析到 raw 下载调用——守卫失效"
