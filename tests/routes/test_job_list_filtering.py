@@ -287,6 +287,9 @@ def test_snapshot_limit_out_of_range_is_422(client_factory, limit, expected):
         # fromisoformat 接受任意单字符分隔符，PostgreSQL 不接受（#974 review）
         "2026-10-05\U0001f40d00:00:00|job-1",
         "2026-10-05x00:00:00|job-1",
+        # job_id 半段的控制字符：NUL 绑定进 SQL 会让 psycopg 抛 DataError（#974 R3）
+        "2026-10-05 00:00:00|job\x00x",
+        "2026-10-05 00:00:00|job\x1fx",
     ],
 )
 def test_snapshot_malformed_cursor_is_422(client_factory, cursor):

@@ -27,7 +27,9 @@ def parse_job_cursor(cursor: str) -> tuple[datetime, str]:
     connection's UTC session timezone the raw string used to parse under.
     """
     created_at, sep, job_id = cursor.partition("|")
-    if not sep or not created_at or not job_id:
+    # Same shape gate as services.job_artifact_names.is_plausible_job_id: a
+    # NUL in a bound text parameter makes psycopg raise DataError (5xx).
+    if not sep or not created_at or not job_id or any(ord(c) < 0x20 or c == "\x7f" for c in job_id):
         raise ValueError("cursor must be the next_cursor value from a previous page")
     try:
         if not _CURSOR_TIMESTAMP.fullmatch(created_at):
