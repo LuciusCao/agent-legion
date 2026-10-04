@@ -8,7 +8,7 @@ from typing import Any
 from acp.schema import AllowedOutcome, DeniedOutcome, RequestPermissionResponse
 
 from server.app.studio_chat.permission_scope import is_allow_option, normalize_selected_option
-from server.app.studio_chat.terminal_policy import AUTO_DECISIONS
+from server.app.studio_chat.terminal_grants import AUTO_DECISIONS
 from server.app.studio_chat.terminals import TerminalClientMixin
 
 

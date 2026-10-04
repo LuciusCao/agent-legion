@@ -12,7 +12,7 @@ requests approval, the human answers, only then does it spawn). The server
 does not take that ordering on trust: every create must consume a grant
 minted by a human-answered (or allow-all) permission, the child gets an
 allowlisted environment (never the server's own), and the cwd is confined
-to the session root — see terminal_policy.py (#921). Output is capped at
+to the session root — see terminal_policy.py / terminal_grants.py (#921). Output is capped at
 ``output_byte_limit`` (the agent sets 4 MiB) with head-truncation to keep the
 retained tail, mirroring the protocol's truncation contract.
 
@@ -49,11 +49,8 @@ from acp.schema import (
     WaitForTerminalExitResponse,
 )
 
-from server.app.studio_chat.terminal_policy import (
-    TerminalGrants,
-    confined_cwd,
-    terminal_env,
-)
+from server.app.studio_chat.terminal_grants import TerminalGrants
+from server.app.studio_chat.terminal_policy import confined_cwd, terminal_env
 
 if TYPE_CHECKING:
     from server.app.studio_chat.acp_session import AcpSessionHandle
@@ -267,7 +264,7 @@ class TerminalClientMixin:
         **kwargs: Any,
     ) -> CreateTerminalResponse:
         del session_id  # one store per handle; the id adds nothing here
-        if not self.terminals.grants.consume(command, args):
+        if not self.terminals.grants.consume(command, args, root=self._handle.cwd):
             raise RequestError.invalid_request(
                 {"reason": "terminal/create without an approved permission request"}
             )

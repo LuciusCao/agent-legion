@@ -17,18 +17,20 @@ from typing import Any, cast
 import pytest
 from acp import RequestError
 
-from server.app.studio_chat import terminal_policy
+from server.app.studio_chat import terminal_grants, terminal_policy
 from server.app.studio_chat.acp_client import AcpClient
 from server.app.studio_chat.permission_scope import (
     is_staging_read_only_tool_call,
     normalize_selected_option,
 )
-from server.app.studio_chat.terminal_policy import TerminalGrants, confined_cwd
+from server.app.studio_chat.terminal_grants import TerminalGrants
+from server.app.studio_chat.terminal_policy import confined_cwd
 from server.app.studio_chat.terminals import AcpTerminalStore
 
 pytestmark = pytest.mark.no_db
 
 WS = "ws-policy"
+ROOT = "/w"
 OPTIONS = [
     {"optionId": "once", "name": "Approve once", "kind": "allow_once"},
     {"optionId": "always", "name": "Approve for session", "kind": "allow_always"},
@@ -140,14 +142,31 @@ def test_terminal_env_excludes_server_process_secrets(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_LEGION_DATABASE_URL", "postgresql://server-only")
     code = (
         "import os, json; print(json.dumps(sorted(os.environ)));"
-        "print(os.environ.get('AGENT_SET', 'missing'))"
+        "print(os.environ.get('NO_COLOR', 'missing'))"
     )
-    for env in (None, [_Env("AGENT_SET", "yes")]):
+    for env in (None, [_Env("NO_COLOR", "yes")]):
         output = _run_terminal(AcpTerminalStore(), code, env=env)
         assert "server-only" not in output
         assert "AGENT_LEGION_" not in output
         assert '"PATH"' in output
     assert "yes" in output
+
+
+def test_terminal_env_drops_overrides_that_steer_program_resolution(tmp_path) -> None:
+    hijack = [
+        _Env("PATH", str(tmp_path)),
+        _Env("LD_PRELOAD", "x.so"),
+        _Env("DYLD_INSERT_LIBRARIES", "x.dylib"),
+        _Env("BASH_ENV", "x.sh"),
+        _Env("PYTHONPATH", str(tmp_path)),
+        _Env("NODE_OPTIONS", "--require x"),
+        _Env("TERM", "dumb"),
+    ]
+    env = terminal_policy.terminal_env(hijack)
+    assert env.get("PATH") == os.environ.get("PATH")
+    for key in ("LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "BASH_ENV", "PYTHONPATH", "NODE_OPTIONS"):
+        assert key not in env
+    assert env["TERM"] == "dumb"
 
 
 # -- terminal working-directory confinement ---------------------------------
@@ -175,29 +194,34 @@ def test_terminal_store_refuses_cwd_outside_root(tmp_path) -> None:
 
 def test_grants_are_one_shot_and_bound_to_the_approved_command() -> None:
     grants = TerminalGrants()
-    assert not grants.consume("sh", ["-c", "ls"])
+    assert not grants.consume("sh", ["-c", "ls"], root=ROOT)
     grants.grant({"rawInput": {"command": "ls -la"}})
     # Bound grants match exactly: extending or prefixing the approved command
     # (or an unquoted cd wrapper) does not consume them.
     for mutated in ("cat secrets", "cat secrets; ls -la", "ls -la; cat secrets", "cd /w && ls -la"):
-        assert not grants.consume("sh", ["-c", mutated])
-    assert not grants.consume("sh", ["-c", "cd '/w' && cat x; ls -la"])
-    assert grants.consume("sh", ["-c", "cd '/w '\\''q' && ls -la"])
-    assert not grants.consume("sh", ["-c", "cd '/w' && ls -la"])
+        assert not grants.consume("sh", ["-c", mutated], root=ROOT)
+    assert not grants.consume("sh", ["-c", "cd '/w' && cat x; ls -la"], root=ROOT)
+    assert grants.consume("sh", ["-c", "cd '/w/a '\\''q' && ls -la"], root=ROOT)
+    assert not grants.consume("sh", ["-c", "cd '/w' && ls -la"], root=ROOT)
     grants.grant({"rawInput": {"command": "ls -la"}})
-    assert grants.consume("ls", ["-la"])
+    assert grants.consume("ls", ["-la"], root=ROOT)
+    # The cd wrapper target is confined like the terminal cwd.
+    grants.grant({"rawInput": {"command": "cat target"}})
+    for outside in ("/", "/w/../etc", "/etc"):
+        assert not grants.consume("sh", ["-c", f"cd '{outside}' && cat target"], root=ROOT)
+    assert grants.consume("sh", ["-c", "cd '/w/sub' && cat target"], root=ROOT)
     grants.grant({"toolCallId": "tc-unbound"})
-    assert grants.consume("sh", ["-c", "anything"])
+    assert grants.consume("sh", ["-c", "anything"], root=ROOT)
 
 
 def test_grants_expire(monkeypatch) -> None:
     grants = TerminalGrants()
     grants.grant({"toolCallId": "tc"})
-    monkeypatch.setattr(terminal_policy, "GRANT_TTL_SECONDS", -1)
+    monkeypatch.setattr(terminal_grants, "GRANT_TTL_SECONDS", -1)
     grants.grant({"toolCallId": "tc-expired"})
-    clock = terminal_policy.time.monotonic() + 10_000
-    monkeypatch.setattr(terminal_policy.time, "monotonic", lambda: clock)
-    assert not grants.consume("sh", ["-c", "ls"])
+    clock = terminal_grants.time.monotonic() + 10_000
+    monkeypatch.setattr(terminal_grants.time, "monotonic", lambda: clock)
+    assert not grants.consume("sh", ["-c", "ls"], root=ROOT)
 
 
 class _Handle:
@@ -255,7 +279,7 @@ def test_only_human_or_allow_all_approvals_mint_terminal_grants(decision, grants
         client.request_permission("s", _Model({"toolCallId": "tc"}), [_Model(o) for o in OPTIONS])
     )
     minted = 0
-    while client.terminals.grants.consume("sh", []):
+    while client.terminals.grants.consume("sh", [], root=ROOT):
         minted += 1
     assert minted == grants
     outcome = response.outcome

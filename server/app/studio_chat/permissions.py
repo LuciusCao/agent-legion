@@ -147,7 +147,7 @@ def auto_approve(
     else:
         outcome = {"option_id": option["optionId"]}
     # `via` rides on the ACP-side outcome too: platform auto-approvals never
-    # authorize a terminal/create (terminal_policy.py), only human/allow-all.
+    # authorize a terminal/create (terminal_grants.py), only human/allow-all.
     backend.store.append_message(
         session_id,
         "permission",
