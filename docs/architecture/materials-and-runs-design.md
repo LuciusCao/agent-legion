@@ -356,7 +356,9 @@ remote worker 的 presigned URL 用 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`
 
 - **job_dir 降级为执行暂存**：沙箱 `--cwd` 语义不变，节点照常写 job_dir；
   节点完成时由执行面把产物上传对象存储（key 布局
-  `jobs/{workspace_id}/{job_id}/{name}`，`job_artifacts` 表为权威清单）。
+  `jobs/{workspace_id}/{job_id}/{name}`，`job_artifacts` 表为权威清单；#853 起
+  改为不可变版本 key `jobs/{workspace_id}/{job_id}/.v/{version}/{name}`、同名重登记
+  不覆盖旧对象，见 [artifact-direct-url-pinning.md](artifact-direct-url-pinning.md)）。
   本地 job_dir 成为可淘汰缓存：淘汰只删 `job_artifacts` 已确认的文件、
   只限 completed 且无活跃 lease 的 job，容量配置
   `AGENT_LEGION_JOB_CACHE_MAX_BYTES`（默认 50 GiB，对照材料缓存先例）。

@@ -56,6 +56,7 @@ _CURRENT_DOCS = (
     "docs/architecture/workspace-executor-evidence-matrix.md",
     "docs/architecture/execution-generation.md",
     "docs/architecture/artifact-identity-state-space.md",
+    "docs/architecture/artifact-direct-url-pinning.md",
     "docs/architecture/node-sdk-and-worker-execution-design.md",
     "docs/architecture/materials-and-runs-design.md",
     "docs/architecture/studio-draft-publish-contract.md",

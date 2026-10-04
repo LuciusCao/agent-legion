@@ -21,6 +21,7 @@ from tests.db.completion_helpers import (
     _result_archive,
     _seed_completion_job,
 )
+from tests.fakes.artifact_keys import manifest_bytes
 from tests.fakes.storage import FakeObjectStorage
 
 
@@ -57,7 +58,7 @@ def test_completion_truncated_manifest_judged_from_archive_view(
     assert _node_row("trunc1-job", "node_a")["status"] == "completed"
     assert (job_dir / "out.json").read_bytes() == b'{"ok": true}'
     assert store.row_for_node("trunc1-job", "node_a", "out.json") is not None
-    assert storage.objects["jobs/trunc1-ws/trunc1-job/out.json"] == b'{"ok": true}'
+    assert manifest_bytes(store, "trunc1-job", "out.json") == b'{"ok": true}'
 
 
 def test_completion_truncated_manifest_missing_output_still_fails(
