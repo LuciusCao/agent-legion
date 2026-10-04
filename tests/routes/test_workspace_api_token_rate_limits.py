@@ -82,6 +82,21 @@ def test_app_wires_the_default_limits(client) -> None:
     assert limiter.limits == ApiTokenLimits()
 
 
+def test_token_list_exposes_the_effective_limits_read_only(client, monkeypatch) -> None:
+    # #870: the 外部对接 console section shows the bucket a caller runs into;
+    # it must be the live limiter's parameters, not a re-read of the env.
+    _create_workspace(client, WORKSPACE)
+    listed = client.get(f"/api/workspaces/{WORKSPACE}/api-tokens")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["rate_limit"] == {
+        "requests_per_minute": ApiTokenLimits().requests_per_minute,
+        "burst": ApiTokenLimits().burst,
+    }
+    _install_limiter(client, monkeypatch, rpm=7, burst=3)
+    listed = client.get(f"/api/workspaces/{WORKSPACE}/api-tokens").json()
+    assert listed["rate_limit"] == {"requests_per_minute": 7, "burst": 3}
+
+
 def test_over_limit_token_gets_429_others_unaffected(client, caplog, monkeypatch) -> None:
     _create_workspace(client, WORKSPACE)
     clock = _install_limiter(client, monkeypatch, rpm=6, burst=2)

@@ -32,7 +32,10 @@ const sampleToken = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockList.mockResolvedValue([sampleToken])
+  mockList.mockResolvedValue({
+    tokens: [sampleToken],
+    rate_limit: { requests_per_minute: 60, burst: 20 },
+  })
 })
 
 function renderSection(workspaceId: string = WORKSPACE_ID) {
@@ -55,6 +58,40 @@ describe('WorkspaceApiTokensSection', () => {
     expect(row.textContent).toContain('tok-1')
     expect(row.textContent).not.toContain('secret')
     expect(screen.getByText('未使用')).toBeTruthy()
+    expect(screen.getByText('永不过期')).toBeTruthy()
+  })
+
+  it('shows a first-class empty state when no token is issued', async () => {
+    mockList.mockResolvedValue({
+      tokens: [],
+      rate_limit: { requests_per_minute: 60, burst: 20 },
+    })
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('还没有 API Token')).toBeTruthy()
+    })
+  })
+
+  it('marks used and revoked tokens, hiding revoke for revoked rows', async () => {
+    mockList.mockResolvedValue({
+      tokens: [
+        {
+          ...sampleToken,
+          last_used_at: '2026-09-02T00:00:00Z',
+          expires_at: '2026-12-01T00:00:00Z',
+          revoked: true,
+        },
+      ],
+      rate_limit: { requests_per_minute: 60, burst: 20 },
+    })
+    renderSection()
+
+    const row = await screen.findByTestId('api-token-tok-1')
+    expect(row.textContent).toContain('最近使用')
+    expect(row.textContent).toContain('过期')
+    expect(row.textContent).toContain('已吊销')
+    expect(screen.queryByRole('button', { name: '吊销' })).toBeNull()
   })
 
   it('issues a token with label and TTL, showing the plaintext once', async () => {

@@ -15,7 +15,7 @@ import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { DangerZone } from '../components/settings/DangerZone'
 import { PreviewConfigSection } from '../components/settings/PreviewConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
-import { WorkspaceApiTokensSection } from '../components/settings/WorkspaceApiTokensSection'
+import { ApiAccessSection } from '../components/settings/ApiAccessSection'
 import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
 import { WorkerConsoleGuide } from '../components/settings/WorkerConsoleGuide'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
@@ -71,6 +71,7 @@ export function SettingsPage() {
       { id: 'agent-workers', label: 'Agent 与 Worker' },
       // Agent 定义端点 admin-only（studio_secured），非 admin 不给入口（#677）。
       ...(isAdmin ? [{ id: 'workspace-agents', label: 'Agent 定义' }] : []),
+      ...(isAdmin ? [{ id: 'api-access', label: '外部对接' }] : []),
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
       ...(hasCodeNodes
         ? [{ id: 'code-node-concurrency', label: '代码节点并发' }]
@@ -164,11 +165,18 @@ export function SettingsPage() {
             ) : (
               <WorkspaceWorkersSection workspaceId={workspaceId ?? ''} />
             )}
-            {isAdmin && (
-              <WorkspaceApiTokensSection workspaceId={workspaceId ?? ''} />
-            )}
           </section>
           {isAdmin && <WorkspaceAgentsSection workspaceId={workspaceId} />}
+          {/* #870：API Token 与接入信息独立成「外部对接」一级 section——
+              外部系统接入与 agent/worker 管理是两件事。Token 签发/吊销
+              是 admin 动作（后端 require_admin）。 */}
+          {isAdmin && (
+            <section id="api-access" className={styles.section}>
+              <h2 className={styles.sectionTitle}>外部对接</h2>
+              <hr className={styles.sectionDivider} />
+              <ApiAccessSection workspaceId={workspaceId} />
+            </section>
+          )}
           {isAdmin && <WorkspaceMembersSection workspaceId={workspaceId} />}
           {hasCodeNodes && (
             <section id="code-node-concurrency" className={styles.section}>

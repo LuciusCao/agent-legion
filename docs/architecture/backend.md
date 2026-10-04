@@ -658,7 +658,8 @@ server/app/
 | CreateWorkspaceApiTokenRequest | BaseModel | label: str, ttl_hours: int | None | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokenCreatedResponse | BaseModel | token_id: str, api_token: str, workspace_id: str, label: str | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokenSummary | BaseModel | token_id: str, workspace_id: str, label: str, created_at: str, expires_at: st... | app/routes/workspace_api_token_contracts.py |
-| WorkspaceApiTokensResponse | BaseModel | tokens: list[WorkspaceApiTokenSummary] | app/routes/workspace_api_token_contracts.py |
+| ApiTokenRateLimit | BaseModel | requests_per_minute: int, burst: int | app/routes/workspace_api_token_contracts.py |
+| WorkspaceApiTokensResponse | BaseModel | tokens: list[WorkspaceApiTokenSummary], rate_limit: ApiTokenRateLimit | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokenRevokeResponse | BaseModel | token_id: str, revoked: bool | app/routes/workspace_api_token_contracts.py |
 | WorkspaceRecord | BaseModel | id: str, name: str, description: str, default_workflow_key: str, default_enti... | app/routes/workspace_contracts.py |
 | NodeLimitRequest | BaseModel | workflow_key: str, node_key: str, concurrency_limit: int | app/routes/workspace_execution_contracts.py |
