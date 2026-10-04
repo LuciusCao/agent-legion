@@ -34,6 +34,7 @@ curl -sS -X POST "$API_BASE/api/workspaces/$WORKSPACE_ID/runs" \\
   -H "Content-Type: application/json" \\
   -d '{"items": [{"type": "text", "content": "hello", "filename": "input.md"}]}'
 # → {"run": {"id": "…"}, "created_count": 1, "job_ids": ["…"]}
+# 重复提交返回 400 "No tasks were resolved from input" = 已存在（非失败），对账见文档「幂等与重试」
 
 # 2) 轮询 job 状态，直到 completed / failed（建议间隔 10 秒以上）
 JOB_ID="<上一步响应里的 job_ids 元素>"
@@ -44,13 +45,17 @@ curl -sS "$API_BASE/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID" \\
 curl -sS "$API_BASE/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts" \\
   -H "Authorization: Bearer $API_TOKEN"
 
-# 4) 下载：优先直连 download_url（不带 Authorization 头）；
-#    为 null、已过期或直连失败时回落 raw 端点（产物名按路径段 percent-encode）
-DOWNLOAD_URL="<清单条目的 download_url>"
+# 4) 下载：优先直连 download_url（不带 Authorization 头）；download_url 为
+#    null、已过期或直连失败时才回落 raw 端点（-f：失败以非零退出，不把错误体
+#    写成产物）。产物名按 URL 路径段 percent-encode（safe=""）：名字里的 # 或 ?
+#    不编码会被当成 fragment / query 截断，服务端收到残缺名字返回 404
+DOWNLOAD_URL="<清单条目的 download_url，为 null 时留空>"
 ARTIFACT_NAME="<清单条目的 name>"
-curl -fsS --compressed -o out.bin "$DOWNLOAD_URL"
-curl -fsS --compressed -o out.bin "$API_BASE/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts/$ARTIFACT_NAME/raw" \\
-  -H "Authorization: Bearer $API_TOKEN"
+ENCODED_NAME=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$ARTIFACT_NAME")
+if [ -z "$DOWNLOAD_URL" ] || ! curl -fsS --compressed -o out.bin "$DOWNLOAD_URL"; then
+  curl -fsS --compressed -o out.bin "$API_BASE/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts/$ENCODED_NAME/raw" \\
+    -H "Authorization: Bearer $API_TOKEN"
+fi
 `
 }
 
@@ -67,26 +72,47 @@ API_BASE = "${apiBase}"
 WORKSPACE_ID = "${workspaceId}"
 API_TOKEN = "${API_TOKEN_PLACEHOLDER}"
 
+ALREADY_EXISTS = "No tasks were resolved from input"  # 全部条目已有 job 的 400
+# 条目级幂等键（#813）：换成外部系统自己的记录 id，重提时据此对账已有 job
+CLIENT_TOKEN = "demo-1"
+
 s = requests.Session()
 s.headers["Authorization"] = f"Bearer {API_TOKEN}"
 
-# 1) 提交条目（重复提交同一条目返回 400 "No tasks were resolved from input"，
-#    表示已存在而非失败，对账方式见 docs/workspace-api-tokens.md）
-resp = s.post(
-    f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/runs",
-    json={"items": [{"type": "text", "content": "hello", "filename": "input.md"}]},
-)
-resp.raise_for_status()
-submitted = resp.json()
-job_ids = submitted["job_ids"]
-if not job_ids:  # 可能为空：按 run 读回
-    jobs = s.get(
-        f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/jobs",
-        params={"run_id": submitted["run"]["id"]},
-    ).json()["jobs"]
-    job_ids = [job["id"] for job in jobs]
+# 1) 提交条目。超时 / 5xx 后可原样重提，同一条目不会重复建 job；重提撞上
+#    「上次其实成功了」时返回 400 ALREADY_EXISTS——是已存在、不是失败
+item = {"type": "text", "content": "hello", "filename": "input.md", "client_token": CLIENT_TOKEN}
+resp = s.post(f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/runs", json={"items": [item]})
+if resp.status_code == 400 and resp.json().get("detail") == ALREADY_EXISTS:
+    job_ids = []  # 已存在：下面按去重键对账
+else:
+    resp.raise_for_status()
+    submitted = resp.json()
+    job_ids = submitted["job_ids"]
+    if not job_ids:  # 可能为空（#501 治愈 / 并发重叠提交）：按 run 读回，读不到再按去重键对账
+        run_id = submitted["run"]["id"]
+        readback = s.get(f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/jobs", params={"run_id": run_id})
+        job_ids = [job["id"] for job in readback.json()["jobs"]] if readback.ok else []
+cursor = None
+while not job_ids:
+    # 按去重键对账：带 client_token 的 text 项，job 的 source_id 以 "~<token>"
+    # 结尾。search 是子串匹配、按创建时间倒序分页：精确比对，沿 next_cursor 翻页
+    r = s.get(
+        f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/jobs/snapshot",
+        params={"search": f"~{CLIENT_TOKEN}", "limit": 500, "cursor": cursor},
+    )
+    if r.status_code == 429:  # 重提已耗掉限流额度：按 Retry-After 退避后重取同一页
+        time.sleep(int(r.headers.get("Retry-After", "10")))
+        continue
+    r.raise_for_status()
+    page = r.json()
+    job_ids = [job["id"] for job in page["jobs"] if job["source_type"] == "material"
+               and job["source_id"].endswith(f"~{CLIENT_TOKEN}")]
+    cursor = page["next_cursor"]
+    if cursor is None:
+        break
 if not job_ids:
-    raise SystemExit("run 下没有 job，按去重键对账")
+    raise SystemExit(f"{CLIENT_TOKEN}: 翻完也没有已有 job（期间被删除等），按未提交处理后重提")
 job_id = job_ids[0]
 
 # 2) 轮询到终态；429 时按 Retry-After 退避
