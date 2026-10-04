@@ -14,17 +14,13 @@ from typing import Any
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
+from worker import service_host_guard as host_guard
 from worker.config_response import public_config_response
 from worker.console_url import CONSOLE_URL_ENV, resolve_console_url
 from worker.heartbeat_relay import start_heartbeat_relay, stop_heartbeat_relay
 from worker.metrics_proxy import create_metrics_proxy_router
 from worker.service_bind import embed_control_token
 from worker.service_env import strip_proxy_env
-from worker.service_host_guard import (
-    LOOPBACK_HOSTS,
-    control_plane_allowed_hosts,
-    install_host_guard,
-)
 from worker.service_models import WorkerConfigPayload
 from worker.service_static import create_static_router
 from worker.service_tokens import create_register_token_router
@@ -68,13 +64,10 @@ def create_app(
     ui_dir: Path,
     *,
     embed_token: bool = True,
-    allowed_hosts: frozenset[str] | None = LOOPBACK_HOSTS,
+    allowed_hosts: frozenset[str] | None = host_guard.LOOPBACK_HOSTS,
+    trusted_origin: str | None = None,
 ) -> FastAPI:
     token = supervisor.store.control_token()
-    # #923：token 内嵌以 Host 头校验启用（None = 通配暴露面，不校验）且白名单
-    # 只含回环为前提——白名单里任一非回环主机名（暴露面或控制台地址）都意味着
-    # 页面可经非本机入口打开，此时不内嵌。
-    embed_token = embed_token and allowed_hosts is not None and allowed_hosts <= LOOPBACK_HOSTS
 
     async def require_token(request: Request) -> None:
         header = request.headers.get("authorization", "")
@@ -98,7 +91,8 @@ def create_app(
             supervisor.stop()
 
     app = FastAPI(title="Agent Legion Worker Service", version="1.0", lifespan=lifespan)
-    install_host_guard(app, allowed_hosts)
+    # #923：Host / 来源校验先于全部路由；返回值是收紧后的内嵌判定（见 install_host_guard）。
+    embed_token = host_guard.install_host_guard(app, allowed_hosts, trusted_origin, embed_token)
     # 静态资产面（index + 白名单 /assets，含 #493 P1-1 的 ui_assets 全等
     # 钉子）拆在 service_static；token 内嵌与否在此传参。
     app.include_router(create_static_router(ui_dir, token, embed_token=embed_token))
@@ -192,7 +186,7 @@ def main() -> int:
         supervisor,
         worker_dir / "ui",
         embed_token=embed_control_token(args.host, effective_host),
-        allowed_hosts=control_plane_allowed_hosts(args.host, effective_host, console_url),
+        **host_guard.guard_options(args.host, effective_host, console_url),
     )
     uvicorn.run(app, host=args.host, port=args.port)
     return 0

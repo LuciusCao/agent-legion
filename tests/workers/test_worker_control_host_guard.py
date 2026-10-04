@@ -20,6 +20,7 @@ from worker.service_host_guard import (
     host_header_name,
     request_rejection,
 )
+from worker.service_host_names import console_origin
 from worker.supervisor import WorkerConfigStore
 
 pytestmark = pytest.mark.no_db
@@ -192,3 +193,15 @@ def test_unicode_console_host_matches_idna_host_header() -> None:
     hosts = control_plane_allowed_hosts("127.0.0.1", None, "http://例子.测试:8787")
     assert hosts is not None
     assert host_header_name("xn--fsqu00a.xn--0zwm56d:8787") in hosts
+
+
+def test_console_origin_accepted_for_mutation_behind_host_rewriting_proxy() -> None:
+    trusted = console_origin("https://Worker.Example/")
+    assert trusted == "https://worker.example"
+    upstream = {"host": "127.0.0.1:8787", "sec-fetch-site": "same-origin"}
+    ok = {**upstream, "origin": "https://worker.example"}
+    assert request_rejection("POST", ok, LOOPBACK_HOSTS, trusted) is None
+    other = {**upstream, "origin": "https://attacker.example"}
+    assert request_rejection("POST", other, LOOPBACK_HOSTS, trusted)
+    assert console_origin("http://[::1]:8787") == "http://[::1]:8787"
+    assert console_origin("") is None

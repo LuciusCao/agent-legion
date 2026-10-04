@@ -379,7 +379,7 @@ Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-
 | `0.0.0.0`（容器内） | `0.0.0.0` / `192.0.2.1` 等非回环 | 否 | 同网段浏览器都能打开页面，不内嵌 + warning，需手动输入 token（见下方取 token 命令） |
 | 回环 | 非回环 | 否 | 复合形态兜底：设置了 `AGENT_WORKER_UI_EFFECTIVE_BIND` 时判定只看发布面（发布非回环即不内嵌，覆盖发布层与进程 bind 不一致的场景） |
 
-**Host 头校验（issue #923）**：控制面全部路由（`GET /`、`/assets/*` 与全部 `/api/*`，含 `/api/health`）只接受 Host 头属于白名单的请求，其余一律 403。白名单 = 回环变体（`127.0.0.1` / `localhost` / `[::1]`，任意端口）∪ 实际暴露面地址（`AGENT_WORKER_UI_EFFECTIVE_BIND`，未设置时取进程 bind）∪ `AGENT_WORKER_CONSOLE_URL` 的主机名。经主机名（反向代理、MagicDNS 名等）访问控制台时，把该地址写进 `AGENT_WORKER_CONSOLE_URL`。白名单中只要出现非回环主机名（暴露面或控制台地址），页面就不内嵌 token，需手动输入一次。暴露面为通配地址（`0.0.0.0` / `::`）时无法枚举合法主机名，Host 校验不启用、页面也不内嵌 token（API 仍由 control token 把守）。变更类请求（`PUT` / `POST` / `DELETE`）另做来源校验：浏览器带 `Sec-Fetch-Site` 时只放行 `same-origin` / `none`，带 `Origin` 时须与 Host 头一致；`workerctl` 等不带这两个头的客户端不受影响。
+**Host 头校验（issue #923）**：控制面全部路由（`GET /`、`/assets/*` 与全部 `/api/*`，含 `/api/health`）只接受 Host 头属于白名单的请求，其余一律 403。白名单 = 回环变体（`127.0.0.1` / `localhost` / `[::1]`，任意端口）∪ 实际暴露面地址（`AGENT_WORKER_UI_EFFECTIVE_BIND`，未设置时取进程 bind）∪ `AGENT_WORKER_CONSOLE_URL` 的主机名。经主机名（反向代理、MagicDNS 名等）访问控制台时，把该地址写进 `AGENT_WORKER_CONSOLE_URL`。白名单中只要出现非回环主机名（暴露面或控制台地址），页面就不内嵌 token，需手动输入一次。暴露面为通配地址（`0.0.0.0` / `::`）时无法枚举合法主机名，Host 校验不启用、页面也不内嵌 token（API 仍由 control token 把守）。变更类请求（`PUT` / `POST` / `DELETE`）另做来源校验：浏览器带 `Sec-Fetch-Site` 时只放行 `same-origin` / `none`，带 `Origin` 时须与 Host 头一致或等于 `AGENT_WORKER_CONSOLE_URL` 的 origin（反向代理改写上游 Host 的形态）；`workerctl` 等不带这两个头的客户端不受影响。
 
 两个运维注意：
 

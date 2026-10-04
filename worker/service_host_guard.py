@@ -10,19 +10,22 @@ bearer token 把守。
 
 变更类请求（非 GET/HEAD/OPTIONS）另做纵深校验：带 `Sec-Fetch-Site` 时只
 放行 `same-origin` / `none`，带 `Origin` 时其 host[:port] 必须与 Host 头
-一致。CLI（workerctl）不发这两个头，不受影响。
+一致或等于控制台地址的 origin（反向代理改写上游 Host 的形态）。CLI（workerctl）
+不发这两个头，不受影响。
 """
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
+
+from worker.service_host_names import console_origin, normalize_host
 
 logger = logging.getLogger(__name__)
 
@@ -34,32 +37,9 @@ _ALLOWED_FETCH_SITES = frozenset({"same-origin", "none"})
 _HOST_HEADER = re.compile(r"^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)(:[0-9]{1,5})?$")
 
 
-def normalize_host(value: str) -> str:
-    """主机名归一：小写、去尾点与 IPv6 方括号、IP 字面量取规范形态。"""
-    host = value.strip().lower().rstrip(".")
-    if len(host) >= 2 and host.startswith("[") and host.endswith("]"):
-        host = host[1:-1]
-    try:
-        return ipaddress.ip_address(host).compressed
-    except ValueError:
-        pass
-    if not host.isascii():
-        # 浏览器发送的 Host 是 IDNA ASCII 形态，Unicode 主机名按同一形态入白名单
-        try:
-            return host.encode("idna").decode("ascii")
-        except UnicodeError:
-            return host
-    return host
-
-
 def _is_wildcard(host: str) -> bool:
-    normalized = normalize_host(host)
-    if not normalized:
-        return True
-    try:
-        return ipaddress.ip_address(normalized).is_unspecified
-    except ValueError:
-        return False
+    # normalize_host 已把 IP 字面量折成规范形态（0:0::0 → ::）
+    return normalize_host(host) in ("", "0.0.0.0", "::")
 
 
 def host_header_name(header: str) -> str | None:
@@ -90,7 +70,10 @@ def control_plane_allowed_hosts(
 
 
 def request_rejection(
-    method: str, headers: Mapping[str, str], allowed_hosts: frozenset[str] | None
+    method: str,
+    headers: Mapping[str, str],
+    allowed_hosts: frozenset[str] | None,
+    trusted_origin: str | None = None,
 ) -> str | None:
     """返回拒绝原因；放行返回 None。"""
     host = headers.get("host", "")
@@ -107,19 +90,41 @@ def request_rejection(
             origin_netloc = urlsplit(origin.strip()).netloc.lower()
         except ValueError:
             return "origin mismatch"
-        if not origin_netloc or origin_netloc != host.strip().lower():
+        same_origin = bool(origin_netloc) and origin_netloc == host.strip().lower()
+        # 反向代理改写上游 Host 时，浏览器 Origin 是配置的控制台地址
+        if not same_origin and origin.strip().lower().rstrip("/") != trusted_origin:
             return "origin mismatch"
     return None
 
 
-def install_host_guard(app: FastAPI, allowed_hosts: frozenset[str] | None) -> None:
-    """在 app 全部路由前挂 Host / 来源校验（中间件覆盖未匹配路由与 404）。"""
+def guard_options(bind_host: str, effective_host: str | None, console_url: str) -> dict[str, Any]:
+    """service.main 传给 create_app 的 Host 白名单与可信控制台 origin。"""
+    return {
+        "allowed_hosts": control_plane_allowed_hosts(bind_host, effective_host, console_url),
+        "trusted_origin": console_origin(console_url),
+    }
+
+
+def install_host_guard(
+    app: FastAPI,
+    allowed_hosts: frozenset[str] | None,
+    trusted_origin: str | None,
+    embed_token: bool,
+) -> bool:
+    """在 app 全部路由前挂 Host / 来源校验（中间件覆盖未匹配路由与 404）。
+
+    返回收紧后的 token 内嵌判定：Host 校验已启用（None = 通配暴露面）且白名单
+    只含回环名——任一非回环主机名（暴露面或控制台地址）都意味着页面可经
+    非本机入口打开，此时不内嵌。
+    """
 
     @app.middleware("http")
     async def _host_guard(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        reason = request_rejection(request.method, request.headers, allowed_hosts)
+        reason = request_rejection(request.method, request.headers, allowed_hosts, trusted_origin)
         if reason is not None:
             return JSONResponse({"detail": reason}, status_code=403)
         return await call_next(request)
+
+    return embed_token and allowed_hosts is not None and allowed_hosts <= LOOPBACK_HOSTS

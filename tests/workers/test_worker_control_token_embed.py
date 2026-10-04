@@ -188,9 +188,11 @@ def test_main_reads_effective_bind_env(tmp_path: Path, monkeypatch: pytest.Monke
         *,
         embed_token: bool,
         allowed_hosts: frozenset[str] | None,
+        trusted_origin: str | None,
     ) -> object:
         captured["embed_token"] = embed_token
         captured["allowed_hosts"] = allowed_hosts
+        captured["trusted_origin"] = trusted_origin
         return object()
 
     monkeypatch.setattr(service_module, "embed_control_token", fake_embed_control_token)
@@ -211,6 +213,7 @@ def test_main_reads_effective_bind_env(tmp_path: Path, monkeypatch: pytest.Monke
         "effective_host": None,
         "embed_token": True,
         "allowed_hosts": frozenset({"127.0.0.1", "localhost", "::1"}),
+        "trusted_origin": "http://127.0.0.1:8787",
     }
 
     # env 设置（Docker 形态，compose 注入）→ 透传给 embed_control_token
