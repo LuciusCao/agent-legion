@@ -83,5 +83,9 @@ terms:
   - pattern: 'legacy (脚本|回落通道)'
     retired_in: '#834（术语收敛）'
     note: 中文语境的同类表述；现行说法是业务规则层 / 业务规则脚本
+  - pattern: '`capabilities:?`\s*(键|key|config key)'
+    retired_in: '#452（worker.yaml capabilities 兼容键移除；机制自 #284 起即 no-op）'
+    note: Worker 配置不再有 capabilities 键（存量残留读取即剥离并告警）；锚定
+      「键/key」表述，不误伤 Host 注册契约的 capabilities 字段与节点 capability
 
 exemptions: []

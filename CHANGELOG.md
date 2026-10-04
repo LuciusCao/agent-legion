@@ -26,6 +26,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - Agent 对话面板布局收紧（#825）：Agent 选择器、会话选择器与「＋ 新对话」从标题下的独立一行挪进 Dock 标题行（与「Agent 助手」/「定制预览面板」标题同一行）；输入区去掉与消息列表之间的分割线，输入卡改为浅描边 + 投影的悬浮面板样式（聚焦时描边转主色），Studio、定制预览与 job 排查三处对话界面一致。
 - workspace 实时流断线提示条可关闭（issue #918，0.7.15 UI 验收反馈）：提示条右侧新增关闭按钮（×），长时间断线时可以收起横幅。关闭只对当前页面会话的本次断线周期生效：关闭态只存在内存里，不写入任何浏览器存储，刷新页面后如果仍在断线，提示会再次出现；连接恢复后关闭态自动复位，下次断线照常提示。「实时连接未建立」与「中断重连」两种提示共用同一个关闭态；心跳看门狗判定的断线（#914）与连接报错的断线走同一套关闭和复位逻辑。
 
+### Removed
+- Worker 配置的 deprecated `capabilities` 兼容键（issue #452，#284 收尾）：claim 准入自 #284 起即不按 capability 匹配，该键此前只做形状校验 + 启动 warning 的 no-op。现移除其归一化逻辑与控制面字段——`PUT /api/config` 的 `capabilities` 字段改为 422（payload 拒绝未知字段），`workerctl configure --capability` 参数删除，配置接口不再回读该键。**升级说明：** 存量 `worker.yaml`（状态副本或 bootstrap 挂载）残留 `capabilities:` 键时 Worker 照常启动——读取时剥离该键、每进程打一次 warning，下次保存配置即从状态副本清除；仍建议手工删除该行。自写脚本若向 Worker 控制面提交 `capabilities` 需删除该字段。Host 侧 Worker 注册契约的 `capabilities` 字段不受影响。
+
 ### Fixed
 - 前端 `api()` 请求默认超时并透传 AbortSignal（issue #719）：此前后端僵死时 fetch 无限挂起，同 key 在途请求还会跳过 `refetchInterval`，job 详情/监控轮询冻结在加载态且不可取消。读请求默认 30 秒、写请求默认 120 秒超时，可按调用覆写（`timeoutMs`）；批量操作（batch-rerun/run-to/删除/打包/清空打包/升级/暂停恢复）与材料 complete（服务端重算整对象 sha256）豁免超时。超时抛带 `code: request_timeout` 的结构化错误，经错误映射层统一显示「请求超时」文案并走既有重试；job 详情、workspace 统计、运维指标、Worker 列表、预览面板、发布请求、质量回放、token 用量、workspace 列表等轮询/热点查询把 react-query 的 signal 透传到 fetch，页面卸载或查询失效时取消在途请求。
 - workspace 实时流断线对用户可见（issue #720）：SSE 的 `onStatus` 此前不接 UI，断线时任务列表进度冻结且无任何提示，易被误判为任务卡死而错误重跑。现在连接态进入独立 store（沿用 `AgentConnectionDot` 的 onStatus → store → 订阅组件模式），任务列表上方在断线重连期间显示「实时连接中断，正在重连…」与进度停留时刻（可能已过时）、首连持续失败时显示「实时连接未建立」；重连成功后自动重拉快照、提示消失，无需手动刷新。
