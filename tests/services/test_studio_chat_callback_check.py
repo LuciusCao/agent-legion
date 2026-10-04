@@ -17,11 +17,9 @@ from collections.abc import Iterator
 import httpx
 import pytest
 import uvicorn
-from starlette.applications import Starlette
-from starlette.routing import Mount
+from fastapi import FastAPI
 
-from server.app.mcp_server.http_app import MCP_MOUNT_PATH, _ScopedTokenAuthApp
-from server.app.mcp_server.instance_probe import PROBE_SUBPATH
+from server.app.routes import common as common_routes
 from server.app.studio_chat import callback_check, serving_address
 from server.app.studio_chat.callback_check import check_api_base, unreachable_detail
 
@@ -37,18 +35,18 @@ def _fresh_state():
     serving_address.reset_serving_address_for_tests()
 
 
-async def _never_reached(scope, receive, send) -> None:
-    raise AssertionError("the probe must be answered by the guard, not the MCP app")
-
-
 @pytest.fixture
-def served_port() -> Iterator[int]:
-    """The real MCP mount guard + serving-address middleware under uvicorn."""
-    app = serving_address.ServingAddressMiddleware(
-        Starlette(
-            routes=[Mount(MCP_MOUNT_PATH, _ScopedTokenAuthApp(_never_reached, None))]  # type: ignore[arg-type]
-        )
+def served_port(monkeypatch) -> Iterator[int]:
+    """The real public /api/health route + serving-address middleware under uvicorn."""
+    monkeypatch.setattr(common_routes, "pure_remote_workers_status", lambda state: {})
+    monkeypatch.setattr(
+        common_routes,
+        "cached_storage_status",
+        lambda state: {"configured": False, "reachable": False},
     )
+    api = FastAPI()
+    api.include_router(common_routes.create_common_router(), prefix="/api")
+    app = serving_address.ServingAddressMiddleware(api)
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -77,12 +75,15 @@ def test_self_check_passes_for_the_derived_default(served_port: int) -> None:
     assert check_api_base(derived) is None
 
 
-def test_probe_needs_no_token_and_rejects_bad_nonce(served_port: int) -> None:
-    url = f"http://127.0.0.1:{served_port}{MCP_MOUNT_PATH}{PROBE_SUBPATH}"
-    assert httpx.get(url, params={"nonce": "zz"}, trust_env=False).status_code == 400
-    response = httpx.get(url, params={"nonce": "ab" * 16}, trust_env=False)
-    assert response.status_code == 200
-    assert set(response.json()) == {"proof"}
+def test_probe_rides_health_without_any_credential(served_port: int) -> None:
+    url = f"http://127.0.0.1:{served_port}/api/health"
+    plain = httpx.get(url, trust_env=False).json()
+    assert "instance_proof" not in plain
+    # An invalid nonce is ignored: same body as a plain health call, no 4xx.
+    bad = httpx.get(url, params={"instance_probe": "ZZ"}, trust_env=False)
+    assert bad.status_code == 200 and bad.json() == plain
+    probed = httpx.get(url, params={"instance_probe": "ab" * 16}, trust_env=False).json()
+    assert set(probed) - set(plain) == {"instance_proof"}
 
 
 def test_unreachable_api_base_is_reported() -> None:
@@ -109,10 +110,11 @@ def _patched_client(monkeypatch, handler) -> list[httpx.Request]:
 def test_another_instance_is_told_apart_from_this_one(monkeypatch) -> None:
     # A live agent-legion endpoint with a different per-process key.
     seen = _patched_client(
-        monkeypatch, lambda request: httpx.Response(200, json={"proof": "0" * 64})
+        monkeypatch,
+        lambda request: httpx.Response(200, json={"ok": True, "instance_proof": "0" * 64}),
     )
     reason = check_api_base("http://127.0.0.1:8021")
-    assert reason == "该地址响应来自另一个 Agent Legion 实例"
+    assert reason is not None and "不是本实例" in reason
     # Token-less: the probe never carries an Authorization header.
     assert all("authorization" not in request.headers for request in seen)
 
@@ -121,8 +123,10 @@ def test_another_instance_is_told_apart_from_this_one(monkeypatch) -> None:
     ("response", "expected"),
     [
         (httpx.Response(401, json={"detail": "x"}), "HTTP 401"),
-        (httpx.Response(200, text="not json"), "另一个"),
-        (httpx.Response(200, json=["proof"]), "另一个"),
+        (httpx.Response(200, text="not json"), "不是本实例"),
+        (httpx.Response(200, json=["instance_proof"]), "不是本实例"),
+        # An older agent-legion (or any plain health endpoint) has no proof.
+        (httpx.Response(200, json={"ok": True}), "不是本实例"),
     ],
 )
 def test_non_probe_answers_are_reported(monkeypatch, response, expected) -> None:

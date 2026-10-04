@@ -6,7 +6,7 @@ kimi-code drops an MCP server it cannot reach (or that answers 401 because
 the token belongs to another instance) and the session runs with zero
 agent-legion tools, surfacing only the vague one-time ``mcp_unverified``
 hint after a whole turn. The check talks to the token-less instance probe
-(mcp_server/instance_probe.py) and turns the outcome into an actionable
+(``GET /api/health?instance_probe=<nonce>``, studio_chat/instance_probe.py) and turns the outcome into an actionable
 timeline warning.
 
 Not blocking by design: the agent can still chat without tools, and an
@@ -27,8 +27,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from server.app.mcp_server.http_app import MCP_MOUNT_PATH
-from server.app.mcp_server.instance_probe import PROBE_SUBPATH, instance_proof
+from server.app.studio_chat.instance_probe import HEALTH_PATH, PROBE_PARAM, instance_proof
 
 if TYPE_CHECKING:
     from server.app.studio_chat.store import StudioChatStore
@@ -47,22 +46,23 @@ _cache: dict[str, tuple[float, str | None]] = {}
 
 def _probe(api_base: str) -> str | None:
     nonce = secrets.token_hex(16)
-    url = f"{api_base.rstrip('/')}{MCP_MOUNT_PATH}{PROBE_SUBPATH}"
+    # Same origin/prefix convention as the injected MCP URL ({api_base}/api/...).
+    url = f"{api_base.rstrip('/')}{HEALTH_PATH}"
     try:
         # trust_env=False: a proxy env var must not reroute the self-check.
         with httpx.Client(timeout=PROBE_TIMEOUT_SECONDS, trust_env=False) as client:
-            response = client.get(url, params={"nonce": nonce}, follow_redirects=False)
+            response = client.get(url, params={PROBE_PARAM: nonce}, follow_redirects=False)
     except (httpx.HTTPError, httpx.InvalidURL) as exc:
         return f"连接失败（{type(exc).__name__}）"
     if response.status_code != 200:
-        return f"HTTP {response.status_code}，该地址不是本实例的 Studio 回调端点"
+        return f"HTTP {response.status_code}，该地址不是本实例的健康检查端点"
     try:
         payload = response.json()
     except ValueError:
         payload = None
-    proof = payload.get("proof") if isinstance(payload, dict) else None
+    proof = payload.get("instance_proof") if isinstance(payload, dict) else None
     if not isinstance(proof, str) or not hmac.compare_digest(proof, instance_proof(nonce)):
-        return "该地址响应来自另一个 Agent Legion 实例"
+        return "该地址的响应不是本实例（可能是另一个 Agent Legion 实例或其他服务）"
     return None
 
 
