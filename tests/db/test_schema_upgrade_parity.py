@@ -41,29 +41,23 @@ from psycopg import sql
 
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
-from tests.helpers.pre_v88_node_counts import PRE_V88_BUMP_SQL
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v88, job_node_status_count_deltas) must
+# Effects the newest migration (v89, studio_chat_session_soft_delete) must
 # leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v88 creates the node-counter delta table (its index goes
-# with it) and installs the try-lock folder functions plus the terminal
-# bump_job_node_status_counts body; the undo drops the table and folder
-# functions and restores the v87 blocking-upsert bump body, which the v87
-# schema file used to carry (v87's claim_enabled column stays).
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("workspace_job_node_status_count_deltas",)
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+# SCHEMA_VERSION-1. v89 only adds the nullable studio_chat_sessions.deleted_at
+# column (#872), so the undo drops that column and nothing else.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("studio_chat_sessions", "deleted_at", "timestamp with time zone"),
+)
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "job_node_status_count_deltas"
+_NEWEST_MIGRATION_NAME = "studio_chat_session_soft_delete"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v87: the folder functions disappear and bump regains its v87 body.
-_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
-    "drop function if exists try_fold_job_node_status_counts(text)",
-    "drop function if exists apply_job_node_status_count(text, text, text, bigint)",
-    PRE_V88_BUMP_SQL,
-)
+# faithful v88 (v89 is a pure column add: nothing to recreate).
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]

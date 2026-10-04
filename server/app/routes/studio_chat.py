@@ -27,9 +27,11 @@ from server.app.routes.studio_chat_contracts import (
     StudioChatPermissionAnswerRequest,
     StudioChatPermissionAnswerResponse,
     StudioChatSessionCreateRequest,
+    StudioChatSessionDeleteResponse,
     StudioChatSessionRecord,
     StudioChatSessionResponse,
     StudioChatSessionsResponse,
+    StudioChatSessionUpdateRequest,
 )
 from server.app.routes.studio_chat_events import create_studio_chat_events_router
 from server.app.services.job_errors import JobServiceError
@@ -108,6 +110,34 @@ def create_studio_chat_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
+
+    @guarded.patch(
+        "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}",
+        response_model=StudioChatSessionResponse,
+    )
+    def rename_session(
+        workspace_id: str, session_id: str, payload: StudioChatSessionUpdateRequest
+    ) -> StudioChatSessionResponse:
+        try:
+            session = service.rename_session(session_id, workspace_id, payload.title.strip())
+        except JobServiceError as exc:
+            raise_job_http_error(exc)
+        return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
+
+    # Soft delete (#872): DELETE on the session path already means *close*
+    # (kept for existing clients), so removal from the list is its own verb.
+    # Deleted sessions answer 404 everywhere afterwards (not 410: same shape
+    # as an unknown id, no existence signal).
+    @guarded.post(
+        "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete",
+        response_model=StudioChatSessionDeleteResponse,
+    )
+    def delete_session(workspace_id: str, session_id: str) -> StudioChatSessionDeleteResponse:
+        try:
+            service.delete_session(session_id, workspace_id)
+        except JobServiceError as exc:
+            raise_job_http_error(exc)
+        return StudioChatSessionDeleteResponse(deleted=session_id)
 
     @guarded.post(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/resume",

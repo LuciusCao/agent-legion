@@ -62,6 +62,19 @@ class StudioChatSessionRecord(BaseModel):
     closed_at: datetime | None
 
 
+class StudioChatSessionUpdateRequest(BaseModel):
+    """Session rename (#872). Surrounding whitespace is stripped; an empty
+    title falls back to the client's default label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(max_length=200)
+
+
+class StudioChatSessionDeleteResponse(BaseModel):
+    deleted: str
+
+
 class StudioChatSessionResponse(BaseModel):
     session: StudioChatSessionRecord
 

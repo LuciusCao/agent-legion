@@ -254,6 +254,8 @@ server/app/
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions` | `list_sessions` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `get_session` | routes/studio_chat.py |
 | DELETE | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `close_session` | routes/studio_chat.py |
+| PATCH | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `rename_session` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete` | `delete_session` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/resume` | `resume_session` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `list_messages` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `send_message` | routes/studio_chat.py |
@@ -585,6 +587,8 @@ server/app/
 | StudioChatAgentsResponse | BaseModel | agents: list[StudioChatAgentOption] | app/routes/studio_chat_contracts.py |
 | StudioChatSessionCreateRequest | BaseModel | agent_id: str, title: str | app/routes/studio_chat_contracts.py |
 | StudioChatSessionRecord | BaseModel | id: str, workspace_id: str, user_id: str, agent_id: str, title: str, status: ... | app/routes/studio_chat_contracts.py |
+| StudioChatSessionUpdateRequest | BaseModel | title: str | app/routes/studio_chat_contracts.py |
+| StudioChatSessionDeleteResponse | BaseModel | deleted: str | app/routes/studio_chat_contracts.py |
 | StudioChatSessionResponse | BaseModel | session: StudioChatSessionRecord | app/routes/studio_chat_contracts.py |
 | StudioChatSessionsResponse | BaseModel | sessions: list[StudioChatSessionRecord] | app/routes/studio_chat_contracts.py |
 | StudioChatMessageCreateRequest | BaseModel | text: str | app/routes/studio_chat_contracts.py |

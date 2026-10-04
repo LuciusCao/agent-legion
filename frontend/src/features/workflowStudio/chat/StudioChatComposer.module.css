@@ -1,17 +1,22 @@
 /* StudioChatComposer（#695 R4）：圆角卡片一体化输入区——textarea 与卡内底部
- * 工具行是一个视觉整体；配置芯片（StudioChatComposerConfig）是卡内行内元素。 */
+ * 工具行是一个视觉整体；配置芯片（StudioChatComposerConfig）是卡内行内元素。
+ * #825：去掉与消息列表之间的分割线，输入卡改为悬浮面板样式（浅描边 + 投影，
+ * 聚焦时描边转主色），与消息区不再被一条线硬切开。 */
 .composerArea {
-  border-top: 1px solid #e0e0e0;
-  padding: 8px 12px;
+  padding: 6px 12px 10px;
 }
 .composer {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  border: 1px solid #cfcfcf;
-  border-radius: 12px;
+  border: 1px solid #e3e6eb;
+  border-radius: 14px;
   padding: 8px 10px 6px;
   background: #fff;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
+}
+.composer:focus-within {
+  border-color: #90caf9;
 }
 .composer textarea {
   border: none;
