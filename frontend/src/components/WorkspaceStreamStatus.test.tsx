@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createElement, type ReactNode } from 'react'
-import { act, render, renderHook, screen } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+} from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { WorkspaceStreamStatus } from './WorkspaceStreamStatus'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
@@ -23,6 +29,7 @@ function resetStore() {
     everOpened: false,
     attempts: 0,
     staleSince: null,
+    dismissed: false,
   })
 }
 
@@ -146,10 +153,129 @@ describe('useWorkspaceEvents → WorkspaceStreamStatus (#720)', () => {
     expect(useWorkspaceStreamStore.getState().workspaceId).toBeNull()
   })
 
+  it('shows the notice when the stream hangs silently, without any error (#914)', async () => {
+    vi.useFakeTimers()
+    const hook = renderHook(() => useWorkspaceEvents('ws1'), { wrapper })
+    render(<WorkspaceStreamStatus workspaceId="ws1" />)
+
+    await act(async () => {
+      EventSourceMock.instances[0].onopen?.()
+      EventSourceMock.instances[0].emitHeartbeat(15000)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    // Two regular beats: no false positive.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15000)
+      EventSourceMock.instances[0].emitHeartbeat(15000)
+      await vi.advanceTimersByTimeAsync(15000)
+      EventSourceMock.instances[0].emitHeartbeat(15000)
+    })
+    expect(screen.queryByTestId('workspace-stream-status')).toBeNull()
+
+    // Hang: no error, no events. Watchdog fires at 2.5 × interval, then the
+    // shared reconnect path emits `connecting` after the 1s backoff.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(37500 + 1000)
+    })
+    expect(EventSourceMock.instances).toHaveLength(2)
+    expect(screen.getByTestId('workspace-stream-status').textContent).toContain(
+      '实时连接中断，正在重连'
+    )
+    // #918: a watchdog-detected outage is dismissable like an error one.
+    fireEvent.click(screen.getByRole('button', { name: '关闭断线提示' }))
+    expect(screen.queryByTestId('workspace-stream-status')).toBeNull()
+
+    await act(async () => {
+      EventSourceMock.instances[1].onopen?.()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(screen.queryByTestId('workspace-stream-status')).toBeNull()
+    // Recovered → dismissal reset: the next stall shows the notice again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(37500 + 1000)
+    })
+    expect(EventSourceMock.instances).toHaveLength(3)
+    expect(screen.getByTestId('workspace-stream-status')).not.toBeNull()
+    hook.unmount()
+  })
+
   it('renders nothing for a different workspace', () => {
     useWorkspaceStreamStore.getState().setStatus('ws1', 'open')
     useWorkspaceStreamStore.getState().setStatus('ws1', 'connecting')
     render(<WorkspaceStreamStatus workspaceId="ws2" />)
     expect(screen.queryByTestId('workspace-stream-status')).toBeNull()
+  })
+})
+
+describe('WorkspaceStreamStatus dismiss (#918)', () => {
+  beforeEach(resetStore)
+
+  const drop = () => {
+    const store = useWorkspaceStreamStore.getState()
+    store.setStatus('ws1', 'open')
+    store.setStatus('ws1', 'connecting')
+  }
+  const notice = () => screen.queryByTestId('workspace-stream-status')
+
+  it('closes the notice for the current outage only', () => {
+    drop()
+    render(<WorkspaceStreamStatus workspaceId="ws1" />)
+    expect(notice()).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭断线提示' }))
+    expect(notice()).toBeNull()
+    // Further retries within the same outage stay dismissed.
+    act(() => useWorkspaceStreamStore.getState().setStatus('ws1', 'connecting'))
+    expect(notice()).toBeNull()
+  })
+
+  it('resets once the stream recovers: the next outage shows again', () => {
+    drop()
+    render(<WorkspaceStreamStatus workspaceId="ws1" />)
+    fireEvent.click(screen.getByRole('button', { name: '关闭断线提示' }))
+    expect(notice()).toBeNull()
+
+    act(() => useWorkspaceStreamStore.getState().setStatus('ws1', 'open'))
+    expect(useWorkspaceStreamStore.getState().dismissed).toBe(false)
+    act(() => useWorkspaceStreamStore.getState().setStatus('ws1', 'connecting'))
+    expect(notice()?.textContent).toContain('实时连接中断，正在重连')
+  })
+
+  it('shares one dismissed state across the unreachable and reconnecting variants', () => {
+    const store = useWorkspaceStreamStore.getState()
+    store.setStatus('ws1', 'connecting')
+    store.setStatus('ws1', 'connecting')
+    render(<WorkspaceStreamStatus workspaceId="ws1" />)
+    expect(notice()?.textContent).toContain('实时连接未建立')
+    fireEvent.click(screen.getByRole('button', { name: '关闭断线提示' }))
+    expect(notice()).toBeNull()
+  })
+
+  it('does not persist: a page refresh while still offline shows it again', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
+    drop()
+    useWorkspaceStreamStore.getState().dismiss('ws1')
+    expect(setItem).not.toHaveBeenCalled()
+    setItem.mockRestore()
+
+    // Refresh = fresh module state; the stream reconnects and is still down.
+    vi.resetModules()
+    const fresh = await import('../stores/workspaceStreamStore')
+    expect(fresh.useWorkspaceStreamStore.getState().dismissed).toBe(false)
+    fresh.useWorkspaceStreamStore.getState().setStatus('ws1', 'connecting')
+    fresh.useWorkspaceStreamStore.getState().setStatus('ws1', 'connecting')
+    expect(
+      fresh.selectWorkspaceStreamHealth(
+        fresh.useWorkspaceStreamStore.getState(),
+        'ws1'
+      ).kind
+    ).toBe('unreachable')
+  })
+
+  it('a workspace switch starts undismissed', () => {
+    drop()
+    useWorkspaceStreamStore.getState().dismiss('ws1')
+    useWorkspaceStreamStore.getState().setStatus('ws2', 'connecting')
+    expect(useWorkspaceStreamStore.getState().dismissed).toBe(false)
   })
 })

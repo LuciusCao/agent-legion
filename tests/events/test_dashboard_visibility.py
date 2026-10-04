@@ -102,8 +102,10 @@ def test_connect_applies_payload_filter_per_connection():
             )
         ).body_iterator
         unrestricted = (await manager.connect(None, "dashboard")).body_iterator  # type: ignore[arg-type]
-        assert await _next_frame(restricted) == ":ok\n\n"
-        assert await _next_frame(unrestricted) == ":ok\n\n"
+        for body in (restricted, unrestricted):
+            assert await _next_frame(body) == ":ok\n\n"
+            # #914: the opening heartbeat event bypasses the payload filter.
+            assert await _next_frame(body) == sse.heartbeat_frame()
         bus.publish("dashboard", _batch("other", revision=1))
         bus.publish("dashboard", _batch("joined", "other", revision=2))
         got_restricted = [await _next_frame(restricted)]
@@ -139,6 +141,7 @@ def test_filtered_out_events_do_not_starve_heartbeat(monkeypatch):
             )
         ).body_iterator
         assert await _next_frame(body) == ":ok\n\n"
+        assert await _next_frame(body) == sse.heartbeat_frame()
 
         async def flood() -> None:
             while True:
@@ -152,4 +155,6 @@ def test_filtered_out_events_do_not_starve_heartbeat(monkeypatch):
             flooder.cancel()
             await body.aclose()
 
-    assert asyncio.run(scenario()) == ":heartbeat\n\n"
+    # #914: the periodic beat is the data-carrying event (not a comment) and
+    # still reaches a restricted connection whose filter drops everything else.
+    assert asyncio.run(scenario()) == sse.heartbeat_frame()

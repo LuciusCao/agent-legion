@@ -734,6 +734,7 @@
     "frontend/src/lib/reviewReport.ts": 138,
     "frontend/src/lib/sanitizeHooks.ts": 30,
     "frontend/src/lib/sanitizeHtml.ts": 26,
+    "frontend/src/lib/sseStallWatchdog.ts": 84,
     "frontend/src/lib/textItem.ts": 62,
     "frontend/src/lib/textItemFilename.ts": 31,
     "frontend/src/lib/workerConsoleAddress.ts": 27,
