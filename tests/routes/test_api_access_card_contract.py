@@ -221,7 +221,7 @@ def test_python_snippet_reads_only_documented_response_fields() -> None:
     keys |= set(re.findall(r"\.get\(\"(\w+)\"\)", code))
     assert {"job_ids", "run", "id", "jobs", "status", "artifacts", "name", "download_url"} <= keys
     # #907 按去重键对账：snapshot 分页的精确比对字段。
-    assert {"source_type", "source_id", "next_cursor"} <= keys
+    assert {"source_type", "client_token", "next_cursor"} <= keys
     # `detail` 是 FastAPI 错误体（「已存在」400），不在 2xx 响应 schema 里；
     # 它的取值由 test_snippet_and_card_facts_match_code 对账到 run_service。
     unknown = keys - _reachable_fields() - {"detail"}
@@ -296,7 +296,7 @@ def test_python_snippet_reconciles_duplicate_submission() -> None:
     assert '"client_token": CLIENT_TOKEN' in body
     assert '/jobs/snapshot",' in body and '"search": f"~{CLIENT_TOKEN}"' in body
     assert 'job["source_type"] == "material"' in body
-    assert 'job["source_id"].endswith(f"~{CLIENT_TOKEN}")' in body
+    assert 'job["client_token"] == CLIENT_TOKEN' in body
     # #909 review：重提刚耗掉限流额度时 snapshot 可能 429——对账分页须像轮询
     # 一样按 Retry-After 退避重取，并在读响应字段前 raise_for_status。
     loop = body[body.index("while not job_ids:") : body.index('cursor = page["next_cursor"]')]
@@ -315,6 +315,25 @@ def test_python_snippet_reconciles_duplicate_submission() -> None:
     assert 'readback.json()["jobs"]] if readback.ok else []' in body
     doc = DOC.read_text(encoding="utf-8")
     assert "`GET /jobs/snapshot?search=~<client_token>`" in doc
+
+
+def test_python_snippet_rejects_ambiguous_token_reconciliation() -> None:
+    """#910：同一 client_token 复用于不同内容时 snapshot 有多个命中——对账
+    须翻完全部页收齐命中，多于一个即报错，绝不取第一个（第一个可能是另一份
+    内容的 job）。文档同步写明 token 按内容版本唯一。"""
+    body = SNIPPETS.read_text(encoding="utf-8").split("export function buildPythonExample", 1)[1]
+    loop = body[body.index("while not job_ids:") : body.index("if len(matches) > 1:")]
+    # 循环里只累积命中、不提前收敛：唯一出口是翻完（next_cursor 为 null）。
+    assert "matches += [" in loop
+    assert "job_ids =" not in loop
+    assert "if cursor is None:\n        break" in loop
+    verdict = body[body.index("if len(matches) > 1:") :]
+    assert verdict.index("raise SystemExit(") < verdict.index("job_ids = job_ids or matches")
+    assert verdict.index("job_ids = job_ids or matches") < verdict.index("job_id = job_ids[0]")
+    assert "按内容版本唯一" in body
+    doc = DOC.read_text(encoding="utf-8")
+    assert "token 在 workspace 内须按内容版本唯一" in doc
+    assert "按错误处理，不要取第一个" in doc
 
 
 def test_doc_console_pointer_names_the_settings_section() -> None:

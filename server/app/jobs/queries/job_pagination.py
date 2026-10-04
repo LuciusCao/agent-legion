@@ -1,9 +1,31 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_filtering import JobListFilter, filter_clauses
+
+
+def parse_job_cursor(cursor: str) -> tuple[str, str]:
+    """Split a ``next_cursor`` value into ``(created_at, job_id)``.
+
+    #891: a malformed cursor (no ``|`` separator, empty job id, unparseable
+    timestamp) raises ``ValueError`` with a caller-readable message instead of
+    reaching SQL, where it surfaced as an unhandled 5xx that integrators are
+    told to retry forever. The timestamp text is returned unchanged so the
+    query keeps the exact comparison semantics of the emitted cursor.
+    """
+    created_at, sep, job_id = cursor.partition("|")
+    if not sep or not created_at or not job_id:
+        raise ValueError("cursor must be the next_cursor value from a previous page")
+    try:
+        datetime.fromisoformat(created_at)
+    except ValueError:
+        raise ValueError(
+            "cursor timestamp is not a valid ISO datetime; pass next_cursor unchanged"
+        ) from None
+    return created_at, job_id
 
 
 def list_jobs_paginated(
@@ -20,7 +42,7 @@ def list_jobs_paginated(
         clauses.extend(extra_clauses)
         params.extend(extra_params)
     if cursor:
-        created_at, job_id = cursor.split("|", 1)
+        created_at, job_id = parse_job_cursor(cursor)
         clauses.append("(created_at < %s or (created_at = %s and id < %s))")
         params.extend([created_at, created_at, job_id])
     where = f" where {' and '.join(clauses)}"

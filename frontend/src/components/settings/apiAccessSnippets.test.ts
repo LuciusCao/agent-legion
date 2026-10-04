@@ -59,8 +59,24 @@ describe('buildPythonExample duplicate submission (#907)', () => {
   it('reconciles the existing job by the item client_token', () => {
     expect(python).toContain('"client_token": CLIENT_TOKEN')
     expect(python).toContain('/jobs/snapshot"')
-    expect(python).toContain('job["source_id"].endswith(f"~{CLIENT_TOKEN}")')
+    expect(python).toContain('job["client_token"] == CLIENT_TOKEN')
     expect(python).toContain('cursor = page["next_cursor"]')
+  })
+
+  it('raises instead of picking the first match when a token is reused (#910)', () => {
+    const loop = python.slice(
+      python.indexOf('while not job_ids:'),
+      python.indexOf('if len(matches) > 1:')
+    )
+    // 翻完全部页只累积命中，不在循环里提前收敛到某一个。
+    expect(loop).toContain('matches += [')
+    expect(loop).not.toContain('job_ids =')
+    const verdict = python.slice(python.indexOf('if len(matches) > 1:'))
+    const raise = verdict.indexOf('raise SystemExit(')
+    const adopt = verdict.indexOf('job_ids = job_ids or matches')
+    expect(raise).toBeGreaterThan(-1)
+    expect(adopt).toBeGreaterThan(raise)
+    expect(verdict.indexOf('job_id = job_ids[0]')).toBeGreaterThan(adopt)
   })
 
   it('backs off on 429 during reconciliation before reading the page', () => {

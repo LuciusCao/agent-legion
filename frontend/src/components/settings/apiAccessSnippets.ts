@@ -73,7 +73,8 @@ WORKSPACE_ID = "${workspaceId}"
 API_TOKEN = "${API_TOKEN_PLACEHOLDER}"
 
 ALREADY_EXISTS = "No tasks were resolved from input"  # 全部条目已有 job 的 400
-# 条目级幂等键（#813）：换成外部系统自己的记录 id，重提时据此对账已有 job
+# 条目级幂等键（#813）：换成外部系统自己的记录 id，重提时据此对账已有 job。
+# 须在 workspace 内按内容版本唯一：内容改了就换新 token（#910）
 CLIENT_TOKEN = "demo-1"
 
 s = requests.Session()
@@ -94,9 +95,10 @@ else:
         readback = s.get(f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/jobs", params={"run_id": run_id})
         job_ids = [job["id"] for job in readback.json()["jobs"]] if readback.ok else []
 cursor = None
+matches = []
 while not job_ids:
-    # 按去重键对账：带 client_token 的 text 项，job 的 source_id 以 "~<token>"
-    # 结尾。search 是子串匹配、按创建时间倒序分页：精确比对，沿 next_cursor 翻页
+    # 按去重键对账：job 的 client_token 字段精确比对。search 是子串匹配、按
+    # 创建时间倒序分页：沿 next_cursor 翻完全部页，收齐所有命中再判定
     r = s.get(
         f"{API_BASE}/api/workspaces/{WORKSPACE_ID}/jobs/snapshot",
         params={"search": f"~{CLIENT_TOKEN}", "limit": 500, "cursor": cursor},
@@ -106,11 +108,16 @@ while not job_ids:
         continue
     r.raise_for_status()
     page = r.json()
-    job_ids = [job["id"] for job in page["jobs"] if job["source_type"] == "material"
-               and job["source_id"].endswith(f"~{CLIENT_TOKEN}")]
+    matches += [job["id"] for job in page["jobs"] if job["source_type"] == "material"
+                and job["client_token"] == CLIENT_TOKEN]
     cursor = page["next_cursor"]
     if cursor is None:
         break
+if len(matches) > 1:
+    # token 须按内容版本唯一（#910）：多个命中 = 同一 token 用于过不同内容，
+    # 无法判定哪个是本次内容的 job——报错，绝不取第一个
+    raise SystemExit(f"{CLIENT_TOKEN}: 命中 {len(matches)} 个 job，token 被复用于不同内容；换用新 token")
+job_ids = job_ids or matches
 if not job_ids:
     raise SystemExit(f"{CLIENT_TOKEN}: 翻完也没有已有 job（期间被删除等），按未提交处理后重提")
 job_id = job_ids[0]

@@ -274,3 +274,21 @@ def test_snapshot_limit_out_of_range_is_422(client_factory, limit, expected):
         workspace = _make_workspace(client.app.state.job_db, f"snapshot-limit-{limit}-ws")
         response = client.get(f"/api/workspaces/{workspace['id']}/jobs/snapshot?limit={limit}")
     assert response.status_code == expected, response.text
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    ["garbage", "notadate|x", "2026-13-01 00:00:00|job-1", "2026-10-05 00:00:00|", "|job-1"],
+)
+def test_snapshot_malformed_cursor_is_422(client_factory, cursor):
+    """#891：cursor 解析失败与 limit 越界同一约定——422 + 可读 detail，不再
+    落到 SQL 抛未处理异常成 5xx（错误码表让调用方对 5xx 退避重试）。"""
+    with client_factory() as client:
+        workspace = _make_workspace(client.app.state.job_db, "snapshot-cursor-ws")
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/jobs/snapshot", params={"cursor": cursor}
+        )
+    assert response.status_code == 422, response.text
+    [error] = response.json()["detail"]
+    assert error["loc"] == ["query", "cursor"]
+    assert "cursor" in error["msg"]
