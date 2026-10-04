@@ -320,10 +320,13 @@ invariants:
         gate: ci_extended
 
   - id: CONFIG-WORKER-001
-    statement: "Worker Service accepts registration secrets only as write-only input through its locally authenticated UI/API/CLI, never returns or logs their plaintext, stores managed copies with mode 0600 in the writable control volume, preserves non-public runtime settings on edits, disables new-task claiming before every Worker execution-process start or restart until an operator explicitly enables it, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network). A transiently unavailable Host keeps the execution process alive and retries registration in-process without traceback or supervisor restart churn."
+    statement: "Worker Service accepts registration secrets only as write-only input through its locally authenticated UI/API/CLI, never returns or logs their plaintext, stores managed copies with mode 0600 in the writable control volume, preserves non-public runtime settings on edits, disables new-task claiming before every Worker execution-process start or restart until an operator explicitly enables it, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network). A transiently unavailable Host keeps the execution process alive and retries registration in-process without traceback or supervisor restart churn. Every control-plane route (page, assets, /api/*) rejects Host headers outside loopback variants plus the configured exposure/console host (#923); mutating requests also reject cross-site Sec-Fetch-Site or mismatched Origin, and the control token is embedded in the page only when the exposure is loopback and the Host check is enabled."
     owner: agent-worker
     risk: high
     evidence:
+      - kind: integration
+        target: tests/workers/test_worker_control_host_guard.py
+        gate: quick
       - kind: integration
         target: tests/workers/test_agent_worker_service.py
         gate: quick

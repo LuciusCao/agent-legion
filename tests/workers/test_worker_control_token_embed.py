@@ -50,7 +50,7 @@ def test_index_injects_control_token(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     app = create_app(_FakeSupervisor(store), ui)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         body = client.get("/").text
 
     assert f'= "{store.control_token()}"' in body
@@ -67,7 +67,7 @@ def test_index_skips_control_token_when_embedding_disabled(tmp_path: Path) -> No
     store = WorkerConfigStore(tmp_path / "state")
     app = create_app(_FakeSupervisor(store), ui, embed_token=False)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         body = client.get("/").text
 
     assert store.control_token() not in body
@@ -182,8 +182,15 @@ def test_main_reads_effective_bind_env(tmp_path: Path, monkeypatch: pytest.Monke
         captured["effective_host"] = effective_host
         return True
 
-    def fake_create_app(supervisor: object, ui_dir: object, *, embed_token: bool) -> object:
+    def fake_create_app(
+        supervisor: object,
+        ui_dir: object,
+        *,
+        embed_token: bool,
+        allowed_hosts: frozenset[str] | None,
+    ) -> object:
         captured["embed_token"] = embed_token
+        captured["allowed_hosts"] = allowed_hosts
         return object()
 
     monkeypatch.setattr(service_module, "embed_control_token", fake_embed_control_token)
@@ -196,11 +203,14 @@ def test_main_reads_effective_bind_env(tmp_path: Path, monkeypatch: pytest.Monke
 
     # env 未设置 → effective_host=None（裸机/dev 形态，行为与现状一致）
     monkeypatch.delenv("AGENT_WORKER_UI_EFFECTIVE_BIND", raising=False)
+    # main 会写回 AGENT_WORKER_CONSOLE_URL：先登记让 monkeypatch 在收尾时还原
+    monkeypatch.delenv("AGENT_WORKER_CONSOLE_URL", raising=False)
     service_module.main()
     assert captured == {
         "host": "127.0.0.1",
         "effective_host": None,
         "embed_token": True,
+        "allowed_hosts": frozenset({"127.0.0.1", "localhost", "::1"}),
     }
 
     # env 设置（Docker 形态，compose 注入）→ 透传给 embed_control_token

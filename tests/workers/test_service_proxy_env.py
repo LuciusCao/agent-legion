@@ -254,7 +254,7 @@ def test_put_config_proxy_change_triggers_restart(tmp_path: Path) -> None:
     app = create_app(_FakeSupervisor(store), tmp_path, embed_token=False)
     headers = {"Authorization": f"Bearer {store.control_token()}"}
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put("/api/config", json={"proxy": "http://gateway:8080"}, headers=headers)
 
     assert response.status_code == 200
@@ -296,7 +296,7 @@ def test_put_config_proxy_clear_returns_to_direct(tmp_path: Path) -> None:
     app = create_app(_FakeSupervisor(store), tmp_path, embed_token=False)
     headers = {"Authorization": f"Bearer {store.control_token()}"}
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put("/api/config", json={"proxy": ""}, headers=headers)
 
     assert response.status_code == 200

@@ -20,6 +20,11 @@ from worker.heartbeat_relay import start_heartbeat_relay, stop_heartbeat_relay
 from worker.metrics_proxy import create_metrics_proxy_router
 from worker.service_bind import embed_control_token
 from worker.service_env import strip_proxy_env
+from worker.service_host_guard import (
+    LOOPBACK_HOSTS,
+    control_plane_allowed_hosts,
+    install_host_guard,
+)
 from worker.service_models import WorkerConfigPayload
 from worker.service_static import create_static_router
 from worker.service_tokens import create_register_token_router
@@ -58,8 +63,16 @@ def _forget_previous_worker(config: dict[str, Any]) -> None:
         )
 
 
-def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool = True) -> FastAPI:
+def create_app(
+    supervisor: WorkerSupervisor,
+    ui_dir: Path,
+    *,
+    embed_token: bool = True,
+    allowed_hosts: frozenset[str] | None = LOOPBACK_HOSTS,
+) -> FastAPI:
     token = supervisor.store.control_token()
+    # #923：token 内嵌以 Host 头校验启用为前提（None = 通配暴露面，不校验）。
+    embed_token = embed_token and allowed_hosts is not None
 
     async def require_token(request: Request) -> None:
         header = request.headers.get("authorization", "")
@@ -83,6 +96,7 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
             supervisor.stop()
 
     app = FastAPI(title="Agent Legion Worker Service", version="1.0", lifespan=lifespan)
+    install_host_guard(app, allowed_hosts)
     # 静态资产面（index + 白名单 /assets，含 #493 P1-1 的 ui_assets 全等
     # 钉子）拆在 service_static；token 内嵌与否在此传参。
     app.include_router(create_static_router(ui_dir, token, embed_token=embed_token))
@@ -160,7 +174,8 @@ def main() -> int:
     # Worker 自报控制台地址（主控制台按 Worker 显示「控制台」入口）：只有本
     # 进程知道绑定地址，经 env 交给 executor 子进程在注册 labels 里上报；
     # 部署侧显式设置的 AGENT_WORKER_CONSOLE_URL 优先（见 worker/console_url.py）。
-    os.environ[CONSOLE_URL_ENV] = resolve_console_url(args.host, args.port, os.environ)
+    console_url = resolve_console_url(args.host, args.port, os.environ)
+    os.environ[CONSOLE_URL_ENV] = console_url
     worker_dir = Path(__file__).resolve().parent  # worker/ 包根（executor.py 与 ui/ 同级）
     store = WorkerConfigStore(
         args.state_dir.resolve(), args.config.resolve() if args.config is not None else None
@@ -175,6 +190,7 @@ def main() -> int:
         supervisor,
         worker_dir / "ui",
         embed_token=embed_control_token(args.host, effective_host),
+        allowed_hosts=control_plane_allowed_hosts(args.host, effective_host, console_url),
     )
     uvicorn.run(app, host=args.host, port=args.port)
     return 0

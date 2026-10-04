@@ -257,8 +257,8 @@ curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/develop/scri
 控制台 token 体验（issue #489）：默认 loopback 发布下 token 已自动内嵌页面，
 打开控制台即用；仅当把 `AGENT_WORKER_UI_BIND` 改为非回环地址（页面不再内嵌）
 时才需手动取一次 token（安装脚本的成功提示与 §「控制面鉴权」的判定矩阵
-均含该命令）。该内嵌判定随 **worker 0.8.0** 发布——安装脚本钉住的 0.7.0
-仍要求手动输入一次（脚本按实际 `--version` 区分提示）。
+均含该命令）。该内嵌判定随 **worker 0.7.16** 发布——用 `--version` 安装更旧
+版本时仍要求手动输入一次（脚本按实际 `--version` 区分提示）。
 
 与拉取式 override 的取舍：仓库克隆 + `compose.worker.local.yaml` 适合开发/
 调试机（能跑 `make stack-*`、随仓库升级）；一键安装适合纯执行节点（只有
@@ -370,7 +370,7 @@ docker compose -f deploy/compose.host.yaml exec worker cat /var/lib/agent-legion
 
 Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > 状态目录下的 `control_token` 文件（容器内执行时自动命中）。
 
-**页面内嵌判定（issue #489）**：控制台页面是否自动内嵌 token，由**实际暴露面**而非进程 bind 决定。Docker 形态下容器内进程必绑 `0.0.0.0`（端口映射前提），但页面真正从哪个地址被访问由 compose 的宿主侧发布地址（`AGENT_WORKER_UI_BIND`）决定——compose 把该值经 `AGENT_WORKER_UI_EFFECTIVE_BIND` 环境变量告知 service（与发布行同一插值源，`.env` 一处改、两处同步）。该机制随 **worker 0.8.0** 发布：一键安装（`install-worker.sh`）在更低版本上安装时页面仍要求手动输入 token（脚本的成功提示会按实际版本区分）。判定矩阵（进程 bind × 宿主侧发布地址 × token 内嵌结果）：
+**页面内嵌判定（issue #489）**：控制台页面是否自动内嵌 token，由**实际暴露面**而非进程 bind 决定。Docker 形态下容器内进程必绑 `0.0.0.0`（端口映射前提），但页面真正从哪个地址被访问由 compose 的宿主侧发布地址（`AGENT_WORKER_UI_BIND`）决定——compose 把该值经 `AGENT_WORKER_UI_EFFECTIVE_BIND` 环境变量告知 service（与发布行同一插值源，`.env` 一处改、两处同步）。该机制随 **worker 0.7.16** 发布，且以下方「Host 头校验」已启用为前提：一键安装（`install-worker.sh`）在更低版本上安装时页面仍要求手动输入 token（脚本的成功提示会按实际版本区分）。判定矩阵（进程 bind × 宿主侧发布地址 × token 内嵌结果）：
 
 | 进程 bind（`--host`） | 宿主侧发布（`AGENT_WORKER_UI_BIND`） | token 内嵌 | 说明 |
 | --- | --- | --- | --- |
@@ -378,6 +378,8 @@ Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-
 | `0.0.0.0`（容器内） | `127.0.0.1`（默认） / `[::1]` | 是 | 容器内 bind 仅为端口映射前提；宿主发布回环 = 页面仅本机可达，内嵌不扩大风险面，日志打 info 说明判定链。compose.host.yaml 形态另需网络隔离成立（见下方网络拓扑） |
 | `0.0.0.0`（容器内） | `0.0.0.0` / `192.0.2.1` 等非回环 | 否 | 同网段浏览器都能打开页面，不内嵌 + warning，需手动输入 token（见下方取 token 命令） |
 | 回环 | 非回环 | 否 | 复合形态兜底：设置了 `AGENT_WORKER_UI_EFFECTIVE_BIND` 时判定只看发布面（发布非回环即不内嵌，覆盖发布层与进程 bind 不一致的场景） |
+
+**Host 头校验（issue #923）**：控制面全部路由（`GET /`、`/assets/*` 与全部 `/api/*`，含 `/api/health`）只接受 Host 头属于白名单的请求，其余一律 403。白名单 = 回环变体（`127.0.0.1` / `localhost` / `[::1]`，任意端口）∪ 实际暴露面地址（`AGENT_WORKER_UI_EFFECTIVE_BIND`，未设置时取进程 bind）∪ `AGENT_WORKER_CONSOLE_URL` 的主机名。经主机名（反向代理、MagicDNS 名等）访问控制台时，把该地址写进 `AGENT_WORKER_CONSOLE_URL`。暴露面为通配地址（`0.0.0.0` / `::`）时无法枚举合法主机名，Host 校验不启用、页面也不内嵌 token（API 仍由 control token 把守）。变更类请求（`PUT` / `POST` / `DELETE`）另做来源校验：浏览器带 `Sec-Fetch-Site` 时只放行 `same-origin` / `none`，带 `Origin` 时须与 Host 头一致；`workerctl` 等不带这两个头的客户端不受影响。
 
 两个运维注意：
 
