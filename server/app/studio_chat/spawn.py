@@ -118,17 +118,25 @@ def spawn_session_runtime(
         # thread's death-echo on_exit may only tear down this runtime, never
         # a newer one resume registered for the same session_id (ABA).
         with runtimes_lock:
-            # #872 delete fence: a close/delete that landed between the
-            # caller's claim and this registration found no runtime to
-            # retire and already answered. Re-read the row under the same
-            # lock close_session writes under, and never register (or start)
-            # a runtime for a closed or soft-deleted row.
+            # #872 delete fence (#924: archive too): a close/delete/archive
+            # that landed between the caller's claim and this registration
+            # found no runtime to retire and already answered. Re-read the
+            # row under the same lock close_session writes under, and never
+            # register (or start) a runtime for a closed, soft-deleted or
+            # archived row.
             row = db.get_studio_chat_session(session_id)
-            fenced = row is None or row.get("deleted_at") is not None or row["status"] == "closed"
+            fenced = (
+                row is None
+                or row.get("deleted_at") is not None
+                or row.get("archived_at") is not None
+                or row["status"] == "closed"
+            )
             if not fenced:
                 runtimes[session_id] = callbacks.runtime = runtime
         if fenced:
-            raise InvalidOperationError("Chat session was closed or deleted before startup")
+            raise InvalidOperationError(
+                "Chat session was closed, deleted or archived before startup"
+            )
         handle.start()
         if not handle.ready_event.wait(timeout=SESSION_START_TIMEOUT_SECONDS):
             raise InvalidOperationError("Studio agent failed to start (timeout)")
