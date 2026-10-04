@@ -301,3 +301,29 @@ def test_snapshot_malformed_cursor_is_422(client_factory, cursor):
     [error] = response.json()["detail"]
     assert error["loc"] == ["query", "cursor"]
     assert "cursor" in error["msg"]
+
+
+def test_snapshot_cursor_binds_parsed_utc_timestamp(client_factory):
+    """#974 review：SQL 绑定的是解析后的 datetime（naive 视为 UTC，与 next_cursor
+    生成形态一致），不是原字符串——合法 next_cursor 及其 `T` / `+00:00` 等价写法
+    翻到同一页。"""
+    with client_factory() as client:
+        job_db = client.app.state.job_db
+        workspace = _make_workspace(job_db, "snapshot-cursor-bind-ws")
+        for i in range(3):
+            _make_job(job_db, workspace["id"], f"q-bind-{i}")
+        first = _snapshot(client, workspace["id"], "?limit=1")
+        cursor = first["next_cursor"]
+        stamp, _, job_id = cursor.partition("|")
+        variants = [cursor, f"{stamp.replace(' ', 'T')}|{job_id}", f"{stamp}+00:00|{job_id}"]
+        pages = [
+            client.get(
+                f"/api/workspaces/{workspace['id']}/jobs/snapshot",
+                params={"limit": 1, "cursor": variant},
+            )
+            for variant in variants
+        ]
+    assert all(page.status_code == 200 for page in pages), [p.text for p in pages]
+    ids = [[job["id"] for job in page.json()["jobs"]] for page in pages]
+    assert ids[0] and ids[0] != [first["jobs"][0]["id"]]
+    assert ids == [ids[0]] * len(ids)

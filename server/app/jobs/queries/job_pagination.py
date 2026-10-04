@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from server.app.jobs import JobQueries
@@ -15,14 +15,16 @@ _CURSOR_TIMESTAMP = re.compile(
 )
 
 
-def parse_job_cursor(cursor: str) -> tuple[str, str]:
+def parse_job_cursor(cursor: str) -> tuple[datetime, str]:
     """Split a ``next_cursor`` value into ``(created_at, job_id)``.
 
     #891: a malformed cursor (no ``|`` separator, empty job id, unparseable
     timestamp) raises ``ValueError`` with a caller-readable message instead of
     reaching SQL, where it surfaced as an unhandled 5xx that integrators are
-    told to retry forever. The timestamp text is returned unchanged so the
-    query keeps the exact comparison semantics of the emitted cursor.
+    told to retry forever. The query binds the parsed ``datetime`` (never the
+    raw text), so SQL only ever sees a value Python already validated; a
+    naive timestamp (the emitted form, offset stripped) is UTC, matching the
+    connection's UTC session timezone the raw string used to parse under.
     """
     created_at, sep, job_id = cursor.partition("|")
     if not sep or not created_at or not job_id:
@@ -30,12 +32,12 @@ def parse_job_cursor(cursor: str) -> tuple[str, str]:
     try:
         if not _CURSOR_TIMESTAMP.fullmatch(created_at):
             raise ValueError
-        datetime.fromisoformat(created_at)
+        parsed = datetime.fromisoformat(created_at)
     except ValueError:
         raise ValueError(
             "cursor timestamp is not a valid ISO datetime; pass next_cursor unchanged"
         ) from None
-    return created_at, job_id
+    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)), job_id
 
 
 def list_jobs_paginated(
@@ -52,9 +54,9 @@ def list_jobs_paginated(
         clauses.extend(extra_clauses)
         params.extend(extra_params)
     if cursor:
-        created_at, job_id = parse_job_cursor(cursor)
+        after, job_id = parse_job_cursor(cursor)
         clauses.append("(created_at < %s or (created_at = %s and id < %s))")
-        params.extend([created_at, created_at, job_id])
+        params.extend([after, after, job_id])
     where = f" where {' and '.join(clauses)}"
     with job_db._connect_read() as conn:
         rows = conn.execute(
@@ -67,7 +69,7 @@ def list_jobs_paginated(
     last = jobs[limit - 1]
     # Strip the UTC offset: the cursor travels in URL query strings where
     # "+" decodes to a space, and the naive value parses back under the
-    # connection's UTC session timezone.
+    # parse_job_cursor reads it back as UTC.
     created_at = str(last.get("created_at", "")).removesuffix("+00:00")
     next_cursor = f"{created_at}|{last['id']}"
     return jobs[:limit], next_cursor
