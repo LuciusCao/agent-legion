@@ -1,0 +1,278 @@
+"""原生 prod 运行态记录（#894）的行为检查。
+
+prod-up 把实际起来的实例（PID + bind/port）落到 ``data/native-prod.state``，
+prod-down 以它为准、配置为辅；按记录 kill 前校验进程签名、``--port`` 与
+工作目录（防 PID 复用误杀）。这里在临时目录里搭假仓库根（只拷三个脚本），
+用带服务签名命令行的 Python 监听进程充当后端/Worker，真实执行
+``native-prod-down.sh`` 与 up 的守卫函数——不碰本机真实 prod 实例。
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.no_db
+
+ROOT = Path(__file__).resolve().parents[2]
+_SCRIPTS = ("native-prod-down.sh", "dotenv-lib.sh", "native-prod-state-lib.sh")
+_NATIVE_VARS = (
+    "NATIVE_BACKEND_PORT",
+    "NATIVE_WORKER_PORT",
+    "NATIVE_BACKEND_BIND",
+    "NATIVE_WORKER_BIND",
+)
+_SIGNATURES = {
+    "backend": ["-m", "uvicorn", "server.app.main:create_prod_app", "--factory"],
+    "worker": ["-m", "worker.service", "--state-dir", "data/agent-worker-service"],
+}
+# argv 尾部 [..., "--host", host, "--port", port]：与真实启动命令同形。
+_LISTENER = (
+    "import socket, sys, time\n"
+    "s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+    "s.bind((sys.argv[-3], int(sys.argv[-1]))); s.listen(1)\n"
+    "time.sleep(600)\n"
+)
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    (root / "scripts").mkdir(parents=True)
+    (root / "data").mkdir()
+    for name in _SCRIPTS:
+        shutil.copy(ROOT / "scripts" / name, root / "scripts" / name)
+    return root
+
+
+class _Proc:
+    """脱离 pytest 的假服务进程（经中间 shell 孤儿化，由 init 收尸）。
+
+    直接 Popen 的子进程被 SIGTERM 后在 pytest 回收前是僵尸，``kill -0``
+    仍成功，down 会误判「未退出」；孤儿化后退出即被 init 回收。"""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+
+    def alive(self) -> bool:
+        try:
+            os.kill(self.pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    def kill(self) -> None:
+        if self.alive():
+            os.kill(self.pid, signal.SIGKILL)
+
+
+@pytest.fixture
+def procs() -> Iterator[list[_Proc]]:
+    started: list[_Proc] = []
+    yield started
+    for proc in started:
+        proc.kill()
+
+
+def _detach(procs: list[_Proc], cwd: Path, argv: list[str]) -> _Proc:
+    # 子进程关掉管道写端（否则读端要等假服务退出才见 EOF）。
+    launcher = 'exec </dev/null >/dev/null 2>&1; "$@" {fd}>&- & echo $! >&{fd}'
+    read_fd, write_fd = os.pipe()
+    subprocess.run(
+        ["bash", "-c", launcher.format(fd=write_fd), "launcher", *argv],
+        cwd=cwd,
+        check=True,
+        pass_fds=(write_fd,),
+    )
+    os.close(write_fd)
+    with os.fdopen(read_fd) as reader:
+        proc = _Proc(int(reader.read().strip()))
+    procs.append(proc)
+    return proc
+
+
+def _spawn(procs: list[_Proc], cwd: Path, kind: str, port: int) -> _Proc:
+    argv = [sys.executable, "-c", _LISTENER, *_SIGNATURES[kind]]
+    proc = _detach(procs, cwd, [*argv, "--host", "127.0.0.1", "--port", str(port)])
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        with socket.socket() as sock:
+            if sock.connect_ex(("127.0.0.1", port)) == 0:
+                return proc
+        time.sleep(0.05)
+    raise AssertionError(f"fake {kind} did not listen on {port}")
+
+
+def _write_state(repo: Path, **values: object) -> None:
+    lines = [f"{key}={value}" for key, value in values.items()]
+    (repo / "data" / "native-prod.state").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_config(repo: Path, backend_port: int, worker_port: int) -> None:
+    (repo / ".env").write_text(
+        f"NATIVE_BACKEND_PORT={backend_port}\nNATIVE_WORKER_PORT={worker_port}\n", encoding="utf-8"
+    )
+
+
+def _run_down(repo: Path) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in os.environ.items() if k not in _NATIVE_VARS}
+    return subprocess.run(
+        ["bash", str(repo / "scripts" / "native-prod-down.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def _exited(proc: _Proc) -> bool:
+    deadline = time.monotonic() + 5
+    while proc.alive():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def test_down_stops_recorded_instance_after_config_changed(repo: Path, procs: list) -> None:
+    """#894 主场景：实例在旧端口运行、配置已改成新端口——down 按运行态记录
+    停掉旧实例（不再误报未运行），全部停下后删除记录。"""
+    old_b, old_w = _free_port(), _free_port()
+    backend = _spawn(procs, repo, "backend", old_b)
+    worker = _spawn(procs, repo, "worker", old_w)
+    _write_state(
+        repo,
+        BACKEND_PID=backend.pid,
+        BACKEND_BIND="127.0.0.1",
+        BACKEND_PORT=old_b,
+        WORKER_PID=worker.pid,
+        WORKER_BIND="127.0.0.1",
+        WORKER_PORT=old_w,
+    )
+    _write_config(repo, _free_port(), _free_port())
+
+    result = _run_down(repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _exited(backend) and _exited(worker)
+    assert "按运行态记录停止" in result.stdout
+    assert not (repo / "data" / "native-prod.state").exists()
+
+
+def test_down_finds_instance_on_recorded_port_when_pid_stale(repo: Path, procs: list) -> None:
+    """记录 PID 已失效（实例被别的方式重启过）但记录端口上仍有签名匹配的本
+    实例监听：仍按运行态停它，而不是回落到已改的配置。"""
+    old_b, old_w = _free_port(), _free_port()
+    backend = _spawn(procs, repo, "backend", old_b)
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    _write_state(repo, BACKEND_PID=dead.pid, BACKEND_BIND="127.0.0.1", BACKEND_PORT=old_b)
+    _write_config(repo, _free_port(), old_w)
+
+    result = _run_down(repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _exited(backend)
+
+
+def test_down_never_kills_reused_pid(repo: Path, procs: list, tmp_path: Path) -> None:
+    """PID 复用防护：记录 PID 现属无签名的无关进程、或签名相同但工作目录是
+    另一个仓库根（别的 worktree 的实例）——都不得 kill；记录视为陈旧，提示
+    后回落按配置定位。"""
+    stray = _detach(procs, repo, ["sleep", "300"])
+    other_root = tmp_path / "other-worktree"
+    other_root.mkdir()
+    rec_b, rec_w = _free_port(), _free_port()
+    foreign_worker = _spawn(procs, other_root, "worker", rec_w)
+    _write_state(
+        repo,
+        BACKEND_PID=stray.pid,
+        BACKEND_BIND="127.0.0.1",
+        BACKEND_PORT=rec_b,
+        WORKER_PID=foreign_worker.pid,
+        WORKER_BIND="127.0.0.1",
+        WORKER_PORT=rec_w,
+    )
+    _write_config(repo, _free_port(), _free_port())
+
+    result = _run_down(repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stray.alive() and foreign_worker.alive()
+    assert result.stdout.count("回落按当前配置") == 2
+    assert "未在运行，跳过" in result.stdout
+
+
+def test_down_without_record_falls_back_to_config(repo: Path, procs: list) -> None:
+    """无运行态记录（旧版本 up 起的实例）：提示后按配置定位，保持既有行为。"""
+    port_b, port_w = _free_port(), _free_port()
+    backend = _spawn(procs, repo, "backend", port_b)
+    _write_config(repo, port_b, port_w)
+
+    result = _run_down(repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "无运行态记录" in result.stdout
+    assert _exited(backend)
+
+
+def _lib_call(repo: Path, snippet: str) -> subprocess.CompletedProcess[str]:
+    up = (ROOT / "scripts" / "native-prod-up.sh").read_text(encoding="utf-8")
+    match = re.search(
+        r"^refuse_recorded_instance_elsewhere\(\) \{.*?^\}", up, re.MULTILINE | re.DOTALL
+    )
+    assert match, "refuse_recorded_instance_elsewhere 函数定义缺失"
+    code = (
+        "set -euo pipefail\n"
+        f'ROOT="{repo}"\n'
+        f'source "{repo}/scripts/native-prod-state-lib.sh"\n' + match.group(0) + "\n" + snippet
+    )
+    return subprocess.run(["bash", "-c", code], capture_output=True, text=True, timeout=60)
+
+
+def test_up_refuses_when_recorded_instance_runs_elsewhere(repo: Path, procs: list) -> None:
+    """up 侧守卫：记录中的本实例仍在旧地址运行而配置已改 → 拒绝启动并指引
+    先 down；配置未变（幂等重跑）或记录陈旧都放行。"""
+    old_b = _free_port()
+    backend = _spawn(procs, repo, "backend", old_b)
+    _write_state(repo, BACKEND_PID=backend.pid, BACKEND_BIND="127.0.0.1", BACKEND_PORT=old_b)
+    new_b = _free_port()
+    guard = 'refuse_recorded_instance_elsewhere backend BACKEND "后端" 127.0.0.1 {}\n'
+
+    refused = _lib_call(repo, guard.format(new_b))
+    assert refused.returncode == 1
+    assert f"127.0.0.1:{old_b}" in refused.stderr and "make prod-down" in refused.stderr
+    assert _lib_call(repo, guard.format(old_b)).returncode == 0
+
+    backend.kill()
+    assert _exited(backend)
+    assert _lib_call(repo, guard.format(new_b)).returncode == 0
+
+
+def test_state_write_records_listener_pid_and_address(repo: Path, procs: list) -> None:
+    """up 落的记录：PID 取端口上签名匹配的实际监听进程，bind/port 原样记下；
+    没起来的服务 PID 留空。"""
+    port_b, port_w = _free_port(), _free_port()
+    backend = _spawn(procs, repo, "backend", port_b)
+    result = _lib_call(repo, f'native_state_write "$ROOT" 127.0.0.1 {port_b} 0.0.0.0 {port_w}\n')
+    assert result.returncode == 0, result.stderr
+    state = (repo / "data" / "native-prod.state").read_text(encoding="utf-8")
+    assert f"BACKEND_PID={backend.pid}\n" in state
+    assert f"BACKEND_PORT={port_b}\n" in state
+    assert "WORKER_PID=\n" in state and "WORKER_BIND=0.0.0.0\n" in state

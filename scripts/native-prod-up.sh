@@ -9,12 +9,16 @@
 # docs/agent-worker-deployment.md）。取值两级来源：进程环境 > 根 .env
 # （#486：写进 .env 才能跨 shell 会话/重启/launchd 持久，export 仍是临时
 # 覆盖的逃生门；空值按未配置回落默认）。native-prod-down.sh 读同一组来源。
+# 就绪后在 data/native-prod.state 落运行态记录（PID + 实际 bind/port，#894），
+# down 以它为准停实例；改 bind/port 前先 down（见 native-prod-state-lib.sh）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 # shellcheck source=dotenv-lib.sh
 source scripts/dotenv-lib.sh
+# shellcheck source=native-prod-state-lib.sh
+source scripts/native-prod-state-lib.sh
 
 BACKEND_PORT="$(dotenv_lookup_or NATIVE_BACKEND_PORT 8000 .env)"
 WORKER_PORT="$(dotenv_lookup_or NATIVE_WORKER_PORT 8787 .env)"
@@ -102,6 +106,23 @@ refuse_wildcard_double_instance() {
         printf '%s\n' "$listeners" | sed 's/^/  /'
         echo "通配监听会与它们并存，形成连同一个库的双实例（违反单副本约束）。"
         echo "若是旧 bind 的实例，请先停止：${var}=<旧地址> make prod-down（或 .env 里改回旧值后 make prod-down），再重新 make prod-up。"
+    } >&2
+    return 1
+}
+
+# 运行态记录（#894）显示本实例仍在另一个 bind/port 运行时拒绝启动：多半是
+# 改了 .env 的 bind/port 却没先 down，按新地址再起一套就是连同一个库的双
+# 实例。记录 PID 经签名 + 工作目录校验（native_pid_is_instance），陈旧记录
+# 不拦。make prod-down 以记录为准，能直接停掉旧地址上的实例。
+refuse_recorded_instance_elsewhere() {
+    local kind="$1" prefix="$2" name="$3" bind="$4" port="$5" pid rec
+    pid="$(native_state_live_pid "$ROOT" "$kind" "$prefix")"
+    [[ -n "$pid" ]] || return 0
+    rec="$(native_state_get "$ROOT/$NATIVE_STATE_REL" "${prefix}_BIND"):$(native_state_get "$ROOT/$NATIVE_STATE_REL" "${prefix}_PORT")"
+    [[ "$rec" != "$bind:$port" ]] || return 0
+    {
+        echo "错误: 运行态记录显示 ${name} 仍在 ${rec} 运行（pid ${pid}），与当前配置 ${bind}:${port} 不同。"
+        echo "再按新地址启动会形成连同一个库的双实例（违反单副本约束）。请先 make prod-down（按运行态记录停旧实例），再 make prod-up。"
     } >&2
     return 1
 }
@@ -214,6 +235,8 @@ fi
 wildcard_rc=0
 refuse_wildcard_double_instance "后端" "$BACKEND_BIND" "$BACKEND_PORT" NATIVE_BACKEND_BIND || wildcard_rc=1
 refuse_wildcard_double_instance "Worker" "$WORKER_BIND" "$WORKER_PORT" NATIVE_WORKER_BIND || wildcard_rc=1
+refuse_recorded_instance_elsewhere backend BACKEND "后端" "$BACKEND_BIND" "$BACKEND_PORT" || wildcard_rc=1
+refuse_recorded_instance_elsewhere worker WORKER "Worker" "$WORKER_BIND" "$WORKER_PORT" || wildcard_rc=1
 if [[ "$wildcard_rc" -ne 0 ]]; then
     exit 1
 fi
@@ -258,6 +281,7 @@ for i in $(seq 1 150); do
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
     if $backend_ok && $worker_ok; then
+        native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$WORKER_BIND" "$WORKER_PORT"
         echo "原生环境已就绪：后端 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT （含前端 SPA），Worker 控制台 http://$WORKER_HEALTH_HOST:$WORKER_PORT"
         exit 0
     fi
@@ -266,5 +290,7 @@ for i in $(seq 1 150); do
     fi
     sleep 2
 done
+# 未就绪也落记录（PID 取得到多少记多少），down 仍能按实际地址收拾残局。
+native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$WORKER_BIND" "$WORKER_PORT"
 echo "服务未在预期时间内就绪，日志见 data/logs/prod-{backend,worker}.log" >&2
 exit 1
