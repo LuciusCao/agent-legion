@@ -3722,6 +3722,10 @@ export interface components {
       has_draft: boolean
       /** Published At */
       published_at?: string | null
+      /** Published Capability */
+      published_capability?: string | null
+      /** Published Version */
+      published_version?: number | null
       /** Runtime */
       runtime: string
       /** Skill */

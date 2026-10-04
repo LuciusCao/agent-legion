@@ -191,6 +191,29 @@ def test_list_shows_latest_per_agent(client, ws) -> None:
     assert agents["agent-a"]["has_draft"] is True
     assert agents["agent-a"]["version"] == 2
     assert agents["agent-a"]["capability"] == "review_keywords"
+    assert agents["agent-a"]["published_capability"] == "review_keywords"
+    assert agents["agent-a"]["published_version"] == 1
+
+
+def test_list_exposes_published_capability_behind_a_draft(client, ws) -> None:
+    """#906: published capability A + draft capability B — the list row is the
+    draft (B), but the routed published capability (A) is exposed so the
+    settings catalog judges references by it; draft-only rows carry null."""
+    client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
+    _publish(client, "agent-a", ws)
+    client.put(f"{BASE}/agent-a/draft", params=ws, json={**PAYLOAD_V1, "capability": "renamed_cap"})
+    client.post(BASE, params=ws, json={**PAYLOAD_V1, "agent_id": "agent-d", "capability": "d"})
+
+    listed = client.get(BASE, params=ws)
+    assert listed.status_code == 200
+    agents = {item["agent_id"]: item for item in listed.json()["agents"]}
+    assert agents["agent-a"]["status"] == "draft"
+    assert agents["agent-a"]["capability"] == "renamed_cap"
+    assert agents["agent-a"]["published_capability"] == "review_keywords"
+    assert agents["agent-a"]["published_version"] == 1
+    assert agents["agent-d"]["status"] == "draft"
+    assert agents["agent-d"]["published_capability"] is None
+    assert agents["agent-d"]["published_version"] is None
 
 
 def test_versions_and_rollback(client, ws) -> None:

@@ -5,40 +5,29 @@ import { useWorkflowDefinitionQuery } from '../../hooks/useWorkflowDefinitionQue
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { toErrorMessage } from '../../lib/queryError'
 import { useUiStore } from '../../stores/uiStore'
-import type { AgentListItem, WorkflowDefinitionRecord } from '../../types'
+import type { AgentListItem } from '../../types'
 import { ConfirmDialog } from '../ConfirmDialog'
+import {
+  agentNodeReferences,
+  isDraftOnly,
+  nodeName,
+  pendingDraftCapability,
+  referencedWarning,
+  routedCapability,
+} from './workspaceAgentReferences'
 import settingsStyles from '../../pages/SettingsPage.module.css'
 import styles from './WorkspaceAgentsSection.module.css'
 
-type WorkflowNode = WorkflowDefinitionRecord['nodes'][number]
 type AgentFilter = 'all' | 'unreferenced'
 
-/** capability → 引用它的 agent 节点（只有 `type: agent` 节点按 capability
- * 路由到 Agent；code 节点同名 capability 不构成引用）。 */
-export function agentNodeReferences(
-  nodes: readonly WorkflowNode[]
-): Map<string, WorkflowNode[]> {
-  const byCapability = new Map<string, WorkflowNode[]>()
-  for (const node of nodes) {
-    if (node.node_type !== 'agent' || !node.capability) continue
-    const list = byCapability.get(node.capability) ?? []
-    list.push(node)
-    byCapability.set(node.capability, list)
-  }
-  return byCapability
-}
-
 const SECTION_HINT =
-  '本 workspace 的全部 Agent 定义（不含已归档）。「未被引用」指当前生效的 workflow 中没有 Agent 节点使用其 capability，通常是重构后遗留的孤儿，可在此归档。'
+  '本 workspace 的全部 Agent 定义（不含已归档）。「未被引用」指当前生效的 workflow 中没有 Agent 节点使用其已发布版本的 capability（从未发布的按草稿 capability 判定），通常是重构后遗留的孤儿，可在此归档。'
 
-function referencedWarning(refs: WorkflowNode[]): string {
-  return `该 Agent 仍被当前 workflow 的 ${refs.length} 个节点引用（${refs.map(nodeName).join('、')}）。后端不会阻止归档，但归档后这些节点的 capability 将没有已发布的 Agent 可解析，运行与再次发布 workflow 都可能因此失败。`
-}
-
-function nodeName(node: WorkflowNode): string {
-  return node.label && node.label !== node.key
-    ? `${node.label}（${node.key}）`
-    : node.key
+function statusLabel(agent: AgentListItem): string {
+  if (isDraftOnly(agent)) return '仅草稿（从未发布）'
+  if (agent.status === 'draft')
+    return `已发布 v${agent.published_version ?? '?'} · 有草稿`
+  return '已发布'
 }
 
 /**
@@ -47,7 +36,8 @@ function nodeName(node: WorkflowNode): string {
  * 二次确认的归档动作——归档是 Agent 定义自身的生命周期动作，不依赖「恰好
  * 有节点绑定它」（Studio inspector 的归档入口只对已绑定节点可达）。
  *
- * 引用关系以 workspace 的 active revision 为准（未发布的 workflow 草稿不计）。
+ * 引用关系以 workspace 的 active revision 为准（未发布的 workflow 草稿不计），
+ * Agent 侧按已发布版本的 capability 判定（#906，口径见 routedCapability）。
  * 后端 DELETE 对仍被引用的 Agent 不拒绝（Agent 归档不改路由），故这里只在
  * 确认框里提示引用关系与后果，不在前端另立拦截。端点经 studio_secured 挂载
  * 要求 admin，页面层按角色只对 admin 渲染本区块。
@@ -77,12 +67,13 @@ export function WorkspaceAgentsSection({
     (agent) => agent.status !== 'archived'
   )
   const refsOf = (agent: AgentListItem) =>
-    references.get(agent.capability) ?? []
+    references.get(routedCapability(agent)) ?? []
   const unreferenced = referencesKnown
     ? agents.filter((agent) => refsOf(agent).length === 0)
     : []
   const visible = filter === 'unreferenced' ? unreferenced : agents
   const pendingRefs = pending ? refsOf(pending) : []
+  const pendingDraftCap = pending ? pendingDraftCapability(pending) : null
 
   async function handleArchive() {
     if (!pending) return
@@ -150,6 +141,7 @@ export function WorkspaceAgentsSection({
         <ul className={styles.list} aria-label="Agent 定义列表">
           {visible.map((agent) => {
             const refs = refsOf(agent)
+            const draftCap = pendingDraftCapability(agent)
             return (
               <li
                 key={agent.agent_id}
@@ -159,12 +151,10 @@ export function WorkspaceAgentsSection({
                 <div className={styles.itemMain}>
                   <span className={styles.itemLabel}>{agent.agent_id}</span>
                   <span className={styles.meta}>
-                    capability：{agent.capability} · v{agent.version}
+                    {`capability：${routedCapability(agent)}${draftCap ? `（草稿改为 ${draftCap}，未发布）` : ''} · v${agent.version}`}
                   </span>
                 </div>
-                <span className={styles.chip}>
-                  {agent.status === 'draft' ? '草稿' : '已发布'}
-                </span>
+                <span className={styles.chip}>{statusLabel(agent)}</span>
                 {referencesKnown && (
                   <span
                     className={refs.length ? styles.chip : styles.chipOrphan}
@@ -195,11 +185,16 @@ export function WorkspaceAgentsSection({
         onConfirm={handleArchive}
       >
         <p className={styles.dialogText}>
-          {`确定要归档 Agent「${pending?.agent_id ?? ''}」（capability：${pending?.capability ?? ''}）吗？其全部版本都会标记为已归档，不再出现在 Agent 目录与选择器中。`}
+          {`确定要归档 Agent「${pending?.agent_id ?? ''}」（capability：${pending ? routedCapability(pending) : ''}）吗？其全部版本${pending && !isDraftOnly(pending) ? '（含已发布版本）' : ''}都会标记为已归档，不再出现在 Agent 目录与选择器中。`}
         </p>
-        {pendingRefs.length > 0 && (
+        {pending && pendingDraftCap && (
+          <p className={styles.dialogText}>
+            {`草稿已把 capability 改为 ${pendingDraftCap}（未发布）；节点仍按已发布的 ${routedCapability(pending)} 路由到它，引用以此判定。`}
+          </p>
+        )}
+        {pending && pendingRefs.length > 0 && (
           <p className={styles.warning} role="alert">
-            {referencedWarning(pendingRefs)}
+            {referencedWarning(pending, pendingRefs)}
           </p>
         )}
         {!referencesKnown && pending && (

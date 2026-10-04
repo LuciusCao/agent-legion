@@ -75,6 +75,10 @@ class AgentListItem(BaseModel):
     status: Literal["draft", "published", "archived"]
     has_draft: bool
     published_at: datetime | None = None
+    # #906: the latest row can be a draft whose capability differs from the
+    # published version that actually routes; null = never published.
+    published_capability: str | None = None
+    published_version: int | None = None
 
 
 class AgentListResponse(BaseModel):
