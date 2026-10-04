@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 import worker.supervisor as supervisor_module
-from worker import procfs
+from worker import executor_processes, procfs
 from worker.config_store import validate_config
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor
 from worker.zombie_reaper import (
@@ -225,15 +225,15 @@ def test_supervisor_registers_executor_and_runs_reaper_only_as_pid1(
     monkeypatch.setattr(WorkerSupervisor, "_reap_orphans", lambda self: None)
     monkeypatch.setattr(WorkerSupervisor, "_collect_logs", lambda self, *a: None)
 
-    assert WorkerSupervisor(store, tmp_path / "worker.py")._zombie_reaper is None  # not PID 1
+    assert WorkerSupervisor(store, tmp_path / "worker.py").executors.reaper is None  # not PID 1
 
-    monkeypatch.setattr(supervisor_module, "reaping_enabled", lambda: True)
+    monkeypatch.setattr(executor_processes, "reaping_enabled", lambda: True)
     supervisor = WorkerSupervisor(store, tmp_path / "worker.py")
     supervisor._start()
 
-    with supervisor.managed_children.lock:
-        assert supervisor.managed_children.pids_locked() == {4321}
-    assert supervisor._zombie_reaper is not None
+    with supervisor.executors.managed.lock:
+        assert supervisor.executors.managed.pids_locked() == {4321}
+    assert supervisor.executors.reaper is not None
 
 
 # --- codex P1 R2 on #895：收割路径互斥 + waitpid 紧前现证身份 -----------------
@@ -325,7 +325,7 @@ def test_waited_executors_are_forgotten_without_reaper(
     script.write_text("print('executor up')\n", encoding="utf-8")
     monkeypatch.setattr(WorkerSupervisor, "_reap_orphans", lambda self: None)
     supervisor = WorkerSupervisor(store, script)
-    assert supervisor._zombie_reaper is None  # pytest is not PID 1
+    assert supervisor.executors.reaper is None  # pytest is not PID 1
     supervisor._shutdown = True  # collector must not schedule auto-restarts here
 
     spawned = []
@@ -340,5 +340,5 @@ def test_waited_executors_are_forgotten_without_reaper(
             time.sleep(0.02)
 
     assert all(process.returncode == 0 for process in spawned)
-    with supervisor.managed_children.lock:
-        assert supervisor.managed_children._procs == []
+    with supervisor.executors.managed.lock:
+        assert supervisor.executors.managed._procs == []

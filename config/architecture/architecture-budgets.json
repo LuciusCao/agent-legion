@@ -1965,6 +1965,7 @@
     "worker/execution/run.py": 209,
     "worker/executor.py": 212,
     "worker/executor_log.py": 67,
+    "worker/executor_processes.py": 39,
     "worker/fd_limits.py": 26,
     "worker/heartbeat_relay.py": 133,
     "worker/host/__init__.py": 10,

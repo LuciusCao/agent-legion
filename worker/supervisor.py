@@ -17,6 +17,7 @@ from yaml import YAMLError
 
 from worker.config_store import WorkerConfigStore, public_config, validate_config
 from worker.executor_log import PanelLogSinks
+from worker.executor_processes import ExecutorProcesses
 from worker.lease_snapshot import RESULT_FILENAME, SNAPSHOT_ENV_VAR, SNAPSHOT_FILENAME
 from worker.metrics_cache import METRICS_FILENAME
 from worker.orphan_reaper import reap_orphaned_agents
@@ -35,7 +36,6 @@ from worker.service_env import proxy_env_overrides
 from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
 from worker.status.projection import host_view, process_snapshot, status_payload
 from worker.token_status import token_status
-from worker.zombie_reaper import ManagedChildren, ZombieReaper, reaping_enabled
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 
@@ -74,12 +74,8 @@ class WorkerSupervisor:
         # #566 三期 + #510：面板行与结构化事件分别落滚动文件（PanelLogSinks
         # 收口两个 sink 的分流与生命周期），内存 500 行 deque 不再是唯一留存。
         self._sinks = PanelLogSinks(store.state_dir)
-        # #682：容器内本进程即 PID 1，executor 被 SIGKILL 后其沙箱子进程被
-        # 收养到这里；executor Popen 登记进 managed，收割线程绝不抢收它。
-        self.managed_children = ManagedChildren()
-        self._zombie_reaper = (
-            ZombieReaper(self.managed_children, self._log) if reaping_enabled() else None
-        )
+        # #682：PID 1 时收割被收养的僵尸；executor 登记在册、绝不被抢收。
+        self.executors = ExecutorProcesses(self._log)
 
     def _log(self, message: str) -> None:
         """Append one panel log line (timestamped deque + rolling file)."""
@@ -94,8 +90,7 @@ class WorkerSupervisor:
             self._next_restart_delay = None
             self._restart_event.clear()
             self._sinks.resume()  # 与 stop() 的 sinks.close() 配对（#572 P2）
-            if self._zombie_reaper is not None:
-                self._zombie_reaper.start()
+            self.executors.start()
             self._start()
 
     def _start(self, *, crash_restart: bool = False) -> None:
@@ -135,9 +130,14 @@ class WorkerSupervisor:
             # proxy 配置（#444）在派生点注入：executor 与其 agent 子进程全部
             # 出网（backend 上传 + LLM 流量）统一走代理或统一直连；配置变更
             # 经控制台 restart 落到新 executor，与 restarted 语义对齐。
-            # 派生与登记在 managed 锁内一步完成：收割扫描看不到「已出生未登记」的 executor。
-            process = self._process = self.managed_children.spawn(
-                lambda: self._spawn_executor(config, status_file)
+            process = self._process = self.executors.spawn(
+                [sys.executable, str(self.worker_script), "--config", str(self.store.path)],
+                {
+                    **os.environ,
+                    **proxy_env_overrides(config.get("proxy", "")),
+                    ENV_VAR: str(status_file),
+                    SNAPSHOT_ENV_VAR: str(self.store.state_dir / SNAPSHOT_FILENAME),
+                },
             )
             self._started_at = time.time()
             self._exit_code = None
@@ -145,28 +145,12 @@ class WorkerSupervisor:
         self._reap_orphans()
         threading.Thread(target=self._collect_logs, args=(process, generation), daemon=True).start()
 
-    def _spawn_executor(self, config: dict[str, Any], status_file: Path) -> subprocess.Popen[str]:
-        return subprocess.Popen(
-            [sys.executable, str(self.worker_script), "--config", str(self.store.path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env={
-                **os.environ,
-                **proxy_env_overrides(config.get("proxy", "")),
-                ENV_VAR: str(status_file),
-                SNAPSHOT_ENV_VAR: str(self.store.state_dir / SNAPSHOT_FILENAME),
-            },
-            text=True,
-            bufsize=1,
-        )
-
     def stop(self) -> None:
         with self._op_lock:
             self._shutdown = True
             self._restart_event.set()  # 唤醒退避等待中的 collector
             self._stop_locked()
-            if self._zombie_reaper is not None:
-                self._zombie_reaper.stop()
+            self.executors.stop()
         self._sinks.close()
 
     def _stop_locked(self) -> None:
@@ -226,9 +210,7 @@ class WorkerSupervisor:
             with self._lock:
                 self._log(line.rstrip())
         exit_code = process.wait()
-        # 已 wait 完：注销并关管道，非 PID 1 模式下登记表与 fd 不随重启累积（#682）。
-        self.managed_children.forget(process)
-        process.stdout.close()
+        self.executors.finished(process)  # 注销 + 关管道，不随重启累积（#682）
         # 锁外 reap（幂等）：仅当前 generation 的 executor 退出才有孤儿；过期
         # generation 说明新 executor 已启动，其 agent 记录归属它，不能动。
         if generation == self._generation:
