@@ -41,11 +41,12 @@ def download_input_artifacts(
     签发那一瞬，对象仍可能在 Worker GET 前被并行生产者覆盖。dict ref 的
     ``sha256`` 在签发时等于 dispatch 冻结 digest，本身就是冻结身份：
     presigned 段任何失败——下载成功但 digest 失配、HTTP 失败重试耗尽
-    （403/404/5xx）、解码失败（BadGzipFile 属 OSError 族、EOFError 属
-    截断流）——都按该 digest 回落 CAS 通道（blob 内容寻址不可变、
-    ``stage_agent_inputs`` 已按 (job,node) 持 ref 防 GC）——任何
-    transport 满足同一 digest 即同一输入；两段皆败才失败，报错携带两
-    段各自的原因。
+    （403/404/5xx）、解码失败（gzip 三层错误面经下载层
+    ``copy_stream`` 归一化为 RuntimeError）、urllib3 读时错误（
+    ``download_object_artifact`` 归一化）——都按该 digest 回落 CAS 通
+    道（blob 内容寻址不可变、``stage_agent_inputs`` 已按 (job,node) 持
+    ref 防 GC）——任何 transport 满足同一 digest 即同一输入；两段皆
+    败才失败，报错携带两段各自的原因。
     """
     for name, ref in manifest.get("input_artifacts", {}).items():
         # 纵深防御：manifest 来自 Host，但落盘路径必须留在 job_dir 内
@@ -79,8 +80,9 @@ def download_input_artifacts(
                     # 下载成功且 digest 匹配（或无声明按既有语义不校验放行）。
                     continue
             except (RuntimeError, OSError, EOFError) as exc:
-                # 传输失败（重试耗尽）与解码失败（BadGzipFile/EOFError）
-                # 统一归拢进回落判定——解码异常不得绕过两段式。
+                # 传输失败（重试耗尽，含归一化后的 urllib3 读时族）与解码
+                # 失败（下载层已归一化为 RuntimeError；EOFError 留在集合
+                # 是防御余量）统一进回落判定——任何一族都不得绕过两段式。
                 presigned_error = exc
             if not declared:
                 # ref 缺 sha256：无冻结身份可回落——下载失败原样上抛（此

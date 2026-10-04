@@ -134,9 +134,17 @@ def reconcile_outputs(
     validator never touched it, or wrote back identical content); the
     identity check is a content sha256, never (mtime, size) — this is an
     identity path and mtime/size are forgeable (utime rollback plus a
-    same-size rewrite, #876 codex P2). The hash read is cheaper than the
-    skipped temp+copy+replace write amplification, and the dominant
-    hardlink path never pays it (inode fast-path above).
+    same-size rewrite, #876 codex P2). Cost accounting (#876 C1-1): the
+    superseded (mtime, size) check cost 2 stats ≈ 0 I/O while the hash
+    check pays 2 full reads — the real saving is against the pre-skip
+    baseline of an unconditional temp+copy+replace write amplification,
+    not against the old judgment. Behavior change on the copy-fallback
+    face (#876 C1-2): a validator chmod'ing a copied entry to 000 makes
+    the hash read raise PermissionError → the run fails closed (Validator
+    error), where the (mtime, size) judgment used to silently skip; the
+    hardlink face does not diverge in outcome — the inode fast-path still
+    matches (chmod is metadata), but the validator's own contract already
+    governs there.
     A validator-deleted (or non-file-replaced) output propagates the
     deletion: the finish gate's missing-source containment then fails the
     run, exactly as when validators ran inside the staging view.
