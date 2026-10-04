@@ -23,6 +23,7 @@ from server.app.agent_control.completion import AgentCompletionHandler, AgentOut
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from server.app.services.job_artifact_raw import open_raw_artifact
 from tests.fakes.artifact_keys import pin_legacy_authority_keys
 from tests.fakes.storage import FakeObjectStorage
 from tests.helpers.skill_manager import _make_skill_manager
@@ -218,7 +219,7 @@ def test_validator_modifying_remote_output_fails_the_node(
 ) -> None:
     """修复前：节点 completed，而权威对象 / 清单哈希仍是校验前字节。"""
     storage = _storage()
-    handler, leases, object_store, _ = _make_handler(tmp_path, storage, script)
+    handler, leases, object_store, job_dir = _make_handler(tmp_path, storage, script)
 
     _finish(handler, {"out.json": _remote_ref()})
 
@@ -235,6 +236,33 @@ def test_validator_modifying_remote_output_fails_the_node(
     assert storage.objects[AUTHORITY_KEY] == PAYLOAD
     row = object_store.lookup("job-1", "out.json")
     assert row is not None and row["content_hash"] == HASH
+    _assert_reads_serve_worker_bytes(job_dir, object_store)
+
+
+def _assert_reads_serve_worker_bytes(job_dir: Path, object_store: JobArtifactObjectStore) -> None:
+    """codex #913 R2 P1：改写过的本地副本被逐出，本地优先的读路径回落到
+    对象存储权威副本，拿到的是 Worker 原始字节而非 validator 改写。"""
+    assert not (job_dir / "out.json").exists()
+    raw = open_raw_artifact(job_dir / "out.json", object_store, "job-1", "out.json")
+    assert raw.path is None and raw.stream is not None
+    with raw.stream as stream:
+        assert stream.read() == PAYLOAD
+
+
+def test_failing_validator_that_also_rewrites_keeps_its_verdict_and_evicts(
+    tmp_path: Path,
+) -> None:
+    """validator 自身判败但已原地改写：保留它的失败消息，改写副本同样逐出。"""
+    storage = _storage()
+    script = _VALIDATE_REWRITE_IN_PLACE + "print('bad output', file=sys.stderr)\nsys.exit(1)\n"
+    handler, leases, object_store, job_dir = _make_handler(tmp_path, storage, script)
+
+    _finish(handler, {"out.json": _remote_ref()})
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert result.error_message.startswith("Output validation failed: bad output")
+    _assert_reads_serve_worker_bytes(job_dir, object_store)
 
 
 def test_validator_replacing_remote_output_with_identical_bytes_completes(

@@ -33,6 +33,7 @@ from server.app.agent_broker.result_validate_pool import (
 )
 from server.app.skills.commit_cache import resolve_skill_commit
 from server.app.workflows.remote_output_guard import (
+    evict_diverged_copies,
     find_remote_output_rewrites,
     remote_output_rewrite_error,
 )
@@ -61,7 +62,8 @@ def validate_worker_outputs(
     Worker-reported success is untrusted; same bar as the local path.
     ``read_only_outputs`` maps the landed remote-channel outputs to the
     digest the promote phase registered (#867, ``remote_output_guard``):
-    re-hashed once after a passing validation, any change fails the run.
+    re-hashed once after validation; any change fails the run and evicts
+    the diverged local copies (readers fall back to the authority object).
     """
     skill = str(manifest.get("skill", ""))
     if not skill:
@@ -87,10 +89,13 @@ def validate_worker_outputs(
             refs,
             str(artifact_store.root) if artifact_store is not None else None,
         )
-        if verdict is None and (
-            rewrites := find_remote_output_rewrites(run_view_dir, read_only_outputs or {})
-        ):
-            verdict = remote_output_rewrite_error(rewrites)
+        # Judge first, evict after (multi-step discipline): a validator that
+        # failed but still touched a remote output leaves the same diverged
+        # local copy, so the check runs on every verdict; its own message wins.
+        snapshot = read_only_outputs or {}
+        if rewrites := find_remote_output_rewrites(run_view_dir, snapshot):
+            verdict = verdict or remote_output_rewrite_error(rewrites)
+            evict_diverged_copies(snapshot, rewrites, run_view_dir, job_dir)
         return verdict
     except Exception as exc:
         # #204 broad-except audit: convert-to-contract, same channel as
