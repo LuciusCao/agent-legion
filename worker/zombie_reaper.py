@@ -89,6 +89,16 @@ class ManagedChildren:
             self._procs.append(proc)
             return proc
 
+    def forget(self, proc: subprocess.Popen[Any]) -> None:
+        """Drop a Popen its owner has waited (codex P2 on #895).
+
+        Without a reaper (non-PID-1: native installs, ``init: true`` containers)
+        nothing else would ever prune the table, so every executor restart would
+        pin the exited Popen and its stdout pipe forever.
+        """
+        with self.lock:
+            self._procs = [known for known in self._procs if known is not proc]
+
     def pids_locked(self) -> set[int]:
         # Caller holds ``lock``. A Popen whose returncode is set has been waited
         # already: its pid is free (and may be reused), so it stops being shielded.

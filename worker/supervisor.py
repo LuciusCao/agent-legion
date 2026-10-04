@@ -226,6 +226,9 @@ class WorkerSupervisor:
             with self._lock:
                 self._log(line.rstrip())
         exit_code = process.wait()
+        # 已 wait 完：注销并关管道，非 PID 1 模式下登记表与 fd 不随重启累积（#682）。
+        self.managed_children.forget(process)
+        process.stdout.close()
         # 锁外 reap（幂等）：仅当前 generation 的 executor 退出才有孤儿；过期
         # generation 说明新 executor 已启动，其 agent 记录归属它，不能动。
         if generation == self._generation:

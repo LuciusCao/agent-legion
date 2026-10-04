@@ -301,3 +301,44 @@ def test_collect_group_and_scan_are_mutually_exclusive(tmp_path: Path) -> None:
     for thread in threads:
         thread.join(5)
         assert not thread.is_alive()
+
+
+def test_waited_executors_are_forgotten_without_reaper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex P2 on #895：非 PID 1（无收割线程）时，每次重启后已 wait 的 executor
+    必须从登记表注销、stdout 管道关闭，登记表与 fd 不随重启累积。"""
+    store = WorkerConfigStore(tmp_path / "state")
+    token = tmp_path / "register-token"
+    token.write_text("secret", encoding="utf-8")
+    store.write(
+        validate_config(
+            {
+                "host_url": "http://host.test:8000/",
+                "worker_id": "worker-1",
+                "max_concurrency": 1,
+                "register_token_file": str(token),
+            }
+        )
+    )
+    script = tmp_path / "executor.py"
+    script.write_text("print('executor up')\n", encoding="utf-8")
+    monkeypatch.setattr(WorkerSupervisor, "_reap_orphans", lambda self: None)
+    supervisor = WorkerSupervisor(store, script)
+    assert supervisor._zombie_reaper is None  # pytest is not PID 1
+    supervisor._shutdown = True  # collector must not schedule auto-restarts here
+
+    spawned = []
+    for _ in range(3):
+        supervisor._start()
+        process = supervisor._process
+        assert process is not None
+        spawned.append(process)
+        deadline = time.monotonic() + 10
+        while process.stdout is not None and not process.stdout.closed:
+            assert time.monotonic() < deadline, "collector never finished"
+            time.sleep(0.02)
+
+    assert all(process.returncode == 0 for process in spawned)
+    with supervisor.managed_children.lock:
+        assert supervisor.managed_children._procs == []
