@@ -372,7 +372,7 @@ server/app/
 | AgentRegisterTokenDeleteResponse | BaseModel | token_id: str, deleted: bool, cascaded_worker_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | WorkerPresenceRequest | BaseModel | claim_enabled: bool | app/routes/agent_workers_contracts.py |
-| AgentWorkerConsoleResponse | BaseModel | console_url: str | app/routes/agent_workers_contracts.py |
+| AgentWorkerConsoleUrl | BaseModel | console_url: str | app/routes/agent_workers_contracts.py |
 | AgentWorkerDeleteResponse | BaseModel | worker_id: str, deleted: bool | app/routes/agent_workers_contracts.py |
 | AgentHeartbeatResponse | BaseModel | cancelled_execution_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool | app/routes/agents.py |
