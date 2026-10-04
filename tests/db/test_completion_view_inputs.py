@@ -32,6 +32,7 @@ from tests.db.completion_helpers import (
     _result_archive,
     _seed_completion_job,
 )
+from tests.fakes.artifact_keys import manifest_bytes
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -120,10 +121,11 @@ def test_validation_view_includes_declared_inputs(
     assert captured["cleaned_question.json"] == b'{"q": 1}'
     assert captured["out.json"] == b'{"fresh": true}'
     # input 不进 produced 面：零镜像、零清单行；job_dir 里的 input 原样保留。
-    assert "jobs/inp1-ws/inp1-job/cleaned_question.json" not in storage.objects
+    # #853 起 authority key 是版本 key，按对象名后缀断言「零镜像」。
+    assert not any(k.endswith("/cleaned_question.json") for k in storage.objects)
     assert store.row_for_node("inp1-job", "node_a", "cleaned_question.json") is None
     assert (job_dir / "cleaned_question.json").read_bytes() == b'{"q": 1}'
-    assert storage.objects["jobs/inp1-ws/inp1-job/out.json"] == b'{"fresh": true}'
+    assert manifest_bytes(store, "inp1-job", "out.json") == b'{"fresh": true}'
 
 
 def test_declared_input_never_backfills_expected_output(
@@ -171,7 +173,7 @@ def test_declared_input_never_backfills_expected_output(
     assert validated == []  # missing 判定先于校验，校验不跑
     assert (job_dir / "b.json").read_bytes() == b"stale-leftover"
     assert store.row_for_node("inp2-job", "node_a", "b.json") is None
-    assert "jobs/inp2-ws/inp2-job/b.json" not in storage.objects
+    assert not any(k.endswith("/b.json") for k in storage.objects)
 
 
 def test_validation_uses_dispatch_frozen_input_bytes(
