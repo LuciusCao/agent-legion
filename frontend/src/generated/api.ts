@@ -4521,6 +4521,24 @@ export interface components {
         [key: string]: string
       } | null
     }
+    /**
+     * HydrationDeferResponse
+     * @description #887：节点因输入恢复不全（悬挂清单行）被挡，而非普通排队。
+     */
+    HydrationDeferResponse: {
+      /** Inputs */
+      inputs: string[]
+      /**
+       * Reasons
+       * @description object_missing | hash_mismatch | corrupt（重试不会自愈的恢复失败）
+       */
+      reasons: string[]
+      /**
+       * Rerun Nodes
+       * @description 建议重跑以重新生成这些输入的生产节点 key
+       */
+      rerun_nodes: string[]
+    }
     /** InfraConnectionTestRequest */
     InfraConnectionTestRequest: {
       /**
@@ -4861,6 +4879,7 @@ export interface components {
       executor_kind?: ('code' | 'pi' | 'openclaw') | null
       /** Finished At */
       finished_at?: string | null
+      hydration_defer?: components['schemas']['HydrationDeferResponse'] | null
       /** Id */
       id: number
       /** Inputs */

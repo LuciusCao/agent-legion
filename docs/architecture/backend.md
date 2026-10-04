@@ -460,6 +460,7 @@ server/app/
 | JobNodeSummaryResponse | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/job_view_contracts.py |
 | JobSummaryResponse | BaseModel | id: str, workspace_id: str, workflow_key: str, source_type: str, source_id: s... | app/routes/job_view_contracts.py |
 | JobsResponse | BaseModel | jobs: list[JobSummaryResponse], truncated: bool | app/routes/job_view_contracts.py |
+| HydrationDeferResponse | BaseModel | inputs: list[str], reasons: list[str], rerun_nodes: list[str] | app/routes/job_view_contracts.py |
 | JobNodeResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, stale_reason: str, error_me... | app/routes/job_view_contracts.py |
 | NodeRunResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, started_at: str, finished_a... | app/routes/job_view_contracts.py |
 | LogEventResponse | BaseModel | type: str, title: str, detail: str, truncated: bool | app/routes/job_view_contracts.py |
