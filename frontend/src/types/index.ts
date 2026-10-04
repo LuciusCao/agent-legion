@@ -117,17 +117,4 @@ export type CreateJobBatchInput = ApiSchemas['JobBatchRequest']
 
 export type * from './materialTypes'
 
-export type {
-  SocraticOption,
-  AnswerBlank,
-  AnalysisStep,
-  KeyInfoPosition,
-  KeyInfoContent,
-  KeyInfoItem,
-  PossibleErrorItem,
-  ComprehensionInfo,
-  QuestionNormalized,
-  QuestionArtifactNormalized,
-} from './comprehensionTypes'
-
 export type WorkspacesResponse = ApiSchemas['WorkspacesResponse']

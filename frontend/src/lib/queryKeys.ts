@@ -15,8 +15,10 @@ export const queryKeys = {
   jobArtifact: (jobId: string, name: string, version: string) =>
     ['jobArtifact', jobId, name, version] as const,
   // 通用预览面板的原始文本读取。与 jobArtifact 分开命名空间：结构化
-  // hook（如 useJobQuestion）对同名 artifact 返回归一化对象，queryFn
-  // 形状不同，共 key 会让后挂载方读到错误形状（#11）。
+  // 读取对同名 artifact 返回归一化对象，queryFn 形状不同，共 key 会让
+  // 后挂载方读到错误形状（#11）。question 类结构化渲染已迁 builtin 面板
+  // （features/previewPanel/builtin/questionPanel.html，经只读桥
+  // readArtifact 取数，#328）。
   jobArtifactText: (jobId: string, name: string, version: string) =>
     ['jobArtifactText', jobId, name, version] as const,
   studioChatAgents: (workspaceId: string) =>
