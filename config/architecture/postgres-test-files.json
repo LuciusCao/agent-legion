@@ -117,6 +117,7 @@
     "tests/routes/test_jobs_route_contracts.py",
     "tests/routes/test_metrics.py",
     "tests/routes/test_misc.py",
+    "tests/routes/test_publish_cas_contract.py",
     "tests/routes/test_quality.py",
     "tests/routes/test_quality_replay_routes.py",
     "tests/routes/test_studio_agent_catalog_read_tools.py",

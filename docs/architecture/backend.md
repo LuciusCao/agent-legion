@@ -345,7 +345,7 @@ server/app/
 | AgentDefinitionPayload | BaseModel | capability: str, runtime: Literal['pi', 'velites'], skill: str, tools: list[s... | app/routes/agent_definition_contracts.py |
 | AgentCopyRequest | BaseModel | new_agent_id: str | app/routes/agent_definition_contracts.py |
 | AgentRollbackRequest | BaseModel | version: int | app/routes/agent_definition_contracts.py |
-| AgentPublishRequest | BaseModel | expected_hash: str | None | app/routes/agent_definition_contracts.py |
+| AgentPublishRequest | BaseModel | expected_hash: str | app/routes/agent_definition_contracts.py |
 | AgentVersionResponse | BaseModel | id: str, agent_id: str, version: int, status: Literal['draft', 'published', '... | app/routes/agent_definition_contracts.py |
 | AgentVersionSummary | BaseModel | id: str, agent_id: str, version: int, status: Literal['draft', 'published', '... | app/routes/agent_definition_contracts.py |
 | AgentListItem | BaseModel | agent_id: str, capability: str, runtime: str, skill: str, version: int, statu... | app/routes/agent_definition_contracts.py |
@@ -552,6 +552,7 @@ server/app/
 | PreviewPanelVersionResponse | BaseModel | id: str, workspace_id: str | None, entity_key: str, version: int, status: Lit... | app/routes/studio_agent_preview_contracts.py |
 | PreviewPanelStateResponse | BaseModel | published: PreviewPanelVersionResponse | None, draft: PreviewPanelVersionResp... | app/routes/studio_agent_preview_contracts.py |
 | PreviewPanelPublishedResponse | BaseModel | published: PreviewPanelVersionResponse | None | app/routes/studio_agent_preview_contracts.py |
+| PreviewPanelPublishRequest | BaseModel | expected_hash: str | app/routes/studio_agent_preview_contracts.py |
 | PreviewPanelDraftRequest | BaseModel | html: str, change_note: str | None | app/routes/studio_agent_preview_contracts.py |
 | PreviewContextJobSummary | BaseModel | id: str, status: str | None, source_type: str | None, source_id: str | None, ... | app/routes/studio_agent_preview_contracts.py |
 | PreviewContextResponse | BaseModel | workspace_id: str, recent_jobs: list[PreviewContextJobSummary], selected_job:... | app/routes/studio_agent_preview_contracts.py |
@@ -633,7 +634,7 @@ server/app/
 | WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |
-| WorkflowNodeCodePublishRequest | BaseModel | expected_hash: str | None | app/routes/workflow_node_code_contracts.py |
+| WorkflowNodeCodePublishRequest | BaseModel | expected_hash: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeVersionResponse | BaseModel | id: str, version: int, status: str, code: str, code_hash: str, created_by: st... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeVersionSummary | BaseModel | id: str, version: int, status: str, code_hash: str, created_by: str, change_n... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeVersionsResponse | BaseModel | versions: list[WorkflowNodeCodeVersionSummary] | app/routes/workflow_node_code_contracts.py |

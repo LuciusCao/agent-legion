@@ -17,6 +17,7 @@ from server.app.jobs import JobQueries
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_agent_preview_contracts import (
     PreviewPanelPublishedResponse,
+    PreviewPanelPublishRequest,
     PreviewPanelStateResponse,
     PreviewPanelVersionResponse,
 )
@@ -63,9 +64,12 @@ def create_preview_panels_router(job_db: JobQueries, settings: Settings) -> APIR
         response_model=PreviewPanelVersionResponse,
         dependencies=[_AUTHORING, _EFFECTING],
     )
-    def publish(workspace_id: str) -> PreviewPanelVersionResponse:
+    def publish(
+        workspace_id: str, request: PreviewPanelPublishRequest
+    ) -> PreviewPanelVersionResponse:
+        """#841: CAS publish — 409 when the draft is no longer the asserted one."""
         try:
-            row = _service(workspace_id).publish(workspace_id)
+            row = _service(workspace_id).publish(workspace_id, request.expected_hash)
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return PreviewPanelVersionResponse.model_validate(row)

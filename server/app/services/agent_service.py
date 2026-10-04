@@ -17,7 +17,7 @@ from server.app.db.connection import DatabaseDsn
 from server.app.db.dialect import ConnectSource, resolve_dsn
 from server.app.db.transaction import read_connection
 from server.app.services.agent_publish_prune import prune_agent_overrides
-from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.versioned_entities import EntityType, VersionedEntity, VersionedEntityStore
 
 _ENTITY_TYPE: EntityType = "agent"
@@ -121,13 +121,25 @@ class AgentService:
         the capability alone, mirroring the YAML catalog constraint).
         ``expected_hash`` (#692): verified atomically inside the store's
         publish transaction — mismatch raises Conflict with zero side
-        effects."""
+        effects.
+
+        #841: the store CAS always binds to the draft pre-read here (the one
+        the capability check ran against — the NodeCodeService pattern), so
+        a concurrent overwrite between check and publish fails as Conflict.
+        ``expected_hash`` is the caller's optimistic assertion on top: HTTP
+        callers must send it (the route requires it); in-process seeding
+        passes the hash of the definition it just saved."""
         versions = self._store.list_versions(agent_id, self._workspace_id)
         draft = next((v for v in versions if v.status == "draft"), None)
-        if draft is not None:
-            self._require_free_capability(agent_id, str(draft.definition.get("capability") or ""))
-        # draft None → the store raises the canonical NotFoundError.
-        entity = self._store.publish(agent_id, self._workspace_id, expected_hash)
+        if draft is None:
+            raise NotFoundError(f"no draft for {_ENTITY_TYPE} {agent_id}")
+        if expected_hash is not None and expected_hash != draft.definition_hash:
+            raise ConflictError(
+                f"draft hash mismatch for {_ENTITY_TYPE} {agent_id}:"
+                " the draft was overwritten by another session; reload and retry"
+            )
+        self._require_free_capability(agent_id, str(draft.definition.get("capability") or ""))
+        entity = self._store.publish(agent_id, self._workspace_id, draft.definition_hash)
         _invalidate_published_cache(self._store.dsn, self._workspace_id)
         # #430: prune overrides by the JUST-published definition (never the
         # ~5s cache), post-commit, failure-swallowed — agent_publish_prune.
