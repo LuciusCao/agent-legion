@@ -39,6 +39,7 @@ from scripts.architecture.import_cycles import check_import_cycles
 from scripts.architecture.route_contracts import has_protocol_response_annotation
 from scripts.architecture.script_permissions import check_script_permissions
 from scripts.architecture.service_boundaries import check_service_import_boundaries
+from scripts.architecture.shell_var_boundary import check_shell_var_boundary
 from scripts.architecture.service_data_boundary import check_service_data_boundary
 from scripts.architecture.sql_placeholders import check_sql_placeholders
 from scripts.architecture.test_placement import check_test_placement
@@ -176,6 +177,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_docs_retired_terms(root))
     errors.extend(check_docs_consistency(root))
     errors.extend(check_script_permissions(root))
+    errors.extend(check_shell_var_boundary(root))
 
     try:
         policy = load_budget_policy(root / "config/architecture/architecture-budget-policy.yaml")
