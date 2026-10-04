@@ -40,6 +40,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Security
 - `GET /api/workspaces` 按成员关系过滤（issue #711）：此前该列表对任意登录用户全量返回，未加入任何 workspace 的成员也能枚举全部 workspace id（叠加 job_id 内嵌 workspace id 的格式，job id 猜测变为确定性枚举）。现在非 admin 只返回自己是成员（viewer/editor 任一角色）的 workspace，admin 保留全量；studio-agent scope token 继承签发人的可见范围，绑定 workspace 的 run token 只列出所绑定的那一个；workspace API token 在该端点仍为 404（不变）。前端随之适配：未加入任何 workspace 的非 admin 在首页看到「请联系管理员添加」的空态提示；登录与登出时清空前端查询缓存，同一浏览器换号登录不再沿用上一身份缓存的列表。
+- `GET /api/dashboard/events`（SSE）按连接身份过滤 workspace 统计（issue #881，#711 同类 follow-up）：此前该端点是单一广播 channel，`workspace_stats_batch` 事件携带全部 workspace 的 id 与统计，任意登录用户都会收到，非成员可借此枚举 workspace id。现在可见范围与 `GET /api/workspaces` 共用同一判定：非 admin 只收到自己是成员的 workspace 的统计条目，admin 全量；studio-agent scope token 继承签发人的可见范围，绑定 workspace 的 token 只收所绑定的那一个；workspace API token 在该端点仍为 404（不变）。过滤后为空的批次不再下发，可见集在连接上缓存（广播不逐连接查库），每次（重）连接重新计算，连接期间最多每 30 秒随下一批事件刷新一次，成员关系的增删在该窗口内生效；过滤掉的事件不会顶掉心跳。
 
 ## [0.7.14] - 2026-10-03
 
