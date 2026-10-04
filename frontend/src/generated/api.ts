@@ -4969,6 +4969,11 @@ export interface components {
       /** Batch Id */
       batch_id: string
       /**
+       * Client Token
+       * @description 条目级幂等键（#813）：material / bundle（含 text 归一的 material）条目带 client_token 提交时为该 token，否则为 null；ref 条目恒为 null。由服务端从 source_id 的 `~<token>` 后缀解析，只读。
+       */
+      client_token?: string | null
+      /**
        * Completed Nodes
        * @default 0
        */
@@ -5009,6 +5014,11 @@ export interface components {
        * @default 0
        */
       packed: number
+      /**
+       * Source Base Id
+       * @description 去掉 client_token 作用域后的条目 id（material_id / bundle_id）；无 token 时等于 source_id。同一材料以不同 client_token 提交的多个 job 共享同一 source_base_id。只读。
+       */
+      source_base_id?: string | null
       /** Source Id */
       source_id: string
       /** Source Type */
