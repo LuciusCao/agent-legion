@@ -177,12 +177,20 @@ def finish_staged(
     # node's inputs from job_dir + this attempt's outputs from the read
     # view) and reconciles the validator's output mutations back into
     # view_dir, so what the finish gate promotes is what passed validation.
+    # #867: remote-channel outputs are the exception — their authority
+    # object is already promoted and the mirror skips them, so they are
+    # read-only to the validator (hashed around it; any change fails).
     if status == "completed" and handler.skill_manager is not None:
         # #828/#830/#833：input 名单裁决与字节来源（dispatch 冻结 CAS 优先、
         # 缺失回落 job_dir）已下沉进池化视图构造（workflows/validation_view
         # 族），artifact_store 只为取 CAS root 传入，主进程不碰字节。
         validation_error = validate_worker_outputs(
-            handler.skill_manager, manifest, job_dir, view_dir, handler.artifact_store
+            handler.skill_manager,
+            manifest,
+            job_dir,
+            view_dir,
+            handler.artifact_store,
+            read_only_outputs=remote_names,
         )
         if validation_error:
             status, exit_code, error = "failed", 1, validation_error

@@ -152,6 +152,7 @@
     "tests/services/test_agent_catalog.py",
     "tests/services/test_agent_completion_remote.py",
     "tests/services/test_agent_completion_remote_gzip.py",
+    "tests/services/test_agent_completion_remote_validation.py",
     "tests/services/test_agent_manifest_trim.py",
     "tests/services/test_agent_publish_prune.py",
     "tests/services/test_agent_stock.py",

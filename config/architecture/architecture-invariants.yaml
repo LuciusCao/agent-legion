@@ -431,12 +431,15 @@ invariants:
         gate: quick
 
   - id: EXEC-VALIDATION-001
-    statement: "A node run may complete only after the node skill's declared output contract passes against the job directory: validation is engine-first — the machine-readable contract (the skill-root contract.yaml since #542, with the deprecated embedded ```yaml contract block in the skill's references/output-contract.md still honored as the pre-migration location) is checked by the harness's built-in contract engine (existence, text min_chars/required_headings, JSON Schema), with the skill's deterministic scripts/validate_output.py as the business-rule layer — it decides alone when no contract is present and always enforces the cross-file/business rules the engine does not express; the Host remains the authoritative rechecker of Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted) regardless of which path ran; validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected)."
+    statement: "A node run may complete only after the node skill's declared output contract passes against the job directory: validation is engine-first — the machine-readable contract (the skill-root contract.yaml since #542, with the deprecated embedded ```yaml contract block in the skill's references/output-contract.md still honored as the pre-migration location) is checked by the harness's built-in contract engine (existence, text min_chars/required_headings, JSON Schema), with the skill's deterministic scripts/validate_output.py as the business-rule layer — it decides alone when no contract is present and always enforces the cross-file/business rules the engine does not express; the Host remains the authoritative rechecker of Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted) regardless of which path ran; validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected). Outputs a Worker returned through the remote channel (dict-form S3 refs) are read-only to the validator (#867): their authority object and manifest hash are fixed before Host-side validation and the post-validation mirror skips them, so the completion tail hashes them before and after validation and fails the run (Validator error, naming each rewritten/deleted output) on any content change — validators may clean local-channel outputs in place, never remote-channel ones."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
         target: tests/services/test_agent_completion_validation.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_completion_remote_validation.py
         gate: quick
 
   - id: EXEC-CODE-001
