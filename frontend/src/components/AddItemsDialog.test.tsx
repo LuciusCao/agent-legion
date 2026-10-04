@@ -696,6 +696,45 @@ describe('AddItemsDialog', () => {
     expect(screen.getByRole('button', { name: '创建运行' })).toBeEnabled()
   })
 
+  it('blocks mixed submission while a touched text item has an invalid filename', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'text'])
+    mockUpload.mockResolvedValue({ materialId: 'm1', deduplicated: false })
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    pickFiles('add-items-file-input', [new File(['a'], 'a.txt')])
+    await waitFor(() =>
+      expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+    )
+    const submit = screen.getByRole('button', { name: '创建运行' })
+    expect(submit).toBeEnabled()
+
+    // 输入了内容但文件名无效：text 条目不计数，且不得被静默丢弃——
+    // 混合提交整体阻塞并给出提示。
+    fireEvent.click(screen.getByRole('tab', { name: '输入需求' }))
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '实际需求' },
+    })
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: 'notes.pdf' },
+    })
+    expect(screen.getByRole('button', { name: '创建运行' })).toBeDisabled()
+    expect(screen.getByTestId('text-filename-hint')).toBeInTheDocument()
+
+    // 修正文件名恢复可提交；清空内容（不再是条目）同样恢复。
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: 'notes.md' },
+    })
+    expect(screen.getByRole('button', { name: '创建运行' })).toBeEnabled()
+    fireEvent.change(screen.getByLabelText('文件名'), {
+      target: { value: 'notes.pdf' },
+    })
+    fireEvent.change(screen.getByLabelText('需求内容'), {
+      target: { value: '   ' },
+    })
+    expect(screen.getByRole('button', { name: '创建运行' })).toBeEnabled()
+  })
+
   it('falls back to the default filename and rejects oversized text', async () => {
     mockRevisionWithAcceptedTypes(['text'])
     mockCreateRun.mockResolvedValue({

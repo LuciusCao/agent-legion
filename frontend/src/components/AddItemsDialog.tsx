@@ -133,6 +133,14 @@ export function AddItemsDialog({
   const textItem = resolveTextItem(text, textFilename, textConfig)
   const textItems = textAccepted && textItem.ready ? 1 : 0
   const invalidText = textAccepted && textItem.tooLong
+  // 用户已改动内容但文件名无效：混合提交时 text 条目只是不计数会被静默
+  // 丢弃（codex #911 P1）——阻塞提交，修正或清空后才放行。未触碰模板
+  // （untouchedTemplate）与空白内容本来就不是条目，不阻塞。
+  const invalidTextFilename =
+    textAccepted &&
+    !!textItem.filenameError &&
+    textItem.content.trim().length > 0 &&
+    !textItem.untouchedTemplate
   // 契约解析后收窄的窗口期：隐藏面板里残留的条目不计数、不提交。
   const totalItems =
     (materialAccepted ? doneEntries.length + selectedMaterialIds.length : 0) +
@@ -207,6 +215,7 @@ export function AddItemsDialog({
   const submitDisabled =
     totalItems === 0 ||
     invalidText ||
+    invalidTextFilename ||
     isSubmitting ||
     hasActiveUploads ||
     hasActiveBundles ||
@@ -280,6 +289,11 @@ export function AddItemsDialog({
           {!workflowKey && !workspaceQuery.isLoading && (
             <div className={styles.errorHint}>
               当前工作空间尚未发布 workflow，无法创建运行。
+            </div>
+          )}
+          {invalidTextFilename && (
+            <div className={styles.errorHint} data-testid="text-filename-hint">
+              「输入需求」页签的文件名无效，修正或清空后才能创建运行。
             </div>
           )}
         </div>
