@@ -161,9 +161,8 @@ describe('WorkflowNodeCodeSection', () => {
     renderSection()
 
     expect(
-      await screen.findByText('def run(job, job_dir, runtime):', {
-        exact: false,
-      })
+      // #770：窄栏只给签名摘要（无行尾冒号），完整代码进宽视图。
+      await screen.findByText('def run(job, job_dir, runtime)')
     ).toBeInTheDocument()
     expect(mockApi).toHaveBeenCalledWith(BASE)
     expect(screen.getByText(/出厂版本/)).toBeInTheDocument()
@@ -176,7 +175,7 @@ describe('WorkflowNodeCodeSection', () => {
     renderSection()
     await screen.findByText(/出厂版本/)
 
-    fireEvent.click(screen.getByRole('button', { name: '宽视图' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看代码' }))
 
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('节点代码 · fetch_items')

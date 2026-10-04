@@ -220,9 +220,9 @@ describe('WorkflowStudioPage', () => {
     expect(identity).not.toHaveTextContent('/ 编辑工作流')
     expect(identity).not.toHaveTextContent('知识视频 DAG')
     expect(identity).toHaveTextContent('v1')
-    // #804 定案：生命周期动作在左岛——发布 = contained 主按钮（文案「发布」）、
-    // 重置仅 dirty 时外露（干净态不在）；校验按钮（自动校验取代）与 ⋮ 菜单
-    // 退役；干净态无状态 chip。
+    // #804 定案：生命周期动作在左岛——发布 = contained 主按钮（文案「发布」）；
+    // #770 起重置收进版本菜单；校验按钮（自动校验取代）与 ⋮ 菜单退役；
+    // 干净态无状态 chip。
     expect(
       within(identity).getByRole('button', { name: '发布' })
     ).toBeInTheDocument()
@@ -255,7 +255,10 @@ describe('WorkflowStudioPage', () => {
     expect(await screen.findByText('题目审题')).toBeInTheDocument()
     expect(await screen.findByText('获取题目')).toBeInTheDocument()
     expect(screen.getAllByText(/v1/)[0]).toBeInTheDocument()
-    expect(screen.getByText(/abcdef12/)).toBeInTheDocument()
+    // #770：hash 降级为版本触发键的 tooltip / aria-label，不占岛面。
+    expect(
+      screen.getByRole('button', { name: /版本 v1 · abcdef12/ })
+    ).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     expect(
@@ -336,24 +339,25 @@ describe('WorkflowStudioPage', () => {
 
     expect(within(identityIsland()).getByText(/未发布变更/)).toBeInTheDocument()
 
-    // #804 定案：重置仅 dirty 时外露为 outlined 次级按钮（⋮ 菜单退役）；
-    // 轮 6 H5 起带 window.confirm 确认（jsdom 未实现 confirm，桩成通过）。
+    // #770 顶栏减法：重置不再外露按钮，收进版本菜单；轮 6 H5 的
+    // window.confirm 确认保留（jsdom 未实现 confirm，桩成通过）。
+    expect(
+      within(identityIsland()).queryByRole('button', { name: '重置' })
+    ).toBeNull()
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     await user.click(
-      within(identityIsland()).getByRole('button', { name: '重置' })
+      within(identityIsland()).getByRole('button', { name: /版本 v1/ })
     )
+    await user.click(screen.getByRole('menuitem', { name: '重置为已发布版本' }))
     expect(confirmSpy).toHaveBeenCalledOnce()
     confirmSpy.mockRestore()
 
-    // 干净态：状态 chip 与重置按钮一起消失。
+    // 干净态：状态 chip 消失。
     await waitFor(() =>
       expect(
         within(identityIsland()).queryByText(/未发布变更/)
       ).not.toBeInTheDocument()
     )
-    expect(
-      within(identityIsland()).queryByRole('button', { name: '重置' })
-    ).toBeNull()
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     expect(
       await screen.findByDisplayValue(/key: demo_video_workflow/)

@@ -10,6 +10,7 @@ import { patchWorkflowNodeExecution } from '../shared/workflowStudioYamlDraft.ex
 import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft.parse'
 import type { WorkflowYamlExecutionDefaults } from '../shared/workflowStudioYamlDraft.executionDefaults'
 import { WorkflowRuntimeInheritedField } from './WorkflowRuntimeInheritedField'
+import { WorkflowNodeRuntimeSaveBar } from './WorkflowNodeRuntimeSaveBar'
 
 export function WorkflowNodeRuntimeSettings(props: {
   node: WorkflowNodeRecord
@@ -73,6 +74,11 @@ export function WorkflowNodeRuntimeSettings(props: {
       />
       {/* execution.prompt（节点附加提示词）的编辑统一在「查看 Prompt」预览
           面板（默认组装 + 整段替代 + 重置），此处不再重复提供文本框。 */}
+      {/* #769：execution 块的保存收敛在面板内（不必再去顶栏）。 */}
+      <WorkflowNodeRuntimeSaveBar
+        nodeKey={props.node.key}
+        readOnly={props.readOnly}
+      />
     </div>
   )
 }

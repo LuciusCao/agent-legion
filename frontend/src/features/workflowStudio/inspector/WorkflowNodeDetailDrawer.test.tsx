@@ -383,10 +383,46 @@ describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
       screen.getByRole('button', { name: '查看 Prompt' })
     ).toBeInTheDocument()
 
-    // 预览态的 ✕ 直接关抽屉。
+    // 预览态的 ✕ 直接关抽屉；#770：与详情态头栏 ✕ 同一文案（单一关闭语义）。
     fireEvent.click(screen.getByRole('button', { name: '查看 Prompt' }))
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭节点配置' }))
     expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
+  })
+
+  it('#770 分级 Esc：预览子态 Esc 先回节点详情，详情态再按 Esc 才关抽屉', () => {
+    const { setSelectedNodeKey } = renderDrawer()
+
+    fireEvent.click(screen.getByRole('button', { name: '查看 Prompt' }))
+    expect(screen.getByLabelText('Prompt 预览')).toBeInTheDocument()
+
+    // 第一下 Esc：回节点详情（同「← 节点详情」），抽屉不关。base 上
+    // Esc 直接关抽屉（丢掉预览导航上下文）即红。
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(setSelectedNodeKey).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('Prompt 预览')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '查看 Prompt' })
+    ).toBeInTheDocument()
+
+    // 第二下 Esc：详情态才关抽屉。
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
+  })
+
+  it('#770 单一关闭出口：详情态与预览态各只有一个「关闭节点配置」，预览态的返回只在左侧返回条', () => {
+    renderDrawer()
+    expect(
+      screen.getAllByRole('button', { name: '关闭节点配置' })
+    ).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: '返回节点详情' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '查看 Prompt' }))
+    expect(
+      screen.getAllByRole('button', { name: '关闭节点配置' })
+    ).toHaveLength(1)
+    expect(
+      screen.getAllByRole('button', { name: '返回节点详情' })
+    ).toHaveLength(1)
   })
 
   it('技能文件预览同样走返回条', async () => {
