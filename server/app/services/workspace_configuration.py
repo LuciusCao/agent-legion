@@ -1,5 +1,6 @@
 from typing import Any
 
+from server.app.auth.workspace_visibility import narrow_visible_workspace_ids
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.demo_material_seed import seed_demo_workspace_materials
@@ -100,11 +101,9 @@ class WorkspaceConfigurationService:
         Only a membership restriction touches the DB (one member-row read),
         so per-connection callers (dashboard SSE, #881) can cache the result.
         """
-        bound = None if bound_workspace_id is None else frozenset({bound_workspace_id})
-        if member_user_id is None:
-            return bound
-        visible = frozenset(self.job_db.list_user_workspace_ids(member_user_id))
-        return visible if bound is None else visible & bound
+        return narrow_visible_workspace_ids(
+            member_user_id, bound_workspace_id, self.job_db.list_user_workspace_ids
+        )
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
         # Schema v62: the caller-provided id is the workflow key — bound at

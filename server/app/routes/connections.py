@@ -43,6 +43,11 @@ def create_connections_router(job_db: JobQueries, settings: Settings) -> APIRout
         # one for ref items and node configs), but never the full views —
         # display names and masked config stay admin-only. The key-only read
         # rides the JobQueries facade (BOUNDARY-DATA-001).
+        # #752 decision — accepted, not membership-filtered: connections are
+        # instance-level (no workspace owner column), so there is no
+        # membership relation to filter on, and every workspace's editors
+        # must be able to pick any of them. Only key names leave the server;
+        # revisit if connections ever gain per-workspace ownership.
         return ConnectionKeysResponse(keys=job_db.list_external_connection_keys())
 
     @router.get("/admin/connection-types", response_model=ConnectionTypesResponse)

@@ -19,6 +19,7 @@ from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
 from server.app.routes.agent_register_tokens import create_agent_register_tokens_router
 from server.app.routes.agent_worker_claims import create_agent_worker_claim_router
+from server.app.routes.agent_worker_listing import VisibleWorkspaces, narrow_workers_to_visible
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_presence import register_presence_route
 from server.app.routes.agent_worker_results import _recover_result_header, parse_result_metadata
@@ -221,18 +222,19 @@ def create_agent_workers_router(
 
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers(
-        _user: Annotated[dict[str, Any], Depends(require_user)], workspace_id: str | None = None
+        visible: VisibleWorkspaces, workspace_id: str | None = None
     ) -> AgentWorkersResponse:
         """List registered workers; workspace_id narrows to that workspace.
 
         The workspace view only shows workers registered with that
-        workspace's scoped tokens (legacy [] scope is excluded); without the
-        parameter every logged-in user still sees the full list — the UI is
-        responsible for passing the current workspace, and the admin settings
-        page intentionally keeps the unfiltered view."""
+        workspace's scoped tokens (legacy [] scope is excluded). Admins keep
+        the unfiltered view; other identities only see workers serving
+        their own workspaces, with the scope trimmed (#752, see
+        agent_worker_listing)."""
+        workers = registry.list_workers(workspace_id)
         return AgentWorkersResponse.model_validate(
             {
-                "workers": registry.list_workers(workspace_id),
+                "workers": narrow_workers_to_visible(workers, visible, workspace_id),
                 # Deployment-level fallback entry to the Worker console (a
                 # Worker-reported per-machine address is the follow-up).
                 "console_url": config.console_url,
