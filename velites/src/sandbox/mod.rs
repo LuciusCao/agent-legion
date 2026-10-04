@@ -12,8 +12,13 @@
 //!   cwd/session/$TMPDIR//tmp plus /dev).
 //! - Linux: `bubblewrap` (selective read-only binds: system paths + skill
 //!   dirs + the probed python3 roots; read-write binds for
-//!   cwd/session/$TMPDIR, tmpfs on /tmp; the bash tool keeps the shared
-//!   network and pid namespaces it has always had).
+//!   cwd/session/$TMPDIR, tmpfs on /tmp; a private pid namespace with its
+//!   own /proc and, unless network is explicitly allowed, a private network
+//!   namespace — one argv builder for the bash tool and `sandbox wrap`).
+//!
+//! Network is denied by default on both platforms for both callers (#715);
+//! the bash tool opts in via `--allow-network`, `sandbox wrap` via its own
+//! `--allow-network`.
 //!
 //! Fail-closed: [`Sandbox::new`] probes the backend and returns an error when
 //! it is unavailable; the harness refuses to start instead of degrading to an
@@ -41,30 +46,24 @@ enum Backend {
     /// macOS seatbelt profile text, passed to `sandbox-exec -p`.
     #[cfg(target_os = "macos")]
     Seatbelt(String),
-    /// Linux bubblewrap policy; wrap mode and the bash tool diverge here.
+    /// Linux bubblewrap policy (same namespace isolation for both callers).
     #[cfg(target_os = "linux")]
     Bwrap(BwrapPolicy),
 }
 
-/// Linux bubblewrap policy variants. Both use selective read-only binds;
-/// the bash tool keeps its historical shared network and pid namespaces,
-/// while `sandbox wrap` gets the strict one (private pid namespace,
-/// isolated network unless allowed).
+/// Linux bubblewrap policy: selective read-only binds, read-write binds, a
+/// private pid namespace, and a private network namespace unless allowed.
+/// The bash tool and `sandbox wrap` share it (#922 R-1, #715): they differ
+/// only in WHICH roots are bound, never in the namespace isolation.
 #[cfg(target_os = "linux")]
-enum BwrapPolicy {
-    BashTool {
-        read_only: Vec<PathBuf>,
-        read_write: Vec<PathBuf>,
-    },
-    Wrap {
-        read_only: Vec<PathBuf>,
-        read_write: Vec<PathBuf>,
-        allow_network: bool,
-    },
+struct BwrapPolicy {
+    read_only: Vec<PathBuf>,
+    read_write: Vec<PathBuf>,
+    allow_network: bool,
 }
 
-/// Which caller is building the sandbox: the bash tool (legacy policy) or
-/// the generic `sandbox wrap` subcommand (strict policy).
+/// Which caller is building the sandbox: the bash tool or the generic
+/// `sandbox wrap` subcommand (they differ in the roots they whitelist).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SandboxMode {
     BashTool,
@@ -95,15 +94,18 @@ impl Sandbox {
     ///
     /// `cwd` is the job directory (read-write), `session_dir` the
     /// `--session-dir` (read-write), `skill_dirs` the explicit `--skill`
-    /// directories (read-only).
+    /// directories (read-only). Network is denied unless `allow_network`
+    /// (the harness `--allow-network` flag, #715).
     pub fn new(
         cwd: &Path,
         session_dir: Option<&Path>,
         skill_dirs: &[PathBuf],
+        allow_network: bool,
     ) -> anyhow::Result<Self> {
         let read_write = collect_read_write(cwd, session_dir)?;
         let options = WrapOptions {
             read_only: skill_dirs.to_vec(),
+            allow_network,
             ..WrapOptions::default()
         };
         Self::build(read_write, &options, SandboxMode::BashTool)
@@ -202,43 +204,31 @@ impl Sandbox {
         mode: SandboxMode,
     ) -> anyhow::Result<Self> {
         probe_linux()?;
-        let policy = match mode {
-            SandboxMode::BashTool => {
-                let mut read_only = Vec::new();
-                for dir in &options.read_only {
-                    read_only.push(dir.canonicalize().with_context(|| {
-                        format!("failed to canonicalize read root `{}`", dir.display())
-                    })?);
-                }
-                // Design §8: python3 must run inside the sandbox. With
-                // selective binds an interpreter outside the system roots
-                // (uv/Homebrew prefix, venv) no longer starts — whitelist the
-                // probed roots read-only, same as macOS. A failed probe is
-                // silently skipped.
-                for root in python_read_roots() {
-                    if !read_only.contains(&root) {
-                        read_only.push(root);
-                    }
-                }
-                BwrapPolicy::BashTool {
-                    read_only,
-                    read_write,
+        let mut read_only = Vec::new();
+        for dir in &options.read_only {
+            read_only.push(dir.canonicalize().with_context(|| {
+                format!("failed to canonicalize read root `{}`", dir.display())
+            })?);
+        }
+        if mode == SandboxMode::BashTool {
+            // Design §8: python3 must run inside the sandbox. With selective
+            // binds an interpreter outside the system roots (uv/Homebrew
+            // prefix, venv) no longer starts — whitelist the probed roots
+            // read-only, same as macOS. A failed probe is silently skipped.
+            for root in python_read_roots() {
+                if !read_only.contains(&root) {
+                    read_only.push(root);
                 }
             }
-            SandboxMode::Wrap => {
-                let mut read_only = Vec::new();
-                for dir in &options.read_only {
-                    read_only.push(dir.canonicalize().with_context(|| {
-                        format!("failed to canonicalize read root `{}`", dir.display())
-                    })?);
-                }
-                BwrapPolicy::Wrap {
-                    read_only,
-                    read_write,
-                    allow_network: options.allow_network,
-                }
-            }
+        }
+        let policy = BwrapPolicy {
+            read_only,
+            read_write,
+            allow_network: options.allow_network,
         };
+        if mode == SandboxMode::BashTool {
+            probe_bwrap_policy(&policy)?;
+        }
         Ok(Self {
             backend: Backend::Bwrap(policy),
         })
@@ -267,7 +257,15 @@ impl Sandbox {
                 ("sandbox-exec".to_string(), argv)
             }
             #[cfg(target_os = "linux")]
-            Backend::Bwrap(policy) => ("bwrap".to_string(), bwrap_argv_for(policy, inner)),
+            Backend::Bwrap(policy) => (
+                "bwrap".to_string(),
+                bwrap_argv(
+                    &policy.read_only,
+                    &policy.read_write,
+                    inner,
+                    policy.allow_network,
+                ),
+            ),
         }
     }
 }
@@ -430,84 +428,16 @@ fn push_resolv_conf_bind(argv: &mut Vec<String>) {
     }
 }
 
-/// `bwrap` argv for the bash tool: selective read-only binds (system roots
-/// plus the read-only roots) instead of a blanket `/` bind, read-write
-/// binds for the read-write roots. The bash tool keeps its historical
-/// differences from the `sandbox wrap` strict policy: no `--unshare-pid`,
-/// and the network namespace is shared unless `unshare_net` is requested.
-/// `/tmp` becomes an empty tmpfs (scratch writes stay off the host);
-/// read-write binds come after it because later mounts win.
+/// `bwrap` argv shared by the bash tool and `sandbox wrap`: selective
+/// read-only binds instead of a blanket `/` bind, a private pid namespace
+/// with its own /proc, and an isolated network namespace unless the caller
+/// opted in. `/tmp` becomes an empty tmpfs (scratch writes stay off the
+/// host); read-write binds come after it because later mounts win.
+///
+/// #922 R-1: the mounted /proc must belong to the sandbox's own pid
+/// namespace — never mount /proc without `--unshare-pid`.
 #[cfg(any(target_os = "linux", test))]
-fn bwrap_argv_opts(
-    read_only: &[PathBuf],
-    read_write: &[PathBuf],
-    inner: &[String],
-    unshare_net: bool,
-) -> Vec<String> {
-    let mut argv: Vec<String> = vec!["--die-with-parent".into()];
-    if unshare_net {
-        argv.push("--unshare-net".into());
-    }
-    // Read-only system roots a binary needs to start; missing ones are
-    // skipped (e.g. /lib64 on some distros). Same list as bwrap_wrap_argv.
-    for system_root in ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/opt"] {
-        if Path::new(system_root).is_dir() {
-            argv.extend(["--ro-bind".into(), system_root.into(), system_root.into()]);
-        }
-    }
-    for path in read_only {
-        let display = path.display().to_string();
-        argv.extend(["--ro-bind".into(), display.clone(), display]);
-    }
-    push_resolv_conf_bind(&mut argv);
-    argv.extend([
-        "--dev".into(),
-        "/dev".into(),
-        "--proc".into(),
-        "/proc".into(),
-    ]);
-    if read_write.iter().any(|path| path == Path::new("/tmp")) {
-        argv.extend(["--tmpfs".into(), "/tmp".into()]);
-    }
-    for path in read_write {
-        if path == Path::new("/tmp") {
-            continue;
-        }
-        let display = path.display().to_string();
-        argv.extend(["--bind".into(), display.clone(), display]);
-    }
-    argv.push("--".into());
-    argv.extend(inner.iter().cloned());
-    argv
-}
-
-/// `bwrap` argv with the bash tool's shared-network policy.
-#[cfg(test)]
-fn bwrap_argv(read_only: &[PathBuf], read_write: &[PathBuf], inner: &[String]) -> Vec<String> {
-    bwrap_argv_opts(read_only, read_write, inner, false)
-}
-
-/// Dispatch the bwrap argv per policy (bash tool vs `sandbox wrap`).
-#[cfg(target_os = "linux")]
-fn bwrap_argv_for(policy: &BwrapPolicy, inner: &[String]) -> Vec<String> {
-    match policy {
-        BwrapPolicy::BashTool {
-            read_only,
-            read_write,
-        } => bwrap_argv_opts(read_only, read_write, inner, false),
-        BwrapPolicy::Wrap {
-            read_only,
-            read_write,
-            allow_network,
-        } => bwrap_wrap_argv(read_only, read_write, inner, *allow_network),
-    }
-}
-
-/// `sandbox wrap` bwrap argv (strict policy): selective read-only binds
-/// instead of a blanket `/` bind, a private pid namespace with its own
-/// /proc, and an isolated network namespace unless the caller opted in.
-#[cfg(any(target_os = "linux", test))]
-fn bwrap_wrap_argv(
+fn bwrap_argv(
     read_only: &[PathBuf],
     read_write: &[PathBuf],
     inner: &[String],
@@ -546,6 +476,43 @@ fn bwrap_wrap_argv(
     argv.push("--".into());
     argv.extend(inner.iter().cloned());
     argv
+}
+
+/// #715: probe the bash tool's exact policy once at startup (`true` inside
+/// the namespaces). An environment that cannot create them — e.g. a
+/// container whose bwrap cannot configure the private loopback (#39) —
+/// fails closed HERE with an actionable error instead of failing every bash
+/// call mid-run; it never falls back to the shared network namespace.
+#[cfg(target_os = "linux")]
+fn probe_bwrap_policy(policy: &BwrapPolicy) -> anyhow::Result<()> {
+    let argv = bwrap_argv(
+        &policy.read_only,
+        &policy.read_write,
+        &["true".to_string()],
+        policy.allow_network,
+    );
+    let output = std::process::Command::new("bwrap")
+        .args(&argv)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .context("bwrap not found")?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let namespaces = if policy.allow_network {
+        "pid"
+    } else {
+        "pid + network"
+    };
+    Err(anyhow!(
+        "bwrap cannot create the bash tool's private {namespaces} namespaces ({}): {}; \
+         fix the host (user namespaces; in containers also the capability to configure \
+         the private loopback) or opt the node into network with --allow-network",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
 }
 
 #[cfg(target_os = "linux")]
