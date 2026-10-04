@@ -12,6 +12,9 @@ export function textItemFilenameError(name: string): string | null {
   for (const char of name) {
     const code = char.codePointAt(0) ?? 0
     if (code < 32 || code === 127) return '文件名不能含控制字符'
+    // 未配对 UTF-16 代理项：后端 encode('utf-8') 会拒绝（契约测试覆盖），
+    // 前端正向迭代时孤代理项呈现为 0xD800-0xDFFF 区间的独立码点。
+    if (code >= 0xd800 && code <= 0xdfff) return '文件名含无效 Unicode 字符'
   }
   const dot = name.lastIndexOf('.')
   const suffix = dot >= 0 ? name.slice(dot).toLowerCase() : ''

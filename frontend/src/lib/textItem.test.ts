@@ -38,6 +38,7 @@ describe('text item filename validation (backend text_item_filename 同契约)',
     ['notes', 'suffix'],
     ['notes.', 'suffix'],
     ['a\n.md', 'control'],
+    ['bad' + String.fromCharCode(0xd800) + '.md', 'lone-surrogate'],
   ])('invalid name %s blocks ready', (filename) => {
     const item = resolveTextItem('实际需求', filename, config)
     expect(item.filenameError).not.toBeNull()
