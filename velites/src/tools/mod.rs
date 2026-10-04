@@ -8,6 +8,7 @@
 //! design §5). Writes stay cwd-only. Escapes (`../`, absolute paths,
 //! symlinks) are rejected before any filesystem mutation happens.
 
+mod atomic_write;
 pub mod bash;
 pub mod catalog;
 pub mod command_guard;
