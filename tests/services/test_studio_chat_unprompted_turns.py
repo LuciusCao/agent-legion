@@ -120,6 +120,38 @@ def test_cron_fire_receipt_and_cancelled_turn_end():
 
 
 @pytest.mark.no_db
+def test_failed_turn_is_persisted_as_error_not_turn_end():
+    """#938 review R2 P2: ``turn.ended(reason="failed")`` is an error terminal
+    (the ACP path's on_turn_error shape), never a completed end_turn; only
+    code/message of the payload survive, never details/cause."""
+    error = {"code": "PROVIDER_ERROR", "message": "rate limited", "details": {"key": "sk-x"}}
+    rows = _project(
+        [TASK_TURN[0], {"type": "turn.ended", "agentId": "main", "turnId": 1, "reason": "failed"}]
+    )
+    assert rows[-1][2] == {
+        "event": "error",
+        "detail": "agent 自发回合失败",
+        "unprompted": True,
+    }
+    rows = _project(
+        [
+            TASK_TURN[0],
+            {
+                "type": "turn.ended",
+                "agentId": "main",
+                "turnId": 1,
+                "reason": "failed",
+                "error": error,
+            },
+        ]
+    )
+    assert rows[-1][2]["event"] == "error"
+    assert rows[-1][2]["detail"] == "agent 自发回合失败：[PROVIDER_ERROR] rate limited"
+    assert "sk-x" not in json.dumps(rows, ensure_ascii=False)
+    assert all(row[2].get("event") != "turn_end" for row in rows)
+
+
+@pytest.mark.no_db
 def test_failed_tool_result_marks_card_failed():
     records = [*TASK_TURN[:3]]
     records.append(

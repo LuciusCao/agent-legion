@@ -62,6 +62,16 @@ def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _error_detail(error: Any) -> str:
+    """Safe summary of a failed turn's error payload (kimi ``toErrorPayload``):
+    code and message only — never ``details`` / ``cause``, which may carry
+    request payloads."""
+    payload = _mapping(error)
+    code, message = payload.get("code"), payload.get("message")
+    parts = [part for part in (f"[{code}]" if code else "", str(message or "")) if part]
+    return ("agent 自发回合失败" + ("：" + " ".join(parts) if parts else ""))[:500]
+
+
 def _text_blocks(value: Any) -> list[dict[str, Any]]:
     if value is None or value == "":
         return []
@@ -97,8 +107,13 @@ class UnpromptedTurnProjector:
                 return []
             self.turns.discard(turn)
             self.tool_turns = {k: v for k, v in self.tool_turns.items() if v != turn}
-            reason = record.get("reason")
-            stop = {"cancelled": "cancelled", "blocked": "refusal"}.get(str(reason), "end_turn")
+            reason = str(record.get("reason") or "")
+            if reason == "failed":
+                # Same shape as the ACP path's on_turn_error (events.on_error,
+                # non-fatal): one error row, no turn_end, status untouched.
+                err = {"event": "error", "detail": _error_detail(record.get("error"))}
+                return [("status", "system", {**err, "unprompted": True})]
+            stop = {"cancelled": "cancelled", "blocked": "refusal"}.get(reason, "end_turn")
             end: dict[str, Any] = {"event": "turn_end", "stop_reason": stop, "unprompted": True}
             return [("status", "system", end)]
         if kind == "context.append_loop_event" and isinstance(record.get("event"), dict):

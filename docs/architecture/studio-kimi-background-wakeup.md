@@ -156,8 +156,10 @@ Studio 发起的回合按 origin 跳过，不会重复；session/load 加载来�
 `turn.prompt` 的 origin 为 `user` / `skill_activation` 的回合由 Studio 发起（含 #816
 系统提示），已经走 ACP，跳过；其余回合按到达顺序写入 `status`（`unprompted_turn` 回执）、
 agent `text` / `thought`、ACP 形状的 `tool_call` / `tool_call_update`（id 为
-`<turnId>:<toolCallId>`，与 Kimi ACP 一致），最后写 `turn_end`（`unprompted: true`），
-前端照常触发终止回取与草稿查询失效。写入在 runtime 锁内复核 runtime 身份与 closed，
+`<turnId>:<toolCallId>`，与 Kimi ACP 一致），最后写 `turn_end`（`unprompted: true`）；
+引擎以 `reason = failed` 结束的回合改写一条 `error` 状态事件（detail 只含错误 code 与
+message，不含 details / cause），与 ACP 路径 `on_turn_error` 的形态一致，前端按既有告警条
+显示，不写 `turn_end`。前端照常触发终止回取与草稿查询失效。写入在 runtime 锁内复核 runtime 身份与 closed，
 关闭 / 删除栅栏之后不再写；写失败的行保留到下一次轮询重试。会话状态、turn owner
 与 empty_turn 判定都不变：自发回合进行中用户发的消息由 Kimi 引擎排队，按既有
 running 语义在其后执行。kimi-cli V1 会话没有该 wire 文件，watcher 保持空转。
