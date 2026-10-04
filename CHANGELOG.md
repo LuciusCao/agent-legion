@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- workspace 设置页新增「Agent 定义」目录（issue #677）：此前 Agent 定义的归档入口只在 Studio 已绑定节点的 inspector 里，workflow 重构后不再被任何节点引用的孤儿 Agent 无法从界面归档。新区块列出本 workspace 全部未归档的 Agent 定义（含草稿），按当前生效 workflow 的 agent 节点标出「被 N 个节点引用 / 未被引用」并提供「未被引用」过滤视图，每项带二次确认的归档动作；被节点引用的 Agent 在确认框里列出引用节点并说明归档后的影响（后端 `DELETE /api/agent-definitions/{agent_id}` 语义不变，对仍被引用的 Agent 不拒绝）。引用关系只按 active revision 计算，未发布的 workflow 草稿不计；端点为 admin-only，非 admin 不显示该区块与导航项。
+
 ### Changed
 - workflow 升级 inherit 模式不再因只改 `timeout_seconds` 而重跑节点（#858）：per-node diff 比较节点定义 `config` 与冻结 config 段时剔除运行时可调的保留键（以 `runtime_reserved_config` 的分类表为单一事实源，目前只有 `timeout_seconds`）；`sandbox_network` 等随版本冻结的键照常参与比较，与超时一起改动时照常重跑。
 - `GET /api/workspaces/{workspace_id}/jobs/snapshot` 的 `limit` 越界改为 422（issue #852，对外行为变更）：此前 `limit` 无取值约束，越界值（如 `0`、`501`）在函数体内被静默钳到 1–500 后照常 200，调用方拿不到「页大小被改写」的信号；现声明为 `Query(ge=1, le=500)`（默认仍为 200），越界返回 422，与 `GET /runs`（1–500）、`GET /jobs`（1–2000）同一约定。此前传 `limit` > 500 或 < 1 的外部调用方需改为 1–500 内的值；控制台前端一律传 500，不受影响。docs/workspace-api-tokens.md 的示例注释、端点表与错误码表同步更新。
