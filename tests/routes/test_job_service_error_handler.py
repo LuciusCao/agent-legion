@@ -15,10 +15,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from server.app.routes.job_http import (
-    raise_job_http_error,
-    register_job_http_exception_handlers,
-)
+from server.app.routes.job_http import raise_job_http_error
+from server.app.routes.job_http_handlers import register_job_http_exception_handlers
 from server.app.services.job_errors import (
     ConflictError,
     CustomNodesDisabledError,

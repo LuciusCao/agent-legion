@@ -363,10 +363,11 @@ exemptions:
     goes stale automatically. The Codex P2 fix on PR 299 adds _resolve_key (query-bound alias must equal
     the workspace id), which is part of the same deprecation-window cost. Issue 692 (codex P1 round 4)
     adds the optional expected_hash publish body (about 17 lines) — the server-side CAS guard for chat
-    draft cards; re-signed to 257, 2 beyond the prior 240+15 band, time-boxed per issue 641.
+    draft cards; re-signed to 257, 2 beyond the prior 240+15 band, time-boxed per issue 641. Issue 927
+    drops the route-level JobServiceError boilerplate (app-level handler), lowered to actual + 10.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 257
+  ceiling: 246
   expires: 2026-10-31
 - check: architecture.file_budget
   path: server/app/routes/job_http.py
@@ -914,21 +915,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 192
 - check: architecture.file_budget
-  path: server/app/routes/studio_agent_catalog_read_tools.py
-  reason: >-
-    Issue #633 adds the workspace-scoped agent-definition create entry to
-    the agent-definition tool group: one POST handler (capability-derived
-    agent_id, studio-agent attribution) beside the read trio and the save
-    draft. The module IS the single agent-definition tool endpoint surface;
-    splitting one endpoint into a sister module would fork the group's
-    shared router guards and the version-response helper. Ceiling at
-    actual + 10 per the dated-exemption convention. Remove when the
-    agent-definition tool endpoints get a route split per verb or a budget
-    re-balance frees headroom.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 116
-- check: architecture.file_budget
   path: server/app/mcp_server/agent_tools.py
   reason: >-
     Issue #633 adds the create_agent_definition tool to the agent tool
@@ -1273,10 +1259,11 @@ exemptions:
     would hand the tag to any future route added here for free. Ceiling at
     actual + 10 per the dated-exemption convention (#431/#458 precedents).
     Remove when the module is re-balanced under the baseline or the intake
-    tagging moves into a registration helper.'
+    tagging moves into a registration helper. #927 drops the route-level
+    JobServiceError boilerplate (app-level handler): lowered to actual + 10.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/734
-  ceiling: 97
+  ceiling: 87
   expires: 2026-12-31
 - check: architecture.file_budget
   path: server/app/services/external_artifact_access.py
