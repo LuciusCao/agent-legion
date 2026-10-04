@@ -101,14 +101,14 @@ def normalize_selected_option(options: list[dict[str, Any]], option_id: str | No
     """Validate a chosen option against the offered set; downgrade
     ``allow_always`` to the offered ``allow_once`` so every later tool call
     (and every terminal it spawns) comes back through a permission request.
-    Returns None when the id was not offered (treated as a denial)."""
+    Returns None (treated as a denial) when the id was not offered, or when
+    ``allow_always`` was chosen but no one-shot option exists to narrow to."""
     chosen = next((o for o in options if o.get("optionId") == option_id), None)
     if chosen is None:
         return None
     if chosen.get("kind") == "allow_always":
         once = next((o for o in options if o.get("kind") == "allow_once"), None)
-        if once is not None:
-            return str(once["optionId"])
+        return None if once is None else str(once["optionId"])
     return str(chosen["optionId"])
 
 

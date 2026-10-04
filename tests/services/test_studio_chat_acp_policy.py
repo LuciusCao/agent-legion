@@ -103,8 +103,10 @@ def test_option_normalization_rejects_unoffered_and_narrows_always() -> None:
     assert normalize_selected_option(OPTIONS, None) is None
     assert normalize_selected_option(OPTIONS, "always") == "once"
     assert normalize_selected_option(OPTIONS, "reject") == "reject"
-    only_always = [OPTIONS[1]]
-    assert normalize_selected_option(only_always, "always") == "always"
+    # No one-shot option to narrow to: refused rather than a session-wide allow.
+    only_always = [OPTIONS[1], OPTIONS[2]]
+    assert normalize_selected_option(only_always, "always") is None
+    assert normalize_selected_option(only_always, "reject") == "reject"
 
 
 # -- terminal environment allowlist -----------------------------------------
@@ -175,9 +177,15 @@ def test_grants_are_one_shot_and_bound_to_the_approved_command() -> None:
     grants = TerminalGrants()
     assert not grants.consume("sh", ["-c", "ls"])
     grants.grant({"rawInput": {"command": "ls -la"}})
-    assert not grants.consume("sh", ["-c", "cat secrets"])
-    assert grants.consume("sh", ["-c", "cd /w && ls -la"])
-    assert not grants.consume("sh", ["-c", "cd /w && ls -la"])
+    # Bound grants match exactly: extending or prefixing the approved command
+    # (or an unquoted cd wrapper) does not consume them.
+    for mutated in ("cat secrets", "cat secrets; ls -la", "ls -la; cat secrets", "cd /w && ls -la"):
+        assert not grants.consume("sh", ["-c", mutated])
+    assert not grants.consume("sh", ["-c", "cd '/w' && cat x; ls -la"])
+    assert grants.consume("sh", ["-c", "cd '/w '\\''q' && ls -la"])
+    assert not grants.consume("sh", ["-c", "cd '/w' && ls -la"])
+    grants.grant({"rawInput": {"command": "ls -la"}})
+    assert grants.consume("ls", ["-la"])
     grants.grant({"toolCallId": "tc-unbound"})
     assert grants.consume("sh", ["-c", "anything"])
 
