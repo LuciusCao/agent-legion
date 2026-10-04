@@ -13,6 +13,7 @@ import json
 
 from server.app.auth.scoped_tokens import mint_scoped_token, revoke_scoped_token
 from server.app.mcp_server.config import SESSION_ID_HEADER
+from server.app.mcp_server.instance_probe import instance_proof
 from server.app.mcp_server.tool_client import ToolClient
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 
@@ -206,3 +207,16 @@ def test_loopback_api_base_follows_registry_edits(client, job_db, monkeypatch) -
     )
     assert response.status_code == 200, response.text
     assert captured["api_base"] == "http://10.0.0.9:9000"
+
+
+def test_instance_probe_answers_without_token_in_the_real_app(anon_client) -> None:
+    """#915: the mounted guard answers the token-less self-identity probe
+    with this process's keyed proof (the api_base self-check's counterpart)."""
+    nonce = "0123456789abcdef" * 2
+    response = anon_client.get(f"/api/studio-agent/instance-probe?nonce={nonce}")
+    assert response.status_code == 200
+    assert response.json() == {"proof": instance_proof(nonce)}
+    # Everything else on the mount stays behind the scoped-token guard.
+    assert (
+        anon_client.post(MCP_URL, json=_INITIALIZE, headers={**_ACCEPT, **_HOST}).status_code == 401
+    )

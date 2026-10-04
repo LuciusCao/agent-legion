@@ -23,8 +23,10 @@ from server.app.services.job_errors import InvalidOperationError
 from server.app.settings import Settings
 from server.app.studio_chat.acp_session import AcpSessionCallbacks, AcpSessionHandle
 from server.app.studio_chat.background_baseline import CompletionBaseline
+from server.app.studio_chat.callback_check import check_api_base, warn_callback_unreachable
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import revoke_minted_token_quietly, teardown_runtime
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,7 @@ def spawn_session_runtime(
     *,
     resume_acp_session_id: str | None = None,
     background_baseline: CompletionBaseline | None = None,
+    store: StudioChatStore | None = None,
 ) -> AcpSessionHandle:
     """Mint the run token, spawn the agent subprocess, wait for readiness.
 
@@ -80,6 +83,11 @@ def spawn_session_runtime(
     token: str | None = None
     runtime: SessionRuntime | None = None
     try:
+        # #915: read api_base once (the injected MCP URL and the self-check
+        # must agree) and verify, token-less, that it calls back into THIS
+        # process — inside the try so any surprise still runs the cleanup.
+        api_base = str(registry.get()["api_base"])
+        callback_problem = check_api_base(api_base)
         # The run token is bound to this session's workspace (schema v45):
         # the tool surface then refuses other workspaces for it.
         token = mint_scoped_token(db, user_id, origin="run", workspace_id=workspace_id)
@@ -89,7 +97,7 @@ def spawn_session_runtime(
             cwd=str(settings.root_dir),
             mcp_server=build_mcp_server_spec(
                 token=token,
-                api_base=str(registry.get()["api_base"]),
+                api_base=api_base,
                 session_id=session_id,
             ),
             env=None,
@@ -128,6 +136,8 @@ def spawn_session_runtime(
         if session is None or session["status"] != "idle":
             detail = (session or {}).get("error_detail") or "agent startup failed"
             raise InvalidOperationError(f"Studio agent failed to start: {detail}")
+        if store is not None:
+            warn_callback_unreachable(db, store, session_id, api_base, callback_problem)
         return handle
     except Exception as exc:
         # One cleanup path for every startup failure: no half-applied

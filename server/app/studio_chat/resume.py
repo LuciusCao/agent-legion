@@ -94,6 +94,7 @@ def resume_session(
         workspace_id,
         resume_acp_session_id=claimed["acp_session_id"],
         background_baseline=baseline,
+        store=service.store,
     )
     runtime = service.runtime(session_id)
     if runtime is not None and not handle.loaded_existing:

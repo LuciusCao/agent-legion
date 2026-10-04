@@ -28,6 +28,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from server.app.auth.scoped_tokens import STUDIO_AGENT_SCOPE, authenticate_scoped_token
 from server.app.jobs import JobQueries
 from server.app.mcp_server.config import McpServerConfig
+from server.app.mcp_server.instance_probe import is_probe_request, serve_probe
 from server.app.mcp_server.server import create_mcp_server
 
 # Mounted at MCP_MOUNT_PATH inside the FastAPI app; the FastMCP route keeps
@@ -46,6 +47,11 @@ class _ScopedTokenAuthApp:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self._app(scope, receive, send)
+            return
+        if is_probe_request(scope, MCP_MOUNT_PATH):
+            # #915: the token-less self-identity probe (instance_probe.py)
+            # answers ahead of the token check — it carries no credential.
+            await serve_probe(scope, receive, send)
             return
         headers = {str(k, "latin-1"): str(v, "latin-1") for k, v in scope["headers"]}
         scheme, _, raw_token = headers.get("authorization", "").partition(" ")

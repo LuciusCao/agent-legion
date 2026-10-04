@@ -59,6 +59,7 @@ from server.app.storage import build_s3_storage_checked
 from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
+from server.app.studio_chat.serving_address import ServingAddressMiddleware
 from server.app.sweeper_owned_startup import start_sweeper_owned_threads
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
@@ -264,6 +265,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
     add_http_middleware(app, settings)
+    # #915: record the serving socket address — the default Studio MCP
+    # callback base when the registry api_base is unconfigured.
+    app.add_middleware(ServingAddressMiddleware)
     app.state.settings = settings
     app.state.job_db = job_db
     app.state.auth_service = build_auth_service(job_db, settings.config)
