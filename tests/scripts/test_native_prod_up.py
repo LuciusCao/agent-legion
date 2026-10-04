@@ -11,6 +11,7 @@ test_dev_stack_local_s3.py 的静态接线检查一致；health_host 的归一
 
 from __future__ import annotations
 
+import os
 import re
 import socket
 import subprocess
@@ -53,8 +54,122 @@ def _bind_listeners(addresses: list[str], port: int) -> list[Any]:
 
 def test_bind_env_vars_default_to_loopback() -> None:
     """NATIVE_*_BIND 默认 127.0.0.1——未设置时保持仅本机可达的历史行为。"""
-    assert 'BACKEND_BIND="${NATIVE_BACKEND_BIND:-127.0.0.1}"' in NATIVE_PROD_UP
-    assert 'WORKER_BIND="${NATIVE_WORKER_BIND:-127.0.0.1}"' in NATIVE_PROD_UP
+    assert 'BACKEND_BIND="$(dotenv_lookup_or NATIVE_BACKEND_BIND 127.0.0.1 .env)"' in NATIVE_PROD_UP
+    assert 'WORKER_BIND="$(dotenv_lookup_or NATIVE_WORKER_BIND 127.0.0.1 .env)"' in NATIVE_PROD_UP
+
+
+_NATIVE_VARS = (
+    "NATIVE_BACKEND_PORT",
+    "NATIVE_WORKER_PORT",
+    "NATIVE_BACKEND_BIND",
+    "NATIVE_WORKER_BIND",
+)
+_SETTING_LINE = re.compile(r"^(?:BACKEND|WORKER)_(?:PORT|BIND)=.*$", re.MULTILINE)
+
+
+def _resolve_native_settings(
+    script: str, tmp_path: Path, env_file: str | None, environ: dict[str, str]
+) -> dict[str, str]:
+    """真实执行 up/down 脚本里的四行取值（dotenv-lib + 根 .env），返回结果。
+
+    up 已 cd 到仓库根、读相对 ``.env``；down 不 cd、读 ``$ROOT/.env``——
+    两者都把合成目录当仓库根执行，钉住「进程环境 > 根 .env > 默认」。"""
+    source = (ROOT / "scripts" / script).read_text(encoding="utf-8")
+    lines = _SETTING_LINE.findall(source)
+    assert len(lines) == 4, f"{script}: 四个 NATIVE_* 取值行缺失或重复: {lines}"
+    if env_file is not None:
+        (tmp_path / ".env").write_text(env_file, encoding="utf-8")
+    code = (
+        "set -euo pipefail\n"
+        f'ROOT="{tmp_path}"\n'
+        f'source "{ROOT}/scripts/dotenv-lib.sh"\n'
+        + "\n".join(lines)
+        + '\nprintf "%s|%s|%s|%s" "$BACKEND_PORT" "$WORKER_PORT" "$BACKEND_BIND" "$WORKER_BIND"\n'
+    )
+    env = {k: v for k, v in os.environ.items() if k not in _NATIVE_VARS}
+    env.update(environ)
+    result = subprocess.run(
+        ["bash", "-c", code], cwd=tmp_path, env=env, capture_output=True, text=True, check=True
+    )
+    backend_port, worker_port, backend_bind, worker_bind = result.stdout.split("|")
+    return {
+        "NATIVE_BACKEND_PORT": backend_port,
+        "NATIVE_WORKER_PORT": worker_port,
+        "NATIVE_BACKEND_BIND": backend_bind,
+        "NATIVE_WORKER_BIND": worker_bind,
+    }
+
+
+_DOTENV_NATIVE = (
+    "# 原生形态网络配置\n"
+    "NATIVE_BACKEND_BIND=0.0.0.0\n"
+    'export NATIVE_WORKER_BIND="192.0.2.5"\n'
+    "NATIVE_BACKEND_PORT=  9000  \n"
+    "NATIVE_WORKER_PORT='9001'\n"
+)
+
+
+@pytest.mark.parametrize("script", ["native-prod-up.sh", "native-prod-down.sh"])
+def test_native_settings_read_from_root_dotenv(tmp_path: Path, script: str) -> None:
+    """#486 三态之一：进程环境未设置时取根 .env（export 前缀、首尾空白、
+    一层引号与 local-s3-decide 同语义）——bind 写进 .env 后换 shell /
+    重启 / launchd 调起都不再静默退回 loopback。"""
+    assert _resolve_native_settings(script, tmp_path, _DOTENV_NATIVE, {}) == {
+        "NATIVE_BACKEND_PORT": "9000",
+        "NATIVE_WORKER_PORT": "9001",
+        "NATIVE_BACKEND_BIND": "0.0.0.0",
+        "NATIVE_WORKER_BIND": "192.0.2.5",
+    }
+
+
+@pytest.mark.parametrize("script", ["native-prod-up.sh", "native-prod-down.sh"])
+def test_native_settings_process_env_overrides_dotenv(tmp_path: Path, script: str) -> None:
+    """#486 三态之二：export 的值始终优先于 .env（临时覆盖逃生门，与
+    dotenv override=False 同向）；空的进程环境值按未配置，回落 .env。"""
+    environ = {
+        "NATIVE_BACKEND_PORT": "8100",
+        "NATIVE_WORKER_PORT": "",
+        "NATIVE_BACKEND_BIND": "127.0.0.1",
+        "NATIVE_WORKER_BIND": "198.51.100.7",
+    }
+    assert _resolve_native_settings(script, tmp_path, _DOTENV_NATIVE, environ) == {
+        "NATIVE_BACKEND_PORT": "8100",
+        "NATIVE_WORKER_PORT": "9001",
+        "NATIVE_BACKEND_BIND": "127.0.0.1",
+        "NATIVE_WORKER_BIND": "198.51.100.7",
+    }
+
+
+@pytest.mark.parametrize("script", ["native-prod-up.sh", "native-prod-down.sh"])
+@pytest.mark.parametrize("env_file", [None, "OTHER=1\nNATIVE_BACKEND_BIND=\n"])
+def test_native_settings_fall_back_to_defaults(
+    tmp_path: Path, script: str, env_file: str | None
+) -> None:
+    """#486 三态之三：两级来源皆缺（无 .env / 键缺失 / 显式空值）回落默认
+    8000/8787 与 127.0.0.1，保持历史行为。"""
+    assert _resolve_native_settings(script, tmp_path, env_file, {}) == {
+        "NATIVE_BACKEND_PORT": "8000",
+        "NATIVE_WORKER_PORT": "8787",
+        "NATIVE_BACKEND_BIND": "127.0.0.1",
+        "NATIVE_WORKER_BIND": "127.0.0.1",
+    }
+
+
+def test_native_scripts_share_single_dotenv_implementation() -> None:
+    """#486：shell dotenv 解析只有 scripts/dotenv-lib.sh 一份实现——四个
+    入口 source 它，不得再内嵌 grep/引号剥离的第 N 份解析。"""
+    down = (ROOT / "scripts" / "native-prod-down.sh").read_text(encoding="utf-8")
+    decide = (ROOT / "scripts" / "local-s3-decide.sh").read_text(encoding="utf-8")
+    dev_stack = (ROOT / "scripts" / "dev_stack.sh").read_text(encoding="utf-8")
+    for name, text in (
+        ("native-prod-up.sh", NATIVE_PROD_UP),
+        ("native-prod-down.sh", down),
+        ("local-s3-decide.sh", decide),
+        ("dev_stack.sh", dev_stack),
+    ):
+        assert "dotenv-lib.sh" in text, name
+        assert "(export[[:space:]]+)?" not in text, f"{name} 内嵌了 dotenv 行匹配"
+        assert '"${value:0:1}" == \'"\'' not in text, f"{name} 内嵌了引号剥离"
 
 
 def test_processes_consume_bind_variables() -> None:
@@ -302,6 +417,78 @@ def test_listener_match_behavior_mixed_family() -> None:
         s6.close()
 
 
+def _run_wildcard_guard(bind: str, port: int) -> subprocess.CompletedProcess[str]:
+    names = (
+        "listener_display",
+        "listener_family",
+        "port_listening",
+        "wildcard_bind_conflicts",
+        "refuse_wildcard_double_instance",
+    )
+    funcs = "\n".join(_extract_function(name) for name in names)
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            funcs
+            + f'\nrefuse_wildcard_double_instance "后端" "{bind}" "{port}" NATIVE_BACKEND_BIND\n',
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_wildcard_bind_refuses_to_coexist_with_specific_listener() -> None:
+    """#486 顺带项（#482 follow-up）：127.0.0.1 旧实例在监听时以 bind=0.0.0.0
+    跑 prod-up，通配监听能与具体地址监听并存，旧判定放行后起出连同一个
+    库的双实例。取舍：通配 bind 命中同端口任何非通配监听即拒绝启动（rc≠0、
+    报出冲突监听与处置指引），不视为已运行跳过——跳过会让旧实例继续只听
+    loopback、就绪提示误报新 bind 已生效。真实绑定执行。"""
+    port = _free_port()
+    sockets = _bind_listeners(["127.0.0.1"], port)
+    try:
+        refused = _run_wildcard_guard("0.0.0.0", port)
+        assert refused.returncode == 1
+        assert f"127.0.0.1:{port}" in refused.stderr
+        assert "双实例" in refused.stderr
+        assert "make prod-down" in refused.stderr
+        # 非通配 bind 不受影响：同地址视为已运行（交给 port_listening 跳过），
+        # 不同具体地址可并存（#480 的双地址语义保持不变）。
+        assert _run_wildcard_guard("127.0.0.1", port).returncode == 0
+        assert _run_wildcard_guard("192.0.2.99", port).returncode == 0
+    finally:
+        for sock in sockets:
+            sock.close()
+    # 端口空闲：通配 bind 正常放行。
+    assert _run_wildcard_guard("0.0.0.0", port).returncode == 0
+
+
+def test_wildcard_bind_already_listening_is_idempotent_skip() -> None:
+    """通配监听本身已在（同一 bind 重跑 prod-up）不算冲突，走既有幂等跳过。"""
+    port = _free_port()
+    sockets = _bind_listeners(["0.0.0.0"], port)
+    try:
+        result = _run_wildcard_guard("0.0.0.0", port)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+    finally:
+        for sock in sockets:
+            sock.close()
+
+
+def test_wildcard_guard_runs_before_any_process_starts() -> None:
+    """接线钉：两个服务的通配检查都在第一个 nohup 之前完成，拒绝时直接退出
+    ——不留下「后端起了、Worker 被拒」的半启动状态。"""
+    guard_backend = NATIVE_PROD_UP.index(
+        'refuse_wildcard_double_instance "后端" "$BACKEND_BIND" "$BACKEND_PORT"'
+    )
+    guard_worker = NATIVE_PROD_UP.index(
+        'refuse_wildcard_double_instance "Worker" "$WORKER_BIND" "$WORKER_PORT"'
+    )
+    first_start = NATIVE_PROD_UP.index("nohup ${CAFFEINATE")
+    assert guard_backend < first_start and guard_worker < first_start
+
+
 def test_velites_refresh_covers_bundled_copy_channel() -> None:
     """#831：prod-up 必须同时刷新 PATH 与 data/bin 两个 velites 安置点。
 
@@ -328,8 +515,8 @@ def test_prod_down_locates_by_bind_address() -> None:
     精确匹配 display:port（同族通配除外），未命中即视为未运行——族别
     过滤防止误杀同端口另一族的无关监听（Codex #482 P1）。"""
     down = (ROOT / "scripts" / "native-prod-down.sh").read_text(encoding="utf-8")
-    assert 'BACKEND_BIND="${NATIVE_BACKEND_BIND:-127.0.0.1}"' in down
-    assert 'WORKER_BIND="${NATIVE_WORKER_BIND:-127.0.0.1}"' in down
+    assert 'BACKEND_BIND="$(dotenv_lookup_or NATIVE_BACKEND_BIND 127.0.0.1 "$ROOT/.env")"' in down
+    assert 'WORKER_BIND="$(dotenv_lookup_or NATIVE_WORKER_BIND 127.0.0.1 "$ROOT/.env")"' in down
     assert 'listener_pids "$bind" "$port"' in down
     assert '-iTCP:"$port" -i"$family"' in down
     assert 'stop_port "$WORKER_BIND" "$WORKER_PORT" "Worker" 35' in down
@@ -398,7 +585,11 @@ def _extract_function(name: str) -> str:
 # the extracted-function tests must scrub the two variables first: the
 # assertions below pin the file-parsing semantics, and a leaked ambient
 # value (e.g. a worktree .env loaded into the pytest worker) must not win.
-_SCRUB_AMBIENT_S3 = "unset AGENT_LEGION_S3_ACCESS_KEY AGENT_LEGION_S3_SECRET_KEY\n"
+_SCRUB_AMBIENT_S3 = (
+    "unset AGENT_LEGION_S3_ACCESS_KEY AGENT_LEGION_S3_SECRET_KEY\n"
+    # collect_s3_credentials 经共享 dotenv-lib 解析（#486），提取执行时同样 source。
+    f'source "{ROOT}/scripts/dotenv-lib.sh"\n'
+)
 
 
 def test_s3_credentials_bridge_root_env_to_compose(tmp_path: Path) -> None:
