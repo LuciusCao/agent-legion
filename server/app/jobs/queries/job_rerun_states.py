@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.job_bulk_sql import id_chunks
 
 
 class JobRerunStateQueriesMixin(ConnectionQueriesMixin):
@@ -26,17 +27,19 @@ class JobRerunStateQueriesMixin(ConnectionQueriesMixin):
         workspace: the batch write path must distinguish not-found from
         foreign-workspace ids, so the workspace check happens in Python.
         """
-        if not job_ids:
-            return {}
         del workspace_id  # workspace scoping is the caller's semantic check
-        params = [str(job_id) for job_id in job_ids]
-        sql = (
-            "select id, workspace_id, status, workflow_definition_snapshot_json"
-            f" from jobs where id in ({','.join('%s' for _ in job_ids)})"
-        )
-        with self._connect_read() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        return {str(row["id"]): dict(row) for row in rows}
+        by_id: dict[str, dict[str, Any]] = {}
+        # #712: ≤CHUNK_ROWS ids per statement (same chunking as
+        # fetch_jobs_by_ids) — no single giant IN list for large selections.
+        for chunk in id_chunks(job_ids):
+            sql = (
+                "select id, workspace_id, status, workflow_definition_snapshot_json"
+                f" from jobs where id in ({','.join('%s' for _ in chunk)})"
+            )
+            with self._connect_read() as conn:
+                rows = conn.execute(sql, chunk).fetchall()
+            by_id.update({str(row["id"]): dict(row) for row in rows})
+        return by_id
 
     def list_job_node_states_for_jobs(
         self, job_ids: Sequence[str]
@@ -46,16 +49,16 @@ class JobRerunStateQueriesMixin(ConnectionQueriesMixin):
         Same grouping and per-job id ordering as ``list_job_nodes_for_jobs``;
         skipping the wide columns keeps large selections cheap.
         """
-        if not job_ids:
-            return {}
-        placeholders = ",".join("%s" for _ in job_ids)
         grouped: dict[str, list[dict[str, Any]]] = {str(job_id): [] for job_id in job_ids}
-        with self._connect_read() as conn:
-            rows = conn.execute(
-                f"select job_id, node_key, status from job_nodes"
-                f" where job_id in ({placeholders}) order by job_id, id",
-                [str(job_id) for job_id in job_ids],
-            ).fetchall()
-        for row in rows:
-            grouped[str(row["job_id"])].append(dict(row))
+        # Chunks partition job ids, so per-job node order (by id) is kept.
+        for chunk in id_chunks(job_ids):
+            placeholders = ",".join("%s" for _ in chunk)
+            with self._connect_read() as conn:
+                rows = conn.execute(
+                    f"select job_id, node_key, status from job_nodes"
+                    f" where job_id in ({placeholders}) order by job_id, id",
+                    chunk,
+                ).fetchall()
+            for row in rows:
+                grouped[str(row["job_id"])].append(dict(row))
         return grouped

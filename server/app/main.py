@@ -31,6 +31,7 @@ from server.app.mcp_server.http_app import (
 )
 from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
+from server.app.routes.job_http import register_job_http_exception_handlers
 from server.app.routes.quality_deps import build_quality_loop
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
@@ -264,6 +265,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
     add_http_middleware(app, settings)
+    register_job_http_exception_handlers(app)
     app.state.settings = settings
     app.state.job_db = job_db
     app.state.auth_service = build_auth_service(job_db, settings.config)

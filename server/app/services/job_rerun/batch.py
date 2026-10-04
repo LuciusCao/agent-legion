@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
+from server.app.services import job_selection_resolver
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.by_failure_results import (
     assemble_rerun_targets,
@@ -31,7 +32,7 @@ from server.app.services.job_rerun.preview_checks import (
     resolve_rerun_node_from_nodes,
 )
 from server.app.services.job_rerun.single import commit_rerun_result
-from server.app.services.job_selection_resolver import resolve_batch_selection
+from server.app.services.job_selection_resolver import ensure_batch_size, resolve_batch_selection
 from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
@@ -172,7 +173,18 @@ def rerun_by_failure_category(
     resolved = AUTO_STRATEGIES.get(category, "rerun_self") if strategy == "auto" else strategy
     ids = resolve_batch_selection(service.job_db, workspace_id, job_ids, job_filter, exclude_ids)
     requested = [value.strip() for value in ids if value.strip()]
-    grouped = failed_nodes_by_job(service, workspace_id, category, requested, workflow_key)
+    scope = requested
+    if not scope:
+        # An empty selection means "every job with a matching failure": cap it
+        # the same way as filter selections (#712 / #917 B-2) with a LIMITed
+        # distinct-job query, before any failed-run rows are materialized.
+        scope = service.job_db.list_failed_job_ids(
+            workspace_id, category=category, limit=job_selection_resolver.MAX_BATCH_JOBS + 1
+        )
+        ensure_batch_size(len(scope))
+        if not scope:
+            return []
+    grouped = failed_nodes_by_job(service, workspace_id, category, scope, workflow_key)
 
     pre = prefetch_rerun_state(service, list(grouped))
     # Per target: either a ready error result or the target key (to commit).
