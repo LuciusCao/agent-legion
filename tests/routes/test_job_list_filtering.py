@@ -278,7 +278,16 @@ def test_snapshot_limit_out_of_range_is_422(client_factory, limit, expected):
 
 @pytest.mark.parametrize(
     "cursor",
-    ["garbage", "notadate|x", "2026-13-01 00:00:00|job-1", "2026-10-05 00:00:00|", "|job-1"],
+    [
+        "garbage",
+        "notadate|x",
+        "2026-13-01 00:00:00|job-1",
+        "2026-10-05 00:00:00|",
+        "|job-1",
+        # fromisoformat 接受任意单字符分隔符，PostgreSQL 不接受（#974 review）
+        "2026-10-05\U0001f40d00:00:00|job-1",
+        "2026-10-05x00:00:00|job-1",
+    ],
 )
 def test_snapshot_malformed_cursor_is_422(client_factory, cursor):
     """#891：cursor 解析失败与 limit 越界同一约定——422 + 可读 detail，不再

@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_filtering import JobListFilter, filter_clauses
+
+# The shape list_jobs_paginated emits (str() of a timestamp, offset stripped);
+# an optional offset is tolerated. fromisoformat alone is wider than
+# PostgreSQL's input (e.g. any single char as the date/time separator).
+_CURSOR_TIMESTAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,6})?([+-]\d{2}:\d{2})?"
+)
 
 
 def parse_job_cursor(cursor: str) -> tuple[str, str]:
@@ -20,6 +28,8 @@ def parse_job_cursor(cursor: str) -> tuple[str, str]:
     if not sep or not created_at or not job_id:
         raise ValueError("cursor must be the next_cursor value from a previous page")
     try:
+        if not _CURSOR_TIMESTAMP.fullmatch(created_at):
+            raise ValueError
         datetime.fromisoformat(created_at)
     except ValueError:
         raise ValueError(
