@@ -59,6 +59,9 @@ from server.app.db.migrations.preview_panels import migrate_preview_panels
 from server.app.db.migrations.result_stage_profile import migrate_result_stage_profile
 from server.app.db.migrations.retire_workflow_key_columns import migrate_retire_workflow_key_columns
 from server.app.db.migrations.shard_identity_index import migrate_shard_identity_index
+from server.app.db.migrations.studio_chat_session_soft_delete import (
+    migrate_studio_chat_session_soft_delete,
+)
 
 MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(13, "auth_users_sessions_workspace_members"),
@@ -245,6 +248,12 @@ MIGRATIONS: list[SchemaMigration] = [
     # moved out of postgres_schema.sql into this migration's SQL so a later
     # schema-file replay cannot restore the blocking body.
     SchemaMigration(88, "job_node_status_count_deltas", _migrate_v88_node_deltas),
+    # v89 (#872): studio_chat_sessions.deleted_at — Studio chat session soft
+    # delete (list filters it, public reads 404, resume claim refuses it).
+    # A column, not a status value: status is the live runtime state
+    # machine; deletion is an orthogonal visibility flag. DDL-only, same
+    # guarded-ALTER home rule as v87.
+    SchemaMigration(89, "studio_chat_session_soft_delete", migrate_studio_chat_session_soft_delete),
 ]
 
 _versions = [m.version for m in MIGRATIONS]

@@ -38,6 +38,7 @@ from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.session_close import close_session
+from server.app.studio_chat.session_delete import delete_session
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import teardown_runtime
@@ -160,10 +161,16 @@ class StudioChatService:
     def list_sessions(self, workspace_id: str) -> list[dict[str, Any]]:
         return self._db.list_studio_chat_sessions(workspace_id)
 
-    def get_session(self, session_id: str, workspace_id: str | None = None) -> dict[str, Any]:
+    def get_session(
+        self, session_id: str, workspace_id: str | None = None, *, include_deleted: bool = False
+    ) -> dict[str, Any]:
+        """Public session read; a soft-deleted row (#872) is 404 like a
+        missing one — only the delete path itself reads past the stamp."""
         session = self._db.get_studio_chat_session(session_id)
-        if session is None or (
-            workspace_id is not None and session["workspace_id"] != workspace_id
+        if (
+            session is None
+            or (workspace_id is not None and session["workspace_id"] != workspace_id)
+            or (session.get("deleted_at") is not None and not include_deleted)
         ):
             raise NotFoundError("Chat session not found")
         return session
@@ -171,10 +178,17 @@ class StudioChatService:
     def rename_session(self, session_id: str, workspace_id: str, title: str) -> dict[str, Any]:
         self.get_session(session_id, workspace_id)
         self._db.update_studio_chat_session(session_id, title=title)
-        return self.get_session(session_id)
+        session = self.get_session(session_id)
+        self.store.publish_session(session_id)
+        return session
 
     def close_session(self, session_id: str, workspace_id: str) -> dict[str, Any]:
         return close_session(self, session_id, workspace_id)
+
+    def delete_session(self, session_id: str, workspace_id: str) -> None:
+        """Soft delete (#872): stamp first, then close the runtime (see
+        studio_chat.session_delete for the ordering argument)."""
+        delete_session(self, session_id, workspace_id)
 
     @starting_operation
     def resume_session(self, session_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:

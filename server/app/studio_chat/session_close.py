@@ -12,8 +12,16 @@ if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
 
 
-def close_session(service: StudioChatService, session_id: str, workspace_id: str) -> dict[str, Any]:
-    session = service.get_session(session_id, workspace_id)
+def close_session(
+    service: StudioChatService,
+    session_id: str,
+    workspace_id: str,
+    *,
+    include_deleted: bool = False,
+) -> dict[str, Any]:
+    # include_deleted: only the soft-delete path (#872) closes a row it has
+    # already stamped; every public caller keeps the stamped-row 404.
+    session = service.get_session(session_id, workspace_id, include_deleted=include_deleted)
     if session["status"] == "closed":
         return session
     runtime = service.runtime(session_id)
@@ -25,7 +33,7 @@ def close_session(service: StudioChatService, session_id: str, workspace_id: str
                 # snapshot must not inherit this stale close's DB write.
                 current = service._runtimes.get(session_id)
                 if current is not None and current is not runtime:
-                    return service.get_session(session_id)
+                    return service.get_session(session_id, include_deleted=include_deleted)
                 service.db.update_studio_chat_session(
                     session_id, status="closed", closed_at=datetime.now(UTC)
                 )
@@ -42,4 +50,4 @@ def close_session(service: StudioChatService, session_id: str, workspace_id: str
     finally:
         if committed and runtime is not None:
             service.teardown_runtime(session_id, runtime, expected=runtime)
-    return service.get_session(session_id)
+    return service.get_session(session_id, include_deleted=include_deleted)

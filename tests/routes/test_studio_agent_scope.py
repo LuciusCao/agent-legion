@@ -157,6 +157,8 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # (self-approval would void the human-confirmation boundary).
     ("POST", f"{_CHAT}/sessions", {"agent_id": "agent-x"}),
     ("DELETE", f"{_CHAT}/sessions/{{session_id}}", None),
+    ("PATCH", f"{_CHAT}/sessions/{{session_id}}", {"title": "agent-renamed"}),
+    ("POST", f"{_CHAT}/sessions/{{session_id}}/delete", None),
     ("POST", f"{_CHAT}/sessions/{{session_id}}/resume", None),
     ("POST", f"{_CHAT}/sessions/{{session_id}}/messages", {"text": "hi"}),
     ("POST", f"{_CHAT}/sessions/{{session_id}}/cancel", None),
