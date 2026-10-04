@@ -1,4 +1,5 @@
 import type { WorkflowDefinitionRecord, WorkflowNodeRecord } from '../types'
+import { textItemFilenameError } from './textItemFilename'
 
 /** 与后端 run_text_items.TEXT_ITEM_MAX_BYTES 一致（UTF-8 字节数）。 */
 export const TEXT_ITEM_MAX_BYTES = 64 * 1024
@@ -33,6 +34,8 @@ export type ResolvedTextItem = {
   tooLong: boolean
   /** 用户还没动过预填模板（或改回了模板原文）——不算条目，提示先修改。 */
   untouchedTemplate: boolean
+  /** 文件名不合法时的提示文案；null = 合法。与后端同契约。 */
+  filenameError: string | null
   ready: boolean
 }
 
@@ -51,14 +54,21 @@ export function resolveTextItem(
   const untouchedTemplate =
     config.template.trim().length > 0 &&
     content.trim() === config.template.trim()
+  const resolvedFilename =
+    filename?.trim() || config.filename.trim() || DEFAULT_TEXT_FILENAME
+  const filenameError = textItemFilenameError(resolvedFilename)
   return {
     content,
-    filename:
-      filename?.trim() || config.filename.trim() || DEFAULT_TEXT_FILENAME,
+    filename: resolvedFilename,
     bytes,
     tooLong,
     untouchedTemplate,
-    ready: content.trim().length > 0 && !tooLong && !untouchedTemplate,
+    filenameError,
+    ready:
+      content.trim().length > 0 &&
+      !tooLong &&
+      !untouchedTemplate &&
+      !filenameError,
   }
 }
 

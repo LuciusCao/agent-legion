@@ -14,6 +14,7 @@ import { useUiStore } from '../stores/uiStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { acceptedItemTypes } from '../lib/acceptedItemTypes'
+import { isInvalidTouchedTextItem } from '../lib/textItemFilename'
 import { resolveTextItem, startTextInput, textRunItem } from '../lib/textItem'
 import { parseRefIds } from '../lib/addItems'
 import type { RunItem, WorkspaceResponse } from '../types'
@@ -133,6 +134,8 @@ export function AddItemsDialog({
   const textItem = resolveTextItem(text, textFilename, textConfig)
   const textItems = textAccepted && textItem.ready ? 1 : 0
   const invalidText = textAccepted && textItem.tooLong
+  // 已改动但文件名无效的 text 条目不得被静默丢弃（见 helper 注释）。
+  const invalidTextFilename = textAccepted && isInvalidTouchedTextItem(textItem)
   // 契约解析后收窄的窗口期：隐藏面板里残留的条目不计数、不提交。
   const totalItems =
     (materialAccepted ? doneEntries.length + selectedMaterialIds.length : 0) +
@@ -207,6 +210,7 @@ export function AddItemsDialog({
   const submitDisabled =
     totalItems === 0 ||
     invalidText ||
+    invalidTextFilename ||
     isSubmitting ||
     hasActiveUploads ||
     hasActiveBundles ||
@@ -280,6 +284,11 @@ export function AddItemsDialog({
           {!workflowKey && !workspaceQuery.isLoading && (
             <div className={styles.errorHint}>
               当前工作空间尚未发布 workflow，无法创建运行。
+            </div>
+          )}
+          {invalidTextFilename && (
+            <div className={styles.errorHint} data-testid="text-filename-hint">
+              「输入需求」页签的文件名无效，修正或清空后才能创建运行。
             </div>
           )}
         </div>

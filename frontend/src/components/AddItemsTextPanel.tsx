@@ -16,6 +16,7 @@ type AddItemsTextPanelProps = {
 }
 
 function summaryText(item: ResolvedTextItem): string {
+  if (item.filenameError) return item.filenameError
   if (item.tooLong)
     return `内容过长：${item.bytes} 字节，上限 ${TEXT_ITEM_MAX_BYTES} 字节`
   if (item.untouchedTemplate) return '请先按你的方向修改模板，再创建运行'
@@ -35,7 +36,7 @@ export function AddItemsTextPanel({
   onTextChange,
   onFilenameChange,
 }: AddItemsTextPanelProps) {
-  const warn = item.tooLong || item.untouchedTemplate
+  const warn = item.tooLong || item.untouchedTemplate || !!item.filenameError
   return (
     <>
       <TextField
@@ -43,7 +44,8 @@ export function AddItemsTextPanel({
         value={item.filename}
         onChange={(event) => onFilenameChange(event.target.value)}
         placeholder={DEFAULT_TEXT_FILENAME}
-        helperText="存成材料时使用的文件名，.md 或 .txt"
+        helperText={item.filenameError ?? '存成材料时使用的文件名，.md 或 .txt'}
+        error={!!item.filenameError}
         size="small"
         fullWidth
       />
