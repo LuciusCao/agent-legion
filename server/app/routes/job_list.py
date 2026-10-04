@@ -6,9 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.job_list_contracts import JobFacetsResponse, JobsPageResponse
-from server.app.services.job_errors import JobServiceError
 from server.app.services.job_list_queries import JobListQueryService
 
 # #735 review P2 (cluster): optional str filters reject the empty-string form
@@ -85,12 +83,9 @@ def create_job_list_router(
             paused,
             run_id,
         )
-        try:
-            return JobsPageResponse(
-                **job_list_queries.page(workspace_id, job_filter, limit=limit, cursor=cursor)
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return JobsPageResponse(
+            **job_list_queries.page(workspace_id, job_filter, limit=limit, cursor=cursor)
+        )
 
     @router.get("/workspaces/{workspace_id}/jobs/facets", response_model=JobFacetsResponse)
     def workspace_job_facets(
@@ -114,9 +109,6 @@ def create_job_list_router(
             paused,
             run_id,
         )
-        try:
-            return JobFacetsResponse(**job_list_queries.facets(workspace_id, job_filter))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return JobFacetsResponse(**job_list_queries.facets(workspace_id, job_filter))
 
     return router

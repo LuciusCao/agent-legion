@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import reject_studio_agent_scope, require_user
-from server.app.routes.job_http import raise_job_http_error, reject_mismatched_workflow_key
+from server.app.routes.job_http import reject_mismatched_workflow_key
 from server.app.routes.quality_contracts import (
     QualityBatchStatsResponse,
     QualityLabelCreateRequest,
@@ -17,7 +17,6 @@ from server.app.routes.quality_contracts import (
     QualitySampleItemDetailResponse,
     QualityStatsGroup,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.quality_labels import QualityLabelService
 from server.app.services.quality_sampling import QualitySamplingService
 from server.app.services.quality_stats import QualityStatsService
@@ -45,22 +44,19 @@ def create_quality_router(
         # attribute raises the deprecation warning the suite escalates.
         body = payload.model_dump()
         reject_mismatched_workflow_key(workspace_id, body.get("workflow_key"))
-        try:
-            result = sampling.create_batch(
-                workspace_id,
-                name=payload.name,
-                workflow_key=body.get("workflow_key") or workspace_id,
-                node_keys=payload.filters.node_keys,
-                statuses=payload.filters.statuses,
-                since=payload.filters.since,
-                until=payload.filters.until,
-                sample_size=payload.sample_size,
-                seed=payload.seed,
-                created_by=f"user:{user['id']}",
-                filters=payload.filters.model_dump(mode="json", exclude_none=True),
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        result = sampling.create_batch(
+            workspace_id,
+            name=payload.name,
+            workflow_key=body.get("workflow_key") or workspace_id,
+            node_keys=payload.filters.node_keys,
+            statuses=payload.filters.statuses,
+            since=payload.filters.since,
+            until=payload.filters.until,
+            sample_size=payload.sample_size,
+            seed=payload.seed,
+            created_by=f"user:{user['id']}",
+            filters=payload.filters.model_dump(mode="json", exclude_none=True),
+        )
         return QualitySampleBatchCreateResponse(**result)
 
     @router.get(
@@ -68,10 +64,7 @@ def create_quality_router(
         response_model=QualitySampleBatchListResponse,
     )
     def list_sample_batches(workspace_id: str) -> QualitySampleBatchListResponse:
-        try:
-            batches = sampling.list_batches(workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        batches = sampling.list_batches(workspace_id)
         return QualitySampleBatchListResponse.model_validate({"batches": batches})
 
     @router.get(
@@ -81,11 +74,8 @@ def create_quality_router(
     def get_sample_batch(
         workspace_id: str, batch_id: str, limit: int = 200, offset: int = 0
     ) -> QualitySampleBatchDetailResponse:
-        try:
-            batch = sampling.get_batch(workspace_id, batch_id)
-            page = labels.list_batch_items(workspace_id, batch_id, limit=limit, offset=offset)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        batch = sampling.get_batch(workspace_id, batch_id)
+        page = labels.list_batch_items(workspace_id, batch_id, limit=limit, offset=offset)
         return QualitySampleBatchDetailResponse.model_validate(
             {"batch": batch, "items": page["items"], "total": page["total"]}
         )
@@ -95,10 +85,7 @@ def create_quality_router(
         response_model=QualityBatchStatsResponse,
     )
     def get_sample_batch_stats(workspace_id: str, batch_id: str) -> QualityBatchStatsResponse:
-        try:
-            groups = stats.batch_stats(workspace_id, batch_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        groups = stats.batch_stats(workspace_id, batch_id)
         return QualityBatchStatsResponse(
             batch_id=batch_id, groups=[QualityStatsGroup(**group) for group in groups]
         )
@@ -108,10 +95,7 @@ def create_quality_router(
         response_model=QualitySampleItemDetailResponse,
     )
     def get_sample_item(workspace_id: str, item_id: str) -> QualitySampleItemDetailResponse:
-        try:
-            detail = labels.get_item_detail(workspace_id, item_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        detail = labels.get_item_detail(workspace_id, item_id)
         return QualitySampleItemDetailResponse.model_validate(detail)
 
     @router.post(
@@ -125,19 +109,16 @@ def create_quality_router(
         payload: QualityLabelCreateRequest,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> QualityLabelResponse:
-        try:
-            label = labels.add_label(
-                workspace_id,
-                item_id,
-                verdict=payload.verdict,
-                reason_codes=payload.reason_codes,
-                note=payload.note,
-                labeled_by=f"user:{user['id']}",
-                target="replay" if payload.replay_id else "run",
-                replay_id=payload.replay_id,
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        label = labels.add_label(
+            workspace_id,
+            item_id,
+            verdict=payload.verdict,
+            reason_codes=payload.reason_codes,
+            note=payload.note,
+            labeled_by=f"user:{user['id']}",
+            target="replay" if payload.replay_id else "run",
+            replay_id=payload.replay_id,
+        )
         return QualityLabelResponse.model_validate({"label": label})
 
     return router

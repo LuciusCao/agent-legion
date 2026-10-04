@@ -10,12 +10,10 @@ draft-store GET — a scoped token may read what the initiating user may read).
 from fastapi import APIRouter
 
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workflow_node_prompt_contracts import (
     NodePromptPreviewRequest,
     NodePromptPreviewResponse,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.node_prompt_preview import preview_node_prompt
 
 
@@ -29,12 +27,9 @@ def create_workflow_node_prompt_router(job_db: JobQueries) -> APIRouter:
     def preview_node_prompt_route(
         workspace_id: str, request: NodePromptPreviewRequest
     ) -> NodePromptPreviewResponse:
-        try:
-            payload = preview_node_prompt(
-                job_db, workspace_id, request.node_key, request.definition_yaml
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        payload = preview_node_prompt(
+            job_db, workspace_id, request.node_key, request.definition_yaml
+        )
         return NodePromptPreviewResponse(**payload)
 
     return router

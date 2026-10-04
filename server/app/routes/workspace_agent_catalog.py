@@ -5,13 +5,11 @@ from fastapi import APIRouter, Query
 from server.app.jobs import JobQueries
 from server.app.routes.agent_catalog_contracts import AgentCatalogResponse
 from server.app.routes.agent_runtimes import create_agent_runtimes_router
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.skill_catalog_route import create_skill_catalog_router
 from server.app.routes.workspace_execution_contracts import (
     WorkspaceExecutionConfigurationResponse,
 )
 from server.app.services.agent_catalog_projection import AgentCatalogService
-from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
@@ -42,12 +40,7 @@ def create_workspace_agent_catalog_router(
     def get_workspace_execution_configuration(
         workspace_id: str,
     ) -> WorkspaceExecutionConfigurationResponse:
-        try:
-            return WorkspaceExecutionConfigurationResponse(
-                **workspace_configuration.get(workspace_id)
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return WorkspaceExecutionConfigurationResponse(**workspace_configuration.get(workspace_id))
 
     router.include_router(create_skill_catalog_router(settings, job_db))
     # #476：per-runtime 工具目录随 catalog 面挂载（无 DB 依赖，同族只读目录）。

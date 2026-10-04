@@ -34,9 +34,7 @@ from server.app.routes.external_artifact_contracts import (
     ExternalJobStatusResponse,
 )
 from server.app.routes.job_artifact_raw_response import raw_response
-from server.app.routes.job_http import raise_job_http_error
 from server.app.services.external_artifact_access import ExternalArtifactAccessService
-from server.app.services.job_errors import JobServiceError
 
 
 def create_external_artifact_router(
@@ -55,10 +53,7 @@ def create_external_artifact_router(
         tags=[API_SCOPE_INTAKE_TAG],
     )
     def get_external_job_status(workspace_id: str, job_id: str) -> ExternalJobStatusResponse:
-        try:
-            return ExternalJobStatusResponse(**access_service.status(workspace_id, job_id))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return ExternalJobStatusResponse(**access_service.status(workspace_id, job_id))
 
     @router.get(
         "/workspaces/{workspace_id}/jobs/{job_id}/artifacts",
@@ -66,12 +61,7 @@ def create_external_artifact_router(
         tags=[API_SCOPE_INTAKE_TAG],
     )
     def list_external_artifacts(workspace_id: str, job_id: str) -> ExternalArtifactListResponse:
-        try:
-            return ExternalArtifactListResponse(
-                **access_service.list_artifacts(workspace_id, job_id)
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return ExternalArtifactListResponse(**access_service.list_artifacts(workspace_id, job_id))
 
     # {artifact_name:path}（#631 review P2-1）：声明产物名可含 /（reports/
     # final.json——Worker 解包与 promote 都保留子目录），单段参数连
@@ -111,14 +101,11 @@ def create_external_artifact_router(
         # P2-1：未声明 outputs 的名字不可下载）都在 access_service：
         # JobArtifactService 的 open_raw_current 只查 job 存在性，不知道
         # workspace 语境。
-        try:
-            # P2-2：有 manifest 行时优先对象副本——清单刚刚把行的 content_
-            # hash/uploaded_at 当作当前结果公布，本地 job_dir 缓存可能滞后
-            # （rerun 替换本地文件、重传/登记行未落地）；无行才回落本地。
-            return raw_response(
-                access_service.open_raw_current(workspace_id, job_id, artifact_name, range_header)
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        # P2-2：有 manifest 行时优先对象副本——清单刚刚把行的 content_
+        # hash/uploaded_at 当作当前结果公布，本地 job_dir 缓存可能滞后
+        # （rerun 替换本地文件、重传/登记行未落地）；无行才回落本地。
+        return raw_response(
+            access_service.open_raw_current(workspace_id, job_id, artifact_name, range_header)
+        )
 
     return router
