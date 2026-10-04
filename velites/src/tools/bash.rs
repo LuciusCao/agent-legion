@@ -5,7 +5,7 @@
 //! whole group receives SIGTERM, then SIGKILL after a grace period (Pi
 //! semantics, design §8). After the child exits, leftovers in its process
 //! group are signalled and the output drain is bounded (#942, see
-//! `bash_proc::start_drain_watchdog`). The model-supplied `timeout` is
+//! `bash_proc::drain_after_exit`). The model-supplied `timeout` is
 //! clamped to [1s, 1h] (default 120s) so one call cannot outrun the run's wall-clock
 //! budget by orders of magnitude. stdout+stderr volume is reported as
 //! `output_bytes` (full stream measurement — kept head PLUS dropped tail).
@@ -151,7 +151,7 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     // #637: 每条 pipe 各自带上限读取（上限按流计，stdout/stderr 互不
     // 占用对方的额度）。
     let cap = usize::try_from(truncate::MAX_CAPTURE_BYTES).unwrap_or(usize::MAX);
-    // #942: fired by the drain watchdog when leftovers keep the pipes open.
+    // #942: fired by the bounded drain when leftovers keep the pipes open.
     let stop_reading = CancellationToken::new();
     let stdout_task = tokio::spawn({
         let (boundary, stop) = (boundary_fired.clone(), stop_reading.clone());
@@ -165,18 +165,14 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     let timeout = Duration::from_secs(timeout_secs);
     let mut timed_out = false;
     let mut cancelled = false;
-    // `Child::wait` is cancel-safe, so racing it against the timeout and the
-    // cancellation token loses nothing on the dropped branch.
-    let status = tokio::select! {
-        status = child.wait() => Some(status?),
-        _ = tokio::time::sleep(timeout) => {
-            timed_out = true;
-            None
-        }
-        _ = ctx.cancel.wait() => {
-            cancelled = true;
-            None
-        }
+    // #942 R1: exit is observed WITHOUT reaping the leader — the unreaped
+    // leader keeps the process-group id reserved until the final group
+    // signals below, so they can never reach a reused group id.
+    let mut exited = bash_proc::wait_exited(pid);
+    tokio::select! {
+        _ = &mut exited => {}
+        _ = tokio::time::sleep(timeout) => timed_out = true,
+        _ = ctx.cancel.wait() => cancelled = true,
     };
     // Phase 3 (#469): steady run — first output byte → exit observed. On a
     // child with no pre-boundary output there is no first byte, so restMs
@@ -192,18 +188,20 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     let mut reap_ms = None;
     if timed_out || cancelled {
         boundary_fired.store(true, std::sync::atomic::Ordering::Release);
-        // Phase 4 (#469): termination — TERM → grace → KILL → reaped.
+        // Phase 4 (#469): termination — TERM → grace → KILL → exited.
         let reap_started = Instant::now();
-        bash_proc::terminate(&mut child, pid).await;
+        bash_proc::terminate(pid, exited).await;
         reap_ms = Some(elapsed_ms(reap_started));
     }
 
-    // #942: the command is gone; bound the drain of whatever still holds
-    // the pipes (background leftovers) instead of waiting for EOF forever.
-    let watchdog = bash_proc::start_drain_watchdog(pid, stop_reading.clone());
-    let (stdout, stderr) = (stdout_task.await, stderr_task.await);
-    watchdog.abort();
+    // #942: the command is gone; clean up its process group (TERM → bounded
+    // drain → KILL) and only then reap the leader.
+    let readers = [stdout_task, stderr_task];
+    let drained = bash_proc::drain_after_exit(pid, readers, stop_reading.clone()).await;
+    let status = child.wait().await?;
+    let status = (!timed_out && !cancelled).then_some(status);
     let join_error = |err: tokio::task::JoinError| ToolError::Io(std::io::Error::other(err));
+    let [stdout, stderr] = drained;
     let stdout = stdout.map_err(join_error)??;
     let stderr = stderr.map_err(join_error)??;
     let drain_cut = stop_reading.is_cancelled();

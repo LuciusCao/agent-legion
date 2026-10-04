@@ -136,18 +136,58 @@ async fn bash_returns_promptly_and_reaps_background_leftovers() {
     assert!(gone, "background leftovers in group {pgid} survived");
 }
 
+/// Poll until `pid` no longer exists (ESRCH); false if it survives ~4s.
+#[cfg(unix)]
+async fn process_gone(pid: i32) -> bool {
+    for _ in 0..40 {
+        let result = unsafe { libc::kill(pid, 0) };
+        if result != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    false
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn bash_kills_leftovers_that_ignore_term_and_closed_the_pipes() {
+    // A leftover in the group that ignores SIGTERM and holds no pipe must
+    // still be gone when the tool call returns (final group KILL).
+    let dir = tempfile::tempdir().unwrap();
+    let pf = dir.path().join("leftover");
+    let command = format!(
+        "(trap '' TERM; exec sleep 300) >/dev/null 2>&1 & echo $! > '{}'; echo done",
+        pf.display()
+    );
+    let output = ToolKind::Bash
+        .execute(&serde_json::json!({"command": command}), &ctx(dir.path()))
+        .await;
+    let text = text_of(&output);
+    assert!(!output.is_error, "unexpected error: {text}");
+    let pid: i32 = std::fs::read_to_string(&pf)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(process_gone(pid).await, "TERM-ignoring leftover {pid} survived");
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn bash_drain_is_bounded_when_a_process_leaves_the_group() {
-    // A process in its own session is out of reach of the group signals but
-    // still holds the output pipes: the drain must stop at the grace bound.
+    // A process in its own session still holds the output pipes: the drain
+    // must stop at the grace bound, and the process — no longer part of the
+    // command's group — is not signalled.
     let dir = tempfile::tempdir().unwrap();
+    let pf = dir.path().join("escaped");
+    let command = format!(
+        "setsid sh -c 'echo $$ > {}; exec sleep 20' & echo done",
+        pf.display()
+    );
     let started = Instant::now();
     let output = ToolKind::Bash
-        .execute(
-            &serde_json::json!({"command": "setsid sleep 20 & echo done"}),
-            &ctx(dir.path()),
-        )
+        .execute(&serde_json::json!({"command": command}), &ctx(dir.path()))
         .await;
     let elapsed = started.elapsed();
     let text = text_of(&output);
@@ -157,6 +197,14 @@ async fn bash_drain_is_bounded_when_a_process_leaves_the_group() {
         "missing drain note: {text}"
     );
     assert!(elapsed < Duration::from_secs(10), "took {elapsed:?}");
+    let pid: i32 = std::fs::read_to_string(&pf)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let alive = unsafe { libc::kill(pid, 0) } == 0;
+    unsafe { libc::kill(pid, libc::SIGKILL) };
+    assert!(alive, "a process outside the group must not be signalled");
 }
 
 #[cfg(unix)]

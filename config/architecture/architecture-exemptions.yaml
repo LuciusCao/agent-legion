@@ -1092,7 +1092,7 @@ exemptions:
     drain, pipe reader) into bash_proc.rs; ceiling re-seated at actual + 10.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
-  ceiling: 319
+  ceiling: 312
   expires: 2027-03-31
 - check: architecture.file_budget
   path: velites/src/tools/truncate.rs

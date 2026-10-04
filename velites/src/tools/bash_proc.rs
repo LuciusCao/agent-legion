@@ -2,11 +2,12 @@
 //! the file-size budget:
 //!
 //! - the environment allowlist the child inherits (#922 R-4);
-//! - process-group termination (TERM → grace → KILL, design §8);
-//! - the post-exit drain bound (#942): once the command has exited (or was
-//!   terminated), leftovers in its process group are signalled and the pipe
-//!   readers get a bounded grace window, so a background process holding
-//!   the output pipes can no longer hang the tool call or outlive it;
+//! - exit observation without reaping, and process-group termination
+//!   (TERM → grace → KILL, design §8);
+//! - the post-exit cleanup (#942): once the command has exited (or was
+//!   terminated), its process group gets TERM, a bounded drain and a final
+//!   KILL, so a background process can neither hang the tool call nor
+//!   outlive it;
 //! - the bounded pipe reader (#637 capture cap, #469 first-byte offset).
 
 use std::ffi::OsString;
@@ -23,8 +24,8 @@ use super::elapsed_ms;
 pub(super) const TERM_GRACE: Duration = Duration::from_secs(3);
 
 /// #942: how long the pipe readers may keep draining after the command is
-/// gone. Past it the process group is SIGKILLed and the readers stop with
-/// whatever they collected.
+/// gone. Past it the process group is SIGKILLed (and readers still blocked
+/// by a process outside the group stop with what they collected).
 pub(super) const DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 /// Variables the bash child inherits by exact name (#922 R-4). Everything
@@ -62,70 +63,94 @@ pub(super) fn inherited_env() -> Vec<(OsString, OsString)> {
         .collect()
 }
 
+/// One pipe reader task and its joined result.
+pub(super) type Reader = tokio::task::JoinHandle<std::io::Result<PipeCapture>>;
+pub(super) type ReaderResult = Result<std::io::Result<PipeCapture>, tokio::task::JoinError>;
+
+/// After the final group KILL, how long the readers may take to see EOF
+/// before they are stopped (only a process that left the group can still
+/// hold the pipes by then).
+const KILL_SETTLE: Duration = Duration::from_millis(500);
+
+/// Signal the child's process group (spawned with process_group(0), so
+/// pgid == pid). Callers only signal while the leader is still UNREAPED
+/// (see [`wait_exited`]): its zombie keeps the group id reserved, so the
+/// signal can only reach this command's own group.
+fn signal_group(pid: Option<u32>, signal: libc::c_int) {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = pid {
+            unsafe {
+                libc::killpg(pid as libc::pid_t, signal);
+            }
+        }
+    }
+}
+
+/// Resolve once the child has exited, WITHOUT reaping it (`waitid` with
+/// `WNOWAIT`; #942). The caller reaps with `Child::wait` only after the
+/// last group signal.
 #[cfg(unix)]
-fn kill_process_group(pid: u32, signal: libc::c_int) {
-    // The child was spawned with process_group(0), so pgid == pid.
-    unsafe {
-        libc::killpg(pid as libc::pid_t, signal);
-    }
-}
-
-/// TERM → grace → KILL the child's process group, then reap it.
-pub(super) async fn terminate(child: &mut tokio::process::Child, pid: Option<u32>) {
-    #[cfg(unix)]
-    {
-        if let Some(pid) = pid {
-            kill_process_group(pid, libc::SIGTERM);
-        }
-        if tokio::time::timeout(TERM_GRACE, child.wait())
-            .await
-            .is_err()
-        {
-            if let Some(pid) = pid {
-                kill_process_group(pid, libc::SIGKILL);
+pub(super) fn wait_exited(pid: Option<u32>) -> tokio::task::JoinHandle<()> {
+    tokio::task::spawn_blocking(move || {
+        let Some(pid) = pid else { return };
+        loop {
+            // SAFETY: waitid only writes into the zeroed siginfo we own.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let options = libc::WEXITED | libc::WNOWAIT;
+            let rc = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, options) };
+            let interrupted = std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR);
+            if rc == 0 || !interrupted {
+                return;
             }
         }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = child.start_kill();
-    }
-    let _ = child.wait().await;
-}
-
-/// #942: called once the command is gone (natural exit, or after
-/// [`terminate`]). SIGTERM the process group right away — background
-/// leftovers of a finished command must not outlive the tool call as
-/// orphans — then, after [`DRAIN_GRACE`], SIGKILL it and cancel `stop` so
-/// the pipe readers return what they collected (a process that left the
-/// group but still holds the pipes would otherwise block them forever).
-///
-/// The caller aborts the returned task as soon as both readers finished,
-/// so nothing is signalled after the drain completed. While any member of
-/// the group is alive the kernel keeps the group id reserved, so the
-/// signals cannot reach an unrelated process group.
-pub(super) fn start_drain_watchdog(
-    pid: Option<u32>,
-    stop: CancellationToken,
-) -> tokio::task::JoinHandle<()> {
-    #[cfg(unix)]
-    {
-        if let Some(pid) = pid {
-            kill_process_group(pid, libc::SIGTERM);
-        }
-    }
-    tokio::spawn(async move {
-        tokio::time::sleep(DRAIN_GRACE).await;
-        #[cfg(unix)]
-        {
-            if let Some(pid) = pid {
-                kill_process_group(pid, libc::SIGKILL);
-            }
-        }
-        #[cfg(not(unix))]
-        let _ = pid;
-        stop.cancel();
     })
+}
+
+/// velites supports unix workers only; elsewhere exit is never observed
+/// early and the timeout path ends the command.
+#[cfg(not(unix))]
+pub(super) fn wait_exited(_pid: Option<u32>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(std::future::pending())
+}
+
+/// TERM → grace → KILL the child's process group until the leader has
+/// exited (it stays unreaped for the drain that follows).
+pub(super) async fn terminate(pid: Option<u32>, mut exited: tokio::task::JoinHandle<()>) {
+    signal_group(pid, libc::SIGTERM);
+    if tokio::time::timeout(TERM_GRACE, &mut exited).await.is_err() {
+        signal_group(pid, libc::SIGKILL);
+        let _ = exited.await;
+    }
+}
+
+/// #942: called once the leader has exited (unreaped). SIGTERM the group,
+/// give the readers [`DRAIN_GRACE`], then SIGKILL the group
+/// UNCONDITIONALLY — leftovers that ignore TERM or closed the pipes must
+/// not outlive the call — and, past [`KILL_SETTLE`], cancel `stop` so
+/// readers still blocked by a process that left the group return what they
+/// collected. A process outside the group is never signalled.
+pub(super) async fn drain_after_exit(
+    pid: Option<u32>,
+    readers: [Reader; 2],
+    stop: CancellationToken,
+) -> [ReaderResult; 2] {
+    signal_group(pid, libc::SIGTERM);
+    let [stdout, stderr] = readers;
+    let mut both = std::pin::pin!(async move { tokio::join!(stdout, stderr) });
+    let drained = tokio::time::timeout(DRAIN_GRACE, &mut both).await;
+    signal_group(pid, libc::SIGKILL);
+    let (stdout, stderr) = match drained {
+        Ok(results) => results,
+        Err(_) => match tokio::time::timeout(KILL_SETTLE, &mut both).await {
+            Ok(results) => results,
+            Err(_) => {
+                stop.cancel();
+                both.await
+            }
+        },
+    };
+    [stdout, stderr]
 }
 
 /// 一条输出 pipe 的采集结果（#637 带上限读取）。
@@ -152,7 +177,7 @@ pub(super) struct PipeCapture {
 /// the loop NEVER stops reading on its own, because a pipe that is not
 /// drained to EOF backpressure-blocks the child's write side (a `cat
 /// hugefile` would hang instead of finishing). The only early stop is the
-/// `stop` token (#942 drain bound, see [`start_drain_watchdog`]): the reader
+/// `stop` token (#942 drain bound, see [`drain_after_exit`]): the reader
 /// then returns what it collected so far. Error semantics are unchanged:
 /// the first error aborts the read and propagates.
 pub(super) async fn read_with_first_byte<R: tokio::io::AsyncRead + Unpin>(

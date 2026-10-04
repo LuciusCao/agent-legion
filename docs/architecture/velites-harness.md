@@ -381,9 +381,10 @@ fail-closed 报错，内置节点不受影响。
   （#922 R-2，`tools/atomic_write.rs`，json 工具落盘共用）；
 - **bash**：`cwd=job_dir`，env 按 §5 白名单（#922 R-4）；超时 → 进程组 TERM →
   grace → KILL（对齐 Pi 语义，Rust 下用 `process-group` 或手动 `killpg`）；
-  命令正常退出后同样对进程组发 TERM，读管道的 drain 有 2s grace 上界，超时
-  KILL 进程组并截断返回（#942：后台孙进程持有管道不再挂死工具调用，也不泄漏
-  孤儿）——需要常驻后台进程的用法不再受支持；
+  命令正常退出后同样对进程组发 TERM，读管道的 drain 有 2s grace 上界，随后
+  无条件 KILL 进程组（脱离进程组仍持管道的进程不发信号，只停止 drain 并截断
+  返回）；组长在最终组信号发出前不回收，进程组 id 不会被复用（#942：后台孙
+  进程不再挂死工具调用，也不泄漏孤儿）——需要常驻后台进程的用法不再受支持；
   必须能跑 `python3`（skill scripts 依赖，worker 镜像已具备）；
   命令守卫（`tools/command_guard.rs`）在 spawn 前拒绝全盘扫描命令
   （`find /` 等从宽泛根递归遍历，并行 job 下会打爆宿主机 fseventsd/Spotlight），
