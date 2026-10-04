@@ -31,7 +31,6 @@ from server.app.mcp_server.http_app import MCP_MOUNT_PATH
 from server.app.mcp_server.instance_probe import PROBE_SUBPATH, instance_proof
 
 if TYPE_CHECKING:
-    from server.app.jobs import JobQueries
     from server.app.studio_chat.store import StudioChatStore
 
 PROBE_TIMEOUT_SECONDS = 2.0
@@ -89,18 +88,21 @@ def unreachable_detail(api_base: str, reason: str) -> str:
 
 
 def warn_callback_unreachable(
-    db: JobQueries, store: StudioChatStore, session_id: str, api_base: str, reason: str | None
+    store: StudioChatStore, session_id: str, api_base: str, reason: str | None
 ) -> None:
-    """Timeline warning after a successful start; a close that raced the
-    startup owns the final state, so a dead session gets no warning row."""
+    """Timeline warning after a successful start. A close or soft delete that
+    raced the startup owns the final state: the liveness check and the INSERT
+    are one atomic statement (append_message_if_live), so a closed or deleted
+    session gets no warning row and no published event."""
     if reason is None:
         return
-    latest = db.get_studio_chat_session(session_id) or {}
-    if str(latest.get("status")) not in _LIVE_STATUSES:
-        return
     detail = unreachable_detail(api_base, reason)
-    store.append_message(
-        session_id, "status", "system", {"event": CALLBACK_UNREACHABLE_EVENT, "detail": detail}
+    store.append_message_if_live(
+        session_id,
+        "status",
+        "system",
+        {"event": CALLBACK_UNREACHABLE_EVENT, "detail": detail},
+        _LIVE_STATUSES,
     )
 
 

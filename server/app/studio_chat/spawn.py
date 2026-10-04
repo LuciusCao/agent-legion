@@ -137,7 +137,7 @@ def spawn_session_runtime(
             detail = (session or {}).get("error_detail") or "agent startup failed"
             raise InvalidOperationError(f"Studio agent failed to start: {detail}")
         if store is not None:
-            warn_callback_unreachable(db, store, session_id, api_base, callback_problem)
+            warn_callback_unreachable(store, session_id, api_base, callback_problem)
         return handle
     except Exception as exc:
         # One cleanup path for every startup failure: no half-applied
