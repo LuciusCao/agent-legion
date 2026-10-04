@@ -17,6 +17,7 @@ from yaml import YAMLError
 
 from worker.config_store import WorkerConfigStore, public_config, validate_config
 from worker.executor_log import PanelLogSinks
+from worker.executor_processes import ExecutorProcesses
 from worker.lease_snapshot import RESULT_FILENAME, SNAPSHOT_ENV_VAR, SNAPSHOT_FILENAME
 from worker.metrics_cache import METRICS_FILENAME
 from worker.orphan_reaper import reap_orphaned_agents
@@ -73,6 +74,8 @@ class WorkerSupervisor:
         # #566 三期 + #510：面板行与结构化事件分别落滚动文件（PanelLogSinks
         # 收口两个 sink 的分流与生命周期），内存 500 行 deque 不再是唯一留存。
         self._sinks = PanelLogSinks(store.state_dir)
+        # #682：PID 1 时收割被收养的僵尸；executor 登记在册、绝不被抢收。
+        self.executors = ExecutorProcesses(self._log)
 
     def _log(self, message: str) -> None:
         """Append one panel log line (timestamped deque + rolling file)."""
@@ -87,6 +90,7 @@ class WorkerSupervisor:
             self._next_restart_delay = None
             self._restart_event.clear()
             self._sinks.resume()  # 与 stop() 的 sinks.close() 配对（#572 P2）
+            self.executors.start()
             self._start()
 
     def _start(self, *, crash_restart: bool = False) -> None:
@@ -126,18 +130,14 @@ class WorkerSupervisor:
             # proxy 配置（#444）在派生点注入：executor 与其 agent 子进程全部
             # 出网（backend 上传 + LLM 流量）统一走代理或统一直连；配置变更
             # 经控制台 restart 落到新 executor，与 restarted 语义对齐。
-            process = self._process = subprocess.Popen(
+            process = self._process = self.executors.spawn(
                 [sys.executable, str(self.worker_script), "--config", str(self.store.path)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env={
+                {
                     **os.environ,
                     **proxy_env_overrides(config.get("proxy", "")),
                     ENV_VAR: str(status_file),
                     SNAPSHOT_ENV_VAR: str(self.store.state_dir / SNAPSHOT_FILENAME),
                 },
-                text=True,
-                bufsize=1,
             )
             self._started_at = time.time()
             self._exit_code = None
@@ -150,6 +150,7 @@ class WorkerSupervisor:
             self._shutdown = True
             self._restart_event.set()  # 唤醒退避等待中的 collector
             self._stop_locked()
+            self.executors.stop()
         self._sinks.close()
 
     def _stop_locked(self) -> None:
@@ -209,6 +210,7 @@ class WorkerSupervisor:
             with self._lock:
                 self._log(line.rstrip())
         exit_code = process.wait()
+        self.executors.finished(process)  # 注销 + 关管道，不随重启累积（#682）
         # 锁外 reap（幂等）：仅当前 generation 的 executor 退出才有孤儿；过期
         # generation 说明新 executor 已启动，其 agent 记录归属它，不能动。
         if generation == self._generation:
