@@ -160,6 +160,8 @@ class UnpromptedTurnWatcher:
         self.service, self.session_id, self.runtime = service, session_id, runtime
         self.locate = locate
         self.tail: WireTail | None = None
+        # Set when a journal existed at readiness but could not be baselined.
+        self.baseline_on_locate = False
         self.projector = UnpromptedTurnProjector()
         # Projected but not yet durably appended (retried on the next step).
         self.pending: list[Row] = []
@@ -169,7 +171,12 @@ class UnpromptedTurnWatcher:
             path = self.locate()
             if path is None:
                 return
-            self.tail = WireTail(path)
+            tail = WireTail(path)
+            if self.baseline_on_locate:
+                tail.baseline()
+                self.tail = tail
+                return
+            self.tail = tail
         for record in self.tail.read():
             self.pending.extend(self.projector.project(record))
         if not self.pending:
@@ -203,6 +210,20 @@ def start_unprompted_watcher(
     watcher = UnpromptedTurnWatcher(
         service, session_id, runtime, lambda: locate_wire(homes, acp_session_id)
     )
+    # Baseline synchronously, before on_ready releases the session as ready:
+    # a turn written between readiness and the thread's first poll must not
+    # be taken for history (#938 review). stat-only, no content read.
+    path = watcher.locate()
+    if path is not None:
+        tail = WireTail(path)
+        try:
+            tail.baseline()
+        except (OSError, ValueError):
+            # Existing history must never replay: baseline when found again.
+            watcher.baseline_on_locate = True
+            logger.warning("Kimi wire journal baseline failed for %s", session_id, exc_info=True)
+        else:
+            watcher.tail = tail
 
     def watch() -> None:
         while True:

@@ -14,12 +14,14 @@ import time
 
 import pytest
 
+from server.app.studio_chat import unprompted_turns
 from server.app.studio_chat.kimi_wire import WireTail, locate_wire
 from server.app.studio_chat.unprompted_turns import UnpromptedTurnProjector
 from tests.helpers import studio_chat_fixtures as fixtures
 from tests.helpers import wait_for_predicate
 
 chat = fixtures.chat
+admission = fixtures.admission
 
 TASK_TURN = [
     {
@@ -141,7 +143,8 @@ def test_wire_tail_starts_at_end_and_reads_only_complete_lines(tmp_path):
     assert locate_wire([tmp_path / "missing", tmp_path / "home"], "session_abc") == path
     assert locate_wire([tmp_path / "home"], "../escape") is None
     tail = WireTail(path)
-    assert tail.read() == []  # baseline: history is never replayed
+    tail.baseline()  # history is never replayed
+    assert tail.read() == []
     with path.open("a") as handle:
         handle.write(json.dumps({"n": 1}) + "\nnot json\n" + '{"n": 2')
     assert tail.read() == [{"n": 1}]
@@ -153,6 +156,15 @@ def test_wire_tail_starts_at_end_and_reads_only_complete_lines(tmp_path):
     with path.open("a") as handle:
         handle.write(json.dumps({"n": 4}) + "\n")
     assert tail.read() == [{"n": 4}]
+
+
+@pytest.mark.no_db
+def test_journal_appearing_after_readiness_is_read_from_start(tmp_path):
+    path = _wire(tmp_path)
+    with path.open("a") as handle:
+        handle.write(json.dumps({"n": 1}) + "\n")
+    # Never baselined (absent at on_ready): it all belongs to this runtime.
+    assert WireTail(path).read() == [{"type": "metadata"}, {"n": 1}]
 
 
 @pytest.mark.no_db
@@ -256,3 +268,48 @@ def test_closed_session_never_receives_unprompted_rows(chat, kimi_home):
     # Two poll intervals past the journal write: nothing crosses the fence.
     time.sleep(2.5)
     assert _agent_texts(service, session["id"]) == []
+
+
+class _HeldThread:
+    """Captures the watcher loop instead of scheduling it (start-order barrier)."""
+
+    targets: list = []
+
+    def __init__(self, *, target, name, daemon):
+        del name, daemon
+        self.target = target
+
+    def start(self):
+        _HeldThread.targets.append(self.target)
+
+
+def test_turn_written_before_first_poll_is_not_history(admission, tmp_path, monkeypatch):
+    """#938 review P1: on a resumed session the journal already exists; the
+    baseline is captured inside on_ready, so a whole unprompted turn written
+    after readiness but before the thread's first poll is still projected."""
+    service, _db, sid, _workspace, runtime = admission
+    bus = fixtures.RecordingBus()
+    monkeypatch.setattr(service.store, "_bus", bus)
+    monkeypatch.setenv("KIMI_CODE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = _wire(tmp_path, "session_race")
+    with path.open("a") as handle:  # prior history: must not replay
+        handle.write(json.dumps({**TASK_TURN[0], "turnId": 0}) + "\n")
+    runtime.kimi_agent = True
+    _HeldThread.targets = []
+    monkeypatch.setattr(unprompted_turns.threading, "Thread", _HeldThread)
+    unprompted_turns.start_unprompted_watcher(service, sid, runtime, "session_race")
+    with path.open("a") as handle:
+        handle.writelines(json.dumps(record) + "\n" for record in TASK_TURN)
+    runtime.background_stop.set()  # one poll, then the loop exits
+    (watch,) = _HeldThread.targets
+    watch()
+    messages = service.list_messages(sid, None)
+    texts = [m["content"].get("text") for m in messages if m["kind"] == "text"]
+    assert "REPORT-938: 子代理已完成，结果 42" in texts
+    receipts = [m for m in messages if m["content"].get("event") == "unprompted_turn"]
+    assert len(receipts) == 1  # the pre-baseline turn 0 was not replayed
+    published = [
+        p["message"]["content"].get("text") for _c, p in bus.events if p.get("type") == "message"
+    ]
+    assert "REPORT-938: 子代理已完成，结果 42" in published

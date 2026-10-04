@@ -9,10 +9,13 @@ record of such a turn. Layout (Kimi Code 0.43):
 ``sessions/<workspace-id>/<acp-session-id>/agents/main/wire.jsonl`` — one JSON
 record per line, append-only.
 
-Reads are bounded, descriptor-anchored (no symlink traversal) and start at the
-end of the file as first observed: history is never replayed into the Studio
-timeline. A replaced or truncated journal re-baselines at its new end — a
-possible miss, never a duplicate.
+Reads are bounded and descriptor-anchored (no symlink traversal). The watcher
+baselines a journal that already exists synchronously in ``on_ready`` — before
+the session is released as ready — so history is never replayed and a turn
+written right after readiness is never mistaken for history (#938 review). A
+journal that first appears later belongs wholly to this runtime and is read
+from its start. A replaced or truncated journal re-baselines at its new end —
+a possible miss, never a duplicate.
 """
 
 from __future__ import annotations
@@ -73,18 +76,33 @@ class WireTail:
         self.offset = 0
         self.identity: tuple[int, int] | None = None
 
-    def read(self) -> list[dict[str, Any]]:
+    def _open(self) -> tuple[int, os.stat_result]:
         with directory(self.path.parent) as parent:
             descriptor = os.open(
                 self.path.name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=parent
             )
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            os.close(descriptor)
+            raise ValueError("kimi wire journal is not a regular file")
+        return descriptor, info
+
+    def baseline(self) -> None:
+        """Pin identity and current end without reading content (stat only)."""
+        descriptor, info = self._open()
+        os.close(descriptor)
+        self.identity, self.offset = (info.st_dev, info.st_ino), info.st_size
+
+    def read(self) -> list[dict[str, Any]]:
+        descriptor, info = self._open()
         try:
-            info = os.fstat(descriptor)
-            if not stat.S_ISREG(info.st_mode):
-                raise ValueError("kimi wire journal is not a regular file")
             identity = (info.st_dev, info.st_ino)
-            if identity != self.identity or info.st_size < self.offset:
-                # First sight, replacement or truncation: start at the end.
+            if self.identity is None:
+                # Never baselined: the journal appeared after readiness, so
+                # everything in it is this runtime's — read from the start.
+                self.identity, self.offset = identity, 0
+            elif identity != self.identity or info.st_size < self.offset:
+                # Replacement or truncation: re-baseline at the new end.
                 self.identity, self.offset = identity, info.st_size
                 return []
             if info.st_size == self.offset:
