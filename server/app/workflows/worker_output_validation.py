@@ -49,7 +49,6 @@ def validate_worker_outputs(
     job_dir: Path,
     run_view_dir: Path,
     artifact_store: ArtifactStore | None = None,
-    *,
     read_only_outputs: Iterable[str] = (),
 ) -> str | None:
     """Validate this attempt's outputs against the manifest's pinned skill.

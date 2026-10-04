@@ -185,12 +185,7 @@ def finish_staged(
         # 缺失回落 job_dir）已下沉进池化视图构造（workflows/validation_view
         # 族），artifact_store 只为取 CAS root 传入，主进程不碰字节。
         validation_error = validate_worker_outputs(
-            handler.skill_manager,
-            manifest,
-            job_dir,
-            view_dir,
-            handler.artifact_store,
-            read_only_outputs=remote_names,
+            handler.skill_manager, manifest, job_dir, view_dir, handler.artifact_store, remote_names
         )
         if validation_error:
             status, exit_code, error = "failed", 1, validation_error
