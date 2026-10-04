@@ -41,17 +41,6 @@ def parse_token_usage_for_lease(
     return parse_run_usage(run_dir, dict(node_run), workspace_id=lease["workspace_id"])
 
 
-def persist_token_usage_for_lease(
-    conn: DatabaseConnection,
-    lease_id: str,
-    data_dir: Path,
-) -> None:
-    """Parse events.jsonl for a lease and persist the summary in one transaction."""
-    summary = parse_token_usage_for_lease(conn, lease_id, data_dir)
-    if summary is not None:
-        persist_node_run_usage(conn, summary)
-
-
 def capture_token_usage_after_lease_finish(
     conn: DatabaseConnection,
     lease_id: str,

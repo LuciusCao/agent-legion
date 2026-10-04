@@ -70,7 +70,7 @@ frontend/src/
 │   └── ...
 ├── hooks/                  # React 自定义 Hooks
 │   ├── useWorkspaceEvents.ts
-│   ├── useJobComprehensionInfo.ts
+│   ├── useDashboardEvents.ts
 │   └── ...
 ├── lib/                    # 纯工具函数
 │   ├── jobDag.ts
