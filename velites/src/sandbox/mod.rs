@@ -492,7 +492,7 @@ fn probe_bwrap_policy(policy: &BwrapPolicy) -> anyhow::Result<()> {
         policy.allow_network,
     );
     let output = std::process::Command::new("bwrap")
-        .args(&argv)
+        .args(argv)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
