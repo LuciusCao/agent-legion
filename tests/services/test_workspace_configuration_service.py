@@ -225,3 +225,7 @@ def test_list_visible_workspaces_narrows_by_membership_and_binding(workspace_ser
     assert ids(member_user_id=None, bound_workspace_id=other) == {other}
     assert ids(member_user_id=str(user["id"]), bound_workspace_id=other) == set()
     assert ids(member_user_id=None, bound_workspace_id="") == set()
+    # #881: the id set behind the listing; None means unrestricted (admins).
+    visible = workspace_service.visible_workspace_ids
+    assert visible(member_user_id=None, bound_workspace_id=None) is None
+    assert visible(member_user_id=str(user["id"]), bound_workspace_id=None) == {joined}
