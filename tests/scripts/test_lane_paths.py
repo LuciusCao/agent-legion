@@ -63,10 +63,10 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-def _touch(repo: Path, rel: str) -> None:
+def _touch(repo: Path, rel: str, content: str | None = None) -> None:
     target = repo / rel
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(f"change {rel}\n", encoding="utf-8")
+    target.write_text(content if content is not None else f"change {rel}\n", encoding="utf-8")
 
 
 def _init_repo(repo: Path) -> str:
@@ -76,8 +76,8 @@ def _init_repo(repo: Path) -> str:
     return _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
 
 
-def _commit_path(repo: Path, rel: str) -> None:
-    _touch(repo, rel)
+def _commit_path(repo: Path, rel: str, content: str | None = None) -> None:
+    _touch(repo, rel, content)
     _git(["add", "-A"], cwd=repo)
     _git(["commit", "-qm", f"touch {rel}"], cwd=repo)
 
@@ -114,7 +114,7 @@ def _ci_lanes(tmp_path: Path, rel: str) -> set[str]:
     return {lane for lane in ("backend", "frontend", "rust") if flags[lane] == "true"}
 
 
-def _quick_gate_lanes(tmp_path: Path, rel: str) -> str:
+def _quick_gate_lanes(tmp_path: Path, rel: str, content: str | None = None) -> str:
     repo = tmp_path / "quick"
     scripts = repo / "scripts"
     scripts.mkdir(parents=True)
@@ -123,7 +123,7 @@ def _quick_gate_lanes(tmp_path: Path, rel: str) -> str:
     for name in ("check-quick-backend.sh", "check-quick-frontend.sh"):
         _write_executable(scripts / name, "#!/usr/bin/env bash\nexit 0\n")
     _init_repo(repo)
-    _touch(repo, rel)
+    _touch(repo, rel, content)
     env = {
         k: v
         for k, v in os.environ.items()
@@ -143,7 +143,7 @@ def _quick_gate_lanes(tmp_path: Path, rel: str) -> str:
     return derived[0].removeprefix(prefix)
 
 
-def _pre_push_lanes(tmp_path: Path, rel: str) -> str:
+def _pre_push_lanes(tmp_path: Path, rel: str, content: str | None = None) -> str:
     repo = tmp_path / "hook"
     (repo / ".githooks").mkdir(parents=True)
     (repo / "scripts").mkdir()
@@ -156,7 +156,7 @@ def _pre_push_lanes(tmp_path: Path, rel: str) -> str:
         '#!/usr/bin/env bash\nprintf \'%s\\n\' "${GATE_LANES:-}" >>"$GATE_LOG"\n',
     )
     base = _init_repo(repo)
-    _commit_path(repo, rel)
+    _commit_path(repo, rel, content)
     head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["GATE_LOG"] = str(gate_log)
@@ -221,6 +221,23 @@ def test_ci_changes_job_runs_every_lane_when_classifier_changes(tmp_path: Path) 
 
     flags = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
     assert flags == {"backend": "true", "frontend": "true", "rust": "true", "docker": "true"}
+
+
+BROKEN_CLASSIFIER = "lane_path_is_docs() { return 0; }\nlane_path_feeds_backend() { return 1; }\n"
+
+
+def test_quick_gate_runs_every_lane_when_classifier_changes(tmp_path: Path) -> None:
+    # Same control-plane rule locally: an edited (here: everything-is-docs)
+    # classifier is never consulted for its own change set.
+    assert _quick_gate_lanes(tmp_path, "scripts/lane-paths.sh", BROKEN_CLASSIFIER) == (
+        "backend frontend rust"
+    )
+
+
+def test_pre_push_runs_every_lane_when_classifier_changes(tmp_path: Path) -> None:
+    assert _pre_push_lanes(tmp_path, "scripts/lane-paths.sh", BROKEN_CLASSIFIER) == (
+        "backend frontend rust"
+    )
 
 
 def test_case_table_agrees_on_docs_between_ci_and_local() -> None:

@@ -69,7 +69,6 @@ fi
 # Pick the quick-gate lanes from the pushed paths. CI runs every lane for each
 # PR/push, so this only trims the local feedback loop; anything ambiguous
 # (new refs, failed diff, shared files) falls back to all lanes.
-source "$ROOT_DIR/scripts/lane-paths.sh"
 compute_lanes() {
   local saw_frontend=0
   local saw_backend=0
@@ -77,6 +76,17 @@ compute_lanes() {
   local saw_non_docs=0
   local saw_any=0
   local path
+  # The classifier is control plane (#941): when the push touches it, run
+  # every lane and never source the (possibly broken) new rules. Inline,
+  # independent of scripts/lane-paths.sh, and checked before sourcing it.
+  while IFS= read -r path; do
+    if [[ "$path" == "scripts/lane-paths.sh" ]]; then
+      echo "backend frontend rust"
+      return
+    fi
+  done <<<"$changed_paths"
+  # Shared docs / velites-contract path rules (CI changes job + check-quick).
+  source "$ROOT_DIR/scripts/lane-paths.sh"
   while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     saw_any=1

@@ -71,6 +71,17 @@ derive_lanes_from_worktree() {
     echo "backend frontend rust"
     return
   fi
+  # The classifier is control plane (#941): when the change set touches it,
+  # run every lane and never source the (possibly broken) new rules. Inline,
+  # independent of scripts/lane-paths.sh, and checked before sourcing it.
+  case "$status" in
+    *scripts/lane-paths.sh*)
+      echo "backend frontend rust"
+      return
+      ;;
+  esac
+  # Shared docs / velites-contract path rules (CI changes job + pre-push).
+  source "$ROOT_DIR/scripts/lane-paths.sh"
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     path="${line:3}"
@@ -118,8 +129,6 @@ derive_lanes_from_worktree() {
 }
 
 if [[ -z "${GATE_LANES:-}" ]]; then
-  # Shared docs / velites-contract path rules (CI changes job + pre-push).
-  source "$ROOT_DIR/scripts/lane-paths.sh"
   GATE_LANES="$(derive_lanes_from_worktree)"
   echo "Derived lanes from worktree changes: $GATE_LANES"
 fi
