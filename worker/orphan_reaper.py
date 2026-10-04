@@ -70,10 +70,12 @@ def _term_groups(
     # TERM 前按新快照重钉当前成员（codex P1 R3 on #895）：校验后才派生、忽略
     # TERM 的成员也要被 KILL 覆盖——旧钉住成员在等待期全退（tini 立即收割）时
     # 不能误判组已更换。重钉后仍须现证属主，组被复用时照旧跳过。
-    snapshot = proc_groups.pgid_members()
+    # #904：成员按组在各自 TERM 紧前刷新（增量索引，只 stat 新出现的 pid），
+    # 批次内后序组在入口之后才派生的成员同样被钉住。
+    index = proc_groups.MemberIndex()
     refreshed: list[tuple[Path, proc_groups.GroupIdentity]] = []
     for record, identity in targets:
-        current = proc_groups.refresh_identity(identity, snapshot)
+        current = proc_groups.refresh_identity(identity, index.members_of(identity.pgid))
         if current is None:
             log(f"skipped SIGTERM to process group {identity.pgid}: identity changed")
             refreshed.append((record, identity))
