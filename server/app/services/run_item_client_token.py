@@ -24,12 +24,20 @@ contract model forbids the field (422) and the resolver rejects it (400)
 for direct service callers. The token charset excludes ``~`` and ``/``
 (job ids appear in URL paths and storage dirs), and material/bundle ids are
 server-generated hex, so ``{entity_id}~{token}`` parses unambiguously.
+
+#925: ``split_scoped_source_id`` is the read-side inverse. The token never
+enters the job ``input`` document, so a persisted job's only record of it is
+the ``~<token>`` suffix of its ``source_id``; job responses expose the parsed
+token as a read-only structured field so clients never split the string. A
+text item normalizes to a ``material`` source, so only ``material`` /
+``bundle`` sources are parsed — ``ref`` (and any legacy type) never carries a
+token and its free-form ``external_id`` may itself contain ``~``.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, TypeGuard
 
 from server.app.services.job_errors import InvalidOperationError
 
@@ -40,6 +48,8 @@ CLIENT_TOKEN_MAX_CHARS = 64
 CLIENT_TOKEN_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 CLIENT_TOKEN_SEPARATOR = "~"
 CLIENT_TOKEN_ITEM_TYPES = ("material", "bundle", "text")
+# Persisted job source types that can carry a token (text → material).
+CLIENT_TOKEN_SOURCE_TYPES = ("material", "bundle")
 
 _TOKEN_RE = re.compile(CLIENT_TOKEN_PATTERN)
 
@@ -58,12 +68,7 @@ def item_client_token(item: dict[str, Any]) -> str:
             " (ref items are already namespaced by connection_key:external_id)"
         )
     token = item["client_token"]
-    if (
-        not isinstance(token, str)
-        or not token
-        or len(token) > CLIENT_TOKEN_MAX_CHARS
-        or not _TOKEN_RE.fullmatch(token)
-    ):
+    if not _is_valid_token(token):
         raise InvalidOperationError(
             f"client_token must be 1-{CLIENT_TOKEN_MAX_CHARS} characters of"
             " [A-Za-z0-9._-] starting with a letter or digit"
@@ -71,10 +76,36 @@ def item_client_token(item: dict[str, Any]) -> str:
     return token
 
 
+def _is_valid_token(token: object) -> TypeGuard[str]:
+    return (
+        isinstance(token, str)
+        and 0 < len(token) <= CLIENT_TOKEN_MAX_CHARS
+        and _TOKEN_RE.fullmatch(token) is not None
+    )
+
+
 def scoped_entity_id(entity_id: str, item: dict[str, Any]) -> str:
     """``entity_id`` scoped by the item's token (unchanged without one)."""
     token = item_client_token(item)
     return f"{entity_id}{CLIENT_TOKEN_SEPARATOR}{token}" if token else entity_id
+
+
+def split_scoped_source_id(source_type: str, source_id: str) -> tuple[str, str | None]:
+    """``(entity_id, client_token)`` of a job's ``(source_type, source_id)``.
+
+    The inverse of ``scoped_entity_id`` over persisted identities: a
+    ``material`` / ``bundle`` source of the form ``<id>~<token>`` with a
+    well-formed token yields ``(id, token)``; anything else — no separator,
+    an empty id, a malformed token, or a non-tokenizable source type such as
+    ``ref`` whose ``external_id`` may contain ``~`` — is returned unchanged
+    with ``None``.
+    """
+    if source_type not in CLIENT_TOKEN_SOURCE_TYPES:
+        return source_id, None
+    entity_id, separator, token = source_id.partition(CLIENT_TOKEN_SEPARATOR)
+    if not separator or not entity_id or not _is_valid_token(token):
+        return source_id, None
+    return entity_id, token
 
 
 def drop_null_client_tokens(items: list[Any]) -> list[Any]:

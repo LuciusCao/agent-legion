@@ -202,6 +202,14 @@ job、同 token 重提命中同一 job；token 也随 items 进入 run 摘要，
 执行与同内容无 token 的 job 完全一致。不带 token 的条目身份与此前逐字节
 相同，已有 job id / run id 不漂移。
 
+`GET /jobs` 与 `GET /jobs/snapshot` 的 job 条目带两个只读字段（#925，由服务端
+从 `source_id` 解析）：`client_token`（带 token 提交的 material / bundle /
+text 条目为该 token，否则为 null；ref 条目恒为 null）与 `source_base_id`
+（去掉 token 后的 material_id / bundle_id，无 token 时等于 `source_id`）。
+同一材料不同 token 的多个 job 共享同一 `source_base_id`。调用方按这两个字段
+比对即可，不要自己拆 `source_id` 字符串。`GET /jobs/{job_id}` 轻量状态视图
+不含 `source_id`，也不带这两个字段。
+
 **重复提交的三种响应.**
 
 | 情形 | 响应 | 调用方处理 |
@@ -224,9 +232,8 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
   `next_cursor` 为 null。翻完仍没命中说明该条目在本 workspace 没有 job
   （例如 job 已被删除），按「未提交」处理，不要当作已存在。
 - text 项：material id 由服务端按内容派生，调用方不知道——带了
-  `client_token` 时用 `GET /jobs/snapshot?search=~<client_token>` 按
-  `source_id` 后缀 `~<client_token>` 精确匹配（token 由调用方生成，天然
-  可对账）；没带 token 时用 `GET /runs`（最近的 run 在前）按提交时间定位
+  `client_token` 时用 `GET /jobs/snapshot?search=~<client_token>`，在结果里
+  按 `client_token` 字段精确匹配（token 由调用方生成，天然可对账）；没带 token 时用 `GET /runs`（最近的 run 在前）按提交时间定位
   run，再 `GET /jobs?run_id=<run.id>` 取 job。需要可靠对账的调用方建议给
   text 项带 token，或先把文本作为 material 上传、再以 material 项提交。
 

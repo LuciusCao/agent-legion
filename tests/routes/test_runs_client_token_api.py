@@ -417,3 +417,36 @@ def test_text_item_json_still_fails_closed_without_opt_in(client, storage, job_d
     assert response.status_code == 400
     assert "not accepted by this workflow" in response.json()["detail"]
     assert storage.objects == {}
+
+
+# --- #925：job 视图的只读结构化 client_token ---------------------------------
+
+
+def test_job_views_expose_structured_client_token(client, job_db) -> None:
+    """详情 / 列表 / snapshot 的 job 条目带服务端解析的 client_token 与 source_base_id。"""
+    workspace_id = _create_workspace(client)
+    _insert_ready_material(job_db, workspace_id, "mat-a")
+    item = {"type": "material", "material_id": "mat-a"}
+    response = _create_run(
+        client,
+        workspace_id,
+        [{**item, "client_token": "order-1"}, {**item, "client_token": "order-2"}, item],
+    )
+    assert response.status_code == 200, response.text
+    expected = {
+        _job_id("mat-a~order-1"): "order-1",
+        _job_id("mat-a~order-2"): "order-2",
+        _job_id("mat-a"): None,
+    }
+
+    for job_id, token in expected.items():
+        detail = client.get(f"/api/jobs/{job_id}")
+        assert detail.status_code == 200, detail.text
+        job = detail.json()["job"]
+        assert (job["client_token"], job["source_base_id"]) == (token, "mat-a")
+
+    listed = client.get(f"/api/workspaces/{workspace_id}/jobs").json()["jobs"]
+    snapshot = client.get(f"/api/workspaces/{workspace_id}/jobs/snapshot").json()["jobs"]
+    for jobs in (listed, snapshot):
+        assert {job["id"]: job["client_token"] for job in jobs} == expected
+        assert {job["source_base_id"] for job in jobs} == {"mat-a"}
