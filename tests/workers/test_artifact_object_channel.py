@@ -693,3 +693,91 @@ def test_download_input_artifacts_dict_form_retries_with_semaphore(
     assert len(calls) == 3  # 每次重试重新打开下载流
     assert client.requests == []
     assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD
+
+
+# --- #876 codex P2: gzip 解码全错误面归一化（下载层单点） ---
+
+
+def _corrupt_deflate_body(payload: bytes) -> bytes:
+    """合法 gzip 头 + 结构性非法的 deflate 体（BFINAL=1/BTYPE=0b11
+    reserved）+ 原 trailer——确定性抛 zlib.error（非 OSError/EOFError）。"""
+    good = gzip.compress(payload)
+    return good[:10] + b"\x07" + good[-8:]
+
+
+def test_gzip_decode_surface_normalizes_to_runtime_error() -> None:
+    """归一化单点（copy_stream）：gzip 解码三层错误面——BadGzipFile（头/
+    容器，OSError 族）、EOFError（截断）、zlib.error（deflate 体损坏）—
+    —统一转 RuntimeError（'gzip decode failed'），下载层永不泄漏
+    zlib.error；gunzip=False 的原流读错误原样穿透不归一。"""
+    import zlib
+
+    from worker.artifact.gzip import copy_stream
+
+    good = gzip.compress(PAYLOAD)
+    cases = {
+        "BadGzipFile": b"not-a-gzip-stream",  # 头坏
+        "EOFError": good[:5],  # 截断
+        "error": _corrupt_deflate_body(PAYLOAD),  # deflate 体坏（zlib.error）
+    }
+    for expected_cause, blob in cases.items():
+        with pytest.raises(RuntimeError, match="gzip decode failed") as excinfo:
+            copy_stream(io.BytesIO(blob), io.BytesIO(), gunzip=True)
+        assert type(excinfo.value.__cause__).__name__ == expected_cause
+        assert not isinstance(excinfo.value, zlib.error)
+
+    # 非 gunzip 形态：原流读错误不归一、原样穿透。
+    class _Boom(io.RawIOBase):
+        def read(self, size: int = -1) -> bytes:
+            raise OSError(5, "I/O error")
+
+    with pytest.raises(OSError):
+        copy_stream(_Boom(), io.BytesIO())  # type: ignore[arg-type]
+
+
+def test_download_input_artifacts_corrupt_gzip_header_falls_back_to_cas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """三层错误面·头坏（BadGzipFile）：归一化后照样回落 CAS。"""
+    monkeypatch.setattr(artifact_inputs, "_RETRY_BACKOFF_BASE_SECONDS", 0.01)
+    _fake_open_download(monkeypatch, b"not-a-gzip-stream")
+    client = _DownloadFakeClient({f"/api/artifacts/{HASH}": PAYLOAD})
+    manifest = {
+        "input_artifacts": {
+            "inputs/q.json": {
+                "url": "https://s3.test/get/x?sig=1",
+                "sha256": HASH,
+                "content_encoding": "gzip",
+            },
+        }
+    }
+
+    download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
+
+    assert client.requests == [f"/api/artifacts/{HASH}"]
+    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD
+
+
+def test_download_input_artifacts_corrupt_deflate_body_falls_back_to_cas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#876 codex P2 主回归·三层错误面·deflate 体坏（zlib.error，直接继承
+    Exception）：归一化前绕过 CAS 回落裸奔硬失败；归一化后回落 CAS 拿到
+    冻结字节。"""
+    monkeypatch.setattr(artifact_inputs, "_RETRY_BACKOFF_BASE_SECONDS", 0.01)
+    _fake_open_download(monkeypatch, _corrupt_deflate_body(PAYLOAD))
+    client = _DownloadFakeClient({f"/api/artifacts/{HASH}": PAYLOAD})
+    manifest = {
+        "input_artifacts": {
+            "inputs/q.json": {
+                "url": "https://s3.test/get/x?sig=1",
+                "sha256": HASH,
+                "content_encoding": "gzip",
+            },
+        }
+    }
+
+    download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
+
+    assert client.requests == [f"/api/artifacts/{HASH}"]
+    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD

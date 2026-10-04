@@ -1526,6 +1526,12 @@ invariants:
         target: tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_fallback_failure_carries_both_segments
         gate: quick
       - kind: integration
+        target: tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_corrupt_deflate_body_falls_back_to_cas
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_artifact_object_channel.py::test_gzip_decode_surface_normalizes_to_runtime_error
+        gate: quick
+      - kind: integration
         target: tests/db/test_completion_view_inputs.py::test_validation_uses_dispatch_frozen_input_bytes
         gate: quick
       - kind: integration

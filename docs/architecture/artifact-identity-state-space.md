@@ -67,7 +67,7 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
 | INV-1 | E5 | ✅ | `tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_resolve_last_wins` |
 | INV-1 | E6 | 🧱 | reclaim 三点闭环：staging 源的唯一安全删除点是 finish 提交之后（`discard_staging_refs`，codex #774 复审钉死）；requeue 后重 claim 用新鲜 manifest 重新判定身份；CAS blob 由 (job,node) ref 防 GC（job 存活期间不可回收）。三点各自封闭，无残余竞态面 |
 | INV-1 | C7 | ✅ | `tests/db/test_completion_view_inputs.py::test_colliding_undeclared_report_skips_the_frozen_input_slot`（撞名上报）、`tests/db/test_completion_truncated_manifest.py::test_completion_truncated_manifest_judged_from_archive_view`（截断 manifest） |
-| INV-1 | C8 | ✅ | `tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_fallback_failure_carries_both_segments`（两段皆败归因）、`tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_fallback_cas_bytes_are_digest_verified`（CAS 假字节自验） |
+| INV-1 | C8 | ✅ | `tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_fallback_failure_carries_both_segments`（两段皆败归因）、`tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_fallback_cas_bytes_are_digest_verified`（CAS 假字节自验）、`tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_corrupt_gzip_header_falls_back_to_cas`（gzip 头坏）、`tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_truncated_gzip_falls_back_to_cas`（截断）、`tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_corrupt_deflate_body_falls_back_to_cas`（deflate 体坏——zlib.error 经归一化进回落族） |
 | INV-2 | C1 | ✅ | `tests/workflows/test_output_validation_view.py::test_undeclared_files_never_enter_the_view`、`tests/db/test_completion_view_inputs.py::test_declared_input_never_backfills_expected_output`（归档/残留永不可达） |
 | INV-2 | E4 | ✅ | `tests/workflows/test_output_validation_view.py::test_sibling_and_stale_fail_files_cannot_poison_this_node`、`tests/workflows/test_output_validation_view.py::test_double_review_outcomes_reflect_own_verdicts_only` |
 | INV-2 | C6 | ✅ | `tests/workflows/test_output_validation_view.py::test_validator_created_undeclared_files_never_propagate`、`tests/workflows/test_output_validation_view.py::test_unsafe_declared_names_never_escape_the_view` |
@@ -90,7 +90,7 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
 | INV-7 | C1 | 🧱 | dispatch 侧（`stage_agent_inputs`）刻意不去重：consumer 侧 last-wins 规则是唯一事实源，dispatch 去重会引入第二个决策点（EXEC-INPUT-IDENTITY-001 statement 钉死）；Worker 顺序物化天然实现 last-wins，重复下载是病态配置的固有代价 |
 | INV-8 | C8 | ✅ | `tests/workflows/test_output_validation_view.py::test_view_construction_failure_fails_closed`、`tests/workflows/test_output_validation_view.py::test_placement_failure_fails_closed`、`tests/workflows/test_output_validation_view.py::test_skill_missing_legacy_script_fails_closed`（构造/placement/契约缺失 fail-closed） |
 | INV-8 | C3 | ✅ | `tests/workflows/test_output_validation_view.py::test_missing_declared_entries_are_absent_not_errors`（缺源 fail-open） |
-| INV-8 | C8 | ✅ | `tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_presigned_failure_and_cas_missing_message`（两段式归因） |
+| INV-8 | C8 | ✅ | `tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_presigned_failure_and_cas_missing_message`（两段式归因）、`tests/workers/test_artifact_object_channel.py::test_gzip_decode_surface_normalizes_to_runtime_error`（异常分类学归一化单点：gzip 三层错误面 → RuntimeError，下载层永不泄漏 zlib.error） |
 | INV-8 | C7 | ✅ | `tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_dict_form_verifies_sha256`、`tests/workers/test_artifact_object_channel.py::test_download_input_artifacts_gzip_form_detects_tamper`（脏字节拒绝） |
 | INV-8 | C7 | ✅ | `tests/db/test_completion_truncated_manifest.py::test_completion_truncated_manifest_judged_from_archive_view`、`tests/db/test_completion_truncated_manifest.py::test_completion_truncated_manifest_missing_output_still_fails`（截断 manifest 从视图判定） |
 | INV-8 | C7 | ✅ | `tests/db/test_completion_generation_gates.py::test_completion_ref_channel_wins_over_duplicate_archive_member`（双通道同名 ref 字节获胜） |
@@ -108,6 +108,12 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
    制：✅ 格点名的测试必须真实存在（文件 + `::符号` AST 解析），🧱
    格论证必须非空，⬜ 与任何第四态拒绝，轴 token 必须落在图例内。
    网格即活文档——测试改名/删除会立刻红。
+5. **枚举纪律**：凡格子涉及底层库异常面，钉之前必须先列该库的完整
+   错误清单——gzip 样例：三层错误面（`BadGzipFile` 头/容器，OSError
+   族；`EOFError` 截断；`zlib.error` deflate 体损坏，直接继承
+   Exception）各自落在哪个 catch 集合里逐一确认，归一化单点收在下载
+   层（`worker/artifact/gzip.py::copy_stream`），调用方分类学归零。
+   漏一层就是 #876 codex P2 第五轮（zlib.error 绕过回落）的重演。
 
 ## 6. 战绩：历史发现 → 格子归宿
 
@@ -129,3 +135,4 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
 | add_ref 撞名把冻结 input 顶成孤儿 | 对抗 A 员 P2（A1） | INV-5 × C7 | 撞名守卫（终态见下行） |
 | 校验窗口零引用 blob 被 GC 后 500 | #876 codex P2-1 第四轮 | INV-5 × E3 | 校验前登记复位 + 撞名守卫终态 |
 | mtime+size 未修改判定可伪造 | #876 codex P2-2 第四轮 | INV-6 × C6 | 内容 sha256 判定 |
+| gzip deflate 体损坏（zlib.error）绕过回落 | #876 codex P2 第五轮 | INV-1 × C8 | 下载层归一化（`copy_stream` 单点，三层错误面 → RuntimeError）+ 枚举纪律入规程 |
